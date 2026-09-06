@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Capability for the main window",
+  "description": "Main-window capability. shell:allow-spawn is the only permission here that can start a process, and it is scoped to the two package runners external MCP servers are actually launched with (npx, uvx). Every general-purpose interpreter and container runtime was removed: node, deno, bun, python and py all take a one-shot eval flag (node -e, python -c), npm/pnpm/yarn run whatever a package.json in the cwd defines, and docker run -v /:/host hands out the whole disk. With those in the allow-list, any script-execution bug in the WebView (a PDF viewer, a markdown renderer, a dependency) was code execution on the user's machine rather than defacement inside the app.",
   "windows": ["main"],
   "permissions": [
     "core:default",
@@ -19,26 +19,7 @@
       "allow": [
         { "name": "npx", "cmd": "npx", "args": true },
         { "name": "npx.cmd", "cmd": "npx.cmd", "args": true },
-        { "name": "npm", "cmd": "npm", "args": true },
-        { "name": "npm.cmd", "cmd": "npm.cmd", "args": true },
-        { "name": "pnpm", "cmd": "pnpm", "args": true },
-        { "name": "pnpm.cmd", "cmd": "pnpm.cmd", "args": true },
-        { "name": "yarn", "cmd": "yarn", "args": true },
-        { "name": "yarn.cmd", "cmd": "yarn.cmd", "args": true },
-        { "name": "bun", "cmd": "bun", "args": true },
-        { "name": "bun.cmd", "cmd": "bun.cmd", "args": true },
-        { "name": "bunx", "cmd": "bunx", "args": true },
-        { "name": "bunx.cmd", "cmd": "bunx.cmd", "args": true },
-        { "name": "node", "cmd": "node", "args": true },
-        { "name": "node.cmd", "cmd": "node.cmd", "args": true },
-        { "name": "deno", "cmd": "deno", "args": true },
-        { "name": "deno.cmd", "cmd": "deno.cmd", "args": true },
-        { "name": "uv", "cmd": "uv", "args": true },
-        { "name": "uvx", "cmd": "uvx", "args": true },
-        { "name": "python", "cmd": "python", "args": true },
-        { "name": "python3", "cmd": "python3", "args": true },
-        { "name": "py", "cmd": "py", "args": true },
-        { "name": "docker", "cmd": "docker", "args": true }
+        { "name": "uvx", "cmd": "uvx", "args": true }
       ]
     },
     "shell:allow-stdin-write",

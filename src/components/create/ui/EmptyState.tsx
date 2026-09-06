@@ -2,6 +2,7 @@
 import { motion } from 'framer-motion'
 import type { LucideIcon } from 'lucide-react'
 import { Button } from './Button'
+import { ICON_STROKE_MARK } from '../../ui/icon-size'
 
 interface Action {
   label: string
@@ -14,6 +15,15 @@ interface Props {
   icon: LucideIcon
   /** When set, renders this image (e.g. the LU monogram) instead of the icon. */
   logoSrc?: string
+  /**
+   * Zusatzklassen fuer das Bild aus `logoSrc`. Existiert, weil das Monogramm
+   * weiss gezeichnet ist und im Hellmodus invertiert werden muss
+   * (`layout/brand.ts` → `MONOGRAM_INVERT`); ohne das stand hier bis zum
+   * 01.09.2026 eine weisse Marke auf der weissen Create-Flaeche. Das Rezept
+   * gehoert an die Call-Site und nicht hier hinein — dieser Baustein weiss
+   * nicht, welches Bild er zeigt.
+   */
+  logoClassName?: string
   title: string
   description?: string
   action?: Action
@@ -22,7 +32,7 @@ interface Props {
   tone?: 'neutral' | 'accent'
 }
 
-export function EmptyState({ icon: Icon, logoSrc, title, description, action, secondaryAction, children, tone = 'neutral' }: Props) {
+export function EmptyState({ icon: Icon, logoSrc, logoClassName = '', title, description, action, secondaryAction, children, tone = 'neutral' }: Props) {
   return (
     <div className="h-full flex flex-col items-center justify-center text-center px-6">
       <motion.div
@@ -32,7 +42,7 @@ export function EmptyState({ icon: Icon, logoSrc, title, description, action, se
         className="max-w-sm space-y-4"
       >
         {logoSrc ? (
-          <img src={logoSrc} alt="" className="mx-auto h-14 w-14 object-contain opacity-90 select-none" draggable={false} />
+          <img src={logoSrc} alt="" className={`mx-auto h-14 w-14 object-contain opacity-90 select-none ${logoClassName}`} draggable={false} />
         ) : (
           // David 2026-07-13: no gray bubble behind the icon — the SVG stands on
           // its own, lifted only by a soft purple accent glow (a gentle, slow
@@ -46,7 +56,7 @@ export function EmptyState({ icon: Icon, logoSrc, title, description, action, se
               animate={{ opacity: [0.28, tone === 'accent' ? 0.6 : 0.42, 0.28], scale: [0.9, 1.06, 0.9] }}
               transition={{ duration: 3.2, repeat: Infinity, ease: 'easeInOut' }}
             />
-            <Icon size={36} strokeWidth={1.5} className="relative text-lu-accent drop-shadow-[0_0_8px_var(--color-lu-accent-ring)]" />
+            <Icon size={36} strokeWidth={ICON_STROKE_MARK} className="relative text-lu-accent drop-shadow-[0_0_8px_var(--color-lu-accent-ring)]" />
           </div>
         )}
         <div className="space-y-1.5">

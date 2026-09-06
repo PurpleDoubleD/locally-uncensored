@@ -117,7 +117,7 @@ describe('measureRun', () => {
 // stream produces no tokens.
 describe('the wall clock reaches a stream that has stopped sending', () => {
   /** A stream that yields one chunk and then never resolves again. */
-  function stalling(): AsyncIterable<any> {
+  function stalling(): AsyncIterable<ChatStreamChunk> {
     let served = false
     return {
       [Symbol.asyncIterator]() {
@@ -125,7 +125,7 @@ describe('the wall clock reaches a stream that has stopped sending', () => {
           next() {
             if (!served) {
               served = true
-              return Promise.resolve({ done: false, value: { content: 'hi' } })
+              return Promise.resolve({ done: false, value: { content: 'hi', done: false } })
             }
             return new Promise<never>(() => { /* the stall */ })
           },
@@ -150,7 +150,7 @@ describe('the wall clock reaches a stream that has stopped sending', () => {
 
   it('closes the generator so the model is not left generating', async () => {
     let closed = false
-    const stream: AsyncIterable<any> = {
+    const stream: AsyncIterable<ChatStreamChunk> = {
       [Symbol.asyncIterator]() {
         return {
           next() { return new Promise<never>(() => {}) },

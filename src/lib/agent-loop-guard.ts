@@ -88,7 +88,7 @@ const EXEC_TOOLS = new Set<string>(['shell_execute', 'shell_execute_background']
  * `npm`, from any of: `npm init vite@latest`, `C:\nodejs\npm.cmd install -g
  * create-vite`, `/usr/bin/npm ci`. Null when there is no command to key on.
  */
-function execKeyOf(name: string, args?: Record<string, any>): string | null {
+function execKeyOf(name: string, args?: Record<string, unknown>): string | null {
   if (!EXEC_TOOLS.has(name)) return null
   const command = args?.command
   if (typeof command !== 'string') return null
@@ -233,7 +233,7 @@ export class AgentLoopGuard {
    * neither is a model that fixes its command on the second or third try.
    */
   recordResults(
-    results: Array<{ name: string; failed: boolean; error?: string; args?: Record<string, any> }>,
+    results: Array<{ name: string; failed: boolean; error?: string; args?: Record<string, unknown> }>,
   ): LoopGuardVerdict {
     if (results.length === 0) return { action: 'ok' }
 

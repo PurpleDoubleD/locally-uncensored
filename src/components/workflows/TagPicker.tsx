@@ -39,7 +39,7 @@ export function TagPicker({
             aria-pressed={active}
             onClick={() => toggleTag(tag.id)}
             className={cn(
-              't-control rounded-full border px-2.5 py-1 transition-colors lu-focus-ring',
+              't-control rounded-full border px-2.5 py-1 transition-colors',
               active
                 ? 'border-lu-accent/50 bg-lu-accent-soft text-lu-accent'
                 : 'border-white/[0.08] bg-white/[0.04] text-gray-500 hover:border-white/20 hover:text-gray-200',

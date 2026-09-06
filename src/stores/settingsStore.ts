@@ -1,7 +1,10 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
+import { safeJSONStorage } from '../lib/storage-quota'
 import type { Settings, Persona } from '../types/settings'
 import { DEFAULT_SETTINGS, BUILT_IN_PERSONAS } from '../lib/constants'
+import { isEffortLevel } from '../lib/effort'
+import { isRecord, asString } from '../types/json-guards'
 
 // v5 (Feature EE v2.5.0): added settings.exclusiveVramMode. The migrate below
 // already merges { ...DEFAULT_SETTINGS, ...persisted.settings }, so bumping the
@@ -85,7 +88,13 @@ import { DEFAULT_SETTINGS, BUILT_IN_PERSONAS } from '../lib/constants'
 // fills in for everyone, an opt-in the user makes survives every A/B switch,
 // and the stale old key is simply never read again. STRICTLY ADDITIVE and
 // IDEMPOTENT, like v20 and unlike v10 and v19.
-const STORE_VERSION = 21
+// v22 (2.6.8): added settings.reasoningEffort (default 'high'), the rung the
+// composer's effort control cycles through. STRICTLY ADDITIVE and IDEMPOTENT
+// like v20 and v21: the merge below fills the default in, every existing value
+// survives, and there is NO one-shot reset. The default equals what the client
+// already sent for thinking ON, so a profile that rides this migration sends
+// byte-for-byte the same request it sent before.
+const STORE_VERSION = 22
 
 interface SettingsState {
   settings: Settings
@@ -152,12 +161,40 @@ export const useSettingsStore = create<SettingsState>()(
     }),
     {
       name: 'chat-settings',
+      storage: safeJSONStorage(),
       version: STORE_VERSION,
-      migrate: (persisted: any, version: number) => {
+      // The ONE guard for the rung, and it sits here rather than in migrate
+      // above on purpose: migrate does not run for a blob that is already at
+      // STORE_VERSION, where the persisted settings object is swapped in
+      // wholesale. This runs on every rehydration, so it covers both, and a
+      // second copy in migrate would be a guard no test can fail.
+      //
+      // reasoningEffort has a closed set of values. A profile written by a
+      // build that spelled the rung differently, or edited by hand, would
+      // otherwise travel through the whole app as an unknown word and the
+      // composer would draw a rung the provider does not send. isEffortLevel is
+      // the question, 'high' is the answer, and it is the answer a fresh
+      // install gets.
+      onRehydrateStorage: () => (state) => {
+        if (!state?.settings) return
+        if (!isEffortLevel(String(state.settings.reasoningEffort))) {
+          state.settings.reasoningEffort = DEFAULT_SETTINGS.reasoningEffort
+        }
+      },
+      migrate: (persisted: unknown, version: number): SettingsState => {
+        // Foreign at read time, an older build wrote this. A read that throws
+        // in a migrate costs the whole store: zustand abandons hydration and
+        // the next write persists the empty default over the blob, which here
+        // would mean every setting AND every custom persona.
+        const blob = isRecord(persisted) ? persisted : {}
         if (version < STORE_VERSION) {
-          const customPersonas = (persisted.personas || []).filter((p: Persona) => !p.isBuiltIn)
+          const storedPersonas = Array.isArray(blob.personas) ? blob.personas : []
+          const customPersonas = storedPersonas.filter(
+            (p): p is Persona => isRecord(p) && p.isBuiltIn !== true,
+          )
           // Merge new default settings into existing (fills missing fields like thinkingEnabled)
-          const mergedSettings = { ...DEFAULT_SETTINGS, ...(persisted.settings || {}) }
+          const storedSettings = isRecord(blob.settings) ? blob.settings : {}
+          const mergedSettings = { ...DEFAULT_SETTINGS, ...storedSettings }
           // v10: clear the saved model-picker preferences ONCE so the picker is
           // shown first again on image + video (David 2026-06-16). The additive
           // merge above would otherwise preserve a previously-saved pick.
@@ -174,14 +211,16 @@ export const useSettingsStore = create<SettingsState>()(
             if (isMac) mergedSettings.appMode = 'local'
           }
           return {
-            ...persisted,
+            ...blob,
             settings: mergedSettings,
             personas: [...BUILT_IN_PERSONAS, ...customPersonas],
-            activePersonaId: persisted.activePersonaId || 'unrestricted',
+            activePersonaId: asString(blob.activePersonaId) || 'unrestricted',
             _version: STORE_VERSION,
-          }
+          } as unknown as SettingsState
         }
-        return persisted
+        // zustand types migrate as returning the FULL store, but a blob only
+        // ever carries the partialized slice and `merge` puts the actions back.
+        return persisted as SettingsState
       },
     }
   )

@@ -20,6 +20,7 @@
  */
 
 import { findBalancedObjects, balancedObjectAt } from './json-scan'
+import { isRecord, prop } from '../types/json-guards'
 import { repairJson } from './tool-call-repair'
 import { parseHermesToolCalls } from '../api/hermes-tool-calling'
 import { RETIRED_TOOL_NAMES } from './retired-tools'
@@ -103,26 +104,29 @@ function parseJsonObjectCalls(text: string, known: Set<string>): { call: LooseTo
   const candidates: string[] = findBalancedObjects(text)
   for (const cand of candidates) {
     if (!/["']?(?:name|tool|tool_name|tool_call|function)["']?\s*[:=]/.test(cand)) continue
-    const parsed = repairJson(cand) as Record<string, any> | null
+    const parsed = repairJson(cand)
     if (!parsed) continue
     // Name + args may arrive in three shapes, all seen from small local models:
     //   flat     {"name":"file_list","arguments":{…}}
     //   nested   {"function":{"name":"file_list","arguments":{…}}}  (OpenAI/Phi)
     //   wrapped  {"tool_call":{"name":…}} or {"tool_call":"file_list","arguments":{…}}
     // Unwrap an object-valued name carrier so the nested forms resolve too.
-    let nameField: any = parsed.name || parsed.tool || parsed.tool_name || parsed.tool_call || parsed.function
-    let argsField: any = parsed.arguments ?? parsed.parameters ?? parsed.args ?? parsed.params
-    if (nameField && typeof nameField === 'object') {
+    let nameField: unknown = parsed.name || prop(parsed, 'tool') || prop(parsed, 'tool_name')
+      || prop(parsed, 'tool_call') || prop(parsed, 'function')
+    let argsField: unknown = parsed.arguments ?? parsed.parameters ?? prop(parsed, 'args') ?? prop(parsed, 'params')
+    if (isRecord(nameField)) {
       argsField = argsField ?? nameField.arguments ?? nameField.parameters ?? nameField.args
       nameField = nameField.name || nameField.tool || nameField.tool_name
     }
     if (typeof nameField === 'string' && known.has(nameField)) {
-      // Arguments can arrive as a JSON STRING (OpenAI serializes them) — repair it.
-      let a: any = argsField ?? {}
-      if (typeof a === 'string') { const p2 = repairJson(a); a = p2 && typeof p2 === 'object' ? p2 : {} }
+      // Arguments can arrive as a JSON STRING (OpenAI serializes them) — repair
+      // it. `parsed.arguments` is already resolved by repairJson; this still
+      // covers the `args` / `params` spellings and the nested-function form.
+      let a: unknown = argsField ?? {}
+      if (typeof a === 'string') { const p2 = repairJson(a); a = isRecord(p2) ? p2 : {} }
       // Report the source snippet so the caller can strip the raw JSON object
       // from the visible prose (otherwise it leaks as a "notes"/JSON block).
-      calls.push({ call: { name: nameField, arguments: (a && typeof a === 'object') ? a : {} }, snippet: cand })
+      calls.push({ call: { name: nameField, arguments: isRecord(a) ? a : {} }, snippet: cand })
     }
   }
   return calls
@@ -192,16 +196,16 @@ export function parseLooseToolCalls(text: string, known: string[]): LooseParseRe
       const obj = balancedObjectAt(text, m.index + m[0].length)
       if (!obj) continue
       nameRe.lastIndex = obj.end // never rescan inside the object we just took
-      const parsed = repairJson(obj.text) as Record<string, any> | null
-      if (!parsed || typeof parsed !== 'object') continue
+      const parsed = repairJson(obj.text)
+      if (!parsed) continue
       // The brace may BE the args, or wrap them under arguments/parameters.
-      const inner = parsed.arguments ?? parsed.parameters ?? parsed.args ?? parsed.params
-      const args = inner && typeof inner === 'object' ? inner : parsed
-      if (args && typeof args === 'object' && Object.keys(args).length > 0) {
+      const inner = parsed.arguments ?? parsed.parameters ?? prop(parsed, 'args') ?? prop(parsed, 'params')
+      const args: Record<string, unknown> = isRecord(inner) ? inner : parsed
+      if (Object.keys(args).length > 0) {
         let end = obj.end
         const closer = text.slice(end).match(/^\s*\]/)
         if (closer) end += closer[0].length
-        push({ name, arguments: args as Record<string, unknown> }, text.slice(m.index, end))
+        push({ name, arguments: args }, text.slice(m.index, end))
       }
     }
   }

@@ -190,6 +190,48 @@ describe('parseJsonText — Gemini', () => {
     expect(c.markdown).toContain('**You**')
     expect(c.markdown).toContain('**Assistant**')
   })
+
+  // Fehler 1: Gemini-Takeout-Turns, deren Text in `content` als Blockarray
+  // liegt, wurden mit String(...) zu "[object Object]" verkocht und genau so
+  // importiert — der echte Gesprächstext war weg, im RAG-Index stand pro Zug
+  // eine Zeile "[object Object]".
+  it('reads Gemini message text out of a content[] block array instead of stringifying it', () => {
+    const raw = JSON.stringify([
+      {
+        header: 'Gemini Apps',
+        title: 'Explain black holes',
+        time: '2026-03-01T10:00:00Z',
+        messages: [
+          { role: 'user', content: [{ text: 'What is a black hole?' }] },
+          { role: 'model', content: [{ text: 'A region where gravity wins.' }] },
+        ],
+      },
+    ])
+    const c = parseJsonText(raw).conversations[0]
+    expect(c.markdown).not.toContain('[object Object]')
+    expect(c.markdown).toContain('What is a black hole?')
+    expect(c.markdown).toContain('A region where gravity wins.')
+    expect(c.messageCount).toBe(2)
+  })
+
+  it('never emits [object Object] for a content field it cannot read', () => {
+    const raw = JSON.stringify([
+      {
+        header: 'Gemini Apps',
+        title: 'Only a prompt',
+        messages: [{ role: 'user', content: { parts: { nested: true } } }],
+      },
+    ])
+    const md = parseJsonText(raw).conversations.map(c => c.markdown).join('\n')
+    expect(md).not.toContain('[object Object]')
+  })
+
+  it('still reads the flat string content shape', () => {
+    const raw = JSON.stringify([
+      { header: 'Gemini Apps', title: 'Flat', messages: [{ role: 'user', content: 'plain text turn' }] },
+    ])
+    expect(parseJsonText(raw).conversations[0].markdown).toContain('plain text turn')
+  })
 })
 
 describe('parseJsonText — robustness', () => {

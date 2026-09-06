@@ -12,8 +12,44 @@ import {
   type LocalOpParams,
 } from '../dynamic-workflow'
 import { classifyModel, galleryTypeForFile, resolveLocalOpPick, type ClassifiedModel } from '../comfyui'
+import type { ComfyApiGraph, ComfyApiNode } from '../../types/comfy-graph'
 
-const FULL_NODES: Record<string, any> = Object.fromEntries(
+/**
+ * The builders now declare their own graph shape (types/comfy-graph.ts), so
+ * the assertions below read THAT type instead of a local stand-in — a renamed
+ * key or a builder that stops emitting `inputs` at all is a compile error here,
+ * not an `undefined === undefined` that quietly passes.
+ */
+type ComfyNode = ComfyApiNode
+type ComfyGraph = ComfyApiGraph
+
+/** The node of this class_type — fails loudly when the graph has none. */
+function nodeOfType(wf: ComfyGraph, classType: string): ComfyNode {
+  const node = Object.values(wf).find(n => n.class_type === classType)
+  if (!node) throw new Error(`graph has no ${classType} node`)
+  return node
+}
+
+/** A numeric input, checked rather than assumed. */
+function numInput(node: ComfyNode, key: string): number {
+  const v = node.inputs?.[key]
+  if (typeof v !== 'number') {
+    throw new Error(`${node.class_type}.inputs.${key} is not a number: ${String(v)}`)
+  }
+  return v
+}
+
+/** An array input (a ComfyUI link `[nodeId, slot]`, or a literal list). */
+function arrInput(node: ComfyNode, key: string): unknown[] {
+  const v = node.inputs?.[key]
+  if (!Array.isArray(v)) {
+    throw new Error(`${node.class_type}.inputs.${key} is not an array: ${String(v)}`)
+  }
+  return v
+}
+
+/** The presence map getAllNodeInfo() feeds the builders — keys only. */
+const FULL_NODES: Record<string, object> = Object.fromEntries(
   [
     'TextEncodeAceStepAudio', 'EmptyAceStepLatentAudio',
     'TextEncodeAceStepAudio1.5', 'EmptyAceStep1.5LatentAudio',
@@ -33,7 +69,7 @@ const nodesWithout = (...names: string[]) => {
   return copy
 }
 
-const classTypes = (wf: Record<string, any>) => Object.values(wf).map((n: any) => n.class_type)
+const classTypes = (wf: ComfyGraph) => Object.values(wf).map(n => n.class_type)
 
 const baseParams = (over: Partial<LocalOpParams>): LocalOpParams => ({
   op: 'music',
@@ -90,21 +126,19 @@ describe('resolveLocalOpPick', () => {
 
 describe('buildMusicWorkflow', () => {
   it('builds the v1 ACE graph (checkpoint, encode, latent, mp3 save)', () => {
-    const wf = buildMusicWorkflow(baseParams({ seconds: 45, lyrics: 'la la' }), 7, FULL_NODES)
+    const wf: ComfyGraph = buildMusicWorkflow(baseParams({ seconds: 45, lyrics: 'la la' }), 7, FULL_NODES)
     const types = classTypes(wf)
     expect(types).toContain('CheckpointLoaderSimple')
     expect(types).toContain('TextEncodeAceStepAudio')
     expect(types).toContain('EmptyAceStepLatentAudio')
     expect(types).toContain('VAEDecodeAudio')
     expect(types).toContain('SaveAudioMP3')
-    const latent = Object.values(wf).find((n: any) => n.class_type === 'EmptyAceStepLatentAudio') as any
-    expect(latent.inputs.seconds).toBe(45)
-    const enc = Object.values(wf).find((n: any) => n.class_type === 'TextEncodeAceStepAudio') as any
-    expect(enc.inputs.lyrics).toBe('la la')
+    expect(nodeOfType(wf, 'EmptyAceStepLatentAudio').inputs?.seconds).toBe(45)
+    expect(nodeOfType(wf, 'TextEncodeAceStepAudio').inputs?.lyrics).toBe('la la')
   })
 
   it('routes ACE 1.5 checkpoints through the 1.5 node pair with a zeroed negative', () => {
-    const wf = buildMusicWorkflow(
+    const wf: ComfyGraph = buildMusicWorkflow(
       baseParams({ model: 'ace_step_1.5_turbo_aio.safetensors', seconds: 60 }), 7, FULL_NODES)
     const types = classTypes(wf)
     expect(types).toContain('TextEncodeAceStepAudio1.5')
@@ -134,20 +168,19 @@ describe('buildS2VWorkflow', () => {
   })
 
   it('wires audio embeddings into the S2V conditioner and muxes the voice into the mp4', () => {
-    const wf = buildS2VWorkflow(s2v(), 7, FULL_NODES)
+    const wf: ComfyGraph = buildS2VWorkflow(s2v(), 7, FULL_NODES)
     const types = classTypes(wf)
     for (const t of ['LoadAudio', 'AudioEncoderLoader', 'AudioEncoderEncode', 'WanSoundImageToVideo', 'CreateVideo', 'SaveVideo']) {
       expect(types).toContain(t)
     }
-    const create = Object.values(wf).find((n: any) => n.class_type === 'CreateVideo') as any
-    expect(create.inputs.audio).toBeTruthy()
-    const s2vNode = Object.values(wf).find((n: any) => n.class_type === 'WanSoundImageToVideo') as any
+    expect(nodeOfType(wf, 'CreateVideo').inputs?.audio).toBeTruthy()
+    const s2vNode = nodeOfType(wf, 'WanSoundImageToVideo')
     // length stays on the 4k+1 grid
-    expect((s2vNode.inputs.length - 1) % 4).toBe(0)
+    expect((numInput(s2vNode, 'length') - 1) % 4).toBe(0)
   })
 
   it('loads .gguf quants through the GGUF pack and hints its install when missing', () => {
-    const wf = buildS2VWorkflow(s2v({ model: 'Wan2.2-S2V-14B-Q4_K_M.gguf' }), 7, FULL_NODES)
+    const wf: ComfyGraph = buildS2VWorkflow(s2v({ model: 'Wan2.2-S2V-14B-Q4_K_M.gguf' }), 7, FULL_NODES)
     expect(classTypes(wf)).toContain('UnetLoaderGGUF')
     try {
       buildS2VWorkflow(s2v({ model: 'Wan2.2-S2V-14B-Q4_K_M.gguf' }), 7, nodesWithout('UnetLoaderGGUF'))
@@ -174,21 +207,20 @@ describe('buildMotionWorkflow', () => {
   })
 
   it('builds the Animate graph: DWPose skeleton in, trimmed latent out, driving audio carried over', () => {
-    const wf = buildMotionWorkflow(motion(), 7, FULL_NODES)
+    const wf: ComfyGraph = buildMotionWorkflow(motion(), 7, FULL_NODES)
     const types = classTypes(wf)
     for (const t of ['LoadVideo', 'GetVideoComponents', 'DWPreprocessor', 'WanAnimateToVideo', 'TrimVideoLatent', 'CreateVideo']) {
       expect(types).toContain(t)
     }
-    const trim = Object.values(wf).find((n: any) => n.class_type === 'TrimVideoLatent') as any
-    expect(Array.isArray(trim.inputs.trim_amount)).toBe(true)
-    expect(trim.inputs.trim_amount[1]).toBe(3)
-    const create = Object.values(wf).find((n: any) => n.class_type === 'CreateVideo') as any
-    const components = Object.entries(wf).find(([, n]: [string, any]) => n.class_type === 'GetVideoComponents')![0]
-    expect(create.inputs.audio).toEqual([components, 1])
+    const trim = nodeOfType(wf, 'TrimVideoLatent')
+    expect(Array.isArray(trim.inputs?.trim_amount)).toBe(true)
+    expect(arrInput(trim, 'trim_amount')[1]).toBe(3)
+    const components = Object.entries(wf).find(([, n]) => n.class_type === 'GetVideoComponents')![0]
+    expect(nodeOfType(wf, 'CreateVideo').inputs?.audio).toEqual([components, 1])
   })
 
   it('routes VACE models through WanVaceToVideo with the skeleton as control video', () => {
-    const wf = buildMotionWorkflow(motion({ model: 'wan2.1_vace_1.3B_fp16.safetensors' }), 7, FULL_NODES)
+    const wf: ComfyGraph = buildMotionWorkflow(motion({ model: 'wan2.1_vace_1.3B_fp16.safetensors' }), 7, FULL_NODES)
     const types = classTypes(wf)
     expect(types).toContain('WanVaceToVideo')
     expect(types).not.toContain('WanAnimateToVideo')

@@ -19,6 +19,10 @@ export interface TurnToolCall {
   toolName: string
   status?: string
   result?: string | null
+  /** Die Argumente des Aufrufs. Gebraucht wird daraus nur `path`, um zwei
+   *  Schreibvorgaenge auf DIESELBE Datei nicht als zwei Dateien zu zaehlen.
+   *  Optional, weil aeltere gespeicherte Bloecke sie nicht tragen. */
+  args?: Record<string, unknown>
 }
 
 export interface TurnSummaryInput {
@@ -89,19 +93,45 @@ export function summarizeTurn(input: TurnSummaryInput): string {
       : `That ${kind} did not come out and no reason came back. Check that ComfyUI is still running, then try again.`)
   }
 
-  const writes = completed.filter((c) => c.toolName === 'file_write').length
+  const schreibAufrufe = completed.filter((c) => c.toolName === 'file_write')
+  // Persona-Befund 10 (03.09.2026): der Agent schrieb DIESELBE Datei zweimal —
+  // Schritt 1 korrekt, Schritt 4 kaputt — und die Schlusszeile meldete „2 files
+  // written". Es war eine Datei, und die zweite Fassung war schlechter als die
+  // erste. Gezaehlt werden deshalb Ziele, nicht Vorgaenge; und wo ein Ziel
+  // mehrfach beschrieben wurde, steht das ausdruecklich dabei, weil genau dort
+  // eine gute Fassung von einer schlechteren ueberschrieben worden sein kann.
+  const zielVon = (c: TurnToolCall): string | null => {
+    const roh = c.args?.path
+    if (typeof roh !== 'string' || !roh.trim()) return null
+    return roh.trim().replace(/^\.\//, '').replace(/\\/g, '/')
+  }
+  const proZiel = new Map<string, number>()
+  let ohneZiel = 0
+  for (const c of schreibAufrufe) {
+    const ziel = zielVon(c)
+    if (ziel === null) ohneZiel++
+    else proZiel.set(ziel, (proZiel.get(ziel) ?? 0) + 1)
+  }
+  const writes = proZiel.size + ohneZiel
+  const mehrfach = [...proZiel.entries()].filter(([, n]) => n > 1)
   const reads = completed.filter((c) => c.toolName === 'file_read').length
-  const otherOk = completed.length - writes - reads
+  const otherOk = completed.length - schreibAufrufe.length - reads
   const parts: string[] = []
   if (writes) parts.push(`${writes} file${writes === 1 ? '' : 's'} written`)
   if (reads) parts.push(`${reads} file${reads === 1 ? '' : 's'} read`)
   if (otherOk) parts.push(`${otherOk} operation${otherOk === 1 ? '' : 's'} completed`)
 
   const failedNote = `${failed.length} step${failed.length === 1 ? '' : 's'} failed`
+  // Hoechstens zwei Namen: der Hinweis soll die Zeile nicht ersetzen.
+  const rewriteNote = mehrfach.length
+    ? ' ' + mehrfach.slice(0, 2).map(([ziel, n]) => `${ziel} was written ${n}×`).join(', ') +
+      (mehrfach.length > 2 ? `, and ${mehrfach.length - 2} more` : '') +
+      ' — only the last version is on disk.'
+    : ''
   if (parts.length) {
     return failed.length
-      ? `Task partly done: ${parts.join(', ')}. ${failedNote}.`
-      : `Task completed: ${parts.join(', ')}.`
+      ? `Task partly done: ${parts.join(', ')}. ${failedNote}.${rewriteNote}`
+      : `Task completed: ${parts.join(', ')}.${rewriteNote}`
   }
   return failed.length ? `That did not work out. ${failedNote}, nothing else ran.` : NOTHING_AT_ALL
 }

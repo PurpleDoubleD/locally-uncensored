@@ -1,5 +1,10 @@
 import { test, expect, type Page } from '@playwright/test'
 import { tauriMockInit, DEFAULT_ASSISTANT_REPLY, DEFAULT_MODEL_NAME } from './support/tauri-mock'
+import { proxyUrls } from './support/recorded'
+// Types only — erased at build time, so nothing from src is pulled into the
+// test bundle. It gives the page-side module handle below the REAL signatures
+// of src/api/rag.ts instead of a hand-copied guess that would drift.
+import type * as RagModule from '../src/api/rag'
 
 /**
  * P5 acceptance test — Document-Chat / RAG embeddings without Ollama.
@@ -50,7 +55,18 @@ test('document chat embeds via the bundled server, never Ollama', async ({ page 
 
   // ── Drive the real RAG pipeline in-page against the mocked bundled embed ──
   const result = await page.evaluate(async () => {
-    const rag = await import('/src/api/rag.ts')
+    // The pipeline has to run INSIDE the page — it talks to the mocked Tauri
+    // bridge — so rag.ts is reachable only through the URL Vite serves it
+    // under. A dynamic import of a runtime string is untyped by construction;
+    // the annotation restores the real module type (see the `import type`
+    // above), and the check below proves at RUNTIME that the two entry points
+    // are actually there. A renamed export then fails with a sentence instead
+    // of "rag.indexDocument is not a function".
+    const RAG_MODULE_URL = '/src/api/rag.ts'
+    const rag: typeof RagModule = await import(/* @vite-ignore */ RAG_MODULE_URL)
+    if (typeof rag.indexDocument !== 'function' || typeof rag.retrieveContext !== 'function') {
+      throw new Error('src/api/rag.ts no longer exports indexDocument/retrieveContext')
+    }
     const file = new File(
       ['The mitochondria is the powerhouse of the cell. It produces ATP through respiration. ' +
        'Ribosomes synthesize proteins from messenger RNA in the cytoplasm of the cell.'],
@@ -61,19 +77,20 @@ test('document chat embeds via the bundled server, never Ollama', async ({ page 
     const retrieved = await rag.retrieveContext('what makes ATP in the cell', chunks, undefined, 2)
     return {
       chunkCount: chunks.length,
-      embeddingDims: chunks.map((c: any) => (Array.isArray(c.embedding) ? c.embedding.length : 0)),
+      // `embedding` is typed number[], but this spec exists to catch the case
+      // where the pipeline hands back something else, so the array check stays.
+      embeddingDims: chunks.map((c) => (Array.isArray(c.embedding) ? c.embedding.length : 0)),
       retrievedChunks: retrieved.context.chunks.length,
-      proxyUrls: (window as any).__E2E_PROXY_URLS__ || [],
     }
   })
 
   // The document was chunked and every chunk carries a real embedding vector.
   expect(result.chunkCount).toBeGreaterThan(0)
-  expect(result.embeddingDims.every((d: number) => d > 0)).toBe(true)
+  expect(result.embeddingDims.every((d) => d > 0)).toBe(true)
   expect(result.retrievedChunks).toBeGreaterThan(0)
 
   // Embeddings hit the bundled server on 8128 …
-  const urls: string[] = result.proxyUrls
+  const urls = await proxyUrls(page)
   expect(urls.some((u) => u.includes(':8128') && u.includes('/v1/embeddings'))).toBe(true)
   // … and NEVER Ollama's /api/embed on 11434.
   expect(urls.some((u) => u.includes('11434') && u.includes('/embed'))).toBe(false)

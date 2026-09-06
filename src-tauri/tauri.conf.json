@@ -1,16 +1,16 @@
 {
   "$schema": "https://raw.githubusercontent.com/tauri-apps/tauri/dev/crates/tauri-cli/schema.json",
   "productName": "LU",
-  "version": "2.6.7",
+  "version": "2.6.8",
   "identifier": "com.purpledoubled.locally-uncensored",
   "build": {
     "beforeBuildCommand": "npm run build",
     "beforeDevCommand": "npm run dev",
-    "devUrl": "http://localhost:5173",
+    "devUrl": "http://localhost:5273",
     "frontendDist": "../dist"
   },
   "app": {
-    "withGlobalTauri": true,
+    "withGlobalTauri": false,
     "windows": [
       {
         "title": "LU",
@@ -21,7 +21,7 @@
         "visible": false,
         "decorations": false,
         "transparent": true,
-      "dragDropEnabled": false
+        "dragDropEnabled": false
       }
     ],
     "security": {
@@ -37,7 +37,6 @@
     }
   },
   "bundle": {
-    "createUpdaterArtifacts": "v1Compatible",
     "active": true,
     "targets": "all",
     "publisher": "PurpleDoubleD",
@@ -48,8 +47,7 @@
     "homepage": "https://lu-labs.ai",
     "license": "AGPL-3.0-only",
     "resources": [
-      "resources/whisper_server.py",
-      "../dist"
+      "resources/whisper_server.py"
     ],
     "externalBin": [
       "bin/lu-llama-server"
@@ -87,14 +85,18 @@
         "depends": [
           "libwebkit2gtk-4.1-0",
           "libgtk-3-0",
-          "libayatana-appindicator3-1"
+          "libayatana-appindicator3-1",
+          "libvulkan1",
+          "libgomp1"
         ]
       },
       "rpm": {
         "depends": [
           "webkit2gtk4.1",
           "gtk3",
-          "libappindicator-gtk3"
+          "libappindicator-gtk3",
+          "libvulkan.so.1()(64bit)",
+          "libgomp.so.1()(64bit)"
         ]
       }
     }

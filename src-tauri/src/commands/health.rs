@@ -140,7 +140,7 @@ async fn probe_http(url: &str) -> BackendProbe {
 /// `"24576, 23000"` (values in MiB, `nounits` strips the " MiB"). Returns
 /// `(total_gb, free_gb)` for the GPU with the most total memory — picking the
 /// biggest card matches the "what can I fit a model into?" question and
-/// mirrors install.rs taking the highest compute-cap across GPUs.
+/// mirrors the ComfyUI installer taking the highest compute-cap across GPUs.
 ///
 /// Returns `None` on empty / unparseable output. Conversion uses 1024 MiB =
 /// 1 GiB (nvidia-smi reports MiB), rounded to 1 decimal to match ram_gb.

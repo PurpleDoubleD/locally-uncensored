@@ -153,9 +153,44 @@
   Delete "$INSTDIR\llama-server.exe.old"
 !macroend
 
+; The old frontend bundle piles up forever, and nothing ever swept it.
+;
+; Measured on the Windows box on 2026-09-04, in an install folder that has
+; taken every update since April:
+;
+;   _up_\dist\assets        1170 files      131,9 MB
+;   of which from the build installed that morning   266
+;   oldest file                                      2026-04-15
+;
+; So roughly 900 dead files and 110 MB that every updating user carries around.
+; The cause is the pair of habits meeting: Vite puts a content hash in every
+; chunk name, so a new build never overwrites the old chunk, it lands beside
+; it, and NSIS only ever COPIES what the package brings, it never removes what
+; the previous version left. Neither half is wrong on its own. Together they
+; grow the install without limit.
+;
+; The whole folder belongs to the installer. There is nothing of the user's in
+; it: chats, settings, models and outputs live under the app data folders, and
+; the bundle identifier that names them never changes. So it can go wholesale
+; and be laid down fresh.
+;
+; The check on index.html is not for us, it is for a wrong $INSTDIR. A
+; recursive delete is the one instruction in this file that cannot be taken
+; back, and it should only ever run where our own frontend really lies.
+;
+; A file that is still locked is skipped by RMDir without an error, which is
+; the right outcome: one leftover chunk is harmless, and the next install
+; sweeps it.
+!macro LU_SWEEP_OLD_FRONTEND
+  ${If} ${FileExists} "$INSTDIR\_up_\dist\index.html"
+    RMDir /r "$INSTDIR\_up_\dist"
+  ${EndIf}
+!macroend
+
 !macro NSIS_HOOK_PREINSTALL
   !insertmacro LU_FREE_SIDECAR "lu-llama-server.exe"
   !insertmacro LU_SWEEP_OLD_SIDECAR
+  !insertmacro LU_SWEEP_OLD_FRONTEND
 
 !if "${PRODUCTNAME}" != "Locally Uncensored"
   !insertmacro LU_REMOVE_OLD_NSIS HKCU

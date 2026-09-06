@@ -4,18 +4,22 @@ import { UploadCloud, ImagePlus, Scissors, Wand2, Sparkles, X, Loader2, Download
 import { useCreateStore, type GalleryItem } from '../../../stores/createStore'
 import { useCreateExp } from './CreateContext'
 import { INTENT_MAP } from './intents'
+import { stageShowsSetupCard, laneModelCount } from './stageGate'
 import { GeneratingView, ResultView } from './OutputView'
 import { EmptyState } from '../ui/EmptyState'
+import { MONOGRAM, MONOGRAM_INVERT } from '../../layout/brand'
+import { ICON_STROKE_MARK } from '../../ui/icon-size'
 import { Button } from '../ui/Button'
 import { cn } from '../ui/cn'
 import { loadImageRef } from './loadImage'
+import { mediaRefFrom } from './mediaRef'
 import {
   subscribeInstallRuns, getInstallRun, startInstallRun, cancelInstallRun, clearInstallRun,
 } from '../../../lib/model-install-runs'
 import { galleryItemUrl, fetchGalleryItemBlob, recoverGalleryUrl } from './galleryUrl'
 import { InstallCancelled } from '../../../lib/bundle-install'
 import { isMlxImageHost } from '../../../api/mlx-image'
-import { videoLaneModels, bundleForVideoIntent } from '../../../api/comfyui'
+import { bundleForVideoIntent } from '../../../api/comfyui'
 import { getVideoBundles } from '../../../api/discover'
 
 interface Props {
@@ -54,31 +58,26 @@ export function Stage({ displayed, onOpenMaskEditor, onEditResult, onFullscreen 
   // one-click starter-bundle card. connected === false also gates — the same
   // button installs ComfyUI itself first. connected === null (still probing)
   // gates nothing, so the card never flashes during startup.
-  // "Missing" for the video lane must use the same op-gating as the picker:
-  // SVD and FramePack are i2v-only, so a box whose only video model was SVD
-  // passed a bare length check and never offered the starter bundle, while
-  // the T2V picker showed "No matches" (David 2026-08-01).
-  const videoLaneList = videoLaneModels(videoModelList, intent)
-  const listForKind: Record<NonNullable<typeof meta.requiresModels>, unknown[]> = {
-    image: imageModelList,
-    video: videoLaneList,
-    audio: audioModelList,
-    lipsync: lipsyncModelList,
-    motion: motionModelList,
-  }
+  //
   // macOS answers this from MLX, not from ComfyUI: `connected` is deliberately
-  // pinned to null there (there is nothing to connect to), so the rule below
-  // would never fire and a Mac with no model installed got an empty stage and
-  // no way to fix it — the setup lived in Settings, where nothing pointed.
-  const macMissing =
-    backend === 'local' && !!mlxMissing &&
-    (meta.requiresModels === 'image' ? mlxMissing.image
-      : meta.requiresModels === 'video' ? mlxMissing.video
-        : false)
-  const modelsMissing = macMissing || (mlxMissing === null && backend === 'local' && !!meta.requiresModels && (
-    connected === false ||
-    (connected === true && modelsLoaded && listForKind[meta.requiresModels].length === 0)
-  ))
+  // pinned to null there (there is nothing to connect to), so the rule would
+  // never fire and a Mac with no model installed got an empty stage and no way
+  // to fix it — the setup lived in Settings, where nothing pointed.
+  //
+  // Die Regel selbst steht in ./stageGate, weil die Kopfzeile in
+  // CreateExperimental dieselbe Antwort braucht: sie haelt ihren roten Balken
+  // zurueck, solange diese Karte die Lage schon erklaert.
+  const modelsMissing = stageShowsSetupCard({
+    backend,
+    requiresModels: meta.requiresModels,
+    mlxMissing,
+    connected,
+    modelsLoaded,
+    laneModelCount: laneModelCount(intent, meta.requiresModels, {
+      image: imageModelList, video: videoModelList, audio: audioModelList,
+      lipsync: lipsyncModelList, motion: motionModelList,
+    }),
+  })
 
   // A result counts for the current source only if it was generated after the
   // source was loaded — otherwise an older gallery item would hijack the stage.
@@ -123,8 +122,19 @@ export function Stage({ displayed, onOpenMaskEditor, onEditResult, onFullscreen 
       />
     )
   } else {
+    // D-A9/D-W3-7, die zwoelfte Einbindung: hier stand die 512x512-Bitmap des
+    // Monogramms unter ihrem zweiten Dateinamen (die `-white`-Fassung ist
+    // byteidentisch mit der `-bw`-Fassung, derselbe MD5), gezeigt auf 56px.
+    // Sie stand in KEINER der beiden Audit-Listen und ist auch durch die Wache
+    // von `b3f0f786` gefallen, weil die nach EINEM Namen gesucht hat statt
+    // nach dem Muster. `kein-raster-als-hauszeichen.test.ts` sucht das Muster.
+    //
+    // `logoClassName` ist neu und kein Beiwerk: `create/` ist dunkel-zuerst
+    // portiert und sitzt in `<main>` auf `bg-white dark:bg-[#1e1e1e]`. Das
+    // Zeichen ist weiss gezeichnet und stand im Hellmodus unsichtbar auf
+    // Weiss — den Text daneben faengt `index.css:863-868` ab, das Bild nicht.
     body = (
-      <EmptyState icon={Sparkles} logoSrc="/LU-monogram-white.png" title={teachTitle(intent)}>
+      <EmptyState icon={Sparkles} logoSrc={MONOGRAM} logoClassName={MONOGRAM_INVERT} title={teachTitle(intent)}>
         {meta.examples.length > 0 && (
           <div className="flex flex-wrap justify-center gap-1.5 pt-1">
             {meta.examples.map((ex) => (
@@ -251,8 +261,8 @@ function InputSlot() {
         >
           {loading ? <Loader2 className="animate-spin text-lu-accent" size={30} /> : (
             meta.id === 'removebg'
-              ? <Scissors className="text-lu-accent drop-shadow-[0_0_7px_var(--color-lu-accent-ring)]" size={30} strokeWidth={1.5} />
-              : <UploadCloud className="text-lu-accent drop-shadow-[0_0_7px_var(--color-lu-accent-ring)]" size={30} strokeWidth={1.5} />
+              ? <Scissors className="text-lu-accent drop-shadow-[0_0_7px_var(--color-lu-accent-ring)]" size={30} strokeWidth={ICON_STROKE_MARK} />
+              : <UploadCloud className="text-lu-accent drop-shadow-[0_0_7px_var(--color-lu-accent-ring)]" size={30} strokeWidth={ICON_STROKE_MARK} />
           )}
           <div className="text-center">
             <div className="t-title text-gray-300">{meta.id === 'removebg' ? 'Drop an image to cut out' : meta.id === 'animate' ? 'Drop an image to animate' : 'Drop an image to edit'}</div>
@@ -590,9 +600,13 @@ function TrainSetBoard() {
   const inputRef = useRef<HTMLInputElement>(null)
 
   const addFiles = (files: FileList | File[]) => {
+    // One mint, one release: `mediaRefFrom` is the only place a staged file
+    // gets a blob: URL, and `addTrainImages` gives back every ref it does not
+    // keep (a name duplicate, anything past the 30 cap). This used to be an
+    // inline copy of those two lines with nothing on the other end.
     const imgs = Array.from(files)
       .filter((f) => f.type.startsWith('image/'))
-      .map((f) => ({ name: f.name, url: URL.createObjectURL(f), blob: f as Blob }))
+      .map(mediaRefFrom)
     if (imgs.length > 0) addTrainImages(imgs)
   }
 

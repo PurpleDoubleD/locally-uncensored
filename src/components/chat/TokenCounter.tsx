@@ -2,6 +2,14 @@ import { useChatStore } from '../../stores/chatStore'
 import { computeContextFill } from '../../lib/token-usage'
 import { useActiveContextWindow } from '../../hooks/useActiveContextWindow'
 import { useSendSizeStore } from '../../stores/sendSizeStore'
+import { useSettingsStore } from '../../stores/settingsStore'
+import { shouldAutoCompact, autoCompactHint } from '../../lib/compact-trigger'
+import { newestCompaction, isModelVisible } from '../../lib/run-compact-command'
+// Dieselbe Schreibweise wie die Klapplade darunter. Vorher stand hier
+// 8192/1000 und dort 8192/1024, also `8.2k` neben `8K` fuer eine einzige Zahl
+// (Gegenprobe G2, 04.09.2026).
+import { formatContextWindow } from '../../lib/formatters'
+import { HINWEIS_TEXT, PUNKT_FARBE } from '../../lib/hinweis'
 
 export function TokenCounter() {
   const activeConversationId = useChatStore((s) => s.activeConversationId)
@@ -15,6 +23,14 @@ export function TokenCounter() {
   // (David: "muss immer stimmen"). Ollama = the num_ctx we send; LM Studio =
   // loaded_context_length (what it actually loaded), NOT the model's max.
   const ctx = useActiveContextWindow()
+  // MUSS vor dem fruehen `return null` weiter unten stehen. Als dieser Hook
+  // dort unten bei seiner Verwendung stand, hatte die Komponente vier Hooks im
+  // leeren Chat und fuenf im gefuellten — React 19 wirft dann beim Uebergang
+  // „Rendered more hooks than during the previous render", und das ist ein
+  // Absturz, kein Warnhinweis. Der Weg dorthin ist alltaeglich: neuer Chat mit
+  // einem Cloud-Modell (ContextDropdown rendert die Kinder auch, wenn das
+  // Fenster nicht verstellbar ist), erste Nachricht — fertig.
+  const autoSchwelle = useSettingsStore((s) => s.settings.autoCompactThreshold)
 
   const conversation = conversations.find((c) => c.id === activeConversationId)
   const messages = conversation?.messages || []
@@ -44,7 +60,7 @@ export function TokenCounter() {
   // Resolved real context window; fall back to the VRAM-safe default only while
   // the provider probe is still in flight (ctx not resolved yet). On a paid
   // provider the denominator is the SEND window, not the model window: a
-  // 262k-context model whose steps are capped at 64k would otherwise sit green
+  // 262k-context model whose steps are capped at 64k would otherwise sit quiet
   // at 25 percent forever, the red warning would never fire, and every support
   // case would arrive with a healthy meter next to a drained wallet (plan A2,
   // meter honesty).
@@ -57,39 +73,104 @@ export function TokenCounter() {
   const isReal = fill.real && usedTokens === rawUsed
 
   const ratio = maxTokens > 0 ? usedTokens / maxTokens : 0
-  const color = ratio > 0.8 ? 'text-red-400' : ratio > 0.5 ? 'text-amber-400' : 'text-gray-500'
-  const barColor = ratio > 0.8 ? 'bg-red-500' : ratio > 0.5 ? 'bg-amber-500' : 'bg-gray-500'
-
-  const formatK = (n: number) => n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n)
+  // Zwei Toene, kein dritter (`lib/hinweis.ts`). Bis hierher gab es eine
+  // mittlere Stufe ab 50 Prozent, und die hat nichts gesagt: halbvoll ist der
+  // Normalfall eines laufenden Gespraechs, kein Zwischenfall. Ueber 80 Prozent
+  // wird es eng, das traegt Rot. Alles darunter ist ruhiges Grau. Schrift und
+  // Balken holen sich dieselbe Aussage aus derselben Datei, damit der Balken
+  // nicht eines Tages allein weiterwandert.
+  const eng = ratio > 0.8
+  const color = eng ? HINWEIS_TEXT.fehler : HINWEIS_TEXT.ruhig
+  const barColor = eng ? PUNKT_FARBE.kaputt : PUNKT_FARBE.aus
 
   const source = ctx.provider === 'lmstudio'
     ? "LM Studio loaded context"
     : ctx.provider === 'ollama'
       ? 'Ollama num_ctx'
       : ctx.provider === 'builtin'
-        ? 'built-in engine loaded context'
+        ? 'LU Engine loaded context'
         : 'model context'
   const capped = ctx.sendWindow > 0 && ctx.contextWindow > ctx.sendWindow
+  // Dieselbe Schreibweise wie die sichtbare Zeile darunter. Bis zur
+  // Nachpruefung G3 am 04.09.2026 stand hier `formatCount`, also las der Kunde
+  // `82/8K` auf dem Schirm und bekam beim Verweilen mit der Maus auf DERSELBEN
+  // Zahl `82 / 8,192 tokens`. Zwei Schreibweisen fuer denselben Wert, auf
+  // einem Bildschirm, eine davon unter dem Mauszeiger der anderen.
   const capNote = capped
-    ? `. Capped: a step sends at most ${maxTokens.toLocaleString()} of this model's ${ctx.contextWindow.toLocaleString()} tokens (Settings, send window), and tool results older than the newest step go out shortened`
+    ? `. Capped: a step sends at most ${formatContextWindow(maxTokens)} of this model's ${formatContextWindow(ctx.contextWindow)} tokens (Settings, send window), and tool results older than the newest step go out shortened`
     : ''
   const title = fill.source === 'built'
-    ? `Last request: ${usedTokens.toLocaleString()} / ${maxTokens.toLocaleString()} tokens, the size of the payload actually built for the last step, tool catalog, decay and compaction included${capNote}`
+    ? `Last request: ${formatContextWindow(usedTokens)} / ${formatContextWindow(maxTokens)} tokens, the size of the payload actually built for the last step, tool catalog, decay and compaction included${capNote}`
     : isReal
-      ? `Context: ${usedTokens.toLocaleString()} / ${maxTokens.toLocaleString()} tokens (${source}), anchored on the model's last reported usage (includes system prompt + tools + RAG); reasoning tokens are not context and aren't counted${capNote}`
-      : `Estimated: ${usedTokens.toLocaleString()} / ${maxTokens.toLocaleString()} tokens (${source}), estimate until the model reports real usage${capNote}`
+      ? `Context: ${formatContextWindow(usedTokens)} / ${formatContextWindow(maxTokens)} tokens (${source}), anchored on the model's last reported usage (includes system prompt + tools + RAG); reasoning tokens are not context and aren't counted${capNote}`
+      : `Estimated: ${formatContextWindow(usedTokens)} / ${formatContextWindow(maxTokens)} tokens (${source}), estimate until the model reports real usage${capNote}`
 
+  // ── Wie weit ist es noch bis zur automatischen Kompaktierung ────────────
+  //
+  // WARUM UEBERHAUPT: bis hierher stand die Schwelle ausschliesslich in den
+  // Einstellungen. Wer sie eingeschaltet hatte, sah im Chat nur den Fuellstand
+  // und konnte nicht wissen, ob die naechste Nachricht noch durchgeht oder
+  // eine Zusammenfassung ausloest. Die Claude-Code-Desktop-App schreibt genau
+  // diesen Satz in ihre Statuszeile, und er ist der Grund, warum dort niemand
+  // von einer Kompaktierung ueberrascht wird.
+  //
+  // WARUM ueber `shouldAutoCompact` und nicht mit einer eigenen Rechnung: die
+  // wirksame Schwelle ist NICHT die eingestellte. `shouldAutoCompact` zieht
+  // einen Sicherheitsabschlag ab, solange der Fuellstand nur geschaetzt ist —
+  // eine hier selbst gerechnete Prozentzahl waere im haeufigsten Fall (kein
+  // echter Usage-Report) schlicht die falsche. Dieselbe Funktion zu fragen,
+  // die spaeter auch entscheidet, ist der einzige Weg, bei dem Anzeige und
+  // Verhalten nicht auseinanderlaufen koennen.
+  const sichtbareAnzahl = messages.filter(isModelVisible).length
+  const autoUrteil = autoSchwelle
+    ? shouldAutoCompact({
+        used: rawUsed,
+        window: maxTokens,
+        source: fill.source,
+        real: fill.real,
+        // `maxTokens > 0` war immer wahr — auch fuer den 16384er-Notnagel
+        // weiter oben, den es nur gibt, solange die Anbieter-Abfrage laeuft.
+        // Der Zaehler behauptete damit sekundenlang ein bekanntes Fenster:
+        // 14k belegt auf einem 128k-Modell las sich als "triggers on the next
+        // message", bis die Antwort kam. `window` ist die Zahl VOR dem
+        // Notnagel und damit die ehrliche Auskunft.
+        windowIsTrue: window > 0,
+        messageCount: sichtbareAnzahl,
+        threshold: autoSchwelle,
+        lastCompactAtMessageCount: newestCompaction(conversation?.compactions)?.atMessageCount,
+      })
+    : null
+  const autoHinweis = autoCompactHint(autoUrteil)
+
+  // `span`, nicht `div`, und ohne eigenes Padding: seit D-S06 ist dieser
+  // Fuellstand die Beschriftung INNERHALB des Kontextfenster-Knopfes
+  // (`ContextDropdown`). Ein `div` im `<button>` ist kein gueltiges
+  // Phrasing-Content, und das Padding kam sonst zweimal.
   return (
-    <div className={`flex items-center gap-1.5 px-2 py-1 ${color}`} title={title}>
-      <div className="w-12 h-1 rounded-full bg-gray-200 dark:bg-white/10 overflow-hidden">
-        <div
-          className={`h-full rounded-full transition-all duration-300 ${barColor}`}
+    <span className={`inline-flex items-center gap-1.5 ${color}`} title={autoHinweis ? `${title}. ${autoHinweis}` : title}>
+      <span className="relative block w-12 h-1 rounded-full bg-gray-200 dark:bg-white/10 overflow-hidden">
+        <span
+          className={`block h-full rounded-full transition-[width] duration-[var(--motion-slow)] ${barColor}`}
           style={{ width: `${Math.min(ratio * 100, 100)}%` }}
         />
-      </div>
-      <span className="text-[0.55rem] font-mono tabular-nums">
-        {formatK(usedTokens)}/{formatK(maxTokens)}
+        {/* Die Marke sitzt auf der WIRKSAMEN Schwelle, derselben, die
+            entscheidet. Nur gezeichnet, wenn sie ueberhaupt in den Balken
+            faellt — eine Marke am Rand behauptet eine Genauigkeit, die zwei
+            Pixel nicht tragen. */}
+        {autoUrteil && autoUrteil.effectiveThreshold > 0.02 && autoUrteil.effectiveThreshold < 0.98 && (
+          <span
+            aria-hidden
+            data-testid="auto-compact-mark"
+            className="absolute top-0 bottom-0 w-px bg-current opacity-50"
+            style={{ left: `${autoUrteil.effectiveThreshold * 100}%` }}
+          />
+        )}
       </span>
-    </div>
+      {/* `font-mono tabular-nums` war dasselbe Rezept, nur an der Call-Site
+          buchstabiert. `.lu-hud-num` ist die eine Stelle, an der es steht. */}
+      <span className="text-[0.55rem] lu-hud-num">
+        {formatContextWindow(usedTokens)}/{formatContextWindow(maxTokens)}
+      </span>
+    </span>
   )
 }

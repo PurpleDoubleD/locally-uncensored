@@ -13,6 +13,7 @@
  */
 
 import { localFetch, localFetchStream, ollamaUrl } from './backend'
+import { isLocalTransportFailure, localBackendUnreachableMessage } from '../lib/local-backend-transport'
 
 // ── Tool-Calling Templates per Model Family ───────────────────────
 
@@ -220,7 +221,15 @@ export async function createAgentVariant(
 
   if (!res.ok) {
     const error = await res.text()
-    throw new Error(`Failed to create agent variant: ${error}`)
+    // Ollama nicht erreichbar: der Proxy antwortet mit seiner eigenen Zeile,
+    // Rust-Befehlsname inklusive. Gleiche Behandlung wie im Chat und im
+    // Agentenlauf (04.09.2026).
+    const wo = ollamaUrl('/create')
+    throw new Error(
+      isLocalTransportFailure(error, wo)
+        ? localBackendUnreachableMessage('Ollama', wo)
+        : `Failed to create agent variant: ${error}`,
+    )
   }
 
   // Consume the stream to completion

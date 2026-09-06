@@ -37,6 +37,20 @@ import { applyTemplateContract } from '../normalize-system'
 import { groupHistory, groupSystemPrompt } from '../../../lib/group-chat'
 import { isTemplateRefusal, explainSendRefusal } from '../../../lib/template-refusal'
 import type { Message } from '../../../types/chat'
+import type { ChatMessage, ProviderConfig, ToolDefinition } from '../types'
+import type { OpenAIChatRequest } from '../openai-provider'
+import type { OllamaChatRequest } from '../ollama-provider'
+
+/** The init shape both backend helpers are called with in this file. */
+type CapturedInit = { method?: string; headers?: Record<string, string>; body?: string }
+
+/** Read a captured request body as the request type the provider builds, so a
+ *  renamed field in the provider breaks these assertions instead of quietly
+ *  turning them into `undefined === undefined`. */
+function captured<T>(init: CapturedInit): T {
+  if (typeof init.body !== 'string') throw new Error('capture had no JSON body')
+  return JSON.parse(init.body) as T
+}
 
 // ── The guard Gemma 3 actually contains ────────────────────────
 
@@ -66,7 +80,7 @@ const TOLERANT = { toolRole: 'native', alternate: false } as const
 // Weg 1 of the counter-check, copied from logs/wire-b3-12-agent-round2.json:
 // the agent's own history after one approved file_write, on the prompt
 // transport, with no `tools` field in the request.
-const AGENT_AFTER_A_TOOL = [
+const AGENT_AFTER_A_TOOL: ChatMessage[] = [
   { role: 'system', content: 'You are a function calling AI model. <tools>...</tools>' },
   { role: 'user', content: 'Create a file called notes.txt containing the word hello, then read it back.' },
   {
@@ -205,10 +219,10 @@ describe('the template contract', () => {
 
 // ── 2. Which endpoint gets which contract ──────────────────────
 
-const backendMock = (capture: (url: string, init: any) => Response, opts?: { lan?: boolean }) => ({
+const backendMock = (capture: (url: string, init: CapturedInit) => Response, opts?: { lan?: boolean }) => ({
   isTauri: () => false,
-  localFetch: vi.fn(async (url: string, init: any) => capture(url, init)),
-  localFetchStream: vi.fn(async (url: string, init: any) => capture(url, init)),
+  localFetch: vi.fn(async (url: string, init: CapturedInit) => capture(url, init)),
+  localFetchStream: vi.fn(async (url: string, init: CapturedInit) => capture(url, init)),
   ollamaUrl: (path: string) => `http://localhost:11434/api${path}`,
   backendCall: vi.fn(),
   isPrivateOrLanHost: () => opts?.lan !== false,
@@ -223,15 +237,15 @@ const okJson = (body: unknown) =>
 
 async function sendVia(
   config: { baseUrl: string; isLocal: boolean; managed?: boolean },
-  tools: any[],
+  tools: ToolDefinition[],
   lan: boolean,
-): Promise<any> {
+): Promise<OpenAIChatRequest> {
   vi.resetModules()
-  let sent: any = null
+  let sent: OpenAIChatRequest | null = null
   vi.doMock('../../backend', () =>
     backendMock((url, init) => {
       if (url.includes('/chat/completions')) {
-        sent = JSON.parse(init.body)
+        sent = captured<OpenAIChatRequest>(init)
         return okJson({ choices: [{ message: { content: 'ok' } }] })
       }
       return new Response('{}', { status: 404 })
@@ -243,10 +257,12 @@ async function sendVia(
     isManagedBuiltinSlot: () => config.managed === true,
   }))
   const { OpenAIProvider } = await import('../openai-provider')
-  const p = new OpenAIProvider({
+  const providerConfig: ProviderConfig = {
     id: 'openai', name: 'test', enabled: true, apiKey: '', ...config,
-  } as any)
-  await p.chatWithTools('m', AGENT_AFTER_A_TOOL as any, tools as any)
+  }
+  const p = new OpenAIProvider(providerConfig)
+  await p.chatWithTools('m', AGENT_AFTER_A_TOOL, tools)
+  if (!sent) throw new Error('no /chat/completions request was captured')
   return sent
 }
 
@@ -262,7 +278,7 @@ describe('the body that leaves for each kind of endpoint', () => {
       { baseUrl: 'http://127.0.0.1:8127/v1', isLocal: true, managed: true }, [], true,
     )
     expect(sent.tools).toBeUndefined()
-    expect(sent.messages.some((m: any) => m.role === 'tool')).toBe(false)
+    expect(sent.messages.some(m => m.role === 'tool')).toBe(false)
     expect(() => gemmaGate(sent.messages)).not.toThrow()
   })
 
@@ -270,7 +286,7 @@ describe('the body that leaves for each kind of endpoint', () => {
     const sent = await sendVia(
       { baseUrl: 'http://localhost:1234/v1', isLocal: true }, [], true,
     )
-    expect(sent.messages.some((m: any) => m.role === 'tool')).toBe(false)
+    expect(sent.messages.some(m => m.role === 'tool')).toBe(false)
     expect(() => gemmaGate(sent.messages)).not.toThrow()
   })
 
@@ -285,7 +301,7 @@ describe('the body that leaves for each kind of endpoint', () => {
       true,
     )
     expect(sent.tools).toHaveLength(1)
-    expect(sent.messages.some((m: any) => m.role === 'tool')).toBe(true)
+    expect(sent.messages.some(m => m.role === 'tool')).toBe(true)
     expect(sent.messages[2].tool_calls).toHaveLength(1)
   })
 
@@ -295,17 +311,19 @@ describe('the body that leaves for each kind of endpoint', () => {
     const sent = await sendVia(
       { baseUrl: 'https://api.example-cloud.com/v1', isLocal: false }, [], false,
     )
-    expect(sent.messages.some((m: any) => m.role === 'tool')).toBe(true)
+    expect(sent.messages.some(m => m.role === 'tool')).toBe(true)
     expect(sent.messages[3].tool_call_id).toBe('call_1')
-    expect(sent.messages[2].tool_calls[0].id).toBe('call_1')
+    expect(sent.messages[2].tool_calls?.[0].id).toBe('call_1')
   })
 
   it('Ollama chatStream, which never carries tools, gets the tolerant sequence', async () => {
     vi.resetModules()
-    let sent: any = null
+    // An array, not a `let`: TypeScript resets no narrowing on a push, so the
+    // captured body keeps its real type instead of collapsing to `never`.
+    const captures: OllamaChatRequest[] = []
     vi.doMock('../../backend', () =>
       backendMock((_url, init) => {
-        sent = JSON.parse(init.body)
+        captures.push(captured<OllamaChatRequest>(init))
         return new Response('{"message":{"content":"ok"},"done":true}\n')
       }),
     )
@@ -314,17 +332,19 @@ describe('the body that leaves for each kind of endpoint', () => {
       id: 'ollama', name: 'Ollama', enabled: true,
       baseUrl: 'http://localhost:11434', apiKey: '', isLocal: true,
     })
-    for await (const chunk of p.chatStream('gemma3:4b', AGENT_AFTER_A_TOOL as any)) { void chunk }
-    expect(sent.messages.some((m: any) => m.role === 'tool')).toBe(false)
-    expect(() => gemmaGate(sent.messages)).not.toThrow()
+    for await (const chunk of p.chatStream('gemma3:4b', AGENT_AFTER_A_TOOL)) { void chunk }
+    expect(captures).toHaveLength(1)
+    const streamed = captures[0]
+    expect(streamed.messages.some(m => m.role === 'tool')).toBe(false)
+    expect(() => gemmaGate(streamed.messages)).not.toThrow()
   })
 
   it('Ollama chatWithTools with a real tools payload keeps the tool role', async () => {
     vi.resetModules()
-    let sent: any = null
+    const captures: OllamaChatRequest[] = []
     vi.doMock('../../backend', () =>
       backendMock((_url, init) => {
-        sent = JSON.parse(init.body)
+        captures.push(captured<OllamaChatRequest>(init))
         return okJson({ message: { content: 'ok' } })
       }),
     )
@@ -333,10 +353,11 @@ describe('the body that leaves for each kind of endpoint', () => {
       id: 'ollama', name: 'Ollama', enabled: true,
       baseUrl: 'http://localhost:11434', apiKey: '', isLocal: true,
     })
-    await p.chatWithTools('qwen3:8b', AGENT_AFTER_A_TOOL as any, [
+    await p.chatWithTools('qwen3:8b', AGENT_AFTER_A_TOOL, [
       { type: 'function', function: { name: 'file_write', description: '', parameters: { type: 'object', properties: {}, required: [] } } },
-    ] as any)
-    expect(sent.messages.some((m: any) => m.role === 'tool')).toBe(true)
+    ])
+    expect(captures).toHaveLength(1)
+    expect(captures[0].messages.some(m => m.role === 'tool')).toBe(true)
   })
 })
 

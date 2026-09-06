@@ -1,5 +1,4 @@
 
-import { motion } from 'framer-motion'
 import { Loader2 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { cn } from './cn'
@@ -35,11 +34,13 @@ const SIZE_PX: Record<Size, string> = {
 }
 const ICON_SIZE: Record<Size, number> = { sm: 13, md: 14, lg: 16 }
 
-// Matches the live app exactly: the primary action (Generate) is a neutral
-// white-translucent button — the app uses NO loud accent fill. Emphasis comes
-// from the icon + size, not colour.
+// Die Primaeraktion traegt das gemeinsame Rezept `.lu-primary` (index.css) —
+// Flaeche, Textfarbe, Hover, Fokusring und disabled liegen dort, an genau
+// einer Stelle, geteilt mit AccountPanel (Sign in) und ChatInput (Send).
+// Vorher stand hier ein eigenes Graustufen-Rezept, das die wichtigste Aktion
+// des Bildschirms wie eine Nebenaktion aussehen liess.
 const VARIANT: Record<Variant, string> = {
-  primary: 'bg-gray-900 text-white dark:bg-white/10 dark:text-white hover:bg-gray-700 dark:hover:bg-white/15 font-medium',
+  primary: 'lu-primary',
   secondary: 'bg-white/10 text-gray-100 hover:bg-white/15',
   ghost: 'bg-transparent text-gray-400 hover:text-white hover:bg-white/8',
   danger: 'bg-red-500/15 text-red-500 dark:text-red-400 hover:bg-red-500/25',
@@ -51,17 +52,21 @@ export function Button({
   title, ariaLabel, type = 'button', active = false,
 }: Props) {
   const isDisabled = disabled || loading
+  // Der Druck kommt aus der Hausregel in index.css (`:active { scale: .97 }`),
+  // nicht aus einem `whileTap` an diesem Knopf. Beides zugleich waere
+  // 0,96 x 0,97 = 0,93, also ein doppelter Druck — und framer-motion
+  // schriebe dafuer bei jedem Klick ein inline-Transform, das der
+  // Compositor ohnehin allein kann.
   return (
-    <motion.button
+    <button
       type={type}
       title={title}
       aria-label={ariaLabel ?? title}
       aria-busy={loading || undefined}
       onClick={onClick}
       disabled={isDisabled}
-      whileTap={isDisabled ? undefined : { scale: 0.96 }}
       className={cn(
-        't-control inline-flex items-center justify-center select-none transition-colors lu-focus-ring rounded-[var(--radius-control)]',
+        't-control inline-flex items-center justify-center select-none transition-colors rounded-[var(--radius-control)]',
         SIZE_H[size],
         iconOnly ? 'aspect-square' : SIZE_PX[size],
         VARIANT[variant],
@@ -73,6 +78,6 @@ export function Button({
       {loading ? <Loader2 size={ICON_SIZE[size]} className="animate-spin" />
         : Icon ? <Icon size={ICON_SIZE[size]} /> : null}
       {!iconOnly && children}
-    </motion.button>
+    </button>
   )
 }

@@ -5,11 +5,13 @@
 // (same path the model picker uses); when stopped, the next start picks the
 // values up automatically.
 
-import { useEffect, useState } from 'react'
+import { useRef, useState } from 'react'
 import { Loader2, AlertTriangle, Check, Zap } from 'lucide-react'
 import { useSettingsStore } from '../../stores/settingsStore'
-import { bundledEngineStatus, swapBundledModel, type EngineStatus } from '../../api/engine'
-import { isTauri } from '../../api/backend'
+import { Hinweis } from '../ui/Hinweis'
+import { bundledEngineStatus, swapBundledModel, ENGINE_PORT } from '../../api/engine'
+import { useBuiltinEngineStatus } from '../../hooks/useBuiltinEngineStatus'
+import { enginePortLine } from '../../lib/engine-port'
 import type { BuiltinEngineTuning } from '../../types/settings'
 
 type KvType = BuiltinEngineTuning['cacheTypeK']
@@ -31,20 +33,33 @@ function modelNameFromPath(path: string | null): string | null {
   return path.split(/[\\/]/).pop()?.replace(/\.gguf$/i, '') ?? null
 }
 
+/**
+ * The Rust event a sidecar's death raises (commands/engine.rs).
+ *
+ * A16, Windows counter-check 02.09.: the panel read the engine status exactly
+ * once, on mount. Kill lu-llama-server with the section standing open and the
+ * line said "Engine running · Port: 8127" for the full thirty seconds the
+ * counter-check watched, and only folding the section and unfolding it put it
+ * right, because that mounted the panel again and asked again. A display that
+ * is wrong about a process that is gone is worse than no display: it is the
+ * answer to "why does chat not work" and it is the wrong answer.
+ */
 export function BuiltinEngineSettings() {
   const tuning = useSettingsStore((s) => s.settings.builtinEngine)
   const updateSettings = useSettingsStore((s) => s.updateSettings)
 
-  const [status, setStatus] = useState<EngineStatus | null>(null)
   const [dirty, setDirty] = useState(false)
   const [busy, setBusy] = useState(false)
   const [applied, setApplied] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  useEffect(() => {
-    if (!isTauri()) return
-    bundledEngineStatus().then(setStatus).catch(() => setStatus(null))
-  }, [])
+  // A restart this panel started reads the status itself when it is done, and
+  // a poll landing in the middle of it would show the gap as "not running".
+  // Die Schleife selbst steht in hooks/useBuiltinEngineStatus, weil die
+  // Models-Seite dieselbe Frage stellen muss (Persona P2, 04.09.2026).
+  const busyRef = useRef(false)
+  busyRef.current = busy
+  const { status, setStatus } = useBuiltinEngineStatus(() => busyRef.current)
 
   const patch = (p: Partial<BuiltinEngineTuning>) => {
     updateSettings({ builtinEngine: { ...tuning, ...p } })
@@ -52,8 +67,8 @@ export function BuiltinEngineSettings() {
     setApplied(false)
   }
 
-  // llama.cpp constraint: a quantized V-cache requires flash attention — the
-  // server refuses to start otherwise. Warn instead of silently breaking.
+  // llama.cpp constraint: a quantized V-cache requires flash attention, the
+  // server refuses to start otherwise. Say so instead of breaking silently.
   const vQuantNeedsFa = tuning.cacheTypeV !== 'f16' && tuning.flashAttn === 'off'
 
   const running = !!status?.running && !!status.model_path
@@ -80,23 +95,36 @@ export function BuiltinEngineSettings() {
 
   return (
     <div className="space-y-3">
-      <div className="flex items-start gap-2.5 p-2.5 rounded-lg border border-amber-200 dark:border-amber-500/20 bg-amber-50 dark:bg-amber-500/[0.08] text-amber-900 dark:text-amber-200">
-        <Zap size={14} className="mt-0.5 shrink-0" />
-        <div className="text-[0.65rem] leading-relaxed">
-          <strong>Expert settings for the built-in engine.</strong> The defaults match what LU shipped with and are right for most machines. Every start of the engine uses these values; a running engine needs Apply &amp; Restart below.
-        </div>
-      </div>
+      {/* Der klotzigste Fall im ganzen Baum: ein Satz, der nur erklaert, wofuer
+          die Werte hier gut sind, stand in einem gelben Rahmen mit gelber
+          Fuellung und fetter Ueberschrift und sah damit aus wie ein Absturz.
+          Jetzt eine Zeile im ruhigen Ton. Regel: lib/hinweis.ts. */}
+      <Hinweis icon={<Zap size={11} className="shrink-0 mt-[3px]" />}>
+        Expert settings for the LU Engine. The defaults match what LU shipped with and are right for most machines. Every start of the engine uses these values; a running engine needs Apply &amp; Restart below.
+      </Hinweis>
 
       {/* Live status */}
       <div className="text-[0.6rem] text-gray-500">
         {running ? (
           <>
             Engine running{loadedModel ? <> · <span className="text-gray-300">{loadedModel}</span></> : null}
-            {typeof status?.ctx === 'number' ? <> · ctx {status.ctx.toLocaleString()}</> : null}
+            {/* Roh, ohne Tausendertrennung, weil das Eingabefeld drei Zeilen
+                tiefer 8192 zeigt und der Hilfetext daneben von 16384 und 32768
+                spricht. Gegenprobe G2, 04.09.2026: dieselbe Zahl stand hier
+                als `ctx 8,192` und dort als `8192`, keine drei Zeilen
+                auseinander. `String` und nicht `toLocaleString`, sonst waere
+                der deutsche Punkt aus dem P2-Befund wieder da. */}
+            {typeof status?.ctx === 'number' ? <> · ctx {String(status.ctx)}</> : null}
           </>
         ) : (
-          'Engine not running — settings apply automatically on the next start.'
+          'Engine not running, settings apply automatically on the next start.'
         )}
+      </div>
+      {/* A13: which port the engine really holds. It starts its walk at 8127
+          and takes the next free one when that is held, and until now the only
+          place that said so was the log. */}
+      <div className="t-micro text-gray-500" data-testid="builtin-engine-port">
+        {enginePortLine(status, ENGINE_PORT)}
       </div>
 
       {/* Context length */}
@@ -157,10 +185,9 @@ export function BuiltinEngineSettings() {
         Memory vs. quality: q8_0 on K+V roughly halves KV-cache memory at near-identical output; q4_0 quarters it but can degrade long-context answers.
       </div>
       {vQuantNeedsFa && (
-        <div className="flex items-start gap-2 p-2 rounded border border-amber-500/25 bg-amber-500/[0.08] text-amber-300">
-          <AlertTriangle size={12} className="mt-0.5 shrink-0" />
-          <span className="text-[0.6rem] leading-relaxed">A quantized V cache requires flash attention — with it off the engine will refuse to start. Switch flash attention to auto or on.</span>
-        </div>
+        <Hinweis ton="fehler" icon={<AlertTriangle size={11} className="shrink-0 mt-[3px]" />}>
+          A quantized V cache requires flash attention. With it off the engine refuses to start, so switch flash attention to auto or on.
+        </Hinweis>
       )}
 
       {/* Threads */}
@@ -228,10 +255,9 @@ export function BuiltinEngineSettings() {
           </button>
         </div>
         {error && (
-          <div className="flex items-start gap-2 p-2 rounded border border-red-500/20 bg-red-500/[0.06] text-red-300">
-            <AlertTriangle size={12} className="mt-0.5 shrink-0" />
-            <span className="text-[0.6rem] leading-relaxed break-all">{error}</span>
-          </div>
+          <Hinweis ton="fehler" className="break-all" icon={<AlertTriangle size={11} className="shrink-0 mt-[3px]" />}>
+            {error}
+          </Hinweis>
         )}
       </div>
     </div>

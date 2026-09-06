@@ -60,15 +60,18 @@ describe('the notes table', () => {
   it('the shipping entry covers what actually shipped, not the state it was written in', () => {
     // The existence guard above has a blind spot: an entry written early stays
     // green while the branch moves on, so the shipping note is pinned to the
-    // headline features of the release it ships with. For 2.6.7 those are the
-    // honest installed verdict, the built-in engine start on a fresh install,
-    // the update that keeps chats with rotating backups, the system prompt
-    // order for strict templates, the AMD/ROCm and cu130 channels, the Debian
-    // file collision and the hosted history trim, and each anchor below names
-    // one of them, so a note that forgets them fails here.
-    // The late rounds added three more that the early entry could not know:
-    // the honest render phases (sampling), the ComfyUI that restarts itself,
-    // and the AMD detection on Windows after Microsoft removed wmic.
+    // headline features of the release it ships with. For 2.6.8 those are the
+    // effort control on reasoning models, GLM 5.3 in the cloud catalogue, the
+    // built-in engine renamed to LU Engine, the engine that steps off a taken 8127, the model that stays Installed, the
+    // ComfyUI installer that repairs its own environment, the model folder
+    // that is finally read, the CivitAI key field, the HIP SDK on Windows with
+    // its vram_total mix-up, the Linux packages that name libvulkan1, the
+    // Coding Agent working directory, Document Chat in Cloud mode, the prompt
+    // history that clears, the side panel that folds away, and the ComfyUI
+    // requirements.txt that is named when it cannot be used. Each anchor
+    // below names one of them, so a note that forgets one fails here.
+    // The house formula for hardware nobody here owns is pinned too: a claim
+    // we could not run on real hardware says so in those words.
     const shipping = JSON.parse(
       readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '../../../package.json'), 'utf8'),
     ).version as string
@@ -81,12 +84,75 @@ describe('the notes table', () => {
       .join('\n')
       .toLowerCase()
     for (const anchor of [
-      'installed', 'built-in engine', 'backups', 'system prompt',
-      'rocm', 'cu130', 'microphone', 'debian', 'trimmed',
-      'sampling', 'restarts itself', 'wmic',
+      'effort', 'glm 5.3', 'installed', 'lu engine', '8127',
+      'repair environment', 'model storage', 'civitai', 'hip sdk',
+      'vram_total', 'libvulkan1', 'working directory', 'document chat',
+      'prompt history', 'side panel', 'researched rather than proven', 'apple music', 'too big to scan',
+      'requirements.txt',
+      // A14 third review: "moves to a free port when 8127 is taken" reads on
+      // its own as if the engine then lives there. It does not, and the note
+      // has to say which one of the two it is.
+      'begins at 8127 again',
+      // A16 (A14-3a): the trip back to LM Studio is new visible behaviour, so
+      // it is in the note and pinned here.
+      'the way back is one click',
+      // A16 counter-check follow-up: the Ollama half of the same paragraph
+      // said the way back was "the provider card it always was". Ollama has a
+      // slot of its own and never leaves the picker, so the way back is a
+      // click, and sending a reader to Settings for it is a wrong instruction.
+      'never leave the picker',
+      // Discord-Ticket 007 (falcon bob, 01.09.): der Startfehler schickte ihn
+      // in eine Reparatur, die den Fehler gar nicht beheben kann. Beide
+      // Haelften gehoeren in die Notiz, die Ursache UND dass die Reparatur
+      // hier nicht mehr von selbst anlaeuft.
+      'the folder repair rebuilds',
+      'a repair that cannot fix it',
+      // Discord-Ticket 003 (anglefire, 03.09.): sein Windows-Benutzername
+      // steht ausserhalb des englischen Alphabets. Die Zahl bleibt mit
+      // Bezugspunkt, eine von acht, sonst sagt sie nichts.
+      'one step out of eight',
+      // Reddit (zenmasterdredd, 02.09.): AMD-Karte gefunden, Groesse nicht.
+      // Der Grund gehoert dazu, sonst liest es sich wie eine Marotte.
+      'without rocm installed',
+      'fixed carve-out',
+      // AMD-Messung auf echter Hardware (MI325X, 03.09.): aus "ungeprueft"
+      // wird "gemessen", und die zwei Funde, die nur echte Hardware liefert.
+      'measured on a rented amd instinct card',
+      'processing accelerator rather than as graphics',
+      'its gfx target was thrown away',
+      // Und die Zeile im Ausgabefenster, die die falsche Hardware nannte.
+      'no nvidia driver detected',
+      'reporting no usable card',
+      // Persona-Lauf 03.09.: deutsche Alltagssaetze erreichten die Werkzeuge
+      // nicht. Beide Faelle sind benannt, weil ein Kunde nur den Effekt sieht.
+      'schau im netz nach',
     ]) {
       expect(prose, `${shipping}: nothing about "${anchor}"`).toContain(anchor)
     }
+    // And the wrong instruction itself, named so it cannot quietly return.
+    expect(prose, 'the note sends Ollama users to the provider card again')
+      .not.toContain('the way back to ollama is the provider card')
+  })
+
+  it('says nothing in the shipping note twice, word for word', () => {
+    // A14 third review: "The built-in engine is called LU Engine from now on."
+    // stood in `lines` and again in `details.Local`, identical to the letter.
+    // Two copies of one sentence drift apart at the next edit, and until they
+    // do, the reader meets the same statement twice in one popup. The summary
+    // lines are a summary; the details are the detail.
+    const shipping = JSON.parse(
+      readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '../../../package.json'), 'utf8'),
+    ).version as string
+    const note = releaseNoteFor(shipping)
+    // Long sentences only: a short one can legitimately repeat.
+    const sentences = (text: string) =>
+      text.split(/(?<=\.)\s+/).map((x) => x.trim().toLowerCase()).filter((x) => x.length > 30)
+    const inLines = new Set((note?.lines ?? []).flatMap(sentences))
+    const repeated = (note?.details ?? [])
+      .flatMap((s) => s.items)
+      .flatMap(sentences)
+      .filter((x) => inLines.has(x))
+    expect(repeated, 'said word for word in both places').toEqual([])
   })
 
   it('every file that carries the version carries the same one', () => {
@@ -119,9 +185,10 @@ describe('the notes table', () => {
   it('the modal renders the expander and the sections', () => {
     // Source guard, same pattern as the settings guards: the sheet must offer
     // Show all changes and map note.details, or the table above is dead data.
-    const { readFileSync } = require('node:fs')
-    const { resolve } = require('node:path')
-    const src = readFileSync(resolve(__dirname, '../../components/release/ReleaseNotesModal.tsx'), 'utf8')
+    const src = readFileSync(
+      resolve(dirname(fileURLToPath(import.meta.url)), '../../components/release/ReleaseNotesModal.tsx'),
+      'utf8',
+    )
     expect(src).toContain('Show all changes')
     expect(src).toContain('note.details.map')
     expect(src).toContain('section.items.map')

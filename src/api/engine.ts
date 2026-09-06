@@ -11,13 +11,15 @@
  * `backendCall` maps camelCase args → snake_case Rust params (Tauri).
  */
 
-import { backendCall } from './backend'
+import { backendCall, isLinux } from './backend'
+import { syncBuiltinEnginePort } from './builtin-ensure'
 import { trackEngineSwap } from './engine-swap-gate'
-import { prefixModelName } from './providers'
+import { prefixModelName } from './providers/model-name'
 import { useProviderStore } from '../stores/providerStore'
 import { useSettingsStore } from '../stores/settingsStore'
 import type { CloudModel } from '../types/models'
 import type { BuiltinEngineTuning } from '../types/settings'
+import { LU_ENGINE_NAME } from '../lib/engine-name'
 
 /** The user's Built-in Engine expert tuning (settings-backed). Injected into
  * every start/swap below, so Onboarding, Discover, the model picker and the
@@ -48,6 +50,17 @@ export interface BundledModel {
   vision?: boolean
 }
 
+/** What a start / swap answers. `port` is the port the engine ACTUALLY came
+ *  up on: since GH #118 the Rust side may take the next free one when the
+ *  preferred port is held, and every caller has to follow it there. */
+export interface EngineStartResult {
+  status: string
+  port: number
+  model_path: string
+  ctx?: number | null
+  retried?: boolean
+}
+
 export interface EngineStatus {
   running: boolean
   healthy: boolean
@@ -61,6 +74,11 @@ export interface EngineStatus {
 /** Loopback base URL of the managed embeddings server (P5). Mirrors the Rust
  * `DEFAULT_EMBED_PORT` (8128). Document-Chat/RAG POSTs `/v1/embeddings` here
  * when the built-in engine is active, instead of Ollama's `/api/embed`. */
+/** Preferred loopback port of the managed chat engine. Mirrors the Rust
+ *  `DEFAULT_ENGINE_PORT`. Since GH #118 it is a preference, not a promise: the
+ *  engine takes the next free port when this one is held. */
+export const ENGINE_PORT = 8127
+
 export const EMBED_PORT = 8128
 export function embedBaseUrl(): string {
   return `http://127.0.0.1:${EMBED_PORT}/v1`
@@ -97,31 +115,66 @@ export function isManagedBuiltinActive(): boolean {
  * Registered with the swap gate so a send that arrives while the engine is
  * still coming up waits for it instead of hitting the dead port (counter-check
  * round 2, 2026-08-29). */
-export function startBundledEngine(modelPath: string, tuning?: BuiltinEngineTuning) {
-  return trackEngineSwap(
-    backendCall('start_bundled_engine', { modelPath, tuning: tuning ?? tuningFromSettings() }),
+export async function startBundledEngine(modelPath: string, tuning?: BuiltinEngineTuning) {
+  const res = await trackEngineSwap(
+    backendCall<EngineStartResult>('start_bundled_engine', {
+      modelPath,
+      tuning: tuning ?? tuningFromSettings(),
+    }),
   )
+  // The engine may have landed on another port (GH #118). The slot that talks
+  // to it has to be told, or the very next request is refused by a port
+  // nobody is listening on, which is the ticket's own symptom.
+  syncBuiltinEnginePort(res?.port)
+  return res
 }
 
 /** Stop the managed engine child if one is running. */
+/** Delete an LU Engine row's file(s): the GGUF, or every part of a split.
+ *  The backend refuses the loaded model, so the caller stops the engine first
+ *  when the row is the active one. */
+export async function deleteBundledModel(path: string): Promise<{ deleted: number; bytes: number }> {
+  const res = await backendCall<{ deleted?: number; bytes?: number }>('delete_bundled_model', {
+    path,
+    extraDirs: customModelDirs(),
+  })
+  return { deleted: res?.deleted ?? 0, bytes: res?.bytes ?? 0 }
+}
+
 export function stopBundledEngine() {
   return backendCall('stop_bundled_engine')
 }
 
 /** Engine health + which model is loaded on which port. */
-export function bundledEngineStatus() {
-  return backendCall<EngineStatus>('bundled_engine_status')
+export async function bundledEngineStatus() {
+  const status = await backendCall<EngineStatus>('bundled_engine_status')
+  // Running: the port the engine really holds. Stopped: back to the preferred
+  // port, because the next start begins its walk at 8127 and a fallback port
+  // must not outlive the conflict that caused it. The slot is persisted, so
+  // without the reset a one-off collision would keep the app on 8129 for good
+  // and the Settings test would read "failed" on a free 8127 (review S5).
+  syncBuiltinEnginePort(status?.running ? status.port : ENGINE_PORT)
+  return status
 }
 
-/** Swap the loaded model (stop → start on the same port).
+/** Swap the loaded model (stop, then start again).
+ *
+ * The port is NOT preserved. A15: handing the current port back in turned a
+ * one-off collision into a permanent move, so the Rust side picks the port
+ * fresh on every swap, starting at ENGINE_PORT.
  *
  * This is the call the model picker makes on every activation, and the one the
  * counter-check raced: two switches in a row, then a send into the restart gap.
  * Registering it here is what lets the send path wait it out. */
-export function swapBundledModel(modelPath: string, tuning?: BuiltinEngineTuning) {
-  return trackEngineSwap(
-    backendCall('swap_bundled_model', { modelPath, tuning: tuning ?? tuningFromSettings() }),
+export async function swapBundledModel(modelPath: string, tuning?: BuiltinEngineTuning) {
+  const res = await trackEngineSwap(
+    backendCall<EngineStartResult>('swap_bundled_model', {
+      modelPath,
+      tuning: tuning ?? tuningFromSettings(),
+    }),
   )
+  syncBuiltinEnginePort(res?.port)
+  return res
 }
 
 /** Start the built-in embeddings server (P5) with a specific embedding GGUF.
@@ -203,10 +256,87 @@ export async function bundledEmbedLaneReady(): Promise<boolean> {
   }
 }
 
-/** List downloaded GGUFs in the app models dir. Refreshes the name→path map. */
+/**
+ * Every folder the GGUF scan walks: the app models dir (Rust adds that one)
+ * plus the folder the user named under Settings → Model Storage.
+ *
+ * GH #122 (zrmdsxa, 2026-08-28): that setting was a download TARGET and
+ * nothing else. A GGUF already sitting in it was never looked at, so the
+ * Models tab stayed empty next to a folder full of models. Empty setting →
+ * empty list, which is exactly the shipped single-folder scan.
+ */
+export function customModelDirs(): string[] {
+  const dir = useSettingsStore.getState().settings.hfDownloadPathOverride?.trim() || ''
+  return dir ? [dir] : []
+}
+
+/** How one scanned folder fared. `truncated` is a real answer: the walk has a
+ *  wall-clock deadline and an entry budget per folder, because `fetchModels`
+ *  awaits it and four levels below a home directory is tens of thousands of
+ *  directory reads. A partial list within a few seconds beats a complete one
+ *  nobody waited for, as long as the panel says it is partial. */
+export interface ScannedDir {
+  path: string
+  /** `denied` is its own answer, not a shade of `unreachable`: the folder is
+   *  there and this account may not read it, so telling the user to check the
+   *  cable sends them after a fault that does not exist (P3, 7.4). */
+  status: 'ok' | 'truncated' | 'unreachable' | 'denied' | 'unusable'
+}
+
+// The folders the LAST listing walked, app dir first. Kept here rather than
+// returned, so no call site has to change to ignore it; Model Storage is the
+// one surface that asks.
+let lastDirs: ScannedDir[] = []
+
+/** What the last `listBundledModels()` walked, and how each folder fared. */
+export function lastScanDirs(): ScannedDir[] {
+  return lastDirs
+}
+
+/** Same folder, written two ways. Windows arrives with backslashes and any
+ *  case, and `C:\\` and `c:/` are one folder; the trailing separator is noise
+ *  on every platform.
+ *
+ *  The case fold follows Rust's `bundled_scan_dirs`, which folds on Windows
+ *  and macOS and NOT on Linux: `/mnt/Models` and `/mnt/models` really are two
+ *  folders on ext4, and folding them here would let this answer a question
+ *  about one folder with the verdict about the other. */
+function samePath(a: string, b: string): boolean {
+  // The mirror of Rust's `!cfg!(target_os = "linux")` in bundled_scan_dirs,
+  // spelled the same way round so the two cannot drift apart.
+  const fold = !isLinux()
+  const key = (p: string) => {
+    const normalised = String(p ?? '').replace(/\\/g, '/').replace(/\/+$/, '')
+    return fold ? normalised.toLowerCase() : normalised
+  }
+  return key(a) === key(b)
+}
+
+/** The user's own folder from the last listing, or null when none was set or
+ *  when the answer says nothing about it.
+ *
+ *  Matched by path rather than by position: the app dir is row 0 today, but a
+ *  row read off an index is a row that silently reports the wrong folder the
+ *  moment that stops being true. A folder that IS the app folder under another
+ *  spelling is folded away by Rust, so the match then lands on row 0, which is
+ *  the same folder and the right verdict for it. */
+export function lastCustomScanDir(): ScannedDir | null {
+  const wanted = customModelDirs()[0]
+  if (!wanted) return null
+  return lastDirs.find((d) => samePath(d.path, wanted)) ?? null
+}
+
+/** List downloaded GGUFs in the app models dir and in the user's own model
+ *  folder. Refreshes the name→path map. */
 export async function listBundledModels(): Promise<BundledModel[]> {
-  const res = await backendCall<{ dir: string; models: BundledModel[] }>('list_bundled_models')
+  const res = await backendCall<{ dir: string; dirs?: ScannedDir[]; models: BundledModel[] }>(
+    'list_bundled_models',
+    { extraDirs: customModelDirs() },
+  )
   const models = res?.models ?? []
+  // An older backend answers without `dirs`; an empty list then says "nothing
+  // known about the folders", which is the truth and renders no line.
+  lastDirs = Array.isArray(res?.dirs) ? res.dirs : []
   pathByName.clear()
   ctxTrainByName.clear()
   for (const m of models) {
@@ -250,7 +380,12 @@ export function bundledToAIModels(models: BundledModel[]): CloudModel[] {
     size: m.size,
     type: 'text' as const,
     provider: 'openai' as const,
-    providerName: 'Built-in Engine',
+    providerName: LU_ENGINE_NAME,
+    // Carried through since 2.6.8 (A14): the row IS a file, and the Installed
+    // list needs the path to tell "the same GGUF, seen twice" from "two
+    // downloads of the same model". A file under LM Studio's own store is the
+    // case that made this necessary.
+    path: m.path,
     // The projector answer from disk, carried as the app-wide capability flag
     // so the composer and the agent loop stop guessing from the model name.
     // Deliberately left absent (not false) when the backend did not report it,
@@ -259,10 +394,35 @@ export function bundledToAIModels(models: BundledModel[]): CloudModel[] {
   }))
 }
 
+/** Activations already on their way, keyed by GGUF path plus tuning, so two
+ *  callers asking for the SAME model share one engine start. */
+const activationsInFlight = new Map<string, Promise<boolean>>()
+
 /**
  * Activate a built-in model by its picker id (`openai::<name>` or bare `<name>`).
  * Resolves the GGUF path from the last listBundledModels() and swaps the engine.
  * No-op if the path is unknown (list not yet fetched).
+ *
+ * TWO CALLERS, ONE ENGINE (measured 2026-09-03, Windows release build).
+ * Every activation happens twice. `useModels.activateModel` calls
+ * `setActiveModel(name)`, and the store chokepoint (`stores/modelStore.ts`)
+ * fires an activation of its own inside that update; the hook then calls this
+ * function again in the same tick. The picker (`ModelSelector`) does the same
+ * in the other order. The store's comment says Rust's argv idempotence turns
+ * the second call into a no-op, and for a model that LOADS that is true.
+ *
+ * For a model that does not load it is false, and expensively so. There is no
+ * running engine to compare argv against, so the second command runs the whole
+ * routine again: Rust tries once, retries once, and does it all a second time.
+ * One click on a broken GGUF spawned FOUR llama-server processes (measured:
+ * 4 spawns, in two pairs 5.7 s apart, all with identical argv), while the
+ * message on screen said "It was tried twice". Twice the wait, twice the VRAM
+ * churn, and a sentence that is off by a factor of two.
+ *
+ * So the coalescing lives here, at the one door both callers come through,
+ * rather than in either of them. Concurrent callers share the promise, failure
+ * included. A LATER click is a fresh call, because the entry is dropped as soon
+ * as the run settles, and a user retrying a failed start must really retry.
  */
 export async function activateBuiltinModel(nameOrPrefixed: string, tuning?: BuiltinEngineTuning): Promise<boolean> {
   const name = nameOrPrefixed.includes('::') ? nameOrPrefixed.split('::')[1] : nameOrPrefixed
@@ -274,6 +434,25 @@ export async function activateBuiltinModel(nameOrPrefixed: string, tuning?: Buil
     path = pathByName.get(name)
   }
   if (!path) return false
-  await swapBundledModel(path, tuning)
-  return true
+  // The tuning is part of the key: two callers wanting the same file with
+  // different settings want two different engines, and the second must not be
+  // handed the first one's promise.
+  const key = `${path}\u0000${JSON.stringify(tuning ?? null)}`
+  const laufend = activationsInFlight.get(key)
+  if (laufend) return laufend
+  const lauf = (async () => {
+    await swapBundledModel(path as string, tuning)
+    return true
+  })()
+  activationsInFlight.set(key, lauf)
+  try {
+    return await lauf
+  } finally {
+    if (activationsInFlight.get(key) === lauf) activationsInFlight.delete(key)
+  }
+}
+
+/** Test-only: forget every in-flight activation. */
+export function __resetActivationsForTests(): void {
+  activationsInFlight.clear()
 }

@@ -1,0 +1,14 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "onboarding",
+  "description": "Capability of the first-launch window (label `onboarding`, built in src/onboarding_window.rs). Deliberately NOT the main-window capability: the wizard needs to move itself, minimise, close, listen for events and open a vendor's download page in the browser — nothing that spawns a process. The `shell:allow-spawn` entries of default.json exist for external MCP servers, which the wizard never starts; a window that runs before the user has set anything up gets the smallest surface that carries it.",
+  "windows": ["onboarding"],
+  "permissions": [
+    "core:default",
+    "core:window:allow-minimize",
+    "core:window:allow-close",
+    "core:window:allow-start-dragging",
+    "core:webview:default",
+    "shell:allow-open"
+  ]
+}

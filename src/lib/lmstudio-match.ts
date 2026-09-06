@@ -18,6 +18,8 @@
 // missing one, and would otherwise wrongly mark every quant sibling of a model
 // (e.g. all 7 "Qwen 3.6 27B" rows) as installed from a single download.
 
+import { isLuEngineName } from './engine-name'
+
 export interface InstalledModelLike {
   provider?: string
   providerName?: string
@@ -64,20 +66,73 @@ export function modelIdentity(s: string): string {
 }
 
 /** An LM Studio entry in the installed-model list. */
-function isLmStudioEntry(m: InstalledModelLike): boolean {
+export function isLmStudioEntry(m: InstalledModelLike): boolean {
   if (m.provider !== 'openai') return false
   const pname = (m.providerName || '').toLowerCase()
   return pname.includes('lm studio') || pname.includes('lmstudio')
 }
 
 /**
- * A built-in-engine entry. `bundledToAIModels` stamps every downloaded GGUF
- * with `provider: 'openai'` and `providerName: 'Built-in Engine'`, and its
- * `model` is the file stem, so the same filename matcher fits it exactly.
+ * Gehoert diese Zeile dem lokalen Backend namens `name`.
+ *
+ * Jedes Backend, das das OpenAI-Protokoll spricht, traegt `provider: 'openai'`
+ * — das ist der eine Steckplatz, den sie sich teilen. Auseinander halten kann
+ * sie nur der Anzeigename, und der ist derselbe, den die Karte in den
+ * Einstellungen zeigt. Unsere eigene Engine ist nie gemeint: sie hat ihre
+ * eigene Erkennung eine Zeile weiter unten, und wer sie hier mitzaehlt, haelt
+ * das Laufende fuer das Wartende.
  */
-function isBuiltinEntry(m: InstalledModelLike): boolean {
-  if (m.provider !== 'openai') return false
-  return (m.providerName || '').toLowerCase().includes('built-in engine')
+export function isRowOfBackend(
+  m: InstalledModelLike | null | undefined,
+  name: string | null | undefined,
+): boolean {
+  if (!m || !name || m.provider !== 'openai') return false
+  if (isBuiltinEngineEntry(m)) return false
+  return (m.providerName || '').toLowerCase() === name.toLowerCase()
+}
+
+/**
+ * An LU Engine entry. `bundledToAIModels` stamps every downloaded GGUF with
+ * `provider: 'openai'` and `providerName: 'LU Engine'` ('Built-in Engine'
+ * before 2.6.8, still on disk in older chats), and its `model` is the file
+ * stem, so the same filename matcher fits it exactly.
+ */
+export function isBuiltinEngineEntry(m: InstalledModelLike | null | undefined): boolean {
+  if (!m || m.provider !== 'openai') return false
+  return isLuEngineName(m.providerName)
+}
+
+/**
+ * Are these two ids the same FILE, not merely the same model.
+ *
+ * A14 review: `matchesLmStudioInstalled` is the wrong question for
+ * de-duplication and the difference is a whole quant. That matcher serves the
+ * Discover badge, where a catalogue row without a quant in its filename means
+ * "any quant of this counts as installed", so rule (2) returns a match for a
+ * quant-less name against ANY quant on disk. Reused for de-duplication it
+ * reads as: `Qwen2.5-0.5B-Instruct.gguf` in the LU Engine folder is the same
+ * thing as `qwen2.5-0.5b-instruct@q4_k_m` in LM Studio. It is not. It is a
+ * different file, a different download and a different answer quality, and
+ * hiding it would hide a model the user has.
+ *
+ * So this one never guesses across a missing quant:
+ *   (a) the same normalised basename, which already carries the quant, or
+ *   (b) the same model identity AND both sides naming the same quant.
+ * A name with no quant matches only under (a).
+ */
+export function isSameGgufFile(a: string, b: string): boolean {
+  const baseA = normalBase(a)
+  const baseB = normalBase(b)
+  if (!baseA || !baseB) return false
+  if (baseA === baseB) return true
+  const idA = modelIdentity(a)
+  const idB = modelIdentity(b)
+  // The length floor is the one `findInstalled` uses: a two-character identity
+  // collides with half the catalogue.
+  if (!idA || idA.length < 5 || idA !== idB) return false
+  const quantA = extractQuant(a)
+  const quantB = extractQuant(b)
+  return !!quantA && !!quantB && quantA === quantB
 }
 
 /**
@@ -90,7 +145,7 @@ export function matchesLmStudioInstalled(
   filename: string,
   installed: InstalledModelLike[],
 ): boolean {
-  return matchesInstalled(filename, installed.filter(isLmStudioEntry))
+  return !!findInstalled(filename, installed.filter(isLmStudioEntry))
 }
 
 /**
@@ -104,16 +159,37 @@ export function matchesLmStudioInstalled(
  * offered "Get" for a file that was already on disk. `list_bundled_models`
  * reads that disk on every model refresh, so the evidence was there the whole
  * time, just never asked.
+ *
+ * The boolean face of `findLocalGgufInstalled`. The app itself asks the entry
+ * version (lib/discover-installed.ts) because it needs the picker id, and the
+ * regression suite for this matcher's quant precision asks this one.
  */
 export function matchesLocalGgufInstalled(
   filename: string,
   installed: InstalledModelLike[],
 ): boolean {
-  return matchesInstalled(filename, installed.filter((m) => isLmStudioEntry(m) || isBuiltinEntry(m)))
+  return !!findLocalGgufInstalled(filename, installed)
 }
 
-function matchesInstalled(filename: string, lms: InstalledModelLike[]): boolean {
-  if (!filename) return false
+/**
+ * The same question, answering WHICH entry matched instead of just whether one
+ * did.
+ *
+ * GH #118, the dead-button half: a tile that knows a model is installed but not
+ * which installed model it is has nothing to offer beyond a badge. The picker
+ * id lives on the entry, so handing the entry back is what lets the tile load
+ * the model into the chat instead of showing an inert "Installed" pill next to
+ * an engine that is not running.
+ */
+export function findLocalGgufInstalled(
+  filename: string,
+  installed: InstalledModelLike[],
+): InstalledModelLike | null {
+  return findInstalled(filename, installed.filter((m) => isLmStudioEntry(m) || isBuiltinEngineEntry(m)))
+}
+
+function findInstalled(filename: string, lms: InstalledModelLike[]): InstalledModelLike | null {
+  if (!filename) return null
   const wantBase = normalBase(filename)
   const wantId = modelIdentity(filename)
   const wantQuant = extractQuant(filename)
@@ -127,18 +203,18 @@ function matchesInstalled(filename: string, lms: InstalledModelLike[]): boolean 
       const cBase = c.replace(/\.gguf$/, '').replace(SHARD_TAIL, '')
       // (1) exact / path-suffix — full basename ids, already carry the quant
       if (cBase === wantBase || cBase.endsWith(`/${wantBase}`) || cBase.endsWith(`\\${wantBase}`)) {
-        return true
+        return m
       }
       // (2) normalised identity + quant agreement
       const cId = modelIdentity(c)
       if (cId && wantId && cId.length >= 5 && cId === wantId) {
-        if (!wantQuant) return true // generic Discover entry (no quant) → match
+        if (!wantQuant) return m // generic Discover entry (no quant) → match
         const cQuant = extractQuant(c)
-        if (cQuant && cQuant === wantQuant) return true // exact quant present
+        if (cQuant && cQuant === wantQuant) return m // exact quant present
         // quant-specific Discover row but candidate quant missing/different →
         // do NOT light (avoids quant-sibling false positives).
       }
     }
   }
-  return false
+  return null
 }

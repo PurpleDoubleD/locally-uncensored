@@ -1,4 +1,5 @@
 import { motion } from 'framer-motion'
+import { MOTION_S } from './motion'
 
 interface Props {
   progress: number // 0-100
@@ -15,7 +16,7 @@ export function ProgressBar({ progress, label }: Props) {
           style={{}}
           initial={{ width: 0 }}
           animate={{ width: `${Math.min(progress, 100)}%` }}
-          transition={{ duration: 0.3 }}
+          transition={{ duration: MOTION_S.slow }}
         />
       </div>
       <p className="text-xs text-gray-500 mt-1 text-right">{Math.round(progress)}%</p>

@@ -66,8 +66,8 @@ fn fixed_size(ty: u32) -> Option<u64> {
     match ty {
         0 | 1 | 7 => Some(1), // u8 / i8 / bool
         2 | 3 => Some(2),     // u16 / i16
-        4 | 5 | 6 => Some(4), // u32 / i32 / f32
-        10 | 11 | 12 => Some(8), // u64 / i64 / f64
+        4..=6 => Some(4), // u32 / i32 / f32
+        10..=12 => Some(8), // u64 / i64 / f64
         _ => None,            // 8 = string, 9 = array, unknown
     }
 }
@@ -219,54 +219,162 @@ mod tests {
         }
     }
 
-    fn tmp(name: &str) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join("lu-gguf-tests");
-        std::fs::create_dir_all(&dir).unwrap();
-        dir.join(name)
+    /// A directory these fixtures own for the length of one test.
+    ///
+    /// It used to be the FIXED `<temp>/lu-gguf-tests/`, with the fixture names
+    /// fixed too (`ok.gguf`, `reversed.gguf`, …). Every concurrent copy of this
+    /// test binary therefore wrote the same files, and `W::write_to` opens with
+    /// `File::create` — which TRUNCATES. One copy truncating `reversed.gguf`
+    /// while another was parsing it is a header that ends mid-field, and
+    /// `context_length` correctly answers `None`.
+    ///
+    /// Measured on 01.09.2026 under three concurrent copies of the whole suite,
+    /// ten rounds: `context_key_before_architecture_still_resolves` failed 2 of
+    /// 30 and `reads_context_length_behind_skipped_values` 1 of 30, both with
+    /// `left: None`. Nothing about the parser was wrong — the file under it was
+    /// being rewritten mid-read.
+    ///
+    /// `test_dir` carries the process id and the thread id in the name and
+    /// sweeps itself up on `Drop`. The returned guard has to stay in scope: the
+    /// directory is removed when it is dropped.
+    fn fixtures(tag: &str) -> crate::os_paths::TestDir {
+        crate::os_paths::test_dir(&format!("gguf-{tag}"))
     }
 
     #[test]
     fn reads_context_length_behind_skipped_values() {
+        let dir = fixtures("skipped");
         let mut w = W::new(4);
         w.str_field("general.name", "unit test model");
         w.arr_str_field("tokenizer.ggml.tokens", &["a", "b", "c"]);
         w.str_field("general.architecture", "qwen2");
         w.u32_field("qwen2.context_length", 32768);
-        let p = tmp("ok.gguf");
+        let p = dir.join("ok.gguf");
         w.write_to(&p);
         assert_eq!(context_length(p.to_str().unwrap()), Some(32768));
     }
 
     #[test]
     fn context_key_before_architecture_still_resolves() {
+        let dir = fixtures("reversed");
         let mut w = W::new(2);
         w.u32_field("llama.context_length", 8192);
         w.str_field("general.architecture", "llama");
-        let p = tmp("reversed.gguf");
+        let p = dir.join("reversed.gguf");
         w.write_to(&p);
         assert_eq!(context_length(p.to_str().unwrap()), Some(8192));
     }
 
     #[test]
     fn garbage_missing_and_truncated_files_are_none() {
-        let p = tmp("garbage.gguf");
+        let dir = fixtures("garbage");
+        let p = dir.join("garbage.gguf");
         std::fs::write(&p, b"MZ\x90definitely not a gguf").unwrap();
         assert_eq!(context_length(p.to_str().unwrap()), None);
         assert_eq!(context_length("/nonexistent/nope.gguf"), None);
 
         // Valid magic, then the file just ends mid-header.
-        let t = tmp("truncated.gguf");
+        let t = dir.join("truncated.gguf");
         std::fs::write(&t, b"GGUF\x03\x00\x00\x00").unwrap();
         assert_eq!(context_length(t.to_str().unwrap()), None);
     }
 
+    // ── The one check in this file against a GGUF this module did not write ──
+    //
+    // Everything above parses bytes produced by `W`, the writer twenty lines
+    // up. That cannot catch the failure both halves share a wrong assumption
+    // about; only a file llama.cpp produced can. So this probe is worth
+    // keeping — but the way it was written, it was worth nothing:
+    //
+    //     let home = std::env::var("HOME").unwrap_or_default();
+    //     let p = format!("{home}/Library/Application Support/Locally \
+    //                      Uncensored/models/Qwen2.5-0.5B-Instruct-Q8_0.gguf");
+    //     if Path::new(&p).exists() { assert_eq!(...) }
+    //
+    // Two things were wrong with that.
+    //
+    // 1. It built the path by hand, so it was macOS-only and it named the
+    //    directory of the PRODUCTION app directly instead of going through
+    //    `os_paths`, which is the single place that knows the app directory
+    //    and, on this branch, its isolation suffix. Reading is not a violation
+    //    — but a hand-built copy of a path is how a WRITE ends up in the
+    //    user's real data later.
+    // 2. It turned itself off in silence. On every machine without that exact
+    //    file — CI, Windows, Linux, a fresh checkout — it passed while
+    //    asserting nothing, and said so nowhere. A test that quietly checks
+    //    nothing is worse than a red one: the red one gets fixed.
+    //
+    // What replaces it: the path build is pinned by a test that always runs
+    // and always asserts, and the file-dependent half announces its skip on a
+    // stream the test harness does not capture.
+
+    /// The model the built-in engine ships with. Its trained context length is
+    /// a property of the file, not of this repo.
+    const REAL_MODEL_FILE: &str = "Qwen2.5-0.5B-Instruct-Q8_0.gguf";
+    const REAL_MODEL_CONTEXT: u32 = 32768;
+
+    /// Wo ein echtes GGUF liegt: das Modellverzeichnis der eingebauten Engine,
+    /// direkt aus `os_paths`. Bewusst kein hier zusammengebauter Pfad — ein
+    /// von Hand gebauter Pfad ist genau der Weg, auf dem ein Testlauf spaeter
+    /// in die echten Daten des Nutzers schreibt.
+    fn real_gguf_path() -> std::path::PathBuf {
+        crate::os_paths::builtin_models_dir().join(REAL_MODEL_FILE)
+    }
+
+    /// Laeuft immer, prueft immer: die Sonde schaut dorthin, wo `os_paths` es
+    /// sagt, und nicht auf einen hier zusammengesetzten Namen.
     #[test]
-    fn real_bundled_gguf_if_present() {
-        // Best-effort against the dev machine's local test model; absent in CI.
-        let home = std::env::var("HOME").unwrap_or_default();
-        let p = format!("{home}/Library/Application Support/Locally Uncensored/models/Qwen2.5-0.5B-Instruct-Q8_0.gguf");
-        if std::path::Path::new(&p).exists() {
-            assert_eq!(super::context_length(&p), Some(32768));
+    fn the_real_gguf_probe_goes_through_the_central_path_builder() {
+        use crate::app_identity::APP_DISPLAY_DIR;
+
+        let pfad = real_gguf_path();
+        assert_eq!(
+            pfad,
+            crate::os_paths::builtin_models_dir().join(REAL_MODEL_FILE)
+        );
+        assert!(pfad.ends_with(REAL_MODEL_FILE));
+
+        // Und der Pfad steht wirklich unter dem Verzeichnis dieser App, nicht
+        // unter irgendeinem: <data_dir>/<APP_DISPLAY_DIR>/models/<datei>.
+        let app_dir = pfad
+            .parent()
+            .and_then(|p| p.parent())
+            .and_then(|p| p.file_name())
+            .expect("kein App-Verzeichnis im gebauten Pfad");
+        assert_eq!(app_dir, APP_DISPLAY_DIR);
+    }
+
+    /// Parses a real GGUF when one is on this machine — and says out loud when
+    /// there is none, instead of passing in silence.
+    ///
+    /// The skip notice is written straight to `stderr` rather than through
+    /// `eprintln!`: libtest's capture swaps the sink the print macros use, so
+    /// a macro line from a PASSING test is swallowed, while a direct write to
+    /// the handle reaches the terminal. Verified on this machine, 2026-09-01.
+    #[test]
+    fn a_real_gguf_parses_or_the_run_says_why_it_could_not() {
+        let pfad = real_gguf_path();
+        match pfad.exists() {
+            true => {
+                let path = &pfad;
+                assert_eq!(
+                    context_length(path.to_str().expect("non-UTF-8 model path")),
+                    Some(REAL_MODEL_CONTEXT),
+                    "parsing the real model at {} gave the wrong context length",
+                    path.display()
+                );
+            }
+            false => {
+                use std::io::Write;
+                let _ = writeln!(
+                    std::io::stderr(),
+                    "\n  SKIPPED gguf::a_real_gguf_parses_or_the_run_says_why_it_could_not\n  \
+                     reason: no real {REAL_MODEL_FILE} on this machine, so the parser was \
+                     not checked against a file llama.cpp produced.\n  looked at:\n    {}\n  \
+                     to run it for real, download the LU Engine's model once.\n",
+                    pfad.display()
+                );
+            }
         }
     }
 }

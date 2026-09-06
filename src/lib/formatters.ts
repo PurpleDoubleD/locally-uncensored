@@ -1,3 +1,22 @@
+/**
+ * Eine Zahl mit Tausendertrennern fuer die Oberflaeche.
+ *
+ * Mit fester Sprache, nicht mit der des Betriebssystems. Persona P2 hat am
+ * 04.09.2026 auf der deutschen Windows-Box gemessen, was `toLocaleString()`
+ * ohne Sprache anrichtet: die Statuszeile der Engine lautete
+ * "Engine running · Phi-4-mini-instruct-Q4_K_M · ctx 8.192". Gemeint sind
+ * 8192 Token, in einer englischen Oberflaeche liest sich "8.192" als eine
+ * Zahl kleiner als neun. Dieselbe Zahl stand zwei Zeilen tiefer im
+ * Eingabefeld richtig als 8192. Auch "9.766 downloads" in den
+ * CivitAI-Treffern war betroffen.
+ *
+ * Die Oberflaeche dieser Anwendung ist Englisch, also sind es ihre Zahlen
+ * auch. Hausregel: keine lokalisierten Systemtexte durchreichen.
+ */
+export function formatCount(n: number): string {
+  return n.toLocaleString('en-US')
+}
+
 export function formatBytes(bytes: number): string {
   if (bytes === 0) return '0 B'
   const k = 1024
@@ -43,4 +62,38 @@ export function formatDate(timestamp: number): string {
 export function truncate(str: string, maxLength: number): string {
   if (str.length <= maxLength) return str
   return str.slice(0, maxLength) + '...'
+}
+
+/**
+ * Ein Kontextfenster, in EINER Schreibweise.
+ *
+ * Gegenprobe G2, 04.09.2026: derselbe Wert 8192 stand an fuenf Stellen in vier
+ * Schreibweisen da, zwei davon auf demselben Bildschirm. Im Chat war es
+ * gleichzeitig `1.3k/8.2k` auf dem Knopf und `Auto · 8K` in der Klapplade
+ * darunter, also 8192 geteilt durch 1000 neben 8192 geteilt durch 1024. "Wer
+ * den Unterschied las, suchte einen, den es nicht gibt", stand schon in
+ * ContextDropdown, aber die beiden Rechnungen standen weiter nebeneinander.
+ *
+ * Es gewinnt die Kibi-Rechnung, weil die Stufen des Reglers echte
+ * Zweierpotenzen sind: 4096, 8192, 16384 heissen 4K, 8K, 16K und nichts
+ * anderes. Ein krummer Zwischenwert, etwa der Verbrauch, bekommt eine
+ * Nachkommastelle, damit er nicht auf die naechste Stufe gerundet aussieht.
+ */
+export function formatContextWindow(n: number): string {
+  if (n <= 0) return 'Auto'
+  if (n % 1024 === 0) return `${n / 1024}K`
+  if (n < 1024) return String(n)
+  return `${(n / 1024).toFixed(1)}K`
+}
+
+/**
+ * "1 files" ist kein Satz.
+ *
+ * Gegenprobe G2, 04.09.2026: die Bildmodell-Kacheln auf der Models-Seite
+ * zeigten "1 files", auch bei genau einer Datei, und das X ueber einem
+ * einzelnen Download hiess "Cancel all". Beides sind Stellen, an denen die
+ * Anzahl VOR dem Wort steht und niemand hingesehen hat.
+ */
+export function countLabel(n: number, one: string, many = `${one}s`): string {
+  return `${formatCount(n)} ${n === 1 ? one : many}`
 }

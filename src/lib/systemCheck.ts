@@ -3,6 +3,8 @@
  * Uses browser APIs: navigator.deviceMemory and WebGL renderer string.
  */
 
+import { prop, asNumber } from '../types/json-guards'
+
 export type SystemTier = 'low' | 'medium' | 'high'
 
 export interface SystemInfo {
@@ -52,7 +54,9 @@ function detectGPU(): { renderer: string | null; estimatedVRAM: string } {
 }
 
 export function detectSystem(): SystemInfo {
-    const ramGB = (navigator as any).deviceMemory ?? null
+    // `deviceMemory` is not on every engine (Safari, older WebView2), and it
+    // is not in lib.dom either — a foreign read, so it gets a checked one.
+    const ramGB = asNumber(prop(navigator, 'deviceMemory')) ?? null
     const gpu = detectGPU()
 
     let tier: SystemTier = 'medium'

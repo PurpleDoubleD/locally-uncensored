@@ -11,10 +11,30 @@
  */
 
 import type { AgentToolDef } from '../types/agent-mode'
+import type { ToolArgs } from './mcp/types'
 import { repairJson } from '../lib/tool-call-repair'
 
-// Generic tool shape accepted by the prompt builder
-type ToolLike = { name: string; description: string; parameters?: any; inputSchema?: any }
+/**
+ * Generic tool shape accepted by the prompt builder.
+ *
+ * Two spellings of the same field are in circulation and both callers are
+ * real: `parameters` on AgentToolDef / HermesToolDef, `inputSchema` on
+ * MCPToolDefinition. The schema itself is forwarded verbatim into the <tools>
+ * block and never read field-by-field here, so `unknown` is the honest type —
+ * it says "JSON we pass through", where `any` said "a shape we understand".
+ */
+type ToolLike = { name: string; description: string; parameters?: unknown; inputSchema?: unknown }
+
+/**
+ * Whichever of the two spellings this tool carries, `inputSchema` first.
+ * Kept as `||` rather than `??` on purpose: the old code used `||`, so a
+ * present-but-falsy `inputSchema` (a `null` from a third-party MCP server)
+ * still falls through to `parameters` exactly as it did before.
+ */
+function toolParameters(t: AgentToolDef | ToolLike): unknown {
+  const fromMcp = 'inputSchema' in t ? t.inputSchema : undefined
+  return fromMcp || t.parameters
+}
 
 /**
  * Defuse the markers this dialect is built on, everywhere text we did not write
@@ -54,7 +74,7 @@ export function buildHermesToolPrompt(tools: (AgentToolDef | ToolLike)[]): strin
     function: {
       name: t.name,
       description: t.description,
-      parameters: (t as any).inputSchema || (t as any).parameters,
+      parameters: toolParameters(t),
     },
   }))).join('\n')
 
@@ -110,7 +130,12 @@ ${neutralizeToolTags(body)}
 
 export interface ParsedToolCall {
   name: string
-  arguments: Record<string, any>
+  /**
+   * Model output, so `unknown` per value. `repairJson` already guarantees the
+   * container is an object (see RepairedJson.arguments) — this type carries
+   * that guarantee forward without adding one about what is inside it.
+   */
+  arguments: ToolArgs
 }
 
 /**
@@ -139,7 +164,7 @@ export function parseHermesToolCalls(output: string): ParsedToolCall[] {
       const nameMatch = jsonStr.match(/["']?name["']?\s*[:=]\s*["']([^"']+)["']/i)
       const argsMatch = jsonStr.match(/["']?arguments["']?\s*[:=]\s*(\{[\s\S]*?\})/i)
       if (nameMatch) {
-        let args = {}
+        let args: ToolArgs = {}
         if (argsMatch) {
           const repaired = repairJson(argsMatch[1])
           if (repaired) args = repaired

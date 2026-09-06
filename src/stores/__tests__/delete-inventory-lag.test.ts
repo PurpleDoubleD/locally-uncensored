@@ -98,6 +98,13 @@ describe('ModelManager delete path', () => {
   const src = readFileSync(resolve(repo, 'src/components/models/ModelManager.tsx'), 'utf8')
   const body = src.slice(src.indexOf('const handleDelete'), src.indexOf('const filteredModels'))
 
+  it('tells the backend which folder is the user\'s own', () => {
+    // ComfyUI lists files from that folder since GH #122, and LU does not
+    // delete out of it. Without the folder the backend can only answer "was
+    // not found", which reads like a bug rather than a rule.
+    expect(body).toMatch(/extraDirs: customModelDirs\(\)/)
+  })
+
   it('drops the row only AFTER the delete command returned', () => {
     // Never before: an optimistic removal ahead of the command would be a
     // guess, and a failed delete would hide a file that is still on the disk.

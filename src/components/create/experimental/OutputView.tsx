@@ -6,6 +6,7 @@ import { useCreateStore, type GalleryItem, type ProgressPhase } from '../../../s
 import { backendCall, downloadComfyFile, isTauri } from '../../../api/backend'
 import { isMlxImageHost } from '../../../api/mlx-image'
 import { refreshResultUrl } from '../../../api/cloud/jobs'
+import { ICON_LG, ICON_STROKE_MARK } from '../../ui/icon-size'
 import { markGalleryItemAvailable } from './galleryUrl'
 import { useComfyMedia } from './useComfyMedia'
 import { cn } from '../ui/cn'
@@ -16,9 +17,15 @@ import { cn } from '../ui/cn'
 // missing, because the R13 screenshot caught a load and the R14 pair caught
 // two samplings. Checked in git: this mapping has not changed since the
 // surface was ported (eaeff304, 2026-07-04), so nothing was lost. The device
-// is said in words, by the yellow banner in the Create tab.
+// is said in words, by the line at the top of the Create tab.
+//
+// Das Chipsymbol und sein Ring waren gelb. Das war Schmuck fuer eine Phase
+// und nie eine Warnung, und genau solche Stellen haben Gelb in der App
+// bedeutungslos gemacht. Jetzt Sky, weil es im Wartekreis noch frei war:
+// Gruen gehoert dem Sampling, der Akzent dem Dekodieren, Grau dem Warten.
+// Die Regel dazu steht in lib/hinweis.ts.
 function phaseIcon(phase: ProgressPhase) {
-  if (phase === 'loading-model' || phase === 'loading-clip' || phase === 'loading-vae') return <Cpu size={20} className="text-amber-300" />
+  if (phase === 'loading-model' || phase === 'loading-clip' || phase === 'loading-vae') return <Cpu size={20} className="text-sky-300" />
   if (phase === 'sampling') return <Sparkles size={20} className="text-green-300" />
   if (phase === 'decoding') return <ImageDown size={20} className="text-lu-accent" />
   return <Sparkles size={20} className="text-gray-400" />
@@ -62,8 +69,8 @@ export function GeneratingView() {
         <div className="relative w-16 h-16">
           {isLoading ? (
             <>
-              <motion.div className="absolute inset-0 rounded-full border border-amber-400/30" animate={{ scale: [1, 1.6], opacity: [0.5, 0] }} transition={{ duration: 3, repeat: Infinity, ease: 'easeOut' }} />
-              <div className="absolute inset-0 rounded-full border border-amber-400/20 flex items-center justify-center">
+              <motion.div className="absolute inset-0 rounded-full border border-sky-400/30" animate={{ scale: [1, 1.6], opacity: [0.5, 0] }} transition={{ duration: 3, repeat: Infinity, ease: 'easeOut' }} />
+              <div className="absolute inset-0 rounded-full border border-sky-400/20 flex items-center justify-center">
                 <motion.div animate={{ rotate: 360 }} transition={{ duration: 3, repeat: Infinity, ease: 'linear' }}>{phaseIcon(progressPhase)}</motion.div>
               </div>
             </>
@@ -221,7 +228,7 @@ export function ResultView({ item, onFullscreen, onSendToEditor }: ResultProps) 
       <div className="relative group max-w-full max-h-full">
         {isAudio ? (
           <div className="w-[420px] max-w-full flex flex-col items-center gap-3 p-6 rounded-[var(--radius-panel)] border border-white/[0.06] bg-white/[0.02]">
-            <AudioLines size={26} className="text-gray-400" strokeWidth={1.5} />
+            <AudioLines size={26} className="text-gray-400" strokeWidth={ICON_STROKE_MARK} />
             {item.prompt && (
               <p className="t-body text-gray-400 text-center line-clamp-2">{item.prompt}</p>
             )}
@@ -249,7 +256,7 @@ export function ResultView({ item, onFullscreen, onSendToEditor }: ResultProps) 
         )}
         {item.unavailable && (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 rounded-[var(--radius-panel)] bg-black/60 text-gray-400 p-6 text-center">
-            <MonitorOff size={20} strokeWidth={1.5} />
+            <MonitorOff size={ICON_LG} />
             <span className="t-body">This render lives on the local engine, which isn't reachable right now.</span>
           </div>
         )}

@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
+import { safeJSONStorage } from '../lib/storage-quota'
 import type { SandboxLevel } from '../types/agent-mode'
 import type { AgentWorkspace } from '../types/agent-workspace'
 
@@ -120,6 +121,9 @@ export const useAgentModeStore = create<AgentModeState>()(
         return get().agentModeActive[conversationId] ?? false
       },
     }),
-    { name: 'locally-uncensored-agent-mode' }
+    {
+      name: 'locally-uncensored-agent-mode',
+      storage: safeJSONStorage(),
+    }
   )
 )

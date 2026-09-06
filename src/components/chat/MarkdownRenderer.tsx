@@ -1,16 +1,68 @@
+import { useEffect, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
-import rehypeKatex from 'rehype-katex'
 import 'katex/dist/katex.min.css'
-import { MATH_OPTIONS } from '../../lib/markdown-math'
+import { MATH_OPTIONS, contentNeedsKatex } from '../../lib/markdown-math'
 import { CodeBlock } from './CodeBlock'
 import { codeBlockText } from '../../lib/markdown-code'
 import { openExternal } from '../../api/backend'
-import type { Components } from 'react-markdown'
+import { log } from '../../lib/logger'
+import type { Components, Options } from 'react-markdown'
 
 interface Props {
   content: string
+}
+
+// M7 / Audit W-T2 — rehype-katex zieht KaTeX (455 kB) hinter sich her und war
+// damit fast die Hälfte des Boot-Chunks, obwohl die meisten Unterhaltungen nie
+// eine Formel enthalten. Deshalb wird das Plugin erst geholt, wenn der Text
+// wirklich Math-Syntax enthält (contentNeedsKatex, siehe lib/markdown-math.ts:
+// bewiesene Obermenge, kein Heuristik-Raten).
+//
+// Das Stylesheet bleibt absichtlich ein statischer Import: es sind ~23 kB CSS,
+// und nachgeladenes CSS hieße, dass eine fertig gesetzte Formel für einen
+// Moment unformatiert steht. Nur der JS-Brocken wandert.
+type RehypePlugins = NonNullable<Options['rehypePlugins']>
+type KatexPlugin = RehypePlugins[number]
+
+let katexPlugin: KatexPlugin | null = null
+let katexLoad: Promise<void> | null = null
+
+function loadKatex(): Promise<void> {
+  katexLoad ??= import('rehype-katex').then(
+    (m) => { katexPlugin = m.default },
+    (err: unknown) => {
+      // Nachladen gescheitert (offline, kaputter Cache): der Rest der Nachricht
+      // wird weiter gerendert, die Formel bleibt als Quelltext stehen. Ein
+      // erneuter Versuch ist erlaubt, darum das Promise wieder freigeben.
+      katexLoad = null
+      log.warn('[markdown] KaTeX did not load; formulas stay as source text', { error: err })
+    },
+  )
+  return katexLoad
+}
+
+/**
+ * Liefert die rehype-Plugin-Liste für diesen Text und stößt das Nachladen an,
+ * sobald der Text zum ersten Mal Math enthält. Solange der Brocken unterwegs
+ * ist, rendert der Text ganz normal — nur die Formel steht noch als Quelltext.
+ * Beim Streamen ist das der Bruchteil zwischen dem ersten `$$` und dem Rest der
+ * Formel; danach hält das Modul-Singleton das Plugin für alle weiteren
+ * Nachrichten bereit, ohne erneutes Laden.
+ */
+function useRehypePlugins(content: string): RehypePlugins {
+  const needsKatex = contentNeedsKatex(content)
+  const [katexReady, setKatexReady] = useState(() => katexPlugin !== null)
+
+  useEffect(() => {
+    if (!needsKatex || katexPlugin) return
+    let alive = true
+    void loadKatex().then(() => { if (alive && katexPlugin) setKatexReady(true) })
+    return () => { alive = false }
+  }, [needsKatex])
+
+  return needsKatex && katexReady && katexPlugin ? [katexPlugin] : []
 }
 
 // Assistant output can embed images via markdown `![](url)`. Auto-loading an
@@ -125,9 +177,10 @@ const components: Components = {
 }
 
 export function MarkdownRenderer({ content }: Props) {
+  const rehypePlugins = useRehypePlugins(content)
   return (
     <div className="markdown-content text-gray-800 dark:text-gray-200">
-      <ReactMarkdown remarkPlugins={[remarkGfm, [remarkMath, MATH_OPTIONS]]} rehypePlugins={[rehypeKatex]} components={components}>
+      <ReactMarkdown remarkPlugins={[remarkGfm, [remarkMath, MATH_OPTIONS]]} rehypePlugins={rehypePlugins} components={components}>
         {content}
       </ReactMarkdown>
     </div>

@@ -32,6 +32,8 @@ import {
   previewLanguageFor,
 } from '../../lib/file-preview'
 import { isWithinRoot, type ExplorerNode } from '../../lib/explorer-tree'
+import { formatCount } from '../../lib/formatters'
+import { Hinweis } from '../ui/Hinweis'
 
 interface Props {
   node: ExplorerNode
@@ -131,6 +133,11 @@ export function FilePreview({ node, root, onClose }: Props) {
         {state.status === 'html' && (
           <>
             <ViewportSwitcher viewport={viewport} onChange={setViewport} compact />
+            {/* Der Ein-Zustand traegt Gruen, wie jeder Ein-Zustand in der App
+                (`lib/hinweis.ts`). Vorher war er gelb und behauptete damit
+                einen Zwischenfall: eingeschaltete Skripte sind aber genau
+                das, was der Nutzer hier eben angeklickt hat, und das Symbol
+                daneben sagt schon, dass die Seite jetzt ausgefuehrt wird. */}
             <button
               onClick={() => setAllowScripts((v) => !v)}
               title={
@@ -140,7 +147,7 @@ export function FilePreview({ node, root, onClose }: Props) {
               }
               className={`flex items-center gap-0.5 px-1 py-0.5 rounded text-[0.5rem] border transition-colors ${
                 allowScripts
-                  ? 'border-amber-500/40 text-amber-500 bg-amber-500/[0.08]'
+                  ? 'border-emerald-500/40 text-emerald-500 bg-emerald-500/[0.08]'
                   : 'border-gray-200 dark:border-white/10 text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
               }`}
               data-testid="explorer-scripts-toggle"
@@ -175,7 +182,7 @@ export function FilePreview({ node, root, onClose }: Props) {
 
         {state.status === 'binary' && (
           <p className="px-2 py-2 text-[0.55rem] text-gray-400 dark:text-gray-600">
-            Binary file{state.bytes ? `, ${state.bytes.toLocaleString()} bytes` : ''}. Not previewed.
+            Binary file{state.bytes ? `, ${formatCount(state.bytes)} bytes` : ''}. Not previewed.
           </p>
         )}
 
@@ -183,9 +190,7 @@ export function FilePreview({ node, root, onClose }: Props) {
           <div className="p-1">
             <CodeBlock code={state.text} language={previewLanguageFor(node.name)} />
             {state.truncated && (
-              <p className="px-1 pb-1 text-[0.5rem] text-amber-500/80">
-                Shortened for the preview. Open the file to see the rest.
-              </p>
+              <Hinweis className="px-1 pb-1">Shortened for the preview. Open the file to see the rest.</Hinweis>
             )}
           </div>
         )}

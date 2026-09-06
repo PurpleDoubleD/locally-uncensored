@@ -20,11 +20,20 @@ import {
 
 // Real catalogue ids from /api/inference/v1/models, prefixed the way the model
 // store keeps them (see prefixModelName).
+//
+// Two of the four were NOT real and had drifted unnoticed: this file claimed
+// Sao10K/L3.3-70B-Euryale-v2.3 and MiniMaxAI/MiniMax-M2 while the catalogue has
+// carried v2.2 and M2.7 for a while (apps/web/lib/chat/tier-models.ts:150 and
+// :287, checked 2026-09-02). Nothing went red, because the cloud path answers
+// 'native' for any id at all, so the test kept passing while proving none of
+// what its own comment promised. Corrected here; there is no automatic guard,
+// the catalogue lives in the web repo, so this list is checked by hand whenever
+// the catalogue moves.
 const CLOUD = {
   kimi: 'lu-cloud::moonshotai/Kimi-K2.6',
   coder: 'lu-cloud::Qwen/Qwen3-Coder-480B-A35B-Instruct-Turbo',
-  euryale: 'lu-cloud::Sao10K/L3.3-70B-Euryale-v2.3',
-  minimax: 'lu-cloud::MiniMaxAI/MiniMax-M2',
+  euryale: 'lu-cloud::Sao10K/L3.1-70B-Euryale-v2.2',
+  minimax: 'lu-cloud::MiniMaxAI/MiniMax-M2.7',
 }
 
 describe('isNativeToolProvider', () => {
@@ -44,6 +53,15 @@ describe('getToolCallingStrategy — LU Cloud', () => {
     for (const [name, id] of Object.entries(CLOUD)) {
       expect(getToolCallingStrategy(id), `${name} must not fall back to hermes_xml`).toBe('native')
     }
+  })
+
+  it('the two ids that had drifted stay corrected', () => {
+    // A pin, not a proof: nothing local can tell a real catalogue id from a
+    // plausible one, because the catalogue lives in the web repo. What this
+    // does do is make the two ids load-bearing, so drifting them back is a red
+    // test instead of a silent no-op the way it was for weeks.
+    expect(CLOUD.euryale).toBe('lu-cloud::Sao10K/L3.1-70B-Euryale-v2.2')
+    expect(CLOUD.minimax).toBe('lu-cloud::MiniMaxAI/MiniMax-M2.7')
   })
 
   it('still routes Ollama models by family (regression guard for the local path)', () => {

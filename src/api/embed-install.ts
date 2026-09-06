@@ -19,7 +19,7 @@ export async function installBundledEmbedModel(
   onProgress?: (completed: number, total: number) => void,
 ): Promise<void> {
   const destDir = await detectProviderModelPath(BUILTIN_BACKEND_ID)
-  if (!destDir) throw new Error('Could not resolve the built-in models directory.')
+  if (!destDir) throw new Error('Could not resolve the LU Engine models folder.')
 
   const { downloadUrl, filename, sizeGB } = ONBOARDING_EMBED_MODEL
   useDownloadStore.getState().setMeta(filename, downloadUrl, 'gguf', destDir)

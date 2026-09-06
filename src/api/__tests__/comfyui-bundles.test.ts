@@ -190,7 +190,9 @@ describe('2.5.8 specialized lane bundles (music / lipsync / motion)', () => {
 
   it('gguf lane bundles request the gguf node pack', () => {
     for (const b of laneBundles()) {
-      const hasGguf = b.files.some((f) => f.filename.toLowerCase().endsWith('.gguf'))
+      // `filename` is optional on DiscoverModel (Ollama-tag entries carry
+      // none), and a file without one is not a gguf either way.
+      const hasGguf = b.files.some((f) => f.filename?.toLowerCase().endsWith('.gguf'))
       if (hasGguf) expect(b.customNodes).toContain('gguf')
     }
   })

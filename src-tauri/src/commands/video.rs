@@ -5,9 +5,12 @@
 //! with an arch check so Windows/Linux clients hitting these commands by
 //! accident get a clear 400 instead of a hung subprocess.
 //!
-//! Models are downloaded into `~/.cache/lu-labs/mlx-video/<id>/` (the
-//! `--model-dir` argument passed to `mlx_video.<family>.generate`).
-//! Generated videos land in `~/.config/lu-labs/videos/<job_id>.mp4`.
+//! Models are downloaded into `<os_paths::cache_dir()>/mlx-video/<id>/` (the
+//! `--model-dir` argument passed to `mlx_video.<family>.generate`), Linux also
+//! `~/.cache/<APP_DIR>/mlx-video/<id>/`.
+//! Generated videos land in `<os_paths::config_root()>/videos/<job_id>.mp4`.
+//! `<APP_DIR>` kommt aus `app_identity` und trägt auf diesem Branch einen
+//! eigenen Suffix.
 
 use crate::os_error;
 use crate::commands::{bad_request, internal, CmdResult};
@@ -178,18 +181,12 @@ fn catalog_lookup(id: &str) -> Option<&'static CatalogEntry> {
 
 // ── Filesystem layout ─────────────────────────────────────────────────
 
-fn models_root() -> PathBuf {
-    dirs::cache_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("lu-labs")
-        .join("mlx-video")
+pub(crate) fn models_root() -> PathBuf {
+    crate::os_paths::cache_dir().join("mlx-video")
 }
 
 pub(crate) fn outputs_root() -> PathBuf {
-    dirs::config_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("lu-labs")
-        .join("videos")
+    crate::os_paths::config_root().join("videos")
 }
 
 fn model_dir(id: &str) -> PathBuf {
@@ -681,11 +678,14 @@ pub fn video_generate(state: &AppState, args: &Value) -> CmdResult {
     // Stdout / stderr pumps → progress slot.
     let p_out = progress.clone();
     let p_err = progress.clone();
+    // Dieselbe Fortschrittskarte wie beim Installer, also dieselbe Regel:
+    // was das Betriebssystem geschrieben hat, steht dort englisch. Was der
+    // Encoder selbst schreibt, bleibt Zeichen fuer Zeichen stehen.
     std::thread::spawn(move || {
         use std::io::{BufRead, BufReader};
         if let Some(s) = stdout {
             for line in BufReader::new(s).lines().map_while(Result::ok) {
-                p_out.log(line);
+                p_out.log(os_error::english_child_text(&line).into_owned());
             }
         }
     });
@@ -693,7 +693,7 @@ pub fn video_generate(state: &AppState, args: &Value) -> CmdResult {
         use std::io::{BufRead, BufReader};
         if let Some(s) = stderr {
             for line in BufReader::new(s).lines().map_while(Result::ok) {
-                p_err.log(line);
+                p_err.log(os_error::english_child_text(&line).into_owned());
             }
         }
     });
@@ -794,18 +794,20 @@ pub(crate) fn run_streamed(slot: &crate::install_state::InstallSlot, cmd: &mut C
     let t1 = std::thread::spawn(move || {
         if let Some(s) = stdout {
             for line in BufReader::new(s).lines().map_while(Result::ok) {
-                so.log(line);
+                so.log(os_error::english_child_text(&line).into_owned());
             }
         }
     });
     let t2 = std::thread::spawn(move || {
         if let Some(s) = stderr {
             for line in BufReader::new(s).lines().map_while(Result::ok) {
-                se.log(line);
+                se.log(os_error::english_child_text(&line).into_owned());
             }
         }
     });
-    let status = child.wait().map_err(|e| format!("wait: {e}"))?;
+    let status = child
+        .wait()
+        .map_err(|e| format!("wait: {}", crate::os_error::english(&e)))?;
     let _ = t1.join();
     let _ = t2.join();
     if !status.success() {

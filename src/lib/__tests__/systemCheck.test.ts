@@ -1,14 +1,19 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 
 // Provide minimal DOM mocks for node environment before importing
 // systemCheck.ts needs `document.createElement('canvas')` and `navigator.deviceMemory`
+// `defineProperty` rather than an assignment through a cast: its descriptor
+// `value` is untyped in lib.dom, so the stub goes in without claiming to BE a
+// Document or a Navigator — which it is not, and does not need to be.
 if (typeof document === 'undefined') {
-  (globalThis as any).document = {
-    createElement: () => ({ getContext: () => null }),
-  }
+  Object.defineProperty(globalThis, 'document', {
+    value: { createElement: () => ({ getContext: () => null }) },
+    configurable: true,
+    writable: true,
+  })
 }
 if (typeof navigator === 'undefined') {
-  (globalThis as any).navigator = {}
+  Object.defineProperty(globalThis, 'navigator', { value: {}, configurable: true, writable: true })
 }
 
 import { getRecommendations, detectSystem } from '../systemCheck'
@@ -139,14 +144,34 @@ describe('systemCheck', () => {
   // ─── detectSystem ───
 
   describe('detectSystem', () => {
-    let originalCreateElement: any
+    /** What detectSystem actually pulls out of a WebGL context. */
+    interface StubGL {
+      getExtension: (name?: string) => { UNMASKED_RENDERER_WEBGL: number } | null
+      getParameter?: (p?: number) => string
+    }
+
+    /** Swap `document.createElement` for one that hands back a canvas-like
+     *  object whose getContext returns `gl` (or null for "no WebGL"). */
+    const withGL = (gl: StubGL | null) => {
+      Object.defineProperty(document, 'createElement', {
+        value: () => ({ getContext: () => gl }),
+        configurable: true,
+        writable: true,
+      })
+    }
+
+    let originalCreateElement: typeof document.createElement
 
     beforeEach(() => {
       originalCreateElement = document.createElement
     })
 
     afterEach(() => {
-      (document as any).createElement = originalCreateElement
+      Object.defineProperty(document, 'createElement', {
+        value: originalCreateElement,
+        configurable: true,
+        writable: true,
+      })
     })
 
     it('returns a SystemInfo object with expected fields', () => {
@@ -160,20 +185,20 @@ describe('systemCheck', () => {
 
     it('tier is low when RAM <= 4GB and no GPU', () => {
       Object.defineProperty(navigator, 'deviceMemory', { value: 4, writable: true, configurable: true })
-      ;(document as any).createElement = () => ({ getContext: () => null })
+      withGL(null)
       const info = detectSystem()
       expect(info.tier).toBe('low')
     })
 
     it('tier is high when RAM >= 16GB and no GPU', () => {
       Object.defineProperty(navigator, 'deviceMemory', { value: 16, writable: true, configurable: true })
-      ;(document as any).createElement = () => ({ getContext: () => null })
+      withGL(null)
       const info = detectSystem()
       expect(['medium', 'high']).toContain(info.tier)
     })
 
     it('estimatedVRAM is "Unknown" when no WebGL', () => {
-      ;(document as any).createElement = () => ({ getContext: () => null })
+      withGL(null)
       const info = detectSystem()
       expect(info.estimatedVRAM).toBe('Unknown')
     })
@@ -183,7 +208,7 @@ describe('systemCheck', () => {
         getExtension: () => ({ UNMASKED_RENDERER_WEBGL: 0x9246 }),
         getParameter: () => 'NVIDIA GeForce RTX 4090',
       }
-      ;(document as any).createElement = () => ({ getContext: () => mockGL })
+      withGL(mockGL)
       const info = detectSystem()
       expect(info.estimatedVRAM).toContain('24')
       expect(info.tier).toBe('high')
@@ -195,7 +220,7 @@ describe('systemCheck', () => {
         getExtension: () => ({ UNMASKED_RENDERER_WEBGL: 0x9246 }),
         getParameter: () => 'NVIDIA GeForce RTX 3060',
       }
-      ;(document as any).createElement = () => ({ getContext: () => mockGL })
+      withGL(mockGL)
       const info = detectSystem()
       expect(info.estimatedVRAM).toContain('8')
     })
@@ -206,7 +231,7 @@ describe('systemCheck', () => {
         getExtension: () => ({ UNMASKED_RENDERER_WEBGL: 0x9246 }),
         getParameter: () => 'Intel UHD Graphics 630',
       }
-      ;(document as any).createElement = () => ({ getContext: () => mockGL })
+      withGL(mockGL)
       const info = detectSystem()
       expect(info.estimatedVRAM).toContain('integrated')
       expect(info.tier).toBe('low')
@@ -218,14 +243,14 @@ describe('systemCheck', () => {
         getExtension: () => ({ UNMASKED_RENDERER_WEBGL: 0x9246 }),
         getParameter: () => 'Apple M1',
       }
-      ;(document as any).createElement = () => ({ getContext: () => mockGL })
+      withGL(mockGL)
       const info = detectSystem()
       expect(info.estimatedVRAM).toContain('shared')
     })
 
     it('handles WebGL getExtension returning null', () => {
       const mockGL = { getExtension: () => null }
-      ;(document as any).createElement = () => ({ getContext: () => mockGL })
+      withGL(mockGL)
       const info = detectSystem()
       expect(info.gpuRenderer).toBeNull()
       expect(info.estimatedVRAM).toBe('Unknown')
@@ -236,7 +261,7 @@ describe('systemCheck', () => {
         getExtension: () => ({ UNMASKED_RENDERER_WEBGL: 0x9246 }),
         getParameter: () => 'NVIDIA GeForce RTX 3080',
       }
-      ;(document as any).createElement = () => ({ getContext: () => mockGL })
+      withGL(mockGL)
       Object.defineProperty(navigator, 'deviceMemory', { value: 16, writable: true, configurable: true })
       const info = detectSystem()
       expect(info.estimatedVRAM).toContain('16')
@@ -248,7 +273,7 @@ describe('systemCheck', () => {
         getExtension: () => ({ UNMASKED_RENDERER_WEBGL: 0x9246 }),
         getParameter: () => 'NVIDIA GeForce GTX 1060',
       }
-      ;(document as any).createElement = () => ({ getContext: () => mockGL })
+      withGL(mockGL)
       Object.defineProperty(navigator, 'deviceMemory', { value: 8, writable: true, configurable: true })
       const info = detectSystem()
       expect(info.estimatedVRAM).toContain('8')
@@ -259,7 +284,7 @@ describe('systemCheck', () => {
         getExtension: () => ({ UNMASKED_RENDERER_WEBGL: 0x9246 }),
         getParameter: () => 'AMD Radeon RX 7900 XTX',
       }
-      ;(document as any).createElement = () => ({ getContext: () => mockGL })
+      withGL(mockGL)
       const info = detectSystem()
       expect(info.gpuRenderer).toBe('AMD Radeon RX 7900 XTX')
     })

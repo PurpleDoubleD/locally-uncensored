@@ -25,7 +25,7 @@ describe('default provider = built-in engine', () => {
     expect(openai.enabled).toBe(true)
     expect(openai.managed).toBe(true)
     expect(openai.isLocal).toBe(true)
-    expect(openai.name).toBe('Built-in Engine')
+    expect(openai.name).toBe('LU Engine')
     expect(openai.baseUrl).toBe('http://127.0.0.1:8127/v1')
     expect(openai.apiKey).toBe('')
   })

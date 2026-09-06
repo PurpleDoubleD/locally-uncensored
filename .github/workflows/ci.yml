@@ -5,6 +5,19 @@ on:
     branches: [master]
   pull_request:
     branches: [master]
+  # release.yml calls this same workflow as its gate, so the release is held to
+  # exactly the checks master is held to — one definition, no drift between
+  # "what CI runs" and "what a release had to pass".
+  workflow_call:
+    inputs:
+      ref:
+        description: >-
+          Commit-ish to check out. Empty (push/pull_request) keeps actions/checkout's
+          default, which is the commit that triggered the run. release.yml passes the
+          release tag, so the gate reads the same bytes the installer is built from.
+        required: false
+        type: string
+        default: ''
 
 # Third-party actions are pinned to a full commit SHA (not a moving tag) so a
 # compromised or retagged upstream release can't silently run in our CI with
@@ -17,6 +30,10 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          # Empty on push/pull_request (checkout falls back to the triggering
+          # commit); the release tag when release.yml calls this workflow.
+          ref: ${{ inputs.ref }}
 
       - name: Setup Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
@@ -27,16 +44,38 @@ jobs:
       - name: Install npm dependencies
         run: npm ci
 
-      # Historical debt: the repo carries ~170 files of pre-existing lint
-      # errors (unused test vars, no-explicit-any in old suites) that predate
-      # 2.5.7 — lint has been red since April. Keep it visible but non-gating
-      # until the debt is paid down; tsc + vitest + build are the real gates.
-      - name: Lint (non-gating — pre-existing debt)
+      # AS-10. Der Audit-Befund war nicht "es gibt Lint-Fehler", sondern
+      # "Lint ist kein Gate": seit April stand hier `continue-on-error: true`,
+      # und ein Schritt, der nicht scheitern kann, misst nichts. Die Schuld
+      # dahinter ist jetzt bezahlt — `eslint .` meldet ueber 1080 Dateien
+      # 0 Fehler und 0 Warnungen, und zwar OHNE neue `eslint-disable`: die
+      # Regeln stehen scharf, der Code hat sich bewegt.
+      #
+      # Zwei Dinge mussten dafuer zusammenkommen, und beide sind nachgemessen:
+      # (1) KF-11 — ein gebautes `src-tauri/target` schleuste generiertes
+      #     JavaScript in die Pruefung und machte das Ergebnis davon abhaengig,
+      #     OB jemand vorher gebaut hatte. Ohne den `globalIgnores`-Eintrag
+      #     waere dieses Gate auf jeder Maschine mit Release-Build rot und auf
+      #     einem frischen Klon gruen — schlimmer als ein Plattformunterschied,
+      #     weil es sich auf derselben Maschine aendert. Gegengeprueft: auf
+      #     einer Maschine MIT Release-Build (87 Codegen-Assets im Baum) meldet
+      #     `npm run lint` weiterhin 0.
+      # (2) Die letzten 45 Meldungen aus `src/components` sind gefallen, nicht
+      #     stillgestellt.
+      - name: Lint
         run: npm run lint
-        continue-on-error: true
 
       - name: Type check
-        run: npx tsc --noEmit
+        run: npm run typecheck
+
+      # Audit W-T2: der Baum stand auf 11 Importzyklen, alle mit derselben
+      # Bauart — eine Kante, die es nicht geben durfte, versteckt hinter einem
+      # `await import()` mitten in einer Funktion. Sichtbar wird so etwas nur,
+      # wenn jemand misst; also misst CI. Gating ab dem ersten Tag, weil der
+      # Stand bei null anfängt und es hier folglich keine Altlast zu bezahlen
+      # gibt (anders als bei lint und clippy weiter unten).
+      - name: Import cycles
+        run: npm run cycles
 
       - name: Unit tests
         run: npx vitest run
@@ -50,6 +89,10 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          # Empty on push/pull_request (checkout falls back to the triggering
+          # commit); the release tag when release.yml calls this workflow.
+          ref: ${{ inputs.ref }}
 
       - name: Setup Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
@@ -77,9 +120,15 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          # Empty on push/pull_request (checkout falls back to the triggering
+          # commit); the release tag when release.yml calls this workflow.
+          ref: ${{ inputs.ref }}
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          components: clippy
 
       - name: Rust cache
         uses: swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
@@ -109,6 +158,11 @@ jobs:
       # externalBin file is missing — cargo check needs the sidecar file to
       # EXIST, not to work. Stub it so the check doesn't pay a 20-min llama
       # build; the real binaries are built in release.yml + sidecar-windows.yml.
+      #
+      # The same empty file is enough for `cargo test` and `cargo clippy`: they
+      # run the identical build.rs, and no test executes the sidecar. The few
+      # tests that need a live inference server are already #[ignore]d for
+      # exactly that reason (see commands/remote.rs, commands/install.rs).
       - name: Stub llama-server sidecar for cargo check
         shell: bash
         run: |
@@ -120,6 +174,162 @@ jobs:
           esac
           ls -la src-tauri/bin/
 
+      # tauri-build also resolves bundle.resources, and ../dist only exists
+      # after a frontend build. This job runs no npm at all, so build.rs bailed
+      # with "resource path `../dist` doesn't exist" before it ever reached the
+      # crate. A placeholder is enough: nothing here loads the bundle, it only
+      # has to be a directory that exists.
+      - name: Stub the frontend bundle for build.rs
+        shell: bash
+        run: |
+          mkdir -p dist
+          printf '<!doctype html><title>ci placeholder</title>' > dist/index.html
+
       - name: Cargo check
         working-directory: src-tauri
         run: cargo check
+
+      # 539 Rust tests lived in the tree while CI only ever type-checked them.
+      # They are unit tests over pure logic and short-lived child processes —
+      # the whole suite runs in seconds once the crate is built, so there is no
+      # cost argument for leaving them out.
+      - name: Cargo test
+        working-directory: src-tauri
+        run: cargo test
+
+      # Gating since 01.09.2026 — the debt this comment used to describe is paid.
+      # The deny-by-default error sat at src/commands/secret.rs:173, not :108 as
+      # the old note said: MAX_UNITS was a `usize` using `usize::MAX` to mean
+      # "no limit", which made `count() <= MAX_UNITS` always true. It is an
+      # `Option<usize>` now, so "no limit" is `None` and the comparison is gone.
+      # The 78 warning sites behind it are at 0. Eleven `allow`s remain, each on
+      # a single item with its reason written next to it; there is no
+      # crate-level `#![allow]`.
+      #
+      # NOTE for the ubuntu lane: that 0 was measured on macOS, and the
+      # dead-code half of the list is platform-conditional by nature. A Linux
+      # runner can surface items a macOS run cannot see. If this job goes red on
+      # arrival, that is the likely reason — and the fix is the same kind of
+      # single-item annotation with a reason, never a blanket allow.
+      - name: Clippy
+        working-directory: src-tauri
+        run: cargo clippy --all-targets -- -D warnings
+
+  # ── Is the product still buildable at all? ───────────────────────────────
+  #
+  # Audit M6, and the hole underneath it. Until this job existed, no workflow
+  # ever ran `tauri build`. CI ran `npm run build` (vite), `cargo check` and
+  # `cargo test` — all three pass happily on a configuration that cannot be
+  # bundled — and the single place `tauri build` did run was release.yml, with
+  # TAURI_SIGNING_PRIVATE_KEY supplied from secrets. So the one lane able to
+  # see a bundling failure was the one lane configured never to hit it.
+  #
+  # What that hid, at 10bfa0d7 (v2.6.7), in the shipped product: with
+  # `bundle.createUpdaterArtifacts` set next to `plugins.updater.pubkey`,
+  # `tauri build` wrote the installers to disk and THEN exited 1 with "A public
+  # key has been found, but no private key". Anyone without the release
+  # secret — a contributor, a fork, an AGPL-3.0 §6 recipient — could not build
+  # the product. Measured on Windows and reproduced on macOS; fixed in
+  # a0030ad2 by dropping that one field.
+  #
+  # This job builds with NO signing key, deliberately, and the script unsets
+  # the two signing variables itself. Rationale in scripts/ci-tauri-build.sh:
+  # a gate that consumes a secret goes quietly green in a fork where the secret
+  # is absent, and — measured locally — handing the broken 10bfa0d7 config a
+  # key makes it exit 0, so a key-carrying gate would have been green on the
+  # exact commit it exists to fail. No secret is read here, so a fork is held
+  # to precisely this check with nothing to configure.
+  #
+  # The step has no `continue-on-error` and the script does not pipe the exit
+  # code away (PIPESTATUS[0], not `tee`'s status). A build that leaves
+  # installers on disk and still exits non-zero fails this job — which is the
+  # exact shape of the defect above.
+  tauri-build:
+    runs-on: ${{ matrix.platform }}
+    # A hung bundler must fail loudly rather than burn the 6-hour job ceiling,
+    # the way the Linux lane did on 2026-08-15 (see release.yml).
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        # The platforms this product actually ships, read off release.yml's
+        # build-tauri matrix — there is no macOS lane (dropped in c1644d9a).
+        # release-build-gate.test.ts compares the two lists on every run, so
+        # re-adding a release platform without covering it here fails a test
+        # instead of silently narrowing this gate.
+        platform: [ubuntu-22.04, windows-latest]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          # Empty on push/pull_request (checkout falls back to the triggering
+          # commit); the release tag when release.yml calls this workflow.
+          ref: ${{ inputs.ref }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: '.nvmrc'
+          cache: 'npm'
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          workspaces: './src-tauri -> target'
+
+      - name: Install Linux dependencies
+        if: matrix.platform == 'ubuntu-22.04'
+        timeout-minutes: 20
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libgtk-3-dev \
+            libsoup-3.0-dev \
+            libjavascriptcoregtk-4.1-dev \
+            libxdo-dev \
+            build-essential \
+            curl \
+            wget \
+            file \
+            libssl-dev
+
+      # Same stub as the cargo-check job above, for the same reason:
+      # tauri-build's copy_binaries hard-fails on a missing externalBin, and a
+      # real llama.cpp build costs ~20 min that this gate does not need — it is
+      # asking whether the app bundles, not whether inference works. The real
+      # binaries are built in release.yml and sidecar-windows.yml.
+      #
+      # Measured 2026-09-01 on macOS: a zero-byte stub survives the full
+      # `tauri build`, ad-hoc codesigning of the sidecar included (exit 0, .app
+      # + .dmg produced). macOS is the strictest of the three here — Linux and
+      # Windows do not sign the sidecar at all — but this has NOT been observed
+      # on the two runner platforms, because no Actions run was permitted.
+      - name: Stub llama-server sidecar
+        shell: bash
+        run: |
+          mkdir -p src-tauri/bin
+          triple="$(rustc -vV | awk '/^host:/{print $2}')"
+          case "$triple" in
+            *-windows-*) touch "src-tauri/bin/lu-llama-server-$triple.exe" ;;
+            *)           touch "src-tauri/bin/lu-llama-server-$triple" ;;
+          esac
+          ls -la src-tauri/bin/
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      # No `continue-on-error`, no `|| true`, no `if: secrets…` — see the
+      # header. Deliberately the last word on whether this commit is shippable.
+      - name: Tauri build (unsigned — exit code is the verdict)
+        shell: bash
+        run: bash scripts/ci-tauri-build.sh

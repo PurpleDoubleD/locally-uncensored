@@ -87,7 +87,7 @@ export function builtinModelMatches(
  */
 export function builtinModelMismatchMessage(loadedName: string, requestedName: string): string {
   return (
-    `The built-in engine has "${loadedName}" loaded, but this request asked for "${requestedName}". ` +
+    `The LU Engine has "${loadedName}" loaded, but this request asked for "${requestedName}". ` +
     'The engine serves only the model it was started with, so answering would have used the wrong model. ' +
     `Install or pick "${requestedName}" in Models and send again.`
   )

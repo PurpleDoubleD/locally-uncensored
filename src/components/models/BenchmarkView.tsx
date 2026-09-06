@@ -1,11 +1,14 @@
 import { useState } from 'react'
 import { ArrowLeft, Trophy, Zap, Play, Square, Trash2, Download, ListChecks } from 'lucide-react'
+import { Hinweis } from '../ui/Hinweis'
+import { HINWEIS_TEXT } from '../../lib/hinweis'
 import { useUIStore } from '../../stores/uiStore'
 import { useModels } from '../../hooks/useModels'
 import {
   useBenchmarkStore, getLatestSpeed, getLeaderboard,
   toMarkdownReport, unbenchmarked, staleModels,
 } from '../../stores/benchmarkStore'
+import { displayModelName } from '../../api/providers/registry'
 import { useBenchmark } from '../../hooks/useBenchmark'
 
 export function BenchmarkView() {
@@ -58,23 +61,30 @@ export function BenchmarkView() {
   return (
     <div className="h-full overflow-y-auto scrollbar-thin">
       <div className="max-w-2xl mx-auto px-4 py-4">
+        {/* Eine Zeile, kein Kasten. Hier stand ein roter Kasten mit Fuellung,
+            Rand und Polster fuer einen Satz, der ohnehin schon rot ist. Die
+            Farbe traegt die Dringlichkeit, die Flaeche trug nur Flaeche. Die
+            Begruendung steht in `lib/hinweis.ts`. */}
         {benchError && (
-          <div className="mb-3 px-3 py-2 rounded-md bg-red-500/10 border border-red-500/25 text-[0.6rem] text-red-300 flex items-start gap-2">
-            <span className="flex-1">{benchError}</span>
-            <button
-              onClick={() => useBenchmarkStore.getState().setError(null)}
-              className="text-red-400 hover:text-red-200 transition-colors"
-            >
-              Dismiss
-            </button>
-          </div>
+          <Hinweis
+            ton="fehler"
+            className="mb-3"
+            onDismiss={() => useBenchmarkStore.getState().setError(null)}
+          >
+            {benchError}
+          </Hinweis>
         )}
         {/* Header */}
         <div className="flex items-center gap-2 mb-4">
           <button onClick={() => setView('models')} className="p-1 rounded hover:bg-gray-200 dark:hover:bg-white/5 text-gray-500 hover:text-gray-900 dark:hover:text-white transition-colors">
             <ArrowLeft size={16} />
           </button>
-          <Trophy size={16} className="text-amber-400" />
+          {/* Der Pokal war golden, weil Pokale golden sind, nicht weil die
+              Farbe hier etwas sagt. Auf dieser Ansicht bedeutet Gruen
+              „richtig geantwortet" und Rot „abgeschnitten"; ein dritter Ton
+              nur fuers Symbol haette eine Bedeutung behauptet, die es nicht
+              gibt. Also neutral wie der Pfeil daneben. */}
+          <Trophy size={16} className="text-gray-500" />
           <h1 className="text-[0.8rem] font-semibold text-gray-800 dark:text-gray-200">Benchmark</h1>
           <div className="ml-auto flex items-center gap-1">
             {pending.length > 0 && (
@@ -82,7 +92,7 @@ export function BenchmarkView() {
                 onClick={runPending}
                 disabled={isRunning}
                 title={`Benchmark the ${pending.length} model(s) with no result yet, one after another`}
-                className="flex items-center gap-1 px-2 py-1 rounded-md bg-gray-100 dark:bg-white/5 text-gray-600 dark:text-gray-400 text-[0.6rem] hover:bg-gray-200 dark:hover:bg-white/10 transition-colors disabled:opacity-30"
+                className="flex items-center gap-1 px-2 py-1 rounded-md bg-gray-100 dark:bg-white/5 text-gray-600 dark:text-gray-400 t-micro hover:bg-gray-200 dark:hover:bg-white/10 transition-colors disabled:opacity-30"
               >
                 <ListChecks size={11} />
                 Benchmark {pending.length} remaining
@@ -92,7 +102,7 @@ export function BenchmarkView() {
               <button
                 onClick={exportReport}
                 title="Download the table as Markdown"
-                className="flex items-center gap-1 px-2 py-1 rounded-md bg-gray-100 dark:bg-white/5 text-gray-600 dark:text-gray-400 text-[0.6rem] hover:bg-gray-200 dark:hover:bg-white/10 transition-colors"
+                className="flex items-center gap-1 px-2 py-1 rounded-md bg-gray-100 dark:bg-white/5 text-gray-600 dark:text-gray-400 t-micro hover:bg-gray-200 dark:hover:bg-white/10 transition-colors"
               >
                 <Download size={11} />
                 Export
@@ -103,7 +113,7 @@ export function BenchmarkView() {
                 onClick={() => { if (confirmClear) { clearResults(); setConfirmClear(false) } else setConfirmClear(true) }}
                 onBlur={() => setConfirmClear(false)}
                 title="Delete every recorded benchmark run"
-                className={`flex items-center gap-1 px-2 py-1 rounded-md text-[0.6rem] transition-colors ${
+                className={`flex items-center gap-1 px-2 py-1 rounded-md t-micro transition-colors ${
                   confirmClear
                     ? 'bg-red-500/20 text-red-500'
                     : 'bg-gray-100 dark:bg-white/5 text-gray-600 dark:text-gray-400 hover:bg-red-500/15 hover:text-red-500'
@@ -116,26 +126,29 @@ export function BenchmarkView() {
           </div>
         </div>
 
-        {/* Results whose model is gone — the "out of whack" state from D#21. */}
+        {/* Results whose model is gone, the "out of whack" state from D#21.
+            Das war ein gelber Kasten mit gelbem Knopf darin, also die Bauform
+            einer Warnung fuer einen Satz, der nur aufraeumen anbietet: eine
+            Tabellenzeile ohne Modell dahinter ist nichts, wofuer jemand
+            sofort handeln muesste. Jetzt eine ruhige Zeile, und der Weg
+            hinaus steht als Wort im Satz statt als Flaeche daneben. */}
         {stale.length > 0 && (
-          <div className="mb-4 flex items-center justify-between gap-3 px-3 py-2 rounded-lg bg-amber-500/10 border border-amber-500/20">
-            <p className="text-[0.65rem] text-amber-600 dark:text-amber-400">
-              {stale.length} model{stale.length === 1 ? '' : 's'} in this table {stale.length === 1 ? 'is' : 'are'} no longer installed:{' '}
-              {stale.slice(0, 3).join(', ')}{stale.length > 3 ? ` and ${stale.length - 3} more` : ''}.
-            </p>
+          <Hinweis className="mb-4">
+            {stale.length} model{stale.length === 1 ? '' : 's'} in this table {stale.length === 1 ? 'is' : 'are'} no longer installed:{' '}
+            {stale.slice(0, 3).join(', ')}{stale.length > 3 ? ` and ${stale.length - 3} more` : ''}.{' '}
             <button
               onClick={() => pruneMissing(names)}
-              className="shrink-0 px-2 py-1 rounded-md bg-amber-500/15 text-amber-600 dark:text-amber-400 text-[0.6rem] hover:bg-amber-500/25 transition-colors"
+              className="underline underline-offset-2 hover:text-gray-700 dark:hover:text-gray-200 transition-colors"
             >
               Remove them
             </button>
-          </div>
+          </Hinweis>
         )}
 
         {/* Leaderboard */}
         {leaderboard.length > 0 && (
           <div className="mb-6 p-4 rounded-xl bg-gray-50 dark:bg-white/[0.03] border border-gray-200 dark:border-white/5">
-            <h2 className="text-[0.7rem] font-semibold text-amber-500 flex items-center gap-1.5 mb-3">
+            <h2 className="text-[0.7rem] font-semibold text-gray-500 flex items-center gap-1.5 mb-3">
               <Trophy size={13} />
               Leaderboard
             </h2>
@@ -149,14 +162,31 @@ export function BenchmarkView() {
 
                 return (
                   <div key={entry.model} className="flex items-center gap-3">
-                    <span className={`text-[0.7rem] w-5 text-right font-bold ${i === 0 ? 'text-amber-400' : i === 1 ? 'text-gray-400' : i === 2 ? 'text-orange-700' : 'text-gray-500'}`}>
+                    {/* Rang durch Gewicht, nicht durch Medaillenfarbe.
+                        Hier stand die Medaillenreihe aus Bernstein, Grau und
+                        Bronze, und der goldene Platz eins war die einzige
+                        Stelle, an der die Farbe etwas hiess. Auf einem Brett, das
+                        Gruen fuer „richtig" und Rot fuer „abgeschnitten"
+                        benutzt, ist ein vierter Ton fuer „Platz eins" eine
+                        Bedeutung zu viel. Der Akzentviolett der App scheidet
+                        als Ersatz aus: #a094f8 steht 2.60:1 gegen Weiss und
+                        die Hellmodus-Kante #8b7cf0 3.37:1, beides zu wenig
+                        fuer 0.7rem-Text (siehe index.css). Der Rang steht
+                        ohnehin schon in der Zahl und in der Balkenlaenge. */}
+                    <span className={`text-[0.7rem] w-5 text-right font-bold ${
+                      i === 0 ? 'text-gray-900 dark:text-white'
+                        : i === 1 ? 'text-gray-600 dark:text-gray-300'
+                        : 'text-gray-500 dark:text-gray-400'
+                    }`}>
                       {i + 1}.
                     </span>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center justify-between mb-1">
-                        <span className="text-[0.7rem] text-gray-800 dark:text-gray-200 truncate font-medium">{entry.model}</span>
-                        <span className="text-[0.65rem] text-gray-600 dark:text-gray-400 font-mono shrink-0 ml-2 flex items-center gap-1">
-                          <Zap size={10} className="text-amber-400" />
+                        <span className="text-[0.7rem] text-gray-800 dark:text-gray-200 truncate font-medium" title={displayModelName(entry.model)}>{displayModelName(entry.model)}</span>
+                        <span className="t-micro text-gray-600 dark:text-gray-400 font-mono shrink-0 ml-2 flex items-center gap-1">
+                          {/* Der Blitz ist Schmuck und erbt deshalb das Grau
+                              der Zeile, statt eine eigene Farbe zu tragen. */}
+                          <Zap size={10} />
                           <span title="Useful throughput: the average rate multiplied by how often the answer was right. This is what the board is ordered by.">
                             {entry.score} t/s useful
                           </span>
@@ -169,7 +199,7 @@ export function BenchmarkView() {
                       </div>
                       <div className="w-full h-1.5 rounded-full bg-gray-200 dark:bg-white/5 overflow-hidden">
                         <div
-                          className={`h-full rounded-full transition-all duration-500 ${i === 0 ? 'bg-amber-400' : 'bg-gray-400 dark:bg-gray-500/60'}`}
+                          className={`h-full rounded-full transition-[width] duration-[var(--motion-slow)] ${i === 0 ? 'bg-gray-800 dark:bg-white/70' : 'bg-gray-400 dark:bg-gray-500/60'}`}
                           style={{ width: `${barWidth}%` }}
                         />
                       </div>
@@ -186,10 +216,16 @@ export function BenchmarkView() {
                             {Math.round(entry.thinkShare * 100)}% think
                           </span>
                         )}
+                        {/* Unter 100 Prozent ist keine Warnung, sondern eine
+                            Messung: die meisten Modelle liegen dort, und die
+                            Zeile daneben zeigt mit Rot schon an, wo wirklich
+                            etwas schiefging (abgeschnitten, weggelaufen).
+                            Also gruen nur fuer die volle Trefferquote, sonst
+                            der ruhige Ton aus `lib/hinweis.ts`. */}
                         {entry.accuracy !== null && (
                           <span
                             title="How often the answer matched the expected result"
-                            className={entry.accuracy < 1 ? 'text-amber-500' : 'text-emerald-500'}
+                            className={entry.accuracy < 1 ? HINWEIS_TEXT.ruhig : 'text-emerald-500'}
                           >
                             {Math.round(entry.accuracy * 100)}% correct
                           </span>
@@ -220,7 +256,7 @@ export function BenchmarkView() {
 
         {/* Model List with Bench Buttons */}
         <div className="space-y-1">
-          <h2 className="text-[0.65rem] font-semibold uppercase tracking-widest text-gray-500 mb-2">
+          <h2 className="t-micro font-semibold uppercase tracking-widest text-gray-500 mb-2">
             {textModels.length} Text Models
           </h2>
           {textModels.map((model) => {
@@ -230,13 +266,13 @@ export function BenchmarkView() {
             return (
               <div
                 key={model.name}
-                className="flex items-center justify-between px-3 py-2 rounded-lg hover:bg-gray-100 dark:hover:bg-white/[0.03] border border-transparent hover:border-gray-200 dark:hover:border-white/5 transition-all"
+                className="flex items-center justify-between px-3 py-2 rounded-lg hover:bg-gray-100 dark:hover:bg-white/[0.03] border border-transparent hover:border-gray-200 dark:hover:border-white/5 transition-colors"
               >
                 <div className="flex items-center gap-2 min-w-0">
-                  <span className="text-[0.7rem] text-gray-800 dark:text-gray-200 truncate">{model.name}</span>
+                  <span className="text-[0.7rem] text-gray-800 dark:text-gray-200 truncate" title={displayModelName(model.name)}>{displayModelName(model.name)}</span>
                   {latestSpeed !== null && (
                     <span className="text-[0.55rem] text-gray-500 font-mono flex items-center gap-0.5 shrink-0" title="Most recent benchmark run">
-                      <Zap size={9} className="text-amber-400" />
+                      <Zap size={9} />
                       {latestSpeed} t/s
                     </span>
                   )}
@@ -245,7 +281,7 @@ export function BenchmarkView() {
                   {isThisRunning ? (
                     <button
                       onClick={stopBenchmark}
-                      className="flex items-center gap-1 px-2 py-1 rounded-md bg-red-500/15 text-red-500 text-[0.6rem] hover:bg-red-500/25 transition-colors"
+                      className="flex items-center gap-1 px-2 py-1 rounded-md bg-red-500/15 text-red-500 t-micro hover:bg-red-500/25 transition-colors"
                     >
                       <Square size={10} />
                       {currentStep}/{totalSteps}
@@ -254,7 +290,7 @@ export function BenchmarkView() {
                     <button
                       onClick={() => runBenchmark(model.name)}
                       disabled={isRunning}
-                      className="flex items-center gap-1 px-2 py-1 rounded-md bg-gray-100 dark:bg-white/5 text-gray-600 dark:text-gray-400 text-[0.6rem] hover:bg-gray-200 dark:hover:bg-white/10 hover:text-gray-900 dark:hover:text-gray-200 transition-colors disabled:opacity-30"
+                      className="flex items-center gap-1 px-2 py-1 rounded-md bg-gray-100 dark:bg-white/5 text-gray-600 dark:text-gray-400 t-micro hover:bg-gray-200 dark:hover:bg-white/10 hover:text-gray-900 dark:hover:text-gray-200 transition-colors disabled:opacity-30"
                     >
                       <Play size={10} />
                       Run Benchmark

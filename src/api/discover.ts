@@ -1,65 +1,78 @@
 import { backendCall, fetchExternal } from "./backend"
 import { getCheckpoints, getDiffusionModels, getVAEModels, getCLIPModels, getGgufUnetModels, getAnimateDiffModels, getLoraModels, filterPartialFiles, refreshComfyModels } from "./comfyui"
+import { clearNodeCache } from "./comfyui-nodes"
+import { restartComfyForNewNodes } from "./comfy-restart"
 import type { ProviderId } from "./providers/types"
 import { log } from "../lib/logger"
+import { useWorkflowStore } from "../stores/workflowStore"
+import { waitForModelsVisible } from "../lib/bundle-install"
+import type { DownloadProgress } from "../types/downloads"
+import { asNumber, asRecordArray, asString, isRecord, prop, propPath } from "../types/json-guards"
+import type { DiscoverModel, ModelBundle } from "./model-bundles"
+import { formatCount } from '../lib/formatters'
+import { BUILTIN_BACKEND_ID } from '../lib/onboarding-backend'
+import { customModelDirs } from './engine'
+import {
+  CUSTOM_NODE_REGISTRY,
+  getImageBundles, getVideoBundles, getAudioBundles, getLipsyncBundles, getMotionBundles,
+} from "./model-bundles"
 
-export interface DiscoverModel {
-  name: string
-  description: string
-  pulls: string
-  tags: string[]
-  updated: string
-  url?: string
-  // For direct download
-  downloadUrl?: string
-  filename?: string
-  subfolder?: string  // ComfyUI models subfolder: checkpoints, diffusion_models, vae, text_encoders
-  sizeGB?: number
-  // Vision projector that belongs to `downloadUrl`. A text GGUF carries no
-  // image tower: llama.cpp keeps it in a separate mmproj file and only sees
-  // images when the server is started with `--mmproj`. When this is set the
-  // download writes BOTH files into the model folder and the built-in engine
-  // picks the projector up by name (see `mmprojFileName`). Ollama entries never
-  // need it, their tag already ships a projector layer.
-  mmprojUrl?: string
-  mmprojSizeGB?: number
-  // Discovery flags
-  hot?: boolean       // Featured/trending model
-  agent?: boolean     // Supports Agent Mode tool calling
-  released?: string   // Release date YYYY-MM for sorting (newest first)
-  // F4 (juliandiggins-stack GH#21): explicit CPU-only / ≤8 GB RAM
-  // tag. Surfaces a green "CPU-friendly" badge in DiscoverModels and
-  // exposes the optional "Lightweight" filter. Set true for ≤4B
-  // unfiltered models we have personally test-loaded on a CPU-only
-  // 8 GB box.
-  lightweight?: boolean
-  // Multi-provider
-  provider?: ProviderId   // Which provider this model belongs to
-  providerName?: string   // Display name of the provider
-  canPull?: boolean       // false = no download/pull capability (cloud/external)
-  ollamaModel?: string    // Ollama model tag for `ollama pull` (e.g. 'qwen3.6')
-  // Model Hub grouping (2.5.8 redesign): entries that are the SAME model in a
-  // different quant share a `group` and render as ONE card with a size picker.
-  // Different parameter sizes stay separate cards on purpose.
-  group?: string
-  // Optional hand-written one-liner for the card. When absent the card derives
-  // a short line from `description` (text after the first "·", first sentence).
-  blurb?: string
-}
+// Katalog + Formen liegen in model-bundles.ts (siehe dort). Re-Export, damit
+// bestehende Importpfade unverändert bleiben.
+export type { DiscoverModel, ModelBundle, CustomNodeDef } from './model-bundles'
+export {
+  CUSTOM_NODE_REGISTRY,
+  getImageBundles, getImageModelsDiscover, getVideoBundles,
+  getAudioBundles, getLipsyncBundles, getMotionBundles,
+} from './model-bundles'
 
-export interface DownloadProgress {
-  progress: number
-  total: number
-  speed: number
-  filename: string
-  status: 'connecting' | 'downloading' | 'pausing' | 'paused' | 'complete' | 'error'
-  error?: string
-}
+// Die Fortschrittsform lebt in types/downloads.ts, damit lib/bundle-install.ts
+// sie lesen kann, ohne dieses Modul zu importieren. Re-Export, damit bestehende
+// Importpfade unverändert bleiben.
+export type { DownloadProgress }
 
 // ─── Download API ───
 
-export async function startModelDownload(url: string, subfolder: string, filename: string, expectedBytes?: number): Promise<{ status: string; id: string; error?: string }> {
-  return backendCall("download_model", { url, subfolder, filename, expectedBytes: expectedBytes ?? null })
+/**
+ * Is this URL served by CivitAI? Host comparison, never a substring of the
+ * whole URL: `https://evil.test/?x=civitai.com` must not collect the user's
+ * API key. Mirrors `is_civitai_host` in `src-tauri/src/commands/download.rs`,
+ * which gates the same key a second time on its way onto the wire.
+ */
+const CIVITAI_HOSTS = ['civitai.com', 'civitai.red']
+
+export function isCivitaiUrl(url: string): boolean {
+  let host: string
+  try {
+    host = new URL(url).hostname.toLowerCase()
+  } catch {
+    return false
+  }
+  return CIVITAI_HOSTS.some((h) => host === h || host.endsWith(`.${h}`))
+}
+
+/**
+ * The user's CivitAI API key, for a CivitAI URL and no other.
+ *
+ * goonerforporn (Discord #bug-reports, 2026-08-28): downloads from the CivitAI
+ * search died in 400s because they went out anonymous. The key was in the store
+ * and read by the search, and by nothing on the download path.
+ */
+export function civitaiAuthToken(url: string): string | null {
+  if (!isCivitaiUrl(url)) return null
+  const key = useWorkflowStore.getState().civitaiApiKey?.trim()
+  return key ? key : null
+}
+
+export async function startModelDownload(url: string, subfolder: string, filename: string, expectedBytes?: number, sha256?: string): Promise<{ status: string; id: string; error?: string }> {
+  return backendCall("download_model", {
+    url,
+    subfolder,
+    filename,
+    expectedBytes: expectedBytes ?? null,
+    expectedSha256: sha256 ?? null,
+    authToken: civitaiAuthToken(url),
+  })
 }
 
 export async function getDownloadProgress(): Promise<Record<string, DownloadProgress>> {
@@ -74,12 +87,170 @@ export async function pauseDownload(id: string): Promise<void> {
   await backendCall("pause_download", { id })
 }
 
+/**
+ * The user aborting a transfer: stops it AND deletes the partial file.
+ *
+ * Not the same thing as `clearDownloadEntry`, and the two must never be swapped
+ * again. `retry()` used to come through here, so a short outage on a 40 GB
+ * bundle cost the whole download: the error text said "start it again to
+ * resume", the UI offered Retry, and Retry deleted the bytes it was about to
+ * resume from.
+ */
 export async function cancelDownload(id: string): Promise<void> {
   await backendCall("cancel_download", { id })
 }
 
-export async function resumeDownload(id: string, url: string, subfolder: string): Promise<void> {
-  await backendCall("resume_download", { id, url, subfolder })
+/**
+ * Drop a settled row (error / paused / complete) from the Rust progress map and
+ * LEAVE THE PARTIAL FILE ALONE.
+ *
+ * Clearing the Rust side is not optional before a retry: `download_model`
+ * short-circuits on a file that is already on disk without ever touching the
+ * map, so the next poll would resurrect the error row the user just retried
+ * (the_mr_pickles). That bookkeeping is all this does — it is not a decision
+ * about the user's bytes.
+ */
+export async function clearDownloadEntry(id: string): Promise<void> {
+  await backendCall("clear_download_entry", { id })
+}
+
+/**
+ * The four answers that mean the ADDRESS is dead rather than the connection:
+ * gone (404/410) and gated-or-private (401/403). Everything else — a transport
+ * error, a rate limit, a 5xx — is the host having a bad minute and stays
+ * retryable.
+ *
+ * ONE list, read from two directions. `isPermanentDownloadError` reads it out
+ * of the message a failed download carries back from Rust; `classifyAddressProbe`
+ * (below, used by the catalog gate) reads it out of a bare HTTP status. Two
+ * hand-written copies of "what counts as broken" would be two chances to
+ * disagree, and the disagreement would be silent: the gate would pass an
+ * address the download path calls permanently dead.
+ */
+export const PERMANENT_HTTP_STATUSES: readonly number[] = [401, 403, 404, 410]
+
+const PERMANENT_HTTP = new RegExp(`\\(HTTP (${PERMANENT_HTTP_STATUSES.join('|')})\\)`)
+
+/**
+ * Would pressing Retry on this error ever succeed?
+ *
+ * The catalog hard-codes its HuggingFace addresses (`catalogAddresses()` walks
+ * every one of them). When one of those repos is renamed, gated or taken down,
+ * every attempt answers the same 404/403 forever, and the old UI answered with
+ * a bare "HTTP 404" and a Retry button — a loop with no exit. The status code
+ * inside the message is the contract; it is put there by `http_error_message`
+ * in src-tauri/src/commands/download.rs.
+ *
+ * A transport error, a rate limit and a 5xx are all temporary and stay
+ * retryable: only an address that is gone is permanent.
+ */
+export function isPermanentDownloadError(error?: string | null): boolean {
+  return !!error && PERMANENT_HTTP.test(error)
+}
+
+export async function resumeDownload(id: string, url: string, subfolder: string, expectedBytes?: number, sha256?: string): Promise<void> {
+  await backendCall("resume_download", {
+    id,
+    url,
+    subfolder,
+    expectedBytes: expectedBytes ?? null,
+    expectedSha256: sha256 ?? null,
+    authToken: civitaiAuthToken(url),
+  })
+}
+
+/** A `.download` partial from an earlier run of the app, with no row watching it. */
+export interface OrphanDownload {
+  /** Basename minus its extension — NOT the download id. See `orphanFilename`. */
+  stem: string
+  /** Absolute path of the partial. */
+  path: string
+  /** Directory it sits in; a GGUF outside the ComfyUI tree resumes into this. */
+  dir: string
+  bytes: number
+}
+
+/**
+ * Partial downloads a previous run of the app left behind.
+ *
+ * Both halves of the download kept their state purely in RAM, so quitting
+ * during a multi-gigabyte transfer left the `.download` file on disk with no
+ * row, no button and no way to finish or delete it. `extraDirs` carries the
+ * provider model folders only the frontend knows (LM Studio, a custom path),
+ * taken from the download meta the store now persists.
+ */
+export async function findOrphanDownloads(extraDirs: string[] = []): Promise<OrphanDownload[]> {
+  try {
+    // Die Antwort wird geprueft und nicht geglaubt. Der Aufrufer im
+    // downloadStore liest sofort `.length`, und eine Gegenstelle, die statt
+    // der Liste `null` oder gar nichts schickt (eine aeltere Rust-Seite, ein
+    // Bridge-Aufruf, der still leer zurueckkommt), erzeugte dort eine
+    // unbehandelte Zurueckweisung statt eines leeren Ergebnisses. Ein
+    // fehlgeschlagener Suchlauf ist "es liegt nichts herum", nicht ein Fehler,
+    // den der Nutzer sieht.
+    const antwort = await backendCall("find_orphan_downloads", { extraDirs })
+    return Array.isArray(antwort) ? antwort : []
+  } catch (err) {
+    log.warn('[discover] orphan scan failed', { err })
+    return []
+  }
+}
+
+/** Delete one orphaned partial. Jailed to the model folders on the Rust side. */
+export async function deleteOrphanDownload(path: string, extraDirs: string[] = []): Promise<void> {
+  await backendCall("delete_orphan_download", { path, extraDirs })
+}
+
+/**
+ * Recover the download id (the real filename) for an orphaned partial.
+ *
+ * `Path::with_extension("download")` REPLACES the extension, so the partial for
+ * `wan_2.1_vae.safetensors` is `wan_2.1_vae.download`: the original suffix is
+ * not on disk any more. Everything that can name the file lives up here — the
+ * persisted download meta first, because it also knows the destDir, then the
+ * catalog. A stem nothing recognises stays unresolved; it can still be shown
+ * and deleted, just not resumed.
+ */
+export function orphanFilename(stem: string, knownFilenames: Iterable<string>): string | null {
+  for (const name of knownFilenames) {
+    if (name === stem || name.replace(/\.[^.]+$/, '') === stem) return name
+  }
+  return null
+}
+
+/** Verdict of the ONE space check a bundle gets before its first transfer. */
+export interface SpaceVerdict {
+  fits: boolean
+  requiredBytes: number
+  reservedBytes: number
+  availableBytes?: number | null
+  message?: string
+}
+
+/**
+ * Does `requiredBytes` still fit, counting what running transfers still owe?
+ *
+ * Asked once for a whole bundle. The per-file check in `do_download` answers
+ * "does the rest of THIS file fit", which is the wrong question when four files
+ * start at the same moment: all four passed against the same free bytes, all
+ * four started, and the drive filled anyway — on Windows a full system
+ * partition degrades the whole machine, not just the download.
+ */
+export async function checkDownloadSpace(
+  target: { subfolder?: string; destDir?: string },
+  requiredBytes: number,
+): Promise<SpaceVerdict | null> {
+  try {
+    return await backendCall("check_download_space", {
+      subfolder: target.subfolder ?? null,
+      destDir: target.destDir ?? null,
+      requiredBytes: Math.max(0, Math.round(requiredBytes)),
+    })
+  } catch (err) {
+    // A drive we cannot measure must never block a download.
+    log.warn('[discover] space check unavailable', { err })
+    return null
+  }
 }
 
 // ─── Custom Node Installation ───
@@ -339,22 +510,91 @@ export function assertNodeInstallOk(result: unknown, name: string): void {
   }
 }
 
-export async function installCustomNodes(nodeKeys: string[]): Promise<void> {
-  for (const key of nodeKeys) {
-    const entry = CUSTOM_NODE_REGISTRY[key]
-    if (!entry) {
-      log.warn(`[discover] Unknown custom node key: ${key}`)
-      continue
+/** Where the callers of a node install genuinely differ — and nothing else. */
+export interface CustomNodeInstallOptions {
+  /**
+   * Keep going when one pack fails, instead of throwing on the first.
+   *
+   * True for the bundle download, where the packs are an extra alongside
+   * gigabytes of models and one broken clone must not cost the rest. False —
+   * the default — for the Create flows, which install exactly the pack the
+   * next step needs and have nothing to do without it.
+   */
+  keepGoing?: boolean
+  /**
+   * Restart ComfyUI afterwards so the packs actually register.
+   *
+   * A cloned pack is Python that only loads at ComfyUI startup, so without
+   * this the install is on disk and invisible. The callers in the Create
+   * surface do their own restart around their own progress text; the bundle
+   * download has no such surface and asks for it here.
+   */
+  restart?: boolean
+  /** Progress text for a caller that has somewhere to put it. */
+  onProgress?: (message: string) => void
+}
+
+/**
+ * Install node packs — and leave this process's idea of "which nodes exist"
+ * broken behind you, because it is now a lie.
+ *
+ * THE ONE PATH. There used to be two: this function, and a hand-copied loop
+ * inside `installBundleComplete` below. They drifted, as copies do. This one never
+ * touched `clearNodeCache()`, so every caller had to remember; three of them
+ * did, each in its own hand-written sequence (CreateContext.tsx:346 and :407,
+ * useCreate.ts:991). The copy in `installBundleComplete` did not — it restarted
+ * ComfyUI and refreshed the MODEL lists, which is a different cache entirely.
+ * `getAllNodeInfo` holds `/object_info` for five minutes
+ * (comfyui-nodes.ts:60), so after a bundle install the workflow builder kept
+ * reading the pre-install catalogue and kept telling the user to install the
+ * pack he had just installed. T-67.
+ *
+ * The cache break is in a `finally` on purpose. A pack whose `pip install`
+ * died halfway can still have registered its nodes, and a failed install is
+ * exactly the moment nobody remembers to invalidate anything. Dropping a
+ * five-minute cache costs one `/object_info` fetch; keeping a stale one costs
+ * the user a wrong instruction he cannot argue with.
+ *
+ * It is broken a SECOND time after the restart, and that is the one that
+ * matters: between install and restart the nodes are still not registered, so
+ * anything that refetches in that window would just re-cache the same stale
+ * answer. The restart is when the truth changes.
+ */
+export async function installCustomNodes(nodeKeys: string[], opts: CustomNodeInstallOptions = {}): Promise<void> {
+  try {
+    for (const key of nodeKeys) {
+      const entry = CUSTOM_NODE_REGISTRY[key]
+      if (!entry) {
+        log.warn(`[discover] Unknown custom node key: ${key}`)
+        continue
+      }
+      try {
+        opts.onProgress?.(`Installing ${entry.name}…`)
+        const result = await backendCall('install_custom_node', { repoUrl: entry.repo, nodeName: entry.name })
+        assertNodeInstallOk(result, entry.name)
+        log.info(`[discover] Installed custom node: ${entry.name}`)
+      } catch (err) {
+        if (!opts.keepGoing) {
+          log.error(`[discover] Failed to install ${entry.name}`, { err })
+          throw new Error(`Failed to install ${entry.name}: ${err}`)
+        }
+        log.warn('[discover] Custom node install failed', { err })
+      }
     }
-    try {
-      const result = await backendCall('install_custom_node', { repoUrl: entry.repo, nodeName: entry.name })
-      assertNodeInstallOk(result, entry.name)
-      log.info(`[discover] Installed custom node: ${entry.name}`)
-    } catch (err) {
-      log.error(`[discover] Failed to install ${entry.name}`, { err })
-      throw new Error(`Failed to install ${entry.name}: ${err}`)
-    }
+  } finally {
+    clearNodeCache()
   }
+
+  if (!opts.restart) return
+  // `restartComfyForNewNodes`, not a hand-rolled stop/sleep/start. The copy
+  // this replaced slept two seconds and started again unconditionally, which
+  // is exactly wrong for a ComfyUI that LU did not spawn: the old process
+  // keeps the port and its old node list, the new one never gets the port, and
+  // the user is sent hunting an IMPORT FAILED line nobody ever wrote (measured
+  // on the test box 2026-08-15, see comfy-restart.ts).
+  opts.onProgress?.('Restarting ComfyUI so the new nodes register…')
+  await restartComfyForNewNodes()
+  clearNodeCache()
 }
 
 /** How long an install click itself waits for ComfyUI to notice a file that is
@@ -410,7 +650,6 @@ function confirmVisibleOrAccuse(filename: string): Promise<void> {
 
 async function runVisibilityConfirmation(filename: string): Promise<void> {
   try {
-    const { waitForModelsVisible } = await import('../lib/bundle-install')
     const left = await waitForModelsVisible({
       missing: () => modelsNotVisibleInComfy([filename]),
       refresh: async () => {
@@ -429,11 +668,38 @@ async function runVisibilityConfirmation(filename: string): Promise<void> {
   }
 }
 
+/** One gibibyte, the unit the catalog's `sizeGB` and every size message use. */
+const GIB = 1_073_741_824
+
+/**
+ * How many bytes this bundle still has to fetch, and where they land.
+ *
+ * Pure, so the sum can be tested without a drive. Files already on disk are
+ * left out — re-checking space for a file that is not going to be fetched would
+ * refuse installs that fit perfectly well. `totalSizeGB` is the fallback when
+ * the per-file sizes are missing: a rough number is a far better plan than
+ * planning for nothing, and it is only ever used to refuse, never to promise.
+ */
+export function bundleBytesToFetch(
+  bundle: ModelBundle,
+  installed: Set<string>,
+): { bytes: number; subfolder?: string; files: number } {
+  const pending = bundle.files.filter(
+    f => f.downloadUrl && f.filename && f.subfolder && !installed.has(f.filename),
+  )
+  if (pending.length === 0) return { bytes: 0, files: 0 }
+  const known = pending.reduce((sum, f) => sum + (f.sizeGB ? f.sizeGB * GIB : 0), 0)
+  // Not one file states a size: fall back to the bundle total, minus nothing,
+  // because we cannot tell which part of it is already there.
+  const bytes = known > 0 ? known : (bundle.totalSizeGB || 0) * GIB
+  return { bytes: Math.round(bytes), subfolder: pending[0].subfolder, files: pending.length }
+}
+
 export async function installBundleComplete(bundle: ModelBundle): Promise<void> {
   const errors: string[] = []
 
   // Pre-check: which files already exist on disk (skip re-downloading them)
-  let installedFiles = new Set<string>()
+  const installedFiles = new Set<string>()
   try {
     const checkFiles = bundle.files
       .filter(f => f.subfolder && f.filename)
@@ -473,9 +739,6 @@ export async function installBundleComplete(bundle: ModelBundle): Promise<void> 
     // folders, which was simply untrue. Same cure as the Create install and the
     // download poller, on a much shorter clock. The rescan also refreshes the
     // set every later file of this bundle is judged against.
-    // waitForModelsVisible is pulled in here rather than at the top because
-    // bundle-install.ts points back at this module.
-    const { waitForModelsVisible } = await import('../lib/bundle-install')
     const left = await waitForModelsVisible({
       missing: async () => (visibleBases?.has(base) ? [] : [filename]),
       refresh: async () => {
@@ -487,6 +750,21 @@ export async function installBundleComplete(bundle: ModelBundle): Promise<void> 
     })
     if (!visibleBases) return null // engine left mid wait · still no verdict
     return left.length === 0
+  }
+
+  // ONE space check for the whole bundle, before the first byte moves.
+  //
+  // Every file starts its own transfer and every transfer checked the free
+  // space on its own, so a four file bundle passed the same free bytes four
+  // times over and then filled the drive between them. The sum is the only
+  // honest question, and it has to be asked before anything starts: refusing
+  // file three after files one and two have written 20 GB helps nobody.
+  const pendingBytes = bundleBytesToFetch(bundle, installedFiles)
+  if (pendingBytes.bytes > 0 && pendingBytes.subfolder) {
+    const verdict = await checkDownloadSpace({ subfolder: pendingBytes.subfolder }, pendingBytes.bytes)
+    if (verdict && !verdict.fits) {
+      throw new Error(verdict.message || `${bundle.name} does not fit on this drive.`)
+    }
   }
 
   // Step 1: Start downloads only for files NOT already installed
@@ -504,7 +782,7 @@ export async function installBundleComplete(bundle: ModelBundle): Promise<void> 
     }
     try {
       const expectedBytes = file.sizeGB ? Math.round(file.sizeGB * 1_073_741_824) : undefined
-      const result = await startModelDownload(file.downloadUrl, file.subfolder, file.filename, expectedBytes)
+      const result = await startModelDownload(file.downloadUrl, file.subfolder, file.filename, expectedBytes, file.sha256)
       if (result.status === 'exists') {
         // File already on disk · emit synthetic 'complete' so UI reflects it
         window.dispatchEvent(new CustomEvent('comfyui-download-exists', { detail: { filename: file.filename } }))
@@ -517,36 +795,24 @@ export async function installBundleComplete(bundle: ModelBundle): Promise<void> 
 
   // Step 2: Install custom nodes in BACKGROUND (fire-and-forget, non-blocking)
   // This runs git clone + pip install which can take minutes · never block downloads
+  //
+  // Through `installCustomNodes`, not a copy of it. The loop that used to stand
+  // here was the second of two paths doing the same job, and it was the one
+  // nobody maintained: it never broke the /object_info cache, so the workflow
+  // builder went on recommending the pack this very call had just installed
+  // (T-67), and its restart was a hand-rolled sleep that could not tell a
+  // ComfyUI LU owns from one it does not.
   if (bundle.customNodes && bundle.customNodes.length > 0) {
-    const nodeKeys = [...bundle.customNodes]
-    void (async () => {
-      for (const key of nodeKeys) {
-        try {
-          const entry = CUSTOM_NODE_REGISTRY[key]
-          if (!entry) continue
-          const result = await backendCall('install_custom_node', { repoUrl: entry.repo, nodeName: entry.name })
-          assertNodeInstallOk(result, entry.name)
-          log.info(`[discover] Installed custom node: ${entry.name}`)
-        } catch (err) {
-          log.warn('[discover] Custom node install failed', { err })
-        }
-      }
-      // Restart ComfyUI after custom nodes are done (needed for node registration)
-      try {
-        await backendCall('stop_comfyui')
-        await new Promise(resolve => setTimeout(resolve, 2000))
-        await backendCall('start_comfyui')
-        log.info('[discover] ComfyUI restarted after custom node install')
-      } catch (err) {
-        log.warn('[discover] ComfyUI restart after custom node install failed', { err })
-      }
-    })()
+    void installCustomNodes([...bundle.customNodes], { keepGoing: true, restart: true })
+      .catch((err) => log.warn('[discover] Custom node install/restart failed', { err }))
   }
 
   // Force ComfyUI to re-scan model directories so new files appear in /object_info.
-  // Without this, ComfyUI's cached model list stays stale on Windows.
+  // Without this, ComfyUI's cached model list stays stale on Windows. This is
+  // the MODEL scan (ComfyUI's own), not the node catalogue — the node half is
+  // `clearNodeCache()` inside installCustomNodes above, and confusing the two
+  // is what left T-67 open.
   try {
-    const { refreshComfyModels } = await import('./comfyui')
     await refreshComfyModels()
   } catch { /* non-fatal · fetchModels also calls refresh */ }
 
@@ -572,7 +838,10 @@ export interface ComponentSpec {
 }
 
 export interface ComponentRequirements {
-  loader: 'UNETLoader' | 'CheckpointLoaderSimple'
+  // SVD loads through ComfyUI's ImageOnlyCheckpointLoader — the registry
+  // below has always said so, only this union (a stale copy of the one in
+  // comfyui.ts, which lists all three) had not caught up.
+  loader: 'UNETLoader' | 'CheckpointLoaderSimple' | 'ImageOnlyCheckpointLoader'
   vae?: ComponentSpec
   clip?: ComponentSpec
   clipSecondary?: ComponentSpec
@@ -678,10 +947,18 @@ const HF = (repo: string, file: string) => `https://huggingface.co/${repo}/resol
  * Derived, never hand-written in the catalog, because the built-in engine has
  * to find the projector from the model path alone (src-tauri engine.rs mirrors
  * this exact rule). The upstream repos disagree on naming (`mmproj-F16.gguf`,
- * `mmproj-model-bf16.gguf`, `Qwen3.8-27B-Uncensored-vision-f16.gguf`), and the
+ * `mmproj-model-bf16.gguf`, `mmproj-Qwen3.8-27B-Uncensored-f16.gguf`), and the
  * built-in models dir is FLAT, so keeping the upstream name would leave two
  * models fighting over one projector file. Tying the name to the model also
  * keeps the pairing right when a user downloads several quants of one model.
+ *
+ * The third example used to read `Qwen3.8-27B-Uncensored-vision-f16.gguf`.
+ * That file never existed: the address built from it answered 404, and all six
+ * Qwen 3.8 27B entries pointed at it, so every one of them would have fetched
+ * 11-29 GB of model and then failed on the projector. Nothing noticed for as
+ * long as nobody asked the host — which is the whole of T-70. Corrected
+ * against the repo's own file list on 2026-09-01, first run of the gate in
+ * `__tests__/hf-catalog-addresses.live.test.ts`.
  */
 export function mmprojFileName(modelFilename: string): string {
   const stem = modelFilename.replace(/\.gguf$/i, '')
@@ -693,6 +970,8 @@ export interface PlannedDownload {
   url: string
   filename: string
   expectedBytes?: number
+  /** Content digest, when the catalog or the HF tree stated one. */
+  sha256?: string
 }
 
 /**
@@ -705,8 +984,11 @@ export interface PlannedDownload {
  * this model need a second file, and what is it called" decision is unit
  * testable without rendering the Models tab.
  */
-export function planModelDownload(model: DiscoverModel, url: string, filename: string, bytes?: number): PlannedDownload[] {
-  const plan: PlannedDownload[] = [{ url, filename, expectedBytes: bytes }]
+export function planModelDownload(model: DiscoverModel, url: string, filename: string, bytes?: number, sha256?: string): PlannedDownload[] {
+  // The resolved digest wins over the catalog's: `url` may have been corrected
+  // by the HF tree, and a digest that belongs to a different file is worse than
+  // none at all.
+  const plan: PlannedDownload[] = [{ url, filename, expectedBytes: bytes, sha256: sha256 ?? (url === model.downloadUrl ? model.sha256 : undefined) }]
   if (model.mmprojUrl) {
     plan.push({
       url: model.mmprojUrl,
@@ -758,14 +1040,23 @@ export function getUncensoredTextModels(): DiscoverModel[] {
     // vision-language models, so every entry carries the repo's own mmproj and
     // LU downloads it with the model (see `mmprojFileName`). The MTP head that
     // ships inside these GGUFs loads fine on the pinned llama.cpp b9949, which
-    // implements the qwen35 MTP block, so we point at the plain files and not
-    // at JonathanColetti's noMTP cut.
-    { name: 'Qwen 3.8 27B Uncensored', group: 'Qwen 3.8 27B Uncensored', description: 'Qwen 3.8 27B dense · the viral uncensored build. Vision + thinking, 262K context. Recommended quant. The 0.9 GB vision projector comes with it.', pulls: '1M+', tags: ['27B', 'Vision', 'Q4_K_M', '17 GB'], updated: 'Hot', agent: true, released: '2026-08', downloadUrl: HF('JonathanColetti/Qwen3.8-27B-Uncensored-GGUF', 'Qwen3.8-27B-Uncensored-Q4_K_M.gguf'), filename: 'Qwen3.8-27B-Uncensored-Q4_K_M.gguf', sizeGB: 16.8, mmprojUrl: HF('JonathanColetti/Qwen3.8-27B-Uncensored-GGUF', 'Qwen3.8-27B-Uncensored-vision-f16.gguf'), mmprojSizeGB: 0.93 },
-    { name: 'Qwen 3.8 27B Uncensored IQ2_M', group: 'Qwen 3.8 27B Uncensored', description: 'Qwen 3.8 27B uncensored · smallest quant, fits a 12 GB card. Real quality tradeoff, but it runs.', pulls: '1M+', tags: ['27B', 'Vision', 'IQ2_M', '11 GB'], updated: 'Hot', agent: true, released: '2026-08', downloadUrl: HF('JonathanColetti/Qwen3.8-27B-Uncensored-GGUF', 'Qwen3.8-27B-Uncensored-IQ2_M.gguf'), filename: 'Qwen3.8-27B-Uncensored-IQ2_M.gguf', sizeGB: 10.6, mmprojUrl: HF('JonathanColetti/Qwen3.8-27B-Uncensored-GGUF', 'Qwen3.8-27B-Uncensored-vision-f16.gguf'), mmprojSizeGB: 0.93 },
-    { name: 'Qwen 3.8 27B Uncensored IQ4_XS', group: 'Qwen 3.8 27B Uncensored', description: 'Qwen 3.8 27B uncensored · IQ4_XS, the cheapest 4 bit. Close to Q4_K_M on 16 GB cards.', pulls: '1M+', tags: ['27B', 'Vision', 'IQ4_XS', '15 GB'], updated: 'New', agent: true, released: '2026-08', downloadUrl: HF('JonathanColetti/Qwen3.8-27B-Uncensored-GGUF', 'Qwen3.8-27B-Uncensored-IQ4_XS.gguf'), filename: 'Qwen3.8-27B-Uncensored-IQ4_XS.gguf', sizeGB: 15.3, mmprojUrl: HF('JonathanColetti/Qwen3.8-27B-Uncensored-GGUF', 'Qwen3.8-27B-Uncensored-vision-f16.gguf'), mmprojSizeGB: 0.93 },
-    { name: 'Qwen 3.8 27B Uncensored Q5_K_M', group: 'Qwen 3.8 27B Uncensored', description: 'Qwen 3.8 27B uncensored · Q5, higher quality. For 24 GB cards.', pulls: '1M+', tags: ['27B', 'Vision', 'Q5_K_M', '20 GB'], updated: 'New', agent: true, released: '2026-08', downloadUrl: HF('JonathanColetti/Qwen3.8-27B-Uncensored-GGUF', 'Qwen3.8-27B-Uncensored-Q5_K_M.gguf'), filename: 'Qwen3.8-27B-Uncensored-Q5_K_M.gguf', sizeGB: 19.5, mmprojUrl: HF('JonathanColetti/Qwen3.8-27B-Uncensored-GGUF', 'Qwen3.8-27B-Uncensored-vision-f16.gguf'), mmprojSizeGB: 0.93 },
-    { name: 'Qwen 3.8 27B Uncensored Q6_K', group: 'Qwen 3.8 27B Uncensored', description: 'Qwen 3.8 27B uncensored · Q6, near-lossless. High-VRAM setups.', pulls: '1M+', tags: ['27B', 'Vision', 'Q6_K', '22 GB'], updated: 'New', agent: true, released: '2026-08', downloadUrl: HF('JonathanColetti/Qwen3.8-27B-Uncensored-GGUF', 'Qwen3.8-27B-Uncensored-Q6_K.gguf'), filename: 'Qwen3.8-27B-Uncensored-Q6_K.gguf', sizeGB: 22.4, mmprojUrl: HF('JonathanColetti/Qwen3.8-27B-Uncensored-GGUF', 'Qwen3.8-27B-Uncensored-vision-f16.gguf'), mmprojSizeGB: 0.93 },
-    { name: 'Qwen 3.8 27B Uncensored Q8_0', group: 'Qwen 3.8 27B Uncensored', description: 'Qwen 3.8 27B uncensored · Q8, full quality. 32 GB+ or CPU with lots of RAM.', pulls: '1M+', tags: ['27B', 'Vision', 'Q8_0', '29 GB'], updated: 'New', agent: true, released: '2026-08', downloadUrl: HF('JonathanColetti/Qwen3.8-27B-Uncensored-GGUF', 'Qwen3.8-27B-Uncensored-Q8_0.gguf'), filename: 'Qwen3.8-27B-Uncensored-Q8_0.gguf', sizeGB: 29, mmprojUrl: HF('JonathanColetti/Qwen3.8-27B-Uncensored-GGUF', 'Qwen3.8-27B-Uncensored-vision-f16.gguf'), mmprojSizeGB: 0.93 },
+    // implements the qwen35 MTP block, so we point at the plain files.
+    //
+    // The uncensored build is OrcaRouter's abliteration. Its own GGUF repo
+    // (orcarouter/Qwen3.8-27B-Uncensored-GGUF) is gated: every file answers
+    // HTTP 401 without a logged-in, terms-accepted account, which LU's
+    // downloader does not have, so pointing there would fail after the click.
+    // The rows use bartowski's requant of the same weights (base_model =
+    // orcarouter/Qwen3.8-27B-Uncensored, ungated, HEAD 200 on 2026-09-05);
+    // the entries used to point at JonathanColetti's requant. One HF row
+    // serves both the built-in engine and LM Studio (the downloader writes
+    // into whichever folder is active); Ollama gets the author's own tag.
+    { name: 'Qwen 3.8 27B Uncensored', group: 'Qwen 3.8 27B Uncensored', description: 'OrcaRouter Qwen 3.8 27B uncensored · the viral abliterated build, from the author\'s own repo. Vision + thinking + tools, 262K context. Recommended quant. The 0.9 GB vision projector comes with it.', pulls: '35K+', tags: ['27B', 'Vision', 'Q4_K_M', '18 GB'], updated: 'Hot', agent: true, released: '2026-08', downloadUrl: HF('bartowski/orcarouter_Qwen3.8-27B-Uncensored-GGUF', 'orcarouter_Qwen3.8-27B-Uncensored-Q4_K_M.gguf'), filename: 'orcarouter_Qwen3.8-27B-Uncensored-Q4_K_M.gguf', sizeGB: 17.8, mmprojUrl: HF('bartowski/orcarouter_Qwen3.8-27B-Uncensored-GGUF', 'mmproj-orcarouter_Qwen3.8-27B-Uncensored-f16.gguf'), mmprojSizeGB: 0.93 },
+    { name: 'Qwen 3.8 27B Uncensored IQ2_M', group: 'Qwen 3.8 27B Uncensored', description: 'OrcaRouter Qwen 3.8 27B uncensored · smallest quant, fits a 12 GB card. Real quality tradeoff, but it runs.', pulls: '35K+', tags: ['27B', 'Vision', 'IQ2_M', '11 GB'], updated: 'Hot', agent: true, released: '2026-08', downloadUrl: HF('bartowski/orcarouter_Qwen3.8-27B-Uncensored-GGUF', 'orcarouter_Qwen3.8-27B-Uncensored-IQ2_M.gguf'), filename: 'orcarouter_Qwen3.8-27B-Uncensored-IQ2_M.gguf', sizeGB: 10.9, mmprojUrl: HF('bartowski/orcarouter_Qwen3.8-27B-Uncensored-GGUF', 'mmproj-orcarouter_Qwen3.8-27B-Uncensored-f16.gguf'), mmprojSizeGB: 0.93 },
+    { name: 'Qwen 3.8 27B Uncensored IQ4_XS', group: 'Qwen 3.8 27B Uncensored', description: 'OrcaRouter Qwen 3.8 27B uncensored · IQ4_XS, the cheapest 4 bit. Close to Q4_K_M on 16 GB cards.', pulls: '35K+', tags: ['27B', 'Vision', 'IQ4_XS', '16 GB'], updated: 'New', agent: true, released: '2026-08', downloadUrl: HF('bartowski/orcarouter_Qwen3.8-27B-Uncensored-GGUF', 'orcarouter_Qwen3.8-27B-Uncensored-IQ4_XS.gguf'), filename: 'orcarouter_Qwen3.8-27B-Uncensored-IQ4_XS.gguf', sizeGB: 15.6, mmprojUrl: HF('bartowski/orcarouter_Qwen3.8-27B-Uncensored-GGUF', 'mmproj-orcarouter_Qwen3.8-27B-Uncensored-f16.gguf'), mmprojSizeGB: 0.93 },
+    { name: 'Qwen 3.8 27B Uncensored Q5_K_M', group: 'Qwen 3.8 27B Uncensored', description: 'OrcaRouter Qwen 3.8 27B uncensored · Q5, higher quality. For 24 GB cards.', pulls: '35K+', tags: ['27B', 'Vision', 'Q5_K_M', '21 GB'], updated: 'New', agent: true, released: '2026-08', downloadUrl: HF('bartowski/orcarouter_Qwen3.8-27B-Uncensored-GGUF', 'orcarouter_Qwen3.8-27B-Uncensored-Q5_K_M.gguf'), filename: 'orcarouter_Qwen3.8-27B-Uncensored-Q5_K_M.gguf', sizeGB: 20.8, mmprojUrl: HF('bartowski/orcarouter_Qwen3.8-27B-Uncensored-GGUF', 'mmproj-orcarouter_Qwen3.8-27B-Uncensored-f16.gguf'), mmprojSizeGB: 0.93 },
+    { name: 'Qwen 3.8 27B Uncensored Q6_K', group: 'Qwen 3.8 27B Uncensored', description: 'OrcaRouter Qwen 3.8 27B uncensored · Q6, near-lossless. High-VRAM setups.', pulls: '35K+', tags: ['27B', 'Vision', 'Q6_K', '23 GB'], updated: 'New', agent: true, released: '2026-08', downloadUrl: HF('bartowski/orcarouter_Qwen3.8-27B-Uncensored-GGUF', 'orcarouter_Qwen3.8-27B-Uncensored-Q6_K.gguf'), filename: 'orcarouter_Qwen3.8-27B-Uncensored-Q6_K.gguf', sizeGB: 23.5, mmprojUrl: HF('bartowski/orcarouter_Qwen3.8-27B-Uncensored-GGUF', 'mmproj-orcarouter_Qwen3.8-27B-Uncensored-f16.gguf'), mmprojSizeGB: 0.93 },
+    { name: 'Qwen 3.8 27B Uncensored Q8_0', group: 'Qwen 3.8 27B Uncensored', description: 'OrcaRouter Qwen 3.8 27B uncensored · Q8, full quality. 32 GB+ or CPU with lots of RAM.', pulls: '35K+', tags: ['27B', 'Vision', 'Q8_0', '29 GB'], updated: 'New', agent: true, released: '2026-08', downloadUrl: HF('bartowski/orcarouter_Qwen3.8-27B-Uncensored-GGUF', 'orcarouter_Qwen3.8-27B-Uncensored-Q8_0.gguf'), filename: 'orcarouter_Qwen3.8-27B-Uncensored-Q8_0.gguf', sizeGB: 29.1, mmprojUrl: HF('bartowski/orcarouter_Qwen3.8-27B-Uncensored-GGUF', 'mmproj-orcarouter_Qwen3.8-27B-Uncensored-f16.gguf'), mmprojSizeGB: 0.93 },
     { name: 'Qwen 3.8 27B Abliterated', group: 'Qwen 3.8 27B Abliterated', description: 'huihui Qwen 3.8 27B abliterated · clean uncensor of the newest Qwen dense model. Vision + thinking. Note the quant is called Q4_K, not Q4_K_M.', pulls: '635K+', tags: ['27B', 'Vision', 'Q4_K', '17 GB'], updated: 'Hot', agent: true, released: '2026-08', downloadUrl: HF('huihui-ai/Huihui-Qwen3.8-27B-abliterated-GGUF', 'Huihui-Qwen3.8-27B-abliterated-Q4_K.gguf'), filename: 'Huihui-Qwen3.8-27B-abliterated-Q4_K.gguf', sizeGB: 16.8, mmprojUrl: HF('huihui-ai/Huihui-Qwen3.8-27B-abliterated-GGUF', 'mmproj-model-bf16.gguf'), mmprojSizeGB: 0.93 },
     { name: 'Qwen 3.8 27B Abliterated Q2_K', group: 'Qwen 3.8 27B Abliterated', description: 'huihui Qwen 3.8 27B abliterated · smallest quant for 12 GB cards.', pulls: '635K+', tags: ['27B', 'Vision', 'Q2_K', '11 GB'], updated: 'New', agent: true, released: '2026-08', downloadUrl: HF('huihui-ai/Huihui-Qwen3.8-27B-abliterated-GGUF', 'Huihui-Qwen3.8-27B-abliterated-Q2_K.gguf'), filename: 'Huihui-Qwen3.8-27B-abliterated-Q2_K.gguf', sizeGB: 10.9, mmprojUrl: HF('huihui-ai/Huihui-Qwen3.8-27B-abliterated-GGUF', 'mmproj-model-bf16.gguf'), mmprojSizeGB: 0.93 },
     { name: 'Qwen 3.8 27B Abliterated Q5_K', group: 'Qwen 3.8 27B Abliterated', description: 'huihui Qwen 3.8 27B abliterated · Q5, higher quality. For 24 GB cards.', pulls: '635K+', tags: ['27B', 'Vision', 'Q5_K', '20 GB'], updated: 'New', agent: true, released: '2026-08', downloadUrl: HF('huihui-ai/Huihui-Qwen3.8-27B-abliterated-GGUF', 'Huihui-Qwen3.8-27B-abliterated-Q5_K.gguf'), filename: 'Huihui-Qwen3.8-27B-abliterated-Q5_K.gguf', sizeGB: 19.5, mmprojUrl: HF('huihui-ai/Huihui-Qwen3.8-27B-abliterated-GGUF', 'mmproj-model-bf16.gguf'), mmprojSizeGB: 0.93 },
@@ -773,6 +1064,7 @@ export function getUncensoredTextModels(): DiscoverModel[] {
     { name: 'Qwen 3.8 27B Abliterated Q8_0', group: 'Qwen 3.8 27B Abliterated', description: 'huihui Qwen 3.8 27B abliterated · Q8, full quality.', pulls: '635K+', tags: ['27B', 'Vision', 'Q8_0', '29 GB'], updated: 'New', agent: true, released: '2026-08', downloadUrl: HF('huihui-ai/Huihui-Qwen3.8-27B-abliterated-GGUF', 'Huihui-Qwen3.8-27B-abliterated-Q8_0.gguf'), filename: 'Huihui-Qwen3.8-27B-abliterated-Q8_0.gguf', sizeGB: 29, mmprojUrl: HF('huihui-ai/Huihui-Qwen3.8-27B-abliterated-GGUF', 'mmproj-model-bf16.gguf'), mmprojSizeGB: 0.93 },
     // Ollama ships the projector as a layer of the tag, so vision works there
     // without a second file.
+    { name: 'Qwen 3.8 27B Uncensored (Ollama)', description: 'OrcaRouter Qwen 3.8 27B uncensored · one-command pull, projector included. Vision + tools + thinking out of the box. Needs Ollama 0.17.1 or newer.', pulls: '137K+', tags: ['27B', 'Vision', 'Tools', '18 GB'], updated: 'Hot', agent: true, released: '2026-08', ollamaModel: 'orcarouter/Qwen3.8-27B-Uncensored:q4_K_M', sizeGB: 18 },
     { name: 'Qwen 3.8 27B Abliterated (Ollama)', description: 'huihui Qwen 3.8 27B abliterated · one-command pull, projector included. Vision + tools + thinking out of the box.', pulls: '24K+', tags: ['27B', 'Vision', 'Tools', '18 GB'], updated: 'Hot', agent: true, released: '2026-08', ollamaModel: 'huihui_ai/Qwen3.8-abliterated:27b', sizeGB: 17.7 },
     // ── HOT: Qwen 3.6 Unfiltered (April 2026) ──
     { name: 'Qwen 3.6 27B Samantha Unfiltered', description: 'Qwen 3.6 27B dense · Samantha personality, unfiltered finetune. Released April 22 2026. Needs GGUF conversion (see HF).', pulls: 'New', tags: ['27B', 'Vision', 'Unfiltered', '50 GB'], updated: 'Hot', agent: true, released: '2026-04', url: 'https://huggingface.co/cloudbjorn/Qwen3.6-27B_Samantha-Uncensored', canPull: false, sizeGB: 50 },
@@ -808,6 +1100,46 @@ export function getUncensoredTextModels(): DiscoverModel[] {
     { name: 'GLM 4.7 Flash Heretic Q4', group: 'GLM 4.7 Flash Heretic', description: 'GLM 4.7 Flash HERETIC · 30B unfiltered, best quality/size balance.', pulls: '5K+', tags: ['30B', 'Q4_K_M', '19 GB'], updated: 'Hot', agent: true, released: '2026-04', downloadUrl: HF('DavidAU/GLM-4.7-Flash-Uncensored-Heretic-NEO-CODE-Imatrix-MAX-GGUF', 'GLM-4.7-Flash-Uncen-Hrt-NEO-CODE-MAX-imat-D_AU-Q4_K_M.gguf'), filename: 'GLM-4.7-Flash-Uncen-Hrt-NEO-CODE-MAX-imat-D_AU-Q4_K_M.gguf', sizeGB: 19 },
     { name: 'GLM 4.7 Flash Heretic Q6', group: 'GLM 4.7 Flash Heretic', description: 'GLM 4.7 Flash HERETIC · 30B unfiltered, high quality quant.', pulls: '5K+', tags: ['30B', 'Q6_K', '25 GB'], updated: 'New', agent: true, released: '2026-04', downloadUrl: HF('DavidAU/GLM-4.7-Flash-Uncensored-Heretic-NEO-CODE-Imatrix-MAX-GGUF', 'GLM-4.7-Flash-Uncen-Hrt-NEO-CODE-MAX-imat-D_AU-Q6_K.gguf'), filename: 'GLM-4.7-Flash-Uncen-Hrt-NEO-CODE-MAX-imat-D_AU-Q6_K.gguf', sizeGB: 25 },
     { name: 'GLM 4.7 Flash Heretic Q8', group: 'GLM 4.7 Flash Heretic', description: 'GLM 4.7 Flash HERETIC · 30B unfiltered, near-lossless quality.', pulls: '5K+', tags: ['30B', 'Q8_0', '32 GB'], updated: 'New', agent: true, released: '2026-04', downloadUrl: HF('DavidAU/GLM-4.7-Flash-Uncensored-Heretic-NEO-CODE-Imatrix-MAX-GGUF', 'GLM-4.7-Flash-Uncen-Hrt-NEO-CODE-MAX-imat-D_AU-Q8_0.gguf'), filename: 'GLM-4.7-Flash-Uncen-Hrt-NEO-CODE-MAX-imat-D_AU-Q8_0.gguf', sizeGB: 32 },
+    // ── Qwen 3.8 27B Heretic RVN ──────────────────────────────────────
+    //
+    // Nachgetragen am 02.09.2026, nachdem David gesagt hatte „such mehr nach
+    // uncensored, irgendwas muss es geben". Es gab etwas: dieses Repo stand
+    // mit 1,2 Mio Downloads auf Platz zwei aller unzensierten GGUF-Modelle
+    // und fehlte hier.
+    //
+    // WICHTIG zur Dateiwahl, sonst laedt jemand das Falsche: die Modellkarte
+    // sagt ausdruecklich, dass das sauber benannte
+    // `Qwen3.8-27B-Heretic-Q4_K_M.gguf` die AELTERE Abliteration ist und nur
+    // „for download-count continuity" liegen bleibt. Empfohlen sind die
+    // `RVN-*-multilingual`-Dateien: zwei zusaetzliche ARA-Durchgaenge, KL
+    // 0,0085, Verweigerungen von 3/100 auf 0–1/100. Genau die stehen hier.
+    // `-mtp`- und `-vision`-Varianten sind absichtlich draussen, solange sie
+    // niemand am Pin gefahren hat.
+    //
+    // Architektur am 02.09.2026 aus dem echten Dateikopf gelesen: `qwen35` —
+    // dieselbe wie beim Nachbareintrag oben, also von b9949 getragen.
+    { name: 'Qwen 3.8 27B Heretic', group: 'Qwen 3.8 27B Heretic', description: 'Qwen 3.8 27B RVN Heretic · twice-sharpened abliteration, 0–1 refusals per 100 prompts. Vision, multilingual. Recommended size.', pulls: '1.2M+', tags: ['27B', 'Vision', 'Q4_K_M', '17 GB'], updated: 'Hot', agent: true, released: '2026-08', downloadUrl: HF('0bserverx/Qwen3.8-27B-Heretic-Abliterated-Uncensored-GGUF', 'RVN-Q4_K_M-multilingual.gguf'), filename: 'RVN-Q4_K_M-multilingual.gguf', sizeGB: 16.6, mmprojUrl: HF('0bserverx/Qwen3.8-27B-Heretic-Abliterated-Uncensored-GGUF', 'mmproj-Qwen3.8-27B-Q8_0.gguf'), mmprojSizeGB: 0.63 },
+    { name: 'Qwen 3.8 27B Heretic IQ2_M', group: 'Qwen 3.8 27B Heretic', description: 'Qwen 3.8 27B RVN Heretic · the smallest usable quant, fits a 12 GB card.', pulls: '1.2M+', tags: ['27B', 'Vision', 'IQ2_M', '10 GB'], updated: 'New', agent: true, released: '2026-08', downloadUrl: HF('0bserverx/Qwen3.8-27B-Heretic-Abliterated-Uncensored-GGUF', 'RVN-IQ2_M-multilingual.gguf'), filename: 'RVN-IQ2_M-multilingual.gguf', sizeGB: 10, mmprojUrl: HF('0bserverx/Qwen3.8-27B-Heretic-Abliterated-Uncensored-GGUF', 'mmproj-Qwen3.8-27B-Q8_0.gguf'), mmprojSizeGB: 0.63 },
+    { name: 'Qwen 3.8 27B Heretic Q5_K_M', group: 'Qwen 3.8 27B Heretic', description: 'Qwen 3.8 27B RVN Heretic · Q5, higher quality. For 24 GB cards.', pulls: '1.2M+', tags: ['27B', 'Vision', 'Q5_K_M', '19 GB'], updated: 'New', agent: true, released: '2026-08', downloadUrl: HF('0bserverx/Qwen3.8-27B-Heretic-Abliterated-Uncensored-GGUF', 'RVN-Q5_K_M-multilingual.gguf'), filename: 'RVN-Q5_K_M-multilingual.gguf', sizeGB: 19.2, mmprojUrl: HF('0bserverx/Qwen3.8-27B-Heretic-Abliterated-Uncensored-GGUF', 'mmproj-Qwen3.8-27B-Q8_0.gguf'), mmprojSizeGB: 0.63 },
+    { name: 'Qwen 3.8 27B Heretic Q6_K', group: 'Qwen 3.8 27B Heretic', description: 'Qwen 3.8 27B RVN Heretic · Q6, near-lossless. For high-VRAM setups.', pulls: '1.2M+', tags: ['27B', 'Vision', 'Q6_K', '22 GB'], updated: 'New', agent: true, released: '2026-08', downloadUrl: HF('0bserverx/Qwen3.8-27B-Heretic-Abliterated-Uncensored-GGUF', 'RVN-Q6_K-multilingual.gguf'), filename: 'RVN-Q6_K-multilingual.gguf', sizeGB: 22.1, mmprojUrl: HF('0bserverx/Qwen3.8-27B-Heretic-Abliterated-Uncensored-GGUF', 'mmproj-Qwen3.8-27B-Q8_0.gguf'), mmprojSizeGB: 0.63 },
+    // ── Gemma 4 12B Heretic ───────────────────────────────────────────
+    //
+    // Die Luecke, die dem Katalog am meisten gefehlt hat: alles Unzensierte
+    // hier ist Qwen oder GLM. Wer mit Gemma anders zurechtkommt — und viele
+    // tun das —, hatte keine Wahl. 302K Downloads, Architektur `gemma4` am
+    // 02.09.2026 aus dem Dateikopf gelesen, von b9949 getragen.
+    { name: 'Gemma 4 12B Heretic', group: 'Gemma 4 12B Heretic', description: 'Gemma 4 12B heretic-abliterated · the uncensored counterpart to Qwen and GLM, with a different voice. Vision. Recommended size.', pulls: '300K+', tags: ['12B', 'Vision', 'Q4_K_M', '7 GB'], updated: 'Hot', agent: true, released: '2026-06', downloadUrl: HF('culturerevolt/gemma-4-12b-heretic-abliterated-GGUF', 'gemma-4-12b-heretic-Q4_K_M.gguf'), filename: 'gemma-4-12b-heretic-Q4_K_M.gguf', sizeGB: 7.4, mmprojUrl: HF('culturerevolt/gemma-4-12b-heretic-abliterated-GGUF', 'gemma-4-12b-heretic-mmproj-f16.gguf'), mmprojSizeGB: 0.18 },
+    { name: 'Gemma 4 12B Heretic IQ4_XS', group: 'Gemma 4 12B Heretic', description: 'Gemma 4 12B heretic · IQ4_XS, the cheapest 4-bit. For 8 GB cards.', pulls: '300K+', tags: ['12B', 'Vision', 'IQ4_XS', '7 GB'], updated: 'New', agent: true, released: '2026-06', downloadUrl: HF('culturerevolt/gemma-4-12b-heretic-abliterated-GGUF', 'gemma-4-12b-heretic-IQ4_XS.gguf'), filename: 'gemma-4-12b-heretic-IQ4_XS.gguf', sizeGB: 6.6, mmprojUrl: HF('culturerevolt/gemma-4-12b-heretic-abliterated-GGUF', 'gemma-4-12b-heretic-mmproj-f16.gguf'), mmprojSizeGB: 0.18 },
+    { name: 'Gemma 4 12B Heretic Q6_K', group: 'Gemma 4 12B Heretic', description: 'Gemma 4 12B heretic · Q6, near-lossless.', pulls: '300K+', tags: ['12B', 'Vision', 'Q6_K', '10 GB'], updated: 'New', agent: true, released: '2026-06', downloadUrl: HF('culturerevolt/gemma-4-12b-heretic-abliterated-GGUF', 'gemma-4-12b-heretic-Q6_K.gguf'), filename: 'gemma-4-12b-heretic-Q6_K.gguf', sizeGB: 9.8, mmprojUrl: HF('culturerevolt/gemma-4-12b-heretic-abliterated-GGUF', 'gemma-4-12b-heretic-mmproj-f16.gguf'), mmprojSizeGB: 0.18 },
+    // ── Qwen3-VL 8B Abliterated ───────────────────────────────────────
+    //
+    // Die zweite echte Luecke: alles Unzensierte mit Bildverstehen ist hier
+    // 27B aufwaerts. Wer eine 8-GB-Karte hat, konnte Bilder nur zensiert
+    // ansehen lassen. Das hier laeuft in 5 GB. Architektur `qwen3vl`, am
+    // 02.09.2026 aus dem Dateikopf gelesen, von b9949 getragen.
+    { name: 'Qwen3-VL 8B Abliterated', group: 'Qwen3-VL 8B Abliterated', description: 'Qwen3-VL 8B abliterated · uncensored image understanding on an 8 GB card. Recommended size.', pulls: '650K+', tags: ['8B', 'Vision', 'Q4_K_M', '5 GB'], updated: 'Hot', agent: true, released: '2025-11', downloadUrl: HF('mradermacher/Qwen3-VL-8B-Instruct-abliterated-GGUF', 'Qwen3-VL-8B-Instruct-abliterated.Q4_K_M.gguf'), filename: 'Qwen3-VL-8B-Instruct-abliterated.Q4_K_M.gguf', sizeGB: 5, mmprojUrl: HF('mradermacher/Qwen3-VL-8B-Instruct-abliterated-GGUF', 'Qwen3-VL-8B-Instruct-abliterated.mmproj-f16.gguf'), mmprojSizeGB: 1.16 },
+    { name: 'Qwen3-VL 8B Abliterated Q5_K_M', group: 'Qwen3-VL 8B Abliterated', description: 'Qwen3-VL 8B abliterated · Q5, higher quality.', pulls: '650K+', tags: ['8B', 'Vision', 'Q5_K_M', '6 GB'], updated: 'New', agent: true, released: '2025-11', downloadUrl: HF('mradermacher/Qwen3-VL-8B-Instruct-abliterated-GGUF', 'Qwen3-VL-8B-Instruct-abliterated.Q5_K_M.gguf'), filename: 'Qwen3-VL-8B-Instruct-abliterated.Q5_K_M.gguf', sizeGB: 5.9, mmprojUrl: HF('mradermacher/Qwen3-VL-8B-Instruct-abliterated-GGUF', 'Qwen3-VL-8B-Instruct-abliterated.mmproj-f16.gguf'), mmprojSizeGB: 1.16 },
+    { name: 'Qwen3-VL 8B Abliterated Q6_K', group: 'Qwen3-VL 8B Abliterated', description: 'Qwen3-VL 8B abliterated · Q6, near-lossless.', pulls: '650K+', tags: ['8B', 'Vision', 'Q6_K', '7 GB'], updated: 'New', agent: true, released: '2025-11', downloadUrl: HF('mradermacher/Qwen3-VL-8B-Instruct-abliterated-GGUF', 'Qwen3-VL-8B-Instruct-abliterated.Q6_K.gguf'), filename: 'Qwen3-VL-8B-Instruct-abliterated.Q6_K.gguf', sizeGB: 6.7, mmprojUrl: HF('mradermacher/Qwen3-VL-8B-Instruct-abliterated-GGUF', 'Qwen3-VL-8B-Instruct-abliterated.mmproj-f16.gguf'), mmprojSizeGB: 1.16 },
     // ── Popular: GLM 4.6 Abliterated ──
     { name: 'GLM 4 9B Abliterated', description: 'GLM 4 9B abliterated · strong coding and reasoning.', pulls: '5K+', tags: ['9B', 'Q4_K_M', '5 GB'], updated: 'New', agent: true, released: '2026-03', downloadUrl: HF('bartowski/glm-4-9b-chat-abliterated-GGUF', 'glm-4-9b-chat-abliterated-Q4_K_M.gguf'), filename: 'glm-4-9b-chat-abliterated-Q4_K_M.gguf', sizeGB: 5 },
     // ── Popular: Gemma 3 Abliterated ──
@@ -848,6 +1180,21 @@ export function getUncensoredTextModels(): DiscoverModel[] {
     // exists yet (checked 2026-08-01, one day after the 0731 drop; only FP8
     // and MLX abliterations are out). Watchlist: swap to the 0731 uncensor
     // the day huihui or DavidAU ships one.
+    //
+    // BOTH ADDRESSES BELOW ANSWER 401 (measured 2026-09-01, first run of the
+    // catalog gate in __tests__/hf-catalog-addresses.live.test.ts).
+    // `huihui-ai/Huihui-DeepSeek-V4-Flash-abliterated-GGUF` is private or gone
+    // — HuggingFace answers 401 for both, on purpose, so which one it is
+    // cannot be told from outside. They are LEFT AS THEY ARE and not repointed,
+    // because there is nothing verified to repoint them to: the two surviving
+    // huihui repos with similar names
+    // (`...-abliterated-ds4-GGUF`, `...-0731-abliterated-GGUF`) carry neither
+    // `DeepSeek-V4-Flash-UD-IQ1_M.gguf` nor `ggml-model-Q3_K_S.gguf`, and their
+    // quants (Q2/Q2_K/Q4_K) are different files at different sizes. Swapping a
+    // dead 87 GB promise for an unverified one is not a fix, it is a new bug
+    // with a nicer address. Until someone confirms a replacement, the user
+    // clicking these gets the gated-repo sentence from `http_error_message`
+    // and no Retry button (T-07), which is the honest end of the road.
     { name: 'DeepSeek V4 Flash Abliterated IQ1', group: 'DeepSeek V4 Flash Abliterated', description: 'huihui abliterated DeepSeek V4-Flash · 284B MoE (13B active), the most-downloaded uncensored model of 2026 so far. Smallest quant, single 87 GB file, runs on 96 GB RAM rigs. MIT.', pulls: '115K+', tags: ['284B MoE', 'UD-IQ1_M', '87 GB'], updated: 'Hot', agent: true, released: '2026-05', downloadUrl: HF('huihui-ai/Huihui-DeepSeek-V4-Flash-abliterated-GGUF', 'DeepSeek-V4-Flash-UD-IQ1_M.gguf'), filename: 'DeepSeek-V4-Flash-UD-IQ1_M.gguf', sizeGB: 86.8 },
     { name: 'DeepSeek V4 Flash Abliterated Q3', group: 'DeepSeek V4 Flash Abliterated', description: 'huihui abliterated DeepSeek V4-Flash · Q3_K_S, higher fidelity. Single 122 GB file for big-RAM setups. MIT.', pulls: '115K+', tags: ['284B MoE', 'Q3_K_S', '122 GB'], updated: 'Hot', agent: true, released: '2026-05', downloadUrl: HF('huihui-ai/Huihui-DeepSeek-V4-Flash-abliterated-GGUF', 'ggml-model-Q3_K_S.gguf'), filename: 'ggml-model-Q3_K_S.gguf', sizeGB: 122 },
     { name: 'GLM 5.2 Abliterated', description: 'huihui abliterated GLM 5.2 · 744B MoE (40B active) uncensored frontier coder. Multi-part download, ~356 GB. MIT.', pulls: '13K+', tags: ['744B MoE', 'UD-Q3_K_M', '356 GB', 'Multi-part'], updated: 'New', agent: true, released: '2026-06', downloadUrl: HF('huihui-ai/Huihui-GLM-5.2-abliterated-GGUF', 'UD-Q3_K_M/GLM-5.2-UD-Q3_K_M-00001-of-00009.gguf'), filename: 'GLM-5.2-UD-Q3_K_M-00001-of-00009.gguf', sizeGB: 356 },
@@ -977,8 +1324,82 @@ export function getMainstreamTextModels(): DiscoverModel[] {
     { name: 'DeepSeek V4 Flash 0731 IQ1', group: 'DeepSeek V4 Flash 0731', description: 'DeepSeek V4-Flash-0731 · the official V4-Flash release, sharper agentic tuning. 284B MoE (13B active), 1M context, MIT. Smallest quant, runs on 96 GB RAM rigs. Multi-part download.', pulls: '4K+', tags: ['284B MoE', 'UD-IQ1_S', '82.5 GB', 'Multi-part'], updated: 'Hot', agent: true, released: '2026-07', downloadUrl: HF('unsloth/DeepSeek-V4-Flash-0731-GGUF', 'UD-IQ1_S/DeepSeek-V4-Flash-0731-UD-IQ1_S-00001-of-00003.gguf'), filename: 'DeepSeek-V4-Flash-0731-UD-IQ1_S-00001-of-00003.gguf', sizeGB: 82.5 },
     { name: 'DeepSeek V4 Flash 0731 Q2', group: 'DeepSeek V4 Flash 0731', description: 'DeepSeek V4-Flash-0731 · Unsloth Dynamic Q2_K_XL, the quality/size sweet spot for this MoE. 1M context, MIT. Multi-part download.', pulls: '4K+', tags: ['284B MoE', 'UD-Q2_K_XL', '96.8 GB', 'Multi-part'], updated: 'Hot', agent: true, released: '2026-07', downloadUrl: HF('unsloth/DeepSeek-V4-Flash-0731-GGUF', 'UD-Q2_K_XL/DeepSeek-V4-Flash-0731-UD-Q2_K_XL-00001-of-00003.gguf'), filename: 'DeepSeek-V4-Flash-0731-UD-Q2_K_XL-00001-of-00003.gguf', sizeGB: 96.8 },
     { name: 'DeepSeek V4 Flash 0731 Q4', group: 'DeepSeek V4 Flash 0731', description: 'DeepSeek V4-Flash-0731 · UD-Q4_K_XL full quality. Needs ~155 GB disk and serious RAM. 1M context, MIT. Multi-part download.', pulls: '4K+', tags: ['284B MoE', 'UD-Q4_K_XL', '155 GB', 'Multi-part'], updated: 'Hot', agent: true, released: '2026-07', downloadUrl: HF('unsloth/DeepSeek-V4-Flash-0731-GGUF', 'UD-Q4_K_XL/DeepSeek-V4-Flash-0731-UD-Q4_K_XL-00001-of-00005.gguf'), filename: 'DeepSeek-V4-Flash-0731-UD-Q4_K_XL-00001-of-00005.gguf', sizeGB: 155 },
-    { name: 'Hunyuan 3 295B Q4', group: 'Hunyuan 3 295B', description: 'Tencent Hunyuan 3 · 295B MoE (21B active), Apache-2.0 without territorial limits. Needs a current llama.cpp / LM Studio build.', pulls: '20K+', tags: ['295B MoE', 'Q4_K_M', '170 GB'], updated: 'New', agent: true, released: '2026-07', downloadUrl: HF('AngelSlim/Hy3-GGUF', 'Hy3-Q4_K_M.gguf'), filename: 'Hy3-Q4_K_M.gguf', sizeGB: 170 },
-    { name: 'Hunyuan 3 295B IQ1', group: 'Hunyuan 3 295B', description: 'Tencent Hunyuan 3 · 1 bit quant for 96 to 128 GB setups. Real quality tradeoff, but it runs. Apache-2.0.', pulls: '20K+', tags: ['295B MoE', 'IQ1_M', '83.3 GB'], updated: 'New', agent: true, released: '2026-07', downloadUrl: HF('AngelSlim/Hy3-GGUF', 'Hy3-IQ1_M.gguf'), filename: 'Hy3-IQ1_M.gguf', sizeGB: 83.3 },
+    // ── GLM 5.3 ─────────────────────────────────────────────────────────
+    //
+    // Nur die GROSSE Variante steht hier, und das ist eine gemessene
+    // Entscheidung, keine Auslassung. Aus den GGUF-Kopfbytes gelesen
+    // (02.09.2026, siehe api/gguf-arch.ts):
+    //
+    //   unsloth/GLM-5.3-GGUF          general.architecture = glm-dsa
+    //   unsloth/GLM-5.3-Flash-GGUF    general.architecture = glm5next
+    //   antirez, AesSedai (Flash)     general.architecture = glm5-next
+    //
+    // Die zweite Schreibweise ist kein Tippfehler von mir: die Flash-GGUFs
+    // tragen je nach Konvertierdatum `glm5next` ODER `glm5-next`. llama.cpp
+    // kennt beide nicht — weder am gepinnten Tag noch auf master. Vier PRs
+    // waren an dem Tag offen (#27752, #27754, #27773, #27917 fuer MTP), kein
+    // einziger gemergt. Ein Flash-Eintrag hiesse: der Nutzer laedt zweistellig
+    // Gigabyte und die Engine oeffnet die Datei nicht.
+    //
+    // Uncensored gibt es GLM 5.3 derzeit nur als Flash (AliceThirty, darask0,
+    // orcarouter, Blackfrost) — also genau in der Variante, die lokal nicht
+    // laeuft. Fuer die grosse gibt es nur NVFP4/FP8 (dealignai), und das sind
+    // vLLM-Formate, keine GGUF.
+    //
+    // Ollama fuehrt glm-5.3 und glm-5.3-flash ausschliesslich als `:cloud` —
+    // ohne lokale Gewichte. In diesem Katalog waere das ein Eintrag, der
+    // "lokal" verspricht und auf fremden Rechnern rechnet.
+    //
+    // Der Waechter __tests__/katalog-architektur.live.test.ts prueft das ab
+    // jetzt selbst; seine Gegenprobe wird GRUEN-nach-ROT, sobald llama.cpp
+    // glm5next kennt. Dann gehoert Flash hier hinein.
+    //
+    // NACHGEPRUEFT am 02.09.2026, weil David gesagt hatte „such mehr nach
+    // uncensored, irgendwas muss es geben". Das war berechtigt — nur nicht
+    // hier: an GLM 5.3 hat sich nichts geaendert. Neu erhoben statt erinnert:
+    //
+    //   - HuggingFace fuehrt 52 GGUF-Repos zu GLM-5.3, davon 40 Flash.
+    //   - AliceThirty/GLM-5.3-Flash-UNCENSORED-GGUF hat inzwischen 4.572
+    //     Downloads, ist also kein Einzelfall mehr. Kopfbytes am 02.09.2026
+    //     gelesen: `glm5next`. Unveraendert.
+    //   - src/llama-arch.cpp auf MASTER am 02.09.2026 geholt und durchsucht:
+    //     glm4, glm4moe, glm-dsa — kein glm5next, kein glm5-next.
+    //   - Von den 12 Nicht-Flash-GGUF-Repos ist kein einziges unzensiert. Der
+    //     einzige Treffer (msuiche/GLM-5.3-abliterated-cyber-GLP-77) ist eine
+    //     gesperrte LoRA unter 10 MB, kein Modell.
+    //
+    // Was die Suche dafuer WOHL gebracht hat, steht weiter oben im
+    // Uncensored-Block: Qwen 3.8 27B Heretic RVN, Gemma 4 12B Heretic und
+    // Qwen3-VL 8B Abliterated fehlten hier, zusammen ueber zwei Millionen
+    // Downloads. Die Antwort auf „irgendwas muss es geben" war ja — nur unter
+    // einem anderen Namen.
+    // ── Hunyuan 3 295B: entfernt am 03.09.2026, und warum ───────────────
+    //
+    // Hier standen zwei Eintraege, 170 GB und 83,3 GB. Ihre GGUFs tragen
+    // `general.architecture = hy_v3`. Der in scripts/build-llama.sh gepinnte
+    // Stand (LLAMA_TAG b9949 / LLAMA_COMMIT 049326a0, 09.07.2026) kennt die
+    // Architektur NICHT; sie kam am 14.07.2026 mit llama.cpp #25395 dazu und
+    // steht ab Tag b10000.
+    //
+    // Der Nutzer haette also bis zu 170 GB geladen und die Datei danach nicht
+    // oeffnen koennen. Die Eintraege sagten das sogar selbst — "Needs a current
+    // llama.cpp / LM Studio build" — und die App liefert keinen.
+    //
+    // Warum nicht stattdessen der Tag gehoben wurde: das Bauskript pinnt
+    // TAG UND COMMIT und prueft beides bei jedem Lauf; ein Sprung ist kein
+    // Einzeiler, sondern ein Engine-Wechsel. Der Windows-Sidecar, den das
+    // Release wirklich ausliefert, ist ausserdem ein 2.6.3-Build und gar nicht
+    // b9949 (EXPERIMENT-CHANGELOG.md) — ein gehobener Tag im Skript haette den
+    // Architektur-Waechter gruen gemacht, waehrend der Nutzer weiterhin
+    // 170 GB umsonst laedt. Und der Qwen-3.8-27B-Eintrag oben begruendet sich
+    // ausdruecklich damit, dass sein MTP-Kopf "loads fine on the pinned
+    // llama.cpp b9949" — ein Sprung ohne Ladelauf stellt das unbewiesen.
+    //
+    // Zurueck kommen die zwei, wenn LLAMA_TAG/LLAMA_COMMIT gehoben UND ein
+    // echter Ladelauf gemacht ist. Der Waechter dafuer steht schon:
+    // __tests__/katalog-architektur.live.test.ts.
+    { name: 'GLM 5.3 744B IQ1', group: 'GLM 5.3 744B', description: 'ZhipuAI GLM 5.3 · same base as 5.2; the whole jump comes from post-training: +50% on Z.ai Code Bench, open-weights SOTA on Terminal Bench 3.0. 744B MoE (40B active), 1M context. Smallest quant, multi-part.', pulls: '74K+', tags: ['744B MoE', 'UD-IQ1_S', '217 GB', 'Multi-part'], updated: 'Hot', agent: true, released: '2026-08', downloadUrl: HF('unsloth/GLM-5.3-GGUF', 'UD-IQ1_S/GLM-5.3-UD-IQ1_S-00001-of-00006.gguf'), filename: 'GLM-5.3-UD-IQ1_S-00001-of-00006.gguf', sizeGB: 216.7 },
+    { name: 'GLM 5.3 744B Q2', group: 'GLM 5.3 744B', description: 'ZhipuAI GLM 5.3 · Unsloth Dynamic Q2_K_XL, the quality/size sweet spot for this MoE. 744B MoE (40B active), 1M context, GLM-5.3 licence. Multi-part.', pulls: '74K+', tags: ['744B MoE', 'UD-Q2_K_XL', '254 GB', 'Multi-part'], updated: 'Hot', agent: true, released: '2026-08', downloadUrl: HF('unsloth/GLM-5.3-GGUF', 'UD-Q2_K_XL/GLM-5.3-UD-Q2_K_XL-00001-of-00007.gguf'), filename: 'GLM-5.3-UD-Q2_K_XL-00001-of-00007.gguf', sizeGB: 253.9 },
     { name: 'GLM 5.2 744B MoE', description: 'ZhipuAI GLM 5.2 · 744B MoE (40B active), 1M context, MIT. The agentic-coding successor to GLM 5.1. Multi-part, ~304 GB.', pulls: '50K+', tags: ['744B MoE', 'UD-Q2_K_XL', '304 GB', 'Multi-part'], updated: 'Hot', agent: true, released: '2026-06', downloadUrl: HF('unsloth/GLM-5.2-GGUF', 'UD-Q2_K_XL/GLM-5.2-UD-Q2_K_XL-00001-of-00007.gguf'), filename: 'GLM-5.2-UD-Q2_K_XL-00001-of-00007.gguf', sizeGB: 304 },
     { name: 'Kimi K2.7 Code 1T', description: 'Moonshot Kimi K2.7-Code · 1T MoE (32B active) coding flagship. Even the 2-bit quant is ~370 GB · multi-GPU / Mac-cluster territory.', pulls: '392K+', tags: ['1T MoE', 'UD-Q2_K_XL', '371 GB', 'Multi-part'], updated: 'Hot', agent: true, released: '2026-06', downloadUrl: HF('unsloth/Kimi-K2.7-Code-GGUF', 'UD-Q2_K_XL/Kimi-K2.7-Code-UD-Q2_K_XL-00001-of-00008.gguf'), filename: 'Kimi-K2.7-Code-UD-Q2_K_XL-00001-of-00008.gguf', sizeGB: 371 },
   ])
@@ -1123,9 +1544,24 @@ export async function searchHuggingFaceModels(query: string): Promise<DiscoverMo
 //   3. The guessed single-file name simply doesn't exist (404).
 // Resolving against the real tree fixes all three.
 
-export interface HfTreeEntry { type: string; path: string; size?: number }
+/**
+ * One entry of `/api/models/<repo>/tree/main`.
+ *
+ * `lfs.oid` is the SHA256 of the file content — every GGUF and safetensors file
+ * on HuggingFace is stored via LFS, so this is a free, authoritative digest for
+ * exactly the files that are too big to re-download by accident.
+ */
+export interface HfTreeEntry { type: string; path: string; size?: number; lfs?: { oid?: string; size?: number } }
 
-export interface HfGgufFile { url: string; filename: string; sizeBytes: number }
+export interface HfGgufFile { url: string; filename: string; sizeBytes: number; sha256?: string }
+
+/** A 64 hex character digest, or undefined. HF prefixes nothing, but a repo can
+ *  carry a non-LFS pointer whose oid is a git blob hash (40 hex) — that one is
+ *  NOT a content digest and must not be handed on as one. */
+export function lfsSha256(entry: HfTreeEntry): string | undefined {
+  const oid = entry.lfs?.oid?.trim().toLowerCase()
+  return oid && /^[0-9a-f]{64}$/.test(oid) ? oid : undefined
+}
 
 export interface HfGgufResolution {
   sharded: boolean
@@ -1187,6 +1623,7 @@ export function selectGgufFromTree(
     url: `https://huggingface.co/${repoId}/resolve/main/${p.path}`,
     filename: p.path.split('/').pop() as string,
     sizeBytes: p.size || 0,
+    sha256: lfsSha256(p),
   }))
   return {
     sharded: files.length > 1,
@@ -1233,1136 +1670,180 @@ export async function detectProviderModelPath(providerName: string): Promise<str
   }
 }
 
+/**
+ * Wohin eine frisch heruntergeladene GGUF fuer die LU Engine gehoert.
+ *
+ * Der Ordner, den der Nutzer unter Model Storage gesetzt hat, wenn er einen
+ * gesetzt hat, sonst der eigene der Anwendung.
+ *
+ * Persona P2, 04.09.2026: der Text im Panel verspricht "LU downloads GGUFs
+ * here and reads every .gguf in a folder you set". Gelesen wurde der gesetzte
+ * Ordner wirklich, heruntergeladen wurde aber weiter ins Roaming-Profil,
+ * zweimal gemessen mit verschiedenen Modellen. Wer seine GGUFs bewusst auf
+ * eine andere Platte legt, fand den frischen Download nicht dort. Der erste
+ * Halbsatz des Textes stimmte nicht.
+ *
+ * Gefunden wird die Datei danach wie jede andere: `listBundledModels` liest
+ * den eigenen Ordner UND den gesetzten, vier Ebenen tief.
+ */
+export async function luEngineDownloadDir(): Promise<string | null> {
+  const gesetzt = customModelDirs()[0]
+  if (gesetzt) return gesetzt
+  return await detectProviderModelPath(BUILTIN_BACKEND_ID)
+}
+
 /** Download a GGUF model to a specific directory (for non-Ollama providers) */
-export async function startModelDownloadToPath(url: string, destDir: string, filename: string, expectedBytes?: number): Promise<{ status: string; id: string; error?: string }> {
-  return backendCall('download_model_to_path', { url, destDir, filename, expectedBytes: expectedBytes ?? null })
+export async function startModelDownloadToPath(url: string, destDir: string, filename: string, expectedBytes?: number, sha256?: string): Promise<{ status: string; id: string; error?: string }> {
+  return backendCall('download_model_to_path', { url, destDir, filename, expectedBytes: expectedBytes ?? null, expectedSha256: sha256 ?? null })
+}
+
+/** What the catalog knows about one downloadable file. */
+export interface FileMeta {
+  url: string
+  subfolder: string
+  expectedBytes?: number
+  sha256?: string
+}
+
+/** Every catalog entry that carries a downloadable file, image/video bundles
+ *  and text models alike. One walk, so the lookups below cannot drift apart. */
+function catalogEntries(): DiscoverModel[] {
+  const out: DiscoverModel[] = []
+  for (const bundle of [...getImageBundles(), ...getVideoBundles(), ...getAudioBundles(), ...getLipsyncBundles(), ...getMotionBundles()]) {
+    out.push(...bundle.files)
+  }
+  out.push(...getUncensoredTextModels(), ...getMainstreamTextModels())
+  return out
 }
 
 /** Look up download URL + subfolder for a file by filename · searches all bundles + text models */
-export function lookupFileMeta(filename: string): { url: string; subfolder: string } | null {
-  // Search image + video + 2.5.8 specialized-lane bundles
-  for (const bundle of [...getImageBundles(), ...getVideoBundles(), ...getAudioBundles(), ...getLipsyncBundles(), ...getMotionBundles()]) {
-    for (const f of bundle.files) {
-      if (f.filename === filename && f.downloadUrl && f.subfolder) {
-        return { url: f.downloadUrl, subfolder: f.subfolder }
-      }
-    }
-  }
-  // Search text models
-  for (const m of [...getUncensoredTextModels(), ...getMainstreamTextModels()]) {
+export function lookupFileMeta(filename: string): FileMeta | null {
+  for (const m of catalogEntries()) {
     if (m.filename === filename && m.downloadUrl && m.subfolder) {
-      return { url: m.downloadUrl, subfolder: m.subfolder }
+      return {
+        url: m.downloadUrl,
+        subfolder: m.subfolder,
+        expectedBytes: m.sizeGB ? Math.round(m.sizeGB * GIB) : undefined,
+        sha256: m.sha256,
+      }
     }
   }
   return null
 }
 
-// ─── Image Model Bundles ───
-
-export function getImageBundles(): ModelBundle[] {
-  return [
-    {
-      name: 'Juggernaut XL V9 (Photorealistic)',
-      description: 'Best photorealistic SDXL checkpoint. All in one. Just install and generate.',
-      tags: ['SDXL', 'Photorealistic', '1024px'],
-      uncensored: true,
-      verified: true,
-      totalSizeGB: 6.5,
-      vramRequired: '6-8 GB',
-      workflow: 'sdxl',
-      url: 'https://huggingface.co/RunDiffusion/Juggernaut-XL-v9',
-      files: [
-        {
-          name: 'Juggernaut XL V9 Photo v2',
-          description: 'SDXL checkpoint · includes VAE and CLIP.',
-          pulls: '', tags: ['Checkpoint', '6.5 GB'], updated: '',
-          downloadUrl: 'https://huggingface.co/RunDiffusion/Juggernaut-XL-v9/resolve/main/Juggernaut-XL_v9_RunDiffusionPhoto_v2.safetensors',
-          filename: 'Juggernaut-XL_v9.safetensors', subfolder: 'checkpoints', sizeGB: 6.5,
-        },
-      ],
-    },
-    {
-      name: 'RealVisXL V5 (Photorealistic)',
-      description: 'Great for portraits, landscapes, and product photos. Ready to use.',
-      tags: ['SDXL', 'Photorealistic', '1024px'],
-      uncensored: true,
-      verified: true,
-      totalSizeGB: 6.5,
-      vramRequired: '6-8 GB',
-      workflow: 'sdxl',
-      url: 'https://huggingface.co/SG161222/RealVisXL_V5.0',
-      files: [
-        {
-          name: 'RealVisXL V5 FP16',
-          description: 'SDXL checkpoint · includes VAE and CLIP.',
-          pulls: '', tags: ['Checkpoint', '6.5 GB'], updated: '',
-          downloadUrl: 'https://huggingface.co/SG161222/RealVisXL_V5.0/resolve/main/RealVisXL_V5.0_fp16.safetensors',
-          filename: 'RealVisXL_V5.safetensors', subfolder: 'checkpoints', sizeGB: 6.5,
-        },
-      ],
-    },
-    {
-      name: 'FLUX.1 [schnell] FP8 (Fast & Modern)',
-      description: 'State of the art image gen. 1 to 4 steps for fast results. Complete package with all required encoders.',
-      tags: ['FLUX', 'Fast', 'FP8', '1024px'],
-      verified: true,
-      totalSizeGB: 21,
-      vramRequired: '8-10 GB',
-      workflow: 'flux',
-      url: 'https://huggingface.co/Comfy-Org/flux1-schnell',
-      files: [
-        {
-          name: 'FLUX.1 schnell FP8',
-          description: 'The main FLUX diffusion model (quantized).',
-          pulls: '', tags: ['Model', '16 GB'], updated: '',
-          downloadUrl: 'https://huggingface.co/Comfy-Org/flux1-schnell/resolve/main/flux1-schnell-fp8.safetensors',
-          filename: 'flux1-schnell-fp8.safetensors', subfolder: 'diffusion_models', sizeGB: 16.1,
-        },
-        {
-          name: 'FLUX VAE',
-          description: 'Required autoencoder for FLUX.1 (16 channel ae).',
-          pulls: '', tags: ['VAE', '335 MB'], updated: '',
-          downloadUrl: 'https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/vae/ae.safetensors',
-          filename: 'ae.safetensors', subfolder: 'vae', sizeGB: 0.3,
-        },
-        {
-          name: 'T5-XXL Text Encoder (FP8)',
-          description: 'Required text encoder for FLUX prompt understanding.',
-          pulls: '', tags: ['Text Encoder', '4.6 GB'], updated: '',
-          downloadUrl: 'https://huggingface.co/comfyanonymous/flux_text_encoders/resolve/main/t5xxl_fp8_e4m3fn.safetensors',
-          filename: 't5xxl_fp8_e4m3fn.safetensors', subfolder: 'text_encoders', sizeGB: 4.6,
-        },
-        {
-          name: 'CLIP-L Text Encoder',
-          description: 'Required secondary text encoder for FLUX.',
-          pulls: '', tags: ['Text Encoder', '240 MB'], updated: '',
-          downloadUrl: 'https://huggingface.co/comfyanonymous/flux_text_encoders/resolve/main/clip_l.safetensors',
-          filename: 'clip_l.safetensors', subfolder: 'text_encoders', sizeGB: 0.2,
-        },
-      ],
-    },
-    {
-      name: 'FLUX.1 [dev] FP8 (High Quality)',
-      description: 'Highest quality FLUX. More steps but better results. Complete package with all required encoders.',
-      tags: ['FLUX', 'Quality', 'FP8', '1024px'],
-      verified: true,
-      totalSizeGB: 21,
-      vramRequired: '8-10 GB',
-      workflow: 'flux',
-      url: 'https://huggingface.co/Comfy-Org/flux1-dev',
-      files: [
-        {
-          name: 'FLUX.1 dev FP8',
-          description: 'The main FLUX diffusion model (dev, quantized).',
-          pulls: '', tags: ['Model', '16 GB'], updated: '',
-          downloadUrl: 'https://huggingface.co/Comfy-Org/flux1-dev/resolve/main/flux1-dev-fp8.safetensors',
-          filename: 'flux1-dev-fp8.safetensors', subfolder: 'diffusion_models', sizeGB: 16.1,
-        },
-        {
-          name: 'FLUX VAE',
-          description: 'Required autoencoder for FLUX.1 (16 channel ae).',
-          pulls: '', tags: ['VAE', '335 MB'], updated: '',
-          downloadUrl: 'https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/vae/ae.safetensors',
-          filename: 'ae.safetensors', subfolder: 'vae', sizeGB: 0.3,
-        },
-        {
-          name: 'T5-XXL Text Encoder (FP8)',
-          description: 'Required text encoder for FLUX prompt understanding.',
-          pulls: '', tags: ['Text Encoder', '4.6 GB'], updated: '',
-          downloadUrl: 'https://huggingface.co/comfyanonymous/flux_text_encoders/resolve/main/t5xxl_fp8_e4m3fn.safetensors',
-          filename: 't5xxl_fp8_e4m3fn.safetensors', subfolder: 'text_encoders', sizeGB: 4.6,
-        },
-        {
-          name: 'CLIP-L Text Encoder',
-          description: 'Required secondary text encoder for FLUX.',
-          pulls: '', tags: ['Text Encoder', '240 MB'], updated: '',
-          downloadUrl: 'https://huggingface.co/comfyanonymous/flux_text_encoders/resolve/main/clip_l.safetensors',
-          filename: 'clip_l.safetensors', subfolder: 'text_encoders', sizeGB: 0.2,
-        },
-      ],
-    },
-    {
-      name: 'FLUX 2 Klein 4B (Next Gen)',
-      description: 'Latest FLUX architecture. Fastest FLUX model with stunning quality. Includes Qwen 3 text encoder.',
-      tags: ['FLUX 2', 'Fast', '1024px'],
-      verified: true,
-      totalSizeGB: 11.1,
-      vramRequired: '8-10 GB',
-      workflow: 'flux2',
-      url: 'https://huggingface.co/Comfy-Org/vae-text-encorder-for-flux-klein-4b',
-      files: [
-        {
-          name: 'FLUX 2 Klein Base 4B',
-          description: 'FLUX 2 Klein diffusion model · next gen image generation.',
-          pulls: '', tags: ['Diffusion Model', '7.2 GB'], updated: 'New',
-          downloadUrl: 'https://huggingface.co/Comfy-Org/vae-text-encorder-for-flux-klein-4b/resolve/main/split_files/diffusion_models/flux-2-klein-base-4b.safetensors',
-          filename: 'flux-2-klein-base-4b.safetensors', subfolder: 'diffusion_models', sizeGB: 7.2,
-        },
-        {
-          name: 'FLUX 2 VAE',
-          description: 'Required autoencoder for FLUX 2.',
-          pulls: '', tags: ['VAE', '335 MB'], updated: '',
-          downloadUrl: 'https://huggingface.co/Comfy-Org/vae-text-encorder-for-flux-klein-4b/resolve/main/split_files/vae/flux2-vae.safetensors',
-          filename: 'flux2-vae.safetensors', subfolder: 'vae', sizeGB: 0.3,
-        },
-        {
-          name: 'Qwen 3 4B Text Encoder (FP4)',
-          description: 'Required text encoder for FLUX 2 Klein prompt understanding.',
-          pulls: '', tags: ['Text Encoder', '~3.5 GB'], updated: 'New',
-          downloadUrl: 'https://huggingface.co/Comfy-Org/vae-text-encorder-for-flux-klein-4b/resolve/main/split_files/text_encoders/qwen_3_4b_fp4_flux2.safetensors',
-          filename: 'qwen_3_4b_fp4_flux2.safetensors', subfolder: 'text_encoders', sizeGB: 3.5,
-        },
-      ],
-    },
-    {
-      name: 'Z-Image Turbo (Unfiltered, Fast)',
-      description: 'Explicitly unfiltered image model. 8 to 15 seconds per image. No safety filters. Text to Image and Image to Image.',
-      tags: ['Z-Image', 'Unfiltered', 'Fast', '1024px'],
-      uncensored: true,
-      verified: true,
-      totalSizeGB: 19.3,
-      vramRequired: '10-16 GB',
-      workflow: 'zimage',
-      url: 'https://huggingface.co/Comfy-Org/z_image_turbo',
-      files: [
-        {
-          name: 'Z-Image Turbo BF16',
-          description: 'Unfiltered diffusion model · no safety filters, fast generation.',
-          pulls: '', tags: ['Diffusion Model', '11.5 GB'], updated: 'New',
-          downloadUrl: 'https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/diffusion_models/z_image_turbo_bf16.safetensors',
-          filename: 'z_image_turbo_bf16.safetensors', subfolder: 'diffusion_models', sizeGB: 11.5,
-        },
-        {
-          name: 'Z-Image VAE',
-          description: 'Required autoencoder for Z-Image Turbo.',
-          pulls: '', tags: ['VAE', '335 MB'], updated: '',
-          downloadUrl: 'https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/vae/ae.safetensors',
-          filename: 'ae.safetensors', subfolder: 'vae', sizeGB: 0.3,
-        },
-        {
-          name: 'Qwen 3 4B Text Encoder',
-          description: 'Required text encoder for Z-Image Turbo prompt understanding.',
-          pulls: '', tags: ['Text Encoder', '7.5 GB'], updated: '',
-          downloadUrl: 'https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/text_encoders/qwen_3_4b.safetensors',
-          filename: 'qwen_3_4b.safetensors', subfolder: 'text_encoders', sizeGB: 7.5,
-        },
-      ],
-    },
-    {
-      name: 'Z-Image Base (Unfiltered, Quality)',
-      description: 'Highest quality unfiltered model. 30 to 50 steps for maximum detail and composition diversity. Shares VAE/CLIP with Z-Image Turbo.',
-      tags: ['Z-Image', 'Unfiltered', 'Quality', '1024px'],
-      uncensored: true,
-      verified: true,
-      totalSizeGB: 19.3,
-      vramRequired: '10-16 GB',
-      workflow: 'zimage',
-      url: 'https://huggingface.co/Comfy-Org/z_image',
-      files: [
-        {
-          name: 'Z-Image Base BF16',
-          description: 'Unfiltered diffusion model · maximum quality, more compositional diversity.',
-          pulls: '', tags: ['Diffusion Model', '11.5 GB'], updated: 'New',
-          downloadUrl: 'https://huggingface.co/Comfy-Org/z_image/resolve/main/split_files/diffusion_models/z_image_bf16.safetensors',
-          filename: 'z_image_bf16.safetensors', subfolder: 'diffusion_models', sizeGB: 11.5,
-        },
-        {
-          name: 'Z-Image VAE',
-          description: 'Required autoencoder · shared with Z-Image Turbo.',
-          pulls: '', tags: ['VAE', '335 MB'], updated: '',
-          downloadUrl: 'https://huggingface.co/Comfy-Org/z_image/resolve/main/split_files/vae/ae.safetensors',
-          filename: 'ae.safetensors', subfolder: 'vae', sizeGB: 0.3,
-        },
-        {
-          name: 'Qwen 3 4B Text Encoder',
-          description: 'Required text encoder · shared with Z-Image Turbo.',
-          pulls: '', tags: ['Text Encoder', '7.5 GB'], updated: '',
-          downloadUrl: 'https://huggingface.co/Comfy-Org/z_image/resolve/main/split_files/text_encoders/qwen_3_4b.safetensors',
-          filename: 'qwen_3_4b.safetensors', subfolder: 'text_encoders', sizeGB: 7.5,
-        },
-      ],
-    },
-    {
-      name: 'DreamShaper XL Turbo V2 (Anime/Stylized)',
-      description: 'Fast anime and stylized art. Turbo mode for 4 step generation. Great for creative work.',
-      tags: ['SDXL', 'Anime', 'Stylized', 'Turbo', '1024px'],
-      uncensored: true,
-      verified: true,
-      totalSizeGB: 6.5,
-      vramRequired: '6-8 GB',
-      workflow: 'sdxl',
-      url: 'https://huggingface.co/Lykon/dreamshaper-xl-v2-turbo',
-      files: [
-        {
-          name: 'DreamShaper XL Turbo V2',
-          description: 'SDXL checkpoint · anime and stylized art, turbo mode.',
-          pulls: '', tags: ['Checkpoint', '6.5 GB'], updated: '',
-          downloadUrl: 'https://huggingface.co/Lykon/dreamshaper-xl-v2-turbo/resolve/main/DreamShaperXL_Turbo_V2-SFW.safetensors',
-          filename: 'DreamShaperXL_Turbo_V2.safetensors', subfolder: 'checkpoints', sizeGB: 6.5,
-        },
-      ],
-    },
-    {
-      name: 'ERNIE-Image Turbo',
-      description: 'Baidu ERNIE-Image Turbo · 8B DiT, 8 steps, 1024x1024. Fastest ERNIE variant with Ministral-3B encoder + Prompt Enhancer.',
-      tags: ['ernie_image', 'Image', '1024x1024'],
-      uncensored: false,
-      verified: true,
-      totalSizeGB: 28.9,
-      vramRequired: '24 GB',
-      workflow: 'ernie_image',
-      url: 'https://huggingface.co/Comfy-Org/ERNIE-Image',
-      files: [
-        {
-          name: 'ERNIE-Image Turbo (DiT 8B)',
-          description: 'Baidu ERNIE-Image Turbo diffusion model. 8 steps, fast inference.',
-          pulls: '', tags: ['Diffusion Model', '15.0 GB'], updated: 'New',
-          downloadUrl: 'https://huggingface.co/Comfy-Org/ERNIE-Image/resolve/main/diffusion_models/ernie-image-turbo.safetensors',
-          filename: 'ernie-image-turbo.safetensors', subfolder: 'diffusion_models', sizeGB: 15.0,
-        },
-        {
-          name: 'Ministral-3-3B Text Encoder',
-          description: 'Main text encoder (Ministral-3B) for ERNIE-Image prompt understanding.',
-          pulls: '', tags: ['Text Encoder', '7.2 GB'], updated: 'New',
-          downloadUrl: 'https://huggingface.co/Comfy-Org/ERNIE-Image/resolve/main/text_encoders/ministral-3-3b.safetensors',
-          filename: 'ministral-3-3b.safetensors', subfolder: 'text_encoders', sizeGB: 7.2,
-        },
-        {
-          name: 'ERNIE Prompt Enhancer',
-          description: 'Optional prompt enhancer that expands short prompts into richer descriptions.',
-          pulls: '', tags: ['Text Encoder', '6.4 GB'], updated: 'New',
-          downloadUrl: 'https://huggingface.co/Comfy-Org/ERNIE-Image/resolve/main/text_encoders/ernie-image-prompt-enhancer.safetensors',
-          filename: 'ernie-image-prompt-enhancer.safetensors', subfolder: 'text_encoders', sizeGB: 6.4,
-        },
-        {
-          name: 'FLUX 2 VAE',
-          description: 'Required autoencoder · shared with FLUX 2.',
-          pulls: '', tags: ['VAE', '335 MB'], updated: '',
-          downloadUrl: 'https://huggingface.co/Comfy-Org/ERNIE-Image/resolve/main/vae/flux2-vae.safetensors',
-          filename: 'flux2-vae.safetensors', subfolder: 'vae', sizeGB: 0.3,
-        },
-      ],
-    },
-    {
-      name: 'ERNIE-Image Base',
-      description: 'Baidu ERNIE-Image Base · 8B DiT, 50 steps, 1024x1024. Highest quality ERNIE variant.',
-      tags: ['ernie_image', 'Image', '1024x1024'],
-      uncensored: false,
-      verified: true,
-      totalSizeGB: 28.9,
-      vramRequired: '24 GB',
-      workflow: 'ernie_image',
-      url: 'https://huggingface.co/Comfy-Org/ERNIE-Image',
-      files: [
-        {
-          name: 'ERNIE-Image Base (DiT 8B)',
-          description: 'Baidu ERNIE-Image Base diffusion model. 50 steps, highest quality.',
-          pulls: '', tags: ['Diffusion Model', '15.0 GB'], updated: 'New',
-          downloadUrl: 'https://huggingface.co/Comfy-Org/ERNIE-Image/resolve/main/diffusion_models/ernie-image.safetensors',
-          filename: 'ernie-image.safetensors', subfolder: 'diffusion_models', sizeGB: 15.0,
-        },
-        {
-          name: 'Ministral-3-3B Text Encoder',
-          description: 'Main text encoder (Ministral-3B) for ERNIE-Image prompt understanding.',
-          pulls: '', tags: ['Text Encoder', '7.2 GB'], updated: 'New',
-          downloadUrl: 'https://huggingface.co/Comfy-Org/ERNIE-Image/resolve/main/text_encoders/ministral-3-3b.safetensors',
-          filename: 'ministral-3-3b.safetensors', subfolder: 'text_encoders', sizeGB: 7.2,
-        },
-        {
-          name: 'ERNIE Prompt Enhancer',
-          description: 'Optional prompt enhancer that expands short prompts into richer descriptions.',
-          pulls: '', tags: ['Text Encoder', '6.4 GB'], updated: 'New',
-          downloadUrl: 'https://huggingface.co/Comfy-Org/ERNIE-Image/resolve/main/text_encoders/ernie-image-prompt-enhancer.safetensors',
-          filename: 'ernie-image-prompt-enhancer.safetensors', subfolder: 'text_encoders', sizeGB: 6.4,
-        },
-        {
-          name: 'FLUX 2 VAE',
-          description: 'Required autoencoder · shared with FLUX 2.',
-          pulls: '', tags: ['VAE', '335 MB'], updated: '',
-          downloadUrl: 'https://huggingface.co/Comfy-Org/ERNIE-Image/resolve/main/vae/flux2-vae.safetensors',
-          filename: 'flux2-vae.safetensors', subfolder: 'vae', sizeGB: 0.3,
-        },
-      ],
-    },
-    {
-      name: 'SDXL VAE (fp16-fix) · addon',
-      description: 'Standard SDXL VAE (madebyollin fp16-fix). Optional VAE override for any SDXL checkpoint; fixes washed out / desaturated output on some models. After download, pick it under Advanced → VAE.',
-      tags: ['SDXL', 'VAE', 'Addon'],
-      verified: true,
-      totalSizeGB: 0.33,
-      vramRequired: 'any',
-      workflow: 'sdxl',
-      url: 'https://huggingface.co/madebyollin/sdxl-vae-fp16-fix',
-      files: [
-        {
-          name: 'SDXL VAE fp16-fix',
-          description: 'Drop in SDXL VAE → models/vae.',
-          pulls: '', tags: ['VAE', '335 MB'], updated: '',
-          downloadUrl: 'https://huggingface.co/madebyollin/sdxl-vae-fp16-fix/resolve/main/sdxl_vae.safetensors',
-          filename: 'sdxl_vae.safetensors', subfolder: 'vae', sizeGB: 0.33,
-        },
-      ],
-    },
-    {
-      name: 'Pixel Art XL · SDXL LoRA',
-      description: 'nerijs Pixel Art XL · turns any SDXL model into crisp pixel art. A clearly visible style LoRA. After download, pick it under Advanced → LoRA and raise the strength.',
-      tags: ['SDXL', 'LoRA', 'Style'],
-      verified: true,
-      totalSizeGB: 0.17,
-      vramRequired: 'any',
-      workflow: 'sdxl',
-      url: 'https://huggingface.co/nerijs/pixel-art-xl',
-      files: [
-        {
-          name: 'Pixel Art XL LoRA',
-          description: 'SDXL pixel art style LoRA → models/loras.',
-          pulls: '', tags: ['LoRA', '170 MB'], updated: '',
-          downloadUrl: 'https://huggingface.co/nerijs/pixel-art-xl/resolve/main/pixel-art-xl.safetensors',
-          filename: 'pixel-art-xl.safetensors', subfolder: 'loras', sizeGB: 0.17,
-        },
-      ],
-    },
-  ]
+/** Every filename the catalog can name. Used to turn an orphaned partial's
+ *  stem back into a real download id — see `orphanFilename`. */
+export function catalogFilenames(): string[] {
+  const names: string[] = []
+  for (const m of catalogEntries()) if (m.filename) names.push(m.filename)
+  return names
 }
 
-// Flat list for backwards compat
-export function getImageModelsDiscover(): DiscoverModel[] {
-  const bundles = getImageBundles()
-  const files: DiscoverModel[] = []
-  for (const b of bundles) files.push(...b.files)
-  const seen = new Set<string>()
-  return files.filter(f => {
-    if (!f.filename || seen.has(f.filename)) return false
-    seen.add(f.filename)
-    return true
-  })
-}
 
-// ─── Video Model Bundles ───
-// Each bundle contains ALL files needed for a working video workflow.
-// "Install All" downloads model + VAE + CLIP together.
-
-export interface CustomNodeDef {
-  key: string
-  repo: string
-  name: string
-}
-
-export const CUSTOM_NODE_REGISTRY: Record<string, { repo: string; name: string; requiredNodes: string[] }> = {
-  'animatediff-evolved': {
-    repo: 'https://github.com/Kosinkadink/ComfyUI-AnimateDiff-Evolved',
-    name: 'ComfyUI-AnimateDiff-Evolved',
-    requiredNodes: ['ADE_LoadAnimateDiffModel', 'ADE_ApplyAnimateDiffModelSimple', 'ADE_UseEvolvedSampling'],
-  },
-  'cogvideox-wrapper': {
-    repo: 'https://github.com/kijai/ComfyUI-CogVideoXWrapper',
-    name: 'ComfyUI-CogVideoXWrapper',
-    requiredNodes: ['CogVideoXModelLoader', 'CogVideoXCLIPLoader', 'CogVideoXTextEncode', 'CogVideoXEmptyLatents', 'CogVideoXSampler', 'CogVideoXVAEDecode'],
-  },
-  'framepack-wrapper': {
-    repo: 'https://github.com/kijai/ComfyUI-FramePackWrapper',
-    name: 'ComfyUI-FramePackWrapper',
-    requiredNodes: ['LoadFramePackModel', 'FramePackSampler'],
-  },
-  'pyramidflow-wrapper': {
-    repo: 'https://github.com/kijai/ComfyUI-PyramidFlowWrapper',
-    name: 'ComfyUI-PyramidFlowWrapper',
-    requiredNodes: ['PyramidFlowModelLoader', 'PyramidFlowVAELoader', 'PyramidFlowTextEncode', 'PyramidFlowSampler', 'PyramidFlowDecode'],
-  },
-  'allegro': {
-    repo: 'https://github.com/bombax-xiaoice/ComfyUI-Allegro',
-    name: 'ComfyUI-Allegro',
-    requiredNodes: ['AllegroModelLoader', 'AllegroTextEncode', 'AllegroSampler', 'AllegroDecoder'],
-  },
-  // VHS_VideoCombine · the ONLY ComfyUI node that produces actual .mp4 video
-  // output. Without it, the workflow falls back to SaveAnimatedWEBP which
-  // makes "video generation" emit an animated .webp file. Two reporters
-  // (miguelkodoatie on Discord 2026-05-14, Turbulent_Tomato7559 on Reddit
-  // 2026-05-10) hit this on v2.4.3/2.4.4: t2i works, t2v "succeeds" but the
-  // output is a .webp that no video player will open. v2.4.4 added a
-  // warning banner; v2.4.5 makes it a one-click install instead.
-  'videohelpersuite': {
-    repo: 'https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite',
-    name: 'ComfyUI-VideoHelperSuite',
-    requiredNodes: ['VHS_VideoCombine', 'VHS_LoadVideo'],
-  },
-  // Background removal (Create → Remove Background). ComfyUI-RMBG registers the
-  // `RMBG` node · the exact class the capability probe + workflow builder look
-  // for · and auto-downloads its cutout model (BiRefNet / RMBG-2.0, ~300 MB)
-  // into ComfyUI/models/RMBG on first use. So the one-click action only needs to
-  // install the node; the model lands on the first cutout run.
-  'rmbg': {
-    repo: 'https://github.com/1038lab/ComfyUI-RMBG',
-    name: 'ComfyUI-RMBG',
-    requiredNodes: ['RMBG'],
-  },
-  // GGUF quant loader (city96). Lets the 2.5.8 lanes offer Q4 quants of the
-  // 14B Wan models (S2V / Animate / NSFW finetunes) — the difference between
-  // "needs 16 GB on disk and heavy offload" and "runs comfortably on 12 GB".
-  // requirements.txt is just the gguf package, no exotic wheels.
-  'gguf': {
-    repo: 'https://github.com/city96/ComfyUI-GGUF',
-    name: 'ComfyUI-GGUF',
-    requiredNodes: ['UnetLoaderGGUF'],
-  },
-  // Pose extraction for the local Motion Control lane (DWPose skeletons feed
-  // WanAnimateToVideo / WanVaceToVideo). Its requirements pull the CPU
-  // onnxruntime wheel — works on every Windows box, no GPU wheel roulette;
-  // the DWPose onnx models auto-download on first run.
-  'controlnet-aux': {
-    repo: 'https://github.com/Fannovel16/comfyui_controlnet_aux',
-    name: 'comfyui_controlnet_aux',
-    requiredNodes: ['DWPreprocessor'],
-  },
-}
-
-export interface ModelBundle {
-  name: string
-  description: string
-  tags: string[]
-  totalSizeGB: number
-  vramRequired: string
-  workflow: string
-  files: DiscoverModel[]
-  url?: string
-  hot?: boolean
-  uncensored?: boolean
-  customNodes?: string[]  // keys into CUSTOM_NODE_REGISTRY
-  i2v?: boolean           // Image-to-Video model
-  verified?: boolean      // E2E tested and confirmed working
-}
-
-export function getVideoBundles(): ModelBundle[] {
-  return [
-    {
-      name: 'Wan 2.1 · 1.3B (Lightweight)',
-      description: 'Best for 8 to 10 GB VRAM GPUs. Generates 480p video. Fast and lightweight.',
-      tags: ['Wan 2.1', '480p', 'Fast'],
-      uncensored: true,
-      verified: true,
-      totalSizeGB: 9.2,
-      vramRequired: '8-10 GB',
-      workflow: 'wan',
-      url: 'https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged',
-      files: [
-        {
-          name: 'Wan 2.1 T2V 1.3B Model',
-          description: 'The main video generation model.',
-          pulls: '', tags: ['Model', '2.5 GB'], updated: '',
-          downloadUrl: 'https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/diffusion_models/wan2.1_t2v_1.3B_bf16.safetensors',
-          filename: 'wan2.1_t2v_1.3B_bf16.safetensors', subfolder: 'diffusion_models', sizeGB: 2.5,
-        },
-        {
-          name: 'Wan 2.1 VAE',
-          description: 'Required video encoder/decoder.',
-          pulls: '', tags: ['VAE', '200 MB'], updated: '',
-          downloadUrl: 'https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/vae/wan_2.1_vae.safetensors',
-          filename: 'wan_2.1_vae.safetensors', subfolder: 'vae', sizeGB: 0.2,
-        },
-        {
-          name: 'Wan 2.1 CLIP (UMT5-XXL FP8)',
-          description: 'Required text encoder.',
-          pulls: '', tags: ['CLIP', '4.9 GB'], updated: '',
-          downloadUrl: 'https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors',
-          filename: 'umt5_xxl_fp8_e4m3fn_scaled.safetensors', subfolder: 'text_encoders', sizeGB: 6.3,
-        },
-      ],
-    },
-    {
-      name: 'Wan 2.1 · 14B FP8 (High Quality)',
-      description: 'Best quality for 12+ GB VRAM. Generates up to 720p. Slower but much better results.',
-      tags: ['Wan 2.1', '720p', 'Quality'],
-      uncensored: true,
-      verified: true,
-      totalSizeGB: 20.5,
-      vramRequired: '12+ GB',
-      workflow: 'wan',
-      url: 'https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged',
-      files: [
-        {
-          name: 'Wan 2.1 T2V 14B (FP8)',
-          description: 'The main video generation model (quantized).',
-          pulls: '', tags: ['Model', '14 GB'], updated: '',
-          downloadUrl: 'https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/diffusion_models/wan2.1_t2v_14B_fp8_e4m3fn.safetensors',
-          filename: 'wan2.1_t2v_14B_fp8.safetensors', subfolder: 'diffusion_models', sizeGB: 14.0,
-        },
-        {
-          name: 'Wan 2.1 VAE',
-          description: 'Required video encoder/decoder.',
-          pulls: '', tags: ['VAE', '200 MB'], updated: '',
-          downloadUrl: 'https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/vae/wan_2.1_vae.safetensors',
-          filename: 'wan_2.1_vae.safetensors', subfolder: 'vae', sizeGB: 0.2,
-        },
-        {
-          name: 'Wan 2.1 CLIP (UMT5-XXL FP8)',
-          description: 'Required text encoder.',
-          pulls: '', tags: ['CLIP', '4.9 GB'], updated: '',
-          downloadUrl: 'https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors',
-          filename: 'umt5_xxl_fp8_e4m3fn_scaled.safetensors', subfolder: 'text_encoders', sizeGB: 6.3,
-        },
-      ],
-    },
-    {
-      name: 'Wan 2.2 · TI2V 5B (Image + Text to Video)',
-      description: 'Wan 2.2 TI2V-5B · ONE model for both text to video and faithful image to video (the clip opens on your source image). Native 1280×704 @ 24 fps, smooth 2 to 7 s clips. The best quality video model that fits 12 GB.',
-      tags: ['Wan 2.2', '720p', 'I2V', 'T2V', 'Quality'],
-      uncensored: true,
-      verified: true,
-      i2v: true,
-      hot: true,
-      totalSizeGB: 16.9,
-      vramRequired: '12+ GB',
-      workflow: 'wan22',
-      url: 'https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged',
-      files: [
-        {
-          name: 'Wan 2.2 TI2V 5B Model (FP16)',
-          description: 'The unified text + image to video model.',
-          pulls: '', tags: ['Model', '~9.3 GB'], updated: 'New',
-          downloadUrl: 'https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/diffusion_models/wan2.2_ti2v_5B_fp16.safetensors',
-          filename: 'wan2.2_ti2v_5B_fp16.safetensors', subfolder: 'diffusion_models', sizeGB: 9.3,
-        },
-        {
-          name: 'Wan 2.2 VAE',
-          description: 'Required video encoder/decoder · the 2.2 VAE (NOT the 2.1 VAE: higher compression, different latent shape).',
-          pulls: '', tags: ['VAE', '~1.3 GB'], updated: 'New',
-          downloadUrl: 'https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/vae/wan2.2_vae.safetensors',
-          filename: 'wan2.2_vae.safetensors', subfolder: 'vae', sizeGB: 1.3,
-        },
-        {
-          name: 'Wan CLIP (UMT5-XXL FP8)',
-          description: 'Required text encoder · shared with Wan 2.1, so it is skipped if already installed.',
-          pulls: '', tags: ['CLIP', '6.3 GB'], updated: '',
-          downloadUrl: 'https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors',
-          filename: 'umt5_xxl_fp8_e4m3fn_scaled.safetensors', subfolder: 'text_encoders', sizeGB: 6.3,
-        },
-      ],
-    },
-    {
-      name: 'HunyuanVideo 1.5 T2V FP8 (High Quality)',
-      description: 'Tencent HunyuanVideo 1.5 · excellent temporal consistency and visual quality. 480p text to video with CFG distillation.',
-      tags: ['HunyuanVideo 1.5', '480p', 'Quality'],
-      uncensored: true,
-      verified: true,
-      totalSizeGB: 18.8,
-      vramRequired: '12+ GB',
-      workflow: 'hunyuan',
-      url: 'https://huggingface.co/Comfy-Org/HunyuanVideo_1.5_repackaged',
-      files: [
-        {
-          name: 'HunyuanVideo 1.5 T2V FP8',
-          description: 'The main video generation model (480p, CFG distilled, quantized).',
-          pulls: '', tags: ['Model', '7.8 GB'], updated: '',
-          downloadUrl: 'https://huggingface.co/Comfy-Org/HunyuanVideo_1.5_repackaged/resolve/main/split_files/diffusion_models/hunyuanvideo1.5_480p_t2v_cfg_distilled_fp8_scaled.safetensors',
-          filename: 'hunyuanvideo1.5_480p_t2v_fp8.safetensors', subfolder: 'diffusion_models', sizeGB: 7.8,
-        },
-        {
-          name: 'HunyuanVideo 1.5 VAE',
-          description: 'Required video encoder/decoder.',
-          pulls: '', tags: ['VAE', '2.3 GB'], updated: '',
-          downloadUrl: 'https://huggingface.co/Comfy-Org/HunyuanVideo_1.5_repackaged/resolve/main/split_files/vae/hunyuanvideo15_vae_fp16.safetensors',
-          filename: 'hunyuanvideo15_vae_fp16.safetensors', subfolder: 'vae', sizeGB: 2.3,
-        },
-        {
-          name: 'Qwen 2.5 VL 7B Text Encoder (FP8)',
-          description: 'Required text encoder for HunyuanVideo 1.5.',
-          pulls: '', tags: ['Text Encoder', '8.8 GB'], updated: '',
-          downloadUrl: 'https://huggingface.co/Comfy-Org/HunyuanVideo_1.5_repackaged/resolve/main/split_files/text_encoders/qwen_2.5_vl_7b_fp8_scaled.safetensors',
-          filename: 'qwen_2.5_vl_7b_fp8_scaled.safetensors', subfolder: 'text_encoders', sizeGB: 8.8,
-        },
-        {
-          name: 'CLIP-L Text Encoder',
-          description: 'Required secondary text encoder.',
-          pulls: '', tags: ['Text Encoder', '240 MB'], updated: '',
-          downloadUrl: 'https://huggingface.co/Comfy-Org/HunyuanVideo_repackaged/resolve/main/split_files/text_encoders/clip_l.safetensors',
-          filename: 'clip_l.safetensors', subfolder: 'text_encoders', sizeGB: 0.2,
-        },
-      ],
-    },
-    {
-      name: 'LTX Video 2.3 · 22B FP8 (Latest)',
-      description: 'Lightricks LTX Video 2.3 · fast inference, high quality. Uses Gemma 3 12B text encoder. Distilled for speed.',
-      tags: ['LTX 2.3', '22B', 'Quality'],
-      verified: true,
-      totalSizeGB: 40,
-      vramRequired: '16+ GB',
-      workflow: 'ltx',
-      url: 'https://huggingface.co/Lightricks/LTX-2.3-fp8',
-      files: [
-        {
-          name: 'LTX 2.3 22B Distilled FP8',
-          description: 'Main video model · distilled for fast inference.',
-          pulls: '', tags: ['Model', '~22 GB'], updated: 'New',
-          downloadUrl: 'https://huggingface.co/Lightricks/LTX-2.3-fp8/resolve/main/ltx-2.3-22b-distilled-fp8.safetensors',
-          filename: 'ltx-2.3-22b-distilled-fp8.safetensors', subfolder: 'diffusion_models', sizeGB: 27.5,
-        },
-        {
-          name: 'Gemma 3 12B Text Encoder (FP8)',
-          description: 'Required text encoder for LTX Video 2.x.',
-          pulls: '', tags: ['Text Encoder', '12.4 GB'], updated: 'New',
-          downloadUrl: 'https://huggingface.co/Comfy-Org/ltx-2/resolve/main/split_files/text_encoders/gemma_3_12B_it_fp8_scaled.safetensors',
-          filename: 'gemma_3_12B_it_fp8_scaled.safetensors', subfolder: 'text_encoders', sizeGB: 12.4,
-        },
-      ],
-    },
-    // ─── NEW VIDEO BUNDLES ───
-    {
-      name: 'AnimateDiff Lightning',
-      description: 'Ultra fast 4 step animation on any SD1.5 checkpoint. Great for quick iterations. Needs an SD1.5 base model.',
-      tags: ['AnimateDiff', '512x512', 'Lightning'],
-      verified: true,
-      totalSizeGB: 2.8,
-      vramRequired: '6-8 GB',
-      workflow: 'animatediff',
-      customNodes: ['animatediff-evolved'],
-      url: 'https://huggingface.co/ByteDance/AnimateDiff-Lightning',
-      files: [
-        {
-          name: 'AnimateDiff Lightning Motion Model (4 step)',
-          description: 'Lightning fast motion model. Only 4 sampling steps needed.',
-          pulls: '', tags: ['Motion', '800 MB'], updated: '',
-          downloadUrl: 'https://huggingface.co/ByteDance/AnimateDiff-Lightning/resolve/main/animatediff_lightning_4step_comfyui.safetensors',
-          filename: 'animatediff_lightning_4step_comfyui.safetensors', subfolder: 'custom_nodes/ComfyUI-AnimateDiff-Evolved/models', sizeGB: 0.8,
-        },
-        {
-          name: 'Realistic Vision V6 (SD1.5 Base)',
-          description: 'Recommended SD1.5 base checkpoint for realistic animations.',
-          pulls: '', tags: ['Checkpoint', '~2 GB'], updated: '',
-          downloadUrl: 'https://huggingface.co/SG161222/Realistic_Vision_V6.0_B1_noVAE/resolve/main/Realistic_Vision_V6.0_NV_B1_fp16.safetensors',
-          filename: 'Realistic_Vision_V6.0_NV_B1_fp16.safetensors', subfolder: 'checkpoints', sizeGB: 2.0,
-        },
-      ],
-    },
-    {
-      name: 'AnimateDiff v3',
-      description: 'Classic AnimateDiff with more frames and better quality than Lightning. Slower but more detailed.',
-      tags: ['AnimateDiff', '512x768', 'Quality'],
-      totalSizeGB: 3.6,
-      vramRequired: '6-8 GB',
-      workflow: 'animatediff',
-      customNodes: ['animatediff-evolved'],
-      url: 'https://huggingface.co/guoyww/animatediff',
-      files: [
-        {
-          name: 'AnimateDiff v3 Motion Adapter',
-          description: 'Standard motion model · 20 steps, good quality.',
-          pulls: '', tags: ['Motion', '1.6 GB'], updated: '',
-          downloadUrl: 'https://huggingface.co/guoyww/animatediff/resolve/main/v3_sd15_mm.ckpt',
-          filename: 'v3_sd15_mm.ckpt', subfolder: 'custom_nodes/ComfyUI-AnimateDiff-Evolved/models', sizeGB: 1.6,
-        },
-        {
-          name: 'Realistic Vision V6 (SD1.5 Base)',
-          description: 'Recommended SD1.5 base checkpoint.',
-          pulls: '', tags: ['Checkpoint', '~2 GB'], updated: '',
-          downloadUrl: 'https://huggingface.co/SG161222/Realistic_Vision_V6.0_B1_noVAE/resolve/main/Realistic_Vision_V6.0_NV_B1_fp16.safetensors',
-          filename: 'Realistic_Vision_V6.0_NV_B1_fp16.safetensors', subfolder: 'checkpoints', sizeGB: 2.0,
-        },
-      ],
-    },
-    // CogVideoX removed 2026-07-24 (D#88) · both bundles were 21 GB of download
-    // for a lane that could never run. buildCogVideoWorkflow emits five class
-    // types that exist in no version of kijai/ComfyUI-CogVideoXWrapper
-    // (CogVideoXCLIPLoader, CogVideoXTextEncode, CogVideoXEmptyLatents,
-    // CogVideoXSampler, CogVideoXVAEDecode · the real names are CogVideoTextEncode,
-    // CogVideoSampler, CogVideoDecode and there is no empty latents node at all),
-    // so every submit came back a 400. Verified against a real checkout of the
-    // wrapper. Offering the download again needs a rebuilt builder plus a real
-    // end to end run, not a rename. Wan, LTX and SVD cover the same ground and
-    // are proven.
-    {
-      name: 'FramePack F1 (Image to Video)',
-      description: 'Revolutionary I2V: runs on 6 GB VRAM via next frame prediction. Upload an image, get a video. Uses HunyuanVideo backbone.',
-      tags: ['FramePack', 'I2V', 'Low VRAM'],
-      uncensored: true,
-      verified: true,
-      totalSizeGB: 27.0,
-      vramRequired: '6-8 GB',
-      workflow: 'framepack',
-      i2v: true,
-      customNodes: ['framepack-wrapper'],
-      url: 'https://huggingface.co/lllyasviel/FramePack_F1_I2V_HY_20250503',
-      files: [
-        {
-          name: 'FramePack F1 I2V Model (FP8)',
-          description: 'Main I2V model · generates video from a single image.',
-          pulls: '', tags: ['Model', '15.3 GB'], updated: '',
-          downloadUrl: 'https://huggingface.co/Kijai/HunyuanVideo_comfy/resolve/main/FramePackI2V_HY_fp8_e4m3fn.safetensors',
-          filename: 'FramePackI2V_HY_fp8_e4m3fn.safetensors', subfolder: 'diffusion_models', sizeGB: 15.3,
-        },
-        {
-          name: 'SigCLIP Vision Encoder',
-          description: 'Required vision encoder for image understanding.',
-          pulls: '', tags: ['CLIP Vision', '900 MB'], updated: '',
-          downloadUrl: 'https://huggingface.co/Comfy-Org/sigclip_vision_384/resolve/main/sigclip_vision_patch14_384.safetensors',
-          filename: 'sigclip_vision_patch14_384.safetensors', subfolder: 'clip_vision', sizeGB: 0.9,
-        },
-        {
-          name: 'HunyuanVideo VAE',
-          description: 'Required video encoder/decoder (HunyuanVideo 1.0, the backbone FramePack was trained on).',
-          pulls: '', tags: ['VAE', '493 MB'], updated: '',
-          downloadUrl: 'https://huggingface.co/Comfy-Org/HunyuanVideo_repackaged/resolve/main/split_files/vae/hunyuan_video_vae_bf16.safetensors',
-          filename: 'hunyuan_video_vae_bf16.safetensors', subfolder: 'vae', sizeGB: 0.5,
-        },
-        {
-          name: 'CLIP-L Text Encoder',
-          description: 'Required text encoder (shared).',
-          pulls: '', tags: ['Text Encoder', '240 MB'], updated: '',
-          downloadUrl: 'https://huggingface.co/Comfy-Org/HunyuanVideo_repackaged/resolve/main/split_files/text_encoders/clip_l.safetensors',
-          filename: 'clip_l.safetensors', subfolder: 'text_encoders', sizeGB: 0.2,
-        },
-        {
-          name: 'LLaVA LLaMA3 Text Encoder (FP8)',
-          description: 'Required text encoder for FramePack.',
-          pulls: '', tags: ['Text Encoder', '8.5 GB'], updated: '',
-          downloadUrl: 'https://huggingface.co/Comfy-Org/HunyuanVideo_repackaged/resolve/main/split_files/text_encoders/llava_llama3_fp8_scaled.safetensors',
-          filename: 'llava_llama3_fp8_scaled.safetensors', subfolder: 'text_encoders', sizeGB: 8.5,
-        },
-      ],
-    },
-    {
-      name: 'SVD-XT 1.1 (Image to Video)',
-      description: 'Stable Video Diffusion by Stability AI. Upload an image, get 25 frames of smooth video. Native ComfyUI support.',
-      tags: ['SVD', 'I2V', 'Native'],
-      verified: true,
-      totalSizeGB: 4.8,
-      vramRequired: '12+ GB',
-      workflow: 'svd',
-      i2v: true,
-      url: 'https://huggingface.co/stabilityai/stable-video-diffusion-img2vid-xt-1-1',
-      files: [
-        {
-          name: 'SVD-XT 1.1 Checkpoint',
-          description: 'Complete I2V model · no additional downloads needed.',
-          pulls: '', tags: ['Checkpoint', '4.8 GB'], updated: '',
-          downloadUrl: 'https://huggingface.co/vdo/stable-video-diffusion-img2vid-xt-1-1/resolve/main/svd_xt_1_1.safetensors',
-          filename: 'svd_xt_1_1.safetensors', subfolder: 'checkpoints', sizeGB: 4.8,
-        },
-      ],
-    },
-    {
-      name: 'Mochi 1 Preview (FP8)',
-      description: 'Genmo Mochi · 848x480 video at 24 FPS. Good motion and temporal consistency. Native ComfyUI support.',
-      tags: ['Mochi', '848x480', 'Native'],
-      totalSizeGB: 20.4,
-      vramRequired: '16+ GB',
-      workflow: 'mochi',
-      url: 'https://huggingface.co/Comfy-Org/mochi_preview_repackaged',
-      files: [
-        {
-          name: 'Mochi 1 Preview (FP8)',
-          description: 'Main video model (quantized for lower VRAM).',
-          pulls: '', tags: ['Model', '10 GB'], updated: '',
-          downloadUrl: 'https://huggingface.co/Comfy-Org/mochi_preview_repackaged/resolve/main/split_files/diffusion_models/mochi_preview_fp8_scaled.safetensors',
-          filename: 'mochi_preview_fp8_scaled.safetensors', subfolder: 'diffusion_models', sizeGB: 10,
-        },
-        {
-          name: 'Mochi VAE',
-          description: 'Required video encoder/decoder.',
-          pulls: '', tags: ['VAE', '0.9 GB'], updated: '',
-          downloadUrl: 'https://huggingface.co/Comfy-Org/mochi_preview_repackaged/resolve/main/split_files/vae/mochi_vae.safetensors',
-          filename: 'mochi_vae.safetensors', subfolder: 'vae', sizeGB: 0.9,
-        },
-        {
-          name: 'T5-XXL Text Encoder (FP16)',
-          description: 'Required text encoder for Mochi.',
-          pulls: '', tags: ['Text Encoder', '9.5 GB'], updated: '',
-          downloadUrl: 'https://huggingface.co/Comfy-Org/mochi_preview_repackaged/resolve/main/split_files/text_encoders/t5xxl_fp16.safetensors',
-          filename: 't5xxl_fp16.safetensors', subfolder: 'text_encoders', sizeGB: 9.5,
-        },
-      ],
-    },
-    // Pyramid Flow removed 2026-07-24 (same audit as CogVideoX) · the builder was
-    // written against invented node names too. Checked against a real checkout of
-    // kijai/ComfyUI-PyramidFlowWrapper: the loader is registered as
-    // PyramidFlowTransformerLoader (not PyramidFlowModelLoader), decode is
-    // PyramidFlowVAEDecode (not PyramidFlowDecode) and needs a vae input we never
-    // wired, the text encoder takes clip + positive_prompt + negative_prompt (we
-    // passed a single `text` and no CLIP at all), and the sampler wants
-    // prompt_embeds plus per stage step strings rather than steps and frames. That
-    // is a rewrite, not a rename, so the 4.6 GB download comes back only with a
-    // real run behind it.
-    // Allegro removed · diffusers format only, no single-file safetensors available for one-click install
-    {
-      name: 'NVIDIA Cosmos 7B',
-      description: 'NVIDIA Cosmos Diffusion 7B Text to World. 1024x1024 output at 24 FPS. Native ComfyUI support. Uses oldt5 text encoder (NOT t5xxl).',
-      tags: ['Cosmos', '1024x1024', 'NVIDIA'],
-      totalSizeGB: 19.2,
-      vramRequired: '24+ GB',
-      workflow: 'cosmos',
-      url: 'https://huggingface.co/mcmonkey/cosmos-1.0',
-      files: [
-        {
-          name: 'Cosmos 7B Text2World',
-          description: 'Main video generation model by NVIDIA.',
-          pulls: '', tags: ['Model', '14 GB'], updated: '',
-          downloadUrl: 'https://huggingface.co/mcmonkey/cosmos-1.0/resolve/main/Cosmos-1_0-Diffusion-7B-Text2World.safetensors',
-          filename: 'Cosmos-1_0-Diffusion-7B-Text2World.safetensors', subfolder: 'diffusion_models', sizeGB: 14,
-        },
-        {
-          name: 'OldT5-XXL Text Encoder (FP8)',
-          description: 'Required text encoder · NOT the same as regular T5-XXL!',
-          pulls: '', tags: ['Text Encoder', '4.9 GB'], updated: '',
-          downloadUrl: 'https://huggingface.co/comfyanonymous/cosmos_1.0_text_encoder_and_VAE_ComfyUI/resolve/main/text_encoders/oldt5_xxl_fp8_e4m3fn_scaled.safetensors',
-          filename: 'oldt5_xxl_fp8_e4m3fn_scaled.safetensors', subfolder: 'text_encoders', sizeGB: 4.9,
-        },
-        {
-          name: 'Cosmos VAE',
-          description: 'Required video encoder/decoder.',
-          pulls: '', tags: ['VAE', '300 MB'], updated: '',
-          downloadUrl: 'https://huggingface.co/comfyanonymous/cosmos_1.0_text_encoder_and_VAE_ComfyUI/resolve/main/vae/cosmos_cv8x8x8_1.0.safetensors',
-          filename: 'cosmos_cv8x8x8_1.0.safetensors', subfolder: 'vae', sizeGB: 0.2,
-        },
-      ],
-    },
-    {
-      name: 'NSFW Wan 14B (Uncensored, GGUF)',
-      description: 'Full uncensored finetune of Wan 2.1 14B. Text to video, motion trained in, no helper LoRA needed.',
-      tags: ['Wan 2.1', 'Uncensored', 'GGUF', '480p'],
-      uncensored: true,
-      totalSizeGB: 15.5,
-      vramRequired: '10-12 GB',
-      workflow: 'wan',
-      customNodes: ['gguf'],
-      url: 'https://huggingface.co/NSFW-API/NSFW_Wan_14b',
-      files: [
-        {
-          name: 'NSFW Wan 14B Q4 (GGUF)',
-          description: 'The finetuned video model, final e15 epoch, Q4 quant.',
-          pulls: '', tags: ['Model', '9 GB'], updated: '',
-          downloadUrl: 'https://huggingface.co/NSFW-API/NSFW_Wan_14b/resolve/main/nsfw_wan_14b_e15_q4_k.gguf',
-          filename: 'nsfw_wan_14b_e15_q4_k.gguf', subfolder: 'diffusion_models', sizeGB: 9.0,
-        },
-        {
-          name: 'Wan 2.1 VAE',
-          description: 'Required video encoder/decoder.',
-          pulls: '', tags: ['VAE', '250 MB'], updated: '',
-          downloadUrl: 'https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/vae/wan_2.1_vae.safetensors',
-          filename: 'wan_2.1_vae.safetensors', subfolder: 'vae', sizeGB: 0.24,
-        },
-        {
-          name: 'Wan CLIP (UMT5-XXL FP8)',
-          description: 'Required text encoder.',
-          pulls: '', tags: ['CLIP', '6.3 GB'], updated: '',
-          downloadUrl: 'https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors',
-          filename: 'umt5_xxl_fp8_e4m3fn_scaled.safetensors', subfolder: 'text_encoders', sizeGB: 6.27,
-        },
-      ],
-    },
-    {
-      name: 'Wan 2.2 Rapid AIO (Uncensored I2V, GGUF)',
-      description: 'Uncensored Wan 2.2 image to video, lightning merged for few step renders. Great for Animate and Extend.',
-      tags: ['Wan 2.2', 'Uncensored', 'I2V', 'GGUF', 'Fast'],
-      uncensored: true,
-      i2v: true,
-      totalSizeGB: 16.6,
-      vramRequired: '10-12 GB',
-      workflow: 'wan',
-      customNodes: ['gguf'],
-      url: 'https://huggingface.co/desirel/WAN2.2-14B-Rapid-AllInOne-GGUF-NSFW-v10',
-      files: [
-        {
-          name: 'Wan 2.2 Rapid AIO v10 Q4 (GGUF)',
-          description: 'The merged uncensored i2v model, Q4 quant.',
-          pulls: '', tags: ['Model', '10.1 GB'], updated: '',
-          downloadUrl: 'https://huggingface.co/desirel/WAN2.2-14B-Rapid-AllInOne-GGUF-NSFW-v10/resolve/main/wan2.2-i2v-rapid-aio-v10-nsfw-Q4_K_M.gguf',
-          filename: 'wan2.2-i2v-rapid-aio-v10-nsfw-Q4_K_M.gguf', subfolder: 'diffusion_models', sizeGB: 10.1,
-        },
-        {
-          name: 'Wan 2.1 VAE',
-          description: 'Required video encoder/decoder.',
-          pulls: '', tags: ['VAE', '250 MB'], updated: '',
-          downloadUrl: 'https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/vae/wan_2.1_vae.safetensors',
-          filename: 'wan_2.1_vae.safetensors', subfolder: 'vae', sizeGB: 0.24,
-        },
-        {
-          name: 'Wan CLIP (UMT5-XXL FP8)',
-          description: 'Required text encoder.',
-          pulls: '', tags: ['CLIP', '6.3 GB'], updated: '',
-          downloadUrl: 'https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors',
-          filename: 'umt5_xxl_fp8_e4m3fn_scaled.safetensors', subfolder: 'text_encoders', sizeGB: 6.27,
-        },
-      ],
-    },
-  ]
-}
-
-// ─── 2.5.8 specialized local-lane bundles (music / talking character / motion) ───
+// ─── The catalog against reality (T-70) ───
 //
-// Every URL below was HEAD-verified against HuggingFace on 2026-07-18 (status
-// 200 + content-length; sizes in GiB from the actual response). Music and
-// talking character have no censored/uncensored axis — local rendering runs
-// unfiltered by nature, so no red badge games; the honest split lives in the
-// video list above (real uncensored finetunes) instead.
+// THERE IS DELIBERATELY NO LIVENESS CHECK AT RUNTIME, and this is the reason.
+//
+// The audit's complaint is true: every download address in this app is a
+// string a human typed, and nothing ever asked HuggingFace whether the file is
+// still there. The obvious repair — probe them when the app starts — is worse
+// than the disease:
+//
+//   · It buys the app a hundred-odd HEAD requests before the user has asked
+//     for anything, on every start.
+//   · It invents a network dependency LU does not have. This is a local-first
+//     app; the Models tab has to render on a train. A probe that fails offline
+//     either lies ("all of these are broken") or is ignored, and an ignored
+//     check is not a check.
+//   · It cannot fix anything. These URLs are compile-time constants. Knowing
+//     at 09:00 that one is dead does not give the running app a working
+//     address — it only lets it phrase a better refusal.
+//
+// And the better refusal is already built, one layer down and at zero cost:
+// the Rust downloader turns the status of the request the USER started into a
+// sentence that names the cause (`http_error_message`,
+// src-tauri/src/commands/download.rs), and `isPermanentDownloadError` above
+// stops the UI offering Retry on an address that can never answer. That is the
+// lazy check, at the moment of actual access, and it costs no extra request.
+//
+// What was genuinely missing is the other half: nobody checks the catalog
+// BEFORE it ships. So the check moved to where it belongs — a gate the
+// developer and CI run, never the user:
+//
+//     LIVE_HF=1 npx vitest run src/api/__tests__/hf-catalog-addresses.live.test.ts
+//
+// The two functions below are that gate's eyes. They live here, next to the
+// catalog, and they are derived from it rather than copied out of it: a URL
+// added to COMPONENT_REGISTRY or to any bundle is inside the gate the moment
+// it is written. A hand-kept list in the test file would have been a second
+// catalog to forget to update — the same mistake as T-67, in a new place.
 
-export function getAudioBundles(): ModelBundle[] {
-  return [
-    {
-      name: 'ACE Step 1.5 Turbo (Music)',
-      description: 'Newest full song generator, MIT licensed. Vocals, lyrics and instruments from a text description. One file.',
-      tags: ['Music', 'Vocals', 'MIT'],
-      totalSizeGB: 9.4,
-      vramRequired: '6-8 GB',
-      workflow: 'ace',
-      url: 'https://huggingface.co/Comfy-Org/ace_step_1.5_ComfyUI_files',
-      files: [
-        {
-          name: 'ACE Step 1.5 Turbo (all in one)',
-          description: 'Complete music model. Includes its text encoder and audio VAE.',
-          pulls: '', tags: ['Checkpoint', '9.3 GB'], updated: '',
-          downloadUrl: 'https://huggingface.co/Comfy-Org/ace_step_1.5_ComfyUI_files/resolve/main/checkpoints/ace_step_1.5_turbo_aio.safetensors',
-          filename: 'ace_step_1.5_turbo_aio.safetensors', subfolder: 'checkpoints', sizeGB: 9.34,
-        },
-      ],
-    },
-    {
-      name: 'ACE Step v1 3.5B (Music, lighter)',
-      description: 'The proven full song generator. Smaller download, runs from 4 GB VRAM.',
-      tags: ['Music', 'Vocals', 'Light'],
-      totalSizeGB: 7.2,
-      vramRequired: '4-6 GB',
-      workflow: 'ace',
-      url: 'https://huggingface.co/Comfy-Org/ACE-Step_ComfyUI_repackaged',
-      files: [
-        {
-          name: 'ACE Step v1 3.5B (all in one)',
-          description: 'Complete music model. Includes its text encoder and audio VAE.',
-          pulls: '', tags: ['Checkpoint', '7.2 GB'], updated: '',
-          downloadUrl: 'https://huggingface.co/Comfy-Org/ACE-Step_ComfyUI_repackaged/resolve/main/all_in_one/ace_step_v1_3.5b.safetensors',
-          filename: 'ace_step_v1_3.5b.safetensors', subfolder: 'checkpoints', sizeGB: 7.17,
-        },
-      ],
-    },
-  ]
+/** One address the catalog can hand to the downloader. */
+export interface CatalogAddress {
+  url: string
+  /** Every catalog slot that names this URL, each named once. Several entries
+   *  share the big text encoders — the same Wan VAE sits in four bundles — and
+   *  a dead address has to be able to name all of its victims. */
+  where: string[]
 }
 
-export function getLipsyncBundles(): ModelBundle[] {
-  // Shared support files for the S2V graph (text encoder, VAE, audio encoder).
-  const s2vSupport: DiscoverModel[] = [
-    {
-      name: 'Wan CLIP (UMT5-XXL FP8)',
-      description: 'Required text encoder.',
-      pulls: '', tags: ['CLIP', '6.3 GB'], updated: '',
-      downloadUrl: 'https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors',
-      filename: 'umt5_xxl_fp8_e4m3fn_scaled.safetensors', subfolder: 'text_encoders', sizeGB: 6.27,
-    },
-    {
-      name: 'Wan 2.1 VAE',
-      description: 'Required video encoder/decoder.',
-      pulls: '', tags: ['VAE', '250 MB'], updated: '',
-      downloadUrl: 'https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/vae/wan_2.1_vae.safetensors',
-      filename: 'wan_2.1_vae.safetensors', subfolder: 'vae', sizeGB: 0.24,
-    },
-    {
-      name: 'Wav2Vec2 Audio Encoder',
-      description: 'Turns the speech audio into the embeddings the model lip reads from.',
-      pulls: '', tags: ['Audio Encoder', '600 MB'], updated: '',
-      downloadUrl: 'https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/audio_encoders/wav2vec2_large_english_fp16.safetensors',
-      filename: 'wav2vec2_large_english_fp16.safetensors', subfolder: 'audio_encoders', sizeGB: 0.59,
-    },
-  ]
-  return [
-    {
-      name: 'Wan 2.2 S2V Q4 (Talking Character, GGUF)',
-      description: 'A portrait plus any voice becomes a talking video. Q4 quant, the comfortable pick for 12 GB cards.',
-      tags: ['Wan 2.2', 'S2V', 'GGUF'],
-      totalSizeGB: 20.0,
-      vramRequired: '10-12 GB',
-      workflow: 'wans2v',
-      customNodes: ['gguf'],
-      url: 'https://huggingface.co/QuantStack/Wan2.2-S2V-14B-GGUF',
-      files: [
-        {
-          name: 'Wan 2.2 S2V 14B Q4 (GGUF)',
-          description: 'The sound to video model, Q4 quant.',
-          pulls: '', tags: ['Model', '12.9 GB'], updated: '',
-          downloadUrl: 'https://huggingface.co/QuantStack/Wan2.2-S2V-14B-GGUF/resolve/main/Wan2.2-S2V-14B-Q4_K_M.gguf',
-          filename: 'Wan2.2-S2V-14B-Q4_K_M.gguf', subfolder: 'diffusion_models', sizeGB: 12.91,
-        },
-        ...s2vSupport,
-      ],
-    },
-    {
-      name: 'Wan 2.2 S2V FP8 (Talking Character)',
-      description: 'The full precision friendly variant. Bigger file; offloads below 16 GB VRAM, so renders take longer there.',
-      tags: ['Wan 2.2', 'S2V', 'FP8'],
-      totalSizeGB: 22.4,
-      vramRequired: '16 GB best, offloads on less',
-      workflow: 'wans2v',
-      url: 'https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged',
-      files: [
-        {
-          name: 'Wan 2.2 S2V 14B (FP8)',
-          description: 'The sound to video model.',
-          pulls: '', tags: ['Model', '15.3 GB'], updated: '',
-          downloadUrl: 'https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/diffusion_models/wan2.2_s2v_14B_fp8_scaled.safetensors',
-          filename: 'wan2.2_s2v_14B_fp8_scaled.safetensors', subfolder: 'diffusion_models', sizeGB: 15.27,
-        },
-        ...s2vSupport,
-      ],
-    },
-  ]
+/**
+ * Every hardcoded download address the catalog holds, deduplicated by URL.
+ *
+ * Two sources, because there are two: the model catalog `catalogEntries()`
+ * already walks (bundles + text models, model file and vision projector), and
+ * `COMPONENT_REGISTRY`, whose VAE/CLIP addresses are handed to
+ * `startModelDownload` by the component-completion path and appear in no
+ * bundle at all.
+ */
+export function catalogAddresses(): CatalogAddress[] {
+  const byUrl = new Map<string, Set<string>>()
+  const add = (url: string | undefined, where: string) => {
+    if (!url) return
+    const seen = byUrl.get(url)
+    if (seen) seen.add(where)
+    else byUrl.set(url, new Set([where]))
+  }
+
+  for (const m of catalogEntries()) {
+    add(m.downloadUrl, m.filename ? `${m.name} · ${m.filename}` : m.name)
+    add(m.mmprojUrl, `${m.name} · vision projector`)
+  }
+
+  for (const [type, req] of Object.entries(COMPONENT_REGISTRY)) {
+    add(req.vae?.downloadUrl, `COMPONENT_REGISTRY.${type}.vae`)
+    add(req.clip?.downloadUrl, `COMPONENT_REGISTRY.${type}.clip`)
+    add(req.clipSecondary?.downloadUrl, `COMPONENT_REGISTRY.${type}.clipSecondary`)
+  }
+
+  return [...byUrl].map(([url, where]) => ({ url, where: [...where] }))
 }
 
-export function getMotionBundles(): ModelBundle[] {
-  const wanSupport: DiscoverModel[] = [
-    {
-      name: 'Wan CLIP (UMT5-XXL FP8)',
-      description: 'Required text encoder.',
-      pulls: '', tags: ['CLIP', '6.3 GB'], updated: '',
-      downloadUrl: 'https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors',
-      filename: 'umt5_xxl_fp8_e4m3fn_scaled.safetensors', subfolder: 'text_encoders', sizeGB: 6.27,
-    },
-    {
-      name: 'Wan 2.1 VAE',
-      description: 'Required video encoder/decoder.',
-      pulls: '', tags: ['VAE', '250 MB'], updated: '',
-      downloadUrl: 'https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/vae/wan_2.1_vae.safetensors',
-      filename: 'wan_2.1_vae.safetensors', subfolder: 'vae', sizeGB: 0.24,
-    },
-  ]
-  return [
-    {
-      name: 'Wan VACE 1.3B (Motion Control, light)',
-      description: 'Your character copies the moves from any dance or pose video. The light pick, runs from 8 GB VRAM.',
-      tags: ['VACE', 'Motion', 'Light'],
-      totalSizeGB: 10.5,
-      vramRequired: '8-10 GB',
-      workflow: 'wanvace',
-      customNodes: ['controlnet-aux'],
-      url: 'https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged',
-      files: [
-        {
-          name: 'Wan 2.1 VACE 1.3B',
-          description: 'The motion control model.',
-          pulls: '', tags: ['Model', '4 GB'], updated: '',
-          downloadUrl: 'https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/diffusion_models/wan2.1_vace_1.3B_fp16.safetensors',
-          filename: 'wan2.1_vace_1.3B_fp16.safetensors', subfolder: 'diffusion_models', sizeGB: 4.01,
-        },
-        ...wanSupport,
-      ],
-    },
-    {
-      name: 'Wan 2.2 Animate Q4 (Motion Control, GGUF)',
-      description: 'The bigger, better motion transfer model. Q4 quant for 12 GB cards.',
-      tags: ['Wan 2.2', 'Animate', 'GGUF'],
-      totalSizeGB: 17.3,
-      vramRequired: '10-12 GB',
-      workflow: 'wananimate',
-      customNodes: ['gguf', 'controlnet-aux'],
-      url: 'https://huggingface.co/QuantStack/Wan2.2-Animate-14B-GGUF',
-      files: [
-        {
-          name: 'Wan 2.2 Animate 14B Q4 (GGUF)',
-          description: 'The motion transfer model, Q4 quant.',
-          pulls: '', tags: ['Model', '10.7 GB'], updated: '',
-          downloadUrl: 'https://huggingface.co/QuantStack/Wan2.2-Animate-14B-GGUF/resolve/main/Wan2.2-Animate-14B-Q4_K_M.gguf',
-          filename: 'Wan2.2-Animate-14B-Q4_K_M.gguf', subfolder: 'diffusion_models', sizeGB: 10.71,
-        },
-        ...wanSupport,
-      ],
-    },
-  ]
+/** What a probe of a catalog address proved. */
+export type AddressVerdict =
+  /** The host serves this file. */
+  | 'reachable'
+  /** The address is gone or gated — the user's download would fail forever. */
+  | 'dead'
+  /** The host did not answer the question (rate limit, 5xx, no network). */
+  | 'unclear'
+
+/**
+ * Read one HTTP status as a verdict about the ADDRESS.
+ *
+ * The third case is the point. The size watcher next door
+ * (`bundle-size-drift.live.test.ts`) treats every non-OK answer the same way —
+ * `if (echt === null) continue` — so a 404 is silently skipped and the run
+ * still goes green. "I could not ask" and "the answer is no" are different
+ * facts, and a gate that cannot tell them apart passes exactly when it should
+ * shout. A 429 must not fail the build; a 404 must.
+ */
+export function classifyAddressProbe(status: number): AddressVerdict {
+  if (PERMANENT_HTTP_STATUSES.includes(status)) return 'dead'
+  if (status >= 200 && status < 400) return 'reachable'
+  return 'unclear'
 }
+
 
 // ─── CivitAI Model Search ───
 
@@ -2413,19 +1894,31 @@ export async function searchCivitaiModels(
       // back near-empty for users who expected to find e.g. unfiltered SDXL forks.
       nsfw: 'true',
     })
-    // Adding the user's API key as a bearer token unlocks the full catalog and
-    // lifts the per-IP rate limit. Falls back to anon access if no key is set.
-    const url = `https://${host}/api/v1/models?${params}${apiKey ? `&token=${encodeURIComponent(apiKey)}` : ''}`
-    const text = await fetchExternal(url)
-    const data = JSON.parse(text)
-    const items: any[] = data.items ?? []
+    // The user's API key unlocks the full catalog and lifts the per-IP rate
+    // limit. It travels as an Authorization header, NOT as `&token=` in the
+    // URL: the URL is what the error text and the log line quote, and the log
+    // scrubber cannot see a secret that is just another substring of a URL.
+    // No key set is still a valid, anonymous search.
+    const url = `https://${host}/api/v1/models?${params}`
+    const text = await fetchExternal(url, apiKey ?? null)
+    const data: unknown = JSON.parse(text)
+    // CivitAI's catalogue, not ours: `items` is walked with the boundary
+    // guards, and a single malformed entry now yields a partly-empty CARD
+    // instead of throwing out of the `.map` and losing all twenty results to
+    // the catch below.
+    const items = asRecordArray(prop(data, 'items'))
 
     return items.map((item) => {
-      const version = item.modelVersions?.[0]
-      const file = version?.files?.[0]
-      const thumb = version?.images?.[0]?.url
-      const downloadUrl = version?.downloadUrl ?? file?.downloadUrl
-      const sizeKB = file?.sizeKB ?? 0
+      const version = asRecordArray(prop(item, 'modelVersions'))[0]
+      const file = asRecordArray(prop(version, 'files'))[0]
+      const thumb = asString(propPath(asRecordArray(prop(version, 'images'))[0], 'url'))
+      const downloadUrl = asString(prop(version, 'downloadUrl')) ?? asString(prop(file, 'downloadUrl'))
+      const sizeKB = asNumber(prop(file, 'sizeKB')) ?? 0
+      const itemName = asString(prop(item, 'name'))
+      const itemId = asNumber(prop(item, 'id')) ?? 0
+      const stats = prop(item, 'stats')
+      const downloadCount = asNumber(prop(stats, 'downloadCount'))
+      const creator = asString(propPath(item, 'creator', 'username'))
 
       // Determine subfolder based on model type
       let subfolder = 'checkpoints'
@@ -2433,22 +1926,23 @@ export async function searchCivitaiModels(
       else if (type === 'VAE') subfolder = 'vae'
       else if (type === 'TextualInversion') subfolder = 'embeddings'
       // Check if it's a diffusion model (FLUX, Wan, etc.)
-      const name = item.name?.toLowerCase() || ''
+      const name = (itemName ?? '').toLowerCase()
       if (name.includes('flux') || name.includes('wan') || name.includes('hunyuan')) {
         subfolder = 'diffusion_models'
       }
 
-      const filename = file?.name || `${item.name?.replace(/[^a-zA-Z0-9._-]/g, '_')}.safetensors`
+      const filename = asString(prop(file, 'name'))
+        || `${(itemName ?? '').replace(/[^a-zA-Z0-9._-]/g, '_')}.safetensors`
 
       const descParts: string[] = []
-      const rawDesc = (item.description ?? '').replace(/<[^>]*>/g, '').trim()
+      const rawDesc = (asString(prop(item, 'description')) ?? '').replace(/<[^>]*>/g, '').trim()
       if (rawDesc) descParts.push(rawDesc.slice(0, 120))
-      if (item.stats?.downloadCount) descParts.push(`${item.stats.downloadCount.toLocaleString()} downloads`)
-      if (item.creator?.username) descParts.push(`by ${item.creator.username}`)
+      if (downloadCount) descParts.push(`${formatCount(downloadCount)} downloads`)
+      if (creator) descParts.push(`by ${creator}`)
 
       return {
-        id: item.id,
-        name: item.name || `Model #${item.id}`,
+        id: itemId,
+        name: itemName || `Model #${itemId}`,
         description: descParts.join(' · '),
         type: type,
         thumbnailUrl: thumb,
@@ -2456,9 +1950,11 @@ export async function searchCivitaiModels(
         filename,
         subfolder,
         sizeGB: sizeKB > 0 ? Math.round(sizeKB / 1024 / 1024 * 10) / 10 : undefined,
-        stats: item.stats ? { downloads: item.stats.downloadCount || 0, likes: item.stats.thumbsUpCount || 0 } : undefined,
-        creator: item.creator?.username,
-        sourceUrl: `https://${host}/models/${item.id}`,
+        stats: isRecord(stats)
+          ? { downloads: downloadCount ?? 0, likes: asNumber(prop(stats, 'thumbsUpCount')) ?? 0 }
+          : undefined,
+        creator,
+        sourceUrl: `https://${host}/models/${itemId}`,
       }
     })
   } catch (err) {

@@ -485,6 +485,15 @@ describe('discover — data validation', () => {
       expect(groups).toContain('Qwen 3.8 27B Abliterated')
     })
 
+    it('serves OrcaRouter\'s uncensored 27B from the ungated bartowski requant, projector named as that repo names it', () => {
+      const rows = getUncensoredTextModels().filter(m => m.group === 'Qwen 3.8 27B Uncensored')
+      expect(rows.length).toBe(6)
+      for (const m of rows) {
+        expect(m.downloadUrl).toContain('/bartowski/orcarouter_Qwen3.8-27B-Uncensored-GGUF/')
+        expect(m.mmprojUrl).toContain('/bartowski/orcarouter_Qwen3.8-27B-Uncensored-GGUF/resolve/main/mmproj-orcarouter_Qwen3.8-27B-Uncensored-f16.gguf')
+      }
+    })
+
     it('lists the official 27B and the small distill', () => {
       const names = getMainstreamTextModels().map(m => m.name)
       expect(names).toContain('Qwen 3.8 27B')
@@ -497,6 +506,7 @@ describe('discover — data validation', () => {
         .filter(Boolean)
       expect(tags).toContain('qwen3.8')
       expect(tags).toContain('huihui_ai/Qwen3.8-abliterated:27b')
+      expect(tags).toContain('orcarouter/Qwen3.8-27B-Uncensored:q4_K_M')
     })
   })
 })

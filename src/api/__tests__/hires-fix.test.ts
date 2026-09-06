@@ -4,8 +4,14 @@ import {
   nativeHiresFinalSize,
   NativeHiresFixError,
 } from '../hires-fix'
+// The graph is read back through the SAME accessor production uses. A fixture
+// held as `Record<string, any>` answers `undefined` for a renamed field and the
+// assertion goes green against nothing; `nodeInput` answers `undefined` only
+// when the input really is absent, and the comparison below is against a
+// concrete pair, so absence fails.
+import { nodeInput, type ComfyApiGraph } from '../../types/comfy-graph'
 
-const baseWorkflow = () => ({
+const baseWorkflow = (): ComfyApiGraph => ({
   '1': {
     class_type: 'CheckpointLoaderSimple',
     inputs: { ckpt_name: 'model.safetensors' },
@@ -91,14 +97,14 @@ describe('applyNativeHiresFix', () => {
         denoise: 0.35,
       }),
     }))
-    expect(result.workflow['5'].inputs.samples).toEqual([result.samplerNodeId, 0])
+    expect(nodeInput(result.workflow['5'], 'samples')).toEqual([result.samplerNodeId, 0])
 
     // The caller's freshly built graph remains untouched.
-    expect(source['5'].inputs.samples).toEqual(['4', 0])
+    expect(nodeInput(source['5'], 'samples')).toEqual(['4', 0])
   })
 
   it('supports a tiled final image decode', () => {
-    const workflow: Record<string, any> = baseWorkflow()
+    const workflow: ComfyApiGraph = baseWorkflow()
     workflow['5'].class_type = 'VAEDecodeTiled'
 
     const result = applyNativeHiresFix(workflow, {
@@ -110,12 +116,12 @@ describe('applyNativeHiresFix', () => {
       upscaleMethod: 'bicubic',
     })
 
-    expect(result.workflow['5'].inputs.samples).toEqual([result.samplerNodeId, 0])
+    expect(nodeInput(result.workflow['5'], 'samples')).toEqual([result.samplerNodeId, 0])
     expect(result).toEqual(expect.objectContaining({ width: 1280, height: 1280 }))
   })
 
   it('rejects workflows whose final decode is not fed by a core KSampler', () => {
-    const workflow: Record<string, any> = baseWorkflow()
+    const workflow: ComfyApiGraph = baseWorkflow()
     workflow['4'].class_type = 'SamplerCustom'
 
     expect(() => applyNativeHiresFix(workflow, {
@@ -129,7 +135,7 @@ describe('applyNativeHiresFix', () => {
   })
 
   it('rejects ambiguous multi-output image workflows', () => {
-    const workflow: Record<string, any> = baseWorkflow()
+    const workflow: ComfyApiGraph = baseWorkflow()
     workflow['9'] = {
       class_type: 'VAEDecode',
       inputs: { samples: ['4', 0], vae: ['1', 2] },

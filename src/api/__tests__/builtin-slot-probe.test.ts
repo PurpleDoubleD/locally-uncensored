@@ -100,11 +100,24 @@ describe('the AI Backends row goes through that reader', () => {
 
   it('there is a "Not running" state and it is not painted as a failure', () => {
     expect(providerConfig).toContain('Not running')
-    expect(providerConfig).toMatch(/status === 'stopped' \? 'bg-amber-500'/)
+    // Die Regel dahinter hat sich am 04.09.2026 geaendert. Bis dahin teilten
+    // sich ein noch nicht gestarteter Motor und ein Server ohne Modelle einen
+    // eigenen bernsteinfarbenen Punkt (`'stopped' || 'no-models' ?
+    // 'bg-amber-500'`). Dieses Gelb ist im ganzen Haus abgeschafft, weil es
+    // fuenf verschiedene Dinge gleichzeitig sagte und damit keins davon
+    // (lib/hinweis.ts). Der Punkt kennt jetzt an, kaputt und aus, und beide
+    // Lagen fallen in "aus". Der Sinn dieses Tests ist derselbe geblieben:
+    // ein Motor, den niemand gestartet hat, ist kein Fehler.
+    expect(providerConfig).toMatch(/status === 'failed' \? PUNKT_FARBE\.kaputt :\s*PUNKT_FARBE\.aus/)
+    expect(providerConfig).not.toMatch(/status === 'stopped' \? 'bg-red-500'/)
+    // Und das Wort neben dem Punkt sagt dasselbe wie der Punkt.
+    expect(providerConfig).toMatch(/text: 'Not running',\s*ton: HINWEIS_TEXT\.ruhig/)
+    // NEGATIVKONTROLLE zur Abschaffung: kein Gelb mehr in dieser Datei.
+    expect(providerConfig).not.toMatch(/amber-|yellow-/)
   })
 
   it('the user-facing strings on this row are English', () => {
-    for (const s of ['Not running', 'Connected', 'Failed']) {
+    for (const s of ['Not running', 'Connected', 'Failed', 'Reachable, no models']) {
       expect(providerConfig).toContain(s)
     }
   })

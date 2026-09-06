@@ -20,6 +20,11 @@ on:
         description: 'Release tag to announce (e.g. v2.3.8)'
         required: true
         type: string
+      everyone:
+        description: 'Ping @everyone in both channels (manual announce only)'
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -33,24 +38,63 @@ jobs:
     # matches our normal build time (~11 min for Windows + Linux parallel).
     runs-on: ubuntu-latest
     steps:
-      - name: Wait for tauri artifacts
+      - name: Wait for tauri artifacts from THIS run
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
           TAG: ${{ github.event.release.tag_name || inputs.tag }}
+          EVENT_NAME: ${{ github.event_name }}
         run: |
           set -euo pipefail
-          echo "Waiting for $TAG installers to appear on the release…"
+          # Counting asset FILENAMES was never a check that the binaries exist —
+          # only that four files with the right suffixes are attached, no matter
+          # who put them there or when. On 2026-08-15 the Linux lane hung for six
+          # hours and was killed, so that run attached Windows assets only; the
+          # AppImage/.deb from the previous run were still hanging on the release,
+          # the count reached 4, and the announcement went out for installers that
+          # did not contain the code it was announcing. Assets therefore have to
+          # be tied to THIS run: only ones uploaded after the cutoff below count.
+          #
+          # Read through the REST API rather than `gh release view`: the asset
+          # objects there are documented to carry created_at/updated_at, which is
+          # the whole basis of the check.
+          if [ "$EVENT_NAME" = "release" ]; then
+            # The release publish is what started this run, so the installers are
+            # still being built — everything already attached predates this run.
+            CUTOFF=$(date -u +%s)
+          else
+            # Manual announce of a release that is already built: nothing new will
+            # be uploaded, so the bar is "uploaded for this release at all", which
+            # still rejects files carried over from an earlier release.
+            published=$(gh api "repos/$GH_REPO/releases/tags/$TAG" --jq '.published_at // .created_at')
+            CUTOFF=$(date -u -d "$published" +%s)
+          fi
+          echo "Counting only installers uploaded at/after $(date -u -d "@$CUTOFF" +%Y-%m-%dT%H:%M:%SZ)."
+
+          rel_json="$RUNNER_TEMP/release.json"
           for i in $(seq 1 72); do
-            count=$(gh release view "$TAG" --json assets --jq '[.assets[] | select(.name | test("setup\\.exe$|\\.msi$|\\.AppImage$|\\.deb$|\\.rpm$"))] | length')
-            if [ "$count" -ge 4 ]; then
-              echo "Found $count installer artifacts — proceeding."
+            gh api "repos/$GH_REPO/releases/tags/$TAG" > "$rel_json"
+            fresh=$(jq --argjson cutoff "$CUTOFF" '
+              [ .assets[]
+                | select(.name | test("setup\\.exe$|\\.msi$|\\.AppImage$|\\.deb$|\\.rpm$"))
+                | select(.state == "uploaded")
+                | select(((.created_at // .updated_at // "1970-01-01T00:00:00Z") | fromdateiso8601) >= $cutoff)
+              ] | length' "$rel_json")
+            if [ "$fresh" -ge 4 ]; then
+              echo "Found $fresh installer assets from this run — proceeding."
               exit 0
             fi
-            echo "  ($i/72) only $count so far, sleeping 10s…"
+            echo "  ($i/72) $fresh installers from this run so far, sleeping 10s…"
             sleep 10
           done
-          echo "Timeout waiting for artifacts — announcing anyway."
+
+          # Deliberately NOT "announcing anyway": announcing regardless is what
+          # turned a half-failed build into a public post about binaries nobody
+          # had built. A late announcement costs nothing; a wrong one is shipped.
+          echo "Assets currently on $TAG:"
+          jq -r '.assets[] | "  \(.name)  state=\(.state)  created_at=\(.created_at)"' "$rel_json" || true
+          echo "::error::$TAG has no 4 installers from this run after 12 minutes — refusing to announce."
+          exit 1
 
   announce:
     needs: wait-for-build
@@ -81,6 +125,7 @@ jobs:
           TITLE: ${{ steps.rel.outputs.title }}
           URL: ${{ steps.rel.outputs.url }}
           BODY_FILE: ${{ steps.rel.outputs.body_file }}
+          EVERYONE: ${{ inputs.everyone && 'true' || 'false' }}
         run: |
           python3 - <<'PY'
           import json, os, urllib.request, urllib.error, sys
@@ -88,6 +133,11 @@ jobs:
           if not webhook:
               sys.exit("DISCORD_RELEASES_WEBHOOK not set")
           tag = os.environ["TAG"]
+          # The ping is opt-in per manual run. Without it the post stays a
+          # normal message; with it Discord is told explicitly that
+          # @everyone may resolve (allowed_mentions), otherwise the text
+          # would render but nobody would be notified.
+          everyone = os.environ.get("EVERYONE") == "true"
           body_file = os.environ.get("BODY_FILE")
           body = ""
           if body_file and os.path.exists(body_file):
@@ -96,15 +146,17 @@ jobs:
           url  = os.environ["URL"]
           # Discord single-message limit is 2000 chars. Leave room for our
           # own header (~120) and footer (~100), cap the body at 1700.
-          header = f"# 🚀 Locally Uncensored {tag} is live\n\nAuto-update picks this up on your next launch.\n\n"
+          header = ("@everyone " if everyone else "") + f"# 🚀 Locally Uncensored {tag} is live\n\nAuto-update picks this up on your next launch.\n\n"
           footer = f"\n\nFull release notes + installers: {url}"
           budget = 2000 - len(header) - len(footer) - 20
           if len(body) > budget:
               body = body[:budget].rsplit("\n", 1)[0] + "\n\n*(truncated, see full notes link below)*"
           content = header + body + footer
+          payload = {"content": content, "flags": 4}  # 4 = SUPPRESS_EMBEDS (4096 is SUPPRESS_NOTIFICATIONS and silenced the 2.6.0 post)
+          payload["allowed_mentions"] = {"parse": ["everyone"]} if everyone else {"parse": []}
           req = urllib.request.Request(
               webhook,
-              data=json.dumps({"content": content, "flags": 4}).encode("utf-8"),  # 4 = SUPPRESS_EMBEDS (4096 is SUPPRESS_NOTIFICATIONS and silenced the 2.6.0 post)
+              data=json.dumps(payload).encode("utf-8"),
               headers={"Content-Type": "application/json", "User-Agent": "LocallyUncensored/release-announce"},
               method="POST",
           )
@@ -118,6 +170,7 @@ jobs:
           TAG: ${{ steps.rel.outputs.tag }}
           URL: ${{ steps.rel.outputs.url }}
           BODY_FILE: ${{ steps.rel.outputs.body_file }}
+          EVERYONE: ${{ inputs.everyone && 'true' || 'false' }}
         run: |
           python3 - <<'PY'
           import json, os, re, urllib.request, sys
@@ -125,6 +178,7 @@ jobs:
           if not webhook:
               sys.exit("DISCORD_ANNOUNCEMENTS_WEBHOOK not set")
           tag = os.environ["TAG"]
+          everyone = os.environ.get("EVERYONE") == "true"
           url = os.environ["URL"]
           body_file = os.environ.get("BODY_FILE")
           raw = ""
@@ -142,13 +196,16 @@ jobs:
               break
           teaser = re.sub(r"\*\*([^*]+)\*\*", r"**\1**", teaser)[:400]
           msg = (
-              f"Hey everyone, **{tag} is out**. Auto-update rolls on next launch.\n\n"
+              ("@everyone " if everyone else "")
+              + f"Hey everyone, **{tag} is out**. Auto-update rolls on next launch.\n\n"
               + (f"> {teaser}\n\n" if teaser else "")
               + f"Full notes: {url}"
           )
+          payload = {"content": msg, "flags": 4}
+          payload["allowed_mentions"] = {"parse": ["everyone"]} if everyone else {"parse": []}
           req = urllib.request.Request(
               webhook,
-              data=json.dumps({"content": msg, "flags": 4}).encode("utf-8"),
+              data=json.dumps(payload).encode("utf-8"),
               headers={"Content-Type": "application/json", "User-Agent": "LocallyUncensored/release-announce"},
               method="POST",
           )

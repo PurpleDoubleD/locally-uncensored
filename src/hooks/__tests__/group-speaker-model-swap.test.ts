@@ -44,7 +44,7 @@ describe('every speaker gets its own model loaded', () => {
   })
 
   it('says what it is waiting for and clears the line again', () => {
-    expect(groupTurn).toMatch(/Loading \$\{toLoad\} into the built-in engine for this turn/)
+    expect(groupTurn).toMatch(/Loading \$\{toLoad\} into the LU Engine for this turn/)
     // The announcement is written before the wait, and taken back after it, so
     // a turn that answers normally shows no leftover status line.
     const hint = groupTurn.indexOf('Loading ${toLoad}')
@@ -78,7 +78,7 @@ describe('every speaker gets its own model loaded', () => {
 describe('the composer hint tells the truth about local line-ups', () => {
   it('names the reload when two or more speakers share the engine', () => {
     expect(groupCostHintText(2, 2)).toBe(
-      '1 round = 2 answers = 2x the cost, and the built-in engine reloads between local speakers',
+      '1 round = 2 answers = 2x the cost, and the LU Engine reloads between local speakers',
     )
   })
 

@@ -4,6 +4,7 @@ import { useStagedChangesStore, type StagedChange } from '../../stores/stagedCha
 import { applyStagedChange } from '../../lib/staged-apply'
 import { DiffView } from './DiffView'
 import { log } from '../../lib/logger'
+import { HINWEIS_TEXT, HINWEIS_ZEILE } from '../../lib/hinweis'
 
 interface Props {
   /** Active conversation id — the panel scopes itself to this chat. */
@@ -71,7 +72,13 @@ export function StagedChangesPanel({ chatId }: Props) {
   async function applyAll() {
     if (!chatId) return
     for (const change of [...changes]) {
-      // eslint-disable-next-line no-await-in-loop
+      // Sequential on purpose, not an oversight: two changes can touch the same
+      // file, and `applyOne` reads-modifies-writes. In parallel the later write
+      // would be based on a snapshot taken before the earlier one landed.
+      // (Hier stand eine Unterdrueckung der Regel `no-await-in-loop`. Die ist
+      //  in KEINER Config dieses Baums eingeschaltet — die Zeile hat nie etwas
+      //  unterdrueckt, sie hat nur behauptet, es gaebe ein Gate. Der Grund war
+      //  richtig, die Form war eine Luege; der Grund bleibt.)
       await applyOne(change)
     }
   }
@@ -87,27 +94,38 @@ export function StagedChangesPanel({ chatId }: Props) {
   }
 
   return (
-    <div className="border-b border-gray-200 dark:border-white/[0.04] bg-amber-50/40 dark:bg-amber-500/[0.04]">
+    // Die Kopfzeile war komplett in Gelb getaucht, Flaeche, Symbole und
+    // Schrift. Wartende Aenderungen sind aber kein Zwischenfall, sondern eine
+    // Liste, die auf einen Klick wartet: sie traegt jetzt dieselbe neutrale
+    // Haut wie die uebrigen Abschnitte der Spalte, und die Zahl daneben ist
+    // das Signal (`lib/hinweis.ts`).
+    <div className="shrink-0 border-b border-gray-200 dark:border-white/[0.04]" data-testid="staged-changes-panel">
       <button
         onClick={() => setExpanded(!expanded)}
-        className="w-full flex items-center justify-between px-2 py-1.5 group hover:bg-amber-100/50 dark:hover:bg-amber-500/[0.08] transition-colors"
+        className="w-full flex items-center justify-between px-2 py-1.5 group hover:bg-gray-100/70 dark:hover:bg-white/[0.04] transition-colors"
         data-testid="staged-changes-header"
       >
         <span className="flex items-center gap-1.5">
           {expanded ? (
-            <ChevronDown size={11} className="text-amber-700 dark:text-amber-400" />
+            <ChevronDown size={11} className="text-gray-500 dark:text-gray-400" />
           ) : (
-            <ChevronRight size={11} className="text-amber-700 dark:text-amber-400" />
+            <ChevronRight size={11} className="text-gray-500 dark:text-gray-400" />
           )}
-          <FileText size={10} className="text-amber-700 dark:text-amber-400" />
-          <span className="text-[0.6rem] font-semibold text-amber-900 dark:text-amber-300">
+          <FileText size={10} className="text-gray-500 dark:text-gray-400" />
+          <span className="t-micro font-semibold text-gray-800 dark:text-gray-200">
             Pending ({changes.length})
           </span>
         </span>
       </button>
 
+      {/* The list scrolls inside a cap of the column. Without the cap two
+          staged files with long diffs took the whole column and the
+          transcript below shrank to zero height, so the shell approval
+          card that followed sat behind the composer with no way to reach
+          it (t10 on the box, 2026-09-06: run parked on "Waiting for your
+          approval" for 15 minutes). */}
       {expanded && (
-        <div className="px-1.5 pb-2 space-y-1.5">
+        <div className="px-1.5 pb-2 space-y-1.5 max-h-[40vh] overflow-y-auto scrollbar-thin" data-testid="staged-changes-list">
           {changes.map((change) => {
             const isApplying = applying.has(change.id)
             return (
@@ -143,8 +161,15 @@ export function StagedChangesPanel({ chatId }: Props) {
                   </span>
                 </div>
                 {errors[change.id] && (
+                  // Eine Zeile Rot, keine rote Flaeche: der Grund muss lesbar
+                  // sein, nicht laut. Die Farbe traegt die Dringlichkeit.
+                  // Die Zeile baut sich hier selbst, statt <Hinweis> zu nehmen,
+                  // weil sie ihre Testmarke behaelt und ins Kaestchen der
+                  // Aenderung eingerueckt sitzt; die Klassen kommen trotzdem
+                  // aus der einen Regel.
                   <div
-                    className="px-1.5 py-1 text-[0.5rem] leading-snug text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-500/10"
+                    role="alert"
+                    className={`px-1.5 py-1 ${HINWEIS_ZEILE} ${HINWEIS_TEXT.fehler}`}
                     data-testid="staged-change-error"
                   >
                     {errors[change.id]}
@@ -158,7 +183,15 @@ export function StagedChangesPanel({ chatId }: Props) {
               </div>
             )
           })}
+        </div>
+      )}
 
+      {/* Apply all and Reject all sit OUTSIDE the scroll cap. Inside it they
+          scrolled away with the diffs: with two long files the footer sat
+          under the fold of the list and a click without scrolling hit
+          nothing (t14 on the box, 2026-09-06). */}
+      {expanded && (
+        <div className="px-1.5 pb-2">
           <div className="flex items-center gap-1 pt-0.5">
             <button
               onClick={applyAll}

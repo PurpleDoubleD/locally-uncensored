@@ -8,6 +8,7 @@
 import { X, Target } from 'lucide-react'
 import { useAgentGoalStore } from '../../stores/agentGoalStore'
 import { useChatStore } from '../../stores/chatStore'
+import { COMPOSER_MAX_W } from './composer-width'
 
 export function GoalBar() {
   const activeConversationId = useChatStore((s) => s.activeConversationId)
@@ -17,12 +18,12 @@ export function GoalBar() {
   if (!activeConversationId || !goal?.text) return null
 
   return (
-    <div className="w-full max-w-[70%] mx-auto px-3 pb-1 flex justify-center">
+    <div className={`w-full ${COMPOSER_MAX_W} mx-auto px-3 pb-1 flex justify-center`}>
       <div className="w-full flex items-center gap-1.5 px-2 py-1 rounded-md border border-purple-500/20 bg-purple-500/[0.04]">
         <Target size={9} className="text-purple-400 shrink-0" />
         <span className="text-[0.55rem] uppercase tracking-wider text-gray-500 shrink-0">goal</span>
         <span
-          className="flex-1 min-w-0 truncate text-[0.6rem] text-gray-700 dark:text-gray-300"
+          className="flex-1 min-w-0 truncate t-micro text-gray-700 dark:text-gray-300"
           title={goal.text}
         >
           {goal.text}

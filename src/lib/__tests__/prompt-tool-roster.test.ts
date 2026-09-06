@@ -22,6 +22,8 @@ import { resolve } from 'node:path'
 import { renderToolRoster, renderToolNames } from '../tool-roster'
 import { ALWAYS_INCLUDE } from '../tool-selection'
 import type { MCPToolDefinition, ToolCategory } from '../../api/mcp/types'
+import { CODEX_PROMPT } from '../../../mobile-client/personas.js'
+import { AGENT_ALL_TOOLS } from '../../../mobile-client/agent-core.js'
 
 const SRC = resolve(__dirname, '..', '..')
 const read = (...p: string[]) => readFileSync(resolve(SRC, ...p), 'utf8')
@@ -68,13 +70,14 @@ function sliceFunction(src: string, header: string): string {
 const agentChat = read('hooks', 'useAgentChat.ts')
 const codex = read('hooks', 'useCodex.ts')
 const hermes = read('api', 'hermes-tool-calling.ts')
-// The mobile relay ships its own copy of the coding prompt inside the served
-// page. It drifted the same way and is the surface where a visible plan counts
-// for most, so it is held to the same rule.
-const relay = readFileSync(
-  resolve(SRC, '..', 'src-tauri', 'src', 'commands', 'remote.rs'),
-  'utf8',
-)
+// The mobile relay ships its own copy of the coding prompt. It drifted the
+// same way and is the surface where a visible plan counts for most, so it is
+// held to the same rule.
+//
+// 01.09.2026 (T-75): until today the prompt was recovered by finding
+// `var CODEX_PROMPT = '` in src-tauri/src/commands/remote.rs and slicing to
+// the next `';`, and the relay's tool list by a regex over the same file. The
+// client is real source now, so both are imported.
 
 const PROMPTS: Record<string, string> = {
   agent: sliceFunction(agentChat, 'function buildAgentSystemPrompt('),
@@ -87,24 +90,18 @@ const PROMPTS: Record<string, string> = {
   // leaving a real mutating one unmentioned.
   codexReview: sliceTemplate(codex, 'const CODEX_REVIEW_SYSTEM_PROMPT = `'),
   hermes: sliceFunction(hermes, 'export function buildHermesToolPrompt('),
-  mobileCodex: (() => {
-    const header = "var CODEX_PROMPT = '"
-    const start = relay.indexOf(header)
-    expect(start, 'mobile CODEX_PROMPT not found').toBeGreaterThan(-1)
-    const body = relay.slice(start + header.length)
-    return body.slice(0, body.indexOf("';"))
-  })(),
+  mobileCodex: CODEX_PROMPT,
 }
 
 /**
- * The tools the mobile relay actually declares in its own AGENT_TOOLS array.
- * Anchored on `description:` because parameters use the same `{name:'…'` shape
- * and are followed by `type:`. Matching on the name alone collects both and
- * turns the subset check into a tautology.
+ * The tools the mobile relay actually declares.
+ *
+ * This used to be a regex over remote.rs, anchored on `description:` because
+ * parameters use the same `{name:'…'` shape — match the name alone and the
+ * subset check below becomes a tautology. The array is imported now, so the
+ * distinction is made by the language instead of by an anchor.
  */
-const RELAY_TOOL_NAMES: string[] = [
-  ...new Set([...relay.matchAll(/\{name:'([a-z0-9_]+)',\s*description:/g)].map((m) => m[1])),
-]
+const RELAY_TOOL_NAMES: string[] = AGENT_ALL_TOOLS
 
 /** snake_case words, which is what every tool name looks like. */
 function candidateToolWords(text: string): string[] {

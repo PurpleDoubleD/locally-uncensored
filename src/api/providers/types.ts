@@ -7,6 +7,8 @@
 
 // ── Provider Identity ──────────────────────────────────────────
 
+import { LU_ENGINE_NAME } from '../../lib/engine-name'
+
 export type ProviderId = 'ollama' | 'openai' | 'anthropic' | 'lu-cloud'
 
 export interface ProviderConfig {
@@ -64,7 +66,7 @@ export interface ProviderPreset {
 export const PROVIDER_PRESETS: ProviderPreset[] = [
   // Built-in engine (2.5.7) — bundled llama.cpp llama-server, OpenAI-compatible,
   // lifecycle owned by the app. Zero external install. Default backend.
-  { id: 'builtin', name: 'Built-in Engine', providerId: 'openai', baseUrl: 'http://127.0.0.1:8127/v1', isLocal: true, managed: true },
+  { id: 'builtin', name: LU_ENGINE_NAME, providerId: 'openai', baseUrl: 'http://127.0.0.1:8127/v1', isLocal: true, managed: true },
 
   // Ollama (dedicated provider)
   { id: 'ollama', name: 'Ollama', providerId: 'ollama', baseUrl: 'http://localhost:11434', isLocal: true },
@@ -113,6 +115,14 @@ export interface ProviderModel {
    *  the switch, 'always' reasons regardless, 'never' hides it. Absent =
    *  fall back to the local name-heuristic. */
   thinkMode?: 'toggle' | 'always' | 'never'
+  /** The reasoning rungs this model really accepts, ascending (LU Cloud
+   *  /models `reasoning_effort_levels`). Absent on every other backend and on
+   *  a server that predates the field, and absent means no effort control and
+   *  the old fixed behaviour. See lib/effort.ts. */
+  effortLevels?: string[]
+  /** The rung the model itself defaults to (`reasoning_effort_default`). Used
+   *  only where no wish was made; the user's own choice always wins. */
+  effortDefault?: string
 }
 
 // ── Chat Messages (unified format) ────────────────────────────
@@ -129,7 +139,7 @@ export interface ToolCall {
   id?: string            // OpenAI requires this, Ollama doesn't
   function: {
     name: string
-    arguments: Record<string, any>
+    arguments: Record<string, unknown>
   }
 }
 
@@ -141,6 +151,25 @@ export interface ChatOptions {
   topK?: number         // Ollama/Anthropic support this, OpenAI doesn't
   maxTokens?: number
   thinking?: boolean    // Enable model thinking/reasoning mode
+  /**
+   * Which rung of the reasoning ladder to ask for while thinking is on
+   * (2.6.8). Meaningful only together with `effortLevels`; without a declared
+   * ladder the provider keeps sending what it always sent.
+   */
+  reasoningEffort?: string
+  /**
+   * The rungs the ACTIVE model declares, ascending, straight from the server
+   * catalogue. The caller passes them because the model row is what knows
+   * them; the provider clamps the wish onto them. Absent = no ladder = old
+   * behaviour.
+   */
+  effortLevels?: string[]
+  /**
+   * The rung the MODEL declares as its own default. Consulted only where the
+   * wish is off the ladder, and only downward: the user's wish is the wish, and
+   * a model default above it would quietly upgrade the bill.
+   */
+  effortDefault?: string
   // Bug AA v2.5.0 — Kj103x Discord 2026-05-27. Ollama defaults `num_ctx` to
   // 2048 if you don't pass it in /api/chat options, which silently caps RAG
   // and long-turn chats even though the loaded model supports way more. When
@@ -190,7 +219,7 @@ export interface ToolDefinition {
     description: string
     parameters: {
       type: 'object'
-      properties: Record<string, any>
+      properties: Record<string, unknown>
       required: string[]
     }
   }

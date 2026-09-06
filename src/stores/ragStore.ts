@@ -1,5 +1,6 @@
 import { create } from "zustand"
 import { persist } from "zustand/middleware"
+import { safeJSONStorage } from "../lib/storage-quota"
 import type { DocumentMeta, TextChunk } from "../types/rag"
 import { saveChunks, loadChunks, deleteChunks } from "../lib/ragDB"
 import { log } from "../lib/logger"
@@ -13,6 +14,11 @@ interface RAGState {
   indexingProgress: { current: number; total: number } | null
   lastRetrievedChunks: { chunk: TextChunk; score: number }[]
   contextWarning: string | null
+  /** Retrieval failed on the last send, so the answer was written WITHOUT the
+   *  documents (review S4). The old code only logged it, which meant the model
+   *  answered from nothing while the user watched a green Docs badge and
+   *  believed their PDF had been read. Cleared on the next successful turn. */
+  retrievalError: string | null
   pullingEmbeddingModel: boolean
   /** Bytes-level progress for the embedding-model pull (Bug F45-followup,
    *  upgrade-path UX). Populated by useRAG.pullEmbeddingModel from each
@@ -38,8 +44,17 @@ interface RAGState {
   setIndexing: (indexing: boolean) => void
   setIndexingProgress: (progress: { current: number; total: number } | null) => void
   clearConversationDocs: (conversationId: string) => void
+  /** Everything this conversation owns, gone: the document list, the RAG
+   *  toggle, the in-memory chunks and their 768-float vectors in IndexedDB.
+   *  clearConversationDocs empties the document array but LEAVES the two keys
+   *  behind, which is right while the chat still exists and wrong once it does
+   *  not — a deleted chat's entry would sit in `documents` forever and its
+   *  vectors would keep being exported to rag_chunks_backup.json every 30 s for
+   *  the lifetime of the installation. */
+  removeConversation: (conversationId: string) => void
   setLastRetrievedChunks: (chunks: { chunk: TextChunk; score: number }[]) => void
   setContextWarning: (warning: string | null) => void
+  setRetrievalError: (message: string | null) => void
   setPullingEmbeddingModel: (pulling: boolean) => void
   setEmbeddingPullProgress: (p: { completed: number; total: number; status: string } | null) => void
   setEmbeddingInstallPrompt: (prompt: boolean) => void
@@ -58,6 +73,7 @@ export const useRAGStore = create<RAGState>()(
       indexingProgress: null,
       lastRetrievedChunks: [],
       contextWarning: null,
+      retrievalError: null,
       pullingEmbeddingModel: false,
       embeddingPullProgress: null,
       embeddingQueuedFiles: [],
@@ -148,6 +164,10 @@ export const useRAGStore = create<RAGState>()(
       setRagEnabled: (conversationId, enabled) =>
         set((state) => ({
           ragEnabled: { ...state.ragEnabled, [conversationId]: enabled },
+          // Switching Document Chat off answers the complaint. Leaving "your
+          // documents could not be searched" standing over a composer that is
+          // no longer searching documents is just a stale alarm.
+          retrievalError: enabled ? state.retrievalError : null,
         })),
 
       setEmbeddingModel: (model) => set({ embeddingModel: model }),
@@ -173,9 +193,33 @@ export const useRAGStore = create<RAGState>()(
         }))
       },
 
+      removeConversation: (conversationId) => {
+        const docIds = (get().documents[conversationId] || []).map((d) => d.id)
+        for (const docId of docIds) {
+          deleteChunks(docId).catch((err) =>
+            log.error("Failed to delete chunks from IndexedDB", { err })
+          )
+        }
+        set((state) => {
+          const documents = { ...state.documents }
+          const ragEnabled = { ...state.ragEnabled }
+          delete documents[conversationId]
+          delete ragEnabled[conversationId]
+          return {
+            documents,
+            ragEnabled,
+            chunks: docIds.length > 0
+              ? state.chunks.filter((c) => !docIds.includes(c.documentId))
+              : state.chunks,
+          }
+        })
+      },
+
       setLastRetrievedChunks: (chunks) => set({ lastRetrievedChunks: chunks }),
 
       setContextWarning: (warning) => set({ contextWarning: warning }),
+
+      setRetrievalError: (message) => set({ retrievalError: message }),
 
       setPullingEmbeddingModel: (pulling) => set({ pullingEmbeddingModel: pulling }),
 
@@ -190,6 +234,7 @@ export const useRAGStore = create<RAGState>()(
     }),
     {
       name: "rag-store",
+      storage: safeJSONStorage(),
       partialize: (state) => ({
         documents: state.documents,
         ragEnabled: state.ragEnabled,

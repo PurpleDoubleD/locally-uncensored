@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
+import { safeJSONStorage } from "../lib/storage-quota"
 
 /**
  * How long a cloud render stays retrievable. Single source of truth for the
@@ -36,7 +37,10 @@ export const useCloudNoticeStore = create<CloudNoticeState>()(
       retentionNoticeSeen: false,
       setRetentionNoticeSeen: (v) => set({ retentionNoticeSeen: v }),
     }),
-    { name: "lu_cloud_notice" },
+    {
+      name: "lu_cloud_notice",
+      storage: safeJSONStorage(),
+    },
   ),
 );
 

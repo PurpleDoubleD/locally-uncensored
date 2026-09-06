@@ -29,7 +29,10 @@ const localStorageShim = {
 } as Storage
 
 const KEY = 'chat-settings'
-const CURRENT = 21
+/** Must track STORE_VERSION in settingsStore.ts: the case below needs a blob
+ *  that zustand does NOT migrate, and that is only true at the current
+ *  version. Bumped to 22 with the reasoningEffort field (2.6.8). */
+const CURRENT = 22
 /** What a 2.6.5 build stamps back into the shared profile. */
 const OLD_BUILD = 20
 

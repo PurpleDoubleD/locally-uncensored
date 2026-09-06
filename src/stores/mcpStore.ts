@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
+import { safeJSONStorage } from '../lib/storage-quota'
 import type { MCPServerConfig, MCPToolDefinition } from '../api/mcp/types'
 
 interface MCPState {
@@ -60,6 +61,7 @@ export const useMCPStore = create<MCPState>()(
     }),
     {
       name: 'locally-uncensored-mcp-servers',
+      storage: safeJSONStorage(),
       partialize: (state) => ({
         servers: state.servers,
       }),

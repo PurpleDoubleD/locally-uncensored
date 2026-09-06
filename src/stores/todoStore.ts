@@ -1,5 +1,6 @@
 import { create } from 'zustand'
-import { persist, createJSONStorage } from 'zustand/middleware'
+import { persist } from 'zustand/middleware'
+import { safeJSONStorage } from '../lib/storage-quota'
 
 /**
  * The plan a long run is working through, written by the model itself.
@@ -84,7 +85,7 @@ export const useTodoStore = create<TodoState>()(
     }),
     {
       name: 'locally-uncensored-todos',
-      storage: createJSONStorage(() => localStorage),
+      storage: safeJSONStorage(),
     },
   ),
 )

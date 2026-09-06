@@ -4,6 +4,7 @@
 // Dismissing stamps the version, so it never comes back for this build.
 
 import { useState } from 'react'
+import { useDismissOnEscape } from '../../hooks/useDismissOnEscape'
 import { AnimatePresence, motion } from 'framer-motion'
 import { X, Sparkles, ChevronDown } from 'lucide-react'
 import { version as currentVersion } from '../../../package.json'
@@ -20,6 +21,7 @@ export function ReleaseNotesModal() {
   const open = shouldShowReleaseNotes(currentVersion, lastNotesVersion, onboardingDone)
   const note = releaseNoteFor(currentVersion)
   const close = () => markNotesSeen(currentVersion)
+  useDismissOnEscape(open && !!note, close)
 
   return (
     <AnimatePresence>

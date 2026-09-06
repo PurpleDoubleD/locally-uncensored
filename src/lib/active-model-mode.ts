@@ -80,3 +80,35 @@ export function pickForMode(
   if (activeModel === null && !fallback) return { change: false, next: null, usedRequest: false }
   return { change: true, next: fallback ? fallback.name : null, usedRequest: false }
 }
+
+/**
+ * Did the app replace the user's pick behind his back.
+ *
+ * Gegenprobe G1, 04.09.2026: der Testkunde nimmt den Provider LM Studio
+ * wieder heraus. Das gewaehlte Modell gehoerte dazu, verschwindet also aus der
+ * Liste, und die Regel oben greift zum ersten Eintrag, den sie findet. Zweimal
+ * hintereinander war das eine kaputte GGUF-Datei. Die Models-Seite schrieb
+ * ACTIVE daneben, der Waehlerknopf nannte sie, und auf Port 8127 lief nichts.
+ * Kein Wort dazu stand irgendwo.
+ *
+ * Ein Moduswechsel zaehlt NICHT: den hat der Nutzer selbst umgelegt, der
+ * Schalter steht sichtbar auf dem Schirm, und eine Zeile darueber waere Laerm.
+ * Gemeint ist allein der Fall, in dem sich die Liste unter dem Nutzer bewegt
+ * hat, ohne dass er den Waehler angefasst hat.
+ *
+ * `activeModel` muss dafuer da sein, und das ist keine Luecke, sondern die
+ * Grenze dieser Regel: der Satz nennt beide Namen, und ohne den alten gibt es
+ * keinen Satz. Der Fall, in dem die Wahl vorher schon geraeumt wurde, weil ein
+ * fremdes Backend den lokalen Steckplatz uebernommen hat, wird deshalb dort
+ * angesagt, wo der alte Name noch dasteht: in
+ * `dropPickServedByTheBuiltinEngine` (stores/modelStore), im selben Zug wie das
+ * Raeumen. Wer ihn hier einzufangen versucht, kommt immer zu spaet.
+ */
+export function replacedBehindTheUsersBack(
+  activeModel: string | null,
+  pick: ModePick,
+  modeFlipped: boolean,
+): boolean {
+  if (modeFlipped || !pick.change || pick.usedRequest) return false
+  return !!activeModel && !!pick.next && pick.next !== activeModel
+}

@@ -16,6 +16,7 @@
  * Run: npx vitest run src/api/providers/__tests__/openai-lan-capabilities.test.ts
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import type { ProviderConfig } from '../types'
 
 // Answer shapes taken from a real LM Studio 0.3.x on the Mac, 2026-08-07.
 const STANDARD = {
@@ -45,7 +46,7 @@ let enhancedAvailable: boolean
 // llama.cpp's real shape with chat_template_caps.
 let propsAnswer: Record<string, unknown> | null
 
-async function makeProvider(config: Record<string, unknown>) {
+async function makeProvider(config: ProviderConfig) {
   vi.resetModules()
   requested = []
   vi.doMock('../../backend', () => ({
@@ -69,7 +70,7 @@ async function makeProvider(config: Record<string, unknown>) {
     explainDeadEngine: (e: unknown) => e,
   }))
   const mod = await import('../openai-provider')
-  return new mod.OpenAIProvider(config as any)
+  return new mod.OpenAIProvider(config)
 }
 
 beforeEach(() => { enhancedAvailable = true; propsAnswer = null })
@@ -84,7 +85,7 @@ describe('the LAN branch derives supportsTools from the enhanced listing', () =>
   it('a model declaring tool_use comes back true', async () => {
     const p = await makeProvider({ id: 'openai', name: 'LM Studio', baseUrl: 'http://localhost:1234/v1', apiKey: '', enabled: true, isLocal: true })
     const models = await p.listModels()
-    expect(models.find((m: any) => m.id === 'qwen2.5-0.5b-instruct')!.supportsTools).toBe(true)
+    expect(models.find(m => m.id === 'qwen2.5-0.5b-instruct')!.supportsTools).toBe(true)
   })
 
   it('a model WITHOUT tool_use comes back FALSE, not the optimistic default', async () => {
@@ -93,14 +94,14 @@ describe('the LAN branch derives supportsTools from the enhanced listing', () =>
     // already disclaimed.
     const p = await makeProvider({ id: 'openai', name: 'LM Studio', baseUrl: 'http://localhost:1234/v1', apiKey: '', enabled: true, isLocal: true })
     const models = await p.listModels()
-    expect(models.find((m: any) => m.id === 'tinystories-33m')!.supportsTools).toBe(false)
+    expect(models.find(m => m.id === 'tinystories-33m')!.supportsTools).toBe(false)
   })
 
   it('an entry without a capabilities array falls back to the old default', async () => {
     // No answer must not read as a denial (same rule as the Ollama G26 fix).
     const p = await makeProvider({ id: 'openai', name: 'LM Studio', baseUrl: 'http://localhost:1234/v1', apiKey: '', enabled: true, isLocal: true })
     const models = await p.listModels()
-    expect(models.find((m: any) => m.id === 'legacy-model')!.supportsTools).toBe(true)
+    expect(models.find(m => m.id === 'legacy-model')!.supportsTools).toBe(true)
   })
 
   it('NEGATIVE CONTROL: a backend without enhanced API or /props stays optimistic', async () => {
@@ -108,7 +109,7 @@ describe('the LAN branch derives supportsTools from the enhanced listing', () =>
     enhancedAvailable = false
     const p = await makeProvider({ id: 'openai', name: 'vLLM', baseUrl: 'http://localhost:1234/v1', apiKey: '', enabled: true, isLocal: true })
     const models = await p.listModels()
-    for (const m of models) expect((m as any).supportsTools).toBe(true)
+    for (const m of models) expect(m.supportsTools).toBe(true)
   })
 })
 
@@ -124,25 +125,25 @@ describe('G37: llama.cpp /props decides when the enhanced listing says nothing',
   it('supports_tools false on /props downgrades every model of that server', async () => {
     enhancedAvailable = false
     propsAnswer = LLAMA_PROPS_NO_TOOLS
-    const p = await makeProvider({ id: 'builtin', name: 'Built-in Engine', baseUrl: 'http://127.0.0.1:8127/v1', apiKey: '', enabled: true, isLocal: true })
+    const p = await makeProvider({ id: 'openai', name: 'Built-in Engine', baseUrl: 'http://127.0.0.1:8127/v1', apiKey: '', enabled: true, isLocal: true })
     const models = await p.listModels()
-    for (const m of models) expect((m as any).supportsTools).toBe(false)
+    for (const m of models) expect(m.supportsTools).toBe(false)
   })
 
   it('supports_tools true on /props keeps native (llama.cpp with a tool template)', async () => {
     enhancedAvailable = false
     propsAnswer = LLAMA_PROPS_TOOLS
-    const p = await makeProvider({ id: 'builtin', name: 'Built-in Engine', baseUrl: 'http://127.0.0.1:8127/v1', apiKey: '', enabled: true, isLocal: true })
+    const p = await makeProvider({ id: 'openai', name: 'Built-in Engine', baseUrl: 'http://127.0.0.1:8127/v1', apiKey: '', enabled: true, isLocal: true })
     const models = await p.listModels()
-    for (const m of models) expect((m as any).supportsTools).toBe(true)
+    for (const m of models) expect(m.supportsTools).toBe(true)
   })
 
   it('a props answer without the field means nobody said: optimistic default', async () => {
     enhancedAvailable = false
     propsAnswer = { build_info: 'b1', model_path: '/x.gguf' }
-    const p = await makeProvider({ id: 'builtin', name: 'Built-in Engine', baseUrl: 'http://127.0.0.1:8127/v1', apiKey: '', enabled: true, isLocal: true })
+    const p = await makeProvider({ id: 'openai', name: 'Built-in Engine', baseUrl: 'http://127.0.0.1:8127/v1', apiKey: '', enabled: true, isLocal: true })
     const models = await p.listModels()
-    for (const m of models) expect((m as any).supportsTools).toBe(true)
+    for (const m of models) expect(m.supportsTools).toBe(true)
   })
 
   it('NEGATIVE CONTROL: the enhanced listing wins, /props is not even asked', async () => {
@@ -151,7 +152,7 @@ describe('G37: llama.cpp /props decides when the enhanced listing says nothing',
     propsAnswer = LLAMA_PROPS_NO_TOOLS
     const p = await makeProvider({ id: 'openai', name: 'LM Studio', baseUrl: 'http://localhost:1234/v1', apiKey: '', enabled: true, isLocal: true })
     const models = await p.listModels()
-    expect(models.find((m: any) => m.id === 'qwen2.5-0.5b-instruct')!.supportsTools).toBe(true)
+    expect(models.find(m => m.id === 'qwen2.5-0.5b-instruct')!.supportsTools).toBe(true)
     expect(requested.some(u => u.endsWith('/props'))).toBe(false)
   })
 })
@@ -163,7 +164,7 @@ describe('G37b: serverToolSupport answers the same question at send time', () =>
   it('llama.cpp /props false answers false, and the cache pays one request for the whole run', async () => {
     enhancedAvailable = false
     propsAnswer = { chat_template_caps: { supports_tools: false } }
-    const p = await makeProvider({ id: 'builtin', name: 'Built-in Engine', baseUrl: 'http://127.0.0.1:8127/v1', apiKey: '', enabled: true, isLocal: true })
+    const p = await makeProvider({ id: 'openai', name: 'Built-in Engine', baseUrl: 'http://127.0.0.1:8127/v1', apiKey: '', enabled: true, isLocal: true })
     expect(await p.serverToolSupport('any-gguf')).toBe(false)
     expect(await p.serverToolSupport('another-gguf')).toBe(false)
     expect(requested.filter(u => u.endsWith('/props')).length).toBe(1)
@@ -195,7 +196,7 @@ describe('G37b: serverToolSupport answers the same question at send time', () =>
   it('listModels and serverToolSupport share the cache: one /props total', async () => {
     enhancedAvailable = false
     propsAnswer = { chat_template_caps: { supports_tools: false } }
-    const p = await makeProvider({ id: 'builtin', name: 'Built-in Engine', baseUrl: 'http://127.0.0.1:8127/v1', apiKey: '', enabled: true, isLocal: true })
+    const p = await makeProvider({ id: 'openai', name: 'Built-in Engine', baseUrl: 'http://127.0.0.1:8127/v1', apiKey: '', enabled: true, isLocal: true })
     await p.listModels()
     expect(await p.serverToolSupport('any-gguf')).toBe(false)
     expect(requested.filter(u => u.endsWith('/props')).length).toBe(1)
@@ -213,8 +214,8 @@ describe('NEGATIVE CONTROL: cloud endpoints are untouched', () => {
       ] })
     }))
     const models = await p.listModels()
-    expect(models.find((m: any) => m.id === 'gpt-4o')!.supportsTools).toBe(true)
-    expect(models.find((m: any) => m.id === 'roleplay-model')!.supportsTools).toBe(false)
+    expect(models.find(m => m.id === 'gpt-4o')!.supportsTools).toBe(true)
+    expect(models.find(m => m.id === 'roleplay-model')!.supportsTools).toBe(false)
     expect(requested.some(u => u.includes('/api/v0'))).toBe(false)
   })
 })

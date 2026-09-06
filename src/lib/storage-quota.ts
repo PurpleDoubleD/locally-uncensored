@@ -3,8 +3,10 @@
  * corrupting Zustand persisted stores.
  */
 
-import type { StateStorage } from 'zustand/middleware'
+import type { PersistStorage, StateStorage } from 'zustand/middleware'
+import { createJSONStorage } from 'zustand/middleware'
 import { log } from './logger'
+import { prop, asNumber } from '../types/json-guards'
 
 const MAX_CONVERSATIONS = 100
 // Memory store key + how many entries we keep when evicting under quota
@@ -34,7 +36,17 @@ export function getStorageUsage(): { usedBytes: number; percentFull: number } {
   return { usedBytes, percentFull: usedBytes / estimatedLimit }
 }
 
-/** Prune oldest conversations from chat store to free space. */
+/**
+ * Prune oldest conversations from chat store to free space.
+ *
+ * WHEN THIS CAN BITE. Since 2.5.0 `chat-conversations` normally lives in
+ * IndexedDB and idbStorage deletes the localStorage copy, so on a healthy
+ * profile there is nothing here to prune. The tier is for the degraded case
+ * idbStorage falls back to: no IndexedDB (a broken WebView2 profile, the node
+ * test env), where the history goes back into localStorage and is by far the
+ * biggest thing in it — which is exactly when some OTHER store's small write is
+ * the one that hits the 5 MB wall.
+ */
 function pruneOldConversations(): boolean {
   const ls = getLS()
   if (!ls) return false
@@ -42,15 +54,21 @@ function pruneOldConversations(): boolean {
     const raw = ls.getItem('chat-conversations')
     if (!raw) return false
 
-    const data = JSON.parse(raw)
-    if (!data?.state?.conversations || !Array.isArray(data.state.conversations)) return false
+    // Foreign data: an older build of this app wrote it. Nothing below reads a
+    // field without checking it first, so a blob whose shape has since moved on
+    // makes this a no-op instead of an exception inside a failing write.
+    const data: unknown = JSON.parse(raw)
+    const state = prop(data, 'state')
+    const convs = prop(state, 'conversations')
+    if (!Array.isArray(convs) || convs.length <= MAX_CONVERSATIONS) return false
 
-    const convs = data.state.conversations
-    if (convs.length <= MAX_CONVERSATIONS) return false
-
-    convs.sort((a: any, b: any) => (b.updatedAt || 0) - (a.updatedAt || 0))
-    data.state.conversations = convs.slice(0, MAX_CONVERSATIONS)
-    ls.setItem('chat-conversations', JSON.stringify(data))
+    const kept = [...convs]
+      .sort((a, b) => (asNumber(prop(b, 'updatedAt')) ?? 0) - (asNumber(prop(a, 'updatedAt')) ?? 0))
+      .slice(0, MAX_CONVERSATIONS)
+    ls.setItem('chat-conversations', JSON.stringify({
+      ...(typeof data === 'object' && data !== null ? data : {}),
+      state: { ...(typeof state === 'object' && state !== null ? state : {}), conversations: kept },
+    }))
     return true
   } catch {
     return false
@@ -75,24 +93,25 @@ function pruneOldMemories(): boolean {
     const raw = ls.getItem(MEMORY_STORE_KEY)
     if (!raw) return false
 
-    const data = JSON.parse(raw)
-    if (!data?.state?.entries || !Array.isArray(data.state.entries)) return false
-
-    const entries = data.state.entries
-    if (entries.length <= MAX_MEMORIES) return false
+    const data: unknown = JSON.parse(raw)
+    const state = prop(data, 'state')
+    const entries = prop(state, 'entries')
+    if (!Array.isArray(entries) || entries.length <= MAX_MEMORIES) return false
 
     // Lower score = evicted first. Stale and superseded entries are dead
     // weight for retrieval, so they go before any live entry regardless of
     // age; among the rest, newer `updatedAt` wins.
-    const scoreOf = (e: any): number => {
-      let s = e?.updatedAt || e?.createdAt || 0
-      if (e?.stale) s -= 1e15
-      if (e?.supersededBy) s -= 1e14
+    const scoreOf = (e: unknown): number => {
+      let s = asNumber(prop(e, 'updatedAt')) || asNumber(prop(e, 'createdAt')) || 0
+      if (prop(e, 'stale')) s -= 1e15
+      if (prop(e, 'supersededBy')) s -= 1e14
       return s
     }
-    entries.sort((a: any, b: any) => scoreOf(b) - scoreOf(a))
-    data.state.entries = entries.slice(0, MAX_MEMORIES)
-    ls.setItem(MEMORY_STORE_KEY, JSON.stringify(data))
+    const kept = [...entries].sort((a, b) => scoreOf(b) - scoreOf(a)).slice(0, MAX_MEMORIES)
+    ls.setItem(MEMORY_STORE_KEY, JSON.stringify({
+      ...(typeof data === 'object' && data !== null ? data : {}),
+      state: { ...(typeof state === 'object' && state !== null ? state : {}), entries: kept },
+    }))
     return true
   } catch {
     return false
@@ -169,4 +188,21 @@ export function createSafeStorage(): StateStorage {
       if (ls) ls.removeItem(name)
     },
   }
+}
+
+/**
+ * The persist backend every localStorage-backed store uses.
+ *
+ * WHY IT IS NOT OPTIONAL. zustand's default is `createJSONStorage(() =>
+ * localStorage)`, and its setItem runs SYNCHRONOUSLY inside `api.setState`. A
+ * QuotaExceededError there does not fail a save, it throws out of the store
+ * action and out of the React event handler that called it — a click that
+ * silently takes the screen down. Until 2.6.8 nothing used createSafeStorage,
+ * so both prune tiers and StorageQuotaToast were code that could not run.
+ *
+ * Generic so each store keeps its own partialized type; the returned object is
+ * stateless, so sharing the shape across stores costs nothing.
+ */
+export function safeJSONStorage<S>(): PersistStorage<S> | undefined {
+  return createJSONStorage<S>(() => createSafeStorage())
 }

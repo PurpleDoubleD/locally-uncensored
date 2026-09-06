@@ -16,10 +16,16 @@ const STEP_TYPE_LABELS: Record<WorkflowStepType, string> = {
   memory_save: 'Save to Memory',
 }
 
+// Sechs Schrittarten, sechs Toenungen. Das ist eine Sortierhilfe und keine
+// Bewertung: eine Bedingung ist nicht gefaehrlicher als eine Schleife. Sie
+// stand trotzdem in Gelb und war damit die einzige Karte, die aussah, als
+// waere etwas mit ihr. Rose ist die Luecke, die dieses Rad noch hat. Orange
+// waere nur eine halbe Drehung vom alten Gelb, und Rot heisst in dieser App
+// kaputt (der Papierkorb rechts in derselben Zeile faerbt sich so).
 const STEP_TYPE_COLORS: Record<WorkflowStepType, string> = {
   prompt: 'border-blue-500/30 bg-blue-500/5',
   tool: 'border-green-500/30 bg-green-500/5',
-  condition: 'border-amber-500/30 bg-amber-500/5',
+  condition: 'border-rose-500/30 bg-rose-500/5',
   loop: 'border-purple-500/30 bg-purple-500/5',
   user_input: 'border-cyan-500/30 bg-cyan-500/5',
   memory_save: 'border-pink-500/30 bg-pink-500/5',
@@ -101,7 +107,7 @@ export function WorkflowBuilder({ workflowId, onSave, onCancel }: WorkflowBuilde
         <button onClick={onCancel} className="p-1 rounded hover:bg-white/10 text-gray-400">
           <ArrowLeft size={14} />
         </button>
-        <h3 className="text-[0.75rem] font-semibold text-white">
+        <h3 className="text-[12px] font-semibold text-white">
           {workflowId ? 'Edit Workflow' : 'New Workflow'}
         </h3>
       </div>
@@ -124,20 +130,20 @@ export function WorkflowBuilder({ workflowId, onSave, onCancel }: WorkflowBuilde
 
       {/* Steps */}
       <div className="space-y-1.5">
-        <p className="text-[0.6rem] text-gray-500 uppercase tracking-wider">Steps</p>
+        <p className="t-micro text-gray-500 uppercase tracking-wider">Steps</p>
 
         {steps.map((step, index) => (
-          <div key={step.id} className={`rounded-lg border ${STEP_TYPE_COLORS[step.type]} transition-all`}>
+          <div key={step.id} className={`rounded-lg border ${STEP_TYPE_COLORS[step.type]} transition-colors`}>
             {/* Step header */}
             <div
               className="flex items-center gap-2 px-2.5 py-1.5 cursor-pointer"
               onClick={() => setExpandedStep(expandedStep === step.id ? null : step.id)}
             >
-              <span className="text-[0.6rem] text-gray-500 w-4 text-center">{index + 1}</span>
+              <span className="t-micro text-gray-500 w-4 text-center">{index + 1}</span>
               <span className="text-[0.55rem] px-1.5 py-0.5 rounded bg-white/5 text-gray-400">
                 {STEP_TYPE_LABELS[step.type]}
               </span>
-              <span className="text-[0.65rem] text-gray-300 flex-1 truncate">{step.label}</span>
+              <span className="t-micro text-gray-300 flex-1 truncate">{step.label}</span>
               <div className="flex items-center gap-0.5">
                 <button onClick={(e) => { e.stopPropagation(); moveStep(index, -1) }} className="p-0.5 rounded hover:bg-white/10 text-gray-600" disabled={index === 0}>
                   <ChevronUp size={10} />
@@ -158,7 +164,7 @@ export function WorkflowBuilder({ workflowId, onSave, onCancel }: WorkflowBuilde
                   value={step.label}
                   onChange={(e) => updateStep(step.id, { label: e.target.value })}
                   placeholder="Step label"
-                  className="w-full px-2 py-1 rounded bg-white/5 border border-white/10 text-[0.65rem] text-gray-300 placeholder-gray-600 focus:outline-none mt-2"
+                  className="w-full px-2 py-1 rounded bg-white/5 border border-white/10 t-micro text-gray-300 placeholder-gray-600 focus:outline-none mt-2"
                 />
 
                 {/* Type-specific fields */}
@@ -168,7 +174,7 @@ export function WorkflowBuilder({ workflowId, onSave, onCancel }: WorkflowBuilde
                     onChange={(e) => updateStep(step.id, { prompt: e.target.value })}
                     placeholder="Prompt text (use {{variable}} for interpolation)"
                     rows={3}
-                    className="w-full px-2 py-1 rounded bg-white/5 border border-white/10 text-[0.65rem] text-gray-300 placeholder-gray-600 focus:outline-none resize-none"
+                    className="w-full px-2 py-1 rounded bg-white/5 border border-white/10 t-micro text-gray-300 placeholder-gray-600 focus:outline-none resize-none"
                   />
                 )}
 
@@ -177,7 +183,7 @@ export function WorkflowBuilder({ workflowId, onSave, onCancel }: WorkflowBuilde
                     <select
                       value={step.toolName || ''}
                       onChange={(e) => updateStep(step.id, { toolName: e.target.value })}
-                      className="w-full px-2 py-1 rounded bg-white/5 border border-white/10 text-[0.65rem] text-gray-300 focus:outline-none"
+                      className="w-full px-2 py-1 rounded bg-white/5 border border-white/10 t-micro text-gray-300 focus:outline-none"
                     >
                       <option value="">Select tool...</option>
                       {AGENT_TOOL_DEFS.map(t => (
@@ -187,10 +193,16 @@ export function WorkflowBuilder({ workflowId, onSave, onCancel }: WorkflowBuilde
                     <input
                       value={step.toolArgTemplates ? JSON.stringify(step.toolArgTemplates) : ''}
                       onChange={(e) => {
-                        try { updateStep(step.id, { toolArgTemplates: JSON.parse(e.target.value) }) } catch {}
+                        // Halb getippter JSON ist der Normalfall, nicht der
+                        // Fehlerfall: das Feld wird bei JEDEM Tastendruck
+                        // geparst, und `{"q"` ist auf dem Weg zu `{"q": 1}`
+                        // unvermeidlich ungueltig. Der letzte gueltige Stand
+                        // bleibt stehen, bis wieder einer da ist — deshalb
+                        // wird hier nichts gemeldet und nichts gesetzt.
+                        try { updateStep(step.id, { toolArgTemplates: JSON.parse(e.target.value) }) } catch { /* siehe oben */ }
                       }}
                       placeholder='Args JSON: {"query": "{{user_input}}"}'
-                      className="w-full px-2 py-1 rounded bg-white/5 border border-white/10 text-[0.65rem] text-gray-300 placeholder-gray-600 focus:outline-none"
+                      className="w-full px-2 py-1 rounded bg-white/5 border border-white/10 t-micro text-gray-300 placeholder-gray-600 focus:outline-none"
                     />
                   </>
                 )}
@@ -200,7 +212,7 @@ export function WorkflowBuilder({ workflowId, onSave, onCancel }: WorkflowBuilde
                     value={step.userInputPrompt || ''}
                     onChange={(e) => updateStep(step.id, { userInputPrompt: e.target.value })}
                     placeholder="Prompt shown to user"
-                    className="w-full px-2 py-1 rounded bg-white/5 border border-white/10 text-[0.65rem] text-gray-300 placeholder-gray-600 focus:outline-none"
+                    className="w-full px-2 py-1 rounded bg-white/5 border border-white/10 t-micro text-gray-300 placeholder-gray-600 focus:outline-none"
                   />
                 )}
 
@@ -209,7 +221,7 @@ export function WorkflowBuilder({ workflowId, onSave, onCancel }: WorkflowBuilde
                     <select
                       value={step.memorySave?.type || 'reference'}
                       onChange={(e) => updateStep(step.id, { memorySave: { ...step.memorySave!, type: e.target.value as MemoryType } })}
-                      className="w-full px-2 py-1 rounded bg-white/5 border border-white/10 text-[0.65rem] text-gray-300 focus:outline-none"
+                      className="w-full px-2 py-1 rounded bg-white/5 border border-white/10 t-micro text-gray-300 focus:outline-none"
                     >
                       <option value="user">User</option>
                       <option value="feedback">Feedback</option>
@@ -220,7 +232,7 @@ export function WorkflowBuilder({ workflowId, onSave, onCancel }: WorkflowBuilde
                       value={step.memorySave?.titleTemplate || ''}
                       onChange={(e) => updateStep(step.id, { memorySave: { ...step.memorySave!, titleTemplate: e.target.value } })}
                       placeholder="Title template: Research: {{user_input}}"
-                      className="w-full px-2 py-1 rounded bg-white/5 border border-white/10 text-[0.65rem] text-gray-300 placeholder-gray-600 focus:outline-none"
+                      className="w-full px-2 py-1 rounded bg-white/5 border border-white/10 t-micro text-gray-300 placeholder-gray-600 focus:outline-none"
                     />
                   </>
                 )}
@@ -235,7 +247,7 @@ export function WorkflowBuilder({ workflowId, onSave, onCancel }: WorkflowBuilde
             <button
               key={type}
               onClick={() => addStep(type)}
-              className="text-[0.6rem] px-2 py-0.5 rounded border border-white/10 text-gray-500 hover:text-gray-300 hover:border-white/20 transition-colors"
+              className="t-micro px-2 py-0.5 rounded border border-white/10 text-gray-500 hover:text-gray-300 hover:border-white/20 transition-colors"
             >
               <Plus size={8} className="inline mr-0.5" />
               {STEP_TYPE_LABELS[type]}

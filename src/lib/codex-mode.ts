@@ -44,7 +44,7 @@ export const CODEX_MODE_SHORT: Record<CodexMode, string> = {
 
 export const CODEX_MODE_DESCRIPTIONS: Record<CodexMode, string> = {
   ask: 'Confirm commands, review edits before they land',
-  bypass: 'Run without asking. Cloud shell still confirms',
+  bypass: 'Run without asking. Commands and edits land as they come',
   plan: 'Read only. Writes a plan, then waits for approval',
 }
 

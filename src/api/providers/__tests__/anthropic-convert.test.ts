@@ -8,19 +8,25 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { AnthropicProvider } from '../anthropic-provider'
 import type { ChatMessage } from '../types'
+import type { MessagesBody, AnthropicRequestBlock } from '../anthropic-provider'
+import type { FetchArgs } from '../../__tests__/provider-test-support'
 
 function providerWithCapturedBody() {
   const provider = new AnthropicProvider({
     id: 'anthropic', name: 'Anthropic', enabled: true,
     baseUrl: 'https://api.anthropic.com', apiKey: 'sk-test', isLocal: false,
   })
-  const bodies: any[] = []
-  vi.stubGlobal('fetch', vi.fn(async (_url: any, init: any) => {
-    bodies.push(JSON.parse(init.body))
-    return {
-      ok: true,
-      json: async () => ({ content: [{ type: 'text', text: 'ok' }], usage: { input_tokens: 12, output_tokens: 3 } }),
-    } as any
+  // Typed as the provider's own request interface, so a renamed field in
+  // MessagesBody breaks this test instead of silently reading `undefined`.
+  const bodies: MessagesBody[] = []
+  vi.stubGlobal('fetch', vi.fn(async (_url: FetchArgs[0], init: FetchArgs[1]) => {
+    const body = init?.body
+    if (typeof body !== 'string') throw new Error('capture had no JSON body')
+    bodies.push(JSON.parse(body) as MessagesBody)
+    return new Response(
+      JSON.stringify({ content: [{ type: 'text', text: 'ok' }], usage: { input_tokens: 12, output_tokens: 3 } }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } },
+    )
   }))
   return { provider, bodies }
 }
@@ -49,7 +55,9 @@ describe('AnthropicProvider message conversion (audit B7)', () => {
     const resultMsg = sent[2]
     expect(resultMsg.role).toBe('user')
     expect(Array.isArray(resultMsg.content)).toBe(true)
-    const ids = resultMsg.content.map((b: any) => b.tool_use_id)
+    const blocks: AnthropicRequestBlock[] =
+      typeof resultMsg.content === 'string' ? [] : resultMsg.content
+    const ids = blocks.map(b => (b.type === 'tool_result' ? b.tool_use_id : undefined))
     expect(ids).toEqual(['toolu_1', 'toolu_2'])
   })
 

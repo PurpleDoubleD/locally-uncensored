@@ -1,5 +1,4 @@
 import { useEffect, useRef } from "react"
-import { motion } from "framer-motion"
 import { Mic, MicOff, Loader2 } from "lucide-react"
 import { useVoice } from "../../hooks/useVoice"
 import { useVoiceStore } from "../../stores/voiceStore"
@@ -121,59 +120,60 @@ export function VoiceButton({ onTranscript, onInterim, onRecordingChange, disabl
       <div className="relative group/mic shrink-0">
         <button
           disabled
-          className="p-1.5 rounded-lg text-gray-300 dark:text-gray-600 cursor-not-allowed shrink-0"
+          className="lu-control lu-control--icon"
           aria-label="Microphone unavailable"
           title={hint}
         >
           <MicOff size={14} />
         </button>
-        <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 w-max max-w-[240px] bg-gray-800 dark:bg-gray-700 text-white text-[0.6rem] leading-snug rounded text-center opacity-0 group-hover/mic:opacity-100 transition-opacity pointer-events-none">
+        <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 w-max max-w-[240px] bg-gray-800 dark:bg-gray-700 text-white t-micro leading-snug rounded text-center opacity-0 group-hover/mic:opacity-100 transition-opacity pointer-events-none">
           {hint}
         </div>
       </div>
     )
   }
 
-  // Transcribing state — show spinner
+  // Transcribing state — show spinner.
+  // Der Zustand kommt aus `aria-busy`, wie beim Modellwaehler, der waehrend
+  // eines Ladevorgangs dieselbe Akzentkante traegt. Vorher war das ein
+  // eigenes blaues Rezept (`bg-blue-500/20 border-blue-500/40
+  // text-blue-400`) — dieselbe Farbe, die auch der Fokusring fuehrt.
   if (isTranscribing) {
     return (
-      <motion.button
+      <button
         disabled
-        className="p-1.5 rounded-lg bg-blue-100 dark:bg-blue-500/20 border border-blue-300 dark:border-blue-500/40 text-blue-600 dark:text-blue-400 shrink-0 relative"
+        aria-busy="true"
+        className="lu-control lu-control--icon"
         aria-label="Transcribing audio"
       >
         <Loader2 size={14} className="animate-spin" />
-      </motion.button>
+      </button>
     )
   }
 
   return (
     <div className="relative shrink-0">
-      <motion.button
+      <button
         onClick={handleClick}
         disabled={disabled}
-        className={`p-1.5 rounded-lg transition-all shrink-0 relative ${
-          isRecording
-            ? "bg-red-100 dark:bg-red-500/20 border border-red-300 dark:border-red-500/40 text-red-600 dark:text-red-400"
-            : "hover:bg-gray-100 dark:hover:bg-white/10 text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white"
-        } disabled:opacity-30 disabled:cursor-not-allowed`}
+        // Das Mikrofon war bis hierher die einzige eigene Formsprache der
+        // Composer-Leiste (Audit Welle 3): `p-1.5 rounded-lg` ergab Radius
+        // 9,2px neben 8px ueberall sonst, und der Ein-Zustand war ein rotes
+        // Pill. Jetzt dasselbe Rezept wie Paperclip, Think, Stop und Send —
+        // der Ein-Zustand kommt aus `aria-pressed`, nicht aus einer zweiten
+        // Klassenkette. composer-grammar.test.ts zaehlt diese Datei mit.
+        className="lu-control lu-control--icon"
+        aria-pressed={isRecording}
         data-voice-button
-        whileTap={{ scale: 0.9 }}
         aria-label={isRecording ? "Stop recording" : "Start voice input"}
       >
-        {isRecording && (
-          <motion.span
-            className="absolute inset-0 rounded-lg border-2 border-red-500 dark:border-red-400"
-            animate={{ scale: [1, 1.15, 1], opacity: [1, 0.4, 1] }}
-            transition={{ duration: 1.2, repeat: Infinity, ease: "easeInOut" }}
-          />
-        )}
+        {isRecording && <span className="lu-control__pulse" aria-hidden="true" />}
         <Mic size={14} />
-      </motion.button>
+      </button>
       {sttError && (
         <div
           role="alert"
-          className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 w-max max-w-[240px] bg-red-600/95 dark:bg-red-500/90 text-white text-[0.6rem] leading-snug rounded text-center pointer-events-none z-10"
+          className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 w-max max-w-[240px] bg-red-600/95 dark:bg-red-500/90 text-white t-micro leading-snug rounded text-center pointer-events-none z-10"
         >
           {sttError}
         </div>

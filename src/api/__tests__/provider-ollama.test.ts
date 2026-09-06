@@ -6,7 +6,7 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { ProviderError } from '../providers/types'
-import type { ProviderConfig } from '../providers/types'
+import type { ProviderConfig, ToolDefinition } from '../providers/types'
 
 // Mock the backend module — Ollama uses localFetch / localFetchStream instead of bare fetch.
 // Issue #31: apiUrl() now delegates to ollamaUrl() from backend.ts for a single
@@ -19,10 +19,10 @@ vi.mock('../backend', () => ({
 }))
 
 import { OllamaProvider } from '../providers/ollama-provider'
-import { localFetch, localFetchStream } from '../backend'
+import { localFetch } from '../backend'
+import { asProviderError } from './provider-test-support'
 
 const mockLocalFetch = localFetch as ReturnType<typeof vi.fn>
-const mockLocalFetchStream = localFetchStream as ReturnType<typeof vi.fn>
 
 function makeConfig(overrides: Partial<ProviderConfig> = {}): ProviderConfig {
   return {
@@ -30,6 +30,8 @@ function makeConfig(overrides: Partial<ProviderConfig> = {}): ProviderConfig {
     name: 'Ollama',
     enabled: true,
     baseUrl: 'http://localhost:11434',
+    // Required by ProviderConfig; empty is what a local backend stores.
+    apiKey: '',
     isLocal: true,
     ...overrides,
   }
@@ -123,11 +125,12 @@ describe('OllamaProvider', () => {
       try {
         await provider.listModels()
         expect.fail('Should have thrown')
-      } catch (e: any) {
+      } catch (e) {
         expect(e).toBeInstanceOf(ProviderError)
-        expect(e.provider).toBe('ollama')
-        expect(e.code).toBe('network')
-        expect(e.status).toBe(500)
+        const err = asProviderError(e)
+        expect(err.provider).toBe('ollama')
+        expect(err.code).toBe('network')
+        expect(err.status).toBe(500)
       }
     })
   })
@@ -405,8 +408,8 @@ describe('OllamaProvider', () => {
         }), { status: 200 })
       )
 
-      const tools = [{
-        type: 'function' as const,
+      const tools: ToolDefinition[] = [{
+        type: 'function',
         function: {
           name: 'calculator',
           description: 'Do math',
@@ -556,10 +559,11 @@ describe('OllamaProvider', () => {
           [],
         )
         expect.fail('Should have thrown')
-      } catch (e: any) {
+      } catch (e) {
         expect(e).toBeInstanceOf(ProviderError)
-        expect(e.provider).toBe('ollama')
-        expect(e.status).toBe(404)
+        const err = asProviderError(e)
+        expect(err.provider).toBe('ollama')
+        expect(err.status).toBe(404)
       }
     })
 
@@ -576,9 +580,10 @@ describe('OllamaProvider', () => {
           [],
         )
         expect.fail('Should have thrown')
-      } catch (e: any) {
+      } catch (e) {
         expect(e).toBeInstanceOf(ProviderError)
-        expect(e.message).toBe('model "xyz" not found')
+        const err = asProviderError(e)
+        expect(err.message).toBe('model "xyz" not found')
       }
     })
 
@@ -595,9 +600,10 @@ describe('OllamaProvider', () => {
           [],
         )
         expect.fail('Should have thrown')
-      } catch (e: any) {
+      } catch (e) {
         expect(e).toBeInstanceOf(ProviderError)
-        expect(e.message).toBe('Tool calling failed')
+        const err = asProviderError(e)
+        expect(err.message).toBe('Tool calling failed')
       }
     })
 
@@ -610,10 +616,11 @@ describe('OllamaProvider', () => {
       try {
         await provider.listModels()
         expect.fail('Should have thrown')
-      } catch (e: any) {
+      } catch (e) {
         expect(e).toBeInstanceOf(ProviderError)
-        expect(e.provider).toBe('ollama')
-        expect(e.status).toBe(503)
+        const err = asProviderError(e)
+        expect(err.provider).toBe('ollama')
+        expect(err.status).toBe(503)
       }
     })
   })

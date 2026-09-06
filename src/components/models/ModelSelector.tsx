@@ -1,4 +1,5 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useLayoutEffect } from 'react'
+import { useDismissOnEscape } from '../../hooks/useDismissOnEscape'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Ban, ChevronDown, Loader2, Power, PlayCircle, Settings as SettingsIcon, Wrench, X, Cloud } from 'lucide-react'
 import { useModels } from '../../hooks/useModels'
@@ -8,17 +9,35 @@ import { useSettingsStore } from '../../stores/settingsStore'
 import { useUIStore } from '../../stores/uiStore'
 import { unloadAllModels, loadModel, unloadModel, listRunningModels } from '../../api/ollama'
 import { displayModelName, getProviderIdFromModel } from '../../api/providers'
+import { splitForMiddleEllipsis, shortModelLabel } from '../../lib/model-label'
+import { formatContextWindow } from '../../lib/formatters'
 import { activateBuiltinModel, isManagedBuiltinActive } from '../../api/engine'
 import { diagnoseBuiltinEngine } from '../../api/builtin-ensure'
 import { canUseTools, resolveToolSupport, type ToolSupport } from '../../lib/tool-support'
 import { backendCall } from '../../api/backend'
 import { listLoadedLmStudioModels, loadLmStudioModel, unloadLmStudioModel } from '../../api/lmstudio'
 import { isLmStudioProvider } from '../../lib/hf-to-provider'
+import { detailOf } from '../../lib/error-text'
 import { lmStudioSlotUpdate, adoptionReplacesBuiltinEngine } from '../../lib/lmstudio-backend-adopt'
 import { nextProbeDelayMs } from '../../lib/probe-backoff'
 import { noChatBackendEnabled } from '../../lib/provider-visibility'
 import { cloudTeaserModels } from '../../lib/cloud-teaser-models'
+import { splitBackendSwitchRows, needsBackendSwitchHeading, foldedRowsSentence } from '../../lib/lu-engine-rows'
+import { isBuiltinEngineEntry, type InstalledModelLike } from '../../lib/lmstudio-match'
+import type { HandoverSlot } from '../../lib/openai-slot-handover'
+import { modelListIsStale } from '../../lib/model-list-staleness'
+import {
+  ensureLuEngineIsChatProvider, announceLuEngineSwitch, LU_ENGINE_SWAP_BUSY_NOTE,
+  clearEngineErrorAfterSuccess,
+  announceLuEngineSwapBusy, announceLuEngineStartFailure,
+  LM_STUDIO_LOAD_BUSY_NOTE, announceLmStudioLoadBusy,
+  handBackChatProviderForRow, announceChatProviderSwitch, standbyBackendOf,
+} from '../../api/lu-engine-switch'
+import { tryAcquireLuEngineSwap, releaseLuEngineSwap, luEngineSwapInFlight, useLuEngineSwapRunning } from '../../api/lu-engine-swap-lock'
+import { HINWEIS_TEXT } from '../../lib/hinweis'
+import { ModelPickerSkeleton } from '../layout/ViewSkeletons'
 import type { AIModel } from '../../types/models'
+import { MOTION_S } from '../ui/motion'
 
 // ── Local-mode cloud discovery (2.5.8): an "LU Cloud" section at the list's
 // tail. Signed-in accounts show their real hosted chat models (the appMode
@@ -71,10 +90,10 @@ function CloudTeaserSection({ onOpen }: { onOpen: () => void }) {
             title="Runs on LU Cloud, tap to see plans"
           >
             <Cloud size={10} className="text-violet-500 dark:text-violet-200 shrink-0" />
-            <span className="text-[0.68rem] text-gray-400 truncate">
+            <span className="t-micro text-gray-400 truncate">
               {('displayName' in m && m.displayName) || displayModelName(m.name)}
             </span>
-            <span className="ml-auto text-[8px] text-violet-500 dark:text-violet-200">Cloud</span>
+            <span className="ml-auto text-[0.5rem] text-violet-500 dark:text-violet-200">Cloud</span>
           </button>
       ))}
       {cloudChat.length > 0 && cloudMore > 0 && (
@@ -83,7 +102,7 @@ function CloudTeaserSection({ onOpen }: { onOpen: () => void }) {
           className="w-full flex items-center gap-2 px-2.5 py-1.5 text-left hover:bg-white/[0.04] transition-colors"
           title="See the whole hosted catalogue"
         >
-          <span className="text-[0.62rem] text-gray-500">
+          <span className="t-micro text-gray-500">
             {cloudMore} more cloud {cloudMore === 1 ? 'model' : 'models'}, see them all
           </span>
         </button>
@@ -95,10 +114,10 @@ function CloudTeaserSection({ onOpen }: { onOpen: () => void }) {
           title="Runs on LU Cloud, tap to see plans"
         >
           <Cloud size={10} className="text-violet-500 dark:text-violet-200 shrink-0" />
-          <span className="text-[0.68rem] text-gray-400">
+          <span className="t-micro text-gray-400">
             Frontier chat models, no GPU needed
           </span>
-          <span className="ml-auto text-[8px] text-violet-500 dark:text-violet-200">Cloud</span>
+          <span className="ml-auto text-[0.5rem] text-violet-500 dark:text-violet-200">Cloud</span>
         </button>
       )}
     </div>
@@ -134,7 +153,13 @@ function sameStringSet(prev: Set<string>, next: string[]): boolean {
 // re-fetches the model list so the LM Studio models appear without a
 // restart.
 
-interface LmStudioServerStatus {
+/**
+ * Antwort von `lmstudio_server_status`. Deckungsgleich mit der Rust-Seite
+ * (`src-tauri/src/commands/install.rs:3379` baut genau diese fuenf Schluessel,
+ * alle immer gesetzt). Exportiert, weil das Onboarding denselben Befehl ruft
+ * und dort ein `any` stand — eine Antwort, ein Typ.
+ */
+export interface LmStudioServerStatus {
   running: boolean
   port: number
   lms_present: boolean
@@ -203,8 +228,16 @@ function LmStudioServerHint({ onStarted }: { onStarted: () => void }) {
           }
         }
       }
-    } catch (e: any) {
-      setStartError(e?.message ? String(e.message).slice(0, 80) : 'Start failed')
+    } catch (e) {
+      // Hier stand `catch (e: any)` mit `e?.message`. Das las genau EINE Sorte
+      // Fehler: ein `Error`-Objekt. Tauris `invoke` lehnt aber mit einem STRING
+      // ab (die Rust-Seite gibt `Result<_, String>` zurueck) — im ausgelieferten
+      // Programm hatte `e.message` deshalb nie einen Wert, und der Grund des
+      // Fehlschlags wurde jedes Mal durch das pauschale „Start failed" ersetzt.
+      // `detailOf` ist die Stelle, an der dieses Projekt genau diese Frage schon
+      // beantwortet (lib/error-text.ts): String, Error oder sonst etwas.
+      const detail = detailOf(e)
+      setStartError(detail ? detail.slice(0, 80) : 'Start failed')
     } finally {
       setStarting(false)
     }
@@ -220,20 +253,20 @@ function LmStudioServerHint({ onStarted }: { onStarted: () => void }) {
       >
         <X size={10} />
       </button>
-      <p className="text-[0.6rem] text-gray-600 dark:text-gray-300 leading-snug mb-1.5 pr-5">
+      <p className="t-micro text-gray-600 dark:text-gray-300 leading-snug mb-1.5 pr-5">
         LM Studio is installed ({status.model_count} model{status.model_count === 1 ? '' : 's'} on disk) but its server isn't running. Start it to pick LM Studio models here.
       </p>
       <button
         onClick={handleStart}
         disabled={starting}
-        className="w-full flex items-center justify-center gap-1.5 px-2 py-1 rounded text-[0.62rem] bg-black/[0.06] dark:bg-white/[0.06] hover:bg-black/[0.1] dark:hover:bg-white/[0.12] text-gray-700 dark:text-gray-200 transition-colors disabled:opacity-50"
+        className="w-full flex items-center justify-center gap-1.5 px-2 py-1 rounded t-micro bg-black/[0.06] dark:bg-white/[0.06] hover:bg-black/[0.1] dark:hover:bg-white/[0.12] text-gray-700 dark:text-gray-200 transition-colors disabled:opacity-50"
       >
         {starting ? <Loader2 size={10} className="animate-spin" /> : <PlayCircle size={10} />}
         <span>{starting ? 'Starting LM Studio server…' : 'Start LM Studio Server'}</span>
       </button>
       {replacesBuiltinEngine && (
         <p className="text-[0.55rem] text-gray-500 dark:text-gray-400 mt-1 leading-snug">
-          This also makes LM Studio your local chat backend in place of the built-in engine. You can switch back under Settings, AI Backends, Providers.
+          This also makes LM Studio your local chat backend in place of the LU Engine. You can switch back under Settings, AI Backends, Providers.
         </p>
       )}
       {startError && (
@@ -379,9 +412,15 @@ function groupByFamily(models: AIModel[]): { family: string; models: AIModel[] }
  * displayModelName. (Found via live E2E 2026-06-01.)
  */
 export function lmsIdOf(model: AIModel): string {
-  const raw = ('lmsKey' in model && typeof (model as any).lmsKey === 'string'
-    ? (model as any).lmsKey
-    : model.name) as string
+  // `lmsKey` steht auf keinem der vier Glieder von `AIModel`. Seit TS 4.9
+  // verengt `'lmsKey' in model` trotzdem — auf `AIModel & Record<'lmsKey',
+  // unknown>` —, und die `typeof`-Pruefung dahinter macht daraus `string`.
+  // Beide Zusicherungen waren also nur die Handarbeit, die der Compiler seither
+  // selbst macht; die aeussere `as string` hat obendrein verdeckt, dass die
+  // innere Pruefung ueberhaupt etwas garantiert.
+  const raw = 'lmsKey' in model && typeof model.lmsKey === 'string'
+    ? model.lmsKey
+    : model.name
   return raw.replace(/^[^:]+::/, '')
 }
 
@@ -436,9 +475,41 @@ export function toolBadgeTitle(model: AIModel, support: ToolSupport = 'native'):
     ? 'Drives tools through the prompt, because this model has no native function-calling channel. Agent and Code work'
     : 'Supports tool calling (Agent, Code, and tools in Chat)'
   if (ctx > 0 && ctx < TIGHT_CONTEXT) {
-    return `${how}, but its ${Math.round(ctx / 1024)}k context window is too small for a full Agent or Code tool set`
+    // Eine Schreibweise fuer jedes Kontextfenster, aus lib/formatters. Hier
+    // stand `Math.round(ctx / 1024)}k`: klein geschrieben und gerundet, also
+    // bei 6000 Token "6k" neben dem "5.9K", das jede andere Stelle der
+    // Oberflaeche fuer denselben Wert zeigt.
+    return `${how}, but its ${formatContextWindow(ctx)} context window is too small for a full Agent or Code tool set`
   }
   return how
+}
+
+/**
+ * Which wait a click on a switched-off picker row ran into, or null.
+ *
+ * A17 (Windows counter-check 03.09.): while a pick is in flight every row in
+ * the list carries `aria-disabled`, and the row's onClick read
+ * `if (!rowDisabled) void handleSelectModel(model)`. Both busy sentences live
+ * inside `handleSelectModel`, so the door that would have said them was the
+ * door that never opened: two clicks 150 ms apart, fourteen and eighteen
+ * seconds of watching, and not a word on screen. The card path (Models >
+ * Installed) says its line because its buttons are not switched off.
+ *
+ * So the disabled row answers too, and it answers with the SAME split
+ * `handleSelectModel` makes: the bolt is the only thing that knows whether the
+ * engine is swapping, and the picker's own in-flight state without the bolt is
+ * LM Studio warming a model of its own.
+ *
+ * `pickInFlight` is exactly the reason this picker switches rows off. A row
+ * that is dead for any other reason (nothing running, some future rule) is not
+ * a wait, and gets silence rather than a sentence about a wait nobody is in.
+ */
+export function blockedPickWait(
+  pickInFlight: boolean,
+  luEngineSwapRunning: boolean,
+): 'lu-engine' | 'lm-studio' | null {
+  if (!pickInFlight) return null
+  return luEngineSwapRunning ? 'lu-engine' : 'lm-studio'
 }
 
 export function lmsAutoLoadContext(model: AIModel): number {
@@ -471,7 +542,7 @@ function LoadToggle({ loaded, busy, disabled, onClick }: {
       title={loaded
         ? 'Loaded in VRAM. Click to unload (Off)'
         : 'Not loaded. Click to load into VRAM (On)'}
-      className={`flex items-center gap-0.5 pl-1 pr-1.5 py-0.5 rounded text-[8px] font-semibold uppercase tracking-wide transition-colors disabled:opacity-40 ${
+      className={`flex items-center gap-0.5 pl-1 pr-1.5 py-0.5 rounded text-[0.5rem] font-semibold uppercase tracking-wide transition-colors disabled:opacity-40 ${
         loaded
           ? 'text-emerald-400 bg-emerald-500/[0.12] hover:bg-emerald-500/20'
           : 'text-gray-500 hover:text-gray-300 hover:bg-white/[0.06]'
@@ -497,14 +568,32 @@ export interface ModelSelectorProps {
    * not the run says so.
    */
   surface?: 'chat' | 'code'
+  /**
+   * The model that wrote the answers of the open chat, when that is not the
+   * model picked here (Meldung 4 of the R5 re-measure). It used to be a chip
+   * of its own beside the picker; David wanted it out of the row on
+   * 2026-09-02, so the picker carries it: a 4 px dot on the corner and the
+   * full sentence in the tooltip. `null`/undefined is the normal case and
+   * changes nothing about the trigger, not even its width.
+   */
+  answeredBy?: string | null
 }
 
 // `openUpward` flips the dropdown to open above the trigger, right-aligned —
 // used when the picker lives in the composer action bar (bottom of the screen)
 // instead of the header. Header usage keeps the default downward/centered menu.
-export function ModelSelector({ openUpward = false, surface = 'chat' }: ModelSelectorProps = {}) {
+export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy = null }: ModelSelectorProps = {}) {
   const { models, activeModel, setActiveModel, fetchModels } = useModels()
   const isModelLoading = useModelStore((s) => s.isModelLoading)
+  // Welle 3, Listen-Ladezustand 3 von 4 — und der einzige, den es vorher gar
+  // nicht gab. `inventoryLoaded` ist die Frage „ist ueberhaupt schon einmal
+  // eine Modellliste hier gelandet"; sie steht seit dem Zaehler-Nachschlag
+  // (2026-08-29) im Store, aus genau demselben Grund: bis dahin darf man
+  // keine Zahl und keine Leermeldung zeigen, sondern nur eine Ladeanzeige.
+  // Ohne sie ging der Waehler direkt von leer auf Liste — und „leer" rendert
+  // hier als „No models available", also als Aussage ueber die Maschine
+  // statt ueber den Ladezustand.
+  const inventoryLoaded = useModelStore((s) => s.inventoryLoaded)
   // G20: useModels hides every local model while the app is in Cloud mode.
   // Deliberate, but the picker never SAID so, and the silence reads as "my
   // local models are gone" (it cost a whole repro round on 2026-08-07).
@@ -515,6 +604,7 @@ export function ModelSelector({ openUpward = false, surface = 'chat' }: ModelSel
   const noBackendEnabled = useProviderStore((s) => noChatBackendEnabled(s.providers, appMode))
   const openSettingsAt = useUIStore((s) => s.openSettingsAt)
   const [open, setOpen] = useState(false)
+  useDismissOnEscape(open, () => setOpen(false))
   // Read by the empty-state probe below, which runs before the render that
   // computes textModels. A ref keeps it out of the effect's dependency list.
   const textModelsEmptyRef = useRef(true)
@@ -532,6 +622,24 @@ export function ModelSelector({ openUpward = false, surface = 'chat' }: ModelSel
   // (distinct from `togglingLms`, the explicit power-button flow). Drives the
   // inline "loading…" state on the row and blocks a second click.
   const [selectingLms, setSelectingLms] = useState<string | null>(null)
+  /**
+   * Das Modell, auf das gerade gewechselt wird, solange der Wechsel laeuft.
+   *
+   * Gegenprobe G1, 04.09.2026, zwei Messreihen ueber je 60 s: der Knopf im
+   * Eingabefeld fuehrt zwei gegenlaeufige Gepflogenheiten. Innerhalb der LU
+   * Engine nennt er bis zu 20,5 s lang das angeklickte Modell, obwohl noch
+   * das alte bedient, also springt er VOR. Ueber eine Providergrenze hinweg
+   * nennt er 12,44 s lang das alte, obwohl der Steckplatz schon uebergeben
+   * ist, also haengt er NACH. "Zwei gegenlaeufige Konventionen im selben
+   * Knopf."
+   *
+   * Eine Gepflogenheit: der Knopf nennt immer das angeklickte Modell, und
+   * solange es noch nicht bedient, dreht sich der Ring daneben. Der Weg ueber
+   * die LU Engine schrieb die Wahl dafuer schon sofort in den Speicher; der
+   * Weg zu einem fremden Backend darf das nicht, weil eine nicht geladene
+   * Kennung dort mit 404 antwortet, und deshalb steht der Name hier.
+   */
+  const [imWechselZu, setImWechselZu] = useState<string | null>(null)
   const [selectError, setSelectError] = useState<string | null>(null)
   // VRAM load state for Ollama rows — parity with `lmsLoaded` above, so
   // every LOCAL model shows a clear on/off load toggle (not just LM Studio).
@@ -539,6 +647,23 @@ export function ModelSelector({ openUpward = false, surface = 'chat' }: ModelSel
   const [ollamaLoaded, setOllamaLoaded] = useState<Set<string>>(new Set())
   const [togglingOllama, setTogglingOllama] = useState<string | null>(null)
   const ref = useRef<HTMLDivElement>(null)
+  /**
+   * Wie hoch das Aufklappmenue hoechstens werden darf, in Pixeln.
+   *
+   * Persona P5 hat am 03.09.2026 am echten Build gemessen: nach einem
+   * Fehlstart war das Menue 902 px hoch in einem 808 px hohen Fenster, der
+   * Kasten mit der Fehlermeldung begann bei -149 px, also oberhalb des
+   * Fensterrands, und weil das Menue `overflow-hidden` traegt, kam man da
+   * weder mit dem Mausrad noch mit `scrollTop` hin. Sichtbar blieb nur das
+   * rohe Maschinenprotokoll, der Satz mit dem Namen des Modells und dem
+   * Handlungsvorschlag war unerreichbar.
+   *
+   * Ein festes `max-h` in vh reicht dafuer nicht: das Menue haengt mit
+   * `bottom-full` am Ausloeser, und wie viel Platz DARUEBER ist, weiss nur
+   * der Ausloeser selbst. Also gemessen, bei jedem Oeffnen und bei jeder
+   * Groessenaenderung des Fensters.
+   */
+  const [menuePlatz, setMenuePlatz] = useState<number | null>(null)
 
   // Keep the per-row On/Off LOAD state LIVE while the dropdown is open
   // (David 2026-06-12: "on und offload button sehr delayed und nicht immer
@@ -572,8 +697,12 @@ export function ModelSelector({ openUpward = false, surface = 'chat' }: ModelSel
       // dropdown ever stalled on a down LM Studio (the Rust side is now async +
       // port-pre-checked too). Ollama's /api/ps is a cheap loopback call and
       // always runs.
+      // `providerName` steht auf ALLEN vier Gliedern von `AIModel` (auf dreien
+      // optional, auf `CloudModel` verpflichtend) — der `in`-Test und die
+      // Zusicherung waren beide ueberfluessig. `m.providerName` ist von sich aus
+      // `string | undefined`, also genau das, was `isLmStudioProvider` nimmt.
       const hasLmsRows = useModelStore.getState().models.some((m) =>
-        isLmStudioProvider(('providerName' in m && (m as any).providerName) as string | undefined),
+        isLmStudioProvider(m.providerName),
       )
       if (hasLmsRows) {
         void listLoadedLmStudioModels().then((list) => { if (!cancelled) setLmsLoaded((prev) => sameStringSet(prev, list) ? prev : new Set(list)) }).catch(() => {})
@@ -687,6 +816,23 @@ export function ModelSelector({ openUpward = false, surface = 'chat' }: ModelSel
    */
   const handleSelectModel = async (model: AIModel) => {
     const id = lmsIdOf(model)
+    setImWechselZu(model.name)
+    try {
+      await selectModelInner(model, id)
+    } finally {
+      setImWechselZu(null)
+    }
+  }
+
+  const selectModelInner = async (model: AIModel, id: string) => {
+
+    // A16 (A14-3a): a row belonging to the backend our engine displaced hands
+    // the slot back to it. First thing in the function, because everything
+    // below asks who holds the slot: the auto-load branch would warm a model
+    // in LM Studio and then route the chat at 8127, and the LU Engine branch
+    // would try to load an LM Studio id as a GGUF.
+    const handedBackTo = handBackChatProviderForRow(model as unknown as InstalledModelLike)
+    if (handedBackTo) announceChatProviderSwitch(handedBackTo, model.name)
 
     if (shouldAutoLoadForSelect(model, lmsLoaded)) {
       if (selectingLms || togglingLms) return // a load is already in flight
@@ -703,6 +849,7 @@ export function ModelSelector({ openUpward = false, surface = 'chat' }: ModelSel
           return // keep dropdown open; don't activate an unloaded model
         }
         setActiveModel(model.name)
+        clearEngineErrorAfterSuccess()
         setOpen(false)
       } catch {
         setSelectError(`Couldn't load "${displayModelName(model.name)}" into LM Studio. Is the LM Studio server running?`)
@@ -712,39 +859,174 @@ export function ModelSelector({ openUpward = false, surface = 'chat' }: ModelSel
       return
     }
 
-    // Built-in engine rows (ENG-4): swap the GGUF (await) BEFORE activating —
+    // LU Engine rows (ENG-4): swap the GGUF (await) BEFORE activating, the
     // same contract as the LM Studio path above. A failed llama-server start
     // keeps the dropdown open and shows the real reason (Rust appends the
     // stderr tail) instead of activating a model that can't answer. Idempotent
     // when the model is already loaded (the Rust side compares argv + health).
-    if (isManagedBuiltinActive() && getProviderIdFromModel(model.name) === 'openai') {
-      if (selectingLms || togglingLms) return
+    //
+    // A14: the second half of the condition is the case where the LU Engine is
+    // listed but not in front. The rows are visible now on a machine where
+    // Ollama or LM Studio holds the chat, and a row you can see and cannot use
+    // would be worse than the old invisibility, so the pick takes the slot
+    // first and says so.
+    if ((isManagedBuiltinActive() && getProviderIdFromModel(model.name) === 'openai')
+        || isBuiltinEngineEntry(model as unknown as InstalledModelLike)) {
+      // A14 fourth review: `selectingLms` is this component's own state and it
+      // only ever knew about this dropdown, while the Installed card had a
+      // bolt of its own that only ever knew about the card. Two doors into one
+      // llama-server, and a pick here while a card swap is running sent the
+      // second swap_bundled_model at a process the first was still restarting.
+      // Both doors share one bolt now (api/lu-engine-swap-lock), and a blocked
+      // pick says so instead of doing nothing.
+      //
+      // A16 (A14-6): it did not, on this door. `if (selectingLms ||
+      // togglingLms) return` stood one line ABOVE the bolt and returned in
+      // total silence, so the second quick pick never reached the sentence
+      // written for it. The three conditions are one condition, "something is
+      // already going on", and they get one answer. The order matters: the
+      // bolt is only asked for, and therefore only taken, when the first two
+      // are clear.
+      if (selectingLms || togglingLms || !tryAcquireLuEngineSwap()) {
+        // A16 counter-check follow-up: one condition, but not one wait. The
+        // first two flags are this component's own state and are also set
+        // while LM STUDIO loads a model, which has nothing to do with our
+        // engine. The bolt is what says a swap of ours is running, so it
+        // decides which of the two sentences is true.
+        //
+        // Both places in either case, because they outlive different things:
+        // the dropdown line dies when the dropdown closes, the standing row
+        // above the composer survives that and is where the card writes too.
+        if ((selectingLms || togglingLms) && !luEngineSwapInFlight()) {
+          announceLmStudioLoadBusy()
+          setSelectError(LM_STUDIO_LOAD_BUSY_NOTE)
+          return
+        }
+        announceLuEngineSwapBusy()
+        setSelectError(LU_ENGINE_SWAP_BUSY_NOTE)
+        return
+      }
       setSelectError(null)
       setSelectingLms(id)
+      // Der Fangzweig unten muss wissen, ob der Platz schon uebergeben war,
+      // also steht die Antwort ausserhalb des try. Die Uebergabe selbst bleibt
+      // drin, damit sie weiter mitgefangen wird.
+      let switched = false
+      // Was vorher gewaehlt war, fuer den Rueckweg. Genau wie auf der Kachel.
+      const vorherAktiv = useModelStore.getState().activeModel
       try {
-        const swapped = await activateBuiltinModel(model.name)
-        if (swapped) {
-          // Raw store set — the useModels wrapper would fire a second
-          // (idempotent but pointless) activate.
-          useModelStore.getState().setActiveModel(model.name)
-        } else {
-          setActiveModel(model.name) // not a bundled GGUF — plain activate
+        // Announced BEFORE the start is attempted and NOT into this dropdown,
+        // which the pick closes a few lines further down. It goes to the
+        // standing status row above the composer, so it survives both the
+        // close on success and the error banner on failure (A14 review 2).
+        switched = ensureLuEngineIsChatProvider()
+        if (switched) {
+          announceLuEngineSwitch()
         }
+        // Die Wahl steht SOFORT, nicht erst wenn die Engine bedient. Die
+        // Kachel macht das laengst so, der Waehler schrieb sie erst hinter
+        // dem `await`, und ein Ladevorgang dauert Sekunden bis Minuten.
+        //
+        // Persona P5, 03./04.09.2026, am echten Build: nach einem Klick auf
+        // Phi-4-mini nannte das Eingabefeld 11 s lang
+        // "Hermes-3-Llama-3.2-3B", ein Modell, das an dem Wechsel gar nicht
+        // beteiligt war. Waehrend des Wartens wechselt naemlich der
+        // Steckplatz, die Modelliste wird neu gebaut, und die Regel in
+        // lib/active-model-mode findet die ALTE Wahl darin nicht mehr wieder
+        // und faellt auf den Kopf der Liste zurueck. Steht die neue Wahl
+        // schon da, findet sie sich und nichts faellt zurueck.
+        //
+        // Rohes set: der Wrapper aus useModels wuerde ein zweites, sinnloses
+        // activate ausloesen.
+        useModelStore.getState().setActiveModel(model.name)
+        const swapped = await activateBuiltinModel(model.name)
+        // Keine unserer GGUFs: die gewoehnliche Aktivierung ueber den Wrapper
+        // holt nach, was dieser Weg nicht kann.
+        if (!swapped) setActiveModel(model.name)
+        clearEngineErrorAfterSuccess()
         setOpen(false)
       } catch (e) {
-        setSelectError(`Couldn't start the built-in engine with "${displayModelName(model.name)}": ${e instanceof Error ? e.message : String(e)}`)
+        // Und zurueck, wenn nichts daraus wurde. Ohne das stuende die Wahl
+        // auf einem Modell, das nirgends laeuft (derselbe Befund, den die
+        // Kachel am 03.09.2026 hatte).
+        if (useModelStore.getState().activeModel === model.name) {
+          useModelStore.getState().setActiveModel(vorherAktiv)
+        }
+        // Shared with the Installed card, which used to swallow this failure
+        // whole. One sentence, one place it is written (A14 third review).
+        //
+        // Und in BEIDE Zeilen, nicht nur in diese hier. Persona P5 hat am
+        // 03.09.2026 am echten Build den Waehler zwei Sekunden nach dem Klick
+        // geschlossen, so wie ein Mensch es tut: die Antwort kommt erst 12 bis
+        // 21 s spaeter, sie stand nur in diesem Kasten, und der Kasten war
+        // weg. 7,4 s ohne Engine, zwei Prozessstarts, und 75 s lang keine
+        // einzige neue Textzeile auf der Seite.
+        // NICHT in den Kasten im Menue: das Menue geht in derselben
+        // Bewegung zu, und der Kasten waere ein rotes Aufblitzen fuer die
+        // Dauer der Ausblendung. Die Zeile ueber dem Eingabefeld traegt den
+        // ganzen Text und bleibt stehen.
+        announceLuEngineStartFailure(model.name, e, switched)
+        // Und das Menue geht zu, damit die Zeile ueber dem Eingabefeld frei
+        // liegt. Gegenprobe G1, 04.09.2026, nachgemessen: das offene Menue
+        // verdeckte 331 von 763 Pixeln seines eigenen Banners, also 43
+        // Prozent, und der Text im Menue war zu 69 Prozent abgeschnitten
+        // (scrollHeight 576 gegen clientHeight 176). Zwei Schriftstuecke,
+        // beide halb, keines ganz. Die Zeile ueber dem Eingabefeld ist die
+        // dauerhafte: sie hat keine Uhr, sie hat ein X, und der Waehler kann
+        // sie nicht mehr verdecken, wenn er zu ist.
+        setOpen(false)
       } finally {
         setSelectingLms(null)
+        releaseLuEngineSwap()
       }
       return
     }
 
     // Non-LM-Studio, or an already-loaded LM Studio model: activate now.
     setActiveModel(model.name)
+    // Und die stehende Fehlerzeile ist damit auch erledigt. Sie hat absichtlich
+    // keine Uhr, also war der gewoehnliche Ausgang bisher der einzige Weg aus
+    // dem Waehler, der sie stehen liess: kaputte GGUF anklicken, Banner, dann
+    // im selben Menue ein Ollama-Modell waehlen, und das Banner stand ueber
+    // einem Chat, der laengst wieder antwortete. Der Weg ueber die LU Engine
+    // raeumt sie seit G3, dieser hier nicht.
+    clearEngineErrorAfterSuccess()
     setOpen(false)
   }
 
+  /**
+   * The answer a click on a switched-off row gets (A17).
+   *
+   * Not a queued pick: the click is still refused, it just stops being silent.
+   * `blockedPickWait` decides whether there is anything to say at all, so a row
+   * switched off for some other reason keeps its silence.
+   */
+  const announceBlockedPick = (pickInFlight: boolean) => {
+    const wait = blockedPickWait(pickInFlight, luEngineSwapInFlight())
+    if (wait === null) return
+    if (wait === 'lm-studio') {
+      announceLmStudioLoadBusy()
+      setSelectError(LM_STUDIO_LOAD_BUSY_NOTE)
+      return
+    }
+    announceLuEngineSwapBusy()
+    setSelectError(LU_ENGINE_SWAP_BUSY_NOTE)
+  }
+
   useEffect(() => { fetchModels() }, [fetchModels])
+
+  // Und bei jedem Aufklappen noch einmal. Der Modellordner ist eine Sache der
+  // Platte, nicht der Anwendung: eine Datei kann dazugekommen oder
+  // verschwunden sein, seit die Liste zuletzt gelesen wurde, und es gibt
+  // keinen Waechter darauf.
+  //
+  // Persona P5, 03./04.09.2026, am echten Build: eine gerade angelegte GGUF
+  // fehlte im Waehler, und eine laengst geloeschte stand noch darin. Erst der
+  // Refresh-Knopf auf Models, Installed hat die Liste in Ordnung gebracht.
+  // Der Moment des Aufklappens ist genau der, in dem die Liste zaehlt, und
+  // ein Ordnerlauf je Klick ist billiger als eine falsche Liste. Beim
+  // Zuklappen nicht, das waere Arbeit fuer niemanden.
+  useEffect(() => { if (open) void fetchModels() }, [open, fetchModels])
 
   // GH #118: an empty picker used to say "No models available" no matter what
   // was wrong, so a built-in engine that never started read like a machine
@@ -760,16 +1042,15 @@ export function ModelSelector({ openUpward = false, surface = 'chat' }: ModelSel
     return () => { cancelled = true }
   }, [open])
 
-  // Refetch when any provider's enabled state or baseUrl changes (e.g. user
-  // enables LM Studio / adds Anthropic key in Settings, or the backend
-  // picker activates an OpenAI-compatible provider). Without this the
-  // dropdown stays stuck on whatever providers were enabled at mount time.
+  // Refetch when a provider change makes the list stale (the user enables LM
+  // Studio in Settings, the backend picker activates an OpenAI-compatible
+  // provider, a click hands the shared slot on). Without this the dropdown
+  // stays stuck on whatever providers were enabled at mount time. Die Regel
+  // steht in lib/model-list-staleness, dieselbe, die auch die Kopfleiste
+  // fragt.
   useEffect(() => {
     const unsub = useProviderStore.subscribe((state, prev) => {
-      const changed = (Object.keys(state.providers) as Array<keyof typeof state.providers>)
-        .some(id => state.providers[id]?.enabled !== prev.providers[id]?.enabled
-          || state.providers[id]?.baseUrl !== prev.providers[id]?.baseUrl)
-      if (changed) fetchModels()
+      if (modelListIsStale(state.providers, prev.providers)) fetchModels()
     })
     return () => unsub()
   }, [fetchModels])
@@ -782,12 +1063,43 @@ export function ModelSelector({ openUpward = false, surface = 'chat' }: ModelSel
     return () => document.removeEventListener('mousedown', handler)
   }, [])
 
-  const activeModelObj = models.find((m) => m.name === activeModel)
-  const activeDisplayName = activeModel
-    ? (activeModelObj && 'displayName' in activeModelObj && activeModelObj.displayName) ||
-      displayModelName(activeModel).split(':')[0]
+  // Read reactively, not through isManagedBuiltinActive(): the grouping below
+  // has to redraw the moment a pick hands the slot to the engine.
+  const luEngineHoldsChat = useProviderStore((s) => s.providers.openai.enabled && s.providers.openai.managed === true)
+  // Ebenfalls reaktiv, und aus demselben Grund: gibt ein Klick den Steckplatz
+  // zurueck, verschwindet die Ueberschrift im selben Zug.
+  const standbyName = useProviderStore((s) => standbyBackendOf(s.providers.openai as HandoverSlot)?.name ?? null)
+  // Der Name des fremden Backends, das den Steckplatz gerade haelt. Auch
+  // reaktiv, aus demselben Grund wie standbyName: ein Klick kann den Platz
+  // weiterreichen, und die Gruppierung muss das mitbekommen.
+  const holderName = useProviderStore((s) =>
+    s.providers.openai.enabled && s.providers.openai.managed !== true
+      ? (s.providers.openai.name ?? null)
+      : null,
+  )
+  const foldedRows = useModelStore((s) => s.foldedRows)
+  // Ein Wechsel laeuft, solange der Waehler einen fuehrt oder das Backend
+  // eines meldet. Beides faerbt den Punkt und dreht den Ring, damit der Name
+  // im Knopf nie ohne Vorbehalt dasteht, wenn er noch nicht bedient.
+  // Der Riegel kommt dazu, weil `imWechselZu` nur Kliks in DIESEM Menue kennt
+  // und mit dem Bauteil stirbt. Nachpruefung G3, 04.09.2026: der Knopf nennt
+  // das angeklickte Modell nach 15 bis 29 ms, die Engine haelt es erst nach
+  // 16,7 bis 19,3 s. Das ist Absicht, der Knopf nennt die Wahl. Nur muss dann
+  // auch dranstehen, dass sie noch nicht bedient, und zwar auch dann, wenn der
+  // Klick von der Models-Kachel kam oder der Nutzer zwischendurch den Reiter
+  // gewechselt hat.
+  const gezeigtesModell = imWechselZu ?? activeModel
+  const swapLaeuft = useLuEngineSwapRunning()
+  const wechselLaeuft = isModelLoading || imWechselZu !== null
+    || (swapLaeuft && getProviderIdFromModel(gezeigtesModell ?? '') === 'openai')
+  const gezeigtesObj = models.find((m) => m.name === gezeigtesModell)
+  const activeDisplayName = gezeigtesModell
+    ? (gezeigtesObj && 'displayName' in gezeigtesObj && gezeigtesObj.displayName) ||
+      shortModelLabel(displayModelName(gezeigtesModell).split(':')[0])
     : 'Select Model'
-  const activeType = activeModelObj?.type || 'text'
+  // Der Punkt folgt demselben Modell wie der Name daneben, sonst haette der
+  // Knopf waehrend eines Wechsels zwei Aussagen in sich.
+  const activeType = gezeigtesObj?.type || 'text'
   // Chat dropdown shows TEXT models only — image/video live in the
   // Create view's own picker. Everything here is grouped by the model
   // FAMILY (Qwen/Gemma/Llama/…), not by provider, because users pick
@@ -802,56 +1114,113 @@ export function ModelSelector({ openUpward = false, surface = 'chat' }: ModelSel
     ? allTextModels.filter((m) => m.name === activeModel || canUseTools({ name: m.name, supportsTools: m.supportsTools }))
     : allTextModels
   const hiddenForCode = allTextModels.length - textModels.length
-  const groups = groupByFamily(textModels)
+  // A14: die Zeilen, deren Wahl das lokale Backend wechselt, stehen unter
+  // ihrer eigenen Ueberschrift statt zwischen den Modellfamilien, denn ein
+  // Klick darauf hat eine Folge und die Ueberschrift ist die billigste Stelle,
+  // sie VOR dem Klick zu nennen. Welche Zeilen das sind, haengt daran, wer den
+  // Steckplatz haelt: unsere GGUFs unter einem fremden Backend, die Zeilen des
+  // wartenden Backends unter unserer eigenen Engine. Gibt es nichts zu
+  // wechseln, gruppiert der Waehler nach Familie wie eh und je, denn dann gibt
+  // es keine Folge zu melden und Abstammung ist, wonach Menschen waehlen.
+  const wechsel = splitBackendSwitchRows(textModels, luEngineHoldsChat, standbyName, holderName)
+  const groups: { family: string; models: AIModel[] }[] = [
+    ...(wechsel.switching.length > 0 && wechsel.label
+      ? [{ family: wechsel.label, models: wechsel.switching }]
+      : []),
+    // Das fremde Backend, das den Platz haelt, unter seinem eigenen Namen
+    // statt verstreut ueber die Familien.
+    ...(wechsel.holding.length > 0 && wechsel.holderLabel
+      ? [{ family: wechsel.holderLabel, models: wechsel.holding }]
+      : []),
+    ...groupByFamily(wechsel.rest),
+  ]
+  // The one rule, asked rather than copied (second review): one group normally
+  // draws no heading, except the switch group, where the heading is the
+  // warning that picking from it moves the backend.
+  const showHeadings = needsBackendSwitchHeading(groups.map((g) => g.family), wechsel.label)
   const hasOllamaModels = textModels.some(m => ('provider' in m && m.provider === 'ollama') || !('provider' in m))
   textModelsEmptyRef.current = textModels.length === 0
+
+  // Messen, wie viel Fenster ueber (bzw. unter) dem Ausloeser noch frei ist.
+  // 18 px Abzug: 6 px Abstand des Menues zum Ausloeser plus 12 px Luft zum
+  // Fensterrand. Die Untergrenze von 200 px ist die Notbremse fuer ein sehr
+  // flaches Fenster, in dem sonst ein Menue ohne Inhalt herauskaeme.
+  useLayoutEffect(() => {
+    if (!open) return
+    const messen = () => {
+      const el = ref.current
+      if (!el) return
+      const r = el.getBoundingClientRect()
+      const frei = openUpward ? r.top : window.innerHeight - r.bottom
+      setMenuePlatz(Math.max(200, Math.round(frei - 18)))
+    }
+    messen()
+    window.addEventListener('resize', messen)
+    return () => window.removeEventListener('resize', messen)
+  }, [open, openUpward])
 
   return (
     <div ref={ref} className="relative">
       {/* ── Trigger Button ── */}
       <button
         onClick={() => setOpen(!open)}
-        title={activeModel ? `Model: ${activeDisplayName}, click to switch` : 'Select a chat model'}
+        title={
+          answeredBy
+            ? `The answers in this chat were written by ${answeredBy}. The next answer runs on the model picked here.`
+            : activeModel ? `Model: ${activeDisplayName}, click to switch` : 'Select a chat model'
+        }
         aria-label="Select chat model"
-        className={`
-          group flex items-center gap-1.5 h-[26px] px-2 rounded-md
-          bg-transparent border transition-all text-[0.7rem]
-          hover:bg-white/[0.04]
-          ${isModelLoading
-            ? 'border-blue-500/40 shadow-[0_0_6px_rgba(59,130,246,0.2)]'
-            : 'border-white/[0.06] hover:border-white/[0.1]'
-          }
-        `}
+        aria-expanded={open}
+        // Laedt gerade ein Modell: `aria-busy` statt eines eigenen blauen
+        // Rezepts mit Leuchtschatten. Das Rezept faerbt die Kante mit dem
+        // Akzent, die Aussage steht damit im selben Vokabular wie der Rest
+        // der Leiste — und im Accessibility-Baum, wo sie hingehoert.
+        aria-busy={wechselLaeuft}
+        className="lu-control"
       >
         {/* Type indicator dot */}
         <span className={`w-1.5 h-1.5 rounded-full ${
           activeType === 'text' ? 'bg-blue-400' : activeType === 'image' ? 'bg-purple-400' : 'bg-emerald-400'
-        } ${isModelLoading ? 'animate-pulse' : ''}`} />
+        } ${wechselLaeuft ? 'animate-pulse' : ''}`} />
 
-        {/* Model name */}
-        <span className="text-gray-300 max-w-[140px] truncate leading-none">
+        {/* Model name. Keine eigene Textfarbe mehr — sie wird vom Control
+            geerbt, sonst haette der Knopf zwei Graustufen in sich. */}
+        <span className="max-w-[140px] truncate leading-none">
           {activeDisplayName}
         </span>
 
         {/* Chevron / Spinner */}
-        {isModelLoading ? (
-          <Loader2 size={10} className="animate-spin text-blue-400 ml-0.5" />
+        {wechselLaeuft ? (
+          <Loader2 size={10} className="animate-spin" />
         ) : (
-          <ChevronDown size={10} className={`text-gray-500 transition-transform ml-0.5 ${open ? 'rotate-180' : ''}`} />
+          <ChevronDown size={10} className={`transition-transform ${open ? 'rotate-180' : ''}`} />
         )}
       </button>
+
+      {/* The open chat ran on another model than the one picked here. Absolute
+          so the row keeps its width to the pixel, and quiet enough that it is
+          a mark rather than a message: the sentence lives in the tooltip. */}
+      {answeredBy && (
+        <span
+          data-testid="conversation-model-dot"
+          aria-hidden="true"
+          className="pointer-events-none absolute -top-0.5 -right-0.5 w-1 h-1 rounded-full bg-gray-500 opacity-60"
+        />
+      )}
 
       {/* ── Dropdown ── */}
       <AnimatePresence>
         {open && (
           <motion.div
-            className={`absolute w-72 rounded-lg overflow-hidden z-50 bg-white dark:bg-[#363636] border border-black/10 dark:border-white/[0.08] shadow-2xl shadow-black/20 dark:shadow-black/50 ${
+            data-testid="model-picker-menu"
+            style={menuePlatz === null ? undefined : { maxHeight: menuePlatz }}
+            className={`absolute w-72 rounded-lg overflow-x-hidden overflow-y-auto scrollbar-thin z-50 lu-elevated ${
               openUpward ? 'bottom-full mb-1.5 right-0' : 'top-full mt-1.5 left-1/2 -translate-x-1/2'
             }`}
             initial={{ opacity: 0, y: openUpward ? 6 : -6, scale: 0.98 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: openUpward ? 6 : -6, scale: 0.98 }}
-            transition={{ duration: 0.12, ease: 'easeOut' }}
+            transition={{ duration: MOTION_S.fast, ease: 'easeOut' }}
           >
             {/* Bug Q v2.4.7 — surface "Start LM Studio Server" inline when
                 LM Studio is on disk but its server is off. wakeywakeynow's
@@ -863,7 +1232,7 @@ export function ModelSelector({ openUpward = false, surface = 'chat' }: ModelSel
                 letting an empty local section read as a bug (G20). */}
             {appMode === 'cloud' && (
               <div className="px-2.5 py-1.5 border-b border-black/5 dark:border-white/[0.06] text-[0.55rem] text-gray-500">
-                Cloud mode shows hosted models only. Switch the app to Local mode to use Ollama, LM Studio or the Built-in Engine.
+                Cloud mode shows hosted models only. Switch the app to Local mode to use Ollama, LM Studio or the LU Engine.
               </div>
             )}
 
@@ -875,45 +1244,73 @@ export function ModelSelector({ openUpward = false, surface = 'chat' }: ModelSel
               </div>
             )}
 
+            {/* Dieselbe Ehrlichkeit eine Zeile weiter, und in BEIDE
+                Richtungen: was zwei Backends aus derselben Datei anbieten,
+                steht nur einmal da. Ohne diesen Satz sehen Modelle
+                verschwunden aus (Persona P5: LM Studio meldet 7, der Waehler
+                zeigt 4. Gegenprobe G1, andere Richtung: eine installierte
+                Datei des Kunden von 2,3 GB faellt kommentarlos weg). */}
+            {foldedRows && (
+              <div
+                data-testid="picker-folded-rows"
+                className="px-2.5 py-1.5 border-b border-black/5 dark:border-white/[0.06] text-[0.55rem] text-gray-500"
+              >
+                {foldedRowsSentence(foldedRows)}
+              </div>
+            )}
+
             {/* §18 — surfaced when an LM Studio auto-load (on select) failed,
                 so the user isn't left wondering why the model didn't switch. */}
             {selectError && (
-              <div className="mx-2 mt-2 px-2 py-1.5 rounded bg-red-500/10 border border-red-500/20 text-[0.6rem] text-red-600/90 dark:text-red-300/90 leading-snug">
+              <div
+                data-testid="model-picker-error"
+                className="mx-2 mt-2 px-2 py-1.5 rounded bg-red-500/10 border border-red-500/20 t-micro text-red-600/90 dark:text-red-300/90 leading-snug max-h-[22vh] overflow-y-auto overflow-x-hidden scrollbar-thin whitespace-pre-wrap break-words"
+              >
                 {selectError}
               </div>
             )}
 
+
             {/* Scrollable model list */}
             <div className="py-1 max-h-[280px] overflow-y-auto scrollbar-thin">
-              {textModels.length === 0 && (
+              {!inventoryLoaded && textModels.length === 0 && <ModelPickerSkeleton />}
+              {inventoryLoaded && textModels.length === 0 && (
                 <div className="px-2.5 py-3 text-center">
-                  <p className="text-[0.65rem] text-gray-600">No models available</p>
+                  <p className="t-micro text-gray-600">No models available</p>
                   {/* An empty picker after the user switched the last backend
                       off in Settings used to say only that, which reads like a
                       machine with nothing installed (Nebenbefund 1, R9
-                      re-measure). The reason and the way back belong here. */}
+                      re-measure). The reason and the way back belong here.
+                      Beide Saetze standen in Gelb. Der Nutzer hat das Backend
+                      selbst ausgeschaltet; das ist kein Zwischenfall, sondern
+                      die Antwort auf „warum ist die Liste leer". Ruhiger Ton
+                      aus `lib/hinweis.ts`, der Knopf darunter traegt den
+                      Weg zurueck. */}
                   {noBackendEnabled ? (
                     <>
-                      <p className="mt-1 text-[0.6rem] text-amber-300/90 leading-snug text-left">
+                      <p className={`mt-1 t-micro leading-snug text-left ${HINWEIS_TEXT.ruhig}`}>
                         No AI backend is enabled, so there is nothing to list. Open Settings, go to AI Backends, and press Enable on the backend you switched off, or Add Provider.
                       </p>
                       <button
                         onClick={() => { setOpen(false); openSettingsAt({ tab: 'backends' }) }}
-                        className="mt-2 inline-flex items-center gap-1 px-2 py-1 rounded bg-white/5 border border-white/10 text-[0.6rem] text-gray-300 hover:bg-white/10 transition-colors"
+                        className="mt-2 inline-flex items-center gap-1 px-2 py-1 rounded bg-white/5 border border-white/10 t-micro text-gray-300 hover:bg-white/10 transition-colors"
                       >
                         <SettingsIcon size={10} /> Open Settings
                       </button>
                     </>
                   ) : emptyReason && (
-                    <p className="mt-1 text-[0.6rem] text-amber-300/90 leading-snug text-left">{emptyReason}</p>
+                    <p className={`mt-1 t-micro leading-snug text-left ${HINWEIS_TEXT.ruhig}`}>{emptyReason}</p>
                   )}
                 </div>
               )}
 
               {groups.map(({ family, models: groupModels }) => (
                 <div key={family}>
-                  {/* Section header */}
-                  {groups.length > 1 && (
+                  {/* Section header. One group normally draws none; an LU
+                      Engine group under a foreign chat backend draws one
+                      anyway, because that heading is the warning that picking
+                      from it moves the backend (A14 review 7). */}
+                  {showHeadings && (
                     <div className="px-2.5 pt-2 pb-0.5">
                       <span className="text-[0.55rem] font-medium uppercase tracking-widest text-gray-600">
                         {family}
@@ -924,6 +1321,10 @@ export function ModelSelector({ openUpward = false, surface = 'chat' }: ModelSel
                   {groupModels.map((model: AIModel) => {
                     const modelDisplayName =
                       ('displayName' in model && model.displayName) || displayModelName(model.name)
+                    // Fremde Kennungen tragen Pfadteile und Dateiendungen mit
+                    // sich, die kein Kunde gewaehlt hat. Der Name selbst bleibt
+                    // unangetastet (lib/model-label).
+                    const { head: nameKopf, tail: nameEnde } = splitForMiddleEllipsis(modelDisplayName)
                     const modelProvider = ('provider' in model && model.provider) || 'ollama'
                     const providerBadge = getProviderBadge(model)
                     const isActive = model.name === activeModel
@@ -938,7 +1339,12 @@ export function ModelSelector({ openUpward = false, surface = 'chat' }: ModelSel
                     // a <button>. A <button> can't nest a <button> (invalid HTML →
                     // React hydration error + flaky clicks), so the row is a
                     // role="button" <div> with explicit keyboard activation.
-                    const rowDisabled = selectingLms !== null || togglingLms !== null
+                    // The one reason this picker switches rows off: a pick is
+                    // already running. Kept as its own name because the click
+                    // below hands exactly this to `blockedPickWait`, which is
+                    // what keeps any future second reason silent (A17).
+                    const pickInFlight = selectingLms !== null || togglingLms !== null
+                    const rowDisabled = pickInFlight
 
                     return (
                       <div
@@ -946,9 +1352,23 @@ export function ModelSelector({ openUpward = false, surface = 'chat' }: ModelSel
                         role="button"
                         tabIndex={rowDisabled ? -1 : 0}
                         aria-disabled={rowDisabled}
-                        onClick={() => { if (!rowDisabled) void handleSelectModel(model) }}
+                        onClick={() => {
+                          // A17: the switched-off row used to swallow the
+                          // click whole, and both busy sentences sit behind
+                          // this door in `handleSelectModel`, so nothing was
+                          // ever said. It says the wait now and still does not
+                          // pick.
+                          if (rowDisabled) { announceBlockedPick(pickInFlight); return }
+                          void handleSelectModel(model)
+                        }}
                         onKeyDown={(e) => {
-                          if (rowDisabled) return
+                          if (rowDisabled) {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                              e.preventDefault()
+                              announceBlockedPick(pickInFlight)
+                            }
+                            return
+                          }
                           if (e.key === 'Enter' || e.key === ' ') {
                             e.preventDefault()
                             void handleSelectModel(model)
@@ -971,18 +1391,30 @@ export function ModelSelector({ openUpward = false, surface = 'chat' }: ModelSel
 
                         {/* Model info */}
                         <div className="flex-1 min-w-0 flex items-center gap-1.5">
-                          <span className={`text-[0.7rem] truncate ${isActive ? 'text-gray-900 dark:text-white' : ''}`}>
-                            {modelDisplayName}
+                          {/* Gekuerzt wird in der MITTE, nicht am Ende.
+                              Gegenprobe G1, 04.09.2026: am Ende gekuerzt
+                              standen `qwen2.5-0.5b-instruct@...` und
+                              `qwen2.5-0.5b-instruct...` untereinander und
+                              sahen gleich aus, obwohl das eine q4_k_m und das
+                              andere q8_0 ist. Genau das Zeichen, das die
+                              beiden unterscheidet, war das erste, das
+                              weggeschnitten wurde. */}
+                          <span
+                            className={`text-[0.7rem] flex min-w-0 ${isActive ? 'text-gray-900 dark:text-white' : ''}`}
+                            title={modelDisplayName}
+                          >
+                            <span className="truncate">{nameKopf}</span>
+                            {nameEnde && <span className="shrink-0">{nameEnde}</span>}
                           </span>
 
                           {/* Subtle meta */}
                           {model.type !== 'text' && (
-                            <span className={`text-[8px] uppercase font-medium tracking-wide ${TYPE_COLOR[model.type] || 'text-gray-500'} opacity-60`}>
+                            <span className={`text-[0.5rem] uppercase font-medium tracking-wide ${TYPE_COLOR[model.type] || 'text-gray-500'} opacity-60`}>
                               {TYPE_LABEL[model.type] || model.type}
                             </span>
                           )}
                           {modelProvider !== 'ollama' && (
-                            <span className={`text-[8px] ${providerBadge.color}`}>
+                            <span className={`text-[0.5rem] ${providerBadge.color}`}>
                               {providerBadge.label}
                             </span>
                           )}
@@ -1014,9 +1446,15 @@ export function ModelSelector({ openUpward = false, surface = 'chat' }: ModelSel
                               supportsTools: 'supportsTools' in model ? model.supportsTools : undefined,
                             })
                             if (support === 'none') {
+                              // Das Verbotszeichen stand in Gelb, direkt neben
+                              // dem gruenen Schraubenschluessel: zwei Farben
+                              // fuer „kann Werkzeuge" und „kann keine". Es
+                              // fehlt eine Faehigkeit, es ist nichts kaputt,
+                              // also der ruhige Ton aus `lib/hinweis.ts`. Die
+                              // Aussage traegt die Glyphe, nicht die Farbe.
                               return (
                                 <span
-                                  className="inline-flex items-center shrink-0 text-amber-500/80"
+                                  className={`inline-flex items-center shrink-0 ${HINWEIS_TEXT.ruhig}`}
                                   title="This model does not support tool calling, so Agent and Code mode cannot use it"
                                 >
                                   <Ban size={9} />
@@ -1035,7 +1473,7 @@ export function ModelSelector({ openUpward = false, surface = 'chat' }: ModelSel
                           {/* §18 — inline load state while we auto-load this
                               LM Studio model on the way to selecting it. */}
                           {isSelectingThis && (
-                            <span className="inline-flex items-center gap-0.5 text-[8px] text-blue-400">
+                            <span className="inline-flex items-center gap-0.5 text-[0.5rem] text-blue-400">
                               <Loader2 size={8} className="animate-spin" />
                               loading…
                             </span>
@@ -1044,9 +1482,14 @@ export function ModelSelector({ openUpward = false, surface = 'chat' }: ModelSel
 
                         {/* Details on right */}
                         <div className="flex items-center gap-1 shrink-0">
-                          {model.type === 'text' && 'details' in model && (model as any).details && (
-                            <span className="text-[8px] text-gray-600">
-                              {(model as any).details.parameter_size}
+                          {/* `type === 'text'` verengt auf OllamaModel | CloudModel,
+                              `'details' in model` von dort auf OllamaModel — und
+                              nur das hat `details`. Der Zugriff braucht deshalb
+                              keine Zusicherung; `parameter_size` ist dort als
+                              `string` deklariert (types/models.ts:15). */}
+                          {model.type === 'text' && 'details' in model && model.details && (
+                            <span className="text-[0.5rem] text-gray-600">
+                              {model.details.parameter_size}
                             </span>
                           )}
                           {/* On/Off VRAM load toggle for LOCAL models — LM Studio
@@ -1098,7 +1541,7 @@ export function ModelSelector({ openUpward = false, surface = 'chat' }: ModelSel
                     finally { setUnloading(false) }
                   }}
                   disabled={unloading}
-                  className="w-full flex items-center justify-center gap-1.5 px-2 py-[5px] rounded text-[0.6rem] text-red-600/70 dark:text-red-500/60 hover:text-red-500 dark:hover:text-red-400 hover:bg-red-500/[0.06] transition-colors disabled:opacity-40"
+                  className="w-full flex items-center justify-center gap-1.5 px-2 py-[5px] rounded t-micro text-red-600/70 dark:text-red-500/60 hover:text-red-500 dark:hover:text-red-400 hover:bg-red-500/[0.06] transition-colors disabled:opacity-40"
                 >
                   {unloading ? <Loader2 size={10} className="animate-spin" /> : <Power size={10} />}
                   <span>{unloadDone ? 'Unloaded' : unloading ? 'Unloading...' : 'Unload all models'}</span>

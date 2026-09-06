@@ -5,6 +5,7 @@ import { useAgentModeStore } from '../../stores/agentModeStore'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { backendCall } from '../../api/backend'
 import type { AgentWorkspace } from '../../types/agent-workspace'
+import { HINWEIS_TEXT } from '../../lib/hinweis'
 
 interface Props {
   open: boolean
@@ -130,7 +131,7 @@ export function AgentWorkspaceDialog({
   const phase: 'pick' | 'extras' = draft ? 'extras' : 'pick'
 
   return (
-    <Modal open={open} onClose={onClose} title="">
+    <Modal open={open} onClose={onClose} title="" ariaLabel="Agent workspace">
       <div className="space-y-4">
         <div className="text-center space-y-1">
           <h3 className="text-base font-semibold text-gray-900 dark:text-white">
@@ -143,6 +144,12 @@ export function AgentWorkspaceDialog({
           </p>
         </div>
 
+        {/* Drei Wahlmoeglichkeiten, drei Farben, und keine davon sagt etwas
+            ueber Gefahr aus: sie halten die Zeilen nur auseinander. Der Ordner
+            trug Gelb und las sich damit wie eine Warnung vor der eigenen
+            Auswahl. Violett war in diesem Dialog noch frei, Gruen und Blau
+            haengen an den beiden Zeilen darueber, Rot am Entfernen-Knopf und
+            an der Fehlerzeile (`lib/hinweis.ts`). */}
         {phase === 'pick' && (
           <div className="space-y-2" data-testid="agent-workspace-options">
             <WorkspaceOption
@@ -165,7 +172,7 @@ export function AgentWorkspaceDialog({
             )}
 
             <WorkspaceOption
-              icon={<Folder size={16} className="text-amber-500" />}
+              icon={<Folder size={16} className="text-purple-500" />}
               title={picking ? 'Opening picker…' : 'Pick a folder…'}
               body="Choose a real directory. The agent edits files in there directly, like the Coding Agent."
               onClick={handlePick}
@@ -174,10 +181,14 @@ export function AgentWorkspaceDialog({
           </div>
         )}
 
+        {/* Der Hauptordner steht jetzt im selben neutralen Rahmen wie die
+            Zusatzordner darunter. Sein gelber Kasten hat einen ausgewaehlten
+            Pfad wie eine Warnmeldung aussehen lassen; unterschieden wird er
+            durch die Beschriftung, nicht durch die Farbe. */}
         {phase === 'extras' && draft?.kind === 'folder' && (
           <div className="space-y-2" data-testid="agent-workspace-extras">
-            <div className="rounded-lg border border-amber-500/30 bg-amber-50/40 dark:bg-amber-500/[0.04] px-3 py-2">
-              <div className="text-[0.55rem] uppercase tracking-widest text-amber-700 dark:text-amber-300/80 mb-0.5">
+            <div className="rounded-lg border border-gray-200 dark:border-white/10 px-3 py-2">
+              <div className={`text-[0.55rem] uppercase tracking-widest ${HINWEIS_TEXT.ruhig} mb-0.5`}>
                 Primary
               </div>
               <div className="text-[0.7rem] font-mono text-gray-800 dark:text-gray-200 truncate">
@@ -220,7 +231,7 @@ export function AgentWorkspaceDialog({
                 className="w-3 h-3"
                 data-testid="agent-workspace-remember-default"
               />
-              <span className="text-[0.65rem] text-gray-600 dark:text-gray-400">
+              <span className="t-micro text-gray-600 dark:text-gray-400">
                 Remember as default. Future chats open here without asking.
               </span>
             </label>
@@ -228,7 +239,7 @@ export function AgentWorkspaceDialog({
         )}
 
         {error && (
-          <p className="text-[0.65rem] text-red-500 text-center">{error}</p>
+          <p className="t-micro text-red-500 text-center">{error}</p>
         )}
 
         <div className="flex items-center justify-end gap-2 pt-1">
@@ -272,11 +283,11 @@ function WorkspaceOption({ icon, title, body, monoBody, onClick, disabled }: Opt
     >
       <span className="mt-0.5 shrink-0">{icon}</span>
       <span className="flex-1 min-w-0">
-        <span className="block text-[0.75rem] font-medium text-gray-900 dark:text-white">
+        <span className="block text-[12px] font-medium text-gray-900 dark:text-white">
           {title}
         </span>
         <span
-          className={`block text-[0.65rem] text-gray-500 truncate ${
+          className={`block t-micro text-gray-500 truncate ${
             monoBody ? 'font-mono' : ''
           }`}
         >

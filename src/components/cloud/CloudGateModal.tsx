@@ -19,6 +19,7 @@ import { useCloudAuth } from '../../hooks/useCloudAuth'
 import { AccountPanel } from '../auth/AccountPanel'
 import { CLOUD_BASE } from '../../api/cloud/config'
 import { openExternal } from '../../api/backend'
+import { MONOGRAM, MONOGRAM_INVERT } from '../layout/brand'
 
 const PLANS = [
   { anchor: 'hosted', name: 'Hosted', price: '€19' },
@@ -36,9 +37,9 @@ function PlanGrid() {
         <button
           key={p.anchor}
           onClick={() => void openExternal(`${CLOUD_BASE}/pricing#${p.anchor}`)}
-          className="flex flex-col items-center gap-0.5 px-2 py-3 rounded-lg border border-[#7c3aed]/40 bg-[#7c3aed]/5 hover:bg-[#7c3aed]/15 transition-colors"
+          className="flex flex-col items-center gap-0.5 px-2 py-3 rounded-lg border border-lu-cloud/40 bg-lu-cloud/5 hover:bg-lu-cloud/15 transition-colors"
         >
-          <span className="text-[0.8rem] font-semibold text-[#7c3aed] dark:text-[#a78bfa]">{p.name}</span>
+          <span className="text-[0.8rem] font-semibold text-lu-cloud dark:text-lu-cloud-lift">{p.name}</span>
           <span className="text-[0.62rem] font-medium text-gray-500 dark:text-gray-400">
             {p.price}<span className="text-gray-400 dark:text-gray-500">/mo</span>
           </span>
@@ -68,16 +69,16 @@ function CloudHero({ subtitle }: { subtitle?: string }) {
   return (
     <div className="flex flex-col items-center text-center gap-2">
       <img
-        src="/LU-monogram-bw.png"
+        src={MONOGRAM}
         alt=""
         width={40}
         height={40}
-        className="dark:invert-0 invert opacity-90 select-none"
+        className={`${MONOGRAM_INVERT} opacity-90 select-none`}
         draggable={false}
       />
       <h2 className="text-xl font-semibold text-gray-900 dark:text-white">LU Cloud</h2>
       {subtitle && (
-        <p className="text-[0.75rem] leading-relaxed text-gray-600 dark:text-gray-400 max-w-xs">{subtitle}</p>
+        <p className="text-[12px] leading-relaxed text-gray-600 dark:text-gray-400 max-w-xs">{subtitle}</p>
       )}
     </div>
   )
@@ -100,8 +101,16 @@ export function CloudGateModal() {
 
   // Signed-out walkthrough position. Reset to the hero every time the gate
   // opens so a re-open never lands mid-flow.
+  // The reset happens in the render where `open` flips, using React's
+  // documented "adjust state while rendering" shape. As an effect it was a
+  // cascading render (React 19 `set-state-in-effect`) that landed after paint,
+  // so a re-open showed one frame of the step the gate was last left on.
   const [step, setStep] = useState<Step>('intro')
-  useEffect(() => { if (open) setStep('intro') }, [open])
+  const [wasOpen, setWasOpen] = useState(open)
+  if (wasOpen !== open) {
+    setWasOpen(open)
+    if (open) setStep('intro')
+  }
 
   // The moment the account clears every gate — already provisioned when the
   // gate opens, a fresh login, or a re-check after subscribing — flip the
@@ -144,7 +153,7 @@ export function CloudGateModal() {
   }, [open, refresh])
 
   const primaryBtn =
-    'w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-[0.72rem] font-medium bg-[#7c3aed] text-white hover:opacity-90 transition-opacity'
+    'w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-[0.72rem] font-medium bg-lu-cloud text-white hover:opacity-90 transition-opacity'
   const ghostBtn =
     'w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-[0.72rem] font-medium border border-gray-200 dark:border-white/10 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/5 transition-colors'
   const linkRow =

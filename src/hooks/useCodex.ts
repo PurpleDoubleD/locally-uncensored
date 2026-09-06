@@ -1,9 +1,13 @@
 import { useRef, useState, useCallback } from 'react'
+import { markCannotThink } from '../lib/model-compatibility'
 import { v4 as uuid } from 'uuid'
 import { useCodexStore } from '../stores/codexStore'
 import { useModelStore } from '../stores/modelStore'
+import { runCompactForConversation, compactOutcomeMessage, maybeAutoCompact } from '../lib/run-compact-command'
+import { applyStoredCompaction } from '../lib/compact-summary'
 import { useSettingsStore } from '../stores/settingsStore'
 import { useChatStore, flushChatPersist } from '../stores/chatStore'
+import { endTurnDurably } from '../stores/durability'
 import { getProviderForModel, getProviderIdFromModel } from '../api/providers'
 import { markToolsUnsupported } from '../api/tool-capability'
 import { toolRegistry } from '../api/mcp'
@@ -11,37 +15,45 @@ import { usePermissionStore } from '../stores/permissionStore'
 import { toolStrategyFor } from '../lib/tool-support'
 import { allowedInReadOnlyTurn } from '../lib/mutating-tools'
 import { applyGoalCommand } from '../lib/goal-command'
+import {
+  parseFanoutRequest,
+  resolveRequestedModel,
+  fanoutDirective,
+  unresolvedModelNote,
+} from '../lib/agent-fanout'
+import { setExplicitFanout } from '../api/agents/sub-agent'
+import { appendTaskReport } from '../lib/agent-task-report'
+import { useAgentTaskStore } from '../stores/agentTaskStore'
 import { useAgentGoalStore, renderGoalSection } from '../stores/agentGoalStore'
 import { useAgentLoopStore } from '../stores/agentLoopStore'
-import { CODEX_CONFIRM_TOOLS } from './codexShellGate'
+import { beginRun, isRunStopped, stopRun } from '../lib/run-stop'
+import { CODEX_CONFIRM_TOOLS, renderApprovalPreview } from './codexShellGate'
 import { buildHermesToolPrompt, buildHermesToolResult, buildHermesToolCall, parseHermesToolCalls, stripToolCallTags, hasToolCallTags } from '../api/hermes-tool-calling'
 import { streamProviderTurn, type StreamedProviderTurn } from '../lib/provider-stream'
 import { createHermesDisplayFilter, createThinkStreamSplitter, createTurnThinkingSink } from '../lib/hermes-stream'
 import { beginAgentRun, endAgentRun, setActiveAgentModel, type AgentRunContext } from '../api/agent-context'
 import { resolveChatWorkspaceSlug } from '../api/workspace-slug'
-import { codexModeKnobs, CODEX_MODE_LABELS, type CodexMode } from '../lib/codex-mode'
+import { codexModeKnobs, type CodexMode } from '../lib/codex-mode'
 import { CODEX_PLAN_SYSTEM_PROMPT } from '../lib/codex-plan-prompt'
 import { resolveWorkspace } from '../api/agents/workspace-resolve'
 import { useAgentModeStore } from '../stores/agentModeStore'
-import { loadLurules, renderRulesSection, type RulesReader } from '../lib/lurules'
+import { loadLurules, renderRulesSection } from '../lib/lurules'
 import {
   parseAgentCommand, parseLoopSpec, buildLoopRecheck,
   loopPassSaysDone,
 } from '../lib/agent-commands'
 import { useGenerationStore } from '../stores/generationStore'
-import { backendCall, isOllamaLocal } from '../api/backend'
+import { isOllamaLocal } from '../api/backend'
 import { requestGenerationCancel } from '../api/vram-handoff'
 import { planWithArchitect, renderArchitectPlanSection } from '../api/agents/architect'
 import { fetchRepoMap, renderRepoMapSection } from '../api/agents/repo-map'
 import { isLocalModelByName } from '../api/agents/model-locality'
 import { useStagedChangesStore, flushStagedPersist } from '../stores/stagedChangesStore'
-import { computeUnifiedDiff } from '../lib/diff'
-import { applyUniqueEdit } from '../lib/surgical-edit'
 import { log } from '../lib/logger'
-import type { AgentBlock, AgentToolCall } from '../types/agent-mode'
+import type { AgentToolCall } from '../types/agent-mode'
 import { isThinkingCompatible, isPlainTextPlanner } from '../lib/model-compatibility'
 import type { ChatMessage, ToolCall, ToolDefinition } from '../api/providers/types'
-import { executeParallel, applyResultToToolCall, type ExecutionRequest } from '../api/agents/tool-executor'
+import { executeParallel, applyResultToToolCall, APPROVE_ALL, type ExecutionRequest } from '../api/agents/tool-executor'
 import { useToolAuditStore } from '../stores/toolAuditStore'
 import { makeInTurnCacheLookup } from '../api/agents/in-turn-cache'
 import { explainError as explainToolError } from '../api/agents/error-hints'
@@ -52,9 +64,10 @@ import { PlanStaleness, planStalenessSteer } from '../lib/plan-staleness'
 import { planResumeAnchor } from '../lib/plan-resume'
 import { useTodoStore } from '../stores/todoStore'
 import { httpStatusOf } from '../lib/http-status'
+import { asString, errorText, prop } from '../types/json-guards'
+import type { ToolArgs } from '../api/mcp/types'
 import { CREDITS_EXHAUSTED_MESSAGE } from '../lib/credits-exhausted'
 import { streamOllamaChatWithTools } from '../lib/ollama-stream-tools'
-import { extractToolCallsWithRanges, stripRanges } from '../lib/tool-call-repair'
 import { canonicalToolName } from '../lib/loose-tool-parse'
 import { selectRelevantTools, selectRelevantToolsAsync, SMALL_MODEL_MAX_TOOLS, gateCreateTools, wantsMediaTools, isGatedTool } from '../lib/tool-selection'
 import { generateEmbeddings } from '../api/rag'
@@ -68,11 +81,26 @@ import { resolveAgentNumCtx } from '../lib/agent-num-ctx'
 import { platformPromptLine, hostClockLine } from '../lib/host-platform'
 import { ensureBuiltinAgentCtx } from '../api/builtin-ensure'
 import { AgentLoopGuard } from '../lib/agent-loop-guard'
-import { findStagedForPath, stagedReadResult, stagedListingNote } from '../lib/staged-overlay'
 import { applyAllStagedChanges } from '../lib/staged-apply'
 import { useMemoryStore } from '../stores/memoryStore'
 import { extractMemoriesFromPair } from './useMemory'
 import { useCodexConfirmStore } from '../stores/codexConfirmStore'
+// ── Die Teile, die dieser Haken nicht mehr selbst traegt ────────────────────
+// Jedes dieser Module haelt EINEN geteilten Zustand oder EINE Regel, die
+// mehrere Stellen hier gemeinsam brauchen; der Dateikopf dort sagt jeweils,
+// welchen. Was hier bleibt, ist die Reihenfolge des Zuges.
+import { codexReadCtx, readWorkspaceFile, makeLurulesReader } from './codex/workspace-fs'
+import { resolveCodexWorkspace } from './codex/workspace-precedence'
+import { codexModeRefusal } from './codex/mode-refusal'
+import { createAgentBlockSink } from './codex/agent-blocks'
+import { createLivePaint } from './codex/live-paint'
+import { seedEstimatedUsage, reportTurnUsage } from './codex/turn-usage'
+import { shouldDowngradeThinking, engineDeniedThinking } from './codex/thinking-downgrade'
+import { recoverToolCallsFromContent } from './codex/tool-call-recovery'
+import { codexStallVerdict } from './codex/stall-verdict'
+import { createStagedWriter } from './codex/staged-writes'
+import { codexToolDiff, codexEventKind } from './codex/tool-result-view'
+import { capHiddenToolHistory } from './codex/hidden-history'
 
 // No-op diagnostic hook. Kept as a call site so future debugging can swap
 // this for a file logger without re-editing every iter-point in the loop.
@@ -173,31 +201,6 @@ const streamWithTools = streamOllamaChatWithTools
 const CODEX_CATEGORIES = ['filesystem', 'terminal', 'system', 'web', 'image', 'video', 'workflow'] as const
 
 
-// `.lurules` reader. MUST go through `fs_read` (the workspace-aware command)
-// with the run's chatId + workingDirectory — NOT the older `file_read`, which
-// jails every path to the per-chat sandbox (agent-workspace/<id>) and so
-// REJECTS the absolute `<workDir>/.lurules` path with "escapes the allowed
-// workspace". That silent rejection meant per-repo rules never loaded in a real
-// folder workspace. Threading workingDirectory sets the jail root to the actual
-// project folder, so the absolute rules path resolves. Errors still swallow to
-// null so loadLurules() treats "missing file" and "fs error" identically.
-function makeLurulesReader(chatId: string, workDir: string): RulesReader {
-  return {
-    async read(path: string): Promise<string | null> {
-      try {
-        const r = await backendCall<{ content?: string }>('fs_read', {
-          path,
-          chatId,
-          workingDirectory: workDir,
-        })
-        return r?.content ?? null
-      } catch {
-        return null
-      }
-    },
-  }
-}
-
 // Detect when the model emits a re-introduction of itself ("Hello, I am
 // the Coding Agent, an autonomous coding agent…") instead of the actual
 // answer. Gemma 4 + smaller models do this after a tool error — they
@@ -231,6 +234,14 @@ function codexCanThink(model: string): boolean {
   const mode = codexThinkMode(model)
   return mode ? mode === 'toggle' : isThinkingCompatible(model)
 }
+/** The reasoning ladder the server declared for this model, if any. */
+function codexEffort(model: string): { levels?: string[]; fallback?: string } {
+  const meta = useModelStore.getState().models.find((m) => m.name === model)
+  return {
+    levels: meta && 'effortLevels' in meta ? meta.effortLevels : undefined,
+    fallback: meta && 'effortDefault' in meta ? meta.effortDefault : undefined,
+  }
+}
 
 /**
  * The pending next /loop pass. MODULE scope, not a hook ref (audit A3): the
@@ -245,20 +256,31 @@ export function useCodex() {
   const [isRunning, setIsRunning] = useState(false)
   const abortRef = useRef<AbortController | null>(null)
   const runningRef = useRef(false)
-  /** True once the user pressed stop, so the /loop driver does not start
-   *  another pass on the run they just killed. Cleared when a new run starts. */
-  const userStoppedRef = useRef(false)
+  // "The user pressed stop" lives in lib/run-stop, keyed by conversation, NOT
+  // in a ref of this hook instance. The Code view unmounts on every tab switch,
+  // and the /loop driver's finally runs in the closure of the instance that
+  // started the pass — a stop pressed by the remounted instance set a ref that
+  // closure never reads, so the finally re-armed the loop the user had just
+  // killed. The loop is uncapped by design; that made it unstoppable.
 
-  const sendInstruction = useCallback(async (
+  const runInstruction = useCallback(async (
     rawInstruction: string,
     opts?: {
       displayContent?: string
       /** Set by the /loop driver when this run is pass 2 or later. */
       loop?: { pass: number; intervalMs: number; task: string; startedAt: number }
+      /**
+       * Die Nutzernachricht dieses Zuges reist versteckt — siehe die
+       * gleichnamige Option in useAgentChat. Fuer den Weckzug eines fertigen
+       * Hintergrundagenten: der Zug braucht eine Nutzernachricht, aber im
+       * Verlauf stuende sonst ein Satz, den der Mensch nie geschrieben hat.
+       */
+      hiddenUser?: boolean
     },
   ) => {
     const { activeModel } = useModelStore.getState()
     if (!activeModel) return
+
 
     // Coding-Agent slash commands (David 2026-06-12): "/review", "/commit",
     // "/test", … live HERE, in the Code view, its full file_*/shell/git tools
@@ -285,8 +307,6 @@ export function useCodex() {
     // fires the next pass, the proxy refuses it again, and the credits dialog
     // reopens every interval until the user finds Stop.
     let loopHalt: string | null = null
-    // A brand-new instruction clears a previous stop; a /loop pass inherits it.
-    if (!opts?.loop) userStoppedRef.current = false
     // `/loop [30s] …` — the interval is the PAUSE BETWEEN PASSES, and the
     // driver at the end of this function is what actually brings the model back.
     // The value of a loop is the re-check: a model that declares victory early
@@ -309,6 +329,10 @@ export function useCodex() {
     if (!convId) {
       convId = store.createConversation(activeModel, persona?.systemPrompt || '', 'codex')
     }
+
+    // A brand-new instruction clears a previous stop; a /loop pass inherits it,
+    // which is what makes Stop end the LOOP and not just the pass in flight.
+    if (!opts?.loop) beginRun(convId)
 
     // Mode of THIS conversation (plan 2.6.6, C1). A pick made while the
     // previous run was still going has been parked; a send is where it takes
@@ -345,46 +369,67 @@ export function useCodex() {
       defaultWorkspace: settings.defaultWorkspace,
     })
 
-    // Init codex thread if needed
-    if (!codexStore.getThread(convId)) {
-      codexStore.initThread(convId, codexStore.workingDirectory || '.')
+    // Init codex thread if needed. Read LIVE, never from the `codexStore`
+    // snapshot taken at the top of this function: `resolveChatWorkspaceSlug`
+    // above is IPC, and a Remove pressed during it used to be undone here by
+    // a thread born with the old path (A8 review, B1).
+    if (!useCodexStore.getState().getThread(convId)) {
+      useCodexStore.getState().initThread(convId, useCodexStore.getState().workingDirectory)
     }
+    // Pull THIS conversation's thread onto the folder the picker shows now.
+    // Only this one: another chat's thread may carry a deliberate per-chat
+    // workspace, and rewriting all of them took that away (A8 review, S5).
+    const liveWorkingDir = useCodexStore.getState().syncThreadWorkingDirectory(convId)
 
-    const thread = codexStore.getThread(convId)!
-    // Resolve working directory with this precedence:
-    //   1. Explicit codex thread.workingDirectory (file-tree picker)
-    //   2. Resolved agent workspace path (when folder-kind)
-    //   3. Global codexStore.workingDirectory
-    //   4. '.' (bridge's per-chat sandbox)
-    const workspacePath =
-      codexWorkspace && codexWorkspace.kind === 'folder' && codexWorkspace.path
-        ? codexWorkspace.path
-        : null
-    const workDir =
-      (thread.workingDirectory && thread.workingDirectory !== '.' ? thread.workingDirectory : null) ||
-      workspacePath ||
-      codexStore.workingDirectory ||
-      '.'
-
-    // Pin the tool-containment workspace to the SAME folder the model is told
-    // to use (workDir). resolveWorkspace() above only sees the agent-mode
-    // per-chat store + settings.defaultWorkspace — it MISSES the folder the
-    // Code tab's explorer picker sets (codexStore.workingDirectory), which is
-    // the primary way to pick a repo in the Code tab. Without this, containment
-    // stayed pinned to the per-chat sandbox while the model was told to work in
-    // a real folder, so every file_list/file_read of the working dir failed
-    // with "path escapes the allowed workspace" (live cloud find, 2026-07-11).
-    const runWorkspace =
-      workDir && workDir !== '.'
-        ? {
-            kind: 'folder' as const,
-            path: workDir,
-            extraPaths: codexWorkspace && codexWorkspace.kind === 'folder' ? codexWorkspace.extraPaths : undefined,
-          }
-        : codexWorkspace
+    const thread = useCodexStore.getState().getThread(convId)!
+    // Welcher Ordner: Rangfolge, Sperre und die Zusicherung, dass beide
+    // denselben Pfad nennen, stehen in hooks/codex/workspace-precedence.ts.
+    // Dort ist auch belegt, warum die Sperre auf DENSELBEN Ordner zeigen muss,
+    // den der Systemprompt nennt (Live-Fund 2026-07-11: sonst scheitert jedes
+    // file_list/file_read des Arbeitsverzeichnisses an "path escapes the
+    // allowed workspace").
+    //
+    // Beide Eingaben werden LIVE gelesen, nie aus dem codexStore-Abzug vom
+    // Anfang dieser Funktion: dazwischen liegt IPC, und ein waehrenddessen
+    // gedruecktes Entfernen wurde von einem Abzug wieder aufgehoben
+    // (A8-Durchsicht, B1).
+    const { workDir, runWorkspace } = resolveCodexWorkspace({
+      threadWorkingDirectory: thread.workingDirectory,
+      codexWorkspace,
+      storeWorkingDirectory: liveWorkingDir,
+    })
 
     // `/goal` is bookkeeping, not a prompt. Handle it here and show the result;
     // every LATER turn picks the goal up from the system prompt below.
+    // /compact — a round trip, unlike /goal, but the same kind of branch: the
+    // hook does the work and nothing is sent to the model as an instruction.
+    // See lib/run-compact-command.ts for why it is a record and not an edit.
+    if (slash?.command.handledLocally && slash.command.name === 'compact') {
+      // BEIDE Zeilen sind App-Hinweise, keine Modell-Turns. Bis 2.6.8 standen
+      // sie als user/assistant im Verlauf, und die Nutzlast filtert nur
+      // `role:'system'` — also fuhr ein erfundener Assistentenzug
+      // („Summarised 12 earlier messages …") in jede spaetere Anfrage mit und
+      // wurde bei der naechsten Verdichtung als Protokoll mitzusammengefasst.
+      // In der Claude-Code-Desktop-App erreichen Schraegstrich-Befehle das
+      // Modell nie. Der Mechanismus dafuer gab es hier schon: `notice`.
+      useChatStore.getState().addMessage(convId, {
+        id: uuid(), role: 'system', notice: 'info', content: rawInstruction, timestamp: Date.now(),
+      })
+      const noticeId = uuid()
+      useChatStore.getState().addMessage(convId, {
+        id: noticeId, role: 'system', notice: 'info',
+        content: 'Summarising the earlier turns…', timestamp: Date.now(),
+      })
+      const outcome = await runCompactForConversation({
+        conversationId: convId,
+        activeModel: activeModel || '',
+        trigger: 'manual',
+        focus: slash.args || undefined,
+      })
+      useChatStore.getState().updateMessageContent(convId, noticeId, compactOutcomeMessage(outcome))
+      return
+    }
+
     if (slash?.command.handledLocally && slash.command.name === 'goal') {
       const res = applyGoalCommand(convId, slash.args)
       useChatStore.getState().addMessage(convId, {
@@ -396,30 +441,20 @@ export function useCodex() {
       return
     }
 
-    // Review Mode strips every mutating tool. A command whose whole job is to
-    // change something would then run to completion narrating work it could not
-    // do, with nothing on screen explaining why. Say it and stop.
-    if (settings.codexReviewMode && slash && !slash.command.readOnly) {
+    // Ein Befehl, der in diesem Modus nichts ausrichten kann, wird gesagt und
+    // nicht erzaehlt. Rangfolge und Wortlaut: hooks/codex/mode-refusal.ts.
+    const modeRefusal = codexModeRefusal({
+      reviewMode: settings.codexReviewMode,
+      codexMode,
+      slash,
+    })
+    if (modeRefusal) {
       useChatStore.getState().addMessage(convId, {
         id: uuid(), role: 'user', content: rawInstruction, timestamp: Date.now(),
       })
       useChatStore.getState().addMessage(convId, {
         id: uuid(), role: 'assistant', timestamp: Date.now(),
-        content: `Review Mode is on, so I cannot write files or run commands, and /${slash.command.name} needs both. Turn Review Mode off in Settings, or use a read-only command such as /review, /plan, /diff or /explain.`,
-      })
-      return
-    }
-
-    // Same for Plan mode: it is read-only for the whole conversation, so a
-    // command whose job is to change something has nowhere to land. Saying so
-    // beats narrating work that silently could not happen.
-    if (codexMode === 'plan' && slash && !slash.command.readOnly) {
-      useChatStore.getState().addMessage(convId, {
-        id: uuid(), role: 'user', content: rawInstruction, timestamp: Date.now(),
-      })
-      useChatStore.getState().addMessage(convId, {
-        id: uuid(), role: 'assistant', timestamp: Date.now(),
-        content: `Plan mode is read-only, and /${slash.command.name} needs to write files or run commands. Switch the mode dropdown to "${CODEX_MODE_LABELS.ask}" first, or use a read-only command such as /review, /plan, /diff or /explain.`,
+        content: modeRefusal,
       })
       return
     }
@@ -453,6 +488,7 @@ export function useCodex() {
     useChatStore.getState().addMessage(convId, {
       id: uuid(), role: 'user', content: instruction, timestamp: Date.now(),
       ...(displayInstruction ? { displayContent: displayInstruction } : {}),
+      ...(opts?.hiddenUser ? { hidden: true } : {}),
     })
 
     // Add empty assistant message. For a slash command, tag it so CodexView
@@ -472,17 +508,10 @@ export function useCodex() {
     // classic top-of-bubble field (plain answer turns keep the old look).
     let anyToolExecuted = false
 
-    const blocks: AgentBlock[] = []
-    function addBlock(block: AgentBlock) {
-      blocks.push(block)
-      useChatStore.getState().updateMessageAgentBlocks(convId!, assistantMsg.id, [...blocks])
-    }
-    function updateBlockById(blockId: string, updates: Partial<AgentBlock>) {
-      const idx = blocks.findIndex((b) => b.id === blockId)
-      if (idx < 0) return
-      blocks[idx] = { ...blocks[idx], ...updates }
-      useChatStore.getState().updateMessageAgentBlocks(convId!, assistantMsg.id, [...blocks])
-    }
+    // Die Blockliste und ihr Spiegel im Speicher — hooks/codex/agent-blocks.ts.
+    const blockSink = createAgentBlockSink(convId!, assistantMsg.id)
+    const addBlock = blockSink.add
+    const updateBlockById = blockSink.update
 
     // Resolve provider
     const { provider, modelId } = getProviderForModel(activeModel)
@@ -498,7 +527,9 @@ export function useCodex() {
       name: activeModel,
       supportsTools: pickerMeta && pickerMeta.type === 'text' ? pickerMeta.supportsTools : undefined,
     })
-    const modelToUse = activeModel.includes('::') ? activeModel.split('::')[1] : activeModel
+    // The registry already stripped the `provider::` prefix when it resolved
+    // the client; re-splitting the name here was a second copy of that rule.
+    const modelToUse = modelId
     // G37b (R21d wire proof, 2026-08-08): the picker row is silent for the
     // managed built-in engine (useModels synthesizes its rows without ever
     // running listModels), so ask the server itself before the first request.
@@ -543,6 +574,18 @@ export function useCodex() {
       providerId,
       readOnlyTurn,
     })
+    // Die Entscheidung EINMAL, VORNE, auf den Lauf gelegt (Auftrag 2.3, David
+    // 04.09.2026). Alles, was dieser Lauf delegiert, liest von hier, statt die
+    // Rechnung mit eigenen Eingaben zu wiederholen. Nicht in beginAgentRun,
+    // weil die Knoepfe erst feststehen, wenn Provider und Einstellungen
+    // gelesen sind, genau wie beim abortSignal weiter unten.
+    run.execApproval = {
+      confirmExec: knobs.confirmExec,
+      // Wortgleich mit der Karte, die die Hauptschleife zeigt: die
+      // Begruendung entscheidet mit, welche Einstellung ein "stop asking"
+      // ausschaltet, und sie gehoert dem Lauf, nicht dem Unteragenten.
+      cloudReason: !settings.codexConfirmShell && codexMode !== 'ask' && providerId === 'lu-cloud',
+    }
     // The merged shell_execute stays offered on read-only turns (it carries
     // git status/log/diff now); the executor refuses everything else while the
     // run's flag is up. The flag lives on the run object (set at
@@ -683,11 +726,26 @@ export function useCodex() {
     // comes back at exactly those bytes (decayRestoredToolResult is a pure
     // function of the stored text), so a restore never re-cuts with a second
     // budget and never moves the prefix.
+    // 2.6.8 auto-compact, once per user turn — outside the iteration loop for
+    // the same reason as in useAgentChat.
+    if (settings.autoCompactThreshold) {
+      await maybeAutoCompact({ conversationId: convId, activeModel })
+    }
+    const convForPayload =
+      useChatStore.getState().conversations.find(c => c.id === convId) ?? conv
+
     const decayRestored = settings.contextDecay !== false
     let messages: ChatMessage[] = [
       { role: 'system', content: systemPrompt },
-      ...conv.messages
-        .filter(m => m.role !== 'system' && (m.content.trim() || m.hidden))
+      // 2.6.8: a recorded compaction stands in for everything up to its
+      // anchor. Note the filter here keeps `hidden` turns (the agent's own
+      // tool chain) that the other two paths drop, so the anchor is looked up
+      // in exactly the array this payload is built from — which is the reason
+      // this call sits inside each builder rather than in a shared wrapper.
+      ...applyStoredCompaction(
+        convForPayload.messages.filter(m => m.role !== 'system' && (m.content.trim() || m.hidden)),
+        convForPayload.compactions,
+      ).messages
         .map(m => {
           const msg: ChatMessage = {
             role: m.role as 'user' | 'assistant' | 'tool',
@@ -701,7 +759,9 @@ export function useCodex() {
           // Carry over tool_calls from hidden assistant messages so the
           // model sees the full tool-call chain from previous turns
           // (continue capability, parity with original Codex CLI).
-          if (m.tool_calls) msg.tool_calls = m.tool_calls as any
+          // types/chat.Message.tool_calls and providers/types.ToolCall declare
+          // the identical shape, so the assertion never bridged anything.
+          if (m.tool_calls) msg.tool_calls = m.tool_calls
           // Carry the tool-result linkage across turns too. ed99f82 sets
           // tool_call_id on role:'tool' messages INSIDE the loop, but the
           // persist+rebuild round-trip below dropped it — so the SECOND user
@@ -726,11 +786,49 @@ export function useCodex() {
         messages.push({ role: 'user', content: resume.text })
       }
     }
+    // ── „nutze 5 glm 5.2 agenten" ────────────────────────────────────────
+    //
+    // Ausdrueckliche Anweisung des Nutzers, deterministisch aus dem Text
+    // gelesen statt dem Modell ueberlassen. Der Grund steht in
+    // lib/agent-fanout.ts und ist gemessen: ein 4B-Modell antwortete auf
+    // „call delegate_task with background true" mit PROSA („Task ID: t12345")
+    // und rief nie ein Werkzeug. Eine genannte Zahl darf daran nicht
+    // scheitern.
+    //
+    // Als NUTZER-Material, wie jede andere Notiz in diesem Verlauf: eine
+    // System-Nachricht an anderer Stelle als Index 0 weisen strenge
+    // Jinja-Vorlagen ab, eine Werkzeugantwort braeuchte eine echte
+    // tool_call_id.
+    {
+      const wunsch = parseFanoutRequest(instruction)
+      if (wunsch) {
+        const modelle = useModelStore.getState().models
+        const treffer = wunsch.modelPhrase
+          ? resolveRequestedModel(wunsch.modelPhrase, modelle)
+          : null
+        const note = wunsch.modelPhrase && !treffer
+          ? unresolvedModelNote(wunsch.modelPhrase, modelle.map((m) => m.name))
+          : undefined
+        // Die Schranke folgt der Ansage. SUB_AGENT_MAX_PARALLEL (4) bremst
+        // eine Fan-out-Schleife des MODELLS; sagt der NUTZER „nutze 5", ist
+        // sie keine Sicherheitsgrenze mehr, sondern Bevormundung.
+        setExplicitFanout(convId, wunsch.count)
+        messages.push({
+          role: 'user',
+          content: fanoutDirective(wunsch, treffer ? treffer.name : null, note),
+        })
+      }
+    }
+
     const messagesStartLen = messages.length
 
     // Setup
     const abort = new AbortController()
     abortRef.current = abort
+    // Hand Stop to everything this run starts, including the nested ReAct loop
+    // a delegate_task sub-agent runs (audit AGT-1). Assigned here rather than
+    // in beginAgentRun because the controller does not exist that early.
+    run.abortSignal = abort.signal
     runningRef.current = true
     setIsRunning(true)
     codexStore.setThreadStatus(convId, 'running')
@@ -762,14 +860,13 @@ export function useCodex() {
         // Cloud model picked without explicit opt-in → fall back to
         // editor-only. Surface a one-line reflection so the user knows
         // why the plan didn't appear.
-        blocks.push({
+        addBlock({
           id: uuid(),
           phase: 'reflection',
           content:
             `🏗️ Architect skipped, \`${archModel}\` is a cloud model and "Allow cloud architect" is off. Enable it in Settings → Coding Agent, or pick a local model.`,
           timestamp: Date.now(),
         })
-        useChatStore.getState().updateMessageAgentBlocks(convId, assistantMsg.id, [...blocks])
       } else {
         try {
           const planResult = await planWithArchitect({
@@ -784,13 +881,12 @@ export function useCodex() {
           if (planResult.plan) {
             systemPrompt += renderArchitectPlanSection(planResult.plan)
             messages[0] = { role: 'system', content: systemPrompt }
-            blocks.push({
+            addBlock({
               id: uuid(),
               phase: 'reflection',
               content: `🏗️ **Architect plan** (\`${planResult.modelUsed}\`, ${planResult.tookMs}ms)\n\n${planResult.plan}`,
               timestamp: Date.now(),
             })
-            useChatStore.getState().updateMessageAgentBlocks(convId, assistantMsg.id, [...blocks])
           }
         } catch (e) {
           // Architect is advisory — never blocks the editor loop. Use
@@ -817,13 +913,12 @@ export function useCodex() {
         if (repoMap.files.length > 0) {
           systemPrompt += renderRepoMapSection(repoMap)
           messages[0] = { role: 'system', content: systemPrompt }
-          blocks.push({
+          addBlock({
             id: uuid(),
             phase: 'reflection',
             content: `🗺️ Repo map: top ${repoMap.files.length} files (of ${repoMap.count}), ${repoMap.files.slice(0, 5).map((f) => f.path).join(', ')}${repoMap.files.length > 5 ? '…' : ''}`,
             timestamp: Date.now(),
           })
-          useChatStore.getState().updateMessageAgentBlocks(convId, assistantMsg.id, [...blocks])
         }
       } catch (e) {
         log.warn('codex.repo_map_fetch_failed', { err: e })
@@ -940,6 +1035,16 @@ export function useCodex() {
       // backstop. Floor of 1 so a stray 0 setting can't zero the loop.
       const MAX_CODEX_ITERATIONS = Math.max(settings.agentMaxIterations ?? 200, 1)
       for (let i = 0; i < MAX_CODEX_ITERATIONS && runningRef.current && !abort.signal.aborted; i++) {
+        // Fertige Hintergrundagenten melden sich hier, oben in der Iteration:
+        // vor dem Modellaufruf und nach den Werkzeugantworten der vorigen
+        // Runde. Als NUTZER-Material — die Begruendung steht in
+        // lib/agent-task-report.ts und ist dieselbe Regel, an der schon die
+        // Verdichtungsnotiz haengt.
+        appendTaskReport(
+          messages,
+          () => useAgentTaskStore.getState().takeUnreported(convId!),
+          Date.now(),
+        )
         budget.addIteration()
         const bx = budget.exceeded()
         if (bx.kind !== 'none') {
@@ -962,10 +1067,16 @@ export function useCodex() {
               : settings.thinkingEnabled === true)
           : undefined
 
+        const cxEffort = codexEffort(activeModel)
         const chatOptions = {
           temperature: 0.1, // Low temp for coding precision
           maxTokens: settings.maxTokens || undefined,
           thinking: thinkOptCx as unknown as boolean,
+          // The Coding Agent is the third caller that builds its own options,
+          // and the one where a forgotten field costs the most tokens.
+          reasoningEffort: settings.reasoningEffort,
+          effortLevels: cxEffort.levels,
+          effortDefault: cxEffort.fallback,
           signal: abort.signal,
         }
         // Hoisted to the top of the step (2.6.7 Denk-Audit): the prompt
@@ -1079,24 +1190,15 @@ export function useCodex() {
         // cancels the queued frame the moment the stream call returns, so a
         // stale frame can never fire AFTER a final direct write and repaint
         // old content over it.
-        let livePaintPending: string | null = null
-        let livePaintFrame = false
-        const settleLivePaint = () => {
-          livePaintPending = null
-        }
-        const liveContent = (c: string) => {
-          if (echoRetriesRemaining > 0 && isSystemPromptEcho(c)) return
-          livePaintPending = fullContent ? fullContent + '\n\n' + c : c
-          if (livePaintFrame) return
-          livePaintFrame = true
-          requestAnimationFrame(() => {
-            livePaintFrame = false
-            if (livePaintPending !== null) {
-              useChatStore.getState().updateMessageContent(convId!, assistantMsg.id, livePaintPending)
-              livePaintPending = null
-            }
-          })
-        }
+        // Ein Puffer, drei Transporte, ein Bild pro Zeichenrunde — und ein
+        // settle(), das ein wartendes Bild loescht: hooks/codex/live-paint.ts.
+        const livePaint = createLivePaint({
+          suppress: (c) => echoRetriesRemaining > 0 && isSystemPromptEcho(c),
+          prefix: () => fullContent,
+          paint: (text) => useChatStore.getState().updateMessageContent(convId!, assistantMsg.id, text),
+        })
+        const settleLivePaint = livePaint.settle
+        const liveContent = livePaint.feed
 
         if (strategy === 'native') {
           // Route on the USER's instruction, never on the newest user-role
@@ -1203,18 +1305,7 @@ export function useCodex() {
             // char/4 guess of just the visible messages. Provisional estimate that
             // the model's exact count overwrites below; only (re)set while no real
             // count has landed yet, so a real value is never downgraded.
-            {
-              const existingUsage = useChatStore.getState().conversations
-                .find((c) => c.id === convId)?.messages.find((m) => m.id === assistantMsg.id)?.usage
-              if (!existingUsage || existingUsage.estimated) {
-                const estPrompt =
-                  estimateTokens(sendMessages.map((m) => (typeof m.content === 'string' ? m.content : JSON.stringify(m.content))).join('\n')) +
-                  estimateTokens(JSON.stringify(tools))
-                useChatStore.getState().updateMessageUsage(convId!, assistantMsg.id, {
-                  promptTokens: estPrompt, completionTokens: 0, totalTokens: estPrompt, estimated: true,
-                })
-              }
-            }
+            seedEstimatedUsage(convId!, assistantMsg.id, sendMessages, tools)
             try {
               void diagLog('streamWithTools-enter', { iter: i, messagesLen: sendMessages.length, toolsCount: tools.length, thinking: chatOptions.thinking })
               turn = await streamWithTools(
@@ -1229,14 +1320,19 @@ export function useCodex() {
                 },
               )
               void diagLog('streamWithTools-ok', { iter: i, contentLen: turn.content?.length || 0, toolCallsCount: turn.toolCalls?.length || 0 })
-            } catch (thinkErr: any) {
+            } catch (thinkErr) {
               void diagLog('streamWithTools-catch', {
                 iter: i,
                 status: httpStatusOf(thinkErr),
-                messageHead: (thinkErr?.message || String(thinkErr)).slice(0, 400),
-                name: thinkErr?.name,
+                messageHead: errorText(thinkErr).slice(0, 400),
+                name: asString(prop(thinkErr, 'name')),
               })
-              if (httpStatusOf(thinkErr) === 400 || thinkErr?.message?.includes('does not support thinking')) {
+              // Eine Stelle entscheidet, ob der Denkmodus faellt — und sie
+              // fragt fuer jeden Transport dasselbe, die Zusatzbedingung
+              // eingeschlossen (KF-21, siehe codex/thinking-downgrade.ts).
+              if (shouldDowngradeThinking(chatOptions.thinking, thinkErr)) {
+                // Siehe useChat.ts: die Absage der Engine wird gemerkt.
+                if (engineDeniedThinking(thinkErr)) markCannotThink(modelToUse)
                 turn = await streamWithTools(
                   modelToUse, sendMessages, tools,
                   { temperature: 0.1, thinking: undefined, maxTokens: chatOptions.maxTokens, contextWindow: numCtx, signal: abort.signal },
@@ -1251,18 +1347,7 @@ export function useCodex() {
             settleLivePaint()
             toolCalls = turn.toolCalls
             turnContent = turn.content || ''
-            // Real consumed-context usage for THIS coding turn (system + tools +
-            // RAG + file context + history). Multiple model calls run per task;
-            // the latest has the fullest prompt, so store each (last wins) to
-            // keep the TokenCounter on the true fill, not a char/4 estimate.
-            if (turn.promptEvalCount || turn.evalCount) {
-              useChatStore.getState().updateMessageUsage(convId!, assistantMsg.id, {
-                promptTokens: turn.promptEvalCount || 0,
-                completionTokens: turn.evalCount || 0,
-                totalTokens: (turn.promptEvalCount || 0) + (turn.evalCount || 0),
-                estimated: false,
-              })
-            }
+            reportTurnUsage(convId!, assistantMsg.id, turn)
             void diagLog('streamWithTools-return', {
               iter: i,
               toolCallsCount: toolCalls.length,
@@ -1276,50 +1361,13 @@ export function useCodex() {
               useChatStore.getState().updateMessageThinking(convId!, assistantMsg.id, thinkingContent)
             }
 
-            // v2.5.0 fix (post-merge bug hunt): some Ollama models
-            // (qwen2.5-coder:3b confirmed) emit tool calls as a fenced
-            // ```json { "name":..., "arguments":... } ``` block inside
-            // message.content INSTEAD of the native message.tool_calls
-            // array. When the native list is empty but content looks like
-            // a tool call, extract it and strip the fence so the user
-            // doesn't see raw JSON.
-            // Track whether this iteration's content held tool-call JSON.
-            // qwen2.5-coder:3b emits the JSON in content rather than native
-            // tool_calls, and every iteration wraps the JSON with the same
-            // narrative ("I'm about to verify…" + code blocks). Those lines
-            // are not the FINAL answer — they're filler between tool calls
-            // and would duplicate across iterations if accumulated.
-            let extractedFromContent = false
-            if (toolCalls.length === 0 && turnContent) {
-              const { calls: extracted, ranges } = extractToolCallsWithRanges(turnContent)
-              if (extracted.length > 0) {
-                toolCalls = extracted.map(tc => ({ function: { name: tc.name, arguments: tc.arguments } }))
-                turnContent = stripRanges(turnContent, ranges)
-                extractedFromContent = true
-              }
+            // Werkzeugaufrufe, die im Fliesstext stehen — und die Prosa, die dabei
+            // stehen bleiben MUSS: hooks/codex/tool-call-recovery.ts.
+            {
+              const recovered = recoverToolCallsFromContent(toolCalls, turnContent)
+              toolCalls = recovered.toolCalls
+              turnContent = recovered.content
             }
-            // Safety net for qwen2.5-coder: sometimes the model emits the
-            // tool-call JSON alongside native tool_calls — native was parsed
-            // already, but the same JSON still sits in the content. Strip
-            // those too so the chat bubble stays readable.
-            if (toolCalls.length > 0 && turnContent && /\{\s*"(?:name|tool|function)"\s*:/.test(turnContent)) {
-              const { ranges } = extractToolCallsWithRanges(turnContent)
-              if (ranges.length > 0) {
-                turnContent = stripRanges(turnContent, ranges)
-                extractedFromContent = true
-              }
-            }
-            // When the model bundles its tool-call JSON INSIDE the text
-            // (qwen2.5-coder & co.), KEEP the surrounding prose as this
-            // iteration's commentary — the JSON itself was already removed by
-            // stripRanges above. Keeping it (instead of clearing) is what makes
-            // every between-tool answer survive so the renderer can interleave
-            // them chronologically: tool → answer → tool → tool → answer …
-            // (David 2026-06-02 r2: "antworten zwischen drin verschwinden immer,
-            // darf nicht sein"). Older answers auto-collapse in the UI, so the
-            // old "stack of duplicated I'm-about-to paragraphs" problem is gone.
-            // Only drop it when nothing but punctuation/whitespace remains.
-            if (extractedFromContent && !/[A-Za-z0-9]/.test(turnContent)) turnContent = ''
           } else {
             // ── Streaming path for OpenAI-compat / Anthropic / LU Cloud ──
             // chatStream carries the tool defs (ChatOptions.tools) and the
@@ -1337,8 +1385,8 @@ export function useCodex() {
             }
             try {
               turn = await streamProviderTurn(provider, modelToUse, sendMessages, streamOpts, liveContent, liveThinking)
-            } catch (thinkErr: any) {
-              if (thinkErr?.message?.includes('does not support thinking') || httpStatusOf(thinkErr) === 400) {
+            } catch (thinkErr) {
+              if (shouldDowngradeThinking(streamOpts.thinking, thinkErr)) {
                 turn = await streamProviderTurn(provider, modelToUse, sendMessages, { ...streamOpts, thinking: undefined as unknown as boolean }, liveContent, () => {})
               } else {
                 throw thinkErr
@@ -1347,14 +1395,7 @@ export function useCodex() {
             settleLivePaint()
             toolCalls = turn.toolCalls
             turnContent = turn.content || ''
-            if (turn.promptEvalCount || turn.evalCount) {
-              useChatStore.getState().updateMessageUsage(convId!, assistantMsg.id, {
-                promptTokens: turn.promptEvalCount || 0,
-                completionTokens: turn.evalCount || 0,
-                totalTokens: (turn.promptEvalCount || 0) + (turn.evalCount || 0),
-                estimated: false,
-              })
-            }
+            reportTurnUsage(convId!, assistantMsg.id, turn)
             if (keepThinking && turn.thinking) {
               thinkingContent += (thinkingContent ? '\n\n' : '') + turn.thinking
               useChatStore.getState().updateMessageThinking(convId!, assistantMsg.id, thinkingContent)
@@ -1459,12 +1500,14 @@ export function useCodex() {
           )
           try {
             hermesTurn = await runHermes(hermesOpts)
-          } catch (thinkErr: any) {
+          } catch (thinkErr) {
             // Same downgrade the native branch carries: an old Ollama build or
             // an endpoint that predates the knob answers 400, and the run must
             // survive that instead of ending on it.
-            if (hermesOpts.thinking !== undefined
-              && (thinkErr?.message?.includes('does not support thinking') || httpStatusOf(thinkErr) === 400)) {
+            // Die Zusatzbedingung stand frueher NUR hier. Sie ist nicht
+            // weggeraeumt, sondern eingezogen: `shouldDowngradeThinking` traegt
+            // sie jetzt fuer alle drei Transporte (KF-21).
+            if (shouldDowngradeThinking(hermesOpts.thinking, thinkErr)) {
               hermesTurn = await runHermes({ ...hermesOpts, thinking: undefined as unknown as boolean })
             } else {
               throw thinkErr
@@ -1652,34 +1695,9 @@ export function useCodex() {
         // (only strong "is complete / all tests pass / committed" phrases, not
         // forward-looking "to complete the fix") so we err toward nudging.
         if (toolCalls.length === 0) {
-          // Nudge ONLY when the model clearly STALLED mid-task — it narrated the
-          // next step ("I'm about to…", "let me…", "next I'll…", "I need to read…")
-          // or asked for info it could find itself ("please provide the path",
-          // "which file?"), or returned no text at all. A substantive ANSWER
-          // matches none of these, so simple Q&A ("2+2 is 4" / "Task completed.
-          // The answer is 4.") stops cleanly. The previous "nudge unless a
-          // completion keyword is present" version looped on already-answered
-          // questions (David 2026-06-02: coding agent "antwortet in loops" on a
-          // simple question — it called shell_execute 3× + repeated "Task
-          // completed" because "completed" never matched the completion regex).
-          const stalledNarration = /\b(i(?:'?m| am) about to|i will(?: now)?|i'?ll\b|let me\b|next,?\s*i\b|now i'?ll|going to|first,?\s*i\b|then i'?ll|i (?:need|have|am going) to (?:read|open|check|look|run|see|find))\b/i.test(turnContent)
-          // "asksForInfo" also catches the model giving up by asking the user to
-          // VERIFY/CONFIRM a path it can discover itself ("it seems there is an
-          // issue with the file path … could you please verify the correct path
-          // to sum.js?" — David 2026-06-02 live coding run with qwen2.5-coder:7b).
-          // The verify/confirm/clarify branch is anchored on a path/file NOUN so
-          // a genuine completion ("I fixed it, please verify the changes") does
-          // NOT match — only "verify the (correct) path/file/location" does.
-          const asksForInfo = /\b(please provide|could you (?:please )?(?:provide|share|tell|give|specify|verify|confirm|clarify)|what(?:'s| is) the (?:path|file|name|location)|which file|can you (?:provide|share|specify|tell)|provide (?:the|me) (?:the )?(?:path|file|details|more)|(?:verify|confirm|clarify) (?:the )?(?:correct |right |exact |full )?(?:path|file ?path|location|directory|filename|file name)|need (?:the|more) (?:path|info|details|context))\b/i.test(turnContent)
-          const emptyTurn = turnContent.trim().length === 0
-          // Only nudge an empty turn when NOTHING has been produced yet (a true
-          // early stall). An empty turn AFTER a real answer means the model is
-          // finished, break immediately instead of spinning slow no-op nudge
-          // iterations that keep the typing dots up long after the answer is
-          // done (David 2026-06-12: "die punkte bleiben so lange obwohl keine
-          // antwort mehr kam"). Read-only report commands (/review, /explain …)
-          // legitimately end on a text answer + an empty follow-up turn.
-          const nudgeWorthy = stalledNarration || asksForInfo || (emptyTurn && !fullContent.trim())
+          // Steckengeblieben oder fertig — drei Muster ueber denselben Text und
+          // ihre Fehlalarm-Geschichte: hooks/codex/stall-verdict.ts.
+          const { nudgeWorthy } = codexStallVerdict(turnContent, fullContent)
           if (nudgeWorthy && continueNudgesRemaining > 0) {
             continueNudgesRemaining--
             void diagLog('continue-nudge', { iter: i, remaining: continueNudgesRemaining, turnContentLen: turnContent.length })
@@ -1717,6 +1735,15 @@ export function useCodex() {
 
         // Phase 5b (v2.4.0), parallel tool execution via tool-executor.
         if (!runningRef.current || abort.signal.aborted) break
+
+        // Every call carries an id from here on. Only the NATIVE channel gives
+        // us one; a call recovered from prose or rebuilt from Hermes XML had
+        // none, and the next turn then sent `tool_call_id: undefined` next to
+        // an assistant tool_calls entry with no id. A strict OpenAI-compatible
+        // provider (lu-cloud/DeepInfra) 422s that and the whole run dies — on
+        // exactly the weak models that need the prose fallback in the first
+        // place.
+        toolCalls = toolCalls.map((tc) => (tc.id ? tc : { ...tc, id: uuid() }))
 
         // Loop-detector: narration first (the same line re-emitted every
         // iteration), then the batch itself (windowed signature repeats +
@@ -1765,7 +1792,7 @@ export function useCodex() {
           })
         }
 
-        type BatchEntry = { tc: typeof toolCalls[number]; ac: AgentToolCall; blockId: string; injectedArgs: Record<string, any> }
+        type BatchEntry = { tc: typeof toolCalls[number]; ac: AgentToolCall; blockId: string; injectedArgs: ToolArgs }
         const batch: BatchEntry[] = []
         budget.addToolCalls(toolCalls.length)
         anyToolExecuted = true
@@ -1796,7 +1823,14 @@ export function useCodex() {
           //   workDir=D:/Pictures/foo, p=D:/Pictures/foo/bar.html →
           //   D:/Pictures/foo/D:/Pictures/foo/bar.html
           // which then grew further on retry as the model re-emitted the path.
-          if ((toolName === 'file_read' || toolName === 'file_write' || toolName === 'file_edit' || toolName === 'file_list' || toolName === 'file_search') && toolArgs.path) {
+          // `path` is whatever the MODEL put in the tool call, so it is only a
+          // string when the model made it one. The old annotation asserted it
+          // (`const p: string = toolArgs.path` on an `any`), and a call that
+          // sent a number or an object went straight into `p.startsWith` and
+          // threw a TypeError out of the tool loop. Checking it here lets such
+          // a call reach the tool, which rejects it with its own message.
+          // The truthiness of the old guard is kept: '' still skips.
+          if ((toolName === 'file_read' || toolName === 'file_write' || toolName === 'file_edit' || toolName === 'file_list' || toolName === 'file_search') && typeof toolArgs.path === 'string' && toolArgs.path) {
             const p: string = toolArgs.path
             const isAbsolute =
               /^[a-zA-Z]:[/\\]/.test(p) ||  // Windows drive letter: C:/ D:\ etc.
@@ -1842,15 +1876,14 @@ export function useCodex() {
         // absolute project path, so every pre-read returned '' and every diff
         // rendered as a 100% insert — hiding exactly the deletions/overwrites
         // the user needs to see before approving a staged change.
-        const readCtx: { chatId?: string; workingDirectory?: string } =
-          workDir && workDir !== '.' ? { chatId: workspaceSlug, workingDirectory: workDir } : { chatId: workspaceSlug }
+        const readCtx = codexReadCtx(workspaceSlug, workDir)
         const oldContents = new Map<string, string>()
         await Promise.all(
           batch
             .filter((e) => (e.ac.toolName === 'file_write' || e.ac.toolName === 'file_edit') && typeof e.injectedArgs.path === 'string')
             .map(async (e) => {
               try {
-                const r = await backendCall<{ content?: string }>('fs_read', { path: e.injectedArgs.path, ...readCtx })
+                const r = await readWorkspaceFile(e.injectedArgs.path as string, readCtx)
                 oldContents.set(e.ac.id, r?.content ?? '')
               } catch {
                 oldContents.set(e.ac.id, '')
@@ -1863,161 +1896,44 @@ export function useCodex() {
         // race only exists so a tool whose timer never fires cannot hold the
         // loop forever — and the timer is cleared when the tool wins (B10),
         // instead of parking a live closure for up to 615 s per call.
-        const withTimeout = (name: string, args: Record<string, any>) =>
-          raceWithToolTimeout(toolRegistry.execute(name, args, 1, run), name, toolCallCapMs(name, args, settings))
+        const withTimeout = (name: string, args: ToolArgs, signal?: AbortSignal) =>
+          raceWithToolTimeout(
+            // The run's Stop travels all the way INTO the tool now (audit M1).
+            // Before, the signal stopped at the batch scheduler: a shell command
+            // already in flight kept mutating the repository for the rest of its
+            // 615 s budget after the user hit the only brake the product has.
+            toolRegistry.execute(name, args, 1, run, signal ?? abort.signal),
+            name,
+            toolCallCapMs(name, args, settings),
+          )
 
-        // Multi-File Stage-and-Approve (B10). When the user has codex
-        // stage mode on, file_write calls don't hit the disk — they
-        // queue in stagedChangesStore as "pending changes" the user
-        // reviews and applies (or rejects) per-file. The model still
-        // sees a synthetic success message so the loop progresses; the
-        // user is the gatekeeper for the actual disk write.
-        const stageFileWrite = async (args: Record<string, any>): Promise<string> => {
-          const path = String(args.path ?? '')
-          if (!path) return 'file_write: missing path'
-          const newContent = String(args.content ?? '')
-          // Resolve against the run's workspace NOW (at stage time). Apply
-          // happens later, after this turn's finally clears the active
-          // chat/workspace context, so a relative path would otherwise route to
-          // agent-workspace/default/ instead of the real project folder. The
-          // bridge jails absolute paths to the workspace root, so the pre-read
-          // MUST pass the run's workingDirectory (as its root) — otherwise the
-          // absolute project path is rejected and the staged diff shows a 100%
-          // insert, hiding what will be overwritten. (v2.5.0 + 2.5.9 audit fix.)
-          const isAbs = /^([a-zA-Z]:[\\/]|[\\/]|\\\\)/.test(path)
-          const resolvedPath = isAbs || !workDir || workDir === '.'
-            ? path
-            : `${workDir.replace(/[\\/]+$/, '')}${workDir.includes('\\') ? '\\' : '/'}${path.replace(/^[\\/]+/, '')}`
-          const stageReadCtx: { chatId?: string; workingDirectory?: string } =
-            workDir && workDir !== '.' ? { chatId: workspaceSlug, workingDirectory: workDir } : { chatId: workspaceSlug }
-          // A prior staged entry for this path already knows the DISK state —
-          // reuse it so the reviewed diff stays disk → latest even when the
-          // model writes the same file twice in one run.
-          const priorWrite = findStagedForPath(useStagedChangesStore.getState().list(convId!), path)
-          let oldContent = ''
-          if (priorWrite) {
-            oldContent = priorWrite.oldContent
-          } else {
-            try {
-              const r = await backendCall<{ content?: string }>('fs_read', { path: resolvedPath, ...stageReadCtx })
-              oldContent = r?.content ?? ''
-            } catch {
-              // New file — leave oldContent empty so the diff renders an
-              // all-add hunk and the apply path creates the file.
-            }
-          }
-          const diff = computeUnifiedDiff(path, oldContent, newContent)
-          useStagedChangesStore.getState().stage(convId!, {
-            path,
-            resolvedPath,
-            // Capture the workspace root so Apply (which runs after the loop's
-            // finally clears the active context) can jail the write to the real
-            // project folder instead of agent-workspace/default. Undefined in
-            // sandbox mode — the per-chat sandbox is the right root there.
-            workingDirectory: workDir && workDir !== '.' ? workDir : undefined,
-            oldContent,
-            newContent,
-            diff,
-          })
-          return `Staged for review: ${path}. The user will apply or reject the change before it lands on disk.`
-        }
+        // Die Ablage-Warteschlange und ALLES, was sie anfasst — die vier
+        // Zugriffe, die nur zusammen richtig sind: hooks/codex/staged-writes.ts.
+        const stagedWriter = createStagedWriter({
+          convId: convId!,
+          workDir,
+          workspaceSlug,
+          readFile: readWorkspaceFile,
+        })
 
-        // Stage-mode counterpart for surgical edits: resolve old_string ->
-        // new_string against the current file NOW and stage the resulting full
-        // content, so the staged diff and the applied write are the real change
-        // (and a bad edit is reported the same way whether staged or not).
-        const stageFileEdit = async (args: Record<string, any>): Promise<string> => {
-          const path = String(args.path ?? '')
-          if (!path) return 'file_edit: missing path'
-          const oldString = typeof args.old_string === 'string' ? args.old_string : ''
-          const newString = typeof args.new_string === 'string' ? args.new_string : ''
-          const isAbs = /^([a-zA-Z]:[\\/]|[\\/]|\\\\)/.test(path)
-          const resolvedPath = isAbs || !workDir || workDir === '.'
-            ? path
-            : `${workDir.replace(/[\\/]+$/, '')}${workDir.includes('\\') ? '\\' : '/'}${path.replace(/^[\\/]+/, '')}`
-          const stageReadCtx: { chatId?: string; workingDirectory?: string } =
-            workDir && workDir !== '.' ? { chatId: workspaceSlug, workingDirectory: workDir } : { chatId: workspaceSlug }
-          // Read-your-writes: chain onto the STAGED content when this path is
-          // already pending. Without this the base was re-read from DISK —
-          // which never saw the staged write — so a second edit to the same
-          // file silently clobbered the first, and an edit to a staged NEW
-          // file failed with "could not read".
-          const priorEdit = findStagedForPath(useStagedChangesStore.getState().list(convId!), path)
-          let baseContent = ''
-          let diskContent = ''
-          if (priorEdit) {
-            baseContent = priorEdit.newContent
-            diskContent = priorEdit.oldContent
-          } else {
-            try {
-              const r = await backendCall<{ content?: string; encoding?: string }>('fs_read', { path: resolvedPath, ...stageReadCtx })
-              if (r?.encoding === 'binary' || r?.encoding === 'base64') return `file_edit: cannot edit a binary file (${path}).`
-              baseContent = diskContent = r?.content ?? ''
-            } catch {
-              return `file_edit: could not read ${path}. To create a new file use file_write.`
-            }
-          }
-          const applied = applyUniqueEdit(baseContent, oldString, newString)
-          if (!applied.ok) {
-            switch (applied.reason) {
-              case 'empty_old': return 'file_edit: old_string must be non-empty. Use file_write to create a new file.'
-              case 'noop': return 'file_edit: old_string and new_string are identical, nothing to change.'
-              case 'not_found': return `file_edit: old_string not found in ${path}. Read the file and copy the exact text you want to replace.`
-              case 'not_unique': return `file_edit: old_string matches ${applied.matches} places in ${path}. Add surrounding lines so it is unique.`
-              default: return 'file_edit: failed.'
-            }
-          }
-          const newContent = applied.content ?? ''
-          // Diff and oldContent stay anchored on the DISK state, so the user
-          // reviews (and apply writes) disk → final, not staged → staged.
-          const diff = computeUnifiedDiff(path, diskContent, newContent)
-          useStagedChangesStore.getState().stage(convId!, {
-            path,
-            resolvedPath,
-            workingDirectory: workDir && workDir !== '.' ? workDir : undefined,
-            oldContent: diskContent,
-            newContent,
-            diff,
-          })
-          return `Staged for review: ${path} (surgical edit). The user will apply or reject the change before it lands on disk.`
-        }
-
-        const dispatchTool = (name: string, args: Record<string, any>): Promise<string> => {
+        const dispatchTool = (name: string, args: ToolArgs, signal?: AbortSignal): Promise<string> => {
           // Stage-and-Approve follows the MODE preset, not the raw setting:
           // Ask stages every write for review, Bypass writes straight through,
           // Plan never gets here because the write tools are stripped.
           if (knobs.stageWrites) {
-            if (name === 'file_write') return stageFileWrite(args)
-            if (name === 'file_edit') return stageFileEdit(args)
-            // Read-your-writes: staged content is invisible on disk, so reads
-            // MUST be answered from the queue — otherwise the model reads the
-            // old bytes (or a not-found), concludes its write failed, and
-            // stages the same file forever (Morgan's file_read loop,
-            // 2026-07-26). The in-turn cache composes correctly: every staged
-            // write is audited as a file_write mutation, which invalidates
-            // cached reads, so a pre-stage result is never replayed.
-            const staged = convId ? useStagedChangesStore.getState().list(convId) : []
-            if (staged.length > 0) {
-              if (name === 'file_read') {
-                const hit = findStagedForPath(staged, String(args.path ?? ''))
-                if (hit) return Promise.resolve(stagedReadResult(hit))
-              }
-              if (name === 'file_list' || name === 'file_search') {
-                return withTimeout(name, args).then((r) => r + stagedListingNote(staged))
-              }
-            }
+            return stagedWriter.dispatch(name, args, () => withTimeout(name, args, signal))
           }
-          return withTimeout(name, args)
+          return withTimeout(name, args, signal)
         }
 
         const results = await executeParallel(requests, {
           getTool: (name) => toolRegistry.resolveExecutable(name),
-          execute: (name: string, args: Record<string, any>) => {
+          execute: (name: string, args: ToolArgs, _run, signal) => {
             // A create tool the gate had closed still reaches the registry, so
             // the run self-heals: this call runs, and the next step offers the
             // schemas instead of pretending the capability is gone.
             if (isGatedTool(name)) createGateOpened = true
-            return dispatchTool(name, args)
+            return dispatchTool(name, args, signal)
           },
           lookupCache: convId ? makeInTurnCacheLookup({ convId, turnStartMs }) : undefined,
           explainError: (toolName, err) => explainToolError(toolName, err),
@@ -2054,14 +1970,22 @@ export function useCodex() {
                 // styled, and had no way to say "stop asking" (David 2026-07-24).
                 return useCodexConfirmStore.getState().ask({
                   toolName: req.toolName,
-                  command: String(a.command ?? a.code ?? a.script ?? '').slice(0, 800),
+                  // The FULL arguments, not `args.command`. See
+                  // renderApprovalPreview + CodexConfirmRequest.command: the
+                  // old one-field preview showed `python3 -` while the script
+                  // rode in on stdin, unseen and unapproved.
+                  command: renderApprovalPreview(req.toolName, a),
+                  args: a,
                   // "we ask because it is a cloud model" only holds when the
                   // user did not ask for it themselves and Ask mode is not
                   // what put the gate up.
                   cloudReason: !settings.codexConfirmShell && codexMode !== 'ask' && providerId === 'lu-cloud',
                 }, abort.signal)
               }
-            : undefined,
+            // Unattended by choice, stated in writing: awaitApproval is a
+            // required field now (audit AGT-1), so "no prompt here" is a
+            // decision a reader can see instead of a field nobody filled in.
+            : APPROVE_ALL,
           recordAudit: (entry) => {
             if (!convId) return
             if (entry.kind === 'start') {
@@ -2110,31 +2034,19 @@ export function useCodex() {
           // update so the ToolCallBlock itself can render it (audit D5; the
           // diff used to live only on the Codex event log, so the Agent view
           // showed raw text where a change view belonged).
-          let acDiff: string | undefined
-          if (entry.ac.toolName === 'file_write') {
-            // Pre-read above captured the on-disk version; a missing file
-            // yields an all-add hunk. Empty diff → omit.
-            const oldText = oldContents.get(entry.ac.id) ?? ''
-            const newText =
-              typeof entry.injectedArgs.content === 'string'
-                ? entry.injectedArgs.content
-                : ''
-            acDiff = computeUnifiedDiff(entry.injectedArgs.path, oldText, newText) || undefined
-          } else if (entry.ac.toolName === 'file_edit') {
-            // Surgical edit — the tool only received old_string/new_string, so
-            // reconstruct the new content from the pre-read + the unique
-            // replacement to attach a real diff. If the edit did not apply
-            // uniquely the executor already returned an error; skip the diff.
-            const oldText = oldContents.get(entry.ac.id) ?? ''
-            const applied = applyUniqueEdit(
-              oldText,
-              typeof entry.injectedArgs.old_string === 'string' ? entry.injectedArgs.old_string : '',
-              typeof entry.injectedArgs.new_string === 'string' ? entry.injectedArgs.new_string : '',
-            )
-            acDiff = applied.ok
-              ? computeUnifiedDiff(entry.injectedArgs.path, oldText, applied.content ?? '') || undefined
-              : undefined
-          }
+          // `path` is model output, not a promise — the same value the tool
+          // itself re-checks. The display path checks it too instead of handing
+          // whatever arrived to the differ.
+          const acPath = asString(entry.injectedArgs.path)
+          // Der angezeigte Unterschied ist NACHGEBAUT, nicht beobachtet — die
+          // eine Stelle, die ueber eine Aenderung luegen kann:
+          // hooks/codex/tool-result-view.ts.
+          const acDiff = codexToolDiff({
+            toolName: entry.ac.toolName,
+            path: acPath,
+            oldText: oldContents.get(entry.ac.id) ?? '',
+            args: entry.injectedArgs,
+          })
           if (acDiff) entry.ac.diff = acDiff
 
           updateBlockById(entry.blockId, {
@@ -2148,22 +2060,16 @@ export function useCodex() {
                   : `Failed: ${entry.ac.toolName}`,
           })
 
-          // Codex event log parity with the old path.
+          // Codex event log parity with the old path. Welcher Eintrag —
+          // und warum ein FEHLGESCHLAGENES file_write trotzdem ein
+          // file_change bleibt: hooks/codex/tool-result-view.ts.
           const resultStr = entry.ac.result ?? entry.ac.error ?? ''
-          if (entry.ac.toolName === 'shell_execute' || entry.ac.toolName === 'code_execute') {
+          const eventKind = codexEventKind(entry.ac.toolName, isError)
+          if (eventKind) {
             codexStore.addEvent(convId, {
-              id: uuid(), type: 'terminal_output', content: resultStr, timestamp: Date.now(),
-            })
-          } else if (entry.ac.toolName === 'file_write' || entry.ac.toolName === 'file_edit') {
-            codexStore.addEvent(convId, {
-              id: uuid(), type: 'file_change', content: resultStr,
-              filePath: entry.injectedArgs.path,
-              diff: acDiff,
+              id: uuid(), type: eventKind, content: resultStr,
+              ...(eventKind === 'file_change' ? { filePath: acPath, diff: acDiff } : {}),
               timestamp: Date.now(),
-            })
-          } else if (isError) {
-            codexStore.addEvent(convId, {
-              id: uuid(), type: 'error', content: resultStr, timestamp: Date.now(),
             })
           }
         }
@@ -2306,7 +2212,14 @@ export function useCodex() {
       // Apply button, so "auto on everything" really means auto (first
       // customer feedback, Morgan 2026-07-26). Failures stay in the queue for
       // manual retry via the Pending panel.
-      if (settings.codexStageMode && settings.codexAutoApply && convId) {
+      //
+      // Not after a Stop. Auto-apply sits on the loop's normal exit path, so a
+      // run the user aborted mid-edit still wrote its half-finished staged
+      // changes to disk — the opt-in says "apply what the run produced", and an
+      // aborted run did not produce it, it was interrupted producing it. The
+      // queue survives, so nothing is lost: the Pending panel still offers
+      // every change for review.
+      if (settings.codexStageMode && settings.codexAutoApply && convId && !isRunStopped(convId)) {
         const pending = useStagedChangesStore.getState().list(convId)
         if (pending.length > 0) {
           const applied = await applyAllStagedChanges(convId)
@@ -2326,18 +2239,23 @@ export function useCodex() {
       })
 
     } catch (err) {
+      // A caught value is whatever was thrown. `err as any` let five reads
+      // straight through it, including a `.name` read with no optional chain
+      // that would itself have thrown on a `throw null`. The guards answer
+      // undefined for a non-object instead.
+      const errName = asString(prop(err, 'name'))
+      const code = asString(prop(err, 'code'))
       void diagLog('outer-catch', {
-        name: (err as Error)?.name,
-        message: (err as Error)?.message?.slice(0, 400),
+        name: errName,
+        message: errorText(err).slice(0, 400),
         status: httpStatusOf(err),
       })
-      if ((err as Error).name !== 'AbortError') {
-        const e = err as any
+      if (errName !== 'AbortError') {
         const parts: string[] = []
-        if (e?.code) parts.push(`[${e.code}]`)
-        const status = httpStatusOf(e)
+        if (code) parts.push(`[${code}]`)
+        const status = httpStatusOf(err)
         if (status) parts.push(`HTTP ${status}`)
-        parts.push(e?.message || String(err) || 'Coding Agent error')
+        parts.push(errorText(err) || String(err) || 'Coding Agent error')
         const msg = parts.join(' ')
         // Surface common causes so the user can see WHY it failed instead of
         // a bare "Connection error" — previously we only printed `.message`,
@@ -2345,7 +2263,7 @@ export function useCodex() {
         let hint = ''
         if (/Failed to fetch|NetworkError|net::ERR/i.test(msg)) {
           hint = '\n\nHint: the Ollama server is unreachable. Is `ollama serve` running on localhost:11434?'
-        } else if (e?.code === 'tools_unsupported' || /does not support tools|tool.*not.*support/i.test(msg)) {
+        } else if (code === 'tools_unsupported' || /does not support tools|tool.*not.*support/i.test(msg)) {
           markToolsUnsupported(modelToUse)
           hint = '\n\nHint: this model does not support tool calling, so Code mode cannot use it. Pick a model that supports tool calling (Qwen 3, Llama 3.1+, Gemma 4) or an LU Cloud model shown with the tools badge.'
         } else if (/timed out/i.test(msg)) {
@@ -2353,7 +2271,7 @@ export function useCodex() {
         }
         // An empty wallet is not a crash and no retry fixes it. Replace the
         // status-code line with the plain explanation the other surfaces use.
-        if (e?.code === 'credits_exhausted') {
+        if (code === 'credits_exhausted') {
           loopHalt = 'out of credits'
           fullContent += `\n\n${CREDITS_EXHAUSTED_MESSAGE}\n\nThe work finished so far stays in this chat. Once you top up, send a new message naming only what is still left.`
           useChatStore.getState().updateMessageContent(convId, assistantMsg.id, fullContent)
@@ -2382,11 +2300,8 @@ export function useCodex() {
       // The most recent chain is what the next turn actually needs; older
       // steps are summarised by the visible transcript anyway.
       const toolHistoryAll = messages.slice(messagesStartLen)
-      const HIDDEN_HISTORY_MAX = 60
-      let toolHistory = toolHistoryAll.slice(-HIDDEN_HISTORY_MAX)
-      // Never start the kept slice on an orphan tool result — strict
-      // providers 422 a result whose call fell outside the window.
-      while (toolHistory.length > 0 && toolHistory[0].role === 'tool') toolHistory = toolHistory.slice(1)
+      // Deckelung UND Waisenschnitt gehoeren zusammen: hooks/codex/hidden-history.ts.
+      const toolHistory = capHiddenToolHistory(toolHistoryAll)
       if (toolHistory.length > 0 && convId) {
         const store = useChatStore.getState()
         // Find the assistant message we just filled so we can insert BEFORE it
@@ -2399,7 +2314,7 @@ export function useCodex() {
             content: tm.content || '',
             timestamp: Date.now(),
             hidden: true,
-            tool_calls: tm.tool_calls as any,
+            tool_calls: tm.tool_calls,
             // Persist the tool-result linkage so the next turn's history
             // builder can replay it — without this, follow-up turns 422 on
             // lu-cloud (see types/chat.ts Message.tool_call_id, Bug 4).
@@ -2408,22 +2323,13 @@ export function useCodex() {
         }
       }
 
-      // ── Memory extraction (parity with Chat + Agent) ────────────────
-      // After the turn lands a final answer, run the lightweight extractor
-      // on the (user, assistant) pair so long-term preferences / facts get
-      // remembered in Codex too. The extractor has its own autoExtractEnabled
-      // guard + rate-limit + short-response skip, so we just fire-and-forget.
-      if (convId && fullContent) {
-        void extractMemoriesFromPair(instruction, fullContent, convId).catch(() => {})
-      }
-
       // Plan mode finished: put the plan up for approval (plan C1, blocker
       // S7). The card carries the FULL answer, the concrete commands and
       // target paths, not the todo titles: the plan is a function of untrusted
       // repo content, so the user approves what they can actually read. The
       // mode the approval runs under is resolved in the UI and shown ON the
       // button, and it is never Bypass unless the user picked Bypass by hand.
-      if (convId && codexMode === 'plan' && !userStoppedRef.current && fullContent.trim()) {
+      if (convId && codexMode === 'plan' && !isRunStopped(convId) && fullContent.trim()) {
         useCodexStore.getState().setPlanApproval(convId, {
           planText: fullContent.trim(),
           messageId: assistantMsg.id,
@@ -2431,8 +2337,6 @@ export function useCodex() {
         })
       }
 
-      setIsRunning(false)
-      useGenerationStore.getState().setGenerating(convId, false)
       useGenerationStore.getState().clearAborter(convId)
       runningRef.current = false
       abortRef.current = null
@@ -2442,15 +2346,40 @@ export function useCodex() {
       endAgentRun(run)
 
       // The turn is done, including the hidden tool history inserted above, so
-      // put it on disk now. Persistence is coalesced while the run streams
-      // (2.6.3 — see coalescedStorage), and losing the tool chain would cost
-      // the next turn its context, not just the transcript.
-      void flushChatPersist()
-      // Same reasoning for the approval queue: what is still pending is work
-      // the user paid for and has not seen land yet. It has to be on disk
-      // before the app can be closed or updated (2026-08-11).
-      void flushStagedPersist()
-      codexStore.setThreadStatus(convId, 'idle')
+      // it goes on disk BEFORE the app reports the run finished. Persistence is
+      // coalesced while the run streams (2.6.3 — see coalescedStorage), and
+      // losing the tool chain would cost the next turn its context, not just
+      // the transcript.
+      //
+      // The staged-changes queue rides along for the same reason: what is still
+      // pending there is work the user paid for and has not seen land yet, and
+      // it has to be on disk before the app can be closed or updated
+      // (2026-08-11). Both are awaited together, under one deadline —
+      // stores/durability.ts has the measurement, including why this stays in
+      // the statement the old `void flushChatPersist()` occupied instead of
+      // moving to the bottom of the block.
+      await endTurnDurably(
+        () => {
+          setIsRunning(false)
+          useGenerationStore.getState().setGenerating(convId, false)
+          codexStore.setThreadStatus(convId, 'idle')
+        },
+        [flushChatPersist, flushStagedPersist],
+      )
+
+      // ── Memory extraction (parity with Chat + Agent) ────────────────
+      // After the turn lands a final answer, run the lightweight extractor
+      // on the (user, assistant) pair so long-term preferences / facts get
+      // remembered in Codex too. The extractor has its own autoExtractEnabled
+      // guard + rate-limit + short-response skip, so we just fire-and-forget.
+      //
+      // BELOW the turn end, which is where Chat and Agent have always had it
+      // and where Code did not: it used to run in the statement above, so the
+      // extractor's synchronous prologue ran before this turn's write had
+      // started. Fire-and-forget or not, nothing gets to go first.
+      if (convId && fullContent) {
+        void extractMemoriesFromPair(instruction, fullContent, convId).catch(() => {})
+      }
 
       // The per-batch bump above only fires when a batch RETURNS. A user who
       // aborts mid-run (David 2026-07-31: files on disk, panel still showing
@@ -2478,7 +2407,7 @@ export function useCodex() {
           id: uuid(), role: 'assistant', timestamp: Date.now(),
           content: `The loop stopped because the run was ${loopHalt}. Start it again once that is sorted.`,
         })
-      } else if (loopState && convId && !userStoppedRef.current) {
+      } else if (loopState && convId && !isRunStopped(convId)) {
         const saidDone = loopPassSaysDone(fullContent.trim())
         const cap = Math.max(0, settings.loopMaxPasses ?? 0)
         const nextPass = loopState.pass + 1
@@ -2533,6 +2462,32 @@ export function useCodex() {
     }
   }, [])
 
+  /**
+   * The public send. Its only job on top of `runInstruction` is to hold the
+   * working directory for the whole turn (A8 review, S1).
+   *
+   * `beginSend` runs SYNCHRONOUSLY, before the first await inside, which is
+   * the point: `setThreadStatus('running')` is five awaits down the page
+   * (workspace slug over IPC, server tool support, token budget, memory
+   * search, .lurules), and both folder buttons used to be free for that whole
+   * stretch. The marker lives out here rather than inside the body because the
+   * body has four early returns and a handful of unguarded awaits: one finally
+   * around the call covers every exit, a thrown error included. A leaked
+   * counter would lock the folder for the rest of the session, which is the
+   * same trap A8 is about.
+   */
+  const sendInstruction = useCallback(async (
+    rawInstruction: string,
+    opts?: Parameters<typeof runInstruction>[1],
+  ) => {
+    useCodexStore.getState().beginSend()
+    try {
+      await runInstruction(rawInstruction, opts)
+    } finally {
+      useCodexStore.getState().endSend()
+    }
+  }, [runInstruction])
+
   // Self-reference so the /loop driver can start the next pass. A plain
   // recursive call is not possible inside the useCallback that defines it.
   const sendRef = useRef<typeof sendInstruction | null>(null)
@@ -2541,7 +2496,13 @@ export function useCodex() {
   const stopCodex = useCallback(() => {
     // Stop means stop: also cancel a /loop pass that is waiting out its
     // interval, otherwise the run the user just killed comes back by itself.
-    userStoppedRef.current = true
+    const stoppedConvId = useChatStore.getState().activeConversationId
+    // Both of these reach a run a PREVIOUS hook instance started (the Code view
+    // remounts on every tab switch): the store holds that run's real aborter,
+    // and the module-scoped stop is readable from its loop driver's finally,
+    // which lives in that instance's closure and can read no ref of this one.
+    stopRun(stoppedConvId)
+    useGenerationStore.getState().abortConversation(stoppedConvId)
     if (codexLoopTimer) {
       clearTimeout(codexLoopTimer)
       codexLoopTimer = null
@@ -2550,10 +2511,6 @@ export function useCodex() {
     runningRef.current = false
     abortRef.current?.abort()
     abortRef.current = null
-    // The run may belong to a PREVIOUS hook instance (the Code view remounts
-    // on every tab switch) whose controller this instance never saw. The
-    // store-registered aborter reaches it regardless of who started it.
-    useGenerationStore.getState().abortConversation(useChatStore.getState().activeConversationId)
     setIsRunning(false)
   }, [])
 

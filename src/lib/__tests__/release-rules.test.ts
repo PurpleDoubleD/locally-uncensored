@@ -105,7 +105,39 @@ describe('a build is not a decision, on every trigger', () => {
   })
 
   it('the release that IS Latest is never touched, or the flip would undo itself', () => {
+    // No release event named it: this is a manual re-run over a tag somebody
+    // already verified and flipped, and that flag is their verdict.
     expect(shouldForcePrerelease(latest, latest)).toBe(false)
+  })
+
+  // THE case the job exists for, and the one the first version of the rule could
+  // never reach. Publishing a release as a full release makes GitHub point
+  // Latest at it immediately and by itself — so by the time this job runs,
+  // `rel.id === latest.id` is already true and the old `isLatest -> leave it
+  // alone` guard fired every single time. The check was a guaranteed no-op in
+  // its own core case: the release nobody had opened kept Latest, the download
+  // routes and every updater followed it, which is the 2026-08-10 incident.
+  it('a full release that this run just published is forced back EVEN THOUGH GitHub already made it Latest', () => {
+    const justPublished = rel({ id: 42, tag_name: 'v2.6.5', prerelease: false })
+    // `/releases/latest` answers with this very release — automatically.
+    expect(shouldForcePrerelease(justPublished, justPublished, { publishedByThisRun: true })).toBe(true)
+  })
+
+  it('the same release, seen by a later manual re-run, is left alone', () => {
+    // Same inputs minus the release event: now being Latest means a human
+    // verified it, and demoting it would undo their flip.
+    const verified = rel({ id: 42, tag_name: 'v2.6.5', prerelease: false })
+    expect(shouldForcePrerelease(verified, verified, { publishedByThisRun: false })).toBe(false)
+  })
+
+  it('a prerelease this run published is already where it belongs', () => {
+    const fresh = rel({ id: 43, prerelease: true })
+    expect(shouldForcePrerelease(fresh, latest, { publishedByThisRun: true })).toBe(false)
+  })
+
+  it('a draft this run published is still left alone', () => {
+    const draft = rel({ id: 44, draft: true })
+    expect(shouldForcePrerelease(draft, latest, { publishedByThisRun: true })).toBe(false)
   })
 
   it('a release already marked prerelease needs nothing', () => {
@@ -140,5 +172,50 @@ describe('the workflow actually calls it', () => {
     // A failed Linux lane must not leave a full release standing.
     const job = wf.slice(wf.indexOf('enforce-prerelease:'))
     expect(job).toContain('if: always()')
+  })
+
+  it('and knows whether a release event started the run', () => {
+    // Without this the job cannot tell GitHub's automatic Latest pointer from
+    // a human's deliberate flip, and falls back to doing nothing.
+    expect(wf).toContain('PUBLISHED_TAG: ${{ github.event.release.tag_name }}')
+  })
+})
+
+// The release path used to run no check at all: no tsc, no vitest, no cargo —
+// whatever sat on master when someone clicked Publish became a signed installer.
+describe('nothing is built before it is checked', () => {
+  const wf = readFileSync(
+    resolve(dirname(fileURLToPath(import.meta.url)), '../../../.github/workflows/release.yml'), 'utf8',
+  )
+
+  it('the gate is CI itself, so a check added to CI cannot skip the release', () => {
+    expect(wf).toContain('uses: ./.github/workflows/ci.yml')
+  })
+
+  it('and the build waits for it', () => {
+    const job = wf.slice(wf.indexOf('build-tauri:'))
+    expect(job).toContain('needs: gate')
+  })
+
+  it('the gate reads the tagged commit, not whatever the branch points at', () => {
+    expect(wf).toContain("ref: ${{ github.event.release.tag_name || github.event.inputs.tag }}")
+    // target_commitish is a BRANCH name: building it means the tag names one
+    // commit and the signed installer contains another (AGPL-3.0 §6 as well).
+    expect(wf).not.toContain('github.event.release.target_commitish')
+  })
+})
+
+// The Rust suite existed for months while CI only type-checked it.
+describe('CI runs the Rust tests it has', () => {
+  const ci = readFileSync(
+    resolve(dirname(fileURLToPath(import.meta.url)), '../../../.github/workflows/ci.yml'), 'utf8',
+  )
+
+  it('cargo test, not just cargo check', () => {
+    expect(ci).toContain('run: cargo test')
+  })
+
+  it('and is callable as a gate', () => {
+    expect(ci).toContain('workflow_call:')
   })
 })

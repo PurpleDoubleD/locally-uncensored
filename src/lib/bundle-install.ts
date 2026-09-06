@@ -1,5 +1,5 @@
 import { formatBytes } from './formatters'
-import type { DownloadProgress } from '../api/discover'
+import type { DownloadProgress } from '../types/downloads'
 
 /**
  * The download half of the Create tab's "Download & install" cards, pulled out

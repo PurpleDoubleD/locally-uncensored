@@ -2,6 +2,7 @@ pub mod agent;
 pub mod bg_tasks;
 pub mod repo_map;
 pub mod comfy_ws;
+pub mod custom_models;
 pub mod download;
 pub mod engine;
 pub mod filesystem;
@@ -9,6 +10,8 @@ pub mod gguf;
 pub mod gpu;
 pub mod health;
 pub mod install;
+pub mod local_api;
+pub mod logging;
 pub mod media_cmds;
 pub mod mlx;
 pub mod oauth;
@@ -24,6 +27,7 @@ pub mod trainer;
 pub mod tts;
 pub mod video;
 pub mod waitlist;
+pub mod funnel;
 pub mod whisper;
 
 // ── uselu-compat error helpers ────────────────────────────────────────

@@ -18,12 +18,12 @@ const getMlxInstallStatus = vi.fn()
 const getModelInstallStatus = vi.fn()
 
 vi.mock('../../api/mlx-image', () => ({
-  getMlxImageEngineStatus: (...a: any[]) => getMlxImageEngineStatus(...(a as [])),
-  getMlxImageInstallStatus: (...a: any[]) => getMlxImageInstallStatus(...(a as [])),
+  getMlxImageEngineStatus: (...a: unknown[]) => getMlxImageEngineStatus(...(a as [])),
+  getMlxImageInstallStatus: (...a: unknown[]) => getMlxImageInstallStatus(...(a as [])),
 }))
 vi.mock('../../api/mlx-video', () => ({
-  getMlxInstallStatus: (...a: any[]) => getMlxInstallStatus(...(a as [])),
-  getModelInstallStatus: (...a: any[]) => getModelInstallStatus(...(a as [])),
+  getMlxInstallStatus: (...a: unknown[]) => getMlxInstallStatus(...(a as [])),
+  getModelInstallStatus: (...a: unknown[]) => getModelInstallStatus(...(a as [])),
 }))
 
 import { useMlxInstallStore } from '../mlxInstallStore'

@@ -1,0 +1,155 @@
+/**
+ * @vitest-environment jsdom
+ *
+ * A15 review, 03.09., two findings on the closing line a finished run leaves.
+ *
+ * 1. It carried the warning colour whatever it said, so "Repair finished.
+ *    ComfyUI is ready." arrived as a warning after an eight minute rebuild.
+ *    (That colour was amber then. It is red now, and there is no amber left
+ *    anywhere: see lib/hinweis.ts.)
+ * 2. Nothing ever put it away. The section unfolds itself while a line is
+ *    standing, so one finished run kept the section open on every visit for the
+ *    rest of the session.
+ *
+ * Run: npx vitest run src/components/settings/__tests__/comfy-notice-reads-as-what-it-is.test.ts
+ */
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { createElement } from 'react'
+import { render, screen, fireEvent, cleanup, act } from '@testing-library/react'
+
+const backendCall = vi.fn()
+vi.mock('../../../api/backend', () => ({
+  backendCall: (...args: unknown[]) => backendCall(...args),
+  isTauri: () => true,
+  isMacOS: () => false,
+  openExternal: vi.fn(),
+  secretGet: vi.fn().mockRejectedValue(new Error('no keychain here')),
+  secretSet: vi.fn(),
+  secretDelete: vi.fn(),
+  setComfyPort: vi.fn(),
+  setComfyHost: vi.fn(),
+}))
+
+const { ComfyUISettings } = await import('../SettingsPage')
+const { useComfyInstallStore, comfySectionShouldOpen } = await import('../../../stores/comfyInstallStore')
+
+beforeEach(() => {
+  useComfyInstallStore.getState().reset()
+  backendCall.mockReset()
+  backendCall.mockImplementation(async (cmd: string) => {
+    if (cmd === 'comfyui_status') {
+      return { running: false, found: true, complete: true, path: 'C:\\ComfyUI', isLocal: true }
+    }
+    if (cmd === 'install_comfyui_status') return { status: 'idle', logs: [] }
+    return {}
+  })
+})
+afterEach(() => { cleanup(); useComfyInstallStore.getState().reset() })
+
+async function panelShowing(notice: string, noticeKind: 'ok' | 'warn') {
+  useComfyInstallStore.setState({ phase: 'idle', notice, noticeKind })
+  render(createElement(ComfyUISettings))
+  await act(async () => { await Promise.resolve(); await Promise.resolve() })
+  return screen.getByTestId('comfy-install-notice')
+}
+
+describe('the closing line reads as what it is', () => {
+  // Die Farbe der Warnzeile hat sich am 04.09.2026 geaendert, die Aussage
+  // dieses Tests nicht. Bis dahin war 'warn' bernsteinfarben, und dieser Test
+  // pruefte auf `amber`. Gelb ist im ganzen Haus abgeschafft, weil es der
+  // Sammelplatz fuer alles war, was weder gut noch kaputt ist, und damit
+  // nichts mehr aussagte (die Begruendung steht in lib/hinweis.ts). Es gibt
+  // nur noch zwei Toene: ruhiges Grau und rot. Ein 'warn' entsteht hier nur
+  // nach einem Abbruch oder wenn etwas nicht benutzt werden konnte, und jeder
+  // dieser Saetze endet mit "lauf das nochmal", also ist es rot. Geprueft
+  // wird weiterhin dasselbe: die Farbe ist keine Konstante, sie folgt der Art
+  // der Meldung.
+  it('a run that worked is not painted as a warning', async () => {
+    const line = await panelShowing('Repair finished. ComfyUI is ready.', 'ok')
+    expect(line.textContent).toBe('Repair finished. ComfyUI is ready.')
+    expect(line.getAttribute('data-kind')).toBe('ok')
+    expect(line.className).not.toContain('red')
+    expect(line.className).not.toContain('amber')
+    expect(line.className).toContain('emerald')
+  })
+
+  it('a run with something to report still is', async () => {
+    // Negative control for the test above: the colour is not a constant, it
+    // follows the kind the backend sent.
+    const line = await panelShowing(
+      'Repair finished. ComfyUI is ready. The requirements.txt in C:\\ComfyUI could not be used.',
+      'warn',
+    )
+    expect(line.getAttribute('data-kind')).toBe('warn')
+    expect(line.className).toContain('red')
+    expect(line.className).not.toContain('emerald')
+    expect(line.className).not.toContain('amber')
+  })
+})
+
+describe('the closing line can be dismissed', () => {
+  it('the x clears it, and the section stops unfolding itself', async () => {
+    await panelShowing('Repair finished. ComfyUI is ready.', 'ok')
+    expect(comfySectionShouldOpen(useComfyInstallStore.getState())).toBe(true)
+
+    await act(async () => { fireEvent.click(screen.getByLabelText('Dismiss this message')) })
+
+    expect(screen.queryByTestId('comfy-install-notice')).toBeNull()
+    expect(useComfyInstallStore.getState().notice).toBe('')
+    expect(comfySectionShouldOpen(useComfyInstallStore.getState())).toBe(false)
+  })
+
+  // A16 (A15-5): the Windows counter-check reported "die Erfolgsnotiz hat kein
+  // Dismiss daneben, nur die Fehlerkarte hat eines". The control existed, as a
+  // bare 10px X with the word in a tooltip, next to a failed run whose dismiss
+  // is a button that says Dismiss. A control nobody can find is not a control.
+  it('carries the word Dismiss, not only an icon', async () => {
+    await panelShowing('Repair finished. ComfyUI is ready.', 'ok')
+    const button = screen.getByLabelText('Dismiss this message')
+    expect(button.textContent, 'the closing line offers an unlabelled icon again').toContain('Dismiss')
+    // And it is the same offer the failed run makes, which is what the
+    // counter-check compared it against.
+    await act(async () => { fireEvent.click(button) })
+    expect(useComfyInstallStore.getState().notice).toBe('')
+  })
+
+  // P3: im Testbericht stand die gruene Zeile "Repair finished. ComfyUI is
+  // ready." neben einem Start, der gerade abgestuerzt war. Sie beschreibt
+  // einen beendeten Installerlauf und haengt an nichts, was mit einem
+  // ComfyUI-Start zu tun haette, also hat sie jeden Startversuch und jeden
+  // Ordnerwechsel ueberlebt.
+  it('a new start puts the line away, it is not about this attempt', async () => {
+    await panelShowing('Repair finished. ComfyUI is ready.', 'ok')
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Start' })) })
+    expect(screen.queryByTestId('comfy-install-notice')).toBeNull()
+    expect(useComfyInstallStore.getState().notice).toBe('')
+  })
+
+  it('so does pointing the panel at another folder', async () => {
+    await panelShowing('Repair finished. ComfyUI is ready.', 'ok')
+    const feld = screen.getByPlaceholderText('C:\\ComfyUI')
+    await act(async () => { fireEvent.change(feld, { target: { value: 'D:\\Andere\\ComfyUI' } }) })
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Connect' })) })
+    expect(useComfyInstallStore.getState().notice).toBe('')
+  })
+
+  it('but leaving the section and coming back does not', async () => {
+    // Gegengewicht zu den beiden darueber, und der ganze Zweck von A13 und
+    // A15: der Lauf wohnt im Store, damit ein Wechsel des
+    // Einstellungsbereichs nichts wegwirft. Wer die Zeile beim Ummounten
+    // raeumt, hat den alten Fehler zurueck.
+    await panelShowing('Repair finished. ComfyUI is ready.', 'ok')
+    cleanup()
+    render(createElement(ComfyUISettings))
+    await act(async () => { await Promise.resolve(); await Promise.resolve() })
+    expect(screen.getByTestId('comfy-install-notice').textContent).toBe('Repair finished. ComfyUI is ready.')
+  })
+
+  it('shows no dismiss control when there is nothing to dismiss', async () => {
+    // Negative control: an idle panel with no line carries no stray button.
+    render(createElement(ComfyUISettings))
+    await act(async () => { await Promise.resolve(); await Promise.resolve() })
+    expect(screen.queryByTestId('comfy-install-notice')).toBeNull()
+    expect(screen.queryByLabelText('Dismiss this message')).toBeNull()
+  })
+})

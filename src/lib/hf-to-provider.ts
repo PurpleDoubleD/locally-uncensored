@@ -17,7 +17,7 @@
  * model never appears in the model list — the bug from Discord/GitHub.
  */
 
-const HF_HOST_RE = /^https?:\/\/(?:huggingface\.co|hf\.co)\/([^\/]+)\/([^\/]+)\/(?:resolve|raw|blob)\/[^\/]+\/(.+)$/i
+const HF_HOST_RE = /^https?:\/\/(?:huggingface\.co|hf\.co)\/([^/]+)\/([^/]+)\/(?:resolve|raw|blob)\/[^/]+\/(.+)$/i
 
 export interface HfRef {
   user: string

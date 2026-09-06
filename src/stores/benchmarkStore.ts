@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
+import { safeJSONStorage } from '../lib/storage-quota'
 import type { BenchmarkResult } from '../lib/benchmark-prompts'
 
 interface BenchmarkState {
@@ -74,6 +75,7 @@ export const useBenchmarkStore = create<BenchmarkState>()(
     }),
     {
       name: 'lu-benchmark-store',
+      storage: safeJSONStorage(),
       // Only the measurements are worth keeping. Run state is about the run
       // that is happening now: a persisted isRunning left over from a crash
       // greys out the Run button forever, and a persisted error greets the

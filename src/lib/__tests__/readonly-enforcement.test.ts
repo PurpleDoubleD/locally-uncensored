@@ -151,7 +151,10 @@ describe('/loop actually loops', () => {
     expect(stopIdx).toBeGreaterThan(0)
     const stopBody = src.slice(stopIdx, stopIdx + 900)
     expect(stopBody).toContain('clearTimeout(codexLoopTimer)')
-    expect(stopBody).toContain('userStoppedRef.current = true')
+    // The stop is recorded MODULE-side, keyed by conversation (audit M1): a
+    // hook-instance ref was invisible to the finally of a pass a previous
+    // instance had started, so that finally re-armed the loop the user killed.
+    expect(stopBody).toContain('stopRun(stoppedConvId)')
     // And it reaches a run started by a PREVIOUS hook instance (audit A2).
     expect(stopBody).toContain('abortConversation(')
   })

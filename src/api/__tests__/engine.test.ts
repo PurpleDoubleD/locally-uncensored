@@ -85,7 +85,7 @@ describe('engine command wrappers', () => {
       models: [{ name: 'qwen', path: '/data/models/qwen.gguf', size: 400, loaded: true }],
     } as never)
     const models = await listBundledModels()
-    expect(backendCall).toHaveBeenCalledWith('list_bundled_models')
+    expect(backendCall).toHaveBeenCalledWith('list_bundled_models', { extraDirs: [] })
     expect(models).toHaveLength(1)
     expect(models[0].name).toBe('qwen')
   })
@@ -109,7 +109,7 @@ describe('bundledToAIModels', () => {
       model: 'qwen2.5-0.5b',
       type: 'text',
       provider: 'openai',
-      providerName: 'Built-in Engine',
+      providerName: 'LU Engine',
     })
     expect(models[1].name).toBe('openai::llama3')
   })
@@ -176,7 +176,7 @@ describe('activateBuiltinModel', () => {
     // store chokepoint), so ONE refresh is expected — but never a swap for a
     // name that stays unknown.
     expect(backendCall).toHaveBeenCalledTimes(1)
-    expect(backendCall).toHaveBeenCalledWith('list_bundled_models')
+    expect(backendCall).toHaveBeenCalledWith('list_bundled_models', { extraDirs: [] })
     expect(backendCall).not.toHaveBeenCalledWith('swap_bundled_model', expect.anything())
   })
 })

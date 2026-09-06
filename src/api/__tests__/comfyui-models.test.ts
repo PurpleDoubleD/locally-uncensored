@@ -6,7 +6,7 @@ import {
   MODEL_TYPE_DEFAULTS,
   COMPONENT_REGISTRY,
 } from '../comfyui'
-import { determineStrategy, type WorkflowStrategy } from '../dynamic-workflow'
+import { determineStrategy } from '../dynamic-workflow'
 import type { CategorizedNodes, AvailableModels } from '../comfyui-nodes'
 
 // ─── classifyModel ───
@@ -176,9 +176,9 @@ describe('COMPONENT_REGISTRY', () => {
   it('types needing separate VAE have vae spec', () => {
     for (const [type, entry] of Object.entries(COMPONENT_REGISTRY)) {
       if (entry.needsSeparateVAE) {
-        expect(entry.vae).toBeDefined()
-        expect(entry.vae!.matchPatterns.length).toBeGreaterThan(0)
-        expect(entry.vae!.downloadFilename).toBeTruthy()
+        expect(entry.vae, `${type} needs a vae spec`).toBeDefined()
+        expect(entry.vae!.matchPatterns.length, `${type} vae matchPatterns`).toBeGreaterThan(0)
+        expect(entry.vae!.downloadFilename, `${type} vae downloadFilename`).toBeTruthy()
       }
     }
   })
@@ -186,9 +186,9 @@ describe('COMPONENT_REGISTRY', () => {
   it('types needing separate CLIP have clip spec', () => {
     for (const [type, entry] of Object.entries(COMPONENT_REGISTRY)) {
       if (entry.needsSeparateCLIP) {
-        expect(entry.clip).toBeDefined()
-        expect(entry.clip!.matchPatterns.length).toBeGreaterThan(0)
-        expect(entry.clip!.downloadFilename).toBeTruthy()
+        expect(entry.clip, `${type} needs a clip spec`).toBeDefined()
+        expect(entry.clip!.matchPatterns.length, `${type} clip matchPatterns`).toBeGreaterThan(0)
+        expect(entry.clip!.downloadFilename, `${type} clip downloadFilename`).toBeTruthy()
       }
     }
   })

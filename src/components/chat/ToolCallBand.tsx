@@ -13,6 +13,7 @@ import {
   groupIsLive,
   type BandNote,
 } from '../../lib/tool-call-groups'
+import { MOTION_S } from '../ui/motion'
 
 interface Props {
   calls: AgentToolCall[]
@@ -103,7 +104,7 @@ export function ToolCallBand({ calls, notes, renderNote, pendingApprovalId, onAp
             initial={{ opacity: 0, y: 6 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -6 }}
-            transition={{ duration: 0.16 }}
+            transition={{ duration: MOTION_S.base }}
           >
             {blockFor(active)}
           </motion.div>
@@ -149,7 +150,7 @@ function BandHeader({
       className="flex items-center gap-1.5 py-0.5 text-left hover:opacity-80 transition-opacity min-w-0"
     >
       <Wrench size={10} className="text-gray-500 dark:text-gray-500 shrink-0" />
-      <span className="text-[0.65rem] text-gray-600 dark:text-gray-400">
+      <span className="t-micro text-gray-600 dark:text-gray-400">
         {calls.length} steps
       </span>
       {!live &&

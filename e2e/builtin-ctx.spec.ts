@@ -15,6 +15,35 @@ import { openNewChat } from './support/ui'
  *
  * The Tauri mock mirrors ENG-1 Rust semantics: every start/swap derives the
  * engine ctx from the injected tuning and `bundled_engine_status` reports it.
+ *
+ * ── Warum Test 1 seit D-S06 (b3f0f786) anders fragt ─────────────────────────
+ *
+ * Er suchte den Waehler ueber seine Beschriftung "ctx 8K" und den Fuellstand
+ * als zweites, danebenstehendes Element ("/8K"). Genau diese ZWEI Anzeigen
+ * hat der Design-Audit zu einer zusammengelegt: dieselbe Zahl stand 24 px
+ * nebeneinander in zwei Schreibweisen, und wer den Unterschied las, suchte
+ * einen, den es nicht gibt. Der Fuellstand ist jetzt die Beschriftung des
+ * Waehlers — der Messwert sitzt auf dem Regler, der ihn bewegt.
+ *
+ * Der Spec hielt damit einen ERSETZTEN Entwurf fest. Die Behauptung dahinter
+ * gilt unveraendert, also prueft er sie jetzt am neuen Entwurf, und zwar
+ * schaerfer als vorher:
+ *
+ *   • EIN Bedienelement. Gefunden ueber `aria-label="Context window"` — eine
+ *     stabile Rolle mit stabilem Namen, nicht ueber seinen wechselnden Text.
+ *     Das ist staerker als der alte Texttreffer UND staerker als ein Muster
+ *     auf `\d+/[\d.]+k`, das jede beliebige Zahlenpaarung akzeptiert haette.
+ *   • Der Fuellstand steht IN diesem Knopf (`trigger.getByText`), nicht
+ *     daneben. Das ist die Zusammenlegung selbst, und nur diese Verschachtelung
+ *     unterscheidet den neuen Entwurf vom alten.
+ *   • Die beiden Schreibweisen sind NIE gleichzeitig zu sehen — sobald ein
+ *     Fuellstand da ist, ist "ctx 8K" fort. Der alte Entwurf zeigte beides.
+ *   • ENG-3 (beide lesen dieselbe `status.ctx`) wird an DEMSELBEN Knopf in
+ *     seinen beiden Lesarten gemessen: im leeren Chat traegt er
+ *     `ctx {fmt(ctx.contextWindow)}` — das ist die Lesart des WAEHLERS —, mit
+ *     Nachrichten den Nenner des Fuellstands, den `TokenCounter` ueber seine
+ *     EIGENE `useActiveContextWindow()`-Instanz aufloest. Zwei unabhaengige
+ *     Ableitungen, eine Zahl, vorher und nach dem Wechsel auf 16K.
  */
 
 async function completeBuiltinOnboarding(page: Page) {
@@ -42,18 +71,54 @@ async function completeBuiltinOnboarding(page: Page) {
 test('context dropdown relaunches the built-in engine and the counter follows', async ({ page }) => {
   await completeBuiltinOnboarding(page)
 
-  // Chat once so the TokenCounter renders (it needs messages).
+  // Der eine Waehler, weiterhin ueber seinen Namen gegriffen und nie ueber
+  // das, was gerade darin steht.
+  //
+  // KF-9 hat `exact: true` gekostet, und zwar begruendet. Der Name war
+  // „Context window", ein `aria-label`, das den SICHTBAREN Text („117/16K")
+  // ersetzte statt ihn zu enthalten. Das ist der Verstoss gegen WCAG 2.5.3
+  // (Label in Name), und seit D-S06 ist dieser Knopf die einzige Stelle, an
+  // der die Zahl noch steht: fuer einen Screenreader war sie nirgends mehr zu
+  // holen. Der Name lautet jetzt „Context window 117/16K" (unsichtbares
+  // Praefix via `aria-labelledby`, dahinter der gerenderte Text).
+  //
+  // Beides zugleich — Messwert hoerbar UND Name buchstabengleich stabil — geht
+  // nicht: ein exakter Name „Context window" schliesst die Zahl per Definition
+  // aus. Was stabil BLEIBT, ist das Praefix, und genau darauf greift der
+  // Teilstring-Treffer hier. Er ist keine Lockerung: „Context window" trifft
+  // in dieser App weiterhin genau ein Bedienelement, und der Zaehler dahinter
+  // wird unten ohnehin Ziffer fuer Ziffer geprueft.
+  const trigger = page.getByRole('button', { name: 'Context window' })
+
   await openNewChat(page)
+  // Der Teilstring trifft genau einen Knopf — sonst waere die Lockerung oben
+  // eine Verschlechterung und nicht bloss eine andere Schreibweise.
+  await expect(trigger).toHaveCount(1)
+  // Leerer Chat: `TokenCounter` liefert `null`, also traegt der Knopf die
+  // Lesart des WAEHLERS — `ctx.contextWindow` aus seiner eigenen
+  // `useActiveContextWindow(tick)`-Instanz. Default-Tuning = -c 8192.
+  await expect(trigger).toHaveText(/ctx 8K/)
+
+  // Chat once so the TokenCounter renders (it needs messages).
   const composer = page.locator('textarea').first()
   await composer.fill('ping the built-in engine')
   await page.getByRole('button', { name: /Send message/i }).click()
   await expect(page.getByText(/PONG_BUILTIN_OK/)).toBeVisible({ timeout: 20_000 })
 
-  // Default tuning: engine runs with -c 8192 → dropdown trigger "ctx 8K",
-  // counter denominator 8.2k. Both read the SAME status.ctx (ENG-3).
-  const trigger = page.getByRole('button', { name: /ctx 8K/ })
-  await expect(trigger).toBeVisible()
-  await expect(page.getByText(/\/8\.2k/)).toBeVisible()
+  // Jetzt IST der Fuellstand die Beschriftung: derselbe Knopf, aber die Zahl
+  // kommt aus `TokenCounter`, also ueber eine zweite, unabhaengige Aufloesung
+  // derselben `status.ctx` (ENG-3).
+  //
+  // Hier stand bis zum 04.09.2026 `/8.2k`. Das war die 1000er-Teilung, und
+  // genau nebenan stand die 1024er als `8K`: zwei Schreibweisen fuer eine
+  // Zahl. Gegenprobe G2 hat beide auf `formatContextWindow` vereinheitlicht
+  // (TokenCounter.tsx:8-11), der Test wurde dabei nicht mitgezogen und war
+  // seitdem rot. In der gebauten Windows-App am 04.09.2026 nachgesehen, dort
+  // steht `115/8K`.
+  await expect(trigger.getByText(/\/8K/)).toBeVisible()
+  // …und die zweite Anzeige ist wirklich fort, nicht bloss verschoben. Beide
+  // Schreibweisen nebeneinander waren der Befund von D-S06.
+  await expect(page.getByText(/ctx \d+K/)).toHaveCount(0)
 
   // Pick 16K → apply() persists tuning.ctx and swaps the running engine.
   // The preset list is capped at the model's TRAINED ceiling (32k from the
@@ -64,8 +129,14 @@ test('context dropdown relaunches the built-in engine and the counter follows', 
   await expect(page.getByRole('button', { name: /^128K$/ })).toHaveCount(0)
   await page.getByRole('button', { name: /^16K$/ }).click()
 
-  await expect(page.getByRole('button', { name: /ctx 16K/ })).toBeVisible({ timeout: 10_000 })
-  await expect(page.getByText(/\/16\.4k/)).toBeVisible()
+  // Der Nenner des Fuellstands folgt der neuen Engine-ctx …
+  await expect(trigger.getByText(/\/16K/)).toBeVisible({ timeout: 10_000 })
+  // … und die Lesart des Waehlers ebenso: ein frischer, leerer Chat zeigt
+  // wieder `ctx N`, und das N ist die vom Backend GEMELDETE ctx, nicht die
+  // gespeicherte Einstellung. Ohne diesen Schritt wuerde nur noch eine der
+  // beiden Lesarten geprueft, und ENG-3 waere halb gemessen.
+  await openNewChat(page)
+  await expect(trigger).toHaveText(/ctx 16K/, { timeout: 10_000 })
 
   // The relaunch carried the settings-injected tuning, aimed at the loaded GGUF.
   const swap = await page.evaluate(() => {
@@ -82,20 +153,32 @@ test('expert panel shows live engine status and Apply & Restart uses the edited 
   await page.getByRole('button', { name: 'Settings' }).click()
   await page.getByRole('button', { name: /AI Backends/i }).click()
 
-  // The expert section only renders while the managed built-in engine
-  // occupies the openai slot — which the onboarding just configured. It is
-  // a collapsed <Section>; open it first.
-  await page.getByRole('button', { name: /Built-in Engine \(expert\)/i }).click()
-  await expect(page.getByText(/Expert settings for the built-in engine/i)).toBeVisible()
+  // The expert section only renders while the managed engine occupies the
+  // openai slot, which the onboarding just configured. It is a collapsed
+  // <Section>; open it first.
+  //
+  // Der Abschnitt hiess bis zum 02.09.2026 "Built-in Engine (expert)", die
+  // Zeile darunter "Expert settings for the built-in engine". Commit 69cfeaf0
+  // hat beides auf LU Engine umbenannt, Davids Produktentscheidung, und zwar
+  // nur, was der Nutzer LIEST. Die internen Bezeichner blieben, deshalb steht
+  // im Satz oben weiter der openai-Slot. Der Test wurde nicht mitgezogen und
+  // war seitdem rot; in der gebauten Windows-App am 04.09.2026 nachgesehen,
+  // dort kommt "Built-in Engine" nirgends mehr vor.
+  await page.getByRole('button', { name: /LU Engine \(expert\)/i }).click()
+  await expect(page.getByText(/Expert settings for the LU Engine/i)).toBeVisible()
   await expect(page.getByText(/Engine running/)).toBeVisible()
-  await expect(page.getByText(/ctx 8,192/)).toBeVisible()
+  // `ctx 8192`, nicht `ctx 8,192`. Auch das ist Gegenprobe G2 vom 04.09.2026:
+  // diese Zeile schrieb die Zahl mit Tausenderpunkt, und drei Zeilen weiter
+  // stand dieselbe Zahl blank (BuiltinEngineSettings.tsx:113-117). Jetzt
+  // beidemal `String(status.ctx)`.
+  await expect(page.getByText(/ctx 8192/)).toBeVisible()
 
   // Raise the context, then Apply & Restart → swap with the new tuning and
   // the status line re-reads the engine's real ctx.
   const ctxInput = page.locator('input[placeholder="8192"]')
   await ctxInput.fill('32768')
   await page.getByRole('button', { name: /Apply & Restart Engine/i }).click()
-  await expect(page.getByText(/ctx 32,768/)).toBeVisible({ timeout: 10_000 })
+  await expect(page.getByText(/ctx 32768/)).toBeVisible({ timeout: 10_000 })
 
   const swap = await page.evaluate(() => {
     const calls = (window as unknown as { __E2E_ENGINE_CALLS__?: { cmd: string; tuning?: { ctx?: number; cacheTypeK?: string } }[] }).__E2E_ENGINE_CALLS__ || []

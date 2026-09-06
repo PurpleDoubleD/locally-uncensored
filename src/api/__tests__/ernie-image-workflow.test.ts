@@ -9,8 +9,11 @@
  * strategy determination — here we verify the actual workflow nodes.
  */
 import { describe, it, expect } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+import { dirname, resolve } from 'node:path'
 import { classifyModel, MODEL_TYPE_DEFAULTS as COMFYUI_DEFAULTS, COMPONENT_REGISTRY, isImageModelType, type ModelType } from '../comfyui'
-import { determineStrategy, type WorkflowStrategy } from '../dynamic-workflow'
+import { determineStrategy } from '../dynamic-workflow'
 import { getImageBundles } from '../discover'
 import type { CategorizedNodes, AvailableModels } from '../comfyui-nodes'
 
@@ -31,7 +34,7 @@ function allNodes(): CategorizedNodes {
 const defaultModels: AvailableModels = {
   checkpoints: [], unets: ['ernie-image-turbo.safetensors'],
   vaes: ['flux2-vae.safetensors'], clips: ['ministral-3-3b.safetensors'],
-  loras: [], controlnets: [], ipadapters: [],
+  motionModels: [],
 }
 
 // ── Classification ──────────────────────────────────────────────────────
@@ -247,9 +250,8 @@ describe('ERNIE-Image bundles', () => {
 
 describe('ERNIE-Image ConditioningZeroOut (source verification)', () => {
   it('dynamic-workflow.ts uses ConditioningZeroOut for ernie_image negative', () => {
-    const { readFileSync } = require('fs')
-    const { resolve } = require('path')
-    const src = readFileSync(resolve(__dirname, '../dynamic-workflow.ts'), 'utf8')
+    const src = readFileSync(
+      resolve(dirname(fileURLToPath(import.meta.url)), '../dynamic-workflow.ts'), 'utf8')
 
     // The critical branching logic
     expect(src).toContain("strategy === 'unet_ernie_image'")
@@ -259,9 +261,8 @@ describe('ERNIE-Image ConditioningZeroOut (source verification)', () => {
   })
 
   it('dynamic-workflow.ts uses EmptyFlux2LatentImage for ernie_image', () => {
-    const { readFileSync } = require('fs')
-    const { resolve } = require('path')
-    const src = readFileSync(resolve(__dirname, '../dynamic-workflow.ts'), 'utf8')
+    const src = readFileSync(
+      resolve(dirname(fileURLToPath(import.meta.url)), '../dynamic-workflow.ts'), 'utf8')
 
     // ernie_image shares Flux2 latent space
     expect(src).toMatch(/unet_flux2.*unet_ernie_image|unet_ernie_image.*unet_flux2/)
@@ -269,9 +270,8 @@ describe('ERNIE-Image ConditioningZeroOut (source verification)', () => {
   })
 
   it('dynamic-workflow.ts uses flux2 clipType for ernie_image', () => {
-    const { readFileSync } = require('fs')
-    const { resolve } = require('path')
-    const src = readFileSync(resolve(__dirname, '../dynamic-workflow.ts'), 'utf8')
+    const src = readFileSync(
+      resolve(dirname(fileURLToPath(import.meta.url)), '../dynamic-workflow.ts'), 'utf8')
 
     expect(src).toMatch(/ernie_image.*flux2/)
   })

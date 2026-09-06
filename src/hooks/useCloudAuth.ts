@@ -110,6 +110,55 @@ function syncChatProvider(): void {
   }
 }
 
+/** Signs out, or throws saying it could not.
+ *
+ *  The keychain adapter (api/cloud/supabase.ts) throws on purpose when a
+ *  delete fails and the stored session survives — supabase-js does not wrap
+ *  storage errors, so that throw comes straight back out of signOut(). It used
+ *  to be swallowed by a `.catch(() => {})` and the store was flipped to
+ *  signed-out anyway, which is the worst combination available: the user is
+ *  told they are signed out, a valid refresh token is still in the system
+ *  vault, and the 5-minute probe signs the account back in without a word.
+ *  Whoever hands over a shared or company machine on the strength of that
+ *  message hands over the account with it.
+ *
+ *  Module-level (and exported) so the sign-out contract can be tested without
+ *  rendering the hook. */
+export async function signOutAccount(): Promise<void> {
+  // Invalidate any in-flight probe — its request carried the old (still
+  // unexpired) access token and would resurrect the signed-in state.
+  probeGen++
+  const auth = supabaseCloud().auth
+  let failure: string | null = null
+  try {
+    const { error } = await auth.signOut()
+    if (error) failure = error.message
+  } catch (err) {
+    failure = err instanceof Error ? err.message : String(err)
+  }
+  if (failure) {
+    // Ask the storage rather than trusting the failure. A delete that failed
+    // but left the tombstone behind IS a completed sign-out, and so is a failed
+    // server-side revoke (supabase-js clears the local session before it
+    // returns that error). Only a session that still reads back means the
+    // refresh token is still on this machine.
+    const survived = await auth
+      .getSession()
+      .then((r) => Boolean(r.data.session))
+      .catch(() => true)
+    if (survived) {
+      // Leave the store signed in: the account really is still usable here, and
+      // a "signed out" panel over a live session is the dangerous half of this.
+      throw new Error(
+        `Sign-out failed — the saved session is still on this computer, so the account stays signed in here. ${failure}`,
+      )
+    }
+  }
+  useCloudAuthStore.getState().setSignedOut()
+  syncChatProvider()
+  syncAppMode()
+}
+
 export function useCloudAuth() {
   const status = useCloudAuthStore((s) => s.status)
   const user = useCloudAuthStore((s) => s.user)
@@ -139,15 +188,7 @@ export function useCloudAuth() {
     await probeAccount()
   }, [])
 
-  const logout = useCallback(async (): Promise<void> => {
-    // Invalidate any in-flight probe — its request carried the old (still
-    // unexpired) access token and would resurrect the signed-in state.
-    probeGen++
-    await supabaseCloud().auth.signOut().catch(() => {})
-    useCloudAuthStore.getState().setSignedOut()
-    syncChatProvider()
-    syncAppMode()
-  }, [])
+  const logout = useCallback((): Promise<void> => signOutAccount(), [])
 
   const refresh = useCallback(async (): Promise<void> => {
     await probeAccount()

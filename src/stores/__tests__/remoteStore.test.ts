@@ -7,7 +7,7 @@ vi.mock('../../api/backend', () => ({
   isTauri: () => mockIsTauri(),
 }))
 
-import { useRemoteStore, REMOTE_DEV_MODE_ERROR, remoteBackendArgs } from '../remoteStore'
+import { useRemoteStore, REMOTE_DEV_MODE_ERROR, remoteBackendArgs, normalizeRemotePermissions } from '../remoteStore'
 
 describe('remoteBackendArgs (#87 non-Ollama remote routing)', () => {
   const providers = {
@@ -65,7 +65,7 @@ describe('remoteStore', () => {
       mobileUrl: '',
       qrPngBase64: '',
       connectedDevices: [],
-      permissions: { filesystem: false, downloads: false, process_control: false },
+      permissions: { filesystem: false, downloads: false, process_control: false, shell: false },
       tunnelActive: false,
       tunnelUrl: '',
       tunnelLoading: false,
@@ -426,18 +426,24 @@ describe('remoteStore', () => {
         downloads: true,
         process_control: false,
       })
+      // RA-1: the store now normalises to a fully-explicit payload — `shell`
+      // is optional on the TS type, and an undefined scope must never reach
+      // the backend as "whatever serde defaults to".
       expect(useRemoteStore.getState().permissions).toEqual({
         filesystem: true,
         downloads: true,
         process_control: false,
+        shell: false,
       })
     })
 
-    it('calls backend with correct args', async () => {
+    it('calls backend with correct args, every scope explicit', async () => {
       const perms = { filesystem: true, downloads: false, process_control: false }
       mockBackendCall.mockResolvedValueOnce(undefined)
       await useRemoteStore.getState().setPermissions(perms)
-      expect(mockBackendCall).toHaveBeenCalledWith('set_remote_permissions', { permissions: perms })
+      expect(mockBackendCall).toHaveBeenCalledWith('set_remote_permissions', {
+        permissions: { ...perms, shell: false },
+      })
     })
 
     it('sets error on failure', async () => {
@@ -449,5 +455,199 @@ describe('remoteStore', () => {
       })
       expect(useRemoteStore.getState().error).toContain('Perm error')
     })
+
+    it('leaves the shown permissions untouched when the push fails', async () => {
+      // RA-1: a failed toggle must not repaint the panel as if it applied —
+      // the panel has to keep showing the server's last known truth.
+      useRemoteStore.setState({
+        permissions: { filesystem: false, downloads: false, process_control: false, shell: false },
+      })
+      mockBackendCall.mockRejectedValueOnce(new Error('Perm error'))
+      await useRemoteStore.getState().setPermissions({
+        filesystem: true,
+        downloads: true,
+        process_control: true,
+        shell: true,
+      })
+      expect(useRemoteStore.getState().permissions).toEqual({
+        filesystem: false,
+        downloads: false,
+        process_control: false,
+        shell: false,
+      })
+    })
+  })
+
+  // ── RA-1: permission read-back ─────────────────────────────
+  //
+  // The panel used to render a purely local guess: the store hardcoded every
+  // scope to false, refreshStatus never mapped the server's copy, and the Rust
+  // `impl Default for RemotePermissions` started filesystem/downloads/
+  // process_control at TRUE. A user who granted nothing still handed a paired
+  // phone workspace read/write, model pull/delete and ComfyUI start/stop.
+  // Every path that learns the server's mind must now map it into the store.
+
+  describe('permission read-back (RA-1)', () => {
+    const statusBase = {
+      running: true,
+      port: 11435,
+      passcode: 'P',
+      passcodeExpiresAt: 1,
+      lanUrl: 'http://lan',
+      mobileUrl: 'http://lan/m',
+      tunnelActive: false,
+      tunnelUrl: '',
+    }
+
+    it('maps the permissions reported by remote_server_status', async () => {
+      mockBackendCall.mockResolvedValueOnce({
+        ...statusBase,
+        permissions: { filesystem: true, downloads: false, process_control: true, shell: false },
+      })
+      await useRemoteStore.getState().refreshStatus()
+      expect(useRemoteStore.getState().permissions).toEqual({
+        filesystem: true,
+        downloads: false,
+        process_control: true,
+        shell: false,
+      })
+    })
+
+    it('surfaces a scope a paired phone raised through the mobile panel', async () => {
+      // The mobile permissions panel POSTs /remote-api/permissions, which the
+      // desktop never sees on its own. Status polling is the path that catches
+      // it, so the desktop toggle stops lying about what the phone can do.
+      useRemoteStore.setState({
+        permissions: { filesystem: false, downloads: false, process_control: false, shell: false },
+      })
+      mockBackendCall.mockResolvedValueOnce({
+        ...statusBase,
+        permissions: { filesystem: true, downloads: false, process_control: false, shell: false },
+      })
+      await useRemoteStore.getState().refreshStatus()
+      expect(useRemoteStore.getState().permissions.filesystem).toBe(true)
+    })
+
+    it('treats a missing scope as denied, never as granted', async () => {
+      useRemoteStore.setState({
+        permissions: { filesystem: true, downloads: true, process_control: true, shell: true },
+      })
+      mockBackendCall.mockResolvedValueOnce({
+        ...statusBase,
+        permissions: { filesystem: true }, // older/partial payload
+      })
+      await useRemoteStore.getState().refreshStatus()
+      expect(useRemoteStore.getState().permissions).toEqual({
+        filesystem: true,
+        downloads: false,
+        process_control: false,
+        shell: false,
+      })
+    })
+
+    it('keeps the current value when the backend reports no permissions', async () => {
+      // A backend predating the read-back tells us nothing. Coercing to
+      // all-false there would just move the lie to the other side.
+      useRemoteStore.setState({
+        permissions: { filesystem: true, downloads: false, process_control: false, shell: false },
+      })
+      mockBackendCall.mockResolvedValueOnce({ ...statusBase })
+      await useRemoteStore.getState().refreshStatus()
+      expect(useRemoteStore.getState().permissions).toEqual({
+        filesystem: true,
+        downloads: false,
+        process_control: false,
+        shell: false,
+      })
+    })
+
+    it('adopts the server permissions in the same update that enables the server', async () => {
+      // No window may exist in which `enabled` is already true while the panel
+      // still shows the pre-start guess.
+      useRemoteStore.setState({
+        permissions: { filesystem: false, downloads: false, process_control: false, shell: false },
+      })
+      const seen: Array<{ enabled: boolean; filesystem: boolean }> = []
+      const unsub = useRemoteStore.subscribe((st) =>
+        seen.push({ enabled: st.enabled, filesystem: st.permissions.filesystem }),
+      )
+      mockBackendCall
+        .mockResolvedValueOnce({
+          port: 11435,
+          passcode: 'ABC',
+          passcodeExpiresAt: 9999,
+          lanUrl: 'http://lan',
+          mobileUrl: 'http://lan/m',
+          permissions: { filesystem: true, downloads: true, process_control: false, shell: false },
+        })
+        .mockResolvedValueOnce({ qr_png_base64: '', url: '', passcode: '' })
+
+      await useRemoteStore.getState().startServer()
+      unsub()
+
+      expect(useRemoteStore.getState().permissions).toEqual({
+        filesystem: true,
+        downloads: true,
+        process_control: false,
+        shell: false,
+      })
+      // Not one emitted state had the server running under permissions the
+      // panel wasn't showing.
+      expect(seen.filter((s) => s.enabled && !s.filesystem)).toEqual([])
+    })
+
+    it('maps the permissions returned by a restart', async () => {
+      useRemoteStore.setState({
+        permissions: { filesystem: true, downloads: true, process_control: true, shell: true },
+      })
+      mockBackendCall
+        .mockResolvedValueOnce({
+          port: 11435,
+          passcode: 'ABC',
+          passcodeExpiresAt: 9999,
+          lanUrl: 'http://lan',
+          mobileUrl: 'http://lan/m',
+          permissions: { filesystem: false, downloads: false, process_control: false, shell: false },
+        })
+        .mockResolvedValueOnce({ qr_png_base64: '', url: '', passcode: '' })
+
+      await useRemoteStore.getState().restart()
+      expect(useRemoteStore.getState().permissions).toEqual({
+        filesystem: false,
+        downloads: false,
+        process_control: false,
+        shell: false,
+      })
+    })
+
+    it('starts with every scope off, matching the Rust default', async () => {
+      // The store's initial value and `impl Default for RemotePermissions` have
+      // to agree, or the very first render is already a lie.
+      expect(useRemoteStore.getInitialState().permissions).toEqual({
+        filesystem: false,
+        downloads: false,
+        process_control: false,
+        shell: false,
+      })
+    })
+  })
+})
+
+describe('normalizeRemotePermissions (RA-1)', () => {
+  it('coerces every scope to an explicit boolean', () => {
+    expect(normalizeRemotePermissions({ filesystem: true, downloads: false, process_control: true, shell: true }))
+      .toEqual({ filesystem: true, downloads: false, process_control: true, shell: true })
+  })
+
+  it('reads anything that is not exactly `true` as denied', () => {
+    expect(normalizeRemotePermissions({ filesystem: 'true', downloads: 1, process_control: null }))
+      .toEqual({ filesystem: false, downloads: false, process_control: false, shell: false })
+  })
+
+  it('returns null for a payload that carries no permissions object', () => {
+    expect(normalizeRemotePermissions(undefined)).toBeNull()
+    expect(normalizeRemotePermissions(null)).toBeNull()
+    expect(normalizeRemotePermissions('filesystem')).toBeNull()
+    expect(normalizeRemotePermissions([])).toBeNull()
   })
 })

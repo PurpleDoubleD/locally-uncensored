@@ -58,8 +58,16 @@ describe('the plan moved into the panel (C2)', () => {
     expect(src).toMatch(/panel = variant === 'panel'/)
     // The old 70% wrapper was the composer's; in a 280px column it squeezed the
     // plan into a third of the panel, and at the prompt box it had no business
-    // being at all.
-    expect(src).toMatch(/panel \? 'w-full p-1\.5' : 'w-full px-2 pt-1'/)
+    // being at all. The panel therefore still owns its full column width and
+    // must never pick up a measure or a percentage.
+    expect(src).toMatch(/panel \? 'w-full p-1\.5'/)
+    const panelBranch = src.slice(src.indexOf("panel ? 'w-full p-1.5'"))
+    expect(panelBranch.slice(0, panelBranch.indexOf(':'))).not.toMatch(/max-w-|70%/)
+    // The header band, by contrast, sits directly above the transcript and
+    // rides the SAME measure column and gutter as the bubbles (design wave 1) —
+    // a status band running the full window width above 760px of answers read
+    // as a second layout stacked on the first.
+    expect(src).toMatch(/mx-auto w-full max-w-\[var\(--lu-measure\)\] px-3 pt-1/)
   })
 
   it('the clear button and the staged count came along, unchanged', () => {
@@ -73,7 +81,11 @@ describe('the plan moved into the panel (C2)', () => {
     // C1 had put the plan APPROVAL card here (a button plus the plan text the
     // user is approving). It went down into the panel too on 2026-08-22: the
     // prompt window is the prompt window.
-    expect(src).toMatch(/composerAbove=\{<><LoopBar onStop=\{stopCodex\} \/><GoalBar \/><\/>\}/)
+    // Matched on what must be there rather than on the exact list: A14 added
+    // the LU Engine switch line to this row, and pinning the literal would
+    // turn every future status line into a failure of THIS claim. The claim is
+    // that no plan lives here, and the two lines below are the whole of it.
+    expect(src).toMatch(/composerAbove=\{<>.*<LoopBar onStop=\{stopCodex\} \/><GoalBar \/><\/>\}/)
     expect(src).not.toMatch(/PlanBar/)
     expect(src).not.toMatch(/PlanApprovalBar/)
   })

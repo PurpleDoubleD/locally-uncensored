@@ -10,6 +10,22 @@ const legacyCall: AgentToolCall = {
   timestamp: 1,
 }
 
+/**
+ * The migration mutates in place and hands back the SAME object, so the
+ * assertions below need a typed view of it. `migratePersistedChat` itself
+ * reports `unknown`, which is honest: it takes whatever a previous build of
+ * the app persisted.
+ */
+interface PersistedBlock {
+  id: string
+  toolCall?: AgentToolCall
+  toolCalls?: AgentToolCall[]
+}
+interface PersistedChat {
+  conversations: { messages: { content?: string; agentBlocks?: PersistedBlock[] }[] }[]
+}
+const migrated = (state: unknown): PersistedChat => migratePersistedChat(state) as PersistedChat
+
 describe('chatStore — migratePersistedChat', () => {
   it('returns null/undefined/non-object shapes unchanged', () => {
     expect(migratePersistedChat(null)).toBe(null)
@@ -26,7 +42,7 @@ describe('chatStore — migratePersistedChat', () => {
         },
       ],
     }
-    const result = migratePersistedChat(state)
+    const result = migrated(state)
     expect(result.conversations[0].messages[0].content).toBe('hi')
   })
 
@@ -53,8 +69,8 @@ describe('chatStore — migratePersistedChat', () => {
         },
       ],
     }
-    const result = migratePersistedChat(state)
-    const migratedBlock = result.conversations[0].messages[0].agentBlocks[0]
+    const result = migrated(state)
+    const migratedBlock = result.conversations[0].messages[0].agentBlocks![0]
     expect(migratedBlock.toolCalls).toEqual([legacyCall])
     expect(migratedBlock.toolCall).toBe(legacyCall) // preserved for transition
   })
@@ -87,11 +103,11 @@ describe('chatStore — migratePersistedChat', () => {
         },
       ],
     }
-    const result = migratePersistedChat(state)
-    expect(result.conversations[0].messages[0].agentBlocks[0].toolCalls).toHaveLength(1)
+    const result = migrated(state)
+    expect(result.conversations[0].messages[0].agentBlocks![0].toolCalls).toHaveLength(1)
     // Non-tool block untouched.
-    expect(result.conversations[0].messages[0].agentBlocks[1].toolCalls).toBeUndefined()
-    expect(result.conversations[1].messages[0].agentBlocks[0].toolCalls?.[0].id).toBe('t2')
+    expect(result.conversations[0].messages[0].agentBlocks![1].toolCalls).toBeUndefined()
+    expect(result.conversations[1].messages[0].agentBlocks![0].toolCalls?.[0].id).toBe('t2')
   })
 
   it('is idempotent — re-running migration does not double-wrap', () => {
@@ -118,8 +134,8 @@ describe('chatStore — migratePersistedChat', () => {
       ],
     }
     const once = migratePersistedChat(state)
-    const twice = migratePersistedChat(once)
-    expect(twice.conversations[0].messages[0].agentBlocks[0].toolCalls).toEqual([legacyCall])
+    const twice = migrated(once)
+    expect(twice.conversations[0].messages[0].agentBlocks![0].toolCalls).toEqual([legacyCall])
   })
 
   it('handles malformed agentBlocks array without crashing', () => {

@@ -229,11 +229,14 @@ describe('the box answer that killed the video discovery', () => {
       sampler: 'euler', scheduler: 'normal', steps: 20, cfgScale: 8,
       width: 512, height: 512, seed: 1, frames: 16, fps: 8,
     } as Parameters<typeof buildAnimateDiffWorkflow>[0])
+    // The builder returns a typed ComfyApiGraph now — no cast needed, and a
+    // renamed input is a compile error rather than a silent undefined.
     const loader = Object.values(workflow).find(
-      (n) => (n as { class_type?: string }).class_type === 'ADE_LoadAnimateDiffModel',
-    ) as { inputs: { model_name: string } }
-    expect(loader.inputs.model_name).toBe(MOTION_LIGHTNING)
-    expect(loader.inputs.model_name).not.toBe('C')
+      (n) => n.class_type === 'ADE_LoadAnimateDiffModel',
+    )
+    expect(loader).toBeDefined()
+    expect(loader?.inputs?.model_name).toBe(MOTION_LIGHTNING)
+    expect(loader?.inputs?.model_name).not.toBe('C')
   })
 
   it('the AnimateDiff models reach the workflow builder from the newer schema', async () => {

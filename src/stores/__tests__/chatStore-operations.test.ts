@@ -42,8 +42,11 @@ describe('chatStore — conversation CRUD', () => {
 
   it('creates Codex conversation with correct title', () => {
     const id = useChatStore.getState().createConversation('qwen3-coder:30b', '', 'codex')
-    expect(useChatStore.getState().conversations[0].title).toBe('Coding Agent')
-    expect(useChatStore.getState().conversations[0].mode).toBe('codex')
+    // Assert on the conversation the call actually returned, not on whatever
+    // happens to sit at index 0.
+    const conv = useChatStore.getState().conversations.find((c) => c.id === id)!
+    expect(conv.title).toBe('Coding Agent')
+    expect(conv.mode).toBe('codex')
   })
 
   it('auto-numbers remote conversations', () => {
@@ -95,11 +98,26 @@ describe('chatStore — conversation CRUD', () => {
     expect(useChatStore.getState().conversations[0].title).toBe('Tell me about quantum physics and how it works')
   })
 
-  it('does NOT auto-rename Codex/Remote chats', () => {
-    const id = useChatStore.getState().createConversation('gemma4', '', 'codex')
-    useChatStore.getState().addMessage(id, msg({ content: 'Build a website' }))
-    // "Coding Agent" title stays — auto-rename only kicks on title === 'New Chat'
-    expect(useChatStore.getState().conversations[0].title).toBe('Coding Agent')
+  it('auto-renames a Codex chat too, but NOT a numbered Remote chat', () => {
+    // Diese Zusicherung stand bis zum 02.09.2026 andersherum: sie hielt fest,
+    // dass eine Code-Sitzung ihren Titel 'Coding Agent' BEHAELT, und begruendete
+    // das mit "auto-rename only kicks on title === 'New Chat'" — also mit dem
+    // Rumpf, den sie pruefen sollte. Damit sicherte sie eine EINSCHRAENKUNG zu,
+    // keine Anforderung, und liess die Stelle geprueft aussehen, waehrend jede
+    // Code-Sitzung gleich hiess.
+    //
+    // David hat am 02.09.2026 das Gegenteil bestellt. Die ausfuehrliche
+    // Begruendung und die Gegenproben stehen in
+    // stores/__tests__/code-sessions-heissen-verschieden.test.ts.
+    const codex = useChatStore.getState().createConversation('gemma4', '', 'codex')
+    useChatStore.getState().addMessage(codex, msg({ content: 'Build a website' }))
+    expect(useChatStore.getState().conversations[0].title).toBe('Build a website')
+
+    // Remote bleibt bei seiner Nummer: sie unterscheidet die Sitzungen bereits.
+    const remote = useChatStore.getState().createConversation('gemma4', '', 'remote')
+    useChatStore.getState().addMessage(remote, msg({ content: 'Build a website' }))
+    const r = useChatStore.getState().conversations.find((c) => c.id === remote)!
+    expect(r.title).toBe('Remote Chat 1')
   })
 })
 

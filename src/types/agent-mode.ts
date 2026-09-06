@@ -1,6 +1,8 @@
 // Agent Mode — Type Definitions
 // Part of the Agent Mode feature (coding-orch branch)
 
+import type { JSONSchemaProp, ToolArgs } from '../api/mcp/types'
+
 // Permission tiers (auto-approve reads, confirm writes)
 export type ToolPermission = 'auto' | 'confirm'
 
@@ -8,14 +10,19 @@ export type ToolPermission = 'auto' | 'confirm'
 export interface AgentToolDef {
   name: string
   description: string
+  /**
+   * The same schema the MCP registry hands out (`MCPToolDefinition.inputSchema`),
+   * because that is literally where these come from (tool-registry.ts maps
+   * `inputSchema` onto this field). The local copy of the shape had drifted:
+   * it forced `type: string` and a mandatory `description`, so a tool with a
+   * union type (`['string','array']`, the multi-LoRA param) or a bare property
+   * could not be described here at all.
+   */
   parameters: {
     type: 'object'
-    properties: Record<string, {
-      type: string
-      description: string
-      enum?: string[]
-    }>
+    properties: Record<string, JSONSchemaProp>
     required: string[]
+    additionalProperties?: boolean
   }
   permission: ToolPermission
 }
@@ -26,10 +33,17 @@ export interface OllamaTool {
   function: {
     name: string
     description: string
+    /**
+     * The registry copies `MCPToolDefinition.inputSchema` in here verbatim
+     * (tool-registry.toOllamaTools), so the property map carries the same
+     * JSONSchemaProp shape rather than an untyped bag — which is what let the
+     * Hermes prompt builder be handed this object behind an `as any`.
+     */
     parameters: {
       type: 'object'
-      properties: Record<string, any>
+      properties: Record<string, JSONSchemaProp>
       required: string[]
+      additionalProperties?: boolean
     }
   }
 }
@@ -38,7 +52,11 @@ export interface OllamaTool {
 export interface OllamaToolCall {
   function: {
     name: string
-    arguments: Record<string, any>
+    /* Was `Record<string, any>`. It is the project's own ToolArgs — every
+       consumer already reads these through the argString/argNumber guards in
+       builtin-tools.ts, so the `any` was not carrying anything: swapping it
+       for the real type left tsc at 0 errors across the whole program. */
+    arguments: ToolArgs
   }
 }
 
@@ -70,7 +88,7 @@ export type ToolCallStatus = 'pending_approval' | 'running' | 'completed' | 'fai
 export interface AgentToolCall {
   id: string
   toolName: string
-  args: Record<string, any>
+  args: ToolArgs
   status: ToolCallStatus
   result?: string
   error?: string

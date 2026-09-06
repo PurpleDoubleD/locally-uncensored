@@ -3,14 +3,23 @@ import { Brain, Download, Upload, Trash2, Search, Plus, X, Check, Pencil, Zap, F
 import { useMemoryStore, effectiveMemoryBudget } from '../../stores/memoryStore'
 import { useModelStore } from '../../stores/modelStore'
 import { getModelMaxTokens } from '../../lib/context-compaction'
+// Eine Schreibweise fuer jedes Kontextfenster. Hier stand zweimal
+// `Math.round(ctx / 1024)}K`, eine eigene Rechnung: bei 32000 Token sagte
+// diese Zeile 31K und der Rest der Oberflaeche 31.3K.
+import { formatContextWindow } from '../../lib/formatters'
 import { GlowButton } from '../ui/GlowButton'
 import type { MemoryType, MemoryFile } from '../../types/agent-mode'
 
 // ── Subtle type indicator (internal, not user-facing) ─────────
 
+// Vier Kategorien, vier Farben, und keine davon sagt etwas ueber gut oder
+// kaputt. `feedback` war gelb und las sich dadurch als Warnung an einem
+// Eintrag, der nur eine Sorte ist. Pink ist in dieser Datei sonst nicht
+// vergeben (Blau, Lila und Gruen stehen schon hier), und es ist weit genug
+// von Rot weg, um nicht wieder nach einem Fehler auszusehen.
 const TYPE_DOT_COLORS: Record<MemoryType, string> = {
   user: 'bg-blue-400',
-  feedback: 'bg-amber-400',
+  feedback: 'bg-pink-400',
   project: 'bg-purple-400',
   reference: 'bg-green-400',
 }
@@ -23,7 +32,12 @@ export function MemorySettings() {
   const [confirmClear, setConfirmClear] = useState(false)
   const [addingNew, setAddingNew] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
-  const [contextBudgetLabel, setContextBudgetLabel] = useState('')
+  // Only the ASYNC half of the budget line is state; "no model selected" is a
+  // fact the render already has and is derived below. Writing it from the
+  // effect was a cascading render for something nothing had to be fetched for
+  // (React 19 `set-state-in-effect`).
+  const activeModel = useModelStore((s) => s.activeModel)
+  const [budgetLabel, setBudgetLabel] = useState('')
   // Feature FF: reveal outdated (stale/superseded) entries, read-only.
   const [showOutdated, setShowOutdated] = useState(false)
   const [reembedState, setReembedState] = useState<'idle' | 'running' | 'done'>('idle')
@@ -42,23 +56,23 @@ export function MemorySettings() {
   const [editContent, setEditContent] = useState('')
 
   // ── Context budget detection ────────────────────────────────
+  const contextBudgetLabel = activeModel ? budgetLabel : 'No model selected'
   useEffect(() => {
-    const model = useModelStore.getState().activeModel
-    if (!model) {
-      setContextBudgetLabel('No model selected')
-      return
-    }
-    getModelMaxTokens(model).then((ctx) => {
+    if (!activeModel) return
+    let cancelled = false
+    getModelMaxTokens(activeModel).then((ctx) => {
+      if (cancelled) return
       const override = settings.maxMemoriesOverride
       const budget = effectiveMemoryBudget(ctx, override)
       const manual = override != null && override > 0 ? ' (manual)' : ''
       if (budget.budgetTokens === 0) {
-        setContextBudgetLabel(`${Math.round(ctx / 1024)}K ctx, memory injection disabled`)
+        setBudgetLabel(`${formatContextWindow(ctx)} ctx, memory injection disabled`)
       } else {
-        setContextBudgetLabel(`${Math.round(ctx / 1024)}K ctx, up to ${budget.maxMemories} memories injected${manual}`)
+        setBudgetLabel(`${formatContextWindow(ctx)} ctx, up to ${budget.maxMemories} memories injected${manual}`)
       }
-    }).catch(() => setContextBudgetLabel(''))
-  }, [settings.maxMemoriesOverride])
+    }).catch(() => { if (!cancelled) setBudgetLabel('') })
+    return () => { cancelled = true }
+  }, [activeModel, settings.maxMemoriesOverride])
 
   const isEntryStale = (e: MemoryFile) => e.stale === true || typeof e.supersededBy === 'string'
   const staleCount = entries.filter(isEntryStale).length
@@ -227,7 +241,10 @@ export function MemorySettings() {
       <div className="space-y-1.5 pb-2 border-b border-gray-200 dark:border-white/5">
         <div className="flex items-center justify-between py-0.5">
           <div className="flex items-center gap-1.5">
-            <Zap size={11} className="text-amber-400" />
+            {/* Dasselbe Grau wie das Archiv-Symbol eine Zeile tiefer: ein
+                Symbol vor einem Schalter ist Schmuck und kein Zustand. Gelb
+                machte aus einer Einstellung eine Warnung. */}
+            <Zap size={11} className="text-gray-500" />
             <span className="text-[0.65rem] text-gray-400">Auto-extract memories</span>
             <span className="text-[0.5rem] text-gray-600">(extra inference)</span>
           </div>

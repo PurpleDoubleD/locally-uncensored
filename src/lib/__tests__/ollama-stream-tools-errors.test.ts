@@ -62,6 +62,42 @@ describe('streamOllamaChatWithTools — NDJSON error lines', () => {
     expect(turn.evalCount).toBe(7)
   })
 
+  // Fehler 2: ein tool_calls-Eintrag ohne `function`-Huelle liess
+  // `tc.function.arguments` werfen. Der TypeError entstand in der NDJSON-
+  // Schleife, ausserhalb des try, das nur JSON.parse abdeckt — er ist also aus
+  // dem ganzen Stream-Aufruf herausgeflogen und hat den Agentenzug samt aller
+  // bereits gestreamten Tokens mitgenommen.
+  it('survives a tool_calls entry with no function wrapper and keeps the streamed content', async () => {
+    mockStream.mockResolvedValueOnce(new Response(
+      '{"message":{"content":"here you go","tool_calls":[{"id":"call_1","name":"file_read","arguments":{"path":"a.txt"}}]}}\n' +
+      '{"done":true}\n',
+      { status: 200 },
+    ))
+    const turn = await run()
+    expect(turn.content).toBe('here you go')
+    expect(turn.toolCalls).toEqual([])
+  })
+
+  it('keeps the well-formed calls of a chunk that also carries a broken one', async () => {
+    mockStream.mockResolvedValueOnce(new Response(
+      '{"message":{"tool_calls":[' +
+        '{"id":"call_1"},' +
+        '{"function":{"name":"web_search","arguments":{"query":"x"}}}' +
+      ']}}\n',
+      { status: 200 },
+    ))
+    const turn = await run()
+    expect(turn.toolCalls.map(c => c.function.name)).toEqual(['web_search'])
+  })
+
+  it('drops a nameless tool call instead of dispatching `undefined`', async () => {
+    mockStream.mockResolvedValueOnce(new Response(
+      '{"message":{"tool_calls":[{"function":{"arguments":{"query":"x"}}}]}}\n',
+      { status: 200 },
+    ))
+    expect((await run()).toolCalls).toEqual([])
+  })
+
   it('skips partial JSON lines without dying', async () => {
     mockStream.mockResolvedValueOnce(new Response(
       '{"message":{"content":"ok"}}\n{"mess\n',

@@ -65,6 +65,30 @@ function visibleTokens(m: FillMessage): number {
   return t + 4 // role overhead
 }
 
+/**
+ * Kostet diese gespeicherte Nachricht etwas in der NAECHSTEN Anfrage?
+ *
+ * `role:'system'` in einem gespeicherten Gespraech ist immer ein App-Hinweis —
+ * der echte Systemprompt steht nicht im Verlauf, sondern wird beim Bauen der
+ * Nutzlast vorangestellt. Die Nutzlast verwirft diese Zeilen; sie zu zaehlen
+ * heisst, dem Nutzer Token in Rechnung zu stellen, die nie gesendet werden.
+ *
+ * DAS WURDE ERST 2026-09-02 ZUM PROBLEM, und zwar durch die App selbst: bis
+ * dahin gab es kaum solche Zeilen. Seit `/compact` seine Ein- und Ausgabe als
+ * Hinweis ablegt, seit eine fertige Hintergrundaufgabe ihr GANZES Ergebnis als
+ * Hinweis meldet und seit die gescheiterte Auto-Kompaktierung sich meldet,
+ * sind es viele — und die Hintergrund-Notiz kann mehrere tausend Token gross
+ * sein. Der Balken sprang dann um ein Rechercheergebnis nach oben, das nie
+ * jemand verschickt.
+ *
+ * DIESELBE REGEL steht als `isModelVisible` in run-compact-command.ts, wo sie
+ * entscheidet, was zusammengefasst wird. Ein Waechter in
+ * token-usage.test.ts haelt beide auf demselben Wort.
+ */
+function kostetEtwas(m: FillMessage): boolean {
+  return m.role !== 'system'
+}
+
 export function computeContextFill(
   messages: FillMessage[],
   built?: BuiltRequestAnchor,
@@ -83,6 +107,7 @@ export function computeContextFill(
       // wrong until the next turn built a new anchor. Only what the user adds
       // after the build is new context.
       if (messages[i].hidden) continue
+      if (!kostetEtwas(messages[i])) continue
       used += visibleTokens(messages[i])
     }
     return { used, real: false, source: 'built' }
@@ -99,7 +124,7 @@ export function computeContextFill(
   if (anchorIdx === -1) {
     // No usage anywhere yet — plain estimate over the visible conversation.
     return {
-      used: messages.reduce((sum, m) => sum + visibleTokens(m), 0),
+      used: messages.reduce((sum, m) => sum + (kostetEtwas(m) ? visibleTokens(m) : 0), 0),
       real: false,
       source: 'estimate',
     }
@@ -110,6 +135,7 @@ export function computeContextFill(
   // message's own visible reply + every later message joins the next prompt.
   let used = anchor.promptTokens
   for (let i = anchorIdx; i < messages.length; i++) {
+    if (!kostetEtwas(messages[i])) continue
     used += visibleTokens(messages[i])
   }
   return { used, real: !anchor.estimated, source: 'usage' }

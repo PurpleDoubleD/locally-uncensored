@@ -9,7 +9,8 @@
 // curated facts. The Settings copy steers the user accordingly.
 
 import { useState } from 'react'
-import { Upload, FileText, CheckCircle2, AlertTriangle, Loader2, X } from 'lucide-react'
+import { Upload, FileText, CheckCircle2, AlertTriangle, Loader2 } from 'lucide-react'
+import { Hinweis } from '../ui/Hinweis'
 import { parseExportFile, conversationToFile, type NormalisedConversation, type ChatbotPlatform } from '../../lib/parsers/chatbot-export'
 import { useRAG } from '../../hooks/useRAG'
 import { useChatStore } from '../../stores/chatStore'
@@ -23,7 +24,9 @@ const PLATFORM_LABEL: Record<ChatbotPlatform, string> = {
 
 export function ChatbotImporter() {
   const conversationId = useChatStore(s => s.activeConversationId)
-  const rag = useRAG(conversationId || undefined)
+  // useRAG takes `string | null` and already handles the null case; the old
+  // `|| undefined` handed it a value its own signature does not admit.
+  const rag = useRAG(conversationId)
   const uploadDocument = rag.uploadDocument
 
   const [conversations, setConversations] = useState<NormalisedConversation[]>([])
@@ -87,7 +90,7 @@ export function ChatbotImporter() {
     setError(null)
     setDoneCount(0)
     let done = 0
-    let failed: string[] = []
+    const failed: string[] = []
     for (const conv of toImport) {
       try {
         const file = conversationToFile(conv)
@@ -113,7 +116,7 @@ export function ChatbotImporter() {
     <div className="space-y-3">
       <div className="flex items-start gap-2.5 p-2.5 rounded-lg border border-blue-200 dark:border-blue-500/20 bg-blue-50 dark:bg-blue-500/[0.08] text-blue-900 dark:text-blue-200">
         <Upload size={14} className="mt-0.5 shrink-0" />
-        <div className="text-[0.65rem] leading-relaxed">
+        <div className="t-micro leading-relaxed">
           <strong>Import past conversations</strong> from ChatGPT, Claude, or Gemini exports. Each conversation lands in the active chat's RAG store, your local model can reference past turns just like any other document you upload. Stays on your machine.
         </div>
       </div>
@@ -143,17 +146,23 @@ export function ChatbotImporter() {
         </div>
       </div>
 
+      {/* Der Fehler stand in einem roten Kasten mit Rahmen und Fuellflaeche.
+          Die Farbe traegt hier schon alles, was der Kasten dazutun sollte;
+          das Kreuz zum Wegklicken bringt <Hinweis> selbst mit. */}
       {error && (
-        <div className="flex items-start gap-2 p-2 rounded border border-red-500/20 bg-red-500/[0.06] text-red-300">
-          <AlertTriangle size={12} className="mt-0.5 shrink-0" />
-          <span className="text-[0.6rem] whitespace-pre-wrap">{error}</span>
-          <button onClick={() => setError(null)} className="text-red-400 hover:text-red-200 ml-auto"><X size={10} /></button>
-        </div>
+        <Hinweis
+          ton="fehler"
+          icon={<AlertTriangle size={12} className="mt-0.5 shrink-0" />}
+          onDismiss={() => setError(null)}
+          className="whitespace-pre-wrap"
+        >
+          {error}
+        </Hinweis>
       )}
 
       {conversations.length > 0 && (
         <>
-          <div className="flex items-center justify-between text-[0.6rem]">
+          <div className="flex items-center justify-between t-micro">
             <span className="text-gray-400">
               Detected: <strong>{PLATFORM_LABEL[detectedPlatform]}</strong>
               {' · '}
@@ -191,7 +200,7 @@ export function ChatbotImporter() {
                     className="mt-0.5"
                   />
                   <div className="flex-1 min-w-0">
-                    <div className="text-[0.65rem] text-gray-200 truncate">{c.title}</div>
+                    <div className="t-micro text-gray-200 truncate">{c.title}</div>
                     <div className="text-[0.55rem] text-gray-500">
                       {c.messageCount} message{c.messageCount === 1 ? '' : 's'}
                       {c.timestamp ? ` · ${new Date(c.timestamp).toLocaleDateString()}` : ''}
@@ -212,20 +221,23 @@ export function ChatbotImporter() {
               Import {selected.size} → RAG
             </button>
             {importProgress && (
-              <span className="text-[0.6rem] text-gray-400">
+              <span className="t-micro text-gray-400">
                 {importProgress.current} / {importProgress.total}
               </span>
             )}
             {!importing && doneCount > 0 && !error && (
-              <span className="text-[0.6rem] text-green-400 inline-flex items-center gap-1">
+              <span className="t-micro text-green-400 inline-flex items-center gap-1">
                 <CheckCircle2 size={10} /> {doneCount} imported
               </span>
             )}
           </div>
+          {/* Diese Zeile war gelb und kursiv, obwohl nichts kaputt ist: sie
+              sagt nur, in welcher Reihenfolge die zwei Schritte gehen. Ruhig,
+              wie jeder Satz, den man wissen darf und nicht sofort braucht. */}
           {!conversationId && (
-            <div className="text-[0.6rem] text-amber-300 italic">
+            <Hinweis>
               Open or create a chat first, imports attach to the active conversation's RAG store.
-            </div>
+            </Hinweis>
           )}
         </>
       )}

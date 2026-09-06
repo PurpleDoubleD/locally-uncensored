@@ -212,16 +212,28 @@ describe('the same mistake, swept for elsewhere', () => {
   it('the backend dialog re-seeds its choice when the detected list arrives', () => {
     // AppShell mounts it with an empty array and fills it seconds later, so
     // the useState default read `[]` and "Use selected" found nothing.
+    //
+    // The re-seed used to be a `useEffect(..., [backends])` writing the answer
+    // back into state; since the React 19 set-state-in-effect fix the rule is
+    // the pure `selectedBackendId` and the dialog derives the row on every
+    // render, which settles it ON the render the list arrives in rather than a
+    // paint later. Both halves of the rule — "the pick while the list holds it,
+    // otherwise row one" — are exercised in
+    // src/lib/__tests__/derived-ui-state.test.ts; what is pinned here is that
+    // the dialog uses it and grows no effect to undo it.
     const sel = read('src/components/onboarding/BackendSelector.tsx')
-    expect(sel).toMatch(/backends\.some\(\(b\) => b\.id === cur\) \? cur : backends\[0\]\?\.id/)
-    expect(sel).toMatch(/\}, \[backends\]\)/)
+    expect(sel).toMatch(/const selected = selectedBackendId\(picked, backends\)/)
+    expect(sel).not.toMatch(/useEffect/)
+    const det = read('src/lib/backend-detector.ts')
+    expect(det).toMatch(/return backends\[0\]\?\.id \|\| ''/)
   })
 
   it('NEGATIVE CONTROL: it still confirms by id, and a made choice survives', () => {
     const sel = read('src/components/onboarding/BackendSelector.tsx')
     expect(sel).toMatch(/backends\.find\(b => b\.id === selected\)/)
-    // The re-seed keeps `cur` whenever the list still holds it, so a user who
-    // picked before the list settled is not overruled.
-    expect(sel).toMatch(/setSelected\(\(cur\) =>/)
+    // A pick the user made before the list settled is not overruled: it is
+    // returned as-is whenever the list still holds it.
+    const det = read('src/lib/backend-detector.ts')
+    expect(det).toMatch(/if \(picked !== null && backends\.some\(\(b\) => b\.id === picked\)\) return picked/)
   })
 })

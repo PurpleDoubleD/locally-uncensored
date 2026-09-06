@@ -23,6 +23,20 @@
  * bogged down by schema keywords it cannot reason about.
  */
 
+import type { ToolArgs } from '../mcp/types'
+
+/**
+ * The subset of JSON Schema this validator reads, plus the keywords the app's
+ * own tool definitions carry but this file deliberately ignores.
+ *
+ * There used to be an `[key: string]: any` catch-all here "to allow
+ * pass-through for unknown keys". It allowed rather more than that: with an
+ * `any` index signature every read off a schema was unchecked, so a typo
+ * (`propreties`) type-checked and silently validated nothing. The advisory
+ * keywords are therefore spelled out instead — which also makes this type a
+ * structural supertype of `mcp/types.JSONSchemaProp`, the shape the tools
+ * actually ship, so the executor no longer needs a cast to hand one over.
+ */
 export type JsonSchema = {
   type?: string | string[]
   properties?: Record<string, JsonSchema>
@@ -31,8 +45,11 @@ export type JsonSchema = {
   enum?: unknown[]
   /** Unused / advisory; retained so test fixtures can include them. */
   description?: string
-  /** Allow pass-through for unknown keys. */
-  [key: string]: any
+  /** Advisory only — read by nothing here, declared so a tool schema fits. */
+  additionalProperties?: boolean | JsonSchema
+  default?: unknown
+  minimum?: number
+  maximum?: number
 }
 
 export type ValidationError = {
@@ -44,7 +61,7 @@ export type ValidationResult = {
   valid: boolean
   errors: ValidationError[]
   /** Coerced args — typed-string → number when schema calls for it. */
-  coerced?: Record<string, any>
+  coerced?: ToolArgs
 }
 
 /**
@@ -53,7 +70,7 @@ export type ValidationResult = {
  * mistakes like `{"maxResults": "5"}` do not fail downstream calls.
  */
 export function validateToolArgs(
-  args: Record<string, any>,
+  args: ToolArgs,
   schema: JsonSchema | undefined
 ): ValidationResult {
   const errors: ValidationError[] = []
@@ -68,7 +85,7 @@ export function validateToolArgs(
     return { valid: false, errors }
   }
 
-  const coerced: Record<string, any> = { ...(args ?? {}) }
+  const coerced: ToolArgs = { ...(args ?? {}) }
 
   // Required presence.
   if (Array.isArray(schema.required)) {
@@ -112,13 +129,18 @@ export function formatValidationErrors(errors: ValidationError[]): string {
 
 function validatePropertyValue(
   path: string,
-  value: any,
+  value: unknown,
   schema: JsonSchema
-): { errors: ValidationError[]; coerced: any } {
+): { errors: ValidationError[]; coerced: unknown } {
   const errors: ValidationError[] = []
   let coerced = value
 
-  // Enum check first — if it matches an enum value, skip the type check.
+  // Enum first, then type — BOTH, not either/or. The comment here used to say
+  // a matching enum value "skips the type check"; it never did, and the two
+  // only disagree for a schema that mixes them (`{type:'string', enum:['a',5]}`
+  // would accept 5 by enum and reject it by type). Nothing this app ships does
+  // that — `JSONSchemaProp.enum` is `string[]` — so the behaviour is left as it
+  // is and the comment is corrected to match it.
   if (Array.isArray(schema.enum)) {
     if (!schema.enum.some((v) => deepEqual(v, value))) {
       errors.push({
@@ -146,10 +168,14 @@ function validatePropertyValue(
   // Array items. The item result is written BACK: an item schema can coerce
   // just like a top-level one ("5" → 5), and dropping that meant an array of
   // numbers arrived downstream as an array of strings, validated and wrong.
-  if (matchesType(coerced, 'array') && schema.items && Array.isArray(coerced)) {
-    const next = [...coerced]
+  // `Array.isArray` IS the 'array' arm of matchesType — one test, written so
+  // TypeScript narrows on it. `items` is lifted into a const because the
+  // narrowing has to survive into the callback below.
+  const items = schema.items
+  if (Array.isArray(coerced) && items) {
+    const next: unknown[] = [...coerced]
     coerced.forEach((item, i) => {
-      const r = validatePropertyValue(`${path}[${i}]`, item, schema.items as JsonSchema)
+      const r = validatePropertyValue(`${path}[${i}]`, item, items)
       errors.push(...r.errors)
       if (r.errors.length === 0) next[i] = r.coerced
     })
@@ -162,8 +188,8 @@ function validatePropertyValue(
   // first tool to nest is `todo_write` (each plan item is {content, status}),
   // and its status enum is exactly the kind of mistake a small model makes and
   // needs told about.
-  if (matchesType(coerced, 'object') && schema.properties) {
-    const nested: Record<string, any> = { ...coerced }
+  if (isJsonObject(coerced) && schema.properties) {
+    const nested: Record<string, unknown> = { ...coerced }
     if (Array.isArray(schema.required)) {
       for (const key of schema.required) {
         if (nested[key] === undefined || nested[key] === null) {
@@ -183,7 +209,15 @@ function validatePropertyValue(
   return { errors, coerced }
 }
 
-function matchesType(value: any, type: string | string[]): boolean {
+/**
+ * The 'object' arm of {@link matchesType}, in a form TypeScript narrows on.
+ * The switch below delegates to it so the two can never drift apart.
+ */
+function isJsonObject(v: unknown): v is Record<string, unknown> {
+  return v !== null && typeof v === 'object' && !Array.isArray(v)
+}
+
+function matchesType(value: unknown, type: string | string[]): boolean {
   if (Array.isArray(type)) return type.some((t) => matchesType(value, t))
   switch (type) {
     case 'string':
@@ -197,7 +231,7 @@ function matchesType(value: any, type: string | string[]): boolean {
     case 'array':
       return Array.isArray(value)
     case 'object':
-      return value !== null && typeof value === 'object' && !Array.isArray(value)
+      return isJsonObject(value)
     case 'null':
       return value === null
     default:
@@ -210,16 +244,16 @@ function describeType(type: string | string[]): string {
   return Array.isArray(type) ? type.join(' | ') : type
 }
 
-function describeActual(value: any): string {
+function describeActual(value: unknown): string {
   if (value === null) return 'null'
   if (Array.isArray(value)) return 'array'
   return typeof value
 }
 
 function tryCoerce(
-  value: any,
+  value: unknown,
   type: string | string[]
-): { ok: true; value: any } | { ok: false } {
+): { ok: true; value: unknown } | { ok: false } {
   if (Array.isArray(type)) {
     for (const t of type) {
       const r = tryCoerce(value, t)
@@ -272,17 +306,26 @@ function tryCoerce(
   return { ok: false }
 }
 
+/**
+ * Structural equality for enum members, which are parsed JSON.
+ *
+ * Arrays and objects are now compared as separate kinds. The single-branch
+ * version keyed only on `typeof === 'object'`, so `Object.keys` made `[1, 2]`
+ * and `{ "0": 1, "1": 2 }` indistinguishable and an enum could match a value of
+ * the wrong container type. Nothing we ship declares an array-valued enum, so
+ * this is a tightening, not a fix for an observed failure.
+ */
 function deepEqual(a: unknown, b: unknown): boolean {
   if (a === b) return true
   if (typeof a !== typeof b) return false
-  if (a && b && typeof a === 'object') {
+  if (Array.isArray(a) || Array.isArray(b)) {
+    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false
+    return a.every((item, i) => deepEqual(item, b[i]))
+  }
+  if (isJsonObject(a) && isJsonObject(b)) {
     const aKeys = Object.keys(a)
-    const bKeys = Object.keys(b)
-    if (aKeys.length !== bKeys.length) return false
-    for (const k of aKeys) {
-      if (!deepEqual((a as any)[k], (b as any)[k])) return false
-    }
-    return true
+    if (aKeys.length !== Object.keys(b).length) return false
+    return aKeys.every((k) => deepEqual(a[k], b[k]))
   }
   return false
 }

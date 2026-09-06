@@ -1,13 +1,13 @@
-import { useState, useEffect } from 'react'
+import { useCallback, useState, useEffect, useRef } from 'react'
 import { bundleIsComplete, bundleIsDownloading, bundleHasErrors } from '../../lib/bundle-state'
 import { motion } from 'framer-motion'
-import { Search, XCircle, Loader2, Sparkles, Unlock, ShieldCheck, ExternalLink, Download, CheckCircle } from 'lucide-react'
+import { Search, XCircle, Loader2, Sparkles, Unlock, ShieldCheck, ExternalLink, Download, CheckCircle, Info } from 'lucide-react'
 import { X } from 'lucide-react'
 import {
   searchHuggingFaceModels,
   getImageBundles, getVideoBundles,
   getUncensoredTextModels, getMainstreamTextModels,
-  detectProviderModelPath, startModelDownloadToPath,
+  detectProviderModelPath, startModelDownloadToPath, luEngineDownloadDir,
   startModelDownload, searchCivitaiModels,
   installBundleComplete, checkBundlesInstalled, resolveHfGgufFiles, planModelDownload,
   type DiscoverModel, type DownloadProgress, type ModelBundle, type CivitAIModelResult, type HfGgufFile,
@@ -17,27 +17,35 @@ import { getMaxVramGb, getTotalRamGb, bundleVramNeedGb } from '../../lib/hardwar
 import { openExternal } from '../../api/backend'
 import { useModels } from '../../hooks/useModels'
 import { useDownloadStore } from '../../stores/downloadStore'
+import { CivitaiResultsSkeleton, ModelGridSkeleton } from '../layout/ViewSkeletons'
 import { useProviderStore } from '../../stores/providerStore'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { useModelStore } from '../../stores/modelStore'
 import { useWorkflowStore } from '../../stores/workflowStore'
 import { getProviderIdFromModel } from '../../api/providers'
-import { startBundledEngine } from '../../api/engine'
-import { BUILTIN_BACKEND_ID } from '../../lib/onboarding-backend'
-import { matchesLocalGgufInstalled, type InstalledModelLike } from '../../lib/lmstudio-match'
+import { activateDownloadedBundledModel } from '../../lib/bundled-download-activation'
+import { diagnoseBuiltinEngine } from '../../api/builtin-ensure'
+import type { InstalledModelLike } from '../../lib/lmstudio-match'
+import { findInstalledForDiscoverModel } from '../../lib/discover-installed'
+import { isBuiltinEngineEntry } from '../../lib/lmstudio-match'
+import { ensureLuEngineIsChatProvider, announceLuEngineSwitch } from '../../api/lu-engine-switch'
+import { LuEngineSwitchBar } from '../chat/LuEngineSwitchBar'
 import { resolveTextDownloadTarget } from '../../lib/text-download-target'
 import { hfUrlToOllamaRef, hfUrlToLmStudioSubdir, parseHfUrl, extractGgufQuant, isShardedOrIncompatibleGguf } from '../../lib/hf-to-provider'
+import { HINWEIS_TEXT } from '../../lib/hinweis'
 import { GlassCard } from '../ui/GlassCard'
 import { GlowButton } from '../ui/GlowButton'
 import { ProgressBar } from '../ui/ProgressBar'
 import { Modal } from '../ui/Modal'
-import { formatBytes } from '../../lib/formatters'
+import { formatBytes, countLabel } from '../../lib/formatters'
 import type { ModelCategory } from '../../types/models'
 import { proxyImageUrl } from '../../lib/privacy'
 import { log } from '../../lib/logger'
 import {
   ModelTile, BundleTile, HardwareChip, groupModels, pickDefaultVariant, computeFit,
+  CapLegend,
 } from './ModelTiles'
+import { ICON_SM } from '../ui/icon-size'
 
 interface Props {
   category: ModelCategory
@@ -51,6 +59,165 @@ interface Props {
 // 2026-06-06) — only the labels turned human. 'fit' is new and additive:
 // it filters on the detected GPU instead of a fixed bucket.
 type SizeTier = 'all' | 'fit' | 'ultra' | 'light' | 'middle' | 'highend'
+
+// ─── D-S25 · eine Segmented-Sprache statt zwei ──────────────────────
+//
+// Der Befund: „Zwei Segmented-Sprachen 47px uebereinander: Mainstream/
+// Unfiltered rechteckig, Groessenfilter als Pills." Beide Reihen sind
+// dasselbe Bedienelement — eine Reihe, aus der genau EINE Sache aktiv ist —
+// und sahen komplett verschieden aus:
+//
+//   Reihe 1  Behaelter mit Rand, `rounded-md`-Segmente, 0.66rem fett,
+//            aktiv = weisse Flaeche + `shadow-sm`
+//   Reihe 2  freistehende `rounded-full`-Pillen, jede mit eigenem Rand,
+//            11px halbfett, aktiv = graue Flaeche + dunklerer Rand
+//
+// Dazu zwei Zustandsquellen: Reihe 1 setzte `aria-pressed` UND faerbte
+// selbst, Reihe 2 faerbte nur. Jetzt tragen beide Reihen dieselbe Spur und
+// dieselben Segmente, und der aktive Zustand kommt an BEIDEN Stellen aus
+// `aria-pressed` — `.lu-control` liest ihn (index.css). Kein Segment
+// faerbt sich mehr selbst, also kann die Optik nicht mehr neben der
+// Barrierefreiheit herlaufen.
+//
+// Nebenbei faellt hier das zweite `shadow-sm` des Screens weg (D-S24): der
+// aktive Zustand kommt aus Flaeche + Textfarbe, die auf `#141414`
+// gerechnet sind, nicht aus einem Hell-Modus-Schatten, den dort niemand
+// sieht.
+//
+// Die Spur ist bewusst KEIN neues Rezept in index.css, sondern nur der
+// Behaelter um die vorhandenen Controls: 2px Luft (`p-0.5`) und ein Radius,
+// der eine Stufe ueber dem der Segmente liegt, damit die Ecken parallel
+// laufen (`--radius-control` + 2px).
+//
+// Mitgenommen aus der Zeile, die hier vorher stand, weil die Falle bleibt:
+// ein aktives Segment darf NICHT `text-white`/`bg-gray-900` invertieren —
+// die Rettungsregel `.light .text-white` in index.css macht daraus im
+// Hellmodus Gray-900 auf Gray-900. `.lu-control` faellt nicht hinein: sein
+// aktiver Zustand ist im Hellmodus `rgb(17 24 39)` auf `rgba(0,0,0,.05)`,
+// also weder `text-white` noch eine dunkle Flaeche.
+const SEGMENT_TRACK =
+  'inline-flex items-center gap-0.5 p-0.5 rounded-[calc(var(--radius-control)+2px)] '
+  + 'bg-gray-100 dark:bg-white/[0.04] border border-gray-200 dark:border-white/[0.06] '
+  + 'flex-wrap'
+
+// ─── T-69 · Auf eine Datei warten, ohne einen Timer zu hinterlassen ──
+
+/** Wie das Warten geendet hat. Nur `complete` heisst „weitermachen". */
+export type FileWaitOutcome = 'complete' | 'paused' | 'cancelled' | 'aborted'
+
+/**
+ * Genau das, was das Warten vom Download-Store braucht: den aktuellen Stand
+ * lesen und mitbekommen, wenn er sich aendert. Absichtlich nicht der ganze
+ * Store — so laesst sich die Wartefunktion gegen einen echten zustand-Store
+ * pruefen, ohne dass der Test Tauri oder Rust braucht.
+ */
+export interface DownloadWatcher {
+  getState: () => { downloads: Record<string, DownloadProgress> }
+  subscribe: (listener: () => void) => () => void
+}
+
+/**
+ * Wie lange „der Eintrag ist noch nicht da" geduldet wird, bevor es als
+ * Fehlschlag gilt. Rust hat den Auftrag zu diesem Zeitpunkt schon
+ * angenommen (`startModelDownloadToPath` ist `await`ed durch), es fehlt nur
+ * noch der erste `refresh()` — das dauert Sekunden, nicht Minuten.
+ */
+export const FIRST_SIGHT_MS = 30_000
+
+/**
+ * Warten, bis eine Datei fertig heruntergeladen ist — als Abonnement, nicht
+ * als Timer.
+ *
+ * Der Befund (Technik-Audit, „Discovery & Downloads", T-69): der
+ * Built-in-Engine-Installpfad wartete mit einem `setInterval(…, 500)`, das
+ * `clearInterval` nur in zwei von fuenf moeglichen Ausgaengen rief —
+ * `complete` und `error`. Pausiert der Nutzer, steht der Eintrag auf
+ * `paused`; bricht er ab, verschwindet der Eintrag ganz; verlaesst er die
+ * Ansicht, ist niemand mehr da, der zuhoert. In allen drei Faellen traf der
+ * Timer keinen der beiden Zweige, lief mit 2 Hz weiter, und das Promise, auf
+ * das die Installation `await`ete, settelte nie. Pro Versuch ein Timer, und
+ * die Schleife darunter stand fuer immer.
+ *
+ * Hier gibt es keinen zweiten Timer mehr. Der Store wird von `startPolling()`
+ * ohnehin im Sekundentakt aus Rust nachgefuellt, und jedes `set()`
+ * benachrichtigt seine Abonnenten — gewartet wird also auf die Nachricht, die
+ * es schon gibt.
+ *
+ * Fuenf Ausgaenge, und jeder raeumt hinter sich auf:
+ *
+ *   `complete`      die Datei liegt auf Platte      → `'complete'`
+ *   `error`         Rust meldet den Fehlschlag      → `reject`
+ *   `paused`        der Nutzer hat angehalten       → `'paused'`
+ *   Eintrag weg     der Nutzer hat abgebrochen      → `'cancelled'`
+ *   `signal`        Ansicht weg / neuer Versuch     → `'aborted'`
+ *
+ * Warum `paused` beendet statt weiterzuwarten: die Installation verspricht
+ * „Modell laden, dann die Engine darauf starten". Ein Start von llama-server
+ * raeumt VRAM frei und wechselt das aktive Modell — das eine halbe Stunde
+ * spaeter im Hintergrund zu tun, weil der Nutzer irgendwann fortgesetzt hat,
+ * waere schlimmer als es gar nicht zu tun. Der Nutzer erfaehrt genau das
+ * (`installNotice`), statt dass die Installation still stehenbleibt.
+ *
+ * `cancelled` wird ERST gemeldet, nachdem der Eintrag einmal gesehen wurde.
+ * Zwischen dem Start des Downloads und dem ersten `refresh()` existiert er
+ * noch nicht, und „noch nicht da" ist nicht dasselbe wie „geloescht". Damit
+ * ein Eintrag, der ueberhaupt nie auftaucht, die alte Haengerei nicht durch
+ * die Hintertuer zurueckholt, hat genau dieses Fenster eine Frist —
+ * `FIRST_SIGHT_MS`, und der eine `setTimeout` dafuer wird auf jedem Ausgang
+ * geloescht.
+ */
+export function awaitDownloadedFile(
+  watcher: DownloadWatcher,
+  filename: string,
+  signal: AbortSignal,
+  firstSightMs: number = FIRST_SIGHT_MS,
+): Promise<FileWaitOutcome> {
+  return new Promise<FileWaitOutcome>((resolve, reject) => {
+    let seen = false
+    let settled = false
+    let unsubscribe: (() => void) | null = null
+    let firstSight: ReturnType<typeof setTimeout> | null = null
+
+    const settle = (finish: () => void) => {
+      if (settled) return
+      settled = true
+      if (firstSight !== null) { clearTimeout(firstSight); firstSight = null }
+      signal.removeEventListener('abort', onAbort)
+      unsubscribe?.()
+      unsubscribe = null
+      finish()
+    }
+
+    function onAbort() {
+      settle(() => resolve('aborted'))
+    }
+
+    const look = () => {
+      const d = watcher.getState().downloads[filename]
+      if (!d) {
+        // Weg, nachdem er da war = `cancel()` hat die Zeile geloescht.
+        if (seen) settle(() => resolve('cancelled'))
+        return
+      }
+      seen = true
+      if (firstSight !== null) { clearTimeout(firstSight); firstSight = null }
+      if (d.status === 'complete') settle(() => resolve('complete'))
+      else if (d.status === 'error') settle(() => reject(new Error(d.error || 'Download failed')))
+      else if (d.status === 'paused') settle(() => resolve('paused'))
+    }
+
+    if (signal.aborted) { resolve('aborted'); return }
+    signal.addEventListener('abort', onAbort)
+    firstSight = setTimeout(
+      () => settle(() => reject(new Error(`${filename} never showed up in the download list`))),
+      firstSightMs,
+    )
+    unsubscribe = watcher.subscribe(look)
+    // Der Stand von JETZT zaehlt auch: ein Abonnement allein verpasst eine
+    // Datei, die schon fertig ist.
+    look()
+  })
+}
 
 export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }: Props) {
   const [civitaiResults, setCivitaiResults] = useState<CivitAIModelResult[]>([])
@@ -88,7 +255,7 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
   // backends and a bare name for Ollama.
   const activeChatModel = useModelStore(s => s.activeModel)
   const [hfModelPath, setHfModelPath] = useState<string | null>(null)
-  const { pullModel, models: installedModels, fetchModels } = useModels()
+  const { pullModel, models: installedModels, fetchModels, setActiveModel } = useModels()
 
   // Refresh installed-model list on mount + when category switches to text
   // so the Discover grid reflects what Ollama / LM Studio actually have on
@@ -122,26 +289,30 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
 
   // Check which bundles are REALLY installed (file size validated, not just file existence)
   const [bundleStatuses, setBundleStatuses] = useState<Record<string, boolean>>({})
-  const refreshBundleStatuses = () => {
+  // Memoised so the two effects below can name it as the dependency it is
+  // instead of hiding it from the dep array. It only closes over `category`,
+  // so its identity changes exactly when the effects had to re-run anyway —
+  // no re-subscription loop.
+  const refreshBundleStatuses = useCallback(() => {
     if (category !== 'image' && category !== 'video') return
     const allBundles = [...getImageBundles(), ...getVideoBundles()]
     checkBundlesInstalled(allBundles).then(statuses => setBundleStatuses(statuses))
-  }
+  }, [category])
   useEffect(() => {
     refreshBundleStatuses()
-  }, [category])
+  }, [refreshBundleStatuses])
 
   // Re-check bundle statuses when a download completes
   useEffect(() => {
     const handler = () => refreshBundleStatuses()
     window.addEventListener('comfyui-model-downloaded', handler)
     return () => window.removeEventListener('comfyui-model-downloaded', handler)
-  }, [category])
+  }, [refreshBundleStatuses])
 
   // Start polling on mount if there are active downloads
   useEffect(() => {
     dlStore.getState().refresh()
-  }, [])
+  }, [dlStore])
 
   const isText = category === 'text'
   const isImage = category === 'image'
@@ -189,57 +360,91 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
     ? vramFilteredBundles.filter((b) => b.name.toLowerCase().includes(search.toLowerCase()) || b.description.toLowerCase().includes(search.toLowerCase()))
     : vramFilteredBundles
 
+  // Which model the Use button is currently loading. A GGUF start blocks for
+  // seconds to minutes, and without this the button stayed live and a second
+  // click queued a second start behind the first (review S6).
+  const [usingModel, setUsingModel] = useState<string | null>(null)
+
   // Text-model installed check.
   //
-  // Before v2.4.8 this only consulted the in-memory `downloads` store, so the
-  // INSTALLED badge disappeared the moment the user restarted the app — which
-  // is exactly what leonsk29 reported (GH #43). The store has no knowledge of
-  // what Ollama / LM Studio actually have on disk, only of downloads that
-  // happened in the current session.
-  //
-  // Fix: also match against the provider model list (which Ollama/LM Studio
-  // populate from disk). For HF GGUFs the in-app download goes through
-  // `ollama pull hf.co/<repo>:<quant>`, so the same canonical reference is
-  // what we look up in the installed-list. Session downloads remain a valid
-  // signal as the fastest-path (no fetchModels round-trip needed).
-  const isModelFullyInstalled = (model: DiscoverModel) => {
-    if (model.filename && downloads[model.filename]?.status === 'complete') return true
+  // Lives in lib/discover-installed.ts since 2.6.8, unit-tested, because the
+  // rule it encodes is the whole of GH #118: installed is a question about the
+  // DISK. The session download store, the Ollama store and, since the same
+  // ticket, the built-in engine's own directory scan are all filesystem
+  // evidence. Whether the engine answers on its port is a different question
+  // with a different repair, and it must never be able to unsay "this 8 GB
+  // file is on your machine" (Bug #43 was the first version of the same
+  // mistake, nayffy's restart the second).
+  const installedEntryFor = (model: DiscoverModel) =>
+    findInstalledForDiscoverModel(model, downloads, installedModels as unknown as InstalledModelLike[])
 
-    const installedOllamaTags = installedModels
-      .filter(m => m.provider === 'ollama')
-      .map(m => (m.model || m.name || '').toLowerCase())
+  const isModelFullyInstalled = (model: DiscoverModel) => installedEntryFor(model) !== null
 
-    if (model.ollamaModel) {
-      const tag = model.ollamaModel.toLowerCase()
-      if (installedOllamaTags.includes(tag)) return true
-      // Ollama appends `:latest` to bare model names — accept either form
-      if (!tag.includes(':') && installedOllamaTags.includes(`${tag}:latest`)) return true
+  /** Can the Use button do anything for this row: is the local model behind it
+   *  known by its picker id. A download that finished in this session is on the
+   *  disk but carries no id until the next model refresh, so it stays a badge. */
+  const canUseInstalled = (model: DiscoverModel) => !!installedEntryFor(model)?.name
+
+  /**
+   * GH #118: "the Get button doesn't do anything as the files are still
+   * downloaded". With the badge right, the state the user landed in was an
+   * inert Installed pill beside an engine that was not running, and the Models
+   * page offered no way on. This is that way on: pick the model, and start the
+   * engine if it is down.
+   *
+   * The repair runs BEFORE the pick, because diagnoseBuiltinEngine starts the
+   * engine on exactly this model when it is dead, and the pick then swaps only
+   * when something else is loaded. The other order would start twice.
+   *
+   * Review B1: the repair is asked ONLY for a row that really belongs to the
+   * app's own engine. An Ollama or LM Studio row has its own lifecycle, and
+   * sending it through the built-in diagnosis would either boot a stranger's
+   * GGUF that the pick then swaps straight back out, or, on a box with no
+   * built-in GGUF at all, answer a click on a perfectly installed Ollama model
+   * with "no chat model to load yet".
+   */
+  const handleUseInstalled = async (model: DiscoverModel) => {
+    const entry = installedEntryFor(model)
+    const name = entry?.name
+    if (!name || usingModel) return
+    setInstallError(null)
+    setUsingModel(name)
+    try {
+      if (isBuiltinEngineEntry(entry)) {
+        // A14: the LU Engine's GGUFs are listed even while Ollama or LM Studio
+        // holds the chat, so Use has to hand the slot over first. It has to be
+        // FIRST: diagnoseBuiltinEngine answers nothing at all for a slot that
+        // is not ours, so the old order would repair nothing and then activate
+        // a model no request routes to.
+        if (ensureLuEngineIsChatProvider()) {
+          announceLuEngineSwitch()
+        }
+        const diagnosis = await diagnoseBuiltinEngine({ repair: true, preferModel: name })
+        if (!diagnosis.ok && diagnosis.reason) setInstallError(diagnosis.reason)
+      }
+      setActiveModel(name)
+    } catch (e) {
+      log.warn('[DiscoverModels] LU Engine repair failed', { err: e })
+      setActiveModel(name)
+    } finally {
+      setUsingModel(null)
     }
-
-    if (model.filename && model.downloadUrl) {
-      const ref = hfUrlToOllamaRef(model.downloadUrl, model.filename)?.toLowerCase()
-      if (ref && installedOllamaTags.includes(ref)) return true
-    }
-
-    // Bug Y/b v2.5.0 — Aldrich Ironhart Discord. Pre-v2.5.0 isModelFullyInstalled
-    // only checked Ollama tags. After a restart, GGUFs that LU itself wrote
-    // to LM Studio's scan dir would never light up the INSTALLED badge,
-    // because LM Studio surfaces them by file basename in the openai-compat
-    // listing rather than by an Ollama-style hf.co tag. Match by filename
-    // (case-insensitive, with/without trailing `.gguf`).
-    // Match against LM Studio's installed models too (not just Ollama tags).
-    // The matcher (lib/lmstudio-match.ts, unit-tested) handles both the older
-    // full-basename id form AND LM Studio's modern quant-less publisher/short
-    // key (e.g. "qwen/qwen2.5-vl-7b" vs "Qwen2.5-VL-7B-Instruct-Q4_K_M.gguf").
-    if (model.filename && matchesLocalGgufInstalled(model.filename, installedModels as unknown as InstalledModelLike[])) {
-      return true
-    }
-
-    return false
   }
 
   const [installingBundle, setInstallingBundle] = useState<string | null>(null)
   const [installError, setInstallError] = useState<string | null>(null)
+  // Kein Fehler, sondern eine Auskunft: der Nutzer hat den Download angehalten
+  // oder abgebrochen, und die Installation sagt, was das fuer die Engine
+  // bedeutet. Der rote Banner darunter waere hier eine Falschaussage — Rot
+  // heisst in dieser App „kaputt oder wird geloescht" (siehe die Begruendung
+  // am `.lu-control`-Rezept in index.css).
+  const [installNotice, setInstallNotice] = useState<string | null>(null)
+  // T-69: ein Controller pro Installationsversuch. Er bricht ab, wenn die
+  // Ansicht verschwindet — AppShell haengt Models an `currentView === 'models'`
+  // (`AppShell.tsx:955`), ein Wechsel haengt sie also wirklich ab — und wenn
+  // ein neuer Versuch startet.
+  const installWaitRef = useRef<AbortController | null>(null)
+  useEffect(() => () => installWaitRef.current?.abort(), [])
   // Confirmation gate for multi-part (sharded) downloads — these sets routinely
   // run hundreds of GB across many files, so we never start them silently.
   const [confirmDownload, setConfirmDownload] = useState<{ name: string; files: HfGgufFile[]; targetDir: string; totalGB: number; note?: string } | null>(null)
@@ -498,7 +703,7 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
       // directly, so no <user>/<repo> nesting and no hfModelPath override
       // (that path belongs to the LM Studio flow).
       if (isActiveBuiltin) {
-        return await detectProviderModelPath(BUILTIN_BACKEND_ID)
+        return await luEngineDownloadDir()
       }
       const base = hfModelPath || (await detectProviderModelPath(providers.openai?.name || 'LM Studio'))
       if (!base) return null
@@ -583,25 +788,49 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
       }
       dlStore.getState().startPolling()
       if (isActiveBuiltin) {
-        // Built-in engine: await the flat GGUF, then (re)boot llama-server on
-        // it so the freshly-added model is chat-ready without a manual switch.
+        // Built-in engine: await the flat GGUF, then make it the active chat
+        // model so the freshly-added model is chat-ready without a manual switch.
         // The projector is awaited too: booting before it lands would bring the
         // model up text-only and the image button would lie.
-        const awaitFile = (fname: string) => new Promise<void>((resolve, reject) => {
-          const poll = setInterval(() => {
-            const d = dlStore.getState().downloads[fname]
-            if (d?.status === 'complete') { clearInterval(poll); resolve() }
-            else if (d?.status === 'error') { clearInterval(poll); reject(new Error(d.error || 'Download failed')) }
-          }, 500)
-        })
-        for (const f of plan) await awaitFile(f.filename)
-        try {
-          await startBundledEngine(`${targetDir}/${realName}`)
-        } catch (e) {
-          setInstallError(`Model downloaded, but the built-in engine failed to start: ${e instanceof Error ? e.message : String(e)}`)
+        //
+        // T-69: das Warten ist ein Abonnement auf den Download-Store, kein
+        // eigener Timer — siehe `awaitDownloadedFile` oben. Ein zweiter Klick
+        // bricht das Warten des ersten ab, statt zwei Warteschlangen auf
+        // dieselbe Datei zu legen.
+        installWaitRef.current?.abort()
+        const wait = new AbortController()
+        installWaitRef.current = wait
+        setInstallNotice(null)
+        for (const f of plan) {
+          const outcome = await awaitDownloadedFile(dlStore, f.filename, wait.signal)
+          if (outcome === 'complete') continue
+          // Jeder andere Ausgang ist eine Entscheidung des Nutzers (Pause,
+          // Abbruch) oder das Ende der Ansicht. Keiner davon ist ein Fehler,
+          // und keiner darf spaeter noch eine Engine hochfahren.
+          if (outcome === 'paused') {
+            setInstallNotice(`Download paused, so the chat model was not switched. Resume ${f.filename} to finish it.`)
+          } else if (outcome === 'cancelled') {
+            setInstallNotice('Download cancelled, so the chat model was not switched.')
+          }
+          return
         }
-        window.dispatchEvent(new CustomEvent('lu-models-refresh'))
+        // The downloaded file becomes the active chat model through the
+        // picker's own activation (lib/bundled-download-activation): the
+        // engine path comes from the model list, the picker follows, and the
+        // first message goes to the model the user just fetched instead of
+        // swapping the engine back to the previous one.
+        try {
+          await activateDownloadedBundledModel({ filename: realName, refresh: fetchModels, activate: setActiveModel })
+        } catch (e) {
+          setInstallError(`Model downloaded, but the LU Engine failed to start: ${e instanceof Error ? e.message : String(e)}`)
+        }
       }
+      // Outside the built-in branch too: an LM Studio or openai-compat download
+      // lands in a folder the next model refresh reads, and until something
+      // asks for that refresh the tile keeps offering Get for a file that is
+      // already on the disk. That is the badge half of GH #118 wearing another
+      // backend's clothes.
+      window.dispatchEvent(new CustomEvent('lu-models-refresh'))
     } catch (e) {
       log.error('GGUF download failed', { err: e })
       setInstallError(`Download failed: ${e instanceof Error ? e.message : String(e)}`)
@@ -660,6 +889,9 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
         isInstalled={isModelFullyInstalled}
         dlState={getModelDownloadState}
         onDownload={handleTextDownload}
+        onUse={handleUseInstalled}
+        canUse={canUseInstalled}
+        isUsing={(m) => installedEntryFor(m)?.name === usingModel && usingModel !== null}
         onInfo={setInfoModel}
         onOpenUrl={(u) => openExternal(u)}
         highlight={highlight}
@@ -671,30 +903,22 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
     <div className="space-y-4">
       {/* Filter bar: Unfiltered/Mainstream + size chips + hardware chip */}
       <div className="flex items-center gap-2 flex-wrap">
-        <div className="flex p-0.5 rounded-lg bg-gray-100 dark:bg-white/[0.04] border border-gray-200 dark:border-white/[0.06]">
+        <div className={SEGMENT_TRACK} role="group" aria-label="Catalogue">
           <button
             onClick={() => setSubTab('mainstream')}
             aria-pressed={subTab === 'mainstream'}
             title="Popular models with tool calling + vision"
-            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[0.66rem] font-semibold transition-all ${
-              subTab === 'mainstream'
-                ? 'bg-white dark:bg-white/10 text-gray-900 dark:text-white shadow-sm'
-                : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
-            }`}
+            className="lu-control"
           >
-            <ShieldCheck size={11} /> Mainstream
+            <ShieldCheck size={ICON_SM} /> Mainstream
           </button>
           <button
             onClick={() => setSubTab('uncensored')}
             aria-pressed={subTab === 'uncensored'}
             title="No filters, no limits"
-            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[0.66rem] font-semibold transition-all ${
-              subTab === 'uncensored'
-                ? 'bg-white dark:bg-white/10 text-gray-900 dark:text-white shadow-sm'
-                : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
-            }`}
+            className="lu-control"
           >
-            <Unlock size={11} /> Unfiltered
+            <Unlock size={ICON_SM} /> Unfiltered
           </button>
         </div>
 
@@ -705,7 +929,7 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
 
       {/* Size chips — same buckets as the old VRAM-tier filter, plain labels */}
       {(isImage || isVideo || (isText && (uncensoredModels.length > 0 || mainstreamModels.length > 0))) && (
-        <div className="flex gap-1.5 flex-wrap">
+        <div className={SEGMENT_TRACK} role="group" aria-label="Size">
           {([
             { key: 'all' as SizeTier, label: 'All', desc: '' },
             ...(systemVRAM ? [{ key: 'fit' as SizeTier, label: 'Fits my PC', desc: `≤${systemVRAM} GB` }] : []),
@@ -717,19 +941,29 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
             <button
               key={tier.key}
               onClick={() => setVramTier(tier.key)}
-              className={`px-2.5 py-1 rounded-full text-[11px] font-medium transition-all border ${
-                vramTier === tier.key
-                  // No text-white/bg-gray-900 inversion here: the `.light .text-white`
-                  // rescue remap (index.css) would turn that into gray-900-on-gray-900.
-                  ? 'bg-gray-200 text-gray-900 dark:bg-white/15 dark:text-white border-gray-300 dark:border-white/20'
-                  : 'text-gray-500 border-gray-200 dark:border-white/[0.06] hover:text-gray-800 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/5'
-              }`}
+              aria-pressed={vramTier === tier.key}
+              className="lu-control"
             >
               {tier.label}
-              {tier.desc && <span className={`text-[9px] ml-1 ${vramTier === tier.key ? 'text-gray-600 dark:text-gray-400' : 'text-gray-400 dark:text-gray-500'}`}>{tier.desc}</span>}
+              {tier.desc && <span className="opacity-60 ml-1">{tier.desc}</span>}
             </button>
           ))}
         </div>
+      )}
+
+      {/* A14: the pick took the chat backend with it, and says so. The same
+          bar the composer shows, from the same store, so the sentence cannot
+          drift into two versions of itself. */}
+      <LuEngineSwitchBar />
+
+      {/* D-S22 · die Legende zu den Faehigkeitszeichen auf den Kacheln.
+          Steht einmal hier statt 53 Mal als Tooltip, den man erst findet,
+          wenn man auf einem 12px-Glyph stehenbleibt. Sie rendert aus
+          derselben `CAPABILITIES`-Tabelle wie die Kacheln (ModelTiles.tsx),
+          kann also nicht von ihnen abweichen. Sie steht unter der Leiste,
+          also so nah wie moeglich an dem Raster, das sie erklaert. */}
+      {isText && (uncensoredModels.length > 0 || mainstreamModels.length > 0) && (
+        <CapLegend />
       )}
 
       {/* Install error banner */}
@@ -739,6 +973,21 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
           <span className="flex-1">{installError}</span>
           <button onClick={() => setInstallError(null)} className="text-red-400 hover:text-red-300 shrink-0">
             <X size={14} />
+          </button>
+        </div>
+      )}
+
+      {/* Install notice — T-69. Nicht rot: eine Pause ist keine Panne. */}
+      {installNotice && (
+        <div className="flex items-center gap-2 p-3 rounded-lg bg-gray-100 dark:bg-white/[0.04] border border-gray-200 dark:border-white/[0.06] text-gray-600 dark:text-gray-300 text-sm">
+          <Info size={ICON_SM} className="shrink-0" />
+          <span className="flex-1">{installNotice}</span>
+          <button
+            onClick={() => setInstallNotice(null)}
+            className="lu-control lu-control--icon shrink-0"
+            aria-label="Dismiss this notice"
+          >
+            <X size={ICON_SM} />
           </button>
         </div>
       )}
@@ -774,7 +1023,7 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
           <div className="flex items-center justify-between gap-2">
             <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Search CivitAI</h3>
             {/* Mirror toggle (#53) — civitai.red for regions where .com is blocked. */}
-            <div className="flex items-center gap-1 text-[10px]">
+            <div className="flex items-center gap-1 t-micro">
               <span className="text-gray-400 dark:text-gray-500 mr-0.5">mirror</span>
               {(['civitai.com', 'civitai.red'] as const).map((h) => (
                 <button
@@ -827,13 +1076,13 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
                         <span className="text-sm font-medium text-gray-900 dark:text-white truncate">{model.name}</span>
-                        {model.sizeGB && <span className="text-[10px] text-gray-400 flex-shrink-0">{model.sizeGB} GB</span>}
+                        {model.sizeGB && <span className="t-micro text-gray-400 flex-shrink-0">{model.sizeGB} GB</span>}
                       </div>
-                      {model.description && <p className="text-[11px] text-gray-500 line-clamp-1 mt-0.5">{model.description}</p>}
+                      {model.description && <p className="t-micro text-gray-500 line-clamp-1 mt-0.5">{model.description}</p>}
                       {isDl && dlState && dlState.total > 0 && (
                         <div className="mt-1.5">
                           <ProgressBar progress={(dlState.progress / dlState.total) * 100} />
-                          <span className="text-[10px] text-gray-400">{formatBytes(dlState.progress)} / {formatBytes(dlState.total)}</span>
+                          <span className="t-micro text-gray-400">{formatBytes(dlState.progress)} / {formatBytes(dlState.total)}</span>
                         </div>
                       )}
                     </div>
@@ -843,11 +1092,11 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
                       ) : isDl ? (
                         <Loader2 size={16} className="animate-spin text-gray-400" />
                       ) : model.downloadUrl ? (
-                        <button onClick={() => handleCivitaiDownload(model)} className="p-2 rounded-lg bg-green-100 dark:bg-green-500/15 hover:bg-green-200 dark:hover:bg-green-500/25 text-green-700 dark:text-green-400 transition-all" title="Download" aria-label="Download">
+                        <button onClick={() => handleCivitaiDownload(model)} className="p-2 rounded-lg bg-green-100 dark:bg-green-500/15 hover:bg-green-200 dark:hover:bg-green-500/25 text-green-700 dark:text-green-400 transition-colors" title="Download" aria-label="Download">
                           <Download size={14} />
                         </button>
                       ) : null}
-                      <button onClick={() => openExternal(model.sourceUrl)} className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-white/10 text-gray-500 transition-all" title="View on CivitAI" aria-label="View on CivitAI">
+                      <button onClick={() => openExternal(model.sourceUrl)} className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-white/10 text-gray-500 transition-colors" title="View on CivitAI" aria-label="View on CivitAI">
                         <ExternalLink size={14} />
                       </button>
                     </div>
@@ -857,9 +1106,11 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
             </div>
           )}
 
-          {civitaiSearching && <div className="text-center py-4 text-gray-500 text-sm">Searching CivitAI...</div>}
+          {/* Listen-Ladezustand 2 von 4 — dieselbe Begruendung eine Karte
+              weiter oben, nur mit der Zeilengeometrie der Trefferliste. */}
+          {civitaiSearching && <CivitaiResultsSkeleton />}
           {!civitaiSearching && civitaiSearched && civitaiResults.length === 0 && (
-            <div className="text-center py-4 text-[11px] text-gray-500 leading-relaxed">
+            <div className="text-center py-4 t-micro text-gray-500 leading-relaxed">
               No matches for "{civitaiQuery}". Try a broader query, or add your CivitAI API key
               in the Workflow finder for the full catalog.
             </div>
@@ -867,8 +1118,51 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
         </GlassCard>
       )}
 
+      {/* ── D-S26 · „Keine Virtualisierung: 53 Karten = 1610 DOM-Knoten,
+          300 Modelle ≈ 9000." ──────────────────────────────────────────
+
+          Hier steht bewusst KEINE Virtualisierung und auch nicht das Mittel,
+          mit dem T-11 dasselbe Problem im Transkript geloest hat
+          (`content-visibility: auto` in MessageList.tsx). Beides wurde
+          gemessen, bevor es verworfen wurde.
+
+          Gezaehlt im Test (`__tests__/das-raster-zaehlt-seine-knoten.test.ts`,
+          echter Katalog durch `renderToStaticMarkup`): 53 Kacheln je Reiter,
+          rund 28 Elementknoten pro Kachel.
+
+          Gemessen in der laufenden App (Chromium, Dev-Server :5273,
+          1600×900, dreispaltig; erzwungenes Style+Layout ueber
+          `scroller.offsetHeight`, Median aus 41 Messungen):
+
+            53 Kacheln  · 1304 Knoten im Raster, 1595 auf der Seite · 0,2 ms
+           303 Kacheln  · Kacheln geklont, ≈ 7500 Knoten            · 1,1 ms
+
+          Dieselbe Messung mit `content-visibility: auto` +
+          `contain-intrinsic-size: auto 125px` auf jeder Kachel: 0,2 ms und
+          1,1 ms — unveraendert. Dafuer wuchs `scrollHeight` um rund 20 %
+          (2187 → 2637 px bzw. 11367 → 13842 px), weil die Ersatzhoehe eine
+          Schaetzung ist: der Rollbalken wuerde luegen, bis der Nutzer an
+          jeder Kachel einmal vorbeigescrollt ist.
+
+          Der Grund fuer den Unterschied zum Transkript: eine Nachrichtenblase
+          ist ein gerendertes Markdown-Dokument (Prism-Spans, KaTeX,
+          Tabellen), eine Modellkachel sind 25 Flexboxen. `content-visibility`
+          spart das Layout eines Teilbaums — hier gibt es keinen, der sich zu
+          sparen lohnt.
+
+          Und die 300 aus dem Befund sind eine Hochrechnung: gleichzeitig im
+          DOM stehen koennen heute der Katalog (53) plus die
+          HuggingFace-Suche, und die fragt mit `limit=20` (discover.ts).
+          Der Test haelt diese Obergrenze fest und wird rot, sobald der
+          Katalog aus dem gemessenen Bereich herauswaechst — dann neu messen,
+          nicht raten.
+
+          Welle 3, Listen-Ladezustand 1 von 4: „Loading models..." war ein
+          Satz mittig auf 32px Hoehe, wo gleich sechs bis dreiundfuenfzig
+          Kacheln stehen — die Seite sprang beim Eintreffen der Liste um
+          mehrere Bildschirmhoehen. Das Skelett traegt die Rastergeometrie. */}
       {loading ? (
-        <div className="text-center py-8 text-gray-500">Loading models...</div>
+        <ModelGridSkeleton />
       ) : isText ? (
         <>
           {/* Start here — derived picks for the active tab */}
@@ -876,7 +1170,7 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
             <div className="space-y-1.5">
               <div className="flex items-center gap-1.5 px-1">
                 <Sparkles size={11} className="text-gray-400 dark:text-gray-500" />
-                <h3 className="text-[0.62rem] font-semibold uppercase tracking-[0.12em] text-gray-700 dark:text-gray-300">Start here</h3>
+                <h3 className="t-micro font-semibold uppercase tracking-[0.12em] text-gray-700 dark:text-gray-300">Start here</h3>
                 <span className="text-[0.55rem] text-gray-400 dark:text-gray-500">picked for your PC</span>
                 <div className="flex-1 h-px bg-gray-200 dark:bg-white/[0.06]" />
               </div>
@@ -889,7 +1183,7 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
           <div className="space-y-1.5">
             {topPicks.length >= 2 && (
               <div className="flex items-center gap-1.5 px-1 pt-1">
-                <h3 className="text-[0.62rem] font-semibold uppercase tracking-[0.12em] text-gray-700 dark:text-gray-300">
+                <h3 className="t-micro font-semibold uppercase tracking-[0.12em] text-gray-700 dark:text-gray-300">
                   {subTab === 'uncensored' ? 'All unfiltered models' : 'All mainstream models'}
                 </h3>
                 <div className="flex-1 h-px bg-gray-200 dark:bg-white/[0.06]" />
@@ -910,7 +1204,7 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
             <div className="space-y-1.5 mt-6">
               <div className="flex items-center gap-1.5 px-1">
                 <Search size={10} className="text-gray-400" />
-                <h3 className="text-[0.62rem] font-semibold uppercase tracking-[0.12em] text-gray-500">HuggingFace results</h3>
+                <h3 className="t-micro font-semibold uppercase tracking-[0.12em] text-gray-500">HuggingFace results</h3>
                 <div className="flex-1 h-px bg-gray-200 dark:bg-white/[0.06]" />
               </div>
               <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-2.5">
@@ -922,6 +1216,9 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
                       isInstalled={isModelFullyInstalled}
                       dlState={getModelDownloadState}
                       onDownload={handleTextDownload}
+                      onUse={handleUseInstalled}
+                      canUse={canUseInstalled}
+                      isUsing={(m) => installedEntryFor(m)?.name === usingModel && usingModel !== null}
                       onInfo={setInfoModel}
                       onOpenUrl={(u) => openExternal(u)}
                     />
@@ -944,16 +1241,16 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
             <p className="text-[0.72rem] text-gray-700 dark:text-gray-200 leading-relaxed">{infoModel.description}</p>
             <div className="flex items-center gap-1.5 flex-wrap">
               {infoModel.tags.map(t => (
-                <span key={t} className="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 dark:bg-white/5 text-gray-600 dark:text-gray-400">{t}</span>
+                <span key={t} className="t-micro px-1.5 py-0.5 rounded bg-gray-100 dark:bg-white/5 text-gray-600 dark:text-gray-400">{t}</span>
               ))}
-              {infoModel.sizeGB && <span className="text-[10px] text-gray-400">{infoModel.sizeGB} GB</span>}
-              {infoModel.pulls && <span className="text-[10px] text-gray-400">{infoModel.pulls} pulls</span>}
-              {infoModel.released && <span className="text-[10px] text-gray-400">released {infoModel.released}</span>}
+              {infoModel.sizeGB && <span className="t-micro text-gray-400">{infoModel.sizeGB} GB</span>}
+              {infoModel.pulls && <span className="t-micro text-gray-400">{infoModel.pulls} pulls</span>}
+              {infoModel.released && <span className="t-micro text-gray-400">released {infoModel.released}</span>}
             </div>
             {infoRepoUrl(infoModel) && (
               <button
                 onClick={() => openExternal(infoRepoUrl(infoModel)!)}
-                className="flex items-center gap-1.5 text-[0.65rem] text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white transition-colors"
+                className="flex items-center gap-1.5 t-micro text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white transition-colors"
               >
                 <ExternalLink size={11} /> View on HuggingFace
               </button>
@@ -965,21 +1262,28 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
       <Modal open={!!confirmDownload} onClose={() => setConfirmDownload(null)} title="Download split model">
         {confirmDownload && (
           <div className="space-y-3">
-            <p className="text-[0.75rem] text-gray-700 dark:text-gray-200">
+            <p className="text-[12px] text-gray-700 dark:text-gray-200">
               <span className="font-semibold text-gray-900 dark:text-white">{confirmDownload.name}</span> is split into{' '}
-              <span className="font-semibold text-gray-900 dark:text-white">{confirmDownload.files.length} files</span>{' '}
+              <span className="font-semibold text-gray-900 dark:text-white">{countLabel(confirmDownload.files.length, 'file')}</span>{' '}
               totalling <span className="font-semibold text-gray-900 dark:text-white">{confirmDownload.totalGB} GB</span>.
             </p>
             <p className="text-[0.7rem] text-gray-500">
               All parts must download into one folder to load as a single model. Make sure you have the disk space, and the RAM/VRAM to actually run it.
             </p>
+            {/* Beide Saetze standen in Gelb, also in der Farbe, mit der die
+                App bis heute alles zwischen „gut" und „kaputt" markiert hat.
+                Keiner von beiden haelt den Download auf: der erste sagt, wie
+                gross das Ding ist, der zweite, in welchem Ordner die Teile
+                landen. Auskunft, kein Alarm, also der ruhige Ton aus
+                `lib/hinweis.ts`. Die Schriftgroesse bleibt die der beiden
+                Saetze darueber, damit der Absatz eine Stimme behaelt. */}
             {confirmDownload.totalGB > 60 && (
-              <p className="text-[0.7rem] text-amber-500">
+              <p className={`text-[0.7rem] ${HINWEIS_TEXT.ruhig}`}>
                 That is very large for a local model. Most consumer GPUs can't run it.
               </p>
             )}
             {confirmDownload.note && (
-              <p className="text-[0.7rem] text-amber-500">{confirmDownload.note}</p>
+              <p className={`text-[0.7rem] ${HINWEIS_TEXT.ruhig}`}>{confirmDownload.note}</p>
             )}
             <div className="flex gap-2 pt-1">
               <GlowButton variant="secondary" onClick={() => setConfirmDownload(null)} className="flex-1">

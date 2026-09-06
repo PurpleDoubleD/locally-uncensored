@@ -17,18 +17,14 @@ use std::path::{Path, PathBuf};
 /// SAME folder the file tools write to. Used as the fallback cwd when the
 /// caller doesn't pass one — without it the child process inherits the LU
 /// app's ambient cwd and dumps build output into ~/Documents (David 2026-06-04).
+///
+/// The slug comes from `agent::sanitize_chat_slug`, the one copy that drops
+/// `.`: this file used to carry its own that kept it, so a chat id of ".."
+/// resolved to `~/agent-workspace/..` == `$HOME` and the shell tool ran (and
+/// created directories) straight in the user's home (audit IPC-1).
 fn workspace_cwd(chat_id: Option<&str>) -> PathBuf {
-    let id = chat_id.unwrap_or("default");
-    let safe: String = id
-        .chars()
-        .take(64)
-        .map(|c| if c.is_ascii_alphanumeric() || c == '_' || c == '-' || c == '.' { c } else { '_' })
-        .collect();
-    let slug = if safe.is_empty() { "default".to_string() } else { safe };
-    dirs::home_dir()
-        .unwrap_or_default()
-        .join("agent-workspace")
-        .join(slug)
+    crate::os_paths::agent_workspace_root()
+        .join(crate::commands::agent::sanitize_chat_slug(chat_id.unwrap_or("default")))
 }
 
 /// How much of a command's output travels back to the model. Anything past this
@@ -72,6 +68,67 @@ pub(crate) fn drain(mut pipe: impl Read + Send + 'static) -> (Arc<Mutex<Captured
     (buf, done)
 }
 
+/// Terminal-Steuerzeichen aus eingefangener Ausgabe entfernen.
+///
+/// Kindprozesse faerben ihre Ausgabe, wenn sie ein Terminal vermuten, und eine
+/// Pipe reicht vielen dafuer aus: llama-server, pip und ComfyUI tun es alle.
+/// Die Sequenzen kommen bis 2.6.8 ungefiltert im Fenster an und stehen dort
+/// als Kaestchen mitten im Satz (gemessen am 03.09.2026 im Fehlerfeld der
+/// Engine).
+///
+/// Entfernt wird, was ein Terminal steuert, nicht was es zeigt: CSI
+/// (`ESC [ … Endbuchstabe`, also auch Farben und Cursorbewegungen), OSC
+/// (`ESC ] … BEL` oder `ESC \`, wo Programme Fenstertitel setzen) und die
+/// kurzen Zwei-Zeichen-Escapes. Text ohne ESC laeuft unveraendert durch, und
+/// ein einzelnes ESC am Ende eines abgeschnittenen Puffers faellt weg statt
+/// den Rest zu verschlucken.
+///
+/// Hier und nicht in der Fehlermeldung: JEDE eingefangene Ausgabe geht durch
+/// diese Stelle, also auch die Installerprotokolle und die Agentenausgabe. Und
+/// die Mustererkennung darueber (`stderr_blames_the_model` und ihre
+/// Geschwister) liest denselben Text; ein Farbcode mitten im Wort hat dort
+/// schon Treffer gekostet.
+pub(crate) fn strip_ansi(roh: &str) -> String {
+    if !roh.contains('\u{1b}') {
+        return roh.to_string();
+    }
+    let mut aus = String::with_capacity(roh.len());
+    let mut zeichen = roh.chars().peekable();
+    while let Some(c) = zeichen.next() {
+        if c != '\u{1b}' {
+            aus.push(c);
+            continue;
+        }
+        match zeichen.next() {
+            // CSI: Parameter- und Zwischenbytes, dann ein Endbuchstabe 0x40..0x7E.
+            Some('[') => {
+                for z in zeichen.by_ref() {
+                    if ('\u{40}'..='\u{7e}').contains(&z) {
+                        break;
+                    }
+                }
+            }
+            // OSC: laeuft bis BEL oder bis ESC \.
+            Some(']') => {
+                while let Some(z) = zeichen.next() {
+                    if z == '\u{7}' {
+                        break;
+                    }
+                    if z == '\u{1b}' {
+                        if zeichen.peek() == Some(&'\\') {
+                            zeichen.next();
+                        }
+                        break;
+                    }
+                }
+            }
+            // Alles andere ist ein Zwei-Zeichen-Escape und ist damit erledigt.
+            Some(_) | None => {}
+        }
+    }
+    aus
+}
+
 /// Decode captured bytes leniently. Build tools on a non-UTF-8 Windows codepage
 /// emit bytes `read_to_string` rejects outright — that used to throw the whole
 /// output away and hand the model an empty string next to a successful exit code.
@@ -80,7 +137,7 @@ pub(crate) fn captured_text(buf: &Arc<Mutex<Captured>>) -> String {
         Ok(c) => c,
         Err(poisoned) => poisoned.into_inner(),
     };
-    let mut text = String::from_utf8_lossy(&c.kept).into_owned();
+    let mut text = strip_ansi(&String::from_utf8_lossy(&c.kept));
     if c.total > c.kept.len() {
         text.push_str(&format!(
             "\n[output truncated: {} of {} bytes shown]",
@@ -182,8 +239,70 @@ pub(crate) fn settle(a: &Arc<AtomicBool>, b: &Arc<AtomicBool>, max: std::time::D
     }
 }
 
+/// The command line a shell wants for "run this one string as a command": the
+/// program to spawn, and the arguments to hand it.
+///
+/// ONE copy, because there used to be two. The foreground `shell_execute`
+/// derived the argument form from the shell's NAME; the background
+/// `shell_task_start` derived it from the PLATFORM alone and gave PowerShell's
+/// `-NoProfile -NonInteractive -Command` to whatever program the caller had
+/// named. A background task with `shell: "cmd"` — a value the tool schema
+/// advertises — therefore became `cmd -NoProfile -NonInteractive -Command
+/// <command>`, which cmd.exe rejects flag by flag; `shell: "bash"` fared no
+/// better. Only one of the two copies was ever repaired, which is the entire
+/// argument for there being a single function: the same shell must produce the
+/// same command line whether the task runs in the foreground or the background.
+///
+/// `windows` is a parameter rather than a `cfg!` inside the body so that BOTH
+/// platforms' argument forms can be asserted from either platform's test run —
+/// the Windows form is precisely the half no Mac or Linux run would otherwise
+/// ever look at.
+///
+/// `command` stays ONE argument. It is never folded into the flag string, so
+/// nothing inside it can close the argument and open a second command.
+pub(crate) fn shell_argv(
+    windows: bool,
+    shell: Option<&str>,
+    command: &str,
+) -> (String, Vec<String>) {
+    let shell_bin = shell
+        .map(str::to_string)
+        .unwrap_or_else(|| default_shell(windows).to_string());
+    let name = shell_bin.to_lowercase();
+    let mut args: Vec<String> = if windows && name.contains("powershell") {
+        vec![
+            "-NoProfile".into(),
+            "-NonInteractive".into(),
+            "-Command".into(),
+        ]
+    } else if windows && name.contains("cmd") {
+        vec!["/C".into()]
+    } else {
+        // Every POSIX shell — and, on Windows, anything else the caller names,
+        // `pwsh` included. Unchanged from what the foreground path has always
+        // done with a name it does not recognise.
+        vec!["-c".into()]
+    };
+    args.push(command.to_string());
+    (shell_bin, args)
+}
+
+/// The shell a caller gets when it names none: PowerShell on Windows, bash
+/// everywhere else. This is the path every user is on today.
+pub(crate) fn default_shell(windows: bool) -> &'static str {
+    if windows {
+        "powershell"
+    } else {
+        "bash"
+    }
+}
+
+/// The eight arguments are the IPC contract: `#[tauri::command]` derives the
+/// invoke payload from this signature, so folding them into a struct would
+/// change the JSON the frontend sends. `clippy::too_many_arguments` is allowed
+/// here for that reason and not as a matter of taste.
 #[tauri::command]
-#[allow(non_snake_case)]
+#[allow(non_snake_case, clippy::too_many_arguments)]
 pub async fn shell_execute(
     command: String,
     args: Option<Vec<String>>,
@@ -201,6 +320,10 @@ pub async fn shell_execute(
     .map_err(|e| format!("Task join error: {}", e))?
 }
 
+/// Mirrors `shell_execute`'s parameter list one-to-one on purpose — it is the
+/// blocking half of the same command, and a different shape here would be a
+/// second place to keep in step with the frontend contract.
+#[allow(clippy::too_many_arguments)]
 fn shell_execute_sync(
     command: String,
     args: Option<Vec<String>>,
@@ -212,24 +335,13 @@ fn shell_execute_sync(
     working_directory: Option<String>,
 ) -> Result<serde_json::Value, String> {
     let timeout_ms = timeout.unwrap_or(120_000);
-    let shell_bin = shell.unwrap_or_else(|| {
-        if cfg!(target_os = "windows") {
-            "powershell".to_string()
-        } else {
-            "bash".to_string()
-        }
-    });
+    // Shell name in, program + argument form out — the same function the
+    // background twin in bg_tasks.rs calls, so the two cannot drift apart.
+    let (shell_bin, shell_args) =
+        shell_argv(cfg!(target_os = "windows"), shell.as_deref(), &command);
 
     let mut cmd = Command::new(&shell_bin);
-
-    // Build shell command
-    if cfg!(target_os = "windows") && shell_bin.to_lowercase().contains("powershell") {
-        cmd.arg("-NoProfile").arg("-NonInteractive").arg("-Command").arg(&command);
-    } else if cfg!(target_os = "windows") && shell_bin.to_lowercase().contains("cmd") {
-        cmd.arg("/C").arg(&command);
-    } else {
-        cmd.arg("-c").arg(&command);
-    }
+    cmd.args(&shell_args);
 
     // Append extra args
     if let Some(extra_args) = args {
@@ -242,7 +354,7 @@ fn shell_execute_sync(
     // back to the per-chat agent workspace (created if missing) so a relative
     // command never runs in the app's ambient cwd and scatters files into
     // ~/Documents (David 2026-06-04). Mirrors the file tools' path resolution.
-    let workdir: PathBuf = match cwd.as_ref().map(|d| Path::new(d)) {
+    let workdir: PathBuf = match cwd.as_ref().map(Path::new) {
         Some(p) if p.is_dir() => p.to_path_buf(),
         _ => match working_directory.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
             // Folder workspace (the user's repo, from chatCtx.workingDirectory)
@@ -340,6 +452,225 @@ fn shell_execute_sync(
     }
 }
 
+/// The argument form, asserted for both platforms from either platform.
+///
+/// `shell_argv` takes `windows` as a parameter precisely so this module can
+/// pin the Windows command lines on a Mac and the Unix ones on Windows. The
+/// bug that made the function necessary lived in the Windows half and was
+/// therefore invisible to every non-Windows test run there had ever been.
+#[cfg(test)]
+mod shell_dialect_tests {
+    use super::shell_argv;
+
+    const WINDOWS: bool = true;
+    const UNIX: bool = false;
+    const CMD: &str = "echo hi";
+
+    fn argv(windows: bool, shell: Option<&str>) -> (String, Vec<String>) {
+        shell_argv(windows, shell, CMD)
+    }
+
+    fn args_of(windows: bool, shell: &str) -> Vec<String> {
+        argv(windows, Some(shell)).1
+    }
+
+    fn powershell_form() -> Vec<String> {
+        vec![
+            "-NoProfile".to_string(),
+            "-NonInteractive".to_string(),
+            "-Command".to_string(),
+            CMD.to_string(),
+        ]
+    }
+
+    fn cmd_form() -> Vec<String> {
+        vec!["/C".to_string(), CMD.to_string()]
+    }
+
+    fn posix_form() -> Vec<String> {
+        vec!["-c".to_string(), CMD.to_string()]
+    }
+
+    /// The path every user is on today — no `shell` named at all. Windows gets
+    /// PowerShell with `-Command`, Unix gets bash with `-c`, exactly as before
+    /// the two branches were merged into one function.
+    #[test]
+    fn the_default_shell_is_unchanged_on_both_platforms() {
+        assert_eq!(
+            argv(WINDOWS, None),
+            ("powershell".to_string(), powershell_form()),
+        );
+        assert_eq!(argv(UNIX, None), ("bash".to_string(), posix_form()));
+    }
+
+    /// On Windows the form follows the name, including a full path to the
+    /// binary and the `.exe` suffix — the spellings a caller actually sends.
+    #[test]
+    fn windows_gets_the_form_of_the_shell_it_was_named() {
+        for ps in [
+            "powershell",
+            "PowerShell",
+            "powershell.exe",
+            r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe",
+        ] {
+            assert_eq!(args_of(WINDOWS, ps), powershell_form(), "{ps}");
+        }
+        for c in ["cmd", "CMD", "cmd.exe", r"C:\Windows\System32\cmd.exe"] {
+            assert_eq!(args_of(WINDOWS, c), cmd_form(), "{c}");
+        }
+        // The two the background path used to break outright.
+        for posix in ["bash", "sh", r"C:\Program Files\Git\bin\bash.exe"] {
+            assert_eq!(args_of(WINDOWS, posix), posix_form(), "{posix}");
+        }
+    }
+
+    /// PowerShell's flags are a Windows-only dialect. A `powershell` named on
+    /// a Mac is a POSIX-style invocation like everything else there.
+    #[test]
+    fn unix_never_gets_windows_flags() {
+        for shell in ["bash", "sh", "zsh", "/bin/sh", "powershell", "cmd"] {
+            assert_eq!(args_of(UNIX, shell), posix_form(), "{shell}");
+        }
+    }
+
+    /// The program is the shell the caller named, never a rewritten one.
+    #[test]
+    fn the_program_is_the_shell_that_was_named() {
+        assert_eq!(argv(WINDOWS, Some("cmd.exe")).0, "cmd.exe");
+        assert_eq!(argv(UNIX, Some("/bin/zsh")).0, "/bin/zsh");
+    }
+
+    /// No shell injection: the command travels as ONE argument, byte for byte,
+    /// and never gets concatenated onto a flag. Quotes, `&&`, semicolons and
+    /// newlines inside it are the shell's problem to parse, not a way to add a
+    /// second argument to the shell's own command line.
+    #[test]
+    fn the_command_stays_a_single_argument() {
+        let nasty = "echo \"a\" && whoami ; echo 'b'\nrm -rf /";
+        for (windows, shell, flags) in [
+            (WINDOWS, "powershell", 3usize),
+            (WINDOWS, "cmd", 1),
+            (WINDOWS, "bash", 1),
+            (UNIX, "bash", 1),
+        ] {
+            let (_, args) = shell_argv(windows, Some(shell), nasty);
+            assert_eq!(args.len(), flags + 1, "{shell} on windows={windows}");
+            assert_eq!(args.last().map(String::as_str), Some(nasty));
+        }
+    }
+}
+
+/// The IPC surface itself, asserted against the shipped config files.
+///
+/// `shell:allow-spawn` is the only permission the WebView holds that starts a
+/// process, and it used to list ~20 programs with `"args": true` — every
+/// interpreter with a one-shot eval flag plus `docker`. Combined with
+/// `withGlobalTauri`, that turned any script-execution bug in the WebView into
+/// `node -e "…"` with the user's rights. These tests fail the moment either
+/// half comes back.
+#[cfg(test)]
+mod ipc_surface_tests {
+    use std::path::PathBuf;
+
+    fn manifest_dir() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+    }
+
+    fn read_json(rel: &str) -> serde_json::Value {
+        let p = manifest_dir().join(rel);
+        let raw = std::fs::read_to_string(&p).unwrap_or_else(|e| panic!("read {p:?}: {e}"));
+        serde_json::from_str(&raw).unwrap_or_else(|e| panic!("parse {p:?}: {e}"))
+    }
+
+    #[test]
+    fn the_spawn_allow_list_carries_no_general_purpose_interpreter() {
+        let cap = read_json("capabilities/default.json");
+        let mut spawn_entries = Vec::new();
+        for perm in cap["permissions"].as_array().expect("permissions") {
+            if perm.get("identifier").and_then(|v| v.as_str()) == Some("shell:allow-spawn") {
+                for entry in perm["allow"].as_array().expect("allow list") {
+                    spawn_entries.push(entry.clone());
+                }
+            }
+        }
+        assert!(!spawn_entries.is_empty(), "no shell:allow-spawn entry found");
+
+        // Every one of the NINETEEN entries the hardening commit removed, and
+        // not a subset: the list had 15, so `bunx`, `bunx.cmd`, `pnpm.cmd` and
+        // `yarn.cmd` could have been put back without a single test noticing.
+        // `bunx` is the one that matters most — it is npx's exact equivalent,
+        // it fetches a package off the network and runs it, and it was in the
+        // allow-list with `"args": true`.
+        //
+        // Anything that runs code handed to it on the command line, or that
+        // runs whatever a package.json / image says.
+        const BANNED: [&str; 19] = [
+            "node", "node.cmd", "deno", "deno.cmd",
+            "bun", "bun.cmd", "bunx", "bunx.cmd",
+            "python", "python3", "py", "docker",
+            "npm", "npm.cmd", "pnpm", "pnpm.cmd", "yarn", "yarn.cmd", "uv",
+        ];
+        for entry in &spawn_entries {
+            let name = entry["name"].as_str().unwrap_or_default().to_lowercase();
+            let cmd = entry["cmd"].as_str().unwrap_or_default().to_lowercase();
+            for bad in BANNED {
+                assert_ne!(cmd, bad, "{bad} is back in the spawn allow-list");
+                assert_ne!(name, bad, "{bad} is back in the spawn allow-list");
+            }
+        }
+    }
+
+    /// `withGlobalTauri` publishes the whole JS API on `window.__TAURI__`, i.e.
+    /// hands any injected script a ready-made `shell.Command` without it having
+    /// to know the internal invoke shape. The app detects its runtime through
+    /// `__TAURI_INTERNALS__` (see `isTauri` in src/api/backend.ts), which Tauri
+    /// injects regardless, so nothing needs the global.
+    #[test]
+    fn the_full_js_api_is_not_published_on_the_window_object() {
+        let conf = read_json("tauri.conf.json");
+        assert_eq!(
+            conf["app"]["withGlobalTauri"],
+            serde_json::Value::Bool(false),
+            "withGlobalTauri is back on",
+        );
+    }
+
+    /// The reason turning it off is safe — asserted instead of assumed. A
+    /// `window.__TAURI__.something` anywhere in the frontend would go undefined
+    /// at runtime with no compile-time warning.
+    #[test]
+    fn no_frontend_code_calls_through_the_global() {
+        let src = manifest_dir().join("..").join("src");
+        if !src.is_dir() {
+            return; // source-less build tree: nothing to check
+        }
+        let mut offenders: Vec<String> = Vec::new();
+        for entry in walkdir::WalkDir::new(&src).into_iter().filter_map(|e| e.ok()) {
+            let p = entry.path();
+            let is_source = p
+                .extension()
+                .and_then(|e| e.to_str())
+                .map(|e| matches!(e, "ts" | "tsx" | "js" | "jsx" | "html"))
+                .unwrap_or(false);
+            if !is_source {
+                continue;
+            }
+            if let Ok(text) = std::fs::read_to_string(p) {
+                for (i, line) in text.lines().enumerate() {
+                    // A member access, not the `w.__TAURI__` presence check.
+                    if line.contains("__TAURI__.") {
+                        offenders.push(format!("{}:{}", p.display(), i + 1));
+                    }
+                }
+            }
+        }
+        assert!(
+            offenders.is_empty(),
+            "these still call through window.__TAURI__: {offenders:?}",
+        );
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -361,6 +692,17 @@ mod tests {
     }
 
     #[test]
+    fn eingefangene_ausgabe_kommt_ohne_farbcodes_heraus() {
+        // Die Verdrahtung, nicht der Filter: `strip_ansi` allein gruen zu
+        // haben hiess bis hierher gar nichts, denn die Ausgabe lief an ihm
+        // vorbei ins Fenster (gemessen am 03.09.2026 im Fehlerfeld der
+        // Engine). Geprueft wird deshalb der Weg, den die echte Ausgabe nimmt.
+        let text = capture(b"\x1b[0;33mwarn: \x1b[0mno kernel for this quant".to_vec());
+        assert_eq!(text, "warn: no kernel for this quant");
+        assert!(!text.contains('\u{1b}'), "an escape sequence reached the window: {text:?}");
+    }
+
+    #[test]
     fn oversized_output_is_capped_and_says_so() {
         let text = capture(vec![b'x'; MAX_CAPTURE + 5_000]);
         assert!(text.contains("output truncated"), "no truncation note: {:?}", &text[..64]);
@@ -371,6 +713,40 @@ mod tests {
     fn small_output_comes_back_whole_and_unannotated() {
         let text = capture(b"hello\n".to_vec());
         assert_eq!(text, "hello\n");
+    }
+
+    /// The shell tool creates its fallback cwd with `create_dir_all`. With the
+    /// local sanitiser copy that still allowed `.`, a chat id of ".." resolved
+    /// to `~/agent-workspace/..` — the user's HOME — and every relative command
+    /// from that chat ran there (audit IPC-1, fixed in agent.rs only).
+    #[test]
+    fn a_dotted_chat_id_cannot_walk_the_cwd_out_of_the_workspace() {
+        let root = crate::os_paths::agent_workspace_root();
+        for id in ["..", ".", "../..", "a.b"] {
+            let cwd = workspace_cwd(Some(id));
+            assert!(cwd.starts_with(&root), "id {id:?} escaped to {cwd:?}");
+            assert_ne!(cwd, root, "id {id:?} landed on the workspace root itself");
+            // Only the SLUG, never the whole path: a machine whose home is
+            // /Users/max.mustermann has a dot in every path under it, and this
+            // assertion used to fail there for a reason that has nothing to do
+            // with the chat id.
+            //
+            // The last COMPONENT, not `file_name()`: `file_name()` answers None
+            // for a path ending in `..`, which is precisely the id this is
+            // guarding against — the check would pass by not looking.
+            let slug = cwd
+                .components()
+                .next_back()
+                .map(|c| c.as_os_str().to_string_lossy().to_string())
+                .unwrap_or_default();
+            assert!(
+                !slug.contains('.'),
+                "id {id:?} kept a dot in its folder name: {slug:?} (from {cwd:?})",
+            );
+        }
+        // Ordinary ids keep their own folder.
+        assert_eq!(workspace_cwd(Some("coding-agent-8b0c71")), root.join("coding-agent-8b0c71"));
+        assert_eq!(workspace_cwd(None), root.join("default"));
     }
 
     #[cfg(unix)]
@@ -441,5 +817,58 @@ mod tests {
             );
             std::thread::sleep(std::time::Duration::from_millis(100));
         }
+    }
+}
+
+#[cfg(test)]
+mod farbcode_tests {
+    use super::strip_ansi;
+
+    /// Genau die Zeile, die am 03.09.2026 im Fehlerfeld stand: llama-server
+    /// faerbt seine Warnungen, und die Escape-Sequenzen kamen als Kaestchen
+    /// mitten im Satz an.
+    const ECHT: &str = "\u{1b}[0;33mwarn: \u{1b}[0mfailed to load model\u{1b}[0m";
+
+    #[test]
+    fn eine_gefaerbte_zeile_kommt_als_reiner_text_an() {
+        assert_eq!(strip_ansi(ECHT), "warn: failed to load model");
+    }
+
+    #[test]
+    fn text_ohne_steuerzeichen_bleibt_zeichen_fuer_zeichen_gleich() {
+        // Negativkontrolle gegen einen Filter, der zu gierig ist. Umlaute,
+        // Klammern und eckige Klammern stehen in Pfaden und in pip-Ausgaben.
+        let roh = "C:\\Users\\Jörg\\models\\qwen[q4].gguf (3,2 GiB) 100%";
+        assert_eq!(strip_ansi(roh), roh);
+    }
+
+    #[test]
+    fn zeilenumbrueche_und_wagenruecklaeufe_ueberleben() {
+        // Fortschrittsbalken schreiben \r. Wer den mitentfernt, klebt zwei
+        // Zeilen zusammen und macht das Protokoll unlesbar.
+        assert_eq!(strip_ansi("a\r\nb\n"), "a\r\nb\n");
+    }
+
+    #[test]
+    fn ein_fenstertitel_verschluckt_nicht_den_rest_der_zeile() {
+        // OSC endet mit BEL oder mit ESC-Backslash. Wer nur CSI kennt, laesst
+        // den Titel als Text stehen; wer das Ende nicht kennt, frisst alles
+        // danach.
+        assert_eq!(strip_ansi("\u{1b}]0;Titel\u{7}fertig"), "fertig");
+        assert_eq!(strip_ansi("\u{1b}]0;Titel\u{1b}\\fertig"), "fertig");
+    }
+
+    #[test]
+    fn ein_abgeschnittener_puffer_verliert_nur_das_bruchstueck() {
+        // Der Einfangpuffer hat eine Obergrenze und kann mitten in einer
+        // Sequenz enden. Dann faellt das Bruchstueck weg, nicht der Text davor.
+        assert_eq!(strip_ansi("fertig\u{1b}[0;3"), "fertig");
+        assert_eq!(strip_ansi("fertig\u{1b}"), "fertig");
+    }
+
+    #[test]
+    fn cursorbewegungen_gehen_mit_und_nicht_nur_farben() {
+        // ComfyUI setzt den Cursor zurueck, um seinen Balken zu ueberschreiben.
+        assert_eq!(strip_ansi("\u{1b}[2K\u{1b}[1Gnode 3/7"), "node 3/7");
     }
 }

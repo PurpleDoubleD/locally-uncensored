@@ -1,0 +1,257 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LU Experiment — beide Audits, nachgemessen</title>
+<style>
+  :root{
+    --bg:#ffffff; --canvas:#e5e7eb; --fg:#111827; --muted:#4b5563; --line:#d1d5db;
+    --accent:#6d5ce0; --accent-soft:#efecff; --good:#15803d; --bad:#b91c1c; --warn:#a16207;
+    --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+  }
+  @media (prefers-color-scheme:dark){
+    :root{ --bg:#1e1e1e; --canvas:#141414; --fg:#e8e8e8; --muted:#a1a1aa; --line:#333;
+           --accent:#a094f8; --accent-soft:#241f3d; --good:#4ade80; --bad:#f87171; --warn:#fbbf24; }
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--canvas);color:var(--fg);
+       font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Inter,system-ui,sans-serif;}
+  .wrap{max-width:960px;margin:0 auto;padding:0 20px 96px}
+  header{background:var(--bg);border-bottom:1px solid var(--line);padding:56px 0 40px;margin-bottom:40px}
+  header .wrap{padding-bottom:0}
+  h1{font-size:2.1rem;line-height:1.15;margin:0 0 12px;letter-spacing:-.02em}
+  .sub{color:var(--muted);font-size:1.05rem;margin:0}
+  .meta{margin-top:24px;font-family:var(--mono);font-size:.82rem;color:var(--muted)}
+  .meta b{color:var(--fg);font-weight:600}
+  section{background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:28px 28px 24px;margin-bottom:24px}
+  h2{font-size:1.28rem;margin:0 0 6px;letter-spacing:-.01em}
+  h2 + .lede{color:var(--muted);margin:0 0 20px;font-size:.95rem}
+  h3{font-size:1rem;margin:26px 0 8px}
+  table{width:100%;border-collapse:collapse;font-size:.92rem;margin:8px 0 4px}
+  .scroll{overflow-x:auto}
+  th,td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{font-size:.78rem;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:600}
+  td.n{font-family:var(--mono);white-space:nowrap}
+  .was{color:var(--muted)}
+  .ist{font-weight:600}
+  .ziel{color:var(--good);font-size:.85rem}
+  code{font-family:var(--mono);font-size:.86em;background:var(--accent-soft);padding:1px 5px;border-radius:4px}
+  .find{border-left:3px solid var(--accent);padding:2px 0 2px 18px;margin:22px 0}
+  .find h3{margin:0 0 6px;font-size:1.02rem}
+  .find p{margin:0 0 10px}
+  .proof{font-family:var(--mono);font-size:.8rem;background:var(--canvas);border:1px solid var(--line);
+         border-radius:7px;padding:11px 13px;margin:10px 0;white-space:pre-wrap;overflow-x:auto;color:var(--muted)}
+  .tag{display:inline-block;font-size:.7rem;text-transform:uppercase;letter-spacing:.07em;
+       padding:2px 8px;border-radius:20px;font-weight:600;vertical-align:2px;margin-left:8px}
+  .t-mine{background:var(--accent-soft);color:var(--accent)}
+  .t-open{background:transparent;color:var(--warn);border:1px solid var(--warn)}
+  ul{margin:8px 0;padding-left:20px} li{margin:5px 0}
+  .cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px;margin:18px 0 6px}
+  .stat{background:var(--canvas);border:1px solid var(--line);border-radius:9px;padding:14px 16px}
+  .stat .k{font-size:.74rem;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+  .stat .v{font-size:1.5rem;font-weight:650;font-family:var(--mono);letter-spacing:-.02em;margin-top:3px}
+  .stat .d{font-size:.8rem;color:var(--muted);margin-top:2px}
+  footer{color:var(--muted);font-size:.85rem;text-align:center;margin-top:36px}
+  @media (max-width:640px){ h1{font-size:1.6rem} section{padding:22px 18px} }
+</style>
+</head>
+<body>
+<header>
+  <div class="wrap">
+    <h1>LU Experiment — beide Audits, nachgemessen</h1>
+    <p class="sub">Ein unabhängiger Build auf Basis von <code>10bfa0d7</code> (v2.6.7). Jede Zahl auf dieser
+    Seite stammt aus einem echten Lauf derselben Werkzeugkette, nicht aus einer Schätzung.</p>
+    <p class="meta">
+      Basis <b>10bfa0d7</b> · Branch <b>experiment/audits-komplett</b> · <b>93</b> Commits ·
+      kein Remote, kein Push, kein Actions-Lauf
+    </p>
+  </div>
+</header>
+
+<div class="wrap">
+
+<section>
+  <h2>Wo es steht</h2>
+  <p class="lede">Zwei Audits: 85 Technik-Befunde, 73 Design-Befunde.</p>
+  <div class="cols">
+    <div class="stat"><div class="k">Technik-Audit</div><div class="v">80 / 85</div>
+      <div class="d">kritisch 13/13, hoch 37/37</div></div>
+    <div class="stat"><div class="k">Design-Audit</div><div class="v">45 / 73</div>
+      <div class="d">plus 8 halbe; Start war 18</div></div>
+    <div class="stat"><div class="k">Eigene Funde</div><div class="v">2</div>
+      <div class="d">in keinem der beiden Audits</div></div>
+  </div>
+  <p style="font-size:.92rem;color:var(--muted);margin-bottom:0">
+    Von den drei verbliebenen Technik-Positionen sind zwei nicht meine Entscheidung:
+    <code>T-60</code> verlangt eine serverseitige Änderung an Supabases <code>uri_allow_list</code>,
+    <code>T-72</code> einen 211-MiB-Download oder einen Windows-Rechner zum Hashen. Beides gehört dem Eigentümer.
+  </p>
+</section>
+
+<section>
+  <h2>Gemessen, vorher und nachher</h2>
+  <p class="lede">Beide Spalten aus echten Builds, je ein eigener Worktree.</p>
+  <div class="scroll">
+  <table>
+    <tr><th>Messwert</th><th>Basis <code>10bfa0d7</code></th><th>Heute</th><th>Audit-Ziel</th></tr>
+    <tr><td>App-Chunk — blockiert den ersten Bildaufbau</td><td class="n was">2.605 kB</td><td class="n ist">733 kB</td><td class="ziel">&lt; 800 kB ✓</td></tr>
+    <tr><td>JS gesamt</td><td class="n was">4.031 kB / 45 Dateien</td><td class="n ist">3.711 kB / 87 Dateien</td><td></td></tr>
+    <tr><td>Importzyklen (<code>madge --circular</code>)</td><td class="n was">9</td><td class="n ist">0</td><td class="ziel">0 ✓</td></tr>
+    <tr><td><code>eslint</code>-Fehler in <code>src/</code></td><td class="n was">905</td><td class="n ist">147</td><td class="ziel">Gate scharf — offen</td></tr>
+    <tr><td><code>any</code> (ohne Tests)</td><td class="n was">207</td><td class="n ist">54</td><td class="ziel">&lt; 100 ✓</td></tr>
+    <tr><td>leere <code>catch</code>-Blöcke</td><td class="n was">18</td><td class="n ist">5</td><td></td></tr>
+    <tr><td>vitest</td><td class="n was">6.231</td><td class="n ist">7.697</td><td></td></tr>
+    <tr><td>cargo test — macOS</td><td class="n was">438</td><td class="n ist">758</td><td></td></tr>
+    <tr><td>cargo test — Windows (echte Maschine)</td><td class="n was">—</td><td class="n ist">740</td><td></td></tr>
+  </table>
+  </div>
+  <p style="font-size:.88rem;color:var(--muted)">
+    <b>Ehrlich dazu:</b> der Einstiegs-Chunk (<code>index-*.js</code>) ist von 195 auf 201 kB
+    <i>gewachsen</i>. Das ist die Folge des Splittings — was vorher im 2.605-kB-App-Chunk mitkam,
+    verteilt sich jetzt auf 87 Dateien, die erst bei Bedarf geladen werden. Die Zahl, die den ersten
+    Bildaufbau bestimmt, ist der App-Chunk. Und 147 eslint-Fehler sind noch kein scharfes Gate.
+  </p>
+</section>
+
+<section>
+  <h2>Der Satz, der sich durch beide Audits zieht</h2>
+  <p class="lede">Zwei Wege, die dasselbe tun sollen — gepflegt wird nur einer.</p>
+
+  <div class="find">
+    <h3>Ein Sweep, der nie etwas töten konnte</h3>
+    <p><code>kill_orphaned_tunnels</code> läuft beim Start und soll verwaiste <code>cloudflared</code>-Prozesse
+    abräumen, sonst republiziert ein alter Tunnel still die neue Sitzung. Der Matcher liest die
+    Kommandozeile. <code>sysinfo</code> 0.33 liefert <code>process.cmd()</code> aber <b>leer</b>, wenn man sie
+    nicht ausdrücklich anfordert — und die Kette, die das Projekt benutzt, enthält kein
+    <code>.with_cmd()</code>. Der Sweep lief, meldete nichts, und stand in der Deckungsmatrix auf „umgesetzt".</p>
+    <p>An fünf Stellen wurde über Prozesse geurteilt, nur eine holte sich die Kommandozeilen.
+    Jetzt baut <code>process_util::process_table_with_cmdlines()</code> die Tabelle für alle.</p>
+    <div class="proof">Sonde: die eine Zeile 67 entschärft
+  commands::process::…::the_scan_finds_a_real_process_by_the_argv_lu_would_have_used
+  commands::remote::…::the_sweep_finds_a_real_cloudflared_by_its_argv
+  process_util::process_table_tests::the_table_carries_command_lines
+test result: FAILED. 755 passed; 3 failed</div>
+  </div>
+
+  <div class="find">
+    <h3>Ein Timer mit fünf Ausgängen und zwei Aufräumern</h3>
+    <p>Der Built-in-Engine-Installpfad wartete mit <code>setInterval(…, 500)</code> auf die
+    heruntergeladene Datei und rief <code>clearInterval</code> nur bei <i>complete</i> und <i>error</i>.
+    Pausiert der Nutzer, steht der Eintrag auf <i>paused</i>; bricht er ab, verschwindet die Zeile;
+    verlässt er die Ansicht, hört niemand mehr zu. In allen drei Fällen lief der Timer mit 2 Hz weiter,
+    das <code>await</code>ete Promise settelte nie — pro Versuch ein Timer, und die Installation darunter
+    stand für immer.</p>
+    <p>Der Fix ist kein sechster Ausgang, sondern der Verzicht auf den Timer: der Store wird ohnehin
+    im Sekundentakt aus Rust gefüllt.</p>
+  </div>
+
+  <div class="find">
+    <h3>34 von 58 Deklarationen waren vier Kopien einer Maschine</h3>
+    <p>Das Audit verlangt für <code>Onboarding.tsx</code> eine Zerlegung <i>pro Schritt</i>. Das wäre falsch
+    gewesen: 34 der Deklarationen sind vier Kopien <b>einer</b> Maschine — Ollama, LM Studio, ComfyUI,
+    Python — vier davon mit eigenem <code>setInterval</code> für dieselbe Rechnung. Eine Zerlegung pro
+    Schritt hätte vier Kopien auf vier Dateien verteilt.</p>
+    <p>Ein Reducer, viermal benutzt: 58 → 29. Dabei fielen zwei echte Fehler heraus, die vorher viermal
+    einzeln hätten auffallen müssen: ein Poll-Tick nach dem Ende konnte eine fertige Installation zurück
+    auf „läuft" ziehen, und ein zweiter Anlauf begann mit dem Fortschrittsbalken des ersten.</p>
+  </div>
+
+  <div class="find">
+    <h3>Der Audit-Zeiger traf die eine geschlossene Tür</h3>
+    <p><code>T-76</code> zeigt auf <code>SpecialIntentControls.tsx:55</code>. Diese Stelle ist seit längerem in
+    Ordnung — am Basis-Commit nachgeprüft. Das Leck sitzt beim <b>dritten Slot derselben Familie</b>,
+    gemintet in einer wörtlichen Inline-Kopie an anderer Stelle. Alle drei Wege, auf denen der Store
+    diese Refs wegwarf, warfen sie ohne Freigabe weg — einer davon nach jedem abgeschickten
+    Trainingslauf.</p>
+    <div class="proof">30 wählen → dieselben 30 nochmal → eins entfernen → Set leeren
+  60 gemintet · 60 lebendig vorher · 0 nachher</div>
+    <p style="margin-bottom:0">Die Lehre aus mehreren Paketen: die Befunde stimmen fast immer im Muster
+    und oft nicht in der Zeilennummer. Wer die Zeile fixt statt das Muster, schließt eine Tür, die schon zu war.</p>
+  </div>
+</section>
+
+<section>
+  <h2>Zwei Befunde, die in keinem Audit stehen<span class="tag t-mine">bei der Kontrolle gefunden</span></h2>
+
+  <div class="find">
+    <h3>Die Dokumentation erzeugte ausgeliefertes CSS</h3>
+    <p>Tailwind 4 scannt das Projektverzeichnis als Text — Markdown eingeschlossen. Eine Erwähnung von
+    <code>active:scale-[0.97]</code> in der Deckungsmatrix erzeugte die Utility im Bundle, obwohl keine
+    Komponente die Klasse benutzt. 30 solcher Klassen insgesamt: aus Markdown, aus der Website unter
+    <code>docs/</code>, aus <b>Rust-Kommentaren</b>, und aus 20 Testdateien, wo Platzhalter zu Regeln mit
+    buchstäblich <code>background-color:#...</code> wurden.</p>
+    <div class="proof">A/B/A-Messung an echten Builds
+  roh   173.380 → 171.517   (−1.863 B, 1,07 %)
+  gzip   23.258 →  22.919   (−339 B,  1,46 %)
+  Klassen 1.426 →   1.396   — keine einzige kommt hinzu</div>
+    <p>Der Schaden ist doppelt. Totes CSS im Produkt — und der Test, der die Fokusring-Hausregel prüfen
+    sollte, suchte mit <code>indexOf</code> nach einer Zeichenfolge, die <b>zweimal</b> im Bundle steht.
+    Er fand die Utility statt der Hausregel und maß damit die falsche Regel.</p>
+    <p style="margin-bottom:0">Die Kur ist nicht die längere Nadel, sondern: jede Nadel wird gegen
+    <i>alle</i> Treffer geprüft, nicht gegen den ersten.</p>
+  </div>
+
+  <div class="find">
+    <h3>Der Beenden-Pfad erreicht jeden Daemon außer dem Tunnel<span class="tag t-open">offen</span></h3>
+    <p><code>AppState::shutdown_subprocesses</code> ist 115 Zeilen lang und erwähnt <code>remote</code>,
+    <code>RemoteServer</code>, <code>tunnel</code> oder <code>cloudflared</code> kein einziges Mal. Ollama,
+    ComfyUI, llama-server, der Embeddings-Server, der Trainer und der MLX-Sidecar stehen dort. Der Tunnel
+    hängt allein an <code>Drop for RemoteServer</code> — und der Kommentar über der Funktion begründet
+    selbst, warum das nicht reicht: Tauri v2 führt <code>Drop</code> nicht zuverlässig aus, genau deshalb
+    existiert der explizite Pfad.</p>
+  </div>
+</section>
+
+<section>
+  <h2>Wie geprüft wurde</h2>
+  <p class="lede">Geschrieben haben Opus-5-Agenten. Geprüft habe ich, unabhängig von ihren Tests.</p>
+  <ul>
+    <li><b>Jedes Paket isoliert.</b> Nur die Dateien dieses Pakets auf den aktuellen HEAD kopiert,
+      dann <code>tsc</code>, voller <code>vitest</code>, <code>madge</code>.</li>
+    <li><b>Eigene Mutationssonde je Paket</b>, aus dem Befund abgeleitet statt aus den Tests des Agenten.
+      Fix raus → Test rot → zurück → grün. Ein Test, der ohne den Fix grün bleibt, beweist nichts.</li>
+    <li><b>Zahlen nachgerechnet</b> statt übernommen — Kontraste nach WCAG 2.1, Dateigrößen, Zeilenzahlen.</li>
+    <li><b>Vor jedem Lauf, der gebautes CSS liest:</b> <code>rm -rf dist &amp;&amp; npx vite build</code>.
+      Ich bin selbst einmal auf ein veraltetes <code>dist/</code> hereingefallen und habe einen Lauf grün
+      gemeldet, der gegen einen Zustand lief, den der Quelltext nicht mehr hatte.</li>
+  </ul>
+  <h3>Drei Fälle, in denen ein Test sich still abschaltete</h3>
+  <p style="margin-bottom:0"><code>fokusring-und-press.test.ts</code> (kein <code>dist/</code> → ganzer Block weg),
+  <code>gguf.rs:264</code> (Grund per <code>eprintln!</code>, das libtest im grünen Lauf schluckt) und
+  <code>bundle-size-drift.live.test.ts</code> (<code>continue</code> statt Urteil). Alle drei sagen jetzt
+  laut, wenn sie nicht prüfen.</p>
+</section>
+
+<section>
+  <h2>Was offen ist — und warum</h2>
+  <table>
+    <tr><th>Position</th><th>Warum offen</th></tr>
+    <tr><td class="n">T-60</td><td>OAuth-<code>state</code>-Nonce. Verlangt eine serverseitige Änderung an
+      Supabases <code>uri_allow_list</code> — das steht dem Eigentümer zu, nicht mir.</td></tr>
+    <tr><td class="n">T-72</td><td>SHA-256 des Installers. Größe und Authenticode sind gepinnt; die echte
+      Prüfsumme verlangt einen 211-MiB-Download oder einen Windows-Rechner zum Hashen. Ich habe beides
+      nicht autorisiert.</td></tr>
+    <tr><td class="n">KF-1</td><td>Der Tunnel fehlt im Beenden-Pfad. Von mir gefunden, als eigene Position vergeben.</td></tr>
+    <tr><td class="n">AS-10</td><td>Lint ist kein Gate. Die Schuld ist von 905 auf 147 gefallen, aber ein
+      dauerhaft rotes Gate wäre kein Gate.</td></tr>
+    <tr><td class="n">ZB-7</td><td><code>vite.config.ts</code> ist 2.486 Zeilen. Die Guards sind extrahiert und
+      getestet, der Dev-Server steckt weiter in der Build-Konfiguration.</td></tr>
+  </table>
+  <h3>Verifikationsgrenzen, die bleiben</h3>
+  <ul>
+    <li><b>Kein CI-Lauf.</b> Es gibt kein Remote; die Workflows sind statisch geprüft, nie ausgeführt —
+      ein Lauf wäre öffentlich gewesen.</li>
+    <li><b>Kein Codesigning, keine Notarisierung.</b> Braucht Zertifikate und eine Kaufentscheidung.</li>
+    <li><b>Keine DOM-Messung im Testlauf.</b> Das Projekt hat keinen Renderer
+      (<code>environment: 'node'</code>). Wo das Audit Pixelabstände nennt, ist die <i>Ursache</i> bewiesen,
+      nicht die Zahl — außer wo ausdrücklich an einem laufenden Dev-Server gemessen wurde.</li>
+  </ul>
+</section>
+
+<footer>
+  Lokale Seite im Experiment-Ordner. Nichts davon ist veröffentlicht.
+</footer>
+</div>
+</body>
+</html>

@@ -8,12 +8,12 @@
  * from Settings → Providers going forward.
  */
 
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { Modal } from '../ui/Modal'
 import { useProviderStore } from '../../stores/providerStore'
 import { useUIStore } from '../../stores/uiStore'
 import { PROVIDER_PRESETS } from '../../api/providers/types'
-import type { DetectedBackend } from '../../lib/backend-detector'
+import { selectedBackendId, type DetectedBackend } from '../../lib/backend-detector'
 
 interface Props {
   open: boolean
@@ -22,18 +22,21 @@ interface Props {
 }
 
 export function BackendSelector({ open, backends, onClose }: Props) {
-  const [selected, setSelected] = useState<string>(backends[0]?.id || '')
   // AppShell mounts this with an EMPTY `backends` array and fills it seconds
   // later, once the idle-time detection has run. A useState initialiser runs
-  // once, so the default above read `[]` and `selected` stayed the empty
+  // once, so a plain `useState(backends[0]?.id)` read `[]` and stayed the empty
   // string for good: the dialog opened with no row marked, and "Use selected"
   // found nothing under that name, dismissed itself and configured nothing.
   // Same class as the picker bug of R10, a position taken from a list before
-  // the list exists. Re-seed it the moment a list arrives, and never overwrite
-  // a choice the user has already made.
-  useEffect(() => {
-    setSelected((cur) => (backends.some((b) => b.id === cur) ? cur : backends[0]?.id || ''))
-  }, [backends])
+  // the list exists.
+  //
+  // So the SELECTION is not stored, only the user's own pick is; the effective
+  // row is derived by selectedBackendId (lib/backend-detector), which carries
+  // the rule the effect used to write back into state one render late (React 19
+  // `set-state-in-effect`). As a derivation it is simply correct on the render
+  // the list arrives in.
+  const [picked, setPicked] = useState<string | null>(null)
+  const selected = selectedBackendId(picked, backends)
   // Pre-checked: the common case is "saw it once, don't bug me again". User can
   // uncheck if they want it to re-appear on next launch.
   const [dontShowAgain, setDontShowAgain] = useState(true)
@@ -96,7 +99,7 @@ export function BackendSelector({ open, backends, onClose }: Props) {
         <h3 className="text-base font-semibold text-white text-center">
           {backends.length} local backend{backends.length > 1 ? 's' : ''} detected
         </h3>
-        <p className="text-[0.75rem] text-gray-400 text-center leading-relaxed">
+        <p className="text-[12px] text-gray-400 text-center leading-relaxed">
           {backends.length === 1
             ? `${backends[0].name} is running on your system.`
             : 'Multiple backends running. Select your primary backend.'}
@@ -106,7 +109,7 @@ export function BackendSelector({ open, backends, onClose }: Props) {
             engine already works out of the box and stays active if skipped. */}
         {builtinActive && (
           <p className="text-[0.65rem] text-gray-500 text-center leading-relaxed">
-            You're already set up with the built-in engine. Switching is optional.
+            You're already set up with the LU Engine. Switching is optional.
           </p>
         )}
 
@@ -114,7 +117,7 @@ export function BackendSelector({ open, backends, onClose }: Props) {
           {backends.map(backend => (
             <button
               key={backend.id}
-              onClick={() => setSelected(backend.id)}
+              onClick={() => setPicked(backend.id)}
               className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-colors ${
                 selected === backend.id
                   ? 'bg-white/10 border border-white/15'
@@ -158,7 +161,7 @@ export function BackendSelector({ open, backends, onClose }: Props) {
             onClick={dismiss}
             className="px-4 py-1.5 rounded-lg text-[0.7rem] text-gray-400 hover:text-white hover:bg-white/10 transition-colors"
           >
-            {builtinActive ? 'Keep built-in engine' : 'Skip'}
+            {builtinActive ? 'Keep LU Engine' : 'Skip'}
           </button>
           <button
             onClick={handleConfirm}

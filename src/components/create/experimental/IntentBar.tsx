@@ -4,12 +4,55 @@ import { useUIStore, type CloudTeaserTarget } from '../../../stores/uiStore'
 import { isIntentLocked, visibleIntents } from './intents'
 import { isMlxImageHost } from '../../../api/mlx-image'
 import { cn } from '../ui/cn'
+import { ICON_SM } from '../../ui/icon-size'
+import { WheelNav } from '../../ui/WheelNav'
 
-// Pure-CSS expand: no Framer layout projection anywhere, so nothing can snap or
-// jitter on settle. The label opens via a `max-width` transition (collapses
-// reliably to 0 — unlike grid `0fr`, which keeps its min-content floor — and
-// interpolates as a plain length, so it's always smooth). The active pill
-// cross-fades via colour/shadow; neighbours slide on natural flex reflow.
+// Jede Pille traegt ihre Beschriftung, immer. Bis 2.6.7 stand hier ein
+// `max-width`-Aufklappen: nur die AKTIVE Pille zeigte ihren Namen, die
+// uebrigen elf standen auf einer Maximalbreite von null, Deckkraft null und
+// ohne waagerechtes Polster, die Hauptnavigation des ganzen Create-Bereichs
+// war eine Reihe unbeschrifteter Icons, deren Namen nur der Hover-Tooltip
+// verriet. Die kurzen Namen lagen dabei fertig im Datenmodell (`short` in
+// intents.ts) und wurden von niemandem gelesen.
+//
+// (Die drei Utilities stehen hier bewusst ausgeschrieben statt als
+// Klassennamen: Tailwind scannt diese Datei als Text und haette aus der
+// Erklaerung wieder Regeln im ausgelieferten Bundle gemacht, siehe
+// keine-klasse-aus-prosa.test.ts, der genau das gefangen hat.)
+//
+// Gemessen am 01.09.2026 im laufenden Fenster (Chromium 149, 1280x800,
+// --ui-scale 1.15, also gerenderte Pixel), alle zwoelf Pillen der
+// Cloud-/Windows-Leiste beschriftet:
+//
+//   nur Icons (Ist bis 2.6.7)     476 px
+//   `short`  (Image … Motion)    1068 px   <- passt, 184 px Luft
+//   `label`  (Edit / Image to Image, Remove Background, …)  1704 px
+//   verfuegbar bei 1280px Fenster 1252 px
+//
+// Deshalb `short` und nicht `label`: die vollen Namen sprengen schon das
+// Standardfenster um 452 px. `short` traegt bis hinunter zu ~1096 px
+// Fensterbreite in einer Zeile.
+//
+// Darunter reicht der Platz nicht mehr. Nachgemessen bei 700 px Fenster:
+// die Leiste laeuft 50 px ueber ihren Container hinaus, die Pillen stauchen
+// NICHT, weil ein Flex-Item mit `whitespace-nowrap`-Inhalt und ohne `min-w-0`
+// seine Mindestbreite behaelt. Der Ausgang waere die abgeschnittene letzte
+// Pille am rechten Rand.
+//
+// Bis 2.6.8 war die Antwort darauf ein Umbruch in eine zweite Zeile. Seit dem
+// Scrollrad (David, 03.09.2026) ist sie eine andere: die Leiste bleibt EINE
+// Zeile und scrollt. Das loest dasselbe Problem und noch eins dazu, denn beim
+// Umbruch sprang die Buehne darunter um 35,7 px, sobald das Fenster die
+// Grenze kreuzte. Der aktive Eintrag steht immer in der Mitte, fuenf Nachbarn
+// je Seite werden nach aussen blasser, und ein Klick faehrt das Ziel weich
+// dorthin. Kein Ueberlauf, kein abgeschnittener Text, keine springende
+// Hoehe.
+//
+// Der volle Name bleibt in `title` und `aria-label`. „Edit" auf der Pille,
+// „Edit / Image to Image" fuer Hover und Screenreader.
+//
+// Die aktive Pille hebt sich weiter ueber Flaeche, Rand und Schriftfarbe ab
+// (kein Framer-Layout, nichts kann auf dem Weg springen).
 const EASE = 'ease-[cubic-bezier(0.22,1,0.36,1)]'
 
 type TeaserIntent = Extract<CloudTeaserTarget, { surface: 'intent' }>['intent']
@@ -20,7 +63,7 @@ export function IntentBar() {
   const backend = useCreateStore((s) => s.backend)
   const setCloudTeaser = useUIStore((s) => s.setCloudTeaser)
   // Every tool is always in the bar. The 2.5.8 lanes with hasLocalLane
-  // (lipsync / music / extend / motion) are REAL local tabs — plain selectable
+  // (lipsync / music / extend / motion) are REAL local tabs, plain selectable
   // pills with NO cloud glyph (David 2026-07-19: the top row only carries a
   // cloud badge for the genuinely hosted-only tools). Only upscale, eraser and
   // character training (cloudOnly, no local backend) render as locked,
@@ -36,11 +79,44 @@ export function IntentBar() {
     <div
       role="radiogroup"
       aria-label="Create mode"
-      className="flex items-center justify-center gap-1 px-4 py-0.5"
-      // Sized to sit just 9% larger than the LaneControls ratio bar below
-      // (which runs at scale 0.7): 0.7 × 1.09 ≈ 0.763.
-      style={{ transform: 'scale(0.763)', transformOrigin: 'center' }}
+      // Bis 2.6.7 stand hier `transform: scale(0.763)`, eine dritte
+      // Skalierungsschicht neben dem 18,4px-Wurzelmass und dem `zoom: 1.25`
+      // der Sidebar. `transform` skaliert nur das BILD: die Leiste belegte
+      // weiter ihre ungeschrumpfte Layoutbreite (gemessen 1084,7px fuer eine
+      // sichtbar 827px breite Zeile) und jede Haarlinie darin wurde auf
+      // 0,763px gemalt. Die 0,763 stehen jetzt in den Groessen selbst:
+      // jede rem-Laenge dieser Leiste ist ihr altes Mass mal 0,763, in
+      // ganzen Pixeln des 16px-Rasters (36px Pille -> 28px, 16px Icon ->
+      // 12px = ICON_SM, 12px Label -> 9px).
+      // David, 05.09.2026: die Leiste klebte an der Hauptnavigation. Gemessen
+      // am Windows-Bau (1296x808): 9,2 gerenderte px zwischen Kopfzeilenkante
+      // und Leiste, 10,9 bis zur ersten Pille. `pt-1.5` legt 4,5
+      // Entwurfspixel dazu, gerendert gut 5. Das ist die „minimale
+      // Luftschicht, wenige Pixel, nicht mehr", die er verlangt hat. Unten bleibt es bei
+      // den 1,5px: darunter steht die Buehne, und die stand nie zu eng.
+      className="px-3 pt-1.5 pb-[1.5px] [--text-control:9px]"
     >
+      {/* David, 04.09.2026: „das selbe bei create tab ... hard in der mitte."
+          `mx-auto` auf einem Blockkasten setzt seine Mitte auf die Mitte des
+          umgebenden Kastens, und zwar unabhaengig davon, was sonst in der
+          Leiste steht. Die Kopfzeile braucht dafuer eine absolute Position,
+          weil dort links und rechts etwas NEBEN dem Rad steht; hier steht
+          nichts daneben, und dann ist der zentrierte Blockkasten die
+          einfachere Fassung derselben Zusage.
+
+          52rem und nicht die volle Breite, und die Zahl ist in LAYOUT-Pixeln
+          gerechnet, nicht in gerenderten. Genau daran ist der Deckel vorher
+          gescheitert: die 1068px im Kopf dieser Datei sind bei --ui-scale 1,15
+          gemessen, in Layout-Pixeln sind es 928,7. Der alte Deckel von 62rem
+          (992px) lag also UEBER der Breite aller zwoelf Pillen und tat das
+          Gegenteil dessen, was der Kommentar versprach. 52rem sind 832px und
+          damit ein echter Ausschnitt: rund elf der zwoelf Pillen. */}
+      <WheelNav
+        activeIndex={intents.findIndex((m) => m.id === intent)}
+        radius={5}
+        reihenClass="gap-x-[3px]"
+        className="mx-auto w-full max-w-[52rem]"
+      >
       {intents.map((meta) => {
         const locked = isIntentLocked(meta, backend, mlxHost)
         const selected = !locked && intent === meta.id
@@ -58,7 +134,7 @@ export function IntentBar() {
                 : setIntent(meta.id)
             }
             className={cn(
-              'relative flex items-center h-9 rounded-full border lu-focus-ring transition-[background-color,border-color,box-shadow,color] duration-200',
+              'relative flex items-center h-7 rounded-full border transition-[background-color,border-color,box-shadow,color] duration-200',
               EASE,
               selected
                 ? 'bg-white/[0.11] border-white/20 shadow-sm text-white'
@@ -67,31 +143,25 @@ export function IntentBar() {
                   : 'border-transparent text-gray-500 hover:text-gray-200 hover:bg-white/[0.05]',
             )}
           >
-            <span className="grid place-items-center w-9 h-9 shrink-0">
-              <Icon size={16} strokeWidth={selected ? 2 : 1.75} />
+            <span className="grid place-items-center w-7 h-7 shrink-0">
+              <Icon size={ICON_SM} />
             </span>
             {locked && (
               // Brighter, theme-aware cloud tag: violet-300/80 was near
               // invisible on light backgrounds and easy to miss on dark.
               <Cloud
-                size={11}
-                className="absolute top-0.5 right-0.5 text-violet-500 dark:text-violet-200"
-                strokeWidth={2.4}
+                size={8}
+                className="absolute top-[1.5px] right-[1.5px] text-violet-500 dark:text-violet-200"
                 aria-hidden
               />
             )}
-            <span
-              className={cn(
-                'overflow-hidden whitespace-nowrap min-w-0 t-control transition-[max-width,opacity,padding] duration-200',
-                EASE,
-                selected ? 'max-w-[150px] opacity-100 pl-1 pr-3.5' : 'max-w-0 opacity-0 px-0',
-              )}
-            >
-              {meta.label}
+            <span className="whitespace-nowrap t-control pl-[3px] pr-[10.5px]">
+              {meta.short}
             </span>
           </button>
         )
       })}
+      </WheelNav>
     </div>
   )
 }

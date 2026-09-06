@@ -65,7 +65,7 @@ export function Drawer({ open, onClose, title, width = 320, children, footer }: 
           >
             <div className="flex items-center justify-between px-4 h-12 border-b border-white/[0.06] shrink-0">
               <span className="t-title text-gray-200">{title}</span>
-              <button ref={closeRef} onClick={onClose} aria-label="Close" className="text-gray-500 hover:text-white p-1 rounded-md hover:bg-white/8 transition-colors lu-focus-ring">
+              <button ref={closeRef} onClick={onClose} aria-label="Close" className="text-gray-500 hover:text-white p-1 rounded-md hover:bg-white/8 transition-colors">
                 <X size={16} />
               </button>
             </div>

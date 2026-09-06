@@ -18,7 +18,10 @@ export function RemoteAccessSettings() {
       if (enabled) refreshDevices()
     }, 10000)
     return () => clearInterval(interval)
-  }, [enabled])
+    // `refreshStatus`/`refreshDevices` sind Store-Actions aus dem create()-
+    // Initializer: ihre Referenz entsteht einmal und aendert sich nie. Der
+    // Effekt laeuft dadurch weiterhin nur bei einem Wechsel von `enabled`.
+  }, [enabled, refreshDevices, refreshStatus])
 
   // Bug #10: the trash icon called an empty handler. Wire it up to the
   // existing /remote-api/disconnect command and refetch afterwards so the

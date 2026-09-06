@@ -23,7 +23,9 @@
  */
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { OpenAIProvider } from '../providers/openai-provider'
-import type { ProviderConfig } from '../providers/types'
+import type { ChatStreamChunk, ProviderConfig } from '../providers/types'
+import type { OpenAIChatRequest } from '../providers/openai-provider'
+import { sentJson } from './provider-test-support'
 
 function makeConfig(overrides: Partial<ProviderConfig> = {}): ProviderConfig {
   return {
@@ -42,9 +44,20 @@ const refuse = (status = 400) =>
   new Response(JSON.stringify({ error: { message: 'unknown value for reasoning_effort' } }), { status })
 const okStream = () => new Response('data: {"choices":[{"delta":{"content":"hi"}}]}\n\ndata: [DONE]\n\n', { status: 200 })
 
-const bodyOf = (spy: any, call: number) => JSON.parse(spy.mock.calls[call][1]?.body as string)
+/**
+ * Der mitgeschnittene Request-Koerper, gelesen als der Typ, den der Provider
+ * BAUT. Als `any` gelesen haette eine Umbenennung von `reasoning_effort` jede
+ * Zeile unten still auf `undefined` gegen `'none'` laufen lassen — also rot,
+ * aber erst zur Laufzeit und mit einer Meldung, die die Ursache verschweigt.
+ *
+ * Der Spy-Parameter ist strukturell getippt statt als `MockInstance`: gebraucht
+ * wird nur `mock.calls`, und das haelt den Helfer unabhaengig davon, wie vitest
+ * seine Mock-Generics gerade schreibt.
+ */
+const bodyOf = (spy: { mock: { calls: readonly (readonly unknown[])[] } }, call: number) =>
+  sentJson<OpenAIChatRequest>(spy.mock.calls, call)
 
-async function drain(gen: AsyncGenerator<any>) {
+async function drain(gen: AsyncIterable<ChatStreamChunk>) {
   for await (const _ of gen) { /* consume, the fetch only happens on first next() */ }
 }
 

@@ -125,7 +125,14 @@ describe('Stop never opens a second line', () => {
   })
 
   it('the slot has a fixed footprint, so the two states cannot differ in size', () => {
-    expect(INPUT).toMatch(/className="shrink-0 w-\[26px\] h-\[26px\]" data-testid="composer-send-slot"/)
+    // D-T07: the footprint is still fixed, but it is no longer a loose `26px`
+    // twice — it names `--control-h-sm`, the same rung `.lu-control` stands on.
+    // A literal here would drift the moment the rung moves, which is exactly
+    // the finding the audit filed under "11-15 control heights per screen".
+    expect(INPUT).toMatch(
+      /className="shrink-0 w-\[var\(--control-h-sm\)\] h-\[var\(--control-h-sm\)\]" data-testid="composer-send-slot"/,
+    )
+    expect(INPUT, 'the slot fell back to a raw pixel height').not.toMatch(/(?<![\w-])[wh]-\[26px\]/)
     // Both buttons fill the slot instead of sizing themselves by padding.
     const both = INPUT.slice(slot)
     expect(both.slice(0, both.indexOf('</div>')).match(/w-full h-full/g)).toHaveLength(2)

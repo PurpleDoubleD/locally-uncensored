@@ -23,11 +23,26 @@ vi.mock('@tauri-apps/api/core', () => ({
 }))
 
 import { localFetchStream, parseProxyHttpError } from '../backend'
+import { isRecord } from '../../types/json-guards'
 
 const fetchMock = vi.fn()
 
+/** Was backend.ts an `invoke('proxy_localhost_stream_chunked', …)` uebergibt. */
+type ChunkedInvokeArgs = {
+  url: string
+  method: string
+  body: string | null
+  headers: Record<string, string> | null
+  onChunk: MockChannel<number[]>
+  streamId: string
+}
+
 function tauriMode(on: boolean) {
-  const w = ((globalThis as any).window = (globalThis as any).window || {})
+  // Reflect statt eines Casts: die DOM-Typen deklarieren `globalThis.window`
+  // als vollstaendiges `Window`, und genau daran ist das `as any` gehangen.
+  const existing: unknown = Reflect.get(globalThis, 'window')
+  const w: Record<string, unknown> = isRecord(existing) ? existing : {}
+  Reflect.set(globalThis, 'window', w)
   if (on) w.__TAURI_INTERNALS__ = {}
   else { delete w.__TAURI_INTERNALS__; delete w.__TAURI__ }
 }
@@ -66,7 +81,7 @@ describe('parseProxyHttpError', () => {
 describe('localFetchStream in Tauri mode (loopback → proxy-first)', () => {
   it('does NOT attempt a direct fetch for loopback targets', async () => {
     tauriMode(true)
-    invokeMock.mockImplementationOnce((_cmd: string, args: any) => {
+    invokeMock.mockImplementationOnce((_cmd: string, args: ChunkedInvokeArgs) => {
       // Immediately EOF an empty-but-successful stream.
       queueMicrotask(() => args.onChunk.onmessage([]))
       return new Promise(() => {}) // never resolves — EOF settles the Response
@@ -101,7 +116,7 @@ describe('localFetchStream in Tauri mode (loopback → proxy-first)', () => {
   it('delivers chunks that arrive AFTER the invoke promise resolved (WebView2 149 ordering)', async () => {
     tauriMode(true)
     let channel!: MockChannel<number[]>
-    invokeMock.mockImplementationOnce((_cmd: string, args: any) => {
+    invokeMock.mockImplementationOnce((_cmd: string, args: ChunkedInvokeArgs) => {
       channel = args.onChunk
       return Promise.resolve()
     })

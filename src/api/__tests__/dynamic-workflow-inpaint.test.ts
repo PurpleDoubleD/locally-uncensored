@@ -17,6 +17,7 @@ vi.mock('../comfyui-nodes', async (importOriginal) => {
 
 import { buildDynamicWorkflow, WorkflowUnavailableError } from '../dynamic-workflow'
 import { getAllNodeInfo } from '../comfyui-nodes'
+import { classTypes, nodeOf } from './graph-test-support'
 
 // Minimal live /object_info for an SDXL-checkpoint ComfyUI with core nodes.
 const CHECKPOINT_NODES: Record<string, unknown> = {
@@ -39,8 +40,9 @@ const baseParams = {
   width: 1024, height: 1024, steps: 20, cfgScale: 7, seed: 1, batchSize: 1,
 } as never
 
-const node = (wf: Record<string, any>, type: string) =>
-  Object.entries(wf).find(([, n]) => n.class_type === type)
+// nodeOf/nodesOf/classTypes leben in graph-test-support.ts — siehe dort, warum
+// eine Graph-Fixture als ComfyApiGraph statt als Record<string, any> gelesen wird.
+const node = nodeOf
 
 describe('buildDynamicWorkflow — local Edit (mask inpaint, checkpoint path)', () => {
   beforeEach(() => {
@@ -54,7 +56,7 @@ describe('buildDynamicWorkflow — local Edit (mask inpaint, checkpoint path)', 
       inputImage: 'src.png', maskImage: 'mask.png', growMaskBy: 8,
     } as never)
 
-    const types = Object.values(wf).map((n: any) => n.class_type)
+    const types = classTypes(wf)
     expect(types).toContain('LoadImageMask')
     expect(types).toContain('VAEEncodeForInpaint')
     expect(types).not.toContain('EmptyLatentImage') // replaced by the inpaint latent
@@ -91,7 +93,7 @@ describe('buildDynamicWorkflow — local Edit (mask inpaint, checkpoint path)', 
     expect(sampler.inputs.positive).toEqual([condId, 0])
     expect(sampler.inputs.negative).toEqual([condId, 1])
     expect(sampler.inputs.latent_image).toEqual([condId, 2])
-    expect(Object.values(wf).some((n: any) => n.class_type === 'VAEEncodeForInpaint')).toBe(false)
+    expect(classTypes(wf)).not.toContain('VAEEncodeForInpaint')
   })
 
   it('inpaint wins over plain i2i when both a mask and denoise<1 are present', async () => {
@@ -99,8 +101,8 @@ describe('buildDynamicWorkflow — local Edit (mask inpaint, checkpoint path)', 
       ...(baseParams as object),
       inputImage: 'src.png', maskImage: 'mask.png', denoise: 0.6,
     } as never)
-    expect(Object.values(wf).some((n: any) => n.class_type === 'VAEEncodeForInpaint')).toBe(true)
-    expect(Object.values(wf).some((n: any) => n.class_type === 'VAEEncode')).toBe(false)
+    expect(classTypes(wf)).toContain('VAEEncodeForInpaint')
+    expect(classTypes(wf)).not.toContain('VAEEncode')
     expect(node(wf, 'KSampler')![1].inputs.denoise).toBe(0.6) // user strength honored
   })
 
@@ -109,8 +111,8 @@ describe('buildDynamicWorkflow — local Edit (mask inpaint, checkpoint path)', 
       ...(baseParams as object),
       inputImage: 'src.png', denoise: 0.7,
     } as never)
-    expect(Object.values(wf).some((n: any) => n.class_type === 'VAEEncode')).toBe(true)
-    expect(Object.values(wf).some((n: any) => n.class_type === 'VAEEncodeForInpaint')).toBe(false)
+    expect(classTypes(wf)).toContain('VAEEncode')
+    expect(classTypes(wf)).not.toContain('VAEEncodeForInpaint')
   })
 
   // 2.5.9: the Edit lane is "Edit / Image to Image" and its canvas says "leave
@@ -125,7 +127,7 @@ describe('buildDynamicWorkflow — local Edit (mask inpaint, checkpoint path)', 
       denoise: 0.8, // Edit strength slider default
     } as never)
 
-    const types = Object.values(wf).map((n: any) => n.class_type)
+    const types = classTypes(wf)
     expect(types).toContain('VAEEncode')
     expect(types).not.toContain('LoadImageMask')
     expect(types).not.toContain('VAEEncodeForInpaint')

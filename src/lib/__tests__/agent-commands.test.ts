@@ -12,8 +12,15 @@ import {
   LOOP_DONE_MARKER,
   LOOP_CONTINUE_MARKER,
   loopPassSaysDone,
+  commandInScope,
 } from '../agent-commands'
-import { MUTATING_TOOLS } from '../mutating-tools'
+import { MUTATING_TOOLS, allowedInReadOnlyTurn } from '../mutating-tools'
+import { READ_ONLY_SHELL_HINT, isReadOnlyCommand } from '../shell-command-classify'
+import { readFileSync, readdirSync } from 'node:fs'
+import { join } from 'node:path'
+
+/** Die drei Hooks, die einen lokal behandelten Befehl ausfuehren muessen. */
+const HOOKS = join(__dirname, '..', '..', 'hooks')
 
 // The 2.5.9 set. Kept as an explicit list rather than a count so a rename or an
 // accidental drop fails loudly instead of quietly changing a number.
@@ -21,6 +28,8 @@ const EXPECTED = [
   // steer
   'goal', 'loop',
   // understand
+  // context
+  'compact',
   'plan', 'explain', 'find', 'diff', 'log', 'todo',
   // change
   'fix', 'types', 'test', 'refactor', 'clean', 'optimize',
@@ -58,11 +67,54 @@ describe('AGENT_COMMANDS registry', () => {
     }
   })
 
-  it('marks only /goal as handled locally', () => {
-    // Everything else must reach a model; a second locally-handled command
-    // would need its own branch in three hooks and would silently no-op if it
-    // did not get one.
-    expect(AGENT_COMMANDS.filter((c) => c.handledLocally).map((c) => c.name)).toEqual(['goal'])
+  // Diese Sperre stand als "nur /goal ist lokal behandelt" da, mit der
+  // Begruendung: ein zweiter solcher Befehl braeuchte einen eigenen Zweig in
+  // drei Hooks und wuerde still nichts tun, wenn er keinen bekommt.
+  //
+  // Der zweite ist jetzt da (/compact, 2.6.8). Die Namensliste zu erweitern
+  // haette die Sperre entwertet — sie haette dann nur noch gezaehlt. Also
+  // prueft sie ab hier das, wovor ihr eigener Kommentar gewarnt hat: dass
+  // JEDER lokal behandelte Befehl in allen drei Hooks tatsaechlich einen
+  // Zweig hat. Das ist die Zusicherung, die "still nichts tun" verhindert.
+  it('jeder lokal behandelte Befehl hat einen Zweig in JEDEM Hook, der Befehle liest', () => {
+    // Die Hook-Liste wird ABGELEITET, nicht aufgezaehlt. Der erste Entwurf
+    // dieser Sperre nannte drei Dateien fest und verlangte damit einen Zweig
+    // in useAgentChat.ts — das liest aber gar keine Befehle, es bekommt vom
+    // useChat bereits Aufbereitetes. Ein Zweig dort waere Code ohne Aufrufer
+    // gewesen, also genau der Defekt, den dieses Projekt an anderer Stelle
+    // schon einmal aufgeraeumt hat. Wer spaeter parseAgentCommand in einen
+    // weiteren Hook holt, wird von dieser Fassung automatisch miterfasst.
+    const alle = readdirSync(HOOKS).filter((f) => f.endsWith('.ts'))
+    const leser = alle
+      .map((f) => ({ f, src: readFileSync(join(HOOKS, f), 'utf8') }))
+      .filter(({ src }) => /\bparseAgentCommand\s*\(/.test(src))
+    expect(leser.map((h) => h.f).sort()).toEqual(['useChat.ts', 'useCodex.ts'])
+
+    const lokal = AGENT_COMMANDS.filter((c) => c.handledLocally)
+    expect(lokal.length).toBeGreaterThan(1)
+    for (const c of lokal) {
+      for (const { f, src } of leser) {
+        expect(src.includes(`'${c.name}'`), `${f} hat keinen Zweig fuer /${c.name}`).toBe(true)
+      }
+    }
+  })
+
+  // Die Reichweite: genau ein Befehl darf im normalen Chat erscheinen, und es
+  // ist der eine, der ohne Werkzeuge auskommt. Jeder andere wuerde dort eine
+  // Arbeit versprechen, die die Oberflaeche nicht ausfuehren kann.
+  it('nur /compact reicht bis in den normalen Chat', () => {
+    const imChat = AGENT_COMMANDS.filter((c) => commandInScope(c, 'chat')).map((c) => c.name)
+    expect(imChat).toEqual(['compact'])
+    expect(AGENT_COMMANDS.every((c) => commandInScope(c, 'agent'))).toBe(true)
+  })
+
+  it('das Menue und der Parser folgen derselben Reichweite', () => {
+    expect(matchAgentCommands('/', 'chat').map((c) => c.name)).toEqual(['compact'])
+    expect(matchAgentCommands('/', 'agent').length).toBe(AGENT_COMMANDS.length)
+    // Ein Agentenbefehl im normalen Chat ist kein Befehl, sondern Text.
+    expect(parseAgentCommand('/fix den login', 'chat')).toBeNull()
+    expect(parseAgentCommand('/fix den login', 'agent')).not.toBeNull()
+    expect(parseAgentCommand('/compact die datenbank', 'chat')?.args).toBe('die datenbank')
   })
 
   it('an argument the user typed always reaches the expansion', () => {
@@ -76,21 +128,48 @@ describe('AGENT_COMMANDS registry', () => {
     }
   })
 
-  it('read-only commands never name a mutating tool in their template', () => {
-    // The runner strips these tools for the turn, so a template that asks for
-    // one would be instructing the model to reach for something that is gone.
+  it('read-only commands never name a tool the turn does not have', () => {
+    // Der Strip nimmt die mutierenden Werkzeuge, MIT EINER AUSNAHME:
+    // shell_execute bleibt, weil die frueheren Einzel-Inspektoren (git_status,
+    // git_log, git_diff) seit 2.6.6 darin stecken. Diese Ausnahme ist der
+    // Grund, warum die alte Fassung dieses Tests den Fehler mitgetragen hat:
+    // sie verlangte, dass KEIN mutierendes Werkzeug genannt wird, und der
+    // Vorspann sagte deshalb pauschal "no write or shell tools" -- was fuer
+    // shell_execute schlicht nicht stimmt. Gefragt ist nicht "mutierend",
+    // sondern "in diesem Zug nicht da".
     for (const c of AGENT_COMMANDS.filter((c) => c.readOnly)) {
       const text = c.build('x')
       for (const tool of MUTATING_TOOLS) {
+        if (allowedInReadOnlyTurn(tool)) continue
         expect(text, `${c.name} names ${tool}`).not.toContain(tool)
       }
     }
   })
 
-  it('read-only commands say up front that they cannot write or run', () => {
+  it('read-only commands say what they cannot do AND what they still can', () => {
     for (const c of AGENT_COMMANDS.filter((c) => c.readOnly)) {
-      expect(c.build('x')).toContain('no write or shell tools')
+      const text = c.build('x')
+      expect(text, `${c.name} verschweigt die Schreibsperre`).toContain('cannot write files')
+      expect(text, `${c.name} verschweigt die Befehlssperre`).toContain('cannot run arbitrary commands')
+      // Und der erlaubte Rest, woertlich so, wie der Executor ihn zulaesst.
+      expect(text, `${c.name} verschweigt die erlaubten Befehle`).toContain(READ_ONLY_SHELL_HINT)
     }
+  })
+
+  it('der Vorspann verspricht genau die Befehle, die der Waechter auch durchlaesst', () => {
+    // Die Gegenprobe zum Test darueber: ein Satz, der eine Liste nennt, ist
+    // wertlos, wenn die Liste nicht stimmt. Jeder genannte Befehl muss durch
+    // isReadOnlyCommand kommen, und ein verketteter darf es nicht.
+    const liste = READ_ONLY_SHELL_HINT
+      .replace('Only inspection commands run here: ', '')
+      .replace('. One command, no chaining.', '')
+      .split(', ')
+    expect(liste.length).toBeGreaterThan(3)
+    for (const befehl of liste) {
+      expect(isReadOnlyCommand(befehl), `${befehl} wird versprochen, aber abgelehnt`).toBe(true)
+    }
+    // Trennkontrolle: derselbe Befehl mit Verkettung faellt.
+    expect(isReadOnlyCommand(`${liste[0]}; echo hi > x`)).toBe(false)
   })
 
   it('marks exactly the inspection commands read-only', () => {

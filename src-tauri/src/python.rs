@@ -7,6 +7,29 @@ use std::os::windows::process::CommandExt;
 #[cfg(target_os = "windows")]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
+/// Die eine Stelle, die ein Python-Kommando baut.
+///
+/// Ein Python-Kind mit umgeleiteter Ausgabe kodiert unter Windows mit der alten
+/// Codepage, und ein Ausnahmetext mit einem einzigen Zeichen ausserhalb von
+/// ASCII bricht den Lauf dann mit einem UnicodeEncodeError ab, statt zu sagen,
+/// was los ist. Diese Begruendung stand seit 2.6.8 ueber genau einem von acht
+/// Python-Starts im Installer, dem Import-Test, und sie gilt woertlich fuer
+/// jeden anderen. Ungeschuetzt waren ausgerechnet die beiden pip-Laeufe, die
+/// die laengste Ausgabe erzeugen und dabei staendig Pfade drucken.
+///
+/// anglefire (Ticket 003, 03.09.) heisst auf seinem Windows "1 בוגר", also
+/// stehen in jedem gedruckten Pfad hebraeische Zeichen. `CREATE_NO_WINDOW`
+/// sitzt hier mit drin, damit auch das nicht Stelle fuer Stelle nachgezogen
+/// werden muss.
+pub fn python_command<S: AsRef<std::ffi::OsStr>>(python_bin: S) -> Command {
+    let mut cmd = Command::new(python_bin);
+    cmd.env("PYTHONIOENCODING", "utf-8");
+    cmd.env("PYTHONUTF8", "1");
+    #[cfg(target_os = "windows")]
+    cmd.creation_flags(CREATE_NO_WINDOW);
+    cmd
+}
+
 /// True when a `PYTHONHOME` / `PYTHONPATH` value points inside an AppImage's
 /// throwaway mount instead of a real Python installation.
 ///
@@ -80,24 +103,79 @@ pub fn venv_python_path_named(comfyui_dir: &Path, venv_name: &str) -> PathBuf {
     }
 }
 
-/// Resolve the venv Python for `comfyui_dir` iff it exists. Returns the
-/// path as a String (matching the API that `process::start_comfyui` already
-/// uses for its `bundled_python` / `system_python` slots), or None when
-/// no venv has been created — caller falls back to the system Python.
+/// Where this ComfyUI keeps its packages. Three answers, not two.
 ///
-/// Checks both the classic `venv` and the modern `.venv` directory (issue #51,
-/// adhney): a macOS/Linux ComfyUI installed into `.venv` was previously missed,
-/// so `start_comfyui` fell back to the system Python and crashed with
-/// `ModuleNotFoundError: torch`. `venv` is checked first to preserve the exact
-/// behavior for users whose env LU's own installer created.
-pub fn resolve_comfyui_venv_python(comfyui_dir: &Path) -> Option<String> {
+/// P3 (Windows box, 03.09.2026): `venv\Scripts\python.exe` was renamed and the
+/// launcher never noticed. It knew only "venv" and "no venv", a venv without
+/// its interpreter fell into the second box, and the answer to "no venv" is
+/// "use the system Python". So ComfyUI started on
+/// `C:\Program Files\Python311\python.exe` and died on a torch import out of a
+/// site-packages tree that has nothing to do with this install.
+///
+/// The missing answer is [`ComfyVenv::Broken`]: the packages live in that venv,
+/// so no other interpreter can start this ComfyUI, and falling back is not a
+/// rescue but a guaranteed error message about the wrong environment.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ComfyVenv {
+    /// A venv whose interpreter is there.
+    Usable(String),
+    /// A venv directory without its interpreter. `interpreter` is the file
+    /// that is missing, which is the one fact the user cannot see from
+    /// outside.
+    Broken { venv_dir: PathBuf, interpreter: PathBuf },
+    /// No venv. The normal case on Windows and macOS: `install_comfyui` only
+    /// builds one when the system Python is PEP 668 protected, otherwise the
+    /// requirements go into the system Python and starting from it is right.
+    Absent,
+}
+
+/// Which of the three answers holds for `comfyui_dir`.
+///
+/// Both the classic `venv` and the modern `.venv` are checked (issue #51,
+/// adhney: a macOS/Linux ComfyUI installed into `.venv` was missed and started
+/// on the system Python). `venv` first, so LU's own installer keeps its exact
+/// behaviour. Usable beats Broken beats Absent.
+///
+/// What makes a directory a venv rather than a leftover folder: either its
+/// PEP 405 marker `pyvenv.cfg`, or torch sitting in its site-packages. The
+/// second half is deliberately the same question
+/// [`crate::commands::process::prefix_has_torch`] answers for the
+/// completeness check, because this module answering it differently is the
+/// whole bug: the panel called the install complete (it found torch in the
+/// venv) while the launcher called the venv absent (it found no interpreter).
+/// An empty folder called `venv` is neither, and must not block a start.
+pub fn comfy_venv_state(comfyui_dir: &Path) -> ComfyVenv {
+    let mut broken: Option<ComfyVenv> = None;
     for venv_name in ["venv", ".venv"] {
-        let candidate = venv_python_path_named(comfyui_dir, venv_name);
-        if candidate.exists() {
-            return Some(candidate.to_string_lossy().to_string());
+        let interpreter = venv_python_path_named(comfyui_dir, venv_name);
+        if interpreter.exists() {
+            return ComfyVenv::Usable(interpreter.to_string_lossy().to_string());
+        }
+        if broken.is_some() {
+            continue;
+        }
+        let venv_dir = comfyui_dir.join(venv_name);
+        if venv_dir.join("pyvenv.cfg").exists()
+            || crate::commands::process::prefix_has_torch(&venv_dir)
+        {
+            broken = Some(ComfyVenv::Broken { venv_dir, interpreter });
         }
     }
-    None
+    broken.unwrap_or(ComfyVenv::Absent)
+}
+
+/// The venv Python for `comfyui_dir` iff it is usable, as a String (matching
+/// the API that `process::start_comfyui` uses for its `bundled_python` /
+/// `system_python` slots).
+///
+/// None still means "do not launch from a venv", which is what the installer,
+/// the updater and the custom-node path want. Only the launcher has to tell
+/// Broken from Absent, so only the launcher asks [`comfy_venv_state`].
+pub fn resolve_comfyui_venv_python(comfyui_dir: &Path) -> Option<String> {
+    match comfy_venv_state(comfyui_dir) {
+        ComfyVenv::Usable(p) => Some(p),
+        ComfyVenv::Broken { .. } | ComfyVenv::Absent => None,
+    }
 }
 
 /// Resolve the real Python binary path, filtering out the Microsoft Store stub
@@ -108,14 +186,40 @@ pub fn resolve_comfyui_venv_python(comfyui_dir: &Path) -> Option<String> {
 /// "Python not installed". Falling back to the bare `"python"` string the way
 /// older versions did re-introduces the Store-stub trap on a fresh Windows
 /// box, which is exactly the bug P14 fixes.
-/// Non-Windows: prefer python3, then python.
+/// Non-Windows: walk `os_paths::unix_python_candidates()` and return the first
+/// interpreter that resolves on PATH *and* answers `--version`.
+///
+/// Two constraints decide the shape of this function.
+///
+/// 1. BUG-008. Grabbing a bare `python3` is wrong on any box whose `python3`
+///    is ahead of the ML wheels (3.14 today): ComfyUI, faster-whisper and
+///    Piper all die at the first `pip install` with "no matching distribution",
+///    and the user has no way to see why. The ordered candidate list that
+///    prefers 3.12/3.11 already existed in `os_paths` — it was simply never
+///    on the install path, because `find_python` (which uses it) is called by
+///    the media lanes and `get_python_bin` (which did not) is called by
+///    `AppState::new`, i.e. by everything that installs. This is the wiring.
+/// 2. The result must be an ABSOLUTE path. Everything downstream derives
+///    facts from it — `commands::process` reads the interpreter's prefix to
+///    find torch, error messages quote it — and a bare name has no prefix:
+///    `Path::new("python3").parent()` is `Some("")`, which silently turns
+///    every derived path into a relative one.
+///
+/// `which` resolves the name; the `--version` run stays because a dangling
+/// symlink or a shim that exits non-zero must be skipped, not cached.
+/// Returns the empty string when nothing usable exists — callers treat `""`
+/// as "no Python on this box" (see `is_real_python`).
 #[cfg(not(target_os = "windows"))]
 pub fn get_python_bin() -> String {
-    for bin in &["python3", "python"] {
-        if let Ok(output) = Command::new(bin).arg("--version").output() {
-            if output.status.success() {
-                return bin.to_string();
+    for name in crate::os_paths::unix_python_candidates() {
+        let Ok(path) = which::which(name) else { continue };
+        let mut cmd = Command::new(&path);
+        cmd.arg("--version");
+        match cmd.output() {
+            Ok(output) if output.status.success() => {
+                return path.to_string_lossy().to_string();
             }
+            _ => continue,
         }
     }
     String::new()
@@ -198,15 +302,17 @@ fn python_via_py_launcher() -> Option<String> {
 
 /// Standard single-version python.org install dirs at the drive root.
 #[cfg(target_os = "windows")]
+const WINDOWS_FIXED_PYTHONS: [&str; 5] = [
+    "C:\\Python313\\python.exe",
+    "C:\\Python312\\python.exe",
+    "C:\\Python311\\python.exe",
+    "C:\\Python310\\python.exe",
+    "C:\\Python39\\python.exe",
+];
+
+#[cfg(target_os = "windows")]
 fn python_in_fixed_paths() -> Option<String> {
-    const COMMON: [&str; 5] = [
-        "C:\\Python313\\python.exe",
-        "C:\\Python312\\python.exe",
-        "C:\\Python311\\python.exe",
-        "C:\\Python310\\python.exe",
-        "C:\\Python39\\python.exe",
-    ];
-    for p in COMMON {
+    for p in WINDOWS_FIXED_PYTHONS {
         if Path::new(p).exists() && verify_python_path(p) {
             println!("[Python] Found at fixed path: {}", p);
             return Some(p.to_string());
@@ -241,39 +347,46 @@ fn python_in_appdata() -> Option<String> {
 /// Scan `base` for `Python3xx\python.exe`, newest version first.
 #[cfg(target_os = "windows")]
 fn scan_python_subdirs(base: &Path, label: &str) -> Option<String> {
-    let entries = std::fs::read_dir(base).ok()?;
+    let path = python_subdirs(base).into_iter().next()?;
+    println!("[Python] Found in {}: {}", label, path);
+    Some(path)
+}
+
+/// Every runnable `Python3xx\python.exe` under `base`, newest version first.
+#[cfg(target_os = "windows")]
+fn python_subdirs(base: &Path) -> Vec<String> {
+    let Ok(entries) = std::fs::read_dir(base) else { return Vec::new() };
     let mut dirs: Vec<_> = entries
         .filter_map(|e| e.ok())
         .filter(|e| {
-            e.file_type().ok().map_or(false, |ft| ft.is_dir())
+            e.file_type().ok().is_some_and(|ft| ft.is_dir())
                 && e.file_name().to_string_lossy().to_lowercase().starts_with("python")
         })
         .collect();
-    dirs.sort_by(|a, b| b.file_name().cmp(&a.file_name()));
-    for dir in dirs {
-        let exe = dir.path().join("python.exe");
-        if exe.exists() {
-            let path = exe.to_string_lossy().to_string();
-            if verify_python_path(&path) {
-                println!("[Python] Found in {}: {}", label, path);
-                return Some(path);
-            }
-        }
-    }
-    None
+    dirs.sort_by_key(|e| std::cmp::Reverse(e.file_name()));
+    dirs.into_iter()
+        .map(|dir| dir.path().join("python.exe"))
+        .filter(|exe| exe.exists())
+        .map(|exe| exe.to_string_lossy().to_string())
+        .filter(|path| verify_python_path(path))
+        .collect()
 }
 
 /// Miniconda / Anaconda base env in the user profile.
 #[cfg(target_os = "windows")]
-fn python_in_conda() -> Option<String> {
-    let userprofile = std::env::var("USERPROFILE").ok()?;
-    let candidates = [
+fn conda_candidates() -> Vec<PathBuf> {
+    let Ok(userprofile) = std::env::var("USERPROFILE") else { return Vec::new() };
+    vec![
         Path::new(&userprofile).join("miniconda3").join("python.exe"),
         Path::new(&userprofile).join("anaconda3").join("python.exe"),
         Path::new(&userprofile).join("miniconda3").join("Scripts").join("python.exe"),
         Path::new(&userprofile).join("anaconda3").join("Scripts").join("python.exe"),
-    ];
-    for p in candidates {
+    ]
+}
+
+#[cfg(target_os = "windows")]
+fn python_in_conda() -> Option<String> {
+    for p in conda_candidates() {
         if p.exists() {
             let path = p.to_string_lossy().to_string();
             if verify_python_path(&path) {
@@ -283,6 +396,124 @@ fn python_in_conda() -> Option<String> {
         }
     }
     None
+}
+
+/// "3.11.7" for an interpreter that runs, None for a stub or one that dies
+/// during init. The version is asked from the interpreter itself, not read
+/// off a folder name or a pyvenv.cfg, because those describe what was
+/// installed once, not what starts today.
+pub fn python_version(exe: &str) -> Option<String> {
+    let out = python_command(exe)
+        .args(["-c", "import sys;print('%d.%d.%d'%sys.version_info[:3])"])
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let v = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    if v.is_empty() { None } else { Some(v) }
+}
+
+/// Every interpreter this machine has, LU's usual order, duplicates and the
+/// Store stub dropped. `get_python_bin` answers "which Python does LU use";
+/// a lane whose wheels stop at a version has to ask "which Pythons are
+/// there" and pick its own. Until 2.6.8 nobody asked, so a box whose newest
+/// Python was 3.14 built the trainer venv from 3.14 and died at step 4/4
+/// (sockenmonster, Discord, August and ticket 0004 on 2026-09-05).
+///
+/// Nothing here starts an interpreter beyond the `--version` gate the
+/// existing scans apply; the caller asks each hit for its version.
+#[cfg(not(target_os = "windows"))]
+pub fn python_interpreters() -> Vec<String> {
+    let mut found: Vec<String> = Vec::new();
+    for name in crate::os_paths::unix_python_candidates() {
+        let Ok(path) = which::which(name) else { continue };
+        let path = path.to_string_lossy().to_string();
+        if !found.contains(&path) {
+            found.push(path);
+        }
+    }
+    found
+}
+
+/// Windows walks the launcher registry first: `py -0p` lists every
+/// python.org install with its path (PEP 514), whether or not it is on PATH.
+/// Then the same places `get_python_bin` looks, all hits instead of the
+/// first.
+#[cfg(target_os = "windows")]
+pub fn python_interpreters() -> Vec<String> {
+    let mut found: Vec<String> = Vec::new();
+    let mut push = |p: String| {
+        if !p.is_empty()
+            && !p.contains("WindowsApps")
+            && !found.iter().any(|f| f.eq_ignore_ascii_case(&p))
+        {
+            found.push(p);
+        }
+    };
+    let mut launcher = Command::new("py");
+    launcher.arg("-0p");
+    launcher.creation_flags(CREATE_NO_WINDOW);
+    if let Ok(out) = launcher.output() {
+        if out.status.success() {
+            for p in launcher_list_paths(&String::from_utf8_lossy(&out.stdout)) {
+                push(p);
+            }
+        }
+    }
+    let mut where_cmd = Command::new("where");
+    where_cmd.arg("python");
+    where_cmd.creation_flags(CREATE_NO_WINDOW);
+    if let Ok(out) = where_cmd.output() {
+        if out.status.success() {
+            for line in String::from_utf8_lossy(&out.stdout).lines() {
+                push(line.trim().to_string());
+            }
+        }
+    }
+    for p in WINDOWS_FIXED_PYTHONS {
+        if Path::new(p).exists() {
+            push(p.to_string());
+        }
+    }
+    for env_key in ["ProgramFiles", "ProgramW6432", "ProgramFiles(x86)"] {
+        if let Ok(base) = std::env::var(env_key) {
+            for p in python_subdirs(Path::new(&base)) {
+                push(p);
+            }
+        }
+    }
+    if let Ok(localappdata) = std::env::var("LOCALAPPDATA") {
+        for p in python_subdirs(&Path::new(&localappdata).join("Programs").join("Python")) {
+            push(p);
+        }
+    }
+    for p in conda_candidates() {
+        if p.exists() {
+            push(p.to_string_lossy().to_string());
+        }
+    }
+    found
+}
+
+/// The path column of `py -0p`. Lines look like
+/// ` -V:3.13 *        C:\Python313\python.exe` (launcher 3.11 and newer) or
+/// ` -3.11-64 *       C:\Program Files\Python311\python.exe` (older), the
+/// star marks the default, and a path may contain spaces, so everything after
+/// the tag and the optional star is the path.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+pub(crate) fn launcher_list_paths(listing: &str) -> Vec<String> {
+    listing
+        .lines()
+        .map(str::trim)
+        .filter(|l| l.starts_with('-'))
+        .filter_map(|l| {
+            let rest = l[l.find(char::is_whitespace)?..].trim_start();
+            let rest = rest.strip_prefix('*').map_or(rest, str::trim_start);
+            let rest = rest.trim();
+            (!rest.is_empty()).then(|| rest.to_string())
+        })
+        .collect()
 }
 
 /// True iff `bin` looks like a real, runnable Python binary (not the empty
@@ -301,6 +532,41 @@ pub fn is_real_python(bin: &str) -> bool {
 mod tests {
     use super::*;
     use std::fs;
+
+    // ── Ticket 003: die Kodierung haengt am Kommando, nicht am Aufrufer ────
+
+    #[test]
+    fn python_command_carries_the_utf8_environment() {
+        let cmd = python_command("python3");
+        let envs: Vec<(String, Option<String>)> = cmd
+            .get_envs()
+            .map(|(k, v)| {
+                (
+                    k.to_string_lossy().to_string(),
+                    v.map(|v| v.to_string_lossy().to_string()),
+                )
+            })
+            .collect();
+        assert!(
+            envs.contains(&("PYTHONIOENCODING".to_string(), Some("utf-8".to_string()))),
+            "ohne PYTHONIOENCODING bricht ein Pfad mit hebraeischen Zeichen den Lauf ab: {envs:?}",
+        );
+        assert!(
+            envs.contains(&("PYTHONUTF8".to_string(), Some("1".to_string()))),
+            "ohne PYTHONUTF8 bleibt die alte Codepage die Voreinstellung: {envs:?}",
+        );
+        assert_eq!(cmd.get_program(), "python3", "das Programm darf nicht verloren gehen");
+    }
+
+    #[test]
+    fn python_command_takes_a_path_as_well_as_a_string() {
+        // Die Aufrufstellen halten mal einen String, mal einen Pfad. Beide
+        // muessen durch dieselbe Tuer passen, sonst baut die naechste sich
+        // wieder ihr eigenes Kommando.
+        let p = std::path::PathBuf::from("/usr/bin/python3");
+        assert_eq!(python_command(&p).get_program(), p.as_os_str());
+        assert_eq!(python_command(String::from("py")).get_program(), "py");
+    }
 
     // ── AppImage Python env poisoning (numbrain, Discord 2026-07-28) ────────
 
@@ -368,21 +634,31 @@ mod tests {
 
     // ── resolve_comfyui_venv_python — existence gate ────────────────────────
 
+    /// ── Why these three no longer name their own directory ──
+    ///
+    /// They used the FIXED paths `<temp>/lu-venv-test-missing`,
+    /// `…-present` and `lu-dotvenv-test-present`, and each began by deleting
+    /// its own. Every concurrent copy of this test binary used the same three,
+    /// so one copy's `remove_dir_all` landed between another's `create_dir_all`
+    /// and its `resolve_comfyui_venv_python` — the stub python was gone and the
+    /// resolver correctly answered `None`. Measured on 01.09.2026 under six
+    /// concurrent copies of the suite, ten rounds:
+    /// `resolve_returns_some_when_venv_python_exists` and
+    /// `resolve_finds_dot_venv_layout` failed 1 of 60 runs each.
+    ///
+    /// `crate::os_paths::test_dir` puts the process id and the thread id in the
+    /// name and sweeps up on `Drop`, even when an assertion panics.
     #[test]
     fn resolve_returns_none_when_venv_missing() {
-        let tmp = std::env::temp_dir().join("lu-venv-test-missing");
-        let _ = fs::remove_dir_all(&tmp);
-        fs::create_dir_all(&tmp).unwrap();
+        let tmp = crate::os_paths::test_dir("venv-missing");
         assert!(resolve_comfyui_venv_python(&tmp).is_none());
-        let _ = fs::remove_dir_all(&tmp);
     }
 
     #[test]
     fn resolve_returns_some_when_venv_python_exists() {
         // Build the exact layout `python -m venv` would produce so the
         // resolver finds it without actually invoking Python.
-        let tmp = std::env::temp_dir().join("lu-venv-test-present");
-        let _ = fs::remove_dir_all(&tmp);
+        let tmp = crate::os_paths::test_dir("venv-present");
         let inner = if cfg!(target_os = "windows") {
             tmp.join("venv").join("Scripts")
         } else {
@@ -398,15 +674,13 @@ mod tests {
         let resolved = resolve_comfyui_venv_python(&tmp);
         assert!(resolved.is_some(), "expected resolver to find {}", py.display());
         assert!(resolved.unwrap().contains("venv"));
-        let _ = fs::remove_dir_all(&tmp);
     }
 
     #[test]
     fn resolve_finds_dot_venv_layout() {
         // Issue #51 (adhney): ComfyUI installed into `.venv` (uv / modern
         // `python -m venv .venv`) must also be picked up, not just `venv`.
-        let tmp = std::env::temp_dir().join("lu-dotvenv-test-present");
-        let _ = fs::remove_dir_all(&tmp);
+        let tmp = crate::os_paths::test_dir("dotvenv-present");
         let inner = if cfg!(target_os = "windows") {
             tmp.join(".venv").join("Scripts")
         } else {
@@ -422,7 +696,100 @@ mod tests {
         let resolved = resolve_comfyui_venv_python(&tmp);
         assert!(resolved.is_some(), "expected resolver to find {}", py.display());
         assert!(resolved.unwrap().contains(".venv"));
-        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    // ── P3: comfy_venv_state, die dritte Antwort ───────────────────────────
+    //
+    // Der Tester hat `venv\Scripts\python.exe` umbenannt und Start gedrueckt.
+    // Die App hat es nicht gemerkt und still
+    // `C:\Program Files\Python311\python.exe` gestartet, weil "venv ohne
+    // Interpreter" und "kein venv" bis dahin dieselbe Antwort waren.
+
+    /// Legt ein venv an, dem genau der Interpreter fehlt. `Lib/site-packages`
+    /// ist die Windows-Form, und `prefix_has_torch` prueft alle Formen auf
+    /// jeder Plattform, also braucht der Test keinen Plattformzweig.
+    fn broken_venv(tmp: &std::path::Path, venv_name: &str, marker: bool, torch: bool) {
+        let venv = tmp.join(venv_name);
+        fs::create_dir_all(&venv).unwrap();
+        if marker {
+            fs::write(venv.join("pyvenv.cfg"), "home = C:\\Program Files\\Python311\n").unwrap();
+        }
+        if torch {
+            fs::create_dir_all(venv.join("Lib").join("site-packages").join("torch")).unwrap();
+        }
+    }
+
+    #[test]
+    fn ein_venv_ohne_interpreter_ist_kaputt_und_nicht_abwesend() {
+        let tmp = crate::os_paths::test_dir("venv-broken");
+        broken_venv(&tmp, "venv", true, true);
+        assert_eq!(
+            comfy_venv_state(&tmp),
+            ComfyVenv::Broken {
+                venv_dir: tmp.join("venv"),
+                interpreter: venv_python_path_named(&tmp, "venv"),
+            },
+            "der Fall des Testers muss von 'kein venv' unterscheidbar sein",
+        );
+        // Der Vertrag der sechs anderen Aufrufer bleibt: kaputt heisst weiter
+        // "starte hier nicht heraus".
+        assert!(resolve_comfyui_venv_python(&tmp).is_none());
+    }
+
+    #[test]
+    fn ein_venv_ohne_marke_aber_mit_torch_ist_auch_kaputt() {
+        // process.rs:628-632 nennt die Form ausdruecklich: manche Werkzeuge
+        // legen site-packages ohne pyvenv.cfg an. Die Vollstaendigkeitspruefung
+        // zaehlt so ein Verzeichnis als fertige Installation, also darf der
+        // Launcher es nicht als abwesend lesen.
+        let tmp = crate::os_paths::test_dir("venv-broken-nomarker");
+        broken_venv(&tmp, "venv", false, true);
+        assert!(matches!(comfy_venv_state(&tmp), ComfyVenv::Broken { .. }));
+    }
+
+    #[test]
+    fn ein_leerer_ordner_namens_venv_ist_kein_venv() {
+        // Negativkontrolle zu den beiden darueber: wer `Broken` am blossen
+        // Ordnernamen festmacht, verweigert hier einen Start, der heute laeuft.
+        let tmp = crate::os_paths::test_dir("venv-empty");
+        broken_venv(&tmp, "venv", false, false);
+        assert_eq!(comfy_venv_state(&tmp), ComfyVenv::Absent);
+        assert!(resolve_comfyui_venv_python(&tmp).is_none());
+    }
+
+    #[test]
+    fn auch_ein_punkt_venv_kann_kaputt_sein() {
+        // Issue #51 noch einmal, eine Ebene tiefer: die uv-Form darf nicht
+        // durch dasselbe Raster fallen wie damals.
+        let tmp = crate::os_paths::test_dir("dotvenv-broken");
+        broken_venv(&tmp, ".venv", true, false);
+        assert_eq!(
+            comfy_venv_state(&tmp),
+            ComfyVenv::Broken {
+                venv_dir: tmp.join(".venv"),
+                interpreter: venv_python_path_named(&tmp, ".venv"),
+            },
+        );
+    }
+
+    #[test]
+    fn ein_benutzbares_venv_gewinnt_weiterhin() {
+        let tmp = crate::os_paths::test_dir("venv-usable-wins");
+        // Ein kaputtes `.venv` daneben, damit die Reihenfolge geprueft wird und
+        // nicht nur der Einzelfall.
+        broken_venv(&tmp, ".venv", true, false);
+        broken_venv(&tmp, "venv", true, true);
+        let py = venv_python_path_named(&tmp, "venv");
+        fs::create_dir_all(py.parent().unwrap()).unwrap();
+        fs::write(&py, "stub").unwrap();
+        assert_eq!(
+            comfy_venv_state(&tmp),
+            ComfyVenv::Usable(py.to_string_lossy().to_string()),
+        );
+        assert_eq!(
+            resolve_comfyui_venv_python(&tmp).as_deref(),
+            Some(py.to_string_lossy().as_ref()),
+        );
     }
 
     // ── is_real_python (Bug P14 — Microsoft Store stub filter) ──────────────
@@ -441,6 +808,51 @@ mod tests {
     fn real_python_accepts_real_path() {
         assert!(is_real_python("/usr/bin/python3"));
         assert!(is_real_python("C:\\Python312\\python.exe"));
+    }
+
+    // ── get_python_bin wiring (OI-6: BUG-008 resolver was never called) ─────
+
+    /// The install path must never hand out a bare `python3`. Two things break
+    /// on it: BUG-008 (a 3.14 with no ML wheels wins over an installed 3.12),
+    /// and every consumer that derives a path from the interpreter, because
+    /// `Path::new("python3").parent()` is `Some("")` and not a real prefix.
+    #[cfg(not(target_os = "windows"))]
+    #[test]
+    fn get_python_bin_returns_an_absolute_interpreter_or_the_empty_sentinel() {
+        let bin = get_python_bin();
+        if bin.is_empty() {
+            // No Python on this box — the documented sentinel, not a failure.
+            return;
+        }
+        let p = Path::new(&bin);
+        assert!(p.is_absolute(), "get_python_bin returned a bare name: {bin}");
+        assert!(p.exists(), "get_python_bin returned a path that does not exist: {bin}");
+        // The regression in one line: a bare name has no usable parent.
+        let parent = p.parent().expect("an absolute interpreter has a parent");
+        assert!(
+            !parent.as_os_str().is_empty(),
+            "interpreter prefix is empty, derived paths would be relative: {bin}"
+        );
+    }
+
+    /// It has to come from the ordered list, not from a fresh probe of its
+    /// own — that list IS the BUG-008 fix.
+    #[cfg(not(target_os = "windows"))]
+    #[test]
+    fn get_python_bin_picks_a_candidate_from_the_bug_008_order() {
+        let bin = get_python_bin();
+        if bin.is_empty() {
+            return;
+        }
+        let resolved: Vec<String> = crate::os_paths::unix_python_candidates()
+            .iter()
+            .filter_map(|n| which::which(n).ok())
+            .map(|p| p.to_string_lossy().to_string())
+            .collect();
+        assert!(
+            resolved.contains(&bin),
+            "{bin} is not one of the BUG-008 candidates {resolved:?}"
+        );
     }
 
     // ── Windows resolver helpers (Bug B — aldrich "python not installed") ────
@@ -471,5 +883,51 @@ mod tests {
         fs::create_dir_all(tmp.join("NotPython").join("nested")).unwrap();
         assert!(scan_python_subdirs(&tmp, "test").is_none());
         let _ = fs::remove_dir_all(&tmp);
+    }
+
+    // ── the launcher registry, read for a lane that needs a versioned Python ─
+    //
+    // `py -0p` is the one list on Windows that names every python.org install
+    // with its path whether or not "Add to PATH" was ticked. Both launcher
+    // formats appear in the wild, the default carries a star, and Program
+    // Files puts a space in the path, so the parse must not split on spaces.
+
+    #[test]
+    fn the_launcher_listing_yields_every_path_including_ones_with_spaces() {
+        let listing = " -V:3.13 *        C:\\Python313\\python.exe\n\
+                        -V:3.11          C:\\Program Files\\Python311\\python.exe\n\
+                        -V:3.10          C:\\Users\\d\\AppData\\Local\\Programs\\Python\\Python310\\python.exe\n\
+                        -3.9-64 *        C:\\Python39\\python.exe\n\
+                       Installed Pythons found by py Launcher for Windows\n";
+        assert_eq!(
+            launcher_list_paths(listing),
+            vec![
+                "C:\\Python313\\python.exe",
+                "C:\\Program Files\\Python311\\python.exe",
+                "C:\\Users\\d\\AppData\\Local\\Programs\\Python\\Python310\\python.exe",
+                "C:\\Python39\\python.exe",
+            ]
+        );
+        assert!(launcher_list_paths("").is_empty());
+        assert!(launcher_list_paths("no launcher here\n").is_empty());
+    }
+
+    // Ticket 0004, sockenmonster, 2026-09-06: his machine runs the new Python
+    // install manager, whose `py -0p` prints the tag with a bitness suffix in
+    // brackets. The path after the star is what matters, and it is read.
+    #[test]
+    fn the_install_manager_listing_with_its_bracketed_tag_is_read_too() {
+        let listing = "-V:3.14[-64] *   C:\\Users\\milan\\AppData\\Local\\Python\\pythoncore-3.14-64\\python.exe\n";
+        assert_eq!(
+            launcher_list_paths(listing),
+            vec!["C:\\Users\\milan\\AppData\\Local\\Python\\pythoncore-3.14-64\\python.exe"]
+        );
+        // and that Python is outside the trainer's range, so the winget step runs
+        assert!(!crate::commands::trainer::trainer_supports_python("3.14.6"));
+        assert!(crate::commands::trainer::choose_trainer_python(&[(
+            "C:\\Users\\milan\\AppData\\Local\\Python\\pythoncore-3.14-64\\python.exe".to_string(),
+            "3.14.6".to_string(),
+        )])
+        .is_none());
     }
 }

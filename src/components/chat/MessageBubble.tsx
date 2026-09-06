@@ -9,6 +9,7 @@ import { groupAgentBlocks } from '../../lib/tool-call-groups'
 import { VramSwitchCard } from './VramSwitchCard'
 import { SpeakerButton } from './SpeakerButton'
 import { ChatArtifactCard } from './ChatArtifactCard'
+import { displayModelName } from '../../api/providers/model-name'
 import type { Message } from '../../types/chat'
 import { stripModelNoise } from '../../lib/strip-model-noise'
 import { truncationNotice } from '../../lib/answer-notes'
@@ -19,6 +20,12 @@ import { useModelStore } from '../../stores/modelStore'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { extractToolCallsFromContent, looksLikeToolIntent } from '../../lib/tool-call-repair'
 import { isAgentCompatible } from '../../lib/model-compatibility'
+import { ContextMenu } from '../ui/ContextMenu'
+import { buildMessageMenu, type MessageMenuHandlers } from '../ui/menu-actions'
+import { MONOGRAM, MONOGRAM_INVERT } from '../layout/brand'
+import { AVATAR_SLOT } from './avatar-slot'
+import { MOTION_S } from '../ui/motion'
+import { Hinweis } from '../ui/Hinweis'
 
 interface Props {
   message: Message
@@ -36,13 +43,16 @@ interface Props {
   /** True for the last visible message — gates the VRAM hand-off card so it
    *  only renders in the active assistant turn, not in every historical one. */
   isLast?: boolean
+  /** This bubble is the one currently streaming — hides its action bar. */
+  isStreaming?: boolean
 }
 
-function MessageBubbleImpl({ message, onRegenerate, onEdit, pendingApprovalId, onApprove, onReject, isLast }: Props) {
+function MessageBubbleImpl({ message, onRegenerate, onEdit, pendingApprovalId, onApprove, onReject, isLast, isStreaming }: Props) {
   const [copied, setCopied] = useState(false)
   const [isEditing, setIsEditing] = useState(false)
   const [editContent, setEditContent] = useState('')
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null)
   const editRef = useRef<HTMLTextAreaElement>(null)
   const isUser = message.role === 'user'
 
@@ -183,28 +193,96 @@ function MessageBubbleImpl({ message, onRegenerate, onEdit, pendingApprovalId, o
     deleteMessage(activeConversationId, message.id)
   }
 
+  // EIN Satz Aktionen fuer diese Nachricht. Die Leiste unter der Nachricht
+  // liest daraus, und das Kontextmenue bekommt DASSELBE Objekt gereicht
+  // (`buildMessageMenu` gibt die Funktionen unveraendert als `run` weiter).
+  // Rechtsklick und Knopf koennen damit nicht auseinanderlaufen — genau die
+  // Doppelung, die dieses Projekt schon mehrfach bezahlt hat.
+  //
+  // `edit` und `regenerate` sind `null`, wo die Leiste den Knopf auch nicht
+  // zeigt; das Menue laesst den Eintrag dann ebenfalls weg.
+  const canEdit = (isUser && !!onEdit) || canEditAssistant
+  const actions: MessageMenuHandlers = {
+    copy: handleCopy,
+    edit: canEdit ? startEdit : null,
+    regenerate: !isUser && onRegenerate ? () => onRegenerate(message.id) : null,
+    remove: handleDelete,
+  }
+  // Die Leiste haengt an `!isEditing && !isStreaming` — das Menue bietet
+  // dieselben Aktionen an, also gilt fuer es dieselbe Bedingung.
+  const actionsAvailable = !isEditing && !isStreaming
+
+  /**
+   * D-S07 — die Leiste ist jetzt hover-gated.
+   *
+   * Der Befund: „Aktionsleiste ist dauerhaft sichtbar, nicht hover-gated:
+   * drei 12px-Icons unter jeder Nachricht, immer." Der Kommentar an der Leiste
+   * nannte „always visible but subtle" ausdruecklich als Absicht — in einem
+   * Transkript mit 40 Antworten sind das 120 graue Glyphen, die nie jemand
+   * angesehen hat, und sie stehen genau dort, wo die naechste Zeile Text
+   * anfangen wuerde.
+   *
+   * Warum das JETZT geht und vorher nicht: seit `f2650788` traegt die
+   * Nachricht ein Kontextmenue (Rechtsklick) mit denselben Aktionen ueber
+   * DIESELBEN Handler (`actions` unten geht unveraendert an
+   * `buildMessageMenu`). Vorher waere Verstecken ein Funktionsverlust
+   * gewesen: wer die Maus nicht ueber die Nachricht haelt, haette keinen Weg
+   * mehr zu Kopieren gehabt. Jetzt gibt es zwei.
+   *
+   * Was hier NICHT gemacht wird und warum:
+   *
+   *   - Kein `hidden`/`absolute`. Die Leiste behaelt ihren Layoutplatz. Das
+   *     ist bei D-S15 (Sidebar) ausdruecklich falsch, weil sie dort 55px
+   *     Titelbreite frisst — hier ist es richtig: die Zeile liegt UNTER der
+   *     Nachricht, und wuerde sie beim Hovern erst entstehen, spraenge das
+   *     ganze Transkript unter dem Mauszeiger weg. Ein scrollendes Protokoll,
+   *     das bei jeder Mausbewegung umbricht, ist schlimmer als drei blasse
+   *     Icons.
+   *   - `group-focus-within` steht neben `group-hover`. Ohne das waere die
+   *     Leiste per Tastatur unerreichbar sichtbar: die Knoepfe blieben
+   *     fokussierbar, aber unsichtbar, und der Fokus verschwaende ins Nichts.
+   *   - `copied` und `confirmDelete` halten sie offen. Beide sind
+   *     Rueckmeldungen AUF einen Klick („Copied", „Click again to delete");
+   *     verschwaende die Leiste, sobald die Maus weiterzieht, waere die
+   *     Rueckmeldung fuer genau die Geste unsichtbar, die sie ausgeloest hat.
+   *
+   * Was das kostet, offen gesagt: auf einem Geraet ohne Zeiger (Touch) gibt
+   * es weder Hover noch Rechtsklick. Das ist eine Tauri-Desktop-App fuer
+   * mac/Windows/Linux, also heute kein realer Fall — aber es ist einer, falls
+   * die App je auf ein Tablet geht.
+   */
+  const actionBarVisibility =
+    copied || confirmDelete
+      ? 'opacity-100'
+      : 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity'
+
   return (
     <motion.div
       className={'flex gap-2 px-3 py-1 group ' + (isUser ? 'flex-row-reverse' : '')}
+      onContextMenu={(e) => {
+        if (!actionsAvailable) return
+        e.preventDefault()
+        setMenu({ x: e.clientX, y: e.clientY })
+      }}
       initial={{ opacity: 0, y: 6 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.15 }}
+      transition={{ duration: MOTION_S.base }}
     >
-      {/* Avatar */}
-      <div
-        className={
-          'w-6 h-6 rounded-md overflow-hidden flex items-center justify-center shrink-0 ' +
-          // User avatar keeps a framed chip; the AI monogram stands alone (no box).
-          (isUser ? 'bg-gray-100 dark:bg-white/8 border border-gray-200 dark:border-white/10' : '')
-        }
-      >
+      {/* Avatar — EIN Slot, zwei Inhalte (Audit §4, „Zwei Avatar-Systeme:
+          Assistent rahmenlos, User als gerahmte Box").
+          Vorher trug nur die Nutzerseite Rahmen und Flaeche, das Monogramm sass
+          nackt auf der Pane. Zwei Silhouetten in einer Spalte, die der Blick
+          beim Scrollen als Taktgeber benutzt — der Sprecherwechsel war an der
+          Form nicht ablesbar, nur am Inhalt.
+          Jetzt: derselbe Chip fuer beide, und das Monogramm bekommt dabei
+          nebenbei einen definierten Untergrund statt der jeweiligen Pane. */}
+      <div className={AVATAR_SLOT}>
         {isUser ? (
           userAvatarDataUrl
             ? <img src={userAvatarDataUrl} alt="" className="w-full h-full object-cover" />
             : <User size={11} className="text-gray-400" />
         ) : (
-          // AI avatar = the LU monogram ALONE, filling the slot — no box/border/bg.
-          <img src="/LU-monogram-bw.png" alt="" className="w-full h-full object-contain dark:invert-0 invert opacity-80" />
+          <img src={MONOGRAM} alt="" className={`w-[70%] h-[70%] object-contain opacity-80 ${MONOGRAM_INVERT}`} />
         )}
       </div>
 
@@ -216,7 +294,19 @@ function MessageBubbleImpl({ message, onRegenerate, onEdit, pendingApprovalId, o
             chat. Turns from before that carry none and get no line, rather
             than a guess. */}
         {!isUser && message.modelId && (
-          <div className="text-[0.55rem] font-mono text-gray-400 dark:text-gray-500 pl-1">{message.modelId}</div>
+          // Ohne Steckplatz-Praefix: `openai::` ist unsere interne Adresse
+          // fuer jedes Backend, das das OpenAI-Protokoll spricht, und stand
+          // damit vor jedem lokalen Modellnamen im Chat (Persona P5,
+          // 03./04.09.2026).
+          //
+          // Auch im title, seit dem 04.09.2026. Dort stand die rohe Kennung
+          // mit der Begruendung "der volle Name bleibt im title", und das war
+          // der Fehler in einem Wort: der volle Name ist der Modellname, die
+          // Kennung davor ist unsere Adresse. Wer den Zeiger auf der Zeile
+          // ruhen liess, bekam sie zu sehen, obwohl sie ihm nichts sagt.
+          <div title={displayModelName(message.modelId)} className="t-mono text-gray-500 dark:text-gray-400 pl-1">
+            {displayModelName(message.modelId)}
+          </div>
         )}
         {/* Thinking block — auto-expands while this (last) turn is still
             producing so the reasoning streams LIVE, then collapses (David 2026-06-04). */}
@@ -247,7 +337,7 @@ function MessageBubbleImpl({ message, onRegenerate, onEdit, pendingApprovalId, o
                 )
                 .sort((a, b) => a.timestamp - b.timestamp),
             )
-              .map((group) => {
+              .map((group, gruppenIndex, gruppen) => {
                 // Consecutive tool calls render as ONE band that morphs from
                 // tool to tool and collapses to "N steps" when done (David
                 // 2026-07-31) instead of a chip per call.
@@ -288,9 +378,14 @@ function MessageBubbleImpl({ message, onRegenerate, onEdit, pendingApprovalId, o
                   // a stray ool_call>) renders nothing, not an empty bubble.
                   const clean = cleanBlocks.get(block.id) ?? ''
                   if (!clean) return null
+                  // Im Agent-Modus waechst der Text im LETZTEN Block, nicht
+                  // in message.content — der Fallback unten rendert dann gar
+                  // nichts. Also haengt der Balken hier, und nur am Schluss
+                  // der Kette, damit nicht jeder aeltere Block einen bekommt.
+                  const istSchluss = gruppenIndex === gruppen.length - 1
                   return (
                     <div key={block.id} className="px-1 py-0.5">
-                      <div className="text-[0.8rem] leading-relaxed">
+                      <div className={'text-[0.8rem] leading-relaxed' + (isStreaming && istSchluss ? ' lu-caret' : '')}>
                         <MarkdownRenderer content={clean} />
                       </div>
                     </div>
@@ -374,27 +469,46 @@ function MessageBubbleImpl({ message, onRegenerate, onEdit, pendingApprovalId, o
               // fallback, or the turn renders blank.
               if (hasRealAnswerBlocks) return null
               return (
-                <div className="text-[0.78rem] leading-relaxed">
+                // `lu-caret` haengt den blinkenden Balken per CSS an den
+                // LETZTEN Block dieser Antwort (index.css). Die Klasse ist
+                // eine reine Funktion des vorhandenen `isStreaming`-Props —
+                // kein Zustand, kein Timer, keine Subscription, also auch
+                // kein Rerender, den der Stream nicht ohnehin ausloest.
+                <div className={'text-[0.78rem] leading-relaxed' + (isStreaming ? ' lu-caret' : '')}>
                   <MarkdownRenderer content={cleanContent} />
                   {/* Cut-off marker: a turn the model did not finish on its own
                       terms (length budget / dropped connection). The benchmark
                       screen has always flagged cut-offs; the chat did not, so a
                       truncated answer read as complete (David 2026-08-08). */}
                   {truncationNotice(message.finishReason) && (
-                    <div className="mt-1 inline-flex items-center gap-1 text-[0.6rem] text-amber-600/80 dark:text-amber-300/70">
-                      <Scissors size={9} className="shrink-0" />
-                      <span>{truncationNotice(message.finishReason)}</span>
-                    </div>
+                    // Ruhig, nicht laut: die Antwort ist kuerzer als geplant,
+                    // kaputt ist nichts. Die Zeile stand vorher in Gelb und in
+                    // derselben Farbe wie die erfundenen Links darunter, die
+                    // etwas voellig anderes sagen (`lib/hinweis.ts`).
+                    <Hinweis
+                      className="mt-1"
+                      icon={<Scissors size={9} className="mt-0.5 shrink-0" />}
+                    >
+                      {truncationNotice(message.finishReason)}
+                    </Hinweis>
                   )}
                   {/* Z36 finding 3: the model cited links no tool returned and
                       ignored the corrective steer. The answer stays untouched,
                       it is the model's text (G14-2); this labelled app notice
                       names the links that came from nowhere. */}
                   {unbackedLinksNotice(message.unbackedLinks) && (
-                    <div className="mt-1 flex items-start gap-1 text-[0.6rem] text-amber-600/80 dark:text-amber-300/70">
-                      <Unlink size={9} className="mt-0.5 shrink-0" />
-                      <span>{unbackedLinksNotice(message.unbackedLinks)}</span>
-                    </div>
+                    // Der eine Ton, der hier wirklich Fehler heisst: diese
+                    // Links hat kein Werkzeug geliefert, und wer sie anklickt,
+                    // landet nirgends. Das ist die Zeile, wegen der jemand
+                    // etwas tun muss, also traegt sie Rot statt des alten
+                    // Gelbs, das sie sich mit der Abschneide-Marke teilte.
+                    <Hinweis
+                      ton="fehler"
+                      className="mt-1"
+                      icon={<Unlink size={9} className="mt-0.5 shrink-0" />}
+                    >
+                      {unbackedLinksNotice(message.unbackedLinks)}
+                    </Hinweis>
                   )}
                   {/* A reasoning-only reply used to print a stand-in sentence
                       here ("The model only produced internal reasoning and no
@@ -402,37 +516,38 @@ function MessageBubbleImpl({ message, onRegenerate, onEdit, pendingApprovalId, o
                       David 2026-08-07), and on an agent surface the loop's job
                       is to CONTINUE past such a round (G17), not to explain
                       it. The thinking block above already shows what happened.
-                      The amber card below survives because it is a labelled
-                      app hint with an action, not prose posing as an answer. */}
+                      The hint below survives because it is a labelled app hint
+                      with an action, not prose posing as an answer. It is a
+                      quiet line now, no longer a filled card with a framed
+                      button: nothing is broken here, a switch is simply off,
+                      and one line says so (see `lib/hinweis.ts`). */}
                   {thoughtOnly && thoughtOnlyToolIntent && activeModel && isAgentCompatible(activeModel) && (
-                    <div className="mt-1 flex items-start gap-2 px-2 py-1.5 rounded-md border border-amber-400/30 bg-amber-500/10 text-[0.65rem] text-amber-700 dark:text-amber-200">
-                      <Wrench size={11} className="mt-0.5 shrink-0" />
-                      <div className="flex-1">
-                        <p className="font-medium">The model spent its whole reply deciding to call a tool, but Agent Mode is off, so it never said anything.</p>
-                        <p className="opacity-80 mt-0.5">Turn Agent Mode on and ask again to let it actually run the tool (search the web, generate media, read files). Its reasoning is in the thinking block above.</p>
-                      </div>
+                    <Hinweis
+                      className="mt-1"
+                      icon={<Wrench size={11} className="mt-0.5 shrink-0" />}
+                    >
+                      The model spent its whole reply deciding to call a tool, but Agent Mode is off, so nothing ran. Its reasoning is in the thinking block above.{' '}
                       <button
                         onClick={() => activeConversationId && toggleAgentMode(activeConversationId)}
-                        className="shrink-0 px-2 py-0.5 rounded border border-amber-400/40 hover:bg-amber-500/20 transition-colors font-medium"
+                        className="font-medium underline underline-offset-2 hover:no-underline"
                       >
                         Enable Agent
                       </button>
-                    </div>
+                    </Hinweis>
                   )}
                   {suggestAgent && (
-                    <div className="mt-2 flex items-start gap-2 px-2 py-1.5 rounded-md border border-amber-400/30 bg-amber-500/10 text-[0.65rem] text-amber-700 dark:text-amber-200">
-                      <Wrench size={11} className="mt-0.5 shrink-0" />
-                      <div className="flex-1">
-                        <p className="font-medium">This model tried to call a tool, but Agent Mode is off for this chat.</p>
-                        <p className="opacity-80 mt-0.5">Turn it on to let the model actually execute tools (read files, run commands, browse). Until then it'll keep emitting JSON that nothing reads.</p>
-                      </div>
+                    <Hinweis
+                      className="mt-2"
+                      icon={<Wrench size={11} className="mt-0.5 shrink-0" />}
+                    >
+                      This model tried to call a tool, but Agent Mode is off for this chat, so nothing ran and it will keep emitting JSON that nothing reads.{' '}
                       <button
                         onClick={() => activeConversationId && toggleAgentMode(activeConversationId)}
-                        className="shrink-0 px-2 py-0.5 rounded border border-amber-400/40 hover:bg-amber-500/20 transition-colors font-medium"
+                        className="font-medium underline underline-offset-2 hover:no-underline"
                       >
                         Enable Agent
                       </button>
-                    </div>
+                    </Hinweis>
                   )}
                 </div>
               )
@@ -453,26 +568,47 @@ function MessageBubbleImpl({ message, onRegenerate, onEdit, pendingApprovalId, o
 
         {/* Action bar UNDER the message (David 2026-06-06: "eigene Leiste unter
             der Nachricht" instead of cramped hover-icons in the corner). Bigger
-            targets, always visible but subtle; assistant left, user right. */}
-        {!isEditing && (
-          <div className={'flex items-center gap-0.5 ' + (isUser ? 'justify-end pr-0.5' : 'justify-start pl-0.5')}>
-            {isUser && onEdit && (
-              <button onClick={startEdit} className="p-1 rounded-md text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/10 transition-colors" aria-label="Edit message" title="Edit"><Pencil size={12} /></button>
+            targets; assistant left, user right. */}
+        {/* Hidden while this very turn still streams: the bar used to hang on
+            !isEditing alone, so Copy/Regenerate/Delete rendered under a
+            half-written answer from the first token on. Gated on the live
+            generating flag rather than on `usage`, because a backend that
+            never reports usage would otherwise lose the bar for good. */}
+        {/* Und seit D-S07 nur noch beim Hovern/Fokus sichtbar — die Begruendung
+            samt der beiden bewussten Ausnahmen steht bei `actionBarVisibility`. */}
+        {actionsAvailable && (
+          <div className={
+            'flex items-center gap-0.5 ' + actionBarVisibility + ' ' +
+            (isUser ? 'justify-end pr-0.5' : 'justify-start pl-0.5')
+          }>
+            {isUser && actions.edit && (
+              <button onClick={actions.edit} className="p-1 rounded-md text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/10 transition-colors" aria-label="Edit message" title="Edit"><Pencil size={12} /></button>
             )}
-            {canEditAssistant && (
-              <button onClick={startEdit} className="p-1 rounded-md text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/10 transition-colors" aria-label="Edit response" title="Edit"><Pencil size={12} /></button>
+            {!isUser && actions.edit && (
+              <button onClick={actions.edit} className="p-1 rounded-md text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/10 transition-colors" aria-label="Edit response" title="Edit"><Pencil size={12} /></button>
             )}
-            {!isUser && onRegenerate && (
-              <button onClick={() => onRegenerate(message.id)} className="p-1 rounded-md text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/10 transition-colors" aria-label="Regenerate response" title="Regenerate"><RefreshCw size={12} /></button>
+            {actions.regenerate && (
+              <button onClick={actions.regenerate} className="p-1 rounded-md text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/10 transition-colors" aria-label="Regenerate response" title="Regenerate"><RefreshCw size={12} /></button>
             )}
-            <button onClick={handleCopy} className="p-1 rounded-md text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/10 transition-colors" aria-label="Copy message" title={copied ? 'Copied' : 'Copy'}>
+            <button onClick={actions.copy} className="p-1 rounded-md text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/10 transition-colors" aria-label="Copy message" title={copied ? 'Copied' : 'Copy'}>
               {copied ? <Check size={12} className="text-green-500" /> : <Copy size={12} />}
             </button>
             {!isUser && <SpeakerButton text={message.content} />}
-            <button onClick={handleDelete} className={'p-1 rounded-md transition-colors hover:bg-gray-100 dark:hover:bg-white/10 ' + (confirmDelete ? 'text-red-500' : 'text-gray-400 dark:text-gray-500 hover:text-red-500')} aria-label="Delete message" title={confirmDelete ? 'Click again to delete' : 'Delete message'}>
+            <button onClick={actions.remove} className={'p-1 rounded-md transition-colors hover:bg-gray-100 dark:hover:bg-white/10 ' + (confirmDelete ? 'text-red-500' : 'text-gray-400 dark:text-gray-500 hover:text-red-500')} aria-label="Delete message" title={confirmDelete ? 'Click again to delete' : 'Delete message'}>
               <Trash2 size={12} />
             </button>
           </div>
+        )}
+
+        {/* Rechtsklick auf die Nachricht — dieselben Aktionen, derselbe Code. */}
+        {menu && (
+          <ContextMenu
+            items={buildMessageMenu(actions, { copied, confirmDelete })}
+            x={menu.x}
+            y={menu.y}
+            label={isUser ? 'Message actions' : 'Response actions'}
+            onClose={() => setMenu(null)}
+          />
         )}
 
         {/* RAG sources */}

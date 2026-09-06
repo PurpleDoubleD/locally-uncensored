@@ -10,7 +10,7 @@
  * matches old_string byte-exactly against the file, and a model that copies
  * a numbered line into old_string would never match.
  */
-export function sliceFileReadResult(content: string, args: Record<string, any>): string {
+export function sliceFileReadResult(content: string, args: Record<string, unknown>): string {
   const offset = Number(args?.offset)
   const limit = Number(args?.limit)
   const hasOffset = Number.isFinite(offset) && offset > 0

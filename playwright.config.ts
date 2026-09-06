@@ -10,7 +10,7 @@ import { defineConfig, devices } from '@playwright/test'
  * of a real Rust sidecar. That lets the fresh-onboarding → first-chat happy
  * path run with zero external processes (no Ollama, no llama-server).
  *
- * We serve the app with `npm run dev` (Vite, port 5173 — the tauri devUrl). The
+ * We serve the app with `npm run dev` (Vite, port 5273 — the tauri devUrl). The
  * dev middleware only spawns on `/local-api/*` requests, which the mock never
  * triggers, so boot has no side effects.
  */
@@ -24,7 +24,7 @@ export default defineConfig({
   timeout: 60_000,
   expect: { timeout: 15_000 },
   use: {
-    baseURL: 'http://localhost:5173',
+    baseURL: 'http://localhost:5273',
     trace: 'on-first-retry',
     headless: true,
   },
@@ -33,7 +33,7 @@ export default defineConfig({
   ],
   webServer: {
     command: 'npm run dev',
-    url: 'http://localhost:5173',
+    url: 'http://localhost:5273',
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
     stdout: 'ignore',

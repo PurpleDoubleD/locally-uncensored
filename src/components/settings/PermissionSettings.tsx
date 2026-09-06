@@ -32,9 +32,14 @@ const CATEGORIES: {
   { key: 'desktop', label: 'Desktop Control', description: 'Screenshots, screen interaction', icon: Monitor, risk: 'high' },
 ]
 
+// Eine Leiter, eine Achse: Risiko waechst, also waechst Rot. Die mittlere
+// Stufe war gelb, und Gelb heisst in dieser Oberflaeche nichts mehr, seit es
+// fuenf verschiedene Dinge gleichzeitig hiess (lib/hinweis.ts). Ein
+// abgeschwaechtes Rot sagt dasselbe wie das volle, nur leiser, und braucht
+// dafuer keinen dritten Farbton.
 const RISK_COLORS = {
   low: 'bg-green-500',
-  medium: 'bg-amber-500',
+  medium: 'bg-red-500/50',
   high: 'bg-red-500',
 }
 
@@ -79,12 +84,17 @@ export function PermissionSettings() {
                   <button
                     key={value}
                     onClick={() => setGlobalPermission(key, value)}
+                    // "Ask First" war gelb und sah damit aus wie eine Warnung,
+                    // obwohl es die vorsichtigste der drei Einstellungen ist.
+                    // Rot und Gruen sind hier schon vergeben, Blau nicht, und
+                    // Blau traegt in den Einstellungen ohnehin die neutralen
+                    // Knoepfe (der Installierknopf im Speech-Abschnitt).
                     className={`px-2 py-0.5 rounded text-[0.55rem] font-medium transition-all ${
                       isActive
                         ? value === 'blocked'
                           ? 'bg-red-500/15 text-red-400 border border-red-500/30'
                           : value === 'confirm'
-                            ? 'bg-amber-500/15 text-amber-400 border border-amber-500/30'
+                            ? 'bg-blue-500/15 text-blue-400 border border-blue-500/30'
                             : 'bg-green-500/15 text-green-400 border border-green-500/30'
                         : 'text-gray-600 hover:text-gray-400 border border-transparent'
                     }`}

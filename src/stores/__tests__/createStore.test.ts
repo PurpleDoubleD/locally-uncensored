@@ -20,6 +20,14 @@ vi.hoisted(() => {
   g.window = Object.assign(g.window ?? {}, { localStorage: ls })
 })
 
+// Der Wirt wird festgenagelt, nicht geraten. `isMacOS()` liest den
+// User-Agent, und im Testlauf meldet dieser Rechner einen Mac: gemessen am
+// 04.09.2026, `isMacOS()` ist hier true, auf einem Linux-Laeufer waere es
+// false. Damit haetten die Faelle weiter unten je nach Maschine ein anderes
+// Ergebnis. Dieser Block beschreibt den ComfyUI-Wirt (Windows und Linux); der
+// Mac hat seine eigene Datei, der-mac-strandet-nicht-auf-einem-werkzeug.
+vi.mock('../../api/mlx-image', () => ({ isMlxImageHost: () => false, MLX_MODEL_PREFIX: 'MLX ' }))
+
 // Mock comfyui before importing the store
 vi.mock('../../api/comfyui', () => ({
   classifyModel: vi.fn((name: string) => {
@@ -37,6 +45,7 @@ vi.mock('../../api/comfyui', () => ({
 
 import { useCreateStore, MODEL_TYPE_DEFAULTS } from '../createStore'
 import type { GalleryItem } from '../createStore'
+import { prop } from '../../types/json-guards'
 
 // ── Helpers ─────────────────────────────────────────────────────
 
@@ -179,37 +188,48 @@ describe('createStore', () => {
     // tests document the contract: the store does not throw, and its
     // CONSUMERS (which this mirrors) can always fall back to [].
     describe('activeList fallback contract (mirrors CreateTopControls)', () => {
-      const computeActiveList = (mode: string, iml: unknown, vml: unknown) => {
+      const computeActiveList = (mode: string, iml: unknown, vml: unknown): unknown[] => {
         const raw = mode === 'image' ? iml : vml
         return Array.isArray(raw) ? raw : []
       }
 
+      /**
+       * Write a value the store's own type forbids. That is the point of this
+       * block: `imageModelList` is declared as an array, and these tests exist
+       * because a rehydrated blob from an older build has arrived as
+       * undefined / null / an object / a string. The store type says what the
+       * app WRITES; the cast is confined to this one helper so no individual
+       * test claims a corrupt value is a model list.
+       */
+      const forceState = (patch: Record<string, unknown>) =>
+        useCreateStore.setState(patch as Partial<ReturnType<typeof useCreateStore.getState>>)
+
       it('falls back to [] when imageModelList is undefined', () => {
-        useCreateStore.setState({ imageModelList: undefined as any, mode: 'image' })
+        forceState({ imageModelList: undefined, mode: 'image' })
         const s = useCreateStore.getState()
         expect(computeActiveList(s.mode, s.imageModelList, s.videoModelList)).toEqual([])
       })
 
       it('falls back to [] when videoModelList is undefined in video mode', () => {
-        useCreateStore.setState({ videoModelList: undefined as any, mode: 'video' })
+        forceState({ videoModelList: undefined, mode: 'video' })
         const s = useCreateStore.getState()
         expect(computeActiveList(s.mode, s.imageModelList, s.videoModelList)).toEqual([])
       })
 
       it('falls back to [] when the list is null', () => {
-        useCreateStore.setState({ imageModelList: null as any, mode: 'image' })
+        forceState({ imageModelList: null, mode: 'image' })
         const s = useCreateStore.getState()
         expect(computeActiveList(s.mode, s.imageModelList, s.videoModelList)).toEqual([])
       })
 
       it('falls back to [] when the list is an object', () => {
-        useCreateStore.setState({ imageModelList: { foo: 'bar' } as any, mode: 'image' })
+        forceState({ imageModelList: { foo: 'bar' }, mode: 'image' })
         const s = useCreateStore.getState()
         expect(computeActiveList(s.mode, s.imageModelList, s.videoModelList)).toEqual([])
       })
 
       it('falls back to [] when the list is a string', () => {
-        useCreateStore.setState({ imageModelList: 'corrupted' as any, mode: 'image' })
+        forceState({ imageModelList: 'corrupted', mode: 'image' })
         const s = useCreateStore.getState()
         expect(computeActiveList(s.mode, s.imageModelList, s.videoModelList)).toEqual([])
       })
@@ -222,16 +242,16 @@ describe('createStore', () => {
       })
 
       it('.length and .map never throw on the fallback', () => {
-        useCreateStore.setState({ imageModelList: undefined as any, videoModelList: null as any })
+        forceState({ imageModelList: undefined, videoModelList: null })
         const s = useCreateStore.getState()
         const imgList = computeActiveList('image', s.imageModelList, s.videoModelList)
         const vidList = computeActiveList('video', s.imageModelList, s.videoModelList)
         // These are the exact two operations CreateTopControls performs
         // (line 175 `.length === 0` and line 180 `.map(...)`).
         expect(() => imgList.length === 0).not.toThrow()
-        expect(() => imgList.map((m: any) => m.name)).not.toThrow()
+        expect(() => imgList.map((m) => prop(m, 'name'))).not.toThrow()
         expect(() => vidList.length === 0).not.toThrow()
-        expect(() => vidList.map((m: any) => m.name)).not.toThrow()
+        expect(() => vidList.map((m) => prop(m, 'name'))).not.toThrow()
       })
     })
   })
@@ -563,6 +583,67 @@ describe('createStore', () => {
       // oldest 5 (0-4) dropped
       expect(useCreateStore.getState().promptHistory).not.toContain('prompt-0')
       expect(useCreateStore.getState().promptHistory).toContain('prompt-54')
+    })
+  })
+
+  // ── removeFromPromptHistory / clearPromptHistory (A10) ─────
+  //
+  // Bug A10 (pardy22, Discord #general + #help-18): the prompt history could
+  // not be deleted. The store had no action for it at all, so no button could
+  // have worked. These four claims pin the two new actions plus the persisted
+  // copy, which is what made the entries come back after a restart.
+
+  describe('removeFromPromptHistory', () => {
+    it('drops exactly the one entry', () => {
+      useCreateStore.getState().addToPromptHistory('keep me')
+      useCreateStore.getState().addToPromptHistory('delete me')
+      useCreateStore.getState().removeFromPromptHistory('delete me')
+      expect(useCreateStore.getState().promptHistory).toEqual(['keep me'])
+    })
+
+    // Negative control: an unknown prompt must not eat the list.
+    it('leaves the list alone when the prompt is not in it', () => {
+      useCreateStore.getState().addToPromptHistory('a')
+      useCreateStore.getState().addToPromptHistory('b')
+      useCreateStore.getState().removeFromPromptHistory('never added')
+      expect(useCreateStore.getState().promptHistory).toEqual(['b', 'a'])
+    })
+  })
+
+  describe('clearPromptHistory', () => {
+    it('empties the history', () => {
+      useCreateStore.getState().addToPromptHistory('a')
+      useCreateStore.getState().addToPromptHistory('b')
+      useCreateStore.getState().clearPromptHistory()
+      expect(useCreateStore.getState().promptHistory).toEqual([])
+    })
+
+    // Negative control: clearing the prompts must not touch the gallery.
+    it('does not touch the gallery', () => {
+      useCreateStore.getState().addToGallery(makeGalleryItem('a'))
+      useCreateStore.getState().addToPromptHistory('a')
+      useCreateStore.getState().clearPromptHistory()
+      expect(useCreateStore.getState().gallery).toHaveLength(1)
+    })
+  })
+
+  describe('prompt history persistence', () => {
+    const persisted = () => {
+      const raw = localStorage.getItem('create-store')
+      return raw ? (JSON.parse(raw).state as { promptHistory?: string[] }) : null
+    }
+
+    it('writes the surviving entries to localStorage, so nothing returns after a restart', () => {
+      useCreateStore.getState().addToPromptHistory('keep me')
+      useCreateStore.getState().addToPromptHistory('delete me')
+      // Guard: without this the assertions below could pass on an empty store.
+      expect(persisted()?.promptHistory).toEqual(['delete me', 'keep me'])
+
+      useCreateStore.getState().removeFromPromptHistory('delete me')
+      expect(persisted()?.promptHistory).toEqual(['keep me'])
+
+      useCreateStore.getState().clearPromptHistory()
+      expect(persisted()?.promptHistory).toEqual([])
     })
   })
 

@@ -7,9 +7,13 @@
 
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
+import { keepPersistedState } from '../lib/persist-version'
+import { safeJSONStorage } from '../lib/storage-quota'
 import type { ProviderId, ProviderConfig } from '../api/providers/types'
-import { clearProviderCache } from '../api/providers/registry'
+import { clearProviderCache } from '../api/providers/client-cache'
 import { onLocalSlotChanged } from '../lib/builtin-slot-eviction'
+import { LU_ENGINE_NAME, renameLegacyEngine } from '../lib/engine-name'
+import { announceDarkenedSlots } from '../lib/provider-slot-darkening'
 import { secretGet, secretSet, secretDelete } from '../api/backend'
 import { CLOUD_BASE } from '../api/cloud/config'
 
@@ -71,7 +75,7 @@ const DEFAULT_PROVIDERS: Record<ProviderId, ProviderConfig> = {
   },
   openai: {
     id: 'openai',
-    name: 'Built-in Engine',
+    name: LU_ENGINE_NAME,
     enabled: true,
     baseUrl: 'http://127.0.0.1:8127/v1',
     apiKey: '',
@@ -97,6 +101,54 @@ const DEFAULT_PROVIDERS: Record<ProviderId, ProviderConfig> = {
     apiKey: '',
     isLocal: false,
   },
+}
+
+/**
+ * The model/provider invariant, asked on EVERY path that can switch a slot off.
+ *
+ * A slot going dark makes the picked model unservable, and nothing used to
+ * notice: the pick is only re-validated against the next NON-EMPTY model list,
+ * so until a refresh lands the composer offers a model whose backend is off and
+ * every send fails with model-not-found.
+ *
+ * It hung off `setProviderConfig` alone, which is only the explicit toggle.
+ * `resetProvidersToDefaults` ("Reset AI Backends", a button in Settings) writes
+ * DEFAULT_PROVIDERS over the whole map, where Ollama and Anthropic default to
+ * `enabled: false`, so a user whose pick was an Ollama model reached exactly
+ * the same broken state through a supported, one-click, non-exotic path.
+ * `resetProvider` does the same for one slot.
+ *
+ * Audit W-T2: hier stand `void import('./modelStore')` mit der Begruendung
+ * "modelStore reaches back here through chatStore/remoteStore, and a static
+ * edge would close that circle at module-init time". Die Begruendung stimmte,
+ * die Aufloesung nicht: der dynamische Import hat den Kreis nicht geoeffnet,
+ * sondern nur unsichtbar gemacht (providerStore -> modelStore -> engine ->
+ * providerStore, und providerStore -> modelStore -> chatStore -> remoteStore
+ * -> providerStore).
+ *
+ * Dieser Store hat kein Geschaeft damit, den Modell-Store zu kennen. Er weiss
+ * nur, welche Slots gerade dunkel geworden sind, und sagt es an. Wer darauf
+ * reagieren will, meldet sich an; die Leitung dazwischen steht in
+ * lib/provider-slot-darkening.ts, gehoert keinem der beiden Stores und
+ * schliesst damit keinen Kreis.
+ */
+function dropPicksForDarkenedSlots(
+  before: Partial<Record<ProviderId, ProviderConfig>>,
+  after: Partial<Record<ProviderId, ProviderConfig>>,
+): void {
+  const darkened = (Object.keys(after) as ProviderId[]).filter(
+    (id) => before[id]?.enabled === true && after[id]?.enabled === false,
+  )
+  if (darkened.length === 0) return
+  // Die Zustellung liegt eine Mikrotask hinter diesem Aufruf, also wird dort
+  // noch einmal gefragt statt hier eingefroren. Sonst raeumt ein Slot, der in
+  // derselben Runde wieder eingeschaltet wird, eine Wahl, die er weiterhin
+  // bedient: resetProvidersToDefaults() schaltet Ollama aus (Voreinstellung),
+  // und der naechste setProviderConfig('ollama', { enabled: true }) direkt
+  // danach wieder an. Genau diese Runde laeuft im Onboarding.
+  announceDarkenedSlots(() =>
+    darkened.filter((id) => useProviderStore.getState().providers[id]?.enabled === false),
+  )
 }
 
 // ── Store Interface ────────────────────────────────────────────
@@ -145,6 +197,7 @@ export const useProviderStore = create<ProviderState>()(
           },
         }))
         clearProviderCache() // invalidate cached clients
+        dropPicksForDarkenedSlots({ [id]: before }, { [id]: get().providers[id] })
         // Every route that moves the shared local slot comes through here (Add
         // Provider, Enable on the standby card, Remove, Disable, onboarding), so
         // the memory question is asked here, once. R12/R13 measured the answer
@@ -202,10 +255,13 @@ export const useProviderStore = create<ProviderState>()(
           void secretDelete(id).catch(() => { /* vault delete best-effort */ })
         }
         clearProviderCache()
+        // A single-slot reset can switch that slot off too (ollama and
+        // anthropic both default to enabled: false).
+        dropPicksForDarkenedSlots({ [id]: before }, { [id]: get().providers[id] })
       },
 
       resetProvidersToDefaults: () => {
-        const before = get().providers.openai
+        const before = get().providers
         set((state) => {
           const next = {} as Record<ProviderId, ProviderConfig>
           for (const id of Object.keys(DEFAULT_PROVIDERS) as ProviderId[]) {
@@ -220,7 +276,10 @@ export const useProviderStore = create<ProviderState>()(
         clearProviderCache()
         // Reset hands the slot back to the app's own engine, which voids a
         // pending unload rather than causing one.
-        onLocalSlotChanged(before, get().providers.openai)
+        onLocalSlotChanged(before.openai, get().providers.openai)
+        // ...but it switches every OTHER slot the user had enabled back off,
+        // and a pick served by one of them is unservable from this moment on.
+        dropPicksForDarkenedSlots(before, get().providers)
       },
 
       hydrateProviderKeys: async () => {
@@ -275,16 +334,50 @@ export const useProviderStore = create<ProviderState>()(
     }),
     {
       name: 'lu-providers',
+      storage: safeJSONStorage(),
       version: 1,
+      // A version WITHOUT a migrate is the one combination that loses data:
+      // zustand logs "couldn't be migrated" and hydrates from defaults, i.e. it
+      // throws every configured backend away. Harmless today (no blob carries a
+      // numeric version yet), fatal the day this store goes to 2.
+      migrate: keepPersistedState,
       // Blobs persisted before the lu-cloud provider existed lack its entry —
       // backfill every missing provider from defaults so getProvider() can't
       // hit an undefined config after an update.
       merge: (persisted: unknown, current: ProviderState): ProviderState => {
         const p = (persisted ?? {}) as Partial<ProviderState>
+        const merged = { ...DEFAULT_PROVIDERS, ...(p.providers ?? {}) }
+        // 2.6.8 (A14): every store written before the rename carries the label
+        // "Built-in Engine" on the openai slot, and a second copy of it in the
+        // `displaced` memory when another backend pushed the engine aside. Both
+        // are what the provider card and the standby card print, so both are
+        // relabelled here. Only that exact name is touched, so a backend the
+        // user named himself is left alone.
+        //
+        // This relabel MUST STAY WHILE OLD STORES EXIST. It is not a one-off
+        // migration that a version bump retires: `version` is still 1 and the
+        // blob is merged, not rewritten in place, so a machine that has not
+        // been opened since 2.6.7 arrives here with the old name on its very
+        // next launch, whenever that is. Deleting this puts "Built-in Engine"
+        // back on that user's provider card. The READ side (isLuEngineName)
+        // has to stay for the same reason, for rows recorded in old chats.
+        //
+        // Defensive on purpose: a hand-edited or truncated blob can carry a
+        // null entry, and a merge that throws takes the whole provider store
+        // down to defaults, which is every API key the user typed.
+        for (const id of Object.keys(merged) as ProviderId[]) {
+          const raw = merged[id]
+          if (!raw || typeof raw !== 'object') continue
+          const cfg = renameLegacyEngine(raw)
+          const displaced = cfg.displaced ? renameLegacyEngine(cfg.displaced) : cfg.displaced
+          if (cfg !== raw || displaced !== cfg.displaced) {
+            merged[id] = displaced ? { ...cfg, displaced } : cfg
+          }
+        }
         return {
           ...current,
           ...p,
-          providers: { ...DEFAULT_PROVIDERS, ...(p.providers ?? {}) },
+          providers: merged,
         }
       },
       // Don't persist transient state, only configs + user's "don't show again" preference.

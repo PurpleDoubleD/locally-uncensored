@@ -1,12 +1,35 @@
 import type { OllamaModel, PullProgress } from "../types/models"
 import { ollamaUrl, localFetch, localFetchStream, isTauri } from "./backend"
+import { isRecord, prop, asString, asStringArray, asRecordArray } from "./providers/wire"
 import { log } from "../lib/logger"
+import { isLocalTransportFailure, localBackendUnreachableMessage } from "../lib/local-backend-transport"
+
+/**
+ * One entry of Ollama's `/api/tags` response.
+ *
+ * The identity fields mirror `OllamaModel` because the mapper below spreads
+ * the entry straight through, exactly as it always has — this type documents
+ * that spread instead of hiding it behind `any`. `capabilities` is the one
+ * field we do NOT trust: it only appeared in newer Ollama builds, so it stays
+ * `unknown` and is checked with `Array.isArray` before it is read.
+ */
+type OllamaTagsEntry = Omit<
+  OllamaModel,
+  'type' | 'provider' | 'providerName' | 'contextLength' | 'supportsTools'
+> & { capabilities?: unknown }
 
 export async function listModels(): Promise<OllamaModel[]> {
   const res = await localFetch(ollamaUrl("/tags"))
   if (!res.ok) throw new Error("Failed to fetch models")
-  const data = await res.json()
-  return (data.models || []).map((m: any) => ({
+  const data: unknown = await res.json()
+  // Boundary check: `models` must be an array before anything iterates it.
+  // A body that is not shaped that way yields an empty list, which is what
+  // the old `data.models || []` did for a missing field.
+  const rawModels = prop(data, 'models')
+  const entries: OllamaTagsEntry[] = Array.isArray(rawModels)
+    ? (rawModels as OllamaTagsEntry[])
+    : []
+  return entries.map((m) => ({
     ...m,
     type: "text" as const,
     // /api/tags states this per model. Without the mapping the field arrives as
@@ -28,13 +51,20 @@ export async function listModels(): Promise<OllamaModel[]> {
   }))
 }
 
-export async function showModel(name: string) {
+/**
+ * Raw `/api/show` metadata. Ollama's payload differs per architecture
+ * (`llama.context_length` vs `gemma2.context_length` vs …), so there is no
+ * fixed shape to promise — a checked record is the honest return type, and
+ * every reader below probes it field by field.
+ */
+export async function showModel(name: string): Promise<Record<string, unknown>> {
   const res = await localFetch(ollamaUrl("/show"), {
     method: "POST",
     body: JSON.stringify({ name }),
   })
   if (!res.ok) throw new Error("Failed to show model")
-  return res.json()
+  const body: unknown = await res.json()
+  return isRecord(body) ? body : {}
 }
 
 export async function getModelContext(name: string): Promise<number> {
@@ -42,7 +72,7 @@ export async function getModelContext(name: string): Promise<number> {
     const info = await showModel(name)
 
     // Try model_info fields (various architectures use different keys)
-    const modelInfo = info?.model_info || {}
+    const modelInfo: Record<string, unknown> = isRecord(info.model_info) ? info.model_info : {}
     const contextFromInfo =
       modelInfo["general.context_length"] ||
       // Architecture-specific keys (gemma2.context_length, llama.context_length, etc.)
@@ -53,9 +83,9 @@ export async function getModelContext(name: string): Promise<number> {
     }
 
     // Try parameters (can be a string like "num_ctx 8192" or an object)
-    const params = info?.parameters
+    const params: unknown = info.parameters
     if (params) {
-      if (typeof params === 'object' && params.num_ctx) {
+      if (isRecord(params) && params.num_ctx) {
         return Number(params.num_ctx)
       }
       if (typeof params === 'string') {
@@ -100,92 +130,27 @@ export async function warmupOllamaContext(model: string, numCtx: number): Promis
   } catch { /* best-effort warmup — non-fatal */ }
 }
 
-export async function chatStream(
-  model: string,
-  messages: { role: string; content: string }[],
-  options: { temperature?: number; top_p?: number; top_k?: number; num_predict?: number } = {},
-  signal?: AbortSignal
-): Promise<Response> {
-  // v2.4.6 Bug L: dropped hardcoded `num_gpu: 99`. Old code forced ALL layers
-  // onto the GPU regardless of free VRAM, which on 8 GB laptop cards (e.g.
-  // 4070 laptop + gemma3:4b) pushed the KV cache out into system RAM and
-  // dropped chat throughput from 30 tok/s (ollama CLI auto-detect) to 6.9
-  // tok/s in LU (nightmare13740 Discord 2026-05-18). Letting Ollama do its
-  // own layer/VRAM decision restores parity with the CLI on tight cards
-  // and is a no-op on cards with headroom (Ollama already maxes layers
-  // when it can fit them).
-  const opts = { ...options }
-  const res = await localFetchStream(ollamaUrl("/chat"), {
-    method: "POST",
-    body: JSON.stringify({ model, messages, options: opts, stream: true }),
-  })
-  if (!res.ok) throw new Error("Failed to start chat")
-  return res
-}
-
-// Agent Mode: chat with tool calling support
-export async function chatStreamWithTools(
-  model: string,
-  messages: { role: string; content: string; tool_calls?: any[] }[],
-  tools: { type: string; function: { name: string; description: string; parameters: any } }[],
-  options: { temperature?: number; top_p?: number; top_k?: number; num_predict?: number } = {},
-  signal?: AbortSignal
-): Promise<Response> {
-  // v2.4.6 Bug L: see chatStream() above — same num_gpu:99 removal.
-  const opts = { ...options }
-  const res = await localFetchStream(ollamaUrl("/chat"), {
-    method: "POST",
-    body: JSON.stringify({ model, messages, tools, options: opts, stream: true }),
-  })
-  if (!res.ok) {
-    // Try to extract Ollama's error message
-    try {
-      const errorData = await res.json()
-      throw new Error(errorData.error || "Failed to start agent chat")
-    } catch (e) {
-      if (e instanceof Error && e.message !== "Failed to start agent chat") throw e
-      throw new Error("Failed to start agent chat")
-    }
-  }
-  return res
-}
-
-// Agent Mode: non-streaming tool call (more reliable for detecting tool calls)
-export async function chatWithTools(
-  model: string,
-  messages: { role: string; content: string; tool_calls?: any[] }[],
-  tools: { type: string; function: { name: string; description: string; parameters: any } }[],
-  options: { temperature?: number; top_p?: number; top_k?: number; num_predict?: number } = {},
-): Promise<{ content: string; tool_calls?: any[] }> {
-  // v2.4.6 Bug L: see chatStream() above — same num_gpu:99 removal.
-  const res = await localFetch(ollamaUrl("/chat"), {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ model, messages, tools, options: { ...options }, stream: false }),
-  })
-  if (!res.ok) {
-    try {
-      const errorData = await res.json()
-      throw new Error(errorData.error || "Failed to start agent chat")
-    } catch (e) {
-      if (e instanceof Error && e.message !== "Failed to start agent chat") throw e
-      throw new Error("Failed to start agent chat")
-    }
-  }
-  const data = await res.json()
-  return {
-    content: data.message?.content || '',
-    tool_calls: data.message?.tool_calls,
-  }
-}
-
 export async function pullModel(name: string, signal?: AbortSignal): Promise<Response> {
-  const res = await localFetchStream(isTauri() ? ollamaUrl("/pull") : "/api/pull", {
+  const url = isTauri() ? ollamaUrl("/pull") : "/api/pull"
+  const res = await localFetchStream(url, {
     method: "POST",
     body: JSON.stringify({ name, stream: true }),
     signal,
   })
-  if (!res.ok) throw new Error("Failed to pull model")
+  if (!res.ok) {
+    // The body was thrown away here, and it is the only place the reason ever
+    // lived: a stopped Ollama makes the proxy answer
+    // Response(503, {"error": "proxy_localhost_stream_chunked: error sending
+    // request ..."}), so the download card said "Failed to pull model" while the
+    // real answer, that nothing is listening, went unread. Read it, and turn the
+    // Rust line into a sentence rather than printing it (04.09.2026).
+    const raw = (await res.text()).trim()
+    throw new Error(
+      isLocalTransportFailure(raw, url)
+        ? localBackendUnreachableMessage("Ollama", url)
+        : `Failed to pull model: HTTP ${res.status}${raw ? ` ${raw}` : ""}`,
+    )
+  }
   return res
 }
 
@@ -244,8 +209,10 @@ export async function listRunningModels(): Promise<string[]> {
   try {
     const res = await localFetch(ollamaUrl("/ps"))
     if (!res.ok) return []
-    const data = await res.json()
-    return (data.models || []).map((m: any) => m.name || m.model)
+    const data: unknown = await res.json()
+    return asRecordArray(prop(data, 'models'))
+      .map((m) => asString(m.name) || asString(m.model))
+      .filter((n): n is string => !!n)
   } catch {
     return []
   }
@@ -271,8 +238,8 @@ export async function getModelCapabilities(model: string): Promise<string[]> {
       timeoutMs: 8000,
     })
     if (!res.ok) { _capCache.set(model, []); return [] }
-    const data = await res.json()
-    const caps: string[] = Array.isArray(data?.capabilities) ? data.capabilities : []
+    const data: unknown = await res.json()
+    const caps: string[] = asStringArray(prop(data, 'capabilities'))
     _capCache.set(model, caps)
     return caps
   } catch {
@@ -324,7 +291,10 @@ export async function checkModelCapability(
       signal,
     })
     if (res.ok) {
-      try { await res.json() } catch {}
+      // Drain the body so the socket is released; the VERDICT is the status,
+      // not the payload. A malformed body on a 200 changes nothing this
+      // function reports, so there is nothing here to handle or to log.
+      try { await res.json() } catch { /* body only drained, never read */ }
       return { name, ok: true, stale: false }
     }
     const { parseOllamaError, parseShowNotFound } = await import("../lib/ollama-errors")
@@ -376,8 +346,21 @@ export async function loadModel(name: string): Promise<void> {
     log.warn(`[ollama] failed to load model "${name}"`, { status: res.status, message: parsed.message })
     throw new ModelLoadError(parsed, name)
   }
-  // Consume response to ensure model is fully loaded
-  try { await res.json() } catch {}
+  // Consume response to ensure model is fully loaded.
+  //
+  // Reading the body IS the wait — Ollama answers /api/generate with
+  // stream:false only once the weights are resident. So a body that fails to
+  // arrive means "we stopped waiting", not "loaded". We still do not throw:
+  // every caller treats loadModel as a warm-up (Header/ModelSelector warm the
+  // picked model, vram-handoff documents its restore as explicitly non-fatal),
+  // and turning a torn read into a user-facing error would be a behaviour
+  // change none of them asked for. What was wrong was doing it in SILENCE:
+  // the one case where "loaded" is a lie left no trace anywhere.
+  try {
+    await res.json()
+  } catch (e) {
+    log.warn(`[ollama] load of "${name}" returned but its body did not read back`, { err: e })
+  }
 }
 
 export async function unloadModel(name: string): Promise<void> {
@@ -401,9 +384,20 @@ export async function unloadAllModels(): Promise<number> {
   return running.length
 }
 
-export async function checkConnection(): Promise<boolean> {
+/**
+ * Is Ollama answering.
+ *
+ * `timeoutMs` matters more than it looks. Without one the Rust proxy applies its
+ * own default of 300000 ms, and the base URL is user-configurable, so a LAN host
+ * that is switched off does not refuse the connection, it swallows it: the probe
+ * sits there for five minutes. Anything on a UI path has to pass a short budget
+ * (see EMBED_PROBE_TIMEOUT_MS). A timeout counts as "not reachable", which is
+ * the honest reading, because a backend that cannot answer in three seconds
+ * cannot serve an embedding request either.
+ */
+export async function checkConnection(timeoutMs?: number): Promise<boolean> {
   try {
-    await localFetch(ollamaUrl("/tags"))
+    await localFetch(ollamaUrl("/tags"), timeoutMs ? { timeoutMs } : undefined)
     return true
   } catch {
     return false

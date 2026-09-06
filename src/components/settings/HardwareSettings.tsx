@@ -8,6 +8,8 @@ import { useSettingsStore } from '../../stores/settingsStore'
 import { backendCall, isTauri } from '../../api/backend'
 import { isMlxImageHost } from '../../api/mlx-image'
 import { Cpu, RefreshCw, AlertTriangle } from 'lucide-react'
+import { Hinweis } from '../ui/Hinweis'
+import { HINWEIS_TEXT } from '../../lib/hinweis'
 
 interface DetectedGpu {
   index: number
@@ -43,7 +45,10 @@ export function HardwareSettings() {
   const [showRestartHint, setShowRestartHint] = useState(false)
 
   const vendor = (settings.gpuVendor || 'auto') as GpuVendor
-  const indices = settings.gpuIndices || []
+  // Das `|| []` erzeugte bei jedem Render ein frisches Array. Der Effekt unten
+  // haengt an `indices` und schickte deshalb bei JEDEM Render ein
+  // `set_gpu_selection` ans Backend, statt nur bei einer echten Aenderung.
+  const indices = useMemo(() => settings.gpuIndices || [], [settings.gpuIndices])
 
   const detect = async () => {
     setLoading(true)
@@ -98,12 +103,13 @@ export function HardwareSettings() {
 
   return (
     <div className="space-y-3">
-      <div className="flex items-start gap-2.5 p-2.5 rounded-lg border border-amber-200 dark:border-amber-500/20 bg-amber-50 dark:bg-amber-500/[0.08] text-amber-900 dark:text-amber-200">
-        <Cpu size={14} className="mt-0.5 shrink-0" />
-        <div className="text-[0.65rem] leading-relaxed">
-          <strong>GPU picker.</strong> Forwards CUDA_VISIBLE_DEVICES / HIP_VISIBLE_DEVICES / ONEAPI_DEVICE_SELECTOR to Ollama + ComfyUI on next spawn. Use only on multi-GPU / multi-vendor systems where the driver picks the wrong device by default.
-        </div>
-      </div>
+      {/* Eine Zeile, kein Kasten: das hier erklaert nur, wofuer der Abschnitt
+          gut ist. Frueher stand derselbe Satz in einem gelben Rahmen mit
+          gelber Fuellung und trug damit das Gewicht eines Absturzes. Regel:
+          lib/hinweis.ts. */}
+      <Hinweis icon={<Cpu size={11} className="shrink-0 mt-[3px]" />}>
+        GPU picker. Forwards CUDA_VISIBLE_DEVICES / HIP_VISIBLE_DEVICES / ONEAPI_DEVICE_SELECTOR to Ollama + ComfyUI on next spawn. Use only on multi-GPU / multi-vendor systems where the driver picks the wrong device by default.
+      </Hinweis>
 
       <div>
         <div className="flex items-center justify-between mb-1.5">
@@ -140,15 +146,14 @@ export function HardwareSettings() {
       <div>
         <div className="text-[0.7rem] text-gray-700 dark:text-gray-300 font-medium mb-1">Detected GPUs</div>
         {error && (
-          <div className="flex items-start gap-2 p-2 rounded border border-red-500/20 bg-red-500/[0.06] text-red-300 mb-1.5">
-            <AlertTriangle size={12} className="mt-0.5 shrink-0" />
-            <span className="text-[0.6rem]">{error}</span>
-          </div>
+          <Hinweis ton="fehler" className="mb-1.5" icon={<AlertTriangle size={11} className="shrink-0 mt-[3px]" />}>
+            {error}
+          </Hinweis>
         )}
         {!error && gpus.length === 0 && !loading && (
-          <div className="text-[0.6rem] text-gray-500 italic">
+          <Hinweis className="italic">
             No GPUs detected via nvidia-smi / rocm-smi / lspci / wmic. The "Auto" vendor option still works, Ollama will use whatever the driver picks.
-          </div>
+          </Hinweis>
         )}
         {gpusForVendor.length > 0 && (
           <div className="space-y-1">
@@ -181,8 +186,19 @@ export function HardwareSettings() {
                         and selectable, and the line says what LU could not
                         verify, so nobody rebuilds a working install chasing
                         a driver problem that is not there (numbrain). */}
+                    {/* Ein Ton statt zwei. Die Zeile war gelb, sobald der
+                        Rueckgabewert nicht 'info' sagte, und genau danach
+                        fragte hypocritical_rj im Hilfe-Chat (26.08.): ob das
+                        Gelb ein Problem sei. Es war nie eins. Die eine Meldung
+                        nennt ROCm-Version und Architektur, die andere sagt,
+                        dass LU die Rechenschicht nicht pruefen konnte, und die
+                        Karte laeuft in beiden Faellen. Beide sind ruhiges Grau,
+                        und die Schwere vom Backend wird hier nicht mehr
+                        gelesen. Regel: lib/hinweis.ts. */}
                     {g.note && (
-                      <div className="text-[0.55rem] text-amber-500/80 mt-0.5 leading-relaxed">{g.note}</div>
+                      <div className={`text-[0.55rem] mt-0.5 leading-relaxed ${HINWEIS_TEXT.ruhig}`}>
+                        {g.note}
+                      </div>
                     )}
                   </div>
                 </label>
@@ -191,9 +207,9 @@ export function HardwareSettings() {
           </div>
         )}
         {vendor !== 'auto' && gpusForVendor.length === 0 && gpus.length > 0 && !loading && (
-          <div className="text-[0.6rem] text-amber-300 italic mt-1">
+          <Hinweis className="italic mt-1">
             No {vendor.toUpperCase()} GPUs detected on this system. Either install the vendor tool ({vendor === 'nvidia' ? 'nvidia-smi' : vendor === 'amd' ? 'rocm-smi' : 'driver providing lspci/wmic info'}) or switch back to "Auto".
-          </div>
+          </Hinweis>
         )}
       </div>
 
@@ -239,9 +255,9 @@ export function HardwareSettings() {
       )}
 
       {showRestartHint && (vendor !== 'auto' || indices.length > 0) && (
-        <div className="text-[0.6rem] text-amber-300 italic">
+        <Hinweis className="italic">
           GPU pick takes effect on next Ollama / ComfyUI spawn. Restart ComfyUI under AI Backends, ComfyUI (Image &amp; Video), or close LU to apply it to both.
-        </div>
+        </Hinweis>
       )}
     </div>
   )

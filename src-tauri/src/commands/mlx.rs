@@ -1,7 +1,8 @@
 //! MLX-Stable-Diffusion image provider for macOS (Apple Silicon
 //! recommended image stack).
 //!
-//! Layout under `~/Library/Application Support/lu-labs/mlx/`:
+//! Layout under `<os_paths::data_dir()>/mlx/` (macOS: `~/Library/Application
+//! Support/<APP_DIR>/mlx/`; der Verzeichnisname kommt aus `app_identity`):
 //!   venv/             — dedicated Python venv we own
 //!   server.py         — FastAPI sidecar (embedded via include_str!)
 //!   requirements.txt  — pip dependencies (embedded via include_str!)
@@ -57,10 +58,16 @@ static HF_TOKEN: std::sync::RwLock<Option<String>> = std::sync::RwLock::new(None
 /// of reach entirely without a token. HF_HOME stays with the caller: the image
 /// lane shares one cache, the video lane downloads into per-model directories.
 pub(crate) fn apply_hf_token(cmd: &mut Command) {
-    let token = HF_TOKEN.read().ok().and_then(|t| t.clone());
-    if let Some(t) = token {
+    if let Some(t) = hf_token() {
         cmd.env("HF_TOKEN", t);
     }
+}
+
+/// The stored token, for the one other place that talks to the hub directly:
+/// the GGUF downloader in `download.rs`, which sends it as a Bearer header to
+/// huggingface.co and nowhere else.
+pub(crate) fn hf_token() -> Option<String> {
+    HF_TOKEN.read().ok().and_then(|t| t.clone())
 }
 
 /// Store the token from Settings. An empty string clears it, because that is
@@ -802,10 +809,7 @@ pub async fn mlx_generate(_state: &AppState, args: &Value) -> CmdResult {
 /// Where generated stills live. Sibling of the video lane's outputs root and
 /// covered by the same read_media_file allow-list.
 pub(crate) fn images_root() -> PathBuf {
-    dirs::config_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("lu-labs")
-        .join("images")
+    crate::os_paths::config_root().join("images")
 }
 
 fn write_generated_png(b64: &str) -> Result<PathBuf, String> {
@@ -865,13 +869,31 @@ pub fn mlx_start(_state: &AppState, _args: &Value) -> CmdResult {
     Ok(json!({"ok": true, "port": MLX_PORT, "log": log_path.to_string_lossy()}))
 }
 
-/// Stop the MLX sidecar (the long-lived image/video server on MLX_PORT). We
-/// didn't keep a Child handle, so stop it by its listening port — the "Stop"
-/// button counterpart to `mlx_start`.
-pub fn mlx_stop(_state: &AppState, _args: &Value) -> CmdResult {
-    crate::process_util::kill_listeners_on_port(MLX_PORT);
-    Ok(json!({ "ok": true, "port": MLX_PORT }))
-}
+// ── REMOVED on 01.09.2026: `mlx_stop` (KF-19) ─────────────────────────────
+//
+// It was two lines — `kill_listeners_on_port(MLX_PORT)` and an `{"ok":true}` —
+// under a doc comment calling itself "the Stop button counterpart to
+// `mlx_start`". Counted before removing: no Rust caller, no
+// `#[tauri::command]` wrapper in `media_cmds.rs`, no line in `main.rs`'s
+// handler list, and no occurrence of the STRING "mlx_stop" anywhere under
+// `src/`, `dev-server/`, `e2e/` or `mobile-client/` — which is how a Tauri
+// command is actually invoked. Every other mlx entry point is wired all four
+// ways. The Stop button it described could not exist.
+//
+// Deleted rather than wired, because the need it names is already served twice
+// over and neither of those is this function:
+//
+//   * Reclaiming memory while the app runs is `mlx_unload` (bridged, and
+//     called from `src/api/mlx-image.ts`). It frees the resident model and
+//     leaves the sidecar up, which is the point of a sidecar — `mlx_status`
+//     returns `modelLoaded`/`idleSeconds` so the UI can offer exactly that.
+//   * Ending the PROCESS is the quit-time `kill_listeners_on_port(MLX_PORT)`
+//     in `state.rs::shutdown`. Same call, one line, on the path that actually
+//     runs.
+//
+// Wiring it would have meant a bridge in `media_cmds.rs`, a line in `main.rs`
+// and a caller in `src/` — a third door onto a job the other two already do,
+// and the frontend is not this agent's to change.
 
 const REQUIREMENTS_TXT: &str = include_str!("../../resources/mlx/requirements.txt");
 const SERVER_PY: &str = include_str!("../../resources/mlx/server.py");

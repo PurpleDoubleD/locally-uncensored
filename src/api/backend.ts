@@ -9,16 +9,12 @@
  */
 
 import { log } from "../lib/logger";
+import { prop } from "../types/json-guards";
 import { shouldLogRepeat } from "../lib/probe-backoff";
 
 // Hosts whose proxy failure has already been logged, host -> timestamp. Keeps
 // a dead local backend from filling the console with the same line forever.
 const proxyWarnSeen = new Map<string, number>();
-
-/** Test-only: forget which hosts have already had their warning. */
-export function __resetProxyWarnLogForTests(): void {
-  proxyWarnSeen.clear();
-}
 
 let _invoke: ((cmd: string, args?: Record<string, unknown>) => Promise<unknown>) | null = null;
 
@@ -28,8 +24,11 @@ export function isTauri(): boolean {
   // Check both so the app keeps working across both versions (and also
   // during the migration window when people might be on either).
   if (typeof window === "undefined") return false;
-  const w = window as any;
-  return !!(w.__TAURI_INTERNALS__ || w.__TAURI__);
+  // Neither global is in the DOM lib, so reading them off `window` needed an
+  // assertion. `prop` answers `undefined` for a missing key without claiming
+  // anything about the container — the same probe, checked.
+  const w: unknown = window;
+  return !!(prop(w, "__TAURI_INTERNALS__") || prop(w, "__TAURI__"));
 }
 
 /** True when the host OS is macOS. The frontend `dist` is shared across the
@@ -274,8 +273,13 @@ export async function localFetchStream(
     const direct = await tryDirect();
     if (direct) return direct;
     if (!isTauri()) {
-      // No proxy to fall back to in plain browser dev mode.
-      return new Response(JSON.stringify({ error: 'Network error' }), { status: 500 });
+      // No proxy to fall back to in plain browser dev mode. The wording is not
+      // decoration: this body is the only thing a provider gets to read, and
+      // `isLocalTransportFailure` needs the address in the text before it may
+      // turn it into a sentence. "Network error" carried neither the address
+      // nor a shape the filter knows, so a web build printed a bare, useless
+      // line where a Tauri build printed a real one.
+      return new Response(JSON.stringify({ error: `error sending request for url (${url}): failed to fetch, no proxy in this build` }), { status: 500 });
     }
   }
 
@@ -288,7 +292,8 @@ export async function localFetchStream(
     const direct = await tryDirect();
     if (direct) return direct;
   }
-  return new Response(JSON.stringify({ error: 'Local backend unreachable (proxy and direct fetch both failed)' }), { status: 503 });
+  // Same reason as above: name the address, in the shape the filter reads.
+  return new Response(JSON.stringify({ error: `error sending request for url (${url}): proxy and direct fetch both failed` }), { status: 503 });
 }
 
 /**
@@ -435,10 +440,10 @@ async function proxyStreamChunked(url: string, method: string, body?: string, he
 /**
  * Call a backend command. Routes to Tauri invoke() or Vite fetch() automatically.
  */
-export async function backendCall<T = any>(
+export async function backendCall<T = unknown>(
   command: string,
   args?: Record<string, unknown>,
-  options?: { method?: string; body?: any; headers?: Record<string, string> }
+  options?: { method?: string; body?: BodyInit; headers?: Record<string, string> }
 ): Promise<T> {
   if (isTauri()) {
     const invoke = await getInvoke();
@@ -472,8 +477,13 @@ export async function backendCall<T = any>(
     install_tts_status: { path: "/local-api/install-tts" },
     transcribe: { path: "/local-api/transcribe", method: "POST" },
     execute_code: { path: "/local-api/execute-code", method: "POST" },
-    file_read: { path: "/local-api/file-read", method: "POST" },
-    file_write: { path: "/local-api/file-write", method: "POST" },
+    // file_read / file_write: ABSICHTLICH NICHT HIER. Die beiden Dev-Endpunkte
+    // sind entfernt (siehe vite.config.ts), weil sie keinen Aufrufer mehr
+    // hatten und eine dritte, von Rust abweichende Pfadregel waren. Ein Eintrag
+    // ohne Endpunkt waere schlimmer als keiner: `backendCall('file_read', …)`
+    // liefe dann im Dev-Modus in einen nackten HTTP 404, statt mit
+    // "Unknown backend command: file_read" zu sagen, was los ist. Der Weg auf
+    // die Platte ist fs_read / fs_write.
     download_model: { path: "/local-api/download-model", method: "POST" },
     download_model_to_path: { path: "/local-api/download-model-to-path", method: "POST" },
     detect_model_path: { path: "/local-api/detect-model-path", method: "POST" },
@@ -753,10 +763,15 @@ export async function oauthWait(port: number, timeoutSecs: number): Promise<stri
 }
 
 /** Fetch an external URL as text — works in both Tauri and dev mode */
-export async function fetchExternal(url: string): Promise<string> {
+export async function fetchExternal(url: string, authToken?: string | null): Promise<string> {
   if (isTauri()) {
     const invoke = await getInvoke();
-    return invoke('fetch_external', { url }) as Promise<string>;
+    // Rust sends this as a Bearer header and only to a CivitAI host. The web
+    // path below deliberately sends NO token: the dev proxy takes the URL as a
+    // query parameter, and a credential in a query parameter is a credential in
+    // every log that quotes it. An anonymous CivitAI search still works, it is
+    // only filtered and rate limited.
+    return invoke('fetch_external', { url, authToken: authToken ?? null }) as Promise<string>;
   }
   const res = await fetch(`/local-api/proxy-download?url=${encodeURIComponent(url)}`);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -781,7 +796,7 @@ export async function fetchExternalBytes(url: string): Promise<ArrayBuffer> {
  * Tauri the browser can't fetch localhost directly (CORS) so we route through
  * the Rust byte proxy; in dev a plain fetch works.
  */
-export async function fetchLocalhostBytes(url: string): Promise<Uint8Array> {
+export async function fetchLocalhostBytes(url: string): Promise<Uint8Array<ArrayBuffer>> {
   if (isTauri()) {
     const invoke = await getInvoke()
     const bytes = (await invoke('proxy_localhost_stream', { url, method: 'GET', body: null })) as number[]

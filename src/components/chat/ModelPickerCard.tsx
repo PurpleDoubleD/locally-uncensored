@@ -4,6 +4,8 @@ import { useModelPickStore, MODEL_PICK_TIMEOUT_MS, type ModelPickKind, type Mode
 import { useSettingsStore } from '../../stores/settingsStore'
 import { getImageModels, getVideoModels, isI2VModel, isT2VCapable } from '../../api/comfyui'
 import type { AgentToolCall } from '../../types/agent-mode'
+import type { ToolArgs } from '../../api/mcp/types'
+import { Hinweis } from '../ui/Hinweis'
 
 /**
  * Model-Picker UI (v2.5.3, David 2026-06-10). Two faces of one feature:
@@ -39,8 +41,13 @@ export const PICK_PREF_KEY: Record<ModelPickKind, 'preferredImageModel' | 'prefe
 export function pickKindForToolCall(toolCall: Pick<AgentToolCall, 'toolName' | 'args'>): ModelPickKind | null {
   if (toolCall.toolName === 'image_generate') return 'image'
   if (toolCall.toolName !== 'video_generate') return null
-  const a = (toolCall.args ?? {}) as Record<string, any>
-  const s = (a.settings && typeof a.settings === 'object' ? a.settings : {}) as Record<string, any>
+  // `AgentToolCall['args']` ist bereits `ToolArgs` (types/agent-mode.ts:91), es
+  // braucht also gar keine Zusicherung. `s` verengt `unknown` mit derselben
+  // Pruefung wie vorher — nur dass das Ergebnis jetzt auch `unknown` ist und die
+  // `typeof inputImage === 'string'`-Pruefung unten wirklich etwas tut, statt
+  // eine schon durchgewinkte Zusage zu wiederholen.
+  const a: ToolArgs = toolCall.args ?? {}
+  const s: ToolArgs = a.settings && typeof a.settings === 'object' ? (a.settings as ToolArgs) : {}
   const inputImage = a.inputImage ?? a.input_image ?? a.image ?? s.inputImage ?? s.input_image ?? s.image
   return typeof inputImage === 'string' && inputImage ? 'video-i2v' : 'video-t2v'
 }
@@ -56,7 +63,7 @@ function ModelList({ models, selected, onPick }: { models: string[]; selected: s
           key={m}
           type="button"
           onClick={(e) => { e.stopPropagation(); onPick(m) }}
-          className={`w-full text-left px-2 py-1 rounded border text-[0.6rem] transition-colors truncate ${
+          className={`w-full text-left px-2 py-1 rounded border t-micro transition-colors truncate ${
             m === selected
               ? 'border-blue-400/40 bg-blue-500/10 text-gray-900 dark:text-gray-100'
               : 'border-gray-200 dark:border-white/10 bg-gray-50 dark:bg-white/[0.03] text-gray-600 dark:text-gray-400 hover:border-gray-300 dark:hover:border-white/20'
@@ -79,8 +86,13 @@ export function ModelPickerCard({ request }: { request: ModelPickRequest }) {
   // Auto-continue 5s before the store's headless fallback so the countdown
   // resolves with the user's ON-SCREEN selection, not just the default.
   const [secondsLeft, setSecondsLeft] = useState(Math.max(5, Math.floor((MODEL_PICK_TIMEOUT_MS - 5000) / 1000)))
+  // Refreshed from an effect, not from the render body: a ref written while
+  // rendering is a mutation React may discard or replay (React 19 `refs`). The
+  // only reader is the interval below, which first fires a full second after
+  // the effects of the render it was started in, so it still reads the pick
+  // that is on screen.
   const stateRef = useRef({ selected, save })
-  stateRef.current = { selected, save }
+  useEffect(() => { stateRef.current = { selected, save } })
 
   useEffect(() => {
     const t = setInterval(() => {
@@ -98,7 +110,7 @@ export function ModelPickerCard({ request }: { request: ModelPickRequest }) {
 
   return (
     <div className="mt-1 ml-5 rounded-md border border-blue-400/25 bg-blue-500/[0.04] px-2.5 py-2 space-y-1.5" data-testid="model-picker-card">
-      <div className="text-[0.6rem] font-medium text-gray-700 dark:text-gray-300">
+      <div className="t-micro font-medium text-gray-700 dark:text-gray-300">
         Pick the {PICK_KIND_LABEL[request.kind]}
         <span className="ml-1 font-normal text-gray-500 dark:text-gray-500">runs before the VRAM swap</span>
       </div>
@@ -107,7 +119,7 @@ export function ModelPickerCard({ request }: { request: ModelPickRequest }) {
         <button
           type="button"
           onClick={(e) => { e.stopPropagation(); choose({ model: selected, save }) }}
-          className="flex items-center gap-1 px-2.5 py-1 rounded text-[0.6rem] font-medium text-blue-700 dark:text-blue-300 bg-blue-500/10 hover:bg-blue-500/15 border border-blue-500/25 transition-colors"
+          className="flex items-center gap-1 px-2.5 py-1 rounded t-micro font-medium text-blue-700 dark:text-blue-300 bg-blue-500/10 hover:bg-blue-500/15 border border-blue-500/25 transition-colors"
         >
           <Check size={10} /> Continue
         </button>
@@ -188,7 +200,10 @@ export function ChangeModelInline({ kind }: { kind: ModelPickKind }) {
             <div className="flex items-center gap-1 text-[0.55rem] text-gray-500"><Loader2 size={9} className="animate-spin" /> loading models…</div>
           )}
           {loadError && (
-            <div className="text-[0.55rem] text-amber-500">Could not reach ComfyUI, so the model list is unavailable.</div>
+            // Roter Ton, weil hier wirklich etwas fehlgeschlagen ist: ohne
+            // Liste kann niemand waehlen. Gelb hat den Unterschied zwischen
+            // „laedt noch" und „ging schief" eingeebnet (`lib/hinweis.ts`).
+            <Hinweis ton="fehler">Could not reach ComfyUI, so the model list is unavailable.</Hinweis>
           )}
           {models !== null && models.length > 0 && (
             <ModelList

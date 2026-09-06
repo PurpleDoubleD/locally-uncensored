@@ -18,10 +18,13 @@ import { PROVIDER_PRESETS } from '../../api/providers/types'
 import { Modal } from '../ui/Modal'
 import { backendCall } from '../../api/backend'
 import { diagnoseBuiltinEngine, readBuiltinSlotStatus } from '../../api/builtin-ensure'
-import type { SlotStatus } from '../../lib/builtin-slot-status'
+import { useBuiltinEngineStatus } from '../../hooks/useBuiltinEngineStatus'
+import { reachVerdict, liveSlotStatus, type SlotStatus } from '../../lib/builtin-slot-status'
 import type { ProviderId, ProviderConfig } from '../../api/providers/types'
+import { disabledSlotNote } from '../../lib/disabled-slot-note'
+import { HINWEIS_TEXT, PUNKT_FARBE } from '../../lib/hinweis'
 
-const isTauri = typeof window !== 'undefined' && !!(window as any).__TAURI_INTERNALS__
+const isTauri = typeof window !== 'undefined' && !!window.__TAURI_INTERNALS__
 
 /** What a slot in the provider list may show and let the user change. */
 export interface SlotView {
@@ -68,12 +71,19 @@ export function providerSlotView(id: ProviderId, config: ProviderConfig): SlotVi
         : PROVIDER_PRESETS.find(p => p.providerId === 'openai' && (p.name === config.name || p.baseUrl === config.baseUrl)) ||
           PROVIDER_PRESETS.find(p => p.id === 'custom-openai')!
   if (config.managed) {
+    // A13, Windows counter-check 2026-09-02: "nothing to configure" was true
+    // and useless. The engine starts its walk at 8127 and moves to the next
+    // free port when that one is held, and this row is where the address of a
+    // backend belongs. It is the live slot URL, which api/engine keeps on the
+    // port the engine really holds.
     return {
       label: preset.name || config.name,
       presetId: preset.id,
       endpointEditable: false,
       needsKey: false,
-      note: 'Built-in engine, runs locally, nothing to configure.',
+      note: config.baseUrl
+        ? `LU Engine, runs locally on ${config.baseUrl}, nothing to configure.`
+        : 'LU Engine, runs locally, nothing to configure.',
     }
   }
   return {
@@ -100,6 +110,11 @@ export function ProviderSettings() {
   const [dropdownOpen, setDropdownOpen] = useState(false)
   const [testing, setTesting] = useState<ProviderId | null>(null)
   const [statuses, setStatuses] = useState<Record<string, SlotStatus>>({})
+  // Der laufende Zustand unserer eigenen Engine, dieselbe Schleife, die der
+  // Abschnitt LU Engine (expert) weiter unten liest. Gegenprobe G2: ohne sie
+  // blieb der Punkt in dieser Liste 150 Sekunden gruen, waehrend derselbe
+  // Bildschirm "Engine not running" meldete.
+  const engineAnswer = useBuiltinEngineStatus()
   // Per-slot English explanation for a failed Test (GH #118).
   const [testDetail, setTestDetail] = useState<Record<string, string>>({})
   const [showKey, setShowKey] = useState<Record<string, boolean>>({})
@@ -129,18 +144,43 @@ export function ProviderSettings() {
   // in the console first. The app starts that process itself, so it can simply
   // ask whether it runs. An engine that was never started is "Not running",
   // which is a true sentence and also a different one from "Failed".
+  /**
+   * Wie viele Modelle dieser Anbieter gerade wirklich anbietet.
+   *
+   * `null` heisst "nicht beantwortbar" und nicht "keine": ein Anbieter ohne
+   * Liste oder ein Fehler beim Holen darf ein bereits gemessenes Connected
+   * nicht kaputtreden. Kostet eine zweite Anfrage an denselben lokalen Port,
+   * die `checkConnection` schon kennt, und das ist der Preis dafuer, dass die
+   * Anbieterschnittstelle bleibt, wie sie ist: Anthropic prueft mit einem
+   * echten POST, dessen Modellliste steht fest im Code.
+   */
+  const countModels = async (id: ProviderId): Promise<number | null> => {
+    try {
+      const list = await getProvider(id).listModels()
+      return Array.isArray(list) ? list.length : null
+    } catch {
+      return null
+    }
+  }
+
   const probeSlot = async (id: ProviderId): Promise<SlotStatus> => {
     if (id === 'openai') {
       const known = await readBuiltinSlotStatus()
       // 'connected' or 'stopped' answers it without touching a socket. Only an
       // engine that is up but not yet answering falls through to a real probe.
-      if (known) return known
+      // Ein 'connected' von hier geht trotzdem durch dieselbe Verfeinerung wie
+      // der Test-Knopf, sonst sagen Aufschlag und Klick zwei verschiedene
+      // Dinge ueber dieselbe Zeile. Die Anfrage kommt nur bei einer gesunden
+      // Maschine dazu, der stumme Fall aus GH #118 bleibt stumm.
+      if (known) return known === 'connected' ? reachVerdict(true, await countModels(id)) : known
     }
+    let reachable = false
     try {
-      return (await getProvider(id).checkConnection()) ? 'connected' : 'failed'
+      reachable = await getProvider(id).checkConnection()
     } catch {
-      return 'failed'
+      reachable = false
     }
+    return reachVerdict(reachable, reachable ? await countModels(id) : null)
   }
 
   // Auto-check connection status for all enabled providers on mount.
@@ -341,7 +381,10 @@ export function ProviderSettings() {
         setTestDetail(prev => ({ ...prev, [providerId]: diag.reason }))
       }
     }
-    setStatuses(prev => ({ ...prev, [providerId]: ok ? 'connected' : 'failed' }))
+    // Erreichbar ist nicht chatbereit. Derselbe Spruch wie beim Aufschlag oben,
+    // damit der Knopf und die Zeile daneben nie zwei Dinge behaupten.
+    const verdict = reachVerdict(ok, ok ? await countModels(providerId) : null)
+    setStatuses(prev => ({ ...prev, [providerId]: verdict }))
     setTesting(null)
     // Bug (g): refresh after a Test click so the Start-Server button
     // appears the moment a user discovers their LM Studio server is down.
@@ -412,14 +455,17 @@ export function ProviderSettings() {
                 </button>
               </div>
               <p className="px-2 pb-1.5 text-[0.55rem] text-gray-600 leading-snug">
-                Switched off, so its models are not offered in the chat model picker. Press Enable to use it again.
+                {disabledSlotNote(config?.managed === true)}
               </p>
             </div>
           )
         }
         const needsKey = view.needsKey
         const currentKey = getProviderApiKey(id)
-        const status = statuses[id] || 'idle'
+        // Unsere eigene Engine kennt ihren Zustand besser als eine Sonde, die
+        // einmal beim Aufbauen lief: fuer sie entscheidet die laufende
+        // Schleife, sonst der Sondenwert.
+        const status = liveSlotStatus(id, config, engineAnswer) ?? statuses[id] ?? 'idle'
         const isExpanded = expandedProvider === id
         const isTesting = testing === id
         const isKeyVisible = showKey[id] || false
@@ -440,19 +486,19 @@ export function ProviderSettings() {
                 className="flex-1 flex items-center justify-between min-w-0"
               >
                 <div className="flex items-center gap-2 min-w-0">
-                  <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${
-                    status === 'connected' ? 'bg-green-500' :
-                    status === 'failed' ? 'bg-red-500' :
-                    status === 'stopped' ? 'bg-amber-500' :
-                    'bg-gray-500'
-                  }`} />
+                  {/* Gegenprobe G2, 04.09.2026: dieser Punkt blieb 150 Sekunden
+                      lang gruen, waehrend derselbe Bildschirm zwei Zentimeter
+                      tiefer "Engine not running" meldete. Der Grund war die
+                      Uhr: der Zustand wurde EINMAL beim Aufbauen geholt und nie
+                      wieder. Fuer unsere eigene Engine liest der Punkt jetzt
+                      dieselbe laufende Schleife wie der Abschnitt darunter, und
+                      die beiden koennen nicht mehr zwei Dinge behaupten. */}
+                  <Zustandspunkt status={status} />
                   <span className="text-[0.65rem] text-gray-300 font-medium truncate">{view.label}</span>
                   {config.managed && <span className="text-[0.5rem] px-1 py-0.5 rounded bg-purple-500/15 text-purple-300 shrink-0">DEFAULT</span>}
                   {config.isLocal && <span className="text-[0.5rem] px-1 py-0.5 rounded bg-green-500/10 text-green-400 shrink-0">LOCAL</span>}
                   {!config.isLocal && <span className="text-[0.5rem] px-1 py-0.5 rounded bg-blue-500/10 text-blue-400 shrink-0">CLOUD</span>}
-                  {status === 'connected' && <Wifi size={8} className="text-green-400 shrink-0" />}
-                  {status === 'failed' && <WifiOff size={8} className="text-red-400 shrink-0" />}
-                  {status === 'stopped' && <WifiOff size={8} className="text-amber-400 shrink-0" />}
+                  <Zustandssymbol status={status} />
                 </div>
                 <ChevronDown size={10} className={`text-gray-500 transition-transform shrink-0 ${isExpanded ? 'rotate-180' : ''}`} />
               </button>
@@ -558,24 +604,7 @@ export function ProviderSettings() {
                           : <><Play size={10} /> Start Server</>}
                       </button>
                     )}
-                  {status === 'connected' && (
-                    <span className="flex items-center gap-1 text-[0.6rem] text-green-400">
-                      <Wifi size={10} /> Connected
-                    </span>
-                  )}
-                  {status === 'failed' && (
-                    <span className="flex items-center gap-1 text-[0.6rem] text-red-400">
-                      <WifiOff size={10} /> Failed
-                    </span>
-                  )}
-                  {status === 'stopped' && (
-                    <span
-                      className="flex items-center gap-1 text-[0.6rem] text-amber-400"
-                      title="The engine is installed but not started yet. It starts when you pick a chat model, or when you press Test."
-                    >
-                      <WifiOff size={10} /> Not running
-                    </span>
-                  )}
+                  <Statusfeld status={status} />
                 </div>
 
                 {/* Why it failed, when the app can tell (GH #118). */}
@@ -590,9 +619,12 @@ export function ProviderSettings() {
                   </p>
                 )}
 
-                {/* Cloud + auto-extract cost warning */}
+                {/* Cloud + auto-extract cost note. Nichts ist kaputt und
+                    nichts muss jetzt passieren, also ruhig: das ist eine
+                    Folge einer Einstellung, die der Nutzer selbst gesetzt
+                    hat. */}
                 {needsKey && autoExtractEnabled && (
-                  <p className="text-[0.55rem] text-amber-400/80 mt-1 leading-tight">
+                  <p className={`text-[0.55rem] ${HINWEIS_TEXT.ruhig} mt-1 leading-tight`}>
                     Memory auto-extraction runs a secondary inference every 3rd turn, increasing API costs. Disable in Settings &gt; Memory if not needed.
                   </p>
                 )}
@@ -693,8 +725,17 @@ export function ProviderSettings() {
           <Plus size={10} />
           <span>Add Provider</span>
         </button>
+        {/* Hellmodus-Luecke aus Welle 2, in f336b91e gemeldet statt
+            geaendert. Die Flaeche war `bg-[#363636]` OHNE `dark:`, blieb im
+            Hellmodus also dunkel — waehrend der Rescue-Layer in index.css
+            die Schrift darin nach unten dreht (`.light .text-gray-500 →
+            #374151`). Ergebnis: #374151 auf #363636 = 1,17:1, praktisch
+            unsichtbar; jetzt 10,31:1. Kein zweites Literal, sondern
+            derselbe Tokenwechsel wie in ChatView (f336b91e). Das gruene
+            „Active" stand auf Weiss bei 1,74:1 und traegt jetzt green-700
+            mit 5,02:1. */}
         {dropdownOpen && (
-          <div className="absolute z-50 top-full mt-1 w-full bg-[#363636] border border-white/10 rounded-lg shadow-xl max-h-56 overflow-y-auto scrollbar-thin">
+          <div className="absolute z-50 top-full mt-1 w-full bg-white dark:bg-lu-overlay border border-gray-200 dark:border-white/10 rounded-lg shadow-xl max-h-56 overflow-y-auto scrollbar-thin">
             {/* Local group */}
             <div className="px-2.5 py-1 text-[0.5rem] uppercase tracking-wider text-gray-600 font-semibold">Local</div>
             {localPresets.map(preset => {
@@ -710,7 +751,7 @@ export function ProviderSettings() {
                 >
                   <div className="flex items-center justify-between">
                     <span className="font-medium">{preset.name}</span>
-                    {isActive && <span className="text-[0.5rem] text-green-400">Active</span>}
+                    {isActive && <span className="text-[0.5rem] text-green-700 dark:text-green-400">Active</span>}
                   </div>
                   {preset.baseUrl && <span className="block text-[0.55rem] text-gray-500 font-mono">{preset.baseUrl}</span>}
                 </button>
@@ -732,7 +773,7 @@ export function ProviderSettings() {
                 >
                   <div className="flex items-center justify-between">
                     <span className="font-medium">{preset.name}</span>
-                    {isActive && <span className="text-[0.5rem] text-green-400">Active</span>}
+                    {isActive && <span className="text-[0.5rem] text-green-700 dark:text-green-400">Active</span>}
                   </div>
                   {preset.baseUrl && <span className="block text-[0.55rem] text-gray-500 font-mono">{preset.baseUrl}</span>}
                 </button>
@@ -746,10 +787,10 @@ export function ProviderSettings() {
       <Modal open={showCloudWarning} onClose={() => { setShowCloudWarning(false); setPendingPreset(null) }} title="">
         <div className="space-y-4 text-center">
           <h3 className="text-base font-semibold text-white">Enable Cloud Provider</h3>
-          <p className="text-[0.75rem] text-gray-400 leading-relaxed">
+          <p className="text-[12px] text-gray-400 leading-relaxed">
             Cloud providers send your data to external servers. Your conversations will no longer be fully private or offline.
           </p>
-          <p className="text-[0.75rem] text-gray-400 leading-relaxed">
+          <p className="text-[12px] text-gray-400 leading-relaxed">
             For maximum privacy, use Ollama or a local backend instead.
           </p>
           <div className="flex items-center justify-center gap-3 pt-2">
@@ -773,5 +814,106 @@ export function ProviderSettings() {
         </div>
       </Modal>
     </div>
+  )
+}
+
+/**
+ * Was neben Test und Disable steht, in einer Zeile statt in vier Abschriften.
+ *
+ * Vier waren es, als "Reachable, no models" dazukam, und die vierte entstand
+ * durch Abschreiben der dritten, genau der Zug, den die Typo-Sperrklinke in
+ * `die-typo-leiter-und-ihre-umgehung.test.ts` verhindern soll. Eine
+ * Groessenangabe, ein Abstand, vier Saetze.
+ *
+ * Die Toene sind eine Aussage, kein Geschmack: Gruen heisst auf dieser Zeile
+ * "du kannst jetzt chatten", Rot heisst "gemessen und kaputt". Ein laufender
+ * Server ohne Modell und eine nie gestartete Engine sind weder das eine noch
+ * das andere, also sind sie ruhig. Beide trugen frueher einen eigenen
+ * Bernstein, und der hat sie zu halben Fehlern gemacht; die Begruendung, warum
+ * es diesen dritten Ton nicht mehr gibt, steht in lib/hinweis.ts.
+ */
+const SLOT_TEXTE: Partial<Record<SlotStatus, { text: string; ton: string; testid?: string; title?: string }>> = {
+  connected: { text: 'Connected', ton: 'text-green-400' },
+  failed: { text: 'Failed', ton: 'text-red-400' },
+  stopped: {
+    text: 'Not running',
+    ton: HINWEIS_TEXT.ruhig,
+    title: 'The engine is installed but not started yet. It starts when you pick a chat model, or when you press Test.',
+  },
+  'no-models': {
+    text: 'Reachable, no models',
+    ton: HINWEIS_TEXT.ruhig,
+    testid: 'provider-no-models',
+    title: 'The server answered, but it offers no models, so no chat can run on it yet. Load or download a model in that backend, then press Test again.',
+  },
+}
+
+/**
+ * Der farbige Punkt am Anfang der zugeklappten Anbieterzeile.
+ *
+ * Drei Farben, keine vierte (lib/hinweis.ts): Gruen heisst hier "du kannst
+ * chatten", Rot heisst "gemessen und kaputt", und alles dazwischen ist Grau.
+ * "Not running" und "Reachable, no models" hatten frueher einen eigenen
+ * Bernstein, der sie zu halben Fehlern machte; sie fallen jetzt mit 'idle' in
+ * denselben ruhigen Punkt.
+ *
+ * Was die Farbe HEISST, stand nirgends. Der Punkt trug weder `title` noch
+ * `aria-label`, also sah, wer die Zeile nicht aufklappt, einen Farbfleck ohne
+ * Erklaerung, und fuer einen Screenreader gab es ihn gar nicht: die Zustaende
+ * standen nur im Statusfeld im aufgeklappten Koerper. Das Wort kommt deshalb
+ * aus SLOT_TEXTE, derselben Quelle wie dieses Statusfeld. Zwei Woerter fuer
+ * denselben Zustand waeren nur die naechste Luecke.
+ *
+ * Kein Wort heisst kein Anspruch: solange noch niemand gemessen hat ('idle'),
+ * schweigt auch das Statusfeld, und dann bleibt der Punkt eine Farbe ohne
+ * Aussage statt eine Behauptung, die keiner geprueft hat.
+ */
+function Zustandspunkt({ status }: { status: SlotStatus }) {
+  const wort = SLOT_TEXTE[status]?.text
+  return (
+    <span
+      data-testid="provider-dot"
+      role={wort ? 'img' : undefined}
+      aria-label={wort}
+      title={wort}
+      className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+        status === 'connected' ? PUNKT_FARBE.an :
+        status === 'failed' ? PUNKT_FARBE.kaputt :
+        PUNKT_FARBE.aus
+      }`}
+    />
+  )
+}
+
+/**
+ * Das Wifi-Zeichen hinter den Abzeichen derselben Zeile.
+ *
+ * Es sagt dasselbe wie der Punkt am Zeilenanfang, also sagt es der Punkt und
+ * dieses hier bleibt stumm. Es bekommt bewusst KEINEN Namen: lucide setzt
+ * `aria-hidden` von sich aus, solange kein a11y-Merkmal daran haengt, und ein
+ * Name hier wuerde das abschalten und denselben Zustand ein zweites Mal
+ * vorlesen lassen.
+ *
+ * Auswahl und Farbe kommen aus SLOT_TEXTE, damit die zugeklappte Zeile und das
+ * Statusfeld nicht zwei Farbtabellen fuehren, die auseinanderlaufen koennen.
+ */
+function Zustandssymbol({ status }: { status: SlotStatus }) {
+  const wort = SLOT_TEXTE[status]
+  if (!wort) return null
+  const Zeichen = status === 'connected' ? Wifi : WifiOff
+  return <Zeichen size={8} className={`${wort.ton} shrink-0`} />
+}
+
+function Statusfeld({ status }: { status: SlotStatus | undefined }) {
+  const wort = status ? SLOT_TEXTE[status] : undefined
+  if (!wort) return null
+  return (
+    <span
+      data-testid={wort.testid}
+      title={wort.title}
+      className={`flex items-center gap-1 text-[0.6rem] ${wort.ton}`}
+    >
+      {status === 'connected' ? <Wifi size={10} /> : <WifiOff size={10} />} {wort.text}
+    </span>
   )
 }

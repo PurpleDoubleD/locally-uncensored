@@ -51,7 +51,7 @@ describe('explainDeadEngine', () => {
 
   it('turns the exact reported error into a sentence naming the engine and the port', () => {
     const out = explainDeadEngine(new Error(raw), MANAGED_URL) as Error
-    expect(out.message).toMatch(/built-in engine is not answering on 127\.0\.0\.1:8127/i)
+    expect(out.message).toMatch(/LU Engine is not answering on 127\.0\.0\.1:8127/i)
     expect(out.message).toMatch(/Settings/i)
   })
 
@@ -72,7 +72,7 @@ describe('explainDeadEngine', () => {
       'ECONNREFUSED 127.0.0.1:8127',
     ]) {
       const out = explainDeadEngine(new Error(msg), MANAGED_URL) as Error
-      expect(out.message).toMatch(/built-in engine is not answering/i)
+      expect(out.message).toMatch(/LU Engine is not answering/i)
     }
   })
 

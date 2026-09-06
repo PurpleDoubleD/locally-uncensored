@@ -20,7 +20,7 @@ vi.mock('../engine', () => ({
 
 const localFetch = vi.fn()
 vi.mock('../backend', () => ({
-  localFetch: (...args: any[]) => localFetch(...args),
+  localFetch: (...args: unknown[]) => localFetch(...args),
   ollamaUrl: (path: string) => `http://localhost:11434/api${path}`,
 }))
 

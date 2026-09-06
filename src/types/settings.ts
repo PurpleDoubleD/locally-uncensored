@@ -1,4 +1,5 @@
 import type { AgentWorkspace } from './agent-workspace'
+import type { EffortLevel } from '../lib/effort'
 
 export type SearchProvider = 'auto' | 'brave' | 'tavily'
 
@@ -57,6 +58,18 @@ export interface Settings {
   personasEnabled: boolean
   thinkingEnabled: boolean
   /**
+   * How hard a reasoning model should think (2.6.8). One global rung, the same
+   * way thinkingEnabled is one global switch, and it reaches Chat, Agent mode
+   * and the Coding Agent alike.
+   *
+   * It only ever leaves the app for a model whose catalogue entry declares its
+   * own rungs (`reasoning_effort_levels`); everything else keeps sending what
+   * it sent before. The value is clamped onto the model's ladder in
+   * lib/effort.ts, so a wish this model has never heard of cannot become a 400
+   * and cannot become "think as hard as you possibly can" either.
+   */
+  reasoningEffort: EffortLevel
+  /**
    * Small-Model Mode (v2.5.0). Evidence-backed lean profile that maximises
    * tool-call reliability + context retention on small local models (3B-8B,
    * e.g. gemma4:e4b, Llama-3.2-3B, Qwen3-8B). When on it flips: a tighter
@@ -87,6 +100,22 @@ export interface Settings {
   agentMaxToolCalls: number
   /** Hard cap on ReAct loop iterations per user turn. 0 = unlimited. */
   agentMaxIterations: number
+  /**
+   * Dieselben zwei Schranken, aber fuer einen delegierten Sub-Agenten.
+   *
+   * Getrennt von den beiden darueber, und das ist der Punkt: die Kappen des
+   * Hauptlaufs (400/200) sind grosszuegig, weil der Nutzer daneben sitzt und
+   * Stop druecken kann. Ein Sub-Agent laeuft ohne Zuschauer, in fremdem
+   * Auftrag, und seine Kappen sind darum eng (10/5). Beide aus einem Topf zu
+   * bedienen hiesse, entweder den Hauptlauf zu fesseln oder die Delegation
+   * von der Leine zu lassen.
+   *
+   * 0 heisst hier NICHT unbegrenzt, sondern "nimm die Vorgabe" — bei einer
+   * unbeaufsichtigten Schleife ist Unbegrenztheit kein Wunsch, den man aus
+   * Versehen aeussern koennen sollte.
+   */
+  subAgentMaxToolCalls: number
+  subAgentMaxIterations: number
   /**
    * How many passes a `/loop` may run. 0 = unlimited, which is the default:
    * a loop the user asked to keep going should keep going until it is done or
@@ -128,6 +157,24 @@ export interface Settings {
    * costs more. Local backends ignore it.
    */
   codexSendWindowTokens: number
+  /**
+   * Auto-compact trigger, as a fraction of the send window. 2.6.8.
+   *
+   * 0 IS THE FEATURE SWITCH, not a tuning value. Owner decision 2026-09-02,
+   * "einstellbar sonst aus": auto-compact replaces conversation history with a
+   * model's summary of it, and when that summary is wrong the user loses work
+   * silently. Nothing fires until someone sets a number here.
+   *
+   * Valid range [0.3, 0.95]; anything outside — including a stored profile
+   * from before this field existed, where it arrives as `undefined` — reads as
+   * off. The range and the reading both live in lib/compact-trigger.ts
+   * (MIN_THRESHOLD / MAX_THRESHOLD / usableThreshold), so this is a value, not
+   * a second rule.
+   *
+   * The manual `/compact` command does NOT consult this. It is the user asking
+   * for one compaction on purpose; the threshold governs only the automatic one.
+   */
+  autoCompactThreshold: number
   /**
    * Auto memory extraction on lu-cloud only with explicit opt-in (2.6.6, plan
    * A7): every extraction is a paid model call. Local and BYOK providers are

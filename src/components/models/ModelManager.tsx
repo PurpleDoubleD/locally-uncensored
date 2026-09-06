@@ -19,7 +19,14 @@ import { checkComfyConnection, refreshComfyModels } from '../../api/comfyui'
 import { isMlxImageHost } from '../../api/mlx-image'
 import { MlxMediaSettings } from '../settings/MlxMediaSettings'
 import { backendCall } from '../../api/backend'
+import { customModelDirs, deleteBundledModel, stopBundledEngine } from '../../api/engine'
 import { counterView } from '../../lib/inventory-counter'
+import { groupInstalledByProvider, needsBackendSwitchHeading, foldedRowsSentence, LU_ENGINE_GROUP } from '../../lib/lu-engine-rows'
+import { isBuiltinEngineEntry } from '../../lib/lmstudio-match'
+import { installedRowMatchesSearch } from '../../lib/model-search'
+import { useBuiltinEngineStatus, engineIsIdle } from '../../hooks/useBuiltinEngineStatus'
+import { LuEngineSwitchBar } from '../chat/LuEngineSwitchBar'
+import type { InstalledModelLike } from '../../lib/lmstudio-match'
 import type { ModelCategory, AIModel } from '../../types/models'
 
 // One category drives BOTH views (Discover + Installed) — the old split
@@ -57,9 +64,26 @@ export function ModelManager() {
   } = useModels()
   const { setView, openSettingsAt } = useUIStore()
   const ollamaEnabled = useProviderStore(s => s.providers.ollama.enabled)
+  // A14: whether the LU Engine itself is serving the chat. Decides whether its
+  // group needs a heading even when it is the only group (review 7).
+  const luEngineHoldsChat = useProviderStore(s => s.providers.openai.enabled && s.providers.openai.managed === true)
+  const foldedRows = useModelStore((s) => s.foldedRows)
+  // A16 (A14-4a): which row's Use button is mid swap. The engine has to stop,
+  // reload a GGUF that can be several gigabytes and come back healthy, and a
+  // button that looks idle through all of that gets pressed again.
+  const [usingModel, setUsingModel] = useState<string | null>(null)
+  // Dieselbe Frage, die das Einstellungsfenster stellt, und dieselbe Antwort.
+  const engineRuht = engineIsIdle(useBuiltinEngineStatus())
   const [pullOpen, setPullOpen] = useState(false)
   const [infoOpen, setInfoOpen] = useState(false)
-  const [modelInfo, setModelInfo] = useState<any>(null)
+  // Gesetzt wird das aus `{ name, ...await showModel(name) }` (unten in
+  // `handleInfo`), und `showModel` gibt `Record<string, unknown>` zurueck
+  // (api/ollama.ts:61) — es reicht die Antwort von Ollamas /api/show
+  // unveraendert durch, deren Felder je nach Modell wechseln. Genau dafuer ist
+  // der Typ hier gebaut: `name` kennen wir, weil wir es selbst danebenschreiben,
+  // der Rest ist `unknown`. Gelesen wird ohnehin nur `name` (Modal-Titel) und
+  // das Ganze als JSON.stringify.
+  const [modelInfo, setModelInfo] = useState<({ name: string } & Record<string, unknown>) | null>(null)
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
   // Open on Discover by default — most opens are to find and install
   // something new. Installed is one click away in the segment control.
@@ -99,7 +123,20 @@ export function ModelManager() {
     fetchModels()
   }, [fetchModels])
 
+  // An LU Engine row is a file on disk, and the file is what the two buttons
+  // on the right act on. .dan_48 (help chat, 2026-09-05, 2.6.7): the row had
+  // no bin and Details asked Ollama, which knows nothing about it, so a
+  // downloaded model could neither be deleted nor found.
+  const luEngineFile = (m: AIModel): m is AIModel & { path: string } =>
+    m.type === 'text' && isBuiltinEngineEntry(m) && 'path' in m && typeof m.path === 'string' && m.path.length > 0
+
   const handleInfo = async (name: string) => {
+    const model = models.find((m: AIModel) => m.name === name)
+    if (model && luEngineFile(model)) {
+      setModelInfo({ name, file: model.path, size: model.size, engine: model.providerName ?? LU_ENGINE_GROUP })
+      setInfoOpen(true)
+      return
+    }
     try {
       const info = await showModel(name)
       setModelInfo({ name, ...info })
@@ -116,7 +153,10 @@ export function ModelManager() {
       if (model && (model.type === 'image' || model.type === 'video')) {
         // ComfyUI file model (cpl.sardinas7489, Discord): delete the file from
         // the models tree, then rescan so the enum and the list drop it.
-        await backendCall('delete_comfy_model', { filename: name })
+        // The folder the user named under Model Storage goes along: ComfyUI
+        // lists files from it now (GH #122) and LU does not delete out of it,
+        // so the backend needs it to say that instead of "was not found".
+        await backendCall('delete_comfy_model', { filename: name, extraDirs: customModelDirs() })
         // Nebenbefund 2 of the R8 re-measure: the rescan below is the slow
         // part (ComfyUI re-reads its model tree, then a reachability probe,
         // two /object_info reads and a stat over every remaining file), and
@@ -127,6 +167,15 @@ export function ModelManager() {
         setConfirmDelete(null)
         useModelStore.getState().removeInventoryModel(name)
         await refreshComfyModels().catch(() => { /* rescan is best-effort */ })
+        await fetchModels()
+        return
+      }
+      if (model && luEngineFile(model)) {
+        // The loaded file is locked on Windows, so the engine is stopped first
+        // when the row is the active one; the backend refuses otherwise.
+        if (model.name === activeModel) await stopBundledEngine()
+        await deleteBundledModel(model.path)
+        setConfirmDelete(null)
         await fetchModels()
         return
       }
@@ -190,7 +239,7 @@ export function ModelManager() {
               }`}
             >
               <Icon size={15} className={active ? 'text-gray-800 dark:text-gray-100' : 'text-gray-400 dark:text-gray-500'} />
-              <span className={`hidden lg:block text-[0.68rem] font-medium ${active ? 'text-gray-900 dark:text-white' : 'text-gray-500 dark:text-gray-400'}`}>
+              <span className={`hidden lg:block t-micro font-medium ${active ? 'text-gray-900 dark:text-white' : 'text-gray-500 dark:text-gray-400'}`}>
                 {label}
               </span>
               {badge.kind === 'loading' ? (
@@ -224,13 +273,13 @@ export function ModelManager() {
             </button>
             <h1 className="text-[0.85rem] font-semibold text-gray-900 dark:text-white">Models</h1>
 
-            {/* Discover / Installed segment — the MLX panel is one list with
+            {/* Get new / Installed segment. The MLX panel is one list with
                 per-model Install/Remove, so the split would switch nothing. */}
             <div className={`ml-2 flex items-center p-0.5 rounded-lg bg-gray-100 dark:bg-white/[0.04] border border-gray-200 dark:border-white/[0.06] ${showMlxPanel ? 'hidden' : ''}`}>
               <button
                 onClick={() => setTab('discover')}
                 aria-pressed={tab === 'discover'}
-                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[0.62rem] font-semibold transition-colors ${
+                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md t-micro font-semibold transition-colors ${
                   tab === 'discover'
                     ? 'bg-white dark:bg-white/10 text-gray-900 dark:text-white shadow-sm'
                     : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
@@ -241,7 +290,7 @@ export function ModelManager() {
               <button
                 onClick={() => setTab('installed')}
                 aria-pressed={tab === 'installed'}
-                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[0.62rem] font-semibold transition-colors ${
+                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md t-micro font-semibold transition-colors ${
                   tab === 'installed'
                     ? 'bg-white dark:bg-white/10 text-gray-900 dark:text-white shadow-sm'
                     : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
@@ -273,7 +322,7 @@ export function ModelManager() {
                   else if (e.key === 'Escape') setSearchQuery('')
                 }}
                 placeholder="Search models…"
-                className="w-full pl-7 pr-6 py-1.5 rounded-lg bg-gray-100 dark:bg-white/5 border border-gray-200 dark:border-white/10 text-[0.65rem] text-gray-900 dark:text-white placeholder-gray-500 focus:outline-none focus:border-gray-400 dark:focus:border-white/20"
+                className="w-full pl-7 pr-6 py-1.5 rounded-lg bg-gray-100 dark:bg-white/5 border border-gray-200 dark:border-white/10 t-micro text-gray-900 dark:text-white placeholder-gray-500 focus:outline-none focus:border-gray-400 dark:focus:border-white/20"
               />
               {searchQuery && (
                 <button
@@ -293,7 +342,7 @@ export function ModelManager() {
             {ollamaEnabled && (
               <button
                 onClick={() => setPullOpen(true)}
-                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-gray-100 dark:bg-white/5 border border-gray-200 dark:border-white/10 text-[0.62rem] text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-white/10 transition-colors"
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-gray-100 dark:bg-white/5 border border-gray-200 dark:border-white/10 t-micro text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-white/10 transition-colors"
                 title="Pull any Ollama model by name"
               >
                 <Download size={11} /> Pull
@@ -330,11 +379,11 @@ export function ModelManager() {
                 ) : (
                 <div className="flex flex-col items-center justify-center text-center py-16 px-6 gap-3">
                   <div className="w-14 h-14 rounded-full bg-gray-100 dark:bg-white/[0.04] border border-gray-200 dark:border-white/[0.06] flex items-center justify-center">
-                    {mode === 'video' ? <VideoIcon size={22} className="text-gray-400 dark:text-gray-500" /> : <ImageIcon size={22} className="text-gray-400 dark:text-gray-500" />}
+                    {mode === 'video' ? <VideoIcon size={28} className="text-gray-400 dark:text-gray-500" /> : <ImageIcon size={28} className="text-gray-400 dark:text-gray-500" />}
                   </div>
                   <div className="space-y-1">
-                    <p className="text-[0.75rem] font-medium text-gray-800 dark:text-gray-200">Start ComfyUI to see your {mode} models</p>
-                    <p className="text-[0.6rem] text-gray-500 max-w-[300px] leading-relaxed">
+                    <p className="text-[12px] font-medium text-gray-800 dark:text-gray-200">Start ComfyUI to see your {mode} models</p>
+                    <p className="t-micro text-gray-500 max-w-[300px] leading-relaxed">
                       {mode === 'image' ? 'Image' : 'Video'} models are served by ComfyUI, which isn't running right now, so the ones you've downloaded can't be listed yet. Open Settings, go to AI Backends, and press Start under ComfyUI (Image &amp; Video), then come back.
                     </p>
                   </div>
@@ -345,7 +394,7 @@ export function ModelManager() {
                       Backends tab, the ComfyUI section open. */}
                   <button
                     onClick={() => openSettingsAt({ tab: 'backends', section: 'comfyui' })}
-                    className="flex items-center gap-1.5 mt-1 px-3 py-1.5 rounded-md bg-gray-900 dark:bg-white/10 hover:bg-gray-800 dark:hover:bg-white/15 text-white text-[0.65rem] font-medium transition-colors"
+                    className="flex items-center gap-1.5 mt-1 px-3 py-1.5 rounded-md bg-gray-900 dark:bg-white/10 hover:bg-gray-800 dark:hover:bg-white/15 text-white t-micro font-medium transition-colors"
                   >
                     <SettingsIcon size={11} /> Open Settings
                   </button>
@@ -354,19 +403,19 @@ export function ModelManager() {
               ) : models.length === 0 ? (
                 <div className="flex flex-col items-center justify-center text-center py-16 px-6 gap-3">
                   <div className="w-14 h-14 rounded-full bg-gray-100 dark:bg-white/[0.04] border border-gray-200 dark:border-white/[0.06] flex items-center justify-center">
-                    <PackageOpen size={22} className="text-gray-400 dark:text-gray-500" />
+                    <PackageOpen size={28} className="text-gray-400 dark:text-gray-500" />
                   </div>
                   <div className="space-y-1">
-                    <p className="text-[0.75rem] font-medium text-gray-800 dark:text-gray-200">No models installed yet</p>
-                    <p className="text-[0.6rem] text-gray-500 max-w-[280px] leading-relaxed">
+                    <p className="text-[12px] font-medium text-gray-800 dark:text-gray-200">No models installed yet</p>
+                    <p className="t-micro text-gray-500 max-w-[280px] leading-relaxed">
                       Browse curated chat, image and video models and install them with one click.
                     </p>
                   </div>
                   <button
                     onClick={() => setTab('discover')}
-                    className="flex items-center gap-1.5 mt-1 px-3 py-1.5 rounded-md bg-gray-900 dark:bg-white/10 hover:bg-gray-800 dark:hover:bg-white/15 text-white text-[0.65rem] font-medium transition-colors"
+                    className="flex items-center gap-1.5 mt-1 px-3 py-1.5 rounded-md bg-gray-900 dark:bg-white/10 hover:bg-gray-800 dark:hover:bg-white/15 text-white t-micro font-medium transition-colors"
                   >
-                    <Sparkles size={11} /> Discover models
+                    <Sparkles size={11} /> Get new models
                   </button>
                 </div>
               ) : filteredModels.length === 0 ? (
@@ -376,29 +425,72 @@ export function ModelManager() {
                   </p>
                   <button
                     onClick={() => setTab('discover')}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-gray-100 dark:bg-white/5 border border-gray-200 dark:border-white/10 text-[0.65rem] text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-white/10 transition-colors"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-gray-100 dark:bg-white/5 border border-gray-200 dark:border-white/10 t-micro text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-white/10 transition-colors"
                   >
-                    <Sparkles size={11} /> Discover {modeMeta.label.toLowerCase()} models
+                    <Sparkles size={11} /> Get new {modeMeta.label.toLowerCase()} models
                   </button>
                 </div>
               ) : (
                 (() => {
                   const SectionIcon = modeMeta.icon
                   const shown = searchQuery
-                    ? filteredModels.filter(m => m.name.toLowerCase().includes(searchQuery.toLowerCase()))
+                    ? filteredModels.filter(m => installedRowMatchesSearch(m.name, searchQuery))
                     : filteredModels
                   return (
                     <section className="space-y-1.5">
                       <div className="flex items-center gap-2 px-1">
                         <SectionIcon size={11} />
-                        <h2 className="text-[0.62rem] font-semibold uppercase tracking-[0.12em] text-gray-700 dark:text-gray-300">
+                        <h2 className="t-micro font-semibold uppercase tracking-[0.12em] text-gray-700 dark:text-gray-300">
                           {modeMeta.label}
                         </h2>
                         <span className="text-[0.55rem] text-gray-400 dark:text-gray-500 tabular-nums">{shown.length}</span>
                         <div className="flex-1 h-px bg-gray-200 dark:bg-white/[0.06]" />
                       </div>
                       <div className="space-y-1.5">
-                        {shown.map((model, i) => (
+                        {/* A14: a click on an LU Engine card can move the chat
+                            backend, so the same line the composer shows stands
+                            here too, from the same store. */}
+                        <LuEngineSwitchBar />
+                        {/* Gegenprobe G1, 04.09.2026: sobald LM Studio den
+                            Steckplatz haelt, faellt `Qwen3-4B-Q4_K_M`, eine
+                            echte installierte Datei des Kunden von 2,3 GB,
+                            aus dieser Liste weg. Die Seite zeigte "Installed
+                            11" und unter LU ENGINE vier statt fuenf Dateien,
+                            ohne ein Wort. Der Waehler hatte den Satz laengst,
+                            hier fehlte er, und genau hier hat der Kunde
+                            gesucht. Ein Satz, zwei Leser. */}
+                        {foldedRows && (
+                          <p
+                            data-testid="installed-folded-rows"
+                            className="px-1 pt-0.5 text-[0.55rem] text-gray-500 dark:text-gray-500"
+                          >
+                            {foldedRowsSentence(foldedRows)}
+                          </p>
+                        )}
+                        {/* A14: grouped by the backend that serves the row, LU
+                            Engine first. Its rows are listed here even while
+                            Ollama or LM Studio holds the chat, and using one
+                            of them moves the chat backend, so the heading says
+                            whose row it is before the click. One group draws
+                            no heading: there is nothing to tell apart then. */}
+                        {(() => {
+                          const providerGroups = groupInstalledByProvider(shown as unknown as InstalledModelLike[])
+                          // One group normally draws no heading. The exception
+                          // is an LU Engine group while another backend holds
+                          // the chat: then the heading is not decoration, it is
+                          // the warning that a click here moves the backend.
+                          const showHeadings = needsBackendSwitchHeading(providerGroups.map((g) => g.label), luEngineHoldsChat ? null : LU_ENGINE_GROUP)
+                          let drawn = 0
+                          return providerGroups.map(({ label, models: rows }) => (
+                            <div key={label} className="space-y-1.5">
+                              {showHeadings && (
+                                <p className="px-1 pt-1 t-label font-medium text-gray-500 dark:text-gray-500">
+                                  {label}
+                                </p>
+                              )}
+                              {(rows as unknown as AIModel[]).map((model) => {
+                                const i = drawn++
+                                return (
                           <motion.div
                             key={model.name}
                             initial={{ opacity: 0, y: 4 }}
@@ -408,20 +500,45 @@ export function ModelManager() {
                             <ModelCard
                               model={model}
                               isActive={model.name === activeModel}
-                              onSelect={() => setActiveModel(model.name)}
+                              onSelect={() => { void setActiveModel(model.name) }}
+                              // The Use button the 2.6.8 notes promise on this
+                              // tile. Only where the word means anything: an
+                              // LU Engine row that is not already active. It
+                              // fires the same call the tile click does.
+                              onUse={
+                                isBuiltinEngineEntry(model as unknown as InstalledModelLike)
+                                  ? async () => {
+                                      setUsingModel(model.name)
+                                      try { await setActiveModel(model.name) } finally { setUsingModel(null) }
+                                    }
+                                  : undefined
+                              }
+                              useBusy={usingModel === model.name}
+                              // Steht die Engine, darf auch die aktive Zeile
+                              // wieder gestartet werden (Persona P2). Die
+                              // Antwort gilt fuer die Engine, nicht fuer jede
+                              // Zeile: welche davon sie bedient, entscheidet
+                              // die Karte selbst.
+                              engineStopped={engineRuht}
                               onDelete={() => setConfirmDelete(model.name)}
                               onInfo={() => handleInfo(model.name)}
                               canDelete={
                                 // Ollama text models via the Ollama API; image/video
-                                // models are ComfyUI files we can delete from disk.
+                                // models are ComfyUI files we can delete from disk;
+                                // an LU Engine row is a GGUF LU can delete itself.
                                 (ollamaEnabled && model.type === 'text' && (!('provider' in model) || model.provider === 'ollama'))
                                 || model.type === 'image' || model.type === 'video'
+                                || luEngineFile(model)
                               }
                             />
                           </motion.div>
-                        ))}
+                                )
+                              })}
+                            </div>
+                          ))
+                        })()}
                         {shown.length === 0 && (
-                          <p className="text-center text-[0.65rem] text-gray-500 py-6">No installed {modeMeta.label.toLowerCase()} models match "{searchQuery}"</p>
+                          <p className="text-center t-micro text-gray-500 py-6">No installed {modeMeta.label.toLowerCase()} models match "{searchQuery}"</p>
                         )}
                       </div>
                     </section>
@@ -448,6 +565,12 @@ export function ModelManager() {
           Are you sure you want to delete <span className="text-gray-900 dark:text-white font-mono">{confirmDelete}</span>?
           This removes the model file from your disk and frees the space.
         </p>
+        {(() => {
+          const row = models.find((m: AIModel) => m.name === confirmDelete)
+          return row && luEngineFile(row) ? (
+            <p className="t-micro font-mono text-gray-500 dark:text-gray-400 mb-3 break-all" data-testid="delete-file-path">{row.path}</p>
+          ) : null
+        })()}
         <div className="flex gap-2">
           <GlowButton variant="secondary" onClick={() => setConfirmDelete(null)} className="flex-1">
             Cancel
@@ -467,7 +590,7 @@ export function ModelManager() {
 
       <Modal open={infoOpen} onClose={() => setInfoOpen(false)} title={modelInfo?.name || 'Model Info'}>
         {modelInfo && (
-          <pre className="text-[0.6rem] text-gray-600 dark:text-gray-300 bg-gray-100 dark:bg-black/30 rounded-lg p-3 overflow-auto max-h-80 scrollbar-thin font-mono">
+          <pre className="t-micro text-gray-600 dark:text-gray-300 bg-gray-100 dark:bg-black/30 rounded-lg p-3 overflow-auto max-h-80 scrollbar-thin font-mono">
             {JSON.stringify(modelInfo, null, 2)}
           </pre>
         )}

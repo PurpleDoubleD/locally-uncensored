@@ -1,4 +1,82 @@
-@import "tailwindcss";
+/* ── Was Tailwind nach Klassen durchsucht ──────────────────────────────
+   Ohne diese vier Zeilen liest Tailwind 4 das GANZE Projektverzeichnis als
+   Text und macht aus jedem Wort, das wie eine Klasse aussieht, eine Regel im
+   ausgelieferten Bundle: Markdown im Wurzelverzeichnis, die Website unter
+   docs/, die Kommentare des Rust-Backends unter src-tauri/, jede Testdatei.
+
+   Am 01.09.2026 an echten Builds nachgemessen, im A/B/A-Muster gegen
+   denselben Quellstand: der Arbeitsbaum bewegte sich unter der Messung, und
+   ein Diff aus zwei Laeufen ohne Kontrolllauf haette fremde Aenderungen
+   mitgezaehlt — beim ersten Anlauf tat er das auch und schrieb drei Regeln
+   dieser Zeile hier zu, die von woanders kamen.
+
+     Automatik    173380 Bytes roh / 23258 gzip · 1865 Regeln · 1426 Klassen
+     diese Regel  171517 Bytes roh / 22919 gzip · 1833 Regeln · 1396 Klassen
+     ─────────────────────────────────────────────────────────────────────
+     weg            1863 Bytes roh (1,07%) / 339 gzip (1,46%) · 30 Klassen
+
+   Verlustkontrolle: keine einzige Klasse kommt hinzu, die Menge ist eine
+   echte Teilmenge. Vier der dreissig haben ihre einzige Fundstelle
+   ausserhalb von src/, die uebrigen stehen (auch) in einer Testdatei. Die
+   Aufteilung haengt an der Reihenfolge der Sonden und ist deshalb keine
+   Zuordnung — `active:scale-[0.97]` etwa steht in der Audit-Tabelle UND in
+   einem Testkommentar; wer nur eine der beiden Quellen abschaltet, sieht die
+   Klasse weiterhin. Das ist der Grund, warum hier keine Ausschlussliste
+   steht: zwei Quellen, und man pflegt nur eine.
+
+   (Kein Glob in diesem Kommentar: die Zeichenfolge Stern-Stern-Schraegstrich
+   enthaelt das Kommentarende und hat diese Datei beim Aufschreiben genau
+   einmal zerlegt. Der Glob selbst steht unten im Code, wo er hingehoert.)
+
+   Keine einzige davon hatte eine Call-Site. `active:scale-[0.97]` stand als
+   Beispiel in einer Audit-Tabelle, `max-w-[760px]` ausgerechnet in der
+   Beschreibung ihrer eigenen Entfernung, `[hhhh:hhhh]` in einem Kommentar
+   ueber GPU-IDs, `isolate` im englischen Fliesstext eines Blogeintrags. Aus
+   den Platzhaltern `bg-[#...]` und `text-[…]` in Testkommentaren wurden
+   Regeln mit buchstaeblich `#...` und `…` als Wert. Die Zahl ist klein, die
+   Regel dahinter nicht: eine Klasse wurde ausgeliefert, weil jemand ueber
+   sie GESCHRIEBEN hat.
+
+   Und es war nicht nur totes Gewicht. `.active\:scale-\[0\.97\]:active`
+   endet auf dieselbe Zeichenfolge wie die Press-Hausregel weiter unten und
+   stand im Bundle VOR ihr — der Test, der die Kaskade prueft, hat vier
+   Monate lang die Utility gemessen und die Hausregel gemeldet.
+
+   Keine Ausschlussliste nach Endungen (`@source not "*.md"` muesste jede
+   neue Prosa-Endung nachpflegen und uebersieht docs/ und src-tauri/
+   ohnehin), sondern die positive Regel und eine Ausnahme, die keine
+   Pflegeliste ist, sondern eine Definition:
+
+     · Die App ist `index.html` plus `src/`. Was Klassen traegt, steht dort.
+     · `__tests__` sind Pruefungen UEBER die App, nicht die App. Genau so
+       zaehlt es dieses Haus schon: `componentFiles()` in
+       fokusring-und-press.test.ts ueberspringt `__tests__`, wenn es
+       Call-Sites sucht. Der Nebeneffekt ist beabsichtigt: ein Test darf ueber
+       eine Klasse schreiben, ohne sie zu erzeugen.
+
+   DIESE Datei steht bewusst nicht in der Ausschlussliste. Tailwind scannt
+   das Stylesheet, das es selbst verarbeitet, ohnehin nicht — nachgemessen:
+   `@source not "./index.css"` ergab ein BYTE-IDENTISCHES Bundle, und keine
+   der oben genannten Klassen aus diesem Kommentar taucht darin auf. Eine
+   Zeile, die nichts tut, aber so aussieht, als tue sie etwas, waere genau
+   der Fehler, um den es hier geht.
+
+   Wer eine Frontend-Quelle ausserhalb von `src/` anlegt, traegt sie hier
+   nach — sonst fehlen ihre Klassen still. NICHT gemeint ist `mobile-client/`:
+   die Handy-Seite laedt dieses Bundle nicht, sie bringt ihr eigenes
+   `styles.css` mit eigenen Klassennamen mit. Sie hier einzutragen wuerde
+   fremde Woerter in unser CSS holen, ohne ihr zu helfen.
+
+   Bewacht von
+   keine-klasse-aus-prosa.test.ts: es haelt jede Utility des gebauten
+   Bundles gegen genau diese Quellen und wird rot, wenn eine ohne
+   Fundstelle dasteht — in beide Richtungen, also auch, wenn der Scan zu
+   eng wird.
+   ────────────────────────────────────────────────────────────────────── */
+@import "tailwindcss" source(none);
+@source "../index.html";
+@source "./";
+@source not "./**/__tests__/**";
 
 @custom-variant dark (&:where(.dark, .dark *));
 
@@ -15,20 +93,158 @@
    carry no colour identity.
    ───────────────────────────────────────────────────────────────────── */
 @theme {
-  /* ── Neutral ramp — spread for depth (uselu base, widened). Used by the
-     elevated-surface helper below; the canvas/sidebar/header shades live as
-     literals in the layout components. ── */
-  --color-lu-base: #202020;     /* app canvas */
+  /* ── Neutral ramp — spread for depth (uselu base, widened) ──────────
+     D-T06, am 01.09.2026 nachgezaehlt. Der Kommentar, der hier stand, war
+     an einer Stelle schlicht falsch: `--color-lu-base` hiess „app canvas",
+     aber die Leinwand der App ist #141414, nicht #202020. Gemessen im
+     laufenden Fenster (getComputedStyle auf der AppShell-Wurzel):
+
+       Leinwand + Titelleiste + Header   #141414   9 Fundstellen  KEIN Token
+       Pane + Sidebar + Create-Panel     #1e1e1e   5 Fundstellen  KEIN Token
+       --color-lu-base   #202020   2 Fundstellen (zwei Modale)
+       --color-lu-panel  #262626   4 Fundstellen
+       --color-lu-raised #2d2d2d   0 Fundstellen — im Browser als LEERE
+                                   Variable gemessen: Tailwind gibt ein
+                                   Farbtoken nur aus, wenn es jemand
+                                   aufruft. Das Token existiert nur hier.
+       --color-lu-overlay #363636  6 Fundstellen
+
+     Neu war deshalb nur EINE Stufe, und zwar die meistbenutzte Flaeche der
+     App, die als einzige gar keinen Namen hatte.
+
+     ── Zweiter Durchgang, 01.09.2026 abends ──
+
+     `--color-lu-raised` ist jetzt GELOESCHT. Es stand hier mit dem
+     Vermerk „TOT: 0 Call-Sites", und ein Token, dessen einzige Aufgabe
+     es ist, sein eigenes Totsein zu dokumentieren, ist genau die Sorte
+     Stufe, die der Audit unter „16 Graustufen" zaehlt. Die Leiter hat
+     jetzt vier Stufen, und JEDE hat mindestens eine Call-Site — das
+     rechnet zwei-akzente-und-eine-leinwand.test.ts nach, in beide
+     Richtungen: keine Stufe ohne Aufruf, kein Aufruf ohne Stufe.
+
+     Nachgezaehlt am selben Tag, nachdem die Schwebeblaetter der App auf
+     `.lu-elevated` gezogen waren (siehe dort): im CODE — also mit
+     abgeschnittenen Kommentaren, sonst zaehlt man Prosa mit — standen
+     davor 15 dunkle Graustufen als Literal, danach 11. Verschwunden sind
+     #161719, #17171c, #1f1f1f und #262626 (dazu #2d2d2d hier oben): fuenf
+     Namen fuer EINE Rolle, naemlich „dieses Blatt schwebt".
+
+     Diese Leiter ist DUNKEL. Es gibt bewusst kein `.light`-Gegenstueck:
+     im Hellmodus zerfaellt #141414 in ZWEI Rollen, die dieselbe dunkle
+     Zahl teilen — Fensterrahmen (`bg-gray-200`: Titlebar, Header,
+     AppShell) und Vollflaeche (`bg-white`: ViewSkeletons,
+     Create-Wurzel). Eine gespiegelte Leiter muesste sich fuer eine der
+     beiden entscheiden und faerbte die andere falsch. Deshalb tragen alle
+     Call-Sites weiterhin `dark:` und ihr eigenes Hell-Pendant. ── */
+  --color-lu-canvas: #141414;   /* Leinwand, Titelleiste, Header */
+  --color-lu-base: #202020;     /* zwei Modalflaechen, NICHT die Leinwand */
   --color-lu-panel: #262626;    /* sidebar, panels */
-  --color-lu-raised: #2d2d2d;   /* cards, hover */
-  --color-lu-overlay: #363636;  /* dropdowns, modals, popovers */
+  --color-lu-overlay: #363636;  /* Schwebeblatt — siehe .lu-elevated */
 
-  /* ── Form: moderately less round (pills/cards read less "toy") ── */
-  --radius-xl: 0.5rem;
-  --radius-2xl: 0.625rem;
-  --radius-3xl: 0.75rem;
+  /* ── Form: EINE Radiusleiter ────────────────────────────────────────
+     D-T08. Vorher liefen zwei Systeme nebeneinander: die rem-abgeleitete
+     Tailwind-Leiter und die px-Tokens `--radius-control/panel/pill` unten
+     im `:root`. Das Ergebnis war im Browser nachgemessen (Chromium 149,
+     getComputedStyle):
 
-  /* ── Depth: shadows tuned to be visible on dark backgrounds ── */
+       rounded      4px      rounded-lg   8px
+       rounded-sm   4px      rounded-xl   8px   ← DIESELBE Zahl wie lg
+       rounded-md   6px      rounded-2xl 10px
+
+     `rounded-lg` und `rounded-xl` waren derselbe Wert: zwei Namen, eine
+     Zahl, und keine Moeglichkeit, im Code eine Stufe ueber 8px zu meinen,
+     ohne in eckige Klammern auszuweichen. Genau das ist passiert —
+     `rounded-[10px]` (3x), `rounded-[8px]` (8x), `rounded-[6px]` (4x)
+     und `rounded-[5px]` (20x) sagen Zahlen, fuer die es Namen gibt oder
+     geben sollte.
+
+     Jetzt sind die Haus-px-Tokens die Quelle, und jede Stufe ist genau
+     einmal da:
+
+       rounded-sm   4px   die Nagelstufe (Badges, Punkte)
+       rounded-md   6px
+       rounded-lg   8px = --radius-control   Controls, Knoepfe
+       rounded-xl  10px                      Panes (die Sidebar steht dort)
+       rounded-2xl 12px = --radius-panel     Dialoge, Panels
+
+     Zwei Werte aendern sich sichtbar: `rounded-xl` 8 → 10px (16
+     Fundstellen) und `rounded-2xl` 10 → 12px (6 Fundstellen). Beide sind
+     kein Zufallssprung, sondern schliessen eine gemessene Luecke: die
+     Hauptpane in AppShell trug `rounded-xl` (8px) und stand direkt neben
+     der Sidebar mit `rounded-[10px]` — zwei Flaechen derselben Familie,
+     nebeneinander, mit verschiedenen Ecken. Und `rounded-2xl` ist der
+     Dialogradius, der damit auf `--radius-panel` faellt statt 2px
+     daneben zu liegen.
+
+     `--radius-3xl` ist geloescht: 0 Fundstellen, und im Browser als leere
+     Variable gemessen — die Klasse haette 0px ergeben.
+
+     ── Und die 5px? Entschieden, nicht aufgezaehlt (Nachtrag 01.09.2026) ──
+
+     Der Absatz oben zaehlte `rounded-[5px]` (20x, alle in der Sidebar) als
+     Symptom auf und liess offen, wohin sie gehen. Das war eine Luecke: eine
+     Leiter, die eine Zahl nennt, ohne ihr eine Stufe oder ein Ziel zu geben,
+     laedt zur naechsten eckigen Klammer ein.
+
+     5px bekommt KEINE Stufe. Zwischen `rounded-sm` (4) und `rounded-md` (6)
+     liegen bei --ui-scale 1,15 genau 4,6 und 6,9 gerenderte Pixel; eine
+     Stufe dazwischen waere 5,75px und damit von beiden Nachbarn rund einen
+     Geraetepixel entfernt. Das ist dieselbe Aufloesung, in der D-T04 die
+     vierzehn Schriftgroessen in einem 4px-Band als Rauschen verworfen hat.
+     Drei Stufen in zwei Pixeln sind keine Leiter, sie sind ein Zittern.
+
+     Die 20 gehen auf `rounded-md` (6px), nicht auf `rounded-sm` (4px):
+     · Es sind Listenzeilen und Knoepfe, keine Punkte und Abzeichen — und
+       4px ist in dieser Leiter ausdruecklich die Nagelstufe fuer Letztere.
+     · Dieselbe Datei schreibt daneben `rounded-[8px]` (8x) und
+       `rounded-[10px]` (3x), also `rounded-lg` und `rounded-xl` unter
+       anderem Namen. Sie fuehrt eine private px-Leiter 5/8/10, von der
+       nur die 5 keinen Namen im Haus hat.
+     · Aufwaerts statt abwaerts, weil die Zeile im Pane mit 10px sitzt: 6
+       bleibt klar kleiner als der Rahmen und klar groesser als die
+       Nagelstufe.
+
+     `src/components/layout/Sidebar.tsx` gehoert in diesem Durchgang einem
+     anderen Agenten; die Zahl ist deshalb gedeckelt und nicht gezogen —
+     die Sperrklinke steht in radius-schatten-hoehe-und-bewegung.test.ts
+     auf 20 und darf nur sinken. ── */
+  --radius-lg: var(--radius-control);
+  --radius-xl: 10px;
+  --radius-2xl: var(--radius-panel);
+
+  /* ── Tiefe: die Schattenleiter und was sie wirklich traegt (D-T09) ──
+     Tailwind liefert SIEBEN Stufen (2xs xs sm md lg xl 2xl). Dieses Haus
+     stimmt drei davon auf dunkle Flaechen ab — und genau daraus bestand
+     der Befund: eine Leiter, die zur Haelfte dem Haus und zur Haelfte der
+     Werkseinstellung gehoert, ohne dass man einer Call-Site ansieht,
+     welche Haelfte sie gerade erwischt.
+
+     Am 01.09.2026 im CODE nachgezaehlt (Kommentare abgeschnitten, sonst
+     zaehlt man Prosa mit):
+
+       shadow-sm   12x  WERK — und im Dunkeln per Hausregel abgeschaltet,
+                        siehe `.dark .shadow-sm` weiter unten
+       shadow-lg    3x  Haus
+       shadow-xl    6x  Haus
+       shadow-2xl   6x  Haus
+       shadow-md    0x  WERK — niemand ruft sie; wer es taete, bekaeme
+                        ohne Vorwarnung Tailwinds Hellmodus-Wert
+       2xs/xs       0x  dito
+
+     Die Antwort ist NICHT eine vierte Zahl, sondern EIN Aufrufer: fuer
+     „dieses Blatt schwebt" gibt es `.lu-elevated` (Flaeche + Kante +
+     Schatten aus einer Quelle, hell wie dunkel). Zehn Schwebeblaetter in
+     chat/ models/ ui/ agents/ sind darauf gezogen worden; vorher trugen
+     sie acht handgeschriebene Ketten mit sechs verschiedenen Flaechen und
+     drei verschiedenen Schattenstufen.
+
+     `--shadow-2xl` bleibt vorerst stehen, obwohl kein `var()` es aufruft
+     und alle sechs Utility-Call-Sites Schwebeblaetter sind, die auf
+     `.lu-elevated` gehoeren. Grund: die Zeile hier zu LOESCHEN entfernt
+     den Schatten nicht, sie faellt auf Tailwinds Werkswert zurueck — also
+     genau der stille Halbbesitz, den dieser Absatz beseitigt. Die Stufe
+     geht, wenn ihre letzte Call-Site geht, nicht vorher.
+     Bewacht von radius-schatten-hoehe-und-bewegung.test.ts. ── */
   --shadow-lg: 0 8px 24px -6px rgba(0, 0, 0, 0.6), 0 2px 6px -2px rgba(0, 0, 0, 0.4);
   --shadow-xl: 0 16px 48px -12px rgba(0, 0, 0, 0.7), 0 4px 12px -4px rgba(0, 0, 0, 0.5);
   --shadow-2xl: 0 24px 64px -16px rgba(0, 0, 0, 0.8);
@@ -42,6 +258,79 @@
   --color-lu-accent-hover: #b1a6ff;
   --color-lu-accent-soft: rgba(160, 148, 248, 0.14);
   --color-lu-accent-ring: rgba(160, 148, 248, 0.55);
+
+  /* ── Primaeraktion: Text auf der Akzentflaeche ──
+     Gemessen (WCAG 2.1 relative Luminanz):
+       #a094f8 (Ruhe)  gegen #111827 → 6.83:1   (AA Fliesstext, AAA gross)
+       #b1a6ff (Hover) gegen #111827 → 8.25:1
+       #a094f8          gegen #ffffff → 2.60:1  ← weisser Text faellt durch,
+     deshalb traegt die Akzentflaeche DUNKLEN Text, in beiden Modi gleich.
+     --color-lu-accent-edge ist die Kante fuer den Hellmodus: die Flaeche
+     selbst steht nur 2.60:1 gegen Weiss, die Kante schafft 3.37:1 und
+     erfuellt damit 1.4.11 (Nicht-Text-Kontrast) fuer die Buttongrenze. */
+  --color-lu-on-accent: #111827;
+  --color-lu-accent-edge: #8b7cf0;
+
+  /* ── Der Cloud-Akzent (D-T05) ───────────────────────────────────────
+     Der Audit las die Lage als „zwei Akzente nebeneinander": #a094f8
+     steht hier als Token, #7c3aed stand an 20 Stellen als Literal, und
+     das Brand-Kit-Violett #8b5cf6 kommt in src/ ueberhaupt nicht vor
+     (nachgezaehlt: 0 Fundstellen). Der naheliegende Schluss waere, auf
+     EINEN Hex zusammenzufallen. Nachgerechnet ist dieser Schluss falsch,
+     und zwar deutlich.
+
+     Es sind keine zwei Marken, es sind zwei ROLLEN. #7c3aed steht
+     ausschliesslich an der Cloud: der getoente Composer-Rahmen im
+     Cloud-Modus, das „Cloud"-Abzeichen ueber dem Eingabefeld, der
+     Cloud-Schalter, der Cloud-Gate-Dialog. Cloud ist in dieser App ein
+     GELDZUSTAND — die Nachricht laeuft auf gemieteten GPUs und wird
+     abgerechnet. Dass dieser Zustand nicht dieselbe Farbe traegt wie die
+     Hausmarke, ist die Aussage, nicht der Fehler.
+
+     Die Rechnung (WCAG 2.1, relative Luminanz, alle Halbtransparenzen
+     ueber ihren echten Grund gedeckt — #ffffff hell, #1e1e1e dunkel;
+     Minimum ueber die sechs Cloud-Textstellen):
+
+       heute   #7c3aed hell / #a78bfa dunkel      4,53:1   ✓ AA
+       nur     #a094f8 (Haus-Akzent)              2,29:1   ✗
+       nur     #8b5cf6 (Brand-Kit)                3,36:1   ✗
+       Paar    #8b7cf0 hell / #a094f8 dunkel      2,87:1   ✗
+
+     Das heutige Paar ist das einzige der vier, das AA haelt. Ein Wechsel
+     KOSTET also zwischen 1,2 und 2,2 Kontraststufen und wirft jede
+     Cloud-Beschriftung unter die Grenze. Die gefuellte Cloud-Flaeche
+     (`bg-lu-cloud text-white`) traegt in beiden Modi dieselbe Farbe und
+     kommt auf 5,70:1; unter #a094f8 waere sie 2,60:1.
+
+     Was hier also passiert, ist NICHT „ein Akzent statt zwei", sondern
+     „eine Definition statt zwanzig Literalen". Dieselbe Aufteilung wie
+     beim Haus-Akzent oben: eine Farbe fuers Helle, eine angehobene
+     fuers Dunkle.
+
+       hell   #7c3aed auf #ffffff  5,70:1   (und als Flaeche, beide Modi)
+       dunkel #a78bfa auf #1e1e1e  6,13:1
+     ── */
+  --color-lu-cloud: #7c3aed;
+  --color-lu-cloud-lift: #a78bfa;
+
+  /* ── Motion — eine benannte Leiter statt verstreuter Zahlen ──
+     Dauer und Kurve standen bisher als Literale in den Komponenten. Erhoben
+     wurde, was tatsächlich benutzt wird (framer-motion + Tailwind, Stand 2.6.7):
+
+       0.12s ×12  →  --motion-fast   Mikro-Feedback (Hover, Toggle, Badge)
+       0.15s ×21  →  --motion-base   Haus-Standard (Ein-/Ausblenden, Listen)
+       0.20s  ×7  →  --motion-base   (auf den Standard gerundet)
+       0.30s  ×5  →  --motion-slow   Flächen (Dialog, Panel, Slide-over)
+
+     --motion-ease ist die Kurve, die `ease-out`/`transition-colors` in diesem
+     Haus meinen: schnell los, weich aus. Vier Tokens, mehr braucht die App
+     nicht — wer eine fünfte Dauer will, nimmt eine dieser Stufen.
+     Die JS-Seite (framer-motion liest keine CSS-Variablen) spiegelt die
+     gleiche Leiter in src/components/ui/motion.ts. */
+  --motion-fast: 120ms;
+  --motion-base: 150ms;
+  --motion-slow: 300ms;
+  --motion-ease: cubic-bezier(0.2, 0, 0, 1);
 }
 
 /* ─────────────────────────────────────────────────────────────────────
@@ -51,23 +340,142 @@
    root (≈33% oversized vs Chat) and every `h-[var(--control-h-*)]` became an
    invalid/auto height — which is what oversized the Create tab relative to
    Chat and clipped the banner title / gallery / drop-zone. Chat is unaffected
-   because it sizes with rem-based `text-*` utilities. These values are rem-
-   based, so Create now scales off the same 18.4px root as Chat.
+   because it sizes with rem-based `text-*` utilities. Seit dem 16px-Wurzel-
+   maß stehen die Typo-Stufen in ganzen px statt in rem-Brüchen — bei
+   16px Wurzel bezeichnen beide dieselbe Länge, und die px-Schreibweise
+   macht das Raster prüfbar.
    ───────────────────────────────────────────────────────────────────── */
 :root {
-  /* Typography scale (rem-based → rides the 18.4px root exactly like Chat) */
-  --text-display: 1.25rem;   --text-display-lh: 1.2;   --text-display-fw: 600;
-  --text-title:   0.95rem;   --text-title-lh:   1.3;   --text-title-fw:   600;
-  --text-body:    0.8rem;    --text-body-lh:    1.5;   --text-body-fw:    400;
-  --text-control: 0.72rem;   --text-control-lh: 1;     --text-control-fw: 500;
-  --text-label:   0.62rem;   --text-label-lh:   1;     --text-label-fw:   600;
-  --text-mono:    0.7rem;
+  /* ── Der EINE Maßstab der App ────────────────────────────────────────
+     Bis 2.6.7 liefen vier Maßstäbe gleichzeitig: ein 18,4px-Wurzelmaß,
+     `zoom: 1.25` auf der Sidebar, `scale(0.763)` auf der IntentBar und
+     `scale(0.7)` auf der Composer-Reglerzeile. Jede Schicht war ein
+     Pflaster über eine Größe, die woanders falsch gesetzt war, und keine
+     zwei kompensierten sich sauber (0,763 ≈ 1/1,31, aber 1,25 ≠ 1,15).
+
+     Jetzt: Wurzel auf 16px, damit `rem` und `px` DASSELBE Raster meinen
+     (0.5rem = 8px = --radius-control, statt 9,2px ≠ 8px), und die +15 %
+     genau einmal als `zoom` auf der App-Wurzel. Warum `zoom` und nicht
+     `transform: scale()` oder `calc()` — gemessen in Chromium 149:
+
+       calc(16px * 1.15) auf `html`  →  ist wieder 18,4px. Behebt nichts:
+         rem-abgeleitete Werte bleiben krumm, px-Werte bleiben unskaliert.
+       transform: scale() auf #root  →  nimmt die Wurzel aus dem Layout-
+         fluss und macht sie zum umschließenden Block jedes
+         `position: fixed`-Kindes (gemessen: ein fixiertes Kind sprang um
+         die halbe Seitenhöhe). 15 Modale hängen daran.
+       zoom                          →  skaliert das Layout mit, lässt
+         `position: fixed; inset: 0` weiterhin exakt das Fenster
+         abdecken (gemessen 1440×900 bei --ui-scale 1.15) und hält
+         `getComputedStyle` auf dem UNskalierten Entwurfsraster, so dass
+         die Quelle in ganzen Pixeln lesbar bleibt.
+
+     Die eine Stelle, die `zoom` NICHT mitnimmt, sind Viewport-Einheiten:
+     `100vw` misst innerhalb des gezoomten Baums weiter das ungezoomte
+     Fenster und wird danach mitskaliert, überschießt also um genau
+     --ui-scale (gemessen: 1656px in einem 1440px-Fenster). Die drei
+     Vollbild-Wurzeln der App (AppShell, ViewSkeletons, Onboarding) sind
+     alle `h-screen w-screen`; die Regel `#root > *` unten bindet sie an
+     #root statt ans Fenster. Sauberer wäre `h-full w-full` in den drei
+     Komponenten — das liegt außerhalb dieser Änderung. */
+  --ui-scale: 1.15;
+
+  /* Typography scale — sechs Stufen, alle auf ganzen CSS-Pixeln des
+     16px-Rasters. Vorher rem-Brüche am 18,4px-Wurzelmaß, die auf 20 /
+     17,48 / 14,72 / 13,248 / 11,408 / 12,88px fielen; keine einzige davon
+     lag auf einem Pixel. Die Stufen selbst sind unverändert gemeint, nur
+     gerundet: 20 / 15 / 13 / 12 / 10 / 11px. */
+  --text-display: 20px;      --text-display-lh: 1.2;   --text-display-fw: 500;
+  --text-title:   15px;      --text-title-lh:   1.3;   --text-title-fw:   600;
+  --text-body:    13px;      --text-body-lh:    1.5;   --text-body-fw:    400;
+  --text-control: 12px;      --text-control-lh: 1;     --text-control-fw: 500;
+  --text-label:   10px;      --text-label-lh:   1;     --text-label-fw:   600;
+  --text-mono:    11px;
+  /* --text-micro ist KEINE siebte Zahl: es ist dieselbe 10, die
+     --text-label traegt. Siehe die Rechnung bei `.t-micro` unten. */
+  --text-micro:   var(--text-label);
+
+  /* ── Die Markenschrift fuer die Displaystufe ────────────────────────
+     D-T03 stand als „Display-Schrift fehlt ganz" in der Matrix, mit der
+     Begruendung, `public/fonts/lu-fonts.css` enthalte ausschliesslich
+     Inter-Faces. Das ist nachgemessen falsch. Die Datei hat 39
+     `@font-face`-Bloecke in drei Familien:
+
+       Inter           21 Bloecke  (400/500/600, sieben Unicode-Bereiche)
+       JetBrains Mono  12 Bloecke  (500)
+       Space Grotesk    6 Bloecke  (500 und 700, latin/latin-ext/vietn.)
+
+     Und sie ist nicht nur deklariert, sie laedt. Im laufenden Fenster
+     (Chromium 149) nach `document.fonts.load`:
+
+       [...document.fonts] enthaelt „Space Grotesk" 500 und 700,
+       document.fonts.check('500 20px "Space Grotesk"') === true
+       Breite von „Locally Uncensored" bei 100px Schriftgrad:
+         Inter 600         1103,51px
+         Space Grotesk 500 1094,18px   (-0,85 %)
+         Space Grotesk 700 1094,34px
+         serif (Rueckfall)  972,23px   ← klar unterscheidbar, es faellt
+                                          also nichts zurueck
+
+     Die drei woff2-Dateien liegen in public/fonts/woff2/ und sind ueber
+     `index.html` schon heute im Bundle. Nichts wird nachgeladen, nichts
+     kommt hinzu — der Slot war unbesetzt, obwohl die Schrift ausgeliefert
+     wurde.
+
+     Gewicht 500, nicht 600: Space Grotesk hat in dieser Datei genau die
+     Schnitte 500 und 700. Bei `font-weight: 600` waehlt Chromium nach der
+     CSS-Font-Matching-Regel den naechsthoeheren echten Schnitt, also 700
+     — gemessen an der Breite (600 ergab 1094,34 = exakt der 700er-Wert,
+     nicht 1094,18 wie 500). Die Displaystufe haette also still fett
+     gerendert. --text-display-fw geht deshalb auf 500, den Schnitt, den
+     es wirklich gibt. ── */
+  --font-display: 'Space Grotesk', 'Inter', system-ui, -apple-system, sans-serif;
 
   /* Control heights + spacing rhythm */
   --space-unit: 4px;
   --control-h-sm: 26px;
   --control-h-md: 32px;   /* default control height */
   --control-h-lg: 40px;   /* primary Create button */
+
+  /* Chat measure — ONE column for transcript, composer and status anchor.
+     They used to be two independent formulas (max-w-[70%] on the composer,
+     no max-width at all on the message list), which put the answer text and
+     the input box 157px apart at 1600px and let a line run to ~130 chars.
+
+     ACHTUNG, 660 ist kein Tippfehler: dieser Token wird seit der
+     --ui-scale-Umstellung MITSKALIERT. Massgeblich ist die GERENDERTE
+     Spalte — 660 × 1.15 = 759px. Das ist genau die Breite, die die Spalte
+     vor der Umstellung hatte; 760 wuerde heute 874px ergeben.
+
+     Warum: solange die App auf einem 18,4px-Wurzelmass lief, trug dieser
+     px-Token die 15 % NICHT, der rem-basierte Fliesstext aber schon. Jetzt
+     tragen beide. Die Spalte war also als NEBENWIRKUNG um 15 % gewachsen,
+     nicht als Entscheidung — und die 660 stellen den vorherigen Zustand
+     wieder her. Wer sie „korrigiert", weil sie zu schmal aussieht, macht
+     die Spalte um 15 % breiter, nicht die Zahl richtig.
+
+     Zeichen pro Zeile, gemessen (Inter, 1600×1000, 759px Spalte) — die
+     MESSGRUNDLAGE entscheidet, deshalb steht sie dabei:
+
+       Kleinbuchstaben-Alphabet  9,85px/Zeichen  ->  77 Zeichen
+       englische Prosa           8,81px/Zeichen  ->  86 Zeichen
+       deutsche Prosa            8,63px/Zeichen  ->  88 Zeichen
+
+     Das Kleinbuchstaben-Alphabet ist die typografische Konvention fuer
+     „Alphabetlaenge", aber KEINE Aussage ueber Fliesstext: echte Prosa hat
+     Leerzeichen und schmale Buchstaben, also eine kleinere mittlere
+     Zeichenbreite und damit MEHR Zeichen pro Zeile. Der gueltige Wert fuer
+     diese Spalte ist deshalb ~86, nicht 77.
+
+     OFFEN (nicht in diesem Paket entschieden): 86 Zeichen liegen ueber dem
+     klassischen Band fuer gut lesbaren Fliesstext (45–75, aeusserstens 80).
+     Die 760 gerenderten px sind die Wahl aus Audit-Welle 1; ob sie zu breit
+     sind, ist eine eigene, vorbestehende Designfrage.
+
+     Der Test dazu prueft --lu-measure × --ui-scale gegen ~760px, nicht die
+     660 und NICHT eine Zeichenzahl:
+     src/components/__tests__/ein-massstab.test.ts */
+  --lu-measure: 660px;
 
   /* Radii */
   --radius-control: 8px;
@@ -76,11 +484,18 @@
 }
 
 html {
-  font-size: 18.4px; /* 16px * 1.15 = 15% larger UI */
+  /* 16px, nicht 18,4px: das Wurzelmaß ist das Raster, nicht der Regler.
+     Der Regler ist --ui-scale weiter unten. */
+  font-size: 16px;
 }
 
 * {
   box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
 }
 
 body {
@@ -90,9 +505,30 @@ body {
   overflow: hidden;
 }
 
+/* Die +15 % — genau einmal, auf der App-Wurzel.
+   Der zweite Selektor ist keine zweite Anwendung: Tooltip, Select und
+   MemoryDebugPanel portalieren mit `createPortal(…, document.body)` AUS
+   #root heraus, die App hat also mehr als eine Wurzelbox. Die Portale sind
+   Geschwister von #root, nie Kinder — kein Element bekommt den Faktor
+   zweimal. Ohne die zweite Zeile rendern Dropdowns und Tooltips 13 %
+   kleiner als alles andere, also genau der Fehler, den diese Änderung
+   beseitigt. */
+#root,
+body > :not(#root) {
+  zoom: var(--ui-scale);
+}
+
 #root {
   width: 100%;
-  height: 100vh;
+  height: 100%;
+}
+
+/* Siehe --ui-scale: `100vw`/`100vh` sind die einzigen Längen, die `zoom`
+   nicht mitnimmt. Die Vollbild-Wurzel der App (`h-screen w-screen`) füllt
+   deshalb #root statt des Fensters. */
+#root > * {
+  width: 100%;
+  height: 100%;
 }
 
 /* Glass card — aligned with the web companion: near-invisible (a single
@@ -157,6 +593,66 @@ button:not(:disabled) {
 
 .scrollbar-thin::-webkit-scrollbar-corner {
   background: transparent;
+}
+
+/* ── Das Scrollrad (Kopfnavigation, Create-Werkzeuge) ────────────────────
+   Die Spur scrollt waagerecht und zeigt dabei keinen Balken. Zwei Regeln
+   sind noetig, weil die beiden Engines es verschieden loesen: WebKit ueber
+   das Pseudo-Element, Firefox ueber `scrollbar-width`. Ein Balken waere hier
+   falsch, die Reihe ist eine Navigation und kein Textfeld; angefasst wird sie
+   mit Trackpad, Rad oder Klick.
+
+   `overscroll-behavior-x: contain` haelt die Geste in der Spur. Ohne sie
+   loest ein waagerechtes Wischen am Ende der Reihe unter macOS die
+   Zurueck-Navigation des WebViews aus, und der Nutzer verliert die Ansicht,
+   weil er die Werkzeugleiste zu weit geschoben hat.
+
+   Kein `scroll-behavior: smooth` hier: das Anfahren macht `WheelNav` selbst
+   und fragt dabei `prefers-reduced-motion`. Stuende es zusaetzlich im
+   Stylesheet, waere jede Scrollbewegung animiert, auch die des Nutzers am
+   Trackpad, und die Einstellung des Betriebssystems waere umgangen. */
+.lu-wheel-track {
+  scrollbar-width: none;
+  overscroll-behavior-x: contain;
+}
+.lu-wheel-track::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+/* Die Kante des Drehrads loest sich auf, statt abgeschnitten zu werden.
+   (David, 04.09.2026: "links und rechts sollen immer gleich viele optionen
+   sein ... hard in der mitte mit nettem effekt minimalstic.")
+
+   Das ist nicht nur Schmuck. Die Spur ist breiter als die 2r+1 Felder, die
+   das Rad zeigen soll, und dahinter faengt die geschlossene Reihe an, sich zu
+   wiederholen. Ohne den Verlauf stuende dort ein zweites Mal dasselbe Wort.
+
+   64px je Seite und ausdruecklich KEIN Prozentwert. Dieselbe Regel bedient
+   zwei verschieden breite Spuren: 416px in der Kopfzeile, 832px in der
+   Create-Leiste. Ein Prozentwert waere dort doppelt so breit wie hier,
+   obwohl die Pillen dieselbe Groesse haben, und der Verlauf haette in der
+   einen Leiste eine andere Bedeutung als in der anderen. 64px decken in
+   beiden ungefaehr einen Eintrag: genug, damit die Stelle, an der die Walze
+   sich wiederholt, angeschnitten und nicht als Fehler gelesen wird.
+   Der Verlauf liegt UEBER der Deckkraft aus dem Bauteil, beide multiplizieren
+   sich. */
+.lu-wheel-maske {
+  -webkit-mask-image: linear-gradient(
+    to right,
+    transparent 0,
+    #000 64px,
+    #000 calc(100% - 64px),
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to right,
+    transparent 0,
+    #000 64px,
+    #000 calc(100% - 64px),
+    transparent 100%
+  );
 }
 
 /* Global scrollbar (David 2026-06-02): every scrollable surface — not only
@@ -300,16 +796,134 @@ input[type="range"]::-webkit-slider-thumb {
   background-repeat: repeat-y;
 }
 
-/* Refined focus ring — thin, neutral blue (web companion), replaces the
-   browser default. Limited to clickable elements; inputs/textareas get their
-   focus affordance from their own border-color change (adding an outline
-   there reads as a doubled "Windows accent ring"). */
-:is(button, a):focus-visible {
-  outline: 1px solid rgba(96, 165, 250, 0.6);
-  outline-offset: 1px;
+/* ─────────────────────────────────────────────────────────────────────
+   DER Fokusring. Eine Regel, 2px, Akzentfarbe, auf allem, was Fokus
+   bekommen kann — Eingabefelder ausdruecklich eingeschlossen.
+
+   Vorher standen hier drei Aussagen nebeneinander, und alle drei waren
+   falsch (Audit §5, Token-Diff „Fokusring"):
+     • `1px solid rgba(96,165,250,.6)` — zu duenn fuer WCAG 2.2 SC 2.4.13
+       (mindestens 2 CSS-Pixel Staerke) und in einer Fremdfarbe, die die
+       App sonst nur als Think-Pill kennt.
+     • nur `button, a` — role-basierte Controls (Create, Workflows) blieben
+       aussen vor und mussten `.lu-focus-ring` von Hand dazuschreiben.
+     • `:is(input, textarea, select) { outline: none }` — der Fokus im
+       Eingabefeld haing allein an einer Randfarbe, die 67 Call-Sites mit
+       `focus:outline-none` ohnehin selbst gesetzt haben.
+
+   Gerechnet (WCAG 2.1, 1.4.11 verlangt 3:1 gegen die UMGEBUNG; der Ring
+   liegt wegen `outline-offset: 2px` auf der Flaeche HINTER dem Control,
+   also gegen diese gerechnet). Vorher → nachher, Flaeche fuer Flaeche:
+
+     Flaeche                        alt(1px,#60a5fa/.6)   neu
+     dunkel #1e1e1e  App-Grund            3.22:1        6.42:1  (#a094f8)
+     dunkel #141414  Fenster/Titlebar     3.36:1        7.09:1
+     dunkel #252525  Composer-Leiste      3.08:1        5.90:1
+     dunkel #262626  Panel                3.05:1        5.83:1
+     dunkel #2d2d2d  Karte/Hover          2.90:1  ✗     5.30:1
+     dunkel #363636  Overlay/Dropdown     2.68:1  ✗     4.65:1
+     hell   #ffffff  Blatt/Overlay        1.71:1  ✗     3.37:1  (#8b7cf0)
+     hell   #f9fafb  Composer-Leiste      1.68:1  ✗     3.22:1
+     hell   #f3f4f6  Fenstergrund         1.63:1  ✗     3.06:1
+
+   Der ALTE Ring fiel im gesamten Hellmodus durch (1.63–1.71:1) und auf den
+   beiden obersten dunklen Flaechen ebenfalls. Das war kein Schoenheits-,
+   sondern ein Barrierefreiheitsfehler.
+
+   Warum im Hellmodus die KANTE und nicht der Akzent: die Akzentflaeche
+   selbst steht gegen Weiss nur 2.60:1 (gegen den Fenstergrund #f3f4f6 sogar
+   2.36:1) und faellt damit durch 1.4.11. `--color-lu-accent-edge` ist genau
+   dafuer da und schafft 3.06–3.37:1. Dieselbe Aufteilung wie beim
+   Primaer-Rezept und beim Aufnahme-Puls: Akzent im Dunkeln, Kante im Hellen.
+
+   Warum `:not(.lu-primary)`: DAS ist die Spezifitaetsfalle dieses Hauses.
+   `.light :focus-visible:not([tabindex='-1'])` waere 0,3,0 und wuerde
+   `.lu-primary:focus-visible` (0,2,0) schlagen — der Senden-Knopf haette
+   im Hellmodus still seinen invertierten Ring verloren. Der Akzentring auf
+   der Akzentflaeche kommt auf 1.00:1, deshalb traegt `.lu-primary` unten
+   den umgekehrten Ring (17.74:1 hell / 16.67:1 dunkel). Die Ausnahme steht
+   deshalb AN der Regel, nicht als Gegengewicht mit mehr Spezifitaet.
+
+   Warum `:not([tabindex='-1'])`: der Dialog-Rahmen (`ui/Modal.tsx`) ist
+   `tabIndex={-1}` und bekommt beim Oeffnen programmatisch Fokus. Chromium
+   laesst `:focus-visible` dort greifen, sobald zuvor die Tastatur im Spiel
+   war — ohne diese Klammer bekaeme der ganze Dialog einen Akzentrahmen.
+   Programmatischer Fokus ist kein Tastaturfokus; genau das steht hier.
+
+   Die Regel ist UNGESCHICHTET und schlaegt damit jede Tailwind-Utility
+   (`@layer utilities`) unabhaengig von der Spezifitaet — auch die 67
+   `outline-none`-Fundstellen, die den Ring bisher einzeln abgeschaltet
+   haben. Deshalb muss keine davon angefasst werden.
+
+   Warum `:not([data-lu-quiet-focus])`: genau daran haengt die EINE Ausnahme,
+   die das Haus kennt, und sie steht an der Regel statt als zweite Regel
+   dagegen. David, 05.09.2026, am Windows-Bau: „wenn man in das nachrichten
+   feld klickt kommt eine starke lila umrandung, die soll komplett weg."
+   Gemessen an der fokussierten Textarea des Chat-Composers: `outline: solid
+   1,739px rgb(160,148,248)` mit 1,739px Abstand, also diese Hausregel. Das
+   `focus:outline-none` der Textarea (0,2,0) verliert gegen sie (0,3,0).
+
+   Es ist die einzige Stelle, an der das Weglassen keinen Fokus verschluckt:
+   die Promptbox zeichnet ihren Fokus SELBST, mit `focus-within:border-*` auf
+   dem Kasten um die Zeile (`border-lu-cloud/40` -> `/70` im Cloud-Modus,
+   `border-gray-200` -> `border-gray-400` sonst). Der Ring lag also als
+   zweiter, staerkerer Rahmen INNERHALB eines Rahmens, der dasselbe schon
+   sagte. Jedes andere Eingabefeld der App behaelt den Ring; wer das Attribut
+   anderswo setzt, nimmt einem Feld seine einzige Fokusanzeige.
+   ───────────────────────────────────────────────────────────────────── */
+:focus-visible:not([tabindex='-1']):not(.lu-primary):not([data-lu-quiet-focus]) {
+  outline: 2px solid var(--color-lu-accent);
+  outline-offset: 2px;
 }
-:is(input, textarea, select):focus-visible {
-  outline: none;
+.light :focus-visible:not([tabindex='-1']):not(.lu-primary):not([data-lu-quiet-focus]) {
+  outline-color: var(--color-lu-accent-edge);
+}
+
+/* ─────────────────────────────────────────────────────────────────────
+   Press-Feedback — EINE Regel statt 489 Call-Sites.
+
+   Der Audit zaehlt „6 von 462 Buttons haben Press-Feedback". Nachgezaehlt
+   am Stand 3883eaa8: 489 Knoepfe (481 `<button>` + 8 `<motion.button>`),
+   davon 6 mit `whileTap` aus framer-motion und 0 mit `active:scale`. Ein
+   Knopf ohne Press-Zustand fuehlt sich an, als haette der Klick nicht
+   stattgefunden — das ist die haeufigste Rueckmeldung der App und sie fehlt
+   an 483 Stellen.
+
+   Warum hier und nicht an den Call-Sites: `active:scale-[0.97]` an 483
+   className-Strings ist dieselbe Krankheit, die der Audit diagnostiziert
+   (378 verschiedene Button-Klassen bei 462 Knoepfen). Eine ungeschichtete
+   Regel sagt dasselbe einmal.
+
+   Warum `scale:` und nicht `transform:` — Tailwind v4 benutzt die
+   Einzel-Properties (`scale-[1.04]` baut `scale:1.04`, nicht `transform`).
+   Ein `transform` hier wuerde `translate-*`/`rotate-*` an derselben
+   Stelle ueberschreiben; `scale` komponiert daneben.
+
+   Warum KEIN Uebergang an dieser Regel: `transition-property` ist EINE
+   Liste, kein additives Feld. Eine globale Regel, die `scale` ergaenzt,
+   muesste die Liste ersetzen — und damit die bewusst gesetzten
+   `transition-colors` / `transition-all` / `duration-*` an allen 489
+   Call-Sites gleich mit. Der Druck folgt dem Finger deshalb ohne Verzoegerung
+   (genau das tut `active:scale-[0.97]` an den 55 Stellen mit
+   `transition-colors` auch, denn die Liste dort kennt `scale` nicht).
+   Wo ein Rezept seine eigene `transition` BESITZT — `.lu-control` weiter
+   unten —, steht `scale` in dieser Liste und der Druck laeuft weich aus.
+   Das ist der Unterschied zwischen einer Regel, die fremde Entscheidungen
+   respektieren muss, und einem Rezept, dem die Entscheidung gehoert.
+
+   `:disabled` und `aria-disabled` sind ausgenommen: ein Knopf, der nicht
+   reagiert, darf auch nicht so tun.
+
+   Und „Bewegung reduzieren" schaltet den Druck NICHT ab. Die Regel weiter
+   unten haelt an, was Dauerbewegung ist (Shimmer, pulsierende Punkte), und
+   laesst stehen, was Rueckmeldung ist (Ladekringel, Skelett-Puls). Drei
+   Prozent auf der Stelle, nur solange der Finger unten ist, sind
+   vestibulaer nichts — abgeschaltet waere der Knopf wieder der, der sich
+   anfuehlt, als haette der Klick nicht stattgefunden, und genau fuer die
+   Gruppe, die am wenigsten davon hat.
+   ───────────────────────────────────────────────────────────────────── */
+:is(button, [role='button']):not(:disabled):not([aria-disabled='true']):active {
+  scale: 0.97;
 }
 
 /* Status readouts (token counters, version strings, t/s, VRAM) in mono
@@ -320,8 +934,42 @@ input[type="range"]::-webkit-slider-thumb {
   letter-spacing: 0.01em;
 }
 
-/* Elevated surfaces — modals, dropdowns, popovers. Pairs the overlay bg
-   with a real shadow so floating layers actually float on dark. */
+/* ─────────────────────────────────────────────────────────────────────
+   `.lu-elevated` — DAS Schwebeblatt. Flaeche, Kante und Schatten aus einer
+   Quelle, hell wie dunkel (D-T06 + D-T09).
+
+   Der Befund war nicht „die Dropdowns sehen verschieden aus", sondern:
+   jedes Schwebeblatt schrieb sich seine eigene Kette. Am 01.09.2026 in
+   chat/ models/ ui/ agents/ nachgezaehlt — zehn Blaetter, und darin
+
+     sechs Flaechen    #161719 (Dialog) · #17171c (Menue) · #1a1a1a (2x
+                       Aufklapper) · #1f1f1f (Aufklapper) · #262626 (3x) ·
+                       #363636 (Aufklapper)
+     drei Schatten     shadow-lg · shadow-xl (5x) · shadow-2xl (2x)
+     zwei Kanten       border-gray-200/white-10 · black-10/white-[0.08]
+
+   Keine dieser Zahlen war eine Entscheidung; sie sind zu verschiedenen
+   Zeiten abgeschrieben worden. Das Kontextmenue stand sogar auf
+   `--color-lu-canvas`, also in der Farbe der LEINWAND — ein Blatt, das
+   ueber der Flaeche schwebt, in der Farbe der Flaeche darunter.
+
+   Jetzt tragen alle zehn diese eine Klasse. Warum die Flaeche HELLER wird
+   statt dunkler: im Dunkelmodus kommt Erhebung aus der Flaeche, nicht aus
+   dem Schatten — die Rechnung dazu steht unten bei `.dark .shadow-sm`
+   (ein Schatten schafft auf #141414 hoechstens 1,14:1, und das ist keine
+   Einstellungs-, sondern eine Arithmetikgrenze).
+
+   Was die Klasse NICHT setzt: den Radius. Der gehoert der Call-Site, weil
+   ein Dialog (`rounded-2xl`) und ein Menue (`rounded-md`) verschieden
+   gross sind. Und sie ist ungeschichtet — wer daneben `bg-white` oder
+   `shadow-xl` stehen laesst, schreibt eine Klasse ohne Wirkung; die
+   Sperrklinke in zwei-akzente-und-eine-leinwand.test.ts sucht genau das.
+
+   EINE dokumentierte Ausnahme in diesem Durchgang: der Warn-Aufklapper in
+   chat/ContextDropdown.tsx traegt `border-red-500/25` als Aussage („dieser
+   Kontext ist voll"). Diese Regel wuerde die Kante ueberschreiben, also
+   nimmt die Stelle nur das Flaechentoken und behaelt ihre eigene Kante.
+   ───────────────────────────────────────────────────────────────────── */
 .lu-elevated {
   background: var(--color-lu-overlay);
   border: 1px solid rgba(255, 255, 255, 0.08);
@@ -331,6 +979,58 @@ input[type="range"]::-webkit-slider-thumb {
   background: #ffffff;
   border: 1px solid rgba(0, 0, 0, 0.1);
   box-shadow: var(--shadow-lg);
+}
+
+/* ─────────────────────────────────────────────────────────────────────
+   `shadow-sm` ist ein Hellmodus-Rezept — eine Regel statt zwoelf
+   Call-Sites (D-T09).
+
+   `--shadow-lg/xl/2xl` hat dieses Haus fuer dunkle Flaechen nachgezogen
+   (0,6–0,8 Alpha, grosse Weichzeichnung). `shadow-sm` NICHT: es steht
+   weiterhin auf Tailwinds Werkseinstellung, `0 1px 3px rgb(0 0 0/.1)`
+   plus `0 1px 2px -1px rgb(0 0 0/.1)`. An zwoelf Stellen der App.
+
+   Nachgerechnet (WCAG 2.1, dunkelster Schattenpixel gegen seinen Grund;
+   wo beide Lagen uebereinanderliegen, deckt der Schatten 19 % Schwarz):
+
+     hell   #ffffff Blatt        1,248 … 1,558:1
+     hell   #e5e7eb Leinwand     1,247 … 1,554:1
+     dunkel #141414 Leinwand     1,017 … 1,033:1
+     dunkel #1e1e1e Pane         1,033 … 1,065:1
+     dunkel #262626 Panel        1,051 … 1,089:1
+     dunkel #363636 Overlay      1,077 … 1,156:1
+
+   Zum Vergleich: die Pane-Kante im Hellmodus stand vor D-S42 bei 1,008:1
+   und wurde dort als „keine Kante, das ist Rauschen" verworfen. Die
+   dunklen Werte hier liegen in derselben Klasse.
+
+   Und es hilft NICHT, den Schatten dunkler zu stellen. Ein Schatten kann
+   eine Flaeche nur abdunkeln, also ist er nach unten durch Schwarz
+   begrenzt. Selbst 100 % Schwarz schafft:
+
+     auf #141414   1,140:1        auf #ffffff   21,000:1
+     auf #1e1e1e   1,260:1        auf #e5e7eb   16,962:1
+
+   Auf der Leinwand dieser App ist die theoretische Obergrenze eines
+   Schattens also 1,14:1. Das ist keine Frage der Einstellung, das ist
+   Arithmetik — Erhebung im Dunkeln kommt aus einer Kante, nicht aus
+   einem Schatten (so hat es D-S24 an den 53 Modellkacheln schon
+   entschieden).
+
+   Im HELLMODUS bleibt er, und dort traegt er wirklich: der weisse
+   Schaltknopf der Toggles steht auf seiner hellen Spur
+   (`bg-gray-300/30` ueber Weiss = #f1f2f4) bei 1,120:1 — ohne den
+   Schatten waere er dort fast unsichtbar.
+
+   Warum `--tw-shadow` und nicht `box-shadow: none`: Tailwind 4 setzt
+   `box-shadow` als EINE Liste aus fuenf Variablen zusammen (inset-shadow,
+   inset-ring, ring-offset, ring, shadow). `box-shadow: none` haette auch
+   jeden `ring-*` auf demselben Element geloescht. Ueberschrieben wird
+   deshalb genau die eine Variable, die dem Schatten gehoert — dasselbe,
+   was Tailwinds eigenes `shadow-none` tut.
+   ───────────────────────────────────────────────────────────────────── */
+.dark .shadow-sm {
+  --tw-shadow: 0 0 #0000;
 }
 
 /* ─────────────────────────────────────────────────────────────────────
@@ -358,9 +1058,35 @@ input[type="range"]::-webkit-slider-thumb {
 .dark .text-gray-600 { color: rgb(156 163 175); } /* → gray-400 */
 .dark .text-gray-500 { color: rgb(156 163 175); } /* → gray-400 — same as 600 so weight is consistent */
 
-/* Placeholders — Tailwind doesn't add a `dark:` for these. */
-.light ::placeholder { color: rgb(31 41 55); }     /* gray-800 */
-.dark ::placeholder { color: rgb(229 231 235); }   /* gray-200 */
+/* Placeholders — Tailwind doesn't add a `dark:` for these, also dropped the
+   restlichen `placeholder-*`-Klassen der Komponenten: die beiden Regeln hier
+   sind ungeschichtet und schlagen damit jede Utility aus @layer, egal ob in
+   der v3- (`placeholder-gray-600`) oder v4-Schreibweise
+   (`placeholder:text-gray-600`). Sie sind der EINZIGE Platzhalterwert der App.
+
+   Bis 2.6.7 standen hier gray-800 / gray-200 — also praktisch die Textfarbe
+   selbst. Die Grundrelation eines Eingabefeldes stand damit verkehrt herum:
+   der Platzhalter war so auffaellig wie der Wert oder auffaelliger, ein leeres
+   Feld las sich staerker als ein ausgefuelltes. Nachgerechnet am 01.09.2026
+   im laufenden Fenster (Chromium 149, WCAG 2.1, Farben aus getComputedStyle,
+   nicht aus den Klassennamen):
+
+     hell   Feldtext gray-800 auf #ffffff        14,68:1
+            Platzhalter ALT gray-800             14,68:1  ← derselbe Wert
+            Platzhalter NEU gray-600              7,56:1  (auf #f5f5f5: 6,93:1)
+     dunkel Feldtext gray-100 auf #1b1b1b        15,65:1
+            Platzhalter ALT gray-200             13,91:1  ← 89 % des Textes
+            Platzhalter NEU gray-400              6,78:1  (auf #292929: 5,73:1)
+
+   Die beiden neuen Werte sind keine neu erfundenen Zahlen: gray-600 ist genau
+   das, was die `.light .placeholder-gray-*`-Regel weiter unten fuer die
+   v3-Schreibweise ohnehin setzt, und gray-400 ist der Wert, auf den der
+   Rescue-Layer drei Zeilen weiter oben `.dark .text-gray-500/600` hebt.
+   Untergrenze: kein Platzhalter faellt unter 4,5:1 — auf dem hellsten dunklen
+   Feldgrund der App (#1e1e1e + white/5 = #292929) bleiben 5,73:1, auf dem
+   dunkelsten hellen (#f5f5f5) 6,93:1. */
+.light ::placeholder { color: rgb(75 85 99); }     /* gray-600 */
+.dark ::placeholder { color: rgb(156 163 175); }   /* gray-400 */
 
 /* Light-mode rescue for legacy dark-first components that bake in
    `text-white` / `bg-white/N` / `border-white/N` without a `dark:` variant.
@@ -416,19 +1142,366 @@ input[type="range"]::-webkit-slider-thumb {
    the control-height vars above were undefined. See the token block near the
    top of this file for the full rationale.
    ───────────────────────────────────────────────────────────────────── */
-.t-display { font-size: var(--text-display); line-height: var(--text-display-lh); font-weight: var(--text-display-fw); }
+.t-display { font-size: var(--text-display); line-height: var(--text-display-lh); font-weight: var(--text-display-fw); font-family: var(--font-display); letter-spacing: -0.01em; }
 .t-title   { font-size: var(--text-title);   line-height: var(--text-title-lh);   font-weight: var(--text-title-fw); }
 .t-body    { font-size: var(--text-body);    line-height: var(--text-body-lh);    font-weight: var(--text-body-fw); }
 .t-control { font-size: var(--text-control); line-height: var(--text-control-lh); font-weight: var(--text-control-fw); }
 .t-label   { font-size: var(--text-label);   line-height: var(--text-label-lh);   font-weight: var(--text-label-fw); letter-spacing: 0.08em; text-transform: uppercase; }
 .t-mono    { font-size: var(--text-mono); font-variant-numeric: tabular-nums; font-family: ui-monospace, 'JetBrains Mono', 'SF Mono', Menlo, monospace; }
 
-/* Focus affordance for Create controls that opt in via `.lu-focus-ring`
-   (buttons/anchors already get the global ring above; this also covers
-   div/role-based controls). Matches the global focus outline exactly. */
-.lu-focus-ring:focus-visible {
-  outline: 1px solid rgba(96, 165, 250, 0.6);
-  outline-offset: 1px;
+/* ─────────────────────────────────────────────────────────────────────
+   `.t-micro` — die Stufe, deren Fehlen die Leiter umgangen hat (D-T04)
+
+   Gezaehlt am 01.09.2026 ueber src/ ohne __tests__: 1026 Fundstellen
+   einer arbitraeren Schriftgroesse in eckigen Klammern, verteilt auf 30
+   verschiedene Werte (28 Groessen + 2 Farben). Dagegen 143 Nutzungen der
+   `.t-*`-Klassen. Das System existiert und wird umgangen.
+
+   Die Frage war, WARUM. Die Antwort steht in der Verteilung:
+
+     947 von 1026 (92,3 %) liegen zwischen 8 und 11,99 px, also UNTER
+     --text-body (13). Nur 65 (6,3 %) sitzen exakt auf einer Stufe.
+
+     Unter 13px hat die Leiter drei Stufen — und keine davon ist
+     schlichter Text:
+       --text-label (10)  erzwingt uppercase + 0,08em Laufweite
+       --text-mono  (11)  wechselt die Schriftfamilie
+       --text-control (12) setzt line-height 1 (Controlmass, kein Satz)
+
+     Von den 947 Bandstellen tragen 38 uppercase/tracking, waeren also
+     `.t-label`-Kandidaten. Die anderen 909 sind schlichter Kleintext,
+     und dafuer gab es keinen Namen.
+
+   Die Luecke ist also KEINE fehlende Zahl. Der haeufigste Umgehungswert
+   ist 0.6rem = 9,6px, der gewichtete Mittelwert des ganzen Bandes 9,75px
+   — beides einen Viertelpixel neben der 10, die schon da ist. Die
+   Leiter hatte die Zahl und hat sie in einem Stilrezept eingesperrt.
+
+   Deshalb bekommt `.t-micro` KEINE eigene Zahl: --text-micro ist
+   `var(--text-label)`. Eine Groesse, zwei Rezepte — das Grossbuchstaben-
+   Etikett und der schlichte Kleintext.
+
+   Die Auflösung, in der bisher entworfen wurde, ist der zweite Teil des
+   Befunds: 14 verschiedene Werte in einem 4px-Band, die engsten 0,08px
+   auseinander (0.62rem = 9,92 gegen 0.63rem = 10,08). Bei --ui-scale
+   1,15 sind das 0,09 gerenderte Pixel. Das ist keine Entscheidung, das
+   ist Rauschen.
+
+   ── Warum diese Klasse NUR die Groesse setzt ──
+
+   Es gibt einen zweiten Grund fuer die Umgehung, und er ist im Browser
+   nachgemessen: die sechs Klassen oben stehen UNGESCHICHTET und schlagen
+   damit jede Tailwind-Utility, egal mit welcher Spezifitaet (dieselbe
+   Mechanik wie beim Fokusring weiter oben). Gemessen mit
+   getComputedStyle, Chromium 149:
+
+     class="t-body font-semibold"   → font-weight 400  (nicht 600)
+     class="t-control font-bold"    → font-weight 500  (nicht 700)
+     class="t-body leading-none"    → line-height 19,5px (nicht 1)
+     class="t-label font-normal"    → font-weight 600  (nicht 400)
+
+   Wer `.t-body` nimmt, verliert also still sein `font-semibold`. Ein
+   Rezept, das die Entscheidungen der Call-Site frisst, ist kein
+   Angebot — es ist ein Grund, in eckige Klammern auszuweichen.
+
+   `.t-micro` macht das ausdruecklich nicht: EINE Eigenschaft, sonst
+   nichts. Damit ist der Tausch gegen `text-[10px]` beweisbar
+   folgenlos. Nachgemessen: `text-[10px]` erbt line-height 1,5 aus dem
+   Preflight (`html { line-height: 1.5 }` vererbt als ZAHL) und rendert
+   15px; `.t-micro` aendert daran nichts und rendert ebenfalls 15px.
+   Ein `line-height` hier wuerde genau den Fehler wiederholen, der die
+   anderen fuenf Klassen unbrauchbar macht.
+
+   ── Wie weit die Klasse gezogen wurde, und wo die Grenze liegt ──
+   (zweiter Durchgang, 01.09.2026 abends)
+
+   Der erste Durchgang hat die Klasse GEBAUT und neun Call-Sites gehabt.
+   Dieser hat sie GEZOGEN: 1008 -> 826 Fundstellen ueber src/, 25 -> 23
+   verschiedene Werte, `.t-*` von 152 auf 333 Nutzungen, davon 190 auf
+   `.t-micro`. Alles davon in chat/ models/ ui/ agents/ import/ — die
+   uebrigen Verzeichnisse gehoeren in diesem Durchgang anderen.
+
+   Die Grenze ist eine RECHNUNG und keine Ermuedung: `.t-micro` nimmt
+   genau das Band, das auf ihre 10px rundet, ± 1 CSS-Pixel —
+
+     0.58rem  9,28px      0.62rem  9,92px     0.68rem 10,88px
+     0.60rem  9,60px      0.65rem 10,40px     10px / 9px
+
+   — also hoechstens 1,15 gerenderte Pixel Unterschied. Was ausserhalb
+   liegt, BLEIBT stehen, und zwar mit Grund, nicht aus Nachlaessigkeit:
+
+     text-[0.55rem]  8,80px   96x   } kein Name unter 10; sie dorthin zu
+     text-[0.50rem]  8,00px   53x   } ziehen waere +14 bzw. +25 % — eine
+                                    } Entwurfsaenderung, keine Zusammen-
+                                    } fuehrung.
+     text-[0.70rem] 11,20px   50x   } 11 heisst `--text-mono` und wechselt
+                                    } die Schriftfamilie; 12 heisst
+                                    } `--text-control` und setzt lh 1.
+     text-[12px]             15x    } `.t-control` FRISST das
+                                    } `leading-relaxed`/`font-medium` der
+                                    } Call-Site (ungeschichtet, siehe
+                                    } oben). Der Tausch waere nicht
+                                    } folgenlos, sondern still.
+     text-[0.78rem] 12,48px    5x   } die Fliesstextgroesse der Antwort
+                                    } (MessageBubble, `.lu-caret` rechnet
+                                    } mit ihr) plus zwei Ueberschriften
+                                    } mit `font-semibold`.
+
+   Das ist der zweite Teil des Befunds und er ist NICHT behoben: die
+   fuenf Rezeptklassen stehen ungeschichtet und schlagen jede Utility der
+   Call-Site. Sie in `@layer components` zu heben waere die Reparatur —
+   im Baum nachgemessen betrifft sie genau drei Call-Sites (`t-control
+   font-medium`, `t-body leading-relaxed`, `t-body tracking-wide`, alle
+   in create/) und ist damit klein, aber sie ist eine eigene Aenderung
+   mit eigenem Sichttermin, nicht ein Nebensatz in diesem Paket.
+   ───────────────────────────────────────────────────────────────────── */
+.t-micro   { font-size: var(--text-micro); }
+
+/* `.lu-focus-ring` stand hier und ist ersatzlos gestrichen (Audit §5:
+   „9 redundante Nutzungen"). Sie war die Kopie der globalen Regel fuer
+   Controls, die keine `<button>`/`<a>` sind — seit der Fokusring oben an
+   `:focus-visible` haengt statt an einer Elementliste, deckt er genau diese
+   Faelle mit ab. Eine Klasse, die nichts hinzufuegt, ist eine Klasse, die
+   irgendwann auseinanderlaeuft: die alte Kopie hier trug noch den 1px-Ring,
+   als der globale schon 2px gehabt haette. */
+
+/* ──────────────────────────────────────────────────────────────────
+   .lu-control — DAS neutrale Control-Rezept der Composer-Leiste.
+
+   Zusammen mit `.lu-primary` weiter unten sind das die ZWEI Formsprachen,
+   die die Prompt-Zeile noch kennt. Vorher waren es neun, nebeneinander,
+   auf 40 Pixel Hoehe (Audit Welle 2, „Composer-Grammatik"; die Zaehlung
+   steht in src/components/chat/__tests__/composer-grammar.test.ts):
+   Paperclip `p-1.5 rounded-md`, Think `px-1.5 py-1.5 rounded-md` mit
+   blauem Rand nur im Ein-Zustand, Docs dasselbe in Gruen, Tools ganz ohne
+   Flaeche, Plugins `px-2 py-0.5 rounded` mit Dauer-Rand und 10,12px
+   Schrift, Modellwaehler `h-[26px] rounded-md` mit Dauer-Rand und 12,88px
+   Schrift, Stop rot gefuellt, Send violett gefuellt. Vier Hoehen
+   (17 / 26 / 27,8 px), drei Radien (4,6 / 6,9 / 9,2 px), drei
+   Schriftgroessen.
+
+   Was hier steht, ist ausdruecklich EIN Rezept mit ZUSTAENDEN, nicht
+   mehrere Rezepte: Ruhe · Hover · aktiv/offen · disabled · Fokus. Der
+   aktive Zustand wird aus ARIA gelesen (`aria-pressed` fuer Umschalter,
+   `aria-expanded` fuer Aufklapper), damit die Call-Sites nichts
+   dazuschreiben muessen und die Zustandsanzeige zwangslaeufig mit der
+   Barrierefreiheit uebereinstimmt statt daneben zu leben.
+   `data-active` ist die dritte Tuer, fuer Controls, die weder Umschalter
+   noch Aufklapper sind — heute genau eine: Stop.
+
+   Der Rand ist IMMER da, nur im Ruhezustand durchsichtig. Vorher kam er
+   erst beim Aktivieren dazu und die Leiste wuchs beim Umschalten um 2px.
+
+   Warum Stop NEUTRAL bleibt und nicht `.lu-primary` traegt: Stop ist der
+   Normalabschluss eines Streams und die haeufigste Aktion, waehrend eine
+   Antwort laeuft — kein destruktiver Bestaetigungsknopf. Es trug
+   `bg-red-500/15 text-red-400`, und bei 94 `text-red-400`-Fundstellen
+   heisst Rot in dieser App „kaputt oder wird geloescht" (Audit §4, Chat
+   streamend). Auffindbar bleibt es ueber `data-active`, also ueber den
+   Behaelter des neutralen Rezepts, nicht ueber Farbe.
+
+   Geometrie aus vorhandenen Tokens, keine neuen Zahlen:
+   Hoehe --control-h-sm (26px, die Hoehe, die der Modellwaehler und der
+   Send-Slot schon hatten), Radius --radius-control (8px, die Stufe aus
+   dem Token-Diff), Uebergang --motion-fast/--motion-ease.
+
+   Farbe: gerechnet, nicht geschaetzt (WCAG 2.1, 11,04px = Fliesstext,
+   AA = 4.5:1). Dunkelmodus #9ca3af auf #1e1e1e = 6.57:1, aktiv #f3f4f6
+   = 15.15:1. Hellmodus #4b5563 auf #ffffff = 7.56:1, aktiv #111827
+   = 17.74:1. composer-grammar.test.ts rechnet diese vier Werte nach UND
+   prueft, dass genau sie hier stehen — der Kommentar kann also nicht
+   veralten, ohne rot zu werden.
+   ───────────────────────────────────────────────────────────────── */
+.lu-control {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  flex: 0 0 auto;
+  height: var(--control-h-sm);
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  /* Bezugsrahmen fuer alles, was das Rezept UEBER das Control legt — heute
+     genau eins: der Aufnahme-Puls des Mikrofons weiter unten. Das ist
+     Geometrie, gilt also fuer beide Rezepte und traegt keine Abgrenzung
+     gegen das betonte. Die beiden Aufklapper der Leiste (Plugins,
+     Modellwaehler) haengen ihre Menues als GESCHWISTER des Knopfes auf,
+     nicht darin — sie bekommen davon nichts ab. */
+  position: relative;
+  background-color: transparent;
+  color: rgb(156 163 175);
+  font-size: 0.6rem;
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+  /* `scale` steht hier, weil dieses Rezept seine `transition` BESITZT — die
+     globale Press-Regel weiter oben darf die Liste an 489 fremden
+     Call-Sites nicht ersetzen, hier gibt es keine fremde Liste. Ergebnis:
+     der Druck in der Prompt-Zeile laeuft weich aus statt zurueckzuspringen.
+     Dieselben 120 ms wie Hover und Farbe, keine fuenfte Dauer. */
+  transition:
+    background-color var(--motion-fast) var(--motion-ease),
+    border-color var(--motion-fast) var(--motion-ease),
+    color var(--motion-fast) var(--motion-ease),
+    scale var(--motion-fast) var(--motion-ease);
+}
+/* Ueberall dort, wo die neutrale HAUT gesetzt wird, steht `:not(.lu-primary)`.
+   Grund: Send traegt beide Klassen (`.lu-control .lu-control--icon
+   .lu-primary`) — Geometrie vom neutralen, Farbe vom betonten Rezept. Beide
+   sind ungeschichtet, also entscheidet erst die Spezifitaet und dann die
+   Reihenfolge. `.light .lu-control:hover:not(:disabled)` ist 0,4,0 und
+   schlaegt `.lu-primary:hover:not(:disabled)` mit 0,3,0 — im Hellmodus
+   waere der Senden-Knopf beim Ueberfahren grau geworden. Die Ausnahme steht
+   deshalb an der Regel, nicht als Gegengewicht mit noch mehr Spezifitaet.
+   Geometrie (Hoehe, Radius, Polsterung, Rand-PLATZ) gilt weiterhin fuer
+   beide — sie ist ja gerade der gemeinsame Teil. */
+.light .lu-control:not(.lu-primary) { color: rgb(75 85 99); }
+
+/* Die quadratische Variante fuer nackte Icons. Gleiche Hoehe, gleicher
+   Radius, gleiche Zustaende — nur ohne waagerechtes Padding, damit das
+   Icon mittig sitzt. Das ist keine zweite Formsprache, sondern dieselbe
+   ohne Beschriftung. */
+.lu-control--icon {
+  width: var(--control-h-sm);
+  padding: 0;
+}
+
+/* Der Aufnahme-Puls. Ein Control, das gerade zuhoert, sagt das lauter als
+   „aktiv" — aber nicht in Rot: das Mikrofon nimmt auf, es ist nicht kaputt,
+   und Rot heisst in dieser App an rund hundert Stellen „kaputt oder wird
+   geloescht" (dieselbe Begruendung, aus der Stop neutral wurde, siehe oben).
+   Getragen wird die Aussage ohnehin nicht von diesem Ring allein:
+   `aria-pressed` setzt den Behaelter, das aria-label wechselt auf „Stop
+   recording", und der Platzhalter im Eingabefeld schreibt „Recording..."
+   aus. Trotzdem ist Aufnahme ein Zustand, den man auf einen Blick sehen
+   koennen muss — deshalb die VOLLE Akzentkante und nicht der halb
+   durchsichtige --color-lu-accent-ring, der hier auf 2.78:1 (dunkel) und
+   1.60:1 (hell) gekommen waere. Die Aufteilung ist die des
+   Primaer-Rezepts weiter unten: Akzent im Dunkelmodus, --accent-edge im
+   Hellmodus, wo die Flaeche selbst zu hell steht.
+   Gerechnet auf der Composer-Flaeche (`bg-white/[0.03]` ueber #1e1e1e =
+   #252525 / `bg-gray-50` = #f9fafb) und auf dem aktiven Behaelter, den
+   `aria-pressed` darunterlegt (#343434 / #edeeee):
+     dunkel  #a094f8  5.90:1 auf der Flaeche, 4.79:1 auf dem Behaelter
+     hell    #8b7cf0  3.22:1 auf der Flaeche, 2.90:1 auf dem Behaelter
+   Der letzte Wert liegt knapp unter den 3:1 aus 1.4.11 — hinnehmbar aus
+   demselben Grund, aus dem es der aria-pressed-Rand daneben ist: der Ring
+   ist Zugabe, nie das einzige Signal. Vorher lag hier ein 2px-Ring in
+   Rot mit 5.54:1 (dunkel) / 3.60:1 (hell); lauter, aber mit der falschen
+   Aussage.
+   Takt 1200 ms = --motion-slow x 4, genau die Dauer, die vorher als
+   framer-motion-Literal im Knopf stand; jetzt CSS, damit
+   „Bewegung reduzieren" ihn ueberhaupt erreichen kann. */
+@keyframes lu-control-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.3; transform: scale(1.12); }
+}
+.lu-control__pulse {
+  position: absolute;
+  inset: 0;
+  border: 1px solid var(--color-lu-accent);
+  border-radius: inherit;
+  pointer-events: none;
+  animation: lu-control-pulse calc(var(--motion-slow) * 4) var(--motion-ease) infinite;
+}
+.light .lu-control__pulse { border-color: var(--color-lu-accent-edge); }
+
+.lu-control:not(.lu-primary):hover:not(:disabled) {
+  background-color: rgba(255, 255, 255, 0.07);
+  color: rgb(243 244 246);
+}
+.light .lu-control:not(.lu-primary):hover:not(:disabled) {
+  background-color: rgba(0, 0, 0, 0.05);
+  color: rgb(17 24 39);
+}
+
+/* Aktiv / offen — der Behaelter erscheint erst hier. Traeger der Aussage
+   ist die Textfarbe (6.57:1 → 15.34:1 im Dunkelmodus), nicht der Rand:
+   ein 1px-Rand bei 14% Deckung erfuellt 1.4.11 fuer sich genommen nicht
+   und ist deshalb bewusst nur die Zugabe, nie das einzige Signal. */
+.lu-control:not(.lu-primary)[aria-pressed='true'],
+.lu-control:not(.lu-primary)[aria-expanded='true'],
+.lu-control:not(.lu-primary)[data-active='true'] {
+  background-color: rgba(255, 255, 255, 0.07);
+  border-color: rgba(255, 255, 255, 0.14);
+  color: rgb(243 244 246);
+}
+.light .lu-control:not(.lu-primary)[aria-pressed='true'],
+.light .lu-control:not(.lu-primary)[aria-expanded='true'],
+.light .lu-control:not(.lu-primary)[data-active='true'] {
+  background-color: rgba(0, 0, 0, 0.05);
+  border-color: rgba(0, 0, 0, 0.14);
+  color: rgb(17 24 39);
+}
+
+/* Beschaeftigt — der Modellwaehler waehrend ein Modell laedt. Akzentkante
+   statt eines eigenen blauen Rezepts mit Leuchtschatten. */
+.lu-control:not(.lu-primary)[aria-busy='true'] {
+  border-color: var(--color-lu-accent-ring);
+}
+
+/* Der eigene Fokusring dieses Rezepts ist gestrichen. Er trug
+   `--color-lu-accent-ring`, also den halbdurchsichtigen Akzent bei 55 %,
+   und der kommt ueber der Composer-Leiste auf 2.78:1 (dunkel) und 1.60:1
+   (hell) — beides unter den 3:1 aus WCAG 1.4.11. Dieselbe Rechnung, aus der
+   weiter oben der Aufnahme-Puls die VOLLE Kante bekommen hat, gilt hier:
+   das Rezept nimmt jetzt den Ring des Hauses (6.42:1 / 3.37:1) statt einen
+   eigenen, schwaecheren. Ohne Regel greift die globale von oben. */
+
+/* Deaktiviert heisst gedimmt, nicht defekt: Paperclip und Mikrofon standen
+   auf `opacity-20` und lasen sich als kaputt (Audit §4, Chat streamend). */
+.lu-control:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* ──────────────────────────────────────────────────────────────────
+   .lu-primary — DAS Primaer-Rezept. Genau einmal definiert, benutzt von
+   allen drei Primaeraktionen der App:
+     • create/ui/Button.tsx      (Variante `primary`, u.a. Generate)
+     • auth/AccountPanel.tsx     (Sign in / Create account)
+     • chat/ChatInput.tsx        (Send)
+   Vorher waren das drei getrennte Graustufen-Rezepte (`bg-gray-900`,
+   `dark:bg-white/10`, `bg-white/8`) — die wichtigste Aktion des Bildschirms
+   sah aus wie eine beliebige Nebenaktion.
+
+   Farbe kommt ausschliesslich aus dem @theme-Block, kein Literal hier.
+   Der Zustand `disabled` entsaettigt die Flaeche zusaetzlich zum Dimmen,
+   damit er nicht als die aktive Variante durchgeht; die Call-Sites bringen
+   ihr eigenes `disabled:opacity-*` mit, das sich damit addiert.
+   Fokus: 2px Ring mit 2px Abstand, damit er auf dem HINTERGRUND liegt und
+   nicht auf der Akzentflaeche — dunkel im Hellmodus, weiss im Dunkelmodus.
+   Das ist die EINE dokumentierte Ausnahme vom Hausring: der Akzentring auf
+   der Akzentflaeche kaeme auf 1.00:1. Die Ausnahme wird nicht durch mehr
+   Spezifitaet erkaempft, sondern steht als `:not(.lu-primary)` an der
+   Hausregel selbst (siehe dort) — sonst haette der Hellmodus-Zweig mit
+   0,3,0 diese Regel mit 0,2,0 still geschlagen.
+   Gemessen: #111827 auf Weiss = 17.74:1, Weiss auf #1e1e1e = 16.67:1.
+   ───────────────────────────────────────────────────────────────── */
+.lu-primary {
+  background-color: var(--color-lu-accent);
+  color: var(--color-lu-on-accent);
+  border: 1px solid var(--color-lu-accent);
+  font-weight: 500;
+}
+.light .lu-primary { border-color: var(--color-lu-accent-edge); }
+
+.lu-primary:hover:not(:disabled) {
+  background-color: var(--color-lu-accent-hover);
+  border-color: var(--color-lu-accent-hover);
+}
+
+.lu-primary:focus-visible {
+  outline: 2px solid var(--color-lu-on-accent);
+  outline-offset: 2px;
+}
+.dark .lu-primary:focus-visible { outline-color: white; }
+
+.lu-primary:disabled {
+  filter: grayscale(1);
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 /* Checkerboard backing so transparent (background-removed) PNGs don't read
@@ -467,3 +1540,126 @@ input[type="range"]::-webkit-slider-thumb {
   40% { opacity: 1; }
 }
 .lu-band-dot { animation: lu-band-dot 1.2s ease-in-out infinite; }
+
+/* ──────────────────────────────────────────────────────────────────
+   .lu-caret — der Herzschlag des Streams (Audit Welle 3, §4 Befund 7:
+   „Streaming ist kein eigener Zustand ... Das ist der eine Moment, fuer
+   den diese App existiert. Er hat keine Choreografie.").
+
+   Angesetzt wird am LETZTEN Block der gerenderten Antwort, nicht an einem
+   eigenen Element im Baum. Der Grund ist der teuerste Pfad der App: der
+   Balken laeuft waehrend des Streamens, also bei JEDEM Token. Ein
+   `<span>`, das React pro Token neu einhaengt, wuerde die Animation bei
+   jedem Token von vorn starten (ein zuckender statt eines blinkenden
+   Balkens) — ein Pseudoelement gehoert React nicht, es ueberlebt jede
+   Reconciliation des Textknotens darueber und laeuft im Compositor
+   durch. Und das Blinken ist deshalb KEIN JS-Timer: kein setInterval,
+   kein useState, kein requestAnimationFrame, also auch kein Rerender,
+   den es ohne diesen Balken nicht schon gaebe.
+
+   `.markdown-content` ist die Wurzel, die MarkdownRenderer immer setzt;
+   `> :last-child` ist der letzte Block darin, also genau das Ende der
+   zuletzt geschriebenen Zeile. Das ist auch der Grund, warum der Balken
+   beim Absatzwechsel mitspringt, statt am alten Absatz haengen zu
+   bleiben.
+
+   Geometrie: 2px breit (Hairline), `1em` hoch — der Audit nennt 2x14px,
+   und 1em IST 14,35px an der Stelle, an der der Balken steht
+   (`text-[0.78rem]` auf 16px Wurzel × --ui-scale 1.15 = 14,35 gerenderte
+   px, wie vorher auf der 18,4px-Wurzel). In em statt in px, damit er der
+   Schriftgroesse folgt und nicht bei der naechsten Skalenaenderung
+   danebensteht.
+
+   Farbe: `currentColor`, also die Textfarbe des Absatzes, an dem er
+   haengt. Damit fuehrt dieser Balken KEINE neue Farbe ein — er erbt die,
+   die dort schon gemessen ist: #e5e7eb auf #1e1e1e = 13.47:1 (dunkel),
+   #1f2937 auf #ffffff = 14.68:1 (hell). Beides weit ueber den 3:1, die
+   1.4.11 fuer ein Nicht-Text-Signal dieser Groesse verlangt.
+
+   Takt: aus der vorhandenen Motion-Leiter gerechnet, nicht als fuenfte
+   Zahl danebengeschrieben — `--motion-slow` an und `--motion-slow` aus,
+   also 300/300 ms. Der Audit schlaegt 133/133 vor; das waeren 3,8
+   Blitze pro Sekunde, direkt an der Schwelle aus WCAG 2.3.1, und neben
+   laufendem Text liest es sich als Stroboskop. 1,67 Hz sagt dasselbe
+   („hier kommt noch etwas") und flimmert nicht.
+   ────────────────────────────────────────────────────────────────── */
+@keyframes lu-caret-blink {
+  0%, 49.99% { opacity: 1; }
+  50%, 100% { opacity: 0; }
+}
+.lu-caret .markdown-content > :last-child::after {
+  content: '';
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  margin-left: 2px;
+  vertical-align: -0.15em;
+  border-radius: 1px;
+  background-color: currentColor;
+  animation: lu-caret-blink calc(var(--motion-slow) * 2) linear infinite;
+}
+
+/* ─────────────────────────────────────────────────────────────────────
+   „Bewegung reduzieren" respektieren (Audit Welle 2)
+
+   Für einen Teil der Nutzer ist das keine Geschmacksfrage: großflächige
+   Bewegung löst Übelkeit und Schwindel aus. Bisher lief trotz gesetzter
+   Systemeinstellung die volle Animation.
+
+   ENTSCHEIDUNG: nicht auf null. Ein Dialog, der ohne jede Andeutung
+   dasteht, liest sich wie ein Darstellungsfehler — man sieht nicht, ob er
+   gerade aufging oder schon die ganze Zeit da war. Stattdessen wird alles
+   auf eine sehr kurze Ein-/Ausblendung zusammengezogen (--motion-fast,
+   120 ms, linear): kurz genug, dass nichts mehr über den Schirm wandert,
+   lang genug, dass die Zustandsänderung sichtbar bleibt.
+
+   Endlos laufende Zierde (Shimmer, pulsierende Punkte) wird dagegen ganz
+   angehalten — Dauerbewegung hat keine Rückmeldefunktion, sie ist nur
+   Dekoration, und genau sie ist das Problem.
+
+   framer-motion animiert an CSS vorbei (inline Transforms per JS), diese
+   Regel erreicht es also NICHT. Dafür sitzt <MotionConfig reducedMotion="user">
+   an der App-Wurzel (src/App.tsx).
+   ───────────────────────────────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: var(--motion-fast) !important;
+    transition-timing-function: linear !important;
+    /* `iteration-count: 1` beendet auch Dauerschleifen. Ohne das würde die
+       gekürzte Dauer aus einem 1,6-s-Shimmer ein Stroboskop mit acht Durch-
+       läufen pro Sekunde machen — schlimmer als der Ausgangszustand. */
+    animation-duration: var(--motion-fast) !important;
+    animation-iteration-count: 1 !important;
+    animation-timing-function: linear !important;
+    scroll-behavior: auto !important;
+  }
+
+  /* AUSNAHME: der Ladekringel ist keine Zierde, er ist die einzige Auskunft
+     darüber, dass die App noch arbeitet und nicht hängt. Er läuft weiter,
+     aber langsam und gleichförmig (1,5 s statt 1 s) — eine kleine, ortsfeste
+     Drehung ist vestibulär unkritisch, ein eingefrorener Spinner dagegen
+     eine Falschaussage. Gleiches gilt für die Skelett-Pulse. */
+  .animate-spin {
+    animation-duration: 1.5s !important;
+    animation-iteration-count: infinite !important;
+  }
+  .animate-pulse {
+    animation-duration: 3s !important;
+    animation-iteration-count: infinite !important;
+  }
+
+  /* GEGENAUSNAHME: der Caret steht STILL, statt kurz zu zucken. Er ist
+     beides zugleich — der Balken selbst ist Auskunft („der Stream laeuft
+     noch"), sein Blinken ist Zierde. Ohne diese Zeile griffe die Regel
+     ganz oben und machte aus 300/300 ms ein einzelnes 120-ms-Zucken beim
+     Erscheinen, danach stuende er ohnehin. Hier faellt nur der
+     Animations-NAME weg; `opacity: 1` aus der Basisregel bleibt, der
+     Balken ist also sichtbar und ruhig. Deshalb kein !important: die
+     Regel oben setzt Dauer, Zaehler und Kurve, nie den Namen. */
+  .lu-caret .markdown-content > :last-child::after,
+  .lu-control__pulse {
+    animation-name: none;
+  }
+}

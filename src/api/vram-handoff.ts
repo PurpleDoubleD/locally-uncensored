@@ -45,8 +45,11 @@
  */
 
 import { backendCall, ollamaUrl, localFetch, isOllamaLocal, isWindows } from './backend'
+import type { ComfyApiGraph } from '../types/comfy-graph'
+import { asNumber, asRecordArray, asString, prop } from '../types/json-guards'
 import { listRunningModels, loadModel, unloadModel } from './ollama'
 import { startBundledEngine } from './engine'
+import { getAmdGpuArch } from '../lib/hardware'
 import { useSettingsStore } from '../stores/settingsStore'
 import {
   getImageModels,
@@ -56,8 +59,7 @@ import {
   submitWorkflow,
   getHistory,
   freeMemory,
-  cancelGeneration,
-  clearComfyQueue,
+  checkComfyConnection,
   abandonPrompt,
   sweepOrphanedLuJobs,
   extractComfyOutputFiles,
@@ -221,10 +223,12 @@ async function getResidentModels(): Promise<ResidentModel[]> {
     // phase from inheriting the proxy's 5-min default if Ollama is wedged.
     const res = await localFetch(ollamaUrl('/ps'), { timeoutMs: 8_000 })
     if (!res.ok) return []
-    const data = await res.json()
-    return (data.models || []).map((m: any) => ({
-      name: m.name || m.model || '',
-      sizeVram: typeof m.size_vram === 'number' ? m.size_vram : 0,
+    const data: unknown = await res.json()
+    return asRecordArray(prop(data, 'models')).map((m) => ({
+      // `||`, not `??`: an empty `name` has to fall through to `model` the way
+      // it always did.
+      name: asString(m.name) || asString(m.model) || '',
+      sizeVram: asNumber(m.size_vram) ?? 0,
     }))
   } catch {
     return []
@@ -566,6 +570,17 @@ let _cancelSignal: Promise<typeof CANCELLED> = new Promise<typeof CANCELLED>(() 
 // dequeues — its per-run resetCancel() clears the flag, but the epoch persists.
 let _genSeq = 0
 let _cancelledThrough = 0
+/**
+ * The ComfyUI job THIS lane has in flight, or null.
+ *
+ * Stop used to fire a blanket `/interrupt` + a FULL `/queue` clear. Both are
+ * indiscriminate: the interrupt kills whatever is executing (which is our job
+ * only when ours happens to be at the front), and clearing the queue drops the
+ * Create tab's render and every job an external ComfyUI tab on the same server
+ * has queued. A chat-lane Stop is allowed to remove exactly one thing — the
+ * prompt this lane submitted. That is what this id is for.
+ */
+let _currentPromptId: string | null = null
 // Count of runHandoff bodies actually executing. Lets a Stop on a PLAIN text
 // chat (no media gen in flight) skip the ComfyUI /interrupt + full /queue-clear
 // that would otherwise nuke an unrelated Create-tab render or another client.
@@ -592,12 +607,52 @@ export function requestGenerationCancel(): void {
   _cancelledThrough = _genSeq  // cancel every gen created so far (running + queued)
   _cancelNotify?.()            // wake every pending raceCancel immediately
   // Only touch ComfyUI when a chat-initiated generation is actually running.
-  // A plain text-chat Stop must NOT /interrupt + clear the ENTIRE queue (that
-  // would kill an unrelated Create-tab render or another client's job).
-  if (_activeHandoffs > 0) {
-    void cancelGeneration()  // /interrupt the running job (no-op mid model-load)
-    void clearComfyQueue()   // drop anything still queued so it can't start next
+  // A plain text-chat Stop must NOT reach ComfyUI at all.
+  if (_activeHandoffs > 0 && _currentPromptId) {
+    // OUR job, by id — never `/interrupt` + `clear: true`. Those took down the
+    // Create tab's render and the user's own ComfyUI tab along with ours, and
+    // still missed ours whenever it sat behind someone else's in the queue.
+    void abandonPrompt(_currentPromptId)
   }
+  // No prompt id yet means nothing was submitted; the pre-submit check in
+  // submitCancellable is what keeps it that way.
+}
+
+/** Every generation created at or before the last Stop is cancelled — the flag
+ *  is per-run and cleared by resetCancel(), the epoch is not. An abandoned
+ *  promise from a cancelled run must consult THIS, not the flag, or the next
+ *  run's resetCancel() would quietly re-authorise it to submit. */
+function cancelledFor(seq: number): boolean {
+  return _genCancelRequested || seq <= _cancelledThrough
+}
+
+/**
+ * Submit a workflow with the user's Stop honoured on BOTH sides of the request.
+ *
+ * `generateImage` used to go straight from buildDynamicWorkflow to
+ * submitWorkflow with no cancel check between them, and runHandoff only raced
+ * the OVERALL promise — the abandoned one kept running and posted the job
+ * anyway. So Stop, pressed during the (slow, /object_info-bound) workflow
+ * build, told the user the generation was cancelled while the GPU started
+ * rendering something nobody was watching — with the text model already being
+ * reloaded into the same VRAM by the hand-off's finally. Both sides could OOM.
+ */
+async function submitCancellable(
+  workflow: ComfyApiGraph,
+  seq: number,
+): Promise<string | typeof CANCELLED> {
+  if (cancelledFor(seq)) return CANCELLED
+  const promptId = await submitWorkflow(workflow, CLIENT_ID)
+  _currentPromptId = promptId
+  // Stop can land DURING the submit — the check above is already stale by the
+  // time ComfyUI answers. Take the job straight back out.
+  if (cancelledFor(seq)) {
+    log.info('vram_handoff.submit_raced_cancel', { promptId })
+    await abandonPrompt(promptId)
+    _currentPromptId = null
+    return CANCELLED
+  }
+  return promptId
 }
 
 // Last image LU actually produced this session. Small models routinely pass a
@@ -619,6 +674,7 @@ export function __resetGenerationStateForTests(): void {
   _cancelledThrough = 0
   _activeHandoffs = 0
   _genCancelRequested = false
+  _currentPromptId = null
   _lastImageFilename = null
 }
 
@@ -696,6 +752,24 @@ async function runHandoff(kind: 'image' | 'video', args: VramHandoffArgs, seq: n
 
   emitHandoff('deciding', { kind })
 
+  // ComfyUI has to be UP before we ask it anything.
+  //
+  // DECIDE queries the installed models, and getCheckpoints throws while
+  // ComfyUI is down — so the run died right here with "Could not query ComfyUI
+  // models", and the cold start that would have fixed it sat 250 lines further
+  // down, in a phase this return never reached. `image_generate` /
+  // `video_generate` from the chat were therefore dead for every user whose
+  // ComfyUI was not already running: the chat agent could never start it, while
+  // the Create tab started it on the first render. The order is what was wrong,
+  // so the order is what changed. Free when ComfyUI is already up (one
+  // comfyui_status call), and nothing has been evicted yet if it fails.
+  const comfyUp = await ensureComfyRunning()
+  if (_genCancelRequested) return `${label(kind)} generation cancelled.`
+  if (!comfyUp) {
+    emitHandoff('error', { kind, detail: 'ComfyUI did not start' })
+    return 'Error: ComfyUI did not start within 90s. Start it from the Create tab and try again.'
+  }
+
   // ── (a) DECIDE — resolve target model (no side effects yet) ──────
   let targetModel: string
   let videoBackend: VideoBackend = 'none'
@@ -704,7 +778,7 @@ async function runHandoff(kind: 'image' | 'video', args: VramHandoffArgs, seq: n
       const models = await getImageModels()
       if (models.length === 0) {
         emitHandoff('error', { kind, detail: 'no image model installed' })
-        return 'Error: No image model installed. Download one from Models → Discover (e.g. "FLUX.1 [schnell] FP8", "Z-Image Turbo", or "Juggernaut XL V9") and try again.'
+        return 'Error: No image model installed. Download one from Models → Get new (e.g. "FLUX.1 [schnell] FP8", "Z-Image Turbo", or "Juggernaut XL V9") and try again.'
       }
       if (typeof args.model === 'string' && args.model) {
         const resolved = resolveModelName(args.model, models)
@@ -725,7 +799,7 @@ async function runHandoff(kind: 'image' | 'video', args: VramHandoffArgs, seq: n
         const i2vModels = models.filter((m) => isI2VModel(m.name))
         if (i2vModels.length === 0) {
           emitHandoff('error', { kind, detail: 'no i2v model installed' })
-          return 'Error: Image-to-video needs an I2V model such as SVD. Install one from Models → Discover (e.g. "SVD-XT 1.1 (Image to Video)"), then try again.'
+          return 'Error: Image-to-video needs an I2V model such as SVD. Install one from Models → Get new (e.g. "SVD-XT 1.1 (Image to Video)"), then try again.'
         }
         if (typeof args.model === 'string' && args.model) {
           const resolved = resolveModelName(args.model, i2vModels)
@@ -747,7 +821,7 @@ async function runHandoff(kind: 'image' | 'video', args: VramHandoffArgs, seq: n
         const t2vModels = models.filter((m) => isT2VCapable(m.name))
         if (t2vModels.length === 0 || backend === 'none') {
           emitHandoff('error', { kind, detail: 'no text-to-video model installed' })
-          return 'Error: No text-to-video model installed. Download one from Models → Discover (e.g. "Wan 2.1 · 1.3B (Lightweight)" for 8 to 10 GB VRAM or "HunyuanVideo 1.5 T2V FP8" for 12+ GB). Or generate an image first and animate it with an I2V model like "SVD-XT 1.1".'
+          return 'Error: No text-to-video model installed. Download one from Models → Get new (e.g. "Wan 2.1 · 1.3B (Lightweight)" for 8 to 10 GB VRAM or "HunyuanVideo 1.5 T2V FP8" for 12+ GB). Or generate an image first and animate it with an I2V model like "SVD-XT 1.1".'
         }
         if (typeof args.model === 'string' && args.model) {
           const resolved = resolveModelName(args.model, t2vModels)
@@ -934,7 +1008,7 @@ async function runHandoff(kind: 'image' | 'video', args: VramHandoffArgs, seq: n
 
     // ── (b3) HANDOFF-OUT for the built-in engine (GH #85) ──────────
     if (willUnloadBundled && bundledTarget) {
-      emitHandoff('freeing_vram', { kind, detail: 'built-in engine' })
+      emitHandoff('freeing_vram', { kind, detail: 'LU Engine' })
       // Carry the conversation across the eviction: serialize the KV cache to
       // disk, then stop the engine. Restore happens in the finally. When
       // either half fails, the next chat turn just re-processes the history,
@@ -955,6 +1029,10 @@ async function runHandoff(kind: 'image' | 'video', args: VramHandoffArgs, seq: n
 
     // ── (c) GENERATE ───────────────────────────────────────────────
     emitHandoff('loading_image_model', { kind, detail: targetModel })
+    // Re-check, not the first check (that moved above DECIDE). Free when
+    // ComfyUI is up, and it earns its keep on the eviction path: unloading a
+    // text model and waiting for the VRAM to be released takes seconds, and
+    // ComfyUI can die in them.
     const up = await ensureComfyRunning()
     // ensureComfyRunning returns false on a cancel too — distinguish so Stop
     // reads as "cancelled", not the misleading "ComfyUI did not start".
@@ -984,8 +1062,8 @@ async function runHandoff(kind: 'image' | 'video', args: VramHandoffArgs, seq: n
     // background but its output is ignored; requestGenerationCancel already
     // fired /interrupt + queue-clear, and the finally restores the text model.
     const genPromise = kind === 'image'
-      ? generateImage(prompt, targetModel, args)
-      : generateVideo(prompt, targetModel, videoBackend, args)
+      ? generateImage(prompt, targetModel, args, seq)
+      : generateVideo(prompt, targetModel, videoBackend, args, seq)
     const result = await raceCancel(genPromise)
     if (result === CANCELLED) return `${label(kind)} generation cancelled.`
     return result
@@ -1074,7 +1152,12 @@ async function runHandoff(kind: 'image' | 'video', args: VramHandoffArgs, seq: n
 // ── Generation bodies ─────────────────────────────────────────────
 
 /** Image path — mirrors the legacy executeImageGenerate, via buildDynamicWorkflow. */
-async function generateImage(prompt: string, model: string, args: VramHandoffArgs): Promise<string> {
+async function generateImage(
+  prompt: string,
+  model: string,
+  args: VramHandoffArgs,
+  seq: number,
+): Promise<string> {
   const { buildDynamicWorkflow } = await import('./dynamic-workflow')
   try {
     // Capability-aware: read this model's REAL limits/enums from ComfyUI and
@@ -1138,7 +1221,9 @@ async function generateImage(prompt: string, model: string, args: VramHandoffArg
     // (/prompt). Both are now timeout-bounded, so neither can strand the
     // hand-off with the text model unloaded — these logs just pinpoint where.
     log.info('vram_handoff.image.submit', { model, i2i: !!inputImage })
-    const promptId = await submitWorkflow(workflow, CLIENT_ID)
+    const submitted = await submitCancellable(workflow, seq)
+    if (submitted === CANCELLED) return `${label('image')} generation cancelled.`
+    const promptId = submitted
     log.info('vram_handoff.image.submitted', { promptId })
     const result = await pollAndExtract(promptId, prompt, label('image'), getImageTimeoutMs())
     // Remember the produced filename so a follow-up "animate it" video call can
@@ -1160,6 +1245,7 @@ async function generateVideo(
   model: string,
   backend: VideoBackend,
   args: VramHandoffArgs,
+  seq: number,
 ): Promise<string> {
   try {
     const type = classifyModel(model)
@@ -1239,7 +1325,9 @@ async function generateVideo(
         type,
       )
       log.info('vram_handoff.video.submit', { model, mode: inputImage ? 'i2v' : 't2v', wan22: true, steps: tunSteps, cfg: tunCfg })
-      const promptId = await submitWorkflow(workflow, CLIENT_ID)
+      const submitted = await submitCancellable(workflow, seq)
+      if (submitted === CANCELLED) return `${label('video')} generation cancelled.`
+      const promptId = submitted
       log.info('vram_handoff.video.submitted', { promptId })
       return await pollAndExtract(promptId, prompt, label('video'), getVideoTimeoutMs())
     }
@@ -1308,7 +1396,9 @@ async function generateVideo(
         type,
       )
       log.info('vram_handoff.video.submit', { model, i2v: true })
-      const promptId = await submitWorkflow(workflow, CLIENT_ID)
+      const submitted = await submitCancellable(workflow, seq)
+      if (submitted === CANCELLED) return `${label('video')} generation cancelled.`
+      const promptId = submitted
       log.info('vram_handoff.video.submitted', { promptId })
       return await pollAndExtract(promptId, prompt, label('video'), getVideoTimeoutMs())
     }
@@ -1346,7 +1436,9 @@ async function generateVideo(
       backend,
     )
     log.info('vram_handoff.video.submit', { model, i2v: false, backend })
-    const promptId = await submitWorkflow(workflow, CLIENT_ID)
+    const submitted = await submitCancellable(workflow, seq)
+    if (submitted === CANCELLED) return `${label('video')} generation cancelled.`
+    const promptId = submitted
     log.info('vram_handoff.video.submitted', { promptId })
     return await pollAndExtract(promptId, prompt, label('video'), getVideoTimeoutMs())
   } catch (err) {
@@ -1425,6 +1517,23 @@ async function pollAndExtract(promptId: string, prompt: string, kindLabel: strin
   // so a healthy render never pays for the extra request.
   let promptAlive = false
   let aliveCheckedAt = 0
+  // Is ComfyUI still THERE? The loop used to ask only about the prompt, and
+  // getHistory swallows every transport error into `null` — which is also what
+  // a perfectly healthy queued render returns. So a ComfyUI that died mid-render
+  // (crash, OOM kill, the user closing it) was indistinguishable from a slow one:
+  // the chat agent sat here for the full 5/10-minute budget with the text model
+  // evicted from VRAM, unable to answer anything, and then reported a timeout
+  // instead of the truth. Probed on a timer, like the Create tab's heartbeat,
+  // and only a SECOND consecutive failure counts — one refused /system_stats
+  // during a heavy sampler step is not a dead server.
+  // Probed from the FIRST tick (a ComfyUI that is already gone when polling
+  // starts is the worst case: nothing will ever arrive), then every 15 s while
+  // it answers, and every tick once a probe has failed — a suspected-dead
+  // server deserves its second look now, not in fifteen seconds.
+  let comfyProbedAt = 0
+  let comfyMisses = 0
+  const COMFY_PROBE_EVERY_MS = 15_000
+  const COMFY_RECHECK_MS = 1_000
   const offProgress = comfyWS.on((ev) => {
     if (ev.type === 'progress') {
       sawAnyProgress = true
@@ -1483,13 +1592,36 @@ async function pollAndExtract(promptId: string, prompt: string, kindLabel: strin
         // Pull the richest detail ComfyUI gives us: an execution_error carries
         // node_type + exception_type + exception_message (the plain `message`
         // field is usually empty for node errors — David 2026-06-11, FramePack).
-        const errEntry = history.status.messages?.find((m: any) => m?.[0] === 'execution_error')?.[1]
+        // ComfyHistoryEntry DECLARES `messages` as pairs; getHistory only
+        // checked that the entry is an object, so the array-ness is tested
+        // here rather than assumed by a `?.find` that would throw on a string.
+        const messages = Array.isArray(history.status.messages) ? history.status.messages : []
+        const errEntry = messages.find((m) => m?.[0] === 'execution_error')?.[1]
         const rawMsg = errEntry?.exception_message
-          || history.status.messages?.map((m: any) => m?.[1]?.message).filter(Boolean).join(' | ')
-          || history.status.messages?.[0]?.[1]?.message
+          || messages.map((m) => m?.[1]?.message).filter(Boolean).join(' | ')
+          || messages[0]?.[1]?.message
           || 'Unknown ComfyUI error'
-        const hint = comfyErrorHint(errEntry?.node_type, errEntry?.exception_type, String(rawMsg))
+        // The architecture only matters for the hipErrorInvalidValue branch, so
+        // it is only fetched for that branch. detect_gpus shells out to several
+        // vendor tools, each bounded at five seconds, and putting that in front
+        // of EVERY ComfyUI failure would have delayed an out-of-memory message
+        // or a missing-node message by seconds for nothing.
+        const raw = String(rawMsg)
+        const arch = /hiperrorinvalidvalue/i.test(raw) ? await getAmdGpuArch().catch(() => null) : null
+        const hint = comfyErrorHint(errEntry?.node_type, errEntry?.exception_type, raw, arch)
         return `${kindLabel} generation failed: ${rawMsg}${hint ? `\n\n${hint}` : ''}`
+      }
+      const probeGap = comfyMisses > 0 ? COMFY_RECHECK_MS : COMFY_PROBE_EVERY_MS
+      if (Date.now() - comfyProbedAt >= probeGap) {
+        comfyProbedAt = Date.now()
+        const alive = await raceCancel(checkComfyConnection())
+        if (alive === CANCELLED) return `${kindLabel} generation cancelled.`
+        comfyMisses = alive ? 0 : comfyMisses + 1
+        if (comfyMisses >= 2) {
+          const elapsedMs = Date.now() - startedAt
+          log.warn('vram_handoff.comfy_died_mid_render', { promptId, elapsedMs })
+          return `${kindLabel} generation failed: ComfyUI stopped responding after ${Math.round(elapsedMs / 1000)}s, so the render cannot finish. Start ComfyUI from the Create tab and try again.`
+        }
       }
       const projected = pace.projectedTotalMs()
       if (overBudget(projected, timeoutMs)) {
@@ -1510,6 +1642,10 @@ async function pollAndExtract(promptId: string, prompt: string, kindLabel: strin
     }
   } finally {
     offProgress()
+    // The job is settled (delivered, failed, abandoned or cancelled): a later
+    // Stop must not go looking for it in ComfyUI's queue, where the id may by
+    // then belong to nothing — or, after a wrap, to somebody else's work.
+    if (_currentPromptId === promptId) _currentPromptId = null
   }
 }
 
@@ -1520,7 +1656,12 @@ async function pollAndExtract(promptId: string, prompt: string, kindLabel: strin
  * Returns '' when we have nothing better to add than the verbatim error.
  * Exported + pure for the unit tests.
  */
-export function comfyErrorHint(nodeType: string | undefined, _excType: string | undefined, message: string): string {
+export function comfyErrorHint(
+  nodeType: string | undefined,
+  _excType: string | undefined,
+  message: string,
+  gpuArch?: string | null,
+): string {
   const m = message.toLowerCase()
   // FramePack wrapper version mismatch (David 2026-06-11, RTX 3060): the
   // installed ComfyUI-FramePackWrapper's LoadFramePackModel produces a
@@ -1542,6 +1683,23 @@ export function comfyErrorHint(nodeType: string | undefined, _excType: string | 
       m.includes('hiperrornobinaryforgpu') ||
       m.includes('tensilelibrary')) {
     return 'Your AMD card was found and used, but the ROCm build of PyTorch in this ComfyUI environment carries no compute kernels for this particular chip, so the first step of the render had nothing to run. Rebuilding the environment installs the same wheels and will not change this. Set Settings → Hardware → ComfyUI GPU to Force CPU to render on the processor instead: much slower, but it completes. Running ComfyUI with HSA_OVERRIDE_GFX_VERSION=10.3.0 is the community workaround for RDNA 2 cards; it is not supported by AMD and LU does not set it for you.'
+  }
+  // A12 (artoriuskurokami, Discord 2026-09-02, RX 9070 XT): image generation
+  // dies on `CUDA error: invalid argument / Search for 'hipErrorInvalidValue'`
+  // while the same run on the processor completes. The card is RDNA 4, which is
+  // new enough that a ROCm PyTorch built before it has no kernels for the
+  // target, and HIP rejects the very first launch instead of saying so.
+  //
+  // The architecture is NAMED here when a tool named it (gpuArch comes from the
+  // HIP SDK's hipinfo via detect_gpus) and otherwise the user is pointed at the
+  // two commands that print it. Nothing in this string is a version or a table
+  // of which card is which target: both sides are read off the machine.
+  if (m.includes('hiperrorinvalidvalue')) {
+    const mine = gpuArch ? `Your card reports ${gpuArch}. ` : ''
+    const check = gpuArch
+      ? `${gpuArch} has to appear in the list printed by`
+      : 'Read your card\'s target from the gcnArchName line of hipinfo in the HIP SDK\'s bin folder, then check that it appears in the list printed by'
+    return `Your AMD card was found and the render started, but the first HIP call came back with hipErrorInvalidValue. On a recent Radeon this is almost always an architecture mismatch: the chip reports one gfx target and the ROCm build of PyTorch in this ComfyUI environment carries kernels for other ones. ${mine}${check}: python -c "import torch; print(torch.cuda.get_arch_list())" run inside the ComfyUI environment. If it is missing there, rebuilding this environment installs the same wheels and will not add it; you need a PyTorch ROCm build that names your target. Set Settings, Hardware, ComfyUI GPU to Force CPU to finish the render on the processor in the meantime.`
   }
   if (m.includes('out of memory') || m.includes('outofmemory') || _excType === 'torch.OutOfMemoryError') {
     return 'Ran out of GPU memory. Try a shorter clip / lower resolution, set VRAM hand-off to "always" in Settings so the chat model is evicted first, or pick a lighter model.'

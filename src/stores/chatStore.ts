@@ -1,13 +1,21 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { v4 as uuid } from 'uuid'
-import type { Conversation, Message, ChatArtifact } from '../types/chat'
+import type { Conversation, Message, ChatArtifact, CompactionRecord } from '../types/chat'
 import type { AgentBlock } from '../types/agent-mode'
 import { idbStorage } from '../lib/idbStorage'
 import { coalescedJSONStorage } from '../lib/coalescedStorage'
 import { migrateBlockInPlace } from '../api/agents/block-helpers'
 import { useGenerationStore } from './generationStore'
 import { useRemoteStore } from './remoteStore'
+import { useRAGStore } from './ragStore'
+import { useTodoStore } from './todoStore'
+import { usePermissionStore } from './permissionStore'
+import { useStagedChangesStore } from './stagedChangesStore'
+import { useCodexStore } from './codexStore'
+import { useAgentTaskStore } from './agentTaskStore'
+import { log } from '../lib/logger'
+import { isRecord, prop } from '../types/json-guards'
 
 /**
  * Rehydration migration for Phase 1 (v2.4.0) — wraps legacy
@@ -15,18 +23,77 @@ import { useRemoteStore } from './remoteStore'
  * form. Idempotent: safe to run on already-migrated data. Leaves the legacy
  * field in place during a transition window so reads via either shape work.
  */
-export function migratePersistedChat(state: any): any {
-  if (!state || !Array.isArray(state.conversations)) return state
-  for (const conv of state.conversations) {
-    if (!conv || !Array.isArray(conv.messages)) continue
-    for (const msg of conv.messages) {
-      if (!msg || !Array.isArray(msg.agentBlocks)) continue
-      for (const block of msg.agentBlocks as AgentBlock[]) {
-        if (block) migrateBlockInPlace(block)
+export function migratePersistedChat(state: unknown): unknown {
+  const conversations = prop(state, 'conversations')
+  if (!Array.isArray(conversations)) return state
+  for (const conv of conversations) {
+    const messages = prop(conv, 'messages')
+    if (!Array.isArray(messages)) continue
+    for (const msg of messages) {
+      const blocks = prop(msg, 'agentBlocks')
+      if (!Array.isArray(blocks)) continue
+      for (const block of blocks) {
+        // migrateBlockInPlace reads `toolCall` and `toolCalls` and writes
+        // `toolCalls`; the cast claims no more than those three, and the
+        // record check above is what makes even that much true.
+        if (isRecord(block)) migrateBlockInPlace(block as unknown as AgentBlock)
       }
     }
   }
   return state
+}
+
+/**
+ * Everything OUTSIDE this store that is keyed by conversation id.
+ *
+ * Deleting a chat used to remove exactly one row — the one in `conversations` —
+ * and leave five other stores holding that id forever. Nothing ever collects
+ * them, because the id is the only thing that could prove they are orphans and
+ * the id is what was just thrown away.
+ *
+ * Two of the five are expensive, for different reasons:
+ *
+ *  - RAG: its 768-float embedding vectors stay in IndexedDB AND keep being
+ *    exported to rag_chunks_backup.json every 30 s for the lifetime of the
+ *    installation.
+ *  - codex: a Coding-Agent thread carries an event ring of up to 500 entries,
+ *    and each entry is either an UNTRUNCATED terminal result (the 60k cap in
+ *    useCodex applies to what goes back to the model, not to what is stored)
+ *    or a full unified diff — tens of megabytes for a chat that is gone. Its
+ *    status also keeps voting in `lib/run-idle.ts`, so a chat deleted mid-run
+ *    could leave a thread stuck at 'running' and defer every idle-gated dialog
+ *    for the rest of the session. And `codexStore.modeByConversation` is
+ *    PERSISTED, which is the difference between leaking until the next restart
+ *    and leaking for good.
+ *
+ * The list below ran with FOUR entries while this comment said five (and the
+ * one below it said "the other four") — codex was the missing step, and the
+ * mismatch between the two numbers was the only sign of it. Number and list
+ * are now the same thing; keep them that way.
+ *
+ * Each store is its own try/catch: one of them failing must not leave the other
+ * four uncleaned, and none of them may stop the chat from being deleted.
+ *
+ * Exported so a test can assert the sweep without going through the store.
+ */
+export function dropConversationSideState(id: string): void {
+  const steps: [string, () => void][] = [
+    ['rag', () => useRAGStore.getState().removeConversation(id)],
+    ['todos', () => useTodoStore.getState().clearTodos(id)],
+    ['permissions', () => usePermissionStore.getState().clearConversationOverrides(id)],
+    ['staged-changes', () => useStagedChangesStore.getState().clear(id)],
+    ['codex', () => useCodexStore.getState().dropConversation(id)],
+    // 2.6.8: Hintergrundagenten. Diese Zeile fehlte, und sie ist die einzige
+    // in der Liste, die etwas ABBRICHT statt nur zu vergessen — ein
+    // delegierter Agent laeuft in einem eigenen Versprechen weiter, auch wenn
+    // sein Chat weg ist.
+    ['agent-tasks', () => useAgentTaskStore.getState().clearConv(id)],
+  ]
+  for (const [what, run] of steps) {
+    try { run() } catch (err) {
+      log.warn('[chatStore] could not clear side state for a deleted chat', { store: what, err: String(err) })
+    }
+  }
 }
 
 interface ChatState {
@@ -55,6 +122,12 @@ interface ChatState {
    *  chat, and bumping it would jump the chat to the top of the sidebar. */
   setActiveConversationModel: (model: string) => void
   addMessage: (conversationId: string, message: Message) => void
+  /** Append a compaction record (2.6.8). Newest last; every record up to the
+   *  cut is applied, not only the newest. Until 2026-09-05 only the newest one
+   *  went out, and since each run deliberately summarises only what the
+   *  previous one did not cover, a second compaction dropped the first
+   *  section entirely. See `applyStoredCompaction`. */
+  recordCompaction: (conversationId: string, record: CompactionRecord) => void
   insertMessageBefore: (conversationId: string, beforeId: string, message: Message) => void
   insertMessagesBefore: (conversationId: string, beforeId: string, messages: Message[]) => void
   updateMessageContent: (conversationId: string, messageId: string, content: string) => void
@@ -109,6 +182,41 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
   })
 }
 
+/**
+ * Die Titel, die eine Konversation TRAEGT, bis sie einen eigenen bekommt.
+ *
+ * Sie stehen hier als Konstanten und nicht als Literale an den beiden
+ * Verwendungsstellen, weil genau ihr Auseinanderlaufen der Fehler war:
+ * `createConversation` vergab fuer den Code-Modus 'Coding Agent',
+ * `addMessage` benannte aber nur um, wenn der Titel exakt 'New Chat' war.
+ * Eine Code-Sitzung startete also mit einem Namen, den die Umbenennung nicht
+ * kannte, und behielt ihn fuer immer — zehn Sitzungen hiessen zehnmal gleich
+ * und waren in der Seitenleiste nur am Datum auseinanderzuhalten.
+ *
+ * David am 02.09.2026: "Code bereich heisst im Chat immer nur Coding Chat. da
+ * brauchen wir das selbe verhalten wie im normalen Chat, das sauber erkennbar
+ * ist, welche Session, welche war."
+ */
+const NEW_CHAT_TITLE = 'New Chat'
+const CODEX_DEFAULT_TITLE = 'Coding Agent'
+
+/**
+ * Traegt diese Konversation noch den Namen ihrer Gattung?
+ *
+ * Nur dann darf die erste Nutzernachricht ihn ersetzen. Wer selbst umbenannt
+ * hat, behaelt seinen Namen — das ist der Fall, an dem eine zu grosszuegige
+ * Bedingung zerbraeche.
+ *
+ * Remote ist ABSICHTLICH nicht dabei: 'Remote Chat 1', '… 2', '… 3' tragen
+ * eine laufende Nummer und sind damit bereits unterscheidbar, was der Grund
+ * fuer die Nummerierung war. Die Auslassung ist eine Entscheidung, kein
+ * vergessener Fall, und code-sessions-heissen-verschieden.test.ts haelt sie
+ * fest, damit sie es bleibt.
+ */
+function isStillDefaultTitle(title: string): boolean {
+  return title === NEW_CHAT_TITLE || title === CODEX_DEFAULT_TITLE
+}
+
 export const useChatStore = create<ChatState>()(
   persist(
     (set, get) => ({
@@ -121,12 +229,12 @@ export const useChatStore = create<ChatState>()(
         let title: string
         // 'codex' is the internal back-compat mode id; the user-facing
         // default title is "Coding Agent".
-        if (mode === 'codex') title = 'Coding Agent'
+        if (mode === 'codex') title = CODEX_DEFAULT_TITLE
         else if (mode === 'remote') {
           const state = get()
           const nextNum = state.conversations.filter((c) => c.mode === 'remote').length + 1
           title = `Remote Chat ${nextNum}`
-        } else title = 'New Chat'
+        } else title = NEW_CHAT_TITLE
         const conversation: Conversation = {
           id,
           title,
@@ -169,6 +277,7 @@ export const useChatStore = create<ChatState>()(
             void remote.undispatch()
           }
         } catch { /* best-effort */ }
+        dropConversationSideState(id)
         set((state) => ({
           conversations: state.conversations.filter((c) => c.id !== id),
           activeConversationId:
@@ -212,6 +321,18 @@ export const useChatStore = create<ChatState>()(
           }
         }),
 
+      recordCompaction: (conversationId, record) =>
+        set((state) => ({
+          conversations: state.conversations.map((c) =>
+            c.id === conversationId
+              // updatedAt deliberately NOT touched: a compaction changes what
+              // is SENT, not what the user wrote, and bumping it would reorder
+              // the sidebar as if the chat had new activity.
+              ? { ...c, compactions: [...(c.compactions ?? []), record] }
+              : c
+          ),
+        })),
+
       addMessage: (conversationId, message) =>
         set((state) => ({
           conversations: state.conversations.map((c) =>
@@ -221,7 +342,7 @@ export const useChatStore = create<ChatState>()(
                 messages: [...c.messages, message],
                 updatedAt: Date.now(),
                 title:
-                  c.title === 'New Chat' && message.role === 'user'
+                  isStillDefaultTitle(c.title) && message.role === 'user'
                     ? message.content.slice(0, 50)
                     : c.title,
               }
@@ -390,7 +511,11 @@ export const useChatStore = create<ChatState>()(
       importConversations: (incoming, mode = 'merge') => {
         // Normalize legacy block shapes on the way in (the same migration the
         // persist layer runs on load), so an older export hydrates cleanly.
-        const clean = ((migratePersistedChat({ conversations: incoming })?.conversations ?? incoming) as Conversation[])
+        // It mutates the array it is handed and returns the same object, so
+        // `incoming` IS the normalised list afterwards — no cast needed, and
+        // the old `?? incoming` fallback could never fire.
+        migratePersistedChat({ conversations: incoming })
+        const clean = incoming
         let added = 0
         let skipped = 0
         set((state) => {
@@ -429,9 +554,23 @@ export const useChatStore = create<ChatState>()(
       // Phase 1 (v2.4.0) — rehydrate legacy singular `toolCall` into `toolCalls[]`.
       // Persisted shape is whatever was last written; migration runs on every load
       // and is idempotent, so version bumps are not required.
-      merge: (persistedState: any, currentState: ChatState) => {
+      //
+      // Deliberately still NO `version` here, and the 2.6.8 audit's argument for
+      // adding one does not survive contact with zustand 5.0.12. It assumed an
+      // unversioned store writes no version, so a later `version: 1` would find
+      // `undefined` and skip migrate for every existing user. It writes 0 —
+      // `version: 0` is persistImpl's own default and it goes into the blob — and
+      // a v0 blob DOES reach a migrate declared at 1. See persist-version.ts for
+      // the executable proof.
+      //
+      // Adding a number is not free either: an older build declaring no version
+      // reads its own 0, sees a blob at 1, has no migrate, and throws the entire
+      // chat history away. That is the R1 DOWNGRADE-KONTRAKT (see codexStore) —
+      // 2.6.x builds share one WebView profile — so stamping a number here would
+      // buy nothing and cost a reset on every downgrade.
+      merge: (persistedState, currentState) => {
         const migrated = migratePersistedChat(persistedState)
-        return { ...currentState, ...(migrated || {}) }
+        return { ...currentState, ...(isRecord(migrated) ? migrated : {}) }
       },
     }
   )

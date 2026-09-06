@@ -8,6 +8,9 @@
  * message, with no subject and no hint of who said it.
  */
 import { describe, it, expect } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+import { dirname, resolve } from 'node:path'
 import { detailOf, withDetail, withInstallerOutput } from '../error-text'
 
 describe('detailOf', () => {
@@ -52,26 +55,48 @@ describe('withDetail', () => {
 
 describe('the surfaces that used to set foreign text as the whole message', () => {
   const read = (p: string) =>
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    require('node:fs').readFileSync(
-      require('node:path').resolve(__dirname, '..', '..', p),
-      'utf8',
-    ) as string
+    readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', p), 'utf8')
 
   it('first run frames every installer log tail', () => {
     // Onboarding is the highest visibility surface in the app and it had four
     // of these, one per installer. A bare log tail there is the first thing a
     // new user ever reads from us.
-    const src = read('components/onboarding/Onboarding.tsx')
+    //
+    // PATH ONLY (W-T3, 2026-09-01): the four installers used to sit in one
+    // 1909-line Onboarding.tsx. Two of them (Ollama, LM Studio) now live in
+    // BackendsStep.tsx and two (ComfyUI, Python) in ComfyStep.tsx. Both files
+    // are read here, so the claim still covers all four — reading only the
+    // shell would have made this test green by looking at a file that no
+    // longer contains a single installer.
+    const src = [
+      read('components/onboarding/BackendsStep.tsx'),
+      read('components/onboarding/ComfyStep.tsx'),
+    ].join('\n')
     expect(src).toContain('withInstallerOutput')
     expect(src).not.toMatch(/set\w*Error\(lastLog\)/)
     expect(src).not.toMatch(/setPythonInstallError\(lastLog\)/)
+    // And the shell really is out of the installer business now.
+    expect(read('components/onboarding/Onboarding.tsx')).not.toContain('lastLog')
   })
 
   it('Settings frames its installer log tails too', () => {
-    const src = read('components/settings/SettingsPage.tsx')
+    // PATH ONLY (2026-09-02): SettingsPage.tsx used to hold the ComfyUI and
+    // Python install state and framed the log tails where it set them. That
+    // state moved into stores/comfyInstallStore.ts so install and repair
+    // progress survives a section switch; SettingsPage renders the store now
+    // and sets no install error of its own. The store is read here too, so
+    // the claim still covers the whole Settings surface instead of going
+    // green on a file that no longer frames anything.
+    const src = [
+      read('components/settings/SettingsPage.tsx'),
+      read('stores/comfyInstallStore.ts'),
+    ].join('\n')
     expect(src).toContain('withInstallerOutput')
-    expect(src).not.toMatch(/setInstallErr\(lastLog \|\|/)
+    // The shape the frame replaced: a log tail set as the whole message.
+    expect(src).not.toMatch(/error: lastLog\b/)
+    // And Settings itself really is out of the installer business, so there is
+    // no second, unframed path left behind in the file that renders it.
+    expect(read('components/settings/SettingsPage.tsx')).not.toContain('lastLog')
   })
 
   it('the updater frames what the update plugin reports', () => {

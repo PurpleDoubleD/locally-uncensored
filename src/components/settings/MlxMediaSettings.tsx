@@ -10,7 +10,7 @@
 // while something runs instead of holding progress in React.
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Cpu, Download, Trash2, Loader2, Check, AlertTriangle, Film, Image as ImageIcon, KeyRound } from 'lucide-react'
+import { Cpu, Download, Trash2, Loader2, Check, AlertTriangle, Film, Image as ImageIcon } from 'lucide-react'
 import {
   mlxStatus,
   listMlxImageModels,
@@ -19,12 +19,9 @@ import {
   deleteMlxImageModel,
   installMlxImageEngine,
   getMlxImageEngineStatus,
-  applyHfToken,
-  HF_TOKEN_ACCOUNT,
   type MlxStatus,
   type MlxImageModel,
 } from '../../api/mlx-image'
-import { secretGet, secretSet } from '../../api/backend'
 import {
   getVideoStatus,
   listVideoModels,
@@ -78,14 +75,11 @@ export function MlxMediaSettings({ only }: { only?: 'image' | 'video' } = {}) {
   const [progress, setProgress] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
-  const [hfToken, setHfToken] = useState('')
-  const [hfSaving, setHfSaving] = useState(false)
-  const [hfSaved, setHfSaved] = useState(false)
 
   // Keep the latest busy kind readable from inside the interval callback
   // without re-arming the timer on every state change.
   const busyRef = useRef<Busy>(null)
-  busyRef.current = busy
+  useEffect(() => { busyRef.current = busy }, [busy])
 
   const refresh = useCallback(async () => {
     const [e, i, v, vm] = await Promise.all([
@@ -100,36 +94,12 @@ export function MlxMediaSettings({ only }: { only?: 'image' | 'video' } = {}) {
     setVideos(vm)
   }, [])
 
+  // The state writes sit behind four awaits inside `refresh`; the compiler
+  // lint reads through the callback and calls them synchronous anyway.
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void refresh()
   }, [refresh])
-
-  // The keychain is the store of record; Rust only holds the token in memory,
-  // so every app start has to push it down again. Doing that here means the
-  // token is live before the user can start a download from this very panel.
-  useEffect(() => {
-    void (async () => {
-      const stored = await secretGet(HF_TOKEN_ACCOUNT).catch(() => null)
-      if (!stored) return
-      setHfToken(stored)
-      await applyHfToken(stored).catch(() => {})
-    })()
-  }, [])
-
-  const saveHfToken = useCallback(async () => {
-    setHfSaving(true)
-    setError(null)
-    try {
-      const value = hfToken.trim()
-      await secretSet(HF_TOKEN_ACCOUNT, value)
-      await applyHfToken(value)
-      setHfSaved(true)
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
-    } finally {
-      setHfSaving(false)
-    }
-  }, [hfToken])
 
   // Poll the Rust install slot for whichever install is running.
   useEffect(() => {
@@ -291,34 +261,6 @@ export function MlxMediaSettings({ only }: { only?: 'image' | 'video' } = {}) {
           <div className="text-[0.65rem] leading-relaxed break-words">{error}</div>
         </div>
       )}
-
-      <div className="p-2.5 rounded-lg border border-gray-200 dark:border-white/8">
-        <div className="flex items-center gap-1.5">
-          <KeyRound size={12} className="text-gray-500" />
-          <span className="text-[0.7rem] text-gray-800 dark:text-gray-200">HuggingFace token</span>
-          <span className="text-[0.55rem] text-gray-500">optional</span>
-        </div>
-        <div className="text-[0.6rem] text-gray-500 leading-relaxed mt-1">
-          Models download from HuggingFace. Without a token those downloads are anonymous, and the hub throttles them
-          heavily; a slow download is almost always this. A free token also unlocks models that require accepting a
-          licence. Stored in your Mac keychain, never sent anywhere but HuggingFace.
-        </div>
-        <div className="flex gap-1.5 mt-2">
-          <input
-            type="password"
-            value={hfToken}
-            onChange={(e) => { setHfToken(e.target.value); setHfSaved(false) }}
-            placeholder="hf_…"
-            spellCheck={false}
-            aria-label="HuggingFace token"
-            className="flex-1 min-w-0 px-2 py-1 rounded text-[0.65rem] font-mono bg-gray-50 dark:bg-white/[0.04] border border-gray-200 dark:border-white/10 outline-none focus:border-purple-400"
-          />
-          <button className={primaryCls} onClick={saveHfToken} disabled={hfSaving}>
-            {hfSaved ? <Check size={11} /> : null}
-            {hfSaved ? 'Saved' : 'Save'}
-          </button>
-        </div>
-      </div>
 
       {/* ── Image ─────────────────────────────────────────── */}
       {showImage && (<>

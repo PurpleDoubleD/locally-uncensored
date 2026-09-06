@@ -14,17 +14,25 @@ import { MCPExternalClient } from '../external-client'
 import type { MCPServerConfig } from '../types'
 
 class Emitter {
-  private handlers: Record<string, ((data: any) => void)[]> = {}
-  on(event: string, fn: (data: any) => void) {
+  private handlers: Record<string, ((data: string) => void)[]> = {}
+  on(event: string, fn: (data: string) => void) {
     ;(this.handlers[event] ||= []).push(fn)
   }
-  emit(event: string, data?: any) {
+  emit(event: string, data = '') {
     for (const fn of this.handlers[event] || []) fn(data)
   }
 }
 
+/** One JSON-RPC request line as the fake server sees it. */
+interface FakeRequest {
+  jsonrpc?: string
+  id?: number
+  method?: string
+  params?: { arguments?: Record<string, unknown> }
+}
+
 /** Server behaviour a single test wants: id/method → response line. */
-type Responder = (req: any) => string | null
+type Responder = (req: FakeRequest) => string | null
 
 let lastServer: FakeServer | null = null
 let killCount = 0
@@ -55,6 +63,12 @@ class FakeServer extends Emitter {
   }
   constructor() {
     super()
+    // Not the `const self = this` idiom the rule is aimed at (that one is
+    // fixed by an arrow function). This hands the freshly built fake to the
+    // test file so assertions can reach the instance the code under test
+    // constructed — there is no other handle on it, and no arrow function
+    // would produce one.
+    // eslint-disable-next-line @typescript-eslint/no-this-alias
     lastServer = this
   }
   async spawn() {
@@ -104,7 +118,7 @@ const goodServer: Responder = (req) => {
     return JSON.stringify({
       jsonrpc: '2.0',
       id: req.id,
-      result: { content: [{ type: 'text', text: `sunny in ${req.params.arguments.city}` }] },
+      result: { content: [{ type: 'text', text: `sunny in ${String(req.params?.arguments?.city)}` }] },
     })
   }
   return null
@@ -162,6 +176,54 @@ describe('connecting to an external server', () => {
     responder = (req) => JSON.stringify({ jsonrpc: '2.0', id: req.id, error: { code: -32602, message: 'unknown city' } })
 
     await expect(client.callTool('get_forecast', { city: 'Atlantis' })).rejects.toThrow('unknown city')
+  })
+
+  /**
+   * A server that does not follow JSON-RPC still FAILED, and the only wrong
+   * answer is to call it a success.
+   *
+   * `if (response.error)` was true for any truthy value, so a bare-string error
+   * was at least rejected (with an unusable `Error: undefined`). Narrowing the
+   * field to a record turned exactly those lines into `resolve(undefined)` —
+   * the model was told the tool had run. The rule pinned here: any PRESENT
+   * error rejects, and the server's own text is what comes out.
+   */
+  it('rejects when `error` is a bare string, not a record', async () => {
+    const client = new MCPExternalClient(config)
+    await client.connect()
+    responder = (req) => JSON.stringify({ jsonrpc: '2.0', id: req.id, error: 'server exploded' })
+
+    await expect(client.callTool('get_forecast', { city: 'Atlantis' })).rejects.toThrow('server exploded')
+  })
+
+  it('rejects when `error` is a non-string primitive', async () => {
+    const client = new MCPExternalClient(config)
+    await client.connect()
+    responder = (req) => JSON.stringify({ jsonrpc: '2.0', id: req.id, error: 500 })
+
+    await expect(client.callTool('get_forecast', { city: 'Atlantis' })).rejects.toThrow('500')
+  })
+
+  it('rejects when `error` is a record without a message, naming what came back', async () => {
+    const client = new MCPExternalClient(config)
+    await client.connect()
+    responder = (req) => JSON.stringify({ jsonrpc: '2.0', id: req.id, error: { code: -32601 } })
+
+    await expect(client.callTool('get_forecast', { city: 'Atlantis' })).rejects.toThrow('-32601')
+  })
+
+  it('NEGATIVE CONTROL: `error: null` is not an error — the result still resolves', async () => {
+    const client = new MCPExternalClient(config)
+    await client.connect()
+    responder = (req) =>
+      JSON.stringify({
+        jsonrpc: '2.0',
+        id: req.id,
+        error: null,
+        result: { content: [{ type: 'text', text: 'still fine' }] },
+      })
+
+    expect(await client.callTool('get_forecast', { city: 'Berlin' })).toBe('still fine')
   })
 
   it('refuses to call a tool before connecting', async () => {
@@ -235,5 +297,72 @@ describe('disconnect', () => {
     expect(killCount).toBe(1)
     expect(client.isConnected()).toBe(false)
     await expect(client.callTool('get_forecast', {})).rejects.toThrow('Not connected')
+  })
+})
+
+describe('a server that dies on its own', () => {
+  it('tells its owner, so the tools can leave the registry and the UI can stop lying', async () => {
+    // Before this the close event only flipped a private boolean. The tools
+    // stayed registered and the settings panel stayed green, so the model was
+    // still offered a tool whose process was gone and every call came back
+    // "Not connected" for as long as the app stayed open.
+    const exits: string[] = []
+    const client = new MCPExternalClient(config, { onExit: (id) => exits.push(id) })
+    await client.connect()
+
+    lastServer!.emit('close')
+
+    expect(exits).toEqual(['srv-1'])
+    expect(client.isConnected()).toBe(false)
+  })
+
+  it('fails the in-flight calls instead of leaving them to time out', async () => {
+    const client = new MCPExternalClient(config)
+    await client.connect()
+    responder = () => null                       // the server answers nothing
+    const call = client.callTool('get_forecast', { city: 'Berlin' })
+
+    lastServer!.emit('close')
+
+    await expect(call).rejects.toThrow(/Server process exited/)
+  })
+
+  it('NEGATIVE CONTROL: our own disconnect is not reported as a death', async () => {
+    const exits: string[] = []
+    const client = new MCPExternalClient(config, { onExit: (id) => exits.push(id) })
+    await client.connect()
+
+    await client.disconnect()
+    lastServer!.emit('close')                    // the real plugin emits this too
+
+    expect(exits).toEqual([])
+  })
+
+  it('NEGATIVE CONTROL: a close before the handshake finished reports nothing', async () => {
+    const exits: string[] = []
+    const client = new MCPExternalClient(config, { onExit: (id) => exits.push(id) })
+    responder = () => null
+    const connecting = client.connect()
+    await serverStarted()
+    lastServer!.emit('close')
+
+    await expect(connecting).rejects.toThrow()
+    expect(exits).toEqual([])
+  })
+})
+
+describe('the settings panel is what acts on that', () => {
+  it('unregisters the dead server\'s tools and turns its light off', async () => {
+    const { readFileSync } = await import('node:fs')
+    const { resolve, dirname } = await import('node:path')
+    const { fileURLToPath } = await import('node:url')
+    const panel = readFileSync(
+      resolve(dirname(fileURLToPath(import.meta.url)), '../../../components/settings/MCPServerSettings.tsx'),
+      'utf8',
+    )
+    expect(panel).toContain('onExit: (id) => {')
+    expect(panel).toContain('toolRegistry.unregisterServer(id)')
+    expect(panel).toContain('setConnected(id, false)')
+    expect(panel).toContain('clearServerTools(id)')
   })
 })

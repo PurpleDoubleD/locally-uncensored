@@ -38,7 +38,7 @@ export function DiffView({ diff, maxLines = 200 }: Props) {
           </span>
         </div>
       )}
-      <pre className="text-[0.58rem] leading-relaxed font-mono overflow-auto scrollbar-thin max-h-[300px]">
+      <pre className="t-micro leading-relaxed font-mono overflow-auto scrollbar-thin max-h-[300px]">
         {lines.map((l, i) => {
           if (l.kind === 'header') {
             return (

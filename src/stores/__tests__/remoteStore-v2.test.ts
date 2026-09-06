@@ -18,7 +18,11 @@ vi.mock('../../api/backend', () => ({
   isTauri: vi.fn(() => true),
 }))
 import { backendCall } from '../../api/backend'
+import { prop } from '../../types/json-guards'
 const mockBackend = backendCall as unknown as ReturnType<typeof vi.fn>
+
+/** Die unveraenderte Implementierung, einmal vor dem ersten Test gegriffen. */
+const realGetMemoriesForPrompt = useMemoryStore.getState().getMemoriesForPrompt
 
 beforeEach(() => {
   mockBackend.mockClear()
@@ -40,7 +44,13 @@ beforeEach(() => {
     dispatchedConversationId: null,
     qrVisible: false,
   })
-  useMemoryStore.setState({ memories: [] } as any)
+  // Der Reset hiess frueher `memories` — ein Feld, das der Store nicht hat;
+  // `as any` liess es kompilieren, also hat er nie etwas zurueckgesetzt. Neben
+  // dem richtigen Feldnamen gehoert die ECHTE `getMemoriesForPrompt` wieder
+  // hin: mehrere Tests unten ersetzen sie, und ohne diese Zeile trug jede
+  // Ersetzung in alle folgenden Tests weiter — die Testreihenfolge entschied
+  // dann mit, was ein Test sieht.
+  useMemoryStore.setState({ entries: [], getMemoriesForPrompt: realGetMemoriesForPrompt })
 })
 
 afterEach(() => {
@@ -101,9 +111,7 @@ describe('remoteStore › dispatch()', () => {
   })
 
   it('enriches systemPrompt with memory before sending', async () => {
-    useMemoryStore.setState({
-      getMemoriesForPrompt: () => 'MEM CONTEXT HERE',
-    } as any)
+    useMemoryStore.setState({ getMemoriesForPrompt: () => 'MEM CONTEXT HERE' })
     mockBackend.mockResolvedValue({ port: 11435, passcode: '123456' })
     await useRemoteStore.getState().dispatch('c', 'm', 'BASE')
     const call = mockBackend.mock.calls.find(c => c[0] === 'start_remote_server')
@@ -112,9 +120,7 @@ describe('remoteStore › dispatch()', () => {
   })
 
   it('uses memory-only prompt if base systemPrompt is empty', async () => {
-    useMemoryStore.setState({
-      getMemoriesForPrompt: () => 'ONLY_MEMORIES',
-    } as any)
+    useMemoryStore.setState({ getMemoriesForPrompt: () => 'ONLY_MEMORIES' })
     mockBackend.mockResolvedValue({ port: 11435, passcode: '123456' })
     await useRemoteStore.getState().dispatch('c', 'm', '')
     const call = mockBackend.mock.calls.find(c => c[0] === 'start_remote_server')
@@ -122,9 +128,7 @@ describe('remoteStore › dispatch()', () => {
   })
 
   it('leaves systemPrompt unchanged when no memories', async () => {
-    useMemoryStore.setState({
-      getMemoriesForPrompt: () => '',
-    } as any)
+    useMemoryStore.setState({ getMemoriesForPrompt: () => '' })
     mockBackend.mockResolvedValue({ port: 11435, passcode: '123456' })
     await useRemoteStore.getState().dispatch('c', 'm', 'KEEP_THIS')
     const call = mockBackend.mock.calls.find(c => c[0] === 'start_remote_server')
@@ -206,7 +210,7 @@ describe('remoteStore › undispatch()', () => {
 
 describe('remoteStore › memory enrichment behaviour', () => {
   it('prepends "remembered context" preamble to memory block', async () => {
-    useMemoryStore.setState({ getMemoriesForPrompt: () => 'FACT_A\nFACT_B' } as any)
+    useMemoryStore.setState({ getMemoriesForPrompt: () => 'FACT_A\nFACT_B' })
     mockBackend.mockResolvedValue({})
     await useRemoteStore.getState().dispatch('c', 'm', '')
     const call = mockBackend.mock.calls.find(c => c[0] === 'start_remote_server')
@@ -214,7 +218,7 @@ describe('remoteStore › memory enrichment behaviour', () => {
   })
 
   it('separates base prompt and memory with double newline', async () => {
-    useMemoryStore.setState({ getMemoriesForPrompt: () => 'MEM' } as any)
+    useMemoryStore.setState({ getMemoriesForPrompt: () => 'MEM' })
     mockBackend.mockResolvedValue({})
     await useRemoteStore.getState().dispatch('c', 'm', 'BASE')
     const call = mockBackend.mock.calls.find(c => c[0] === 'start_remote_server')
@@ -222,9 +226,7 @@ describe('remoteStore › memory enrichment behaviour', () => {
   })
 
   it('swallows memory-store errors gracefully', async () => {
-    useMemoryStore.setState({
-      getMemoriesForPrompt: () => { throw new Error('store broke') },
-    } as any)
+    useMemoryStore.setState({ getMemoriesForPrompt: () => { throw new Error('store broke') } })
     mockBackend.mockResolvedValue({})
     await useRemoteStore.getState().dispatch('c', 'm', 'STILL_OK')
     const call = mockBackend.mock.calls.find(c => c[0] === 'start_remote_server')
@@ -233,9 +235,10 @@ describe('remoteStore › memory enrichment behaviour', () => {
   })
 
   it('enrichment applies to restart as well (via restart_remote_server)', async () => {
-    useMemoryStore.setState({ getMemoriesForPrompt: () => 'MEM' } as any)
+    useMemoryStore.setState({ getMemoriesForPrompt: () => 'MEM' })
     mockBackend.mockResolvedValue({})
-    const restart = (useRemoteStore.getState() as any).restart
+    // `restart` is not on the store's interface; the test probes for it.
+    const restart = prop(useRemoteStore.getState(), 'restart')
     if (typeof restart === 'function') {
       await restart('conv-r', 'm', 'BASE')
       const call = mockBackend.mock.calls.find(c => c[0] === 'restart_remote_server')
@@ -243,6 +246,20 @@ describe('remoteStore › memory enrichment behaviour', () => {
         expect(call[1].systemPrompt).toContain('MEM')
       }
     }
+  })
+})
+
+// Laeuft NACH dem Block, der `getMemoriesForPrompt` mehrfach ersetzt. Wenn das
+// beforeEach die echte Implementierung nicht zuruecklegt, sieht dieser Test die
+// letzte Attrappe des vorigen Blocks statt des Stores — genau die stille
+// Reihenfolgen-Abhaengigkeit, die hier festgenagelt wird.
+describe('remoteStore › the memory store is isolated between tests', () => {
+  it('sees the real getMemoriesForPrompt again, not the previous block\'s stub', () => {
+    expect(useMemoryStore.getState().getMemoriesForPrompt('anything', 8192)).toBe('')
+  })
+
+  it('and an empty entries list', () => {
+    expect(useMemoryStore.getState().entries).toEqual([])
   })
 })
 

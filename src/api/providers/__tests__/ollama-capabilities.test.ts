@@ -25,6 +25,14 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
+import type { ProviderClient, ProviderConfig } from '../types'
+
+/** The one match, or a loud failure — `find` returning undefined must not
+ *  quietly satisfy a `.toBeUndefined()` assertion about a FIELD. */
+function found<T>(v: T | undefined, what: string): T {
+  if (v === undefined) throw new Error(`no entry matching ${what}`)
+  return v
+}
 
 const src = readFileSync(
   resolve(dirname(fileURLToPath(import.meta.url)), '../ollama-provider.ts'),
@@ -44,7 +52,10 @@ const TAGS = {
   ],
 }
 
-let provider: any
+/** The constructor shape this test resolves out of the dynamic import. */
+type OllamaCtor = new (config: ProviderConfig) => ProviderClient
+
+let provider: ProviderClient
 
 beforeEach(async () => {
   vi.resetModules()
@@ -55,8 +66,10 @@ beforeEach(async () => {
     isTauri: () => false,
   }))
   const mod = await import('../ollama-provider')
-  const Ctor = mod.OllamaProvider ?? Object.values(mod).find((v: any) => typeof v === 'function')
-  provider = new (Ctor as any)({ id: 'ollama', name: 'Ollama', baseUrl: 'http://127.0.0.1:11434', apiKey: '', enabled: true, isLocal: true })
+  const Ctor: OllamaCtor =
+    mod.OllamaProvider ??
+    (Object.values(mod).find(v => typeof v === 'function') as OllamaCtor)
+  provider = new Ctor({ id: 'ollama', name: 'Ollama', baseUrl: 'http://127.0.0.1:11434', apiKey: '', enabled: true, isLocal: true })
 })
 
 afterEach(() => { vi.doUnmock('../../backend'); vi.resetModules() })
@@ -64,7 +77,7 @@ afterEach(() => { vi.doUnmock('../../backend'); vi.resetModules() })
 describe('listModels carries the tool capability through', () => {
   it('a model that declares tools comes back as supportsTools true', async () => {
     const models = await provider.listModels()
-    const m = models.find((x: any) => x.name === 'qwen2.5-coder:14b')
+    const m = found(models.find(x => x.name === 'qwen2.5-coder:14b'), 'qwen2.5-coder:14b')
     expect(m.supportsTools).toBe(true)
   })
 
@@ -73,7 +86,7 @@ describe('listModels carries the tool capability through', () => {
     // decision to the family list, and the family list says yes because the
     // name contains 'qwen3'.
     const models = await provider.listModels()
-    const m = models.find((x: any) => x.name.includes('DevQuasar'))
+    const m = found(models.find(x => x.name.includes('DevQuasar')), 'DevQuasar')
     expect(m.supportsTools).toBe(false)
     expect(m.supportsTools).not.toBeUndefined()
   })
@@ -82,7 +95,7 @@ describe('listModels carries the tool capability through', () => {
     // Deliberately not `false`: no answer must not read as a denial, or every
     // model on an older server would be pushed onto the hermes path.
     const models = await provider.listModels()
-    const m = models.find((x: any) => x.name === 'legacy-model:7b')
+    const m = found(models.find(x => x.name === 'legacy-model:7b'), 'legacy-model:7b')
     expect(m.supportsTools).toBeUndefined()
   })
 })

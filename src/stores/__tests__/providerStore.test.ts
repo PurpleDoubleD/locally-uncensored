@@ -1,12 +1,16 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
-// Mock the registry before importing the store
-vi.mock('../../api/providers/registry', () => ({
+// Mock the client cache before importing the store.
+// Audit W-T2: stand vorher auf '../../api/providers/registry'. clearProviderCache
+// wohnt jetzt in providers/client-cache.ts (der Store zog über die Registry
+// sonst die ganze Provider-Fabrik herein). Reine Pfadanpassung — dieselbe
+// Funktion, dieselbe Zusicherung.
+vi.mock('../../api/providers/client-cache', () => ({
   clearProviderCache: vi.fn(),
 }))
 
 import { useProviderStore } from '../providerStore'
-import { clearProviderCache } from '../../api/providers/registry'
+import { clearProviderCache } from '../../api/providers/client-cache'
 
 // ── Default state snapshot ────────────────────────────────────
 

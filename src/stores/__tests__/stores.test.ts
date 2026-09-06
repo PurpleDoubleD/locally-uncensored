@@ -230,8 +230,10 @@ describe('modelStore', () => {
     useModelStore.setState({
       models: [],
       activeModel: null,
-      pullProgress: null,
-      isPulling: false,
+      // `pullProgress` / `isPulling` are long gone from ModelState — pulls are
+      // tracked per model in `activePulls`. Setting the dead keys wrote junk
+      // into the store instead of resetting anything.
+      activePulls: {},
       categoryFilter: 'all',
     })
   })
@@ -457,7 +459,7 @@ describe('memoryStore', () => {
   // injected prompt block, and that the manual override caps the count.
   describe('getMemoriesForPrompt injection', () => {
     it('injects a keyword-matching memory into the prompt block', () => {
-      useMemoryStore.getState().addMemory({ type: 'user', title: 'Favorite language', description: '', content: 'My favorite programming language is Rust', tags: [] })
+      useMemoryStore.getState().addMemory({ type: 'user', title: 'Favorite language', description: '', content: 'My favorite programming language is Rust', tags: [], source: 'manual' })
       const block = useMemoryStore.getState().getMemoriesForPrompt('what is my favorite programming language?', 32768)
       expect(block).toContain('Rust')
     })
@@ -465,7 +467,7 @@ describe('memoryStore', () => {
       // Unique marker only in CONTENT (title is shared) so each memory shows
       // its marker exactly once in the rendered block.
       for (const m of ['uniqaaa', 'uniqbbb', 'uniqccc']) {
-        useMemoryStore.getState().addMemory({ type: 'user', title: 'note', description: '', content: `shared topic ${m}`, tags: [] })
+        useMemoryStore.getState().addMemory({ type: 'user', title: 'note', description: '', content: `shared topic ${m}`, tags: [], source: 'manual' })
       }
       useMemoryStore.setState({ settings: { ...useMemoryStore.getState().settings, maxMemoriesOverride: 1 } })
       const block = useMemoryStore.getState().getMemoriesForPrompt('shared topic', 32768)

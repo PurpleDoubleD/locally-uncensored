@@ -35,6 +35,8 @@ import { buildDynamicWorkflow } from '../dynamic-workflow'
 import { getAllNodeInfo } from '../comfyui-nodes'
 import { buildTxt2VidWorkflow, classifyModel } from '../comfyui'
 import { localFetch } from '../backend'
+import { classTypes, nodeOf, type BuiltNode } from './graph-test-support'
+import type { ComfyApiGraph } from '../../types/comfy-graph'
 
 const RAPID_AIO = 'wan2.2-i2v-rapid-aio-v10-nsfw-Q4_K_M.gguf'
 const NSFW_WAN14B = 'nsfw_wan_14b_e15_q4_k.gguf'
@@ -93,11 +95,10 @@ const videoParams = {
   frames: 49, fps: 16,
 }
 
-type WfNode = { class_type: string; inputs: Record<string, any> }
-const classTypes = (wf: Record<string, any>): string[] =>
-  Object.values(wf as Record<string, WfNode>).map(n => n.class_type)
-const loaderOf = (wf: Record<string, any>): WfNode | undefined =>
-  Object.values(wf as Record<string, WfNode>).find(n => n.class_type === 'UnetLoaderGGUF' || n.class_type === 'UNETLoader')
+// nodeOf/nodesOf/classTypes leben in graph-test-support.ts — siehe dort, warum
+// eine Graph-Fixture als ComfyApiGraph statt als Record<string, any> gelesen wird.
+const loaderOf = (wf: ComfyApiGraph): BuiltNode | undefined =>
+  (nodeOf(wf, 'UnetLoaderGGUF') ?? nodeOf(wf, 'UNETLoader'))?.[1]
 
 describe('the catalog entries this bug was reported against', () => {
   it('both uncensored video quants are GGUF', () => {

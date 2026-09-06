@@ -1,5 +1,55 @@
 use crate::os_error;
+use std::net::SocketAddr;
+use std::time::Duration;
 use tauri::Emitter;
+
+/// The host as an IP, or None for a real DNS name. Strips the brackets the URL
+/// parser keeps around an IPv6 literal.
+fn parse_ip_host(host: &str) -> Option<std::net::IpAddr> {
+    host.trim_matches(|c| c == '[' || c == ']').parse().ok()
+}
+
+/// True for an address that no external fetch may reach: loopback, the RFC1918
+/// LAN ranges, link-local (where the cloud-metadata endpoints live), and the
+/// unspecified block. IPv4-mapped/compatible IPv6 is folded down to v4 first, so
+/// `::ffff:127.0.0.1` is judged as `127.0.0.1` and not as a global address.
+///
+/// This is the predicate the RESOLVED addresses are held to. A hostname carries
+/// no evidence about where it points: `db.attacker.tld` and `localtest.me` are
+/// ordinary public names whose A record is 127.0.0.1, and behind that record sit
+/// the built-in engine, Ollama, LM Studio, ComfyUI, the remote bridge, the
+/// router and the internal wiki.
+///
+/// 100.64.0.0/10 is deliberately NOT blocked: that is where Tailscale puts a
+/// user's own machines, and the literal-host gate has always allowed it.
+fn is_blocked_ip(ip: std::net::IpAddr) -> bool {
+    // Fold v4 + IPv4-mapped/compatible v6 to v4 and judge on the v4 ranges.
+    let folded = match ip {
+        std::net::IpAddr::V4(v4) => Some(v4),
+        std::net::IpAddr::V6(v6) => v6.to_ipv4_mapped().or_else(|| v6.to_ipv4()),
+    };
+    if let Some(v4) = folded {
+        let o = v4.octets();
+        return matches!(o,
+            [10, ..] |                  // 10.0.0.0/8
+            [172, 16..=31, ..] |        // 172.16.0.0/12
+            [192, 168, ..] |            // 192.168.0.0/16
+            [127, ..] |                 // 127.0.0.0/8
+            [169, 254, ..] |            // 169.254.0.0/16 link-local incl. AWS/GCP/Azure IMDS
+            [0, ..]                     // 0.0.0.0/8 (and ::, ::1 once folded)
+        ) || o == [100, 100, 100, 200]; // Alibaba IMDS
+    }
+    match ip {
+        std::net::IpAddr::V6(v6) => {
+            let s = v6.segments();
+            v6.is_loopback()
+                || v6.is_unspecified()
+                || (s[0] & 0xfe00) == 0xfc00   // fc00::/7 ULA, incl. GCP fd00:ec2::254
+                || (s[0] & 0xffc0) == 0xfe80   // fe80::/10 link-local
+        }
+        std::net::IpAddr::V4(_) => false,
+    }
+}
 
 /// Validate that an external URL is safe to fetch (no SSRF).
 /// Blocks private IP ranges, non-HTTP schemes, and localhost.
@@ -22,56 +72,56 @@ fn validate_external_url(raw: &str) -> Result<(), String> {
         return Err("Blocked: localhost access not allowed for external fetch".into());
     }
 
-    // Block private/reserved IPv4 ranges
-    if let Ok(ip) = host.parse::<std::net::Ipv4Addr>() {
-        let octets = ip.octets();
-        let blocked = matches!(octets,
-            [10, ..] |                                          // 10.0.0.0/8
-            [172, 16..=31, ..] |                                // 172.16.0.0/12
-            [192, 168, ..] |                                    // 192.168.0.0/16
-            [127, ..] |                                         // 127.0.0.0/8
-            [169, 254, ..] |                                    // 169.254.0.0/16 (link-local)
-            [0, ..]                                             // 0.0.0.0/8
-        );
-        if blocked {
+    // An IP written straight into the URL is judged by the same predicate the
+    // resolved addresses face, so the two can never drift apart.
+    if let Some(ip) = parse_ip_host(host) {
+        if is_blocked_ip(ip) {
             return Err(format!("Blocked: private/reserved IP {}", ip));
-        }
-    }
-
-    // Block private IPv6 (fc00::/7, fe80::/10, ::1)
-    if let Ok(ip) = host.trim_matches(|c| c == '[' || c == ']').parse::<std::net::Ipv6Addr>() {
-        let segments = ip.segments();
-        let blocked = ip.is_loopback()
-            || (segments[0] & 0xfe00) == 0xfc00   // fc00::/7 (unique local)
-            || (segments[0] & 0xffc0) == 0xfe80;  // fe80::/10 (link-local)
-        if blocked {
-            return Err(format!("Blocked: private/reserved IPv6 {}", ip));
         }
     }
 
     Ok(())
 }
 
+/// A URL fit to appear in an error message or a log line.
+///
+/// The query string is dropped, and so is any userinfo. A secret in a URL is a
+/// secret in every log that ever quotes the URL, and the log scrubber cannot
+/// see a token that is just another substring of a URL. The CivitAI search used
+/// to put the user's API key there, and this function is the second half of
+/// closing that: the first half is not putting it there at all.
+pub(crate) fn redact_url(raw: &str) -> String {
+    match url::Url::parse(raw) {
+        Ok(mut u) => {
+            u.set_query(None);
+            u.set_fragment(None);
+            let _ = u.set_username("");
+            let _ = u.set_password(None);
+            u.to_string()
+        }
+        // Unparseable: say nothing rather than echo whatever it was.
+        Err(_) => "the requested URL".to_string(),
+    }
+}
+
 /// Generic HTTP proxy — fetch any external URL and return body as string.
 /// Used for CivitAI API calls, workflow JSON downloads, etc.
+///
+/// `authToken` is the user's CivitAI API key and is sent as a Bearer header,
+/// ONLY to a CivitAI host, exactly like the download path. It is not a generic
+/// "send this to whatever host" parameter: a bearer that follows any URL a
+/// catalogue hands us is a credential leak waiting for a redirect.
+#[allow(non_snake_case)]
 #[tauri::command]
-pub async fn fetch_external(url: String) -> Result<String, String> {
-    validate_public_url(&url)?;
-
-    let client = reqwest::Client::builder()
-        .user_agent("LocallyUncensored/2.0")
-        .timeout(std::time::Duration::from_secs(60))
-        .redirect(ssrf_safe_redirect_policy(10))
-        .build()
-        .map_err(|e| os_error::english(&e))?;
-
-    let resp = client.get(&url)
-        .send()
-        .await
-        .map_err(|e| format!("fetch_external: {}", os_error::english(&e)))?;
+pub async fn fetch_external(url: String, authToken: Option<String>) -> Result<String, String> {
+    let bearer = authToken
+        .as_deref()
+        .map(str::trim)
+        .filter(|t| !t.is_empty());
+    let resp = ssrf_safe_fetch(&url, "fetch_external", Duration::from_secs(60), 10, bearer).await?;
 
     if !resp.status().is_success() {
-        return Err(format!("HTTP {}: {}", resp.status().as_u16(), url));
+        return Err(format!("HTTP {}: {}", resp.status().as_u16(), redact_url(&url)));
     }
 
     resp.text().await.map_err(|e| os_error::english(&e))
@@ -81,22 +131,10 @@ pub async fn fetch_external(url: String) -> Result<String, String> {
 /// Used for downloading ZIP files, images, model files.
 #[tauri::command]
 pub async fn fetch_external_bytes(url: String) -> Result<Vec<u8>, String> {
-    validate_public_url(&url)?;
-
-    let client = reqwest::Client::builder()
-        .user_agent("LocallyUncensored/2.0")
-        .timeout(std::time::Duration::from_secs(300))
-        .redirect(ssrf_safe_redirect_policy(10))
-        .build()
-        .map_err(|e| os_error::english(&e))?;
-
-    let resp = client.get(&url)
-        .send()
-        .await
-        .map_err(|e| format!("fetch_external_bytes: {}", os_error::english(&e)))?;
+    let resp = ssrf_safe_fetch(&url, "fetch_external_bytes", Duration::from_secs(300), 10, None).await?;
 
     if !resp.status().is_success() {
-        return Err(format!("HTTP {}: {}", resp.status().as_u16(), url));
+        return Err(format!("HTTP {}: {}", resp.status().as_u16(), redact_url(&url)));
     }
 
     resp.bytes().await.map(|b| b.to_vec()).map_err(|e| os_error::english(&e))
@@ -164,6 +202,54 @@ fn is_blocked_proxy_host(host: &str) -> bool {
 /// instead of ad-hoc substring blocklists (which miss 172.16/12, IPv6, and
 /// decimal/hex/octal IP encodings).
 pub(crate) fn validate_public_url(raw: &str) -> Result<(), String> {
+    validate_public_url_addrs(raw).map(|_| ())
+}
+
+/// Where the gate learns what a hostname actually points at. Injected so a test
+/// can hand back the answer a hostile resolver would give — a plain public name
+/// that maps to 127.0.0.1 — which is the entire attack and cannot be staged
+/// against the machine's real resolver.
+type HostResolver = fn(&str, u16) -> Result<Vec<SocketAddr>, String>;
+
+/// Resolve with a hard cap. `to_socket_addrs` has no timeout knob and an
+/// unreachable resolver parks the calling thread for the OS default (tens of
+/// seconds on some stacks); the gate sits on a request path, so it caps the wait
+/// and fails closed rather than hanging the command.
+fn resolve_host(host: &str, port: u16) -> Result<Vec<SocketAddr>, String> {
+    use std::net::ToSocketAddrs;
+    const CAP: Duration = Duration::from_secs(5);
+    let target = format!("{}:{}", host, port);
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let resolved = target
+            .to_socket_addrs()
+            .map(|it| it.collect::<Vec<_>>())
+            // Windows words a resolver failure in the system language; the app
+            // is English-only.
+            .map_err(|e| os_error::english(&e));
+        let _ = tx.send(resolved);
+    });
+    match rx.recv_timeout(CAP) {
+        Ok(Ok(addrs)) => Ok(addrs),
+        Ok(Err(e)) => Err(format!("Blocked: cannot resolve host ({})", e)),
+        Err(_) => Err(format!(
+            "Blocked: '{}' did not resolve within {} s",
+            host,
+            CAP.as_secs()
+        )),
+    }
+}
+
+/// The gate, returning the addresses it approved so the caller can pin the
+/// connection to exactly those (see `pinned_client`).
+pub(crate) fn validate_public_url_addrs(raw: &str) -> Result<Vec<SocketAddr>, String> {
+    validate_public_url_addrs_with(raw, resolve_host)
+}
+
+fn validate_public_url_addrs_with(
+    raw: &str,
+    resolve: HostResolver,
+) -> Result<Vec<SocketAddr>, String> {
     validate_external_url(raw)?;
     let parsed = url::Url::parse(raw).map_err(|e| format!("Invalid URL: {}", e))?;
     let host = parsed.host_str().unwrap_or("");
@@ -181,13 +267,44 @@ pub(crate) fn validate_public_url(raw: &str) -> Result<(), String> {
     if is_decimal_int || is_hex_int {
         return Err("Blocked: numeric host form (possible IP-encoding bypass)".into());
     }
-    Ok(())
+
+    let port = parsed.port_or_known_default().unwrap_or(80);
+    if let Some(ip) = parse_ip_host(host) {
+        // Written as a literal, so the checks above already judged the address
+        // itself — there is nothing a resolver could change about it.
+        return Ok(vec![SocketAddr::new(ip, port)]);
+    }
+
+    // Everything above only read the host TEXT, and the text is not evidence:
+    // any name the caller controls can answer 127.0.0.1 or 192.168.1.1. The
+    // local backends, the remote bridge, the router and the internal wiki are
+    // all exactly one such record away, so the ADDRESSES decide.
+    let addrs = resolve(&h, port)?;
+    if addrs.is_empty() {
+        return Err(format!("Blocked: '{}' resolved to no address", h));
+    }
+    for addr in &addrs {
+        if is_blocked_ip(addr.ip()) {
+            return Err(format!(
+                "Blocked: '{}' resolves to {}, a private/loopback/link-local address",
+                h,
+                addr.ip()
+            ));
+        }
+    }
+    Ok(addrs)
 }
 
 /// Redirect policy that re-validates EVERY hop with `validate_public_url`, so a
 /// public URL can't 30x-redirect into localhost / a private host / cloud
 /// metadata (the classic SSRF-via-redirect bypass). Use this on any reqwest
 /// client that fetches a renderer- or model-supplied URL.
+///
+/// The hop check now resolves the target too, but reqwest opens the connection
+/// itself afterwards, so the address is looked up a second time — a rebinding
+/// resolver still has a window here. `ssrf_safe_fetch` closes it by following
+/// redirects by hand and pinning each hop; prefer that where the request shape
+/// allows it.
 pub(crate) fn ssrf_safe_redirect_policy(max: usize) -> reqwest::redirect::Policy {
     reqwest::redirect::Policy::custom(move |attempt| {
         if attempt.previous().len() >= max {
@@ -198,6 +315,82 @@ pub(crate) fn ssrf_safe_redirect_policy(max: usize) -> reqwest::redirect::Policy
             Err(_) => attempt.error("redirect to a blocked (private/metadata) host"),
         }
     })
+}
+
+/// A client pinned to the addresses the gate just approved. Without the pin the
+/// name is resolved a SECOND time when the socket is opened, and a resolver that
+/// answers a public IP to the check and 127.0.0.1 to the connect (DNS rebinding)
+/// walks through untouched. `resolve_to_addrs` overrides only the address — the
+/// port always comes from the URL.
+fn pinned_client(host: &str, addrs: &[SocketAddr], timeout: Duration) -> Result<reqwest::Client, String> {
+    let mut builder = reqwest::Client::builder()
+        .user_agent("LocallyUncensored/2.0")
+        .timeout(timeout)
+        // Redirects are followed by hand in `ssrf_safe_fetch` so every hop gets
+        // its own check AND its own pin; letting reqwest follow them would
+        // re-resolve the next host behind our back.
+        .redirect(reqwest::redirect::Policy::none());
+    if parse_ip_host(host).is_none() {
+        builder = builder.resolve_to_addrs(host, addrs);
+    }
+    builder.build().map_err(|e| os_error::english(&e))
+}
+
+/// GET a renderer-supplied URL with the SSRF gate applied to EVERY hop, each one
+/// connected to the address that hop was checked against.
+///
+/// reqwest's default policy follows up to 10 redirects and checks nothing on the
+/// way, so a public URL answering `302 Location: http://169.254.169.254/…` (or
+/// `http://127.0.0.1:11434/…`) reached the blocked host through the front door.
+///
+/// `bearer` is the user's CivitAI API key. It is attached per hop and ONLY while
+/// that hop is a CivitAI host, so a redirect off CivitAI drops the credential
+/// instead of handing it to whoever the catalogue pointed at.
+async fn ssrf_safe_fetch(
+    url: &str,
+    label: &str,
+    timeout: Duration,
+    max_hops: usize,
+    bearer: Option<&str>,
+) -> Result<reqwest::Response, String> {
+    let mut current = url.to_string();
+    for _ in 0..=max_hops {
+        let target = current.clone();
+        // The resolver blocks; keep it off the reactor.
+        let addrs = tokio::task::spawn_blocking(move || validate_public_url_addrs(&target))
+            .await
+            .map_err(|e| format!("{}: resolver task failed: {}", label, e))??;
+        let parsed = url::Url::parse(&current).map_err(|e| format!("Invalid URL: {}", e))?;
+        let host = parsed.host_str().unwrap_or("").to_string();
+        let client = pinned_client(&host, &addrs, timeout)?;
+        let mut request = client.get(current.clone());
+        // Jeder Sprung wird neu geprueft, der Bearer folgt nie einer Umleitung
+        // von CivitAI weg.
+        if let Some(token) =
+            bearer.filter(|_| crate::commands::download::is_civitai_host(&current))
+        {
+            request = request.bearer_auth(token);
+        }
+        let resp = request
+            .send()
+            .await
+            .map_err(|e| format!("{}: {}", label, os_error::english(&e)))?;
+        // Only the statuses reqwest itself would have followed. 300 and 304 are
+        // redirection-class but carry no target, and handing those back to the
+        // caller is what happened before.
+        if !matches!(resp.status().as_u16(), 301 | 302 | 303 | 307 | 308) {
+            return Ok(resp);
+        }
+        let location = match resp.headers().get(reqwest::header::LOCATION).and_then(|v| v.to_str().ok()) {
+            Some(l) => l.to_string(),
+            None => return Ok(resp),
+        };
+        current = parsed
+            .join(&location)
+            .map_err(|e| format!("Invalid redirect target: {}", e))?
+            .to_string();
+    }
+    Err(format!("{}: too many redirects", label))
 }
 
 /// True only for private/LAN hosts a user could legitimately point a local
@@ -264,71 +457,123 @@ fn is_registerable_public_host(host: &str) -> bool {
     h.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '.')
 }
 
-/// Validate that a URL targets either localhost or one of the user-configured
-/// backend hosts (Ollama via `ollama_base`, ComfyUI via `comfy_host`).
+/// The proxy allow-list, frozen at the moment a request starts.
 ///
-/// SSRF policy: the proxy only forwards to hosts the user explicitly pointed
-/// LU at. A JS-level compromise still cannot reach arbitrary intranet
-/// services; it can only reach the host the user already wanted to reach.
-fn validate_proxy_url(raw: &str, state: &crate::state::AppState) -> Result<(), String> {
-    let parsed = url::Url::parse(raw)
-        .map_err(|e| format!("Invalid URL: {}", e))?;
+/// A snapshot rather than a live `AppState` read for two reasons: the redirect
+/// policy runs inside reqwest and cannot borrow a `tauri::State`, and a host
+/// registered while a redirect chain is already in flight must not be able to
+/// widen that chain retroactively.
+#[derive(Clone, Default)]
+struct ProxyAllowList {
+    ollama: String,
+    comfy: String,
+    openai: std::collections::HashSet<String>,
+}
 
-    match parsed.scheme() {
-        "http" | "https" => {}
-        other => return Err(format!("Blocked scheme: {}", other)),
-    }
-
-    let host = parsed.host_str().unwrap_or("").to_lowercase();
-
-    // Hard block: cloud-metadata / link-local — never proxied, even if a host
-    // somehow got allow-listed (SSRF defense-in-depth, Bug A).
-    if is_blocked_proxy_host(&host) {
-        return Err(format!(
-            "Blocked: '{}' is a metadata/link-local address and is never proxied", host
-        ));
-    }
-
-    // Always-allowed: localhost variants. Covers the common case + any
-    // backend bound to 0.0.0.0 on the same machine.
-    let is_local = matches!(host.as_str(),
-        "localhost" | "127.0.0.1" | "::1" | "[::1]" | "0.0.0.0"
-    ) || host.ends_with(".localhost");
-    if is_local {
-        return Ok(());
-    }
-
-    // Configured Ollama host (Issue #31: users with OLLAMA_HOST=192.168.x.x).
-    let ollama_host = state.ollama_base.lock()
-        .ok()
-        .map(|g| configured_host(&g))
-        .unwrap_or_default();
-    if !ollama_host.is_empty() && host == ollama_host {
-        return Ok(());
-    }
-
-    // Configured ComfyUI host (v2.3.6 feature).
-    let comfy_host = state.comfy_host.lock()
-        .ok()
-        .map(|g| configured_host(&g))
-        .unwrap_or_default();
-    if !comfy_host.is_empty() && host == comfy_host {
-        return Ok(());
-    }
-
-    // Configured OpenAI-compatible LAN backends (Bug A / GH #49). Registered
-    // via `register_openai_host` when the provider points at a non-localhost
-    // host. Only these specific user-configured hosts are forwarded.
-    if let Ok(hosts) = state.openai_hosts.lock() {
-        if hosts.contains(&host) {
-            return Ok(());
+impl ProxyAllowList {
+    fn snapshot(state: &crate::state::AppState) -> Self {
+        Self {
+            // Configured Ollama host (Issue #31: users with OLLAMA_HOST=192.168.x.x).
+            ollama: state
+                .ollama_base
+                .lock()
+                .ok()
+                .map(|g| configured_host(&g))
+                .unwrap_or_default(),
+            // Configured ComfyUI host (v2.3.6 feature).
+            comfy: state
+                .comfy_host
+                .lock()
+                .ok()
+                .map(|g| configured_host(&g))
+                .unwrap_or_default(),
+            // Configured OpenAI-compatible LAN backends (Bug A / GH #49),
+            // registered via `register_openai_host`.
+            openai: state
+                .openai_hosts
+                .lock()
+                .ok()
+                .map(|g| g.clone())
+                .unwrap_or_default(),
         }
     }
 
-    Err(format!(
-        "proxy_localhost: host '{}' not allowed. Configure remote backends via Settings → Providers or Settings → ComfyUI (Host).",
-        host
-    ))
+    /// Validate that a URL targets either localhost or one of the user-configured
+    /// backend hosts.
+    ///
+    /// SSRF policy: the proxy only forwards to hosts the user explicitly pointed
+    /// LU at. A JS-level compromise still cannot reach arbitrary intranet
+    /// services; it can only reach the host the user already wanted to reach.
+    fn check(&self, raw: &str) -> Result<(), String> {
+        let parsed = url::Url::parse(raw)
+            .map_err(|e| format!("Invalid URL: {}", e))?;
+
+        match parsed.scheme() {
+            "http" | "https" => {}
+            other => return Err(format!("Blocked scheme: {}", other)),
+        }
+
+        let host = parsed.host_str().unwrap_or("").to_lowercase();
+
+        // Hard block: cloud-metadata / link-local — never proxied, even if a host
+        // somehow got allow-listed (SSRF defense-in-depth, Bug A).
+        if is_blocked_proxy_host(&host) {
+            return Err(format!(
+                "Blocked: '{}' is a metadata/link-local address and is never proxied", host
+            ));
+        }
+
+        // Always-allowed: localhost variants. Covers the common case + any
+        // backend bound to 0.0.0.0 on the same machine.
+        let is_local = matches!(host.as_str(),
+            "localhost" | "127.0.0.1" | "::1" | "[::1]" | "0.0.0.0"
+        ) || host.ends_with(".localhost");
+        if is_local {
+            return Ok(());
+        }
+
+        if !self.ollama.is_empty() && host == self.ollama {
+            return Ok(());
+        }
+        if !self.comfy.is_empty() && host == self.comfy {
+            return Ok(());
+        }
+        if self.openai.contains(&host) {
+            return Ok(());
+        }
+
+        Err(format!(
+            "proxy_localhost: host '{}' not allowed. Configure remote backends via Settings → Providers or Settings → ComfyUI (Host).",
+            host
+        ))
+    }
+}
+
+/// The client every proxy command uses.
+///
+/// The redirect policy is the point: with reqwest's default one, a backend
+/// answering `302 Location: http://169.254.169.254/latest/meta-data/` — or any
+/// intranet host the allow-list never approved — was followed without a second
+/// look, so a single redirect from a machine the user did trust reached a
+/// machine they did not. Every hop is put through the same allow-list as the
+/// first request, and the chain is short: a local LLM backend has no legitimate
+/// reason to bounce a request more than a couple of times.
+fn proxy_client(timeout: Duration, allow: ProxyAllowList) -> Result<reqwest::Client, String> {
+    const MAX_HOPS: usize = 3;
+    reqwest::Client::builder()
+        .user_agent("LocallyUncensored/2.0")
+        .timeout(timeout)
+        .redirect(reqwest::redirect::Policy::custom(move |attempt| {
+            if attempt.previous().len() >= MAX_HOPS {
+                return attempt.error("too many redirects");
+            }
+            match allow.check(attempt.url().as_str()) {
+                Ok(()) => attempt.follow(),
+                Err(_) => attempt.error("redirect to a host outside the proxy allow-list"),
+            }
+        }))
+        .build()
+        .map_err(|e| os_error::english(&e))
 }
 
 /// Register a user-configured OpenAI-compatible backend host (LAN LM Studio,
@@ -520,7 +765,7 @@ pub(crate) fn builtin_model_conflict(
         return None;
     }
     Some(format!(
-        "The built-in engine has \"{loaded}\" loaded, but this request asked for \"{asked}\". \
+        "The LU Engine has \"{loaded}\" loaded, but this request asked for \"{asked}\". \
          The engine answers with the model it was started with, whatever the model field says, \
          so this request was refused instead of being answered by the wrong model. \
          Load \"{asked}\" first (Models, or the chat model picker) and send again."
@@ -568,17 +813,14 @@ pub async fn proxy_localhost(
     headers: Option<std::collections::HashMap<String, String>>,
     state: tauri::State<'_, crate::state::AppState>,
 ) -> Result<String, String> {
-    validate_proxy_url(&url, &state)?;
+    let allow = ProxyAllowList::snapshot(&state);
+    allow.check(&url)?;
     // A generation request may not name a model the engine is not holding.
     guard_builtin_model(&url, body.as_deref(), &state)?;
 
-    let timeout = std::time::Duration::from_millis(timeout_ms.unwrap_or(300_000));
+    let timeout = Duration::from_millis(timeout_ms.unwrap_or(300_000));
 
-    let client = reqwest::Client::builder()
-        .user_agent("LocallyUncensored/2.0")
-        .timeout(timeout)
-        .build()
-        .map_err(|e| os_error::english(&e))?;
+    let client = proxy_client(timeout, allow)?;
 
     let http_method = method.unwrap_or_else(|| "GET".to_string());
 
@@ -610,15 +852,12 @@ pub async fn proxy_localhost(
 /// below so a long generation doesn't look like a multi-minute "model loading" hang.
 #[tauri::command]
 pub async fn proxy_localhost_stream(url: String, method: Option<String>, body: Option<String>, headers: Option<std::collections::HashMap<String, String>>, state: tauri::State<'_, crate::state::AppState>) -> Result<Vec<u8>, String> {
-    validate_proxy_url(&url, &state)?;
+    let allow = ProxyAllowList::snapshot(&state);
+    allow.check(&url)?;
     // A generation request may not name a model the engine is not holding.
     guard_builtin_model(&url, body.as_deref(), &state)?;
 
-    let client = reqwest::Client::builder()
-        .user_agent("LocallyUncensored/2.0")
-        .timeout(std::time::Duration::from_secs(7200))
-        .build()
-        .map_err(|e| os_error::english(&e))?;
+    let client = proxy_client(Duration::from_secs(7200), allow)?;
 
     let http_method = method.unwrap_or_else(|| "GET".to_string());
 
@@ -656,6 +895,7 @@ pub async fn proxy_localhost_stream(url: String, method: Option<String>, body: O
 /// → true token-by-token streaming. (`Channel` must be a required arg — wrapping it in
 /// `Option` does not implement `Deserialize`, hence a separate command.)
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn proxy_localhost_stream_chunked(
     url: String,
     method: Option<String>,
@@ -667,11 +907,33 @@ pub async fn proxy_localhost_stream_chunked(
     // read-loop while Ollama kept generating to completion on the proxy path
     // (David 2026-06-15: deleting/Stopping a chat must stop the backend too).
     stream_id: Option<String>,
+    // Max silence between two chunks once the backend has started answering.
+    // Optional so the renderer can widen it for a backend that is known to
+    // think for minutes between tokens; see IDLE_TIMEOUT_MS for the default.
+    idle_timeout_ms: Option<u64>,
     state: tauri::State<'_, crate::state::AppState>,
 ) -> Result<(), String> {
-    validate_proxy_url(&url, &state)?;
+    // No chunk for this long once the stream is running means the backend died
+    // in a way that leaves the socket open (killed process, suspended
+    // container, dropped Wi-Fi on a LAN backend). The only other bound is the
+    // 7200 s whole-request timeout, so without this the UI sat on a dead
+    // stream for two hours.
+    const IDLE_TIMEOUT_MS: u64 = 60_000;
+    // Before the FIRST chunk the same silence is normal: that is where a cold
+    // model is read off disk and pushed into VRAM, which takes minutes for a
+    // large GGUF. Killing that at 60 s would break loading, not protect it.
+    const FIRST_CHUNK_GRACE: Duration = Duration::from_secs(600);
+
+    let allow = ProxyAllowList::snapshot(&state);
+    allow.check(&url)?;
     // A generation request may not name a model the engine is not holding.
     guard_builtin_model(&url, body.as_deref(), &state)?;
+
+    // Built before the token is registered: everything after the registration
+    // has to reach the pump, which is what guarantees the EOF marker and the
+    // registry cleanup. An early `?` between the two would skip both.
+    let idle = Duration::from_millis(idle_timeout_ms.unwrap_or(IDLE_TIMEOUT_MS));
+    let client = proxy_client(Duration::from_secs(7200), allow)?;
 
     // Register a cancellation token under stream_id (mirrors pull_tokens).
     let token = tokio_util::sync::CancellationToken::new();
@@ -682,22 +944,51 @@ pub async fn proxy_localhost_stream_chunked(
         }
     }
 
-    // Run the actual proxying in an inner future so we can always clean the
-    // token out of the registry afterwards, regardless of how we exit.
-    let run = async move {
-        let client = reqwest::Client::builder()
-            .user_agent("LocallyUncensored/2.0")
-            .timeout(std::time::Duration::from_secs(7200))
-            .build()
-            .map_err(|e| os_error::english(&e))?;
+    let run = pump_proxy_stream(
+        &client,
+        &url,
+        method,
+        body,
+        headers,
+        &token,
+        idle,
+        FIRST_CHUNK_GRACE,
+        &move |chunk| on_chunk.send(chunk).is_ok(),
+    )
+    .await;
 
+    if let Some(id) = stream_id.as_ref() {
+        registry.lock().unwrap().remove(id);
+    }
+    run
+}
+
+/// The stream pump behind `proxy_localhost_stream_chunked`, with the IPC channel
+/// reduced to a sink (`false` = the receiving side is gone) so every exit path
+/// can be exercised without a webview.
+#[allow(clippy::too_many_arguments)]
+async fn pump_proxy_stream(
+    client: &reqwest::Client,
+    url: &str,
+    method: Option<String>,
+    body: Option<String>,
+    headers: Option<std::collections::HashMap<String, String>>,
+    token: &tokio_util::sync::CancellationToken,
+    idle: Duration,
+    first_chunk_grace: Duration,
+    sink: &(dyn Fn(Vec<u8>) -> bool + Send + Sync),
+) -> Result<(), String> {
+    // Lives outside the pump because the EOF marker below has to know whether a
+    // single byte of an answer ever reached the renderer.
+    let mut seen_first_chunk = false;
+    let run = async {
         let http_method = method.unwrap_or_else(|| "GET".to_string());
 
         let mut request = match http_method.as_str() {
-            "POST" => client.post(&url),
-            "DELETE" => client.delete(&url),
-            "PUT" => client.put(&url),
-            _ => client.get(&url),
+            "POST" => client.post(url),
+            "DELETE" => client.delete(url),
+            "PUT" => client.put(url),
+            _ => client.get(url),
         };
 
         request = apply_body_and_headers(request, body, headers);
@@ -717,35 +1008,63 @@ pub async fn proxy_localhost_stream_chunked(
         use futures_util::StreamExt;
         let mut stream = resp.bytes_stream();
         loop {
+            let window = if seen_first_chunk { idle } else { first_chunk_grace };
             tokio::select! {
                 // Stop fires → drop `stream`/`resp` → the HTTP connection closes
                 // → Ollama stops generating (frees the GPU). This is the fix.
                 _ = token.cancelled() => break,
-                item = stream.next() => match item {
-                    Some(it) => {
+                item = tokio::time::timeout(window, stream.next()) => match item {
+                    Err(_) => return Err(if seen_first_chunk {
+                        format!(
+                            "the backend stopped sending data (nothing for {} s). The model server may have crashed or been killed — check that it is still running and try again.",
+                            window.as_secs()
+                        )
+                    } else {
+                        format!(
+                            "the backend accepted the request but sent nothing for {} s. A very large model can take this long to load; if it is not loading, restart the backend and try again.",
+                            window.as_secs()
+                        )
+                    }),
+                    Ok(Some(it)) => {
                         let bytes = it.map_err(|e| os_error::english(&e))?;
                         if bytes.is_empty() { continue; }
+                        seen_first_chunk = true;
                         // JS side gone (reader cancelled / window closed) → stop.
-                        if on_chunk.send(bytes.to_vec()).is_err() { break; }
+                        if !sink(bytes.to_vec()) { break; }
                     }
-                    None => break,
+                    Ok(None) => break,
                 }
             }
         }
-        // Explicit EOF marker (empty chunk — data chunks are never empty, the
-        // loop above skips them). The JS side closes its ReadableStream on THIS,
-        // not on the command's return: WebView2 149 delivers queued channel
-        // messages AFTER the invoke result resolves (live find 2026-06-11), so
-        // closing on the result raced ahead of the data and silently dropped
-        // every chunk — chats showed the user message but never a reply.
-        let _ = on_chunk.send(Vec::new());
         Ok(())
     }
     .await;
 
-    if let Some(id) = stream_id.as_ref() {
-        registry.lock().unwrap().remove(id);
+    // Explicit EOF marker (empty chunk — data chunks are never empty, the loop
+    // above skips them). The JS side closes its ReadableStream on THIS, not on
+    // the command's return: WebView2 149 delivers queued channel messages AFTER
+    // the invoke result resolves (live find 2026-06-11), so closing on the
+    // result raced ahead of the data and silently dropped every chunk.
+    //
+    // It is emitted HERE, after the pump and outside every early return, because
+    // those returns used to skip it: Stop pressed during connect or while the
+    // model was still loading returned Ok(()) with no marker at all, and the
+    // renderer then held the stream open on its 15 s grace timer — Stop looked
+    // frozen for fifteen seconds on the proxy-first loopback path, which is the
+    // default for the built-in engine, Ollama and LM Studio.
+    //
+    // But NOT when the pump died before a single byte arrived. The marker settles
+    // the renderer's Response as 200 with an empty body, and the real error, which
+    // only reaches JS one tick later on the rejected invoke, is then thrown away
+    // as a late answer. Every unreachable local backend read as "The connection
+    // dropped before the model finished its answer. Check your network and try
+    // again." while the truth was a refused connection on 127.0.0.1 (counter-check
+    // P1, 2026-09-04, LU Engine switched off). A failure with no answer behind it
+    // must travel as a failure.
+    if run.is_ok() || seen_first_chunk {
+        sink(Vec::new());
     }
+
     run
 }
 
@@ -778,7 +1097,8 @@ pub async fn comfy_upload_image(
     file_bytes: Vec<u8>,
     state: tauri::State<'_, crate::state::AppState>,
 ) -> Result<String, String> {
-    validate_proxy_url(&url, &state)?;
+    let allow = ProxyAllowList::snapshot(&state);
+    allow.check(&url)?;
     if file_bytes.is_empty() {
         return Err("the source image is empty (0 bytes)".to_string());
     }
@@ -790,10 +1110,7 @@ pub async fn comfy_upload_image(
     let form = reqwest::multipart::Form::new()
         .part("image", part)
         .text("overwrite", "true");
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(120))
-        .build()
-        .map_err(|e| os_error::english(&e))?;
+    let client = proxy_client(Duration::from_secs(120), allow)?;
     let resp = client.post(&url).multipart(form).send().await
         .map_err(|e| format!("comfy_upload_image: {}", os_error::english(&e)))?;
     let status = resp.status();
@@ -802,6 +1119,32 @@ pub async fn comfy_upload_image(
         return Err(format!("HTTP {}: {}", status.as_u16(), body.trim()));
     }
     Ok(body)
+}
+
+/// The `/api/pull` request body.
+///
+/// The model name arrives from the renderer, and a name carrying a `"` used to
+/// terminate the JSON string early: `x","insecure":true,"name":"y` was pasted
+/// verbatim into a hand-formatted body, so the caller decided which fields
+/// Ollama parsed, not this function. serde does the quoting.
+fn ollama_pull_body(name: &str) -> String {
+    serde_json::json!({ "name": name, "stream": true }).to_string()
+}
+
+/// One `pull-progress` payload. Same reason as the body: the model name and the
+/// error text both reach this string from outside, and a quote in either one
+/// used to produce a payload the renderer's `JSON.parse` threw away — or, worse,
+/// one it parsed with fields the caller chose.
+fn pull_progress_payload(name: &str, data: serde_json::Value) -> String {
+    serde_json::json!({ "model": name, "data": data }).to_string()
+}
+
+/// A progress line as it should be forwarded. Ollama sends NDJSON; a line that
+/// does not parse is passed on as a plain status string instead of being
+/// spliced in raw, which used to make the whole payload invalid JSON.
+fn pull_progress_line(line: &str) -> serde_json::Value {
+    serde_json::from_str::<serde_json::Value>(line)
+        .unwrap_or_else(|_| serde_json::json!({ "status": line }))
 }
 
 /// Streaming Ollama model pull — emits per-model progress events.
@@ -837,7 +1180,7 @@ pub async fn pull_model_stream(app: tauri::AppHandle, state: tauri::State<'_, cr
     let resp = client
         .post(&pull_url)
         .header("Content-Type", "application/json")
-        .body(format!(r#"{{"name":"{}","stream":true}}"#, name))
+        .body(ollama_pull_body(&name))
         .send()
         .await
         .map_err(|e| format!("pull_model_stream: {}", os_error::english(&e)))?;
@@ -882,26 +1225,25 @@ pub async fn pull_model_stream(app: tauri::AppHandle, state: tauri::State<'_, cr
                             buffer = buffer[pos + 1..].to_string();
                             if !line.is_empty() {
                                 // Bug Z/a — inspect each line for status/error fields
-                                if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&line) {
-                                    if let Some(err) = parsed.get("error").and_then(|v| v.as_str()) {
-                                        error_msg = Some(err.to_string());
-                                    }
-                                    if let Some(st) = parsed.get("status").and_then(|v| v.as_str()) {
-                                        last_status = Some(st.to_string());
-                                        if st == "success" {
-                                            saw_success = true;
-                                        }
+                                let parsed = pull_progress_line(&line);
+                                if let Some(err) = parsed.get("error").and_then(|v| v.as_str()) {
+                                    error_msg = Some(err.to_string());
+                                }
+                                if let Some(st) = parsed.get("status").and_then(|v| v.as_str()) {
+                                    last_status = Some(st.to_string());
+                                    if st == "success" {
+                                        saw_success = true;
                                     }
                                 }
                                 // Emit with model name so frontend can route
-                                let payload = format!(r#"{{"model":"{}","data":{}}}"#, name, line);
-                                let _ = app.emit("pull-progress", &payload);
+                                let _ = app.emit("pull-progress", &pull_progress_payload(&name, parsed));
                             }
                         }
                     }
                     Some(Err(e)) => {
-                        let _ = app.emit("pull-progress", &format!(
-                            r#"{{"model":"{}","data":{{"status":"Error: {}"}}}}"#, name, e
+                        let _ = app.emit("pull-progress", &pull_progress_payload(
+                            &name,
+                            serde_json::json!({ "status": format!("Error: {}", e) }),
                         ));
                         error_msg = Some(format!("network: {}", e));
                         break;
@@ -917,19 +1259,17 @@ pub async fn pull_model_stream(app: tauri::AppHandle, state: tauri::State<'_, cr
         let remaining = buffer.trim().to_string();
         if !remaining.is_empty() {
             // Same status/error inspection for the flushed tail
-            if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&remaining) {
-                if let Some(err) = parsed.get("error").and_then(|v| v.as_str()) {
-                    error_msg = Some(err.to_string());
-                }
-                if let Some(st) = parsed.get("status").and_then(|v| v.as_str()) {
-                    last_status = Some(st.to_string());
-                    if st == "success" {
-                        saw_success = true;
-                    }
+            let parsed = pull_progress_line(&remaining);
+            if let Some(err) = parsed.get("error").and_then(|v| v.as_str()) {
+                error_msg = Some(err.to_string());
+            }
+            if let Some(st) = parsed.get("status").and_then(|v| v.as_str()) {
+                last_status = Some(st.to_string());
+                if st == "success" {
+                    saw_success = true;
                 }
             }
-            let payload = format!(r#"{{"model":"{}","data":{}}}"#, name, remaining);
-            let _ = app.emit("pull-progress", &payload);
+            let _ = app.emit("pull-progress", &pull_progress_payload(&name, parsed));
         }
     }
 
@@ -1205,6 +1545,35 @@ mod tests {
         assert!(!is_blocked_proxy_host("2606:4700::1111"));
     }
 
+    /// goonerforporn's key used to ride in the search URL as `&token=`, and
+    /// this function is what quotes that URL back into an error the app then
+    /// logs. The scrubber cannot see a secret that is only a substring of a
+    /// URL, so the query goes.
+    #[test]
+    fn a_url_in_an_error_carries_no_query_and_no_userinfo() {
+        assert_eq!(
+            redact_url("https://civitai.com/api/v1/models?query=x&token=SECRET"),
+            "https://civitai.com/api/v1/models",
+        );
+        assert_eq!(
+            redact_url("https://civitai.com/api/v1/models?token=SECRET#frag"),
+            "https://civitai.com/api/v1/models",
+        );
+        assert!(!redact_url("https://user:pw@civitai.com/x?token=SECRET").contains("pw"));
+        assert!(!redact_url("https://user:pw@civitai.com/x?token=SECRET").contains("SECRET"));
+    }
+
+    /// Negative control: a plain URL is left alone, so the message still says
+    /// which resource failed, and an unparseable one is not echoed at all.
+    #[test]
+    fn a_plain_url_survives_and_a_broken_one_is_not_echoed() {
+        assert_eq!(
+            redact_url("https://huggingface.co/repo/resolve/main/m.gguf"),
+            "https://huggingface.co/repo/resolve/main/m.gguf",
+        );
+        assert_eq!(redact_url("token=SECRET"), "the requested URL");
+    }
+
     #[test]
     fn validate_public_url_blocks_private_and_loopback() {
         for u in [
@@ -1233,12 +1602,436 @@ mod tests {
 
     #[test]
     fn validate_public_url_allows_real_public_hosts() {
+        // Resolution is stubbed: the assertion is about the policy, and a test
+        // that needs a working resolver fails offline for reasons that have
+        // nothing to do with the policy.
         for u in [
             "https://huggingface.co/model", "https://civitai.com/api",
             "http://example.com/", "https://8.8.8.8/", "https://3com.com/",
         ] {
-            assert!(validate_public_url(u).is_ok(), "{} should be allowed", u);
+            assert!(
+                validate_public_url_addrs_with(u, public_answer).is_ok(),
+                "{} should be allowed", u
+            );
         }
+    }
+
+    // ── SSRF: the gate has to judge the ADDRESS, not the host text (M3a) ─────
+    //
+    // A hostname carries no evidence about where it points. `ollama.attacker.tld`
+    // is an ordinary public name whose A record is 127.0.0.1, and `localtest.me`
+    // is a public name that does the same by design — so a text-only gate let
+    // web_fetch (which needs no remote permission) reach the built-in engine,
+    // Ollama, LM Studio, ComfyUI, the remote bridge, the router and the
+    // internal wiki.
+
+    fn addr(ip: &str, port: u16) -> SocketAddr {
+        SocketAddr::new(ip.parse().unwrap(), port)
+    }
+
+    fn public_answer(_host: &str, port: u16) -> Result<Vec<SocketAddr>, String> {
+        Ok(vec![addr("93.184.216.34", port)])
+    }
+    fn loopback_answer(_host: &str, port: u16) -> Result<Vec<SocketAddr>, String> {
+        Ok(vec![addr("127.0.0.1", port)])
+    }
+    fn lan_answer(_host: &str, port: u16) -> Result<Vec<SocketAddr>, String> {
+        Ok(vec![addr("192.168.1.50", port)])
+    }
+    fn metadata_answer(_host: &str, port: u16) -> Result<Vec<SocketAddr>, String> {
+        Ok(vec![addr("169.254.169.254", port)])
+    }
+    fn mapped_loopback_answer(_host: &str, port: u16) -> Result<Vec<SocketAddr>, String> {
+        Ok(vec![addr("::ffff:127.0.0.1", port)])
+    }
+    fn ula_answer(_host: &str, port: u16) -> Result<Vec<SocketAddr>, String> {
+        Ok(vec![addr("fd00::1", port)])
+    }
+    /// A resolver that returns a good address AND a bad one — round-robin DNS
+    /// picks per connection, so one poisoned record is enough.
+    fn split_answer(_host: &str, port: u16) -> Result<Vec<SocketAddr>, String> {
+        Ok(vec![addr("93.184.216.34", port), addr("127.0.0.1", port)])
+    }
+    fn empty_answer(_host: &str, _port: u16) -> Result<Vec<SocketAddr>, String> {
+        Ok(vec![])
+    }
+
+    #[test]
+    fn a_hostname_is_judged_by_the_address_it_answers_with() {
+        let hostile: [(&str, HostResolver); 6] = [
+            ("loopback", loopback_answer),
+            ("LAN", lan_answer),
+            ("cloud metadata", metadata_answer),
+            ("IPv4-mapped loopback", mapped_loopback_answer),
+            ("IPv6 ULA", ula_answer),
+            ("one poisoned record among good ones", split_answer),
+        ];
+        for (what, resolve) in hostile {
+            // Nothing about this URL's text is suspicious. Only the answer is.
+            let out = validate_public_url_addrs_with("http://ollama.attacker.tld/api/tags", resolve);
+            assert!(out.is_err(), "a {} answer was let through", what);
+        }
+    }
+
+    #[test]
+    fn a_hostname_that_answers_a_public_address_is_allowed_and_reported_for_pinning() {
+        let addrs =
+            validate_public_url_addrs_with("https://huggingface.co/model", public_answer).unwrap();
+        // Returned so the caller can pin the socket to exactly this address and
+        // not re-resolve (DNS rebinding).
+        assert_eq!(addrs, vec![addr("93.184.216.34", 443)]);
+    }
+
+    #[test]
+    fn a_name_that_answers_nothing_is_refused_rather_than_assumed_public() {
+        assert!(validate_public_url_addrs_with("https://nowhere.example/", empty_answer).is_err());
+    }
+
+    #[test]
+    fn the_blocked_ranges_are_the_same_whether_written_or_resolved() {
+        for ip in ["127.0.0.1", "10.0.0.5", "192.168.1.1", "172.16.4.4", "169.254.169.254",
+                   "0.0.0.0", "::1", "fd00::1", "fe80::1", "::ffff:127.0.0.1",
+                   "100.100.100.200"] {
+            assert!(is_blocked_ip(ip.parse().unwrap()), "{} should be blocked", ip);
+        }
+        for ip in ["93.184.216.34", "8.8.8.8", "2606:4700::1111",
+                   "100.64.0.1" /* Tailscale CGNAT — the user's own machines */] {
+            assert!(!is_blocked_ip(ip.parse().unwrap()), "{} should be allowed", ip);
+        }
+    }
+
+    // ── SSRF via redirect: the hard block has to survive a 302 (M3b) ─────────
+
+    /// A loopback HTTP stub that answers `/start` with a 302 to `location` and
+    /// anything else with 200 "ok".
+    async fn redirect_stub<F>(location: F) -> u16
+    where
+        F: FnOnce(u16) -> String,
+    {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let location = location(port);
+        tokio::spawn(async move {
+            while let Ok((mut sock, _)) = listener.accept().await {
+                let location = location.clone();
+                tokio::spawn(async move {
+                    let mut buf = [0u8; 4096];
+                    let n = sock.read(&mut buf).await.unwrap_or(0);
+                    let req = String::from_utf8_lossy(&buf[..n]).to_string();
+                    let resp = if req.starts_with("GET /start") {
+                        format!(
+                            "HTTP/1.1 302 Found\r\nLocation: {}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                            location
+                        )
+                    } else {
+                        "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok".to_string()
+                    };
+                    let _ = sock.write_all(resp.as_bytes()).await;
+                    let _ = sock.flush().await;
+                });
+            }
+        });
+        port
+    }
+
+    /// The proxy allow-list waves localhost through, so a backend on localhost
+    /// that answers `302 Location: http://169.254.169.254/…` used to hand the
+    /// caller the cloud-metadata service — the exact address the hard block
+    /// exists for. The redirect never leaves the machine in this test: it is
+    /// refused before a connection to 169.254.169.254 is attempted.
+    #[test]
+    fn a_backend_redirect_into_the_metadata_service_is_not_followed() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async {
+            let port = redirect_stub(|_| {
+                "http://169.254.169.254/latest/meta-data/iam/security-credentials/".to_string()
+            })
+            .await;
+            let client = proxy_client(Duration::from_secs(10), ProxyAllowList::default()).unwrap();
+            let out = client.get(format!("http://127.0.0.1:{}/start", port)).send().await;
+            let err = out.expect_err("the metadata redirect must not be followed");
+            assert!(err.is_redirect(), "refused for the wrong reason: {err}");
+        });
+    }
+
+    #[test]
+    fn a_redirect_that_stays_inside_the_allow_list_is_still_followed() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async {
+            let port = redirect_stub(|p| format!("http://127.0.0.1:{}/ok", p)).await;
+            let client = proxy_client(Duration::from_secs(10), ProxyAllowList::default()).unwrap();
+            let resp = client
+                .get(format!("http://127.0.0.1:{}/start", port))
+                .send()
+                .await
+                .expect("a localhost → localhost redirect is legitimate");
+            assert!(resp.status().is_success());
+            assert_eq!(resp.text().await.unwrap(), "ok");
+        });
+    }
+
+    #[test]
+    fn the_allow_list_refuses_every_hop_target_it_would_refuse_as_a_first_request() {
+        let allow = ProxyAllowList::default();
+        for u in [
+            "http://169.254.169.254/latest/meta-data/",
+            "http://[::ffff:169.254.169.254]/",
+            "http://100.100.100.200/",
+            "http://192.168.1.99/v1/models",   // LAN host the user never configured
+            "http://intranet.corp/wiki",
+            "file:///etc/passwd",
+        ] {
+            assert!(allow.check(u).is_err(), "{} should be refused", u);
+        }
+        // What the proxy exists for still passes.
+        for u in ["http://127.0.0.1:11434/api/chat", "http://localhost:8188/prompt"] {
+            assert!(allow.check(u).is_ok(), "{} should be allowed", u);
+        }
+    }
+
+    // ── The stream always ends with an EOF marker ────────────────────────────
+
+    /// A loopback stub that writes `script` verbatim and then, if `hold` is set,
+    /// keeps the socket open without sending anything — what a backend that
+    /// died mid-generation looks like from the client side.
+    async fn raw_stub(script: &'static str, hold: Option<Duration>) -> u16 {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            while let Ok((mut sock, _)) = listener.accept().await {
+                tokio::spawn(async move {
+                    let mut buf = [0u8; 4096];
+                    let _ = sock.read(&mut buf).await;
+                    let _ = sock.write_all(script.as_bytes()).await;
+                    let _ = sock.flush().await;
+                    if let Some(d) = hold {
+                        tokio::time::sleep(d).await;
+                    }
+                });
+            }
+        });
+        port
+    }
+
+    async fn pump_and_collect(
+        url: &str,
+        token: &tokio_util::sync::CancellationToken,
+        idle: Duration,
+        grace: Duration,
+    ) -> (Result<(), String>, Vec<Vec<u8>>) {
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::<Vec<u8>>::new()));
+        let sink_store = seen.clone();
+        let sink = move |chunk: Vec<u8>| {
+            sink_store.lock().unwrap().push(chunk);
+            true
+        };
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(30))
+            .build()
+            .unwrap();
+        let out = pump_proxy_stream(&client, url, None, None, None, token, idle, grace, &sink).await;
+        let chunks = seen.lock().unwrap().clone();
+        (out, chunks)
+    }
+
+    /// The renderer closes its ReadableStream on the empty chunk and on nothing
+    /// else; the invoke result does not close it. A path that ends without the
+    /// marker leaves the reader hanging on a 15 s grace timer, which is why Stop
+    /// used to look frozen. Loopback is proxy-first in Tauri, so this is the
+    /// default route for the built-in engine, Ollama and LM Studio.
+    ///
+    /// The marker is NOT free, though, and the first version of this test had
+    /// that backwards. It settles the renderer's Response as 200 with an empty
+    /// body. Send it after a failure that produced no answer, and the real
+    /// error, which reaches JS one tick later on the rejected invoke, arrives
+    /// too late and is dropped: every unreachable local backend came out as
+    /// "The connection dropped before the model finished its answer. Check your
+    /// network and try again." (counter-check P1, 2026-09-04, LU Engine
+    /// switched off; the truth was a refused connection on 127.0.0.1). So the
+    /// rule is: end what has an end. A cancel and a finished body have one, and
+    /// so does a stream that died after delivering data. A connect failure and
+    /// a rejected status do not, and they must travel as failures.
+    #[test]
+    fn the_marker_ends_an_answer_and_never_hides_a_failure() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async {
+            let short = Duration::from_millis(200);
+
+            // 1. Stop pressed before the connection is even up.
+            let port = raw_stub("HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nhi", None).await;
+            let token = tokio_util::sync::CancellationToken::new();
+            token.cancel();
+            let (out, chunks) = pump_and_collect(
+                &format!("http://127.0.0.1:{}/", port), &token, short, short).await;
+            assert!(out.is_ok(), "cancel is not an error: {out:?}");
+            assert_eq!(chunks, vec![Vec::<u8>::new()], "cancel must still emit EOF");
+
+            // 2. Nothing listening: the failure happens before the first byte.
+            //    No marker, or the refused connection reads as a dropped answer.
+            let dead = {
+                let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+                let p = l.local_addr().unwrap().port();
+                drop(l);
+                p
+            };
+            let token = tokio_util::sync::CancellationToken::new();
+            let (out, chunks) = pump_and_collect(
+                &format!("http://127.0.0.1:{}/", dead), &token, short, short).await;
+            assert!(out.is_err());
+            assert!(chunks.is_empty(), "a refused connection must not look like an ended answer: {chunks:?}");
+
+            // 3. The backend answers, but with an error status. Same rule: the
+            //    renderer has to see the status and the body, not an empty 200.
+            let port = raw_stub(
+                "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 5\r\nConnection: close\r\n\r\nboom",
+                None,
+            ).await;
+            let token = tokio_util::sync::CancellationToken::new();
+            let (out, chunks) = pump_and_collect(
+                &format!("http://127.0.0.1:{}/", port), &token, short, short).await;
+            assert!(out.is_err());
+            assert!(chunks.is_empty(), "a rejected status must not look like an ended answer: {chunks:?}");
+
+            // 4. The ordinary path: chunks, then the marker, in that order.
+            let port = raw_stub(
+                "HTTP/1.1 200 OK\r\nContent-Length: 5\r\nConnection: close\r\n\r\nhello",
+                None,
+            ).await;
+            let token = tokio_util::sync::CancellationToken::new();
+            let (out, chunks) = pump_and_collect(
+                &format!("http://127.0.0.1:{}/", port), &token, short, short).await;
+            assert!(out.is_ok(), "{out:?}");
+            assert_eq!(chunks.first().map(|c| c.as_slice()), Some(&b"hello"[..]));
+            assert_eq!(chunks.last(), Some(&Vec::<u8>::new()));
+
+            // 5. The backend delivers, then goes quiet with the socket open.
+            //    There IS half an answer in the window, so it gets a clean end
+            //    and the reader keeps what it already has.
+            let port = raw_stub(
+                "HTTP/1.1 200 OK\r\nContent-Length: 32\r\n\r\nhalf",
+                Some(Duration::from_secs(2)),
+            ).await;
+            let token = tokio_util::sync::CancellationToken::new();
+            let (out, chunks) = pump_and_collect(
+                &format!("http://127.0.0.1:{}/", port), &token, short, short).await;
+            assert!(out.is_err(), "the idle window has to fire: {out:?}");
+            assert_eq!(chunks.first().map(|c| c.as_slice()), Some(&b"half"[..]));
+            assert_eq!(chunks.last(), Some(&Vec::<u8>::new()), "data seen, so the stream gets an end");
+        });
+    }
+
+    /// The only other bound on a proxied stream is the 7200 s whole-request
+    /// timeout, so a backend that dies with the socket still open (killed
+    /// process, suspended container, LAN backend that fell off the Wi-Fi) held
+    /// the UI for two hours.
+    #[test]
+    fn a_stalled_stream_is_cut_with_a_reason_and_still_emits_eof() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async {
+            // Headers + one chunk of a chunked body, then silence — the
+            // terminating 0-chunk never arrives.
+            let port = raw_stub(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/x-ndjson\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nhello\r\n",
+                Some(Duration::from_secs(30)),
+            ).await;
+            let token = tokio_util::sync::CancellationToken::new();
+            let (out, chunks) = pump_and_collect(
+                &format!("http://127.0.0.1:{}/", port),
+                &token,
+                Duration::from_millis(250),
+                Duration::from_secs(10),
+            ).await;
+            let err = out.expect_err("a stalled stream must not hang");
+            assert!(err.contains("stopped sending data"), "unhelpful reason: {err}");
+            assert_eq!(chunks.first().map(|c| c.as_slice()), Some(&b"hello"[..]));
+            assert_eq!(chunks.last(), Some(&Vec::<u8>::new()));
+        });
+    }
+
+    /// A cold model is read off disk and pushed into VRAM before the first
+    /// token, which for a large GGUF takes minutes. Cutting that at the idle
+    /// timeout would break loading rather than protect it, so the window before
+    /// the first chunk is its own, much longer one.
+    ///
+    /// When it does run out there is no answer to end, so no marker either, and
+    /// the reason travels as the failure it is. Before 04.09.2026 the marker
+    /// went out anyway, the renderer settled a 200 with an empty body, and the
+    /// sentence about a model that may still be loading was dropped as a late
+    /// answer. What the user read instead was "the connection dropped, check
+    /// your network", on a machine whose network was fine.
+    #[test]
+    fn silence_before_the_first_chunk_gets_the_model_load_window() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async {
+            let port = raw_stub(
+                "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n",
+                Some(Duration::from_secs(30)),
+            ).await;
+            let token = tokio_util::sync::CancellationToken::new();
+            let (out, chunks) = pump_and_collect(
+                &format!("http://127.0.0.1:{}/", port),
+                &token,
+                Duration::from_millis(50),   // idle: would have fired long ago
+                Duration::from_millis(400),  // the model-load window is what counts
+            ).await;
+            let err = out.expect_err("the load window has to end eventually too");
+            assert!(err.contains("sent nothing"), "wrong reason: {err}");
+            assert!(chunks.is_empty(), "nothing arrived, so there is nothing to end: {chunks:?}");
+        });
+    }
+
+    // ── The Ollama pull body is JSON, not a format string ────────────────────
+
+    /// The model name comes from the renderer. Hand-formatted into JSON, a name
+    /// carrying a quote closed the string early and appended fields of its own,
+    /// so the caller — not this file — decided what Ollama parsed.
+    #[test]
+    fn a_quote_in_the_model_name_cannot_forge_the_pull_body() {
+        let hostile = r#"x","insecure":true,"name":"y"#;
+        let body = ollama_pull_body(hostile);
+        let parsed: serde_json::Value =
+            serde_json::from_str(&body).expect("the body must be valid JSON");
+        assert_eq!(parsed["name"], hostile, "the name must survive verbatim");
+        assert_eq!(parsed["stream"], true);
+        assert!(parsed.get("insecure").is_none(), "the name injected a field: {body}");
+        assert_eq!(parsed.as_object().unwrap().len(), 2, "extra fields: {body}");
+    }
+
+    #[test]
+    fn awkward_model_names_still_produce_valid_json() {
+        for name in [
+            r#"a"b"#,
+            r#"back\slash"#,
+            "new\nline",
+            "tab\there",
+            "unicode-ümlaut-🦙",
+            r#"{"not":"a name"}"#,
+        ] {
+            let body = ollama_pull_body(name);
+            let parsed: serde_json::Value =
+                serde_json::from_str(&body).unwrap_or_else(|e| panic!("{name:?} → {body} ({e})"));
+            assert_eq!(parsed["name"], name);
+        }
+    }
+
+    /// The progress event is parsed by the renderer, and both the model name and
+    /// the network-error text reach it from outside.
+    #[test]
+    fn a_quote_cannot_forge_a_progress_event_either() {
+        let hostile = r#"m","data":{"status":"success"},"x":"#;
+        let payload = pull_progress_payload(hostile, pull_progress_line(r#"{"status":"pulling"}"#));
+        let parsed: serde_json::Value = serde_json::from_str(&payload).expect("valid JSON");
+        assert_eq!(parsed["model"], hostile);
+        assert_eq!(parsed["data"]["status"], "pulling");
+        assert_eq!(parsed.as_object().unwrap().len(), 2);
+
+        // A line Ollama did not send as JSON is forwarded as text, not spliced
+        // in raw — splicing produced a payload the renderer threw away whole.
+        let junk = pull_progress_payload("llama3", pull_progress_line("<html>502</html>"));
+        let parsed: serde_json::Value = serde_json::from_str(&junk).expect("valid JSON");
+        assert_eq!(parsed["data"]["status"], "<html>502</html>");
     }
 
     #[test]

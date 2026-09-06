@@ -11,12 +11,12 @@ import { AnimatePresence, motion } from 'framer-motion'
 import {
   AudioLines, Download, Film, ImagePlus, Info, Mic, Music2, Trash2, Upload, Wand2, X,
 } from 'lucide-react'
-import { useCreateStore, type CreateIntent, type MediaRef, type GalleryItem } from '../../../stores/createStore'
+import { useCreateStore, type CreateIntent, type GalleryItem } from '../../../stores/createStore'
 import { useCloudCatalogStore, cloudModelById, modelForOp } from '../../../stores/cloudCatalogStore'
 import { listLoras, deleteLora, type CloudLora } from '../../../api/cloud/loras'
 import {
   characterTrainerStatus, installCharacterTrainer, parseLocalCharacterLora,
-  TRAINER_BASE_FILES, type TrainerStatus,
+  TRAINER_BASE_FILES, baseDownloadRunning, baseDownloadPercent, type TrainerStatus,
 } from '../../../api/trainer'
 import { startModelDownload, getDownloadProgress } from '../../../api/discover'
 import { useDownloadStore } from '../../../stores/downloadStore'
@@ -24,6 +24,7 @@ import { getLoraModels } from '../../../api/comfyui'
 import { musicTakesLyrics, musicHowtoLines } from '../../../lib/render/music-ui'
 import { useCreateExp } from './CreateContext'
 import { loadImageRef } from './loadImage'
+import { mediaRefFrom } from './mediaRef'
 import { fetchGalleryItemBlob } from './galleryUrl'
 import { Button } from '../ui/Button'
 import { Segmented } from '../ui/Segmented'
@@ -43,10 +44,13 @@ export function SpecialControls({ intent }: { intent: CreateIntent }) {
 }
 
 // ── shared chip: a small labeled file slot (audio/video/image) ──────────────
-
-function mediaRefFrom(file: File): MediaRef {
-  return { name: file.name, url: URL.createObjectURL(file), blob: file }
-}
+//
+// `mediaRefFrom` used to be defined right here, and the training board in
+// Stage.tsx had its own inline copy of the same two lines. Two mints, one
+// release — and it was the copy without a release. Both now come from
+// `./mediaRef`, whose counterpart in createStore is
+// `releaseDroppedMediaRefs`. Do NOT revoke in this file: the ref outlives the
+// component, it lives in the store.
 
 function FileChip({
   icon: Icon,
@@ -268,6 +272,18 @@ function LocalTrainControls() {
   }, [])
   useEffect(() => { refresh() }, [refresh])
 
+  // A base-file download outlives this panel. Leave the tab and come back and
+  // the button read "Download base files" again with no note, while the 19 GB
+  // kept flowing in the tray (Phase G, Windows box, 06.09.2026). On mount the
+  // meter picks a running download back up, and the poll below carries on.
+  useEffect(() => {
+    let live = true
+    getDownloadProgress()
+      .then((prog) => { if (live && baseDownloadRunning(prog)) setBusy('bases') })
+      .catch(() => {})
+    return () => { live = false }
+  }, [])
+
   // While an install or a bases download runs, poll its progress into `note`.
   useEffect(() => {
     if (!busy) return
@@ -284,14 +300,12 @@ function LocalTrainControls() {
         }
       } else {
         const prog = await getDownloadProgress().catch(() => ({} as Record<string, { progress: number; total: number; status: string; filename: string; error?: string }>))
-        const rows = TRAINER_BASE_FILES.map((f) => prog[f.filename]).filter(Boolean)
-        const active = rows.find((r) => r.status === 'downloading' || r.status === 'connecting')
-        if (active) {
-          const pct = active.total > 0 ? Math.round((active.progress / active.total) * 100) : 0
-          setNote(`Downloading ${active.filename} (${pct}%)...`)
+        const pct = baseDownloadPercent(prog)
+        if (pct !== null) {
+          setNote(`Downloading base files (${pct}% of about 19 GB)...`)
           return
         }
-        const failed = rows.find((r) => r.status === 'error')
+        const failed = TRAINER_BASE_FILES.map((f) => prog[f.filename]).find((r) => r?.status === 'error')
         const s = await characterTrainerStatus().catch(() => null)
         if (s) setStatus(s)
         if (failed) {
@@ -348,7 +362,7 @@ function LocalTrainControls() {
             {busy === 'install' ? 'Setting up…' : 'Set up trainer'}
           </Button>
         </div>
-        {note && <div className="t-label text-gray-600 max-w-[520px] truncate">{note}</div>}
+        {note && <div className="t-label text-gray-600 max-w-[520px] text-center break-words">{note}</div>}
       </div>
     )
   }
@@ -361,7 +375,7 @@ function LocalTrainControls() {
             {busy === 'bases' ? 'Downloading…' : 'Download base files'}
           </Button>
         </div>
-        {note && <div className="t-label text-gray-600 max-w-[520px] truncate">{note}</div>}
+        {note && <div className="t-label text-gray-600 max-w-[520px] text-center break-words">{note}</div>}
       </div>
     )
   }
@@ -391,7 +405,7 @@ function LocalTrainControls() {
       </div>
       {!isGenerating && (
         <div className="t-label text-gray-600 flex items-center gap-1.5">
-          <span>Runs on your GPU and takes a while ({trainSteps} steps). The character lands in your local LoRAs.</span>
+          <span>Runs on your GPU and takes a while ({trainSteps} steps). The local chat model pauses for the run. The character lands in your local LoRAs.</span>
           {/* The run repairs its own environment now (A2), so this is no
               longer the only way out of a broken install. It stays because
               the button used to render ONLY while the environment counted as

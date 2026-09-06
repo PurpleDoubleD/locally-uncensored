@@ -8,6 +8,19 @@ export type Tool = 'brush' | 'eraser'
 
 const UNDO_CAP = 20
 
+/**
+ * The brush a fresh engine starts with: 6% of the longest source edge.
+ *
+ * Exported because the editor's brush-size slider has to show this number from
+ * its very first render. Reading it back off a just-constructed engine inside
+ * an effect meant a setState in an effect body (React 19 `set-state-in-effect`)
+ * for a value that is a plain function of the source dimensions the editor
+ * already holds. The constructor uses it too, so the two cannot drift apart.
+ */
+export function defaultBrushSize(width: number, height: number): number {
+  return Math.round(Math.max(Math.max(1, Math.round(width)), Math.max(1, Math.round(height))) * 0.06)
+}
+
 export class MaskCanvasEngine {
   readonly width: number
   readonly height: number
@@ -30,7 +43,7 @@ export class MaskCanvasEngine {
     this.mask.height = this.height
     // willReadFrequently: undo snapshots + hasPaint do frequent getImageData.
     this.ctx = this.mask.getContext('2d', { willReadFrequently: true })!
-    this.brushSize = Math.round(Math.max(this.width, this.height) * 0.06)
+    this.brushSize = defaultBrushSize(this.width, this.height)
   }
 
   // ── stroke lifecycle (coords are in SOURCE pixels) ──

@@ -15,6 +15,7 @@ import { NumberField } from '../ui/NumberField'
 import { Button } from '../ui/Button'
 import { Tooltip } from '../ui/Tooltip'
 import { cn } from '../ui/cn'
+import { HINWEIS_TEXT } from '../../../lib/hinweis'
 
 // Video families whose dynamic-workflow strategy actually wires a LoRA node:
 // the generic UNET path (wan/hunyuan/ltx/mochi/cosmos) plus Wan 2.2's dedicated
@@ -153,7 +154,10 @@ export function ParamGroups() {
                       <span className="t-mono text-gray-200">{hiresFinal.width}×{hiresFinal.height}</span>
                     </>
                   ) : (
-                    <span className="text-amber-400">{hiresSizeError}</span>
+                    // Rot, nicht gelb: solange hier ein Satz steht, kommt aus
+                    // dieser Zeile keine Zielgroesse und der Lauf startet nicht.
+                    // Zwei Toene, kein dritter, siehe lib/hinweis.ts.
+                    <span className={HINWEIS_TEXT.fehler}>{hiresSizeError}</span>
                   )}
                 </div>
                 <Slider label="Upscale" min={1.1} max={3} step={0.1} value={s.hiresScale} onChange={s.setHiresScale} format={(v) => `${v.toFixed(1)}×`} />

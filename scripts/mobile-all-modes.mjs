@@ -12,7 +12,7 @@
  */
 
 import { execSync } from 'node:child_process'
-import { mkdirSync, copyFileSync, existsSync, readFileSync, writeFileSync, renameSync, rmSync, statSync } from 'node:fs'
+import { mkdirSync, existsSync, readFileSync, writeFileSync, renameSync, rmSync } from 'node:fs'
 import { argv, exit } from 'node:process'
 
 function args() {

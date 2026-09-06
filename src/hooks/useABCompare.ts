@@ -37,8 +37,11 @@ export function useABCompare() {
     // Build messages for the providers
     const persona = useSettingsStore.getState().getActivePersona()
     const chatMessages: ChatMessage[] = []
-    if (persona?.prompt) {
-      chatMessages.push({ role: 'system', content: persona.prompt })
+    // `Persona` carries `systemPrompt`, never `prompt`: the old read was
+    // always undefined, so a comparison ran with no persona at all while the
+    // rest of the app (chat, Codex) sent one.
+    if (persona?.systemPrompt) {
+      chatMessages.push({ role: 'system', content: persona.systemPrompt })
     }
 
     // Include previous messages for context

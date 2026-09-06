@@ -20,6 +20,10 @@ export const DEFAULT_SETTINGS: Settings = {
   cloudTeasersEnabled: true,
   personasEnabled: true,
   thinkingEnabled: true,
+  // Reasoning effort (2.6.8). 'high' is not a taste, it is the rung this
+  // client has always sent for thinking ON. Any other default would move every
+  // existing customer's token bill on update without them touching anything.
+  reasoningEffort: 'high',
   // Small-Model Mode (v2.5.0) — lean profile for 3B-8B local models.
   // Default OFF: big models behave exactly as before until the user flips it.
   smallModelMode: false,
@@ -39,6 +43,10 @@ export const DEFAULT_SETTINGS: Settings = {
   // surfaces in finite wall-clock.
   agentMaxToolCalls: 400,
   agentMaxIterations: 200,
+  // Die heutigen festen Werte aus sub-agent.ts, unveraendert uebernommen:
+  // wer nichts einstellt, bekommt exakt das Verhalten von 2.6.7.
+  subAgentMaxToolCalls: 10,
+  subAgentMaxIterations: 5,
   // Unlimited by design — see the note on the type.
   loopMaxPasses: 0,
   hfDownloadPathOverride: '',
@@ -52,6 +60,14 @@ export const DEFAULT_SETTINGS: Settings = {
   // default; the switch is the support way back without a rollback release.
   contextDecay: true,
   codexSendWindowTokens: 64000,
+  // 2.6.8: auto-compact is OFF until someone sets a threshold. 0 is the
+  // switch, not a tuning value — see the field's comment in types/settings.ts.
+  // No STORE_VERSION bump for this key: settingsStore's migrate merges
+  // additively ({...DEFAULT_SETTINGS, ...stored}), and a profile already at
+  // the current version simply reads `undefined` here, which usableThreshold
+  // already answers with "off". A version bump that buys nothing costs a full
+  // state loss on downgrade (lib/persist-version.ts, DOWNGRADE-KONTRAKT).
+  autoCompactThreshold: 0,
   memoryCloudOptIn: false,
   codexDefaultMode: 'ask' as const,
   builtinEngine: {
@@ -324,11 +340,11 @@ export const ONBOARDING_EMBED_MODEL = {
 }
 
 export const ONBOARDING_MODELS: OnboardingModel[] = [
-  // P4 / LU-Aufgaben: ONBOARDING shows exactly ONE model — the tiny ~400 MB
-  // Qwen 2.5 0.5B starter. The previous list of 22 entries (5–42 GB) was
+  // P4 / LU-Aufgaben: ONBOARDING shows exactly ONE model, the tiny ~400 MB
+  // Qwen 2.5 0.5B starter. The previous list of 22 entries (5 to 42 GB) was
   // pure noise on first launch. Discoverability for everything else lives
-  // in the Model Manager → Discover tab (curated list + HuggingFace
+  // in the Model Manager → Get new tab (curated list + HuggingFace
   // search). Onboarding is "give the user a working chat in 30 seconds";
   // anything heavier comes after they've made it past the wizard.
-  { name: 'qwen2.5-0.5b', label: 'Qwen 2.5 0.5B (Starter)', description: 'Tiny instant-chat model, 400 MB, runs on anything. Great to verify your setup; pick bigger models from the Discover tab once you\'re in.', size: '0.4 GB', vram: '1 GB', vramGB: 1, recommended: true, agent: false, downloadUrl: HF_OB('bartowski/Qwen2.5-0.5B-Instruct-GGUF', 'Qwen2.5-0.5B-Instruct-Q4_K_M.gguf'), filename: 'Qwen2.5-0.5B-Instruct-Q4_K_M.gguf', sizeGB: 0.4 },
+  { name: 'qwen2.5-0.5b', label: 'Qwen 2.5 0.5B (Starter)', description: 'Tiny instant-chat model, 400 MB, runs on anything. Great to verify your setup; pick bigger models from the Get new tab once you\'re in.', size: '0.4 GB', vram: '1 GB', vramGB: 1, recommended: true, agent: false, downloadUrl: HF_OB('bartowski/Qwen2.5-0.5B-Instruct-GGUF', 'Qwen2.5-0.5B-Instruct-Q4_K_M.gguf'), filename: 'Qwen2.5-0.5B-Instruct-Q4_K_M.gguf', sizeGB: 0.4 },
 ]

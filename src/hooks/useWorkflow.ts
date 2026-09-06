@@ -51,7 +51,7 @@ export function useWorkflow() {
         setCurrentStepLabel(step.label)
         store.updateExecution(executionId, { currentStepIndex: stepIndex })
       },
-      onStepComplete: (stepIndex, result) => {
+      onStepComplete: (_stepIndex, result) => {
         store.addStepResult(executionId, result)
       },
       onStepError: (stepIndex, error) => {

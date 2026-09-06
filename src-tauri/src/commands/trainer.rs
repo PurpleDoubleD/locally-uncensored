@@ -24,7 +24,7 @@ use crate::os_error;
 
 use crate::state::AppState;
 use std::fs;
-use std::io::{BufRead, BufReader};
+use std::io::{BufReader, Read};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::Ordering;
@@ -39,6 +39,32 @@ const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 const MUSUBI_REPO: &str = "https://github.com/kohya-ss/musubi-tuner.git";
 const MUSUBI_TAG: &str = "v0.3.4";
+
+/// The same tag as a plain archive from GitHub's codeload host. The trainer
+/// used to depend on a git binary for one shallow clone, and a machine without
+/// git ended the setup with "git clone could not start" and a pointer to go
+/// and install git. The archive needs nothing but the network; git stays as
+/// the fallback for the day the archive host is unreachable and git is there.
+fn musubi_archive_url() -> String {
+    format!("https://codeload.github.com/kohya-ss/musubi-tuner/zip/refs/tags/{MUSUBI_TAG}")
+}
+
+/// What a fresh setup writes to the drive: PyTorch and its CUDA libraries are
+/// 2.5 GB compressed and about 5 GB unpacked, pip keeps the download while it
+/// unpacks, and the trainer's own dependencies add a gigabyte. Measured on the
+/// box on 06.09.2026: 5.0 GB in the trainer folder plus 2.4 GB in pip's cache.
+/// Asked before the first byte, because the old check was pip's "No space left
+/// on device" with 2.5 GB already on the way.
+const TRAINER_SETUP_NEEDS_GIB: u64 = 10;
+/// A torch reinstall on top of an existing one: pip holds both copies while
+/// it swaps them (see DISK_NEXT_STEP).
+const TRAINER_REINSTALL_NEEDS_GIB: u64 = 7;
+
+/// The card the documented recipe (fp8 base, block swap, gradient
+/// checkpointing, 8 bit optimizer) was proven on has 12 GB. Below that the run
+/// gets through both cache steps and dies with CUDA out of memory in the first
+/// training step, after ten minutes of work. Asked before the first step.
+const TRAINER_VRAM_FLOOR_MIB: u64 = 11 * 1024;
 
 /// Known Z-Image training-base files, resolved by exact filename from the
 /// trainer root's models dir or the active ComfyUI models tree.
@@ -82,7 +108,7 @@ fn free_stem(dir: &Path, base: &str, ext: &str, bytes: &[u8]) -> String {
 }
 
 fn config_json_path() -> Option<PathBuf> {
-    dirs::config_dir().map(|d| d.join("locally-uncensored").join("config.json"))
+    dirs::config_dir().map(|_| crate::os_paths::app_config_json())
 }
 
 fn read_config_value(key: &str) -> Option<String> {
@@ -177,9 +203,61 @@ fn active_comfy_dir(state: &AppState) -> Option<PathBuf> {
 /// practice the moment tqdm draws its block-glyph progress bar, which is
 /// exactly when the train step finally has a step total. Force UTF-8 stdio
 /// on every trainer child instead.
+///
+/// The same hook carries the second Windows-only environment fix. GitHub #121
+/// (Z0mbieK, two GPUs, 2026-08-29): the train step died at start with
+/// "use_libuv was requested but PyTorch was build without libuv support".
+/// torch 2.4+ asks for libuv by default when torch.distributed sets up its
+/// store on Windows, and the Windows wheels are built without it. USE_LIBUV=0
+/// is the knob torch itself reads for that; it changes nothing on a single
+/// GPU and nothing outside the trainer's children.
 fn force_python_utf8(cmd: &mut Command) {
     cmd.env("PYTHONIOENCODING", "utf-8");
     cmd.env("PYTHONUTF8", "1");
+    #[cfg(target_os = "windows")]
+    cmd.env("USE_LIBUV", "0");
+}
+
+/// The Pythons the trainer can be built with. musubi-tuner v0.3.4 declares
+/// `requires-python >=3.10,<3.13`, and the cu121 wheel index stops at cp312
+/// as well, so anything newer fails at step 3 (cu121) or step 4 (cu128, where
+/// torch itself installs fine and musubi then refuses the interpreter).
+///
+/// Ticket 0004 (sockenmonster, 2026-09-05, after the same wall in August):
+/// LU built the venv from the newest Python on the machine, 3.14.6, because
+/// nothing between "which Python does LU use" and "which Python can the
+/// trainer use" existed. The setup now chooses its own interpreter from this
+/// range, and a venv built from the wrong one is rebuilt, not kept.
+const TRAINER_PYTHON_MINORS: std::ops::RangeInclusive<u32> = 10..=12;
+pub(crate) const TRAINER_PYTHON_RANGE: &str = "3.10, 3.11 or 3.12";
+
+/// `(3, 11)` from "3.11.7", None for anything that is not a version.
+pub(crate) fn python_major_minor(version: &str) -> Option<(u32, u32)> {
+    let mut parts = version.trim().split('.');
+    let major = parts.next()?.parse().ok()?;
+    let minor = parts.next()?.parse().ok()?;
+    Some((major, minor))
+}
+
+pub(crate) fn trainer_supports_python(version: &str) -> bool {
+    matches!(python_major_minor(version), Some((3, minor)) if TRAINER_PYTHON_MINORS.contains(&minor))
+}
+
+/// Which interpreter builds the trainer venv, from `(path, version)` pairs
+/// with LU's default first. The default wins when it fits, so a working
+/// environment is never rebuilt just because a newer Python appeared; otherwise
+/// the newest supported one. None when nothing on the list fits.
+pub(crate) fn choose_trainer_python(candidates: &[(String, String)]) -> Option<(String, String)> {
+    if let Some(first) = candidates.first() {
+        if trainer_supports_python(&first.1) {
+            return Some(first.clone());
+        }
+    }
+    candidates
+        .iter()
+        .filter(|(_, v)| trainer_supports_python(v))
+        .max_by_key(|(_, v)| python_major_minor(v))
+        .cloned()
 }
 
 /// cu121 wheels carry kernels up to sm_90 (Hopper). Blackwell reports
@@ -397,7 +475,7 @@ fn musubi_installed(root: &Path) -> bool {
 /// preflight_verdict below. The trainer package is probed with find_spec
 /// rather than a real import: importing it pulls the whole training stack and
 /// would turn a cheap check into seconds of work and a second CUDA context.
-const TORCH_PREFLIGHT_PY: &str = "import importlib.util\nimport torch\nprint('TORCH_OK', torch.__version__)\ncuda = torch.cuda.is_available()\nprint('CUDA', '1' if cuda else '0')\nif cuda:\n    cap = torch.cuda.get_device_capability(0)\n    print('CAP', cap[0], cap[1])\n    print('ARCHS', ' '.join(torch.cuda.get_arch_list()))\nif importlib.util.find_spec('musubi_tuner') is not None:\n    print('MUSUBI_OK')\n";
+const TORCH_PREFLIGHT_PY: &str = "import importlib.util\nimport torch\nprint('TORCH_OK', torch.__version__)\ncuda = torch.cuda.is_available()\nprint('CUDA', '1' if cuda else '0')\nif cuda:\n    cap = torch.cuda.get_device_capability(0)\n    print('CAP', cap[0], cap[1])\n    print('ARCHS', ' '.join(torch.cuda.get_arch_list()))\n    print('VRAM_MIB', torch.cuda.get_device_properties(0).total_memory // (1024 * 1024))\nif importlib.util.find_spec('musubi_tuner') is not None:\n    print('MUSUBI_OK')\n";
 
 /// What the preflight found. Four failure classes that all used to surface as
 /// a raw error deep inside the run: torch not importable (half install), a
@@ -509,6 +587,55 @@ pub(crate) fn useful_tail(text: &str) -> String {
     lines[lines.len().saturating_sub(3)..].join(" | ")
 }
 
+/// The dead ends that are neither the network nor the disk, and that the one
+/// generic step sent people to look in the wrong place for. A2 stage one
+/// (aikabatzu, aldrich_ironhart, Z0mbieK, Discord and GH #121, 2026-08-27 and
+/// 2026-08-29): "Setting up the trainer environment failed. Check that you are
+/// online" while online, with the firewall off, confirmed by a second user.
+///
+/// Windows and the rest get different sentences, because the Visual C++
+/// Redistributable does not exist off Windows and sending a Linux user to
+/// microsoft.com is the same class of mistake as sending an online user to
+/// their router. Both texts compile everywhere and the OS is a parameter, the
+/// way `torch_wheels` does it, so a Mac can test the Windows wording.
+const WINDOWS_REDIST_NEXT_STEP: &str = "A Microsoft Visual C++ runtime library is missing, and PyTorch cannot load without it. Install the current Visual C++ Redistributable for x64 from https://learn.microsoft.com/cpp/windows/latest-supported-vc-redist, restart Windows, then press Set up trainer in Character Studio.";
+const UNIX_LIBRARY_NEXT_STEP: &str = "A system library PyTorch loads is missing on this machine; the log line above names the file. Install it with your package manager, then press Set up trainer in Character Studio.";
+const WINDOWS_NATIVE_NEXT_STEP: &str = "PyTorch is on disk but its native libraries will not load. Install the current Visual C++ Redistributable for x64 from https://learn.microsoft.com/cpp/windows/latest-supported-vc-redist, update the graphics driver, restart Windows, then press Set up trainer in Character Studio.";
+const UNIX_NATIVE_NEXT_STEP: &str = "PyTorch is on disk but its native libraries will not load. Update the graphics driver and the system libraries, restart the machine, then press Set up trainer in Character Studio.";
+/// A wrong wheel, not a broken machine. The setup probes the card again, so it
+/// is the same button and a completely different reason.
+const WHEEL_NEXT_STEP: &str = "The PyTorch that was installed carries no support for the card in this machine, so it can only run on the processor. Press Set up trainer in Character Studio: the setup probes the card again and picks the matching wheel.";
+const PYTHON_VERSION_NEXT_STEP: &str = "The Python in the trainer environment is one the trainer cannot use (it needs 3.10, 3.11 or 3.12). Press Set up trainer in Character Studio: the setup looks for a matching Python on this machine on its own, installs 3.12 on Windows when there is none, and rebuilds the environment with it.";
+const PERMISSION_NEXT_STEP: &str = "The installer was not allowed to write into the Python folder. Close every open Python, Jupyter or IDE debugger, and if that changes nothing, install Python for your own user instead of for all users, then press Set up trainer in Character Studio.";
+const PEP668_NEXT_STEP: &str = "This Python refuses installs outside a virtual environment and the venv module is missing. Install it from your package manager (python3-venv on Debian and Ubuntu, python-virtualenv on Arch, python3-virtualenv on Fedora), then press Set up trainer in Character Studio.";
+
+/// The way out that fits what actually failed, on the platform it failed on.
+/// The old code offered exactly one, "check that you are online and that the
+/// drive has room", for every failure class there is.
+pub(crate) fn next_step_for_log(log: &str, fallback: &'static str, os: &str) -> &'static str {
+    use crate::commands::install::pip::PipFailureKind as K;
+    let windows = os == "windows";
+    if out_of_disk(log) {
+        return DISK_NEXT_STEP;
+    }
+    match crate::commands::install::pip::pip_failure_kind(log) {
+        K::MissingRuntimeLibrary => {
+            if windows { WINDOWS_REDIST_NEXT_STEP } else { UNIX_LIBRARY_NEXT_STEP }
+        }
+        K::NativeLoadFailure => {
+            if windows { WINDOWS_NATIVE_NEXT_STEP } else { UNIX_NATIVE_NEXT_STEP }
+        }
+        K::TorchWithoutGpuSupport => WHEEL_NEXT_STEP,
+        K::NoMatchingWheel | K::UnsupportedPython => PYTHON_VERSION_NEXT_STEP,
+        K::Permission => PERMISSION_NEXT_STEP,
+        K::ExternallyManaged => PEP668_NEXT_STEP,
+        K::DiskFull => DISK_NEXT_STEP,
+        // Network failures and everything we cannot name keep the old text.
+        // Naming the network for a failure that is not one is the whole bug.
+        _ => fallback,
+    }
+}
+
 /// One shape for every dead end in the trainer environment: what is wrong, what
 /// to press, and a short tail that says why. In that order, because the user
 /// reads the first sentence and the last one.
@@ -516,8 +643,8 @@ pub(crate) fn useful_tail(text: &str) -> String {
 /// Before this, a repair that never finished put the raw process error into the
 /// status line instead, which on a full disk meant fifteen `Moving to ...`
 /// lines and no next step at all.
-pub(crate) fn env_failure_message(diagnosis: &str, fallback_step: &str, log: &str) -> String {
-    let step = if out_of_disk(log) { DISK_NEXT_STEP } else { fallback_step };
+pub(crate) fn env_failure_message(diagnosis: &str, fallback_step: &'static str, log: &str) -> String {
+    let step = next_step_for_log(log, fallback_step, std::env::consts::OS);
     let head = diagnosis.trim();
     let head = if head.is_empty() { String::new() } else { format!("{head} ") };
     format!("{head}{step} Last steps: {}", useful_tail(log))
@@ -534,10 +661,13 @@ pub(crate) fn repair_failed_message(after: &Preflight, tail: &str) -> String {
 
 /// An error that is already a finished sentence with its own way out. Wrapping
 /// it would bury that way out under a generic one and quote it back as a log
-/// tail. `no_base_python_message` is the only such case today, and it points at
-/// a different button than every other failure here.
+/// tail. `no_trainer_python_message` is the first such case, and it points at
+/// python.org rather than at the button every other failure here names.
 fn already_explained(err: &str) -> bool {
-    err.contains("Install Python in Settings")
+    err.contains("LU finds it on its own")
+        // The room check answers before a byte is downloaded and names the
+        // drive; wrapping it would add "check that you are online" on top.
+        || err.contains("before anything is downloaded")
         // The AMD refusal is the second one: it names the OS wall, says that
         // nothing was downloaded, and pointing at Set up trainer would only
         // walk the customer into the same wall again.
@@ -582,9 +712,7 @@ fn preflight_verdict(exit_ok: bool, stdout: &str, stderr: &str, gpu: Option<&str
     if !exit_ok || !stdout.contains("TORCH_OK") {
         let tail = stderr
             .lines()
-            .map(str::trim)
-            .filter(|l| !l.is_empty())
-            .next_back()
+            .map(str::trim).rfind(|l| !l.is_empty())
             .unwrap_or("no detail from python")
             .to_string();
         return Preflight::TorchBroken(tail);
@@ -637,12 +765,158 @@ fn preflight_verdict(exit_ok: bool, stdout: &str, stderr: &str, gpu: Option<&str
 /// Run one child to completion, streaming stdout+stderr lines into the run
 /// state. Registers the child pid so cancel can kill it. Returns Err on
 /// non-zero exit (with the last stderr lines) or on cancel.
+/// Whether a child's own lines go into the log the note under the button
+/// reads. winget prints in the language of the Windows it runs on, and on
+/// the box the note read "Download läuft ..." in an English app while LU
+/// fetched Python 3.12 (06.09.2026). Quiet keeps the tail for the failure
+/// message and lets the caller narrate in English.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Echo {
+    Log,
+    Quiet,
+}
+
 fn run_streamed(
+    cmd: Command,
+    label: &str,
+    run: &Arc<Mutex<crate::state::InstallState>>,
+    cancel: &Arc<std::sync::atomic::AtomicBool>,
+    pid_slot: &Arc<Mutex<Option<u32>>>,
+) -> Result<(), String> {
+    run_child(cmd, label, run, cancel, pid_slot, Echo::Log)
+}
+
+fn run_quiet(
+    cmd: Command,
+    label: &str,
+    run: &Arc<Mutex<crate::state::InstallState>>,
+    cancel: &Arc<std::sync::atomic::AtomicBool>,
+    pid_slot: &Arc<Mutex<Option<u32>>>,
+) -> Result<(), String> {
+    run_child(cmd, label, run, cancel, pid_slot, Echo::Quiet)
+}
+
+/// winget as LU runs it: silent, both agreements accepted so it never waits
+/// for a keypress inside our thread, and quiet (see Echo). A per user package
+/// takes `--scope user` and needs no elevation; a machine wide one (the Visual
+/// C++ runtime) is left without a scope, its installer asks Windows for
+/// elevation on its own.
+pub(crate) fn winget_install_args(id: &str, user_scope: bool) -> Vec<String> {
+    let mut args: Vec<String> = ["install", id, "--silent", "--accept-package-agreements", "--accept-source-agreements"]
+        .iter()
+        .map(|a| a.to_string())
+        .collect();
+    if user_scope {
+        args.push("--scope".to_string());
+        args.push("user".to_string());
+    }
+    args
+}
+
+fn winget_install(
+    id: &str,
+    user_scope: bool,
+    run: &Arc<Mutex<crate::state::InstallState>>,
+    cancel: &Arc<std::sync::atomic::AtomicBool>,
+    pid_slot: &Arc<Mutex<Option<u32>>>,
+) -> Result<(), String> {
+    let mut winget = Command::new("winget");
+    winget.args(winget_install_args(id, user_scope));
+    run_quiet(winget, &format!("winget install {id}"), run, cancel, pid_slot)
+}
+
+fn cancel_requested(cancel: &Arc<std::sync::atomic::AtomicBool>) -> bool {
+    cancel.load(Ordering::SeqCst)
+}
+
+/// Sleeps `secs`, a third of a second at a time, and says whether Cancel came
+/// first.
+fn wait_or_cancel(cancel: &Arc<std::sync::atomic::AtomicBool>, secs: u64) -> bool {
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(secs);
+    while std::time::Instant::now() < until {
+        if cancel_requested(cancel) {
+            return true;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(300));
+    }
+    false
+}
+
+/// A pip run that died on the network, not on the machine. Worth another try
+/// after a pause; every other class comes back identical on a retry.
+pub(crate) fn is_transient_network(err: &str) -> bool {
+    use crate::commands::install::pip::PipFailureKind as K;
+    matches!(
+        crate::commands::install::pip::pip_failure_kind(err),
+        K::Network | K::Timeout | K::RateLimited
+    )
+}
+
+/// The two pip steps are the ones the network can break halfway, and the old
+/// answer to a connection dropped at 2 GB of 2.5 was the dead end sentence.
+/// Two retries after a pause the customer can still cancel, then the sentence.
+fn pip_with_retry(
+    mut build: impl FnMut() -> Command,
+    label: &str,
+    run: &Arc<Mutex<crate::state::InstallState>>,
+    cancel: &Arc<std::sync::atomic::AtomicBool>,
+    pid_slot: &Arc<Mutex<Option<u32>>>,
+) -> Result<(), String> {
+    const RETRIES: u32 = 2;
+    let mut attempt = 0;
+    loop {
+        match run_streamed(build(), label, run, cancel, pid_slot) {
+            Err(e) if e != "cancelled" && attempt < RETRIES && is_transient_network(&e) => {
+                attempt += 1;
+                push_log(run, &format!(
+                    "The download broke off during {label}. Waiting 15 seconds and trying again ({attempt} of {RETRIES})..."
+                ));
+                if wait_or_cancel(cancel, 15) {
+                    return Err("cancelled".to_string());
+                }
+            }
+            other => return other,
+        }
+    }
+}
+
+/// Feed a child's output to `on_line` one segment at a time, where a segment
+/// ends at a newline OR a carriage return. Progress bars (tqdm) redraw their
+/// line with \r and never send \n until the bar is done, so `BufRead::lines`
+/// delivers a whole epoch of updates as one line, long after they happened.
+fn for_each_progress_line<R: Read>(mut stream: R, mut on_line: impl FnMut(String)) {
+    let mut pending: Vec<u8> = Vec::new();
+    let mut buf = [0u8; 4096];
+    loop {
+        let n = match stream.read(&mut buf) {
+            Ok(0) => break,
+            Ok(n) => n,
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(_) => break,
+        };
+        for &b in &buf[..n] {
+            if b == b'\n' || b == b'\r' {
+                if !pending.is_empty() {
+                    on_line(String::from_utf8_lossy(&pending).into_owned());
+                    pending.clear();
+                }
+            } else {
+                pending.push(b);
+            }
+        }
+    }
+    if !pending.is_empty() {
+        on_line(String::from_utf8_lossy(&pending).into_owned());
+    }
+}
+
+fn run_child(
     mut cmd: Command,
     label: &str,
     run: &Arc<Mutex<crate::state::InstallState>>,
     cancel: &Arc<std::sync::atomic::AtomicBool>,
     pid_slot: &Arc<Mutex<Option<u32>>>,
+    echo: Echo,
 ) -> Result<(), String> {
     force_python_utf8(&mut cmd);
     cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
@@ -670,12 +944,38 @@ fn run_streamed(
     {
         let run = run.clone();
         let tail = tail.clone();
+        let cancel = cancel.clone();
         handles.push(std::thread::spawn(move || {
-            let reader = BufReader::new(stream);
-            for line in reader.lines().map_while(Result::ok) {
+            // Split on carriage returns as well as newlines: tqdm rewrites its
+            // progress line in place with \r and only ends it with \n at the
+            // end of an epoch, so a reader that waits for \n saw the step
+            // counter jump in blocks of one epoch (measured on the box on
+            // 06.09.2026: "Training 0/400" for 23 minutes, then 48 at a time).
+            for_each_progress_line(stream, |line| {
+                // After a cancel the tree is being killed; what the dying
+                // Python still prints (a KeyboardInterrupt traceback) is not
+                // this run's log. The box showed one under a status of
+                // "cancelled" (06.09.2026).
+                if cancel.load(Ordering::SeqCst) {
+                    return;
+                }
+                // Der Schwanz dieses Protokolls steht in der Oberflaeche, also
+                // gilt hier dieselbe Regel wie beim Installer: was das
+                // Betriebssystem geschrieben hat, steht englisch da, was der
+                // Trainer selbst schreibt, bleibt unangetastet.
+                let line = os_error::english_child_text(&line).into_owned();
                 let trimmed = line.trim();
                 if trimmed.is_empty() {
-                    continue;
+                    return;
+                }
+                if let Ok(mut t) = tail.lock() {
+                    t.push(trimmed.to_string());
+                    if t.len() > 12 {
+                        t.remove(0);
+                    }
+                }
+                if echo == Echo::Quiet {
+                    return;
                 }
                 // Step counter for the UI meter: musubi/tqdm emit
                 // "steps: NN%|...| 123/1600 [...]" style lines.
@@ -685,14 +985,8 @@ fn run_streamed(
                         s.download_total = total;
                     }
                 }
-                if let Ok(mut t) = tail.lock() {
-                    t.push(trimmed.to_string());
-                    if t.len() > 12 {
-                        t.remove(0);
-                    }
-                }
                 push_log(&run, trimmed);
-            }
+            });
         }));
     }
 
@@ -712,7 +1006,9 @@ fn run_streamed(
         match child.try_wait() {
             Ok(Some(s)) => break s,
             Ok(None) => std::thread::sleep(std::time::Duration::from_millis(300)),
-            Err(e) => return Err(format!("{label} wait failed: {e}")),
+            Err(e) => {
+                return Err(format!("{label} wait failed: {}", os_error::english(&e)))
+            }
         }
     };
     for h in handles {
@@ -734,6 +1030,15 @@ fn run_streamed(
 
 /// Pull "123/1600" out of a tqdm-ish progress line.
 pub fn parse_step_counter(line: &str) -> Option<(u64, u64)> {
+    // Only the training bar counts. musubi labels it "steps: NN%|...| cur/total
+    // [...]". The weight loader right before it draws a tqdm bar of its own
+    // (521 tensors on the box, 06.09.2026) and the epoch line carries a total
+    // of its own: the meter read "Training 27/521 ... 521/521" for three
+    // minutes against a 400-step run, then fell back to 0/400.
+    let line = line.trim_start();
+    if !line.get(..5).is_some_and(|p| p.eq_ignore_ascii_case("steps")) {
+        return None;
+    }
     // Cheap scan without regex: find "N/M" where both sides are digits and M
     // looks like a step total (>= 10, filters version strings like 2/3).
     let bytes = line.as_bytes();
@@ -787,15 +1092,11 @@ pub fn install_character_trainer(
         }
     }
     let root = trainer_root(&app);
+    // An empty or unusable default Python is no longer a reason to stop here:
+    // trainer_base_python surveys the machine and, on Windows, installs 3.12
+    // itself. The old guard sent the customer to Settings for the one case
+    // the setup can now handle on its own.
     let python_bin = state.python_bin.lock().unwrap().clone();
-    if python_bin.is_empty() || !crate::python::is_real_python(&python_bin) {
-        set_status(
-            &state.trainer_install,
-            "error",
-            "No usable Python found. Install Python first (Settings), then retry.",
-        );
-        return Err("no_python".to_string());
-    }
 
     let install = state.trainer_install.clone();
     let cancel = state.trainer_cancel.clone();
@@ -845,12 +1146,17 @@ pub(crate) enum VenvAction {
 /// venv healed itself by accident: `venv/bin/python` is a symlink, and
 /// `exists()` follows it, so a dead base made the check false.
 ///
-/// The question is therefore whether the interpreter RUNS.
-pub(crate) fn venv_action(python_exists: bool, python_starts: bool) -> VenvAction {
-    match (python_exists, python_starts) {
+/// The question is therefore whether the interpreter RUNS, and since ticket
+/// 0004 also WHICH one it is: `python_version` is None for a venv that does
+/// not start and the version for one that does, and a venv built from a
+/// Python outside the trainer's range is exactly as unusable as a dead one.
+/// It ran fine on sockenmonster's machine, its pip just refused musubi.
+pub(crate) fn venv_action(python_exists: bool, python_version: Option<&str>) -> VenvAction {
+    match (python_exists, python_version) {
         (false, _) => VenvAction::Create,
-        (true, false) => VenvAction::Rebuild,
-        (true, true) => VenvAction::Keep,
+        (true, None) => VenvAction::Rebuild,
+        (true, Some(v)) if !trainer_supports_python(v) => VenvAction::Rebuild,
+        (true, Some(_)) => VenvAction::Keep,
     }
 }
 
@@ -865,28 +1171,324 @@ pub(crate) fn venv_create_args(action: VenvAction) -> &'static [&'static str] {
     }
 }
 
-/// Why we are stopping when there is no system Python to build with. A rebuild
-/// deletes the old venv, so it must never start without one: leaving the
-/// customer with no environment at all is worse than the broken one they had.
-pub(crate) fn no_base_python_message(action: VenvAction) -> String {
-    let why = if action == VenvAction::Rebuild {
-        "The trainer environment is still there but its Python does not start any more (the Python it was built from was moved, upgraded or removed), and rebuilding it needs a working Python on this machine."
+/// Why we are stopping when no Python on this machine can build the trainer
+/// venv. `found` is every version that runs here, so the sentence can say what
+/// IS installed instead of asking the customer to guess. Settings > Install
+/// Python is deliberately not the pointer: it short-circuits as soon as any
+/// Python exists, which on a 3.14 machine is exactly the one that cannot help.
+/// The last sentence is the marker `already_explained` looks for.
+pub(crate) fn no_trainer_python_message(found: &[String], os: &str, winget_tried: bool) -> String {
+    let have = if found.is_empty() {
+        "no Python that starts".to_string()
     } else {
-        "Setting up the trainer needs a working Python on this machine."
+        format!("Python {}", found.join(" and "))
     };
-    format!("{why} Install Python in Settings, then start this again.")
+    let get = match os {
+        "windows" if winget_tried => {
+            "LU tried to install Python 3.12 with winget and that did not work. Install Python 3.12 from https://www.python.org/downloads/windows/ (any install option, it does not need to be on PATH)"
+        }
+        "windows" => "Install Python 3.12 from https://www.python.org/downloads/windows/ (any install option, it does not need to be on PATH)",
+        "macos" => "Install it with 'brew install python@3.12' or from https://www.python.org/downloads/macos/",
+        _ => "Install it with your package manager (python3.12 on Debian, Ubuntu and Fedora, python312 from the AUR on Arch)",
+    };
+    format!(
+        "The trainer needs Python {TRAINER_PYTHON_RANGE} and this machine has {have}. {get}, then press Set up trainer in Character Studio. LU finds it on its own."
+    )
 }
 
-/// Cheapest honest check that an interpreter is usable: start it and let it
-/// exit immediately. A venv python whose base is gone never reaches the code,
-/// it aborts during interpreter init, so a non-zero exit is the answer.
-fn python_starts(exe: &Path) -> bool {
-    let mut cmd = Command::new(exe);
-    cmd.args(["-c", "pass"]);
-    force_python_utf8(&mut cmd);
+/// The interpreter that builds `<root>/venv`, decided before a clone and 2.5
+/// GB of wheels. LU's default first, then every other Python on the machine,
+/// each asked for its version; on Windows, when none fits, the same winget
+/// install Settings runs, and the machine is asked again. The winget run is
+/// streamed like every other step so it can be cancelled and read.
+fn trainer_base_python(
+    python_bin: &str,
+    state: &Arc<Mutex<crate::state::InstallState>>,
+    status_kind: &str,
+    cancel: &Arc<std::sync::atomic::AtomicBool>,
+    pid_slot: &Arc<Mutex<Option<u32>>>,
+) -> Result<(String, String), String> {
+    let versioned = |paths: Vec<String>| -> Vec<(String, String)> {
+        let mut seen: Vec<(String, String)> = Vec::new();
+        for p in paths {
+            if !crate::python::is_real_python(&p) || seen.iter().any(|(s, _)| s.eq_ignore_ascii_case(&p)) {
+                continue;
+            }
+            if let Some(v) = crate::python::python_version(&p) {
+                seen.push((p, v));
+            }
+        }
+        seen
+    };
+    let survey = || {
+        let mut paths = vec![python_bin.to_string()];
+        paths.extend(crate::python::python_interpreters());
+        versioned(paths)
+    };
+    let mut found = survey();
+    let mut winget_tried = false;
+    if choose_trainer_python(&found).is_none() && std::env::consts::OS == "windows" {
+        set_status(state, status_kind, &format!(
+            "Installing Python 3.12 for the trainer (this machine has {}, the trainer needs {TRAINER_PYTHON_RANGE})...",
+            found.iter().map(|(_, v)| v.as_str()).collect::<Vec<_>>().join(" and ")
+        ));
+        winget_tried = true;
+        match winget_install("Python.Python.3.12", true, state, cancel, pid_slot) {
+            Ok(()) => push_log(state, "Python 3.12 is installed."),
+            Err(e) if e == "cancelled" => return Err(e),
+            Err(e) => push_log(state, &format!("winget could not install Python 3.12: {}", useful_tail(&e))),
+        }
+        // Asked again whatever winget said: its exit code is not the fact
+        // that matters, the interpreter on disk is.
+        found = survey();
+    }
+    let versions: Vec<String> = found.iter().map(|(_, v)| v.clone()).collect();
+    let (path, version) = choose_trainer_python(&found)
+        .ok_or_else(|| no_trainer_python_message(&versions, std::env::consts::OS, winget_tried))?;
+    if path != python_bin {
+        let default = found
+            .first()
+            .filter(|(p, _)| p == python_bin)
+            .map_or("none".to_string(), |(_, v)| v.clone());
+        push_log(state, &format!(
+            "Building the trainer environment with Python {version} at {path}: the trainer needs {TRAINER_PYTHON_RANGE}, and LU's default Python here is {default}."
+        ));
+    }
+    Ok((path, version))
+}
+
+fn musubi_source_marker(root: &Path) -> PathBuf {
+    repo_dir(root).join(".lu-source")
+}
+
+/// The trainer source is there and is the pinned tag: either the archive this
+/// version unpacks (marker file carrying the tag) or a git checkout from an
+/// older LU, which is kept as it is.
+pub(crate) fn musubi_source_present(root: &Path) -> bool {
+    let repo = repo_dir(root);
+    if !repo.join("src").join("musubi_tuner").exists() {
+        return false;
+    }
+    repo.join(".git").exists()
+        || fs::read_to_string(musubi_source_marker(root))
+            .map(|s| s.trim() == MUSUBI_TAG)
+            .unwrap_or(false)
+}
+
+/// Step 1 without a git binary: the tag as an archive, unpacked into place.
+/// git is the fallback, not the requirement, so a machine without it gets the
+/// network sentence when the archive fails, never "install git first".
+fn fetch_musubi_source(
+    root: &Path,
+    state: &Arc<Mutex<crate::state::InstallState>>,
+    status_kind: &str,
+    tag: &str,
+    cancel: &Arc<std::sync::atomic::AtomicBool>,
+    pid_slot: &Arc<Mutex<Option<u32>>>,
+) -> Result<(), String> {
+    set_status(state, status_kind, &format!("{tag} (1/4): getting musubi tuner {MUSUBI_TAG}..."));
+    let archive_err = match download_musubi_archive(root, state, cancel) {
+        Ok(()) => return Ok(()),
+        Err(e) if e == "cancelled" => return Err(e),
+        Err(e) => e,
+    };
+    let mut git = Command::new("git");
+    git.arg("--version");
     #[cfg(target_os = "windows")]
-    cmd.creation_flags(CREATE_NO_WINDOW);
-    cmd.output().map(|o| o.status.success()).unwrap_or(false)
+    git.creation_flags(CREATE_NO_WINDOW);
+    let has_git = git.output().map(|o| o.status.success()).unwrap_or(false);
+    if !has_git {
+        return Err(format!("Could not download the trainer source: {archive_err}"));
+    }
+    push_log(state, &format!("Could not get the trainer source as an archive ({archive_err}); getting it with git instead."));
+    let _ = fs::remove_dir_all(repo_dir(root));
+    let mut clone = Command::new("git");
+    clone.args(["clone", "--branch", MUSUBI_TAG, "--depth", "1", MUSUBI_REPO])
+        .arg(repo_dir(root));
+    run_streamed(clone, "git clone", state, cancel, pid_slot)
+}
+
+/// Download the tag archive into the trainer root, unpack it, move the one
+/// folder it contains to `<root>/musubi-tuner`, and mark it with the tag.
+/// Cancel is honoured between chunks, and a half download never becomes a
+/// half source: the move happens last.
+fn download_musubi_archive(
+    root: &Path,
+    state: &Arc<Mutex<crate::state::InstallState>>,
+    cancel: &Arc<std::sync::atomic::AtomicBool>,
+) -> Result<(), String> {
+    let url = musubi_archive_url();
+    let zip_path = root.join(format!("musubi-tuner-{MUSUBI_TAG}.zip"));
+    let unpack_dir = root.join(".musubi-unpack");
+    let client = reqwest::blocking::Client::builder()
+        .user_agent("LocallyUncensored/2.6")
+        .connect_timeout(std::time::Duration::from_secs(30))
+        .timeout(std::time::Duration::from_secs(1800))
+        .build()
+        .map_err(|e| format!("HTTP client: {}", os_error::english(&e)))?;
+    let response = client
+        .get(&url)
+        .send()
+        .map_err(|e| os_error::english(&e).to_string())?;
+    if !response.status().is_success() {
+        return Err(format!("HTTP {} from {url}", response.status()));
+    }
+    let mut file = fs::File::create(&zip_path)
+        .map_err(|e| format!("could not write the archive: {}", os_error::english(&e)))?;
+    let mut reader = BufReader::new(response);
+    let mut buf = [0u8; 65536];
+    let mut got: u64 = 0;
+    loop {
+        if cancel_requested(cancel) {
+            drop(file);
+            let _ = fs::remove_file(&zip_path);
+            return Err("cancelled".to_string());
+        }
+        let n = reader
+            .read(&mut buf)
+            .map_err(|e| format!("the download broke off: {}", os_error::english(&e)))?;
+        if n == 0 {
+            break;
+        }
+        std::io::Write::write_all(&mut file, &buf[..n])
+            .map_err(|e| format!("could not write the archive: {}", os_error::english(&e)))?;
+        got += n as u64;
+    }
+    drop(file);
+    push_log(state, &format!("Downloaded the trainer source ({:.1} MB), unpacking it...", got as f64 / 1e6));
+    let _ = fs::remove_dir_all(&unpack_dir);
+    let zipped = fs::File::open(&zip_path)
+        .map_err(|e| format!("could not read the archive: {}", os_error::english(&e)))?;
+    let mut archive = zip::ZipArchive::new(zipped)
+        .map_err(|e| format!("the archive could not be read: {e}"))?;
+    archive
+        .extract(&unpack_dir)
+        .map_err(|e| format!("the archive could not be unpacked: {e}"))?;
+    let inner = fs::read_dir(&unpack_dir)
+        .map_err(|e| format!("could not read the unpacked archive: {}", os_error::english(&e)))?
+        .filter_map(Result::ok)
+        .map(|e| e.path())
+        .find(|p| p.is_dir() && p.join("src").join("musubi_tuner").exists())
+        .ok_or_else(|| "the archive did not contain the trainer source".to_string())?;
+    let repo = repo_dir(root);
+    let _ = fs::remove_dir_all(&repo);
+    fs::rename(&inner, &repo)
+        .map_err(|e| format!("could not move the trainer source into place: {}", os_error::english(&e)))?;
+    fs::write(musubi_source_marker(root), MUSUBI_TAG)
+        .map_err(|e| format!("could not mark the trainer source: {}", os_error::english(&e)))?;
+    let _ = fs::remove_dir_all(&unpack_dir);
+    let _ = fs::remove_file(&zip_path);
+    Ok(())
+}
+
+/// Free room on the drive that holds the trainer folder against what the
+/// setup is about to write, before the first byte. None when there is room.
+pub(crate) fn disk_room_message(root: &Path, free: u64, needed_gib: u64) -> Option<String> {
+    let need = needed_gib.saturating_mul(1024 * 1024 * 1024);
+    if free >= need {
+        return None;
+    }
+    Some(format!(
+        "The drive holding the trainer folder ({}) has {:.1} GB free and the trainer setup needs about {needed_gib} GB before anything is downloaded (PyTorch alone is 2.5 GB and installs with both copies on disk). Free up room on that drive, then press Set up trainer in Character Studio.",
+        root.display(),
+        free as f64 / (1024.0 * 1024.0 * 1024.0)
+    ))
+}
+
+/// A torch that will not load because a Windows runtime library is missing or
+/// its native libraries fail to initialise: the class the Visual C++ runtime
+/// install fixes (ticket 007, falcon bob, on the ComfyUI side).
+pub(crate) fn runtime_library_missing(tail: &str) -> bool {
+    use crate::commands::install::pip::PipFailureKind as K;
+    matches!(
+        crate::commands::install::pip::pip_failure_kind(tail),
+        K::MissingRuntimeLibrary | K::NativeLoadFailure
+    )
+}
+
+/// The card's memory as the probe reports it, against the recipe's floor.
+pub(crate) fn vram_verdict(vram_mib: Option<u64>) -> Option<String> {
+    let mib = vram_mib?;
+    if mib >= TRAINER_VRAM_FLOOR_MIB {
+        return None;
+    }
+    Some(format!(
+        "This card has {:.0} GB of memory and the local training recipe needs 12 GB: it was proven on a 12 GB card with fp8 weights and block swapping, and below that the first training step runs out of memory after both cache steps. Character Studio in Cloud mode trains the same character without this limit.",
+        mib as f64 / 1024.0
+    ))
+}
+
+pub(crate) fn parse_vram_mib(stdout: &str) -> Option<u64> {
+    stdout
+        .lines()
+        .find_map(|l| l.trim().strip_prefix("VRAM_MIB "))
+        .and_then(|v| v.trim().parse().ok())
+}
+
+/// The run's own dead ends, named. CUDA out of memory is the one a 12 GB card
+/// hits when something else holds part of it (a browser playing video, a
+/// game, ComfyUI with a model loaded), and the raw traceback says none of that.
+/// Every step of the run ends the same way when its child fails: a cancel
+/// stays a cancel, anything else goes through `training_failure_message`, so
+/// a card that fills up during the latent or text-encoder cache gets the same
+/// named cause and way out as one that fills up in the training step (the
+/// cache steps used to hand the raw Python tail to the note).
+fn end_failed_run(run: &Arc<Mutex<crate::state::InstallState>>, err: &str, vram_mib: Option<u64>) {
+    if err == "cancelled" {
+        set_status(run, "cancelled", err);
+    } else {
+        set_status(run, "error", &training_failure_message(err, vram_mib));
+    }
+}
+
+pub(crate) fn training_failure_message(err: &str, vram_mib: Option<u64>) -> String {
+    let low = err.to_ascii_lowercase();
+    if low.contains("out of memory") || low.contains("outofmemoryerror") {
+        let card = vram_mib
+            .map(|m| format!(" This card has {:.0} GB.", m as f64 / 1024.0))
+            .unwrap_or_default();
+        return format!(
+            "Training ran out of memory on the card.{card} The recipe needs 12 GB free on the card while it runs: close other apps that use it (a browser playing video, a game, ComfyUI with a model loaded), then press Create again. If the card has less than 12 GB, Character Studio in Cloud mode trains the same character without this limit. Last steps: {}",
+            useful_tail(err)
+        );
+    }
+    err.to_string()
+}
+
+struct ProbeOutcome {
+    verdict: Preflight,
+    vram_mib: Option<u64>,
+}
+
+/// One probe for every place that asks whether the environment loads: the end
+/// of a setup, the start of a run, and the check after a repair.
+fn probe_trainer_env(vpy: &Path, gpu: Option<&str>, label: &str) -> ProbeOutcome {
+    let mut probe = Command::new(vpy);
+    probe.args(["-c", TORCH_PREFLIGHT_PY]);
+    force_python_utf8(&mut probe);
+    #[cfg(target_os = "windows")]
+    probe.creation_flags(CREATE_NO_WINDOW);
+    match probe.output() {
+        Ok(out) => {
+            let stdout = String::from_utf8_lossy(&out.stdout);
+            ProbeOutcome {
+                verdict: preflight_verdict(
+                    out.status.success(),
+                    &stdout,
+                    &String::from_utf8_lossy(&out.stderr),
+                    gpu,
+                ),
+                vram_mib: parse_vram_mib(&stdout),
+            }
+        }
+        Err(e) => ProbeOutcome {
+            verdict: Preflight::TorchBroken(format!(
+                "could not run the trainer python ({label}): {}",
+                os_error::english(&e)
+            )),
+            vram_mib: None,
+        },
+    }
 }
 
 /// The four install steps, idempotent by design: an existing checkout and a
@@ -940,36 +1542,60 @@ fn provision_trainer_env(
     .unwrap_or(candidates[0]);
     let wheel_note = format!("{wheel_note} (wheel index: {torch_index})");
 
+    // Decided second, for the same reason: the interpreter the venv is built
+    // from must be one the wheels and musubi accept, and LU's default Python
+    // is whatever is newest on the machine.
+    let (python_bin, base_version) = trainer_base_python(python_bin, state, status_kind, cancel, pid_slot)?;
+    let python_bin = python_bin.as_str();
+
     let _ = fs::create_dir_all(root.join("models"));
 
-    // 1) pinned clone (releases are the project's own stability advice)
-    if !repo_dir(root).join(".git").exists() {
-        set_status(state, status_kind, &format!("{tag} (1/4): getting musubi tuner {MUSUBI_TAG}..."));
-        let mut clone = Command::new("git");
-        clone.args(["clone", "--branch", MUSUBI_TAG, "--depth", "1", MUSUBI_REPO])
-            .arg(repo_dir(root));
-        run_streamed(clone, "git clone", state, cancel, pid_slot)?;
+    // Room before the first byte. A fresh install writes about 10 GB across
+    // the trainer folder and pip's cache; a reinstall holds two copies of
+    // torch for a moment; a repair that reinstalls nothing needs no room.
+    let force_reinstall = cap.is_some_and(|c| c >= 12) || repairing;
+    let needed_gib = if !torch_installed(root) {
+        TRAINER_SETUP_NEEDS_GIB
+    } else if force_reinstall {
+        TRAINER_REINSTALL_NEEDS_GIB
     } else {
-        push_log(state, "musubi tuner already present, keeping the pinned checkout.");
+        1
+    };
+    if let Some(free) = crate::commands::download::available_space_for(root) {
+        if let Some(msg) = disk_room_message(root, free, needed_gib) {
+            return Err(msg);
+        }
     }
 
-    // 2) venv. Asked as "does its python run", not "is the file there": see
-    // venv_action. A dead venv is exactly the state a repair is called for,
-    // and it used to be the one state this step could not fix.
+    // 1) the pinned source (releases are the project's own stability advice),
+    // as an archive, so no git is needed on the machine.
+    if !musubi_source_present(root) {
+        fetch_musubi_source(root, state, status_kind, tag, cancel, pid_slot)?;
+    } else {
+        push_log(state, "musubi tuner already present, keeping the pinned source.");
+    }
+
+    // 2) venv. Asked as "does its python run, and which one is it", not "is
+    // the file there": see venv_action. A dead venv is exactly the state a
+    // repair is called for, and it used to be the one state this step could
+    // not fix; a venv from the wrong Python was kept and failed at step 4.
     let vpy_path = venv_python(root);
     let exists = vpy_path.exists();
-    let action = venv_action(exists, exists && python_starts(&vpy_path));
+    let venv_version = if exists {
+        crate::python::python_version(&vpy_path.to_string_lossy())
+    } else {
+        None
+    };
+    let action = venv_action(exists, venv_version.as_deref());
     if action != VenvAction::Keep {
-        // A rebuild deletes what is there, so it may only start once we know
-        // there is something to rebuild WITH. is_real_python filters the
-        // Windows Store stub; starting it is what proves the interpreter the
-        // user still has is the one this venv lost.
-        let base = Path::new(python_bin);
-        if !crate::python::is_real_python(python_bin) || !python_starts(base) {
-            return Err(no_base_python_message(action));
-        }
+        // A rebuild deletes what is there, and it only starts here because
+        // trainer_base_python has already proven there is something to
+        // rebuild WITH.
         if action == VenvAction::Rebuild {
-            push_log(state, "The trainer environment is there but its Python does not start any more. Rebuilding it from scratch, your training images and base models are left alone.");
+            push_log(state, &match venv_version.as_deref() {
+                Some(v) => format!("The trainer environment was built with Python {v}, which the trainer cannot use (it needs {TRAINER_PYTHON_RANGE}). Rebuilding it with Python {base_version}, your training images and base models are left alone."),
+                None => "The trainer environment is there but its Python does not start any more. Rebuilding it from scratch, your training images and base models are left alone.".to_string(),
+            });
         }
         set_status(state, status_kind, &format!("{tag} (2/4): creating the training environment (venv)..."));
         let mut venv = Command::new(python_bin);
@@ -982,23 +1608,70 @@ fn provision_trainer_env(
     // every other NVIDIA card keeps cu121, an AMD card on Linux gets ROCm.
     set_status(state, status_kind, &format!("{tag} (3/4): installing PyTorch into the trainer venv (~2.5 GB, one time)..."));
     push_log(state, &wheel_note);
-    let mut torch = Command::new(&vpy);
     let mut torch_args = vec!["-m", "pip", "install", "--progress-bar", "off", "--no-input"];
     // A finished but WRONG torch satisfies pip and would never be replaced:
     // cu121 on a Blackwell box, or the half install a repair was called for.
-    if cap.is_some_and(|c| c >= 12) || repairing {
+    if force_reinstall {
         torch_args.push("--force-reinstall");
     }
     torch_args.extend(["torch", "torchvision", "--index-url", torch_index]);
-    torch.args(&torch_args);
-    run_streamed(torch, "torch install", state, cancel, pid_slot)?;
+    let vpy_for_torch = vpy.clone();
+    pip_with_retry(
+        || {
+            let mut torch = Command::new(&vpy_for_torch);
+            torch.args(&torch_args);
+            torch
+        },
+        "torch install",
+        state,
+        cancel,
+        pid_slot,
+    )?;
 
     // 4) musubi + deps
     set_status(state, status_kind, &format!("{tag} (4/4): installing the trainer package..."));
-    let mut pkg = Command::new(&vpy);
-    pkg.args(["-m", "pip", "install", "--progress-bar", "off", "--no-input", "-e", "."])
-        .current_dir(repo_dir(root));
-    run_streamed(pkg, "musubi install", state, cancel, pid_slot)?;
+    let vpy_for_pkg = vpy.clone();
+    pip_with_retry(
+        || {
+            let mut pkg = Command::new(&vpy_for_pkg);
+            pkg.args(["-m", "pip", "install", "--progress-bar", "off", "--no-input", "-e", "."])
+                .current_dir(repo_dir(root));
+            pkg
+        },
+        "musubi install",
+        state,
+        cancel,
+        pid_slot,
+    )?;
+
+    // 5) the environment has to LOAD, not just be on disk. A torch whose
+    // native libraries will not start passed every step above and was found
+    // out by the run, ten minutes later, with a traceback and a link to
+    // microsoft.com. On Windows the missing piece is the Visual C++ runtime,
+    // and winget installs it; the customer only has to say yes to Windows.
+    set_status(state, status_kind, &format!("{tag}: checking that PyTorch loads..."));
+    let gpu = training_gpu_label();
+    let venv_exe = venv_python(root);
+    if let Preflight::TorchBroken(first_tail) = probe_trainer_env(&venv_exe, gpu, "after setup").verdict {
+        let mut tail = first_tail;
+        if std::env::consts::OS == "windows" && runtime_library_missing(&tail) {
+            set_status(
+                state,
+                status_kind,
+                "Installing the Microsoft Visual C++ runtime that PyTorch loads (Windows will ask for permission)...",
+            );
+            match winget_install("Microsoft.VCRedist.2015+.x64", false, state, cancel, pid_slot) {
+                Ok(()) => push_log(state, "The Visual C++ runtime is installed."),
+                Err(e) if e == "cancelled" => return Err(e),
+                Err(e) => push_log(state, &format!("LU could not install the Visual C++ runtime: {}", useful_tail(&e))),
+            }
+            match probe_trainer_env(&venv_exe, gpu, "after the runtime install").verdict {
+                Preflight::TorchBroken(again) => tail = again,
+                _ => return Ok(()),
+            }
+        }
+        return Err(format!("PyTorch does not load in the trainer environment.\n{tail}"));
+    }
     Ok(())
 }
 
@@ -1168,6 +1841,10 @@ pub fn start_character_training(
     let cancel = state.trainer_cancel.clone();
     let pid_slot = state.trainer_process.clone();
     let env_broken = state.trainer_env_broken.clone();
+    // T-65: the training thread outlives this `State` borrow, so resolve
+    // ComfyUI's ACTUAL address here (user-configured host/port from AppState,
+    // not a hardcoded localhost:8188) and move the verdict in.
+    let comfy_vram_target = crate::commands::process::comfy_vram_target(state.inner());
     cancel.store(false, Ordering::SeqCst);
 
     std::thread::spawn(move || {
@@ -1188,7 +1865,11 @@ pub fn start_character_training(
         );
         let toml_path = set_dir.join("dataset.toml");
         if let Err(e) = fs::write(&toml_path, toml) {
-            set_status(&run, "error", &format!("could not write dataset config: {e}"));
+            set_status(
+                &run,
+                "error",
+                &format!("could not write dataset config: {}", os_error::english(&e)),
+            );
             return;
         }
 
@@ -1211,25 +1892,11 @@ pub fn start_character_training(
         // install plans from, so the check and the repair cannot disagree
         // about what is in the machine.
         let gpu_label = training_gpu_label();
-        let probe_env = |label: &str| -> Preflight {
-            let mut probe = Command::new(&vpy_s);
-            probe.args(["-c", TORCH_PREFLIGHT_PY]);
-            force_python_utf8(&mut probe);
-            #[cfg(target_os = "windows")]
-            probe.creation_flags(CREATE_NO_WINDOW);
-            match probe.output() {
-                Ok(out) => preflight_verdict(
-                    out.status.success(),
-                    &String::from_utf8_lossy(&out.stdout),
-                    &String::from_utf8_lossy(&out.stderr),
-                    gpu_label,
-                ),
-                Err(e) => Preflight::TorchBroken(format!("could not run the trainer python ({label}): {e}")),
-            }
-        };
 
         set_status(&run, "running", "Checking the training environment...");
-        let verdict = probe_env("first check");
+        let first = probe_trainer_env(&vpy, gpu_label, "first check");
+        let verdict = first.verdict;
+        let mut vram_mib = first.vram_mib;
         if !verdict.is_ok() {
             push_log(&run, &verdict.message());
             push_log(&run, "Repairing it now, no action needed. Your training images and base models are left alone.");
@@ -1253,7 +1920,9 @@ pub fn start_character_training(
             // Only a SECOND failure is a dead end. Report what is still wrong
             // plus the tail of the repair log, so the message names the cause
             // instead of the symptom.
-            let after = probe_env("after repair");
+            let repaired = probe_trainer_env(&vpy, gpu_label, "after repair");
+            let after = repaired.verdict;
+            vram_mib = repaired.vram_mib;
             if !after.is_ok() {
                 let tail = run.lock().ok()
                     .map(|st| st.logs.iter().rev().take(8).rev().cloned().collect::<Vec<_>>().join(" | "))
@@ -1270,6 +1939,23 @@ pub fn start_character_training(
         } else {
             env_broken.store(false, Ordering::SeqCst);
         }
+        // The card's memory, before ten minutes of caching: the recipe is a
+        // 12 GB recipe, and a smaller card dies in the first training step.
+        if let Some(msg) = vram_verdict(vram_mib) {
+            set_status(&run, "error", &msg);
+            return;
+        }
+
+        // Cancel can arrive while no child is alive: during the environment
+        // probe (a plain Command::output, nothing in pid_slot) or between two
+        // children. The flag alone does nothing then, and the next child
+        // would be spawned only to be killed on its first poll, or, worse,
+        // never noticed. Measured on the box on 06.09.2026: a Cancel 14 s
+        // after Create left the run training on while the UI had gone idle.
+        if cancel_requested(&cancel) {
+            set_status(&run, "cancelled", "cancelled");
+            return;
+        }
 
         // 1) latent cache
         set_status(&run, "running", "Step 1/4: Caching image latents...");
@@ -1280,10 +1966,14 @@ pub fn start_character_training(
             "--vae", &vae_s,
         ]);
         if let Err(e) = run_streamed(c1, "latent cache", &run, &cancel, &pid_slot) {
-            set_status(&run, if e == "cancelled" { "cancelled" } else { "error" }, &e);
+            end_failed_run(&run, &e, vram_mib);
             return;
         }
 
+        if cancel_requested(&cancel) {
+            set_status(&run, "cancelled", "cancelled");
+            return;
+        }
         // 2) text-encoder cache (fp8 keeps the 4B Qwen TE inside 12 GB)
         set_status(&run, "running", "Step 2/4: Caching text encoder outputs...");
         let mut c2 = Command::new(&vpy_s);
@@ -1295,17 +1985,37 @@ pub fn start_character_training(
             "--fp8_llm",
         ]);
         if let Err(e) = run_streamed(c2, "text encoder cache", &run, &cancel, &pid_slot) {
-            set_status(&run, if e == "cancelled" { "cancelled" } else { "error" }, &e);
+            end_failed_run(&run, &e, vram_mib);
             return;
         }
 
+        if cancel_requested(&cancel) {
+            set_status(&run, "cancelled", "cancelled");
+            return;
+        }
         // 3) the train itself — documented 12 GB combo: fp8 base + block swap
         // + gradient checkpointing + 8-bit optimizer. ComfyUI's model cache
         // would eat the same VRAM the trainer needs — ask it to let go first.
-        if crate::commands::process::free_comfyui_memory() {
-            push_log(&run, "Freed ComfyUI's cached models to make room for training.");
+        match &comfy_vram_target {
+            Ok(base) => {
+                let outcome = crate::commands::process::free_comfyui_memory_at(base);
+                if outcome.released() {
+                    push_log(&run, "Freed ComfyUI's cached models to make room for training.");
+                } else if let Some((target, why)) = outcome.not_responsible() {
+                    // Used to be a silent `false`. On a 12 GB card the user is
+                    // about to hit CUDA OOM, and "LU could not ask" is the one
+                    // sentence that explains it.
+                    push_log(
+                        &run,
+                        &format!("Did not free ComfyUI's VRAM ({target}): {why}"),
+                    );
+                }
+            }
+            Err((target, why)) => {
+                push_log(&run, &format!("Did not free ComfyUI's VRAM ({target}): {why}"));
+            }
         }
-        set_status(&run, "running", &format!("Step 3/4: Training ({steps} steps). This runs for a while, live log below..."));
+        set_status(&run, "running", &format!("Step 3/4: Training ({steps} steps). This runs for a while, the counter follows every step."));
         let accelerate = {
             #[cfg(target_os = "windows")]
             { root.join("venv").join("Scripts").join("accelerate.exe") }
@@ -1336,10 +2046,14 @@ pub fn start_character_training(
             "--output_name", &out_name,
         ]);
         if let Err(e) = run_streamed(c3, "training", &run, &cancel, &pid_slot) {
-            set_status(&run, if e == "cancelled" { "cancelled" } else { "error" }, &e);
+            end_failed_run(&run, &e, vram_mib);
             return;
         }
 
+        if cancel_requested(&cancel) {
+            set_status(&run, "cancelled", "cancelled");
+            return;
+        }
         // 4) convert to the Diffusers key layout ComfyUI loads, straight into
         // the loras dir (musubi's documented `--target other` conversion).
         set_status(&run, "running", "Step 4/4: Converting the LoRA for ComfyUI...");
@@ -1358,7 +2072,7 @@ pub fn start_character_training(
             "--target", "other",
         ]);
         if let Err(e) = run_streamed(c4, "lora convert", &run, &cancel, &pid_slot) {
-            set_status(&run, if e == "cancelled" { "cancelled" } else { "error" }, &e);
+            end_failed_run(&run, &e, vram_mib);
             return;
         }
 
@@ -1498,7 +2212,11 @@ mod tests {
     #[test]
     fn the_cancel_branch_does_not_join_the_reader_threads() {
         let src = include_str!("trainer.rs");
-        let zweig = src
+        // The reader closure above the wait loop checks the same flag (it
+        // drops what the dying child prints), so anchor on the loop itself.
+        let warte = &src[src.find("fn run_child(").expect("run_child")..];
+        let warte = &warte[warte.find("let exit = loop {").expect("wait loop")..];
+        let zweig = warte
             .split("if cancel.load(Ordering::SeqCst) {")
             .nth(1)
             .expect("cancel branch")
@@ -1890,6 +2608,11 @@ mod tests {
             .collect();
         assert!(envs.contains(&("PYTHONIOENCODING".into(), Some("utf-8".into()))));
         assert!(envs.contains(&("PYTHONUTF8".into(), Some("1".into()))));
+        // GitHub #121: only Windows wheels lack libuv, so only Windows gets the knob.
+        #[cfg(target_os = "windows")]
+        assert!(envs.contains(&("USE_LIBUV".into(), Some("0".into()))));
+        #[cfg(not(target_os = "windows"))]
+        assert!(!envs.iter().any(|(k, _)| k == "USE_LIBUV"));
     }
 
     #[test]
@@ -1925,10 +2648,21 @@ mod tests {
     #[test]
     fn step_counter_parses_tqdm_lines() {
         assert_eq!(parse_step_counter("steps:  8%|▊| 123/1600 [02:10<26:04]"), Some((123, 1600)));
-        assert_eq!(parse_step_counter("epoch 1/16"), Some((1, 16)));
+        assert_eq!(parse_step_counter("steps:   9%|▉         | 35/400 [06:34<1:08:38, 11.28s/it]"), Some((35, 400)));
         assert_eq!(parse_step_counter("no counter here"), None);
         // version-ish fragments with tiny totals are ignored
-        assert_eq!(parse_step_counter("python 3/4 things"), None);
+        assert_eq!(parse_step_counter("steps: python 3/4 things"), None);
+    }
+
+    #[test]
+    fn only_the_training_bar_moves_the_step_counter() {
+        // The DiT loader draws its own tqdm bar right before training starts
+        // (521 tensors on the box, 06.09.2026); for three minutes the meter
+        // counted it up to 521/521 against a 400-step run. Epoch lines carry
+        // a total of their own as well.
+        assert_eq!(parse_step_counter("41/521 [00:10<02:00, 4.0it/s]"), None);
+        assert_eq!(parse_step_counter("Loading: 100%|██████████| 521/521 [02:10<00:00]"), None);
+        assert_eq!(parse_step_counter("epoch 1/16"), None);
     }
 
     #[test]
@@ -1977,7 +2711,7 @@ mod shutdown_tests {
     #[test]
     fn a_venv_whose_python_no_longer_starts_gets_rebuilt() {
         use super::{venv_action, venv_create_args, VenvAction};
-        assert_eq!(venv_action(true, false), VenvAction::Rebuild);
+        assert_eq!(venv_action(true, None), VenvAction::Rebuild);
         // A rebuild must clear: the old site-packages belongs to an
         // interpreter that no longer exists, and pip would repair on top of it.
         assert_eq!(venv_create_args(VenvAction::Rebuild), ["-m", "venv", "--clear"]);
@@ -1986,38 +2720,124 @@ mod shutdown_tests {
     #[test]
     fn a_working_venv_is_kept_and_a_missing_one_is_created() {
         use super::{venv_action, venv_create_args, VenvAction};
-        assert_eq!(venv_action(true, true), VenvAction::Keep);
-        assert_eq!(venv_action(false, false), VenvAction::Create);
+        assert_eq!(venv_action(true, Some("3.11.7")), VenvAction::Keep);
+        assert_eq!(venv_action(false, None), VenvAction::Create);
         // POSIX: venv/bin/python is a symlink, so a dead base already shows up
         // as absent. That is why this only ever bit Windows.
-        assert_eq!(venv_action(false, true), VenvAction::Create);
+        assert_eq!(venv_action(false, Some("3.12.1")), VenvAction::Create);
         assert_eq!(venv_create_args(VenvAction::Create), ["-m", "venv"]);
         assert_eq!(venv_create_args(VenvAction::Keep), ["-m", "venv"]);
     }
 
+    // ── ticket 0004: the venv from the wrong Python (sockenmonster) ─────────
+    //
+    // His machine has Python 3.14.6 and nothing older. LU used it for the
+    // venv, torch from cu128 installed fine, and step 4 died on "Package
+    // 'musubi-tuner' requires a different Python: 3.14.6 not in
+    // '<3.13,>=3.10'", which 2.6.7 reported as "check that you are online".
+    // On the next attempt the venv was there and ran, so step 2 kept it, and
+    // the same wall came back on every update since August.
+
     #[test]
-    fn presence_alone_never_counts_as_a_working_interpreter() {
-        use super::python_starts;
-        let dir = std::env::temp_dir().join("lu-trainer-venv-probe");
-        let _ = std::fs::create_dir_all(&dir);
-        let fake = dir.join("python-not-an-interpreter");
-        std::fs::write(&fake, b"pyvenv.cfg points at a home that is gone").unwrap();
-        assert!(fake.exists(), "the file is there, which is all the old check asked");
-        assert!(!python_starts(&fake), "but it does not run, which is the question");
-        assert!(!python_starts(&dir.join("nothing-here")));
-        let _ = std::fs::remove_file(&fake);
+    fn a_venv_from_a_python_the_trainer_cannot_use_is_rebuilt_not_kept() {
+        use super::{venv_action, VenvAction};
+        assert_eq!(venv_action(true, Some("3.14.6")), VenvAction::Rebuild, "sockenmonster's venv");
+        assert_eq!(venv_action(true, Some("3.13.5")), VenvAction::Rebuild, "the box's newest Python");
+        assert_eq!(venv_action(true, Some("3.9.13")), VenvAction::Rebuild, "too old is as wrong as too new");
+        for v in ["3.10.6", "3.11.7", "3.12.1"] {
+            assert_eq!(venv_action(true, Some(v)), VenvAction::Keep, "{v}");
+        }
     }
 
     #[test]
-    fn a_rebuild_without_a_base_python_explains_itself_instead_of_wiping_the_venv() {
-        use super::{no_base_python_message, VenvAction};
-        let rebuild = no_base_python_message(VenvAction::Rebuild);
-        assert!(rebuild.contains("does not start any more"));
-        assert!(rebuild.contains("Install Python in Settings"));
-        // The fresh-install case must not claim there is an environment.
-        let create = no_base_python_message(VenvAction::Create);
-        assert!(!create.contains("still there"));
-        assert!(create.contains("Install Python in Settings"));
+    fn the_trainer_range_is_the_one_musubi_and_the_cu121_index_agree_on() {
+        use super::trainer_supports_python;
+        assert!(trainer_supports_python("3.10.0"));
+        assert!(trainer_supports_python("3.12.11"));
+        assert!(!trainer_supports_python("3.13.0"));
+        assert!(!trainer_supports_python("3.14.6"));
+        assert!(!trainer_supports_python("3.9.99"));
+        assert!(!trainer_supports_python("4.0.0"));
+        assert!(!trainer_supports_python("Python 3.11"), "not a version, not a match");
+        assert!(!trainer_supports_python(""));
+    }
+
+    #[test]
+    fn the_setup_keeps_lus_python_when_it_fits_and_otherwise_takes_the_newest_that_does() {
+        use super::choose_trainer_python;
+        let pair = |p: &str, v: &str| (p.to_string(), v.to_string());
+        // LU's default fits: kept, even though a newer supported one exists,
+        // so a working venv is never rebuilt because a Python appeared.
+        let got = choose_trainer_python(&[pair("C:\\py311", "3.11.7"), pair("C:\\py312", "3.12.1")]);
+        assert_eq!(got, Some(pair("C:\\py311", "3.11.7")));
+        // sockenmonster: the default is 3.14, and there is a 3.10 and a 3.12
+        // further down the list. The newest that fits wins.
+        let got = choose_trainer_python(&[
+            pair("C:\\py314", "3.14.6"),
+            pair("C:\\py310", "3.10.6"),
+            pair("C:\\py312", "3.12.1"),
+            pair("C:\\py313", "3.13.5"),
+        ]);
+        assert_eq!(got, Some(pair("C:\\py312", "3.12.1")));
+        // Only 3.14: nothing fits, and the caller has to say so or install one.
+        assert_eq!(choose_trainer_python(&[pair("C:\\py314", "3.14.6")]), None);
+        assert_eq!(choose_trainer_python(&[]), None);
+    }
+
+    #[test]
+    fn when_no_python_fits_the_message_names_what_is_there_and_where_to_get_one() {
+        use super::{install_failed_message, no_trainer_python_message, repair_aborted_message, Preflight};
+        let found = vec!["3.14.6".to_string()];
+        let win = no_trainer_python_message(&found, "windows", true);
+        assert!(win.contains("3.10, 3.11 or 3.12"), "{win}");
+        assert!(win.contains("has Python 3.14.6"), "{win}");
+        assert!(win.contains("winget") && win.contains("python.org/downloads/windows"), "{win}");
+        assert!(win.contains("Set up trainer"), "{win}");
+        // Settings > Install Python short-circuits as soon as ANY Python exists,
+        // which on this machine is the one that cannot help.
+        assert!(!win.contains("Settings"), "{win}");
+        let win_no_try = no_trainer_python_message(&found, "windows", false);
+        assert!(!win_no_try.contains("winget"), "{win_no_try}");
+        let linux = no_trainer_python_message(&found, "linux", false);
+        assert!(linux.contains("package manager") && !linux.contains("python.org"), "{linux}");
+        let mac = no_trainer_python_message(&found, "macos", false);
+        assert!(mac.contains("brew install python@3.12"), "{mac}");
+        let none = no_trainer_python_message(&[], "windows", true);
+        assert!(none.contains("no Python that starts"), "{none}");
+        // It carries its own way out, so neither wrapper may bury it.
+        assert_eq!(install_failed_message(&win), win);
+        assert_eq!(repair_aborted_message(&Preflight::TorchBroken("x".into()), &win), win);
+    }
+
+    #[test]
+    fn sockenmonsters_pip_line_is_named_as_a_python_version_problem_not_a_network_one() {
+        use super::install_failed_message;
+        let msg = install_failed_message(
+            "musubi install failed (exit Some(1)).\nERROR: Package 'musubi-tuner' requires a different Python: 3.14.6 not in '<3.13,>=3.10'",
+        );
+        assert!(msg.contains("3.10, 3.11 or 3.12"), "{msg}");
+        assert!(msg.contains("Set up trainer"), "{msg}");
+        assert!(!msg.contains("Check that you are online"), "still the 2.6.7 sentence: {msg}");
+    }
+
+    /// The probe directory is per-process now (`test_dir` puts the pid and the
+    /// thread id in the name and sweeps up on `Drop`). It used to be the FIXED
+    /// `<temp>/lu-trainer-venv-probe/python-not-an-interpreter`, deleted at the
+    /// end of the test — so a concurrent copy of this binary removed the file
+    /// between this copy's `write` and its `exists`. Measured on 01.09.2026
+    /// under six concurrent copies of the suite, ten rounds: 1 of 60 runs, and
+    /// the message it failed with — "the file is there, which is all the old
+    /// check asked" — pointed at the production code rather than at the
+    /// fixture.
+    #[test]
+    fn presence_alone_never_counts_as_a_working_interpreter() {
+        use crate::python::python_version;
+        let dir = crate::os_paths::test_dir("trainer-venv-probe");
+        let fake = dir.join("python-not-an-interpreter");
+        std::fs::write(&fake, b"pyvenv.cfg points at a home that is gone").unwrap();
+        assert!(fake.exists(), "the file is there, which is all the old check asked");
+        assert_eq!(python_version(&fake.to_string_lossy()), None, "but it does not run, which is the question");
+        assert_eq!(python_version(&dir.join("nothing-here").to_string_lossy()), None);
     }
 
     #[test]
@@ -2029,8 +2849,8 @@ mod shutdown_tests {
         let step2 = &src[src.find("    // 2) venv").expect("step 2 marker")..];
         let step2 = &step2[..step2.find("// 3) torch").expect("step 3 marker")];
         assert!(
-            step2.contains("venv_action(exists, exists && python_starts(&vpy_path))"),
-            "step 2 must decide with venv_action, not with a bare exists()",
+            step2.contains("venv_action(exists, venv_version.as_deref())"),
+            "step 2 must decide with venv_action on the venv's version, not with a bare exists()",
         );
         assert!(
             !step2.contains("if !venv_python(root).exists()"),
@@ -2117,8 +2937,8 @@ mod shutdown_tests {
     /// button. Wrapping it would bury that and quote it back as a log tail.
     #[test]
     fn an_error_that_already_names_its_button_is_left_alone() {
-        use super::{install_failed_message, no_base_python_message, repair_aborted_message, Preflight, VenvAction};
-        let eigen = no_base_python_message(VenvAction::Rebuild);
+        use super::{install_failed_message, no_trainer_python_message, repair_aborted_message, Preflight};
+        let eigen = no_trainer_python_message(&["3.14.6".to_string()], "windows", false);
         assert_eq!(install_failed_message(&eigen), eigen);
         assert_eq!(
             repair_aborted_message(&Preflight::TorchBroken("x".into()), &eigen),
@@ -2158,6 +2978,139 @@ mod shutdown_tests {
             .expect("end of the install thread");
         assert!(knopf.contains("env_broken.store(true, Ordering::SeqCst)"), "{knopf}");
         assert!(knopf.contains("install_failed_message"), "{knopf}");
+    }
+
+    // ── A2 stage one: the setup step told everyone to check the network ────
+    //
+    // aikabatzu (Discord #general, 2026-08-27), confirmed by aldrich_ironhart
+    // and by Z0mbieK in GH #121 on 2026-08-29: "Setting up the trainer
+    // environment failed. Check that you are online" while online, with the
+    // firewall off. Every failure class ended in that one sentence, because
+    // there was only one sentence.
+
+    #[test]
+    fn a_missing_visual_cpp_runtime_does_not_send_the_customer_to_the_router() {
+        use super::install_failed_message;
+        let log = "torch install failed (exit Some(1)).\nImportError: VCOMP140.DLL was not found";
+        let msg = install_failed_message(log);
+        assert!(msg.contains("Set up trainer"), "no button: {msg}");
+        assert!(!msg.contains("Check that you are online"), "still blames the network: {msg}");
+        if cfg!(target_os = "windows") {
+            assert!(msg.contains("Visual C++"), "the real cause is unnamed: {msg}");
+            assert!(msg.contains("latest-supported-vc-redist"), "no way to get it: {msg}");
+        } else {
+            assert!(msg.contains("package manager"), "{msg}");
+        }
+    }
+
+    #[test]
+    fn the_visual_cpp_advice_is_only_given_where_it_exists() {
+        // Negative control for the platform split: sending a Linux user to
+        // microsoft.com is the same class of mistake as sending an online user
+        // to their router. Both texts compile everywhere, so a Mac tests both.
+        use super::next_step_for_log;
+        let dll = "ImportError: VCOMP140.DLL was not found";
+        let win = next_step_for_log(dll, "FALLBACK", "windows");
+        let linux = next_step_for_log(dll, "FALLBACK", "linux");
+        assert!(win.contains("Visual C++") && win.contains("vc-redist"), "{win}");
+        assert!(!linux.contains("Visual C++"), "Linux is sent to microsoft.com: {linux}");
+        assert!(!linux.contains("microsoft.com"), "{linux}");
+        assert!(linux.contains("package manager"), "{linux}");
+        assert!(linux.contains("Set up trainer"), "{linux}");
+
+        let native = "OSError: [WinError 1114] initialization routine failed";
+        let win_native = next_step_for_log(native, "FALLBACK", "windows");
+        let linux_native = next_step_for_log(native, "FALLBACK", "linux");
+        assert!(win_native.contains("Visual C++"), "{win_native}");
+        assert!(!linux_native.contains("Visual C++"), "{linux_native}");
+        assert!(linux_native.to_lowercase().contains("driver"), "{linux_native}");
+    }
+
+    #[test]
+    fn a_wrong_wheel_is_not_dressed_up_as_a_broken_machine() {
+        // "Torch not compiled with CUDA enabled" used to get the native
+        // library text, which sends the customer to install a redistributable
+        // and update a driver for a problem that is neither.
+        use super::next_step_for_log;
+        for os in ["windows", "linux"] {
+            let step = next_step_for_log("AssertionError: Torch not compiled with CUDA enabled", "FALLBACK", os);
+            assert!(step.contains("probes the card again"), "{os}: {step}");
+            assert!(!step.contains("Visual C++"), "{os}: {step}");
+            assert!(step.contains("Set up trainer"), "{os}: {step}");
+        }
+    }
+
+    #[test]
+    fn the_refused_write_is_worded_for_every_platform() {
+        // Negative control for wording: the sentence has to be true on a Mac
+        // and on Linux too, where nothing called Windows refuses anything.
+        use super::next_step_for_log;
+        let step = next_step_for_log("ERROR: [WinError 5] Access is denied", "FALLBACK", "linux");
+        assert!(!step.contains("Windows refused"), "names the wrong system: {step}");
+        assert!(step.contains("Set up trainer"), "{step}");
+        // And the Windows wordings for a refused write have to reach this arm
+        // at all, which they did not before: neither contains "permission".
+        for log in ["ERROR: [WinError 5] Access is denied", "ERROR: Access is denied"] {
+            assert_ne!(next_step_for_log(log, "FALLBACK", "windows"), "FALLBACK", "{log}");
+        }
+    }
+
+    #[test]
+    fn an_unsupported_python_is_named_as_such() {
+        use super::install_failed_message;
+        let msg = install_failed_message(
+            "torch install failed (exit Some(1)).\nERROR: Could not find a version that satisfies the requirement torch",
+        );
+        assert!(msg.contains("3.10, 3.11 or 3.12"), "{msg}");
+        assert!(!msg.contains("Check that you are online"), "{msg}");
+    }
+
+    #[test]
+    fn a_real_network_failure_still_gets_the_network_sentence() {
+        // Negative control. The point is not to stop saying "check that you
+        // are online", it is to stop saying it when it is not true.
+        use super::install_failed_message;
+        for log in [
+            "torch install failed (exit Some(1)).\nConnectionResetError: connection reset by peer",
+            "torch install failed (exit Some(1)).\nReadTimeoutError: read timed out",
+            "torch install failed (exit Some(1)).\nsomething nobody has a rule for",
+        ] {
+            let msg = install_failed_message(log);
+            assert!(msg.contains("online") && msg.contains("room"), "lost the usual two: {msg}");
+        }
+    }
+
+    #[test]
+    fn the_full_drive_still_wins_over_every_other_verdict() {
+        // Negative control for the ordering: a disk-full rollback names a DLL
+        // under torch\lib on every line it prints, and the disk sentence is
+        // the one with the measured number in it.
+        use super::next_step_for_log;
+        let mut log = String::from("OSError: [Errno 28] No space left on device\n");
+        log.push_str("Moving to c:\\users\\x\\musubi\\venv\\lib\\site-packages\\torch\\lib\\vcomp140.dll\n");
+        for os in ["windows", "linux"] {
+            let step = next_step_for_log(&log, "FALLBACK", os);
+            assert!(step.contains("7 GB"), "{os}: {step}");
+        }
+    }
+
+    #[test]
+    fn every_replacement_step_still_names_the_button() {
+        use super::next_step_for_log;
+        for log in [
+            "VCOMP140.DLL was not found",
+            "[WinError 1114] initialization routine failed",
+            "ERROR: Could not find a version that satisfies the requirement torch",
+            "PermissionError: [Errno 13] Permission denied",
+            "error: externally-managed-environment",
+            "AssertionError: Torch not compiled with CUDA enabled",
+        ] {
+            for os in ["windows", "linux", "macos"] {
+                let step = next_step_for_log(log, "FALLBACK", os);
+                assert_ne!(step, "FALLBACK", "no verdict for {log:?} on {os}");
+                assert!(step.contains("Set up trainer"), "{log:?} on {os} has no way out: {step}");
+            }
+        }
     }
 
     #[test]
@@ -2201,5 +3154,264 @@ mod shutdown_tests {
             state_rs.contains("trainer_process") && state_rs.contains("kill_trainer_tree"),
             "shutdown_subprocesses no longer kills the trainer",
         );
+    }
+}
+
+// ── the whole journey, ticket 0004 follow-up (06.09.2026) ───────────────────
+//
+// David's line: the app cannot afford to hand anyone instructions; from the
+// first error to a finished training, everything has to happen in the app.
+// These pin the pieces that replaced a pointer with an action: no git needed,
+// room checked before the first byte, a dropped download retried, the Visual
+// C++ runtime installed instead of linked, winget kept out of the note, the
+// card's memory checked before ten minutes of caching, and the one dead end
+// the run still has (out of memory) named with its way out.
+#[cfg(test)]
+mod journey_tests {
+    use super::*;
+
+    fn fresh_state() -> Arc<Mutex<crate::state::InstallState>> {
+        Arc::new(Mutex::new(crate::state::InstallState::default()))
+    }
+
+    #[test]
+    fn winget_runs_silent_with_both_agreements_and_a_scope_only_for_user_packages() {
+        let user = winget_install_args("Python.Python.3.12", true);
+        assert_eq!(user[..2], ["install", "Python.Python.3.12"]);
+        assert!(user.contains(&"--silent".to_string()));
+        assert!(user.contains(&"--accept-package-agreements".to_string()));
+        assert!(user.contains(&"--accept-source-agreements".to_string()));
+        assert_eq!(user[user.len() - 2..], ["--scope", "user"]);
+        // The Visual C++ runtime only installs machine wide; a scope would
+        // make winget refuse it.
+        let machine = winget_install_args("Microsoft.VCRedist.2015+.x64", false);
+        assert!(!machine.iter().any(|a| a == "--scope"), "{machine:?}");
+        assert!(machine.contains(&"--silent".to_string()));
+    }
+
+    #[test]
+    fn a_quiet_child_keeps_its_tail_for_the_error_and_writes_nothing_into_the_log() {
+        let state = fresh_state();
+        let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let pid = Arc::new(Mutex::new(None));
+        let mk = || {
+            #[cfg(target_os = "windows")]
+            {
+                let mut c = Command::new("cmd");
+                c.args(["/c", "echo geheim & exit 3"]);
+                c
+            }
+            #[cfg(not(target_os = "windows"))]
+            {
+                let mut c = Command::new("sh");
+                c.args(["-c", "echo geheim; exit 3"]);
+                c
+            }
+        };
+        let err = run_quiet(mk(), "probe", &state, &cancel, &pid).unwrap_err();
+        assert!(err.contains("geheim"), "the tail must survive for the failure message: {err}");
+        assert!(
+            !state.lock().unwrap().logs.iter().any(|l| l.contains("geheim")),
+            "a quiet child's lines must not reach the note under the button"
+        );
+        // Negative control: the streamed variant does put them there.
+        let err = run_streamed(mk(), "probe", &state, &cancel, &pid).unwrap_err();
+        assert!(err.contains("geheim"));
+        assert!(state.lock().unwrap().logs.iter().any(|l| l.contains("geheim")));
+    }
+
+    #[test]
+    fn only_a_network_failure_is_worth_a_retry() {
+        assert!(is_transient_network("torch install failed (exit Some(1)).\nConnectionResetError: connection reset by peer"));
+        assert!(is_transient_network("ReadTimeoutError: read timed out"));
+        assert!(is_transient_network("ERROR: 429 Too Many Requests "));
+        assert!(!is_transient_network("ERROR: No matching distribution found for torch"));
+        assert!(!is_transient_network("OSError: [Errno 28] No space left on device"));
+        assert!(!is_transient_network("cancelled"));
+    }
+
+    #[test]
+    fn the_room_check_answers_before_the_first_byte_and_carries_its_own_way_out() {
+        let root = Path::new("C:\\Users\\d\\musubi");
+        let gib = 1024u64 * 1024 * 1024;
+        let msg = disk_room_message(root, 5 * gib + gib / 2, 10).expect("5.5 GB is not enough for 10");
+        assert!(msg.contains("5.5 GB free"), "{msg}");
+        assert!(msg.contains("about 10 GB"), "{msg}");
+        assert!(msg.contains("Set up trainer"), "{msg}");
+        assert!(msg.contains(&root.display().to_string()), "names the drive: {msg}");
+        // It must not be wrapped in "check that you are online".
+        assert_eq!(install_failed_message(&msg), msg);
+        assert!(disk_room_message(root, 20 * gib, 10).is_none());
+        assert!(disk_room_message(root, 7 * gib, 7).is_none(), "exactly enough is enough");
+    }
+
+    #[test]
+    fn the_source_counts_as_present_for_an_archive_with_the_tag_or_an_older_git_checkout() {
+        let dir = crate::os_paths::test_dir("trainer-source");
+        assert!(!musubi_source_present(&dir), "nothing there yet");
+        let pkg = repo_dir(&dir).join("src").join("musubi_tuner");
+        fs::create_dir_all(&pkg).unwrap();
+        assert!(!musubi_source_present(&dir), "a bare folder without a tag is not the pinned source");
+        fs::write(musubi_source_marker(&dir), "v0.0.1").unwrap();
+        assert!(!musubi_source_present(&dir), "a different tag is not this release");
+        fs::write(musubi_source_marker(&dir), format!("{MUSUBI_TAG}\n")).unwrap();
+        assert!(musubi_source_present(&dir), "the archive of this tag");
+        fs::remove_file(musubi_source_marker(&dir)).unwrap();
+        fs::create_dir_all(repo_dir(&dir).join(".git")).unwrap();
+        assert!(musubi_source_present(&dir), "a git checkout from an older LU is kept");
+        fs::remove_dir_all(&pkg).unwrap();
+        assert!(!musubi_source_present(&dir), "a checkout without the package is not usable");
+    }
+
+    #[test]
+    fn the_archive_url_names_the_pinned_tag_on_the_codeload_host() {
+        let url = musubi_archive_url();
+        assert!(url.starts_with("https://codeload.github.com/kohya-ss/musubi-tuner/zip/refs/tags/"), "{url}");
+        assert!(url.ends_with(MUSUBI_TAG), "{url}");
+    }
+
+    #[test]
+    fn the_probe_reports_the_cards_memory_and_the_floor_is_twelve_gigabytes() {
+        assert!(TORCH_PREFLIGHT_PY.contains("VRAM_MIB"), "the probe script has to print it");
+        assert_eq!(parse_vram_mib("TORCH_OK 2.5.1\nCUDA 1\nCAP 8 6\nARCHS sm_86\nVRAM_MIB 12288\n"), Some(12288));
+        assert_eq!(parse_vram_mib("TORCH_OK 2.5.1\nCUDA 0\n"), None);
+        assert!(vram_verdict(Some(12288)).is_none(), "the box's 12 GB card trains");
+        assert!(vram_verdict(Some(16 * 1024)).is_none());
+        assert!(vram_verdict(None).is_none(), "no card reported is the processor case, handled elsewhere");
+        let small = vram_verdict(Some(8 * 1024)).expect("8 GB is below the floor");
+        assert!(small.contains("8 GB"), "{small}");
+        assert!(small.contains("12 GB"), "{small}");
+        assert!(small.contains("Cloud mode"), "names the way that works: {small}");
+    }
+
+    #[test]
+    fn every_step_of_the_run_ends_a_failure_through_the_same_door() {
+        // A card that fills up during the latent or text-encoder cache used to
+        // hand the raw Python tail to the note; only the training step named
+        // the cause. All four children now end through end_failed_run.
+        let src = include_str!("trainer.rs");
+        let run = &src[src.find("pub fn start_character_training").expect("start fn")..];
+        let run = &run[..run.find("pub fn character_training_status").expect("end of run")];
+        assert_eq!(run.matches("if let Err(e) = run_streamed(c").count(), 4, "the run drives four children");
+        assert_eq!(run.matches("end_failed_run(&run, &e, vram_mib)").count(), 4, "each child failure goes through the helper");
+        assert!(!run.contains("{ \"cancelled\" } else { \"error\" }"), "a raw error still reaches the note");
+    }
+
+    #[test]
+    fn out_of_memory_in_the_run_is_named_with_its_way_out_and_other_errors_pass_through() {
+        let oom = "training failed (exit Some(1)).\ntorch.OutOfMemoryError: CUDA out of memory. Tried to allocate 512.00 MiB";
+        let msg = training_failure_message(oom, Some(12288));
+        assert!(msg.contains("ran out of memory"), "{msg}");
+        assert!(msg.contains("This card has 12 GB"), "{msg}");
+        assert!(msg.contains("close other apps"), "{msg}");
+        assert!(msg.contains("Cloud mode"), "{msg}");
+        assert!(msg.contains("Last steps:"), "{msg}");
+        let other = "training failed (exit Some(1)).\nKeyError: 'foo'";
+        assert_eq!(training_failure_message(other, Some(12288)), other);
+    }
+
+    #[test]
+    fn the_runtime_library_class_is_the_one_the_visual_cpp_install_fixes() {
+        assert!(runtime_library_missing("ImportError: VCOMP140.DLL was not found"));
+        assert!(runtime_library_missing("OSError: [WinError 1114] initialization routine failed"));
+        assert!(runtime_library_missing("ImportError: DLL load failed while importing _C"));
+        assert!(!runtime_library_missing("ModuleNotFoundError: No module named 'torch'"));
+        assert!(!runtime_library_missing("AssertionError: Torch not compiled with CUDA enabled"));
+    }
+
+    #[test]
+    fn a_torch_that_does_not_load_after_setup_names_the_cause_not_the_network() {
+        // What provision returns when the probe fails on a missing runtime
+        // and the install could not fix it: the wrapper has to pick the
+        // Visual C++ sentence on Windows, and never the network one.
+        use super::next_step_for_log;
+        let err = "PyTorch does not load in the trainer environment.\nImportError: VCOMP140.DLL was not found";
+        let step = next_step_for_log(err, "FALLBACK", "windows");
+        assert!(step.contains("Visual C++"), "{step}");
+        assert!(!install_failed_message(err).contains("Check that you are online"));
+    }
+
+    #[test]
+    fn the_setup_takes_the_paths_that_act_instead_of_pointing() {
+        let src = include_str!("trainer.rs");
+        let body = &src[src.find("fn provision_trainer_env(").expect("provision")..];
+        let body = &body[..body.find("pub fn character_trainer_status").expect("end of provision")];
+        assert!(body.contains("fetch_musubi_source(root, state, status_kind, tag, cancel, pid_slot)?"), "step 1 must go through the archive path");
+        assert!(!body.contains("Command::new(\"git\")"), "provision itself must not require git");
+        assert!(body.contains("disk_room_message(root, free, needed_gib)"), "room is asked before the first byte");
+        assert_eq!(body.matches("pip_with_retry(").count(), 2, "both pip steps retry a dropped download");
+        assert!(body.contains("probe_trainer_env(&venv_exe, gpu, \"after setup\")"), "the setup proves the environment loads");
+        assert!(body.contains("winget_install(\"Microsoft.VCRedist.2015+.x64\", false"), "the runtime is installed, not linked");
+        let base = &src[src.find("fn trainer_base_python(").expect("base")..];
+        let base = &base[..base.find("fn musubi_source_marker").expect("end of base")];
+        assert!(base.contains("winget_install(\"Python.Python.3.12\", true"), "Python comes through the quiet winget path");
+        let code = &src[..src.find("#[cfg(test)]").expect("tests start")];
+        assert!(!code.contains("run_streamed(winget"), "winget lines never stream into the note");
+    }
+}
+
+#[cfg(test)]
+mod progress_line_tests {
+    use super::*;
+    use std::io::Cursor;
+
+    fn collect(bytes: &[u8]) -> Vec<String> {
+        let mut out = Vec::new();
+        for_each_progress_line(Cursor::new(bytes.to_vec()), |l| out.push(l));
+        out
+    }
+
+    #[test]
+    fn a_carriage_return_ends_a_line_like_a_newline_does() {
+        assert_eq!(collect(b"a\rb\rc\nd"), ["a", "b", "c", "d"]);
+        assert_eq!(collect(b"\r\n\r"), Vec::<String>::new(), "empty segments are not lines");
+        assert_eq!(collect(b"tail without newline"), ["tail without newline"]);
+    }
+
+    #[test]
+    fn every_tqdm_redraw_reaches_the_step_counter() {
+        let stream = b"steps:   0%|          | 0/400 [00:00<?, ?it/s]\rsteps:   0%|          | 1/400 [00:11<1:16:00, 11.4s/it]\rsteps:   0%|          | 2/400 [00:23<1:16:00, 11.4s/it]\n";
+        let steps: Vec<(u64, u64)> = collect(stream).iter().filter_map(|l| parse_step_counter(l)).collect();
+        assert_eq!(steps, [(0, 400), (1, 400), (2, 400)], "each \\r update is its own line");
+    }
+
+    #[test]
+    fn a_cancel_with_no_child_alive_still_ends_the_run_before_the_next_spawn() {
+        // The probe runs Command::output (nothing in pid_slot) and between two
+        // children nothing is alive either, so Cancel there only sets the flag.
+        // Each of the four children is preceded by a check of that flag.
+        let src = include_str!("trainer.rs");
+        let body = &src[src.find("pub fn start_character_training").expect("start fn")..];
+        let body = &body[..body.find("info!(\"character training complete\")").expect("end of the run")];
+        let checks = body.matches("if cancel_requested(&cancel) {").count();
+        assert_eq!(checks, 4, "one cancel check per child, before its spawn");
+        for label in ["\"latent cache\"", "\"text encoder cache\"", "\"training\"", "\"lora convert\""] {
+            let spawn = body.find(label).expect(label);
+            let check = body[..spawn].rfind("if cancel_requested(&cancel) {").expect("a check before the spawn");
+            assert!(body[check..spawn].matches("run_streamed(").count() == 1, "the check right before {label}");
+        }
+    }
+
+    #[test]
+    fn what_the_dying_child_prints_after_a_cancel_is_not_the_log() {
+        // The box showed a raw KeyboardInterrupt traceback in the live log
+        // under a status of "cancelled" (06.09.2026): the tree was being
+        // killed and the reader kept forwarding its last breaths.
+        let src = include_str!("trainer.rs");
+        let body = &src[src.find("fn run_child(").expect("run_child")..];
+        let body = &body[..body.find("let exit = loop").expect("wait loop")];
+        let reader = &body[body.find("for_each_progress_line(stream").expect("reader")..];
+        let gate = reader.find("if cancel.load(Ordering::SeqCst)").expect("the reader checks the cancel flag");
+        let log = reader.find("push_log(&run, trimmed)").expect("the reader logs");
+        assert!(gate < log, "the cancel check comes before anything reaches the log");
+    }
+
+    #[test]
+    fn the_child_reader_no_longer_waits_for_a_newline() {
+        let src = include_str!("trainer.rs");
+        let body = &src[src.find("fn run_child(").expect("run_child")..];
+        let body = &body[..body.find("let exit = loop").expect("wait loop")];
+        assert!(body.contains("for_each_progress_line(stream"), "the reader goes through the \\r-aware splitter");
+        assert!(!body.contains(".lines()"), "BufRead::lines would hide tqdm updates until the epoch ends");
     }
 }

@@ -4,6 +4,7 @@ import {
   MODE_SCOPE_ALLOWED_CATEGORIES,
   modeAllowsCategory,
 } from '../permissionStore'
+import type { ToolCategory } from '../../api/mcp/types'
 
 describe('permissionStore — Phase 12 per-tool overrides', () => {
   beforeEach(() => {
@@ -89,10 +90,10 @@ describe('permissionStore — Phase 12 mode scopes', () => {
   })
 
   it('agent scope allows every category', () => {
-    const all: ReadonlyArray<string> = [
+    const all: ReadonlyArray<ToolCategory> = [
       'filesystem', 'terminal', 'desktop', 'web', 'system', 'image', 'video', 'workflow',
     ]
-    for (const c of all) expect(modeAllowsCategory('agent', c as any)).toBe(true)
+    for (const c of all) expect(modeAllowsCategory('agent', c)).toBe(true)
   })
 
   it('allowed-category table is monotonic chat ⊆ edit ⊆ agent', () => {

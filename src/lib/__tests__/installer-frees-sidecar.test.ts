@@ -35,14 +35,18 @@ const read = (rel: string) => readFileSync(resolve(root, rel), 'utf8')
 const hooks = read('src-tauri/windows/installer-hooks.nsh')
 const engineRs = read('src-tauri/src/commands/engine.rs')
 const conf = JSON.parse(read('src-tauri/tauri.conf.json')) as {
-  bundle?: { externalBin?: string[] }
+  build?: { frontendDist?: string }
+  bundle?: { externalBin?: string[]; resources?: string[] }
 }
 
 // Only the unlock macro. The dormant product-rename macro below it kills the
-// app itself and is a different question.
+// app itself and is a different question, and so is the frontend sweep that
+// now sits between them: this slice used to run to NSIS_HOOK_PREINSTALL and
+// swallowed everything in between, so the cases below would have started
+// making claims about code they were never written for.
 const unlock = hooks.slice(
   hooks.indexOf('!macro LU_FREE_SIDECAR'),
-  hooks.indexOf('!macro NSIS_HOOK_PREINSTALL'),
+  hooks.indexOf('!macro LU_SWEEP_OLD_FRONTEND'),
 )
 
 describe('the installer frees the bundled engine', () => {
@@ -147,5 +151,110 @@ describe('an update from before the rename does not leave the old engine behind'
     for (const owned of ['llama-server', 'llama-cli', 'llama-bench', 'llama-quantize']) {
       expect(names).not.toContain(owned)
     }
+  })
+})
+
+/**
+ * Was der Installer hinlegt, muss er auch wieder wegnehmen koennen.
+ *
+ * Gemessen am 04.09.2026 auf der Windows-Box, in einem Ordner, der seit April
+ * jede Aktualisierung mitgenommen hat:
+ *
+ *     _up_\dist\assets                        1170 Dateien   131,9 MB
+ *     davon aus dem an dem Morgen installierten Build    266
+ *     aelteste Datei                              15.04.2026
+ *
+ * Rund 900 tote Dateien und gut 110 MB, die jeder Nutzer mitschleppt. Der
+ * Grund sind zwei Gewohnheiten, die einzeln richtig sind: Vite haengt an jeden
+ * Brocken einen Hash, ein neuer Build ueberschreibt den alten also nie sondern
+ * legt sich daneben, und NSIS kopiert nur, es raeumt nie weg.
+ *
+ * Beides zusammen erklaert, warum der Stapel waechst. Es erklaert nicht, warum
+ * ueberhaupt ein Frontend danebenliegt: das ist der zweite Teil, weiter unten.
+ */
+describe('der Installer laesst den alten Frontend-Stapel nicht liegen', () => {
+  const preinstall = hooks.slice(hooks.indexOf('!macro NSIS_HOOK_PREINSTALL'))
+  const sweep = hooks.slice(
+    hooks.indexOf('!macro LU_SWEEP_OLD_FRONTEND'),
+    hooks.indexOf('!macro NSIS_HOOK_PREINSTALL'),
+  )
+
+  it('raeumt vor jedem Kopieren auf, in jedem Build', () => {
+    expect(preinstall).toContain('!insertmacro LU_SWEEP_OLD_FRONTEND')
+    // Vor dem Umbenennungsschalter, sonst waere es wieder toter Code, genau
+    // wie die Entsperrung es einmal war.
+    expect(preinstall.indexOf('!insertmacro LU_SWEEP_OLD_FRONTEND'))
+      .toBeLessThan(preinstall.indexOf('!if "${PRODUCTNAME}"'))
+  })
+
+  it('nimmt den ganzen Ordner, nicht einzelne Dateien', () => {
+    // Eine Liste von Namen waere sinnlos: die Namen sind Hashes und heissen bei
+    // jedem Build anders. Genau daran ist das Aufraeumen bisher gescheitert.
+    expect(sweep).toContain('RMDir /r "$INSTDIR\\_up_\\dist"')
+  })
+
+  it('nur dort, wo unser Frontend wirklich liegt', () => {
+    // Das rekursive Loeschen ist die einzige Anweisung in dieser Datei, die
+    // sich nicht zuruecknehmen laesst. Sie darf bei einem falschen $INSTDIR
+    // nicht losgehen.
+    expect(sweep).toContain('${FileExists} "$INSTDIR\\_up_\\dist\\index.html"')
+    expect(sweep.indexOf('FileExists')).toBeLessThan(sweep.indexOf('RMDir'))
+  })
+
+  it('faesst nichts an, worin Nutzerdaten liegen koennten', () => {
+    // Negativkontrolle. Chats, Einstellungen, Modelle und Ergebnisse liegen
+    // unter den App-Data-Ordnern, nie im Installationsordner. Ein RMDir auf
+    // $APPDATA oder auf $INSTDIR selbst waere ein Datenverlust, kein Aufraeumen.
+    expect(sweep).not.toContain('RMDir /r "$INSTDIR"')
+    expect(sweep).not.toContain('$APPDATA')
+    expect(sweep).not.toContain('$LOCALAPPDATA')
+    expect(sweep).not.toContain('$DOCUMENTS')
+    // Und der Ordner mit den Modellen der Engine schon gar nicht.
+    expect(sweep).not.toContain('resources')
+  })
+})
+
+/**
+ * Und der Grund, warum ueberhaupt etwas liegen bleibt: wir haben das Frontend
+ * zweimal ausgeliefert.
+ *
+ * `build.frontendDist` backt die Oberflaeche in die Binaerdatei, das ist der
+ * Weg, den die App geht (`tauri.localhost` liest aus der exe). Daneben stand
+ * `../dist` in `bundle.resources`, seit dem allerersten Tauri-Commit
+ * (bd22a135, Geruest, ohne Begruendung). Das `..` schreibt Tauri als `_up_`,
+ * darum der Ordner mit dem seltsamen Namen. Gelesen hat ihn nie jemand:
+ * `resource_dir()` kommt in diesem Baum genau zweimal vor, einmal fuer
+ * `whisper_server.py` und einmal fuer die Engine.
+ *
+ * Gegenprobe am 04.09.2026 am echten Windows-Build, nicht am Quelltext: den
+ * Ordner beiseite geschoben (er liess sich verschieben, also hielt ihn kein
+ * Prozess offen), App ueber die geplante Aufgabe neu gestartet, CDP nach vier
+ * Sekunden gefragt. Titel „Locally Uncensored", ein Kind unter `#root`, alle
+ * sechs Reiter der Kopfzeile da. Die Kopie ist tot.
+ *
+ * Die beiden Haelften gehoeren zusammen und ersetzen einander nicht: hier
+ * entsteht kein neuer Stapel mehr, und das Aufraeumen oben holt den weg, den
+ * die Aktualisierung von einer aelteren Fassung vorfindet.
+ */
+describe('das Frontend wird einmal ausgeliefert, nicht zweimal', () => {
+  const resources = conf.bundle?.resources ?? []
+
+  it('liegt in der Binaerdatei', () => {
+    expect(conf.build?.frontendDist).toBe('../dist')
+  })
+
+  it('und nicht noch einmal daneben', () => {
+    expect(resources).not.toContain('../dist')
+    // Kein Eintrag klettert aus src-tauri heraus. Jeder, der es taete, laege
+    // wieder unter `_up_` und faenge denselben Stapel von vorne an.
+    for (const r of resources) expect(r).not.toContain('..')
+  })
+
+  it('was wirklich gebraucht wird, bleibt', () => {
+    // Negativkontrolle gegen einen zu breiten Schnitt: `whisper_server.py`
+    // wird ueber `resource_dir()` gelesen, das Loeschen waere kein Aufraeumen
+    // sondern ein kaputtes Diktiergeraet.
+    expect(resources).toContain('resources/whisper_server.py')
+    expect(read('src-tauri/src/commands/whisper.rs')).toContain('.resource_dir()')
   })
 })

@@ -1,0 +1,55 @@
+# Line endings are a cross-platform correctness issue here, not cosmetics.
+#
+# Without this file every text file arrives CRLF on a Windows checkout
+# (git's core.autocrlf defaults to true there), and two things break that
+# nobody sees on macOS or Linux:
+#
+#   1. setup.sh / build-llama.sh / start scripts carry `#!/usr/bin/env bash\r`
+#      and die with "bad interpreter" under WSL and Git Bash — the documented
+#      from-source path on Windows.
+#   2. The source-pinning tests that assert on file contents byte for byte
+#      (build-llama-script, prompt-tool-roster, codex-mode-wiring,
+#      chat-budget-wiring, displaced-engine-frees-its-memory) fail on a fresh
+#      Windows clone. A contributor's first `npm test` there was 8 red.
+#
+# Normalise to LF in the repository and in every working tree, and name the
+# exceptions explicitly: Windows batch files genuinely want CRLF, and binaries
+# must never be touched.
+
+* text=auto eol=lf
+
+# Windows-native scripts: cmd.exe is the consumer, CRLF is correct there.
+*.bat   text eol=crlf
+*.cmd   text eol=crlf
+*.ps1   text eol=crlf
+
+# POSIX scripts stay LF even on Windows — they run under bash/WSL.
+*.sh    text eol=lf
+
+# Binaries: never normalise, never diff as text.
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.webp  binary
+*.gif   binary
+*.ico   binary
+*.icns  binary
+*.pdf   binary
+*.zip   binary
+*.gz    binary
+*.woff  binary
+*.woff2 binary
+*.ttf   binary
+*.otf   binary
+*.gguf  binary
+*.safetensors binary
+*.ckpt  binary
+*.exe   binary
+*.dll   binary
+*.dylib binary
+*.so    binary
+*.node  binary
+*.wasm  binary
+*.mp4   binary
+*.webm  binary
+*.bundle binary

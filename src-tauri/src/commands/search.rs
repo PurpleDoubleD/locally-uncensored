@@ -90,12 +90,12 @@ async fn try_ddg(query: &str, count: usize) -> Result<Vec<SearchResult>, String>
         .collect();
 
     let mut results = Vec::new();
-    for i in 0..titles.len().min(count) {
+    for (i, title) in titles.iter().take(count).enumerate() {
         let url = urls.get(i).cloned().unwrap_or_default();
         let snippet = snippets.get(i).cloned().unwrap_or_default();
         if !url.is_empty() {
             results.push(SearchResult {
-                title: titles[i].clone(),
+                title: title.clone(),
                 url,
                 snippet,
             });
@@ -221,10 +221,94 @@ async fn try_tavily(query: &str, count: usize, api_key: &str) -> Result<Vec<Sear
     }
 }
 
+/// Traegt der Text deutsche Signale? Umlaute und ss zaehlen sofort, danach
+/// haeufige Funktionswoerter, danach typische Endungen von Fachwoertern.
+///
+/// Der Anlass, gemessen am 04.09.2026: „Transparenzgesetz Hamburg
+/// Antragsfristen" ergibt auf en.wikipedia 0 Treffer und auf de.wikipedia 31
+/// (verkuerzt auf die ersten beiden Begriffe). Zusammen mit DuckDuckGos
+/// Bot-Sperre (HTTP 202 auf `html.` UND `lite.`) hatte eine deutsche
+/// Recherche damit keine einzige funktionierende Suchstufe mehr.
+pub fn sprach_signal_deutsch(text: &str) -> bool {
+    let t = text.trim();
+    if t.is_empty() {
+        return false;
+    }
+    if t.chars().any(|c| matches!(c, 'ä' | 'ö' | 'ü' | 'ß' | 'Ä' | 'Ö' | 'Ü')) {
+        return true;
+    }
+    let klein = t.to_lowercase();
+    const WOERTER: &[&str] = &[
+        "der", "die", "das", "des", "dem", "den", "und", "oder", "nicht", "welche", "welcher",
+        "wie", "was", "wer", "wann", "warum", "von", "vom", "zum", "zur", "fuer", "ueber",
+        "mit", "nach", "bei", "auf", "aus", "ein", "eine", "einer", "einem", "ist", "sind",
+        "war", "waren", "wird", "werden", "kann", "koennen", "muss", "soll", "gibt", "sich",
+    ];
+    if klein.split_whitespace().any(|w| WOERTER.contains(&w)) {
+        return true;
+    }
+    const ENDUNGEN: &[&str] = &[
+        "gesetz", "gesetze", "gesetzes", "fristen", "frist", "ordnung", "verordnung",
+        "pflicht", "pflichten", "recht", "rechte", "antrag", "verfahren", "verwaltung",
+        "gebuehren", "kammer",
+    ];
+    klein
+        .split_whitespace()
+        .any(|w| w.len() > 6 && ENDUNGEN.iter().any(|e| w.ends_with(e)))
+}
+
+/// Die Anfragen, die die Wikipedia-Stufe der Reihe nach versucht:
+/// (Sprache, Suchbegriffe). Gekuerzt wird von hinten, weil Wikipedia die
+/// Begriffe UND-verknuepft und der letzte ueblicherweise die engste
+/// Einschraenkung ist; nie unter zwei Begriffe, und hoechstens vier Versuche —
+/// die letzte Rettungsstufe darf keine Suchmaschine werden.
+pub fn wiki_versuche(query: &str, max_versuche: usize) -> Vec<(&'static str, String)> {
+    let begriffe: Vec<&str> = query.split_whitespace().filter(|w| !w.is_empty()).collect();
+    if begriffe.is_empty() {
+        return Vec::new();
+    }
+    let mut varianten = vec![begriffe.join(" ")];
+    let mut n = begriffe.len().saturating_sub(1);
+    while n >= 2 {
+        varianten.push(begriffe[..n].join(" "));
+        n -= 1;
+    }
+    let sprachen: [&'static str; 2] = if sprach_signal_deutsch(query) {
+        ["de", "en"]
+    } else {
+        ["en", "de"]
+    };
+    let mut out = Vec::new();
+    for sprache in sprachen {
+        for v in &varianten {
+            out.push((sprache, v.clone()));
+            if out.len() >= max_versuche {
+                return out;
+            }
+        }
+    }
+    out
+}
+
 async fn try_wikipedia(query: &str, count: usize) -> Result<Vec<SearchResult>, String> {
+    let mut letzter = "No Wikipedia results".to_string();
+    for (sprache, anfrage) in wiki_versuche(query, 4) {
+        match try_wikipedia_einmal(sprache, &anfrage, count).await {
+            Ok(r) => return Ok(r),
+            Err(e) => letzter = e,
+        }
+    }
+    Err(letzter)
+}
+
+async fn try_wikipedia_einmal(
+    sprache: &str,
+    query: &str,
+    count: usize,
+) -> Result<Vec<SearchResult>, String> {
     let url = format!(
-        "https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch={}&format=json&srlimit={}",
-        urlencoding::encode(query), count
+        "https://{}.wikipedia.org/w/api.php?action=query&list=search&srsearch={}&format=json&srlimit={}",
+        sprache, urlencoding::encode(query), count
     );
 
     let client = reqwest::Client::builder()
@@ -247,7 +331,10 @@ async fn try_wikipedia(query: &str, count: usize) -> Result<Vec<SearchResult>, S
                     let title = r.get("title")?.as_str()?;
                     Some(SearchResult {
                         title: title.to_string(),
-                        url: format!("https://en.wikipedia.org/wiki/{}", urlencoding::encode(title)),
+                        // Die Adresse MUSS die gefragte Sprachwiki tragen: ein
+                        // Treffer aus de.wikipedia unter einer en-Adresse ist ein
+                        // 404, das wie ein Beleg aussieht (nachgemessen).
+                        url: format!("https://{}.wikipedia.org/wiki/{}", sprache, urlencoding::encode(title)),
                         snippet: r.get("snippet").and_then(|s| s.as_str())
                             .map(|s| html_decode(&strip_html(s)))
                             .unwrap_or_default(),
@@ -369,7 +456,16 @@ pub async fn web_search(
         return Ok(attach(serde_json::json!({"results": results, "provider": "wikipedia"})));
     }
 
-    Ok(attach(serde_json::json!({"results": [], "error": "All search tiers failed"})))
+    // Was hier steht, muss dem Nutzer sagen, was er tun kann. Eine Persona las
+    // am 03.09.2026 nur „All search tiers failed" und konnte daraus nicht
+    // schliessen, dass ein API-Schluessel die Kette wieder ganz macht — das
+    // Modell konnte es auch nicht und erfand stattdessen eine Tabelle.
+    let hinweis = if brave_key.is_empty() && tavily_key.is_empty() {
+        "All search tiers failed. The free tiers are unreliable (DuckDuckGo answers automated requests with a bot check). Configure Brave or Tavily under Settings → Agent → Search Provider for dependable search."
+    } else {
+        "All search tiers failed"
+    };
+    Ok(attach(serde_json::json!({"results": [], "error": hinweis})))
 }
 
 #[tauri::command]
@@ -733,5 +829,55 @@ mod tests {
         assert_eq!(title, "STRAẞE");
         assert!(text.contains("Inhalt"), "body text lost: {:?}", text);
         assert!(!text.contains("evil"), "script survived: {:?}", text);
+    }
+}
+
+#[cfg(test)]
+mod wiki_sprache_tests {
+    use super::{sprach_signal_deutsch, wiki_versuche};
+
+    // Der Anlass steht bei `sprach_signal_deutsch`: gemessen am 04.09.2026,
+    // en.wikipedia 0 Treffer / de.wikipedia 31, DuckDuckGo HTTP 202.
+
+    #[test]
+    fn die_frage_der_persona_geht_zuerst_an_die_deutsche() {
+        let v = wiki_versuche("Transparenzgesetz Hamburg Antragsfristen", 4);
+        assert_eq!(v[0], ("de", "Transparenzgesetz Hamburg Antragsfristen".to_string()));
+        // Und der zweite Versuch ist der, der wirklich Treffer hat.
+        assert_eq!(v[1], ("de", "Transparenzgesetz Hamburg".to_string()));
+    }
+
+    #[test]
+    fn englische_fragen_bleiben_bei_der_englischen() {
+        let v = wiki_versuche("Hamburg transparency law deadlines", 4);
+        assert_eq!(v[0].0, "en");
+    }
+
+    #[test]
+    fn beide_sprachen_bleiben_erreichbar() {
+        // Eine Vermutung, die die andere Sprache ausschliesst, wiederholt genau
+        // den Fehler, den sie beheben soll.
+        let v = wiki_versuche("Transparenzgesetz", 4);
+        assert!(v.iter().any(|(s, _)| *s == "de"));
+        assert!(v.iter().any(|(s, _)| *s == "en"));
+    }
+
+    #[test]
+    fn nie_unter_zwei_begriffe_und_gedeckelt() {
+        let v = wiki_versuche("a b c d e f g h", 4);
+        assert_eq!(v.len(), 4);
+        assert!(v.iter().all(|(_, q)| q.split_whitespace().count() >= 2));
+    }
+
+    #[test]
+    fn leere_anfrage_ergibt_keinen_versuch() {
+        assert!(wiki_versuche("   ", 4).is_empty());
+    }
+
+    #[test]
+    fn umlaute_zaehlen_sofort() {
+        assert!(sprach_signal_deutsch("Gebührenordnung"));
+        assert!(sprach_signal_deutsch("Straßenverkehr"));
+        assert!(!sprach_signal_deutsch("transparency law"));
     }
 }

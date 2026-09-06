@@ -1,8 +1,71 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
+import { safeJSONStorage } from '../lib/storage-quota'
 import { v4 as uuid } from 'uuid'
 import { isVideoModelType, type ModelType, } from '../api/comfyui'
 import type { WorkflowTag, WorkflowTemplate } from '../types/workflows'
+import { secretGet, secretSet, secretDelete } from '../api/backend'
+
+// ── The CivitAI API key lives in the OS vault ──────────────────────────────
+//
+// Every other secret in the app already does (providerStore, the HuggingFace
+// token in MlxMediaSettings). This one sat in localStorage in plain text,
+// which is the same mistake providerStore's H5 fix was written for. Same
+// shape, same limits: Windows Credential Manager and the macOS Keychain hold
+// it, Linux desktop and the web build have no uniform vault and keep the
+// localStorage path unchanged.
+
+/** Keychain account for the CivitAI key. Keep it stable, changing it would
+ *  orphan the stored key. */
+export const CIVITAI_KEY_ACCOUNT = 'civitai-api-key'
+
+// True once a secret_get has RESOLVED here, which is what proves the vault
+// works. Module level so the static `partialize` below can read it.
+let civitaiVaultReady = false
+// True when a vault WRITE failed this session. partialize then KEEPS the key
+// in localStorage, because a locked or full credential store must not make the
+// key vanish on the next restart with no trace.
+let civitaiVaultFailed = false
+
+/** Test seam: the flags are module state, so a test needs a way back. */
+export function __resetCivitaiVaultForTests(): void {
+  civitaiVaultReady = false
+  civitaiVaultFailed = false
+}
+
+/**
+ * Load the key from the OS vault, and move an existing localStorage key into it
+ * once. Called at boot.
+ *
+ * A reject on the very first probe means there is no vault here (web build, or
+ * Linux "unsupported"), and everything stays exactly as it was.
+ */
+export async function hydrateCivitaiApiKey(): Promise<void> {
+  let stored: string | null
+  try {
+    stored = await secretGet(CIVITAI_KEY_ACCOUNT)
+  } catch {
+    return // no vault on this host
+  }
+  civitaiVaultReady = true
+  if (stored) {
+    useWorkflowStore.setState({ civitaiApiKey: stored })
+    return
+  }
+  // Nothing in the vault. Read the CURRENT store value rather than a snapshot
+  // taken before the await: a key typed while a locked keychain kept us waiting
+  // must not be lost.
+  const existing = useWorkflowStore.getState().civitaiApiKey?.trim()
+  if (existing) {
+    try {
+      await secretSet(CIVITAI_KEY_ACCOUNT, existing)
+    } catch {
+      civitaiVaultFailed = true
+    }
+  }
+  // Re-persist, so partialize can now strip the plaintext copy.
+  useWorkflowStore.setState((s) => ({ ...s }))
+}
 
 export type WorkflowTagMode = 'image' | 'video'
 
@@ -353,9 +416,20 @@ export const useWorkflowStore = create<WorkflowState>()(
           })
       },
 
-      setCivitaiApiKey: (key) => set({
-        civitaiApiKey: key,
-      }),
+      setCivitaiApiKey: (key) => {
+        const trimmed = key.trim()
+        set({ civitaiApiKey: trimmed })
+        if (!civitaiVaultReady) return
+        civitaiVaultFailed = false
+        const write = trimmed
+          ? secretSet(CIVITAI_KEY_ACCOUNT, trimmed)
+          : secretDelete(CIVITAI_KEY_ACCOUNT)
+        write.catch(() => {
+          civitaiVaultFailed = true
+          // Re-persist so partialize retains the localStorage fallback.
+          set((s) => ({ ...s }))
+        })
+      },
 
       setCivitaiHost: (host) => set({
         civitaiHost:
@@ -438,6 +512,16 @@ export const useWorkflowStore = create<WorkflowState>()(
     }),
     {
       name: 'workflow-store',
+      storage: safeJSONStorage(),
+      // The key is kept OUT of localStorage as soon as the OS vault has
+      // proven itself and holds it. Until then, and on a host without one,
+      // nothing changes: dropping it there would lose the key instead of
+      // protecting it.
+      partialize: (state) => {
+        if (!civitaiVaultReady || civitaiVaultFailed) return state
+        const { civitaiApiKey: _inTheVault, ...rest } = state
+        return rest as WorkflowState
+      },
     },
   ),
 )

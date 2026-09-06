@@ -27,6 +27,9 @@ import {
   DEV_READ_BYTES_CAP,
   JailEscapeError,
 } from '../dev-fs-jail'
+// Der Ordnername kommt aus app-identity (dieser Branch hängt einen Suffix an),
+// damit die Zusicherungen den Namen nicht gegen sich selbst ausspielen.
+import { AGENT_WORKSPACE_DIR as WS } from '../app-identity'
 
 const HOME = '/Users/dev'
 const ROOT = '/Users/dev/projects/lu'
@@ -37,18 +40,24 @@ describe('devWorkspaceRoot', () => {
   })
 
   it('falls back to the per-chat sandbox', () => {
-    expect(devWorkspaceRoot(HOME, 'chat-1', '')).toBe('/Users/dev/agent-workspace/chat-1')
-    expect(devWorkspaceRoot(HOME, null, null)).toBe('/Users/dev/agent-workspace/default')
+    expect(devWorkspaceRoot(HOME, 'chat-1', '')).toBe(`/Users/dev/${WS}/chat-1`)
+    expect(devWorkspaceRoot(HOME, null, null)).toBe(`/Users/dev/${WS}/default`)
   })
 
   it('sanitises the chat id the way the Rust side does', () => {
-    expect(devWorkspaceRoot(HOME, '../../etc', null)).toBe('/Users/dev/agent-workspace/.._.._etc')
-    expect(devWorkspaceRoot(HOME, 'a/b c', null)).toBe('/Users/dev/agent-workspace/a_b_c')
+    // Der Punkt wird ERSETZT, nicht durchgelassen. Diese Zusicherung stand
+    // hier als `.._.._etc` und hat damit den IPC-1-Fehler festgeschrieben:
+    // ein `..`, das die Sanitisierung überlebt, kollabiert die Käfigwurzel in
+    // `lexicalNormalize` auf `$HOME`. Die vollständige Gegenüberstellung mit
+    // `agent::sanitize_chat_slug` steht in dev-fs-jail-slug.test.ts.
+    expect(devWorkspaceRoot(HOME, '../../etc', null)).toBe(`/Users/dev/${WS}/______etc`)
+    expect(devWorkspaceRoot(HOME, 'a/b c', null)).toBe(`/Users/dev/${WS}/a_b_c`)
+    expect(devWorkspaceRoot(HOME, '..', null)).toBe(`/Users/dev/${WS}/__`)
   })
 
   it('caps the chat id at 64 chars', () => {
     const long = 'a'.repeat(200)
-    expect(devWorkspaceRoot(HOME, long, null)).toBe(`/Users/dev/agent-workspace/${'a'.repeat(64)}`)
+    expect(devWorkspaceRoot(HOME, long, null)).toBe(`/Users/dev/${WS}/${'a'.repeat(64)}`)
   })
 })
 
@@ -86,7 +95,7 @@ describe('the jail', () => {
 
   it('jails the per-chat sandbox too, not just a picked folder', () => {
     expect(devResolveWithinJail({ path: 'note.txt', homeDir: HOME, chatId: 'c1' })).toBe(
-      '/Users/dev/agent-workspace/c1/note.txt',
+      `/Users/dev/${WS}/c1/note.txt`,
     )
     expect(() =>
       devResolveWithinJail({ path: '../c2/note.txt', homeDir: HOME, chatId: 'c1' }),

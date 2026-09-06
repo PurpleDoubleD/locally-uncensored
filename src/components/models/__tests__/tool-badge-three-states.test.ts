@@ -24,6 +24,7 @@ import { describe, it, expect, vi } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
+import type { CloudModel } from '../../../types/models'
 
 vi.mock('../../../api/tool-capability', () => ({ getToolCapability: () => 'unknown' }))
 vi.mock('../../../stores/providerStore', () => ({
@@ -36,6 +37,31 @@ const src = readFileSync(
   resolve(dirname(fileURLToPath(import.meta.url)), '../ModelSelector.tsx'),
   'utf8',
 )
+
+/**
+ * Ein echtes `CloudModel`, kein `as any`.
+ *
+ * Hier stand dreimal `{ name: 'x', type: 'text' } as any`. Das erfuellt KEINES
+ * der vier Glieder von `AIModel` — es fehlen `model`, `size`, `provider`,
+ * `providerName` —, und die Zusicherung hat genau das verdeckt. `toolBadgeTitle`
+ * nimmt `AIModel`; wenn der Test ihm etwas anderes gibt, prueft er eine
+ * Signatur, die es nicht gibt.
+ *
+ * `CloudModel` ist das schmalste der vier Glieder und deshalb das ehrliche
+ * Stellvertreterobjekt. Gelesen wird von `toolBadgeTitle` ohnehin nur
+ * `contextLength` (ModelSelector.tsx:429) — dass der Rest jetzt trotzdem stimmt,
+ * ist der Punkt: faellt ein Pflichtfeld weg oder aendert sich sein Typ, sagt es
+ * `tsc`, statt dass ein `any` weiter zustimmt.
+ */
+const model = (over: Partial<CloudModel> = {}): CloudModel => ({
+  name: 'x',
+  model: 'x',
+  size: 0,
+  type: 'text',
+  provider: 'openai',
+  providerName: 'X',
+  ...over,
+})
 
 describe('a local model that declares no native tools is still tool capable', () => {
   it('resolves to hermes, not none', () => {
@@ -83,24 +109,43 @@ describe('the badge asks resolveToolSupport instead of concluding on its own', (
 describe('the tooltip says HOW, so the dimmer wrench is explainable', () => {
   it('hermes is described as going through the prompt', async () => {
     const { toolBadgeTitle } = await import('../ModelSelector')
-    const m = { name: 'x', type: 'text' } as any
+    const m = model()
     expect(toolBadgeTitle(m, 'hermes')).toMatch(/through the prompt/i)
     expect(toolBadgeTitle(m, 'hermes')).toMatch(/Agent and Code work/i)
   })
 
   it('native keeps the plain wording', async () => {
     const { toolBadgeTitle } = await import('../ModelSelector')
-    const m = { name: 'x', type: 'text' } as any
+    const m = model()
     expect(toolBadgeTitle(m, 'native')).toMatch(/Supports tool calling/i)
     expect(toolBadgeTitle(m, 'native')).not.toMatch(/through the prompt/i)
   })
 
   it('the tight-context warning survives on both paths', async () => {
     const { toolBadgeTitle } = await import('../ModelSelector')
-    const tight = { name: 'x', type: 'text', contextLength: 4096 } as any
+    const tight = model({ contextLength: 4096 })
     expect(toolBadgeTitle(tight, 'native')).toMatch(/too small/i)
     expect(toolBadgeTitle(tight, 'hermes')).toMatch(/too small/i)
     // The hermes wording must still be in there, not replaced by the warning.
     expect(toolBadgeTitle(tight, 'hermes')).toMatch(/through the prompt/i)
+  })
+
+  /**
+   * Nachpruefung G4, 04.09.2026: die Warnung schrieb das Fenster mit
+   * `Math.round(ctx / 1024)}k`, also klein und auf die naechste ganze Stufe
+   * gerundet. Ein 6000er Fenster hiess hier "6k" und in der Klapplade des
+   * Zaehlers "5.9K", und 6k ist ausgerechnet die Zahl, ab der die Warnung gar
+   * nicht mehr erscheinen wuerde.
+   */
+  it('das Fenster steht in der Schreibweise, die der Rest der Oberflaeche nimmt', async () => {
+    const { toolBadgeTitle } = await import('../ModelSelector')
+    const { formatContextWindow } = await import('../../../lib/formatters')
+    expect(toolBadgeTitle(model({ contextLength: 6000 }), 'native'))
+      .toContain(`${formatContextWindow(6000)} context window`)
+    expect(toolBadgeTitle(model({ contextLength: 6000 }), 'native')).toContain('5.9K context window')
+    // Die alte Rechnung, ausgeschrieben: sie sagte etwas anderes.
+    expect(toolBadgeTitle(model({ contextLength: 6000 }), 'native')).not.toContain('6k context window')
+    // Und auf einer echten Stufe bleibt es die kurze Form.
+    expect(toolBadgeTitle(model({ contextLength: 4096 }), 'native')).toContain('4K context window')
   })
 })

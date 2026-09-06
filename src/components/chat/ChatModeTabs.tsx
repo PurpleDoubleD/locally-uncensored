@@ -21,7 +21,7 @@ export function ChatModeTabs() {
             key={mode}
             onClick={() => !disabled && setChatMode(mode)}
             disabled={disabled}
-            className={`flex items-center gap-1 px-2 py-0.5 rounded text-[0.55rem] font-medium transition-all ${
+            className={`flex items-center gap-1 px-2 py-0.5 rounded text-[0.55rem] font-medium transition-colors ${
               isActive
                 ? 'bg-white/10 text-white border border-white/15'
                 : disabled
@@ -31,7 +31,7 @@ export function ChatModeTabs() {
           >
             <Icon size={9} />
             <span>{label}</span>
-            {tag && <span className="text-[0.4rem] text-gray-600 ml-0.5">{tag}</span>}
+            {tag && <span className="text-[0.45rem] text-gray-600 ml-0.5">{tag}</span>}
           </button>
         )
       })}

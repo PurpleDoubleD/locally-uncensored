@@ -5,7 +5,20 @@ import {
   activeToolCall,
   groupDurationLabel,
 } from '../tool-call-groups'
+import type { AgentBlockGroup, BandNote } from '../tool-call-groups'
 import type { AgentBlock, AgentToolCall } from '../../types/agent-mode'
+
+// The group union is discriminated by `kind`; these narrow it and say so out
+// loud when a test's premise is wrong. The `as any` they replace let a test
+// read `.calls` off a 'single' group and compare undefined against undefined.
+function asBand(g: AgentBlockGroup): Extract<AgentBlockGroup, { kind: 'tools' }> {
+  if (g.kind !== 'tools') throw new Error(`expected a tools band, got kind=${g.kind}`)
+  return g
+}
+function asSingle(g: AgentBlockGroup): Extract<AgentBlockGroup, { kind: 'single' }> {
+  if (g.kind !== 'single') throw new Error(`expected a single block, got kind=${g.kind}`)
+  return g
+}
 
 let ts = 0
 function call(name: string, status: AgentToolCall['status'], duration?: number): AgentToolCall {
@@ -25,7 +38,7 @@ describe('groupAgentBlocks', () => {
     const groups = groupAgentBlocks([a, b])
     expect(groups).toHaveLength(1)
     expect(groups[0].kind).toBe('tools')
-    expect((groups[0] as any).calls.map((c: AgentToolCall) => c.toolName)).toEqual(['file_read', 'file_write'])
+    expect(asBand(groups[0]).calls.map((c) => c.toolName)).toEqual(['file_read', 'file_write'])
   })
 
   // G14-4 (David 2026-08-07): this test used to assert the OPPOSITE, that an
@@ -40,7 +53,7 @@ describe('groupAgentBlocks', () => {
     const t3 = toolBlock(call('shell_execute', 'completed'))
     const groups = groupAgentBlocks([t1, ans, t2, t3])
     expect(groups.map(g => g.kind)).toEqual(['tools'])
-    const band = groups[0] as any
+    const band = asBand(groups[0])
     expect(band.calls).toHaveLength(3)
     expect(band.notes).toEqual([{ afterCall: 0, block: ans }])
   })
@@ -53,7 +66,7 @@ describe('groupAgentBlocks', () => {
     const fin = answerBlock('All done, results above.')
     const groups = groupAgentBlocks([t1, t2, fin])
     expect(groups.map(g => g.kind)).toEqual(['tools', 'single'])
-    expect((groups[0] as any).notes).toEqual([])
+    expect(asBand(groups[0]).notes).toEqual([])
   })
 
   it('NEGATIVE CONTROL: narration before the FIRST call is not band content', () => {
@@ -74,8 +87,8 @@ describe('groupAgentBlocks', () => {
     const t2 = toolBlock(call('file_write', 'completed'))
     const groups = groupAgentBlocks([t1, think, t2])
     expect(groups.map(g => g.kind)).toEqual(['tools'])
-    const band = groups[0] as any
-    expect(band.notes.map((n: any) => [n.afterCall, n.block.phase])).toEqual([[0, 'thinking']])
+    const band = asBand(groups[0])
+    expect(band.notes.map((n) => [n.afterCall, n.block.phase])).toEqual([[0, 'thinking']])
   })
 
   it('G21-2 NEGATIVE CONTROL: a TRAILING thought stays a single after the band', () => {
@@ -83,7 +96,7 @@ describe('groupAgentBlocks', () => {
     const think: AgentBlock = { id: `th-${++ts}`, phase: 'thinking', content: 'closing thought', timestamp: ts }
     const groups = groupAgentBlocks([t1, think])
     expect(groups.map(g => g.kind)).toEqual(['tools', 'single'])
-    expect((groups[1] as any).block.phase).toBe('thinking')
+    expect(asSingle(groups[1]).block.phase).toBe('thinking')
   })
 
   it('multiple notes between two calls all anchor to the earlier call, in order', () => {
@@ -91,8 +104,8 @@ describe('groupAgentBlocks', () => {
     const n1 = answerBlock('first note')
     const n2 = answerBlock('second note')
     const t2 = toolBlock(call('file_write', 'completed'))
-    const band = groupAgentBlocks([t1, n1, n2, t2])[0] as any
-    expect(band.notes.map((n: any) => [n.afterCall, n.block.content])).toEqual([
+    const band = asBand(groupAgentBlocks([t1, n1, n2, t2])[0])
+    expect(band.notes.map((n) => [n.afterCall, n.block.content])).toEqual([
       [0, 'first note'],
       [0, 'second note'],
     ])
@@ -101,7 +114,7 @@ describe('groupAgentBlocks', () => {
   it('keeps a lone tool call as a group of one', () => {
     const groups = groupAgentBlocks([toolBlock(call('web_search', 'running'))])
     expect(groups).toHaveLength(1)
-    expect((groups[0] as any).calls).toHaveLength(1)
+    expect(asBand(groups[0]).calls).toHaveLength(1)
   })
 
   it('passes a tool_call block without a call payload through as single', () => {
@@ -139,23 +152,25 @@ describe('G34: the real R17d shape groups into one band', () => {
     const groups = groupAgentBlocks(r17dSequence(47))
     expect(groups).toHaveLength(2)
     expect(groups[0].kind).toBe('single')
-    expect((groups[0] as any).block.phase).toBe('thinking')
-    const band = groups[1] as any
+    expect(asSingle(groups[0]).block.phase).toBe('thinking')
+    const band = asBand(groups[1])
     expect(band.kind).toBe('tools')
     expect(band.calls).toHaveLength(47)
     // Every per-round thought except the leading one is an interior note.
     expect(band.notes).toHaveLength(46)
-    expect(band.notes.every((n: any) => n.block.phase === 'thinking')).toBe(true)
+    expect(band.notes.every((n: BandNote) => n.block.phase === 'thinking')).toBe(true)
   })
 
   it('NEGATIVE CONTROL: a trailing thought stays outside the band (G21-2)', () => {
     const blocks = r17dSequence(3)
     blocks.push({ id: 'th-final', phase: 'thinking', content: 'closing thought', timestamp: 99_000 })
     const groups = groupAgentBlocks(blocks)
-    const last = groups[groups.length - 1] as any
+    const last = asSingle(groups[groups.length - 1])
     expect(last.kind).toBe('single')
     expect(last.block.id).toBe('th-final')
-    const band = groups.find((g) => g.kind === 'tools') as any
+    const found = groups.find((g) => g.kind === 'tools')
+    expect(found).toBeDefined()
+    const band = asBand(found!)
     expect(band.calls).toHaveLength(3)
     expect(band.notes).toHaveLength(2)
   })

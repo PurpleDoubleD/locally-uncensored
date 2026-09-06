@@ -2,9 +2,15 @@
  * The last surface carrying the wrong reason from Nebenbefund 1 of the R12/R13
  * re-measure (2026-08-30, ergebnis-r1213-nachmessung.md).
  *
- * Round 14 fixed the Create tab's yellow banner: it had been telling a user
- * with a working, correctly detected RTX 3060 that no usable GPU was found,
- * when he had picked Force CPU himself in Settings, Hardware, ComfyUI GPU.
+ * Round 14 fixed the Create tab's CPU banner: it had been telling a user with
+ * a working, correctly detected RTX 3060 that no usable GPU was found, when he
+ * had picked Force CPU himself in Settings, Hardware, ComfyUI GPU.
+ *
+ * Der Balken war damals gelb, und dieser Kopf hat ihn auch so genannt. Am
+ * 04.09.2026 ist Gelb aus der Oberflaeche verschwunden: es stand gleichzeitig
+ * fuer einen Expertenhinweis, einen gestoppten Server und einen Absturz, also
+ * fuer nichts. Der Satz, um den es hier geht, ist unveraendert; er steht jetzt
+ * in gedaempftem Grau und ohne Kasten da. Die Begruendung dazu: lib/hinweis.ts.
  *
  * The three render failure notices in lib/render-budget.ts said the same thing
  * in their own words, through the sentence they share:
@@ -87,6 +93,18 @@ describe('THE FIX: the render notices name the press, not a missing GPU path', (
     const budget = read('src/lib/render-budget.ts')
     expect(budget).toMatch(/import \{ FORCE_CPU_REASON, FORCE_CPU_WAY_BACK, type ComfyGpuModeName \} from '\.\/comfy-cpu-banner'/)
     expect(budget).not.toMatch(/Settings → Hardware → ComfyUI GPU back to Auto/)
+  })
+
+  it('and the line that carries it is not painted like a fault any more', () => {
+    // Die Regel hat sich geaendert, nicht der Satz: seit 04.09.2026 traegt die
+    // Create-Leiste denselben Wortlaut in Grau statt in Gelb, weil der Rechner
+    // auf dem Prozessor nichts KAPUTT hat, sondern nur langsam ist. Ein Test,
+    // der die alte Farbe festhielte, wuerde die Regel zurueckholen.
+    const tab = read('src/components/create/experimental/CreateExperimental.tsx')
+    // Die beiden Namen stehen absichtlich ohne Bindestrich da: so faellt diese
+    // Datei nicht selbst in den Repo-Griff nach der alten Farbe.
+    for (const ton of ['amber', 'yellow']) expect(tab).not.toContain(`${ton}-`)
+    expect(tab).toMatch(/<Hinweis icon=\{<Cpu /)
   })
 
   it('the wiring: mode is read off the reply that always carried it', () => {

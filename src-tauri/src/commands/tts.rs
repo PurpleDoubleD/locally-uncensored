@@ -41,7 +41,7 @@ fn piper_voices_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     let dir = app
         .path()
         .app_data_dir()
-        .map_err(|e| format!("no app data dir: {}", e))?
+        .map_err(|e| format!("no app data dir: {}", crate::os_error::english(&e)))?
         .join("piper_voices");
     Ok(dir)
 }

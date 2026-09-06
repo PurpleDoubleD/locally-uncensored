@@ -28,15 +28,24 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
+import type { ProviderConfig, ChatStreamChunk } from '../types'
+import type { OpenAIChatRequest } from '../openai-provider'
+import type { FetchArgs } from '../../__tests__/provider-test-support'
 
 const streamBody = 'data: {"choices":[{"delta":{"content":"hi"}}]}\n\ndata: [DONE]\n\n'
 
-let sent: { url: string; body: Record<string, any> }[]
+/** The init shape both backend helpers are called with in this file. */
+type CapturedInit = { method?: string; headers?: Record<string, string>; body?: string }
+
+let sent: { url: string; body: OpenAIChatRequest }[]
 /** Status the fake server answers with, one entry per request in order. */
 let statuses: number[]
 
-function answer(url: string, init: any) {
-  const body = JSON.parse(init.body as string)
+function answer(url: string, init: CapturedInit) {
+  if (typeof init.body !== 'string') throw new Error('request had no JSON body')
+  // Read as the provider's own request interface, so a renamed field breaks
+  // the assertions instead of quietly comparing undefined to undefined.
+  const body = JSON.parse(init.body) as OpenAIChatRequest
   sent.push({ url, body })
   const status = statuses.shift() ?? 200
   if (status !== 200) {
@@ -46,13 +55,13 @@ function answer(url: string, init: any) {
   return new Response(JSON.stringify({ choices: [{ message: { content: 'ok' } }] }), { status: 200 })
 }
 
-async function makeProvider(config: Record<string, unknown>) {
+async function makeProvider(config: ProviderConfig) {
   vi.resetModules()
   sent = []
   statuses = []
   vi.doMock('../../backend', () => ({
-    localFetch: vi.fn(async (url: string, init: any) => answer(url, init)),
-    localFetchStream: vi.fn(async (url: string, init: any) => answer(url, init)),
+    localFetch: vi.fn(async (url: string, init: CapturedInit) => answer(url, init)),
+    localFetchStream: vi.fn(async (url: string, init: CapturedInit) => answer(url, init)),
     backendCall: vi.fn(),
     isPrivateOrLanHost: (host: string) => host === 'localhost' || host === '127.0.0.1',
     isDirectFetchAllowed: () => true,
@@ -67,23 +76,28 @@ async function makeProvider(config: Record<string, unknown>) {
     isManagedBuiltinSlot: () => false,
   }))
   const mod = await import('../openai-provider')
-  return new mod.OpenAIProvider(config as any)
+  return new mod.OpenAIProvider(config)
 }
 
-const BUILTIN = {
+const BUILTIN: ProviderConfig = {
   id: 'openai', name: 'Built-in Engine', apiKey: '', enabled: true,
   baseUrl: 'http://127.0.0.1:8127/v1', isLocal: true, managed: true,
 }
-const CLOUD = {
+const CLOUD: ProviderConfig = {
   id: 'openai', name: 'OpenAI', apiKey: 'sk-test', enabled: true,
   baseUrl: 'https://api.openai.com/v1', isLocal: false,
 }
 
-async function drain(gen: AsyncGenerator<any>) {
+async function drain(gen: AsyncGenerator<ChatStreamChunk>) {
   for await (const _ of gen) { /* the fetch only fires on the first next() */ }
 }
 
-beforeEach(() => { vi.spyOn(globalThis, 'fetch').mockImplementation(((url: any, init: any) => answer(String(url), init)) as any) })
+beforeEach(() => {
+  vi.spyOn(globalThis, 'fetch').mockImplementation(
+    async (url: FetchArgs[0], init: FetchArgs[1]) =>
+      answer(String(url), { body: typeof init?.body === 'string' ? init.body : undefined }),
+  )
+})
 afterEach(() => {
   vi.doUnmock('../../backend')
   vi.doUnmock('../../builtin-ensure')

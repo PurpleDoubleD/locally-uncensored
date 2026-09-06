@@ -1,6 +1,8 @@
 import { useBenchmarkStore, getLatestSpeed, getLeaderboard } from '../../stores/benchmarkStore'
 import { useBenchmark } from '../../hooks/useBenchmark'
 import { Zap, Play, Square, Trophy } from 'lucide-react'
+import { displayModelName } from '../../api/providers/registry'
+import { HINWEIS_TEXT } from '../../lib/hinweis'
 
 interface Props {
   modelName: string
@@ -20,7 +22,7 @@ export function BenchmarkButton({ modelName }: Props) {
   return (
     <div className="flex items-center gap-1.5">
       {latestSpeed !== null && (
-        <span className="text-[0.55rem] text-gray-400 font-mono flex items-center gap-0.5" title={`Latest run: ${latestSpeed} tokens/sec`}>
+        <span className="text-[0.55rem] text-gray-400 lu-hud-num flex items-center gap-0.5" title={`Latest run: ${latestSpeed} tokens/sec`}>
           <Zap size={9} />
           {latestSpeed} t/s
         </span>
@@ -28,7 +30,7 @@ export function BenchmarkButton({ modelName }: Props) {
       {isThisRunning ? (
         <button
           onClick={stopBenchmark}
-          className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-red-500/15 text-red-400 text-[0.55rem] hover:bg-red-500/25 transition-colors"
+          className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-red-500/15 text-red-400 text-[0.55rem] lu-hud-num hover:bg-red-500/25 transition-colors"
           title="Stop benchmark"
         >
           <Square size={9} />
@@ -57,7 +59,9 @@ export function BenchmarkLeaderboard() {
 
   return (
     <div className="mt-4 p-3 rounded-lg bg-white/[0.03] border border-white/5">
-      <h3 className="text-[0.7rem] font-semibold text-amber-400 flex items-center gap-1.5 mb-2">
+      {/* Die Ueberschrift war golden, weil ein Pokal daneben steht. Farbe
+          traegt hier nur noch Bedeutung, und „Bestenliste" ist keine. */}
+      <h3 className="text-[0.7rem] font-semibold text-gray-400 flex items-center gap-1.5 mb-2">
         <Trophy size={12} />
         Benchmark Leaderboard
       </h3>
@@ -74,22 +78,26 @@ export function BenchmarkLeaderboard() {
 
           return (
             <div key={entry.model} className="flex items-center gap-2">
-              <span className="text-[0.6rem] text-gray-500 w-4 text-right font-mono">{i + 1}.</span>
+              <span className="t-micro text-gray-500 w-4 text-right font-mono">{i + 1}.</span>
               <div className="flex-1 min-w-0">
                 <div className="flex items-center justify-between mb-0.5">
-                  <span className="text-[0.6rem] text-gray-300 truncate">{entry.model}</span>
-                  <span className="text-[0.55rem] text-gray-400 font-mono shrink-0 ml-2">{entry.avgTps} t/s</span>
+                  <span className="t-micro text-gray-300 truncate" title={displayModelName(entry.model)}>{displayModelName(entry.model)}</span>
+                  <span className="text-[0.55rem] text-gray-400 lu-hud-num shrink-0 ml-2">{entry.avgTps} t/s</span>
                 </div>
                 <div className="w-full h-1 rounded-full bg-white/5 overflow-hidden">
                   <div
-                    className="h-full rounded-full bg-gray-500/60 transition-all duration-500"
+                    className="h-full rounded-full bg-gray-500/60 transition-[width] duration-[var(--motion-slow)]"
                     style={{ width: `${barWidth}%` }}
                   />
                 </div>
-                <div className="flex items-center flex-wrap gap-x-2 mt-0.5 text-[0.5rem] font-mono text-gray-600">
+                <div className="flex items-center flex-wrap gap-x-2 mt-0.5 text-[0.5rem] lu-hud-num text-gray-600">
                   {entry.avgTokens !== null && <span>{entry.avgTokens} tok</span>}
+                  {/* Wie im grossen Brett: gruen nur fuer die volle
+                      Trefferquote, alles darunter ist eine Messung und kein
+                      Zwischenfall, also der ruhige Ton aus `lib/hinweis.ts`.
+                      Rot bleibt der abgeschnittenen Antwort daneben. */}
                   {entry.accuracy !== null && (
-                    <span className={entry.accuracy < 1 ? 'text-amber-400' : 'text-emerald-400'}>
+                    <span className={entry.accuracy < 1 ? HINWEIS_TEXT.ruhig : 'text-emerald-400'}>
                       {Math.round(entry.accuracy * 100)}% correct
                     </span>
                   )}

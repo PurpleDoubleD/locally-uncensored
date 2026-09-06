@@ -11,18 +11,13 @@ import { OpenAIProvider } from './openai-provider'
 import { AnthropicProvider } from './anthropic-provider'
 import { LuCloudProvider } from './lu-cloud-provider'
 import { useProviderStore } from '../../stores/providerStore'
+import { cachedClient } from './client-cache'
 
-// ── Provider client cache ──────────────────────────────────────
-
-const clientCache: Map<string, ProviderClient> = new Map()
-
-/**
- * Create a unique cache key for a provider config.
- * Invalidates when URL or API key changes.
- */
-function cacheKey(config: ProviderConfig): string {
-  return `${config.id}:${config.baseUrl}:${config.apiKey?.slice(0, 8) || ''}`
-}
+// Cache und Namens-Helfer sind aus diesem Modul herausgezogen (Audit W-T2,
+// Begründung steht in client-cache.ts bzw. model-name.ts). Re-Export, damit
+// bestehende Importpfade unverändert bleiben.
+export { clearProviderCache } from './client-cache'
+export { getProviderIdFromModel, prefixModelName, displayModelName } from './model-name'
 
 /**
  * Create a provider client from config.
@@ -60,13 +55,7 @@ export function getProvider(id: ProviderId): ProviderClient {
   // (m9mx Discord 2026-07-26, four providers).
   const config = { ...stored, apiKey: state.getProviderApiKey(id) }
 
-  const key = cacheKey(config)
-  let client = clientCache.get(key)
-  if (!client) {
-    client = createClient(config)
-    clientCache.set(key, client)
-  }
-  return client
+  return cachedClient(config, () => createClient(config))
 }
 
 /**
@@ -96,46 +85,5 @@ export function getProviderForModel(modelName: string): { provider: ProviderClie
  */
 export function getEnabledProviders(): ProviderClient[] {
   const configs = useProviderStore.getState().getEnabledProviders()
-  return configs.map(c => {
-    const key = cacheKey(c)
-    let client = clientCache.get(key)
-    if (!client) {
-      client = createClient(c)
-      clientCache.set(key, client)
-    }
-    return client
-  })
-}
-
-/**
- * Extract the provider ID from a prefixed model name.
- * Returns 'ollama' if no prefix.
- */
-export function getProviderIdFromModel(modelName: string): ProviderId {
-  if (!modelName) return 'ollama'
-  const parts = modelName.split('::')
-  return parts.length === 2 ? parts[0] as ProviderId : 'ollama'
-}
-
-/**
- * Create a prefixed model name for storage.
- */
-export function prefixModelName(provider: ProviderId, modelId: string): string {
-  if (provider === 'ollama') return modelId // backward compat: Ollama models have no prefix
-  return `${provider}::${modelId}`
-}
-
-/**
- * Get the display name for a model (strip provider prefix).
- */
-export function displayModelName(modelName: string): string {
-  const parts = modelName.split('::')
-  return parts.length === 2 ? parts[1] : modelName
-}
-
-/**
- * Clear the client cache (e.g. when provider config changes).
- */
-export function clearProviderCache(): void {
-  clientCache.clear()
+  return configs.map(c => cachedClient(c, () => createClient(c)))
 }

@@ -1,4 +1,7 @@
 import { describe, it, expect } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+import { dirname, resolve } from 'node:path'
 import { determineStrategy } from '../dynamic-workflow'
 import type { CategorizedNodes, AvailableModels } from '../comfyui-nodes'
 import type { ModelType } from '../comfyui'
@@ -279,9 +282,8 @@ describe('dynamic-workflow — determineStrategy', () => {
 // read a non-existent `params.numFrames` (VideoParams only has `frames`).
 describe('FramePack length wiring (source verification)', () => {
   it('total_second_length is driven by params.frames, not the dead params.numFrames', () => {
-    const { readFileSync } = require('fs')
-    const { resolve } = require('path')
-    const src = readFileSync(resolve(__dirname, '../dynamic-workflow.ts'), 'utf8')
+    const src = readFileSync(
+      resolve(dirname(fileURLToPath(import.meta.url)), '../dynamic-workflow.ts'), 'utf8')
     expect(src).toContain('total_second_length: (params.frames || 49) / (params.fps || 16)')
     // The dead field must be gone — otherwise FramePack silently pins to 49 frames.
     expect(src).not.toContain('params.numFrames')

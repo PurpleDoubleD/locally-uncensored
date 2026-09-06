@@ -4,9 +4,9 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 // away from a built-in model to any OTHER local backend must stop the sidecar,
 // or two models sit in VRAM at once. These tests lock that mutual-exclusion.
 
-const backendCall = vi.fn(async () => ({}))
-const unloadModel = vi.fn(async () => undefined)
-const unloadLmStudioModel = vi.fn(async () => undefined)
+const backendCall = vi.fn(async (..._args: unknown[]) => ({}))
+const unloadModel = vi.fn(async (..._args: unknown[]) => undefined)
+const unloadLmStudioModel = vi.fn(async (..._args: unknown[]) => undefined)
 
 vi.mock('../../api/backend', () => ({
   backendCall: (...a: unknown[]) => backendCall(...a),
