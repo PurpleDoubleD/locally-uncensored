@@ -38,7 +38,9 @@ import { useModelStore } from '../../stores/modelStore'
 import { detectProviderModelPath, startModelDownloadToPath, luEngineDownloadDir } from '../../api/discover'
 import { hfUrlToOllamaRef, hfUrlToLmStudioSubdir } from '../../lib/hf-to-provider'
 import { pullModelTauri, checkConnection as checkOllama } from '../../api/ollama'
-import { startBundledEngine } from '../../api/engine'
+import { activateBuiltinModel } from '../../api/engine'
+import { builtinModelNameFromPath } from '../../lib/builtin-model-identity'
+import { bundledPickerIdForFile } from '../../lib/bundled-download-activation'
 import { backendCall } from '../../api/backend'
 import { getSystemVRAM } from '../../api/comfyui'
 import { classifyOnboardingBackend, resolveOnboardingBackend } from '../../lib/onboarding-backend'
@@ -209,7 +211,7 @@ export function ModelsStep({ skin, scan, fleet, step, setStep, pulledModels, set
           useDownloadStore.getState().markComplete(model.filename)
         } else if (useBuiltinPath) {
           // Built-in engine: write the GGUF flat into the app models dir, wait
-          // for it to finish, then boot llama-server on it. Unlike LM Studio
+          // for it to finish, then make it the active model. Unlike LM Studio
           // there's no <user>/<repo> nesting — list_bundled_models scans the
           // dir directly. We await completion here (not fire-and-forget) so the
           // engine starts on a fully-downloaded file and the first chat works.
@@ -218,8 +220,13 @@ export function ModelsStep({ skin, scan, fleet, step, setStep, pulledModels, set
           await startModelDownloadToPath(model.downloadUrl, destDir!, model.filename, expectedBytes)
           dlStore.getState().startPolling()
           await awaitDownloadComplete(model.filename)
+          // Same door as the Models page (lib/bundled-download-activation):
+          // the engine path comes from the model list, not from a string glued
+          // together here, and the downloaded model is the one the chat uses.
           try {
-            await startBundledEngine(`${destDir}/${model.filename}`)
+            const found = await activateBuiltinModel(builtinModelNameFromPath(model.filename))
+            if (!found) setDownloadError(`Model downloaded, but the LU Engine did not find ${model.filename} in its model folder.`)
+            else setActiveModel(bundledPickerIdForFile(model.filename))
           } catch (e) {
             setDownloadError(`Model downloaded, but the LU Engine failed to start: ${e instanceof Error ? e.message : String(e)}`)
           }

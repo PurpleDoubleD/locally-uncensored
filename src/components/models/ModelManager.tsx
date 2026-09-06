@@ -23,6 +23,7 @@ import { customModelDirs } from '../../api/engine'
 import { counterView } from '../../lib/inventory-counter'
 import { groupInstalledByProvider, needsBackendSwitchHeading, foldedRowsSentence, LU_ENGINE_GROUP } from '../../lib/lu-engine-rows'
 import { isBuiltinEngineEntry } from '../../lib/lmstudio-match'
+import { installedRowMatchesSearch } from '../../lib/model-search'
 import { useBuiltinEngineStatus, engineIsIdle } from '../../hooks/useBuiltinEngineStatus'
 import { LuEngineSwitchBar } from '../chat/LuEngineSwitchBar'
 import type { InstalledModelLike } from '../../lib/lmstudio-match'
@@ -411,7 +412,7 @@ export function ModelManager() {
                 (() => {
                   const SectionIcon = modeMeta.icon
                   const shown = searchQuery
-                    ? filteredModels.filter(m => m.name.toLowerCase().includes(searchQuery.toLowerCase()))
+                    ? filteredModels.filter(m => installedRowMatchesSearch(m.name, searchQuery))
                     : filteredModels
                   return (
                     <section className="space-y-1.5">

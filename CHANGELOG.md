@@ -210,7 +210,16 @@ and the built-in engine has a name of its own, the LU Engine.
   as researched rather than proven, because no such reservation could be staged
   here.
 - **A chat model you downloaded stays visible as Installed** even while the
-  engine is not running.
+  engine is not running, and it becomes the active chat model the moment the
+  download is done. Measured on the Windows box on 2026-09-05: the download
+  started the engine on the new file, but the picker still named the previous
+  model, so the first message would have swapped the engine straight back,
+  and a Use click restarted the engine on the same file because the path the
+  frontend had glued together did not match the one the engine lists. The
+  download now goes through the picker's own activation, so the path comes
+  from the model list, the picker follows, and the engine starts once. The
+  Installed search also answers to catalogue spelling now, so "Llama 3.2 3B
+  Abliterated" finds Llama-3.2-3B-Instruct-abliterated.Q4_K_M.
 - **A running LM Studio stays in the model picker** after the chat has moved to
   the LU Engine. Its models keep their own heading, and picking one hands the
   local slot back to LM Studio with a line that says so. The way back is one

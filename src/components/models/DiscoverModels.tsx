@@ -23,7 +23,7 @@ import { useSettingsStore } from '../../stores/settingsStore'
 import { useModelStore } from '../../stores/modelStore'
 import { useWorkflowStore } from '../../stores/workflowStore'
 import { getProviderIdFromModel } from '../../api/providers'
-import { startBundledEngine } from '../../api/engine'
+import { activateDownloadedBundledModel } from '../../lib/bundled-download-activation'
 import { diagnoseBuiltinEngine } from '../../api/builtin-ensure'
 import type { InstalledModelLike } from '../../lib/lmstudio-match'
 import { findInstalledForDiscoverModel } from '../../lib/discover-installed'
@@ -788,8 +788,8 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
       }
       dlStore.getState().startPolling()
       if (isActiveBuiltin) {
-        // Built-in engine: await the flat GGUF, then (re)boot llama-server on
-        // it so the freshly-added model is chat-ready without a manual switch.
+        // Built-in engine: await the flat GGUF, then make it the active chat
+        // model so the freshly-added model is chat-ready without a manual switch.
         // The projector is awaited too: booting before it lands would bring the
         // model up text-only and the image button would lie.
         //
@@ -814,8 +814,13 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
           }
           return
         }
+        // The downloaded file becomes the active chat model through the
+        // picker's own activation (lib/bundled-download-activation): the
+        // engine path comes from the model list, the picker follows, and the
+        // first message goes to the model the user just fetched instead of
+        // swapping the engine back to the previous one.
         try {
-          await startBundledEngine(`${targetDir}/${realName}`)
+          await activateDownloadedBundledModel({ filename: realName, refresh: fetchModels, activate: setActiveModel })
         } catch (e) {
           setInstallError(`Model downloaded, but the LU Engine failed to start: ${e instanceof Error ? e.message : String(e)}`)
         }
