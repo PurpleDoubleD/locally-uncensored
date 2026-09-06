@@ -35,6 +35,7 @@ export const RELEASE_NOTES: ReleaseNote[] = [
     version: '2.6.8',
     headline: 'Compact mode, background agents, and an effort control for reasoning models',
     lines: [
+      'Known in this release: after you switch Cloud off, the LU Engine stays stopped until you press Use on your model under Models. One click, a few seconds. 2.6.9 brings the engine back on its own when Cloud goes off.',
       'Compact mode: type /compact and the older part of a long conversation is folded into a summary the chat model writes itself, so the chat keeps going instead of running out of room. Auto-compact stays off until you switch it on under Settings.',
       'Background agents in Agent and Code mode: the agent hands a self-contained task to a sub-agent that works while you carry on, a panel on the right shows what is running, and the main agent picks the result up on its own. Cloud and local models alike.',
       'Reasoning models have an effort control next to the Think button: Low, Medium or High, and Max on GLM 5.3. The setting decides how many tokens a reply may spend on thinking.',

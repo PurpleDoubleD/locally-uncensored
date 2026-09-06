@@ -20,6 +20,11 @@ on:
         description: 'Release tag to announce (e.g. v2.3.8)'
         required: true
         type: string
+      everyone:
+        description: 'Ping @everyone in both channels (manual announce only)'
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -120,6 +125,7 @@ jobs:
           TITLE: ${{ steps.rel.outputs.title }}
           URL: ${{ steps.rel.outputs.url }}
           BODY_FILE: ${{ steps.rel.outputs.body_file }}
+          EVERYONE: ${{ inputs.everyone && 'true' || 'false' }}
         run: |
           python3 - <<'PY'
           import json, os, urllib.request, urllib.error, sys
@@ -127,6 +133,11 @@ jobs:
           if not webhook:
               sys.exit("DISCORD_RELEASES_WEBHOOK not set")
           tag = os.environ["TAG"]
+          # The ping is opt-in per manual run. Without it the post stays a
+          # normal message; with it Discord is told explicitly that
+          # @everyone may resolve (allowed_mentions), otherwise the text
+          # would render but nobody would be notified.
+          everyone = os.environ.get("EVERYONE") == "true"
           body_file = os.environ.get("BODY_FILE")
           body = ""
           if body_file and os.path.exists(body_file):
@@ -135,15 +146,17 @@ jobs:
           url  = os.environ["URL"]
           # Discord single-message limit is 2000 chars. Leave room for our
           # own header (~120) and footer (~100), cap the body at 1700.
-          header = f"# 🚀 Locally Uncensored {tag} is live\n\nAuto-update picks this up on your next launch.\n\n"
+          header = ("@everyone " if everyone else "") + f"# 🚀 Locally Uncensored {tag} is live\n\nAuto-update picks this up on your next launch.\n\n"
           footer = f"\n\nFull release notes + installers: {url}"
           budget = 2000 - len(header) - len(footer) - 20
           if len(body) > budget:
               body = body[:budget].rsplit("\n", 1)[0] + "\n\n*(truncated, see full notes link below)*"
           content = header + body + footer
+          payload = {"content": content, "flags": 4}  # 4 = SUPPRESS_EMBEDS (4096 is SUPPRESS_NOTIFICATIONS and silenced the 2.6.0 post)
+          payload["allowed_mentions"] = {"parse": ["everyone"]} if everyone else {"parse": []}
           req = urllib.request.Request(
               webhook,
-              data=json.dumps({"content": content, "flags": 4}).encode("utf-8"),  # 4 = SUPPRESS_EMBEDS (4096 is SUPPRESS_NOTIFICATIONS and silenced the 2.6.0 post)
+              data=json.dumps(payload).encode("utf-8"),
               headers={"Content-Type": "application/json", "User-Agent": "LocallyUncensored/release-announce"},
               method="POST",
           )
@@ -157,6 +170,7 @@ jobs:
           TAG: ${{ steps.rel.outputs.tag }}
           URL: ${{ steps.rel.outputs.url }}
           BODY_FILE: ${{ steps.rel.outputs.body_file }}
+          EVERYONE: ${{ inputs.everyone && 'true' || 'false' }}
         run: |
           python3 - <<'PY'
           import json, os, re, urllib.request, sys
@@ -164,6 +178,7 @@ jobs:
           if not webhook:
               sys.exit("DISCORD_ANNOUNCEMENTS_WEBHOOK not set")
           tag = os.environ["TAG"]
+          everyone = os.environ.get("EVERYONE") == "true"
           url = os.environ["URL"]
           body_file = os.environ.get("BODY_FILE")
           raw = ""
@@ -181,13 +196,16 @@ jobs:
               break
           teaser = re.sub(r"\*\*([^*]+)\*\*", r"**\1**", teaser)[:400]
           msg = (
-              f"Hey everyone, **{tag} is out**. Auto-update rolls on next launch.\n\n"
+              ("@everyone " if everyone else "")
+              + f"Hey everyone, **{tag} is out**. Auto-update rolls on next launch.\n\n"
               + (f"> {teaser}\n\n" if teaser else "")
               + f"Full notes: {url}"
           )
+          payload = {"content": msg, "flags": 4}
+          payload["allowed_mentions"] = {"parse": ["everyone"]} if everyone else {"parse": []}
           req = urllib.request.Request(
               webhook,
-              data=json.dumps({"content": msg, "flags": 4}).encode("utf-8"),
+              data=json.dumps(payload).encode("utf-8"),
               headers={"Content-Type": "application/json", "User-Agent": "LocallyUncensored/release-announce"},
               method="POST",
           )

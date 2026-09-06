@@ -12,6 +12,8 @@ run while you carry on, a reasoning model gets a dial for how much thinking a
 reply may pay for, every local model answers on one OpenAI-compatible address,
 and the built-in engine has a name of its own, the LU Engine.
 
+**Known in this release:** after you switch Cloud off, the LU Engine stays stopped until you press Use on your model under Models. One click, a few seconds. 2.6.9 brings the engine back on its own when Cloud goes off.
+
 ### Added
 
 - **The Cloud switch counts its presses anonymously.** Which way it was
