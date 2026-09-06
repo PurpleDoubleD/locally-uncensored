@@ -264,8 +264,9 @@ and the built-in engine has a name of its own, the LU Engine.
   comes back afterwards, so it no longer squats the memory the recipe needs;
   and a run that still runs out of memory on the card says what to close.
   The step counter moves with every training step instead of once per epoch
-  (it used to sit on 0 for twenty minutes). Lines from winget stay out of the
-  note under the button.
+  (it used to sit on 0 for twenty minutes), and the base-file download keeps
+  showing its progress when you leave the tab and come back. Lines from winget
+  stay out of the note under the button.
 - **AMD on Windows is read from the HIP SDK itself.** The only ROCm probe ran
   rocm-smi, which the Windows SDK does not ship, so an installed ROCm went
   unseen. LU reads HIP_PATH and hipinfo now and names the card architecture,

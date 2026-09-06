@@ -16,7 +16,7 @@ import { useCloudCatalogStore, cloudModelById, modelForOp } from '../../../store
 import { listLoras, deleteLora, type CloudLora } from '../../../api/cloud/loras'
 import {
   characterTrainerStatus, installCharacterTrainer, parseLocalCharacterLora,
-  TRAINER_BASE_FILES, type TrainerStatus,
+  TRAINER_BASE_FILES, baseDownloadRunning, type TrainerStatus,
 } from '../../../api/trainer'
 import { startModelDownload, getDownloadProgress } from '../../../api/discover'
 import { useDownloadStore } from '../../../stores/downloadStore'
@@ -271,6 +271,18 @@ function LocalTrainControls() {
     characterTrainerStatus().then(setStatus).catch(() => setStatus(null))
   }, [])
   useEffect(() => { refresh() }, [refresh])
+
+  // A base-file download outlives this panel. Leave the tab and come back and
+  // the button read "Download base files" again with no note, while the 19 GB
+  // kept flowing in the tray (Phase G, Windows box, 06.09.2026). On mount the
+  // meter picks a running download back up, and the poll below carries on.
+  useEffect(() => {
+    let live = true
+    getDownloadProgress()
+      .then((prog) => { if (live && baseDownloadRunning(prog)) setBusy('bases') })
+      .catch(() => {})
+    return () => { live = false }
+  }, [])
 
   // While an install or a bases download runs, poll its progress into `note`.
   useEffect(() => {

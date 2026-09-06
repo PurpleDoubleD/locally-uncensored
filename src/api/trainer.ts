@@ -55,6 +55,21 @@ export const TRAINER_BASE_FILES = [
   },
 ] as const
 
+/**
+ * Is one of the base files still coming in? The download outlives the
+ * Character Studio panel: leave the tab while 19 GB flow and come back, and
+ * the button read "Download base files" again with no note while the tray kept
+ * counting (Phase G, Windows box, 2026-09-06). The panel asks this on mount.
+ */
+export function baseDownloadRunning(
+  progress: Record<string, { status: string } | undefined>,
+): boolean {
+  return TRAINER_BASE_FILES.some((f) => {
+    const row = progress[f.filename]
+    return !!row && (row.status === 'downloading' || row.status === 'connecting')
+  })
+}
+
 export async function installCharacterTrainer(installPath?: string): Promise<{ status: string }> {
   return backendCall('install_character_trainer', { installPath: installPath ?? null })
 }
