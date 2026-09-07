@@ -120,7 +120,7 @@ Locally Uncensored is a free, open-source (AGPL-3.0) local AI studio for the des
 - Local AI on Your Phone: https://locallyuncensored.com/blog/local-ai-on-your-phone.html
 - Best Local AI Apps 2026 (comparison): https://locallyuncensored.com/blog/best-local-ai-apps-2026.html
 - Best Uncensored AI Models 2026: https://locallyuncensored.com/blog/best-uncensored-ai-models-2026.html
-- How to Run Qwen 3.6 Locally: https://locallyuncensored.com/blog/how-to-run-qwen-3-6-locally.html
+- How to Run Qwen 3.8 27B Locally: https://locallyuncensored.com/blog/how-to-run-qwen-3-8-27b-locally.html
 - Plug and Play Local AI (what zero-setup means): https://locallyuncensored.com/blog/plug-and-play-local-ai.html
 - Local AI Image and Video Generator in One App: https://locallyuncensored.com/blog/local-ai-image-and-video-generator.html
 - Unzensierte KI lokal nutzen (German guide): https://locallyuncensored.com/blog/unzensierte-ki-lokal.html
