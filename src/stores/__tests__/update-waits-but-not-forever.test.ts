@@ -157,7 +157,13 @@ describe('the update waits for the chats to be written, but not forever', () => 
 
     const before = calls.slice(0, calls.indexOf('install'))
     expect(before).not.toContain('backup')
-    expect(before.filter((c) => c.startsWith('backend:'))).toHaveLength(0)
+    // install_method is the one backend call that legitimately runs before
+    // install(): it asks which package manager owns the running binary and
+    // calls the update off on a copy LU must not replace in place (Zen, Arch,
+    // UPDATER-LINUX-BEFUND.md). It reads, it never writes.
+    expect(
+      before.filter((c) => c.startsWith('backend:') && c !== 'backend:install_method'),
+    ).toHaveLength(0)
   })
 
   it('a backup that never answers does not stop the update either', async () => {

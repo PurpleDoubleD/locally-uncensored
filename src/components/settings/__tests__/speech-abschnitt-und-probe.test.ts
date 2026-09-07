@@ -104,7 +104,7 @@ describe('AS-09: der Abschnitt ist ausgezogen, nicht nur verschoben', () => {
     // Sperrklinke. Die 13 waren: whisperStatus/Loading/Installing/InstallError,
     // ttsStatus/Loading/Installing/InstallError, installedVoices, voiceBusy,
     // voiceError, entryFocus, tab. Elf davon gehoerten dem Speech-Abschnitt.
-    const body = PAGE.slice(PAGE.indexOf('export function SettingsPage()'), PAGE.indexOf('\nfunction UpdateSection()'))
+    const body = PAGE.slice(PAGE.indexOf('export function SettingsPage()'), PAGE.indexOf('\nexport function UpdateSection()'))
     expect((body.match(/=\s*useState[<(]/g) ?? []).length).toBeLessThanOrEqual(2)
   })
 

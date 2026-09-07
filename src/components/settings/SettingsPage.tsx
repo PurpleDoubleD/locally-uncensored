@@ -46,7 +46,7 @@ import { PermissionSettings } from './PermissionSettings'
 import { MCPServerSettings } from './MCPServerSettings'
 import { WorkflowList } from '../agents/WorkflowList'
 import { WorkflowBuilder } from '../agents/WorkflowBuilder'
-import { useUpdateStore, isNewerVersion } from '../../stores/updateStore'
+import { useUpdateStore, isNewerVersion, installPasswordNotice } from '../../stores/updateStore'
 import { backendCall, isTauri, isMacOS, openExternal } from '../../api/backend'
 import { troubleshootHinweis, type TroubleshootHinweis } from './troubleshoot-message'
 import { isMlxImageHost } from '../../api/mlx-image'
@@ -2249,8 +2249,12 @@ export function SettingsPage() {
 
 // ── Update Section ──────────────────────────────────────────────
 
-function UpdateSection() {
-  const { currentVersion, latestVersion, updateAvailable, releaseNotes, dismissed, isChecking, autoDownload, downloadStatus, downloadProgress, downloadedBytes, totalBytes, errorMessage, checkForUpdate, downloadUpdate, installAndRestart, clearDismiss, setAutoDownload, openReleasePage } = useUpdateStore()
+export function UpdateSection() {
+  const { currentVersion, latestVersion, updateAvailable, releaseNotes, dismissed, isChecking, autoDownload, downloadStatus, downloadProgress, downloadedBytes, totalBytes, errorMessage, installMethod, checkForUpdate, downloadUpdate, installAndRestart, clearDismiss, setAutoDownload, openReleasePage } = useUpdateStore()
+  // On a deb or rpm the install really is a package install, and polkit or
+  // sudo will ask for a password. Saying so first is the difference between
+  // "the system wants my password" and "the app is asking me to log in".
+  const passwordNotice = installPasswordNotice(installMethod)
   // Defensive: only treat the persisted `latestVersion` as actually newer if a
   // semver compare confirms it. Otherwise the binary was updated out-of-band
   // and the persisted value is stale (e.g. localStorage still says 2.3.8 while
@@ -2317,8 +2321,28 @@ function UpdateSection() {
               <p className="text-[0.6rem] text-red-400/80 leading-relaxed mb-2.5">{errorMessage}</p>
             )}
 
+            {/* Not a failure: the update is fine, this copy is just not one LU
+                may replace by itself (pacman, an AppImage in a read-only
+                folder, a repackaged install). The quiet tone, not the red one
+                (lib/hinweis.ts). */}
+            {downloadStatus === 'unavailable' && errorMessage && (
+              <p data-testid="update-unavailable" className={`text-[0.6rem] ${HINWEIS_TEXT.ruhig} leading-relaxed mb-2.5`}>{errorMessage}</p>
+            )}
+
+            {/* The password prompt is about to arrive, so it gets announced. */}
+            {downloadStatus === 'downloaded' && passwordNotice && (
+              <p data-testid="update-password-notice" className={`text-[0.6rem] ${HINWEIS_TEXT.ruhig} leading-relaxed mb-2.5`}>{passwordNotice}</p>
+            )}
+
             <div className="flex gap-2">
-              {!isTauri() ? (
+              {downloadStatus === 'unavailable' ? (
+                <button
+                  onClick={openReleasePage}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[0.6rem] font-medium bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30 transition-colors"
+                >
+                  <Download size={11} /> View Release
+                </button>
+              ) : !isTauri() ? (
                 <button
                   onClick={openReleasePage}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[0.6rem] font-medium bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30 transition-colors"

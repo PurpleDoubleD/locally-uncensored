@@ -1,10 +1,11 @@
 import { create } from 'zustand'
-import { withDetail } from '../lib/error-text'
+import { detailOf, withDetail } from '../lib/error-text'
 import { log } from '../lib/logger'
 import { persist } from 'zustand/middleware'
 import { safeJSONStorage } from '../lib/storage-quota'
 import { version as currentVersion } from '../../package.json'
-import { isTauri, backendCall, openExternal } from '../api/backend'
+import { isTauri, isLinux, backendCall, openExternal } from '../api/backend'
+import { asBoolean, asString, prop } from '../types/json-guards'
 import { stopBundledEngine, stopBundledEmbed } from '../api/engine'
 import { flushChatPersist } from './chatStore'
 import { flushStagedPersist } from './stagedChangesStore'
@@ -44,7 +45,92 @@ export { settledOrTimedOut } from './durability'
 
 // ── Types ─────────────────────────────────────────────────────
 
-type DownloadStatus = 'idle' | 'downloading' | 'downloaded' | 'installing' | 'error'
+/** 'unavailable' is not a failure: the update exists, it is fine, and this
+ *  copy of LU is simply not one the in-app updater is allowed to replace. */
+type DownloadStatus = 'idle' | 'downloading' | 'downloaded' | 'installing' | 'error' | 'unavailable'
+
+// ── How this copy of LU was installed ─────────────────────────
+//
+// The updater plugin decides between AppImage, deb and rpm by reading a string
+// the bundler patched into the binary, not by looking at the machine
+// (tauri-utils platform.rs:349, and UPDATER-LINUX-BEFUND.md for the whole
+// trace). A repackaged install therefore lies to it. The AUR package
+// locally-uncensored-bin unpacks our .deb into /usr, so on Arch the updater
+// downloads a Debian package and runs `pkexec dpkg -i` on a box with no dpkg:
+// polkit asks for the password, the command fails afterwards, and the user is
+// left thinking their password was wrong. That is the customer report this
+// exists for.
+//
+// The Rust command asks the package managers that are installed who owns the
+// running file, and the answer decides whether the in-app updater may run.
+
+export type InstallKind =
+  | 'appimage' | 'deb' | 'rpm' | 'pacman' | 'homebrew' | 'msi' | 'unknown'
+
+export interface InstallMethod {
+  kind: InstallKind
+  exePath: string
+  /** Whether the folder holding the executable can be written to. Only the
+   *  AppImage path cares: replacing it is a rename inside that folder. */
+  writable: boolean
+  hint: string
+}
+
+const INSTALL_KINDS: readonly string[] = [
+  'appimage', 'deb', 'rpm', 'pacman', 'homebrew', 'msi', 'unknown',
+]
+
+/** Anything that is not a recognisable answer is no answer: null means "we
+ *  could not find out", which leaves the updater exactly as it was. */
+export function parseInstallMethod(raw: unknown): InstallMethod | null {
+  const kind = asString(prop(raw, 'kind'))
+  if (!kind || !INSTALL_KINDS.includes(kind)) return null
+  return {
+    kind: kind as InstallKind,
+    exePath: asString(prop(raw, 'exe_path')) ?? '',
+    writable: asBoolean(prop(raw, 'writable')) ?? false,
+    hint: asString(prop(raw, 'hint')) ?? '',
+  }
+}
+
+/** Why the in-app updater must not touch this copy, or null when it may.
+ *
+ *  Kept as a plain function so the badge, the settings page and the tests all
+ *  read the same sentence from the same place. */
+export function updateBlockedBecause(method: InstallMethod | null): string | null {
+  if (!method) return null
+  switch (method.kind) {
+    case 'pacman':
+      return 'This copy was installed with your package manager (AUR package '
+        + 'locally-uncensored-bin). Update it with your AUR helper, for example '
+        + 'yay -Syu locally-uncensored-bin. The AUR package is maintained by a '
+        + 'community member and can lag a few days behind the GitHub release.'
+    case 'appimage':
+      if (method.writable) return null
+      return `The AppImage sits in a folder you cannot write to (${method.exePath}). `
+        + 'Move it to your home folder or download the new AppImage from the release page.'
+    case 'unknown':
+      // A .app in /Applications and a dev build both land here, and on those
+      // the updater is fine. On Linux it means the binary is somewhere no
+      // package manager claims it, which is the hand-unpacked install.
+      if (!isLinux()) return null
+      return 'This copy was installed by a package manager or script LU does not '
+        + 'recognise. Download the new version from the release page.'
+    default:
+      return null
+  }
+}
+
+/** The sentence that has to stand next to the install button on deb and rpm,
+ *  where the update really does run a package install. The password prompt
+ *  comes from polkit or sudo, and a prompt nobody warned about reads like the
+ *  app asking for an account password. */
+export function installPasswordNotice(method: InstallMethod | null): string | null {
+  if (!method) return null
+  if (method.kind !== 'deb' && method.kind !== 'rpm') return null
+  return 'Your system will ask for your password to install the package. '
+    + 'That is the normal Linux package install, not an LU login.'
+}
 
 interface UpdateState {
   currentVersion: string
@@ -64,6 +150,17 @@ interface UpdateState {
   downloadedBytes: number
   totalBytes: number
   errorMessage: string | null
+
+  /** How this copy got onto the machine. Null until the probe has answered,
+   *  and null forever on a build whose backend does not know the command:
+   *  in both cases the updater behaves exactly as it did before. */
+  installMethod: InstallMethod | null
+
+  /** Reads the install method once and caches it. */
+  refreshInstallMethod: () => Promise<InstallMethod | null>
+  /** Parks the badge on 'unavailable' when this copy must not be updated in
+   *  place, and answers with the reason. Null means carry on. */
+  refuseUpdate: () => Promise<string | null>
 
   /** `force` skips the 6h cooldown — for a user-triggered check, and for
    *  the download path when the Update handle is missing. */
@@ -85,6 +182,28 @@ const INITIAL_DELAY = 5_000
 // ── Non-serializable update object (module-level) ─────────────
 
 let _pendingUpdate: Update | null = null
+
+/** In flight or already answered, so a startup check and a click on Download
+ *  do not run the same three subprocesses twice. Cleared again when the probe
+ *  came back empty, so a later attempt can still get an answer. */
+let _methodProbe: Promise<InstallMethod | null> | null = null
+
+/** Test seam: drop the cached probe. */
+export function resetInstallMethodProbe() {
+  _methodProbe = null
+}
+
+async function readInstallMethod(): Promise<InstallMethod | null> {
+  if (!isTauri()) return null
+  try {
+    return parseInstallMethod(await backendCall('install_method'))
+  } catch (e) {
+    // An older backend without the command, or a probe that threw. Not being
+    // able to ask must never be a reason to withhold an update.
+    log.warn('[update] could not read the install method, leaving the updater as it was', { err: detailOf(e) })
+    return null
+  }
+}
 
 // ── Semver compare (kept for dev mode fallback) ───────────────
 
@@ -117,6 +236,30 @@ export const useUpdateStore = create<UpdateState>()(
       downloadedBytes: 0,
       totalBytes: 0,
       errorMessage: null,
+      installMethod: null,
+
+      refreshInstallMethod: async () => {
+        const known = get().installMethod
+        if (known) return known
+        if (!_methodProbe) _methodProbe = readInstallMethod()
+        const method = await _methodProbe
+        if (method) set({ installMethod: method })
+        else _methodProbe = null
+        return method
+      },
+
+      refuseUpdate: async () => {
+        const reason = updateBlockedBecause(await get().refreshInstallMethod())
+        if (reason) {
+          set({
+            downloadStatus: 'unavailable',
+            errorMessage: reason,
+            downloadProgress: 0,
+            downloadedBytes: 0,
+          })
+        }
+        return reason
+      },
 
       checkForUpdate: async (force = false) => {
         const state = get()
@@ -155,6 +298,12 @@ export const useUpdateStore = create<UpdateState>()(
                     }
                   : {}),
               })
+
+              // Ask who owns this copy before anything is fetched. On the
+              // installs where the updater would fail (or would have to walk
+              // past a package database) this parks the badge on a sentence
+              // that says what to do instead, and nothing is downloaded.
+              if (await get().refuseUpdate()) return
 
               // Fetch it now rather than waiting for a click. Sign-ups in the
               // app were still arriving from 2.5.5 and 2.5.6 builds weeks after
@@ -210,6 +359,10 @@ export const useUpdateStore = create<UpdateState>()(
       },
 
       downloadUpdate: async () => {
+        // Nothing is fetched for a copy that must not be updated in place.
+        // 100 MB that can never be installed is worse than no download at all.
+        if (await get().refuseUpdate()) return
+
         // The Update handle lives in this process only. `updateAvailable` is
         // persisted, so after a relaunch — or when the startup check has not
         // landed yet, or ran while offline — the badge offers a Download button
@@ -258,6 +411,12 @@ export const useUpdateStore = create<UpdateState>()(
       },
 
       installAndRestart: async () => {
+        // Second gate, because a download that started before the probe
+        // answered must still not end in an install. This is the one that
+        // catches the AppImage in /opt: the plugin's first move there is a
+        // rename it has no right to make.
+        if (await get().refuseUpdate()) return
+
         if (!_pendingUpdate) {
           // Nothing was downloaded in THIS process — same dead-button problem
           // as above, and here a re-check would not help.
