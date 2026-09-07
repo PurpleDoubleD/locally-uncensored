@@ -41,7 +41,7 @@ export function reportCloudSwitch(action: CloudSwitchAction): void {
 /**
  * The same press once more, per account (David, 2026-09-07: split the
  * presses into subscribers and the rest, and see how often one person
- * presses). Signed in only: cloudFetch has no token for a signed-out
+ * presses). Signed in only: cloudFetch has no session for a signed-out
  * session and throws, and that press stays anonymous by design. Fire and
  * forget like the anonymous counter; a dead network costs the press nothing.
  */
