@@ -42,8 +42,6 @@ pub enum InstallKind {
     Rpm,
     /// pacman owns the file. Nothing may overwrite it behind pacman's back.
     Pacman,
-    /// A Homebrew prefix on macOS.
-    Homebrew,
     /// Windows. Msi or Nsis, the updater handles both and the difference does
     /// not change anything we do here.
     Msi,
@@ -62,7 +60,6 @@ impl InstallKind {
             InstallKind::Deb => "deb",
             InstallKind::Rpm => "rpm",
             InstallKind::Pacman => "pacman",
-            InstallKind::Homebrew => "homebrew",
             InstallKind::Msi => "msi",
             InstallKind::Unknown => "unknown",
         }
@@ -123,17 +120,6 @@ pub fn detect(p: &Probes) -> InstallKind {
     InstallKind::Unknown
 }
 
-/// macOS. Homebrew is the one place where updating past the package manager
-/// leaves a mess, same as pacman on Linux.
-pub fn detect_macos(exe: &Path) -> InstallKind {
-    let path = exe.to_string_lossy();
-    if path.contains("/opt/homebrew") || path.contains("/usr/local/Cellar") {
-        InstallKind::Homebrew
-    } else {
-        InstallKind::Unknown
-    }
-}
-
 /// True when the file sits in the system tree a package manager owns. Only
 /// used for the wording of the hint: `detect` answers Unknown either way.
 pub fn is_under_usr(exe: &Path) -> bool {
@@ -166,9 +152,6 @@ pub fn hint_for(kind: InstallKind, p: &Probes) -> String {
             "The AppImage sits in a folder you cannot write to ({}).",
             p.exe_path.display()
         ),
-        InstallKind::Homebrew => {
-            "Installed with Homebrew. Update it with brew upgrade.".to_string()
-        }
         InstallKind::Msi => "Installed with the Windows installer.".to_string(),
         InstallKind::Unknown if is_under_usr(&p.exe_path) => format!(
             "{} is in the system folders and no package manager claims it. It was \
@@ -200,7 +183,9 @@ pub fn report() -> Report {
         // its own elevation and there is no package database to walk past.
         InstallKind::Msi
     } else if cfg!(target_os = "macos") {
-        detect_macos(&probes.exe_path)
+        // No macOS build ships, and a .app in /Applications is fine for the
+        // updater anyway: Unknown is "no reason to refuse" off Linux.
+        InstallKind::Unknown
     } else {
         detect(&probes)
     };
@@ -495,22 +480,6 @@ mod tests {
     }
 
     #[test]
-    fn macos_homebrew_prefixes() {
-        assert_eq!(
-            detect_macos(Path::new("/opt/homebrew/Caskroom/lu/2.6.8/LU.app/Contents/MacOS/LU")),
-            InstallKind::Homebrew
-        );
-        assert_eq!(
-            detect_macos(Path::new("/usr/local/Cellar/lu/2.6.8/bin/LU")),
-            InstallKind::Homebrew
-        );
-        assert_eq!(
-            detect_macos(Path::new("/Applications/LU.app/Contents/MacOS/LU")),
-            InstallKind::Unknown
-        );
-    }
-
-    #[test]
     fn every_kind_has_a_stable_wire_name() {
         // The frontend switches on these strings.
         for (kind, name) in [
@@ -518,7 +487,6 @@ mod tests {
             (InstallKind::Deb, "deb"),
             (InstallKind::Rpm, "rpm"),
             (InstallKind::Pacman, "pacman"),
-            (InstallKind::Homebrew, "homebrew"),
             (InstallKind::Msi, "msi"),
             (InstallKind::Unknown, "unknown"),
         ] {

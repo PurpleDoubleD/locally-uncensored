@@ -65,7 +65,7 @@ type DownloadStatus = 'idle' | 'downloading' | 'downloaded' | 'installing' | 'er
 // running file, and the answer decides whether the in-app updater may run.
 
 export type InstallKind =
-  | 'appimage' | 'deb' | 'rpm' | 'pacman' | 'homebrew' | 'msi' | 'unknown'
+  | 'appimage' | 'deb' | 'rpm' | 'pacman' | 'msi' | 'unknown'
 
 export interface InstallMethod {
   kind: InstallKind
@@ -77,7 +77,7 @@ export interface InstallMethod {
 }
 
 const INSTALL_KINDS: readonly string[] = [
-  'appimage', 'deb', 'rpm', 'pacman', 'homebrew', 'msi', 'unknown',
+  'appimage', 'deb', 'rpm', 'pacman', 'msi', 'unknown',
 ]
 
 /** Anything that is not a recognisable answer is no answer: null means "we
