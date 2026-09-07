@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hermes 3 405B vs Hermes 3 70B: Which One, When</title>
+<meta name="description" content="Same family, same character, very different token bill. Where Hermes 3 405B earns its price, where Hermes 3 70B wins outright, and how to split your budget between them.">
+<meta name="keywords" content="hermes 3 405b vs 70b, hermes 3 70b, hermes 3 405b, nous research hermes 3, hermes 3 roleplay model, hermes 3 price per token, hermes 3 405b worth it">
+<meta property="og:title" content="Hermes 3 405B vs Hermes 3 70B: Which One, When">
+<meta property="og:description" content="Same family, same character, very different token bill. Where Hermes 3 405B earns its price, where Hermes 3 70B wins outright, and how to split your budget between them.">
+<meta property="og:image" content="https://raw.githubusercontent.com/PurpleDoubleD/locally-uncensored/master/docs/social-preview.png">
+<meta property="og:url" content="https://locallyuncensored.com/blog/hermes-3-405b-vs-70b.html">
+<meta property="og:type" content="article">
+<meta property="article:published_time" content="2026-09-07">
+<meta property="article:author" content="PurpleDoubleD">
+<meta property="article:tag" content="Hermes 3">
+<meta property="article:tag" content="Comparison">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Hermes 3 405B vs Hermes 3 70B: Which One, When">
+<meta name="twitter:description" content="Same family, same character, very different token bill. Where Hermes 3 405B earns its price, where Hermes 3 70B wins outright, and how to split your budget between them.">
+<meta name="twitter:image" content="https://raw.githubusercontent.com/PurpleDoubleD/locally-uncensored/master/docs/social-preview.png">
+<link rel="canonical" href="https://locallyuncensored.com/blog/hermes-3-405b-vs-70b.html">
+<meta name="robots" content="index, follow">
+<meta name="theme-color" content="#0a0a0a">
+<link rel="icon" href="../favicon.png">
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"BlogPosting","headline":"Hermes 3 405B vs Hermes 3 70B: Which One, When","description":"An opinionated comparison of the two Hermes 3 sizes from Nous Research: what actually changes with parameter count, what does not, why the token price gap decides most of it, and a decision table for roleplay, reasoning, agent loops and budget.","image":"https://raw.githubusercontent.com/PurpleDoubleD/locally-uncensored/master/docs/social-preview.png","datePublished":"2026-09-07","dateModified":"2026-09-07","inLanguage":"en","author":{"@type":"Person","name":"PurpleDoubleD","url":"https://github.com/PurpleDoubleD"},"publisher":{"@type":"Organization","name":"Locally Uncensored","url":"https://locallyuncensored.com/"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://locallyuncensored.com/blog/hermes-3-405b-vs-70b.html"},"keywords":"hermes 3 405b vs 70b, hermes 3 70b, hermes 3 405b, hermes 3 price per token"}
+</script>
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"FAQPage","mainEntity":[{"@type":"Question","name":"Is Hermes 3 405B better than Hermes 3 70B?","acceptedAnswer":{"@type":"Answer","text":"On a hard single-shot prompt, usually yes. Across a long session, usually not worth it. Both are Nous Research fine tunes of the same Llama 3.1 family and share the same instruction-following character, so the 405B does not talk differently, it just holds more in its head on difficult prompts. Our take: keep 70B as the default and switch to 405B for the prompts that actually need it."}},{"@type":"Question","name":"Do either of them have a thinking mode?","acceptedAnswer":{"@type":"Answer","text":"No. Neither Hermes 3 405B nor Hermes 3 70B has a thinking mode, so there is no think toggle and no reasoning parameter on either. In the same hosted catalog, Qwen 3.6 35B A3B is the model with vision and a think toggle."}},{"@type":"Question","name":"How many tokens do I get for 5 EUR on Hermes 3 70B?","acceptedAnswer":{"@type":"Answer","text":"Hermes 3 70B costs 0.07 credits per output token and the 5 EUR credit pack is 165,000 credits, so that is roughly 2.3 million output tokens. Credit packs need no subscription, any pack works from the first purchase, and credits never expire."}},{"@type":"Question","name":"Can I run Hermes 3 70B locally?","acceptedAnswer":{"@type":"Answer","text":"A 70B class model is at least reachable on a big workstation with enough VRAM at a low quant. Hermes 3 405B is not a home model in any practical sense: at 4-bit the weights alone are roughly 200 GB. The free Locally Uncensored desktop app for Windows and Linux runs whatever you install, so the local escape hatch is open for the 70B and closed for the 405B."}},{"@type":"Question","name":"Which one should I use for roleplay?","acceptedAnswer":{"@type":"Answer","text":"Hermes 3 70B for the long sessions, because the token bill is what decides a hundred-turn chat, not a small quality edge. Euryale 70B, Lunaris 8B and MythoMax 13B sit in the same picker if you want a different writing voice, and Lunaris 8B is the cheapest place to test a character card before committing."}},{"@type":"Question","name":"What else is in the hosted chat catalog?","acceptedAnswer":{"@type":"Answer","text":"15 chat models in total. Alongside the two Hermes 3 sizes there are Euryale 70B, Lunaris 8B, MythoMax 13B, Qwen 3.6 35B A3B with vision and a think toggle, Qwen3 Coder 480B and Kimi K3, among others. Qwen 3.6 27B is available on the Pro and Max tiers only."}}]}
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@200;300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/assets/lu.css">
+<script defer src="/assets/lu.js"></script>
+  <script data-goatcounter="https://lu-uncensored.goatcounter.com/count" async src="//gc.zgo.at/count.js"></script>
+</head>
+<body>
+<nav class="lu-nav">
+  <a class="lu-nav-brand" href="/" aria-label="Locally Uncensored">
+    <span class="lu-mono" data-mono="nav" data-size="40" aria-hidden="true"></span>
+    <span class="lu-nav-word">Locally <span class="accent">Uncensored</span></span>
+  </a>
+  <div class="lu-nav-links" id="lu-nav-links">
+    <a class="lu-nav-link" href="/">Home</a>
+    <a class="lu-nav-link" href="/blog/">Blog</a>
+    <a class="lu-nav-link" href="/guide/">Guide</a>
+    <a class="lu-nav-link" href="/remote-access/">Remote</a>
+  </div>
+  <div class="lu-nav-right">
+    <a class="lu-nav-icon" href="https://github.com/PurpleDoubleD/locally-uncensored" title="GitHub" aria-label="GitHub"><svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.37.5 0 5.87 0 12.5c0 5.3 3.44 9.8 8.21 11.39.6.11.82-.26.82-.58 0-.29-.01-1.04-.02-2.05-3.34.73-4.04-1.61-4.04-1.61-.55-1.39-1.33-1.76-1.33-1.76-1.09-.75.08-.73.08-.73 1.2.08 1.84 1.24 1.84 1.24 1.07 1.83 2.81 1.3 3.5.99.11-.78.42-1.3.76-1.6-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.13-.3-.54-1.52.11-3.18 0 0 1.01-.32 3.3 1.23a11.5 11.5 0 0 1 6.01 0c2.29-1.55 3.3-1.23 3.3-1.23.65 1.66.24 2.88.12 3.18.77.84 1.23 1.91 1.23 3.22 0 4.61-2.8 5.63-5.48 5.92.43.37.81 1.1.81 2.22 0 1.6-.01 2.9-.01 3.29 0 .32.21.7.82.58A12.01 12.01 0 0 0 24 12.5C24 5.87 18.63.5 12 .5Z"/></svg><span class="lu-nav-badge">1400+&#8202;⭐</span></a>
+    <a class="lu-nav-icon discord" href="https://locallyuncensored.com/discord" target="_blank" rel="noopener" title="Discord" aria-label="Discord"><svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M20.32 4.37A19.8 19.8 0 0 0 15.45 3c-.2.36-.44.85-.6 1.23a18.3 18.3 0 0 0-5.7 0c-.16-.38-.4-.87-.6-1.23a19.7 19.7 0 0 0-4.87 1.37C.55 8.9-.32 13.3.11 17.63a19.9 19.9 0 0 0 6 3.03c.48-.66.9-1.36 1.27-2.1-.7-.26-1.36-.58-1.99-.96.17-.12.33-.25.49-.38a14.2 14.2 0 0 0 12.24 0c.16.13.32.26.49.38-.63.38-1.3.7-2 .96.37.74.8 1.44 1.27 2.1a19.8 19.8 0 0 0 6-3.03c.5-5.03-.85-9.39-3.55-13.26ZM8.02 15c-1.18 0-2.15-1.09-2.15-2.42 0-1.34.95-2.43 2.15-2.43 1.2 0 2.17 1.09 2.15 2.43 0 1.33-.95 2.42-2.15 2.42Zm7.96 0c-1.18 0-2.15-1.09-2.15-2.42 0-1.34.95-2.43 2.15-2.43 1.2 0 2.17 1.09 2.15 2.43 0 1.33-.94 2.42-2.15 2.42Z"/></svg><span class="lu-nav-badge">700+&#8202;<span style="font-size:0.715em">🟢</span></span></a>
+    <span class="lu-nav-sep"></span>
+    <div class="switch" id="theme-switch" role="button" aria-label="Toggle theme"></div>
+    <a class="lu-nav-dl" href="https://github.com/PurpleDoubleD/locally-uncensored/releases/latest"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m0 0 4-4m-4 4-4-4"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>Download</a>
+    <button type="button" class="lu-nav-toggle" aria-label="Menu"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+  </div>
+</nav>
+<div class="container lu-doc">
+  <div class="breadcrumb"><a href="../">Locally Uncensored</a> / <a href="./">Blog</a> / This Post</div>
+
+  <div class="post-meta">
+    <span class="post-tag">Comparison</span>
+    <span>September 7, 2026</span>
+    <span>&middot;</span>
+    <span>6 min read</span>
+  </div>
+
+  <article>
+    <h1>Hermes 3 405B vs Hermes 3 70B: Which One, When</h1>
+
+    <p>Short version, because most comparisons bury it: <strong>Hermes 3 70B is the default and Hermes 3 405B is the model you switch to for a hard prompt.</strong> If you take nothing else from this page, take that. The rest is the reasoning, and the numbers that make it true.</p>
+
+    <h2>What stays the same</h2>
+
+    <p>Both are Nous Research fine tunes of the same Llama 3.1 family. That matters more than the parameter count does for how the model feels to use. They share the same instruction-following character: they follow a system prompt closely, they stay in a persona you hand them, and they do not lecture you back at the end of an answer. Swapping between them mid-project does not force you to rewrite prompts, which is not something you can say about jumping between different labs.</p>
+
+    <p>Neither has a thinking mode. There is no think toggle on either, no reasoning parameter to send, and no hidden deliberation pass inflating your output tokens. Both answer flat. In the same hosted catalog, <strong>Qwen 3.6 35B A3B</strong> is the one with vision and a think toggle if you want a model that reasons before it speaks.</p>
+
+    <h2>What changes with size</h2>
+
+    <p>The 405B holds more in its head. On a prompt with a lot of interacting constraints (a long spec, a tangled function, a scene with six characters and a rule about who knows what), it drops fewer of them. That is the honest description of the gap, and it is real. It is not a personality upgrade, it is a robustness upgrade on hard inputs.</p>
+
+    <p>What it is not: two or three times better. Nothing in this business scales like that. On an ordinary turn, an ordinary summary, an ordinary bit of dialogue, you would struggle to pick the 405B blind.</p>
+
+    <h2>The token price is the actual decision</h2>
+
+    <p>Everything above is a small effect. The price gap is a large one, and that is what should drive your choice.</p>
+
+    <p>The concrete anchor: <strong>Hermes 3 70B costs 0.07 credits per output token</strong>, and the 5 EUR credit pack is 165,000 credits, which works out to roughly <strong>2.3 million output tokens</strong>. That is a lot of roleplay. A 405B model is a different weight class on the meter, so the same money buys a fraction of that. Current per model rates are listed next to each model on the <a href="https://lu-labs.ai/pricing" target="_blank" rel="noopener">LU Labs pricing page</a>.</p>
+
+    <p>Which means the two models fail differently. A hundred-turn roleplay session or an agent loop hammering tools is a token volume problem, and volume problems are won by the cheaper model. A single gnarly refactor is a quality problem, and you should not be counting credits on it. Same account, same picker, one click apart. The mistake is picking one and staying there out of habit.</p>
+
+    <h2>The decision table</h2>
+
+    <table>
+      <thead><tr><th>What you are doing</th><th>Pick</th><th>Why</th></tr></thead>
+      <tbody>
+        <tr><td>Long multi-turn sessions, roleplay, companion chat</td><td>Hermes 3 70B</td><td>Token volume decides this, not a small quality edge. 2.3 million output tokens on a 5 EUR pack.</td></tr>
+        <tr><td>One hard reasoning prompt, a tangled spec, a nasty refactor</td><td>Hermes 3 405B</td><td>This is the case it was worth building. Fewer dropped constraints on complicated input.</td></tr>
+        <tr><td>Agent and coding loops with many tool calls</td><td>Start on 70B</td><td>Tool calls run through a prompt transport on both, so both work. Loops emit a lot of tokens, so the cheap one first.</td></tr>
+        <tr><td>Creative writing, first drafts, brainstorming</td><td>Hermes 3 70B</td><td>You are going to regenerate a lot. Regeneration is cheap on 70B and expensive on 405B.</td></tr>
+        <tr><td>Creative writing, final polish on a piece that matters</td><td>Hermes 3 405B</td><td>One pass, one prompt, worth the credits.</td></tr>
+        <tr><td>Budget is a one-off 5 EUR pack</td><td>Hermes 3 70B, mostly</td><td>Packs never expire, so spend them where the volume is and keep a reserve for 405B prompts.</td></tr>
+        <tr><td>Budget is the 19 EUR Hosted month</td><td>Mix freely</td><td>900,000 credits plus 2 LoRA trainings a month gives you room to switch per conversation.</td></tr>
+      </tbody>
+    </table>
+
+    <h2>The local escape hatch, and where it closes</h2>
+
+    <p>We ship a free open source desktop app for Windows and Linux, and it runs whatever you install, with nothing in the middle. So it is fair to ask whether you need a hosted endpoint at all.</p>
+
+    <p>For a 70B class model: reachable. A big workstation with enough VRAM at a low quant will run it, slowly but genuinely. Our <a href="how-to-run-qwen-3-6-locally.html">local setup guide for Qwen 3.6</a> covers the quant math that applies here too, and <a href="best-uncensored-ai-models-2026.html">the 2026 model roundup</a> covers what else is worth downloading.</p>
+
+    <p>For 405B: closed. At 4-bit the weights alone are roughly 200 GB. There is no consumer card, and no realistic single workstation, that gets you there. If you want 405B, you want somebody else's GPUs. That is the whole argument for the hosted route, and we would rather state it plainly than pretend a home build is around the corner. The setup for both routes is in <a href="hermes-3-405b-online-guide.html">the Hermes 3 405B online guide</a>.</p>
+
+    <h2>Where the rest of the catalog fits</h2>
+
+    <p>There are 15 hosted chat models, and Hermes is not always the right family:</p>
+
+    <ul>
+      <li><strong>Euryale 70B</strong> and <strong>MythoMax 13B</strong>: different writing voices for fiction and roleplay. Try them before assuming Hermes is the answer.</li>
+      <li><strong>Lunaris 8B</strong>: the cheapest place to test a character card or a system prompt before you spend real tokens on it.</li>
+      <li><strong>Qwen 3.6 35B A3B</strong>: vision and a think toggle. The one to reach for when the prompt needs an image read or actual step-by-step reasoning.</li>
+      <li><strong>Qwen3 Coder 480B</strong>: code specific, and the better first choice for a coding agent than either Hermes.</li>
+      <li><strong>Kimi K3</strong>: the other very large generalist. Worth a side-by-side on your own hard prompt.</li>
+      <li><strong>Qwen 3.6 27B</strong>: Pro and Max tiers only, so it is not on the table with a credit pack.</li>
+    </ul>
+
+    <h2>The verdict</h2>
+
+    <p>Run Hermes 3 70B. Keep credits in reserve. When a prompt comes back wrong twice in a row and the problem is clearly that the model lost track of the input rather than that your prompt is bad, switch the picker to 405B for that one message and switch back. Treating 405B as a permanent upgrade is how a 5 EUR pack becomes a weekend.</p>
+
+    <hr>
+
+    <p><em>Locally Uncensored is AGPL-3.0 licensed. Built by <a href="https://github.com/PurpleDoubleD">PurpleDoubleD</a>. Bug reports and feature requests on <a href="https://github.com/PurpleDoubleD/locally-uncensored/discussions">GitHub Discussions</a> or in the <a href="https://locallyuncensored.com/discord">Discord</a>.</em></p>
+  </article>
+
+  <div class="post-footer">
+    <p>Both Hermes 3 sizes sit in the same model picker, one click apart, on the same account.</p>
+    <a href="https://lu-labs.ai/checkout/start?plan=hosted&amp;src=luc-hermes405b-vs70b" class="cta-btn" target="_blank" rel="noopener">
+      Compare them on LU Labs
+    </a>
+  </div>
+</div>
+
+<footer>
+  <div class="footer-row footer-meta"><span>&copy; 2026 &middot; Locally Uncensored &middot; AGPL-3.0</span></div>
+  <div class="footer-row footer-links">
+    <a href="https://locallyuncensored.com/blog/">Blog</a>
+    <a href="https://locallyuncensored.com/guide/">Guide</a>
+    <a href="https://locallyuncensored.com/remote-access/">Remote access</a>
+    <a href="https://locallyuncensored.com/discord" target="_blank" rel="noopener">Discord</a>
+    <a href="https://github.com/PurpleDoubleD/locally-uncensored">GitHub</a>
+    <a href="https://github.com/PurpleDoubleD/locally-uncensored/discussions">Discussions</a>
+    <a href="https://github.com/PurpleDoubleD/locally-uncensored/issues">Issues</a>
+    <a href="https://reddit.com/user/GroundbreakingMall54">Reddit</a>
+    <a href="https://www.linkedin.com/in/david-drobnitza-locallyuncensored/" rel="me noopener" target="_blank">LinkedIn</a>
+  </div>
+</footer>
+</body>
+</html>

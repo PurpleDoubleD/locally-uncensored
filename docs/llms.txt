@@ -147,6 +147,17 @@ Locally Uncensored is a free, open-source (AGPL-3.0) local AI studio for the des
 - How to Run DeepSeek V4 Pro: https://locallyuncensored.com/blog/how-to-run-deepseek-v4-pro.html
 - DeepSeek V4 Flash vs V4 Pro: https://locallyuncensored.com/blog/deepseek-v4-flash-vs-v4-pro.html
 - Abliterated Models Guide: https://locallyuncensored.com/blog/abliterated-models-guide.html
+- Hermes 3 405B Online (browser Studio and API key setup): https://locallyuncensored.com/blog/hermes-3-405b-online-guide.html
+- Hermes 3 405B vs Hermes 3 70B (which one, when, and the token bill): https://locallyuncensored.com/blog/hermes-3-405b-vs-70b.html
+- How to Run Qwen 3.6 Without a GPU (hosted Studio or API key): https://locallyuncensored.com/blog/run-qwen-3-6-without-gpu.html
+- Qwen 3.6 35B A3B Explained (what 3B active parameters buys you, local vs hosted): https://locallyuncensored.com/blog/qwen-3-6-35b-a3b-explained.html
+- Flux 2 Online Without a 24 GB Card (browser image generation, credit math): https://locallyuncensored.com/blog/flux-2-online-without-gpu.html
+- Flux 2 Dev vs Flux Dev vs Flux Schnell (cost per image and which to default to): https://locallyuncensored.com/blog/flux-2-dev-vs-flux-dev-vs-schnell.html
+- LM Studio Alternative for Mac (browser Studio setup, no native Mac build): https://locallyuncensored.com/blog/lm-studio-alternative-for-mac.html
+- What a Mac Can Run Locally in 2026 (RAM tiers and where the cloud picks up): https://locallyuncensored.com/blog/what-a-mac-can-run-locally-2026.html
+- Uncensored AI Chat Online (browser, desktop Cloud switch, or API key): https://locallyuncensored.com/blog/uncensored-ai-chat-online-guide.html
+- What No Filter Actually Means Here (the honest limits): https://locallyuncensored.com/blog/what-no-filter-means-online.html
+- Uncensored AI chat online, no filter on text (landing page): https://locallyuncensored.com/uncensored-ai-chat-online/
 - Locally Uncensored vs Open WebUI / LM Studio / Jan / GPT4All / Msty / SillyTavern / KoboldCpp: https://locallyuncensored.com/blog/
 
 ## Comparisons

@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>What No Filter Actually Means Here, and What It Does Not</title>
+<meta name="description" content="An honest read on uncensored AI chat online: the difference between a moderation layer and a model's own training, what is different for image and video, the one line with no exceptions, and hosted against fully local.">
+<meta name="keywords" content="what does no filter mean, uncensored ai chat, uncensored ai limits, abliterated model, hosted vs local ai, ai without moderation layer">
+<meta property="og:title" content="What No Filter Actually Means Here, and What It Does Not">
+<meta property="og:description" content="An honest read on uncensored AI chat online: moderation layer against model training, what is different for image and video, the one line with no exceptions, and hosted against fully local.">
+<meta property="og:image" content="https://raw.githubusercontent.com/PurpleDoubleD/locally-uncensored/master/docs/social-preview.png">
+<meta property="og:url" content="https://locallyuncensored.com/blog/what-no-filter-means-online.html">
+<meta property="og:type" content="article">
+<meta property="article:published_time" content="2026-09-07">
+<meta property="article:author" content="PurpleDoubleD">
+<meta property="article:tag" content="Uncensored AI">
+<meta property="article:tag" content="Guide">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="What No Filter Actually Means Here, and What It Does Not">
+<meta name="twitter:description" content="The difference between a moderation layer and a model's own training, what is different for image and video, and hosted against fully local.">
+<meta name="twitter:image" content="https://raw.githubusercontent.com/PurpleDoubleD/locally-uncensored/master/docs/social-preview.png">
+<link rel="canonical" href="https://locallyuncensored.com/blog/what-no-filter-means-online.html">
+<meta name="robots" content="index, follow">
+<meta name="theme-color" content="#0a0a0a">
+<link rel="icon" href="../favicon.png">
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"BlogPosting","headline":"What No Filter Actually Means Here, and What It Does Not","description":"A candid account of what uncensored means on a hosted AI service: the difference between a moderation layer bolted on top of a model and the model's own training, why the catalog matters, what is genuinely different for image and video, the rule with no exceptions, and how hosted compares to a fully local setup.","image":"https://raw.githubusercontent.com/PurpleDoubleD/locally-uncensored/master/docs/social-preview.png","datePublished":"2026-09-07","dateModified":"2026-09-07","inLanguage":"en","author":{"@type":"Person","name":"PurpleDoubleD","url":"https://github.com/PurpleDoubleD"},"publisher":{"@type":"Organization","name":"Locally Uncensored","url":"https://locallyuncensored.com/"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://locallyuncensored.com/blog/what-no-filter-means-online.html"},"keywords":"what does no filter mean, uncensored ai chat, uncensored ai limits, abliterated model, hosted vs local ai"}
+</script>
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"FAQPage","mainEntity":[{"@type":"Question","name":"What does no filter actually mean on a hosted AI service?","acceptedAnswer":{"@type":"Answer","text":"On our hosted text models it means one specific thing: we add no moderation layer on top of the model. There is no classifier reading your prompt and no rewriter editing the answer. It does not mean a model will say anything, because the model still answers the way it was trained, and a fine tune trained to decline will still decline."}},{"@type":"Question","name":"Will an uncensored model answer anything I ask?","acceptedAnswer":{"@type":"Answer","text":"No. Refusal behaviour lives in the weights as much as in any wrapper around them. An instruction tuned model like Hermes 3 carries the habits it was trained with. Community fine tunes such as Euryale 70B, Lunaris 8B and MythoMax 13B were tuned for character and story work and behave differently. Picking the right model matters more than any marketing word on a landing page."}},{"@type":"Question","name":"Are the hosted image and video models unfiltered?","acceptedAnswer":{"@type":"Answer","text":"No, and we will not pretend otherwise. Hosted image and video follow the Terms of Service, and the prompt is checked before it renders. A hosted picture is a different product from a hosted paragraph, and the rules on that lane are stricter."}},{"@type":"Question","name":"Is there anything that is refused everywhere?","acceptedAnswer":{"@type":"Answer","text":"Yes, one thing. Content involving minors is refused everywhere, always, with no exception, on every surface and every model we host."}},{"@type":"Question","name":"What is an abliterated model?","acceptedAnswer":{"@type":"Answer","text":"An abliterated model is an open weight model that has had the internal direction associated with refusal identified and suppressed, so the model stops producing its trained refusal response. It is done to the weights, not with a prompt. The cost is real: abliteration can dent instruction following and factual sharpness, which is why a well made abliterated build matters more than the label."}},{"@type":"Question","name":"Is hosted or fully local the more private option?","acceptedAnswer":{"@type":"Answer","text":"Fully local, without question. A hosted request leaves your machine by definition. We do not train on your prompts and we never sell them, and accounts and billing are in the EU, but that is a promise plus a jurisdiction, not a technical guarantee. The free open source desktop app on Windows or Linux running local weights sends nothing anywhere."}},{"@type":"Question","name":"What are the other limits of the hosted layer?","acceptedAnswer":{"@type":"Answer","text":"The hardware is shared, so there is a short queue at busy hours. The catalog is curated, so you cannot upload your own checkpoint. Accounts and billing are in the EU. Credits are drawn per token, with a 5 EUR pack available without any subscription."}}]}
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@200;300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/assets/lu.css">
+<script defer src="/assets/lu.js"></script>
+  <script data-goatcounter="https://lu-uncensored.goatcounter.com/count" async src="//gc.zgo.at/count.js"></script>
+</head>
+<body>
+<nav class="lu-nav">
+  <a class="lu-nav-brand" href="/" aria-label="Locally Uncensored">
+    <span class="lu-mono" data-mono="nav" data-size="40" aria-hidden="true"></span>
+    <span class="lu-nav-word">Locally <span class="accent">Uncensored</span></span>
+  </a>
+  <div class="lu-nav-links" id="lu-nav-links">
+    <a class="lu-nav-link" href="/">Home</a>
+    <a class="lu-nav-link" href="/blog/">Blog</a>
+    <a class="lu-nav-link" href="/guide/">Guide</a>
+    <a class="lu-nav-link" href="/remote-access/">Remote</a>
+  </div>
+  <div class="lu-nav-right">
+    <a class="lu-nav-icon" href="https://github.com/PurpleDoubleD/locally-uncensored" title="GitHub" aria-label="GitHub"><svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.37.5 0 5.87 0 12.5c0 5.3 3.44 9.8 8.21 11.39.6.11.82-.26.82-.58 0-.29-.01-1.04-.02-2.05-3.34.73-4.04-1.61-4.04-1.61-.55-1.39-1.33-1.76-1.33-1.76-1.09-.75.08-.73.08-.73 1.2.08 1.84 1.24 1.84 1.24 1.07 1.83 2.81 1.3 3.5.99.11-.78.42-1.3.76-1.6-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.13-.3-.54-1.52.11-3.18 0 0 1.01-.32 3.3 1.23a11.5 11.5 0 0 1 6.01 0c2.29-1.55 3.3-1.23 3.3-1.23.65 1.66.24 2.88.12 3.18.77.84 1.23 1.91 1.23 3.22 0 4.61-2.8 5.63-5.48 5.92.43.37.81 1.1.81 2.22 0 1.6-.01 2.9-.01 3.29 0 .32.21.7.82.58A12.01 12.01 0 0 0 24 12.5C24 5.87 18.63.5 12 .5Z"/></svg><span class="lu-nav-badge">1400+&#8202;⭐</span></a>
+    <a class="lu-nav-icon discord" href="https://locallyuncensored.com/discord" target="_blank" rel="noopener" title="Discord" aria-label="Discord"><svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M20.32 4.37A19.8 19.8 0 0 0 15.45 3c-.2.36-.44.85-.6 1.23a18.3 18.3 0 0 0-5.7 0c-.16-.38-.4-.87-.6-1.23a19.7 19.7 0 0 0-4.87 1.37C.55 8.9-.32 13.3.11 17.63a19.9 19.9 0 0 0 6 3.03c.48-.66.9-1.36 1.27-2.1-.7-.26-1.36-.58-1.99-.96.17-.12.33-.25.49-.38a14.2 14.2 0 0 0 12.24 0c.16.13.32.26.49.38-.63.38-1.3.7-2 .96.37.74.8 1.44 1.27 2.1a19.8 19.8 0 0 0 6-3.03c.5-5.03-.85-9.39-3.55-13.26ZM8.02 15c-1.18 0-2.15-1.09-2.15-2.42 0-1.34.95-2.43 2.15-2.43 1.2 0 2.17 1.09 2.15 2.43 0 1.33-.95 2.42-2.15 2.42Zm7.96 0c-1.18 0-2.15-1.09-2.15-2.42 0-1.34.95-2.43 2.15-2.43 1.2 0 2.17 1.09 2.15 2.43 0 1.33-.94 2.42-2.15 2.42Z"/></svg><span class="lu-nav-badge">700+&#8202;<span style="font-size:0.715em">🟢</span></span></a>
+    <span class="lu-nav-sep"></span>
+    <div class="switch" id="theme-switch" role="button" aria-label="Toggle theme"></div>
+    <a class="lu-nav-dl" href="https://github.com/PurpleDoubleD/locally-uncensored/releases/latest"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m0 0 4-4m-4 4-4-4"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>Download</a>
+    <button type="button" class="lu-nav-toggle" aria-label="Menu"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+  </div>
+</nav>
+<div class="container lu-doc">
+  <div class="breadcrumb"><a href="../">Locally Uncensored</a> / <a href="./">Blog</a> / This Post</div>
+
+  <div class="post-meta">
+    <span class="post-tag">Guide</span>
+    <span>September 7, 2026</span>
+    <span>&middot;</span>
+    <span>6 min read</span>
+  </div>
+
+  <article>
+    <h1>What No Filter Actually Means Here, and What It Does Not</h1>
+
+    <p>Every page selling <a href="https://locallyuncensored.com/uncensored-ai-chat-online/">uncensored AI chat online</a> uses the same three words and almost none of them say what they mean by them. We named the project Locally Uncensored, so we owe you a precise version rather than a louder one. Here is what is true on our hosted layer, what is not, and where the honest limits sit.</p>
+
+    <h2>Two Different Things Get Called a Filter</h2>
+
+    <p>The first is a <strong>moderation layer</strong>: a separate system wrapped around the model that reads your prompt before it goes in, reads the answer before it comes out, and blocks or rewrites either one. It is a piece of infrastructure. Someone builds it, ships it, and can remove it.</p>
+
+    <p>The second is the <strong>model's own training</strong>. Refusal behaviour gets baked into the weights during instruction tuning and alignment work. Nothing sits beside the model doing the refusing. The model itself produces the refusal, the same way it produces any other sentence.</p>
+
+    <p>On our hosted text models we do not add the first one. There is no classifier in front of the endpoint and no rewriter behind it. That is a claim about our own stack, which makes it checkable: you can prod at it and see for yourself.</p>
+
+    <p>What it is not is a promise that a model will say anything. The model still answers the way it was trained. A build that was tuned to decline a category of request will decline it on our GPUs exactly as it would on yours. Anyone telling you otherwise is either selling something or has not looked closely.</p>
+
+    <h2>Which Is Why the Catalog Is the Real Answer</h2>
+
+    <p>If refusal lives in the weights, then the useful question is not whether a service is uncensored but which weights it will run for you. That is why the hosted chat catalog carries community fine tunes next to instruction tuned models.</p>
+
+    <p><strong>Hermes 3</strong> is an instruction tuned assistant. It is broadly capable, follows long instructions well, and carries the habits it was trained with. <strong>Euryale 70B</strong>, <strong>Lunaris 8B</strong> and <strong>MythoMax 13B</strong> came out of the roleplay community and were tuned for character voice and sustained fiction. They behave noticeably differently on the same prompt, and for character work that difference is the whole point. Picking the right build does more for you than any adjective on a pricing page. Our older piece on <a href="uncensored-ai-chat.html">uncensored AI chat</a> compares the individual builds in more depth, and the <a href="uncensored-ai-chat-online-guide.html">step by step setup guide</a> shows where the picker lives.</p>
+
+    <h2>Image and Video Are a Different Lane</h2>
+
+    <p>This is where a lot of sites get vague, so we will be blunt. Hosted image and video generation follows the Terms of Service, and the prompt is checked before it renders. That is not the same arrangement as the text lane, and we are not going to describe it as if it were.</p>
+
+    <p>The reason is not squeamishness. A hosted picture is a different product from a hosted paragraph: it is a file that gets stored, shared, and moves through systems that treat images with more scrutiny than text, and the legal and payment surface around it is stricter. If your interest is specifically visual and specifically unrestricted, the honest answer is that hosted is not the route, and local generation on your own machine is.</p>
+
+    <h2>The One Line With No Exceptions</h2>
+
+    <p>Content involving minors is refused. Everywhere, always, on every model and every surface, hosted or otherwise. There is no plan, no tier, and no configuration where that changes. That is the whole section, and it does not need softening.</p>
+
+    <h2>The Other Limits Worth Weighing</h2>
+
+    <ul>
+      <li><strong>Shared hardware.</strong> The GPUs serve everyone, so at busy hours there is a short queue before your request starts.</li>
+      <li><strong>Curated catalog.</strong> You pick from what we host. There is no bring your own checkpoint on the hosted side.</li>
+      <li><strong>EU accounts and billing.</strong> That is a jurisdiction, which some readers want and others do not care about.</li>
+      <li><strong>No training on your data, and it is never sold.</strong> A policy commitment, and worth exactly as much as your trust in the people making it.</li>
+      <li><strong>A hosted request leaves your machine.</strong> By definition. No wording changes that, which is why the local app exists.</li>
+    </ul>
+
+    <p>Prices sit at <a href="https://lu-labs.ai/pricing" target="_blank" rel="noopener">https://lu-labs.ai/pricing</a>, and the smallest way in is a 5 EUR credit pack with no subscription attached.</p>
+
+    <h2>Hosted Against Fully Local</h2>
+
+    <table>
+      <thead>
+        <tr><th>Question</th><th>Hosted</th><th>Fully local</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Where the prompt goes</td><td>Someone else's GPU</td><td>Nowhere</td></tr>
+        <tr><td>Moderation layer on text</td><td>None added</td><td>None possible</td></tr>
+        <tr><td>Image and video rules</td><td>Terms of Service, prompt checked</td><td>Whatever you install</td></tr>
+        <tr><td>Model choice</td><td>Curated catalog</td><td>Any weights you can download</td></tr>
+        <tr><td>Hardware needed</td><td>A browser</td><td>A capable GPU</td></tr>
+        <tr><td>Cost</td><td>Credits per token</td><td>Electricity and the card you already bought</td></tr>
+      </tbody>
+    </table>
+
+    <p>Local here means the free open source desktop app on Windows or Linux, running weights you downloaded yourself, with nothing between you and the model. The walkthrough is <a href="run-uncensored-ai-locally.html">how to run uncensored AI locally</a>.</p>
+
+    <h2>What an Abliterated Model Actually Is</h2>
+
+    <p>Abliteration is a weight edit. Researchers found that refusal in a chat model tends to be represented as a single direction in the model's internal activations. Identify that direction, suppress it, and the model stops emitting its trained refusal. No prompt trick, no jailbreak that gets patched next week: the behaviour is gone from the file.</p>
+
+    <p>It costs something. Removing a direction from the weights is a blunt operation, and abliterated builds can lose instruction following precision, get looser on facts, or turn agreeable in ways that hurt on technical work. The quality of the specific build matters far more than the label, which is why we keep <a href="abliterated-models-guide.html">a guide to the ones we consider good</a> rather than telling people to grab whatever has the word in its filename.</p>
+
+    <h2>The Plain Verdict</h2>
+
+    <p>If you own a card with 24 GB or more and privacy is the reason you are here, run local. It is free, it is the stronger answer, and nothing about the hosted layer beats sending zero requests. If you do not have that hardware, or you want a 405B model that will never fit in consumer VRAM, hosted is a reasonable trade with the limits above stated out loud. Most people we talk to end up doing both, which is why the desktop app has a Cloud switch instead of a wall.</p>
+  </article>
+
+  <div class="post-footer">
+    <p>Hosted chat with no moderation layer on the text models, and a 5 EUR pack that never expires.</p>
+    <a href="https://lu-labs.ai/checkout/start?plan=hosted&amp;src=luc-nofilter-article" class="cta-btn" target="_blank" rel="noopener">
+      See LU Labs Cloud
+    </a>
+  </div>
+</div>
+
+<footer>
+  <div class="footer-row footer-meta"><span>&copy; 2026 &middot; Locally Uncensored &middot; AGPL-3.0</span></div>
+  <div class="footer-row footer-links">
+    <a href="https://locallyuncensored.com/blog/">Blog</a>
+    <a href="https://locallyuncensored.com/guide/">Guide</a>
+    <a href="https://locallyuncensored.com/remote-access/">Remote access</a>
+    <a href="https://locallyuncensored.com/discord" target="_blank" rel="noopener">Discord</a>
+    <a href="https://github.com/PurpleDoubleD/locally-uncensored">GitHub</a>
+    <a href="https://github.com/PurpleDoubleD/locally-uncensored/discussions">Discussions</a>
+    <a href="https://github.com/PurpleDoubleD/locally-uncensored/issues">Issues</a>
+    <a href="https://reddit.com/user/GroundbreakingMall54">Reddit</a>
+    <a href="https://www.linkedin.com/in/david-drobnitza-locallyuncensored/" rel="me noopener" target="_blank">LinkedIn</a>
+  </div>
+</footer>
+</body>
+</html>

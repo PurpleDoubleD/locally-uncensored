@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Qwen 3.6 35B A3B Explained: What 3B Active Parameters Buys You</title>
+<meta name="description" content="35B total, 3B active per token. That makes Qwen 3.6 35B A3B cheap to compute and expensive to hold in memory. What that shape means per machine class, and when owning the card beats renting one.">
+<meta name="keywords" content="qwen 3.6 35b a3b, qwen 3.6 moe, 3b active parameters, qwen 3.6 vram, qwen 3.6 vs hosted, mixture of experts explained, qwen 3.6 27b pro">
+<meta property="og:title" content="Qwen 3.6 35B A3B Explained: What 3B Active Parameters Buys You">
+<meta property="og:description" content="35B total, 3B active per token. Cheap to compute, expensive to hold in memory. What that shape means per machine class, and when owning the card beats renting one.">
+<meta property="og:image" content="https://raw.githubusercontent.com/PurpleDoubleD/locally-uncensored/master/docs/social-preview.png">
+<meta property="og:url" content="https://locallyuncensored.com/blog/qwen-3-6-35b-a3b-explained.html">
+<meta property="og:type" content="article">
+<meta property="article:published_time" content="2026-09-07">
+<meta property="article:author" content="PurpleDoubleD">
+<meta property="article:tag" content="Qwen 3.6">
+<meta property="article:tag" content="Model Guide">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Qwen 3.6 35B A3B Explained: What 3B Active Parameters Buys You">
+<meta name="twitter:description" content="35B total, 3B active per token. Cheap to compute, expensive to hold in memory. What that shape means per machine class, and when owning the card beats renting one.">
+<meta name="twitter:image" content="https://raw.githubusercontent.com/PurpleDoubleD/locally-uncensored/master/docs/social-preview.png">
+<link rel="canonical" href="https://locallyuncensored.com/blog/qwen-3-6-35b-a3b-explained.html">
+<meta name="robots" content="index, follow">
+<meta name="theme-color" content="#0a0a0a">
+<link rel="icon" href="../favicon.png">
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"BlogPosting","headline":"Qwen 3.6 35B A3B Explained: What 3B Active Parameters Buys You","description":"A plain technical explanation of the mixture-of-experts shape behind Qwen 3.6 35B A3B: 35B total parameters, about 3B active per token, small compute per token but the full 18 to 20 GB memory bill. What that means per machine class, and an honest verdict on owning the hardware versus renting a GPU.","image":"https://raw.githubusercontent.com/PurpleDoubleD/locally-uncensored/master/docs/social-preview.png","datePublished":"2026-09-07","dateModified":"2026-09-07","inLanguage":"en","author":{"@type":"Person","name":"PurpleDoubleD","url":"https://github.com/PurpleDoubleD"},"publisher":{"@type":"Organization","name":"Locally Uncensored","url":"https://locallyuncensored.com/"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://locallyuncensored.com/blog/qwen-3-6-35b-a3b-explained.html"},"keywords":"qwen 3.6 35b a3b, qwen 3.6 moe, 3b active parameters, qwen 3.6 vram, mixture of experts explained"}
+</script>
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"FAQPage","mainEntity":[{"@type":"Question","name":"What does A3B mean in Qwen 3.6 35B A3B?","acceptedAnswer":{"@type":"Answer","text":"A3B means about 3 billion active parameters per token. The model holds 35 billion parameters in total, split across expert blocks, and a router picks a small subset for each token. Compute per token is sized by the active 3B, not by the full 35B."}},{"@type":"Question","name":"If only 3B parameters are active, why does it still need 20 GB?","acceptedAnswer":{"@type":"Answer","text":"Because the router can call any expert on any token, so every expert has to be resident. At a 4-bit quant the full weight set is roughly 18 to 20 GB, plus KV cache and runtime overhead. Mixture-of-experts cuts the compute bill, not the memory bill."}},{"@type":"Question","name":"What hardware runs Qwen 3.6 35B A3B properly?","acceptedAnswer":{"@type":"Answer","text":"A 24 GB card such as an RTX 3090, 4090 or 5090, or a Mac with 32 GB of unified memory. A 16 GB card can load it with layer offload but you give up a large share of the throughput, and integrated graphics is not a realistic target for this model."}},{"@type":"Question","name":"Does Qwen 3.6 35B A3B support images and a thinking mode?","acceptedAnswer":{"@type":"Answer","text":"Yes to both. It takes image input, so a screenshot, chart or photo can go into the prompt, and it has a think toggle that turns the deliberation step on or off. Thinking helps on code review, math and multi-step planning, and costs latency and tokens everywhere else."}},{"@type":"Question","name":"Where does it sit in the LU Labs hosted chat catalog?","acceptedAnswer":{"@type":"Answer","text":"The hosted chat catalog holds 15 models. Qwen 3.6 35B A3B is the mid-size vision option, next to Hermes 3 70B, Hermes 3 405B, Euryale 70B, Lunaris 8B, MythoMax 13B, Qwen3 Coder 480B and Kimi K3. Qwen 3.6 27B is restricted to the Pro and Max tiers."}},{"@type":"Question","name":"Is it cheaper to buy a 24 GB card or to rent the GPU?","acceptedAnswer":{"@type":"Answer","text":"It depends on how often you run it. A 24 GB card is a one time hardware purchase and then only electricity, which wins for constant daily use, full privacy and no queue. A 5 EUR credit pack of 165,000 credits with no subscription and no expiry wins for occasional use, or when you want the model today. Prices are at https://lu-labs.ai/pricing."}}]}
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@200;300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/assets/lu.css">
+<script defer src="/assets/lu.js"></script>
+  <script data-goatcounter="https://lu-uncensored.goatcounter.com/count" async src="//gc.zgo.at/count.js"></script>
+</head>
+<body>
+<nav class="lu-nav">
+  <a class="lu-nav-brand" href="/" aria-label="Locally Uncensored">
+    <span class="lu-mono" data-mono="nav" data-size="40" aria-hidden="true"></span>
+    <span class="lu-nav-word">Locally <span class="accent">Uncensored</span></span>
+  </a>
+  <div class="lu-nav-links" id="lu-nav-links">
+    <a class="lu-nav-link" href="/">Home</a>
+    <a class="lu-nav-link" href="/blog/">Blog</a>
+    <a class="lu-nav-link" href="/guide/">Guide</a>
+    <a class="lu-nav-link" href="/remote-access/">Remote</a>
+  </div>
+  <div class="lu-nav-right">
+    <a class="lu-nav-icon" href="https://github.com/PurpleDoubleD/locally-uncensored" title="GitHub" aria-label="GitHub"><svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.37.5 0 5.87 0 12.5c0 5.3 3.44 9.8 8.21 11.39.6.11.82-.26.82-.58 0-.29-.01-1.04-.02-2.05-3.34.73-4.04-1.61-4.04-1.61-.55-1.39-1.33-1.76-1.33-1.76-1.09-.75.08-.73.08-.73 1.2.08 1.84 1.24 1.84 1.24 1.07 1.83 2.81 1.3 3.5.99.11-.78.42-1.3.76-1.6-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.13-.3-.54-1.52.11-3.18 0 0 1.01-.32 3.3 1.23a11.5 11.5 0 0 1 6.01 0c2.29-1.55 3.3-1.23 3.3-1.23.65 1.66.24 2.88.12 3.18.77.84 1.23 1.91 1.23 3.22 0 4.61-2.8 5.63-5.48 5.92.43.37.81 1.1.81 2.22 0 1.6-.01 2.9-.01 3.29 0 .32.21.7.82.58A12.01 12.01 0 0 0 24 12.5C24 5.87 18.63.5 12 .5Z"/></svg><span class="lu-nav-badge">1400+&#8202;⭐</span></a>
+    <a class="lu-nav-icon discord" href="https://locallyuncensored.com/discord" target="_blank" rel="noopener" title="Discord" aria-label="Discord"><svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M20.32 4.37A19.8 19.8 0 0 0 15.45 3c-.2.36-.44.85-.6 1.23a18.3 18.3 0 0 0-5.7 0c-.16-.38-.4-.87-.6-1.23a19.7 19.7 0 0 0-4.87 1.37C.55 8.9-.32 13.3.11 17.63a19.9 19.9 0 0 0 6 3.03c.48-.66.9-1.36 1.27-2.1-.7-.26-1.36-.58-1.99-.96.17-.12.33-.25.49-.38a14.2 14.2 0 0 0 12.24 0c.16.13.32.26.49.38-.63.38-1.3.7-2 .96.37.74.8 1.44 1.27 2.1a19.8 19.8 0 0 0 6-3.03c.5-5.03-.85-9.39-3.55-13.26ZM8.02 15c-1.18 0-2.15-1.09-2.15-2.42 0-1.34.95-2.43 2.15-2.43 1.2 0 2.17 1.09 2.15 2.43 0 1.33-.95 2.42-2.15 2.42Zm7.96 0c-1.18 0-2.15-1.09-2.15-2.42 0-1.34.95-2.43 2.15-2.43 1.2 0 2.17 1.09 2.15 2.43 0 1.33-.94 2.42-2.15 2.42Z"/></svg><span class="lu-nav-badge">700+&#8202;<span style="font-size:0.715em">🟢</span></span></a>
+    <span class="lu-nav-sep"></span>
+    <div class="switch" id="theme-switch" role="button" aria-label="Toggle theme"></div>
+    <a class="lu-nav-dl" href="https://github.com/PurpleDoubleD/locally-uncensored/releases/latest"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m0 0 4-4m-4 4-4-4"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>Download</a>
+    <button type="button" class="lu-nav-toggle" aria-label="Menu"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+  </div>
+</nav>
+<div class="container lu-doc">
+  <div class="breadcrumb"><a href="../">Locally Uncensored</a> / <a href="./">Blog</a> / This Post</div>
+
+  <div class="post-meta">
+    <span class="post-tag">Model Guide</span>
+    <span>September 7, 2026</span>
+    <span>&middot;</span>
+    <span>6 min read</span>
+  </div>
+
+  <article>
+    <h1>Qwen 3.6 35B A3B Explained: What 3B Active Parameters Buys You</h1>
+
+    <p>A3B is the part of the name that decides whether this model will run on your machine, and it is the part people read backwards. Three billion active parameters sounds like a small model. It is not one. It is a 35 billion parameter model that behaves like a small one only in the dimension that is cheapest to buy.</p>
+
+    <h2>Mixture of experts, in plain terms</h2>
+
+    <p>A dense model pushes every token through every weight. A mixture-of-experts model splits most of its feed-forward capacity into expert blocks and puts a small router in front of them. For each token the router picks a handful of experts and only those run. Qwen 3.6 35B A3B holds <strong>35B parameters in total</strong> and activates <strong>about 3B per token</strong>.</p>
+
+    <p>Two consequences follow, and they pull in opposite directions.</p>
+
+    <p><strong>Compute per token is small.</strong> The arithmetic for one token is sized by the active 3B, not the full 35B. That is why an A3B model feels quicker in generation than a dense model of similar total size, once it is loaded.</p>
+
+    <p><strong>Memory is still the full model.</strong> The router is free to call any expert on any token, and it changes its mind token by token. So all the experts have to be resident. At a 4-bit quant that is <strong>roughly 18 to 20 GB of weights</strong>, before KV cache and runtime overhead.</p>
+
+    <p>That shape is exactly wrong for a machine with little memory and exactly right for a rented GPU. On rented hardware the memory is already there and idle, and the thing you pay for is compute, which this model uses sparingly. On your laptop the situation inverts: the compute you have would be adequate and the memory you have is the wall.</p>
+
+    <h2>What that means for your machine</h2>
+
+    <table>
+      <thead><tr><th>Machine</th><th>What happens</th></tr></thead>
+      <tbody>
+        <tr><td>24 GB NVIDIA card (3090 / 4090 / 5090)</td><td>Weights fit at 4-bit with headroom for context. This is the target.</td></tr>
+        <tr><td>Mac with 32 GB unified memory</td><td>Fits comfortably via MLX. Unified memory is the Mac advantage here.</td></tr>
+        <tr><td>16 GB card</td><td>Loads with layers offloaded to system RAM. Those layers run at bus speed instead of GPU speed, so expect a several-fold drop in tokens per second, depending on how many spill.</td></tr>
+        <tr><td>8 to 12 GB card</td><td>Too much spill to be worth it. Run a smaller local model, or rent this one.</td></tr>
+        <tr><td>No discrete GPU</td><td>Not a realistic target for this model at any usable speed.</td></tr>
+      </tbody>
+    </table>
+
+    <p>The <a href="how-to-run-qwen-3-6-locally.html">local setup guide</a> has the quants and download links if you are in the first two rows. The <a href="run-qwen-3-6-without-gpu.html">no-GPU guide</a> covers the other three.</p>
+
+    <h2>Vision and the think toggle</h2>
+
+    <p>Two features change what this model is for. It accepts <strong>image input</strong>, so a screenshot of a failing UI, a chart, a scanned page or a photo can go into the prompt instead of being described in words. And it has a <strong>think toggle</strong>: with thinking on, the model runs a deliberation pass before answering. That earns its keep on code review, math and multi-step planning, and wastes latency and tokens on everything else. Treat it as a per-conversation switch, not a default.</p>
+
+    <h2>Where it sits in the hosted catalog</h2>
+
+    <p>On the hosted layer at LU Labs the chat catalog holds <strong>15 models</strong>, and Qwen 3.6 35B A3B is the mid-size vision option in it. Around it:</p>
+
+    <ul>
+      <li><strong>Hermes 3 70B</strong> and <strong>Hermes 3 405B</strong> for general chat and agent work. The 405B has no thinking mode, but tool calls reach it through a prompt transport, which is why the Agent and the coding agent run on it.</li>
+      <li><strong>Euryale 70B</strong>, <strong>Lunaris 8B</strong> and <strong>MythoMax 13B</strong> for roleplay and character work, with Lunaris as the cheap fast one.</li>
+      <li><strong>Qwen3 Coder 480B</strong> for code, and <a href="kimi-k3-explained.html"><strong>Kimi K3</strong></a> at the top of the reasoning end.</li>
+    </ul>
+
+    <p>One thing to know before you plan around it: <strong>Qwen 3.6 27B is Pro and Max only</strong>. The 35B A3B is the Qwen 3.6 you get on the entry tiers. If you want the broader comparison of what is worth running at all this year, our <a href="best-uncensored-ai-models-2026.html">2026 model roundup</a> goes wider than one family.</p>
+
+    <h2>The cost side</h2>
+
+    <p>Hosted usage is metered in credits, where 1 credit is $0.00001. Chat bills per token at a rate that differs per model. The published reference: Hermes 3 70B costs 0.07 credits per output token, so a 5 EUR pack of 165,000 credits is roughly 2.3 million output tokens on it. Packs are 5 EUR for 165,000 credits, 10 EUR for 350,000 and 25 EUR for 900,000, they need no subscription, any pack works from the first purchase, and credits never expire. The Hosted plan is 19 EUR a month for 900,000 credits and it is the tier that includes LoRA training, two per month. Current rates sit on <a href="https://lu-labs.ai/pricing" target="_blank" rel="noopener">https://lu-labs.ai/pricing</a>, and the model page is <a href="https://lu-labs.ai/run-qwen-3-6-without-gpu" target="_blank" rel="noopener">Qwen 3.6 without a GPU</a>.</p>
+
+    <h2>Own or rent</h2>
+
+    <p><strong>Owning wins</strong> when you use the model constantly, when the prompts must never leave your machine, and when you refuse to sit behind anyone else's queue. Shared hardware means a short wait at busy hours, and a curated catalog means you cannot bring your own checkpoint. A card is a one time purchase, and after that you pay electricity.</p>
+
+    <p><strong>Renting wins</strong> when the use is occasional, when you do not have a 24 GB card and are not about to buy one, and when you want this model today rather than after a delivery. On the hosted side, accounts and billing sit in the EU, there is no training on your prompts, and hosted text models answer as they were trained with no moderation layer added on top.</p>
+
+    <p>The free desktop app for Windows and Linux does not change either way: it runs whatever you install, with nothing in the middle, and that stays true. The Cloud switch inside it is there for exactly the case this article describes, one model that will not fit while everything else still runs at home.</p>
+  </article>
+
+  <div class="post-footer">
+    <p>Try Qwen 3.6 35B A3B on rented hardware before you buy a 24 GB card. Packs from 5 EUR, credits never expire.</p>
+    <a href="https://lu-labs.ai/checkout/start?plan=hosted&amp;src=luc-qwen36-a3b-article" class="cta-btn" target="_blank" rel="noopener">
+      Open LU Labs Studio
+    </a>
+  </div>
+</div>
+
+<footer>
+  <div class="footer-row footer-meta"><span>&copy; 2026 &middot; Locally Uncensored &middot; AGPL-3.0</span></div>
+  <div class="footer-row footer-links">
+    <a href="https://locallyuncensored.com/blog/">Blog</a>
+    <a href="https://locallyuncensored.com/guide/">Guide</a>
+    <a href="https://locallyuncensored.com/remote-access/">Remote access</a>
+    <a href="https://locallyuncensored.com/discord" target="_blank" rel="noopener">Discord</a>
+    <a href="https://github.com/PurpleDoubleD/locally-uncensored">GitHub</a>
+    <a href="https://github.com/PurpleDoubleD/locally-uncensored/discussions">Discussions</a>
+    <a href="https://github.com/PurpleDoubleD/locally-uncensored/issues">Issues</a>
+    <a href="https://reddit.com/user/GroundbreakingMall54">Reddit</a>
+    <a href="https://www.linkedin.com/in/david-drobnitza-locallyuncensored/" rel="me noopener" target="_blank">LinkedIn</a>
+  </div>
+</footer>
+</body>
+</html>

@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LM Studio Alternative for Mac: The Browser Studio Setup (2026)</title>
+<meta name="description" content="LM Studio is a good Mac chat client, but it will not make images and it cannot hold a 405B model. Here is the browser Studio setup, the API key path, and the hybrid that actually works on Apple Silicon.">
+<meta name="keywords" content="lm studio alternative for mac, lm studio mac alternative, local ai mac, mac ai image generation, apple silicon llm, lu labs studio, openai compatible api mac">
+<meta property="og:title" content="LM Studio Alternative for Mac: The Browser Studio Setup (2026)">
+<meta property="og:description" content="What LM Studio gives a Mac owner, the two things it does not, and how to set up the browser Studio next to it in five minutes. With the API key path and real credit prices.">
+<meta property="og:image" content="https://raw.githubusercontent.com/PurpleDoubleD/locally-uncensored/master/docs/social-preview.png">
+<meta property="og:url" content="https://locallyuncensored.com/blog/lm-studio-alternative-for-mac.html">
+<meta property="og:type" content="article">
+<meta property="article:published_time" content="2026-09-07">
+<meta property="article:author" content="PurpleDoubleD">
+<meta property="article:tag" content="Mac">
+<meta property="article:tag" content="LM Studio">
+<meta property="article:tag" content="Tutorial">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="LM Studio Alternative for Mac: The Browser Studio Setup (2026)">
+<meta name="twitter:description" content="What LM Studio gives a Mac owner, the two things it does not, and how to set up the browser Studio next to it in five minutes.">
+<meta name="twitter:image" content="https://raw.githubusercontent.com/PurpleDoubleD/locally-uncensored/master/docs/social-preview.png">
+<link rel="canonical" href="https://locallyuncensored.com/blog/lm-studio-alternative-for-mac.html">
+<meta name="robots" content="index, follow">
+<meta name="theme-color" content="#0a0a0a">
+<link rel="icon" href="../favicon.png">
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"BlogPosting","headline":"LM Studio Alternative for Mac: The Browser Studio Setup (2026)","description":"LM Studio is a good local chat client on a Mac, but it does not generate images or video and it cannot hold a model larger than your unified memory. This guide sets up the LU Labs browser Studio as the alternative on a Mac, covers the API key path for terminal and third party tools, and lays out the hybrid local plus hosted setup with credit prices.","image":"https://raw.githubusercontent.com/PurpleDoubleD/locally-uncensored/master/docs/social-preview.png","datePublished":"2026-09-07","dateModified":"2026-09-07","inLanguage":"en","author":{"@type":"Person","name":"PurpleDoubleD","url":"https://github.com/PurpleDoubleD"},"publisher":{"@type":"Organization","name":"Locally Uncensored","url":"https://locallyuncensored.com/"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://locallyuncensored.com/blog/lm-studio-alternative-for-mac.html"},"keywords":"lm studio alternative for mac, lm studio mac alternative, local ai mac, apple silicon llm, mac ai image generation"}
+</script>
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"HowTo","name":"How to set up an LM Studio alternative on a Mac","description":"Set up the LU Labs browser Studio on a Mac as the alternative to LM Studio, including sign in, model choice, adding the page to the Dock as a web app, and creating an API key for terminal use.","totalTime":"PT5M","tool":[{"@type":"HowToTool","name":"Any Mac running Safari or Chrome"},{"@type":"HowToTool","name":"An LU Labs account"},{"@type":"HowToTool","name":"Optional: a local runner such as LM Studio or Ollama for offline work"}],"step":[{"@type":"HowToStep","position":1,"name":"Open the Studio in your browser","text":"Go to lu-labs.ai in Safari or Chrome. There is nothing to install, no Homebrew formula, no Xcode command line tools, no model download."},{"@type":"HowToStep","position":2,"name":"Sign in","text":"Create an account or sign in. Accounts and billing sit in the EU, and prompts are not used for training and are never sold."},{"@type":"HowToStep","position":3,"name":"Pick a chat model","text":"Open the model picker. Qwen 3.6 35B A3B is a good first pick because it takes images as input and has a think toggle. Hermes 3 405B is the largest model in the chat catalog and needs no local memory at all."},{"@type":"HowToStep","position":4,"name":"Send the first message","text":"Type a prompt and send it. Usage is metered in credits per token, so a short chat costs a fraction of a cent rather than a monthly fee."},{"@type":"HowToStep","position":5,"name":"Add the Studio to your Dock as a web app","text":"In Safari choose File then Add to Dock. In Chrome open the three dot menu, then Cast Save and Share, then Install page as app. You get an icon in the Dock and a window without browser tabs, which is as close to a native app as this gets."},{"@type":"HowToStep","position":6,"name":"Switch lanes for image and video","text":"Use the lane switcher at the top of the Studio to move from chat to the image lane with 10 models or the video lane with 5 models. This is the part LM Studio does not cover at all."},{"@type":"HowToStep","position":7,"name":"Create an API key for terminal and third party tools","text":"Open Settings then Cloud API keys and create a key. The key starts with lu_ and is shown once, so copy it immediately. Point any OpenAI compatible client at https://lu-labs.ai/api/inference/v1 with that key."}]}
+</script>
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"FAQPage","mainEntity":[{"@type":"Question","name":"Is there a Mac version of the Locally Uncensored desktop app?","acceptedAnswer":{"@type":"Answer","text":"No. The free open source desktop app is Windows and Linux only. There is no native Mac build and we do not want to imply otherwise. On a Mac the answer is the browser Studio at lu-labs.ai, used next to whatever local runner you already have installed. The desktop app's Cloud switch and the browser Studio use the same LU Labs account, so a Windows machine and a Mac in the same household share one balance."}},{"@type":"Question","name":"What is the best LM Studio alternative on a Mac?","acceptedAnswer":{"@type":"Answer","text":"It depends on what LM Studio is failing to do for you. If you want a different local chat client, Jan and Ollama with a front end are the closest swaps and stay fully offline. If you hit the ceiling of your unified memory or you want images and video, a local client is not the answer at all, and the browser Studio at lu-labs.ai covers chat with 15 hosted models, an image lane with 10 models and a video lane with 5."}},{"@type":"Question","name":"Do I need to install anything to run the browser Studio on a Mac?","acceptedAnswer":{"@type":"Answer","text":"No. It runs in Safari or Chrome. No Homebrew, no Xcode command line tools, no Python environment, no model download. If you want it to feel like an app, add the page to the Dock: File then Add to Dock in Safari, or the three dot menu then Cast Save and Share then Install page as app in Chrome."}},{"@type":"Question","name":"Can I use it from the Mac terminal or from SillyTavern?","acceptedAnswer":{"@type":"Answer","text":"Yes. Create a key under Settings then Cloud API keys. The key has an lu_ prefix and is shown once. The base URL is https://lu-labs.ai/api/inference/v1 and the shape is OpenAI chat completions, so curl works, and so do SillyTavern in Chat Completion mode as a custom OpenAI compatible source, Aider, and LibreChat. Useful model ids are NousResearch/Hermes-3-Llama-3.1-405B and Qwen/Qwen3.6-35B-A3B."}},{"@type":"Question","name":"Can LM Studio generate images on a Mac?","acceptedAnswer":{"@type":"Answer","text":"No. LM Studio is a text app. It runs language models and serves them over a local OpenAI compatible endpoint, and that is the whole scope. For diffusion work on a Mac you either install a separate stack such as Draw Things or ComfyUI and accept slow generation, or you send the prompt to a rented GPU. The hosted image lane runs on managed NVIDIA H100, A100 and B200 class hardware."}},{"@type":"Question","name":"What does the hosted layer cost?","acceptedAnswer":{"@type":"Answer","text":"A 5 EUR credit pack is 165,000 credits with no subscription, and credits never expire. That is roughly 550 Flux Schnell images at 300 credits each, or about 137 Flux 2 Dev images at 1,200 credits each, or roughly 2.3 million output tokens on Hermes 3 70B. The Hosted plan is 19 EUR a month with 900,000 credits and includes 2 LoRA trainings a month. Full list at lu-labs.ai/pricing."}},{"@type":"Question","name":"Should I stop using LM Studio if I set this up?","acceptedAnswer":{"@type":"Answer","text":"No, and that is the point of the hybrid setup. Keep a small model loaded in LM Studio or Ollama for offline work, drafts and anything you do not want leaving the machine. Send the heavy prompts, the long agent loops and every image to the hosted lane. The two do not conflict, and on a Mac this combination beats either half on its own."}}]}
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@200;300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/assets/lu.css">
+<script defer src="/assets/lu.js"></script>
+  <script data-goatcounter="https://lu-uncensored.goatcounter.com/count" async src="//gc.zgo.at/count.js"></script>
+</head>
+<body>
+<nav class="lu-nav">
+  <a class="lu-nav-brand" href="/" aria-label="Locally Uncensored">
+    <span class="lu-mono" data-mono="nav" data-size="40" aria-hidden="true"></span>
+    <span class="lu-nav-word">Locally <span class="accent">Uncensored</span></span>
+  </a>
+  <div class="lu-nav-links" id="lu-nav-links">
+    <a class="lu-nav-link" href="/">Home</a>
+    <a class="lu-nav-link" href="/blog/">Blog</a>
+    <a class="lu-nav-link" href="/guide/">Guide</a>
+    <a class="lu-nav-link" href="/remote-access/">Remote</a>
+  </div>
+  <div class="lu-nav-right">
+    <a class="lu-nav-icon" href="https://github.com/PurpleDoubleD/locally-uncensored" title="GitHub" aria-label="GitHub"><svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.37.5 0 5.87 0 12.5c0 5.3 3.44 9.8 8.21 11.39.6.11.82-.26.82-.58 0-.29-.01-1.04-.02-2.05-3.34.73-4.04-1.61-4.04-1.61-.55-1.39-1.33-1.76-1.33-1.76-1.09-.75.08-.73.08-.73 1.2.08 1.84 1.24 1.84 1.24 1.07 1.83 2.81 1.3 3.5.99.11-.78.42-1.3.76-1.6-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.13-.3-.54-1.52.11-3.18 0 0 1.01-.32 3.3 1.23a11.5 11.5 0 0 1 6.01 0c2.29-1.55 3.3-1.23 3.3-1.23.65 1.66.24 2.88.12 3.18.77.84 1.23 1.91 1.23 3.22 0 4.61-2.8 5.63-5.48 5.92.43.37.81 1.1.81 2.22 0 1.6-.01 2.9-.01 3.29 0 .32.21.7.82.58A12.01 12.01 0 0 0 24 12.5C24 5.87 18.63.5 12 .5Z"/></svg><span class="lu-nav-badge">1400+&#8202;⭐</span></a>
+    <a class="lu-nav-icon discord" href="https://locallyuncensored.com/discord" target="_blank" rel="noopener" title="Discord" aria-label="Discord"><svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M20.32 4.37A19.8 19.8 0 0 0 15.45 3c-.2.36-.44.85-.6 1.23a18.3 18.3 0 0 0-5.7 0c-.16-.38-.4-.87-.6-1.23a19.7 19.7 0 0 0-4.87 1.37C.55 8.9-.32 13.3.11 17.63a19.9 19.9 0 0 0 6 3.03c.48-.66.9-1.36 1.27-2.1-.7-.26-1.36-.58-1.99-.96.17-.12.33-.25.49-.38a14.2 14.2 0 0 0 12.24 0c.16.13.32.26.49.38-.63.38-1.3.7-2 .96.37.74.8 1.44 1.27 2.1a19.8 19.8 0 0 0 6-3.03c.5-5.03-.85-9.39-3.55-13.26ZM8.02 15c-1.18 0-2.15-1.09-2.15-2.42 0-1.34.95-2.43 2.15-2.43 1.2 0 2.17 1.09 2.15 2.43 0 1.33-.95 2.42-2.15 2.42Zm7.96 0c-1.18 0-2.15-1.09-2.15-2.42 0-1.34.95-2.43 2.15-2.43 1.2 0 2.17 1.09 2.15 2.43 0 1.33-.94 2.42-2.15 2.42Z"/></svg><span class="lu-nav-badge">700+&#8202;<span style="font-size:0.715em">🟢</span></span></a>
+    <span class="lu-nav-sep"></span>
+    <div class="switch" id="theme-switch" role="button" aria-label="Toggle theme"></div>
+    <a class="lu-nav-dl" href="https://github.com/PurpleDoubleD/locally-uncensored/releases/latest"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m0 0 4-4m-4 4-4-4"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>Download</a>
+    <button type="button" class="lu-nav-toggle" aria-label="Menu"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+  </div>
+</nav>
+<div class="container lu-doc">
+  <div class="breadcrumb"><a href="../">Locally Uncensored</a> / <a href="./">Blog</a> / This Post</div>
+
+  <div class="post-meta">
+    <span class="post-tag">Tutorial</span>
+    <span>September 7, 2026</span>
+    <span>&middot;</span>
+    <span>7 min read</span>
+  </div>
+
+  <article>
+    <h1>LM Studio Alternative for Mac: The Browser Studio Setup</h1>
+
+    <p>LM Studio is a good app. If you are on a Mac and you want a tidy local chat client with a model browser bolted on, it is one of the shortest routes there, and nothing below is an argument against keeping it installed. People search for an alternative on a Mac for two reasons that have very little to do with the app itself: they run into the memory ceiling of the machine, or they want a picture and a text client does not make pictures.</p>
+
+    <p>This guide is the setup we recommend on Apple hardware: the browser Studio at <a href="https://lu-labs.ai/lm-studio-alternative-for-mac" target="_blank" rel="noopener">LU Labs</a> next to whatever local runner you already use. For a straight comparison of desktop clients, see the <a href="lm-studio-alternatives.html">seven LM Studio alternatives roundup</a>.</p>
+
+    <h2>What LM Studio Already Does Well</h2>
+
+    <p>Credit where it is due. On a Mac, LM Studio gives you a clean chat window, a model browser that surfaces both GGUF and MLX builds with the quant sizes visible, and a local server speaking the OpenAI chat completions shape on localhost. Everything stays on the machine. Pull the network cable and it keeps answering. For a laptop that mostly needs a private assistant for text, that is a complete product and you do not need us.</p>
+
+    <h2>The Two Things It Does Not Do</h2>
+
+    <p><strong>It does not generate images or video.</strong> LM Studio runs language models, full stop. Diffusion on a Mac means installing a separate stack such as Draw Things or ComfyUI, and then waiting, because Apple Silicon is not built for that workload.</p>
+
+    <p><strong>It cannot run a model larger than your machine.</strong> On Apple Silicon the model weights live in unified memory shared with macOS, your browser and everything else. A 16 GB MacBook Air realistically tops out around a 7B to 12B model at 4-bit before the system starts swapping. There is no local path to a 405B model on a laptop, at any quant, ever. We wrote the honest tier list in <a href="what-a-mac-can-run-locally-2026.html">what a Mac can actually run locally in 2026</a>.</p>
+
+    <h2>What the Browser Studio Gives You Instead</h2>
+
+    <table>
+      <thead><tr><th>Lane</th><th>What is in it</th></tr></thead>
+      <tbody>
+        <tr><td>Chat</td><td>15 hosted models, including Hermes 3 70B, Hermes 3 405B, Euryale 70B, Lunaris 8B, MythoMax 13B, Qwen 3.6 35B A3B (vision plus a think toggle), Qwen3 Coder 480B and Kimi K3</td></tr>
+        <tr><td>Image</td><td>10 models: Flux 2 Dev, Flux Dev, Flux Schnell, Qwen Image, HiDream, HunyuanImage 2.1, Z-Image Turbo, Chroma, Prefect Pony XL, Neta Lumina</td></tr>
+        <tr><td>Editing</td><td>Inpainting on Flux Dev, Qwen Image Edit, background removal, eraser, upscale to 2k, 4k or 8k</td></tr>
+        <tr><td>Video</td><td>5 models: Wan 2.2 720p, Wan 2.2 Fast, LTX-2 with audio, LTX 2.3, HunyuanVideo 1.5. Clips are 5 or 8 seconds</td></tr>
+        <tr><td>Hardware</td><td>Managed NVIDIA H100, A100 and B200 class GPUs. Shared, so expect a short queue at busy hours</td></tr>
+      </tbody>
+    </table>
+
+    <p>On filtering, the honest version: hosted text models answer the way they were trained and we add no moderation layer on top of them. Image and video prompts follow the Terms of Service and are checked before anything renders. Content involving minors is refused everywhere, always. The local desktop app runs whatever you install with nothing in the middle, which is exactly why the hybrid below makes sense.</p>
+
+    <h2>Setup on a Mac, Step by Step</h2>
+
+    <ol>
+      <li><strong>Open the Studio.</strong> Go to <a href="https://lu-labs.ai/" target="_blank" rel="noopener">lu-labs.ai</a> in Safari or Chrome. Nothing to install. No Homebrew formula, no Xcode command line tools, no 20 GB download sitting in your Downloads folder.</li>
+      <li><strong>Sign in.</strong> Accounts and billing are in the EU. Prompts are not used for training and are never sold.</li>
+      <li><strong>Pick a model.</strong> Qwen 3.6 35B A3B is the sensible first pick: it takes images as input and has a think toggle. If you want the largest thing in the catalog, Hermes 3 405B needs exactly zero gigabytes of your RAM.</li>
+      <li><strong>Send the first message.</strong> Usage is metered per token in credits, so a short chat costs a fraction of a cent rather than a subscription.</li>
+      <li><strong>Add it to the Dock, if you want it to feel like an app.</strong> Safari: File, then Add to Dock. Chrome: the three dot menu, then Cast Save and Share, then Install page as app. You get an icon and a window with no tab strip.</li>
+      <li><strong>Switch lanes.</strong> The lane switcher at the top moves you from chat to image or video. This is the part a local text client cannot cover at all.</li>
+    </ol>
+
+    <h2>The API Key Path, So It Works From the Terminal Too</h2>
+
+    <p>The browser is not the only door. Open <strong>Settings, then Cloud API keys</strong>, and create a key. It carries an <code>lu_</code> prefix and is shown once, so copy it before you close the dialog. The endpoint is OpenAI chat completions shaped, at base URL <code>https://lu-labs.ai/api/inference/v1</code>.</p>
+
+    <pre><code>curl https://lu-labs.ai/api/inference/v1/chat/completions \
+  -H "Authorization: Bearer lu_YOUR_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "NousResearch/Hermes-3-Llama-3.1-405B",
+    "messages": [{"role": "user", "content": "Summarise this shell script."}]
+  }'</code></pre>
+
+    <p>The two model ids worth memorising are <code>NousResearch/Hermes-3-Llama-3.1-405B</code> and <code>Qwen/Qwen3.6-35B-A3B</code>. Because the shape is standard, the usual suspects work without a shim: SillyTavern in Chat Completion mode as a custom OpenAI compatible source, Aider, and LibreChat. If you already point one of those at LM Studio's localhost server, you are changing a base URL and a key, nothing else.</p>
+
+    <h2>The Hybrid Setup, Which Is the Actual Answer on a Mac</h2>
+
+    <p>Do not pick a side. Keep a small model loaded in the runner you already have, LM Studio or Ollama or MLX, for offline work, drafts, notes, and anything you would rather not send anywhere. Send the heavy prompts, the long agent loops and every single image to the hosted lane. Your fans stay quiet and your memory pressure graph stays green.</p>
+
+    <p>The dividing line is concrete. Qwen 3.6 35B A3B at 4-bit needs roughly 18 to 20 GB of weights resident, so a 32 GB Mac can hold it locally and a 16 GB Mac cannot. Our <a href="how-to-run-qwen-3-6-locally.html">Qwen 3.6 local guide</a> has the quant table if you want to try. Above that size, hosted is not a compromise, it is the only option that exists.</p>
+
+    <h2>What It Costs</h2>
+
+    <table>
+      <thead><tr><th>Option</th><th>Credits</th><th>Roughly</th></tr></thead>
+      <tbody>
+        <tr><td>5 EUR pack, no subscription</td><td>165,000</td><td>About 550 Flux Schnell images, or 137 Flux 2 Dev images, or 2.3 million output tokens on Hermes 3 70B</td></tr>
+        <tr><td>10 EUR pack</td><td>350,000</td><td>Same rates, better ratio</td></tr>
+        <tr><td>25 EUR pack</td><td>900,000</td><td>Same volume as a Hosted month, without the subscription</td></tr>
+        <tr><td>Hosted, 19 EUR a month</td><td>900,000</td><td>About 3,000 Flux Schnell images or 750 Flux 2 Dev images, plus 2 LoRA trainings a month</td></tr>
+      </tbody>
+    </table>
+
+    <p>Credits never expire and any pack is available from the first purchase, so you can start at 5 EUR without committing to anything. Per model rates are listed at <a href="https://lu-labs.ai/pricing" target="_blank" rel="noopener">https://lu-labs.ai/pricing</a>. Flux Schnell is 300 credits an image, Flux 2 Dev 1,200, a 5 second LTX-2 clip 8,000. LoRA training is Hosted only, not on packs.</p>
+
+    <h2>One Thing to Be Clear About</h2>
+
+    <p>The free open source desktop app is <strong>Windows and Linux only</strong>. There is no native Mac build, and we are not going to pretend otherwise in a post aimed at Mac owners. The desktop app has a Cloud switch that signs into the same LU Labs account, so if you also have a Windows box the balance is shared. On the Mac itself, the browser Studio is the app.</p>
+
+    <h2>Related Reading</h2>
+
+    <ul>
+      <li><a href="what-a-mac-can-run-locally-2026.html">What a Mac can run locally in 2026</a>, the memory tiers</li>
+      <li><a href="lm-studio-alternatives.html">7 best LM Studio alternatives</a>, desktop clients</li>
+      <li><a href="how-to-run-qwen-3-6-locally.html">How to run Qwen 3.6 locally</a>, quants and hardware</li>
+      <li><a href="local-ai-image-and-video-generator.html">Local AI image and video generator</a>, the diffusion side</li>
+    </ul>
+
+    <hr>
+
+    <p><em>Locally Uncensored is AGPL-3.0 licensed and built by <a href="https://github.com/PurpleDoubleD">PurpleDoubleD</a>. Questions on <a href="https://github.com/PurpleDoubleD/locally-uncensored/discussions">GitHub Discussions</a> or in the <a href="https://locallyuncensored.com/discord">Discord</a>.</em></p>
+  </article>
+
+  <div class="post-footer">
+    <p>No Mac build, no problem: chat, image and video in the browser, with a 5 EUR pack that never expires.</p>
+    <a href="https://lu-labs.ai/checkout/start?plan=hosted&amp;src=luc-lmstudio-mac-guide" class="cta-btn" target="_blank" rel="noopener">
+      Open the Studio on your Mac
+    </a>
+  </div>
+</div>
+
+<footer>
+  <div class="footer-row footer-meta"><span>&copy; 2026 &middot; Locally Uncensored &middot; AGPL-3.0</span></div>
+  <div class="footer-row footer-links">
+    <a href="https://locallyuncensored.com/blog/">Blog</a>
+    <a href="https://locallyuncensored.com/guide/">Guide</a>
+    <a href="https://locallyuncensored.com/remote-access/">Remote access</a>
+    <a href="https://locallyuncensored.com/discord" target="_blank" rel="noopener">Discord</a>
+    <a href="https://github.com/PurpleDoubleD/locally-uncensored">GitHub</a>
+    <a href="https://github.com/PurpleDoubleD/locally-uncensored/discussions">Discussions</a>
+    <a href="https://github.com/PurpleDoubleD/locally-uncensored/issues">Issues</a>
+    <a href="https://reddit.com/user/GroundbreakingMall54">Reddit</a>
+    <a href="https://www.linkedin.com/in/david-drobnitza-locallyuncensored/" rel="me noopener" target="_blank">LinkedIn</a>
+  </div>
+</footer>
+</body>
+</html>
