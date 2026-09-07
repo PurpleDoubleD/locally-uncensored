@@ -77,7 +77,7 @@ export function CloudTeaserModal() {
 
   // One-time onboarding (David 2026-07-19): the Cloud discovery layer is meant
   // to appear ONCE per user, never again — not after updates either. Any
-  // dismissal of this sheet (button, backdrop, X, Try local / See plans) retires
+  // dismissal of this sheet (button, backdrop, X, Try local / Get LU Cloud) retires
   // the whole discovery layer permanently; the persisted flag survives updates,
   // and Settings can re-enable it. Cloud-only *features* (upscale / eraser) stay
   // accessible regardless — their sheet renders on tap, not on this flag.
@@ -159,17 +159,19 @@ export function CloudTeaserModal() {
               <div className="flex items-center gap-2 pt-1">
                 <button
                   onClick={() => {
-                    // The plans live on the pricing page, not behind the
-                    // in-app gate (David, 2026-09-07: "nur zur Preisseite").
-                    // Until 2.6.8 this opened CloudGateModal, which asks for a
-                    // login before it shows a single price; the browser page
-                    // shows the numbers first and logs in second.
+                    // Straight into signup and checkout with Hosted preselected
+                    // (David, 2026-09-07: "die Pricing-Seite ist eine
+                    // Entscheidung zu viel"). Until 2.6.8 this opened
+                    // CloudGateModal, which asks for a login before it shows a
+                    // single price. The src tag names the card size, so the
+                    // funnel on the server can say what this button brings.
                     close()
-                    void openExternal(`${CLOUD_BASE}/pricing`)
+                    const src = gpuGb !== null ? `gpu${gpuGb}` : 'gpu-unknown'
+                    void openExternal(`${CLOUD_BASE}/checkout/start?plan=hosted&src=${src}`)
                   }}
                   className="flex-1 flex items-center justify-center gap-1.5 h-8 rounded-lg bg-white text-black text-[0.7rem] font-semibold hover:bg-gray-200 transition-colors"
                 >
-                  <Sparkles size={12} /> See plans
+                  <Sparkles size={12} /> Get LU Cloud
                 </button>
                 {localLane && (
                   <button
