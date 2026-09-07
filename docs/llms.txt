@@ -56,8 +56,7 @@ Locally Uncensored is a free, open-source (AGPL-3.0) local AI studio for the des
 - Linux installer auto-detects deb/rpm/AppImage family; ComfyUI CPU mode + Arch venv auto-create (v2.4.5)
 
 ## Supported Chat Models
-- Qwen 3.6: 27B dense + 35B MoE (vision, agentic coding, thinking, 256K context, day-0 support)
-- Qwen 3.5: 9B / 27B / 35B MoE
+- Qwen 3.8: 27B dense with vision through a separate mmproj file, plus a 9B distill for small cards (text only); official, abliterated and uncensored builds (v2.6.6)
 - Qwen 3-Coder: 30B + Next 80B
 - Gemma 4: 31B / 26B MoE / E4B / E2B (native vision + tools)
 - GPT-OSS: 120B and 20B
@@ -97,7 +96,7 @@ Locally Uncensored is a free, open-source (AGPL-3.0) local AI studio for the des
 - Recommended: 8 GB+ VRAM NVIDIA GPU for FLUX, Juggernaut XL image gen
 - Video generation: 10-12 GB VRAM (Wan 1.3B, LTX 2.3)
 - Image-to-video: 6 GB VRAM minimum (FramePack F1)
-- Best in class: 24 GB+ VRAM for Qwen 3.6 35B MoE and 35B+ chat models
+- Best in class: 24 GB+ VRAM for 35B MoE and 35B+ chat models
 
 ## Privacy
 - 100% local by default
