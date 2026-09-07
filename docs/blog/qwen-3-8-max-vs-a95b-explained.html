@@ -4,10 +4,10 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Qwen 3.8 Max vs Qwen 3.8 A95B, explained</title>
-<meta name="description" content="Two Qwen 3.8 entries, one plan, almost the same price. The thinking switch is the whole difference, and on one of them it does not exist.">
+<meta name="description" content="Two Qwen 3.8 entries on every plan, almost the same price. The thinking switch is the whole difference, and on one of them it does not exist.">
 <meta name="keywords" content="qwen 3.8 max vs a95b, qwen 3.8 a95b, qwen 3.8 max, qwen3.8 2.4t a95b, qwen 3.8 thinking, qwen 3.8 price, qwen 3.8 licence">
 <meta property="og:title" content="Qwen 3.8 Max vs Qwen 3.8 A95B, explained">
-<meta property="og:description" content="Two Qwen 3.8 entries, one plan, almost the same price. The thinking switch is the whole difference, and on one of them it does not exist.">
+<meta property="og:description" content="Two Qwen 3.8 entries on every plan, almost the same price. The thinking switch is the whole difference, and on one of them it does not exist.">
 <meta property="og:image" content="https://raw.githubusercontent.com/PurpleDoubleD/locally-uncensored/master/docs/social-preview.png">
 <meta property="og:url" content="https://locallyuncensored.com/blog/qwen-3-8-max-vs-a95b-explained.html">
 <meta property="og:type" content="article">
@@ -17,17 +17,17 @@
 <meta property="article:tag" content="Comparison">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="Qwen 3.8 Max vs Qwen 3.8 A95B, explained">
-<meta name="twitter:description" content="Two Qwen 3.8 entries, one plan, almost the same price. The thinking switch is the whole difference, and on one of them it does not exist.">
+<meta name="twitter:description" content="Two Qwen 3.8 entries on every plan, almost the same price. The thinking switch is the whole difference, and on one of them it does not exist.">
 <meta name="twitter:image" content="https://raw.githubusercontent.com/PurpleDoubleD/locally-uncensored/master/docs/social-preview.png">
 <link rel="canonical" href="https://locallyuncensored.com/blog/qwen-3-8-max-vs-a95b-explained.html">
 <meta name="robots" content="index, follow">
 <meta name="theme-color" content="#0a0a0a">
 <link rel="icon" href="../favicon.png">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"BlogPosting","headline":"Qwen 3.8 Max vs Qwen 3.8 A95B, explained","description":"The two hosted Qwen 3.8 entries compared on the things that decide it: credits per token, whether the reasoning can be switched off, image input, licence and plan.","image":"https://raw.githubusercontent.com/PurpleDoubleD/locally-uncensored/master/docs/social-preview.png","datePublished":"2026-09-07","dateModified":"2026-09-07","inLanguage":"en","author":{"@type":"Person","name":"PurpleDoubleD","url":"https://github.com/PurpleDoubleD"},"publisher":{"@type":"Organization","name":"Locally Uncensored","url":"https://locallyuncensored.com/"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://locallyuncensored.com/blog/qwen-3-8-max-vs-a95b-explained.html"},"keywords":"qwen 3.8 max vs a95b, qwen 3.8 a95b, qwen 3.8 thinking, qwen 3.8 price"}
+{"@context":"https://schema.org","@type":"BlogPosting","headline":"Qwen 3.8 Max vs Qwen 3.8 A95B, explained","description":"The two hosted Qwen 3.8 entries compared on the things that decide it: credits per token, whether the reasoning can be switched off, image input and licence. Both are on every plan and on a credit pack.","image":"https://raw.githubusercontent.com/PurpleDoubleD/locally-uncensored/master/docs/social-preview.png","datePublished":"2026-09-07","dateModified":"2026-09-07","inLanguage":"en","author":{"@type":"Person","name":"PurpleDoubleD","url":"https://github.com/PurpleDoubleD"},"publisher":{"@type":"Organization","name":"Locally Uncensored","url":"https://locallyuncensored.com/"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://locallyuncensored.com/blog/qwen-3-8-max-vs-a95b-explained.html"},"keywords":"qwen 3.8 max vs a95b, qwen 3.8 a95b, qwen 3.8 thinking, qwen 3.8 price"}
 </script>
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"FAQPage","mainEntity":[{"@type":"Question","name":"What is the difference between Qwen 3.8 Max and Qwen 3.8 A95B?","acceptedAnswer":{"@type":"Answer","text":"The thinking switch. Both reason on every turn by default, but Qwen 3.8 Max can be told to stop and Qwen 3.8 A95B cannot. Max is also the cheaper of the two per token. Neither takes image input and both call tools natively."}},{"@type":"Question","name":"Can I turn the reasoning off on Qwen 3.8 Max?","acceptedAnswer":{"@type":"Answer","text":"Yes, through the chat template flag rather than the reasoning effort field, which has no effect on this model. We measured a short question at 109 output tokens with reasoning running and 4 with the template flag set, for an identical answer. The toggle in the Studio sends the flag that works."}},{"@type":"Question","name":"Can I turn the reasoning off on Qwen 3.8 A95B?","acceptedAnswer":{"@type":"Answer","text":"No. Reasoning effort is accepted and ignored, and the chat template flag comes back as a 400 saying that disabling thinking is not supported. The model always reasons and you always pay for those tokens."}},{"@type":"Question","name":"Do either of them take images?","acceptedAnswer":{"@type":"Answer","text":"No. Both refuse image input at the API layer. If you need a hosted model that reads pictures, GLM 5.3 Flash and Kimi K3 both do, and both are on the entry shortlist rather than the Pro plan."}},{"@type":"Question","name":"Is Qwen 3.8 A95B Apache 2.0?","acceptedAnswer":{"@type":"Answer","text":"No. The A95B repository carries Alibaba's own terms. In the same release wave only the small 27B checkpoint is Apache 2.0, so if the licence is what you are choosing on, that is the model to look at."}},{"@type":"Question","name":"Which plan carries them?","acceptedAnswer":{"@type":"Answer","text":"Both are on the Pro plan and up. The Pro plan is 49 EUR a month for 2,350,000 credits and the Max plan is 99 EUR for 5,000,000. A credit pack and the 19 EUR Hosted plan do not reach either."}},{"@type":"Question","name":"What do they cost per token?","acceptedAnswer":{"@type":"Answer","text":"One credit is $0.00001 of wholesale cost. Qwen 3.8 Max draws 0.165 credits per input token and 0.4951 per output token. Qwen 3.8 A95B draws 0.2 and 0.6."}}]}
+{"@context":"https://schema.org","@type":"FAQPage","mainEntity":[{"@type":"Question","name":"What is the difference between Qwen 3.8 Max and Qwen 3.8 A95B?","acceptedAnswer":{"@type":"Answer","text":"The thinking switch. Both reason on every turn by default, but Qwen 3.8 Max can be told to stop and Qwen 3.8 A95B cannot. Max is also the cheaper of the two per token. Neither takes image input and both call tools natively."}},{"@type":"Question","name":"Can I turn the reasoning off on Qwen 3.8 Max?","acceptedAnswer":{"@type":"Answer","text":"Yes, through the chat template flag rather than the reasoning effort field, which has no effect on this model. We measured a short question at 109 output tokens with reasoning running and 4 with the template flag set, for an identical answer. The toggle in the Studio sends the flag that works."}},{"@type":"Question","name":"Can I turn the reasoning off on Qwen 3.8 A95B?","acceptedAnswer":{"@type":"Answer","text":"No. Reasoning effort is accepted and ignored, and the chat template flag comes back as a 400 saying that disabling thinking is not supported. The model always reasons and you always pay for those tokens."}},{"@type":"Question","name":"Do either of them take images?","acceptedAnswer":{"@type":"Answer","text":"No. Both refuse image input at the API layer. If you need a hosted model that reads pictures, GLM 5.3 Flash and Kimi K3 both do, and both sit in the same picker."}},{"@type":"Question","name":"Is Qwen 3.8 A95B Apache 2.0?","acceptedAnswer":{"@type":"Answer","text":"No. The A95B repository carries Alibaba's own terms. In the same release wave only the small 27B checkpoint is Apache 2.0, so if the licence is what you are choosing on, that is the model to look at."}},{"@type":"Question","name":"Which plan carries them?","acceptedAnswer":{"@type":"Answer","text":"All of them, and a credit pack with no subscription reaches them too. Every plan and every pack gets the whole chat catalog, so the difference is budget: a 5 EUR pack of 165,000 credits is roughly 333,000 output tokens on Max or 275,000 on A95B, the 19 EUR Hosted month is 900,000 credits, Pro is 2,350,000 and Max is 5,000,000."}},{"@type":"Question","name":"What do they cost per token?","acceptedAnswer":{"@type":"Answer","text":"One credit is $0.00001 of wholesale cost. Qwen 3.8 Max draws 0.165 credits per input token and 0.4951 per output token. Qwen 3.8 A95B draws 0.2 and 0.6."}}]}
 </script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -80,7 +80,7 @@
       <thead><tr><th></th><th>Qwen 3.8 Max</th><th>Qwen 3.8 A95B</th></tr></thead>
       <tbody>
         <tr><td>Model id</td><td><code>Qwen/Qwen3.8-Max</code></td><td><code>Qwen/Qwen3.8-2.4T-A95B</code></td></tr>
-        <tr><td>Plan</td><td>Pro and Max</td><td>Pro and Max</td></tr>
+        <tr><td>Plan</td><td>Every plan and every credit pack</td><td>Every plan and every credit pack</td></tr>
         <tr><td>Credits per input token</td><td>0.165</td><td>0.2</td></tr>
         <tr><td>Credits per output token</td><td>0.4951</td><td>0.6</td></tr>
         <tr><td>Reasoning</td><td>On every turn, switchable off</td><td>On every turn, no off switch</td></tr>
@@ -104,7 +104,7 @@
 
     <h2>Neither of them sees pictures</h2>
 
-    <p>Worth stating because the family reputation says otherwise. Both entries refuse image input at the API layer. If your prompt has a screenshot in it, look at GLM 5.3 Flash or Kimi K3 instead, both of which take images and both of which are on the entry shortlist rather than behind a Pro plan.</p>
+    <p>Worth stating because the family reputation says otherwise. Both entries refuse image input at the API layer. If your prompt has a screenshot in it, look at GLM 5.3 Flash or Kimi K3 instead, both of which take images and both of which sit in the same picker.</p>
 
     <h2>The licence question</h2>
 
@@ -126,7 +126,7 @@
     <h2>Related reading</h2>
 
     <ul>
-      <li><a href="run-qwen-3-8-without-gpu.html">How to run Qwen 3.8 without a GPU</a>, the plan, the price and the setup</li>
+      <li><a href="run-qwen-3-8-without-gpu.html">How to run Qwen 3.8 without a GPU</a>, the budget, the price and the setup</li>
       <li><a href="qwen-3-8-max-explained.html">Qwen 3.8 Max explained</a>, the release itself</li>
       <li><a href="how-to-run-qwen-3-8-27b-locally.html">How to run Qwen 3.8 27B locally</a>, the Apache 2.0 one that fits on a card</li>
       <li><a href="kimi-k3-vs-deepseek-v4.html">Kimi K3 vs DeepSeek V4</a>, the same trade across families</li>
@@ -138,7 +138,7 @@
   </article>
 
   <div class="post-footer">
-    <p>Both Qwen 3.8 entries sit in the same picker on the Pro plan, one click apart.</p>
+    <p>Both Qwen 3.8 entries sit in the same picker on every plan, one click apart.</p>
     <a href="https://lu-labs.ai/checkout/start?plan=hosted-pro&amp;src=luc-qwen38-max-vs-a95b" class="cta-btn" target="_blank" rel="noopener">
       Compare them on LU Labs
     </a>
