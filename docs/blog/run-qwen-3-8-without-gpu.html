@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>How to run Qwen 3.8 without a GPU</title>
+<meta name="description" content="The two big Qwen 3.8 checkpoints are hosted on the Pro plan and up. What they cost per token, what the entry plan gets instead, and the 27B you can genuinely run at home.">
+<meta name="keywords" content="run qwen 3.8 without gpu, qwen 3.8 online, qwen 3.8 max api, qwen 3.8 a95b, qwen 3.8 price, qwen 3.8 27b local, qwen 3.8 hosted">
+<meta property="og:title" content="How to run Qwen 3.8 without a GPU">
+<meta property="og:description" content="The two big Qwen 3.8 checkpoints are hosted on the Pro plan and up. What they cost per token, what the entry plan gets instead, and the 27B you can genuinely run at home.">
+<meta property="og:image" content="https://raw.githubusercontent.com/PurpleDoubleD/locally-uncensored/master/docs/social-preview.png">
+<meta property="og:url" content="https://locallyuncensored.com/blog/run-qwen-3-8-without-gpu.html">
+<meta property="og:type" content="article">
+<meta property="article:published_time" content="2026-09-07">
+<meta property="article:author" content="PurpleDoubleD">
+<meta property="article:tag" content="Qwen 3.8">
+<meta property="article:tag" content="Cloud">
+<meta property="article:tag" content="Tutorial">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="How to run Qwen 3.8 without a GPU">
+<meta name="twitter:description" content="The two big Qwen 3.8 checkpoints are hosted on the Pro plan and up. What they cost per token, what the entry plan gets instead, and the 27B you can genuinely run at home.">
+<meta name="twitter:image" content="https://raw.githubusercontent.com/PurpleDoubleD/locally-uncensored/master/docs/social-preview.png">
+<link rel="canonical" href="https://locallyuncensored.com/blog/run-qwen-3-8-without-gpu.html">
+<meta name="robots" content="index, follow">
+<meta name="theme-color" content="#0a0a0a">
+<link rel="icon" href="../favicon.png">
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"BlogPosting","headline":"How to run Qwen 3.8 without a GPU","description":"The hosted route to Qwen 3.8 Max and Qwen 3.8 A95B, which plan carries them, what a token costs in credits, what the entry shortlist gets instead, and the 27B from the same wave that runs on a 16 GB card.","image":"https://raw.githubusercontent.com/PurpleDoubleD/locally-uncensored/master/docs/social-preview.png","datePublished":"2026-09-07","dateModified":"2026-09-07","inLanguage":"en","author":{"@type":"Person","name":"PurpleDoubleD","url":"https://github.com/PurpleDoubleD"},"publisher":{"@type":"Organization","name":"Locally Uncensored","url":"https://locallyuncensored.com/"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://locallyuncensored.com/blog/run-qwen-3-8-without-gpu.html"},"keywords":"run qwen 3.8 without gpu, qwen 3.8 online, qwen 3.8 max api, qwen 3.8 price"}
+</script>
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"HowTo","name":"How to run Qwen 3.8 without a GPU","description":"Reach the hosted Qwen 3.8 checkpoints through the browser Studio or an OpenAI compatible API key, on the Pro plan or above.","totalTime":"PT10M","tool":[{"@type":"HowToTool","name":"A web browser"},{"@type":"HowToTool","name":"An LU Labs account on the Pro plan or above"},{"@type":"HowToTool","name":"curl or the OpenAI Python SDK for the API route"}],"step":[{"@type":"HowToStep","position":1,"name":"Sign in to the browser Studio","text":"Open lu-labs.ai and sign in. The Studio runs in the browser, so nothing is installed and no card is required on your side."},{"@type":"HowToStep","position":2,"name":"Take the Pro plan","text":"Qwen 3.8 Max and Qwen 3.8 A95B sit on the Pro plan and up. The Pro plan is 49 EUR a month for 2,350,000 credits and the Max plan is 99 EUR for 5,000,000. A credit pack does not reach them."},{"@type":"HowToStep","position":3,"name":"Pick a Qwen 3.8 entry in the model picker","text":"Choose Qwen 3.8 Max for the cheaper token and a thinking switch you can turn off, or Qwen 3.8 A95B for the open checkpoint that always reasons."},{"@type":"HowToStep","position":4,"name":"Create an API key for your own client","text":"In Settings and then Cloud API keys, create a key. It carries an lu_ prefix and is shown once, so copy it before the dialog closes."},{"@type":"HowToStep","position":5,"name":"Point the client at the endpoint","text":"Base URL https://lu-labs.ai/api/inference/v1, OpenAI chat completions shape, model id Qwen/Qwen3.8-Max or Qwen/Qwen3.8-2.4T-A95B."}]}
+</script>
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"FAQPage","mainEntity":[{"@type":"Question","name":"Can I use Qwen 3.8 without a GPU?","acceptedAnswer":{"@type":"Answer","text":"Yes, through a hosted endpoint. Qwen 3.8 Max and Qwen 3.8 A95B are both in the LU Labs cloud catalog, on the Pro plan and up. Nothing is installed on your machine and no card is involved."}},{"@type":"Question","name":"Which plan do I need for Qwen 3.8?","acceptedAnswer":{"@type":"Answer","text":"The Pro plan or the Max plan. Pro is 49 EUR a month for 2,350,000 credits and Max is 99 EUR for 5,000,000. The 5 EUR credit pack and the 19 EUR Hosted plan do not reach either Qwen 3.8 entry."}},{"@type":"Question","name":"What does Qwen 3.8 cost per token?","acceptedAnswer":{"@type":"Answer","text":"One credit is $0.00001 of wholesale cost. Qwen 3.8 Max draws 0.165 credits per input token and 0.4951 per output token. Qwen 3.8 A95B draws 0.2 and 0.6. Spent entirely on output, the Pro budget is roughly 4.7 million tokens on Max or 3.9 million on A95B."}},{"@type":"Question","name":"Does hosted Qwen 3.8 take images?","acceptedAnswer":{"@type":"Answer","text":"No. Neither Qwen 3.8 Max nor Qwen 3.8 A95B accepts image input, and the request is refused at the API layer. If you need a hosted model that reads pictures, GLM 5.3 Flash and Kimi K3 both do, and both are on the entry shortlist."}},{"@type":"Question","name":"Which Qwen 3.8 can I actually run at home?","acceptedAnswer":{"@type":"Answer","text":"The 27B dense checkpoint from the same wave. It is Apache 2.0, it fits on a 16 GB card at IQ4_XS (15.7 GB) or a 24 GB card at Q4_K_M (17.1 GB), it has 262,144 tokens of native context, and a 0.9 GB mmproj file adds image input."}},{"@type":"Question","name":"What are the model ids?","acceptedAnswer":{"@type":"Answer","text":"Qwen/Qwen3.8-Max and Qwen/Qwen3.8-2.4T-A95B, against base URL https://lu-labs.ai/api/inference/v1 with the OpenAI chat completions shape."}}]}
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@200;300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/assets/lu.css">
+<script defer src="/assets/lu.js"></script>
+  <script data-goatcounter="https://lu-uncensored.goatcounter.com/count" async src="//gc.zgo.at/count.js"></script>
+</head>
+<body>
+<nav class="lu-nav">
+  <a class="lu-nav-brand" href="/" aria-label="Locally Uncensored">
+    <span class="lu-mono" data-mono="nav" data-size="40" aria-hidden="true"></span>
+    <span class="lu-nav-word">Locally <span class="accent">Uncensored</span></span>
+  </a>
+  <div class="lu-nav-links" id="lu-nav-links">
+    <a class="lu-nav-link" href="/">Home</a>
+    <a class="lu-nav-link" href="/blog/">Blog</a>
+    <a class="lu-nav-link" href="/guide/">Guide</a>
+    <a class="lu-nav-link" href="/remote-access/">Remote</a>
+  </div>
+  <div class="lu-nav-right">
+    <a class="lu-nav-icon" href="https://github.com/PurpleDoubleD/locally-uncensored" title="GitHub" aria-label="GitHub"><svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.37.5 0 5.87 0 12.5c0 5.3 3.44 9.8 8.21 11.39.6.11.82-.26.82-.58 0-.29-.01-1.04-.02-2.05-3.34.73-4.04-1.61-4.04-1.61-.55-1.39-1.33-1.76-1.33-1.76-1.09-.75.08-.73.08-.73 1.2.08 1.84 1.24 1.84 1.24 1.07 1.83 2.81 1.3 3.5.99.11-.78.42-1.3.76-1.6-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.13-.3-.54-1.52.11-3.18 0 0 1.01-.32 3.3 1.23a11.5 11.5 0 0 1 6.01 0c2.29-1.55 3.3-1.23 3.3-1.23.65 1.66.24 2.88.12 3.18.77.84 1.23 1.91 1.23 3.22 0 4.61-2.8 5.63-5.48 5.92.43.37.81 1.1.81 2.22 0 1.6-.01 2.9-.01 3.29 0 .32.21.7.82.58A12.01 12.01 0 0 0 24 12.5C24 5.87 18.63.5 12 .5Z"/></svg><span class="lu-nav-badge">1400+&#8202;⭐</span></a>
+    <a class="lu-nav-icon discord" href="https://locallyuncensored.com/discord" target="_blank" rel="noopener" title="Discord" aria-label="Discord"><svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M20.32 4.37A19.8 19.8 0 0 0 15.45 3c-.2.36-.44.85-.6 1.23a18.3 18.3 0 0 0-5.7 0c-.16-.38-.4-.87-.6-1.23a19.7 19.7 0 0 0-4.87 1.37C.55 8.9-.32 13.3.11 17.63a19.9 19.9 0 0 0 6 3.03c.48-.66.9-1.36 1.27-2.1-.7-.26-1.36-.58-1.99-.96.17-.12.33-.25.49-.38a14.2 14.2 0 0 0 12.24 0c.16.13.32.26.49.38-.63.38-1.3.7-2 .96.37.74.8 1.44 1.27 2.1a19.8 19.8 0 0 0 6-3.03c.5-5.03-.85-9.39-3.55-13.26ZM8.02 15c-1.18 0-2.15-1.09-2.15-2.42 0-1.34.95-2.43 2.15-2.43 1.2 0 2.17 1.09 2.15 2.43 0 1.33-.95 2.42-2.15 2.42Zm7.96 0c-1.18 0-2.15-1.09-2.15-2.42 0-1.34.95-2.43 2.15-2.43 1.2 0 2.17 1.09 2.15 2.43 0 1.33-.94 2.42-2.15 2.42Z"/></svg><span class="lu-nav-badge">700+&#8202;<span style="font-size:0.715em">🟢</span></span></a>
+    <span class="lu-nav-sep"></span>
+    <div class="switch" id="theme-switch" role="button" aria-label="Toggle theme"></div>
+    <a class="lu-nav-dl" href="https://github.com/PurpleDoubleD/locally-uncensored/releases/latest"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m0 0 4-4m-4 4-4-4"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>Download</a>
+    <button type="button" class="lu-nav-toggle" aria-label="Menu"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+  </div>
+</nav>
+<div class="container lu-doc">
+  <div class="breadcrumb"><a href="../">Locally Uncensored</a> / <a href="./">Blog</a> / This Post</div>
+
+  <div class="post-meta">
+    <span class="post-tag">Tutorial</span>
+    <span>September 7, 2026</span>
+    <span>&middot;</span>
+    <span>7 min read</span>
+  </div>
+
+  <article>
+    <h1>How to run Qwen 3.8 without a GPU</h1>
+
+    <p>Two different questions hide behind this one. If you mean the big Qwen 3.8 checkpoints, the answer is a hosted endpoint and a Pro plan, and the numbers are below. If you mean Qwen 3.8 in general, there is a 27B in the same family that runs on a 16 GB card, and that is a better answer for most people. Both routes are here.</p>
+
+    <h2>What is actually hosted</h2>
+
+    <p>The cloud catalog carries two Qwen 3.8 entries, and neither is on the entry shortlist:</p>
+
+    <table>
+      <thead><tr><th></th><th>Qwen 3.8 Max</th><th>Qwen 3.8 A95B</th></tr></thead>
+      <tbody>
+        <tr><td>Model id</td><td><code>Qwen/Qwen3.8-Max</code></td><td><code>Qwen/Qwen3.8-2.4T-A95B</code></td></tr>
+        <tr><td>Plan</td><td>Pro and Max</td><td>Pro and Max</td></tr>
+        <tr><td>Credits per input token</td><td>0.165</td><td>0.2</td></tr>
+        <tr><td>Credits per output token</td><td>0.4951</td><td>0.6</td></tr>
+        <tr><td>Image input</td><td>No</td><td>No</td></tr>
+        <tr><td>Thinking</td><td>On by default, can be switched off</td><td>On by default, cannot be switched off</td></tr>
+        <tr><td>Tool calls</td><td>Native</td><td>Native</td></tr>
+      </tbody>
+    </table>
+
+    <p>One credit is $0.00001 of wholesale inference cost. The difference between those two is smaller than the names suggest and the thinking switch is the part that matters, which is why it has <a href="qwen-3-8-max-vs-a95b-explained.html">its own page</a>.</p>
+
+    <h2>Which plan, and what it buys</h2>
+
+    <p>The Pro plan is 49 EUR a month for 2,350,000 credits and the Max plan is 99 EUR for 5,000,000. Spent entirely on output tokens, the Pro budget is roughly 4.7 million tokens on Qwen 3.8 Max or 3.9 million on A95B, and input tokens come out of the same wallet so a long context chat lands below that.</p>
+
+    <p>The 5 EUR credit pack and the 19 EUR Hosted plan do <strong>not</strong> reach either of them. That is a real fence and it is worth saying plainly rather than letting you find out at the model picker.</p>
+
+    <h2>What the entry plan gets instead</h2>
+
+    <p>The shortlist that a pack or the Hosted plan reaches is 15 chat models, and several of them are current releases rather than leftovers:</p>
+
+    <ul>
+      <li>GLM 5.3 Flash, which takes images, reasons on every turn and holds a 1M context, at 0.015 credits per input token and 0.05 per output token</li>
+      <li>Kimi K3, the 2.8 trillion parameter multimodal reasoner, at 0.285 in and 1.425 out</li>
+      <li>DeepSeek V3.2 at 0.026 in and 0.038 out, with a think toggle</li>
+      <li>Gemma 4 26B with image input at 0.007 in and 0.034 out</li>
+      <li>gpt-oss 120B at 0.0037 in and 0.017 out</li>
+      <li>Ling 3.0 flash at 0.006 in and 0.018 out</li>
+    </ul>
+
+    <p>If what you wanted from Qwen 3.8 was a strong reasoner without buying a card, GLM 5.3 Flash gets you most of the way there for a tenth of the token price, and it reads pictures, which neither Qwen 3.8 entry does.</p>
+
+    <h2>The API route</h2>
+
+    <ol>
+      <li>Sign in at <a href="https://lu-labs.ai/" target="_blank" rel="noopener">lu-labs.ai</a> and go to <strong>Settings &gt; Cloud API keys</strong>.</li>
+      <li>Create a key. It carries an <code>lu_</code> prefix and is shown once, so copy it before the dialog closes.</li>
+      <li>Point your client at base URL <code>https://lu-labs.ai/api/inference/v1</code> with the OpenAI chat completions shape.</li>
+    </ol>
+
+    <pre><code>curl https://lu-labs.ai/api/inference/v1/chat/completions \
+  -H "Authorization: Bearer $LU_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "Qwen/Qwen3.8-Max",
+    "messages": [
+      {"role": "user", "content": "Explain this stack trace and name the likely cause."}
+    ]
+  }'</code></pre>
+
+    <p>SillyTavern, Aider, LibreChat and anything else that takes a base URL, a key and a model string work against the same endpoint.</p>
+
+    <h2>The other answer: run the 27B at home</h2>
+
+    <p>The same Qwen 3.8 wave shipped a 27B dense checkpoint, and unlike the big two it is Apache 2.0 and it fits on hardware people actually own. Real numbers from our own setup guide:</p>
+
+    <table>
+      <thead><tr><th>Quant</th><th>Size</th><th>Practical home</th></tr></thead>
+      <tbody>
+        <tr><td>UD-Q3_K_XL</td><td>13.4 GB</td><td>16 GB cards</td></tr>
+        <tr><td>IQ4_XS</td><td>15.7 GB</td><td>16 GB cards, the last one that fits whole</td></tr>
+        <tr><td>Q4_K_M</td><td>17.1 GB</td><td>24 GB cards, the sweet spot</td></tr>
+        <tr><td>Q6_K</td><td>22.9 GB</td><td>24 GB, barely, or 32 GB</td></tr>
+      </tbody>
+    </table>
+
+    <p>It is a native vision language model, so a 0.9 GB mmproj file gets you image input the hosted Qwen 3.8 entries do not have. Context is 262,144 native. The full walkthrough with the KV cache math and the chat template trap is in <a href="how-to-run-qwen-3-8-27b-locally.html">how to run Qwen 3.8 27B locally</a>, and there is a mirror of it at <a href="https://lu-labs.ai/blog/how-to-run-qwen-3-8-27b-locally" target="_blank" rel="noopener">lu-labs.ai</a>.</p>
+
+    <p>Our free desktop app for Windows and Linux is one way to run it, and it has a Cloud switch on the same account, so the local 27B and the hosted models sit in one picker. That is the setup we actually use: the 27B for the everyday work that stays on the machine, the switch for the prompts that outgrow it.</p>
+
+    <h2>Related reading</h2>
+
+    <ul>
+      <li><a href="qwen-3-8-max-vs-a95b-explained.html">Qwen 3.8 Max vs Qwen 3.8 A95B</a>, the difference that actually matters</li>
+      <li><a href="can-you-run-qwen-3-8-locally.html">Can you run Qwen 3.8 locally</a>, the honest hardware math for the big checkpoints</li>
+      <li><a href="how-to-run-qwen-3-8.html">How to run Qwen 3.8 Max</a>, every option including the ones that are not ours</li>
+      <li><a href="kimi-k3-online-guide.html">Kimi K3 online</a>, the large hosted model that does not need a Pro plan</li>
+    </ul>
+
+    <hr>
+
+    <p><em>Locally Uncensored is AGPL-3.0 licensed. Built by <a href="https://github.com/PurpleDoubleD">PurpleDoubleD</a>. Bug reports and feature requests on <a href="https://github.com/PurpleDoubleD/locally-uncensored/discussions">GitHub Discussions</a> or in the <a href="https://locallyuncensored.com/discord">Discord</a>.</em></p>
+  </article>
+
+  <div class="post-footer">
+    <p>Qwen 3.8 Max and A95B on the Pro plan, or the 27B on your own card. Same account either way.</p>
+    <a href="https://lu-labs.ai/checkout/start?plan=hosted-pro&amp;src=luc-qwen38-nogpu-guide" class="cta-btn" target="_blank" rel="noopener">
+      Get Qwen 3.8 on LU Labs
+    </a>
+  </div>
+</div>
+
+<footer>
+  <div class="footer-row footer-meta"><span>&copy; 2026 &middot; Locally Uncensored &middot; AGPL-3.0</span></div>
+  <div class="footer-row footer-links">
+    <a href="https://locallyuncensored.com/blog/">Blog</a>
+    <a href="https://locallyuncensored.com/guide/">Guide</a>
+    <a href="https://locallyuncensored.com/remote-access/">Remote access</a>
+    <a href="https://locallyuncensored.com/discord" target="_blank" rel="noopener">Discord</a>
+    <a href="https://github.com/PurpleDoubleD/locally-uncensored">GitHub</a>
+    <a href="https://github.com/PurpleDoubleD/locally-uncensored/discussions">Discussions</a>
+    <a href="https://github.com/PurpleDoubleD/locally-uncensored/issues">Issues</a>
+    <a href="https://reddit.com/user/GroundbreakingMall54">Reddit</a>
+    <a href="https://www.linkedin.com/in/david-drobnitza-locallyuncensored/" rel="me noopener" target="_blank">LinkedIn</a>
+  </div>
+</footer>
+</body>
+</html>
