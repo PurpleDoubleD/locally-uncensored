@@ -4,6 +4,28 @@ All notable changes to Locally Uncensored are documented here.
 
 ## [Unreleased]
 
+### Fixed
+
+- **The update no longer asks for your password and then fails on Arch.** LU
+  installed from the AUR package `locally-uncensored-bin` is our Debian
+  package unpacked into `/usr`, and the updater could not tell the difference:
+  it downloaded a `.deb` and ran `dpkg` on a system that has no `dpkg`, so
+  polkit asked for a password and the install failed right after it was typed.
+  LU now asks the package managers on the machine who owns the running file.
+  On an AUR install it downloads nothing and says to update through your AUR
+  helper instead, with a note that the package is maintained by a community
+  member and can lag a few days behind the GitHub release. Reported by a
+  customer running Zen on Arch.
+- **An AppImage in a folder you cannot write to says so.** Replacing an
+  AppImage means writing into the folder it sits in, so one in `/opt` or
+  another system folder could never be updated in place and failed with no
+  useful message. LU now names the folder and points at the release page.
+- **The password prompt on a Debian or Fedora install is announced.**
+  Installing the update there really does run a package install, and the
+  prompt that follows comes from the system, not from LU. It says so before
+  the button, so a password prompt out of nowhere no longer reads like the app
+  asking you to log in.
+
 ## [2.6.8] - 2026-09-03
 
 The compact release. A long conversation folds its older turns into a summary
