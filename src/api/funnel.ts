@@ -10,6 +10,7 @@
  * is down all cost the press nothing.
  */
 import { backendCall } from './backend'
+import { cloudFetch } from './cloud/client'
 import type { CloudSwitchAction } from '../lib/cloud-switch-guard'
 
 export type FunnelEvent =
@@ -28,9 +29,31 @@ export function funnelEventFor(action: CloudSwitchAction): FunnelEvent {
 }
 
 export function reportCloudSwitch(action: CloudSwitchAction): void {
+  const event = funnelEventFor(action)
   try {
-    void backendCall('funnel_ping', { event: funnelEventFor(action) }).catch(() => {})
+    void backendCall('funnel_ping', { event }).catch(() => {})
   } catch {
     /* no bridge (web build): the press is simply not counted */
+  }
+  reportCloudSwitchForAccount(event)
+}
+
+/**
+ * The same press once more, per account (David, 2026-09-07: split the
+ * presses into subscribers and the rest, and see how often one person
+ * presses). Signed in only: cloudFetch has no token for a signed-out
+ * session and throws, and that press stays anonymous by design. Fire and
+ * forget like the anonymous counter; a dead network costs the press nothing.
+ */
+export function reportCloudSwitchForAccount(event: FunnelEvent): void {
+  try {
+    void cloudFetch('/api/funnel/switch', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ event }),
+      timeoutMs: 5_000,
+    }).catch(() => {})
+  } catch {
+    /* nothing to count without a session */
   }
 }
