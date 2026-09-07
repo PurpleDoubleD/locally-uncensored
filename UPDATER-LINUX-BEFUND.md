@@ -212,5 +212,173 @@ wird nicht installiert, sondern auf die Release-Seite verwiesen.
 
 ## Beweis
 
-Wird im letzten Commit dieser Runde nachgetragen (drei Container: Arch mit und
-ohne pacman-Paket, Ubuntu mit dpkg, ein AppImage in `/opt` ohne Schreibrecht).
+Nicht nur Unit-Tests. Die Erkennung lief in echten Containern gegen das echte
+Binary aus dem echten 2.6.8-Deb, und zwar mit der Datei, die auch ausgeliefert
+wird: `src-tauri/src/commands/install_method.rs`, md5
+`afd6182b26fd77edf241f6e3ef724b34`, in jedem Container mit `md5sum` gegen den
+Baum geprueft. Sie kompiliert mit blossem `rustc`, ohne cargo, ohne tauri, ohne
+serde. Daneben liegt nur `probe_main.rs`, ein Dutzend Zeilen Ausgabe, das die
+Datei per `#[path]` einbindet.
+
+Docker auf dem Mac (29.5.3, colima), Container als `linux/amd64` unter
+Emulation.
+
+### Vorbereitung auf dem Mac
+
+    curl -sSL -o lu.deb https://github.com/PurpleDoubleD/locally-uncensored/releases/download/v2.6.8/Locally.Uncensored_2.6.8_amd64.deb
+    ar x lu.deb && mkdir root && tar -xzf data.tar.gz -C root
+    strings -a root/usr/bin/locally-uncensored | grep -o '__TAURI_BUNDLE_TYPE_VAR_[A-Z]*'
+    __TAURI_BUNDLE_TYPE_VAR_DEB
+
+    docker create --platform linux/amd64 --name lu-arch archlinux:latest sleep 7200
+    docker cp lu.deb        lu-arch:/root/lu.deb
+    docker cp install_method.rs lu-arch:/root/install_method.rs
+    docker cp probe_main.rs lu-arch:/root/probe_main.rs
+    docker cp PKGBUILD      lu-arch:/root/PKGBUILD
+    docker start lu-arch
+
+`pacman` braucht in diesem Container `--disable-sandbox`, sonst bricht es mit
+`error restricting syscalls via seccomp: 22` ab. Das ist die Emulation, nicht
+pacman.
+
+### a) Arch, Lauf 1: das Deb einfach nach / entpackt
+
+    docker exec lu-arch bash /root/arch.sh
+
+    ### uname: x86_64
+    ### os: NAME="Arch Linux"
+    ### rustc: rustc 1.98.1 (48a229cea 2026-09-01) (Arch Linux rust 1:1.98.1-1)
+    --- what landed in /usr/bin:
+    /usr/bin/locally-uncensored
+    /usr/bin/lu-llama-server
+    -rwxr-xr-x 1 root root 16398304 Sep  6 20:10 /usr/bin/locally-uncensored
+    --- the bundle-type marker the tauri bundler patched in:
+    __TAURI_BUNDLE_TYPE_VAR_DEB
+    --- pacman -Qo says:
+    error: No package owns /usr/bin/locally-uncensored
+    (pacman -Qo exit 1)
+    --- detect():
+    exe_path         = /usr/bin/locally-uncensored
+    appimage_env     = None
+    exe_dir_writable = true
+    has_pacman       = true
+    has_dpkg         = false
+    has_rpm          = false
+    pacman_owns_exe  = false
+    dpkg_owns_exe    = false
+    rpm_owns_exe     = false
+    DETECT           = unknown
+    HINT             = /usr/bin/locally-uncensored is in the system folders and no package manager claims it. It was installed by a repackaged build or a script.
+
+Die Schritte davor waren `bsdtar -xf lu.deb` und `bsdtar -xzf data.tar.gz -C /`,
+also genau das, was `package()` im PKGBUILD tut, nur ohne pacman drumherum. Der
+Marker im Binary sagt weiter DEB, obwohl kein dpkg auf der Maschine ist.
+
+### b) Arch, Lauf 2: als echtes pacman-Paket, der Zen-Fall
+
+    docker exec lu-arch bash /root/arch2.sh
+
+Gebaut mit `makepkg --nodeps --skipinteg` als unprivilegierter Nutzer aus dem
+PKGBUILD des AUR-Maintainers (2.6.7, laedt sein Deb selbst von GitHub),
+installiert mit `pacman -U --overwrite '*'` ueber die Dateien aus Lauf 1.
+
+    ==> Finished making: locally-uncensored-bin 2.6.7-1
+    --- makepkg built:
+    -rw-r--r-- 1 builder builder 23755608 Sep  7 23:04 /home/builder/build/locally-uncensored-bin-2.6.7-1-x86_64.pkg.tar.zst
+    --- pacman -Qo says:
+    /usr/bin/locally-uncensored is owned by locally-uncensored-bin 2.6.7-1
+    --- the marker is still the deb one:
+    __TAURI_BUNDLE_TYPE_VAR_DEB
+    --- detect():
+    exe_path         = /usr/bin/locally-uncensored
+    appimage_env     = None
+    exe_dir_writable = true
+    has_pacman       = true
+    has_dpkg         = false
+    has_rpm          = false
+    pacman_owns_exe  = true
+    dpkg_owns_exe    = false
+    rpm_owns_exe     = false
+    DETECT           = pacman
+    HINT             = Installed with pacman. Update it with your package manager, for example yay -Syu locally-uncensored-bin.
+
+Das ist der Fall des Kunden, und die Datei traegt dabei weiter den DEB-Marker,
+den das Plugin liest.
+
+**Nebenbefund am PKGBUILD.** Die Kopie, die uns vorliegt, baut so nicht durch:
+
+    ==> Starting package()...
+    mv: cannot stat '/home/builder/build/pkg/locally-uncensored-bin/usr/bin/llama-server': No such file or directory
+    ==> ERROR: A failure occurred in package().
+
+Das 2.6.7-Deb legt `usr/bin/lu-llama-server` ab, nicht `usr/bin/llama-server`,
+und die Zeile, die den Sidecar aus `/usr/bin` herausschiebt, findet ihre Datei
+darum nicht. Fuer den Beweislauf wurde genau diese eine Zeile in ein
+`if [ -e ... ]` gefasst, im PKGBUILD als Aenderung markiert; an der
+Besitzfrage aendert die Verschiebung nichts. Ob der Maintainer inzwischen eine
+andere Fassung veroeffentlicht hat, ist von hier aus nicht zu sehen. Wenn
+nicht, baut sein Paket aktuell nicht, und das erklaert auch, warum es auf 2.6.7
+steht.
+
+### c) Ubuntu 22.04: unser Deb, mit dpkg installiert
+
+    docker create --platform linux/amd64 --name lu-ubuntu ubuntu:22.04 sleep 7200
+    docker cp lu.deb install_method.rs probe_main.rs ubuntu.sh lu-ubuntu:/root/
+    docker start lu-ubuntu && docker exec lu-ubuntu bash /root/ubuntu.sh
+
+    ### os: Ubuntu 22.04.5 LTS
+    ### rustc: rustc 1.75.0 (82e1608df 2023-12-21) (built from a source tarball)
+    Setting up locally-uncensored (2.6.8) ...
+    -rwxr-xr-x 1 root root 16398304 Sep  6 20:10 /usr/bin/locally-uncensored
+    --- dpkg -S says:
+    locally-uncensored: /usr/bin/locally-uncensored
+    --- detect():
+    exe_path         = /usr/bin/locally-uncensored
+    appimage_env     = None
+    exe_dir_writable = true
+    has_pacman       = false
+    has_dpkg         = true
+    has_rpm          = false
+    pacman_owns_exe  = false
+    dpkg_owns_exe    = true
+    rpm_owns_exe     = false
+    DETECT           = deb
+    HINT             = Installed with dpkg. Installing the update runs a package install, and the system asks for your password.
+
+Die Abhaengigkeiten (webkit2gtk, gtk3, libvulkan1) fehlen im nackten Container,
+darum lief `dpkg --force-depends -i`. Fuer die Besitzfrage spielt das keine
+Rolle: die Datei steht in der dpkg-Datenbank.
+
+### d) AppImage in /opt ohne Schreibrecht
+
+Im selben Ubuntu-Container, als unprivilegierter Nutzer, `chmod 555` auf dem
+Ordner:
+
+    su tester -c 'APPIMAGE=/opt/lu-readonly/x.AppImage /tmp/probe'
+
+    dr-xr-xr-x 2 root root 4096 Sep  7 23:02 /opt/lu-readonly
+    exe_path         = /opt/lu-readonly/x.AppImage
+    appimage_env     = Some("/opt/lu-readonly/x.AppImage")
+    exe_dir_writable = false
+    has_pacman       = false
+    has_dpkg         = true
+    has_rpm          = false
+    pacman_owns_exe  = false
+    dpkg_owns_exe    = false
+    rpm_owns_exe     = false
+    DETECT           = appimage
+    HINT             = The AppImage sits in a folder you cannot write to (/opt/lu-readonly/x.AppImage).
+
+`exe_dir_writable` wird nicht aus Rechte-Bits geraten, sondern durch einen
+Schreibversuch beantwortet, der die Probendatei danach wieder wegraeumt. Genau
+das braucht der Updater an dieser Stelle: sein erster Schritt ist ein `rename`
+IN diesen Ordner (`updater.rs:1003`).
+
+### Was der Beweis nicht zeigt
+
+Es lief kein echtes Update auf einer echten Arch-Maschine mit Desktop, weil hier
+weder eine solche Maschine noch ein polkit-Dialog zur Verfuegung steht. Der Weg
+von `pkexec` bis zum Fehlschlag ist aus dem Quelltext gelesen (Abschnitt 3) und
+mit der Fehlerbeschreibung des Kunden abgeglichen, nicht nachgestellt. Was
+gemessen wurde, ist die Frage, an der der Fix haengt: wem gehoert die Datei, und
+was antwortet `detect()` darauf.
