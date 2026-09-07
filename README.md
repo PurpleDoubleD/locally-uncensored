@@ -4,9 +4,9 @@
 
 # Locally Uncensored
 
-**The plug-and-play local AI studio — uncensored chat, image & video generation, and a coding agent. One installer. No cloud.**
+**The all-in-one local AI studio for your desktop. Chat, images, video and a coding agent in one app. Install it, pick a model, go.**
 
-Install it like a normal app and you're chatting, generating images, and making videos in minutes. No command line, no Docker, no config files. Auto-detects 12 local backends. Your AI, your hardware, your rules.
+Free, open source, Windows and Linux. Everything runs on your own machine. No Docker, no terminal, no config files.
 
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
 [![GitHub stars](https://img.shields.io/github/stars/PurpleDoubleD/locally-uncensored?style=social)](https://github.com/PurpleDoubleD/locally-uncensored/stargazers)
@@ -15,253 +15,177 @@ Install it like a normal app and you're chatting, generating images, and making 
 [![Discord](https://img.shields.io/discord/1496087522042843146?style=flat-square&logo=discord&label=Discord&color=5865F2)](https://locallyuncensored.com/discord)
 [![Website](https://img.shields.io/badge/Website-locallyuncensored.com-8b5cf6)](https://locallyuncensored.com)
 
-<img src="docs/demo.gif" alt="Locally Uncensored Demo" width="700">
+<img src="docs/demo.gif" alt="Locally Uncensored in use" width="700">
 
-*The only desktop app that runs AI chat, image, and video generation — locally, one click, no cloud.*
+[Download](#download) · [Three steps](#three-steps) · [What is in the box](#what-is-in-the-box) · [How it compares](#how-it-compares) · [Models](#models-that-run-well) · [FAQ](#faq)
 
-[Download](#download) · [Quick Start](#quick-start) · [Features](#features) · [Why This App?](#why-locally-uncensored) · [Models](#recommended-models) · [FAQ](#faq)
+| Chat that draws your images | Images and video in the same window |
+|:---:|:---:|
+| ![Chat](docs/screenshots/chat_generate_dark.webp) | ![Create](docs/screenshots/create_gallery_dark.webp) |
+| **The coding agent shows the diff first** | **Agent mode does the legwork** |
+| ![Coding agent](docs/screenshots/coding_review_dark.webp) | ![Agent mode](docs/screenshots/agent_mode_dark.webp) |
 
 </div>
 
 ---
 
-## What is Locally Uncensored?
-
-Locally Uncensored (LU) is a **free, open-source local AI studio** for Windows and Linux. It combines four things most local-AI tools keep separate — **AI chat, a coding agent, image generation, and video generation** — in one desktop app, and it installs like a normal program: run one installer, let the setup wizard detect (or install) an AI engine, one-click a model, start typing.
-
-- **Uncensored by default** — first-class support for [abliterated models](https://locallyuncensored.com/blog/abliterated-models-guide.html) that answer directly, without refusals or lectures. Mainstream models are in the same menu.
-- **100% local and private** — zero telemetry, zero analytics, works fully offline after model download. Cloud providers (OpenAI, Anthropic, OpenRouter, Groq…) are optional and use your own keys.
-- **Plug and play** — auto-detects 12 local backends (Ollama, LM Studio, vLLM, KoboldCpp, Jan, llama.cpp, LocalAI, GPT4All, TabbyAPI, Aphrodite, SGLang, TGI). Nothing installed? One click installs the engine for you.
-- **Free forever** — AGPL-3.0. The models are open weights. No subscription, no credits, no rate limits.
-
-**New to local AI?** Start with the [5-minute beginner guide](https://locallyuncensored.com/blog/how-to-run-ai-locally.html) — no command line anywhere.
-
----
-
-### Screenshots
-
-| Chat that draws your images | Built-in image & video studio |
-|:---:|:---:|
-| ![Chat](docs/screenshots/chat_generate_dark.webp) | ![Create](docs/screenshots/create_gallery_dark.webp) |
-| **Coding Agent reviews & fixes** | **Agent Mode builds it for you** |
-| ![Coding Agent](docs/screenshots/coding_review_dark.webp) | ![Agent Mode](docs/screenshots/agent_mode_dark.webp) |
-
----
-
 ## Download
 
-Grab the latest release from [**Releases**](https://github.com/PurpleDoubleD/locally-uncensored/releases/latest):
+Take the latest build from [Releases](https://github.com/PurpleDoubleD/locally-uncensored/releases/latest).
 
 | Platform | File | Status |
 |----------|------|--------|
-| **Windows 10/11** | `.exe` (NSIS, recommended) or `.msi` | Fully tested, signed auto-update channel |
-| **Linux** | `.deb` / `.rpm` / `.AppImage` | Packages on every release |
-| macOS | — | Coming soon (source builds via `npm run tauri build`) |
+| Windows 10 and 11 | `.exe` (NSIS, recommended) or `.msi` | Tested every release, signed auto update channel |
+| Linux | `.deb`, `.rpm` or `.AppImage` | Built on every release |
+| macOS | none yet | Builds from source with `npm run tauri build` |
 
-> **Antivirus warning?** Some engines flag unsigned NSIS installers that download other binaries — a **false positive**. The installer is built by GitHub Actions from the public source on `master`, and the auto-update channel is signed against a public minisign key. Verification steps: [SECURITY.md](SECURITY.md#antivirus--browser-false-positives).
+Some antivirus engines flag unsigned NSIS installers that download other binaries, which is a false positive. The installer is built by GitHub Actions from the public source on `master`, and the update channel is signed against a public minisign key, so you can verify both: see [SECURITY.md](SECURITY.md#antivirus--browser-false-positives).
 
-**Current release: v2.6.8** (September 2026). Portable-friendly installers for Windows and Linux (no admin rights required), under the short in-app name **LU** by LU Labs. Full history in [Releases](https://github.com/PurpleDoubleD/locally-uncensored/releases) and [CHANGELOG.md](CHANGELOG.md).
+Current release: **v2.6.8** (September 2026). Every change since 1.0.0 is in [CHANGELOG.md](CHANGELOG.md).
 
-### What's new in 2.6.8
+## Three steps
 
-The compact release. Type /compact and the older turns of a long conversation are folded into a summary the chat model writes itself, so the chat keeps going instead of running out of room; auto-compact is opt-in under Settings and announces itself every time it fires. In Agent and Code mode the agent hands a self-contained task to a background agent that works while you carry on, a panel on the right shows what is running, and the main agent picks the result up on its own, on cloud and local models alike, without a single extra approval dialog. A reasoning model has an effort control beside its Think button, Low, Medium and High with Max on GLM 5.3, and GLM 5.3 (Pro) and GLM 5.3 Flash (Hosted) joined the cloud catalogue. A Local API under Settings gives every local model, LU Engine, Ollama and LM Studio, one OpenAI-compatible address on your machine, behind a token and off until you start it. Ctrl+K opens a command palette, first-run setup has a small window of its own, the collapsed side panel is an icon rail with the chat column draggable, and Chat works without a mouse. The built-in engine goes by LU Engine now: it moves to a free port when 8127 is taken, retries once after a start that fails, and a chat model you downloaded stays visible as Installed with a Use button that starts the engine for it. A running LM Studio keeps its own heading in the picker, and one click hands the local slot back to it. Model Storage is read now, not only written to, so every GGUF up to four levels down shows up under Installed, and the three backends got three named rows instead of one field labelled auto-detect. The CivitAI API key has a field again. Three uncensored models joined the catalogue, Qwen 3.8 27B Heretic, Gemma 4 12B Heretic and Qwen3-VL 8B Abliterated, GLM 5.3 is in it in the one variant the LU Engine can open, and the uncensored Qwen 3.8 27B rows come from OrcaRouter's abliteration with a Hugging Face token field on every platform. Document Chat works in Cloud mode, with your files indexed on your own machine. AMD on Windows is read from the HIP SDK, because the only ROCm probe ran rocm-smi and the Windows SDK does not ship it (#123); that one is researched rather than proven, since there is no RDNA4 card here. AMD cards on Linux report their memory size without ROCm installed, and on a rented AMD Instinct MI325X LU lists the card with its name and gfx target, installs PyTorch from the ROCm channel it picks, and rendered an image, a video, a song, a 4x upscale and a cutout in Create. Also fixed: the deb and the rpm ask for libvulkan1 and libgomp1, the ComfyUI installer proves that the environment it just built can import ComfyUI and Repair can be cancelled, a ComfyUI that will not start names the cause instead of sending you into a repair that cannot fix it, every Python step runs with UTF-8 output, German phrasing reaches the chat tools, Windows error messages arrive in English, the Mac stopped scanning your whole home folder for a ComfyUI it never runs there, LU starts MCP servers through npx and uvx only and says so by name, the Memory section reads its own export again, updates no longer leave the previous frontend behind, character training on a Windows machine with more than one GPU no longer dies at the first step over libuv (#121), and the Character Studio setup picks a Python 3.10 to 3.12 on its own instead of failing at the last step on a machine whose newest Python is 3.14, needs no git any more, checks the drive before the first byte, retries a dropped download, installs a missing Windows runtime library itself, pauses the local chat model for the run and tells a card below 12 GB so before it starts.
+1. **Install.** Run the installer like any other program. On first launch a wizard looks for an AI engine that is already running on your machine, and installs one for you with a single click if there is none. It does the same for ComfyUI, which draws the images and video.
+2. **Pick a model.** The model manager marks which models fit your hardware and downloads them in one click. It works with the engine you already have (Ollama, LM Studio and others) and can link models those tools already store, without copying them.
+3. **Create.** Chat, Create, Code and Agent are tabs in one window. Type in one, switch to the next, keep the same models.
 
-**Known in this release:** after you switch Cloud off, the LU Engine stays stopped until you press Use on your model under Models. One click, a few seconds. 2.6.9 brings the engine back on its own when Cloud goes off.
-
-### What's new in 2.6.7
-
-The repair release. Every fix went back to a fresh tester who did not know what had been changed, driving the real installed build on Windows, and whatever they broke went into the next round; that loop ran seventeen times. Create now says what it is really doing: the first render after starting the app keeps its loading texts, sampling is only claimed once ComfyUI is sampling, a still picture stops announcing that it decodes frames, and a cold start explains itself. A ComfyUI that dies while the app runs is restarted by the app, and an idle app notices the outage instead of sitting silent. In the Model Manager, Installed means installed (#113): every file of a bundle is checked, the Installed list covers every ComfyUI folder rather than two, and your own file no longer disappears behind a catalogue size. The built-in engine starts on a fresh installation and says why if it cannot (#118), adding your own provider stops erasing its card, a disabled provider keeps an Enable button, and the LM Studio button sets the provider up instead of starting a server nobody asks. Thinking finally reaches the engine on every path, strict chat templates stop failing on tool results and group rounds, every answer records the model that wrote it, and one stray click can no longer move the app into the cloud. AMD cards are detected on Windows again through the registry after Windows removed wmic, RDNA3 and newer get AMD's own ROCm wheels, uncovered AMD cards on Linux stay honestly on the processor build, and the Debian package stopped fighting llama.cpp over a file name (#120). Also fixed: chats survive an update, closing the window gives the video memory back, the engine dies with the app instead of holding gigabytes as an orphan, voice input names the real reason, error messages are English on a non English system, and the model size check no longer answers questions about arbitrary paths on your disk.
-
-### What's new in 2.6.6
-
-The release that makes an agent or coding run cost less for the same work. The agent carries 15 tools instead of 31, older tool results age out of what gets resent, the amount sent on a paid step has a cap, and the stable half of the prompt stops moving so the upstream cache keeps paying off. Measured over our own set of tool driven runs, 2.6.6 spent 78.6 percent fewer credits than our own 2.6.5. The Code view gained a mode menu per conversation (Ask, Bypass, Plan), a plan panel and a real file explorer with preview, and the prompt box is one quiet row again. Qwen 3.8 joined the Model Manager including the uncensored 27B, with the vision projector downloaded alongside. Also fixed: a plan survives an interrupted run, the credits meter counts what a coding step really sends, a chat database wiped by a hard crash is restored from the app's own backup, and a long hosted chat shrinks its request instead of refusing every further turn.
-
-### What's new in 2.6.5
-
-The self-healing release. Updating works again: the installer closes our own running engine first instead of failing at "Error opening file for writing" and rolling everything back. The image track gained a LoRA section with a Rescan button, so characters you trained and files you dropped in are selectable and stackable. A ComfyUI environment that dies at import is detected and rebuilt into its own venv, with a Repair button in Settings, and fresh setups install a torch build the current core actually accepts. The built-in engine keeps its conversation memory when an image or video render needs the VRAM. Settings, Model Storage, "Scan for local models" links the models Ollama and LM Studio already store, no copying, no re-download. Model downloads no longer freeze at "Refreshing the model list": the install waits, restarts ComfyUI once if needed, and says what is wrong instead of hanging. Also fixed: trainer Cancel really stops the run and frees the GPU, Blackwell cards get the right torch build with a clear preflight, AMD cards show up without the ROCm tools, staged changes apply again and survive a restart, the gallery shows the seed that was really rolled, tooltips are readable everywhere, drag and drop works again on Windows, environment rebuilds show size, speed and time left, and FramePack got its proper VAE back.
-
-### What's new in 2.6.4
-
-Two money fixes from your bug reports. The Cloud switch now really means off: flipping to Local with no local model running used to keep the cloud model silently active and kept billing credits; the send path now refuses any model from the wrong mode. And the music price in the picker follows the length slider live, billing was always per second but the label quoted 1 minute, so a 3 minute song looked three times cheaper than it was. What you see is what you pay.
-
-### What's new in 2.6.3
-
-The reliability release. Agent and Code mode were driven end to end on the shipped build for a week and fixed where they actually broke: runs no longer stall, loop, or invent results, small local models get the tool transport their server really supports (the bundled engine used to swallow tool definitions silently), approvals stay visible, Stop always stops, and the run budget respects what LM Studio actually loaded. New: group chat with 2 to 4 local models answering in turn, an edit pencil on every model answer, one-click chips for the native Wan video sizes with a portrait/landscape flip, native HiRes fix for local image generation (community PR #97 by Kizerfluid), RTX 50 support for character training with a preflight that names a broken environment before the run, and personal API keys so any OpenAI-compatible tool can use your cloud plan. Long chats got a deep memory fix, generated images survive a restart, your own lyrics really get sung, every cloud model shows its price in the picker, and the benchmark measures cost and correctness instead of just speed. Every download is 7 MB smaller.
-
-### What's new in 2.6.2
-
-Custom ComfyUI workflows are back, built on a community PR by Kizerfluid (#94). The workflow button in the Create prompt bar opens a manager popup: import any workflow saved with ComfyUI's Save (API Format), pair it with models through shared tags, and pick it in the Workflow selector under Advanced settings; Auto returns to the built-in graph. Prompt, size, steps and seed are still injected, custom I2V workflows get the source image wired in, and video nodes save to the gallery instead of the temp folder. Also fixed: read aloud on Windows N editions (playback now falls back to codec-free Web Audio), pip errors from a Python built without ssl name the real problem, and ComfyUI model discovery survives one unreadable folder.
-
-### What's new in 2.6.1
-
-Create could not submit anything on setups whose ComfyUI runs the pure Python HTTP parser: the app put the Content-Type header on the wire twice and ComfyUI refused the request with a 400. The header a caller sends now wins, and the same trap is closed for the other headers the HTTP stack derives itself.
-
-### What's new in 2.6.0
-
-The GGUF video release: found by running the shipped build end to end on a real 12 GB card, plus a round of customer reports from Discord and GitHub.
-
-- **GGUF video models generate for the first time.** The catalog offered GGUF video bundles (19 GB downloads) that could never render a clip: the video pipeline only read the loaders that list `.safetensors`. The GGUF loaders are wired in now, the Video lane shows its starter card on an empty model list, and a freshly booted app no longer races its own model list.
-- **Video renders finish on 12 GB cards.** After sampling, the video decode ran full-frame next to the resident model, got paged by the Windows driver instead of a clean out-of-memory, and sat at 100% GPU for an hour. Every video decode now runs tiled whenever the installed ComfyUI supports it, which turns that hour into minutes.
-- **The render progress bar ticks.** The long phases (model load, frame decode) send no ComfyUI events for minutes, so the bar froze and looked hung while the GPU was working. It now ticks every second with the phase and elapsed time.
-- **The Linux AppImage no longer breaks Python installs.** It leaked its bundled libraries into every Python it launched, which broke ComfyUI installs for every AppImage user. Helper processes start clean now.
-- **Downloads got honest.** Big model downloads no longer die in a fixed timeout and resume where they stopped, and the Downloads tab shows real per-file progress with proper GB formatting.
-- **A pile of reported fixes.** Document chat handles files without punctuation, VRAM above 4 GB is no longer invented, deleting a chat is findable, read-aloud installs its Piper voice correctly, external MCP servers can actually spawn, the built-in engine says what is wrong instead of a proxy error, and the agent got a screenshot tool.
-- **LU Cloud grew too:** DeepSeek V4 Flash joined the cloud catalog, and the cloud Edit lane gained Qwen Image Edit, which edits from a plain instruction with no mask needed.
-
----
-
-## Quick Start
-
-1. **Install** — download the installer and run it. No Docker, no terminal, no config files.
-2. **Detect** — the first-launch wizard scans for all 12 supported local backends and offers one-click installs if none are running. ComfyUI (for images/video) is detected or installed the same way.
-3. **Run** — pick a model in the Model Manager (hardware-aware recommendations, one-click downloads) and start chatting. Flip to the Coding Agent or the Create tab whenever you like.
-
-Full walkthrough with screenshots: [Getting Started Guide](https://locallyuncensored.com/guide/).
+Walkthrough with screenshots: [Getting started guide](https://locallyuncensored.com/guide/). New to local AI: [the five minute beginner guide](https://locallyuncensored.com/blog/how-to-run-ai-locally.html).
 
 <details>
-<summary><strong>Build from source / contribute</strong></summary>
+<summary><strong>Build from source, or contribute</strong></summary>
 
 ```bash
 git clone https://github.com/PurpleDoubleD/locally-uncensored.git
 cd locally-uncensored
 npm install
-npm run dev          # browser dev-mode (for contributing)
-npm run tauri build  # production desktop binary
+npm run dev          # browser dev mode
+npm run tauri build  # desktop binary
 ```
 
-`setup.bat` (Windows) / `setup.sh` (Linux/macOS) bootstrap Node, Git, and Ollama for dev-mode. See the [Contributing Guide](CONTRIBUTING.md).
+`setup.bat` on Windows and `setup.sh` on Linux and macOS bootstrap Node, Git and Ollama for dev mode. See the [contributing guide](CONTRIBUTING.md).
 
 </details>
 
----
+## What is in the box
 
-## Features
+**Chat.** Models that answer directly, without refusals, next to the mainstream ones in the same menu. Thinking is shown as it happens, with an effort control on the models that offer one. Upload an image and ask about it, chat with your own documents through a local index, talk instead of typing and have answers read back, keep a memory across conversations, switch personas, and import your ChatGPT, Claude or Gemini export so the old threads come with you. A long conversation folds its older turns into a summary instead of running out of room.
 
-### Chat
-- **Uncensored AI chat** — abliterated models with the refusal behavior removed from the weights (not a jailbreak). Streaming, thinking display, unlimited history.
-- **20+ provider presets** — local: Ollama, LM Studio, vLLM, KoboldCpp, llama.cpp, LocalAI, Jan, TabbyAPI, GPT4All, Aphrodite, SGLang, TGI. Cloud (optional, your keys): OpenAI, Anthropic, OpenRouter, Groq, Together, DeepSeek, Mistral.
-- **Thinking Mode** (provider-agnostic), **file upload with vision**, **memory system**, **Document Chat (RAG)** with local embeddings, **voice** (Whisper STT + neural TTS), **25+ personas**, chat import from ChatGPT/Claude/Gemini exports.
+**Create.** Images and video on your own GPU through a ComfyUI the app installs, starts, repairs and updates for you. No node graphs. The lanes are text to image, edit and image to image with a mask for inpainting, remove background, video, animate an image, extend a clip, motion control, talking character, music, and Character Studio, which trains a character on your own card and drops it into your local LoRA folder. A LoRA picker with a stack and strength sliders reads the folder live, and everything you make lands in the gallery. Upscale and Erase Object are the two lanes that run in the cloud only. [How it works](https://locallyuncensored.com/blog/easiest-local-ai-image-generator.html).
 
-### Create — images & video
-- **Image generation** via a bundled, auto-managed ComfyUI: FLUX 2 Klein, FLUX.1, Juggernaut XL, Z-Image Turbo (uncensored), ERNIE-Image, SDXL, SD 3.5. Per-model correct defaults — no node graphs, no config. [How it works](https://locallyuncensored.com/blog/easiest-local-ai-image-generator.html).
-- **Video generation** with Wan 2.1/2.2, HunyuanVideo 1.5, LTX 2.3, AnimateDiff, Mochi, Cosmos. **Image-to-video** with FramePack F1 on just 6 GB VRAM. **Image-to-image** with denoise control, in a tab now labelled **Edit / Image to Image**.
-- **Talking Character, Music, Extend Video and Motion Control run on your own GPU** as normal local lanes, built from core ComfyUI node families. Only Upscale, Erase Object and Character Studio are cloud only. Per-lane frame, size and step controls let you trade quality for speed.
-- LoRA picker, VAE override, CLIP-skip, and a local gallery for everything you make. No content filter, no watermark, no credits.
+**Code.** A coding agent that builds a map of the repo, edits only the lines you asked for, shows the diff before it applies anything, runs your tests and reads the failures, and carries typed git tools and per project rules in a `.lurules` file. Ask, Plan and Bypass modes per conversation, a file explorer with preview, and a workspace per project. A Local API in Settings puts every local model on one OpenAI compatible address behind a token, so your other coding tools can use the same machine.
 
-### Code & agents
-- **Coding Agent** with Architect mode, repo-map (Aider-style PageRank), a surgical `file_edit` tool that rewrites only the lines you asked for, review-before-apply diffs, test-runner loop, typed git/GitHub tools, multi-repo workspaces, per-project `.lurules`.
-- **Agent Mode** — 28 tools + MCP: web search/fetch, file I/O, shell, code execution, screenshots, background tasks, parallel sub-agents. **Granular permissions** (7 categories, 3 levels).
-- **Claude Code CLI integration** and universal tool calling — native for supported models, XML fallback for everything else.
+**Agent.** Web search and fetch, reading and writing files, a shell, code execution, screenshots, image and video generation, and your own MCP servers on top. Long jobs go to background agents that work while you carry on, and a panel shows what is running. Every tool call passes a permission gate you control, and a read only run stays read only.
 
-### Everywhere
-- **Remote access from your phone** with a full mobile web app over LAN or Cloudflare Tunnel: QR pairing, 6-digit passcode, opt-in, visible connection status. Works with non-Ollama backends too (LM Studio, Lemonade, llama.cpp), translated to and from the OpenAI-compatible shape, including streaming, tool calls, vision and reasoning. [Details](https://locallyuncensored.com/blog/local-ai-on-your-phone.html).
-- **A/B model compare**, **local benchmark**, hardware-aware model recommendations, model load/unload, auto-update over a signed channel.
+**Everywhere.** Reach the app from your phone over your LAN or through a Cloudflare tunnel, paired by QR code and a passcode, off until you turn it on, with connected devices listed. Compare two models side by side, benchmark them on your own hardware for speed, cost and correctness, and take updates over a signed channel. [Phone details](https://locallyuncensored.com/blog/local-ai-on-your-phone.html).
 
----
+## Optional: LU Labs Cloud
 
-## Why Locally Uncensored?
+Some models are larger than any desktop card. Flip the Cloud switch in the same app and those run on hosted GPUs instead, with the heavy Create lanes alongside them. The same account works in the browser at [lu-labs.ai](https://lu-labs.ai), on a plan or on credit packs that do not expire. The local app stays free either way, and switching back to local costs nothing: [plans and prices](https://lu-labs.ai/pricing).
 
-| Feature | Locally Uncensored | Open WebUI | LM Studio | Jan | SillyTavern |
-|---------|:-:|:-:|:-:|:-:|:-:|
-| AI Chat | **Yes** | Yes | Yes | Yes | Yes |
-| Image Generation | **Yes** | No | No | No | Via ext. |
-| Video Generation | **Yes** | No | No | No | No |
-| Image-to-Image / Image-to-Video | **Yes** | No | No | No | No |
-| Coding Agent | **Yes** | No | No | No | No |
-| Agent Tools + MCP | **28 tools** | No | No | No | No |
-| Plug & Play Backend Setup | **12 backends** | No | Built-in | Built-in | No |
-| Remote Access (Phone) | **Yes** | Browser | No | No | Browser |
-| A/B Compare + Benchmark | **Yes** | No | No | No | No |
-| Uncensored by Default | **Yes** | No | No | No | Partial |
-| Voice (STT + TTS) | **Yes** | Partial | No | No | Partial |
-| Document Chat (RAG) | **Yes** | Yes | No | No | No |
-| No Docker Required | **Yes** | No | Yes | Yes | Yes |
-| Open Source | **AGPL-3.0** | Open | No | AGPL | AGPL |
+## How it compares
+
+| | Locally Uncensored | Open WebUI | LM Studio | Jan | SillyTavern |
+|---|:-:|:-:|:-:|:-:|:-:|
+| Chat | **Yes** | Yes | Yes | Yes | Yes |
+| Image generation | **Yes** | No | No | No | Partial |
+| Video generation | **Yes** | No | No | No | No |
+| Image to image and image to video | **Yes** | No | No | No | No |
+| Coding agent | **Yes** | No | No | No | No |
+| Agent with tools and MCP | **Yes** | No | No | No | No |
+| Works out of the box | **Yes** | No | Yes | Yes | No |
+| Remote access from your phone | **Yes** | Partial | No | No | Partial |
+| Compare and benchmark | **Yes** | No | No | No | No |
+| Answers directly, without refusals | **Yes** | No | No | No | Partial |
+| Voice in and out | **Yes** | Partial | No | No | Partial |
+| Document chat | **Yes** | Yes | No | No | No |
+| Runs without Docker | **Yes** | No | Yes | Yes | Yes |
+| Open source | **Yes** | Yes | No | Yes | Yes |
 
 Deep dives: [vs LM Studio](https://locallyuncensored.com/blog/locally-uncensored-vs-lm-studio.html) · [vs Jan](https://locallyuncensored.com/blog/locally-uncensored-vs-jan.html) · [vs Open WebUI](https://locallyuncensored.com/blog/locally-uncensored-vs-open-webui.html) · [vs GPT4All](https://locallyuncensored.com/blog/locally-uncensored-vs-gpt4all.html) · [vs Msty](https://locallyuncensored.com/blog/locally-uncensored-vs-msty.html) · [vs KoboldCpp](https://locallyuncensored.com/blog/locally-uncensored-vs-koboldcpp.html) · [vs SillyTavern](https://locallyuncensored.com/blog/locally-uncensored-vs-sillytavern.html) · [LM Studio alternatives](https://locallyuncensored.com/blog/lm-studio-alternatives.html) · [Best local AI apps 2026](https://locallyuncensored.com/blog/best-local-ai-apps-2026.html)
 
----
+## Models that run well
 
-## Recommended Models
+The model manager holds the full catalog and marks what fits your machine. These are the ones worth starting with.
 
-75+ one-click downloads in the Model Manager, filtered by what your hardware can run. Highlights:
+### Text
 
-### Text (any local backend)
+| Model | Download | Notes |
+|-------|----------|-------|
+| Qwen 3.8 27B Uncensored | 18 GB | Vision, tools and switchable thinking, 262K context. The IQ2_M build is 11 GB and fits a 12 GB card. |
+| Gemma 4 12B Heretic | 7.4 GB | Vision, a different voice from the Qwen line. The IQ4_XS build is for 8 GB cards. |
+| Qwen3-VL 8B Abliterated | 5 GB | Image understanding on an 8 GB card. |
+| Hermes 3 Llama 3.1 8B | 5 GB | Native tool calling. The small model to give the agent. |
+| Llama 3.1 8B Abliterated | 5 GB | Fast and reliable, the usual first download. |
+| GLM 4.7 Flash Heretic | 10 GB | 30B class in an IQ2_M build that fits 12 GB. |
+| Qwen 3.6 35B MoE Abliterated | 24 GB | 35B total with 3B active, vision and agentic coding. |
 
-| Model | VRAM | Best For |
-|-------|------|----------|
-| **Qwen 3.6 35B MoE** | 24 GB | Vision + agentic coding + thinking. 256K context. Day-0 support. |
-| **Qwen 3.5 35B MoE** | 16 GB | Best agentic, SWE-bench leader. |
-| **GLM-4.7-Flash IQ2** | 12 GB | Strongest 30B class. Tool calling, 198K context. |
-| **Gemma 4 27B / E4B** | 16 / 4 GB | Google flagship — native tools + vision; E4B runs on small GPUs. |
-| **GPT-OSS 120B / 20B** | via Ollama | OpenAI's open-weight models. |
-| Llama 3.1 8B Abliterated | 6 GB | The classic uncensored starting point. |
-| Hermes 3 8B | 6 GB | Uncensored + reliable tool calling for Agent Mode. |
-| DeepSeek R1 (8B–70B) | 6–48 GB | Visible chain-of-thought reasoning. |
+GLM 5.3 is in the catalog too, but its smallest local quant is 217 GB, so on a desktop it is cloud territory. [Kimi K3 is further out still](https://locallyuncensored.com/blog/can-you-run-kimi-k3-locally.html).
 
-### Image (ComfyUI, auto-managed)
-
-| Model | VRAM | Notes |
-|-------|------|-------|
-| FLUX.1 Schnell / Dev | 8–10 GB | Best text-to-image; fast or quality. |
-| FLUX 2 Klein 4B | 8–10 GB | Next-gen, fastest FLUX. |
-| Juggernaut XL V9 | 6 GB | Best photoreal SDXL — friendliest entry point. |
-| Z-Image Turbo | 10–16 GB | Uncensored, 8–15 s per image. |
-| ERNIE-Image Turbo | 24 GB | Baidu DiT, 8 steps. |
-
-### Video (ComfyUI, auto-managed)
+### Image
 
 | Model | VRAM | Notes |
 |-------|------|-------|
-| Wan 2.1 T2V 1.3B / 14B | 8–10 / 12+ GB | Fast entry point → high quality 720p. |
-| FramePack F1 (I2V) | 6 GB | Image-to-video on remarkably low VRAM. |
-| LTX 2.3 | 10 GB | Fast text-to-video on modest hardware. |
-| HunyuanVideo 1.5 | 12+ GB | Excellent temporal consistency. |
-| AnimateDiff Lightning | 6–8 GB | Ultra-fast 4-step animation. |
+| Juggernaut XL V9 | 6-8 GB | Photoreal SDXL, the friendliest entry point. |
+| DreamShaper XL Turbo V2 | 6-8 GB | Anime and stylized. |
+| FLUX.1 schnell or dev | 8-10 GB | Fast, or slower and better. |
+| FLUX 2 Klein 4B | 8-10 GB | The newest FLUX, and the quickest of them. |
+| Z-Image Turbo | 10-16 GB | Unfiltered, 8 to 15 seconds per image. |
+| ERNIE-Image Turbo | 24 GB | Baidu DiT, eight steps. |
 
----
+### Video
+
+| Model | VRAM | Notes |
+|-------|------|-------|
+| AnimateDiff Lightning | 6-8 GB | Four step animation, the cheapest way in. |
+| FramePack F1 | 6-8 GB | Image to video on a small card. |
+| Wan 2.1 1.3B | 8-10 GB | Light text to video. |
+| Wan 2.1 14B FP8 | 12+ GB | The quality step up. |
+| Wan 2.2 TI2V 5B | 12+ GB | Image and text to video in one model. |
+| HunyuanVideo 1.5 FP8 | 12+ GB | Strong frame to frame consistency. |
+| LTX Video 2.3 22B FP8 | 16+ GB | The newest LTX. |
+
+Music runs on ACE Step 1.5 Turbo at 6-8 GB, and Talking Character on Wan 2.2 S2V from 10-12 GB.
+
+## Bring your own engine
+
+If you already run a local engine, the app finds it and lists it instead of installing a second one. It detects Ollama, LM Studio, vLLM, KoboldCpp, llama.cpp, LocalAI, Jan, TabbyAPI, GPT4All, Aphrodite, SGLang, TGI, LiteLLM and text-generation-webui, and it ships its own LU Engine for people who have none. Cloud providers are optional and use your own keys: OpenAI, Anthropic, OpenRouter, Groq, Together, DeepSeek, Mistral, or any OpenAI compatible address you paste in.
 
 ## FAQ
 
 **Is it really free and offline?**
-Yes. AGPL-3.0, no account, no telemetry, no usage limits. After the initial model download the local stack works fully offline. Cloud providers are optional and bring-your-own-key.
+Yes. AGPL-3.0, no account, no usage limits. In local mode chat, agent runs and image and video generation all happen on your machine, with no telemetry and no analytics. The app checks GitHub for updates, and pressing the Cloud switch sends one anonymous daily count, which Settings names.
 
 **What does "uncensored" mean?**
-Abliterated models have the trained-in refusal behavior removed from the weights themselves — not a jailbreak, nothing to patch or break. The model answers directly. Combined with local execution, your conversations stay private. [Full guide](https://locallyuncensored.com/blog/abliterated-models-guide.html).
+Abliterated models have the trained in refusal behaviour removed from the weights, so it is not a jailbreak that can be patched or break. They answer directly, without refusals. [Full guide](https://locallyuncensored.com/blog/abliterated-models-guide.html).
 
 **What hardware do I need?**
-Text chat: 8 GB RAM. Fast 8B chat: a GPU with 6 GB VRAM. Image generation: NVIDIA GPU with 8+ GB VRAM. Video: 10–12 GB (image-to-video from 6 GB via FramePack F1). The app recommends models that fit your machine.
+Chat runs a 3B model on 8 GB of system RAM with no GPU at all, and an 8B model comfortably on a 6 GB card. Image generation starts at 6 to 8 GB of VRAM, and so does video on AnimateDiff Lightning or FramePack F1; the Wan and Hunyuan models want 12 GB or more. The model manager marks what fits before you download.
 
 **Can it replace ChatGPT or Claude?**
-For most chat, writing, and coding: yes, with a good 8–14B local model — private, unlimited, and refusal-free. Frontier cloud models are still stronger on the hardest reasoning; add them via your own API keys if you want both.
+For most chat, writing and coding, yes, with a good 8B to 14B local model, and it stays private and unlimited. Frontier cloud models are still stronger on the hardest reasoning. You can add them with your own API keys, or use the Cloud switch.
 
 **Does remote access leak data?**
-No. It's opt-in, passcode-gated, and shows connected devices. LAN traffic never leaves your network; away from home an encrypted Cloudflare tunnel connects phone and PC. No third-party AI server involved.
+No. It is off until you turn it on, gated by a passcode, and it lists the devices that are connected. On your LAN nothing leaves the network; away from home an encrypted Cloudflare tunnel joins phone and PC. No third party AI server is involved.
 
-**macOS?**
-Not yet — Windows and Linux today, macOS is on the roadmap. The source builds on macOS via `npm run tauri build` if you want to try.
-
----
+**What about macOS?**
+Windows and Linux today. The source builds on macOS with `npm run tauri build`, and a proper macOS release is on the roadmap.
 
 ## Roadmap
 
-Everything from plug-and-play backend setup through the coding agent, Agent Mode (28 tools + MCP), image/video generation, remote access, voice, RAG, A/B compare, and signed auto-update has shipped — see [Releases](https://github.com/PurpleDoubleD/locally-uncensored/releases) for the full history.
-
-**Next up:**
-- [ ] Create-tab polish + new generation features (face-ID / PuLID, cleaner image & video workflow)
-- [ ] Upscale + inpainting
-- [ ] Voice Mode (live voice conversations)
 - [ ] macOS build
+- [ ] Voice mode, a live spoken conversation rather than push to talk in and read aloud out
+- [ ] Face ID and PuLID in Create, so a character keeps one face across images
+- [ ] Upscale and Erase Object as local lanes; both run in the cloud today
 
----
+Everything else listed here has shipped. See [Releases](https://github.com/PurpleDoubleD/locally-uncensored/releases) for the history.
 
-## Tech Stack
+## Tech stack
 
-**Tauri v2** (Rust backend, lightweight standalone binary) · **React 19 + TypeScript + Tailwind CSS 4** · **Vite 8** · ComfyUI for media, faster-whisper for STT · 20+ AI provider integrations.
+Tauri v2 with a Rust backend, React 19, TypeScript, Tailwind CSS 4, Vite 8, ComfyUI for images and video, faster-whisper for speech to text and Piper for speech.
 
 ## Community
 
-Join the Discord: **https://locallyuncensored.com/discord** — help channels for chat, image gen, video gen, and the coding agent. Bugs and ideas: [Issues](https://github.com/PurpleDoubleD/locally-uncensored/issues/new?template=bug_report.yml) · [Discussions](https://github.com/PurpleDoubleD/locally-uncensored/discussions).
+Discord: **https://locallyuncensored.com/discord**, with help channels for chat, images, video and the coding agent. Bugs and ideas: [Issues](https://github.com/PurpleDoubleD/locally-uncensored/issues/new?template=bug_report.yml) and [Discussions](https://github.com/PurpleDoubleD/locally-uncensored/discussions).
 
 ## License
 
@@ -273,6 +197,6 @@ AGPL-3.0-only. See [LICENSE](LICENSE).
 
 **Your data stays on your machine.**
 
-[Website](https://locallyuncensored.com) · [Beginner Guide](https://locallyuncensored.com/blog/how-to-run-ai-locally.html) · [Blog](https://locallyuncensored.com/blog/) · [Report Bug](https://github.com/PurpleDoubleD/locally-uncensored/issues/new?template=bug_report.yml) · [Request Feature](https://github.com/PurpleDoubleD/locally-uncensored/issues/new?template=feature_request.yml)
+[Website](https://locallyuncensored.com) · [Beginner guide](https://locallyuncensored.com/blog/how-to-run-ai-locally.html) · [Blog](https://locallyuncensored.com/blog/) · [Report a bug](https://github.com/PurpleDoubleD/locally-uncensored/issues/new?template=bug_report.yml) · [Request a feature](https://github.com/PurpleDoubleD/locally-uncensored/issues/new?template=feature_request.yml)
 
 </div>
