@@ -25,6 +25,13 @@ All notable changes to Locally Uncensored are documented here.
   prompt that follows comes from the system, not from LU. It says so before
   the button, so a password prompt out of nowhere no longer reads like the app
   asking you to log in.
+- **The top navigation and the Create toolbar are back to the 2.6.7 layout
+  after feedback on Discord: entries stay where they are.** 2.6.8 turned both
+  rows into a wheel that scrolled the selected entry into the middle, so every
+  click moved the other tools somewhere else and the ones at the edge were cut
+  off. All six views and all twelve Create tools are back to fixed positions,
+  fully readable, and the Create row wraps onto a second line in a narrow
+  window instead of hiding anything.
 
 ## [2.6.8] - 2026-09-03
 

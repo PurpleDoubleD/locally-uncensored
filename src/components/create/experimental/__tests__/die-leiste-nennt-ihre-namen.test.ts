@@ -95,27 +95,21 @@ describe('die Namen bleiben kurz genug fuer eine Zeile', () => {
   })
 })
 
-describe('bei knappem Platz wird gescrollt, nicht ueberlaufen und nicht umgebrochen', () => {
-  it('die Leiste ist ein Scrollrad', () => {
-    // Die Gegenprobe im Browser (700 px Fenster, ohne Gegenmittel): 50 px
-    // Ueberlauf ueber den Container, die letzte Pille abgeschnitten. Bis 2.6.8
-    // war die Antwort `flex-wrap` und damit eine zweite Zeile; seit dem
-    // Scrollrad bleibt es eine Zeile, die scrollt. Hier steht nur die Quelle
-    // dafuer, die Breiten selbst sind in dieser Umgebung nicht messbar.
-    expect(code).toMatch(/<WheelNav/)
-    expect(code).toMatch(/radius=\{5\}/)
+describe('bei knappem Platz wird umgebrochen, nicht ueberlaufen', () => {
+  it('die Leiste darf umbrechen', () => {
+    // Die Gegenprobe im Browser (700 px Fenster, flex-wrap versuchsweise aus):
+    // 50 px Ueberlauf ueber den Container, die letzte Pille abgeschnitten. Mit
+    // `flex-wrap` zwei Zeilen und kein Ueberlauf. Hier steht nur die Quelle
+    // dafuer.
+    expect(code).toMatch(/flex-wrap/)
   })
 
-  it('und bricht nicht mehr um', () => {
-    // Beides zusammen waere ein Rad, das trotzdem in eine zweite Zeile faellt:
-    // die Mitte stimmte dann nicht mehr, und die Buehne darunter spraenge
-    // weiter um eine Zeilenhoehe.
-    expect(code).not.toMatch(/flex-wrap/)
-  })
-
-  it('der aktive Eintrag steht in der Mitte, nicht irgendwo', () => {
-    // Ohne diesen Fall koennte `activeIndex` still auf 0 stehen und das Rad
-    // zeigte immer denselben Ausschnitt.
-    expect(code).toMatch(/activeIndex=\{intents\.findIndex/)
+  it('und sie ist kein Scrollrad mehr', () => {
+    // Rollback am 07.09.2026 (Discord: „when the tools move I have to look for
+    // them"). Zwischen 2.6.8 und dem Rollback stand hier ein WheelNav, das den
+    // aktiven Eintrag in die Mitte fuhr; jeder Klick liess die uebrigen elf
+    // Werkzeuge wandern. Dieser Fall haelt fest, dass es nicht zurueckkommt.
+    expect(code).not.toMatch(/WheelNav/)
+    expect(code).not.toMatch(/activeIndex=/)
   })
 })
