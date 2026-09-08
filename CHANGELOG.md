@@ -32,6 +32,11 @@ All notable changes to Locally Uncensored are documented here.
   off. All six views and all twelve Create tools are back to fixed positions,
   fully readable, and the Create row wraps onto a second line in a narrow
   window instead of hiding anything.
+- **The Context menu in the chat opens in full instead of being cut off.** It
+  always opened downwards, and its button moved to the bottom of the window in
+  2.6.8, so half the list ran past the edge of the panel and the largest sizes
+  could not be picked. It now measures the room it has and opens upwards when
+  the space below is too small, scrolling inside its own box on a short window.
 
 ## [2.6.8] - 2026-09-03
 
