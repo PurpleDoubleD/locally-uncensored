@@ -6,25 +6,18 @@ All notable changes to Locally Uncensored are documented here.
 
 ### Fixed
 
-- **The update no longer asks for your password and then fails on Arch.** LU
-  installed from the AUR package `locally-uncensored-bin` is our Debian
-  package unpacked into `/usr`, and the updater could not tell the difference:
-  it downloaded a `.deb` and ran `dpkg` on a system that has no `dpkg`, so
-  polkit asked for a password and the install failed right after it was typed.
-  LU now asks the package managers on the machine who owns the running file.
-  On an AUR install it downloads nothing and says to update through your AUR
-  helper instead, with a note that the package is maintained by a community
-  member and can lag a few days behind the GitHub release. Reported by a
-  customer running Zen on Arch.
-- **An AppImage in a folder you cannot write to says so.** Replacing an
-  AppImage means writing into the folder it sits in, so one in `/opt` or
-  another system folder could never be updated in place and failed with no
-  useful message. LU now names the folder and points at the release page.
-- **The password prompt on a Debian or Fedora install is announced.**
-  Installing the update there really does run a package install, and the
-  prompt that follows comes from the system, not from LU. It says so before
-  the button, so a password prompt out of nowhere no longer reads like the app
-  asking you to log in.
+- **The update works on Arch, and on every other Linux install the built-in
+  updater could not reach.** LU from the AUR package `locally-uncensored-bin`
+  is our Debian package unpacked into `/usr`, and the updater could not tell
+  the two apart: it downloaded a `.deb` and ran `dpkg` on a system that has no
+  `dpkg`, so the password prompt arrived and the install failed right after the
+  password was typed. LU now asks the package managers on the machine who owns
+  the running file. Where the answer means the updater cannot install anything
+  (a package manager owns the files, nothing owns them, or the AppImage sits in
+  a folder you cannot write to), Download and Restart do the work themselves: a
+  signed AppImage lands in your own data folder, the start menu entry points at
+  it, and LU starts again from there. After that, updates are the usual one
+  click. Reported by a customer on Arch.
 
 ## [2.6.8] - 2026-09-03
 

@@ -182,15 +182,17 @@ der deb- oder rpm-Zweig gelaufen ist, nicht der AppImage-Zweig.
 Ein Fix im Updater-Plugin ist nicht moeglich, ohne das Plugin zu forken, und er
 waere auch falsch: auf einer pacman-Installation darf LU sich gar nicht selbst
 ueberschreiben, weil dann die Paketdatenbank und die Dateien auf der Platte
-auseinanderlaufen. Der richtige Weg ist, den Fall vorher zu erkennen und den
-Updater erst gar nicht laufen zu lassen.
+auseinanderlaufen. Der Weg ist, den Fall vorher zu erkennen (Abschnitt 6) und
+dann an der Paketdatenbank vorbei eine eigene AppImage ins Heimverzeichnis zu
+legen, die niemandem sonst gehoert (Abschnitt 7).
 
 ## 6. Was der Fix macht
 
-`src-tauri/src/commands/install_method.rs` beantwortet die Frage, die das Plugin
-nie stellt: wem gehoert die laufende Datei? Reine Funktion `detect(&Probes)`,
-daneben `collect_probes()` mit den echten Aufrufen (`pacman -Qo`, `dpkg -S`,
-`rpm -qf`, jeweils mit Deckel und ohne Panik, wenn das Programm fehlt).
+`src-tauri/src/commands/install_method.rs` beantwortet die Frage, die das
+Plugin nie stellt: wem gehoert die laufende Datei? Reine Funktion
+`detect(&Probes)`, daneben `collect_probes()` mit den echten Aufrufen
+(`pacman -Qo`, `dpkg -S`, `rpm -qf`, jeweils mit Deckel und ohne Panik, wenn
+das Programm fehlt).
 
 Regeln, in dieser Reihenfolge:
 
@@ -203,20 +205,90 @@ Regeln, in dieser Reihenfolge:
 | Datei unter `/usr`, kein Paketmanager meldet sich | `unknown` |
 | sonst | `unknown` |
 
-Der Store fragt vor dem Download. Bei `pacman` wird nichts geladen und nichts
-installiert, stattdessen steht da, dass das AUR-Paket den Weg vorgibt. Bei `deb`
-und `rpm` laeuft alles wie bisher, aber vor dem Klick steht, dass gleich das
-System nach dem Passwort fragt und dass das nicht LU ist, das nach einem Login
-fragt. Bei `appimage` ohne Schreibrecht am Ordner und bei `unknown` unter Linux
-wird nicht installiert, sondern auf die Release-Seite verwiesen.
+## 7. Loesung: LU zieht sich selbst um
 
-## Beweis
+Die erste Fassung dieses Fixes hat auf `pacman`, `unknown` und der AppImage
+ohne Schreibrecht gar nichts geladen und stattdessen einen Hinweis angezeigt
+("update ueber deinen AUR-Helper", "das System fragt gleich nach dem
+Passwort"). Der Chef hat das verworfen, und zwar zu Recht: der Kunde soll den
+Update-Knopf druecken und fertig sein. Ein Hinweistext ist kein Update.
+
+Ausgeliefert wird darum Selbstheilung. `src-tauri/src/commands/self_migrate.rs`
+(reine Logik, kein tauri) und `self_migrate_cmd.rs` (HTTP, Konfiguration,
+Fortschrittsereignisse).
+
+### Wer welchen Weg nimmt
+
+`self_migrate::migrates_itself(kind, exe_dir_writable)`:
+
+| Lage | Weg |
+| --- | --- |
+| `appimage` in beschreibbarem Ordner | Plugin, in place, unveraendert |
+| `deb`, `rpm` | Plugin, `pkexec dpkg -i` / `rpm -U`, ohne Zusatztext |
+| `msi` | Plugin, Windows-Installer |
+| `pacman` | LU installiert sich selbst |
+| `unknown` unter Linux | LU installiert sich selbst |
+| `appimage` ohne Schreibrecht am Ordner | LU installiert sich selbst |
+
+Die Frontend-Seite (`installsItself` in `src/stores/updateStore.ts`) haengt
+noch `isLinux()` davor: ein `.app` unter `/Applications` meldet ebenfalls
+`unknown`, und dort funktioniert das Plugin.
+
+### Was der Eigenbau tut
+
+1. `latest.json` von denselben Endpunkten wie das Plugin
+   (`tauri.conf.json`, `plugins.updater.endpoints`, Platzhalter werden
+   ersetzt), Eintrag `platforms["linux-x86_64-appimage"]`.
+2. Download nach `<XDG_DATA_HOME>/locally-uncensored/` in
+   `Locally.Uncensored.AppImage.part`, Fortschritt alle 512 KB als Ereignis
+   `update-migration`.
+3. Signaturpruefung mit `minisign-verify` und dem `pubkey` aus derselben
+   `tauri.conf.json`, also genau die Pruefung aus
+   `tauri-plugin-updater-2.10.1/src/updater.rs`, `verify_signature`. Faellt sie
+   durch, wird die Datei geloescht und der Fehler (englisch) gemeldet.
+4. `chmod 755`, dann `rename` auf `Locally.Uncensored.AppImage`. Gleicher
+   Ordner, also atomar.
+5. `<XDG_DATA_HOME>/applications/Locally Uncensored.desktop` mit `Exec` auf die
+   AppImage, Name und Icon wie im Deb. Der Dateiname ist buchstabengleich mit
+   dem aus `usr/share/applications`, denn XDG sucht nach Dateinamen und nur ein
+   gleicher Name im Heimverzeichnis ueberdeckt den Systemeintrag, statt einen
+   zweiten Menueeintrag danebenzustellen. Icons werden aus `$APPDIR`, sonst aus
+   `XDG_DATA_DIRS`, sonst aus `/usr/share` in den eigenen hicolor-Baum kopiert,
+   danach `update-desktop-database` (Fehler egal).
+6. Start der neuen AppImage abgekoppelt, danach beendet die Oberflaeche die
+   laufende App ueber `exit_app`.
+
+Punkt 6 hat einen Haken, den man nur einmal uebersieht: LU laeuft mit
+`tauri-plugin-single-instance`. Eine zweite Instanz mit derselben Kennung
+findet die laufende, holt deren Fenster nach vorn und beendet sich. Die neue
+AppImage waere also sofort wieder weg. `self_migrate::relaunch_script` startet
+deshalb ueber `setsid sh -c` einen Helfer, der auf das Verschwinden unserer PID
+wartet (Deckel 20 Sekunden) und danach die AppImage exect. `APPIMAGE`,
+`APPDIR`, `OWD` und `ARGV0` werden aus seiner Umgebung entfernt, sonst erbt die
+neue Instanz die Pfade der alten.
+
+Ab dem naechsten Update ist die Lage die gewoehnliche: `APPIMAGE` zeigt in das
+Heimverzeichnis, der Ordner ist beschreibbar, `detect()` sagt `appimage` und
+`migrates_itself` sagt nein. Das Plugin tauscht die Datei wieder selbst.
+
+### Oberflaeche
+
+Keine eigene. Derselbe Download-Knopf, derselbe Neustart-Knopf, derselbe
+Fortschrittsbalken. Die drei kurzen Schritte nach dem Download haben keine
+Prozentzahl und schreiben stattdessen ihren Namen in dieselbe Zeile ("Checking
+the signature", "Putting the new version in place", "Starting the new
+version"). Status `unavailable`, `updateBlockedBecause`, der Passworthinweis
+und das Feld `hint` sind samt Oberflaeche geloescht.
+
+## 8. Beweis der Erkennung
 
 Nicht nur Unit-Tests. Die Erkennung lief in echten Containern gegen das echte
 Binary aus dem echten 2.6.8-Deb, und zwar mit der Datei, die auch ausgeliefert
 wird: `src-tauri/src/commands/install_method.rs`, md5
 `afd6182b26fd77edf241f6e3ef724b34`, in jedem Container mit `md5sum` gegen den
-Baum geprueft. Sie kompiliert mit blossem `rustc`, ohne cargo, ohne tauri, ohne
+Baum geprueft. Diese Fassung hat inzwischen `hint_for` und `is_under_usr`
+verloren, weil die Oberflaeche nichts mehr erklaert; die Laeufe in Abschnitt 9
+pruefen die aktuelle Datei (md5 `1d5ddd6212bf0b34465cd55ad4d0da79`). Sie kompiliert mit blossem `rustc`, ohne cargo, ohne tauri, ohne
 serde. Daneben liegt nur `probe_main.rs`, ein Dutzend Zeilen Ausgabe, das die
 Datei per `#[path]` einbindet.
 
@@ -382,3 +454,162 @@ von `pkexec` bis zum Fehlschlag ist aus dem Quelltext gelesen (Abschnitt 3) und
 mit der Fehlerbeschreibung des Kunden abgeglichen, nicht nachgestellt. Was
 gemessen wurde, ist die Frage, an der der Fix haengt: wem gehoert die Datei, und
 was antwortet `detect()` darauf.
+
+
+## 9. Beweis der Selbstheilung
+
+Zweiter Lauf, 08.09.2026, im selben Aufbau: Docker auf dem Mac (colima,
+`macOS Virtualization.Framework`, Gast `aarch64`), Container `archlinux:latest`
+als `linux/amd64`, also unter `qemu-x86_64`.
+
+Getestet werden die ausgelieferten Dateien, unveraendert. Der Container baut
+sie mit cargo (`--offline`, Kisten vorher mit `cargo vendor` mitgegeben), drei
+Kisten: serde_json, minisign-verify, base64. Daneben liegt nur ein `main.rs`
+mit den Unterbefehlen `detect`, `migrate` und `launch`, das nichts entscheidet.
+Am Anfang jedes Laufs steht `md5sum`:
+
+    1d5ddd6212bf0b34465cd55ad4d0da79  src/commands/install_method.rs
+    5cce6c52ba71684b754e1c09e8b24aff  src/commands/self_migrate.rs
+    92d791fa837357611f55f5076537aea4  src/app_identity.rs
+    46cb22874e67cf71def3f5a46b192ec4  src/os_error.rs
+
+### a) Die Signatur, gegen die echte 2.6.8-AppImage
+
+Auf dem Mac, als Test im Baum (`the_real_appimage_is_accepted_and_one_flipped_byte_is_not`,
+laeuft nur mit `LU_APPIMAGE_FIXTURE`, sonst uebersprungen):
+
+    accepted 112871928 bytes from ".../Locally.Uncensored_2.6.8_amd64.AppImage"
+    refused after flipping byte 56435964: the signature does not match the
+      downloaded file: The signature verification failed
+
+Datei und Signatur sind die echten: die AppImage von GitHub, die Signatur aus
+`platforms["linux-x86_64-appimage"]` in `latest.json`, der Schluessel aus
+`tauri.conf.json`.
+
+### b) Der Zen-Fall, echtes AUR-Paket
+
+`makepkg --nodeps --skipinteg` aus dem PKGBUILD des AUR-Maintainers (2.6.7,
+laedt sein Deb selbst von GitHub), installiert mit
+`pacman -U --disable-sandbox --nodeps --overwrite '*'`. Die `mv`-Zeile fuer den
+Sidecar ist wie in der Nacht in ein `if` gefasst, sonst bricht `package()` ab
+(Nebenbefund in Abschnitt 8b); an der Besitzfrage aendert das nichts.
+
+    /usr/bin/locally-uncensored is owned by locally-uncensored-bin 2.6.7-1
+    __TAURI_BUNDLE_TYPE_VAR_DEB
+    LU starting version="2.6.7"
+
+    exe_path         = /usr/bin/locally-uncensored
+    has_pacman       = true
+    has_dpkg         = false
+    pacman_owns_exe  = true
+    DETECT           = pacman
+    MIGRATES_ITSELF  = true
+
+Das Binary aus dem Deb startet in diesem Container wirklich (die Zeile
+`LU starting version="2.6.7"` kommt aus dem Programm) und bricht danach ab,
+weil kein Display da ist.
+
+### c) Die Migration, als gewoehnlicher Nutzer
+
+    --- gate
+    DETECT           = pacman
+    MIGRATES_ITSELF  = true
+    --- manifest
+    version          = 2.6.8
+    url              = https://github.com/PurpleDoubleD/locally-uncensored/releases/download/v2.6.8/Locally.Uncensored_2.6.8_amd64.AppImage
+    --- signature
+    bytes            = 112871928
+    VERIFY           = accepted
+    --- placed
+    appimage         = /home/builder/.local/share/locally-uncensored/Locally.Uncensored.AppImage
+    staged_gone      = true
+    desktop_file     = /home/builder/.local/share/applications/Locally Uncensored.desktop
+    icon             = /home/builder/.local/share/icons/hicolor/32x32/apps/locally-uncensored.png
+    icon             = /home/builder/.local/share/icons/hicolor/128x128/apps/locally-uncensored.png
+    icon             = /home/builder/.local/share/icons/hicolor/256x256@2/apps/locally-uncensored.png
+    icon             = /home/builder/.local/share/icons/hicolor/512x512/apps/locally-uncensored.png
+    --- after
+    DETECT           = appimage
+    exe_dir_writable = true
+    MIGRATES_ITSELF  = false
+
+    -rwxr-xr-x 1 builder builder 112871928 Locally.Uncensored.AppImage
+
+Die vier Icons stammen aus `/usr/share/icons/hicolor`, also aus dem, was das
+AUR-Paket hinterlassen hat. `MIGRATES_ITSELF = false` in der letzten Zeile ist
+die Zusage fuer das naechste Update: ab hier macht es wieder das Plugin.
+
+### d) Der Menueeintrag gewinnt gegen den des Pakets
+
+Beide Dateien liegen da, und die XDG-Reihenfolge entscheidet nach Dateinamen:
+
+    WINS:      /home/builder/.local/share/applications/Locally Uncensored.desktop
+    absent:    /usr/local/share/applications/Locally Uncensored.desktop
+    shadowed:  /usr/share/applications/Locally Uncensored.desktop
+
+    Exec=locally-uncensored                                              (Paket)
+    Exec="/home/builder/.local/share/locally-uncensored/Locally.Uncensored.AppImage"  (unserer)
+
+`update-desktop-database` hat daneben die `mimeinfo.cache` geschrieben.
+
+### e) Die neue AppImage ist die echte 2.6.8
+
+`--appimage-extract` laeuft in diesem Container NICHT:
+
+    cannot execute binary file: Exec format error
+
+Der Grund liegt nicht an der Datei, sondern am Aufbau: der Container ist
+`linux/amd64` unter `qemu-x86_64` auf einem Apple-Silicon-Mac, und die
+AppImage-Laufzeit ist `static-pie` gelinkt, was diese Emulation nicht startet
+(`file`: "ELF 64-bit LSB pie executable, x86-64, static-pie linked"). Dynamisch
+gelinkte x86-64-Programme laufen sehr wohl, siehe b).
+
+Der Inhalt wurde darum ohne Ausfuehren geholt, mit `unsquashfs` am Versatz aus
+dem ELF-Kopf (`e_shoff + e_shentsize * e_shnum`, dasselbe, was
+`--appimage-offset` ausrechnet):
+
+    squashfs offset = 944632
+    unsquashfs_exit=0
+    AppRun  AppRun.wrapped  Locally Uncensored.desktop  locally-uncensored.png  usr
+    usr/bin: locally-uncensored  lu-llama-server
+
+    /tmp/x/root/usr/bin/locally-uncensored --version
+    LU starting version="2.6.8"
+
+    xvfb-run -a ./AppRun --version
+    LU starting version="2.6.8"
+    [Python] Resolved: /usr/sbin/python3
+    [Ollama] Starting...
+
+Mit Bildschirm startet die entpackte 2.6.8 also durch bis zum Hochfahren ihrer
+eigenen Dienste.
+
+### f) Der Neustart wartet auf das Ende der alten Instanz
+
+Ohne dieses Warten wuerde Single-Instance die neue Instanz sofort wieder
+beenden. Beweis mit einem Platzhalter fuer die neue Version (ein Skript, das
+einen Zeitstempel schreibt) und einem alten Prozess, der 25 Sekunden lebt:
+
+    the old process:              pid 11519
+    launched
+    11529  1  11529  /usr/bin/qemu-x86_64 /usr/sbin/sh sh -c n=0; while [ $n -lt 200 ] && kill -0 11519 2>/dev/null; do sleep 0.1; n=$((n+1)); done; exec '/home/builder/new-version.sh'
+    after 3 s, old process alive: yes, new version started: no
+    3 s after it ended:           old process alive: no, new version started: yes
+
+Die Spalten sind pid, ppid, pgid: der Helfer haengt an 1 und hat eine eigene
+Prozessgruppe, `setsid` hat also gegriffen. Und er startet die neue Version
+genau dann, wenn die alte weg ist, nicht vorher.
+
+### Was dieser Beweis nicht zeigt
+
+* Kein Klick auf einer echten Arch-Maschine mit Desktop. Was hier lief, ist die
+  Logik der beiden Befehle, nicht die Oberflaeche darum herum; die haengt an
+  den Vitest-Tests (`update-installiert-sich-auf-arch-selbst`,
+  `das-update-zeigt-den-schritt-statt-eines-hinweises`).
+* Die AppImage-Datei selbst wurde im Container nicht gestartet (Abschnitt e).
+  Bewiesen ist ihr Inhalt und dass er unter xvfb hochfaehrt, nicht der Start
+  ueber die AppImage-Laufzeit.
+* Der Download laeuft im Container nicht ueber `self_migrate_cmd.rs`, weil der
+  Teil tauri braucht. Die AppImage wurde auf dem Mac von GitHub geladen und in
+  den Container kopiert; die Signaturpruefung im Container hat sie danach als
+  echt angenommen.
