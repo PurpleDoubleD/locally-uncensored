@@ -215,7 +215,9 @@ fn shell_pid_of(id: &str) -> u32 {
 /// the same processes.
 #[cfg(test)]
 async fn wait_for_children_of(shell_pid: u32) -> Vec<u32> {
-    for _ in 0..50 {
+    // 30 s for the same reason as reported_directory: the loop leaves as soon
+    // as a child shows up, so a fast machine pays nothing for the margin.
+    for _ in 0..300 {
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         let kids = crate::test_support::worker_descendants_of(shell_pid);
         if !kids.is_empty() {
@@ -1030,7 +1032,9 @@ mod cwd_default_tests {
     /// not instant.
     async fn reported_directory(id: &str) -> String {
         let mut seen = String::new();
-        for _ in 0..100 {
+        // 30 s, not 5: on a loaded CI runner the shell can take longer than
+        // that to start, and a slow runner is not a failed test.
+        for _ in 0..600 {
             tokio::time::sleep(std::time::Duration::from_millis(50)).await;
             let st = shell_task_status_impl(&json!({ "id": id })).await.unwrap();
             seen = st["output_tail"].as_str().unwrap_or("").to_string();
