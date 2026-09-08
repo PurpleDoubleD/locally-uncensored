@@ -95,10 +95,11 @@ function classNameMit(src: string, marker: string): string {
 }
 
 describe('D-S18: die zwei verbliebenen Streifen sind EINE Flaeche', () => {
-  // 04.09.2026: die Kopfzeile war ein Raster und ist jetzt eine Flex-Zeile
-  // mit absolut gesetzter Mitte (das Drehrad muss hart mittig stehen). An
-  // der FLAECHE, um die es hier geht, aendert das nichts.
-  const headerFlaeche = flaeche(classNameMit(HEADER, 'h-10 flex'))
+  // 07.09.2026: zwischen dem 04.09. und dem Rollback war die Kopfzeile eine
+  // Flex-Zeile mit absolut gesetzter Mitte, weil das Scrollrad hart mittig
+  // stehen musste. Sie ist wieder das Raster aus 2.6.7. An der FLAECHE, um
+  // die es hier geht, hat keine der beiden Fassungen etwas geaendert.
+  const headerFlaeche = flaeche(classNameMit(HEADER, 'h-10 grid'))
 
   it('der Header traegt ueberhaupt eine benannte Flaeche', () => {
     expect(headerFlaeche).not.toBe('')
@@ -122,7 +123,7 @@ describe('D-S18: die zwei verbliebenen Streifen sind EINE Flaeche', () => {
   it('NEGATIVKONTROLLE: keine Trennkante und kein Schatten zwischen ihnen', () => {
     // Eine Kante oder ein Schatten waere der Strich, der aus einer Flaeche
     // zwei Baender macht — und damit das Argument dieses Befundes zurueck.
-    const streifen = [classNameMit(HEADER, 'h-10 flex'), ...titlebarStreifen()]
+    const streifen = [classNameMit(HEADER, 'h-10 grid'), ...titlebarStreifen()]
     for (const s of streifen) {
       expect(s, s).not.toMatch(/\bborder-b\b/)
       expect(s, s).not.toMatch(/\bshadow-/)

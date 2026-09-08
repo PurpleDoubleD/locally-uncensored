@@ -18,7 +18,6 @@ import { checkModelCapability } from '../../api/ollama'
 import { closeDialog, isTopDialog, nextFocusIndex, openDialog } from '../ui/dialog-a11y'
 import { MONOGRAM, MONOGRAM_INVERT } from './brand'
 import type { View } from '../../stores/uiStore'
-import { WheelNav } from '../ui/WheelNav'
 import { modelListIsStale } from '../../lib/model-list-staleness'
 
 /**
@@ -305,7 +304,7 @@ export function Header() {
        Nebeneffekt, gemessen: die aktive Nav-Pille und die Hover-Flaeche der
        Fensterknoepfe waren beide `gray-100` auf `gray-100` und damit
        unsichtbar; sie haben jetzt Grund unter sich. */
-    <header className="relative h-10 flex items-center justify-between px-3 bg-gray-200 dark:bg-lu-canvas z-40 gap-4">
+    <header className="h-10 grid grid-cols-[auto_1fr_auto] items-center px-3 bg-gray-200 dark:bg-lu-canvas z-40 gap-4">
       {/* Left: Sidebar + Logo */}
       <div className="flex items-center gap-2 min-w-0">
         <button
@@ -355,29 +354,7 @@ export function Header() {
           zusammen; was rechts steht, ist ein Zustandsanzeiger oder ein
           Schalter und klappt nie. Das Kebab steht deshalb hier, bei dem, was
           es aufnimmt, und nicht mehr drueben bei dem, was es nie aufnimmt. */}
-      <nav
-        aria-label="Main"
-        /* David, 04.09.2026: „das ausgewaehlte im drehrad ist immer hardstuck
-           mittig. keine ausnahme." Vorher war die Leiste ein Raster
-           `auto | 1fr | auto`, und die Mitte der mittleren Spalte ist NICHT
-           die Mitte der Leiste, sobald die beiden Aussengruppen verschieden
-           breit sind. Gemessen: links Burger plus Zeichen rund 62px, rechts
-           vier Dienstprogramme rund 150px, macht die Radmitte 44px zu weit
-           links. Genau das war zu sehen.
-
-           Deshalb haengt die Navigation jetzt absolut an `left-1/2` und traegt
-           ihre eigene Breite. Ihre Mitte ist damit die Mitte des Polsterkastens
-           der Leiste, unabhaengig davon, was links und rechts steht und wie
-           breit es ist. Der Stale-Chip ist aus dieser Gruppe heraus zu den
-           Dienstprogrammen gezogen: er stand vorher IN der Mitte-Gruppe und
-           schob das Rad jedes Mal zur Seite, wenn er auftauchte.
-
-           `pointer-events-none` auf der Huelle und `auto` auf den Kindern:
-           unterhalb von `lg` ist die Huelle breiter als das Kebab darin, und
-           eine leere Flaeche ueber dem Hell-Dunkel-Schalter, die Klicks
-           schluckt, waere ein neuer Fehler statt eines behobenen. */
-        className="absolute left-1/2 top-0 -translate-x-1/2 h-full w-full max-w-[26rem] flex items-center justify-center gap-2 pointer-events-none [&>*]:pointer-events-auto"
-      >
+      <nav aria-label="Main" className="flex items-center justify-center gap-2 min-w-0 shrink">
         {/* D-S20: EIN Breakpoint, nicht zwei. Vorher `xl` auf Create und `lg`
             ueberall sonst — dieselbe Leiste brach bei zwei verschiedenen
             Fensterbreiten, je nachdem, was gerade im Hauptbereich stand. Die
@@ -386,24 +363,14 @@ export function Header() {
             aendert. `lg` (1024px) traegt die sechs Ziele mit Rand: sechs
             Beschriftungen in `px-2` plus Logo, Burger und vier
             Dienstprogramme kommen zusammen auf rund 570px. */}
-        {/* Das Scrollrad (David, 03.09.2026): der aktive Reiter steht in der
-            Mitte, drei Nachbarn je Seite werden nach aussen blasser, ein Klick
-            faehrt das Ziel weich in die Mitte und macht es voll lesbar. Die
-            Begruendung fuer Polster, Scrollflaeche und Deckkraft steht in
-            `ui/WheelNav`.
-
-            Die Breite (26rem) steht an der Huelle, nicht hier: das Rad soll
-            ein Ausschnitt sein. Bei sechs Zielen und voller Leistenbreite
-            stuenden alle sechs nebeneinander, der Klick bewegte nichts, und
-            der Verlauf waere nur Dekoration statt Orientierung. Die Spur
-            fuellt die Huelle, damit Spurmitte und Leistenmitte derselbe Punkt
-            sind. */}
-        <WheelNav
-          activeIndex={navTargets.findIndex(isNavActive)}
-          radius={3}
-          reihenClass="gap-0.5"
-          className="hidden lg:block w-full"
-        >
+        {/* Rollback 2.6.9 (Discord, 07.09.2026): „when the tools move I have
+            to look for them." Zwischen 2.6.8 und hier stand an dieser Stelle
+            ein Scrollrad, das den aktiven Reiter in die Mitte fuhr und die
+            Nachbarn nach aussen ausblendete. Damit stand kein Ziel zweimal an
+            derselben Stelle, und am Rand war immer etwas angeschnitten. Es ist
+            wieder die Reihe aus 2.6.7: sechs feste Eintraege, alle gleich
+            hell, jeder immer an seinem Platz. */}
+        <div className="hidden lg:flex items-center gap-0.5">
           {navTargets.map((t) => (
             <button
               key={t.id}
@@ -414,7 +381,7 @@ export function Header() {
               {t.label}
             </button>
           ))}
-        </WheelNav>
+        </div>
 
         {/* Dieselben Ziele, zusammengeklappt. Ein echtes Menue — siehe die
             Begruendung oben bei `menuId`. */}
@@ -467,12 +434,12 @@ export function Header() {
           Regel aus D-S47. Die Navigation, die hier stand, ist in die Mitte
           gezogen. */}
       <div className="flex items-center justify-end gap-2.5 min-w-0">
-        {/* Der Stale-Hinweis stand bis 04.09.2026 in der Mitte-Gruppe und schob
-            dort das Rad zur Seite, sobald er auftauchte. Er gehoert ohnehin
-            hierher: er zeigt einen ZUSTAND, und das ist genau die Regel dieser
-            Gruppe. Model picker und Memory sind 2026-07-11 in den Composer
-            gezogen (Web-Paritaet); nur diese Warnung ist hier geblieben,
-            Chat und Code, nie Create. */}
+        {/* Der Stale-Hinweis stand bis 04.09.2026 in der Mitte-Gruppe und
+            schob die Navigation zur Seite, sobald er auftauchte. Er gehoert
+            ohnehin hierher: er zeigt einen ZUSTAND, und das ist genau die
+            Regel dieser Gruppe. Model picker und Memory sind 2026-07-11 in
+            den Composer gezogen (Web-Paritaet); nur diese Warnung ist hier
+            geblieben, Chat und Code, nie Create. */}
         {currentView !== 'create' && isOllamaModel && staleError && (
           <div
             className="flex items-center gap-1 t-micro text-gray-500 dark:text-gray-400"

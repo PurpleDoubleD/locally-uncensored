@@ -595,66 +595,6 @@ button:not(:disabled) {
   background: transparent;
 }
 
-/* ── Das Scrollrad (Kopfnavigation, Create-Werkzeuge) ────────────────────
-   Die Spur scrollt waagerecht und zeigt dabei keinen Balken. Zwei Regeln
-   sind noetig, weil die beiden Engines es verschieden loesen: WebKit ueber
-   das Pseudo-Element, Firefox ueber `scrollbar-width`. Ein Balken waere hier
-   falsch, die Reihe ist eine Navigation und kein Textfeld; angefasst wird sie
-   mit Trackpad, Rad oder Klick.
-
-   `overscroll-behavior-x: contain` haelt die Geste in der Spur. Ohne sie
-   loest ein waagerechtes Wischen am Ende der Reihe unter macOS die
-   Zurueck-Navigation des WebViews aus, und der Nutzer verliert die Ansicht,
-   weil er die Werkzeugleiste zu weit geschoben hat.
-
-   Kein `scroll-behavior: smooth` hier: das Anfahren macht `WheelNav` selbst
-   und fragt dabei `prefers-reduced-motion`. Stuende es zusaetzlich im
-   Stylesheet, waere jede Scrollbewegung animiert, auch die des Nutzers am
-   Trackpad, und die Einstellung des Betriebssystems waere umgangen. */
-.lu-wheel-track {
-  scrollbar-width: none;
-  overscroll-behavior-x: contain;
-}
-.lu-wheel-track::-webkit-scrollbar {
-  display: none;
-  width: 0;
-  height: 0;
-}
-
-/* Die Kante des Drehrads loest sich auf, statt abgeschnitten zu werden.
-   (David, 04.09.2026: "links und rechts sollen immer gleich viele optionen
-   sein ... hard in der mitte mit nettem effekt minimalstic.")
-
-   Das ist nicht nur Schmuck. Die Spur ist breiter als die 2r+1 Felder, die
-   das Rad zeigen soll, und dahinter faengt die geschlossene Reihe an, sich zu
-   wiederholen. Ohne den Verlauf stuende dort ein zweites Mal dasselbe Wort.
-
-   64px je Seite und ausdruecklich KEIN Prozentwert. Dieselbe Regel bedient
-   zwei verschieden breite Spuren: 416px in der Kopfzeile, 832px in der
-   Create-Leiste. Ein Prozentwert waere dort doppelt so breit wie hier,
-   obwohl die Pillen dieselbe Groesse haben, und der Verlauf haette in der
-   einen Leiste eine andere Bedeutung als in der anderen. 64px decken in
-   beiden ungefaehr einen Eintrag: genug, damit die Stelle, an der die Walze
-   sich wiederholt, angeschnitten und nicht als Fehler gelesen wird.
-   Der Verlauf liegt UEBER der Deckkraft aus dem Bauteil, beide multiplizieren
-   sich. */
-.lu-wheel-maske {
-  -webkit-mask-image: linear-gradient(
-    to right,
-    transparent 0,
-    #000 64px,
-    #000 calc(100% - 64px),
-    transparent 100%
-  );
-  mask-image: linear-gradient(
-    to right,
-    transparent 0,
-    #000 64px,
-    #000 calc(100% - 64px),
-    transparent 100%
-  );
-}
-
 /* Global scrollbar (David 2026-06-02): every scrollable surface — not only
    .scrollbar-thin containers — gets the themed scrollbar so the bare white
    Windows/WebView2 default never shows (it was visible on the coding file-tree

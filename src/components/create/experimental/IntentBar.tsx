@@ -5,7 +5,6 @@ import { isIntentLocked, visibleIntents } from './intents'
 import { isMlxImageHost } from '../../../api/mlx-image'
 import { cn } from '../ui/cn'
 import { ICON_SM } from '../../ui/icon-size'
-import { WheelNav } from '../../ui/WheelNav'
 
 // Jede Pille traegt ihre Beschriftung, immer. Bis 2.6.7 stand hier ein
 // `max-width`-Aufklappen: nur die AKTIVE Pille zeigte ihren Namen, die
@@ -39,14 +38,16 @@ import { WheelNav } from '../../ui/WheelNav'
 // seine Mindestbreite behaelt. Der Ausgang waere die abgeschnittene letzte
 // Pille am rechten Rand.
 //
-// Bis 2.6.8 war die Antwort darauf ein Umbruch in eine zweite Zeile. Seit dem
-// Scrollrad (David, 03.09.2026) ist sie eine andere: die Leiste bleibt EINE
-// Zeile und scrollt. Das loest dasselbe Problem und noch eins dazu, denn beim
-// Umbruch sprang die Buehne darunter um 35,7 px, sobald das Fenster die
-// Grenze kreuzte. Der aktive Eintrag steht immer in der Mitte, fuenf Nachbarn
-// je Seite werden nach aussen blasser, und ein Klick faehrt das Ziel weich
-// dorthin. Kein Ueberlauf, kein abgeschnittener Text, keine springende
-// Hoehe.
+// Deshalb `flex-wrap`: dieselbe Leiste bricht in eine zweite Zeile um
+// (gemessen 35,6 -> 71,3 px Hoehe; die Buehne darunter ist `flex-1` und gibt
+// die 35,7 px her). Kein Ueberlauf, kein abgeschnittener Text, nichts
+// verschwindet.
+//
+// 2.6.8 hatte hier ein Scrollrad an dieser Stelle: eine Zeile, die den
+// aktiven Eintrag in die Mitte fuhr und die Nachbarn nach aussen ausblendete.
+// Rueckbau am 07.09.2026 nach dem Discord-Befund „when the tools move I have
+// to look for them" (Rollback auf den Stand von 2.6.7). Ein Werkzeug, das
+// seinen Platz wechselt, ist teurer als eine zweite Zeile.
 //
 // Der volle Name bleibt in `title` und `aria-label`. „Edit" auf der Pille,
 // „Edit / Image to Image" fuer Hover und Screenreader.
@@ -94,29 +95,8 @@ export function IntentBar() {
       // Entwurfspixel dazu, gerendert gut 5. Das ist die „minimale
       // Luftschicht, wenige Pixel, nicht mehr", die er verlangt hat. Unten bleibt es bei
       // den 1,5px: darunter steht die Buehne, und die stand nie zu eng.
-      className="px-3 pt-1.5 pb-[1.5px] [--text-control:9px]"
+      className="flex flex-wrap items-center justify-center gap-x-[3px] gap-y-[3px] px-3 pt-1.5 pb-[1.5px] [--text-control:9px]"
     >
-      {/* David, 04.09.2026: „das selbe bei create tab ... hard in der mitte."
-          `mx-auto` auf einem Blockkasten setzt seine Mitte auf die Mitte des
-          umgebenden Kastens, und zwar unabhaengig davon, was sonst in der
-          Leiste steht. Die Kopfzeile braucht dafuer eine absolute Position,
-          weil dort links und rechts etwas NEBEN dem Rad steht; hier steht
-          nichts daneben, und dann ist der zentrierte Blockkasten die
-          einfachere Fassung derselben Zusage.
-
-          52rem und nicht die volle Breite, und die Zahl ist in LAYOUT-Pixeln
-          gerechnet, nicht in gerenderten. Genau daran ist der Deckel vorher
-          gescheitert: die 1068px im Kopf dieser Datei sind bei --ui-scale 1,15
-          gemessen, in Layout-Pixeln sind es 928,7. Der alte Deckel von 62rem
-          (992px) lag also UEBER der Breite aller zwoelf Pillen und tat das
-          Gegenteil dessen, was der Kommentar versprach. 52rem sind 832px und
-          damit ein echter Ausschnitt: rund elf der zwoelf Pillen. */}
-      <WheelNav
-        activeIndex={intents.findIndex((m) => m.id === intent)}
-        radius={5}
-        reihenClass="gap-x-[3px]"
-        className="mx-auto w-full max-w-[52rem]"
-      >
       {intents.map((meta) => {
         const locked = isIntentLocked(meta, backend, mlxHost)
         const selected = !locked && intent === meta.id
@@ -161,7 +141,6 @@ export function IntentBar() {
           </button>
         )
       })}
-      </WheelNav>
     </div>
   )
 }
