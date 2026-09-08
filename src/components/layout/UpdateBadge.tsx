@@ -5,7 +5,6 @@ import { useUpdateStore, initUpdateChecker } from '../../stores/updateStore'
 import { formatBytes } from '../../lib/formatters'
 import { isTauri } from '../../api/backend'
 import { ICON_LG } from '../ui/icon-size'
-import { HINWEIS_TEXT } from '../../lib/hinweis'
 
 export function UpdateBadge() {
   const {
@@ -19,10 +18,10 @@ export function UpdateBadge() {
     downloadedBytes,
     totalBytes,
     errorMessage,
+    progressNote,
     downloadUpdate,
     installAndRestart,
     dismissUpdate,
-    openReleasePage,
   } = useUpdateStore()
 
   const [open, setOpen] = useState(false)
@@ -45,10 +44,6 @@ export function UpdateBadge() {
   const isDownloaded = downloadStatus === 'downloaded'
   const isInstalling = downloadStatus === 'installing'
   const isError = downloadStatus === 'error'
-  // The update exists and is fine; this copy is one LU must not replace by
-  // itself (pacman, an AppImage in a folder the user cannot write to, an
-  // install nothing claims). See updateStore for the sentences.
-  const isUnavailable = downloadStatus === 'unavailable'
   const canDownload = isTauri() && downloadStatus === 'idle'
 
   // A bare 20px icon in the corner is easy to never notice: on 2026-08-05 the
@@ -64,9 +59,7 @@ export function UpdateBadge() {
         ? 'Installing'
         : isError
           ? 'Update failed'
-          : isUnavailable
-            ? `Update v${latestVersion} by hand`
-            : `Update to v${latestVersion}`
+          : `Update to v${latestVersion}`
 
   return (
     <div ref={ref} className="relative">
@@ -179,7 +172,9 @@ export function UpdateBadge() {
                 </div>
                 <div className="flex items-center justify-between mt-1">
                   <span className="text-[0.55rem] text-gray-500">
-                    {isDownloaded ? 'Download complete' : `${downloadProgress}%`}
+                    {/* The steps of LU's own install have a name instead of a
+                        percentage; the plugin's download has only the bar. */}
+                    {progressNote ?? (isDownloaded ? 'Download complete' : `${downloadProgress}%`)}
                   </span>
                   {totalBytes > 0 && (
                     <span className="text-[0.55rem] text-gray-600">
@@ -187,13 +182,6 @@ export function UpdateBadge() {
                     </span>
                   )}
                 </div>
-              </div>
-            )}
-
-            {/* Why this copy cannot update itself */}
-            {isUnavailable && errorMessage && (
-              <div className="px-3 pb-2">
-                <p className={`text-[0.6rem] ${HINWEIS_TEXT.ruhig} leading-relaxed`}>{errorMessage}</p>
               </div>
             )}
 
@@ -283,25 +271,6 @@ export function UpdateBadge() {
                     className="px-2 py-1.5 rounded-md text-[0.65rem] text-gray-500 hover:text-gray-300 hover:bg-white/[0.04] transition-colors"
                   >
                     Dismiss
-                  </button>
-                </>
-              )}
-
-              {/* State: the in-app updater is not allowed here */}
-              {isUnavailable && (
-                <>
-                  <button
-                    onClick={() => { openReleasePage(); setOpen(false) }}
-                    className="flex-1 flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-md text-[0.65rem] font-medium bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-500/25 transition-colors"
-                  >
-                    <Download size={11} />
-                    View Release
-                  </button>
-                  <button
-                    onClick={() => { dismissUpdate(); setOpen(false) }}
-                    className="px-2 py-1.5 rounded-md text-[0.65rem] text-gray-500 hover:text-gray-300 hover:bg-white/[0.04] transition-colors"
-                  >
-                    Later
                   </button>
                 </>
               )}

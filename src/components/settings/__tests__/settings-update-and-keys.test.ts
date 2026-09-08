@@ -26,20 +26,17 @@ describe('Settings update section uses the in-app updater', () => {
     expect(updateSection).not.toMatch(/onClick=\{openReleasePage\}[\s\S]{0,300}Download Update/)
   })
 
-  it('keeps openReleasePage out of the working download lane', () => {
-    // Two uses, and neither is the CTA of an update that can install itself.
-    // The first belongs to a copy the updater is not allowed to replace (an
-    // AUR install, an AppImage in a folder the user cannot write to, a binary
-    // no package manager claims), where the release page is the only honest
-    // next step. The second is the browser fallback outside Tauri.
+  it('keeps openReleasePage out of every lane that can install', () => {
+    // One use left, and it is the browser fallback outside Tauri. The second
+    // one belonged to the installs the updater refused to touch (an AUR
+    // install, an AppImage in a folder the user cannot write to, a binary no
+    // package manager claims); there LU now installs itself and the release
+    // page is not an answer anybody needs.
     const uses = updateSection.match(/onClick=\{openReleasePage\}/g) ?? []
-    expect(uses).toHaveLength(2)
-    const refusalGate = updateSection.indexOf("downloadStatus === 'unavailable' ?")
+    expect(uses).toHaveLength(1)
     const fallbackGate = updateSection.indexOf('!isTauri()')
-    expect(refusalGate).toBeGreaterThan(-1)
-    expect(fallbackGate).toBeGreaterThan(refusalGate)
-    expect(updateSection.indexOf('onClick={openReleasePage}')).toBeGreaterThan(refusalGate)
-    expect(updateSection.lastIndexOf('onClick={openReleasePage}')).toBeGreaterThan(fallbackGate)
+    expect(fallbackGate).toBeGreaterThan(-1)
+    expect(updateSection.indexOf('onClick={openReleasePage}')).toBeGreaterThan(fallbackGate)
   })
 
   it('renders download progress from the store', () => {
