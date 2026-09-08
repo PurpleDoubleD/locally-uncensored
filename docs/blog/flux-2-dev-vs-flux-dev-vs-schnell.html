@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Flux 2 Dev vs Flux Dev vs Flux Schnell: Which One for Which Job</title>
+<meta name="description" content="Flux 2 Dev, Flux Dev and Flux Schnell compared on the number that matters: 1,200 credits an image against 300. Cost table, the draft and finish workflow, and where editing lives.">
+<meta name="keywords" content="flux 2 dev vs flux dev, flux dev vs flux schnell, flux 2 dev comparison, flux schnell cost, flux 2 dev credits, which flux model, flux model comparison 2026">
+<meta property="og:title" content="Flux 2 Dev vs Flux Dev vs Flux Schnell: Which One for Which Job">
+<meta property="og:description" content="Flux 2 Dev, Flux Dev and Flux Schnell compared on the number that matters: 1,200 credits an image against 300. Cost table, workflow, and where editing lives.">
+<meta property="og:image" content="https://raw.githubusercontent.com/PurpleDoubleD/locally-uncensored/master/docs/social-preview.png">
+<meta property="og:url" content="https://locallyuncensored.com/blog/flux-2-dev-vs-flux-dev-vs-schnell.html">
+<meta property="og:type" content="article">
+<meta property="article:published_time" content="2026-09-07">
+<meta property="article:author" content="PurpleDoubleD">
+<meta property="article:tag" content="Flux 2">
+<meta property="article:tag" content="Image Generation">
+<meta property="article:tag" content="Comparison">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Flux 2 Dev vs Flux Dev vs Flux Schnell: Which One for Which Job">
+<meta name="twitter:description" content="A quarter of the price per Schnell render buys you four tries. Here is when that is the smarter move and when it is not.">
+<meta name="twitter:image" content="https://raw.githubusercontent.com/PurpleDoubleD/locally-uncensored/master/docs/social-preview.png">
+<link rel="canonical" href="https://locallyuncensored.com/blog/flux-2-dev-vs-flux-dev-vs-schnell.html">
+<meta name="robots" content="index, follow">
+<meta name="theme-color" content="#0a0a0a">
+<link rel="icon" href="../favicon.png">
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"BlogPosting","headline":"Flux 2 Dev vs Flux Dev vs Flux Schnell: Which One for Which Job","description":"A practical comparison of the three Flux models in the hosted image lane, built around the hard number: 300 credits for a Schnell render against 1,200 for Flux Dev and Flux 2 Dev, with a cost table, a draft and finish workflow, and where the editing tools live.","image":"https://raw.githubusercontent.com/PurpleDoubleD/locally-uncensored/master/docs/social-preview.png","datePublished":"2026-09-07","dateModified":"2026-09-07","inLanguage":"en","author":{"@type":"Person","name":"PurpleDoubleD","url":"https://github.com/PurpleDoubleD"},"publisher":{"@type":"Organization","name":"Locally Uncensored","url":"https://locallyuncensored.com/"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://locallyuncensored.com/blog/flux-2-dev-vs-flux-dev-vs-schnell.html"},"keywords":"flux 2 dev vs flux dev, flux dev vs flux schnell, flux 2 dev credits, flux schnell cost, flux model comparison"}
+</script>
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"FAQPage","mainEntity":[{"@type":"Question","name":"What is the difference between Flux 2 Dev, Flux Dev and Flux Schnell?","acceptedAnswer":{"@type":"Answer","text":"They are one family with different step budgets and different generations. Flux Schnell is the fast few step model. Flux Dev is the established quality model and the one the editing tools are built on. Flux 2 Dev is the newer generation and the one to finish on when the image matters."}},{"@type":"Question","name":"How much does each Flux model cost per image?","acceptedAnswer":{"@type":"Answer","text":"Flux Schnell is 300 credits per image. Flux Dev is 1,200 credits. Flux 2 Dev is also 1,200 credits. A Schnell render therefore costs a quarter of a Dev render, which means four Schnell tries for the price of one Dev try."}},{"@type":"Question","name":"How many images do I get per credit pack?","acceptedAnswer":{"@type":"Answer","text":"The 5 EUR pack holds 165,000 credits: about 550 Schnell images or about 137 images on Flux Dev or Flux 2 Dev. The 19 EUR Hosted month holds 900,000 credits: about 3,000 Schnell images or about 750 on Flux Dev or Flux 2 Dev. Credit packs need no subscription and the credits do not expire."}},{"@type":"Question","name":"Which Flux model should I default to?","acceptedAnswer":{"@type":"Answer","text":"Default to Flux Schnell while you are exploring and switch to Flux 2 Dev for the render you intend to keep. Prompt exploration is where credits go, and Schnell costs a quarter as much per attempt. Keep Flux Dev in the rotation because inpainting runs on it."}},{"@type":"Question","name":"Why keep Flux Dev if Flux 2 Dev is newer?","acceptedAnswer":{"@type":"Answer","text":"Because editing lives there. Inpainting runs on Flux Dev, so if your workflow involves patching a region of an existing image rather than generating a fresh one, Flux Dev stays in the rotation at the same 1,200 credits. Qwen Image Edit covers instruction style edits, and background removal, an eraser and upscaling to 2k, 4k or 8k round it out."}},{"@type":"Question","name":"Can I run these models locally instead?","acceptedAnswer":{"@type":"Answer","text":"Yes, if you have the VRAM. Flux is comfortable on a 24 GB card and every render after the download costs nothing. Below that you are trading quality or patience for the missing memory, which is the reason the hosted lane exists. The desktop app is free and open source."}},{"@type":"Question","name":"Are the hosted image models filtered?","acceptedAnswer":{"@type":"Answer","text":"Hosted image and video prompts follow the Terms of Service, and the prompt is checked before it renders. Content involving minors is refused everywhere, always, with no exception. The local desktop app is separate: it stays free and runs whatever you install, with nothing in the middle."}}]}
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@200;300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/assets/lu.css">
+<script defer src="/assets/lu.js"></script>
+  <script data-goatcounter="https://lu-uncensored.goatcounter.com/count" async src="//gc.zgo.at/count.js"></script>
+</head>
+<body>
+<nav class="lu-nav">
+  <a class="lu-nav-brand" href="/" aria-label="Locally Uncensored">
+    <span class="lu-mono" data-mono="nav" data-size="40" aria-hidden="true"></span>
+    <span class="lu-nav-word">Locally <span class="accent">Uncensored</span></span>
+  </a>
+  <div class="lu-nav-links" id="lu-nav-links">
+    <a class="lu-nav-link" href="/">Home</a>
+    <a class="lu-nav-link" href="/blog/">Blog</a>
+    <a class="lu-nav-link" href="/guide/">Guide</a>
+    <a class="lu-nav-link" href="/remote-access/">Remote</a>
+  </div>
+  <div class="lu-nav-right">
+    <a class="lu-nav-icon" href="https://github.com/PurpleDoubleD/locally-uncensored" title="GitHub" aria-label="GitHub"><svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.37.5 0 5.87 0 12.5c0 5.3 3.44 9.8 8.21 11.39.6.11.82-.26.82-.58 0-.29-.01-1.04-.02-2.05-3.34.73-4.04-1.61-4.04-1.61-.55-1.39-1.33-1.76-1.33-1.76-1.09-.75.08-.73.08-.73 1.2.08 1.84 1.24 1.84 1.24 1.07 1.83 2.81 1.3 3.5.99.11-.78.42-1.3.76-1.6-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.13-.3-.54-1.52.11-3.18 0 0 1.01-.32 3.3 1.23a11.5 11.5 0 0 1 6.01 0c2.29-1.55 3.3-1.23 3.3-1.23.65 1.66.24 2.88.12 3.18.77.84 1.23 1.91 1.23 3.22 0 4.61-2.8 5.63-5.48 5.92.43.37.81 1.1.81 2.22 0 1.6-.01 2.9-.01 3.29 0 .32.21.7.82.58A12.01 12.01 0 0 0 24 12.5C24 5.87 18.63.5 12 .5Z"/></svg><span class="lu-nav-badge">1400+&#8202;⭐</span></a>
+    <a class="lu-nav-icon discord" href="https://locallyuncensored.com/discord" target="_blank" rel="noopener" title="Discord" aria-label="Discord"><svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M20.32 4.37A19.8 19.8 0 0 0 15.45 3c-.2.36-.44.85-.6 1.23a18.3 18.3 0 0 0-5.7 0c-.16-.38-.4-.87-.6-1.23a19.7 19.7 0 0 0-4.87 1.37C.55 8.9-.32 13.3.11 17.63a19.9 19.9 0 0 0 6 3.03c.48-.66.9-1.36 1.27-2.1-.7-.26-1.36-.58-1.99-.96.17-.12.33-.25.49-.38a14.2 14.2 0 0 0 12.24 0c.16.13.32.26.49.38-.63.38-1.3.7-2 .96.37.74.8 1.44 1.27 2.1a19.8 19.8 0 0 0 6-3.03c.5-5.03-.85-9.39-3.55-13.26ZM8.02 15c-1.18 0-2.15-1.09-2.15-2.42 0-1.34.95-2.43 2.15-2.43 1.2 0 2.17 1.09 2.15 2.43 0 1.33-.95 2.42-2.15 2.42Zm7.96 0c-1.18 0-2.15-1.09-2.15-2.42 0-1.34.95-2.43 2.15-2.43 1.2 0 2.17 1.09 2.15 2.43 0 1.33-.94 2.42-2.15 2.42Z"/></svg><span class="lu-nav-badge">700+&#8202;<span style="font-size:0.715em">🟢</span></span></a>
+    <span class="lu-nav-sep"></span>
+    <div class="switch" id="theme-switch" role="button" aria-label="Toggle theme"></div>
+    <a class="lu-nav-dl" href="https://github.com/PurpleDoubleD/locally-uncensored/releases/latest"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m0 0 4-4m-4 4-4-4"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>Download</a>
+    <button type="button" class="lu-nav-toggle" aria-label="Menu"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+  </div>
+</nav>
+<div class="container lu-doc">
+  <div class="breadcrumb"><a href="../">Locally Uncensored</a> / <a href="./">Blog</a> / This Post</div>
+
+  <div class="post-meta">
+    <span class="post-tag">Comparison</span>
+    <span>September 7, 2026</span>
+    <span>&middot;</span>
+    <span>6 min read</span>
+  </div>
+
+  <article>
+    <h1>Flux 2 Dev vs Flux Dev vs Flux Schnell</h1>
+
+    <p>Three names in the same model picker, and most comparisons of them argue about sample images. We are going to argue about the price instead, because it is the one hard fact nobody can spin, and because it changes how you should actually work.</p>
+
+    <p>The three are one family with different step budgets and different generations. <strong>Flux Schnell</strong> is the fast few step model, built to produce something usable in a handful of steps. <strong>Flux Dev</strong> is the established quality model, the one most tooling grew up around. <strong>Flux 2 Dev</strong> is the newer generation of that same quality tier. They are not three tiers of good, better, best. They are one exploratory model and two finishing models.</p>
+
+    <h2>The Number That Decides It</h2>
+
+    <p>In the hosted image lane, a Flux Schnell render costs 300 credits. Flux Dev costs 1,200. Flux 2 Dev costs 1,200 as well. That is the whole pricing story: <strong>a Schnell render costs a quarter of a Dev render, so you can afford four tries instead of one.</strong></p>
+
+    <table>
+      <thead>
+        <tr><th>Model</th><th>Per image</th><th>Good at</th><th>5 EUR pack (165,000 credits)</th><th>Hosted month (900,000 credits)</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Flux Schnell</td><td>300 credits</td><td>Fast drafts, composition tests, prompt wording, volume work</td><td>about 550 images</td><td>about 3,000 images</td></tr>
+        <tr><td>Flux Dev</td><td>1,200 credits</td><td>Finished renders, and the model inpainting runs on</td><td>about 137 images</td><td>about 750 images</td></tr>
+        <tr><td>Flux 2 Dev</td><td>1,200 credits</td><td>Finished renders on the newer generation, the default keeper</td><td>about 137 images</td><td>about 750 images</td></tr>
+      </tbody>
+    </table>
+
+    <p>Credit packs need no subscription, work from the first purchase, and the credits do not expire: 5 EUR for 165,000 credits, 10 EUR for 350,000, 25 EUR for 900,000. The Hosted plan is 19 EUR a month with 900,000 credits and adds two LoRA trainings a month. Current numbers live on the <a href="https://lu-labs.ai/pricing" target="_blank" rel="noopener">LU Labs pricing page</a>.</p>
+
+    <h2>The Workflow That Falls Out of That</h2>
+
+    <p>Here is the opinionated part. <strong>Iterate on Schnell, finish on Flux 2 Dev.</strong> That is the default, and it is not a compromise, it is just where the money is.</p>
+
+    <p>Prompt exploration is where credits actually go. The first render is almost never the one you keep. You find out the subject is centred when it should be off to the left, the light is flat, the word "cinematic" pulled the whole thing somewhere you did not want. Every one of those discoveries is worth 300 credits, not 1,200.</p>
+
+    <p>Run ten drafts on Schnell to settle the composition and the wording, then re-render the winner on Flux 2 Dev. Total: 4,200 credits. The same ten attempts straight on Flux 2 Dev cost 12,000 credits and tell you nothing extra about framing. On a 5 EUR pack that is the difference between roughly thirteen finished pieces and roughly four.</p>
+
+    <p>The catch to know about: Schnell and the Dev models are close in how they read a prompt, but not identical. Wording that helps on Schnell almost always helps on Flux 2 Dev, while fine texture and small detail will shift when you switch. Treat the Schnell pass as a composition and prompt test, not as a preview of the final pixels.</p>
+
+    <h2>Why Flux Dev Stays in the Rotation</h2>
+
+    <p>If Flux 2 Dev is the newer generation at the same price, why keep the older one open? Because editing is attached to it. <strong>Inpainting runs on Flux Dev</strong>, so the moment your job is patching a region of an image you already have rather than generating a fresh one, that is the model you are on.</p>
+
+    <p>The rest of the editing set sits alongside it: Qwen Image Edit for instruction style changes, background removal, an eraser, and upscaling to 2k, 4k or 8k. Face swap is not offered. For a lot of real work the sequence is draft on Schnell, finish on Flux 2 Dev, then fix one hand or one sign on Flux Dev inpainting and upscale the result. All three names earn their place in a single job.</p>
+
+    <h2>Where the Other Seven Fit</h2>
+
+    <p>The hosted lane carries ten image models, and the seven outside the Flux family are there because different houses have different tastes. Qwen Image is strong when your image needs readable text in it. HiDream and HunyuanImage 2.1 are alternative photographic looks worth a try when Flux keeps giving you the same face. Z-Image Turbo is another fast option in the draft slot. Chroma leans stylised. Prefect Pony XL and Neta Lumina are the anime and illustration end of the catalog. Switching costs a click, so if two Flux attempts have not landed the look, the fastest fix is often a different model rather than a longer prompt.</p>
+
+    <h2>The Local Option and Its VRAM Reality</h2>
+
+    <p>None of this is required. Flux runs at home, and every render after the download is free. The reality check is memory: the Dev tier is comfortable on a 24 GB card, and under that you start trading quality or patience for the missing VRAM. That gap is the entire reason the hosted lane exists. If you have the card, <a href="how-to-run-flux-locally.html">run Flux locally</a> and keep your credits. If you do not, <a href="flux-2-online-without-gpu.html">the browser route</a> walks through the six steps from sign in to download. For the wider desktop setup there is <a href="local-ai-image-and-video-generator.html">the local image and video generator guide</a> and <a href="easiest-local-ai-image-generator.html">the shortest install path</a>.</p>
+
+    <h2>The Honest Note</h2>
+
+    <p>Hosted image prompts follow the Terms of Service and the prompt is checked before it renders. That is the deal on shared, rented hardware, and we would rather write it down than have you find out at the render button. Content involving minors is refused everywhere, always, no exception. The local desktop app is the other side of that: free, open source, and it runs whatever you install with nothing in the middle.</p>
+
+    <h2>Short Version</h2>
+
+    <ul>
+      <li><strong>Exploring an idea:</strong> Flux Schnell, 300 credits, four tries for the price of one.</li>
+      <li><strong>Rendering the keeper:</strong> Flux 2 Dev, 1,200 credits, the default finisher.</li>
+      <li><strong>Patching an existing image:</strong> Flux Dev, 1,200 credits, because inpainting lives there.</li>
+      <li><strong>You own a 24 GB card:</strong> none of the above, run it locally.</li>
+    </ul>
+  </article>
+
+  <div class="post-footer">
+    <p>All three Flux models in one picker, plus seven more image models and the editing tools.</p>
+    <a href="https://lu-labs.ai/checkout/start?plan=hosted&amp;src=luc-flux2-vs-schnell" class="cta-btn" target="_blank" rel="noopener">Compare them in the browser Studio</a>
+  </div>
+</div>
+
+<footer>
+  <div class="footer-row footer-meta"><span>&copy; 2026 &middot; Locally Uncensored &middot; AGPL-3.0</span></div>
+  <div class="footer-row footer-links">
+    <a href="https://locallyuncensored.com/blog/">Blog</a>
+    <a href="https://locallyuncensored.com/guide/">Guide</a>
+    <a href="https://locallyuncensored.com/remote-access/">Remote access</a>
+    <a href="https://locallyuncensored.com/discord" target="_blank" rel="noopener">Discord</a>
+    <a href="https://github.com/PurpleDoubleD/locally-uncensored">GitHub</a>
+    <a href="https://github.com/PurpleDoubleD/locally-uncensored/discussions">Discussions</a>
+    <a href="https://github.com/PurpleDoubleD/locally-uncensored/issues">Issues</a>
+    <a href="https://reddit.com/user/GroundbreakingMall54">Reddit</a>
+    <a href="https://www.linkedin.com/in/david-drobnitza-locallyuncensored/" rel="me noopener" target="_blank">LinkedIn</a>
+  </div>
+</footer>
+</body>
+</html>

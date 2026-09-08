@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Kimi K3 online: browser, desktop app and API key</title>
+<meta name="description" content="Kimi K3 runs on somebody else's GPUs because nobody has 2.8 trillion parameters at home. Three routes to it, the credit price per token, and the client setup.">
+<meta name="keywords" content="kimi k3 online, kimi k3 api, kimi k3 without gpu, moonshot kimi k3, kimi k3 api key, kimi k3 price, kimi k3 sillytavern">
+<meta property="og:title" content="Kimi K3 online: browser, desktop app and API key">
+<meta property="og:description" content="Kimi K3 runs on somebody else's GPUs because nobody has 2.8 trillion parameters at home. Three routes to it, the credit price per token, and the client setup.">
+<meta property="og:image" content="https://raw.githubusercontent.com/PurpleDoubleD/locally-uncensored/master/docs/social-preview.png">
+<meta property="og:url" content="https://locallyuncensored.com/blog/kimi-k3-online-guide.html">
+<meta property="og:type" content="article">
+<meta property="article:published_time" content="2026-09-07">
+<meta property="article:author" content="PurpleDoubleD">
+<meta property="article:tag" content="Kimi K3">
+<meta property="article:tag" content="Cloud">
+<meta property="article:tag" content="Tutorial">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Kimi K3 online: browser, desktop app and API key">
+<meta name="twitter:description" content="Kimi K3 runs on somebody else's GPUs because nobody has 2.8 trillion parameters at home. Three routes to it, the credit price per token, and the client setup.">
+<meta name="twitter:image" content="https://raw.githubusercontent.com/PurpleDoubleD/locally-uncensored/master/docs/social-preview.png">
+<link rel="canonical" href="https://locallyuncensored.com/blog/kimi-k3-online-guide.html">
+<meta name="robots" content="index, follow">
+<meta name="theme-color" content="#0a0a0a">
+<link rel="icon" href="../favicon.png">
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"BlogPosting","headline":"Kimi K3 online: browser, desktop app and API key","description":"A practical guide to Kimi K3 without local hardware: the browser Studio, the Cloud switch in the desktop app, an OpenAI compatible API key with curl and Python examples, and what a token costs in credits.","image":"https://raw.githubusercontent.com/PurpleDoubleD/locally-uncensored/master/docs/social-preview.png","datePublished":"2026-09-07","dateModified":"2026-09-07","inLanguage":"en","author":{"@type":"Person","name":"PurpleDoubleD","url":"https://github.com/PurpleDoubleD"},"publisher":{"@type":"Organization","name":"Locally Uncensored","url":"https://locallyuncensored.com/"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://locallyuncensored.com/blog/kimi-k3-online-guide.html"},"keywords":"kimi k3 online, kimi k3 api, kimi k3 without gpu, kimi k3 price, kimi k3 sillytavern"}
+</script>
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"HowTo","name":"How to use Kimi K3 online","description":"Three routes to Kimi K3 without buying hardware: the browser Studio, the Cloud switch in the desktop app, and an OpenAI compatible API key.","totalTime":"PT10M","tool":[{"@type":"HowToTool","name":"A web browser"},{"@type":"HowToTool","name":"An LU Labs account with credits"},{"@type":"HowToTool","name":"curl or the OpenAI Python SDK for the API route"}],"step":[{"@type":"HowToStep","position":1,"name":"Sign in to the browser Studio","text":"Open lu-labs.ai and sign in. The Studio runs in the browser, so there is nothing to install and no GPU requirement on your machine."},{"@type":"HowToStep","position":2,"name":"Put credits on the account","text":"Buy a credit pack with no subscription, from 5 EUR for 165,000 credits, or take the Hosted plan at 19 EUR a month for 900,000 credits. Pack credits never expire."},{"@type":"HowToStep","position":3,"name":"Pick Kimi K3 in the model picker","text":"Open the model picker above the chat input and choose Kimi K3. It is on every plan, including the pay as you go wallet."},{"@type":"HowToStep","position":4,"name":"Or flip the Cloud switch in the desktop app","text":"The free desktop app for Windows and Linux has a Cloud switch on the same account, so local models and Kimi K3 sit in one picker."},{"@type":"HowToStep","position":5,"name":"Create an API key","text":"In the LU Labs account go to Settings and then Cloud API keys and create a key. The key starts with lu_ and is shown once, so copy it before you close the dialog."},{"@type":"HowToStep","position":6,"name":"Point a client at the base URL","text":"Use base URL https://lu-labs.ai/api/inference/v1 with the OpenAI chat completions shape and model id moonshotai/Kimi-K3. curl, the OpenAI SDK, SillyTavern, Aider and LibreChat all work against it."}]}
+</script>
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"FAQPage","mainEntity":[{"@type":"Question","name":"Can I run Kimi K3 on my own PC?","acceptedAnswer":{"@type":"Answer","text":"Realistically, no. Kimi K3 is a 2.8 trillion parameter model. No consumer card and no single workstation holds it at any quant, and the hardware math is spelled out in our can-you-run-Kimi-K3-locally post. A hosted endpoint is the working answer."}},{"@type":"Question","name":"Do I need a subscription to use Kimi K3?","acceptedAnswer":{"@type":"Answer","text":"No. Kimi K3 is on every LU Labs plan including the pay as you go wallet, so a 5 EUR credit pack with no subscription reaches it. Pack credits never expire."}},{"@type":"Question","name":"What does Kimi K3 cost per token?","acceptedAnswer":{"@type":"Answer","text":"One credit is $0.00001 of wholesale cost. Kimi K3 draws 0.285 credits per input token and 1.425 per output token, so 285,000 credits per million tokens in and 1,425,000 per million out. A 5 EUR pack of 165,000 credits is roughly 115,000 output tokens on it."}},{"@type":"Question","name":"What is the model id for Kimi K3 on the LU Labs API?","acceptedAnswer":{"@type":"Answer","text":"moonshotai/Kimi-K3. The base URL is https://lu-labs.ai/api/inference/v1 and the request shape is OpenAI chat completions, so an existing client usually needs only a changed base URL, key and model string."}},{"@type":"Question","name":"Does Kimi K3 take images?","acceptedAnswer":{"@type":"Answer","text":"Yes. Image input works in the browser Studio and over the API as an image content part. It also holds a 1M token context and calls tools natively, so it runs in Agent and coding modes."}},{"@type":"Question","name":"Can I turn the thinking off?","acceptedAnswer":{"@type":"Answer","text":"Yes. The think toggle in the Studio maps to the reasoning effort the API takes, and on this model switching it off genuinely stops the reasoning pass. On a short factual question we measured 34 completion tokens dropping to 8."}},{"@type":"Question","name":"Where do I get an API key?","acceptedAnswer":{"@type":"Answer","text":"In your LU Labs account under Settings and then Cloud API keys. The key carries an lu_ prefix and is displayed once at creation. If you lose it, delete the key and create a new one."}}]}
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@200;300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/assets/lu.css">
+<script defer src="/assets/lu.js"></script>
+  <script data-goatcounter="https://lu-uncensored.goatcounter.com/count" async src="//gc.zgo.at/count.js"></script>
+</head>
+<body>
+<nav class="lu-nav">
+  <a class="lu-nav-brand" href="/" aria-label="Locally Uncensored">
+    <span class="lu-mono" data-mono="nav" data-size="40" aria-hidden="true"></span>
+    <span class="lu-nav-word">Locally <span class="accent">Uncensored</span></span>
+  </a>
+  <div class="lu-nav-links" id="lu-nav-links">
+    <a class="lu-nav-link" href="/">Home</a>
+    <a class="lu-nav-link" href="/blog/">Blog</a>
+    <a class="lu-nav-link" href="/guide/">Guide</a>
+    <a class="lu-nav-link" href="/remote-access/">Remote</a>
+  </div>
+  <div class="lu-nav-right">
+    <a class="lu-nav-icon" href="https://github.com/PurpleDoubleD/locally-uncensored" title="GitHub" aria-label="GitHub"><svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.37.5 0 5.87 0 12.5c0 5.3 3.44 9.8 8.21 11.39.6.11.82-.26.82-.58 0-.29-.01-1.04-.02-2.05-3.34.73-4.04-1.61-4.04-1.61-.55-1.39-1.33-1.76-1.33-1.76-1.09-.75.08-.73.08-.73 1.2.08 1.84 1.24 1.84 1.24 1.07 1.83 2.81 1.3 3.5.99.11-.78.42-1.3.76-1.6-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.13-.3-.54-1.52.11-3.18 0 0 1.01-.32 3.3 1.23a11.5 11.5 0 0 1 6.01 0c2.29-1.55 3.3-1.23 3.3-1.23.65 1.66.24 2.88.12 3.18.77.84 1.23 1.91 1.23 3.22 0 4.61-2.8 5.63-5.48 5.92.43.37.81 1.1.81 2.22 0 1.6-.01 2.9-.01 3.29 0 .32.21.7.82.58A12.01 12.01 0 0 0 24 12.5C24 5.87 18.63.5 12 .5Z"/></svg><span class="lu-nav-badge">1400+&#8202;⭐</span></a>
+    <a class="lu-nav-icon discord" href="https://locallyuncensored.com/discord" target="_blank" rel="noopener" title="Discord" aria-label="Discord"><svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M20.32 4.37A19.8 19.8 0 0 0 15.45 3c-.2.36-.44.85-.6 1.23a18.3 18.3 0 0 0-5.7 0c-.16-.38-.4-.87-.6-1.23a19.7 19.7 0 0 0-4.87 1.37C.55 8.9-.32 13.3.11 17.63a19.9 19.9 0 0 0 6 3.03c.48-.66.9-1.36 1.27-2.1-.7-.26-1.36-.58-1.99-.96.17-.12.33-.25.49-.38a14.2 14.2 0 0 0 12.24 0c.16.13.32.26.49.38-.63.38-1.3.7-2 .96.37.74.8 1.44 1.27 2.1a19.8 19.8 0 0 0 6-3.03c.5-5.03-.85-9.39-3.55-13.26ZM8.02 15c-1.18 0-2.15-1.09-2.15-2.42 0-1.34.95-2.43 2.15-2.43 1.2 0 2.17 1.09 2.15 2.43 0 1.33-.95 2.42-2.15 2.42Zm7.96 0c-1.18 0-2.15-1.09-2.15-2.42 0-1.34.95-2.43 2.15-2.43 1.2 0 2.17 1.09 2.15 2.43 0 1.33-.94 2.42-2.15 2.42Z"/></svg><span class="lu-nav-badge">700+&#8202;<span style="font-size:0.715em">🟢</span></span></a>
+    <span class="lu-nav-sep"></span>
+    <div class="switch" id="theme-switch" role="button" aria-label="Toggle theme"></div>
+    <a class="lu-nav-dl" href="https://github.com/PurpleDoubleD/locally-uncensored/releases/latest"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m0 0 4-4m-4 4-4-4"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>Download</a>
+    <button type="button" class="lu-nav-toggle" aria-label="Menu"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+  </div>
+</nav>
+<div class="container lu-doc">
+  <div class="breadcrumb"><a href="../">Locally Uncensored</a> / <a href="./">Blog</a> / This Post</div>
+
+  <div class="post-meta">
+    <span class="post-tag">Tutorial</span>
+    <span>September 7, 2026</span>
+    <span>&middot;</span>
+    <span>7 min read</span>
+  </div>
+
+  <article>
+    <h1>Kimi K3 online: browser, desktop app and API key</h1>
+
+    <p>We build a desktop app whose whole point is running models on your own machine, so this costs us something to write: Kimi K3 is not a model you run at home. It is 2.8 trillion parameters. There is no quant that fixes that, and the arithmetic is laid out in <a href="can-you-run-kimi-k3-locally.html">can you run Kimi K3 locally</a> if you want to see it fail in detail.</p>
+
+    <p>So this page is about the other side of the house: the three ways to reach Kimi K3 on hardware you do not own. If you want to know what the model actually is first, that is <a href="kimi-k3-explained.html">Kimi K3 explained</a>.</p>
+
+    <h2>The short version</h2>
+
+    <p>Kimi K3 sits on every LU Labs plan, including the pay as you go wallet. That means a 5 EUR credit pack with no subscription reaches it. It takes images as input, it has a think toggle, it holds a 1M token context, and it calls tools natively, so the Agent and the coding agent both run on it.</p>
+
+    <h2>Route one, the browser</h2>
+
+    <ol>
+      <li>Open <a href="https://lu-labs.ai/" target="_blank" rel="noopener">lu-labs.ai</a> and sign in. Nothing to install, no driver, no GPU on your side.</li>
+      <li>Put credits on the account. The smallest pack is 5 EUR for 165,000 credits and needs no subscription. Prices sit on the <a href="https://lu-labs.ai/pricing" target="_blank" rel="noopener">pricing page</a>.</li>
+      <li>Open the model picker above the chat input and choose Kimi K3.</li>
+      <li>Type. Attach a picture if you have one, the model reads image input. Leave the think toggle on for hard prompts and off for short ones, because the reasoning pass is output tokens and output tokens are the bill.</li>
+    </ol>
+
+    <h2>Route two, the desktop app</h2>
+
+    <p>The free open source app for Windows and Linux has a Cloud switch that uses the same account. The point of that switch is that you do not run two workflows: a 27B on your own card for the private everyday work, one click for Kimi K3 when the prompt is bigger than the machine, one click back. Same chat window, same history, same key.</p>
+
+    <p>Install the app, sign in under the cloud settings, flip the switch, pick Kimi K3 in the same picker your local models live in. The comparison against the usual desktop runners is in <a href="lm-studio-alternatives.html">LM Studio alternatives</a>.</p>
+
+    <h2>Route three, an API key</h2>
+
+    <ol>
+      <li>Sign in and go to <strong>Settings &gt; Cloud API keys</strong>.</li>
+      <li>Create a key. It carries an <code>lu_</code> prefix and is shown once, so copy it before the dialog closes. Lose it and you delete the key and make a new one.</li>
+      <li>Point your client at base URL <code>https://lu-labs.ai/api/inference/v1</code>.</li>
+      <li>Use the OpenAI chat completions shape with the model id <code>moonshotai/Kimi-K3</code>.</li>
+    </ol>
+
+    <pre><code>curl https://lu-labs.ai/api/inference/v1/chat/completions \
+  -H "Authorization: Bearer $LU_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "moonshotai/Kimi-K3",
+    "messages": [
+      {"role": "user", "content": "Rewrite this paragraph in a colder register."}
+    ]
+  }'</code></pre>
+
+    <p>The same thing with the official OpenAI Python SDK, which needs no LU specific library:</p>
+
+    <pre><code>from openai import OpenAI
+
+client = OpenAI(
+    api_key="lu_your_key_here",
+    base_url="https://lu-labs.ai/api/inference/v1",
+)
+
+resp = client.chat.completions.create(
+    model="moonshotai/Kimi-K3",
+    messages=[{"role": "user", "content": "Draft three openings for a heist scene."}],
+)
+print(resp.choices[0].message.content)</code></pre>
+
+    <h2>Clients that take a base URL</h2>
+
+    <table>
+      <thead><tr><th>Client</th><th>What to set</th></tr></thead>
+      <tbody>
+        <tr><td>SillyTavern</td><td>API type Chat Completion, source Custom (OpenAI-compatible). Base URL and key as above, model id in the custom model field.</td></tr>
+        <tr><td>Aider</td><td>OpenAI compatible base URL and key in the environment, model id on the command line.</td></tr>
+        <tr><td>LibreChat</td><td>A custom endpoint with the base URL, the key, and the model id in the model list.</td></tr>
+        <tr><td>Anything else</td><td>If it takes a base URL, a key and a model string, it works. That is most of the tooling built in the last two years.</td></tr>
+      </tbody>
+    </table>
+
+    <h2>What it costs</h2>
+
+    <p>Billing is in credits and 1 credit is $0.00001 of wholesale inference cost. Kimi K3 draws <strong>0.285 credits per input token and 1.425 per output token</strong>, which is 285,000 credits per million tokens in and 1,425,000 per million out. It is the most expensive model in the catalog, and that is the honest reason it sits on the entry plan instead of behind an upgrade: the meter charges per token, so nobody is locked out, they just spend faster.</p>
+
+    <table>
+      <thead><tr><th>What you buy</th><th>Credits</th><th>Output tokens on Kimi K3</th></tr></thead>
+      <tbody>
+        <tr><td>5 EUR pack, no subscription</td><td>165,000</td><td>about 115,000</td></tr>
+        <tr><td>10 EUR pack</td><td>350,000</td><td>about 245,000</td></tr>
+        <tr><td>25 EUR pack</td><td>900,000</td><td>about 630,000</td></tr>
+        <tr><td>Hosted plan, 19 EUR a month</td><td>900,000 a month</td><td>about 630,000</td></tr>
+      </tbody>
+    </table>
+
+    <p>Input tokens draw from the same wallet, so a long chat history lands below those numbers. Pack credits never expire and the Hosted plan adds two character trainings a month, which packs do not include. If those figures make you wince, that is the correct reaction and the answer is a cheaper model for the volume work: <a href="deepseek-v4-flash-cloud.html">DeepSeek in the cloud</a> covers the other end of the price range.</p>
+
+    <h2>Thinking and images</h2>
+
+    <p>Kimi K3 reasons when you ask it to and stays quiet when you do not. The think toggle in the Studio maps to the reasoning effort the API takes, and switching it off really does stop the reasoning on this model, which is not true of every reasoner in the catalog. On a short factual question the difference we measured was 34 completion tokens down to 8.</p>
+
+    <p>Image input works. Attach a picture in the Studio, or send an image content part over the API the way you would to any OpenAI shaped endpoint.</p>
+
+    <h2>What you give up</h2>
+
+    <ul>
+      <li>Shared hardware. Managed H100, A100 and B200 class GPUs, shared across users, so at a busy hour you can sit in a short queue. A dedicated box would not do that, and it would not cost 5 EUR either.</li>
+      <li>A curated catalog. 38 chat models, all of them on every plan and on a credit pack, but no bring your own checkpoint. If your workflow depends on one specific community fine tune, local is your route.</li>
+      <li>Somebody else's machine. Accounts and billing sit in the EU, prompts are not used for training and are never sold, and the hosted text models answer as they were trained with no moderation layer added on top. Image and video follow the Terms of Service and the prompt is checked before it renders. Content involving minors is refused everywhere, always.</li>
+    </ul>
+
+    <h2>Related reading</h2>
+
+    <ul>
+      <li><a href="kimi-k3-vs-deepseek-v4.html">Kimi K3 vs DeepSeek V4</a>, the price and capability trade in one table</li>
+      <li><a href="kimi-k3-explained.html">Kimi K3 explained</a>, what the model is and where it came from</li>
+      <li><a href="how-to-run-kimi-k3.html">How to run Kimi K3</a>, every option including the ones that are not ours</li>
+      <li><a href="run-glm-5-3-locally.html">Can you run GLM 5.3 locally</a>, the same honest math for a model you can almost fit</li>
+    </ul>
+
+    <hr>
+
+    <p><em>Locally Uncensored is AGPL-3.0 licensed. Built by <a href="https://github.com/PurpleDoubleD">PurpleDoubleD</a>. Bug reports and feature requests on <a href="https://github.com/PurpleDoubleD/locally-uncensored/discussions">GitHub Discussions</a> or in the <a href="https://locallyuncensored.com/discord">Discord</a>.</em></p>
+  </article>
+
+  <div class="post-footer">
+    <p>Kimi K3 and 14 more chat models in one browser tab, EU billing, credits that do not expire.</p>
+    <a href="https://lu-labs.ai/checkout/start?plan=hosted&amp;src=luc-kimik3-guide" class="cta-btn" target="_blank" rel="noopener">
+      Try Kimi K3 on LU Labs
+    </a>
+  </div>
+</div>
+
+<footer>
+  <div class="footer-row footer-meta"><span>&copy; 2026 &middot; Locally Uncensored &middot; AGPL-3.0</span></div>
+  <div class="footer-row footer-links">
+    <a href="https://locallyuncensored.com/blog/">Blog</a>
+    <a href="https://locallyuncensored.com/guide/">Guide</a>
+    <a href="https://locallyuncensored.com/remote-access/">Remote access</a>
+    <a href="https://locallyuncensored.com/discord" target="_blank" rel="noopener">Discord</a>
+    <a href="https://github.com/PurpleDoubleD/locally-uncensored">GitHub</a>
+    <a href="https://github.com/PurpleDoubleD/locally-uncensored/discussions">Discussions</a>
+    <a href="https://github.com/PurpleDoubleD/locally-uncensored/issues">Issues</a>
+    <a href="https://reddit.com/user/GroundbreakingMall54">Reddit</a>
+    <a href="https://www.linkedin.com/in/david-drobnitza-locallyuncensored/" rel="me noopener" target="_blank">LinkedIn</a>
+  </div>
+</footer>
+</body>
+</html>

@@ -55,6 +55,8 @@
 
 <p><a href="https://locallyuncensored.com/">Locally Uncensored</a> takes a fundamentally different approach. Rather than trying to be a universal chat client, it focuses on being a complete local AI creative suite. It combines LLM chat via Ollama with image generation and video generation via ComfyUI -- capabilities that Jan does not offer at all. If you are exploring the <a href="best-local-ai-apps-2026.html">best local AI apps in 2026</a>, these two represent very different philosophies about what a local AI app should be.</p>
 
+<p>Both apps sit on an engine you pick yourself, and if that choice is still open, LU Labs has an <a href="https://lu-labs.ai/blog/ollama-vs-lm-studio-vs-lu-labs" target="_blank" rel="noopener">Ollama vs LM Studio comparison</a>.</p>
+
 <p>Both apps run on Windows, macOS, and Linux. Both let you chat with local models on your own hardware. But the similarities end there. This comparison breaks down exactly where each app excels and where it falls short.</p>
 
 <h2>Feature Comparison</h2>
@@ -67,7 +69,7 @@
 <tr><td>Cloud API Support</td><td><span class="check hl">Yes (Ollama + OpenAI + Anthropic)</span></td><td><span class="check">Yes (OpenAI, Anthropic, etc.)</span></td></tr>
 <tr><td>Custom Personas</td><td><span class="check hl">25+ built-in</span></td><td><span class="cross">No</span></td></tr>
 <tr><td>Extension System</td><td><span class="cross">No</span></td><td><span class="check">Yes</span></td></tr>
-<tr><td>Uncensored by Default</td><td><span class="check hl">Yes</span></td><td><span class="cross">No</span></td></tr>
+<tr><td>Answers directly, abliterated models available</td><td><span class="check hl">Yes</span></td><td><span class="cross">No</span></td></tr>
 <tr><td>License</td><td><span class="check">AGPL-3.0</span></td><td>AGPL v3</td></tr>
 <tr><td>UI Framework</td><td>Tauri (Rust)</td><td>Electron (Chromium)</td></tr>
 <tr><td>App Memory Usage</td><td><span class="check hl">Low (50-100 MB)</span></td><td>High (300-500 MB)</td></tr>
@@ -89,7 +91,7 @@
 <li><strong>Lightweight Runtime</strong> -- Locally Uncensored is built with Tauri, which uses Rust and your system's native webview. This typically means 50-100 MB of RAM for the app shell. Jan uses Electron, which bundles an entire Chromium browser and routinely consumes 300-500 MB before you even load a model. On machines with limited RAM, that difference matters for model inference headroom. This is similar to the advantage over <a href="locally-uncensored-vs-lm-studio.html">other Electron-based apps like LM Studio</a>.</li>
 <li><strong>AGPL-3.0 License</strong> -- Both Locally Uncensored and Jan are fully open source under the AGPL v3 license. You can audit, modify, and self-host either one with no proprietary lock-in.</li>
 <li><strong>Custom Personas</strong> -- 25+ built-in AI personas let you switch between different personalities instantly without writing system prompts. Jan provides a blank chat window with no persona system.</li>
-<li><strong>Uncensored by Default</strong> -- Ships with abliterated model recommendations and no content filters on text, images, or video. Jan does not specifically cater to uncensored use cases.</li>
+<li><strong>Answers directly, abliterated models available</strong>: pick a model with the refusal behaviour removed from the weights, or a mainstream one, in the same picker. Nothing sits between you and the model on your own machine</li>
 <li><strong>Coding Agent</strong> -- Built-in coding agent that reads your codebase, writes files, and runs commands. Jan has no coding agent.</li>
 <li><strong>13 MCP Tools</strong> -- Web search, file operations, shell access, screenshots, and more, all built in without extensions.</li>
 <li><strong>File Upload with Vision</strong> -- Drag and drop images into chat; vision models describe them automatically.</li>

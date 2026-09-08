@@ -26,11 +26,11 @@ Locally Uncensored is a plug-and-play local AI studio: a desktop application for
 ### What is Locally Uncensored?
 A free, open-source desktop app for running AI locally. It combines chat (20+ provider presets), a coding agent with 14 tools, image generation via ComfyUI (FLUX 2, Juggernaut XL, Z-Image, SDXL), and video generation (Wan 2.1, HunyuanVideo, LTX 2.3, FramePack F1) in one interface. AGPL-3.0 licensed.
 
-### Does it support Qwen 3.6, GPT-OSS and GLM-4.7?
-Yes. Qwen 3.6 (35B MoE) has day-0 integration with vision, agentic coding, thinking preservation and 256K context. GPT-OSS-120B and GPT-OSS-20B run via Ollama. GLM-4.7 Flash is supported through Ollama. DeepSeek R1, Llama 4, Gemma 4, Mistral Small 3 and Phi 4 are also ready.
+### Does it support Qwen 3.8, GPT-OSS and GLM-4.7?
+Yes. Qwen 3.8 27B is in the Model Manager since v2.6.6, with working vision: the image tower ships as a separate mmproj file that the download writes next to the model. Official, huihui abliterated and OrcaRouter uncensored builds are there, plus a 9B distill for small cards and two Ollama tags. GPT-OSS-120B and GPT-OSS-20B run via Ollama. GLM-4.7 Flash is supported through Ollama. DeepSeek R1, Llama 4, Gemma 4, Mistral Small 3 and Phi 4 are also ready.
 
 ### Can I use it as a ChatGPT or Claude alternative?
-Yes. Locally Uncensored works as a ChatGPT and Claude alternative that runs on your own hardware. Use Qwen 3.6, GPT-OSS, GLM-4.7, DeepSeek R1, Llama 4 or Gemma 4 instead, or add cloud providers (OpenAI, Anthropic, OpenRouter, Groq) alongside the local stack.
+Yes. Locally Uncensored works as a ChatGPT and Claude alternative that runs on your own hardware. Use Qwen 3.8, GPT-OSS, GLM-4.7, DeepSeek R1, Llama 4 or Gemma 4 instead, or add cloud providers (OpenAI, Anthropic, OpenRouter, Groq) alongside the local stack.
 
 ### Is it really free and offline?
 Yes. After setup and model download, no internet is needed for the local providers. There are no accounts, no telemetry, and no usage limits. Cloud providers are optional; the core runs entirely on your hardware.
@@ -108,8 +108,7 @@ About five minutes. There is no Docker, terminal or config file. Run the install
 - 100% offline and private by default; AGPL-3.0 open source
 
 ## Supported Chat Models
-- Qwen 3.6: 27B dense and 35B MoE — vision, agentic coding, thinking preservation, 256K context, day-0 support
-- Qwen 3.5: 9B / 27B / 35B MoE
+- Qwen 3.8: 27B dense with vision through a separate mmproj file, plus a 9B distill for small cards (text only). Official, huihui abliterated and OrcaRouter uncensored builds, and two Ollama tags (v2.6.6, uncensored rows reworked in v2.6.8)
 - Qwen 3-Coder: 30B and Next 80B
 - Gemma 4: 31B / 26B MoE / E4B / E2B — native vision and tools, Apache 2.0
 - GPT-OSS: 120B and 20B (via Ollama)
@@ -161,7 +160,7 @@ A correctness release. Most of it is things that looked like they worked and did
 - Image generation: NVIDIA GPU with 8+ GB VRAM (FLUX, Juggernaut XL)
 - Video generation: 10-12 GB VRAM (Wan 1.3B, LTX 2.3)
 - Image-to-video: 6 GB VRAM minimum (FramePack F1)
-- Best in class: 24 GB+ VRAM for Qwen 3.6 35B MoE and 35B+ chat models
+- Best in class: 24 GB+ VRAM for 35B MoE and 35B+ chat models
 
 ## Installation
 1. Download the signed installer for Windows or Linux from GitHub Releases (https://github.com/PurpleDoubleD/locally-uncensored/releases/latest). One-click install — no Docker, no terminal, no config files.

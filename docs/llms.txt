@@ -56,8 +56,7 @@ Locally Uncensored is a free, open-source (AGPL-3.0) local AI studio for the des
 - Linux installer auto-detects deb/rpm/AppImage family; ComfyUI CPU mode + Arch venv auto-create (v2.4.5)
 
 ## Supported Chat Models
-- Qwen 3.6: 27B dense + 35B MoE (vision, agentic coding, thinking, 256K context, day-0 support)
-- Qwen 3.5: 9B / 27B / 35B MoE
+- Qwen 3.8: 27B dense with vision through a separate mmproj file, plus a 9B distill for small cards (text only); official, abliterated and uncensored builds (v2.6.6)
 - Qwen 3-Coder: 30B + Next 80B
 - Gemma 4: 31B / 26B MoE / E4B / E2B (native vision + tools)
 - GPT-OSS: 120B and 20B
@@ -97,7 +96,7 @@ Locally Uncensored is a free, open-source (AGPL-3.0) local AI studio for the des
 - Recommended: 8 GB+ VRAM NVIDIA GPU for FLUX, Juggernaut XL image gen
 - Video generation: 10-12 GB VRAM (Wan 1.3B, LTX 2.3)
 - Image-to-video: 6 GB VRAM minimum (FramePack F1)
-- Best in class: 24 GB+ VRAM for Qwen 3.6 35B MoE and 35B+ chat models
+- Best in class: 24 GB+ VRAM for 35B MoE and 35B+ chat models
 
 ## Privacy
 - 100% local by default
@@ -121,7 +120,7 @@ Locally Uncensored is a free, open-source (AGPL-3.0) local AI studio for the des
 - Local AI on Your Phone: https://locallyuncensored.com/blog/local-ai-on-your-phone.html
 - Best Local AI Apps 2026 (comparison): https://locallyuncensored.com/blog/best-local-ai-apps-2026.html
 - Best Uncensored AI Models 2026: https://locallyuncensored.com/blog/best-uncensored-ai-models-2026.html
-- How to Run Qwen 3.6 Locally: https://locallyuncensored.com/blog/how-to-run-qwen-3-6-locally.html
+- How to Run Qwen 3.8 27B Locally: https://locallyuncensored.com/blog/how-to-run-qwen-3-8-27b-locally.html
 - Plug and Play Local AI (what zero-setup means): https://locallyuncensored.com/blog/plug-and-play-local-ai.html
 - Local AI Image and Video Generator in One App: https://locallyuncensored.com/blog/local-ai-image-and-video-generator.html
 - Unzensierte KI lokal nutzen (German guide): https://locallyuncensored.com/blog/unzensierte-ki-lokal.html
@@ -147,6 +146,17 @@ Locally Uncensored is a free, open-source (AGPL-3.0) local AI studio for the des
 - How to Run DeepSeek V4 Pro: https://locallyuncensored.com/blog/how-to-run-deepseek-v4-pro.html
 - DeepSeek V4 Flash vs V4 Pro: https://locallyuncensored.com/blog/deepseek-v4-flash-vs-v4-pro.html
 - Abliterated Models Guide: https://locallyuncensored.com/blog/abliterated-models-guide.html
+- Kimi K3 online (browser, desktop app and API key): https://locallyuncensored.com/blog/kimi-k3-online-guide.html
+- Kimi K3 vs DeepSeek V4 (price, thinking, vision, and which plan): https://locallyuncensored.com/blog/kimi-k3-vs-deepseek-v4.html
+- How to run Qwen 3.8 without a GPU (hosted Studio, API key, or the 27B at home): https://locallyuncensored.com/blog/run-qwen-3-8-without-gpu.html
+- Qwen 3.8 Max vs Qwen 3.8 A95B (the thinking switch, the price, the licence): https://locallyuncensored.com/blog/qwen-3-8-max-vs-a95b-explained.html
+- Flux 2 Online Without a 24 GB Card (browser image generation, credit math): https://locallyuncensored.com/blog/flux-2-online-without-gpu.html
+- Flux 2 Dev vs Flux Dev vs Flux Schnell (cost per image and which to default to): https://locallyuncensored.com/blog/flux-2-dev-vs-flux-dev-vs-schnell.html
+- LM Studio Alternative for Mac (browser Studio setup, no native Mac build): https://locallyuncensored.com/blog/lm-studio-alternative-for-mac.html
+- What a Mac Can Run Locally in 2026 (RAM tiers and where the cloud picks up): https://locallyuncensored.com/blog/what-a-mac-can-run-locally-2026.html
+- Uncensored AI Chat Online (browser, desktop Cloud switch, or API key): https://locallyuncensored.com/blog/uncensored-ai-chat-online-guide.html
+- What No Filter Actually Means Here (the honest limits): https://locallyuncensored.com/blog/what-no-filter-means-online.html
+- Uncensored AI chat online, no filter on text (landing page): https://locallyuncensored.com/uncensored-ai-chat-online/
 - Locally Uncensored vs Open WebUI / LM Studio / Jan / GPT4All / Msty / SillyTavern / KoboldCpp: https://locallyuncensored.com/blog/
 
 ## Comparisons

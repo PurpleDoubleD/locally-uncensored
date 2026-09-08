@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Flux 2 Online Without a 24 GB Card: Step by Step in the Browser</title>
+<meta name="description" content="Generate with Flux 2 Dev in the browser when your GPU is too small. Six steps in the LU Labs Studio, the real credit math (1,200 credits an image), and when to render locally instead.">
+<meta name="keywords" content="flux 2 online, flux 2 dev without gpu, flux 2 no vram, run flux 2 in browser, flux 2 dev credits, flux schnell cost, hosted flux 2 dev, flux 2 dev online generator">
+<meta property="og:title" content="Flux 2 Online Without a 24 GB Card: Step by Step in the Browser">
+<meta property="og:description" content="Generate with Flux 2 Dev in the browser when your GPU is too small. Six steps in the LU Labs Studio, the real credit math, and when to render locally instead.">
+<meta property="og:image" content="https://raw.githubusercontent.com/PurpleDoubleD/locally-uncensored/master/docs/social-preview.png">
+<meta property="og:url" content="https://locallyuncensored.com/blog/flux-2-online-without-gpu.html">
+<meta property="og:type" content="article">
+<meta property="article:published_time" content="2026-09-07">
+<meta property="article:author" content="PurpleDoubleD">
+<meta property="article:tag" content="Flux 2">
+<meta property="article:tag" content="Image Generation">
+<meta property="article:tag" content="Tutorial">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Flux 2 Online Without a 24 GB Card: Step by Step in the Browser">
+<meta name="twitter:description" content="Six steps to render Flux 2 Dev in the browser, plus the credit math that decides whether it is worth it.">
+<meta name="twitter:image" content="https://raw.githubusercontent.com/PurpleDoubleD/locally-uncensored/master/docs/social-preview.png">
+<link rel="canonical" href="https://locallyuncensored.com/blog/flux-2-online-without-gpu.html">
+<meta name="robots" content="index, follow">
+<meta name="theme-color" content="#0a0a0a">
+<link rel="icon" href="../favicon.png">
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"BlogPosting","headline":"Flux 2 Online Without a 24 GB Card: Step by Step in the Browser","description":"How to generate with Flux 2 Dev in a browser when your graphics card is too small, with the six steps in the LU Labs Studio, the credit math per image, and the cases where rendering locally is still the better answer.","image":"https://raw.githubusercontent.com/PurpleDoubleD/locally-uncensored/master/docs/social-preview.png","datePublished":"2026-09-07","dateModified":"2026-09-07","inLanguage":"en","author":{"@type":"Person","name":"PurpleDoubleD","url":"https://github.com/PurpleDoubleD"},"publisher":{"@type":"Organization","name":"Locally Uncensored","url":"https://locallyuncensored.com/"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://locallyuncensored.com/blog/flux-2-online-without-gpu.html"},"keywords":"flux 2 online, flux 2 dev without gpu, run flux 2 in browser, flux 2 dev credits, flux schnell cost"}
+</script>
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"HowTo","name":"How to run Flux 2 Dev online without a 24 GB graphics card","description":"Six steps to render an image with Flux 2 Dev in the browser Studio at LU Labs, from sign in to download, including the draft on Schnell and finish on Flux 2 Dev workflow.","totalTime":"PT10M","tool":[{"@type":"HowToTool","name":"Any modern browser"},{"@type":"HowToTool","name":"An LU Labs account"},{"@type":"HowToTool","name":"A credit pack from 5 EUR or the Hosted plan at 19 EUR a month"}],"step":[{"@type":"HowToStep","position":1,"name":"Sign in at lu-labs.ai","text":"Create an account or sign in at lu-labs.ai. The Studio runs in the browser, so it works the same on Windows, Linux, macOS and a tablet. No download, no CUDA install."},{"@type":"HowToStep","position":2,"name":"Open the image lane","text":"Switch from chat to the image lane in the Studio. This is where the 10 hosted image models live, along with inpainting, background removal, the eraser and the upscaler."},{"@type":"HowToStep","position":3,"name":"Pick Flux 2 Dev in the model picker","text":"Select Flux 2 Dev from the model list. It costs 1,200 credits per image. Flux Schnell in the same list costs 300 credits per image and is the one to draft on."},{"@type":"HowToStep","position":4,"name":"Write the prompt","text":"Write one specific paragraph rather than a pile of tags. Name the subject, the framing, the lighting and the medium. Flux models follow sentences well, so ordinary prose beats keyword soup."},{"@type":"HowToStep","position":5,"name":"Render","text":"Press generate. The job goes to managed NVIDIA H100, A100 and B200 class hardware. The hardware is shared, so at busy hours you may sit in a short queue before the render starts."},{"@type":"HowToStep","position":6,"name":"Download the image","text":"Download the finished image from the result panel, or send it straight into inpainting on Flux Dev, Qwen Image Edit, background removal, the eraser or the 2k, 4k and 8k upscaler."}]}
+</script>
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"FAQPage","mainEntity":[{"@type":"Question","name":"Can I run Flux 2 Dev without a 24 GB graphics card?","acceptedAnswer":{"@type":"Answer","text":"Not comfortably on your own machine, which is why the browser route exists. In the LU Labs Studio the render happens on managed NVIDIA H100, A100 and B200 class GPUs and your browser only sends the prompt and receives the image. Any laptop that can open a web page can drive it."}},{"@type":"Question","name":"How much does one Flux 2 Dev image cost?","acceptedAnswer":{"@type":"Answer","text":"1,200 credits. Flux Dev costs the same 1,200 credits. Flux Schnell costs 300 credits. The 5 EUR credit pack holds 165,000 credits, which works out to about 137 Flux 2 Dev images or about 550 Schnell images. The 19 EUR Hosted month holds 900,000 credits, which is about 750 Flux 2 Dev images or about 3,000 Schnell images."}},{"@type":"Question","name":"Do I need a subscription to try it?","acceptedAnswer":{"@type":"Answer","text":"No. Credit packs work from the first purchase with no subscription: 5 EUR for 165,000 credits, 10 EUR for 350,000, 25 EUR for 900,000. Credits do not expire. The 19 EUR Hosted month exists for people who also want the monthly extras such as LoRA training."}},{"@type":"Question","name":"Which image models are in the hosted lane?","acceptedAnswer":{"@type":"Answer","text":"Ten: Flux 2 Dev, Flux Dev, Flux Schnell, Qwen Image, HiDream, HunyuanImage 2.1, Z-Image Turbo, Chroma, Prefect Pony XL and Neta Lumina. Editing covers inpainting on Flux Dev, Qwen Image Edit, background removal, an eraser and upscaling to 2k, 4k or 8k. Face swap is not offered."}},{"@type":"Question","name":"Can I bring my own checkpoint or LoRA?","acceptedAnswer":{"@type":"Answer","text":"The hosted catalog is curated, so there is no bring your own checkpoint. LoRA training is included twice a month on the Hosted plan and is not part of a credit pack. If you need an arbitrary checkpoint from the community, that is a job for the local desktop app on your own GPU."}},{"@type":"Question","name":"What are the rules on hosted image prompts?","acceptedAnswer":{"@type":"Answer","text":"Hosted image and video prompts follow the Terms of Service and the prompt is checked before it renders. Content involving minors is refused everywhere, always, with no exception. The local desktop app is a different story: it stays free and runs whatever you install, with nothing in the middle."}},{"@type":"Question","name":"When should I still render locally?","acceptedAnswer":{"@type":"Answer","text":"When you already own the VRAM, or when you want a checkpoint that is not in the curated catalog. A card with 24 GB runs Flux comfortably at home and every render after the download is free. Our local guide walks through the install and the quant choices."}}]}
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@200;300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/assets/lu.css">
+<script defer src="/assets/lu.js"></script>
+  <script data-goatcounter="https://lu-uncensored.goatcounter.com/count" async src="//gc.zgo.at/count.js"></script>
+</head>
+<body>
+<nav class="lu-nav">
+  <a class="lu-nav-brand" href="/" aria-label="Locally Uncensored">
+    <span class="lu-mono" data-mono="nav" data-size="40" aria-hidden="true"></span>
+    <span class="lu-nav-word">Locally <span class="accent">Uncensored</span></span>
+  </a>
+  <div class="lu-nav-links" id="lu-nav-links">
+    <a class="lu-nav-link" href="/">Home</a>
+    <a class="lu-nav-link" href="/blog/">Blog</a>
+    <a class="lu-nav-link" href="/guide/">Guide</a>
+    <a class="lu-nav-link" href="/remote-access/">Remote</a>
+  </div>
+  <div class="lu-nav-right">
+    <a class="lu-nav-icon" href="https://github.com/PurpleDoubleD/locally-uncensored" title="GitHub" aria-label="GitHub"><svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.37.5 0 5.87 0 12.5c0 5.3 3.44 9.8 8.21 11.39.6.11.82-.26.82-.58 0-.29-.01-1.04-.02-2.05-3.34.73-4.04-1.61-4.04-1.61-.55-1.39-1.33-1.76-1.33-1.76-1.09-.75.08-.73.08-.73 1.2.08 1.84 1.24 1.84 1.24 1.07 1.83 2.81 1.3 3.5.99.11-.78.42-1.3.76-1.6-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.13-.3-.54-1.52.11-3.18 0 0 1.01-.32 3.3 1.23a11.5 11.5 0 0 1 6.01 0c2.29-1.55 3.3-1.23 3.3-1.23.65 1.66.24 2.88.12 3.18.77.84 1.23 1.91 1.23 3.22 0 4.61-2.8 5.63-5.48 5.92.43.37.81 1.1.81 2.22 0 1.6-.01 2.9-.01 3.29 0 .32.21.7.82.58A12.01 12.01 0 0 0 24 12.5C24 5.87 18.63.5 12 .5Z"/></svg><span class="lu-nav-badge">1400+&#8202;⭐</span></a>
+    <a class="lu-nav-icon discord" href="https://locallyuncensored.com/discord" target="_blank" rel="noopener" title="Discord" aria-label="Discord"><svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M20.32 4.37A19.8 19.8 0 0 0 15.45 3c-.2.36-.44.85-.6 1.23a18.3 18.3 0 0 0-5.7 0c-.16-.38-.4-.87-.6-1.23a19.7 19.7 0 0 0-4.87 1.37C.55 8.9-.32 13.3.11 17.63a19.9 19.9 0 0 0 6 3.03c.48-.66.9-1.36 1.27-2.1-.7-.26-1.36-.58-1.99-.96.17-.12.33-.25.49-.38a14.2 14.2 0 0 0 12.24 0c.16.13.32.26.49.38-.63.38-1.3.7-2 .96.37.74.8 1.44 1.27 2.1a19.8 19.8 0 0 0 6-3.03c.5-5.03-.85-9.39-3.55-13.26ZM8.02 15c-1.18 0-2.15-1.09-2.15-2.42 0-1.34.95-2.43 2.15-2.43 1.2 0 2.17 1.09 2.15 2.43 0 1.33-.95 2.42-2.15 2.42Zm7.96 0c-1.18 0-2.15-1.09-2.15-2.42 0-1.34.95-2.43 2.15-2.43 1.2 0 2.17 1.09 2.15 2.43 0 1.33-.94 2.42-2.15 2.42Z"/></svg><span class="lu-nav-badge">700+&#8202;<span style="font-size:0.715em">🟢</span></span></a>
+    <span class="lu-nav-sep"></span>
+    <div class="switch" id="theme-switch" role="button" aria-label="Toggle theme"></div>
+    <a class="lu-nav-dl" href="https://github.com/PurpleDoubleD/locally-uncensored/releases/latest"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m0 0 4-4m-4 4-4-4"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>Download</a>
+    <button type="button" class="lu-nav-toggle" aria-label="Menu"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+  </div>
+</nav>
+<div class="container lu-doc">
+  <div class="breadcrumb"><a href="../">Locally Uncensored</a> / <a href="./">Blog</a> / This Post</div>
+
+  <div class="post-meta">
+    <span class="post-tag">Tutorial</span>
+    <span>September 7, 2026</span>
+    <span>&middot;</span>
+    <span>6 min read</span>
+  </div>
+
+  <article>
+    <h1>Flux 2 Online Without a 24 GB Card</h1>
+
+    <p>Flux 2 Dev is the kind of model that makes people go shopping. It wants a big card, and most desktops do not have one. The workaround is not a smaller quant and a lot of patience. It is renting the GPU for the six seconds you actually need it, and doing the rest of the work in a browser tab.</p>
+
+    <p>This guide is the short path: six steps to a finished image in the LU Labs Studio, then the credit math so you can decide before you pay whether the browser route is worth it for the way you work. If you already own a 24 GB card, skip to the last section, because you probably want <a href="how-to-run-flux-locally.html">the local install</a> instead.</p>
+
+    <h2>Six Steps to a Flux 2 Dev Image</h2>
+
+    <ol>
+      <li><strong>Sign in at <a href="https://lu-labs.ai/flux-2-online-without-gpu" target="_blank" rel="noopener">lu-labs.ai</a>.</strong> The Studio is a web app from the same team that ships the open source desktop app. Nothing to install, no CUDA, no Python. It behaves the same on Windows, Linux, a Mac or a tablet.</li>
+      <li><strong>Open the image lane.</strong> The Studio splits into chat, image and video. Switch to image and you get the model picker, the prompt box and the editing tools in one panel.</li>
+      <li><strong>Pick Flux 2 Dev.</strong> It sits in the model list next to Flux Dev and Flux Schnell. Note the price before you click: Flux 2 Dev is 1,200 credits per image.</li>
+      <li><strong>Write the prompt.</strong> Flux models read sentences, not tag soup. One specific paragraph that names the subject, the framing, the light and the medium beats twenty comma separated keywords. Say "shot on a 35mm lens, late afternoon window light, shallow depth of field" rather than "photorealistic, 8k, masterpiece".</li>
+      <li><strong>Render.</strong> The job runs on managed NVIDIA H100, A100 and B200 class hardware. It is shared hardware, so at busy hours you wait in a short queue before your render starts.</li>
+      <li><strong>Download.</strong> Grab the file from the result panel, or push it straight into the editing tools: inpainting on Flux Dev, Qwen Image Edit, background removal, the eraser, or the upscaler at 2k, 4k or 8k.</li>
+    </ol>
+
+    <h2>The Credit Math, Done Properly</h2>
+
+    <p>This is the part most hosted image pages skip. Credits are not vague; every render has a fixed price, and the arithmetic decides whether this is a good deal for you.</p>
+
+    <table>
+      <thead>
+        <tr><th>Model</th><th>Per image</th><th>5 EUR pack (165,000 credits)</th><th>Hosted month (900,000 credits)</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Flux 2 Dev</td><td>1,200 credits</td><td>about 137 images</td><td>about 750 images</td></tr>
+        <tr><td>Flux Dev</td><td>1,200 credits</td><td>about 137 images</td><td>about 750 images</td></tr>
+        <tr><td>Flux Schnell</td><td>300 credits</td><td>about 550 images</td><td>about 3,000 images</td></tr>
+      </tbody>
+    </table>
+
+    <p>The credit packs need no subscription and work from the first purchase: 5 EUR buys 165,000 credits, 10 EUR buys 350,000, 25 EUR buys 900,000, and the credits do not expire. The Hosted plan is 19 EUR a month with 900,000 credits. Full breakdown on the <a href="https://lu-labs.ai/pricing" target="_blank" rel="noopener">LU Labs pricing page</a>.</p>
+
+    <p>So a five euro pack is roughly a hundred and thirty seven finished Flux 2 Dev images. If you generate two or three keepers a week, that pack outlives the month you bought it in. If you are producing assets daily, the Hosted month is the honest choice.</p>
+
+    <h2>The Workflow the Numbers Imply</h2>
+
+    <p>Four Schnell renders cost the same as one Flux 2 Dev render. That single fact should shape how you work.</p>
+
+    <p><strong>Draft on Schnell, finish on Flux 2 Dev.</strong> Prompt exploration is where credits actually go. Nobody nails composition, framing and wording on the first try, and burning 1,200 credits to discover that the subject is facing the wrong way is a waste. Iterate on Flux Schnell at 300 credits until the composition and the sentence are right, then re-render the keeper on Flux 2 Dev. Ten Schnell drafts plus one Flux 2 Dev finish costs 4,200 credits. Ten Flux 2 Dev attempts cost 12,000. Same result, roughly a third of the spend.</p>
+
+    <p>The two models are close enough in prompt behaviour that a wording change which helps on Schnell usually helps on Flux 2 Dev too. We wrote the head to head in <a href="flux-2-dev-vs-flux-dev-vs-schnell.html">Flux 2 Dev vs Flux Dev vs Schnell</a>.</p>
+
+    <h2>What Else Is in the Image Lane</h2>
+
+    <p>Ten image models are hosted: Flux 2 Dev, Flux Dev, Flux Schnell, Qwen Image, HiDream, HunyuanImage 2.1, Z-Image Turbo, Chroma, Prefect Pony XL and Neta Lumina. Different houses, different tastes, all in one picker, so trying a second look costs a click.</p>
+
+    <p>Editing is a separate set of tools: inpainting runs on Flux Dev, Qwen Image Edit handles instruction style edits, and there is background removal, an eraser and upscaling to 2k, 4k or 8k. Face swap is not offered.</p>
+
+    <p>For context on the rest of the Studio, video sits in the same account with five models and clips of 5 or 8 seconds. An LTX-2 clip at 5 seconds costs 8,000 credits, which is a bit under seven Flux 2 Dev images, so video eats a pack quickly. LoRA training is included twice a month on the Hosted plan and is not part of a credit pack. If training your own style is the point of the exercise, the pack will not get you there.</p>
+
+    <h2>Who Should Still Render Locally</h2>
+
+    <p>Two clear cases, and we would rather say so than sell you a plan you do not need.</p>
+
+    <p><strong>You already have the VRAM.</strong> If a 24 GB card is sitting in your machine, run Flux at home. Every render after the download is free, there is no queue but your own, and the desktop app is free and open source. Start with <a href="how-to-run-flux-locally.html">how to run Flux locally</a>, and <a href="easiest-local-ai-image-generator.html">the easiest local image generator setup</a> if you want the shortest install.</p>
+
+    <p><strong>You want a checkpoint that is not in the catalog.</strong> The hosted catalog is curated. There is no bring your own checkpoint, so a niche community merge from a model site is a local job. That is exactly what the desktop app is for.</p>
+
+    <h2>Honest Limits</h2>
+
+    <ul>
+      <li>Hosted image and video prompts follow the Terms of Service, and the prompt is checked before it renders. This is a hosted service on rented hardware and it comes with rules.</li>
+      <li>Content involving minors is refused everywhere, always, with no exception.</li>
+      <li>Shared hardware means a short queue at busy hours. Renders are not instant when the cluster is full.</li>
+      <li>No bring your own checkpoint. The catalog is what you get.</li>
+      <li>Accounts and billing sit in the EU, and there is no training on your data.</li>
+      <li>The local desktop app is the other half of the answer. It stays free, it runs whatever you install, and nothing sits in the middle.</li>
+    </ul>
+
+    <h2>Related Reading</h2>
+
+    <ul>
+      <li><a href="flux-2-dev-vs-flux-dev-vs-schnell.html">Flux 2 Dev vs Flux Dev vs Schnell</a>, which model for which job</li>
+      <li><a href="how-to-run-flux-locally.html">How to run Flux locally</a>, the VRAM route with no credits involved</li>
+      <li><a href="local-ai-image-and-video-generator.html">Local AI image and video generator</a>, the desktop side of the same workflow</li>
+      <li><a href="best-local-ai-apps-2026.html">Best local AI apps 2026</a>, where the desktop app sits among the alternatives</li>
+    </ul>
+  </article>
+
+  <div class="post-footer">
+    <p>Flux 2 Dev, Flux Schnell and eight more image models in one browser tab, no 24 GB card required.</p>
+    <a href="https://lu-labs.ai/checkout/start?plan=hosted&amp;src=luc-flux2-nogpu-guide" class="cta-btn" target="_blank" rel="noopener">Try Flux 2 Dev in the browser</a>
+  </div>
+</div>
+
+<footer>
+  <div class="footer-row footer-meta"><span>&copy; 2026 &middot; Locally Uncensored &middot; AGPL-3.0</span></div>
+  <div class="footer-row footer-links">
+    <a href="https://locallyuncensored.com/blog/">Blog</a>
+    <a href="https://locallyuncensored.com/guide/">Guide</a>
+    <a href="https://locallyuncensored.com/remote-access/">Remote access</a>
+    <a href="https://locallyuncensored.com/discord" target="_blank" rel="noopener">Discord</a>
+    <a href="https://github.com/PurpleDoubleD/locally-uncensored">GitHub</a>
+    <a href="https://github.com/PurpleDoubleD/locally-uncensored/discussions">Discussions</a>
+    <a href="https://github.com/PurpleDoubleD/locally-uncensored/issues">Issues</a>
+    <a href="https://reddit.com/user/GroundbreakingMall54">Reddit</a>
+    <a href="https://www.linkedin.com/in/david-drobnitza-locallyuncensored/" rel="me noopener" target="_blank">LinkedIn</a>
+  </div>
+</footer>
+</body>
+</html>

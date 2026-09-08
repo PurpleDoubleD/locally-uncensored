@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Qwen 3.8 Max vs Qwen 3.8 A95B, explained</title>
+<meta name="description" content="Two Qwen 3.8 entries on every plan, almost the same price. The thinking switch is the whole difference, and on one of them it does not exist.">
+<meta name="keywords" content="qwen 3.8 max vs a95b, qwen 3.8 a95b, qwen 3.8 max, qwen3.8 2.4t a95b, qwen 3.8 thinking, qwen 3.8 price, qwen 3.8 licence">
+<meta property="og:title" content="Qwen 3.8 Max vs Qwen 3.8 A95B, explained">
+<meta property="og:description" content="Two Qwen 3.8 entries on every plan, almost the same price. The thinking switch is the whole difference, and on one of them it does not exist.">
+<meta property="og:image" content="https://raw.githubusercontent.com/PurpleDoubleD/locally-uncensored/master/docs/social-preview.png">
+<meta property="og:url" content="https://locallyuncensored.com/blog/qwen-3-8-max-vs-a95b-explained.html">
+<meta property="og:type" content="article">
+<meta property="article:published_time" content="2026-09-07">
+<meta property="article:author" content="PurpleDoubleD">
+<meta property="article:tag" content="Qwen 3.8">
+<meta property="article:tag" content="Comparison">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Qwen 3.8 Max vs Qwen 3.8 A95B, explained">
+<meta name="twitter:description" content="Two Qwen 3.8 entries on every plan, almost the same price. The thinking switch is the whole difference, and on one of them it does not exist.">
+<meta name="twitter:image" content="https://raw.githubusercontent.com/PurpleDoubleD/locally-uncensored/master/docs/social-preview.png">
+<link rel="canonical" href="https://locallyuncensored.com/blog/qwen-3-8-max-vs-a95b-explained.html">
+<meta name="robots" content="index, follow">
+<meta name="theme-color" content="#0a0a0a">
+<link rel="icon" href="../favicon.png">
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"BlogPosting","headline":"Qwen 3.8 Max vs Qwen 3.8 A95B, explained","description":"The two hosted Qwen 3.8 entries compared on the things that decide it: credits per token, whether the reasoning can be switched off, image input and licence. Both are on every plan and on a credit pack.","image":"https://raw.githubusercontent.com/PurpleDoubleD/locally-uncensored/master/docs/social-preview.png","datePublished":"2026-09-07","dateModified":"2026-09-07","inLanguage":"en","author":{"@type":"Person","name":"PurpleDoubleD","url":"https://github.com/PurpleDoubleD"},"publisher":{"@type":"Organization","name":"Locally Uncensored","url":"https://locallyuncensored.com/"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://locallyuncensored.com/blog/qwen-3-8-max-vs-a95b-explained.html"},"keywords":"qwen 3.8 max vs a95b, qwen 3.8 a95b, qwen 3.8 thinking, qwen 3.8 price"}
+</script>
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"FAQPage","mainEntity":[{"@type":"Question","name":"What is the difference between Qwen 3.8 Max and Qwen 3.8 A95B?","acceptedAnswer":{"@type":"Answer","text":"The thinking switch. Both reason on every turn by default, but Qwen 3.8 Max can be told to stop and Qwen 3.8 A95B cannot. Max is also the cheaper of the two per token. Neither takes image input and both call tools natively."}},{"@type":"Question","name":"Can I turn the reasoning off on Qwen 3.8 Max?","acceptedAnswer":{"@type":"Answer","text":"Yes, through the chat template flag rather than the reasoning effort field, which has no effect on this model. We measured a short question at 109 output tokens with reasoning running and 4 with the template flag set, for an identical answer. The toggle in the Studio sends the flag that works."}},{"@type":"Question","name":"Can I turn the reasoning off on Qwen 3.8 A95B?","acceptedAnswer":{"@type":"Answer","text":"No. Reasoning effort is accepted and ignored, and the chat template flag comes back as a 400 saying that disabling thinking is not supported. The model always reasons and you always pay for those tokens."}},{"@type":"Question","name":"Do either of them take images?","acceptedAnswer":{"@type":"Answer","text":"No. Both refuse image input at the API layer. If you need a hosted model that reads pictures, GLM 5.3 Flash and Kimi K3 both do, and both sit in the same picker."}},{"@type":"Question","name":"Is Qwen 3.8 A95B Apache 2.0?","acceptedAnswer":{"@type":"Answer","text":"No. The A95B repository carries Alibaba's own terms. In the same release wave only the small 27B checkpoint is Apache 2.0, so if the licence is what you are choosing on, that is the model to look at."}},{"@type":"Question","name":"Which plan carries them?","acceptedAnswer":{"@type":"Answer","text":"All of them, and a credit pack with no subscription reaches them too. Every plan and every pack gets the whole chat catalog, so the difference is budget: a 5 EUR pack of 165,000 credits is roughly 333,000 output tokens on Max or 275,000 on A95B, the 19 EUR Hosted month is 900,000 credits, Pro is 2,350,000 and Max is 5,000,000."}},{"@type":"Question","name":"What do they cost per token?","acceptedAnswer":{"@type":"Answer","text":"One credit is $0.00001 of wholesale cost. Qwen 3.8 Max draws 0.165 credits per input token and 0.4951 per output token. Qwen 3.8 A95B draws 0.2 and 0.6."}}]}
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@200;300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/assets/lu.css">
+<script defer src="/assets/lu.js"></script>
+  <script data-goatcounter="https://lu-uncensored.goatcounter.com/count" async src="//gc.zgo.at/count.js"></script>
+</head>
+<body>
+<nav class="lu-nav">
+  <a class="lu-nav-brand" href="/" aria-label="Locally Uncensored">
+    <span class="lu-mono" data-mono="nav" data-size="40" aria-hidden="true"></span>
+    <span class="lu-nav-word">Locally <span class="accent">Uncensored</span></span>
+  </a>
+  <div class="lu-nav-links" id="lu-nav-links">
+    <a class="lu-nav-link" href="/">Home</a>
+    <a class="lu-nav-link" href="/blog/">Blog</a>
+    <a class="lu-nav-link" href="/guide/">Guide</a>
+    <a class="lu-nav-link" href="/remote-access/">Remote</a>
+  </div>
+  <div class="lu-nav-right">
+    <a class="lu-nav-icon" href="https://github.com/PurpleDoubleD/locally-uncensored" title="GitHub" aria-label="GitHub"><svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.37.5 0 5.87 0 12.5c0 5.3 3.44 9.8 8.21 11.39.6.11.82-.26.82-.58 0-.29-.01-1.04-.02-2.05-3.34.73-4.04-1.61-4.04-1.61-.55-1.39-1.33-1.76-1.33-1.76-1.09-.75.08-.73.08-.73 1.2.08 1.84 1.24 1.84 1.24 1.07 1.83 2.81 1.3 3.5.99.11-.78.42-1.3.76-1.6-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.13-.3-.54-1.52.11-3.18 0 0 1.01-.32 3.3 1.23a11.5 11.5 0 0 1 6.01 0c2.29-1.55 3.3-1.23 3.3-1.23.65 1.66.24 2.88.12 3.18.77.84 1.23 1.91 1.23 3.22 0 4.61-2.8 5.63-5.48 5.92.43.37.81 1.1.81 2.22 0 1.6-.01 2.9-.01 3.29 0 .32.21.7.82.58A12.01 12.01 0 0 0 24 12.5C24 5.87 18.63.5 12 .5Z"/></svg><span class="lu-nav-badge">1400+&#8202;⭐</span></a>
+    <a class="lu-nav-icon discord" href="https://locallyuncensored.com/discord" target="_blank" rel="noopener" title="Discord" aria-label="Discord"><svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M20.32 4.37A19.8 19.8 0 0 0 15.45 3c-.2.36-.44.85-.6 1.23a18.3 18.3 0 0 0-5.7 0c-.16-.38-.4-.87-.6-1.23a19.7 19.7 0 0 0-4.87 1.37C.55 8.9-.32 13.3.11 17.63a19.9 19.9 0 0 0 6 3.03c.48-.66.9-1.36 1.27-2.1-.7-.26-1.36-.58-1.99-.96.17-.12.33-.25.49-.38a14.2 14.2 0 0 0 12.24 0c.16.13.32.26.49.38-.63.38-1.3.7-2 .96.37.74.8 1.44 1.27 2.1a19.8 19.8 0 0 0 6-3.03c.5-5.03-.85-9.39-3.55-13.26ZM8.02 15c-1.18 0-2.15-1.09-2.15-2.42 0-1.34.95-2.43 2.15-2.43 1.2 0 2.17 1.09 2.15 2.43 0 1.33-.95 2.42-2.15 2.42Zm7.96 0c-1.18 0-2.15-1.09-2.15-2.42 0-1.34.95-2.43 2.15-2.43 1.2 0 2.17 1.09 2.15 2.43 0 1.33-.94 2.42-2.15 2.42Z"/></svg><span class="lu-nav-badge">700+&#8202;<span style="font-size:0.715em">🟢</span></span></a>
+    <span class="lu-nav-sep"></span>
+    <div class="switch" id="theme-switch" role="button" aria-label="Toggle theme"></div>
+    <a class="lu-nav-dl" href="https://github.com/PurpleDoubleD/locally-uncensored/releases/latest"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m0 0 4-4m-4 4-4-4"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>Download</a>
+    <button type="button" class="lu-nav-toggle" aria-label="Menu"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+  </div>
+</nav>
+<div class="container lu-doc">
+  <div class="breadcrumb"><a href="../">Locally Uncensored</a> / <a href="./">Blog</a> / This Post</div>
+
+  <div class="post-meta">
+    <span class="post-tag">Comparison</span>
+    <span>September 7, 2026</span>
+    <span>&middot;</span>
+    <span>6 min read</span>
+  </div>
+
+  <article>
+    <h1>Qwen 3.8 Max vs Qwen 3.8 A95B, explained</h1>
+
+    <p>These two sit next to each other in the model picker and nothing in the names tells you which to take. Neither replaces the other, which is why both are there. The difference that decides it is the thinking switch, and it takes one paragraph to explain, so here it is before the table.</p>
+
+    <p><strong>Qwen 3.8 Max lets you turn the reasoning off. Qwen 3.8 A95B does not.</strong> On Max that switch is roughly a twenty times cost lever on a short question. On A95B, asking for it comes back as an error. Everything else between them is small.</p>
+
+    <h2>Side by side</h2>
+
+    <table>
+      <thead><tr><th></th><th>Qwen 3.8 Max</th><th>Qwen 3.8 A95B</th></tr></thead>
+      <tbody>
+        <tr><td>Model id</td><td><code>Qwen/Qwen3.8-Max</code></td><td><code>Qwen/Qwen3.8-2.4T-A95B</code></td></tr>
+        <tr><td>Plan</td><td>Every plan and every credit pack</td><td>Every plan and every credit pack</td></tr>
+        <tr><td>Credits per input token</td><td>0.165</td><td>0.2</td></tr>
+        <tr><td>Credits per output token</td><td>0.4951</td><td>0.6</td></tr>
+        <tr><td>Reasoning</td><td>On every turn, switchable off</td><td>On every turn, no off switch</td></tr>
+        <tr><td>Image input</td><td>No</td><td>No</td></tr>
+        <tr><td>Tool calls</td><td>Native</td><td>Native</td></tr>
+        <tr><td>Size</td><td>2.4T mixture of experts</td><td>2.4T total, 95B active</td></tr>
+        <tr><td>Context</td><td>Not listed in our catalog</td><td>262,144 tokens</td></tr>
+        <tr><td>Licence</td><td>Alibaba terms</td><td>Alibaba terms, not Apache</td></tr>
+      </tbody>
+    </table>
+
+    <h2>The thinking switch, in detail</h2>
+
+    <p>Both models reason on every turn by default. That is fine when you asked something hard and it is pure waste when you asked what year something shipped, because a reasoning pass is output tokens and output tokens are the bill.</p>
+
+    <p>On Qwen 3.8 Max the switch works, but not through the field everyone else uses. Reasoning effort does nothing here. We measured a short question at 109 output tokens with the effort field set and 126 with it set to none, so it reasoned <em>more</em> when told to stop. The chat template flag is the one that lands: the same question drops from 109 tokens to 4, with an identical answer. Our proxy sends the flag that works, so the toggle in the Studio does what the label says.</p>
+
+    <p>On Qwen 3.8 A95B there is no switch at all. Reasoning effort is accepted and ignored, and the chat template flag comes back as a 400 with the message that disabling thinking is not supported. So the model always thinks, you always pay for it, and any client that tries to turn it off breaks the turn rather than saving anything.</p>
+
+    <p>So Max is the one we point people at on this pair. It is the cheaper token and it is the one you can make quiet.</p>
+
+    <h2>Neither of them sees pictures</h2>
+
+    <p>Worth stating because the family reputation says otherwise. Both entries refuse image input at the API layer. If your prompt has a screenshot in it, look at GLM 5.3 Flash or Kimi K3 instead, both of which take images and both of which sit in the same picker.</p>
+
+    <p>If you would rather hold those weights yourself, LU Labs has the hardware math for <a href="https://lu-labs.ai/blog/how-to-run-glm-5-3-locally" target="_blank" rel="noopener">how to run GLM-5.3 locally</a>, flagship and Flash.</p>
+
+    <h2>The licence question</h2>
+
+    <p>The A95B weights went public in August 2026 and it is easy to assume that means Apache 2.0. It does not. The repository carries Alibaba's own terms, and in the same wave only the small 27B checkpoint is Apache 2.0. If licensing is what you are choosing on, read the actual terms rather than the family reputation, and if you want the permissive one, the 27B is the model you want and it runs at home. That path is in <a href="how-to-run-qwen-3-8-27b-locally.html">how to run Qwen 3.8 27B locally</a>.</p>
+
+    <h2>Which to pick</h2>
+
+    <table>
+      <thead><tr><th>What you are doing</th><th>Pick</th><th>Why</th></tr></thead>
+      <tbody>
+        <tr><td>Mixed everyday work, some easy turns</td><td>Qwen 3.8 Max</td><td>Cheaper per token and you can switch the reasoning off when the question is small.</td></tr>
+        <tr><td>Hard prompts only, every turn deserves a reasoning pass</td><td>Either, and Max is still cheaper</td><td>The price gap holds whether the reasoning runs or not.</td></tr>
+        <tr><td>Agent or coding loops</td><td>Qwen 3.8 Max</td><td>Both call tools natively, loops emit a lot of tokens, and only one of them can be told to stop thinking between steps.</td></tr>
+        <tr><td>You specifically want the open checkpoint served</td><td>Qwen 3.8 A95B</td><td>2.4T total with 95B active, 262K context, the weights that went public in August 2026.</td></tr>
+        <tr><td>Anything with an image in it</td><td>Neither</td><td>Both refuse image input. GLM 5.3 Flash and Kimi K3 do not.</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Related reading</h2>
+
+    <ul>
+      <li><a href="run-qwen-3-8-without-gpu.html">How to run Qwen 3.8 without a GPU</a>, the budget, the price and the setup</li>
+      <li><a href="qwen-3-8-max-explained.html">Qwen 3.8 Max explained</a>, the release itself</li>
+      <li><a href="how-to-run-qwen-3-8-27b-locally.html">How to run Qwen 3.8 27B locally</a>, the Apache 2.0 one that fits on a card</li>
+      <li><a href="kimi-k3-vs-deepseek-v4.html">Kimi K3 vs DeepSeek V4</a>, the same trade across families</li>
+    </ul>
+
+    <hr>
+
+    <p><em>Locally Uncensored is AGPL-3.0 licensed. Built by <a href="https://github.com/PurpleDoubleD">PurpleDoubleD</a>. Bug reports and feature requests on <a href="https://github.com/PurpleDoubleD/locally-uncensored/discussions">GitHub Discussions</a> or in the <a href="https://locallyuncensored.com/discord">Discord</a>.</em></p>
+  </article>
+
+  <div class="post-footer">
+    <p>Both Qwen 3.8 entries sit in the same picker on every plan, one click apart.</p>
+    <a href="https://lu-labs.ai/checkout/start?plan=hosted&amp;src=luc-qwen38-max-vs-a95b" class="cta-btn" target="_blank" rel="noopener">
+      Compare them on LU Labs
+    </a>
+  </div>
+</div>
+
+<footer>
+  <div class="footer-row footer-meta"><span>&copy; 2026 &middot; Locally Uncensored &middot; AGPL-3.0</span></div>
+  <div class="footer-row footer-links">
+    <a href="https://locallyuncensored.com/blog/">Blog</a>
+    <a href="https://locallyuncensored.com/guide/">Guide</a>
+    <a href="https://locallyuncensored.com/remote-access/">Remote access</a>
+    <a href="https://locallyuncensored.com/discord" target="_blank" rel="noopener">Discord</a>
+    <a href="https://github.com/PurpleDoubleD/locally-uncensored">GitHub</a>
+    <a href="https://github.com/PurpleDoubleD/locally-uncensored/discussions">Discussions</a>
+    <a href="https://github.com/PurpleDoubleD/locally-uncensored/issues">Issues</a>
+    <a href="https://reddit.com/user/GroundbreakingMall54">Reddit</a>
+    <a href="https://www.linkedin.com/in/david-drobnitza-locallyuncensored/" rel="me noopener" target="_blank">LinkedIn</a>
+  </div>
+</footer>
+</body>
+</html>
