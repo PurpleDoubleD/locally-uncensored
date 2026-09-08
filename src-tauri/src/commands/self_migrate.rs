@@ -656,7 +656,10 @@ mod tests {
 
         let entry = write_desktop_entry(&layout, &layout.appimage()).expect("entry");
         let text = std::fs::read_to_string(&entry).expect("entry text");
-        assert!(text.contains(&layout.appimage().to_string_lossy().to_string()));
+        // The Exec line carries the path in freedesktop quoting, so a Windows
+        // temp path with backslashes appears escaped; the contract is the quoted
+        // form, and that is what the assertion reads.
+        assert!(text.contains(&quote_exec(&layout.appimage())));
 
         let icons = copy_icons(&layout, std::slice::from_ref(&fake_system));
         assert_eq!(icons, vec![layout.icon_file("128x128")]);
