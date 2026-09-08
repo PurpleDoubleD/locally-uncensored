@@ -359,6 +359,10 @@ fn main() {
             commands::system::backup_rag_chunks,
             commands::system::restore_rag_chunks,
             commands::system::exit_app,
+            // Who owns this copy of LU (the updater plugin never asks)
+            commands::install_method_cmd::install_method,
+            commands::self_migrate_cmd::self_migrate_stage,
+            commands::self_migrate_cmd::self_migrate_finish,
             // Downloads
             commands::download::download_model,
             commands::download::download_model_to_path,
@@ -1046,6 +1050,22 @@ mod log_file_tests {
             "commands::logging::log_write",
             "commands::logging::log_file_path",
             "commands::logging::log_reveal",
+        ] {
+            assert!(SRC.contains(cmd), "{cmd} is not in generate_handler!");
+        }
+    }
+
+    #[test]
+    fn the_frontend_can_actually_reach_the_whole_linux_update_path() {
+        // updateStore calls install_method BEFORE it downloads anything.
+        // Unregistered, the invoke rejects, the store falls back to "unknown"
+        // and the Arch install is back to running pkexec dpkg -i
+        // (UPDATER-LINUX-BEFUND.md). The two migration commands are what the
+        // update button calls there instead of the plugin.
+        for cmd in [
+            "commands::install_method_cmd::install_method",
+            "commands::self_migrate_cmd::self_migrate_stage",
+            "commands::self_migrate_cmd::self_migrate_finish",
         ] {
             assert!(SRC.contains(cmd), "{cmd} is not in generate_handler!");
         }

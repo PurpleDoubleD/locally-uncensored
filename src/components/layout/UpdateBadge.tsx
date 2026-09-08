@@ -18,6 +18,7 @@ export function UpdateBadge() {
     downloadedBytes,
     totalBytes,
     errorMessage,
+    progressNote,
     downloadUpdate,
     installAndRestart,
     dismissUpdate,
@@ -171,7 +172,9 @@ export function UpdateBadge() {
                 </div>
                 <div className="flex items-center justify-between mt-1">
                   <span className="text-[0.55rem] text-gray-500">
-                    {isDownloaded ? 'Download complete' : `${downloadProgress}%`}
+                    {/* The steps of LU's own install have a name instead of a
+                        percentage; the plugin's download has only the bar. */}
+                    {progressNote ?? (isDownloaded ? 'Download complete' : `${downloadProgress}%`)}
                   </span>
                   {totalBytes > 0 && (
                     <span className="text-[0.55rem] text-gray-600">

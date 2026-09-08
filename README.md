@@ -41,7 +41,7 @@ Take the latest build from [Releases](https://github.com/PurpleDoubleD/locally-u
 
 Some antivirus engines flag unsigned NSIS installers that download other binaries, which is a false positive. The installer is built by GitHub Actions from the public source on `master`, and the update channel is signed against a public minisign key, so you can verify both: see [SECURITY.md](SECURITY.md#antivirus--browser-false-positives).
 
-Current release: **v2.6.8** (September 2026). Every change since 1.0.0 is in [CHANGELOG.md](CHANGELOG.md).
+Current release: **v2.6.9** (September 2026). Every change since 1.0.0 is in [CHANGELOG.md](CHANGELOG.md).
 
 ## Three steps
 

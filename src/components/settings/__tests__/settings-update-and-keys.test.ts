@@ -26,11 +26,17 @@ describe('Settings update section uses the in-app updater', () => {
     expect(updateSection).not.toMatch(/onClick=\{openReleasePage\}[\s\S]{0,300}Download Update/)
   })
 
-  it('keeps openReleasePage only as the non-Tauri fallback', () => {
+  it('keeps openReleasePage out of every lane that can install', () => {
+    // One use left, and it is the browser fallback outside Tauri. The second
+    // one belonged to the installs the updater refused to touch (an AUR
+    // install, an AppImage in a folder the user cannot write to, a binary no
+    // package manager claims); there LU now installs itself and the release
+    // page is not an answer anybody needs.
+    const uses = updateSection.match(/onClick=\{openReleasePage\}/g) ?? []
+    expect(uses).toHaveLength(1)
     const fallbackGate = updateSection.indexOf('!isTauri()')
-    const releasePageUse = updateSection.indexOf('onClick={openReleasePage}')
     expect(fallbackGate).toBeGreaterThan(-1)
-    expect(releasePageUse).toBeGreaterThan(fallbackGate)
+    expect(updateSection.indexOf('onClick={openReleasePage}')).toBeGreaterThan(fallbackGate)
   })
 
   it('renders download progress from the store', () => {

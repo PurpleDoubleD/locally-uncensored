@@ -1,10 +1,11 @@
 import { create } from 'zustand'
-import { withDetail } from '../lib/error-text'
+import { detailOf, withDetail } from '../lib/error-text'
 import { log } from '../lib/logger'
 import { persist } from 'zustand/middleware'
 import { safeJSONStorage } from '../lib/storage-quota'
 import { version as currentVersion } from '../../package.json'
-import { isTauri, backendCall, openExternal } from '../api/backend'
+import { isTauri, isLinux, backendCall, openExternal } from '../api/backend'
+import { asBoolean, asString, prop } from '../types/json-guards'
 import { stopBundledEngine, stopBundledEmbed } from '../api/engine'
 import { flushChatPersist } from './chatStore'
 import { flushStagedPersist } from './stagedChangesStore'
@@ -46,6 +47,85 @@ export { settledOrTimedOut } from './durability'
 
 type DownloadStatus = 'idle' | 'downloading' | 'downloaded' | 'installing' | 'error'
 
+// ── How this copy of LU was installed ─────────────────────────
+//
+// The updater plugin decides between AppImage, deb and rpm by reading a string
+// the bundler patched into the binary, not by looking at the machine
+// (tauri-utils platform.rs:349, and UPDATER-LINUX-BEFUND.md for the whole
+// trace). A repackaged install therefore lies to it. The AUR package
+// locally-uncensored-bin unpacks our .deb into /usr, so on Arch the updater
+// downloads a Debian package and runs `pkexec dpkg -i` on a box with no dpkg:
+// polkit asks for the password, the command fails afterwards, and the user is
+// left thinking their password was wrong. That is the customer report this
+// exists for.
+//
+// The Rust command asks the package managers that are installed who owns the
+// running file. Where the answer means the plugin cannot deliver, the same
+// Download and Restart buttons run LU's own install instead: it fetches the
+// AppImage, checks its signature, puts it in the user's own data folder with a
+// start menu entry and starts it. Nothing to read, nothing to do by hand, and
+// from the next update on the plugin's ordinary in place swap works.
+
+export type InstallKind =
+  | 'appimage' | 'deb' | 'rpm' | 'pacman' | 'msi' | 'unknown'
+
+export interface InstallMethod {
+  kind: InstallKind
+  exePath: string
+  /** Whether the folder holding the executable can be written to. Only the
+   *  AppImage path cares: replacing it is a rename inside that folder. */
+  writable: boolean
+}
+
+const INSTALL_KINDS: readonly string[] = [
+  'appimage', 'deb', 'rpm', 'pacman', 'msi', 'unknown',
+]
+
+/** Anything that is not a recognisable answer is no answer: null means "we
+ *  could not find out", which leaves the updater exactly as it was. */
+export function parseInstallMethod(raw: unknown): InstallMethod | null {
+  const kind = asString(prop(raw, 'kind'))
+  if (!kind || !INSTALL_KINDS.includes(kind)) return null
+  return {
+    kind: kind as InstallKind,
+    exePath: asString(prop(raw, 'exe_path')) ?? '',
+    writable: asBoolean(prop(raw, 'writable')) ?? false,
+  }
+}
+
+/** Whether the update runs through LU's own install instead of the plugin.
+ *
+ *  The mirror of self_migrate::migrates_itself, plus the one question the Rust
+ *  side leaves to its caller: off Linux there is nothing to migrate to. A
+ *  macOS app in /Applications reports 'unknown' as well, and there the plugin
+ *  works. */
+export function installsItself(method: InstallMethod | null): boolean {
+  if (!method || !isLinux()) return false
+  switch (method.kind) {
+    // pacman owns the files; writing past its database is never allowed. And
+    // a binary no package manager claims is our deb, hand unpacked.
+    case 'pacman':
+    case 'unknown':
+      return true
+    // The plugin replaces an AppImage with a rename INSIDE its folder.
+    case 'appimage':
+      return !method.writable
+    // deb and rpm run a package install with the system's own password
+    // prompt, and Windows has its installer. Both work.
+    default:
+      return false
+  }
+}
+
+/** What the backend says while it is installing LU itself. The download half
+ *  fills the same progress bar the plugin does; the short steps after it get a
+ *  word instead of a percentage, because they have no length to show. */
+const MIGRATION_NOTE: Record<string, string> = {
+  verify: 'Checking the signature',
+  install: 'Putting the new version in place',
+  start: 'Starting the new version',
+}
+
 interface UpdateState {
   currentVersion: string
   latestVersion: string | null
@@ -64,6 +144,18 @@ interface UpdateState {
   downloadedBytes: number
   totalBytes: number
   errorMessage: string | null
+  /** The step LU is on while it installs itself, for the line that otherwise
+   *  shows a percentage. Null on the plugin's own lane, which has nothing but
+   *  a download to report. */
+  progressNote: string | null
+
+  /** How this copy got onto the machine. Null until the probe has answered,
+   *  and null forever on a build whose backend does not know the command:
+   *  in both cases the updater behaves exactly as it did before. */
+  installMethod: InstallMethod | null
+
+  /** Reads the install method once and caches it. */
+  refreshInstallMethod: () => Promise<InstallMethod | null>
 
   /** `force` skips the 6h cooldown — for a user-triggered check, and for
    *  the download path when the Update handle is missing. */
@@ -85,6 +177,37 @@ const INITIAL_DELAY = 5_000
 // ── Non-serializable update object (module-level) ─────────────
 
 let _pendingUpdate: Update | null = null
+
+/** The version LU downloaded for its own install, and the sign that the
+ *  staged AppImage from `self_migrate_stage` is still lying next to the app.
+ *  Module level for the same reason `_pendingUpdate` is: it does not survive
+ *  the process, and a rehydrated 'downloaded' would offer a Restart with
+ *  nothing behind it. */
+let _stagedSelfInstall: string | null = null
+
+/** In flight or already answered, so a startup check and a click on Download
+ *  do not run the same three subprocesses twice. Cleared again when the probe
+ *  came back empty, so a later attempt can still get an answer. */
+let _methodProbe: Promise<InstallMethod | null> | null = null
+
+/** Test seam: forget everything that only lives in this process, which is the
+ *  cached probe and the AppImage staged for LU's own install. */
+export function resetUpdateSession() {
+  _methodProbe = null
+  _stagedSelfInstall = null
+}
+
+async function readInstallMethod(): Promise<InstallMethod | null> {
+  if (!isTauri()) return null
+  try {
+    return parseInstallMethod(await backendCall('install_method'))
+  } catch (e) {
+    // An older backend without the command, or a probe that threw. Not being
+    // able to ask must never be a reason to withhold an update.
+    log.warn('[update] could not read the install method, leaving the updater as it was', { err: detailOf(e) })
+    return null
+  }
+}
 
 // ── Semver compare (kept for dev mode fallback) ───────────────
 
@@ -117,6 +240,18 @@ export const useUpdateStore = create<UpdateState>()(
       downloadedBytes: 0,
       totalBytes: 0,
       errorMessage: null,
+      progressNote: null,
+      installMethod: null,
+
+      refreshInstallMethod: async () => {
+        const known = get().installMethod
+        if (known) return known
+        if (!_methodProbe) _methodProbe = readInstallMethod()
+        const method = await _methodProbe
+        if (method) set({ installMethod: method })
+        else _methodProbe = null
+        return method
+      },
 
       checkForUpdate: async (force = false) => {
         const state = get()
@@ -152,6 +287,7 @@ export const useUpdateStore = create<UpdateState>()(
                       downloadedBytes: 0,
                       totalBytes: 0,
                       errorMessage: null,
+                      progressNote: null,
                     }
                   : {}),
               })
@@ -210,6 +346,14 @@ export const useUpdateStore = create<UpdateState>()(
       },
 
       downloadUpdate: async () => {
+        // Where the plugin cannot deliver, LU fetches its own AppImage
+        // instead. Same button, same progress bar, and nothing on screen says
+        // which of the two lanes ran.
+        if (installsItself(await get().refreshInstallMethod())) {
+          await downloadOwnInstall(set)
+          return
+        }
+
         // The Update handle lives in this process only. `updateAvailable` is
         // persisted, so after a relaunch — or when the startup check has not
         // landed yet, or ran while offline — the badge offers a Download button
@@ -258,9 +402,15 @@ export const useUpdateStore = create<UpdateState>()(
       },
 
       installAndRestart: async () => {
-        if (!_pendingUpdate) {
-          // Nothing was downloaded in THIS process — same dead-button problem
-          // as above, and here a re-check would not help.
+        // The install method decides the lane, not whichever handle happens to
+        // be lying around. checkForUpdate fills `_pendingUpdate` on every
+        // install, this one included, so asking it instead would send an Arch
+        // box back into `pkexec dpkg -i` the moment our own download failed.
+        const ownInstall = installsItself(await get().refreshInstallMethod())
+        const handle = _pendingUpdate
+        if (ownInstall ? _stagedSelfInstall === null : !handle) {
+          // Nothing was downloaded in THIS process, same dead-button problem
+          // as in downloadUpdate, and here a re-check would not help.
           set({
             downloadStatus: 'error',
             errorMessage: 'The downloaded update was lost when the app restarted. Download it again.',
@@ -324,13 +474,27 @@ export const useUpdateStore = create<UpdateState>()(
 
           await new Promise((r) => setTimeout(r, UPDATE_SETTLE_MS))
 
-          await _pendingUpdate.install()
+          if (ownInstall) {
+            // Puts the checked AppImage in place, gives it a start menu entry
+            // of its own and starts it. The new process waits for this one to
+            // be gone before it opens a window, because single instance would
+            // otherwise send it straight back here.
+            const stop = await followMigration(set)
+            try {
+              await backendCall('self_migrate_finish')
+            } finally {
+              stop()
+            }
+          } else if (handle) {
+            await handle.install()
+          }
           // Exit so the installer can overwrite the binary
           await backendCall('exit_app')
         } catch (e) {
           set({
             downloadStatus: 'error',
             errorMessage: withDetail('The update could not be installed.', e),
+            progressNote: null,
           })
         }
       },
@@ -398,6 +562,73 @@ export const useUpdateStore = create<UpdateState>()(
 )
 
 // ── Helpers ───────────────────────────────────────────────────
+
+/** One patch of update state, the shape zustand's `set` takes. */
+type Patch = (partial: Partial<UpdateState>) => void
+
+/** Follow the backend while it installs LU itself.
+ *
+ *  The plugin reports its download through a callback; this one reports the
+ *  same thing through an event, because the work happens in Rust. Everything
+ *  lands in the same three fields, so the progress bar does not know the
+ *  difference. Losing the events costs a moving bar and nothing else, which is
+ *  why nothing here can fail the update. */
+async function followMigration(set: Patch): Promise<() => void> {
+  if (!isTauri()) return () => {}
+  try {
+    const { listen } = await import('@tauri-apps/api/event')
+    return await listen<{ phase: string; downloaded: number; total: number }>(
+      'update-migration',
+      ({ payload }) => {
+        if (payload.phase === 'download') {
+          const total = payload.total ?? 0
+          set({
+            downloadedBytes: payload.downloaded ?? 0,
+            totalBytes: total,
+            downloadProgress: total > 0 ? Math.round(((payload.downloaded ?? 0) / total) * 100) : 0,
+            progressNote: null,
+          })
+          return
+        }
+        set({ progressNote: MIGRATION_NOTE[payload.phase] ?? null })
+      },
+    )
+  } catch (e) {
+    log.warn('[update] the self install runs without progress events', { err: detailOf(e) })
+    return () => {}
+  }
+}
+
+/** Fetch and check the AppImage LU will install into the home folder.
+ *
+ *  Stops at the checked file: installing it restarts the app, and nothing
+ *  restarts the app without a click, auto-download or not. */
+async function downloadOwnInstall(set: Patch): Promise<void> {
+  set({
+    downloadStatus: 'downloading',
+    downloadProgress: 0,
+    downloadedBytes: 0,
+    totalBytes: 0,
+    errorMessage: null,
+    progressNote: null,
+  })
+  const stop = await followMigration(set)
+  try {
+    const staged = await backendCall('self_migrate_stage')
+    _stagedSelfInstall = asString(prop(staged, 'version')) ?? ''
+    set({ downloadStatus: 'downloaded', downloadProgress: 100, progressNote: null })
+  } catch (e) {
+    _stagedSelfInstall = null
+    set({
+      downloadStatus: 'error',
+      errorMessage: withDetail('The update could not be downloaded.', e),
+      progressNote: null,
+    })
+  } finally {
+    stop()
+  }
+}
+
 
 function truncateNotes(notes: string): string {
   const lines = notes.split('\n').filter(l => l.trim()).slice(0, 5)

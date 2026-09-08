@@ -2249,8 +2249,8 @@ export function SettingsPage() {
 
 // ── Update Section ──────────────────────────────────────────────
 
-function UpdateSection() {
-  const { currentVersion, latestVersion, updateAvailable, releaseNotes, dismissed, isChecking, autoDownload, downloadStatus, downloadProgress, downloadedBytes, totalBytes, errorMessage, checkForUpdate, downloadUpdate, installAndRestart, clearDismiss, setAutoDownload, openReleasePage } = useUpdateStore()
+export function UpdateSection() {
+  const { currentVersion, latestVersion, updateAvailable, releaseNotes, dismissed, isChecking, autoDownload, downloadStatus, downloadProgress, downloadedBytes, totalBytes, errorMessage, progressNote, checkForUpdate, downloadUpdate, installAndRestart, clearDismiss, setAutoDownload, openReleasePage } = useUpdateStore()
   // Defensive: only treat the persisted `latestVersion` as actually newer if a
   // semver compare confirms it. Otherwise the binary was updated out-of-band
   // and the persisted value is stale (e.g. localStorage still says 2.3.8 while
@@ -2302,7 +2302,10 @@ function UpdateSection() {
                 </div>
                 <div className="flex items-center justify-between mt-1">
                   <span className="text-[0.55rem] text-gray-500">
-                    {downloadStatus === 'downloaded' ? 'Download complete' : `${downloadProgress}%`}
+                    {/* On the lane where LU installs itself the short steps
+                        after the download report a word instead of a
+                        percentage they do not have. */}
+                    {progressNote ?? (downloadStatus === 'downloaded' ? 'Download complete' : `${downloadProgress}%`)}
                   </span>
                   {totalBytes > 0 && (
                     <span className="text-[0.55rem] text-gray-600">
@@ -2316,6 +2319,7 @@ function UpdateSection() {
             {downloadStatus === 'error' && errorMessage && (
               <p className="text-[0.6rem] text-red-400/80 leading-relaxed mb-2.5">{errorMessage}</p>
             )}
+
 
             <div className="flex gap-2">
               {!isTauri() ? (

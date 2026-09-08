@@ -2,7 +2,34 @@
 
 All notable changes to Locally Uncensored are documented here.
 
-## [Unreleased]
+## [2.6.9] - 2026-09-08
+
+### Fixed
+
+- **The update works on Arch, and on every other Linux install the built-in
+  updater could not reach.** LU from the AUR package `locally-uncensored-bin`
+  is our Debian package unpacked into `/usr`, and the updater could not tell
+  the two apart: it downloaded a `.deb` and ran `dpkg` on a system that has no
+  `dpkg`, so the password prompt arrived and the install failed right after the
+  password was typed. LU now asks the package managers on the machine who owns
+  the running file. Where the answer means the updater cannot install anything
+  (a package manager owns the files, nothing owns them, or the AppImage sits in
+  a folder you cannot write to), Download and Restart do the work themselves: a
+  signed AppImage lands in your own data folder, the start menu entry points at
+  it, and LU starts again from there. After that, updates are the usual one
+  click. Reported by a customer on Arch.
+- **The top navigation and the Create toolbar are back to the 2.6.7 layout
+  after feedback on Discord: entries stay where they are.** 2.6.8 turned both
+  rows into a wheel that scrolled the selected entry into the middle, so every
+  click moved the other tools somewhere else and the ones at the edge were cut
+  off. All six views and all twelve Create tools are back to fixed positions,
+  fully readable, and the Create row wraps onto a second line in a narrow
+  window instead of hiding anything.
+- **The Context menu in the chat opens in full instead of being cut off.** It
+  always opened downwards, and its button moved to the bottom of the window in
+  2.6.8, so half the list ran past the edge of the panel and the largest sizes
+  could not be picked. It now measures the room it has and opens upwards when
+  the space below is too small, scrolling inside its own box on a short window.
 
 ## [2.6.8] - 2026-09-03
 
@@ -12,7 +39,7 @@ run while you carry on, a reasoning model gets a dial for how much thinking a
 reply may pay for, every local model answers on one OpenAI-compatible address,
 and the built-in engine has a name of its own, the LU Engine.
 
-**Known in this release:** after you switch Cloud off, the LU Engine stays stopped until you press Use on your model under Models. One click, a few seconds. 2.6.9 brings the engine back on its own when Cloud goes off.
+**Known in this release:** after you switch Cloud off, the LU Engine stays stopped until you press Use on your model under Models. One click, a few seconds. A later release brings the engine back on its own when Cloud goes off.
 
 ### Added
 

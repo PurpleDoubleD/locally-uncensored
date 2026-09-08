@@ -46,10 +46,14 @@ describe('the example-video stage is gone', () => {
     }
   })
 
-  it('the teaser sheet goes straight to the gate from both surfaces', () => {
-    // The intent branch used to call setCloudExampleVideo; both branches take
-    // the model-row path now, which was always one step shorter.
-    expect(teaser).toMatch(/setCloudGateOpen\(true\)/)
+  it('the teaser sheet goes straight into checkout from both surfaces', () => {
+    // The intent branch used to call setCloudExampleVideo, then both branches
+    // went to the in-app gate. Since 2026-09-07 the one button opens
+    // /checkout/start in the browser with Hosted preselected and the card
+    // size as src, and the gate is no longer referenced from the sheet.
+    expect(teaser).toMatch(/openExternal\(`\$\{CLOUD_BASE\}\/checkout\/start\?plan=hosted&src=\$\{src\}`\)/)
+    expect(teaser).toMatch(/gpuGb !== null \? `gpu\$\{gpuGb\}` : 'gpu-unknown'/)
+    expect(teaser).not.toMatch(/setCloudGateOpen/)
     expect(teaser).not.toMatch(/setCloudExampleVideo/)
     // The branch itself is gone, not just its call.
     expect(teaser).not.toMatch(/if \(t\.surface === 'intent'\)/)

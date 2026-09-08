@@ -23,6 +23,17 @@ const UNKNOWN = '9.9.9'
 
 beforeEach(() => useReleaseNotesStore.setState({ lastNotesVersion: null }))
 
+function proseOf(version: string): string {
+  const note = releaseNoteFor(version)
+  return [
+    note?.headline ?? '',
+    ...(note?.lines ?? []),
+    ...(note?.details ?? []).flatMap((s) => s.items),
+  ]
+    .join('\n')
+    .toLowerCase()
+}
+
 describe('the notes table', () => {
   it('has at least one entry, so the rest of this file means something', () => {
     expect(RELEASE_NOTES.length).toBeGreaterThan(0)
@@ -72,17 +83,10 @@ describe('the notes table', () => {
     // below names one of them, so a note that forgets one fails here.
     // The house formula for hardware nobody here owns is pinned too: a claim
     // we could not run on real hardware says so in those words.
-    const shipping = JSON.parse(
-      readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '../../../package.json'), 'utf8'),
-    ).version as string
-    const note = releaseNoteFor(shipping)
-    const prose = [
-      note?.headline ?? '',
-      ...(note?.lines ?? []),
-      ...(note?.details ?? []).flatMap((s) => s.items),
-    ]
-      .join('\n')
-      .toLowerCase()
+    // 2.6.9 shipped on top of it, so the 2.6.8 anchors now pin the 2.6.8 entry
+    // by version and the shipping entry gets its own list below.
+    const shipping = '2.6.8'
+    const prose = proseOf(shipping)
     for (const anchor of [
       'effort', 'glm 5.3', 'installed', 'lu engine', '8127',
       'repair environment', 'model storage', 'civitai', 'hip sdk',
@@ -132,6 +136,36 @@ describe('the notes table', () => {
     // And the wrong instruction itself, named so it cannot quietly return.
     expect(prose, 'the note sends Ollama users to the provider card again')
       .not.toContain('the way back to ollama is the provider card')
+  })
+
+  it('the 2.6.9 entry names the rollback, the context menu and the Linux self-heal', () => {
+    // Same blind spot, next release: the shipping note is pinned to what
+    // 2.6.9 actually carries. Two Discord complaints about the wheel (the
+    // tools moved, the edge was cut off), the context menu David saw clipped
+    // himself, the AUR customer whose update asked for a password and died,
+    // the teaser that names the card's own VRAM, and the per-account count of
+    // the Cloud switch, which is new telemetry and therefore said out loud.
+    const shipping = JSON.parse(
+      readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '../../../package.json'), 'utf8'),
+    ).version as string
+    expect(shipping).toBe('2.6.9')
+    const prose = proseOf(shipping)
+    for (const anchor of [
+      'back to the 2.6.7 layout', 'nothing is cut off', 'opens upwards',
+      'signed appimage', 'without a password', 'pacman, dpkg and rpm',
+      'system password prompt', 'how much vram your own gpu has', 'hosted checkout',
+      'counted per account',
+      // The limitation 2.6.8 announced is still there, so it is still said.
+      'stays stopped until you press use',
+    ]) {
+      expect(prose, `${shipping}: nothing about "${anchor}"`).toContain(anchor)
+    }
+    // 2.6.8 promised the engine would come back on its own in 2.6.9. It does
+    // not, so no entry may keep that promise alive.
+    for (const version of ['2.6.8', '2.6.9']) {
+      expect(proseOf(version), `${version} still promises the engine fix for 2.6.9`)
+        .not.toContain('2.6.9 brings the engine back')
+    }
   })
 
   it('says nothing in the shipping note twice, word for word', () => {
