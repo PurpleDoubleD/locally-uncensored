@@ -32,10 +32,45 @@ export interface ReleaseNote {
 
 export const RELEASE_NOTES: ReleaseNote[] = [
   {
+    version: '2.6.9',
+    headline: 'The navigation is back to the 2.6.7 layout, and updates work on every Linux install',
+    lines: [
+      'Known in this release: after you switch Cloud off, the LU Engine stays stopped until you press Use on your model under Models. One click, a few seconds.',
+      'The top bar and the Create toolbar are back to the 2.6.7 layout after your feedback on Discord: every entry stays where it is, nothing scrolls, nothing is cut off.',
+      'The context size menu in Chat opens upwards when there is no room below it, so 16K, 32K and the hint line are reachable again.',
+      'Linux: LU installed from the AUR package or unpacked by hand no longer downloads a Debian package and fails after the password prompt. It fetches the signed AppImage into your home folder, points the start menu entry at it and restarts; from then on updates install in place, without a password.',
+      'The Cloud teaser says how much VRAM your own GPU has when a model does not fit, and its button leads straight into signup and the Hosted checkout.',
+    ],
+    details: [
+      {
+        title: 'Navigation and Chat',
+        items: [
+          'The top bar (Chat, Create, Compare, Benchmark, Models, Settings) and the Create toolbar no longer rotate the active entry into the middle. They are the fixed rows from 2.6.7 again; a narrow window wraps the Create tools onto a second line instead of hiding them.',
+          'The context size menu measures the room it has before it opens and flips upwards when the space below is too small, capped to the visible area so it can never be clipped again.',
+        ],
+      },
+      {
+        title: 'Linux updates',
+        items: [
+          'The updater used to decide between AppImage, deb and rpm from a marker written into the binary at build time. A copy repackaged by the AUR or unpacked by hand carried the wrong marker, downloaded a .deb and ran dpkg through polkit, which asked for your password and then failed.',
+          'LU now asks pacman, dpkg and rpm who owns the running file. On an install none of them may overwrite, it downloads the AppImage from the release page, verifies its signature, places it under ~/.local/share/locally-uncensored, writes a start menu entry for it and relaunches. An AppImage in a folder you cannot write to takes the same route.',
+          'Debian, Ubuntu and Fedora installs from our .deb and .rpm keep the normal package install, including the system password prompt.',
+        ],
+      },
+      {
+        title: 'Cloud',
+        items: [
+          'The Cloud teaser reads your GPU size from the same hardware detection the settings use and says it on the card, so the reason a model does not fit is on screen. Its button opens signup and the Hosted checkout in one go instead of the pricing page.',
+          'Privacy note: pressing the Cloud switch was already counted anonymously per day, platform and version. When you are signed in it is now also counted per account, so we can tell whether subscribers or everyone else use it. No prompt, no chat content, nothing else.',
+        ],
+      },
+    ],
+  },
+  {
     version: '2.6.8',
     headline: 'Compact mode, background agents, and an effort control for reasoning models',
     lines: [
-      'Known in this release: after you switch Cloud off, the LU Engine stays stopped until you press Use on your model under Models. One click, a few seconds. 2.6.9 brings the engine back on its own when Cloud goes off.',
+      'Known in this release: after you switch Cloud off, the LU Engine stays stopped until you press Use on your model under Models. One click, a few seconds. A later release brings the engine back on its own when Cloud goes off.',
       'Compact mode: type /compact and the older part of a long conversation is folded into a summary the chat model writes itself, so the chat keeps going instead of running out of room. Auto-compact stays off until you switch it on under Settings.',
       'Background agents in Agent and Code mode: the agent hands a self-contained task to a sub-agent that works while you carry on, a panel on the right shows what is running, and the main agent picks the result up on its own. Cloud and local models alike.',
       'Reasoning models have an effort control next to the Think button: Low, Medium or High, and Max on GLM 5.3. The setting decides how many tokens a reply may spend on thinking.',
