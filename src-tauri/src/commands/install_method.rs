@@ -16,8 +16,10 @@
 //!
 //! This module answers the question the plugin skips, by asking the package
 //! managers that are actually installed which one of them owns the file. The
-//! frontend calls it before it downloads anything and refuses the update on
-//! the installs where taking it would be wrong.
+//! frontend calls it before it downloads anything, and on the installs where
+//! the plugin cannot deliver, LU installs itself into the home folder as an
+//! AppImage instead (`self_migrate.rs`) rather than telling the user to go and
+//! do it by hand.
 //!
 //! Deliberately free of every dependency, tauri and serde included: the rules
 //! below are the whole fix, and they have to be provable on a real Arch and a
@@ -120,50 +122,6 @@ pub fn detect(p: &Probes) -> InstallKind {
     InstallKind::Unknown
 }
 
-/// True when the file sits in the system tree a package manager owns. Only
-/// used for the wording of the hint: `detect` answers Unknown either way.
-pub fn is_under_usr(exe: &Path) -> bool {
-    exe.starts_with("/usr")
-}
-
-/// What we tell the user, in English, as a fallback for anything the frontend
-/// does not have its own sentence for.
-pub fn hint_for(kind: InstallKind, p: &Probes) -> String {
-    match kind {
-        InstallKind::Pacman => {
-            "Installed with pacman. Update it with your package manager, for example \
-             yay -Syu locally-uncensored-bin."
-                .to_string()
-        }
-        InstallKind::Deb => {
-            "Installed with dpkg. Installing the update runs a package install, and the \
-             system asks for your password."
-                .to_string()
-        }
-        InstallKind::Rpm => {
-            "Installed with rpm. Installing the update runs a package install, and the \
-             system asks for your password."
-                .to_string()
-        }
-        InstallKind::AppImage if p.exe_dir_writable => {
-            "Running as an AppImage. The update replaces the file in place.".to_string()
-        }
-        InstallKind::AppImage => format!(
-            "The AppImage sits in a folder you cannot write to ({}).",
-            p.exe_path.display()
-        ),
-        InstallKind::Msi => "Installed with the Windows installer.".to_string(),
-        InstallKind::Unknown if is_under_usr(&p.exe_path) => format!(
-            "{} is in the system folders and no package manager claims it. It was \
-             installed by a repackaged build or a script.",
-            p.exe_path.display()
-        ),
-        InstallKind::Unknown => {
-            "LU does not recognise how this copy was installed.".to_string()
-        }
-    }
-}
-
 /// What the frontend gets.
 #[derive(Debug, Clone)]
 pub struct Report {
@@ -172,7 +130,6 @@ pub struct Report {
     /// Whether the folder holding the executable can be written to. Only
     /// meaningful for the AppImage case, where the update is a file swap.
     pub writable: bool,
-    pub hint: String,
 }
 
 /// The whole answer for the machine we are on.
@@ -193,7 +150,6 @@ pub fn report() -> Report {
         kind,
         exe_path: probes.exe_path.to_string_lossy().to_string(),
         writable: probes.exe_dir_writable,
-        hint: hint_for(kind, &probes),
     }
 }
 
@@ -373,8 +329,7 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(detect(&p), InstallKind::Unknown);
-        assert!(is_under_usr(&p.exe_path));
-        assert!(hint_for(InstallKind::Unknown, &p).contains("no package manager claims it"));
+        assert!(p.exe_path.starts_with("/usr"));
     }
 
     #[test]
@@ -408,7 +363,6 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(detect(&p), InstallKind::AppImage);
-        assert!(hint_for(InstallKind::AppImage, &p).contains("replaces the file in place"));
     }
 
     #[test]
@@ -423,7 +377,6 @@ mod tests {
         };
         assert_eq!(detect(&p), InstallKind::AppImage);
         assert!(!p.exe_dir_writable);
-        assert!(hint_for(InstallKind::AppImage, &p).contains("/opt/LU.AppImage"));
     }
 
     #[test]
@@ -475,8 +428,7 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(detect(&p), InstallKind::Unknown);
-        assert!(!is_under_usr(&p.exe_path));
-        assert!(hint_for(InstallKind::Unknown, &p).contains("does not recognise"));
+        assert!(!p.exe_path.starts_with("/usr"));
     }
 
     #[test]

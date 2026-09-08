@@ -12,6 +12,8 @@ pub mod health;
 pub mod install;
 pub mod install_method;
 pub mod install_method_cmd;
+pub mod self_migrate;
+pub mod self_migrate_cmd;
 pub mod local_api;
 pub mod logging;
 pub mod media_cmds;

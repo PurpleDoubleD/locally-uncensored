@@ -20,6 +20,11 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = ["devtools", "tray-icon", "image-png"] }
 tauri-plugin-shell = "2"
 tauri-plugin-updater = "2"
+# The same signature check the updater plugin runs, for the one download the
+# plugin cannot do for us: the AppImage LU installs into the home folder when
+# it was repackaged by somebody else (commands/self_migrate.rs). Already in
+# Cargo.lock as a dependency of the plugin, so this adds no crate to the build.
+minisign-verify = "0.2"
 tauri-plugin-single-instance = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

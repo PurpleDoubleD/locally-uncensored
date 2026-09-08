@@ -2556,6 +2556,7 @@ dependencies = [
  "jsonwebtoken",
  "keyring",
  "local-ip-address",
+ "minisign-verify",
  "num_cpus",
  "once_cell",
  "qrcode",

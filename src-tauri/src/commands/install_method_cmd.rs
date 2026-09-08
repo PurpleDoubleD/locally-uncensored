@@ -24,6 +24,5 @@ pub async fn install_method() -> Result<serde_json::Value, String> {
         "kind": report.kind.as_str(),
         "exe_path": report.exe_path,
         "writable": report.writable,
-        "hint": report.hint,
     }))
 }
