@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Can You Run DeepSeek V4.1 Flash Locally? The Honest Hardware Math</title>
+<meta name="description" content="DeepSeek V4.1 Flash weights went public on 10 September 2026 under MIT. 510.3 GB of originals, 168.9 GB for the smallest quant on the Hub, and the runtime that does not exist yet.">
+<meta name="keywords" content="deepseek v4.1 flash locally, run deepseek v4.1, deepseek v4.1 hardware requirements, deepseek v4.1 vram, deepseek v4.1 gguf, deepseek v4.1 llama.cpp, deepseek v4.1 uncensored">
+<meta property="og:title" content="Can You Run DeepSeek V4.1 Flash Locally? The Honest Hardware Math">
+<meta property="og:description" content="510.3 GB of original weights, 168.9 GB for the smallest quant, and a runtime that is still a draft pull request. Real numbers, checked against the files.">
+<meta property="og:image" content="https://raw.githubusercontent.com/PurpleDoubleD/locally-uncensored/master/docs/social-preview.png">
+<meta property="og:url" content="https://locallyuncensored.com/blog/run-deepseek-v4-1-flash-locally.html">
+<meta property="og:type" content="article">
+<meta property="og:locale" content="en_US">
+<meta property="article:published_time" content="2026-09-10">
+<meta property="article:author" content="PurpleDoubleD">
+<meta property="article:tag" content="AI">
+<meta property="article:tag" content="DeepSeek V4.1 Flash">
+<meta property="article:tag" content="Guide">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Can You Run DeepSeek V4.1 Flash Locally? The Honest Hardware Math">
+<meta name="twitter:description" content="510.3 GB of original weights, 168.9 GB for the smallest quant, and a runtime that is still a draft pull request.">
+<meta name="twitter:image" content="https://raw.githubusercontent.com/PurpleDoubleD/locally-uncensored/master/docs/social-preview.png">
+<link rel="canonical" href="https://locallyuncensored.com/blog/run-deepseek-v4-1-flash-locally.html">
+<meta name="robots" content="index, follow">
+<meta name="theme-color" content="#0a0a0a">
+<link rel="icon" href="../favicon.png">
+<script type="application/ld+json">
+{"@context": "https://schema.org", "@type": "BlogPosting", "headline": "Can You Run DeepSeek V4.1 Flash Locally? The Honest Hardware Math", "description": "What DeepSeek V4.1 Flash needs in disk and memory, checked against the published files and the llama.cpp pull request rather than the announcement.", "image": "https://raw.githubusercontent.com/PurpleDoubleD/locally-uncensored/master/docs/social-preview.png", "datePublished": "2026-09-10", "dateModified": "2026-09-10", "inLanguage": "en", "author": {"@type": "Person", "name": "PurpleDoubleD", "url": "https://github.com/PurpleDoubleD"}, "publisher": {"@type": "Organization", "name": "Locally Uncensored", "url": "https://locallyuncensored.com/"}, "mainEntityOfPage": {"@type": "WebPage", "@id": "https://locallyuncensored.com/blog/run-deepseek-v4-1-flash-locally.html"}, "keywords": "deepseek v4.1 flash locally, run deepseek v4.1, deepseek v4.1 hardware requirements, deepseek v4.1 gguf, deepseek v4.1 llama.cpp"}
+</script>
+<script type="application/ld+json">
+{"@context": "https://schema.org", "@type": "FAQPage", "mainEntity": [{"@type": "Question", "name": "Can I run DeepSeek V4.1 Flash on a 24 GB graphics card?", "acceptedAnswer": {"@type": "Answer", "text": "No. The smallest published quantised build is 168.9 GB and every routed expert has to stay reachable, so a single consumer card is not the unit of measurement. Offloading to system RAM does not fix it at this size."}}, {"@type": "Question", "name": "Does DeepSeek V4.1 Flash work in llama.cpp or Ollama?", "acceptedAnswer": {"@type": "Answer", "text": "Not yet. Convert support is llama.cpp pull request 28696, opened on 10 September 2026 and still marked draft. Ollama follows llama.cpp, so it is downstream of that work."}}, {"@type": "Question", "name": "How big are the DeepSeek V4.1 Flash weights?", "acceptedAnswer": {"@type": "Answer", "text": "The original checkpoint is 510.3 GB across 48 safetensors shards, stored as FP8 with FP4 routed experts. Community quants published on the first day range from 168.9 GB for a mixed two bit GGUF to 238.8 GB for an MLX two bit build."}}, {"@type": "Question", "name": "Is DeepSeek V4.1 Flash open source?", "acceptedAnswer": {"@type": "Answer", "text": "The weights are MIT licensed, so commercial use, modification and redistribution are allowed. The training data and training code are not published, which makes it open weights rather than open source in the strict sense."}}, {"@type": "Question", "name": "How much memory does the one million token context need?", "acceptedAnswer": {"@type": "Answer", "text": "About 930 MB. DeepSeek puts the global KV cache at 890 bytes per token, so a full 1,048,576 token window is roughly 930 MB of cache. On this model the weights are the constraint, not the context."}}]}
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@200;300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/assets/lu.css">
+<script defer src="/assets/lu.js"></script>
+  <script data-goatcounter="https://lu-uncensored.goatcounter.com/count" async src="//gc.zgo.at/count.js"></script>
+</head>
+<body>
+
+<nav class="lu-nav">
+  <a class="lu-nav-brand" href="/" aria-label="Locally Uncensored">
+    <span class="lu-mono" data-mono="nav" data-size="40" aria-hidden="true"></span>
+    <span class="lu-nav-word">Locally <span class="accent">Uncensored</span></span>
+  </a>
+  <div class="lu-nav-links" id="lu-nav-links">
+    <a class="lu-nav-link" href="/">Home</a>
+    <a class="lu-nav-link" href="/blog/">Blog</a>
+    <a class="lu-nav-link" href="/guide/">Guide</a>
+    <a class="lu-nav-link" href="/remote-access/">Remote</a>
+  </div>
+  <div class="lu-nav-right">
+    <a class="lu-nav-icon" href="https://github.com/PurpleDoubleD/locally-uncensored" title="GitHub" aria-label="GitHub"><svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.37.5 0 5.87 0 12.5c0 5.3 3.44 9.8 8.21 11.39.6.11.82-.26.82-.58 0-.29-.01-1.04-.02-2.05-3.34.73-4.04-1.61-4.04-1.61-.55-1.39-1.33-1.76-1.33-1.76-1.09-.75.08-.73.08-.73 1.2.08 1.84 1.24 1.84 1.24 1.07 1.83 2.81 1.3 3.5.99.11-.78.42-1.3.76-1.6-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.13-.3-.54-1.52.11-3.18 0 0 1.01-.32 3.3 1.23a11.5 11.5 0 0 1 6.01 0c2.29-1.55 3.3-1.23 3.3-1.23.65 1.66.24 2.88.12 3.18.77.84 1.23 1.91 1.23 3.22 0 4.61-2.8 5.63-5.48 5.92.43.37.81 1.1.81 2.22 0 1.6-.01 2.9-.01 3.29 0 .32.21.7.82.58A12.01 12.01 0 0 0 24 12.5C24 5.87 18.63.5 12 .5Z"/></svg><span class="lu-nav-badge">1400+&#8202;⭐</span></a>
+    <a class="lu-nav-icon discord" href="https://locallyuncensored.com/discord" target="_blank" rel="noopener" title="Discord" aria-label="Discord"><svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M20.32 4.37A19.8 19.8 0 0 0 15.45 3c-.2.36-.44.85-.6 1.23a18.3 18.3 0 0 0-5.7 0c-.16-.38-.4-.87-.6-1.23a19.7 19.7 0 0 0-4.87 1.37C.55 8.9-.32 13.3.11 17.63a19.9 19.9 0 0 0 6 3.03c.48-.66.9-1.36 1.27-2.1-.7-.26-1.36-.58-1.99-.96.17-.12.33-.25.49-.38a14.2 14.2 0 0 0 12.24 0c.16.13.32.26.49.38-.63.38-1.3.7-2 .96.37.74.8 1.44 1.27 2.1a19.8 19.8 0 0 0 6-3.03c.5-5.03-.85-9.39-3.55-13.26ZM8.02 15c-1.18 0-2.15-1.09-2.15-2.42 0-1.34.95-2.43 2.15-2.43 1.2 0 2.17 1.09 2.15 2.43 0 1.33-.95 2.42-2.15 2.42Zm7.96 0c-1.18 0-2.15-1.09-2.15-2.42 0-1.34.95-2.43 2.15-2.43 1.2 0 2.17 1.09 2.15 2.43 0 1.33-.94 2.42-2.15 2.42Z"/></svg><span class="lu-nav-badge">700+&#8202;<span style="font-size:0.715em">🟢</span></span></a>
+    <span class="lu-nav-sep"></span>
+    <div class="switch" id="theme-switch" role="button" aria-label="Toggle theme"></div>
+    <a class="lu-nav-dl" href="https://github.com/PurpleDoubleD/locally-uncensored/releases/latest"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m0 0 4-4m-4 4-4-4"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>Download</a>
+    <button type="button" class="lu-nav-toggle" aria-label="Menu"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+  </div>
+</nav>
+<div class="container lu-doc">
+  <div class="breadcrumb"><a href="../">Locally Uncensored</a> / <a href="./">Blog</a> / This Post</div>
+
+      <div class="post-meta">
+    <span class="post-tag">Guide</span>
+    <span>September 10, 2026</span>
+    <span>&middot;</span>
+    <span>8 min read</span>
+  </div>
+
+  <article>
+    <h1>Can You Run DeepSeek V4.1 Flash Locally? The Honest Hardware Math</h1>
+
+    <p><strong>Short answer:</strong> not today, and the reason is not your graphics card. There are two walls. The smallest quantised build on the Hub right now is <strong>168.9 GB</strong>, and no released runtime can execute any of these files yet. The llama.cpp work is a draft pull request that opened on the same day as the weights.</p>
+
+    <p>That is the honest version. The rest of this page is the arithmetic behind it, checked against the actual files and the actual pull request rather than the announcement.</p>
+
+    <h2>What landed, and when</h2>
+
+    <p>DeepSeek published the weights for <strong>DeepSeek-V4.1-Flash</strong> on Hugging Face on <strong>10 September 2026 at 02:17 UTC</strong>, under the <strong>MIT licence</strong>, with no gate and no access form. That matters more than it sounds: MIT means commercial use, modification and redistribution without asking anyone.</p>
+
+    <p>The checkpoint is <strong>48 safetensors shards totalling 510.3 GB</strong>. It is not a plain FP8 dump either. The routed experts are stored at FP4 inside an otherwise FP8 checkpoint, which is why the file size does not divide neatly by the parameter count.</p>
+
+    <table>
+      <thead><tr><th></th><th>DeepSeek V4.1 Flash</th></tr></thead>
+      <tbody>
+        <tr><td>Backbone parameters</td><td>552 billion</td></tr>
+        <tr><td>Active per token</td><td>8 billion in prefill, 16 billion in decode</td></tr>
+        <tr><td>Experts</td><td>1 shared, 384 routed, 6 routed active</td></tr>
+        <tr><td>Context window</td><td>1,048,576 tokens</td></tr>
+        <tr><td>Original weights</td><td>510.3 GB across 48 files</td></tr>
+        <tr><td>Licence</td><td><strong>MIT</strong></td></tr>
+        <tr><td>Reads images</td><td><strong>Yes, natively</strong></td></tr>
+      </tbody>
+    </table>
+
+    <h2>The number that fools people</h2>
+
+    <p>Eight billion active parameters during prefill, sixteen billion during decode. Those figures are real and they are the point of the architecture, but they describe <em>compute per token</em>, not memory. Every one of the 552 billion backbone parameters has to be somewhere the model can reach, because the router picks a different six experts for the next token than it picked for this one.</p>
+
+    <p>There is a second store on top of that. DeepSeek calls it Engram, a conditional memory of <strong>196 billion parameters</strong> that is looked up sparsely by token. It is part of the checkpoint and it is not small.</p>
+
+    <p>So the rule from every other mixture of experts release holds here too: active parameters decide how fast it runs, resident weights decide whether it starts at all.</p>
+
+    <h2>What the quants actually weigh</h2>
+
+    <p>Community quantisation started within hours of the drop. These are measured file sizes from the Hub, added up per build, on the evening of 10 September 2026.</p>
+
+    <table>
+      <thead><tr><th>Build</th><th>Size</th><th>Notes</th></tr></thead>
+      <tbody>
+        <tr><td>Original, FP8 with FP4 experts</td><td>510.3 GB</td><td>48 shards, DeepSeek's own</td></tr>
+        <tr><td>MLX, 2 bit with MTP</td><td>238.8 GB</td><td>for Apple silicon</td></tr>
+        <tr><td>GGUF Q2_K</td><td>191.8 GB</td><td>7 shards</td></tr>
+        <tr><td>GGUF mixed, IQ2_XXS gate and up, Q2_K down</td><td><strong>168.9 GB</strong></td><td>smallest published so far</td></tr>
+      </tbody>
+    </table>
+
+    <p>The smallest of them averages 2.25 bits per weight across the routed experts. That is aggressive, and the author of that build says openly that it was quantised without an importance matrix, on a constant unit importance vector, as a memory bounded choice rather than a calibrated one. Two bit weights without calibration cost quality in ways that are hard to predict from the file size.</p>
+
+    <h2>The wall nobody puts in the headline</h2>
+
+    <p>You can download 168.9 GB. You cannot run it.</p>
+
+    <p>Support for this architecture lives in <strong>llama.cpp pull request 28696</strong>, titled "convert : add DeepSeek V4.1 (DeepseekV41ForCausalLM)". It opened on 10 September 2026 at 10:23 UTC, about eight hours after the weights, and at the time of writing it is <strong>still marked draft</strong> and not merged. Read the title carefully: it is a <em>convert</em> pull request. It teaches the converter how to turn the checkpoint into a GGUF. Being able to write the file and being able to execute it are two different pieces of work.</p>
+
+    <p>The person who published the mixed two bit build says the same thing in plainer words on the model card: it is a weights artifact, and no runtime has yet been shown to execute it end to end. That sentence is doing a lot of work, and it is the most useful sentence written about this model so far.</p>
+
+    <p>This is normal for day one. GLM-5.3-Flash sat behind an unmerged pull request for the same reason two weeks ago. It usually resolves in days or weeks. It has not resolved yet.</p>
+
+    <h2>One trap if you convert it yourself</h2>
+
+    <p>DeepSeek V4.1 stores its FP8 block scales in <strong>32 by 32</strong> blocks. DeepSeek V4 used <strong>128 by 128</strong>. If a converter carries the old value across, every weight in the model is silently rescaled. You do not get an error. You get a file that loads, runs, and produces confident nonsense, which is the worst failure mode there is because it looks like a model problem rather than a conversion problem.</p>
+
+    <p>If you see token soup out of a self converted build, check the block size before you blame the quant.</p>
+
+    <h2>What machine would hold it, when the runtime lands</h2>
+
+    <p>Take the 168.9 GB build as the floor. Weights are not the whole bill: you also need room for the context and for the runtime itself, so a machine with exactly 192 GB of unified memory is going to be uncomfortable and a 256 GB machine is the first honest fit. The 191.8 GB Q2_K build needs 256 GB outright. At four bit, which is where quality usually stops hurting, you are looking at something over 300 GB and there is no such build published yet.</p>
+
+    <p>The context is the one piece of good news, and it is a big one. The whole architecture exists to shrink the KV cache, and DeepSeek puts the global cache at <strong>890 bytes per token</strong>. A full million token context is therefore about <strong>930 MB</strong> of cache. On most large models the context is what kills the machine. Here it is a rounding error next to the weights.</p>
+
+    <h2>What to run locally instead, today</h2>
+
+    <p>If the goal is a capable model on hardware you own, these three actually run, and we have measured hardware pages for each:</p>
+
+    <ul>
+      <li><a href="run-glm-5-3-locally.html">GLM-5.3 Flash</a>, 93.1 GB at the smallest build, MIT, reads images.</li>
+      <li><a href="how-to-run-qwen-3-8-27b-locally.html">Qwen 3.8 27B</a>, 10.7 GB to 54.7 GB depending on the quant, Apache 2.0. This is the one that fits a single card.</li>
+      <li><a href="how-to-run-ling-3-0-flash-locally.html">Ling 3.0 Flash</a>, 27 GB at the smallest build, MIT, 5.1 billion active parameters.</li>
+    </ul>
+
+    <p><a href="../">Locally Uncensored</a> runs all three on Windows and Linux with nothing sent anywhere: the models sit on your disk, the chat stays in your machine, and there is no account in the way.</p>
+
+    <h2>And if you want this model in particular</h2>
+
+    <p>Then it is a hosted model for now, the same way Qwen 3.8 Max was for its first ten days. <a href="https://lu-labs.ai/pricing?src=lucv41">LU Labs Cloud</a> carries DeepSeek V4.1 Flash from 10 September, on every plan and on a credit pack with no subscription, alongside the rest of the chat catalogue. The Think switch stays on for this one, because we measured it and the off signal does not save anything: the model keeps reasoning and the monologue moves into the answer instead.</p>
+
+    <p>When the runtime lands, this page gets the numbers that matter: real tokens per second on real machines, not a table of file sizes.</p>
+
+    <h2>Questions people are actually asking</h2>
+
+    <h3>Can I run DeepSeek V4.1 Flash on a 24 GB graphics card?</h3>
+    <p>No. The smallest published build is 168.9 GB and every routed expert has to be reachable, so a single consumer card is not the unit of measurement here. Offloading to system RAM does not fix it either at this size.</p>
+
+    <h3>Does it work in llama.cpp or Ollama?</h3>
+    <p>Not yet. The convert support is llama.cpp pull request 28696, opened 10 September 2026 and still a draft. Ollama follows llama.cpp, so it is downstream of that work. Check the pull request before you rebuild anything, since this moves quickly.</p>
+
+    <h3>Is DeepSeek V4.1 Flash open source?</h3>
+    <p>The weights are MIT licensed, which is as permissive as these releases get: commercial use, modification and redistribution are all allowed. The training data and the training code are not published, so it is open weights rather than open source in the strict sense.</p>
+
+    <h3>Is there an uncensored version?</h3>
+    <p>Abliterated repositories appeared within hours of the drop, as they do for every notable release. They sit behind exactly the same wall as the official checkpoint: nothing can execute them yet. Judge them when there is a runtime and someone has actually measured refusal behaviour, not from a repository name.</p>
+
+    <h3>How much context can it really hold?</h3>
+    <p>One million tokens, and unusually for a model this size the context is not what stops you. The global KV cache is 890 bytes per token, so a full million token window is roughly 930 MB. The weights are the problem, not the window.</p>
+</article>
+
+  <div class="post-footer">
+    <p>Run the models that actually fit your machine, privately and uncensored.</p>
+    <a href="https://github.com/PurpleDoubleD/locally-uncensored" class="cta-btn" target="_blank">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z"/></svg>
+      Get Started on GitHub
+    </a>
+  </div>
+</div>
+
+<footer>
+  <div class="footer-row footer-meta"><span>&copy; 2026 &middot; Locally Uncensored &middot; AGPL-3.0</span></div>
+  <div class="footer-row footer-links">
+    <a href="https://locallyuncensored.com/blog/">Blog</a>
+    <a href="https://locallyuncensored.com/guide/">Guide</a>
+    <a href="https://locallyuncensored.com/remote-access/">Remote access</a>
+    <a href="https://locallyuncensored.com/discord" target="_blank" rel="noopener">Discord</a>
+    <a href="https://github.com/PurpleDoubleD/locally-uncensored">GitHub</a>
+    <a href="https://github.com/PurpleDoubleD/locally-uncensored/discussions">Discussions</a>
+    <a href="https://github.com/PurpleDoubleD/locally-uncensored/issues">Issues</a>
+    <a href="https://reddit.com/user/GroundbreakingMall54">Reddit</a>
+    <a href="https://www.linkedin.com/in/david-drobnitza-locallyuncensored/" rel="me noopener" target="_blank">LinkedIn</a>
+  </div>
+</footer>
+</body>
+</html>

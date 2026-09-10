@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DeepSeek V4.1 Flash Explained: 552B Backbone, 16B of Compute</title>
+<meta name="description" content="DeepSeek V4.1 Flash went open weight under MIT on 10 September 2026. The encoder decoder split, the 890 byte KV cache, the benchmark claims, and what we measured ourselves.">
+<meta name="keywords" content="deepseek v4.1 flash, deepseek v4.1 explained, deepseek v4.1 architecture, deepseek v4.1 benchmarks, deepseek v4.1 kv cache, deepseek v4.1 mit licence, deepseek open weight">
+<meta property="og:title" content="DeepSeek V4.1 Flash Explained: 552B Backbone, 16B of Compute">
+<meta property="og:description" content="A 552B mixture of experts that activates 8B in prefill and 16B in decode, with a KV cache of 890 bytes per token. MIT licensed.">
+<meta property="og:image" content="https://raw.githubusercontent.com/PurpleDoubleD/locally-uncensored/master/docs/social-preview.png">
+<meta property="og:url" content="https://locallyuncensored.com/blog/deepseek-v4-1-flash-explained.html">
+<meta property="og:type" content="article">
+<meta property="og:locale" content="en_US">
+<meta property="article:published_time" content="2026-09-10">
+<meta property="article:author" content="PurpleDoubleD">
+<meta property="article:tag" content="AI">
+<meta property="article:tag" content="DeepSeek V4.1 Flash">
+<meta property="article:tag" content="News">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="DeepSeek V4.1 Flash Explained: 552B Backbone, 16B of Compute">
+<meta name="twitter:description" content="A 552B mixture of experts that activates 8B in prefill and 16B in decode, with a KV cache of 890 bytes per token. MIT licensed.">
+<meta name="twitter:image" content="https://raw.githubusercontent.com/PurpleDoubleD/locally-uncensored/master/docs/social-preview.png">
+<link rel="canonical" href="https://locallyuncensored.com/blog/deepseek-v4-1-flash-explained.html">
+<meta name="robots" content="index, follow">
+<meta name="theme-color" content="#0a0a0a">
+<link rel="icon" href="../favicon.png">
+<script type="application/ld+json">
+{"@context": "https://schema.org", "@type": "BlogPosting", "headline": "DeepSeek V4.1 Flash Explained: 552B Backbone, 16B of Compute", "description": "The architecture, the KV cache arithmetic, the published benchmark table and our own measurements of DeepSeek V4.1 Flash, released open weight under MIT on 10 September 2026.", "image": "https://raw.githubusercontent.com/PurpleDoubleD/locally-uncensored/master/docs/social-preview.png", "datePublished": "2026-09-10", "dateModified": "2026-09-10", "inLanguage": "en", "author": {"@type": "Person", "name": "PurpleDoubleD", "url": "https://github.com/PurpleDoubleD"}, "publisher": {"@type": "Organization", "name": "Locally Uncensored", "url": "https://locallyuncensored.com/"}, "mainEntityOfPage": {"@type": "WebPage", "@id": "https://locallyuncensored.com/blog/deepseek-v4-1-flash-explained.html"}, "keywords": "deepseek v4.1 flash, deepseek v4.1 explained, deepseek v4.1 architecture, deepseek v4.1 benchmarks, deepseek v4.1 kv cache"}
+</script>
+<script type="application/ld+json">
+{"@context": "https://schema.org", "@type": "FAQPage", "mainEntity": [{"@type": "Question", "name": "What is DeepSeek V4.1 Flash?", "acceptedAnswer": {"@type": "Answer", "text": "A multimodal mixture of experts model with a 552 billion parameter backbone, released open weight under the MIT licence on 10 September 2026. It activates 8 billion parameters per token during prefill and 16 billion during decode, reads images natively, and supports a context of 1,048,576 tokens."}}, {"@type": "Question", "name": "What is new compared with DeepSeek V4 Flash?", "acceptedAnswer": {"@type": "Answer", "text": "The architecture changes rather than the size. A causal encoder decoder split lets the decoder project its global KV cache from the final encoder states, and FP4 KV caching plus a sparse indexing scheme bring the global cache down to 890 bytes per token, which DeepSeek states is about a quarter of DeepSeek V4 Flash. It also reads images, which V4 Flash did not."}}, {"@type": "Question", "name": "Can you turn the reasoning off?", "acceptedAnswer": {"@type": "Answer", "text": "Not in a way that saves money. The model card describes a continuously controllable reasoning effort from 1 to 100 rather than an off switch. We measured three runs of the same question with and without an off signal: with no signal the model answered in 42 output tokens with about 120 characters of separate reasoning, and with the off signal the reasoning field went empty while the turn grew to 51, 53 and 82 tokens, because the monologue moved into the answer instead."}}, {"@type": "Question", "name": "Is DeepSeek V4.1 Flash multimodal?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. A vision encoder trained from scratch and a two layer projector feed image embeddings into the language model from the start of pre-training. We confirmed it by sending three small images of different colours and reading back the correct colour each time."}}, {"@type": "Question", "name": "What licence is DeepSeek V4.1 Flash under?", "acceptedAnswer": {"@type": "Answer", "text": "MIT. Commercial use, modification and redistribution are permitted. The training data and training code are not published, so it is open weights rather than open source in the strict sense."}}]}
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@200;300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/assets/lu.css">
+<script defer src="/assets/lu.js"></script>
+  <script data-goatcounter="https://lu-uncensored.goatcounter.com/count" async src="//gc.zgo.at/count.js"></script>
+</head>
+<body>
+
+<nav class="lu-nav">
+  <a class="lu-nav-brand" href="/" aria-label="Locally Uncensored">
+    <span class="lu-mono" data-mono="nav" data-size="40" aria-hidden="true"></span>
+    <span class="lu-nav-word">Locally <span class="accent">Uncensored</span></span>
+  </a>
+  <div class="lu-nav-links" id="lu-nav-links">
+    <a class="lu-nav-link" href="/">Home</a>
+    <a class="lu-nav-link" href="/blog/">Blog</a>
+    <a class="lu-nav-link" href="/guide/">Guide</a>
+    <a class="lu-nav-link" href="/remote-access/">Remote</a>
+  </div>
+  <div class="lu-nav-right">
+    <a class="lu-nav-icon" href="https://github.com/PurpleDoubleD/locally-uncensored" title="GitHub" aria-label="GitHub"><svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.37.5 0 5.87 0 12.5c0 5.3 3.44 9.8 8.21 11.39.6.11.82-.26.82-.58 0-.29-.01-1.04-.02-2.05-3.34.73-4.04-1.61-4.04-1.61-.55-1.39-1.33-1.76-1.33-1.76-1.09-.75.08-.73.08-.73 1.2.08 1.84 1.24 1.84 1.24 1.07 1.83 2.81 1.3 3.5.99.11-.78.42-1.3.76-1.6-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.13-.3-.54-1.52.11-3.18 0 0 1.01-.32 3.3 1.23a11.5 11.5 0 0 1 6.01 0c2.29-1.55 3.3-1.23 3.3-1.23.65 1.66.24 2.88.12 3.18.77.84 1.23 1.91 1.23 3.22 0 4.61-2.8 5.63-5.48 5.92.43.37.81 1.1.81 2.22 0 1.6-.01 2.9-.01 3.29 0 .32.21.7.82.58A12.01 12.01 0 0 0 24 12.5C24 5.87 18.63.5 12 .5Z"/></svg><span class="lu-nav-badge">1400+&#8202;⭐</span></a>
+    <a class="lu-nav-icon discord" href="https://locallyuncensored.com/discord" target="_blank" rel="noopener" title="Discord" aria-label="Discord"><svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M20.32 4.37A19.8 19.8 0 0 0 15.45 3c-.2.36-.44.85-.6 1.23a18.3 18.3 0 0 0-5.7 0c-.16-.38-.4-.87-.6-1.23a19.7 19.7 0 0 0-4.87 1.37C.55 8.9-.32 13.3.11 17.63a19.9 19.9 0 0 0 6 3.03c.48-.66.9-1.36 1.27-2.1-.7-.26-1.36-.58-1.99-.96.17-.12.33-.25.49-.38a14.2 14.2 0 0 0 12.24 0c.16.13.32.26.49.38-.63.38-1.3.7-2 .96.37.74.8 1.44 1.27 2.1a19.8 19.8 0 0 0 6-3.03c.5-5.03-.85-9.39-3.55-13.26ZM8.02 15c-1.18 0-2.15-1.09-2.15-2.42 0-1.34.95-2.43 2.15-2.43 1.2 0 2.17 1.09 2.15 2.43 0 1.33-.95 2.42-2.15 2.42Zm7.96 0c-1.18 0-2.15-1.09-2.15-2.42 0-1.34.95-2.43 2.15-2.43 1.2 0 2.17 1.09 2.15 2.43 0 1.33-.94 2.42-2.15 2.42Z"/></svg><span class="lu-nav-badge">700+&#8202;<span style="font-size:0.715em">🟢</span></span></a>
+    <span class="lu-nav-sep"></span>
+    <div class="switch" id="theme-switch" role="button" aria-label="Toggle theme"></div>
+    <a class="lu-nav-dl" href="https://github.com/PurpleDoubleD/locally-uncensored/releases/latest"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m0 0 4-4m-4 4-4-4"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>Download</a>
+    <button type="button" class="lu-nav-toggle" aria-label="Menu"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+  </div>
+</nav>
+<div class="container lu-doc">
+  <div class="breadcrumb"><a href="../">Locally Uncensored</a> / <a href="./">Blog</a> / This Post</div>
+
+      <div class="post-meta">
+    <span class="post-tag">News</span>
+    <span>September 10, 2026</span>
+    <span>&middot;</span>
+    <span>7 min read</span>
+  </div>
+
+  <article>
+    <h1>DeepSeek V4.1 Flash Explained: 552B Backbone, 16B of Compute</h1>
+
+    <p>DeepSeek put the weights for <strong>DeepSeek-V4.1-Flash</strong> on Hugging Face on <strong>10 September 2026 at 02:17 UTC</strong>, under the <strong>MIT licence</strong>, ungated. It is a multimodal mixture of experts with a <strong>552 billion parameter backbone</strong> and a context window of <strong>1,048,576 tokens</strong>.</p>
+
+    <p>The headline number is not the parameter count. It is <strong>890 bytes</strong>.</p>
+
+    <h2>The problem this model is built around</h2>
+
+    <p>Long context work has a cost that most benchmark tables hide. Every token you feed a transformer leaves behind a key and value entry that has to stay in memory for as long as the conversation lives. On an agent that reads a repository, runs a command, reads the output and does it again for two hundred steps, that cache is the bill. The weights are a fixed cost you pay once. The cache grows all day.</p>
+
+    <p>DeepSeek states the global KV cache for V4.1 Flash at <strong>890 bytes per token</strong>. Their own figure puts that at roughly a quarter of DeepSeek V4 Flash and roughly one four hundred and thirty seventh of DeepSeek V1. In practical terms, a full million token context costs about <strong>930 MB</strong> of cache. That is the release.</p>
+
+    <h2>How they got there</h2>
+
+    <p>Three pieces do the work, and they are worth naming because they are unusual.</p>
+
+    <p><strong>A causal encoder decoder.</strong> The 40 layer transformer is split into a 20 layer causal encoder followed by a 20 layer decoder. The decoder does not derive its global KV cache from each of its own layers. It projects it from the final encoder hidden states. One projection instead of twenty caches, which is also why the prefill pass activates only 8 billion parameters against 16 billion in decode.</p>
+
+    <p><strong>Compressed Sparse Attention 2.</strong> Every attention layer is assigned one of three static modes, called Full, Reindex and Reuse, so layers share main KV and indexer keys instead of each keeping its own. In the decoder a hierarchical sparse indexer restricts the later indexing layers to a candidate pool built by the first Full mode layer, which stops indexing cost from growing with context length.</p>
+
+    <p><strong>FP4 for the cache itself.</strong> The main KV cache is stored in E2M1 with one E4M3 scale per sixteen channels. Four bit weights are common now. Four bit cache is not.</p>
+
+    <p>Two more parts sit alongside. <strong>SWA Bounded Replay</strong> rebuilds missing sliding window states by replaying the most recent tokens rather than persisting them, which DeepSeek says cuts the persistent footprint to about an eighth of V4 Flash. And <strong>Engram</strong>, a conditional memory of 196 billion parameters that is looked up sparsely per token, sits outside the expert routing entirely.</p>
+
+    <p>The mixture itself is 1 shared expert and 384 routed experts per layer, with 6 routed experts active per token.</p>
+
+    <h2>It reads images, and that is new for this line</h2>
+
+    <p>A vision encoder called DeepSeek-ViT, trained from scratch with 2D rotary embeddings and 3 by 3 pixel unshuffle downsampling, feeds a two layer projector. Image embeddings join text embeddings from the beginning of language model pre-training rather than being bolted on afterwards. DeepSeek V4 Flash 0731 returned an error on image input. This one does not.</p>
+
+    <p>We checked rather than assumed: three eight by eight images of different colours, one question each, and it named red, blue and green correctly.</p>
+
+    <h2>What the benchmark table says</h2>
+
+    <p>These are DeepSeek's own published numbers, run at maximum reasoning effort, and they should be read the way any vendor table is read. What makes them interesting is the shape rather than the size.</p>
+
+    <table>
+      <thead><tr><th>Benchmark</th><th>V4 Flash</th><th>V4 Pro</th><th>V4.1 Flash</th><th>Best in table</th></tr></thead>
+      <tbody>
+        <tr><td>Terminal-Bench 2.1</td><td>82.7</td><td>87.9</td><td><strong>90.6</strong></td><td>V4.1 Flash</td></tr>
+        <tr><td>DeepSWE v1.1 resolved</td><td>54.4</td><td>62.7</td><td><strong>74.2</strong></td><td>V4.1 Flash</td></tr>
+        <tr><td>Codeforces rating</td><td>3289</td><td>3348</td><td><strong>3471</strong></td><td>V4.1 Flash</td></tr>
+        <tr><td>Agent's Last Exam</td><td>25.2</td><td>25.7</td><td><strong>31.8</strong></td><td>V4.1 Flash</td></tr>
+        <tr><td>AutomationBench</td><td>37.7</td><td>43.2</td><td><strong>54.8</strong></td><td>V4.1 Flash</td></tr>
+        <tr><td>GPQA Diamond</td><td>89.9</td><td>92.4</td><td>90.9</td><td>GPT-5.6 Sol, 94.1</td></tr>
+        <tr><td>Terminal-Bench 4.0</td><td>7.0</td><td>12.4</td><td>31.2</td><td>Opus-5.0, 51.8</td></tr>
+        <tr><td>Humanity's Last Exam</td><td>37.8</td><td>42.7</td><td>36.8</td><td>Opus-5.0, 56.3</td></tr>
+      </tbody>
+    </table>
+
+    <p>The pattern is consistent across the full table. On agentic work, the long horizon tasks where the context keeps growing, V4.1 Flash takes the top row repeatedly against models with far more active compute. On single shot reasoning it does not, and it is slightly behind its own V4 Pro sibling on GPQA Diamond and on Humanity's Last Exam.</p>
+
+    <p>That is exactly what you would expect from a model whose innovation is the cache rather than the brain. Give it a task where the cache is the bottleneck and it wins. Ask it one hard question and the architecture has nothing to contribute.</p>
+
+    <h2>The reasoning dial, and what it does in practice</h2>
+
+    <p>The model card describes a <strong>continuously controllable reasoning effort from 1 to 100</strong>. Not a switch, a dial. Every instruct benchmark above was run at 100.</p>
+
+    <p>That design choice has a consequence people will meet through OpenAI compatible APIs, where the convention is a coarse setting with an off position. We measured it, three runs of the same question, before putting the model in front of anyone:</p>
+
+    <ul>
+      <li>With no signal: 42 output tokens, about 120 characters of separate reasoning, correct answer, every run.</li>
+      <li>Told to stop reasoning: the separate reasoning field came back empty, and the turn grew to 51, 53 and 82 output tokens across three runs.</li>
+    </ul>
+
+    <p>The off signal did not stop the thinking. It stopped the thinking from being labelled, and the monologue landed in the answer instead. A user who presses that switch expecting a cheaper turn gets a dearer one and a worse looking reply. So on <a href="https://lu-labs.ai/pricing?src=lucv41x">our own cloud</a> the Think switch stays locked on for this model, and the tooltip does not promise a saving that does not exist.</p>
+
+    <p>None of that is a fault in the model. It is what happens when a 1 to 100 dial is squeezed into an on and off button somewhere downstream.</p>
+
+    <h2>The licence</h2>
+
+    <p>MIT, ungated, no access form. Commercial use, modification and redistribution are all allowed. Training data and training code are not published, so this is open weights rather than open source in the strict sense, which is the same footing as GLM-5.3 Flash and Ling 3.0 Flash.</p>
+
+    <h2>Can you run it</h2>
+
+    <p>Not this week, unless something changes. The checkpoint is 510.3 GB, the smallest community quant on the Hub is 168.9 GB, and llama.cpp support is still an unmerged draft pull request opened on the day of the release. The arithmetic, the measured quant sizes and the one conversion trap that produces silent nonsense are in the companion piece: <a href="run-deepseek-v4-1-flash-locally.html">Can You Run DeepSeek V4.1 Flash Locally? The Honest Hardware Math</a>.</p>
+
+    <p>If you want to try the model itself in the meantime, <a href="https://lu-labs.ai/pricing?src=lucv41">LU Labs Cloud</a> has carried it since the day it dropped, on every plan and on a credit pack without a subscription. And if you would rather run models on your own machine with nothing leaving it, that is what <a href="../">Locally Uncensored</a> is for.</p>
+</article>
+
+  <div class="post-footer">
+    <p>Run the models that actually fit your machine, privately and uncensored.</p>
+    <a href="https://github.com/PurpleDoubleD/locally-uncensored" class="cta-btn" target="_blank">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z"/></svg>
+      Get Started on GitHub
+    </a>
+  </div>
+</div>
+
+<footer>
+  <div class="footer-row footer-meta"><span>&copy; 2026 &middot; Locally Uncensored &middot; AGPL-3.0</span></div>
+  <div class="footer-row footer-links">
+    <a href="https://locallyuncensored.com/blog/">Blog</a>
+    <a href="https://locallyuncensored.com/guide/">Guide</a>
+    <a href="https://locallyuncensored.com/remote-access/">Remote access</a>
+    <a href="https://locallyuncensored.com/discord" target="_blank" rel="noopener">Discord</a>
+    <a href="https://github.com/PurpleDoubleD/locally-uncensored">GitHub</a>
+    <a href="https://github.com/PurpleDoubleD/locally-uncensored/discussions">Discussions</a>
+    <a href="https://github.com/PurpleDoubleD/locally-uncensored/issues">Issues</a>
+    <a href="https://reddit.com/user/GroundbreakingMall54">Reddit</a>
+    <a href="https://www.linkedin.com/in/david-drobnitza-locallyuncensored/" rel="me noopener" target="_blank">LinkedIn</a>
+  </div>
+</footer>
+</body>
+</html>
