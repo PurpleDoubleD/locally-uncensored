@@ -61,12 +61,17 @@
 <link rel="stylesheet" href="/assets/lu.css">
 <script defer src="/assets/lu.js"></script>
   <script data-goatcounter="https://lu-uncensored.goatcounter.com/count" async src="//gc.zgo.at/count.js"></script>
+<link rel="stylesheet" href="/assets/home.css">
+<script defer src="/assets/home-motion.js"></script>
 </head>
-<body>
+<body class="hp">
+<script>document.documentElement.classList.add("js")</script>
+<div class="lu-bg hp-bg" aria-hidden="true"><i class="hp-glow g1"></i><i class="hp-glow g2"></i><i class="hp-glow g3"></i></div>
+<div class="lu-atmosphere" aria-hidden="true"></div>
 
 <nav class="lu-nav">
   <a class="lu-nav-brand" href="#" aria-label="Locally Uncensored">
-    <span class="lu-mono" data-mono="nav" data-size="44" aria-hidden="true"></span>
+    <svg class="hp-mark" viewBox="176 176 672 672" aria-hidden="true"><defs><linearGradient id="hp-mark-g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#a78bfa"/><stop offset="1" stop-color="#8b5cf6"/></linearGradient></defs><rect x="193" y="193" width="638" height="638" rx="138" ry="138" fill="none" stroke="url(#hp-mark-g)" stroke-width="44"/><path fill="url(#hp-mark-g)" d="M302,342 H377 V612 H433.6 A162,162 0 0,0 500.5,680 H302 Z"/><path fill="url(#hp-mark-g)" d="M434,342 H508 V545 A69,69 0 0,0 646,545 V342 H722 V537.5 A144,144 0 0,1 434,537.5 Z"/></svg>
     <span class="lu-nav-word">Locally <span class="accent">Uncensored</span></span>
   </a>
   <div class="lu-nav-links" id="lu-nav-links">
@@ -79,8 +84,8 @@
     <a class="lu-nav-link" href="#faq">FAQ</a>
   </div>
   <div class="lu-nav-right">
-    <a class="lu-nav-icon" href="https://github.com/PurpleDoubleD/locally-uncensored" title="GitHub" aria-label="GitHub"><svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.37.5 0 5.87 0 12.5c0 5.3 3.44 9.8 8.21 11.39.6.11.82-.26.82-.58 0-.29-.01-1.04-.02-2.05-3.34.73-4.04-1.61-4.04-1.61-.55-1.39-1.33-1.76-1.33-1.76-1.09-.75.08-.73.08-.73 1.2.08 1.84 1.24 1.84 1.24 1.07 1.83 2.81 1.3 3.5.99.11-.78.42-1.3.76-1.6-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.13-.3-.54-1.52.11-3.18 0 0 1.01-.32 3.3 1.23a11.5 11.5 0 0 1 6.01 0c2.29-1.55 3.3-1.23 3.3-1.23.65 1.66.24 2.88.12 3.18.77.84 1.23 1.91 1.23 3.22 0 4.61-2.8 5.63-5.48 5.92.43.37.81 1.1.81 2.22 0 1.6-.01 2.9-.01 3.29 0 .32.21.7.82.58A12.01 12.01 0 0 0 24 12.5C24 5.87 18.63.5 12 .5Z"/></svg><span class="lu-nav-badge">1600+&#8202;⭐</span></a>
-    <a class="lu-nav-icon discord" href="https://locallyuncensored.com/discord" target="_blank" rel="noopener" title="Discord" aria-label="Discord"><svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M20.32 4.37A19.8 19.8 0 0 0 15.45 3c-.2.36-.44.85-.6 1.23a18.3 18.3 0 0 0-5.7 0c-.16-.38-.4-.87-.6-1.23a19.7 19.7 0 0 0-4.87 1.37C.55 8.9-.32 13.3.11 17.63a19.9 19.9 0 0 0 6 3.03c.48-.66.9-1.36 1.27-2.1-.7-.26-1.36-.58-1.99-.96.17-.12.33-.25.49-.38a14.2 14.2 0 0 0 12.24 0c.16.13.32.26.49.38-.63.38-1.3.7-2 .96.37.74.8 1.44 1.27 2.1a19.8 19.8 0 0 0 6-3.03c.5-5.03-.85-9.39-3.55-13.26ZM8.02 15c-1.18 0-2.15-1.09-2.15-2.42 0-1.34.95-2.43 2.15-2.43 1.2 0 2.17 1.09 2.15 2.43 0 1.33-.95 2.42-2.15 2.42Zm7.96 0c-1.18 0-2.15-1.09-2.15-2.42 0-1.34.95-2.43 2.15-2.43 1.2 0 2.17 1.09 2.15 2.43 0 1.33-.94 2.42-2.15 2.42Z"/></svg><span class="lu-nav-badge">800+&#8202;<span style="font-size:0.715em">🟢</span></span></a>
+    <a class="lu-nav-icon" href="https://github.com/PurpleDoubleD/locally-uncensored" title="GitHub" aria-label="GitHub"><svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.37.5 0 5.87 0 12.5c0 5.3 3.44 9.8 8.21 11.39.6.11.82-.26.82-.58 0-.29-.01-1.04-.02-2.05-3.34.73-4.04-1.61-4.04-1.61-.55-1.39-1.33-1.76-1.33-1.76-1.09-.75.08-.73.08-.73 1.2.08 1.84 1.24 1.84 1.24 1.07 1.83 2.81 1.3 3.5.99.11-.78.42-1.3.76-1.6-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.13-.3-.54-1.52.11-3.18 0 0 1.01-.32 3.3 1.23a11.5 11.5 0 0 1 6.01 0c2.29-1.55 3.3-1.23 3.3-1.23.65 1.66.24 2.88.12 3.18.77.84 1.23 1.91 1.23 3.22 0 4.61-2.8 5.63-5.48 5.92.43.37.81 1.1.81 2.22 0 1.6-.01 2.9-.01 3.29 0 .32.21.7.82.58A12.01 12.01 0 0 0 24 12.5C24 5.87 18.63.5 12 .5Z"/></svg><span class="lu-nav-badge">1700+&#8202;⭐</span></a>
+    <a class="lu-nav-icon discord" href="https://locallyuncensored.com/discord" target="_blank" rel="noopener" title="Discord" aria-label="Discord"><svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M20.32 4.37A19.8 19.8 0 0 0 15.45 3c-.2.36-.44.85-.6 1.23a18.3 18.3 0 0 0-5.7 0c-.16-.38-.4-.87-.6-1.23a19.7 19.7 0 0 0-4.87 1.37C.55 8.9-.32 13.3.11 17.63a19.9 19.9 0 0 0 6 3.03c.48-.66.9-1.36 1.27-2.1-.7-.26-1.36-.58-1.99-.96.17-.12.33-.25.49-.38a14.2 14.2 0 0 0 12.24 0c.16.13.32.26.49.38-.63.38-1.3.7-2 .96.37.74.8 1.44 1.27 2.1a19.8 19.8 0 0 0 6-3.03c.5-5.03-.85-9.39-3.55-13.26ZM8.02 15c-1.18 0-2.15-1.09-2.15-2.42 0-1.34.95-2.43 2.15-2.43 1.2 0 2.17 1.09 2.15 2.43 0 1.33-.95 2.42-2.15 2.42Zm7.96 0c-1.18 0-2.15-1.09-2.15-2.42 0-1.34.95-2.43 2.15-2.43 1.2 0 2.17 1.09 2.15 2.43 0 1.33-.94 2.42-2.15 2.42Z"/></svg><span class="lu-nav-badge">900+&#8202;<span style="font-size:0.715em">🟢</span></span></a>
     <a class="he-cta" href="/pricing/" aria-label="LU Cloud plans and what they include"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/></svg>Cloud</a>
     <span class="lu-nav-sep"></span>
     <div class="switch" id="theme-switch" role="button" aria-label="Toggle theme"></div>
@@ -91,17 +96,17 @@
   </div>
 </nav>
 
-<header class="lu-hero">
-  <span class="lu-mono lu-hero-mono" data-mono="hero" data-size="164" aria-hidden="true"></span>
-  <h1 class="mast-title"><span class="accent">Uncensored&nbsp;AI</span>, on your PC or online</h1>
-  <p class="mast-kicker"><span>Locally Uncensored, the plug-and-play AI studio</span><span class="k-dot">·</span><span>Chat · Code · Image · Video · Remote</span></p>
-  <p class="section-lead mast-lede">An uncensored AI answers the question instead of refusing it. You can run one free on your own PC, or open it in a browser when the GPU is not there. Read <a href="/uncensored-ai/">what uncensored AI means here</a>.</p>
-</header>
+<!-- ── HERO: headline, the download card, then the studio as a live reel ── -->
+<header class="lu-hero hx">
+  <div class="hx-grid" aria-hidden="true"></div>
+  <a class="hx-pill" href="/pricing/"><i class="hx-live" aria-hidden="true"></i><b>LU Cloud is live</b><span class="hx-pill-sub">No GPU? Run it in your browser</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
+  <h1 class="mast-title hx-title"><span class="accent hx-rx">Uncensored&nbsp;AI</span>,<br class="hx-br"> on your PC or online</h1>
+  <p class="mast-kicker hx-kicker"><span>Locally Uncensored, the plug-and-play AI studio</span><span class="k-dot">·</span><span>Chat · Code · Image · Video · Remote</span></p>
+  <p class="section-lead mast-lede hx-lede">An uncensored AI answers the question instead of refusing it. You can run one free on your own PC, or open it in a browser when the GPU is not there. Read <a href="/uncensored-ai/">what uncensored AI means here</a>.</p>
 
-<!-- ── HERO (just the download banner, directly under masthead) ─ -->
-<section class="hero">
-  <div class="container">
-    <div class="dl-card">
+  <div class="hx-dl">
+    <div class="dl-card dl-card--xl">
+      <span class="dl-win" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 5.5 10.5 4.4v7.1H3zM11.5 4.3 21 3v8.5h-9.5zM3 12.5h7.5v7.1L3 18.5zM11.5 12.5H21V21l-9.5-1.3z"/></svg></span>
       <div class="dl-info">
         <h3>Locally Uncensored <em>&middot; 3.0.2</em></h3>
         <p>v3.0.2 &middot; WINDOWS &middot; ~14 MB installer &middot; 90,000+ DOWNLOADS</p>
@@ -111,23 +116,185 @@
         Download .exe
       </a>
     </div>
-    <div class="dl-alts">
-      <a href="#whats-new">New in 3.0.1</a>
-      <a href="https://locallyuncensored.com/discord" target="_blank" rel="noopener">Join Discord</a>
-      <a href="https://github.com/PurpleDoubleD/locally-uncensored/releases">All releases</a>
-      <a href="https://github.com/PurpleDoubleD/locally-uncensored">Source on GitHub</a>
-      <a href="https://github.com/PurpleDoubleD/locally-uncensored/discussions">Discussions</a>
-      <a href="https://github.com/PurpleDoubleD/locally-uncensored/blob/master/SECURITY.md#antivirus--browser-false-positives">Antivirus warning?</a>
+    <p class="hx-alt">Free and open source. On Linux, take the <a href="https://github.com/PurpleDoubleD/locally-uncensored/releases/latest">AppImage or a package from GitHub</a>. No GPU, or on a Mac? <a href="/pricing/">Use LU Cloud</a>.</p>
+  </div>
+  <div class="dl-alts">
+    <a href="#whats-new">New in 3.0.1</a>
+    <a href="https://locallyuncensored.com/discord" target="_blank" rel="noopener">Join Discord</a>
+    <a href="https://github.com/PurpleDoubleD/locally-uncensored/releases">All releases</a>
+    <a href="https://github.com/PurpleDoubleD/locally-uncensored">Source on GitHub</a>
+    <a href="https://github.com/PurpleDoubleD/locally-uncensored/discussions">Discussions</a>
+    <a href="https://github.com/PurpleDoubleD/locally-uncensored/blob/master/SECURITY.md#antivirus--browser-false-positives">Antivirus warning?</a>
+  </div>
+</header>
+
+<section class="hx-reel" id="content-start" aria-labelledby="reel-h">
+  <div class="hx-reel-in">
+    <div class="reel-bar">
+      <div class="reel-t">
+        <h2 class="reel-h" id="reel-h">Generate Anything. Locally. <em class="rx">Uncensored.</em></h2>
+        <span class="reel-k"><i aria-hidden="true"></i>Live demo · one character, start to finish</span>
+      </div>
+      <div class="mv-tabs" data-mv-for="mv-hero">
+        <button type="button" data-i="0"><span>01</span>Chat</button>
+        <button type="button" data-i="1"><span>02</span>Image</button>
+        <button type="button" data-i="2"><span>03</span>Video</button>
+        <button type="button" data-i="3"><span>04</span>Edit</button>
+        <button type="button" data-i="4"><span>05</span>Code</button>
+      </div>
     </div>
+    <figure class="mv mv--hero" id="mv-hero" data-mv="hero">
+      <div class="mv-box" data-nosnippet><div class="mv-clip"><div class="mv-stage" aria-hidden="true" translate="no"></div></div></div>
+      <div class="mv-ctl"><button type="button" class="mv-pp" aria-label="Pause demo"></button><div class="mv-track"><i class="mv-fill"></i></div><span class="mv-tc">0:00</span></div>
+      <figcaption class="sr-only">A sixteen second demo of the app: a chat invents a character, Create draws her, turns the picture into a video clip and edits the scene, and the Coding Agent puts the picture on a web page.</figcaption>
+    </figure>
+  </div>
+</section>
+
+<!-- ── PROOF STRIP ─────────────────────────────────────────── -->
+<div class="proof" aria-label="Locally Uncensored in numbers">
+  <div class="proof-row">
+    <span>90,000+ downloads</span><span>1700+ GitHub stars</span><span>Free and open source, AGPL-3.0</span><span>No telemetry</span><span>12 local backends detected for you</span><span>75+ one-click models</span><span>Windows and Linux</span><span>2,200+ automated checks</span>
+    <span aria-hidden="true">90,000+ downloads</span><span aria-hidden="true">1700+ GitHub stars</span><span aria-hidden="true">Free and open source, AGPL-3.0</span><span aria-hidden="true">No telemetry</span><span aria-hidden="true">12 local backends detected for you</span><span aria-hidden="true">75+ one-click models</span><span aria-hidden="true">Windows and Linux</span><span aria-hidden="true">2,200+ automated checks</span>
+  </div>
+</div>
+
+<!-- ── THE STUDIO: one explained mini video per job ────────── -->
+<section class="things hp-things" id="things">
+  <div class="container">
+    <div class="hp-head">
+      <p class="eyebrow">What you can do</p>
+      <h2>Not a chat app. <em class="rx">The whole studio.</em></h2>
+      <p class="section-lead">Real AI on your own computer. One installer, no command line, no Docker. Private, free, and yours. In local mode there is no account, no cloud and nobody watching.</p>
+    </div>
+
+    <article class="ft" id="chat">
+      <div class="ft-copy">
+        <span class="ft-num"><b>01</b> Chat</span>
+        <h3 class="ft-h">Like ChatGPT, <em>but yours.</em></h3>
+        <p>Ask anything and you get an answer instead of a lecture. Show it a photo, drop in a PDF, and it remembers what matters across chats. Ask for a picture and it draws one right in the conversation. The app finds and installs the right free model for your PC, so all you do is type.</p>
+        <ol class="mv-ch" data-mv-for="mv-chat">
+          <li><button type="button" data-i="0">Ask anything</button></li>
+          <li><button type="button" data-i="1">A filtered model refuses</button></li>
+          <li><button type="button" data-i="2">LU answers</button></li>
+          <li><button type="button" data-i="3">Ask for a picture</button></li>
+        </ol>
+        <div class="thing-tags"><span>Qwen 3.8</span><span>GPT-OSS</span><span>GLM-4.7</span><span>DeepSeek R1</span></div>
+      </div>
+      <figure class="mv" id="mv-chat" data-mv="chat">
+        <div class="mv-top"><span class="mv-live"><i></i>Live demo</span><span class="mv-name">Chat · no refusal</span></div>
+        <div class="mv-box" data-nosnippet><div class="mv-clip"><div class="mv-stage" aria-hidden="true" translate="no"></div></div></div>
+        <div class="mv-ctl"><button type="button" class="mv-pp" aria-label="Pause demo"></button><div class="mv-track"><i class="mv-fill"></i></div><span class="mv-tc">0:00</span></div>
+        <figcaption class="sr-only">Demo: a user asks for a disturbing horror scene. A typical filtered model refuses, Locally Uncensored writes it, then draws the character right in the chat.</figcaption>
+      </figure>
+    </article>
+
+    <article class="ft ft--flip" id="create">
+      <div class="ft-copy">
+        <span class="ft-num"><b>02</b> Create</span>
+        <h3 class="ft-h">Images and video <em>from a sentence.</em></h3>
+        <p>Type what you imagine and get a picture. Change it with words, cut it out, or turn it into a clip. Twelve modes share one tab, and everything you make lands in your own gallery. The app only offers what your computer can handle and installs each tool with one click.</p>
+        <div class="mv-modes" data-mv-for="mv-create">
+          <button type="button" data-i="0">Image</button><button type="button" data-i="1">Edit</button><button type="button" data-i="2">Cutout</button><button type="button" data-i="3">Enhance</button><button type="button" data-i="4">Erase</button><button type="button" data-i="5">Video</button><button type="button" data-i="6">Animate</button><button type="button" data-i="7">Character</button><button type="button" data-i="8">Lipsync</button><button type="button" data-i="9">Music</button><button type="button" data-i="10">Extend</button><button type="button" data-i="11">Motion</button>
+        </div>
+        <p class="ft-note">All twelve run on LU Cloud. Enhance and Erase need the cloud; the other ten also run on your own graphics card.</p>
+        <div class="thing-tags"><span>FLUX 2</span><span>Juggernaut XL</span><span>LTX 2.3</span><span>Wan 2.1</span></div>
+      </div>
+      <figure class="mv" id="mv-create" data-mv="create">
+        <div class="mv-top"><span class="mv-live"><i></i>Live demo</span><span class="mv-name">Create · 12 modes</span></div>
+        <div class="mv-box" data-nosnippet><div class="mv-clip"><div class="mv-stage" aria-hidden="true" translate="no"></div></div></div>
+        <div class="mv-ctl"><button type="button" class="mv-pp" aria-label="Pause demo"></button><div class="mv-track"><i class="mv-fill"></i></div><span class="mv-tc">0:00</span></div>
+        <figcaption class="sr-only">Demo: the Create tab runs through all twelve modes, from a new image and an edit to a cutout, a video clip, a talking character and a music track.</figcaption>
+      </figure>
+    </article>
+
+    <article class="ft" id="code">
+      <div class="ft-copy">
+        <span class="ft-num"><b>03</b> Code</span>
+        <h3 class="ft-h">It finds the bug <em>and shows you the fix.</em></h3>
+        <p>Point the Coding Agent at your project and describe the problem in plain words. It reads the files, says what it found, and shows every change as a diff before anything touches your code. Here it catches a temperature formula that is off by 0.15. It even runs on small models most PCs can handle.</p>
+        <ol class="mv-ch" data-mv-for="mv-code">
+          <li><button type="button" data-i="0">Describe the problem</button></li>
+          <li><button type="button" data-i="1">It reads your files</button></li>
+          <li><button type="button" data-i="2">You see the diff first</button></li>
+          <li><button type="button" data-i="3">Apply, then it tests</button></li>
+        </ol>
+        <div class="thing-tags"><span>Coding Agent</span><span>Claude Code</span><span>14 tools</span><span>MCP</span></div>
+      </div>
+      <figure class="mv" id="mv-code" data-mv="code">
+        <div class="mv-top"><span class="mv-live"><i></i>Live demo</span><span class="mv-name">Coding Agent · diff first</span></div>
+        <div class="mv-box" data-nosnippet><div class="mv-clip"><div class="mv-stage" aria-hidden="true" translate="no"></div></div></div>
+        <div class="mv-ctl"><button type="button" class="mv-pp" aria-label="Pause demo"></button><div class="mv-track"><i class="mv-fill"></i></div><span class="mv-tc">0:00</span></div>
+        <figcaption class="sr-only">Demo: the Coding Agent reads the source file, finds a conversion that adds 32.15 instead of 32, shows the one line diff, applies it and runs the tests.</figcaption>
+      </figure>
+    </article>
+
+    <article class="ft ft--flip" id="agent">
+      <div class="ft-copy">
+        <span class="ft-num"><b>04</b> Agent Mode</span>
+        <h3 class="ft-h">It stops talking <em>and starts doing.</em></h3>
+        <p>Give Agent Mode a goal and it picks its own tools. It searches the web, writes the files and runs each step while you watch. Ask for a website and you get one, built in a sandbox on your own machine.</p>
+        <ol class="mv-ch" data-mv-for="mv-agent">
+          <li><button type="button" data-i="0">Give it a goal</button></li>
+          <li><button type="button" data-i="1">It picks its tools</button></li>
+          <li><button type="button" data-i="2">It writes the files</button></li>
+          <li><button type="button" data-i="3">It runs the result</button></li>
+        </ol>
+        <div class="thing-tags"><span>web_search</span><span>file_write</span><span>shell_execute</span><span>delegate_task</span></div>
+      </div>
+      <figure class="mv" id="mv-agent" data-mv="agent">
+        <div class="mv-top"><span class="mv-live"><i></i>Live demo</span><span class="mv-name">Agent Mode · a website from one sentence</span></div>
+        <div class="mv-box" data-nosnippet><div class="mv-clip"><div class="mv-stage" aria-hidden="true" translate="no"></div></div></div>
+        <div class="mv-ctl"><button type="button" class="mv-pp" aria-label="Pause demo"></button><div class="mv-track"><i class="mv-fill"></i></div><span class="mv-tc">0:00</span></div>
+        <figcaption class="sr-only">Demo: Agent Mode gets one sentence about a bakery website, searches the web, writes index.html and style.css, and starts a local server while the page builds up next to it.</figcaption>
+      </figure>
+    </article>
+
+    <article class="ft" id="phone">
+      <div class="ft-copy">
+        <span class="ft-num"><b>05</b> Remote</span>
+        <h3 class="ft-h">Use it <em>from your phone.</em></h3>
+        <p>Your PC does the heavy lifting and your phone is the remote. Scan a QR code, type a 6-digit code, and chat, coding and tools are in your pocket, at home or on the road. Remote access stays off until you switch it on.</p>
+        <ol class="mv-ch" data-mv-for="mv-phone">
+          <li><button type="button" data-i="0">Scan the QR code</button></li>
+          <li><button type="button" data-i="1">Type the 6-digit code</button></li>
+          <li><button type="button" data-i="2">Your PC does the work</button></li>
+        </ol>
+        <div class="thing-tags"><span>LAN</span><span>tunnel</span><span>QR</span><span>mobile</span></div>
+      </div>
+      <figure class="mv" id="mv-phone" data-mv="phone">
+        <div class="mv-top"><span class="mv-live"><i></i>Live demo</span><span class="mv-name">Remote access · phone</span></div>
+        <div class="mv-box" data-nosnippet><div class="mv-clip"><div class="mv-stage" aria-hidden="true" translate="no"></div></div></div>
+        <div class="mv-ctl"><button type="button" class="mv-pp" aria-label="Pause demo"></button><div class="mv-track"><i class="mv-fill"></i></div><span class="mv-tc">0:00</span></div>
+        <figcaption class="sr-only">Demo: a phone scans the QR code on the PC, enters the 6-digit passcode and asks for a picture; the PC renders it and the phone shows the result.</figcaption>
+      </figure>
+    </article>
   </div>
 </section>
 
 <!-- ── CLOUD (same catalog, in a browser) ───────────────── -->
-<section class="models lu-cloud" id="cloud-online">
+<section class="models lu-cloud hp-cloud" id="cloud-online">
   <div class="container">
-    <p class="eyebrow">No GPU, or the wrong one</p>
-    <h2>Prefer not to buy a GPU? <em>The same catalog runs online</em></h2>
-    <p class="section-lead">The hosted side opens in a browser, which is also how it works on a Mac and on a phone, and it is paid from credit packs that start at 15 EUR, never expire and need no subscription.</p>
+    <div class="hp-head">
+      <p class="eyebrow">No GPU, or the wrong one</p>
+      <h2>Prefer not to buy a GPU? <em class="rx">The same catalog runs online</em></h2>
+      <p class="section-lead">The hosted side opens in a browser, which is also how it works on a Mac and on a phone, and it is paid from credit packs that start at 15 EUR, never expire and need no subscription.</p>
+    </div>
+    <div class="cl-split">
+      <figure class="mv" id="mv-cloud" data-mv="cloud">
+        <div class="mv-top"><span class="mv-live"><i></i>Explainer</span><span class="mv-name">Where your prompt runs</span></div>
+        <div class="mv-box" data-nosnippet><div class="mv-clip"><div class="mv-stage" aria-hidden="true" translate="no"></div></div></div>
+        <div class="mv-ctl"><button type="button" class="mv-pp" aria-label="Pause demo"></button><div class="mv-track"><i class="mv-fill"></i></div><span class="mv-tc">0:00</span></div>
+        <figcaption class="sr-only">Explainer: in local mode the prompt stays inside your PC and runs on your graphics card. Switched to LU Cloud, the same app sends it to hosted GPUs, so no graphics card is needed.</figcaption>
+      </figure>
+      <div class="cl-stats">
+        <div class="cl-stat"><b data-count="47">47</b><span>chat models online, every one of them in every plan and every pack</span></div>
+        <div class="cl-stat"><b><span data-count="24">24</span><small>/46</small></b><span>measured chat models answer without refusing, marked in the picker</span></div>
+        <div class="cl-stat"><b data-count="7">7</b><span>open image models, plus <em>14</em> open video models</span></div>
+        <div class="cl-stat"><b><small>&euro;</small><span data-count="19">19</span></b><span>a month for Hosted, or credit packs from 15 EUR that never expire</span></div>
+        <p class="cl-foot">We add no moderation layer of our own to text. For cloud image and video, your LU Cloud account has a content policy setting: Strict, Standard, or off.</p>
+      </div>
+    </div>
     <div class="lu-cloud-grid">
       <article class="lu-cloud-card">
         <h3>Uncensored AI chat online</h3>
@@ -153,73 +320,14 @@
   </div>
 </section>
 
-<!-- ── SCROLL ZONE (clickable arrow, between banner and content) ── -->
-<section class="scroll-zone">
-  <a href="#content-start" class="scroll-arrow" aria-label="Scroll to content">
-    <span class="arrow-line" aria-hidden="true"></span>
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
-    <span class="arrow-label">Explore</span>
-  </a>
-</section>
-
-<!-- ── TAGLINE (above first screenshot) ───────────────────── -->
-<section class="tagline" id="content-start">
-  <div class="container">
-    <h2>Generate Anything.<span class="t-sub">Locally. <span class="t-accent">Uncensored.</span></span></h2>
-    <p class="tagline-sub">Real AI on your own computer. One installer, no command line, no Docker &mdash; private, free, and yours. In local mode: no account, no cloud, nobody watching.</p>
-  </div>
-</section>
-
-<!-- ── SHOWCASE 1 ─────────────────────────────────────────── -->
-<section class="showcase">
-  <div class="showcase-inner">
-    <img src="screenshots/chat_generate_dark.webp" alt="Chat view drawing an image from a request, right in the conversation" class="showcase-img" loading="lazy">
-    <div class="showcase-cap">
-      <span>Everything you'd do in ChatGPT &mdash; ask anything, write, brainstorm, work with your own files and photos. Ask for a picture and it <em>draws one right in the chat</em>. Except in local mode it all stays on your computer: nothing sent to a company, nothing logged. The app even picks the right free AI for your PC, so you don't have to.</span>
-    </div>
-  </div>
-</section>
-
-<!-- ── FOUR THINGS ────────────────────────────────────────── -->
-<section class="things" id="things">
-  <div class="container">
-    <p class="eyebrow">What you can do</p>
-    <h2>Not a chat app. <em>The whole studio.</em></h2>
-    <div class="things-list">
-      <article class="thing">
-        <span class="thing-num">01</span>
-        <h3 class="thing-head"><em>Chat</em> &mdash; like ChatGPT, but yours.</h3>
-        <p>Ask anything. No limits, no sign-up, no one reading along. Show it a photo, drop in a PDF, and it remembers what matters across chats. You don't pick the tech &mdash; the app finds and installs the right free AI for you. You just type.</p>
-        <div class="thing-tags"><span>Qwen 3.8</span><span>GPT-OSS</span><span>GLM-4.7</span><span>DeepSeek R1</span></div>
-      </article>
-      <article class="thing">
-        <span class="thing-num">02</span>
-        <h3 class="thing-head"><em>Code</em> &mdash; it writes and fixes code for you.</h3>
-        <p>Tell it what you want in plain words. It opens your files, makes the changes, runs the steps, and shows its work as it goes. Great for small fixes, quick scripts, and &ldquo;why is this broken?&rdquo; &mdash; no separate coding app needed.</p>
-        <div class="thing-tags"><span>Coding Agent</span><span>Claude Code</span><span>14 tools</span><span>MCP</span></div>
-      </article>
-      <article class="thing">
-        <span class="thing-num">03</span>
-        <h3 class="thing-head"><em>Create</em> &mdash; images and videos from a sentence.</h3>
-        <p>Type what you imagine and get a picture. Turn a photo into a short video. It's all built in &mdash; no plugins to wire up, no confusing setup. The app installs each tool for you with one click.</p>
-        <div class="thing-tags"><span>FLUX 2</span><span>Juggernaut XL</span><span>LTX 2.3</span><span>Wan 2.1</span></div>
-      </article>
-      <article class="thing">
-        <span class="thing-num">04</span>
-        <h3 class="thing-head"><em>Use it from your phone.</em></h3>
-        <p>Your PC does the heavy lifting; your phone is just the remote. Scan a QR code, type a 6-digit code, and the whole thing &mdash; chat, coding, tools &mdash; is in your pocket, from anywhere.</p>
-        <div class="thing-tags"><span>LAN</span><span>tunnel</span><span>QR</span><span>mobile</span></div>
-      </article>
-    </div>
-  </div>
-</section>
-
 <!-- ── WHAT'S NEW (release highlights) ────────────────────── -->
-<section class="models" id="whats-new">
+<section class="models hp-new" id="whats-new">
   <div class="container">
-    <p class="eyebrow">New in 3.0.1</p>
-    <h2>One model <em>draws and edits</em>, and Linux stops tripping itself.</h2>
-    <p class="section-lead">3.0.1 is a correctness release with two additions. Qwen-Image 2.1 makes a picture from a prompt and edits one from a reference image, on your own card, on Windows and Linux. LoRAs get a tab of their own in Models. On the fixing side: a graphics card whose free memory could not be measured is planned more carefully instead of optimistically, the Linux AppImage stops handing its own runtime to every program LU starts, and the local engine answers one conversation at a time and says how many are waiting. Free as always, and the app updates itself.</p>
+    <div class="hp-head">
+      <p class="eyebrow">New in 3.0.1</p>
+      <h2>One model <em class="rx">draws and edits</em>, and Linux stops tripping itself.</h2>
+      <p class="section-lead">3.0.1 is a correctness release with two additions. Qwen-Image 2.1 makes a picture from a prompt and edits one from a reference image, on your own card, on Windows and Linux. LoRAs get a tab of their own in Models. On the fixing side: a graphics card whose free memory could not be measured is planned more carefully instead of optimistically, the Linux AppImage stops handing its own runtime to every program LU starts, and the local engine answers one conversation at a time and says how many are waiting. Free as always, and the app updates itself.</p>
+    </div>
     <div class="model-grid">
       <article class="model-card">
         <span class="model-type">CREATE</span>
@@ -262,79 +370,51 @@
   </div>
 </section>
 
-<!-- ── SHOWCASE 2 ─────────────────────────────────────────── -->
-<section class="showcase">
-  <div class="showcase-inner">
-    <img src="screenshots/create_gallery_dark.webp" alt="Create view making an image, with a gallery of past generations below" class="showcase-img" loading="lazy">
-    <div class="showcase-cap">
-      <span>The Create tab keeps it simple: pick a look, pick a size, hit go. <em>Make images, turn them into video</em> &mdash; and every piece you generate lands in your own gallery. It only offers the tools your computer can actually handle, and installs each one with a single click.</span>
-    </div>
-  </div>
-</section>
-
-<!-- ── MANIFESTO ──────────────────────────────────────────── -->
-<section class="manifesto">
-  <div class="narrow">
-    <p class="eyebrow">Why</p>
-    <h2>Made for people who want <em>their</em> AI on <em>their</em> machine.</h2>
-    <p>In local mode your chats never leave your computer. No subscription, no tracking, no limits &mdash; and no company reading along. Most local-AI apps stop at text chat; this one gives you <em>chat, code, images, and video</em> in one place, and your phone can run it from anywhere.</p>
-    <p>It's <strong>free</strong> and <strong>open source</strong> &mdash; anyone can check the code. Local wins for privacy and unlimited use; when you want a cloud model for the really hard stuff, you can plug your own in. Tested with <strong>2,200+ automated checks</strong> so it just works.</p>
-  </div>
-</section>
-
-<!-- ── SHOWCASE 3 ─────────────────────────────────────────── -->
-<section class="showcase">
-  <div class="showcase-inner">
-    <img src="screenshots/coding_review_dark.webp" alt="Coding Agent reviewing a file and pointing out a real bug" class="showcase-img" loading="lazy">
-    <div class="showcase-cap">
-      <span>Flip to the <em>Coding Agent</em> and point it at your project. Ask it to review, fix, or build &mdash; here it caught a real bug (a temperature formula off by 0.15) and explained the fix in plain words. It even runs on small, light models most PCs can handle.</span>
-    </div>
-  </div>
-</section>
-
-<!-- ── SHOWCASE 4 ─────────────────────────────────────────── -->
-<section class="showcase">
-  <div class="showcase-inner">
-    <img src="screenshots/agent_mode_dark.webp" alt="Agent Mode writing files on its own to build a website" class="showcase-img" loading="lazy">
-    <div class="showcase-cap">
-      <span>Turn on <em>Agent Mode</em> and it stops just talking and starts doing. Ask for a website and it writes the files, runs each step, and shows its work as it goes &mdash; safely, in a sandbox on your own machine.</span>
-    </div>
-  </div>
-</section>
-
 <!-- ── HOW IT WORKS ──────────────────────────────────────── -->
-<section class="how" id="how">
+<section class="how hp-how" id="how">
   <div class="container">
-    <p class="eyebrow">Setup</p>
-    <h2>Running in under <em>five minutes.</em></h2>
-    <p class="section-lead">No tech skills needed. No command line, no setup files &mdash; just install it like any normal app and you're chatting in minutes.</p>
-    <div class="steps">
-      <article class="step">
-        <span class="step-num">01 &middot; Install</span>
-        <h3>Download &amp; install.</h3>
-        <p>One file. Click it and install like any app. It keeps itself up to date. Free, forever.</p>
-      </article>
-      <article class="step">
-        <span class="step-num">02 &middot; Detect</span>
-        <h3>Wizard finds everything.</h3>
-        <p>On first start it checks what you've already got and sets it up for you. Nothing installed yet? It grabs the free AI engine for you in one click.</p>
-      </article>
-      <article class="step">
-        <span class="step-num">03 &middot; Run</span>
-        <h3>Chat. Code. Create.</h3>
-        <p>Pick an AI and start typing. Flip to coding, or to images and video, whenever you like. Want to add a cloud account later? One setting.</p>
-      </article>
+    <div class="hp-head">
+      <p class="eyebrow">Setup</p>
+      <h2>Running in under <em class="rx">five minutes.</em></h2>
+      <p class="section-lead">No tech skills needed. There is no command line and there are no setup files. Install it like any normal app and you're chatting in minutes.</p>
+    </div>
+    <div class="how-split">
+      <div class="steps" data-mv-for="mv-setup">
+        <article class="step" data-i="0" tabindex="0">
+          <span class="step-num">01 &middot; Install</span>
+          <h3>Download &amp; install.</h3>
+          <p>One file. Click it and install like any app. It keeps itself up to date. Free, forever.</p>
+        </article>
+        <article class="step" data-i="1" tabindex="0">
+          <span class="step-num">02 &middot; Detect</span>
+          <h3>Wizard finds everything.</h3>
+          <p>On first start it checks what you've already got and sets it up for you. Nothing installed yet? It grabs the free AI engine for you in one click.</p>
+        </article>
+        <article class="step" data-i="2" tabindex="0">
+          <span class="step-num">03 &middot; Run</span>
+          <h3>Chat. Code. Create.</h3>
+          <p>Pick an AI and start typing. Flip to coding, or to images and video, whenever you like. Want to add a cloud account later? One setting.</p>
+        </article>
+      </div>
+      <figure class="mv" id="mv-setup" data-mv="setup">
+        <div class="mv-top"><span class="mv-live"><i></i>Live demo</span><span class="mv-name">First start</span></div>
+        <div class="mv-box" data-nosnippet><div class="mv-clip"><div class="mv-stage" aria-hidden="true" translate="no"></div></div></div>
+        <div class="mv-ctl"><button type="button" class="mv-pp" aria-label="Pause demo"></button><div class="mv-track"><i class="mv-fill"></i></div><span class="mv-tc">0:00</span></div>
+        <figcaption class="sr-only">Demo: the installer runs, the first start wizard checks twelve local AI engines, and the app opens with a model that fits the PC.</figcaption>
+      </figure>
     </div>
     <p class="guide-link"><a href="https://locallyuncensored.com/guide/">The full handbook: install, first start, chat, agent, Create, Cloud &rarr;</a></p>
   </div>
 </section>
 
 <!-- ── MODELS ────────────────────────────────────────────── -->
-<section class="models" id="models">
+<section class="models hp-models" id="models">
   <div class="container">
-    <p class="eyebrow">Models</p>
-    <h2>The best <em>free AI</em>, for every job.</h2>
-    <p class="section-lead">Whatever you want to do &mdash; chat, make art, make videos &mdash; there's a free AI for it. The app installs them for you and only suggests the ones your computer can run. The big names are all here: <strong>Qwen</strong>, <strong>GPT-OSS</strong>, <strong>Llama 4</strong>, <strong>Gemma 4</strong>, <strong>DeepSeek</strong> and more.</p>
+    <div class="hp-head">
+      <p class="eyebrow">Models</p>
+      <h2>The best <em class="rx">free AI</em>, for every job.</h2>
+      <p class="section-lead">Whatever you want to do, whether that is chat, art or video, there's a free AI for it. The app installs them for you and only suggests the ones your computer can run. The big names are all here: <strong>Qwen</strong>, <strong>GPT-OSS</strong>, <strong>Llama 4</strong>, <strong>Gemma 4</strong>, <strong>DeepSeek</strong> and more.</p>
+    </div>
     <div class="model-grid">
       <article class="model-card">
         <span class="model-type">CHAT &middot; VISION</span>
@@ -345,7 +425,7 @@
       <article class="model-card">
         <span class="model-type">CHAT &middot; REASONING</span>
         <h3>Qwen 3.8 &middot; GPT-OSS &middot; GLM-4.7</h3>
-        <p>The smart ones &mdash; best for thinking through tough questions and writing code. Uncensored versions included that just answer, no lectures.</p>
+        <p>The smart ones, best for thinking through tough questions and writing code. Uncensored versions are included that just answer, with no lectures.</p>
         <span class="model-meta">Uncensored versions &middot; gaming PC</span>
       </article>
       <article class="model-card">
@@ -357,7 +437,7 @@
       <article class="model-card">
         <span class="model-type">IMAGE &middot; UNCENSORED</span>
         <h3>Z-Image Turbo</h3>
-        <p>Truly uncensored, no filters &mdash; about 10 seconds per image.</p>
+        <p>Truly uncensored, no filters, and about 10 seconds per image.</p>
         <span class="model-meta">Needs a strong graphics card</span>
       </article>
       <article class="model-card">
@@ -376,22 +456,34 @@
   </div>
 </section>
 
+<!-- ── MANIFESTO ──────────────────────────────────────────── -->
+<section class="manifesto hp-manifesto">
+  <div class="narrow">
+    <p class="eyebrow">Why</p>
+    <h2>Made for people who want <em class="rx">their</em> AI on <em class="rx">their</em> machine.</h2>
+    <p>In local mode your chats never leave your computer. No subscription, no tracking, no limits, and no company reading along. Most local AI apps stop at text chat; this one gives you <em>chat, code, images, and video</em> in one place, and your phone can run it from anywhere.</p>
+    <p>It's <strong>free</strong> and <strong>open source</strong>, so anyone can check the code. Local wins for privacy and unlimited use; when you want a cloud model for the really hard stuff, you can plug your own in. Tested with <strong>2,200+ automated checks</strong> so it just works.</p>
+  </div>
+</section>
+
 <!-- ── BLOG ──────────────────────────────────────────────── -->
-<section class="blog" id="blog">
+<section class="blog hp-blog" id="blog">
   <div class="container">
-    <p class="eyebrow">Writing</p>
-    <h2>Guides, comparisons, release notes.</h2>
-    <p class="section-lead">Plain-English guides to running AI on your own PC &mdash; what to install, what runs on your machine, and how it compares to the rest.</p>
+    <div class="hp-head">
+      <p class="eyebrow">Writing</p>
+      <h2>Guides, comparisons, release notes.</h2>
+      <p class="section-lead">Plain-English guides to running AI on your own PC: what to install, what runs on your machine, and how it compares to the rest.</p>
+    </div>
     <div class="post-list">
       <a class="post" href="https://locallyuncensored.com/blog/how-to-run-ai-locally.html">
         <span class="post-cat">Beginner</span>
-        <h3>How to Run AI Locally &mdash; 5-Minute Beginner Guide</h3>
+        <h3>How to Run AI Locally: 5-Minute Beginner Guide</h3>
         <p>No command line, no Docker. One installer, one-click models, honest hardware requirements.</p>
       </a>
       <a class="post" href="https://locallyuncensored.com/blog/lm-studio-alternatives.html">
         <span class="post-cat">Comparison</span>
         <h3>7 Best LM Studio Alternatives in 2026</h3>
-        <p>Locally Uncensored, Jan, Ollama, Open WebUI, GPT4All, Msty, KoboldCpp &mdash; compared honestly.</p>
+        <p>Locally Uncensored, Jan, Ollama, Open WebUI, GPT4All, Msty and KoboldCpp, compared honestly.</p>
       </a>
       <a class="post" href="https://locallyuncensored.com/blog/easiest-local-ai-image-generator.html">
         <span class="post-cat">Beginner</span>
@@ -415,12 +507,12 @@
       </a>
       <a class="post" href="https://locallyuncensored.com/blog/locally-uncensored-v2-4-0-release.html">
         <span class="post-cat">Release</span>
-        <h3>v2.4.0 &mdash; Settings Polish + Linux Drag Fix</h3>
+        <h3>v2.4.0: Settings Polish + Linux Drag Fix</h3>
         <p>Single-instance lock, configurable HuggingFace path, in-app Privacy section, Linux drag fix.</p>
       </a>
       <a class="post" href="https://locallyuncensored.com/blog/gemma-4-local-guide.html">
         <span class="post-cat">Guide</span>
-        <h3>Google Gemma 4 &mdash; Run It Locally</h3>
+        <h3>Google Gemma 4: Run It Locally</h3>
         <p>All sizes from E4B to 27B. Native tools, vision, uncensored variants.</p>
       </a>
       <a class="post" href="https://locallyuncensored.com/blog/image-to-image-local-ai.html">
@@ -464,55 +556,59 @@
 </section>
 
 <!-- ── FAQ ───────────────────────────────────────────────── -->
-<section class="faq" id="faq">
+<section class="faq hp-faq" id="faq">
   <div class="container narrow">
     <p class="eyebrow">Questions</p>
     <h2>Common questions.</h2>
     <div class="faq-list">
-      <div class="faq-item">
-        <h3>What is Locally Uncensored?</h3>
+      <details class="faq-item" open>
+        <summary><h3>What is Locally Uncensored?</h3></summary>
         <p>A free, open-source local AI studio for your desktop. Install it like any normal app and you're chatting, generating images, and making videos in minutes, with no command line and no Docker. Under the hood: chat with 20+ provider presets, a coding agent, image generation via ComfyUI (FLUX 2, Juggernaut XL, Z-Image, SDXL), and video generation (Wan 2.1, HunyuanVideo, LTX 2.3, FramePack F1) in one interface. AGPL-3.0 licensed.</p>
-      </div>
-      <div class="faq-item">
-        <h3>Does it support Qwen 3.8, GPT-OSS and GLM-4.7?</h3>
+      </details>
+      <details class="faq-item">
+        <summary><h3>Does it support Qwen 3.8, GPT-OSS and GLM-4.7?</h3></summary>
         <p>Yes. <strong>Qwen 3.8 27B</strong> is in the Model Manager since v2.6.6, and vision works: the image tower comes as a separate mmproj file that the download writes next to the model. Official, abliterated and uncensored builds, plus a 9B distill for small cards. <strong>GPT-OSS-120B</strong> and <strong>GPT-OSS-20B</strong> run via Ollama. <strong>GLM-4.7 Flash</strong> supported through Ollama. Also ready: <strong>DeepSeek R1</strong>, <strong>Llama 4</strong>, <strong>Gemma 4</strong>, <strong>Mistral Small 3</strong>, <strong>Phi 4</strong>.</p>
-      </div>
-      <div class="faq-item">
-        <h3>Can I use it as a ChatGPT or Claude alternative?</h3>
+      </details>
+      <details class="faq-item">
+        <summary><h3>Can I use it as a ChatGPT or Claude alternative?</h3></summary>
         <p>Yes. Locally Uncensored works as a ChatGPT and Claude alternative that runs on your own hardware. Use Qwen 3.8, GPT-OSS, GLM-4.7, DeepSeek R1, Llama 4 or Gemma 4 instead, or add cloud providers (OpenAI, Anthropic, OpenRouter, Groq) alongside the local stack.</p>
-      </div>
-      <div class="faq-item">
-        <h3>Is it really free and offline?</h3>
-        <p>Yes. After setup and model download, no internet is needed for the local providers. No accounts, no telemetry, no usage limits. Cloud providers are optional &mdash; the core runs one-hundred percent on your hardware.</p>
-      </div>
-      <div class="faq-item">
-        <h3>How is this different from Open WebUI or LM Studio?</h3>
-        <p>Those tools handle text chat. Locally Uncensored adds a coding agent with fourteen MCP tools, image generation, video creation, A/B model comparison, local benchmarking, granular permissions, file upload with vision, and thinking mode &mdash; all in one app.</p>
-      </div>
-      <div class="faq-item">
-        <h3>What hardware do I need?</h3>
+      </details>
+      <details class="faq-item">
+        <summary><h3>Is it really free and offline?</h3></summary>
+        <p>Yes. After setup and model download, no internet is needed for the local providers. No accounts, no telemetry, no usage limits. Cloud providers are optional, and the core runs one-hundred percent on your hardware.</p>
+      </details>
+      <details class="faq-item">
+        <summary><h3>How is this different from Open WebUI or LM Studio?</h3></summary>
+        <p>Those tools handle text chat. Locally Uncensored adds a coding agent with fourteen MCP tools, image generation, video creation, A/B model comparison, local benchmarking, granular permissions, file upload with vision, and thinking mode, all in one app.</p>
+      </details>
+      <details class="faq-item">
+        <summary><h3>What hardware do I need?</h3></summary>
         <p>Text chat: 8&nbsp;GB RAM. Image generation: an NVIDIA card from 6&nbsp;GB of VRAM with the starter checkpoint, 8 to 10&nbsp;GB for FLUX. Video generation: from 6&nbsp;GB for AnimateDiff and image to video with FramePack F1, from 8&nbsp;GB for the Wan 2.1 starter, 12&nbsp;GB and up for Wan 2.2 and HunyuanVideo. The app auto-detects hardware and recommends models. Windows 10/11 and Linux supported.</p>
-      </div>
-      <div class="faq-item">
-        <h3>What does &ldquo;uncensored&rdquo; mean?</h3>
+      </details>
+      <details class="faq-item">
+        <summary><h3>What does "uncensored" mean?</h3></summary>
         <p>Abliterated models with artificial restrictions removed. The AI responds honestly without refusing or adding disclaimers. Combined with local execution, your conversations stay private.</p>
-      </div>
-      <div class="faq-item">
-        <h3>Does remote access leak data?</h3>
+      </details>
+      <details class="faq-item">
+        <summary><h3>Does remote access leak data?</h3></summary>
         <p>Only if you explicitly dispatch a chat over LAN or Cloudflare Tunnel. Remote is opt-in, gated behind a six-digit passcode, and you see exactly when a device is connected. No background uploads. No telemetry.</p>
-      </div>
-      <div class="faq-item">
-        <h3>Can I use this on macOS?</h3>
+      </details>
+      <details class="faq-item">
+        <summary><h3>Can I use this on macOS?</h3></summary>
         <p>No. There is no Mac build and there has never been one. The release workflow builds Windows and Linux. On a Mac, use the hosted studio in a browser at lu-labs.ai.</p>
-      </div>
+      </details>
     </div>
   </div>
 </section>
 
-<!-- ── GET IT (banner only, no heading) ──────────────────── -->
-<section class="get" id="get">
+<!-- ── GET IT ────────────────────────────────────────────── -->
+<section class="get hp-get" id="get">
   <div class="narrow">
-    <div class="dl-card">
+    <svg class="get-mark" viewBox="176 176 672 672" aria-hidden="true"><rect class="get-mark-r" x="193" y="193" width="638" height="638" rx="138" ry="138" fill="none" stroke="currentColor" stroke-width="30" pathLength="1"/><path class="get-mark-p" fill="currentColor" d="M302,342 H377 V612 H433.6 A162,162 0 0,0 500.5,680 H302 Z"/><path class="get-mark-p" fill="currentColor" d="M434,342 H508 V545 A69,69 0 0,0 646,545 V342 H722 V537.5 A144,144 0 0,1 434,537.5 Z"/></svg>
+    <h2 class="get-h">The whole studio. <em class="rx">Free.</em></h2>
+    <p class="get-sub">Chat, create and code. On your PC or in the cloud.</p>
+    <div class="dl-card dl-card--xl">
+      <span class="dl-win" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 5.5 10.5 4.4v7.1H3zM11.5 4.3 21 3v8.5h-9.5zM3 12.5h7.5v7.1L3 18.5zM11.5 12.5H21V21l-9.5-1.3z"/></svg></span>
       <div class="dl-info">
         <h3>Locally Uncensored <em>&middot; 3.0.2</em></h3>
         <p>v3.0.2 &middot; WINDOWS &middot; ~14 MB installer &middot; 90,000+ DOWNLOADS &middot; 100% open source</p>
