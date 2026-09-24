@@ -1,7 +1,7 @@
 <!-- LU-CLOUD-FACTS:START -->
 ## Current cloud offer (2026-09-14)
 Hosted includes 11 Flash models; Pro and Max include 12. Up to 500,000 combined input and output tokens per account per UTC day in app sessions. GLM 5.3 Flash uses credits on Hosted and joins the daily allowance on Pro and Max. API keys always use credits.
-Hosted EUR 19/month: 900,000 shared credits, up to 900 Spicy images OR 90 five-second Spicy image-to-video clips. Each maximum spends the entire shared monthly wallet on one model. These are alternatives, not separate allowances. Input-image generation, character training, LoRA routes and additional operations cost extra. Spicy video uses an input image and five-second clips. Failed jobs and changing catalog prices can affect results.
+Hosted EUR 19/month: 900,000 shared credits, up to 900 uncensored images OR 90 five-second uncensored image-to-video clips. Each maximum spends the entire shared monthly wallet on one model. These are alternatives, not separate allowances. Input-image generation, character training, LoRA routes and additional operations cost extra. Uncensored video uses an input image and five-second clips. Failed jobs and changing catalog prices can affect results.
 https://locallyuncensored.com/cloud-facts.json
 Uncensored AI chat online: 47 chat models, all of them in every plan and every pack, and no moderation layer from us on text. https://locallyuncensored.com/uncensored-ai-chat-online/
 Uncensored AI image generator online: adult-capable models from 1,000 credits per image, only after the account switches its own content policy setting. https://locallyuncensored.com/uncensored-ai-image-generator-online/
