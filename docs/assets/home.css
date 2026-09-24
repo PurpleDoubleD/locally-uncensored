@@ -1,5 +1,5 @@
 /* ═══════════════════════════════════════════════════════════════════════
-   Locally Uncensored homepage (redesign proposal).
+   Locally Uncensored homepage.
    Loaded after lu.css and only by /index.html, so every other page keeps
    the shared look untouched. Fonts and colours are the lu.css tokens.
    The mini videos are small HTML compositions drawn by home-motion.js;
@@ -20,6 +20,28 @@ html[data-theme="light"] .hp-glow{opacity:.45}
 
 /* Nav: the flat mark replaces the 3D monogram */
 .hp-mark{width:30px;height:30px;display:block;flex:none}
+/* This nav carries seven links plus the Cloud pill, about 1150px in all,
+   so it folds into the menu below 1160px (lu.css folds at 900px) and trims
+   the right cluster earlier on phones. If a large font setting still runs
+   out of room, the brand word gives way, never the menu button. */
+@media(max-width:1160px){
+  .lu-nav{grid-template-columns:minmax(0,1fr) auto;gap:8px}
+  .lu-nav-links{display:none;position:absolute;top:60px;left:0;right:0;flex-direction:column;
+    background:rgba(20,20,20,0.97);backdrop-filter:blur(14px);border-bottom:1px solid var(--line-subtle);padding:8px 16px;gap:2px}
+  html[data-theme="light"] .lu-nav-links{background:rgba(255,255,255,0.97)}
+  .lu-nav-links.open{display:flex}
+  .lu-nav-link{padding:12px}
+  .lu-nav-toggle{display:flex;align-items:center;justify-content:center;width:34px;height:34px;color:var(--fg-50)}
+  .lu-nav-word{overflow:hidden;text-overflow:ellipsis}
+}
+@media(max-width:680px){.lu-nav-icon,.lu-nav-dl,.lu-nav-sep,.lu-nav .switch{display:none}}
+@media(max-width:400px){
+  .lu-nav{padding-right:10px;gap:6px}
+  .lu-nav-brand{gap:8px}
+  .lu-nav-right{gap:2px}
+  .he-cta{padding:5px 9px}
+}
+@media(max-width:359px){.lu-nav-word{display:none}}
 
 /* ═══════════════════════════════════════════════════════════════════════
    Hero
