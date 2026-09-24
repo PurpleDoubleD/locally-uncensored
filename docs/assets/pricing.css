@@ -48,6 +48,9 @@
 .luc-pack .price{font-family:var(--display);font-size:2rem;color:var(--fg);margin:12px 0}
 .luc-pack p{font-size:.78rem;color:var(--fg-50);line-height:1.55;margin:0 0 15px}
 .luc-pack a{color:var(--accent-soft);font-size:.78rem;font-weight:600}
+.luc-pack p.luc-pack-plan{color:var(--accent-soft);font-weight:600;margin:-4px 0 12px}
+.luc-pack-plan-rate{margin-top:10px}
+.luc-pack-plan-rate strong{color:var(--accent-soft);font-weight:600}
 .luc-model-catalog{scroll-margin-top:82px}
 .luc-model-groups{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
 .luc-model-group{border:1px solid var(--line-subtle);border-radius:var(--radius-xl);background:var(--panel);overflow:hidden}
