@@ -4,7 +4,7 @@ Hosted includes 11 Flash models; Pro and Max include 12. Up to 500,000 combined 
 Hosted EUR 19/month: 900,000 shared credits, up to 900 uncensored images OR 90 five-second uncensored image-to-video clips. Each maximum spends the entire shared monthly wallet on one model. These are alternatives, not separate allowances. Input-image generation, character training, LoRA routes and additional operations cost extra. Uncensored video uses an input image and five-second clips. Failed jobs and changing catalog prices can affect results.
 https://locallyuncensored.com/cloud-facts.json
 Uncensored AI chat online: 47 chat models, all of them in every plan and every pack, and no moderation layer from us on text. https://locallyuncensored.com/uncensored-ai-chat-online/
-Uncensored AI image generator online: adult-capable models from 1,000 credits per image, only after the account switches its own content policy setting. https://locallyuncensored.com/uncensored-ai-image-generator-online/
+Uncensored AI image generator online: uncensored models from 1,000 credits per image, only after the account switches its own content policy setting. https://locallyuncensored.com/uncensored-ai-image-generator-online/
 Uncensored AI video generator online: image-to-video only, clips are five seconds, the input image is not included. https://locallyuncensored.com/uncensored-ai-video-generator-online/
 Uncensored AI API: OpenAI-compatible Chat Completions at https://lu-labs.ai/api/inference/v1, keys start with lu_ and always spend credits. https://locallyuncensored.com/uncensored-ai-api/
 Venice AI alternatives: Venice Pro is 18 USD per month with 100 credits (read 2026-09-22); our credit packs start at 15 EUR and need no subscription. https://locallyuncensored.com/vs/venice/
@@ -186,8 +186,8 @@ Locally Uncensored is a free, open-source (AGPL-3.0) local AI studio for the des
 - Uncensored AI Chat Online (browser, desktop Cloud switch, or API key): https://locallyuncensored.com/blog/uncensored-ai-chat-online-guide.html
 - What No Filter Actually Means Here (the honest limits): https://locallyuncensored.com/blog/what-no-filter-means-online.html
 - Uncensored AI chat online, no filter on text (landing page): https://locallyuncensored.com/uncensored-ai-chat-online/
-- Uncensored AI image generator online (seven adult-capable models from 1,000 credits per image, content policy setting on the account): https://locallyuncensored.com/uncensored-ai-image-generator-online/
-- Uncensored AI video generator online (fourteen adult-capable models, image-to-video only, five-second clips): https://locallyuncensored.com/uncensored-ai-video-generator-online/
+- Uncensored AI image generator online (seven uncensored models from 1,000 credits per image, content policy setting on the account): https://locallyuncensored.com/uncensored-ai-image-generator-online/
+- Uncensored AI video generator online (fourteen uncensored models, image-to-video only, five-second clips): https://locallyuncensored.com/uncensored-ai-video-generator-online/
 - Uncensored AI API (OpenAI-compatible, base URL https://lu-labs.ai/api/inference/v1, keys spend credits): https://locallyuncensored.com/uncensored-ai-api/
 - Locally Uncensored vs Open WebUI / LM Studio / Jan / GPT4All / Msty / SillyTavern / KoboldCpp: https://locallyuncensored.com/blog/
 

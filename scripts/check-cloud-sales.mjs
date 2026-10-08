@@ -300,13 +300,12 @@ assert.equal(
   adultVideo.length,
   `docs/pricing/index.html: the page lists ${adultRows.length} adult video models, the catalogue has ${adultVideo.length}`,
 )
-// Entscheid David vom 13.09.2026, er kehrt den Entscheid vom 12.09. um: die
-// Anzeigenamen dieser Endpunkte heissen wieder "Spicy". Der Desktop und die
-// LUC-Seiten gingen voran, das Web hat mit acaa0c9d nachgezogen. Verglichen
-// wird deshalb wieder die volle Beschriftung; das Markenwort wird zusaetzlich
-// gegen den Entscheid geprueft, nicht nur gegen das Web. Auf der Zahlungsdomain
-// taucht keiner dieser Endpunkte auf (Entscheid dbf663fe).
-const MARKENWORT = 'Spicy'
+// Entscheid David vom 08.10.2026: die Anzeigenamen dieser Endpunkte heissen
+// "Uncensored". Er loest den Entscheid vom 13.09.2026 ab. Verglichen wird die
+// volle Beschriftung; das Markenwort wird zusaetzlich gegen den Entscheid
+// geprueft, nicht nur gegen das Web. Auf der Zahlungsdomain taucht keiner
+// dieser Endpunkte auf (Entscheid dbf663fe).
+const MARKENWORT = 'Uncensored'
 adultVideo.forEach((model, index) => {
   const row = adultRows[index]
   const name = row.querySelector('[data-adult-model-id]')

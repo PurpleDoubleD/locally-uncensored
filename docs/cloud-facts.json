@@ -72,7 +72,7 @@
   "models": [
     {
       "id": "chroma",
-      "name": "Chroma Spicy",
+      "name": "Chroma Uncensored",
       "kind": "image",
       "credits_per_run": 1500,
       "full_wallet_runs": 600,
@@ -86,7 +86,7 @@
     },
     {
       "id": "prefect-pony",
-      "name": "Prefect Pony XL Spicy",
+      "name": "Prefect Pony XL Uncensored",
       "kind": "image",
       "credits_per_run": 1500,
       "full_wallet_runs": 600,
@@ -100,7 +100,7 @@
     },
     {
       "id": "neta-lumina",
-      "name": "Neta Lumina (anime) Spicy",
+      "name": "Neta Lumina (anime) Uncensored",
       "kind": "image",
       "credits_per_run": 1000,
       "full_wallet_runs": 900,
@@ -170,7 +170,7 @@
     },
     {
       "id": "wan-2.2-spicy",
-      "name": "Wan 2.2 Spicy",
+      "name": "Wan 2.2 Uncensored",
       "kind": "video",
       "credits_per_run": 15000,
       "full_wallet_runs": 60,
@@ -184,7 +184,7 @@
     },
     {
       "id": "ltx-2.3-spicy",
-      "name": "LTX 2.3 Spicy",
+      "name": "LTX 2.3 Uncensored",
       "kind": "video",
       "credits_per_run": 10000,
       "full_wallet_runs": 90,
@@ -198,7 +198,7 @@
     },
     {
       "id": "wan-2.6-spicy",
-      "name": "Wan 2.6 Spicy",
+      "name": "Wan 2.6 Uncensored",
       "kind": "video",
       "credits_per_run": 50000,
       "full_wallet_runs": 18,
@@ -212,7 +212,7 @@
     },
     {
       "id": "wan-2.7-spicy",
-      "name": "Wan 2.7 Spicy",
+      "name": "Wan 2.7 Uncensored",
       "kind": "video",
       "credits_per_run": 50000,
       "full_wallet_runs": 18,
@@ -226,7 +226,7 @@
     },
     {
       "id": "minimax-h3-spicy",
-      "name": "MiniMax H3 Spicy",
+      "name": "MiniMax H3 Uncensored",
       "kind": "video",
       "credits_per_run": 20000,
       "full_wallet_runs": 45,
@@ -240,7 +240,7 @@
     },
     {
       "id": "seedance-1.5-pro-spicy",
-      "name": "Seedance 1.5 Pro Spicy",
+      "name": "Seedance 1.5 Pro Uncensored",
       "kind": "video",
       "credits_per_run": 26000,
       "full_wallet_runs": 34,
@@ -254,7 +254,7 @@
     },
     {
       "id": "seedance-2.5-spicy",
-      "name": "Seedance 2.5 Spicy",
+      "name": "Seedance 2.5 Uncensored",
       "kind": "video",
       "credits_per_run": 90000,
       "full_wallet_runs": 10,
@@ -268,7 +268,7 @@
     },
     {
       "id": "seedance-2.0-spicy",
-      "name": "Seedance 2.0 Spicy",
+      "name": "Seedance 2.0 Uncensored",
       "kind": "video",
       "credits_per_run": 60000,
       "full_wallet_runs": 15,
@@ -282,7 +282,7 @@
     },
     {
       "id": "seedance-2.0-fast-spicy",
-      "name": "Seedance 2.0 Fast Spicy",
+      "name": "Seedance 2.0 Fast Uncensored",
       "kind": "video",
       "credits_per_run": 50000,
       "full_wallet_runs": 18,
@@ -296,7 +296,7 @@
     },
     {
       "id": "vidu-q3-spicy",
-      "name": "Vidu Q3 Spicy",
+      "name": "Vidu Q3 Uncensored",
       "kind": "video",
       "credits_per_run": 35000,
       "full_wallet_runs": 25,
@@ -338,7 +338,7 @@
     },
     {
       "id": "wan-3.0-spicy",
-      "name": "Wan 3.0 Spicy",
+      "name": "Wan 3.0 Uncensored",
       "kind": "video",
       "credits_per_run": 25000,
       "full_wallet_runs": 36,
@@ -352,7 +352,7 @@
     },
     {
       "id": "wan-3.0-prime-spicy",
-      "name": "Wan 3.0 Prime Spicy",
+      "name": "Wan 3.0 Prime Uncensored",
       "kind": "video",
       "credits_per_run": 37500,
       "full_wallet_runs": 24,
@@ -366,7 +366,7 @@
     },
     {
       "id": "wan-2.2-spicy-extend",
-      "name": "Wan 2.2 Spicy Extend",
+      "name": "Wan 2.2 Uncensored Extend",
       "kind": "video",
       "credits_per_run": 15000,
       "full_wallet_runs": 60,

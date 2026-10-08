@@ -22,7 +22,7 @@ Let's skip the philosophical debates and talk about the practical reasons develo
 
 **Privacy is non-negotiable.** Every prompt you send to OpenAI or Anthropic is stored on their servers. Even if you trust these companies today, policies change. Running locally means your conversations about proprietary code, personal projects, or creative writing never leave your machine.
 
-**No content restrictions.** Cloud AI providers filter outputs aggressively. This isn't just about NSFW content — it affects legitimate use cases too. Writers working on fiction with complex themes, security researchers analyzing vulnerabilities, medical professionals discussing symptoms — all get hit by the same blunt content filters. Local models don't have these restrictions.
+**No content restrictions.** Cloud AI providers filter outputs aggressively. This affects legitimate use cases too. Writers working on fiction with complex themes, security researchers analyzing vulnerabilities, medical professionals discussing symptoms — all get hit by the same blunt content filters. Local models don't have these restrictions.
 
 **No rate limits, no subscriptions.** Once you download a model, it's yours. Run it 24/7 if you want. No API keys, no $20/month subscriptions, no "you've reached your limit" messages at 2am when you're deep in a coding session.
 
