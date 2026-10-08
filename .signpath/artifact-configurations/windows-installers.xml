@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  SignPath artifact configuration, slug "windows-installers".
+
+  Second signing request of a Windows release: the two installers, built
+  around the app binary that the first request signed. Only the installer
+  files themselves are signed here. SignPath has no composite type for NSIS,
+  so the NSIS installer is a plain PE file, and the MSI is signed as a whole
+  without touching its contents, which already carry their signature or are
+  upstream files that stay unsigned.
+
+  The NSIS installer carries the product name and version in its version
+  resource (Tauri's installer template writes both), so the same restrictions
+  apply as for the app binary.
+-->
+<artifact-configuration xmlns="http://signpath.io/artifact-configuration/v1">
+  <parameters>
+    <parameter name="version" required="true" />
+  </parameters>
+  <zip-file>
+    <pe-file path="Locally Uncensored_${version}_x64-setup.exe" product-name="Locally Uncensored" product-version="${version}">
+      <authenticode-sign description="LU Setup" description-url="https://github.com/PurpleDoubleD/locally-uncensored" />
+    </pe-file>
+    <msi-file path="Locally Uncensored_${version}_x64_en-US.msi">
+      <authenticode-sign description="LU Setup" description-url="https://github.com/PurpleDoubleD/locally-uncensored" />
+    </msi-file>
+  </zip-file>
+</artifact-configuration>

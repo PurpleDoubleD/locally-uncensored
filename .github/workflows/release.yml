@@ -48,6 +48,14 @@ env:
   STORIES260K_REVISION: '499bc8821c6b12b4e53c5bffcb21ec206f212d81'
   STORIES260K_SHA256: '270cba1bd5109f42d03350f60406024560464db173c0e387d91f0426d3bd256d'
 
+  # Windows code signing (Azure Artifact Signing), used only when the signing
+  # secrets exist: the SignTool plug-in Microsoft publishes as the NuGet package
+  # Microsoft.ArtifactSigning.Client, pinned by version and by the sha256 of the
+  # .nupkg file, both read from api.nuget.org on 2026-10-08. Bump both together:
+  #   https://api.nuget.org/v3-flatcontainer/microsoft.artifactsigning.client/index.json
+  ARTIFACT_SIGNING_CLIENT_VERSION: '1.0.146'
+  ARTIFACT_SIGNING_CLIENT_SHA256: '7761e5d8f31e54b764da21d33cd8b0a2940e1b05526c7dfcb5e94b0431426f70'
+
 jobs:
   # The Latest flag comes off FIRST, before anything is gated or built.
   #
@@ -90,6 +98,39 @@ jobs:
           PUBLISHED_TAG: ${{ github.event.release.tag_name }}
         run: node scripts/enforce-prerelease.mjs
 
+  # Code signing is opt-in by secrets. This repository ships unsigned Windows
+  # and Linux installers and no macOS build, and it keeps doing exactly that
+  # until the secrets of a signing lane are entered: then that lane switches
+  # on with no further change to this file. A fork has none of the secrets, so
+  # a fork builds what it builds today.
+  #
+  # `secrets` cannot be read in a job-level `if:`, so this job turns "are the
+  # secrets there" into a plain output the macOS job can be conditioned on. The
+  # values themselves never leave the step: scripts/signing-config.sh only
+  # tests them for presence. A half-filled set is a warning on the run and
+  # counts as absent.
+  signing-config:
+    runs-on: ubuntu-22.04
+    outputs:
+      macos: ${{ steps.detect.outputs.macos }}
+      macos_notary: ${{ steps.detect.outputs.macos_notary }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: ${{ github.event.release.tag_name || github.event.inputs.tag }}
+      - name: Which signing secrets are present
+        id: detect
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: bash scripts/signing-config.sh macos
+
   # A build is not a decision — and neither is a green master. Until this job
   # existed, `release.yml` typechecked nothing, ran no test and no lint: any
   # commit that happened to sit on master when someone clicked "Publish release"
@@ -115,7 +156,13 @@ jobs:
     # signs the bundle and builds every installer target (NSIS, MSI, deb,
     # AppImage) that ci.yml's own tauri-build does not, so its ceiling is
     # wider than that job's 60 minutes rather than equal to it.
-    timeout-minutes: 90
+    #
+    # The SignPath lane (Windows only) waits for a person to approve two
+    # signing requests, so that leg gets the six hours a hosted runner allows.
+    # The signing policy is the last of the SignPath values to be entered,
+    # the one that switches the lane on for releases; without it the
+    # expression is 90 for every leg, as before.
+    timeout-minutes: ${{ matrix.platform == 'windows-latest' && vars.SIGNPATH_SIGNING_POLICY_SLUG != '' && 360 || 90 }}
     strategy:
       fail-fast: false
       matrix:
@@ -128,9 +175,10 @@ jobs:
             args: ''
             rust_targets: ''
             sidecar_triple: x86_64-pc-windows-msvc
-          # No macOS lane: LU ships Windows + Linux only (the 2.5.7 mac assets
-          # were unsigned/ad-hoc and pulled post-release). Re-add a macos-14
-          # entry here once Apple Developer ID signing creds land as secrets.
+          # No macOS entry in this matrix: the 2.5.7 mac assets were ad hoc
+          # signed and pulled after the release (c1644d9a). macOS is built by
+          # the build-macos job below, and only as a Developer ID signed and
+          # notarized build, which needs the Apple secrets.
 
     runs-on: ${{ matrix.platform }}
 
@@ -498,12 +546,60 @@ jobs:
       - name: Install npm dependencies
         run: npm ci
 
+      # ── Windows code signing, only with the secrets of one lane ──────────
+      # Two lanes, and at most one of them signs a release:
+      #   - Azure Artifact Signing signs inside `tauri build`.
+      #   - SignPath signs uploaded artifacts after the build, so that lane
+      #     replaces the build step below with its own (see the action).
+      # Without the values of either lane the detect step answers false twice,
+      # every signing step is skipped, and the build below gets the same
+      # arguments it always got: unsigned installers, as before. With both
+      # lanes complete the detect step fails the run.
+      - name: Which Windows signing secrets are present
+        id: signcfg
+        if: matrix.platform == 'windows-latest'
+        shell: bash
+        env:
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          ARTIFACT_SIGNING_ENDPOINT: ${{ secrets.ARTIFACT_SIGNING_ENDPOINT }}
+          ARTIFACT_SIGNING_ACCOUNT: ${{ secrets.ARTIFACT_SIGNING_ACCOUNT }}
+          ARTIFACT_SIGNING_PROFILE: ${{ secrets.ARTIFACT_SIGNING_PROFILE }}
+          SIGNPATH_API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
+          SIGNPATH_ORGANIZATION_ID: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          SIGNPATH_PROJECT_SLUG: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          SIGNPATH_SIGNING_POLICY_SLUG: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
+        run: bash scripts/signing-config.sh windows
+
+      - name: Configure Windows code signing (Azure Artifact Signing)
+        id: winsign
+        if: matrix.platform == 'windows-latest' && steps.signcfg.outputs.windows == 'true'
+        shell: pwsh
+        timeout-minutes: 5
+        env:
+          ARTIFACT_SIGNING_ENDPOINT: ${{ secrets.ARTIFACT_SIGNING_ENDPOINT }}
+          ARTIFACT_SIGNING_ACCOUNT: ${{ secrets.ARTIFACT_SIGNING_ACCOUNT }}
+          ARTIFACT_SIGNING_PROFILE: ${{ secrets.ARTIFACT_SIGNING_PROFILE }}
+        run: ./scripts/windows-signing-setup.ps1
+
       - name: Build and release Tauri app
+        # Every leg, except Windows when SignPath signs: that lane cannot let
+        # this step publish, because the installers it would attach, and the
+        # updater signatures over them, are the unsigned ones. On Linux the
+        # detect step is skipped and its output is empty, so this is true.
+        if: matrix.platform != 'windows-latest' || steps.signcfg.outputs.signpath != 'true'
         uses: tauri-apps/tauri-action@51a9f1156b33df106d827c3a78f8f894946c5faa # v0.5.25
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # Read by SignTool's Artifact Signing plug-in at signing time, and by
+          # nothing else. Empty without the secrets, and then nothing asks for
+          # them: no signCommand is configured (see the winsign step above).
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
           # K1-18 (lu-301/e2e/linux/BERICHT.md, section "K1-18"): measured on a
           # real Ubuntu 24.04 box, `tauri build --bundles appimage` on this
           # project's Linux config makes linuxdeploy resolve
@@ -556,7 +652,116 @@ jobs:
           # for signed artefacts cannot be built by anyone who lacks the key
           # (a0030ad2, the exit-1-after-bundling defect of v2.6.7). The overlay
           # is merged on top of the checked-in config by `tauri build`.
-          args: --config src-tauri/tauri.release.conf.json ${{ matrix.args }}
+          #
+          # The last expression is empty unless Windows signing is configured;
+          # then it is a second --config, the overlay that sets
+          # bundle.windows.signCommand (scripts/windows-signing-setup.ps1).
+          args: --config src-tauri/tauri.release.conf.json ${{ matrix.args }} ${{ steps.winsign.outputs.config_args }}
+
+      # A configured signCommand that signed nothing must not pass for a signed
+      # release. Skipped on the unsigned path, like the setup step.
+      - name: Verify the Windows signatures
+        id: winverify
+        if: matrix.platform == 'windows-latest' && steps.signcfg.outputs.windows == 'true'
+        shell: pwsh
+        timeout-minutes: 10
+        run: ./scripts/windows-signing-verify.ps1 -SignTool "${{ steps.winsign.outputs.signtool }}"
+
+      # ── Windows code signing with SignPath, only with its values ─────────
+      # Builds, signs and verifies; see the header of the action for the
+      # order and for why it takes two signing requests. It publishes nothing.
+      # The publisher check refuses anything but the certificate of the
+      # SignPath Foundation, so a release can never go out under the
+      # self-signed test certificate: that one is for signpath-probe.yml.
+      - name: Build and sign the Windows installers (SignPath)
+        id: signpath
+        if: matrix.platform == 'windows-latest' && steps.signcfg.outputs.signpath == 'true'
+        uses: ./.github/actions/windows-signpath
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
+          expected-publisher: ${{ vars.SIGNPATH_EXPECTED_PUBLISHER || 'SignPath Foundation' }}
+          updater-private-key: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          updater-private-key-password: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+
+      # What tauri-action does for the other lanes, for the files this lane
+      # signed after the build: attach them to the release and point the
+      # Windows entries of latest.json at them. The Linux leg writes its own
+      # entries into the same file with tauri-action, at a time this leg does
+      # not control, so the merge is read back and repeated if the other leg
+      # wrote in between.
+      - name: Attach the signed Windows installers and update latest.json
+        if: matrix.platform == 'windows-latest' && steps.signcfg.outputs.signpath == 'true'
+        shell: bash
+        timeout-minutes: 45
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.event.release.tag_name || github.event.inputs.tag }}
+          DIST: ${{ steps.signpath.outputs.dist }}
+        run: |
+          set -euo pipefail
+          # On workflow_dispatch the release may not exist yet: the Linux leg
+          # creates it when its own build is through.
+          for attempt in $(seq 1 60); do
+            if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then break; fi
+            if [ "$attempt" -eq 60 ]; then
+              echo "::error::release $TAG does not exist after 30 minutes; the signed installers were not attached"
+              exit 1
+            fi
+            sleep 30
+          done
+          cd "$DIST"
+          gh release upload "$TAG" ./* --repo "$GITHUB_REPOSITORY" --clobber
+          RELEASE_NOTES="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json body --jq .body)"
+          export RELEASE_NOTES
+          base="https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG"
+          work="$(mktemp -d)"
+          for attempt in 1 2 3 4 5; do
+            rm -f "$work/latest.json"
+            gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern latest.json --dir "$work" 2>/dev/null \
+              || echo "no latest.json on the release yet, starting one"
+            node "$GITHUB_WORKSPACE/scripts/windows-signpath.mjs" merge-latest-json . "$work/latest.json" "$base"
+            cp "$work/latest.json" "$work/wanted.json"
+            gh release upload "$TAG" "$work/latest.json" --repo "$GITHUB_REPOSITORY" --clobber
+            sleep 45
+            rm -f "$work/latest.json"
+            gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern latest.json --dir "$work"
+            if node -e '
+              const [now, wanted] = process.argv.slice(1).map((f) => JSON.parse(require("fs").readFileSync(f, "utf8")).platforms)
+              const kept = Object.keys(wanted).filter((k) => k.startsWith("windows-")).every((k) => now[k] && now[k].signature === wanted[k].signature)
+              process.exit(kept ? 0 : 1)
+            ' "$work/latest.json" "$work/wanted.json"; then
+              echo "latest.json on $TAG names the signed Windows installers"
+              exit 0
+            fi
+            echo "latest.json was rewritten by another job, merging again (attempt $attempt)"
+          done
+          echo "::error::latest.json on $TAG does not keep the Windows entries of the signed installers"
+          exit 1
+
+      - name: Say on the run page whether this Windows build is signed
+        if: matrix.platform == 'windows-latest'
+        shell: bash
+        env:
+          AZURE: ${{ steps.signcfg.outputs.windows }}
+          AZURE_PUBLISHER: ${{ steps.winverify.outputs.publisher }}
+          SIGNPATH: ${{ steps.signcfg.outputs.signpath }}
+          SIGNPATH_PUBLISHER: ${{ steps.signpath.outputs.publisher }}
+          SIGNPATH_APP_REQUEST: ${{ steps.signpath.outputs.app-signing-request }}
+          SIGNPATH_INSTALLERS_REQUEST: ${{ steps.signpath.outputs.installers-signing-request }}
+        run: |
+          if [ "$AZURE" = "true" ]; then
+            echo "Windows installers: signed with Azure Artifact Signing, publisher \`$AZURE_PUBLISHER\`." >> "$GITHUB_STEP_SUMMARY"
+          elif [ "$SIGNPATH" = "true" ]; then
+            {
+              echo "Windows installers: signed with SignPath, publisher \`$SIGNPATH_PUBLISHER\`."
+              echo "Signing requests: [app binary]($SIGNPATH_APP_REQUEST), [installers]($SIGNPATH_INSTALLERS_REQUEST)."
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Windows installers: unsigned (no signing lane is configured)." >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       # K1-18 (lu-301/e2e/linux/BERICHT.md): the LD_LIBRARY_PATH fix above
       # only proves linuxdeploy did not hard-fail; K1-18 itself measured that
@@ -641,11 +846,148 @@ jobs:
           [ "$missing" -eq 0 ] || exit 1
           echo "OK: every staged sidecar companion is present inside the built .deb ($extracted_llama_dir)"
 
+  # ── macOS, Developer ID signed and notarized, or not at all ──────────────
+  #
+  # The lane c1644d9a removed, back under the one condition that commit named:
+  # Apple Developer ID credentials. Without them `signing-config` answers
+  # macos=false, this job is skipped (a skipped job is not a failed run), and
+  # the release has no macOS assets, exactly as today. There is deliberately no
+  # unsigned or ad hoc fallback: that is what was shipped once and pulled.
+  #
+  # Apple Silicon only. Local inference on a Mac is MLX, which has no Intel
+  # build, so there is no x86_64-apple-darwin lane.
+  #
+  # Signing and the notarization of the .app happen inside `tauri build`
+  # (tauri-cli 2.10.1): APPLE_CERTIFICATE and its password make the bundler
+  # import the .p12 into a keychain of its own, sign the sidecar and the app
+  # with the Hardened Runtime and src-tauri/Entitlements.plist, submit the app
+  # with notarytool and staple it. scripts/macos-release-signing.sh does the
+  # rest: it verifies every Mach-O file in the bundle, notarizes and staples
+  # the disk image, and asks spctl for Gatekeeper's verdict on both.
+  #
+  # ci.yml's build gate has no macOS lane. The checks of `gate` therefore
+  # cover the code this job builds, but not its bundling on macOS; the first
+  # proof that it bundles is this job's own run.
+  build-macos:
+    needs: [gate, signing-config]
+    if: needs.signing-config.outputs.macos == 'true'
+    runs-on: macos-14
+    timeout-minutes: 90
+    env:
+      SIDECAR_TRIPLE: aarch64-apple-darwin
+      RELEASE_TAG: ${{ github.event.release.tag_name || github.event.inputs.tag }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: ${{ github.event.release.tag_name || github.event.inputs.tag }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          workspaces: './src-tauri -> target'
+
+      - name: Sidecar build cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: .llama-build
+          key: llama-${{ hashFiles('scripts/build-llama.sh') }}-${{ env.SIDECAR_TRIPLE }}-v1
+
+      # One static binary with Metal embedded (scripts/build-llama.sh), so
+      # there are no companion libraries to sign next to it.
+      - name: Build llama-server sidecar
+        env:
+          BUILD_JOBS: 2
+        run: bash scripts/build-llama.sh "$SIDECAR_TRIPLE"
+
+      - name: Assert sidecar exists
+        run: |
+          test -x "src-tauri/bin/lu-llama-server-$SIDECAR_TRIPLE"
+          ls -la src-tauri/bin/
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      # Exactly one set of notarization credentials reaches the build, through
+      # $GITHUB_ENV. Why not through the `env:` of the build step: see the
+      # header of the script.
+      - name: Hand the notarization credentials to the build
+        env:
+          NOTARY_MODE: ${{ needs.signing-config.outputs.macos_notary }}
+          NOTARY_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          NOTARY_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          NOTARY_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+          NOTARY_APPLE_ID: ${{ secrets.APPLE_ID }}
+          NOTARY_APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          EXPECTED_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: bash scripts/macos-release-signing.sh prepare
+
+      - name: Build, sign, notarize and release the macOS app
+        uses: tauri-apps/tauri-action@51a9f1156b33df106d827c3a78f8f894946c5faa # v0.5.25
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          # Overrides bundle.macOS.signingIdentity ("-", the ad hoc identity
+          # local builds use). The bundler takes the identity from the imported
+          # certificate and only requires that its name contains this string,
+          # so the default also refuses a .p12 that holds the wrong kind of
+          # certificate, for example an "Apple Development" one.
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY || 'Developer ID Application' }}
+        with:
+          tagName: ${{ github.event.release.tag_name || github.event.inputs.tag || 'v1.3.0' }}
+          releaseName: 'LU ${{ github.event.release.tag_name || github.event.inputs.tag }}'
+          releaseDraft: false
+          # Same promise as the Windows and Linux lane: a build is not a
+          # decision. enforce-prerelease below holds it for every trigger.
+          prerelease: true
+          args: --config src-tauri/tauri.release.conf.json
+
+      - name: Verify signatures, notarize and staple the disk image, ask Gatekeeper
+        id: finish
+        timeout-minutes: 30
+        env:
+          EXPECTED_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: bash scripts/macos-release-signing.sh finish src-tauri/target
+
+      # The build step uploaded the disk image before it had a ticket of its
+      # own. Replace that one asset with the stapled file. latest.json does not
+      # name the disk image (the updater takes the .app.tar.gz, packed from the
+      # already stapled app), so no updater signature changes.
+      - name: Replace the uploaded disk image with the stapled one
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DMG: ${{ steps.finish.outputs.dmg }}
+        run: |
+          set -euo pipefail
+          names="$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name | select(endswith(".dmg"))')"
+          count="$(printf '%s\n' "$names" | sed '/^$/d' | wc -l | tr -d ' ')"
+          if [ "$count" -ne 1 ]; then
+            echo "::error::expected exactly one .dmg asset on $RELEASE_TAG, found $count: $names"
+            exit 1
+          fi
+          staged="$RUNNER_TEMP/$names"
+          cp "$DMG" "$staged"
+          gh release upload "$RELEASE_TAG" "$staged" --repo "$GITHUB_REPOSITORY" --clobber
+          echo "macOS: \`$names\` is Developer ID signed, notarized and stapled." >> "$GITHUB_STEP_SUMMARY"
+
   # The promise above, made real for every trigger. Runs after the binaries are
   # attached, so a release published as a full release is put back before
   # anyone is offered it, and never touches the release that is already Latest.
+  # It waits for the macOS job too, which may be skipped; `always()` covers
+  # that case as it covers a failed lane.
   enforce-prerelease:
-    needs: build-tauri
+    needs: [build-tauri, build-macos]
     if: always()
     runs-on: ubuntu-22.04
     steps:

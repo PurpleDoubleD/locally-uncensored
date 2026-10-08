@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  CANDIDATE, not in use. tauri.conf.json points at Entitlements.plist.
+
+  The smallest set a Developer ID build of LU is expected to need: the
+  microphone, and no Hardened Runtime exception at all. Apple runs extra
+  Gatekeeper checks on programs that disable library validation, and asks for
+  only the entitlements an app cannot work without, so this is where the
+  release build should end up.
+
+  It has not run in any build. Before tauri.conf.json is switched to it, one
+  Hardened Runtime build has to pass these by hand (the Hardened Runtime is
+  enforced for an ad hoc signature too, so no certificate is needed for the
+  test): the window renders and chat streams, the bundled engine loads a model
+  and answers, dictation and a voice session hear the microphone, MLX image
+  generation starts, an update installs. When it passes, this content replaces
+  Entitlements.plist and this file goes away.
+-->
+<plist version="1.0">
+<dict>
+    <key>com.apple.security.device.audio-input</key>
+    <true/>
+</dict>
+</plist>

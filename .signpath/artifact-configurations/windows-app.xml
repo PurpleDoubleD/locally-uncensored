@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  SignPath artifact configuration, slug "windows-app".
+
+  First signing request of a Windows release: the app binary, before it is
+  packed into the installers. The GitHub artifact is a ZIP archive, so the
+  root element is a zip-file. It holds the same build twice, once marked for
+  the NSIS installer and once for the MSI (scripts/windows-signpath.mjs
+  explains why). Nothing else is in the archive and nothing else is signed:
+  the bundled llama.cpp server and its libraries are built from upstream
+  source and stay unsigned.
+
+  The metadata restrictions are the ones the SignPath Foundation asks for:
+  the product name is fixed, and the product version must equal the version
+  the workflow passes as a parameter.
+-->
+<artifact-configuration xmlns="http://signpath.io/artifact-configuration/v1">
+  <parameters>
+    <parameter name="version" required="true" />
+  </parameters>
+  <zip-file>
+    <directory path="nsis">
+      <pe-file path="locally-uncensored.exe" product-name="Locally Uncensored" product-version="${version}">
+        <authenticode-sign description="LU" description-url="https://github.com/PurpleDoubleD/locally-uncensored" />
+      </pe-file>
+    </directory>
+    <directory path="msi">
+      <pe-file path="locally-uncensored.exe" product-name="Locally Uncensored" product-version="${version}">
+        <authenticode-sign description="LU" description-url="https://github.com/PurpleDoubleD/locally-uncensored" />
+      </pe-file>
+    </directory>
+  </zip-file>
+</artifact-configuration>

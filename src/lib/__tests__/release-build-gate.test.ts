@@ -213,7 +213,9 @@ describe('a longer gate must not mean a longer window at Latest', () => {
     // run when the build FAILED, which is when leaving the flag on would be
     // worst, and it is what holds the promise on a manual re-run.
     expect(late).not.toBe('')
-    expect(late).toMatch(/^\s*needs:\s*build-tauri\s*$/m)
+    // Both build jobs: the macOS one may be skipped (no Apple secrets), and
+    // `always()` below covers that as it covers a failed lane.
+    expect(late).toMatch(/^\s*needs:\s*\[build-tauri, build-macos\]\s*$/m)
     expect(late).toMatch(/^\s*if:\s*always\(\)\s*$/m)
     expect(late).toContain('node scripts/enforce-prerelease.mjs')
   })

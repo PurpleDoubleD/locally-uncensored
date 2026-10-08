@@ -31,6 +31,10 @@ pnpm-lock.yaml
 # Rust build artifacts
 src-tauri/target/
 
+# Written by scripts/windows-signing-setup.ps1 during a signed release build:
+# the Tauri overlay that names the sign command. Never part of the tree.
+src-tauri/tauri.signing.conf.json
+
 # Environment
 .env
 

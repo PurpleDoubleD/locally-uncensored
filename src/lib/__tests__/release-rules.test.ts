@@ -160,7 +160,7 @@ describe('the workflow actually calls it', () => {
 
   it('after the binaries are attached, not before', () => {
     expect(wf).toContain('enforce-prerelease:')
-    expect(wf).toContain('needs: build-tauri')
+    expect(wf).toContain('needs: [build-tauri, build-macos]')
     expect(wf).toContain('node scripts/enforce-prerelease.mjs')
   })
 

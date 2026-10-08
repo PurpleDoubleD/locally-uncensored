@@ -1,0 +1,163 @@
+name: SignPath signing probe (Windows)
+
+# Runs the SignPath signing lane of release.yml once, by hand, so that the
+# setup can be tried and shown to SignPath before a release depends on it.
+#
+# It builds the commit it is started on, sends the same two signing requests
+# a release sends (.github/actions/windows-signpath), verifies the result and
+# keeps the signed installers as a workflow artifact for 7 days.
+#
+# What it never does: it creates no release, attaches nothing to one, and
+# does not read or write latest.json. The updater signatures it writes are
+# made with a key generated in the run and thrown away with it, so the release
+# updater key is not used here and no installed app would accept these files
+# as an update.
+#
+# The default signing policy is test-signing, whose certificate is
+# self-signed. Windows does not trust it, and the probe accepts exactly that.
+# To try the production certificate, start it with the release policy and
+# switch "allow-test-certificate" off.
+
+on:
+  workflow_dispatch:
+    inputs:
+      signing-policy-slug:
+        description: 'SignPath signing policy slug'
+        required: true
+        default: 'test-signing'
+      allow-test-certificate:
+        description: 'Accept a self-signed certificate that Windows does not trust'
+        type: boolean
+        default: true
+      expected-publisher:
+        description: 'Text the certificate subject must contain (empty: not checked)'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  # Same pin as release.yml and sidecar-windows.yml; bump the three together.
+  VULKAN_SDK_VERSION: '1.4.313.2'
+
+jobs:
+  probe:
+    # SignPath accepts builds from GitHub-hosted runners only.
+    runs-on: windows-latest
+    # Long enough for a policy with manual approval: two requests, each may
+    # wait two hours for a person.
+    timeout-minutes: 360
+    env:
+      SIDECAR_TRIPLE: x86_64-pc-windows-msvc
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Which SignPath values are present
+        id: signcfg
+        shell: bash
+        env:
+          SIGNPATH_API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
+          SIGNPATH_ORGANIZATION_ID: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          SIGNPATH_PROJECT_SLUG: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          SIGNPATH_SIGNING_POLICY_SLUG: ${{ inputs.signing-policy-slug }}
+        run: bash scripts/signing-config.sh windows
+
+      - name: Stop when the SignPath values are incomplete
+        if: steps.signcfg.outputs.signpath != 'true'
+        shell: bash
+        run: |
+          echo "::error::The probe needs the secret SIGNPATH_API_TOKEN and the repository variables SIGNPATH_ORGANIZATION_ID and SIGNPATH_PROJECT_SLUG."
+          exit 1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          workspaces: './src-tauri -> target'
+
+      # The bundled llama.cpp server has to exist before the app builds
+      # (tauri-build fails on a missing externalBin). Same steps and the same
+      # cache key as the Windows leg of release.yml.
+      - name: Sidecar build cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: D:/lb
+          key: llama-${{ hashFiles('scripts/build-llama.sh') }}-${{ env.SIDECAR_TRIPLE }}-v1
+
+      - name: Install Vulkan SDK
+        shell: pwsh
+        run: |
+          curl.exe -fL --retry 3 -o "$env:RUNNER_TEMP\VulkanSDK-Installer.exe" `
+            "https://sdk.lunarg.com/sdk/download/${env:VULKAN_SDK_VERSION}/windows/vulkansdk-windows-X64-${env:VULKAN_SDK_VERSION}.exe"
+          if ($LASTEXITCODE -ne 0) { throw "Vulkan SDK download failed" }
+          & "$env:RUNNER_TEMP\VulkanSDK-Installer.exe" --accept-licenses --default-answer --confirm-command install
+          Add-Content $env:GITHUB_ENV "VULKAN_SDK=C:\VulkanSDK\${env:VULKAN_SDK_VERSION}"
+
+      - name: Build llama-server sidecar
+        shell: bash
+        env:
+          BUILD_JOBS: 2
+          LLAMA_BUILD_CACHE: 'D:/lb'
+        run: bash scripts/build-llama.sh "$SIDECAR_TRIPLE"
+
+      - name: Assert sidecar exists
+        shell: bash
+        run: test -f "src-tauri/bin/lu-llama-server-$SIDECAR_TRIPLE.exe"
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      # Not the release key: one that exists for this run only.
+      - name: Generate a throwaway updater key
+        id: probe-key
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx tauri signer generate --ci -w "$RUNNER_TEMP/probe-updater.key" > /dev/null
+          key="$(cat "$RUNNER_TEMP/probe-updater.key")"
+          echo "::add-mask::$key"
+          echo "key=$key" >> "$GITHUB_OUTPUT"
+
+      - name: Build and sign the Windows installers (SignPath)
+        id: signpath
+        uses: ./.github/actions/windows-signpath
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ inputs.signing-policy-slug }}
+          expected-publisher: ${{ inputs.expected-publisher }}
+          allow-test-certificate: ${{ inputs.allow-test-certificate }}
+          updater-private-key: ${{ steps.probe-key.outputs.key }}
+
+      - name: Keep the signed installers as a workflow artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: windows-signpath-probe
+          path: ${{ steps.signpath.outputs.dist }}
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Say on the run page what was signed
+        shell: bash
+        env:
+          POLICY: ${{ inputs.signing-policy-slug }}
+          PUBLISHER: ${{ steps.signpath.outputs.publisher }}
+          APP_REQUEST: ${{ steps.signpath.outputs.app-signing-request }}
+          INSTALLERS_REQUEST: ${{ steps.signpath.outputs.installers-signing-request }}
+        run: |
+          {
+            echo "SignPath probe with signing policy \`$POLICY\`: both requests completed, publisher \`$PUBLISHER\`."
+            echo "Signing requests: [app binary]($APP_REQUEST), [installers]($INSTALLERS_REQUEST)."
+            echo "Nothing was published. The signed installers are in the workflow artifact \`windows-signpath-probe\`."
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -1,16 +1,32 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!--
-  Hardened Runtime entitlements (referenced via bundle.macOS.entitlements in
-  tauri.conf.json; derived from the proven LU-Labs bridge set).
+  Entitlements of the macOS build (bundle.macOS.entitlements in
+  tauri.conf.json). The bundler applies this one file to the main binary AND
+  to every externalBin, so lu-llama-server runs with the same set.
 
-  - allow-jit + allow-unsigned-executable-memory: WKWebView JavaScriptCore JIT.
-  - disable-library-validation: whisper/voice sidecar loads Python dylibs not
-    signed with our identity.
-  - network.client: Ollama/LM-Studio probes, Hugging Face + Civitai downloads.
-  - network.server: remote-access bridge listens on port 19191.
-  - device.audio-input: microphone for dictation/voice — required in a
-    notarized Hardened Runtime build even with NSMicrophoneUsageDescription.
+  The app is signed with the Hardened Runtime (tauri's default), ad hoc in a
+  local build and with a Developer ID in the release lane. The first three keys
+  are exceptions to it, and each one switches a protection off. The set below
+  is the one every Mac build so far has run with. Which of the three a
+  notarized build still needs has not been measured; Entitlements.minimal.plist
+  is the candidate to test before any of them is dropped.
+
+  - cs.allow-jit, cs.allow-unsigned-executable-memory: kept from the LU-Labs
+    bridge set. WKWebView runs its JavaScript JIT in Apple's own WebContent
+    process, not in this one, so the app itself is not expected to need them.
+  - cs.disable-library-validation: lets this process load libraries that are
+    not signed by Apple or by our team. Nothing in the bundle is such a
+    library. The Python the voice and MLX sidecars run on is a separate
+    program in a separate process and is not governed by this file at all.
+  - network.client, network.server: App Sandbox keys. The app is not
+    sandboxed, so they have no effect and only document what the app does
+    (model downloads, local backends, the remote access listener).
+  - device.audio-input: the microphone, for dictation and voice. Required
+    under the Hardened Runtime in addition to NSMicrophoneUsageDescription.
+
+  Computer control needs no key here: Accessibility and Screen Recording are
+  granted by the user in System Settings, to the signed identity of the app.
 -->
 <plist version="1.0">
 <dict>

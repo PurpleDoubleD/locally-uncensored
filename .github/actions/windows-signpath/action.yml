@@ -1,0 +1,208 @@
+name: Build and sign the Windows installers with SignPath
+description: >-
+  Builds the app, has SignPath sign the app binary, packs the installers
+  around the signed binary, has SignPath sign the installers, and writes the
+  updater signatures over the signed files. Publishes nothing.
+
+# SignPath signs artifacts that were uploaded to GitHub, after the build;
+# Tauri would sign during the build. So the build is split in two and SignPath
+# is asked twice:
+#
+#   1. `tauri build --no-bundle` compiles the app and stops.
+#   2. Request one (artifact configuration "windows-app"): the app binary.
+#   3. `tauri bundle` packs the NSIS installer and the MSI around the signed
+#      binary. It does not compile again and does not change the binary
+#      (read at tauri-cli 2.10.1; the binary is compared after each run).
+#   4. Request two (artifact configuration "windows-installers"): both
+#      installers. SignPath cannot look inside an NSIS installer, which is
+#      why the binary had to be signed first.
+#   5. The updater archives and their minisign signatures are made from the
+#      signed installers, so the updater checks the same bytes a user
+#      downloads.
+#
+# Every other file in the installers stays unsigned on purpose: the llama.cpp
+# server and its libraries are built from upstream source, and the terms of
+# the SignPath Foundation allow its certificate for this project's own
+# binaries only (https://signpath.org/terms, read 2026-10-08).
+#
+# The caller must have checked out the repository, installed Node, Rust and
+# the npm dependencies, and built the llama.cpp sidecar. Every job of the
+# workflow has to run on a GitHub-hosted runner, or SignPath refuses.
+#
+# Used by release.yml (publishes the result) and signpath-probe.yml (keeps it
+# as a workflow artifact).
+
+inputs:
+  api-token:
+    description: API token of the SignPath CI user that may submit to the signing policy.
+    required: true
+  organization-id:
+    description: SignPath organization ID.
+    required: true
+  project-slug:
+    description: SignPath project slug.
+    required: true
+  signing-policy-slug:
+    description: SignPath signing policy slug, for example test-signing or release-signing.
+    required: true
+  app-artifact-configuration-slug:
+    description: Slug of the artifact configuration in .signpath/artifact-configurations/windows-app.xml.
+    default: windows-app
+  installers-artifact-configuration-slug:
+    description: Slug of the artifact configuration in .signpath/artifact-configurations/windows-installers.xml.
+    default: windows-installers
+  wait-seconds:
+    description: >-
+      How long each signing request may wait for its result. A policy with
+      manual approval waits for a person, twice per build.
+    default: '7200'
+  expected-publisher:
+    description: Text the subject of the signing certificate must contain. Empty skips the check.
+    default: ''
+  allow-test-certificate:
+    description: Accept a self-signed certificate that Windows does not trust. Only for the test-signing policy.
+    default: 'false'
+  updater-private-key:
+    description: Tauri updater private key (minisign) that signs the updater files.
+    required: true
+  updater-private-key-password:
+    description: Password of the updater private key.
+    default: ''
+
+outputs:
+  dist:
+    description: Directory with the signed installers, the updater archives and their .sig files, under their release asset names.
+    value: ${{ steps.updater.outputs.dir }}
+  publisher:
+    description: Subject of the certificate that signed the installers.
+    value: ${{ steps.verify.outputs.publisher }}
+  app-signing-request:
+    description: URL of the first signing request in SignPath.
+    value: ${{ steps.sign-app.outputs.signing-request-web-url }}
+  installers-signing-request:
+    description: URL of the second signing request in SignPath.
+    value: ${{ steps.sign-installers.outputs.signing-request-web-url }}
+
+runs:
+  using: composite
+  steps:
+    - name: Build the app without bundling
+      shell: bash
+      run: npx tauri build --no-bundle
+
+    - name: Stage the app binary for signing
+      id: stage-app
+      shell: bash
+      run: node scripts/windows-signpath.mjs stage-app "$RUNNER_TEMP/signpath/app-unsigned"
+
+    # SignPath takes its input from GitHub's artifact store, not from the
+    # runner, so that what it signs is what this workflow run produced.
+    - name: Upload the unsigned app binary
+      id: upload-app
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      with:
+        name: windows-app-unsigned
+        path: ${{ steps.stage-app.outputs.dir }}
+        if-no-files-found: error
+        retention-days: 7
+        overwrite: true
+
+    - name: Sign the app binary (SignPath)
+      id: sign-app
+      uses: signpath/github-action-submit-signing-request@f6d04783b4569d051e0c80105fe66e82819d0092 # v3.0
+      with:
+        api-token: ${{ inputs.api-token }}
+        organization-id: ${{ inputs.organization-id }}
+        project-slug: ${{ inputs.project-slug }}
+        signing-policy-slug: ${{ inputs.signing-policy-slug }}
+        artifact-configuration-slug: ${{ inputs.app-artifact-configuration-slug }}
+        github-artifact-id: ${{ steps.upload-app.outputs.artifact-id }}
+        wait-for-completion: true
+        wait-for-completion-timeout-in-seconds: ${{ inputs.wait-seconds }}
+        output-artifact-directory: ${{ runner.temp }}/signpath/app-signed
+        parameters: |
+          version: "${{ steps.stage-app.outputs.version }}"
+
+    # One installer type per run, each around the copy of the binary that is
+    # marked for it. `check-app` fails the build if the bundler touched the
+    # signed file.
+    - name: Pack the installers around the signed app binary
+      shell: bash
+      env:
+        SIGNED: ${{ runner.temp }}/signpath/app-signed
+      run: |
+        set -euo pipefail
+        for kind in nsis msi; do
+          node scripts/windows-signpath.mjs place-app "$kind" "$SIGNED"
+          npx tauri bundle --bundles "$kind"
+          node scripts/windows-signpath.mjs check-app "$kind" "$SIGNED"
+        done
+
+    - name: Stage the installers for signing
+      id: stage-installers
+      shell: bash
+      run: node scripts/windows-signpath.mjs stage-installers "$RUNNER_TEMP/signpath/installers-unsigned"
+
+    - name: Upload the unsigned installers
+      id: upload-installers
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      with:
+        name: windows-installers-unsigned
+        path: ${{ steps.stage-installers.outputs.dir }}
+        if-no-files-found: error
+        retention-days: 7
+        overwrite: true
+
+    - name: Sign the installers (SignPath)
+      id: sign-installers
+      uses: signpath/github-action-submit-signing-request@f6d04783b4569d051e0c80105fe66e82819d0092 # v3.0
+      with:
+        api-token: ${{ inputs.api-token }}
+        organization-id: ${{ inputs.organization-id }}
+        project-slug: ${{ inputs.project-slug }}
+        signing-policy-slug: ${{ inputs.signing-policy-slug }}
+        artifact-configuration-slug: ${{ inputs.installers-artifact-configuration-slug }}
+        github-artifact-id: ${{ steps.upload-installers.outputs.artifact-id }}
+        wait-for-completion: true
+        wait-for-completion-timeout-in-seconds: ${{ inputs.wait-seconds }}
+        output-artifact-directory: ${{ runner.temp }}/signpath/installers-signed
+        parameters: |
+          version: "${{ steps.stage-app.outputs.version }}"
+
+    # The updater signature has to cover the file a user downloads. That file
+    # exists only now, so the .sig files are written here and not by the
+    # bundler.
+    - name: Write the updater archives and signatures over the signed installers
+      id: updater
+      shell: pwsh
+      env:
+        TAURI_SIGNING_PRIVATE_KEY: ${{ inputs.updater-private-key }}
+        TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ inputs.updater-private-key-password }}
+      run: |
+        $signed = Join-Path $env:RUNNER_TEMP 'signpath/installers-signed'
+        $dist = Join-Path $env:RUNNER_TEMP 'signpath/dist'
+        node scripts/windows-signpath.mjs updater-artifacts $signed $dist
+        if ($LASTEXITCODE -ne 0) { throw "the updater archives could not be written" }
+        foreach ($file in @(Get-ChildItem -File -Path $dist)) {
+          npx tauri signer sign $file.FullName | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw "tauri signer sign failed for $($file.Name)" }
+          if (-not (Test-Path "$($file.FullName).sig")) { throw "no updater signature was written for $($file.Name)" }
+        }
+        Get-ChildItem -File -Path $dist | Format-Table Name, Length
+
+    - name: Verify the signatures
+      id: verify
+      shell: pwsh
+      env:
+        DIST: ${{ steps.updater.outputs.dir }}
+        EXPECTED_PUBLISHER: ${{ inputs.expected-publisher }}
+        ALLOW_TEST_CERTIFICATE: ${{ inputs.allow-test-certificate }}
+        APP_BINARY: ${{ steps.stage-app.outputs.binary }}
+      run: |
+        $arguments = @{
+          BundleRoot = $env:DIST
+          ExpectedPublisher = $env:EXPECTED_PUBLISHER
+          SignedExecutables = @($env:APP_BINARY)
+        }
+        if ($env:ALLOW_TEST_CERTIFICATE -eq 'true') { $arguments.AllowTestCertificate = $true }
+        ./scripts/windows-signing-verify.ps1 @arguments
