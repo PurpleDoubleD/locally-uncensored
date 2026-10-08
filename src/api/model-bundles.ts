@@ -325,7 +325,7 @@ export function getImageBundles(): ModelBundle[] {
     },
     {
       name: 'Z-Image Turbo (Unfiltered, Fast)',
-      description: 'Explicitly unfiltered image model. No safety filters. Text to Image and Image to Image.',
+      description: 'Unfiltered image model. No safety filters. Text to Image and Image to Image.',
       tags: ['Z-Image', 'Unfiltered', 'Fast', '1024px'],
       uncensored: true,
       verified: true,
