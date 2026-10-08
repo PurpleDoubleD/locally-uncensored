@@ -21,12 +21,12 @@
   <zip-file>
     <directory path="nsis">
       <pe-file path="locally-uncensored.exe" product-name="Locally Uncensored" product-version="${version}">
-        <authenticode-sign description-url="https://github.com/PurpleDoubleD/locally-uncensored" />
+        <authenticode-sign />
       </pe-file>
     </directory>
     <directory path="msi">
       <pe-file path="locally-uncensored.exe" product-name="Locally Uncensored" product-version="${version}">
-        <authenticode-sign description-url="https://github.com/PurpleDoubleD/locally-uncensored" />
+        <authenticode-sign />
       </pe-file>
     </directory>
   </zip-file>

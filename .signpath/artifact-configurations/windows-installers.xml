@@ -19,10 +19,10 @@
   </parameters>
   <zip-file>
     <pe-file path="Locally Uncensored_${version}_x64-setup.exe" product-name="Locally Uncensored" product-version="${version}">
-      <authenticode-sign description-url="https://github.com/PurpleDoubleD/locally-uncensored" />
+      <authenticode-sign />
     </pe-file>
     <msi-file path="Locally Uncensored_${version}_x64_en-US.msi">
-      <authenticode-sign description-url="https://github.com/PurpleDoubleD/locally-uncensored" />
+      <authenticode-sign />
     </msi-file>
   </zip-file>
 </artifact-configuration>
