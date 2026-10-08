@@ -65,6 +65,15 @@ describe('the installer type marker', () => {
     expect(bundleTypeOf(UNPATCHED)).toBeNull()
   })
 
+  it('reads the mark of a real build, which carries every value once as a literal', () => {
+    // The app compares its marker against the NSS and MSI values, so both are
+    // in every build. The first probe run on GitHub read each copy as "nsis".
+    const real = fakeExe('__TAURI_BUNDLE_TYPE_VAR_NSS __TAURI_BUNDLE_TYPE_VAR_MSI code __TAURI_BUNDLE_TYPE_VAR_UNK end')
+    expect(bundleTypeOf(real)).toBeNull()
+    expect(bundleTypeOf(patchBundleType(real, 'nsis'))).toBe('nsis')
+    expect(bundleTypeOf(patchBundleType(real, 'msi'))).toBe('msi')
+  })
+
   it('does not modify the buffer it was given', () => {
     const before = Buffer.from(UNPATCHED)
     patchBundleType(UNPATCHED, 'nsis')

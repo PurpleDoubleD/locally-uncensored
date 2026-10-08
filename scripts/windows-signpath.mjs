@@ -68,12 +68,19 @@ export function patchBundleType(binary, variant) {
   return patched
 }
 
-/** Which installer type a binary is marked for: "nsis", "msi", or null. */
+/**
+ * Which installer type a binary is marked for: "nsis", "msi", or null.
+ *
+ * A real build carries every ..._NSS and ..._MSI value once already, as the
+ * literals the app compares its marker against. Marking overwrites the one
+ * ..._UNK with a second copy of a value, so the marked type is the value that
+ * occurs more often than the other, with no ..._UNK left.
+ */
 export function bundleTypeOf(binary) {
-  for (const [variant, value] of Object.entries(VARIANTS)) {
-    if (offsetsOf(binary, value).length > 0) return variant
-  }
-  return null
+  if (offsetsOf(binary, UNPATCHED).length > 0) return null
+  const counts = Object.entries(VARIANTS).map(([variant, value]) => [variant, offsetsOf(binary, value).length])
+  counts.sort((a, b) => b[1] - a[1])
+  return counts[0][1] > counts[1][1] ? counts[0][0] : null
 }
 
 /**
