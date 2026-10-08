@@ -185,7 +185,7 @@ A correctness release. Most of it is things that looked like they worked and did
 - Best in class: 24 GB+ VRAM for 35B MoE and 35B+ chat models
 
 ## Installation
-1. Download the signed installer for Windows or Linux from GitHub Releases (https://github.com/PurpleDoubleD/locally-uncensored/releases/latest). One-click install, no Docker, no terminal, no config files.
+1. Download the installer for Windows or Linux from GitHub Releases (https://github.com/PurpleDoubleD/locally-uncensored/releases/latest). One-click install, no Docker, no terminal, no config files.
 2. On first launch, the setup wizard scans for 12 local AI backends and offers one-click install links if none are running.
 3. Pick a model from the Model Manager and start chatting. Switch to the Coding Agent for coding, or open Create to generate images and video. Add cloud providers in Settings to mix local and cloud.
 
