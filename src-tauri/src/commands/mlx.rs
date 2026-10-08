@@ -451,7 +451,7 @@ pub const IMAGE_CATALOG: &[ImageCatalogEntry] = &[
     },
     ImageCatalogEntry {
         id: "nsfw-gen-v2",
-        name: "NSFW-gen v2",
+        name: "UnfilteredAI Gen v2",
         repo: "UnfilteredAI/NSFW-gen-v2",
         size_gb: 8.6,
         min_ram_gb: 16,
@@ -463,7 +463,7 @@ pub const IMAGE_CATALOG: &[ImageCatalogEntry] = &[
         disable_safety_checker: false,
         default_size: 1024,
         unfiltered: true,
-        description: "Explicitly unfiltered SDXL by UnfilteredAI — no content restrictions, adult themes included.",
+        description: "Unfiltered SDXL by UnfilteredAI, no content restrictions.",
         // This repo has fp16 weights for the unet and the VAE and none for
         // either text encoder, so the fp16 patterns copied from the RealVisXL
         // entry above matched no encoder file at all: GitHub 127. The install

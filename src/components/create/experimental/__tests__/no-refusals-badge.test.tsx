@@ -37,7 +37,7 @@ afterEach(() => {
 describe('CloudModel.adult (seed data)', () => {
   it('marks every hosted "Spicy" endpoint adult, and nothing else', () => {
     const adultIds = CLOUD_MODEL_SEED.filter((m) => m.adult).map((m) => m.id).sort()
-    const spicyIds = CLOUD_MODEL_SEED.filter((m) => m.label.includes('Spicy')).map((m) => m.id).sort()
+    const spicyIds = CLOUD_MODEL_SEED.filter((m) => m.label.includes('Uncensored')).map((m) => m.id).sort()
     expect(adultIds).toEqual(spicyIds)
     expect(adultIds.length).toBeGreaterThan(0)
   })

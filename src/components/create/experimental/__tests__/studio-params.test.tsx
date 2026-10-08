@@ -41,7 +41,7 @@ describe('AdvancedDrawer, Studio-Zweig', () => {
     useCreateStore.setState({ backend: 'cloud', mode: 'video' })
     render(createElement(AdvancedDrawer, { open: true, onClose: () => {}, studioModel: STUDIO_EXTEND_MODEL }))
     // Die Ueberschrift der Studio-Regler traegt den Modellnamen.
-    expect(screen.getByText(/Wan 2.2 Spicy Extend/i)).toBeTruthy()
+    expect(screen.getByText(/Wan 2.2 Uncensored Extend/i)).toBeTruthy()
     // Kein einziges Wort des Experten-Abschnitts (der ist ParamGroups' Sache).
     expect(screen.queryByText('Sampler')).toBeNull()
     expect(screen.queryByText('Scheduler')).toBeNull()

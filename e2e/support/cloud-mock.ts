@@ -192,7 +192,7 @@ export async function routeCloud(page: Page, scenario: CloudScenario): Promise<v
             // on EVERY scenario, not just studioCatalog, so
             // create-studio.spec.ts can prove the fallback actually resolves
             // to a real, pickable model instead of an empty list.
-            { id: 'wan-2.2-spicy-extend', label: 'Wan 2.2 Spicy Extend', kind: 'video', ops: ['extend'], t2v: false, i2v: false, adult: true, credits: { base: 15000 } },
+            { id: 'wan-2.2-spicy-extend', label: 'Wan 2.2 Uncensored Extend', kind: 'video', ops: ['extend'], t2v: false, i2v: false, adult: true, credits: { base: 15000 } },
             { id: 'wan-2.2-animate', label: 'Wan 2.2 Animate', kind: 'video', ops: ['motion'], t2v: false, i2v: false, credits: { base: 12000 } },
             ...(scenario.studioCatalog ? [STUDIO_CATALOG_MODEL] : []),
             ...(scenario.tierCatalog

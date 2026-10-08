@@ -2,7 +2,7 @@
  * Nachtrag zu Fund 5.
  *
  * Seit dem Fix rechnet die Oberflaeche jede MLX-Groesse ueber `formatBytes`,
- * also in 1024er-Schritten: die Karte von NSFW-gen v2 sagt "8.0 GB download",
+ * also in 1024er-Schritten: die Karte von UnfilteredAI Gen v2 sagt "8.0 GB download",
  * die Downloads-Leiste sagt dasselbe. Der Katalog in Rust fuehrt dieselbe Datei
  * weiter als `size_gb: 8.6`, weil er dezimal zaehlt und das auch selbst so
  * umrechnet (`size_gb as f64 * 1e9`).
@@ -104,7 +104,7 @@ function dezimalfunde(zeilen: string[], quelle: string): string[] {
 describe('die Katalogzahl bleibt in der Quelle', () => {
   it('die beiden Kataloge sind gelesen, nicht geraten', () => {
     expect(MLX_KATALOG).toHaveLength(14)
-    const nsfw = MLX_KATALOG.find((e) => e.name === 'NSFW-gen v2')
+    const nsfw = MLX_KATALOG.find((e) => e.name === 'UnfilteredAI Gen v2')
     expect(nsfw?.roh).toBe('8.6')
     // Die Zahl, um die es geht: derselbe Eintrag, zwei Zaehlweisen.
     expect(formatBytes(siGbToBytes(nsfw!.dezimalGB))).toBe('8.0 GB')
@@ -121,7 +121,7 @@ describe('die Katalogzahl bleibt in der Quelle', () => {
     // Positivkontrolle, sonst prueft der Lauf oben nur, dass die Texte die
     // Modelle gar nicht erwaehnen.
     const gesetzt = [
-      'Local media on the Mac: NSFW-gen v2 is an 8.6 GB download.',
+      'Local media on the Mac: UnfilteredAI Gen v2 is an 8.6 GB download.',
       'Z-Image Turbo braucht 25,0 GB Platz.',
     ]
     const funde = dezimalfunde(gesetzt, 'probe')
@@ -131,7 +131,7 @@ describe('die Katalogzahl bleibt in der Quelle', () => {
 
     // Gegenprobe: die richtige Zahl und eine Speicherangabe gehen durch.
     expect(dezimalfunde([
-      'Local media on the Mac: NSFW-gen v2 is an 8.0 GB download.',
+      'Local media on the Mac: UnfilteredAI Gen v2 is an 8.0 GB download.',
       'Z-Image Turbo runs from 10-16 GB VRAM.',
       'Qwen-Image needs 155 GB on disk.',
     ], 'probe')).toEqual([])

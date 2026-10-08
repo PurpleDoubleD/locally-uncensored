@@ -287,7 +287,7 @@
     "baselineUsd": 0.5
   },
   "wan-3.0-spicy": {
-    "label": "Wan 3.0 Spicy",
+    "label": "Wan 3.0 Uncensored",
     "endpoint": "alibaba/wan-3.0/image-to-video-spicy",
     "kind": "video",
     "adult": true,
@@ -365,7 +365,7 @@
     "baselineUsd": 0.01
   },
   "preset-wan-2.2-spicy": {
-    "label": "Wan 2.2 Spicy",
+    "label": "Wan 2.2 Uncensored",
     "endpoint": "wavespeed-ai/wan-2.2-spicy/image-to-video",
     "kind": "video",
     "adult": true,
@@ -386,7 +386,7 @@
     "baselineUsd": 0.15
   },
   "preset-wan-2.7-spicy": {
-    "label": "Wan 2.7 Spicy",
+    "label": "Wan 2.7 Uncensored",
     "endpoint": "alibaba/wan-2.7/image-to-video-spicy",
     "kind": "video",
     "adult": true,
@@ -408,7 +408,7 @@
     "baselineUsd": 0.5
   },
   "preset-wan-2.2-spicy-extend": {
-    "label": "Wan 2.2 Spicy Extend",
+    "label": "Wan 2.2 Uncensored Extend",
     "endpoint": "wavespeed-ai/wan-2.2-spicy/video-extend",
     "kind": "video",
     "adult": true,
@@ -754,7 +754,7 @@
     "baselineUsd": 0.75
   },
   "wan-3.0-prime-spicy": {
-    "label": "Wan 3.0 Prime Spicy",
+    "label": "Wan 3.0 Prime Uncensored",
     "endpoint": "alibaba/wan-3.0-prime/image-to-video-spicy",
     "kind": "video",
     "adult": true,

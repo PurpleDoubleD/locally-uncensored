@@ -128,7 +128,7 @@ const credits = (usd: number) => Math.ceil(usd / CREDIT_USD)
  * gegen den Entscheid geprueft, damit ein Rueckfall des Webs auf "Open" nicht
  * als blosse Abweichung durchgeht, sondern benennt, welche Seite recht hat.
  */
-const MARKENWORT = 'Spicy'
+const MARKENWORT = 'Uncensored'
 
 describe.skipIf(!WEB)('Katalogparitaet Desktop gegen Web', () => {
   const klassischWeb = () => webKatalog().filter((m) => !m.ops)

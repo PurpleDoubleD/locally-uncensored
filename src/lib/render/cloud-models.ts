@@ -128,9 +128,9 @@ export const CLOUD_MODEL_SEED: CloudModel[] = [
   { id: 'hidream', label: 'HiDream', kind: 'image', tier: 'older', weights: 'open' },
   { id: 'hunyuan-image', label: 'HunyuanImage 2.1', kind: 'image', tier: 'older', weights: 'open' },
   { id: 'z-image-turbo', label: 'Z-Image Turbo (fast)', kind: 'image', tier: 'best', weights: 'open' },
-  { id: 'chroma', label: 'Chroma Spicy', kind: 'image', adult: true, tier: 'standard', weights: 'open' },
-  { id: 'prefect-pony', label: 'Prefect Pony XL (illustration) Spicy', kind: 'image', adult: true, tier: 'standard', weights: 'open' },
-  { id: 'neta-lumina', label: 'Neta Lumina (anime) Spicy', kind: 'image', adult: true, tier: 'standard', weights: 'open' },
+  { id: 'chroma', label: 'Chroma Uncensored', kind: 'image', adult: true, tier: 'standard', weights: 'open' },
+  { id: 'prefect-pony', label: 'Prefect Pony XL (illustration) Uncensored', kind: 'image', adult: true, tier: 'standard', weights: 'open' },
+  { id: 'neta-lumina', label: 'Neta Lumina (anime) Uncensored', kind: 'image', adult: true, tier: 'standard', weights: 'open' },
   // Every hosted clip model does both t2v + i2v, so both flags are true. They're
   // the enforced contract (Video/Animate pickers + submit filter on them), not a
   // note — a future t2v-only or i2v-only model MUST set the flag it lacks to
@@ -148,17 +148,17 @@ export const CLOUD_MODEL_SEED: CloudModel[] = [
   // first, then one of these. CLIP does not fit here, the provider quotes only
   // a 5 s rate for them, so there is no 8s button to offer.
   // 2026-09-10:
-  { id: 'wan-2.2-spicy', label: 'Wan 2.2 Spicy', kind: 'video', t2v: false, i2v: true, adult: true, clip: { short: 5 }, credits: { base: 15000, lora: 20000 }, tier: 'older', weights: 'open' },
-  { id: 'ltx-2.3-spicy', label: 'LTX 2.3 Spicy', kind: 'video', t2v: false, i2v: true, adult: true, clip: { short: 5 }, credits: { base: 10000, lora: 15000 }, tier: 'older', weights: 'open' },
-  { id: 'wan-2.6-spicy', label: 'Wan 2.6 Spicy', kind: 'video', t2v: false, i2v: true, adult: true, clip: { short: 5 }, credits: { base: 50000 }, tier: 'older', weights: 'open-family' },
-  { id: 'wan-2.7-spicy', label: 'Wan 2.7 Spicy', kind: 'video', t2v: false, i2v: true, adult: true, clip: { short: 5 }, credits: { base: 50000 }, tier: 'standard', weights: 'open-family' },
-  { id: 'minimax-h3-spicy', label: 'MiniMax H3 Spicy', kind: 'video', t2v: false, i2v: true, adult: true, clip: { short: 5 }, credits: { base: 20000 }, tier: 'best', weights: 'open' },
-  { id: 'seedance-1.5-pro-spicy', label: 'Seedance 1.5 Pro Spicy', kind: 'video', t2v: false, i2v: true, adult: true, clip: { short: 5 }, credits: { base: 26000 }, tier: 'older', weights: 'closed' },
+  { id: 'wan-2.2-spicy', label: 'Wan 2.2 Uncensored', kind: 'video', t2v: false, i2v: true, adult: true, clip: { short: 5 }, credits: { base: 15000, lora: 20000 }, tier: 'older', weights: 'open' },
+  { id: 'ltx-2.3-spicy', label: 'LTX 2.3 Uncensored', kind: 'video', t2v: false, i2v: true, adult: true, clip: { short: 5 }, credits: { base: 10000, lora: 15000 }, tier: 'older', weights: 'open' },
+  { id: 'wan-2.6-spicy', label: 'Wan 2.6 Uncensored', kind: 'video', t2v: false, i2v: true, adult: true, clip: { short: 5 }, credits: { base: 50000 }, tier: 'older', weights: 'open-family' },
+  { id: 'wan-2.7-spicy', label: 'Wan 2.7 Uncensored', kind: 'video', t2v: false, i2v: true, adult: true, clip: { short: 5 }, credits: { base: 50000 }, tier: 'standard', weights: 'open-family' },
+  { id: 'minimax-h3-spicy', label: 'MiniMax H3 Uncensored', kind: 'video', t2v: false, i2v: true, adult: true, clip: { short: 5 }, credits: { base: 20000 }, tier: 'best', weights: 'open' },
+  { id: 'seedance-1.5-pro-spicy', label: 'Seedance 1.5 Pro Uncensored', kind: 'video', t2v: false, i2v: true, adult: true, clip: { short: 5 }, credits: { base: 26000 }, tier: 'older', weights: 'closed' },
   // 2026-09-13:
-  { id: 'seedance-2.5-spicy', label: 'Seedance 2.5 Spicy', kind: 'video', t2v: false, i2v: true, adult: true, clip: { short: 5 }, credits: { base: 90000 }, tier: 'best', weights: 'closed' },
-  { id: 'seedance-2.0-spicy', label: 'Seedance 2.0 Spicy', kind: 'video', t2v: false, i2v: true, adult: true, clip: { short: 5 }, credits: { base: 60000 }, tier: 'older', weights: 'closed' },
-  { id: 'seedance-2.0-fast-spicy', label: 'Seedance 2.0 Fast Spicy', kind: 'video', t2v: false, i2v: true, adult: true, clip: { short: 5 }, credits: { base: 50000 }, tier: 'older', weights: 'closed' },
-  { id: 'vidu-q3-spicy', label: 'Vidu Q3 Spicy', kind: 'video', t2v: false, i2v: true, adult: true, clip: { short: 5 }, credits: { base: 35000 }, tier: 'standard', weights: 'closed' },
+  { id: 'seedance-2.5-spicy', label: 'Seedance 2.5 Uncensored', kind: 'video', t2v: false, i2v: true, adult: true, clip: { short: 5 }, credits: { base: 90000 }, tier: 'best', weights: 'closed' },
+  { id: 'seedance-2.0-spicy', label: 'Seedance 2.0 Uncensored', kind: 'video', t2v: false, i2v: true, adult: true, clip: { short: 5 }, credits: { base: 60000 }, tier: 'older', weights: 'closed' },
+  { id: 'seedance-2.0-fast-spicy', label: 'Seedance 2.0 Fast Uncensored', kind: 'video', t2v: false, i2v: true, adult: true, clip: { short: 5 }, credits: { base: 50000 }, tier: 'older', weights: 'closed' },
+  { id: 'vidu-q3-spicy', label: 'Vidu Q3 Uncensored', kind: 'video', t2v: false, i2v: true, adult: true, clip: { short: 5 }, credits: { base: 35000 }, tier: 'standard', weights: 'closed' },
 
   // ── 2.5.8 op-specialized fleet (Character-Studio / lipsync / voice / music /
   // extend / motion). `ops` keeps them out of every classic picker; the live
@@ -190,7 +190,7 @@ export const CLOUD_MODEL_SEED: CloudModel[] = [
   { id: 'ace-step', label: 'ACE-Step (fast)', kind: 'audio', ops: ['music'], credits: { base: 1200, per_s: 20 }, tier: 'older', weights: 'open' },
   { id: 'ace-step-1.5', label: 'ACE-Step 1.5', kind: 'audio', ops: ['music'], lyrics: true, credits: { base: 1800, per_s: 30 }, tier: 'standard', weights: 'open' },
   { id: 'sonilo-music', label: 'Sonilo Music', kind: 'audio', ops: ['music'], credits: { base: 15000, per_s: 250 }, tier: 'standard', weights: 'closed' },
-  { id: 'wan-2.2-spicy-extend', label: 'Wan 2.2 Spicy Extend', kind: 'video', ops: ['extend'], t2v: false, i2v: false, adult: true, credits: { base: 15000, lora: 20000 }, tier: 'older', weights: 'open' },
+  { id: 'wan-2.2-spicy-extend', label: 'Wan 2.2 Uncensored Extend', kind: 'video', ops: ['extend'], t2v: false, i2v: false, adult: true, credits: { base: 15000, lora: 20000 }, tier: 'older', weights: 'open' },
   { id: 'ltx-2-extend', label: 'LTX-2 Extend', kind: 'video', ops: ['extend'], t2v: false, i2v: false, tier: 'older', weights: 'open' },
   { id: 'pixverse-extend', label: 'Pixverse Extend (fast)', kind: 'video', ops: ['extend'], t2v: false, i2v: false, tier: 'standard', weights: 'closed' },
   { id: 'wan-2.2-animate', label: 'Wan 2.2 Animate', kind: 'video', ops: ['motion'], t2v: false, i2v: false, tier: 'standard', weights: 'open' },

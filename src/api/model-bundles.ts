@@ -1549,7 +1549,7 @@ export function getVideoBundles(): ModelBundle[] {
       ],
     },
     {
-      name: 'NSFW Wan 14B (Uncensored, GGUF)',
+      name: 'Wan 14B Uncensored (GGUF)',
       description: 'Full uncensored finetune of Wan 2.1 14B. Text to video, motion trained in, no helper LoRA needed.',
       tags: ['Wan 2.1', 'Uncensored', 'GGUF', '480p'],
       uncensored: true,
@@ -1561,7 +1561,7 @@ export function getVideoBundles(): ModelBundle[] {
       url: 'https://huggingface.co/NSFW-API/NSFW_Wan_14b',
       files: [
         {
-          name: 'NSFW Wan 14B Q4 (GGUF)',
+          name: 'Wan 14B Uncensored Q4 (GGUF)',
           description: 'The finetuned video model, final e15 epoch, Q4 quant.',
           pulls: '', tags: ['Model', '9 GB'], updated: '',
           downloadUrl: 'https://huggingface.co/NSFW-API/NSFW_Wan_14b/resolve/main/nsfw_wan_14b_e15_q4_k.gguf',

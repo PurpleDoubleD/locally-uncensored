@@ -217,7 +217,7 @@ describe('every bundle in the catalogue carries the two numbers', () => {
     ['SVD-XT 1.1 (Image to Video)', 12, 12, 'big fits fits fits'],
     ['Mochi 1 Preview (FP8)', 16, 16, 'big big fits fits'],
     ['NVIDIA Cosmos 7B', 24, 24, 'big big big fits'],
-    ['NSFW Wan 14B (Uncensored, GGUF)', 10, 12, 'big fits fits fits'],
+    ['Wan 14B Uncensored (GGUF)', 10, 12, 'big fits fits fits'],
     ['Wan 2.2 Rapid AIO (Uncensored I2V, GGUF)', 10, 12, 'big fits fits fits'],
     ['ACE Step 1.5 Turbo (Music)', 6, 10.8, 'tight fits fits fits'],
     ['YuE2 (Songs from Style and Lyrics)', 6, 8, 'fits fits fits fits'],

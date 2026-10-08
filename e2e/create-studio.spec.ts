@@ -178,7 +178,7 @@ test('an older server (no quote_required): Extend and Motion behave exactly as b
   // The classic twin from the mocked catalog, not a Studio id: proves
   // resolveIntentPick fell back instead of picking a model this server
   // never announced.
-  await expect(page.getByRole('button', { name: /Wan 2\.2 Spicy Extend/ })).toBeVisible({ timeout: 15_000 })
+  await expect(page.getByRole('button', { name: /Wan 2\.2 Uncensored Extend/ })).toBeVisible({ timeout: 15_000 })
   // The old, pre-Studio failure mode: no version-gap alert, because no
   // studio-quote call was ever made for a classic pick. (This app always
   // shows an unrelated "ComfyUI is not running" banner on the cloud track

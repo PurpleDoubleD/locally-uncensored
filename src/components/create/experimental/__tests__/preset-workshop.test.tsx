@@ -281,7 +281,7 @@ it('ein Preset mit Freigabe bietet nur die offenen Modelle an', async () => {
   render(<PresetWorkshop preset={CREATE_PRESETS[0]} onClose={() => {}} onGenerate={() => {}} />)
   const namen = eintraege('Model')
   expect(namen).toEqual(sortByTier(presetModels('image', true)).map((m) => m.label))
-  expect(namen).toContain('Chroma Spicy')
+  expect(namen).toContain('Chroma Uncensored')
   expect(namen).not.toContain('Flux Schnell (fast)')
 })
 
@@ -291,7 +291,7 @@ it('laesst den Kunden das Modell des Schrittes wechseln und bucht das gewechselt
   const namen = eintraege('Model')
   expect(namen).toContain('Flux Schnell (fast)')
   // Derselbe Endpunkt steht nicht zweimal drin, einmal als Studio-Zwilling.
-  expect(namen.filter((n) => n === 'Chroma Spicy')).toHaveLength(1)
+  expect(namen.filter((n) => n === 'Chroma Uncensored')).toHaveLength(1)
 
   fireEvent.change(screen.getByLabelText('Preset prompt'), { target: { value: 'a portrait in warm light' } })
   await waitFor(() => expect((screen.getByRole('button', { name: 'Generate' }) as HTMLButtonElement).disabled).toBe(false), { timeout: 3000 })
@@ -370,7 +370,7 @@ it('bleibt waehrend der Generation offen und meldet den Start nur', async () => 
 
 it('bietet Continue oben in der Leiste an und nicht als Banner ueber dem Bild', () => {
   const weiter = vi.fn()
-  render(<ShelfMitZustand onSelect={() => {}} resume={{ title: 'Spicy Anime', onResume: weiter }} />)
+  render(<ShelfMitZustand onSelect={() => {}} resume={{ title: 'Uncensored Anime', onResume: weiter }} />)
   fireEvent.click(screen.getByRole('button', { name: 'Expand presets' }))
   const knopf = screen.getByRole('button', { name: 'Continue' })
   expect(knopf.parentElement?.textContent).toContain(`Presets · ${CREATE_PRESETS.length}`)
