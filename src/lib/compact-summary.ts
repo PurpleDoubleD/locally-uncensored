@@ -272,8 +272,22 @@ export function parseCompactSummary(text: string): CompactSummary {
   const out: CompactSummary = { ...EMPTY_SUMMARY }
   const buckets: Record<string, string[]> = { rest: [] }
   let current = 'rest'
+  let fence: { marker: string; length: number } | undefined
 
   for (const line of src.split('\n')) {
+    // Section names inside fenced code are literal text, not summary headings.
+    const marker = line.match(/^ {0,3}(`{3,}|~{3,})(.*)$/)
+    if (fence) {
+      if (marker && marker[1][0] === fence.marker && marker[1].length >= fence.length
+          && marker[2].trim() === '') fence = undefined
+      buckets[current].push(line)
+      continue
+    }
+    if (marker && (marker[1][0] === '~' || !marker[2].includes('`'))) {
+      fence = { marker: marker[1][0], length: marker[1].length }
+      buckets[current].push(line)
+      continue
+    }
     const m = line.match(headingRe)
     if (m) {
       const wort = m[1].toLowerCase()
