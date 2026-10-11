@@ -4,6 +4,7 @@ import { Plus, Trash2, Power, PowerOff, Pencil } from 'lucide-react'
 import { useMCPStore } from '../../stores/mcpStore'
 import { toolRegistry } from '../../api/mcp'
 import type { MCPServerConfig } from '../../api/mcp/types'
+import { parallelSearchConfig } from '../../api/mcp/presets'
 // `import type` und nicht `import`: die Klasse wird unten bewusst dynamisch
 // geladen, damit der Tauri-Import im Dev-Modus nicht mitkommt. Ein Typ-Import
 // wird beim Uebersetzen geloescht und erzeugt keine Laufzeit-Abhaengigkeit —
@@ -131,6 +132,19 @@ export function MCPServerSettings() {
       <p className="text-[0.6rem] text-gray-500">
         Connect external MCP servers to extend Agent capabilities with community tools.
       </p>
+      <div className="space-y-1">
+        <button
+          onClick={() => addServer(parallelSearchConfig(uuid()))}
+          disabled={servers.some((server) => server.toolPrefix === 'parallel_')}
+          className="px-3 py-1.5 rounded-lg text-[0.65rem] text-gray-300 bg-white/5 border border-white/10 hover:bg-white/10 disabled:opacity-40"
+        >
+          Add Parallel Search
+        </button>
+        <p className="text-[0.6rem] text-gray-500">
+          Free web search and page fetching, no account or API key. Requires Node.js and internet access.
+          Queries and fetched URLs are sent to Parallel. Add it, then click Connect.
+        </p>
+      </div>
 
       {/* Server List */}
       {servers.map((server) => {

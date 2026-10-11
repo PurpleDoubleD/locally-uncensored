@@ -12,6 +12,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { MCPExternalClient } from '../external-client'
 import type { MCPServerConfig } from '../types'
+import { parallelSearchConfig } from '../presets'
+import { ToolRegistry } from '../tool-registry'
 
 class Emitter {
   private handlers: Record<string, ((data: string) => void)[]> = {}
@@ -364,5 +366,33 @@ describe('the settings panel is what acts on that', () => {
     expect(panel).toContain('toolRegistry.unregisterServer(id)')
     expect(panel).toContain('setConnected(id, false)')
     expect(panel).toContain('clearServerTools(id)')
+  })
+})
+
+describe('optional external tool namespace', () => {
+  it('preserves builtins and sends the original remote name through registry dispatch', async () => {
+    responder = (req) => {
+      if (req.method === 'tools/list') return JSON.stringify({
+        jsonrpc: '2.0', id: req.id,
+        result: { tools: [{ name: 'web_search', description: 'search', inputSchema: { type: 'object', properties: {}, required: [] } }] },
+      })
+      if (req.method === 'tools/call') return JSON.stringify({
+        jsonrpc: '2.0', id: req.id, result: { content: [{ type: 'text', text: 'Useful remote result' }] },
+      })
+      return goodServer(req)
+    }
+    const client = new MCPExternalClient(parallelSearchConfig('parallel-test'))
+    const tools = await client.connect()
+    const registry = new ToolRegistry()
+    registry.registerBuiltin({ ...tools[0], name: 'web_search', source: 'builtin' }, async () => 'Existing provider')
+    registry.registerExternal('parallel-test', tools, async (name, args) => client.callTool(name, args))
+    expect(tools[0].name).toBe('parallel_web_search')
+    expect(await registry.execute('web_search', {})).toBe('Existing provider')
+    expect(await registry.execute('parallel_web_search', { objective: 'find something' })).toBe('Useful remote result')
+    expect(JSON.parse(lastServer!.written.at(-1)!).params).toEqual({ name: 'web_search', arguments: { objective: 'find something' } })
+    registry.unregisterServer('parallel-test')
+    expect(registry.getToolByName('parallel_web_search')).toBeUndefined()
+    expect(await registry.execute('web_search', {})).toBe('Existing provider')
+    await client.disconnect()
   })
 })

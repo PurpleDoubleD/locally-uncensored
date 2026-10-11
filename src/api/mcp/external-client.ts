@@ -176,6 +176,7 @@ export class MCPExternalClient {
   }>()
   private outputBuffer = ''
   private connected = false
+  private remoteToolNames = new Map<string, string>()
   /** True while OUR disconnect() is taking the process down, so the close
    *  handler can tell a deliberate shutdown from a server that died. */
   private closingOnPurpose = false
@@ -282,6 +283,7 @@ export class MCPExternalClient {
       // Discover tools
       const toolsResult = await this.sendRequest('tools/list', {})
       const tools: MCPToolDefinition[] = []
+      this.remoteToolNames.clear()
       for (const t of asRecordArray(prop(toolsResult, 'tools'))) {
         const toolName = asString(t.name)
         // A tool with no name cannot be looked up, called or unregistered — it
@@ -290,8 +292,10 @@ export class MCPExternalClient {
           log.warn(`[MCP:${this.config.name}] ignoring a tool with no name in tools/list`)
           continue
         }
+        const exposedName = `${this.config.toolPrefix ?? ''}${toolName}`
+        this.remoteToolNames.set(exposedName, toolName)
         tools.push({
-          name: toolName,
+          name: exposedName,
           description: asString(t.description) || '',
           inputSchema: isToolInputSchema(t.inputSchema) ? t.inputSchema : EMPTY_INPUT_SCHEMA,
           category: 'workflow', // External tools default to workflow category
@@ -316,7 +320,8 @@ export class MCPExternalClient {
   async callTool(name: string, args: ToolArgs): Promise<string> {
     if (!this.connected) throw new Error('Not connected')
 
-    const result = await this.sendRequest('tools/call', { name, arguments: args })
+    const remoteName = this.remoteToolNames.get(name) ?? name
+    const result = await this.sendRequest('tools/call', { name: remoteName, arguments: args })
 
     // MCP returns a content array of `{ type, ... }` blocks.
     const content = prop(result, 'content')

@@ -65,6 +65,8 @@ export interface MCPServerConfig {
   command: string
   args: string[]
   env?: Record<string, string>
+  /** Optional model-visible namespace; calls still use the server's original names. */
+  toolPrefix?: string
   enabled: boolean
 }
 
