@@ -9,6 +9,7 @@ export function parallelSearchConfig(id: string): MCPServerConfig {
     args: [
       '-y', 'mcp-remote@0.14.3', 'https://search.parallel.ai/mcp',
       '--transport', 'http-only',
+      '--enable-proxy',
       '--header', 'User-Agent:locally-uncensored',
     ],
     toolPrefix: 'parallel_',

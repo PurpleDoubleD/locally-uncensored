@@ -17,6 +17,7 @@ lower rate limits for anonymous use. It needs an internet connection and sends
 search queries and fetched URLs to Parallel, so this optional service is not offline.
 
 The preset runs `npx -y mcp-remote@0.14.3 https://search.parallel.ai/mcp --transport
-http-only --header User-Agent:locally-uncensored`. The bridge connects using
+http-only --enable-proxy --header User-Agent:locally-uncensored`. The bridge connects using
 Streamable HTTP; `parallel_` is a local tool namespace to avoid collisions with
-LU's built-in tools.
+LU's built-in tools. It respects `HTTPS_PROXY`, `HTTP_PROXY` and `NO_PROXY` if
+your environment uses an outbound proxy.
