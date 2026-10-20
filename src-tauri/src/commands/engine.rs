@@ -129,6 +129,103 @@ impl Default for EngineTuning {
     }
 }
 
+/// A successful request, kept separately from the reapable process handle.
+/// Keep the requested tuning (including auto GPU layers), and the port that
+/// actually served. Recovery must never silently revert a chosen 256K context.
+#[derive(Debug, Clone, PartialEq)]
+pub struct EngineRecoveryRecipe {
+    pub model_path: String,
+    pub tuning: EngineTuning,
+    pub port: u16,
+}
+
+const REMOTE_ENGINE_WAIT: Duration = Duration::from_secs(600);
+const REMOTE_ENGINE_STOPPED: &str = "The LU Engine was deliberately stopped. Start it in Settings, AI Backends before continuing.";
+
+/// Waiting for the existing start gate also waits for a desktop model/context
+/// reload. Unlike an explicit start, recovery never clears a stop request.
+fn recovery_gate<'a>(gate: &'a std::sync::Mutex<()>, stopped: &std::sync::atomic::AtomicBool) -> Result<std::sync::MutexGuard<'a, ()>, String> {
+    let deadline = Instant::now() + REMOTE_ENGINE_WAIT;
+    loop {
+        if stopped.load(std::sync::atomic::Ordering::SeqCst) {
+            return Err(REMOTE_ENGINE_STOPPED.into());
+        }
+        match gate.try_lock() {
+            Ok(guard) => return Ok(guard),
+            Err(std::sync::TryLockError::Poisoned(error)) => return Ok(error.into_inner()),
+            Err(std::sync::TryLockError::WouldBlock) => {}
+        }
+        if Instant::now() >= deadline {
+            return Err("The LU Engine is still reloading. Wait for it to finish, then try again.".into());
+        }
+        std::thread::sleep(Duration::from_millis(25));
+    }
+}
+
+/// Separated from Tauri/process creation so races with Stop, concurrent phone
+/// requests and desktop swaps can be checked without launching a real model.
+fn ensure_remote_engine_with(
+    gate: &std::sync::Mutex<()>,
+    stopped: &std::sync::atomic::AtomicBool,
+    recipes: &std::sync::Mutex<Option<EngineRecoveryRecipe>>,
+    dispatched_path: &str,
+    probe: impl Fn() -> Option<(String, u16, bool)>,
+    start: impl FnOnce(&EngineRecoveryRecipe) -> Result<u16, String>,
+) -> Result<u16, String> {
+    let _gate = recovery_gate(gate, stopped)?;
+    if stopped.load(std::sync::atomic::Ordering::SeqCst) { return Err(REMOTE_ENGINE_STOPPED.into()); }
+    let recipe = recipes.lock().map_err(|_| "LU Engine recovery state unavailable")?.clone()
+        .ok_or("The LU Engine has no previously loaded model to recover. Start it in Settings, AI Backends.")?;
+    if recipe.model_path != dispatched_path {
+        return Err("The desktop changed the loaded model. Dispatch Remote Access again before continuing.".into());
+    }
+    if let Some((model, port, healthy)) = probe() {
+        if model != dispatched_path {
+            return Err("The desktop changed the loaded model. Dispatch Remote Access again before continuing.".into());
+        }
+        // An alive but unresponsive model is not evidence of a crash. Never
+        // kill an inference another desktop/phone request may still be using.
+        if !healthy { return Err("The LU Engine is running but is not ready. Wait for its current operation, then try again.".into()); }
+        return Ok(port);
+    }
+    // A Stop arriving while we inspected the handle must still prevent spawn.
+    if stopped.load(std::sync::atomic::Ordering::SeqCst) { return Err(REMOTE_ENGINE_STOPPED.into()); }
+    start(&recipe)
+}
+
+pub(crate) async fn ensure_remote_engine(app: AppHandle, dispatched_path: String) -> Result<u16, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        ensure_remote_engine_with(
+            &crate::commands::process::ENGINE_START,
+            &state.engine_stop_requested,
+            &state.bundled_engine_recovery,
+            &dispatched_path,
+            || {
+                let live = { let mut slot = state.bundled_engine.lock().unwrap(); live_sidecar(&mut slot) }?;
+                let healthy = engine_healthy(live.port);
+                if !healthy {
+                    // The process can exit during the HTTP probe itself.
+                    // Reap that death now rather than report an alive/busy
+                    // engine until the phone's next request.
+                    let mut slot = state.bundled_engine.lock().unwrap();
+                    live_sidecar(&mut slot)?;
+                }
+                Some((live.model_path, live.port, healthy))
+            },
+            |recipe| {
+                tracing::warn!(target: "engine", port = recipe.port, ctx = effective_ctx(&recipe.tuning), "recovering the Remote session's exited LU Engine");
+                let answer = start_engine_and_remember(&app, &state, recipe.model_path.clone(), recipe.tuning.clone(), recipe.port)?;
+                if stop_was_requested(&state) || answer.get("status").and_then(|v| v.as_str()) == Some("stopped") {
+                    return Err(REMOTE_ENGINE_STOPPED.into());
+                }
+                answer.get("port").and_then(|p| p.as_u64()).and_then(|p| u16::try_from(p).ok())
+                    .ok_or_else(|| "The LU Engine restart did not return a serving port.".into())
+            },
+        )
+    }).await.map_err(|e| format!("LU Engine recovery task failed: {e}"))?
+}
+
 /// KV cache types this build of llama-server accepts and we consider sane.
 const KV_CACHE_TYPES: &[&str] = &["f16", "bf16", "q8_0", "q4_0"];
 
@@ -2937,8 +3034,48 @@ fn start_bundled_engine_blocking(
     // now wants it. Cleared under the gate, so it is only ever a stop that
     // arrives DURING this start that the waits below get to see.
     state.engine_stop_requested.store(false, std::sync::atomic::Ordering::SeqCst);
-    let tuning = tuning.unwrap_or_default();
-    let port = port.unwrap_or(DEFAULT_ENGINE_PORT);
+    start_engine_and_remember(app, state, model_path, tuning.unwrap_or_default(), port.unwrap_or(DEFAULT_ENGINE_PORT))
+}
+
+/// Caller holds ENGINE_START. Both explicit starts and Remote recovery use
+/// the same startup, rollback, GPU fallback and model-file validation path.
+/// Only an explicit start above is permitted to clear a deliberate Stop.
+fn start_engine_and_remember(
+    app: &AppHandle,
+    state: &State<'_, AppState>,
+    model_path: String,
+    tuning: EngineTuning,
+    port: u16,
+) -> Result<serde_json::Value, String> {
+    if stop_was_requested(state) { return Ok(stopped_answer(port, &model_path)); }
+    let result = start_bundled_engine_locked(app, state, model_path.clone(), &tuning, port);
+    remember_engine_request(&state.bundled_engine_recovery, &state.engine_stop_requested, model_path, tuning, &result);
+    result
+}
+
+fn remember_engine_request(
+    recipes: &std::sync::Mutex<Option<EngineRecoveryRecipe>>,
+    stopped: &std::sync::atomic::AtomicBool,
+    model_path: String,
+    tuning: EngineTuning,
+    result: &Result<serde_json::Value, String>,
+) {
+    let Ok(answer) = result else { return };
+    if stopped.load(std::sync::atomic::Ordering::SeqCst) { return; }
+    if !matches!(answer.get("status").and_then(|s| s.as_str()), Some("started" | "already_running")) { return; }
+    let Some(port) = answer.get("port").and_then(|p| p.as_u64()).and_then(|p| u16::try_from(p).ok()) else { return };
+    if let Ok(mut latest) = recipes.lock() {
+        *latest = Some(EngineRecoveryRecipe { model_path, tuning, port });
+    }
+}
+
+fn start_bundled_engine_locked(
+    app: &AppHandle,
+    state: &State<'_, AppState>,
+    model_path: String,
+    tuning: &EngineTuning,
+    port: u16,
+) -> Result<serde_json::Value, String> {
 
     if !Path::new(&model_path).exists() {
         return Err(format!("Model file not found: {model_path}"));
@@ -7567,7 +7704,7 @@ mod tests {
         // Rueckfall ueberhaupt fehlen konnte.
         let src = include_str!("engine.rs");
         let wechsel = src
-            .split("fn start_bundled_engine_blocking(")
+            .split("fn start_bundled_engine_locked(")
             .nth(1)
             .expect("the switch is gone")
             .split("\nfn ")
@@ -8452,11 +8589,12 @@ mod tests {
             assert!(asked < at, "the stop is asked about after `{later}`");
         }
 
-        let switch = body_of("fn start_bundled_engine_blocking(");
-        let cleared = switch.find("engine_stop_requested.store(false").expect("a start no longer clears an old stop");
-        let gate = switch.find("start_gate(").expect("the start gate is gone");
-        let first_stop = switch.find("stop_engine_locked(state);").expect("no stop");
-        assert!(gate < cleared && cleared < first_stop, "an old stop is not cleared under the gate, before the work begins");
+        let wrapper = body_of("fn start_bundled_engine_blocking(");
+        let cleared = wrapper.find("engine_stop_requested.store(false").expect("a start no longer clears an old stop");
+        let gate = wrapper.find("start_gate(").expect("the start gate is gone");
+        let work = wrapper.find("start_engine_and_remember(").expect("the serialized start is gone");
+        assert!(gate < cleared && cleared < work, "an old stop is not cleared under the gate, before the work begins");
+        let switch = body_of("fn start_bundled_engine_locked(");
         // Whether the previous model comes back is decided in one place, and
         // `settle_switch_*` below run that place.
         let handed_over = switch.find("settle_switch(").expect("the switch no longer ends in settle_switch");
@@ -8936,7 +9074,7 @@ srv    llama_server: exiting due to model loading error";
         // und war immer gruen. Genau die Falle, die eine Gegenprobe aufdeckt:
         // die Vorpruefung entfernen und nichts wurde rot.
         let wechsel = include_str!("engine.rs")
-            .split("fn start_bundled_engine_blocking(")
+            .split("fn start_bundled_engine_locked(")
             .nth(1)
             .expect("the switch is gone")
             .split("\nfn ")
@@ -9571,3 +9709,7 @@ mod diag_tests {
         assert_eq!(pick_save_slot(&serde_json::json!(null)), 0);
     }
 }
+
+#[cfg(test)]
+#[path = "engine_remote_recovery_tests.rs"]
+mod remote_recovery_tests;

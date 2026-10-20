@@ -8,6 +8,7 @@ vi.mock('../../api/backend', () => ({
 }))
 
 import { useRemoteStore, REMOTE_DEV_MODE_ERROR, remoteBackendArgs, normalizeRemotePermissions } from '../remoteStore'
+import { useProviderStore } from '../providerStore'
 
 describe('remoteBackendArgs (#87 non-Ollama remote routing)', () => {
   const providers = {
@@ -30,6 +31,26 @@ describe('remoteBackendArgs (#87 non-Ollama remote routing)', () => {
     const out = remoteBackendArgs('openai::m', providers, withKey)
     expect(out.backendKind).toBe('openai')
     expect(out.backendKey).toBe('sk-lan')
+  })
+
+  it('opts only an enabled managed LU slot into native model recovery', () => {
+    expect(remoteBackendArgs('openai::m', {
+      openai: { baseUrl: 'http://127.0.0.1:8127/v1', managed: true, enabled: true },
+    }, noKey).backendManaged).toBe(true)
+    for (const config of [
+      { baseUrl: 'http://127.0.0.1:8127/v1' },
+      { baseUrl: 'http://127.0.0.1:8127/v1', managed: false },
+      { baseUrl: 'http://127.0.0.1:8127/v1', managed: true, enabled: false },
+    ]) {
+      expect(remoteBackendArgs('openai::m', { openai: config }, noKey).backendManaged).toBe(false)
+    }
+  })
+
+  it('never grants model recovery to an additional OpenAI-compatible server', () => {
+    const out = remoteBackendArgs('openai:other::m', {
+      openai: { baseUrl: 'http://127.0.0.1:8127/v1', managed: true },
+    }, noKey, () => ({ baseUrl: 'http://127.0.0.1:8127/v1', apiKey: '' }))
+    expect(out.backendManaged).toBe(false)
   })
 
   it('leaves a bare Ollama model on the Ollama path (back-compat)', () => {
@@ -108,6 +129,26 @@ describe('remoteStore', () => {
       // #87: startServer always tags the backend kind. With no dispatched model
       // it defaults to the Ollama path (back-compat), so args carry only that.
       expect(mockBackendCall).toHaveBeenCalledWith('start_remote_server', { backendKind: 'ollama' })
+    })
+
+    it.each(['startServer', 'restart'] as const)('%s follows a new fallback port after native recovery', async (method) => {
+      const previous = useProviderStore.getState().providers
+      useProviderStore.setState({ providers: {
+        ...previous,
+        openai: { ...previous.openai, enabled: true, managed: true, baseUrl: 'http://127.0.0.1:8129/v1' },
+      } })
+      mockBackendCall.mockImplementation(async (command: string) => command === 'bundled_engine_status'
+        ? { running: true, healthy: true, port: 8131 }
+        : { port: 11435, passcode: '' })
+      try {
+        await useRemoteStore.getState()[method]('openai::test-model')
+        const command = method === 'startServer' ? 'start_remote_server' : 'restart_remote_server'
+        expect(mockBackendCall).toHaveBeenCalledWith(command, expect.objectContaining({
+          model: 'test-model', backendManaged: true, backendBase: 'http://127.0.0.1:8131/v1',
+        }))
+      } finally {
+        useProviderStore.setState({ providers: previous })
+      }
     })
 
     it('auto-fetches QR code after starting', async () => {

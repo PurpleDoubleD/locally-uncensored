@@ -130,6 +130,9 @@ struct RemoteState {
     /// OpenAI-compatible base URL including `/v1` (only read when backend_kind ==
     /// "openai"), snapshotted from the desktop provider config at dispatch time.
     openai_base: String,
+    /// Only the desktop's explicit managed slot may recover native processes.
+    /// Pin the model path, while the engine owns the latest successful tuning.
+    managed_engine_model: Option<String>,
     /// Optional bearer key for the OpenAI-compatible backend (e.g. a LAN vLLM);
     /// empty for keyless local servers (built-in engine, LM Studio, llama.cpp).
     openai_key: String,
@@ -1549,6 +1552,57 @@ fn openai_resp_to_ollama_ndjson(resp: &serde_json::Value) -> String {
     format!("{}\n{}\n", first, done)
 }
 
+/// Resolve the managed engine afresh on each attempt: a completed desktop
+/// reload or recovery may have moved its port. External endpoints remain the
+/// exact dispatch-time address/key and never enter native lifecycle code.
+async fn remote_openai_target(state: &RemoteState) -> Result<(String, String), String> {
+    if let Some(model_path) = &state.managed_engine_model {
+        let app = state.app_handle.handle().ok_or("Desktop engine recovery is unavailable.")?;
+        let port = crate::commands::engine::ensure_remote_engine(app.clone(), model_path.clone()).await?;
+        return Ok((format!("http://127.0.0.1:{port}/v1"), crate::commands::engine_key::engine_key().to_string()));
+    }
+    let base = state.openai_base.trim_end_matches('/');
+    Ok((if base.contains("://localhost") { base.replace("://localhost", "://127.0.0.1") } else { base.to_string() }, state.openai_key.clone()))
+}
+
+/// Only inference is replayed, never `/remote-api/agent-tool`. The bridge
+/// buffers a whole completion, so no browser-visible answer has been sent
+/// when a transport failure or temporary upstream refusal earns one retry.
+async fn buffered_remote_completion<F, Fut>(
+    client: &reqwest::Client,
+    body: &serde_json::Value,
+    managed: bool,
+    mut target: F,
+) -> Result<serde_json::Value, (StatusCode, String)>
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = Result<(String, String), String>>,
+{
+    for attempt in 0..=usize::from(managed) {
+        let (base, key) = target().await.map_err(|e| (StatusCode::SERVICE_UNAVAILABLE, e))?;
+        let url = format!("{}/chat/completions", base.trim_end_matches('/'));
+        let mut request = client.post(&url).json(body);
+        if !key.is_empty() { request = request.bearer_auth(key); }
+        let failure = match request.send().await {
+            Ok(response) => {
+                let status = StatusCode::from_u16(response.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
+                match response.bytes().await {
+                    Ok(bytes) if status.is_success() => {
+                        return serde_json::from_slice(&bytes).map_err(|e| (StatusCode::BAD_GATEWAY, format!("Read error: {e}")));
+                    }
+                    Ok(bytes) => (status, String::from_utf8_lossy(&bytes).into_owned(), matches!(status.as_u16(), 502 | 503 | 504)),
+                    Err(error) => (StatusCode::BAD_GATEWAY, format!("Read error: {error}"), true),
+                }
+            }
+            Err(error) => (StatusCode::BAD_GATEWAY, format!("Proxy error: {error}"), true),
+        };
+        if !managed || attempt == 1 || !failure.2 { return Err((failure.0, failure.1)); }
+        warn!("Remote inference lost its managed engine connection; checking it before one retry");
+        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+    }
+    unreachable!("the bounded inference attempts always return")
+}
+
 async fn proxy_openai_compat(state: &RemoteState, req: Request) -> Response {
     let path = req.uri().path().to_string();
     let base = state.openai_base.trim_end_matches('/');
@@ -1558,10 +1612,9 @@ async fn proxy_openai_compat(state: &RemoteState, req: Request) -> Response {
         base.to_string()
     };
 
-    let client = match reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(600))
-        .build()
-    {
+    let mut builder = reqwest::Client::builder().timeout(std::time::Duration::from_secs(600));
+    if state.managed_engine_model.is_some() { builder = builder.no_proxy(); }
+    let client = match builder.build() {
         Ok(c) => c,
         Err(e) => {
             return (StatusCode::INTERNAL_SERVER_ERROR, format!("Client init: {}", e)).into_response()
@@ -1570,10 +1623,16 @@ async fn proxy_openai_compat(state: &RemoteState, req: Request) -> Response {
 
     // Model list: /api/tags → GET {base}/models
     if path.ends_with("/tags") {
-        let url = format!("{}/models", base_final);
+        let (base, key) = if state.managed_engine_model.is_some() {
+            match remote_openai_target(state).await {
+                Ok(target) => target,
+                Err(error) => return (StatusCode::SERVICE_UNAVAILABLE, error).into_response(),
+            }
+        } else { (base_final.clone(), state.openai_key.clone()) };
+        let url = format!("{}/models", base);
         let mut rb = client.get(&url);
-        if !state.openai_key.is_empty() {
-            rb = rb.bearer_auth(&state.openai_key);
+        if !key.is_empty() {
+            rb = rb.bearer_auth(key);
         }
         return match rb.send().await {
             Ok(resp) => {
@@ -1599,38 +1658,20 @@ async fn proxy_openai_compat(state: &RemoteState, req: Request) -> Response {
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
         let oai_req = ollama_chat_req_to_openai(&ollama_req, is_lan_base(&base_final));
-        let url = format!("{}/chat/completions", base_final);
-        let mut rb = client.post(&url).json(&oai_req);
-        if !state.openai_key.is_empty() {
-            rb = rb.bearer_auth(&state.openai_key);
-        }
-        return match rb.send().await {
-            Ok(resp) => {
-                let status = StatusCode::from_u16(resp.status().as_u16())
-                    .unwrap_or(StatusCode::BAD_GATEWAY);
-                if !status.is_success() {
-                    let txt = resp.text().await.unwrap_or_default();
-                    return (status, txt).into_response();
-                }
-                match resp.json::<serde_json::Value>().await {
-                    Ok(v) => {
-                        if want_stream {
-                            let ndjson = openai_resp_to_ollama_ndjson(&v);
-                            Response::builder()
-                                .status(StatusCode::OK)
-                                .header(header::CONTENT_TYPE, "application/x-ndjson")
-                                .body(Body::from(ndjson))
-                                .unwrap_or_else(|_| {
-                                    (StatusCode::INTERNAL_SERVER_ERROR, "build").into_response()
-                                })
-                        } else {
-                            Json(openai_resp_to_ollama_message(&v)).into_response()
-                        }
-                    }
-                    Err(e) => (StatusCode::BAD_GATEWAY, format!("Read error: {}", e)).into_response(),
+        return match buffered_remote_completion(&client, &oai_req, state.managed_engine_model.is_some(), || remote_openai_target(state)).await {
+            Ok(v) => {
+                if want_stream {
+                    let ndjson = openai_resp_to_ollama_ndjson(&v);
+                    Response::builder()
+                        .status(StatusCode::OK)
+                        .header(header::CONTENT_TYPE, "application/x-ndjson")
+                        .body(Body::from(ndjson))
+                        .unwrap_or_else(|_| (StatusCode::INTERNAL_SERVER_ERROR, "build").into_response())
+                } else {
+                    Json(openai_resp_to_ollama_message(&v)).into_response()
                 }
             }
-            Err(e) => (StatusCode::BAD_GATEWAY, format!("Proxy error: {}", e)).into_response(),
+            Err((status, error)) => (status, error).into_response(),
         };
     }
 
@@ -2797,6 +2838,7 @@ struct BackendChoice {
     kind: Option<String>,
     base: Option<String>,
     key: Option<String>,
+    managed: Option<bool>,
 }
 
 #[tauri::command]
@@ -2808,9 +2850,10 @@ pub async fn start_remote_server(
     backend_kind: Option<String>,
     backend_base: Option<String>,
     backend_key: Option<String>,
+    backend_managed: Option<bool>,
 ) -> Result<serde_json::Value, String> {
     let operation = remote_lifecycle(&state)?.acquire().await?;
-    let backend = BackendChoice { kind: backend_kind, base: backend_base, key: backend_key };
+    let backend = BackendChoice { kind: backend_kind, base: backend_base, key: backend_key, managed: backend_managed };
     start_remote_server_inner(app, state, model, system_prompt, backend, &operation).await
 }
 
@@ -2826,6 +2869,18 @@ fn remote_backend_key(base: &str, sent: String, engine_ports: &[u16]) -> String 
     }
 }
 
+fn managed_remote_model(base: &str, recipe: &crate::commands::engine::EngineRecoveryRecipe) -> Result<String, String> {
+    let target = format!("{}/chat/completions", base.trim_end_matches('/'));
+    // Status polling resets the desktop slot to its preferred port after a
+    // crash. Accept that stale preferred address as well as the actual serving
+    // port, only after the desktop explicitly opted this slot into management.
+    // The request itself uses ensure_remote_engine's fresh native port.
+    if !crate::commands::engine_key::goes_to_engine(&target, &[recipe.port, crate::commands::engine::DEFAULT_ENGINE_PORT]) {
+        return Err("The managed Remote backend does not match the LU Engine's serving address.".into());
+    }
+    Ok(recipe.model_path.clone())
+}
+
 async fn start_remote_server_inner(
     app: AppHandle,
     state: tauri::State<'_, crate::state::AppState>,
@@ -2839,6 +2894,11 @@ async fn start_remote_server_inner(
 ) -> Result<serde_json::Value, String> {
     let backend_kind = backend.kind.unwrap_or_else(|| "ollama".to_string());
     let openai_base = backend.base.unwrap_or_default();
+    let managed_engine_model = if backend.managed == Some(true) && backend_kind == "openai" {
+        let recipe = state.bundled_engine_recovery.lock().map_err(|_| "LU Engine recovery state unavailable")?.clone()
+            .ok_or("Start the managed LU Engine before dispatching Remote Access.")?;
+        Some(managed_remote_model(&openai_base, &recipe)?)
+    } else { None };
     // A phone dispatched to the LU Engine reaches it through this server, and
     // the engine wants its key (engine_key.rs). The desktop's web view does not
     // have it to send, so it is put in here and never leaves this process.
@@ -2936,6 +2996,7 @@ async fn start_remote_server_inner(
         ollama_base,
         backend_kind,
         openai_base,
+        managed_engine_model,
         openai_key,
         comfy_port,
         comfy_host,
@@ -3071,6 +3132,7 @@ pub async fn restart_remote_server(
     backend_kind: Option<String>,
     backend_base: Option<String>,
     backend_key: Option<String>,
+    backend_managed: Option<bool>,
 ) -> Result<serde_json::Value, String> {
     use tauri::Manager;
     let operation = remote_lifecycle(&state)?.acquire().await?;
@@ -3078,7 +3140,7 @@ pub async fn restart_remote_server(
     stop_remote_server_inner(&state.remote, &operation).await?;
     // Start fresh with a re-acquired State handle from the AppHandle
     let state2 = app.state::<crate::state::AppState>();
-    let backend = BackendChoice { kind: backend_kind, base: backend_base, key: backend_key };
+    let backend = BackendChoice { kind: backend_kind, base: backend_base, key: backend_key, managed: backend_managed };
     start_remote_server_inner(app.clone(), state2, model, system_prompt, backend, &operation).await
 }
 
@@ -3792,7 +3854,7 @@ mod memory_revocation_tests {
                 memory_revoked: server.memory_revoked.clone(),
                 jwt_secret: server.jwt_secret.clone(), passcode: server.passcode.clone(),
                 ollama_base: upstream_base.clone(), backend_kind: backend.into(),
-                openai_base: format!("{upstream_base}/v1"), openai_key: String::new(),
+                openai_base: format!("{upstream_base}/v1"), openai_key: String::new(), managed_engine_model: None,
                 comfy_port: 0, comfy_host: "127.0.0.1".into(),
                 permissions: server.permissions.clone(), connected_devices: server.connected_devices.clone(),
                 tunnel_url: server.tunnel_url.clone(), dispatched_model: server.dispatched_model.clone(),
@@ -5711,3 +5773,7 @@ mod engine_key_tests {
         assert_eq!(remote_backend_key("http://127.0.0.1:8127/v1", String::new(), &[]), "");
     }
 }
+
+#[cfg(test)]
+#[path = "remote_engine_recovery_tests.rs"]
+mod engine_recovery_tests;
