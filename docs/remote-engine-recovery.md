@@ -20,18 +20,20 @@ For the Qwen3.8-27B GGUF with `qwen35` architecture and a declared 262144-token 
   "flashAttn": "on",
   "cacheTypeK": "q8_0",
   "cacheTypeV": "q4_0",
-  "gpuLayers": 999
+  "gpuLayers": -1
 }
 ```
 
 Apply and restart the engine before dispatching Remote Access.
 
-This model has 16 full-attention layers. At 256K, mixed q8/q4 K/V uses approximately 6.5 GiB; q8/q8 uses 8.5 GiB. Weights, projector, recurrent state, compute buffers, and other applications consume additional memory. Explicit GPU layers bypass LU's conservative estimate, which ignores hybrid attention and cache quantization.
+This model has 16 full-attention layers. At 256K, mixed q8/q4 K/V uses approximately 6.5 GiB; q8/q8 uses 8.5 GiB. Weights, projector, recurrent state, compute buffers, and other applications consume additional memory. The automatic GPU setting (`-1`) delegates placement to the bundled engine's tensor-aware fitter, preserving the requested context and cache types. An explicit layer count overrides that placement decision.
+
+The phone receives the active context together with its model identity. Its coding agent reserves room for output and tool definitions before budgeting history; a different selected model uses the conservative fallback until its own capacity is known. Stop cancels only that paired device's inference request and does not restart the model server.
 
 Allocation success does not establish long-context answer quality or prompt speed. Quantized V can reduce quality; verify representative prompts and retain headroom for other GPU workloads.
 
 ## Local deployment verification
 
-On 2026-10-20, the patched Windows build loaded this configuration on an RTX 5090 with 32 GiB VRAM. A browser Code request completed a read-only `file_list` tool round trip. After forcibly terminating only the chat `llama-server` process, the next Code request restarted the same model with all five tuning values above and completed another `file_list` round trip. The desktop app, Remote listener, and paired browser session stayed running.
+On 2026-10-20, the recovery build loaded this context and cache configuration with explicit full offload (`gpuLayers: 999`) on an RTX 5090 with 32 GiB VRAM. A browser Code request completed a read-only `file_list` tool round trip. After forcibly terminating only the chat `llama-server` process, the next Code request restarted the same model with that tuning and completed another `file_list` round trip. The desktop app, Remote listener, and paired browser session stayed running. This predates the automatic-fitting default above.
 
 This verifies model allocation and recovery with short prompts. Full-window retrieval quality and 256K prompt throughput have not been benchmarked. The installed executable is a local build; a future application update can replace it, so retain the source changes and deployment backup.

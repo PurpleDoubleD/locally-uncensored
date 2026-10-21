@@ -16,7 +16,7 @@ use axum::{
 use tower_http::cors::CorsLayer;
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex as TokioMutex;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 use tracing::{error, info, warn};
 
 // ─── Constants ───
@@ -112,6 +112,7 @@ impl RemoteDesktop {
 
 #[derive(Clone)]
 struct RemoteState {
+    inference_calls: crate::cancel_registry::CancelRegistry,
     memory_revoked: Arc<CancellationToken>,
     jwt_secret: Arc<TokioMutex<String>>,
     passcode: Arc<TokioMutex<PasscodeState>>,
@@ -1187,6 +1188,64 @@ async fn proxy_ollama(
     AxumState(state): AxumState<RemoteState>,
     req: Request,
 ) -> Response {
+    let is_inference = req.method() == Method::POST && matches!(req.uri().path(), "/api/chat" | "/api/generate");
+    if is_inference {
+        if let Some(id) = req.headers().get("x-lu-inference-id") {
+            let Some(id) = id.to_str().ok().filter(|id| valid_inference_id(id)) else {
+                return (StatusCode::BAD_REQUEST, "Invalid inference id").into_response();
+            };
+            let Some(CallerDevice(owner)) = req.extensions().get::<CallerDevice>() else {
+                return StatusCode::UNAUTHORIZED.into_response();
+            };
+            let key = inference_key(owner, id);
+            return cancellable_inference(&state.inference_calls, key, proxy_ollama_inner(&state, req)).await;
+        }
+    }
+    proxy_ollama_inner(&state, req).await
+}
+
+fn valid_inference_id(id: &str) -> bool {
+    !id.is_empty() && id.len() <= 128 && id.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-'))
+}
+
+fn inference_key(owner: &str, id: &str) -> String {
+    format!("{}:{owner}:{id}", owner.len())
+}
+
+async fn cancellable_inference(
+    calls: &crate::cancel_registry::CancelRegistry,
+    key: String,
+    inference: impl std::future::Future<Output = Response>,
+) -> Response {
+    // The registry retains an early Stop until registration catches up, and
+    // the guard removes this call on success, error, cancellation or drop.
+    let (cancel, _registration) = calls.register(key);
+    tokio::select! {
+        biased;
+        _ = cancel.cancelled() => (StatusCode::REQUEST_TIMEOUT, "Inference cancelled").into_response(),
+        response = inference => response,
+    }
+}
+
+#[derive(Deserialize)]
+struct CancelInferenceRequest { id: String }
+
+async fn handle_cancel_inference(
+    AxumState(state): AxumState<RemoteState>,
+    caller: Option<axum::Extension<CallerDevice>>,
+    Json(body): Json<CancelInferenceRequest>,
+) -> Response {
+    let Some(axum::Extension(CallerDevice(owner))) = caller else {
+        return StatusCode::UNAUTHORIZED.into_response();
+    };
+    if !valid_inference_id(&body.id) {
+        return (StatusCode::BAD_REQUEST, "Invalid inference id").into_response();
+    }
+    state.inference_calls.cancel(&inference_key(&owner, &body.id));
+    Json(serde_json::json!({"cancelled": true})).into_response()
+}
+
+async fn proxy_ollama_inner(state: &RemoteState, req: Request) -> Response {
     let path = req.uri().path().to_string();
 
     // #87: when the desktop's active chat backend is OpenAI-compatible (the
@@ -1195,7 +1254,7 @@ async fn proxy_ollama(
     // blindly proxying to Ollama (which the user may not even run). Ollama stays
     // the default path below.
     if state.backend_kind == "openai" {
-        return proxy_openai_compat(&state, req).await;
+        return proxy_openai_compat(state, req).await;
     }
 
     // Enforce the `downloads` permission for any endpoint that writes model
@@ -1435,7 +1494,11 @@ fn ollama_chat_req_to_openai(req: &serde_json::Value, lan: bool) -> serde_json::
     let model = strip_provider_prefix(req.get("model").and_then(|v| v.as_str()).unwrap_or(""));
     let mut messages = Vec::new();
     if let Some(arr) = req.get("messages").and_then(|m| m.as_array()) {
-        for m in arr {
+        let mut pending_calls: Vec<(String, String)> = Vec::new();
+        let mut used_ids: std::collections::HashSet<String> = arr.iter()
+            .filter_map(|m| m.get("tool_calls").and_then(|v| v.as_array()))
+            .flatten().filter_map(|tc| tc.get("id").and_then(|v| v.as_str()).map(str::to_owned)).collect();
+        for (message_index, m) in arr.iter().enumerate() {
             let role = m.get("role").and_then(|v| v.as_str()).unwrap_or("user");
             let content = m.get("content").and_then(|v| v.as_str()).unwrap_or("");
             let images = m.get("images").and_then(|v| v.as_array());
@@ -1458,6 +1521,55 @@ fn ollama_chat_req_to_openai(req: &serde_json::Value, lan: bool) -> serde_json::
                 _ => {
                     messages.push(serde_json::json!({"role": role, "content": content}));
                 }
+            }
+            let message = messages.last_mut().expect("one output for each input message");
+            if role == "assistant" {
+                pending_calls.clear();
+                if let Some(calls) = m.get("tool_calls").and_then(|v| v.as_array()) {
+                    let mut translated = Vec::new();
+                    for (call_index, call) in calls.iter().enumerate() {
+                        let Some(function) = call.get("function").and_then(|v| v.as_object()) else { continue };
+                        let name = function.get("name").and_then(|v| v.as_str()).unwrap_or("");
+                        let id = match call.get("id").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
+                            Some(id) => id.to_owned(),
+                            None => {
+                                // Ollama omits ids. Derive one from this immutable history position,
+                                // avoiding collisions with ids supplied by an OpenAI backend.
+                                let base = format!("call_lu_{message_index}_{call_index}");
+                                let mut id = base.clone();
+                                let mut suffix = 0;
+                                while !used_ids.insert(id.clone()) {
+                                    suffix += 1;
+                                    id = format!("{base}_{suffix}");
+                                }
+                                id
+                            }
+                        };
+                        let args = function.get("arguments").cloned().unwrap_or_else(|| serde_json::json!({}));
+                        let args = args.as_str().map(str::to_owned).unwrap_or_else(|| args.to_string());
+                        translated.push(serde_json::json!({
+                            "id": id, "type": "function", "function": {"name": name, "arguments": args}
+                        }));
+                        pending_calls.push((id, name.to_owned()));
+                    }
+                    if !translated.is_empty() { message["tool_calls"] = serde_json::json!(translated); }
+                }
+            } else if role == "tool" {
+                let name = m.get("name").or_else(|| m.get("tool_name")).and_then(|v| v.as_str());
+                let supplied_id = m.get("tool_call_id").and_then(|v| v.as_str()).filter(|s| !s.is_empty());
+                let matched = pending_calls.iter().position(|(id, call_name)| match supplied_id {
+                    Some(wanted) => id == wanted,
+                    None => name.is_none_or(|wanted| call_name == wanted),
+                });
+                let inferred = matched.map(|i| pending_calls.remove(i));
+                if let Some(id) = supplied_id.or_else(|| inferred.as_ref().map(|(id, _)| id.as_str())) {
+                    message["tool_call_id"] = serde_json::json!(id);
+                }
+                if let Some(name) = name.or_else(|| inferred.as_ref().map(|(_, name)| name.as_str())) {
+                    message["name"] = serde_json::json!(name);
+                }
+            } else {
+                pending_calls.clear();
             }
         }
     }
@@ -1512,7 +1624,11 @@ fn openai_choice_parts(resp: &serde_json::Value) -> (String, String, Vec<serde_j
                 // OpenAI sends `arguments` as a JSON string — the mobile's
                 // repairToolCallArgs already handles that, so pass it through.
                 let args = f.get("arguments").cloned().unwrap_or(serde_json::json!(""));
-                tool_calls.push(serde_json::json!({"function": {"name": name, "arguments": args}}));
+                let mut call = serde_json::json!({"type": "function", "function": {"name": name, "arguments": args}});
+                if let Some(id) = tc.get("id").and_then(|v| v.as_str()) {
+                    call["id"] = serde_json::json!(id);
+                }
+                tool_calls.push(call);
             }
         }
     }
@@ -1591,10 +1707,10 @@ where
                         return serde_json::from_slice(&bytes).map_err(|e| (StatusCode::BAD_GATEWAY, format!("Read error: {e}")));
                     }
                     Ok(bytes) => (status, String::from_utf8_lossy(&bytes).into_owned(), matches!(status.as_u16(), 502 | 503 | 504)),
-                    Err(error) => (StatusCode::BAD_GATEWAY, format!("Read error: {error}"), true),
+                    Err(error) => (StatusCode::BAD_GATEWAY, format!("Read error: {}", os_error::english(&error)), true),
                 }
             }
-            Err(error) => (StatusCode::BAD_GATEWAY, format!("Proxy error: {error}"), true),
+            Err(error) => (StatusCode::BAD_GATEWAY, format!("Proxy error: {}", os_error::english(&error)), true),
         };
         if !managed || attempt == 1 || !failure.2 { return Err((failure.0, failure.1)); }
         warn!("Remote inference lost its managed engine connection; checking it before one retry");
@@ -1839,6 +1955,7 @@ mod openai_bridge_tests {
         assert_eq!(out["message"]["thinking"], "hmm");
         assert_eq!(out["message"]["tool_calls"][0]["function"]["name"], "file_read");
         assert_eq!(out["message"]["tool_calls"][0]["function"]["arguments"], "{\"path\":\"a\"}");
+        assert_eq!(out["message"]["tool_calls"][0]["id"], "1");
         assert_eq!(out["done"], true);
     }
 
@@ -1853,6 +1970,73 @@ mod openai_bridge_tests {
         assert_eq!(first["done"], false);
         let second: serde_json::Value = serde_json::from_str(lines[1]).unwrap();
         assert_eq!(second["done"], true);
+    }
+
+    #[test]
+    fn tool_history_survives_the_openai_ollama_roundtrip() {
+        let reply = openai_resp_to_ollama_message(&serde_json::json!({"choices": [{"message": {
+            "content": null,
+            "tool_calls": [{"id": "call_backend", "type": "function", "function": {
+                "name": "file_read", "arguments": "{ \"path\": \"a\" }"
+            }}]
+        }}]}));
+        let out = ollama_chat_req_to_openai(&serde_json::json!({"model": "m", "messages": [
+            reply["message"],
+            {"role": "tool", "content": "contents", "tool_call_id": "call_backend", "name": "file_read"}
+        ]}), false);
+        let call = &out["messages"][0]["tool_calls"][0];
+        assert_eq!(call["id"], "call_backend");
+        assert_eq!(call["type"], "function");
+        assert_eq!(call["function"]["arguments"], "{ \"path\": \"a\" }");
+        assert_eq!(out["messages"][1]["tool_call_id"], call["id"]);
+        assert_eq!(out["messages"][1]["name"], "file_read");
+    }
+
+    #[test]
+    fn idless_ollama_parallel_tools_get_stable_linked_ids_and_string_arguments() {
+        let req = serde_json::json!({"model": "m", "messages": [
+            {"role": "user", "content": "read two"},
+            {"role": "assistant", "content": "", "tool_calls": [
+                {"function": {"name": "file_read", "arguments": {"path": "a"}}},
+                {"function": {"name": "file_list", "arguments": {"path": "."}}}
+            ]},
+            {"role": "tool", "tool_name": "file_list", "content": "files"},
+            {"role": "tool", "tool_name": "file_read", "content": "text"}
+        ]});
+        let out = ollama_chat_req_to_openai(&req, false);
+        assert_eq!(out, ollama_chat_req_to_openai(&req, false));
+        let calls = &out["messages"][1]["tool_calls"];
+        assert_ne!(calls[0]["id"], calls[1]["id"]);
+        assert_eq!(calls[0]["function"]["arguments"], "{\"path\":\"a\"}");
+        assert_eq!(out["messages"][2]["tool_call_id"], calls[1]["id"]);
+        assert_eq!(out["messages"][3]["tool_call_id"], calls[0]["id"]);
+    }
+
+    #[test]
+    fn duplicate_names_consume_results_once_and_explicit_ids_avoid_generated_collisions() {
+        let out = ollama_chat_req_to_openai(&serde_json::json!({"model": "m", "messages": [
+            {"role": "assistant", "tool_calls": [
+                {"function": {"name": "f", "arguments": {}}},
+                {"id": "call_lu_0_0", "function": {"name": "f", "arguments": "{}"}}
+            ]},
+            {"role": "tool", "content": "one"},
+            {"role": "tool", "content": "two"}
+        ]}), true);
+        let calls = &out["messages"][0]["tool_calls"];
+        assert_ne!(calls[0]["id"], calls[1]["id"]);
+        assert_eq!(out["messages"][1]["tool_call_id"], calls[0]["id"]);
+        assert_eq!(out["messages"][2]["tool_call_id"], calls[1]["id"]);
+    }
+
+    #[test]
+    fn actual_context_is_bound_to_the_dispatched_model() {
+        let path = "C:\\models\\模型.gguf";
+        let loaded = Some((path.into(), Some(262144)));
+        assert_eq!(super::remote_context_window("openai::模型", path, loaded.clone()), Some(262144));
+        assert_eq!(super::remote_context_window("another", path, loaded), None);
+        assert_eq!(super::remote_context_window("模型", path, Some(("other.gguf".into(), Some(8192)))), None);
+        assert_eq!(super::remote_context_window("模型", path, Some((path.into(), Some(0)))), None);
+        assert_eq!(super::remote_context_window("模型", path, None), None);
     }
 }
 
@@ -2358,7 +2542,31 @@ fn config_payload(model: String, system_prompt: String) -> serde_json::Value {
 async fn handle_config(AxumState(state): AxumState<RemoteState>) -> Json<serde_json::Value> {
     let model = state.dispatched_model.lock().await.clone();
     let system_prompt = state.dispatched_system_prompt.lock().await.clone();
-    Json(config_payload(model, system_prompt))
+    let mut payload = config_payload(model.clone(), system_prompt);
+    if let (Some(pinned), Some(app)) = (&state.managed_engine_model, state.app_handle.handle()) {
+        let desktop = app.state::<crate::state::AppState>();
+        // Snapshot only plain values under each mutex. No process probe or IO here.
+        let loaded = desktop.bundled_engine.lock().ok().and_then(|engine| engine.as_ref()
+            .map(|engine| (engine.model_path.clone(), engine.ctx)));
+        let recipe = desktop.bundled_engine_recovery.lock().ok().and_then(|recipe| recipe.as_ref()
+            .map(|recipe| (recipe.model_path.clone(), Some(super::engine::effective_ctx(&recipe.tuning)))));
+        if let Some(ctx) = remote_context_window(&model, pinned, loaded.or(recipe)) {
+            payload["contextWindow"] = serde_json::json!(ctx);
+            payload["contextModel"] = serde_json::json!(model);
+        }
+    }
+    Json(payload)
+}
+
+/// The allocated context belongs to one dispatched model, never a picker's
+/// advertised training maximum or a later model loaded on the desktop.
+fn remote_context_window(model: &str, pinned_path: &str, loaded: Option<(String, Option<u32>)>) -> Option<u32> {
+    let (path, ctx) = loaded?;
+    if path != pinned_path || super::proxy::builtin_model_name_from_path(strip_provider_prefix(model))
+        != super::proxy::builtin_model_name_from_path(pinned_path) {
+        return None;
+    }
+    ctx.filter(|ctx| *ctx > 0)
 }
 
 // ─── Permissions ───
@@ -2990,6 +3198,7 @@ async fn start_remote_server_inner(
     let permissions_readback = permissions_arc.clone();
 
     let server_state = RemoteState {
+        inference_calls: crate::cancel_registry::CancelRegistry::new(),
         memory_revoked,
         jwt_secret: jwt_secret_arc,
         passcode: passcode_arc,
@@ -3661,6 +3870,7 @@ fn build_router(state: RemoteState) -> Router {
         .route("/remote-api/permissions", get(handle_get_permissions))
         .route("/remote-api/permissions", post(handle_set_permissions))
         .route("/remote-api/config", get(handle_config))
+        .route("/remote-api/cancel-inference", post(handle_cancel_inference))
         .route("/remote-api/chat-event", post(handle_chat_event))
         .route("/remote-api/agent-tool", post(handle_agent_tool));
 
@@ -3851,6 +4061,7 @@ mod memory_revocation_tests {
             { let mut pc = server.passcode.lock().await; pc.code = passcode.clone(); pc.expires_at = chrono_now_secs() + PASSCODE_TTL_SECS; }
             *server.dispatched_system_prompt.lock().await = "synthetic remembered context".into();
             let state = RemoteState {
+                inference_calls: crate::cancel_registry::CancelRegistry::new(),
                 memory_revoked: server.memory_revoked.clone(),
                 jwt_secret: server.jwt_secret.clone(), passcode: server.passcode.clone(),
                 ollama_base: upstream_base.clone(), backend_kind: backend.into(),
@@ -5557,8 +5768,8 @@ mod mobile_decay_tests {
         // the ones that have done their job, and capping the newest is the one
         // thing it must never do.
         let html = page();
-        assert!(html.contains("apiMessages.push({role:'tool', content:obs, iter:iter})"));
-        assert!(html.contains("apiMessages.push({role:'tool', content:'Error: '+errMsg, iter:iter})"));
+        assert!(html.contains("recordMessage(toolResultMessage(tc, obs, iter))"));
+        assert!(html.contains("recordMessage(toolResultMessage(tc, 'Error: '+errMsg, iter))"));
     }
 
     /// Offset of a statement that really RUNS: the line it sits on may hold
@@ -5585,7 +5796,7 @@ mod mobile_decay_tests {
         let html = page();
         let decay = live_statement(&html, "decayToolResults(apiMessages, iter);")
             .expect("the decay call is missing or commented out");
-        let compact = live_statement(&html, "apiMessages = compactApiMessages(apiMessages, 24000);")
+        let compact = live_statement(&html, "apiMessages = compactApiMessages(apiMessages, run.budget.charBudget);")
             .expect("the compaction call is missing or commented out");
         assert!(decay < compact, "compaction runs before the decay");
     }
@@ -5777,3 +5988,7 @@ mod engine_key_tests {
 #[cfg(test)]
 #[path = "remote_engine_recovery_tests.rs"]
 mod engine_recovery_tests;
+
+#[cfg(test)]
+#[path = "remote_inference_cancel_tests.rs"]
+mod inference_cancel_tests;

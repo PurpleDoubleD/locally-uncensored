@@ -120,7 +120,10 @@ import { stripNonCanonicalTags } from './personas.js'
         var name = obj && (obj.name || obj.tool || (obj.function && obj.function.name));
         var args = obj && (obj.arguments || obj.args || (obj.function && obj.function.arguments) || {});
         if(name && (!knownToolNames || knownToolNames.indexOf(name) !== -1)){
-          calls.push({function:{name: name, arguments: repairToolCallArgs(args)}});
+          var call = {function:{name: name, arguments: repairToolCallArgs(args)}};
+          if(obj.id) call.id = obj.id;
+          if(obj.type) call.type = obj.type;
+          calls.push(call);
           ranges.push({start: match.index, end: match.index + match[0].length});
         }
       }catch(_){}
@@ -226,6 +229,9 @@ import { stripNonCanonicalTags } from './personas.js'
   function msgChars(m){
     if(!m) return 0;
     var n = String(m.content || '').length;
+    if(m.tool_calls) n += JSON.stringify(m.tool_calls).length;
+    if(m.tool_call_id) n += String(m.tool_call_id).length;
+    if(m.name) n += String(m.name).length;
     if(Array.isArray(m.images)){
       for(var i=0;i<m.images.length;i++) n += String(m.images[i] || '').length;
     }
@@ -236,6 +242,35 @@ import { stripNonCanonicalTags } from './personas.js'
     var n = 0;
     for(var i=0;i<messages.length;i++) n += msgChars(messages[i]);
     return n;
+  }
+
+  // Capacity is the backend's ACTIVE context, not the model's advertised
+  // maximum. Unknown backends retain the conservative 8K fallback. Reserve
+  // output, tool schemas and framing before budgeting the conversation.
+  function agentContextBudget(contextWindow, tools){
+    var capacity = Number(contextWindow);
+    if(!isFinite(capacity) || capacity < 1024) capacity = 8192;
+    capacity = Math.floor(capacity);
+    var outputTokens = Math.min(16384, Math.floor(capacity / 4));
+    var framingTokens = Math.max(512, Math.ceil(capacity * 0.05));
+    var schemaChars = JSON.stringify(tools || []).length;
+    return {
+      contextWindow: capacity,
+      outputTokens: outputTokens,
+      charBudget: Math.max(1024, (capacity - outputTokens - framingTokens) * 3 - schemaChars)
+    };
+  }
+
+  // The durable log owns independent messages. Decay/compaction may mutate the
+  // model's copy, but must never erase completed work from the next turn.
+  function copyApiMessage(message){
+    return JSON.parse(JSON.stringify(message));
+  }
+
+  function toolResultMessage(call, content, iteration){
+    var message = {role:'tool', content:content, iter:iteration, name:call.function.name};
+    if(call.id) message.tool_call_id = call.id;
+    return message;
   }
 
   // Only the newest `keepRecent` messages that carry images send them again.
@@ -269,7 +304,6 @@ import { stripNonCanonicalTags } from './personas.js'
     // Unconditional, and before the early return: an old image is bytes the
     // model has already been shown and cannot act on twice.
     dropOldImages(messages, IMAGE_KEEP_RECENT);
-    if(messages.length < 6) return messages;
     if(totalChars(messages) <= budget) return messages;
     // Always keep [0] (system) and [1] (first user) if present.
     var head = [];
@@ -277,12 +311,29 @@ import { stripNonCanonicalTags } from './personas.js'
     var firstUserIdx = -1;
     for(var j=0;j<messages.length;j++) if(messages[j].role === 'user'){ firstUserIdx = j; break; }
     if(firstUserIdx !== -1 && messages[firstUserIdx] !== head[0]) head.push(messages[firstUserIdx]);
-    // Drop oldest tail messages until we fit.
+    // Drop whole assistant/tool exchanges. Dropping a single message leaves
+    // orphan tool_call_id references, which OpenAI-compatible servers reject.
     var tail = messages.slice(firstUserIdx + 1);
+    var lastUser = null;
+    for(var u=messages.length-1;u>=0;u--){
+      if(messages[u].role === 'user'){ lastUser = messages[u]; break; }
+    }
+    var groups = [];
+    for(var g=0;g<tail.length;g++){
+      if(tail[g].role === 'tool' && groups.length){ groups[groups.length-1].push(tail[g]); }
+      else groups.push([tail[g]]);
+    }
     var headChars = totalChars(head);
-    while(tail.length > 4){
+    while(groups.length > 1){
       if(headChars + totalChars(tail) <= budget) break;
-      tail.shift();
+      var removable = -1;
+      for(var gi=0;gi<groups.length-1;gi++){
+        if(groups[gi].indexOf(lastUser) === -1){ removable = gi; break; }
+      }
+      if(removable < 0) break;
+      groups.splice(removable, 1);
+      tail = [];
+      for(var gj=0;gj<groups.length;gj++) tail = tail.concat(groups[gj]);
     }
     // The floor of four can still be bigger than the whole budget when one of
     // those four is a single huge result: the newest iteration is never
@@ -360,7 +411,9 @@ export {
   RESTORE_RESULT_CHARS,
   TRUNCATION_MARKER,
   buildToolDefs,
+  agentContextBudget,
   capToolResult,
+  copyApiMessage,
   compactApiMessages,
   decayToolResults,
   dropOldImages,
@@ -372,5 +425,6 @@ export {
   stripRanges,
   stripThinkTags,
   totalChars,
+  toolResultMessage,
 }
 /*@@LU_END@@*/

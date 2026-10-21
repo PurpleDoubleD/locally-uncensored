@@ -22,7 +22,9 @@ import {
   DECAY_RESULT_CHARS,
   RESTORE_RESULT_CHARS,
   buildToolDefs,
+  agentContextBudget,
   capToolResult,
+  copyApiMessage,
   compactApiMessages,
   decayToolResults,
   extractToolCallsFromContent,
@@ -31,6 +33,8 @@ import {
   repairToolCallArgs,
   stripRanges,
   stripThinkTags,
+  totalChars,
+  toolResultMessage,
 } from './agent-core.js'
 /*@@LU_END@@*/
 (function(){
@@ -49,6 +53,7 @@ import {
   var currentModel = '';
   var dispatchedSystemPrompt = '';
   var availableModels = [];
+  var contextWindows = Object.create(null);
   // The DESKTOP's platform sentence, handed over by /remote-api/config.
   // Never navigator.platform: the tools run on the machine that serves this
   // page, not on the phone holding it, so the phone's own OS is the one
@@ -150,38 +155,39 @@ import {
   // Agent mode is per-chat; toggled via the brain icon next to Plugins.
   // When active, _doSend runs the ReAct loop instead of plain chat.
   var agentRunning = false;
-  var agentAbort = false;
+  var activeAgentRun = null;
 
   //@@LU_AGENT_CORE@@
 
   // Non-streaming POST to /api/chat with native `tools` array.
   // Returns a Promise that resolves to {content, thinking, toolCalls}.
   // `apiMessages` = [{role, content, ...}], `tools` = Ollama tool defs.
-  function nativeToolChat(apiMessages, tools){
+  function nativeToolChat(apiMessages, tools, run){
     var body = {
-      model: currentModel,
+      model: run.model,
       messages: apiMessages,
       tools: tools,
       stream: false,
       // v2.4.6 Bug L: dropped hardcoded num_gpu:99 (forced all layers to GPU,
       // killed 8 GB-VRAM laptop chat speed). Ollama auto-decides layer count.
-      options: {num_predict: 16384}
+      options: {num_predict: run.budget.outputTokens}
     };
     // Tri-state think flag — same logic as _doSend.
-    if(isThinkingCompatible(currentModel)){
-      if(thinking){
+    if(isThinkingCompatible(run.model)){
+      if(run.thinking){
         body.think = true;
-      } else if(!isPlainTextPlanner(currentModel)){
+      } else if(!isPlainTextPlanner(run.model)){
         body.think = false;
       }
     }
 
     function doPost(b){
+      run.inferenceId = run.id + '_' + (++run.inferenceCount);
       return fetch('/api/chat',{
         method:'POST',
-        headers:{'Content-Type':'application/json','Authorization':'Bearer '+TOKEN},
+        headers:{'Content-Type':'application/json','Authorization':'Bearer '+TOKEN,'X-LU-Inference-ID':run.inferenceId},
         body: JSON.stringify(b),
-        signal: abortCtrl ? abortCtrl.signal : undefined
+        signal: run.controller.signal
       }).then(absorbRefresh);
     }
 
@@ -217,11 +223,20 @@ import {
             // `arguments` as a JSON-stringified blob — without this the
             // mobile agent saw `{}` and the Rust handler errored out
             // with "file_write needs argument".
-            toolCalls.push({function:{name:tc.function.name, arguments:repairToolCallArgs(tc.function.arguments)}});
+            var call = {function:{name:tc.function.name, arguments:repairToolCallArgs(tc.function.arguments)}};
+            if(tc.id) call.id = tc.id;
+            if(tc.type) call.type = tc.type;
+            toolCalls.push(call);
           }
         }
       }
       return {content: rawContent, thinking: rawThinking, toolCalls: toolCalls};
+    }).then(function(result){
+      run.inferenceId = null;
+      return result;
+    }, function(error){
+      run.inferenceId = null;
+      throw error;
     });
   }
 
@@ -230,21 +245,21 @@ import {
   // The Rust bridge returns 200 OK with {error:"..."} for every failure
   // (missing arg, permission, underlying tool error). We surface those
   // as clean observations instead of "HTTP 500: ..." red errors.
-  function runAgentTool(tool, args){
+  function runAgentTool(tool, args, run){
     // todo_write never leaves the browser: it writes the plan strip and nothing
     // else. Sending it to the desktop bridge would need a Rust dispatcher and a
     // permission gate for something that touches no file and no process, and it
     // would put a network round trip in front of a UI update.
     if(tool === 'todo_write'){
-      return Promise.resolve(applyTodoWrite(args && args.todos));
+      return Promise.resolve(applyTodoWrite(args && args.todos, run.chatId));
     }
     return fetch('/remote-api/agent-tool',{
       method:'POST',
       headers:{'Content-Type':'application/json','Authorization':'Bearer '+TOKEN},
-      // `chatId` → per-chat workspace on the desktop side. Each mobile
-      // chat gets its own isolated `~/agent-workspace/<chatId>/` folder
-      // so agents across chats don't trample each other's files.
-      body: JSON.stringify({tool:tool, args:args||{}, chatId: currentChatId || ''})
+      // The server may bind every phone chat to the desktop's __remote__
+      // workspace override. Keep the origin chat identity even in that mode;
+      // navigation must never change where subsequent tools are dispatched.
+      body: JSON.stringify({tool:tool, args:args||{}, chatId: run.chatId})
     }).then(absorbRefresh).then(function(r){
       if(r.status===401){ clearAuthAndReload(); return 'Auth required'; }
       return r.text().then(function(text){
@@ -331,6 +346,49 @@ import {
     return false;
   }
 
+  function contextModelKey(model){
+    return String(model || '').replace(/^[^:]+::/, '');
+  }
+
+  function rememberContextWindow(config){
+    // Bind capacity to the model it was measured for. A different model in
+    // the picker must never inherit the managed engine's large allocation.
+    contextWindows = Object.create(null);
+    var model = config.contextModel;
+    var capacity = Number(config.contextWindow);
+    if(model && isFinite(capacity) && capacity >= 1024){
+      contextWindows[contextModelKey(model)] = capacity;
+    }
+  }
+
+  function persistAgentRun(run){
+    // A deleted chat stays deleted, even if an already-dispatched tool returns.
+    if(findChat(run.chatId) !== run.chat) return;
+    updateChatMessages(run.chat, run.messages);
+    if(currentChatId === run.chatId) msgs = run.messages;
+    persistChats();
+  }
+
+  function stopAgentRun(){
+    if(activeAgentRun){
+      activeAgentRun.stopped = true;
+      // Buffered native handlers cannot rely on a browser disconnect to stop
+      // upstream generation. Cancel the exact inference, then abort its fetch.
+      if(activeAgentRun.inferenceId){
+        try{
+          fetch('/remote-api/cancel-inference',{
+            method:'POST',
+            headers:{'Content-Type':'application/json','Authorization':'Bearer '+TOKEN},
+            body:JSON.stringify({id:activeAgentRun.inferenceId})
+          }).then(absorbRefresh).catch(function(){});
+        }catch(_){}
+      }
+      // Abort inference immediately. Tool requests are allowed to settle so
+      // their result can be recorded; aborting HTTP cannot undo a file write.
+      try{ activeAgentRun.controller.abort(); }catch(_){}
+    }
+  }
+
   // ── Persistence ──
   function loadPersisted(){
     try{
@@ -376,16 +434,19 @@ import {
   function findChat(id){for(var i=0;i<chats.length;i++){if(chats[i].id===id) return chats[i];}return null;}
   function syncCurrentChat(){
     var c = findChat(currentChatId); if(!c) return;
-    c.msgs = msgs.slice();
+    updateChatMessages(c, msgs);
+    persistChats();
+  }
+  function updateChatMessages(c, messages){
+    c.msgs = messages.slice();
     // Title auto-derive from first user message
-    if((!c.title || c.title==='New Chat' || c.title==='New Code') && msgs.length){
-      var firstUser = msgs.find(function(m){return m.role==='user';});
+    if((!c.title || c.title==='New Chat' || c.title==='New Code') && messages.length){
+      var firstUser = messages.find(function(m){return m.role==='user';});
       if(firstUser){
         var t = firstUser.content.replace(/\s+/g,' ').trim().slice(0,32);
         if(t) c.title = t;
       }
     }
-    persistChats();
   }
   function createChat(mode){
     var c = {id:uid(), title: mode==='codex'?'New Code':'New Chat', mode:mode||'lu', caveman:'off', personaId:'unrestricted', personaEnabled:false, agentEnabled:false, createdAt:Date.now(), msgs:[], model: currentModel||''};
@@ -407,6 +468,7 @@ import {
     persistState();
   }
   function deleteChat(id){
+    if(activeAgentRun && activeAgentRun.chatId === id) stopAgentRun();
     chats = chats.filter(function(c){return c.id!==id;});
     if(currentChatId===id){
       if(chats.length){ currentChatId = chats[0].id; msgs = Array.isArray(chats[0].msgs) ? chats[0].msgs.slice() : []; }
@@ -530,8 +592,8 @@ import {
     localStorage.removeItem('lu-remote-token');
     location.reload();
   }
-  function authJson(url){
-    return fetch(url,{headers:{'Authorization':'Bearer '+TOKEN}})
+  function authJson(url, signal){
+    return fetch(url,{headers:{'Authorization':'Bearer '+TOKEN}, signal:signal})
       .then(absorbRefresh)
       .then(function(r){
         if(r.status===401){clearAuthAndReload();throw new Error('401');}
@@ -618,6 +680,7 @@ import {
                  : (cfg.model || availableModels[0] || '');
     dispatchedSystemPrompt = cfg.systemPrompt || '';
     hostPlatformLine = cfg.platformLine || '';
+    rememberContextWindow(cfg);
 
     // Ensure we have a current chat
     if(!currentChatId || !findChat(currentChatId)){
@@ -769,28 +832,40 @@ import {
     var overlay = document.createElement('div');
     overlay.className = 'picker-overlay';
     overlay.onclick = function(e){if(e.target===overlay) document.body.removeChild(overlay);};
-    var items = availableModels.length
-      ? availableModels.map(function(name){
-          var active = name === currentModel;
-          return '<button class="picker-item'+(active?' active':'')+'" data-model="'+H(name)+'">' +
-                   '<span>'+H(name)+'</span>' +
-                   (active ? '<span class="material-symbols-outlined">'+svgIcon('check')+'</span>' : '') +
-                 '</button>';
-        }).join('')
-      : '<div class="picker-empty">No models found. Make sure your desktop backend is running with a model loaded.</div>';
     overlay.innerHTML =
       '<div class="picker-sheet">' +
         '<div class="picker-header">' +
           '<span class="picker-title">Select Model</span>' +
           '<button class="picker-close" aria-label="Close"><span class="material-symbols-outlined">'+svgIcon('close')+'</span></button>' +
         '</div>' +
-        '<div class="picker-list">' + items + '</div>' +
+        '<div class="picker-list"></div>' +
       '</div>';
     document.body.appendChild(overlay);
     overlay.querySelector('.picker-close').onclick = function(){document.body.removeChild(overlay);};
-    var buttons = overlay.querySelectorAll('.picker-item[data-model]');
-    for(var i=0;i<buttons.length;i++){
-      buttons[i].onclick = function(){
+    var list = overlay.querySelector('.picker-list');
+    if(!availableModels.length){
+      var empty = document.createElement('div');
+      empty.className = 'picker-empty';
+      empty.textContent = 'No models found. Make sure your desktop backend is running with a model loaded.';
+      list.appendChild(empty);
+    }
+    for(var i=0;i<availableModels.length;i++){
+      var name = availableModels[i];
+      var button = document.createElement('button');
+      button.className = 'picker-item' + (name === currentModel ? ' active' : '');
+      // Backend metadata is data, including quotes and angle brackets. Never
+      // parse it as HTML attributes or inline event handlers in a paired page.
+      button.setAttribute('data-model', name);
+      var label = document.createElement('span');
+      label.textContent = name;
+      button.appendChild(label);
+      if(name === currentModel){
+        var check = document.createElement('span');
+        check.className = 'material-symbols-outlined';
+        check.innerHTML = svgIcon('check');
+        button.appendChild(check);
+      }
+      button.onclick = function(){
         var name = this.getAttribute('data-model');
         if(name){
           currentModel = name;
@@ -799,6 +874,7 @@ import {
         }
         document.body.removeChild(overlay);
       };
+      list.appendChild(button);
     }
   };
 
@@ -868,8 +944,8 @@ import {
   // is. Per chat, in memory only — a plan outlives neither the run nor a reload.
   var todosByChat = {};
 
-  function applyTodoWrite(raw){
-    var key = currentChatId || '';
+  function applyTodoWrite(raw, chatId){
+    var key = typeof chatId === 'string' ? chatId : (currentChatId || '');
     var out = [];
     if(Object.prototype.toString.call(raw) === '[object Array]'){
       for(var i=0;i<raw.length && out.length<40;i++){
@@ -1186,11 +1262,11 @@ import {
     setAgentEnabled(!getAgentEnabled());
     renderShell();
   };
-  window._stopAgent = function(){ agentAbort = true; };
+  window._stopAgent = function(){ stopAgentRun(); };
 
   // Single-button cancel: stops whichever mode is currently running.
-  // Streaming chat → abort the fetch. Agent loop → flip the agentAbort
-  // flag so the next iteration bails cleanly. User can hit this from
+  // Streaming and agent inference both abort the fetch immediately. A tool
+  // already dispatched settles before the agent stops. User can hit this from
   // the input-bar Send (which flips to Stop while busy) OR from the
   // header Agent icon (also flips to Stop while an agent is running).
   window._cancelSend = function(){
@@ -1198,7 +1274,7 @@ import {
       try{ abortCtrl.abort(); }catch(_){}
     }
     if(agentRunning){
-      agentAbort = true;
+      stopAgentRun();
     }
   };
   window._triggerAttach = function(){
@@ -1497,12 +1573,13 @@ import {
   //                 after the mobile chat title. That way "codex chat on
   //                 mobile must also show up in Codex in the app with
   //                 content" (user request).
-  function postChatEvent(role, content){
+  function postChatEvent(role, content, run){
     if(!content) return;
     // Safety filter: never mirror bare "Continue." to the desktop.
     // Legacy from the old ReAct loop; kept as defense in depth.
     if(role === 'user' && /^\s*continue\.?\s*$/i.test(content)) return;
-    var c = findChat(currentChatId);
+    var c = run ? run.chat : findChat(currentChatId);
+    if(run && findChat(run.chatId) !== c) return;
     if(!c) return;
     var mode = c.mode === 'codex' ? 'codex' : 'lu';
     try{
@@ -1512,7 +1589,7 @@ import {
         body:JSON.stringify({
           role:role,
           content:content,
-          model:currentModel||'',
+          model:run ? run.model : (currentModel||''),
           mode:mode,
           chat_id:c.id||'',
           chat_title:c.title||''
@@ -1664,17 +1741,18 @@ import {
   // Steps render as small colored cards ABOVE the bubble; they are NOT
   // part of msg.content, so the next user turn does NOT see tool-call
   // scaffolding and the model cannot drift into that style.
-  function appendAgentStep(type, content, meta){
-    var idx = msgs.length-1;
-    if(idx < 0 || msgs[idx].role !== 'assistant') return;
-    if(!Array.isArray(msgs[idx].agentSteps)) msgs[idx].agentSteps = [];
+  function appendRunStep(type, content, meta, run){
+    var target = run.target;
+    if(!target || target.role !== 'assistant') return;
+    if(!Array.isArray(target.agentSteps)) target.agentSteps = [];
     // ALL steps always start collapsed (user request). Pulsing CSS stripe
     // on `.live` rows shows in-flight status; the content itself stays
     // behind the chevron until the user taps to expand.
-    for(var p=0; p<msgs[idx].agentSteps.length; p++){ msgs[idx].agentSteps[p].open = false; }
+    for(var p=0; p<target.agentSteps.length; p++){ target.agentSteps[p].open = false; }
     var step = {type:type, content:content, ts:Date.now(), open:false, live:false};
     if(meta && typeof meta === 'object'){ for(var k in meta) if(Object.prototype.hasOwnProperty.call(meta,k)) step[k]=meta[k]; }
-    msgs[idx].agentSteps.push(step);
+    target.agentSteps.push(step);
+    persistAgentRun(run);
     renderChat();
   }
 
@@ -1692,15 +1770,46 @@ import {
   // reliability instead of ~60% JSON parse success.
   function runToolLoop(systemPrompt, toolNames, kindLabel){
     agentRunning = true;
-    agentAbort = false;
-    abortCtrl = new AbortController();
+    var run = {
+      id: uid(),
+      chatId: currentChatId,
+      chat: findChat(currentChatId),
+      model: currentModel,
+      messages: msgs,
+      target: msgs[msgs.length-1],
+      thinking: thinking,
+      controller: new AbortController(),
+      stopped: false,
+      finished: false,
+      inferenceId: null,
+      inferenceCount: 0,
+      log: [],
+      pendingCalls: [],
+      taskContent: ''
+    };
+    for(var taskIdx=run.messages.length-2;taskIdx>=0;taskIdx--){
+      if(run.messages[taskIdx].role === 'user'){
+        run.taskContent = String(run.messages[taskIdx].content || '');
+        break;
+      }
+    }
+    activeAgentRun = run;
+    abortCtrl = run.controller;
     renderShell(); // flips Send button to Stop
     renderChat();
 
     var maxIter = 50; // matches desktop v24 AgentBudget default
     var iter = 0;
-    var target = msgs[msgs.length-1]; // the empty assistant slot
+    var target = run.target;
     var tools = buildToolDefs(toolNames);
+    run.budget = agentContextBudget(contextWindows[contextModelKey(run.model)], tools);
+    var completeRun;
+    run.done = new Promise(function(resolve){ completeRun = resolve; });
+    function appendAgentStep(type, content, meta){ appendRunStep(type, content, meta, run); }
+    function recordMessage(message){
+      run.log.push(copyApiMessage(message));
+      apiMessages.push(message);
+    }
     // Cap silent echo retries so a model fully wedged on the echo
     // can't burn the whole iteration budget on the same drift.
     var echoRetriesRemaining = 3;
@@ -1725,11 +1834,10 @@ import {
     // so the model sees what it did before (continue capability, parity
     // with original Codex CLI).
     var apiMessages = [];
-    var apiStartLen = 0; // track where loop-generated messages begin
     if(systemPrompt) apiMessages.push({role:'system', content:systemPrompt});
     var cm = getCaveman();
-    for(var k=0; k<msgs.length-1; k++){
-      var m = msgs[k];
+    for(var k=0; k<run.messages.length-1; k++){
+      var m = run.messages[k];
       var content = m.content;
       if(m.role==='user' && cm!=='off' && CAVEMAN_REMINDERS[cm]){
         content = CAVEMAN_REMINDERS[cm] + '\n' + content;
@@ -1746,26 +1854,26 @@ import {
       var apiMsg = {role: m.role, content: content};
       // Carry over tool_calls on assistant messages so Ollama sees the
       // full native tool-call history (assistant→tool pairs).
-      if(m.tool_calls) apiMsg.tool_calls = m.tool_calls;
+      if(m.tool_calls) apiMsg.tool_calls = copyApiMessage(m.tool_calls);
+      if(m.tool_call_id) apiMsg.tool_call_id = m.tool_call_id;
+      if(m.name) apiMsg.name = m.name;
       if(m.images && m.images.length){ apiMsg.images = m.images.map(function(im){return im.data;}); }
       apiMessages.push(apiMsg);
     }
-
-    apiStartLen = apiMessages.length; // everything after this was added during the loop
 
     // Show a "thinking" step while the first call is in flight
     appendAgentStep('thought', kindLabel+' is thinking...', {live:true});
     var thinkingStepIdx = (target.agentSteps || []).length - 1;
 
     function step(){
-      if(agentAbort){
+      if(run.stopped){
         appendAgentStep('error', kindLabel+' stopped by user.');
-        finishToolLoop(null);
+        finishToolLoop(null, 'stopped');
         return;
       }
       if(iter >= maxIter){
         appendAgentStep('error', kindLabel+' stopped: max iterations reached.');
-        finishToolLoop(null);
+        finishToolLoop(null, 'stopped');
         return;
       }
       iter++;
@@ -1779,11 +1887,17 @@ import {
       // Compaction — keeps Ollama from silently truncating the system
       // prompt + first user message after a few iterations of file reads
       // (the symptom: "I'm ready to receive the task" appearing mid-loop).
-      // Conservative budget tuned to fit comfortably inside an 8K-token
-      // context with room to spare for the model's reply.
-      apiMessages = compactApiMessages(apiMessages, 24000);
+      // Capacity belongs to this run's model, with output and schemas reserved.
+      apiMessages = compactApiMessages(apiMessages, run.budget.charBudget);
+      if(totalChars(apiMessages) > run.budget.charBudget){
+        appendAgentStep('error', 'The task exceeds this model\'s active context budget. Shorten the request or increase context on the desktop.');
+        finishToolLoop(null, 'failed');
+        return;
+      }
 
-      nativeToolChat(apiMessages, tools).then(function(res){
+      nativeToolChat(apiMessages, tools, run).then(function(res){
+        if(run.finished) return;
+        if(run.stopped){ finishToolLoop(null, 'stopped'); return; }
         // Remove the initial "thinking" placeholder on the first
         // successful response (only matters for iter === 1).
         if(thinkingStepIdx >= 0 && target.agentSteps && target.agentSteps[thinkingStepIdx]){
@@ -1793,7 +1907,7 @@ import {
         }
 
         // Handle thinking content (native Ollama field + inline tags)
-        var keepThinking = thinking && isThinkingCompatible(currentModel);
+        var keepThinking = run.thinking && isThinkingCompatible(run.model);
         var stripped = stripThinkTags(res.content, keepThinking);
         var turnContent = stripped.content;
         var turnThinking = stripped.thinking;
@@ -1833,7 +1947,7 @@ import {
         if(isSystemPromptEcho(turnContent)){
           if(echoRetriesRemaining > 0){
             echoRetriesRemaining--;
-            apiMessages.push({
+            recordMessage({
               role: 'user',
               content: 'Continue the task. Do not introduce yourself again. Resume from the last successful step using the appropriate tool call.'
             });
@@ -1878,15 +1992,9 @@ import {
             .test(trimmed.slice(-260));
           // Empty-summary check: trailing colon/dash with nothing after it.
           var emptyAfterColon = /(:\s*|—\s*|-\s*)$/.test(trimmed) && trimmed.length < 400;
-          // Probe the FIRST user msg (= the original task) for explicit
-          // tool mentions. Using the LAST user msg fails after a nudge —
-          // the nudge text doesn't repeat the tool list, so mentionedTools
-          // would drop to 0 and the coverage-gap check would never fire on
-          // subsequent iterations.
-          var firstUserContent = '';
-          for(var li2 = 0; li2 < apiMessages.length; li2++){
-            if(apiMessages[li2].role === 'user'){ firstUserContent = String(apiMessages[li2].content || ''); break; }
-          }
+          // Use this run's actual task, independent of old conversation turns,
+          // compaction and synthetic continuation nudges.
+          var firstUserContent = run.taskContent;
           var mentionedTools = 0;
           var allKnownToolNames = (typeof AGENT_TOOLS !== 'undefined') ? AGENT_TOOLS.map(function(t){return t.name;}) : [];
           var distinctToolsCalled = {};
@@ -1945,30 +2053,31 @@ import {
                 'Write the final user-facing summary right now: 1-3 sentences listing what you did and any concrete results. ' +
                 'Do not introduce yourself again.';
             }
-            apiMessages.push({ role: 'user', content: nudgeText });
+            recordMessage({ role: 'user', content: nudgeText });
             step();
             return;
           }
-          finishToolLoop(turnContent || null);
+          finishToolLoop(turnContent || null, 'completed');
           return;
         }
 
         // Push the assistant message with tool_calls into the history
         // so Ollama sees the proper assistant→tool message pairs.
-        apiMessages.push({
+        recordMessage({
           role: 'assistant',
           content: turnContent || '',
           tool_calls: res.toolCalls.map(function(tc){
-            return {function:{name:tc.function.name, arguments:tc.function.arguments}};
+            return copyApiMessage(tc);
           })
         });
+        run.pendingCalls = res.toolCalls.slice();
 
         // Execute each tool call sequentially, show steps in UI
         var tcIndex = 0;
         function execNext(){
-          if(agentAbort){
+          if(run.stopped){
             appendAgentStep('error', kindLabel+' stopped by user.');
-            finishToolLoop(null);
+            finishToolLoop(null, 'stopped');
             return;
           }
           if(tcIndex >= res.toolCalls.length){
@@ -1988,25 +2097,27 @@ import {
           appendAgentStep('action', '`'+toolName+'` '+argsPretty, {toolName:toolName, args:toolArgs, live:true});
           var actionIdx = (target.agentSteps || []).length - 1;
 
-          runAgentTool(toolName, toolArgs).then(function(observation){
+          runAgentTool(toolName, toolArgs, run).then(function(observation){
             var obs = String(observation || '');
 
             // Mark action as completed
             if(target.agentSteps && target.agentSteps[actionIdx]){
               target.agentSteps[actionIdx].live = false;
+              target.agentSteps[actionIdx].outcome = /^(Error|Permission denied|Network error|Execution timed out)/i.test(obs) ? 'failed' : 'completed';
             }
             appendAgentStep('observation', obs);
 
             // Push tool result into the LLM history. The iteration rides with
             // it so decayToolResults can tell the newest results (kept whole)
             // from the ones that have done their job (A1).
-            apiMessages.push({role:'tool', content:obs, iter:iter});
+            recordMessage(toolResultMessage(tc, obs, iter));
+            run.pendingCalls.shift();
 
             // runAgentTool resolves on graceful 200+{error} too — we have
             // to inspect the observation text to know whether the tool
             // really succeeded. If it didn't, bump the consecutive-error
             // counter; on success, reset.
-            if(/^(Error|Permission denied|Network error)/i.test(obs)){
+            if(/^(Error|Permission denied|Network error|Execution timed out)/i.test(obs)){
               consecutiveErrors++;
             } else {
               consecutiveErrors = 0;
@@ -2016,7 +2127,7 @@ import {
               appendAgentStep('error',
                 kindLabel + ' stopped: ' + consecutiveErrors +
                 ' consecutive tool errors. Try rephrasing the task or fixing the tool arguments.');
-              finishToolLoop(null);
+              finishToolLoop(null, 'failed');
               return;
             }
 
@@ -2026,18 +2137,20 @@ import {
             var errMsg = String(e && e.message || e);
             if(target.agentSteps && target.agentSteps[actionIdx]){
               target.agentSteps[actionIdx].live = false;
+              target.agentSteps[actionIdx].outcome = 'failed';
             }
             appendAgentStep('error', errMsg);
 
             // Push error as tool result so the model can adapt
-            apiMessages.push({role:'tool', content:'Error: '+errMsg, iter:iter});
+            recordMessage(toolResultMessage(tc, 'Error: '+errMsg, iter));
+            run.pendingCalls.shift();
 
             consecutiveErrors++;
             if(consecutiveErrors >= maxConsecutiveErrors){
               appendAgentStep('error',
                 kindLabel + ' stopped: ' + consecutiveErrors +
                 ' consecutive tool errors. Try rephrasing the task or fixing the tool arguments.');
-              finishToolLoop(null);
+              finishToolLoop(null, 'failed');
               return;
             }
 
@@ -2054,26 +2167,36 @@ import {
           thinkingStepIdx = -1;
         }
 
-        if(e && e.name === 'AbortError'){
+        if(run.finished) return;
+        if(run.stopped || (e && e.name === 'AbortError')){
           appendAgentStep('error', 'Stopped.');
-          finishToolLoop(null);
+          finishToolLoop(null, 'stopped');
           return;
         }
         var errMsg = (e && e.message) || String(e);
         if(errMsg === 'TOOLS_NOT_SUPPORTED'){
           appendAgentStep('error', 'This model does not support tool calling. Pick a tool-capable model (Qwen 3, Llama 3.1+, Gemma 4).');
-          finishToolLoop(null);
+          finishToolLoop(null, 'failed');
           return;
         }
         appendAgentStep('error', kindLabel+' error: '+errMsg);
-        finishToolLoop(null);
+        finishToolLoop(null, 'failed');
       });
     }
 
-    function finishToolLoop(finalAnswer){
+    function finishToolLoop(finalAnswer, outcome){
+      if(run.finished) return;
+      if(run.stopped) outcome = 'stopped';
+      run.finished = true;
+      run.outcome = outcome;
       agentRunning = false;
-      agentAbort = false;
       abortCtrl = null;
+      activeAgentRun = null;
+      // A cancelled multi-call reply still needs a result for every call ID
+      // before it can be replayed. These entries report non-execution clearly.
+      while(run.pendingCalls.length){
+        recordMessage(toolResultMessage(run.pendingCalls.shift(), 'Not executed: task ' + outcome + '.', iter));
+      }
 
       // ── Continue capability (parity with original Codex CLI) ────────
       // Persist the tool-call history from THIS turn as hidden messages
@@ -2082,23 +2205,25 @@ import {
       // Hidden messages are skipped by renderChat() — the user only sees
       // the final answer, but the model sees the full tool-call chain.
       var toolHistory = [];
-      for(var hi = apiStartLen; hi < apiMessages.length; hi++){
-        var am = apiMessages[hi];
+      for(var hi = 0; hi < run.log.length; hi++){
+        var am = run.log[hi];
         toolHistory.push(mkMsg(am.role, am.content || '', {
           hidden: true,
-          tool_calls: am.tool_calls || undefined
+          tool_calls: am.tool_calls || undefined,
+          tool_call_id: am.tool_call_id || undefined,
+          name: am.name || undefined
         }));
       }
       if(toolHistory.length > 0){
         // Splice BEFORE target (the visible final-answer message) so
         // the conversation order is: user → hidden tool chain → answer.
-        var targetIdx = msgs.indexOf(target);
+        var targetIdx = run.messages.indexOf(target);
         if(targetIdx >= 0){
           // splice(targetIdx, 0, ...items) — Array.prototype.splice.apply
           // for ES5 compat (mobile JS can't use spread in all engines).
           var spliceArgs = [targetIdx, 0];
           for(var si = 0; si < toolHistory.length; si++) spliceArgs.push(toolHistory[si]);
-          Array.prototype.splice.apply(msgs, spliceArgs);
+          Array.prototype.splice.apply(run.messages, spliceArgs);
         }
       }
 
@@ -2112,11 +2237,11 @@ import {
         for(var si2 = 0; si2 < steps.length; si2++){
           var s = steps[si2];
           if(s.type === 'action'){
+            if(s.outcome === 'failed'){ fails++; continue; }
+            if(s.outcome !== 'completed') continue;
             if(s.toolName === 'file_write') writes++;
             else if(s.toolName === 'file_read') reads++;
             else otherOk++;
-          } else if(s.type === 'error' && s.content && s.content.indexOf('stopped') < 0){
-            fails++;
           }
         }
         var summaryParts = [];
@@ -2124,19 +2249,29 @@ import {
         if(reads) summaryParts.push(reads + ' file(s) read');
         if(otherOk) summaryParts.push(otherOk + ' other operation(s) completed');
         if(fails) summaryParts.push(fails + ' operation(s) failed');
-        answer = summaryParts.length > 0
-          ? 'Task completed: ' + summaryParts.join(', ') + '.'
-          : 'Task completed.';
+        var label = outcome === 'completed' ? 'Task completed' : outcome === 'stopped' ? 'Task stopped' : 'Task failed';
+        answer = label + (summaryParts.length ? ': ' + summaryParts.join(', ') + '.' : '.');
       }
-      if(target){ target.content = answer || target.content || ''; }
+      if(target){
+        target.content = answer || target.content || '';
+        target.runOutcome = outcome;
+        for(var ai=0; ai<target.agentSteps.length; ai++) target.agentSteps[ai].live = false;
+      }
       renderShell();
       renderChat();
       var finalText = target ? (target.content || '') : '';
-      postChatEvent('assistant', finalText);
-      syncCurrentChat();
+      postChatEvent('assistant', finalText, run);
+      persistAgentRun(run);
+      completeRun(outcome);
     }
 
-    step();
+    // Refresh once per run so desktop context changes are picked up without a
+    // phone reload. A failed metadata read retains the known safe capacity.
+    authJson('/remote-api/config', run.controller.signal).then(function(config){
+      if(config) rememberContextWindow(config);
+      run.budget = agentContextBudget(contextWindows[contextModelKey(run.model)], tools);
+    }).catch(function(){}).then(function(){ step(); });
+    return run;
   }
 
   // Character-state-machine for inline <think>...</think> tags.
