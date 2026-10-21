@@ -1485,6 +1485,7 @@ fn fix_comfyui_cors_blocking(state: &AppState) -> Result<serde_json::Value, Stri
     }
     let port = *state.comfy_port.lock().unwrap();
 
+
     // Stop our own child cleanly first (if any), then whatever else owns the port.
     {
         let mut proc = state.comfy_process.lock().unwrap();
@@ -1553,6 +1554,18 @@ pub(crate) static COMFY_START: Mutex<()> = Mutex::new(());
 pub(crate) static OLLAMA_START: Mutex<()> = Mutex::new(());
 pub(crate) static ENGINE_START: Mutex<()> = Mutex::new(());
 pub(crate) static EMBED_START: Mutex<()> = Mutex::new(());
+
+/// A live child counts as an in-progress start before its HTTP port binds.
+/// Only a confirmed exit clears ownership; an OS query error must not make
+/// another start overwrite a possibly live child.
+fn tracked_comfy_child_alive(process: &Mutex<Option<std::process::Child>>) -> bool {
+    let mut process = process.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    match process.as_mut().map(std::process::Child::try_wait) {
+        Some(Ok(Some(_))) => { *process = None; false }
+        Some(Ok(None) | Err(_)) => true,
+        None => false,
+    }
+}
 
 /// Is an Ollama server already listening?
 ///
@@ -1906,6 +1919,14 @@ pub(crate) fn start_comfyui_blocking(state: &AppState) -> Result<serde_json::Val
         return Err(MACOS_COMFY_REFUSAL.to_string());
     }
 
+    // Discovery also runs when another ComfyUI owns the port: downloads still
+    // need the configured installation folder. Keep it inside the shared gate.
+    if state.comfy_path.lock().unwrap().is_none() {
+        if let Some(path) = find_comfyui_path() {
+            *state.comfy_path.lock().unwrap() = Some(path);
+        }
+    }
+
     let port = *state.comfy_port.lock().unwrap();
 
     if is_comfyui_running_on_port(port) {
@@ -1930,14 +1951,8 @@ pub(crate) fn start_comfyui_blocking(state: &AppState) -> Result<serde_json::Val
     // the tracked twin while the zombie keeps serving the stale node list
     // (the "install spinner never ends" chain). Report 'starting' instead;
     // callers already poll the connection afterwards.
-    {
-        let mut proc = state.comfy_process.lock().unwrap();
-        if let Some(child) = proc.as_mut() {
-            match child.try_wait() {
-                Ok(None) => return Ok(serde_json::json!({"status": "starting"})),
-                _ => *proc = None, // exited or unreapable — clear and start fresh
-            }
-        }
+    if tracked_comfy_child_alive(&state.comfy_process) {
+        return Ok(serde_json::json!({"status": "starting"}));
     }
 
     let comfy_path = {
@@ -3060,190 +3075,16 @@ pub fn auto_start_ollama(state: &AppState) {
 
 /// Auto-start ComfyUI on app launch (called from setup)
 pub fn auto_start_comfyui(state: &AppState) {
-    // Hard rule: macOS local media is MLX only, NEVER ComfyUI (see
-    // commands::mlx / commands::video). Auto-starting ComfyUI on Mac violated
-    // that rule (2026-07-23 log: "[ComfyUI] Already running on port 8188").
-    // ComfyUI itself stays fully intact for Windows/Linux and for a user who
-    // manually invokes `start_comfyui` — only the unattended boot path skips it.
-    if cfg!(target_os = "macos") {
+    // Both entry points must share the gate, tracked-child check, Python/GPU
+    // preferences, startup watch and captured diagnostics. In particular, a
+    // child importing torch has no listening port yet and must not be replaced.
+    if !comfy_supported_here() {
         println!("[ComfyUI] Auto-start skipped on macOS — local media is MLX-only");
         return;
     }
-    // If user configured a remote host, don't try to auto-start anything locally.
-    {
-        let host = state.comfy_host.lock().unwrap().clone();
-        if !is_local_host(&host) {
-            println!("[ComfyUI] Remote host configured ({}), skipping local auto-start", host);
-            return;
-        }
-    }
-
-    // Always try to find and store the ComfyUI path (needed for downloads)
-    if state.comfy_path.lock().unwrap().is_none() {
-        if let Some(path) = find_comfyui_path() {
-            println!("[ComfyUI] Found at: {}", path);
-            *state.comfy_path.lock().unwrap() = Some(path);
-        }
-    }
-
-    let port = *state.comfy_port.lock().unwrap();
-
-    if is_comfyui_running_on_port(port) {
-        // T-68: a ComfyUI on our port at launch is either the user's own or an
-        // orphan this app left behind when it was killed. Naming which one in
-        // the log is what makes a later "Stop did nothing" diagnosable.
-        match find_orphaned_comfyui(port) {
-            Some(pid) => println!(
-                "[ComfyUI] Already running on port {port} — orphan of an earlier session (pid {pid}); Stop can adopt it"
-            ),
-            None => println!("[ComfyUI] Already running on port {} (not started by this app)", port),
-        }
-        return;
-    }
-
-    match find_comfyui_path() {
-        Some(path) => {
-            let port_str = port.to_string();
-            println!("[ComfyUI] Auto-starting from: {} on port {}", path, port);
-            *state.comfy_path.lock().unwrap() = Some(path.clone());
-
-            // Mirror the start_comfyui Python preference: use the portable's
-            // bundled Python when present so AMD / cu126 / CPU portables boot
-            // with the right torch wheel. See start_comfyui for full context.
-            let portable_python = std::path::Path::new(&path)
-                .parent()
-                .and_then(|p| {
-                    let c = p.join("python_embeded").join("python.exe");
-                    if c.exists() { Some(c.to_string_lossy().to_string()) } else { None }
-                })
-                .or_else(|| {
-                    let c = std::path::Path::new(&path).join("python_embeded").join("python.exe");
-                    if c.exists() { Some(c.to_string_lossy().to_string()) } else { None }
-                });
-            // Bug E: prefer the per-install venv that the PEP 668 path
-            // creates (Arch / Debian 12+ / Fedora 38+ / Ubuntu 23.04+).
-            // Without this auto-start would launch with the system Python
-            // that doesn't have torch and crash on first import.
-            // P3: the same three answers as the manual start. A boot that
-            // silently launches a foreign interpreter is the worse half of
-            // that bug, because there is no panel here to read the traceback
-            // in: the reason only reaches the log.
-            let venv_state = crate::python::comfy_venv_state(std::path::Path::new(&path));
-            let has_usable_venv = matches!(venv_state, crate::python::ComfyVenv::Usable(_));
-            let system_python = state.python_bin.lock().unwrap().clone();
-            let comfy_dir = std::path::Path::new(&path);
-            let python = match launch_python(portable_python.as_deref(), &venv_state, comfy_dir, || {
-                bound_comfy_python(comfy_dir, &system_python)
-            }) {
-                Ok(p) => p,
-                Err(why) => {
-                    println!("[ComfyUI] Auto-start skipped: {why}");
-                    return;
-                }
-            };
-            if portable_python.is_some() {
-                println!("[ComfyUI] Auto-start using bundled portable Python: {}", python);
-            } else if has_usable_venv {
-                println!("[ComfyUI] Auto-start using ComfyUI venv Python: {}", python);
-            } else {
-                println!("[ComfyUI] Auto-start without a venv, using the Python that holds torch: {}", python);
-            }
-
-            // Bug J: same --cpu fallback as start_comfyui to avoid the
-            // "Found no NVIDIA driver" crash loop on non-NVIDIA systems.
-            let auto_gpu_mode = ComfyGpuMode::parse(&state.comfy_gpu_mode.lock().unwrap());
-            let auto_decision = comfy_needs_cpu(&python, auto_gpu_mode, Some(&state.comfy_gpu_cache));
-            let auto_needs_cpu = auto_decision.needs_cpu;
-            // Mirror of start_comfyui: expose the real launch mode to the UI.
-            *state.comfy_started_cpu.lock().unwrap() = Some(auto_needs_cpu);
-            // Wie im manuellen Start, und bis P3 fehlte das hier ganz: auf einer
-            // Maschine, auf der LU ComfyUI beim Programmstart selbst hochzieht,
-            // erreichte der Model-Storage-Ordner ComfyUI nie, auch bei
-            // brandaktueller Datei. Vor comfy_args, damit der Autostart dieselbe
-            // Form hat wie der Startpfad und wie port_str weiter oben.
-            let auto_extra = crate::commands::custom_models::refresh_extra_model_paths_arg()
-                .map(|p| p.to_string_lossy().to_string());
-            let mut comfy_args: Vec<&str> = vec![
-                "main.py",
-                "--listen", "127.0.0.1",
-                "--port", &port_str,
-                "--enable-cors-header", comfy_cors_origin(),
-            ];
-            if auto_needs_cpu {
-                comfy_args.push("--cpu");
-                if let Some(reason) = cpu_flag_reason(auto_gpu_mode, auto_decision.baseline, auto_decision.torch_gpu) {
-                    println!("[ComfyUI] Auto-start: {reason}");
-                }
-            }
-            // Mirror start_comfyui: auto-enable Flash Attention (FA2) when it
-            // actually imports in this python. Boot auto-start previously never
-            // passed the flag, so auto-started ComfyUI ran WAN video 4-5x slower
-            // than a manual start even with flash-attn installed. The probe is
-            // cached per python; an absent package fails fast, so the rare cost
-            // is one slow first-probe on a cold boot with flash-attn present.
-            if !auto_needs_cpu && flash_attention_cached(state, &python) {
-                comfy_args.push("--use-flash-attention");
-                println!("[ComfyUI] Auto-start: flash-attn detected — enabling Flash Attention");
-            }
-            if let Some(file) = &auto_extra {
-                comfy_args.push("--extra-model-paths-config");
-                comfy_args.push(file);
-                println!("[ComfyUI] Auto-start: extra model paths: {}", file);
-            }
-            // GH #183: the same flags from the user's start script as the
-            // manual start.
-            let user_args = crate::commands::comfy_user_paths::UserComfyPaths::discover(std::path::Path::new(&path)).launch_args();
-            if !user_args.is_empty() {
-                println!("[ComfyUI] Auto-start: from the start script: {}", user_args.join(" "));
-            }
-            comfy_args.extend(user_args.iter().map(String::as_str));
-            let mut cmd = python_command(&python);
-            cmd.args(&comfy_args)
-                .current_dir(&path)
-                .env("TQDM_DISABLE", "1")
-                .env("PYTHONUNBUFFERED", "1")
-                // UTF-8 kommt aus python_command, siehe start_comfyui. Ohne
-                // das stirbt ComfyUI auf einer Windows-Konsole ohne UTF-8 an
-                // einem UnicodeEncodeError, sobald es Fortschrittszeichen
-                // druckt (07.06.2026).
-                .stdin(Stdio::null())
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped());
-            #[cfg(target_os = "windows")]
-            cmd.creation_flags(CREATE_NO_WINDOW);
-            match cmd.spawn() {
-                Ok(mut child) => {
-                    // Assign to Job Object so child dies when parent dies (even via Task Manager)
-                    #[cfg(target_os = "windows")]
-                    assign_to_kill_on_close_job(&child);
-
-                    // Drain stdout/stderr in background threads to prevent buffer deadlock
-                    if let Some(stdout) = child.stdout.take() {
-                        std::thread::spawn(move || {
-                            use std::io::{BufRead, BufReader};
-                            let reader = BufReader::new(stdout);
-                            for line in reader.lines().map_while(Result::ok) {
-                                println!("[ComfyUI] {}", line);
-                            }
-                        });
-                    }
-                    if let Some(stderr) = child.stderr.take() {
-                        std::thread::spawn(move || {
-                            use std::io::{BufRead, BufReader};
-                            let reader = BufReader::new(stderr);
-                            for line in reader.lines().map_while(Result::ok) {
-                                println!("[ComfyUI] {}", line);
-                            }
-                        });
-                    }
-
-                    *state.comfy_process.lock().unwrap() = Some(child);
-                    println!("[ComfyUI] Started");
-                }
-                Err(e) => println!("[ComfyUI] Failed to start: {}", e),
-            }
-        }
-        None => println!("[ComfyUI] Not found. Install ComfyUI or set path in settings."),
+    match start_comfyui_blocking(state) {
+        Ok(status) => info!(%status, "comfyui auto-start"),
+        Err(reason) => error!(%reason, "comfyui auto-start failed"),
     }
 }
 
@@ -4601,8 +4442,8 @@ mod orphan_safety_tests {
             process_rs_production_code()
                 .matches("assign_to_kill_on_close_job(&child)")
                 .count(),
-            2,
-            "both ComfyUI spawns must stay on the kill-on-close job"
+            1,
+            "the shared ComfyUI spawn must stay on the kill-on-close job"
         );
     }
 
@@ -5068,10 +4909,10 @@ mod comfy_adoption_tests {
         let src = whole.split("#[cfg(test)]").next().expect("die ausgelieferte Haelfte");
         assert_eq!(
             src.matches("--extra-model-paths-config").count(),
-            2,
+            1,
             "der Schalter steht nicht an beiden Startorten",
         );
-        for name in ["fn start_comfyui_blocking", "fn auto_start_comfyui"] {
+        for name in ["fn start_comfyui_blocking"] {
             let start = src.find(name).unwrap_or_else(|| panic!("{name} ist weg"));
             let rest = &src[start..];
             let end = start + rest.find("\n}\n").expect("unterminated fn");
@@ -5154,7 +4995,7 @@ mod comfy_adoption_tests {
     fn der_start_greift_an_keiner_stelle_mehr_still_zum_system_python() {
         let whole = include_str!("process.rs");
         let src = whole.split("#[cfg(test)]").next().expect("die ausgelieferte Haelfte");
-        for name in ["fn start_comfyui_blocking", "fn auto_start_comfyui"] {
+        for name in ["fn start_comfyui_blocking"] {
             let start = src.find(name).unwrap_or_else(|| panic!("{name} ist weg"));
             let rest = &src[start..];
             let end = start + rest.find("\n}\n").expect("unterminated fn");
@@ -5423,3 +5264,7 @@ mod process_tree_kill_tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "comfy_start_serialization_tests.rs"]
+mod comfy_start_serialization_tests;
