@@ -227,7 +227,7 @@ async fn a_connection_lost_mid_response_is_retried_before_exposing_an_answer() {
     let broken_task = tokio::spawn(async move {
         let (mut socket, _) = broken.accept().await.unwrap();
         let mut request = [0u8; 4096];
-        socket.read(&mut request).await.unwrap();
+        assert!(socket.read(&mut request).await.unwrap() > 0, "the relay sent no request");
         socket.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 128\r\nConnection: close\r\n\r\n{").await.unwrap();
         socket.shutdown().await.unwrap();
     });

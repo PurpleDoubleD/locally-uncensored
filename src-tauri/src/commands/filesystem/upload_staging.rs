@@ -252,9 +252,9 @@ fn no_hardlinks(error: &std::io::Error) -> bool {
     #[cfg(windows)]
     {
         use windows_sys::Win32::Foundation::{ERROR_INVALID_FUNCTION, ERROR_NOT_SUPPORTED};
-        return error.raw_os_error().is_some_and(|code| {
+        error.raw_os_error().is_some_and(|code| {
             code == ERROR_INVALID_FUNCTION as i32 || code == ERROR_NOT_SUPPORTED as i32
-        });
+        })
     }
     #[cfg(not(windows))]
     {

@@ -7,10 +7,9 @@
 //! Context dropdown uses it to cap its presets — without it a 32k model
 //! happily "accepts" -c 131072 and degrades silently (llama.cpp only warns).
 //!
-//! The same header carries `<arch>.block_count`, the number of transformer
-//! layers `-ngl` counts in. The engine start needs it to answer "how much of
-//! this model fits on this card" with a layer count instead of the blanket
-//! 999 that put a 12B model onto an 8 GB board (3.0.0 list, bugs u and a).
+//! Parser tests also read `<arch>.block_count` to check optional field and
+//! architecture matching. GPU allocation uses llama-server's own fitter,
+//! which accounts for the actual model tensors and KV cache types.
 //!
 //! Deliberately paranoid: this runs against user-downloaded files inside
 //! `list_bundled_models`, so it must NEVER panic or stall the listing —
@@ -133,9 +132,8 @@ fn read_value(r: &mut R, ty: u32) -> Option<Val> {
 pub struct HeaderFacts {
     /// `<arch>.context_length`, the context the model was TRAINED with.
     pub context_length: Option<u32>,
-    /// `<arch>.block_count`, how many transformer layers there are to
-    /// offload. This is the denominator of the per-layer size the engine
-    /// start divides the free graphics memory by.
+    /// `<arch>.block_count`, the transformer layer count. Retained for the
+    /// bounded-header parser tests; GPU allocation uses the engine's fitter.
     pub block_count: Option<u32>,
 }
 
@@ -148,10 +146,9 @@ pub fn context_length(path: &str) -> Option<u32> {
     scan_header(path, false).unwrap_or_default().context_length
 }
 
-/// Context length AND layer count in one pass. Costs more than
-/// `context_length` on a file that carries no `block_count`, because the scan
-/// then has to walk past the tokenizer vocabulary before it can say so; the
-/// engine start pays that once per start, not once per listed model.
+/// Test helper that reads context length and layer count in one pass, proving
+/// that optional facts resolve to the correct architecture in arbitrary order.
+#[cfg(test)]
 pub fn read_header(path: &str) -> HeaderFacts {
     scan_header(path, true).unwrap_or_default()
 }

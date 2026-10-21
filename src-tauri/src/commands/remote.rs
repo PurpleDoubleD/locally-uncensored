@@ -1704,9 +1704,9 @@ where
                 let status = StatusCode::from_u16(response.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
                 match response.bytes().await {
                     Ok(bytes) if status.is_success() => {
-                        return serde_json::from_slice(&bytes).map_err(|e| (StatusCode::BAD_GATEWAY, format!("Read error: {e}")));
+                        return serde_json::from_slice(&bytes).map_err(|e| (StatusCode::BAD_GATEWAY, format!("Read error: {}", os_error::english(&e))));
                     }
-                    Ok(bytes) => (status, String::from_utf8_lossy(&bytes).into_owned(), matches!(status.as_u16(), 502 | 503 | 504)),
+                    Ok(bytes) => (status, String::from_utf8_lossy(&bytes).into_owned(), matches!(status.as_u16(), 502..=504)),
                     Err(error) => (StatusCode::BAD_GATEWAY, format!("Read error: {}", os_error::english(&error)), true),
                 }
             }
@@ -3049,6 +3049,8 @@ struct BackendChoice {
     managed: Option<bool>,
 }
 
+// Tauri injects AppHandle/State; keep the established optional IPC arguments.
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub async fn start_remote_server(
     app: AppHandle,
@@ -3332,6 +3334,8 @@ pub fn revoke_remote_memory(state: tauri::State<'_, crate::state::AppState>) -> 
 /// Restart the remote server in-place: stop + start while preserving the
 /// dispatched conversation on the desktop. Generates a new passcode + JWT secret
 /// (so the mobile has to re-authenticate, which is the desired security behaviour).
+// Same IPC shape as start_remote_server, including Tauri's injected handles.
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub async fn restart_remote_server(
     app: AppHandle,

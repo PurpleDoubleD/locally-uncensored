@@ -1554,6 +1554,7 @@ pub fn detect_gpus() -> Result<Vec<DetectedGpu>, String> {
 
 /// One MiB, because every vendor tool on this planet reports in MiB and every
 /// caller downstream wants bytes.
+#[cfg(any(target_os = "macos", test))]
 const MIB: u64 = 1024 * 1024;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

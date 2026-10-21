@@ -4912,7 +4912,8 @@ mod comfy_adoption_tests {
             1,
             "der Schalter steht nicht an beiden Startorten",
         );
-        for name in ["fn start_comfyui_blocking"] {
+        {
+            let name = "fn start_comfyui_blocking";
             let start = src.find(name).unwrap_or_else(|| panic!("{name} ist weg"));
             let rest = &src[start..];
             let end = start + rest.find("\n}\n").expect("unterminated fn");
@@ -4995,7 +4996,8 @@ mod comfy_adoption_tests {
     fn der_start_greift_an_keiner_stelle_mehr_still_zum_system_python() {
         let whole = include_str!("process.rs");
         let src = whole.split("#[cfg(test)]").next().expect("die ausgelieferte Haelfte");
-        for name in ["fn start_comfyui_blocking"] {
+        {
+            let name = "fn start_comfyui_blocking";
             let start = src.find(name).unwrap_or_else(|| panic!("{name} ist weg"));
             let rest = &src[start..];
             let end = start + rest.find("\n}\n").expect("unterminated fn");

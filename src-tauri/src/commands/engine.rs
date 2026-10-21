@@ -2877,7 +2877,7 @@ fn start_bundled_engine_locked(
             let part_it_runs_with = if engine.image_part_note.is_some() { None } else { mmproj.as_deref() };
             let args_on_its_port = build_server_args(
                 &model_path,
-                &tuning,
+                tuning,
                 engine.port,
                 slot_dir.as_deref(),
                 part_it_runs_with,
@@ -2932,7 +2932,7 @@ fn start_bundled_engine_locked(
     // Different model (or dead) → stop the old process before spawning.
     stop_engine_locked(state);
 
-    let outcome = start_after_stop(app, state, &model_path, &tuning, port, slot_dir.as_deref(), mmproj.as_deref());
+    let outcome = start_after_stop(app, state, &model_path, tuning, port, slot_dir.as_deref(), mmproj.as_deref());
     settle_switch(state, port, &model_path, outcome, || match (vorher, resolve_engine_binary(app)) {
         (Some(p), Some(bin)) => restore_engine(&bin, state, &p, resolve_engine_backend_dir(app).as_deref()),
         _ => false,

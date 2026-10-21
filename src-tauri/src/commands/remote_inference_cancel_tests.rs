@@ -62,7 +62,10 @@ async fn hanging_upstream() -> (
     let task = tokio::spawn(async move {
         let (mut socket, _) = listener.accept().await.unwrap();
         let mut buf = [0; 8192];
-        socket.read(&mut buf).await.unwrap();
+        assert!(
+            socket.read(&mut buf).await.unwrap() > 0,
+            "the relay sent no request"
+        );
         socket.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 4096\r\n\r\n{").await.unwrap();
         let _ = ready.send(());
         tokio::time::timeout(Duration::from_secs(3), async {
