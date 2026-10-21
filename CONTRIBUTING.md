@@ -6,7 +6,7 @@ Thanks for your interest in contributing! This project thrives on community inpu
 
 ### Prerequisites
 
-- **Node.js** 18+ ([download](https://nodejs.org/))
+- **Node.js** 22+ ([download](https://nodejs.org/))
 - **Ollama** ([download](https://ollama.com/)) — for text model testing
 - **ComfyUI** (optional) — only needed for image/video gen features
 - **Git** (obviously)
@@ -27,7 +27,7 @@ npm run tauri:dev
 
 # Browser-only — no Rust, no Tauri shell. Fast feedback for pure UI tweaks.
 # Tauri invokes (backendCall, auto-update, filesystem access) do NOT work here.
-npm run dev           # serves at http://localhost:5173
+npm run dev           # normally serves at http://localhost:5273; use the URL Vite prints
 
 # Production build — emits a signed .exe / .msi / .AppImage / .deb / .rpm into
 # src-tauri/target/release/bundle/. Use when you want to test a real installer.
@@ -39,19 +39,23 @@ flagging that these commands weren't spelled out here.
 
 #### ComfyUI CORS when you run your own instance
 
-If you already have a ComfyUI running **outside** LU (e.g. a long-lived homelab
-instance) and you point `npm run tauri:dev` at it, Vite on `:5173` won't match
-ComfyUI's origin check and you'll see `403` on `/prompt` + a console warning:
-`request with non matching host and origin localhost:8188 != localhost:5173`.
-
-Start your ComfyUI with:
+Browser mode sends HTTP, media and WebSocket requests through the app's
+same-origin `/comfyui` bridge. Its managed ComfyUI instance needs no CORS flag:
 
 ```bash
-python main.py --listen 127.0.0.1 --port 8188 --enable-cors-header "*"
+python main.py --listen 127.0.0.1 --port 8188
 ```
 
-LU's own auto-started ComfyUI already passes this flag — you only need it when
-you're bringing your own. Thanks to a user for flagging this in Discord.
+The bridge accepts the origins of the URLs Vite actually serves, including
+its alternate port and deliberate `--host` LAN addresses. For an SSH tunnel
+or reverse proxy with a different public origin, set `LU_DEV_PUBLIC_ORIGIN`
+to that exact HTTP(S) origin before starting Vite. Do not use wildcard CORS.
+This also permits that hostname through Vite's Host check and trusts that
+exact origin on `/local-api`; its existing CSRF headers remain required.
+
+Native Tauri connections use their own backend path and the app-specific
+origin selected by the native launcher. When bringing your own native
+ComfyUI instance, match that app origin instead of allowing every origin.
 
 ### Project Structure
 

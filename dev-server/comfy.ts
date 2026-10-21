@@ -125,7 +125,9 @@ const startComfy = (comfyPath: string): { status: string; path: string } => {
   comfyLogs = []
   const executable = getComfyPython(comfyPath)
   console.log(`[ComfyUI] Spawning ${executable} in: ${comfyPath}`)
-  comfyProcess = spawn(executable, ['main.py', '--listen', '127.0.0.1', '--port', '8188', '--enable-cors-header', '*'], {
+  // Browser HTTP/media/WebSocket traffic uses the guarded same-origin bridge.
+  // No CORS flag: unrelated websites must not read this backend directly.
+  comfyProcess = spawn(executable, ['main.py', '--listen', '127.0.0.1', '--port', '8188'], {
     cwd: comfyPath,
     stdio: ['ignore', 'pipe', 'pipe'],
     shell: false,

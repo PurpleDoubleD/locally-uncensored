@@ -850,6 +850,10 @@ export function comfyAbsoluteFallback(url: string): string {
 
 /** Get the WebSocket URL for ComfyUI */
 export function comfyuiWsUrl(): string {
+  if (!isTauri()) {
+    const scheme = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+    return `${scheme}//${window.location.host}/comfyui/ws`;
+  }
   return `ws://${_comfyHost}:${_comfyPort}/ws`;
 }
 

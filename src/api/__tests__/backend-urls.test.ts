@@ -7,7 +7,9 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 // Set up window mock BEFORE importing backend.ts. Reflect rather than a cast:
 // the DOM lib types `globalThis.window` as a full `Window`, which is the only
 // reason an assertion was needed to put a bare object there.
-const windowMock: Record<string, unknown> = {}
+const windowMock: Record<string, unknown> = {
+  location: { protocol: 'http:', host: 'localhost:5274' },
+}
 Reflect.set(globalThis, 'window', windowMock)
 
 // Now import the functions (they capture `window` reference at call time, not import time)
@@ -269,14 +271,22 @@ describe('backend — URL helpers', () => {
   // ─── comfyuiWsUrl ───
 
   describe('comfyuiWsUrl', () => {
-    it('returns ws:// URL with default port', () => {
+    it('returns the direct ws:// URL with default port in Tauri mode', () => {
+      windowMock.__TAURI__ = {}
       setComfyPort(8188)
       expect(comfyuiWsUrl()).toBe('ws://localhost:8188/ws')
     })
 
-    it('uses custom port', () => {
+    it('uses custom port in Tauri mode', () => {
+      windowMock.__TAURI__ = {}
       setComfyPort(3000)
       expect(comfyuiWsUrl()).toBe('ws://localhost:3000/ws')
+    })
+
+    it('uses the browser origin and guarded bridge in dev mode', () => {
+      setComfyHost('remote-server')
+      setComfyPort(3000)
+      expect(comfyuiWsUrl()).toBe('ws://localhost:5274/comfyui/ws')
     })
   })
 
@@ -306,7 +316,8 @@ describe('backend — URL helpers', () => {
       expect(comfyuiUrl('/test')).toBe('http://localhost:7777/test')
     })
 
-    it('port change affects comfyuiWsUrl', () => {
+    it('port change affects comfyuiWsUrl in Tauri mode', () => {
+      windowMock.__TAURI__ = {}
       setComfyPort(4444)
       expect(comfyuiWsUrl()).toBe('ws://localhost:4444/ws')
     })
@@ -349,7 +360,8 @@ describe('backend — URL helpers', () => {
       expect(comfyuiUrl('/prompt')).toBe('http://server-1.lan:8188/prompt')
     })
 
-    it('host change affects comfyuiWsUrl', () => {
+    it('host change affects comfyuiWsUrl in Tauri mode', () => {
+      windowMock.__TAURI__ = {}
       setComfyHost('192.168.1.50')
       setComfyPort(8188)
       expect(comfyuiWsUrl()).toBe('ws://192.168.1.50:8188/ws')

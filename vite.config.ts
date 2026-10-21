@@ -11,6 +11,8 @@ import {
   isStrippableModule,
 } from './src/dev/console-strip'
 import { ABSENT_PACKAGES } from './src/dev/absent-packages'
+import { comfyBridgeProxy, createComfyBridgeAccess } from './dev-server/comfy-origin'
+import { configuredOrigin, devServerAllowedHosts } from './dev-server/public-origin'
 // ── Der Dev-Server steht nicht mehr hier ────────────────────────────────────
 //
 // Bis ZB-7 waren 2 120 der 2 536 Zeilen dieser Datei ein vollständiger
@@ -100,6 +102,8 @@ function stripConsolePlugin(): Plugin {
 // requests, which is not what happens in the app). Hot reload is off in that
 // mode because its inline preamble is itself something the policy refuses.
 const E2E_CSP = process.env.LU_E2E_CSP === '1'
+const PUBLIC_ORIGIN = configuredOrigin(process.env.LU_DEV_PUBLIC_ORIGIN)
+const comfyAccess = createComfyBridgeAccess(PUBLIC_ORIGIN)
 
 function appCspPlugin(): Plugin {
   return {
@@ -123,14 +127,16 @@ export default defineConfig({
   // Packages a dependency imports and LU must not ship (the Daily call client
   // with Sentry). The same list is in vitest.config.ts.
   resolve: { alias: ABSENT_PACKAGES },
-  plugins: [react(), tailwindcss(), stripConsolePlugin(), devServerPlugin({ port: DEV_PORT }), ...(E2E_CSP ? [appCspPlugin()] : [])],
+  plugins: [react(), tailwindcss(), stripConsolePlugin(), devServerPlugin({ port: DEV_PORT, comfyAccess, publicOrigin: PUBLIC_ORIGIN }), ...(E2E_CSP ? [appCspPlugin()] : [])],
   server: {
     ...(E2E_CSP ? { hmr: false } : {}),
     // The Rust build tree churns thousands of files per `cargo build`; watching
     // it starves the dev server on a `tauri:dev` run.
     watch: { ignored: ['**/src-tauri/target/**'] },
     port: DEV_PORT,
-    cors: true,
+    // The browser app uses same-origin bridges, including through an SSH or
+    // reverse-proxy URL. No other website needs readable dev-server responses.
+    cors: false,
     // `true` switched Vite's host-header check off completely. This dev server
     // is not a developer convenience here — setup.sh / start.bat ship it as the
     // user's runtime, with /local-api/shell-execute and /local-api/execute-code
@@ -139,7 +145,7 @@ export default defineConfig({
     // app. Vite waves through bare IP literals and localhost regardless, so the
     // job of this list is only to withhold arbitrary DNS names; reaching the
     // dev server over a LAN hostname is an opt-in that belongs in here by name.
-    allowedHosts: ['localhost', '127.0.0.1'],
+    allowedHosts: devServerAllowedHosts(PUBLIC_ORIGIN),
     proxy: {
       '/api': {
         // Issue #31: honour OLLAMA_HOST so `OLLAMA_HOST=0.0.0.0:11434 npm run dev`
@@ -158,12 +164,7 @@ export default defineConfig({
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/ollama-search/, '/search'),
       },
-      '/comfyui': {
-        target: 'http://localhost:8188',
-        changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/comfyui/, ''),
-        ws: true,
-      },
+      '^/comfyui(?:/|$|\\?)': comfyBridgeProxy(comfyAccess),
       '/civitai-api': {
         target: 'https://civitai.com/api',
         changeOrigin: true,
