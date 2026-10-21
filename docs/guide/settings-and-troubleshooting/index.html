@@ -15,7 +15,7 @@
 <meta property="og:image" content="https://locallyuncensored.com/social-preview.png">
 <meta name="twitter:card" content="summary_large_image">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"TechArticle","headline":"Locally Uncensored Settings and Troubleshooting: Every Tab, Log File, Engine Errors","description":"Every settings tab of Locally Uncensored in one line each, where the log file is and what to send when asking for help, the exact engine and trainer error sentences and their fixes, Linux notes, storage paths and reset.","url":"https://locallyuncensored.com/guide/settings-and-troubleshooting/","dateModified":"2026-10-15","inLanguage":"en","author":{"@type":"Person","name":"PurpleDoubleD","url":"https://github.com/PurpleDoubleD"},"publisher":{"@type":"Organization","name":"Locally Uncensored","url":"https://locallyuncensored.com/"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://locallyuncensored.com/guide/settings-and-troubleshooting/"},"isPartOf":{"@type":"WebPage","name":"Locally Uncensored Handbook: Install, Chat, Agent, Code, Create, Cloud","url":"https://locallyuncensored.com/guide/"},"about":{"@type":"SoftwareApplication","name":"Locally Uncensored","operatingSystem":"Windows, Linux, macOS","applicationCategory":"UtilitiesApplication"}}
+{"@context":"https://schema.org","@type":"TechArticle","headline":"Locally Uncensored Settings and Troubleshooting: Every Tab, Log File, Engine Errors","description":"Every settings tab of Locally Uncensored in one line each, where the log file is and what to send when asking for help, the exact engine and trainer error sentences and their fixes, Linux notes, storage paths and reset.","url":"https://locallyuncensored.com/guide/settings-and-troubleshooting/","dateModified":"2026-10-20","inLanguage":"en","author":{"@type":"Person","name":"PurpleDoubleD","url":"https://github.com/PurpleDoubleD"},"publisher":{"@type":"Organization","name":"Locally Uncensored","url":"https://locallyuncensored.com/"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://locallyuncensored.com/guide/settings-and-troubleshooting/"},"isPartOf":{"@type":"WebPage","name":"Locally Uncensored Handbook: Install, Chat, Agent, Code, Create, Cloud","url":"https://locallyuncensored.com/guide/"},"about":{"@type":"SoftwareApplication","name":"Locally Uncensored","operatingSystem":"Windows, Linux, macOS","applicationCategory":"UtilitiesApplication"}}
 </script>
 <link rel="icon" href="/favicon.png">
 <script type="application/ld+json">
@@ -64,6 +64,7 @@
 <a href="#comfy">ComfyUI errors the repair cannot fix</a>
 <a href="#trainer">Trainer errors</a>
 <a href="#linux">Linux notes</a>
+<a href="#v306">Known issues since 3.0.6</a>
 <a href="#reset">Reset</a>
 </nav>
 
@@ -240,6 +241,52 @@
 <li>An install a package manager owns (the AUR package, a hand unpacked .deb) updates itself into <code>~/.local/share/locally-uncensored/</code> as chapter 2 describes.</li>
 <li>Where the files live is in chapter 2.</li>
 </ul>
+
+<h2 id="v306">Known issues since 3.0.6, and what to do about them</h2>
+
+<p>3.0.6 added Voice, computer control, Create in chat and a Mac build, and the first three of those carry the word Beta in the app. These are the things people ran into most with 3.0.6. The <a href="/blog/locally-uncensored-v3-0-6-release.html">3.0.6 release notes</a> and the <a href="/blog/locally-uncensored-v3-0-7-release.html">3.0.7 release notes</a> have the full lists of what is and is not tested.</p>
+
+<h3>Windows warns about the installer</h3>
+<p>The Windows installers of 3.0.6 and 3.0.7 are not code signed, so SmartScreen and some antivirus engines can warn about them. Chapter 2 explains the warning, and <a href="/is-locally-uncensored-safe/">Is Locally Uncensored safe?</a> says how to check a download.</p>
+
+<h3>The app stayed closed after updating to 3.0.6 (macOS, Linux)</h3>
+<p>Restart Now used to close the app on macOS and Linux without starting it again. The fix is part of 3.0.6, so it works from the next update on, and the update to 3.0.6 itself can still leave the app closed. Start it by hand once. Windows is not affected, because the installer starts the app there.</p>
+
+<h3>Voice is missing from the navigation</h3>
+<p>Voice is shown in local mode only. With the Cloud switch on it is hidden, because LU Cloud has no voice service yet. Switch Cloud off and it is back.</p>
+
+<h3>The first voice session takes a long time to start</h3>
+<p>The first session after setup or after a restart loads the speech models. In our Windows tests that took 23 to 63 seconds, against about one second later. What you say after the Start click is kept for up to a minute and answered once the session is up.</p>
+
+<h3>Voice cuts off the start of what I say, or I cannot interrupt it</h3>
+<p>Speaking while LU speaks relies on the echo cancellation of your system. With loud speakers and no headset, the first words of an interruption can be quiet or missing. For the first six seconds after Start, a voice that reaches the microphone only faintly is turned down. A headset helps with both. Voice is English only.</p>
+
+<h3>The wrong microphone is used</h3>
+<p>Settings, Voice &amp; Remote, Speech has a Microphone field with the system default and your devices by name. The names appear once the app may use the microphone, and a button under the field asks for that. If the chosen device is unplugged, LU records from the system default and keeps your choice. This field has run in automated tests and not yet with a real microphone.</p>
+
+<h3>Dictation failed with "open() got an unexpected keyword argument 'metadata_errors'"</h3>
+<p>That was a speech-to-text install on Python 3.12 or newer. 3.0.6 fixes it in the dictation server that ships with the app, so no reinstall is needed. Update and try again.</p>
+
+<h3>Computer control does nothing on Linux</h3>
+<p>Computer control needs an X11 session on Linux, and it has not been run in the app on Linux yet. On Linux and macOS every click is asked as a sensitive action, because LU cannot name what a click would press there.</p>
+
+<h3>Computer control on a Mac asks for permissions</h3>
+<p>macOS has to grant two permissions first, Accessibility and Screen Recording. LU asks above the input field under "macOS has to allow this first", with a button that opens the right page in System Settings. Computer control on a Mac is in the app but not fully tested yet.</p>
+
+<h3>A local model ignores the picture I attached</h3>
+<p>A local model of the LU Engine sees pictures only with its image part next to it. Add image input fetches the missing file, on the model's row under Models or at the top of the chat once a picture is attached. If the graphics memory has no room for the image part, the model loads without it and LU says so.</p>
+
+<h3>An Ollama model got slow</h3>
+<p>A context window that is too large for the graphics memory moves part of the model to the processor, and every answer gets slower. After a load LU now shows how much of the model sits in graphics memory, in the context window list and on the model's row in the picker. Pick a smaller context window if most of it sits on the processor.</p>
+
+<h3>Loading an LM Studio model hangs</h3>
+<p>The load switch turns into Cancel while a model loads, and a load ends after five minutes at the latest with the sentence LM Studio's own command gave.</p>
+
+<h3>"CUDA error: unknown error" in Create</h3>
+<p>That error comes from the graphics driver and not from the model or your prompt. It usually clears after restarting ComfyUI or the computer. If it keeps coming back, update the graphics driver.</p>
+
+<h3>"Could not load that gallery image: Load failed"</h3>
+<p>Picking a picture you had just made as the source in Edit failed with this sentence before 3.0.6. Update and it works, also as the start image of a video and for Download in the gallery.</p>
 
 <h2 id="reset">Reset</h2>
 

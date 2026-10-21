@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Import a ComfyUI Workflow and Run It Without the Node Graph</title>
+<meta name="description" content="Import ComfyUI workflows saved normally or from a folder, install missing node packs and change every setting from Create in Locally Uncensored 3.0.7.">
+<meta name="keywords" content="import comfyui workflow, comfyui workflow without node graph, comfyui workflow json import, comfyui custom nodes manager, comfyui node packs, comfyui subgraph import, civitai lora download link, wan animate workflow, locally uncensored comfyui">
+<meta property="og:title" content="Import a ComfyUI Workflow and Run It Without the Node Graph">
+<meta property="og:description" content="Step by step: import a ComfyUI workflow in the regular save format or a whole folder of them, install the node packs it needs, change every setting in Create, use your own graph in Motion Control, add a LoRA from a CivitAI link. With what has only run in tests.">
+<meta property="og:image" content="https://raw.githubusercontent.com/PurpleDoubleD/locally-uncensored/master/docs/social-preview.png">
+<meta property="og:url" content="https://locallyuncensored.com/blog/import-comfyui-workflow-into-lu.html">
+<meta property="og:type" content="article">
+<meta property="article:published_time" content="2026-10-20">
+<meta property="article:author" content="PurpleDoubleD">
+<meta property="article:tag" content="Tutorial">
+<meta property="article:tag" content="ComfyUI">
+<meta property="article:tag" content="Create">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Import a ComfyUI Workflow, Skip the Node Graph">
+<meta name="twitter:description" content="Step by step: import a ComfyUI workflow in the regular save format or a whole folder of them, install the node packs it needs, change every setting in Create, use your own graph in Motion Control, add a LoRA from a CivitAI link. With what has only run in tests.">
+<meta name="twitter:image" content="https://raw.githubusercontent.com/PurpleDoubleD/locally-uncensored/master/docs/social-preview.png">
+<link rel="canonical" href="https://locallyuncensored.com/blog/import-comfyui-workflow-into-lu.html">
+<meta name="robots" content="index, follow">
+<meta name="theme-color" content="#0a0a0a">
+<link rel="icon" href="../favicon.png">
+<!-- Privacy: No external fonts loaded. Using system fonts. -->
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"BlogPosting","headline":"Import a ComfyUI Workflow and Run It Without the Node Graph","description":"Import ComfyUI workflows saved normally or from a folder, install missing node packs and change every setting from Create in Locally Uncensored 3.0.7.","image":"https://raw.githubusercontent.com/PurpleDoubleD/locally-uncensored/master/docs/social-preview.png","datePublished":"2026-10-20","dateModified":"2026-10-20","inLanguage":"en","author":{"@type":"Person","name":"PurpleDoubleD","url":"https://github.com/PurpleDoubleD"},"publisher":{"@type":"Organization","name":"Locally Uncensored","url":"https://locallyuncensored.com/"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://locallyuncensored.com/blog/import-comfyui-workflow-into-lu.html"},"keywords":"import comfyui workflow, comfyui workflow without node graph, comfyui workflow json import, comfyui custom nodes manager, comfyui node packs, comfyui subgraph import, civitai lora download link, wan animate workflow, locally uncensored comfyui"}
+</script>
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"FAQPage","mainEntity":[{"@type":"Question","name":"Do I still need Save (API Format) to import a ComfyUI workflow?","acceptedAnswer":{"@type":"Answer","text":"Only for workflows with the older group nodes. A workflow saved with Save or Export imports as well, as long as ComfyUI is running, because LU reads the node settings from it."}},{"@type":"Question","name":"Can I import a whole folder of ComfyUI workflows?","acceptedAnswer":{"@type":"Answer","text":"Yes. Choose folder in the Workflows & tags window imports every .json in the folder, and each file gets its own result line."}},{"@type":"Question","name":"Is installing a ComfyUI node pack from LU safe?","acceptedAnswer":{"@type":"Answer","text":"A node pack is code by its author that runs inside ComfyUI with the same access to your computer as ComfyUI. LU says so before every install. Install only packs you trust."}},{"@type":"Question","name":"Can I change settings of an imported workflow that Create does not show?","acceptedAnswer":{"@type":"Answer","text":"Yes. Workflow parameters under Advanced settings lists every node with its values, such as the VAE, CLIP skip, LoRA strength or denoise, and Reset goes back to the values in the file."}},{"@type":"Question","name":"Does the ComfyUI workflow import work on a Mac?","acceptedAnswer":{"@type":"Answer","text":"No. A Mac runs no ComfyUI workflows, so the import and the node packs need Windows or Linux."}}]}
+</script>
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://locallyuncensored.com/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://locallyuncensored.com/blog/"},{"@type":"ListItem","position":3,"name":"Import a ComfyUI Workflow","item":"https://locallyuncensored.com/blog/import-comfyui-workflow-into-lu.html"}]}
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@200;300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/assets/lu.css">
+<script defer src="/assets/lu.js"></script>
+  <script data-goatcounter="https://purple47.goatcounter.com/count" async src="//gc.zgo.at/count.js"></script>
+</head>
+<body>
+<nav class="lu-nav">
+  <a class="lu-nav-brand" href="/" aria-label="Locally Uncensored">
+    <span class="lu-mono" data-mono="nav" data-size="40" aria-hidden="true"></span>
+    <span class="lu-nav-word">Locally <span class="accent">Uncensored</span></span>
+  </a>
+  <div class="lu-nav-links" id="lu-nav-links">
+    <a class="lu-nav-link" href="/">Home</a>
+    <a class="lu-nav-link" href="/pricing/">Pricing</a>
+    <a class="lu-nav-link" href="/blog/">Blog</a>
+    <a class="lu-nav-link" href="/guide/">Guide</a>
+    <a class="lu-nav-link" href="/remote-access/">Remote</a>
+  </div>
+  <div class="lu-nav-right">
+    <a class="lu-nav-icon" href="https://github.com/PurpleDoubleD/locally-uncensored" title="GitHub" aria-label="GitHub"><svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.37.5 0 5.87 0 12.5c0 5.3 3.44 9.8 8.21 11.39.6.11.82-.26.82-.58 0-.29-.01-1.04-.02-2.05-3.34.73-4.04-1.61-4.04-1.61-.55-1.39-1.33-1.76-1.33-1.76-1.09-.75.08-.73.08-.73 1.2.08 1.84 1.24 1.84 1.24 1.07 1.83 2.81 1.3 3.5.99.11-.78.42-1.3.76-1.6-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.13-.3-.54-1.52.11-3.18 0 0 1.01-.32 3.3 1.23a11.5 11.5 0 0 1 6.01 0c2.29-1.55 3.3-1.23 3.3-1.23.65 1.66.24 2.88.12 3.18.77.84 1.23 1.91 1.23 3.22 0 4.61-2.8 5.63-5.48 5.92.43.37.81 1.1.81 2.22 0 1.6-.01 2.9-.01 3.29 0 .32.21.7.82.58A12.01 12.01 0 0 0 24 12.5C24 5.87 18.63.5 12 .5Z"/></svg><span class="lu-nav-badge">2000+&#8202;⭐</span></a>
+    <a class="lu-nav-icon discord" href="https://locallyuncensored.com/discord" target="_blank" rel="noopener" title="Discord" aria-label="Discord"><svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M20.32 4.37A19.8 19.8 0 0 0 15.45 3c-.2.36-.44.85-.6 1.23a18.3 18.3 0 0 0-5.7 0c-.16-.38-.4-.87-.6-1.23a19.7 19.7 0 0 0-4.87 1.37C.55 8.9-.32 13.3.11 17.63a19.9 19.9 0 0 0 6 3.03c.48-.66.9-1.36 1.27-2.1-.7-.26-1.36-.58-1.99-.96.17-.12.33-.25.49-.38a14.2 14.2 0 0 0 12.24 0c.16.13.32.26.49.38-.63.38-1.3.7-2 .96.37.74.8 1.44 1.27 2.1a19.8 19.8 0 0 0 6-3.03c.5-5.03-.85-9.39-3.55-13.26ZM8.02 15c-1.18 0-2.15-1.09-2.15-2.42 0-1.34.95-2.43 2.15-2.43 1.2 0 2.17 1.09 2.15 2.43 0 1.33-.95 2.42-2.15 2.42Zm7.96 0c-1.18 0-2.15-1.09-2.15-2.42 0-1.34.95-2.43 2.15-2.43 1.2 0 2.17 1.09 2.15 2.43 0 1.33-.94 2.42-2.15 2.42Z"/></svg><span class="lu-nav-badge">1200+&#8202;<span style="font-size:0.715em">🟢</span></span></a>
+    <span class="lu-nav-sep"></span>
+    <div class="switch" id="theme-switch" role="button" aria-label="Toggle theme"></div>
+    <a class="he-cta" href="/pricing/" aria-label="LU Cloud plans and what they include"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/></svg>Cloud</a>
+    <a class="lu-nav-dl" href="https://github.com/PurpleDoubleD/locally-uncensored/releases/latest"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m0 0 4-4m-4 4-4-4"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>Download</a>
+    <button type="button" class="lu-nav-toggle" aria-label="Menu"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+  </div>
+</nav>
+<div class="container lu-doc">
+  <div class="breadcrumb"><a href="../">Locally Uncensored</a> / <a href="./">Blog</a> / This Post</div>
+
+  <div class="post-meta">
+    <span class="post-tag">Tutorial</span>
+    <span>October 20, 2026</span>
+    <span>&middot;</span>
+    <span>7 min read</span>
+  </div>
+
+  <article>
+    <h1>Import a ComfyUI Workflow and Run It Without the Node Graph</h1>
+
+    <p>You have a ComfyUI workflow that does what you want, and you would rather not open the node graph every time. <a href="https://github.com/PurpleDoubleD/locally-uncensored">Locally Uncensored</a> 3.0.7 imports workflows in the format ComfyUI saves, installs the node packs they need and lets you change every setting of the workflow from Create. This tutorial goes through it step by step, with the button names as the app shows them.</p>
+
+    <div class="callout info"><div class="callout-title">Windows and Linux only</div>
+    <p>Workflows run on ComfyUI, which LU installs and starts for you on Windows and Linux. A Mac runs no ComfyUI workflows. Our check in the real app ran on one Windows machine.</p>
+    </div>
+
+    <h2>What You Need</h2>
+
+    <ul>
+      <li>Locally Uncensored 3.0.7 on Windows or Linux, in local mode</li>
+      <li>ComfyUI installed and running. Settings, AI Backends, ComfyUI (Image &amp; Video) has the buttons Install ComfyUI and Start</li>
+      <li>A workflow as a .json file from ComfyUI</li>
+    </ul>
+
+    <h2>Step 1: Save the Workflow in ComfyUI</h2>
+
+    <p>Use Save, Export or Save (API Format). Until 3.0.6, LU only took Save (API Format). Now a normal save works too, and LU converts it with the node definitions of the running ComfyUI, so ComfyUI has to be started while you import. If it is not, the import says so: "ComfyUI has to be running to import a workflow saved in the regular format, because the node settings are read from it."</p>
+
+    <p>Reroute and Primitive nodes are resolved, notes and muted nodes are left out, and bypassed nodes pass their input through. Subgraphs are unpacked the way ComfyUI unpacks them, so the stock templates built on subgraphs, all Z-Image templates among them, can be imported. A workflow with the older group nodes, unknown nodes or settings that do not fit the installed node version is turned down with the reason.</p>
+
+    <h2>Step 2: Import One File or a Whole Folder</h2>
+
+    <p>Open Create. Among the controls of the tab sits a workflow button. On Video, Animate and Motion Control it reads "Use your own ComfyUI workflow". On the other tabs it is a small icon titled "Workflows and tags". It opens the window Workflows &amp; tags.</p>
+
+    <p>Under "Install a workflow" you have three ways in:</p>
+
+    <ul>
+      <li>Choose files picks one or several .json files at once</li>
+      <li>Choose folder imports every .json in a folder</li>
+      <li>Paste the JSON into the box and click Install pasted workflow</li>
+    </ul>
+
+    <p>With several files, each workflow is named after its file and gets its own result line, under a count such as "Imported 3 of 4". Importing again under the same name updates the workflow in place and keeps its tags.</p>
+
+    <h2>Step 3: Install the Node Packs It Needs</h2>
+
+    <p>When ComfyUI does not know a node of the workflow, a box "Missing node packs" appears. For every node whose pack LU knows, it offers the install right there. Before that it warns: "A node pack is code written by its author. Once installed it runs inside ComfyUI with the same access to this computer as ComfyUI itself, so install only packs you trust." After the install, click Restart ComfyUI and import the workflow again.</p>
+
+    <p>For a node LU cannot place, the box names the node, and Open node packs takes you to the section below.</p>
+
+    <h3>The node pack manager</h3>
+
+    <p>Settings, AI Backends has a section ComfyUI node packs. It lists every pack in your custom_nodes folder with where it came from, its branch, commit and date, and marks switched off packs as Disabled.</p>
+
+    <ol>
+      <li>Paste a link into Install from a Git link. LU takes https links to a repository on github.com, gitlab.com or codeberg.org</li>
+      <li>Click Install. A card repeats the note and says: "LU clones the repository and installs its requirements.txt into the Python of your ComfyUI."</li>
+      <li>Confirm with the second Install button. The log runs on screen</li>
+      <li>Click Restart ComfyUI so it loads the new nodes</li>
+    </ol>
+
+    <p>Update pulls the newest version; a pack LU pins to a tested version stays on it. Remove moves the folder to the trash, nothing is deleted for good. A ComfyUI on another machine is not managed from here.</p>
+
+    <p>On Windows we installed a pack from GitHub in the app, ComfyUI knew its nodes after Restart ComfyUI, and Remove put the folder in the Recycle Bin. Update has run in automated tests only.</p>
+
+    <h2>Step 4: Pair the Workflow With a Model</h2>
+
+    <p>A tag pairs a workflow with a model. Create one on the Tags view, for example the model family the workflow was built for. Give it to the workflow on the Workflows view and to a model on the Models view.</p>
+
+    <p>Then open Advanced settings in Create, the sliders next to the Create button. The Workflow selector lists every workflow whose tags match the current model. Pick yours instead of Auto, and the next render runs through your graph. LU still puts in your prompt, size, steps and seed. Auto brings back the built-in graph.</p>
+
+    <h2>Step 5: Change Any Setting From Create</h2>
+
+    <p>With your workflow picked, Advanced settings shows Workflow parameters: each node with its values, such as the VAE, CLIP skip, LoRA strength, denoise or any value of a custom node.</p>
+
+    <ul>
+      <li>Numbers keep the limits ComfyUI states, and lists offer the choices ComfyUI has</li>
+      <li>What LU sets on its own (prompt, seed, size, steps, CFG, sampler, scheduler and model) is named on its node and not offered twice</li>
+      <li>The VAE and the text encoder stay on Auto until you pick one</li>
+      <li>Nodes fold, and Search by name finds a setting</li>
+    </ul>
+
+    <p>Changes are kept per workflow and go into every run, and Reset goes back to the values in the file. On Windows we changed the denoise of an imported workflow in the app, the run used it, and Reset brought back the value from the file.</p>
+
+    <h2>Your Own Workflow in Motion Control</h2>
+
+    <p>Until 3.0.6, Motion Control always ran LU's own graph. Now a workflow imported in the Workflows window and paired with a Wan Animate model runs there. LU fills in the model, the prompt, the seed, the character picture and the driving video, and leaves everything else as you saved it.</p>
+
+    <p>The import reads the model from a GGUF loader and the clip from Load Video or Video Helper Suite's Load Video, and files the graph under the Wan Animate family, so the Workflow selector finds it for a Motion Control model. We checked this with tests on QuantStack's Wan 2.2 Animate example workflow, not yet in a real run against ComfyUI.</p>
+
+    <h2>Add a LoRA From a CivitAI Link</h2>
+
+    <p>Models, LoRAs, Get new has a card Add a LoRA from a link. Paste a CivitAI model link, with or without a version (without one, LU takes the newest), or a Hugging Face link to a .safetensors file, and click Check link.</p>
+
+    <p>Before anything is downloaded, LU reads the file name, the base model and the size from the site, with your CivitAI API key from Settings when one is set. The download runs with progress and Cancel, is checked against its SHA256 when the site states one, and lands in ComfyUI's models/loras folder, where the LoRA stack in Create finds it.</p>
+
+    <p>A checkpoint, embedding, VAE or other model that is not a LoRA is refused. When LU does not know the base model, it says so first and the button reads Download anyway. A file of the same name in the LoRA folder is never replaced. On Windows we downloaded a Z Image LoRA from Hugging Face in the app, checked against its SHA256, and a CivitAI checkpoint was refused.</p>
+
+    <h2>Check Files and Repair</h2>
+
+    <p>In Models, Get new, image and video bundles have a Check files button once any of their files is on disk. It compares every file with the catalog by size, and by SHA256 where the catalog lists one. Each file reads OK, Missing, Wrong size, Checksum mismatch, Incomplete download or Not confirmed. Repair downloads only the broken or missing files again. A wrong file goes to the Trash, or the Recycle Bin on Windows, first. Check files and Repair have run in automated tests only.</p>
+
+    <h2>Limits</h2>
+
+    <ul>
+      <li>Windows and Linux only. Older group nodes do not import; export those workflows with Save (API Format)</li>
+      <li>In the app we imported stock templates without subgraphs and made a picture with one. Subgraphs have run in automated tests only: all 205 subgraph templates of the template package unpack without a loose wire, but none has run against ComfyUI yet</li>
+      <li>Your own workflow in Motion Control has not run against a real ComfyUI yet</li>
+    </ul>
+
+    <h2>Questions</h2>
+
+    <h3>Do I still need Save (API Format)?</h3>
+
+    <p>Only for workflows with the older group nodes. Save or Export works as well, as long as ComfyUI is running.</p>
+
+    <h3>Is installing a node pack safe?</h3>
+
+    <p>A node pack is code by its author that runs inside ComfyUI with the same access to your computer as ComfyUI. LU says so before every install. Install only packs you trust.</p>
+
+    <h3>Can I change settings that Create does not show?</h3>
+
+    <p>Yes, for an imported workflow: Workflow parameters under Advanced settings lists every node with its values.</p>
+
+    <h2>Related</h2>
+
+    <ul>
+      <li><a href="comfyui-beginners-guide.html">ComfyUI for beginners</a>, what ComfyUI is and how LU runs it</li>
+      <li><a href="/vs/comfyui/">Locally Uncensored vs ComfyUI</a>, the comparison page</li>
+    </ul>
+
+    <hr>
+
+    <p><em>Locally Uncensored is AGPL-3.0 licensed and built by <a href="https://github.com/PurpleDoubleD">PurpleDoubleD</a>. Corrections welcome on <a href="https://github.com/PurpleDoubleD/locally-uncensored/discussions">GitHub Discussions</a> or in the <a href="https://locallyuncensored.com/discord">Discord</a>.</em></p>
+    <h2>In the handbook</h2>
+
+    <ul>
+      <li><a href="/guide/create/">Create</a>, the tabs, ComfyUI, advanced settings and the LoRA stack</li>
+      <li><a href="/guide/settings-and-troubleshooting/">Settings and troubleshooting</a>, the ComfyUI buttons and the errors Repair environment cannot fix</li>
+      <li><a href="/guide/storage/">LU and your models on another drive</a>, where ComfyUI and its model folders live</li>
+    </ul>
+  </article>
+
+  <div class="post-footer">
+    <p>Locally Uncensored is free, open source and runs on your own machine</p>
+    <p style="display:flex;gap:10px;flex-wrap:wrap;justify-content:center;margin:0">
+      <a href="https://github.com/PurpleDoubleD/locally-uncensored/releases/latest/download/Locally.Uncensored_3.0.7_x64-setup.exe" class="cta-btn" download>Download for Windows</a>
+      <a href="https://github.com/PurpleDoubleD/locally-uncensored/releases/latest/download/LU_3.0.7_aarch64.dmg" class="cta-btn" download>Download for Mac (Apple Silicon)</a>
+      <a href="https://github.com/PurpleDoubleD/locally-uncensored/releases/latest/download/Locally.Uncensored_3.0.7_amd64.AppImage" class="cta-btn" download>Download for Linux</a>
+    </p>
+    <p style="margin-top:14px;margin-bottom:0">No GPU? LU Cloud runs in a browser, paid from credit packs that start at 15 EUR and need no subscription. <a href="/pricing/">See what it costs</a> or <a href="https://lu-labs.ai/pricing?tab=credits&amp;src=luc-import-comfyui-workflow-end" target="_blank" rel="noopener">open LU Cloud</a>.</p>
+  </div>
+</div>
+
+<footer>
+  <div class="footer-row footer-meta"><span>&copy; 2026 &middot; Locally Uncensored &middot; AGPL-3.0</span></div>
+  <div class="footer-row footer-links">
+    <a href="https://locallyuncensored.com/blog/">Blog</a>
+    <a href="https://locallyuncensored.com/guide/">Guide</a>
+    <a href="https://locallyuncensored.com/pricing/">Pricing</a>
+    <a href="https://locallyuncensored.com/cloud/">LU Cloud</a>
+    <a href="https://locallyuncensored.com/uncensored-ai-chat-online/">Uncensored AI chat online</a>
+    <a href="https://locallyuncensored.com/uncensored-ai-image-generator-online/">Image generator online</a>
+    <a href="https://locallyuncensored.com/uncensored-ai-video-generator-online/">Video generator online</a>
+    <a href="https://locallyuncensored.com/alternatives/">Alternatives</a>
+    <a href="https://locallyuncensored.com/is-locally-uncensored-safe/">Is it safe?</a>
+    <a href="https://locallyuncensored.com/remote-access/">Remote access</a>
+    <a href="https://locallyuncensored.com/discord" target="_blank" rel="noopener">Discord</a>
+    <a href="https://github.com/PurpleDoubleD/locally-uncensored">GitHub</a>
+    <a href="https://github.com/PurpleDoubleD/locally-uncensored/discussions">Discussions</a>
+    <a href="https://github.com/PurpleDoubleD/locally-uncensored/issues">Issues</a>
+    <a href="https://reddit.com/user/GroundbreakingMall54">Reddit</a>
+    <a href="https://www.linkedin.com/in/david-drobnitza-locallyuncensored/" rel="me noopener" target="_blank">LinkedIn</a>
+    <a href="https://locallyuncensored.com/privacy/">Privacy</a>
+    <a href="https://locallyuncensored.com/terms/">Terms</a>
+    <a href="https://locallyuncensored.com/impressum/">Impressum</a>
+  </div>
+</footer>
+</body>
+</html>

@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Train a Character LoRA on a Mac: Step by Step on Apple Silicon</title>
+<meta name="description" content="Train a Z Image character LoRA on an Apple Silicon Mac with Locally Uncensored 3.0.7, then use it for images, video, Talking Character and Motion Control.">
+<meta name="keywords" content="train lora on mac, character lora apple silicon, z image lora mac, mlx lora training, train ai character mac, talking character mac, motion control mac, locally uncensored character studio mac">
+<meta property="og:title" content="Train a Character LoRA on a Mac: Step by Step on Apple Silicon">
+<meta property="og:description" content="Every click of local character training on a Mac in LU 3.0.7: Z-Image Turbo, 24 GB of memory, the 340 MB adapter, a text field per photo for changing clothes, times on an M5 Pro, then Use character, the two step video, Talking Character and Motion Control, with the beta limits.">
+<meta property="og:image" content="https://raw.githubusercontent.com/PurpleDoubleD/locally-uncensored/master/docs/social-preview.png">
+<meta property="og:url" content="https://locallyuncensored.com/blog/train-a-character-on-a-mac.html">
+<meta property="og:type" content="article">
+<meta property="article:published_time" content="2026-10-20">
+<meta property="article:author" content="PurpleDoubleD">
+<meta property="article:tag" content="Tutorial">
+<meta property="article:tag" content="Mac">
+<meta property="article:tag" content="Character Studio">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Train a Character LoRA on a Mac, Step by Step">
+<meta name="twitter:description" content="Every click of local character training on a Mac in LU 3.0.7: Z-Image Turbo, 24 GB of memory, the 340 MB adapter, a text field per photo for changing clothes, times on an M5 Pro, then Use character, the two step video, Talking Character and Motion Control, with the beta limits.">
+<meta name="twitter:image" content="https://raw.githubusercontent.com/PurpleDoubleD/locally-uncensored/master/docs/social-preview.png">
+<link rel="canonical" href="https://locallyuncensored.com/blog/train-a-character-on-a-mac.html">
+<meta name="robots" content="index, follow">
+<meta name="theme-color" content="#0a0a0a">
+<link rel="icon" href="../favicon.png">
+<!-- Privacy: No external fonts loaded. Using system fonts. -->
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"BlogPosting","headline":"Train a Character LoRA on a Mac: Step by Step on Apple Silicon","description":"Train a Z Image character LoRA on an Apple Silicon Mac with Locally Uncensored 3.0.7, then use it for images, video, Talking Character and Motion Control.","image":"https://raw.githubusercontent.com/PurpleDoubleD/locally-uncensored/master/docs/social-preview.png","datePublished":"2026-10-20","dateModified":"2026-10-20","inLanguage":"en","author":{"@type":"Person","name":"PurpleDoubleD","url":"https://github.com/PurpleDoubleD"},"publisher":{"@type":"Organization","name":"Locally Uncensored","url":"https://locallyuncensored.com/"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://locallyuncensored.com/blog/train-a-character-on-a-mac.html"},"keywords":"train lora on mac, character lora apple silicon, z image lora mac, mlx lora training, train ai character mac, talking character mac, motion control mac, locally uncensored character studio mac"}
+</script>
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"FAQPage","mainEntity":[{"@type":"Question","name":"Can I train a LoRA on a Mac?","acceptedAnswer":{"@type":"Answer","text":"Yes, since 3.0.7. Character Studio's Train new tab trains a Z Image character from 4 to 100 photos on the Mac itself, with no ComfyUI and no graphics card. It needs Z-Image Turbo from the Model Manager and downloads a 340 MB training adapter on the first run."}},{"@type":"Question","name":"How much memory does training need on a Mac?","acceptedAnswer":{"@type":"Answer","text":"At least 24 GB. A smaller Mac is refused before the run starts. Every real run so far was on one M5 Pro with 48 GB, and nothing has run on a Mac with less memory."}},{"@type":"Question","name":"How long does training take on Apple Silicon?","acceptedAnswer":{"@type":"Answer","text":"About 7 seconds per step on an M5 Pro, so the Standard setting with 1200 steps runs a little over two hours. Only a run with 10 photos and 100 steps has been done for real so far."}},{"@type":"Question","name":"Can the trained character wear different clothes?","acceptedAnswer":{"@type":"Answer","text":"Write what changes from photo to photo, such as clothes, hair or place, in the text field under each photo. It goes into that photo's caption after the trigger word, so the character keeps its face and body but is not tied to one outfit. This has run in automated tests only."}},{"@type":"Question","name":"Does Talking Character run locally on a Mac?","acceptedAnswer":{"@type":"Answer","text":"Yes, with LTX-2.3 4-bit and one more download of 11.3 GB. It needs 24 GB or more. A 4 second clip took about 10 minutes on an M5 Pro."}}]}
+</script>
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://locallyuncensored.com/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://locallyuncensored.com/blog/"},{"@type":"ListItem","position":3,"name":"Train a Character LoRA on a Mac","item":"https://locallyuncensored.com/blog/train-a-character-on-a-mac.html"}]}
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@200;300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/assets/lu.css">
+<script defer src="/assets/lu.js"></script>
+  <script data-goatcounter="https://purple47.goatcounter.com/count" async src="//gc.zgo.at/count.js"></script>
+</head>
+<body>
+<nav class="lu-nav">
+  <a class="lu-nav-brand" href="/" aria-label="Locally Uncensored">
+    <span class="lu-mono" data-mono="nav" data-size="40" aria-hidden="true"></span>
+    <span class="lu-nav-word">Locally <span class="accent">Uncensored</span></span>
+  </a>
+  <div class="lu-nav-links" id="lu-nav-links">
+    <a class="lu-nav-link" href="/">Home</a>
+    <a class="lu-nav-link" href="/pricing/">Pricing</a>
+    <a class="lu-nav-link" href="/blog/">Blog</a>
+    <a class="lu-nav-link" href="/guide/">Guide</a>
+    <a class="lu-nav-link" href="/remote-access/">Remote</a>
+  </div>
+  <div class="lu-nav-right">
+    <a class="lu-nav-icon" href="https://github.com/PurpleDoubleD/locally-uncensored" title="GitHub" aria-label="GitHub"><svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.37.5 0 5.87 0 12.5c0 5.3 3.44 9.8 8.21 11.39.6.11.82-.26.82-.58 0-.29-.01-1.04-.02-2.05-3.34.73-4.04-1.61-4.04-1.61-.55-1.39-1.33-1.76-1.33-1.76-1.09-.75.08-.73.08-.73 1.2.08 1.84 1.24 1.84 1.24 1.07 1.83 2.81 1.3 3.5.99.11-.78.42-1.3.76-1.6-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.13-.3-.54-1.52.11-3.18 0 0 1.01-.32 3.3 1.23a11.5 11.5 0 0 1 6.01 0c2.29-1.55 3.3-1.23 3.3-1.23.65 1.66.24 2.88.12 3.18.77.84 1.23 1.91 1.23 3.22 0 4.61-2.8 5.63-5.48 5.92.43.37.81 1.1.81 2.22 0 1.6-.01 2.9-.01 3.29 0 .32.21.7.82.58A12.01 12.01 0 0 0 24 12.5C24 5.87 18.63.5 12 .5Z"/></svg><span class="lu-nav-badge">2000+&#8202;⭐</span></a>
+    <a class="lu-nav-icon discord" href="https://locallyuncensored.com/discord" target="_blank" rel="noopener" title="Discord" aria-label="Discord"><svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M20.32 4.37A19.8 19.8 0 0 0 15.45 3c-.2.36-.44.85-.6 1.23a18.3 18.3 0 0 0-5.7 0c-.16-.38-.4-.87-.6-1.23a19.7 19.7 0 0 0-4.87 1.37C.55 8.9-.32 13.3.11 17.63a19.9 19.9 0 0 0 6 3.03c.48-.66.9-1.36 1.27-2.1-.7-.26-1.36-.58-1.99-.96.17-.12.33-.25.49-.38a14.2 14.2 0 0 0 12.24 0c.16.13.32.26.49.38-.63.38-1.3.7-2 .96.37.74.8 1.44 1.27 2.1a19.8 19.8 0 0 0 6-3.03c.5-5.03-.85-9.39-3.55-13.26ZM8.02 15c-1.18 0-2.15-1.09-2.15-2.42 0-1.34.95-2.43 2.15-2.43 1.2 0 2.17 1.09 2.15 2.43 0 1.33-.95 2.42-2.15 2.42Zm7.96 0c-1.18 0-2.15-1.09-2.15-2.42 0-1.34.95-2.43 2.15-2.43 1.2 0 2.17 1.09 2.15 2.43 0 1.33-.94 2.42-2.15 2.42Z"/></svg><span class="lu-nav-badge">1200+&#8202;<span style="font-size:0.715em">🟢</span></span></a>
+    <span class="lu-nav-sep"></span>
+    <div class="switch" id="theme-switch" role="button" aria-label="Toggle theme"></div>
+    <a class="he-cta" href="/pricing/" aria-label="LU Cloud plans and what they include"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/></svg>Cloud</a>
+    <a class="lu-nav-dl" href="https://github.com/PurpleDoubleD/locally-uncensored/releases/latest"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m0 0 4-4m-4 4-4-4"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>Download</a>
+    <button type="button" class="lu-nav-toggle" aria-label="Menu"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+  </div>
+</nav>
+<div class="container lu-doc">
+  <div class="breadcrumb"><a href="../">Locally Uncensored</a> / <a href="./">Blog</a> / This Post</div>
+
+  <div class="post-meta">
+    <span class="post-tag">Tutorial</span>
+    <span>October 20, 2026</span>
+    <span>&middot;</span>
+    <span>7 min read</span>
+  </div>
+
+  <article>
+    <h1>Train a Character LoRA on a Mac: Step by Step on Apple Silicon</h1>
+
+    <p>Since 3.0.7, <a href="https://github.com/PurpleDoubleD/locally-uncensored">Locally Uncensored</a> trains a character LoRA on the Mac itself, with no ComfyUI and no graphics card. The result is a Z Image character that Create and the chat use on the same Mac, for pictures, for video, for Talking Character and for Motion Control.</p>
+
+    <div class="callout info"><div class="callout-title">The Mac build is in beta</div>
+    <p>It runs on Apple Silicon with macOS 14 or newer, not on Intel Macs. Training has run with the real engine with 10 photos and 100 steps on one M5 Pro with 48 GB. The rest of what has and has not run is in the Limits at the end.</p>
+    </div>
+
+    <h2>What You Need</h2>
+
+    <table>
+      <thead><tr><th>Item</th><th>Detail</th></tr></thead>
+      <tbody>
+        <tr><td>Memory</td><td>At least 24 GB. A smaller Mac is refused before the run starts</td></tr>
+        <tr><td>Base model</td><td>Z-Image Turbo, installed from the Model Manager</td></tr>
+        <tr><td>First run</td><td>A training adapter of 340 MB, downloaded once</td></tr>
+        <tr><td>Photos</td><td>4 to 100 of one person or figure</td></tr>
+        <tr><td>Time</td><td>About 7 seconds per step on an M5 Pro, so Standard (1200 steps) runs a little over two hours</td></tr>
+      </tbody>
+    </table>
+
+    <p>The Mac trains on the Z-Image Turbo model Create already runs, so there is no separate download of base files as on a PC. A Mac under 24 GB gets "Training a character needs a Mac with 24 GB of memory", with the reason: the run would fill the memory until the Mac stops answering. 24 GB is the lower edge LU allows. We have not measured a run on a Mac that small.</p>
+
+    <h2>Step 1: Install Z-Image Turbo</h2>
+
+    <p>Without it, the Train tab says "Training a character on this Mac needs Z-Image Turbo. Install it in the Model Manager first, then come back here." Do that, then open Create.</p>
+
+    <h2>Step 2: Open the Train Tab</h2>
+
+    <p>With the Cloud switch at the top right on Local, open Create, then Character, then Train new. Under the inputs a line reads "Runs on this Mac and takes a while (Standard, 1200 steps). The local chat model pauses for the run. The first run also downloads a 340 MB training adapter. The character lands in your LoRA folder." The link Open the LoRA folder at its end shows where the file will go.</p>
+
+    <h2>Step 3: Add the Photos</h2>
+
+    <p>Drop the photos on the stage or click it. The stage says "One person or character, varied angles and lighting works best", and the counter says "need at least 4" until you reach four. The <a href="/guide/character-studio/#photos">photo section of the Character Studio chapter</a> explains what makes a good set.</p>
+
+    <p>You can also train from a clip. The large view of a video offers "Use frames for a character", which takes 8 frames spread over the clip, 4 to 20 with the slider. Untick the frames that do not show the figure, and the rest go to this training. That path has run in automated tests only.</p>
+
+    <h2>Step 4: Pick a Trigger Word</h2>
+
+    <p>Type it into the field "Trigger word, e.g. davechar". Use a made up word, not a normal English one, so the model cannot mix it up with something it knows.</p>
+
+    <h2>Step 5: Let the Clothes Change</h2>
+
+    <p>Under each photo sits a short text field with the placeholder "e.g. red jacket, short hair, beach". Write what changes from photo to photo there, such as clothes, hair or place, up to 200 characters. It goes into that photo's caption after the trigger word. The trigger word then stands for what stays the same, face and body, and the character is not tied to one outfit. Leave a field empty and that photo keeps the plain caption.</p>
+
+    <p>Describe photos writes the empty fields for you. It asks the local chat model picked in Chat and works only when that model can see images. Otherwise its tooltip says what is missing, for example "Your chat model cannot see images. Pick a local one that can, in Chat." It never overwrites what you typed and never sends the photos to a cloud model. The model is told to name only what can change and never the face, body or age. The text field per photo has run in automated tests only.</p>
+
+    <h2>Step 6: Choose the Length and Start</h2>
+
+    <p>Pick Quick (400 steps), Standard (1200, the default) or Thorough (2400), then press Create.</p>
+
+    <p>Plan for the time. At about 7 seconds per step on an M5 Pro, Standard runs a little over two hours, and Thorough has twice its steps. The status line reads "Reading the photos" with a count, then "Training" with the steps, such as 120/1200. It ends with "Character ready!", and the tab moves to Use character by itself.</p>
+
+    <p>While the Mac trains, a picture, a track or a video is refused with "A character is being trained on this Mac. Wait for it to finish or stop it, then try again."</p>
+
+    <h2>Step 7: Use the Character</h2>
+
+    <p>The Use character shelf lists every file in the Mac's LoRA folder named like char_&lt;name&gt;_zimage.safetensors, with its trigger word and the label Z-Image. A click picks the character and sets the Z Image model it was trained for. The line under it reads "Put "davechar" in your prompt and describe the key features too. The trigger word alone often does not hold the look."</p>
+
+    <p>If the likeness is off, go through <a href="/guide/character-studio/#likeness">When the likeness is off</a> in the handbook. An image with a LoRA ran with the real engine on our Mac. The trash icon next to a character asks first and moves the file to the Trash.</p>
+
+    <h2>Step 8: A Video From the Character</h2>
+
+    <p>On a video tab, pick the character on the character chip next to the model chip. LU then runs two steps: "Step 1 of 2: character image" makes a picture of the character on the Mac, and "Step 2 of 2: video" starts the clip from it. If you add a start image yourself, LU uses it instead of the character. A video model that only takes text says so before anything runs.</p>
+
+    <p>The video step of a character run has not run with a real video model yet. LTX-2.3 video at a chosen size did run with the real engine on our Mac.</p>
+
+    <h2>Step 9: Talking Character</h2>
+
+    <p>Talking Character turns a portrait and a voice recording into a clip whose lips follow the voice, with LTX-2.3 4-bit. It needs a Mac with 24 GB or more and one more download of 11.3 GB, which the tab offers with "Get Talking Character".</p>
+
+    <p>Add a portrait with "Add portrait", or pick your character and let step 1 make one. Upload the voice recording. The field "What does the voice say? Optional, the lips follow the words better with it" takes the spoken words. The clip runs as long as the recording, 10 seconds at most. Expect a wait: on our M5 Pro a 4 second clip needed about 10 minutes, roughly 150 seconds for each second of video.</p>
+
+    <h2>Step 10: Motion Control</h2>
+
+    <p>Motion Control makes a video in which the character follows the moves of another clip. It runs on LTX-2.3 4-bit with the IC-LoRA Union Control, about 650 MB, which the tab offers with Download &amp; install. Add the character with "Add character image" or the character chip, and the clip with "Add driving video (dance/pose)". There is no prompt field. LU turns the motion clip into edges first. On our M5 Pro, 2 seconds at 512 x 512 were done in 103 seconds.</p>
+
+    <h2>Limits</h2>
+
+    <ul>
+      <li>Beta, Apple Silicon only, macOS 14 or newer, no Intel. The Mac parts of 3.0.7 have not been clicked through in a built app yet</li>
+      <li>All real Mac runs named here used one M5 Pro with 48 GB. Smaller Macs are untested</li>
+      <li>Training ran with 10 photos and 100 steps. Standard, Thorough and stopping a training in the middle have not run on a Mac</li>
+      <li>The text field per photo and Use frames for a character have run in automated tests only</li>
+      <li>Nobody has checked yet how well a real character keeps its face, and the video step of a character run has not run with a real video model</li>
+      <li>Talking Character and Motion Control ran with the real engine. The downloads on their tabs have run in automated tests only</li>
+    </ul>
+
+    <p>For the same feature on a PC and on LU Cloud, read <a href="/blog/train-a-character-once-use-it-everywhere.html">Consistent Characters with Local AI</a>. Everything else Create runs on a Mac is in <a href="/blog/create-on-a-mac.html">Create on a Mac</a>, and the <a href="/mac/">Mac page</a> has the install steps.</p>
+
+    <hr>
+
+    <p><em>Locally Uncensored is AGPL-3.0 licensed and built by <a href="https://github.com/PurpleDoubleD">PurpleDoubleD</a>. Corrections welcome on <a href="https://github.com/PurpleDoubleD/locally-uncensored/discussions">GitHub Discussions</a> or in the <a href="https://locallyuncensored.com/discord">Discord</a>.</em></p>
+
+    <h2>In the handbook</h2>
+
+    <ul>
+      <li><a href="/guide/character-studio/">Character Studio</a>, picking photos, the trigger word and fixing a weak likeness</li>
+      <li><a href="/guide/create/#character">Create: Character</a>, where the Character lane sits in Create</li>
+      <li><a href="/guide/create/#video">Create: video</a>, the video tabs a character can start</li>
+      <li><a href="/guide/install/">Install</a>, the installers for Windows, Linux and the Mac</li>
+    </ul>
+  </article>
+
+  <div class="post-footer">
+    <p>Locally Uncensored is free, open source and runs on your own machine</p>
+    <p style="display:flex;gap:10px;flex-wrap:wrap;justify-content:center;margin:0">
+      <a href="https://github.com/PurpleDoubleD/locally-uncensored/releases/latest/download/Locally.Uncensored_3.0.7_x64-setup.exe" class="cta-btn" download>Download for Windows</a>
+      <a href="https://github.com/PurpleDoubleD/locally-uncensored/releases/latest/download/LU_3.0.7_aarch64.dmg" class="cta-btn" download>Download for Mac (Apple Silicon)</a>
+      <a href="https://github.com/PurpleDoubleD/locally-uncensored/releases/latest/download/Locally.Uncensored_3.0.7_amd64.AppImage" class="cta-btn" download>Download for Linux</a>
+    </p>
+    <p style="margin-top:14px;margin-bottom:0">No GPU? LU Cloud runs in a browser, paid from credit packs that start at 15 EUR and need no subscription. <a href="/pricing/">See what it costs</a> or <a href="https://lu-labs.ai/pricing?tab=credits&amp;src=luc-train-a-character-on-a-m-end" target="_blank" rel="noopener">open LU Cloud</a>.</p>
+  </div>
+</div>
+
+<footer>
+  <div class="footer-row footer-meta"><span>&copy; 2026 &middot; Locally Uncensored &middot; AGPL-3.0</span></div>
+  <div class="footer-row footer-links">
+    <a href="https://locallyuncensored.com/blog/">Blog</a>
+    <a href="https://locallyuncensored.com/guide/">Guide</a>
+    <a href="https://locallyuncensored.com/pricing/">Pricing</a>
+    <a href="https://locallyuncensored.com/cloud/">LU Cloud</a>
+    <a href="https://locallyuncensored.com/uncensored-ai-chat-online/">Uncensored AI chat online</a>
+    <a href="https://locallyuncensored.com/uncensored-ai-image-generator-online/">Image generator online</a>
+    <a href="https://locallyuncensored.com/uncensored-ai-video-generator-online/">Video generator online</a>
+    <a href="https://locallyuncensored.com/alternatives/">Alternatives</a>
+    <a href="https://locallyuncensored.com/is-locally-uncensored-safe/">Is it safe?</a>
+    <a href="https://locallyuncensored.com/remote-access/">Remote access</a>
+    <a href="https://locallyuncensored.com/discord" target="_blank" rel="noopener">Discord</a>
+    <a href="https://github.com/PurpleDoubleD/locally-uncensored">GitHub</a>
+    <a href="https://github.com/PurpleDoubleD/locally-uncensored/discussions">Discussions</a>
+    <a href="https://github.com/PurpleDoubleD/locally-uncensored/issues">Issues</a>
+    <a href="https://reddit.com/user/GroundbreakingMall54">Reddit</a>
+    <a href="https://www.linkedin.com/in/david-drobnitza-locallyuncensored/" rel="me noopener" target="_blank">LinkedIn</a>
+    <a href="https://locallyuncensored.com/privacy/">Privacy</a>
+    <a href="https://locallyuncensored.com/terms/">Terms</a>
+    <a href="https://locallyuncensored.com/impressum/">Impressum</a>
+  </div>
+</footer>
+</body>
+</html>

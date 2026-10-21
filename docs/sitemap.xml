@@ -14,6 +14,9 @@
   <url><loc>https://locallyuncensored.com/uncensored-ai-chat-online/</loc><lastmod>2026-10-16</lastmod><changefreq>weekly</changefreq><priority>0.9</priority></url>
   <url><loc>https://locallyuncensored.com/qwen-image-2-1/</loc><lastmod>2026-10-16</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>
 
+  <url><loc>https://locallyuncensored.com/blog/create-images-in-chat.html</loc><lastmod>2026-10-20</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://locallyuncensored.com/blog/run-vision-models-locally.html</loc><lastmod>2026-10-20</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://locallyuncensored.com/blog/is-local-voice-ai-private.html</loc><lastmod>2026-10-20</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>
   <url><loc>https://locallyuncensored.com/blog/kimi-k3-online-guide.html</loc><lastmod>2026-10-16</lastmod><changefreq>monthly</changefreq><priority>0.9</priority></url>
   <url><loc>https://locallyuncensored.com/blog/kimi-k3-vs-deepseek-v4.html</loc><lastmod>2026-10-16</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>
   <url><loc>https://locallyuncensored.com/blog/run-qwen-3-8-without-gpu.html</loc><lastmod>2026-10-16</lastmod><changefreq>monthly</changefreq><priority>0.9</priority></url>
@@ -51,6 +54,12 @@
   <url><loc>https://locallyuncensored.com/blog/local-ai-computer-control.html</loc><lastmod>2026-10-19</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>
   <url><loc>https://locallyuncensored.com/blog/deepseek-v4-1-flash-1017.html</loc><lastmod>2026-10-19</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>
   <url><loc>https://locallyuncensored.com/blog/rea-plugin-reverse-engineering.html</loc><lastmod>2026-10-19</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://locallyuncensored.com/blog/branch-and-duplicate-ai-chats.html</loc><lastmod>2026-10-20</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://locallyuncensored.com/blog/create-on-a-mac.html</loc><lastmod>2026-10-20</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://locallyuncensored.com/blog/import-comfyui-workflow-into-lu.html</loc><lastmod>2026-10-20</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://locallyuncensored.com/blog/run-several-local-llm-backends.html</loc><lastmod>2026-10-20</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://locallyuncensored.com/blog/train-a-character-on-a-mac.html</loc><lastmod>2026-10-20</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://locallyuncensored.com/blog/train-a-character-once-use-it-everywhere.html</loc><lastmod>2026-10-20</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>
   <url><loc>https://locallyuncensored.com/blog/locally-uncensored-v3-0-6-release.html</loc><lastmod>2026-10-19</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>
   <url><loc>https://locallyuncensored.com/blog/talk-to-local-llm-voice-chat.html</loc><lastmod>2026-10-19</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>
   <url><loc>https://locallyuncensored.com/blog/locally-uncensored-v3-0-1-release.html</loc><lastmod>2026-10-19</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>
@@ -65,7 +74,7 @@
   <url><loc>https://locallyuncensored.com/blog/how-to-run-ai-locally.html</loc><lastmod>2026-10-16</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>
   <url><loc>https://locallyuncensored.com/blog/lm-studio-alternatives.html</loc><lastmod>2026-10-16</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>
   <url><loc>https://locallyuncensored.com/blog/easiest-local-ai-image-generator.html</loc><lastmod>2026-10-16</lastmod><changefreq>monthly</changefreq><priority>0.7</priority></url>
-  <url><loc>https://locallyuncensored.com/blog/local-ai-on-your-phone.html</loc><lastmod>2026-10-19</lastmod><changefreq>monthly</changefreq><priority>0.7</priority></url>
+  <url><loc>https://locallyuncensored.com/blog/local-ai-on-your-phone.html</loc><lastmod>2026-10-20</lastmod><changefreq>monthly</changefreq><priority>0.7</priority></url>
   <url><loc>https://locallyuncensored.com/blog/locally-uncensored-v2-4-0-release.html</loc><lastmod>2026-10-19</lastmod><changefreq>monthly</changefreq><priority>0.7</priority></url>
   <url><loc>https://locallyuncensored.com/blog/how-to-run-qwen-3-6-locally.html</loc><lastmod>2026-10-16</lastmod><changefreq>monthly</changefreq><priority>0.7</priority></url>
   <url><loc>https://locallyuncensored.com/blog/abliterated-models-guide.html</loc><lastmod>2026-10-16</lastmod><changefreq>monthly</changefreq><priority>0.7</priority></url>

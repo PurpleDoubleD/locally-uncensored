@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Run Vision Models Locally: Local LLMs That Read Images</title>
+<meta name="description" content="A local vision model needs two files: the model and its image part (mmproj). How LU downloads both, which models to pick and what to do when VRAM runs out.">
+<meta name="keywords" content="local vision model, run vision llm locally, mmproj, local llm image input, llama.cpp vision, qwen3-vl local, gemma 4 vision local, uncensored vision model">
+<meta property="og:title" content="Run Vision Models Locally: Local LLMs That Read Images">
+<meta property="og:description" content="Why a local vision LLM needs a second file, how Locally Uncensored fetches it with the model since 3.0.6, the models to start with, and what happens when the graphics card is full.">
+<meta property="og:image" content="https://raw.githubusercontent.com/PurpleDoubleD/locally-uncensored/master/docs/social-preview.png">
+<meta property="og:url" content="https://locallyuncensored.com/blog/run-vision-models-locally.html">
+<meta property="og:type" content="article">
+<meta property="article:published_time" content="2026-10-20">
+<meta property="article:author" content="PurpleDoubleD">
+<meta property="article:tag" content="Vision">
+<meta property="article:tag" content="LU Engine">
+<meta property="article:tag" content="llama.cpp">
+<meta property="article:tag" content="Local Models">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Run Vision Models Locally">
+<meta name="twitter:description" content="Why a local vision LLM needs a second file, how Locally Uncensored fetches it with the model since 3.0.6, the models to start with, and what happens when the graphics card is full.">
+<meta name="twitter:image" content="https://raw.githubusercontent.com/PurpleDoubleD/locally-uncensored/master/docs/social-preview.png">
+<link rel="canonical" href="https://locallyuncensored.com/blog/run-vision-models-locally.html">
+<meta name="robots" content="index, follow">
+<meta name="theme-color" content="#0a0a0a">
+<link rel="icon" href="../favicon.png">
+<!-- Privacy: No external fonts loaded. Using system fonts. -->
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"BlogPosting","headline":"Run Vision Models Locally: Local LLMs That Read Images","description":"A local vision model needs two files: the model and its image part (mmproj). How LU downloads both, which models to pick and what to do when VRAM runs out.","image":"https://raw.githubusercontent.com/PurpleDoubleD/locally-uncensored/master/docs/social-preview.png","datePublished":"2026-10-20","dateModified":"2026-10-20","inLanguage":"en","author":{"@type":"Person","name":"PurpleDoubleD","url":"https://github.com/PurpleDoubleD"},"publisher":{"@type":"Organization","name":"Locally Uncensored","url":"https://locallyuncensored.com/"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://locallyuncensored.com/blog/run-vision-models-locally.html"},"keywords":"local vision model, run vision llm locally, mmproj, local llm image input, llama.cpp vision, qwen3-vl local, gemma 4 vision local, uncensored vision model"}
+</script>
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"FAQPage","mainEntity":[{"@type":"Question","name":"What is an mmproj file?","acceptedAnswer":{"@type":"Answer","text":"It is the second file a GGUF vision model needs next to it to read images. llama.cpp calls it mmproj and LU calls it the image part. Without it the model loads and answers text, but it cannot see."}},{"@type":"Question","name":"Does Locally Uncensored download the image part automatically?","acceptedAnswer":{"@type":"Answer","text":"Yes, since 3.0.6. The model and its image part come as one download with one progress bar and a checksum for each file. The download dialogs have a ticked box, Include image input, with the size it adds."}},{"@type":"Question","name":"How do I add image input to a model I already downloaded?","acceptedAnswer":{"@type":"Answer","text":"Use Add image input. It is on the model's row under Models, Installed, and at the top of a chat once you attach a picture to a model whose image part is missing."}},{"@type":"Question","name":"Why does my model say it was loaded without image input?","acceptedAnswer":{"@type":"Answer","text":"The graphics memory had no room for the image part next to the model, so LU loaded the model without it. A smaller context makes room."}},{"@type":"Question","name":"Which local vision model fits an 8 GB card?","acceptedAnswer":{"@type":"Answer","text":"Qwen3-VL 8B Abliterated is a 5 GB download for image understanding on an 8 GB card, and Gemma 4 12B Heretic has an IQ4_XS build for 8 GB cards."}}]}
+</script>
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://locallyuncensored.com/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://locallyuncensored.com/blog/"},{"@type":"ListItem","position":3,"name":"Run Vision Models Locally","item":"https://locallyuncensored.com/blog/run-vision-models-locally.html"}]}
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@200;300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/assets/lu.css">
+<script defer src="/assets/lu.js"></script>
+  <script data-goatcounter="https://purple47.goatcounter.com/count" async src="//gc.zgo.at/count.js"></script>
+</head>
+<body>
+<nav class="lu-nav">
+  <a class="lu-nav-brand" href="/" aria-label="Locally Uncensored">
+    <span class="lu-mono" data-mono="nav" data-size="40" aria-hidden="true"></span>
+    <span class="lu-nav-word">Locally <span class="accent">Uncensored</span></span>
+  </a>
+  <div class="lu-nav-links" id="lu-nav-links">
+    <a class="lu-nav-link" href="/">Home</a>
+    <a class="lu-nav-link" href="/pricing/">Pricing</a>
+    <a class="lu-nav-link" href="/blog/">Blog</a>
+    <a class="lu-nav-link" href="/guide/">Guide</a>
+    <a class="lu-nav-link" href="/remote-access/">Remote</a>
+  </div>
+  <div class="lu-nav-right">
+    <a class="lu-nav-icon" href="https://github.com/PurpleDoubleD/locally-uncensored" title="GitHub" aria-label="GitHub"><svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.37.5 0 5.87 0 12.5c0 5.3 3.44 9.8 8.21 11.39.6.11.82-.26.82-.58 0-.29-.01-1.04-.02-2.05-3.34.73-4.04-1.61-4.04-1.61-.55-1.39-1.33-1.76-1.33-1.76-1.09-.75.08-.73.08-.73 1.2.08 1.84 1.24 1.84 1.24 1.07 1.83 2.81 1.3 3.5.99.11-.78.42-1.3.76-1.6-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.13-.3-.54-1.52.11-3.18 0 0 1.01-.32 3.3 1.23a11.5 11.5 0 0 1 6.01 0c2.29-1.55 3.3-1.23 3.3-1.23.65 1.66.24 2.88.12 3.18.77.84 1.23 1.91 1.23 3.22 0 4.61-2.8 5.63-5.48 5.92.43.37.81 1.1.81 2.22 0 1.6-.01 2.9-.01 3.29 0 .32.21.7.82.58A12.01 12.01 0 0 0 24 12.5C24 5.87 18.63.5 12 .5Z"/></svg><span class="lu-nav-badge">2000+&#8202;⭐</span></a>
+    <a class="lu-nav-icon discord" href="https://locallyuncensored.com/discord" target="_blank" rel="noopener" title="Discord" aria-label="Discord"><svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M20.32 4.37A19.8 19.8 0 0 0 15.45 3c-.2.36-.44.85-.6 1.23a18.3 18.3 0 0 0-5.7 0c-.16-.38-.4-.87-.6-1.23a19.7 19.7 0 0 0-4.87 1.37C.55 8.9-.32 13.3.11 17.63a19.9 19.9 0 0 0 6 3.03c.48-.66.9-1.36 1.27-2.1-.7-.26-1.36-.58-1.99-.96.17-.12.33-.25.49-.38a14.2 14.2 0 0 0 12.24 0c.16.13.32.26.49.38-.63.38-1.3.7-2 .96.37.74.8 1.44 1.27 2.1a19.8 19.8 0 0 0 6-3.03c.5-5.03-.85-9.39-3.55-13.26ZM8.02 15c-1.18 0-2.15-1.09-2.15-2.42 0-1.34.95-2.43 2.15-2.43 1.2 0 2.17 1.09 2.15 2.43 0 1.33-.95 2.42-2.15 2.42Zm7.96 0c-1.18 0-2.15-1.09-2.15-2.42 0-1.34.95-2.43 2.15-2.43 1.2 0 2.17 1.09 2.15 2.43 0 1.33-.94 2.42-2.15 2.42Z"/></svg><span class="lu-nav-badge">1100+&#8202;<span style="font-size:0.715em">🟢</span></span></a>
+    <span class="lu-nav-sep"></span>
+    <div class="switch" id="theme-switch" role="button" aria-label="Toggle theme"></div>
+    <a class="he-cta" href="/pricing/" aria-label="LU Cloud plans and what they include"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/></svg>Cloud</a>
+    <a class="lu-nav-dl" href="https://github.com/PurpleDoubleD/locally-uncensored/releases/latest"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m0 0 4-4m-4 4-4-4"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>Download</a>
+    <button type="button" class="lu-nav-toggle" aria-label="Menu"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+  </div>
+</nav>
+<div class="container lu-doc">
+  <div class="breadcrumb"><a href="../">Locally Uncensored</a> / <a href="./">Blog</a> / This Post</div>
+
+  <div class="post-meta">
+    <span class="post-tag">Tutorial</span>
+    <span>October 20, 2026</span>
+    <span>&middot;</span>
+    <span>7 min read</span>
+  </div>
+
+  <article>
+    <h1>Run Vision Models Locally: Local LLMs That Read Images</h1>
+
+    <p>A local vision model is a chat model that can look at a picture you give it and answer questions about it. In <a href="https://github.com/PurpleDoubleD/locally-uncensored">Locally Uncensored</a> that works offline, on your own graphics card. There is one catch: the model file alone cannot see. This guide explains the second file it needs, how LU fetches both since version 3.0.6, which models to start with, and what happens when your card runs out of room.</p>
+
+    <h2>Why a Vision Model Is Two Files</h2>
+
+    <p>The LU Engine, the built-in chat engine, runs on llama.cpp and loads models in the GGUF format. A GGUF chat model carries no image tower. To take pictures it needs a second file next to it, which llama.cpp calls mmproj and LU calls the image part. When that file is there, the engine passes it along at start and the model can read images. When it is missing, the same model loads fine and answers text, but it is blind.</p>
+
+    <p>Many repositories list the image part as a separate file with a name like <code>mmproj-F16.gguf</code>, so a download of only the model looks complete. Before 3.0.6 it was easy to end up with only the first file.</p>
+
+    <h2>Since 3.0.6: One Download, Two Checksums</h2>
+
+    <p>LU now fetches the model and its image part as one download. That holds on the Models page, in onboarding and for a model you find through the hub search. You see one progress bar, and each of the two files is checked against its own checksum. The download only counts as finished when both files are.</p>
+
+    <p>The download dialogs have a box that is ticked by default: <strong>Include image input</strong>, followed by the size it adds, for example "Include image input (+0.9 GB)". Untick it if you only want text and would rather save the space. In onboarding the size line of a model shows the extra part the same way.</p>
+
+    <p>If you download through the hub search and the drive has no room for the extra file, the model downloads without it and LU tells you so. You can add the part later.</p>
+
+    <h3>Add Image Input to a Model You Already Have</h3>
+
+    <p>A model you downloaded before 3.0.6, or with the box unticked, can get its image part afterwards. <strong>Add image input</strong> fetches the missing file, with its size on the button. You find it in two places:</p>
+
+    <ul>
+      <li>On the model's row under Models, Installed</li>
+      <li>At the top of a chat, once you attach a picture to a model whose image part is missing. The line reads "This model can take images, but its image part is not installed." and the button sits next to it</li>
+    </ul>
+
+    <p>If the model is already loaded, LU loads it again with the image part as soon as no answer is being written.</p>
+
+    <p>Every image part in the catalog is listed with its exact size in bytes and its SHA-256, read from its repository.</p>
+
+    <h2>Which Models to Start With</h2>
+
+    <p>These are the vision models from the starter list in our README. The download sizes are the recommended builds. The image part column is the extra size the dialog shows for the LU Engine download.</p>
+
+    <table>
+      <thead><tr><th>Model</th><th>Download</th><th>Image part</th><th>Notes</th></tr></thead>
+      <tbody>
+        <tr><td>Qwen 3.8 27B Uncensored</td><td>18 GB</td><td>+0.9 GB</td><td>Vision, tools and switchable thinking, 262K context. The IQ2_M build is 11 GB and fits a 12 GB card</td></tr>
+        <tr><td>Gemma 4 12B Heretic</td><td>7.4 GB</td><td>+0.2 GB</td><td>Vision, a different voice from the Qwen line. The IQ4_XS build is for 8 GB cards</td></tr>
+        <tr><td>Qwen3-VL 8B Abliterated</td><td>5 GB</td><td>+1.1 GB</td><td>Image understanding on an 8 GB card</td></tr>
+        <tr><td>Qwen 3.6 35B MoE Abliterated</td><td>24 GB</td><td>in the Ollama tag</td><td>35B total with 3B active, vision and agentic coding</td></tr>
+      </tbody>
+    </table>
+
+    <p>One note on that table. The catalog entry named Qwen 3.6 35B MoE Abliterated is an Ollama download, so it has no separate image part (more on Ollama below). Its sibling Qwen 3.6 35B MoE Abliterated Heretic is a GGUF for the LU Engine, 21 GB with a 0.8 GB image part.</p>
+
+    <p>All four are abliterated builds, edited to drop refusals. If that term is new, the <a href="abliterated-models-guide.html">abliterated models guide</a> explains it. For the Qwen line in particular, the <a href="/qwen/">Qwen overview</a> collects every guide we have.</p>
+
+    <h2>What You Do With It</h2>
+
+    <h3>Ask About a Picture</h3>
+
+    <p>The paper clip next to the message box attaches up to five images. Attach a screenshot, a photo or a scan, then ask. A few prompts that work well as a first test:</p>
+
+    <ul>
+      <li>"What does this error dialog say, and what should I click?"</li>
+      <li>"Read the text in this photo of a receipt and list the items."</li>
+      <li>"Describe this chart. Which line goes up the most?"</li>
+    </ul>
+
+    <p>If the selected model cannot read images at all, the chat says "This model can't read images. Switch to a vision model (Gemma 4, LLaVA, Qwen-VL) to use the attachment." The Models tab marks vision models with an image icon. For documents such as PDFs, use the Documents panel instead. The <a href="/guide/chat/">chat chapter of the handbook</a> covers both.</p>
+
+    <h3>Let It Look at the Screen</h3>
+
+    <p>Computer control (Beta) lets a model use the mouse and keyboard in apps you approve. It is off until you switch it on. By default the model that looks at the screen is your chat model. If that model can see images, it gets screenshots. A local model sees images only while it is loaded with its image part.</p>
+
+    <p>On Windows a model without image input can still work from the list of buttons and fields the app exposes. On macOS and Linux there is no such list, so there the model needs image input to see the screen at all. On a Mac, computer control is in the app but not fully tested yet.</p>
+
+    <h2>When the Graphics Memory Is Too Small</h2>
+
+    <p>The image part needs memory on the card in addition to the model and its context. If the model alone fits and the part does not, LU still loads the model, without image input. The model menu and the Models page then say:</p>
+
+    <p><em>"Loaded without image input: the graphics memory has no room for the image part next to the model. A smaller context makes room."</em></p>
+
+    <p>So the fix is usually the context dropdown above the message box. On the LU Engine a change there reloads the model, and a smaller context window leaves more memory for the part. If you attach a picture while the model runs without its part, the chat says so instead of letting the model guess: "This model was loaded without its image part, so it cannot read the attachment. The model menu says why."</p>
+
+    <p>If the engine itself refuses the image part, LU starts the model again without it, and the note reads "Loaded without image input: the engine could not load this model's image part."</p>
+
+    <h2>Image Parts You Placed by Hand</h2>
+
+    <p>If you download GGUF files yourself, note the naming rule. Before 3.0.6 the engine found an image part only under the name LU's own downloads write: <code>&lt;model&gt;.mmproj.gguf</code>, next to the model. Since 3.0.6 (from <a href="https://github.com/PurpleDoubleD/locally-uncensored/discussions/67">discussion 67</a>) it also uses a part under its original name, as long as it is clear which model it belongs to:</p>
+
+    <ul>
+      <li>Its name carries the model's name, or</li>
+      <li>It is the only image part in a folder that holds this one model</li>
+    </ul>
+
+    <p>Where that is not clear, for example a file named <code>mmproj-F16.gguf</code> next to several models, no model gets it. Rename it to <code>&lt;model file name without .gguf&gt;.mmproj.gguf</code> and it pairs with that model. Image parts named like <code>&lt;model&gt;.mmproj-Q8_0.gguf</code> no longer show up as chat models in the picker. This part has run in automated tests only.</p>
+
+    <h2>Ollama and LM Studio</h2>
+
+    <p>LU can also use Ollama or LM Studio as the chat backend. With Ollama there is no second file to manage: an Ollama tag brings its projector as a layer of the tag, so a vision model pulled through Ollama can see without anything extra.</p>
+
+    <p>For LM Studio we can say less. When LU lists the models in LM Studio's folder, a projector file (<code>mmproj-*.gguf</code>) is not shown as a model of its own. Whether a given model sees images then depends on LM Studio, which runs the model in that setup.</p>
+
+    <h2>Limits You Should Know</h2>
+
+    <ul>
+      <li>The Mac build is in beta, for Apple Silicon on macOS 14 or newer, and Intel Macs are not supported</li>
+      <li>A model whose repository ships no image part, and for which no other part was proven to fit, stays text only in the catalog</li>
+    </ul>
+
+    <hr>
+
+    <p><em>Locally Uncensored is AGPL-3.0 licensed and built by <a href="https://github.com/PurpleDoubleD">PurpleDoubleD</a>. Corrections welcome on <a href="https://github.com/PurpleDoubleD/locally-uncensored/discussions">GitHub Discussions</a> or in the <a href="https://locallyuncensored.com/discord">Discord</a>.</em></p>
+    <h2>In the handbook</h2>
+
+    <ul>
+      <li><a href="/guide/chat/">Chat</a>, attaching images, the model picker and the context window</li>
+      <li><a href="/guide/agent/">Agent</a>, the tools and permissions behind computer control</li>
+      <li><a href="/guide/settings-and-troubleshooting/">Settings and troubleshooting</a>, what the engine sentences mean and where the log file is</li>
+    </ul>
+  </article>
+
+  <div class="post-footer">
+    <p>Locally Uncensored is free, open source and runs on your own machine</p>
+    <p style="display:flex;gap:10px;flex-wrap:wrap;justify-content:center;margin:0">
+      <a href="https://github.com/PurpleDoubleD/locally-uncensored/releases/latest/download/Locally.Uncensored_3.0.7_x64-setup.exe" class="cta-btn" download>Download for Windows</a>
+      <a href="https://github.com/PurpleDoubleD/locally-uncensored/releases/latest/download/LU_3.0.7_aarch64.dmg" class="cta-btn" download>Download for Mac (Apple Silicon)</a>
+      <a href="https://github.com/PurpleDoubleD/locally-uncensored/releases/latest/download/Locally.Uncensored_3.0.7_amd64.AppImage" class="cta-btn" download>Download for Linux</a>
+    </p>
+    <p style="margin-top:14px;margin-bottom:0">No GPU? LU Cloud runs in a browser, paid from credit packs that start at 15 EUR and need no subscription. <a href="/pricing/">See what it costs</a> or <a href="https://lu-labs.ai/pricing?tab=credits&amp;src=luc-run-vision-models-locall-end" target="_blank" rel="noopener">open LU Cloud</a>.</p>
+  </div>
+</div>
+
+<footer>
+  <div class="footer-row footer-meta"><span>&copy; 2026 &middot; Locally Uncensored &middot; AGPL-3.0</span></div>
+  <div class="footer-row footer-links">
+    <a href="https://locallyuncensored.com/blog/">Blog</a>
+    <a href="https://locallyuncensored.com/guide/">Guide</a>
+    <a href="https://locallyuncensored.com/pricing/">Pricing</a>
+    <a href="https://locallyuncensored.com/cloud/">LU Cloud</a>
+    <a href="https://locallyuncensored.com/uncensored-ai-chat-online/">Uncensored AI chat online</a>
+    <a href="https://locallyuncensored.com/uncensored-ai-image-generator-online/">Image generator online</a>
+    <a href="https://locallyuncensored.com/uncensored-ai-video-generator-online/">Video generator online</a>
+    <a href="https://locallyuncensored.com/alternatives/">Alternatives</a>
+    <a href="https://locallyuncensored.com/is-locally-uncensored-safe/">Is it safe?</a>
+    <a href="https://locallyuncensored.com/remote-access/">Remote access</a>
+    <a href="https://locallyuncensored.com/discord" target="_blank" rel="noopener">Discord</a>
+    <a href="https://github.com/PurpleDoubleD/locally-uncensored">GitHub</a>
+    <a href="https://github.com/PurpleDoubleD/locally-uncensored/discussions">Discussions</a>
+    <a href="https://github.com/PurpleDoubleD/locally-uncensored/issues">Issues</a>
+    <a href="https://reddit.com/user/GroundbreakingMall54">Reddit</a>
+    <a href="https://www.linkedin.com/in/david-drobnitza-locallyuncensored/" rel="me noopener" target="_blank">LinkedIn</a>
+    <a href="https://locallyuncensored.com/privacy/">Privacy</a>
+    <a href="https://locallyuncensored.com/terms/">Terms</a>
+    <a href="https://locallyuncensored.com/impressum/">Impressum</a>
+  </div>
+</footer>
+</body>
+</html>
