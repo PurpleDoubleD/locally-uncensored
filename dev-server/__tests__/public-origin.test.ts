@@ -15,7 +15,7 @@ describe('administrator-configured browser origin', () => {
     expect(configuredOrigin(' HTTPS://Studio.Example:8443/ ')).toBe(publicOrigin)
     expect(devServerAllowedHosts(publicOrigin)).toEqual(['localhost', '127.0.0.1', 'studio.example'])
     expect(devServerAllowedHosts()).toEqual(['localhost', '127.0.0.1'])
-    for (const invalid of ['*', 'https://*.example', 'https://studio.example/path', 'https://name:password@studio.example', 'https://studio.example?x=1', 'file:///example', 'https://studio.example/#fragment']) {
+    for (const invalid of ['*', 'https://*.example', 'https://.example.com', 'https://.', 'https://studio.example/path', 'https://name:password@studio.example', 'https://studio.example?x=1', 'file:///example', 'https://studio.example/#fragment']) {
       expect(() => configuredOrigin(invalid), invalid).toThrow()
       expect(() => devServerAllowedHosts(invalid), invalid).toThrow()
       expect(() => createComfyBridgeAccess(invalid), invalid).toThrow()
