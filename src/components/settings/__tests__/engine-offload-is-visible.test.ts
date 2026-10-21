@@ -102,6 +102,14 @@ describe('the line itself', () => {
     expect(engineOffloadLine({ running: true, gpuLayers: 18 })).toBe('GPU layers: 18')
   })
 
+  it('identifies an engine fit without claiming a measured or full layer count', () => {
+    expect(engineOffloadLine({ running: true, gpuLayers: null, gpuLayerMode: 'auto' }))
+      .toBe('GPU layers: automatic (engine fit)')
+    expect(engineOffloadLine({ ...AUF_DEM_PROZESSOR, gpuLayerMode: 'auto' }))
+      .toBe('GPU layers: 0, the GPU start failed')
+    expect(engineOffloadLine({ running: false, gpuLayerMode: 'auto' })).toBeNull()
+  })
+
   it('stays silent when every layer was asked for', () => {
     // 999 is llama.cpp's sentinel for "all of them" and Rust withholds it, so
     // this is what an ordinary machine produces and it deserves no line.
@@ -132,6 +140,9 @@ describe('the line itself', () => {
 })
 
 describe('Built-in Engine (expert) shows the layer count', () => {
+  it('shows that the engine selected its own allocation', async () => {
+    expect(await panel({ ...AUF_DER_KARTE, gpuLayerMode: 'auto' })).toBe('GPU layers: automatic (engine fit)')
+  })
   it('says the engine ended up on the processor', async () => {
     expect(await panel(AUF_DEM_PROZESSOR)).toBe('GPU layers: 0, the GPU start failed')
   })

@@ -76,10 +76,8 @@ pub struct DetectedGpu {
     /// basis for "which model fits this Mac". `None` on every PC card.
     ///
     /// A field of its own and not `memory_mib`, on purpose: `memory_mib` is
-    /// read as graphics memory by `engine_vram_reading` (which documents
-    /// `None` on Apple as the answer it relies on) and by `getMaxVramGb` in
-    /// the frontend. Filling it on a Mac would make the engine plan its layer
-    /// split against the whole pool as if it were a free card.
+    /// read as dedicated graphics memory by `getMaxVramGb` in the frontend.
+    /// Filling it on a Mac would describe the whole shared pool as a card.
     pub shared_memory_mib: Option<u64>,
 }
 
@@ -1558,75 +1556,6 @@ pub fn detect_gpus() -> Result<Vec<DetectedGpu>, String> {
 /// caller downstream wants bytes.
 const MIB: u64 = 1024 * 1024;
 
-/// What the engine start is allowed to assume about graphics memory.
-#[derive(Debug, Clone, PartialEq)]
-pub struct VramReading {
-    /// Bytes. FREE memory where a probe could measure it, the card's total
-    /// where it could not. The difference matters to the reader of the log
-    /// line, which is why it is carried rather than flattened away.
-    pub bytes: u64,
-    /// True when `bytes` is free memory rather than the card's total.
-    pub free: bool,
-    /// The probe that produced the number, for the log line.
-    pub source: &'static str,
-}
-
-/// `nvidia-smi --query-gpu=memory.free,memory.total --format=csv,noheader,nounits`
-/// writes one line per card: `7423, 8188`. Returns (free, total) in MiB of the
-/// card with the largest total, or `None` when no line parses.
-///
-/// Largest, not first, and not the sum: it mirrors what the rest of the app
-/// already reports as "your VRAM" (`getMaxVramGb` in src/lib/hardware.ts). On a
-/// box with two unequal cards llama.cpp spreads layers over both, so the sum
-/// would be the generous answer and the max is the cautious one. Cautious is
-/// the direction that keeps the engine alive.
-pub(crate) fn parse_nvidia_memory(raw: &str) -> Option<(u64, u64)> {
-    raw.lines()
-        .filter_map(|line| {
-            let mut parts = line.split(',').map(|s| s.trim());
-            let free: u64 = parts.next()?.parse().ok()?;
-            let total: u64 = parts.next()?.parse().ok()?;
-            // A card that reports zero total has not been measured, it has
-            // been guessed at by a driver that is not answering properly.
-            (total > 0 && free <= total).then_some((free, total))
-        })
-        .max_by_key(|(_, total)| *total)
-}
-
-/// How much graphics memory the engine start may plan with, or `None` when
-/// nothing on this machine measured a card.
-///
-/// `None` is a real answer and the callers must keep their old behaviour on
-/// it. Two kinds of machine land there on purpose:
-///
-///   * Apple. `detect_macos` reports no size because there is no separate
-///     card to size: the weights sit in the same memory either way, and the
-///     Metal backend does its own accounting.
-///   * Anything whose vendor tools are missing or wedged.
-///
-/// Cost: `nvidia-smi` answers in milliseconds and fails instantly when it is
-/// not installed, so the common case is cheap. The fallback is the app's full
-/// `detect_gpus` sweep, which is bounded at five seconds per probe; it runs
-/// only on machines without NVIDIA, and only once per engine start.
-pub fn engine_vram_reading() -> Option<VramReading> {
-    // Free, not total: a desktop compositor, a browser and whatever the Create
-    // tab just rendered are all holding pages this engine cannot have. Total
-    // would plan with memory that is not there. The total half of the reading
-    // is only there so `parse_nvidia_memory` can throw out a card whose driver
-    // answers nonsense.
-    if let Some((free, _total)) = run_cmd(
-        "nvidia-smi",
-        &["--query-gpu=memory.free,memory.total", "--format=csv,noheader,nounits"],
-    )
-    .as_deref()
-    .and_then(parse_nvidia_memory)
-    {
-        return Some(VramReading { bytes: free * MIB, free: true, source: "nvidia-smi" });
-    }
-    let biggest = detect_gpus().ok()?.into_iter().filter_map(|g| g.memory_mib).max()?;
-    Some(VramReading { bytes: biggest * MIB, free: false, source: "detect_gpus" })
-}
-
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct GpuSelection {
     /// Vendor whose env-var family to set ("nvidia" | "amd" | "intel" | "auto").
@@ -1739,28 +1668,6 @@ mod tests {
         let found = detect_macos();
         assert_eq!(found.len(), 1);
         assert!(found[0].shared_memory_mib.is_some_and(|m| m >= 4096), "{found:?}");
-        assert!(engine_vram_reading().is_none(), "the engine must still see no card on a Mac");
-    }
-
-    #[test]
-    fn the_engine_reads_free_memory_off_the_biggest_card() {
-        // Two cards, the second one larger and busier. The plan has to be
-        // made against what is free on the card it would actually use.
-        let raw = "7423, 8188\n2100, 24564\n";
-        assert_eq!(parse_nvidia_memory(raw), Some((2100, 24564)));
-        assert_eq!(parse_nvidia_memory("7423, 8188"), Some((7423, 8188)));
-    }
-
-    #[test]
-    fn a_driver_that_answers_nonsense_measures_nothing() {
-        // Every one of these used to be a number the engine would have
-        // planned with. A zero total is a driver that is not answering, and
-        // free above total is not a reading either.
-        for raw in ["", "N/A, N/A", "0, 0", "8188", "9000, 8188", "[Not Supported]"] {
-            assert_eq!(parse_nvidia_memory(raw), None, "{raw:?}");
-        }
-        // One unreadable line does not throw away the readable one next to it.
-        assert_eq!(parse_nvidia_memory("N/A, N/A\n7423, 8188"), Some((7423, 8188)));
     }
 
     /// Real `reg query … /s /v DriverDesc` shape from a two-GPU box: an Arc Pro
