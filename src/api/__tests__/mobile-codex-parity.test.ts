@@ -275,7 +275,7 @@ describe('Mobile agent loop — read as source, because it lives in the shell', 
   })
 
   it('supports user abort', () => {
-    expect(CLIENT).toContain('agentAbort')
+    expect(CLIENT).toContain('activeAgentRun.controller.abort()')
   })
 
   it('routes Codex to CODEX_TOOLS and Agent to AGENT_ALL_TOOLS', () => {

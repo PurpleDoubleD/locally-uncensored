@@ -44,6 +44,8 @@ export interface EngineOffloadStatus {
    *  them. Rust withholds the 999 sentinel rather than making every surface
    *  know what it means (`gpu_layers_reported`). */
   gpuLayers?: number | null
+  /** The engine's actual argv requests its fitter; the final count is unknown. */
+  gpuLayerMode?: 'auto' | 'all' | 'explicit' | null
   /** Bug a: the sentence the start-time sanity probe left on this process
    *  (restarted without Flash Attention, restarted on the processor, or
    *  unreadable on the processor too). Written in Rust, shown as it is. The
@@ -79,6 +81,7 @@ export function engineOffloadLine(status: EngineOffloadStatus | null | undefined
   if (status.cpuOnly) {
     return status.sanityNote ? 'GPU layers: 0, the GPU answered unreadably' : 'GPU layers: 0, the GPU start failed'
   }
+  if (status.gpuLayerMode === 'auto') return 'GPU layers: automatic (engine fit)'
   const layers = status.gpuLayers
   if (typeof layers !== 'number' || !Number.isInteger(layers) || layers < 0) return null
   return `GPU layers: ${layers}`

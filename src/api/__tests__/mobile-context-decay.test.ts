@@ -251,8 +251,8 @@ describe('the loop actually calls all of it', () => {
   // A helper nobody calls is a helper that proves nothing, and the whole bug
   // was a compaction that could not reach the message that mattered.
   it('the observation push carries its iteration', () => {
-    expect(LOOP).toMatch(/apiMessages\.push\(\{role:'tool', content:obs, iter:iter\}\)/)
-    expect(LOOP).toMatch(/apiMessages\.push\(\{role:'tool', content:'Error: '\+errMsg, iter:iter\}\)/)
+    expect(LOOP).toContain('recordMessage(toolResultMessage(tc, obs, iter))')
+    expect(LOOP).toContain("recordMessage(toolResultMessage(tc, 'Error: '+errMsg, iter))")
   })
 
   it('decay runs before compaction, on every step', () => {
@@ -260,7 +260,7 @@ describe('the loop actually calls all of it', () => {
     // The first version of this test matched the substring and stayed green
     // with the call disabled, which is the failure mode a guard is for.
     const decayAt = LOOP.search(/\n[ \t]*decayToolResults\(apiMessages, iter\);/)
-    const compactAt = LOOP.search(/\n[ \t]*apiMessages = compactApiMessages\(apiMessages, 24000\);/)
+    const compactAt = LOOP.search(/\n[ \t]*apiMessages = compactApiMessages\(apiMessages, run\.budget\.charBudget\);/)
     expect(decayAt).toBeGreaterThan(-1)
     expect(compactAt).toBeGreaterThan(decayAt)
   })

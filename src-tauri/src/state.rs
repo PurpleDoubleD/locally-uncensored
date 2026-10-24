@@ -231,6 +231,10 @@ pub struct AppState {
     /// managed lifecycle (start/stop/swap) lives in `commands::engine`; this
     /// is just the handle so shutdown can reap it.
     pub bundled_engine: Mutex<Option<BundledEngine>>,
+    /// Last successful managed chat-engine request. Unlike the child handle,
+    /// this survives an unexpected exit so Remote can recover the same model
+    /// and tuning. Explicit stops still win through `engine_stop_requested`.
+    pub bundled_engine_recovery: Mutex<Option<crate::commands::engine::EngineRecoveryRecipe>>,
     /// Somebody asked for the built-in engine to be stopped (the frontend's
     /// stop, the switch into Cloud, the end of the app). A start that is still
     /// waiting for its model reads this to tell "my child was taken away on
@@ -449,6 +453,7 @@ impl AppState {
             comfy_process: Mutex::new(None),
             ollama_process: Arc::new(Mutex::new(None)),
             bundled_engine: Mutex::new(None),
+            bundled_engine_recovery: Mutex::new(None),
             engine_stop_requested: AtomicBool::new(false),
             bundled_embed: Mutex::new(None),
             comfy_path: Arc::new(Mutex::new(None)),

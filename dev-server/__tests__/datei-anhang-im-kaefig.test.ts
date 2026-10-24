@@ -40,6 +40,19 @@ function put(body: Record<string, unknown>) {
 const b64 = (bytes: number[]) => Buffer.from(bytes).toString('base64')
 
 describe('a binary lands byte for byte', () => {
+  it('creates an empty attachment', async () => {
+    const res = await put({ path: 'empty.bin', base64: '', offset: 0, last: true, workingDirectory: ws })
+    expect(res.status).toBe(200)
+    expect(res.json()).toMatchObject({ status: 'saved', bytes: 0 })
+    expect(readFileSync(join(ws, 'empty.bin')).length).toBe(0)
+  })
+
+  it('offset zero restarts an abandoned upload without old bytes', async () => {
+    await put({ path: 'restart.bin', base64: b64([9, 9, 9]), offset: 0, last: false, workingDirectory: ws })
+    const res = await put({ path: 'restart.bin', base64: b64([7]), offset: 0, last: true, workingDirectory: ws })
+    expect(res.status).toBe(200)
+    expect([...readFileSync(join(ws, 'restart.bin'))]).toEqual([7])
+  })
   it('one chunk: bytes no text write would survive', async () => {
     const raw = [0x00, 0x0d, 0xff, 0xfe, 0x0a, 0x80, 0x4e, 0x45, 0x53, 0x1a]
     const res = await put({ path: 'game.nes', base64: b64(raw), offset: 0, last: true, workingDirectory: ws })
@@ -60,6 +73,12 @@ describe('a binary lands byte for byte', () => {
 })
 
 describe('what it refuses', () => {
+  it.each([-1, 0.5, 9007199254740992, '0', null])('rejects invalid offset %s before creating a stage', async (offset) => {
+    const res = await put({ path: 'bad-offset.bin', base64: b64([1]), offset, last: true, workingDirectory: ws })
+    expect(res.status).toBe(400)
+    expect(res.text).toContain('Invalid upload offset')
+    expect(existsSync(join(ws, 'bad-offset.bin'))).toBe(false)
+  })
   it('a chunk at the wrong offset', async () => {
     await put({ path: 'order.bin', base64: b64([1, 1, 1, 1]), offset: 0, last: false, workingDirectory: ws })
     const res = await put({ path: 'order.bin', base64: b64([2]), offset: 2, last: true, workingDirectory: ws })

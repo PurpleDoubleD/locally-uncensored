@@ -1,5 +1,6 @@
 import type { Connect } from 'vite'
 import { postContentTypeAllowed, postContentTypeError } from '../src/lib/local-api-guard'
+import { configuredOrigin } from './public-origin'
 
 /**
  * Der Wächter vor /local-api — Content-Type, CSRF-Header, Origin.
@@ -37,7 +38,9 @@ import { postContentTypeAllowed, postContentTypeError } from '../src/lib/local-a
 export function createLocalApiGuard(
   port: number,
   getLanOrigins?: () => string[],
+  publicOrigin?: string,
 ): Connect.NextHandleFunction {
+  const explicitOrigin = configuredOrigin(publicOrigin)
   // Vites eigener Middleware-Typ statt einer geratenen Signatur: `next`
   // ist hier Pflicht, weil dieser Wächter durchreicht statt zu antworten.
   return (req, res, next) => {
@@ -69,7 +72,7 @@ export function createLocalApiGuard(
 
     // 3. Strict Origin Validation (Defense in Depth)
     const origin = req.headers.origin;
-    if (origin) {
+    if (origin !== undefined) {
         // The allowlist is built from constants only. It used to append
         // `http(s)://${req.headers.host}` so a request always matched its
         // own host — but the Host header is attacker-chosen under DNS
@@ -103,14 +106,15 @@ export function createLocalApiGuard(
         //
         // `port` ist damit KEINE Regel mehr, sondern nur noch die DIAGNOSE in
         // der Ablehnung: „Invalid Origin" allein sagt nicht, was erwartet war.
-        const allowedOrigins = ['tauri://localhost', 'http://tauri.localhost'];
-        const isLoopback = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin);
+        const allowedOrigins = ['tauri://localhost', 'http://tauri.localhost', ...(explicitOrigin ? [explicitOrigin] : [])];
+        const isValidOrigin = typeof origin === 'string' && origin.length > 0;
+        const isLoopback = isValidOrigin && /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin);
         // K8: the server's own LAN origin(s), see the doc comment on
         // getLanOrigins above. Read fresh on every request; [] when --host
         // is not active, so a plain `npm run dev` behaves exactly as before.
         const lanOrigins = getLanOrigins ? getLanOrigins() : [];
-        const isOwnLan = lanOrigins.includes(origin);
-        if (!allowedOrigins.includes(origin) && !isLoopback && !isOwnLan) {
+        const isOwnLan = isValidOrigin && lanOrigins.includes(origin);
+        if (!isValidOrigin || (!allowedOrigins.includes(origin) && !isLoopback && !isOwnLan)) {
             res.writeHead(403, { 'Content-Type': 'text/plain' });
             const lanNote = lanOrigins.length > 0 ? `, and this server's own LAN origin (${lanOrigins.join(', ')})` : '';
             res.end(

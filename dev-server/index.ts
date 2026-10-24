@@ -1,6 +1,7 @@
 import type { Plugin } from 'vite'
 import type { RouteMount } from './routes'
 import { createLocalApiGuard } from './guard'
+import { comfyBridgeGuard, createComfyBridgeAccess, type ComfyBridgeAccess } from './comfy-origin'
 import { autostartOllama } from './ollama'
 import {
   autostartComfy,
@@ -74,6 +75,9 @@ export interface DevServerOptions {
    * die Zahl nur noch im Text der Ablehnung; siehe dort.
    */
   port: number
+  comfyAccess?: ComfyBridgeAccess
+  /** Explicit administrator-owned SSH/reverse-proxy browser origin. */
+  publicOrigin?: string
 }
 
 /**
@@ -84,19 +88,24 @@ export interface DevServerOptions {
  * Zeilen, die vorher in vite.config.ts standen — Wächter zuerst, dann die
  * Proxies, dann die Endpunkte.
  */
-export function devServerPlugin({ port }: DevServerOptions): Plugin {
+export function devServerPlugin({ port, publicOrigin, comfyAccess = createComfyBridgeAccess(publicOrigin) }: DevServerOptions): Plugin {
   const comfy = createComfyLauncher()
 
   return {
     name: 'lu-dev-server',
     configureServer(server) {
+      comfyAccess.bind(server)
       const routes: RouteMount = {
         use: (path, handler) => { server.middlewares.use(path, handler) },
       }
 
       // K8 (GH #134): read lazily, per request, since resolvedUrls only
       // populates after listen(). See lanOrigins' own doc comment above.
-      routes.use('/local-api', createLocalApiGuard(port, () => lanOrigins(server)))
+      routes.use('/local-api', createLocalApiGuard(port, () => lanOrigins(server), publicOrigin))
+
+      // This namespace carries multipart uploads, media and WebSockets, so it
+      // needs an origin boundary without /local-api's JSON-only requirement.
+      routes.use('/comfyui', comfyBridgeGuard(comfyAccess))
 
       // K8 nachbessert, Punkt 6: warn once, after Vite has actually bound to
       // the network interface, that --host also exposes /shell-execute and
