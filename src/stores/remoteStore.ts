@@ -86,14 +86,14 @@ function revokeRemoteMemory(): Promise<void> {
  */
 export function remoteBackendArgs(
   model: string | undefined,
-  providers: Record<string, { baseUrl?: string } | undefined>,
+  providers: Record<string, { baseUrl?: string; managed?: boolean; enabled?: boolean } | undefined>,
   // `ProviderId`, not `string`: the store's own getProviderApiKey is keyed by
   // the provider union, so a plain `string` here forced every caller to hand
   // it an id its lookup does not accept.
   getKey: (id: ProviderId) => string,
   /** GitHub #173: address and key of an additional OpenAI-compatible entry. */
   entry?: (entryId: string) => { baseUrl: string; apiKey: string } | undefined,
-): { model?: string; backendKind: string; backendBase?: string; backendKey?: string } {
+): { model?: string; backendKind: string; backendBase?: string; backendKey?: string; backendManaged?: boolean } {
   if (!model) return { model, backendKind: 'ollama' }
   const hasPrefix = model.includes('::')
   const providerId = hasPrefix ? model.split('::')[0] : 'ollama'
@@ -107,6 +107,7 @@ export function remoteBackendArgs(
       backendKind: 'openai',
       backendBase: e?.baseUrl || '',
       backendKey: e?.apiKey || undefined,
+      backendManaged: false,
     }
   }
   if (providerId === 'openai') {
@@ -117,10 +118,32 @@ export function remoteBackendArgs(
       backendKind: 'openai',
       backendBase: base,
       backendKey: key || undefined,
+      // Only LU's explicitly managed slot may restart its sidecar. A custom
+      // server on the same loopback port is still owned by its own process.
+      backendManaged: providers.openai?.managed === true && providers.openai.enabled !== false,
     }
   }
   // ollama (bare / ollama::) and any non-OpenAI-compatible provider.
   return { model: bare, backendKind: 'ollama' }
+}
+
+/** Native crash recovery can move the managed server without a frontend
+ * model pick. Read its current port before dispatch instead of reusing a
+ * persisted address from an earlier fallback. External providers stay put. */
+async function currentRemoteBackend(model: string | undefined) {
+  const ps = useProviderStore.getState()
+  const backend = remoteBackendArgs(model, ps.providers, (id) => ps.getProviderApiKey(id), (entryId) => {
+    const e = ps.openaiEntries.find((x) => x.entryId === entryId)
+    return e ? { baseUrl: e.baseUrl, apiKey: ps.getOpenAIEntryApiKey(entryId) } : undefined
+  })
+  if (backend.backendManaged) {
+    const status = await backendCall<{ port?: number }>('bundled_engine_status')
+    const port = status?.port
+    if (typeof port === 'number' && Number.isInteger(port) && port > 0 && port <= 65535) {
+      backend.backendBase = `http://127.0.0.1:${port}/v1`
+    }
+  }
+  return backend
 }
 
 /**
@@ -305,13 +328,10 @@ export const useRemoteStore = create<RemoteState>()((set, get) => ({
       // #87: tell the Rust proxy which backend serves the dispatched model so
       // remote reaches the real backend (built-in engine / LM Studio / Lemonade
       // / llama.cpp / vLLM), not just Ollama. Sends the bare model name.
-      const ps = useProviderStore.getState()
-      const backend = remoteBackendArgs(model, ps.providers, (id) => ps.getProviderApiKey(id), (entryId) => {
-        const e = ps.openaiEntries.find((x) => x.entryId === entryId)
-        return e ? { baseUrl: e.baseUrl, apiKey: ps.getOpenAIEntryApiKey(entryId) } : undefined
-      })
+      const backend = await currentRemoteBackend(model)
       if (backend.model) args.model = backend.model
       args.backendKind = backend.backendKind
+      if (backend.backendManaged !== undefined) args.backendManaged = backend.backendManaged
       if (backend.backendBase) args.backendBase = backend.backendBase
       if (backend.backendKey) args.backendKey = backend.backendKey
       // Always enrich systemPrompt with memory — even when caller passes no
@@ -620,13 +640,10 @@ export const useRemoteStore = create<RemoteState>()((set, get) => ({
       const args: Record<string, unknown> = {}
       // #87: same backend derivation as startServer so a restart keeps routing
       // to the desktop's real backend, not just Ollama.
-      const ps = useProviderStore.getState()
-      const backend = remoteBackendArgs(model, ps.providers, (id) => ps.getProviderApiKey(id), (entryId) => {
-        const e = ps.openaiEntries.find((x) => x.entryId === entryId)
-        return e ? { baseUrl: e.baseUrl, apiKey: ps.getOpenAIEntryApiKey(entryId) } : undefined
-      })
+      const backend = await currentRemoteBackend(model)
       if (backend.model) args.model = backend.model
       args.backendKind = backend.backendKind
+      if (backend.backendManaged !== undefined) args.backendManaged = backend.backendManaged
       if (backend.backendBase) args.backendBase = backend.backendBase
       if (backend.backendKey) args.backendKey = backend.backendKey
       // Refresh memory context on restart so newly-extracted memories from

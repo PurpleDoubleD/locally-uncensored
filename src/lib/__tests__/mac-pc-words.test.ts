@@ -57,6 +57,11 @@ describe('on the Mac', () => {
 })
 
 describe('COUNTER-CHECK: Windows and Linux read every sentence as before', () => {
+  it('also describes automatic fitting on a Mac without promising every layer', () => {
+    expect(gpuLayersTitle(true)).toContain('as many layers on the graphics unit as fit')
+    expect(gpuLayersHint(true)).toContain('as many layers on the graphics unit as fit')
+    expect(gpuLayersTitle(true)).not.toContain('every layer')
+  })
   it('letter for letter', () => {
     expect(computerOffLimitsLine(false)).toBe('Always off limits, and not a setting: LU itself, terminals and shells, password managers, sign-in and permission dialogs, the Run dialog and system launchers, security settings and windows with administrator rights.')
     expect(gpuLayersLabel(false)).toBe('GPU layers')

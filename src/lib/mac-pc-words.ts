@@ -24,19 +24,17 @@ export function gpuLayersLabel(mac: boolean): string {
   return mac ? 'Graphics layers' : 'GPU layers'
 }
 
-/** Its tooltip. On a PC "-1" is auto, not "all" (GH #156): the start puts as
- *  many layers on the card as fit, and a user who read "every layer" took the
- *  slower result for a bug. The Mac sentences are left as they were. */
+/** The pinned engine fits the automatic layer count on both PC and Mac. */
 export function gpuLayersTitle(mac: boolean): string {
   return mac
-    ? '-1 = run every layer on the graphics unit of this Mac (default). 0 = processor only. N = run the first N layers there. Use it when the model and its context do not fit in memory.'
+    ? '-1 = as many layers on the graphics unit as fit (default). 0 = processor only. N = run the first N layers there. The engine accounts for the model and its context in shared memory.'
     : '-1 = as many layers on the GPU as fit (default). 0 = CPU only. N = offload the first N layers, for when the model and its KV cache do not fit your VRAM.'
 }
 
 /** The line under the field. */
 export function gpuLayersHint(mac: boolean): string {
   return mac
-    ? '-1 = all layers on the graphics unit · 0 = processor only · N = part of them, for models bigger than your memory.'
+    ? '-1 = as many layers on the graphics unit as fit · 0 = processor only · N = part of them, for models bigger than your memory.'
     : '-1 = as many layers on GPU as fit · 0 = CPU only · N = partial offload for models bigger than your VRAM.'
 }
 

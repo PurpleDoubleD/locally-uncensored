@@ -778,7 +778,7 @@ fn apply_body_and_headers(
 pub(crate) fn builtin_model_name_from_path(path: &str) -> String {
     let leaf = path.rsplit(['/', '\\']).next().unwrap_or(path);
     let stem = match leaf.len().checked_sub(5) {
-        Some(cut) if leaf[cut..].eq_ignore_ascii_case(".gguf") => &leaf[..cut],
+        Some(cut) if leaf.get(cut..).is_some_and(|suffix| suffix.eq_ignore_ascii_case(".gguf")) => &leaf[..cut],
         _ => leaf,
     };
     match crate::commands::engine::split_shard_stem(stem) {
@@ -2854,6 +2854,17 @@ mod builtin_model_guard_tests {
         assert_eq!(builtin_model_name_from_path("/Users/x/models/qwen2.5-0.5b.gguf"), "qwen2.5-0.5b");
         assert_eq!(builtin_model_name_from_path("C:\\m\\qwen2.5-0.5b.GGUF"), "qwen2.5-0.5b");
         assert_eq!(builtin_model_name_from_path("qwen2.5-0.5b"), "qwen2.5-0.5b");
+    }
+
+    #[test]
+    fn unicode_picker_names_never_slice_inside_a_codepoint() {
+        for name in ["模型", "abc模型", "日本語モデル", "🦙🧠", "éa", ""] {
+            assert_eq!(builtin_model_name_from_path(name), name);
+        }
+        assert_eq!(builtin_model_name_from_path("C:\\模型\\日本語.GGUF"), "日本語");
+        assert_eq!(builtin_model_name_from_path("/m/模型-00001-of-00002.gguf"), "模型");
+        let request = body("日本語");
+        assert!(builtin_model_conflict(CHAT, Some(&request), "/m/日本語.gguf", PORT).is_none());
     }
 }
 

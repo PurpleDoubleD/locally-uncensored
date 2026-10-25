@@ -10,6 +10,8 @@ use once_cell::sync::Lazy;
 use regex::RegexBuilder;
 use walkdir::WalkDir;
 
+mod upload_staging;
+
 /// Strip duplicate drive-letter prefixes, e.g.
 /// `D:/a/D:/a/file.txt` → `D:/a/file.txt`. See commands/agent.rs for
 /// the full rationale — same bug surface for fs_list / fs_search.
@@ -1029,16 +1031,6 @@ pub fn fs_write(path: String, content: String, chatId: Option<String>, workingDi
 /// that cannot be talked out of it.
 const WRITE_BYTES_CAP: u64 = 256 * 1024 * 1024;
 
-/// The hidden sibling a binary upload grows in until its last chunk arrived.
-fn upload_part_path(target: &Path) -> Result<PathBuf, String> {
-    let parent = target.parent().ok_or_else(|| "No parent directory".to_string())?;
-    let name = target
-        .file_name()
-        .map(|n| n.to_string_lossy().to_string())
-        .ok_or_else(|| "No file name".to_string())?;
-    Ok(parent.join(format!(".{name}.lu-part")))
-}
-
 /// Put a BINARY file into the workspace, in base64 chunks, through the same
 /// jail as every other fs command (`resolve_path` -> `contain_within`).
 ///
@@ -1056,8 +1048,8 @@ fn upload_part_path(target: &Path) -> Result<PathBuf, String> {
 /// NEVER OVER AN EXISTING FILE. With a folder workspace the root is the
 /// user's real project, and an attachment that happens to share a name with a
 /// file there must not replace it. The caller picks another name and tries
-/// again. For the same reason the bytes grow in a hidden `.name.lu-part` file
-/// and only the last chunk renames it into place: the visible file is either
+/// again. For the same reason the bytes grow in an exclusively owned private
+/// stage and only the last chunk publishes it without replacement: the file is
 /// absent or complete, also for an agent tool that looks at the folder in the
 /// middle of the upload.
 #[tauri::command]
@@ -1086,8 +1078,6 @@ pub(crate) fn fs_write_bytes_sync(
     chatId: Option<String>,
     workingDirectory: Option<String>,
 ) -> Result<serde_json::Value, String> {
-    use std::io::Write;
-
     let full = resolve_path(&path, chatId.as_deref(), workingDirectory.as_deref())?;
     let root = workspace_root(chatId.as_deref(), workingDirectory.as_deref());
     reject_root_as_write_target(&root, &full)?;
@@ -1106,38 +1096,10 @@ pub(crate) fn fs_write_bytes_sync(
         ));
     }
 
-    let part = upload_part_path(&full)?;
-    if let Some(parent) = full.parent() {
-        fs::create_dir_all(parent).map_err(|e| format!("Create dir: {}", os_error::english(&e)))?;
-    }
-    let mut file = if offset == 0 {
-        // A first chunk starts over, also over the leftover of an upload that
-        // was abandoned half way.
-        fs::File::create(&part)
-    } else {
-        let have = fs::metadata(&part).map(|m| m.len()).unwrap_or(0);
-        if have != offset {
-            return Err(format!(
-                "Upload out of order: expected the chunk at byte {}, got the one at byte {}",
-                have, offset
-            ));
-        }
-        fs::OpenOptions::new().append(true).open(&part)
-    }
-    .map_err(|e| format!("Write error: {}", os_error::english(&e)))?;
-    if let Err(e) = file.write_all(&bytes) {
-        drop(file);
-        let _ = fs::remove_file(&part);
-        return Err(format!("Write error: {}", os_error::english(&e)));
-    }
-    drop(file);
+    upload_staging::write_chunk(&full, &bytes, offset, last)?;
 
     if !last {
         return Ok(serde_json::json!({ "status": "partial", "bytes": total }));
-    }
-    if let Err(e) = fs::rename(&part, &full) {
-        let _ = fs::remove_file(&part);
-        return Err(format!("Write error (rename): {}", os_error::english(&e)));
     }
     Ok(serde_json::json!({
         "status": "saved",
@@ -2470,6 +2432,88 @@ mod attachment_byte_write_tests {
         assert_eq!(v["bytes"], raw.len());
         assert_eq!(fs::read(dir.join("game.nes")).unwrap(), raw);
         assert!(!dir.join(".game.nes.lu-part").exists(), "the part file must be gone");
+    }
+
+    #[test]
+    fn an_empty_attachment_is_a_complete_empty_file() {
+        let dir = ws("empty");
+        let value = put(&dir, "empty.bin", b"", 0, true).expect("empty attachment");
+        assert_eq!(value["bytes"], 0);
+        assert_eq!(fs::metadata(dir.join("empty.bin")).unwrap().len(), 0);
+    }
+
+    fn stage_in(dir: &Path) -> PathBuf {
+        fs::read_dir(dir).unwrap().filter_map(Result::ok)
+            .find(|entry| entry.file_name().to_string_lossy().starts_with(".lu-upload-"))
+            .expect("owned upload directory").path().join("bytes")
+    }
+
+    #[test]
+    fn a_legacy_hardlink_cannot_choose_the_first_or_later_chunk_inode() {
+        let dir = ws("legacy-hardlink");
+        let workspace = dir.join("workspace");
+        fs::create_dir(&workspace).unwrap();
+        allow_root_for_test(&workspace);
+        let victim = dir.join("outside");
+        fs::write(&victim, b"outside unchanged").unwrap();
+        fs::hard_link(&victim, workspace.join(".rom.bin.lu-part")).unwrap();
+        put(&workspace, "rom.bin", b"a", 0, false).expect("first");
+        put(&workspace, "rom.bin", b"b", 1, true).expect("last");
+        assert_eq!(fs::read(&victim).unwrap(), b"outside unchanged");
+        assert_eq!(fs::read(workspace.join("rom.bin")).unwrap(), b"ab");
+    }
+
+    #[test]
+    fn an_unowned_legacy_partial_file_is_never_adopted() {
+        let dir = ws("unowned");
+        fs::write(dir.join(".rom.bin.lu-part"), b"prefix").unwrap();
+        let error = put(&dir, "rom.bin", b"private", 6, true).expect_err("no owned upload");
+        assert!(error.contains("out of order"), "{error}");
+        assert_eq!(fs::read(dir.join(".rom.bin.lu-part")).unwrap(), b"prefix");
+    }
+
+    #[test]
+    fn a_stage_replaced_with_a_hardlink_is_not_appended_or_published() {
+        let dir = ws("stage-hardlink");
+        let victim = dir.join("outside");
+        fs::write(&victim, b"outside unchanged").unwrap();
+        put(&dir, "rom.bin", b"prefix", 0, false).expect("first");
+        let stage = stage_in(&dir);
+        fs::remove_file(&stage).unwrap();
+        fs::hard_link(&victim, &stage).unwrap();
+        let error = put(&dir, "rom.bin", b"private", 6, true).expect_err("changed stage");
+        assert!(error.contains("staging file was changed"), "{error}");
+        assert_eq!(fs::read(&victim).unwrap(), b"outside unchanged");
+        assert!(!dir.join("rom.bin").exists());
+    }
+
+    #[test]
+    fn an_extra_hardlink_to_a_stage_prevents_later_writes() {
+        let dir = ws("stage-alias");
+        put(&dir, "rom.bin", b"prefix", 0, false).expect("first");
+        let alias = dir.join("outside-alias");
+        fs::hard_link(stage_in(&dir), &alias).unwrap();
+        let error = put(&dir, "rom.bin", b"private", 6, true).expect_err("linked stage");
+        assert!(error.contains("staging file was changed"), "{error}");
+        assert_eq!(fs::read(alias).unwrap(), b"prefix");
+        assert!(!dir.join("rom.bin").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symbolic_legacy_and_replaced_stages_cannot_write_outside() {
+        use std::os::unix::fs::symlink;
+        let dir = ws("stage-symlink");
+        let victim = dir.join("outside");
+        fs::write(&victim, b"outside unchanged").unwrap();
+        symlink(&victim, dir.join(".rom.bin.lu-part")).unwrap();
+        put(&dir, "rom.bin", b"prefix", 0, false).expect("first ignores legacy link");
+        let stage = stage_in(&dir);
+        fs::remove_file(&stage).unwrap();
+        symlink(&victim, &stage).unwrap();
+        assert!(put(&dir, "rom.bin", b"private", 6, true).is_err());
+        assert_eq!(fs::read(victim).unwrap(), b"outside unchanged");
+        assert!(!dir.join("rom.bin").exists());
     }
 
     #[test]

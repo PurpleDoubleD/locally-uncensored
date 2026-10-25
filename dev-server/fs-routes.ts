@@ -1,6 +1,6 @@
-import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync, type Dirent } from 'fs'
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync, type Dirent } from 'fs'
 import os from 'os'
-import { basename, join, resolve } from 'path'
+import { join, resolve } from 'path'
 import type { RouteMount } from './routes'
 import { requirePost, withJsonBody } from './http'
 import { bodyFlag, bodyNumber, bodyString } from '../src/dev/http-body'
@@ -14,7 +14,8 @@ import {
   namedDepth,
   type DevJailOptions,
 } from '../src/lib/dev-fs-jail'
-import { errorText } from '../src/types/json-guards'
+import { errorText, prop } from '../src/types/json-guards'
+import { writeUploadChunk } from './upload-staging'
 
 // ── Der Pfad-Käfig: was er vom Prozess braucht ──────────────────────────────
 // `src/lib/dev-fs-jail.ts` ist rein (keine node:*-Importe, siehe Dateikopf
@@ -128,8 +129,7 @@ export function registerFsRoutes(routes: RouteMount): void {
   // API: FS write bytes, one base64 chunk of a BINARY file attached in the
   // chat (3.0.5). Parity port of the `fs_write_bytes` Tauri command: the same
   // jail, the same 256 MiB ceiling, never over an existing file, and the bytes
-  // grow in a hidden `.name.lu-part` sibling until the last chunk renames it
-  // into place.
+  // grow in an exclusively owned private stage until no-clobber publication.
   routes.use('/local-api/fs-write-bytes', (req, res) => {
     if (!requirePost(req, res)) return
     withJsonBody(req, res, (body) => {
@@ -143,6 +143,11 @@ export function registerFsRoutes(routes: RouteMount): void {
         const workingDirectory = bodyString(body, 'workingDirectory')
         const offset = bodyNumber(body, 'offset') ?? 0
         const last = bodyFlag(body, 'last')
+         const rawOffset = prop(body, 'offset')
+         if (!Number.isSafeInteger(offset) || offset < 0 || (rawOffset !== undefined && (typeof rawOffset !== 'number' || !Number.isSafeInteger(rawOffset)))) {
+           fail(400, 'Invalid upload offset: expected a non-negative safe integer')
+           return
+         }
         const resolved = devResolveWithinJail({
           path: filePath ?? '',
           homeDir: os.homedir(),
@@ -171,29 +176,11 @@ export function registerFsRoutes(routes: RouteMount): void {
           fail(400, `File is too large to attach: more than ${DEV_WRITE_BYTES_CAP} bytes`)
           return
         }
-        const parentDir = resolve(resolved, '..')
-        const part = join(parentDir, `.${basename(resolved)}.lu-part`)
-        if (!existsSync(parentDir)) mkdirSync(parentDir, { recursive: true })
-        if (offset === 0) {
-          writeFileSync(part, bytes)
-        } else {
-          const have = existsSync(part) ? statSync(part).size : 0
-          if (have !== offset) {
-            fail(400, `Upload out of order: expected the chunk at byte ${have}, got the one at byte ${offset}`)
-            return
-          }
-          appendFileSync(part, bytes)
-        }
+         writeUploadChunk(resolved, bytes, offset, last)
         if (!last) {
           res.writeHead(200, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ status: 'partial', bytes: total }))
           return
-        }
-        try {
-          renameSync(part, resolved)
-        } catch (err) {
-          rmSync(part, { force: true })
-          throw err
         }
         res.writeHead(200, { 'Content-Type': 'application/json' })
         res.end(JSON.stringify({ status: 'saved', path: resolved, bytes: total }))

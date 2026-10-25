@@ -97,6 +97,8 @@ export interface EngineStatus {
   /** The `-ngl` the running process carries, null when it asked for every
    * layer. See lib/engine-offload. */
   gpuLayers?: number | null
+  /** Auto fitting uses backend memory estimates; its final layer count is unknown here. */
+  gpuLayerMode?: 'auto' | 'all' | 'explicit' | null
   /** Bug a: what the start-time sanity probe worked around for this process,
    * as the sentence the user is shown (engine_sanity.rs). Null on every
    * ordinary start. Outlives the start call on purpose, see lib/engine-offload. */

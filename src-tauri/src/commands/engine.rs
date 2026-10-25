@@ -105,7 +105,7 @@ pub struct EngineTuning {
     pub cache_type_v: String,
     /// CPU threads for generation. <=0 = auto (omitted).
     pub threads: i32,
-    /// GPU layers to offload. <0 = all (999, today's behavior); >=0 explicit
+    /// GPU layers to offload. <0 = the engine fits layers automatically; >=0 explicit
     /// (0 = CPU-only is a valid expert choice on RAM-starved boxes).
     pub gpu_layers: i32,
     /// Pin model in RAM (`--mlock`).
@@ -127,6 +127,103 @@ impl Default for EngineTuning {
             no_mmap: false,
         }
     }
+}
+
+/// A successful request, kept separately from the reapable process handle.
+/// Keep the requested tuning (including auto GPU layers), and the port that
+/// actually served. Recovery must never silently revert a chosen 256K context.
+#[derive(Debug, Clone, PartialEq)]
+pub struct EngineRecoveryRecipe {
+    pub model_path: String,
+    pub tuning: EngineTuning,
+    pub port: u16,
+}
+
+const REMOTE_ENGINE_WAIT: Duration = Duration::from_secs(600);
+const REMOTE_ENGINE_STOPPED: &str = "The LU Engine was deliberately stopped. Start it in Settings, AI Backends before continuing.";
+
+/// Waiting for the existing start gate also waits for a desktop model/context
+/// reload. Unlike an explicit start, recovery never clears a stop request.
+fn recovery_gate<'a>(gate: &'a std::sync::Mutex<()>, stopped: &std::sync::atomic::AtomicBool) -> Result<std::sync::MutexGuard<'a, ()>, String> {
+    let deadline = Instant::now() + REMOTE_ENGINE_WAIT;
+    loop {
+        if stopped.load(std::sync::atomic::Ordering::SeqCst) {
+            return Err(REMOTE_ENGINE_STOPPED.into());
+        }
+        match gate.try_lock() {
+            Ok(guard) => return Ok(guard),
+            Err(std::sync::TryLockError::Poisoned(error)) => return Ok(error.into_inner()),
+            Err(std::sync::TryLockError::WouldBlock) => {}
+        }
+        if Instant::now() >= deadline {
+            return Err("The LU Engine is still reloading. Wait for it to finish, then try again.".into());
+        }
+        std::thread::sleep(Duration::from_millis(25));
+    }
+}
+
+/// Separated from Tauri/process creation so races with Stop, concurrent phone
+/// requests and desktop swaps can be checked without launching a real model.
+fn ensure_remote_engine_with(
+    gate: &std::sync::Mutex<()>,
+    stopped: &std::sync::atomic::AtomicBool,
+    recipes: &std::sync::Mutex<Option<EngineRecoveryRecipe>>,
+    dispatched_path: &str,
+    probe: impl Fn() -> Option<(String, u16, bool)>,
+    start: impl FnOnce(&EngineRecoveryRecipe) -> Result<u16, String>,
+) -> Result<u16, String> {
+    let _gate = recovery_gate(gate, stopped)?;
+    if stopped.load(std::sync::atomic::Ordering::SeqCst) { return Err(REMOTE_ENGINE_STOPPED.into()); }
+    let recipe = recipes.lock().map_err(|_| "LU Engine recovery state unavailable")?.clone()
+        .ok_or("The LU Engine has no previously loaded model to recover. Start it in Settings, AI Backends.")?;
+    if recipe.model_path != dispatched_path {
+        return Err("The desktop changed the loaded model. Dispatch Remote Access again before continuing.".into());
+    }
+    if let Some((model, port, healthy)) = probe() {
+        if model != dispatched_path {
+            return Err("The desktop changed the loaded model. Dispatch Remote Access again before continuing.".into());
+        }
+        // An alive but unresponsive model is not evidence of a crash. Never
+        // kill an inference another desktop/phone request may still be using.
+        if !healthy { return Err("The LU Engine is running but is not ready. Wait for its current operation, then try again.".into()); }
+        return Ok(port);
+    }
+    // A Stop arriving while we inspected the handle must still prevent spawn.
+    if stopped.load(std::sync::atomic::Ordering::SeqCst) { return Err(REMOTE_ENGINE_STOPPED.into()); }
+    start(&recipe)
+}
+
+pub(crate) async fn ensure_remote_engine(app: AppHandle, dispatched_path: String) -> Result<u16, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        ensure_remote_engine_with(
+            &crate::commands::process::ENGINE_START,
+            &state.engine_stop_requested,
+            &state.bundled_engine_recovery,
+            &dispatched_path,
+            || {
+                let live = { let mut slot = state.bundled_engine.lock().unwrap(); live_sidecar(&mut slot) }?;
+                let healthy = engine_healthy(live.port);
+                if !healthy {
+                    // The process can exit during the HTTP probe itself.
+                    // Reap that death now rather than report an alive/busy
+                    // engine until the phone's next request.
+                    let mut slot = state.bundled_engine.lock().unwrap();
+                    live_sidecar(&mut slot)?;
+                }
+                Some((live.model_path, live.port, healthy))
+            },
+            |recipe| {
+                tracing::warn!(target: "engine", port = recipe.port, ctx = effective_ctx(&recipe.tuning), "recovering the Remote session's exited LU Engine");
+                let answer = start_engine_and_remember(&app, &state, recipe.model_path.clone(), recipe.tuning.clone(), recipe.port)?;
+                if stop_was_requested(&state) || answer.get("status").and_then(|v| v.as_str()) == Some("stopped") {
+                    return Err(REMOTE_ENGINE_STOPPED.into());
+                }
+                answer.get("port").and_then(|p| p.as_u64()).and_then(|p| u16::try_from(p).ok())
+                    .ok_or_else(|| "The LU Engine restart did not return a serving port.".into())
+            },
+        )
+    }).await.map_err(|e| format!("LU Engine recovery task failed: {e}"))?
 }
 
 /// KV cache types this build of llama-server accepts and we consider sane.
@@ -304,261 +401,16 @@ pub(crate) fn model_can_see_images(model_path: &str) -> bool {
     existing_mmproj(model_path).is_some()
 }
 
-// ── How much of a model a card can actually hold (3.0.0 list, bugs u and a) ──
-//
-// `-ngl 999` means "every layer on the graphics card". llama.cpp clamps it to
-// the model's real layer count, which is why it reads as the idiomatic way to
-// say "all of it", and on a roomy card it is. The two reports that opened this
-// are the other case:
-//
-//   * Discord ticket-0009 (2026-09-07): a 12B model on an 8 GB RTX 4060. The
-//     engine "start and exit again before it could serve on port 8127. It was
-//     tried twice."
-//   * GitHub 128 and two more Discord reports: a 3B Q4_K_M on a 2 GB card
-//     answers with token soup.
-//
-// The app already knew how to ask this question and never asked it here: the
-// fit check lives in the model picker (`computeFit`, src/components/models/
-// ModelTiles.tsx), where it paints a coloured dot, and nothing of it ever
-// reached the engine arguments.
-//
-// NOT PROVEN ON THE REPORTERS' HARDWARE. There is no 2 GB and no 8 GB NVIDIA
-// card on the machine this was written on, so what is proven here is the
-// arithmetic, by the tests at the bottom of this file. What changes for a user
-// is narrower than "bug a is fixed": a card too small for the whole model is
-// no longer asked by default to take all of it, and the log now says what the
-// engine was told to do.
-
-/// One MiB, for the reserves below and the numbers in the log line.
-const MIB: u64 = 1024 * 1024;
-
-/// Graphics memory that is spoken for before a single weight is loaded: the
-/// driver's own context plus llama.cpp's compute buffers. A CUDA context alone
-/// runs to a few hundred MiB and the compute buffer adds a few hundred more at
-/// the default batch sizes, so 512 MiB is the round number above both.
-///
-/// This is the reserve for a MEASURED-free reading (`nvidia-smi`'s
-/// `memory.free`, `VramReading.free == true`): the number already excludes
-/// whatever else is running, so only the driver and the compute buffers are
-/// left to hold back.
-const VRAM_OVERHEAD_BYTES: u64 = 512 * MIB;
-
-/// R1-3: the reserve for a reading that is NOT known to be free, the
-/// `detect_gpus` fallback (`VramReading.free == false`) reports the card's
-/// TOTAL size, not what is currently unused. A desktop compositor, a browser
-/// and whatever Create last rendered can all be sitting in that total already,
-/// same as the free-memory case this file's own header comment describes for
-/// `engine_vram_reading`. 512 MiB on top of a total-capacity number plans as
-/// if the card were otherwise empty; this takes a bigger, still round, bite
-/// out of it instead, so a start on this weaker signal fails toward "fewer
-/// layers than would have fit" rather than toward a start that dies.
-const VRAM_OVERHEAD_BYTES_UNMEASURED: u64 = 2048 * MIB;
-
-/// KV cache per offloaded layer per 1024 tokens of context.
-///
-/// 4 MiB is the f16 figure for a modern grouped query model: K and V, 1024
-/// key and value dimensions, two bytes each, is 4 KiB per token per layer. A
-/// model with wider key and value heads needs more than this and will be given
-/// fewer layers than it could have held. That error costs speed. The opposite
-/// error costs the start, which is the failure this whole block exists to
-/// prevent.
-const KV_BYTES_PER_LAYER_PER_1K_CTX: u64 = 4 * MIB;
-
-/// The layer count assumed when the GGUF header does not carry one.
-///
-/// Deliberately LOW. The count only ever multiplies the fraction of the model
-/// that fits, so a guess BELOW the real block count can only ask for fewer
-/// layers than would have fit, never for more, and fewer layers is the
-/// direction in which a start survives. 16 is under the block count of every
-/// chat GGUF this app offers.
-const ASSUMED_BLOCK_COUNT: u32 = 16;
-
-/// What `-ngl` carries when every layer is wanted.
-///
-/// A number rather than a string, because two questions are asked of it: what
-/// to write into argv, and whether a layer count read back OUT of argv is this
-/// sentinel or a real measurement. A surface that printed "999" at a user
-/// would be printing the sentinel.
+// The bundled llama.cpp revision (scripts/build-llama.sh) fits against the
+// selected backend's real model/context/compute tensors. A fixed bytes-per-
+// layer formula cannot account for grouped heads, compressed KV, recurrent
+// layers, MoE placement or several devices. Use the same fitter on Metal,
+// Vulkan and CUDA instead of overriding it with a guessed count.
 const ALL_LAYERS: u32 = 999;
-
-/// What `-ngl` carries when the engine decides the layer count itself (GH
-/// #156). Written into argv as `auto`, read back as this number, so the retry
-/// and the restart ladder below see "layers on the card" and keep handing the
-/// same word on. Never shown to anyone: `gpu_layers_reported` drops it like
-/// `ALL_LAYERS`.
 const ENGINE_DECIDES: u32 = 998;
 
-/// Whether the auto default goes to llama-server's own fit instead of the plan
-/// below (GH #156).
-///
-/// A reading that is not free memory is a card's total from `detect_gpus`:
-/// every AMD and Intel card on Windows and Linux, which run the Vulkan build.
-/// The plan has to guess the rest from that total (a 2 GiB reserve and a
-/// fixed cache size per layer). GH #156 reports "-1" running as slow as the
-/// processor on a Navi 10 card where a typed 99 was fast, and this guess is
-/// the only place where the two differ (no log of that machine was seen, so
-/// the layer count it got is not known). The pinned llama-server measures the
-/// memory of the device it really uses (`-ngl auto` with `--fit`, on by
-/// default), so where LU cannot measure, the engine does. A measured-free
-/// reading (`nvidia-smi`) keeps the plan, and so does the Mac, whose unified
-/// memory the plan has always handled.
-pub(crate) fn engine_fits_layers(card: Option<&crate::commands::gpu::VramReading>, mac: bool) -> bool {
-    card.is_some_and(|c| !c.free) && !mac
-}
-
-/// The numbers an offload decision is made from. Plain values, so the
-/// arithmetic can be checked without a graphics card in the machine.
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) struct OffloadInputs {
-    /// The GGUF on disk. Its size is the honest proxy for what the weights
-    /// take in graphics memory at full offload, and the app already treats it
-    /// as one (`modelBytes` in `bundled_engine_status`, GH #85).
-    pub model_bytes: u64,
-    /// `<arch>.block_count` from the header, when it could be read.
-    pub block_count: Option<u32>,
-    /// Free graphics memory where a probe measured it, the card's total where
-    /// it could not, `None` where nothing measured a card at all.
-    pub vram_bytes: Option<u64>,
-    /// The context this start will ask for, which is what the KV cache is
-    /// sized from.
-    pub ctx: u32,
-    /// R1-3: whether `vram_bytes` is a measured-free reading (`nvidia-smi`)
-    /// or a card's total capacity (`detect_gpus`, `VramReading.free`).
-    /// Meaningless when `vram_bytes` is `None`. Drives both the reserve
-    /// (`VRAM_OVERHEAD_BYTES` vs `VRAM_OVERHEAD_BYTES_UNMEASURED`) and the
-    /// wording of `why`: "are free" is simply false of a total-capacity
-    /// number, and the log line that started every start read that way
-    /// regardless of which kind of number backed it.
-    pub free: bool,
-    /// Size of the image part (mmproj) that lies next to the model, 0 for a
-    /// model without one. The part is loaded into graphics memory beside the
-    /// weights, so it is part of what has to fit.
-    pub image_part_bytes: u64,
-}
-
-/// What the start should send as `-ngl`, and the sentence that explains it.
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) struct OffloadPlan {
-    /// `None` means "ask for all layers": what this app has always sent, and
-    /// what a machine with room and a machine nothing could measure both keep
-    /// getting.
-    pub layers: Option<u32>,
-    /// One English clause for the log line, naming the numbers it decided on.
-    /// Without it the log would carry a layer count nobody could argue with.
-    pub why: String,
-    /// Whether the image part is loaded with the model. False in exactly one
-    /// case: the model alone fits on the card and the part would push it off.
-    /// Always true for a model without a part, where there is nothing to drop.
-    pub with_image_part: bool,
-}
-
-fn mib(bytes: u64) -> u64 {
-    bytes / MIB
-}
-
-/// Decide how many layers go on the card.
-///
-/// Three outcomes, and two of them are the old behaviour:
-///
-///   * Nothing measured a card: all layers, exactly as before, and the log
-///     says the probe came back empty.
-///   * The model and its cache fit with the reserve: all layers, exactly as
-///     before.
-///   * They do not fit: `floor(usable / per_layer)`, where `per_layer` is the
-///     file size divided by the block count plus that layer's share of the KV
-///     cache, and `usable` is the measured memory minus the driver reserve.
-///
-/// Pure. No file is read and no card is asked; the caller collects the inputs
-/// so this can be checked against hardware nobody here owns.
-pub(crate) fn plan_offload(input: &OffloadInputs) -> OffloadPlan {
-    let part = input.image_part_bytes;
-    let Some(vram) = input.vram_bytes else {
-        return OffloadPlan {
-            layers: None,
-            why: "no probe measured graphics memory on this machine, so every layer is requested exactly as before".to_string(),
-            with_image_part: true,
-        };
-    };
-    // A header that answers zero is a header that answered nothing.
-    let read_from_header = input.block_count.filter(|b| *b > 0);
-    let blocks = read_from_header.unwrap_or(ASSUMED_BLOCK_COUNT);
-    // Round the context UP to whole thousands: a 6000 token context pays for
-    // six, because the error has to point at reserving too much.
-    let ctx_k = (input.ctx.max(1) as u64).div_ceil(1024);
-    let kv_per_layer = KV_BYTES_PER_LAYER_PER_1K_CTX * ctx_k;
-    // R1-3: a total-capacity reading is not a free-memory reading, and the
-    // reserve taken out of it has to be bigger for the same reason the
-    // sentence below has to say something different.
-    let overhead = if input.free { VRAM_OVERHEAD_BYTES } else { VRAM_OVERHEAD_BYTES_UNMEASURED };
-    let vram_clause = if input.free {
-        format!("{} MiB are free", mib(vram))
-    } else {
-        format!("the card holds {} MiB in total (actual free memory was not measured)", mib(vram))
-    };
-    let whole = input.model_bytes + kv_per_layer * blocks as u64 + overhead;
-    if whole + part <= vram {
-        let what = if part > 0 { "the model, its cache and its image part" } else { "the model and its cache" };
-        return OffloadPlan {
-            layers: None,
-            why: format!(
-                "{what} need about {} MiB and {vram_clause}, so every layer is requested",
-                mib(whole + part)
-            ),
-            with_image_part: true,
-        };
-    }
-    // The image part (October 2026). The model alone fits, and its part would
-    // be the thing that pushes layers off the card: then the model is loaded
-    // whole and without the part, and the app says so in one sentence. A model
-    // that answers at full speed and cannot see beats one that can see and
-    // crawls, and the user who wants the picture has a way to get it (a
-    // smaller context), while nobody asked for a slow chat.
-    if part > 0 && whole <= vram {
-        return OffloadPlan {
-            layers: None,
-            why: format!(
-                "the model and its cache need about {} MiB and {vram_clause}, so every layer is requested, but the image part needs {} MiB more than that leaves, so the model is loaded without image input",
-                mib(whole),
-                mib(part)
-            ),
-            with_image_part: false,
-        };
-    }
-    // The model alone does not fit. It is shared between the card and the
-    // processor either way, so here the part stays: it takes its room out of
-    // the budget first and costs a few layers, and a model the user chose
-    // larger than the card does not lose its image input for good over it.
-    // Only a card that cannot hold the part at all loads without it.
-    let budget = vram.saturating_sub(overhead);
-    let with_image_part = part == 0 || part < budget;
-    let usable = if with_image_part { budget - part } else { budget };
-    let per_layer = input.model_bytes / blocks as u64 + kv_per_layer;
-    // A layer that costs nothing cannot be divided into the budget, so that
-    // case answers 0 layers instead of dividing by zero.
-    let layers = usable
-        .checked_div(per_layer)
-        .map_or(0, |fit| fit.min(blocks as u64) as u32);
-    let counted = match read_from_header {
-        Some(b) => format!("{b} layers the GGUF header names"),
-        None => format!("{ASSUMED_BLOCK_COUNT} layers assumed, because the GGUF header carries no block count"),
-    };
-    let part_clause = if part == 0 {
-        String::new()
-    } else if with_image_part {
-        format!(", {} MiB of that set aside for the image part", mib(part))
-    } else {
-        format!(", and without image input because the image part of {} MiB does not fit at all", mib(part))
-    };
-    OffloadPlan {
-        layers: Some(layers),
-        why: format!(
-            "the model and its cache need about {} MiB but {vram_clause}, so {layers} of {counted} go on the card, at about {} MiB per layer and {} MiB held back for the driver and the compute buffers{part_clause}",
-            mib(whole),
-            mib(per_layer),
-            mib(overhead)
-        ),
-        with_image_part,
-    }
+fn automatic_gpu_layers(tuning: &EngineTuning) -> Option<u32> {
+    (tuning.gpu_layers < 0).then_some(ENGINE_DECIDES)
 }
 
 /// Said when a model came up without its image part because the card has no
@@ -640,7 +492,7 @@ pub(crate) fn argv_without_gpu_layers(args: &[String]) -> Vec<String> {
 
 /// Build the `llama-server` argv for a chat engine.
 ///
-/// `auto_ngl` is what `plan_offload` resolved the "auto" default to, and it is
+/// `auto_ngl` carries the engine fitter sentinel or a retained retry setting, and it is
 /// consulted ONLY when the user left GPU Layers on auto (`gpu_layers < 0`).
 /// `None` there means "ask for all layers" and produces the exact argv this
 /// app has always produced, which is what a machine nothing could measure and
@@ -2937,8 +2789,48 @@ fn start_bundled_engine_blocking(
     // now wants it. Cleared under the gate, so it is only ever a stop that
     // arrives DURING this start that the waits below get to see.
     state.engine_stop_requested.store(false, std::sync::atomic::Ordering::SeqCst);
-    let tuning = tuning.unwrap_or_default();
-    let port = port.unwrap_or(DEFAULT_ENGINE_PORT);
+    start_engine_and_remember(app, state, model_path, tuning.unwrap_or_default(), port.unwrap_or(DEFAULT_ENGINE_PORT))
+}
+
+/// Caller holds ENGINE_START. Both explicit starts and Remote recovery use
+/// the same startup, rollback, GPU fallback and model-file validation path.
+/// Only an explicit start above is permitted to clear a deliberate Stop.
+fn start_engine_and_remember(
+    app: &AppHandle,
+    state: &State<'_, AppState>,
+    model_path: String,
+    tuning: EngineTuning,
+    port: u16,
+) -> Result<serde_json::Value, String> {
+    if stop_was_requested(state) { return Ok(stopped_answer(port, &model_path)); }
+    let result = start_bundled_engine_locked(app, state, model_path.clone(), &tuning, port);
+    remember_engine_request(&state.bundled_engine_recovery, &state.engine_stop_requested, model_path, tuning, &result);
+    result
+}
+
+fn remember_engine_request(
+    recipes: &std::sync::Mutex<Option<EngineRecoveryRecipe>>,
+    stopped: &std::sync::atomic::AtomicBool,
+    model_path: String,
+    tuning: EngineTuning,
+    result: &Result<serde_json::Value, String>,
+) {
+    let Ok(answer) = result else { return };
+    if stopped.load(std::sync::atomic::Ordering::SeqCst) { return; }
+    if !matches!(answer.get("status").and_then(|s| s.as_str()), Some("started" | "already_running")) { return; }
+    let Some(port) = answer.get("port").and_then(|p| p.as_u64()).and_then(|p| u16::try_from(p).ok()) else { return };
+    if let Ok(mut latest) = recipes.lock() {
+        *latest = Some(EngineRecoveryRecipe { model_path, tuning, port });
+    }
+}
+
+fn start_bundled_engine_locked(
+    app: &AppHandle,
+    state: &State<'_, AppState>,
+    model_path: String,
+    tuning: &EngineTuning,
+    port: u16,
+) -> Result<serde_json::Value, String> {
 
     if !Path::new(&model_path).exists() {
         return Err(format!("Model file not found: {model_path}"));
@@ -2985,7 +2877,7 @@ fn start_bundled_engine_blocking(
             let part_it_runs_with = if engine.image_part_note.is_some() { None } else { mmproj.as_deref() };
             let args_on_its_port = build_server_args(
                 &model_path,
-                &tuning,
+                tuning,
                 engine.port,
                 slot_dir.as_deref(),
                 part_it_runs_with,
@@ -3040,7 +2932,7 @@ fn start_bundled_engine_blocking(
     // Different model (or dead) → stop the old process before spawning.
     stop_engine_locked(state);
 
-    let outcome = start_after_stop(app, state, &model_path, &tuning, port, slot_dir.as_deref(), mmproj.as_deref());
+    let outcome = start_after_stop(app, state, &model_path, tuning, port, slot_dir.as_deref(), mmproj.as_deref());
     settle_switch(state, port, &model_path, outcome, || match (vorher, resolve_engine_binary(app)) {
         (Some(p), Some(bin)) => restore_engine(&bin, state, &p, resolve_engine_backend_dir(app).as_deref()),
         _ => false,
@@ -3277,67 +3169,22 @@ fn start_after_stop(
     if port != preferred_port {
         tracing::warn!(target: "engine", wanted = preferred_port, port, "the preferred port is taken, the LU Engine moves");
     }
-    // The layer count, decided against the card instead of assumed (bugs u and
-    // a). Only for the auto default: a number typed into Settings is the
-    // user's answer and the probe is not even run for it.
-    //
-    // Asked HERE and not further up, for the same reason the port is: the old
-    // engine has been stopped and ComfyUI and Ollama have been asked to let go
-    // a few lines above, so this is the first moment at which "free" means
-    // free. Those two release asynchronously, so a reading taken while a
-    // driver still holds their pages is too small rather than too large, and
-    // too small costs speed while too large costs the start.
+    // The pinned engine estimates actual KV types, head dimensions and hybrid
+    // recurrent state using its no-allocation model/context. The explicit ctx
+    // below prevents its fitter from shrinking a user-selected context. Typed
+    // GPU layer counts remain authoritative, including 0 and 999.
     let ctx_size = effective_ctx(tuning);
     let auto_layers = tuning.gpu_layers < 0;
-    let auto_card = if auto_layers { crate::commands::gpu::engine_vram_reading() } else { None };
-    let (auto_ngl, part_fits) = if auto_layers && engine_fits_layers(auto_card.as_ref(), cfg!(target_os = "macos")) {
-        // GH #156: the card was not measured free, so the engine measures it.
-        // The image part stays: if it does not fit, the engine says so and
-        // the retry below starts again without it.
-        tracing::info!(
-            target: "engine",
-            vram_mib = auto_card.as_ref().map(|c| (c.bytes / (1024 * 1024)).to_string()).unwrap_or_else(|| "unknown".into()),
-            vram_source = auto_card.as_ref().map(|c| c.source).unwrap_or("none"),
-            ctx = ctx_size,
-            ngl = "auto",
-            "the card's free graphics memory was not measured, only its total, so the engine measures it and picks the layer count itself"
-        );
-        (Some(ENGINE_DECIDES), true)
-    } else if auto_layers {
-        let card = auto_card;
-        let header = crate::commands::gguf::read_header(model_path);
-        let plan = plan_offload(&OffloadInputs {
-            model_bytes: std::fs::metadata(model_path).map(|m| m.len()).unwrap_or(0),
-            block_count: header.block_count,
-            vram_bytes: card.as_ref().map(|c| c.bytes),
-            ctx: ctx_size,
-            free: card.as_ref().map(|c| c.free).unwrap_or(false),
-            image_part_bytes: image_part
-                .and_then(|p| std::fs::metadata(p).ok())
-                .map(|m| m.len())
-                .unwrap_or(0),
-        });
-        tracing::info!(
-            target: "engine",
-            vram_mib = card.as_ref().map(|c| (c.bytes / (1024 * 1024)).to_string()).unwrap_or_else(|| "unknown".into()),
-            vram_is_free_memory = card.as_ref().map(|c| c.free).unwrap_or(false),
-            vram_source = card.as_ref().map(|c| c.source).unwrap_or("none"),
-            block_count = header.block_count.map(|b| b.to_string()).unwrap_or_else(|| "unknown".into()),
-            ctx = ctx_size,
-            ngl = plan.layers.unwrap_or(ALL_LAYERS).to_string(),
-            "{}",
-            plan.why
-        );
-        (plan.layers, plan.with_image_part)
-    } else {
-        // A layer count the user typed is the user's answer, and nothing is
-        // measured for it. The image part is loaded as it always was.
-        (None, true)
-    };
-    // The image part this start really passes along. A part that would push
-    // the model off the card is left out, and the note says so afterwards.
-    let mmproj = if part_fits { image_part } else { None };
-    let image_note = (image_part.is_some() && !part_fits).then_some(IMAGE_PART_NO_ROOM_NOTE);
+    let auto_ngl = automatic_gpu_layers(tuning);
+    if auto_layers {
+        tracing::info!(target: "engine", ctx = ctx_size,
+            cache_k = %tuning.cache_type_k, cache_v = %tuning.cache_type_v,
+            ngl = "auto", "the LU Engine fits actual model, cache and compute tensors to the selected device memory");
+    }
+    // The image part keeps the existing retry without it if its load fails.
+    // It is no longer disabled pre-emptively by an inaccurate KV estimate.
+    let mmproj = image_part;
+    let image_note = None;
     let desired_args =
         build_server_args(model_path, tuning, port, slot_dir, mmproj, auto_ngl);
 
@@ -3444,7 +3291,10 @@ fn start_after_stop(
                     backend_dir.as_deref(),
                 );
                 answer["retried"] = serde_json::json!(true);
-                note_image_part(state, &mut answer, Some(IMAGE_PART_REFUSED_NOTE));
+                let no_room = stderr_blames_the_gpu(&failure.stderr)
+                    && ["out of memory", "failed to allocate", "cudamalloc"].iter()
+                        .any(|word| failure.stderr.to_ascii_lowercase().contains(word));
+                note_image_part(state, &mut answer, Some(if no_room { IMAGE_PART_NO_ROOM_NOTE } else { IMAGE_PART_REFUSED_NOTE }));
                 Ok(answer)
             }
             Err(second) => Err(start_failure_message(&second, port, deadline, SecondAttempt::SameOffload, backend_dir.as_deref())),
@@ -3701,7 +3551,7 @@ fn serve_or_heal_garbled(
                 (on_the_processor(&serving), true)
             }
         };
-        // A restart is a measurement thrown away: whatever `plan_offload` said
+        // A restart is a measurement thrown away: whatever the engine fitter selected
         // for the first start is not asked again, because the argument that is
         // being changed is not the layer count. So the layer count the engine
         // is actually running with is carried across instead of dropped, read
@@ -4116,6 +3966,7 @@ pub async fn bundled_engine_status(app: AppHandle) -> Result<serde_json::Value, 
                 // ran at a tenth of the speed.
                 "cpuOnly": live.cpu_fallback,
                 "gpuLayers": live.gpu_layers,
+                "gpuLayerMode": live.gpu_layer_mode,
                 // The sanity probe's verdict about THIS process (bug a). The
                 // start call answered it once; the status keeps it, so the
                 // standing line can say why the card was taken away, and
@@ -4134,6 +3985,7 @@ pub async fn bundled_engine_status(app: AppHandle) -> Result<serde_json::Value, 
                 "ctx": null,
                 "cpuOnly": false,
                 "gpuLayers": null,
+                "gpuLayerMode": null,
                 "sanityNote": null,
                 "imageNote": null,
             }),
@@ -4729,6 +4581,9 @@ pub(crate) struct LiveSidecar {
     /// The `-ngl` the process really carries, `None` when it asked for all of
     /// them (`gpu_layers_reported`).
     pub gpu_layers: Option<u32>,
+    /// Automatic fitter versus a typed count; neither sentinel is a measured
+    /// layer count and the UI must not interpret `None` as full offload.
+    pub gpu_layer_mode: &'static str,
     /// The sentence the sanity probe left behind (`BundledEngine::sanity_note`).
     pub sanity_note: Option<&'static str>,
     /// Why this engine runs without its image part, when it does.
@@ -4745,6 +4600,11 @@ pub(crate) fn live_sidecar(slot: &mut Option<BundledEngine>) -> Option<LiveSidec
         ctx: e.ctx,
         cpu_fallback: e.cpu_fallback,
         gpu_layers: gpu_layers_reported(&e.args),
+        gpu_layer_mode: match gpu_layers_in(&e.args) {
+            Some(ENGINE_DECIDES) => "auto",
+            Some(ALL_LAYERS) => "all",
+            _ => "explicit",
+        },
         sanity_note: e.sanity_note,
         image_part_note: e.image_part_note,
         image_part_bytes: image_part_in(&e.args)
@@ -5553,129 +5413,6 @@ mod tests {
         assert!(line.contains("-ngl 999"), "{line}");
     }
 
-    // ── Bugs u and a: how much of a model goes on the card ────────────────
-    //
-    // Every number below is a real one. None of them was measured on the
-    // hardware that reported the bugs: there is no 2 GB and no 8 GB NVIDIA
-    // card on this machine. What these tests prove is the arithmetic and the
-    // direction of every rounding in it, not the effect on a reporter's box.
-
-    /// A 3B Q4_K_M, the size class of the model behind GitHub 128.
-    const THREE_B_Q4: u64 = 2_019_377_696;
-    /// Its layer count.
-    const THREE_B_BLOCKS: u32 = 28;
-    /// A 12B IQ4_XS, the size class behind Discord ticket-0009.
-    const TWELVE_B_IQ4: u64 = 7_300_000_000;
-    const TWELVE_B_BLOCKS: u32 = 40;
-    /// What a 2 GB card, an 8 GB RTX 4060 and a 12 GB RTX 3060 report.
-    const CARD_2_GB: u64 = 2048 * 1024 * 1024;
-    const CARD_8_GB: u64 = 8188 * 1024 * 1024;
-    const CARD_12_GB: u64 = 12288 * 1024 * 1024;
-
-    fn plan(model: u64, blocks: Option<u32>, vram: Option<u64>, ctx: u32) -> OffloadPlan {
-        plan_free(model, blocks, vram, ctx, true)
-    }
-
-    /// R1-3: same as `plan`, with the free-vs-total flag exposed.
-    fn plan_free(model: u64, blocks: Option<u32>, vram: Option<u64>, ctx: u32, free: bool) -> OffloadPlan {
-        plan_offload(&OffloadInputs {
-            model_bytes: model,
-            block_count: blocks,
-            vram_bytes: vram,
-            ctx,
-            free,
-            image_part_bytes: 0,
-        })
-    }
-
-    // ── The image part in the plan (October 2026) ───────────────────────────
-
-    /// Qwen 3.5 9B Q4_K_M and its F16 image part, as the catalog states them.
-    const NINE_B: u64 = 5_627_045_216;
-    const NINE_B_PART: u64 = 918_166_080;
-
-    fn plan_with_part(model: u64, part: u64, blocks: Option<u32>, vram: Option<u64>, ctx: u32) -> OffloadPlan {
-        plan_offload(&OffloadInputs {
-            model_bytes: model,
-            block_count: blocks,
-            vram_bytes: vram,
-            ctx,
-            free: true,
-            image_part_bytes: part,
-        })
-    }
-
-    #[test]
-    fn a_model_and_its_image_part_that_fit_are_loaded_whole_and_together() {
-        // The owner's test machine: a 9B with its part on a 12 GB card.
-        let p = plan_with_part(NINE_B, NINE_B_PART, Some(32), Some(CARD_12_GB), 8192);
-        assert_eq!(p.layers, None);
-        assert!(p.with_image_part);
-        assert!(p.why.contains("image part"), "{}", p.why);
-    }
-
-    #[test]
-    fn a_part_that_would_push_the_model_off_the_card_is_left_out_and_the_model_stays_whole() {
-        // The model with a 32k context needs about 9.9 GB and fits a card with
-        // 10.2 GB free. The part needs 0.9 GB more than that leaves.
-        let free = 10_400 * MIB;
-        let alone = plan_with_part(NINE_B, 0, Some(32), Some(free), 32768);
-        assert_eq!(alone.layers, None, "the model alone has to fit for this case: {}", alone.why);
-        let p = plan_with_part(NINE_B, NINE_B_PART, Some(32), Some(free), 32768);
-        // Every layer on the card, exactly as without a part: nothing moves to
-        // the processor because of the image part.
-        assert_eq!(p.layers, None);
-        assert!(!p.with_image_part);
-        assert!(p.why.contains("without image input"), "{}", p.why);
-        // A smaller context makes room again, which is what the note advises.
-        let smaller = plan_with_part(NINE_B, NINE_B_PART, Some(32), Some(free), 8192);
-        assert!(smaller.with_image_part);
-        assert_eq!(smaller.layers, None);
-    }
-
-    #[test]
-    fn a_model_larger_than_the_card_keeps_its_part_and_pays_for_it_in_layers() {
-        // A 27B at 16.5 GB on a 12 GB card is shared with the processor
-        // either way. The part stays and costs layers, it is not dropped.
-        let model = 17_716_740_096_u64;
-        let part = 927_607_488_u64;
-        let without = plan_with_part(model, 0, Some(64), Some(CARD_12_GB), 8192);
-        let with = plan_with_part(model, part, Some(64), Some(CARD_12_GB), 8192);
-        assert!(with.with_image_part);
-        let (a, b) = (without.layers.unwrap(), with.layers.unwrap());
-        assert!(b < a && b > 0, "the part costs layers and leaves some: {a} without, {b} with");
-        assert!(with.why.contains("set aside for the image part"), "{}", with.why);
-    }
-
-    #[test]
-    fn a_card_that_cannot_hold_the_part_at_all_loads_without_it() {
-        // 2 GB card, 512 MiB reserve: 1.5 GB of budget, and the part of the
-        // Qwen3-VL 8B is 1.1 GB. It "fits" the budget, so it stays.
-        let vl = plan_with_part(5_000_000_000, 1_159_030_336, Some(36), Some(CARD_2_GB), 8192);
-        assert!(vl.with_image_part);
-        // A 5.4 GB part (Mistral Medium 3.5) does not.
-        let big = plan_with_part(45_000_000_000, 5_356_846_528, Some(88), Some(CARD_2_GB), 8192);
-        assert!(!big.with_image_part);
-        assert!(big.why.contains("does not fit at all"), "{}", big.why);
-        assert!(big.layers.is_some());
-    }
-
-    #[test]
-    fn a_machine_nothing_measured_loads_the_part_as_before() {
-        let p = plan_with_part(NINE_B, NINE_B_PART, Some(32), None, 8192);
-        assert_eq!(p.layers, None);
-        assert!(p.with_image_part);
-    }
-
-    #[test]
-    fn a_model_without_a_part_plans_exactly_as_it_always_did() {
-        for (vram, ctx) in [(Some(CARD_2_GB), 4096), (Some(CARD_8_GB), 8192), (Some(CARD_12_GB), 32768), (None, 8192)] {
-            let a = plan(NINE_B, Some(32), vram, ctx);
-            assert!(a.with_image_part, "nothing to drop means nothing is dropped");
-            assert_eq!(a.layers, plan_with_part(NINE_B, 0, Some(32), vram, ctx).layers);
-        }
-    }
-
     #[test]
     fn a_death_on_the_image_part_is_told_from_a_death_on_the_model() {
         // What llama.cpp prints when the part is the problem.
@@ -5714,163 +5451,23 @@ mod tests {
     }
 
     #[test]
-    fn a_model_that_fits_is_left_exactly_as_it_was() {
-        // The rule this whole change lives under. A 3B on a 12 GB card has
-        // room for its weights, its cache and the driver, so nothing about
-        // that start may move.
-        let p = plan(THREE_B_Q4, Some(THREE_B_BLOCKS), Some(CARD_12_GB), 8192);
-        assert_eq!(p.layers, None, "{}", p.why);
-        assert!(p.why.contains("every layer is requested"), "{}", p.why);
-    }
-
-    /// R1-3 table test: the SAME numbers, once with `free: true` (a measured
-    /// `nvidia-smi` reading) and once with `free: false` (`detect_gpus`'
-    /// total-capacity fallback). The sentence must differ and the total-
-    /// capacity run must never ask for MORE layers than the measured-free run
-    ///, a card that has not been shown to be empty is the case where asking
-    /// for too much costs the start.
-    #[test]
-    fn r1_3_a_total_capacity_reading_never_outbids_a_measured_free_one() {
-        let cases: &[(u64, Option<u32>, u64, u32)] = &[
-            (THREE_B_Q4, Some(THREE_B_BLOCKS), CARD_12_GB, 8192),
-            (TWELVE_B_IQ4, Some(TWELVE_B_BLOCKS), CARD_8_GB, 8192),
-            (THREE_B_Q4, Some(THREE_B_BLOCKS), CARD_2_GB, 8192),
-        ];
-        for &(model, blocks, vram, ctx) in cases {
-            let free = plan_free(model, blocks, Some(vram), ctx, true);
-            let total = plan_free(model, blocks, Some(vram), ctx, false);
-
-            assert_ne!(free.why, total.why, "the two readings must not read the same on screen");
-            assert!(free.why.contains("are free"), "{}", free.why);
-            assert!(
-                total.why.contains("in total (actual free memory was not measured)"),
-                "{}",
-                total.why
-            );
-
-            let free_layers = free.layers.unwrap_or(ALL_LAYERS);
-            let total_layers = total.layers.unwrap_or(ALL_LAYERS);
-            assert!(
-                total_layers <= free_layers,
-                "an unmeasured total-capacity reading asked for MORE layers ({total_layers}) than \
-                 the measured-free reading ({free_layers}) on the same {vram} bytes, \
-                 free: {}\ntotal: {}",
-                free.why,
-                total.why
-            );
+    fn automatic_offload_uses_the_engine_fitter_with_fixed_context_and_cache_types() {
+        // No app-side GPU vendor/free-memory branch: all bundled targets use
+        // the same pinned fitter, including NVIDIA and Metal unified memory.
+        for model in ["dense-llama.gguf", "qwen35-hybrid.gguf", "moe.gguf"] {
+            let tuning = EngineTuning { ctx: 262144, cache_type_k: "q8_0".into(),
+                cache_type_v: "q4_0".into(), flash_attn: "on".into(), ..Default::default() };
+            let args = build_server_args(model, &tuning, 8127, None, Some("vision.gguf"), automatic_gpu_layers(&tuning));
+            for (flag, value) in [("-ngl", "auto"), ("--ctx-size", "262144"),
+                ("-ctk", "q8_0"), ("-ctv", "q4_0"), ("-fa", "on"), ("--mmproj", "vision.gguf")] {
+                assert!(args.windows(2).any(|w| w[0] == flag && w[1] == value), "{args:?}");
+            }
         }
-    }
-
-    #[test]
-    fn a_card_nothing_measured_keeps_todays_behaviour() {
-        // Apple, a machine without vendor tools, a wedged driver. `None` is a
-        // real answer and it has to mean "carry on as before", or this change
-        // would take the graphics card away from everyone it cannot see.
-        let p = plan(TWELVE_B_IQ4, Some(TWELVE_B_BLOCKS), None, 8192);
-        assert_eq!(p.layers, None);
-        assert!(p.why.contains("no probe measured"), "{}", p.why);
-    }
-
-    #[test]
-    fn a_twelve_b_on_an_eight_gb_card_gets_a_layer_count_instead_of_all_of_them() {
-        // Discord ticket-0009. 7.3 GB of weights plus 1.25 GB of cache at 8192
-        // tokens plus the driver is more than the 8 GB board has, so the whole
-        // model was never going to fit and `-ngl 999` was asking for it anyway.
-        let p = plan(TWELVE_B_IQ4, Some(TWELVE_B_BLOCKS), Some(CARD_8_GB), 8192);
-        assert_eq!(p.layers, Some(37), "{}", p.why);
-        assert!(p.why.contains("40 layers the GGUF header names"), "{}", p.why);
-
-        // And what it chose really does fit in what it measured.
-        let per_layer = TWELVE_B_IQ4 / TWELVE_B_BLOCKS as u64 + 4 * 1024 * 1024 * 8;
-        assert!(37 * per_layer + VRAM_OVERHEAD_BYTES <= CARD_8_GB);
-        assert!(38 * per_layer + VRAM_OVERHEAD_BYTES > CARD_8_GB, "one layer short of the truth");
-    }
-
-    #[test]
-    fn the_counter_check_the_old_code_would_have_sent_all_of_them() {
-        // The same 8 GB case with the new decision switched off, which is what
-        // `auto_ngl: None` is: the argv is the one that shipped, `-ngl 999`.
-        // Without this the test above proves an arithmetic nobody asked for.
-        let tuning = EngineTuning::default();
-        assert_eq!(tuning.gpu_layers, -1, "the default is auto");
-        let old = build_server_args("/models/nemo-12b.gguf", &tuning, 8127, None, None, None);
-        assert_eq!(gpu_layers_in(&old), Some(999));
-
-        let plan = plan(TWELVE_B_IQ4, Some(TWELVE_B_BLOCKS), Some(CARD_8_GB), 8192);
-        let now = build_server_args("/models/nemo-12b.gguf", &tuning, 8127, None, None, plan.layers);
-        assert_eq!(gpu_layers_in(&now), Some(37));
-        // Nothing else about the argv moved.
-        assert_eq!(argv_without_gpu_layers(&old), argv_without_gpu_layers(&now));
-    }
-
-    #[test]
-    fn a_three_b_on_a_two_gb_card_stops_asking_for_the_whole_model() {
-        // GitHub 128 and the two Discord reports. 2 GB of card, about 2 GB of
-        // weights, and a cache on top.
-        let p = plan(THREE_B_Q4, Some(THREE_B_BLOCKS), Some(CARD_2_GB), 8192);
-        assert_eq!(p.layers, Some(15), "{}", p.why);
-        let per_layer = THREE_B_Q4 / THREE_B_BLOCKS as u64 + 4 * 1024 * 1024 * 8;
-        assert!(15 * per_layer + VRAM_OVERHEAD_BYTES <= CARD_2_GB);
-        assert!(16 * per_layer + VRAM_OVERHEAD_BYTES > CARD_2_GB);
-    }
-
-    #[test]
-    fn a_smaller_context_pays_for_fewer_layers_of_cache_and_buys_more_layers() {
-        // The reserve is derived from the context, so the same card and the
-        // same model at 2048 tokens has room for more of the model.
-        let wide = plan(THREE_B_Q4, Some(THREE_B_BLOCKS), Some(CARD_2_GB), 8192);
-        let narrow = plan(THREE_B_Q4, Some(THREE_B_BLOCKS), Some(CARD_2_GB), 2048);
-        assert_eq!(narrow.layers, Some(20), "{}", narrow.why);
-        assert!(narrow.layers > wide.layers);
-    }
-
-    #[test]
-    fn a_header_without_a_layer_count_guesses_low_and_says_that_it_guessed() {
-        // The fallback. 16 assumed layers against a model that really has 28
-        // buys 10 layers where the truth would have bought 15, and 10 layers
-        // of a 28 layer model really do fit. The guess is low ON PURPOSE: the
-        // count only multiplies the fraction that fits, so guessing under the
-        // real block count can only ask for too few layers, never too many.
-        let guessed = plan(THREE_B_Q4, None, Some(CARD_2_GB), 8192);
-        assert_eq!(guessed.layers, Some(10), "{}", guessed.why);
-        assert!(guessed.why.contains("carries no block count"), "{}", guessed.why);
-
-        let real_per_layer = THREE_B_Q4 / THREE_B_BLOCKS as u64 + 4 * 1024 * 1024 * 8;
-        assert!(10 * real_per_layer + VRAM_OVERHEAD_BYTES <= CARD_2_GB, "the guess overshot");
-
-        // A header that answers zero is a header that answered nothing.
-        assert_eq!(plan(THREE_B_Q4, Some(0), Some(CARD_2_GB), 8192), guessed);
-    }
-
-    #[test]
-    fn a_card_far_too_small_ends_up_on_the_processor_rather_than_at_a_bad_number() {
-        // 512 MiB of memory cannot hold the driver's own reserve, let alone a
-        // layer. Zero is the right answer and `saturating_sub` is why it is
-        // not a panic.
-        let p = plan(THREE_B_Q4, Some(THREE_B_BLOCKS), Some(256 * 1024 * 1024), 8192);
-        assert_eq!(p.layers, Some(0), "{}", p.why);
-    }
-
-    #[test]
-    fn gh156_auto_on_a_card_only_its_total_is_known_of_goes_to_the_engine() {
-        use crate::commands::gpu::VramReading;
-        // The RX 5700 of GH #156: Vulkan, no nvidia-smi, the card's total out
-        // of sysfs or the registry. The engine measures, LU does not guess.
-        let total = VramReading { bytes: 8176 * 1024 * 1024, free: false, source: "detect_gpus" };
-        assert!(engine_fits_layers(Some(&total), false), "an AMD or Intel card on Windows or Linux");
-        // A measured-free reading keeps the plan, and so does the Mac.
-        let measured = VramReading { bytes: 7000 * 1024 * 1024, free: true, source: "nvidia-smi" };
-        assert!(!engine_fits_layers(Some(&measured), false), "nvidia-smi measured it");
-        assert!(!engine_fits_layers(Some(&total), true), "the Mac keeps its plan");
-        // Nothing measured at all: every layer, as it always was.
-        assert!(!engine_fits_layers(None, false));
-
-        let auto = EngineTuning::default();
-        assert_eq!(auto.gpu_layers, -1);
-        let args = build_server_args("/m.gguf", &auto, 8127, None, None, Some(ENGINE_DECIDES));
-        let at = args.iter().position(|a| a == "-ngl").expect("-ngl in argv");
-        assert_eq!(args[at + 1], "auto", "llama-server gets its own word, not a number LU made up");
-        assert!(!args.iter().any(|a| a == "--fit"), "fit is on by default in the pinned engine");
+        for count in [0, 20, 999] {
+            let tuning = EngineTuning { gpu_layers: count, ..Default::default() };
+            assert_eq!(automatic_gpu_layers(&tuning), None);
+            assert_eq!(gpu_layers_in(&build_server_args("m.gguf", &tuning, 8127, None, None, automatic_gpu_layers(&tuning))), Some(count as u32));
+        }
     }
 
     #[test]
@@ -6136,7 +5733,7 @@ mod tests {
     #[test]
     fn a_typed_layer_count_is_still_dropped_when_the_answer_is_unreadable() {
         // An expert who typed 20 into Settings gets 20 on the first start
-        // (plan_offload is not even run for him), but a card that answers in
+        // (the automatic fitter is not requested for him), but a card that answers in
         // question marks is not a settings question. The restart takes it out
         // for him too, and the note says so.
         let typed = EngineTuning { gpu_layers: 20, flash_attn: "off".into(), ..Default::default() };
@@ -7567,7 +7164,7 @@ mod tests {
         // Rueckfall ueberhaupt fehlen konnte.
         let src = include_str!("engine.rs");
         let wechsel = src
-            .split("fn start_bundled_engine_blocking(")
+            .split("fn start_bundled_engine_locked(")
             .nth(1)
             .expect("the switch is gone")
             .split("\nfn ")
@@ -8452,11 +8049,12 @@ mod tests {
             assert!(asked < at, "the stop is asked about after `{later}`");
         }
 
-        let switch = body_of("fn start_bundled_engine_blocking(");
-        let cleared = switch.find("engine_stop_requested.store(false").expect("a start no longer clears an old stop");
-        let gate = switch.find("start_gate(").expect("the start gate is gone");
-        let first_stop = switch.find("stop_engine_locked(state);").expect("no stop");
-        assert!(gate < cleared && cleared < first_stop, "an old stop is not cleared under the gate, before the work begins");
+        let wrapper = body_of("fn start_bundled_engine_blocking(");
+        let cleared = wrapper.find("engine_stop_requested.store(false").expect("a start no longer clears an old stop");
+        let gate = wrapper.find("start_gate(").expect("the start gate is gone");
+        let work = wrapper.find("start_engine_and_remember(").expect("the serialized start is gone");
+        assert!(gate < cleared && cleared < work, "an old stop is not cleared under the gate, before the work begins");
+        let switch = body_of("fn start_bundled_engine_locked(");
         // Whether the previous model comes back is decided in one place, and
         // `settle_switch_*` below run that place.
         let handed_over = switch.find("settle_switch(").expect("the switch no longer ends in settle_switch");
@@ -8936,7 +8534,7 @@ srv    llama_server: exiting due to model loading error";
         // und war immer gruen. Genau die Falle, die eine Gegenprobe aufdeckt:
         // die Vorpruefung entfernen und nichts wurde rot.
         let wechsel = include_str!("engine.rs")
-            .split("fn start_bundled_engine_blocking(")
+            .split("fn start_bundled_engine_locked(")
             .nth(1)
             .expect("the switch is gone")
             .split("\nfn ")
@@ -9571,3 +9169,7 @@ mod diag_tests {
         assert_eq!(pick_save_slot(&serde_json::json!(null)), 0);
     }
 }
+
+#[cfg(test)]
+#[path = "engine_remote_recovery_tests.rs"]
+mod remote_recovery_tests;
