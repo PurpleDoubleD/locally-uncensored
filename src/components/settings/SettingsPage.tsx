@@ -86,7 +86,7 @@ import { userAgentProblem } from '../../lib/search-user-agent'
 import { SEARCH_PROVIDERS, normalizeSearchProvider } from '../../lib/search-providers'
 import { ContentPolicySettings } from './ContentPolicySettings'
 import { isLmStudioProvider } from '../../lib/hf-to-provider'
-import { TEMPERATURE_MAX } from '../../lib/sampling'
+import { TEMPERATURE_MAX, TEMPERATURE_HELP, TEMPERATURE_HELP_LABEL } from '../../lib/sampling'
 import { HighTemperatureWarning } from '../chat/HighTemperatureWarning'
 
 // ── User profile picture (Appearance) ───────────────────────────
@@ -1987,7 +1987,7 @@ export function SettingsPage() {
           </Section>
 
           <Section title="Generation">
-            <SliderControl label="Temperature" value={settings.temperature} min={0} max={TEMPERATURE_MAX} step={0.1} onChange={(v) => updateSettings({ temperature: v })} />
+            <SliderControl label="Temperature" help={{ text: TEMPERATURE_HELP, label: TEMPERATURE_HELP_LABEL }} value={settings.temperature} min={0} max={TEMPERATURE_MAX} step={0.1} onChange={(v) => updateSettings({ temperature: v })} />
             {/* A33: every chat that never moved its own slider follows this
                 one, so a high value here turns all of them into noise. */}
             <HighTemperatureWarning

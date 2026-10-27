@@ -3,7 +3,8 @@ import { v4 as uuid } from 'uuid'
 import { GlowButton } from '../ui/GlowButton'
 import { useSettingsStore } from '../../stores/settingsStore'
 import type { SamplerValues } from '../../types/settings'
-import { clampSampling, TEMPERATURE_MAX } from '../../lib/sampling'
+import { clampSampling, TEMPERATURE_MAX, TEMPERATURE_HELP, TEMPERATURE_HELP_LABEL } from '../../lib/sampling'
+import { HelpMark } from '../ui/HelpMark'
 import { HighTemperatureWarning } from '../chat/HighTemperatureWarning'
 import { DEFAULT_NOTE_DEPTH, MAX_NOTE_DEPTH, clampNoteDepth } from '../../lib/persona-note'
 
@@ -87,6 +88,7 @@ export function SystemPromptEditor({
   const [prompt, setPrompt] = useState(initialPrompt)
   const [sampling, setSampling] = useState<SamplingDraft>(() => draftOf(initialSampling))
   const [note, setNote] = useState(initialNote)
+  const [tempHelp, setTempHelp] = useState(false)
   const [noteDepth, setNoteDepth] = useState(String(initialNoteDepth ?? DEFAULT_NOTE_DEPTH))
   const isEditing = !!editingId
 
@@ -136,7 +138,18 @@ export function SystemPromptEditor({
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-3 gap-y-1.5">
           {PERSONA_SAMPLING_FIELDS.map((f) => (
             <label key={f.key} className="flex flex-col gap-0.5 text-[0.6rem] text-gray-400">
-              <span>{f.label}</span>
+              <span className="flex items-center gap-1">
+                {f.label}
+                {f.key === 'temperature' && (
+                  <HelpMark
+                    text={TEMPERATURE_HELP}
+                    label={TEMPERATURE_HELP_LABEL}
+                    open={tempHelp}
+                    onToggle={() => setTempHelp((v) => !v)}
+                    testId="temperature-help"
+                  />
+                )}
+              </span>
               <input
                 type="number"
                 inputMode="decimal"
@@ -152,6 +165,9 @@ export function SystemPromptEditor({
             </label>
           ))}
         </div>
+        {tempHelp && (
+          <p className="mt-1.5 t-micro leading-relaxed text-gray-500" data-testid="temperature-help-text">{TEMPERATURE_HELP}</p>
+        )}
         <div className="mt-1.5">
           <HighTemperatureWarning
             temperature={sampling.temperature === undefined || sampling.temperature === '' ? undefined : Number(sampling.temperature)}

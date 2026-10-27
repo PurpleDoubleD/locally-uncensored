@@ -6,9 +6,10 @@ import { useChatStore } from '../../stores/chatStore'
 import { useAgentModeStore } from '../../stores/agentModeStore'
 import { HINWEIS_TEXT } from '../../lib/hinweis'
 import { useDismissOnEscape } from '../../hooks/useDismissOnEscape'
-import { SAMPLING_DEFAULTS, TEMPERATURE_MAX, AGENT_TEMPERATURE_MAX, effectiveSampling, samplingIsChanged, hasOwnSampling, isHighTemperature } from '../../lib/sampling'
+import { SAMPLING_DEFAULTS, TEMPERATURE_MAX, AGENT_TEMPERATURE_MAX, TEMPERATURE_HELP, TEMPERATURE_HELP_LABEL, effectiveSampling, samplingIsChanged, hasOwnSampling, isHighTemperature } from '../../lib/sampling'
 import { resetTemperatureToDefault } from '../../lib/temperature-reset'
 import { HighTemperatureWarning } from './HighTemperatureWarning'
+import { HelpMark } from '../ui/HelpMark'
 import type { SamplingOverrides } from '../../lib/sampling'
 import { isGroupChat } from '../../lib/group-chat'
 import { speakerSamplingLines, type SpeakerSamplingLine } from '../../lib/speaker-sampling-lines'
@@ -162,6 +163,7 @@ function ThinkBudgetRow() {
 
 export function SamplingControls() {
   const [open, setOpen] = useState(false)
+  const [tempHelp, setTempHelp] = useState(false)
   const [draft, setDraft] = useState<string | null>(null)
   const wrapRef = useRef<HTMLDivElement>(null)
   const panelRef = useRef<HTMLDivElement>(null)
@@ -352,8 +354,20 @@ export function SamplingControls() {
           </div>
 
           {FIELDS.map((f) => (
-            <label key={f.key} className="flex items-center gap-2">
-              <span className="w-20 shrink-0 text-gray-400">{f.label}</span>
+            <div key={f.key}>
+            <label className="flex items-center gap-2">
+              <span className="w-20 shrink-0 flex items-center gap-1 text-gray-400">
+                {f.label}
+                {f.key === 'temperature' && (
+                  <HelpMark
+                    text={TEMPERATURE_HELP}
+                    label={TEMPERATURE_HELP_LABEL}
+                    open={tempHelp}
+                    onToggle={() => setTempHelp((v) => !v)}
+                    testId="temperature-help"
+                  />
+                )}
+              </span>
               <input
                 type="range"
                 className="min-w-0 flex-1"
@@ -366,6 +380,10 @@ export function SamplingControls() {
               />
               <span className="w-10 shrink-0 text-right tabular-nums text-gray-300">{value[f.key]}</span>
             </label>
+            {f.key === 'temperature' && tempHelp && (
+              <p className="mt-1 leading-relaxed text-gray-500" data-testid="temperature-help-text">{TEMPERATURE_HELP}</p>
+            )}
+            </div>
           ))}
 
           <HighTemperatureWarning
