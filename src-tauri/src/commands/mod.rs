@@ -7,6 +7,8 @@ pub mod character_files;
 #[cfg(desktop)]
 pub mod cloud_file;
 pub mod repo_map;
+// Which attention flag a ComfyUI that LU starts gets (Comfy Kitchen, flash).
+pub mod comfy_attention;
 pub mod comfy_folders;
 pub mod comfy_user_paths;
 pub mod comfy_ws;
@@ -80,6 +82,10 @@ pub mod remote;
 pub mod remote_chats;
 pub mod remote_create;
 pub mod video_thumb;
+// Colour settle across the seams of a long video, on ComfyUI's Python.
+// Desktop only: it starts a process.
+#[cfg(desktop)]
+pub mod video_settle;
 pub mod win_firewall;
 pub mod remote_sealed;
 pub mod runtime_folder;

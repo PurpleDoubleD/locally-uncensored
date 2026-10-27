@@ -337,8 +337,11 @@ pub fn install_comfyui(
         println!("[Install] Cloning ComfyUI to {:?}", target_dir);
         update("downloading", "Step 1/4: Downloading ComfyUI repository...");
 
+        // 3.0.9: the release LU tested (comfy_pin.rs), not whatever master
+        // is at this minute. Full history, so a later pin is a local move.
         let mut cmd = crate::process_util::foreign_system_command("git");
-        cmd.args(["clone", "https://github.com/comfyanonymous/ComfyUI.git"])
+        cmd.args(["clone"])
+            .args(super::comfy_pin::pinned_clone_args())
             .arg(&target_dir)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
@@ -377,7 +380,16 @@ pub fn install_comfyui(
 
         if clone_exit.success() {
             println!("[Install] Git clone successful");
-            update("installing", "Repository cloned successfully.");
+            update(
+                "installing",
+                &format!("Repository cloned successfully (ComfyUI {}).", super::comfy_pin::COMFYUI_PINNED_TAG),
+            );
+            // The marker that lets Update keep exactly this folder on the pin
+            // later on, and nothing the customer brought along. Not fatal:
+            // an unmarked install still works, it updates the old way.
+            if let Err(e) = super::comfy_pin::mark_lu_installed(&target_dir) {
+                println!("[Install] Could not mark the ComfyUI as installed by LU: {e}");
+            }
         } else {
             let mut stderr = String::new();
             if let Some(mut e) = clone_child.stderr.take() {
@@ -396,11 +408,29 @@ pub fn install_comfyui(
                     return;
                 }
                 println!("[Install] ComfyUI directory already exists, updating...");
-                update("installing", "ComfyUI already exists, pulling latest...");
                 if cancelled() {
                     update("cancelled", "Install cancelled.");
                     return;
                 }
+                // A ComfyUI LU cloned earlier sits on a tag without a branch,
+                // so a pull has nothing to update: it is set to the pin
+                // instead. Everything else keeps the pull it always got.
+                if super::comfy_pin::is_lu_installed(&target_dir) {
+                    let tag = super::comfy_pin::COMFYUI_PINNED_TAG;
+                    update("installing", &format!("ComfyUI already exists, setting it to the tested release {tag}..."));
+                    match super::comfy_pin::checkout_pinned_tag(&target_dir, tag, true) {
+                        Ok(_) => update("installing", &format!("ComfyUI is on {tag}.")),
+                        Err(e) => update(
+                            "installing",
+                            &format!(
+                                "Could not set ComfyUI to {tag}, continuing with the ComfyUI already \
+                                 on disk.\n{}",
+                                e.chars().take(400).collect::<String>()
+                            ),
+                        ),
+                    }
+                } else {
+                update("installing", "ComfyUI already exists, pulling latest...");
                 let mut pull = crate::process_util::foreign_system_command("git");
                 pull.args(["pull"]).current_dir(&target_dir)
                     .stdout(Stdio::piped()).stderr(Stdio::piped());
@@ -440,6 +470,7 @@ pub fn install_comfyui(
                             ),
                         );
                     }
+                }
                 }
             } else {
                 let err = format!("Git clone failed: {}", stderr);

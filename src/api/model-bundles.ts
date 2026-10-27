@@ -131,6 +131,22 @@ const QWEN21_VAE: DiscoverModel = {
   sha256: 'bb21f7473051e1ac368515dd3f2e15cd44d7a11748ee8823e1ddca3e4876b7c9',
 }
 
+// The Wan VAE and text encoder every Wan 2.1 / 2.2 14B bundle loads.
+const WAN21_VAE_FILE: DiscoverModel = {
+  name: 'Wan 2.1 VAE',
+  description: 'Required video encoder/decoder.',
+  pulls: '', tags: ['VAE', '250 MB'], updated: '',
+  downloadUrl: 'https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/vae/wan_2.1_vae.safetensors',
+  filename: 'wan_2.1_vae.safetensors', subfolder: 'vae', sizeGB: 0.24,
+}
+const WAN_UMT5_FILE: DiscoverModel = {
+  name: 'Wan CLIP (UMT5-XXL FP8)',
+  description: 'Required text encoder · shared with every Wan model, skipped if already installed.',
+  pulls: '', tags: ['CLIP', '6.3 GB'], updated: '',
+  downloadUrl: 'https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors',
+  filename: 'umt5_xxl_fp8_e4m3fn_scaled.safetensors', subfolder: 'text_encoders', sizeGB: 6.27,
+}
+
 // ─── Image Model Bundles ───
 
 export function getImageBundles(): ModelBundle[] {
@@ -1023,6 +1039,150 @@ export function getVideoBundles(): ModelBundle[] {
           pulls: '', tags: ['CLIP', '4.9 GB'], updated: '',
           downloadUrl: 'https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors',
           filename: 'umt5_xxl_fp8_e4m3fn_scaled.safetensors', subfolder: 'text_encoders', sizeGB: 6.3,
+        },
+      ],
+    },
+    // Wan 2.2 A14B, fast (B18, 3.0.9). The 14B pair as QuantStack's GGUF
+    // (Q4_K_S, the quant A34 ran on the 12 GB box) plus lightx2v's own 4 step
+    // speed LoRAs, both Apache-2.0 like Wan itself. Sizes and SHA-256 are the
+    // Hugging Face LFS values, read from the tree API on 2026-10-27. Fast mode
+    // (lib/wan-speed) runs 2 + 2 steps at cfg 1; Quality runs the official
+    // 20 step template without the LoRAs.
+    {
+      name: 'Wan 2.2 A14B · Image to Video, Fast (4 steps)',
+      description: 'The full Wan 2.2 14B image to video pair as GGUF, with the lightx2v 4 step LoRAs: a 5 s clip in minutes on a 12 GB card. Continues clips up to 30 s with Extend Video. Quality mode (20 steps) stays one switch away.',
+      tags: ['Wan 2.2', '14B', 'I2V', 'GGUF', 'Fast', 'Long video'],
+      uncensored: true,
+      i2v: true,
+      totalSizeGB: 24.1,
+      vramRequired: '10-16 GB',
+      workflow: 'wan',
+      tier: 'standard',
+      customNodes: ['gguf'],
+      url: 'https://huggingface.co/lightx2v/Wan2.2-Distill-Loras',
+      files: [
+        {
+          name: 'Wan 2.2 A14B I2V High Noise Q4_K_S (GGUF)',
+          description: 'First half of the image to video pair: lays out the motion.',
+          pulls: '', tags: ['Model', '8.15 GB'], updated: 'New',
+          downloadUrl: 'https://huggingface.co/QuantStack/Wan2.2-I2V-A14B-GGUF/resolve/main/HighNoise/Wan2.2-I2V-A14B-HighNoise-Q4_K_S.gguf',
+          filename: 'Wan2.2-I2V-A14B-HighNoise-Q4_K_S.gguf', subfolder: 'diffusion_models', sizeGB: 8.15,
+          sizeBytes: 8748151296,
+          sha256: '8fc5f726ccf1214e43c6a599bdef1e63daf7fab06e71fb74081416c4b9ce200b',
+        },
+        {
+          name: 'Wan 2.2 A14B I2V Low Noise Q4_K_S (GGUF)',
+          description: 'Second half: finishes the detail.',
+          pulls: '', tags: ['Model', '8.15 GB'], updated: 'New',
+          downloadUrl: 'https://huggingface.co/QuantStack/Wan2.2-I2V-A14B-GGUF/resolve/main/LowNoise/Wan2.2-I2V-A14B-LowNoise-Q4_K_S.gguf',
+          filename: 'Wan2.2-I2V-A14B-LowNoise-Q4_K_S.gguf', subfolder: 'diffusion_models', sizeGB: 8.15,
+          sizeBytes: 8748151296,
+          sha256: '54e2313ef7fbb169e72ab1d7cecdc90a04db01097c86f9f39097b8caacea50fb',
+        },
+        {
+          name: 'lightx2v 4 step LoRA, I2V high noise',
+          description: 'Speed LoRA for the high noise half (lightx2v, Apache-2.0).',
+          pulls: '', tags: ['LoRA', '0.59 GB'], updated: 'New',
+          downloadUrl: 'https://huggingface.co/lightx2v/Wan2.2-Distill-Loras/resolve/main/wan2.2_i2v_A14b_high_noise_lora_rank64_lightx2v_4step_1022.safetensors',
+          filename: 'wan2.2_i2v_A14b_high_noise_lora_rank64_lightx2v_4step_1022.safetensors', subfolder: 'loras', sizeGB: 0.59,
+          sizeBytes: 634645944,
+          sha256: '887c3bdeb74e83859c920438e16ca31f39ab18ce189abc5f0e36f8348c5bbb19',
+        },
+        {
+          name: 'lightx2v 4 step LoRA, I2V low noise',
+          description: 'Speed LoRA for the low noise half (lightx2v, Apache-2.0).',
+          pulls: '', tags: ['LoRA', '0.69 GB'], updated: 'New',
+          downloadUrl: 'https://huggingface.co/lightx2v/Wan2.2-Distill-Loras/resolve/main/wan2.2_i2v_A14b_low_noise_lora_rank64_lightx2v_4step_1022.safetensors',
+          filename: 'wan2.2_i2v_A14b_low_noise_lora_rank64_lightx2v_4step_1022.safetensors', subfolder: 'loras', sizeGB: 0.69,
+          sizeBytes: 739472104,
+          sha256: '8833bd4fd7c8eabebf0bc8ee5cfaf47f4f310ce116928a02c1adf8941dd4b0f1',
+        },
+        WAN21_VAE_FILE,
+        WAN_UMT5_FILE,
+      ],
+    },
+    {
+      name: 'Wan 2.2 A14B · Text to Video, Fast (4 steps)',
+      description: 'The full Wan 2.2 14B text to video pair as GGUF, with the lightx2v 4 step LoRAs. For clips past 5 s, add the image to video bundle: later sections continue from the last frames.',
+      tags: ['Wan 2.2', '14B', 'T2V', 'GGUF', 'Fast'],
+      uncensored: true,
+      totalSizeGB: 23.9,
+      vramRequired: '10-16 GB',
+      workflow: 'wan',
+      tier: 'standard',
+      customNodes: ['gguf'],
+      url: 'https://huggingface.co/lightx2v/Wan2.2-Distill-Loras',
+      files: [
+        {
+          name: 'Wan 2.2 A14B T2V High Noise Q4_K_S (GGUF)',
+          description: 'First half of the text to video pair: lays out the motion.',
+          pulls: '', tags: ['Model', '8.15 GB'], updated: 'New',
+          downloadUrl: 'https://huggingface.co/QuantStack/Wan2.2-T2V-A14B-GGUF/resolve/main/HighNoise/Wan2.2-T2V-A14B-HighNoise-Q4_K_S.gguf',
+          filename: 'Wan2.2-T2V-A14B-HighNoise-Q4_K_S.gguf', subfolder: 'diffusion_models', sizeGB: 8.15,
+          sizeBytes: 8746512896,
+          sha256: '4943639d985db2aba0e6038daaca3cd244b6c86175d7ad8bf92182f4b2251bbf',
+        },
+        {
+          name: 'Wan 2.2 A14B T2V Low Noise Q4_K_S (GGUF)',
+          description: 'Second half: finishes the detail.',
+          pulls: '', tags: ['Model', '8.15 GB'], updated: 'New',
+          downloadUrl: 'https://huggingface.co/QuantStack/Wan2.2-T2V-A14B-GGUF/resolve/main/LowNoise/Wan2.2-T2V-A14B-LowNoise-Q4_K_S.gguf',
+          filename: 'Wan2.2-T2V-A14B-LowNoise-Q4_K_S.gguf', subfolder: 'diffusion_models', sizeGB: 8.15,
+          sizeBytes: 8746512896,
+          sha256: '55439a8ee4c56c609f1754581dafe4408dbffdc14d07c60f5921051794cd3c99',
+        },
+        {
+          name: 'lightx2v 4 step LoRA, T2V high noise',
+          description: 'Speed LoRA for the high noise half (lightx2v, Apache-2.0).',
+          pulls: '', tags: ['LoRA', '0.57 GB'], updated: 'New',
+          downloadUrl: 'https://huggingface.co/lightx2v/Wan2.2-Distill-Loras/resolve/main/wan2.2_t2v_A14b_high_noise_lora_rank64_lightx2v_4step_1217.safetensors',
+          filename: 'wan2.2_t2v_A14b_high_noise_lora_rank64_lightx2v_4step_1217.safetensors', subfolder: 'loras', sizeGB: 0.57,
+          sizeBytes: 613518320,
+          sha256: '89003385f8a9d53ba58fd6ede647fdc90292e8568a54683fcfe6db5556a31769',
+        },
+        {
+          name: 'lightx2v 4 step LoRA, T2V low noise',
+          description: 'Speed LoRA for the low noise half (lightx2v, Apache-2.0).',
+          pulls: '', tags: ['LoRA', '0.57 GB'], updated: 'New',
+          downloadUrl: 'https://huggingface.co/lightx2v/Wan2.2-Distill-Loras/resolve/main/wan2.2_t2v_A14b_low_noise_lora_rank64_lightx2v_4step_1217.safetensors',
+          filename: 'wan2.2_t2v_A14b_low_noise_lora_rank64_lightx2v_4step_1217.safetensors', subfolder: 'loras', sizeGB: 0.57,
+          sizeBytes: 613518320,
+          sha256: '4df7c206f3189472da2f92c0a42dcf308f04433d9c14302d08d56e99a3f51322',
+        },
+        WAN21_VAE_FILE,
+        WAN_UMT5_FILE,
+      ],
+    },
+    // Speed LoRAs for the Wan 2.1 14B models LU already offers (B18, 3.0.9).
+    // Same lightx2v distill as the A14B pair; Fast mode in Create uses them.
+    {
+      name: 'Wan 2.1 14B Speed LoRAs · 4 Steps',
+      description: 'Add-on for Wan 2.1 14B: 4 steps at cfg 1 instead of 30 at cfg 6. Create picks it up by itself in Fast mode.',
+      tags: ['Wan 2.1', 'LoRA', 'Addon', 'Fast'],
+      totalSizeGB: 1.28,
+      vramRequired: '12+ GB',
+      addonFor: 'Wan 2.1 14B',
+      workflow: 'wan',
+      tier: 'older',
+      url: 'https://huggingface.co/lightx2v/Wan2.1-Distill-Loras',
+      files: [
+        {
+          name: 'lightx2v 4 step LoRA, Wan 2.1 T2V 14B',
+          description: 'Speed LoRA for Wan 2.1 T2V 14B (lightx2v, Apache-2.0).',
+          pulls: '', tags: ['LoRA', '0.59 GB'], updated: 'New',
+          downloadUrl: 'https://huggingface.co/lightx2v/Wan2.1-Distill-Loras/resolve/main/wan2.1_t2v_14b_lora_rank64_lightx2v_4step.safetensors',
+          filename: 'wan2.1_t2v_14b_lora_rank64_lightx2v_4step.safetensors', subfolder: 'loras', sizeGB: 0.59,
+          sizeBytes: 631344264,
+          sha256: '1c918df9eaa102766d8f99104209ce55fe7a892278a667a63d721c5d1c18efb1',
+        },
+        {
+          name: 'lightx2v 4 step LoRA, Wan 2.1 I2V 14B',
+          description: 'Speed LoRA for Wan 2.1 I2V 14B (lightx2v, Apache-2.0).',
+          pulls: '', tags: ['LoRA', '0.69 GB'], updated: 'New',
+          downloadUrl: 'https://huggingface.co/lightx2v/Wan2.1-Distill-Loras/resolve/main/wan2.1_i2v_lora_rank64_lightx2v_4step.safetensors',
+          filename: 'wan2.1_i2v_lora_rank64_lightx2v_4step.safetensors', subfolder: 'loras', sizeGB: 0.69,
+          sizeBytes: 739472104,
+          sha256: '8833bd4fd7c8eabebf0bc8ee5cfaf47f4f310ce116928a02c1adf8941dd4b0f1',
         },
       ],
     },

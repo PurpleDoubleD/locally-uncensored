@@ -32,6 +32,7 @@ import { supportsTransparent } from '../../../lib/transparent-image'
 import { QWEN_ENCODER_HELP, pickQwenEncoder, qwenEncoderOptions, type QwenEncoderVariant } from '../../../lib/render/qwen-text-encoder'
 import { MAX_SHOTS, MAX_SHOT_CHARS, supportsMultishot } from '../../../lib/ltx-multishot'
 import { frameRangeFor, framesOnRange, lengthHint } from '../../../lib/video-length'
+import { LongVideoControls } from './LongVideoControls'
 import { useMacMemoryGb } from '../../../lib/mac-memory'
 
 // Video families whose dynamic-workflow strategy actually wires a LoRA node:
@@ -431,6 +432,11 @@ export function ParamGroups() {
             <Slider label="FPS" min={1} max={60} step={1} value={s.fps} onChange={s.setFps} />
             {framesHint && (
               <p className="col-span-2 t-micro text-gray-500" data-testid="video-length-hint">{framesHint}</p>
+            )}
+            {!isCloud && (
+              <div className="col-span-2">
+                <LongVideoControls model={laneModel} intent={meta.id} />
+              </div>
             )}
           </div>
         )}

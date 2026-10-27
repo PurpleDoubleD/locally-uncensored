@@ -72,6 +72,7 @@ export function registerMlxMediaStubs(routes: RouteMount): void {
     '/local-api/video-generate',
     '/local-api/video-progress',
     '/local-api/video-cancel',
+    '/local-api/video-color-settle',
     '/local-api/read-media-file',
     '/local-api/mlx-music-status',
     '/local-api/mlx-music-install',

@@ -571,6 +571,9 @@ export async function backendCall<T = unknown>(
     video_generate: { path: "/local-api/video-generate", method: "POST" },
     video_progress: { path: "/local-api/video-progress" },
     video_cancel: { path: "/local-api/video-cancel", method: "POST" },
+    // B18: the colour settle of a long clip runs in the desktop app only
+    // (commands/video_settle.rs); the dev server answers 501.
+    video_color_settle: { path: "/local-api/video-color-settle", method: "POST" },
     read_media_file: { path: "/local-api/read-media-file", method: "POST" },
     // The music engine of the Mac (commands/music.rs), desktop only like the
     // MLX commands above: the dev server answers 501 (mlx-media-stubs.ts).

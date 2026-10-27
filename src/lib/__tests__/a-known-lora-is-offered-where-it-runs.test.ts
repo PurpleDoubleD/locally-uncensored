@@ -36,7 +36,7 @@ describe('what the app knows about a LoRA', () => {
 
   it('every LoRA add-on of the catalogue is known, with its family and its catalogue name', () => {
     const addons = getLoraAddonBundles()
-    expect(addons.map((b) => b.name)).toEqual(['Pixel Art XL · SDXL LoRA', 'MiniMax H3 Turbo LoRA · 8 Steps'])
+    expect(addons.map((b) => b.name)).toEqual(['Pixel Art XL · SDXL LoRA', 'Wan 2.1 14B Speed LoRAs · 4 Steps', 'MiniMax H3 Turbo LoRA · 8 Steps'])
     for (const b of addons) {
       for (const f of b.files) {
         expect(knownLora(f.filename!), f.filename).toEqual({ family: b.workflow, familyLabel: b.tags[0], catalogName: b.name })

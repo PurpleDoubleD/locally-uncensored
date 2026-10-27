@@ -1,4 +1,6 @@
 import { MAX_LOCAL_FRAMES } from '../lib/video-length'
+import { wanSamplingFor, type VideoSpeed } from '../lib/wan-speed'
+import { MAX_LONG_SECONDS, type LongVideoMode } from '../lib/long-video'
 import { create } from 'zustand'
 import { maxTrainImages } from '../lib/train-image-cap'
 import { MAX_STORED_REFERENCES } from '../lib/edit-references'
@@ -42,6 +44,8 @@ const RUNTIME_ONLY_KEYS: readonly string[] = [
   // 3.0.8 D28: the captions belong to the staged photos, which are runtime
   // only (blobs); a caption from yesterday has no photo to stand under.
   'trainCaptions',
+  // B18: the clip Extend Video continues is a blob of this session.
+  'extendClip',
 ]
 import type { ModelType, ClassifiedModel } from '../api/comfyui'
 import { MAX_SHOTS, MAX_SHOT_CHARS } from '../lib/ltx-multishot'
@@ -350,6 +354,17 @@ export interface CreateState {
   batchSize: number
   frames: number
   fps: number
+  /** Fast (lightx2v 4 steps) or Quality sampling for the Wan 14B models
+   *  (B18, lib/wan-speed). Other families ignore it. */
+  videoSpeed: VideoSpeed
+  /** A long local clip in seconds (B18, lib/long-video); 0 is one run at the
+   *  Frames slider's length. */
+  longVideoSeconds: number
+  /** Sections (default) or one pass with context windows. */
+  longVideoMode: LongVideoMode
+  /** The clip Extend Video continues, as picked (runtime only, never
+   *  persisted: partialize does not list it). */
+  extendClip: Blob | null
   // Review A kleiner Punkt 1 (studio-r2): the cloud video Length control used
   // to read and write these SAME frames/fps fields, which the local video
   // lane also owns. Picking a cloud length silently rewrote the local
@@ -595,6 +610,10 @@ export interface CreateState {
   setBatchSize: (batchSize: number) => void
   setFrames: (frames: number) => void
   setFps: (fps: number) => void
+  setVideoSpeed: (speed: VideoSpeed) => void
+  setLongVideoSeconds: (seconds: number) => void
+  setLongVideoMode: (mode: LongVideoMode) => void
+  setExtendClip: (clip: Blob | null) => void
   setCloudFrames: (frames: number) => void
   setCloudFps: (fps: number) => void
   setDenoise: (denoise: number) => void
@@ -913,7 +932,7 @@ export const MOBILE_CLOUD_VIDEO_FAMILY: ModelType = 'minimaxh3'
 /** The video model's own sampling values, for picking it and for every tab
  *  that runs it. Lightning/rapid merges are distilled to few steps at cfg 1,
  *  the architecture defaults (30 steps, cfg 5+) render them to mush. */
-function videoModelParams(model: string, list: readonly ClassifiedModel[] | null = [], intent = 'video') {
+function videoModelParams(model: string, list: readonly ClassifiedModel[] | null = [], intent = 'video', speed: VideoSpeed = 'fast') {
   // A phone has no local video model, so `model` is empty there and the
   // family would be 'unknown': 1024 by 1024, a square image size, sent along
   // with a cloud clip. It takes the family of the cloud's own default video
@@ -929,12 +948,17 @@ function videoModelParams(model: string, list: readonly ClassifiedModel[] | null
   // fps under an LTX (persona walk, 09.10.2026, Fund 19). A ComfyUI entry
   // carries no `mlxVideo`, and nothing changes for it.
   const clip = mlxVideoLaneEntry(list, model, intent)?.mlxVideo
+  // The Wan 14B models (B18): Fast is lightx2v's 4 steps at cfg 1, Quality
+  // the official templates; both at the 81 frames, 832×480 and 16 fps Wan
+  // learned. The Mac's MLX entry below still wins on the Mac.
+  const wan = clip ? null : wanSamplingFor(model, speed)
   return {
     steps: lightning ? 6 : defaults.steps, cfgScale: lightning ? 1.0 : defaults.cfgScale,
     sampler: defaults.sampler, scheduler: defaults.scheduler,
     width: defaults.width, height: defaults.height,
     ...(defaults.frames ? { frames: defaults.frames } : {}),
     ...(defaults.fps ? { fps: defaults.fps } : {}),
+    ...(wan ? { steps: wan.steps, cfgScale: wan.cfgScale, sampler: wan.sampler, scheduler: wan.scheduler, width: 832, height: 480, frames: 81, fps: 16 } : {}),
     ...(clip ? { frames: clip.frames, fps: clip.fps, width: clip.width, height: clip.height } : {}),
     // A Wan on the Mac runs its config's steps (50 or 40) unless asked, and
     // the slider starts there, not at the family's ComfyUI count.
@@ -955,7 +979,7 @@ function videoIntentOf(s: Pick<CreateState, 'videoSubMode' | 'cloudOp'>): string
  */
 function restartSampling(s: CreateState): Partial<CreateState> {
   if (s.cloudOp === 'music') return imageLaneParams(s)
-  if (s.cloudOp === 'lipsync' || s.cloudOp === 'motion') return videoModelParams(s.videoModel, s.videoModelList, videoIntentOf(s))
+  if (s.cloudOp === 'lipsync' || s.cloudOp === 'motion') return videoModelParams(s.videoModel, s.videoModelList, videoIntentOf(s), s.videoSpeed)
   return {}
 }
 
@@ -991,6 +1015,10 @@ export const useCreateStore = create<CreateState>()(
       batchSize: 1,
       frames: 24,
       fps: 8,
+      videoSpeed: 'fast',
+      longVideoSeconds: 0,
+      longVideoMode: 'sections',
+      extendClip: null,
       cloudFrames: 24,
       cloudFps: 8,
       imageLaneKept: null,
@@ -1095,7 +1123,7 @@ export const useCreateStore = create<CreateState>()(
         // On a phone both lists are empty for good, and the reset must still
         // happen: the video tab takes the cloud clip size, the way back takes
         // the image size again.
-        if (mode === 'video' && (state.videoModel || isMobile())) return { mode, ...videoModelParams(state.videoModel, state.videoModelList, videoIntentOf(state)) }
+        if (mode === 'video' && (state.videoModel || isMobile())) return { mode, ...videoModelParams(state.videoModel, state.videoModelList, videoIntentOf(state), state.videoSpeed) }
         if (mode === 'image' && (state.imageModel || isMobile())) return { mode, ...imageModelParams(state) }
         return { mode }
       }),
@@ -1106,7 +1134,7 @@ export const useCreateStore = create<CreateState>()(
         imageModel: model, imageModelType: type,
         ...imageModelParams({ imageModel: model, imageModelType: type }),
       })),
-      setVideoModel: (model) => set((s) => ({ videoModel: model, ...videoModelParams(model, s.videoModelList, videoIntentOf(s)) })),
+      setVideoModel: (model) => set((s) => ({ videoModel: model, ...videoModelParams(model, s.videoModelList, videoIntentOf(s), s.videoSpeed) })),
       setSampler: (sampler) => set({ sampler }),
       setScheduler: (scheduler) => set({ scheduler }),
       setSteps: (steps) => set({ steps: Math.max(1, Math.min(200, Math.floor(steps))) }),
@@ -1128,6 +1156,19 @@ export const useCreateStore = create<CreateState>()(
       // slider of the picked family keeps a shorter one inside its range.
       setFrames: (frames) => set({ frames: Math.max(1, Math.min(MAX_LOCAL_FRAMES, Math.floor(frames))) }),
       setFps: (fps) => set({ fps: Math.max(1, Math.min(60, Math.floor(fps))) }),
+      // Switching speed re-reads the sampling values of the picked model; a
+      // model without a fast mode keeps what it has.
+      setVideoSpeed: (videoSpeed) => set((s) => {
+        const wan = wanSamplingFor(s.videoModel, videoSpeed)
+        return wan && s.mode === 'video'
+          ? { videoSpeed, steps: wan.steps, cfgScale: wan.cfgScale, sampler: wan.sampler, scheduler: wan.scheduler }
+          : { videoSpeed }
+      }),
+      setLongVideoSeconds: (seconds) => set({
+        longVideoSeconds: Number.isFinite(seconds) && seconds > 0 ? Math.min(MAX_LONG_SECONDS, Math.round(seconds)) : 0,
+      }),
+      setLongVideoMode: (longVideoMode) => set({ longVideoMode }),
+      setExtendClip: (extendClip) => set({ extendClip }),
       // Review A kleiner Punkt 1 (studio-r2, 20.09.2026, found by the new
       // e2e test itself): the local slider's clamp follows the family
       // (lib/video-length); the cloud track only ever encodes
@@ -1206,7 +1247,7 @@ export const useCreateStore = create<CreateState>()(
             // The local lane continues from the picked clip's last frame —
             // regular I2V models, regular video defaults.
             return { ...base, cloudOp: 'extend' as const, mode: 'video' as const, videoSubMode: 't2v' as const, ...dropAll,
-              ...videoModelParams(s.videoModel, s.videoModelList, 'extend') }
+              ...videoModelParams(s.videoModel, s.videoModelList, 'extend', s.videoSpeed) }
           }
           case 'motion': {
             // Keeps the source slot (the character image the video drives).
@@ -1234,10 +1275,10 @@ export const useCreateStore = create<CreateState>()(
           case 'eraser':   return { ...base, utilityOp: 'eraser' as const, mode: 'image' as const, imageSubMode: 'img2img' as const }
           case 'video':
             return { ...base, mode: 'video' as const, videoSubMode: 't2v' as const, ...dropAll,
-              ...videoModelParams(s.videoModel, s.videoModelList, 'video') }
+              ...videoModelParams(s.videoModel, s.videoModelList, 'video', s.videoSpeed) }
           case 'animate':
             return { ...base, mode: 'video' as const, videoSubMode: 'i2v' as const, mask: null,
-              ...videoModelParams(s.videoModel, s.videoModelList, 'animate') }
+              ...videoModelParams(s.videoModel, s.videoModelList, 'animate', s.videoSpeed) }
         }
         })()
         // Leaving the image lane, its values are put aside under the model
@@ -1522,7 +1563,7 @@ export const useCreateStore = create<CreateState>()(
         // The picked model's own values where it has some: a distilled
         // checkpoint reset to its family's 25 or 30 steps renders to mush.
         // LU Cloud renders with its own model, there the family stays.
-        const own = s.backend === 'cloud' ? {} : s.mode === 'video' ? videoModelParams(s.videoModel, s.videoModelList, videoIntentOf(s)) : imageModelParams(s)
+        const own = s.backend === 'cloud' ? {} : s.mode === 'video' ? videoModelParams(s.videoModel, s.videoModelList, videoIntentOf(s), s.videoSpeed) : imageModelParams(s)
         set({
           sampler: d.sampler,
           scheduler: d.scheduler,
@@ -1751,6 +1792,9 @@ export const useCreateStore = create<CreateState>()(
         batchSize: state.batchSize,
         frames: state.frames,
         fps: state.fps,
+        videoSpeed: state.videoSpeed,
+        longVideoSeconds: state.longVideoSeconds,
+        longVideoMode: state.longVideoMode,
         ...restartSampling(state),
         denoise: state.denoise,
         editStrength: state.editStrength,

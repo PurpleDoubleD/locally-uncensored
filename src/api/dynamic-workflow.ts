@@ -63,6 +63,8 @@ import { promptFilenamePrefix, videoDecodeNode, addVideoSave } from './comfyui-g
 import { extraReferenceSlots, isQwenImageEditModel, referenceSide } from '../lib/edit-references'
 import { canonicalImageRefs } from '../lib/image-ref-names'
 import { nativeUpscaleScale, upscaleTarget, type UpscaleFactor } from '../lib/local-upscale'
+import { WAN_FAST, findWanSpeedLora, isFastSampling, wanSamplingFor, wanSpeedKind, wanSpeedLoraNames } from '../lib/wan-speed'
+import { addAudioStitch, addContextWindows, addContinueSource, addStitch, CONTINUE_NEEDS_UPDATE, type ContinueSource } from './video-continue'
 
 // ─── Strategy Detection ───
 
@@ -1436,7 +1438,11 @@ export async function buildDynamicWorkflow(
   // builders above. Wiring is schema-driven — we only feed inputs the live
   // node declares and map outputs by their declared types — so version drift
   // in these nodes degrades to a ComfyUI validation error, not a bad graph.
-  const isI2V = isVideo && !!(params as GenerateParams).inputImage
+  // A later section of a long clip (B18) is an I2V run too: it starts on the
+  // last frames of the clip so far instead of on one picture.
+  const continueFrom = isVideo ? videoParams.continueFrom : undefined
+  let continued: ContinueSource | null = null
+  const isI2V = isVideo && (!!(params as GenerateParams).inputImage || !!continueFrom)
   if (isI2V && ['unet_video', 'unet_ltx', 'unet_cosmos', 'unet_mochi'].includes(strategy)) {
     if (strategy === 'unet_mochi') {
       throw new WorkflowUnavailableError(
@@ -1458,8 +1464,20 @@ export async function buildDynamicWorkflow(
         { needsComfyUpdate: true },
       )
     }
-    const loadId = String(n++)
-    workflow[loadId] = { class_type: 'LoadImage', inputs: { image: (params as GenerateParams).inputImage } }
+    if (continueFrom && i2vNode !== 'WanImageToVideo') {
+      throw new WorkflowUnavailableError('Continuing a clip in sections works with Wan, Wan 2.2 and LTX 2.5. Pick one of those models, or make this clip in one run.', strategy)
+    }
+    let startRef: [string, number]
+    if (continueFrom) {
+      requireContinueNodes(allNodes, strategy)
+      continued = addContinueSource(workflow, n, continueFrom, allNodes)
+      n = continued.n
+      startRef = continued.tail
+    } else {
+      const loadId = String(n++)
+      workflow[loadId] = { class_type: 'LoadImage', inputs: { image: (params as GenerateParams).inputImage } }
+      startRef = [loadId, 0]
+    }
     const required = meta.input?.required ?? {}
     const optional = meta.input?.optional ?? {}
     const decl = { ...required, ...optional }
@@ -1471,9 +1489,13 @@ export async function buildDynamicWorkflow(
     if (decl.height) inputs.height = params.height
     if (decl.length) inputs.length = videoParams.frames
     if (decl.batch_size) inputs.batch_size = 1
-    if (decl.start_image) inputs.start_image = [loadId, 0]
-    else if (decl.image) inputs.image = [loadId, 0]
-    else if (decl.init_image) inputs.init_image = [loadId, 0]
+    if (decl.start_image) inputs.start_image = startRef
+    else if (decl.image) inputs.image = startRef
+    else if (decl.init_image) inputs.init_image = startRef
+    // SVI-style anti-drift padding (core WanImageToVideo, 2026): the empty
+    // frames of a continued section are filled with the clip's first picture
+    // instead of grey, so faces and colours stay where the clip started.
+    if (continued && decl.ref_pad_image) inputs.ref_pad_image = continued.first
     // Remaining REQUIRED widgets we don't model: take the schema default,
     // for a combo the first option. Same live-schema pattern as the RMBG
     // builder, and the combo read goes through the one shared reader so the
@@ -1552,10 +1574,77 @@ export async function buildDynamicWorkflow(
     ? wan22LowNoisePartner(params.model, listedUnets)
     : null
   let highNoiseStage: { id: string; lowId: string; split: number } | null = null
+  let lowModelRef: [string, number] | null = null
   if (lowNoisePartner) {
-    highNoiseStage = { lowId: String(n++), id: String(n++), split: Math.max(1, Math.floor(params.steps / 2)) }
-    const { id, lowId, split } = highNoiseStage
-    addUnetLoader(workflow, lowId, lowNoisePartner, allNodes)
+    const lowLoaderId = String(n++)
+    addUnetLoader(workflow, lowLoaderId, lowNoisePartner, allNodes)
+    lowModelRef = [lowLoaderId, 0]
+  }
+
+  // Wan (B18, 3.0.9): the sampling shift of the official templates, which the
+  // main path never set, and the lightx2v speed LoRAs for a fast run (4 steps
+  // at cfg 1, lib/wan-speed). The LoRAs go on each half its own: the high
+  // noise LoRA on the high noise model, the low noise one on the low. A fast
+  // run without its LoRA would come out as mush, so it stops with the file
+  // names instead.
+  if (isVideo && type === 'wan' && strategy === 'unet_video' && !fromCheckpoint) {
+    const kind = wanSpeedKind(params.model)
+    const fast = !!kind && isFastSampling(params.steps, params.cfgScale)
+    if (fast && kind) {
+      const listedLoras = [
+        ...nodeComboOptions(allNodes, 'LoraLoaderModelOnly', 'lora_name'),
+        ...nodeComboOptions(allNodes, 'LoraLoader', 'lora_name'),
+      ]
+      const halves: Array<'high' | 'low' | 'single'> = kind.startsWith('a14b') ? ['high', 'low'] : ['single']
+      const picks = halves.map((h) => findWanSpeedLora(kind, h, listedLoras))
+      if (picks.some((p) => !p) || (kind.startsWith('a14b') && !lowModelRef)) {
+        const need = wanSpeedLoraNames(kind)
+        throw new WorkflowUnavailableError(
+          kind.startsWith('a14b') && !lowModelRef && picks.every(Boolean)
+            ? `Fast mode runs both halves of ${params.model}: the matching low noise file is not installed. Install the whole Wan 2.2 A14B bundle, or switch Speed to Quality.`
+            : `Fast mode (4 steps) needs the lightx2v speed LoRA${need.length > 1 ? 's' : ''} ${need.join(' and ')} in ComfyUI/models/loras. Download "Wan speed LoRAs" in the Model Manager, or switch Speed to Quality.`,
+          strategy,
+        )
+      }
+      const loraNode = allNodes['LoraLoaderModelOnly'] ? 'LoraLoaderModelOnly' : null
+      const patch = (model: [string, number], lora: string): [string, number] => {
+        const id = String(n++)
+        workflow[id] = loraNode
+          ? { class_type: loraNode, inputs: { lora_name: lora, strength_model: 1.0, model }, _meta: { title: 'Speed LoRA' } }
+          : { class_type: 'LoraLoader', inputs: { lora_name: lora, strength_model: 1.0, strength_clip: 0, model, clip: [clipSourceId, clipOutputSlot] }, _meta: { title: 'Speed LoRA' } }
+        return [id, 0]
+      }
+      samplerModelId = patch([samplerModelId, 0], picks[0]!)[0]
+      if (lowModelRef && picks[1]) lowModelRef = patch(lowModelRef, picks[1])
+    }
+    if (allNodes['ModelSamplingSD3']) {
+      const shift = fast ? WAN_FAST.shift : (wanSamplingFor(params.model, 'quality')?.shift ?? 8)
+      const shiftOf = (model: [string, number]): [string, number] => {
+        const id = String(n++)
+        workflow[id] = { class_type: 'ModelSamplingSD3', inputs: { model, shift } }
+        return [id, 0]
+      }
+      samplerModelId = shiftOf([samplerModelId, 0])[0]
+      if (lowModelRef) lowModelRef = shiftOf(lowModelRef)
+    }
+  }
+
+  // One pass past the native length (B18): sliding context windows on the
+  // model(s), when asked for and the core has the node.
+  if (isVideo && videoParams.contextWindows && !continueFrom) {
+    const win = addContextWindows(workflow, n, [samplerModelId, 0], type, videoParams.frames, allNodes)
+    n = win.n
+    samplerModelId = win.model[0]
+    if (lowModelRef) {
+      const low = addContextWindows(workflow, n, lowModelRef, type, videoParams.frames, allNodes)
+      n = low.n
+      lowModelRef = low.model
+    }
+  }
+
+  if (lowNoisePartner && lowModelRef) {
+    highNoiseStage = { lowId: lowModelRef[0], id: String(n++), split: Math.max(1, Math.floor(params.steps / 2)) }
+    const { id, split } = highNoiseStage
     workflow[id] = {
       class_type: 'KSamplerAdvanced',
       inputs: {
@@ -1613,8 +1702,16 @@ export async function buildDynamicWorkflow(
   // ─── Phase 6: Output ───
 
   if (isVideo) {
+    // A continued section goes behind the clip so far, without the frames it
+    // repeats, and the whole clip is saved (B18).
+    let frames: [string, number] = [decodeId, 0]
+    if (continued && continueFrom) {
+      const joined = addStitch(workflow, n, continued.frames, frames, continueFrom.overlap, allNodes)
+      n = joined.n
+      frames = joined.images
+    }
     // Video output: core SaveVideo (mp4) > VHS > SaveAnimatedWEBP > SaveImage (A19)
-    addVideoSave(workflow, n, [decodeId, 0], videoParams.fps, promptFilenamePrefix(params.prompt, true), (c) => nodes.videoSavers.includes(c))
+    addVideoSave(workflow, n, frames, videoParams.fps, promptFilenamePrefix(params.prompt, true), (c) => nodes.videoSavers.includes(c))
   } else {
     workflow[String(n)] = {
       class_type: 'SaveImage',
@@ -1914,10 +2011,27 @@ async function buildWan22Workflow(params: VideoParams, seed: number, nodes: Cate
   // SD3), so the sampler reads from it to match the official 5B workflow's motion.
   const shiftId = String(n++)
   workflow[shiftId] = { class_type: 'ModelSamplingSD3', inputs: { model: [wanModelSrc, 0], shift: 8.0 } }
+  let samplerModel: [string, number] = [shiftId, 0]
+  if (params.contextWindows && !params.continueFrom) {
+    const win = addContextWindows(workflow, n, samplerModel, 'wan22', length, allNodes)
+    n = win.n
+    samplerModel = win.model
+  }
 
-  // Unified latent: a start_image is attached ONLY for an I2V request.
+  // Unified latent: a start_image is attached ONLY for an I2V request. A
+  // continued section (B18) attaches the last frames of the clip so far; the
+  // node masks every latent frame they cover, so the section picks the
+  // motion up where it stopped.
   const latentInputs: ComfyNodeInputs = { vae: [vaeId, 0], width, height, length, batch_size: 1 }
-  if (params.inputImage) {
+  let continued: ContinueSource | null = null
+  if (params.continueFrom) {
+    requireContinueNodes(allNodes, 'unet_video')
+    continued = addContinueSource(workflow, n, params.continueFrom, allNodes)
+    n = continued.n
+    const scaleId = String(n++)
+    workflow[scaleId] = { class_type: 'ImageScale', inputs: { image: continued.tail, upscale_method: 'lanczos', width, height, crop: 'center' } }
+    latentInputs.start_image = [scaleId, 0]
+  } else if (params.inputImage) {
     const imageId = String(n++)
     const scaleId = String(n++)
     workflow[imageId] = { class_type: 'LoadImage', inputs: { image: params.inputImage } }
@@ -1931,13 +2045,18 @@ async function buildWan22Workflow(params: VideoParams, seed: number, nodes: Cate
   workflow[samplerId] = {
     class_type: 'KSampler',
     inputs: {
-      model: [shiftId, 0], positive: [posId, 0], negative: [negId, 0], latent_image: [latentId, 0],
+      model: samplerModel, positive: [posId, 0], negative: [negId, 0], latent_image: [latentId, 0],
       seed, steps: params.steps, cfg: params.cfgScale, sampler_name: params.sampler, scheduler: params.scheduler, denoise: 1.0,
     },
   }
   const decodeId = String(n++)
   workflow[decodeId] = videoDecodeNode([samplerId, 0], [vaeId, 0], nodes.decoders.includes('VAEDecodeTiled'))
 
+  if (continued && params.continueFrom) {
+    const joined = addStitch(workflow, n, continued.frames, [decodeId, 0], params.continueFrom.overlap, allNodes)
+    addVideoSave(workflow, joined.n, joined.images, params.fps, promptFilenamePrefix(params.prompt, true), (c) => nodes.videoSavers.includes(c))
+    return workflow
+  }
   addVideoOutput(workflow, n, decodeId, params.fps, nodes, params.prompt)
   return workflow
 }
@@ -2130,7 +2249,8 @@ async function buildLtx25Workflow(params: VideoParams, seed: number, allNodes: N
     'LTXVLatentUpsampler', 'LatentUpscaleModelLoader', 'LTXVAudioVAEDecode', 'ManualSigmas', 'KSamplerSelect',
     'RandomNoise', 'SamplerCustomAdvanced', 'VAEDecodeTiled', 'CLIPTextEncode',
   ], 'LTX 2.5')
-  if (params.inputImage) requireNodes(allNodes, ['LTXVImgToVideoInplace', 'LTXVPreprocess', 'LoadImage', 'ImageScale'], 'LTX 2.5 image to video')
+  if (params.inputImage || params.continueFrom) requireNodes(allNodes, ['LTXVImgToVideoInplace', 'LTXVPreprocess', 'LoadImage', 'ImageScale'], 'LTX 2.5 image to video')
+  if (params.continueFrom) requireContinueNodes(allNodes, 'ltx25')
 
   // The graph is the distilled one. The dev weights need a different schedule
   // and guidance, and running them on this one gives noise.
@@ -2180,23 +2300,40 @@ async function buildLtx25Workflow(params: VideoParams, seed: number, allNodes: N
   const negId = add('CLIPTextEncode', { text: params.negativePrompt || '', clip: [clipId, 0] })
   const condId = add('LTXVConditioning', { positive: [posId, 0], negative: [negId, 0], frame_rate: fps })
 
+  // A continued section (B18) pins the last frames of the clip so far, an
+  // 8n+1 run (17 frames are three latent frames), instead of one picture,
+  // and pins them fully in both passes: they are frames that already exist.
   let imageSrc: string | null = null
-  if (params.inputImage) {
+  let continued: ContinueSource | null = null
+  if (params.continueFrom) {
+    continued = addContinueSource(workflow, n, params.continueFrom, allNodes)
+    n = continued.n
+    const scaleId = add('ImageScale', { image: continued.tail, upscale_method: 'lanczos', width, height, crop: 'center' })
+    imageSrc = add('LTXVPreprocess', { image: [scaleId, 0], img_compression: 18 })
+  } else if (params.inputImage) {
     const loadId = add('LoadImage', { image: params.inputImage })
     const scaleId = add('ImageScale', { image: [loadId, 0], upscale_method: 'lanczos', width, height, crop: 'center' })
     imageSrc = add('LTXVPreprocess', { image: [scaleId, 0], img_compression: 18 })
   }
   const pin = (latent: string, strength: number): string =>
     imageSrc
-      ? add('LTXVImgToVideoInplace', { vae: [vaeId, 0], image: [imageSrc, 0], latent: [latent, 0], strength, bypass: false })
+      ? add('LTXVImgToVideoInplace', { vae: [vaeId, 0], image: [imageSrc, 0], latent: [latent, 0], strength: continued ? 1 : strength, bypass: false })
       : latent
+
+  // One pass past one window: context windows on the model (LTXVContextWindows).
+  let model: [string, number] = [unetId, 0]
+  if (params.contextWindows && !continued) {
+    const win = addContextWindows(workflow, n, model, 'ltx25', length, allNodes)
+    n = win.n
+    model = win.model
+  }
 
   // Pass 1: half size.
   const emptyId = add('EmptyLTXVLatentVideo', { width: width / 2, height: height / 2, length, batch_size: 1 })
   const videoLatent1 = pin(emptyId, 0.7)
   const audioLatentId = add('LTXVEmptyLatentAudio', { frames_number: length, frame_rate: fps, batch_size: 1, audio_vae: [audioVaeId, 0] })
   const joint1 = add('LTXVConcatAVLatent', { video_latent: [videoLatent1, 0], audio_latent: [audioLatentId, 0] })
-  const guider1 = add('LTXVDualCFGGuider', { model: [unetId, 0], positive: [condId, 0], negative: [condId, 1], video_cfg: 1, audio_cfg: 1 })
+  const guider1 = add('LTXVDualCFGGuider', { model, positive: [condId, 0], negative: [condId, 1], video_cfg: 1, audio_cfg: 1 })
   const sampler1 = add('KSamplerSelect', { sampler_name: 'euler_ancestral' })
   const sigmas1 = add('ManualSigmas', { sigmas: LTX25_SIGMAS_FIRST })
   const noise1 = add('RandomNoise', { noise_seed: seed })
@@ -2211,7 +2348,7 @@ async function buildLtx25Workflow(params: VideoParams, seed: number, allNodes: N
   const joint2 = add('LTXVConcatAVLatent', { video_latent: [videoLatent2, 0], audio_latent: [split1, 1] })
 
   // Pass 2: full size.
-  const guider2 = add('LTXVDualCFGGuider', { model: [unetId, 0], positive: [condId, 0], negative: [condId, 1], video_cfg: 1, audio_cfg: 1 })
+  const guider2 = add('LTXVDualCFGGuider', { model, positive: [condId, 0], negative: [condId, 1], video_cfg: 1, audio_cfg: 1 })
   const sampler2 = add('KSamplerSelect', { sampler_name: 'euler_ancestral' })
   const sigmas2 = add('ManualSigmas', { sigmas: LTX25_SIGMAS_SECOND })
   const noise2 = add('RandomNoise', { noise_seed: seed })
@@ -2223,6 +2360,16 @@ async function buildLtx25Workflow(params: VideoParams, seed: number, allNodes: N
   const decodeId = add('VAEDecodeTiled', { samples: [split2, 0], vae: [vaeId, 0], tile_size: 512, overlap: 64, temporal_size: 64, temporal_overlap: 16 })
   const audioDecodeId = add('LTXVAudioVAEDecode', { samples: [split2, 1], audio_vae: [audioVaeId, 0] })
 
+  if (continued && params.continueFrom) {
+    const joined = addStitch(workflow, n, continued.frames, [decodeId, 0], params.continueFrom.overlap, allNodes)
+    n = joined.n
+    // The sound so far plus the new sound past the overlap. A clip so far
+    // without sound (made elsewhere) keeps only the new part's sound.
+    const sound = addAudioStitch(workflow, n, continued.audio, [audioDecodeId, 0], params.continueFrom.overlap / fps, allNodes)
+    if (sound) n = sound.n
+    addVideoWithAudioOutput(workflow, n, joined.images[0], fps, sound ? sound.audio : [audioDecodeId, 0], allNodes, params.prompt)
+    return workflow
+  }
   addVideoWithAudioOutput(workflow, n, decodeId, fps, [audioDecodeId, 0], allNodes, params.prompt)
   return workflow
 }
@@ -2261,6 +2408,11 @@ export interface LocalOpParams {
 
 const UPDATE_COMFY_HINT =
   'Update ComfyUI (Settings, AI Backends, Update ComfyUI), restart it, then generate again.'
+
+/** The core video nodes a continued section is built from (B18). */
+function requireContinueNodes(allNodes: NodePresence, strategy: WorkflowStrategy): void {
+  requireRelease(allNodes, ['LoadVideo', 'GetVideoComponents', 'ImageFromBatch'], CONTINUE_NEEDS_UPDATE, strategy)
+}
 
 function requireNodes(allNodes: NodePresence, needed: string[], lane: string): void {
   const missing = needed.filter((n) => !allNodes[n])

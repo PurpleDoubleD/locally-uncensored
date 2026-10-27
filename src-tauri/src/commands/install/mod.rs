@@ -63,6 +63,7 @@ mod download;
 pub(crate) mod git;
 mod comfy_job;
 mod comfy_install;
+mod comfy_pin;
 mod comfy_repair;
 mod env_check;
 mod ollama;
@@ -105,6 +106,7 @@ mod tests {
         ("children.rs", include_str!("children.rs")),
         ("comfy_install.rs", include_str!("comfy_install.rs")),
         ("comfy_job.rs", include_str!("comfy_job.rs")),
+        ("comfy_pin.rs", include_str!("comfy_pin.rs")),
         ("comfy_repair.rs", include_str!("comfy_repair.rs")),
         ("custom_node_packs.rs", include_str!("custom_node_packs.rs")),
         ("custom_nodes.rs", include_str!("custom_nodes.rs")),

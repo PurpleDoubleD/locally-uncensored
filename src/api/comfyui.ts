@@ -103,6 +103,12 @@ export interface VideoParams extends GenerateParams {
   // source still / calmer motion; 127 (SVD default) drifts hard. We default ~90
   // for I2V fidelity (2026-06-11). Honoured only by the SVD path.
   motionBucketId?: number
+  /** A later section of a long clip (B18): the clip so far in ComfyUI's input
+   *  folder and how many of its last frames this section repeats. The graph
+   *  starts on those frames and outputs the whole clip (api/video-continue). */
+  continueFrom?: { video: string; overlap: number }
+  /** One pass with sliding context windows instead of sections (B18). */
+  contextWindows?: boolean
 }
 
 export interface ComfyUIOutput {
