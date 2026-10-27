@@ -174,8 +174,9 @@ describe('runLongVideo: section after section, one clip in the gallery', () => {
       ...f.deps,
       settle: async (item, seams) => { seen.push([...seams]); return item },
     })
+    // One seam per step, at the frame the new section starts.
     expect(seen[0]).toEqual([81])
-    expect(seen[1]).toEqual([81, 157])
+    expect(seen[1]).toEqual([157])
   })
 })
 

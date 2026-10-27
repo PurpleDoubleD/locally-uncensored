@@ -154,8 +154,11 @@ export async function runLongVideo(plan: LongVideoPlan, start: LongRunStart, dep
       seams.push(frames)
       frames += sectionFrames - plan.overlap
     }
+    // Only the newest seam: everything before it was settled in the step
+    // before, and this section was made from those settled frames. Passing
+    // every seam would only re-encode the old ones again.
     if (deps.settle && seams.length > 0) {
-      const settled = await deps.settle(current, seams).catch(() => null)
+      const settled = await deps.settle(current, seams.slice(-1)).catch(() => null)
       if (settled) current = settled
     }
   }
