@@ -60,13 +60,18 @@ interface Reference {
   workGb: number
 }
 
-/** Per family, measured or derived on the RTX 3060 12 GB box. Wan 14B: A14B
- *  Q4_K_S GGUF at 832×480×81 (B18 box run). Wan 2.2 5B: fp16 at 1280×704×121.
- *  LTX 2.5: the whole two pass graph counted as eleven steps at 1280×704×121. */
+/** Per family, measured or derived on the RTX 3060 12 GB box (16 GB RAM).
+ *  Wan 2.2 5B is MEASURED (B18, 27.10.2026, ComfyUI 0.42.4, ck attention):
+ *  832×480×121 at 20 steps and cfg 5 sampled at 36 s a step, two model calls
+ *  each, and the section took 1011 s in all; the rest (text encoder, model
+ *  and VAE loads, decode) is the overhead, inflated by a box with about 1 GB
+ *  of RAM free. Wan 14B: A14B Q4_K_S GGUF at 832×480×81, derived (see the
+ *  B18 report). LTX 2.5: the whole two pass graph counted as eleven steps at
+ *  1280×704×121, derived. */
 const REFERENCE: Partial<Record<string, Reference>> = {
   wan14b: { secPerStep: 42, w: 832, h: 480, frames: 81, space: 8, time: 4, overhead: 70, workGb: 2.5 },
   wan13b: { secPerStep: 7, w: 832, h: 480, frames: 81, space: 8, time: 4, overhead: 25, workGb: 1.5 },
-  wan22: { secPerStep: 16, w: 1280, h: 704, frames: 121, space: 16, time: 4, overhead: 40, workGb: 3 },
+  wan22: { secPerStep: 18, w: 832, h: 480, frames: 121, space: 16, time: 4, overhead: 290, workGb: 3 },
   ltx25: { secPerStep: 22, w: 1280, h: 704, frames: 121, space: 32, time: 8, overhead: 60, workGb: 3 },
 }
 

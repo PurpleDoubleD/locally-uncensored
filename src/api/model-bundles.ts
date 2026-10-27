@@ -883,6 +883,11 @@ export const CUSTOM_NODE_REGISTRY: Record<string, CustomNodeEntry> = {
     name: 'ComfyUI-GGUF',
     requiredNodes: ['UnetLoaderGGUF'],
     alsoProvides: ['UnetLoaderGGUFAdvanced', 'CLIPLoaderGGUF', 'DualCLIPLoaderGGUF', 'TripleCLIPLoaderGGUF', 'QuadrupleCLIPLoaderGGUF'],
+    // Pinned in 3.0.9 (B18): the Wan 2.2 A14B Fast bundles made this pack a
+    // default download, and an unpinned clone took whatever its head was
+    // that day. 6ea2651e (12.01.2026) is the commit that rendered the A14B
+    // pair with the speed LoRAs on ComfyUI v0.42.4 on the 12 GB box.
+    commit: '6ea2651e7df66d7585f6ffee804b20e92fb38b8a',
   },
   // Pose extraction for the local Motion Control lane (DWPose skeletons feed
   // WanAnimateToVideo / WanVaceToVideo). Its requirements pull the CPU
