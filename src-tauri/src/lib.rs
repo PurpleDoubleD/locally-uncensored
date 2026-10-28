@@ -50,6 +50,7 @@ mod shown_path;
 mod e2e_remote;
 mod runtime_root;
 mod storage_move;
+mod system_tray;
 mod state;
 // Test-only OS helpers (a shell, a sleeper, "is this pid alive"), shared by
 // the process tests in state.rs, commands/engine.rs and commands/bg_tasks.rs
@@ -1344,50 +1345,56 @@ pub fn run() {
             #[cfg(desktop)]
             let menu = Menu::with_items(app, &[&show, &quit])?;
 
+            // GH #204: on Linux the tray needs libayatana-appindicator, and
+            // building it without that library aborts the whole app. Without
+            // it LU starts with no tray, and the close button quits.
             #[cfg(desktop)]
-            let tray_icon = Image::from_path("icons/icon.png")
-                .or_else(|_| Image::from_path("icons/32x32.png"))
-                .unwrap_or_else(|_| Image::from_bytes(include_bytes!("../icons/32x32.png")).expect("embedded icon"));
+            let tray_present = system_tray::system_tray_available();
 
-            // On a Mac the menu bar gets a template image (see
-            // `menu_bar_template_rgba`), built from the embedded icon so it
-            // does not depend on the working directory of a bundled app.
-            #[cfg(target_os = "macos")]
-            let tray_icon = {
-                let source = Image::from_bytes(include_bytes!("../icons/128x128.png")).expect("embedded icon");
-                let _ = tray_icon;
-                Image::new_owned(menu_bar_template_rgba(source.rgba()), source.width(), source.height())
-            };
             #[cfg(desktop)]
-            let tray = TrayIconBuilder::new()
-                .icon(tray_icon)
-                .tooltip("LU");
-            #[cfg(target_os = "macos")]
-            let tray = tray.icon_as_template(true);
-            #[cfg(desktop)]
-            tray
-                .menu(&menu)
-                .on_menu_event(|app, event| {
-                    match event.id().as_ref() {
-                        "show" => onboarding_window::bring_to_front(app),
-                        "quit" => {
-                            // Tauri's AppState Drop doesn't fire reliably on
-                            // Windows after `app.exit(0)` — run the explicit
-                            // subprocess shutdown here so tray Quit doesn't
-                            // leak Ollama / ComfyUI (a user V/b, v2.4.9).
-                            let state = app.state::<AppState>();
-                            state.shutdown_subprocesses();
-                            app.exit(0);
+            if tray_present {
+                let tray_icon = Image::from_path("icons/icon.png")
+                    .or_else(|_| Image::from_path("icons/32x32.png"))
+                    .unwrap_or_else(|_| Image::from_bytes(include_bytes!("../icons/32x32.png")).expect("embedded icon"));
+
+                // On a Mac the menu bar gets a template image (see
+                // `menu_bar_template_rgba`), built from the embedded icon so it
+                // does not depend on the working directory of a bundled app.
+                #[cfg(target_os = "macos")]
+                let tray_icon = {
+                    let source = Image::from_bytes(include_bytes!("../icons/128x128.png")).expect("embedded icon");
+                    let _ = tray_icon;
+                    Image::new_owned(menu_bar_template_rgba(source.rgba()), source.width(), source.height())
+                };
+                let tray = TrayIconBuilder::new()
+                    .icon(tray_icon)
+                    .tooltip("LU");
+                #[cfg(target_os = "macos")]
+                let tray = tray.icon_as_template(true);
+                tray
+                    .menu(&menu)
+                    .on_menu_event(|app, event| {
+                        match event.id().as_ref() {
+                            "show" => onboarding_window::bring_to_front(app),
+                            "quit" => {
+                                // Tauri's AppState Drop doesn't fire reliably on
+                                // Windows after `app.exit(0)` — run the explicit
+                                // subprocess shutdown here so tray Quit doesn't
+                                // leak Ollama / ComfyUI (a user V/b, v2.4.9).
+                                let state = app.state::<AppState>();
+                                state.shutdown_subprocesses();
+                                app.exit(0);
+                            }
+                            _ => {}
                         }
-                        _ => {}
-                    }
-                })
-                .on_tray_icon_event(|tray, event| {
-                    if let tauri::tray::TrayIconEvent::DoubleClick { .. } = event {
-                        onboarding_window::bring_to_front(tray.app_handle());
-                    }
-                })
-                .build(app)?;
+                    })
+                    .on_tray_icon_event(|tray, event| {
+                        if let tauri::tray::TrayIconEvent::DoubleClick { .. } = event {
+                            onboarding_window::bring_to_front(tray.app_handle());
+                        }
+                    })
+                    .build(app)?;
+            }
 
             // ─── Close → hide to tray instead of quit ───
             #[cfg(desktop)]
@@ -1397,6 +1404,14 @@ pub fn run() {
                 window.on_window_event(move |event| {
                     if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                         api.prevent_close();
+                        // No tray (GH #204): a hidden window could never come
+                        // back, so the close button is the Quit item.
+                        if !system_tray::close_hides_to_tray(tray_present) {
+                            let app = w.app_handle();
+                            app.state::<AppState>().shutdown_subprocesses();
+                            app.exit(0);
+                            return;
+                        }
                         // The hidden webview stays fully alive — read-aloud
                         // would keep talking and a running dictation would
                         // keep the mic hot behind a window the user believes
@@ -1761,6 +1776,33 @@ mod tests {
         assert!(
             after.contains("offload_local_models_blocking"),
             "hiding to the tray must release the local model backends"
+        );
+    }
+
+    #[test]
+    fn the_tray_is_only_built_when_its_library_loads() {
+        // GH #204: 3.0.8 built the tray unconditionally, and on a Linux
+        // without libayatana-appindicator that aborted the app at start. The
+        // probe in `system_tray` is worth nothing unless the build sits
+        // behind it and the close button knows there may be no tray.
+        let src = include_str!("lib.rs");
+        let builder = src
+            .find("let tray = TrayIconBuilder::new()")
+            .expect("tray builder should exist");
+        let gate = src[..builder]
+            .rfind("if tray_present {")
+            .expect("the tray build must sit inside `if tray_present`");
+        let probe = src[..gate]
+            .rfind("system_tray::system_tray_available()")
+            .expect("tray_present must come from the library probe");
+        assert!(probe < gate && gate < builder);
+        let close = src
+            .find("if let tauri::WindowEvent::CloseRequested { api, .. } = event {")
+            .expect("close handler should exist");
+        let hide = src.find("let _ = w.hide();").expect("hide call should exist");
+        assert!(
+            src[close..hide].contains("system_tray::close_hides_to_tray(tray_present)"),
+            "without a tray the close button must not hide the window"
         );
     }
 
