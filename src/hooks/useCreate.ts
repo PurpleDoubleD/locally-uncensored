@@ -122,6 +122,7 @@ import { defaultLoraStrength } from '../lib/lora-strength'
 import { fetchGalleryItemBlob } from '../components/create/experimental/galleryUrl'
 import { LongRunStopped, longVideoRequest, runLongVideo, type ClipItem } from '../lib/long-video-run'
 import { settleSeams } from '../api/video-settle'
+import { ownWorkflowMisfit } from '../lib/own-workflow-fit'
 import { loadImageRef } from '../components/create/experimental/loadImage'
 import { listMlxLoras } from '../api/mlx-loras'
 import {
@@ -1897,15 +1898,9 @@ export function useCreate() {
       // Check for custom workflow assignment — but verify it's compatible with the model
       let customWf = localOp || isUpscale ? null : useWorkflowStore.getState().getWorkflowForModel(activeModel, imageModelType)
       if (customWf) {
-        const wfNodes = apiNodes(customWf.workflow).map(([, n]) => n.class_type)
-        const needsUnet = imageModelType === 'flux' || imageModelType === 'flux2' || imageModelType === 'zimage' || imageModelType === 'wan' || imageModelType === 'hunyuan'
-        const hasUnet = wfNodes.includes('UNETLoader')
-        const hasCheckpoint = wfNodes.includes('CheckpointLoaderSimple')
-        if (needsUnet && !hasUnet && hasCheckpoint) {
-          console.warn('[useCreate] Custom workflow incompatible: model needs UNETLoader but workflow has CheckpointLoaderSimple. Using auto.')
-          customWf = null
-        } else if (!needsUnet && hasUnet && !hasCheckpoint) {
-          console.warn('[useCreate] Custom workflow incompatible: model needs CheckpointLoaderSimple but workflow has UNETLoader. Using auto.')
+        const misfit = ownWorkflowMisfit(apiNodes(customWf.workflow).map(([, n]) => n.class_type), imageModelType, listedModel?.source)
+        if (misfit) {
+          console.warn(`[useCreate] Custom workflow incompatible: ${misfit}. Using auto.`)
           customWf = null
         }
       }
