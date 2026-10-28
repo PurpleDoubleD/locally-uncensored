@@ -114,6 +114,12 @@ describe('before the run', () => {
     expect(screen.getByText(/nothing is uploaded/)).toBeTruthy()
   })
 
+  it('names the check the run makes: 100 requests and 200 knowledge questions (3.0.9)', async () => {
+    api.abliteratePlan.mockResolvedValue(plan())
+    openFor()
+    expect(await screen.findByText(/the same 100 short requests and 200 knowledge questions/)).toBeTruthy()
+  })
+
   it('opens Start only after the 18+ line, and sends what was chosen', async () => {
     api.abliteratePlan.mockResolvedValue(plan())
     api.abliterateStart.mockResolvedValue(status())
