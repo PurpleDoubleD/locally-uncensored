@@ -2538,8 +2538,8 @@ export function useCreate() {
             fetchBlob: (item) => fetchGalleryItemBlob(item as GalleryItem),
             upload: (blob, name) => uploadMediaFile(blob, name),
             remove: (id) => useCreateStore.getState().removeFromGallery(id),
-            settle: async (item: ClipItem, seams) => {
-              const settled = await settleSeams(item, seams)
+            settle: async (item: ClipItem, seams, anchorEnd) => {
+              const settled = await settleSeams(item, seams, anchorEnd)
               if (!settled) return null
               const st = useCreateStore.getState()
               const old = st.gallery.find((g) => g.id === item.id)

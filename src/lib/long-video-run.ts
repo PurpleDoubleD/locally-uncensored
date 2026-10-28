@@ -8,14 +8,14 @@
 // gallery: the hook's run adds each one, this removes the one before it.
 // A clip the user brought (Extend Video) is never removed.
 //
-// After each section the seam gets a colour settle when the backend can do it
-// (a numpy step in ComfyUI's own Python, Rust command video_color_settle):
-// the next section then starts from settled frames, so a drift cannot carry
-// over and add up. Without it (a ComfyUI LU does not manage) the run goes on
+// After each section the new frames are matched to the first section when the
+// backend can do it (a numpy step in ComfyUI's own Python, Rust command
+// video_color_settle): the next section then starts from settled frames, so a
+// drift cannot carry over and add up. Without it (a ComfyUI LU does not manage) the run goes on
 // unsettled.
 
 import type { ModelType } from '../api/comfyui'
-import { planLongVideo, sectionSpec, type LongVideoPlan } from './long-video'
+import { MAX_LONG_SECONDS, planLongVideo, sectionSpec, type LongVideoPlan } from './long-video'
 
 /** What the chain needs to know about a gallery entry. */
 export interface ClipItem {
@@ -37,9 +37,10 @@ export interface LongRunDeps {
   /** Into ComfyUI's input folder; returns the name LoadVideo lists. */
   upload: (blob: Blob, name: string) => Promise<string>
   remove: (id: string) => void
-  /** Settle the colours at the seams, in place of the item; null when the
+  /** Match everything from the boundaries on to the anchor (frames
+   *  0..anchorEnd, the first section), in place of the item; null when the
    *  backend cannot. */
-  settle?: (item: ClipItem, boundaries: number[]) => Promise<ClipItem | null>
+  settle?: (item: ClipItem, boundaries: number[], anchorEnd: number) => Promise<ClipItem | null>
   aborted: () => boolean
 }
 
@@ -154,11 +155,12 @@ export async function runLongVideo(plan: LongVideoPlan, start: LongRunStart, dep
       seams.push(frames)
       frames += sectionFrames - plan.overlap
     }
-    // Only the newest seam: everything before it was settled in the step
-    // before, and this section was made from those settled frames. Passing
-    // every seam would only re-encode the old ones again.
+    // Only the newest section, matched to the first one (the anchor):
+    // everything before it was settled in the step before, and this section
+    // was made from those settled frames, so its drift is one step, never the
+    // sum of all before it.
     if (deps.settle && seams.length > 0) {
-      const settled = await deps.settle(current, seams.slice(-1)).catch(() => null)
+      const settled = await deps.settle(current, seams.slice(-1), seams[0]).catch(() => null)
       if (settled) current = settled
     }
   }
@@ -198,6 +200,9 @@ export function longVideoRequest(ask: LongVideoAsk): LongVideoRequest | null {
   const spec = sectionSpec(ask.type)
   if (!spec) return null
   const fps = ask.fps > 0 ? ask.fps : spec.fps
+  // A value saved before the limit came down never asks for more than the
+  // control offers now.
+  const seconds = Math.min(MAX_LONG_SECONDS, ask.longVideoSeconds)
   const continueModel = continueModelFor(ask.model, ask.type, ask.installed)
   const noI2v = (): LongVideoRequest => ({
     kind: 'error',
@@ -205,14 +210,14 @@ export function longVideoRequest(ask: LongVideoAsk): LongVideoRequest | null {
   })
   if (ask.intent === 'extend') {
     if (!ask.extendClip) return null
-    const add = ask.longVideoSeconds > 0 ? ask.longVideoSeconds : (spec.native - spec.overlap) / spec.fps
+    const add = seconds > 0 ? seconds : (spec.native - spec.overlap) / spec.fps
     const plan = planExtension(ask.type, add, fps)
     if (!plan) return null
     if (!continueModel) return noI2v()
     return { kind: 'sections', plan, start: { firstModel: continueModel, continueModel, clip: ask.extendClip } }
   }
-  if (!(ask.longVideoSeconds > 0) || ask.longVideoSeconds * fps <= spec.native) return null
-  const plan = planLongVideo(ask.type, ask.longVideoSeconds, fps)
+  if (!(seconds > 0) || seconds * fps <= spec.native) return null
+  const plan = planLongVideo(ask.type, seconds, fps)
   if (!plan || plan.sections.length < 2) return null
   if (ask.longVideoMode === 'one-pass') return { kind: 'one-pass', frames: plan.totalFrames }
   if (!continueModel) return noI2v()

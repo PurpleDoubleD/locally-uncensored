@@ -178,6 +178,28 @@ describe('runLongVideo: section after section, one clip in the gallery', () => {
     expect(seen[0]).toEqual([81])
     expect(seen[1]).toEqual([157])
   })
+
+  it('matches every new section to the first one, not to the one before (P5)', async () => {
+    const f = fakeDeps()
+    const anchors: number[] = []
+    await runLongVideo(planLongVideo('wan', 30, 16)!, { firstModel: 'T', continueModel: 'I' }, {
+      ...f.deps,
+      settle: async (item, _seams, anchorEnd) => { anchors.push(anchorEnd); return item },
+    })
+    expect(anchors).toHaveLength(6)
+    expect(new Set(anchors)).toEqual(new Set([81]))
+  })
+
+  it('an extended clip is its own anchor', async () => {
+    const f = fakeDeps()
+    const anchors: number[] = []
+    const plan = planExtension('wan', 10, 16)!
+    await runLongVideo(plan, { firstModel: 'I', continueModel: 'I', clip: new Blob(['x']), clipFrames: 161 }, {
+      ...f.deps,
+      settle: async (item, _seams, anchorEnd) => { anchors.push(anchorEnd); return item },
+    })
+    expect(new Set(anchors)).toEqual(new Set([161]))
+  })
 })
 
 describe('Fast mode for the Wan 14B models', () => {

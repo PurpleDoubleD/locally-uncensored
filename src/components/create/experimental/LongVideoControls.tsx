@@ -139,7 +139,7 @@ export function LongVideoControls({ model, intent }: { model: string; intent: st
             ? 'Continues from the last frames of the clip, the result is the whole clip, longer.'
             : s.longVideoMode === 'one-pass'
               ? 'One run past the native length. Keeps the scene even; motion may repeat.'
-              : `Past ${nativeSeconds} s the clip is made in sections. Each one continues from the last frames, colours are matched at every seam.`}
+              : `Past ${nativeSeconds} s the clip is made in sections. Each one continues from the last frames and is held to the colours and sharpness of the first.`}
         </p>
       )}
       {estimate && (

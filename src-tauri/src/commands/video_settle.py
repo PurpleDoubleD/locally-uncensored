@@ -1,24 +1,38 @@
 """Colour settle for a video made of several sections laid end to end.
 
 LU writes this file into a private temp folder and runs it with ComfyUI's own
-Python (``python -I video_settle.py --input A --output B --boundaries 81,157
---window 5``). Only numpy and PyAV (``av``) are imported besides the standard
-library; both are in ComfyUI's requirements.txt.
+Python (``python -I video_settle.py --input A --output B --boundaries 157
+--anchor-end 81 --window 8``). Only numpy and PyAV (``av``) are imported
+besides the standard library; both are in ComfyUI's requirements.txt.
 
-Every boundary is the index of the first frame of a new section. Each section
-is matched to the one before it, as that one looks AFTER its own correction:
-the last ``window`` corrected frames before the boundary are the reference,
-the first ``window`` frames of the new section the sample. Per channel
+Every boundary is the index of the first frame of a new section. The frames
+before the first boundary pass through as they are; from it on every frame is
+matched to the anchor, frames 0..anchor_end-1 (without ``--anchor-end``: all
+frames before the first boundary). The anchor is the clip's first section, so
+every later one hangs on it and no correction builds on another.
 
-    gain = clamp(std_ref / std_cur, 0.8, 1.25)
-    f'   = (f - mean_cur) * gain + mean_ref
+Why per frame and not once per seam (P5, 3.0.9): in the B18 box runs a Wan
+section continued from frames came out about a fifth more saturated and half
+again as sharp within its first 15 frames, then stayed there, and the next
+section started from that and added its own step. Matching the first frames
+of a section to the last ones of the section before only carried every step
+over. Here, per frame and per plane of the video's own YUV,
 
-is applied to every frame from the boundary to the next one (or the end).
-Chained like this, every section hangs on the first one and the corrections
-do not add up their own errors.
+    f' = (f - mean_t) * clamp(std_anchor / std_t) + mean_t + clamp(mean_anchor - mean_t)
 
-The video is streamed: at most ``window`` corrected frames and ``window``
-uncorrected ones are held at a time, so the length of the video does not
+where mean_t and std_t are smoothed over ``window`` frames on each side
+(never across a boundary), so a quick change in the picture stays and only
+the slow drift goes. U and V carry the saturation. Sharpness is the mean
+absolute Laplacian of Y; a frame sharper than the anchor is blended towards a
+slightly blurred copy of itself by just enough to meet it (softened only,
+never sharpened).
+
+Everything stays in YUV 4:2:0, the format the h264 file has anyway. A detour
+through RGB lost about 1.2 levels of brightness on every pass with PyAV, and
+a long clip passes through here once per section.
+
+Two passes over the video: statistics first, then the corrected frames. Only
+per-frame numbers are kept between them, so the length of the video does not
 decide the memory it needs. Frames above MAX_PIXELS are refused outright.
 
 The result goes to stdout as one JSON line, the last line printed. An error
@@ -28,18 +42,23 @@ is the same shape with ``ok: false`` and exit code 2.
 import argparse
 import json
 import sys
-from collections import deque
 from fractions import Fraction
 
 import av
 import numpy as np
 
-GAIN_MIN = 0.8
-GAIN_MAX = 1.25
-# 4096 x 2304: far above anything LU renders, low enough that 2 x window
-# frames in float stay well under a gigabyte.
+# 4096 x 2304: far above anything LU renders.
 MAX_PIXELS = 4096 * 2304
 MAX_WINDOW = 60
+# The drift this takes out builds up over sections; the clamp only stops a
+# scene that really changed from being forced back.
+Y_GAIN = (0.75, 1.25)
+C_GAIN = (0.5, 1.5)
+Y_SHIFT = 30.0
+C_SHIFT = 15.0
+SOFTEN_MAX = 0.85
+# Every 2nd pixel in each direction is enough for the statistics.
+STEP = 2
 
 
 def fail(message):
@@ -60,41 +79,124 @@ def parse_boundaries(text):
     return sorted(out)
 
 
-def channel_stats(frames):
-    """Mean and standard deviation per channel over a list of HxWx3 uint8."""
-    stack = np.stack(frames).astype(np.float64)
-    flat = stack.reshape(-1, 3)
-    return flat.mean(axis=0), flat.std(axis=0)
+def planes(frame, w, h):
+    """Y (h x w), U and V (h/2 x w/2) of a decoded frame, as uint8."""
+    if frame.format.name != "yuv420p":
+        frame = frame.reformat(format="yuv420p")
+    a = frame.to_ndarray(format="yuv420p")
+    fw = frame.width
+    fh = frame.height
+    y = a[:fh, :fw]
+    qw, qh = fw // 2, fh // 2
+    u = a[fh:fh + fh // 4].reshape(-1)[: qw * qh].reshape(qh, qw)
+    v = a[fh + fh // 4:].reshape(-1)[: qw * qh].reshape(qh, qw)
+    return y[:h, :w], u[: h // 2, : w // 2], v[: h // 2, : w // 2]
 
 
-def make_transform(ref_frames, cur_frames):
-    ref_mean, ref_std = channel_stats(ref_frames)
-    cur_mean, cur_std = channel_stats(cur_frames)
-    gain = np.ones(3)
-    for c in range(3):
-        if cur_std[c] > 1e-6:
-            gain[c] = ref_std[c] / cur_std[c]
-    gain = np.clip(gain, GAIN_MIN, GAIN_MAX)
-    seam = {
-        "refMean": [round(float(v), 3) for v in ref_mean],
-        "curMean": [round(float(v), 3) for v in cur_mean],
-        "refStd": [round(float(v), 3) for v in ref_std],
-        "curStd": [round(float(v), 3) for v in cur_std],
-        "gain": [round(float(v), 4) for v in gain],
-        "refFrames": len(ref_frames),
-        "curFrames": len(cur_frames),
+def to_frame(y, u, v):
+    h, w = y.shape
+    a = np.empty((h * 3 // 2, w), dtype=np.uint8)
+    a[:h] = y
+    a[h:h + h // 4] = u.reshape(h // 4, w)
+    a[h + h // 4:] = v.reshape(h // 4, w)
+    return av.VideoFrame.from_ndarray(a, format="yuv420p")
+
+
+def blur(img):
+    """5-tap binomial blur along both axes, edges repeated."""
+    out = img.astype(np.float32)
+    for axis in (0, 1):
+        pad = [(0, 0), (0, 0)]
+        pad[axis] = (2, 2)
+        p = np.pad(out, pad, mode="edge")
+        n = out.shape[axis]
+        acc = np.zeros_like(out)
+        for i, w in enumerate((1.0, 4.0, 6.0, 4.0, 1.0)):
+            acc += w * np.take(p, range(i, i + n), axis=axis)
+        out = acc / 16.0
+    return out
+
+
+def sharpness(y):
+    y = y.astype(np.float32)
+    lap = 4 * y[1:-1, 1:-1] - y[:-2, 1:-1] - y[2:, 1:-1] - y[1:-1, :-2] - y[1:-1, 2:]
+    return float(np.abs(lap).mean())
+
+
+def frame_stats(y, u, v, with_blur):
+    sub = [p[::STEP, ::STEP].astype(np.float64) for p in (y, u, v)]
+    row = {
+        "mean": np.array([p.mean() for p in sub]),
+        "std": np.array([p.std() for p in sub]),
+        "sharp": sharpness(y),
     }
-    return (cur_mean, gain, ref_mean), seam
+    if with_blur:
+        row["sharpBlur"] = sharpness(blur(y))
+    return row
 
 
-def apply_transform(frame, transform):
-    if transform is None:
-        return frame
-    cur_mean, gain, ref_mean = transform
-    out = (frame.astype(np.float32) - cur_mean.astype(np.float32)) * gain.astype(np.float32)
-    out += ref_mean.astype(np.float32)
-    np.clip(out, 0.0, 255.0, out=out)
-    return np.rint(out).astype(np.uint8)
+def smooth(values, window, cuts):
+    """Centred moving average over `window` frames each side, never across a
+    cut (indices where a new section starts)."""
+    arr = np.asarray(values, dtype=np.float64)
+    out = np.empty_like(arr)
+    edges = [0] + [c for c in cuts if 0 < c < len(arr)] + [len(arr)]
+    for lo_seg, hi_seg in zip(edges, edges[1:]):
+        for i in range(lo_seg, hi_seg):
+            lo, hi = max(lo_seg, i - window), min(hi_seg, i + window + 1)
+            out[i] = arr[lo:hi].mean(axis=0)
+    return out
+
+
+def plan_frames(stats, anchor_end, start, window, boundaries):
+    """Per frame from `start` on: (mean_t, gain, target, soften), and the
+    anchor's numbers."""
+    anchor = stats[:anchor_end]
+    a_mean = np.mean([r["mean"] for r in anchor], axis=0)
+    a_std = np.mean([r["std"] for r in anchor], axis=0)
+    a_sharp = float(np.mean([r["sharp"] for r in anchor]))
+    rest = stats[start:]
+    cuts = [b - start for b in boundaries if b > start]
+    m = smooth([r["mean"] for r in rest], window, cuts)
+    sd = smooth([r["std"] for r in rest], window, cuts)
+    sh = smooth([r["sharp"] for r in rest], window, cuts)
+    sb = smooth([r["sharpBlur"] for r in rest], window, cuts)
+    plan = []
+    for i in range(len(rest)):
+        gain = np.ones(3)
+        for c in range(3):
+            if sd[i][c] > 1e-6:
+                gain[c] = a_std[c] / sd[i][c]
+        gain[0] = min(max(gain[0], Y_GAIN[0]), Y_GAIN[1])
+        gain[1:] = np.clip(gain[1:], C_GAIN[0], C_GAIN[1])
+        target = m[i].copy()
+        target[0] += float(np.clip(a_mean[0] - m[i][0], -Y_SHIFT, Y_SHIFT))
+        target[1:] += np.clip(a_mean[1:] - m[i][1:], -C_SHIFT, C_SHIFT)
+        # The Laplacian scales with the Y gain; blending towards the blurred
+        # copy moves it linearly between the two.
+        s_now, s_soft = gain[0] * sh[i], gain[0] * sb[i]
+        soften = 0.0
+        if s_now > a_sharp and s_now - s_soft > 1e-6:
+            soften = min(SOFTEN_MAX, (s_now - a_sharp) / (s_now - s_soft))
+        plan.append((m[i], gain, target, soften))
+    anchor_info = {
+        "mean": [round(float(x), 3) for x in a_mean],
+        "std": [round(float(x), 3) for x in a_std],
+        "sharp": round(a_sharp, 3),
+    }
+    return plan, anchor_info
+
+
+def apply_plan(y, u, v, step):
+    mean_t, gain, target, soften = step
+    out = []
+    for c, p in enumerate((y, u, v)):
+        f = (p.astype(np.float32) - np.float32(mean_t[c])) * np.float32(gain[c]) + np.float32(target[c])
+        if soften > 0:
+            f += np.float32(soften) * (blur(f) - f)
+        np.clip(f, 0.0, 255.0, out=f)
+        out.append(np.rint(f).astype(np.uint8))
+    return out
 
 
 def add_audio_stream(output, in_audio):
@@ -107,12 +209,28 @@ def add_audio_stream(output, in_audio):
         return None, "audio not copied: %s" % exc
 
 
+def copy_audio(input_path, output, out_audio):
+    """Remux the source's audio behind the video. Returns (copied, note)."""
+    try:
+        with av.open(input_path) as again:
+            stream = again.streams.audio[0]
+            for packet in again.demux(stream):
+                if packet.dts is None:
+                    continue
+                packet.stream = out_audio
+                output.mux(packet)
+        return True, None
+    except Exception as exc:
+        return False, "audio not copied: %s" % exc
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--input", required=True)
     parser.add_argument("--output", required=True)
     parser.add_argument("--boundaries", default="")
-    parser.add_argument("--window", type=int, default=5)
+    parser.add_argument("--anchor-end", type=int, default=0)
+    parser.add_argument("--window", type=int, default=8)
     parser.add_argument("--crf", type=int, default=18)
     args = parser.parse_args()
 
@@ -128,15 +246,36 @@ def main():
     if not source.streams.video:
         fail("The file has no video stream.")
     in_video = source.streams.video[0]
-    in_audio = source.streams.audio[0] if source.streams.audio else None
+    has_audio = bool(source.streams.audio)
     width = in_video.codec_context.width
     height = in_video.codec_context.height
     if width * height > MAX_PIXELS:
         fail("Frames of %dx%d are larger than this step handles." % (width, height))
-    rate = in_video.average_rate or in_video.guessed_rate or Fraction(24, 1)
-    rate = Fraction(rate)
+    rate = Fraction(in_video.average_rate or in_video.guessed_rate or Fraction(24, 1))
     # yuv420p needs even sides; an odd one loses its last row or column.
     out_w, out_h = width - (width % 2), height - (height % 2)
+
+    # Pass 1: numbers per frame.
+    stats = []
+    try:
+        for frame in source.decode(in_video):
+            stats.append(frame_stats(*planes(frame, out_w, out_h), with_blur=True))
+    except Exception as exc:
+        fail("Reading failed at frame %d: %s" % (len(stats), exc))
+    source.close()
+    total = len(stats)
+
+    inside = [b for b in requested if 0 < b < total]
+    ignored = [b for b in requested if b not in inside]
+    anchor_end = args.anchor_end if args.anchor_end > 0 else (inside[0] if inside else 0)
+    after = [b for b in inside if b >= anchor_end]
+    ignored.extend(b for b in inside if b < anchor_end)
+    start = after[0] if after else None
+    if start is None or anchor_end < 1 or anchor_end >= total:
+        start = total  # nothing to correct: a plain copy
+        plan, anchor_info = [], None
+    else:
+        plan, anchor_info = plan_frames(stats, anchor_end, start, window, after)
 
     output = av.open(args.output, mode="w")
     out_video = output.add_stream("h264", rate=rate)
@@ -149,103 +288,68 @@ def main():
         pass
     time_base = Fraction(1, 1) / rate
     out_audio, audio_note = (None, None)
-    if in_audio is not None:
-        out_audio, audio_note = add_audio_stream(output, in_audio)
+    if has_audio:
+        with av.open(args.input) as probe:
+            out_audio, audio_note = add_audio_stream(output, probe.streams.audio[0])
 
-    written = 0
-
-    def write(frame_array):
-        nonlocal written
-        if frame_array.shape[1] != out_w or frame_array.shape[0] != out_h:
-            frame_array = frame_array[:out_h, :out_w]
-        vf = av.VideoFrame.from_ndarray(np.ascontiguousarray(frame_array), format="rgb24")
-        vf.pts = written
-        vf.time_base = time_base
-        for packet in out_video.encode(vf):
-            output.mux(packet)
-        written += 1
-
-    pending = deque(requested)
-    while pending and pending[0] <= 0:
-        pending.popleft()
-    ignored = [b for b in requested if b <= 0]
-    seams = []
-    recent = deque(maxlen=window)  # last corrected frames
-    transform = None
-    sample = None  # raw frames collected after a boundary
-    sample_start = None
-    sample_end = None
+    # Pass 2: write.
     index = 0
-
-    def close_sample():
-        nonlocal transform, sample, sample_start
-        new_transform, seam = make_transform(list(recent), sample)
-        seam["frame"] = sample_start
-        seams.append(seam)
-        transform = new_transform
-        for raw in sample:
-            fixed = apply_transform(raw, transform)
-            write(fixed)
-            recent.append(fixed)
-        sample = None
-        sample_start = None
-
     try:
-        for frame in source.decode(in_video):
-            raw = frame.to_ndarray(format="rgb24")
-            if pending and index == pending[0]:
-                if sample is not None:
-                    close_sample()
-                pending.popleft()
-                sample, sample_start = [], index
-                # The sample stays inside its own section.
-                sample_end = min(index + window, pending[0] if pending else index + window)
-            if sample is not None:
-                sample.append(raw)
-                if index + 1 >= sample_end:
-                    close_sample()
-            else:
-                fixed = apply_transform(raw, transform)
-                write(fixed)
-                recent.append(fixed)
-            index += 1
-        if sample is not None:
-            close_sample()
+        with av.open(args.input) as again:
+            for frame in again.decode(again.streams.video[0]):
+                y, u, v = planes(frame, out_w, out_h)
+                if index >= start:
+                    y, u, v = apply_plan(y, u, v, plan[index - start])
+                vf = to_frame(y, u, v)
+                vf.pts = index
+                vf.time_base = time_base
+                for packet in out_video.encode(vf):
+                    output.mux(packet)
+                index += 1
         for packet in out_video.encode():
             output.mux(packet)
-    except SystemExit:
-        raise
     except Exception as exc:
         output.close()
         fail("Processing failed at frame %d: %s" % (index, exc))
 
-    ignored.extend(pending)
-    source.close()
-
     audio_copied = False
     if out_audio is not None:
-        try:
-            with av.open(args.input) as again:
-                stream = again.streams.audio[0]
-                for packet in again.demux(stream):
-                    if packet.dts is None:
-                        continue
-                    packet.stream = out_audio
-                    output.mux(packet)
-            audio_copied = True
-        except Exception as exc:
-            audio_note = "audio not copied: %s" % exc
+        audio_copied, note = copy_audio(args.input, output, out_audio)
+        audio_note = note or audio_note
     output.close()
+
+    seams = []
+    if anchor_info is not None:
+        cuts = after + [total]
+        for lo, hi in zip(cuts, cuts[1:]):
+            part = plan[lo - start:hi - start]
+            raw = stats[lo:hi]
+            softens = [p[3] for p in part]
+            seams.append({
+                "frame": lo,
+                "space": "yuv",
+                "refMean": anchor_info["mean"],
+                "refStd": anchor_info["std"],
+                "curMean": [round(float(x), 3) for x in np.mean([r["mean"] for r in raw], axis=0)],
+                "curStd": [round(float(x), 3) for x in np.mean([r["std"] for r in raw], axis=0)],
+                "gain": [round(float(x), 4) for x in np.mean([p[1] for p in part], axis=0)],
+                "refFrames": anchor_end,
+                "curFrames": hi - lo,
+                "refSharp": anchor_info["sharp"],
+                "curSharp": round(float(np.mean([r["sharp"] for r in raw])), 3),
+                "soften": round(float(np.mean(softens)), 4),
+                "softenMax": round(float(np.max(softens)), 4),
+            })
 
     print(json.dumps({
         "ok": True,
-        "frames": written,
+        "frames": index,
         "width": out_w,
         "height": out_h,
         "fps": float(rate),
         "window": window,
         "seams": seams,
-        "ignoredBoundaries": ignored,
+        "ignoredBoundaries": sorted(ignored),
         "audio": audio_copied,
         "note": audio_note,
     }))

@@ -22,8 +22,15 @@
 
 import type { ModelType } from '../api/comfyui'
 
-/** The longest clip the Seconds control offers. */
-export const MAX_LONG_SECONDS = 30
+/** The longest clip sections can make. The box run of 3.0.9 made 30 s with
+ *  clean seams, so the plan itself goes this far. */
+export const LONG_SECONDS_CAP = 30
+
+/** The longest clip the Length control offers (and the most Extend Video
+ *  adds in one go). 15 s for 3.0.9: past that the box runs drifted towards
+ *  a saturated, oversharpened picture (B18). Set it to LONG_SECONDS_CAP to
+ *  offer the full 30 s; nothing else needs to change. */
+export const MAX_LONG_SECONDS = 15
 
 export interface SectionSpec {
   /** Frames of one section at the model's native length. */
@@ -71,19 +78,21 @@ export interface LongVideoPlan {
  * the native length (or shorter for a short clip), each later one adds up to
  * `native - overlap` new frames, and the last one is cut to what is left,
  * on the family's grid and never shorter than its overlap plus one grid step.
- * The clip never comes out shorter than asked; it may run up to one grid step
- * longer.
+ * The clip may run up to one grid step longer than asked, or up to half a
+ * second shorter where one more section would only add those few frames.
  */
 export function planLongVideo(type: ModelType | string, seconds: number, fps?: number): LongVideoPlan | null {
   const spec = sectionSpec(type)
   if (!spec) return null
   const rate = fps && fps > 0 ? fps : spec.fps
-  const want = snapUp(Math.round(Math.min(MAX_LONG_SECONDS, Math.max(1, seconds)) * rate), spec.grid)
+  const want = snapUp(Math.round(Math.min(LONG_SECONDS_CAP, Math.max(1, seconds)) * rate), spec.grid)
   const first = Math.min(spec.native, want)
   const sections = [first]
   let total = first
   const step = spec.native - spec.overlap
-  while (total < want) {
+  // A last section that would add half a second or less costs a whole run
+  // (model load, decode) for almost nothing: the clip ends that much short.
+  while (want - total > Math.max(spec.grid, rate / 2)) {
     const add = Math.min(step, want - total)
     const frames = Math.max(spec.overlap + spec.grid, snapUp(spec.overlap + add, spec.grid))
     sections.push(frames)

@@ -1,12 +1,12 @@
 //! Colour settle for a long video made of several sections (3.0.9).
 //!
-//! A 30 second clip is rendered as sections that each continue from the last
-//! frame of the one before. Every section drifts a little in brightness,
-//! contrast and tint, and over five or six sections that adds up to a visible
-//! jump at every seam. `video_color_settle` takes the finished, already
-//! concatenated clip and matches each section to the corrected one before it
-//! (the rule is in video_settle.py, which runs on ComfyUI's own Python with
-//! numpy and PyAV, both in ComfyUI's requirements).
+//! A long clip is rendered as sections that each continue from the last
+//! frames of the one before. Every section comes out more saturated and
+//! sharper than the one it continues, and over a few sections that adds up.
+//! `video_color_settle` takes the finished, already concatenated clip and
+//! matches every frame from the newest seam on to the clip's first section,
+//! the anchor (the rule is in video_settle.py, which runs on ComfyUI's own
+//! Python with numpy and PyAV, both in ComfyUI's requirements).
 //!
 //! The frontend only knows ComfyUI's own file names (filename, subfolder,
 //! type), the same triple the gallery shows. The file is resolved here inside
@@ -38,8 +38,8 @@ const SCRIPT: &str = include_str!("video_settle.py");
 /// the frontend can skip the step without showing an error.
 pub const NOT_AVAILABLE: &str = "not available";
 
-/// Default frames on each side of a seam that the statistics are taken over.
-pub(crate) const DEFAULT_WINDOW: u32 = 5;
+/// Default frames on each side that a frame's statistics are smoothed over.
+pub(crate) const DEFAULT_WINDOW: u32 = 8;
 /// Upper bound, the same as the script's own.
 pub(crate) const MAX_WINDOW: u32 = 60;
 /// A 30 second 832x480 clip takes well under a minute; ten minutes covers a
@@ -48,8 +48,9 @@ const RUN_TIMEOUT: Duration = Duration::from_secs(600);
 /// Video containers a section render can come out as.
 const VIDEO_EXTENSIONS: &[&str] = &["mp4", "webm", "mov", "mkv"];
 
-/// One seam as the script measured it. Means and deviations are per RGB
-/// channel on the 0..255 scale.
+/// One corrected section as the script measured it. Means and deviations are
+/// per plane of the video's YUV (`space`), on the 0..255 scale; `ref*` is the
+/// anchor, `cur*` the section as it came out.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct SettleSeam {
@@ -59,10 +60,22 @@ pub struct SettleSeam {
     pub cur_mean: [f64; 3],
     pub ref_std: [f64; 3],
     pub cur_std: [f64; 3],
-    /// The contrast factor applied, already clamped to 0.8..1.25.
+    /// The mean contrast factor applied per plane, already clamped.
     pub gain: [f64; 3],
     pub ref_frames: u32,
     pub cur_frames: u32,
+    #[serde(default)]
+    pub space: Option<String>,
+    /// Sharpness (mean absolute Laplacian of Y) of the anchor and the section.
+    #[serde(default)]
+    pub ref_sharp: Option<f64>,
+    #[serde(default)]
+    pub cur_sharp: Option<f64>,
+    /// How far frames were blended towards a blurred copy, mean and most.
+    #[serde(default)]
+    pub soften: Option<f64>,
+    #[serde(default)]
+    pub soften_max: Option<f64>,
 }
 
 /// What the script prints as its last line.
@@ -198,9 +211,9 @@ pub(crate) fn effective_window(window: Option<u32>) -> Result<u32, String> {
 
 /// The interpreter's argument list: isolated mode, the script, then every
 /// path as its own argument. No shell ever sees these.
-pub(crate) fn script_args(script: &Path, input: &Path, output: &Path, boundaries: &[u32], window: u32) -> Vec<OsString> {
+pub(crate) fn script_args(script: &Path, input: &Path, output: &Path, boundaries: &[u32], window: u32, anchor_end: Option<u32>) -> Vec<OsString> {
     let list = boundaries.iter().map(u32::to_string).collect::<Vec<_>>().join(",");
-    vec![
+    let mut args: Vec<OsString> = vec![
         "-I".into(),
         script.as_os_str().to_owned(),
         "--input".into(),
@@ -211,7 +224,12 @@ pub(crate) fn script_args(script: &Path, input: &Path, output: &Path, boundaries
         list.into(),
         "--window".into(),
         window.to_string().into(),
-    ]
+    ];
+    if let Some(end) = anchor_end.filter(|e| *e > 0) {
+        args.push("--anchor-end".into());
+        args.push(end.to_string().into());
+    }
+    args
 }
 
 /// The report out of the script's stdout: the last line that is JSON. Lines
@@ -288,6 +306,7 @@ fn settle_blocking(
     folder_type: &str,
     boundaries: Vec<u32>,
     window: Option<u32>,
+    anchor_end: Option<u32>,
 ) -> Result<SettleReport, String> {
     let folder = ComfyFolder::parse(folder_type)?;
     let window = effective_window(window)?;
@@ -307,7 +326,7 @@ fn settle_blocking(
     // stopped run never leaves a half file under the name the gallery shows.
     let partial = out_dir.join(format!(".lu-settle-{}-{}.mp4", std::process::id(), uuid::Uuid::new_v4().simple()));
     let (_script_dir, script) = crate::private_tmp::write_private_temp("lu-settle-", "video_settle.py", SCRIPT.as_bytes())?;
-    let args = script_args(&script, &input, &partial, &boundaries, window);
+    let args = script_args(&script, &input, &partial, &boundaries, window, anchor_end);
 
     let run = run_with_timeout(&python, &args, RUN_TIMEOUT);
     let finish = || {
@@ -350,7 +369,9 @@ fn settle_blocking(
 
 /// Settle the colour across the seams of a long video in ComfyUI's output
 /// (or input) folder. `boundaries` are the frame indices where a new section
-/// starts, `window` the frames per side the statistics use (default 5).
+/// starts; frames from the first of them on are matched to the anchor, frames
+/// `0..anchor_end` (default: all before the first boundary). `window` is the
+/// frames per side the statistics are smoothed over (default 8).
 // ASYNC + spawn_blocking, like start_comfyui: the run takes seconds to
 // minutes and must not sit on the main thread.
 #[tauri::command]
@@ -361,10 +382,11 @@ pub async fn video_color_settle(
     folder_type: String,
     boundaries: Vec<u32>,
     window: Option<u32>,
+    anchor_end: Option<u32>,
 ) -> Result<SettleReport, String> {
     tokio::task::spawn_blocking(move || {
         let state = app.state::<AppState>();
-        settle_blocking(&state, &filename, &subfolder, &folder_type, boundaries, window)
+        settle_blocking(&state, &filename, &subfolder, &folder_type, boundaries, window, anchor_end)
     })
     .await
     .map_err(|e| format!("video_color_settle task: {e}"))?
@@ -449,7 +471,7 @@ mod tests {
         assert_eq!(ComfyFolder::parse("input").unwrap(), ComfyFolder::Input);
         assert!(ComfyFolder::parse("temp").is_err());
         assert!(ComfyFolder::parse("../output").is_err());
-        assert_eq!(effective_window(None).unwrap(), 5);
+        assert_eq!(effective_window(None).unwrap(), 8);
         assert_eq!(effective_window(Some(12)).unwrap(), 12);
         assert!(effective_window(Some(0)).is_err());
         assert!(effective_window(Some(MAX_WINDOW + 1)).is_err());
@@ -464,6 +486,7 @@ mod tests {
             Path::new("/c/out/.lu-settle-1.mp4"),
             &[81, 157],
             5,
+            None,
         );
         let text: Vec<String> = args.iter().map(|a| a.to_string_lossy().to_string()).collect();
         assert_eq!(
@@ -481,6 +504,30 @@ mod tests {
                 "5",
             ]
         );
+    }
+
+    #[test]
+    fn the_anchor_goes_to_the_script_only_when_given() {
+        let args = |anchor| {
+            script_args(Path::new("/s.py"), Path::new("/i.mp4"), Path::new("/o.mp4"), &[157], 8, anchor)
+                .iter()
+                .map(|a| a.to_string_lossy().to_string())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(args(Some(81))[9..], ["8", "--anchor-end", "81"]);
+        assert_eq!(args(None).len(), 10);
+        assert_eq!(args(Some(0)).len(), 10);
+    }
+
+    #[test]
+    fn a_report_with_the_anchor_numbers_reads() {
+        let out = "{\"ok\": true, \"frames\": 233, \"seams\": [{\"frame\": 157, \"space\": \"yuv\", \"refMean\": [1,2,3], \
+                   \"curMean\": [1,2,3], \"refStd\": [1,1,1], \"curStd\": [1,1,1], \"gain\": [1,0.8,0.8], \"refFrames\": 81, \
+                   \"curFrames\": 76, \"refSharp\": 6.9, \"curSharp\": 10.0, \"soften\": 0.4, \"softenMax\": 0.5}]}";
+        let r = parse_script_output(out).unwrap();
+        assert_eq!(r.seams[0].space.as_deref(), Some("yuv"));
+        assert_eq!(r.seams[0].soften_max, Some(0.5));
+        assert_eq!(r.seams[0].ref_frames, 81);
     }
 
     #[test]
@@ -514,6 +561,15 @@ mod tests {
                 assert!(allowed.contains(&m), "video_settle.py imports {m}");
             }
         }
+    }
+
+    /// P5: PyAV's yuv420p -> rgb24 -> yuv420p round trip lost about 1.2
+    /// levels of brightness per pass, and a long clip passes through here
+    /// once per section. The script works on the YUV planes only.
+    #[test]
+    fn the_script_never_takes_a_detour_through_rgb() {
+        assert!(!SCRIPT.contains("rgb24"), "video_settle.py converts to RGB");
+        assert!(SCRIPT.contains("format=\"yuv420p\""));
     }
 
     #[test]
