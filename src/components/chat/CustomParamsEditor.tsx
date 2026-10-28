@@ -42,7 +42,8 @@ export function CustomParamsEditor({
   const remove = (i: number) => onChange(rows.filter((_, j) => j !== i))
   const add = () => onChange([...rows, { key: '', type: 'number', value: '' }])
   const own = new Set(rows.map((r) => r.key.trim()))
-  const below = (inherited?.rows ?? []).filter((r) => r.key.trim() && !own.has(r.key.trim()))
+  // Only the persona rows that really go out: a broken or fixed one is not "from" anywhere.
+  const below = (inherited?.rows ?? []).filter((r) => !customParamProblem(r) && !own.has(r.key.trim()))
 
   return (
     <div role="group" aria-label={CUSTOM_PARAMS_LABEL} data-testid={testId} className="space-y-1.5">

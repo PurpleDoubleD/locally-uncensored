@@ -18,7 +18,7 @@ const conversation = {
 }
 const baron = {
   id: 'baron', name: 'Baron', icon: 'User', systemPrompt: 'You are Baron.', isBuiltIn: false,
-  customParams: [{ key: 'xtc_threshold', type: 'number' as const, value: '0.1' }],
+  customParams: [{ key: 'xtc_threshold', type: 'number' as const, value: '0.1' }, { key: 'temperature', type: 'number' as const, value: '1.9' }],
 }
 
 beforeEach(() => {
@@ -53,6 +53,6 @@ describe('custom rows in the Sampling popup', () => {
     fireEvent.click(screen.getByTestId('sampling-trigger'))
     fireEvent.click(screen.getByRole('button', { name: 'Reset' }))
     expect(conv().customParams).toBeUndefined()
-    expect(useSettingsStore.getState().personas[0].customParams).toHaveLength(1)
+    expect(useSettingsStore.getState().personas[0].customParams).toHaveLength(2)
   })
 })
