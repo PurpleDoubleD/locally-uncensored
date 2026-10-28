@@ -206,6 +206,10 @@ describe('endpointMap covers every backendCall/invokeMedia site the frontend can
     // behind isTauri() for the same reason, the browser build has no files of
     // its own to place.
     'storage_apply', 'storage_cancel', 'storage_plan', 'storage_status',
+    // The inbox of locallyuncensored://open-model links (P9, 3.0.9,
+    // components/models/HfLinkInbox.tsx). Read only behind isTauri(): a link
+    // from the system reaches the desktop app, never the browser build.
+    'hf_link_take',
     'exit_app', 'file_read', 'find_orphan_downloads', 'fix_comfyui_cors', 'funnel_ping',
     'get_comfy_gpu_status', 'get_current_time', 'import_local_model', 'install_character_trainer',
     'install_lmstudio', 'install_lmstudio_status', 'install_method', 'install_python',

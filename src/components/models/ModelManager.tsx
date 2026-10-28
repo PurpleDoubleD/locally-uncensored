@@ -9,6 +9,7 @@ import {
 import { useModels } from '../../hooks/useModels'
 import { useModelStore } from '../../stores/modelStore'
 import { useUIStore } from '../../stores/uiStore'
+import { useHfLinkStore } from '../../stores/hfLinkStore'
 import { useProviderStore } from '../../stores/providerStore'
 import { ModelCard } from './ModelCard'
 import { RemoveRefusalsDialog } from './RemoveRefusalsDialog'
@@ -148,6 +149,17 @@ export function ModelManager() {
   // image engine (MacLoraLane), which the LoRA stack in Create reads. Until
   // that folder existed the rail was not offered on the Mac at all.
   const [extraRail, setExtraRail] = useState<'lora' | 'music' | null>(null)
+
+  // A Hugging Face link (HfLinkInbox) opens the Chat lane of Discover, where
+  // its dialog lives, whatever lane or tab was open.
+  const hfLink = useHfLinkStore((s) => s.pending)
+  useEffect(() => {
+    if (!hfLink) return
+    setExtraRail(null)
+    setTab('discover')
+    setCategoryFilter('text')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hfLink])
   const rail: Rail = extraRail === 'lora' ? 'lora' : extraRail === 'music' && macMlxMedia ? 'music' : mode
   const showMlxPanel = macMlxMedia && rail !== 'lora' && (rail === 'music' || mode === 'image' || mode === 'video')
   /** The Mac's own LoRA lane, in place of the ComfyUI one below. */
