@@ -20,7 +20,8 @@
   "bundle": {
     "externalBin": [
       "bin/lu-llama-server",
-      "bin/lu-llama-quantize"
+      "bin/lu-llama-quantize",
+      "bin/lu-llama-cvector-generator"
     ],
     "macOS": {
       "minimumSystemVersion": "14.0"

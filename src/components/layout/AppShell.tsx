@@ -64,6 +64,7 @@ import { RenderFixupModal } from '../create/experimental/RenderFixupModal'
 import { CommandPalette } from '../ui/CommandPalette'
 import { CreditsExhaustedModal } from './CreditsExhaustedModal'
 import { Titlebar } from './Titlebar'
+import { useNeuronFollowsPersona } from '../../hooks/useNeuronFollowsPersona'
 
 // Aus der Komponente herausgezogen: `new Set(STORE_KEYS)` entstand bei jedem
 // Render neu und war damit die instabile Referenz, wegen der der Restore-Effekt
@@ -125,6 +126,7 @@ const loadModelManager = () => import('../models/ModelManager').then((m) => ({ d
 const loadBenchmarkView = () => import('../models/BenchmarkView').then((m) => ({ default: m.BenchmarkView }))
 const loadSettingsPage = () => import('../settings/SettingsPage').then((m) => ({ default: m.SettingsPage }))
 const loadCreateExperimental = () => import('../create/experimental/CreateExperimental').then((m) => ({ default: m.CreateExperimental }))
+const loadNeuronView = () => import('../neuron/NeuronView').then((m) => ({ default: m.NeuronView }))
 const loadVoiceView = () => import('../voice/VoiceView').then((m) => ({ default: m.VoiceView }))
 const loadOnboarding = () => import('../onboarding/Onboarding').then((m) => ({ default: m.Onboarding }))
 
@@ -165,6 +167,7 @@ export function AppShell() {
   // the cloud Create axis and the lu-cloud chat provider in sync.
   useCloudAuth()
   useCloudOutageWatch()
+  useNeuronFollowsPersona()
 
   // ── Global Local/Cloud mode (2.5.7) — appMode drives everything ──
   const appMode = settings.appMode
@@ -268,7 +271,7 @@ export function AppShell() {
   // unmount), so there is no second stop here.
   useEffect(() => {
     const ui = useUIStore.getState()
-    if (appMode === 'cloud' && (ui.currentView === 'voice' || ui.currentView === 'models' || ui.currentView === 'benchmark')) {
+    if (appMode === 'cloud' && (ui.currentView === 'voice' || ui.currentView === 'models' || ui.currentView === 'benchmark' || ui.currentView === 'neuron')) {
       ui.setView('chat')
     }
   }, [appMode])
@@ -1177,6 +1180,7 @@ export function AppShell() {
             {currentView === 'settings' && <LazyView load={loadSettingsPage} fallback={<SettingsSkeleton />} />}
             {currentView === 'create' && <LazyView load={loadCreateExperimental} fallback={<CreateSkeleton />} />}
             {currentView === 'voice' && <LazyView load={loadVoiceView} fallback={<VoiceSkeleton />} />}
+            {currentView === 'neuron' && <LazyView load={loadNeuronView} fallback={<BenchmarkSkeleton />} />}
           </main>
         </div>
       </div>

@@ -128,6 +128,12 @@ pub struct EngineTuning {
     /// Set by the VRAM plan: `--cache-ram` in MiB when RAM is tight.
     #[serde(skip)]
     pub plan_cache_ram_mib: Option<u64>,
+    /// Set at the start from the Neuron tweaker (3.0.9, P11), never read
+    /// from settings: the one mixed control vector file for this model
+    /// (`--control-vector`). Only a file inside LU's own neuron folder gets
+    /// here (`neuron::control_vector_for`).
+    #[serde(skip)]
+    pub control_vector: Option<String>,
 }
 
 impl Default for EngineTuning {
@@ -144,6 +150,7 @@ impl Default for EngineTuning {
             ctx_chosen: false,
             plan_cpu_moe: 0,
             plan_cache_ram_mib: None,
+            control_vector: None,
         }
     }
 }
@@ -904,6 +911,13 @@ pub(crate) fn server_args(
         args.push("--slot-save-path".into());
         args.push(dir.into());
     }
+    // 3.0.9 (P11): the Neuron tweaker's sliders, mixed into one file. Part of
+    // the argv, so a changed slider is a different request and restarts the
+    // engine, and an unchanged one keeps it.
+    if let Some(path) = &tuning.control_vector {
+        args.push("--control-vector".into());
+        args.push(path.clone());
+    }
     args
 }
 
@@ -1477,9 +1491,15 @@ pub(crate) fn resolve_sidecar(app: &AppHandle, base: &str) -> Option<PathBuf> {
 /// to the app's lifetime, on a port the caller picked. Healthy when this
 /// returns; the caller kills it.
 pub(crate) fn spawn_private_server(app: &AppHandle, model_path: &str, port: u16, ctx: u32) -> Result<std::process::Child, String> {
+    spawn_private_server_with(app, model_path, port, ctx, &[])
+}
+
+/// `spawn_private_server` with more flags at the end (the Neuron tweaker's
+/// strength check passes `--control-vector`).
+pub(crate) fn spawn_private_server_with(app: &AppHandle, model_path: &str, port: u16, ctx: u32, extra: &[String]) -> Result<std::process::Child, String> {
     let binary = resolve_engine_binary(app)
         .ok_or_else(|| format!("Bundled engine binary not found ({}).", sidecar_binary_name()))?;
-    let args: Vec<String> = vec![
+    let mut args: Vec<String> = vec![
         "-m".into(),
         model_path.into(),
         "--host".into(),
@@ -1493,6 +1513,7 @@ pub(crate) fn spawn_private_server(app: &AppHandle, model_path: &str, port: u16,
         "-np".into(),
         "1".into(),
     ];
+    args.extend(extra.iter().cloned());
     tracing::info!(target: "engine", port, command = %command_line(&binary, &args), "starting a llama-server for a check");
     let mut cmd = Command::new(&binary);
     super::engine_key::apply(&mut cmd);
@@ -1518,6 +1539,20 @@ pub(crate) fn spawn_private_server(app: &AppHandle, model_path: &str, port: u16,
         return Err(format!("The check could not load the model: {e}\n{why}"));
     }
     Ok(child)
+}
+
+/// What a llama.cpp tool next to the engine needs to find its card and its
+/// libraries the way the engine does: the GPU choice, the companion DLL/so
+/// folder, no console window. Used for `lu-llama-cvector-generator`.
+pub(crate) fn prepare_tool_command(app: &AppHandle, cmd: &mut Command) {
+    let state = app.state::<AppState>();
+    let gpu_selection = state.gpu_selection.lock().ok().map(|sel| sel.clone());
+    if let Some(sel) = gpu_selection {
+        crate::commands::gpu::apply_gpu_env(cmd, &sel);
+    }
+    apply_engine_backend_dir(cmd, resolve_engine_backend_dir(app).as_deref());
+    #[cfg(target_os = "windows")]
+    cmd.creation_flags(CREATE_NO_WINDOW);
 }
 
 /// K1 (3.0.1): directory holding the dynamic-ISA sidecar's companion
@@ -3220,7 +3255,7 @@ pub async fn start_bundled_engine(
 }
 
 #[cfg(desktop)]
-fn start_bundled_engine_blocking(
+pub(crate) fn start_bundled_engine_blocking(
     app: &AppHandle,
     state: &State<'_, AppState>,
     model_path: String,
@@ -3232,7 +3267,8 @@ fn start_bundled_engine_blocking(
     // now wants it. Cleared under the gate, so it is only ever a stop that
     // arrives DURING this start that the waits below get to see.
     state.engine_stop_requested.store(false, std::sync::atomic::Ordering::SeqCst);
-    let tuning = tuning.unwrap_or_default();
+    let mut tuning = tuning.unwrap_or_default();
+    tuning.control_vector = crate::commands::neuron::control_vector_for(&model_path);
     let port = port.unwrap_or(DEFAULT_ENGINE_PORT);
 
     if !Path::new(&model_path).exists() {

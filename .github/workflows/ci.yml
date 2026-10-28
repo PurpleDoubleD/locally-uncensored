@@ -263,6 +263,12 @@ jobs:
             *-windows-*) touch "src-tauri/bin/lu-llama-server-$triple.exe" ;;
             *)           touch "src-tauri/bin/lu-llama-server-$triple" ;;
           esac
+          # The Neuron tweaker's vector tool (3.0.9, P11) is a second
+          # externalBin on Windows (tauri.windows.conf.json), so it needs its
+          # stub too. Linux does not ship it.
+          case "$triple" in
+            *-windows-*) touch "src-tauri/bin/lu-llama-cvector-generator-$triple.exe" ;;
+          esac
           ls -la src-tauri/bin/
           # K1 (3.0.1): tauri.windows.conf.json / tauri.linux.conf.json now
           # declare a bundle.resources glob for the dynamic-ISA companion
@@ -518,6 +524,12 @@ jobs:
             *-windows-*) touch "src-tauri/bin/lu-llama-server-$triple.exe" ;;
             *)           touch "src-tauri/bin/lu-llama-server-$triple" ;;
           esac
+          # The Neuron tweaker's vector tool (3.0.9, P11) is a second
+          # externalBin on Windows (tauri.windows.conf.json), so it needs its
+          # stub too. Linux does not ship it.
+          case "$triple" in
+            *-windows-*) touch "src-tauri/bin/lu-llama-cvector-generator-$triple.exe" ;;
+          esac
           ls -la src-tauri/bin/
           # K1 (3.0.1): this job runs a REAL `tauri build`, which resolves
           # bundle.resources for real: tauri.windows.conf.json /
@@ -666,6 +678,8 @@ jobs:
           # The refusal-removal tool's quantizer (A14) is a second externalBin
           # on macOS only (tauri.macos.conf.json), so it needs its stub too.
           touch "src-tauri/bin/lu-llama-quantize-$triple"
+          # And the Neuron tweaker's vector tool (3.0.9, P11), same file list.
+          touch "src-tauri/bin/lu-llama-cvector-generator-$triple"
           printf '<!doctype html><title>ci placeholder</title>' > dist/index.html
           ls -la src-tauri/bin/
 

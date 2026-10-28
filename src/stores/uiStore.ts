@@ -3,7 +3,7 @@ import { persist } from 'zustand/middleware'
 import { safeJSONStorage } from '../lib/storage-quota'
 import type { SettingsTab } from '../lib/settings-reset'
 
-export type View = 'chat' | 'models' | 'settings' | 'create' | 'benchmark' | 'voice'
+export type View = 'chat' | 'models' | 'settings' | 'create' | 'benchmark' | 'voice' | 'neuron'
 
 /** Which collapsible section of the Settings page a deep link wants open.
  *  Only sections a hint elsewhere in the app sends people to. */
