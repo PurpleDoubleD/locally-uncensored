@@ -92,7 +92,7 @@ impl R<'_> {
         Ok(u64::from_le_bytes(self.bytes::<8>()?))
     }
     fn skip(&mut self, n: u64) -> Result<(), String> {
-        let got = std::io::copy(&mut self.0.take(n), &mut std::io::sink()).map_err(|e| e.to_string())?;
+        let got = std::io::copy(&mut self.0.take(n), &mut std::io::sink()).map_err(|e| crate::os_error::english(&e))?;
         if got != n {
             return Err("The file ends too early.".into());
         }
@@ -152,7 +152,7 @@ fn skip_value(r: &mut R, ty: u32) -> Result<(), String> {
 /// that is not `direction.N` with N ≥ 1, not F32, not one-dimensional, or of
 /// another width than the first.
 pub fn read(path: &Path) -> Result<ControlVector, String> {
-    let file = std::fs::File::open(path).map_err(|e| format!("Cannot open {}: {e}", path.display()))?;
+    let file = std::fs::File::open(path).map_err(|e| format!("Cannot open {}: {}", path.display(), crate::os_error::english(&e)))?;
     let mut buf = std::io::BufReader::new(file);
     read_from(&mut buf)
 }
@@ -289,15 +289,15 @@ pub fn to_bytes(cv: &ControlVector, model_hint: &str, n_layer: usize) -> Vec<u8>
 /// half a file.
 pub fn write(path: &Path, cv: &ControlVector, model_hint: &str, n_layer: usize) -> Result<(), String> {
     if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir).map_err(|e| format!("Cannot create {}: {e}", dir.display()))?;
+        std::fs::create_dir_all(dir).map_err(|e| format!("Cannot create {}: {}", dir.display(), crate::os_error::english(&e)))?;
     }
     let tmp = path.with_extension("part");
     {
-        let mut f = std::fs::File::create(&tmp).map_err(|e| format!("Cannot write {}: {e}", tmp.display()))?;
-        f.write_all(&to_bytes(cv, model_hint, n_layer)).map_err(|e| e.to_string())?;
+        let mut f = std::fs::File::create(&tmp).map_err(|e| format!("Cannot write {}: {}", tmp.display(), crate::os_error::english(&e)))?;
+        f.write_all(&to_bytes(cv, model_hint, n_layer)).map_err(|e| crate::os_error::english(&e))?;
         f.sync_all().ok();
     }
-    std::fs::rename(&tmp, path).map_err(|e| format!("Cannot save {}: {e}", path.display()))
+    std::fs::rename(&tmp, path).map_err(|e| format!("Cannot save {}: {}", path.display(), crate::os_error::english(&e)))
 }
 
 /// A short, stable name for a mix: the same sliders give the same file name,

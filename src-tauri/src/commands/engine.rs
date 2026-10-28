@@ -6076,7 +6076,8 @@ mod phone_tests {
         // A phone cannot start a process. Whatever builds a `Command` for
         // llama-server must not be reachable there.
         for signature in [
-            "fn start_bundled_engine_blocking(\n    app: &AppHandle,",
+            // pub(crate) since 3.0.9: the Neuron tweaker restarts the engine with it.
+            "pub(crate) fn start_bundled_engine_blocking(\n    app: &AppHandle,",
             "fn restore_engine(binary: &Path,",
             "fn start_after_stop(\n",
             "fn serve_or_heal_garbled(\n",

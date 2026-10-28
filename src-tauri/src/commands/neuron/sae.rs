@@ -147,9 +147,9 @@ pub fn feature_vector(root: &Path, spec: &SaeSpec, feature: usize) -> Result<sup
         return Err(format!("Feature {feature} does not exist (0–{}).", spec.width - 1));
     }
     let mut f = std::fs::File::open(dir(root, spec).join("w_dec.f32")).map_err(|_| "The feature data is not downloaded yet.".to_string())?;
-    f.seek(SeekFrom::Start((feature * spec.n_embd * 4) as u64)).map_err(|e| e.to_string())?;
+    f.seek(SeekFrom::Start((feature * spec.n_embd * 4) as u64)).map_err(|e| crate::os_error::english(&e))?;
     let mut b = vec![0u8; spec.n_embd * 4];
-    f.read_exact(&mut b).map_err(|e| e.to_string())?;
+    f.read_exact(&mut b).map_err(|e| crate::os_error::english(&e))?;
     let row: Vec<f32> = b.chunks_exact(4).map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect();
     let mut cv = super::cvec::ControlVector::new(spec.n_embd);
     cv.layers.insert(spec.layer, row);

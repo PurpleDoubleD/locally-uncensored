@@ -97,7 +97,7 @@ pub fn facts(path: &str) -> Result<ModelFacts, String> {
 /// skipping everything else. The shared head reader keeps only the length of
 /// such arrays.
 pub fn string_array(path: &Path, wanted: &str) -> Result<Vec<String>, String> {
-    let f = std::fs::File::open(path).map_err(|e| format!("Cannot open {}: {e}", path.display()))?;
+    let f = std::fs::File::open(path).map_err(|e| format!("Cannot open {}: {}", path.display(), crate::os_error::english(&e)))?;
     let mut r = std::io::BufReader::new(f);
     let mut b4 = [0u8; 4];
     let mut b8 = [0u8; 8];
@@ -130,7 +130,7 @@ pub fn string_array(path: &Path, wanted: &str) -> Result<Vec<String>, String> {
         Ok(String::from_utf8_lossy(&b).into_owned())
     }
     fn skip(r: &mut dyn Read, n: u64) -> Result<(), String> {
-        let got = std::io::copy(&mut r.take(n), &mut std::io::sink()).map_err(|e| e.to_string())?;
+        let got = std::io::copy(&mut r.take(n), &mut std::io::sink()).map_err(|e| crate::os_error::english(&e))?;
         if got == n { Ok(()) } else { Err("The model file ends too early.".into()) }
     }
     fn skip_val(r: &mut dyn Read, ty: u32) -> Result<(), String> {

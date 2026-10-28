@@ -179,9 +179,9 @@ pub fn list_vectors(root: &Path, model_path: &str) -> Vec<VectorMeta> {
 
 fn save_meta(root: &Path, model_path: &str, meta: &VectorMeta) -> Result<(), String> {
     let dir = vectors_dir(root, model_path);
-    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    let bytes = serde_json::to_vec_pretty(meta).map_err(|e| e.to_string())?;
-    std::fs::write(dir.join(format!("{}.json", meta.id)), bytes).map_err(|e| e.to_string())
+    std::fs::create_dir_all(&dir).map_err(|e| crate::os_error::english(&e))?;
+    let bytes = serde_json::to_vec_pretty(meta).map_err(|e| crate::os_error::english(&e))?;
+    std::fs::write(dir.join(format!("{}.json", meta.id)), bytes).map_err(|e| crate::os_error::english(&e))
 }
 
 /// One slider as the frontend sends it.
@@ -223,12 +223,12 @@ pub fn mix(root: &Path, model_path: &str, n_embd: usize, entries: &[Entry]) -> R
 fn write_mix(root: &Path, cv: &cvec::ControlVector, hint: &str, n_layer: usize) -> Result<String, String> {
     let bytes = cvec::to_bytes(cv, hint, n_layer);
     let dir = root.join("mix");
-    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(&dir).map_err(|e| crate::os_error::english(&e))?;
     let path = dir.join(format!("{}.gguf", cvec::content_tag(&bytes)));
     if !path.is_file() {
         let tmp = path.with_extension("part");
-        std::fs::write(&tmp, &bytes).map_err(|e| e.to_string())?;
-        std::fs::rename(&tmp, &path).map_err(|e| e.to_string())?;
+        std::fs::write(&tmp, &bytes).map_err(|e| crate::os_error::english(&e))?;
+        std::fs::rename(&tmp, &path).map_err(|e| crate::os_error::english(&e))?;
     }
     Ok(path.to_string_lossy().into_owned())
 }
@@ -392,12 +392,12 @@ pub fn parse_progress(line: &str) -> Option<(u64, u64)> {
 /// Runs the generator on the example pairs and returns the direction.
 fn generate(app: &tauri::AppHandle, model_path: &str, plus: &[String], minus: &[String], work: &Path) -> Result<cvec::ControlVector, String> {
     let binary = generator_binary(app).ok_or("This build of LU has no vector tool (lu-llama-cvector-generator). On Linux it comes in a later version.")?;
-    std::fs::create_dir_all(work).map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(work).map_err(|e| crate::os_error::english(&e))?;
     let pos = work.join("more.txt");
     let neg = work.join("less.txt");
     let out = work.join("direction.gguf");
-    std::fs::write(&pos, plus.join("\n") + "\n").map_err(|e| e.to_string())?;
-    std::fs::write(&neg, minus.join("\n") + "\n").map_err(|e| e.to_string())?;
+    std::fs::write(&pos, plus.join("\n") + "\n").map_err(|e| crate::os_error::english(&e))?;
+    std::fs::write(&neg, minus.join("\n") + "\n").map_err(|e| crate::os_error::english(&e))?;
     let _ = std::fs::remove_file(&out);
     let mut cmd = Command::new(&binary);
     cmd.arg("-m").arg(model_path)
@@ -410,7 +410,7 @@ fn generate(app: &tauri::AppHandle, model_path: &str, plus: &[String], minus: &[
         .stderr(Stdio::piped());
     crate::commands::engine::prepare_tool_command(app, &mut cmd);
     log(format!("$ {} …", binary.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default()));
-    let mut child = cmd.spawn().map_err(|e| format!("The vector tool did not start: {e}"))?;
+    let mut child = cmd.spawn().map_err(|e| format!("The vector tool did not start: {}", crate::os_error::english(&e)))?;
     let stderr = child.stderr.take().map(crate::commands::shell::drain);
     let stdout = child.stdout.take().ok_or("no output")?;
     let id = child.id();
@@ -429,7 +429,7 @@ fn generate(app: &tauri::AppHandle, model_path: &str, plus: &[String], minus: &[
             let _ = watcher.join();
             return Err("cancelled".into());
         }
-        if let Some(s) = child.try_wait().map_err(|e| e.to_string())? {
+        if let Some(s) = child.try_wait().map_err(|e| crate::os_error::english(&e))? {
             break s;
         }
         std::thread::sleep(std::time::Duration::from_millis(200));
@@ -449,13 +449,13 @@ fn generate(app: &tauri::AppHandle, model_path: &str, plus: &[String], minus: &[
 }
 
 fn free_port() -> Result<u16, String> {
-    std::net::TcpListener::bind(("127.0.0.1", 0)).and_then(|l| l.local_addr()).map(|a| a.port()).map_err(|e| e.to_string())
+    std::net::TcpListener::bind(("127.0.0.1", 0)).and_then(|l| l.local_addr()).map(|a| a.port()).map_err(|e| crate::os_error::english(&e))
 }
 
 /// One answer from an engine on `port`, deterministic: temperature 0 and a
 /// fixed seed.
 pub(crate) fn ask(port: u16, question: &str, seed: u64, max_tokens: u32) -> Result<String, String> {
-    let client = reqwest::blocking::Client::builder().timeout(std::time::Duration::from_secs(300)).build().map_err(|e| e.to_string())?;
+    let client = reqwest::blocking::Client::builder().timeout(std::time::Duration::from_secs(300)).build().map_err(|e| crate::os_error::english(&e))?;
     let body = json!({
         "messages": [{ "role": "user", "content": question }],
         "temperature": 0,
@@ -464,11 +464,11 @@ pub(crate) fn ask(port: u16, question: &str, seed: u64, max_tokens: u32) -> Resu
         "stream": false,
     });
     let req = client.post(format!("http://127.0.0.1:{port}/v1/chat/completions")).json(&body);
-    let resp = crate::commands::engine_key::authorize_blocking(req).send().map_err(|e| format!("The model did not answer: {e}"))?;
+    let resp = crate::commands::engine_key::authorize_blocking(req).send().map_err(|e| format!("The model did not answer: {}", crate::os_error::english(&e)))?;
     if !resp.status().is_success() {
         return Err(format!("The model answered with HTTP {}.", resp.status()));
     }
-    let v: Value = resp.json().map_err(|e| e.to_string())?;
+    let v: Value = resp.json().map_err(|e| crate::os_error::english(&e))?;
     Ok(v["choices"][0]["message"]["content"].as_str().unwrap_or("").to_string())
 }
 
@@ -582,7 +582,7 @@ pub async fn neuron_info(app: tauri::AppHandle, model_path: String) -> Result<Va
         }))
     })
     .await
-    .map_err(|e| e.to_string())?
+    .map_err(|e| crate::os_error::english(&e))?
 }
 
 #[tauri::command]
@@ -650,7 +650,7 @@ pub fn neuron_feature_add(app: tauri::AppHandle, model_path: String, feature: us
     start_job("feature", &format!("Adding feature #{feature}"), &model_path.clone(), move || {
         let root = root();
         let work = model_dir(&root, &model_path).join("work");
-        std::fs::create_dir_all(&work).map_err(|e| e.to_string())?;
+        std::fs::create_dir_all(&work).map_err(|e| crate::os_error::english(&e))?;
         free_the_model(&app);
         let cv = sae::feature_vector(&root, spec, feature)?;
         let unit = calibrate(&app, &model_path, &facts, &cv, 50.0, false, &work)?;
@@ -683,18 +683,18 @@ fn fetch_slice(client: &reqwest::blocking::Client, url: &str, slice: &sae::Slice
         .get(url)
         .header(reqwest::header::RANGE, format!("bytes={}-{}", slice.start, slice.end))
         .send()
-        .map_err(|e| format!("Download failed: {e}"))?;
+        .map_err(|e| format!("Download failed: {}", crate::os_error::english(&e)))?;
     if resp.status().as_u16() != 206 {
         return Err(format!("The server did not send the part LU asked for (HTTP {}).", resp.status()));
     }
     let mut resp = resp;
-    let mut f = std::fs::File::create(&part).map_err(|e| e.to_string())?;
+    let mut f = std::fs::File::create(&part).map_err(|e| crate::os_error::english(&e))?;
     let mut hasher = Sha256::new();
     let mut buf = vec![0u8; 256 * 1024];
     let mut got = 0u64;
     loop {
         cancelled()?;
-        let n = resp.read(&mut buf).map_err(|e| format!("Download interrupted: {e}"))?;
+        let n = resp.read(&mut buf).map_err(|e| format!("Download interrupted: {}", crate::os_error::english(&e)))?;
         if n == 0 {
             break;
         }
@@ -703,7 +703,7 @@ fn fetch_slice(client: &reqwest::blocking::Client, url: &str, slice: &sae::Slice
             return Err("The server sent more than LU asked for.".into());
         }
         hasher.update(&buf[..n]);
-        f.write_all(&buf[..n]).map_err(|e| e.to_string())?;
+        f.write_all(&buf[..n]).map_err(|e| crate::os_error::english(&e))?;
         with_job(|j| {
             j.bytes_done = done_before + got;
             j.bytes_total = total;
@@ -720,7 +720,7 @@ fn fetch_slice(client: &reqwest::blocking::Client, url: &str, slice: &sae::Slice
         let _ = std::fs::remove_file(&part);
         return Err(format!("The downloaded data does not match the official file (SHA-256 {digest}). Nothing was kept."));
     }
-    std::fs::rename(&part, dest).map_err(|e| e.to_string())
+    std::fs::rename(&part, dest).map_err(|e| crate::os_error::english(&e))
 }
 
 #[tauri::command]
@@ -730,14 +730,14 @@ pub fn neuron_sae_download(model_path: String) -> Result<Value, String> {
     start_job("download", &format!("Downloading {}", spec.title), &model_path, move || {
         let root = root();
         let dir = sae::dir(&root, spec);
-        std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+        std::fs::create_dir_all(&dir).map_err(|e| crate::os_error::english(&e))?;
         phase(&format!("Downloading the feature data ({})", spec.license), 0);
         let client = reqwest::blocking::Client::builder()
             .connect_timeout(std::time::Duration::from_secs(20))
             .timeout(std::time::Duration::from_secs(3600))
             .user_agent(crate::app_identity::outgoing_agent_for(crate::app_identity::APP_VERSION))
             .build()
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| crate::os_error::english(&e))?;
         let total = spec.bytes();
         let t0 = Instant::now();
         fetch_slice(&client, &spec.url(&spec.w_dec), &spec.w_dec, &dir.join("w_dec.f32"), 0, total, t0)?;
@@ -775,7 +775,7 @@ pub async fn neuron_sae_search(model_path: String, query: String) -> Result<Valu
         Ok(json!({ "hits": sae::search(&labels, &query, 30) }))
     })
     .await
-    .map_err(|e| e.to_string())?
+    .map_err(|e| crate::os_error::english(&e))?
 }
 
 #[tauri::command]
@@ -855,7 +855,7 @@ pub async fn neuron_apply(app: tauri::AppHandle, model_path: String, entries: Ve
         Ok(out)
     })
     .await
-    .map_err(|e| e.to_string())?
+    .map_err(|e| crate::os_error::english(&e))?
 }
 
 /// The same question to the same model with the sliders off and on, side by
@@ -895,7 +895,7 @@ pub async fn neuron_compare(
         Ok(json!({ "before": before, "after": after, "seed": seed, "steered": on.is_some(), "same": before == after }))
     })
     .await
-    .map_err(|e| e.to_string())?
+    .map_err(|e| crate::os_error::english(&e))?
 }
 
 #[cfg(test)]
