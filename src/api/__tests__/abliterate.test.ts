@@ -8,7 +8,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { gb, minutesRange, phaseShare, roughDuration } from '../abliterate'
+import { downloadLine, gb, minutesRange, mmluVerdict, phaseShare, roughDuration, sizeText } from '../abliterate'
 
 vi.mock('../backend', () => ({ backendCall: vi.fn(), isTauri: () => false }))
 
@@ -73,5 +73,50 @@ describe('the local render tools check the prompt themselves', () => {
         expect(lastCheck, `${fn}: ${exit[0]} without a check before it`).toBeGreaterThan(lastExit)
       }
     }
+  })
+})
+
+describe('a download as it moves (3.0.9)', () => {
+  it('names bytes of total, share, speed and time left in one line', () => {
+    expect(sizeText(740e6)).toBe('740 MB')
+    expect(sizeText(1_990_600_000)).toBe('1.99 GB')
+    expect(downloadLine({ step: 740e6, total: 1_990_600_000, rateBps: 4_200_000, etaSecs: 298 }))
+      .toBe('740 MB of 1.99 GB · 37% · 4.2 MB/s · about 5 min left')
+    // the first second: no speed measured yet
+    expect(downloadLine({ step: 0, total: 988_097_824, rateBps: null, etaSecs: null })).toBe('0 MB of 988 MB · 0%')
+    expect(downloadLine({ step: 900e6, total: 988e6, rateBps: 800_000, etaSecs: 40 })).toBe('900 MB of 988 MB · 91% · 800 kB/s · 40 s left')
+  })
+})
+
+describe('the knowledge check, read honestly (3.0.9)', () => {
+  const marks = (right: number, n: number) => '1'.repeat(right) + '0'.repeat(n - right)
+  it('3.0.8 had no marks: a small change is reported, not judged', () => {
+    const v = mmluVerdict({ refusals: 39, falseAlarms: 13, mmlu: 22, n: 50 }, { refusals: 3, falseAlarms: 2, mmlu: 21, n: 50 })
+    expect(v.reading).toBe('chance')
+    expect(v.text).toBe('-1 of 50 questions; too few to tell a loss from chance')
+  })
+  it('counts the answers that changed and calls a small net change chance', () => {
+    // 90 right before; the copy loses 6 of them and gains 3 others
+    const before = { refusals: 0, falseAlarms: 0, mmlu: 90, n: 50, mmluN: 200, mmluMarks: marks(90, 200) }
+    const a = before.mmluMarks.split('')
+    for (let i = 0; i < 6; i++) a[i] = '0'
+    for (let i = 90; i < 93; i++) a[i] = '1'
+    const after = { ...before, mmlu: 87, mmluMarks: a.join('') }
+    const v = mmluVerdict(before, after)
+    expect([v.worse, v.better, v.delta]).toEqual([6, 3, -3])
+    expect(v.reading).toBe('chance')
+    expect(v.text).toBe('6 answers turned wrong, 3 answers turned right (-3 of 200): within chance')
+  })
+  it('a loss larger than chance is called a loss, in points', () => {
+    const before = { refusals: 0, falseAlarms: 0, mmlu: 100, n: 50, mmluN: 200, mmluMarks: marks(100, 200) }
+    const a = before.mmluMarks.split('')
+    for (let i = 0; i < 20; i++) a[i] = '0'
+    const v = mmluVerdict(before, { ...before, mmlu: 80, mmluMarks: a.join('') })
+    expect(v.reading).toBe('loss')
+    expect(v.text).toContain('a real loss of 10.0 points')
+  })
+  it('identical answers say so', () => {
+    const c = { refusals: 0, falseAlarms: 0, mmlu: 88, n: 50, mmluN: 200, mmluMarks: marks(88, 200) }
+    expect(mmluVerdict(c, c).text).toBe('All 200 answers the same as the original')
   })
 })

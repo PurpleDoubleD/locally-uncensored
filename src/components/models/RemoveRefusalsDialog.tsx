@@ -7,7 +7,7 @@ import { HINWEIS_TEXT } from '../../lib/hinweis'
 import { isWindows, openExternal } from '../../api/backend'
 import {
   abliterateCancel, abliterateDismiss, abliteratePlan, abliterateStart, abliterateTrashCopy,
-  gb, minutesRange, phaseShare, roughDuration,
+  downloadLine, gb, minutesRange, mmluVerdict, phaseShare, roughDuration,
   type Check, type Mode, type Plan, type RunRecord, type RunStatus,
 } from '../../api/abliterate'
 import { useAbliterateStore } from '../../stores/abliterateStore'
@@ -390,11 +390,21 @@ function RunView({ run, onClose, onUse, onModelsChanged }: { run: RunStatus } & 
               style={{ width: share == null ? '0%' : `${Math.round(share * 100)}%` }}
             />
           </div>
-          <p className={`t-micro ${HINWEIS_TEXT.ruhig}`}>
-            {stepText(run)}
-            {run.elapsedSecs > 0 && ` · running for ${roughDuration(run.elapsedSecs)}`}
-            {run.etaSecs != null && ` · about ${roughDuration(run.etaSecs)} left`}
-          </p>
+          {run.bytes && run.total > 0 ? (
+            // A download says what it has, how fast and how long, on the
+            // face of the window: 3.0.8 showed an empty bar and "running for
+            // 26 minutes" while PyTorch came down.
+            <>
+              <p className="t-body font-mono text-gray-800 dark:text-gray-100" data-testid="remove-refusals-download">{downloadLine(run)}</p>
+              {run.elapsedSecs > 0 && <p className={`t-micro ${HINWEIS_TEXT.ruhig}`}>Running for {roughDuration(run.elapsedSecs)}</p>}
+            </>
+          ) : (
+            <p className={`t-micro ${HINWEIS_TEXT.ruhig}`}>
+              {stepText(run)}
+              {run.elapsedSecs > 0 && `${stepText(run) ? ' · ' : ''}running for ${roughDuration(run.elapsedSecs)}`}
+              {run.etaSecs != null && ` · about ${roughDuration(run.etaSecs)} left`}
+            </p>
+          )}
           {run.best && (
             <p className="t-body text-gray-800 dark:text-gray-100" data-testid="remove-refusals-best">
               Best so far: trial {run.best.trial}, {run.best.refusals}
@@ -491,7 +501,7 @@ function RunView({ run, onClose, onUse, onModelsChanged }: { run: RunStatus } & 
 
 function stepText(run: RunStatus): string {
   if (!run.total) return ''
-  if (run.phase === 'download' || run.phase === 'setup') return `${gb(run.step)} of ${gb(run.total)}`
+  if (run.bytes || run.phase === 'download' || run.phase === 'setup') return `${gb(run.step)} of ${gb(run.total)}`
   if (run.phase === 'trials') return `${run.step} of ${run.total} trials`
   if (run.phase === 'check_before' || run.phase === 'check_after') return `${run.step} of ${run.total} questions`
   if (run.phase === 'merge') return `part ${run.step} of ${run.total}`
@@ -525,7 +535,9 @@ function ResultTable({ r }: { r: RunRecord }) {
       <td className="py-0.5 text-right font-mono text-gray-900 dark:text-white">{b}</td>
     </tr>
   )
-  const of = (c: Check | null, k: keyof Check) => (c ? `${c[k]} of ${c.n}` : '–')
+  const of = (c: Check | null, k: 'refusals' | 'falseAlarms') => (c ? `${c[k]} of ${c.n}` : '–')
+  const mmlu = (c: Check | null) => (c ? `${c.mmlu} of ${c.mmluN ?? c.n}` : '–')
+  const verdict = r.before && r.after ? mmluVerdict(r.before, r.after) : null
   return (
     <table className="w-full t-body" data-testid="remove-refusals-result">
       <thead>
@@ -538,7 +550,7 @@ function ResultTable({ r }: { r: RunRecord }) {
       <tbody>
         {row('Refused requests', of(r.before, 'refusals'), of(r.after, 'refusals'), 'JailbreakBench, prompts the search never saw')}
         {row('Refused harmless requests', of(r.before, 'falseAlarms'), of(r.after, 'falseAlarms'))}
-        {row('Knowledge check', of(r.before, 'mmlu'), of(r.after, 'mmlu'), 'MMLU questions answered right')}
+        {row('Knowledge check', mmlu(r.before), mmlu(r.after), verdict ? `MMLU questions answered right. ${verdict.text}` : 'MMLU questions answered right')}
         {row(
           'Refusals in the search',
           r.searchRefusalsBefore != null ? `${r.searchRefusalsBefore} of ${r.searchPrompts ?? '?'}` : '–',
