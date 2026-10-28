@@ -531,8 +531,9 @@ function ResultTable({ r }: { r: RunRecord }) {
         {label}
         {hint && <span className={`block t-micro ${HINWEIS_TEXT.ruhig}`}>{hint}</span>}
       </td>
-      <td className="pr-3 py-0.5 text-right font-mono text-gray-800 dark:text-gray-100">{a}</td>
-      <td className="py-0.5 text-right font-mono text-gray-900 dark:text-white">{b}</td>
+      {/* "40 of 50" stays on one line; the long hints wrap instead (3.0.9, Mac). */}
+      <td className="pr-3 py-0.5 text-right font-mono whitespace-nowrap text-gray-800 dark:text-gray-100">{a}</td>
+      <td className="py-0.5 text-right font-mono whitespace-nowrap text-gray-900 dark:text-white">{b}</td>
     </tr>
   )
   const of = (c: Check | null, k: 'refusals' | 'falseAlarms') => (c ? `${c[k]} of ${c.n}` : '–')

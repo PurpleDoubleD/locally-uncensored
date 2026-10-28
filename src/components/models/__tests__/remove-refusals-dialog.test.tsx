@@ -217,6 +217,10 @@ describe('during and after', () => {
     const table = await screen.findByTestId('remove-refusals-result')
     expect(table.textContent).toContain('3 of 200')
     expect(table.textContent).toContain('1 answer turned wrong, 0 answers turned right (-1 of 200): within chance')
+    // the counts never break between "of" and the total
+    const cells = [...table.querySelectorAll('td.font-mono')]
+    expect(cells.length).toBeGreaterThan(0)
+    for (const c of cells) expect(c.className).toContain('whitespace-nowrap')
   })
 
   it('the result card compares original and copy, and Use loads the copy', async () => {
