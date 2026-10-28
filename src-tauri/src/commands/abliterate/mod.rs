@@ -239,12 +239,20 @@ struct ByteMeter {
 impl ByteMeter {
     const WINDOW: Duration = Duration::from_secs(10);
 
+    /// Below this a download has not really begun: the hub sends the small
+    /// files first, after a pause. Measured from there, the Mac showed
+    /// "4 kB/s · about 66 h left" for the weights (28.10.2026).
+    const STARTED: u64 = 1_000_000;
+
     /// Take a reading; `(bytes per second, seconds left)` once there are
     /// a little over one second of readings. A count that goes back (a new
     /// file) starts over.
     fn sample(&mut self, at: Instant, done: u64, total: u64) -> (Option<u64>, Option<u64>) {
-        if self.samples.back().is_some_and(|&(_, d)| done < d) {
+        if self.samples.back().is_some_and(|&(_, d)| done < d) || done < Self::STARTED.min(total) {
             self.samples.clear();
+        }
+        if done < Self::STARTED.min(total) {
+            return (None, None);
         }
         self.samples.push_back((at, done));
         while self.samples.len() > 2 && self.samples.front().is_some_and(|&(t, _)| at.duration_since(t) > Self::WINDOW) {
@@ -1675,8 +1683,8 @@ mod tests {
     fn the_byte_meter_gives_speed_and_time_left() {
         let t = Instant::now();
         let mut m = ByteMeter::default();
-        assert_eq!(m.sample(t, 0, 1_000_000_000), (None, None));
-        let (rate, left) = m.sample(t + Duration::from_secs(2), 20_000_000, 1_000_000_000);
+        assert_eq!(m.sample(t, 1_000_000, 1_000_000_000), (None, None));
+        let (rate, left) = m.sample(t + Duration::from_secs(2), 21_000_000, 1_000_000_000);
         assert_eq!(rate, Some(10_000_000));
         assert_eq!(left, Some(98));
         // the window forgets a stall long ago
@@ -1685,10 +1693,16 @@ mod tests {
         assert_eq!(rate, Some(10_000_000));
         // a new file starts over
         assert_eq!(m.sample(t + Duration::from_secs(33), 5, 100), (None, None));
+        // the pause before the first megabyte does not count
+        let mut m = ByteMeter::default();
+        m.sample(t, 0, 988_000_000);
+        m.sample(t + Duration::from_secs(3), 40_000, 988_000_000);
+        assert_eq!(m.sample(t + Duration::from_secs(4), 4_000_000, 988_000_000), (None, None));
+        assert_eq!(m.sample(t + Duration::from_secs(6), 12_000_000, 988_000_000).0, Some(4_000_000));
         // finished
         let mut m = ByteMeter::default();
-        m.sample(t, 0, 100);
-        assert_eq!(m.sample(t + Duration::from_secs(2), 100, 100), (Some(50), Some(0)));
+        m.sample(t, 2_000_000, 10_000_000);
+        assert_eq!(m.sample(t + Duration::from_secs(2), 10_000_000, 10_000_000), (Some(4_000_000), Some(0)));
     }
 
     #[test]
