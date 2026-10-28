@@ -77,9 +77,8 @@ describe('Eine Zeile wie ein Werkzeugaufruf', () => {
     expect(html).not.toContain('rounded-full border')
   })
 
-  it('/compact sagt, dass der Nutzer es war; automatisch steht nichts dabei', () => {
-    expect(rendern(schnitt({ trigger: 'manual' }))).toContain('/compact')
-    expect(rendern(schnitt({ trigger: 'auto' }))).not.toContain('/compact')
+  it('/compact und automatisch sehen gleich aus: der Befehl steht schon als Hinweis im Verlauf', () => {
+    expect(rendern(schnitt({ trigger: 'manual' }))).toBe(rendern(schnitt({ trigger: 'auto' })))
   })
 
   it('eine kaputte Zahl wird zu 0, nicht zu einem Minus', () => {

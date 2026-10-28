@@ -53,9 +53,6 @@ export function CompactBlock({ cut }: Props) {
         <span className={`t-micro italic pr-0.5 ${running ? 'lu-tool-shimmer' : 'text-gray-600 dark:text-gray-400'}`}>
           {label}
         </span>
-        {cut?.trigger === 'manual' && (
-          <span className="t-micro text-gray-400 dark:text-gray-600">/compact</span>
-        )}
         {canOpen && (
           <ChevronDown
             size={10}
