@@ -8,6 +8,7 @@ import type { FixupPrompt } from '../lib/render-fixups'
 import { persist } from 'zustand/middleware'
 import { safeJSONStorage } from '../lib/storage-quota'
 import { TRAIN_STEPS_DEFAULT, TRAIN_VRAM_PRESET_DEFAULT, isTrainVramPreset, type TrainVramPreset } from '../lib/trainer-presets'
+import { TRAIN_KIND_DEFAULT, isTrainKind, trainPresetsFor, trainStepsDefaultFor, type TrainKind } from '../lib/train-kind'
 import { TRAIN_CAPTION_MAX } from '../lib/train-captions'
 import { isMobile } from '../lib/device-kind'
 import { isRecord } from '../types/json-guards'
@@ -402,6 +403,12 @@ export interface CreateState {
   /** 3.0.8 D20: the local trainer's recipe, Normal or Low VRAM. Persisted:
    *  it follows the card, which does not change between sessions. */
   trainVramPreset: TrainVramPreset
+  /** 3.0.9 P8: what the local trainer learns, a character or a style /
+   *  concept / pose (lib/train-kind.ts). Persisted like the steps. */
+  trainKind: TrainKind
+  /** 3.0.9 P8: in style mode, whether the name leads every caption as a
+   *  trigger word. Off: the LoRA works without one. Persisted. */
+  trainStyleTrigger: boolean
   /** The shelf character selected for use-mode generation. Runtime-only. */
   selectedCharacter: CharacterRef | null
   /** Lipsync speech / voice-clone reference audio. Runtime-only (blob). */
@@ -631,6 +638,8 @@ export interface CreateState {
   setTrainSteps: (n: number) => void
   setTrainCaption: (name: string, text: string) => void
   setTrainVramPreset: (p: TrainVramPreset) => void
+  setTrainKind: (k: TrainKind) => void
+  setTrainStyleTrigger: (on: boolean) => void
   setSelectedCharacter: (c: CharacterRef | null) => void
   setAudioInput: (m: MediaRef | null) => void
   setVoiceFromJob: (v: { jobId: string; label: string } | null) => void
@@ -1017,6 +1026,8 @@ export const useCreateStore = create<CreateState>()(
       trainSteps: TRAIN_STEPS_DEFAULT,
       trainCaptions: {} as Record<string, string>,
       trainVramPreset: TRAIN_VRAM_PRESET_DEFAULT as TrainVramPreset,
+      trainKind: TRAIN_KIND_DEFAULT as TrainKind,
+      trainStyleTrigger: true,
       selectedCharacter: null as CharacterRef | null,
       audioInput: null as MediaRef | null,
       voiceFromJob: null as { jobId: string; label: string } | null,
@@ -1335,6 +1346,15 @@ export const useCreateStore = create<CreateState>()(
         return { trainCaptions }
       }),
       setTrainVramPreset: (p) => set({ trainVramPreset: isTrainVramPreset(p) ? p : TRAIN_VRAM_PRESET_DEFAULT }),
+      // The steps follow the mode: each has its own three presets, and a
+      // number of the other mode would match none of the switch's options.
+      setTrainKind: (k) => set((s) => {
+        const trainKind = isTrainKind(k) ? k : TRAIN_KIND_DEFAULT
+        if (trainKind === s.trainKind) return {}
+        const fits = trainPresetsFor(trainKind).some((p) => p.steps === s.trainSteps)
+        return { trainKind, ...(fits ? {} : { trainSteps: trainStepsDefaultFor(trainKind) }) }
+      }),
+      setTrainStyleTrigger: (on) => set({ trainStyleTrigger: !!on }),
       setSelectedCharacter: (selectedCharacter) => set((s) => withOwnStudioOptions(s, { selectedCharacter })),
       // Upload and voice-pick are mutually exclusive speech sources.
       setAudioInput: (audioInput) => {
@@ -1788,6 +1808,8 @@ export const useCreateStore = create<CreateState>()(
         triggerWord: state.triggerWord,
         trainSteps: state.trainSteps,
         trainVramPreset: state.trainVramPreset,
+        trainKind: state.trainKind,
+        trainStyleTrigger: state.trainStyleTrigger,
         // Studio: the picked step's option values are a preference like the
         // ones above. cloudStudioCredits is NOT here on purpose: a saved
         // price from yesterday is a lie, see the field's own doc comment.
@@ -1847,6 +1869,9 @@ export const useCreateStore = create<CreateState>()(
         if ('galleryFolders' in safe) safe.galleryFolders = sanitizeFolders(safe.galleryFolders)
         // 3.0.8 D20: an unknown recipe name would reach the trainer as text.
         if ('trainVramPreset' in safe && !isTrainVramPreset(safe.trainVramPreset)) safe.trainVramPreset = TRAIN_VRAM_PRESET_DEFAULT
+        // 3.0.9 P8: same for the mode, it picks the LoRA's file name.
+        if ('trainKind' in safe && !isTrainKind(safe.trainKind)) safe.trainKind = TRAIN_KIND_DEFAULT
+        if ('trainStyleTrigger' in safe && typeof safe.trainStyleTrigger !== 'boolean') safe.trainStyleTrigger = true
         // The persisted slice is ~30 independent scalar preferences (see
         // partialize). They are adopted as written, which is what the store
         // has always done; the fields that could actually do damage — the

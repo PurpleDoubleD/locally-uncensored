@@ -39,6 +39,7 @@ import { SavedCharacterChips } from './SavedCharacters'
 import { loadPhotosAsReferences, sendPhotosToStudio } from './characterPhotos'
 import { MIN_TRAIN_IMAGES, maxTrainImages } from '../../../lib/train-image-cap'
 import { TRAIN_CAPTION_HELP, TRAIN_CAPTION_MAX, TRAIN_CAPTION_PLACEHOLDER } from '../../../lib/train-captions'
+import { STYLE_CAPTION_HELP, STYLE_CAPTION_PLACEHOLDER, STYLE_DROP_HINT, STYLE_DROP_TITLE } from '../../../lib/train-kind'
 import { describeAvailability, describeTrainPhoto, type DescribeAvailability } from '../../../lib/render/describe-train-photos'
 import { MAC_IMAGE_SETUP_SIZE, macVideoSetupCopy } from '../../../lib/mac-setup-sizes'
 import { macVideoSetupPlan, type MacVideoSetupPlan } from '../../../api/mlx-starter'
@@ -926,6 +927,12 @@ export function TrainSetBoard() {
   // Windows and Linux, mflux on a Mac; both read the photo's .txt caption).
   // The cloud trainer takes photos only, so it shows no field it would not use.
   const captions = backend !== 'cloud'
+  // 3.0.9 P8: a style / concept set is captioned by what is in each picture,
+  // not by what changes about a person. The cloud trains characters only.
+  const trainKind = useCreateStore((s) => s.trainKind)
+  const style = captions && trainKind === 'style'
+  const captionHelp = style ? STYLE_CAPTION_HELP : TRAIN_CAPTION_HELP
+  const captionPlaceholder = style ? STYLE_CAPTION_PLACEHOLDER : TRAIN_CAPTION_PLACEHOLDER
   const [describe, setDescribe] = useState<DescribeAvailability | null>(null)
   const [describing, setDescribing] = useState<{ done: number; total: number } | null>(null)
   const describeAbort = useRef<AbortController | null>(null)
@@ -949,7 +956,7 @@ export function TrainSetBoard() {
     setDescribing({ done: 0, total: todo.length })
     for (const [n, img] of todo.entries()) {
       if (own.signal.aborted) break
-      const text = await describeTrainPhoto(img.blob as Blob, own.signal)
+      const text = await describeTrainPhoto(img.blob as Blob, own.signal, style ? 'style' : 'character')
       if (text && !(useCreateStore.getState().trainCaptions[img.name] ?? '').trim()) setTrainCaption(img.name, text)
       setDescribing({ done: n + 1, total: todo.length })
     }
@@ -988,9 +995,9 @@ export function TrainSetBoard() {
           className="flex-1 rounded-xl border-2 border-dashed border-white/10 hover:border-white/25 transition-colors flex flex-col items-center justify-center gap-2 text-gray-500 hover:text-gray-300"
         >
           <UploadCloud size={28} />
-          <div className="t-body">Drop {MIN_TRAIN_IMAGES} to {maxTrainImages(backend)} photos of your character here</div>
+          <div className="t-body">Drop {MIN_TRAIN_IMAGES} to {maxTrainImages(backend)} {style ? STYLE_DROP_TITLE : 'photos of your character here'}</div>
           <div className="t-label text-gray-600">
-            One person or character, varied angles and lighting works best
+            {style ? STYLE_DROP_HINT : 'One person or character, varied angles and lighting works best'}
           </div>
         </button>
       ) : null}
@@ -1003,7 +1010,7 @@ export function TrainSetBoard() {
         <>
           {captions && (
             <div className="flex items-start justify-center gap-2 flex-wrap shrink-0" data-testid="train-caption-help">
-              <span className="t-label text-gray-500 max-w-[640px] text-center">{TRAIN_CAPTION_HELP}</span>
+              <span className="t-label text-gray-500 max-w-[640px] text-center">{captionHelp}</span>
               {describing ? (
                 <button
                   type="button"
@@ -1047,9 +1054,9 @@ export function TrainSetBoard() {
                       onChange={(e) => setTrainCaption(img.name, e.target.value)}
                       maxLength={TRAIN_CAPTION_MAX}
                       disabled={isGenerating}
-                      placeholder={TRAIN_CAPTION_PLACEHOLDER}
-                      title={trainCaptions[img.name] || TRAIN_CAPTION_PLACEHOLDER}
-                      aria-label={`What changes in ${img.name}`}
+                      placeholder={captionPlaceholder}
+                      title={trainCaptions[img.name] || captionPlaceholder}
+                      aria-label={style ? `What is in ${img.name}` : `What changes in ${img.name}`}
                       className="t-label w-full px-1.5 h-6 rounded-md bg-white/[0.03] border border-white/[0.06] text-gray-300 placeholder-gray-600 focus:outline-none focus:border-white/15 disabled:opacity-60"
                     />
                   )}
@@ -1071,8 +1078,8 @@ export function TrainSetBoard() {
               // A Mac trains with its own image engine, on Z-Image Turbo, and
               // keeps the character in the Mac's LoRA folder (api/mlx-train).
               : isMlxImageHost()
-                ? "Training runs on this Mac and lands the character in the Mac's LoRA folder."
-                : 'Training runs on your GPU and lands the character in your local LoRAs.'}
+                ? `Training runs on this Mac and lands the ${style ? 'style' : 'character'} in the Mac's LoRA folder.`
+                : `Training runs on your GPU and lands the ${style ? 'style' : 'character'} in your local LoRAs.`}
           </div>
         </>
       )}

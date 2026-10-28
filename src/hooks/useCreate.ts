@@ -75,7 +75,7 @@ import { transparentPrompt, wantsTransparent } from '../lib/transparent-image'
 import { scenePromptFor } from '../lib/ltx-multishot'
 import { intentTakesOptionalPrompt, intentTakesPrompt } from '../components/create/experimental/intents'
 import { knownMacMemoryGb } from '../lib/mac-memory'
-import { MIN_TRAIN_IMAGES, tooFewTrainPhotosLine } from '../lib/train-image-cap'
+import { MIN_TRAIN_IMAGES, maxTrainImages, tooFewTrainPhotosLine } from '../lib/train-image-cap'
 import { improveKindForIntent, IMPROVING_PROMPT, type ImproveOutcome } from '../lib/render/improve-prompt'
 import { elapsedLine } from '../lib/elapsed-line'
 import { improvePrompt } from '../lib/render/improve-prompt-run'
@@ -95,6 +95,7 @@ import {
 } from '../api/trainer'
 import { getMacTrainStatus, macTrainMissing } from '../api/mlx-train'
 import { buildTrainCaption } from '../lib/train-captions'
+import { buildStyleCaption, missingNameLine, trainedLine, trainedLoraFile } from '../lib/train-kind'
 import { useCreateStore, EDIT_MAX_DENOISE, characterImageRun, deriveIntent, type CreateState } from '../stores/createStore'
 import { useWorkflowStore } from '../stores/workflowStore'
 import { useSettingsStore } from '../stores/settingsStore'
@@ -554,9 +555,13 @@ export function useCreate() {
     // below go there by themselves (api/trainer.ts); what differs is how the
     // memory is handed over.
     const mac = isMlxImageHost()
+    // 3.0.9 P8: a style / concept run shares the whole path; it differs in
+    // the captions, the file name and where it lands (lib/train-kind.ts).
+    // The field holds the character's trigger word or the style's name.
+    const kind = state.trainKind
     const trigger = state.triggerWord.trim()
     if (!trigger) {
-      setError('Pick a trigger word first, e.g. davechar. It becomes the token that summons your character.')
+      setError(missingNameLine(kind))
       return
     }
     // Blobs are runtime-only — after an app restart the thumbnails would
@@ -567,7 +572,9 @@ export function useCreate() {
         ? 'Your photos did not survive the app restart. Re-add them, then train.'
         // The local trainer's cap (100), the one the drop zone names, not
         // the cloud's 30. A Mac trains locally too.
-        : tooFewTrainPhotosLine('local'))
+        : kind === 'style'
+          ? `Add at least ${MIN_TRAIN_IMAGES} pictures in the style first (up to ${maxTrainImages('local')}).`
+          : tooFewTrainPhotosLine('local'))
       return
     }
     // GH #194: the Train tab of a Mac without Z-Image Turbo takes a trigger
@@ -592,7 +599,10 @@ export function useCreate() {
     // back in the finally below. exclusiveVramMode 'never' skips it.
     let trainingEviction: RenderEviction | null = null
     try {
-      const setId = trigger
+      // A style gets a set of its own: a character's set holds the photos
+      // Edit hands out as that character's references (character_files.rs),
+      // and clearing it for a style of the same name would take them.
+      const setId = kind === 'style' ? `style-${trigger}` : trigger
       await clearTrainingSet(setId)
       let n = 0
       for (const img of staged) {
@@ -600,7 +610,12 @@ export function useCreate() {
         // Musubi has no trigger flag, the token must lead every caption. A
         // photo's own description (D28: clothes, hair, place) follows it, so
         // only what stays the same is learned into the trigger word.
-        await stageTrainingImage(setId, img.name, bytes, buildTrainCaption(trigger, state.trainCaptions[img.name]))
+        // A style's line names what is in the picture, with the name in front
+        // only when it is to be a trigger word (P8).
+        const caption = kind === 'style'
+          ? buildStyleCaption(state.trainStyleTrigger ? trigger : '', state.trainCaptions[img.name])
+          : buildTrainCaption(trigger, state.trainCaptions[img.name])
+        await stageTrainingImage(setId, img.name, bytes, caption)
         n += 1
         setProgress(2 + Math.round((n / staged.length) * 5), `Staging photos (${n}/${staged.length})...`)
       }
@@ -619,7 +634,7 @@ export function useCreate() {
       // step 27 while the chat model was brought back beside it).
       if (trainingCancelRequested.current) return
       setProgress(8, 'Starting the training run...')
-      await startCharacterTraining(setId, trigger, trigger, state.trainSteps, state.trainVramPreset)
+      await startCharacterTraining(setId, trigger, trigger, state.trainSteps, state.trainVramPreset, kind)
       let cancelRounds = 0
       for (;;) {
         await new Promise((r) => setTimeout(r, 3000))
@@ -648,12 +663,21 @@ export function useCreate() {
             setProgress(10, headline || 'Preparing training data...')
           }
         } else if (s.status === 'complete') {
-          setProgress(100, 'Character ready!')
+          setProgress(100, trainedLine(kind))
           // The LoRA file just landed in models/loras — drop the node cache so
           // the Use shelf and the LoRA picker list it without a restart.
           clearNodeCache()
-          useCreateStore.getState().bumpCharactersVersion()
-          useCreateStore.getState().setCharacterTab('use')
+          const store = useCreateStore.getState()
+          store.bumpCharactersVersion()
+          if (kind === 'style') {
+            // No shelf for a style: it is a LoRA of the Image tab, switched
+            // on there, with its strength slider (P8).
+            const file = trainedLoraFile('style', trigger)
+            store.setIntent('image')
+            if (!useCreateStore.getState().selectedLoras.some((l) => l.name === file)) store.toggleLora(file)
+          } else {
+            store.setCharacterTab('use')
+          }
           return
         } else if (s.status === 'cancelled') {
           return

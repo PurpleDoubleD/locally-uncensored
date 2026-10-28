@@ -36,7 +36,8 @@ import { LOCAL_MUSIC_TEXT, SECONDS_LENGTH, musicHowtoLines, musicLength, musicTe
 import { MAC_MUSIC_MIN_SECONDS } from '../../../lib/mac-music'
 import { createRunModel, studioShownValue } from '../../../lib/render/create-studio'
 import { galleryLabelShort } from '../../../lib/render/gallery-label'
-import { TRAIN_PRESETS, TRAIN_VRAM_PRESETS, LOW_VRAM_NOTE, trainStepsNote, trainVramSuggestion, type TrainVramPreset } from '../../../lib/trainer-presets'
+import { TRAIN_VRAM_PRESETS, LOW_VRAM_NOTE, trainStepsNote, trainVramSuggestion, type TrainVramPreset } from '../../../lib/trainer-presets'
+import { STYLE_MODE_NOTE, STYLE_NAME_PLACEHOLDER, STYLE_TRIGGER_HINT_OFF, STYLE_TRIGGER_HINT_ON, STYLE_TRIGGER_LABEL, TRAIN_KINDS, trainPresetsFor, type TrainKind } from '../../../lib/train-kind'
 import { useGraphicsCardGb } from '../../../hooks/useGraphicsMemory'
 import { trainerPathPlaceholder } from '../../../lib/trainer-path-placeholder'
 import { trainerRootHint } from '../../../lib/trainer-root-hint'
@@ -434,12 +435,53 @@ function TrainerReinstallModal({
 // Local training readiness + inputs (2.5.8 A5). Three gates render in order:
 // trainer env (one-time musubi setup) -> Z-Image base files -> the actual
 // trigger/steps inputs. The Rust side is the source of truth for readiness.
+// 3.0.9 P8: Character or Style / concept, above the inputs of both local
+// trainers (CUDA and Mac). The cloud trains characters only, so it has none.
+function TrainKindPicker() {
+  const trainKind = useCreateStore((s) => s.trainKind)
+  const setTrainKind = useCreateStore((s) => s.setTrainKind)
+  const trainStyleTrigger = useCreateStore((s) => s.trainStyleTrigger)
+  const setTrainStyleTrigger = useCreateStore((s) => s.setTrainStyleTrigger)
+  const isGenerating = useCreateStore((s) => s.isGenerating)
+  return (
+    <div className="flex flex-col items-center gap-1" data-testid="train-kind">
+      <Segmented
+        size="sm"
+        layoutId="train-kind"
+        value={trainKind}
+        onChange={(v) => { if (!isGenerating) setTrainKind(v as TrainKind) }}
+        options={TRAIN_KINDS.map((k) => ({ value: k.value, label: k.label }))}
+      />
+      {trainKind === 'style' && (
+        <>
+          <div className="t-label text-gray-500 max-w-[560px] text-center" data-testid="style-mode-note">{STYLE_MODE_NOTE}</div>
+          <label className="t-label text-gray-400 flex items-center gap-1.5 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={trainStyleTrigger}
+              disabled={isGenerating}
+              onChange={(e) => setTrainStyleTrigger(e.target.checked)}
+              data-testid="style-trigger"
+            />
+            {STYLE_TRIGGER_LABEL}
+          </label>
+          <div className="t-label text-gray-600 max-w-[560px] text-center" data-testid="style-trigger-hint">
+            {trainStyleTrigger ? STYLE_TRIGGER_HINT_ON : STYLE_TRIGGER_HINT_OFF}
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
 function LocalTrainControls() {
   const triggerWord = useCreateStore((s) => s.triggerWord)
   const setTriggerWord = useCreateStore((s) => s.setTriggerWord)
   const trainImages = useCreateStore((s) => s.trainImages)
   const trainSteps = useCreateStore((s) => s.trainSteps)
   const setTrainSteps = useCreateStore((s) => s.setTrainSteps)
+  const trainKind = useCreateStore((s) => s.trainKind)
+  const presets = trainPresetsFor(trainKind)
   const trainVramPreset = useCreateStore((s) => s.trainVramPreset)
   const setTrainVramPreset = useCreateStore((s) => s.setTrainVramPreset)
   const isGenerating = useCreateStore((s) => s.isGenerating)
@@ -674,11 +716,13 @@ function LocalTrainControls() {
   }
   return (
     <div className="flex flex-col items-center gap-1.5">
+      <TrainKindPicker />
       <div className="flex items-center justify-center gap-2 flex-wrap">
         <input
           value={triggerWord}
           onChange={(e) => setTriggerWord(e.target.value)}
-          placeholder="Trigger word, e.g. davechar"
+          placeholder={trainKind === 'style' ? STYLE_NAME_PLACEHOLDER : 'Trigger word, e.g. davechar'}
+          aria-label={trainKind === 'style' ? 'Style name' : 'Trigger word'}
           className="t-control w-44 px-2.5 h-[var(--control-h-sm)] rounded-md bg-white/[0.03] border border-white/[0.06] text-gray-200 placeholder-gray-600 focus:outline-none focus:border-white/15"
         />
         <Segmented
@@ -686,7 +730,7 @@ function LocalTrainControls() {
           layoutId="train-steps"
           value={String(trainSteps)}
           onChange={(v) => setTrainSteps(Number(v))}
-          options={TRAIN_PRESETS.map((p) => ({ value: String(p.steps), label: p.label }))}
+          options={presets.map((p) => ({ value: String(p.steps), label: p.label }))}
         />
         <Segmented
           size="sm"
@@ -705,7 +749,7 @@ function LocalTrainControls() {
               3.0.0: `(400 STEPS)` allein sagt nicht, welche der drei Stufen
               gerade gilt, und ein Tester hielt Quick deshalb fuer wirkungslos,
               obwohl Quick genau diese 400 sind. */}
-          <span>Runs on your GPU and takes a while ({trainStepsNote(trainSteps)}). The local chat model pauses for the run. The character lands in your local LoRAs.</span>
+          <span>Runs on your GPU and takes a while ({trainStepsNote(trainSteps, presets)}). The local chat model pauses for the run. The {trainKind === 'style' ? 'style' : 'character'} lands in your local LoRAs.</span>
           {/* The run repairs its own environment now (A2), so this is no
               longer the only way out of a broken install. It stays because
               the button used to render ONLY while the environment counted as
@@ -759,6 +803,8 @@ function MacTrainControls() {
   const trainImages = useCreateStore((s) => s.trainImages)
   const trainSteps = useCreateStore((s) => s.trainSteps)
   const setTrainSteps = useCreateStore((s) => s.setTrainSteps)
+  const trainKind = useCreateStore((s) => s.trainKind)
+  const presets = trainPresetsFor(trainKind)
   const isGenerating = useCreateStore((s) => s.isGenerating)
   const setView = useUIStore((s) => s.setView)
   const setCategoryFilter = useModelStore((s) => s.setCategoryFilter)
@@ -789,6 +835,7 @@ function MacTrainControls() {
   const missing = macTrainMissing(status)
   return (
     <div className="flex flex-col items-center gap-1.5" data-testid="mac-train-controls">
+      <TrainKindPicker />
       {missing && (
         <div className="flex items-center justify-center gap-2 flex-wrap max-w-[560px]">
           <span className="t-label text-gray-400 text-center" data-testid="mac-train-note">{missing}</span>
@@ -801,7 +848,8 @@ function MacTrainControls() {
         <input
           value={triggerWord}
           onChange={(e) => setTriggerWord(e.target.value)}
-          placeholder="Trigger word, e.g. davechar"
+          placeholder={trainKind === 'style' ? STYLE_NAME_PLACEHOLDER : 'Trigger word, e.g. davechar'}
+          aria-label={trainKind === 'style' ? 'Style name' : 'Trigger word'}
           className="t-control w-44 px-2.5 h-[var(--control-h-sm)] rounded-md bg-white/[0.03] border border-white/[0.06] text-gray-200 placeholder-gray-600 focus:outline-none focus:border-white/15"
         />
         <Segmented
@@ -809,7 +857,7 @@ function MacTrainControls() {
           layoutId="train-steps"
           value={String(trainSteps)}
           onChange={(v) => setTrainSteps(Number(v))}
-          options={TRAIN_PRESETS.map((p) => ({ value: String(p.steps), label: p.label }))}
+          options={presets.map((p) => ({ value: String(p.steps), label: p.label }))}
         />
         <span className="t-label text-gray-600">
           {trainImages.length}/{maxTrainImages('local')} photos{trainImages.length < MIN_TRAIN_IMAGES ? `, need at least ${MIN_TRAIN_IMAGES}` : ''}
@@ -817,7 +865,7 @@ function MacTrainControls() {
       </div>
       {!isGenerating && (
         <div className="t-label text-gray-600 text-center max-w-[560px]" data-testid="mac-train-hint">
-          {macTrainNote(trainStepsNote(trainSteps), status)}{' '}
+          {macTrainNote(trainStepsNote(trainSteps, presets), status, trainKind)}{' '}
           <button
             onClick={() => { void openMlxLoraFolder().catch(() => undefined) }}
             className="underline underline-offset-2 text-gray-500 hover:text-gray-300"

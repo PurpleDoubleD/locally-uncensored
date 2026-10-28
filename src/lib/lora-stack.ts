@@ -4,7 +4,7 @@
 // One of them was a Z-Image character LoRA riding into the Animate lane.
 // This file decides, from the one list ComfyUI reports, which picks a run uses
 // and which LoRAs the stack offers for the model that is picked.
-import { parseLocalCharacterLora } from '../api/trainer'
+import { parseLocalCharacterLora, parseLocalStyleLora } from '../api/trainer'
 import { getLoraAddonBundles } from '../api/model-bundles'
 import type { ModelType } from '../api/comfyui'
 
@@ -39,13 +39,14 @@ function catalog(): Map<string, KnownLora> {
 
 /**
  * What the app knows about a file in models/loras, or null when it knows
- * nothing. Two kinds are known: a character from Character Studio (trainer
- * naming `char_<name>_zimage`, a Z-Image LoRA) and the catalogue's own add-ons
+ * nothing. Two kinds are known: a character or a style from Character Studio
+ * (trainer naming `char_<name>_zimage` / `style_<name>_zimage`, Z-Image) and the catalogue's own add-ons
  * (the MiniMax H3 turbo LoRA, Pixel Art XL). Everything else is a file the
  * user put there, and the app does not guess a family from its name.
  */
 export function knownLora(name: string): KnownLora | null {
-  if (parseLocalCharacterLora(name)) return { family: 'zimage', familyLabel: 'Z-Image' }
+  // A style from the same trainer (3.0.9 P8) is the same kind of file.
+  if (parseLocalCharacterLora(name) || parseLocalStyleLora(name)) return { family: 'zimage', familyLabel: 'Z-Image' }
   return catalog().get(fileOf(name).toLowerCase()) ?? null
 }
 

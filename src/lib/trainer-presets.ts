@@ -36,16 +36,16 @@ export const TRAIN_PRESETS: TrainPreset[] = [
 export const TRAIN_STEPS_DEFAULT = 1200
 
 /** Die Stufe zu einer Schrittzahl, oder null fuer eine Zahl, die keine ist. */
-export function trainPresetLabel(steps: number): string | null {
-  return TRAIN_PRESETS.find((p) => p.steps === steps)?.label ?? null
+export function trainPresetLabel(steps: number, presets: TrainPreset[] = TRAIN_PRESETS): string | null {
+  return presets.find((p) => p.steps === steps)?.label ?? null
 }
 
 /**
  * Was im Hinweistext in der Klammer steht: die wirksame Zahl, und davor die
  * Stufe, wenn es eine ist.
  */
-export function trainStepsNote(steps: number): string {
-  const label = trainPresetLabel(steps)
+export function trainStepsNote(steps: number, presets: TrainPreset[] = TRAIN_PRESETS): string {
+  const label = trainPresetLabel(steps, presets)
   return label ? `${label}, ${steps} steps` : `${steps} steps`
 }
 

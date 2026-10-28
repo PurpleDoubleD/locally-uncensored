@@ -54,8 +54,11 @@ export async function stageMacTrainPhoto(set: string, bytes: number[] | Uint8Arr
   return invokeMedia<{ staged: string }>('mlx_train_stage', { set, data: bytesToBase64(bytes), caption })
 }
 
-export async function startMacTraining(set: string, trigger: string, steps?: number): Promise<{ status: string }> {
-  await invokeMedia('mlx_train_start', { set, trigger, steps: steps ?? null, run: RUN })
+/** `trigger` is the name the file is made of (`char_<trigger>_zimage`, or
+ *  `style_<trigger>_zimage` for kind 'style'); the captions carry the trigger
+ *  word itself. */
+export async function startMacTraining(set: string, trigger: string, steps?: number, kind?: 'character' | 'style'): Promise<{ status: string }> {
+  await invokeMedia('mlx_train_start', { set, trigger, steps: steps ?? null, run: RUN, kind: kind ?? null })
   return { status: 'started' }
 }
 
@@ -86,12 +89,13 @@ export function macTrainRunStatus(p: MacTrainProgress): { status: string; phase:
  *  arrives with Z-Image Turbo, so one install answers both (GH #194). */
 export function macTrainMissing(s: Pick<MacTrainStatus, 'engineReady' | 'base'>): string | null {
   if (s.engineReady && s.base) return null
-  return 'Training a character on this Mac needs Z-Image Turbo, about 6 GB. The standard setup does not install it.'
+  // Said for a character and a style alike (3.0.9 P8): both train on it.
+  return 'Training on this Mac needs Z-Image Turbo, about 6 GB. The standard setup does not install it.'
 }
 
-export function macTrainNote(stepsNote: string, s: Pick<MacTrainStatus, 'adapterReady' | 'adapterBytes'>): string {
+export function macTrainNote(stepsNote: string, s: Pick<MacTrainStatus, 'adapterReady' | 'adapterBytes'>, kind: 'character' | 'style' = 'character'): string {
   const first = s.adapterReady ? '' : ` The first run also downloads a ${Math.round(s.adapterBytes / 1_000_000)} MB training adapter.`
-  return `Runs on this Mac and takes a while (${stepsNote}). The local chat model pauses for the run.${first} The character lands in your LoRA folder.`
+  return `Runs on this Mac and takes a while (${stepsNote}). The local chat model pauses for the run.${first} The ${kind === 'style' ? 'style' : 'character'} lands in your LoRA folder.`
 }
 
 function bytesToBase64(bytes: number[] | Uint8Array): string {

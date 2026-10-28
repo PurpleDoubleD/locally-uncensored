@@ -57,8 +57,8 @@ beforeEach(() => {
   useCreateStore.setState({
     backend: 'local', characterTab: 'train', isGenerating: false,
     trainImages: [photo('a.png'), photo('b.png'), photo('c.png'), photo('d.png')],
-    trainCaptions: {}, trainVramPreset: 'standard', triggerWord: 'davechar',
-  })
+    trainCaptions: {}, trainVramPreset: 'standard', triggerWord: 'davechar', trainKind: 'character', trainSteps: 1200,
+  } as never)
 })
 
 describe('die Textzeile unter jedem Foto (D28)', () => {
@@ -106,7 +106,7 @@ describe('die Textzeile unter jedem Foto (D28)', () => {
   it('der Lauf gibt jedem Foto seine Zeile und dem Trainer das Rezept', () => {
     const src = readFileSync(resolve(__dirname, '../../../../hooks/useCreate.ts'), 'utf8')
     expect(src).toContain('buildTrainCaption(trigger, state.trainCaptions[img.name])')
-    expect(src).toContain('startCharacterTraining(setId, trigger, trigger, state.trainSteps, state.trainVramPreset)')
+    expect(src).toContain('startCharacterTraining(setId, trigger, trigger, state.trainSteps, state.trainVramPreset, kind)')
     expect(src).not.toContain('`${trigger}, a photo of ${trigger}`')
   })
 })
@@ -152,5 +152,25 @@ describe('Normal / Low VRAM (D20)', () => {
     const merged = persist.getOptions().merge({ trainVramPreset: 'ultra', trainCaptions: { x: 'y' } }, { ...useCreateStore.getState(), trainCaptions: {} })
     expect(merged.trainVramPreset).toBe('standard')
     expect(merged.trainCaptions).toEqual({})
+  })
+})
+
+describe('3.0.9 P8: Style / concept', () => {
+  it('fragt je Bild nach dem Inhalt, nicht nach dem, was sich an einer Person aendert', () => {
+    useCreateStore.getState().setTrainKind('style')
+    render(<TrainSetBoard />)
+    expect(screen.getAllByPlaceholderText('e.g. a fox in a forest')).toHaveLength(4)
+    expect(screen.queryAllByPlaceholderText('e.g. red jacket, short hair, beach')).toHaveLength(0)
+    expect(screen.getByTestId('train-caption-help').textContent).toContain('what is left unnamed is what the LoRA learns')
+    expect(screen.getByText(/lands the style in your local LoRAs/)).toBeTruthy()
+  })
+
+  it('der Waehler steht auch im Windows-Trainer, mit den Stufen des Stils', async () => {
+    render(<SpecialControls intent="character" />)
+    fireEvent.click(await screen.findByRole('radio', { name: 'Style / concept' }))
+    expect(screen.getByPlaceholderText('Name, e.g. inkwash')).toBeTruthy()
+    expect(screen.getByText(/Standard, 1600 steps.*The style lands in your local LoRAs/)).toBeTruthy()
+    // Normal / Low VRAM bleibt, der Stil laeuft auf demselben Rezept.
+    expect(screen.getByRole('radio', { name: 'Low VRAM' })).toBeTruthy()
   })
 })
