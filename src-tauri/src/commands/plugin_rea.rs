@@ -81,6 +81,14 @@ fn child_path() -> Option<String> {
     }
 }
 
+/// The PATH every external MCP server starts with (api/mcp/external-client,
+/// `spawnEnv`): the login shell's on a Mac, where a Finder start has only
+/// launchd's and an installed uvx or npx is not found; None elsewhere.
+#[tauri::command]
+pub async fn mcp_child_path() -> Result<Option<String>, String> {
+    tokio::task::spawn_blocking(child_path).await.map_err(|e| e.to_string())
+}
+
 /// The file name of Node on this platform.
 const NODE_EXE: &str = if cfg!(windows) { "node.exe" } else { "node" };
 

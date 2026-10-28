@@ -609,6 +609,7 @@ export async function backendCall<T = unknown>(
     // REA, the reverse engineering plugin of the agents: the pinned package
     // is fetched and checked by the Rust process only (commands/plugin_rea.rs).
     plugin_rea_status: { path: "/local-api/plugin-rea-status" },
+    mcp_child_path: { path: "/local-api/mcp-child-path" },
     plugin_rea_fetch: { path: "/local-api/plugin-rea-fetch", method: "POST" },
     plugin_rea_guard: { path: "/local-api/plugin-rea-guard", method: "POST" },
     // Astra computer use: mouse, keyboard and screen belong to the Rust

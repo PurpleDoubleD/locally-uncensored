@@ -230,6 +230,7 @@ export class MCPExternalClient {
       if (!isStartableMcpCommand(this.config.command)) {
         throw new Error(notStartableMessage(this.config.name, this.config.command))
       }
+      const env = await spawnEnv(this.config.env)
       const candidates = commandCandidatesForPlatform(this.config.command)
       // Every failed attempt is kept, not just the last one. The last one used
       // to be the only one thrown, and on Windows that was the `.cmd`
@@ -239,7 +240,7 @@ export class MCPExternalClient {
       const spawnErrors: unknown[] = []
       for (const program of candidates) {
         const command = Command.create(program, this.config.args, {
-          env: this.config.env,
+          env,
           ...(this.config.cwd ? { cwd: this.config.cwd } : {}),
         })
 
@@ -590,6 +591,32 @@ export function notStartableMessage(name: string, command: string): string {
     + `server entry to change the command to one of those, for example the command `
     + `\`uvx\` with the argument \`mcp-server-time\`.`
   )
+}
+
+/**
+ * Die Umgebung, mit der ein Server startet.
+ *
+ * Ein Mac-LU aus dem Finder hat den launchd-PATH `/usr/bin:/bin:/usr/sbin:/sbin`.
+ * uvx liegt nach Astrals Installer in `~/.local/bin`, nach Homebrew in
+ * `/opt/homebrew/bin`, npx bei nvm in dessen Ordner: alles unsichtbar. Am
+ * 28.10.2026 im gebauten Testbau nachgestellt: ein installiertes uvx brachte
+ * "`uvx` was not found", und "LU neu oeffnen" aenderte daran nichts. REA bekam
+ * den PATH der Login-Shell schon (commands/plugin_rea.rs); jetzt jeder Server.
+ * Rust sucht das Programm unter Unix in genau diesem PATH. Ein PATH, den der
+ * Nutzer selbst eingetragen hat, bleibt seiner. Windows und Linux antworten
+ * mit null und behalten die Umgebung der App.
+ */
+export async function spawnEnv(configured?: Record<string, string>): Promise<Record<string, string> | undefined> {
+  if (configured && Object.keys(configured).some((k) => k.toUpperCase() === 'PATH')) return configured
+  if (!isTauri()) return configured
+  try {
+    const { invoke } = await import('@tauri-apps/api/core')
+    const path = await invoke<string | null>('mcp_child_path')
+    if (!path) return configured
+    return { ...(configured ?? {}), PATH: path }
+  } catch {
+    return configured
+  }
 }
 
 /**

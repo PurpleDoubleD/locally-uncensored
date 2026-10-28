@@ -49,6 +49,7 @@ pub const BLOCKED: &[&str] = &[
     "trash_model_file",
     "comfy_torch_plan",
     "plugin_rea_status",
+    "mcp_child_path",
     "plugin_rea_fetch",
     "plugin_rea_guard",
     "storage_status",

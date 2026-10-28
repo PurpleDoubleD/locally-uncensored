@@ -786,6 +786,7 @@ pub fn run() {
             // Shell
             // REA as an agent plugin: the pinned package and what its start needs.
             commands::plugin_rea::plugin_rea_status,
+            commands::plugin_rea::mcp_child_path,
             commands::plugin_rea::plugin_rea_fetch,
             commands::plugin_rea::plugin_rea_guard,
             commands::shell::shell_execute,
