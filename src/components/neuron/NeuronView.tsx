@@ -372,7 +372,7 @@ function SliderRow({ id, left, right, value, computed, disabled, onChange, onCom
           aria-label={`${left} to ${right}`}
           onChange={(e) => onChange(Number(e.target.value))}
           onDoubleClick={() => onChange(0)}
-          className="w-full accent-[var(--lu-accent,#8b7cf0)]"
+          className="w-full accent-lu-accent"
         />
       ) : (
         <button

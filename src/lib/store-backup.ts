@@ -39,6 +39,8 @@ export const STORE_KEYS = [
   'lu_cloud_notice', 'lu_comfy_notice', 'locally-uncensored-model-health',
   // 3.0.8: which LU Cloud outage sentence was closed (stores/cloudOutageStore).
   'lu-cloud-outage',
+  // Neuron tweaker slider values per model and persona (3.0.9, P11).
+  'lu-neuron-tweaker',
   'locally-uncensored-agent-goal',
   // Computer control: the switch and the always allowed apps.
   'locally-uncensored-computer',

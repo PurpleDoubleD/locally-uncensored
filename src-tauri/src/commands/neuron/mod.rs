@@ -735,7 +735,7 @@ pub fn neuron_sae_download(model_path: String) -> Result<Value, String> {
         let client = reqwest::blocking::Client::builder()
             .connect_timeout(std::time::Duration::from_secs(20))
             .timeout(std::time::Duration::from_secs(3600))
-            .user_agent("LocallyUncensored")
+            .user_agent(crate::app_identity::outgoing_agent_for(crate::app_identity::APP_VERSION))
             .build()
             .map_err(|e| e.to_string())?;
         let total = spec.bytes();

@@ -115,7 +115,7 @@ export function backendNote(kind: BackendKind): string | null {
     case 'lu-engine':
       return null
     case 'ollama':
-      return 'Your chat model runs in Ollama. Ollama takes no control vectors, so the sliders cannot reach it. Load the same model in LU Engine (Models → LU Engine) to tweak it.'
+      return 'Your chat model runs in Ollama. Ollama takes no control vectors, so the sliders cannot reach it. Load the same model in LU Engine to tweak it.'
     case 'lmstudio':
       return 'Your chat model runs in LM Studio, which takes no control vectors. Load it in LU Engine to tweak it.'
     case 'cloud':
