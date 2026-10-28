@@ -45,6 +45,55 @@ export const REA_TOOLS_NOTE =
   + 'It works best with a model of about 27B and a context window of 64K or more; smaller ones often stop before an answer. '
   + 'Use it on software you own or are allowed to examine.'
 
+/**
+ * What LU found of Ghidra (commands/plugin_rea.rs, `ghidra_status_in`).
+ *
+ * REA uses a Ghidra the user installed. On a Mac the official download has no
+ * decompiler for the machine (B11): Ghidra ships it for Windows and Linux
+ * x86-64 only and asks everyone else to build it once.
+ */
+export interface ReaGhidra {
+  found: boolean
+  installDir?: string
+  /** env: GHIDRA_INSTALL_DIR, path: a launcher on the PATH, folder: LU's search. */
+  foundBy?: 'env' | 'path' | 'folder'
+  version?: string | null
+  /** The Ghidra version REA is validated against. */
+  wantVersion: string
+  /** Ghidra's name for this machine's native tools, e.g. mac_arm_64. */
+  nativeDir: string | null
+  decompiler?: string | null
+  /** Found, but no decompiler for this machine: `gradle buildNatives` needed. */
+  needsNatives?: boolean
+  /** `<install>/support/gradle`, where Ghidra's build runs. */
+  buildDir?: string
+}
+
+/** The section of the guide that walks through Ghidra on a Mac. */
+export const REA_GHIDRA_GUIDE = 'https://locallyuncensored.com/guide/agent/#rea-ghidra'
+
+/**
+ * The sentence about Ghidra under the REA row, or null when there is nothing
+ * to say (Ghidra ready, or the status came from an older Rust side).
+ */
+export function reaGhidraLine(g: ReaGhidra | null | undefined): string | null {
+  if (!g) return null
+  if (!g.found) {
+    return g.installDir
+      ? `GHIDRA_INSTALL_DIR points at ${g.installDir}, which is not a Ghidra install. Native programs need Ghidra ${g.wantVersion}.`
+      : `Ghidra not found. For native programs install Ghidra ${g.wantVersion} from its official GitHub release (guide: ${REA_GHIDRA_GUIDE}).`
+  }
+  const which = `Ghidra ${g.version ?? '(unknown version)'} at ${g.installDir}`
+  const versionNote = g.version && g.version !== g.wantVersion ? ` REA is made for Ghidra ${g.wantVersion}.` : ''
+  if (g.needsNatives) {
+    return `${which} has no decompiler for this computer (${g.nativeDir}). `
+      + 'The official download ships it only for Windows and Linux; build it once in Terminal: '
+      + `xcode-select --install, then cd "${g.buildDir}" && gradle buildNatives (needs Gradle 8.5+ and a JDK 21). `
+      + `Then switch REA off and on. Guide: ${REA_GHIDRA_GUIDE}${versionNote}`
+  }
+  return `${which}, decompiler ready.${versionNote}`
+}
+
 /** The answer of `plugin_rea_status` / `plugin_rea_fetch`. */
 export interface ReaStatus {
   version: string
@@ -57,6 +106,8 @@ export interface ReaStatus {
   node: string | null
   nodeOk: boolean
   nodeRange: string
+  /** Since 3.0.9; missing from an older Rust side. */
+  ghidra?: ReaGhidra | null
 }
 
 export function reaStatus(): Promise<ReaStatus> {
@@ -119,6 +170,11 @@ export function reaServerConfig(status: ReaStatus): MCPServerConfig {
     REA_LOG_LEVEL: 'warn',
   }
   if (status.path) env.PATH = status.path
+  // A Ghidra LU found in a folder is one REA would not find on its own: a
+  // Finder start has no GHIDRA_INSTALL_DIR and no terminal PATH (B11).
+  if (status.ghidra?.found && status.ghidra.installDir && status.ghidra.foundBy === 'folder') {
+    env.GHIDRA_INSTALL_DIR = status.ghidra.installDir
+  }
   return {
     id: REA_PLUGIN.serverId,
     name: REA_PLUGIN.name,

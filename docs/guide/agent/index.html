@@ -15,7 +15,7 @@
 <meta property="og:image" content="https://locallyuncensored.com/social-preview.png">
 <meta name="twitter:card" content="summary_large_image">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"TechArticle","headline":"Agent Mode in Locally Uncensored: Tools, Workspace Folder, Approvals, Stop","description":"How agent mode works in Locally Uncensored: the tools, the workspace folder and the sandbox, permissions and approvals, Stop, background agents and loops.","url":"https://locallyuncensored.com/guide/agent/","dateModified":"2026-09-11","inLanguage":"en","author":{"@type":"Person","name":"PurpleDoubleD","url":"https://github.com/PurpleDoubleD"},"publisher":{"@type":"Organization","name":"Locally Uncensored","url":"https://locallyuncensored.com/"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://locallyuncensored.com/guide/agent/"},"isPartOf":{"@type":"WebPage","name":"Locally Uncensored Handbook: Install, Chat, Agent, Code, Create, Cloud","url":"https://locallyuncensored.com/guide/"},"about":{"@type":"SoftwareApplication","name":"Locally Uncensored","operatingSystem":"Windows, Linux, macOS","applicationCategory":"UtilitiesApplication"}}
+{"@context":"https://schema.org","@type":"TechArticle","headline":"Agent Mode in Locally Uncensored: Tools, Workspace Folder, Approvals, Stop","description":"How agent mode works in Locally Uncensored: the tools, the workspace folder and the sandbox, permissions and approvals, Stop, background agents and loops.","url":"https://locallyuncensored.com/guide/agent/","dateModified":"2026-10-28","inLanguage":"en","author":{"@type":"Person","name":"PurpleDoubleD","url":"https://github.com/PurpleDoubleD"},"publisher":{"@type":"Organization","name":"Locally Uncensored","url":"https://locallyuncensored.com/"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://locallyuncensored.com/guide/agent/"},"isPartOf":{"@type":"WebPage","name":"Locally Uncensored Handbook: Install, Chat, Agent, Code, Create, Cloud","url":"https://locallyuncensored.com/guide/"},"about":{"@type":"SoftwareApplication","name":"Locally Uncensored","operatingSystem":"Windows, Linux, macOS","applicationCategory":"UtilitiesApplication"}}
 </script>
 <link rel="icon" href="/favicon.png">
 <script type="application/ld+json">
@@ -64,6 +64,7 @@
 <a href="#approvals">Permissions and approvals</a>
 <a href="#stop">Stop, background agents and loops</a>
 <a href="#mcp">MCP servers and workflows</a>
+<a href="#rea-ghidra">REA and Ghidra on a Mac</a>
 <a href="#wrong">When it goes wrong</a>
 </nav>
 
@@ -146,7 +147,24 @@
 
 <p>MCP is a standard that lets you plug an outside tool server into the agent. Settings, Agent, MCP Servers adds one with a name and a command; the field is labelled "Command (only npx or uvx)", because the app starts servers only through those two launchers. The server's tools then appear next to the built in ones.</p>
 
+<p>A server started with uvx needs uv, Astral's Python tool runner. Install it from the official instructions at <a href="https://docs.astral.sh/uv/getting-started/installation/">docs.astral.sh/uv</a>; on Windows the quickest is <code>winget install --id=astral-sh.uv -e</code>, on a Mac <code>brew install uv</code>. uv puts <code>uvx</code> into <code>~/.local/bin</code> (Windows: <code>%USERPROFILE%\.local\bin\uvx.exe</code>). Quit and reopen LU afterwards so it sees the new PATH; on Windows LU also finds uvx in that folder without it. To try it, add a server with the command <code>uvx</code> and the argument <code>mcp-server-time==2026.8.18</code>: it answers with two tools, get_current_time and convert_time. If uv is missing, the server row says "`uvx` was not found" and links the installation page.</p>
+
 <p>Agent Workflows, under the same settings tab, are saved sequences the agent can run with run_workflow.</p>
+
+<h2 id="rea-ghidra">REA and Ghidra on a Mac</h2>
+
+<p>REA (Plugins, REA) takes apart apps and files for Agent and Code. For native programs it uses Ghidra, which you install yourself; LU installs none of it. REA 6.5.0 is made for Ghidra 12.1.4. Download it only from the official release on <a href="https://github.com/NationalSecurityAgency/ghidra/releases">github.com/NationalSecurityAgency/ghidra</a> and compare the SHA-256 the release lists. Ghidra needs a JDK 21 or newer.</p>
+
+<p>The official download has no decompiler for a Mac. Ghidra ships its native decompiler for Windows and Linux on x86-64 only, and asks everyone on macOS (Apple Silicon and Intel) and Linux ARM to build it once. Without it every decompile ends with "executable_missing" and a path ending in <code>os/mac_arm_64/decompile</code>. With REA switched on, the plugin row now says which Ghidra LU found and whether its decompiler is there. To build it, following Ghidra's own Getting Started:</p>
+
+<ol>
+<li>Install the Command Line Tools for Xcode: <code>xcode-select --install</code> (or Xcode from the App Store).</li>
+<li>Install Gradle 8.5 or newer, for example <code>brew install gradle</code>, and a JDK 21 or newer, for example <code>brew install openjdk@21</code>.</li>
+<li>In Terminal: <code>cd ~/ghidra_12.1.4_PUBLIC/support/gradle</code> (your Ghidra folder), then <code>gradle buildNatives</code>. It takes about a minute. The decompiler lands in <code>Ghidra/Features/Decompiler/build/os/mac_arm_64/</code>, which Ghidra prefers over the shipped folder.</li>
+<li>Switch REA off and on. The row should read "decompiler ready".</li>
+</ol>
+
+<p>LU finds Ghidra through <code>GHIDRA_INSTALL_DIR</code>, a <code>ghidraRun</code> on the PATH (Homebrew's cask puts one in <code>/opt/homebrew/bin</code>), or a folder named <code>ghidra…</code> in your home folder, <code>~/Applications</code> or <code>/Applications</code>. A Ghidra it finds in such a folder is handed to REA, so a Finder start works without a terminal. Desktop, Documents and Downloads are not searched, because macOS would ask for permission each time; move Ghidra out of there or set <code>GHIDRA_INSTALL_DIR</code>.</p>
 
 <h2 id="wrong">When it goes wrong</h2>
 
