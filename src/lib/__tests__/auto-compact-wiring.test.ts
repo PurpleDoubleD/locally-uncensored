@@ -633,6 +633,18 @@ describe('Auto-Kompaktierung, die klappt, sagt es auch', () => {
     expect(hinweise(id)).toHaveLength(0)
   })
 
+  it('eine schon angelegte, leere Antwort gehoert nicht zum Stand davor', async () => {
+    // Mac-Lauf 28.10.: die Agent-Schleife legt die Antwort an, bevor sie
+    // verdichtet. Als Ende genommen zeigte die Ebene "vorher" die spaetere
+    // Antwort mit.
+    setzeSchwelle(0.5)
+    const id = vollesGespraech()
+    useChatStore.getState().addMessage(id, { id: 'offen', role: 'assistant', content: '', timestamp: 9999, agentBlocks: [] })
+    zusammenfassen.mockResolvedValue({ ok: true, summary: ZUSAMMENFASSUNG } as never)
+    const rec = await maybeAutoCompact({ conversationId: id, activeModel: MODELL })
+    expect(rec!.endMessageId).toBe('lang39')
+  })
+
   it('die Linie steht NACH den Nachrichten, die sie ersetzt', async () => {
     // Am Schnittpunkt, nicht am Anfang: sonst behauptet sie, das ganze
     // Gespraech sei zusammengefasst. Was davor stand, liegt eine Ebene tiefer.

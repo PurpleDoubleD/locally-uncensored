@@ -272,7 +272,10 @@ export async function runCompactForConversation(opts: {
       record.contextBefore = contextBefore
       record.contextAfter = Math.max(0, contextBefore - Math.max(0, record.tokensBefore - record.tokensAfter))
     }
-    const newest = conv.messages[conv.messages.length - 1]
+    // The answer the agent loops have already opened (empty, no step yet) is
+    // not part of the stand before: what it will say comes after. Mac run
+    // 28.10.: with it as the end, the layer "before" showed the later answer.
+    const newest = conv.messages.findLast((m) => !(m.role === 'assistant' && !m.content && !m.agentBlocks?.length))
     if (newest) record.endMessageId = newest.id
     // Re-read the store: the conversation may have been deleted while the model
     // was writing. recordCompaction is a no-op on a missing id, but reporting
