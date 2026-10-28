@@ -116,6 +116,23 @@ describe('a compaction in the middle of an Agent or Code run', () => {
   })
 })
 
+describe('a /compact after a compaction in the middle of a run', () => {
+  // Found on the web run of 28.10.: the record keeps the newest messages
+  // verbatim, its anchor lies before the run's cut, and it was dropped, so
+  // the /compact left no line and no layer.
+  const run = msg('a2', { agentBlocks: [cutBlock('k1', 50)] })
+  const messages = [msg('u1'), msg('a1'), msg('u2'), run, msg('n1', { role: 'system', notice: 'info', content: '/compact' })]
+  const rec = record({ id: 'r9', upToMessageId: 'a1', endMessageId: 'n1', at: 200 })
+
+  it('is still a layer, and the view after it does not run backwards', () => {
+    const cuts = compactCuts(messages, [rec])
+    expect(cuts.map((c) => c.key)).toEqual(['k1', 'r9'])
+    expect(ids(layerItems(messages, cuts, null))).toEqual(['|r9|', 'a2', 'n1'])
+    expect(ids(layerItems(messages, cuts, 1))).toEqual(['|k1|', 'a2', 'n1'])
+    expect(ids(layerItems(messages, cuts, 0))).toEqual(['u1', 'a1', 'u2'])
+  })
+})
+
 describe('nothing is lost', () => {
   // The rule the 2.6.8 guard protected ("a compaction takes nothing away from
   // the transcript") in its 3.0.9 form: every stored message, and every step

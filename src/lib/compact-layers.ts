@@ -111,15 +111,21 @@ export function compactCuts(
     })
   })
 
-  // In the order they happened. A cut that would start before the one it
-  // follows (data from a hand-edited or imported chat) cannot make a layer
-  // and is dropped instead of producing a view that runs backwards.
+  // In the order they happened. A view never runs backwards: a per-turn
+  // record keeps the newest messages verbatim, so its anchor can lie before
+  // the start of the view it follows (a /compact after a compaction in the
+  // middle of a run, Mac run 28.10.). The model then reads the summary and
+  // those kept messages, and the view after it starts where the one before
+  // started, with the new line on top. Its layer ends no earlier than that.
   cuts.sort((a, b) => a.at - b.at)
   const out: CompactCut[] = []
   for (const cut of cuts) {
     const prev = out[out.length - 1]
-    if (prev && before(cut.start, prev.start)) continue
-    out.push(cut)
+    if (prev && before(cut.start, prev.start)) {
+      out.push({ ...cut, start: prev.start, end: before(cut.end, prev.start) ? prev.start : cut.end })
+    } else {
+      out.push(cut)
+    }
   }
   return out
 }
