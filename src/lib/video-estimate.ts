@@ -65,11 +65,14 @@ interface Reference {
  *  832×480×121 at 20 steps and cfg 5 sampled at 36 s a step, two model calls
  *  each, and the section took 1011 s in all; the rest (text encoder, model
  *  and VAE loads, decode) is the overhead, inflated by a box with about 1 GB
- *  of RAM free. Wan 14B: A14B Q4_K_S GGUF at 832×480×81, derived (see the
- *  B18 report). LTX 2.5: the whole two pass graph counted as eleven steps at
+ *  of RAM free. Wan 14B is MEASURED too (B18, 28.10.2026): A14B Q4_K_S GGUF
+ *  with the lightx2v LoRAs, 832×480×81, 4 steps at cfg 1, about 100 s a step
+ *  because ComfyUI kept 4 of the 8.15 GB in system memory (only 4.5 GB of the
+ *  card usable next to the working memory); sections took 554 to 853 s, the
+ *  30 s clip 70 min. LTX 2.5: the whole two pass graph counted as eleven steps at
  *  1280×704×121, derived. */
 const REFERENCE: Partial<Record<string, Reference>> = {
-  wan14b: { secPerStep: 42, w: 832, h: 480, frames: 81, space: 8, time: 4, overhead: 70, workGb: 2.5 },
+  wan14b: { secPerStep: 100, w: 832, h: 480, frames: 81, space: 8, time: 4, overhead: 220, workGb: 6.5 },
   wan13b: { secPerStep: 7, w: 832, h: 480, frames: 81, space: 8, time: 4, overhead: 25, workGb: 1.5 },
   wan22: { secPerStep: 18, w: 832, h: 480, frames: 121, space: 16, time: 4, overhead: 290, workGb: 3 },
   ltx25: { secPerStep: 22, w: 1280, h: 704, frames: 121, space: 32, time: 8, overhead: 60, workGb: 3 },
