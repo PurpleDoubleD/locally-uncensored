@@ -127,6 +127,10 @@ export default function NewCharacterPage() {
     // itself emptied the photos), that sentence is over and the page ends like any training.
     const stoppedInVain = !!st.error && explainError(st.error).kind === 'cannot-stop' && st.trainImages.length === 0
     if (st.error && !stoppedInVain) return
+    // A training that came through emptied the photos. Photos still there and no error: the run was
+    // stopped (the shelf's Stop, or Stop during the upload). That is not "trained", and the shelf says
+    // "Training cancelled" itself; this page used to toast "trained" over it and leave the shelf.
+    if (!stoppedInVain && st.trainImages.length > 0) return
     if (stoppedInVain) st.setError(null)
     st.clearTrainImages()
     st.setTriggerWord('')
