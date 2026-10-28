@@ -276,6 +276,7 @@ export function MessageList({ isGenerating, isThisChatGenerating, isLoadingModel
                 // stream writes into out of the thread.
                 onSwitchFork={isGenerating || readOnly ? undefined : handleSwitchFork}
                 onBranch={readOnly ? undefined : handleBranch}
+                readOnly={readOnly}
                 declined={message.id === declinedId}
                 speakerName={speakerNameOf(message, speakers, authors)}
               />

@@ -58,6 +58,10 @@ interface Props {
   onSwitchFork?: (key: string, index: number) => void
   /** GH #174: a new chat that ends with this message. */
   onBranch?: (messageId: string) => void
+  /** An earlier compact layer (3.0.9): the message can be read and copied,
+   *  nothing else. The parent already leaves edit/regenerate/branch out;
+   *  this also takes delete and the assistant's own edit away. */
+  readOnly?: boolean
   /** Tool-call id awaiting user approval. When the matching block in
    *  this message has that id, ToolCallBlock renders Approve/Reject
    *  inline instead of a popup over the chat input. */
@@ -77,7 +81,7 @@ interface Props {
   declined?: boolean
 }
 
-function MessageBubbleImpl({ message, onRegenerate, onEdit, pendingApprovalId, onApprove, onReject, isLast, isStreaming, speakerName, declined, forkKey, forkIndex, forkTotal, onSwitchFork, onBranch }: Props) {
+function MessageBubbleImpl({ message, onRegenerate, onEdit, pendingApprovalId, onApprove, onReject, isLast, isStreaming, speakerName, declined, forkKey, forkIndex, forkTotal, onSwitchFork, onBranch, readOnly }: Props) {
   const [copied, setCopied] = useState(false)
   const [isEditing, setIsEditing] = useState(false)
   const [editContent, setEditContent] = useState('')
@@ -253,13 +257,13 @@ function MessageBubbleImpl({ message, onRegenerate, onEdit, pendingApprovalId, o
   //
   // `edit` und `regenerate` sind `null`, wo die Leiste den Knopf auch nicht
   // zeigt; das Menue laesst den Eintrag dann ebenfalls weg.
-  const canEdit = (isUser && !!onEdit) || canEditAssistant
+  const canEdit = !readOnly && ((isUser && !!onEdit) || canEditAssistant)
   const actions: MessageMenuHandlers = {
     copy: handleCopy,
     edit: canEdit ? startEdit : null,
     regenerate: !isUser && onRegenerate ? () => onRegenerate(message.id) : null,
     branch: onBranch ? () => onBranch(message.id) : null,
-    remove: handleDelete,
+    remove: readOnly ? null : handleDelete,
   }
   // Die Leiste haengt an `!isEditing && !isStreaming` — das Menue bietet
   // dieselben Aktionen an, also gilt fuer es dieselbe Bedingung.
@@ -697,9 +701,9 @@ function MessageBubbleImpl({ message, onRegenerate, onEdit, pendingApprovalId, o
             {actions.branch && (
               <button onClick={actions.branch} className="p-1 rounded-md text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/10 transition-colors" aria-label="Branch from here" title="Branch from here: a new chat up to this message"><GitBranch size={12} /></button>
             )}
-            <button onClick={actions.remove} className={'p-1 rounded-md transition-colors hover:bg-gray-100 dark:hover:bg-white/10 ' + (confirmDelete ? 'text-red-500' : 'text-gray-400 dark:text-gray-500 hover:text-red-500')} aria-label="Delete message" title={confirmDelete ? 'Click again to delete' : 'Delete message'}>
+            {actions.remove && <button onClick={actions.remove} className={'p-1 rounded-md transition-colors hover:bg-gray-100 dark:hover:bg-white/10 ' + (confirmDelete ? 'text-red-500' : 'text-gray-400 dark:text-gray-500 hover:text-red-500')} aria-label="Delete message" title={confirmDelete ? 'Click again to delete' : 'Delete message'}>
               <Trash2 size={12} />
-            </button>
+            </button>}
             {!isUser && <RequestUsageLine usage={message.requestUsage} className="pl-1.5" />}
           </div>
         )}
