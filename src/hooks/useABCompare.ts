@@ -8,7 +8,7 @@ import { useCompareStore } from '../stores/compareStore'
 import { useSettingsStore } from '../stores/settingsStore'
 import { getProviderForModel, getProviderIdFromModel } from '../api/providers'
 import { getChatWindowTokens } from '../lib/context-compaction'
-import { applySendBudget, chatBudgetApplies, sharedChatSendBudget } from '../lib/chat-send-budget'
+import { applySendBudget, chatBudgetApplies, chatBudgetHysteresis, sharedChatSendBudget } from '../lib/chat-send-budget'
 import { sendsToALanBackend } from '../lib/lan-openai-slot'
 import { buildChatSystemPrompt } from '../lib/system-prompt'
 import { v4 as uuid } from 'uuid'
@@ -103,11 +103,18 @@ export function useABCompare() {
             sendWindowTokens: sendWindowFor(settings, m),
             contextDecay: settings.contextDecay,
             localBackend: sendsToALanBackend(providerId, m),
+            answerTokens: settings.maxTokens,
           }
         }),
       ),
     )
-    const sendMessages = applySendBudget(chatMessages, budget).messages
+    // GH #201: two local sides are trimmed to their budget and no deeper, and
+    // the note they read is a conversation's, not an agent's.
+    const hysteresis = [modelA, modelB].some((m) => {
+      const id = getProviderIdFromModel(m)
+      return chatBudgetHysteresis({ providerId: id, localBackend: sendsToALanBackend(id, m) })
+    })
+    const sendMessages = applySendBudget(chatMessages, budget, { hysteresis, notice: 'chat' }).messages
 
     // R5-10/R5-11: Compare has no conversation of its own (compareStore, not
     // chatStore), so there is no per-chat override to read; only the "omit a

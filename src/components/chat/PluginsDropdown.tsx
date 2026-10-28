@@ -1,11 +1,12 @@
 import { lazy, Suspense, useRef, useState } from 'react'
 import { usePopoverPlatz } from '../../hooks/usePopoverPlatz'
 import { useDismissOnEscape } from '../../hooks/useDismissOnEscape'
-import { Plug, ChevronDown, Bone, User, Users, Sparkles, X } from 'lucide-react'
+import { Plug, ChevronDown, ChevronUp, Bone, User, Users, Sparkles, X, GripVertical } from 'lucide-react'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { useChatStore } from '../../stores/chatStore'
 import { useModelStore } from '../../stores/modelStore'
 import { GROUP_CHAT_MAX, isGroupChat, groupChatRows } from '../../lib/group-chat'
+import { moveMember } from '../../lib/group-rounds'
 import { resolveChatPersona } from '../../lib/chat-persona'
 import type { CavemanMode } from '../../types/settings'
 import { displayModelName } from '../../api/providers/registry'
@@ -61,6 +62,8 @@ export function PluginsDropdown({
   const [groupOpen, setGroupOpen] = useState(false)
   // Which participant's persona list is open, by model name.
   const [personaFor, setPersonaFor] = useState<string | null>(null)
+  // GH #200: the member being dragged in the speaking order, by index.
+  const [dragFrom, setDragFrom] = useState<number | null>(null)
   const setActivePersona = useSettingsStore((s) => s.setActivePersona)
   const activePersonaId = useSettingsStore((s) => s.activePersonaId)
   const allPersonas = useSettingsStore((s) => s.personas)
@@ -379,6 +382,59 @@ export function PluginsDropdown({
                   <p className="px-2 pb-0.5 text-[0.5rem] leading-snug text-gray-400">
                     Pick 2 to {GROUP_CHAT_MAX} models. They answer in turn on every message, and each sees what the others said. Each one can speak as its own persona.
                   </p>
+                  {/* GH #200: the order is the order of the round. Shown, and
+                      changed by dragging a row or with its arrows; before,
+                      it was the order of ticking and nowhere to be seen. */}
+                  {groupModels.length >= 2 && (
+                    <div data-testid="group-order" className="mb-1 pb-1 border-b border-gray-200/60 dark:border-white/[0.04]">
+                      <p className="px-2 pb-0.5 t-micro leading-snug text-gray-400">Speaking order. Drag a row or use the arrows.</p>
+                      {groupModels.map((name, i) => {
+                        const persona = allPersonas.find((p) => p.id === groupPersonas?.[name])
+                        const label = persona?.name ?? displayModelName(name)
+                        return (
+                          <div
+                            key={name}
+                            data-testid="group-order-row"
+                            data-model={name}
+                            draggable
+                            onDragStart={(e) => { setDragFrom(i); e.dataTransfer.effectAllowed = 'move' }}
+                            onDragOver={(e) => { if (dragFrom !== null) e.preventDefault() }}
+                            onDrop={(e) => {
+                              e.preventDefault()
+                              if (dragFrom !== null) setGroupModels(activeConvId, moveMember(groupModels, dragFrom, i))
+                              setDragFrom(null)
+                            }}
+                            onDragEnd={() => setDragFrom(null)}
+                            className={`flex items-center gap-1 px-1.5 py-0.5 rounded cursor-grab active:cursor-grabbing transition-colors ${dragFrom === i ? 'opacity-50' : 'hover:bg-purple-500/5'}`}
+                          >
+                            <GripVertical size={9} className="shrink-0 text-gray-400" />
+                            <span className="lu-hud-num w-3 shrink-0 t-micro text-purple-500 dark:text-purple-400">{i + 1}</span>
+                            <span className="flex-1 min-w-0 truncate t-micro text-gray-600 dark:text-gray-300" title={displayModelName(name)}>{label}</span>
+                            <button
+                              disabled={i === 0}
+                              onClick={() => setGroupModels(activeConvId, moveMember(groupModels, i, i - 1))}
+                              aria-label={`Move ${label} up`}
+                              title="Speak earlier"
+                              data-testid="group-order-up"
+                              className="shrink-0 p-0.5 rounded text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-500/10 disabled:opacity-30 disabled:pointer-events-none"
+                            >
+                              <ChevronUp size={9} />
+                            </button>
+                            <button
+                              disabled={i === groupModels.length - 1}
+                              onClick={() => setGroupModels(activeConvId, moveMember(groupModels, i, i + 1))}
+                              aria-label={`Move ${label} down`}
+                              title="Speak later"
+                              data-testid="group-order-down"
+                              className="shrink-0 p-0.5 rounded text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-500/10 disabled:opacity-30 disabled:pointer-events-none"
+                            >
+                              <ChevronDown size={9} />
+                            </button>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
                   {groupRows.map((m) => {
                     const on = groupModels.includes(m.name)
                     const full = !on && groupModels.length >= GROUP_CHAT_MAX
@@ -413,7 +469,12 @@ export function PluginsDropdown({
                                   : 'text-gray-500 hover:bg-gray-50 dark:hover:bg-white/[0.04] hover:text-gray-700 dark:hover:text-gray-300'
                             }`}
                           >
-                            {on && <div className={`w-1 h-1 rounded-full shrink-0 ${m.unavailable ? 'bg-gray-400' : 'bg-purple-400'}`} />}
+                            {/* GH #200: the place in the round, where the dot was. */}
+                            {on && (
+                              <span data-testid="group-participant-place" aria-hidden="true" className={`lu-hud-num w-3 shrink-0 t-micro ${m.unavailable ? 'text-gray-400' : 'text-purple-500 dark:text-purple-400'}`}>
+                                {groupModels.indexOf(m.name) + 1}
+                              </span>
+                            )}
                             <span
                               className={`text-[0.55rem] font-medium truncate ${m.unavailable ? 'line-through' : ''}`}
                               title={m.unavailable

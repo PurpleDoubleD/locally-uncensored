@@ -16,6 +16,11 @@ import { useAgentModeStore } from '../../stores/agentModeStore'
 import { latestRefusalId, refusalNoticeApplies } from '../../lib/refusal-detect'
 import { GreetingSwitcher } from './GreetingSwitcher'
 import { forkMarks } from '../../lib/chat-forks'
+import { hasLaterRounds, isSpeakerTurn, laterAnswersInRound } from '../../lib/group-rounds'
+import { historyTrimNote } from '../../lib/history-trim-note'
+import { displayModelName } from '../../api/providers'
+import { Modal } from '../ui/Modal'
+import { ModalActions, ModalButton } from '../ui/ModalActions'
 
 /**
  * Above this many visible messages the transcript stops paying full layout +
@@ -65,6 +70,9 @@ interface Props {
   isThisChatGenerating?: boolean
   isLoadingModel?: boolean
   onRegenerate?: (conversationId: string, assistantMessageId: string) => void
+  /** GH #199: one speaker of a group round answers again ('only'), or it and
+   *  every later speaker of the round ('from-here'). */
+  onRegenerateSpeaker?: (conversationId: string, assistantMessageId: string, mode: 'only' | 'from-here') => Promise<boolean>
   /** Save & resend. False when nothing could be sent. */
   onEdit?: (conversationId: string, messageId: string, newContent: string) => boolean | void
   /** Tool-call id awaiting user approval — when set, the matching tool
@@ -74,7 +82,7 @@ interface Props {
   onReject?: () => void
 }
 
-export function MessageList({ isGenerating, isThisChatGenerating, isLoadingModel, onRegenerate, onEdit, pendingApprovalId, onApprove, onReject }: Props) {
+export function MessageList({ isGenerating, isThisChatGenerating, isLoadingModel, onRegenerate, onRegenerateSpeaker, onEdit, pendingApprovalId, onApprove, onReject }: Props) {
   const showTyping = isThisChatGenerating ?? isGenerating
   // The question of the first use of computer control is open in this conversation.
   const chatAsked = useComputerStore((s) => !!s.chatAsk && !s.chatAsk.voice && (s.chatAsk.conversationId === null || s.chatAsk.conversationId === useChatStore.getState().activeConversationId))
@@ -127,13 +135,38 @@ export function MessageList({ isGenerating, isThisChatGenerating, isLoadingModel
   // (React 19 `refs`). Both readers below are user-event handlers, which never
   // run before the effects of the render they belong to, so they still only
   // ever see the current conversation and callbacks.
-  const bind = useRef({ conversation, onRegenerate, onEdit })
-  useEffect(() => { bind.current = { conversation, onRegenerate, onEdit } })
+  const bind = useRef({ conversation, onRegenerate, onRegenerateSpeaker, onEdit })
+  useEffect(() => { bind.current = { conversation, onRegenerate, onRegenerateSpeaker, onEdit } })
+
+  // GH #199: in a group, Regenerate on a speaker asks that speaker again. With
+  // later speakers already answered, the person picks first; the question
+  // stays open here until they do.
+  const [askRegen, setAskRegen] = useState<{ convId: string; messageId: string; later: number; laterRounds: boolean } | null>(null)
 
   const handleRegenerate = useCallback((messageId: string) => {
+    const { conversation: c, onRegenerate: cb, onRegenerateSpeaker: one } = bind.current
+    if (!c) return
+    if (one && (c.groupModels?.length ?? 0) >= 2 && isSpeakerTurn(c.messages, messageId)) {
+      const later = laterAnswersInRound(c.messages, messageId).length
+      if (later === 0) void one(c.id, messageId, 'only')
+      else setAskRegen({ convId: c.id, messageId, later, laterRounds: hasLaterRounds(c.messages, messageId) })
+      return
+    }
+    if (cb) cb(c.id, messageId)
+  }, [])
+
+  // "Regenerate whole round": the round's question again, every speaker.
+  const handleRegenerateRound = useCallback((messageId: string) => {
     const { conversation: c, onRegenerate: cb } = bind.current
     if (c && cb) cb(c.id, messageId)
   }, [])
+
+  const answerRegen = (mode: 'only' | 'from-here') => {
+    const ask = askRegen
+    setAskRegen(null)
+    const one = bind.current.onRegenerateSpeaker
+    if (ask && one) void one(ask.convId, ask.messageId, mode)
+  }
 
   const handleEdit = useCallback((messageId: string, content: string): boolean => {
     const { conversation: c, onEdit: cb } = bind.current
@@ -195,6 +228,8 @@ export function MessageList({ isGenerating, isThisChatGenerating, isLoadingModel
   // Die Verdichtungslinien. Berechnet aus der VOLLEN Nachrichtenliste, weil
   // der Schnittpunkt auf eine gefilterte Nachricht zeigen kann, aber
   // angezeigt an sichtbaren Zeilen — siehe compactionAnchors.
+  const groupOn = (groupModels?.length ?? 0) >= 2
+
   const compactAt = compactionAnchors(
     conversation.messages,
     visibleMessages.map((m) => m.id),
@@ -202,6 +237,7 @@ export function MessageList({ isGenerating, isThisChatGenerating, isLoadingModel
   )
 
   return (
+    <>
     <div
       ref={scrollRef}
       className="flex-1 overflow-y-auto scrollbar-thin py-4"
@@ -233,6 +269,18 @@ export function MessageList({ isGenerating, isThisChatGenerating, isLoadingModel
               key={message.id}
               style={skipOffscreen && index < tailStart ? SKIPPABLE : undefined}
             >
+              {message.role === 'assistant' && message.historyTrim && (
+                <div className="px-3 pt-1" data-testid="history-trim-note">
+                  <Hinweis>
+                    <span className="break-words">
+                      {historyTrimNote(
+                        message.historyTrim,
+                        groupOn && message.modelId ? (speakerNameOf(message, speakers, authors) ?? displayModelName(message.modelId)) : undefined,
+                      )}
+                    </span>
+                  </Hinweis>
+                </div>
+              )}
               {message.role === 'system' && message.notice ? (
                 // Schlichte Zeile, keine Blase: eine Blase wuerde behaupten,
                 // das Modell habe es gesagt. Und kein Kasten mehr darum: der
@@ -255,6 +303,9 @@ export function MessageList({ isGenerating, isThisChatGenerating, isLoadingModel
                 isStreaming={showTyping && message.id === lastVisibleId && message.role === 'assistant'}
                 onRegenerate={message.role === 'assistant' && onRegenerate && !isGenerating && !message.greetings
                   ? handleRegenerate
+                  : undefined}
+                onRegenerateRound={groupOn && message.role === 'assistant' && onRegenerate && !isGenerating && message.modelId
+                  ? handleRegenerateRound
                   : undefined}
                 onEdit={message.role === 'user' && onEdit && !isGenerating
                   ? handleEdit
@@ -299,6 +350,21 @@ export function MessageList({ isGenerating, isThisChatGenerating, isLoadingModel
         )}
       </div>
     </div>
+    {/* GH #199: later speakers of this round already answered. Ask before
+        anything moves. Outside the scrolling list, whose mask would clip it. */}
+    <Modal open={!!askRegen} onClose={() => setAskRegen(null)} title="Regenerate this answer" maxWidth="max-w-md">
+      <p className="t-small text-gray-600 dark:text-gray-300" data-testid="regen-speaker-question">
+        {askRegen?.later === 1 ? 'One later speaker' : `${askRegen?.later ?? 0} later speakers`} of this round already answered.
+        Keep {askRegen?.later === 1 ? 'that answer' : 'their answers'}, or let {askRegen?.later === 1 ? 'it' : 'them'} answer again after the new one?
+        {askRegen?.laterRounds ? ' Later rounds move into the earlier version either way; the arrows bring them back.' : ''}
+      </p>
+      <ModalActions>
+        <ModalButton variant="quiet" onClick={() => setAskRegen(null)}>Cancel</ModalButton>
+        <ModalButton data-testid="regen-from-here" onClick={() => answerRegen('from-here')}>Regenerate from here</ModalButton>
+        <ModalButton data-testid="regen-keep-later" variant="primary" onClick={() => answerRegen('only')}>Keep later answers</ModalButton>
+      </ModalActions>
+    </Modal>
+    </>
   )
 }
 

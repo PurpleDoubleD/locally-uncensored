@@ -61,7 +61,8 @@ describe('a group round is budgeted per model', () => {
 describe('compare caps the shared base before the fan-out', () => {
   it('takes the tightest budget of the two sides', () => {
     expect(compare).toMatch(/sharedChatSendBudget\(/)
-    expect(compare).toMatch(/applySendBudget\(chatMessages, budget\)/)
+    // GH #201: with the hysteresis only where a side is paid.
+    expect(compare).toMatch(/applySendBudget\(chatMessages, budget, \{ hysteresis, notice: 'chat' \}\)/)
   })
 
   it('streams the budgeted array to BOTH sides, not the raw history', () => {

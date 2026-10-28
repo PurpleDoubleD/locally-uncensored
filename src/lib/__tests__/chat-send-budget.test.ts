@@ -51,8 +51,10 @@ const CLOUD_262K = { providerId: 'lu-cloud', modelWindow: 262144, contextDecay: 
 const OLLAMA = { providerId: 'ollama', modelWindow: 262144, contextDecay: true }
 /** Ein lokales Modell mit einem Fenster, das eine lange Unterhaltung sprengt. */
 const OLLAMA_8K = { providerId: 'ollama', modelWindow: 8192, contextDecay: true }
-/** Die Grenze, ab der die A3-Hysterese auf einem lokalen Modell greift. */
-const TRIGGER_8K = Math.floor(Math.floor(8192 * 0.8) * 1.15)
+/** GH #201: ein lokales Modell wird an seinem Fenster weniger dem Platz
+ *  fuer die Antwort gemessen (8 Prozent, 512 bis 8192), ohne Hysterese. */
+const TRIGGER_8K = 8192 - Math.floor(8192 * 0.08)
+const BUDGET_262K = 262144 - 8192
 
 describe('A4: a long chat costs budget level, not history level', () => {
   it('a 50k-token history plus a short question sends at most the budget', () => {
@@ -126,9 +128,10 @@ describe('2.6.8: ein lokales Modell wird gekappt — aber erst, wo es ueberlaeuf
     const history = historyOf(50000)
     expect(size(history)).toBeGreaterThan(TRIGGER_8K)
     const sent = applyChatSendBudget(history, OLLAMA_8K)
-    expect(sent.budget).toBe(Math.floor(8192 * 0.8))
+    expect(sent.budget).toBe(TRIGGER_8K)
     expect(sent.promptTokens).toBeLessThanOrEqual(sent.budget!)
     expect(sent.messages.length).toBeLessThan(history.length)
+    expect(sent.droppedMessages).toBeGreaterThan(0)
   })
 
   // Negativkontrolle in der Zeit: derselbe Fall war vor diesem Umbau
@@ -140,9 +143,8 @@ describe('2.6.8: ein lokales Modell wird gekappt — aber erst, wo es ueberlaeuf
     expect(sent.messages).toBe(history)
   })
 
-  // Die Zahl, die der Modulkopf von chat-send-budget.ts behauptet: nicht bei
-  // 0,8 des Fensters, sondern bei 1,15 x 0,8 = 0,92 — der Rest ist der Platz,
-  // den die ANTWORT braucht.
+  // Bis 100K bleibt die Grenze, wo die Hysterese sie hatte (0,92 des
+  // Fensters); der Rest ist der Platz, den die ANTWORT braucht.
   it('die Grenze liegt bei 92 Prozent des Fensters, nicht bei 80', () => {
     expect(TRIGGER_8K / 8192).toBeCloseTo(0.92, 2)
     const knappDrunter = historyOf(TRIGGER_8K - 800)
@@ -177,7 +179,7 @@ describe('2.6.8: ein lokales Modell wird gekappt — aber erst, wo es ueberlaeuf
     // codexSendWindowTokens gedeckelt, der lokale nur auf sein eigenes
     // Fenster. Das ist der Unterschied, den `isPaidProvider` weiter macht.
     expect(chatSendBudget({ providerId: 'ollama', modelWindow: 262144, contextDecay: true }))
-      .toBe(Math.floor(262144 * 0.8))
+      .toBe(BUDGET_262K)
     expect(chatSendBudget(CLOUD_262K)).toBe(DEFAULT_SEND_WINDOW_TOKENS)
   })
 })
@@ -197,11 +199,11 @@ describe('A4: a group round is budgeted per model per round', () => {
     // sie ungekappt an beide.
     const shared = historyOf(120000)
     const sent = applyChatSendBudget(shared, OLLAMA_8K)
-    expect(sent.budget).toBe(Math.floor(8192 * 0.8))
+    expect(sent.budget).toBe(TRIGGER_8K)
     expect(sent.promptTokens).toBeLessThanOrEqual(sent.budget!)
     // Und das grosse lokale Modell derselben Runde behaelt ein Vielfaches
     // davon. Was seine Nutzlast begrenzt, ist nicht die neue Token-Decke
-    // (209715 waere sie), sondern MAX_SEND_MESSAGES — die aeltere Anzahl-Decke,
+    // (253952 waere sie), sondern MAX_SEND_MESSAGES — die aeltere Anzahl-Decke,
     // die diese Historie mit ihren ~480 kurzen Zuegen schon vorher traf.
     const gross = applyChatSendBudget(shared, OLLAMA)
     expect(gross.promptTokens).toBeGreaterThan(sent.promptTokens * 10)
@@ -239,8 +241,8 @@ describe('A4: compare caps the shared base before the fan-out', () => {
   it('zwei lokale Modelle teilen sich das engere ihrer Fenster', () => {
     // Beide Seiten muessen denselben Prompt sehen, sonst ist der Vergleich
     // keiner — also gilt auch unter lokalen Modellen das kleinere Fenster.
-    expect(sharedChatSendBudget([OLLAMA, OLLAMA])).toBe(Math.floor(262144 * 0.8))
-    expect(sharedChatSendBudget([OLLAMA, OLLAMA_8K])).toBe(Math.floor(8192 * 0.8))
+    expect(sharedChatSendBudget([OLLAMA, OLLAMA])).toBe(BUDGET_262K)
+    expect(sharedChatSendBudget([OLLAMA, OLLAMA_8K])).toBe(TRIGGER_8K)
     // Mit dem Notaus auf beiden Seiten bleibt es beim ungekappten Array.
     const aus = [OLLAMA, OLLAMA_8K].map((m) => ({ ...m, contextDecay: false }))
     expect(sharedChatSendBudget(aus)).toBeNull()
