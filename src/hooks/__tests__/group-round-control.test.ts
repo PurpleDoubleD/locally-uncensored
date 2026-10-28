@@ -49,11 +49,14 @@ let requests: Request[] = []
 let calls: Record<string, number> = {}
 /** Models whose answer waits until the request is aborted. */
 let hang = new Set<string>()
+/** Models that write a few words and then wait until the request is aborted. */
+let partial = new Set<string>()
 
 beforeEach(() => {
   requests = []
   calls = {}
   hang = new Set()
+  partial = new Set()
   __resetRunLanesForTests()
   useChatStore.setState({ conversations: [], activeConversationId: null })
   useGenerationStore.setState({ generating: {}, aborters: {}, runs: {} })
@@ -71,6 +74,17 @@ beforeEach(() => {
     const body = JSON.parse(String((init as RequestInit).body)) as Request
     requests.push(body)
     calls[body.model] = (calls[body.model] ?? 0) + 1
+    if (partial.has(body.model)) {
+      const signal = (init as RequestInit).signal
+      const enc = new TextEncoder()
+      const stream = new ReadableStream({
+        start(c) {
+          c.enqueue(enc.encode(`data: ${JSON.stringify({ choices: [{ delta: { content: 'half an answer' } }] })}\n\n`))
+          signal?.addEventListener('abort', () => c.error(Object.assign(new Error('aborted'), { name: 'AbortError' })))
+        },
+      })
+      return new Response(stream, { status: 200, headers: { 'content-type': 'text/event-stream' } })
+    }
     if (hang.has(body.model)) {
       const signal = (init as RequestInit).signal
       await new Promise<never>((_, reject) => {
@@ -203,6 +217,25 @@ describe('GH #200: order, who answers, skip', () => {
     expect(said(id)).toEqual(['baron 1', 'clara 1'])
     expect(useGroupRoundStore.getState().live[id]).toBeUndefined()
     expect(skipGroupSpeaker(id)).toBe(false)
+  })
+
+  it('what a skipped speaker had already written stays in the chat', async () => {
+    // Found on the Mac build: a window in the background paints no frames, so
+    // the streamed words had never reached the store when the skip came, and
+    // the turn was taken for an empty one and removed.
+    vi.stubGlobal('requestAnimationFrame', () => 1)
+    vi.stubGlobal('cancelAnimationFrame', () => {})
+    const id = openGroup()
+    partial.add('walt')
+    const { result } = renderHook(() => useChat())
+    let round!: Promise<void>
+    act(() => { round = result.current.sendMessage('go') })
+    await vi.waitFor(() => expect(asked()).toEqual(['walt']))
+    await new Promise((r) => setTimeout(r, 50))
+    expect(skipGroupSpeaker(id)).toBe(true)
+    await act(async () => { await round })
+    expect(said(id)).toEqual(['half an answer', 'baron 1', 'clara 1'])
+    vi.unstubAllGlobals()
   })
 
   it('negative control: "Stop round" ends the round, nobody after answers', async () => {

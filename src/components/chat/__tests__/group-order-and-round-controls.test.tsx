@@ -106,7 +106,7 @@ describe('GH #200: the round bar', () => {
     const stop = vi.fn()
     groupTurnStarted(convId, { speaker: B, index: 1, total: 3 }, skip)
     render(<GroupRoundBar onStop={stop} />)
-    expect(screen.getByTestId('group-round-speaker').textContent).toBe('baron 2/3')
+    expect(screen.getByTestId('group-round-speaker').textContent).toBe('2/3baron')
     fireEvent.click(screen.getByTestId('group-skip-speaker'))
     expect(skip).toHaveBeenCalledTimes(1)
     fireEvent.click(screen.getByTestId('group-stop-round'))

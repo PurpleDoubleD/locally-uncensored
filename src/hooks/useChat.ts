@@ -244,6 +244,15 @@ async function runGroupTurn(convId: string, model: string, allModels: string[], 
   const others = allModels
     .filter((m) => m !== model)
     .flatMap((m) => (speakers[m].name === m ? [m] : [m, speakers[m].name]))
+  // A stopped or skipped turn keeps what it had written. The stream is written
+  // to the store once per frame, and a window in the background paints no
+  // frames: on the Mac build a skipped speaker's words had never reached the
+  // store, so the turn read as empty and was removed (GH #200).
+  const keepWhatWasWritten = () => {
+    if (abort.signal.aborted && contentAcc.trim()) {
+      useChatStore.getState().updateMessageContent(convId, assistantMessage.id, stripImpersonatedSpeakers(stripNonCanonicalTags(contentAcc), others))
+    }
+  }
 
   try {
     // Local speakers share ONE engine process. llama-server holds a single
@@ -375,6 +384,7 @@ async function runGroupTurn(convId: string, model: string, allModels: string[], 
     }
     thinkClock.end()
     frames.close()
+    keepWhatWasWritten()
     if (!abort.signal.aborted && !contentAcc.trim()) {
       // Empty turn: say WHY, length-aware, not a flat "didn't return an answer".
       // The bubble already labels the speaker, so no model prefix here.
@@ -386,6 +396,7 @@ async function runGroupTurn(convId: string, model: string, allModels: string[], 
     }
   } catch (err) {
     frames.close()
+    keepWhatWasWritten()
     if ((err as Error).name !== 'AbortError') {
       syncOllamaHealthFromError(err)
       // Bug B3 round 2: a group round on a strict template used to paste the

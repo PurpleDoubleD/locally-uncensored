@@ -46,8 +46,10 @@ export function GroupRoundBar({ onStop }: { onStop: () => void }) {
     return (
       <div data-testid="group-round-bar" data-state="running" className="flex items-center gap-1 min-w-0 t-micro text-gray-500">
         <Users size={10} className="shrink-0 text-purple-400" />
-        <span className="truncate" data-testid="group-round-speaker">
-          {memberLabel(live.speaker, speakers)} <span className="lu-hud-num">{live.index + 1}/{live.total}</span>
+        <span className="flex items-center gap-1 min-w-0" data-testid="group-round-speaker">
+          {/* The place first: a long model name is cut, the place never. */}
+          <span className="lu-hud-num shrink-0">{live.index + 1}/{live.total}</span>
+          <span className="truncate">{memberLabel(live.speaker, speakers)}</span>
         </span>
         <button
           onClick={() => skipGroupSpeaker(convId)}
