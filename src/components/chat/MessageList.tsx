@@ -9,7 +9,7 @@ import { MessageBubble } from './MessageBubble'
 import { WorkingAnchor } from './WorkingAnchor'
 import { useComputerStore } from '../../stores/computerStore'
 import { CompactBlock } from './CompactBlock'
-import { compactionAnchors } from '../../lib/compact-summary'
+import { CompactLayerBanner, CompactLayerRail, useCompactLayers } from './CompactLayerRail'
 import { Hinweis } from '../ui/Hinweis'
 import { TRANSCRIPT_MAX_PX } from './composer-width'
 import { useAgentModeStore } from '../../stores/agentModeStore'
@@ -113,9 +113,15 @@ export function MessageList({ isGenerating, isThisChatGenerating, isLoadingModel
   // covered by the hook's ResizeObserver (G33). The resumeKey is the last
   // USER message: sending jumps all the way down even after scrolling away.
   const lastUserMessage = conversation?.messages.filter((m) => m.role === 'user').at(-1)
+  // Compact layers (3.0.9): the view starts at the newest compaction, and the
+  // rail on the left opens the stretch before each one, read only.
+  const layers = useCompactLayers(conversation, lastUserMessage?.id)
+  const readOnly = layers.layer !== null
+  // Switching layers is a jump like sending: to the bottom of what is shown,
+  // the moment right before that compaction.
   const { ref: scrollRef, contentRef } = useAutoScroll(
     `${lastMessage?.content ?? ''}|${pendingApprovalId ?? ''}`,
-    lastUserMessage?.id,
+    `${lastUserMessage?.id ?? ''}|${layers.layer ?? 'now'}`,
   )
 
   // MessageBubble is memoised, so its handlers have to keep the same identity
@@ -171,9 +177,11 @@ export function MessageList({ isGenerating, isThisChatGenerating, isLoadingModel
   // in den Verlauf. Bis 2.6.8 filterte diese Zeile jede Systemnachricht weg,
   // und der Code-Verlauf zeigte sie schon; damit war `/compact` im Chat
   // stumm, sobald die beiden Zeilen ehrlich als Hinweise abgelegt wurden.
-  const visibleMessages = conversation.messages.filter(
-    (m) => (m.role !== 'system' || !!m.notice) && !m.hidden,
-  )
+  const isVisible = (m: (typeof conversation.messages)[number]) => (m.role !== 'system' || !!m.notice) && !m.hidden
+  // What this view shows: the current layer, or the one picked on the rail.
+  // Each compaction is ONE line at the top of the view after it.
+  const items = layers.items.filter((it) => it.kind === 'line' || isVisible(it.message))
+  const visibleMessages = items.flatMap((it) => (it.kind === 'message' ? [it.message] : []))
   const lastVisibleId = visibleMessages[visibleMessages.length - 1]?.id
   // The one answer that carries the refusal notice, if any. The answer that
   // is still being written is never judged: every long answer is a short one
@@ -190,21 +198,15 @@ export function MessageList({ isGenerating, isThisChatGenerating, isLoadingModel
     })
   }
   const skipOffscreen = skipGate.id === conversation.id && skipGate.on
-  const tailStart = visibleMessages.length - ALWAYS_RENDERED_TAIL
-
-  // Die Verdichtungslinien. Berechnet aus der VOLLEN Nachrichtenliste, weil
-  // der Schnittpunkt auf eine gefilterte Nachricht zeigen kann, aber
-  // angezeigt an sichtbaren Zeilen — siehe compactionAnchors.
-  const compactAt = compactionAnchors(
-    conversation.messages,
-    visibleMessages.map((m) => m.id),
-    conversation.compactions,
-  )
+  const tailStart = items.length - ALWAYS_RENDERED_TAIL
 
   return (
+    <div className="relative flex-1 min-h-0 flex flex-col">
+    <CompactLayerBanner view={layers} />
     <div
       ref={scrollRef}
-      className="flex-1 overflow-y-auto scrollbar-thin py-4"
+      className={`flex-1 overflow-y-auto scrollbar-thin py-4 ${layers.cuts.length ? 'pl-6' : ''}`}
+      data-compact-layer={layers.layer ?? 'current'}
       style={{
         // Soft top fade — chat content "blurs out" under the header.
         WebkitMaskImage: 'linear-gradient(to bottom, transparent 0, #000 28px)',
@@ -224,8 +226,11 @@ export function MessageList({ isGenerating, isThisChatGenerating, isLoadingModel
           steht; als `style`, weil Tailwind Klassennamen scannt und eine
           gerechnete Breite deshalb keine Regel bekaeme. */}
       <div ref={contentRef} className="mx-auto w-full" style={{ maxWidth: TRANSCRIPT_MAX_PX }}>
-        {visibleMessages
-          .map((message, index) => (
+        {items
+          .map((item, index) => {
+            if (item.kind === 'line') return <CompactBlock key={item.cut.key} cut={item.cut} />
+            const message = item.message
+            return (
             // The wrapper carries the skip hint so MessageBubble keeps owning
             // its own root class. It is a plain block inside a plain block, so
             // it adds no layout of its own.
@@ -252,40 +257,42 @@ export function MessageList({ isGenerating, isThisChatGenerating, isLoadingModel
                 isLast={message.id === lastVisibleId}
                 // The live generating flag, not `message.usage`: a backend that
                 // never reports usage would lose the action bar for good.
-                isStreaming={showTyping && message.id === lastVisibleId && message.role === 'assistant'}
-                onRegenerate={message.role === 'assistant' && onRegenerate && !isGenerating && !message.greetings
+                isStreaming={!readOnly && showTyping && message.id === lastVisibleId && message.role === 'assistant'}
+                // An earlier layer is read only: no regenerate, no edit, no
+                // approval, no switching or branching of versions.
+                onRegenerate={!readOnly && message.role === 'assistant' && onRegenerate && !isGenerating && !message.greetings
                   ? handleRegenerate
                   : undefined}
-                onEdit={message.role === 'user' && onEdit && !isGenerating
+                onEdit={!readOnly && message.role === 'user' && onEdit && !isGenerating
                   ? handleEdit
                   : undefined}
-                pendingApprovalId={pendingApprovalId}
-                onApprove={onApprove}
-                onReject={onReject}
+                pendingApprovalId={readOnly ? null : pendingApprovalId}
+                onApprove={readOnly ? undefined : onApprove}
+                onReject={readOnly ? undefined : onReject}
                 forkKey={marks.get(message.id)?.key}
                 forkIndex={marks.get(message.id)?.index}
                 forkTotal={marks.get(message.id)?.total}
                 // Switching while a turn streams would move the bubble the
                 // stream writes into out of the thread.
-                onSwitchFork={isGenerating ? undefined : handleSwitchFork}
-                onBranch={handleBranch}
+                onSwitchFork={isGenerating || readOnly ? undefined : handleSwitchFork}
+                onBranch={readOnly ? undefined : handleBranch}
                 declined={message.id === declinedId}
                 speakerName={speakerNameOf(message, speakers, authors)}
               />
               )}
-              {message.greetings && message.greetings.length > 1 && message.id === lastVisibleId && !isGenerating && (
+              {!readOnly && message.greetings && message.greetings.length > 1 && message.id === lastVisibleId && !isGenerating && (
                 <GreetingSwitcher conversationId={conversation.id} message={message} />
               )}
-              {compactAt.get(message.id)?.map((record) => (
-                <CompactBlock key={record.id} record={record} />
-              ))}
             </div>
-          ))}
+            )
+          })}
+        {/* A summary is being written: one line, where the next step will be. */}
+        {!readOnly && layers.compacting && <CompactBlock />}
         {/* The run anchor stays visible the entire time the agent is still
             working, including between tool calls and while the final answer
             streams. G14-6: one shimmering "Working" with the clock beside it,
             instead of three dots here and a floating counter elsewhere. */}
-        {showTyping && lastMessage?.role === 'assistant' && (
+        {!readOnly && showTyping && lastMessage?.role === 'assistant' && (
           <WorkingAnchor
             isRunning
             conversationId={conversation?.id}
@@ -298,6 +305,8 @@ export function MessageList({ isGenerating, isThisChatGenerating, isLoadingModel
           />
         )}
       </div>
+    </div>
+    <CompactLayerRail view={layers} />
     </div>
   )
 }

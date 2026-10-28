@@ -240,6 +240,18 @@ export interface CompactionRecord {
    * and on a run whose merge failed and fell back to a plain link.
    */
   merged?: boolean
+  /**
+   * The whole payload before and after, estimated, for the transcript line
+   * "Compacted, 28.9K → 17.9K" (3.0.9). `tokensBefore`/`tokensAfter` above
+   * only measure the replaced turns against their summary, which is not the
+   * number the context counter shows. Absent on records from before 3.0.9.
+   */
+  contextBefore?: number
+  contextAfter?: number
+  /** Id of the newest message when it ran: where the view "before this
+   *  compaction" ends (lib/compact-layers.ts). Absent on older records,
+   *  which fall back to `atMessageCount`. */
+  endMessageId?: string
 }
 
 /**

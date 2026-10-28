@@ -562,18 +562,21 @@ export function useCodex() {
       useChatStore.getState().addMessage(convId, {
         id: uuid(), role: 'system', notice: 'info', content: rawInstruction, timestamp: Date.now(),
       })
-      const noticeId = uuid()
-      useChatStore.getState().addMessage(convId, {
-        id: noticeId, role: 'system', notice: 'info',
-        content: 'Summarising the earlier turns…', timestamp: Date.now(),
-      })
+      // While it runs the transcript shows "Compacting conversation…", and
+      // the record stays as the line "Compacted, …" (3.0.9). Only a run that
+      // changed nothing gets a sentence.
       const outcome = await runCompactForConversation({
         conversationId: convId,
         activeModel: activeModel || '',
         trigger: 'manual',
         focus: slash.args || undefined,
       })
-      useChatStore.getState().updateMessageContent(convId, noticeId, compactOutcomeMessage(outcome))
+      if (!outcome.ok) {
+        useChatStore.getState().addMessage(convId, {
+          id: uuid(), role: 'system', notice: 'info',
+          content: compactOutcomeMessage(outcome), timestamp: Date.now(),
+        })
+      }
       activeCodexRuns.delete(convId)
       return
     }
@@ -1397,6 +1400,7 @@ export function useCodex() {
             signal: abort.signal,
             state: laufVerdichtung,
             decay: { enabled: decayOn },
+            onCompacted: addBlock,
           })
           if (verdichtet.compacted) messages = verdichtet.messages
           messages = trimWorkingHistory(messages, sendWindow, { enabled: decayOn, hysteresis: decayOn }).messages

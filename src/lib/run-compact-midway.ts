@@ -63,6 +63,7 @@ import { formatCount } from './formatters'
 import { useChatStore } from '../stores/chatStore'
 import { useSettingsStore } from '../stores/settingsStore'
 import { COMPACTING_ACTIVITY, useRunActivityStore } from '../stores/runActivityStore'
+import type { AgentBlock } from '../types/agent-mode'
 
 /**
  * Share of the budget the newest steps may keep verbatim. The rest is for the
@@ -299,6 +300,17 @@ export function runCompactNotice(replaced: number, saved: number): string {
   return `Summarised ${replaced} earlier step message${replaced === 1 ? '' : 's'} of this run to stay inside the context window, about ${formatCount(saved)} tokens less in every following step. The run goes on from the summary; every result is still here in the chat.`
 }
 
+/** The block that marks a compaction in the middle of a run. */
+export function compactionBlock(replaced: number, before: number, after: number): AgentBlock {
+  return {
+    id: `${RUN_COMPACT_NOTICE_PREFIX}${uuid()}`,
+    phase: 'reflection',
+    content: runCompactNotice(replaced, Math.max(0, before - after)),
+    timestamp: Date.now(),
+    compaction: { before, after, replaced },
+  }
+}
+
 function addNotice(convId: string, beforeMessageId: string | undefined, notice: 'info' | 'warn', content: string): void {
   const store = useChatStore.getState()
   const message = {
@@ -332,6 +344,13 @@ export interface RunCompactInput<T extends DecayMessage> {
   signal?: AbortSignal
   state: RunCompactState
   decay?: DecayOptions<T>
+  /**
+   * The run's own block list (3.0.9). Given, a compaction that worked becomes
+   * a block of the answer being written, at the step where it happened, and
+   * the transcript draws it as one line. Without it the old notice message is
+   * written in front of the answer, as before.
+   */
+  onCompacted?: (block: AgentBlock) => void
 }
 
 export interface RunCompactOutcome<T> {
@@ -433,7 +452,9 @@ export async function compactRunMidway<T extends DecayMessage>(
   input.state.lastLength = out.length
   input.state.count++
   input.state.failures = 0
-  if (convId) {
+  if (input.onCompacted) {
+    input.onCompacted(compactionBlock(dropped.length, plan.tokens, tokensAfter))
+  } else if (convId) {
     addNotice(convId, input.beforeMessageId, 'info',
       runCompactNotice(dropped.length, Math.max(0, plan.tokens - tokensAfter)))
   }

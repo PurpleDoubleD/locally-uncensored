@@ -74,7 +74,8 @@ describe('die Bewegung liegt in CSS, nicht in React', () => {
   it('die Klasse ist eine reine Funktion des vorhandenen isStreaming-Props', () => {
     // Kein neuer Store, kein neuer Prop, keine neue Subscription: der Wert
     // wird in MessageList schon berechnet und war schon da.
-    expect(LIST).toMatch(/isStreaming=\{showTyping && message\.id === lastVisibleId/)
+    // 3.0.9: an earlier compact layer never streams, hence the leading !readOnly.
+    expect(LIST).toMatch(/isStreaming=\{!readOnly && showTyping && message\.id === lastVisibleId/)
     const stellen = [...BUBBLE.matchAll(/isStreaming \? ' lu-caret' : ''|isStreaming && istSchluss \? ' lu-caret' : ''/g)]
     expect(stellen).toHaveLength(2)
   })

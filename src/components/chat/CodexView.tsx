@@ -50,9 +50,9 @@ import { StagedChangesPanel } from './StagedChangesPanel'
 import { PhoneWritesLine } from './PhoneWritesLine'
 import { SlashStepsBlock } from './SlashStepsBlock'
 import { CompactBlock } from './CompactBlock'
-import { compactionAnchors } from '../../lib/compact-summary'
+import { CompactLayerBanner, CompactLayerRail, useCompactLayers } from './CompactLayerRail'
 import { User, Code, Eye, GitBranch, Download, RefreshCw, RotateCcw, Folder, FolderX, Check, AlertTriangle } from 'lucide-react'
-import { Fragment, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { checkGitInstalled, openExternal, type GitStatus } from '../../api/backend'
 import { CodexConfirmDialog } from './CodexConfirmDialog'
 import { Hinweis } from '../ui/Hinweis'
@@ -113,15 +113,6 @@ export function CodexView() {
   const conversation = conversations.find(c => c.id === activeConversationId)
   const messages = conversation?.messages || []
 
-  // Verdichtungslinien fuer den Code-Verlauf. Codex blendet nur `hidden` aus
-  // (Systemhinweise bleiben stehen), aber die Rechnung laeuft trotzdem ueber
-  // die volle Liste, denn der Schnittpunkt darf auf eine ausgeblendete zeigen.
-  const compactAt = compactionAnchors(
-    messages,
-    messages.filter((m) => !m.hidden).map((m) => m.id),
-    conversation?.compactions,
-  )
-
   // Per-conversation generating flag (2026-06-12): the typing indicator
   // + realtime counter + a message's live-stream state must follow the coding
   // chat that's ACTUALLY running, not every chat the user switches to. The
@@ -155,9 +146,18 @@ export function CodexView() {
   // re-engages via the last user message id.
   const lastMessage = messages[messages.length - 1]
   const lastUserMessage = messages.filter((m) => m.role === 'user').at(-1)
+  // Compact layers (3.0.9), as in the chat list: the view starts at the
+  // newest compaction, the rail opens the stretch before each one, read only.
+  // Codex hides only `hidden` messages; app notices stay in the transcript.
+  const layers = useCompactLayers(conversation, lastUserMessage?.id)
+  const readOnly = layers.layer !== null
+  const shownItems = layers.items.filter((it) => it.kind === 'line' || !it.message.hidden)
+  // The message a run is writing into. In an earlier layer nothing streams,
+  // even where the cut runs through that very answer.
+  const liveId = readOnly ? undefined : lastMessage?.id
   const { ref: scrollRef, contentRef } = useAutoScroll(
     `${lastMessage?.content ?? ''}|${thread?.events?.length ?? 0}`,
-    lastUserMessage?.id,
+    `${lastUserMessage?.id ?? ''}|${layers.layer ?? 'now'}`,
   )
 
   const codexReviewMode = useSettingsStore((s) => s.settings.codexReviewMode)
@@ -388,7 +388,14 @@ export function CodexView() {
         <PhoneWritesLine chatId={activeConversationId} />
 
         {/* Messages */}
-        <div ref={scrollRef} className="flex-1 min-h-[10rem] overflow-y-auto scrollbar-thin" data-testid="codex-transcript">
+        <div className="relative flex-1 min-h-[10rem] flex flex-col">
+        <CompactLayerBanner view={layers} />
+        <div
+          ref={scrollRef}
+          className={`flex-1 min-h-0 overflow-y-auto scrollbar-thin ${layers.cuts.length ? 'pl-6' : ''}`}
+          data-testid="codex-transcript"
+          data-compact-layer={layers.layer ?? 'current'}
+        >
           {messages.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-full text-center" data-testid="codex-landing">
               <Code size={28} className="text-gray-300 dark:text-gray-700 mb-2" />
@@ -417,14 +424,14 @@ export function CodexView() {
             </div>
           ) : (
             <div ref={contentRef} className="py-1">
-              {messages.filter(msg => !msg.hidden).map((msg) => {
+              {shownItems.map((item) => {
+                if (item.kind === 'line') return <CompactBlock key={item.cut.key} cut={item.cut} />
+                const msg = item.message
                 // Der Rumpf hat mehrere Ausgaenge (Hinweiszeile, Werkzeugblock,
-                // normale Blase). Statt jeden einzeln anzufassen, wandert er
-                // unveraendert in eine IIFE, seine `return`s werden ihre. Die
-                // Verdichtungslinie haengt danach EINMAL an, fuer alle Ausgaenge
-                // gleich. Der Alternativentwurf, jeden Ausgang zu umhuellen,
-                // waere dieselbe Zeile an fuenf Stellen gewesen, und die
-                // sechste, die jemand spaeter dazuschreibt, haette gefehlt.
+                // normale Blase) und steht unveraendert in einer IIFE, seine
+                // `return`s werden ihre. Bis 3.0.8 hing danach die
+                // Verdichtungslinie an; seit 3.0.9 ist sie ein eigenes Element
+                // der Ebene (lib/compact-layers.ts) und steht oben drueber.
                 const gerendert = (() => {
                 // App notices (a staged change that landed on disk) are not
                 // model turns. They used to be written hidden, so the one line
@@ -477,11 +484,11 @@ export function CodexView() {
                       {msg.role === 'assistant' && msg.thinking && (
                         <ThinkingBlock
                           thinking={msg.thinking}
-                          streaming={codexGenerating && msg.id === messages[messages.length - 1]?.id && !cleanContent.trim()}
+                          streaming={codexGenerating && msg.id === liveId && !cleanContent.trim()}
                         />
                       )}
                       {(() => {
-                        const running = codexGenerating && msg.id === messages[messages.length - 1]?.id
+                        const running = codexGenerating && msg.id === liveId
                         // While this message streams, an open ` or ** is closed
                         // for the frame (lib/streaming-markdown.ts).
                         const shown = (text: string) => (running ? closeOpenMarkdown(text) : text)
@@ -715,17 +722,10 @@ export function CodexView() {
                   </div>
                 )
                 })()
-                const linien = compactAt.get(msg.id)
-                if (!linien?.length) return gerendert
-                return (
-                  <Fragment key={msg.id}>
-                    {gerendert}
-                    {linien.map((record) => (
-                      <CompactBlock key={record.id} record={record} />
-                    ))}
-                  </Fragment>
-                )
+                return gerendert
               })}
+              {/* A summary is being written: one line, where the next step will be. */}
+              {!readOnly && layers.compacting && <CompactBlock />}
               {/* 3-dot indicator while THIS coding chat is mid-loop. Bound to
                   the per-conversation flag so switching to another (idle) chat
                   doesn't show its dots. 2026-06-12 ("die drei ladepunkte
@@ -734,18 +734,22 @@ export function CodexView() {
                   next step of the run instead of covering it (2026-07-24:
                   "ich hätte das gerne im chat, wie ein tool call"). Renders
                   nothing while no request is pending. */}
-              <CodexConfirmDialog />
+              {!readOnly && <CodexConfirmDialog />}
               {/* G14-6: one anchor with shimmer + clock, no dots, no floating
                   counter. It also names an approval wait for what it is, so a
                   blocked run never looks like a working one (G15b). */}
-              <WorkingAnchor
-                isRunning={codexGenerating}
-                conversationId={activeConversationId}
-                awaitingApproval={!!pendingConfirm || chatAsked}
-                message={messages[messages.length - 1]?.role === 'assistant' ? messages[messages.length - 1] : undefined}
-              />
+              {!readOnly && (
+                <WorkingAnchor
+                  isRunning={codexGenerating}
+                  conversationId={activeConversationId}
+                  awaitingApproval={!!pendingConfirm || chatAsked}
+                  message={messages[messages.length - 1]?.role === 'assistant' ? messages[messages.length - 1] : undefined}
+                />
+              )}
             </div>
           )}
+        </div>
+        <CompactLayerRail view={layers} />
         </div>
 
         {/* Die stehenden Sitzungsbaender und die Zeilen, die frueher IM

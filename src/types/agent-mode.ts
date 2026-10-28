@@ -149,6 +149,14 @@ export interface AgentBlock {
   /** v2.4+ — array of tool calls attached to this block (enables parallel execution). */
   toolCalls?: AgentToolCall[]
   timestamp: number
+  /** Set on the block that marks a compaction in the middle of this run
+   *  (3.0.9): the payload estimate before and after, and how many step
+   *  messages the summary stands for. The block is a cut, not content: the
+   *  transcript draws it as the one line "Compacted, 28.9K → 17.9K" and
+   *  starts the current view there (lib/compact-layers.ts). Its phase is
+   *  'reflection' and `content` carries the sentence, so a reader that does
+   *  not know the field still shows something true. */
+  compaction?: { before: number; after: number; replaced: number }
 }
 
 // Sandbox configuration
