@@ -676,6 +676,7 @@ pub fn run() {
             commands::process::get_comfy_gpu_status,
             commands::process::comfy_torch_plan,
             commands::process::set_comfyui_port,
+            commands::process::set_comfyui_autostart,
             commands::process::set_comfyui_host,
             commands::process::set_ollama_host,
             commands::process::get_ollama_host,

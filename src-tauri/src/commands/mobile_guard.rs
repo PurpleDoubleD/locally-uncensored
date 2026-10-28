@@ -139,6 +139,7 @@ pub const ALLOWED: &[&str] = &[
     "set_comfy_gpu_mode",
     "get_comfy_gpu_status",
     "set_comfyui_port",
+    "set_comfyui_autostart",
     "set_comfyui_host",
     "set_ollama_host",
     "get_ollama_host",

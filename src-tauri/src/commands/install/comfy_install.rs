@@ -746,6 +746,9 @@ pub fn install_comfyui(
                 .and_then(|s| serde_json::from_str(&s).ok())
                 .unwrap_or_else(|| serde_json::json!({}));
             config["comfyui_path"] = serde_json::json!(dir_str);
+            // An install the user asked LU to make is one LU may start with
+            // itself (comfy_boot_plan). A ComfyUI LU merely found is not.
+            config["comfyui_autostart"] = serde_json::json!(true);
             let _ = std::fs::write(
                 &config_file,
                 serde_json::to_string_pretty(&config).unwrap_or_default(),
