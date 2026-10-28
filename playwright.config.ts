@@ -42,9 +42,10 @@ export default defineConfig({
   testDir: './e2e',
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
-  // Two more tries on CI only: the full run takes over two hours on a shared runner, and a test that passes on a
-  // later try is still listed as flaky in the report. Locally a red test stays red.
-  retries: process.env.CI ? 2 : 0,
+  // No second try, on CI either. 3.0.8 gave CI two and skipped two tests there; both turned out to be real races
+  // that only the slower runner hit (a "trained" toast after a stopped training, a tray read during its fade,
+  // 3.0.9). A retry hides that kind of finding, so a red test stays red everywhere.
+  retries: 0,
   workers: 1,
   reporter: [['list']],
   timeout: 60_000,

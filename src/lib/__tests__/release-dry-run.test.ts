@@ -289,7 +289,8 @@ describe('release-dry-run.mjs rewrite-updater, executed', () => {
       expect(result.out).not.toContain('::error')
       expect(result.code).toBe(0)
       const after = box.conf()
-      expect(after.plugins.updater).toEqual({ endpoints: [DRY_RUN_ENDPOINT], pubkey: THROWAWAY_PUBKEY })
+      // Everything else of the section stays, requireSignedVersion too: the dry run builds with the same CLI.
+      expect(after.plugins.updater).toEqual({ ...CHECKED_IN.plugins.updater, endpoints: [DRY_RUN_ENDPOINT], pubkey: THROWAWAY_PUBKEY })
       expect({ ...after, plugins: { ...after.plugins, updater: CHECKED_IN.plugins.updater } }).toEqual(CHECKED_IN)
       const text = readFileSync(join(box.dir, 'src-tauri/tauri.conf.json'), 'utf8')
       expect(text).not.toContain(PUBLIC_ENDPOINT)
