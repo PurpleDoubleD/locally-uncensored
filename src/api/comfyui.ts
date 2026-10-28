@@ -147,6 +147,12 @@ export function extractComfyOutputFiles(nodeOutput: unknown): ComfyUIOutput[] {
         typeof (item as { filename: unknown }).filename === 'string'
       ) {
         const it = item as { filename: string; subfolder?: unknown; type?: unknown }
+        // A file of ComfyUI's INPUT folder is never a result. Core LoadVideo
+        // reports a preview of the video it loaded under that type (B18 box
+        // run, 27.10.2026: every continued section of a long clip listed the
+        // clip so far next to its own output, and the chain took the input
+        // for the new section). Motion Control's driving video is the same.
+        if (it.type === 'input') continue
         found.push({
           filename: it.filename,
           subfolder: typeof it.subfolder === 'string' ? it.subfolder : '',
