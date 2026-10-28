@@ -68,8 +68,15 @@ runs:
         $dist = Join-Path $env:RUNNER_TEMP 'signpath/dist'
         node scripts/windows-signpath.mjs updater-artifacts $signed $dist
         if ($LASTEXITCODE -ne 0) { throw "the updater archives could not be written" }
+        # The version goes into the trusted comment (tauri-cli 2.11.5 and up).
+        # The app requires it (requireSignedVersion in tauri.conf.json): a
+        # signature without it is refused by every install from 3.0.9 on, so
+        # these files would never install. `tauri build` fills it in by itself
+        # on the other lanes; signing by hand has to name it.
+        $version = (Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
+        if (-not $version) { throw "src-tauri/tauri.conf.json has no version to bind the updater signatures to" }
         foreach ($file in @(Get-ChildItem -File -Path $dist)) {
-          npx tauri signer sign $file.FullName | Out-Null
+          npx tauri signer sign --app-version $version $file.FullName | Out-Null
           if ($LASTEXITCODE -ne 0) { throw "tauri signer sign failed for $($file.Name)" }
           if (-not (Test-Path "$($file.FullName).sig")) { throw "no updater signature was written for $($file.Name)" }
         }
