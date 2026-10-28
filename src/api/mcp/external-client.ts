@@ -231,7 +231,12 @@ export class MCPExternalClient {
         throw new Error(notStartableMessage(this.config.name, this.config.command))
       }
       const candidates = commandCandidatesForPlatform(this.config.command)
-      let spawnError: unknown = null
+      // Every failed attempt is kept, not just the last one. The last one used
+      // to be the only one thrown, and on Windows that was the `.cmd`
+      // fallback: a uvx that was simply not installed (or not yet on the PATH
+      // LU was started with) reached the user as Tauri's scope refusal for
+      // `uvx.cmd` (Discord, 27.10.2026), which says nothing about uv.
+      const spawnErrors: unknown[] = []
       for (const program of candidates) {
         const command = Command.create(program, this.config.args, {
           env: this.config.env,
@@ -266,13 +271,12 @@ export class MCPExternalClient {
 
         try {
           this.child = await command.spawn()
-          spawnError = null
           break
         } catch (err) {
-          spawnError = err
+          spawnErrors.push(err)
         }
       }
-      if (!this.child) throw spawnError
+      if (!this.child) throw new Error(spawnFailureMessage(this.config.command, spawnErrors))
       this.connected = true
       // Enrolled the moment a process exists, not once the handshake is
       // through: a server that spawns and then hangs in `initialize` is
@@ -588,6 +592,18 @@ export function notStartableMessage(name: string, command: string): string {
   )
 }
 
+/**
+ * Scope-Name des Eintrags, der uvx an seinem offiziellen Windows-Ort startet.
+ *
+ * Astrals Installer legt `uvx.exe` nach `%USERPROFILE%\.local\bin` und traegt
+ * den Ordner in den Benutzer-PATH ein (docs.astral.sh/uv, Installation und
+ * Deinstallation, Stand 26.10.2026). Ein LU, das vor der Installation lief,
+ * erbt den alten PATH und findet den blanken Namen trotzdem nicht. Der Eintrag
+ * in `capabilities/default.json` ist derselbe uvx an einem festen Ort, kein
+ * weiteres Programm.
+ */
+export const UVX_LOCAL_BIN_SCOPE = 'uvx-local-bin'
+
 export function commandCandidatesForPlatform(
   command: string,
   platform: string = typeof navigator !== 'undefined' ? navigator.platform : ''
@@ -597,5 +613,39 @@ export function commandCandidatesForPlatform(
   if (/[\\/]|\.(cmd|bat|exe)$/i.test(command)) return [command]
   const CMD_SHIM_FIRST = new Set(['npx', 'npm', 'pnpm', 'yarn', 'corepack'])
   if (CMD_SHIM_FIRST.has(command)) return [`${command}.cmd`, command]
+  // uv liefert unter Windows `uvx.exe`, nie ein `.cmd`. Den Shim gibt es nur,
+  // wo jemand einen gebaut hat (ein Versionsmanager, ein eigener Wrapper),
+  // deshalb kommt er nach dem echten Programm und vor dem festen Ort.
+  if (command.toLowerCase() === 'uvx') return ['uvx', 'uvx.cmd', UVX_LOCAL_BIN_SCOPE]
   return [command, `${command}.cmd`]
+}
+
+/** Tauris Ablehnung eines Programms, das nicht in `shell:allow-spawn` steht. */
+const SCOPE_REFUSAL = /not allowed on the configured shell scope/i
+/** Was Rust sagt, wenn es das Programm nicht findet: Windows bzw. macOS/Linux. */
+const NOT_FOUND = /program not found|cannot find the file|no such file or directory|os error 2\b/i
+
+/**
+ * Der Satz, wenn kein Startversuch einen Prozess ergeben hat.
+ *
+ * Eine Bereichsablehnung ist hier nie die Ursache: was gar nicht starten darf,
+ * hat `isStartableMcpCommand` vorher abgefangen, und eine Ablehnung kann nur
+ * noch einen Rueckfall-Namen treffen. Gezeigt wird darum der erste echte
+ * Fehler, und wenn das Programm schlicht fehlt, wie man es bekommt.
+ */
+export function spawnFailureMessage(command: string, errors: unknown[]): string {
+  const texte = errors.map((e) => (e instanceof Error ? e.message : String(e)))
+  const echt = texte.filter((t) => !SCOPE_REFUSAL.test(t))
+  if (echt.length === 0) return texte[0] ?? `could not start \`${command}\``
+  if (!echt.every((t) => NOT_FOUND.test(t))) return echt[0]
+  const nackt = command.trim().toLowerCase().replace(/\.(cmd|exe)$/, '')
+  if (nackt === 'uvx') {
+    return '`uvx` was not found. Install uv from https://docs.astral.sh/uv/getting-started/installation/ '
+      + '(on Windows: winget install --id=astral-sh.uv -e), then quit and reopen LU so it sees the new PATH.'
+  }
+  if (nackt === 'npx') {
+    return '`npx` was not found. Install Node.js from https://nodejs.org, '
+      + 'then quit and reopen LU so it sees the new PATH.'
+  }
+  return echt[0]
 }
