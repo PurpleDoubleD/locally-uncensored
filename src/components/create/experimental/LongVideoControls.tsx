@@ -3,7 +3,7 @@
 //
 //   Speed   Fast (lightx2v 4 steps) or Quality, for the Wan 14B models that
 //           have the speed LoRAs (lib/wan-speed). Hidden for every other model.
-//   Length  Seconds up to 30 for the families that can continue a clip
+//   Length  Seconds up to MAX_LONG_SECONDS (15 in 3.0.9) for the families that can continue a clip
 //           (lib/long-video): Wan, Wan 2.2 5B, LTX 2.5. Up to the native
 //           length it is one run; past it the clip is made in sections, and
 //           the line says how many. On Extend Video it is the time to add.
