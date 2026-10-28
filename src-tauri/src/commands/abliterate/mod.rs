@@ -16,7 +16,7 @@
 //! 2. download: the safetensors of the repo at the commit the dialog showed.
 //! 3. check before: the ORIGINAL GGUF in a llama-server of its own, through
 //!    the same short check as at the end (refusals on 50 JailbreakBench
-//!    prompts, false alarms on 50 harmless ones, 200 MMLU questions, each
+//!    prompts, false alarms on 50 harmless ones, 1000 MMLU questions, each
 //!    answer kept as right or wrong so the two runs compare question by
 //!    question).
 //! 4. search: Heretic's trials, without its menus (`lu_abliterate.py search`).
@@ -72,9 +72,11 @@ const CONSTRAINTS: &str = include_str!("../../../resources/abliterate/constraint
 /// JailbreakBench has 100 of each; the search never sees them.
 const CHECK_N: u32 = 50;
 /// MMLU questions in the check. 50 left a loss of three questions inside
-/// chance (3.0.8 on the box: 22 → 21 of 50), so a real loss and noise read
-/// the same; 200 cost the box about a minute more per check.
-const MMLU_N: u32 = 200;
+/// chance (3.0.8 on the box: 22 → 21 of 50). 200 were still too few: on the
+/// box the first 200 read as a real loss (88 → 79) while all 1000 showed
+/// none (409 → 410). 1000 one-letter answers cost the box under a minute
+/// per check for a 0.5B model.
+const MMLU_N: u32 = 1000;
 const LOG_LINES: usize = 160;
 
 // ── Paths ─────────────────────────────────────────────────────────────────
@@ -1675,6 +1677,8 @@ mod tests {
         let old: Check = serde_json::from_str(r#"{"refusals":39,"falseAlarms":13,"mmlu":22,"n":50}"#).unwrap();
         assert!(!check_is_current(Some(&old)));
         assert!(!check_is_current(None));
+        let first_309 = Check { mmlu_n: Some(200), mmlu_marks: Some("1".repeat(200)), ..old.clone() };
+        assert!(!check_is_current(Some(&first_309)));
         let new = Check { mmlu_n: Some(MMLU_N), mmlu_marks: Some("1".repeat(MMLU_N as usize)), ..old };
         assert!(check_is_current(Some(&new)));
     }

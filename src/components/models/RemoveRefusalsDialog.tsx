@@ -322,7 +322,7 @@ function PlanView({ path, onClose }: { path: string; onClose: () => void }) {
       <p className={`t-body ${HINWEIS_TEXT.ruhig}`}>{CLAIM}</p>
       <p className={`t-micro ${HINWEIS_TEXT.ruhig}`}>
         The chat model is unloaded while the run works. Before and after, LU asks both versions the same 100 short
-        requests and 200 knowledge questions and shows you the counts; the questions and answers are not kept.
+        requests and 1000 knowledge questions and shows you the counts; the questions and answers are not kept.
       </p>
 
       {needsLicense && (
