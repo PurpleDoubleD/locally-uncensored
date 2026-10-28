@@ -1,3 +1,5 @@
+import type { EnterKeyMode } from '../lib/enter-key'
+import type { CustomParam } from '../lib/custom-params'
 import type { AgentWorkspace } from './agent-workspace'
 import type { EffortLevel } from '../lib/effort'
 
@@ -90,6 +92,9 @@ export interface Settings {
   /** Emoticons such as :) become emojis while typing in the chat composer
    *  (Chat, Agent, Code; not Create). Default on (lib/emoticons.ts). */
   emojiAutoReplace: boolean
+  /** GH #202: what Enter does in the composer and in the edit field of an
+   *  earlier message, 'send' (the default) or 'newline' (lib/enter-key.ts). */
+  enterKey?: EnterKeyMode
   /** REA, the reverse engineering plugin of the agents (lib/plugins/rea.ts):
    *  on starts its local MCP server. Default off. */
   reaPluginEnabled: boolean
@@ -507,6 +512,10 @@ export interface Persona {
    *  persona speaks (its chat, or its seat in a group); a chat's own values
    *  from the Sampling popup still win. Absent on every persona from before. */
   sampling?: SamplerValues
+  /** GH #198: sampling parameters LU has no field for, sent as typed where
+   *  the backend takes them (lib/custom-params.ts). A chat's own row with the
+   *  same key wins. Absent on every persona from before. */
+  customParams?: CustomParam[]
   /** GH #181: a short reminder sent near the end of the prompt on every turn
    *  this persona speaks (lib/persona-note.ts). Payload only, never stored
    *  in a chat. Absent on every persona from before. */

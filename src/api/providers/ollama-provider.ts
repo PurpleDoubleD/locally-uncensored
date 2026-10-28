@@ -1,5 +1,6 @@
 import { chatBackendsBack } from '../../lib/chat-backends-gate'
 import { ollamaSamplerOptions } from './sampler-fields'
+import { ollamaCustomOptions } from '../../lib/custom-params'
 import { resolveMessageAttachments } from '../../lib/chat-attachments'
 /**
  * Ollama Provider, wraps existing ollama.ts into the ProviderClient interface.
@@ -45,6 +46,8 @@ export interface OllamaRequestOptions {
   repeat_penalty?: number
   presence_penalty?: number
   frequency_penalty?: number
+  /** GH #198: custom rows (dry_base, xtc_threshold ...), see lib/custom-params.ts. */
+  [custom: string]: unknown
 }
 
 export interface OllamaRequestMessage {
@@ -168,6 +171,8 @@ export class OllamaProvider implements ProviderClient {
     if (options?.topK !== undefined) ollamaOptions.top_k = options.topK
     if (options?.maxTokens && options.maxTokens > 0) ollamaOptions.num_predict = options.maxTokens
     if (options) Object.assign(ollamaOptions, ollamaSamplerOptions(options))
+    // GH #198: the custom rows, inside options, where Ollama reads samplers.
+    Object.assign(ollamaOptions, ollamaCustomOptions(options?.customParams))
     // The window: resolved in ONE place for every request to Ollama, so the
     // model is never loaded again by a call that sends another one. Without
     // any, Ollama runs at its own small default and cuts real chats short.
@@ -332,6 +337,8 @@ export class OllamaProvider implements ProviderClient {
     if (options?.topK !== undefined) ollamaOptions.top_k = options.topK
     if (options?.maxTokens && options.maxTokens > 0) ollamaOptions.num_predict = options.maxTokens
     if (options) Object.assign(ollamaOptions, ollamaSamplerOptions(options))
+    // GH #198: the custom rows, inside options, where Ollama reads samplers.
+    Object.assign(ollamaOptions, ollamaCustomOptions(options?.customParams))
     // The window, see chatStream().
     Object.assign(ollamaOptions, await ollamaWindowOption(model, options?.window))
     body.options = ollamaOptions

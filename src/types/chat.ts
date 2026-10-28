@@ -1,3 +1,4 @@
+import type { CustomParam } from '../lib/custom-params'
 import type { AgentBlock } from './agent-mode'
 import type { SamplingOverrides } from '../lib/sampling'
 
@@ -305,6 +306,10 @@ export interface Conversation {
    *  defaults into it, so a reset chat keeps following the Settings page even
    *  if its sliders move again afterwards. */
   sampling?: SamplingOverrides
+  /** GH #198: this chat's own custom sampling parameters. They win over the
+   *  speaker's persona rows with the same key; in a group they hold for every
+   *  member. Absent on every chat from before. */
+  customParams?: CustomParam[]
   /**
    * Kept versions (GH #172, #174), keyed by the id of the message they follow,
    * or FORK_ROOT (lib/chat-forks.ts) for a change of the very first message.

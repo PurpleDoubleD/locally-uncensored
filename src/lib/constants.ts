@@ -28,6 +28,8 @@ export const DEFAULT_SETTINGS: Settings = {
   thinkingEnabled: true,
   // Emoticons to emojis in the chat composer (3.0.7), as chat apps do.
   emojiAutoReplace: true,
+  // GH #202: Enter sends, as it always did, until the user picks "new line".
+  enterKey: 'send',
   // REA plugin (3.0.7): a local MCP server, off until the user turns it on.
   reaPluginEnabled: false,
   // Reasoning effort (2.6.8). 'high' is not a taste, it is the rung this

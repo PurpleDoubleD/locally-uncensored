@@ -203,6 +203,7 @@ export function PersonaPanel() {
           initialSampling={editingPersona.sampling}
           initialNote={editingPersona.note}
           initialNoteDepth={editingPersona.noteDepth}
+          initialCustomParams={editingPersona.customParams}
           onDone={() => setEditingId(null)}
         />
       ) : showEditor ? (

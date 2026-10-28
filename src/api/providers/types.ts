@@ -236,6 +236,11 @@ export interface ChatOptions {
   presencePenalty?: number
   frequencyPenalty?: number
   dryMultiplier?: number
+  /** GH #198: custom sampling parameters, key → parsed value. OpenAI
+   *  compatible providers put them at the top level of the body, Ollama in
+   *  `options`; a key LU sets from its own field is never taken from here
+   *  (lib/custom-params.ts). */
+  customParams?: Record<string, unknown>
   /**
    * True when `maxTokens` above is THIS caller's own fallback default, not a
    * value the user actually typed into a slider (bau/wfprogress.md Runde 3,

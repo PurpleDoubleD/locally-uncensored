@@ -29,6 +29,7 @@ import { requestLimitMessage } from '../../lib/request-limit'
 import { localFetch, localFetchStream, isPrivateOrLanHost, isDirectFetchAllowed, hostnameOf, ensureProxyAllowsHost, backendCall } from '../backend'
 import { chatBackendsBack } from '../../lib/chat-backends-gate'
 import { openAiSamplerFields } from './sampler-fields'
+import { openAiCustomFields } from '../../lib/custom-params'
 import { topPForTemperature } from '../../lib/sampling'
 import { ensureBuiltinEngineAlive, explainDeadEngine, explainEngineTransportMessage, isManagedBuiltinSlot } from '../builtin-ensure'
 import { isLocalTransportFailure, localBackendUnreachableMessage, remoteBackendUnreachableMessage } from '../../lib/local-backend-transport'
@@ -707,6 +708,18 @@ export class OpenAIProvider implements ProviderClient {
    * other server in this slot is a version we do not know, and the cloud
    * endpoints refuse unknown fields, so nobody else gets it.
    */
+  /**
+   * GH #198: the custom sampling rows of the persona and the chat, as top
+   * level fields, under the names typed. A field LU sets itself is never
+   * taken from a row (lib/custom-params.ts). Not for LU Cloud, whose proxy
+   * refuses a field it does not know. A strict remote server may refuse one
+   * too; the person added the row for that server and sees its answer.
+   */
+  private applyCustomParams(body: OpenAIChatRequest, options?: ChatOptions): void {
+    if (this.config.id === 'lu-cloud') return
+    Object.assign(body, openAiCustomFields(options?.customParams))
+  }
+
   private applyThinkBudget(body: OpenAIChatRequest, options?: ChatOptions): void {
     if (this.config.managed !== true) return
     const budget = thinkBudgetForRequest(options?.thinking, options?.thinkingBudget)
@@ -1029,6 +1042,7 @@ export class OpenAIProvider implements ProviderClient {
     // server on this machine or the LAN counts as local whether its preset
     // said so or only its address does, an additional entry (#173) included.
     if (options) Object.assign(body, openAiSamplerFields(this.samplerTarget, options))
+    this.applyCustomParams(body, options)
     // Streaming tool turn: same wire shape as chatWithTools, but the calls
     // come back as deltas which the accumulator below already merges.
     if (options?.tools?.length) {
@@ -1284,6 +1298,7 @@ export class OpenAIProvider implements ProviderClient {
     if (options?.topK !== undefined && this.config.id !== 'lu-cloud') body.top_k = options.topK
     // GH #175: the extra samplers, under the names this backend reads.
     if (options) Object.assign(body, openAiSamplerFields(this.samplerTarget, options))
+    this.applyCustomParams(body, options)
     await this.applyMaxTokens(model, body, options)
     // Same reasoning_effort gate as chatStream.
     const effort = this.thinkingEffort(model, options?.thinking, options)

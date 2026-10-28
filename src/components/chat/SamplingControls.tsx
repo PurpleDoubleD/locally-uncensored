@@ -10,6 +10,7 @@ import { SAMPLING_DEFAULTS, TEMPERATURE_MAX, AGENT_TEMPERATURE_MAX, TEMPERATURE_
 import { resetTemperatureToDefault } from '../../lib/temperature-reset'
 import { HighTemperatureWarning } from './HighTemperatureWarning'
 import { HelpMark } from '../ui/HelpMark'
+import { CustomParamsEditor, CUSTOM_PARAMS_LABEL } from './CustomParamsEditor'
 import type { SamplingOverrides } from '../../lib/sampling'
 import { isGroupChat } from '../../lib/group-chat'
 import { speakerSamplingLines, type SpeakerSamplingLine } from '../../lib/speaker-sampling-lines'
@@ -167,7 +168,7 @@ export function SamplingControls() {
   const [draft, setDraft] = useState<string | null>(null)
   const wrapRef = useRef<HTMLDivElement>(null)
   const panelRef = useRef<HTMLDivElement>(null)
-  const lage = usePopoverPlatz(panelRef, open, { bevorzugt: 'oben', abstand: 6 })
+  const lage = usePopoverPlatz(panelRef, open, { bevorzugt: 'oben', abstand: 6, breiteDeckeln: true })
   const panelId = useId()
   const settings = useSettingsStore((s) => s.settings)
   const activeId = useChatStore((s) => s.activeConversationId)
@@ -179,6 +180,13 @@ export function SamplingControls() {
       : undefined
   )
   const setSampling = useChatStore((s) => s.setConversationSampling)
+  // GH #198: this chat's own custom rows.
+  const customRows = useChatStore((s) =>
+    s.activeConversationId
+      ? s.conversations.find((c) => c.id === s.activeConversationId)?.customParams
+      : undefined
+  )
+  const setCustomRows = useChatStore((s) => s.setConversationCustomParams)
   const agentMode = useAgentModeStore((s) => (activeId ? s.agentModeActive[activeId] === true : false))
   const resetSampling = useChatStore((s) => s.resetConversationSampling)
   // GH #175: who speaks in this chat, and which persona preset holds for
@@ -197,7 +205,7 @@ export function SamplingControls() {
   useProviderStore((s) => s.openaiEntries)
   const lines: SpeakerSamplingLine[] = speakerSamplingLines({
     settings,
-    conv: { personaId, systemPrompt: keptPrompt, personaEnabled, groupModels, groupPersonas, sampling: overrides },
+    conv: { personaId, systemPrompt: keptPrompt, personaEnabled, groupModels, groupPersonas, sampling: overrides, customParams: customRows },
     activeModel,
     personas,
     activePersonaId,
@@ -212,13 +220,13 @@ export function SamplingControls() {
   const sliderPreset = isGroupChat(groupModels) ? undefined : lines[0]?.preset
 
   const value = effectiveSampling(settings, overrides, sliderPreset)
-  const changed = samplingIsChanged(settings, overrides, sliderPreset)
+  const changed = samplingIsChanged(settings, overrides, sliderPreset) || (customRows?.length ?? 0) > 0
   // F1 (review-w2ui.md, 18.09.2026): Reset only deletes THIS chat's own
   // override, so it must go by whether one exists, not by whether the
   // EFFECTIVE value differs from the shipped default (`changed` above): that
   // is also true when only the Settings page moved and this chat never
   // touched its own slider, and Reset then has nothing to delete.
-  const ownSampling = hasOwnSampling(overrides)
+  const ownSampling = hasOwnSampling(overrides) || (customRows?.length ?? 0) > 0
   const write = (patch: SamplingOverrides) => {
     if (activeId) setSampling(activeId, patch)
   }
@@ -420,6 +428,17 @@ export function SamplingControls() {
           </label>
 
           <ThinkBudgetRow />
+
+          <div className="space-y-1 border-t border-gray-700/50 pt-1.5">
+            <div className="text-gray-400">{CUSTOM_PARAMS_LABEL}</div>
+            <CustomParamsEditor
+              rows={customRows ?? []}
+              onChange={(rows) => { if (activeId) setCustomRows(activeId, rows) }}
+              inherited={!isGroupChat(groupModels) && lines[0]?.personaCustom?.length
+                ? { source: lines[0].source.replace(/^Persona /, 'persona '), rows: lines[0].personaCustom }
+                : undefined}
+            />
+          </div>
 
           {lines.length > 0 && (
             <div data-testid="sampling-speakers" className="space-y-1 border-t border-gray-700/50 pt-1.5">

@@ -38,6 +38,8 @@ import { RefusalNotice } from './RefusalNotice'
 import { RequestUsageLine } from './RequestUsageLine'
 import { fitTextarea } from '../../lib/fit-textarea'
 import { editableText } from '../../lib/message-edit'
+import { editKeyAction, editShortcuts, enterKeyMode } from '../../lib/enter-key'
+import { isMacOS } from '../../lib/device-kind'
 import { ForkSwitcher } from './ForkSwitcher'
 
 interface Props {
@@ -106,6 +108,9 @@ function MessageBubbleImpl({ message, onRegenerate, onEdit, pendingApprovalId, o
   )
   const toggleAgentMode = useAgentModeStore((s) => s.toggleAgentMode)
   const userAvatarDataUrl = useSettingsStore((s) => s.settings.userAvatarDataUrl)
+  // GH #202: the Enter key in the edit field follows the same setting as the composer.
+  const enterMode = enterKeyMode(useSettingsStore((s) => s.settings.enterKey))
+  const editKeys = editShortcuts(enterMode, isMacOS())
   // Chat Tools (v2.5.3) gives plain chat web/file/image/video WITHOUT Agent Mode.
   // When it's on, the "turn Agent Mode on" banners below are wrong + contradictory
   // (the tool IS available in normal chat) — they predate Chat Tools and only
@@ -511,10 +516,12 @@ function MessageBubbleImpl({ message, onRegenerate, onEdit, pendingApprovalId, o
                 onKeyDown={(e) => {
                   // Enter saves, Ctrl or Cmd with Enter resends, Shift with
                   // Enter is a new line. Enter used to resend and drop every
-                  // later turn (GH #172).
-                  if (e.key === 'Enter' && !e.shiftKey) {
+                  // later turn (GH #172). GH #202: in "new line" mode Enter is a
+                  // line, Ctrl/Cmd+Enter saves and with Shift resends.
+                  const action = editKeyAction({ key: e.key, shiftKey: e.shiftKey, ctrlKey: e.ctrlKey, metaKey: e.metaKey, altKey: e.altKey, isComposing: e.nativeEvent.isComposing }, enterMode)
+                  if (action !== 'none') {
                     e.preventDefault()
-                    if ((e.ctrlKey || e.metaKey) && isUser && onEdit) resendEdit()
+                    if (action === 'resend' && isUser && onEdit) resendEdit()
                     else saveEdit()
                   }
                   if (e.key === 'Escape') cancelEdit()
@@ -523,10 +530,11 @@ function MessageBubbleImpl({ message, onRegenerate, onEdit, pendingApprovalId, o
                 className="w-full bg-transparent text-[0.78rem] leading-relaxed text-gray-800 dark:text-gray-200 resize-none focus:outline-none"
               />
               <div className="flex items-center gap-1 justify-end t-micro">
+                <span className="mr-auto text-gray-500" data-testid="edit-key-hint">{editKeys.hint}</span>
                 <button onClick={cancelEdit} className="px-1.5 py-0.5 rounded text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-white/10 transition-colors">Cancel</button>
-                <button onClick={saveEdit} title="Change the text only (Enter)" className="px-1.5 py-0.5 rounded text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-white/10 transition-colors">Save</button>
+                <button onClick={saveEdit} title={`Change the text only (${editKeys.save})`} className="px-1.5 py-0.5 rounded text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-white/10 transition-colors">Save</button>
                 {isUser && onEdit && (
-                  <button onClick={resendEdit} title="Ask again from here and keep the current answers as a version (Ctrl+Enter)" className="px-1.5 py-0.5 rounded border border-gray-300 dark:border-white/15 text-gray-800 dark:text-gray-100 hover:bg-gray-200 dark:hover:bg-white/10 transition-colors">Save &amp; resend</button>
+                  <button onClick={resendEdit} title={`Ask again from here and keep the current answers as a version (${editKeys.resend})`} className="px-1.5 py-0.5 rounded border border-gray-300 dark:border-white/15 text-gray-800 dark:text-gray-100 hover:bg-gray-200 dark:hover:bg-white/10 transition-colors">Save &amp; resend</button>
                 )}
               </div>
             </div>
