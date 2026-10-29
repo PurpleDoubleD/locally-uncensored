@@ -55,6 +55,7 @@ vi.mock('../compact-run', async (importOriginal) => {
 })
 
 import { maybeAutoCompact, runCompactForConversation } from '../run-compact-command'
+import { compactCuts, layerItems } from '../compact-layers'
 import { useRunActivityStore } from '../../stores/runActivityStore'
 import { deriveRunStatus } from '../../components/status/run-status'
 import { runCompactSummary } from '../compact-run'
@@ -490,24 +491,12 @@ describe('Auto-Kompaktierung, die schiefgeht, sagt es', () => {
     expect(hinweise(id)).toHaveLength(0)
   })
 
-  it('meldet den Erfolg GENAU einmal — und zwar am Ende', async () => {
-    // Diese Zusicherung hiess bis zum 03.09.2026 „schreibt nichts in den
-    // Verlauf, wenn es geklappt hat", begruendet mit: der Erfolg habe seine
-    // eigene Darstellung, den Compact-Block an der Schnittstelle, ein
-    // zusaetzlicher Hinweis waere dasselbe zweimal.
-    //
-    // Die Praemisse stimmt zur Haelfte. Den Block gibt es wirklich
-    // (CompactBlock, verankert per compactionAnchors) — aber er steht am
-    // SCHNITTPUNKT, also mitten in einem Gespraech, das gerade lang genug
-    // geworden ist, um verdichtet zu werden. Der Leser steht in diesem Moment
-    // unten am Eingabefeld, dreissig Nachrichten weiter. Eine Persona hat
-    // genau dort gestanden, den Ueberlauf komplett verpasst und ihn erst im
-    // Netzwerkverkehr gefunden.
-    //
-    // Die Sorge des alten Tests bleibt trotzdem richtig, deshalb steht sie
-    // jetzt als Zahl da: GENAU eine Notiz, nicht zwei. Der Block sagt, WO
-    // geschnitten wurde; die Notiz sagt, DASS es eben passiert ist, an der
-    // Stelle, auf die der Leser ohnehin schaut.
+  it('meldet den Erfolg GENAU einmal: als Linie, nicht als zweite Notiz', async () => {
+    // Bis 3.0.8 schrieb der Erfolg zusaetzlich eine Notiz ans Ende, weil die
+    // Linie am Schnittpunkt mitten im Gespraech stand und der Leser dreissig
+    // Nachrichten weiter unten (Persona 03.09.2026). Seit 3.0.9 beginnt die
+    // aktuelle Ansicht AN der Linie (lib/compact-layers.ts): sie steht damit
+    // genau dort, wo der Leser schaut, und eine Notiz waere dasselbe zweimal.
     setzeSchwelle(0.5)
     const id = vollesGespraech()
     zusammenfassen.mockResolvedValue({
@@ -517,7 +506,7 @@ describe('Auto-Kompaktierung, die schiefgeht, sagt es', () => {
 
     const rec = await maybeAutoCompact({ conversationId: id, activeModel: MODELL })
     expect(rec).not.toBeNull()
-    expect(hinweise(id)).toHaveLength(1)
+    expect(hinweise(id)).toHaveLength(0)
   })
 })
 
@@ -624,39 +613,57 @@ describe('Auto-Kompaktierung, die klappt, sagt es auch', () => {
     (useChatStore.getState().conversations.find((c) => c.id === id)?.messages ?? [])
       .filter((m) => m.role === 'system' && !!m.notice)
 
-  it('hinterlaesst eine sichtbare Notiz im Verlauf', async () => {
+  it('hinterlaesst die Linie oben in der aktuellen Ansicht, mit den Zahlen des Zaehlers', async () => {
     setzeSchwelle(0.5)
     const id = vollesGespraech()
     zusammenfassen.mockResolvedValue({ ok: true, summary: ZUSAMMENFASSUNG } as never)
 
     const rec = await maybeAutoCompact({ conversationId: id, activeModel: MODELL })
     expect(rec).not.toBeNull()
+    // Die ganze Nutzlast vorher und nachher, nicht nur die ersetzten Zuege:
+    // das ist die Zahl, die der Zaehler zeigt (David, REA-Test 27.10.).
+    expect(rec!.contextBefore).toBeGreaterThan(0)
+    expect(rec!.contextAfter).toBeLessThan(rec!.contextBefore!)
+    expect(rec!.contextBefore! - rec!.contextAfter!).toBe(Math.max(0, rec!.tokensBefore - rec!.tokensAfter))
 
-    const n = hinweise(id)
-    expect(n).toHaveLength(1)
-    // Kein 'warn': es ist nichts schiefgegangen, es ist etwas passiert.
-    expect(n[0].notice).toBe('info')
-    expect(n[0].content).toContain('Summarised')
-    // Der Satz, der die Angst nimmt — der Verlauf ist nicht weg, nur die
-    // Nutzlast ist kuerzer. Ohne ihn liest sich die Notiz wie ein Datenverlust.
-    expect(n[0].content).toContain('The full conversation is still here')
+    const conv = useChatStore.getState().conversations.find((c) => c.id === id)!
+    const jetzt = layerItems(conv.messages, compactCuts(conv.messages, conv.compactions), null)
+    expect(jetzt[0]).toMatchObject({ kind: 'line', cut: { key: rec!.id } })
+    // Und keine Notiz daneben.
+    expect(hinweise(id)).toHaveLength(0)
   })
 
-  it('die Notiz steht NACH den Nachrichten, die sie ersetzt', async () => {
+  it('eine schon angelegte, leere Antwort gehoert nicht zum Stand davor', async () => {
+    // Mac-Lauf 28.10.: die Agent-Schleife legt die Antwort an, bevor sie
+    // verdichtet. Als Ende genommen zeigte die Ebene "vorher" die spaetere
+    // Antwort mit.
+    setzeSchwelle(0.5)
+    const id = vollesGespraech()
+    useChatStore.getState().addMessage(id, { id: 'offen', role: 'assistant', content: '', timestamp: 9999, agentBlocks: [] })
+    zusammenfassen.mockResolvedValue({ ok: true, summary: ZUSAMMENFASSUNG } as never)
+    const rec = await maybeAutoCompact({ conversationId: id, activeModel: MODELL })
+    expect(rec!.endMessageId).toBe('lang39')
+  })
+
+  it('die Linie steht NACH den Nachrichten, die sie ersetzt', async () => {
     // Am Schnittpunkt, nicht am Anfang: sonst behauptet sie, das ganze
-    // Gespraech sei zusammengefasst.
+    // Gespraech sei zusammengefasst. Was davor stand, liegt eine Ebene tiefer.
     setzeSchwelle(0.5)
     const id = vollesGespraech()
     zusammenfassen.mockResolvedValue({ ok: true, summary: ZUSAMMENFASSUNG } as never)
 
-    await maybeAutoCompact({ conversationId: id, activeModel: MODELL })
-    const alle = useChatStore.getState().conversations.find((c) => c.id === id)!.messages
-    expect(alle[alle.length - 1].notice).toBe('info')
+    const rec = await maybeAutoCompact({ conversationId: id, activeModel: MODELL })
+    const conv = useChatStore.getState().conversations.find((c) => c.id === id)!
+    const cuts = compactCuts(conv.messages, conv.compactions)
+    const ids = (items: ReturnType<typeof layerItems>) =>
+      items.flatMap((it) => (it.kind === 'message' ? [it.message.id] : []))
+    const vorher = ids(layerItems(conv.messages, cuts, 0))
+    expect(vorher).toContain(rec!.upToMessageId)
+    expect(ids(layerItems(conv.messages, cuts, null))).not.toContain(rec!.upToMessageId)
   })
 
-  it('der manuelle Weg verdoppelt die Notiz nicht', async () => {
-    // /compact zeigt sein Ergebnis selbst an. Zwei Notizen fuer einen Vorgang
-    // waeren eine Falschmeldung ueber die Anzahl der Vorgaenge.
+  it('der manuelle Weg schreibt auch keine Notiz', async () => {
+    // /compact zeigt sein Ergebnis als dieselbe Linie (der Datensatz).
     setzeSchwelle(0.5)
     const id = vollesGespraech()
     zusammenfassen.mockResolvedValue({ ok: true, summary: ZUSAMMENFASSUNG } as never)

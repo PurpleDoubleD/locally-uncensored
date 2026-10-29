@@ -112,6 +112,15 @@ export type CompactOutcome =
   | { ok: true; record: CompactionRecord }
   | { ok: false; reason: CompactRunReason | 'no-conversation' | 'nothing-to-compact'; detail?: string }
 
+/** How full the payload of this chat is, the same reading the counter shows. */
+function contextFillOf(conv: { id: string; messages: Message[] }) {
+  const sent = useSendSizeStore.getState().byConv[conv.id]
+  return computeContextFill(
+    conv.messages as unknown as FillMessage[],
+    sent ? { tokens: sent.tokens + sent.toolsTokens, atMessageCount: sent.atMessageCount } : undefined,
+  )
+}
+
 /** A stored message the model actually saw. App notices never reach a model. */
 export function isModelVisible(m: Message): boolean {
   return m.role !== 'system' && typeof m.content === 'string' && m.content.trim() !== ''
@@ -198,56 +207,85 @@ export async function runCompactForConversation(opts: {
   const chain = prevIdx >= 0 ? chainToSend(records, records.length - 1) : []
   const previousState = chain.length ? stateFromStored(chain) : undefined
 
-  let result = await runCompactSummary({
-    turns,
-    activeModel: opts.activeModel,
-    focus: opts.focus,
-    signal: opts.signal,
-    previous: previousState,
-    window,
-  })
-  // Scheitert die Zusammenfuehrung, wird wie bisher nur der neue Abschnitt
-  // zusammengefasst und als Kettenglied gespeichert. Die alten Datensaetze
-  // bleiben unangetastet und gehen weiter mit, es geht also nichts verloren.
-  // Abbruch und fehlendes Modell sind keine Gruende fuer einen zweiten Lauf.
-  // Der Rueckfall nur, wenn er etwas sparen kann (canSave, oben) und der
-  // Grund nicht beim Nutzer oder beim fehlenden Modell liegt.
-  if (!result.ok && previousState && canSave
-      && result.reason !== 'aborted' && result.reason !== 'no-model') {
-    result = await runCompactSummary({
+  // The summary is a model call of its own and can take a while. The
+  // transcript shows "Compacting conversation…" for as long as this runs,
+  // for /compact as for the automatic trigger (3.0.9). Whatever the run said
+  // before comes back afterwards.
+  const activity = useRunActivityStore.getState()
+  const activityBefore = activity.activity[opts.conversationId] ?? null
+  activity.setActivity(opts.conversationId, COMPACTING_ACTIVITY)
+  try {
+    return await summariseAndRecord()
+  } finally {
+    useRunActivityStore.getState().setActivity(opts.conversationId, activityBefore)
+  }
+
+  async function summariseAndRecord(): Promise<CompactOutcome> {
+    if (!opts.activeModel || !conv) return { ok: false, reason: 'no-model' }
+    let result = await runCompactSummary({
       turns,
       activeModel: opts.activeModel,
       focus: opts.focus,
       signal: opts.signal,
+      previous: previousState,
       window,
     })
-  }
-  if (!result.ok) return { ok: false, reason: result.reason, detail: result.detail }
+    // Scheitert die Zusammenfuehrung, wird wie bisher nur der neue Abschnitt
+    // zusammengefasst und als Kettenglied gespeichert. Die alten Datensaetze
+    // bleiben unangetastet und gehen weiter mit, es geht also nichts verloren.
+    // Abbruch und fehlendes Modell sind keine Gruende fuer einen zweiten Lauf.
+    // Der Rueckfall nur, wenn er etwas sparen kann (canSave, oben) und der
+    // Grund nicht beim Nutzer oder beim fehlenden Modell liegt.
+    if (!result.ok && previousState && canSave
+        && result.reason !== 'aborted' && result.reason !== 'no-model') {
+      result = await runCompactSummary({
+        turns,
+        activeModel: opts.activeModel,
+        focus: opts.focus,
+        signal: opts.signal,
+        window,
+      })
+    }
+    if (!result.ok) return { ok: false, reason: result.reason, detail: result.detail }
 
-  const merged = Boolean(result.merged && previousState)
-  // Was ohne diesen Lauf mitginge: die neuen Zuege, und bei einer
-  // Zusammenfuehrung auch die Kette, die der neue Stand ersetzt.
-  const chainTokens = merged ? chain.reduce((n, r) => n + estimateTokens(r.summary), 0) : 0
-  const record: CompactionRecord = {
-    id: uuid(),
-    summary: renderCompactSummary(result.summary),
-    upToMessageId: anchor.id,
-    replaced: covered.length,
-    atMessageCount: conv.messages.length,
-    tokensBefore: turns.reduce((n, t) => n + estimateTokens(t.content) + 4, 0) + chainTokens,
-    tokensAfter: summaryTokens(result.summary),
-    trigger: opts.trigger,
-    at: Date.now(),
-    ...(merged ? { merged: true } : {}),
+    const merged = Boolean(result.merged && previousState)
+    // Was ohne diesen Lauf mitginge: die neuen Zuege, und bei einer
+    // Zusammenfuehrung auch die Kette, die der neue Stand ersetzt.
+    const chainTokens = merged ? chain.reduce((n, r) => n + estimateTokens(r.summary), 0) : 0
+    const record: CompactionRecord = {
+      id: uuid(),
+      summary: renderCompactSummary(result.summary),
+      upToMessageId: anchor.id,
+      replaced: covered.length,
+      atMessageCount: conv.messages.length,
+      tokensBefore: turns.reduce((n, t) => n + estimateTokens(t.content) + 4, 0) + chainTokens,
+      tokensAfter: summaryTokens(result.summary),
+      trigger: opts.trigger,
+      at: Date.now(),
+      ...(merged ? { merged: true } : {}),
+    }
+    // The whole payload, for the line in the transcript: what the counter read
+    // before, less what the summary saves. An estimate both ways, like the
+    // counter's own number between two real usage reports.
+    const contextBefore = contextFillOf(conv).used
+    if (contextBefore > 0) {
+      record.contextBefore = contextBefore
+      record.contextAfter = Math.max(0, contextBefore - Math.max(0, record.tokensBefore - record.tokensAfter))
+    }
+    // The answer the agent loops have already opened (empty, no step yet) is
+    // not part of the stand before: what it will say comes after. Mac run
+    // 28.10.: with it as the end, the layer "before" showed the later answer.
+    const newest = conv.messages.findLast((m) => !(m.role === 'assistant' && !m.content && !m.agentBlocks?.length))
+    if (newest) record.endMessageId = newest.id
+    // Re-read the store: the conversation may have been deleted while the model
+    // was writing. recordCompaction is a no-op on a missing id, but reporting
+    // success for a chat that no longer exists would be a lie to the caller.
+    if (!useChatStore.getState().conversations.some((c) => c.id === opts.conversationId)) {
+      return { ok: false, reason: 'no-conversation' }
+    }
+    useChatStore.getState().recordCompaction(opts.conversationId, record)
+    return { ok: true, record }
   }
-  // Re-read the store: the conversation may have been deleted while the model
-  // was writing. recordCompaction is a no-op on a missing id, but reporting
-  // success for a chat that no longer exists would be a lie to the caller.
-  if (!useChatStore.getState().conversations.some((c) => c.id === opts.conversationId)) {
-    return { ok: false, reason: 'no-conversation' }
-  }
-  useChatStore.getState().recordCompaction(opts.conversationId, record)
-  return { ok: true, record }
 }
 
 /**
@@ -427,7 +465,6 @@ export async function maybeAutoCompact(opts: {
   if (recentAutoFailure(conv.messages)) return null
 
   const visible = conv.messages.filter(isModelVisible)
-  const sent = useSendSizeStore.getState().byConv[opts.conversationId]
   // ── Warum hier die UNGEFILTERTE Liste steht ──────────────────────────────
   //
   // `atMessageCount` wird von beiden Agentenschleifen als
@@ -441,10 +478,7 @@ export async function maybeAutoCompact(opts: {
   // die beiden liefen also genau dann auseinander, wenn die App selbst geredet
   // hatte. Dass die Hinweise nicht mitzaehlen, erledigt jetzt
   // `computeContextFill` selbst und fuer BEIDE Aufrufer gleich.
-  const fill = computeContextFill(
-    conv.messages as unknown as FillMessage[],
-    sent ? { tokens: sent.tokens + sent.toolsTokens, atMessageCount: sent.atMessageCount } : undefined,
-  )
+  const fill = contextFillOf(conv)
 
   let window = opts.window
   let windowIsTrue = opts.windowIsTrue ?? false
@@ -475,27 +509,19 @@ export async function maybeAutoCompact(opts: {
   })
   if (!verdict.shouldCompact) return null
 
-  // The summary is a model call of its own and can take a while. The status
-  // line of the run says so instead of "Starting".
-  const { setActivity } = useRunActivityStore.getState()
-  setActivity(opts.conversationId, COMPACTING_ACTIVITY)
-  let outcome: Awaited<ReturnType<typeof runCompactForConversation>>
-  try {
-    outcome = await runCompactForConversation({
-      conversationId: opts.conversationId,
-      activeModel: opts.activeModel,
-      trigger: 'auto',
-      signal: opts.signal,
-      window,
-    })
-  } finally {
-    setActivity(opts.conversationId, null)
-  }
+  // runCompactForConversation shows "Compacting conversation…" while the
+  // summary is written, and the record it stores is the line that stays.
+  const outcome = await runCompactForConversation({
+    conversationId: opts.conversationId,
+    activeModel: opts.activeModel,
+    trigger: 'auto',
+    signal: opts.signal,
+    window,
+  })
   if (!outcome.ok) {
     meldeAutoFehlschlag(opts.conversationId, outcome)
     return null
   }
-  meldeAutoErfolg(opts.conversationId, outcome)
   return outcome.record
 }
 
@@ -552,34 +578,9 @@ export async function maybeAutoCompact(opts: {
  */
 const AUTO_FAIL_PREFIX = 'autocompact-fail-'
 
-/**
- * Same prefix trick for the case that WORKED.
- *
- * The asymmetry was the bug. A failed auto-compaction has written a visible
- * notice into the transcript since it existed; a successful one wrote nothing
- * — although success is the case that changes what the model can still see.
- * The window kept showing the full conversation, the request no longer carried
- * it, and the only way to find out was to read the network traffic. A tester
- * put the cost plainly on 2026-09-03: „Ich glaube, das Werkzeug hat alles, und
- * uebernehme falsche Zahlen in einen Artikel."
- *
- * `notice: 'info'`, not 'warn': nothing went wrong. Something happened, and the
- * person it happened to gets to know. The wording is `compactOutcomeMessage`,
- * the same sentence the manual /compact has always shown — including the half
- * that takes the fright out of it: the conversation is still here, only the
- * payload got shorter.
- */
-const AUTO_OK_PREFIX = 'autocompact-ok-'
-
-function meldeAutoErfolg(convId: string, outcome: CompactOutcome & { ok: true }): void {
-  useChatStore.getState().addMessage(convId, {
-    id: `${AUTO_OK_PREFIX}${outcome.record.id}`,
-    role: 'system',
-    notice: 'info',
-    content: compactOutcomeMessage(outcome),
-    timestamp: Date.now(),
-  })
-}
+// A successful auto-compaction wrote a notice up to 3.0.8 (prefix
+// 'autocompact-ok-'); since 3.0.9 the record itself is drawn as the line
+// "Compacted, 28.9K → 17.9K". See AUTO_OK_PREFIX in lib/compact-layers.ts.
 
 /** True while the newest own failure notice is fewer than
  *  MIN_MESSAGES_SINCE_COMPACT messages back. */

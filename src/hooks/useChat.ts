@@ -868,14 +868,19 @@ export function useChat() {
         store.addMessage(convId, {
           id: uuid(), role: 'system', notice: 'info', content, timestamp: Date.now(),
         })
-        // A placeholder first: writing the summary is a real round trip, and a
-        // composer that just goes quiet for ten seconds reads as a hang. The
-        // same reason the send path shows a streaming placeholder.
-        const noticeId = uuid()
-        store.addMessage(convId, {
-          id: noticeId, role: 'system', notice: 'info',
-          content: 'Summarising the earlier turns…', timestamp: Date.now(),
-        })
+        // Writing the summary is a real round trip, and a composer that just
+        // goes quiet for ten seconds reads as a hang. Until 3.0.8 a placeholder
+        // notice said so; now runCompactForConversation shows the line
+        // "Compacting conversation…" while it runs, and the record it stores
+        // stays as "Compacted, 28.9K → 17.9K". Only a run that changed nothing
+        // still gets a sentence, because then there is no record to draw.
+        const reportUnlessDone = (outcome: Parameters<typeof compactOutcomeMessage>[0]) => {
+          if (outcome.ok) return
+          useChatStore.getState().addMessage(convId, {
+            id: uuid(), role: 'system', notice: 'info',
+            content: compactOutcomeMessage(outcome), timestamp: Date.now(),
+          })
+        }
         // Runde 5 Nachtrag (review-lanes.md Runde 2, Grep-Audit dieser Runde):
         // this used to call runCompactForConversation straight away, a real
         // inference call that never touched run-lanes.ts. A local /compact
@@ -921,14 +926,10 @@ export function useChat() {
                 focus: cmd.args || undefined,
                 signal: compactAbort.signal,
               })
-              useChatStore.getState().updateMessageContent(convId, noticeId, compactOutcomeMessage(outcome))
+              reportUnlessDone(outcome)
             },
           )
-          if (laneOutcome === 'cancelled-while-queued') {
-            useChatStore.getState().updateMessageContent(
-              convId, noticeId, compactOutcomeMessage({ ok: false, reason: 'aborted' }),
-            )
-          }
+          if (laneOutcome === 'cancelled-while-queued') reportUnlessDone({ ok: false, reason: 'aborted' })
         } finally {
           if (activeChatRuns.get(convId) === myRunToken) {
             activeChatRuns.delete(convId)

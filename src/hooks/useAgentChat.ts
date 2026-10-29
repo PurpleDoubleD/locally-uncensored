@@ -1862,6 +1862,7 @@ export function useAgentChat() {
             signal: abort.signal,
             state: laufVerdichtung,
             decay: { enabled: decayOn },
+            onCompacted: convId ? (block) => addBlock(runState, convId, assistantMessage.id, block) : undefined,
           })
           if (verdichtet.compacted) agentMessages = verdichtet.messages
           agentMessages = trimWorkingHistory(agentMessages, sendBudget, { enabled: decayOn, hysteresis: decayOn }).messages

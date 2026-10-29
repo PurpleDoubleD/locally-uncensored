@@ -38,6 +38,7 @@ import { useChatStore } from '../../stores/chatStore'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { useRunActivityStore } from '../../stores/runActivityStore'
 import { DEFAULT_SETTINGS } from '../constants'
+import type { AgentBlock } from '../../types/agent-mode'
 
 const summarise = vi.mocked(runCompactSummary)
 
@@ -187,6 +188,40 @@ describe('compactRunMidway', () => {
     expect(note.notice).toBe('info')
     expect(note.content).toMatch(/^Summarised \d+ earlier step messages of this run/)
     expect(all.findIndex((m) => m.id === note.id)).toBe(all.findIndex((m) => m.id === assistantId) - 1)
+  })
+
+  it('with the run\'s block list it adds ONE compaction block instead of a notice (3.0.9)', async () => {
+    // David, REA-Test 27.10.: 28.9K/32K, then 17.9K, and nothing to see in the
+    // chat. The block lands among the steps of the answer, where the
+    // transcript draws it as the line "Compacted, 28.9K → 17.9K" and starts
+    // the current view (lib/compact-layers.ts).
+    const { convId, assistantId } = seedConversation()
+    const blocks: AgentBlock[] = []
+    const out = await compactRunMidway({
+      messages: run(30), budgetTokens: 16384, modelWindow: 32768, activeModel: 'ollama::qwen3:8b',
+      convId, beforeMessageId: assistantId, state: newRunCompactState(),
+      onCompacted: (b) => blocks.push(b),
+    })
+    expect(out.compacted).toBe(true)
+    expect(notices(convId)).toEqual([])
+    expect(blocks).toHaveLength(1)
+    expect(blocks[0].compaction).toEqual({ before: out.tokensBefore, after: out.tokensAfter, replaced: out.replaced })
+    // A reader that does not know the field still shows something true.
+    expect(blocks[0].phase).toBe('reflection')
+    expect(blocks[0].content).toMatch(/^Summarised \d+ earlier step messages of this run/)
+  })
+
+  it('a failed compaction adds no block, the warning stays a notice', async () => {
+    const { convId, assistantId } = seedConversation()
+    summarise.mockResolvedValue({ ok: false, summary: { ...EMPTY_SUMMARY }, reason: 'unusable' })
+    const blocks: AgentBlock[] = []
+    await compactRunMidway({
+      messages: run(30), budgetTokens: 16384, modelWindow: 32768, activeModel: 'ollama::qwen3:8b',
+      convId, beforeMessageId: assistantId, state: newRunCompactState(),
+      onCompacted: (b) => blocks.push(b),
+    })
+    expect(blocks).toEqual([])
+    expect(notices(convId).map((n) => n.notice)).toEqual(['warn'])
   })
 
   it('says Compacting while the summary is written and gives the status back after', async () => {
