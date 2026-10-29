@@ -745,7 +745,7 @@ function LocalTrainControls() {
           options={TRAIN_VRAM_PRESETS.map((p) => ({ value: p.value, label: p.label }))}
         />
         <span className="t-label text-gray-600">
-          {trainImages.length}/{maxTrainImages('local')} photos{trainImages.length < MIN_TRAIN_IMAGES ? `, need at least ${MIN_TRAIN_IMAGES}` : ''}
+          {trainImages.length}/{maxTrainImages('local')} {trainKind === 'style' ? 'pictures' : 'photos'}{trainImages.length < MIN_TRAIN_IMAGES ? `, need at least ${MIN_TRAIN_IMAGES}` : ''}
         </span>
       </div>
       {!isGenerating && (
@@ -865,7 +865,7 @@ function MacTrainControls() {
           options={presets.map((p) => ({ value: String(p.steps), label: p.label }))}
         />
         <span className="t-label text-gray-600">
-          {trainImages.length}/{maxTrainImages('local')} photos{trainImages.length < MIN_TRAIN_IMAGES ? `, need at least ${MIN_TRAIN_IMAGES}` : ''}
+          {trainImages.length}/{maxTrainImages('local')} {trainKind === 'style' ? 'pictures' : 'photos'}{trainImages.length < MIN_TRAIN_IMAGES ? `, need at least ${MIN_TRAIN_IMAGES}` : ''}
         </span>
       </div>
       {!isGenerating && (
