@@ -1,3 +1,6 @@
+
+Want stuff for WSL look here - https://github.com/vinberg88/
+
 <div align="center">
 
 <img src="logos/LU-monogram-bw.png" alt="Locally Uncensored" width="80">
