@@ -39,6 +39,7 @@ import { galleryLabelShort } from '../../../lib/render/gallery-label'
 import { TRAIN_VRAM_PRESETS, LOW_VRAM_NOTE, trainStepsNote, trainVramSuggestion, type TrainVramPreset } from '../../../lib/trainer-presets'
 import { STYLE_MODE_NOTE, STYLE_NAME_PLACEHOLDER, STYLE_TRIGGER_HINT_OFF, STYLE_TRIGGER_HINT_ON, STYLE_TRIGGER_LABEL, TRAIN_KINDS, trainPresetsFor, type TrainKind } from '../../../lib/train-kind'
 import { useGraphicsCardGb } from '../../../hooks/useGraphicsMemory'
+import { BetaMark } from '../../ui/BetaMark'
 import { trainerPathPlaceholder } from '../../../lib/trainer-path-placeholder'
 import { trainerRootHint } from '../../../lib/trainer-root-hint'
 import { useCreateExp } from './CreateContext'
@@ -445,13 +446,17 @@ function TrainKindPicker() {
   const isGenerating = useCreateStore((s) => s.isGenerating)
   return (
     <div className="flex flex-col items-center gap-1" data-testid="train-kind">
-      <Segmented
-        size="sm"
-        layoutId="train-kind"
-        value={trainKind}
-        onChange={(v) => { if (!isGenerating) setTrainKind(v as TrainKind) }}
-        options={TRAIN_KINDS.map((k) => ({ value: k.value, label: k.label }))}
-      />
+      <div className="flex items-center gap-1.5">
+        <Segmented
+          size="sm"
+          layoutId="train-kind"
+          value={trainKind}
+          onChange={(v) => { if (!isGenerating) setTrainKind(v as TrainKind) }}
+          options={TRAIN_KINDS.map((k) => ({ value: k.value, label: k.label }))}
+        />
+        {/* Beta stands for the style mode only (lib/beta.ts). */}
+        <BetaMark feature="style-training" />
+      </div>
       {trainKind === 'style' && (
         <>
           <div className="t-label text-gray-500 max-w-[560px] text-center" data-testid="style-mode-note">{STYLE_MODE_NOTE}</div>
