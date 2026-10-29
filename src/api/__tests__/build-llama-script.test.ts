@@ -426,3 +426,81 @@ describe('build-llama.sh — the llama.cpp revision is pinned to a commit', { ti
     }
   })
 })
+
+/**
+ * FEHLER-P11 #8: the pinned llama.cpp defines the cvector-generator target
+ * only without GGML_BACKEND_DL, which the Windows/Linux server build needs.
+ * build_triple therefore configures the vector tool apart from the server.
+ * Run with a stand-in `cmake` that records its calls and writes the files a
+ * real build would, in a throwaway checkout: the order and the directories
+ * are the point, not the compile.
+ */
+describe('build-llama.sh: the vector tool gets a cmake run of its own on Windows and Linux', () => {
+  const temps: string[] = []
+  const tmp = (prefix: string) => {
+    const dir = mkdtempSync(join(tmpdir(), prefix))
+    temps.push(dir)
+    return dir.replace(/\\/g, '/')
+  }
+  afterAll(() => {
+    for (const dir of temps) rmSync(dir, { recursive: true, force: true })
+  })
+
+  const STAND_IN = `
+cmake() {
+  if [ "$1" = "-S" ]; then echo "configure $4 \${*:5}" >> "$CALLS"; return 0; fi
+  local dir="$2" target=""
+  while [ $# -gt 0 ]; do [ "$1" = "--target" ] && target="$2"; shift; done
+  echo "build $dir $target" >> "$CALLS"
+  mkdir -p "$dir/bin"
+  case "$target" in
+    llama-server) touch "$dir/bin/llama-server" "$dir/bin/llama-server.exe" "$dir/bin/libggml-base.so" "$dir/bin/ggml-base.dll" ;;
+    *) touch "$dir/bin/$target" "$dir/bin/$target.exe" ;;
+  esac
+}
+`
+
+  function build(triple: string) {
+    const repoRoot = tmp('llama-p11-root-')
+    const cache = tmp('llama-p11-cache-')
+    const calls = join(cache, 'calls.txt')
+    const { code, out } = runScript(`${STAND_IN} build_triple '${triple}'`, {
+      BUILD_LLAMA_REPO_ROOT: repoRoot,
+      LLAMA_BUILD_CACHE: cache,
+      CALLS: calls,
+    })
+    return { code, out, repoRoot, cache, calls: existsSync(calls) ? readFileSync(calls, 'utf8').trim().split('\n') : [] }
+  }
+
+  for (const triple of ['x86_64-unknown-linux-gnu', 'x86_64-pc-windows-msvc']) {
+    it(`${triple}: server as before, the tool from its own static baseline build`, () => {
+      const r = build(triple)
+      expect(r.code, r.out).toBe(0)
+      const server = `${r.cache}/build-${triple}`
+      const tool = `${r.cache}/build-${triple}-cvector`
+      const configures = r.calls.filter((c) => c.startsWith('configure '))
+      expect(configures).toHaveLength(2)
+      expect(configures[0]).toContain(`configure ${server} `)
+      expect(configures[0]).toContain('-DGGML_BACKEND_DL=ON')
+      expect(configures[1]).toContain(`configure ${tool} `)
+      expect(configures[1]).toContain('-DGGML_BACKEND_DL=OFF')
+      expect(configures[1]).toContain('-DBUILD_SHARED_LIBS=OFF')
+      expect(configures[1]).toContain('-DGGML_AVX2=OFF')
+      expect(r.calls).toContain(`build ${server} llama-server`)
+      expect(r.calls).toContain(`build ${tool} llama-cvector-generator`)
+      expect(r.calls).not.toContain(`build ${server} llama-cvector-generator`)
+      const exe = triple.includes('windows') ? '.exe' : ''
+      expect(existsSync(join(r.repoRoot, 'src-tauri', 'bin', `lu-llama-cvector-generator-${triple}${exe}`))).toBe(true)
+      expect(existsSync(join(r.repoRoot, 'src-tauri', 'bin', `lu-llama-server-${triple}${exe}`))).toBe(true)
+    })
+  }
+
+  it('aarch64-apple-darwin: one static build makes both, as before', () => {
+    const r = build('aarch64-apple-darwin')
+    expect(r.code, r.out).toBe(0)
+    const server = `${r.cache}/build-aarch64-apple-darwin`
+    expect(r.calls.filter((c) => c.startsWith('configure '))).toHaveLength(1)
+    expect(r.calls).toContain(`build ${server} llama-cvector-generator`)
+    expect(existsSync(join(r.repoRoot, 'src-tauri', 'bin', 'lu-llama-cvector-generator-aarch64-apple-darwin'))).toBe(true)
+  })
+})
