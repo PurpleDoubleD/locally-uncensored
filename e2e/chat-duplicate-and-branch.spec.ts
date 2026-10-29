@@ -141,9 +141,10 @@ test('#174 Duplicate chat from the chat list: the hover button makes the copy to
   await boot(page)
   await oeffneSeitenleiste(page)
   const del = page.getByRole('button', { name: 'Duplicate chat' }).first()
-  const box = await del.boundingBox()
-  if (!box) throw new Error('the row has no Duplicate button')
-  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
+  // Hover the row as Playwright does, once it stands still. The box used to be measured right after the sidebar
+  // opened, while it still slid in: the mouse then sat beside the row, the bar stayed pointer-events-none, and
+  // every click attempt hit the row's date instead until the timeout (1 of 20 in the CI-like container).
+  await row(page, TITLE).first().hover()
   await del.click()
   await expect(row(page, `${TITLE} (copy)`)).toHaveAttribute('aria-selected', 'true')
   await expect(page.getByRole('option')).toHaveCount(2)
