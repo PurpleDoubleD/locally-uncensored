@@ -37,9 +37,9 @@ Take the latest build from [Releases](https://github.com/PurpleDoubleD/locally-u
 
 | Platform | File | Status |
 |----------|------|--------|
-| Windows 10 and 11 | [`Locally.Uncensored_3.0.7_x64-setup.exe`](https://github.com/PurpleDoubleD/locally-uncensored/releases/latest/download/Locally.Uncensored_3.0.7_x64-setup.exe) (NSIS, recommended) or [`Locally.Uncensored_3.0.7_x64_en-US.msi`](https://github.com/PurpleDoubleD/locally-uncensored/releases/latest/download/Locally.Uncensored_3.0.7_x64_en-US.msi) | Tested every release, signed auto update channel |
-| Linux | [`Locally.Uncensored_3.0.7_amd64.AppImage`](https://github.com/PurpleDoubleD/locally-uncensored/releases/latest/download/Locally.Uncensored_3.0.7_amd64.AppImage), [`Locally.Uncensored_3.0.7_amd64.deb`](https://github.com/PurpleDoubleD/locally-uncensored/releases/latest/download/Locally.Uncensored_3.0.7_amd64.deb) or [`Locally.Uncensored-3.0.7-1.x86_64.rpm`](https://github.com/PurpleDoubleD/locally-uncensored/releases/latest/download/Locally.Uncensored-3.0.7-1.x86_64.rpm) | Built on every release |
-| macOS 14 or newer, Apple Silicon (Beta) | [`LU_3.0.7_aarch64.dmg`](https://github.com/PurpleDoubleD/locally-uncensored/releases/latest/download/LU_3.0.7_aarch64.dmg) | Signed with an Apple Developer ID and notarized by Apple. Intel Macs are not supported. The app has run on one Mac so far. Voice has been tried by hand in the app on a Mac and works. Computer control is in the Mac app but not fully tested yet on macOS. Remote Access and the automatic update are not confirmed on macOS |
+| Windows 10 and 11 | [`Locally.Uncensored_3.0.8_x64-setup.exe`](https://github.com/PurpleDoubleD/locally-uncensored/releases/latest/download/Locally.Uncensored_3.0.8_x64-setup.exe) (NSIS, recommended) or [`Locally.Uncensored_3.0.8_x64_en-US.msi`](https://github.com/PurpleDoubleD/locally-uncensored/releases/latest/download/Locally.Uncensored_3.0.8_x64_en-US.msi) | Tested every release, signed auto update channel |
+| Linux | [`Locally.Uncensored_3.0.8_amd64.AppImage`](https://github.com/PurpleDoubleD/locally-uncensored/releases/latest/download/Locally.Uncensored_3.0.8_amd64.AppImage), [`Locally.Uncensored_3.0.8_amd64.deb`](https://github.com/PurpleDoubleD/locally-uncensored/releases/latest/download/Locally.Uncensored_3.0.8_amd64.deb) or [`Locally.Uncensored-3.0.8-1.x86_64.rpm`](https://github.com/PurpleDoubleD/locally-uncensored/releases/latest/download/Locally.Uncensored-3.0.8-1.x86_64.rpm) | Built on every release |
+| macOS 14 or newer, Apple Silicon (Beta) | [`LU_3.0.8_aarch64.dmg`](https://github.com/PurpleDoubleD/locally-uncensored/releases/latest/download/LU_3.0.8_aarch64.dmg) | Signed with an Apple Developer ID and notarized by Apple. Intel Macs are not supported. The app has run on one Mac so far. Voice has been tried by hand in the app on a Mac and works. Computer control is in the Mac app but not fully tested yet on macOS. Remote Access and the automatic update are not confirmed on macOS |
 | Android 7.0 or newer (arm64) | [`LU-3.0.7-Android.apk`](https://github.com/PurpleDoubleD/locally-uncensored/releases/download/v3.0.7/LU-3.0.7-Android.apk) | The phone app. Not in the Play Store yet: install the file from this page. SHA-256 `2f4e2c60f2edde2705c31ca324b5ba952a84efa8eec3075f4f45f2a29a806fb6` |
 
 <!-- MAC: the macOS row above is the one place in this file that says whether there is a Mac build. This is the Mac version of the row. It is true only for the .dmg that the release run built, signed and notarized, so it goes out after that run is green. -->
@@ -48,7 +48,9 @@ Some antivirus engines flag unsigned NSIS installers that download other binarie
 
 Code signing for the Windows installers: free code signing provided by [SignPath.io](https://about.signpath.io), certificate by [SignPath Foundation](https://signpath.org). SignPath Foundation has accepted the project. The production certificate is not in place yet, and until it is the installers ship unsigned.
 
-Current release: **v3.0.7** (October 2026). Every change since 1.0.0 is in [CHANGELOG.md](CHANGELOG.md).
+Current release: **v3.0.8** (October 2026). Every change since 1.0.0 is in [CHANGELOG.md](CHANGELOG.md).
+
+3.0.8 makes web search in the chat work again: LU asks five search services in turn and needs no key for any of them. A video made in the chat plays in the chat, and a long one renders in the background while you write on. A picture attached in the chat reaches the image tool, and with two graphics cards chat and ComfyUI can each get their own. The LU Engine plans a model's memory from the file itself and offers a shorter context with one click. AMD cards on Windows get AMD's current ROCm build. New: the chat can read and change LU's settings with a confirmation card, the Model Manager can make a copy of a local model that refuses less, and Settings, Storage puts models, gallery and runtime in one folder of your choice. What has only run in automated tests is listed under Known limits in the [CHANGELOG](CHANGELOG.md).
 
 3.0.7 brings REA (Reverse Engineer Anything) as a plugin: switch it on under Plugins in the desktop app, and Agent and Code can take apart apps and files (it needs Node.js and works best with a model of about 27B and 64K context; a full analysis has run on one Mac so far, and on Windows it has started from the built app). LU Cloud now has DeepSeek V4.1 Flash 1017, ready to pick in Chat. A chat can be duplicated or branched from any message, character cards turn into personas with their greeting, a persona can carry a reminder, group chats got a round of fixes, and auto compact is on by default. A character you trained works in every part of Create and in chat, and a Mac can train one too. ComfyUI workflows import the way ComfyUI saves them, a whole folder at once, with the node packs they need, and LU now uses the shared model folders set in ComfyUI. In Create, Edit takes as many reference images as the graphics memory holds (up to ten on a Mac), Enhance Image runs on your own machine, and on a Mac Talking Character, Motion Control, Music, Enhance Image, Remove Background and masks in Edit run locally. There is an Android app now, see [Mobile app](#mobile-app-android-iphone) below. The iPhone app is in review at the App Store. Some of it has only been checked in tests so far; the [CHANGELOG](CHANGELOG.md) says which.
 
@@ -72,7 +74,7 @@ Current release: **v3.0.7** (October 2026). Every change since 1.0.0 is in [CHAN
 
 ## Mobile app (Android, iPhone)
 
-LU 3.0.7 is also available as an app for your phone.
+LU is also available as an app for your phone. The current APK comes from the 3.0.7 release.
 
 - **Android:** download `LU-3.0.7-Android.apk` from the [3.0.7 release](https://github.com/PurpleDoubleD/locally-uncensored/releases/tag/v3.0.7). Needs Android 7.0 or newer on a 64-bit (arm64) phone. Allow installing apps from your browser or file app when Android asks. SHA-256: `2f4e2c60f2edde2705c31ca324b5ba952a84efa8eec3075f4f45f2a29a806fb6`
 - **iPhone:** in review at the App Store.
@@ -228,24 +230,23 @@ The macOS row of the [Download](#download) table says whether the current releas
 
 ## Roadmap
 
-Updated 22 October 2026. Everything up to 3.0.7 has shipped; [Releases](https://github.com/PurpleDoubleD/locally-uncensored/releases) has the history.
+Updated 28 October 2026. Everything up to 3.0.8 has shipped; [Releases](https://github.com/PurpleDoubleD/locally-uncensored/releases) has the history.
 
-**Now: 3.0.8, built and in testing**
+**Just out: 3.0.8**
 
-- Videos made in chat play in the chat
-- New web search in chat that keeps working when one search source blocks it
-- Change LU settings by asking in chat, with a confirmation card and undo
-- A picture attached in chat reaches the image tools
-- Create tools in chat and agent hardened: attachments, file names, model choice, error messages, stop and timeouts
-- Exact VRAM planning for local models, with a hint and one click fixes when a model does not fit
-- Less RAM in use while idle on Windows
-- Upscale in Edit
-- Choose where models, the gallery and the runtime are stored
-- Binary files in chat, such as ROMs, reach the tools with their full path
-- AMD graphics cards in ComfyUI
-- Faster start of an answer when the model is already loaded
-- Light mode: icons that were hard to see are fixed
-- Security basics: automated code and dependency checks
+- DeepSeek V4.1 Flash Dealigned and Kimi K3.1 Pro in LU Cloud
+- Remove refusals: a local model that refuses less, made inside the app
+- Web search that keeps working, videos that play in the chat, settings from the chat
+- Two graphics cards at once, exact VRAM planning for local models
+- Fixes for Wan 2.2 14B, the character trainer, special characters in Windows user names, the Mac image engine and the Linux AppImage
+
+**Next: 3.0.9**
+
+- Longer local videos: extend a clip and pick the length in seconds, with a time estimate before it starts
+- Faster local video with fewer steps
+- Group chat keeps the full context you picked
+- MCP servers started with uvx work on Windows
+- Your own ComfyUI workflows, for example LTX 2.5 image to video
 
 **Phone**
 
@@ -254,8 +255,8 @@ Updated 22 October 2026. Everything up to 3.0.7 has shipped; [Releases](https://
 
 **Soon**
 
-- Two graphics cards at once: chat stays usable on one card while a video renders on the other
-- Remove refusals from a local model inside the app (abliteration), with the result in the Model Manager
+- 3D in Create: text to 3D and image to 3D
+- LU Sync: your chats, memory and characters on all your devices
 - Partner program
 - Complete remote access via the mobile app: Chat, Agent, Code and all of Create from your phone, running on your PC
 

@@ -18,7 +18,7 @@ Locally Uncensored is a free, open-source (AGPL-3.0) local AI studio for the des
 
 ## Key Facts
 - Name: Locally Uncensored
-- Current Version: v3.0.7
+- Current Version: v3.0.8
 - Type: Desktop AI Application (local AI studio)
 - License: AGPL-3.0 (free and open source)
 - Platforms: Windows 10/11, Linux (deb, rpm, AppImage), macOS 14 or newer on Apple Silicon (dmg, since v3.0.6). Intel Macs are not supported.

@@ -738,8 +738,11 @@ export function useCreate() {
       ? state.negativePrompt
       : ''
     {
+      // The negative prompt is read apart (B30, safety.ts): there it keeps
+      // things out of the picture.
       const verdict = checkPromptSafety(
-        `${typedPrompt} ${state.negativePrompt} ${state.musicLyrics} ${state.triggerWord} ${state.videoShots.join(' ')}`,
+        `${typedPrompt} ${state.musicLyrics} ${state.triggerWord} ${state.videoShots.join(' ')}`,
+        { negative: state.negativePrompt },
       )
       if (verdict.blocked) {
         state.setError(SAFETY_BLOCK_MESSAGE)

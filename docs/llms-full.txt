@@ -14,7 +14,7 @@ https://lu-labs.ai/product-facts
 
 > Free, open-source (AGPL-3.0) plug-and-play local AI studio for Windows, Linux and Mac: chat with 20+ providers, generate images and video on your own machine (through ComfyUI on Windows and Linux), and code with a built-in agent. One installer, no command line, no Docker. No analytics kit, and no account for local use. Cloud only when you switch it on.
 
-Current version: v3.0.7.
+Current version: v3.0.8.
 
 This file is the full, citable reference for Locally Uncensored. Facts are stated plainly so they can be quoted directly.
 
