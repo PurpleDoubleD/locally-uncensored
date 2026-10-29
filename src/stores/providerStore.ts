@@ -15,7 +15,7 @@ import { onLocalSlotChanged } from '../lib/builtin-slot-eviction'
 import { LU_ENGINE_NAME, renameLegacyEngine } from '../lib/engine-name'
 import { announceDarkenedSlots } from '../lib/provider-slot-darkening'
 import { honourUserDisable } from '../lib/provider-visibility'
-import { secretGet, secretSet, secretDelete, secretParkGet, secretParkSet, secretParkDelete } from '../api/backend'
+import { secretGet, secretSet, secretDelete, secretParkGet, secretParkSet, secretParkDelete, setOllamaBase } from '../api/backend'
 import { isOpenAIEntryId, OPENAI_ENTRY_PREFIX } from '../api/providers/model-name'
 import { CLOUD_BASE } from '../api/cloud/config'
 
@@ -784,6 +784,17 @@ export const useProviderStore = create<ProviderState>()(
           // GitHub #173: whatever arrives, only well formed entries stay.
           openaiEntries: sanitizeOpenAIEntries(p.openaiEntries),
         }
+      },
+      // Ollamas Adresse in backend.ts, sobald die gespeicherte da ist. Vorher
+      // stand dort bis zu AppShells pullAndArm der Default localhost:11434,
+      // und der erste Modellabruf beim Kaltstart (useModels.fetchModels) ging
+      // an ein anderes Ollama: dessen Liste ersetzte die gespeicherte Wahl.
+      // Rusts OLLAMA_HOST gewinnt danach wie gehabt (lib/ollama-host-sync.ts,
+      // AppShell); spaetere Aenderungen traegt AppShells Subscription.
+      onRehydrateStorage: () => (state) => {
+        const base = state?.providers?.ollama?.baseUrl
+        if (!base) return
+        try { setOllamaBase(base) } catch { /* backend.ts nicht da (Testattrappe) */ }
       },
       // Don't persist transient state, only configs + user's "don't show again" preference.
       // When the OS keychain is active (H5), strip apiKey so the secret never

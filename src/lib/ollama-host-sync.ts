@@ -21,6 +21,7 @@
 import { backendCall, getOllamaBase, isTauri, setOllamaBase } from '../api/backend'
 
 let pending: Promise<void> | null = null
+const RUST_TIMEOUT_MS = 3000
 
 async function pull(): Promise<void> {
   const { useProviderStore } = await import('../stores/providerStore')
@@ -36,7 +37,13 @@ async function pull(): Promise<void> {
   }
 
   try {
-    const res = await backendCall<{ base?: string }>('get_ollama_host')
+    // Gedeckelt: der Modellabruf wartet hierauf, und ein Rust, das nie
+    // antwortet, darf die Modellliste nicht anhalten.
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const res = await Promise.race([
+      backendCall<{ base?: string }>('get_ollama_host'),
+      new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('timeout')), RUST_TIMEOUT_MS) }),
+    ]).finally(() => clearTimeout(timer))
     if (res?.base) {
       setOllamaBase(res.base)
       const current = useProviderStore.getState().providers.ollama?.baseUrl
