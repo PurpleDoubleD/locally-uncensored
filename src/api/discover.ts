@@ -1538,7 +1538,32 @@ export function deriveQ4FilenameFromRepo(repoName: string): string {
   return QUANT_SUFFIX.test(baseName) ? `${baseName}.gguf` : `${baseName}-Q4_K_M.gguf`
 }
 
+/**
+ * The HuggingFace search could not answer: no connection, the free rate limit,
+ * or a reply that is not a list of repos. Thrown instead of an empty list so
+ * the page can tell "nothing matches" from "nobody answered".
+ */
+export class HfSearchError extends Error {
+  readonly kind: 'offline' | 'rate-limit'
+  constructor(kind: 'offline' | 'rate-limit', detail: string) {
+    super(detail)
+    this.name = 'HfSearchError'
+    this.kind = kind
+  }
+}
+
+/** The sentence the user reads when the HuggingFace search failed. */
+export function hfSearchFailureText(err: unknown): string {
+  if (err instanceof HfSearchError && err.kind === 'rate-limit') {
+    return 'Hugging Face is limiting searches right now. Wait a minute and search again.'
+  }
+  return 'Hugging Face could not be reached. Check the connection and search again.'
+}
+
+const RATE_LIMIT = /rate.?limit|too many requests|\b429\b/i
+
 export async function searchHuggingFaceModels(query: string): Promise<DiscoverModel[]> {
+  let repos: Array<{ id: string; downloads?: number; modelId?: string }>
   try {
     // Case-insensitive · HF repos almost always end in `-GGUF` (uppercase),
     // and the previous case-sensitive `includes('gguf')` missed those, so a
@@ -1554,43 +1579,52 @@ export async function searchHuggingFaceModels(query: string): Promise<DiscoverMo
     } else {
       const res = await fetch(url)
       json = await res.text()
+      if (res.status === 429) throw new HfSearchError('rate-limit', `HTTP 429: ${json.slice(0, 200)}`)
     }
 
-    const repos: Array<{ id: string; downloads?: number; modelId?: string }> = JSON.parse(json)
-
-    const models: DiscoverModel[] = []
-    for (const repo of repos) {
-      const repoName = repo.id.split('/').pop() || ''
-      const q4File = deriveQ4FilenameFromRepo(repoName)
-      const downloadUrl = `https://huggingface.co/${repo.id}/resolve/main/${q4File}`
-
-      // Display name = repo basename without the GGUF suffix. The previous
-      // version referenced an undefined `baseName` here, throwing a
-      // ReferenceError that the catch silently turned into an empty array
-      // · the user-facing P11 search was returning "No models found" for
-      // every query, even ones that match plenty of HF results.
-      const displayName = repoName.replace(/-GGUF$/i, '').replace(/-gguf$/i, '')
-
-      const downloads = repo.downloads || 0
-      const pullsStr = downloads > 1000000 ? `${(downloads / 1000000).toFixed(1)}M` :
-        downloads > 1000 ? `${Math.round(downloads / 1000)}K` : `${downloads}`
-
-      models.push({
-        name: displayName,
-        description: repo.id,
-        pulls: pullsStr,
-        tags: ['Q4_K_M', 'GGUF'],
-        updated: '',
-        downloadUrl,
-        filename: q4File,
-        url: `https://huggingface.co/${repo.id}`,
-      })
+    const parsed: unknown = JSON.parse(json)
+    if (!Array.isArray(parsed)) {
+      // HF answers a limit or an outage with {"error": "..."} instead of a list.
+      const said = isRecord(parsed) && typeof parsed.error === 'string' ? parsed.error : json.slice(0, 200)
+      throw new HfSearchError(RATE_LIMIT.test(said) ? 'rate-limit' : 'offline', said)
     }
-    return models
+    repos = parsed
   } catch (err) {
     log.warn('[discover] HF search failed', { err })
-    return []
+    if (err instanceof HfSearchError) throw err
+    throw new HfSearchError(RATE_LIMIT.test(String(err)) ? 'rate-limit' : 'offline', String(err))
   }
+
+  const models: DiscoverModel[] = []
+  for (const repo of repos) {
+    if (typeof repo?.id !== 'string') continue
+    const repoName = repo.id.split('/').pop() || ''
+    const q4File = deriveQ4FilenameFromRepo(repoName)
+    const downloadUrl = `https://huggingface.co/${repo.id}/resolve/main/${q4File}`
+
+    // Display name = repo basename without the GGUF suffix. The previous
+    // version referenced an undefined `baseName` here, throwing a
+    // ReferenceError that the catch silently turned into an empty array
+    // · the user-facing P11 search was returning "No models found" for
+    // every query, even ones that match plenty of HF results.
+    const displayName = repoName.replace(/-GGUF$/i, '').replace(/-gguf$/i, '')
+
+    const downloads = repo.downloads || 0
+    const pullsStr = downloads > 1000000 ? `${(downloads / 1000000).toFixed(1)}M` :
+      downloads > 1000 ? `${Math.round(downloads / 1000)}K` : `${downloads}`
+
+    models.push({
+      name: displayName,
+      description: repo.id,
+      pulls: pullsStr,
+      tags: ['Q4_K_M', 'GGUF'],
+      updated: '',
+      downloadUrl,
+      filename: q4File,
+      url: `https://huggingface.co/${repo.id}`,
+    })
+  }
+  return models
 }
 
 // ─── HuggingFace file-tree resolution (sharded / multi-part GGUF) ───

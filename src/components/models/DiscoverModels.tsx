@@ -6,6 +6,7 @@ import { Search, XCircle, Sparkles, Unlock, ShieldCheck, ExternalLink, Info } fr
 import { X } from 'lucide-react'
 import {
   searchHuggingFaceModels,
+  hfSearchFailureText,
   getImageBundles, getVideoBundles, getAudioBundles, getLipsyncBundles, getMotionBundles,
   getUncensoredTextModels, getMainstreamTextModels,
   detectProviderModelPath, luEngineDownloadDir,
@@ -613,6 +614,9 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
   // end the spinner: a slow answer to an older query arriving late used to
   // overwrite the hits of the query now in the box.
   const hfSearchSeq = useRef(0)
+  // Offline or rate limited is not "No models found": the user would go on
+  // trying other words instead of checking the connection.
+  const [hfSearchError, setHfSearchError] = useState<string | null>(null)
 
   const handleSearch = async () => {
     if (!search.trim() || !isText) return
@@ -620,8 +624,16 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
     setLoading(true)
     try {
       const results = await searchHuggingFaceModels(search.trim())
-      if (mine === hfSearchSeq.current) setHfSearchResults(results)
-    } catch { /* keep existing */ }
+      if (mine === hfSearchSeq.current) {
+        setHfSearchResults(results)
+        setHfSearchError(null)
+      }
+    } catch (err) {
+      if (mine === hfSearchSeq.current) {
+        setHfSearchResults([])
+        setHfSearchError(hfSearchFailureText(err))
+      }
+    }
     if (mine === hfSearchSeq.current) setLoading(false)
   }
 
@@ -1223,6 +1235,10 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
             )}
           </div>
 
+          {hfSearchError && (
+            <p role="alert" className={skin.cls.searchEmpty} data-testid="hf-search-failed">{hfSearchError}</p>
+          )}
+
           {/* HuggingFace Search Results */}
           {hfSearchResults.length > 0 && (
             <div className={`${skin.cls.group} mt-6`}>
@@ -1252,7 +1268,7 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
         </>
       ) : null}
 
-      {!loading && filteredBundles.length === 0 && filteredUncensored.length === 0 && filteredMainstream.length === 0 && (
+      {!loading && !(isText && hfSearchError) && filteredBundles.length === 0 && filteredUncensored.length === 0 && filteredMainstream.length === 0 && (
         <p className={skin.cls.searchEmpty}>No models found</p>
       )}
 
