@@ -20,6 +20,7 @@ import { EFFORT_STEPS } from './effort'
 import { normalizeThinkBudget } from './think-budget'
 import { normalizeChatFirstReplySeconds } from './chat-reply-timeout'
 import { TEMPERATURE_MAX } from './sampling'
+import { CONTEXT_WINDOW_MAX, MAX_TOKENS_MAX } from './number-limits'
 
 type Parsed = { ok: true; value: unknown } | { ok: false; error: string }
 
@@ -177,7 +178,7 @@ export const CATALOG: readonly CatalogEntry[] = [
   // Context. Three different knobs, the help says which is which.
   e('autoCompact', 'Auto-compact', 'general', 'Summarise older turns automatically when the chat nears the context window.', bool()),
   e('autoCompactThreshold', 'Auto-compact at', 'general', 'How full the context window gets before auto-compact runs.', compactThreshold),
-  e('contextWindowOverride', 'Context window (Ollama)', 'general', 'num_ctx sent to Ollama, in tokens. Other backends ignore it.', int(0, 1_048_576, 'tokens', 'auto')),
+  e('contextWindowOverride', 'Context window (Ollama)', 'general', 'num_ctx sent to Ollama, in tokens. Other backends ignore it.', int(0, CONTEXT_WINDOW_MAX, 'tokens', 'auto')),
   e('engineIdleUnloadMinutes', 'Unload the model when unused', 'backends', 'Minutes without use before LU Engine frees the model.', int(0, 1_440, 'min', 'never')),
   e('builtinEngine.ctx', 'Context window (LU Engine)', 'backends', 'Context size of LU Engine, in tokens. Applies on the next engine start.', int(0, 1_048_576, 'tokens', 'default 8192')),
   e('attachmentTokenLimit', 'Attachment limit', 'general', 'Most tokens one attached text file may take.', int(0, 1_048_576, 'tokens', 'no limit')),
@@ -188,7 +189,7 @@ export const CATALOG: readonly CatalogEntry[] = [
   e('temperature', 'Temperature', 'general', 'Randomness of answers.', real(0, TEMPERATURE_MAX)),
   e('topP', 'Top P', 'general', 'Nucleus sampling.', real(0, 1)),
   e('topK', 'Top K', 'general', 'Sample from the K most likely tokens.', int(1, 100)),
-  e('maxTokens', 'Max tokens', 'general', 'Longest answer in tokens.', int(0, 1_000_000, 'tokens', 'model default')),
+  e('maxTokens', 'Max tokens', 'general', 'Longest answer in tokens.', int(0, MAX_TOKENS_MAX, 'tokens', 'model default')),
   // Thinking
   e('thinkingEnabled', 'Thinking', 'general', 'Let reasoning models think before answering.', bool()),
   e('reasoningEffort', 'Reasoning effort', 'general', 'How hard a reasoning model thinks.', oneOf(EFFORT_STEPS)),

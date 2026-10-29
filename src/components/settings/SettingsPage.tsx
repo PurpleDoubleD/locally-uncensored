@@ -14,6 +14,7 @@ import { CompactThresholdInput } from './CompactThresholdInput'
 import { HowItWorks } from '../ui/HowItWorks'
 import { HOWTO } from '../../lib/howto'
 import { useSettingsStore } from '../../stores/settingsStore'
+import { rerunOnboarding } from '../../lib/onboarding-rerun'
 import { useUIStore } from '../../stores/uiStore'
 import { SliderControl } from './SliderControl'
 import { THINK_BUDGET_STEP, normalizeThinkBudget } from '../../lib/think-budget'
@@ -88,6 +89,8 @@ import { ContentPolicySettings } from './ContentPolicySettings'
 import { isLmStudioProvider } from '../../lib/hf-to-provider'
 import { TEMPERATURE_MAX, TEMPERATURE_HELP, TEMPERATURE_HELP_LABEL } from '../../lib/sampling'
 import { HighTemperatureWarning } from '../chat/HighTemperatureWarning'
+import { BoundedNumberInput } from './BoundedNumberInput'
+import { CONTEXT_WINDOW_MAX, MAX_TOKENS_MAX } from '../../lib/number-limits'
 
 // ── User profile picture (Appearance) ───────────────────────────
 // Self-contained like HfDownloadPathSetting. Stores the picture as a
@@ -2040,14 +2043,11 @@ export function SettingsPage() {
                 die Werte untereinander nicht wandern). */}
             <div className="flex items-center justify-between">
               <span className="t-micro text-gray-700 dark:text-gray-400">Max Tokens</span>
-              <input
-                aria-label="Max Tokens"
-                type="number"
+              <BoundedNumberInput
+                ariaLabel="Max Tokens"
                 value={settings.maxTokens}
-                onChange={(e) => updateSettings({ maxTokens: Math.max(0, parseInt(e.target.value) || 0) })}
-                min={0}
-                placeholder="0"
-                className="w-20 px-1.5 py-0.5 rounded bg-transparent border border-white/8 t-mono text-right text-gray-300 focus:outline-none focus:border-white/20"
+                max={MAX_TOKENS_MAX}
+                onCommit={(v) => updateSettings({ maxTokens: v })}
               />
             </div>
             {/* Think budget (D12). Same row shape as Max Tokens above; 0 is
@@ -2079,18 +2079,15 @@ export function SettingsPage() {
                 context window. Ignored by Anthropic / OpenAI providers. */}
             <div className="flex items-center justify-between">
               <span className="t-micro text-gray-700 dark:text-gray-400" title="Forwarded as Ollama num_ctx. 0 = provider default (Ollama defaults to 2048, which clips RAG and long chats). Bump up to use the model's full context. Ignored by cloud providers.">Context window (Ollama)</span>
-              <input
-                aria-label="Context window (Ollama)"
-                type="number"
+              <BoundedNumberInput
+                ariaLabel="Context window (Ollama)"
                 value={settings.contextWindowOverride ?? 0}
-                onChange={(e) => updateSettings({ contextWindowOverride: Math.max(0, parseInt(e.target.value) || 0) })}
-                min={0}
-                placeholder="0"
-                className="w-20 px-1.5 py-0.5 rounded bg-transparent border border-white/8 t-mono text-right text-gray-300 focus:outline-none focus:border-white/20"
+                max={CONTEXT_WINDOW_MAX}
+                onCommit={(v) => updateSettings({ contextWindowOverride: v })}
               />
             </div>
             <div className="t-micro text-gray-500 dark:text-gray-500 leading-relaxed pt-0.5">
-              0 = let Ollama decide (defaults to 2048). Set to e.g. 8192 or 16384 if RAG / long chats get clipped. Cloud providers ignore this.
+              0 = let Ollama decide (defaults to 2048). Set to e.g. 8192 or 16384 if RAG / long chats get clipped, at most 1,048,576. Cloud providers ignore this. Max Tokens goes up to 1,000,000.
             </div>
             {/* Auto-compact (2.6.8, on by default since 3.0.7). The switch is
                 its own row; the threshold is shown as a percentage and stored
@@ -2282,22 +2279,7 @@ export function SettingsPage() {
                 </div>
               </div>
               <button
-                onClick={async () => {
-                  // The line above is what actually re-runs the wizard: AppShell
-                  // gates it on settings.onboardingDone, and that store is
-                  // persisted, so it survives the reload below. The backend call
-                  // only clears the marker FILE, which is read in one place,
-                  // the NSIS-update recovery in AppShell, and only when the
-                  // store itself was lost.
-                  //
-                  // Level (a): silent on purpose. The visible action succeeds
-                  // either way, and the reload on the next line would wipe any
-                  // message before it could be read. A stale marker costs
-                  // nothing until a store-loss recovery, which re-writes it.
-                  useSettingsStore.getState().updateSettings({ onboardingDone: false })
-                  try { await backendCall('set_onboarding_done', { done: false }) } catch { /* see above */ }
-                  window.location.reload()
-                }}
+                onClick={() => { void rerunOnboarding() }}
                 className="ml-3 shrink-0 px-2.5 py-1 rounded-md text-[0.6rem] font-medium bg-white dark:bg-white/10 text-gray-800 dark:text-white hover:bg-gray-100 dark:hover:bg-white/15 border border-gray-200 dark:border-white/15 transition-colors"
               >
                 Re-run onboarding

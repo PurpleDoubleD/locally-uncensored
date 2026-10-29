@@ -8,6 +8,7 @@ import { isLocalTransportFailure, localBackendUnreachableMessage } from "../lib/
 import { ollamaWindowFor, type WindowChoice, type WindowUse } from "../lib/context-window"
 import { useSettingsStore } from "../stores/settingsStore"
 import { callLimit, CallTimeoutError, type CallLimitOptions } from "../lib/call-limit"
+import { clampContextWindow } from "../lib/number-limits"
 
 /**
  * How long a load may take before the app stops waiting.
@@ -228,9 +229,10 @@ const lastSentWindow = new Map<string, number>()
  * over both, at once, for every caller.
  */
 export async function ollamaNumCtx(model: string, use?: WindowUse): Promise<number> {
-  const override = useSettingsStore.getState().settings.contextWindowOverride
+  // Clamped (B13): a typo of 999999999 is a KV-cache reservation of that size.
+  const override = clampContextWindow(useSettingsStore.getState().settings.contextWindowOverride)
   let window: number
-  if (override && override > 0) {
+  if (override > 0) {
     // With an override the model's own maximum is never read, so nothing is asked.
     window = override
   } else if (use) {
