@@ -937,6 +937,16 @@ jobs:
             [ -e "$link" ] || { echo "FAIL: $(basename "$link") -> $target does not resolve inside the AppImage (GH #191)" >&2; exit 1; }
           done
           echo "OK: .DirIcon and the .desktop link are relative and resolve (GH #191)"
+          # GH #204: 3.0.8 shipped without the tray library, and on a system
+          # without it the app aborted at start. @tauri-apps/cli adds it only
+          # when it sees `tray-icon` on the FIRST `tauri` entry of Cargo.toml,
+          # and since 3.0.8 that sits in the desktop target block, so
+          # tauri.linux.conf.json now names it. It has to be here, and so do
+          # the libraries it needs that linuxdeploy pulls in after it.
+          for lib in libayatana-appindicator3.so.1 libayatana-indicator3.so.7 libayatana-ido3-0.4.so.0 libdbusmenu-glib.so.4 libdbusmenu-gtk3.so.4; do
+            [ -e "$workdir/squashfs-root/usr/lib/$lib" ] || { echo "FAIL: usr/lib/$lib is missing from the built AppImage; without it the tray cannot be built (GH #204)" >&2; exit 1; }
+          done
+          echo "OK: the AppImage carries libayatana-appindicator3 and what it needs (GH #204)"
 
       # SKEPTIKER-LINUX-WEB-K1.md: the AppImage check above proves nothing
       # about the .deb, a completely different bundler (dpkg-deb, not

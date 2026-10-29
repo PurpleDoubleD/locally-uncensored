@@ -17,6 +17,13 @@
     ]
   },
   "bundle": {
+    "linux": {
+      "appimage": {
+        "files": {
+          "/usr/lib/libayatana-appindicator3.so.1": "/usr/lib/x86_64-linux-gnu/libayatana-appindicator3.so.1"
+        }
+      }
+    },
     "resources": {
       "resources/whisper_server.py": "resources/whisper_server.py",
       "resources/voice_loop/lu_voice_loop/*.py": "resources/voice_loop/lu_voice_loop/",
