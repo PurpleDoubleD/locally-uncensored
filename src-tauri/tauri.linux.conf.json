@@ -17,6 +17,10 @@
     ]
   },
   "bundle": {
+    "externalBin": [
+      "bin/lu-llama-server",
+      "bin/lu-llama-cvector-generator"
+    ],
     "linux": {
       "appimage": {
         "files": {

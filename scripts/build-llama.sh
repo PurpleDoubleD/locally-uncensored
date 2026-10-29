@@ -226,17 +226,20 @@ quantize_out_name_for() {
   echo "lu-llama-quantize-$1"
 }
 
-# llama-cvector-generator (3.0.9, P11 Neuron tweaker) ships on macOS and
-# Windows: it turns two short lists of example prompts into a control vector
-# for the model the user has, which llama-server then applies with
-# --control-vector. Same pinned source tree, same flags as the server. On
-# Windows it links the same llama/ggml/llama-common DLLs the server already
-# stages beside the exe, so it needs nothing of its own. Linux does not ship
-# it yet (AppImage/deb library layout is a separate check).
+# llama-cvector-generator (3.0.9, P11 Neuron tweaker) ships on all three
+# desktop platforms: it turns two short lists of example prompts into a
+# control vector for the model the user has, which llama-server then applies
+# with --control-vector. Same pinned source tree, same flags as the server.
+# On Windows and Linux it links the same llama/ggml/llama-common libraries
+# the server already has staged in resources/llama/<triple>/ (every .dll/.so
+# cmake writes beside the binaries goes there, see
+# stage_dynamic_isa_companions), and the app starts it with the server's own
+# library path (engine.rs prepare_tool_command), so it needs nothing of its
+# own. FEHLER-P11 #7: everything a feature needs must come with the install.
 cvector_ships_for() {
   case "$1" in
-    *-apple-darwin | x86_64-pc-windows-msvc) return 0 ;;
-    *)                                      return 1 ;;
+    *-apple-darwin | x86_64-pc-windows-msvc | x86_64-unknown-linux-gnu) return 0 ;;
+    *)                                                                 return 1 ;;
   esac
 }
 

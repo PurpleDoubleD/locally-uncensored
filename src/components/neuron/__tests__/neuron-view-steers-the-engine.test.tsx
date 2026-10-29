@@ -83,7 +83,7 @@ describe('Neuron tweaker view', () => {
     const button = (await screen.findByTestId('neuron-compute-creative')) as HTMLButtonElement
     // Locked until the model's info says the vector tool is there; a click
     // before that does nothing, as it should.
-    expect(screen.queryByText(/This build has no vector tool/)).toBeNull()
+    expect(screen.queryByText(/missing its vector tool/)).toBeNull()
     await waitFor(() => expect(button.disabled).toBe(false))
     fireEvent.click(button)
     await waitFor(() => expect(buildPreset).toHaveBeenCalledWith('/models/qwen.gguf', 'creative'))

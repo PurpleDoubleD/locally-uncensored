@@ -368,6 +368,13 @@ jobs:
             *-windows-*) test -f "src-tauri/bin/lu-llama-server-${{ matrix.sidecar_triple }}.exe" ;;
             *)           test -x "src-tauri/bin/lu-llama-server-${{ matrix.sidecar_triple }}" ;;
           esac
+          # The Neuron tweaker's vector tool (3.0.9, P11) ships on every
+          # desktop platform (FEHLER-P11 #7): without it the ready-made and
+          # own sliders cannot be computed, so a build without it is not one.
+          case "${{ matrix.sidecar_triple }}" in
+            *-windows-*) test -f "src-tauri/bin/lu-llama-cvector-generator-${{ matrix.sidecar_triple }}.exe" ;;
+            *)           test -x "src-tauri/bin/lu-llama-cvector-generator-${{ matrix.sidecar_triple }}" ;;
+          esac
           ls -la src-tauri/bin/
 
       # review-k1-avx.md R1-R6: dumpbin.exe (the Windows half of the guard
@@ -535,6 +542,44 @@ jobs:
             *) echo "FAIL: a libggml-cpu-*.so was loaded from outside $moved/llama: $cpu_maps" >&2; exit 1;;
           esac
           echo "OK: sidecar boots from $moved, loads a real model, /health answers, and has a libggml-cpu-*.so from $moved/llama mapped, nowhere near the build directory it was compiled in"
+
+      # FEHLER-P11 #7: the vector tool links the same libllama/libggml*/
+      # libllama-common the server does, and the app starts it the way it
+      # starts the server (cwd and LD_LIBRARY_PATH on the companions
+      # directory, engine.rs prepare_tool_command). Same moved-directory
+      # proof as above, with a real run: two example lines each way through
+      # the tiny model, and the control vector it writes must be there.
+      - name: "Vector tool computes from a moved directory (P11)"
+        if: matrix.sidecar_triple == 'x86_64-unknown-linux-gnu'
+        shell: bash
+        timeout-minutes: 5
+        run: |
+          set -euo pipefail
+          moved="$RUNNER_TEMP/moved-cvector"
+          rm -rf "$moved"
+          mkdir -p "$moved"
+          cp "src-tauri/bin/lu-llama-cvector-generator-${{ matrix.sidecar_triple }}" "$moved/"
+          cp -r "src-tauri/resources/llama/${{ matrix.sidecar_triple }}" "$moved/llama"
+          chmod +x "$moved/lu-llama-cvector-generator-${{ matrix.sidecar_triple }}"
+          export LD_LIBRARY_PATH="$moved/llama${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+          model="$RUNNER_TEMP/stories260K.gguf"
+          if [ ! -f "$model" ]; then
+            curl -fsSL --retry 3 --max-time 60 -o "$model" \
+              "https://huggingface.co/ggml-org/models/resolve/${STORIES260K_REVISION}/tinyllamas/stories260K.gguf"
+          fi
+          echo "${STORIES260K_SHA256}  $model" | sha256sum -c - \
+            || { echo "FAIL: stories260K.gguf did not match the pinned sha256" >&2; exit 1; }
+          printf 'Once upon a time there was a happy dog.\nThe sun was bright and everyone smiled.\n' > "$moved/more.txt"
+          printf 'Once upon a time there was a sad dog.\nThe rain fell and everyone cried.\n' > "$moved/less.txt"
+          ( cd "$moved/llama" && "$moved/lu-llama-cvector-generator-${{ matrix.sidecar_triple }}" -m "$model" \
+              --positive-file "$moved/more.txt" --negative-file "$moved/less.txt" \
+              -o "$moved/direction.gguf" --method mean -c 256 ) >/tmp/cvector.log 2>&1 || {
+            cat /tmp/cvector.log
+            echo "FAIL: lu-llama-cvector-generator exited non-zero from $moved" >&2
+            exit 1
+          }
+          [ -s "$moved/direction.gguf" ] || { cat /tmp/cvector.log; echo "FAIL: no control vector written" >&2; exit 1; }
+          echo "OK: the vector tool computes a control vector from $moved, nowhere near the build directory"
 
       # Nachbesserung N5 (review-sidecar.md, Runde 2): before this step,
       # release.yml had no real model-load proof for EITHER platform (the
@@ -923,6 +968,11 @@ jobs:
           done
           [ "$missing" -eq 0 ] || exit 1
           echo "OK: every staged sidecar companion is present inside the built AppImage ($extracted_llama_dir)"
+          for exe in lu-llama-server lu-llama-cvector-generator; do
+            [ -x "$workdir/squashfs-root/usr/bin/$exe" ] \
+              || { echo "FAIL: usr/bin/$exe is missing from the built AppImage (FEHLER-P11 #7)" >&2; exit 1; }
+          done
+          echo "OK: lu-llama-server and lu-llama-cvector-generator are in the AppImage's usr/bin"
           # GH #191: .DirIcon and the .desktop file at the AppImage's root are
           # symlinks, and they must be RELATIVE. The bundler before
           # @tauri-apps/cli 2.11.4 wrote the build machine's absolute path
@@ -986,6 +1036,11 @@ jobs:
           done
           [ "$missing" -eq 0 ] || exit 1
           echo "OK: every staged sidecar companion is present inside the built .deb ($extracted_llama_dir)"
+          for exe in lu-llama-server lu-llama-cvector-generator; do
+            [ -x "$workdir/usr/bin/$exe" ] \
+              || { echo "FAIL: usr/bin/$exe is missing from the built .deb (FEHLER-P11 #7)" >&2; exit 1; }
+          done
+          echo "OK: lu-llama-server and lu-llama-cvector-generator are in the .deb's usr/bin"
 
       # ── Dry run: the judged files, and no release ────────────────────────
       # Last, so that only a build that passed every check above is handed
@@ -1272,6 +1327,8 @@ jobs:
           set -euo pipefail
           bin="src-tauri/bin/lu-llama-server-$SIDECAR_TRIPLE"
           test -x "$bin"
+          # The Neuron tweaker's vector tool ships here too (FEHLER-P11 #7).
+          test -x "src-tauri/bin/lu-llama-cvector-generator-$SIDECAR_TRIPLE"
           ls -la src-tauri/bin/
           file "$bin" | grep -q 'arm64' || { echo "FAIL: the sidecar is not an arm64 binary" >&2; exit 1; }
           minos="$(otool -l "$bin" | awk '/LC_BUILD_VERSION/{f=1} f && /minos/ && !done {print $2; done=1}')"

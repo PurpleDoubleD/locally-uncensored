@@ -264,10 +264,11 @@ jobs:
             *)           touch "src-tauri/bin/lu-llama-server-$triple" ;;
           esac
           # The Neuron tweaker's vector tool (3.0.9, P11) is a second
-          # externalBin on Windows (tauri.windows.conf.json), so it needs its
-          # stub too. Linux does not ship it.
+          # externalBin on Windows and Linux (tauri.windows.conf.json,
+          # tauri.linux.conf.json), so it needs its stub too.
           case "$triple" in
             *-windows-*) touch "src-tauri/bin/lu-llama-cvector-generator-$triple.exe" ;;
+            *)           touch "src-tauri/bin/lu-llama-cvector-generator-$triple" ;;
           esac
           ls -la src-tauri/bin/
           # K1 (3.0.1): tauri.windows.conf.json / tauri.linux.conf.json now
@@ -525,10 +526,11 @@ jobs:
             *)           touch "src-tauri/bin/lu-llama-server-$triple" ;;
           esac
           # The Neuron tweaker's vector tool (3.0.9, P11) is a second
-          # externalBin on Windows (tauri.windows.conf.json), so it needs its
-          # stub too. Linux does not ship it.
+          # externalBin on Windows and Linux (tauri.windows.conf.json,
+          # tauri.linux.conf.json), so it needs its stub too.
           case "$triple" in
             *-windows-*) touch "src-tauri/bin/lu-llama-cvector-generator-$triple.exe" ;;
+            *)           touch "src-tauri/bin/lu-llama-cvector-generator-$triple" ;;
           esac
           ls -la src-tauri/bin/
           # K1 (3.0.1): this job runs a REAL `tauri build`, which resolves
