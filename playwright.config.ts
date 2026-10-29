@@ -42,12 +42,13 @@ export default defineConfig({
   testDir: './e2e',
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
-  // No second try, on CI either. 3.0.8 gave CI two and skipped two tests there; both turned out to be real races
-  // that only the slower runner hit (a "trained" toast after a stopped training, a tray read during its fade,
-  // 3.0.9). A retry hides that kind of finding, so a red test stays red everywhere.
-  retries: 0,
+  // Locally no second try: a red test stays red. CI gets one (David, 3.0.9), so one race on the slower runner does
+  // not block a release, but it may not hide either: 3.0.8 gave CI two retries and two skipped tests, and both
+  // turned out to be real races (a "trained" toast after a stopped training, a tray read during its fade). The
+  // flaky report names every test that needed the retry, as a warning and in the job summary.
+  retries: process.env.CI ? 1 : 0,
   workers: 1,
-  reporter: [['list']],
+  reporter: process.env.CI ? [['list'], ['./e2e/support/flaky-report.ts']] : [['list']],
   timeout: 60_000,
   expect: { timeout: 15_000 },
   use: {
