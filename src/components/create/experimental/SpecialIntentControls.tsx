@@ -56,6 +56,7 @@ import { Slider } from '../ui/Slider'
 import { cn } from '../ui/cn'
 import { useClickAway } from '../ui/useClickAway'
 import { Modal } from '../../ui/Modal'
+import { useTrainReplaceStore } from '../../../stores/trainReplaceStore'
 import { ModalActions, ModalButton } from '../../ui/ModalActions'
 import { MIN_TRAIN_IMAGES, maxTrainImages } from '../../../lib/train-image-cap'
 
@@ -251,6 +252,7 @@ function CharacterPanel() {
 
   return (
     <div className="space-y-2">
+      <TrainReplaceDialog />
       <div className="flex items-center justify-center">
         <Segmented
           size="sm"
@@ -1671,4 +1673,28 @@ function TriggerWordNote() {
   const note = useCreateStore((s) => s.triggerWordNote)
   if (!note) return null
   return <p role="status" data-testid="trigger-word-note" className={`w-full text-center t-micro ${HINWEIS_TEXT.ruhig}`}>{note}</p>
+}
+
+/** C8: asks before a new training replaces the character of the same name
+ *  (stores/trainReplaceStore.ts). Same Modal as the shelf's delete question. */
+function TrainReplaceDialog() {
+  const pending = useTrainReplaceStore((s) => s.pending)
+  const answer = useTrainReplaceStore((s) => s.answer)
+  useEffect(() => useTrainReplaceStore.getState().mount(), [])
+  return (
+    <Modal open={!!pending} onClose={() => answer('rename')} title="Replace character?">
+      <p className="t-micro text-gray-600 dark:text-gray-300 mb-3">
+        A character named <span className="text-gray-900 dark:text-white font-mono">{pending}</span> already exists on this computer.
+        Training with the same trigger word replaces its file when the run ends, and the old character is gone.
+      </p>
+      <ModalActions>
+        <ModalButton variant="quiet" onClick={() => answer('rename')} data-testid="train-replace-rename">
+          Pick another name
+        </ModalButton>
+        <ModalButton variant="danger" onClick={() => answer('replace')} data-testid="train-replace-confirm">
+          Replace
+        </ModalButton>
+      </ModalActions>
+    </Modal>
+  )
 }

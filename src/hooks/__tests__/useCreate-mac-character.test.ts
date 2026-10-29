@@ -82,6 +82,7 @@ vi.mock('../../api/mlx-train', async (orig) => ({
 
 import { useCreate } from '../useCreate'
 import { useCreateStore } from '../../stores/createStore'
+import { useTrainReplaceStore } from '../../stores/trainReplaceStore'
 import type { ClassifiedModel } from '../../api/comfyui'
 
 const model = (name: string, type: ClassifiedModel['type'], extra: Partial<ClassifiedModel> = {}): ClassifiedModel =>
@@ -139,6 +140,8 @@ describe('Use character on the Mac', () => {
 
   it('trains on the Mac through the Mac trainer, never the image engine', async () => {
     arrange(ZIMAGE, 'train')
+    // A new character: none of this name is on the Mac yet (C8 asks otherwise).
+    mlxLoras.files = []
     const photo = (name: string) => ({ name, url: 'blob:x', blob: new Blob([new Uint8Array([137, 80, 78, 71])], { type: 'image/png' }) })
     useCreateStore.setState({ triggerWord: 'davechar', trainImages: ['a', 'b', 'c', 'd'].map(photo) } as never)
     const { result } = renderHook(() => useCreate())
@@ -150,5 +153,34 @@ describe('Use character on the Mac', () => {
     // The refusal of the backend is what the user reads.
     expect(state().error).toBe('Training a character on a Mac needs Z-Image Turbo. Install it in the Model Manager first.')
     expect(state().isGenerating).toBe(false)
+  })
+
+  // C8: davechar is on the Mac already (char_davechar_zimage.safetensors).
+  // A new run with that trigger would write over it at the end.
+  it('C8: never trains over an existing character without a yes', async () => {
+    arrange(ZIMAGE, 'train')
+    const photo = (name: string) => ({ name, url: 'blob:x', blob: new Blob([new Uint8Array([137, 80, 78, 71])], { type: 'image/png' }) })
+    useCreateStore.setState({ triggerWord: 'davechar', trainImages: ['a', 'b', 'c', 'd'].map(photo) } as never)
+    const { result } = renderHook(() => useCreate())
+    await result.current.generate()
+    expect(train.calls).toEqual([])
+    expect(state().error).toMatch(/“davechar” already exists/)
+    expect(state().isGenerating).toBe(false)
+  })
+
+  it('C8: asks, and "Replace" goes on with the run', async () => {
+    arrange(ZIMAGE, 'train')
+    const photo = (name: string) => ({ name, url: 'blob:x', blob: new Blob([new Uint8Array([137, 80, 78, 71])], { type: 'image/png' }) })
+    useCreateStore.setState({ triggerWord: 'davechar', trainImages: ['a', 'b', 'c', 'd'].map(photo) } as never)
+    const unmount = useTrainReplaceStore.getState().mount()
+    const asked: (string | null)[] = []
+    const stop = useTrainReplaceStore.subscribe((s) => {
+      if (s.pending) { asked.push(s.pending); queueMicrotask(() => useTrainReplaceStore.getState().answer('replace')) }
+    })
+    const { result } = renderHook(() => useCreate())
+    await result.current.generate()
+    stop(); unmount()
+    expect(asked).toEqual(['davechar'])
+    expect(train.calls.map((c) => c[0])).toEqual(['clear', 'stage', 'stage', 'stage', 'stage', 'start'])
   })
 })
