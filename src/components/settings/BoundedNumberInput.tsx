@@ -1,5 +1,6 @@
 import { useState, type KeyboardEvent } from 'react'
 import { clampCount } from '../../lib/number-limits'
+import { HINWEIS_TEXT } from '../../lib/hinweis'
 
 interface Props {
   ariaLabel: string
@@ -49,7 +50,7 @@ export function BoundedNumberInput({ ariaLabel, value, max, onCommit, placeholde
         className="w-20 px-1.5 py-0.5 rounded bg-transparent border border-white/8 t-mono text-right text-gray-300 focus:outline-none focus:border-white/20"
       />
       {clampedFrom !== null && (
-        <span role="status" className="t-micro text-amber-500 pt-0.5">
+        <span role="status" className={`t-micro pt-0.5 ${HINWEIS_TEXT.ruhig}`}>
           {`${clampedFrom} is above the limit, set to ${max.toLocaleString('en-US')}`}
         </span>
       )}
