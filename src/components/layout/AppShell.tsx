@@ -64,6 +64,7 @@ import { RenderFixupModal } from '../create/experimental/RenderFixupModal'
 import { CommandPalette } from '../ui/CommandPalette'
 import { CreditsExhaustedModal } from './CreditsExhaustedModal'
 import { Titlebar } from './Titlebar'
+import { HfLinkInbox } from '../models/HfLinkInbox'
 
 // Aus der Komponente herausgezogen: `new Set(STORE_KEYS)` entstand bei jedem
 // Render neu und war damit die instabile Referenz, wegen der der Restore-Effekt
@@ -1197,6 +1198,7 @@ export function AppShell() {
       <ReleaseNotesModal />
       <ShortcutsModal />
       <RemotePairPrompt />
+      <HfLinkInbox />
       <RemoteSigninPrompt />
       <PhoneContinuedBar />
       {/* Cmd/Ctrl+K. Hoert auf `lu-command-palette`, genau wie die

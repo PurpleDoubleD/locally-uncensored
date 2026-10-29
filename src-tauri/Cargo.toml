@@ -184,7 +184,12 @@ tauri = { version = "2", features = ["devtools", "tray-icon"] }
 # which binds a signature to the version latest.json announces; the CLI writes
 # that version into the signature since 2.11.5. 2.13 asks for tauri 2.12.
 tauri-plugin-updater = "=2.12.0"
-tauri-plugin-single-instance = "2"
+# `deep-link`: a second start that carries a locallyuncensored:// link
+# (Windows, Linux) hands the link to the deep-link plugin of the running app.
+tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
+# locallyuncensored://open-model, Hugging Face's "Use this model" (hf_link.rs).
+# The same pinned version the phones use below, so no crate enters the lock.
+tauri-plugin-deep-link = "=2.4.10"
 # Native open and save dialogs.
 rfd = "0.15"
 # Gallery delete moves the render to the Recycle Bin / Trash instead of

@@ -47,6 +47,8 @@ import { HINWEIS_TEXT } from '../../lib/hinweis'
 import { Modal } from '../ui/Modal'
 import { ModalActions, ModalButton } from '../ui/ModalActions'
 import { countLabel } from '../../lib/formatters'
+import { useHfLinkStore } from '../../stores/hfLinkStore'
+import { HfLinkDialog } from './HfLinkDialog'
 import type { ModelCategory } from '../../types/models'
 import { log } from '../../lib/logger'
 import { groupModels, pickDefaultVariant, computeFit, modelFootprintGb } from './ModelTiles'
@@ -252,6 +254,10 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
   // backends and a bare name for Ollama.
   const activeChatModel = useModelStore(s => s.activeModel)
   const [hfModelPath, setHfModelPath] = useState<string | null>(null)
+  // A locallyuncensored://open-model link waiting for its question (HfLinkInbox).
+  const hfLink = useHfLinkStore(s => s.pending)
+  const hfNeedsLocal = useHfLinkStore(s => s.needsLocal)
+  const clearHfLink = useHfLinkStore(s => s.clear)
   const { pullModel, models: installedModels, fetchModels, setActiveModel } = useModels()
 
   // Refresh installed-model list on mount + when category switches to text
@@ -682,7 +688,9 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
     return `Download failed: ${msg}`
   }
 
-  const handleTextDownload = async (model: DiscoverModel) => {
+  // `confirmed`: the user already said yes to the size and the parts in the
+  // Hugging Face link dialog, so a split set starts without a second question.
+  const handleTextDownload = async (model: DiscoverModel, opts: { confirmed?: boolean } = {}) => {
     // Bug Y/a v2.5.0 — a user Discord. Pre-v2.5.0 we picked the
     // download backend by "whichever is enabled" with LM Studio winning when
     // both were on. That decoupled the download path from the active chat
@@ -777,6 +785,11 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
       // built-in engine as the target the parts land in the app's own flat
       // models dir and the Rust scan collapses the set, so the note would lie.
       const ollamaCantLoad = isActiveOllama || (!isActiveBuiltin && !isActiveLmStudio && !lmStudioEnabled && ollamaEnabledNow)
+      if (opts.confirmed) {
+        const part = imagePartFor(model, resolution)
+        await startDirectDownload(resolution.files, targetDir, model.name, wantsImagePart(model) ? part : null)
+        return
+      }
       setConfirmDownload({
         model,
         name: model.name,
@@ -1294,6 +1307,21 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
           refreshBundleStatuses()
         }}
       />
+
+      {hfLink && !hfNeedsLocal && category === 'text' && (
+        <HfLinkDialog
+          key={`${hfLink.repo}|${hfLink.file ?? ''}`}
+          link={hfLink}
+          onCancel={clearHfLink}
+          onConfirm={(model) => {
+            clearHfLink()
+            handleTextDownload(model, { confirmed: true }).catch((e) => {
+              log.error('Hugging Face link download failed', { err: e })
+              setInstallError(`Download failed: ${e instanceof Error ? e.message : String(e)}`)
+            })
+          }}
+        />
+      )}
 
       <Modal open={!!confirmDownload} onClose={() => setConfirmDownload(null)} title="Download split model">
         {confirmDownload && (

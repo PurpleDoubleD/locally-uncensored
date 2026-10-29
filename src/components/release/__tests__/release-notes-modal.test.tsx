@@ -30,11 +30,12 @@ import { readFileSync } from 'node:fs'
 import { resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { ReleaseNoteBody, ReleaseNotesModal } from '../ReleaseNotesModal'
 import { MONOGRAM } from '../../layout/brand'
 import { useReleaseNotesStore } from '../../../stores/releaseNotesStore'
 import { useSettingsStore } from '../../../stores/settingsStore'
+import { useHfLinkStore } from '../../../stores/hfLinkStore'
 import type { ReleaseNote } from '../../../lib/release-notes'
 
 const SRC = readFileSync(
@@ -231,6 +232,17 @@ describe('the wired-up sheet, end to end', () => {
     cleanup()
     useReleaseNotesStore.setState({ lastNotesVersion: null })
     useSettingsStore.setState((s) => ({ settings: { ...s.settings, onboardingDone: true } }))
+    useHfLinkStore.getState().clear()
+  })
+
+  // P9 (3.0.9), found on the Mac: a Hugging Face link that started the app
+  // after an update had its download question hidden under this sheet.
+  it('waits while a Hugging Face link is being asked about, and opens after', async () => {
+    useHfLinkStore.getState().offer({ repo: 'a/b', file: 'm.gguf' }, false)
+    render(<ReleaseNotesModal />)
+    expect(screen.queryByTestId('release-heading')).toBeNull()
+    act(() => useHfLinkStore.getState().clear())
+    await waitFor(() => expect(screen.getByTestId('release-heading')).toBeTruthy())
   })
 
   it('opens for the shipping version and Escape closes it, stamping the version so it does not return', async () => {

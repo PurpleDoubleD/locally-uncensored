@@ -23,6 +23,8 @@ mod commands;
 mod crash_report;
 mod disk;
 mod finder_path;
+#[cfg(desktop)]
+mod hf_link;
 mod host_kind;
 mod install_state;
 mod media_store;
@@ -629,12 +631,12 @@ pub fn run() {
     // phone), before the page runs. The page decides by it which interface
     // loads, instead of guessing from the navigator (host_kind.rs).
     let builder = builder.plugin(host_kind::plugin());
-    // The native layer of the phones (plugins/lu-native) and the links that
-    // open the app: lu://oauth/callback and lu://remote.
+    // The native layer of the phones (plugins/lu-native).
     #[cfg(mobile)]
-    let builder = builder
-        .plugin(tauri_plugin_lu_native::init())
-        .plugin(tauri_plugin_deep_link::init());
+    let builder = builder.plugin(tauri_plugin_lu_native::init());
+    // The links that open the app: lu://oauth/callback and lu://remote on a
+    // phone, locallyuncensored://open-model on the desktop (hf_link.rs).
+    let builder = builder.plugin(tauri_plugin_deep_link::init());
     // Updates of a phone app come through the store.
     #[cfg(desktop)]
     let builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
@@ -659,6 +661,9 @@ pub fn run() {
         // commands/mobile_guard.rs), on the desktop it does nothing.
         .mobile_guard()
         .invoke_handler(tauri::generate_handler![
+            // Hugging Face "Use this model": the page takes the waiting link
+            #[cfg(desktop)]
+            hf_link::hf_link_take,
             // LU Cloud OAuth loopback (Google/GitHub via system browser)
             commands::oauth::oauth_start,
             commands::oauth::oauth_wait,
@@ -1274,6 +1279,11 @@ pub fn run() {
             // has no such store.
             #[cfg(desktop)]
             media_store::settle_at_start(&app.state::<AppState>());
+
+            // locallyuncensored://open-model: the link that started the app
+            // and every later one go to the inbox the page reads (hf_link.rs).
+            #[cfg(desktop)]
+            hf_link::setup(app.handle());
 
             // Remove Windows DWM shadow/border (the 1mm border around the window)
             #[cfg(target_os = "windows")]

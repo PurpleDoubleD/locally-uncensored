@@ -35,5 +35,14 @@
       "resources/abliterate/requirements.txt": "resources/abliterate/requirements.txt",
       "resources/abliterate/constraints.txt": "resources/abliterate/constraints.txt"
     }
+  },
+  "plugins": {
+    "deep-link": {
+      "desktop": {
+        "schemes": [
+          "locallyuncensored"
+        ]
+      }
+    }
   }
 }
