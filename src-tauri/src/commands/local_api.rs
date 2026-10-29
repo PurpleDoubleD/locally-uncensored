@@ -1081,16 +1081,60 @@ async fn weiterleiten_mit(
         .unwrap_or_else(|_| fehler(StatusCode::INTERNAL_SERVER_ERROR, "api_error", "Could not build the response."))
 }
 
-async fn handle_chat(AxumState(state): AxumState<LocalApiState>, headers: HeaderMap, body: axum::body::Bytes) -> Response {
-    weiterleiten(state, "/chat/completions", "messages", headers, body).await
+/// Der Anfragekoerper, wie axum ihn liest, samt seiner Ablehnung.
+///
+/// Bericht B5 (2026-10-28): ohne eigene Behandlung beantwortet axum einen zu
+/// grossen Koerper selbst, mit einer nackten Text-413, an `fehler()` vorbei,
+/// und ein OpenAI-SDK meldet dann nur einen Parse-Fehler.
+type Koerper = Result<axum::body::Bytes, axum::extract::rejection::BytesRejection>;
+
+/// Wie gross ein Anfragekoerper sein darf: 32 MB.
+///
+/// Axums Vorgabe von 2 MB reicht fuer kein Handyfoto: ein Bild von 3 bis
+/// 6 MB wird als base64 in `image_url` gut ein Drittel groesser, und ein
+/// Chat mit mehreren Bildern oder einem langen Verlauf addiert sich. 32 MB
+/// lassen mehrere solche Bilder zu und halten trotzdem eine Grenze: der
+/// Koerper liegt beim Lesen ganz im Speicher, und ein Client soll die App
+/// nicht mit einer endlosen Anfrage volllaufen lassen koennen.
+pub const MAX_KOERPER_BYTES: usize = 32 * 1024 * 1024;
+
+/// Eine abgelehnte Anfrage in der Fehlerform dieses Servers. Gezaehlt wird
+/// sie nicht: sie hat kein Modell erreicht, wie vorher auch.
+fn koerper_abgelehnt(e: axum::extract::rejection::BytesRejection) -> Response {
+    if e.status() == StatusCode::PAYLOAD_TOO_LARGE {
+        return fehler_mit(
+            StatusCode::PAYLOAD_TOO_LARGE,
+            "invalid_request_error",
+            &format!(
+                "Request body is larger than this server accepts ({} MB). Send smaller or fewer images, or a shorter history.",
+                MAX_KOERPER_BYTES / (1024 * 1024)
+            ),
+            None,
+            Some("request_too_large"),
+        );
+    }
+    fehler_mit(e.status(), "invalid_request_error", &format!("Could not read the request body: {}", e.body_text()), None, Some("invalid_body"))
 }
 
-async fn handle_completions(AxumState(state): AxumState<LocalApiState>, headers: HeaderMap, body: axum::body::Bytes) -> Response {
-    weiterleiten(state, "/completions", "prompt", headers, body).await
+async fn handle_chat(AxumState(state): AxumState<LocalApiState>, headers: HeaderMap, body: Koerper) -> Response {
+    match body {
+        Ok(b) => weiterleiten(state, "/chat/completions", "messages", headers, b).await,
+        Err(e) => koerper_abgelehnt(e),
+    }
 }
 
-async fn handle_embeddings(AxumState(state): AxumState<LocalApiState>, headers: HeaderMap, body: axum::body::Bytes) -> Response {
-    weiterleiten(state, "/embeddings", "input", headers, body).await
+async fn handle_completions(AxumState(state): AxumState<LocalApiState>, headers: HeaderMap, body: Koerper) -> Response {
+    match body {
+        Ok(b) => weiterleiten(state, "/completions", "prompt", headers, b).await,
+        Err(e) => koerper_abgelehnt(e),
+    }
+}
+
+async fn handle_embeddings(AxumState(state): AxumState<LocalApiState>, headers: HeaderMap, body: Koerper) -> Response {
+    match body {
+        Ok(b) => weiterleiten(state, "/embeddings", "input", headers, b).await,
+        Err(e) => koerper_abgelehnt(e),
+    }
 }
 
 /// Was gerade laeuft und wohin geleitet wird. Auch das steht hinter dem Token.
@@ -1347,6 +1391,7 @@ pub fn build_local_api_router(state: LocalApiState) -> Router {
                 &format!("No route {} {}. This server speaks /v1/models, /v1/chat/completions, /v1/completions, /v1/embeddings, /lu/v1/health, /lu/v1/tools and /lu/v1/docs — the last one describes all of them.", method, uri.path()),
             )
         })
+        .layer(axum::extract::DefaultBodyLimit::max(MAX_KOERPER_BYTES))
         .layer(axum::middleware::from_fn_with_state(state.clone(), auth))
         .layer(axum::middleware::from_fn_with_state(state.clone(), cors))
         .layer(axum::middleware::from_fn(request_id))
@@ -2245,6 +2290,34 @@ mod tests {
         assert_eq!(lane_basis_der_app(Lane::Engine, None, Some(8129)).as_deref(), Some("http://127.0.0.1:8129/v1"));
         // LU fuehrt fuer LM Studio keine eigene Adresse.
         assert_eq!(lane_basis_aus_state(&app, Lane::LmStudio), None);
+    }
+
+    /// B5: ein Koerper ueber axums 2 MB kommt durch, einer ueber dem eigenen
+    /// Limit bekommt die Fehlerform dieses Servers statt einer Text-413.
+    #[tokio::test]
+    async fn grosse_koerper_kommen_durch_und_zu_grosse_bekommen_json() {
+        let oben = attrappe("tiny").await;
+        let api = api_mit(vec![Upstream { lane_prefix: "ollama".into(), base: format!("http://{}/v1", oben) }], None).await;
+        let c = reqwest::Client::new();
+        let mit_text = |n: usize| serde_json::json!({
+            "model": "ollama/tiny", "messages": [{ "role": "user", "content": "a".repeat(n) }]
+        }).to_string();
+
+        let gross = mit_text(3 * 1024 * 1024);
+        let r = c.post(format!("http://{}/v1/chat/completions", api)).bearer_auth("t0k")
+            .header(header::CONTENT_TYPE, "application/json").body(gross.clone()).send().await.unwrap();
+        assert_eq!(r.status(), 200, "3 MB is a phone photo, it must pass");
+        let v: serde_json::Value = r.json().await.unwrap();
+        assert!(v["received"].as_u64().unwrap() >= 3 * 1024 * 1024);
+
+        let zu_gross = mit_text(MAX_KOERPER_BYTES + 1);
+        let r = c.post(format!("http://{}/v1/chat/completions", api)).bearer_auth("t0k")
+            .header(header::CONTENT_TYPE, "application/json").body(zu_gross).send().await.unwrap();
+        assert_eq!(r.status(), 413);
+        let v: serde_json::Value = r.json().await.expect("the 413 is JSON, not plain text");
+        assert_eq!(v["error"]["code"], "request_too_large");
+        assert_eq!(v["error"]["type"], "invalid_request_error");
+        assert!(v["error"]["message"].as_str().unwrap().contains("32 MB"));
     }
 
     #[test]
