@@ -143,7 +143,7 @@ pub(crate) struct ModelShape {
 
 /// Architectures llama.cpp creates no memory for (llama-model.cpp,
 /// `create_memory`).
-const NO_CACHE_ARCHS: &[&str] = &[
+pub(crate) const NO_CACHE_ARCHS: &[&str] = &[
     "bert", "jina-bert-v2", "jina-bert-v3", "nomic-bert", "nomic-bert-moe", "neo-bert", "eurobert",
     "wavtokenizer-dec", "modern-bert", "gemma-embedding", "dream", "llada", "llada-moe", "rnd1",
 ];

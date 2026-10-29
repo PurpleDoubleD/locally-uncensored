@@ -4,7 +4,7 @@ import { Hinweis } from '../ui/Hinweis'
 import { HINWEIS_TEXT } from '../../lib/hinweis'
 import { ICON_SM } from '../ui/icon-size'
 import { openExternal } from '../../api/backend'
-import { listBundledModels, bundledEngineStatus, type BundledModel } from '../../api/engine'
+import { listBundledModels, bundledEngineStatus, isEmbeddingGgufName, type BundledModel } from '../../api/engine'
 import {
   neuronApply, neuronBuildOwn, neuronBuildPreset, neuronCancel, neuronCompare, neuronDelete, neuronDismiss,
   neuronFeatureAdd, neuronInfo, neuronPresets, neuronSaeDownload, neuronSaeSearch, neuronStatus,
@@ -16,14 +16,17 @@ import { preservedSwapCtx } from '../../lib/builtin-ctx'
 import { builtinModelMatches } from '../../lib/builtin-model-identity'
 import {
   backendNote, effectiveStrengths, entriesFor, hasPersonaProfile, jobProgressText, jobShare, sameEntries,
-  strengthWarning, warningText, type BackendKind,
+  clampStrength, steeringPersona, strengthWarning, warningText, type BackendKind,
 } from '../../lib/neuron'
 import { editingKey, useNeuronStore } from '../../stores/neuronStore'
 import { useModelStore } from '../../stores/modelStore'
+import { useChatStore } from '../../stores/chatStore'
 import { useSettingsStore } from '../../stores/settingsStore'
 import type { BuiltinEngineTuning } from '../../types/settings'
 
 const APPLY_DELAY_MS = 700
+
+const NO_CHAT_MODEL = 'There is no chat model for LU Engine yet. Download one to start. An embedding model (the one Document Chat uses) cannot be tweaked.'
 
 /** Which program answers the chat's model right now. */
 function chatBackend(activeModel: string | null, appMode: string | undefined): BackendKind {
@@ -57,14 +60,21 @@ async function restartTuning(model: BundledModel | undefined): Promise<BuiltinEn
 export function NeuronView() {
   const activeModel = useModelStore((s) => s.activeModel)
   const appMode = useSettingsStore((s) => s.settings.appMode)
-  const personaId = useSettingsStore((s) => s.activePersonaId)
+  const activePersonaId = useSettingsStore((s) => s.activePersonaId)
   const personas = useSettingsStore((s) => s.personas)
+  const personasOn = useSettingsStore((s) => s.settings.personasEnabled !== false)
+  const conv = useChatStore((s) => s.conversations.find((c) => c.id === s.activeConversationId))
+  const steering = steeringPersona(conv, personas, activePersonaId, personasOn)
+  const personaId = steering.id ?? undefined
   const persona = personas.find((p) => p.id === personaId)
   const { profiles, scopeByModel, setStrength, setProfile, removeProfile, removeSlider, setScope } = useNeuronStore()
 
   const [models, setModels] = useState<BundledModel[]>([])
+  const [modelsLoaded, setModelsLoaded] = useState(false)
   const [modelPath, setModelPath] = useState<string>('')
-  const [info, setInfo] = useState<NeuronInfo | null>(null)
+  // The info is kept with the model it was read for: after a switch the old
+  // model's sliders must not reach the new one while its info is on the way.
+  const [loadedInfo, setLoadedInfo] = useState<{ path: string; info: NeuronInfo } | null>(null)
   const [presets, setPresets] = useState<NeuronPreset[]>([])
   const [job, setJob] = useState<NeuronJob | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -73,26 +83,35 @@ export function NeuronView() {
 
   const backend = chatBackend(activeModel, appMode)
   const model = models.find((m) => m.path === modelPath)
+  const info = loadedInfo?.path === modelPath ? loadedInfo.info : null
+  const pathRef = useRef(modelPath)
+  pathRef.current = modelPath
 
   // Models and presets once; the loaded model (or the chat's) preselected.
   useEffect(() => {
     void neuronPresets().then(setPresets).catch(() => setPresets([]))
-    void listBundledModels().then((list) => {
+    void listBundledModels().then((all) => {
+      // Chat models only: an embedding model (Document Chat's) has no chat
+      // turn to steer, and the vector tool aborts on it.
+      const list = all.filter((m) => !isEmbeddingGgufName(m.name))
       setModels(list)
       const loaded = list.find((m) => m.loaded)
       const chat = list.find((m) => activeModel && builtinModelMatches(m.path, activeModel) && activeModel.includes(m.name))
       setModelPath((cur) => cur || (chat ?? loaded ?? list[0])?.path || '')
-    }).catch(() => setModels([]))
+    }).catch(() => setModels([])).finally(() => setModelsLoaded(true))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const refreshInfo = useCallback(async (path: string) => {
     if (!path) return
     try {
-      setInfo(await neuronInfo(path))
+      const read = await neuronInfo(path)
+      if (path !== pathRef.current) return
+      setLoadedInfo({ path, info: read })
       setError(null)
     } catch (e) {
-      setInfo(null)
+      if (path !== pathRef.current) return
+      setLoadedInfo(null)
       setError(String(e))
     }
   }, [])
@@ -165,16 +184,25 @@ export function NeuronView() {
     }
   }
 
+  // A persona without its own profile shows the model's; its first move
+  // starts from what is shown, so the other sliders keep their place (T1:
+  // they fell to 0 when the saved scope was already "persona").
+  const move = (id: string, value: number) => {
+    if (editKey in profiles) setStrength(editKey, id, value)
+    else setProfile(editKey, { ...strengths, [id]: clampStrength(value) })
+  }
+
   const reset = () => {
     if (!modelKey) return
     if (scope === 'persona') removeProfile(editKey)
     else setProfile(editKey, {})
   }
 
-  if (backend !== 'lu-engine' && backend !== 'none' && models.length === 0) {
+  if (modelsLoaded && models.length === 0) {
     return (
       <Shell>
-        <Hinweis>{backendNote(backend)}</Hinweis>
+        {backend !== 'lu-engine' && backend !== 'none' && <Hinweis className="mb-3">{backendNote(backend)}</Hinweis>}
+        <Hinweis><span data-testid="neuron-no-chat-model">{NO_CHAT_MODEL}</span></Hinweis>
       </Shell>
     )
   }
@@ -214,6 +242,10 @@ export function NeuronView() {
         </div>
       )}
 
+      {steering.group && (
+        <Hinweis className="mb-3"><span data-testid="neuron-group-note">This chat is a group chat: the model&apos;s sliders apply to every speaker. Sliders saved for one persona apply in its own chats (per speaker: later version).</span></Hinweis>
+      )}
+
       {job && job.status !== 'idle' && <JobPanel job={job} onStop={() => void neuronCancel().then(poll)} onDismiss={() => void neuronDismiss().then(poll)} />}
 
       <Section title="Sliders">
@@ -233,7 +265,7 @@ export function NeuronView() {
                 computed={!!v}
                 disabled={running || !modelPath || (!v && !info?.generator)}
                 onCompute={() => void startJob(() => neuronBuildPreset(modelPath, p.id))}
-                onChange={(x) => setStrength(editKey, p.id, x)}
+                onChange={(x) => move(p.id, x)}
               />
             )
           })}
@@ -251,7 +283,7 @@ export function NeuronView() {
               value={strengths[v.id] ?? 0}
               computed
               disabled={running}
-              onChange={(x) => setStrength(editKey, v.id, x)}
+              onChange={(x) => move(v.id, x)}
               onDelete={() => void neuronDelete(modelPath, v.id).then(() => { removeSlider(modelKey, v.id); return refreshInfo(modelPath) })}
             />
           ))}
@@ -269,7 +301,7 @@ export function NeuronView() {
             disabled={running}
             onDownload={() => void startJob(() => neuronSaeDownload(modelPath))}
             onAdd={(hit) => void startJob(() => neuronFeatureAdd(modelPath, hit.feature, hit.label))}
-            onChange={(id, x) => setStrength(editKey, id, x)}
+            onChange={(id, x) => move(id, x)}
             onDelete={(id) => void neuronDelete(modelPath, id).then(() => { removeSlider(modelKey, id); return refreshInfo(modelPath) })}
             onError={setError}
           />

@@ -389,6 +389,22 @@ pub fn parse_progress(line: &str) -> Option<(u64, u64)> {
     Some((a.trim().parse().ok()?, b.trim().parse().ok()?))
 }
 
+/// One readable sentence for a generator that ended without a direction. Its
+/// own output (a backtrace on an abort) goes to the log, not on the page;
+/// only a missing library is named, since that is what the user can act on.
+pub fn tool_failure(stderr: &str) -> String {
+    let missing = stderr.lines().map(str::trim).find(|l| {
+        let low = l.to_lowercase();
+        let names_lib = low.contains(".dll") || low.contains(".dylib");
+        let says_missing = ["not found", "not loaded", "missing", "cannot", "could not", "no such"].iter().any(|w| low.contains(w));
+        names_lib && says_missing && l.len() < 200
+    });
+    match missing {
+        Some(line) => format!("The vector tool could not start: a library is missing ({line})."),
+        None => "The vector tool stopped on this model without a result. Its last output is in the app log (target neuron).".into(),
+    }
+}
+
 /// Runs the generator on the example pairs and returns the direction.
 fn generate(app: &tauri::AppHandle, model_path: &str, plus: &[String], minus: &[String], work: &Path) -> Result<cvec::ControlVector, String> {
     let binary = generator_binary(app).ok_or("This build of LU has no vector tool (lu-llama-cvector-generator). On Linux it comes in a later version.")?;
@@ -438,8 +454,11 @@ fn generate(app: &tauri::AppHandle, model_path: &str, plus: &[String], minus: &[
     tracing::info!(target: "neuron", pid = id, ?status, "vector tool finished");
     if !status.success() || !out.is_file() {
         let why = stderr.map(|(buf, _)| crate::commands::shell::captured_text(&buf)).unwrap_or_default();
-        let tail: Vec<&str> = why.lines().rev().take(6).collect::<Vec<_>>().into_iter().rev().collect();
-        return Err(format!("The vector tool stopped without a result.\n{}", tail.join("\n")));
+        let tail: Vec<&str> = why.lines().rev().take(12).collect::<Vec<_>>().into_iter().rev().collect();
+        for line in &tail {
+            log(format!("  {line}"));
+        }
+        return Err(tool_failure(&why));
     }
     with_job(|j| j.step = j.total);
     let cv = cvec::read(&out)?;
@@ -900,6 +919,18 @@ pub async fn neuron_compare(
 
 #[cfg(test)]
 mod tests {
+    /// T1 (3.0.9): an abort put the raw backtrace on the page.
+    #[test]
+    fn a_tool_failure_reads_as_one_sentence() {
+        let abort = "ggml/src/ggml.c:1234: GGML_ASSERT(x) failed\nSee: https://github.com/ggml-org/llama.cpp/pull/17869\n0 lu-llama-cvector-generator 0x0000000100b14358 ggml_print_backtrace + 276\n1 libggml-base.dylib 0x0000000100c01234 ggml_abort + 160";
+        let msg = super::tool_failure(abort);
+        assert!(!msg.contains("0x") && !msg.contains("github") && msg.contains("app log"), "{msg}");
+        let dll = super::tool_failure("error while loading: llama-common.dll was not found");
+        assert!(dll.contains("llama-common.dll"), "{dll}");
+        let dylib = super::tool_failure("dyld: Library not loaded: @rpath/libllama.dylib");
+        assert!(dylib.contains("libllama.dylib"), "{dylib}");
+    }
+
     use super::*;
 
     #[test]
