@@ -37,7 +37,7 @@ vi.mock('../../../api/neuron', () => ({
     sae: null,
     activeMix: null,
   }),
-  neuronStatus: async () => ({ status: 'idle', kind: '', title: '', modelPath: '', phaseLabel: '', step: 0, total: 0, bytesDone: 0, bytesTotal: 0, rateBps: 0, etaSecs: null, elapsedSecs: 0, resultId: null, error: null, logs: [] }),
+  neuronStatus: async () => ({ status: job.status, kind: '', title: '', modelPath: job.modelPath, phaseLabel: '', step: 0, total: 0, bytesDone: 0, bytesTotal: 0, rateBps: 0, etaSecs: null, elapsedSecs: 0, resultId: null, error: null, logs: [] }),
   neuronApply: (p: string, e: unknown[], t?: unknown) => apply(p, e, t),
   neuronBuildPreset: (p: string, id: string) => buildPreset(p, id),
   neuronBuildOwn: vi.fn(), neuronCancel: vi.fn(), neuronCompare: vi.fn(), neuronDelete: vi.fn(), neuronDismiss: vi.fn(),
@@ -54,6 +54,7 @@ const LLAMA = { name: 'llama-3.2-3b-q4_k_m', path: '/models/llama.gguf', size: 1
 const NOMIC = { name: 'nomic-embed-text-v1.5.Q4_K_M', path: '/models/nomic.gguf', size: 1, loaded: false }
 const disk = vi.hoisted(() => ({ models: [] as Array<Record<string, unknown>> }))
 const slot = vi.hoisted(() => ({ managed: true }))
+const job = vi.hoisted(() => ({ status: 'idle', modelPath: '' }))
 vi.mock('../../../api/builtin-ensure', () => ({ isManagedBuiltinSlot: () => slot.managed }))
 
 import { NeuronView } from '../NeuronView'
@@ -65,6 +66,8 @@ beforeEach(() => {
   buildPreset.mockClear()
   vectors.length = 0
   slot.managed = true
+  job.status = 'idle'
+  job.modelPath = ''
   disk.models = [NOMIC, QWEN]
   useNeuronStore.setState({ profiles: {}, scopeByModel: {} })
   useModelStore.setState({ activeModel: 'openai::qwen2.5-0.5b-instruct-q8_0' })
@@ -110,6 +113,21 @@ describe('Neuron tweaker view', () => {
     await new Promise((r) => setTimeout(r, 300))
     const toLlama = apply.mock.calls.filter((c) => c[0] === LLAMA.path)
     expect(toLlama.map((c) => c[1])).toEqual([[]])
+  })
+
+  // T1 (3.0.9): a job for the old model that ended after the switch put the
+  // old model's info under the new model's name.
+  it('stays on the new model when a job for the old one ends', async () => {
+    disk.models = [QWEN, LLAMA]
+    render(createElement(NeuronView))
+    await screen.findByText(/qwen2 · 24 layers/)
+    job.status = 'running'
+    job.modelPath = QWEN.path
+    fireEvent.change(screen.getByTestId('neuron-model'), { target: { value: LLAMA.path } })
+    await screen.findByText(/llama · 28 layers/)
+    job.status = 'done'
+    await new Promise((r) => setTimeout(r, 1500))
+    expect(screen.queryByText(/qwen2 · 24 layers/)).toBeNull()
   })
 
   // T1 (3.0.9): the embedding model of Document Chat was the only choice,
