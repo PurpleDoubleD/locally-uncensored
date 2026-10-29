@@ -1,9 +1,12 @@
 import type { ModelType } from './comfyui'
 import type { GenerateParams, VideoParams } from './comfyui'
-import { findMatchingVAE, findMatchingCLIP } from './comfyui'
+import { findMatchingVAE, findMatchingCLIP, getVAEModels, getCLIPModels } from './comfyui'
 import { log } from '../lib/logger'
 import { resolveRunSeed } from '../lib/run-seed'
 import { applyParamOverrides, type WorkflowParamOverrides } from './workflow-params'
+import {
+  closestAspectRatio, detectPrompts, resolutionSelectorIds, withDetectedPrompts,
+} from './workflow-graph-detect'
 import type {
   WorkflowTemplate,
   WorkflowSource,
@@ -11,11 +14,11 @@ import type {
   ParameterMapping,
 } from '../types/workflows'
 import type {
-  ComfyApiGraph, ComfyApiNode, ComfyInputValue, ComfyNodeInputs,
+  ComfyApiGraph, ComfyInputValue, ComfyNodeInputs,
 } from '../types/comfy-graph'
 import {
   apiNodes, isComfyApiGraph,
-  inputNumber, linkTarget,
+  inputNumber,
 } from '../types/comfy-graph'
 
 // ─── Validation ───
@@ -80,12 +83,9 @@ export function extractSearchTerms(modelName: string, modelType: ModelType): str
 export function autoDetectParameterMap(workflow: ComfyApiGraph): ParameterMap {
   const map: ParameterMap = {}
 
-  let ksamplerNode: ComfyApiNode | null = null
-
   for (const [nodeId, node] of apiNodes(workflow)) {
     const ct = node.class_type
     if (ct === 'KSampler' || ct === 'KSamplerAdvanced') {
-      ksamplerNode = node
       map.seed = { nodeId, inputKey: 'seed' }
       map.steps = { nodeId, inputKey: 'steps' }
       map.cfgScale = { nodeId, inputKey: 'cfg' }
@@ -95,22 +95,13 @@ export function autoDetectParameterMap(workflow: ComfyApiGraph): ParameterMap {
     }
   }
 
-  if (ksamplerNode?.inputs) {
-    const posNodeId = linkTarget(ksamplerNode.inputs.positive)
-    const negNodeId = linkTarget(ksamplerNode.inputs.negative)
-    if (posNodeId !== undefined) {
-      const posNode = workflow[posNodeId]
-      if (posNode?.class_type === 'CLIPTextEncode') {
-        map.positivePrompt = { nodeId: posNodeId, inputKey: 'text' }
-      }
-    }
-    if (negNodeId !== undefined) {
-      const negNode = workflow[negNodeId]
-      if (negNode?.class_type === 'CLIPTextEncode') {
-        map.negativePrompt = { nodeId: negNodeId, inputKey: 'text' }
-      }
-    }
-  }
+  // The prompt boxes, from the positive and negative inputs of the sampler
+  // or guider back to the text encoders (GitHub #196). Only a graph where
+  // no such wire leads to an encoder falls back to the order of the
+  // CLIPTextEncode nodes further down.
+  const prompts = detectPrompts(workflow)
+  if (prompts?.positive) map.positivePrompt = prompts.positive
+  if (prompts?.negative) map.negativePrompt = prompts.negative
 
   for (const [nodeId, node] of apiNodes(workflow)) {
     const ct = node.class_type
@@ -181,7 +172,7 @@ export function autoDetectParameterMap(workflow: ComfyApiGraph): ParameterMap {
     }
   }
 
-  if (!map.positivePrompt) {
+  if (!prompts) {
     const clipNodes = apiNodes(workflow).filter(
       ([, n]) => n.class_type === 'CLIPTextEncode'
     )
@@ -200,7 +191,7 @@ export function autoDetectParameterMap(workflow: ComfyApiGraph): ParameterMap {
 
 export async function injectParameters(
   workflow: ComfyApiGraph,
-  paramMap: ParameterMap,
+  storedMap: ParameterMap,
   params: GenerateParams | VideoParams,
   modelType: ModelType,
   /** The values the user changed under "Workflow parameters" (workflow-params.ts). */
@@ -224,6 +215,10 @@ export async function injectParameters(
       inputs[mapping.inputKey] = value
     }
   }
+
+  // The prompt boxes are read again from the graph: a map saved by an older
+  // LU may name the negative box as the positive one (GitHub #196).
+  const paramMap = withDetectedPrompts(wf, storedMap)
 
   inject(paramMap.model, params.model)
   inject(paramMap.positivePrompt, params.prompt)
@@ -264,6 +259,19 @@ export async function injectParameters(
 
   inject(widthMapping, params.width)
   inject(heightMapping, params.height)
+
+  // No width and height to write, but a ResolutionSelector (aspect ratio
+  // plus megapixels, as in the LTX 2.5 templates): pick the aspect ratio
+  // closest to LU's size and keep the workflow's megapixels (GitHub #196).
+  if (!widthMapping && !heightMapping) {
+    const aspect = closestAspectRatio(params.width, params.height)
+    if (aspect) {
+      for (const id of resolutionSelectorIds(wf)) {
+        const node = wf[id]
+        if (node.inputs) node.inputs.aspect_ratio = aspect
+      }
+    }
+  }
   inject(paramMap.batchSize, params.batchSize)
   inject(paramMap.sampler, params.sampler)
   inject(paramMap.scheduler, params.scheduler)
@@ -307,15 +315,35 @@ export async function injectParameters(
     `${id}: ${n.class_type} (${Object.keys(n.inputs || {}).join(', ')})`
   ).join(' | ') })
 
-  // Auto-resolve VAE and CLIP loaders with real model files
+  // VAE and CLIP loaders: the file the workflow names stays when ComfyUI
+  // has it. A workflow with more than one of them (LTX 2.5: a video and an
+  // audio VAE, a text encoder and a prompt enhancer) needs each one as it
+  // is; one pick for all of them breaks it (GitHub #196). Only a file this
+  // ComfyUI lacks is replaced by a matching one.
+  let vaeFiles: Set<string> | undefined
+  let clipFiles: Set<string> | undefined
+  const installed = async (read: () => Promise<string[]>): Promise<Set<string>> => {
+    try { return new Set(await read()) } catch { return new Set() }
+  }
   for (const [, node] of apiNodes(wf)) {
     const ct = node.class_type
     try {
       if (ct === 'VAELoader' && node.inputs) {
+        const named = node.inputs.vae_name
+        if (typeof named === 'string') {
+          vaeFiles ??= await installed(getVAEModels)
+          if (vaeFiles.has(named)) continue
+        }
         const vae = await findMatchingVAE(modelType)
         node.inputs.vae_name = vae
       }
       if (ct === 'CLIPLoader' && node.inputs) {
+        const named = node.inputs.clip_name
+        if (typeof named === 'string') {
+          clipFiles ??= await installed(getCLIPModels)
+          // The workflow's encoder stays, and with it the type it was saved with.
+          if (clipFiles.has(named)) continue
+        }
         const clip = await findMatchingCLIP(modelType)
         node.inputs.clip_name = clip
         // Also set the CLIP type based on model type

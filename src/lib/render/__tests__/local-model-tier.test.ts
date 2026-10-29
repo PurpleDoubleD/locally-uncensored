@@ -25,8 +25,9 @@ const mainFile = (b: ModelBundle) =>
 const tierOfFile = (name: string) => localTier({ name, type: classifyModel(name) })
 
 describe('jedes lokale Bundle traegt eine Stufe', () => {
-  it('alle 43 Bundles haben best, standard oder older', () => {
-    expect(ALL.length).toBe(43)
+  it('alle 46 Bundles haben best, standard oder older', () => {
+    // B18 (3.0.9): Wan 2.2 A14B I2V und T2V Fast, Wan 2.1 Speed-LoRAs.
+    expect(ALL.length).toBe(46)
     for (const b of ALL) expect(['best', 'standard', 'older'], b.name).toContain(b.tier)
   })
 

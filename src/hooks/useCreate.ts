@@ -95,7 +95,7 @@ import {
 } from '../api/trainer'
 import { getMacTrainStatus, macTrainMissing } from '../api/mlx-train'
 import { buildTrainCaption } from '../lib/train-captions'
-import { useCreateStore, EDIT_MAX_DENOISE, characterImageRun, deriveIntent, type CreateState } from '../stores/createStore'
+import { useCreateStore, EDIT_MAX_DENOISE, characterImageRun, deriveIntent, type CreateState, type GalleryItem } from '../stores/createStore'
 import { useWorkflowStore } from '../stores/workflowStore'
 import { useSettingsStore } from '../stores/settingsStore'
 import { renderStallLimitMs, renderStallMessage } from '../lib/tool-timeout'
@@ -120,6 +120,9 @@ import {
 } from '../lib/character-run'
 import { defaultLoraStrength } from '../lib/lora-strength'
 import { fetchGalleryItemBlob } from '../components/create/experimental/galleryUrl'
+import { LongRunStopped, longVideoRequest, runLongVideo, type ClipItem } from '../lib/long-video-run'
+import { settleSeams } from '../api/video-settle'
+import { ownWorkflowMisfit } from '../lib/own-workflow-fit'
 import { loadImageRef } from '../components/create/experimental/loadImage'
 import { listMlxLoras } from '../api/mlx-loras'
 import {
@@ -185,6 +188,19 @@ interface RunOpts {
   stepLabel?: string
   /** The character's trigger word, kept in a prompt the chat model rewrote. */
   trigger?: string
+  /** A later section of a long clip (B18): the clip so far in ComfyUI's
+   *  input folder and the frames this section repeats from it. */
+  continueFrom?: { video: string; overlap: number }
+  /** One pass with context windows past the native length (B18). */
+  contextWindows?: boolean
+}
+
+/** The long clip fields of one run, as the workflow builder takes them. */
+function longVideoParams(opts: RunOpts): { continueFrom?: { video: string; overlap: number }; contextWindows?: boolean } {
+  return {
+    ...(opts.continueFrom ? { continueFrom: opts.continueFrom } : {}),
+    ...(opts.contextWindows ? { contextWindows: true } : {}),
+  }
 }
 
 /** The store as one run reads it: the live state with this run's fields
@@ -1629,7 +1645,7 @@ export function useCreate() {
     // feeding a start image to a t2v-only checkpoint — that either errors in
     // ComfyUI or silently ignores the source. The ModelChip already filters
     // the picker; this guards a stale store selection reaching submit.
-    if (intent === 'animate' || intent === 'extend') {
+    if ((intent === 'animate' || intent === 'extend') && !opts.continueFrom) {
       if (!effI2vImage) {
         setError(intent === 'extend'
           ? 'Pick the clip to extend first. Its last frame becomes the starting point.'
@@ -1882,15 +1898,9 @@ export function useCreate() {
       // Check for custom workflow assignment — but verify it's compatible with the model
       let customWf = localOp || isUpscale ? null : useWorkflowStore.getState().getWorkflowForModel(activeModel, imageModelType)
       if (customWf) {
-        const wfNodes = apiNodes(customWf.workflow).map(([, n]) => n.class_type)
-        const needsUnet = imageModelType === 'flux' || imageModelType === 'flux2' || imageModelType === 'zimage' || imageModelType === 'wan' || imageModelType === 'hunyuan'
-        const hasUnet = wfNodes.includes('UNETLoader')
-        const hasCheckpoint = wfNodes.includes('CheckpointLoaderSimple')
-        if (needsUnet && !hasUnet && hasCheckpoint) {
-          console.warn('[useCreate] Custom workflow incompatible: model needs UNETLoader but workflow has CheckpointLoaderSimple. Using auto.')
-          customWf = null
-        } else if (!needsUnet && hasUnet && !hasCheckpoint) {
-          console.warn('[useCreate] Custom workflow incompatible: model needs CheckpointLoaderSimple but workflow has UNETLoader. Using auto.')
+        const misfit = ownWorkflowMisfit(apiNodes(customWf.workflow).map(([, n]) => n.class_type), imageModelType, listedModel?.source)
+        if (misfit) {
+          console.warn(`[useCreate] Custom workflow incompatible: ${misfit}. Using auto.`)
           customWf = null
         }
       }
@@ -1907,7 +1917,7 @@ export function useCreate() {
         // Dynamic workflow builder — auto-detects nodes and builds the right pipeline
         setProgress(5, 'Building workflow...')
         try {
-          const genParams = mode === 'video' ? { ...baseParams, frames, fps, ...(effI2vImage ? { inputImage: effI2vImage } : {}) } : baseParams
+          const genParams = mode === 'video' ? { ...baseParams, frames, fps, ...(effI2vImage ? { inputImage: effI2vImage } : {}), ...longVideoParams(opts) } : baseParams
           // A missing text encoder / VAE or a too-old ComfyUI is fixed in
           // place after one question, then the build runs again.
           workflow = await buildWithFixups(
@@ -1997,7 +2007,7 @@ export function useCreate() {
                     return
                   }
                   // Re-build the workflow now that the new node is available
-                  const genParams = { ...baseParams, frames, fps, ...(effI2vImage ? { inputImage: effI2vImage } : {}) }
+                  const genParams = { ...baseParams, frames, fps, ...(effI2vImage ? { inputImage: effI2vImage } : {}), ...longVideoParams(opts) }
                   workflow = await buildDynamicWorkflow(genParams, imageModelType)
                   setProgress(10, 'VHS installed, generating MP4...')
                 } catch (instErr) {
@@ -2495,6 +2505,59 @@ export function useCreate() {
   const generateInner = useCallback(async () => {
     const s = useCreateStore.getState()
     const mac = isMlxImageHost()
+    // A long local clip (B18): several sections, each continuing the clip so
+    // far, or one pass with context windows. ComfyUI only; the Mac's MLX
+    // lanes keep their own lengths.
+    if (!mac && s.backend === 'local' && !isLocalCharacter(s.selectedCharacter)) {
+      const intent = s.intent()
+      const lane = s.videoModelList.length > 0 ? videoLaneModels(s.videoModelList, intent) : []
+      const model = lane.length > 0 && !lane.some((m) => m.name === s.videoModel) ? lane[0].name : s.videoModel
+      const long = longVideoRequest({
+        mode: s.mode, intent, model,
+        type: s.videoModelList.find((m) => m.name === model)?.type ?? classifyModel(model),
+        installed: s.videoModelList.map((m) => m.name),
+        longVideoSeconds: s.longVideoSeconds, longVideoMode: s.longVideoMode,
+        fps: s.fps, frames: s.frames, extendClip: s.extendClip,
+      })
+      if (long?.kind === 'error') { s.setError(long.message); return }
+      if (long?.kind === 'one-pass') { await runOnce({ frames: long.frames }, { contextWindows: true }); return }
+      if (long?.kind === 'sections') {
+        const own = new AbortController()
+        chainAbort.current = own
+        s.setError(null)
+        try {
+          await runLongVideo(long.plan, long.start, {
+            run: (override, opts) => runOnce(override as Partial<CreateState>, opts),
+            gallery: () => useCreateStore.getState().gallery,
+            error: () => useCreateStore.getState().error,
+            fetchBlob: (item) => fetchGalleryItemBlob(item as GalleryItem),
+            upload: (blob, name) => uploadMediaFile(blob, name),
+            remove: (id) => useCreateStore.getState().removeFromGallery(id),
+            settle: async (item: ClipItem, seams, anchorEnd, base) => {
+              const settled = await settleSeams(item, seams, anchorEnd, base)
+              if (!settled) return null
+              const st = useCreateStore.getState()
+              const old = st.gallery.find((g) => g.id === item.id)
+              if (!old) return null
+              const next = { ...old, id: uuid(), filename: settled.filename, subfolder: settled.subfolder }
+              st.addToGallery(next)
+              st.removeFromGallery(old.id)
+              return next
+            },
+            aborted: () => own.signal.aborted,
+          })
+        } catch (e) {
+          if (!(e instanceof LongRunStopped) || e.message !== 'Stopped.') {
+            useCreateStore.getState().setError(e instanceof Error ? e.message : String(e))
+          }
+        } finally {
+          if (chainAbort.current === own) chainAbort.current = null
+          useCreateStore.getState().setIsGenerating(false)
+          useCreateStore.getState().setProgress(0)
+        }
+        return
+      }
+    }
     if (s.backend !== 'local' || !isLocalCharacter(s.selectedCharacter)) {
       await runOnce()
       return

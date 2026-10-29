@@ -184,9 +184,13 @@ describe('the A14B pair runs high noise, then low noise', () => {
     const loaders = nodesOf(wf, 'UNETLoader').map(([, node]) => node.inputs.unet_name)
     expect(loaders).toEqual([REPORTED, 'wan2.2_i2v_low_noise_14B_fp8_scaled.safetensors'])
     // The low stage samples the low half and continues the high stage's latent.
+    // Since 3.0.9 (B18) each half goes through the template's sampling shift
+    // first (ModelSamplingSD3, 8 for a quality run).
     const lowLoaderId = nodesOf(wf, 'UNETLoader')[1][0]
     const highId = nodesOf(wf, 'KSamplerAdvanced')[0][0]
-    expect(low.inputs.model).toEqual([lowLoaderId, 0])
+    const lowShift = wf[(low.inputs.model as [string, number])[0]]
+    expect(lowShift.class_type).toBe('ModelSamplingSD3')
+    expect(lowShift.inputs).toMatchObject({ model: [lowLoaderId, 0], shift: 8 })
     expect(low.inputs.latent_image).toEqual([highId, 0])
     expect(nodeOf(wf, 'VAEDecode')?.[1].inputs.samples ?? nodeOf(wf, 'VAEDecodeTiled')?.[1].inputs.samples)
       .toEqual([nodesOf(wf, 'KSamplerAdvanced')[1][0], 0])

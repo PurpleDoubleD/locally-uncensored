@@ -450,8 +450,19 @@ function specOptions(spec: unknown): Record<string, unknown> {
   return Array.isArray(spec) && isRecord(spec[1]) ? spec[1] : {}
 }
 
+/**
+ * The type the widget of an input has. A V3 input that takes more than one
+ * type ("FLOAT,INT", io.MultiType with a widget input) names the widget in
+ * `widgetType` (comfy_api/latest/_io.py, WidgetInput.as_dict and
+ * MultiType.Input), and the canvas keeps its value like any other widget.
+ */
+function widgetType(spec: unknown): string | string[] | null {
+  const declared = specOptions(spec).widgetType
+  return typeof declared === 'string' ? declared : specType(spec)
+}
+
 function isWidgetSpec(spec: unknown): boolean {
-  const t = specType(spec)
+  const t = widgetType(spec)
   if (t === null) return false
   if (specOptions(spec).forceInput === true) return false
   return Array.isArray(t) || WIDGET_TYPES.has(t.toUpperCase())
@@ -459,7 +470,7 @@ function isWidgetSpec(spec: unknown): boolean {
 
 function hasControlWidget(name: string, spec: unknown): boolean {
   if (specOptions(spec).control_after_generate) return true
-  const t = specType(spec)
+  const t = widgetType(spec)
   return t === 'INT' && (name === 'seed' || name === 'noise_seed')
 }
 
@@ -469,7 +480,7 @@ function hasUploadWidget(spec: unknown): boolean {
 }
 
 function valueFits(spec: unknown, value: unknown): boolean {
-  const t = specType(spec)
+  const t = widgetType(spec)
   if (Array.isArray(t) || t?.toUpperCase() === 'COMBO') return typeof value === 'string' || typeof value === 'number'
   switch (t?.toUpperCase()) {
     case 'INT':
@@ -501,6 +512,63 @@ function orderedNames(def: ComfyNodeDef, group: 'required' | 'optional'): string
     return [...order.filter((n) => n in specs), ...Object.keys(specs).filter((n) => !order.includes(n))]
   }
   return Object.keys(specs)
+}
+
+// ── V3 dynamic inputs ───────────────────────────────────────────
+//
+// Two input types of the V3 node API stand for a set of inputs rather than
+// one (comfy_api/latest/_io.py of ComfyUI v0.42.4):
+//   - COMFY_DYNAMICCOMBO_V3 (DynamicCombo): a dropdown whose chosen option
+//     brings its own inputs. The canvas keeps their values right after the
+//     dropdown's own value, required ones first. The API format names them
+//     "<combo>.<input>" (finalize_prefix), nested combos "<a>.<b>.<input>".
+//   - COMFY_AUTOGROW_V3 (Autogrow): sockets that grow one by one, named
+//     "<input>.<name>" from a list of names or "<input>.<prefix><i>". The
+//     first `min` of them are required when the template input is. They are
+//     sockets only (the template is forced to an input), never widgets.
+
+const DYNAMIC_COMBO = 'COMFY_DYNAMICCOMBO_V3'
+const AUTOGROW = 'COMFY_AUTOGROW_V3'
+
+interface DynamicOption {
+  key: string
+  inputs: { required: Record<string, unknown>; optional: Record<string, unknown> }
+}
+
+function inputGroups(raw: unknown): DynamicOption['inputs'] {
+  const groups = isRecord(raw) ? raw : {}
+  return {
+    required: isRecord(groups.required) ? groups.required : {},
+    optional: isRecord(groups.optional) ? groups.optional : {},
+  }
+}
+
+function dynamicOptions(spec: unknown): DynamicOption[] {
+  const raw = specOptions(spec).options
+  if (!Array.isArray(raw)) return []
+  return raw.flatMap((o): DynamicOption[] => {
+    if (!isRecord(o) || (typeof o.key !== 'string' && typeof o.key !== 'number')) return []
+    return [{ key: String(o.key), inputs: inputGroups(o.inputs) }]
+  })
+}
+
+/** The socket names of an Autogrow input, with whether each one is required. */
+function autogrowSlots(id: string, spec: unknown): { name: string; spec: unknown; required: boolean }[] {
+  const template = specOptions(spec).template
+  if (!isRecord(template)) return []
+  const groups = inputGroups(template.input)
+  const requiredFirst = Object.entries(groups.required)[0]
+  const entry = requiredFirst ?? Object.entries(groups.optional)[0]
+  if (!entry) return []
+  const templateRequired = requiredFirst !== undefined
+  const min = typeof template.min === 'number' ? template.min : 1
+  let names: string[] = []
+  if (Array.isArray(template.names)) {
+    names = template.names.filter((n): n is string => typeof n === 'string')
+  } else if (typeof template.prefix === 'string' && typeof template.max === 'number') {
+    names = Array.from({ length: Math.min(template.max, 100) }, (_, i) => `${template.prefix}${i}`)
+  }
+  return names.map((n, i) => ({ name: `${id}.${n}`, spec: entry[1], required: templateRequired && i < min }))
 }
 
 // ── Conversion ──────────────────────────────────────────────────
@@ -597,9 +665,12 @@ export function convertUiGraph(file: UiGraph, defs: ComfyNodeDefs): UiConvertRes
   }
 
   const graph: ComfyApiGraph = {}
+  // Per node, the API names of the inputs ComfyUI will ask for.
+  const requiredInputs = new Map<string, string[]>()
   for (const node of real) {
     const def = defs[node.type]
     const inputs: ComfyNodeInputs = {}
+    const required: string[] = []
     const vals = node.widgets_values
     const byName = isRecord(vals) ? vals : null
     const positional = Array.isArray(vals) ? vals : []
@@ -612,36 +683,71 @@ export function convertUiGraph(file: UiGraph, defs: ComfyNodeDefs): UiConvertRes
       if (typeof input.widget?.name === 'string') sockets.set(input.widget.name, input)
     }
 
+    const nextValue = (name: string, spec: unknown): unknown => {
+      if (byName) return byName[name]
+      if (cursor >= positional.length) return undefined
+      const value = positional[cursor++]
+      const shortName = name.slice(name.lastIndexOf('.') + 1)
+      if (hasControlWidget(shortName, spec) && CONTROL_VALUES.has(positional[cursor] as string)) cursor++
+      if (hasUploadWidget(spec) && UPLOAD_VALUES.has(positional[cursor] as string)) cursor++
+      return value
+    }
+
+    /** One input by its API name. False: the saved values do not fit the definition. */
+    const readInput = (name: string, spec: unknown, isRequired: boolean, socketOnly = false): boolean => {
+      const type = specType(spec)
+      if (type === DYNAMIC_COMBO) {
+        const options = dynamicOptions(spec)
+        let value = nextValue(name, spec)
+        if (value === undefined && isRequired) value = specOptions(spec).default ?? options[0]?.key
+        if (value === undefined) return true
+        const chosen = options.find((o) => o.key === String(value))
+        if (!chosen) return false
+        inputs[name] = value as ComfyInputValue
+        if (isRequired) required.push(name)
+        for (const [group, specs] of Object.entries(chosen.inputs)) {
+          for (const [child, childSpec] of Object.entries(specs)) {
+            if (!readInput(`${name}.${child}`, childSpec, group === 'required')) return false
+          }
+        }
+        return true
+      }
+      if (type === AUTOGROW) {
+        for (const slot of autogrowSlots(name, spec)) {
+          if (!readInput(slot.name, slot.spec, slot.required, true)) return false
+        }
+        return true
+      }
+
+      if (isRequired) required.push(name)
+      const widget = !socketOnly && isWidgetSpec(spec)
+      let value: unknown
+      if (widget) {
+        value = nextValue(name, spec)
+        if (value !== undefined && !valueFits(spec, value)) return false
+      }
+
+      const socket = sockets.get(name)
+      if (socket && typeof socket.link === 'number') {
+        const src = resolve(socket.link)
+        if (src.kind === 'link') { inputs[name] = [src.nodeId, src.slot]; return true }
+        if (src.kind === 'value') {
+          if (widget && !valueFits(spec, src.value)) return false
+          inputs[name] = src.value as ComfyInputValue
+          return true
+        }
+      }
+
+      if (widget && value === undefined && isRequired) value = specDefault(spec)
+      if (value !== undefined) inputs[name] = value as ComfyInputValue
+      return true
+    }
+
     for (const group of ['required', 'optional'] as const) {
       for (const name of orderedNames(def, group)) {
-        const spec = def.input?.[group]?.[name]
-        const widget = isWidgetSpec(spec)
-        let value: unknown
-
-        if (widget) {
-          if (byName) {
-            value = byName[name]
-          } else if (cursor < positional.length) {
-            value = positional[cursor++]
-            if (hasControlWidget(name, spec) && CONTROL_VALUES.has(positional[cursor] as string)) cursor++
-            if (hasUploadWidget(spec) && UPLOAD_VALUES.has(positional[cursor] as string)) cursor++
-          }
-          if (value !== undefined && !valueFits(spec, value)) return { ok: false, reason: settingsMismatch(node) }
+        if (!readInput(name, def.input?.[group]?.[name], group === 'required')) {
+          return { ok: false, reason: settingsMismatch(node) }
         }
-
-        const socket = sockets.get(name)
-        if (socket && typeof socket.link === 'number') {
-          const src = resolve(socket.link)
-          if (src.kind === 'link') { inputs[name] = [src.nodeId, src.slot]; continue }
-          if (src.kind === 'value') {
-            if (widget && !valueFits(spec, src.value)) return { ok: false, reason: settingsMismatch(node) }
-            inputs[name] = src.value as ComfyInputValue
-            continue
-          }
-        }
-
-        if (widget && value === undefined && group === 'required') value = specDefault(spec)
-        if (value !== undefined) inputs[name] = value as ComfyInputValue
       }
     }
 
@@ -651,6 +757,7 @@ export function convertUiGraph(file: UiGraph, defs: ComfyNodeDefs): UiConvertRes
       _meta: { title: node.title || def.display_name || node.type },
     }
     graph[nodeKey(node)] = apiNode
+    requiredInputs.set(nodeKey(node), required)
   }
 
   // Keep what an output node needs, the same set ComfyUI would run.
@@ -677,8 +784,7 @@ export function convertUiGraph(file: UiGraph, defs: ComfyNodeDefs): UiConvertRes
   for (const node of real) {
     const id = nodeKey(node)
     if (!graph[id]) continue
-    const def = defs[node.type]
-    for (const name of orderedNames(def, 'required')) {
+    for (const name of requiredInputs.get(id) ?? []) {
       if (graph[id].inputs?.[name] === undefined) {
         return {
           ok: false,

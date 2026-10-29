@@ -88,6 +88,11 @@ const CORE_NODES = new Set([
   'LTXVSeparateAVLatent', 'LTXVEmptyLatentAudio', 'LTXVAudioVAEDecode', 'LTXVLatentUpsampler',
   'LatentUpscaleModelLoader', 'ManualSigmas',
   'MiniMaxH3SigmaShift', 'BlockSparseAttention',
+  // Qwen-Image 2.1 Turbo, read in ComfyUI v0.42.4 on 28.10.2026: CFGGuider
+  // [nodes_custom_sampler.py 823, registered at 1219] and QwenImage21Cache
+  // [nodes_qwen.py 185, in the QwenExtension list at 244]. The builder adds
+  // either only when /object_info lists it.
+  'CFGGuider', 'QwenImage21Cache',
   'YuE2GenerateMusic', 'EmptyYuE2LatentAudio',
   // lora
   'LoraLoader', 'LoraLoaderModelOnly',

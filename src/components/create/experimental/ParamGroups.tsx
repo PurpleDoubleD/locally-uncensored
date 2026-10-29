@@ -29,9 +29,11 @@ import { loraStackView, setLoraStackQuery, setLoraStackScroll } from './loraStac
 import { LoraStrength } from './LoraStrength'
 import { MOTION_OWN_WORKFLOW_NOTE, useMotionOwnWorkflow } from './motionWorkflow'
 import { supportsTransparent } from '../../../lib/transparent-image'
+import { isQwenImage21Turbo } from '../../../lib/render/qwen21-turbo'
 import { QWEN_ENCODER_HELP, pickQwenEncoder, qwenEncoderOptions, type QwenEncoderVariant } from '../../../lib/render/qwen-text-encoder'
 import { MAX_SHOTS, MAX_SHOT_CHARS, supportsMultishot } from '../../../lib/ltx-multishot'
 import { frameRangeFor, framesOnRange, lengthHint } from '../../../lib/video-length'
+import { LongVideoControls } from './LongVideoControls'
 import { useMacMemoryGb } from '../../../lib/mac-memory'
 
 // Video families whose dynamic-workflow strategy actually wires a LoRA node:
@@ -167,6 +169,10 @@ export function ParamGroups() {
   const showSteps = !(isCloud && isVideo) && !ownSampling && (!macVideo || macSteps) && !macMusic
   const showSize = !isAudio && (!macVideo || macSize)
   const showCfg = isCloud ? cloudModelById(cloudModelId)?.cfg === true : !ownSampling && !macVideo && !macMusic
+  // Qwen-Image 2.1 Turbo on ComfyUI runs the eight step schedule of its
+  // official template (lib/render/qwen21-turbo): a line says which sliders
+  // reach it. The Mac's Turbo pack is another model and hides the sliders.
+  const qwenTurbo = !isCloud && !isVideo && !isMlxLocal && isQwenImage21Turbo(laneModel)
   // Native HiRes rewrites the local ComfyUI image graph: text to image, and
   // since 3.0.8 Edit too (Discord feature request 21.10.2026). It has no
   // cloud or video path, so keep the control honest and scoped to the lanes
@@ -248,6 +254,12 @@ export function ParamGroups() {
       >
         {showSteps && <Slider label="Steps" min={1} max={macVideo ? (macClip?.maxSteps ?? 60) : 60} step={1} value={s.steps} onChange={s.setSteps} />}
         {showCfg && <Slider label={isVideo ? 'Guidance' : 'CFG scale'} min={0} max={30} step={0.5} value={s.cfgScale} onChange={s.setCfgScale} format={(v) => v.toFixed(1)} />}
+        {qwenTurbo && (
+          <p className="t-micro text-gray-500" data-testid="qwen21-turbo-hint">
+            Turbo runs its own 8-step schedule at CFG 1. Steps, sampler and scheduler are not used.
+            {s.cfgScale > 1 && ` CFG ${s.cfgScale.toFixed(1)} is above the 1 Turbo is made for and can overcook it.`}
+          </p>
+        )}
         {showSize && (macSize && macClip ? (
           // The Mac: the model's grid and bounds. What runs is said below.
           <div className="grid grid-cols-2 gap-2">
@@ -431,6 +443,11 @@ export function ParamGroups() {
             <Slider label="FPS" min={1} max={60} step={1} value={s.fps} onChange={s.setFps} />
             {framesHint && (
               <p className="col-span-2 t-micro text-gray-500" data-testid="video-length-hint">{framesHint}</p>
+            )}
+            {!isCloud && (
+              <div className="col-span-2">
+                <LongVideoControls model={laneModel} intent={meta.id} />
+              </div>
             )}
           </div>
         )}

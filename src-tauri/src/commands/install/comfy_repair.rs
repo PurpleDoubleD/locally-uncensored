@@ -936,7 +936,9 @@ fn reset_install_status_for_new_run(state: &AppState) {
 }
 
 /// Update an existing ComfyUI install in place: `git pull --ff-only` plus a
-/// venv-aware `pip install -r requirements.txt`. The 2.5.8 local Create lanes
+/// venv-aware `pip install -r requirements.txt`. Since 3.0.9 a ComfyUI that
+/// LU cloned itself is set to the pinned release instead of pulled
+/// (comfy_pin.rs); a ComfyUI the customer brought keeps the pull. The 2.5.8 local Create lanes
 /// (music / talking character / extend / motion) need node classes that ship
 /// with current ComfyUI cores, and the UI gates on node PRESENCE, so when the
 /// nodes are missing this command is the one-click "Update ComfyUI" path.
@@ -1228,6 +1230,31 @@ pub fn update_comfyui(state: State<'_, AppState>, app: tauri::AppHandle) -> Resu
             }
         };
 
+        // 3.0.9: a ComfyUI LU cloned itself is set to the release LU tested
+        // (comfy_pin.rs: fetch the tags, check the pinned one out), never
+        // pulled to master. A ComfyUI the customer brought along has no LU
+        // marker and keeps the fast-forward pull of its own branch below.
+        if super::comfy_pin::is_lu_installed(&comfy_dir) {
+            let tag = super::comfy_pin::COMFYUI_PINNED_TAG;
+            update("installing", &format!("Step 1/3: Setting ComfyUI to the tested release {tag}..."));
+            match super::comfy_pin::checkout_pinned_tag(&comfy_dir, tag, true) {
+                Ok(super::comfy_pin::PinOutcome::AlreadyThere) => {
+                    update("installing", &format!("ComfyUI is already on {tag}."));
+                }
+                Ok(super::comfy_pin::PinOutcome::Moved) => {
+                    update("installing", &format!("ComfyUI moved to {tag}."));
+                }
+                Err(e) => {
+                    // Nothing moved: checkout_pinned_tag only checks out a tag
+                    // it found, so the checkout is still on `old_commit`.
+                    update(
+                        "error",
+                        &format!("Could not set ComfyUI to {tag}. Nothing was changed.\n\n{e}"),
+                    );
+                    return;
+                }
+            }
+        } else {
         update("installing", "Step 1/3: Pulling the latest ComfyUI...");
         let mut pull = crate::process_util::foreign_system_command("git");
         // --ff-only: a user-modified checkout must not silently merge; surface
@@ -1263,6 +1290,7 @@ pub fn update_comfyui(state: State<'_, AppState>, app: tauri::AppHandle) -> Resu
                 update("error", &format!("Could not run git: {}", os_error::english(&e)));
                 return;
             }
+        }
         }
 
         update(

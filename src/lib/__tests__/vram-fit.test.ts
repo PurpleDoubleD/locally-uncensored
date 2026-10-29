@@ -202,6 +202,12 @@ describe('every bundle in the catalogue carries the two numbers', () => {
     ['Pixel Art XL · SDXL LoRA', 0, 1.7, 'fits fits fits fits'],
     ['Wan 2.1 · 1.3B (Lightweight)', 8, 10, 'tight fits fits fits'],
     ['Wan 2.1 · 14B FP8 (High Quality)', 12, 15.5, 'big tight fits fits'],
+    // B18: the A14B pair as GGUF with its speed LoRAs. The halves take turns,
+    // so the 8.1 GB half is what has to fit; past 10 GB it runs, from 16 GB
+    // without moving weights out.
+    ['Wan 2.2 A14B · Image to Video, Fast (4 steps)', 10, 16, 'big tight fits fits'],
+    ['Wan 2.2 A14B · Text to Video, Fast (4 steps)', 10, 16, 'big tight fits fits'],
+    ['Wan 2.1 14B Speed LoRAs · 4 Steps', 12, 12, 'big fits fits fits'],
     ['Wan 2.2 · TI2V 5B (Image + Text to Video)', 12, 12, 'big fits fits fits'],
     ['HunyuanVideo 1.5 T2V FP8 (High Quality)', 12, 12, 'big fits fits fits'],
     ['LTX Video 2.3 · 22B FP8', 16, 29, 'big big tight tight'],
@@ -236,6 +242,7 @@ describe('every bundle in the catalogue carries the two numbers', () => {
       ['Krea 2 Companion Files (Text Encoder + VAE)', 'Krea 2 checkpoints'],
       ['SDXL VAE (fp16-fix) · addon', 'SDXL models'],
       ['Pixel Art XL · SDXL LoRA', 'SDXL models'],
+      ['Wan 2.1 14B Speed LoRAs · 4 Steps', 'Wan 2.1 14B'],
       ['MiniMax H3 Turbo LoRA · 8 Steps', 'MiniMax H3'],
     ])
     // The box, 04.10.2026: the Krea 2 companion files had neither a verdict

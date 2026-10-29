@@ -50,5 +50,5 @@ export const WAN_STEADY_FRAMES = 81
  *  holds steady, or null. */
 export function lengthHint(type: ModelType | string, frames: number): string | null {
   if (type !== 'wan' || !(frames > WAN_STEADY_FRAMES)) return null
-  return `Wan holds steady up to ${WAN_STEADY_FRAMES} frames. Longer clips tend to turn restless; for more, make ${WAN_STEADY_FRAMES} frames and continue with Extend Video.`
+  return `Wan holds steady up to ${WAN_STEADY_FRAMES} frames. Longer clips tend to turn restless; for more, set Length in seconds below and LU makes it in sections.`
 }

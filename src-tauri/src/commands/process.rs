@@ -1,4 +1,5 @@
 use crate::os_error;
+use crate::commands::comfy_attention;
 use crate::python::python_command;
 use std::collections::HashMap;
 use std::fs;
@@ -929,6 +930,23 @@ pub(crate) fn launch_python(
         }
         (None, crate::python::ComfyVenv::Absent) => bind().ok_or_else(|| comfy_no_torch_python_message(comfy_dir)),
     }
+}
+
+/// The interpreter a ComfyUI start in `comfy_dir` would use, for a helper
+/// script that needs ComfyUI's packages (numpy, av) and nothing of its own,
+/// such as the colour settle of a long video (commands/video_settle.rs). The
+/// same order as both start paths: the portable's `python_embeded` (beside
+/// the folder or inside it), the install's venv, the Python that holds its
+/// torch. Errors carry the same sentences the start would show.
+pub(crate) fn comfy_tool_python(state: &AppState, comfy_dir: &Path) -> Result<String, String> {
+    let embedded = |base: &Path| {
+        let candidate = base.join("python_embeded").join("python.exe");
+        candidate.exists().then(|| candidate.to_string_lossy().to_string())
+    };
+    let bundled = comfy_dir.parent().and_then(embedded).or_else(|| embedded(comfy_dir));
+    let venv_state = crate::python::comfy_venv_state(comfy_dir);
+    let system_python = state.python_bin.lock().unwrap().clone();
+    launch_python(bundled.as_deref(), &venv_state, comfy_dir, || bound_comfy_python(comfy_dir, &system_python))
 }
 
 /// Collect the system Python paths we might want to probe. Mirrors the
@@ -2009,7 +2027,7 @@ pub async fn start_comfyui(app: tauri::AppHandle) -> Result<serde_json::Value, S
 }
 
 pub(crate) fn start_comfyui_blocking(state: &AppState) -> Result<serde_json::Value, String> {
-    let _gate = start_gate(&COMFY_START);
+    let gate = start_gate(&COMFY_START);
     // If user pointed LU at a remote ComfyUI, we have no local process to spawn.
     // Just report status — the remote side is responsible for running ComfyUI.
     {
@@ -2176,6 +2194,7 @@ pub(crate) fn start_comfyui_blocking(state: &AppState) -> Result<serde_json::Val
         "--port", &port_str,
         "--enable-cors-header", comfy_cors_origin(),
     ];
+    let mut device_flag: Option<&'static str> = None;
     if needs_cpu_fallback {
         comfy_args.push("--cpu");
         if let Some(reason) = cpu_flag_reason(gpu_mode, cpu_decision.baseline, cpu_decision.torch_gpu) {
@@ -2185,18 +2204,32 @@ pub(crate) fn start_comfyui_blocking(state: &AppState) -> Result<serde_json::Val
         comfy_launch_device_flag(&python, gpu_mode, cpu_decision.baseline, Some(&state.comfy_gpu_cache))
     {
         comfy_args.push(flag);
+        device_flag = Some(flag);
         println!("[ComfyUI] torch-directml found in this environment, starting ComfyUI with {flag}");
     }
-    // Auto-enable Flash Attention when the package actually imports in THIS
-    // python (2026-06-11: measured 4-5x faster WAN video sampling vs
-    // pytorch SDPA on a 12 GB 3060). ComfyUI only uses FA2 with the flag, so
-    // an installed wheel does nothing without this. The real-import probe
-    // guarantees we never pass the flag on a broken install (ComfyUI would
-    // error at startup); probe result is cached per python path. CPU mode
-    // skips it — flash-attn is CUDA-only.
-    if !needs_cpu_fallback && flash_attention_cached(state, &python) {
-        comfy_args.push("--use-flash-attention");
-        println!("[ComfyUI] flash-attn detected in {} — enabling Flash Attention", python);
+    // One attention flag at most (comfy_attention.rs): Comfy Kitchen on a
+    // CUDA or ROCm torch with ComfyUI 0.32.0+, otherwise Flash Attention when
+    // the package actually imports in THIS python (2026-06-11: measured 4-5x
+    // faster WAN video sampling vs pytorch SDPA on a 12 GB 3060). ComfyUI only
+    // uses FA2 with the flag, so an installed wheel does nothing without it.
+    // The real-import probes guarantee we never pass a flag on a broken
+    // install (ComfyUI would error at startup); results are cached per python
+    // path. CPU mode skips both, flash-attn is CUDA-only.
+    let attention = comfy_attention_choice(
+        state,
+        &python,
+        comfy_dir,
+        needs_cpu_fallback,
+        device_flag,
+        cpu_decision.baseline,
+    );
+    if let Some(flag) = attention.flag {
+        comfy_args.push(flag);
+        if flag == comfy_attention::CK_FLAG {
+            println!("[ComfyUI] comfy_kitchen imports in {python}, enabling Comfy Kitchen attention ({flag})");
+        } else {
+            println!("[ComfyUI] flash-attn detected in {python}, enabling Flash Attention");
+        }
     }
     // The folder under Settings -> Storage, when it holds ComfyUI-shaped
     // subfolders (GH #122). ComfyUI lists only what sits under its own models
@@ -2360,6 +2393,20 @@ pub(crate) fn start_comfyui_blocking(state: &AppState) -> Result<serde_json::Val
     };
     if let Some(code) = early_exit {
         wait_for_output_readers(&readers_done, COMFY_READER_SETTLE);
+        // The same fallback as the longer watch further down, for a ComfyUI
+        // that refused the ck flag right in argparse: one start without it.
+        if attention.ck_unproven {
+            attention.remember(comfy_dir, false);
+            *state.comfy_start_at.lock().unwrap() = None;
+            error!(python = %python, "comfyui exited at once with the ck attention flag, starting again without it");
+            println!(
+                "[ComfyUI] Exited within the first seconds with {}, starting again without it",
+                comfy_attention::CK_FLAG
+            );
+            // Gate handed back for the second start, as further down.
+            drop(gate);
+            return start_comfyui_blocking(state);
+        }
         let tail: Vec<String> = state
             .comfy_output
             .lock()
@@ -2378,9 +2425,138 @@ pub(crate) fn start_comfyui_blocking(state: &AppState) -> Result<serde_json::Val
     }
     *state.comfy_start_at.lock().unwrap() = Some(std::time::Instant::now());
 
+    // A ck start that has not proven itself on this folder and version is
+    // watched until its port answers. The two second watch above cannot see
+    // the failure: ComfyUI rejects the attention backend only after the torch
+    // import, many seconds in. The child already sits in `comfy_process`, so
+    // the panel reads "starting" meanwhile and Stop still reaches it.
+    if attention.ck_unproven {
+        match watch_own_ck_start(state, port) {
+            comfy_attention::CkWatch::Proven => attention.remember(comfy_dir, true),
+            comfy_attention::CkWatch::DiedEarly => {
+                wait_for_output_readers(&readers_done, COMFY_READER_SETTLE);
+                attention.remember(comfy_dir, false);
+                *state.comfy_start_at.lock().unwrap() = None;
+                error!(python = %python, "comfyui died with the ck attention flag, starting again without it");
+                println!(
+                    "[ComfyUI] Exited before the port answered with {}, starting again without it",
+                    comfy_attention::CK_FLAG
+                );
+                // `remember` also marks the flag failed for this run, so the
+                // second start goes without it even when config.json could
+                // not be written. The gate is handed back first, the second
+                // start takes it again: a click that slips in between finds
+                // the same "no ck" and the second start then reports it.
+                drop(gate);
+                return start_comfyui_blocking(state);
+            }
+            comfy_attention::CkWatch::Undecided => {}
+        }
+    }
+
     println!("[ComfyUI] Started");
     info!("comfyui started");
     Ok(serde_json::json!({"status": "started", "path": comfy_path}))
+}
+
+/// What the start decided about attention, and what it must remember after.
+struct AttentionChoice {
+    /// The one attention flag on the command line, if any.
+    flag: Option<&'static str>,
+    /// The flag is `--use-ck-attention` and no earlier start of this folder
+    /// and version has shown whether it works.
+    ck_unproven: bool,
+    /// The ComfyUI version the decision was made for.
+    version: Option<comfy_attention::ComfyVersion>,
+}
+
+impl AttentionChoice {
+    /// Write the outcome of an unproven ck start to the app's config.json.
+    /// A failure is also noted for the rest of this run, which is what keeps
+    /// the retry from looping when the file cannot be written.
+    fn remember(&self, comfy_dir: &Path, works: bool) {
+        if !works {
+            comfy_attention::note_ck_failed_this_run();
+        }
+        if let Some(v) = self.version {
+            comfy_attention::remember_ck_in(&crate::os_paths::app_config_json(), comfy_dir, v, works);
+        }
+    }
+}
+
+/// The attention decision both start paths share (comfy_attention.rs has the
+/// rule). Gathers the facts, asks the cheap ones first and probes an import
+/// only when the answer still matters.
+fn comfy_attention_choice(
+    state: &AppState,
+    python: &str,
+    comfy_dir: &Path,
+    needs_cpu: bool,
+    device_flag: Option<&str>,
+    baseline_needs_cpu: bool,
+) -> AttentionChoice {
+    let version = comfy_attention::read_comfyui_version(comfy_dir);
+    let remembered = version
+        .and_then(|v| comfy_attention::remembered_ck_in(&crate::os_paths::app_config_json(), comfy_dir, v));
+    // Without an NVIDIA driver the torch device tells ROCm ("cuda") from XPU
+    // and the rest. Same cache as the --cpu decision, so Auto pays nothing
+    // extra; only asked when it can still change the answer.
+    let torch_device = if baseline_needs_cpu && !needs_cpu && device_flag.is_none() {
+        comfy_gpu_device_cached(python, Some(&state.comfy_gpu_cache)).flatten()
+    } else {
+        None
+    };
+    let facts = comfy_attention::CkFacts {
+        os: std::env::consts::OS,
+        needs_cpu,
+        device_flag,
+        nvidia_driver: !baseline_needs_cpu,
+        torch_device,
+        comfy_version: version,
+        switched_off: comfy_attention::ck_switched_off() || comfy_attention::ck_failed_this_run(),
+        remembered,
+    };
+    if remembered == Some(false) {
+        println!(
+            "[ComfyUI] {} is off for this ComfyUI: an earlier start with it exited before the port answered",
+            comfy_attention::CK_FLAG
+        );
+    }
+    let flag = comfy_attention::pick_attention_flag(
+        needs_cpu,
+        comfy_attention::ck_attention_eligible(&facts),
+        || comfy_attention::comfy_kitchen_cached(python, version),
+        || flash_attention_cached(state, python),
+    );
+    AttentionChoice {
+        flag,
+        ck_unproven: flag == Some(comfy_attention::CK_FLAG) && remembered != Some(true),
+        version,
+    }
+}
+
+/// Watch the ComfyUI in `comfy_process` until the port answers or the child
+/// exits, for [`comfy_attention::CK_PROOF_WATCH`] at most. The lock is held
+/// only for one `try_wait` per round, never across the HTTP probe or the
+/// sleep. A child that Stop took away reads as undecided.
+fn watch_own_ck_start(state: &AppState, port: u16) -> comfy_attention::CkWatch {
+    comfy_attention::watch_ck_start(
+        || {
+            let mut proc = state.comfy_process.lock().unwrap();
+            let child = proc.as_mut()?;
+            match child.try_wait() {
+                Ok(Some(_)) => {
+                    *proc = None;
+                    Some(true)
+                }
+                Ok(None) => Some(false),
+                Err(_) => None,
+            }
+        },
+        || is_comfyui_running_on_port(port),
+        comfy_attention::CK_PROOF_WATCH,
+        std::time::Duration::from_secs(1),
+    )
 }
 
 // ASYNC + spawn_blocking: a SYNCHRONOUS Tauri command runs on the MAIN thread.
@@ -3537,6 +3713,7 @@ pub fn auto_start_comfyui(state: &AppState) {
                 "--port", &port_str,
                 "--enable-cors-header", comfy_cors_origin(),
             ];
+            let mut auto_device_flag: Option<&'static str> = None;
             if auto_needs_cpu {
                 comfy_args.push("--cpu");
                 if let Some(reason) = cpu_flag_reason(auto_gpu_mode, auto_decision.baseline, auto_decision.torch_gpu) {
@@ -3549,17 +3726,27 @@ pub fn auto_start_comfyui(state: &AppState) {
                 Some(&state.comfy_gpu_cache),
             ) {
                 comfy_args.push(flag);
+                auto_device_flag = Some(flag);
                 println!("[ComfyUI] Auto-start: torch-directml found, starting with {flag}");
             }
-            // Mirror start_comfyui: auto-enable Flash Attention (FA2) when it
-            // actually imports in this python. Boot auto-start previously never
-            // passed the flag, so auto-started ComfyUI ran WAN video 4-5x slower
-            // than a manual start even with flash-attn installed. The probe is
-            // cached per python; an absent package fails fast, so the rare cost
-            // is one slow first-probe on a cold boot with flash-attn present.
-            if !auto_needs_cpu && flash_attention_cached(state, &python) {
-                comfy_args.push("--use-flash-attention");
-                println!("[ComfyUI] Auto-start: flash-attn detected — enabling Flash Attention");
+            // Mirror start_comfyui: the same single attention flag (Comfy
+            // Kitchen, else Flash Attention when it actually imports in this
+            // python). Boot auto-start previously never passed the flash flag,
+            // so auto-started ComfyUI ran WAN video 4-5x slower than a manual
+            // start even with flash-attn installed. The probes are cached per
+            // python; an absent package fails fast, so the rare cost is one
+            // slow first-probe on a cold boot with the package present.
+            let auto_attention = comfy_attention_choice(
+                state,
+                &python,
+                comfy_dir,
+                auto_needs_cpu,
+                auto_device_flag,
+                auto_decision.baseline,
+            );
+            if let Some(flag) = auto_attention.flag {
+                comfy_args.push(flag);
+                println!("[ComfyUI] Auto-start: enabling {flag}");
             }
             if let Some(file) = &auto_extra {
                 comfy_args.push("--extra-model-paths-config");
@@ -3614,6 +3801,25 @@ pub fn auto_start_comfyui(state: &AppState) {
                     }
 
                     *state.comfy_process.lock().unwrap() = Some(child);
+                    // Same proof as the manual start: an unproven ck start is
+                    // watched until its port answers. This runs on the setup
+                    // thread, so the wait blocks nothing the user sees.
+                    if auto_attention.ck_unproven {
+                        match watch_own_ck_start(state, port) {
+                            comfy_attention::CkWatch::Proven => auto_attention.remember(comfy_dir, true),
+                            comfy_attention::CkWatch::DiedEarly => {
+                                auto_attention.remember(comfy_dir, false);
+                                println!(
+                                    "[ComfyUI] Auto-start: exited before the port answered with {}, starting again without it",
+                                    comfy_attention::CK_FLAG
+                                );
+                                // `remember` marked the flag failed for this
+                                // run, so this second pass goes without it.
+                                return auto_start_comfyui(state);
+                            }
+                            comfy_attention::CkWatch::Undecided => {}
+                        }
+                    }
                     println!("[ComfyUI] Started");
                 }
                 Err(e) => println!("[ComfyUI] Failed to start: {}", e),

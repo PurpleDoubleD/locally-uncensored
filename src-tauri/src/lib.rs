@@ -1034,6 +1034,9 @@ pub fn run() {
             commands::media_cmds::video_stage_motion_video,
             #[cfg(desktop)]
             commands::media_cmds::video_stage_voice,
+            // Colour settle across the seams of a long ComfyUI video (3.0.9).
+            #[cfg(desktop)]
+            commands::video_settle::video_color_settle,
             // The music engine of the Mac (ACE-Step 1.5). See commands/music.rs.
             #[cfg(desktop)]
             commands::media_cmds::mlx_music_status,

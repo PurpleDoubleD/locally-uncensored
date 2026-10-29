@@ -103,6 +103,12 @@ export interface VideoParams extends GenerateParams {
   // source still / calmer motion; 127 (SVD default) drifts hard. We default ~90
   // for I2V fidelity (2026-06-11). Honoured only by the SVD path.
   motionBucketId?: number
+  /** A later section of a long clip (B18): the clip so far in ComfyUI's input
+   *  folder and how many of its last frames this section repeats. The graph
+   *  starts on those frames and outputs the whole clip (api/video-continue). */
+  continueFrom?: { video: string; overlap: number }
+  /** One pass with sliding context windows instead of sections (B18). */
+  contextWindows?: boolean
 }
 
 export interface ComfyUIOutput {
@@ -141,6 +147,12 @@ export function extractComfyOutputFiles(nodeOutput: unknown): ComfyUIOutput[] {
         typeof (item as { filename: unknown }).filename === 'string'
       ) {
         const it = item as { filename: string; subfolder?: unknown; type?: unknown }
+        // A file of ComfyUI's INPUT folder is never a result. Core LoadVideo
+        // reports a preview of the video it loaded under that type (B18 box
+        // run, 27.10.2026: every continued section of a long clip listed the
+        // clip so far next to its own output, and the chain took the input
+        // for the new section). Motion Control's driving video is the same.
+        if (it.type === 'input') continue
         found.push({
           filename: it.filename,
           subfolder: typeof it.subfolder === 'string' ? it.subfolder : '',
@@ -2249,33 +2261,7 @@ export async function submitWorkflow(workflow: ComfyApiGraph, clientId?: string)
     const rawText = await res.text().catch(() => '')
     let errMsg = `HTTP ${res.status}`
     try {
-      // ComfyUI's rejection body. Foreign JSON: `error` is a string on some
-      // versions and an `{ message }` on others, and `node_errors` is only
-      // present for a validation failure — so every read is narrowed.
-      const errData: unknown = JSON.parse(rawText)
-      const parts: string[] = []
-      const rawErr = isRecord(errData) ? errData.error : undefined
-      const topLevel = asString(rawErr) ?? (isRecord(rawErr) ? asString(rawErr.message) : undefined)
-      if (topLevel) parts.push(topLevel)
-      const nodeErrors = isRecord(errData) ? errData.node_errors : undefined
-      if (isRecord(nodeErrors)) {
-        for (const [nodeId, data] of Object.entries(nodeErrors)) {
-          const errs = asRecordArray(isRecord(data) ? data.errors : undefined)
-            // "Value not in list" alone names no value; the details say which
-            // one ("ckpt_name: 'x.safetensors' not in [...]"). The list itself
-            // can be hundreds of file names, so it is cut off.
-            .map((e) => {
-              const message = asString(e.message) ?? ''
-              const details = asString(e.details)?.split(' not in [')[0].slice(0, 200)
-              return details && message ? `${message} (${details})` : message || details || ''
-            })
-            .filter(Boolean)
-            .join(', ') || 'unknown'
-          const cls = (isRecord(data) ? asString(data.class_type) : undefined) ?? '?'
-          parts.push(`Node ${nodeId} (${cls}): ${errs}`)
-        }
-      }
-      if (parts.length > 0) errMsg = parts.join(' | ')
+      errMsg = describeComfyRejection(JSON.parse(rawText)) ?? errMsg
     } catch {
       if (rawText) errMsg = rawText.slice(0, 500)
     }
@@ -2284,8 +2270,53 @@ export async function submitWorkflow(workflow: ComfyApiGraph, clientId?: string)
   }
   const data: unknown = await res.json()
   const promptId = isRecord(data) ? asString(data.prompt_id) : undefined
+  // ComfyUI queues a prompt as soon as ONE output node passes validation and
+  // lists the failed ones in node_errors of a 200 answer (execution.py
+  // validate_prompt, server.py post_prompt). The run then ends without the
+  // video or image LU waits for, and all the user saw was "no output was
+  // produced" (GitHub #196). Such a half prompt is taken out of the queue
+  // and reported like a full rejection.
+  const nodeErrors = isRecord(data) ? data.node_errors : undefined
+  if (isRecord(nodeErrors) && Object.keys(nodeErrors).length > 0) {
+    if (promptId) await abandonPrompt(promptId)
+    const errMsg = describeComfyRejection(data) ?? 'some output nodes failed validation'
+    log.error('comfyui.workflow_rejected', { errMsg, partial: true, workflow: JSON.stringify(workflow).slice(0, 2000) })
+    throw new Error(`ComfyUI rejected workflow: ${errMsg}`)
+  }
   if (!promptId) throw new Error('ComfyUI accepted the workflow but returned no prompt_id.')
   return promptId
+}
+
+/**
+ * ComfyUI's verdict on a prompt as one line, or null when it names nothing.
+ * Foreign JSON: `error` is a string on some versions and an `{ message }` on
+ * others, and `node_errors` is only present for a validation failure, so
+ * every read is narrowed.
+ */
+function describeComfyRejection(errData: unknown): string | null {
+  const parts: string[] = []
+  const rawErr = isRecord(errData) ? errData.error : undefined
+  const topLevel = asString(rawErr) ?? (isRecord(rawErr) ? asString(rawErr.message) : undefined)
+  if (topLevel) parts.push(topLevel)
+  const nodeErrors = isRecord(errData) ? errData.node_errors : undefined
+  if (isRecord(nodeErrors)) {
+    for (const [nodeId, data] of Object.entries(nodeErrors)) {
+      const errs = asRecordArray(isRecord(data) ? data.errors : undefined)
+        // "Value not in list" alone names no value; the details say which
+        // one ("ckpt_name: 'x.safetensors' not in [...]"). The list itself
+        // can be hundreds of file names, so it is cut off.
+        .map((e) => {
+          const message = asString(e.message) ?? ''
+          const details = asString(e.details)?.split(' not in [')[0].slice(0, 200)
+          return details && message ? `${message} (${details})` : message || details || ''
+        })
+        .filter(Boolean)
+        .join(', ') || 'unknown'
+      const cls = (isRecord(data) ? asString(data.class_type) : undefined) ?? '?'
+      parts.push(`Node ${nodeId} (${cls}): ${errs}`)
+    }
+  }
+  return parts.length > 0 ? parts.join(' | ') : null
 }
 
 export async function cancelGeneration(): Promise<void> {

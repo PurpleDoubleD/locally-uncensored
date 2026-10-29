@@ -1463,14 +1463,19 @@ function LocalExtendControls() {
   const panelRef = useRef<HTMLDivElement>(null)
   const panel = usePopoverPlatz(panelRef, open, { bevorzugt: 'oben', abstand: 6, deckel: 256 })
 
-  const adopt = async (getUrl: () => Promise<{ url: string; revoke?: () => void }>, label: string) => {
+  const setExtendClip = useCreateStore((s) => s.setExtendClip)
+  const adopt = async (getUrl: () => Promise<{ url: string; revoke?: () => void; blob?: Blob }>, label: string) => {
     setBusy(true)
     setError(null)
     try {
-      const { url, revoke } = await getUrl()
+      const { url, revoke, blob } = await getUrl()
       try {
         const frame = await lastFrameFile(url, label)
         setSource(await loadImageRef(frame))
+        // B18: the clip itself goes along too. Wan and LTX 2.5 continue from
+        // its last frames instead of the one still, and the result is the
+        // whole clip, longer (lib/long-video-run).
+        setExtendClip(blob ?? null)
         setPickedLabel(label)
       } finally {
         revoke?.()
@@ -1487,13 +1492,13 @@ function LocalExtendControls() {
     adopt(async () => {
       const blob = await fetchGalleryItemBlob(g)
       const url = URL.createObjectURL(blob)
-      return { url, revoke: () => URL.revokeObjectURL(url) }
+      return { url, revoke: () => URL.revokeObjectURL(url), blob }
     }, g.prompt.slice(0, 40) || 'Local video')
 
   const fromFile = (f: File) =>
     adopt(async () => {
       const url = URL.createObjectURL(f)
-      return { url, revoke: () => URL.revokeObjectURL(url) }
+      return { url, revoke: () => URL.revokeObjectURL(url), blob: f }
     }, f.name)
 
   const value = source && pickedLabel ? pickedLabel : null
@@ -1528,7 +1533,7 @@ function LocalExtendControls() {
         </button>
         {value && (
           <button
-            onClick={() => { setSource(null); setPickedLabel(null) }}
+            onClick={() => { setSource(null); setExtendClip(null); setPickedLabel(null) }}
             className="p-1 text-gray-500 hover:text-gray-300" title="Clear" aria-label="Clear"
           >
             <X size={11} />
