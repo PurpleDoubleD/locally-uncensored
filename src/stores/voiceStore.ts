@@ -172,7 +172,13 @@ export const useVoiceStore = create<VoiceState>()(
       setRetryTakeReady: (ready) => set({ retryTakeReady: ready }),
       setPiperVoice: (voice) => set({ piperVoice: voice }),
 
-      updateVoiceSettings: (settings) => set((state) => ({ ...state, ...settings })),
+      // A fallback reason belongs to the engine that failed: switching the
+      // engine drops it, so a Piper reason never shows under External (B11).
+      updateVoiceSettings: (settings) => set((state) => ({
+        ...state,
+        ...settings,
+        ...(settings.ttsMode !== undefined && settings.ttsMode !== state.ttsMode ? { ttsFallbackReason: null } : {}),
+      })),
 
       resetTransient: () =>
         set({

@@ -1,5 +1,7 @@
+import { useState } from "react"
 import { Volume2, VolumeX } from "lucide-react"
 import { useVoice } from "../../hooks/useVoice"
+import { useVoiceStore } from "../../stores/voiceStore"
 
 interface Props {
   text: string
@@ -7,6 +9,11 @@ interface Props {
 
 export function SpeakerButton({ text }: Props) {
   const { isSpeaking, ttsSupported, ttsAvailable, ttsExternalReady, ttsEnabled, speakTextStreaming, stopSpeaking } = useVoice()
+  // Jaeger B, B11: when the external voice fails, read-aloud switches to the
+  // system voice. The bubble whose button was pressed says so, with the
+  // error, instead of speaking in another voice without a word.
+  const fallbackReason = useVoiceStore((s) => (s.ttsMode === "external" ? s.ttsFallbackReason : null))
+  const [pressed, setPressed] = useState(false)
 
   // Show the read-aloud button only when the feature is on AND some TTS engine
   // is usable: an external HTTP engine (#58), local neural Piper, or the
@@ -19,11 +26,13 @@ export function SpeakerButton({ text }: Props) {
     if (isSpeaking) {
       stopSpeaking()
     } else {
+      setPressed(true)
       speakTextStreaming(text)
     }
   }
 
   return (
+    <>
     <button
       onClick={handleClick}
       className={
@@ -37,5 +46,11 @@ export function SpeakerButton({ text }: Props) {
     >
       {isSpeaking ? <VolumeX size={12} /> : <Volume2 size={12} />}
     </button>
+    {pressed && fallbackReason && (
+      <span role="status" className="text-[0.6rem] leading-snug text-amber-600 dark:text-amber-400 max-w-[18rem]">
+        {fallbackReason}
+      </span>
+    )}
+    </>
   )
 }
