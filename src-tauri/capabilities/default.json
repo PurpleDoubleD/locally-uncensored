@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Main-window capability. shell:allow-spawn is the only permission here that can start a process, and it is scoped to the two package runners external MCP servers are actually launched with (npx, uvx). Every general-purpose interpreter and container runtime was removed: node, deno, bun, python and py all take a one-shot eval flag (node -e, python -c), npm/pnpm/yarn run whatever a package.json in the cwd defines, and docker run -v /:/host hands out the whole disk. With those in the allow-list, any script-execution bug in the WebView (a PDF viewer, a markdown renderer, a dependency) was code execution on the user's machine rather than defacement inside the app.",
+  "description": "Main-window capability. shell:allow-spawn is the only permission here that can start a process, and it is scoped to the two package runners external MCP servers are actually launched with (npx, uvx). Every general-purpose interpreter and container runtime was removed: node, deno, bun, python and py all take a one-shot eval flag (node -e, python -c), npm/pnpm/yarn run whatever a package.json in the cwd defines, and docker run -v /:/host hands out the whole disk. With those in the allow-list, any script-execution bug in the WebView (a PDF viewer, a markdown renderer, a dependency) was code execution on the user's machine rather than defacement inside the app. The three uvx entries are one program, not three: uv ships uvx.exe on Windows (docs.astral.sh/uv), which the bare name finds; uvx.cmd covers a shim a version manager or wrapper put on the PATH, the same way npx.cmd covers npm's shim; and $HOME/.local/bin/uvx.exe is the official installer's fixed location, for an LU that was started before the installer added that folder to the PATH. None of them takes an eval flag or starts anything but uvx.",
   "platforms": ["linux", "macOS", "windows"],
   "windows": ["main"],
   "permissions": [
@@ -20,7 +20,9 @@
       "allow": [
         { "name": "npx", "cmd": "npx", "args": true },
         { "name": "npx.cmd", "cmd": "npx.cmd", "args": true },
-        { "name": "uvx", "cmd": "uvx", "args": true }
+        { "name": "uvx", "cmd": "uvx", "args": true },
+        { "name": "uvx.cmd", "cmd": "uvx.cmd", "args": true },
+        { "name": "uvx-local-bin", "cmd": "$HOME/.local/bin/uvx.exe", "args": true }
       ]
     },
     "shell:allow-stdin-write",

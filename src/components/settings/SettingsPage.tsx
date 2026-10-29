@@ -758,6 +758,11 @@ interface ComfyStatusResponse {
    *  read as foreign after a restart, blocking Update on the customer's own
    *  process). */
   ownedByApp?: boolean
+  /** 3.0.9: the "Start ComfyUI when LU starts" switch (`comfy_boot_plan` in
+   *  `process.rs`). Off unless the user turned it on or LU installed this
+   *  ComfyUI itself; a ComfyUI LU only found is no longer started at launch.
+   *  The dev server does not send it. */
+  autostart?: boolean
 }
 
 /** Antwort von `comfyui_last_output` (`process.rs`). Alle vier Schluessel
@@ -1276,6 +1281,34 @@ export function ComfyUISettings() {
           </p>
         )}
       </div>
+
+      {/* 3.0.9: at launch LU only connects to a ComfyUI that already runs.
+          Box click-through 27.10.2026: it used to start whatever install the
+          disk search found, the user's own included, without asking. */}
+      {status?.isLocal !== false && status?.found && (
+        <label className="flex items-start justify-between gap-3 cursor-pointer">
+          <span>
+            <span className="block t-micro text-gray-300">Start ComfyUI when LU starts</span>
+            <span className={`block t-micro leading-relaxed ${HINWEIS_TEXT.ruhig}`}>
+              Off: LU uses a ComfyUI that is already running and starts this one only when you click Start or create something.
+            </span>
+          </span>
+          <input
+            type="checkbox"
+            aria-label="Start ComfyUI when LU starts"
+            checked={status?.autostart === true}
+            onChange={async (e) => {
+              const enabled = e.target.checked
+              const { backendCall } = await import('../../api/backend')
+              try {
+                await backendCall('set_comfyui_autostart', { enabled })
+                setStatus(prev => prev ? { ...prev, autostart: enabled } : prev)
+              } catch { /* the next status poll shows what was actually saved */ }
+            }}
+            className="mt-0.5 accent-emerald-500"
+          />
+        </label>
+      )}
 
       {/* Controls, local host only (can't manage a remote process) */}
       {status?.isLocal !== false && (

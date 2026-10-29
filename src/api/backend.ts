@@ -506,6 +506,7 @@ export async function backendCall<T = unknown>(
     install_ollama: { path: "/local-api/install-ollama", method: "POST" },
     install_ollama_status: { path: "/local-api/install-ollama-status" },
     set_comfyui_port: { path: "/local-api/set-comfyui-port", method: "POST" },
+    set_comfyui_autostart: { path: "/local-api/set-comfyui-autostart", method: "POST" },
     set_comfyui_host: { path: "/local-api/set-comfyui-host", method: "POST" },
     set_ollama_host: { path: "/local-api/set-ollama-host", method: "POST" },
     get_ollama_host: { path: "/local-api/get-ollama-host" },
@@ -608,6 +609,7 @@ export async function backendCall<T = unknown>(
     // REA, the reverse engineering plugin of the agents: the pinned package
     // is fetched and checked by the Rust process only (commands/plugin_rea.rs).
     plugin_rea_status: { path: "/local-api/plugin-rea-status" },
+    mcp_child_path: { path: "/local-api/mcp-child-path" },
     plugin_rea_fetch: { path: "/local-api/plugin-rea-fetch", method: "POST" },
     plugin_rea_guard: { path: "/local-api/plugin-rea-guard", method: "POST" },
     // Astra computer use: mouse, keyboard and screen belong to the Rust

@@ -677,6 +677,7 @@ pub fn run() {
             commands::process::get_comfy_gpu_status,
             commands::process::comfy_torch_plan,
             commands::process::set_comfyui_port,
+            commands::process::set_comfyui_autostart,
             commands::process::set_comfyui_host,
             commands::process::set_ollama_host,
             commands::process::get_ollama_host,
@@ -786,6 +787,7 @@ pub fn run() {
             // Shell
             // REA as an agent plugin: the pinned package and what its start needs.
             commands::plugin_rea::plugin_rea_status,
+            commands::plugin_rea::mcp_child_path,
             commands::plugin_rea::plugin_rea_fetch,
             commands::plugin_rea::plugin_rea_guard,
             commands::shell::shell_execute,
