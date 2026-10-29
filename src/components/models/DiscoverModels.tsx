@@ -609,15 +609,20 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
   }
 
   const [hfSearchResults, setHfSearchResults] = useState<DiscoverModel[]>([])
+  // Each Enter is a new search. Only the newest one may write the results and
+  // end the spinner: a slow answer to an older query arriving late used to
+  // overwrite the hits of the query now in the box.
+  const hfSearchSeq = useRef(0)
 
   const handleSearch = async () => {
     if (!search.trim() || !isText) return
+    const mine = ++hfSearchSeq.current
     setLoading(true)
     try {
       const results = await searchHuggingFaceModels(search.trim())
-      setHfSearchResults(results)
+      if (mine === hfSearchSeq.current) setHfSearchResults(results)
     } catch { /* keep existing */ }
-    setLoading(false)
+    if (mine === hfSearchSeq.current) setLoading(false)
   }
 
   // The search input lives in the ModelManager header. It feeds `search`
