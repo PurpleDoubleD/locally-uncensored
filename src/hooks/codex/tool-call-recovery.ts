@@ -87,3 +87,27 @@ export function recoverToolCallsFromContent(toolCalls: ToolCall[], content: stri
   if (extractedFromContent && !/[A-Za-z0-9]/.test(turnContent)) turnContent = ''
   return { toolCalls: calls, content: turnContent, extractedFromContent }
 }
+
+/**
+ * Dasselbe, aber ein Aufruf AUS DEM TEXT zaehlt nur, wenn jeder Name darin ein
+ * Werkzeug dieses Agenten ist (GH #147): Beispiel-JSON in einer Erklaerung
+ * wird so nie ausgefuehrt. Native Aufrufe bleiben, wie sie sind.
+ *
+ * Der Streaming-Zweig von useCodex hatte diese Regel inline, der Hermes-Zweig
+ * gar keine: ein Modell auf dem Prompt-Transport, das seine Aufrufe als
+ * ```json-Block schrieb, beendete den Lauf mit rohem JSON (T1-Nachttest 3.0.9).
+ */
+export function recoverKnownToolCallsFromContent(
+  toolCalls: ToolCall[],
+  content: string,
+  isKnown: (name: string, args: Record<string, unknown>) => boolean,
+): RecoveredTurn {
+  const recovered = recoverToolCallsFromContent(toolCalls, content)
+  const fromText = toolCalls.length === 0 && recovered.toolCalls.length > 0
+  if (!fromText) return recovered
+  const allKnown = recovered.toolCalls.every((tc) => {
+    const args = tc.function.arguments
+    return isKnown(tc.function.name, args && typeof args === 'object' && !Array.isArray(args) ? args as Record<string, unknown> : {})
+  })
+  return allKnown ? recovered : { toolCalls, content, extractedFromContent: false }
+}
