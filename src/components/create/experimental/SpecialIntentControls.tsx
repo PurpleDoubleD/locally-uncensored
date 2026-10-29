@@ -277,6 +277,7 @@ function CharacterPanel() {
             placeholder="Trigger word, e.g. davechar"
             className="t-control w-44 px-2.5 h-[var(--control-h-sm)] rounded-md bg-white/[0.03] border border-white/[0.06] text-gray-200 placeholder-gray-600 focus:outline-none focus:border-white/15"
           />
+          <TriggerWordNote />
           <span className="t-label text-gray-600">
             {trainImages.length}/{maxTrainImages(backend)} photos added{trainImages.length < MIN_TRAIN_IMAGES ? `, need at least ${MIN_TRAIN_IMAGES}` : ''}
           </span>
@@ -681,6 +682,7 @@ function LocalTrainControls() {
           placeholder="Trigger word, e.g. davechar"
           className="t-control w-44 px-2.5 h-[var(--control-h-sm)] rounded-md bg-white/[0.03] border border-white/[0.06] text-gray-200 placeholder-gray-600 focus:outline-none focus:border-white/15"
         />
+        <TriggerWordNote />
         <Segmented
           size="sm"
           layoutId="train-steps"
@@ -804,6 +806,7 @@ function MacTrainControls() {
           placeholder="Trigger word, e.g. davechar"
           className="t-control w-44 px-2.5 h-[var(--control-h-sm)] rounded-md bg-white/[0.03] border border-white/[0.06] text-gray-200 placeholder-gray-600 focus:outline-none focus:border-white/15"
         />
+        <TriggerWordNote />
         <Segmented
           size="sm"
           layoutId="train-steps"
@@ -1660,4 +1663,12 @@ function MotionControls() {
       <DrivingVideoChip empty="Add driving video (dance/pose)" />
     </div>
   )
+}
+
+/** C7: says under the trigger field what it did to the typed word ("Jörg" is
+ *  trained as "Joerg"), so the word on screen is visibly the word learned. */
+function TriggerWordNote() {
+  const note = useCreateStore((s) => s.triggerWordNote)
+  if (!note) return null
+  return <p role="status" data-testid="trigger-word-note" className={`w-full text-center t-micro ${HINWEIS_TEXT.ruhig}`}>{note}</p>
 }

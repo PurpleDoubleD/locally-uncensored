@@ -66,6 +66,7 @@ export default function NewCharacterPage() {
   useCatalogVersion()
   const f = useCreateFacts()
   const name = useCreateStore((s) => s.triggerWord)
+  const nameNote = useCreateStore((s) => s.triggerWordNote)
   const photos = useCreateStore((s) => s.trainImages)
   const running = useCreateStore((s) => s.isGenerating)
   const progress = useCreateStore((s) => s.progress)
@@ -265,7 +266,7 @@ export default function NewCharacterPage() {
           value={name}
           onChange={(v) => useCreateStore.getState().setTriggerWord(v)}
           placeholder={T.newChar.namePlaceholder}
-          hint={T.newChar.nameHint}
+          hint={nameNote ?? T.newChar.nameHint}
           error={asked && !name.trim() ? T.newChar.nameMissing : undefined}
           disabled={running}
           maxLength={30}

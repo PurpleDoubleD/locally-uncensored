@@ -95,6 +95,7 @@ import {
 } from '../api/trainer'
 import { getMacTrainStatus, macTrainMissing } from '../api/mlx-train'
 import { buildTrainCaption } from '../lib/train-captions'
+import { trainTriggerWord } from '../lib/train-trigger'
 import { useCreateStore, EDIT_MAX_DENOISE, characterImageRun, deriveIntent, type CreateState } from '../stores/createStore'
 import { useWorkflowStore } from '../stores/workflowStore'
 import { useSettingsStore } from '../stores/settingsStore'
@@ -554,7 +555,10 @@ export function useCreate() {
     // below go there by themselves (api/trainer.ts); what differs is how the
     // memory is handed over.
     const mac = isMlxImageHost()
-    const trigger = state.triggerWord.trim()
+    // C7: the same word Rust names the LoRA file after, so captions, file
+    // name and the Use shelf's prompt token are one word (lib/train-trigger.ts).
+    // Also catches a persisted "Jörg" saved before the field cleaned it.
+    const trigger = trainTriggerWord(state.triggerWord)
     if (!trigger) {
       setError('Pick a trigger word first, e.g. davechar. It becomes the token that summons your character.')
       return

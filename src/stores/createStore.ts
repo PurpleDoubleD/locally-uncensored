@@ -59,6 +59,7 @@ import { cloudModelsFor } from './cloudCatalogStore'
 import { createRunModel } from '../lib/render/create-studio'
 import { DEFAULT_UPSCALE_FACTOR, normalizeUpscaleFactor, type UpscaleFactor } from '../lib/local-upscale'
 import { characterLoraFile, isLocalCharacter, type CharacterRef } from '../lib/character-ref'
+import { triggerWordNote, typedTriggerWord } from '../lib/train-trigger'
 // ModelType includes: flux, flux2, zimage, sdxl, sd15, wan, hunyuan, unknown
 
 export type ProgressPhase = 'idle' | 'queued' | 'loading-model' | 'loading-clip' | 'loading-vae' | 'sampling' | 'decoding' | 'complete'
@@ -393,6 +394,9 @@ export interface CreateState {
   trainImages: MediaRef[]
   /** Character-Studio trigger word — the token that summons the character. */
   triggerWord: string
+  /** C7: what the field did to the last typed trigger word (ö to oe, a
+   *  dropped letter), shown under it. Null when nothing was changed. */
+  triggerWordNote: string | null
   /** Local training length (musubi steps). Quality/time tradeoff, persisted. */
   trainSteps: number
   /** 3.0.8 D28: each staged photo's own description (clothes, hair, place),
@@ -1041,6 +1045,7 @@ export const useCreateStore = create<CreateState>()(
       characterTab: 'train' as 'train' | 'use',
       trainImages: [] as MediaRef[],
       triggerWord: '',
+      triggerWordNote: null,
       // Dieselbe Zahl, die der Trainer ohne Angabe nimmt
       // (`steps.unwrap_or(1200)`, trainer.rs), und die Stufe `Standard`.
       trainSteps: TRAIN_STEPS_DEFAULT,
@@ -1362,7 +1367,15 @@ export const useCreateStore = create<CreateState>()(
         releaseDroppedMediaRefs(get().trainImages, [])
         set({ trainImages: [], trainCaptions: {} })
       },
-      setTriggerWord: (w) => set({ triggerWord: w.replace(/\s+/g, '').slice(0, 30) }),
+      // C7: the field holds the word in the one form the trainer, the LoRA
+      // file name and the Use shelf agree on (lib/train-trigger.ts). The note
+      // stays until the field is emptied, so it is still there after the next
+      // keystroke.
+      setTriggerWord: (w) => set((s) => {
+        const triggerWord = typedTriggerWord(w)
+        const note = triggerWordNote(w)
+        return { triggerWord, triggerWordNote: triggerWord || note ? note ?? s.triggerWordNote : null }
+      }),
       // Same clamp as the Rust command so the UI can never book a rejected run.
       setTrainSteps: (n) => set({ trainSteps: Math.max(100, Math.min(4000, Math.floor(n))) }),
       setTrainCaption: (name, text) => set((s) => {
