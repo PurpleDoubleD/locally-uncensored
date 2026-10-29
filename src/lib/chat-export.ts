@@ -338,7 +338,36 @@ export function parseImportedChats(json: string): Conversation[] {
   if (valid.length === 0) {
     throw new Error('No valid conversations found in that file.')
   }
-  return valid
+  return valid.map((c) => ({ ...c, messages: importedMessages(c.messages as unknown[], c.id) }))
+}
+
+const ROLES = new Set(['user', 'assistant', 'system', 'tool'])
+
+/**
+ * Every message of an imported chat in the shape the chat view draws.
+ *
+ * A backup is a file from outside: edited by hand, from an older build, or
+ * simply broken. One message with `"content": null` used to be taken as it
+ * was, and the chat view fell over on it, again after every restart, while a
+ * search in the sidebar took the whole app down (T1 night test 3.0.9, A4).
+ * What is not a message at all, or has a role the app does not know, is
+ * dropped; a missing id is made up; content that is not text becomes text.
+ */
+function importedMessages(raw: unknown[], conversationId: string): Message[] {
+  const out: Message[] = []
+  raw.forEach((m, i) => {
+    if (!m || typeof m !== 'object') return
+    const msg = m as Record<string, unknown>
+    if (typeof msg.role !== 'string' || !ROLES.has(msg.role)) return
+    const content = msg.content
+    out.push({
+      ...(msg as unknown as Message),
+      id: typeof msg.id === 'string' && msg.id ? msg.id : `${conversationId}-import-${i}`,
+      content: typeof content === 'string' ? content : content == null ? '' : typeof content === 'object' ? JSON.stringify(content) : String(content),
+      timestamp: typeof msg.timestamp === 'number' ? msg.timestamp : 0,
+    })
+  })
+  return out
 }
 
 /** References are installation-local. The browser build exports the original
