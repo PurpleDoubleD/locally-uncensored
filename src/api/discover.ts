@@ -2126,6 +2126,48 @@ export function civitaiHostSwap(url: string | undefined, host: string): string |
 }
 
 /**
+ * Das Vorschaubild eines CivitAI-Treffers als kleines Standbild.
+ *
+ * Discord #bug-reports, 29.10.2026 (Ubuntu): „when searching for models in app
+ * from civitai searchbox, the app crashes". Die API nennt als erstes Bild einer
+ * Version die Originaldatei (`…/original=true/123.mp4`). Gemessen für „wan“,
+ * 20 Treffer mit 19 Vorschaubildern: 13 davon MP4-Videos, zusammen 68 MB (das größte 15,9 MB) für
+ * Kärtchen von 56 px. Auf Linux dekodiert WebKitGTK ein Video im `<img>` mit
+ * GStreamer (WebView2 unter Windows zeigt es gar nicht), also
+ * zwanzig Videodekoder auf einmal, mit echter GPU über VA-API/GL.
+ *
+ * Der Bild-CDN von CivitAI liefert dieselbe Datei verkleinert, und mit
+ * `anim=false` auch ein Video als einzelnes JPEG (gemessen: 111 KB statt
+ * 695 KB bis 16 MB, image/jpeg statt video/mp4; alle 19 zusammen
+ * 1,89 MB). Dieselbe Angabe benutzt die CivitAI-Seite selbst. Ein Video, das
+ * nicht auf diesem CDN liegt, bekommt KEIN Vorschaubild: ein Video gehört nicht
+ * in ein `<img>`.
+ */
+const CIVITAI_THUMB_PARAMS = 'anim=false,width=450,optimized=true'
+
+export function civitaiThumbUrl(url: string | undefined, type?: string): string | undefined {
+  if (!url) return undefined
+  const isVideo = type === 'video' || /\.(mp4|webm|mov|m4v)(\?|#|$)/i.test(url)
+  let parsed: URL
+  try {
+    parsed = new URL(url)
+  } catch {
+    return undefined
+  }
+  if (parsed.protocol !== 'https:' || parsed.hostname !== 'image.civitai.com') {
+    return isVideo ? undefined : url
+  }
+  // /<Schlüssel>/<uuid>/<Angaben>/<Name>, ältere Antworten ohne Angaben-Teil.
+  const segs = parsed.pathname.split('/').filter(Boolean)
+  if (segs.length === 4 && segs[2].includes('=')) segs[2] = CIVITAI_THUMB_PARAMS
+  else if (segs.length === 3) segs.splice(2, 0, CIVITAI_THUMB_PARAMS)
+  else return isVideo ? undefined : url
+  // `pathname` ist schon kodiert, die Teile gehen unverändert zurück.
+  parsed.pathname = '/' + segs.join('/')
+  return parsed.toString()
+}
+
+/**
  * Eine CivitAI-Beschreibung als Text, nicht als Markup.
  *
  * Befund am echten Windows-Bau (21.09.2026, C4-search-pixel-results.png): in
@@ -2285,7 +2327,8 @@ export async function searchCivitaiModels(
       const version = asRecordArray(prop(item, 'modelVersions'))[0]
       const files = asRecordArray(prop(version, 'files'))
       const file = only?.safetensorsOnly ? files.find(isSafetensors) : files[0]
-      const thumb = asString(propPath(asRecordArray(prop(version, 'images'))[0], 'url'))
+      const firstImage = asRecordArray(prop(version, 'images'))[0]
+      const thumb = civitaiThumbUrl(asString(prop(firstImage, 'url')), asString(prop(firstImage, 'type')))
       // The version's own address is that of its first file. Where a later
       // file was picked, only that file's address fetches it.
       const downloadUrl = only?.safetensorsOnly
