@@ -141,6 +141,13 @@ impl TrainPreset {
         }
     }
 
+    /// `--network_alpha`, the same as the rank. musubi's default is 1, which
+    /// scales the LoRA by 1/rank: at 1e-4 a 600-step style run on the 3060
+    /// drew no style at strength 1.0 (3.0.9 P8 box run).
+    pub(crate) fn network_alpha(self) -> &'static str {
+        self.network_dim()
+    }
+
     /// `--gradient_checkpointing_cpu_offload` (needs `--gradient_checkpointing`,
     /// which every recipe sets).
     pub(crate) fn offloads_activations(self) -> bool {
@@ -159,6 +166,49 @@ impl TrainPreset {
         match self {
             TrainPreset::Standard => "Normal",
             TrainPreset::LowVram => "Low VRAM",
+        }
+    }
+}
+
+/// 3.0.9 P8: what a run learns. Both kinds run the same recipe on the same
+/// bases; the frontend writes the captions (`lib/train-kind.ts`), so the
+/// kind only decides the file name, the closing line and whether the set's
+/// photos become a character's reference images.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TrainKind {
+    Character,
+    Style,
+}
+
+impl TrainKind {
+    /// `"style"` from the frontend; anything else, a missing value from an
+    /// older frontend included, is a character.
+    pub(crate) fn from_arg(arg: Option<&str>) -> Self {
+        match arg.map(str::trim) {
+            Some("style") => TrainKind::Style,
+            _ => TrainKind::Character,
+        }
+    }
+
+    /// The trained file's stem. `char_<name>_zimage` is what the Use shelf
+    /// reads (`parseLocalCharacterLora`); a style must not land there.
+    pub(crate) fn output_name(self, name: &str) -> String {
+        match self {
+            TrainKind::Character => format!("char_{name}_zimage"),
+            TrainKind::Style => format!("style_{name}_zimage"),
+        }
+    }
+
+    pub(crate) fn finished_line(self, file: &str, at: &Path, trigger: &str) -> String {
+        match self {
+            TrainKind::Character => format!(
+                "Character ready: {file} is saved at {} and already in the LoRA picker on the Image tab. Put '{trigger}' in a prompt with the LoRA active.",
+                at.display(),
+            ),
+            TrainKind::Style => format!(
+                "Style ready: {file} is saved at {} and switched on in the LoRA picker on the Image tab. Set its strength there.",
+                at.display(),
+            ),
         }
     }
 }
@@ -2844,6 +2894,7 @@ fn training_command(vpy: &str, repo: &Path, step: &TrainStep<'_>) -> Command {
     cmd.args([
         "--max_data_loader_n_workers", "2", "--persistent_data_loader_workers",
         "--network_module", "networks.lora_zimage", "--network_dim", step.preset.network_dim(),
+        "--network_alpha", step.preset.network_alpha(),
         "--max_train_steps", step.steps,
         "--save_precision", step.precision.save_precision,
         "--seed", "42",
@@ -2854,6 +2905,8 @@ fn training_command(vpy: &str, repo: &Path, step: &TrainStep<'_>) -> Command {
 }
 
 #[allow(non_snake_case)]
+// The arguments are the fields of the IPC call (api/trainer.ts), one each.
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub fn start_character_training(
     app: tauri::AppHandle,
@@ -2863,8 +2916,10 @@ pub fn start_character_training(
     triggerWord: String,
     steps: Option<u32>,
     preset: Option<String>,
+    kind: Option<String>,
 ) -> Result<serde_json::Value, String> {
     let preset = TrainPreset::from_arg(preset.as_deref());
+    let kind = TrainKind::from_arg(kind.as_deref());
     {
         let mut run = state.trainer_run.lock().unwrap();
         if run.status == "running" {
@@ -3167,7 +3222,7 @@ pub fn start_character_training(
         }
         set_status(&run, "running", &format!("Step 3/4: Training ({steps} steps). This runs for a while, the counter follows every step."));
         let steps_s = steps.to_string();
-        let out_name = format!("char_{lora_name}_zimage");
+        let out_name = kind.output_name(&lora_name);
         let out_dir_s = out_dir.to_string_lossy().to_string();
         let mut c3 = training_command(&vpy_s, &repo, &TrainStep {
             dit: &dit_s,
@@ -3219,17 +3274,13 @@ pub fn start_character_training(
             return;
         }
         // The set's photos now belong to this file: Edit hands them out as
-        // reference images of the character (character_files.rs).
-        crate::commands::character_files::write_training_marker(&set_dir, &final_path);
+        // reference images of the character (character_files.rs). A style's
+        // pictures are no one's likeness, so they stay out of that.
+        if kind == TrainKind::Character {
+            crate::commands::character_files::write_training_marker(&set_dir, &final_path);
+        }
 
-        set_status(
-            &run,
-            "complete",
-            &format!(
-                "Character ready: {out_name}.safetensors is saved at {} and already in the LoRA picker on the Image tab. Put '{trigger}' in a prompt with the LoRA active.",
-                final_path.display(),
-            ),
-        );
+        set_status(&run, "complete", &kind.finished_line(&format!("{out_name}.safetensors"), &final_path, &trigger));
         info!("character training complete");
     });
 
@@ -5875,6 +5926,7 @@ mod captions_and_low_vram_tests {
         let args = args_for(TrainPreset::Standard);
         assert_eq!(value_of(&args, "--blocks_to_swap"), Some("16"));
         assert_eq!(value_of(&args, "--network_dim"), Some("32"));
+        assert_eq!(value_of(&args, "--network_alpha"), Some("32"));
         assert!(!args.iter().any(|a| a == "--gradient_checkpointing_cpu_offload"), "{args:?}");
         assert!(args.iter().any(|a| a == "--gradient_checkpointing"));
         assert!(args.iter().any(|a| a == "--fp8_base") && args.iter().any(|a| a == "--fp8_scaled"));
@@ -5886,6 +5938,7 @@ mod captions_and_low_vram_tests {
         // 28 = num_blocks (30) - 2, the assert in zimage_model.py enable_block_swap.
         assert_eq!(value_of(&args, "--blocks_to_swap"), Some("28"));
         assert_eq!(value_of(&args, "--network_dim"), Some("16"));
+        assert_eq!(value_of(&args, "--network_alpha"), Some("16"));
         assert!(args.iter().any(|a| a == "--gradient_checkpointing_cpu_offload"), "{args:?}");
         // The offload only works on top of gradient checkpointing.
         assert!(args.iter().any(|a| a == "--gradient_checkpointing"));
@@ -5896,7 +5949,7 @@ mod captions_and_low_vram_tests {
             "--fp8_scaled", "--blocks_to_swap", "--timestep_sampling", "--weighting_scheme", "--discrete_flow_shift",
             "--optimizer_type", "--learning_rate", "--gradient_checkpointing", "--gradient_checkpointing_cpu_offload",
             "--max_data_loader_n_workers", "--persistent_data_loader_workers", "--network_module", "--network_dim",
-            "--max_train_steps", "--save_precision", "--seed", "--output_dir", "--output_name",
+            "--network_alpha", "--max_train_steps", "--save_precision", "--seed", "--output_dir", "--output_name",
         ];
         for a in args.iter().filter(|a| a.starts_with("--")) {
             assert!(known.contains(&a.as_str()), "{a} is not an argument this recipe has evidence for");
@@ -5954,5 +6007,34 @@ mod captions_and_low_vram_tests {
         assert!(run.contains("vram_verdict(vram_mib, &precision, preset)"));
         assert!(run.contains("preset.text_encoder_batch()"));
         assert!(run.contains("            preset,\n        });"), "the training step gets the preset");
+    }
+
+    #[test]
+    fn a_style_run_writes_a_style_file_and_an_older_frontend_trains_a_character() {
+        assert_eq!(TrainKind::from_arg(Some("style")), TrainKind::Style);
+        assert_eq!(TrainKind::from_arg(Some(" style ")), TrainKind::Style);
+        assert_eq!(TrainKind::from_arg(Some("character")), TrainKind::Character);
+        assert_eq!(TrainKind::from_arg(Some("pose")), TrainKind::Character);
+        assert_eq!(TrainKind::from_arg(None), TrainKind::Character, "an older frontend sends nothing");
+        assert_eq!(TrainKind::Character.output_name("anna"), "char_anna_zimage");
+        assert_eq!(TrainKind::Style.output_name("inkwash"), "style_inkwash_zimage");
+        // The Use shelf and the Edit references read `char_..._zimage`; a style
+        // must not look like one (character_files.rs `trigger_of`).
+        assert!(crate::commands::character_files::trigger_of("style_inkwash_zimage.safetensors").is_none());
+        let style = TrainKind::Style.finished_line("style_inkwash_zimage.safetensors", Path::new("/l/x"), "inkwash");
+        assert!(style.starts_with("Style ready"), "{style}");
+        assert!(!style.contains("Character"), "{style}");
+    }
+
+    #[test]
+    fn the_run_threads_the_kind_into_the_file_name_and_keeps_a_style_out_of_the_references() {
+        let src = include_str!("trainer.rs");
+        let run = &src[src.find("pub fn start_character_training").expect("start fn")..];
+        let run = &run[..run.find("pub fn character_training_status").expect("end of run")];
+        assert!(run.contains("TrainKind::from_arg(kind.as_deref())"));
+        assert!(run.contains("let out_name = kind.output_name(&lora_name);"));
+        assert!(!run.contains("format!(\"char_{lora_name}_zimage\")"));
+        let marker = run.find("write_training_marker").expect("the marker call");
+        assert!(run[..marker].ends_with("if kind == TrainKind::Character {\n            crate::commands::character_files::"), "only a character's photos become references");
     }
 }

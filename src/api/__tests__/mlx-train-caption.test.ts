@@ -59,6 +59,6 @@ describe('die Beschreibung je Foto auf dem Mac', () => {
   it('unter Windows und Linux geht das Rezept mit', async () => {
     io.mac = false
     await startCharacterTraining('luxfox', 'luxfox', 'luxfox', 400, 'low-vram')
-    expect(io.backend[0]).toEqual({ cmd: 'start_character_training', args: { setId: 'luxfox', name: 'luxfox', triggerWord: 'luxfox', steps: 400, preset: 'low-vram' } })
+    expect(io.backend[0]).toEqual({ cmd: 'start_character_training', args: { setId: 'luxfox', name: 'luxfox', triggerWord: 'luxfox', steps: 400, preset: 'low-vram', kind: null } })
   })
 })

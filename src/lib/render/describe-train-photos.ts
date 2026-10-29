@@ -14,6 +14,7 @@ import { runInLane } from '../run-slot'
 import { isThinkingCompatible } from '../model-compatibility'
 import { laneOf, currentLaneFacts } from '../run-lane-of-model'
 import { cleanTrainDescription } from '../train-captions'
+import { DESCRIBE_STYLE_SYSTEM, type TrainKind } from '../train-kind'
 
 export interface DescribeAvailability {
   available: boolean
@@ -98,7 +99,7 @@ async function base64Of(blob: Blob): Promise<string> {
 }
 
 /** One photo's description from the local chat model, or null. */
-export async function describeTrainPhoto(blob: Blob, signal?: AbortSignal): Promise<string | null> {
+export async function describeTrainPhoto(blob: Blob, signal?: AbortSignal, kind: TrainKind = 'character'): Promise<string | null> {
   const model = useModelStore.getState().activeModel
   if (!model || signal?.aborted) return null
   if (laneOf(model, currentLaneFacts()) !== 'local') return null
@@ -113,7 +114,7 @@ export async function describeTrainPhoto(blob: Blob, signal?: AbortSignal): Prom
     const effortDefault = meta && 'effortDefault' in meta ? meta.effortDefault : undefined
     const image = await photoForModel(blob)
     const messages: ChatMessage[] = [
-      { role: 'system', content: DESCRIBE_SYSTEM },
+      { role: 'system', content: kind === 'style' ? DESCRIBE_STYLE_SYSTEM : DESCRIBE_SYSTEM },
       { role: 'user', content: 'Caption this photo.', images: [image] },
     ]
     const own = new AbortController()
