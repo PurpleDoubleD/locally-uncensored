@@ -22,6 +22,9 @@ export async function settleSeams(
   boundaries: number[],
   /** Frames of the anchor, the clip's first section. */
   anchorEnd?: number,
+  /** The clip this step settled last time, in the same folder: its frames
+   *  stand in for ComfyUI's re-encoded copy of them. */
+  base?: { filename?: string; subfolder?: string },
 ): Promise<SettleReport | null> {
   if (!isTauri() || !item.filename || boundaries.length === 0) return null
   try {
@@ -32,6 +35,7 @@ export async function settleSeams(
       boundaries,
       window: 8,
       ...(anchorEnd && anchorEnd > 0 ? { anchorEnd } : {}),
+      ...(base?.filename && (base.subfolder ?? '') === (item.subfolder ?? '') ? { baseFilename: base.filename } : {}),
     })
     return report?.filename ? report : null
   } catch (e) {

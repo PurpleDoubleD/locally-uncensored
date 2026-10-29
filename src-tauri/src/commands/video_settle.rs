@@ -101,6 +101,10 @@ struct ScriptReport {
     audio: bool,
     #[serde(default)]
     note: Option<String>,
+    #[serde(default)]
+    base: u32,
+    #[serde(default)]
+    base_note: Option<String>,
 }
 
 /// What the command returns.
@@ -123,6 +127,10 @@ pub struct SettleReport {
     /// The source's audio track was copied over unchanged.
     pub audio: bool,
     pub note: Option<String>,
+    /// Frames taken from the base (the last settled clip) instead of the input.
+    pub base: u32,
+    /// Why the base was left out, when it was.
+    pub base_note: Option<String>,
 }
 
 /// The ComfyUI folder a file triple names: `output` or `input`.
@@ -211,7 +219,15 @@ pub(crate) fn effective_window(window: Option<u32>) -> Result<u32, String> {
 
 /// The interpreter's argument list: isolated mode, the script, then every
 /// path as its own argument. No shell ever sees these.
-pub(crate) fn script_args(script: &Path, input: &Path, output: &Path, boundaries: &[u32], window: u32, anchor_end: Option<u32>) -> Vec<OsString> {
+pub(crate) fn script_args(
+    script: &Path,
+    input: &Path,
+    output: &Path,
+    boundaries: &[u32],
+    window: u32,
+    anchor_end: Option<u32>,
+    base: Option<&Path>,
+) -> Vec<OsString> {
     let list = boundaries.iter().map(u32::to_string).collect::<Vec<_>>().join(",");
     let mut args: Vec<OsString> = vec![
         "-I".into(),
@@ -228,6 +244,10 @@ pub(crate) fn script_args(script: &Path, input: &Path, output: &Path, boundaries
     if let Some(end) = anchor_end.filter(|e| *e > 0) {
         args.push("--anchor-end".into());
         args.push(end.to_string().into());
+    }
+    if let Some(b) = base {
+        args.push("--base".into());
+        args.push(b.as_os_str().to_owned());
     }
     args
 }
@@ -299,6 +319,7 @@ fn run_with_timeout(python: &str, args: &[OsString], timeout: Duration) -> Resul
     Ok((status.success(), out.join().unwrap_or_default(), err.join().unwrap_or_default()))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn settle_blocking(
     state: &AppState,
     filename: &str,
@@ -307,6 +328,7 @@ fn settle_blocking(
     boundaries: Vec<u32>,
     window: Option<u32>,
     anchor_end: Option<u32>,
+    base_filename: Option<&str>,
 ) -> Result<SettleReport, String> {
     let folder = ComfyFolder::parse(folder_type)?;
     let window = effective_window(window)?;
@@ -318,6 +340,12 @@ fn settle_blocking(
         ComfyFolder::Input => paths.input_dir_or(&comfy_dir),
     };
     let input = resolve_source(&base, filename, subfolder)?;
+    // The last settled clip, in the same folder: its frames stand in for
+    // ComfyUI's re-encoded copy of them (see --base in video_settle.py).
+    let base_file = match base_filename.filter(|b| !b.is_empty()) {
+        Some(b) => Some(resolve_source(&base, b, subfolder)?),
+        None => None,
+    };
     let python = crate::commands::process::comfy_tool_python(state, &comfy_dir)
         .map_err(|e| format!("{NOT_AVAILABLE}: {e}"))?;
 
@@ -326,7 +354,7 @@ fn settle_blocking(
     // stopped run never leaves a half file under the name the gallery shows.
     let partial = out_dir.join(format!(".lu-settle-{}-{}.mp4", std::process::id(), uuid::Uuid::new_v4().simple()));
     let (_script_dir, script) = crate::private_tmp::write_private_temp("lu-settle-", "video_settle.py", SCRIPT.as_bytes())?;
-    let args = script_args(&script, &input, &partial, &boundaries, window, anchor_end);
+    let args = script_args(&script, &input, &partial, &boundaries, window, anchor_end, base_file.as_deref());
 
     let run = run_with_timeout(&python, &args, RUN_TIMEOUT);
     let finish = || {
@@ -364,6 +392,8 @@ fn settle_blocking(
         ignored_boundaries: report.ignored_boundaries,
         audio: report.audio,
         note: report.note,
+        base: report.base,
+        base_note: report.base_note,
     })
 }
 
@@ -375,6 +405,7 @@ fn settle_blocking(
 // ASYNC + spawn_blocking, like start_comfyui: the run takes seconds to
 // minutes and must not sit on the main thread.
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn video_color_settle(
     app: tauri::AppHandle,
     filename: String,
@@ -383,10 +414,11 @@ pub async fn video_color_settle(
     boundaries: Vec<u32>,
     window: Option<u32>,
     anchor_end: Option<u32>,
+    base_filename: Option<String>,
 ) -> Result<SettleReport, String> {
     tokio::task::spawn_blocking(move || {
         let state = app.state::<AppState>();
-        settle_blocking(&state, &filename, &subfolder, &folder_type, boundaries, window, anchor_end)
+        settle_blocking(&state, &filename, &subfolder, &folder_type, boundaries, window, anchor_end, base_filename.as_deref())
     })
     .await
     .map_err(|e| format!("video_color_settle task: {e}"))?
@@ -487,6 +519,7 @@ mod tests {
             &[81, 157],
             5,
             None,
+            None,
         );
         let text: Vec<String> = args.iter().map(|a| a.to_string_lossy().to_string()).collect();
         assert_eq!(
@@ -509,7 +542,7 @@ mod tests {
     #[test]
     fn the_anchor_goes_to_the_script_only_when_given() {
         let args = |anchor| {
-            script_args(Path::new("/s.py"), Path::new("/i.mp4"), Path::new("/o.mp4"), &[157], 8, anchor)
+            script_args(Path::new("/s.py"), Path::new("/i.mp4"), Path::new("/o.mp4"), &[157], 8, anchor, None)
                 .iter()
                 .map(|a| a.to_string_lossy().to_string())
                 .collect::<Vec<_>>()
@@ -517,6 +550,31 @@ mod tests {
         assert_eq!(args(Some(81))[9..], ["8", "--anchor-end", "81"]);
         assert_eq!(args(None).len(), 10);
         assert_eq!(args(Some(0)).len(), 10);
+    }
+
+    #[test]
+    fn the_base_goes_to_the_script_as_its_own_argument() {
+        let args = script_args(
+            Path::new("/s.py"),
+            Path::new("/i.mp4"),
+            Path::new("/o.mp4"),
+            &[233],
+            8,
+            Some(81),
+            Some(Path::new("/c/out/clip 1; x_settled.mp4")),
+        );
+        let text: Vec<String> = args.iter().map(|a| a.to_string_lossy().to_string()).collect();
+        assert_eq!(text[10..], ["--anchor-end", "81", "--base", "/c/out/clip 1; x_settled.mp4"]);
+    }
+
+    #[test]
+    fn a_report_says_how_many_frames_came_from_the_base() {
+        let r = parse_script_output("{\"ok\": true, \"frames\": 309, \"seams\": [], \"base\": 233, \"baseNote\": null}").unwrap();
+        assert_eq!(r.base, 233);
+        let r = parse_script_output("{\"ok\": true, \"frames\": 309, \"seams\": [], \"base\": 0, \"baseNote\": \"base left out\"}").unwrap();
+        assert_eq!((r.base, r.base_note.as_deref()), (0, Some("base left out")));
+        // An older script without the field still reads.
+        assert_eq!(parse_script_output("{\"ok\": true, \"frames\": 1, \"seams\": []}").unwrap().base, 0);
     }
 
     #[test]

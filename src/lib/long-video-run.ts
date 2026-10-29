@@ -39,8 +39,9 @@ export interface LongRunDeps {
   remove: (id: string) => void
   /** Match everything from the boundaries on to the anchor (frames
    *  0..anchorEnd, the first section), in place of the item; null when the
-   *  backend cannot. */
-  settle?: (item: ClipItem, boundaries: number[], anchorEnd: number) => Promise<ClipItem | null>
+   *  backend cannot. `base` is the clip settled the step before: the frames
+   *  before the newest boundary are taken from it, not from ComfyUI's copy. */
+  settle?: (item: ClipItem, boundaries: number[], anchorEnd: number, base?: ClipItem) => Promise<ClipItem | null>
   aborted: () => boolean
 }
 
@@ -148,6 +149,12 @@ export async function runLongVideo(plan: LongVideoPlan, start: LongRunStart, dep
       { videoModel: start.continueModel, frames: sectionFrames, cloudOp: 'extend', mode: 'video' },
       { stepLabel: `Section ${index + 1} of ${total}`, continueFrom: { video: name, overlap: plan.overlap } },
     )
+    // The clip this section continued, when it is our own (not a brought
+    // one): ComfyUI hands back the whole clip, and its copy of these frames
+    // went through its own RGB round trip (P5 box run, 30 s: +1.3 to +1.6
+    // levels of Y per section, the first section included). The settle takes
+    // them from here instead.
+    const continued = current
     // Only our own in-between clips are taken out of the gallery.
     if (current) deps.remove(current.id)
     current = made
@@ -160,7 +167,7 @@ export async function runLongVideo(plan: LongVideoPlan, start: LongRunStart, dep
     // was made from those settled frames, so its drift is one step, never the
     // sum of all before it.
     if (deps.settle && seams.length > 0) {
-      const settled = await deps.settle(current, seams.slice(-1), seams[0]).catch(() => null)
+      const settled = await deps.settle(current, seams.slice(-1), seams[0], continued ?? undefined).catch(() => null)
       if (settled) current = settled
     }
   }

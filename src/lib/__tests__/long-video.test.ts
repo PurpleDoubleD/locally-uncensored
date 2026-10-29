@@ -200,6 +200,52 @@ describe('runLongVideo: section after section, one clip in the gallery', () => {
     })
     expect(new Set(anchors)).toEqual(new Set([161]))
   })
+
+  // P5 box run, 30 s: ComfyUI hands back the whole clip with every section,
+  // and its copy of the frames already there came out brighter each time
+  // (Y 74.8 -> 83.8 over six sections, the first one included). The settle
+  // takes those frames from the clip the section continued instead.
+  it('gives the settle the clip each section continued as its base', async () => {
+    const f = fakeDeps()
+    const calls: Array<{ item: string; base?: string }> = []
+    await runLongVideo(planLongVideo('wan', 15, 16)!, { firstModel: 'T', continueModel: 'I' }, {
+      ...f.deps,
+      settle: async (item, _seams, _anchorEnd, base) => {
+        calls.push({ item: item.id, base: base?.id })
+        return { ...item, id: `${item.id}-settled` }
+      },
+    })
+    expect(calls).toHaveLength(2)
+    // Section 2 continued section 1 as it came out; section 3 continued the
+    // settled clip of the step before, never ComfyUI's newest copy.
+    expect(calls[0].base).toBeDefined()
+    expect(calls[0].base).not.toBe(calls[0].item)
+    expect(calls[1].base).toBe(`${calls[0].item}-settled`)
+  })
+
+  it('a settle that fails leaves the next base on the clip that was continued', async () => {
+    const f = fakeDeps()
+    const calls: Array<{ item: string; base?: string }> = []
+    await runLongVideo(planLongVideo('wan', 15, 16)!, { firstModel: 'T', continueModel: 'I' }, {
+      ...f.deps,
+      settle: async (item, _seams, _anchorEnd, base) => {
+        calls.push({ item: item.id, base: base?.id })
+        return null
+      },
+    })
+    expect(calls[1].base).toBe(calls[0].item)
+  })
+
+  it('a brought clip is never a base: it is not in ComfyUI\'s output', async () => {
+    const f = fakeDeps()
+    const bases: Array<string | undefined> = []
+    await runLongVideo(planExtension('wan', 10, 16)!, { firstModel: 'I', continueModel: 'I', clip: new Blob(['x']), clipFrames: 161 }, {
+      ...f.deps,
+      settle: async (item, _seams, _anchorEnd, base) => { bases.push(base?.id); return { ...item, id: `${item.id}-settled` } },
+    })
+    expect(bases[0]).toBeUndefined()
+    if (bases.length > 1) expect(bases[1]).toMatch(/-settled$/)
+  })
 })
 
 describe('Fast mode for the Wan 14B models', () => {

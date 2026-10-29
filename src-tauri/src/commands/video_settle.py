@@ -31,6 +31,19 @@ Everything stays in YUV 4:2:0, the format the h264 file has anyway. A detour
 through RGB lost about 1.2 levels of brightness on every pass with PyAV, and
 a long clip passes through here once per section.
 
+``--base`` (P5 box run, 30 s): the file this step wrote last time. ComfyUI
+hands back the WHOLE clip with every section, and its copy of the frames
+already there went through its own RGB round trip: +1.3 to +1.6 levels of Y
+and 3 to 4 % more saturation per section, the first section included. Matched
+to the first section, every section looked even while the whole clip grew
+brighter (Y 74.8 -> 83.8 over six sections). With ``--base`` the frames before
+the newest boundary come from that file instead, so only the new section is
+ComfyUI's. When the base does not have exactly that many frames of the same
+size, it is left out and the report says why.
+
+The output carries the colour tags of the input (range, matrix, primaries,
+transfer). Without them ComfyUI read the next clip with another matrix.
+
 Two passes over the video: statistics first, then the corrected frames. Only
 per-frame numbers are kept between them, so the length of the video does not
 decide the memory it needs. Frames above MAX_PIXELS are refused outright.
@@ -51,11 +64,13 @@ import numpy as np
 MAX_PIXELS = 4096 * 2304
 MAX_WINDOW = 60
 # The drift this takes out builds up over sections; the clamp only stops a
-# scene that really changed from being forced back.
+# scene that really changed from being forced back. Chroma is wider (P5 box
+# run, 30 s): a short last section of A14B + lightx2v came out with U and V
+# 20 to 27 levels off the anchor and needed gains near 0.35.
 Y_GAIN = (0.75, 1.25)
-C_GAIN = (0.5, 1.5)
+C_GAIN = (0.35, 1.5)
 Y_SHIFT = 30.0
-C_SHIFT = 15.0
+C_SHIFT = 30.0
 SOFTEN_MAX = 0.85
 # Every 2nd pixel in each direction is enough for the statistics.
 STEP = 2
@@ -121,6 +136,36 @@ def sharpness(y):
     y = y.astype(np.float32)
     lap = 4 * y[1:-1, 1:-1] - y[:-2, 1:-1] - y[2:, 1:-1] - y[1:-1, :-2] - y[1:-1, 2:]
     return float(np.abs(lap).mean())
+
+
+COLOR_FIELDS = ("color_range", "colorspace", "color_primaries", "color_trc")
+
+
+def read_color(source):
+    """The colour tags of a codec context or frame that PyAV exposes."""
+    tags = {}
+    for name in COLOR_FIELDS:
+        try:
+            tags[name] = getattr(source, name)
+        except Exception:
+            pass
+    return tags
+
+
+def apply_color(tags, target):
+    """Set the tags on a codec context or frame; older PyAV lacks some."""
+    for name, value in tags.items():
+        try:
+            setattr(target, name, value)
+        except Exception:
+            pass
+
+
+def frame_count_and_size(path):
+    with av.open(path) as c:
+        s = c.streams.video[0]
+        n = sum(1 for _ in c.decode(s))
+        return n, s.codec_context.width, s.codec_context.height
 
 
 def frame_stats(y, u, v, with_blur):
@@ -232,6 +277,7 @@ def main():
     parser.add_argument("--anchor-end", type=int, default=0)
     parser.add_argument("--window", type=int, default=8)
     parser.add_argument("--crf", type=int, default=18)
+    parser.add_argument("--base", default="")
     args = parser.parse_args()
 
     window = args.window
@@ -255,17 +301,52 @@ def main():
     # yuv420p needs even sides; an odd one loses its last row or column.
     out_w, out_h = width - (width % 2), height - (height % 2)
 
+    color = read_color(in_video.codec_context)
+    # The input's frame count first: whether the base fits depends on it.
+    try:
+        total = sum(1 for _ in source.decode(in_video))
+    except Exception as exc:
+        fail("Reading failed: %s" % exc)
+    source.close()
+
+    inside = [b for b in requested if 0 < b < total]
+    base_frames, base_note = 0, None
+    if args.base:
+        newest = inside[-1] if inside else 0
+        try:
+            n, bw, bh = frame_count_and_size(args.base)
+        except Exception as exc:
+            n, bw, bh = -1, 0, 0
+            base_note = "base not read: %s" % exc
+        if base_note is None:
+            if newest < 1 or n != newest or (bw - bw % 2, bh - bh % 2) != (out_w, out_h):
+                base_note = "base left out: %d frames of %dx%d, the clip needs %d of %dx%d" % (n, bw, bh, newest, out_w, out_h)
+            else:
+                base_frames = newest
+
+    def frames_in_order():
+        """Planes of every frame: the first base_frames from the base, the
+        rest from the input."""
+        if base_frames:
+            with av.open(args.base) as b:
+                for i, frame in enumerate(b.decode(b.streams.video[0])):
+                    if i >= base_frames:
+                        break
+                    yield planes(frame, out_w, out_h)
+        with av.open(args.input) as c:
+            for i, frame in enumerate(c.decode(c.streams.video[0])):
+                if i >= base_frames:
+                    yield planes(frame, out_w, out_h)
+
     # Pass 1: numbers per frame.
     stats = []
     try:
-        for frame in source.decode(in_video):
-            stats.append(frame_stats(*planes(frame, out_w, out_h), with_blur=True))
+        for p in frames_in_order():
+            stats.append(frame_stats(*p, with_blur=True))
     except Exception as exc:
         fail("Reading failed at frame %d: %s" % (len(stats), exc))
-    source.close()
     total = len(stats)
 
-    inside = [b for b in requested if 0 < b < total]
     ignored = [b for b in requested if b not in inside]
     anchor_end = args.anchor_end if args.anchor_end > 0 else (inside[0] if inside else 0)
     after = [b for b in inside if b >= anchor_end]
@@ -282,6 +363,7 @@ def main():
     out_video.width = out_w
     out_video.height = out_h
     out_video.pix_fmt = "yuv420p"
+    apply_color(color, out_video.codec_context)
     try:
         out_video.options = {"crf": str(args.crf)}
     except Exception:
@@ -295,17 +377,16 @@ def main():
     # Pass 2: write.
     index = 0
     try:
-        with av.open(args.input) as again:
-            for frame in again.decode(again.streams.video[0]):
-                y, u, v = planes(frame, out_w, out_h)
-                if index >= start:
-                    y, u, v = apply_plan(y, u, v, plan[index - start])
-                vf = to_frame(y, u, v)
-                vf.pts = index
-                vf.time_base = time_base
-                for packet in out_video.encode(vf):
-                    output.mux(packet)
-                index += 1
+        for y, u, v in frames_in_order():
+            if index >= start:
+                y, u, v = apply_plan(y, u, v, plan[index - start])
+            vf = to_frame(y, u, v)
+            apply_color(color, vf)
+            vf.pts = index
+            vf.time_base = time_base
+            for packet in out_video.encode(vf):
+                output.mux(packet)
+            index += 1
         for packet in out_video.encode():
             output.mux(packet)
     except Exception as exc:
@@ -352,6 +433,8 @@ def main():
         "ignoredBoundaries": sorted(ignored),
         "audio": audio_copied,
         "note": audio_note,
+        "base": base_frames,
+        "baseNote": base_note,
     }))
 
 
