@@ -5,6 +5,8 @@ import {
   nodeInput,
   type ComfyApiGraph,
   type ComfyApiNode,
+  type ComfyInputValue,
+  type ComfyNodeInputs,
 } from '../types/comfy-graph'
 import { propPath } from '../types/json-guards'
 
@@ -148,6 +150,41 @@ export function nativeHiresFinalSize(
 }
 
 /**
+ * The KSampler a SamplerCustomAdvanced stands for, when it is fed by a
+ * CFGGuider, a RandomNoise and a KSamplerSelect (the Qwen-Image 2.1 Turbo
+ * chain). Its own sigmas cover a full run from noise, so the refinement pass
+ * takes the simple scheduler at the pass's own steps and denoise. Undefined
+ * for any other feed, which keeps the refusal below.
+ */
+function customAsKSampler(workflow: ComfyApiGraph, custom: ComfyApiNode): ComfyApiNode | undefined {
+  const fed = (key: string, type: string): ComfyApiNode | undefined => {
+    const ref = nodeInput(custom, key)
+    const node = isComfyLinkRef(ref) ? nodeAt(workflow, String(ref[0])) : undefined
+    return node?.class_type === type ? node : undefined
+  }
+  const guider = fed('guider', 'CFGGuider')
+  const noise = fed('noise', 'RandomNoise')
+  const sampler = fed('sampler', 'KSamplerSelect')
+  if (!guider || !noise || !sampler) return undefined
+  const read: Record<string, ComfyInputValue | undefined> = {
+    model: nodeInput(guider, 'model'),
+    positive: nodeInput(guider, 'positive'),
+    negative: nodeInput(guider, 'negative'),
+    latent_image: nodeInput(custom, 'latent_image'),
+    seed: nodeInput(noise, 'noise_seed'),
+    steps: 1,
+    cfg: nodeInput(guider, 'cfg'),
+    sampler_name: nodeInput(sampler, 'sampler_name'),
+    scheduler: 'simple',
+    denoise: 1,
+  }
+  // A missing input stays out, so the check for the four links below names it.
+  const inputs: ComfyNodeInputs = {}
+  for (const [key, value] of Object.entries(read)) if (value !== undefined) inputs[key] = value
+  return { class_type: 'KSampler', inputs }
+}
+
+/**
  * Adds a native latent-upscale refinement pass to a simple image workflow:
  *
  *   KSampler → LatentUpscaleBy → KSampler (low denoise) → VAEDecode → SaveImage
@@ -229,10 +266,14 @@ export function applyNativeHiresFix(
   }
 
   const firstSamplerId = String(samplesRef[0])
-  const firstSampler = nodeAt(workflow, firstSamplerId)
+  const found = nodeAt(workflow, firstSamplerId)
+  // Qwen-Image 2.1 Turbo's chain (lib/render/qwen21-turbo) ends in a
+  // SamplerCustomAdvanced; its pass reads the same model, prompt, CFG, seed
+  // and sampler off the CFGGuider, RandomNoise and KSamplerSelect.
+  const firstSampler = found?.class_type === 'SamplerCustomAdvanced' ? customAsKSampler(workflow, found) : found
   if (!firstSampler || firstSampler.class_type !== 'KSampler') {
     throw new NativeHiresFixError(
-      `Native HiRes currently requires a core KSampler before the final decode; this workflow uses ${firstSampler?.class_type ?? 'an unknown node'}.`,
+      `Native HiRes currently requires a core KSampler before the final decode; this workflow uses ${found?.class_type ?? 'an unknown node'}.`,
     )
   }
 

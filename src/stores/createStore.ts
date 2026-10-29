@@ -56,6 +56,7 @@ import { classifyModel, hidreamSampling, resolveLocalOpPick } from '../api/comfy
 import type { HiresUpscaleMethod } from '../api/hires-fix'
 import { mlxFollowsMotion, mlxTakesStartImage, mlxTalking, mlxVideoLaneEntry, releaseVideoBlobUrl } from '../api/mlx-video'
 import { isMlxImageHost, type MacUpscaleFactor } from '../api/mlx-image'
+import { QWEN21_TURBO_SAMPLING, isQwenImage21Turbo } from '../lib/render/qwen21-turbo'
 import { mlxMakesMusic } from '../lib/mac-music'
 import { MAC_EDIT_DEAD_SIDE, MAC_EDIT_SIDE_INSTEAD, imageLaneModels, mlxTakesEditImage } from '../lib/image-engines'
 import { STUDIO_MODELS } from '../lib/render/studio-contract'
@@ -806,6 +807,15 @@ function imageModelParams(state: { imageModel: string; imageModelType: ModelType
     ? hidreamDefaults(state.imageModel)
     : MODEL_TYPE_DEFAULTS[state.imageModelType] || MODEL_TYPE_DEFAULTS.unknown
   const distilled = distilledImageCheckpoint(state.imageModel, state.imageModelType)
+  // Qwen-Image 2.1 Turbo on ComfyUI runs its own eight step schedule at CFG 1
+  // (lib/render/qwen21-turbo), so the sliders stand at what the run takes.
+  if (state.imageModelType === 'qwenimage' && isQwenImage21Turbo(state.imageModel)) {
+    return {
+      steps: QWEN21_TURBO_SAMPLING.steps, cfgScale: QWEN21_TURBO_SAMPLING.cfg,
+      sampler: QWEN21_TURBO_SAMPLING.sampler, scheduler: QWEN21_TURBO_SAMPLING.scheduler,
+      width: defaults.width, height: defaults.height,
+    }
+  }
   return {
     steps: distilled ? 4 : defaults.steps, cfgScale: distilled ? 1.0 : defaults.cfgScale,
     sampler: defaults.sampler, scheduler: defaults.scheduler,
@@ -907,7 +917,7 @@ export function imageQualityLadder(
       Standard: own.steps,
       High: Math.round(own.steps * 1.5),
     },
-    ...(local && distilledImageCheckpoint(s.imageModel, s.imageModelType) ? { cfgScale: own.cfgScale } : {}),
+    ...(local && (distilledImageCheckpoint(s.imageModel, s.imageModelType) || isQwenImage21Turbo(s.imageModel)) ? { cfgScale: own.cfgScale } : {}),
   }
 }
 

@@ -20,6 +20,18 @@ file last changed in e7cd011d4ded3411c2f481200544f0be6fdc962e, git blob
 15a7d911874f48957dd0fe0d5e3dd15047fc73a9). Same MIT license (LICENSE of that
 repository). Unchanged.
 
+The three Qwen-Image 2.1 templates come from the same repository at the same
+commit 14220b8bd3e86baa852959f17039613191e66656, paths
+`templates/<file>`, unchanged, MIT license (LICENSE of that repository).
+Used by `qwen-image-21-turbo.test.ts` (the Turbo sampler chain, Discord
+28.10.2026) and read for their node classes, sigmas, cfg and sampler only.
+
+| File | SHA-256 | Used for |
+|---|---|---|
+| image_qwen_image_2_1_turbo_t2i.json | 3eb9cef2866c0186fbe30172701f112b35e574cf3c6575c6e4a6b5dd1e76a403 | Turbo: QwenImage21Cache, CFGGuider cfg 1, KSamplerSelect euler, RandomNoise, ManualSigmas, SamplerCustomAdvanced |
+| image_qwen_image_2_1_t2i.json | 5f2b50eeaf27e56a45456681ad5319df1ae51243d9653ac3f92c7dc05d1e1503 | full model: QwenImage21Cache, KSampler 25 / 1 / euler / simple |
+| image_qwen_image_2_1_turbo_image_edit.json | 5a9622d550866800414afcb9c70523ec5c6965eb171476e401e243a7fe8d5a4e | Turbo edit: the same sigmas; CFGGuider shows a widget value of 8, but its cfg input is linked to the subgraph input "cfg", which the outer node sets to 1 |
+
 ## ../object-info-ltx25.json
 
 What `/object_info` serves for the 32 node types of `video_ltx2_5_i2v.json`,

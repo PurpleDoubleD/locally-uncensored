@@ -4,6 +4,7 @@ import {
   findMatchingAudioEncoder, findMatchingClipVision, findFramePackCLIPPair, getSystemVRAM,
 } from './comfyui'
 import { isMacOS } from './backend'
+import { QWEN21_TURBO_NODES, QWEN21_TURBO_SAMPLING, QWEN21_TURBO_SIGMAS, isQwenImage21Turbo } from '../lib/render/qwen21-turbo'
 import { comfyEditFullImages, qwenEditPlusOverCard } from '../lib/comfy-edit-memory'
 import type { ModelType, GenerateParams, VideoParams } from './comfyui'
 import { log } from '../lib/logger'
@@ -1561,6 +1562,29 @@ export async function buildDynamicWorkflow(
     workflow[id] = { class_type: 'CFGNorm', inputs: { model: [samplerModelId, 0], strength: 1 } }
     samplerModelId = id
   }
+  // Qwen-Image 2.1, full model and Turbo: both official templates put
+  // QwenImage21Cache ("auto", "default") between the model and the sampler.
+  // It only sets where the key/value cache of the prompt prefix lives
+  // (comfy_extras/nodes_qwen.py), so it goes after the LoRA chain: UNET →
+  // LoRAs → cache → sampler. A ComfyUI without the node runs without it.
+  if (strategy === 'unet_qwenimage' && allNodes['QwenImage21Cache']) {
+    const id = String(n++)
+    workflow[id] = { class_type: 'QwenImage21Cache', inputs: { model: [samplerModelId, 0], device: 'auto', dtype: 'default' } }
+    samplerModelId = id
+  }
+  // Qwen-Image 2.1 Turbo (lib/render/qwen21-turbo): its own eight step
+  // schedule through SamplerCustomAdvanced, as the official Turbo templates
+  // run it, for Generate and Edit alike. Steps, sampler and scheduler of the
+  // sliders do not reach it. CFG does: the Turbo edit template offers cfg as
+  // a setting of its own (1, "raise it only if you use a negative prompt"),
+  // and Create presets 1 for a Turbo file and says so when it is higher.
+  // Without one of the custom sampler nodes the run falls back to a KSampler
+  // at eight steps, euler, simple.
+  const qwenTurbo = strategy === 'unet_qwenimage' && isQwenImage21Turbo(params.model)
+  const qwenTurboChain = qwenTurbo && QWEN21_TURBO_NODES.every((c) => !!allNodes[c])
+  if (qwenTurbo) {
+    log.info(`[dynamic-workflow] Qwen-Image 2.1 Turbo: ${qwenTurboChain ? 'SamplerCustomAdvanced on the template sigmas' : 'KSampler fallback, 8 steps'}`)
+  }
 
   // ─── Phase 4: Sampling ───
 
@@ -1658,6 +1682,25 @@ export async function buildDynamicWorkflow(
     log.info(`[dynamic-workflow] Wan 2.2 A14B pair: ${params.model} → ${lowNoisePartner}, split at step ${split}`)
   }
 
+  // The four inputs of the Turbo chain besides the latent, one node each.
+  let qwenTurboCustom: ComfyNodeInputs | null = null
+  if (qwenTurboChain) {
+    const part = (node: { class_type: string; inputs: ComfyNodeInputs }): [string, number] => {
+      const id = String(n++)
+      workflow[id] = node
+      return [id, 0]
+    }
+    qwenTurboCustom = {
+      noise: part({ class_type: 'RandomNoise', inputs: { noise_seed: seed } }),
+      guider: part({
+        class_type: 'CFGGuider',
+        inputs: { model: [samplerModelId, 0], positive: positiveRef, negative: negativeRef, cfg: params.cfgScale },
+      }),
+      sampler: part({ class_type: 'KSamplerSelect', inputs: { sampler_name: QWEN21_TURBO_SAMPLING.sampler } }),
+      sigmas: part({ class_type: 'ManualSigmas', inputs: { sigmas: QWEN21_TURBO_SIGMAS } }),
+    }
+  }
+
   const samplerId = String(n++)
 
   workflow[samplerId] = highNoiseStage ? {
@@ -1669,6 +1712,13 @@ export async function buildDynamicWorkflow(
       start_at_step: highNoiseStage.split, end_at_step: 10000, return_with_leftover_noise: 'disable',
     },
     _meta: { title: 'Wan 2.2 low noise' },
+  } : qwenTurboCustom ? {
+    class_type: 'SamplerCustomAdvanced',
+    inputs: {
+      ...qwenTurboCustom,
+      latent_image: latentRef,
+    },
+    _meta: { title: 'Qwen-Image 2.1 Turbo' },
   } : {
     class_type: 'KSampler',
     inputs: {
@@ -1677,10 +1727,10 @@ export async function buildDynamicWorkflow(
       negative: negativeRef,
       latent_image: latentRef,
       seed,
-      steps: params.steps,
+      steps: qwenTurbo ? QWEN21_TURBO_SAMPLING.steps : params.steps,
       cfg: params.cfgScale,
-      sampler_name: params.sampler,
-      scheduler: params.scheduler,
+      sampler_name: qwenTurbo ? QWEN21_TURBO_SAMPLING.sampler : params.sampler,
+      scheduler: qwenTurbo ? QWEN21_TURBO_SAMPLING.scheduler : params.scheduler,
       denoise: isInpaint ? (params.denoise ?? 0.85) : isI2I ? (params.denoise ?? 0.7) : 1.0, // Qwen-Image-Edit: 1.0, like its template
     },
   }
