@@ -31,7 +31,7 @@ const TOOLS: MCPToolDefinition[] = toolRegistry.getAll()
 /** The permission map that hides nothing, so the transport checks see everything. */
 const ALL_ALLOWED = {
   filesystem: 'auto', terminal: 'auto', desktop: 'auto', web: 'auto',
-  system: 'auto', image: 'auto', video: 'auto', workflow: 'auto',
+  system: 'auto', image: 'auto', video: 'auto', workflow: 'auto', mcp: 'auto',
 } as const
 
 /** JSON-Schema types every one of the four transports understands. */

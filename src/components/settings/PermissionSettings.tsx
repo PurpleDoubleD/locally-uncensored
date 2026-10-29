@@ -1,6 +1,6 @@
 import { usePermissionStore } from '../../stores/permissionStore'
 import type { ToolCategory, PermissionLevel } from '../../api/mcp/types'
-import { FolderOpen, Terminal, Monitor, Globe, Cpu, Image, Film, GitBranch, X } from 'lucide-react'
+import { FolderOpen, Terminal, Monitor, Globe, Cpu, Image, Film, GitBranch, Plug, X } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { useComputerStore } from '../../stores/computerStore'
 import { useModelStore } from '../../stores/modelStore'
@@ -57,7 +57,12 @@ const CATEGORIES: {
   { key: 'filesystem', label: 'Filesystem', description: "Read, write, search files in the chat's working folder. Reading there never asks", icon: FolderOpen, risk: 'medium' },
   { key: 'image', label: 'Image Generation', description: 'Generate images', icon: Image, risk: 'medium' },
   { key: 'video', label: 'Video Generation', description: 'Generate video', icon: Film, risk: 'medium' },
-  { key: 'workflow', label: 'Workflows', description: 'Execute saved agent workflows', icon: GitBranch, risk: 'medium' },
+  // B12: MCP tools hingen frueher an dieser Zeile, ohne dass es dastand.
+  { key: 'workflow', label: 'Workflows', description: 'Saved agent workflows and sub agents. Not MCP server tools', icon: GitBranch, risk: 'medium' },
+  // Eigene Zeile fuer jedes Werkzeug eines MCP-Servers: ein Server kann
+  // Befehle ausfuehren und Dateien schreiben, und Terminal oder Filesystem
+  // decken ihn nicht ab. Darum steht sie per Vorgabe auf Ask First.
+  { key: 'mcp', label: 'MCP / External Tools', description: 'Every tool of a connected MCP server, including ones that run commands or write files', icon: Plug, risk: 'high' },
   { key: 'terminal', label: 'Terminal / Shell', description: 'Execute commands, run code', icon: Terminal, risk: 'high' },
   { key: 'desktop', label: 'Desktop Control', description: 'Screenshots. Blocked also switches computer control off', icon: Monitor, risk: 'high' },
 ]

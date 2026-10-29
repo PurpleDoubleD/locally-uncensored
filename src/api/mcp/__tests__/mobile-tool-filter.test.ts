@@ -230,7 +230,7 @@ describe('media, permissions and the working folder', () => {
     expect(defaultPermissionsForDevice()).toEqual(DEFAULT_PERMISSIONS)
     expect(DEFAULT_PERMISSIONS).toEqual({
       filesystem: 'confirm', terminal: 'confirm', desktop: 'confirm', web: 'auto',
-      system: 'auto', image: 'confirm', video: 'confirm', workflow: 'confirm',
+      system: 'auto', image: 'confirm', video: 'confirm', workflow: 'confirm', mcp: 'confirm',
     })
   })
 

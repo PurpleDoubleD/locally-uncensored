@@ -238,7 +238,9 @@ const streamWithTools = streamOllamaChatWithTools
 // therefore unreachable from the Code tab. Local models only see it on a
 // delegate/parallel intent via the keyword router; cloud models get it in
 // the full catalog.
-const CODEX_CATEGORIES = ['filesystem', 'terminal', 'system', 'web', 'image', 'video', 'workflow'] as const
+// mcp: external MCP tools moved out of 'workflow' into a row of their own
+// (B12) and stay reachable here. Ask and Bypass decide them as before.
+const CODEX_CATEGORIES = ['filesystem', 'terminal', 'system', 'web', 'image', 'video', 'workflow', 'mcp'] as const
 
 
 // Detect when the model emits a re-introduction of itself ("Hello, I am

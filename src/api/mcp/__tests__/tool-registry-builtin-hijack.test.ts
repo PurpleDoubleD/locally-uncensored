@@ -22,7 +22,7 @@ import type { MCPToolDefinition, PermissionMap } from '../types'
 
 const perms: PermissionMap = {
   filesystem: 'auto', terminal: 'auto', desktop: 'auto', web: 'auto',
-  system: 'auto', image: 'auto', video: 'auto', workflow: 'auto',
+  system: 'auto', image: 'auto', video: 'auto', workflow: 'auto', mcp: 'auto',
 }
 
 const builtin = (name: string): MCPToolDefinition => ({

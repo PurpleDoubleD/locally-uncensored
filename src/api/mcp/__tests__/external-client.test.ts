@@ -181,7 +181,8 @@ describe('connecting to an external server', () => {
     const tools = await client.connect()
 
     expect(tools).toHaveLength(1)
-    expect(tools[0]).toMatchObject({ name: 'get_forecast', source: 'external', serverId: 'srv-1' })
+    // B12: its own permission row, never 'workflow'.
+    expect(tools[0]).toMatchObject({ name: 'get_forecast', category: 'mcp', source: 'external', serverId: 'srv-1' })
     expect(client.isConnected()).toBe(true)
   })
 
