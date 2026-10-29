@@ -43,7 +43,7 @@ import { useAnyAgentLoopActive } from '../../stores/agentLoopStore'
 import { useGenerationStore } from '../../stores/generationStore'
 import { useAgentModeStore } from '../../stores/agentModeStore'
 import { useSettingsStore } from '../../stores/settingsStore'
-import { useUIStore } from '../../stores/uiStore'
+import { useUIStore, clampExplorerWidth, isNarrowViewport } from '../../stores/uiStore'
 import {
   CODEX_WORKDIR_LOCK_TITLE,
   codexBusyReason,
@@ -110,7 +110,14 @@ export function ExplorerPanel({ onApprovePlan }: Props) {
   const lockReason = codexBusyReason({ sendsInFlight, threads, generating, loop })
   const lockTitle = lockReason ? CODEX_WORKDIR_LOCK_TITLE[lockReason] : null
 
-  const width = useUIStore((s) => s.explorerWidth)
+  // Issue 309 T1: gegen das aktuelle Fenster geklemmt, nicht nur beim Ziehen.
+  // Im schmalen Fenster ist das Panel zu (uiStore, NARROW_VIEWPORT_WIDTH);
+  // klappt es dort jemand auf, liegt es UEBER dem Verlauf statt daneben, sonst
+  // blieben dem Composer die ~25 px aus der Messung.
+  const viewportWidth = useUIStore((s) => s.viewportWidth)
+  const storedWidth = useUIStore((s) => s.explorerWidth)
+  const width = clampExplorerWidth(storedWidth, viewportWidth)
+  const overlay = isNarrowViewport(viewportWidth)
   const collapsed = useUIStore((s) => s.explorerCollapsed)
   const setExplorerWidth = useUIStore((s) => s.setExplorerWidth)
   const setExplorerCollapsed = useUIStore((s) => s.setExplorerCollapsed)
@@ -310,10 +317,10 @@ export function ExplorerPanel({ onApprovePlan }: Props) {
   const rows = flattenTree(root, listings, expanded)
   const loadingRoot = busy.includes(root)
 
-  return (
+  const panel = (
     <aside
       style={{ width: `${width}px` }}
-      className="relative shrink-0 h-full flex flex-col border-l border-gray-200 dark:border-white/[0.04] bg-gray-50 dark:bg-white/[0.01]"
+      className={`${overlay ? 'absolute right-0 top-0 z-30 shadow-lg bg-gray-50 dark:bg-lu-panel' : 'relative shrink-0 bg-gray-50 dark:bg-white/[0.01]'} h-full flex flex-col border-l border-gray-200 dark:border-white/[0.04]`}
     >
       {/* Drag handle on the panel edge. */}
       <div
@@ -478,6 +485,15 @@ export function ExplorerPanel({ onApprovePlan }: Props) {
       </div>
     </aside>
   )
+
+  // Ein Rahmen ohne eigene Breite traegt die Ueberlagerung, wie die
+  // Chatspalte in Sidebar.tsx: so braucht kein Vorfahre `relative`, und kein
+  // anderes absolut gesetztes Element bekommt einen neuen Bezugsrahmen.
+  return overlay ? (
+    <div data-testid="explorer-overlay" className="relative shrink-0 w-0 h-full">
+      {panel}
+    </div>
+  ) : panel
 }
 
 /** The two things a listing has to admit: the backend cut it off at 500, and

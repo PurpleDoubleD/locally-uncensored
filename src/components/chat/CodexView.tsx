@@ -251,9 +251,13 @@ export function CodexView() {
           landet unter dem Fensterrand. */}
       <div className="flex-1 flex flex-col min-w-0 min-h-0 relative">
         {/* Codex header */}
+        {/* flex-wrap (Issue 309 T1, 375 px): ohne Umbruch lief die Zeile
+            ueber den Rand der Spalte hinaus und lag auf dem Aufklappknopf des
+            Explorers daneben. Kein overflow-hidden: die Menues dieser Zeile
+            klappen nach unten auf und wuerden sonst abgeschnitten. */}
         <div
           data-testid="codex-header"
-          className="flex items-center gap-1.5 px-2 py-0.5 border-b border-gray-200 dark:border-white/[0.04]"
+          className="flex flex-wrap items-center gap-1.5 px-2 py-0.5 border-b border-gray-200 dark:border-white/[0.04]"
         >
           <Code size={9} className="text-gray-500" />
           <span className="text-[0.55rem] text-gray-600 dark:text-gray-400 font-medium whitespace-nowrap shrink-0">Coding Agent</span>

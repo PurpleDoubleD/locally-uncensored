@@ -19,7 +19,7 @@ import {
   SettingsSkeleton,
   VoiceSkeleton,
 } from './ViewSkeletons'
-import { useUIStore } from '../../stores/uiStore'
+import { useUIStore, readViewportWidth } from '../../stores/uiStore'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { useCompareStore } from '../../stores/compareStore'
 import { useProviderStore } from '../../stores/providerStore'
@@ -164,6 +164,18 @@ export function AppShell() {
   const [showSelector, setShowSelector] = useState(false)
 
   useKeyboardShortcuts()
+
+  // Issue 309 T1: die Seitenpanels gegen die Fensterbreite halten, beim
+  // Einhaengen und bei jedem Resize (NARROW_VIEWPORT_WIDTH in uiStore).
+  // Layout-Effekt, damit ein schmal startendes Fenster nicht erst einen
+  // Rahmen lang die gequetschte Spalte zeigt. getState statt Abo: diese
+  // Komponente soll von der Breite nicht neu rendern.
+  useLayoutEffect(() => {
+    const fit = () => useUIStore.getState().fitToViewport(readViewportWidth())
+    fit()
+    window.addEventListener('resize', fit)
+    return () => window.removeEventListener('resize', fit)
+  }, [])
   // LU Cloud account boot: keychain session restore + /api/me probe; keeps
   // the cloud Create axis and the lu-cloud chat provider in sync.
   useCloudAuth()
