@@ -217,7 +217,7 @@ export function NeuronView() {
       {job && job.status !== 'idle' && <JobPanel job={job} onStop={() => void neuronCancel().then(poll)} onDismiss={() => void neuronDismiss().then(poll)} />}
 
       <Section title="Sliders">
-        {!info?.generator && (
+        {info && !info.generator && (
           <Hinweis className="mb-2">This build has no vector tool, so ready-made and own sliders cannot be computed here (Linux: later version). Feature sliders work where the model has one.</Hinweis>
         )}
         <div className="space-y-2" data-testid="neuron-presets">
