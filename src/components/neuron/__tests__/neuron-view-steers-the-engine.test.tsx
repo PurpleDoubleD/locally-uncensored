@@ -60,6 +60,9 @@ vi.mock('../../../api/builtin-ensure', () => ({ isManagedBuiltinSlot: () => slot
 import { NeuronView } from '../NeuronView'
 import { useModelStore } from '../../../stores/modelStore'
 import { useNeuronStore } from '../../../stores/neuronStore'
+import { useSettingsStore } from '../../../stores/settingsStore'
+import { useChatStore } from '../../../stores/chatStore'
+import type { Persona } from '../../../types/settings'
 
 beforeEach(() => {
   apply.mockClear()
@@ -128,6 +131,21 @@ describe('Neuron tweaker view', () => {
     job.status = 'done'
     await new Promise((r) => setTimeout(r, 1500))
     expect(screen.queryByText(/qwen2 · 24 layers/)).toBeNull()
+  })
+
+  // T1 (3.0.9): with the scope already on "persona", a persona without its
+  // own sliders kept only the one moved; the others fell to 0.
+  it('keeps the other sliders when a persona is first moved', async () => {
+    for (const id of ['creative', 'cheerful']) vectors.push({ id, kind: 'preset', name: id, left: 'L', right: 'R', unit: 0.8, builtAt: 1, more: [], less: [] })
+    useNeuronStore.setState({ profiles: { 'qwen-1': { creative: 0.5, cheerful: 0.4 } }, scopeByModel: { 'qwen-1': 'persona' } })
+    useChatStore.setState({ conversations: [], activeConversationId: null })
+    useSettingsStore.setState((s) => ({ personas: [{ id: 'coder', name: 'Coder', systemPrompt: 'Code.' } as Persona], activePersonaId: 'coder', settings: { ...s.settings, personasEnabled: true } }))
+    render(createElement(NeuronView))
+    const row = await screen.findByTestId('neuron-slider-creative')
+    await screen.findByText(/This model with/)
+    fireEvent.change(row.querySelector('input[type=range]') as HTMLInputElement, { target: { value: '0.2' } })
+    expect(useNeuronStore.getState().profiles['qwen-1::persona:coder']).toEqual({ creative: 0.2, cheerful: 0.4 })
+    await waitFor(() => expect(apply.mock.calls.at(-1)?.[1]).toEqual([{ id: 'cheerful', strength: 0.4 }, { id: 'creative', strength: 0.2 }]), { timeout: 3000 })
   })
 
   // T1 (3.0.9): the embedding model of Document Chat was the only choice,

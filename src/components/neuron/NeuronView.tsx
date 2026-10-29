@@ -16,7 +16,7 @@ import { preservedSwapCtx } from '../../lib/builtin-ctx'
 import { builtinModelMatches } from '../../lib/builtin-model-identity'
 import {
   backendNote, effectiveStrengths, entriesFor, hasPersonaProfile, jobProgressText, jobShare, sameEntries,
-  steeringPersona, strengthWarning, warningText, type BackendKind,
+  clampStrength, steeringPersona, strengthWarning, warningText, type BackendKind,
 } from '../../lib/neuron'
 import { editingKey, useNeuronStore } from '../../stores/neuronStore'
 import { useModelStore } from '../../stores/modelStore'
@@ -184,6 +184,14 @@ export function NeuronView() {
     }
   }
 
+  // A persona without its own profile shows the model's; its first move
+  // starts from what is shown, so the other sliders keep their place (T1:
+  // they fell to 0 when the saved scope was already "persona").
+  const move = (id: string, value: number) => {
+    if (editKey in profiles) setStrength(editKey, id, value)
+    else setProfile(editKey, { ...strengths, [id]: clampStrength(value) })
+  }
+
   const reset = () => {
     if (!modelKey) return
     if (scope === 'persona') removeProfile(editKey)
@@ -257,7 +265,7 @@ export function NeuronView() {
                 computed={!!v}
                 disabled={running || !modelPath || (!v && !info?.generator)}
                 onCompute={() => void startJob(() => neuronBuildPreset(modelPath, p.id))}
-                onChange={(x) => setStrength(editKey, p.id, x)}
+                onChange={(x) => move(p.id, x)}
               />
             )
           })}
@@ -275,7 +283,7 @@ export function NeuronView() {
               value={strengths[v.id] ?? 0}
               computed
               disabled={running}
-              onChange={(x) => setStrength(editKey, v.id, x)}
+              onChange={(x) => move(v.id, x)}
               onDelete={() => void neuronDelete(modelPath, v.id).then(() => { removeSlider(modelKey, v.id); return refreshInfo(modelPath) })}
             />
           ))}
@@ -293,7 +301,7 @@ export function NeuronView() {
             disabled={running}
             onDownload={() => void startJob(() => neuronSaeDownload(modelPath))}
             onAdd={(hit) => void startJob(() => neuronFeatureAdd(modelPath, hit.feature, hit.label))}
-            onChange={(id, x) => setStrength(editKey, id, x)}
+            onChange={(id, x) => move(id, x)}
             onDelete={(id) => void neuronDelete(modelPath, id).then(() => { removeSlider(modelKey, id); return refreshInfo(modelPath) })}
             onError={setError}
           />
