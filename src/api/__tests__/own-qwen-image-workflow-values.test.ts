@@ -61,15 +61,15 @@ describe('an own Qwen Image 2.1 workflow, value by value', () => {
     expect(out['3'].inputs).toEqual(wf['3'].inputs)
     expect(out['4'].inputs).toEqual(wf['4'].inputs)
     expect(out['5'].inputs).toEqual(wf['5'].inputs)
-    expect(out['1'].inputs.weight_dtype).toBe('fp8_e4m3fn')
-    expect(out['9'].inputs.denoise).toBe(1)
+    expect(out['1'].inputs?.weight_dtype).toBe('fp8_e4m3fn')
+    expect(out['9'].inputs?.denoise).toBe(1)
   })
 
   it('the prompt goes into the positive box, the negative box gets LU\'s negative', async () => {
     const wf = qwenGraph()
     const out = await injectParameters(wf, autoDetectParameterMap(wf), lu, 'qwenimage')
-    expect(out['6'].inputs.text).toBe(lu.prompt)
-    expect(out['7'].inputs.text).toBe('')
+    expect(out['6'].inputs?.text).toBe(lu.prompt)
+    expect(out['7'].inputs?.text).toBe('')
   })
 
   it('steps, CFG, sampler, scheduler and size are the Create controls, not the workflow', async () => {
