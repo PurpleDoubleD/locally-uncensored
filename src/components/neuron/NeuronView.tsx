@@ -72,7 +72,9 @@ export function NeuronView() {
   const [models, setModels] = useState<BundledModel[]>([])
   const [modelsLoaded, setModelsLoaded] = useState(false)
   const [modelPath, setModelPath] = useState<string>('')
-  const [info, setInfo] = useState<NeuronInfo | null>(null)
+  // The info is kept with the model it was read for: after a switch the old
+  // model's sliders must not reach the new one while its info is on the way.
+  const [loadedInfo, setLoadedInfo] = useState<{ path: string; info: NeuronInfo } | null>(null)
   const [presets, setPresets] = useState<NeuronPreset[]>([])
   const [job, setJob] = useState<NeuronJob | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -81,6 +83,9 @@ export function NeuronView() {
 
   const backend = chatBackend(activeModel, appMode)
   const model = models.find((m) => m.path === modelPath)
+  const info = loadedInfo?.path === modelPath ? loadedInfo.info : null
+  const pathRef = useRef(modelPath)
+  pathRef.current = modelPath
 
   // Models and presets once; the loaded model (or the chat's) preselected.
   useEffect(() => {
@@ -100,10 +105,13 @@ export function NeuronView() {
   const refreshInfo = useCallback(async (path: string) => {
     if (!path) return
     try {
-      setInfo(await neuronInfo(path))
+      const read = await neuronInfo(path)
+      if (path !== pathRef.current) return
+      setLoadedInfo({ path, info: read })
       setError(null)
     } catch (e) {
-      setInfo(null)
+      if (path !== pathRef.current) return
+      setLoadedInfo(null)
       setError(String(e))
     }
   }, [])

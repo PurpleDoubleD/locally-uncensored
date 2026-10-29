@@ -23,7 +23,12 @@ vi.mock('../../../api/neuron', () => ({
     { id: 'creative', left: 'Sober', right: 'Creative' },
     { id: 'cheerful', left: 'Serious', right: 'Cheerful' },
   ],
-  neuronInfo: async () => ({
+  neuronInfo: async (path: string) => path === LLAMA.path ? {
+    // The second model's info comes later than the first's, as on disk.
+    ...(await new Promise((r) => setTimeout(r, 200)), {}),
+    facts: { arch: 'llama', nLayer: 28, nEmbd: 3072, template: 'llama3', name: 'Llama 3.2 3B' },
+    modelKey: 'llama-1', generator: true, band: [4, 22], vectors: [...vectors], sae: null, activeMix: null,
+  } : ({
     facts: { arch: 'qwen2', nLayer: 24, nEmbd: 896, template: 'chatMl', name: 'Qwen2.5 0.5B Instruct' },
     modelKey: 'qwen-1',
     generator: true,
@@ -45,6 +50,7 @@ vi.mock('../../../api/engine', () => ({
 }))
 vi.mock('../../../api/backend', () => ({ openExternal: vi.fn(), backendCall: vi.fn() }))
 const QWEN = { name: 'qwen2.5-0.5b-instruct-q8_0', path: '/models/qwen.gguf', size: 1, loaded: true }
+const LLAMA = { name: 'llama-3.2-3b-q4_k_m', path: '/models/llama.gguf', size: 1, loaded: false }
 const NOMIC = { name: 'nomic-embed-text-v1.5.Q4_K_M', path: '/models/nomic.gguf', size: 1, loaded: false }
 const disk = vi.hoisted(() => ({ models: [] as Array<Record<string, unknown>> }))
 const slot = vi.hoisted(() => ({ managed: true }))
@@ -89,6 +95,21 @@ describe('Neuron tweaker view', () => {
     await waitFor(() => expect(apply.mock.calls.at(-1)?.[1]).toEqual([{ id: 'creative', strength: 0.6 }]), { timeout: 3000 })
     fireEvent.click(screen.getByTestId('neuron-reset'))
     await waitFor(() => expect(apply.mock.calls.at(-1)?.[1]).toEqual([]), { timeout: 3000 })
+  })
+
+  // T1 (3.0.9): after a switch the old model's sliders went to the new
+  // model (twice, each a restart) until its info was in.
+  it('sends the new model only its own sliders after a switch', async () => {
+    disk.models = [QWEN, LLAMA]
+    vectors.push({ id: 'creative', kind: 'preset', name: 'Sober ↔ Creative', left: 'Sober', right: 'Creative', unit: 0.8, builtAt: 1, more: [], less: [] })
+    useNeuronStore.setState({ profiles: { 'qwen-1': { creative: 0.5 } }, scopeByModel: {} })
+    render(createElement(NeuronView))
+    await waitFor(() => expect(apply.mock.calls.at(-1)?.[1]).toEqual([{ id: 'creative', strength: 0.5 }]))
+    fireEvent.change(screen.getByTestId('neuron-model'), { target: { value: LLAMA.path } })
+    await waitFor(() => expect(apply.mock.calls.some((c) => c[0] === LLAMA.path)).toBe(true))
+    await new Promise((r) => setTimeout(r, 300))
+    const toLlama = apply.mock.calls.filter((c) => c[0] === LLAMA.path)
+    expect(toLlama.map((c) => c[1])).toEqual([[]])
   })
 
   // T1 (3.0.9): the embedding model of Document Chat was the only choice,
