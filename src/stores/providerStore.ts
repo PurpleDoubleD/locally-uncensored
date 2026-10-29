@@ -155,6 +155,27 @@ const DEFAULT_PROVIDERS: Record<FixedProviderId, ProviderConfig> = {
 }
 
 /**
+ * Where a reset points Ollama. Rust reports it with `get_ollama_host` as
+ * `defaultBase`: OLLAMA_HOST if set, else the default. config.json is not
+ * part of it, because that file still holds the address being reset away
+ * from. Until Rust has answered (or outside Tauri) it is the shipped default.
+ * Before this the reset wrote a fixed localhost:11434 even with OLLAMA_HOST
+ * set, and the store subscription then pinned that port in config.json.
+ */
+let ollamaResetBase = DEFAULT_PROVIDERS.ollama.baseUrl
+
+export function rememberOllamaResetBase(base: string | undefined | null): void {
+  const b = base?.trim().replace(/\/+$/, '')
+  if (b) ollamaResetBase = b
+}
+
+function shippedDefault(id: FixedProviderId): ProviderConfig {
+  return id === 'ollama'
+    ? { ...DEFAULT_PROVIDERS.ollama, baseUrl: ollamaResetBase }
+    : DEFAULT_PROVIDERS[id]
+}
+
+/**
  * The model/provider invariant, asked on EVERY path that can switch a slot off.
  *
  * A slot going dark makes the picked model unservable, and nothing used to
@@ -561,7 +582,7 @@ export const useProviderStore = create<ProviderState>()(
         set((state) => ({
           providers: {
             ...state.providers,
-            [id]: DEFAULT_PROVIDERS[id],
+            [id]: shippedDefault(id),
           },
         }))
         // Opus review, round 2, Blocker 7: DEFAULT_PROVIDERS.openai carries
@@ -594,7 +615,7 @@ export const useProviderStore = create<ProviderState>()(
           }
           for (const id of Object.keys(DEFAULT_PROVIDERS) as FixedProviderId[]) {
             next[id] = {
-              ...DEFAULT_PROVIDERS[id],
+              ...shippedDefault(id),
               apiKey: state.providers[id]?.apiKey ?? '',
               ...(id === 'lu-cloud' ? { enabled: state.providers[id]?.enabled ?? false } : {}),
             }

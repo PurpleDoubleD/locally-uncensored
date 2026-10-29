@@ -22,7 +22,7 @@ import {
 import { useUIStore, readViewportWidth } from '../../stores/uiStore'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { useCompareStore } from '../../stores/compareStore'
-import { useProviderStore } from '../../stores/providerStore'
+import { useProviderStore, rememberOllamaResetBase } from '../../stores/providerStore'
 import { mayEnableFromWizard } from '../../lib/onboarding-provider-gate'
 import { sameEndpoint } from '../../lib/openai-entries'
 import { useChatStore } from '../../stores/chatStore'
@@ -815,7 +815,9 @@ export function AppShell() {
       if (!cancelled) armSubscription()
 
       try {
-        const res = await backendCall<{ base?: string }>('get_ollama_host')
+        const res = await backendCall<{ base?: string; defaultBase?: string }>('get_ollama_host')
+        // Where "Reset AI Backends" points Ollama (OLLAMA_HOST, else default).
+        rememberOllamaResetBase(res?.defaultBase)
         if (!cancelled && res?.base) {
           setOllamaBase(res.base)
           const current = useProviderStore.getState().providers.ollama?.baseUrl

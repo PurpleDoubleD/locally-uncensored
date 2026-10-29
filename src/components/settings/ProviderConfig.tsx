@@ -418,6 +418,12 @@ export function ProviderSettings() {
     applyPreset(preset)
   }
 
+  /** The address a preset row stands for: Ollama's is the configured one. */
+  function presetAddress(preset: typeof PROVIDER_PRESETS[0]): string {
+    if (preset.providerId === 'ollama') return providers.ollama?.baseUrl?.trim() || preset.baseUrl
+    return preset.baseUrl
+  }
+
   function applyPreset(preset: typeof PROVIDER_PRESETS[0]) {
     // GitHub #173: an OpenAI-compatible backend no longer has to push the one
     // in the slot out. While the slot is on and serves something else, the
@@ -437,7 +443,11 @@ export function ProviderSettings() {
     }
     // Enable the selected provider WITHOUT disabling others
     if (preset.providerId === 'ollama') {
-      setProviderConfig('ollama', { enabled: true, baseUrl: preset.baseUrl })
+      // Jaeger B, B7: the slot already carries the address Rust resolved
+      // (config.json > OLLAMA_HOST) or the one typed in by hand. Picking
+      // Ollama turns it on there; the preset's localhost:11434 is only for
+      // a slot that has no address at all.
+      setProviderConfig('ollama', { enabled: true, baseUrl: presetAddress(preset) })
     } else if (preset.providerId === 'anthropic') {
       setProviderConfig('anthropic', { enabled: true, name: preset.name, baseUrl: preset.baseUrl, isLocal: false })
     } else {
@@ -982,7 +992,7 @@ export function ProviderSettings() {
                     <span className="font-medium">{preset.name}</span>
                     {isActive && <span className="text-[0.5rem] text-green-700 dark:text-green-400">Active</span>}
                   </div>
-                  {preset.baseUrl && <span className="block text-[0.55rem] text-gray-500 font-mono">{preset.baseUrl}</span>}
+                  {presetAddress(preset) && <span className="block text-[0.55rem] text-gray-500 font-mono">{presetAddress(preset)}</span>}
                 </button>
               )
             })}
@@ -1005,7 +1015,7 @@ export function ProviderSettings() {
                     <span className="font-medium">{preset.name}</span>
                     {isActive && <span className="text-[0.5rem] text-green-700 dark:text-green-400">Active</span>}
                   </div>
-                  {preset.baseUrl && <span className="block text-[0.55rem] text-gray-500 font-mono">{preset.baseUrl}</span>}
+                  {presetAddress(preset) && <span className="block text-[0.55rem] text-gray-500 font-mono">{presetAddress(preset)}</span>}
                 </button>
               )
             })}

@@ -24,7 +24,7 @@ let pending: Promise<void> | null = null
 const RUST_TIMEOUT_MS = 3000
 
 async function pull(): Promise<void> {
-  const { useProviderStore } = await import('../stores/providerStore')
+  const { useProviderStore, rememberOllamaResetBase } = await import('../stores/providerStore')
 
   // Erst nach der Hydrierung schreiben, sonst spielt `persist` den alten
   // baseUrl aus localStorage darueber (siehe AppShell, Schritt 2).
@@ -41,9 +41,10 @@ async function pull(): Promise<void> {
     // antwortet, darf die Modellliste nicht anhalten.
     let timer: ReturnType<typeof setTimeout> | undefined
     const res = await Promise.race([
-      backendCall<{ base?: string }>('get_ollama_host'),
+      backendCall<{ base?: string; defaultBase?: string }>('get_ollama_host'),
       new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('timeout')), RUST_TIMEOUT_MS) }),
     ]).finally(() => clearTimeout(timer))
+    rememberOllamaResetBase(res?.defaultBase)
     if (res?.base) {
       setOllamaBase(res.base)
       const current = useProviderStore.getState().providers.ollama?.baseUrl

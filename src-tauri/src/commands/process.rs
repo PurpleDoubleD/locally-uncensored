@@ -3204,7 +3204,13 @@ fn get_ollama_host_blocking(state: &AppState) -> Result<serde_json::Value, Strin
         .and_then(|u| u.host_str().map(|h| h.to_lowercase()))
         .map(|h| matches!(h.as_str(), "localhost" | "127.0.0.1" | "::1" | "0.0.0.0"))
         .unwrap_or(false);
-    Ok(serde_json::json!({"base": base, "isLocal": is_local}))
+    // `defaultBase`: where "Reset AI Backends" points Ollama (OLLAMA_HOST,
+    // else the default), see state::ollama_default_base.
+    Ok(serde_json::json!({
+        "base": base,
+        "isLocal": is_local,
+        "defaultBase": crate::state::ollama_default_base(),
+    }))
 }
 
 /// Auto-start Ollama on app launch (called from setup)
