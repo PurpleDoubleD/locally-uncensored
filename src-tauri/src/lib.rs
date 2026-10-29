@@ -772,6 +772,31 @@ pub fn run() {
             commands::abliterate::abliterate_dismiss,
             commands::abliterate::abliterate_runs,
             commands::abliterate::abliterate_trash_copy,
+            // Neuron tweaker (3.0.9, P11)
+            #[cfg(desktop)]
+            commands::neuron::neuron_presets,
+            #[cfg(desktop)]
+            commands::neuron::neuron_info,
+            #[cfg(desktop)]
+            commands::neuron::neuron_build,
+            #[cfg(desktop)]
+            commands::neuron::neuron_feature_add,
+            #[cfg(desktop)]
+            commands::neuron::neuron_delete,
+            #[cfg(desktop)]
+            commands::neuron::neuron_sae_download,
+            #[cfg(desktop)]
+            commands::neuron::neuron_sae_search,
+            #[cfg(desktop)]
+            commands::neuron::neuron_status,
+            #[cfg(desktop)]
+            commands::neuron::neuron_cancel,
+            #[cfg(desktop)]
+            commands::neuron::neuron_dismiss,
+            #[cfg(desktop)]
+            commands::neuron::neuron_apply,
+            #[cfg(desktop)]
+            commands::neuron::neuron_compare,
             // Whisper STT
             commands::whisper::whisper_status,
             commands::whisper::transcribe,

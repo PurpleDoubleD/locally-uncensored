@@ -72,6 +72,9 @@ pub mod mobile_guard;
 pub mod mobile_native;
 pub mod model_sniff;
 pub mod model_verify;
+// The Neuron tweaker (3.0.9, P11): control vectors for the LU Engine.
+#[cfg(desktop)]
+pub mod neuron;
 pub mod oauth;
 pub mod process;
 pub mod proxy;

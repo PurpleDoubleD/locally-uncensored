@@ -208,7 +208,8 @@ describe('D-S47: die Kebab-Regel ist an der Anordnung ablesbar', () => {
 
   it('Voice is one of the targets Cloud hides, next to Benchmark and Models', () => {
     const local = [...CODE.matchAll(/\{ id: '(\w+)',[^}]*localOnly: true \}/g)].map((m) => m[1])
-    expect(local.sort()).toEqual(['benchmark', 'models', 'voice'])
+    // The Neuron tweaker (3.0.9) steers local LU Engine models only.
+    expect(local.sort()).toEqual(['benchmark', 'models', 'neuron', 'voice'])
   })
 })
 

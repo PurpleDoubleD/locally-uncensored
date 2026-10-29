@@ -226,6 +226,27 @@ quantize_out_name_for() {
   echo "lu-llama-quantize-$1"
 }
 
+# llama-cvector-generator (3.0.9, P11 Neuron tweaker) ships on macOS and
+# Windows: it turns two short lists of example prompts into a control vector
+# for the model the user has, which llama-server then applies with
+# --control-vector. Same pinned source tree, same flags as the server. On
+# Windows it links the same llama/ggml/llama-common DLLs the server already
+# stages beside the exe, so it needs nothing of its own. Linux does not ship
+# it yet (AppImage/deb library layout is a separate check).
+cvector_ships_for() {
+  case "$1" in
+    *-apple-darwin | x86_64-pc-windows-msvc) return 0 ;;
+    *)                                      return 1 ;;
+  esac
+}
+
+cvector_out_name_for() {
+  case "$1" in
+    *-windows-*) echo "lu-llama-cvector-generator-$1.exe" ;;
+    *)           echo "lu-llama-cvector-generator-$1" ;;
+  esac
+}
+
 # A 40-hex commit SHA and nothing else. A short SHA, a tag name or an empty
 # override would all silently reduce the pin back to "whatever origin says".
 assert_pinned_commit() {
@@ -427,6 +448,9 @@ build_triple() {
   if quantize_ships_for "$triple"; then
     cmake --build "$build_dir" --config Release --target llama-quantize -j "${BUILD_JOBS:-4}"
   fi
+  if cvector_ships_for "$triple"; then
+    cmake --build "$build_dir" --config Release --target llama-cvector-generator -j "${BUILD_JOBS:-4}"
+  fi
   # Locate the produced binary (path differs by generator/platform).
   local built
   built="$(find "$build_dir" -type f \( -name 'llama-server' -o -name 'llama-server.exe' \) -print -quit)"
@@ -441,6 +465,13 @@ build_triple() {
     [ -n "$built_q" ] || die "llama-quantize binary not found under $build_dir"
     cp "$built_q" "$BIN_DIR/$(quantize_out_name_for "$triple")"
     chmod +x "$BIN_DIR/$(quantize_out_name_for "$triple")"
+  fi
+  if cvector_ships_for "$triple"; then
+    local built_cv
+    built_cv="$(find "$build_dir" -type f \( -name 'llama-cvector-generator' -o -name 'llama-cvector-generator.exe' \) -print -quit)"
+    [ -n "$built_cv" ] || die "llama-cvector-generator binary not found under $build_dir"
+    cp "$built_cv" "$BIN_DIR/$(cvector_out_name_for "$triple")"
+    chmod +x "$BIN_DIR/$(cvector_out_name_for "$triple")"
   fi
 
   local out_digest; out_digest="$(sha256_of "$out")"

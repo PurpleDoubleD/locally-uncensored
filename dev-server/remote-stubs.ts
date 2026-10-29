@@ -100,6 +100,7 @@ export function registerRemoteStubs(routes: RouteMount): void {
     '/local-api/abliterate-plan', '/local-api/abliterate-start', '/local-api/abliterate-status',
     '/local-api/abliterate-cancel', '/local-api/abliterate-dismiss', '/local-api/abliterate-runs',
     '/local-api/abliterate-trash-copy',
+    '/local-api/neuron-presets', '/local-api/neuron-info', '/local-api/neuron-build', '/local-api/neuron-feature-add', '/local-api/neuron-delete', '/local-api/neuron-sae-download', '/local-api/neuron-sae-search', '/local-api/neuron-status', '/local-api/neuron-cancel', '/local-api/neuron-dismiss', '/local-api/neuron-apply', '/local-api/neuron-compare',
   ]) {
     routes.use(path, (_req, res) => {
       res.writeHead(501, { 'Content-Type': 'application/json' })

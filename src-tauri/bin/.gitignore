@@ -5,6 +5,7 @@
 # does not suddenly offer a 3 GB binary for commit.
 lu-llama-server-*
 lu-llama-quantize-*
+lu-llama-cvector-generator-*
 llama-server-*
 *.dll
 !.gitignore

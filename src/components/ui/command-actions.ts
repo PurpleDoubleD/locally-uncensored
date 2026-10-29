@@ -125,6 +125,7 @@ export function buildCommands(ctx: CommandContext): Command[] {
   if (ctx.localViewsAvailable) {
     out.push({ id: 'view-voice', label: 'Voice', group: GROUP_VIEW, run: () => ctx.setView('voice') })
     out.push({ id: 'view-benchmark', label: 'Benchmark', group: GROUP_VIEW, run: () => ctx.setView('benchmark') })
+    out.push({ id: 'view-neuron', label: 'Neuron tweaker', group: GROUP_VIEW, run: () => ctx.setView('neuron') })
     out.push({ id: 'view-models', label: 'Models', group: GROUP_VIEW, run: () => ctx.setView('models') })
   }
   out.push({ id: 'view-settings', label: 'Settings', group: GROUP_VIEW, run: () => ctx.setView('settings') })
