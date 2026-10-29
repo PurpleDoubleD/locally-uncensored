@@ -901,7 +901,7 @@ export const useChatStore = create<ChatState>()(
               ...c,
               messages: c.messages.map((m) => {
                 if (m.id !== messageId) return m
-                if (trim && trim.dropped > 0) return { ...m, historyTrim: trim }
+                if (trim && (trim.dropped > 0 || (trim.shortened ?? 0) > 0)) return { ...m, historyTrim: trim }
                 if (!m.historyTrim) return m
                 const next = { ...m }
                 delete next.historyTrim

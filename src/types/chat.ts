@@ -137,7 +137,7 @@ export interface Message {
   /** GH #201: the request behind this answer left out `dropped` older
    *  messages to fit `window` tokens. The chat says so next to the answer.
    *  Absent when the whole conversation went out. */
-  historyTrim?: { dropped: number; window: number }
+  historyTrim?: { dropped: number; window: number; shortened?: number }
   timestamp: number
   images?: ImageAttachment[]
   /** Files attached to this user message. `content` already carries their

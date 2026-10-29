@@ -505,3 +505,51 @@ export function compactMessagesWithCount(
     dropped: Math.max(0, droppedCount),
   }
 }
+
+/** The least a shortened turn keeps, in tokens: enough for its start and its end. */
+const SHORTENED_TURN_FLOOR = 256
+
+/**
+ * Shorten the longest turns until the payload fits `maxTokens`, keeping the
+ * head and the tail of each. Never the system prompt (index 0), and never the
+ * message being answered: by default the last one, or whatever `isKept` names.
+ * A group round passes `isKept`, because there the last message is usually the
+ * speaker before this one, and that is exactly the turn that may be too long.
+ *
+ * compactMessages only drops whole older messages and always keeps the newest
+ * KEEP_RECENT, so one very long answer inside that window rode along whole. In
+ * a group round that is the speaker before this one: an 82K-character answer
+ * against a 16K model and every later speaker of the round was refused by the
+ * engine (T1 2026-10-29, GH #201 follow-up). The person's history keeps the
+ * full text; only this request carries the shortened copy.
+ */
+export function shortenLongTurns<T extends { role: string; content: string }>(
+  messages: T[],
+  maxTokens: number,
+  isKept: (m: T, index: number) => boolean = (_m, i) => i === messages.length - 1,
+): { messages: T[]; shortened: number } {
+  const size = (m: T) => estimateMessageTokens([m as unknown as OllamaChatMessage])
+  let total = estimateMessageTokens(messages as unknown as OllamaChatMessage[])
+  if (total <= maxTokens) return { messages, shortened: 0 }
+  const out = [...messages]
+  const touched = new Set<number>()
+  const first = out[0]?.role === 'system' ? 1 : 0
+  for (let round = 0; round < out.length && total > maxTokens; round++) {
+    let at = -1
+    let largest = SHORTENED_TURN_FLOOR
+    for (let i = first; i < out.length; i++) {
+      if (isKept(messages[i], i)) continue
+      const t = size(out[i])
+      if (t > largest) { largest = t; at = i }
+    }
+    if (at < 0) break
+    const keep = Math.max(SHORTENED_TURN_FLOOR, largest - (total - maxTokens) - 32)
+    const text = out[at].content
+    const chars = Math.max(200, Math.floor((text.length * keep) / largest) - 40)
+    if (chars >= text.length) break
+    out[at] = { ...out[at], content: truncateToolResult(text, chars) }
+    touched.add(at)
+    total = estimateMessageTokens(out as unknown as OllamaChatMessage[])
+  }
+  return touched.size ? { messages: out, shortened: touched.size } : { messages, shortened: 0 }
+}
