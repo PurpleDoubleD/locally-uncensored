@@ -407,7 +407,7 @@ pub fn tool_failure(stderr: &str) -> String {
 
 /// Runs the generator on the example pairs and returns the direction.
 fn generate(app: &tauri::AppHandle, model_path: &str, plus: &[String], minus: &[String], work: &Path) -> Result<cvec::ControlVector, String> {
-    let binary = generator_binary(app).ok_or("This build of LU has no vector tool (lu-llama-cvector-generator). On Linux it comes in a later version.")?;
+    let binary = generator_binary(app).ok_or("This install of LU is missing its vector tool (lu-llama-cvector-generator). Reinstall LU to bring it back.")?;
     std::fs::create_dir_all(work).map_err(|e| crate::os_error::english(&e))?;
     let pos = work.join("more.txt");
     let neg = work.join("less.txt");
@@ -608,7 +608,7 @@ pub async fn neuron_info(app: tauri::AppHandle, model_path: String) -> Result<Va
 pub fn neuron_build(app: tauri::AppHandle, args: BuildArgs) -> Result<Value, String> {
     let facts = model::facts(&args.model_path)?;
     if generator_binary(&app).is_none() {
-        return Err("This build of LU has no vector tool (lu-llama-cvector-generator). Feature sliders still work where the model has an SAE.".into());
+        return Err("This install of LU is missing its vector tool (lu-llama-cvector-generator). Reinstall LU to bring it back. Feature sliders still work where the model has an SAE.".into());
     }
     let (id, kind, name, left, right, plus, minus) = match &args.preset {
         Some(pid) => {
