@@ -57,6 +57,7 @@ vi.mock('../compact-run', async (importOriginal) => {
 import { maybeAutoCompact, runCompactForConversation } from '../run-compact-command'
 import { compactCuts, layerItems } from '../compact-layers'
 import { useRunActivityStore } from '../../stores/runActivityStore'
+import { useSendSizeStore } from '../../stores/sendSizeStore'
 import { deriveRunStatus } from '../../components/status/run-status'
 import { runCompactSummary } from '../compact-run'
 import { resolveAgentNumCtxWithConfidence } from '../agent-num-ctx'
@@ -660,6 +661,33 @@ describe('Auto-Kompaktierung, die klappt, sagt es auch', () => {
     const vorher = ids(layerItems(conv.messages, cuts, 0))
     expect(vorher).toContain(rec!.upToMessageId)
     expect(ids(layerItems(conv.messages, cuts, null))).not.toContain(rec!.upToMessageId)
+  })
+
+  it('ein schon gekuerzter Zug macht "nachher" nicht zu 0', async () => {
+    // T1 29.10.: eine Antwort mit 82 500 Zeichen, gesendet nur gekuerzt. Der
+    // Zaehler las 737, die ersetzten Zuege zaehlten roh ueber 20 000, und die
+    // Linie sagte "Compacted, 737 → 0". Nachher stehen mindestens die
+    // Zusammenfassung und die behaltenen Nachrichten.
+    setzeSchwelle(0.5)
+    const id = seedGespraech(MIN_MESSAGES_TO_COMPACT + 4)
+    useChatStore.getState().addMessage(id, { id: 'riesig', role: 'assistant', content: 'y'.repeat(82_500), timestamp: 999 })
+    for (let i = 0; i < 12; i++) {
+      useChatStore.getState().addMessage(id, {
+        id: `kurz${i}`, role: i % 2 === 0 ? 'user' : 'assistant', content: 'z'.repeat(200), timestamp: 1000 + i,
+      })
+    }
+    const n = useChatStore.getState().conversations.find((c) => c.id === id)!.messages.length
+    useSendSizeStore.getState().report(id, { tokens: 737, window: 8192, atMessageCount: n, trimmedResults: 0, savedChars: 0 })
+    zusammenfassen.mockResolvedValue({ ok: true, summary: ZUSAMMENFASSUNG } as never)
+
+    const out = await runCompactForConversation({ conversationId: id, activeModel: MODELL, trigger: 'manual', window: 8192 })
+    expect(out.ok).toBe(true)
+    const rec = out.ok ? out.record : null
+    expect(rec!.tokensBefore).toBeGreaterThan(rec!.contextBefore!)
+    expect(rec!.contextAfter).toBeGreaterThan(0)
+    expect(rec!.contextAfter).toBeGreaterThanOrEqual(rec!.tokensAfter)
+    expect(rec!.contextAfter).toBeLessThanOrEqual(rec!.contextBefore!)
+    useSendSizeStore.getState().clear(id)
   })
 
   it('der manuelle Weg schreibt auch keine Notiz', async () => {
