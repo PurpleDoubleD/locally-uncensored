@@ -56,6 +56,7 @@ export const useNeuronStore = create<NeuronState>()(
 )
 
 /** The profile key the panel edits for this model and persona. */
-export function editingKey(modelKey: string, personaId: string, scope: 'model' | 'persona'): string {
-  return scope === 'persona' ? personaProfileKey(modelKey, personaId) : modelProfileKey(modelKey)
+export function editingKey(modelKey: string, personaId: string | undefined, scope: 'model' | 'persona'): string {
+  // No persona steers (none active, or a group chat): the model's own.
+  return scope === 'persona' && personaId ? personaProfileKey(modelKey, personaId) : modelProfileKey(modelKey)
 }
