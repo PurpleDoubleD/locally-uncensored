@@ -129,15 +129,16 @@ describe('the same mechanic the Cloud switch uses, on purpose', () => {
   })
 
   it('NEGATIVE CONTROL: the reset still needs the SECOND click to fire', () => {
-    // resetSettingsKeys must sit AFTER the arm-and-return guard, never before.
+    // The reset must sit AFTER the arm-and-return guard, never before. Since
+    // B2 both buttons fire through lib/run-settings-reset.ts.
     const guard = settingsPage.indexOf('if (armed !== which)')
-    const fires = settingsPage.indexOf('resetSettingsKeys(SETTINGS_TAB_RESET_KEYS[tab])')
+    const fires = settingsPage.indexOf('runSettingsReset(which, tab)')
     expect(guard).toBeGreaterThan(-1)
     expect(fires).toBeGreaterThan(guard)
   })
 
   it('NEGATIVE CONTROL: the backends reset still hands the slot back to the engine', () => {
-    expect(settingsPage).toContain(
+    expect(read('src/lib/run-settings-reset.ts')).toContain(
       "if (tab === 'backends') useProviderStore.getState().resetProvidersToDefaults()",
     )
   })

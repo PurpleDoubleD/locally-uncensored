@@ -6,14 +6,14 @@ import { withDetail } from '../../lib/error-text'
 // traegt ihn neben dem Wort.
 import { ArrowLeft, RotateCcw, Sun, Moon, Check, X, Loader2, Shield, ChevronRight, GraduationCap, Lock, Sliders, Plug, Bot, Phone, User, Download, AlertTriangle } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { SETTINGS_TAB_RESET_KEYS, type SettingsTab } from '../../lib/settings-reset'
+import { type SettingsTab } from '../../lib/settings-reset'
+import { runSettingsReset } from '../../lib/run-settings-reset'
 import { armedScopeFor, type ResetArm, type ResetArmScope } from '../../lib/reset-arming'
 import { sectionAnchorId, sectionsFor, type SettingsSectionFlags } from './settings-nav'
 import { ChatReplyTimeoutSettings } from './ChatReplyTimeoutSettings'
 import { HowItWorks } from '../ui/HowItWorks'
 import { HOWTO } from '../../lib/howto'
 import { useSettingsStore } from '../../stores/settingsStore'
-import { usePermissionStore } from '../../stores/permissionStore'
 import { useUIStore } from '../../stores/uiStore'
 import { SliderControl } from './SliderControl'
 import { THINK_BUDGET_STEP, normalizeThinkBudget } from '../../lib/think-budget'
@@ -23,7 +23,6 @@ import { SpeechSettings } from './SpeechSettings'
 import { LogFileSettings } from './LogFileSettings'
 import { PersonaPanel } from '../personas/PersonaPanel'
 import { AccountPanel } from '../auth/AccountPanel'
-import { useVoiceStore } from '../../stores/voiceStore'
 import { downloadSuffix } from '../../lib/formatters'
 // Der Satz zum Startfehler kommt fuer beide Oberflaechen aus dieser Stelle
 // (Ticket 007). Statisch geladen, weil ihn der Beobachter unten in dem
@@ -1621,10 +1620,6 @@ const SETTINGS_TABS: { id: SettingsTab; label: string; icon: ReactNode }[] = [
 // visible signals are pinned by
 // src/lib/__tests__/reset-arming-is-visible.test.ts.
 function ResetSection({ tab }: { tab: SettingsTab }) {
-  const resetSettingsKeys = useSettingsStore((s) => s.resetSettingsKeys)
-  const resetSettings = useSettingsStore((s) => s.resetSettings)
-  const resetVoiceDefaults = useVoiceStore((s) => s.resetVoiceDefaults)
-  const resetPermissions = usePermissionStore((s) => s.resetToDefaults)
   // The arm records the tab it was made on, so "still armed?" is a question
   // that can be answered while rendering. Switching tabs while armed must
   // disarm, otherwise a click armed on General would confirm-fire on Agent,
@@ -1654,22 +1649,8 @@ function ResetSection({ tab }: { tab: SettingsTab }) {
     }
     if (armTimer.current) window.clearTimeout(armTimer.current)
     setArmed(null)
-    if (which === 'all') {
-      resetSettings()
-      resetVoiceDefaults()
-      resetPermissions()
-      setDone('All settings restored to defaults')
-    } else {
-      resetSettingsKeys(SETTINGS_TAB_RESET_KEYS[tab])
-      if (tab === 'agent') resetPermissions()
-      if (tab === 'voice-remote') resetVoiceDefaults()
-      // G20: "Reset AI Backends" only reset settings KEYS and never touched
-      // the provider store, so it could not hand the openai slot back to the
-      // Built-in Engine once LM Studio had adopted it. Now it restores the
-      // shipped slots too (API keys and the cloud account flag are kept).
-      if (tab === 'backends') useProviderStore.getState().resetProvidersToDefaults()
-      setDone(`${tabLabel} settings restored to defaults`)
-    }
+    runSettingsReset(which, tab)
+    setDone(which === 'all' ? 'All settings restored to defaults' : `${tabLabel} settings restored to defaults`)
     if (doneTimer.current) window.clearTimeout(doneTimer.current)
     doneTimer.current = window.setTimeout(() => setDone(null), 3000)
   }
