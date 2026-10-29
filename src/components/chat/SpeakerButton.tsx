@@ -2,6 +2,7 @@ import { useState } from "react"
 import { Volume2, VolumeX } from "lucide-react"
 import { useVoice } from "../../hooks/useVoice"
 import { useVoiceStore } from "../../stores/voiceStore"
+import { HINWEIS_TEXT } from "../../lib/hinweis"
 
 interface Props {
   text: string
@@ -47,7 +48,7 @@ export function SpeakerButton({ text }: Props) {
       {isSpeaking ? <VolumeX size={12} /> : <Volume2 size={12} />}
     </button>
     {pressed && fallbackReason && (
-      <span role="status" className="text-[0.6rem] leading-snug text-amber-600 dark:text-amber-400 max-w-[18rem]">
+      <span role="status" className={`t-micro leading-snug max-w-[18rem] ${HINWEIS_TEXT.fehler}`}>
         {fallbackReason}
       </span>
     )}

@@ -426,7 +426,7 @@ export function SpeechSettings() {
         </p>
         {/* B11: the external voice fell back to the system voice in silence. */}
         {voiceSettings.ttsFallbackReason && (
-          <p className={`text-[0.55rem] leading-snug ${HINWEIS_TEXT.fehler}`}>{voiceSettings.ttsFallbackReason}</p>
+          <p className={`t-micro leading-snug ${HINWEIS_TEXT.fehler}`}>{voiceSettings.ttsFallbackReason}</p>
         )}
       </div>
     )}
