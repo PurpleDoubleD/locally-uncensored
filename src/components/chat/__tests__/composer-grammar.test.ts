@@ -580,7 +580,8 @@ describe('der Zustand kommt aus ARIA, nicht aus einer zweiten Klassenkette', () 
     // solange Denken an ist, und das meldet der Think-Knopf daneben.
     expect(EFFORT).toMatch(/aria-label=\{`Reasoning effort: \$\{effortText\}`\}/)
     expect(EFFORT).not.toContain('aria-pressed')
-    expect(INPUT).toContain('<span>{effortText}</span>')
+    // Visible in the button; below 26rem only for the screen reader (P2, 375 px).
+    expect(INPUT).toContain('<span className="@max-[26rem]:sr-only">{effortText}</span>')
     // Das blaue Pill der Release-Linie ist weg. Es war dieselbe Farbe wie der
     // Fokusring, direkt neben dem Knopf, an dem sie schon abgebaut war.
     // Geprueft wird der KNOPF, nicht die Datei: das Blau der Ablegeflaeche

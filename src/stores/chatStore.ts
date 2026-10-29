@@ -4,6 +4,7 @@ import { v4 as uuid } from 'uuid'
 import type { Conversation, Message, MessageError, ChatArtifact, CompactionRecord, RequestUsage } from '../types/chat'
 import type { AgentBlock } from '../types/agent-mode'
 import { clampSampling, storedTemperature, type SamplingOverrides } from '../lib/sampling'
+import { cleanCustomParams, type CustomParam } from '../lib/custom-params'
 import { idbStorage } from '../lib/idbStorage'
 import { externalizeConversations, hasInlineImages } from '../lib/chat-attachments'
 import { FILE_ONLY_TEXT } from '../lib/chat-files'
@@ -249,6 +250,9 @@ interface ChatState {
    *  so it goes back to following the Settings page instead of pinning
    *  today's defaults into the conversation forever. */
   resetConversationSampling: (id: string) => void
+  /** GH #198: replace this chat's custom sampling rows. An empty list
+   *  deletes the field, so the chat follows its persona's rows again. */
+  setConversationCustomParams: (id: string, rows: CustomParam[]) => void
   /** Group chat v1: the models that answer in turn (capped at 4). */
   setGroupModels: (id: string, models: string[]) => void
   /** Group chat: the persona ONE participant speaks as in this chat, or
@@ -672,12 +676,25 @@ export const useChatStore = create<ChatState>()(
           ),
         })),
 
+      setConversationCustomParams: (id, rows) =>
+        set((state) => ({
+          conversations: state.conversations.map((c) => {
+            if (c.id !== id) return c
+            const clean = cleanCustomParams(rows)
+            const next: Conversation = { ...c, customParams: clean, updatedAt: Date.now() }
+            if (clean.length === 0) delete next.customParams
+            return next
+          }),
+        })),
+
       resetConversationSampling: (id) =>
         set((state) => ({
           conversations: state.conversations.map((c) => {
             if (c.id !== id) return c
             const next = { ...c, updatedAt: Date.now() }
             delete next.sampling
+            // GH #198: the chat's custom rows are its own values too.
+            delete next.customParams
             return next
           }),
         })),

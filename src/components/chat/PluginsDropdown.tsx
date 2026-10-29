@@ -171,7 +171,7 @@ export function PluginsDropdown({
           className="lu-control"
         >
           <Plug size={10} />
-          <span>Plugins</span>
+          <span className="@max-[26rem]:sr-only">Plugins</span>
           {anyPluginActive && (
             <div className="flex gap-0.5">
               {createOn && <div data-testid="plugins-dot-create" className="w-1 h-1 rounded-full bg-lu-accent" />}

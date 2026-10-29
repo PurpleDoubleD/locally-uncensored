@@ -78,6 +78,19 @@ export const TEMPERATURE_WARN = 1.2
 export const HIGH_TEMPERATURE_WARNING = 'High values make the model produce random text.'
 
 /**
+ * What the temperature slider does, behind the "?" next to it, in the chat
+ * popup, the Settings page and the persona editor. The warning above only
+ * speaks once the value is high; this says what the slider is for before
+ * anyone gets there (David, 27.10.2026). The web app shows the same words,
+ * and a test on each side pins them.
+ */
+export const TEMPERATURE_HELP =
+  'Temperature controls how random the answers are. Low (0.2 to 0.5): focused and repeatable. '
+  + 'Around 0.7: balanced, the default. Above 1.2: answers can turn into random text.'
+/** Accessible name of the "?" button. */
+export const TEMPERATURE_HELP_LABEL = 'What temperature does'
+
+/**
  * The most Agent turns use, whatever the chat, the persona or the Settings
  * page say. A tool call is a JSON object that must parse; a run of them at
  * a creative temperature breaks long before plain chat does.

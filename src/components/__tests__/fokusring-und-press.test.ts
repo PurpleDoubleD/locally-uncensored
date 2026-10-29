@@ -300,6 +300,9 @@ describe('Punkt 4 — die Ausnahme steht AN der Regel, nicht gegen sie', () => {
   const AM_KASTEN: Record<string, string> = {
     'chat/ChatInput.tsx': 'chat/ChatInput.tsx',
     'create/ui/PromptField.tsx': 'create/experimental/Composer.tsx',
+    // GH #197: the search box and the text of the large editor, each in a
+    // box with focus-within:border-.
+    'ui/LongTextField.tsx': 'ui/LongTextField.tsx',
   }
 
   it('`lu-fokus-am-kasten` haengt an genau diesen Feldern und sonst nirgends', () => {

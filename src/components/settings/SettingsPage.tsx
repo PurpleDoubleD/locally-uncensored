@@ -18,6 +18,7 @@ import { useUIStore } from '../../stores/uiStore'
 import { SliderControl } from './SliderControl'
 import { THINK_BUDGET_STEP, normalizeThinkBudget } from '../../lib/think-budget'
 import { InlineToggle } from './InlineToggle'
+import { composerHint, enterKeyMode } from '../../lib/enter-key'
 import { SpeechSettings } from './SpeechSettings'
 import { LogFileSettings } from './LogFileSettings'
 import { PersonaPanel } from '../personas/PersonaPanel'
@@ -86,7 +87,7 @@ import { userAgentProblem } from '../../lib/search-user-agent'
 import { SEARCH_PROVIDERS, normalizeSearchProvider } from '../../lib/search-providers'
 import { ContentPolicySettings } from './ContentPolicySettings'
 import { isLmStudioProvider } from '../../lib/hf-to-provider'
-import { TEMPERATURE_MAX } from '../../lib/sampling'
+import { TEMPERATURE_MAX, TEMPERATURE_HELP, TEMPERATURE_HELP_LABEL } from '../../lib/sampling'
 import { HighTemperatureWarning } from '../chat/HighTemperatureWarning'
 
 // ── User profile picture (Appearance) ───────────────────────────
@@ -1984,10 +1985,30 @@ export function SettingsPage() {
               enabled={settings.emojiAutoReplace}
               onChange={() => updateSettings({ emojiAutoReplace: !settings.emojiAutoReplace })}
             />
+            {/* GH #202: what Enter does in the chat box and in an edit. */}
+            <div className="flex items-center justify-between gap-2" data-testid="enter-key-setting">
+              <span className="t-control text-gray-700 dark:text-gray-400" title="In the chat box and when you edit an earlier message.">Enter key</span>
+              <div className="flex gap-1" role="radiogroup" aria-label="Enter key">
+                {([['send', 'Sends'], ['newline', 'New line']] as const).map(([mode, text]) => (
+                  <button
+                    key={mode}
+                    role="radio"
+                    aria-checked={enterKeyMode(settings.enterKey) === mode}
+                    onClick={() => updateSettings({ enterKey: mode })}
+                    className={`px-2 py-1 rounded t-micro transition-colors ${
+                      enterKeyMode(settings.enterKey) === mode ? 'bg-lu-accent-soft ring-1 ring-lu-accent-edge dark:ring-lu-accent text-gray-900 dark:text-white' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
+                    }`}
+                  >
+                    {text}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <p className="t-micro text-gray-500 -mt-1" data-testid="enter-key-hint">{composerHint(enterKeyMode(settings.enterKey), isMacOS())}{enterKeyMode(settings.enterKey) === 'newline' ? '. In an edit, add Shift to save and resend.' : '.'}</p>
           </Section>
 
           <Section title="Generation">
-            <SliderControl label="Temperature" value={settings.temperature} min={0} max={TEMPERATURE_MAX} step={0.1} onChange={(v) => updateSettings({ temperature: v })} />
+            <SliderControl label="Temperature" help={{ text: TEMPERATURE_HELP, label: TEMPERATURE_HELP_LABEL }} value={settings.temperature} min={0} max={TEMPERATURE_MAX} step={0.1} onChange={(v) => updateSettings({ temperature: v })} />
             {/* A33: every chat that never moved its own slider follows this
                 one, so a high value here turns all of them into noise. */}
             <HighTemperatureWarning

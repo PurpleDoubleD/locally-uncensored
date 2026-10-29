@@ -150,12 +150,19 @@ describe('Stop never opens a second line', () => {
 describe('the action bar is one quiet row', () => {
   const bar = INPUT.indexOf('flex flex-nowrap items-center gap-1 px-2 py-1.5')
 
-  it('does not wrap, at any width, in any state', () => {
+  it('does not wrap in any state; by width only below 26rem, and then always the same way', () => {
     expect(bar).toBeGreaterThan(-1)
-    // Only the image-preview strip above the textarea is still allowed to
-    // wrap; the action row itself never is.
+    // Only the image-preview strip above the textarea may wrap freely. The
+    // action row may only wrap in a phone-wide composer (P2, LU 3.0.9: at
+    // 375 px Sampling, the model and Send were pushed out of the frame), and
+    // then the right cluster is a full line of its own, so the height depends
+    // on the WIDTH alone and never on a run starting.
     const wrappers = [...INPUT.matchAll(/className="([^"]*\bflex-wrap\b[^"]*)"/g)].map((m) => m[1])
-    expect(wrappers).toEqual(['flex gap-1.5 mb-1.5 flex-wrap'])
+    expect(wrappers).toEqual([
+      'flex gap-1.5 mb-1.5 flex-wrap',
+      'flex flex-nowrap items-center gap-1 px-2 py-1.5 min-h-[38px] border-t border-gray-200 dark:border-white/[0.05] @max-[26rem]:flex-wrap',
+    ])
+    expect(INPUT).toMatch(/className="contents @max-\[26rem\]:flex @max-\[26rem\]:basis-full[^"]*" data-testid="composer-right-cluster"/)
   })
 
   it('keeps a fixed row height whether a run is in flight or not', () => {

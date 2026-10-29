@@ -201,6 +201,7 @@ export const CATALOG: readonly CatalogEntry[] = [
   // Look and feel
   e('theme', 'Theme', 'general', 'Light or dark app theme.', oneOf(['light', 'dark'])),
   e('emojiAutoReplace', 'Emoji replacement', 'general', 'Turn :) into an emoji while typing.', bool()),
+  e('enterKey', 'Enter key', 'general', 'Enter sends the message, or adds a new line (then Ctrl/Cmd+Enter sends).', oneOf(['send', 'newline'])),
   e('backgroundMediaTools', 'Keep chatting while it renders', 'general', 'A long picture or video from the chat goes on in the background.', bool()),
   e('cloudTeasersEnabled', 'Cloud features in Local mode', 'general', 'Show LU Cloud hints in Local mode.', bool()),
   e('cavemanMode', 'Caveman mode', 'general', 'Shorter, terser answers.', oneOf(['off', 'lite', 'full', 'ultra'])),

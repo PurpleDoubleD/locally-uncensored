@@ -1,5 +1,10 @@
+import { useState } from 'react'
+import { HelpMark } from '../ui/HelpMark'
+
 interface Props {
   label: string
+  /** Explanation behind a "?" next to the label: hover, or tap to show it below. */
+  help?: { text: string; label: string }
   value: number
   min: number
   max: number
@@ -9,14 +14,18 @@ interface Props {
   display?: string
 }
 
-export function SliderControl({ label, value, min, max, step, onChange, display }: Props) {
+export function SliderControl({ label, help, value, min, max, step, onChange, display }: Props) {
+  const [helpOpen, setHelpOpen] = useState(false)
   const pct = ((value - min) / (max - min)) * 100
 
   return (
     <div className="space-y-1">
       {/* Label + value on one line */}
       <div className="flex items-center justify-between">
-        <span className="text-[0.7rem] text-gray-500 dark:text-gray-400">{label}</span>
+        <span className="flex items-center gap-1 text-[0.7rem] text-gray-500 dark:text-gray-400">
+          {label}
+          {help && <HelpMark text={help.text} label={help.label} open={helpOpen} onToggle={() => setHelpOpen((v) => !v)} />}
+        </span>
         <span className="text-[0.65rem] font-mono text-gray-400 dark:text-gray-500">{display ?? value}</span>
       </div>
       {/* Slider full width below */}
@@ -44,6 +53,7 @@ export function SliderControl({ label, value, min, max, step, onChange, display 
           style={{ left: `calc(${pct}% - 6px)`, zIndex: 1 }}
         />
       </div>
+      {help && helpOpen && <p className="t-micro leading-relaxed text-gray-500">{help.text}</p>}
     </div>
   )
 }

@@ -169,7 +169,7 @@ import { asString, errorText, isRecord, prop } from '../types/json-guards'
 import type { ToolArgs } from '../api/mcp/types'
 import { CREDITS_EXHAUSTED_MESSAGE } from '../lib/credits-exhausted'
 import { buildChatSystemPrompt } from '../lib/system-prompt'
-import { withChatPersona, samplingPresetFor, speakerPersonaFor } from '../lib/chat-persona'
+import { withChatPersona, samplingPresetFor, speakerCustomParams, speakerPersonaFor } from '../lib/chat-persona'
 import { injectPersonaNote, noteTokens, personaNoteOf } from '../lib/persona-note'
 
 // ── Hook ──────────────────────────────────────────────────────
@@ -1763,10 +1763,17 @@ export function useAgentChat() {
         // GH #175: the chat persona's preset sits under this chat's own values,
         // while the persona is on for the chat, as its prompt is.
         const { personas: allPersonas, activePersonaId: pickedPersonaId } = useSettingsStore.getState()
-        const personaPreset = samplingConv
-          ? samplingPresetFor(samplingConv, activeModel, allPersonas, pickedPersonaId, settings.personasEnabled !== false).preset
+        const speaker = samplingConv
+          ? samplingPresetFor(samplingConv, activeModel, allPersonas, pickedPersonaId, settings.personasEnabled !== false)
           : undefined
-        const sampling = { topK: settings.topK, ...buildSamplingRequest(settings, convSampling, personaPreset) }
+        const personaPreset = speaker?.preset
+        // GH #198: the custom rows go along here too, the chat's over the persona's.
+        const customParams = samplingConv ? speakerCustomParams(samplingConv, speaker?.persona) : {}
+        const sampling = {
+          topK: settings.topK,
+          ...buildSamplingRequest(settings, convSampling, personaPreset),
+          ...(Object.keys(customParams).length > 0 ? { customParams } : {}),
+        }
         // Small-Model Mode (Knob 6): gently clamp temperature for tool turns.
         // FOLKLORE, not measured — research found NO temperature finding for
         // tool-calling. A low, low-entropy setting is *plausible* for valid

@@ -7,6 +7,7 @@ import { useModelStore } from '../../stores/modelStore'
 import { getModelMaxTokens } from '../../lib/context-compaction'
 import { AnimatePresence, motion } from 'framer-motion'
 import { MemoryDeleteConfirm, MemoryRowDelete, MemoryUndoBar, memoriesWord, useMemoryUndo } from './MemoryDelete'
+import { LongTextField } from '../ui/LongTextField'
 
 // Memory button. Lives in the TOP BAR next to the model picker (the owner
 // 2026-06-06: "memory button raus aus chat/code/agent, neben den modelloader
@@ -206,12 +207,14 @@ function MemoryPopover({ onClose }: { onClose: () => void }) {
               placeholder="Title (optional)"
               className="w-full px-2 py-1 rounded bg-black/20 border border-white/10 t-micro text-gray-200 placeholder-gray-600 focus:outline-none focus:border-purple-500/40"
             />
-            <textarea
+            <LongTextField
               value={newContent}
-              onChange={(e) => setNewContent(e.target.value)}
+              onChange={setNewContent}
+              storageKey="memory-content"
+              label="Memory"
               placeholder="What should the model always remember? (injected into every prompt)"
               rows={3}
-              className="w-full px-2 py-1 rounded bg-black/20 border border-white/10 t-micro text-gray-200 placeholder-gray-600 focus:outline-none focus:border-purple-500/40 resize-none"
+              className="block w-full px-2 py-1 rounded bg-black/20 border border-white/10 t-micro text-gray-200 placeholder-gray-600 focus:outline-none focus:border-purple-500/40"
             />
             <div className="flex justify-end gap-1.5">
               <button onClick={() => { setAdding(false); setNewTitle(''); setNewContent('') }} className="px-2 py-1 rounded t-micro text-gray-400 hover:text-gray-200 hover:bg-white/10">Cancel</button>

@@ -10,6 +10,8 @@ import { ComputerNote } from '../computer/ComputerNote'
 import { dismissComputerStop } from '../../api/computer-use'
 import { useVoiceStore } from '../../stores/voiceStore'
 import { useSettingsStore } from '../../stores/settingsStore'
+import { composerHint, composerPlaceholder, composerSends, enterKeyMode } from '../../lib/enter-key'
+import { isMacOS } from '../../lib/device-kind'
 import { useUIStore } from '../../stores/uiStore'
 import { useModelStore } from '../../stores/modelStore'
 import { useChatStore } from '../../stores/chatStore'
@@ -288,6 +290,8 @@ export function ChatInput({ onSend, onStop, isGenerating, waitingForLocalLane, p
   const updateSettings = useSettingsStore((s) => s.updateSettings)
   // Emoticons to emojis while typing (lib/emoticons.ts, Settings: Appearance).
   const emojiOn = useSettingsStore((s) => s.settings.emojiAutoReplace) !== false
+  // GH #202: whether Enter sends or adds a line.
+  const enterMode = enterKeyMode(useSettingsStore((s) => s.settings.enterKey))
   // The last turn, for one Backspace to take back, and the caret it leaves.
   const emojiTurnRef = useRef<EmojiTurn | null>(null)
   const caretRef = useRef<number | null>(null)
@@ -674,7 +678,7 @@ export function ChatInput({ onSend, onStop, isGenerating, waitingForLocalLane, p
         return
       }
     }
-    if (e.key === 'Enter' && !e.shiftKey) {
+    if (composerSends({ key: e.key, shiftKey: e.shiftKey, ctrlKey: e.ctrlKey, metaKey: e.metaKey, altKey: e.altKey, isComposing: e.nativeEvent.isComposing }, enterMode)) {
       e.preventDefault()
       // While the last words are still being transcribed, Enter waits for
       // them. While recording it sends what the field shows and ends the
@@ -901,7 +905,7 @@ export function ChatInput({ onSend, onStop, isGenerating, waitingForLocalLane, p
             onKeyDown={handleKeyDown}
             onBlur={() => setTimeout(() => setCmdMenu([]), 120)}
             onPaste={handlePaste}
-            placeholder={disabled ? "Unavailable" : isDragOver ? "Drop files here..." : isTranscribing ? "Transcribing..." : isVoiceRecording ? "Recording..." : "Message..."}
+            placeholder={disabled ? "Unavailable" : isDragOver ? "Drop files here..." : isTranscribing ? "Transcribing..." : isVoiceRecording ? "Recording..." : composerPlaceholder(enterMode, isMacOS())}
             disabled={disabled}
             rows={1}
             className="lu-fokus-am-kasten w-full bg-transparent resize-none text-gray-800 dark:text-gray-200 placeholder-gray-400 dark:placeholder-gray-600 focus:outline-none text-[12px] leading-relaxed max-h-[200px] disabled:opacity-50 scrollbar-thin"
@@ -923,7 +927,17 @@ export function ChatInput({ onSend, onStop, isGenerating, waitingForLocalLane, p
             only the middle spacer giving way, das `flex: 0 0 auto` steckt
             seit der Composer-Grammatik im Rezept `.lu-control` (index.css),
             nicht mehr als `shrink-0` an jedem einzelnen Knopf. */}
-        <div className="@container flex flex-nowrap items-center gap-1 px-2 py-1.5 min-h-[38px] border-t border-gray-200 dark:border-white/[0.05]">
+        {/* Narrow (a phone-wide window, 375 px with the rail open): the row
+            had 470 px of controls in 253, and Sampling, the model and Send
+            were pushed out past the right edge. Below 26rem the labels of
+            Docs, Plugins and Effort shrink to their icons, and Sampling, the
+            model and Send move to a second line of their own. That line is
+            there by WIDTH alone, never by what is running, so the composer
+            still keeps one height while it works (see below). */}
+        {/* The query container sits one level out: a container query cannot
+            style the container itself, and the row has to wrap. */}
+        <div className="@container">
+        <div className="flex flex-nowrap items-center gap-1 px-2 py-1.5 min-h-[38px] border-t border-gray-200 dark:border-white/[0.05] @max-[26rem]:flex-wrap">
           {/* Clip button */}
           <button
             onClick={() => fileInputRef.current?.click()}
@@ -1008,7 +1022,7 @@ export function ChatInput({ onSend, onStop, isGenerating, waitingForLocalLane, p
               title={effortHint}
             >
               <Gauge size={11} />
-              <span>{effortText}</span>
+              <span className="@max-[26rem]:sr-only">{effortText}</span>
             </button>
           )}
           {showEffortGreyed && (
@@ -1020,7 +1034,7 @@ export function ChatInput({ onSend, onStop, isGenerating, waitingForLocalLane, p
               title={`Reasoning effort: ${effortNote}`}
             >
               <Gauge size={11} />
-              <span>Effort</span>
+              <span className="@max-[26rem]:sr-only">Effort</span>
             </button>
           )}
 
@@ -1051,6 +1065,10 @@ export function ChatInput({ onSend, onStop, isGenerating, waitingForLocalLane, p
 
           <div className="flex-1 min-w-0" />
 
+          {/* The right cluster. `contents` in a wide row, so the controls sit
+              in the one row exactly as before; in a narrow one its own full
+              width line, right aligned. */}
+          <div className="contents @max-[26rem]:flex @max-[26rem]:basis-full @max-[26rem]:min-w-0 @max-[26rem]:items-center @max-[26rem]:justify-end @max-[26rem]:gap-1" data-testid="composer-right-cluster">
           {/* Sampling controls sit next to the picker: same row, collapsed. */}
           <div className="shrink-0"><SamplingControls /></div>
 
@@ -1091,11 +1109,14 @@ export function ChatInput({ onSend, onStop, isGenerating, waitingForLocalLane, p
                 disabled={preparingImages || preparingFiles || (!input.trim() && images.length === 0 && files.length === 0 && media.length === 0) || isTranscribing || !!waitingForLocalLane}
                 className="lu-control lu-control--icon lu-primary w-full h-full"
                 aria-label="Send message"
+                title={composerHint(enterMode, isMacOS())}
               >
                 <Send size={13} />
               </button>
             )}
           </div>
+          </div>
+        </div>
         </div>
       </div>
     </div>
