@@ -267,10 +267,18 @@ export async function runCompactForConversation(opts: {
     // The whole payload, for the line in the transcript: what the counter read
     // before, less what the summary saves. An estimate both ways, like the
     // counter's own number between two real usage reports.
+    //
+    // tokensBefore is the raw size of the replaced turns, and a turn the
+    // mechanical trim already shortened never went out whole, so the saving
+    // can exceed what the counter read. The payload after still carries the
+    // summary and the kept messages: that is its floor, capped at the number
+    // before (T1 29.10.: an 82K-character answer gave "Compacted, 737 → 0").
     const contextBefore = contextFillOf(conv).used
     if (contextBefore > 0) {
+      const kept = visible.slice(cutAt).reduce((n, m) => n + estimateTokens(m.content) + MESSAGE_OVERHEAD_TOKENS, 0)
+      const floor = Math.min(contextBefore, record.tokensAfter + kept)
       record.contextBefore = contextBefore
-      record.contextAfter = Math.max(0, contextBefore - Math.max(0, record.tokensBefore - record.tokensAfter))
+      record.contextAfter = Math.max(floor, contextBefore - Math.max(0, record.tokensBefore - record.tokensAfter))
     }
     // The answer the agent loops have already opened (empty, no step yet) is
     // not part of the stand before: what it will say comes after. Mac run
