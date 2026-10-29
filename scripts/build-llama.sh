@@ -263,7 +263,20 @@ cvector_ships_for() {
 #     (baseline: no AVX instruction);
 #   - no OpenMP: ggml's own thread pool, so no vcomp140.dll/libgomp.so is
 #     needed beside it;
-#   - Windows keeps -MAP, the ISA guard reads the linker map.
+#   - Windows keeps -MAP, the ISA guard reads the linker map;
+#   - Windows puts switch jump tables in .rdata (-jumptablerdata, MSVC 17.7+,
+#     x64 only). By default MSVC places them in .text beside the code
+#     (learn.microsoft.com, /jumptablerdata), and their entries are image
+#     RVAs, so in this exe they decode as instructions that are not there:
+#     FEHLER-P11 #9, an "unprotected" EVEX vfmadd132ss xmm21 at a $LN label
+#     of speculative.obj, while the same object in the server's
+#     llama-common.dll (other RVAs) reads clean. Nothing in this build may
+#     emit EVEX (no /arch, every ISA option off), so moving the tables out
+#     of .text is the fix and the proof at once: if the guard still finds
+#     the hit, it is real code. Set through CMAKE_<LANG>_FLAGS_INIT, which
+#     CMake's Windows-MSVC module appends its defaults (/EHsc and the rest)
+#     to; CMAKE_<LANG>_FLAGS itself would replace them. Dash spelling for
+#     the same MSYS reason as -MAP.
 cvector_separate_build_for() {
   is_dynamic_isa_triple "$1"
 }
@@ -273,7 +286,7 @@ cvector_cmake_flags_for() {
   local common="-DLLAMA_OPENSSL=OFF -DLLAMA_BUILD_UI=OFF -DLLAMA_USE_PREBUILT_UI=OFF -DCMAKE_BUILD_TYPE=Release"
   local cpu="-DBUILD_SHARED_LIBS=OFF -DGGML_BACKEND_DL=OFF -DGGML_CPU_ALL_VARIANTS=OFF -DGGML_VULKAN=OFF -DGGML_OPENMP=OFF -DGGML_NATIVE=OFF -DGGML_SSE42=OFF -DGGML_AVX=OFF -DGGML_AVX_VNNI=OFF -DGGML_AVX2=OFF -DGGML_BMI2=OFF -DGGML_FMA=OFF -DGGML_F16C=OFF -DGGML_AVX512=OFF -DGGML_AVX512_VBMI=OFF -DGGML_AVX512_VNNI=OFF -DGGML_AVX512_BF16=OFF -DGGML_AMX_TILE=OFF -DGGML_AMX_INT8=OFF -DGGML_AMX_BF16=OFF"
   case "$triple" in
-    x86_64-pc-windows-msvc)   echo "$common $cpu -DCMAKE_EXE_LINKER_FLAGS=-MAP" ;;
+    x86_64-pc-windows-msvc)   echo "$common $cpu -DCMAKE_EXE_LINKER_FLAGS=-MAP -DCMAKE_C_FLAGS_INIT=-jumptablerdata -DCMAKE_CXX_FLAGS_INIT=-jumptablerdata" ;;
     x86_64-unknown-linux-gnu) echo "$common $cpu" ;;
     *) die "no separate vector-tool build for $triple" ;;
   esac

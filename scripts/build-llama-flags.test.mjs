@@ -101,3 +101,13 @@ test('P11 #8: the Mac builds the vector tool in its server build (static there a
   assert.equal(sourced('cvector_separate_build_for aarch64-apple-darwin && echo yes || echo no'), 'no');
   assert.equal(sourced('cvector_ships_for aarch64-apple-darwin && echo yes || echo no'), 'yes');
 });
+
+test('P11 #9: the Windows vector tool puts jump tables in .rdata, without replacing the MSVC defaults', () => {
+  const flags = sourced('cvector_cmake_flags_for x86_64-pc-windows-msvc');
+  assert.match(flags, /-DCMAKE_C_FLAGS_INIT=-jumptablerdata\b/);
+  assert.match(flags, /-DCMAKE_CXX_FLAGS_INIT=-jumptablerdata\b/);
+  assert.doesNotMatch(flags, /-DCMAKE_(C|CXX)_FLAGS=/, 'CMAKE_<LANG>_FLAGS would drop /EHsc and the other MSVC defaults');
+  assert.doesNotMatch(flags, /\/jumptablerdata/, 'MSYS rewrites a leading slash into a path, as with /MAP');
+  assert.doesNotMatch(sourced('cvector_cmake_flags_for x86_64-unknown-linux-gnu'), /jumptablerdata/);
+  assert.doesNotMatch(cmakeFlagsFor('x86_64-pc-windows-msvc'), /jumptablerdata/, 'the server build stays as it is');
+});
