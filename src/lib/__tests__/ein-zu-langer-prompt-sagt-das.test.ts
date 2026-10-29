@@ -10,7 +10,7 @@ import { BAD_REQUEST_SENTENCE, CONTEXT_OVERFLOW_REFUSAL_SENTENCE, explainSendRef
 const overflow = (msg: string) => Object.assign(new Error(msg), { statusCode: 400 })
 
 describe('a prompt longer than the context window', () => {
-  it('says that the message is too long, not "send it again"', () => {
+  it('says that the chat is too long, not "send it again"', () => {
     const text = explainSendRefusal(overflow('request (42120 tokens) exceeds the available context size (16384 tokens), try increasing it'))!
     expect(text.startsWith(CONTEXT_OVERFLOW_REFUSAL_SENTENCE)).toBe(true)
     expect(text).not.toContain(BAD_REQUEST_SENTENCE)

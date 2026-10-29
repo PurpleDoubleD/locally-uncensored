@@ -51,11 +51,13 @@ export const BAD_REQUEST_SENTENCE =
 
 /** A request longer than the window of the model. Sending it again cannot
  *  help, and a local model charges nothing: the general 400 sentence said
- *  both (T1 Nacht-Durchtest 3.0.9, 204K characters into a 16K window). */
+ *  both (T1 Nacht-Durchtest 3.0.9, 204K characters into a 16K window). The
+ *  sentence names the chat, not the message: in a group the overflow can come
+ *  from an earlier speaker's long answer while the user's line is short. */
 export const CONTEXT_OVERFLOW_REFUSAL_SENTENCE =
-  'This message is longer than the model can read at once, so nothing was generated. Shorten it, ' +
-  'attach long text with Docs instead of pasting it, or raise the Context window above the message box ' +
-  'if this model offers one.'
+  'This chat is more than the model can read at once, so nothing was generated. Shorten the last ' +
+  'message or start a new chat, attach long text with Docs instead of pasting it, or raise the Context ' +
+  'window above the message box if this model offers one.'
 
 /** A backend that names the temperature in its refusal (A33): one LU Cloud
  *  model takes 0 to 1 and answered 1.9 with a bare 400. */
