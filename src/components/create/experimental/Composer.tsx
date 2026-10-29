@@ -78,6 +78,7 @@ export function Composer({ onOpenAdvanced, onOpenWorkflows }: Props) {
   // the short gap between two of its images: the button stays Cancel.
   const isGenerating = useCreateStore((s) => s.isGenerating || s.batchRun !== null)
   const backend = useCreateStore((s) => s.backend)
+  const trainKind = useCreateStore((s) => s.trainKind)
   const targetResolution = useCreateStore((s) => s.targetResolution)
   const setTargetResolution = useCreateStore((s) => s.setTargetResolution)
   const upscaleFactor = useCreateStore((s) => s.upscaleFactor)
@@ -369,7 +370,7 @@ export function Composer({ onOpenAdvanced, onOpenWorkflows }: Props) {
   // A caption that names the missing inputs is a note above the prompt
   // window (laneHint.ts isInputHint); the action captions stay inside it.
   const inputNote = showNoPromptHint && !needsMask && isInputHint(intent)
-  const laneCaption = noPromptHint(meta.id, backend, backend === 'local' && isMlxImageHost())
+  const laneCaption = noPromptHint(meta.id, backend, backend === 'local' && isMlxImageHost(), trainKind)
   // The disabled button says which input it waits for (laneHint.ts).
   const missingSource = missingSourceHint({ intent, needsSource: meta.needsSource, hasSource: hasStart })
 

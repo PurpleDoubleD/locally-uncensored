@@ -73,6 +73,16 @@ describe('noPromptHint', () => {
     expect(noPromptHint('character', 'cloud')).toContain('4 to 30 photos')
   })
 
+  it('speaks of a style, not of one person, in the style mode (FEHLER-P8 #1)', () => {
+    const style = noPromptHint('character', 'local', false, 'style')
+    expect(style).toBe('Add 4 to 100 pictures that share the style above, give it a name, then hit Create to train.')
+    expect(style).not.toMatch(/person|trigger|photos/)
+    expect(noPromptHint('character', 'local', true, 'style')).toBe(style)
+    // The cloud has no style mode: a leftover choice changes nothing there.
+    expect(noPromptHint('character', 'cloud', false, 'style')).toBe(noPromptHint('character', 'cloud'))
+    expect(noPromptHint('character', 'local', false, 'character')).toContain('photos of one person or character')
+  })
+
   it('keeps the eraser on its own line instead of the cutout default', () => {
     // The old copy said "remove the background" for every prompt-less lane,
     // which walked eraser users straight into "Paint a mask first".

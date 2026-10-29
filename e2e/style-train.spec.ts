@@ -68,6 +68,9 @@ test('mac: a style is trained with content captions and lands switched on in the
   await page.getByRole('radio', { name: 'Style / concept', exact: true }).click()
   await expect(page.getByTestId('style-mode-note')).toContainText('Teaches a look, a concept or a pose')
   await expect(page.getByText('Drop 4 to 100 pictures in the style here')).toBeVisible()
+  // FEHLER-P8 #1: the line over Create speaks of the style too.
+  await expect(page.getByText('Add 4 to 100 pictures that share the style above, give it a name, then hit Create to train.')).toBeVisible()
+  await expect(page.getByText(/photos of one person or character/)).toHaveCount(0)
   await expect(page.getByTestId('mac-train-hint')).toContainText('Standard, 1600 steps')
   await expect(page.getByTestId('mac-train-hint')).toContainText('The style lands in your LoRA folder')
   await controls.getByPlaceholder('Name, e.g. inkwash').fill('p8lino')
@@ -76,7 +79,7 @@ test('mac: a style is trained with content captions and lands switched on in the
 
   const files = pictures(4)
   await page.locator('input[type="file"][accept="image/*"]').first().setInputFiles(files)
-  await expect(controls).toContainText('4/100 photos')
+  await expect(controls).toContainText('4/100 pictures')
   await expect(page.getByTestId('train-caption-help')).toContainText('what is left unnamed is what the LoRA learns')
   const fields = page.getByPlaceholder('e.g. a fox in a forest')
   await expect(fields).toHaveCount(4)

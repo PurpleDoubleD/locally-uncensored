@@ -41,6 +41,10 @@ const PLACES: Record<BetaFeature, string[]> = {
     // One mark on the head of the group, none on the rows.
     'components/models/CloudModelPicker.tsx',
   ],
+  'style-training': [
+    // Next to the Character | Style / concept switch of the local trainer.
+    'components/create/experimental/SpecialIntentControls.tsx',
+  ],
 }
 
 function sources(dir: string, out: string[] = []): string[] {
@@ -56,8 +60,8 @@ function sources(dir: string, out: string[] = []): string[] {
 const FILES = sources(SRC).map((path) => ({ file: relative(SRC, path).split('\\').join('/'), text: readFileSync(path, 'utf8') }))
 
 describe('the Beta list', () => {
-  it('names exactly the features that ship as Beta in 3.0.6', () => {
-    expect(Object.keys(BETA_FEATURES).sort()).toEqual(['computer-control', 'create-in-chat', 'direct-models', 'voice'])
+  it('names exactly the features that ship as Beta', () => {
+    expect(Object.keys(BETA_FEATURES).sort()).toEqual(['computer-control', 'create-in-chat', 'direct-models', 'style-training', 'voice'])
   })
 
   it('says one word, and every sentence starts with it', () => {

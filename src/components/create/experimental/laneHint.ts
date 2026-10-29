@@ -8,6 +8,7 @@
 // the user did.
 import type { CreateBackend, CreateIntent } from '../../../stores/createStore'
 import { MIN_TRAIN_IMAGES, maxTrainImages } from '../../../lib/train-image-cap'
+import type { TrainKind } from '../../../lib/train-kind'
 
 /** Captions that name the inputs a lane is waiting for. These go stale the
  *  moment the chips are filled, so they hide once the lane reports ready. */
@@ -31,13 +32,19 @@ export function isInputHint(id: CreateIntent): boolean {
 /** Caption for prompt-less intents so each reads honestly (the old copy said
  *  "remove the background" for every one of them — misleading the eraser into
  *  a guaranteed "Paint a mask first" error). */
-export function noPromptHint(id: CreateIntent, backend: CreateBackend = 'local', mac = false): string {
+export function noPromptHint(id: CreateIntent, backend: CreateBackend = 'local', mac = false, trainKind: TrainKind = 'character'): string {
   switch (id) {
     case 'upscale':
       return 'No prompt needed. Just hit Create to enhance the image.'
     case 'eraser':
       return 'No prompt needed. Paint a mask over the object to remove, then hit Create.'
     case 'character':
+      // 3.0.9 P8 (FEHLER-P8 #1): the style mode of the local trainers wants
+      // pictures in one style and a name, not one person and a trigger word.
+      // The cloud trains characters only, so it keeps the character line.
+      if (trainKind === 'style' && backend === 'local') {
+        return `Add ${MIN_TRAIN_IMAGES} to ${maxTrainImages(backend)} pictures that share the style above, give it a name, then hit Create to train.`
+      }
       return `Add ${MIN_TRAIN_IMAGES} to ${maxTrainImages(backend)} photos of one person or character above, pick a trigger word, then hit Create to train.`
     case 'lipsync':
       // A Mac makes the clip from a portrait; it has no clip to resync.

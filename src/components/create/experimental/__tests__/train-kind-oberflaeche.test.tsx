@@ -19,6 +19,7 @@ vi.mock('../../../../api/mlx-train', async (orig) => ({
 import { SpecialControls } from '../SpecialIntentControls'
 import { useCreateStore } from '../../../../stores/createStore'
 import { STYLE_MODE_NOTE, STYLE_TRIGGER_HINT_OFF } from '../../../../lib/train-kind'
+import { BETA_FEATURES } from '../../../../lib/beta'
 
 function arrange() {
   useCreateStore.setState({ backend: 'local', error: null, triggerWord: '', trainImages: [], trainKind: 'character', trainSteps: 1200, trainStyleTrigger: true } as never)
@@ -37,6 +38,15 @@ describe('the Style / concept mode in the Train tab', () => {
     expect(screen.getByRole('radio', { name: 'Character' }).getAttribute('aria-checked')).toBe('true')
     expect(screen.queryByTestId('style-mode-note')).toBeNull()
     expect(screen.getByTestId('mac-train-hint').textContent).toMatch(/Standard, 1200 steps.*The character lands/)
+  })
+
+  it('the switch carries the Beta mark of the style mode (David, 29.10.2026)', async () => {
+    arrange()
+    render(<SpecialControls intent="character" />)
+    await screen.findByRole('radio', { name: 'Style / concept' })
+    const mark = screen.getByTestId('train-kind').querySelector('[data-beta="style-training"]')
+    expect(mark?.textContent).toBe('Beta')
+    expect(mark?.getAttribute('title')).toBe(BETA_FEATURES['style-training'])
   })
 
   it('switching says what it is for, renames the field and takes its own steps', async () => {
