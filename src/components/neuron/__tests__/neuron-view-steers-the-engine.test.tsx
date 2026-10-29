@@ -2,7 +2,8 @@
  * @vitest-environment jsdom
  *
  * P11 (3.0.9): the Neuron tweaker. A slider that is not computed for the
- * model offers to compute it; a computed one, moved, reaches the engine as
+ * model offers to compute it (locked, with no false notice, until the model's
+ * info is in); a computed one, moved, reaches the engine as
  * one entry; Reset brings the engine back to no vector at all; a chat model
  * in Ollama is told plainly that the sliders cannot reach it.
  *
@@ -61,7 +62,11 @@ afterEach(() => cleanup())
 describe('Neuron tweaker view', () => {
   it('offers to compute a slider the model does not have yet', async () => {
     render(createElement(NeuronView))
-    const button = await screen.findByTestId('neuron-compute-creative')
+    const button = (await screen.findByTestId('neuron-compute-creative')) as HTMLButtonElement
+    // Locked until the model's info says the vector tool is there; a click
+    // before that does nothing, as it should.
+    expect(screen.queryByText(/This build has no vector tool/)).toBeNull()
+    await waitFor(() => expect(button.disabled).toBe(false))
     fireEvent.click(button)
     await waitFor(() => expect(buildPreset).toHaveBeenCalledWith('/models/qwen.gguf', 'creative'))
   })
