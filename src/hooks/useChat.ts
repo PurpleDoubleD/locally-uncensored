@@ -732,6 +732,13 @@ export function useChat() {
         try {
           for (const [index, model] of models.entries()) {
             if (abort.signal.aborted) break
+            // Taken out of the group while the round ran: it does not speak
+            // in it any more, like a member set to sit out (T1 2026-10-29,
+            // A10: one wrote 63 623 characters after it was removed).
+            if (!(useChatStore.getState().conversations.find((c) => c.id === convId)?.groupModels ?? []).includes(model)) {
+              log.info('chat.group_speaker_left_mid_round', { convId, index })
+              continue
+            }
             // Each turn has a controller of its own under the round's: Stop
             // ends the round, "Skip speaker" (GH #200) ends this turn only and
             // the next speaker takes over.
