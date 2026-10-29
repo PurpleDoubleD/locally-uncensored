@@ -121,6 +121,21 @@ function contextFillOf(conv: { id: string; messages: Message[] }) {
   )
 }
 
+/**
+ * Why a chat with too few turns to cut still does not fit: undefined when it
+ * fits (or the window is unknown), 'message-over-window' when one message is
+ * longer than the whole window, 'over-window' when the few turns together are.
+ */
+function overWindowDetail(
+  visible: ReadonlyArray<{ content: string }>,
+  windowTokens: number,
+): 'message-over-window' | 'over-window' | undefined {
+  if (!(Number.isFinite(windowTokens) && windowTokens > 0)) return undefined
+  const sizes = visible.map((m) => estimateTokens(m.content) + MESSAGE_OVERHEAD_TOKENS)
+  if (sizes.some((t) => t > windowTokens)) return 'message-over-window'
+  return sizes.reduce((a, b) => a + b, 0) > windowTokens ? 'over-window' : undefined
+}
+
 /** A stored message the model actually saw. App notices never reach a model. */
 export function isModelVisible(m: Message): boolean {
   return m.role !== 'system' && typeof m.content === 'string' && m.content.trim() !== ''
@@ -163,7 +178,12 @@ export async function runCompactForConversation(opts: {
   const window = opts.window
     ?? (await resolveSendWindow(opts.activeModel).catch(() => ({ window: 0 }))).window
   const cutAt = visible.length - keepRecentCount(visible, window)
-  if (cutAt <= 0) return { ok: false, reason: 'nothing-to-compact' }
+  if (cutAt <= 0) {
+    // Too few turns to cut anything is not the same as "short enough to send
+    // whole": one huge answer in a short chat fills the window on its own
+    // (Jaeger A, A3). Say which of the two it is.
+    return { ok: false, reason: 'nothing-to-compact', detail: overWindowDetail(visible, window) }
+  }
 
   // Do not re-summarise material an earlier summary already covers: that is
   // the summary-of-a-summary decay this feature is designed to avoid. The cut
@@ -317,6 +337,12 @@ export function compactOutcomeMessage(outcome: CompactOutcome): string {
     case 'nothing-to-compact':
       if (outcome.detail === 'already-compacted') {
         return 'Nothing new to summarise — everything before the last summary is already covered, and the turns since then are the ones being kept.'
+      }
+      if (outcome.detail === 'message-over-window') {
+        return 'Nothing to summarise: this conversation has too few turns to cut, and one message alone is longer than the model\'s context window. It gets shortened when it is sent; the full text stays here.'
+      }
+      if (outcome.detail === 'over-window') {
+        return 'Nothing to summarise: this conversation has too few turns to cut, but together they no longer fit the model\'s context window. The oldest part gets shortened when it is sent; the full text stays here.'
       }
       return 'Nothing to summarise yet — this conversation is still short enough to send whole.'
     case 'no-conversation':
