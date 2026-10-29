@@ -110,13 +110,14 @@ export function PermissionSettings() {
             </div>
 
             {/* Permission Level Selector */}
-            <div className="flex gap-0.5 shrink-0">
+            <div className="flex gap-0.5 shrink-0" role="group" aria-label={label}>
               {LEVEL_OPTIONS.map(({ value, label: lvlLabel }) => {
                 const isActive = globalPermissions[key] === value
                 return (
                   <button
                     key={value}
                     onClick={() => setGlobalPermission(key, value)}
+                    aria-pressed={isActive}
                     // "Ask First" war gelb und sah damit aus wie eine Warnung,
                     // obwohl es die vorsichtigste der drei Einstellungen ist.
                     // Rot und Gruen sind hier schon vergeben, Blau nicht, und

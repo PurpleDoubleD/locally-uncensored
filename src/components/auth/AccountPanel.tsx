@@ -212,6 +212,7 @@ export function AccountPanel() {
           value={email}
           onChange={(e) => setEmail(e.target.value)}
           placeholder="Email"
+          aria-label="Email"
           autoComplete="email"
           className="w-full px-2 py-1.5 rounded text-[0.7rem] bg-gray-100 dark:bg-white/5 border border-gray-200 dark:border-white/10 text-gray-900 dark:text-gray-100 placeholder-gray-400 outline-none focus:border-gray-400 dark:focus:border-white/30"
         />
@@ -220,6 +221,7 @@ export function AccountPanel() {
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           placeholder="Password"
+          aria-label="Password"
           autoComplete={mode === 'signin' ? 'current-password' : 'new-password'}
           className="w-full px-2 py-1.5 rounded text-[0.7rem] bg-gray-100 dark:bg-white/5 border border-gray-200 dark:border-white/10 text-gray-900 dark:text-gray-100 placeholder-gray-400 outline-none focus:border-gray-400 dark:focus:border-white/30"
         />

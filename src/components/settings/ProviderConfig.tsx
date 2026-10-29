@@ -717,8 +717,9 @@ export function ProviderSettings() {
                   </div>
                 ) : (
                   <div className="pt-1.5">
-                    <label className="text-[0.6rem] text-gray-500 mb-0.5 block">Endpoint</label>
+                    <label className="text-[0.6rem] text-gray-500 mb-0.5 block" htmlFor={`provider-url-${id}`}>Endpoint</label>
                     <input
+                      id={`provider-url-${id}`}
                       value={config.baseUrl}
                       onChange={(e) => setProviderConfig(id, { baseUrl: e.target.value })}
                       placeholder="http://localhost:..."
@@ -730,9 +731,10 @@ export function ProviderSettings() {
                 {/* API Key (cloud only) */}
                 {needsKey && (
                   <div>
-                    <label className="text-[0.6rem] text-gray-500 mb-0.5 block">API Key</label>
+                    <label className="text-[0.6rem] text-gray-500 mb-0.5 block" htmlFor={`provider-key-${id}`}>API Key</label>
                     <div className="relative">
                       <input
+                        id={`provider-key-${id}`}
                         type={isKeyVisible ? 'text' : 'password'}
                         value={currentKey}
                         onChange={(e) => setProviderApiKey(id, e.target.value)}
@@ -741,6 +743,7 @@ export function ProviderSettings() {
                       />
                       <button
                         onClick={() => setShowKey(prev => ({ ...prev, [id]: !isKeyVisible }))}
+                        aria-label={isKeyVisible ? 'Hide API key' : 'Show API key'}
                         className="absolute right-1.5 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-300"
                       >
                         {isKeyVisible ? <EyeOff size={10} /> : <Eye size={10} />}
@@ -1398,6 +1401,7 @@ function OpenAIEntryRow({ entry, expanded, onToggleExpanded }: {
               />
               <button
                 onClick={() => setKeyVisible(!keyVisible)}
+                aria-label={keyVisible ? 'Hide API key' : 'Show API key'}
                 className="absolute right-1.5 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-300"
               >
                 {keyVisible ? <EyeOff size={10} /> : <Eye size={10} />}
