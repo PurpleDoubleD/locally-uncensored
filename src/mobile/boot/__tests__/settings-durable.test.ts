@@ -108,6 +108,7 @@ describe('which keys are kept', () => {
       'workflow-store': 'desktop only',
       'lu-local-api': 'desktop only',
       'locally-uncensored-computer': 'desktop only: the settings of computer use, which the phone does not have',
+      'lu-neuron-tweaker': 'desktop only (3.0.9, P11): the Neuron tweaker steers LU Engine, which the phone does not have',
       'LU-create-orders': 'the orders of Create in chat, which is locked on the phone until it has the order card',
       'lu-mobile-switched-under-answer': 'a note per answer; lost, the chat says "interrupted" instead of "you switched models"',
       'lu-mobile-settings-stamp': 'the stamp of this copy itself; in the native backup it dates the settings there (L5)',
