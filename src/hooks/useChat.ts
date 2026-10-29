@@ -384,7 +384,6 @@ async function runGroupTurn(convId: string, model: string, allModels: string[], 
     }
     thinkClock.end()
     frames.close()
-    keepWhatWasWritten()
     if (!abort.signal.aborted && !contentAcc.trim()) {
       // Empty turn: say WHY, length-aware, not a flat "didn't return an answer".
       // The bubble already labels the speaker, so no model prefix here.
@@ -394,6 +393,8 @@ async function runGroupTurn(convId: string, model: string, allModels: string[], 
         emptyAnswerExplanation({ finishReason: groupFinish, captured: !!thinkingAcc.trim(), keepThinking }),
       )
     }
+    // Only a stopped or skipped turn, so never together with the line above.
+    keepWhatWasWritten()
   } catch (err) {
     frames.close()
     keepWhatWasWritten()
