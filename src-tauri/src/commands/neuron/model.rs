@@ -77,9 +77,18 @@ pub struct ModelFacts {
     pub name: String,
 }
 
+/// Embedding and diffusion models (the architectures llama.cpp gives no
+/// cache) have no chat turn to steer, and the vector tool aborts on them.
+pub fn is_chat_arch(arch: &str) -> bool {
+    !crate::commands::vram_plan::NO_CACHE_ARCHS.contains(&arch)
+}
+
 pub fn facts(path: &str) -> Result<ModelFacts, String> {
     let head = read_model_head(path).ok_or("LU cannot read this file as a GGUF model.")?;
     let arch = head.arch().ok_or("The model file names no architecture.")?.to_string();
+    if !is_chat_arch(&arch) {
+        return Err(format!("This is not a chat model ({arch}: embeddings or diffusion). The Neuron tweaker works on chat models."));
+    }
     let n_layer = head.arch_int("block_count").filter(|n| *n > 1).ok_or("The model file names no layer count.")? as usize;
     let n_embd = head.arch_int("embedding_length").filter(|n| *n > 0).ok_or("The model file names no width.")? as usize;
     let template_text = match head.keys.get("tokenizer.chat_template") {
@@ -234,5 +243,36 @@ mod tests {
         std::fs::write(&p, &b).unwrap();
         assert_eq!(string_array(&p, "tokenizer.ggml.tokens").unwrap(), vec!["<pad>".to_string(), "\u{2581}love".to_string()]);
         assert!(string_array(&p, "nope").is_err());
+    }
+
+    fn head_file(dir: &Path, arch: &str) -> std::path::PathBuf {
+        let mut b = Vec::new();
+        b.extend_from_slice(b"GGUF");
+        b.extend_from_slice(&3u32.to_le_bytes());
+        b.extend_from_slice(&0u64.to_le_bytes());
+        b.extend_from_slice(&3u64.to_le_bytes());
+        put_str(&mut b, "general.architecture");
+        b.extend_from_slice(&8u32.to_le_bytes());
+        put_str(&mut b, arch);
+        for (key, v) in [("block_count", 12u32), ("embedding_length", 768)] {
+            put_str(&mut b, &format!("{arch}.{key}"));
+            b.extend_from_slice(&4u32.to_le_bytes());
+            b.extend_from_slice(&v.to_le_bytes());
+        }
+        let p = dir.join(format!("{arch}.gguf"));
+        std::fs::write(&p, &b).unwrap();
+        p
+    }
+
+    /// T1 (3.0.9): an embedding model in the models folder was offered and
+    /// the vector tool aborted on it.
+    #[test]
+    fn an_embedding_model_is_refused_in_words() {
+        let dir = tempfile::tempdir().unwrap();
+        let err = facts(head_file(dir.path(), "nomic-bert").to_str().unwrap()).unwrap_err();
+        assert!(err.contains("not a chat model"), "{err}");
+        let ok = facts(head_file(dir.path(), "qwen2").to_str().unwrap()).unwrap();
+        assert_eq!((ok.n_layer, ok.n_embd), (12, 768));
+        assert!(!is_chat_arch("bert") && !is_chat_arch("gemma-embedding") && is_chat_arch("gemma3"));
     }
 }

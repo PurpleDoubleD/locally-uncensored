@@ -5,7 +5,8 @@
  * model offers to compute it (locked, with no false notice, until the model's
  * info is in); a computed one, moved, reaches the engine as
  * one entry; Reset brings the engine back to no vector at all; a chat model
- * in Ollama is told plainly that the sliders cannot reach it.
+ * in Ollama is told plainly that the sliders cannot reach it; an embedding
+ * model is never offered.
  *
  * Run: npx vitest run src/components/neuron/__tests__/neuron-view-steers-the-engine.test.tsx
  */
@@ -38,10 +39,14 @@ vi.mock('../../../api/neuron', () => ({
   neuronFeatureAdd: vi.fn(), neuronSaeDownload: vi.fn(), neuronSaeSearch: vi.fn(),
 }))
 vi.mock('../../../api/engine', () => ({
-  listBundledModels: async () => [{ name: 'qwen2.5-0.5b-instruct-q8_0', path: '/models/qwen.gguf', size: 1, loaded: true }],
+  listBundledModels: async () => [...disk.models],
+  isEmbeddingGgufName: (name: string) => /embed/.test(name.toLowerCase()),
   bundledEngineStatus: async () => ({ running: true, healthy: true, port: 8127, model_path: '/models/qwen.gguf', ctx: 8192 }),
 }))
 vi.mock('../../../api/backend', () => ({ openExternal: vi.fn(), backendCall: vi.fn() }))
+const QWEN = { name: 'qwen2.5-0.5b-instruct-q8_0', path: '/models/qwen.gguf', size: 1, loaded: true }
+const NOMIC = { name: 'nomic-embed-text-v1.5.Q4_K_M', path: '/models/nomic.gguf', size: 1, loaded: false }
+const disk = vi.hoisted(() => ({ models: [] as Array<Record<string, unknown>> }))
 const slot = vi.hoisted(() => ({ managed: true }))
 vi.mock('../../../api/builtin-ensure', () => ({ isManagedBuiltinSlot: () => slot.managed }))
 
@@ -54,6 +59,7 @@ beforeEach(() => {
   buildPreset.mockClear()
   vectors.length = 0
   slot.managed = true
+  disk.models = [NOMIC, QWEN]
   useNeuronStore.setState({ profiles: {}, scopeByModel: {} })
   useModelStore.setState({ activeModel: 'openai::qwen2.5-0.5b-instruct-q8_0' })
 })
@@ -83,6 +89,24 @@ describe('Neuron tweaker view', () => {
     await waitFor(() => expect(apply.mock.calls.at(-1)?.[1]).toEqual([{ id: 'creative', strength: 0.6 }]), { timeout: 3000 })
     fireEvent.click(screen.getByTestId('neuron-reset'))
     await waitFor(() => expect(apply.mock.calls.at(-1)?.[1]).toEqual([]), { timeout: 3000 })
+  })
+
+  // T1 (3.0.9): the embedding model of Document Chat was the only choice,
+  // and the vector tool aborted on it.
+  it('offers chat models only, under a labelled picker', async () => {
+    render(createElement(NeuronView))
+    const picker = (await screen.findByLabelText('Model')) as HTMLSelectElement
+    await waitFor(() => expect(picker.options.length).toBe(1))
+    expect(picker.options[0].value).toBe('/models/qwen.gguf')
+  })
+
+  it('says so when only an embedding model is there', async () => {
+    disk.models = [NOMIC]
+    useModelStore.setState({ activeModel: 'ollama::llama3:8b' })
+    render(createElement(NeuronView))
+    expect((await screen.findByTestId('neuron-no-chat-model')).textContent).toMatch(/no chat model/)
+    expect(screen.getByText(/Ollama takes no control vectors/)).toBeTruthy()
+    expect(screen.queryByTestId('neuron-model')).toBeNull()
   })
 
   it('says plainly when the chat model runs in Ollama', async () => {

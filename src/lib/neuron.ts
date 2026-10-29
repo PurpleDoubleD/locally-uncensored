@@ -2,6 +2,9 @@
 // to which chat, how a job's progress reads, when to warn.
 
 import type { NeuronEntry, NeuronJob } from '../api/neuron'
+import type { Persona } from '../types/settings'
+import { plainChatSpeaker } from './chat-persona'
+import { isGroupChat } from './group-chat'
 
 /** Slider values by vector id, −1 … +1. */
 export type Strengths = Record<string, number>
@@ -25,6 +28,23 @@ export function effectiveStrengths(profiles: Profiles, modelKey: string, persona
     if (own) return own
   }
   return profiles[modelProfileKey(modelKey)] ?? {}
+}
+
+/** The persona whose sliders steer the engine, decided the way a send
+ *  decides who speaks (lib/chat-persona): the open chat's own persona while
+ *  it is switched on for that chat, the app wide pick when no chat is open.
+ *  A group chat has none: its speakers may be different personas on the one
+ *  engine, so the model's sliders apply there (own sliders per speaker:
+ *  later version). */
+export function steeringPersona(
+  conv: { personaId?: string; systemPrompt?: string | null; personaEnabled?: boolean; groupModels?: string[] } | undefined,
+  personas: readonly Persona[],
+  activePersonaId: string | undefined,
+  personasOn: boolean,
+): { id: string | null; group: boolean } {
+  if (!conv) return { id: personasOn && activePersonaId ? activePersonaId : null, group: false }
+  if (isGroupChat(conv.groupModels)) return { id: null, group: true }
+  return { id: plainChatSpeaker(conv, personas, activePersonaId, personasOn)?.id ?? null, group: false }
 }
 
 export function hasPersonaProfile(profiles: Profiles, modelKey: string, personaId: string): boolean {
