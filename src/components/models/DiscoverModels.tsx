@@ -765,6 +765,13 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
       ? await resolveHfGgufFiles(request.repoId, request.preferredQuant, request.exactPath)
       : null
 
+    // A split set the uploader has not finished: llama.cpp loads it only with
+    // every part, so none of it is fetched.
+    if (resolution?.incomplete) {
+      setInstallError(`${model.name} is not complete on Hugging Face yet: only ${resolution.incomplete.have} of ${resolution.incomplete.of} parts are there, and the model loads only with all of them. Try again later.`)
+      return
+    }
+
     const lmStudioEnabled = !!providers.openai?.enabled && (providers.openai?.name || '').toLowerCase().includes('lm studio')
     const ollamaEnabledNow = !!providers.ollama?.enabled
 

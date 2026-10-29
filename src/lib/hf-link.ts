@@ -12,6 +12,7 @@
 
 import type { DiscoverModel } from '../api/model-bundles'
 import type { HfGgufResolution } from '../api/discover'
+import { shardSetGap, type ShardGap } from './gguf-shards'
 
 export interface HfModelLink {
   repo: string
@@ -81,6 +82,9 @@ export interface HfLinkChoice {
   quant?: string
   bytes: number
   parts: number
+  /** A split set the repository holds only some parts of. It cannot be
+   *  loaded, so it is shown but not downloaded. */
+  incomplete?: ShardGap
 }
 
 const SHARD_RE = /-(\d{4,5})-of-(\d{4,5})\.gguf$/i
@@ -96,7 +100,7 @@ interface TreeEntry { type?: string; path?: string; size?: number }
  */
 export function ggufChoicesFromTree(entries: unknown): HfLinkChoice[] {
   if (!Array.isArray(entries)) return []
-  const groups = new Map<string, HfLinkChoice & { first: number }>()
+  const groups = new Map<string, HfLinkChoice & { first: number; paths: string[] }>()
   for (const e of entries as TreeEntry[]) {
     if (e?.type !== 'file' || typeof e.path !== 'string' || !/\.gguf$/i.test(e.path)) continue
     if (IMAGE_PART_RE.test(e.path)) continue
@@ -104,14 +108,18 @@ export function ggufChoicesFromTree(entries: unknown): HfLinkChoice[] {
     const key = e.path.replace(SHARD_RE, '')
     const index = shard ? parseInt(shard[1], 10) : 0
     const leaf = (e.path.split('/').pop() || '').replace(SHARD_RE, '.gguf')
-    const g = groups.get(key) ?? { path: e.path, quant: (QUANT_RE.exec(leaf)?.[1] ?? QUANT_RE.exec(e.path)?.[1])?.toUpperCase(), bytes: 0, parts: 0, first: index }
+    const g = groups.get(key) ?? { path: e.path, quant: (QUANT_RE.exec(leaf)?.[1] ?? QUANT_RE.exec(e.path)?.[1])?.toUpperCase(), bytes: 0, parts: 0, first: index, paths: [] }
     g.bytes += typeof e.size === 'number' ? e.size : 0
     g.parts += 1
+    g.paths.push(e.path)
     if (index < g.first) { g.first = index; g.path = e.path }
     groups.set(key, g)
   }
   return [...groups.values()]
-    .map(({ first: _first, ...c }) => c)
+    .map(({ first: _first, paths, ...c }) => {
+      const gap = shardSetGap(paths)
+      return gap ? { ...c, incomplete: gap } : c
+    })
     .sort((a, b) => a.bytes - b.bytes || a.path.localeCompare(b.path))
 }
 
@@ -126,9 +134,16 @@ export function choiceForFile(choices: readonly HfLinkChoice[], file: string): H
   return choices.find((c) => c.path === file || c.path.replace(SHARD_RE, '') === key && SHARD_RE.test(file)) ?? null
 }
 
-/** The row preselected when the link names no file: Q4_K_M, else the smallest. */
+/** The row preselected when the link names no file: Q4_K_M, else the
+ *  smallest, a complete one before an incomplete split set. */
 export function defaultChoice(choices: readonly HfLinkChoice[]): HfLinkChoice | null {
-  return choices.find((c) => c.quant === 'Q4_K_M') ?? choices[0] ?? null
+  const loadable = choices.filter((c) => !c.incomplete)
+  return loadable.find((c) => c.quant === 'Q4_K_M') ?? loadable[0] ?? choices[0] ?? null
+}
+
+/** The line a split set with parts missing gets. */
+export function incompleteLabel(gap: ShardGap): string {
+  return `incomplete: ${gap.have} of ${gap.of} parts, try again later`
 }
 
 /** "1.2 GB", "380 MB". */

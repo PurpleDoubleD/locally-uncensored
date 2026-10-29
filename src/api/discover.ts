@@ -18,6 +18,7 @@ import { extractGgufQuant, hfUrlToTreePath, parseHfUrl } from '../lib/hf-to-prov
 import { IMAGE_PART } from './image-parts'
 import { kimiK3CatalogEntries } from './kimi-k3-catalog'
 import { imagePartFileName, isUpstreamImagePart, pickUpstreamImagePart } from '../lib/image-part'
+import { shardSetGap, type ShardGap } from '../lib/gguf-shards'
 import {
   CUSTOM_NODE_REGISTRY,
   getImageBundles, getVideoBundles, getAudioBundles, getLipsyncBundles, getMotionBundles, getUpscaleBundles,
@@ -1667,6 +1668,10 @@ export interface HfGgufResolution {
   /** The image part the same repository ships, when it ships one. For a model
    *  the catalog does not know, this is what is offered with it. */
   imagePart?: ImagePartSource
+  /** Set when the chosen file is a split set the repository holds only some
+   *  parts of (an upload still running). `files` is empty then: llama.cpp
+   *  cannot load the set, so nothing of it is downloaded. */
+  incomplete?: ShardGap
 }
 
 // 5-digit llama.cpp split convention: `<name>-00001-of-00002.gguf`. A few
@@ -1679,7 +1684,7 @@ const GGUF_QUANT_TOKEN = /(IQ\d_[A-Z0-9]+|Q\d_K(?:_[A-Z]+)?|Q\d_[01]|BF16|F16|F3
 
 /** One downloadable unit of a repo tree: a single file, or every part of a
  *  split set. */
-interface GgufGroup { key: string; quant?: string; parts: HfTreeEntry[] }
+interface GgufGroup { key: string; quant?: string; parts: HfTreeEntry[]; gap?: ShardGap | null }
 
 /**
  * The group that holds the file the caller named, or undefined.
@@ -1740,14 +1745,25 @@ export function selectGgufFromTree(
   }
 
   const all = [...groups.values()]
+  for (const g of all) g.gap = shardSetGap(g.parts.map(p => p.path))
+  // A split set with parts missing never loads. A loadable group is taken
+  // over it wherever the choice is ours; when the caller's own file or quant
+  // is only there incomplete, the answer says so instead of fetching another.
+  const complete = all.filter(g => !g.gap)
   const wanted = preferredQuant?.toUpperCase()
+  const byQuant = (g: GgufGroup) => g.quant === wanted
+  const byKey = (g: GgufGroup) => !!wanted && g.key.toUpperCase().includes(wanted)
   const picked =
     groupOfNamedFile(all, exactPath) ||
-    (wanted ? all.find(g => g.quant === wanted) : undefined) ||
-    (wanted ? all.find(g => g.key.toUpperCase().includes(wanted)) : undefined) ||
-    all.find(g => g.quant === 'Q4_K_M') ||
+    (wanted ? complete.find(byQuant) || all.find(byQuant) : undefined) ||
+    (wanted ? complete.find(byKey) || all.find(byKey) : undefined) ||
+    complete.find(g => g.quant === 'Q4_K_M') ||
+    complete[0] ||
     all[0]
   if (!picked) return null
+  if (picked.gap) {
+    return { sharded: true, files: [], totalBytes: 0, quant: picked.quant, incomplete: picked.gap }
+  }
 
   const sorted = [...picked.parts].sort((a, b) => {
     const ai = parseInt(a.path.match(GGUF_SHARD_RE)?.[1] || '0', 10)
