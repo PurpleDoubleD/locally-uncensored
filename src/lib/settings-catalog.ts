@@ -123,6 +123,17 @@ export function compactThresholdFromPercent(pct: number): number {
   return p < 30 ? 0 : p / 100
 }
 
+/**
+ * One arrow step on the "Compact at" field, in percent. Only 0 and 30 to 95
+ * are values, so a step skips the gap: up from 0 is 30, down from 30 is 0.
+ * The plain step of 5 went 0 to 5, which the rule above turned back into 0.
+ */
+export function stepCompactPercent(pct: number, dir: 1 | -1): number {
+  const p = Math.max(0, Math.min(95, Math.round(pct)))
+  if (dir > 0) return p < 30 ? 30 : Math.min(95, p + 5)
+  return p <= 30 ? 0 : p - 5
+}
+
 const compactThreshold: Pick<CatalogEntry, 'parse' | 'show' | 'allowed'> = {
   allowed: '0 (auto, fits the model) or 30–95 %',
   parse: (v) => {

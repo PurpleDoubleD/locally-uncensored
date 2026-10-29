@@ -1,5 +1,4 @@
 import { useState, useEffect, useRef, type ReactNode, type ChangeEvent } from 'react'
-import { compactThresholdFromPercent } from '../../lib/settings-catalog'
 import { withDetail } from '../../lib/error-text'
 // `X` steht hier weiterhin, obwohl der Sprachabschnitt mit seinen Symbolen
 // nach ./SpeechSettings.tsx gezogen ist: der Dismiss-Knopf der ComfyUI-Notiz
@@ -11,6 +10,7 @@ import { runSettingsReset } from '../../lib/run-settings-reset'
 import { armedScopeFor, type ResetArm, type ResetArmScope } from '../../lib/reset-arming'
 import { sectionAnchorId, sectionsFor, type SettingsSectionFlags } from './settings-nav'
 import { ChatReplyTimeoutSettings } from './ChatReplyTimeoutSettings'
+import { CompactThresholdInput } from './CompactThresholdInput'
 import { HowItWorks } from '../ui/HowItWorks'
 import { HOWTO } from '../../lib/howto'
 import { useSettingsStore } from '../../stores/settingsStore'
@@ -2109,21 +2109,7 @@ export function SettingsPage() {
                 title="When the conversation or a running tool chain fills this much of the window, the model writes a summary of the older part and that part stops being sent. 0 = fit the model's context window, from 32K up. The full history stays in the chat either way; only what is sent changes."
               >Compact at</span>
               <div className="flex items-center gap-1">
-                <input
-                  aria-label="Auto-compact at"
-                  type="number"
-                  value={Math.round((settings.autoCompactThreshold || 0) * 100)}
-                  disabled={settings.autoCompact === false}
-                  onChange={(e) => {
-                    // Same rule as set_setting from the chat (lib/settings-catalog.ts).
-                    updateSettings({ autoCompactThreshold: compactThresholdFromPercent(parseInt(e.target.value) || 0) })
-                  }}
-                  min={0}
-                  max={95}
-                  step={5}
-                  placeholder="0"
-                  className="w-20 px-1.5 py-0.5 rounded bg-transparent border border-white/8 t-mono text-right text-gray-300 focus:outline-none focus:border-white/20 disabled:opacity-40"
-                />
+                <CompactThresholdInput />
                 <span className="t-mono text-gray-500 w-3">%</span>
               </div>
             </div>
