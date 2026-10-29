@@ -543,12 +543,13 @@ jobs:
           esac
           echo "OK: sidecar boots from $moved, loads a real model, /health answers, and has a libggml-cpu-*.so from $moved/llama mapped, nowhere near the build directory it was compiled in"
 
-      # FEHLER-P11 #7: the vector tool links the same libllama/libggml*/
-      # libllama-common the server does, and the app starts it the way it
-      # starts the server (cwd and LD_LIBRARY_PATH on the companions
-      # directory, engine.rs prepare_tool_command). Same moved-directory
-      # proof as above, with a real run: two example lines each way through
-      # the tiny model, and the control vector it writes must be there.
+      # FEHLER-P11 #7/#8: the vector tool is a static baseline build of its
+      # own (build-llama.sh cvector_cmake_flags_for); the app starts it the
+      # way it starts the server (cwd and LD_LIBRARY_PATH on the companions
+      # directory, engine.rs prepare_tool_command), which it does not need
+      # but must not trip over. Same moved-directory proof as above, with a
+      # real run: two example lines each way through the tiny model, and the
+      # control vector it writes must be there.
       - name: "Vector tool computes from a moved directory (P11)"
         if: matrix.sidecar_triple == 'x86_64-unknown-linux-gnu'
         shell: bash

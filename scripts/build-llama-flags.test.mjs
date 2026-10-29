@@ -63,3 +63,41 @@ test('mac and Linux cmake flags are untouched by the Windows -MAP fix', () => {
   assert.doesNotMatch(cmakeFlagsFor('x86_64-apple-darwin'), /MAP/);
   assert.doesNotMatch(cmakeFlagsFor('x86_64-unknown-linux-gnu'), /MAP/);
 });
+
+// FEHLER-P11 #8: the pinned llama.cpp defines the cvector-generator target
+// only with GGML_BACKEND_DL OFF (tools/CMakeLists.txt:35-39), which the
+// Windows/Linux server build needs ON (K1). The vector tool gets a cmake run
+// of its own there: static, CPU only, every ISA option off by name, since
+// GGML_NATIVE=OFF alone turns AVX/AVX2 on (INS_ENB). The server flags stay
+// as they were.
+function sourced(call) {
+  return execFileSync('bash', ['-c', `source "${SCRIPT}"; ${call}`], { encoding: 'utf8' }).trim();
+}
+
+const ISA_OPTIONS = ['SSE42', 'AVX', 'AVX_VNNI', 'AVX2', 'BMI2', 'FMA', 'F16C', 'AVX512', 'AVX512_VBMI', 'AVX512_VNNI', 'AVX512_BF16', 'AMX_TILE', 'AMX_INT8', 'AMX_BF16'];
+
+for (const triple of ['x86_64-pc-windows-msvc', 'x86_64-unknown-linux-gnu']) {
+  test(`P11 #8: ${triple} builds the vector tool apart from the server`, () => {
+    assert.equal(sourced(`cvector_separate_build_for ${triple} && echo yes || echo no`), 'yes');
+    const flags = sourced(`cvector_cmake_flags_for ${triple}`);
+    for (const f of ['BUILD_SHARED_LIBS=OFF', 'GGML_BACKEND_DL=OFF', 'GGML_CPU_ALL_VARIANTS=OFF', 'GGML_VULKAN=OFF', 'GGML_OPENMP=OFF', 'GGML_NATIVE=OFF']) {
+      assert.match(flags, new RegExp(`-D${f}\\b`), f);
+    }
+    for (const isa of ISA_OPTIONS) assert.match(flags, new RegExp(`-DGGML_${isa}=OFF\\b`), `GGML_${isa} must be off by name`);
+    assert.doesNotMatch(flags, /=ON\b/, 'nothing in the vector tool build is switched on');
+    assert.notEqual(sourced(`cvector_build_dir_for ${triple}`), sourced(`echo "$CACHE_DIR/build-${triple}"`), 'its own build directory');
+    // The server build is the K1 one, untouched.
+    assert.match(cmakeFlagsFor(triple), /-DGGML_BACKEND_DL=ON\b/);
+    assert.match(cmakeFlagsFor(triple), /-DGGML_CPU_ALL_VARIANTS=ON\b/);
+  });
+}
+
+test('P11 #8: the Windows vector tool keeps its linker map for the ISA guard', () => {
+  assert.match(sourced('cvector_cmake_flags_for x86_64-pc-windows-msvc'), /-DCMAKE_EXE_LINKER_FLAGS=-MAP\b/);
+  assert.doesNotMatch(sourced('cvector_cmake_flags_for x86_64-unknown-linux-gnu'), /MAP/);
+});
+
+test('P11 #8: the Mac builds the vector tool in its server build (static there already)', () => {
+  assert.equal(sourced('cvector_separate_build_for aarch64-apple-darwin && echo yes || echo no'), 'no');
+  assert.equal(sourced('cvector_ships_for aarch64-apple-darwin && echo yes || echo no'), 'yes');
+});
