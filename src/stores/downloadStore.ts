@@ -172,6 +172,11 @@ interface DownloadStoreState {
    *  with their bundle, so a bundle with cancelled files never reads as
    *  complete (lib/download-tray). This session only. */
   cancelled: string[]
+  /** Finished files the user cleared from the badge. Rust keeps finished
+   *  entries in its map, so without this list the next poll brought the row
+   *  straight back. A new start of the same file takes it off the list. This
+   *  session only. */
+  dismissed: string[]
   polling: boolean
   pollInterval: ReturnType<typeof setInterval> | null
   pollCount: number
@@ -292,6 +297,7 @@ export const useDownloadStore = create<DownloadStoreState>()(persist((set, get) 
   bundleMap: {},
   orphans: {},
   cancelled: [],
+  dismissed: [],
   polling: false,
   pollInterval: null,
 
@@ -299,8 +305,12 @@ export const useDownloadStore = create<DownloadStoreState>()(persist((set, get) 
 
   refresh: async () => {
     try {
-      const prog = await getDownloadProgress()
+      const raw = await getDownloadProgress()
       const prev = get().downloads
+      // A finished row the user cleared stays cleared. An entry that is no
+      // longer finished is a new run of that file and shows again.
+      const dismissed = get().dismissed.filter((id) => raw[id]?.status === 'complete')
+      const prog = Object.fromEntries(Object.entries(raw).filter(([id]) => !dismissed.includes(id)))
 
       // Detect newly completed downloads and dispatch event. The filename
       // rides along now so a listener can tell WHICH model arrived; every
@@ -326,6 +336,7 @@ export const useDownloadStore = create<DownloadStoreState>()(persist((set, get) 
       set({
         downloads: { ...orphanRows(stillOrphaned, downloadMeta), ...ownRows, ...prog },
         orphans: stillOrphaned,
+        dismissed,
         pollCount: count,
       })
 
@@ -374,7 +385,12 @@ export const useDownloadStore = create<DownloadStoreState>()(persist((set, get) 
       // Every start goes through here first, so a file that is started
       // again stops counting as cancelled, and what this side said about
       // it before (already there, not listed) is no longer the news.
-      return { downloadMeta: next, cancelled: s.cancelled.filter((f) => f !== filename), ownRows: without(s.ownRows, filename) }
+      return {
+        downloadMeta: next,
+        cancelled: s.cancelled.filter((f) => f !== filename),
+        dismissed: s.dismissed.filter((f) => f !== filename),
+        ownRows: without(s.ownRows, filename),
+      }
     })
   },
 
@@ -582,11 +598,14 @@ export const useDownloadStore = create<DownloadStoreState>()(persist((set, get) 
     // The phone shell clears a finished row for good: its list polls again on
     // every visit, and a row the backend still holds came back a second after
     // it was cleared. The desktop badge keeps dismissing finished rows on this
-    // side only, as before.
-    if (status === 'complete' && isMobileHost()) {
+    // side only, as before, and remembers them so the next poll of the Rust
+    // map does not bring them back.
+    const remember = status === 'complete' && !isMobileHost()
+    if (status === 'complete' && !remember) {
       clearDownloadEntry(id).catch(() => { /* app restart clears it anyway */ })
     }
     set(s => ({
+      dismissed: remember && !s.dismissed.includes(id) ? [...s.dismissed, id] : s.dismissed,
       downloads: without(s.downloads, id),
       ownRows: without(s.ownRows, id),
       orphans: withoutFilename(s.orphans, id),
