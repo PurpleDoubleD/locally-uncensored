@@ -960,7 +960,9 @@ export function TrainSetBoard() {
   const addFiles = (files: FileList | File[]) => {
     // One mint, one release: `mediaRefFrom` is the only place a staged file
     // gets a blob: URL, and `addTrainImages` gives back every ref it does not
-    // keep (a name duplicate, anything past the 30 cap). This used to be an
+    // keep (a re-drop of a photo already in the set, anything past the cap).
+    // Two different photos under one name both stay: the store numbers the
+    // second one on. This used to be an
     // inline copy of those two lines with nothing on the other end.
     const imgs = Array.from(files)
       .filter((f) => f.type.startsWith('image/'))
