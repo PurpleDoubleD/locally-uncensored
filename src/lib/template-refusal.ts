@@ -23,6 +23,7 @@
 
 import { detailOf, withDetail } from './error-text'
 import { httpStatusOf } from './http-status'
+import { isContextOverflow } from './context-overflow'
 
 /**
  * Wordings from the templates themselves plus the wrappers the engines put
@@ -48,6 +49,14 @@ export const BAD_REQUEST_SENTENCE =
   'Nothing was sent to the model, so nothing was charged. Send the message again, and if it keeps ' +
   'happening, start a new chat or pick another model.'
 
+/** A request longer than the window of the model. Sending it again cannot
+ *  help, and a local model charges nothing: the general 400 sentence said
+ *  both (T1 Nacht-Durchtest 3.0.9, 204K characters into a 16K window). */
+export const CONTEXT_OVERFLOW_REFUSAL_SENTENCE =
+  'This message is longer than the model can read at once, so nothing was generated. Shorten it, ' +
+  'attach long text with Docs instead of pasting it, or raise the Context window above the message box ' +
+  'if this model offers one.'
+
 /** A backend that names the temperature in its refusal (A33): one LU Cloud
  *  model takes 0 to 1 and answered 1.9 with a bare 400. */
 const TEMPERATURE_MARKERS = /\btemperature\b/i
@@ -65,6 +74,7 @@ export const TEMPERATURE_REFUSAL_SENTENCE =
 export function explainSendRefusal(err: unknown): string | null {
   if (isTemplateRefusal(err)) return withDetail(TEMPLATE_REFUSAL_SENTENCE, err)
   if (httpStatusOf(err) === 400 && TEMPERATURE_MARKERS.test(detailOf(err))) return withDetail(TEMPERATURE_REFUSAL_SENTENCE, err)
+  if (httpStatusOf(err) === 400 && isContextOverflow(detailOf(err))) return withDetail(CONTEXT_OVERFLOW_REFUSAL_SENTENCE, err)
   if (httpStatusOf(err) === 400) return withDetail(BAD_REQUEST_SENTENCE, err)
   return null
 }
