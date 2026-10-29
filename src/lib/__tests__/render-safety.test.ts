@@ -149,12 +149,20 @@ describe('both render paths gate the same fields', () => {
     expect(cloud).toMatch(/const prompt = intentTakesPrompt\(intent, characterUse\) \? s\.prompt : ''/)
   })
 
-  it('the local path reads prompt, negativePrompt, musicLyrics and triggerWord', () => {
-    expect(gatedFields(local)).toEqual(['musicLyrics', 'negativePrompt', 'prompt', 'triggerWord'])
+  /** The negative prompt is handed over apart since B30 (safety.ts): the
+   *  field named right after the template literal, as `{ negative: x.f }` on
+   *  the local path or as a second argument on the cloud path. */
+  const negativeField = (src: string): string | null =>
+    /\w*Safety\(\s*`[^`]*`,\s*(?:\{\s*negative:\s*)?[a-zA-Z]+\.([a-zA-Z]+)/.exec(src)?.[1] ?? null
+
+  it('the local path reads prompt, musicLyrics and triggerWord, and negativePrompt apart', () => {
+    expect(gatedFields(local)).toEqual(['musicLyrics', 'prompt', 'triggerWord'])
+    expect(negativeField(local)).toBe('negativePrompt')
   })
 
-  it('and the cloud path reads exactly the same four', () => {
+  it('and the cloud path reads exactly the same, the negative prompt apart as well', () => {
     expect(gatedFields(cloud)).toEqual(gatedFields(local))
+    expect(negativeField(cloud)).toBe(negativeField(local))
   })
 
   it('the local audio lane really does carry the lyrics, so the gate is not theoretical', () => {

@@ -82,7 +82,8 @@ export interface ResolvedCreateJob {
   characterUse: boolean
 }
 
-export type PromptSafetyCheck = (text: string) => SafetyVerdict
+/** `negative` is the negative prompt, checked apart (safety.ts, B30). */
+export type PromptSafetyCheck = (text: string, negative?: string) => SafetyVerdict
 
 export interface CreateDeps {
   uploadInput: (file: Blob, role: UploadRole) => Promise<string>
@@ -162,7 +163,7 @@ export function validateCreateJob(
   if ((op === 'generate' || op === 'music') && req.prompt.trim().length === 0) {
     return PROMPT_MISSING
   }
-  const safety = checkSafety(`${req.prompt} ${req.negativePrompt} ${req.musicLyrics} ${req.triggerWord}`)
+  const safety = checkSafety(`${req.prompt} ${req.musicLyrics} ${req.triggerWord}`, req.negativePrompt)
   if (safety.blocked) return blockMessageFor(safety.reason)
   if (characterUse && !req.character) return 'Pick a character from your shelf first, or train one.'
   if (characterUse && !model) return 'This character has no compatible generation model yet.'

@@ -65,7 +65,7 @@ import { forgetStaged, stagedMayBeStale, uploadTrainPhotos } from '../lib/train-
 // If the account policy has not loaded yet, this checks CSAM only ('off'):
 // never block on a guessed rule, the server is the authority for the rest,
 // same reasoning as the web app's own comment on clientSafety().
-function clientSafety(text: string): SafetyVerdict {
+function clientSafety(text: string, negative?: string): SafetyVerdict {
   const account = contentPolicySnapshot()
   if (!account) void loadContentPolicy() // for the next run
   // A store build of the phone app caps the level (lib/content-policy-cap.ts):
@@ -73,7 +73,7 @@ function clientSafety(text: string): SafetyVerdict {
   // level here, and an unknown level is the cap, never 'off'. No cap on the
   // desktop: the line is what it was.
   const policy = effectiveContentPolicy(account)
-  return checkPromptSafety(text, { tier: 'cloud', policy: policy ?? 'off' })
+  return checkPromptSafety(text, { tier: 'cloud', policy: policy ?? 'off', negative })
 }
 
 // Gallery label for ops that never read the composer prompt. Without this
@@ -344,7 +344,8 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
     // below either way; this only saves the round trip when the client
     // already knows the verdict (B3).
     {
-      const verdict = clientSafety(`${prompt} ${s.negativePrompt} ${s.musicLyrics} ${s.triggerWord}`)
+      // The negative prompt is read apart (B30, safety.ts).
+      const verdict = clientSafety(`${prompt} ${s.musicLyrics} ${s.triggerWord}`, s.negativePrompt)
       if (verdict.blocked) {
         s.setError(blockMessageFor(verdict.reason))
         return

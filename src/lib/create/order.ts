@@ -328,8 +328,8 @@ function pickModel(list: ChatModel[], wanted: string | undefined, openAllowed: b
   return hit
 }
 
-function checkPrompt(p: Planner, text: string): void {
-  const verdict = p.ctx.checkSafety(text)
+function checkPrompt(p: Planner, text: string, negative?: string): void {
+  const verdict = p.ctx.checkSafety(text, negative)
   if (verdict.blocked) spec(blockMessageFor(verdict.reason))
 }
 
@@ -558,7 +558,14 @@ async function planStep(
   if (!r.studio && raw.role === 'speech' && r.step.model === 'qwen3-tts-design' && !options.voice_description) {
     spec(`${title} on qwen3-tts-design needs option "voice_description".`)
   }
-  checkPrompt(p, `${prompt} ${Object.values(options).filter((v) => typeof v === 'string').join(' ')}`)
+  // The negative prompt the model wrote goes apart: it is where a model puts
+  // "child, underage" to keep them OUT (B30, safety.ts).
+  const { negative_prompt: negative, ...rest } = options
+  checkPrompt(
+    p,
+    `${prompt} ${Object.values(rest).filter((v) => typeof v === 'string').join(' ')}`,
+    typeof negative === 'string' ? negative : undefined,
+  )
   const placeholder: Record<string, string | string[]> = {}
   for (const key of [...Object.keys(inputs), ...(carry ? [carry] : [])]) {
     placeholder[key] = key === 'image_paths' ? ['placeholder'] : key === 'source_url' ? 'https://placeholder.invalid/clip.mp4' : 'placeholder'
