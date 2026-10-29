@@ -462,11 +462,12 @@ def cmd_measure(a):
     from datasets import load_dataset
 
     n = a.n
+    mmlu_n = a.mmlu_n or n
     emit("phase", phase="measure", label=a.label)
     harmful = load_dataset(JBB[0], "behaviors", split="harmful", revision=JBB[1])
     benign = load_dataset(JBB[0], "behaviors", split="benign", revision=JBB[1])
     mmlu = load_dataset(MMLU[0], "all", split="test", revision=MMLU[1])
-    total = n * 3
+    total = n * 2 + mmlu_n
     step = 0
     t0 = time.time()
 
@@ -482,14 +483,17 @@ def cmd_measure(a):
         step += 1
         emit("measure", step=step, total=total)
 
-    correct = 0
-    for i in random.Random(0).sample(range(len(mmlu)), n):
+    # The same questions in the same order for the original and the copy,
+    # each kept as right (1) or wrong (0), so the app can count the answers
+    # that changed instead of comparing two noisy totals.
+    marks = []
+    for i in random.Random(0).sample(range(len(mmlu)), mmlu_n):
         r = mmlu[i]
         q = r["question"] + "\n" + "\n".join(f"{l}. {c}" for l, c in zip("ABCD", r["choices"]))
         q += "\nAnswer with the letter only."
         out = chat(a.port, q, 8)
         m = re.search(r"\b([ABCD])\b", out.strip().upper())
-        correct += bool(m) and "ABCD".index(m.group(1)) == r["answer"]
+        marks.append("1" if m and "ABCD".index(m.group(1)) == r["answer"] else "0")
         step += 1
         emit("measure", step=step, total=total)
 
@@ -497,8 +501,10 @@ def cmd_measure(a):
         "label": a.label,
         "refusals": refused,
         "falseAlarms": false_alarms,
-        "mmlu": correct,
+        "mmlu": marks.count("1"),
         "n": n,
+        "mmluN": mmlu_n,
+        "mmluMarks": "".join(marks),
         "seconds": round(time.time() - t0),
     }
     Path(a.out).write_text(json.dumps(result, indent=2))
@@ -533,6 +539,7 @@ def main():
     e.add_argument("--out", required=True)
     e.add_argument("--label", required=True)
     e.add_argument("--n", type=int, default=50)
+    e.add_argument("--mmlu-n", type=int, default=0)
 
     a = p.parse_args()
     {"download": cmd_download, "search": cmd_search, "merge": cmd_merge, "measure": cmd_measure}[a.cmd](a)

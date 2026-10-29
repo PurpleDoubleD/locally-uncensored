@@ -16,7 +16,9 @@
 //! 2. download: the safetensors of the repo at the commit the dialog showed.
 //! 3. check before: the ORIGINAL GGUF in a llama-server of its own, through
 //!    the same short check as at the end (refusals on 50 JailbreakBench
-//!    prompts, false alarms on 50 harmless ones, 50 MMLU questions).
+//!    prompts, false alarms on 50 harmless ones, 1000 MMLU questions, each
+//!    answer kept as right or wrong so the two runs compare question by
+//!    question).
 //! 4. search: Heretic's trials, without its menus (`lu_abliterate.py search`).
 //!    A stopped run carries on from Heretic's checkpoint next time.
 //! 5. merge: the adapter into the original weights, shard by shard.
@@ -66,8 +68,15 @@ const LLAMA_ZIP_SHA256: &str = "f18fc09e7a53fb277b6d7725d5c13f3bb9927acaaa8b6e42
 const REQUIREMENTS: &str = include_str!("../../../resources/abliterate/requirements.txt");
 const CONSTRAINTS: &str = include_str!("../../../resources/abliterate/constraints.txt");
 
-/// Prompts per part of the check (refusals, false alarms, MMLU).
+/// Prompts per refusal part of the check (refused, harmless refused).
+/// JailbreakBench has 100 of each; the search never sees them.
 const CHECK_N: u32 = 50;
+/// MMLU questions in the check. 50 left a loss of three questions inside
+/// chance (3.0.8 on the box: 22 → 21 of 50). 200 were still too few: on the
+/// box the first 200 read as a real loss (88 → 79) while all 1000 showed
+/// none (409 → 410). 1000 one-letter answers cost the box under a minute
+/// per check for a 0.5B model.
+const MMLU_N: u32 = 1000;
 const LOG_LINES: usize = 160;
 
 // ── Paths ─────────────────────────────────────────────────────────────────
@@ -140,6 +149,13 @@ pub struct Check {
     pub false_alarms: u32,
     pub mmlu: u32,
     pub n: u32,
+    /// MMLU questions asked; older records asked `n`.
+    #[serde(default)]
+    pub mmlu_n: Option<u32>,
+    /// One character per MMLU question, `1` right and `0` wrong, in the
+    /// same order for both runs, so a loss can be told from chance.
+    #[serde(default)]
+    pub mmlu_marks: Option<String>,
 }
 
 /// What a finished run leaves behind, in `runs/<id>.json`.
@@ -194,6 +210,10 @@ pub struct RunState {
     pub started_at: u64,
     pub elapsed_secs: u64,
     pub eta_secs: Option<u64>,
+    /// The step counts bytes (a download): `step` of `total` bytes.
+    pub bytes: bool,
+    /// Bytes per second over the last seconds of a download.
+    pub rate_bps: Option<u64>,
     pub logs: VecDeque<String>,
     pub error: Option<String>,
     pub result: Option<RunRecord>,
@@ -205,6 +225,76 @@ pub struct RunState {
     started: Option<Instant>,
     #[serde(skip)]
     search_started: Option<(Instant, u32)>,
+    #[serde(skip)]
+    meter: ByteMeter,
+    /// pip is on a file large enough to show (see `pip_line`).
+    #[serde(skip)]
+    pip_big: bool,
+}
+
+/// Speed and time left of a download from its last few seconds.
+#[derive(Debug, Clone, Default)]
+struct ByteMeter {
+    samples: VecDeque<(Instant, u64)>,
+}
+
+impl ByteMeter {
+    const WINDOW: Duration = Duration::from_secs(10);
+
+    /// Below this a download has not really begun: the hub sends the small
+    /// files first, after a pause. Measured from there, the Mac showed
+    /// "4 kB/s · about 66 h left" for the weights (28.10.2026).
+    const STARTED: u64 = 1_000_000;
+
+    /// Take a reading; `(bytes per second, seconds left)` once there are
+    /// a little over one second of readings. A count that goes back (a new
+    /// file) starts over.
+    fn sample(&mut self, at: Instant, done: u64, total: u64) -> (Option<u64>, Option<u64>) {
+        if self.samples.back().is_some_and(|&(_, d)| done < d) || done < Self::STARTED.min(total) {
+            self.samples.clear();
+        }
+        if done < Self::STARTED.min(total) {
+            return (None, None);
+        }
+        self.samples.push_back((at, done));
+        while self.samples.len() > 2 && self.samples.front().is_some_and(|&(t, _)| at.duration_since(t) > Self::WINDOW) {
+            self.samples.pop_front();
+        }
+        let &(t0, d0) = self.samples.front().expect("just pushed");
+        let secs = at.duration_since(t0).as_secs_f64();
+        if secs < 1.2 {
+            return (None, None);
+        }
+        let rate = (done - d0) as f64 / secs;
+        if rate < 1.0 {
+            return (Some(0), None);
+        }
+        let left = (total > done).then(|| ((total - done) as f64 / rate).ceil() as u64);
+        (Some(rate as u64), left.or(Some(0)).filter(|_| total > 0))
+    }
+}
+
+/// A download's progress: bytes done of total, with speed and time left.
+fn set_bytes(r: &mut RunState, done: u64, total: u64) {
+    if !r.bytes {
+        r.meter = ByteMeter::default();
+    }
+    r.bytes = true;
+    r.step = done;
+    r.total = total;
+    let (rate, left) = r.meter.sample(Instant::now(), done, total);
+    r.rate_bps = rate;
+    r.eta_secs = left;
+}
+
+/// Back to a step without a byte count (the bar shows no share).
+fn clear_bytes(r: &mut RunState) {
+    r.bytes = false;
+    r.rate_bps = None;
+    r.eta_secs = None;
+    r.step = 0;
+    r.total = 0;
+    r.meter = ByteMeter::default();
 }
 
 static RUN: LazyLock<Mutex<RunState>> = LazyLock::new(|| Mutex::new(RunState { status: "idle".into(), ..Default::default() }));
@@ -235,9 +325,8 @@ fn set_phase(phase: &str, label: &str) {
     with_run(|r| {
         r.phase = phase.to_string();
         r.phase_label = label.to_string();
-        r.step = 0;
-        r.total = 0;
-        r.eta_secs = None;
+        clear_bytes(r);
+        r.pip_big = false;
     });
 }
 
@@ -856,7 +945,7 @@ fn run_job(app: &tauri::AppHandle, job: &Job) -> Result<RunRecord, String> {
     // 1. the original weights
     let source_dir = job.work.join("source");
     set_phase("download", "Downloading the original weights");
-    with_run(|r| r.total = job.estimate.download_bytes);
+    with_run(|r| set_bytes(r, 0, job.estimate.download_bytes));
     {
         let dir = source_dir.clone();
         let mut cmd = python(&py, job);
@@ -869,18 +958,26 @@ fn run_job(app: &tauri::AppHandle, job: &Job) -> Result<RunRecord, String> {
         let result = run_python(cmd, "download", |ev| {
             if ev.get("event").and_then(|e| e.as_str()) == Some("bytes") {
                 let done = ev.get("done").and_then(|v| v.as_u64()).unwrap_or(0);
-                with_run(|r| r.step = r.step.max(done));
+                with_run(|r| {
+                    let (done, total) = (r.step.max(done), r.total);
+                    set_bytes(r, done, total)
+                });
             }
         });
         watcher.store(false, Ordering::SeqCst);
         result?;
-        with_run(|r| r.step = r.total);
+        with_run(|r| {
+            let total = r.total;
+            set_bytes(r, total, total)
+        });
     }
     check_cancel()?;
 
     // 2. the original, checked
     let before_json = job.work.join("check-before.json");
-    if !before_json.is_file() {
+    // A check from an older LU asked fewer MMLU questions and would not
+    // compare with the copy's.
+    if !check_is_current(read_json::<Check>(&before_json).as_ref()) {
         set_phase("check_before", "Checking the original");
         check_gguf(app, &py, job, &job.source, &before_json, "original")?;
     }
@@ -1036,6 +1133,12 @@ fn run_job(app: &tauri::AppHandle, job: &Job) -> Result<RunRecord, String> {
     };
     write_record(&record)?;
     Ok(record)
+}
+
+/// A saved check of the original counts only when it asked the questions
+/// the copy will be asked, with each answer kept.
+fn check_is_current(c: Option<&Check>) -> bool {
+    c.is_some_and(|c| c.mmlu_n == Some(MMLU_N) && c.mmlu_marks.as_ref().is_some_and(|m| m.len() == MMLU_N as usize))
 }
 
 fn check_cancel() -> Result<(), String> {
@@ -1194,21 +1297,15 @@ fn keep_line(tail: &Arc<Mutex<VecDeque<String>>>, line: String) {
     }
     // Progress bars redraw themselves many times a second; the log keeps
     // the lines that say something.
-    let bar = line.contains('█') || line.contains("it/s]") || line.contains("s/it]");
+    let bar = line.contains('█') || line.contains("it/s]") || line.contains("s/it]") || pip_progress(&line).is_some();
     if !bar {
         log(line.clone());
     }
-    // pip shows no progress outside a terminal, and the CUDA build of
-    // PyTorch is 2 GB: on the box the phase read "Installing PyTorch" for
-    // twenty minutes with nothing moving. Say at least how big it is.
-    if let Some(size) = big_download(&line) {
-        with_run(|r| {
-            if r.phase == "setup" {
-                let base = r.phase_label.split(" (").next().unwrap_or_default().to_string();
-                r.phase_label = format!("{base} ({size} download, this takes a while)");
-            }
-        });
-    }
+    with_run(|r| {
+        if r.phase == "setup" {
+            pip_line(r, &line);
+        }
+    });
     if let Ok(mut t) = tail.lock() {
         t.push_back(line);
         while t.len() > 40 {
@@ -1217,22 +1314,55 @@ fn keep_line(tail: &Arc<Mutex<VecDeque<String>>>, line: String) {
     }
 }
 
-/// "2.0 GB" for pip's "Downloading <file> (1990.6 MB)" when the file is
-/// 100 MB or more, else None.
-fn big_download(line: &str) -> Option<String> {
+/// pip's own words into the setup step. The CUDA build of PyTorch is 2 GB:
+/// on the box the step read "Installing PyTorch" for 26 minutes with the bar
+/// empty. Now a file of 20 MB or more shows its bytes, speed and time left
+/// under the step's name; smaller ones pass in seconds and leave the bar as
+/// it is, so it does not flicker.
+fn pip_line(r: &mut RunState, line: &str) {
+    let base = r.phase_label.split(": ").next().unwrap_or_default().to_string();
+    if let Some((file, mb)) = pip_download(line) {
+        r.pip_big = mb >= 20.0;
+        if r.pip_big {
+            clear_bytes(r);
+            r.phase_label = format!("{base}: downloading {file}");
+        }
+    } else if let Some((done, total)) = pip_progress(line) {
+        if r.pip_big && total > 0 {
+            set_bytes(r, done, total);
+        }
+    } else if line.starts_with("Installing collected packages") {
+        r.pip_big = false;
+        clear_bytes(r);
+        r.phase_label = format!("{base}: unpacking");
+    }
+}
+
+/// pip's `--progress-bar raw` line: "Progress 1048576 of 1990600000".
+fn pip_progress(line: &str) -> Option<(u64, u64)> {
+    let (done, total) = line.trim().strip_prefix("Progress ")?.split_once(" of ")?;
+    Some((done.parse().ok()?, total.parse().ok()?))
+}
+
+/// `("torch 2.14.1+cu130", 1990.6)` for pip's "Downloading <url or file>
+/// (1990.6 MB)". Files without a size, or in kB, are None.
+fn pip_download(line: &str) -> Option<(String, f64)> {
     let rest = line.trim_start().strip_prefix("Downloading ")?;
-    let inner = rest.rsplit_once(" (")?.1.strip_suffix(')')?;
-    let (num, unit) = inner.split_once(' ')?;
+    let (what, inner) = rest.rsplit_once(" (")?;
+    let (num, unit) = inner.strip_suffix(')')?.split_once(' ')?;
     let n: f64 = num.parse().ok()?;
     let mb = match unit {
         "MB" => n,
         "GB" => n * 1000.0,
         _ => return None,
     };
-    if mb < 100.0 {
-        return None;
-    }
-    Some(if mb >= 1000.0 { format!("{:.1} GB", mb / 1000.0) } else { format!("{mb:.0} MB") })
+    let file = what.rsplit('/').next().unwrap_or(what).replace("%2B", "+").replace("%2b", "+");
+    let mut parts = file.split('-');
+    let name = match (parts.next(), parts.next()) {
+        (Some(n), Some(v)) if file.ends_with(".whl") => format!("{n} {v}"),
+        _ => file.clone(),
+    };
+    Some((name, mb))
 }
 
 /// The sentence for a failed step: a known cause in plain words, else the
@@ -1261,7 +1391,12 @@ fn watch_size(dir: PathBuf) -> Arc<AtomicBool> {
     std::thread::spawn(move || {
         while flag.load(Ordering::SeqCst) {
             let size = dir_size(&dir);
-            with_run(|r| r.step = r.step.max(size));
+            with_run(|r| {
+                if r.phase == "download" && size > r.step {
+                    let total = r.total;
+                    set_bytes(r, size, total)
+                }
+            });
             std::thread::sleep(Duration::from_millis(800));
         }
     });
@@ -1283,11 +1418,11 @@ fn dir_size(p: &Path) -> u64 {
 fn check_gguf(app: &tauri::AppHandle, py: &Path, job: &Job, model: &Path, out: &Path, label: &str) -> Result<(), String> {
     let port = free_port().ok_or("No free local port for the check.")?;
     let mut server = crate::commands::engine::spawn_private_server(app, &model.to_string_lossy(), port, 4096)?;
-    with_run(|r| r.total = (CHECK_N * 3) as u64);
+    with_run(|r| r.total = (CHECK_N * 2 + MMLU_N) as u64);
     let mut cmd = python(py, job);
     cmd.env("LU_ENGINE_BEARER", crate::commands::engine_key::bearer());
     cmd.arg(&job.script)
-        .args(["measure", "--port", &port.to_string(), "--label", label, "--n", &CHECK_N.to_string(), "--out"])
+        .args(["measure", "--port", &port.to_string(), "--label", label, "--n", &CHECK_N.to_string(), "--mmlu-n", &MMLU_N.to_string(), "--out"])
         .arg(out);
     let result = run_python(cmd, "check", |ev| {
         if ev.get("event").and_then(|e| e.as_str()) == Some("measure") {
@@ -1315,10 +1450,7 @@ impl crate::private_python::Progress for RunProgress {
         CANCEL.clone()
     }
     fn set_download(&self, done: u64, total: u64, _speed: u64) {
-        with_run(|r| {
-            r.step = done;
-            r.total = total;
-        });
+        with_run(|r| set_bytes(r, done, total));
     }
 }
 
@@ -1346,7 +1478,9 @@ fn ensure_env(job: &Job) -> Result<PathBuf, String> {
     let pip = |extra: &[String]| {
         let mut cmd = crate::python::python_command(&vpy);
         cmd.env_remove("PYTHONHOME").env_remove("PYTHONPATH");
-        cmd.args(["-m", "pip", "install", "--disable-pip-version-check", "--no-warn-script-location", "--progress-bar", "off"]);
+        // "raw" writes "Progress <done> of <total>" per file even into a
+        // pipe (pip 24.1 and later; LU's Python 3.12.15 brings 25.x).
+        cmd.args(["-m", "pip", "install", "--disable-pip-version-check", "--no-warn-script-location", "--progress-bar", "raw"]);
         cmd.args(extra);
         cmd
     };
@@ -1413,10 +1547,7 @@ fn ensure_converter() -> Result<(), String> {
             break;
         }
         bytes.extend_from_slice(&buf[..n]);
-        with_run(|r| {
-            r.step = bytes.len() as u64;
-            r.total = LLAMA_ZIP_BYTES;
-        });
+        with_run(|r| set_bytes(r, bytes.len() as u64, LLAMA_ZIP_BYTES));
         if bytes.len() as u64 > LLAMA_ZIP_BYTES {
             return Err("The converter archive is larger than expected; nothing was unpacked.".into());
         }
@@ -1509,13 +1640,73 @@ mod tests {
     }
 
     #[test]
-    fn a_big_pip_download_is_named_with_its_size() {
+    fn pip_download_lines_are_read() {
         let line = "Downloading https://download-r2.pytorch.org/whl/cu130/torch-2.14.1%2Bcu130-cp312-cp312-win_amd64.whl (1990.6 MB)";
-        assert_eq!(big_download(line).as_deref(), Some("2.0 GB"));
-        assert_eq!(big_download("  Downloading numpy-2.5.4-cp312-cp312-win_amd64.whl (12.6 MB)"), None);
-        assert_eq!(big_download("  Downloading mpmath-1.3.0-py3-none-any.whl.metadata (8.6 kB)"), None);
-        assert_eq!(big_download("Downloading x.whl (250.0 MB)").as_deref(), Some("250 MB"));
-        assert_eq!(big_download("Collecting torch"), None);
+        assert_eq!(pip_download(line), Some(("torch 2.14.1+cu130".to_string(), 1990.6)));
+        assert_eq!(pip_download("  Downloading numpy-2.5.4-cp312-cp312-win_amd64.whl (12.6 MB)").map(|d| d.1), Some(12.6));
+        assert_eq!(pip_download("  Downloading mpmath-1.3.0-py3-none-any.whl.metadata (8.6 kB)"), None);
+        assert_eq!(pip_download("Downloading x.whl (2.1 GB)").map(|d| d.1), Some(2100.0));
+        assert_eq!(pip_download("Collecting torch"), None);
+        assert_eq!(pip_progress("Progress 1048576 of 1990600000"), Some((1_048_576, 1_990_600_000)));
+        assert_eq!(pip_progress("Progress of the night"), None);
+    }
+
+    /// The box, 3.0.8: "Installing PyTorch", an empty bar, 26 minutes.
+    #[test]
+    fn the_pytorch_download_shows_its_bytes_in_the_setup_step() {
+        let mut r = RunState { phase: "setup".into(), phase_label: "Installing PyTorch".into(), ..Default::default() };
+        pip_line(&mut r, "Collecting torch");
+        pip_line(&mut r, "  Downloading https://download-r2.pytorch.org/whl/cu130/torch-2.14.1%2Bcu130-cp312-cp312-win_amd64.whl (1990.6 MB)");
+        assert_eq!(r.phase_label, "Installing PyTorch: downloading torch 2.14.1+cu130");
+        pip_line(&mut r, "Progress 0 of 1990600000");
+        pip_line(&mut r, "Progress 995300000 of 1990600000");
+        assert!(r.bytes);
+        assert_eq!((r.step, r.total), (995_300_000, 1_990_600_000));
+        // a small file afterwards leaves the bar alone
+        pip_line(&mut r, "  Downloading sympy-1.14.0-py3-none-any.whl (6.3 MB)");
+        pip_line(&mut r, "Progress 100 of 6300000");
+        assert_eq!(r.step, 995_300_000);
+        pip_line(&mut r, "Installing collected packages: mpmath, torch");
+        assert_eq!(r.phase_label, "Installing PyTorch: unpacking");
+        assert!(!r.bytes);
+        assert_eq!(r.total, 0);
+    }
+
+    #[test]
+    fn a_check_of_the_original_from_3_0_8_is_measured_again() {
+        let old: Check = serde_json::from_str(r#"{"refusals":39,"falseAlarms":13,"mmlu":22,"n":50}"#).unwrap();
+        assert!(!check_is_current(Some(&old)));
+        assert!(!check_is_current(None));
+        let first_309 = Check { mmlu_n: Some(200), mmlu_marks: Some("1".repeat(200)), ..old.clone() };
+        assert!(!check_is_current(Some(&first_309)));
+        let new = Check { mmlu_n: Some(MMLU_N), mmlu_marks: Some("1".repeat(MMLU_N as usize)), ..old };
+        assert!(check_is_current(Some(&new)));
+    }
+
+    #[test]
+    fn the_byte_meter_gives_speed_and_time_left() {
+        let t = Instant::now();
+        let mut m = ByteMeter::default();
+        assert_eq!(m.sample(t, 1_000_000, 1_000_000_000), (None, None));
+        let (rate, left) = m.sample(t + Duration::from_secs(2), 21_000_000, 1_000_000_000);
+        assert_eq!(rate, Some(10_000_000));
+        assert_eq!(left, Some(98));
+        // the window forgets a stall long ago
+        m.sample(t + Duration::from_secs(30), 300_000_000, 1_000_000_000);
+        let (rate, _) = m.sample(t + Duration::from_secs(32), 320_000_000, 1_000_000_000);
+        assert_eq!(rate, Some(10_000_000));
+        // a new file starts over
+        assert_eq!(m.sample(t + Duration::from_secs(33), 5, 100), (None, None));
+        // the pause before the first megabyte does not count
+        let mut m = ByteMeter::default();
+        m.sample(t, 0, 988_000_000);
+        m.sample(t + Duration::from_secs(3), 40_000, 988_000_000);
+        assert_eq!(m.sample(t + Duration::from_secs(4), 4_000_000, 988_000_000), (None, None));
+        assert_eq!(m.sample(t + Duration::from_secs(6), 12_000_000, 988_000_000).0, Some(4_000_000));
+        // finished
+        let mut m = ByteMeter::default();
+        m.sample(t, 2_000_000, 10_000_000);
+        assert_eq!(m.sample(t + Duration::from_secs(2), 10_000_000, 10_000_000), (Some(4_000_000), Some(0)));
     }
 
     #[test]

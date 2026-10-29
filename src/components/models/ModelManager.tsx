@@ -13,6 +13,7 @@ import { useProviderStore } from '../../stores/providerStore'
 import { ModelCard } from './ModelCard'
 import { RemoveRefusalsDialog } from './RemoveRefusalsDialog'
 import { useAbliterateStore } from '../../stores/abliterateStore'
+import { downloadLine } from '../../api/abliterate'
 import { prefixModelName } from '../../api/providers/model-name'
 import { PullModelDialog } from './PullModelDialog'
 import { DiscoverModels } from './DiscoverModels'
@@ -396,7 +397,8 @@ export function ModelManager() {
                 // One quiet line above the list, not the empty-state block:
                 // the list stays where it was while the run goes on.
                 <p data-testid="remove-refusals-strip" className="t-body text-gray-500 dark:text-gray-400 mb-2">
-                  Removing refusals from {ablStatus.modelName}: {ablStatus.phaseLabel || 'starting'}.{' '}
+                  Removing refusals from {ablStatus.modelName}: {ablStatus.phaseLabel || 'starting'}
+                  {ablStatus.bytes && ablStatus.total > 0 && ` (${downloadLine(ablStatus)})`}.{' '}
                   <button type="button" className="underline hover:text-gray-900 dark:hover:text-white" onClick={() => openRemoveRefusals(ablStatus.sourcePath)}>Open</button>
                 </p>
               )}
