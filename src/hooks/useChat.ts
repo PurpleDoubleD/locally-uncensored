@@ -230,7 +230,7 @@ async function runGroupTurn(convId: string, model: string, allModels: string[], 
   let messages = fitted.messages
   // Said in the chat, next to this answer: older turns did not go out.
   let dropped = full.length - counted.length + sent.droppedMessages
-  let shortened = fitted.shortened
+  let shortened = (sent.shortenedMessages ?? 0) + fitted.shortened
   const noteTrim = () => useChatStore.getState().updateMessageHistoryTrim(
     convId, assistantMessage.id,
     dropped > 0 || shortened > 0 ? { dropped, window: modelWindow, ...(shortened ? { shortened } : {}) } : null,
@@ -324,7 +324,8 @@ async function runGroupTurn(convId: string, model: string, allModels: string[], 
         log.info('chat.group_context_overflow_retry', { sent: size, next, window: overflow.window, promptTokens: overflow.promptTokens, kept: cut.messages.length, shortened: fit.shortened })
         messages = fit.messages
         dropped += cut.dropped
-        shortened += fit.shortened
+        // The pin is capped again on the retry: the same message, not a second one.
+        shortened = Math.max(shortened, cut.shortened) + fit.shortened
         noteTrim()
         yield* provider.chatStream(modelId, messages, streamOpts)
       }

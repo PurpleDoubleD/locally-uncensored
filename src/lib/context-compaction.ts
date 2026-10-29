@@ -355,13 +355,15 @@ export function compactMessages(
  * compactMessages, and how many of the older messages it left out. The count
  * is what the chat shows under an answer whose request was trimmed (GH #201),
  * so nobody has to guess from a token counter that turns were dropped.
+ * `shortened` is 1 when the pinned first user message went out capped: it is
+ * not counted as dropped, and without the count it was cut without a word.
  */
 export function compactMessagesWithCount(
   messages: OllamaChatMessage[],
   maxTokens: number,
   opts: CompactOptions = {},
-): { messages: OllamaChatMessage[]; dropped: number } {
-  const unchanged = { messages, dropped: 0 }
+): { messages: OllamaChatMessage[]; dropped: number; shortened: number } {
+  const unchanged = { messages, dropped: 0, shortened: 0 }
   const currentTokens = estimateMessageTokens(messages)
   const triggerTokens = opts.hysteresis ? Math.floor(maxTokens * COMPACT_TRIGGER_RATIO) : maxTokens
   const targetTokens = opts.hysteresis ? Math.floor(maxTokens * COMPACT_TARGET_RATIO) : maxTokens
@@ -503,6 +505,7 @@ export function compactMessagesWithCount(
       strip: stripTrimNotice,
     }),
     dropped: Math.max(0, droppedCount),
+    shortened: pinNeeded && rawTask !== null && rawTask.length > PINNED_TASK_MAX_CHARS ? 1 : 0,
   }
 }
 

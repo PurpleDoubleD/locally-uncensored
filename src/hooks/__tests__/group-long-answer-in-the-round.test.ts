@@ -185,3 +185,31 @@ describe('shortenLongTurns', () => {
     expect(estimateMessageTokens(out.messages as never)).toBeGreaterThan(5000)
   })
 })
+
+describe('the pinned first message', () => {
+  it('a long first line that went out capped is said next to the answer', async () => {
+    reply = (model) => sse(`${model} answer.`)
+    const convId = openGroup()
+    useChatStore.setState((s) => ({
+      conversations: s.conversations.map((c) => (c.id === convId ? {
+        ...c,
+        messages: [
+          { id: 'u0', role: 'user' as const, content: 'Please read this. ' + 'The quick brown fox jumps. '.repeat(2700), timestamp: 1 },
+          { id: 'a0', role: 'assistant' as const, content: 'qwen05 read it.', modelId: A, timestamp: 2 },
+          { id: 'a1', role: 'assistant' as const, content: 'qwen05-zwei read it.', modelId: B, timestamp: 3 },
+          { id: 'a2', role: 'assistant' as const, content: 'coder15 read it.', modelId: C, timestamp: 4 },
+          { id: 'u1', role: 'user' as const, content: 'hallo', timestamp: 5 },
+          { id: 'a3', role: 'assistant' as const, content: 'qwen05 hallo.', modelId: A, timestamp: 6 },
+          { id: 'a4', role: 'assistant' as const, content: 'qwen05-zwei hallo.', modelId: B, timestamp: 7 },
+          { id: 'a5', role: 'assistant' as const, content: 'coder15 hallo.', modelId: C, timestamp: 8 },
+        ],
+      } : c)),
+    }))
+    await round('und noch einmal')
+
+    const budget = chatSendBudget({ providerId: 'openai', modelWindow: 16384, contextDecay: true, localBackend: true })!
+    for (const r of requests) expect(wireSize(r)).toBeLessThanOrEqual(budget)
+    const said = turns(convId).slice(-3)
+    expect(said.every((m) => (m.historyTrim?.shortened ?? 0) >= 1)).toBe(true)
+  })
+})
