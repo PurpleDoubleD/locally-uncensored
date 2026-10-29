@@ -20,7 +20,7 @@ import { EFFORT_STEPS } from './effort'
 import { normalizeThinkBudget } from './think-budget'
 import { normalizeChatFirstReplySeconds } from './chat-reply-timeout'
 import { TEMPERATURE_MAX } from './sampling'
-import { CONTEXT_WINDOW_MAX, MAX_TOKENS_MAX } from './number-limits'
+import { CONTEXT_WINDOW_MAX, MAX_TOKENS_MAX, SUB_AGENT_LIMIT_MAX } from './number-limits'
 
 type Parsed = { ok: true; value: unknown } | { ok: false; error: string }
 
@@ -207,8 +207,8 @@ export const CATALOG: readonly CatalogEntry[] = [
   // Agent limits: read at the start of a run, so a run cannot raise its own.
   e('agentMaxToolCalls', 'Agent tool call limit', 'agent', 'Most tool calls per message. Applies from the next message.', int(0, 10_000, '', 'unlimited')),
   e('agentMaxIterations', 'Agent step limit', 'agent', 'Most steps per message. Applies from the next message.', int(0, 10_000, '', 'unlimited')),
-  e('subAgentMaxToolCalls', 'Sub-agent tool call limit', 'agent', 'Most tool calls of one sub-agent.', int(0, 1_000, '', 'default')),
-  e('subAgentMaxIterations', 'Sub-agent step limit', 'agent', 'Most steps of one sub-agent.', int(0, 1_000, '', 'default')),
+  e('subAgentMaxToolCalls', 'Sub-agent tool call limit', 'agent', 'Most tool calls of one sub-agent.', int(0, SUB_AGENT_LIMIT_MAX, '', 'default')),
+  e('subAgentMaxIterations', 'Sub-agent step limit', 'agent', 'Most steps of one sub-agent.', int(0, SUB_AGENT_LIMIT_MAX, '', 'default')),
   e('loopMaxPasses', '/loop passes', 'agent', 'How many passes a /loop may run.', int(0, 10_000, '', 'unlimited')),
   // Look and feel
   e('theme', 'Theme', 'general', 'Light or dark app theme.', oneOf(['light', 'dark'])),

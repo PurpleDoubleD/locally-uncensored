@@ -51,6 +51,7 @@ import { MAX_EXPLICIT_FANOUT } from '../../lib/agent-fanout'
 import { resolveApprovalLevel } from '../../lib/agent-approval-policy'
 import { allowedInReadOnlyTurn } from '../../lib/mutating-tools'
 import { isSettingsToolName } from '../../lib/settings-tool-names'
+import { clampSubAgentLimit } from '../../lib/number-limits'
 
 // NOTE: the toolRegistry import is done LAZILY inside defaultSubAgentRunner
 // to avoid a circular dependency with src/api/mcp/builtin-tools.ts, which
@@ -142,8 +143,9 @@ export function resolveSubAgentBudget(s?: {
   subAgentMaxToolCalls?: number
   subAgentMaxIterations?: number
 }): { maxToolCalls: number; maxIterations: number } {
-  const zahl = (v: unknown, vorgabe: number) =>
-    typeof v === 'number' && Number.isFinite(v) && v > 0 ? Math.floor(v) : vorgabe
+  // 0 or nothing = the default; above SUB_AGENT_LIMIT_MAX is clamped (B9),
+  // a sub-agent runs unattended and must not get a practically endless budget.
+  const zahl = (v: unknown, vorgabe: number) => clampSubAgentLimit(v) || vorgabe
   return {
     maxToolCalls: zahl(s?.subAgentMaxToolCalls, SUB_AGENT_BUDGET.maxToolCalls),
     maxIterations: zahl(s?.subAgentMaxIterations, SUB_AGENT_BUDGET.maxIterations),

@@ -90,7 +90,7 @@ import { isLmStudioProvider } from '../../lib/hf-to-provider'
 import { TEMPERATURE_MAX, TEMPERATURE_HELP, TEMPERATURE_HELP_LABEL } from '../../lib/sampling'
 import { HighTemperatureWarning } from '../chat/HighTemperatureWarning'
 import { BoundedNumberInput } from './BoundedNumberInput'
-import { CONTEXT_WINDOW_MAX, MAX_TOKENS_MAX } from '../../lib/number-limits'
+import { CONTEXT_WINDOW_MAX, MAX_TOKENS_MAX, SUB_AGENT_LIMIT_MAX } from '../../lib/number-limits'
 
 // ── User profile picture (Appearance) ───────────────────────────
 // Self-contained like HfDownloadPathSetting. Stores the picture as a
@@ -2421,14 +2421,12 @@ export function SettingsPage() {
               >
                 Sub-agent tool calls
               </span>
-              <input
-                aria-label="Sub-agent tool calls"
-                type="number"
+              <BoundedNumberInput
+                ariaLabel="Sub-agent tool calls"
                 value={settings.subAgentMaxToolCalls ?? 0}
-                onChange={(e) => updateSettings({ subAgentMaxToolCalls: Math.max(0, parseInt(e.target.value) || 0) })}
-                min={0}
+                max={SUB_AGENT_LIMIT_MAX}
                 placeholder="10"
-                className="w-20 px-1.5 py-0.5 rounded bg-transparent border border-white/8 t-mono text-right text-gray-300 focus:outline-none focus:border-white/20"
+                onCommit={(v) => updateSettings({ subAgentMaxToolCalls: v })}
               />
             </div>
             <div className="flex items-center justify-between">
@@ -2438,18 +2436,16 @@ export function SettingsPage() {
               >
                 Sub-agent steps
               </span>
-              <input
-                aria-label="Sub-agent steps"
-                type="number"
+              <BoundedNumberInput
+                ariaLabel="Sub-agent steps"
                 value={settings.subAgentMaxIterations ?? 0}
-                onChange={(e) => updateSettings({ subAgentMaxIterations: Math.max(0, parseInt(e.target.value) || 0) })}
-                min={0}
+                max={SUB_AGENT_LIMIT_MAX}
                 placeholder="5"
-                className="w-20 px-1.5 py-0.5 rounded bg-transparent border border-white/8 t-mono text-right text-gray-300 focus:outline-none focus:border-white/20"
+                onCommit={(v) => updateSettings({ subAgentMaxIterations: v })}
               />
             </div>
             <div className="t-micro text-gray-500 dark:text-gray-500 leading-relaxed pt-0.5">
-              0 = use the defaults (10 calls, 5 steps). A sub-agent runs unattended, so these stay deliberately tight, raise them only for a task you know is long.
+              0 = use the defaults (10 calls, 5 steps), at most 1,000 each. A sub-agent runs unattended, so these stay deliberately tight, raise them only for a task you know is long.
             </div>
             </Section>
           )}
