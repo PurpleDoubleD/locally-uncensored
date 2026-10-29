@@ -22,6 +22,7 @@ vi.mock('../../api/backend', async () => {
   const actual = await vi.importActual<typeof import('../../api/backend')>('../../api/backend')
   return { ...actual, backendCall: backend.backendCall }
 })
+vi.mock('@tauri-apps/api/core', () => ({ invoke: (cmd: string) => backend.backendCall(cmd) }))
 
 import { rerunOnboarding } from '../onboarding-rerun'
 import { useSettingsStore } from '../../stores/settingsStore'
@@ -50,7 +51,7 @@ describe('Re-run onboarding', () => {
     const reload = vi.fn()
     await rerunOnboarding(reload)
     expect(calls).toEqual(['set_onboarding_done', 'onboarding_window_open'])
-    expect(backend.backendCall).toHaveBeenCalledWith('set_onboarding_done', { done: false })
+    expect(backend.backendCall).toHaveBeenNthCalledWith(1, 'set_onboarding_done', { done: false })
     expect(useSettingsStore.getState().settings.onboardingDone).toBe(true)
     expect(reload).toHaveBeenCalledTimes(1)
   })

@@ -24,7 +24,11 @@ import { useSettingsStore } from '../stores/settingsStore'
 
 export async function rerunOnboarding(reload: () => void = () => window.location.reload()): Promise<void> {
   try { await backendCall('set_onboarding_done', { done: false }) } catch { /* see above */ }
-  const ownWindow = await backendCall<boolean>('onboarding_window_open').catch(() => false)
+  // Straight to Tauri like `awaitOnboardingHandover` (host-window.ts): the
+  // question has no dev-server route, and outside Tauri the answer is no.
+  const ownWindow = await import('@tauri-apps/api/core')
+    .then(({ invoke }) => invoke<boolean>('onboarding_window_open'))
+    .catch(() => false)
   if (ownWindow !== true) useSettingsStore.getState().updateSettings({ onboardingDone: false })
   reload()
 }
