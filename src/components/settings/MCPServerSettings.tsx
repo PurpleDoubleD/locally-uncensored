@@ -14,10 +14,29 @@ import type { MCPExternalClient } from '../../api/mcp/external-client'
 // Active client instances (lazy-loaded to avoid Tauri import in dev mode)
 const clients = new Map<string, MCPExternalClient>()
 
+/**
+ * Connects still in flight, one per server. A connect takes as long as the
+ * server needs for its handshake (an npx server installs first), and during
+ * that time the row can be removed, disconnected or connected again. Before
+ * this map the only guard was one `connecting` value for the whole panel:
+ * a second Connect on the same row spawned a second process whose client
+ * overwrote the first in `clients`, and a Remove found no client yet, so the
+ * handshake finished afterwards and registered the tools of a server that
+ * no longer existed, with its process running and no row left to stop it.
+ * The entry is the attempt itself: whoever ends it (Remove, Disconnect, an
+ * edit) deletes it, and the connect, once its handshake returns, sees that
+ * it is no longer current and takes its own client down instead of
+ * registering anything.
+ */
+interface ConnectAttempt { client: MCPExternalClient | null }
+const inFlight = new Map<string, ConnectAttempt>()
+
 export function MCPServerSettings() {
   const { servers, connectedServers, serverTools, addServer, updateServer, removeServer, setConnected, setServerTools, clearServerTools } = useMCPStore()
   const [showAddForm, setShowAddForm] = useState(false)
-  const [connecting, setConnecting] = useState<string | null>(null)
+  const [connecting, setConnecting] = useState<string[]>(() => [...inFlight.keys()])
+  const markConnecting = (id: string, on: boolean) =>
+    setConnecting((ids) => (on ? [...ids.filter((x) => x !== id), id] : ids.filter((x) => x !== id)))
   const [error, setError] = useState<string | null>(null)
 
   // Add form state. `editingId` entscheidet, ob Speichern anlegt oder aendert.
@@ -64,7 +83,7 @@ export function MCPServerSettings() {
       // Ein laufender Server traegt noch den alten Befehl. Ihn stehen zu
       // lassen waere die schlimmere Haelfte des Fehlers: die Zeile zeigte
       // dann den neuen Befehl, waehrend der alte Prozess weiterlaeuft.
-      if (connectedServers.includes(editingId)) await handleDisconnect(editingId)
+      if (connectedServers.includes(editingId) || inFlight.has(editingId)) await handleDisconnect(editingId)
       updateServer(editingId, felder)
     } else {
       addServer({ id: uuid(), ...felder, enabled: true })
@@ -73,23 +92,46 @@ export function MCPServerSettings() {
   }
 
   const handleConnect = async (server: MCPServerConfig) => {
-    setConnecting(server.id)
+    // One connect per server: a second click while the first is still in its
+    // handshake would start a second process.
+    if (inFlight.has(server.id) || clients.has(server.id)) return
+    const attempt: ConnectAttempt = { client: null }
+    inFlight.set(server.id, attempt)
+    const current = () =>
+      inFlight.get(server.id) === attempt && useMCPStore.getState().servers.some((s) => s.id === server.id)
+    markConnecting(server.id, true)
     setError(null)
     try {
       const { MCPExternalClient } = await import('../../api/mcp/external-client')
+      if (!current()) return
       // A server process can die on its own (crash, OOM kill, a bad config it
       // quits on). Before this the panel stayed green and its tools stayed in
       // the registry, so the model kept being offered a terminal that was not
       // there and every call failed with "Not connected" until the app closed.
       const client = new MCPExternalClient(server, {
         onExit: (id) => {
+          if (clients.get(id) !== client) return
           toolRegistry.unregisterServer(id)
           setConnected(id, false)
           clearServerTools(id)
           clients.delete(id)
         },
       })
-      const tools = await client.connect()
+      attempt.client = client
+      let tools: Awaited<ReturnType<MCPExternalClient['connect']>>
+      try {
+        tools = await client.connect()
+      } catch (err) {
+        // A connect that was called off fails on purpose; that is no error.
+        if (current()) throw err
+        return
+      }
+      // Removed, disconnected or edited while the handshake ran: this client
+      // is nobody's any more. Stop its process and register nothing.
+      if (!current()) {
+        await client.disconnect().catch(() => {})
+        return
+      }
       clients.set(server.id, client)
       setConnected(server.id, true)
       setServerTools(server.id, tools)
@@ -106,15 +148,24 @@ export function MCPServerSettings() {
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
-      setConnecting(null)
+      if (inFlight.get(server.id) === attempt) inFlight.delete(server.id)
+      markConnecting(server.id, false)
     }
   }
 
   const handleDisconnect = async (id: string) => {
+    // A connect still in its handshake is called off: its process is stopped
+    // now, and the connect sees it is no longer current when it returns.
+    const attempt = inFlight.get(id)
+    if (attempt) {
+      inFlight.delete(id)
+      markConnecting(id, false)
+      await attempt.client?.disconnect().catch(() => {})
+    }
     const client = clients.get(id)
     if (client) {
-      await client.disconnect()
       clients.delete(id)
+      await client.disconnect()
     }
     toolRegistry.unregisterServer(id)
     setConnected(id, false)
@@ -136,7 +187,7 @@ export function MCPServerSettings() {
       {servers.map((server) => {
         const isConnected = connectedServers.includes(server.id)
         const tools = serverTools[server.id] || []
-        const isLoading = connecting === server.id
+        const isLoading = connecting.includes(server.id)
 
         return (
           <div
