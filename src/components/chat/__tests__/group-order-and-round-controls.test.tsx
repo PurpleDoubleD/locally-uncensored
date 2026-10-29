@@ -109,6 +109,9 @@ describe('GH #200: the round bar', () => {
     expect(screen.getByTestId('group-round-speaker').textContent).toBe('2/3baron')
     fireEvent.click(screen.getByTestId('group-skip-speaker'))
     expect(skip).toHaveBeenCalledTimes(1)
+    // A double click is one skip (T1 A8): it used to end the next turn too.
+    fireEvent.click(screen.getByTestId('group-skip-speaker'))
+    expect(skip).toHaveBeenCalledTimes(1)
     fireEvent.click(screen.getByTestId('group-stop-round'))
     expect(stop).toHaveBeenCalledTimes(1)
     groupRoundEnded(convId)
@@ -169,6 +172,16 @@ describe('GH #199: regenerate in a group', () => {
     fireEvent.click(regenerateOn(2))
     expect(screen.queryByTestId('regen-speaker-question')).toBeNull()
     expect(one).toHaveBeenCalledWith(convId, 'c1', 'only')
+  })
+
+  it('a member who left the group is not offered to be asked again, the round still is (T1 A9)', () => {
+    seedRound()
+    useChatStore.getState().setGroupModels(convId, [A, B])
+    const one = vi.fn(async () => true)
+    render(<MessageList isGenerating={false} onRegenerate={() => {}} onRegenerateSpeaker={one} />)
+    // walt and baron keep theirs; clara's answer has none any more.
+    expect(screen.getAllByRole('button', { name: 'Regenerate response' })).toHaveLength(2)
+    expect(screen.getAllByTestId('regenerate-round')).toHaveLength(3)
   })
 
   it('"Regenerate whole round" is its own action', () => {

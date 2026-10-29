@@ -219,6 +219,43 @@ describe('GH #200: order, who answers, skip', () => {
     expect(skipGroupSpeaker(id)).toBe(false)
   })
 
+  it('a double click on "Skip speaker" skips one speaker, not two (T1 A8)', async () => {
+    const id = openGroup()
+    hang.add('walt')
+    hang.add('baron')
+    const { result } = renderHook(() => useChat())
+    let round!: Promise<void>
+    act(() => { round = result.current.sendMessage('go') })
+    await vi.waitFor(() => expect(asked()).toEqual(['walt']))
+    const t = Date.now()
+    expect(skipGroupSpeaker(id, 0, t)).toBe(true)
+    await vi.waitFor(() => expect(useGroupRoundStore.getState().live[id]?.index).toBe(1))
+    // The second click of the pair: once as the button showed it (walt's
+    // place), once after the bar had already moved on to baron.
+    expect(skipGroupSpeaker(id, 0, t + 60)).toBe(false)
+    expect(skipGroupSpeaker(id, 1, t + 60)).toBe(false)
+    await vi.waitFor(() => expect(asked()).toEqual(['walt', 'baron']))
+    // baron is still speaking; a later, separate click skips him.
+    expect(useGroupRoundStore.getState().live[id]).toMatchObject({ speaker: B, index: 1 })
+    expect(skipGroupSpeaker(id, 1, t + 2000)).toBe(true)
+    await act(async () => { await round })
+    expect(asked()).toEqual(['walt', 'baron', 'clara'])
+  })
+
+  it('a member taken out of the group while the round runs does not speak in it (T1 A10)', async () => {
+    const id = openGroup()
+    hang.add('walt')
+    const { result } = renderHook(() => useChat())
+    let round!: Promise<void>
+    act(() => { round = result.current.sendMessage('go') })
+    await vi.waitFor(() => expect(asked()).toEqual(['walt']))
+    useChatStore.getState().setGroupModels(id, [A, B])
+    expect(skipGroupSpeaker(id, 0)).toBe(true)
+    await act(async () => { await round })
+    expect(asked()).toEqual(['walt', 'baron'])
+    expect(said(id)).toEqual(['baron 1'])
+  })
+
   it('what a skipped speaker had already written stays in the chat', async () => {
     // Found on the Mac build: a window in the background paints no frames, so
     // the streamed words had never reached the store when the skip came, and

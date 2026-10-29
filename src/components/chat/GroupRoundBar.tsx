@@ -52,7 +52,7 @@ export function GroupRoundBar({ onStop }: { onStop: () => void }) {
           <span className="truncate">{memberLabel(live.speaker, speakers)}</span>
         </span>
         <button
-          onClick={() => skipGroupSpeaker(convId)}
+          onClick={() => skipGroupSpeaker(convId, live.index)}
           disabled={live.index + 1 >= live.total}
           data-testid="group-skip-speaker"
           title={live.index + 1 >= live.total ? 'This is the last speaker of the round' : 'Stop this speaker and go on with the next one'}

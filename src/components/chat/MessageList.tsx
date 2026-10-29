@@ -106,6 +106,14 @@ export function MessageList({ isGenerating, isThisChatGenerating, isLoadingModel
     [groupModels, groupPersonas, personas, listedModels, inventoryLoaded],
   )
   const authors = useMemo(() => ({ groupPersonas, personas }), [groupPersonas, personas])
+  // Who can be asked again: a speaker's own Regenerate asks only that member,
+  // so it is not offered on the turn of one who left the group or whose model
+  // is not listed now. It used to stand there and do nothing (T1 2026-10-29,
+  // A9). "Regenerate whole round" stays: it runs the members who are here.
+  const atTable = useMemo(
+    () => new Set(availableGroupMembers(groupModels ?? [], listedModels, inventoryLoaded)),
+    [groupModels, listedModels, inventoryLoaded],
+  )
 
   // Agent mode of THIS chat: a short "I can't ..." there is usually about a
   // file or a command, so the refusal notice stays out (lib/refusal-detect).
@@ -308,6 +316,7 @@ export function MessageList({ isGenerating, isThisChatGenerating, isLoadingModel
                 // An earlier layer is read only: no regenerate, no edit, no
                 // approval, no switching or branching of versions.
                 onRegenerate={!readOnly && message.role === 'assistant' && onRegenerate && !isGenerating && !message.greetings
+                  && !(groupOn && message.modelId && !atTable.has(message.modelId))
                   ? handleRegenerate
                   : undefined}
                 onRegenerateRound={!readOnly && groupOn && message.role === 'assistant' && onRegenerate && !isGenerating && message.modelId
