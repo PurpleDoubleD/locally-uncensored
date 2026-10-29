@@ -6,6 +6,7 @@ import { MarkdownRenderer } from './MarkdownRenderer'
 import { StatusChip } from '../status/StatusChip'
 import { deriveRunStatus } from '../status/run-status'
 import { stripModelNoise } from '../../lib/strip-model-noise'
+import { compareFailureText } from '../../lib/compare-failure'
 import { ArrowLeft, Send, Square, Zap, Clock, Hash } from 'lucide-react'
 import { displayModelName } from '../../api/providers/registry'
 
@@ -120,9 +121,14 @@ export function ABCompare() {
             {messagesA.map(msg => (
               <div key={msg.id} className={`text-[0.7rem] ${msg.role === 'user' ? 'text-gray-400 italic' : 'text-gray-200'}`}>
                 {msg.role === 'assistant' ? (
-                  cleanA.get(msg.id) || !isStreamingA
-                    ? <MarkdownRenderer content={cleanA.get(msg.id) || ''} />
-                    : <div role="status" data-testid="compare-status-a"><StatusChip {...deriveRunStatus({ message: { content: '' } })} /></div>
+                  <>
+                    {cleanA.get(msg.id) || (!isStreamingA && !msg.error)
+                      ? <MarkdownRenderer content={cleanA.get(msg.id) || ''} />
+                      : !msg.error && <div role="status" data-testid="compare-status-a"><StatusChip {...deriveRunStatus({ message: { content: '' } })} /></div>}
+                    {msg.error && (
+                      <p role="alert" data-testid="compare-error-a" className="mt-1 whitespace-pre-wrap text-red-300/90">{compareFailureText(msg.error)}</p>
+                    )}
+                  </>
                 ) : (
                   <p>{msg.content}</p>
                 )}
@@ -147,9 +153,14 @@ export function ABCompare() {
             {messagesB.map(msg => (
               <div key={msg.id} className={`text-[0.7rem] ${msg.role === 'user' ? 'text-gray-400 italic' : 'text-gray-200'}`}>
                 {msg.role === 'assistant' ? (
-                  cleanB.get(msg.id) || !isStreamingB
-                    ? <MarkdownRenderer content={cleanB.get(msg.id) || ''} />
-                    : <div role="status" data-testid="compare-status-b"><StatusChip {...deriveRunStatus({ message: { content: '' } })} /></div>
+                  <>
+                    {cleanB.get(msg.id) || (!isStreamingB && !msg.error)
+                      ? <MarkdownRenderer content={cleanB.get(msg.id) || ''} />
+                      : !msg.error && <div role="status" data-testid="compare-status-b"><StatusChip {...deriveRunStatus({ message: { content: '' } })} /></div>}
+                    {msg.error && (
+                      <p role="alert" data-testid="compare-error-b" className="mt-1 whitespace-pre-wrap text-red-300/90">{compareFailureText(msg.error)}</p>
+                    )}
+                  </>
                 ) : (
                   <p>{msg.content}</p>
                 )}
