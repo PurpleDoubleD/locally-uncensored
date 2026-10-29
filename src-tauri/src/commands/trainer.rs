@@ -141,6 +141,13 @@ impl TrainPreset {
         }
     }
 
+    /// `--network_alpha`, the same as the rank. musubi's default is 1, which
+    /// scales the LoRA by 1/rank: at 1e-4 a 600-step style run on the 3060
+    /// drew no style at strength 1.0 (3.0.9 P8 box run).
+    pub(crate) fn network_alpha(self) -> &'static str {
+        self.network_dim()
+    }
+
     /// `--gradient_checkpointing_cpu_offload` (needs `--gradient_checkpointing`,
     /// which every recipe sets).
     pub(crate) fn offloads_activations(self) -> bool {
@@ -2887,6 +2894,7 @@ fn training_command(vpy: &str, repo: &Path, step: &TrainStep<'_>) -> Command {
     cmd.args([
         "--max_data_loader_n_workers", "2", "--persistent_data_loader_workers",
         "--network_module", "networks.lora_zimage", "--network_dim", step.preset.network_dim(),
+        "--network_alpha", step.preset.network_alpha(),
         "--max_train_steps", step.steps,
         "--save_precision", step.precision.save_precision,
         "--seed", "42",
@@ -5918,6 +5926,7 @@ mod captions_and_low_vram_tests {
         let args = args_for(TrainPreset::Standard);
         assert_eq!(value_of(&args, "--blocks_to_swap"), Some("16"));
         assert_eq!(value_of(&args, "--network_dim"), Some("32"));
+        assert_eq!(value_of(&args, "--network_alpha"), Some("32"));
         assert!(!args.iter().any(|a| a == "--gradient_checkpointing_cpu_offload"), "{args:?}");
         assert!(args.iter().any(|a| a == "--gradient_checkpointing"));
         assert!(args.iter().any(|a| a == "--fp8_base") && args.iter().any(|a| a == "--fp8_scaled"));
@@ -5929,6 +5938,7 @@ mod captions_and_low_vram_tests {
         // 28 = num_blocks (30) - 2, the assert in zimage_model.py enable_block_swap.
         assert_eq!(value_of(&args, "--blocks_to_swap"), Some("28"));
         assert_eq!(value_of(&args, "--network_dim"), Some("16"));
+        assert_eq!(value_of(&args, "--network_alpha"), Some("16"));
         assert!(args.iter().any(|a| a == "--gradient_checkpointing_cpu_offload"), "{args:?}");
         // The offload only works on top of gradient checkpointing.
         assert!(args.iter().any(|a| a == "--gradient_checkpointing"));
@@ -5939,7 +5949,7 @@ mod captions_and_low_vram_tests {
             "--fp8_scaled", "--blocks_to_swap", "--timestep_sampling", "--weighting_scheme", "--discrete_flow_shift",
             "--optimizer_type", "--learning_rate", "--gradient_checkpointing", "--gradient_checkpointing_cpu_offload",
             "--max_data_loader_n_workers", "--persistent_data_loader_workers", "--network_module", "--network_dim",
-            "--max_train_steps", "--save_precision", "--seed", "--output_dir", "--output_name",
+            "--network_alpha", "--max_train_steps", "--save_precision", "--seed", "--output_dir", "--output_name",
         ];
         for a in args.iter().filter(|a| a.starts_with("--")) {
             assert!(known.contains(&a.as_str()), "{a} is not an argument this recipe has evidence for");
