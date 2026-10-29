@@ -44,6 +44,7 @@ import { pullModelTauri, checkConnection as checkOllama } from '../../api/ollama
 import { activateBuiltinModel } from '../../api/engine'
 import { builtinModelNameFromPath } from '../../lib/builtin-model-identity'
 import { mayEnableFromWizard } from '../../lib/onboarding-provider-gate'
+import { syncOllamaBaseFromRust } from '../../lib/ollama-host-sync'
 import { bundledPickerIdForFile } from '../../lib/bundled-download-activation'
 import { backendCall, isMacOS } from '../../api/backend'
 import { getSystemVRAM } from '../../api/comfyui'
@@ -368,7 +369,11 @@ export function ModelsStep({ skin, scan, fleet, step, setStep, pulledModels, set
     if (step !== 'models') return
     if (ollamaOffenbarUnerwuenscht) { setInstalledModels([]); return }
     let cancelled = false
-    import('../../api/ollama').then(({ listModels }) =>
+    // Erst Rusts Ollama-Adresse holen: im eigenen Assistentenfenster stand
+    // sonst der Default 11434 in backend.ts (lib/ollama-host-sync.ts).
+    syncOllamaBaseFromRust()
+      .then(() => import('../../api/ollama'))
+      .then(({ listModels }) =>
       listModels()
         .then(models => {
           const chatCapable = models.filter(m => {
