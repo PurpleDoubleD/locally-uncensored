@@ -194,6 +194,8 @@ export interface ChatSendResult<T> {
   droppedImages: number
   /** Older messages the token budget left out of this payload (GH #201). */
   droppedMessages: number
+  /** Messages that went out cut to fit (the pinned first user message). */
+  shortenedMessages?: number
 }
 
 export interface ApplyBudgetOptions {
@@ -249,6 +251,7 @@ export function applySendBudget<T extends { role: string; content?: unknown }>(
     promptTokens: estimateMessageTokens(out as unknown as Estimated),
     droppedImages: aged.strippedImages,
     droppedMessages: compacted.dropped,
+    shortenedMessages: compacted.shortened,
   }
 }
 

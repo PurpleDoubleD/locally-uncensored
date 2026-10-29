@@ -28,7 +28,7 @@ import { isSearchStopped, waitForSlotOrStop } from "../lib/slot-wait"
 import { sourcesFromChunks } from "../lib/rag-sources"
 import { buildRagSuffix, RETRIEVAL_FAILED_MESSAGE } from "../lib/rag-prompt"
 import { buildTurnContext, withTurnContext } from "../lib/turn-context"
-import { getChatWindowTokens, capMessageCount, compactMessages, compactMessagesWithCount, estimateMessageTokens } from "../lib/context-compaction"
+import { getChatWindowTokens, capMessageCount, compactMessages, compactMessagesWithCount, estimateMessageTokens, shortenLongTurns } from "../lib/context-compaction"
 import { contextOverflowOf, shrunkSendWindow } from "./codex/context-overflow"
 import { applyChatSendBudget, chatBudgetApplies, sendBudgetWouldTrim } from "../lib/chat-send-budget"
 import { sendsToALanBackend } from "../lib/lan-openai-slot"
@@ -218,11 +218,22 @@ async function runGroupTurn(convId: string, model: string, allModels: string[], 
     answerTokens: settings.maxTokens,
     notice: 'chat',
   })
-  let messages = sent.messages
+  // Dropping older turns never touches the newest ones, and in a round the
+  // newest is the speaker before this one. One very long answer there filled
+  // a small window alone and the engine refused every later speaker of the
+  // round (T1 2026-10-29). It goes out shortened, head and tail kept.
+  // Kept whole: the person's newest line, the one the round answers. The
+  // trim notice may sit in front of or behind it, so it is found as a part.
+  const personLine = [...conv.messages].reverse().find((m) => m.role === 'user')?.content.trim() ?? ''
+  const keepPersonLine = (m: { role: string; content: string }) => !!personLine && m.role === 'user' && m.content.includes(personLine)
+  const fitted = sent.budget !== null ? shortenLongTurns(sent.messages, sent.budget, keepPersonLine) : { messages: sent.messages, shortened: 0 }
+  let messages = fitted.messages
   // Said in the chat, next to this answer: older turns did not go out.
   let dropped = full.length - counted.length + sent.droppedMessages
+  let shortened = (sent.shortenedMessages ?? 0) + fitted.shortened
   const noteTrim = () => useChatStore.getState().updateMessageHistoryTrim(
-    convId, assistantMessage.id, dropped > 0 ? { dropped, window: modelWindow } : null,
+    convId, assistantMessage.id,
+    dropped > 0 || shortened > 0 ? { dropped, window: modelWindow, ...(shortened ? { shortened } : {}) } : null,
   )
   noteTrim()
 
@@ -306,11 +317,15 @@ async function runGroupTurn(convId: string, model: string, allModels: string[], 
         type Wire = Parameters<typeof estimateMessageTokens>[0]
         const size = estimateMessageTokens(messages as unknown as Wire)
         const next = shrunkSendWindow(size, overflow, size)
-        const cut = next !== null ? compactMessagesWithCount(messages as unknown as Wire, next, { notice: 'chat' }) : null
-        if (!cut || cut.messages.length >= messages.length) throw err
-        log.info('chat.group_context_overflow_retry', { sent: size, next, window: overflow.window, promptTokens: overflow.promptTokens, kept: cut.messages.length })
-        messages = cut.messages as unknown as typeof messages
+        if (next === null) throw err
+        const cut = compactMessagesWithCount(messages as unknown as Wire, next, { notice: 'chat' })
+        const fit = shortenLongTurns(cut.messages as unknown as typeof messages, next, keepPersonLine)
+        if (cut.messages.length >= messages.length && !fit.shortened) throw err
+        log.info('chat.group_context_overflow_retry', { sent: size, next, window: overflow.window, promptTokens: overflow.promptTokens, kept: cut.messages.length, shortened: fit.shortened })
+        messages = fit.messages
         dropped += cut.dropped
+        // The pin is capped again on the retry: the same message, not a second one.
+        shortened = Math.max(shortened, cut.shortened) + fit.shortened
         noteTrim()
         yield* provider.chatStream(modelId, messages, streamOpts)
       }
@@ -409,16 +424,14 @@ async function runGroupTurn(convId: string, model: string, allModels: string[], 
         assistantMessage.id,
         refusal ?? `Error from ${model}: ${errorText(err) || 'Connection failed'}`,
       )
-      // The kind of the failure as a field, for a reader that draws its own
-      // error box (lib/message-error.ts). The sentence above replaces the
-      // whole bubble, so none of it is answer text.
-      if (!refusal) {
-        useChatStore.getState().updateMessageError(
-          convId,
-          assistantMessage.id,
-          messageErrorFor(err, { cloud: getProviderIdFromModel(model) === 'lu-cloud' }, ''),
-        )
-      }
+      // The failure as a field (lib/message-error.ts), a refusal too: the
+      // sentence is not answer text, and groupHistory sends none of it on
+      // (T1 2026-10-29: it reached the next speaker as this one's answer).
+      useChatStore.getState().updateMessageError(
+        convId,
+        assistantMessage.id,
+        messageErrorFor(err, { cloud: getProviderIdFromModel(model) === 'lu-cloud' }, ''),
+      )
     }
   }
 }
