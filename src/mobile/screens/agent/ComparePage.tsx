@@ -20,6 +20,7 @@ import { AGENT_STRINGS as T } from '../../strings/agent'
 import { Button, Composer, EmptyState, IconButton, ModelChip, Notice, Page, Segmented, Spinner, toast } from '../../ui'
 import './parts/agent.css'
 import { NEW_CHAT } from './parts/chat-ref'
+import { compareFailureText } from '../../../lib/compare-failure'
 import { compareBlock, formatRate, keptPair, rateIsMeaningful, type Side } from './parts/compare-logic'
 import { localCount, modelLabel, whereOf } from './parts/model-names'
 import { consentFor, isCloudModel, reportAnswer } from './parts/policy'
@@ -131,8 +132,8 @@ export default function ComparePage() {
                   {queued ? S.waitingTurn : S.waiting}
                 </span>
               ) : empty ? (
-                <span className="m-ag-error" role="alert" data-testid={`m-compare-noanswer-${side}`}>
-                  {S.noAnswer}
+                <span className="m-ag-error" role="alert" style={{ whiteSpace: 'pre-wrap' }} data-testid={`m-compare-noanswer-${side}`}>
+                  {message.error ? compareFailureText(message.error) : S.noAnswer}
                 </span>
               ) : (
                 <div className="m-ag-answer-text">{message.content}</div>

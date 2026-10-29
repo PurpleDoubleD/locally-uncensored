@@ -7,7 +7,7 @@
  * mirror toggle, one key hint, one download path, and the folder a hit lands in
  * is decided once, in `searchCivitaiModels`, from that same type.
  */
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Search, Loader2, ExternalLink, Download, CheckCircle } from 'lucide-react'
 import { checkCivitaiInstalled, civitaiInstalledInFolder, searchCivitaiModels, startCivitaiDownload, startModelDownloadToPath, type CivitAIModelResult } from '../../api/discover'
 import { openExternal } from '../../api/backend'
@@ -84,8 +84,14 @@ export function CivitaiSearchPanel({ modelType, title, placeholder, search = '',
     [installed, results, onDisk],
   )
 
+  // Each search is numbered. Only the newest one may write the hits and end
+  // the spinner: a slow answer to an older query arriving late used to
+  // replace the hits of the query now in the field.
+  const searchSeq = useRef(0)
+
   const runSearch = async (text: string = query) => {
     if (!text.trim()) return
+    const mine = ++searchSeq.current
     setSearching(true)
     setSearched(true)
     // The CivitAI API key the user configured in Settings, AI Backends,
@@ -96,6 +102,7 @@ export function CivitaiSearchPanel({ modelType, title, placeholder, search = '',
     const hits = baseModel || destDir
       ? await searchCivitaiModels(text, modelType, apiKey, host, { baseModel, safetensorsOnly: !!destDir })
       : await searchCivitaiModels(text, modelType, apiKey, host)
+    if (mine !== searchSeq.current) return
     setResults(hits)
     setSearching(false)
   }

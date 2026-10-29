@@ -309,7 +309,9 @@ export class MCPExternalClient {
           name: toolName,
           description: asString(t.description) || '',
           inputSchema: isToolInputSchema(t.inputSchema) ? t.inputSchema : EMPTY_INPUT_SCHEMA,
-          category: 'workflow', // External tools default to workflow category
+          // Their own permission row (B12): an external tool can do anything
+          // its server does, and Ask First is the default for that row.
+          category: 'mcp',
           source: 'external',
           serverId: this.config.id,
         })

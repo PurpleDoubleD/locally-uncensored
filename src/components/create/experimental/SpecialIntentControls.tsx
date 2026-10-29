@@ -56,6 +56,7 @@ import { Slider } from '../ui/Slider'
 import { cn } from '../ui/cn'
 import { useClickAway } from '../ui/useClickAway'
 import { Modal } from '../../ui/Modal'
+import { useTrainReplaceStore } from '../../../stores/trainReplaceStore'
 import { ModalActions, ModalButton } from '../../ui/ModalActions'
 import { MIN_TRAIN_IMAGES, maxTrainImages } from '../../../lib/train-image-cap'
 
@@ -251,6 +252,7 @@ function CharacterPanel() {
 
   return (
     <div className="space-y-2">
+      <TrainReplaceDialog />
       <div className="flex items-center justify-center">
         <Segmented
           size="sm"
@@ -277,6 +279,7 @@ function CharacterPanel() {
             placeholder="Trigger word, e.g. davechar"
             className="t-control w-44 px-2.5 h-[var(--control-h-sm)] rounded-md bg-white/[0.03] border border-white/[0.06] text-gray-200 placeholder-gray-600 focus:outline-none focus:border-white/15"
           />
+          <TriggerWordNote />
           <span className="t-label text-gray-600">
             {trainImages.length}/{maxTrainImages(backend)} photos added{trainImages.length < MIN_TRAIN_IMAGES ? `, need at least ${MIN_TRAIN_IMAGES}` : ''}
           </span>
@@ -681,6 +684,7 @@ function LocalTrainControls() {
           placeholder="Trigger word, e.g. davechar"
           className="t-control w-44 px-2.5 h-[var(--control-h-sm)] rounded-md bg-white/[0.03] border border-white/[0.06] text-gray-200 placeholder-gray-600 focus:outline-none focus:border-white/15"
         />
+        <TriggerWordNote />
         <Segmented
           size="sm"
           layoutId="train-steps"
@@ -804,6 +808,7 @@ function MacTrainControls() {
           placeholder="Trigger word, e.g. davechar"
           className="t-control w-44 px-2.5 h-[var(--control-h-sm)] rounded-md bg-white/[0.03] border border-white/[0.06] text-gray-200 placeholder-gray-600 focus:outline-none focus:border-white/15"
         />
+        <TriggerWordNote />
         <Segmented
           size="sm"
           layoutId="train-steps"
@@ -1664,5 +1669,37 @@ function MotionControls() {
       <PortraitChip empty="Add character image" />
       <DrivingVideoChip empty="Add driving video (dance/pose)" />
     </div>
+  )
+}
+
+/** C7: says under the trigger field what it did to the typed word ("Jörg" is
+ *  trained as "Joerg"), so the word on screen is visibly the word learned. */
+function TriggerWordNote() {
+  const note = useCreateStore((s) => s.triggerWordNote)
+  if (!note) return null
+  return <p role="status" data-testid="trigger-word-note" className={`w-full text-center t-micro ${HINWEIS_TEXT.ruhig}`}>{note}</p>
+}
+
+/** C8: asks before a new training replaces the character of the same name
+ *  (stores/trainReplaceStore.ts). Same Modal as the shelf's delete question. */
+function TrainReplaceDialog() {
+  const pending = useTrainReplaceStore((s) => s.pending)
+  const answer = useTrainReplaceStore((s) => s.answer)
+  useEffect(() => useTrainReplaceStore.getState().mount(), [])
+  return (
+    <Modal open={!!pending} onClose={() => answer('rename')} title="Replace character?">
+      <p className="t-micro text-gray-600 dark:text-gray-300 mb-3">
+        A character named <span className="text-gray-900 dark:text-white font-mono">{pending}</span> already exists on this computer.
+        Training with the same trigger word replaces its file when the run ends, and the old character is gone.
+      </p>
+      <ModalActions>
+        <ModalButton variant="quiet" onClick={() => answer('rename')} data-testid="train-replace-rename">
+          Pick another name
+        </ModalButton>
+        <ModalButton variant="danger" onClick={() => answer('replace')} data-testid="train-replace-confirm">
+          Replace
+        </ModalButton>
+      </ModalActions>
+    </Modal>
   )
 }

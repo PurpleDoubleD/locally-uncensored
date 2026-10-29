@@ -75,9 +75,12 @@ export function GroupRoundBar({ onStop }: { onStop: () => void }) {
   const sitOut = sitOutPick ?? []
   const answering = table.filter((m) => !sitOut.includes(m))
   return (
-    <div data-testid="group-round-bar" data-state="idle" className="flex items-center gap-1 min-w-0 t-micro text-gray-500">
+    // overflow-hidden und ein kuerzbares Etikett (Issue 309 T1, 375 px): die
+    // Leiste darf schmaler werden als "Next round:", und ein nicht
+    // schrumpfendes Etikett lief dann ueber den Fuellstand daneben.
+    <div data-testid="group-round-bar" data-state="idle" className="flex items-center gap-1 min-w-0 overflow-hidden t-micro text-gray-500">
       <Users size={10} className="shrink-0 text-purple-400" />
-      <span className="shrink-0">Next round:</span>
+      <span className="truncate">Next round:</span>
       <div className="flex items-center gap-0.5 min-w-0 overflow-x-auto scrollbar-thin">
         {table.map((model, i) => {
           const out = sitOut.includes(model)

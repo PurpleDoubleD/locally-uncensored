@@ -20,6 +20,7 @@ import { EFFORT_STEPS } from './effort'
 import { normalizeThinkBudget } from './think-budget'
 import { normalizeChatFirstReplySeconds } from './chat-reply-timeout'
 import { TEMPERATURE_MAX } from './sampling'
+import { CONTEXT_WINDOW_MAX, MAX_TOKENS_MAX, SUB_AGENT_LIMIT_MAX } from './number-limits'
 
 type Parsed = { ok: true; value: unknown } | { ok: false; error: string }
 
@@ -123,6 +124,17 @@ export function compactThresholdFromPercent(pct: number): number {
   return p < 30 ? 0 : p / 100
 }
 
+/**
+ * One arrow step on the "Compact at" field, in percent. Only 0 and 30 to 95
+ * are values, so a step skips the gap: up from 0 is 30, down from 30 is 0.
+ * The plain step of 5 went 0 to 5, which the rule above turned back into 0.
+ */
+export function stepCompactPercent(pct: number, dir: 1 | -1): number {
+  const p = Math.max(0, Math.min(95, Math.round(pct)))
+  if (dir > 0) return p < 30 ? 30 : Math.min(95, p + 5)
+  return p <= 30 ? 0 : p - 5
+}
+
 const compactThreshold: Pick<CatalogEntry, 'parse' | 'show' | 'allowed'> = {
   allowed: '0 (auto, fits the model) or 30–95 %',
   parse: (v) => {
@@ -166,7 +178,7 @@ export const CATALOG: readonly CatalogEntry[] = [
   // Context. Three different knobs, the help says which is which.
   e('autoCompact', 'Auto-compact', 'general', 'Summarise older turns automatically when the chat nears the context window.', bool()),
   e('autoCompactThreshold', 'Auto-compact at', 'general', 'How full the context window gets before auto-compact runs.', compactThreshold),
-  e('contextWindowOverride', 'Context window (Ollama)', 'general', 'num_ctx sent to Ollama, in tokens. Other backends ignore it.', int(0, 1_048_576, 'tokens', 'auto')),
+  e('contextWindowOverride', 'Context window (Ollama)', 'general', 'num_ctx sent to Ollama, in tokens. Other backends ignore it.', int(0, CONTEXT_WINDOW_MAX, 'tokens', 'auto')),
   e('engineIdleUnloadMinutes', 'Unload the model when unused', 'backends', 'Minutes without use before LU Engine frees the model.', int(0, 1_440, 'min', 'never')),
   e('builtinEngine.ctx', 'Context window (LU Engine)', 'backends', 'Context size of LU Engine, in tokens. Applies on the next engine start.', int(0, 1_048_576, 'tokens', 'default 8192')),
   e('attachmentTokenLimit', 'Attachment limit', 'general', 'Most tokens one attached text file may take.', int(0, 1_048_576, 'tokens', 'no limit')),
@@ -177,7 +189,7 @@ export const CATALOG: readonly CatalogEntry[] = [
   e('temperature', 'Temperature', 'general', 'Randomness of answers.', real(0, TEMPERATURE_MAX)),
   e('topP', 'Top P', 'general', 'Nucleus sampling.', real(0, 1)),
   e('topK', 'Top K', 'general', 'Sample from the K most likely tokens.', int(1, 100)),
-  e('maxTokens', 'Max tokens', 'general', 'Longest answer in tokens.', int(0, 1_000_000, 'tokens', 'model default')),
+  e('maxTokens', 'Max tokens', 'general', 'Longest answer in tokens.', int(0, MAX_TOKENS_MAX, 'tokens', 'model default')),
   // Thinking
   e('thinkingEnabled', 'Thinking', 'general', 'Let reasoning models think before answering.', bool()),
   e('reasoningEffort', 'Reasoning effort', 'general', 'How hard a reasoning model thinks.', oneOf(EFFORT_STEPS)),
@@ -195,8 +207,8 @@ export const CATALOG: readonly CatalogEntry[] = [
   // Agent limits: read at the start of a run, so a run cannot raise its own.
   e('agentMaxToolCalls', 'Agent tool call limit', 'agent', 'Most tool calls per message. Applies from the next message.', int(0, 10_000, '', 'unlimited')),
   e('agentMaxIterations', 'Agent step limit', 'agent', 'Most steps per message. Applies from the next message.', int(0, 10_000, '', 'unlimited')),
-  e('subAgentMaxToolCalls', 'Sub-agent tool call limit', 'agent', 'Most tool calls of one sub-agent.', int(0, 1_000, '', 'default')),
-  e('subAgentMaxIterations', 'Sub-agent step limit', 'agent', 'Most steps of one sub-agent.', int(0, 1_000, '', 'default')),
+  e('subAgentMaxToolCalls', 'Sub-agent tool call limit', 'agent', 'Most tool calls of one sub-agent.', int(0, SUB_AGENT_LIMIT_MAX, '', 'default')),
+  e('subAgentMaxIterations', 'Sub-agent step limit', 'agent', 'Most steps of one sub-agent.', int(0, SUB_AGENT_LIMIT_MAX, '', 'default')),
   e('loopMaxPasses', '/loop passes', 'agent', 'How many passes a /loop may run.', int(0, 10_000, '', 'unlimited')),
   // Look and feel
   e('theme', 'Theme', 'general', 'Light or dark app theme.', oneOf(['light', 'dark'])),

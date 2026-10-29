@@ -2,7 +2,7 @@ import { usePermissionStore } from '../../stores/permissionStore'
 import { useChatStore } from '../../stores/chatStore'
 import type { PermissionLevel, ToolCategory } from '../../api/mcp/types'
 import { useToolSupport } from '../../hooks/useToolSupport'
-import { FolderOpen, Terminal, Monitor, Globe, Cpu, Image, Film, GitBranch, Lock } from 'lucide-react'
+import { FolderOpen, Terminal, Monitor, Globe, Cpu, Image, Film, GitBranch, Plug, Lock } from 'lucide-react'
 import { HINWEIS_TEXT } from '../../lib/hinweis'
 
 // Image AND video generation are LIVE (chat agent → ComfyUI; video unlocked
@@ -19,6 +19,7 @@ const CATEGORIES: { key: ToolCategory; icon: typeof Globe; label: string }[] = [
   { key: 'image', icon: Image, label: 'Image' },
   { key: 'video', icon: Film, label: 'Video' },
   { key: 'workflow', icon: GitBranch, label: 'Workflows' },
+  { key: 'mcp', icon: Plug, label: 'MCP' },
 ]
 
 /**

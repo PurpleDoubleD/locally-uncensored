@@ -899,6 +899,7 @@ export function ChatInput({ onSend, onStop, isGenerating, waitingForLocalLane, p
           <textarea
             data-lu-composer
             key={conversationId ?? 'none'}
+            aria-label="Message"
             ref={textareaRef}
             value={input}
             onChange={(e) => updateInput(e.target.value, e.target.selectionStart)}

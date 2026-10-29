@@ -6,6 +6,7 @@ import { Search, XCircle, Sparkles, Unlock, ShieldCheck, ExternalLink, Info } fr
 import { X } from 'lucide-react'
 import {
   searchHuggingFaceModels,
+  hfSearchFailureText,
   getImageBundles, getVideoBundles, getAudioBundles, getLipsyncBundles, getMotionBundles,
   getUncensoredTextModels, getMainstreamTextModels,
   detectProviderModelPath, luEngineDownloadDir,
@@ -609,15 +610,31 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
   }
 
   const [hfSearchResults, setHfSearchResults] = useState<DiscoverModel[]>([])
+  // Each Enter is a new search. Only the newest one may write the results and
+  // end the spinner: a slow answer to an older query arriving late used to
+  // overwrite the hits of the query now in the box.
+  const hfSearchSeq = useRef(0)
+  // Offline or rate limited is not "No models found": the user would go on
+  // trying other words instead of checking the connection.
+  const [hfSearchError, setHfSearchError] = useState<string | null>(null)
 
   const handleSearch = async () => {
     if (!search.trim() || !isText) return
+    const mine = ++hfSearchSeq.current
     setLoading(true)
     try {
       const results = await searchHuggingFaceModels(search.trim())
-      setHfSearchResults(results)
-    } catch { /* keep existing */ }
-    setLoading(false)
+      if (mine === hfSearchSeq.current) {
+        setHfSearchResults(results)
+        setHfSearchError(null)
+      }
+    } catch (err) {
+      if (mine === hfSearchSeq.current) {
+        setHfSearchResults([])
+        setHfSearchError(hfSearchFailureText(err))
+      }
+    }
+    if (mine === hfSearchSeq.current) setLoading(false)
   }
 
   // The search input lives in the ModelManager header. It feeds `search`
@@ -747,6 +764,13 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
     const resolution = request
       ? await resolveHfGgufFiles(request.repoId, request.preferredQuant, request.exactPath)
       : null
+
+    // A split set the uploader has not finished: llama.cpp loads it only with
+    // every part, so none of it is fetched.
+    if (resolution?.incomplete) {
+      setInstallError(`${model.name} is not complete on Hugging Face yet: only ${resolution.incomplete.have} of ${resolution.incomplete.of} parts are there, and the model loads only with all of them. Try again later.`)
+      return
+    }
 
     const lmStudioEnabled = !!providers.openai?.enabled && (providers.openai?.name || '').toLowerCase().includes('lm studio')
     const ollamaEnabledNow = !!providers.ollama?.enabled
@@ -1218,6 +1242,10 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
             )}
           </div>
 
+          {hfSearchError && (
+            <p role="alert" className={skin.cls.searchEmpty} data-testid="hf-search-failed">{hfSearchError}</p>
+          )}
+
           {/* HuggingFace Search Results */}
           {hfSearchResults.length > 0 && (
             <div className={`${skin.cls.group} mt-6`}>
@@ -1247,7 +1275,7 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
         </>
       ) : null}
 
-      {!loading && filteredBundles.length === 0 && filteredUncensored.length === 0 && filteredMainstream.length === 0 && (
+      {!loading && !(isText && hfSearchError) && filteredBundles.length === 0 && filteredUncensored.length === 0 && filteredMainstream.length === 0 && (
         <p className={skin.cls.searchEmpty}>No models found</p>
       )}
 

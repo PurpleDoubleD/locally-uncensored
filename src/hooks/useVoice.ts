@@ -451,6 +451,14 @@ export function stopSpeechPlayback(): void {
   useVoiceStore.getState().setSpeaking(false);
 }
 
+/** The notice when the external HTTP voice (#58) could not speak (B11). */
+export function externalTtsFallbackReason(err: unknown, systemVoice: boolean): string {
+  const detail = (err instanceof Error ? err.message : String(err)) || "no detail";
+  return systemVoice
+    ? `The external voice failed (${detail}). Read-aloud used the system voice instead.`
+    : `The external voice failed (${detail}). No system voice is available, so nothing was read.`;
+}
+
 /**
  * Read-aloud on a phone.
  *
@@ -863,10 +871,15 @@ export function useVoice() {
             const url = await synthesizeExternal(text, store.externalTtsUrl.trim(), store.externalTtsVoice || undefined);
             if (stopped()) return;
             await playNeuralAudio(url);
+            store.setTtsFallbackReason(null);
             return;
           } catch (err) {
             if (stopped()) return;
             log.error("External TTS failed, falling back to browser voices", { err });
+            // Jaeger B, B11: the same silent switch as Piper had (#77). Who
+            // set up an own voice heard another one and was told nothing.
+            // The reason is shown at the Read aloud button and in Settings.
+            store.setTtsFallbackReason(externalTtsFallbackReason(err, ttsSupported));
           }
         } else {
           // Local neural (Piper). Trust the cached availability flag, but if it

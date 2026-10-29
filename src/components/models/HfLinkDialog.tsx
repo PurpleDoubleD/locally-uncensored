@@ -3,7 +3,7 @@ import { fetchExternal } from '../../api/backend'
 import { selectGgufFromTree, type HfTreeEntry } from '../../api/discover'
 import type { DiscoverModel } from '../../api/model-bundles'
 import {
-  choiceForFile, defaultChoice, ggufChoicesFromTree, hfRepoPage, hfTreeApi, linkModel, sizeLabel,
+  choiceForFile, defaultChoice, ggufChoicesFromTree, hfRepoPage, hfTreeApi, incompleteLabel, linkModel, sizeLabel,
   type HfLinkChoice, type HfModelLink,
 } from '../../lib/hf-link'
 import { log } from '../../lib/logger'
@@ -93,8 +93,8 @@ export function HfLinkDialog({ link, onCancel, onConfirm }: Props) {
                   data-testid="hf-link-file-select"
                 >
                   {load.choices.map((c) => (
-                    <option key={c.path} value={c.path}>
-                      {c.path} · {c.quant ?? 'GGUF'} · {sizeLabel(c.bytes)}{c.parts > 1 ? ` · ${c.parts} parts` : ''}
+                    <option key={c.path} value={c.path} disabled={!!c.incomplete}>
+                      {c.path} · {c.quant ?? 'GGUF'} · {sizeLabel(c.bytes)}{c.incomplete ? ` · ${incompleteLabel(c.incomplete)}` : c.parts > 1 ? ` · ${c.parts} parts` : ''}
                     </option>
                   ))}
                 </select>
@@ -110,6 +110,14 @@ export function HfLinkDialog({ link, onCancel, onConfirm }: Props) {
                 <dd className="text-gray-800 dark:text-gray-100" data-testid="hf-link-size">
                   {sizeLabel(choice.bytes)}{choice.parts > 1 ? ` in ${choice.parts} parts` : ''}
                 </dd>
+                {choice.incomplete && (
+                  <>
+                    <dt className="text-gray-500">Parts</dt>
+                    <dd role="alert" className="text-gray-800 dark:text-gray-100" data-testid="hf-link-incomplete">
+                      Only {choice.incomplete.have} of {choice.incomplete.of} parts are on Hugging Face yet, and the model loads only with all of them. Try again later.
+                    </dd>
+                  </>
+                )}
                 {resolution?.imagePart && (
                   <>
                     <dt className="text-gray-500">Image input</dt>
@@ -129,7 +137,7 @@ export function HfLinkDialog({ link, onCancel, onConfirm }: Props) {
           <ModalButton variant="quiet" onClick={onCancel}>Cancel</ModalButton>
           <ModalButton
             variant="primary"
-            disabled={!model || !armed}
+            disabled={!model || !armed || !!choice?.incomplete}
             onClick={() => { if (model) onConfirm(model) }}
           >
             {choice ? `Download (${sizeLabel(choice.bytes)})` : 'Download'}

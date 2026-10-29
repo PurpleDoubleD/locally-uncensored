@@ -32,6 +32,7 @@ const fullPerms: PermissionMap = {
   image: 'auto',
   video: 'auto',
   workflow: 'auto',
+  mcp: 'auto',
 }
 
 const mkTool = (

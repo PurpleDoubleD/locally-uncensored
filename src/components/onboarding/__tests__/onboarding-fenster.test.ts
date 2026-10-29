@@ -215,7 +215,8 @@ describe('die Größe ist gemessen, nicht geraten', () => {
 
 describe('„Re-run onboarding" bringt das kleine Fenster zurück — über den Marker', () => {
   it('die Einstellungen löschen den Marker, und die Fenster folgen ihm', () => {
-    const settings = codeOnly(read('src', 'components', 'settings', 'SettingsPage.tsx'))
+    expect(codeOnly(read('src', 'components', 'settings', 'SettingsPage.tsx'))).toContain('rerunOnboarding()')
+    const settings = codeOnly(read('src', 'lib', 'onboarding-rerun.ts'))
     expect(settings).toContain("await backendCall('set_onboarding_done', { done: false })")
     const system = read('src-tauri', 'src', 'commands', 'system.rs')
     expect(system).toContain('crate::onboarding_window::follow_marker(&app, done);')
@@ -241,11 +242,14 @@ describe('das Fenster selbst', () => {
     expect(open).toContain('WebviewUrl::default()')
   })
 
-  it('zu heißt Ende, solange das Onboarding nicht fertig ist', () => {
+  it('zu heißt Ende, solange die erste Einrichtung nicht fertig ist', () => {
     const open = RUST.slice(RUST.indexOf('pub fn open('), RUST.indexOf('fn quit('))
     expect(open).toContain('tauri::WindowEvent::CloseRequested')
-    expect(open).toContain('if !is_onboarding_done()')
-    expect(open).toContain('quit(&handle)')
+    expect(open).toContain('on_close(is_onboarding_done(), RERUN.load(Ordering::SeqCst))')
+    expect(open).toContain('OnClose::Quit => quit(&handle)')
+    // B6: ein abgebrochener erneuter Durchlauf fuehrt zurueck in die App.
+    expect(open).toContain('(false, false) => OnClose::Quit')
+    expect(open).toContain('OnClose::BackToTheApp => back_to_the_app(&handle)')
     const quit = RUST.slice(RUST.indexOf('fn quit('), RUST.indexOf('#[tauri::command]'))
     expect(quit).toContain('shutdown_subprocesses()')
     expect(quit).toContain('app.exit(0)')

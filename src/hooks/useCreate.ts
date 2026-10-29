@@ -95,6 +95,8 @@ import {
 } from '../api/trainer'
 import { getMacTrainStatus, macTrainMissing } from '../api/mlx-train'
 import { buildTrainCaption } from '../lib/train-captions'
+import { trainTriggerWord } from '../lib/train-trigger'
+import { characterThisWouldReplace, useTrainReplaceStore } from '../stores/trainReplaceStore'
 import { useCreateStore, EDIT_MAX_DENOISE, characterImageRun, deriveIntent, type CreateState, type GalleryItem } from '../stores/createStore'
 import { useWorkflowStore } from '../stores/workflowStore'
 import { useSettingsStore } from '../stores/settingsStore'
@@ -113,7 +115,7 @@ import { anyImageEngineReady, editCanvas, imageLaneModels, installedMlxEnhancers
 import { characterBaseModel, characterRunBlock } from '../lib/character-base'
 import {
   CHAIN_STEP_IMAGE, CHAIN_STEP_VIDEO, CharacterChainCancelled, characterLoraFile, characterStartImage,
-  isLocalCharacter, withTriggerWord,
+  isLocalCharacter, listLocalCharacters, withTriggerWord,
 } from '../lib/characters'
 import {
   characterImagePrompt, characterImageSize, characterRunPlan, characterVideoLaneEmpty, CHARACTER_VIDEO_LANES, withCharacterLora, withoutCharacterLoras,
@@ -570,7 +572,10 @@ export function useCreate() {
     // below go there by themselves (api/trainer.ts); what differs is how the
     // memory is handed over.
     const mac = isMlxImageHost()
-    const trigger = state.triggerWord.trim()
+    // C7: the same word Rust names the LoRA file after, so captions, file
+    // name and the Use shelf's prompt token are one word (lib/train-trigger.ts).
+    // Also catches a persisted "Jörg" saved before the field cleaned it.
+    const trigger = trainTriggerWord(state.triggerWord)
     if (!trigger) {
       setError('Pick a trigger word first, e.g. davechar. It becomes the token that summons your character.')
       return
@@ -593,6 +598,17 @@ export function useCreate() {
       const missing = st && (st.memoryRefusal ?? macTrainMissing(st))
       if (missing) {
         setError(st.memoryRefusal ?? `${missing} Install it in the Model Manager, then hit Create again.`)
+        return
+      }
+    }
+    // C8: the run ends by writing char_<trigger>_zimage.safetensors, the same
+    // path an existing character of that name lives at. Ask before that
+    // character is replaced, not after (stores/trainReplaceStore.ts). A list
+    // that cannot be read (ComfyUI not up) does not block the run.
+    const existing = characterThisWouldReplace(trigger, await listLocalCharacters().catch(() => []))
+    if (existing) {
+      if (await useTrainReplaceStore.getState().ask(existing) !== 'replace') {
+        setError(`A character named “${existing}” already exists. Pick another trigger word, or confirm that the new training replaces it.`)
         return
       }
     }

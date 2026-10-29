@@ -20,7 +20,7 @@ describe('rights as the upper bound of a phone turn', () => {
   it('maps the missing rights to blocked categories', () => {
     expect(capsFor({ agent: true, files: true, terminal: true, create: true })).toEqual({})
     expect(capsFor({ agent: false, files: false, terminal: false, create: false })).toEqual({
-      filesystem: 'blocked', terminal: 'blocked', desktop: 'blocked', image: 'blocked', video: 'blocked', workflow: 'blocked', web: 'blocked', system: 'blocked',
+      filesystem: 'blocked', terminal: 'blocked', desktop: 'blocked', mcp: 'blocked', image: 'blocked', video: 'blocked', workflow: 'blocked', web: 'blocked', system: 'blocked',
     })
   })
 

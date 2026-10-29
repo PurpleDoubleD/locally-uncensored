@@ -133,7 +133,7 @@ describe('the REA switch', () => {
     await startRea()
     expect(useReaRuntime.getState()).toMatchObject({ phase: 'on', tools: 3, error: null })
     expect(reaTools().map((t) => t.name)).toEqual(['rea_inspect', 'rea_asar_list', 'rea_trace'])
-    expect(reaTools().every((t) => t.source === 'external' && t.category === 'workflow')).toBe(true)
+    expect(reaTools().every((t) => t.source === 'external' && t.category === 'mcp')).toBe(true)
     await toolRegistry.execute('rea_inspect', { path: '/tmp/app.asar' })
     expect(fake.calls).toEqual([['rea_inspect', { path: '/tmp/app.asar' }]])
   })

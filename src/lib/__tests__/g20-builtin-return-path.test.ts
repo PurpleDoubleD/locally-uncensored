@@ -53,8 +53,10 @@ describe('resetProvidersToDefaults hands the slot back to the Built-in Engine', 
 
 describe('wiring and the second G20 leftover', () => {
   it('the backends tab reset actually calls the store reset', () => {
+    // The two reset buttons live in lib/run-settings-reset.ts since B2.
     const page = read('../../components/settings/SettingsPage.tsx')
-    expect(page).toContain("if (tab === 'backends') useProviderStore.getState().resetProvidersToDefaults()")
+    expect(page).toContain('runSettingsReset(which, tab)')
+    expect(read('../run-settings-reset.ts')).toContain("if (tab === 'backends') useProviderStore.getState().resetProvidersToDefaults()")
   })
 
   it('the Add Provider path to the Built-in Engine exists as a preset', () => {

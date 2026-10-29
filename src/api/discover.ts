@@ -18,6 +18,7 @@ import { extractGgufQuant, hfUrlToTreePath, parseHfUrl } from '../lib/hf-to-prov
 import { IMAGE_PART } from './image-parts'
 import { kimiK3CatalogEntries } from './kimi-k3-catalog'
 import { imagePartFileName, isUpstreamImagePart, pickUpstreamImagePart } from '../lib/image-part'
+import { shardSetGap, type ShardGap } from '../lib/gguf-shards'
 import {
   CUSTOM_NODE_REGISTRY,
   getImageBundles, getVideoBundles, getAudioBundles, getLipsyncBundles, getMotionBundles, getUpscaleBundles,
@@ -1538,7 +1539,32 @@ export function deriveQ4FilenameFromRepo(repoName: string): string {
   return QUANT_SUFFIX.test(baseName) ? `${baseName}.gguf` : `${baseName}-Q4_K_M.gguf`
 }
 
+/**
+ * The HuggingFace search could not answer: no connection, the free rate limit,
+ * or a reply that is not a list of repos. Thrown instead of an empty list so
+ * the page can tell "nothing matches" from "nobody answered".
+ */
+export class HfSearchError extends Error {
+  readonly kind: 'offline' | 'rate-limit'
+  constructor(kind: 'offline' | 'rate-limit', detail: string) {
+    super(detail)
+    this.name = 'HfSearchError'
+    this.kind = kind
+  }
+}
+
+/** The sentence the user reads when the HuggingFace search failed. */
+export function hfSearchFailureText(err: unknown): string {
+  if (err instanceof HfSearchError && err.kind === 'rate-limit') {
+    return 'Hugging Face is limiting searches right now. Wait a minute and search again.'
+  }
+  return 'Hugging Face could not be reached. Check the connection and search again.'
+}
+
+const RATE_LIMIT = /rate.?limit|too many requests|\b429\b/i
+
 export async function searchHuggingFaceModels(query: string): Promise<DiscoverModel[]> {
+  let repos: Array<{ id: string; downloads?: number; modelId?: string }>
   try {
     // Case-insensitive · HF repos almost always end in `-GGUF` (uppercase),
     // and the previous case-sensitive `includes('gguf')` missed those, so a
@@ -1554,43 +1580,52 @@ export async function searchHuggingFaceModels(query: string): Promise<DiscoverMo
     } else {
       const res = await fetch(url)
       json = await res.text()
+      if (res.status === 429) throw new HfSearchError('rate-limit', `HTTP 429: ${json.slice(0, 200)}`)
     }
 
-    const repos: Array<{ id: string; downloads?: number; modelId?: string }> = JSON.parse(json)
-
-    const models: DiscoverModel[] = []
-    for (const repo of repos) {
-      const repoName = repo.id.split('/').pop() || ''
-      const q4File = deriveQ4FilenameFromRepo(repoName)
-      const downloadUrl = `https://huggingface.co/${repo.id}/resolve/main/${q4File}`
-
-      // Display name = repo basename without the GGUF suffix. The previous
-      // version referenced an undefined `baseName` here, throwing a
-      // ReferenceError that the catch silently turned into an empty array
-      // · the user-facing P11 search was returning "No models found" for
-      // every query, even ones that match plenty of HF results.
-      const displayName = repoName.replace(/-GGUF$/i, '').replace(/-gguf$/i, '')
-
-      const downloads = repo.downloads || 0
-      const pullsStr = downloads > 1000000 ? `${(downloads / 1000000).toFixed(1)}M` :
-        downloads > 1000 ? `${Math.round(downloads / 1000)}K` : `${downloads}`
-
-      models.push({
-        name: displayName,
-        description: repo.id,
-        pulls: pullsStr,
-        tags: ['Q4_K_M', 'GGUF'],
-        updated: '',
-        downloadUrl,
-        filename: q4File,
-        url: `https://huggingface.co/${repo.id}`,
-      })
+    const parsed: unknown = JSON.parse(json)
+    if (!Array.isArray(parsed)) {
+      // HF answers a limit or an outage with {"error": "..."} instead of a list.
+      const said = isRecord(parsed) && typeof parsed.error === 'string' ? parsed.error : json.slice(0, 200)
+      throw new HfSearchError(RATE_LIMIT.test(said) ? 'rate-limit' : 'offline', said)
     }
-    return models
+    repos = parsed
   } catch (err) {
     log.warn('[discover] HF search failed', { err })
-    return []
+    if (err instanceof HfSearchError) throw err
+    throw new HfSearchError(RATE_LIMIT.test(String(err)) ? 'rate-limit' : 'offline', String(err))
   }
+
+  const models: DiscoverModel[] = []
+  for (const repo of repos) {
+    if (typeof repo?.id !== 'string') continue
+    const repoName = repo.id.split('/').pop() || ''
+    const q4File = deriveQ4FilenameFromRepo(repoName)
+    const downloadUrl = `https://huggingface.co/${repo.id}/resolve/main/${q4File}`
+
+    // Display name = repo basename without the GGUF suffix. The previous
+    // version referenced an undefined `baseName` here, throwing a
+    // ReferenceError that the catch silently turned into an empty array
+    // · the user-facing P11 search was returning "No models found" for
+    // every query, even ones that match plenty of HF results.
+    const displayName = repoName.replace(/-GGUF$/i, '').replace(/-gguf$/i, '')
+
+    const downloads = repo.downloads || 0
+    const pullsStr = downloads > 1000000 ? `${(downloads / 1000000).toFixed(1)}M` :
+      downloads > 1000 ? `${Math.round(downloads / 1000)}K` : `${downloads}`
+
+    models.push({
+      name: displayName,
+      description: repo.id,
+      pulls: pullsStr,
+      tags: ['Q4_K_M', 'GGUF'],
+      updated: '',
+      downloadUrl,
+      filename: q4File,
+      url: `https://huggingface.co/${repo.id}`,
+    })
+  }
+  return models
 }
 
 // ─── HuggingFace file-tree resolution (sharded / multi-part GGUF) ───
@@ -1633,6 +1668,10 @@ export interface HfGgufResolution {
   /** The image part the same repository ships, when it ships one. For a model
    *  the catalog does not know, this is what is offered with it. */
   imagePart?: ImagePartSource
+  /** Set when the chosen file is a split set the repository holds only some
+   *  parts of (an upload still running). `files` is empty then: llama.cpp
+   *  cannot load the set, so nothing of it is downloaded. */
+  incomplete?: ShardGap
 }
 
 // 5-digit llama.cpp split convention: `<name>-00001-of-00002.gguf`. A few
@@ -1645,7 +1684,7 @@ const GGUF_QUANT_TOKEN = /(IQ\d_[A-Z0-9]+|Q\d_K(?:_[A-Z]+)?|Q\d_[01]|BF16|F16|F3
 
 /** One downloadable unit of a repo tree: a single file, or every part of a
  *  split set. */
-interface GgufGroup { key: string; quant?: string; parts: HfTreeEntry[] }
+interface GgufGroup { key: string; quant?: string; parts: HfTreeEntry[]; gap?: ShardGap | null }
 
 /**
  * The group that holds the file the caller named, or undefined.
@@ -1706,14 +1745,25 @@ export function selectGgufFromTree(
   }
 
   const all = [...groups.values()]
+  for (const g of all) g.gap = shardSetGap(g.parts.map(p => p.path))
+  // A split set with parts missing never loads. A loadable group is taken
+  // over it wherever the choice is ours; when the caller's own file or quant
+  // is only there incomplete, the answer says so instead of fetching another.
+  const complete = all.filter(g => !g.gap)
   const wanted = preferredQuant?.toUpperCase()
+  const byQuant = (g: GgufGroup) => g.quant === wanted
+  const byKey = (g: GgufGroup) => !!wanted && g.key.toUpperCase().includes(wanted)
   const picked =
     groupOfNamedFile(all, exactPath) ||
-    (wanted ? all.find(g => g.quant === wanted) : undefined) ||
-    (wanted ? all.find(g => g.key.toUpperCase().includes(wanted)) : undefined) ||
-    all.find(g => g.quant === 'Q4_K_M') ||
+    (wanted ? complete.find(byQuant) || all.find(byQuant) : undefined) ||
+    (wanted ? complete.find(byKey) || all.find(byKey) : undefined) ||
+    complete.find(g => g.quant === 'Q4_K_M') ||
+    complete[0] ||
     all[0]
   if (!picked) return null
+  if (picked.gap) {
+    return { sharded: true, files: [], totalBytes: 0, quant: picked.quant, incomplete: picked.gap }
+  }
 
   const sorted = [...picked.parts].sort((a, b) => {
     const ai = parseInt(a.path.match(GGUF_SHARD_RE)?.[1] || '0', 10)
@@ -2076,6 +2126,48 @@ export function civitaiHostSwap(url: string | undefined, host: string): string |
 }
 
 /**
+ * Das Vorschaubild eines CivitAI-Treffers als kleines Standbild.
+ *
+ * Discord #bug-reports, 29.10.2026 (Ubuntu): „when searching for models in app
+ * from civitai searchbox, the app crashes". Die API nennt als erstes Bild einer
+ * Version die Originaldatei (`…/original=true/123.mp4`). Gemessen für „wan“,
+ * 20 Treffer mit 19 Vorschaubildern: 13 davon MP4-Videos, zusammen 68 MB (das größte 15,9 MB) für
+ * Kärtchen von 56 px. Auf Linux dekodiert WebKitGTK ein Video im `<img>` mit
+ * GStreamer (WebView2 unter Windows zeigt es gar nicht), also
+ * zwanzig Videodekoder auf einmal, mit echter GPU über VA-API/GL.
+ *
+ * Der Bild-CDN von CivitAI liefert dieselbe Datei verkleinert, und mit
+ * `anim=false` auch ein Video als einzelnes JPEG (gemessen: 111 KB statt
+ * 695 KB bis 16 MB, image/jpeg statt video/mp4; alle 19 zusammen
+ * 1,89 MB). Dieselbe Angabe benutzt die CivitAI-Seite selbst. Ein Video, das
+ * nicht auf diesem CDN liegt, bekommt KEIN Vorschaubild: ein Video gehört nicht
+ * in ein `<img>`.
+ */
+const CIVITAI_THUMB_PARAMS = 'anim=false,width=450,optimized=true'
+
+export function civitaiThumbUrl(url: string | undefined, type?: string): string | undefined {
+  if (!url) return undefined
+  const isVideo = type === 'video' || /\.(mp4|webm|mov|m4v)(\?|#|$)/i.test(url)
+  let parsed: URL
+  try {
+    parsed = new URL(url)
+  } catch {
+    return undefined
+  }
+  if (parsed.protocol !== 'https:' || parsed.hostname !== 'image.civitai.com') {
+    return isVideo ? undefined : url
+  }
+  // /<Schlüssel>/<uuid>/<Angaben>/<Name>, ältere Antworten ohne Angaben-Teil.
+  const segs = parsed.pathname.split('/').filter(Boolean)
+  if (segs.length === 4 && segs[2].includes('=')) segs[2] = CIVITAI_THUMB_PARAMS
+  else if (segs.length === 3) segs.splice(2, 0, CIVITAI_THUMB_PARAMS)
+  else return isVideo ? undefined : url
+  // `pathname` ist schon kodiert, die Teile gehen unverändert zurück.
+  parsed.pathname = '/' + segs.join('/')
+  return parsed.toString()
+}
+
+/**
  * Eine CivitAI-Beschreibung als Text, nicht als Markup.
  *
  * Befund am echten Windows-Bau (21.09.2026, C4-search-pixel-results.png): in
@@ -2235,7 +2327,8 @@ export async function searchCivitaiModels(
       const version = asRecordArray(prop(item, 'modelVersions'))[0]
       const files = asRecordArray(prop(version, 'files'))
       const file = only?.safetensorsOnly ? files.find(isSafetensors) : files[0]
-      const thumb = asString(propPath(asRecordArray(prop(version, 'images'))[0], 'url'))
+      const firstImage = asRecordArray(prop(version, 'images'))[0]
+      const thumb = civitaiThumbUrl(asString(prop(firstImage, 'url')), asString(prop(firstImage, 'type')))
       // The version's own address is that of its first file. Where a later
       // file was picked, only that file's address fetches it.
       const downloadUrl = only?.safetensorsOnly

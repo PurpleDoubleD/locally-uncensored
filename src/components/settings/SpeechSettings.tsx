@@ -424,6 +424,10 @@ export function SpeechSettings() {
         <p className="text-[0.55rem] text-gray-500 leading-snug">
           Any OpenAI-compatible TTS endpoint (e.g. Kokoro-FastAPI). Used for read-aloud instead of Piper. Stays on your machine when the endpoint is local.
         </p>
+        {/* B11: the external voice fell back to the system voice in silence. */}
+        {voiceSettings.ttsFallbackReason && (
+          <p className={`t-micro leading-snug ${HINWEIS_TEXT.fehler}`}>{voiceSettings.ttsFallbackReason}</p>
+        )}
       </div>
     )}
   </>)

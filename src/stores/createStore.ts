@@ -64,6 +64,7 @@ import { cloudModelsFor } from './cloudCatalogStore'
 import { createRunModel } from '../lib/render/create-studio'
 import { DEFAULT_UPSCALE_FACTOR, normalizeUpscaleFactor, type UpscaleFactor } from '../lib/local-upscale'
 import { characterLoraFile, isLocalCharacter, type CharacterRef } from '../lib/character-ref'
+import { triggerWordNote, typedTriggerWord } from '../lib/train-trigger'
 // ModelType includes: flux, flux2, zimage, sdxl, sd15, wan, hunyuan, unknown
 
 export type ProgressPhase = 'idle' | 'queued' | 'loading-model' | 'loading-clip' | 'loading-vae' | 'sampling' | 'decoding' | 'complete'
@@ -409,6 +410,9 @@ export interface CreateState {
   trainImages: MediaRef[]
   /** Character-Studio trigger word — the token that summons the character. */
   triggerWord: string
+  /** C7: what the field did to the last typed trigger word (ö to oe, a
+   *  dropped letter), shown under it. Null when nothing was changed. */
+  triggerWordNote: string | null
   /** Local training length (musubi steps). Quality/time tradeoff, persisted. */
   trainSteps: number
   /** 3.0.8 D28: each staged photo's own description (clothes, hair, place),
@@ -779,6 +783,35 @@ function releaseDroppedMediaRefs(previous: readonly MediaRef[], next: readonly M
   }
 }
 
+/**
+ * A training photo staged again: the same file as one already in the set, by
+ * its original file name, size and modification time (the most a browser
+ * knows about a file's identity). Only an earlier batch counts; one pick or
+ * one drop never holds the same file twice, so two same-named files in it are
+ * two photos.
+ */
+function isSameTrainFile(had: MediaRef, img: MediaRef): boolean {
+  const a = had.blob
+  const b = img.blob
+  if (a === b) return true
+  if (!(a instanceof File) || !(b instanceof File)) return false
+  return a.name === b.name && a.size === b.size && a.lastModified === b.lastModified
+}
+
+/** `name` if the set does not hold it yet (case-insensitive, like the Mac
+ *  and Windows file systems the trainer writes to), else `stem_2.ext`,
+ *  `stem_3.ext` and so on. */
+function freeTrainImageName(name: string, taken: ReadonlySet<string>): string {
+  if (!taken.has(name.toLowerCase())) return name
+  const dot = name.lastIndexOf('.')
+  const stem = dot > 0 ? name.slice(0, dot) : name
+  const ext = dot > 0 ? name.slice(dot) : ''
+  for (let n = 2; ; n++) {
+    const next = `${stem}_${n}${ext}`
+    if (!taken.has(next.toLowerCase())) return next
+  }
+}
+
 /** The same rule for a slot that holds at most one ref. */
 function releaseReplacedMediaRef(previous: MediaRef | null, next: MediaRef | null): void {
   releaseDroppedMediaRefs(previous ? [previous] : [], next ? [next] : [])
@@ -1050,6 +1083,7 @@ export const useCreateStore = create<CreateState>()(
       characterTab: 'train' as 'train' | 'use',
       trainImages: [] as MediaRef[],
       triggerWord: '',
+      triggerWordNote: null,
       // Dieselbe Zahl, die der Trainer ohne Angabe nimmt
       // (`steps.unwrap_or(1200)`, trainer.rs), und die Stufe `Standard`.
       trainSteps: TRAIN_STEPS_DEFAULT,
@@ -1343,16 +1377,28 @@ export const useCreateStore = create<CreateState>()(
       setTargetResolution: (targetResolution) => set({ targetResolution }),
       setMacUpscaleScale: (macUpscaleScale) => set({ macUpscaleScale }),
       setCharacterTab: (characterTab) => set((s) => withOwnStudioOptions(s, { characterTab })),
-      // Cap at the backend's photo limit (lib/train-image-cap) and de-dupe by filename so
-      // a re-drop of the same files doesn't double the set. Both of those
-      // THROW REFS AWAY — the caller minted a blob: URL for every file it
-      // handed over, including the ones landing in the dedupe and the ones
-      // the cap cuts off, and neither is reachable from the store afterwards.
-      // So "before" is everything in play, not just what was already staged.
+      // Cap at the backend's photo limit (lib/train-image-cap) and skip a
+      // re-drop of a file already in the set, so the same folder twice does
+      // not double it. Every photo keeps a name of its own: a DIFFERENT photo
+      // under a name the set already holds (IMG_0001.png from a second
+      // folder, two face.png in one drop) is numbered on, face_2.png, the way
+      // the Rust side's free_stem numbers a stem. The name is the photo's id
+      // for Remove, its caption and the grid key. Skipping and capping both
+      // THROW REFS AWAY: the caller minted a blob: URL for every file it
+      // handed over, and none of the dropped ones is reachable from the store
+      // afterwards. So "before" is everything in play, not just what was
+      // already staged.
       addTrainImages: (imgs) => {
         const before = get().trainImages
-        const have = new Set(before.map((i) => i.name))
-        const trainImages = [...before, ...imgs.filter((i) => !have.has(i.name))].slice(0, maxTrainImages(get().backend))
+        const taken = new Set(before.map((i) => i.name.toLowerCase()))
+        const added: MediaRef[] = []
+        for (const img of imgs) {
+          if (before.some((had) => isSameTrainFile(had, img))) continue
+          const name = freeTrainImageName(img.name, taken)
+          taken.add(name.toLowerCase())
+          added.push(name === img.name ? img : { ...img, name })
+        }
+        const trainImages = [...before, ...added].slice(0, maxTrainImages(get().backend))
         releaseDroppedMediaRefs([...before, ...imgs], trainImages)
         set({ trainImages })
       },
@@ -1372,7 +1418,15 @@ export const useCreateStore = create<CreateState>()(
         releaseDroppedMediaRefs(get().trainImages, [])
         set({ trainImages: [], trainCaptions: {} })
       },
-      setTriggerWord: (w) => set({ triggerWord: w.replace(/\s+/g, '').slice(0, 30) }),
+      // C7: the field holds the word in the one form the trainer, the LoRA
+      // file name and the Use shelf agree on (lib/train-trigger.ts). The note
+      // stays until the field is emptied, so it is still there after the next
+      // keystroke.
+      setTriggerWord: (w) => set((s) => {
+        const triggerWord = typedTriggerWord(w)
+        const note = triggerWordNote(w)
+        return { triggerWord, triggerWordNote: triggerWord || note ? note ?? s.triggerWordNote : null }
+      }),
       // Same clamp as the Rust command so the UI can never book a rejected run.
       setTrainSteps: (n) => set({ trainSteps: Math.max(100, Math.min(4000, Math.floor(n))) }),
       setTrainCaption: (name, text) => set((s) => {

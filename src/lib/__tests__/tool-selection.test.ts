@@ -47,6 +47,7 @@ const ALL_ALLOWED: PermissionMap = {
   image: 'auto',
   video: 'auto',
   workflow: 'auto',
+  mcp: 'auto',
 }
 
 function toolNames(tools: MCPToolDefinition[]): string[] {
@@ -264,6 +265,7 @@ describe('tool-selection', () => {
         image: 'blocked',
         video: 'blocked',
         workflow: 'blocked',
+        mcp: 'blocked',
       }
       // Message that matches web tools (blocked) and filesystem (blocked)
       const result = selectRelevantTools('search and read', ALL_TOOLS, permissions)
@@ -311,7 +313,7 @@ describe('tool-selection', () => {
 
 describe('external (MCP) tools are always offered', () => {
   const external = (name: string): MCPToolDefinition => ({
-    ...makeTool(name, 'workflow'),
+    ...makeTool(name, 'mcp'),
     source: 'external' as const,
     serverId: 'srv1',
   })
@@ -326,7 +328,7 @@ describe('external (MCP) tools are always offered', () => {
 
   it('still excludes external tools when their category is blocked', () => {
     const tools = [...ALL_TOOLS, external('list_directory')]
-    const out = selectRelevantTools('write a poem', tools, { ...ALL_ALLOWED, workflow: 'blocked' })
+    const out = selectRelevantTools('write a poem', tools, { ...ALL_ALLOWED, mcp: 'blocked' })
     expect(toolNames(out)).not.toContain('list_directory')
   })
 

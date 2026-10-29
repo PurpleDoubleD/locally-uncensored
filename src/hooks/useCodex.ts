@@ -115,7 +115,7 @@ import { createLivePaint } from './codex/live-paint'
 import { seedEstimatedUsage, reportTurnUsage } from './codex/turn-usage'
 import { lastRequestUsageNotice, requestUsageTracker } from '../lib/request-usage'
 import { shouldDowngradeThinking, engineDeniedThinking } from './codex/thinking-downgrade'
-import { recoverToolCallsFromContent } from './codex/tool-call-recovery'
+import { recoverToolCallsFromContent, recoverKnownToolCallsFromContent } from './codex/tool-call-recovery'
 import { codexStallVerdict } from './codex/stall-verdict'
 import { createStagedWriter } from './codex/staged-writes'
 import { codexCutoffNote, dropCutOffCall } from './codex/turn-cutoff'
@@ -124,6 +124,14 @@ import { capHiddenToolHistory } from './codex/hidden-history'
 import { withHouseConduct } from '../lib/system-prompt'
 import { yieldSilentRunsTo } from '../lib/silent-runs-yield'
 import { gatePlanTool, planToolAllowed } from '../lib/plan-gate'
+
+/** A name the model wrote in its text is a call only when it is one of the
+ *  agent's tools, after the usual name repair (GH #147). */
+function isCodexTool(name: string, args: Record<string, unknown>): boolean {
+  const tools = toolRegistry.getAll()
+  const repaired = repairToolCall(name, args, tools).name
+  return tools.some((t) => t.name === repaired)
+}
 
 // Why a run ended, or was pushed on, belongs in the support log. This used to
 // be a no-op, and a run that never finished its task left nothing to read on
@@ -230,7 +238,9 @@ const streamWithTools = streamOllamaChatWithTools
 // therefore unreachable from the Code tab. Local models only see it on a
 // delegate/parallel intent via the keyword router; cloud models get it in
 // the full catalog.
-const CODEX_CATEGORIES = ['filesystem', 'terminal', 'system', 'web', 'image', 'video', 'workflow'] as const
+// mcp: external MCP tools moved out of 'workflow' into a row of their own
+// (B12) and stay reachable here. Ask and Bypass decide them as before.
+const CODEX_CATEGORIES = ['filesystem', 'terminal', 'system', 'web', 'image', 'video', 'workflow', 'mcp'] as const
 
 
 // Detect when the model emits a re-introduction of itself ("Hello, I am
@@ -1742,16 +1752,9 @@ export function useCodex() {
             // only when every name in it is a tool this agent has, so example
             // JSON in an explanation is never run.
             {
-              const recovered = recoverToolCallsFromContent(toolCalls, turnContent)
-              const tools = toolRegistry.getAll()
-              const known = new Set(tools.map((t) => t.name))
-              const fromText = toolCalls.length === 0 && recovered.toolCalls.length > 0
-              const allKnown = recovered.toolCalls.every((tc) =>
-                known.has(repairToolCall(tc.function.name, isRecord(tc.function.arguments) ? tc.function.arguments : {}, tools).name))
-              if (!fromText || allKnown) {
-                toolCalls = recovered.toolCalls
-                turnContent = recovered.content
-              }
+              const recovered = recoverKnownToolCallsFromContent(toolCalls, turnContent, isCodexTool)
+              toolCalls = recovered.toolCalls
+              turnContent = recovered.content
             }
             if (keepThinking && turn.thinking) {
               thinkingContent += (thinkingContent ? '\n\n' : '') + turn.thinking
@@ -1895,7 +1898,12 @@ export function useCodex() {
             }))
             turnContent = stripToolCallTags(raw)
           } else {
-            turnContent = raw
+            // Kein <tool_call>-Tag, aber vielleicht ein ```json-Aufruf: dieselbe
+            // Wiederherstellung wie in den beiden Zweigen darueber, nur fuer
+            // bekannte Werkzeuge (T1-Nachttest 3.0.9).
+            const recovered = recoverKnownToolCallsFromContent([], raw, isCodexTool)
+            toolCalls = recovered.toolCalls
+            turnContent = recovered.content
           }
         }
         overflowRetries = 0

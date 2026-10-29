@@ -1,19 +1,20 @@
 import { useState, useEffect, useRef, type ReactNode, type ChangeEvent } from 'react'
-import { compactThresholdFromPercent } from '../../lib/settings-catalog'
 import { withDetail } from '../../lib/error-text'
 // `X` steht hier weiterhin, obwohl der Sprachabschnitt mit seinen Symbolen
 // nach ./SpeechSettings.tsx gezogen ist: der Dismiss-Knopf der ComfyUI-Notiz
 // traegt ihn neben dem Wort.
 import { ArrowLeft, RotateCcw, Sun, Moon, Check, X, Loader2, Shield, ChevronRight, GraduationCap, Lock, Sliders, Plug, Bot, Phone, User, Download, AlertTriangle } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { SETTINGS_TAB_RESET_KEYS, type SettingsTab } from '../../lib/settings-reset'
+import { type SettingsTab } from '../../lib/settings-reset'
+import { runSettingsReset } from '../../lib/run-settings-reset'
 import { armedScopeFor, type ResetArm, type ResetArmScope } from '../../lib/reset-arming'
 import { sectionAnchorId, sectionsFor, type SettingsSectionFlags } from './settings-nav'
 import { ChatReplyTimeoutSettings } from './ChatReplyTimeoutSettings'
+import { CompactThresholdInput } from './CompactThresholdInput'
 import { HowItWorks } from '../ui/HowItWorks'
 import { HOWTO } from '../../lib/howto'
 import { useSettingsStore } from '../../stores/settingsStore'
-import { usePermissionStore } from '../../stores/permissionStore'
+import { rerunOnboarding } from '../../lib/onboarding-rerun'
 import { useUIStore } from '../../stores/uiStore'
 import { SliderControl } from './SliderControl'
 import { THINK_BUDGET_STEP, normalizeThinkBudget } from '../../lib/think-budget'
@@ -23,7 +24,6 @@ import { SpeechSettings } from './SpeechSettings'
 import { LogFileSettings } from './LogFileSettings'
 import { PersonaPanel } from '../personas/PersonaPanel'
 import { AccountPanel } from '../auth/AccountPanel'
-import { useVoiceStore } from '../../stores/voiceStore'
 import { downloadSuffix } from '../../lib/formatters'
 // Der Satz zum Startfehler kommt fuer beide Oberflaechen aus dieser Stelle
 // (Ticket 007). Statisch geladen, weil ihn der Beobachter unten in dem
@@ -89,6 +89,8 @@ import { ContentPolicySettings } from './ContentPolicySettings'
 import { isLmStudioProvider } from '../../lib/hf-to-provider'
 import { TEMPERATURE_MAX, TEMPERATURE_HELP, TEMPERATURE_HELP_LABEL } from '../../lib/sampling'
 import { HighTemperatureWarning } from '../chat/HighTemperatureWarning'
+import { BoundedNumberInput } from './BoundedNumberInput'
+import { CONTEXT_WINDOW_MAX, MAX_TOKENS_MAX, SUB_AGENT_LIMIT_MAX } from '../../lib/number-limits'
 
 // ── User profile picture (Appearance) ───────────────────────────
 // Self-contained like HfDownloadPathSetting. Stores the picture as a
@@ -1621,10 +1623,6 @@ const SETTINGS_TABS: { id: SettingsTab; label: string; icon: ReactNode }[] = [
 // visible signals are pinned by
 // src/lib/__tests__/reset-arming-is-visible.test.ts.
 function ResetSection({ tab }: { tab: SettingsTab }) {
-  const resetSettingsKeys = useSettingsStore((s) => s.resetSettingsKeys)
-  const resetSettings = useSettingsStore((s) => s.resetSettings)
-  const resetVoiceDefaults = useVoiceStore((s) => s.resetVoiceDefaults)
-  const resetPermissions = usePermissionStore((s) => s.resetToDefaults)
   // The arm records the tab it was made on, so "still armed?" is a question
   // that can be answered while rendering. Switching tabs while armed must
   // disarm, otherwise a click armed on General would confirm-fire on Agent,
@@ -1654,22 +1652,8 @@ function ResetSection({ tab }: { tab: SettingsTab }) {
     }
     if (armTimer.current) window.clearTimeout(armTimer.current)
     setArmed(null)
-    if (which === 'all') {
-      resetSettings()
-      resetVoiceDefaults()
-      resetPermissions()
-      setDone('All settings restored to defaults')
-    } else {
-      resetSettingsKeys(SETTINGS_TAB_RESET_KEYS[tab])
-      if (tab === 'agent') resetPermissions()
-      if (tab === 'voice-remote') resetVoiceDefaults()
-      // G20: "Reset AI Backends" only reset settings KEYS and never touched
-      // the provider store, so it could not hand the openai slot back to the
-      // Built-in Engine once LM Studio had adopted it. Now it restores the
-      // shipped slots too (API keys and the cloud account flag are kept).
-      if (tab === 'backends') useProviderStore.getState().resetProvidersToDefaults()
-      setDone(`${tabLabel} settings restored to defaults`)
-    }
+    runSettingsReset(which, tab)
+    setDone(which === 'all' ? 'All settings restored to defaults' : `${tabLabel} settings restored to defaults`)
     if (doneTimer.current) window.clearTimeout(doneTimer.current)
     doneTimer.current = window.setTimeout(() => setDone(null), 3000)
   }
@@ -2059,14 +2043,11 @@ export function SettingsPage() {
                 die Werte untereinander nicht wandern). */}
             <div className="flex items-center justify-between">
               <span className="t-micro text-gray-700 dark:text-gray-400">Max Tokens</span>
-              <input
-                aria-label="Max Tokens"
-                type="number"
+              <BoundedNumberInput
+                ariaLabel="Max Tokens"
                 value={settings.maxTokens}
-                onChange={(e) => updateSettings({ maxTokens: Math.max(0, parseInt(e.target.value) || 0) })}
-                min={0}
-                placeholder="0"
-                className="w-20 px-1.5 py-0.5 rounded bg-transparent border border-white/8 t-mono text-right text-gray-300 focus:outline-none focus:border-white/20"
+                max={MAX_TOKENS_MAX}
+                onCommit={(v) => updateSettings({ maxTokens: v })}
               />
             </div>
             {/* Think budget (D12). Same row shape as Max Tokens above; 0 is
@@ -2098,18 +2079,15 @@ export function SettingsPage() {
                 context window. Ignored by Anthropic / OpenAI providers. */}
             <div className="flex items-center justify-between">
               <span className="t-micro text-gray-700 dark:text-gray-400" title="Forwarded as Ollama num_ctx. 0 = provider default (Ollama defaults to 2048, which clips RAG and long chats). Bump up to use the model's full context. Ignored by cloud providers.">Context window (Ollama)</span>
-              <input
-                aria-label="Context window (Ollama)"
-                type="number"
+              <BoundedNumberInput
+                ariaLabel="Context window (Ollama)"
                 value={settings.contextWindowOverride ?? 0}
-                onChange={(e) => updateSettings({ contextWindowOverride: Math.max(0, parseInt(e.target.value) || 0) })}
-                min={0}
-                placeholder="0"
-                className="w-20 px-1.5 py-0.5 rounded bg-transparent border border-white/8 t-mono text-right text-gray-300 focus:outline-none focus:border-white/20"
+                max={CONTEXT_WINDOW_MAX}
+                onCommit={(v) => updateSettings({ contextWindowOverride: v })}
               />
             </div>
             <div className="t-micro text-gray-500 dark:text-gray-500 leading-relaxed pt-0.5">
-              0 = let Ollama decide (defaults to 2048). Set to e.g. 8192 or 16384 if RAG / long chats get clipped. Cloud providers ignore this.
+              0 = let Ollama decide (defaults to 2048). Set to e.g. 8192 or 16384 if RAG / long chats get clipped, at most 1,048,576. Cloud providers ignore this. Max Tokens goes up to 1,000,000.
             </div>
             {/* Auto-compact (2.6.8, on by default since 3.0.7). The switch is
                 its own row; the threshold is shown as a percentage and stored
@@ -2128,21 +2106,7 @@ export function SettingsPage() {
                 title="When the conversation or a running tool chain fills this much of the window, the model writes a summary of the older part and that part stops being sent. 0 = fit the model's context window, from 32K up. The full history stays in the chat either way; only what is sent changes."
               >Compact at</span>
               <div className="flex items-center gap-1">
-                <input
-                  aria-label="Auto-compact at"
-                  type="number"
-                  value={Math.round((settings.autoCompactThreshold || 0) * 100)}
-                  disabled={settings.autoCompact === false}
-                  onChange={(e) => {
-                    // Same rule as set_setting from the chat (lib/settings-catalog.ts).
-                    updateSettings({ autoCompactThreshold: compactThresholdFromPercent(parseInt(e.target.value) || 0) })
-                  }}
-                  min={0}
-                  max={95}
-                  step={5}
-                  placeholder="0"
-                  className="w-20 px-1.5 py-0.5 rounded bg-transparent border border-white/8 t-mono text-right text-gray-300 focus:outline-none focus:border-white/20 disabled:opacity-40"
-                />
+                <CompactThresholdInput />
                 <span className="t-mono text-gray-500 w-3">%</span>
               </div>
             </div>
@@ -2315,22 +2279,7 @@ export function SettingsPage() {
                 </div>
               </div>
               <button
-                onClick={async () => {
-                  // The line above is what actually re-runs the wizard: AppShell
-                  // gates it on settings.onboardingDone, and that store is
-                  // persisted, so it survives the reload below. The backend call
-                  // only clears the marker FILE, which is read in one place,
-                  // the NSIS-update recovery in AppShell, and only when the
-                  // store itself was lost.
-                  //
-                  // Level (a): silent on purpose. The visible action succeeds
-                  // either way, and the reload on the next line would wipe any
-                  // message before it could be read. A stale marker costs
-                  // nothing until a store-loss recovery, which re-writes it.
-                  useSettingsStore.getState().updateSettings({ onboardingDone: false })
-                  try { await backendCall('set_onboarding_done', { done: false }) } catch { /* see above */ }
-                  window.location.reload()
-                }}
+                onClick={() => { void rerunOnboarding() }}
                 className="ml-3 shrink-0 px-2.5 py-1 rounded-md text-[0.6rem] font-medium bg-white dark:bg-white/10 text-gray-800 dark:text-white hover:bg-gray-100 dark:hover:bg-white/15 border border-gray-200 dark:border-white/15 transition-colors"
               >
                 Re-run onboarding
@@ -2472,14 +2421,12 @@ export function SettingsPage() {
               >
                 Sub-agent tool calls
               </span>
-              <input
-                aria-label="Sub-agent tool calls"
-                type="number"
+              <BoundedNumberInput
+                ariaLabel="Sub-agent tool calls"
                 value={settings.subAgentMaxToolCalls ?? 0}
-                onChange={(e) => updateSettings({ subAgentMaxToolCalls: Math.max(0, parseInt(e.target.value) || 0) })}
-                min={0}
+                max={SUB_AGENT_LIMIT_MAX}
                 placeholder="10"
-                className="w-20 px-1.5 py-0.5 rounded bg-transparent border border-white/8 t-mono text-right text-gray-300 focus:outline-none focus:border-white/20"
+                onCommit={(v) => updateSettings({ subAgentMaxToolCalls: v })}
               />
             </div>
             <div className="flex items-center justify-between">
@@ -2489,18 +2436,16 @@ export function SettingsPage() {
               >
                 Sub-agent steps
               </span>
-              <input
-                aria-label="Sub-agent steps"
-                type="number"
+              <BoundedNumberInput
+                ariaLabel="Sub-agent steps"
                 value={settings.subAgentMaxIterations ?? 0}
-                onChange={(e) => updateSettings({ subAgentMaxIterations: Math.max(0, parseInt(e.target.value) || 0) })}
-                min={0}
+                max={SUB_AGENT_LIMIT_MAX}
                 placeholder="5"
-                className="w-20 px-1.5 py-0.5 rounded bg-transparent border border-white/8 t-mono text-right text-gray-300 focus:outline-none focus:border-white/20"
+                onCommit={(v) => updateSettings({ subAgentMaxIterations: v })}
               />
             </div>
             <div className="t-micro text-gray-500 dark:text-gray-500 leading-relaxed pt-0.5">
-              0 = use the defaults (10 calls, 5 steps). A sub-agent runs unattended, so these stay deliberately tight, raise them only for a task you know is long.
+              0 = use the defaults (10 calls, 5 steps), at most 1,000 each. A sub-agent runs unattended, so these stay deliberately tight, raise them only for a task you know is long.
             </div>
             </Section>
           )}

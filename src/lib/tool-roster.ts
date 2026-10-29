@@ -29,6 +29,7 @@ const GROUPS: { label: string; categories: ToolCategory[] }[] = [
   { label: 'Web', categories: ['web'] },
   { label: 'System', categories: ['system', 'desktop'] },
   { label: 'Creative', categories: ['image', 'video', 'workflow'] },
+  { label: 'MCP servers', categories: ['mcp'] },
 ]
 
 /**

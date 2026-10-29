@@ -1,5 +1,6 @@
 import { DEFAULT_SETTINGS } from './constants'
 import type { Settings, SamplerValues } from '../types/settings'
+import { clampMaxTokens, MAX_TOKENS_MAX } from './number-limits'
 
 /**
  * Sampling for one conversation: temperature, top_p and a max output cap,
@@ -154,7 +155,7 @@ const BOUNDS: Record<keyof SamplingOverrides, [number, number]> = {
   topP: [0, 1],
   // A cap above any context window served is the same as no cap; the ceiling
   // here only stops a hand-edited store from putting nonsense on the wire.
-  maxTokens: [0, 1_000_000],
+  maxTokens: [0, MAX_TOKENS_MAX],
   topK: [0, 1000],
   minP: [0, 1],
   repeatPenalty: [0, 2],
@@ -198,7 +199,8 @@ export function effectiveSampling(
   return {
     temperature: Number.isFinite(temperature) ? Math.min(TEMPERATURE_MAX, Math.max(0, temperature)) : SAMPLING_DEFAULTS.temperature,
     topP: overrides?.topP ?? preset?.topP ?? settings.topP ?? SAMPLING_DEFAULTS.topP,
-    maxTokens: overrides?.maxTokens ?? preset?.maxTokens ?? settings.maxTokens ?? SAMPLING_DEFAULTS.maxTokens,
+    // Clamped (B13) like the temperature above, 0 stays "model default".
+    maxTokens: clampMaxTokens(overrides?.maxTokens ?? preset?.maxTokens ?? settings.maxTokens ?? SAMPLING_DEFAULTS.maxTokens),
   }
 }
 

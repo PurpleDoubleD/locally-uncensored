@@ -1100,8 +1100,11 @@ export const useChatStore = create<ChatState>()(
         const lower = query.toLowerCase()
         return conversations.filter(
           (c) =>
-            c.title.toLowerCase().includes(lower) ||
-            c.messages.some((m) => m.content.toLowerCase().includes(lower))
+            // String() and the typeof: a chat from an old or edited backup may
+            // carry a message that is not text, and the search must not take
+            // the whole app down on it (T1 night test 3.0.9, A4).
+            String(c.title ?? '').toLowerCase().includes(lower) ||
+            c.messages.some((m) => typeof m.content === 'string' && m.content.toLowerCase().includes(lower))
         )
       },
 

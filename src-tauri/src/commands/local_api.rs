@@ -532,10 +532,11 @@ impl Upstream {
 
 /// Die Vorgabe-Upstreams — dieselben Adressen, die die App ohnehin benutzt.
 ///
-/// Sie stehen hier als FALLBACK, nicht als Wahrheit: der Aufrufer aus dem
-/// Frontend kennt den echten Ollama-Base (der Nutzer kann ihn umstellen) und
-/// den Port, auf dem die Engine gerade wirklich laeuft. Wer nichts uebergibt,
-/// bekommt die Werkswerte statt eine leere Liste.
+/// Sie stehen hier als FALLBACK, nicht als Wahrheit: den echten Ollama-Base
+/// (der Nutzer kann ihn umstellen) und den Port, auf dem die Engine gerade
+/// wirklich laeuft, liest `start_local_api` bei jeder Anfrage aus `AppState`
+/// (`LaneQuelle`). Diese Werte gelten nur fuer eine Lane, fuer die die App
+/// gerade keine eigene Adresse kennt.
 pub fn default_upstreams() -> Vec<Upstream> {
     vec![
         Upstream { lane_prefix: "lu".into(), base: format!("http://127.0.0.1:{}/v1", crate::commands::engine::DEFAULT_ENGINE_PORT) },
@@ -676,11 +677,67 @@ pub fn usage_lesen(json: &serde_json::Value) -> Option<(u64, u64)> {
     Some((p.unwrap_or(0), a.unwrap_or(0)))
 }
 
+/// Liefert die Adresse einer Lane im Moment der Anfrage, oder nichts.
+///
+/// Bericht B4 (2026-10-28): die Ollama-Spur ging immer an 127.0.0.1:11434,
+/// auch wenn LU selbst ein Ollama auf einem anderen Port oder Host benutzte.
+/// Die Quelle wird bei jeder Anfrage gefragt und nicht einmal beim Start,
+/// weil der Nutzer die Ollama-Adresse umstellen kann, waehrend die API laeuft
+/// (`set_ollama_host`), und die LU Engine nach einem Neustart auf einem
+/// anderen Port stehen kann. `None` heisst: der Eintrag aus `cfg.upstreams`.
+pub type LaneQuelle = Arc<dyn Fn(Lane) -> Option<String> + Send + Sync>;
+
 #[derive(Clone)]
 pub struct LocalApiState {
     pub cfg: Arc<RwLock<LocalApiConfig>>,
     pub http: reqwest::Client,
     pub nutzung: Arc<Nutzung>,
+    /// Die laufenden Adressen der App. `None` in Tests und wenn der Aufrufer
+    /// eigene `upstreams` uebergeben hat: dann gelten genau die.
+    pub live: Option<LaneQuelle>,
+}
+
+/// Die Upstreams, wie sie JETZT gelten: `cfg.upstreams`, wo die App fuer eine
+/// Lane eine eigene Adresse kennt, mit dieser.
+async fn upstreams_jetzt(state: &LocalApiState) -> Vec<Upstream> {
+    let mut ups = state.cfg.read().await.upstreams.clone();
+    if let Some(quelle) = &state.live {
+        for u in ups.iter_mut() {
+            if let Some(base) = u.lane().and_then(|l| quelle(l)) {
+                u.base = base;
+            }
+        }
+    }
+    ups
+}
+
+/// Ollamas OpenAI-Adresse zu dem Base, den LU benutzt (`AppState::ollama_base`,
+/// ohne `/v1`). Ein Base, der schon auf `/v1` endet, bekommt es nicht doppelt.
+pub fn ollama_v1(base: &str) -> String {
+    let b = base.trim().trim_end_matches('/');
+    if b.ends_with("/v1") { b.to_string() } else { format!("{}/v1", b) }
+}
+
+/// Die Adresse einer Lane aus dem, was die App gerade benutzt.
+///
+/// Ollama: der aufgeloeste Base der App (config.json, dann OLLAMA_HOST, dann
+/// Vorgabe). LU Engine: der Port, auf dem sie gerade wirklich laeuft; laeuft
+/// keine, bleibt der Vorgabeport. LM Studio: LU fuehrt dafuer keine eigene
+/// Adresse, es erkennt LM Studio selbst an der Vorgabe :1234
+/// (lib/lmstudio-backend-adopt.ts), also bleibt auch hier die Vorgabe.
+pub fn lane_basis_der_app(lane: Lane, ollama_base: Option<&str>, engine_port: Option<u16>) -> Option<String> {
+    match lane {
+        Lane::Ollama => ollama_base.map(ollama_v1),
+        Lane::Engine => engine_port.map(|p| format!("http://127.0.0.1:{}/v1", p)),
+        Lane::LmStudio => None,
+    }
+}
+
+/// `lane_basis_der_app` mit den Werten, die in `AppState` gerade stehen.
+pub fn lane_basis_aus_state(st: &crate::state::AppState, lane: Lane) -> Option<String> {
+    let ollama = st.ollama_base.lock().ok().map(|b| b.clone());
+    let engine = st.bundled_engine.lock().ok().and_then(|g| g.as_ref().map(|e| e.port));
+    lane_basis_der_app(lane, ollama.as_deref(), engine)
 }
 
 /// Was `stop` braucht, um wirklich zu stoppen.
@@ -798,7 +855,7 @@ async fn lane_modelle(http: &reqwest::Client, up: &Upstream) -> Vec<String> {
 
 /// Der aktuelle Katalog ueber alle Lanes, in Lane-Reihenfolge.
 async fn katalog(state: &LocalApiState) -> Vec<(Lane, String)> {
-    let ups = state.cfg.read().await.upstreams.clone();
+    let ups = upstreams_jetzt(state).await;
     let mut raus: Vec<(Lane, String)> = Vec::new();
     for lane in Lane::ALL {
         for up in ups.iter().filter(|u| u.lane() == Some(lane)) {
@@ -896,12 +953,9 @@ async fn weiterleiten_mit(
 
     let stream_gewuenscht = json.get("stream").and_then(|v| v.as_bool()).unwrap_or(false);
 
-    let base = {
-        let cfg = state.cfg.read().await;
-        match cfg.upstreams.iter().find(|u| u.lane() == Some(ziel.lane)) {
-            Some(u) => u.base.trim_end_matches('/').to_string(),
-            None => return fehler(StatusCode::BAD_GATEWAY, "api_error", &format!("{} has no configured address.", ziel.lane.label())),
-        }
+    let base = match upstreams_jetzt(&state).await.into_iter().find(|u| u.lane() == Some(ziel.lane)) {
+        Some(u) => u.base.trim_end_matches('/').to_string(),
+        None => return fehler(StatusCode::BAD_GATEWAY, "api_error", &format!("{} has no configured address.", ziel.lane.label())),
     };
 
     let ziel_url = format!("{}{}", base, pfad);
@@ -1027,21 +1081,66 @@ async fn weiterleiten_mit(
         .unwrap_or_else(|_| fehler(StatusCode::INTERNAL_SERVER_ERROR, "api_error", "Could not build the response."))
 }
 
-async fn handle_chat(AxumState(state): AxumState<LocalApiState>, headers: HeaderMap, body: axum::body::Bytes) -> Response {
-    weiterleiten(state, "/chat/completions", "messages", headers, body).await
+/// Der Anfragekoerper, wie axum ihn liest, samt seiner Ablehnung.
+///
+/// Bericht B5 (2026-10-28): ohne eigene Behandlung beantwortet axum einen zu
+/// grossen Koerper selbst, mit einer nackten Text-413, an `fehler()` vorbei,
+/// und ein OpenAI-SDK meldet dann nur einen Parse-Fehler.
+type Koerper = Result<axum::body::Bytes, axum::extract::rejection::BytesRejection>;
+
+/// Wie gross ein Anfragekoerper sein darf: 32 MB.
+///
+/// Axums Vorgabe von 2 MB reicht fuer kein Handyfoto: ein Bild von 3 bis
+/// 6 MB wird als base64 in `image_url` gut ein Drittel groesser, und ein
+/// Chat mit mehreren Bildern oder einem langen Verlauf addiert sich. 32 MB
+/// lassen mehrere solche Bilder zu und halten trotzdem eine Grenze: der
+/// Koerper liegt beim Lesen ganz im Speicher, und ein Client soll die App
+/// nicht mit einer endlosen Anfrage volllaufen lassen koennen.
+pub const MAX_KOERPER_BYTES: usize = 32 * 1024 * 1024;
+
+/// Eine abgelehnte Anfrage in der Fehlerform dieses Servers. Gezaehlt wird
+/// sie nicht: sie hat kein Modell erreicht, wie vorher auch.
+fn koerper_abgelehnt(e: axum::extract::rejection::BytesRejection) -> Response {
+    if e.status() == StatusCode::PAYLOAD_TOO_LARGE {
+        return fehler_mit(
+            StatusCode::PAYLOAD_TOO_LARGE,
+            "invalid_request_error",
+            &format!(
+                "Request body is larger than this server accepts ({} MB). Send smaller or fewer images, or a shorter history.",
+                MAX_KOERPER_BYTES / (1024 * 1024)
+            ),
+            None,
+            Some("request_too_large"),
+        );
+    }
+    fehler_mit(e.status(), "invalid_request_error", &format!("Could not read the request body: {}", e.body_text()), None, Some("invalid_body"))
 }
 
-async fn handle_completions(AxumState(state): AxumState<LocalApiState>, headers: HeaderMap, body: axum::body::Bytes) -> Response {
-    weiterleiten(state, "/completions", "prompt", headers, body).await
+async fn handle_chat(AxumState(state): AxumState<LocalApiState>, headers: HeaderMap, body: Koerper) -> Response {
+    match body {
+        Ok(b) => weiterleiten(state, "/chat/completions", "messages", headers, b).await,
+        Err(e) => koerper_abgelehnt(e),
+    }
 }
 
-async fn handle_embeddings(AxumState(state): AxumState<LocalApiState>, headers: HeaderMap, body: axum::body::Bytes) -> Response {
-    weiterleiten(state, "/embeddings", "input", headers, body).await
+async fn handle_completions(AxumState(state): AxumState<LocalApiState>, headers: HeaderMap, body: Koerper) -> Response {
+    match body {
+        Ok(b) => weiterleiten(state, "/completions", "prompt", headers, b).await,
+        Err(e) => koerper_abgelehnt(e),
+    }
+}
+
+async fn handle_embeddings(AxumState(state): AxumState<LocalApiState>, headers: HeaderMap, body: Koerper) -> Response {
+    match body {
+        Ok(b) => weiterleiten(state, "/embeddings", "input", headers, b).await,
+        Err(e) => koerper_abgelehnt(e),
+    }
 }
 
 /// Was gerade laeuft und wohin geleitet wird. Auch das steht hinter dem Token.
 async fn handle_health(AxumState(state): AxumState<LocalApiState>) -> Response {
     let cfg = state.cfg.read().await.clone();
+    let ups = upstreams_jetzt(&state).await;
     let k = katalog(&state).await;
     let mut je_lane = serde_json::Map::new();
     for lane in Lane::ALL {
@@ -1049,7 +1148,7 @@ async fn handle_health(AxumState(state): AxumState<LocalApiState>) -> Response {
             lane.prefix().to_string(),
             serde_json::json!({
                 "label": lane.label(),
-                "base": cfg.upstreams.iter().find(|u| u.lane() == Some(lane)).map(|u| u.base.clone()),
+                "base": ups.iter().find(|u| u.lane() == Some(lane)).map(|u| u.base.clone()),
                 "models": k.iter().filter(|(l, _)| *l == lane).count(),
             }),
         );
@@ -1292,6 +1391,7 @@ pub fn build_local_api_router(state: LocalApiState) -> Router {
                 &format!("No route {} {}. This server speaks /v1/models, /v1/chat/completions, /v1/completions, /v1/embeddings, /lu/v1/health, /lu/v1/tools and /lu/v1/docs — the last one describes all of them.", method, uri.path()),
             )
         })
+        .layer(axum::extract::DefaultBodyLimit::max(MAX_KOERPER_BYTES))
         .layer(axum::middleware::from_fn_with_state(state.clone(), auth))
         .layer(axum::middleware::from_fn_with_state(state.clone(), cors))
         .layer(axum::middleware::from_fn(request_id))
@@ -1312,6 +1412,7 @@ pub fn build_local_api_router(state: LocalApiState) -> Router {
 /// offene Tuer, die nur zufaellig zu ist.
 #[tauri::command]
 pub async fn start_local_api(
+    app: tauri::AppHandle,
     state: tauri::State<'_, crate::state::AppState>,
     port: Option<u16>,
     lan: Option<bool>,
@@ -1325,6 +1426,7 @@ pub async fn start_local_api(
 
     stop_local_api_inner(&state);
 
+    let eigene_upstreams = upstreams.is_some();
     let cfg = LocalApiConfig {
         port: port.unwrap_or(DEFAULT_LOCAL_API_PORT),
         lan: lan.unwrap_or(false),
@@ -1341,6 +1443,18 @@ pub async fn start_local_api(
     };
     let addr = bind_addr(cfg.lan, cfg.port);
 
+    // Wer eigene Upstreams uebergibt, bekommt genau die. Sonst gelten die
+    // Adressen, die die App selbst gerade benutzt, bei jeder Anfrage neu
+    // gelesen (siehe `LaneQuelle`).
+    let live: Option<LaneQuelle> = if eigene_upstreams {
+        None
+    } else {
+        Some(Arc::new(move |lane| {
+            use tauri::Manager;
+            lane_basis_aus_state(&app.state::<crate::state::AppState>(), lane)
+        }))
+    };
+
     let api_state = LocalApiState {
         cfg: Arc::new(RwLock::new(cfg.clone())),
         http: reqwest::Client::builder()
@@ -1351,6 +1465,7 @@ pub async fn start_local_api(
             .build()
             .map_err(|e| e.to_string())?,
         nutzung: Arc::new(Nutzung::neu()),
+        live,
     };
     let nutzung = Arc::clone(&api_state.nutzung);
 
@@ -1562,7 +1677,7 @@ mod local_api_echt {
             upstreams: default_upstreams(),
             cors_origins: cors,
         };
-        let state = LocalApiState { cfg: Arc::new(RwLock::new(cfg)), http, nutzung: Arc::new(Nutzung::neu()) };
+        let state = LocalApiState { cfg: Arc::new(RwLock::new(cfg)), http, nutzung: Arc::new(Nutzung::neu()), live: None };
         let l = tokio::net::TcpListener::bind(bind_addr(false, 0)).await.ok()?;
         let addr = l.local_addr().ok()?;
         let router = build_local_api_router(state);
@@ -1746,6 +1861,7 @@ mod local_api_echt {
             http: reqwest::Client::builder()
                 .connect_timeout(std::time::Duration::from_secs(5)).build().unwrap(),
             nutzung: Arc::new(Nutzung::neu()),
+            live: None,
         };
         let l = tokio::net::TcpListener::bind(bind_addr(false, port)).await
             .unwrap_or_else(|e| panic!("Port {} nicht frei: {}", port, e));
@@ -2057,6 +2173,7 @@ mod tests {
             })),
             http: reqwest::Client::new(),
             nutzung: Arc::clone(&nutzung),
+            live: None,
         };
         let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let api = l.local_addr().unwrap();
@@ -2084,6 +2201,123 @@ mod tests {
         assert_eq!(z["withoutCounts"], 1);
         assert_eq!(z["lastModel"], "ollama/nobody");
         assert!(z["since"].as_u64().unwrap() > 0);
+    }
+
+    /// Eine Attrappe eines Modellservers, die `modell` fuehrt und auf jeden
+    /// Chat mit der Laenge des empfangenen Koerpers antwortet. Ohne eigenes
+    /// Koerperlimit, damit nur das Limit der API geprueft wird.
+    async fn attrappe(modell: &'static str) -> std::net::SocketAddr {
+        let r = Router::new()
+            .route("/v1/models", get(move || async move { Json(serde_json::json!({ "data": [{ "id": modell }] })) }))
+            .route("/v1/chat/completions", post(|body: axum::body::Bytes| async move {
+                Json(serde_json::json!({ "model": "x", "received": body.len() }))
+            }))
+            .layer(axum::extract::DefaultBodyLimit::disable());
+        let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let a = l.local_addr().unwrap();
+        tokio::spawn(async move { let _ = axum::serve(l, r).await; });
+        a
+    }
+
+    async fn api_mit(upstreams: Vec<Upstream>, live: Option<LaneQuelle>) -> std::net::SocketAddr {
+        let state = LocalApiState {
+            cfg: Arc::new(RwLock::new(LocalApiConfig {
+                port: 0, lan: false, token: "t0k".into(), upstreams, cors_origins: Vec::new(),
+            })),
+            http: reqwest::Client::new(),
+            nutzung: Arc::new(Nutzung::neu()),
+            live,
+        };
+        let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let a = l.local_addr().unwrap();
+        let router = build_local_api_router(state);
+        tokio::spawn(async move { let _ = axum::serve(l, router).await; });
+        a
+    }
+
+    async fn modell_ids(api: std::net::SocketAddr) -> Vec<String> {
+        let v: serde_json::Value = reqwest::Client::new()
+            .get(format!("http://{}/v1/models", api)).bearer_auth("t0k")
+            .send().await.unwrap().json().await.unwrap();
+        v["data"].as_array().unwrap().iter().map(|m| m["id"].as_str().unwrap().to_string()).collect()
+    }
+
+    /// B4: die Ollama-Spur folgt dem Ollama, das die App benutzt
+    /// (`AppState::ollama_base`), nicht einer festen Adresse, und zwar auch
+    /// dann, wenn der Nutzer die Adresse umstellt, waehrend die API laeuft.
+    /// Der feste Eintrag in `cfg.upstreams` zeigt hier auf einen Port, auf dem
+    /// niemand lauscht, damit kein echtes Ollama auf 11434 gefragt wird.
+    #[tokio::test]
+    async fn die_ollama_spur_folgt_dem_ollama_der_app() {
+        let erstes = attrappe("coder15:t1").await;
+        let zweites = attrappe("qwen05:t1").await;
+        let app = Arc::new(crate::state::AppState::new());
+        *app.ollama_base.lock().unwrap() = format!("http://{}", erstes);
+        let st = Arc::clone(&app);
+        let live: LaneQuelle = Arc::new(move |lane| lane_basis_aus_state(&st, lane));
+        let api = api_mit(
+            vec![Upstream { lane_prefix: "ollama".into(), base: "http://127.0.0.1:9/v1".into() }],
+            Some(live),
+        ).await;
+
+        assert_eq!(modell_ids(api).await, vec!["ollama/coder15:t1".to_string()]);
+        let chat = reqwest::Client::new()
+            .post(format!("http://{}/v1/chat/completions", api)).bearer_auth("t0k")
+            .json(&serde_json::json!({ "model": "ollama/coder15:t1", "messages": [{ "role": "user", "content": "hi" }] }))
+            .send().await.unwrap();
+        assert_eq!(chat.status(), 200, "the chat reaches the app's Ollama");
+        let health: serde_json::Value = reqwest::Client::new()
+            .get(format!("http://{}/lu/v1/health", api)).bearer_auth("t0k")
+            .send().await.unwrap().json().await.unwrap();
+        assert_eq!(health["lanes"]["ollama"]["base"], format!("http://{}/v1", erstes));
+
+        // Umgestellt, waehrend die API laeuft: die naechste Anfrage geht dorthin.
+        *app.ollama_base.lock().unwrap() = format!("http://{}/", zweites);
+        assert_eq!(modell_ids(api).await, vec!["ollama/qwen05:t1".to_string()]);
+    }
+
+    #[test]
+    fn die_lane_adressen_kommen_aus_der_app() {
+        assert_eq!(ollama_v1("http://127.0.0.1:18902"), "http://127.0.0.1:18902/v1");
+        assert_eq!(ollama_v1("http://127.0.0.1:18902/"), "http://127.0.0.1:18902/v1");
+        assert_eq!(ollama_v1("http://box:11434/v1"), "http://box:11434/v1");
+
+        let app = crate::state::AppState::new();
+        *app.ollama_base.lock().unwrap() = "http://127.0.0.1:18902".into();
+        assert_eq!(lane_basis_aus_state(&app, Lane::Ollama).as_deref(), Some("http://127.0.0.1:18902/v1"));
+        // Keine Engine gestartet: dann gilt der Vorgabeport aus `cfg.upstreams`.
+        assert_eq!(lane_basis_aus_state(&app, Lane::Engine), None);
+        assert_eq!(lane_basis_der_app(Lane::Engine, None, Some(8129)).as_deref(), Some("http://127.0.0.1:8129/v1"));
+        // LU fuehrt fuer LM Studio keine eigene Adresse.
+        assert_eq!(lane_basis_aus_state(&app, Lane::LmStudio), None);
+    }
+
+    /// B5: ein Koerper ueber axums 2 MB kommt durch, einer ueber dem eigenen
+    /// Limit bekommt die Fehlerform dieses Servers statt einer Text-413.
+    #[tokio::test]
+    async fn grosse_koerper_kommen_durch_und_zu_grosse_bekommen_json() {
+        let oben = attrappe("tiny").await;
+        let api = api_mit(vec![Upstream { lane_prefix: "ollama".into(), base: format!("http://{}/v1", oben) }], None).await;
+        let c = reqwest::Client::new();
+        let mit_text = |n: usize| serde_json::json!({
+            "model": "ollama/tiny", "messages": [{ "role": "user", "content": "a".repeat(n) }]
+        }).to_string();
+
+        let gross = mit_text(3 * 1024 * 1024);
+        let r = c.post(format!("http://{}/v1/chat/completions", api)).bearer_auth("t0k")
+            .header(header::CONTENT_TYPE, "application/json").body(gross.clone()).send().await.unwrap();
+        assert_eq!(r.status(), 200, "3 MB is a phone photo, it must pass");
+        let v: serde_json::Value = r.json().await.unwrap();
+        assert!(v["received"].as_u64().unwrap() >= 3 * 1024 * 1024);
+
+        let zu_gross = mit_text(MAX_KOERPER_BYTES + 1);
+        let r = c.post(format!("http://{}/v1/chat/completions", api)).bearer_auth("t0k")
+            .header(header::CONTENT_TYPE, "application/json").body(zu_gross).send().await.unwrap();
+        assert_eq!(r.status(), 413);
+        let v: serde_json::Value = r.json().await.expect("the 413 is JSON, not plain text");
+        assert_eq!(v["error"]["code"], "request_too_large");
+        assert_eq!(v["error"]["type"], "invalid_request_error");
+        assert!(v["error"]["message"].as_str().unwrap().contains("32 MB"));
     }
 
     #[test]

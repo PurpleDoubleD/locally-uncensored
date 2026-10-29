@@ -1,11 +1,11 @@
-import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
+import { useDeferredValue, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Plus, Search, Trash2, Edit3, Check, X, MessageSquare, Code, Radio, Copy, RefreshCw, Square, Wifi, Globe, QrCode, PanelLeftOpen, PanelLeftClose, Smartphone } from 'lucide-react'
 import { useChatStore } from '../../stores/chatStore'
 import { HowItWorks } from '../ui/HowItWorks'
 import { HOWTO } from '../../lib/howto'
 import { latestConversationOfMode } from '../../lib/conversation-mode'
-import { useUIStore } from '../../stores/uiStore'
+import { useUIStore, clampSidebarWidth, isNarrowViewport } from '../../stores/uiStore'
 import { useCompareStore } from '../../stores/compareStore'
 import { useModelStore } from '../../stores/modelStore'
 import { useSettingsStore } from '../../stores/settingsStore'
@@ -21,6 +21,23 @@ import {
   conversationMatches, sameSidebarRows, toSidebarRow, type SidebarRow,
 } from './sidebar-rows'
 
+/**
+ * Rahmen der aufgeklappten Liste. Im breiten Fenster nichts, die Spalte steht
+ * im Fluss neben dem Verlauf. Im schmalen Fenster (NARROW_VIEWPORT_WIDTH,
+ * Issue 309 T1) hat sie dort keinen Platz: ein Rahmen ohne eigene Breite
+ * traegt sie dann als Ueberlagerung, und der Verlauf darunter behaelt das
+ * ganze Fenster. `-mr-2` nimmt den `gap-2` der Zeile in AppShell zurueck, den
+ * ein Rahmen ohne Breite sonst als leeren Streifen hinterliesse.
+ */
+function SidebarFrame({ overlay, children }: { overlay: boolean; children: ReactNode }) {
+  if (!overlay) return <>{children}</>
+  return (
+    <div data-testid="sidebar-overlay" className="relative shrink-0 w-0 -mr-2 h-full z-30">
+      {children}
+    </div>
+  )
+}
+
 export function Sidebar() {
   // Gezielte Selektoren, durchgehend. Ein Abo auf den ganzen Store hat die
   // Seitenleiste einmal pro Bild neu gezeichnet, solange eine Antwort lief,
@@ -33,7 +50,13 @@ export function Sidebar() {
   const setActiveConversation = useChatStore((s) => s.setActiveConversation)
   const sidebarOpen = useUIStore((s) => s.sidebarOpen)
   const setSidebarOpen = useUIStore((s) => s.setSidebarOpen)
-  const sidebarWidth = useUIStore((s) => s.sidebarWidth)
+  const storedSidebarWidth = useUIStore((s) => s.sidebarWidth)
+  // Issue 309 T1: die gespeicherte Breite gegen das AKTUELLE Fenster, nicht
+  // nur beim Ziehen. Geschrieben wird nichts, die Vorliebe fuer ein breites
+  // Fenster bleibt, wie sie war.
+  const viewportWidth = useUIStore((s) => s.viewportWidth)
+  const sidebarWidth = clampSidebarWidth(storedSidebarWidth, viewportWidth)
+  const overlay = isNarrowViewport(viewportWidth)
   const setSidebarWidth = useUIStore((s) => s.setSidebarWidth)
   const setView = useUIStore((s) => s.setView)
   const currentView = useUIStore((s) => s.currentView)
@@ -527,10 +550,10 @@ export function Sidebar() {
           zoom 1.25 ist weg, die Spalte haengt jetzt am Ziehgriff weiter unten
           (sidebarWidth). `relative` traegt diesen Griff. */}
       {showSidebar && sidebarOpen && (
+        <SidebarFrame key="full" overlay={overlay}>
         <motion.aside
-          key="full"
           data-testid="sidebar-panel"
-          className="relative h-full rounded-[10px] bg-white dark:bg-[#1e1e1e] ring-1 ring-black/[0.04] dark:ring-white/[0.05] flex flex-col z-20 overflow-hidden"
+          className={`${overlay ? 'absolute left-0 top-0 shadow-lg' : 'relative'} h-full rounded-[10px] bg-white dark:bg-[#1e1e1e] ring-1 ring-black/[0.04] dark:ring-white/[0.05] flex flex-col z-20 overflow-hidden`}
           initial={{ width: 0, opacity: 0 }}
           animate={{ width: sidebarWidth, opacity: 1 }}
           exit={{ width: 0, opacity: 0 }}
@@ -1306,6 +1329,7 @@ export function Sidebar() {
             )}
           </div>
         </motion.aside>
+        </SidebarFrame>
       )}
     </AnimatePresence>
 

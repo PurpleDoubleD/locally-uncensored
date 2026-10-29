@@ -44,9 +44,9 @@ export async function loadPhotosAsReferences(name: string, photos: readonly Blob
 }
 
 /** The photos join the training set in Character Studio. The studio's own
- *  minimum and maximum stay as they are. The set drops a photo whose name it
- *  already holds, so a second batch under the same name numbers on after the
- *  first instead of vanishing. */
+ *  minimum and maximum stay as they are. A second batch under the same name
+ *  numbers on after the first, so the frames keep one running count (the set
+ *  itself would only append _2 to a name it already holds). */
 export function sendPhotosToStudio(name: string, photos: readonly Blob[]): void {
   const st = useCreateStore.getState()
   st.setIntent('character')

@@ -553,7 +553,7 @@ function MessageBubbleImpl({ message, onRegenerate, onRegenerateRound, onEdit, p
             // long expanded instruction held in content (which drives the model).
             // The same holds for a message with files: content carries their
             // summaries for the model, the bubble shows what was typed.
-            <p className="text-[0.78rem] leading-relaxed text-gray-800 dark:text-gray-200 whitespace-pre-wrap">{message.displayContent || message.content}</p>
+            <p className="text-[0.78rem] leading-relaxed text-gray-800 dark:text-gray-200 whitespace-pre-wrap wrap-anywhere">{message.displayContent || message.content}</p>
           ) : (
             // Answer-blocks (when present) already rendered the per-iteration
             // text chronologically above; skip message.content here to avoid

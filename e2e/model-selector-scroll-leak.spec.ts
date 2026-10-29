@@ -336,8 +336,16 @@ test('Negativkontrolle Code-Reiter: ohne overflow-clip auf dem CodexView-Vorfahr
   const vorfahr = await findeSchneidendenVorfahren(page)
   expect(await scrollLeftVon(page, vorfahr)).toBe(0)
 
+  // Seit dem Schmal-Fenster-Fix (T1, 3.0.9) laeuft bei 360 px nichts mehr
+  // ueber, es gaebe also nichts zu scrollen. Die Kontrolle prueft den Vorfahren,
+  // nicht das Layout: sie legt ihren Ueberlauf deshalb selbst hinein.
   await page.evaluate((el) => {
-    (el as HTMLElement | null)?.style.setProperty('overflow', 'hidden')
+    const node = el as HTMLElement | null
+    if (!node) return
+    const breit = document.createElement('div')
+    breit.style.cssText = 'width: 3000px; min-width: 3000px; flex: none; height: 1px'
+    node.appendChild(breit)
+    node.style.setProperty('overflow', 'hidden')
   }, vorfahr)
 
   await page.evaluate((el) => {

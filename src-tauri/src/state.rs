@@ -175,52 +175,73 @@ pub(crate) fn load_comfy_config_values() -> (u16, String) {
     (port, host)
 }
 
+/// Normalise an Ollama address the way Ollama reads OLLAMA_HOST: bare
+/// `host:port`, scheme-less `host`, or full URL, returned as a full URL
+/// without trailing slash. Empty input gives the default.
+fn normalize_ollama_base(raw: &str) -> String {
+    let trimmed = raw.trim().trim_end_matches('/');
+    if trimmed.is_empty() {
+        "http://localhost:11434".to_string()
+    } else if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
+        trimmed.to_string()
+    } else {
+        format!("http://{}", trimmed)
+    }
+}
+
+/// The address Ollama has when LU's own setting is left out: `OLLAMA_HOST`
+/// if set, else the default. This is what "Reset AI Backends to defaults"
+/// goes back to. config.json is skipped on purpose: it still holds the
+/// address the user is resetting away from, and a reset that kept it would
+/// not be one; a hard-coded port would point past a user's OLLAMA_HOST.
+fn env_or_default_ollama_base(env: Option<&str>) -> String {
+    normalize_ollama_base(env.unwrap_or(""))
+}
+
+pub(crate) fn ollama_default_base() -> String {
+    env_or_default_ollama_base(std::env::var("OLLAMA_HOST").ok().as_deref())
+}
+
 /// Read persisted Ollama base URL with the following priority:
 ///  1. `ollama_base` in config.json (GUI-configured)
 ///  2. `OLLAMA_HOST` env var (Ollama's own convention)
 ///  3. Default `http://localhost:11434`
 ///
-/// Accepts bare `host:port`, scheme-less `host`, or full URL — returns full
-/// URL without trailing slash. Matches Ollama's own OLLAMA_HOST semantics so
-/// setting it as an env var before launching LU "just works".
+/// Matches Ollama's own OLLAMA_HOST semantics so setting it as an env var
+/// before launching LU "just works".
 pub(crate) fn load_ollama_base() -> String {
-    let normalize = |raw: &str| -> String {
-        let trimmed = raw.trim().trim_end_matches('/');
-        if trimmed.is_empty() {
-            "http://localhost:11434".to_string()
-        } else if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
-            trimmed.to_string()
-        } else {
-            format!("http://{}", trimmed)
-        }
-    };
-
     // Priority 1: config.json override (GUI takes precedence)
     {
         let config_file = crate::os_paths::app_config_json();
         if let Ok(raw) = std::fs::read_to_string(&config_file) {
             if let Ok(v) = serde_json::from_str::<serde_json::Value>(&raw) {
                 if let Some(b) = v.get("ollama_base").and_then(|x| x.as_str()) {
-                    let normalized = normalize(b);
-                    if !normalized.is_empty() {
-                        return normalized;
-                    }
+                    return normalize_ollama_base(b);
                 }
             }
         }
     }
 
-    // Priority 2: OLLAMA_HOST env var — same semantics as Ollama itself.
-    // Ollama docs explicitly document e.g. `OLLAMA_HOST=0.0.0.0:11434`.
-    if let Ok(env) = std::env::var("OLLAMA_HOST") {
-        let normalized = normalize(&env);
-        if !normalized.is_empty() {
-            return normalized;
-        }
+    // Priority 2 and 3: OLLAMA_HOST env var, same semantics as Ollama
+    // itself (its docs show e.g. `OLLAMA_HOST=0.0.0.0:11434`), else default.
+    ollama_default_base()
+}
+
+#[cfg(test)]
+mod ollama_default_base_tests {
+    use super::env_or_default_ollama_base;
+
+    #[test]
+    fn reset_follows_ollama_host_and_never_a_fixed_port_when_it_is_set() {
+        assert_eq!(env_or_default_ollama_base(Some("127.0.0.1:18902")), "http://127.0.0.1:18902");
+        assert_eq!(env_or_default_ollama_base(Some("https://box.lan:9000/")), "https://box.lan:9000");
     }
 
-    // Priority 3: default
-    "http://localhost:11434".to_string()
+    #[test]
+    fn reset_without_ollama_host_is_the_default() {
+        assert_eq!(env_or_default_ollama_base(None), "http://localhost:11434");
+        assert_eq!(env_or_default_ollama_base(Some("  ")), "http://localhost:11434");
+    }
 }
 
 pub struct AppState {

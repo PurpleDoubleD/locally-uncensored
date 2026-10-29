@@ -41,12 +41,12 @@ export function variantsFromTree(entries: HfTreeEntry[], repo: string): HfVarian
   const out: HfVariant[] = []
   for (const quant of quants) {
     const picked = selectGgufFromTree(models, repo, quant)
-    if (!picked || picked.quant !== quant) continue
+    if (!picked || picked.incomplete || picked.quant !== quant) continue
     out.push({ quant, files: picked.files, totalBytes: picked.totalBytes, sharded: picked.sharded })
   }
   if (out.length === 0) {
     const any = selectGgufFromTree(models, repo)
-    if (any) out.push({ quant: any.quant ?? 'GGUF', files: any.files, totalBytes: any.totalBytes, sharded: any.sharded })
+    if (any && !any.incomplete) out.push({ quant: any.quant ?? 'GGUF', files: any.files, totalBytes: any.totalBytes, sharded: any.sharded })
   }
   return out.sort((a, b) => a.totalBytes - b.totalBytes)
 }
