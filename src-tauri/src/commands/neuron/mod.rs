@@ -395,7 +395,9 @@ pub fn parse_progress(line: &str) -> Option<(u64, u64)> {
 pub fn tool_failure(stderr: &str) -> String {
     let missing = stderr.lines().map(str::trim).find(|l| {
         let low = l.to_lowercase();
-        let names_lib = low.contains(".dll") || low.contains(".dylib");
+        // Linux's loader says "error while loading shared libraries: x.so";
+        // a bare ".so" would also match backtrace frames, so only that phrase.
+        let names_lib = low.contains(".dll") || low.contains(".dylib") || low.contains("error while loading shared libraries");
         let says_missing = ["not found", "not loaded", "missing", "cannot", "could not", "no such"].iter().any(|w| low.contains(w));
         names_lib && says_missing && l.len() < 200
     });
@@ -929,6 +931,10 @@ mod tests {
         assert!(dll.contains("llama-common.dll"), "{dll}");
         let dylib = super::tool_failure("dyld: Library not loaded: @rpath/libllama.dylib");
         assert!(dylib.contains("libllama.dylib"), "{dylib}");
+        let so = super::tool_failure("lu-llama-cvector-generator: error while loading shared libraries: libllama-common.so: cannot open shared object file: No such file or directory");
+        assert!(so.contains("libllama-common.so"), "{so}");
+        let frame = super::tool_failure("2 libggml-base.so 0x00007f0000001234 ggml_abort + 160 (no such frame info)");
+        assert!(frame.contains("app log"), "{frame}");
     }
 
     use super::*;
