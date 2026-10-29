@@ -46,9 +46,13 @@ async function masse(page: Page): Promise<Masse> {
       return { x: Math.round(b.x), y: Math.round(b.y), w: Math.round(b.width), h: Math.round(b.height) }
     }
     const send = document.querySelector('[data-testid="composer-send-slot"]')
+    // The row is the first ancestor with a box of its own: since 3.0.9 the send
+    // slot sits in a cluster that is `display: contents` in a wide window.
+    let row = send?.parentElement ?? null
+    while (row && getComputedStyle(row).display === 'contents') row = row.parentElement
     return {
       textarea: runden(document.querySelector('textarea')),
-      row: runden(send?.parentElement ?? null),
+      row: runden(row),
       send: runden(send),
     }
   })

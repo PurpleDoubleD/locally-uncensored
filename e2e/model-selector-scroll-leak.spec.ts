@@ -38,6 +38,14 @@ import { seedOnboardingDone } from './support/cloud-mock'
  * wo die Zeile keinen Ueberlauf hat (`scrollWidth === clientWidth`,
  * gemessen), laeuft der volle Oeffnen/Waehlen/Schliessen-Weg am
  * Modellwaehler selbst.
+ *
+ * Seit 3.0.9 (P2, schmales Fenster) bricht die Aktionszeile unter 26rem in
+ * zwei Zeilen um: bei 360px laeuft sie nicht mehr ueber (`scrollWidth ===
+ * clientWidth`, gemessen 233), Modellwaehler und Send liegen im Fenster. Der
+ * Vorfahr hat dort also von sich aus nichts mehr zu verschieben. Damit die
+ * Pruefung unten weiter etwas misst, gibt `erzwingeUeberlauf` ihm zur Laufzeit
+ * einen ueberbreiten Inhalt; der Schutz (`overflow-clip`) bleibt, was geprueft
+ * wird.
  */
 
 /**
@@ -61,6 +69,22 @@ async function findeSchneidendenVorfahren(page: Page) {
     }
     return null
   })
+}
+
+/** Ein 2000px breiter, leerer Inhalt im Vorfahren, damit er etwas zu
+ *  verschieben haette: ohne Ueberlauf bliebe jede `scrollLeft`-Zuweisung 0,
+ *  mit `clip` wie mit `hidden`, und die Pruefung saehe nichts. */
+async function erzwingeUeberlauf(page: Page, handle: Awaited<ReturnType<typeof findeSchneidendenVorfahren>>) {
+  const breit = await page.evaluate((el) => {
+    const node = el as HTMLElement | null
+    if (!node) return null
+    const platz = document.createElement('div')
+    platz.setAttribute('aria-hidden', 'true')
+    platz.style.cssText = 'flex: 0 0 2000px; width: 2000px; height: 1px'
+    node.appendChild(platz)
+    return node.scrollWidth > node.clientWidth
+  }, handle)
+  expect(breit, 'der Vorfahr muss jetzt ueberlaufen').toBe(true)
 }
 
 async function scrollLeftVon(page: Page, handle: Awaited<ReturnType<typeof findeSchneidendenVorfahren>>) {
@@ -162,6 +186,7 @@ test(`scrollLeft bleibt 0 bei 360px, auch nach einer echten Interaktion in der Z
   // Vorfahren landete: eine direkte `scrollLeft`-Zuweisung. `overflow: clip`
   // lehnt sie ab, `overflow: hidden` (der Zustand vor dem Fix) haette sie
   // angenommen, siehe die Negativkontrolle unten.
+  await erzwingeUeberlauf(page, vorfahr)
   await page.evaluate((el) => {
     const node = el as HTMLElement | null
     if (node) node.scrollLeft = 300
@@ -183,6 +208,7 @@ test('Negativkontrolle: ohne overflow-clip auf dem Vorfahren wirkt eine scrollLe
   const vorfahr = await findeSchneidendenVorfahren(page)
   expect(await scrollLeftVon(page, vorfahr)).toBe(0)
 
+  await erzwingeUeberlauf(page, vorfahr)
   await page.evaluate((el) => {
     (el as HTMLElement | null)?.style.setProperty('overflow', 'hidden')
   }, vorfahr)
@@ -195,6 +221,33 @@ test('Negativkontrolle: ohne overflow-clip auf dem Vorfahren wirkt eine scrollLe
   const nachher = await scrollLeftVon(page, vorfahr)
   expect(nachher, 'mit overflow: hidden statt clip nimmt der Vorfahr die Zuweisung an').not.toBe(0)
 })
+
+/** 3.0.9: bei 360px bricht die Zeile um, statt ueberzulaufen; Modellwaehler
+ *  und Send liegen ganz im Fenster, eine echte Maus erreicht sie. */
+for (const uiScale of [1, 1.15]) {
+test(`bei 360px laeuft die Zeile nicht ueber, Modellwaehler und Send liegen im Fenster, --ui-scale ${uiScale}`, async ({ page }) => {
+  await boot(page, 360, 720, uiScale)
+  const vorfahr = await findeSchneidendenVorfahren(page)
+  const masse = await page.evaluate((el) => {
+    const node = el as HTMLElement
+    return { sw: node.scrollWidth, cw: node.clientWidth }
+  }, vorfahr)
+  expect(masse.sw).toBeLessThanOrEqual(masse.cw)
+  for (const knopf of [
+    page.getByRole('button', { name: 'Select chat model', exact: true }),
+    page.getByTestId('composer-send-slot'),
+    page.getByTestId('sampling-trigger'),
+  ]) {
+    const box = await knopf.boundingBox()
+    expect(box).not.toBeNull()
+    expect(box!.x).toBeGreaterThanOrEqual(0)
+    expect(box!.x + box!.width).toBeLessThanOrEqual(360)
+  }
+  await page.getByRole('button', { name: 'Select chat model', exact: true }).click()
+  await expect(page.getByTestId('model-picker-menu')).toBeVisible()
+  expect(await scrollLeftVon(page, vorfahr), 'nach dem Oeffnen bei 360px').toBe(0)
+})
+}
 
 /**
  * Sichtbarkeitsfall fuer den VoiceButton-Tooltip: diese Runde ruehrt

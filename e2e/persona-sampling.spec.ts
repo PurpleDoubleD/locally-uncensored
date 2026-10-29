@@ -115,7 +115,8 @@ test('a persona made with its own sampling values runs on them, and the chat can
   await expect(speaker).toContainText('Baron')
   await expect(speaker).toContainText('Min P 0.07')
   await expect(speaker).toContainText('Repeat penalty 1.12')
-  await expect(page.getByTestId('sampling-panel').getByLabel('Temperature')).toHaveValue('0.35')
+  // exact: the "?" next to it is "What temperature does" (3.0.9).
+  await expect(page.getByTestId('sampling-panel').getByLabel('Temperature', { exact: true })).toHaveValue('0.35')
   await page.getByTestId('sampling-close').click()
 
   await send(page, 'hello')
@@ -129,7 +130,7 @@ test('a persona made with its own sampling values runs on them, and the chat can
   // The first answer is done before the second turn goes out.
   await expect(page.getByRole('button', { name: 'Regenerate response' })).toBeVisible({ timeout: 30_000 })
   await page.getByTestId('sampling-trigger').click()
-  await page.getByTestId('sampling-panel').getByLabel('Temperature').fill('1.2')
+  await page.getByTestId('sampling-panel').getByLabel('Temperature', { exact: true }).fill('1.2')
   await page.getByTestId('sampling-close').click()
   await expect(page.getByTestId('sampling-panel')).toHaveCount(0)
   await expect(page.getByTestId('sampling-trigger')).toContainText('1.20')
