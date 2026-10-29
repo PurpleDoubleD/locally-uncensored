@@ -2704,6 +2704,10 @@ for (const size of SIZES) {
       await tid(page, 'm-create-train-cancel').tap()
       await expect.poll(() => cloud.cancels).toEqual(['job-1'])
       await expect(tid(page, 'm-create-train-running')).toHaveCount(0)
+      // Stopped, not trained: the page stays with its photos and says nothing about a finished character.
+      await expect(tid(page, 'm-create-character-new-screen')).toBeVisible()
+      await expect(tid(page, 'm-toast-create-character-trained')).toHaveCount(0)
+      await expect(tid(page, 'm-create-char-photo')).not.toHaveCount(0)
     })
 
     test('prompt styles for clips: the length is kept and applied', async ({ page }) => {
@@ -2876,8 +2880,6 @@ for (const size of SIZES) {
     })
 
     test('training: the shelf stops a running training; a training the server refuses says so', async ({ page }) => {
-      // Red twice in a row at 320x568 on the shared CI runner of 3.0.8 (no toast after the stop), green locally every time.
-      test.skip(!!process.env.CI, 'timing on the shared CI runner; runs locally')
       const cloud = new Cloud()
       cloud.hold = true
       await openCreate(page, cloud)
@@ -2909,6 +2911,14 @@ for (const size of SIZES) {
       await expect.poll(() => cloud.cancels).toEqual(['job-1'])
       await expect(tid(page, 'm-toast-create-training-cancelled')).toBeVisible()
       await expect(tid(page, 'm-create-training')).toHaveCount(0)
+      // A stopped training is not a trained one. The page of the new character used to take the end of
+      // the run for success: it toasted "trained" (over this toast or under it, whichever came last, which
+      // is why this test was red on the Linux runner only) and left the shelf.
+      await expect(tid(page, 'm-create-characters-screen')).toBeVisible()
+      await expect(tid(page, 'm-toast-create-character-trained')).toHaveCount(0)
+      await page.waitForTimeout(1000)
+      await expect(tid(page, 'm-create-characters-screen')).toBeVisible()
+      await expect(tid(page, 'm-toast-create-character-trained')).toHaveCount(0)
     })
 
     test('the note about how long results are kept shows once; the credits chip opens the account', async ({ page }) => {

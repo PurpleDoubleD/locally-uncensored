@@ -235,17 +235,34 @@ const trayRow = (page: Page, kind: string) => page.locator(`[data-mlx-install="$
  *  page when that 120 ms fade is over, which is a transition and not a wait. */
 const NOTHING_RUNNING = '[data-downloads-active="0"]'
 
+/** Fully opaque all the way up: a row of a tray that is fading in or out is not. */
+const settled = (row: Locator) =>
+  row.evaluate((el) => {
+    for (let n: Element | null = el; n; n = n.parentElement) if (parseFloat(getComputedStyle(n).opacity) < 1) return false
+    return true
+  }).catch(() => false)
+
 async function openTray(page: Page, kind: string) {
   // The tray opens itself when a download starts, and a click on an open tray
   // closes it. Looked at once, a tray still opening read as closed and the
   // click shut it (red on the Linux runner, 3.0.8 release run), so look again
   // after every click until the row is there.
+  //
+  // And a tray on its way out still reads as open: a click outside it (the
+  // tests leave the Model Manager through the header) closes it with a fade
+  // (framer-motion `exit`, 120 ms), and for that long its rows are in the
+  // page and visible. On the CI runner the look landed in the fade: no click,
+  // the row "was there", then the panel left, and the Stop under test was gone
+  // (no Stop for 15 s) or was clicked after it had left the page (never
+  // answered). Locally the fade was always over before the look. So a row only
+  // counts when its panel is fully opaque, not in a fade either way; a fading
+  // row is waited out and the tray opened again. (Reproduced with the fade
+  // slowed down through CDP `Animation.setPlaybackRate`: red every time
+  // before, green after.)
   await expect(async () => {
-    if (!(await trayRow(page, kind).isVisible().catch(() => false))) {
-      await tray(page).click()
-      await page.waitForTimeout(300)
-    }
-    await expect(trayRow(page, kind)).toBeVisible({ timeout: 1000 })
+    const row = trayRow(page, kind)
+    if (!(await row.isVisible().catch(() => false))) await tray(page).click()
+    await expect.poll(() => settled(row), { timeout: 1000 }).toBe(true)
   }).toPass({ timeout: 15_000 })
 }
 
@@ -305,8 +322,6 @@ test('the tray stops an engine setup too, and the tile that waited for it is fre
 })
 
 test('the tray stops a video download from any page, with the video lane\'s own Stop', async ({ page }) => {
-  // Red twice in a row on the shared CI runner of 3.0.8 (no answer within ten seconds), green locally every time.
-  test.skip(!!process.env.CI, 'timing on the shared CI runner; runs locally')
   await openModels(page, { ...MAC, mlx: { engineInstalled: true, videoEngineInstalled: true, installedVideos: [], installPolls: 400 } })
   await rail(page, 'Video').click()
   const pick = tile(page, 'wan21-t2v-1.3b')

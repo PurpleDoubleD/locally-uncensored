@@ -196,13 +196,26 @@ fn tauri_target() -> &'static str {
 // ── The signature ─────────────────────────────────────────────
 
 /// The same check the plugin runs before it installs anything
-/// (tauri-plugin-updater-2.10.1/src/updater.rs, `verify_signature`): both the
+/// (tauri-plugin-updater-2.12.0/src/updater.rs, `verify_signature`): both the
 /// public key and the signature travel base64 wrapped around minisign's own
 /// text format, and the key is the one out of `tauri.conf.json`.
 ///
+/// After the file, the version: latest.json is not signed, so its `version`
+/// alone does not say which release the url and signature belong to. Since
+/// tauri-cli 2.11.5 the trusted comment carries `version:x.y.z`, and the global
+/// signature covers that comment, so it can only be read once `verify` passed.
+/// A signature without it is refused when `require_signed_version` is set
+/// (`requireSignedVersion` in tauri.conf.json), exactly as the plugin does.
+///
 /// A file that fails here is deleted by the caller and never becomes an
 /// executable in the user's home folder.
-pub fn verify_signature(data: &[u8], signature_b64: &str, pub_key_b64: &str) -> Result<(), String> {
+pub fn verify_signature(
+    data: &[u8],
+    signature_b64: &str,
+    pub_key_b64: &str,
+    announced_version: &str,
+    require_signed_version: bool,
+) -> Result<(), String> {
     use base64::Engine;
     let unwrap_b64 = |what: &str, s: &str| -> Result<String, String> {
         let raw = base64::engine::general_purpose::STANDARD
@@ -221,7 +234,32 @@ pub fn verify_signature(data: &[u8], signature_b64: &str, pub_key_b64: &str) -> 
 
     public_key
         .verify(data, &signature, true)
-        .map_err(|e| format!("the signature does not match the downloaded file: {e}"))
+        .map_err(|e| format!("the signature does not match the downloaded file: {e}"))?;
+
+    verify_signed_version(signature.trusted_comment(), announced_version, require_signed_version)
+}
+
+/// The plugin's `verify_signed_version`. `3.0.9` and `v3.0.9` are the same
+/// release; the plugin compares as semver, and our versions are plain x.y.z.
+pub fn verify_signed_version(
+    trusted_comment: &str,
+    announced_version: &str,
+    require_signed_version: bool,
+) -> Result<(), String> {
+    let Some(signed) = trusted_comment.split('\t').find_map(|field| field.strip_prefix("version:")) else {
+        return if require_signed_version {
+            Err("the signature does not name the version it was made for, and this build requires that".to_string())
+        } else {
+            Ok(())
+        };
+    };
+    if signed.trim_start_matches('v') == announced_version.trim_start_matches('v') {
+        Ok(())
+    } else {
+        Err(format!(
+            "the signature was made for version {signed}, but the update server announced {announced_version}"
+        ))
+    }
 }
 
 // ── Putting the file in place ─────────────────────────────────
@@ -608,12 +646,42 @@ mod tests {
         // a download that got swapped on the way.
         let key = "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDZDNkRFNzJFRjhFNkIxNDcKUldSSHNlYjRMdWR0YklwQlJhTUR4TXBTTE1xKzFUcWVVTEpTL0hZMi9ldmlOcW5BWFZWeUdzRGMK";
         let sig = "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSSHNlYjRMdWR0YklZalVUbGZSSDJ6Y1VYMmNrcmJwZUhwbHFoRFN6Qi84MjRTQ1ROaUdYaE43S2NjODNSU24rclIzVEF2cktpeThpN216QnRQRG1pWEFGQm1rZ2dBbWdzPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg4NzI1Njk2CWZpbGU6TG9jYWxseSBVbmNlbnNvcmVkXzIuNi44X2FtZDY0LkFwcEltYWdlCjEzRkxyQ0lWNlZ2YWdjdTJ0WGZOMUJNUXRmQWdmRVE5ZmlUTzk5TTM3V29EMXV3NERBSE5nZTd0bkQ2dEcvNVVlVWNTdFNsVFpnbGduclNxY1pBbkJBPT0K";
-        let err = verify_signature(b"this is not the AppImage", sig, key).unwrap_err();
+        let err = verify_signature(b"this is not the AppImage", sig, key, "2.6.8", false).unwrap_err();
         assert!(err.contains("does not match"), "{err}");
 
         // And the two ways the inputs themselves can be wrong.
-        assert!(verify_signature(b"x", "not base64!!", key).unwrap_err().contains("signature"));
-        assert!(verify_signature(b"x", sig, "not base64!!").unwrap_err().contains("public key"));
+        assert!(verify_signature(b"x", "not base64!!", key, "2.6.8", false).unwrap_err().contains("signature"));
+        assert!(verify_signature(b"x", sig, "not base64!!", "2.6.8", false).unwrap_err().contains("public key"));
+    }
+
+    // A throwaway key made for this test with `tauri signer generate` (CLI
+    // 2.11.5), and two signatures over FIXTURE: one with `--app-version 3.0.9`,
+    // whose trusted comment ends in `version:3.0.9`, and one without, which is
+    // what every CLI before 2.11.5 wrote.
+    const TEST_KEY: &str = "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDI2NEU5RUM3QzE5RkY1QkEKUldTNjlaL0J4NTVPSm1YSTdrLzN0YTUyeEZGOC9MWlV4RWc2ME1SdFVvU3dxbHR1RFBVS010Q0IK";
+    const FIXTURE: &[u8] = b"lu self migrate fixture\n";
+    const SIGNED_FOR_309: &str = "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTNjlaL0J4NTVPSmpOeEdjcG1JYkUyK0x5Y0Z6WEw0T2ExeENlSncvVTJVVTgrYTluK2hKNEZLc21ZdUZrd0c2YlhkeUUxYnQ4TFhyOUtkN3pRTXl6T3IrUVFZYWhnUnc4PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzMTk2NTQzCWZpbGU6Zml4dHVyZS5iaW4JdmVyc2lvbjozLjAuOQphU1NDQSs2dmVZRFhBVmkxMDRUVWZhRE9tc1JtemN5clRCa1ppQlI3ZVJMVUFhMHJPcVlQV0ZmbVd4RG84RlUzWEhkTWY5a1JOemZ1OEt6akhXVUdDZz09Cg==";
+    const SIGNED_WITHOUT_VERSION: &str = "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTNjlaL0J4NTVPSnR5VUY4aFpWNG5mbm5ZZUpvK0RkZUcwajNrL3cyZDNYMXJlSHlHSE1iSGFzaWhyZmlKOWV1eHRSemU0UGVCb1N6RjRxak42YWUyc0hjNEltVWpDY3c0PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzMTk2NTQzCWZpbGU6bGVnYWN5LmJpbgpDZ21FclNTYmtLM3R6eW9ISExpQk9YeHpUcTVON2I1QmZDM0RLU2x1ZTZaTFNkUFh2T2VBU1pKMjJ5T3phaEJ1LzM3VmVBQjh6eVk2cnh4R0tFMHJBUT09Cg==";
+
+    #[test]
+    fn a_signature_made_for_one_version_is_refused_for_another() {
+        // The file and signature are genuine; only latest.json claims a newer
+        // version for them. That is the replay the version binding stops.
+        verify_signature(FIXTURE, SIGNED_FOR_309, TEST_KEY, "3.0.9", true).expect("same version");
+        verify_signature(FIXTURE, SIGNED_FOR_309, TEST_KEY, "v3.0.9", true).expect("v prefix");
+        let err = verify_signature(FIXTURE, SIGNED_FOR_309, TEST_KEY, "3.0.10", true).unwrap_err();
+        assert!(err.contains("made for version 3.0.9") && err.contains("3.0.10"), "{err}");
+        // Like the plugin: a version in the signature is always checked, even
+        // when the build does not require one.
+        assert!(verify_signature(FIXTURE, SIGNED_FOR_309, TEST_KEY, "3.0.10", false).is_err());
+    }
+
+    #[test]
+    fn a_signature_without_a_version_passes_only_when_none_is_required() {
+        verify_signature(FIXTURE, SIGNED_WITHOUT_VERSION, TEST_KEY, "3.0.9", false)
+            .expect("an old signature is still fine where the build does not ask for a version");
+        let err = verify_signature(FIXTURE, SIGNED_WITHOUT_VERSION, TEST_KEY, "3.0.9", true).unwrap_err();
+        assert!(err.contains("does not name the version"), "{err}");
     }
 
     /// The real proof, against the file GitHub serves.
@@ -638,12 +706,12 @@ mod tests {
             .expect("LU_APPIMAGE_PUBKEY: the pubkey out of tauri.conf.json");
 
         let mut bytes = std::fs::read(&path).expect("the fixture");
-        verify_signature(&bytes, &signature, &key).expect("the real download must be accepted");
+        verify_signature(&bytes, &signature, &key, "2.6.8", false).expect("the real download must be accepted");
         eprintln!("accepted {} bytes from {:?}", bytes.len(), path);
 
         let middle = bytes.len() / 2;
         bytes[middle] ^= 0x01;
-        let err = verify_signature(&bytes, &signature, &key)
+        let err = verify_signature(&bytes, &signature, &key, "2.6.8", false)
             .expect_err("one flipped byte must be refused");
         eprintln!("refused after flipping byte {middle}: {err}");
     }

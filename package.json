@@ -47,7 +47,7 @@
     "@react-three/fiber": "^9.5.0",
     "@supabase/supabase-js": "^2.110.0",
     "@tauri-apps/plugin-shell": "^2.3.5",
-    "@tauri-apps/plugin-updater": "^2.10.1",
+    "@tauri-apps/plugin-updater": "2.12.0",
     "@types/react-syntax-highlighter": "^15.5.13",
     "@types/uuid": "^10.0.0",
     "dotenv": "^17.3.1",
@@ -73,8 +73,8 @@
     "@eslint/js": "^9.39.4",
     "@playwright/test": "^1.61.1",
     "@tailwindcss/vite": "^4.2.2",
-    "@tauri-apps/api": "^2.10.1",
-    "@tauri-apps/cli": "2.11.4",
+    "@tauri-apps/api": "2.10.1",
+    "@tauri-apps/cli": "2.11.5",
     "@testing-library/react": "^16.3.3",
     "@types/node": "^24.12.0",
     "@types/react": "^19.2.14",
@@ -88,7 +88,12 @@
     "madge": "^8.0.0",
     "typescript": "~5.9.3",
     "typescript-eslint": "^8.57.0",
-    "vite": "^8.0.1",
+    "vite": "8.1.6",
     "vitest": "^4.1.11"
+  },
+  "overrides": {
+    "@tauri-apps/plugin-updater": {
+      "@tauri-apps/api": "$@tauri-apps/api"
+    }
   }
 }

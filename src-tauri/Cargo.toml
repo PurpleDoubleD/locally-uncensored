@@ -180,7 +180,10 @@ tauri-plugin-lu-native = { path = "plugins/lu-native" }
 # the updater has nothing to install because updates come through the store.
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri = { version = "2", features = ["devtools", "tray-icon"] }
-tauri-plugin-updater = "2"
+# Pinned: 2.12.0 is the first with `requireSignedVersion` (tauri.conf.json),
+# which binds a signature to the version latest.json announces; the CLI writes
+# that version into the signature since 2.11.5. 2.13 asks for tauri 2.12.
+tauri-plugin-updater = "=2.12.0"
 tauri-plugin-single-instance = "2"
 # Native open and save dialogs.
 rfd = "0.15"
