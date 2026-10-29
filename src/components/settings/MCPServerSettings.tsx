@@ -4,6 +4,7 @@ import { Plus, Trash2, Power, PowerOff, Pencil } from 'lucide-react'
 import { useMCPStore } from '../../stores/mcpStore'
 import { toolRegistry } from '../../api/mcp'
 import type { MCPServerConfig } from '../../api/mcp/types'
+import { joinArgs, parseArgs } from '../../lib/mcp-args'
 // `import type` und nicht `import`: die Klasse wird unten bewusst dynamisch
 // geladen, damit der Tauri-Import im Dev-Modus nicht mitkommt. Ein Typ-Import
 // wird beim Uebersetzen geloescht und erzeugt keine Laufzeit-Abhaengigkeit —
@@ -67,7 +68,7 @@ export function MCPServerSettings() {
     setEditingId(server.id)
     setFormName(server.name)
     setFormCommand(server.command)
-    setFormArgs(server.args.join(' '))
+    setFormArgs(joinArgs(server.args))
     setError(null)
     setShowAddForm(true)
   }
@@ -77,7 +78,7 @@ export function MCPServerSettings() {
     const felder = {
       name: formName.trim(),
       command: formCommand.trim(),
-      args: formArgs.trim() ? formArgs.trim().split(' ') : [],
+      args: parseArgs(formArgs),
     }
     if (editingId) {
       // Ein laufender Server traegt noch den alten Befehl. Ihn stehen zu
@@ -208,7 +209,7 @@ export function MCPServerSettings() {
               <div className="flex-1 min-w-0">
                 <p className="text-[0.7rem] text-gray-300 font-medium">{server.name}</p>
                 <p className="text-[0.55rem] text-gray-600 font-mono truncate">
-                  {server.command} {server.args.join(' ')}
+                  {server.command} {joinArgs(server.args)}
                 </p>
               </div>
 
@@ -296,7 +297,7 @@ export function MCPServerSettings() {
           <input
             value={formArgs}
             onChange={(e) => setFormArgs(e.target.value)}
-            placeholder="Args (e.g. -y @modelcontextprotocol/server-filesystem /path)"
+            placeholder='Args (e.g. -y @modelcontextprotocol/server-filesystem "/My Folder")'
             className="w-full px-2 py-1 rounded bg-white/5 border border-white/10 text-[0.65rem] text-gray-300 placeholder-gray-600 font-mono focus:border-white/20 outline-none"
           />
           <div className="flex gap-1.5">
