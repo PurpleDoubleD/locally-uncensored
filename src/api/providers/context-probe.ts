@@ -195,6 +195,21 @@ export function parseOllamaShowContext(info: unknown): number | null {
       }
     }
   }
+  // GH #201: a server that emulates Ollama (KoboldCpp, or a proxy in front
+  // of it) can name the length outside `model_info`: as a plain
+  // `context_length`, as `<arch>.context_length` beside it, or in `details`.
+  // Ollama itself never does, so for Ollama nothing changes.
+  for (const where of [info, prop(info, 'details')]) {
+    if (!isRecord(where)) continue
+    const plain = positiveCount(where.context_length)
+    if (plain) return plain
+    for (const [k, v] of Object.entries(where)) {
+      if (k.endsWith('.context_length')) {
+        const n = positiveCount(v)
+        if (n) return n
+      }
+    }
+  }
   const params = prop(info, 'parameters')
   if (isRecord(params)) {
     const n = positiveCount(params.num_ctx)

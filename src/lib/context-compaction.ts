@@ -142,6 +142,9 @@ const COUNT_BUDGET = MAX_SEND_MESSAGES - 3
  * any real instruction; a pasted 200 KB file does not ride along forever. */
 const PINNED_TASK_MAX_CHARS = 8000
 
+/** The agent notice without its trail of done calls, to size its room. */
+const AGENT_NOTICE_SIZE_PROBE = '[999 earlier messages were trimmed to fit the context window. The original task still stands. Results you already saw still hold. If a detail is genuinely missing, re-read that specific file once; never repeat a call that already ran.]'
+
 /** How many already-done tool names the trim notice carries. */
 const DONE_TRAIL_MAX = 40
 
@@ -175,7 +178,17 @@ function toolNamesIn(msg: OllamaChatMessage): string[] {
  * shared /g regex carries lastIndex state between .test and .replace calls.
  */
 const trimNoticeRe = () =>
-  /\s*\[\d+ earlier messages? (?:was|were) trimmed to fit the context window\.[^\]]*\]\s*/g
+  /\s*\[(?:\d+ earlier messages? (?:was|were) trimmed to fit the context window\.|Note: \d+ earlier messages? of this conversation (?:is|are) not included here)[^\]]*\]\s*/g
+
+/**
+ * The trim notice for a CONVERSATION (GH #201): plain chat, a group round,
+ * compare. The agent's wording below talks about a task, results and files to
+ * re-read, which in a story only confuses the model. This one says what is
+ * true in a chat: the start is missing, carry on from what is here.
+ */
+export function chatTrimNotice(dropped: number): string {
+  return `[Note: ${dropped} earlier message${dropped === 1 ? ' of this conversation is' : 's of this conversation are'} not included here because they no longer fit the context window. Continue naturally from the messages you can see.]`
+}
 
 /** Remove an earlier trim notice from a message body, so repeated compaction
  *  rounds never stack notices inside the pinned task or the kept window. */
@@ -325,6 +338,9 @@ export const COMPACT_DROP_BLOCK = 16
 export interface CompactOptions {
   /** Wait for budget × 1.15, then drop to budget × 0.7. */
   hysteresis?: boolean
+  /** Who reads the trim notice: an agent run (default) or a conversation,
+   *  which gets chatTrimNotice (GH #201). */
+  notice?: 'agent' | 'chat'
 }
 
 export function compactMessages(
@@ -332,13 +348,27 @@ export function compactMessages(
   maxTokens: number,
   opts: CompactOptions = {},
 ): OllamaChatMessage[] {
+  return compactMessagesWithCount(messages, maxTokens, opts).messages
+}
+
+/**
+ * compactMessages, and how many of the older messages it left out. The count
+ * is what the chat shows under an answer whose request was trimmed (GH #201),
+ * so nobody has to guess from a token counter that turns were dropped.
+ */
+export function compactMessagesWithCount(
+  messages: OllamaChatMessage[],
+  maxTokens: number,
+  opts: CompactOptions = {},
+): { messages: OllamaChatMessage[]; dropped: number } {
+  const unchanged = { messages, dropped: 0 }
   const currentTokens = estimateMessageTokens(messages)
   const triggerTokens = opts.hysteresis ? Math.floor(maxTokens * COMPACT_TRIGGER_RATIO) : maxTokens
   const targetTokens = opts.hysteresis ? Math.floor(maxTokens * COMPACT_TARGET_RATIO) : maxTokens
 
   // Already within budget — BOTH budgets. A history that fits the token
   // window but exceeds the message-count ceiling still has to shrink.
-  if (currentTokens <= triggerTokens && messages.length <= MAX_SEND_MESSAGES) return messages
+  if (currentTokens <= triggerTokens && messages.length <= MAX_SEND_MESSAGES) return unchanged
 
   // Separate system prompt (always kept). A stray system message deeper in
   // the history that is only an old trim notice is dropped outright here:
@@ -351,7 +381,7 @@ export function compactMessages(
   )
 
   // If we have fewer messages than KEEP_RECENT, can't compact further
-  if (nonSystem.length <= KEEP_RECENT) return messages
+  if (nonSystem.length <= KEEP_RECENT) return unchanged
 
   const systemTokens = systemMsg ? estimateMessageTokens([systemMsg]) : 0
   const budget = Math.max(0, targetTokens - systemTokens)
@@ -400,7 +430,11 @@ export function compactMessages(
   // Accumulate a recent suffix that fits, newest-first. Keep at least
   // KEEP_RECENT messages even when that exceeds budget (recent context is the
   // most valuable), otherwise stop as soon as the next message would overflow.
-  const suffixBudget = Math.max(0, budget - pinnedTokens)
+  // The trim notice rides on top of the window, so its room comes off first.
+  // Without the hysteresis (a local chat, GH #201) nothing else leaves slack
+  // under the budget, and the notice alone pushed the payload past it.
+  const noticeTokens = estimateTokens(opts.notice === 'chat' ? chatTrimNotice(999) : AGENT_NOTICE_SIZE_PROBE) + 8
+  const suffixBudget = Math.max(0, budget - pinnedTokens - noticeTokens)
   const kept: OllamaChatMessage[] = []
   let used = 0
   for (let i = capped.length - 1; i >= 0; i--) {
@@ -426,7 +460,9 @@ export function compactMessages(
 
   const droppedCount = capped.length - kept.length - (pinNeeded ? 1 : 0)
   let notice: string | null = null
-  if (droppedCount > 0) {
+  if (droppedCount > 0 && opts.notice === 'chat') {
+    notice = chatTrimNotice(droppedCount)
+  } else if (droppedCount > 0) {
     // What was dropped is exactly the record of the work already done, while
     // the pin keeps the instruction alive forever. Measured on the installed
     // build 2026-08-06, Coding + Ollama + hermes, a 30 step plan: the run
@@ -458,11 +494,14 @@ export function compactMessages(
   // between the pin and the window. Why that is forbidden, and where it goes
   // instead, is now documented once at attachNoteToUserMaterial above — the
   // written summary of 2.6.8 obeys the identical rule through the same call.
-  return attachNoteToUserMaterial<OllamaChatMessage>({
-    system: systemMsg,
-    pinned: pinNeeded ? pinnedTask : null,
-    kept,
-    note: notice,
-    strip: stripTrimNotice,
-  })
+  return {
+    messages: attachNoteToUserMaterial<OllamaChatMessage>({
+      system: systemMsg,
+      pinned: pinNeeded ? pinnedTask : null,
+      kept,
+      note: notice,
+      strip: stripTrimNotice,
+    }),
+    dropped: Math.max(0, droppedCount),
+  }
 }

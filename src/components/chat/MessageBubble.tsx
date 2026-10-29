@@ -2,7 +2,7 @@ import { ChatAttachment } from './ChatAttachment'
 import { ChatFileChip } from './ChatFileChip'
 import { FILE_ONLY_TEXT } from '../../lib/chat-files'
 import { motion } from 'framer-motion'
-import { User, Copy, Check, Pencil, RefreshCw, Wrench, Trash2, Scissors, Unlink, Film, Music, GitBranch } from 'lucide-react'
+import { User, Copy, Check, Pencil, RefreshCw, Wrench, Trash2, Scissors, Unlink, Film, Music, GitBranch, ListRestart } from 'lucide-react'
 import { useState, useRef, useEffect, useMemo, memo } from 'react'
 import { MarkdownRenderer } from './MarkdownRenderer'
 import { closeOpenMarkdown } from '../../lib/streaming-markdown'
@@ -46,6 +46,9 @@ interface Props {
    *  ONE stable function to every bubble — a per-message closure would be a new
    *  prop on every render and defeat the memo() below. */
   onRegenerate?: (messageId: string) => void
+  /** GH #199: a group speaker's answer also offers the whole round again,
+   *  as an action of its own beside Regenerate. */
+  onRegenerateRound?: (messageId: string) => void
   /** "Save & resend" of an edited user message. False when nothing could be
    *  sent; the edit is then saved instead of lost. */
   onEdit?: (messageId: string, newContent: string) => boolean
@@ -77,7 +80,7 @@ interface Props {
   declined?: boolean
 }
 
-function MessageBubbleImpl({ message, onRegenerate, onEdit, pendingApprovalId, onApprove, onReject, isLast, isStreaming, speakerName, declined, forkKey, forkIndex, forkTotal, onSwitchFork, onBranch }: Props) {
+function MessageBubbleImpl({ message, onRegenerate, onRegenerateRound, onEdit, pendingApprovalId, onApprove, onReject, isLast, isStreaming, speakerName, declined, forkKey, forkIndex, forkTotal, onSwitchFork, onBranch }: Props) {
   const [copied, setCopied] = useState(false)
   const [isEditing, setIsEditing] = useState(false)
   const [editContent, setEditContent] = useState('')
@@ -688,7 +691,10 @@ function MessageBubbleImpl({ message, onRegenerate, onEdit, pendingApprovalId, o
               <button onClick={actions.edit} className="p-1 rounded-md text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/10 transition-colors" aria-label="Edit response" title="Edit"><Pencil size={12} /></button>
             )}
             {actions.regenerate && (
-              <button onClick={actions.regenerate} className="p-1 rounded-md text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/10 transition-colors" aria-label="Regenerate response" title="Regenerate"><RefreshCw size={12} /></button>
+              <button onClick={actions.regenerate} className="p-1 rounded-md text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/10 transition-colors" aria-label="Regenerate response" title={onRegenerateRound ? 'Regenerate this answer' : 'Regenerate'}><RefreshCw size={12} /></button>
+            )}
+            {!isUser && onRegenerateRound && (
+              <button onClick={() => onRegenerateRound(message.id)} data-testid="regenerate-round" className="p-1 rounded-md text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/10 transition-colors" aria-label="Regenerate whole round" title="Regenerate whole round: every speaker answers this message again"><ListRestart size={12} /></button>
             )}
             <button onClick={actions.copy} className="p-1 rounded-md text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/10 transition-colors" aria-label="Copy message" title={copied ? 'Copied' : 'Copy'}>
               {copied ? <Check size={12} className="text-green-500" /> : <Copy size={12} />}

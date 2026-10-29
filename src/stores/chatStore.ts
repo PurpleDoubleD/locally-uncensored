@@ -254,6 +254,9 @@ interface ChatState {
   /** Group chat: the persona ONE participant speaks as in this chat, or
    *  `null` to let it follow the chat's own persona setting again. */
   setGroupPersona: (id: string, model: string, personaId: string | null) => void
+  /** Group chat (GH #200): who sits out the next round. An empty list takes
+   *  the pick away. */
+  setGroupSitOut: (id: string, models: string[]) => void
   /** Write the model the open chat is actually running on.
    *
    *  Befund 4 of the abnahme counter-check (2026-08-29): switching the model
@@ -280,6 +283,9 @@ interface ChatState {
   /** The summed counts of one request (lib/request-usage.ts), replaced whole. */
   updateMessageRequestUsage: (conversationId: string, messageId: string, requestUsage: RequestUsage) => void
   updateMessageFinishReason: (conversationId: string, messageId: string, finishReason: string) => void
+  /** GH #201: how much older history the request behind this answer left
+   *  out, or null when it went out whole. */
+  updateMessageHistoryTrim: (conversationId: string, messageId: string, trim: Message['historyTrim'] | null) => void
   /** The kind of error a run ended with, or null to take it away again. */
   updateMessageError: (conversationId: string, messageId: string, error: MessageError | null) => void
   /** How long the model thought before it answered, in milliseconds. */
@@ -692,6 +698,22 @@ export const useChatStore = create<ChatState>()(
             // persona stays their author once another model takes it over.
             const leaving = Object.entries(c.groupPersonas ?? {}).filter(([model]) => !groupModels.includes(model))
             if (leaving.length > 0) next.messages = stampGroupPersonas(c.messages, Object.fromEntries(leaving))
+            // GH #200: a member that left cannot sit out a round either.
+            const sitOut = (c.groupSitOut ?? []).filter((m) => groupModels.includes(m))
+            if (sitOut.length > 0) next.groupSitOut = sitOut
+            else delete next.groupSitOut
+            return next
+          }),
+        })),
+
+      setGroupSitOut: (id, models) =>
+        set((state) => ({
+          conversations: state.conversations.map((c) => {
+            if (c.id !== id) return c
+            const sitOut = models.filter((m) => c.groupModels?.includes(m))
+            const next = { ...c }
+            if (sitOut.length > 0) next.groupSitOut = sitOut
+            else delete next.groupSitOut
             return next
           }),
         })),
@@ -869,6 +891,24 @@ export const useChatStore = create<ChatState>()(
               }
               : c
           ),
+        })),
+
+      updateMessageHistoryTrim: (conversationId, messageId, trim) =>
+        set((state) => ({
+          conversations: state.conversations.map((c) => {
+            if (c.id !== conversationId) return c
+            return {
+              ...c,
+              messages: c.messages.map((m) => {
+                if (m.id !== messageId) return m
+                if (trim && trim.dropped > 0) return { ...m, historyTrim: trim }
+                if (!m.historyTrim) return m
+                const next = { ...m }
+                delete next.historyTrim
+                return next
+              }),
+            }
+          }),
         })),
 
       updateMessageError: (conversationId, messageId, error) =>

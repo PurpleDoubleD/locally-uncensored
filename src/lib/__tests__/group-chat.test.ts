@@ -144,8 +144,10 @@ describe('wiring (source guards)', () => {
 
   it('every group turn is labeled and one abort spans the whole round', () => {
     expect(useChatSrc).toContain('modelId: model')
-    expect(useChatSrc).toContain('await runGroupTurn(convId, model, models, abort)')
+    expect(useChatSrc).toContain('await runGroupTurn(convId, model, table, turn)')
     expect(useChatSrc).toContain('if (abort.signal.aborted) break')
+    // The turn's controller follows the round's: Stop still ends the round.
+    expect(useChatSrc).toContain("abort.signal.addEventListener('abort', endTurn)")
   })
 
   it('the bubble names the speaker only when a turn carries a model', () => {

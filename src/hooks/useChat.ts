@@ -28,7 +28,7 @@ import { isSearchStopped, waitForSlotOrStop } from "../lib/slot-wait"
 import { sourcesFromChunks } from "../lib/rag-sources"
 import { buildRagSuffix, RETRIEVAL_FAILED_MESSAGE } from "../lib/rag-prompt"
 import { buildTurnContext, withTurnContext } from "../lib/turn-context"
-import { getChatWindowTokens, capMessageCount, compactMessages, estimateMessageTokens } from "../lib/context-compaction"
+import { getChatWindowTokens, capMessageCount, compactMessages, compactMessagesWithCount, estimateMessageTokens } from "../lib/context-compaction"
 import { contextOverflowOf, shrunkSendWindow } from "./codex/context-overflow"
 import { applyChatSendBudget, chatBudgetApplies, sendBudgetWouldTrim } from "../lib/chat-send-budget"
 import { sendsToALanBackend } from "../lib/lan-openai-slot"
@@ -66,6 +66,9 @@ import { fileMessageFields, filesWithoutWorkspace, type ChatFileInput } from "..
 import { fitFilesForSend, requestTextOf } from "./chat-file-room"
 import { isGroupChat, availableGroupMembers, groupSystemPrompt, groupHistory, groupSpeakers, stripImpersonatedSpeakers, hasGroupHistory, soloSpeakers, soloTurnAuthorFields, soloHistoryTag, SOLO_HISTORY_LINE } from "../lib/group-chat"
 import { explainSendRefusal } from "../lib/template-refusal"
+import { laterAnswersInRound, nextRoundSpeakers, regenerateSpeakers, copiesForNewVersion } from "../lib/group-rounds"
+import { groupTurnStarted, groupRoundEnded } from "../stores/groupRoundStore"
+import { forkStart } from "../lib/chat-forks"
 import { builtinReloadNeeded, ensureBuiltinEngineAlive } from "../api/builtin-ensure"
 import { emptyAnswerExplanation } from "../lib/answer-notes"
 import { beginModelSwitchWatch, cutByModelSwitch, finishReasonAfterSwitch, MODEL_SWITCH_FINISH } from "../lib/model-switch-stop"
@@ -188,26 +191,40 @@ async function runGroupTurn(convId: string, model: string, allModels: string[], 
   // GH #181: each member carries the reminder of the persona it plays, in
   // its own request only, by the same rule as its prompt and its sampling.
   const note = personaNoteOf(speakerPersonaFor(conv, model, personas, activePersonaId, true))
-  const messages = applyChatSendBudget(
-    capMessageCount([
-      { role: 'system' as const, content: groupSystemPrompt(model, allModels, personaPrompt, speakers) },
-      ...groupHistory(conv.messages, model, speakers, { groupPersonas: conv.groupPersonas, personas }),
-    ]),
-    {
-      note,
-      providerId,
-      // Only asked where the answer can change something — which, since the
-      // notaus is now the only thing that closes the gate, means: unless the
-      // user switched capping off. The lookup is cached per model, so a group
-      // round does not pay an /api/show per member per turn.
-      modelWindow: chatBudgetApplies(providerId, settings.contextDecay)
-        ? await getChatWindowTokens(model)
-        : 0,
-      sendWindowTokens: sendWindowFor(settings, model),
-      contextDecay: settings.contextDecay,
-      localBackend: sendsToALanBackend(providerId, model),
-    },
-  ).messages
+  // Only asked where the answer can change something — which, since the
+  // notaus is now the only thing that closes the gate, means: unless the
+  // user switched capping off. The lookup is cached per model, so a group
+  // round does not pay an /api/show per member per turn.
+  //
+  // GH #201: the window is THIS speaker's, as picked for its model, and a
+  // local speaker's budget is that window less the answer's room
+  // (chatSendBudget). It used to end at 0.56 of the window: 128K-131K of a
+  // 256K pick, every round.
+  const modelWindow = chatBudgetApplies(providerId, settings.contextDecay)
+    ? await getChatWindowTokens(model)
+    : 0
+  const full = [
+    { role: 'system' as const, content: groupSystemPrompt(model, allModels, personaPrompt, speakers) },
+    ...groupHistory(conv.messages, model, speakers, { groupPersonas: conv.groupPersonas, personas }),
+  ]
+  const counted = capMessageCount([...full])
+  const sent = applyChatSendBudget(counted, {
+    note,
+    providerId,
+    modelWindow,
+    sendWindowTokens: sendWindowFor(settings, model),
+    contextDecay: settings.contextDecay,
+    localBackend: sendsToALanBackend(providerId, model),
+    answerTokens: settings.maxTokens,
+    notice: 'chat',
+  })
+  let messages = sent.messages
+  // Said in the chat, next to this answer: older turns did not go out.
+  let dropped = full.length - counted.length + sent.droppedMessages
+  const noteTrim = () => useChatStore.getState().updateMessageHistoryTrim(
+    convId, assistantMessage.id, dropped > 0 ? { dropped, window: modelWindow } : null,
+  )
+  noteTrim()
 
   const canThink = isThinkingCompatible(model)
   const useThinking: boolean | undefined = canThink ? settings.thinkingEnabled === true : undefined
@@ -227,6 +244,15 @@ async function runGroupTurn(convId: string, model: string, allModels: string[], 
   const others = allModels
     .filter((m) => m !== model)
     .flatMap((m) => (speakers[m].name === m ? [m] : [m, speakers[m].name]))
+  // A stopped or skipped turn keeps what it had written. The stream is written
+  // to the store once per frame, and a window in the background paints no
+  // frames: on the Mac build a skipped speaker's words had never reached the
+  // store, so the turn read as empty and was removed (GH #200).
+  const keepWhatWasWritten = () => {
+    if (abort.signal.aborted && contentAcc.trim()) {
+      useChatStore.getState().updateMessageContent(convId, assistantMessage.id, stripImpersonatedSpeakers(stripNonCanonicalTags(contentAcc), others))
+    }
+  }
 
   try {
     // Local speakers share ONE engine process. llama-server holds a single
@@ -261,12 +287,35 @@ async function runGroupTurn(convId: string, model: string, allModels: string[], 
     // GH #175: each member runs on the values of its own persona, the chat's
     // own Sampling values on top. Not gated on the Personas switch, the same
     // rule as the member's prompt above.
-    const stream = provider.chatStream(modelId, messages, {
+    const streamOpts = {
       ...speakerSamplingOptions(settings, conv, model, personas, activePersonaId, true),
-      window: 'chat',
+      window: 'chat' as const,
       thinking: useThinking,
       signal: abort.signal,
-    })
+    }
+    // The same one retry as plain chat: the engine refused the prompt as
+    // larger than its context, because its own count ran ahead of the
+    // estimate. Cut once under what it named and send again; the refusal
+    // comes before any token, so nothing shows twice.
+    async function* streamWithOverflowRetry() {
+      try {
+        yield* provider.chatStream(modelId, messages, streamOpts)
+      } catch (err) {
+        const overflow = contextOverflowOf(err)
+        if (!overflow) throw err
+        type Wire = Parameters<typeof estimateMessageTokens>[0]
+        const size = estimateMessageTokens(messages as unknown as Wire)
+        const next = shrunkSendWindow(size, overflow, size)
+        const cut = next !== null ? compactMessagesWithCount(messages as unknown as Wire, next, { notice: 'chat' }) : null
+        if (!cut || cut.messages.length >= messages.length) throw err
+        log.info('chat.group_context_overflow_retry', { sent: size, next, window: overflow.window, promptTokens: overflow.promptTokens, kept: cut.messages.length })
+        messages = cut.messages as unknown as typeof messages
+        dropped += cut.dropped
+        noteTrim()
+        yield* provider.chatStream(modelId, messages, streamOpts)
+      }
+    }
+    const stream = streamWithOverflowRetry()
 
     for await (const chunk of stream) {
       if (abort.signal.aborted) break
@@ -335,6 +384,7 @@ async function runGroupTurn(convId: string, model: string, allModels: string[], 
     }
     thinkClock.end()
     frames.close()
+    keepWhatWasWritten()
     if (!abort.signal.aborted && !contentAcc.trim()) {
       // Empty turn: say WHY, length-aware, not a flat "didn't return an answer".
       // The bubble already labels the speaker, so no model prefix here.
@@ -346,6 +396,7 @@ async function runGroupTurn(convId: string, model: string, allModels: string[], 
     }
   } catch (err) {
     frames.close()
+    keepWhatWasWritten()
     if ((err as Error).name !== 'AbortError') {
       syncOllamaHealthFromError(err)
       // Bug B3 round 2: a group round on a strict template used to paste the
@@ -422,6 +473,14 @@ interface ChatRun {
  * claim).
  */
 const activeChatRuns = new Map<string, symbol>()
+
+/** A group round that answers again instead of starting from a new user
+ *  line (GH #199): who speaks, and what to do once the round holds its
+ *  claim, before the first speaker (move the old answers into a version). */
+interface GroupRoundAgain {
+  speakers: string[]
+  prepare: () => void
+}
 
 /**
  * "A send of this conversation is on its way", from the tap to the end.
@@ -547,7 +606,7 @@ export function useChat() {
    * a second local conversation could stream from the built-in engine at the
    * same time, silently, because `localLaneHolder()` never heard about the
    * group round at all. */
-  const runGroupRound = useCallback(async (convId: string, content: string, images: ImageAttachment[] | undefined, members: string[], files?: ChatFileInput[]) => {
+  const runGroupRound = useCallback(async (convId: string, content: string, images: ImageAttachment[] | undefined, members: string[], files?: ChatFileInput[], again?: GroupRoundAgain): Promise<boolean> => {
     // Auflage 3 (Review composer, 19.09.2026): derselbe Wiedereintritts-Riegel
     // wie sendMessage oben ("Re-entry guard"). Ohne ihn ueberschrieb ein
     // doppeltes Enter auf einem Gruppenchat den Token der ersten Runde weiter
@@ -558,7 +617,7 @@ export function useChat() {
     // Verlauf. Claim synchron, vor der ersten Nachricht, exakt wie dort.
     if (activeChatRuns.has(convId)) {
       log.info('chat.duplicate_group_round_blocked', { convId })
-      return
+      return false
     }
     const myRunToken = Symbol(convId)
     activeChatRuns.set(convId, myRunToken)
@@ -582,37 +641,51 @@ export function useChat() {
       // shown as unavailable in the group menu, and speaks again once its
       // model is listed again.
       const listed = useModelStore.getState()
-      const models = availableGroupMembers(members, listed.models, listed.inventoryLoaded)
+      // Everyone at the table: named to each speaker and tagged in its history.
+      const table = availableGroupMembers(members, listed.models, listed.inventoryLoaded)
+      // Who answers THIS round. A regenerate (GH #199) names its speakers and
+      // adds no user line; a new round takes the group's order less whoever
+      // was set to sit it out (GH #200), and that pick is used up here.
+      let models: string[]
+      if (again) {
+        models = again.speakers.filter((m) => table.includes(m))
+        if (models.length === 0) return false
+        again.prepare()
+      } else {
+        const sitOut = useChatStore.getState().conversations.find((c) => c.id === convId)?.groupSitOut
+        models = nextRoundSpeakers(table, sitOut)
+        if (sitOut?.length) useChatStore.getState().setGroupSitOut(convId, [])
 
-      // GH #171: an attached text goes out whole when it fits, and as far as
-      // it fits otherwise. One user line reaches every speaker, so it is
-      // fitted to the smallest window at the table (all members when none is
-      // listed: then nobody answers and the size does not matter).
-      const sendFiles = await fitFilesForSend({
-        files: filesWithoutWorkspace(files),
-        models: models.length ? models : members,
-        use: 'chat',
-        otherText: requestTextOf(useChatStore.getState().conversations.find((c) => c.id === convId), content),
-      })
-      useChatStore.getState().addMessage(convId, {
-        id: uuid(),
-        role: 'user',
-        // An attached file reaches every speaker as its summary, inside the
-        // one user line they all share (lib/chat-files.ts).
-        ...fileMessageFields(content, sendFiles),
-        images,
-        timestamp: Date.now(),
-      })
-
-      if (models.length === 0) {
+        // GH #171: an attached text goes out whole when it fits, and as far as
+        // it fits otherwise. One user line reaches every speaker, so it is
+        // fitted to the smallest window at the table (all members when none is
+        // listed: then nobody answers and the size does not matter).
+        const sendFiles = await fitFilesForSend({
+          files: filesWithoutWorkspace(files),
+          models: models.length ? models : members,
+          use: 'chat',
+          otherText: requestTextOf(useChatStore.getState().conversations.find((c) => c.id === convId), content),
+        })
         useChatStore.getState().addMessage(convId, {
           id: uuid(),
-          role: 'system',
-          notice: 'info',
-          content: 'No model of this group is in the model list right now, so nobody answered. Load one of them again, or change the group under Plugins.',
+          role: 'user',
+          // An attached file reaches every speaker as its summary, inside the
+          // one user line they all share (lib/chat-files.ts).
+          ...fileMessageFields(content, sendFiles),
+          images,
           timestamp: Date.now(),
         })
-        return
+
+        if (models.length === 0) {
+          useChatStore.getState().addMessage(convId, {
+            id: uuid(),
+            role: 'system',
+            notice: 'info',
+            content: 'No model of this group is in the model list right now, so nobody answered. Load one of them again, or change the group under Plugins.',
+            timestamp: Date.now(),
+          })
+          return true
+        }
       }
 
       // The round holds the lane its SPEAKERS need. Mixed local+cloud speakers
@@ -643,11 +716,33 @@ export function useChat() {
         setIsGenerating(true)
         useGenerationStore.getState().setGenerating(convId, true)
         try {
-          for (const model of models) {
+          for (const [index, model] of models.entries()) {
             if (abort.signal.aborted) break
-            await runGroupTurn(convId, model, models, abort)
+            // Each turn has a controller of its own under the round's: Stop
+            // ends the round, "Skip speaker" (GH #200) ends this turn only and
+            // the next speaker takes over.
+            const turn = new AbortController()
+            const endTurn = () => turn.abort()
+            abort.signal.addEventListener('abort', endTurn)
+            groupTurnStarted(convId, { speaker: model, index, total: models.length }, endTurn)
+            const before = useChatStore.getState().conversations.find((c) => c.id === convId)?.messages.length ?? 0
+            try {
+              await runGroupTurn(convId, model, table, turn)
+            } finally {
+              abort.signal.removeEventListener('abort', endTurn)
+            }
+            if (turn.signal.aborted && !abort.signal.aborted) {
+              // Skipped before a word: no empty bubble is left standing for it.
+              // What it had written stays, as with Stop.
+              const said = useChatStore.getState().conversations.find((c) => c.id === convId)?.messages[before]
+              if (said?.role === 'assistant' && said.modelId === model && !said.content.trim()) {
+                useChatStore.getState().deleteMessage(convId, said.id)
+              }
+              log.info('chat.group_speaker_skipped', { convId, index })
+            }
           }
         } finally {
+          groupRoundEnded(convId)
           // Same identity check as the single-model turn below (Blocker 2,
           // review-lanes.md): a Stop followed by an immediate resend on this
           // conversation can register a new aborter before this round's
@@ -692,6 +787,7 @@ export function useChat() {
         // Eintrag muss deshalb hier freigegeben werden.
         activeChatRuns.delete(convId)
       }
+      return true
     } finally {
       if (activeChatRuns.get(convId) === myRunToken) {
         activeChatRuns.delete(convId)
@@ -953,7 +1049,8 @@ export function useChat() {
     {
       const groupConv = store.conversations.find((c) => c.id === store.activeConversationId)
       if (groupConv && isGroupChat(groupConv.groupModels)) {
-        return runGroupRound(groupConv.id, content, images, groupConv.groupModels, files)
+        await runGroupRound(groupConv.id, content, images, groupConv.groupModels, files)
+        return
       }
     }
 
@@ -1376,6 +1473,7 @@ export function useChat() {
           sendWindowTokens: sendWindowFor(settings, activeModel),
           contextDecay: settings.contextDecay,
           localBackend: sendsToALanBackend(providerId, activeModel),
+          answerTokens: settings.maxTokens,
         },
       )
       await maybeAutoCompact({
@@ -1482,6 +1580,13 @@ export function useChat() {
         // eigenen Netz stellt keine Rechnung; jeder andere Sendepfad gibt es
         // schon mit (useAgentChat, useCodex, useABCompare, run-compact-command).
         localBackend: sendsToALanBackend(providerId, activeModel),
+        answerTokens: settings.maxTokens,
+        notice: 'chat',
+        // GH #201: older turns that did not go out are said next to the answer.
+        onTrimmed: (dropped) => useChatStore.getState().updateMessageHistoryTrim(convId, assistantMessage.id, {
+          dropped,
+          window: modelWindowTokens,
+        }),
       },
     ).messages
     // Phone only: the request ends with the cut answer instead of the
@@ -1652,7 +1757,7 @@ export function useChat() {
             const sent = estimateMessageTokens(messages as unknown as Wire)
             const next = shrunkSendWindow(sent, overflow, sent)
             const cut = next !== null
-              ? (compactMessages(messages as unknown as Wire, next) as unknown as typeof messages)
+              ? (compactMessages(messages as unknown as Wire, next, { notice: 'chat' }) as unknown as typeof messages)
               : messages
             if (cut === messages || cut.length >= messages.length) throw err
             log.info('chat.context_overflow_retry', { sent, next, window: overflow.window, promptTokens: overflow.promptTokens, kept: cut.length })
@@ -2206,6 +2311,51 @@ export function useChat() {
     resend(conversationId, assistantMessageId)
   }, [resend])
 
+  /**
+   * GH #199: one speaker of a group round answers again, and only that
+   * speaker ('only'), or it and every speaker after it in the round
+   * ('from-here'). The answers before it stay as they are.
+   *
+   * The old answer is not lost: it moves into a version like every
+   * regenerate since GH #172, and "< 1/2 >" sits on the new answer. With
+   * 'only', the later answers of the round come back after the new one, as
+   * copies, so each version holds its own. Regenerating the whole round is
+   * still `regenerateMessage`.
+   *
+   * Resolves false when nothing ran (another run in flight, no such speaker
+   * at the table any more) or nothing was written; the version shown before
+   * comes back then.
+   */
+  const regenerateSpeaker = useCallback(async (conversationId: string, messageId: string, mode: 'only' | 'from-here'): Promise<boolean> => {
+    if (activeChatRuns.has(conversationId)) return false
+    const conv = useChatStore.getState().conversations.find((c) => c.id === conversationId)
+    if (!conv || !isGroupChat(conv.groupModels)) return false
+    const listed = useModelStore.getState()
+    const table = availableGroupMembers(conv.groupModels, listed.models, listed.inventoryLoaded)
+    const speakers = regenerateSpeakers(conv.messages, messageId, mode, table)
+    if (speakers.length === 0) return false
+    const kept = mode === 'only' ? laterAnswersInRound(conv.messages, messageId) : []
+    const fork = { key: null as string | null }
+    const ran = await runGroupRound(conversationId, '', undefined, conv.groupModels, undefined, {
+      speakers,
+      prepare: () => { fork.key = useChatStore.getState().forkFrom(conversationId, messageId) },
+    })
+    const key = fork.key
+    if (!ran || key === null) return false
+    const store = useChatStore.getState()
+    const now = store.conversations.find((c) => c.id === conversationId)
+    if (!now) return true
+    const start = forkStart(now.messages, key)
+    const fresh = start < 0 ? [] : now.messages.slice(start)
+    if (fresh.every((m) => m.role === 'assistant' && !m.content.trim())) {
+      for (const m of fresh) store.deleteMessage(conversationId, m.id)
+      store.restoreEmptyFork(conversationId, key)
+      return false
+    }
+    for (const m of copiesForNewVersion(kept, uuid)) store.addMessage(conversationId, m)
+    return true
+  }, [runGroupRound])
+
   const editAndResend = useCallback((conversationId: string, messageId: string, newContent: string): boolean => {
     return resend(conversationId, messageId, newContent)
   }, [resend])
@@ -2216,6 +2366,7 @@ export function useChat() {
     isGenerating: isGenerating || agentChat.isAgentRunning || orphanRun,
     isLoadingModel,
     regenerateMessage,
+    regenerateSpeaker,
     editAndResend,
     // Agent mode additions
     isAgentRunning: agentChat.isAgentRunning,
