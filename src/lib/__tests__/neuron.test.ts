@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { editingKey } from '../../stores/neuronStore'
 import {
   backendNote,
   clampStrength,
@@ -95,5 +96,13 @@ describe('neuron progress', () => {
     expect(shortDuration(42)).toBe('42 s')
     expect(shortDuration(150)).toBe('3 min')
     expect(shortDuration(3900)).toBe('1 h 5 min')
+  })
+})
+
+describe('editingKey', () => {
+  it('is the persona key only while a persona steers', () => {
+    expect(editingKey('m', 'pirate', 'persona')).toBe('m::persona:pirate')
+    expect(editingKey('m', undefined, 'persona')).toBe('m')
+    expect(editingKey('m', 'pirate', 'model')).toBe('m')
   })
 })

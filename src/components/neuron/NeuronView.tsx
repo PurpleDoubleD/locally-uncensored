@@ -236,7 +236,7 @@ export function NeuronView() {
         <div className="flex flex-wrap items-center gap-1 mb-4 t-body" role="radiogroup" aria-label="Save sliders for">
           <span className="text-gray-600 dark:text-gray-300 mr-1">Save for</span>
           <ScopeButton on={scope === 'model'} onClick={() => setScope(modelKey, 'model')}>This model</ScopeButton>
-          <ScopeButton on={scope === 'persona'} onClick={() => { setScope(modelKey, 'persona'); if (!hasPersonaProfile(profiles, modelKey, personaId)) setProfile(editingKey(modelKey, personaId, 'persona'), { ...(profiles[modelKey] ?? {}) }) }}>
+          <ScopeButton on={scope === 'persona'} onClick={() => { setScope(modelKey, 'persona'); if (!hasPersonaProfile(profiles, modelKey, persona.id)) setProfile(editingKey(modelKey, persona.id, 'persona'), { ...(profiles[modelKey] ?? {}) }) }}>
             This model with “{persona.name}”
           </ScopeButton>
         </div>
