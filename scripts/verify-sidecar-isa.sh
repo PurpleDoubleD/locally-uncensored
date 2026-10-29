@@ -546,6 +546,24 @@ if [[ "$TRIPLE" == *-windows-* ]]; then
     vlog "no exe found at $exe_path, skipping the exe-itself check (build first for the full check)"
   fi
 
+  # FEHLER-P11 #8: the Neuron tweaker's vector tool is a static exe of its
+  # own (build-llama.sh cvector_cmake_flags_for), so every ggml-cpu line it
+  # carries is the baseline one and must hold the same rule as the server
+  # exe. Its map lies in its own build directory.
+  cv_path="$BIN_DIR/$(cvector_out_name_for "$TRIPLE")"
+  if [ -f "$cv_path" ]; then
+    cv_map="$(find "${WIN_CVEC_MAP_DIR_OVERRIDE:-$(cvector_build_dir_for "$TRIPLE")}" -type f -iname 'llama-cvector-generator.map' -print -quit 2>/dev/null)"
+    [ -n "$cv_map" ] || vdie "no llama-cvector-generator.map found for $cv_path, rebuild with scripts/build-llama.sh $TRIPLE first"
+    disasm_tmp="$(mktemp)"
+    disassemble_windows "$cv_path" > "$disasm_tmp"
+    if ! "$NODE_BIN" "$WIN_GUARD" check --module "$(basename "$cv_path")" --disasm "$disasm_tmp" --map "$cv_map"; then
+      win_fail_count=$((win_fail_count + 1))
+    fi
+    rm -f "$disasm_tmp"
+  else
+    vlog "no vector tool at $cv_path, skipping its check (build first for the full check)"
+  fi
+
   # R4, control 1/3 (positive control): independent of win-isa-guard.mjs, a
   # raw opcode-byte grep straight on dumpbin's own output. haswell is the
   # first AVX2 tier, so SOME VEX/EVEX byte pattern must show up, if it does
@@ -906,6 +924,23 @@ if [ -f "$exe_path" ]; then
   fi
 else
   vlog "no exe found at $exe_path, skipping the exe-itself check (build first for the full check)"
+fi
+
+# FEHLER-P11 #8: the vector tool, a static baseline exe of its own (see the
+# Windows branch above), holds the server exe's rule.
+cv_path="$BIN_DIR/$(cvector_out_name_for "$TRIPLE")"
+if [ -f "$cv_path" ]; then
+  asm="$(disassemble "$cv_path")"
+  cv_label="$(basename "$cv_path") ($cv_path)"
+  if lines_verdict="$(check_min_disasm_lines "$asm" "$cv_label")" && verdict="$(evaluate_module_asm baseline "$asm" "$cv_label")"; then
+    vlog "$verdict"
+  else
+    printf '\033[1;31m[verify-sidecar-isa] FAIL:\033[0m %s\n' "${verdict:-$lines_verdict}" >&2
+    grep -E '%[xyz]mm[0-9]+|%k[0-7]\b|[[:space:]]v[a-z0-9]{2,}([[:space:]]|$)|[[:space:]]k[a-z]{2,}([[:space:]]|$)' <<<"$asm" | head -5 >&2 || true
+    fail_count=$((fail_count + 1))
+  fi
+else
+  vlog "no vector tool at $cv_path, skipping its check (build first for the full check)"
 fi
 
 # Positive control: without this, a broken disassembler invocation (a typo'd

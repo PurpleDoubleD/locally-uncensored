@@ -228,7 +228,10 @@ jobs:
           # ggml-cpu-*/ggml-vulkan DLLs staged next to it (see above):
           # shipping only the exe from this artifact would be shipping
           # something that cannot boot.
+          # P11: the Neuron tweaker's vector tool is built in the same run
+          # (static, nothing beside it) and ships with the app as well.
           path: |
             src-tauri/bin/lu-llama-server-x86_64-pc-windows-msvc.exe
+            src-tauri/bin/lu-llama-cvector-generator-x86_64-pc-windows-msvc.exe
             src-tauri/resources/llama/x86_64-pc-windows-msvc/*
           retention-days: 14
