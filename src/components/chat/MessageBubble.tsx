@@ -30,6 +30,7 @@ import { extractToolCallsFromContent, looksLikeToolIntent } from '../../lib/tool
 import { isAgentCompatible } from '../../lib/model-compatibility'
 import { ContextMenu } from '../ui/ContextMenu'
 import { buildMessageMenu, type MessageMenuHandlers } from '../ui/menu-actions'
+import { plainTextToCopy } from '../../lib/copy-plain'
 import { MONOGRAM, MONOGRAM_INVERT } from '../layout/brand'
 import { AVATAR_SLOT, MODEL_MARK, MODEL_MARK_SLOT } from './avatar-slot'
 import { MOTION_S } from '../ui/motion'
@@ -91,7 +92,10 @@ function MessageBubbleImpl({ message, onRegenerate, onRegenerateRound, onEdit, p
   const [isEditing, setIsEditing] = useState(false)
   const [editContent, setEditContent] = useState('')
   const [confirmDelete, setConfirmDelete] = useState(false)
-  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null)
+  // `text` is what "Copy text" will copy, taken when the menu opens: the
+  // click into the menu may clear the selection.
+  const [menu, setMenu] = useState<{ x: number; y: number; text: string } | null>(null)
+  const columnRef = useRef<HTMLDivElement>(null)
   const editRef = useRef<HTMLTextAreaElement>(null)
   const isUser = message.role === 'user'
 
@@ -199,6 +203,14 @@ function MessageBubbleImpl({ message, onRegenerate, onRegenerateRound, onEdit, p
     setTimeout(() => setCopied(false), 2000)
   }
 
+  // Right-click "Copy text": what Ctrl+C would give (lib/copy-plain.ts).
+  const handleCopyText = () => {
+    if (!menu) return
+    navigator.clipboard.writeText(menu.text)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }
+
   const startEdit = () => {
     // User: edit the short slash command, not its expanded instruction.
     // Assistant: edit what the model actually said.
@@ -268,6 +280,7 @@ function MessageBubbleImpl({ message, onRegenerate, onRegenerateRound, onEdit, p
   const canEdit = !readOnly && ((isUser && !!onEdit) || canEditAssistant)
   const actions: MessageMenuHandlers = {
     copy: handleCopy,
+    copyText: handleCopyText,
     edit: canEdit ? startEdit : null,
     regenerate: !isUser && onRegenerate ? () => onRegenerate(message.id) : null,
     branch: onBranch ? () => onBranch(message.id) : null,
@@ -327,7 +340,8 @@ function MessageBubbleImpl({ message, onRegenerate, onRegenerateRound, onEdit, p
       onContextMenu={(e) => {
         if (!actionsAvailable) return
         e.preventDefault()
-        setMenu({ x: e.clientX, y: e.clientY })
+        const text = columnRef.current ? plainTextToCopy(columnRef.current, window.getSelection()) : ''
+        setMenu({ x: e.clientX, y: e.clientY, text })
       }}
       initial={{ opacity: 0, y: 6 }}
       animate={{ opacity: 1, y: 0 }}
@@ -348,7 +362,7 @@ function MessageBubbleImpl({ message, onRegenerate, onRegenerateRound, onEdit, p
 
       {/* A reply with a Create order takes the full width in a narrow window:
           the card and the result need the room. */}
-      <div className={(hasCreateOrder ? 'min-w-0 flex-1 sm:flex-none sm:max-w-[80%]' : 'max-w-[80%]') + ' space-y-0.5'}>
+      <div ref={columnRef} className={(hasCreateOrder ? 'min-w-0 flex-1 sm:flex-none sm:max-w-[80%]' : 'max-w-[80%]') + ' space-y-0.5'}>
         {/* Name the model that produced this answer. Group chats have always
             done this; since the R5 re-measure (2026-08-30) every assistant
             turn carries it, because the app had no model name at a single
@@ -445,7 +459,7 @@ function MessageBubbleImpl({ message, onRegenerate, onRegenerateRound, onEdit, p
                   const istSchluss = gruppenIndex === gruppen.length - 1
                   return (
                     <div key={block.id} className="px-1 py-0.5">
-                      <div className={'text-[0.8rem] leading-relaxed' + (isStreaming && istSchluss ? ' lu-caret' : '')}>
+                      <div data-copy-text className={'text-[0.8rem] leading-relaxed' + (isStreaming && istSchluss ? ' lu-caret' : '')}>
                         <MarkdownRenderer content={isStreaming && istSchluss ? closeOpenMarkdown(clean) : clean} />
                       </div>
                     </div>
@@ -553,7 +567,7 @@ function MessageBubbleImpl({ message, onRegenerate, onRegenerateRound, onEdit, p
             // long expanded instruction held in content (which drives the model).
             // The same holds for a message with files: content carries their
             // summaries for the model, the bubble shows what was typed.
-            <p className="text-[0.78rem] leading-relaxed text-gray-800 dark:text-gray-200 whitespace-pre-wrap wrap-anywhere">{message.displayContent || message.content}</p>
+            <p data-copy-text className="text-[0.78rem] leading-relaxed text-gray-800 dark:text-gray-200 whitespace-pre-wrap wrap-anywhere">{message.displayContent || message.content}</p>
           ) : (
             // Answer-blocks (when present) already rendered the per-iteration
             // text chronologically above; skip message.content here to avoid
@@ -570,7 +584,7 @@ function MessageBubbleImpl({ message, onRegenerate, onRegenerateRound, onEdit, p
                 // eine reine Funktion des vorhandenen `isStreaming`-Props —
                 // kein Zustand, kein Timer, keine Subscription, also auch
                 // kein Rerender, den der Stream nicht ohnehin ausloest.
-                <div className={'text-[0.78rem] leading-relaxed' + (isStreaming ? ' lu-caret' : '')}>
+                <div data-copy-text className={'text-[0.78rem] leading-relaxed' + (isStreaming ? ' lu-caret' : '')}>
                   {/* While it streams, an open ` or ** is closed for the frame
                       (lib/streaming-markdown.ts); the stored text is untouched. */}
                   <MarkdownRenderer content={isStreaming ? closeOpenMarkdown(cleanContent) : cleanContent} />
