@@ -62,6 +62,8 @@ describe('B29: preview only on the user\'s click', () => {
     const frame = container.querySelector('iframe')!
     expect(frame.getAttribute('sandbox')).toBe('allow-scripts')
     expect(frame.getAttribute('referrerpolicy')).toBe('no-referrer')
+    // Mac run: without a width wish the answer bubble shrank around the toolbar.
+    expect(screen.getByTestId('code-preview-inline').className).toMatch(/\bw-\[48rem\] max-w-full\b/)
     // Back to code takes the frame away again.
     fireEvent.click(screen.getByTestId('code-preview-button'))
     expect(container.querySelector('iframe')).toBeNull()

@@ -217,7 +217,10 @@ export function CodeBlock({ code, language }: Props) {
       {preview !== 'off' && (
         <Suspense fallback={null}>
           {preview === 'inline' && (
-            <div className="h-[360px]">
+            // The panel has no width of its own (the frame is 100%), and an
+            // answer bubble sizes to its content: without a wish the block
+            // shrank to the toolbar (Mac run). 48rem, never wider than the column.
+            <div className="h-[360px] w-[48rem] max-w-full" data-testid="code-preview-inline">
               <HtmlPreviewPanel
                 code={code}
                 language={language}
