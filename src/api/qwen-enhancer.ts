@@ -21,7 +21,7 @@ import { getAllNodeInfo } from './comfyui-nodes'
 import { submitWorkflow, getHistory, freeMemory, abandonPrompt } from './comfyui'
 import { comfyWS, type ComfyWSEvent } from './comfyui-ws'
 import { WorkflowUnavailableError } from './dynamic-workflow'
-import { enhancedOutcome, type EnhancerPhase, type QwenEnhancerMode } from '../lib/render/qwen-enhancer'
+import { enhancedOutcome, QWEN_ENHANCER_LIMIT_MINUTES, type EnhancerPhase, type QwenEnhancerMode } from '../lib/render/qwen-enhancer'
 import type { ImproveOutcome } from '../lib/render/improve-prompt'
 import { QWEN_PE_I2I_SYSTEM_PROMPT, QWEN_PE_T2I_SYSTEM_PROMPT } from './qwen-enhancer-prompts'
 
@@ -39,9 +39,8 @@ export const QWEN_ENHANCER_MAX_LENGTH = 4096
 /** How long the rewrite may take, loading the 9 GB file included. After this
  *  the job is taken out of the queue and the run goes on with the user's prompt.
  *  B41 (3.0.9): was 15 minutes, and a user gave up after 530 s of a line that
- *  only counted. The box needs 70 s for a new picture and 175 s for an edit
- *  on a 12 GB card; eight minutes leaves a slower card room and no more. */
-export const QWEN_ENHANCER_TIMEOUT_MS = 8 * 60_000
+ *  only counted (lib/render/qwen-enhancer QWEN_ENHANCER_LIMIT_MINUTES). */
+export const QWEN_ENHANCER_TIMEOUT_MS = QWEN_ENHANCER_LIMIT_MINUTES * 60_000
 
 /** How long the enhancer may go without a word from ComfyUI once it has
  *  started reporting: no token, no node. A stuck job ends here instead of at

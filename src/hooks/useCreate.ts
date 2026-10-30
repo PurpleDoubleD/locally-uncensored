@@ -81,7 +81,7 @@ import { elapsedLine } from '../lib/elapsed-line'
 import { improvePrompt } from '../lib/render/improve-prompt-run'
 import { currentChatModelList, currentHelperModel } from '../lib/cloud-helper-model'
 import { enhancerLine, enhancerNames, pickQwenEnhancer, rewrittenByName, type ImproveWriter } from '../lib/render/qwen-enhancer'
-import { buildQwenEnhancerWorkflow, runQwenEnhancer, QWEN_ENHANCER_TIMEOUT_MS } from '../api/qwen-enhancer'
+import { buildQwenEnhancerWorkflow, runQwenEnhancer } from '../api/qwen-enhancer'
 import { enhancePromptOnMac } from '../api/mlx-enhancer'
 import { extraReferenceSlots, referenceSide } from '../lib/edit-references'
 import { canonicalImageRefs } from '../lib/image-ref-names'
@@ -1781,11 +1781,10 @@ export function useCreate() {
         const improving = elapsedLine((text) => setProgress(3, text), IMPROVING_PROMPT)
         // B41: the line says which part runs and, while it writes, how many
         // tokens it has and how fast, from ComfyUI's own progress stream.
-        const limitMinutes = Math.round(QWEN_ENHANCER_TIMEOUT_MS / 60_000)
         const out = await runQwenEnhancer(enhancerGraph, scenePrompt, {
           clientId: CLIENT_ID,
           signal,
-          onProgress: (p) => improving.setLabel(enhancerLine(p, qwenEnhancer.mode, limitMinutes)),
+          onProgress: (p) => improving.setLabel(enhancerLine(p, qwenEnhancer.mode)),
         }).finally(improving.stop)
         if (signal?.aborted) throw new Error('Cancelled')
         takeRewrite(out, qwenEnhancer.variant)
