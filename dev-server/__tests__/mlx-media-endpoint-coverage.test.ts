@@ -211,9 +211,9 @@ describe('endpointMap covers every backendCall/invokeMedia site the frontend can
     // from the system reaches the desktop app, never the browser build.
     'hf_link_take',
     // The chat's HTML preview page (B29, 3.0.9, lib/html-preview-source.ts).
-    // Put up only behind isTauri(): the browser build loads the page as
-    // srcdoc and has no scheme to serve it from.
-    'html_preview_put',
+    // Put up and closed only behind isTauri(): the browser build loads the
+    // page as srcdoc and has no loopback server to serve it from.
+    'html_preview_close', 'html_preview_put',
     'exit_app', 'file_read', 'find_orphan_downloads', 'fix_comfyui_cors', 'funnel_ping',
     'get_comfy_gpu_status', 'get_current_time', 'import_local_model', 'install_character_trainer',
     'install_lmstudio', 'install_lmstudio_status', 'install_method', 'install_python',

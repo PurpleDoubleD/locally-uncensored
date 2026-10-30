@@ -5,9 +5,13 @@
  *
  *  - nothing runs when a chat is shown: no frame until the user clicks Preview;
  *  - the frame is sandboxed with scripts but never with same-origin;
- *  - in the app the page comes from the `luprev` scheme, whose response has
- *    its own closed policy (Rust tests in src-tauri/src/html_preview.rs), not
- *    as srcdoc, which inherits the app policy and ran no script at all;
+ *  - in the app the page comes from a loopback server on 127.0.0.1 with a
+ *    token per page and its own closed policy (Rust tests in
+ *    src-tauri/src/html_preview.rs), not as srcdoc, which inherits the app
+ *    policy and ran no script at all, and not from a custom scheme, which
+ *    Tauri counts as the app's own origin (owner decision 30.10.2026);
+ *  - the server runs only while a preview is open: every page is closed;
+ *  - no capability gives a remote origin anything;
  *  - the network is off and opens only after a second, explicit yes, for
  *    that one page;
  *  - the app's own policy is not loosened for it: it only allows the frame.
@@ -15,7 +19,7 @@
  * Run: npx vitest run src/components/chat/__tests__/html-preview-b29.test.tsx
  */
 import { describe, it, expect, afterEach, vi, beforeEach } from 'vitest'
-import { readFileSync } from 'node:fs'
+import { readFileSync, readdirSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 
@@ -25,11 +29,9 @@ vi.mock('../../../api/backend', async (orig) => ({
   isTauri: () => tauri.on,
   backendCall: async (cmd: string, args?: Record<string, unknown>) => {
     tauri.calls.push({ cmd, args })
-    return 'ab'.repeat(16)
+    const id = String(tauri.calls.filter((c) => c.cmd === 'html_preview_put').length).padStart(32, 'a')
+    return cmd === 'html_preview_put' ? { id, url: `http://127.0.0.1:51234/${id}` } : null
   },
-}))
-vi.mock('@tauri-apps/api/core', () => ({
-  convertFileSrc: (path: string, protocol: string) => `${protocol}://localhost/${path}`,
 }))
 
 import { CodeBlock } from '../CodeBlock'
@@ -66,16 +68,36 @@ describe('B29: preview only on the user\'s click', () => {
   })
 })
 
-describe('B29: in the app the page comes from the luprev scheme', () => {
-  it('the frame loads luprev://, not srcdoc, and the page went up with the network off', async () => {
+describe('B29: in the app the page comes from the loopback server', () => {
+  it('the frame loads http://127.0.0.1, not srcdoc, and the page went up with the network off', async () => {
     tauri.on = true
     const { container } = render(<CodeBlock code={PAGE} language="html" />)
     fireEvent.click(screen.getByTestId('code-preview-button'))
     await waitFor(() => expect(container.querySelector('iframe')).not.toBeNull())
     const frame = container.querySelector('iframe')!
-    expect(frame.getAttribute('src')).toBe(`luprev://localhost/${'ab'.repeat(16)}`)
+    expect(frame.getAttribute('src')).toBe(`http://127.0.0.1:51234/${'1'.padStart(32, 'a')}`)
     expect(frame.hasAttribute('srcdoc')).toBe(false)
     expect(tauri.calls).toEqual([{ cmd: 'html_preview_put', args: { doc: PAGE, allowNetwork: false } }])
+  })
+
+  it('leaving the preview closes its page, so the server can stop', async () => {
+    tauri.on = true
+    const { container, unmount } = render(<CodeBlock code={PAGE} language="html" />)
+    fireEvent.click(screen.getByTestId('code-preview-button'))
+    await waitFor(() => expect(container.querySelector('iframe')).not.toBeNull())
+    fireEvent.click(screen.getByTestId('code-preview-button'))
+    await waitFor(() => expect(tauri.calls.filter((c) => c.cmd === 'html_preview_close')).toHaveLength(1))
+    expect(tauri.calls.at(-1)).toEqual({ cmd: 'html_preview_close', args: { id: '1'.padStart(32, 'a') } })
+    // A reload replaces the page: the old one is closed, one stays open.
+    fireEvent.click(screen.getByTestId('code-preview-button'))
+    await waitFor(() => expect(container.querySelector('iframe')).not.toBeNull())
+    fireEvent.click(screen.getByRole('button', { name: 'Reload preview' }))
+    await waitFor(() => expect(tauri.calls.filter((c) => c.cmd === 'html_preview_put')).toHaveLength(3))
+    await waitFor(() => expect(tauri.calls.filter((c) => c.cmd === 'html_preview_close')).toHaveLength(2))
+    unmount()
+    await waitFor(() => expect(tauri.calls.filter((c) => c.cmd === 'html_preview_close')).toHaveLength(3))
+    const puts = tauri.calls.filter((c) => c.cmd === 'html_preview_put').length
+    expect(tauri.calls.filter((c) => c.cmd === 'html_preview_close')).toHaveLength(puts)
   })
 
   it('the network needs a second yes and goes up as a new page', async () => {
@@ -83,6 +105,7 @@ describe('B29: in the app the page comes from the luprev scheme', () => {
     render(<CodeBlock code={PAGE} language="html" />)
     fireEvent.click(screen.getByTestId('code-preview-button'))
     await waitFor(() => expect(tauri.calls).toHaveLength(1))
+    tauri.calls = tauri.calls.filter((c) => c.cmd === 'html_preview_put')
     fireEvent.click(screen.getByTestId('html-preview-network'))
     // One click only asks.
     const ask = screen.getByTestId('html-preview-network-ask')
@@ -97,8 +120,8 @@ describe('B29: in the app the page comes from the luprev scheme', () => {
     expect(tauri.calls).toHaveLength(1)
     fireEvent.click(screen.getByTestId('html-preview-network'))
     fireEvent.click(screen.getByText('Allow for this page'))
-    await waitFor(() => expect(tauri.calls).toHaveLength(2))
-    expect(tauri.calls[1].args).toEqual({ doc: PAGE, allowNetwork: true })
+    await waitFor(() => expect(tauri.calls.filter((c) => c.cmd === 'html_preview_put')).toHaveLength(2))
+    expect(tauri.calls.filter((c) => c.cmd === 'html_preview_put')[1].args).toEqual({ doc: PAGE, allowNetwork: true })
     expect(screen.getByTestId('html-preview-panel').dataset.network).toBe('on')
   })
 
@@ -117,17 +140,27 @@ describe('B29: the app policy is not loosened for the preview', () => {
   const csp: string = conf.app.security.csp
   const directive = (name: string) => (csp.split(';').map((d) => d.trim()).find((d) => d.startsWith(name + ' ')) ?? '')
 
-  it('frames may come from luprev, and from nowhere new besides', () => {
-    expect(directive('frame-src').split(/\s+/).slice(1).sort()).toEqual(["'self'", 'http://luprev.localhost', 'luprev:'].sort())
+  it('frames may come from loopback, and from nowhere new besides', () => {
+    expect(directive('frame-src').split(/\s+/).slice(1).sort()).toEqual(["'self'", 'http://127.0.0.1:*'].sort())
+    expect(csp).not.toMatch(/luprev/)
   })
 
   it('the app itself still runs no inline script', () => {
-    expect(directive('script-src')).not.toMatch(/unsafe-inline|luprev/)
+    expect(directive('script-src')).not.toMatch(/unsafe-inline|127\.0\.0\.1/)
   })
 
-  it('the scheme is registered and its command is in the handler list', () => {
+  it('no custom scheme any more: the frame must not count as the app to Tauri', () => {
     const lib = readFileSync(resolve(root, 'src-tauri/src/lib.rs'), 'utf8')
-    expect(lib).toMatch(/register_uri_scheme_protocol\(html_preview::SCHEME/)
+    expect(lib).not.toMatch(/register_uri_scheme_protocol|register_asynchronous_uri_scheme_protocol/)
     expect(lib).toMatch(/html_preview::html_preview_put,/)
+    expect(lib).toMatch(/html_preview::html_preview_close,/)
+  })
+
+  it('no capability grants a remote origin anything', () => {
+    const dir = resolve(root, 'src-tauri/capabilities')
+    for (const f of readdirSync(dir).filter((n) => n.endsWith('.json'))) {
+      const cap = JSON.parse(readFileSync(resolve(dir, f), 'utf8'))
+      expect(cap.remote, `${f} has a remote section`).toBeUndefined()
+    }
   })
 })

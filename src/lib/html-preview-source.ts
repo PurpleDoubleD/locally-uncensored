@@ -1,10 +1,14 @@
 /**
  * Where a chat HTML preview gets its page from (B29, 3.0.9).
  *
- * In the app the page is put up on the `luprev` scheme (src-tauri/src/
- * html_preview.rs) and the frame loads it by URL. That response carries its
- * own closed policy; a srcdoc frame would inherit the app's, which allows no
- * inline script, so a generated page never ran in the installed app.
+ * In the app the page is put up on a loopback server (src-tauri/src/
+ * html_preview.rs, http://127.0.0.1:<random port>/<token>) and the frame
+ * loads it by URL. That response carries its own closed policy; a srcdoc
+ * frame would inherit the app's, which allows no inline script, so a
+ * generated page never ran in the installed app. Loopback and not a custom
+ * scheme because Tauri counts its registered schemes as the app's own origin;
+ * a frame on 127.0.0.1 is a remote origin to Tauri. The server runs while a
+ * preview is open: every page put up here is closed again by its caller.
  *
  * In the browser build there is no scheme. The page goes in as srcdoc with a
  * closed policy as its first tag (same rule as the phone preview's
@@ -15,11 +19,8 @@
  */
 import { isTauri, backendCall } from '../api/backend'
 
-/** The scheme the Rust side registers. */
-export const PREVIEW_SCHEME = 'luprev'
-
 export type PreviewSource =
-  | { kind: 'src'; src: string }
+  | { kind: 'src'; src: string; id: string }
   | { kind: 'doc'; doc: string }
 
 /** The closed policy of the browser fallback: inline script and style, pictures it carries, nothing else. */
@@ -34,16 +35,15 @@ export function withClosedPolicy(doc: string): string {
   return doc.slice(0, at) + `<meta http-equiv="Content-Security-Policy" content="${FALLBACK_CSP}">` + doc.slice(at)
 }
 
-/** The URL of a stored page: `luprev://localhost/<id>` on macOS and Linux,
- *  `http://luprev.localhost/<id>` on Windows and Android (Tauri's own rule). */
-export async function previewUrl(id: string): Promise<string> {
-  const { convertFileSrc } = await import('@tauri-apps/api/core')
-  return convertFileSrc(id, PREVIEW_SCHEME)
-}
-
 /** Put the document up for one preview and say how the frame loads it. */
 export async function putPreviewDocument(doc: string, allowNetwork: boolean): Promise<PreviewSource> {
   if (!isTauri()) return { kind: 'doc', doc: withClosedPolicy(doc) }
-  const id = await backendCall<string>('html_preview_put', { doc, allowNetwork })
-  return { kind: 'src', src: await previewUrl(id) }
+  const page = await backendCall<{ id: string; url: string }>('html_preview_put', { doc, allowNetwork })
+  return { kind: 'src', src: page.url, id: page.id }
+}
+
+/** The preview went. The last one closed stops the loopback server. */
+export function closePreviewDocument(source: PreviewSource): void {
+  if (source.kind !== 'src') return
+  void backendCall('html_preview_close', { id: source.id }).catch(() => {})
 }

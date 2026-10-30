@@ -650,9 +650,6 @@ pub fn run() {
     use commands::mobile_guard::GuardExt as _;
     builder
         .manage(app_state)
-        // The chat's HTML preview: its own scheme so its page carries its own
-        // closed policy instead of inheriting the app's (html_preview.rs).
-        .register_uri_scheme_protocol(html_preview::SCHEME, |_ctx, request| html_preview::handle(request))
         .manage(commands::oauth::OauthPending::default())
         // Entries marked `#[cfg(desktop)]` are not registered on a phone:
         // ComfyUI's websocket, every installer, the character trainer, the
@@ -665,7 +662,10 @@ pub fn run() {
         // commands/mobile_guard.rs), on the desktop it does nothing.
         .mobile_guard()
         .invoke_handler(tauri::generate_handler![
+            // The chat's HTML preview: a loopback page with its own closed
+            // policy, served while a preview is open (html_preview.rs).
             html_preview::html_preview_put,
+            html_preview::html_preview_close,
             // Hugging Face "Use this model": the page takes the waiting link
             #[cfg(desktop)]
             hf_link::hf_link_take,

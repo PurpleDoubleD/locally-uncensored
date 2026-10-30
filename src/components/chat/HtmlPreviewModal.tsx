@@ -12,7 +12,8 @@ interface Props {
 /**
  * The large view of a snippet the MODEL produced (B29). The page and its
  * rules are the inline panel's (HtmlPreviewPanel): scripts run, never with
- * `allow-same-origin`, on the `luprev` scheme with its own closed policy.
+ * `allow-same-origin`, from the loopback preview server with its own closed
+ * policy.
  *
  * The old "open in browser" button is gone: it handed a data: URL to
  * openExternal, which refuses data: URLs, so it never did anything.

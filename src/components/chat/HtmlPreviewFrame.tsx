@@ -16,7 +16,7 @@ import { sandboxAttr } from '../../lib/file-preview'
 interface FrameProps {
   /** The page as text, loaded as srcdoc. Ignored when `src` is given. */
   doc?: string
-  /** The page on the `luprev` scheme (chat snippets in the app, B29). It
+  /** The page on the loopback preview server (chat snippets in the app, B29). It
    *  carries its own policy instead of inheriting the app's. */
   src?: string
   viewport: Viewport
