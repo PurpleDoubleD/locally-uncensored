@@ -62,7 +62,7 @@ export function Lightbox({ item, onClose, onSaveCharacter, onNavigate, promptOpe
   const scale = item && zoom.id === item.id ? zoom.scale : 1
   const panX = scale > 1 ? zoom.panX : 0
   const panY = scale > 1 ? zoom.panY : 0
-  // B47 (3.0.9, Discord boromirofgeo 30.10.2026): a zoomed picture is moved
+  // B47 (3.0.9, Discord 30.10.2026): a zoomed picture is moved
   // with the mouse button held, as in a photo viewer. The drag goes on outside
   // the picture, and letting go there does not close the view.
   const [dragging, setDragging] = useState(false)

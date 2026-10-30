@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 /**
- * B40 (3.0.9, Discord boromirofgeo 29.10.2026): the gallery and the large view
+ * B40 (3.0.9, Discord 29.10.2026): the gallery and the large view
  * say which LoRAs a picture was made with, and at what strength. The entry
  * carries them since this change (GalleryItem.loras, written by the local
  * runs through ranLoras).

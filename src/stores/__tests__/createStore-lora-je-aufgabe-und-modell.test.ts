@@ -1,5 +1,5 @@
 /**
- * B24 (3.0.9, Discord .molot 28.10.2026): a video LoRA stayed switched on
+ * B24 (3.0.9, Discord 28.10.2026): a video LoRA stayed switched on
  * after the change to Image and rode into the run of another model. The LoRA
  * picks now belong to the task and the model: leaving puts them aside, coming
  * back brings them back, a lane never visited starts empty.

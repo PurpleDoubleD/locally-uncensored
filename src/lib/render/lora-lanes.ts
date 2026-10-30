@@ -1,4 +1,4 @@
-// B24 (3.0.9, Discord .molot 28.10.2026): the LoRA picks belong to the task and
+// B24 (3.0.9, Discord 28.10.2026): the LoRA picks belong to the task and
 // the model they were made for. One list for every tab kept a video LoRA
 // switched on after the change to Image, where it rode along into the run of
 // another model. Each task + model now keeps its own picks: leaving it puts
