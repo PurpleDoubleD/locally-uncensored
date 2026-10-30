@@ -21,6 +21,9 @@ export interface RunActivity {
   detail?: string
   /** A named state of the run. Without it the label is a call being written. */
   kind?: 'compacting' | 'retrying' | 'reading' | 'thinking'
+  /** A sentence under the line when the wait needs explaining (B26: a local
+   *  model that does not fit on the graphics card). Shown, not announced. */
+  hint?: string
 }
 
 interface RunActivityState {
@@ -34,7 +37,7 @@ export const useRunActivityStore = create<RunActivityState>((set) => ({
     if (!conversationId) return
     set((state) => {
       const now = state.activity[conversationId]
-      if (now?.label === activity?.label && now?.detail === activity?.detail && now?.kind === activity?.kind) return state
+      if (now?.label === activity?.label && now?.detail === activity?.detail && now?.kind === activity?.kind && now?.hint === activity?.hint) return state
       const next = { ...state.activity }
       if (activity) next[conversationId] = activity
       else delete next[conversationId]

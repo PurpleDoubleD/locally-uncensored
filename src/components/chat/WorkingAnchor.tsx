@@ -95,6 +95,13 @@ export function WorkingAnchor({ isRunning, conversationId, awaitingApproval, loa
       >
         <StatusChip kind={status.kind} word={status.word} detail={status.detail} seconds={elapsed} />
       </div>
+      {/* B26: why the first wait lasts, while it is still the line shown.
+          Outside the live region: the word is announced, the sentence is read. */}
+      {activity?.hint && status.word === activity.label && (
+        <p className="pl-11 pr-3 pb-1.5 text-xs text-gray-500 dark:text-gray-400" data-testid="working-anchor-hint">
+          {activity.hint}
+        </p>
+      )}
       {/* Scrolled away from the line above, the run still shows: the mark alone, above the composer. */}
       <WorkingBeacon anchor={line} kind={status.kind} />
     </>
