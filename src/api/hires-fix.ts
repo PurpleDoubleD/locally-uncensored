@@ -284,7 +284,13 @@ export function applyNativeHiresFix(
   }
 
   const latentRef = nodeInput(firstSampler, 'latent_image')
-  const latentSource = isComfyLinkRef(latentRef) ? nodeAt(workflow, String(latentRef[0])) : undefined
+  let latentSource = isComfyLinkRef(latentRef) ? nodeAt(workflow, String(latentRef[0])) : undefined
+  // An edit batch (api/edit-batch) repeats the source latent; the mask is
+  // the one of the latent it repeats.
+  if (latentSource?.class_type === 'RepeatLatentBatch') {
+    const repeated = nodeInput(latentSource, 'samples')
+    latentSource = isComfyLinkRef(repeated) ? nodeAt(workflow, String(repeated[0])) : undefined
+  }
   if (latentSource && MASKED_LATENT_NODES.has(latentSource.class_type)) {
     throw new NativeHiresFixError(
       'Native HiRes runs on edits of the whole picture. Clear the mask, or turn Native HiRes off for this edit.',

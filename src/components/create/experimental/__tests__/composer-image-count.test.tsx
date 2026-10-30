@@ -80,18 +80,20 @@ describe('the image count in the Composer', () => {
     expect(useCreateStore.getState().batchSize).toBe(1)
   })
 
-  it('no chip where a run makes one result: video, local Edit on ComfyUI, utilities', () => {
+  it('no chip where a run makes one result: video, utilities', () => {
     useCreateStore.getState().setIntent('video')
-    composer()
-    expect(chip()).toBeNull()
-    cleanup()
-    useCreateStore.getState().setIntent('edit')
     composer()
     expect(chip()).toBeNull()
     cleanup()
     useCreateStore.getState().setIntent('removebg')
     composer()
     expect(chip()).toBeNull()
+  })
+
+  it('local Edit offers the count on ComfyUI too (B35)', () => {
+    useCreateStore.getState().setIntent('edit')
+    composer()
+    expect(chip()).not.toBeNull()
   })
 
   it('the Mac edits one picture per image, so local Edit offers the count there', () => {
@@ -104,11 +106,11 @@ describe('the image count in the Composer', () => {
 
 describe('composerImageCountMax', () => {
   it('follows the lanes', () => {
-    expect(composerImageCountMax('local', 'image', false)).toBe(8)
-    expect(composerImageCountMax('local', 'edit', false)).toBeNull()
-    expect(composerImageCountMax('local', 'edit', true)).toBe(8)
-    expect(composerImageCountMax('cloud', 'edit', false)).toBe(4)
-    expect(composerImageCountMax('cloud', 'video', false)).toBeNull()
-    expect(composerImageCountMax('local', 'music', false)).toBeNull()
+    expect(composerImageCountMax('local', 'image')).toBe(8)
+    // B35: a local ComfyUI edit repeats its source latent (api/edit-batch).
+    expect(composerImageCountMax('local', 'edit')).toBe(8)
+    expect(composerImageCountMax('cloud', 'edit')).toBe(4)
+    expect(composerImageCountMax('cloud', 'video')).toBeNull()
+    expect(composerImageCountMax('local', 'music')).toBeNull()
   })
 })

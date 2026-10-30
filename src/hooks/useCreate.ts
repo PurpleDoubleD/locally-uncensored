@@ -103,6 +103,7 @@ import { useWorkflowStore } from '../stores/workflowStore'
 import { useSettingsStore } from '../stores/settingsStore'
 import { renderStallLimitMs, renderStallMessage } from '../lib/tool-timeout'
 import { injectParameters, injectLaneParameters } from '../api/workflows'
+import { applyEditBatch } from '../api/edit-batch'
 import { applyNativeHiresFix, latentDownscale } from '../api/hires-fix'
 import { editHiresBase } from '../lib/edit-hires'
 import { lorasForRun, skippedLorasLine } from '../lib/lora-stack'
@@ -2065,6 +2066,12 @@ export function useCreate() {
             }
           } catch { /* non-fatal */ }
         }
+      }
+
+      // B35: an edit starts from a latent of one; the batch size repeats it,
+      // so an edit run makes as many pictures as a Generate run (api/edit-batch).
+      if (intent === 'edit' && isI2I && !isRemoveBg && effInputImage) {
+        workflow = applyEditBatch(workflow, batchSize)
       }
 
       // Native HiRes is a graph transform, not a special workflow. Apply
