@@ -99,6 +99,9 @@ export interface VideoParams extends GenerateParams {
   frames: number
   fps: number
   inputImage?: string  // Uploaded image filename for I2V models (SVD, FramePack)
+  /** Animate: the picture the clip ends on (B38), for the models
+   *  lib/frame-refs localEndFrame names. Any other model refuses it. */
+  endImage?: string
   // SVD motion strength (motion_bucket_id, 1–255). Lower = more faithful to the
   // source still / calmer motion; 127 (SVD default) drifts hard. We default ~90
   // for I2V fidelity (2026-06-11). Honoured only by the SVD path.
@@ -503,6 +506,9 @@ export function isI2VModel(name: string): boolean {
   if (isFastH3(lower)) return false
   // An A14B half is one or the other, never both like the TI2V-5B.
   if (isWan22A14B(lower)) return lower.includes('i2v') || !lower.includes('t2v')
+  // Wan 2.1 FLF2V (wan2.1_flf2v_720p_14B) starts from an image and ends on
+  // a second one (B38); its name carries no i2v tag.
+  if (/(^|[^a-z0-9])flf2v([^a-z0-9]|$)/.test(lower)) return true
   return lower.includes('i2v') || lower.includes('svd') || lower.includes('framepack')
     || lower.includes('ti2v') || lower.includes('wan2.2') || lower.includes('wan2_2') || lower.includes('wan22')
     || lower.includes('ltx') || lower.includes('video2world') || classifyModel(name) === 'minimaxh3'
@@ -526,7 +532,7 @@ export function isT2VCapable(name: string): boolean {
   if (lower.includes('ti2v') || lower.includes('wan2.2') || lower.includes('wan2_2') || lower.includes('wan22')) return true
   if (lower.includes('svd') || lower.includes('framepack')) return false
   if (lower.includes('video2world')) return false
-  if (lower.includes('i2v')) return false
+  if (lower.includes('i2v') || /(^|[^a-z0-9])flf2v([^a-z0-9]|$)/.test(lower)) return false
   return true
 }
 

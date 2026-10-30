@@ -544,9 +544,14 @@ describe.each(QWEN21_WEIGHTS)('buildDynamicWorkflow, Qwen-Image 2.1 edit with fu
     expect(await at(9, 1536, 1536)).toBe(960)
   })
 
-  // Negative control: references without a source are not an edit at all.
-  it('a generate run ignores references', async () => {
+  // References without a source are not an edit: since B45 (3.0.9) they are
+  // the reference images of a text to image run, read by the text encoder,
+  // with the picture from the empty latent (create-takes-reference-images).
+  it('a generate run takes references as reference images, not as an edit source', async () => {
     const wf = await buildDynamicWorkflow({ ...baseParams, referenceImages: ['person.png'] } as never)
-    expect(nodeOf(wf, 'LoadImage')).toBeUndefined()
+    const enc = nodeOf(wf, 'TextEncodeQwenImage21')![1]
+    expect(enc.inputs['images.image_1']).toBeDefined()
+    expect(nodeOf(wf, 'VAEEncode')).toBeUndefined()
+    expect(nodeOf(wf, 'EmptyLatentImage')).toBeDefined()
   })
 })

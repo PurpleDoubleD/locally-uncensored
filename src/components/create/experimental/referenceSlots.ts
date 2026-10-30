@@ -10,6 +10,8 @@ import { getSharedMemoryGb } from '../../../lib/hardware'
 import { laneImageModel } from '../../../lib/image-engines'
 import { macEditReferenceRoom } from '../../../lib/mac-edit-memory'
 import { referenceModel, studioExtraPhotoSlots } from '../../../lib/render/create-studio'
+import { isMlxImageHost } from '../../../api/mlx-image'
+import { laneVideoModel, localAnimateReferenceSlots } from '../../../lib/frame-refs'
 
 export function useReferenceSlots(): number {
   const backend = useCreateStore((s) => s.backend)
@@ -22,13 +24,18 @@ export function useReferenceSlots(): number {
   const cloudImageModel = useCreateStore((s) => s.cloudImageModel)
   const cloudVideoModel = useCreateStore((s) => s.cloudVideoModel)
   const cloudOpModel = useCreateStore((s) => s.cloudOpModel)
+  const localAnimateModel = useCreateStore((s) => laneVideoModel(s.videoModelList, s.videoModel, 'animate'))
   // The type from the fetched list carries the header sniff; the name is the
   // fallback, exactly as useCreate decides the pipeline.
   if (backend === 'cloud') {
     const pick = referenceModel(intent, { cloudImageModel, cloudVideoModel, cloudOpModel })
     return pick ? studioExtraPhotoSlots(pick) : 0
   }
-  return intent === 'edit' ? extraReferenceSlots(listedType ?? classifyModel(imageModel), imageModel) : 0
+  return intent === 'edit' ? extraReferenceSlots(listedType ?? classifyModel(imageModel), imageModel)
+    // B38: a local reference video model that reads several pictures (MiniMax
+    // H3 ref2va). The Mac's own video engine reads one.
+    : intent === 'animate' && !isMlxImageHost() ? localAnimateReferenceSlots(localAnimateModel)
+    : 0
 }
 
 /** The memory of this Mac, read once for every strip. */

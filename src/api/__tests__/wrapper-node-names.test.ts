@@ -93,6 +93,14 @@ const CORE_NODES = new Set([
   // [nodes_qwen.py 185, in the QwenExtension list at 244]. The builder adds
   // either only when /object_info lists it.
   'CFGGuider', 'QwenImage21Cache',
+  // B38/B45, read in ComfyUI master b5a43215 on 30.10.2026 (schema node_id or
+  // NODE_CLASS_MAPPINGS key, the file in brackets) and used by the official
+  // Comfy-Org templates named in lib/frame-refs.ts: WanFirstLastFrameToVideo
+  // [nodes_wan.py 188], FluxKontextMultiReferenceLatentMethod [nodes_flux.py
+  // 158], ModelSamplingFlux [nodes_model_advanced.py 166], ReferenceLatent
+  // [nodes_edit_model.py], ImageScaleToTotalPixels [nodes_post_processing.py 234].
+  'WanFirstLastFrameToVideo', 'FluxKontextMultiReferenceLatentMethod', 'ModelSamplingFlux', 'ReferenceLatent',
+  'ImageScaleToTotalPixels',
   'YuE2GenerateMusic', 'EmptyYuE2LatentAudio',
   // lora
   'LoraLoader', 'LoraLoaderModelOnly',

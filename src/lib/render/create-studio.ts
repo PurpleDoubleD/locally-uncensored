@@ -12,7 +12,7 @@
 
 import { STUDIO_MODELS, studioBaseCredits, studioFields, studioPreviewCredits, studioSchema } from './studio-contract'
 import { presetModels, requiredRoleInputs, type PresetModel, type StepRole } from './preset-models'
-import { defaultCloudModel, modelForOp, opPickerModels, resolveCharacterModel, resolveOpPick } from '../../stores/cloudCatalogStore'
+import { cloudModelById, defaultCloudModel, modelForOp, opPickerModels, resolveCharacterModel, resolveOpPick } from '../../stores/cloudCatalogStore'
 import { intentToJob, type CreateIntentLike } from './cloud-jobs'
 
 // Desktop port (P2, checked again in P9): the web's CreateIntent already
@@ -184,10 +184,34 @@ export function studioPhotoCap(model: string): number {
   return Math.min(studioSchema(model).properties?.[field]?.maxItems ?? 1, MAX_STUDIO_PHOTOS)
 }
 
+/** B38 (W6-API 30.10.2026): nimmt der Server fuer dieses Animate-Modell ein
+ *  Endbild an? Nur das Katalogfeld `end_image` zaehlt. Ein Server von vor W6
+ *  nahm ein Endbild an und verwarf es still, darum ohne Feld kein Endbild. */
+export function cloudTakesEndImage(model: string | null | undefined): boolean {
+  return !!model && cloudModelById(model)?.end_image === true
+}
+
+/** W6-API: wie viele Bilder (das Startbild eingerechnet) der Server fuer
+ *  dieses Modell als Bilderliste annimmt. 0 ohne Katalogfeld. */
+export function cloudReferenceCap(model: string | null | undefined): number {
+  const n = model ? cloudModelById(model)?.reference_images : undefined
+  return typeof n === 'number' && n > 0 ? Math.floor(n) : 0
+}
+
+/** Liest dieses Studio-Modell ein Endbild (last_image_path)? Animate bietet
+ *  dann neben dem Startbild ein zweites Feld an (B38, Discord 30.10.2026). */
+export function studioReadsEndImage(model: string | null | undefined): boolean {
+  if (!model) return false
+  return Object.values(STUDIO_MODELS[model]?.inputs ?? {}).includes('last_image_path')
+}
+
 /** Wie viele WEITERE Fotos neben dem Standbild die Referenzleiste fuer dieses
  *  Modell anbietet. */
 export function studioExtraPhotoSlots(model: string): number {
-  return Math.max(0, studioPhotoCap(model) - 1)
+  // W6-API: where the catalogue names how many pictures the server takes,
+  // never more than that.
+  const server = cloudReferenceCap(model)
+  return Math.max(0, (server ? Math.min(studioPhotoCap(model), server) : studioPhotoCap(model)) - 1)
 }
 
 /** Das Studio-Modell, das Bearbeiten oder Animate gerade fahren wuerde, wenn es

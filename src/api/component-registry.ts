@@ -30,6 +30,10 @@ export interface ComponentSpec {
   subfolder?: string
   /** Size, for the "download N GB now?" question in Create. */
   sizeGB?: number
+  /** The file's sha256 where the component is not in the bundle catalogue
+   *  (B45: the Krea 2 style reference LoRA). The download is checked
+   *  against it; a catalogue file takes its digest from the catalogue. */
+  sha256?: string
 }
 
 export interface ComponentRequirements {

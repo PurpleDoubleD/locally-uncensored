@@ -63,6 +63,7 @@ export { promptFilenamePrefix, videoDecodeNode } from './comfyui-graph'
 import { promptFilenamePrefix, videoDecodeNode, addVideoSave } from './comfyui-graph'
 import { extraReferenceSlots, isQwenImageEditModel, referenceSide } from '../lib/edit-references'
 import { canonicalImageRefs } from '../lib/image-ref-names'
+import { KREA2_STYLE_LORA, LOCAL_END_FRAME_MODELS, createReferenceSupport, localAnimateReferenceSlots, localEndFrame, CREATE_REFERENCE_MODELS } from '../lib/frame-refs'
 import { nativeUpscaleScale, upscaleTarget, type UpscaleFactor } from '../lib/local-upscale'
 import { WAN_FAST, findWanSpeedLora, isFastSampling, wanSamplingFor, wanSpeedKind, wanSpeedLoraNames } from '../lib/wan-speed'
 import { addAudioStitch, addContextWindows, addContinueSource, addStitch, CONTINUE_NEEDS_UPDATE, type ContinueSource } from './video-continue'
@@ -627,6 +628,14 @@ export async function buildDynamicWorkflow(
   // picture Phantom and MAGREF stay the text to video runs they always were;
   // VACE has no such run in LU.
   const refFamily = isVideo ? ref2vFamily(params.model) : null
+  // B38: never drop an end image or further references without a word. A
+  // model that cannot take them refuses, and Create shows why.
+  if (isVideo && videoParams.endImage && !localEndFrame(params.model)) {
+    throw new WorkflowUnavailableError(`${params.model} starts from one image and cannot also take an end image. ${LOCAL_END_FRAME_MODELS}`, 'unavailable')
+  }
+  if (isVideo && (gp.referenceImages?.length ?? 0) > 0 && localAnimateReferenceSlots(params.model) === 0) {
+    throw new WorkflowUnavailableError(`${params.model} reads one picture. Several references work with MiniMax H3 Reference (ref2va).`, 'unavailable')
+  }
   if (refFamily && (videoParams.inputImage || refFamily === 'vace')) {
     const refusal = ref2vRefusal(params.model)
     if (refusal) throw new WorkflowUnavailableError(refusal, 'unavailable')
@@ -1099,11 +1108,44 @@ export async function buildDynamicWorkflow(
   const references = (isQwenEdit || isQwen1Edit)
     ? (gp.referenceImages ?? []).slice(0, extraReferenceSlots(type, params.model))
     : []
+  // B45 (Discord 30.10.2026): reference images for text to image, read the
+  // way each family's official template reads them (lib/frame-refs). A model
+  // without such a path refuses instead of drawing from the prompt alone.
+  const createRefsAsked = !isVideo && !gp.inputImage ? (gp.referenceImages ?? []) : []
+  const createRefSupport = createReferenceSupport(type, params.model)
+  const createRefStrategy = strategy === 'unet_krea2' || strategy === 'unet_qwenimage' || strategy === 'unet_flux2'
+  if (createRefsAsked.length > 0 && (createRefSupport.slots === 0 || !createRefStrategy)) {
+    throw new WorkflowUnavailableError(`${params.model} cannot take reference images. ${CREATE_REFERENCE_MODELS}`, strategy)
+  }
+  const createRefs = createRefsAsked.slice(0, createRefSupport.slots)
+  const krea2StyleRef = strategy === 'unet_krea2' && createRefs.length > 0
+  if (krea2StyleRef) {
+    requireRelease(allNodes, ['TextEncodeQwenImageEditPlus', 'FluxKontextMultiReferenceLatentMethod', 'ModelSamplingFlux', 'LoraLoaderModelOnly'],
+      'Reference images with Krea 2 need a newer ComfyUI. Update ComfyUI, then try again.', strategy)
+  }
+  if (strategy === 'unet_flux2' && createRefs.length > 0) {
+    requireRelease(allNodes, ['ReferenceLatent', 'VAEEncode', 'ImageScaleToTotalPixels'],
+      'Reference images with FLUX.2 need a newer ComfyUI. Update ComfyUI, then try again.', strategy)
+  }
+  // The style reference LoRA of the Krea 2 template. Without it the images
+  // would reach the model but not steer the style, so Create offers the file.
+  let krea2StyleLora: string | null = null
+  if (krea2StyleRef) {
+    krea2StyleLora = nodeComboOptions(allNodes, 'LoraLoaderModelOnly', 'lora_name')
+      .find((l) => (l.split(/[\\/]/).pop() ?? '').toLowerCase() === KREA2_STYLE_LORA.filename) ?? null
+    if (!krea2StyleLora) {
+      throw new WorkflowUnavailableError(
+        `Reference images with Krea 2 need the Krea 2 style reference LoRA (${KREA2_STYLE_LORA.filename}, 436 MB) in ComfyUI/models/loras.`,
+        strategy, undefined,
+        { missing: [{ matchPatterns: [KREA2_STYLE_LORA.filename], downloadFilename: KREA2_STYLE_LORA.filename, downloadUrl: KREA2_STYLE_LORA.url, subfolder: 'loras', sizeGB: 0.43, sha256: KREA2_STYLE_LORA.sha256 }] },
+      )
+    }
+  }
   // The graphics card, read only for an edit with further images: past what
   // it carries, ComfyUI 0.37 ends the run in "aimdo memory compile error"
   // (lib/comfy-edit-memory). Not on a Mac, where ComfyUI has no such compiler
   // and the figure is the shared memory.
-  const cardGb = references.length > 0 && !isMacOS()
+  const cardGb = (references.length > 0 || (strategy === 'unet_qwenimage' && createRefs.length > 1)) && !isMacOS()
     ? await getSystemVRAM().catch(() => null)
     : null
   const fullImages = comfyEditFullImages(cardGb)
@@ -1152,9 +1194,11 @@ export async function buildDynamicWorkflow(
       // however the user spelled them (lib/image-ref-names).
       prompt: isQwenEdit
         ? canonicalImageRefs(params.prompt, 1 + references.length, 'qwen21')
+        : createRefs.length > 0 ? canonicalImageRefs(params.prompt, createRefs.length, 'qwen21')
         : gp.transparent ? transparentPrompt(params.prompt) : params.prompt,
       negative_prompt: isQwenEdit
         ? canonicalImageRefs(params.negativePrompt || '', 1 + references.length, 'qwen21')
+        : createRefs.length > 0 ? canonicalImageRefs(params.negativePrompt || '', createRefs.length, 'qwen21')
         : params.negativePrompt || '',
       // With more images in an edit than the card carries at full size
       // (four, fewer on a card under 24 GB) they share a pixel budget
@@ -1163,6 +1207,7 @@ export async function buildDynamicWorkflow(
       // first, so such an edit comes out smaller than the canvas.
       resolution: isQwenEdit
         ? referenceSide(qwenEditResolution(params.width, params.height), 1 + references.length, fullImages)
+        : createRefs.length > 0 ? referenceSide(qwenEditResolution(params.width, params.height), createRefs.length, fullImages)
         : qwenEditResolution(params.width, params.height),
     }
     if (isQwenEdit) {
@@ -1170,6 +1215,15 @@ export async function buildDynamicWorkflow(
       // user added follow as image_2 and up, the names the prompt uses.
       const images = [gp.inputImage!, ...references]
       for (const [i, image] of images.entries()) {
+        const loadId = String(n++)
+        workflow[loadId] = { class_type: 'LoadImage', inputs: { image } }
+        qwenInputs[`images.image_${i + 1}`] = [loadId, 0]
+      }
+      qwenInputs.vae = [vaeSourceId, vaeOutputSlot]
+    } else if (createRefs.length > 0) {
+      // B45: references without a source. They are image_1 and up; the
+      // picture still comes from the empty latent at the canvas size below.
+      for (const [i, image] of createRefs.entries()) {
         const loadId = String(n++)
         workflow[loadId] = { class_type: 'LoadImage', inputs: { image } }
         qwenInputs[`images.image_${i + 1}`] = [loadId, 0]
@@ -1203,6 +1257,28 @@ export async function buildDynamicWorkflow(
     const pictures = (text: string) => canonicalImageRefs(text, 1 + references.length, 'qwenEditPlus')
     workflow[posId] = { class_type: 'TextEncodeQwenImageEditPlus', inputs: editInputs(pictures(params.prompt)) }
     workflow[negId] = { class_type: 'TextEncodeQwenImageEditPlus', inputs: editInputs(pictures(params.negativePrompt || '')) }
+  } else if (krea2StyleRef) {
+    // B45: the official Krea 2 style reference template. The images go
+    // through TextEncodeQwenImageEditPlus (image1 to image3), the reference
+    // latents are placed with index_timestep_zero, and the negative is the
+    // zeroed positive at CFG 1, as the template runs it.
+    const encId = String(n++)
+    const encInputs: ComfyNodeInputs = {
+      clip: [clipSourceId, clipOutputSlot],
+      prompt: canonicalImageRefs(params.prompt, createRefs.length, 'qwenEditPlus'),
+      vae: [vaeSourceId, vaeOutputSlot],
+    }
+    for (const [i, image] of createRefs.entries()) {
+      const loadId = String(n++)
+      workflow[loadId] = { class_type: 'LoadImage', inputs: { image } }
+      encInputs[`image${i + 1}`] = [loadId, 0]
+    }
+    workflow[encId] = { class_type: 'TextEncodeQwenImageEditPlus', inputs: encInputs }
+    workflow[posId] = {
+      class_type: 'FluxKontextMultiReferenceLatentMethod',
+      inputs: { conditioning: [encId, 0], reference_latents_method: 'index_timestep_zero' },
+    }
+    workflow[negId] = { class_type: 'ConditioningZeroOut', inputs: { conditioning: [posId, 0] } }
   } else {
     workflow[posId] = {
       class_type: 'CLIPTextEncode',
@@ -1451,10 +1527,14 @@ export async function buildDynamicWorkflow(
         strategy,
       )
     }
+    // B38: an end image turns the Wan run into first and last frame
+    // (WanFirstLastFrameToVideo, the node of the official FLF2V templates).
+    const endImage = continueFrom ? undefined : videoParams.endImage
     const i2vNode =
       strategy === 'unet_ltx' ? 'LTXVImgToVideo'
       : strategy === 'unet_cosmos' ? 'CosmosImageToVideoLatent'
       : type === 'hunyuan' ? 'HunyuanImageToVideo'
+      : endImage ? 'WanFirstLastFrameToVideo'
       : 'WanImageToVideo'
     const meta = allNodes[i2vNode]
     if (!meta) {
@@ -1493,6 +1573,11 @@ export async function buildDynamicWorkflow(
     if (decl.start_image) inputs.start_image = startRef
     else if (decl.image) inputs.image = startRef
     else if (decl.init_image) inputs.init_image = startRef
+    if (endImage && decl.end_image) {
+      const endId = String(n++)
+      workflow[endId] = { class_type: 'LoadImage', inputs: { image: endImage } }
+      inputs.end_image = [endId, 0]
+    }
     // SVI-style anti-drift padding (core WanImageToVideo, 2026): the empty
     // frames of a continued section are filled with the clip's first picture
     // instead of grey, so faces and colours stay where the clip started.
@@ -1543,6 +1628,36 @@ export async function buildDynamicWorkflow(
   // official templates: AuraFlow shift 1 (Chroma), 6 (Lumina 2), 3.1 / 3
   // (Qwen-Image / -Edit); ModelSamplingSD3 shift 3 (HiDream fast/full) or 6
   // (dev). Qwen-Image-Edit also runs CFGNorm at strength 1.
+  // B45: FLUX.2 reads references as ReferenceLatent on the conditioning,
+  // each image scaled to about a megapixel and encoded, chained one after
+  // the other on both sides (image_flux2, the Klein edit templates).
+  if (strategy === 'unet_flux2' && createRefs.length > 0) {
+    for (const image of createRefs) {
+      const loadId = String(n++)
+      const scaleId = String(n++)
+      const encId = String(n++)
+      workflow[loadId] = { class_type: 'LoadImage', inputs: { image } }
+      workflow[scaleId] = { class_type: 'ImageScaleToTotalPixels', inputs: { image: [loadId, 0], upscale_method: 'lanczos', megapixels: 1, resolution_steps: 1 } }
+      workflow[encId] = { class_type: 'VAEEncode', inputs: { pixels: [scaleId, 0], vae: [vaeSourceId, vaeOutputSlot] } }
+      const posRefId = String(n++)
+      const negRefId = String(n++)
+      workflow[posRefId] = { class_type: 'ReferenceLatent', inputs: { conditioning: positiveRef, latent: [encId, 0] } }
+      workflow[negRefId] = { class_type: 'ReferenceLatent', inputs: { conditioning: negativeRef, latent: [encId, 0] } }
+      positiveRef = [posRefId, 0]
+      negativeRef = [negRefId, 0]
+    }
+  }
+  // B45: the Krea 2 style reference LoRA and the template's flux sampling
+  // patch (max shift 1.15, base shift 0.5 at the canvas size), after the
+  // user's own LoRA stack.
+  if (krea2StyleRef && krea2StyleLora) {
+    const loraId = String(n++)
+    const shiftId = String(n++)
+    workflow[loraId] = { class_type: 'LoraLoaderModelOnly', inputs: { model: [samplerModelId, 0], lora_name: krea2StyleLora, strength_model: 1 }, _meta: { title: 'Krea 2 style reference' } }
+    workflow[shiftId] = { class_type: 'ModelSamplingFlux', inputs: { model: [loraId, 0], max_shift: 1.15, base_shift: 0.5, width: params.width, height: params.height } }
+    samplerModelId = shiftId
+  }
+
   const auraShift = strategy === 'unet_chroma' ? 1
     : strategy === 'unet_lumina2' ? 6
     : strategy === 'unet_qwenimage1' ? (isQwenImageEditModel(params.model) ? 3 : 3.1)
@@ -2222,6 +2337,27 @@ async function buildMiniMaxH3Workflow(params: VideoParams, seed: number, allNode
     workflow[scaleId] = { class_type: 'ImageScale', inputs: { image: [imageId, 0], upscale_method: 'lanczos', width, height, crop: 'center' } }
     if (isRef2va) encodeInputs['ref_images.ref_image_0'] = [scaleId, 0]
     else encodeInputs.first_frame = [scaleId, 0]
+  }
+  // B38: fl2va ends on a second picture (last_frame, center crop like the
+  // node itself), ref2va takes up to nine references (ref_image_0 to _8).
+  // The node scales references on its own ("match"), so they go in as they are.
+  if (params.endImage && !isRef2va) {
+    const endId = String(n++)
+    const endScaleId = String(n++)
+    workflow[endId] = { class_type: 'LoadImage', inputs: { image: params.endImage } }
+    workflow[endScaleId] = { class_type: 'ImageScale', inputs: { image: [endId, 0], upscale_method: 'lanczos', width, height, crop: 'center' } }
+    encodeInputs.last_frame = [endScaleId, 0]
+  }
+  if (isRef2va) {
+    const more = params.inputImage ? (params.referenceImages ?? []).slice(0, localAnimateReferenceSlots(params.model)) : []
+    for (const [i, image] of more.entries()) {
+      const refId = String(n++)
+      workflow[refId] = { class_type: 'LoadImage', inputs: { image } }
+      encodeInputs[`ref_images.ref_image_${i + 1}`] = [refId, 0]
+    }
+    // The node numbers its pictures <Picture 1> and up; "image 2" in the
+    // prompt means the second of them (lib/image-ref-names).
+    if (more.length > 0) encodeInputs.prompt = canonicalImageRefs(params.prompt, 1 + more.length, 'minimaxH3')
   }
   if (isRef2va) {
     encodeInputs.audio_vae = [audioVaeId, 0]

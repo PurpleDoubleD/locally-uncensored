@@ -22,7 +22,7 @@ import { cleanFolderName, newFolderId, sanitizeFolders, FOLDER_CAP, type Gallery
  * results, the in-flight flag). Everything else in the blob is a preference.
  */
 const RUNTIME_ONLY_KEYS: readonly string[] = [
-  'backend', 'source', 'mask', 'references', 'caps', 'isGenerating', 'comfyCorsBlocked',
+  'backend', 'source', 'mask', 'references', 'endImage', 'imageReferences', 'caps', 'isGenerating', 'comfyCorsBlocked',
   // A queue of source images from yesterday must never start a run today.
   'batchSources', 'batchRun', 'batchOriginal',
   // Ein gespeicherter Preis von gestern ist eine Luege (siehe partialize
@@ -481,6 +481,14 @@ export interface CreateState {
   /** Edit: further reference images after the source, for a model that takes
    *  them (lib/edit-references). Runtime-only like `source`; cleared with it. */
   references: ImageRef[]
+  /** Animate: the picture the clip ends on (B38), for a model that takes
+   *  one (lib/frame-refs, studioReadsEndImage). Runtime-only like `source`;
+   *  cleared with it. */
+  endImage: ImageRef | null
+  /** Image (text to image): reference images for style, pose and camera
+   *  angle (B45), for a model that reads them (lib/frame-refs). Runtime-only,
+   *  kept apart from the Edit references. */
+  imageReferences: ImageRef[]
   /** Several source images, one edit (lib/batch-edit): the files that get the
    *  same run, one after the other. Empty for a single image, else two or more,
    *  and `source` shows the first. Runtime-only like `source`. */
@@ -697,6 +705,9 @@ export interface CreateState {
   addReference: (img: ImageRef) => void
   removeReference: (index: number) => void
   setReferences: (refs: ImageRef[]) => void
+  setEndImage: (img: ImageRef | null) => void
+  addImageReference: (img: ImageRef) => void
+  removeImageReference: (index: number) => void
   setBatchSources: (list: MediaRef[]) => void
   setBatchRun: (run: BatchRunState | null) => void
   setBatchOriginal: (img: ImageRef | null) => void
@@ -1129,6 +1140,8 @@ export const useCreateStore = create<CreateState>()(
       growMaskBy: 6,
       source: null as ImageRef | null,
       references: [] as ImageRef[],
+      endImage: null as ImageRef | null,
+      imageReferences: [] as ImageRef[],
       batchSources: [] as MediaRef[],
       batchRun: null as BatchRunState | null,
       batchOriginal: null as ImageRef | null,
@@ -1272,7 +1285,7 @@ export const useCreateStore = create<CreateState>()(
         // removebg/animate keep the source but drop a stale mask. Video/animate
         // mirror setMode's reset so image resolution never leaks into video.
         // A stale error from the previous intent never carries over.
-        const dropAll = { source: null, mask: null, sourceSetAt: 0, references: [] }
+        const dropAll = { source: null, mask: null, sourceSetAt: 0, references: [], endImage: null }
         // Back from a tab that runs another model (the video tabs, Music), the
         // image lane gets its own values again; inside the image lane a switch
         // keeps what the user tuned. Music has mode 'image', so asking the mode
@@ -1538,13 +1551,16 @@ export const useCreateStore = create<CreateState>()(
       setSource: (source) => {
         // The list of further source images goes with the image it belongs to.
         if (!source) get().setBatchSources([])
-        set({ source, sourceSetAt: source ? Date.now() : 0, ...(source ? {} : { mask: null, references: [] }) })
+        set({ source, sourceSetAt: source ? Date.now() : 0, ...(source ? {} : { mask: null, references: [], endImage: null }) })
       },
       // Capped at the most any model takes, local or cloud (lib/edit-references);
       // the UI offers fewer for a model with fewer slots and the builder slices.
       addReference: (img) => set((s) => ({ references: [...s.references, img].slice(0, MAX_STORED_REFERENCES) })),
       removeReference: (index) => set((s) => ({ references: s.references.filter((_, i) => i !== index) })),
       setReferences: (references) => set({ references }),
+      setEndImage: (endImage) => set({ endImage }),
+      addImageReference: (img) => set((s) => ({ imageReferences: [...s.imageReferences, img].slice(0, MAX_STORED_REFERENCES + 1) })),
+      removeImageReference: (index) => set((s) => ({ imageReferences: s.imageReferences.filter((_, i) => i !== index) })),
       setBatchSources: (batchSources) => {
         releaseDroppedMediaRefs(get().batchSources, batchSources)
         set({ batchSources })

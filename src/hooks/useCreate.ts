@@ -84,6 +84,7 @@ import { enhancerNames, pickQwenEnhancer, rewrittenByName, type ImproveWriter } 
 import { buildQwenEnhancerWorkflow, runQwenEnhancer } from '../api/qwen-enhancer'
 import { enhancePromptOnMac } from '../api/mlx-enhancer'
 import { extraReferenceSlots, referenceSide } from '../lib/edit-references'
+import { END_IMAGE_ONE_CLIP, createReferenceSupport, localAnimateReferenceSlots, localEndFrame } from '../lib/frame-refs'
 import { canonicalImageRefs } from '../lib/image-ref-names'
 import { macEditReferenceRoom } from '../lib/mac-edit-memory'
 import { getSharedMemoryGb } from '../lib/hardware'
@@ -1614,6 +1615,23 @@ export function useCreate() {
     const listedModel = (mode === 'image' ? state.imageModelList : state.videoModelList)
       .find((m) => m.name === activeModel)
     const imageModelType = localOp ? classifyModel(activeModel) : (listedModel?.type ?? classifyModel(activeModel))
+    // B38: Animate hands the builder an end image and further references only
+    // for a model that reads them (lib/frame-refs). The Stage marks the ones
+    // a model does not read as not sent, so nothing is dropped unseen.
+    const animateSlots = intent === 'animate' ? localAnimateReferenceSlots(activeModel) : 0
+    const animateExtras = intent === 'animate'
+      ? {
+        ...(state.endImage?.filename && localEndFrame(activeModel) ? { endImage: state.endImage.filename } : {}),
+        ...(animateSlots > 0 && references.some((r) => r.filename)
+          ? { referenceImages: references.map((r) => r.filename).filter(Boolean).slice(0, animateSlots) }
+          : {}),
+      }
+      : {}
+    // B45: reference images for text to image, as many as the model reads.
+    const createRefSlots = intent === 'image' && !isI2I ? createReferenceSupport(imageModelType, activeModel).slots : 0
+    const createRefNames = createRefSlots > 0
+      ? state.imageReferences.map((r) => r.filename).filter(Boolean).slice(0, createRefSlots)
+      : []
 
     // Background removal is prompt-free and model-independent (RMBG node);
     // lipsync/motion drive off their media inputs (the builder supplies a
@@ -1828,6 +1846,7 @@ export function useCreate() {
         ...(isI2I && !isRemoveBg && effInputImage && references.some((r) => r.filename)
           ? { referenceImages: references.map((r) => r.filename).filter(Boolean) }
           : {}),
+        ...(createRefNames.length > 0 ? { referenceImages: createRefNames } : {}),
         ...(!isRemoveBg && maskFilename ? { maskImage: maskFilename, growMaskBy } : {}),
         // Advanced adjustments. LoRA feeds the builder's `lora`/`loraStrength`
         // contract (string[] + number[]); the old `loras` key was read by nobody,
@@ -1956,7 +1975,7 @@ export function useCreate() {
       if (customWf) {
         builderUsed = 'custom'
         setProgress(5, `Using workflow: ${customWf.name}...`)
-        const params = mode === 'video' ? { ...baseParams, frames, fps, ...(effI2vImage ? { inputImage: effI2vImage } : {}) } : baseParams
+        const params = mode === 'video' ? { ...baseParams, frames, fps, ...(effI2vImage ? { inputImage: effI2vImage } : {}), ...animateExtras } : baseParams
         // The values changed under "Workflow parameters" go in last (GitHub wish #8).
         const overrides = useWorkflowStore.getState().paramOverrides[customWf.id]
         workflow = await injectParameters(customWf.workflow, customWf.parameterMap, params, imageModelType, overrides)
@@ -1964,7 +1983,7 @@ export function useCreate() {
         // Dynamic workflow builder — auto-detects nodes and builds the right pipeline
         setProgress(5, 'Building workflow...')
         try {
-          const genParams = mode === 'video' ? { ...baseParams, frames, fps, ...(effI2vImage ? { inputImage: effI2vImage } : {}), ...longVideoParams(opts) } : baseParams
+          const genParams = mode === 'video' ? { ...baseParams, frames, fps, ...(effI2vImage ? { inputImage: effI2vImage } : {}), ...animateExtras, ...longVideoParams(opts) } : baseParams
           // A missing text encoder / VAE or a too-old ComfyUI is fixed in
           // place after one question, then the build runs again.
           workflow = await buildWithFixups(
@@ -2054,7 +2073,7 @@ export function useCreate() {
                     return
                   }
                   // Re-build the workflow now that the new node is available
-                  const genParams = { ...baseParams, frames, fps, ...(effI2vImage ? { inputImage: effI2vImage } : {}), ...longVideoParams(opts) }
+                  const genParams = { ...baseParams, frames, fps, ...(effI2vImage ? { inputImage: effI2vImage } : {}), ...animateExtras, ...longVideoParams(opts) }
                   workflow = await buildDynamicWorkflow(genParams, imageModelType)
                   setProgress(10, 'VHS installed, generating MP4...')
                 } catch (instErr) {
@@ -2573,6 +2592,12 @@ export function useCreate() {
         fps: s.fps, frames: s.frames, extendClip: s.extendClip,
       })
       if (long?.kind === 'error') { s.setError(long.message); return }
+      // B38: a clip in sections would end its FIRST section on the end
+      // image. Said instead of done wrong.
+      if (long && intent === 'animate' && s.endImage && localEndFrame(model)) {
+        s.setError(END_IMAGE_ONE_CLIP)
+        return
+      }
       if (long?.kind === 'one-pass') { await runOnce({ frames: long.frames }, { contextWindows: true }); return }
       if (long?.kind === 'sections') {
         const own = new AbortController()
