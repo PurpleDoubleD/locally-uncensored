@@ -1423,42 +1423,103 @@ pub fn reap_orphaned_sidecars(app: &AppHandle) {
 
 // ── Sidecar resolution ───────────────────────────────────────────────────────
 
-/// Locate the bundled `llama-server` binary. Prod: next to the main
-/// executable (where Tauri copies `externalBin`). Dev: the target-triple
-/// artifact `scripts/build-llama.sh` drops into `src-tauri/bin/`.
-fn resolve_engine_binary(app: &AppHandle) -> Option<PathBuf> {
-    // 1. Bundled: same dir as the running app binary.
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(dir) = exe.parent() {
-            let candidate = dir.join(sidecar_binary_name());
-            if candidate.exists() {
-                return Some(candidate);
-            }
-        }
-    }
+/// What a sidecar file on disk is.
+///
+/// GH #207: a build from source with the 0-byte stubs ci.yml creates for
+/// `cargo check` (`touch src-tauri/bin/lu-llama-server-<triple>.exe`) found the
+/// stub, because the lookup asked only `exists()`. Windows then refused to run
+/// it with "os error 193" (not a valid Win32 application), an answer that says
+/// nothing about the cause. A file is only the engine when it starts like a
+/// program of this platform.
+#[derive(Debug, PartialEq, Eq)]
+enum SidecarFile {
+    Missing,
+    /// There, but empty or not a program (its size in bytes).
+    NotAProgram(u64),
+    Program,
+}
 
-    // 2. Resource dir (belt-and-suspenders for platforms that stage it there).
+/// The first bytes of an executable on this platform: PE (`MZ`), ELF, or
+/// Mach-O (thin in both byte orders, and universal).
+fn starts_like_a_program(head: &[u8]) -> bool {
+    if cfg!(target_os = "windows") {
+        head.starts_with(b"MZ")
+    } else if cfg!(target_os = "macos") {
+        [[0xcf, 0xfa, 0xed, 0xfe], [0xce, 0xfa, 0xed, 0xfe], [0xfe, 0xed, 0xfa, 0xcf], [0xfe, 0xed, 0xfa, 0xce], [0xca, 0xfe, 0xba, 0xbe]]
+            .iter()
+            .any(|m| head.starts_with(m))
+    } else {
+        head.starts_with(b"\x7fELF")
+    }
+}
+
+fn sidecar_file(p: &Path) -> SidecarFile {
+    use std::io::Read;
+    let Ok(meta) = std::fs::metadata(p) else { return SidecarFile::Missing };
+    if !meta.is_file() {
+        return SidecarFile::Missing;
+    }
+    let mut head = [0u8; 4];
+    let n = std::fs::File::open(p).and_then(|mut f| f.read(&mut head)).unwrap_or(0);
+    if starts_like_a_program(&head[..n]) {
+        SidecarFile::Program
+    } else {
+        SidecarFile::NotAProgram(meta.len())
+    }
+}
+
+/// Where the engine may be, in the order it is looked for. Prod: next to the
+/// main executable (where Tauri copies `externalBin`), then the resource dir.
+/// Dev: the target-triple artifact `scripts/build-llama.sh` drops into
+/// `src-tauri/bin/` (`tauri dev` runs from target/debug, so up to the manifest).
+fn engine_binary_candidates(app: &AppHandle) -> Vec<PathBuf> {
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    if let Some(dir) = std::env::current_exe().ok().and_then(|e| e.parent().map(Path::to_path_buf)) {
+        candidates.push(dir.join(sidecar_binary_name()));
+    }
     if let Ok(res) = app.path().resource_dir() {
-        let candidate = res.join(sidecar_binary_name());
-        if candidate.exists() {
-            return Some(candidate);
-        }
+        candidates.push(res.join(sidecar_binary_name()));
     }
-
-    // 3. Dev: src-tauri/bin/lu-llama-server-<triple>[.exe]. `tauri dev` runs
-    //    the binary from target/debug, so walk up to the manifest dir.
-    let triple = host_target_triple();
     let suffix = if cfg!(target_os = "windows") { ".exe" } else { "" };
-    let dev_name = format!("lu-llama-server-{triple}{suffix}");
-    let mut dev_candidates: Vec<PathBuf> = Vec::new();
+    let dev_name = format!("lu-llama-server-{}{suffix}", host_target_triple());
     if let Ok(manifest) = std::env::var("CARGO_MANIFEST_DIR") {
-        dev_candidates.push(PathBuf::from(&manifest).join("bin").join(&dev_name));
+        candidates.push(PathBuf::from(&manifest).join("bin").join(&dev_name));
     }
     if let Ok(cwd) = std::env::current_dir() {
-        dev_candidates.push(cwd.join("src-tauri").join("bin").join(&dev_name));
-        dev_candidates.push(cwd.join("bin").join(&dev_name));
+        candidates.push(cwd.join("src-tauri").join("bin").join(&dev_name));
+        candidates.push(cwd.join("bin").join(&dev_name));
     }
-    dev_candidates.into_iter().find(|p| p.exists())
+    candidates
+}
+
+/// The first candidate that is a program. A stub is passed over, so a real
+/// binary further down still counts.
+fn pick_engine_binary(candidates: &[PathBuf]) -> Option<PathBuf> {
+    candidates.iter().find(|p| sidecar_file(p) == SidecarFile::Program).cloned()
+}
+
+/// Locate the bundled `llama-server` binary.
+fn resolve_engine_binary(app: &AppHandle) -> Option<PathBuf> {
+    pick_engine_binary(&engine_binary_candidates(app))
+}
+
+/// The sentence for an engine that cannot be started. `missing` is the call
+/// site's own sentence for no file at all; a file that is there but no program
+/// gets its own, because that is a build from source with the CI stub, not a
+/// broken installation.
+fn engine_binary_error(candidates: &[PathBuf], missing: impl FnOnce() -> String) -> String {
+    let stub = candidates.iter().find_map(|p| match sidecar_file(p) {
+        SidecarFile::NotAProgram(len) => Some(len),
+        _ => None,
+    });
+    match stub {
+        Some(len) => format!(
+            "The LU Engine program ({}) in this build is a placeholder of {len} bytes, not the engine, so it cannot start. \
+             A build from source needs the real file: run scripts/build-llama.sh, or take it from the latest release (CONTRIBUTING.md, \"The LU Engine\").",
+            sidecar_binary_name()
+        ),
+        None => missing(),
+    }
 }
 
 /// Another binary that ships next to the engine (`lu-llama-quantize`, used
@@ -1482,7 +1543,7 @@ pub(crate) fn resolve_sidecar(app: &AppHandle, base: &str) -> Option<PathBuf> {
         candidates.push(cwd.join("src-tauri").join("bin").join(&dev_name));
         candidates.push(cwd.join("bin").join(&dev_name));
     }
-    candidates.into_iter().find(|p| p.is_file())
+    candidates.into_iter().find(|p| sidecar_file(p) == SidecarFile::Program)
 }
 
 /// A llama-server of its own for one model, apart from the chat engine:
@@ -1497,8 +1558,9 @@ pub(crate) fn spawn_private_server(app: &AppHandle, model_path: &str, port: u16,
 /// `spawn_private_server` with more flags at the end (the Neuron tweaker's
 /// strength check passes `--control-vector`).
 pub(crate) fn spawn_private_server_with(app: &AppHandle, model_path: &str, port: u16, ctx: u32, extra: &[String]) -> Result<std::process::Child, String> {
-    let binary = resolve_engine_binary(app)
-        .ok_or_else(|| format!("Bundled engine binary not found ({}).", sidecar_binary_name()))?;
+    let candidates = engine_binary_candidates(app);
+    let binary = pick_engine_binary(&candidates)
+        .ok_or_else(|| engine_binary_error(&candidates, || format!("Bundled engine binary not found ({}).", sidecar_binary_name())))?;
     let mut args: Vec<String> = vec![
         "-m".into(),
         model_path.into(),
@@ -3565,14 +3627,18 @@ fn start_after_stop(
         }
     }
 
-    let binary = resolve_engine_binary(app).ok_or_else(|| {
+    let candidates = engine_binary_candidates(app);
+    let binary = pick_engine_binary(&candidates).ok_or_else(|| {
         // This used to name a build script. On a user's machine that is not an
         // instruction, it is noise; the only real remedies are a reinstall or a
-        // different backend (GH #118).
-        format!(
-            "The LU Engine program ({}) is missing from this installation. Reinstall Locally Uncensored, or pick a different backend in Settings, AI Backends.",
-            sidecar_binary_name()
-        )
+        // different backend (GH #118). A placeholder file is the one case that
+        // is a build from source, and gets the build steps (GH #207).
+        engine_binary_error(&candidates, || {
+            format!(
+                "The LU Engine program ({}) is missing from this installation. Reinstall Locally Uncensored, or pick a different backend in Settings, AI Backends.",
+                sidecar_binary_name()
+            )
+        })
     })?;
     // K1 (3.0.1): where the dynamic-ISA sidecar's companion libraries are,
     // None on mac / a static build. Resolved once here and carried through
@@ -5396,11 +5462,14 @@ fn start_bundled_embed_blocking(
         ));
     }
 
-    let binary = resolve_engine_binary(app).ok_or_else(|| {
-        format!(
-            "Bundled engine binary not found ({}). Run scripts/build-llama.sh to produce the sidecar.",
-            sidecar_binary_name()
-        )
+    let candidates = engine_binary_candidates(app);
+    let binary = pick_engine_binary(&candidates).ok_or_else(|| {
+        engine_binary_error(&candidates, || {
+            format!(
+                "Bundled engine binary not found ({}). Run scripts/build-llama.sh to produce the sidecar.",
+                sidecar_binary_name()
+            )
+        })
     })?;
 
     let embed_args = build_embed_args(&model_path, port);
@@ -10778,5 +10847,74 @@ mod diag_tests {
         assert_eq!(pick_save_slot(&serde_json::json!({})), 0);
         assert_eq!(pick_save_slot(&serde_json::json!([])), 0);
         assert_eq!(pick_save_slot(&serde_json::json!(null)), 0);
+    }
+}
+
+#[cfg(test)]
+mod a_stub_is_not_the_engine {
+    //! GH #207: a build from source with ci.yml's 0-byte sidecar stubs got
+    //! "os error 193" from the embeddings server, because the lookup took any
+    //! file that exists.
+    use super::*;
+
+    /// The head of a real program of this platform: the test binary itself.
+    fn program_bytes() -> Vec<u8> {
+        let mut b = std::fs::read(std::env::current_exe().unwrap()).unwrap();
+        b.truncate(4096);
+        b
+    }
+
+    #[test]
+    fn the_empty_ci_stub_is_passed_over_for_the_real_binary_behind_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let stub = dir.path().join("next-to-the-exe");
+        let real = dir.path().join("src-tauri-bin");
+        std::fs::write(&stub, b"").unwrap();
+        std::fs::write(&real, program_bytes()).unwrap();
+        assert_eq!(pick_engine_binary(&[stub, real.clone()]), Some(real));
+    }
+
+    #[test]
+    fn a_stub_alone_is_no_engine_and_the_error_says_what_it_is() {
+        let dir = tempfile::tempdir().unwrap();
+        let stub = dir.path().join("lu-llama-server");
+        std::fs::write(&stub, b"").unwrap();
+        let candidates = [stub];
+        assert_eq!(pick_engine_binary(&candidates), None);
+        let msg = engine_binary_error(&candidates, || "missing".into());
+        assert!(msg.contains("placeholder of 0 bytes"), "{msg}");
+        // engine-start-failure.ts keys on this fragment: a stub is no reason
+        // for the boot resume to start the engine again.
+        assert!(msg.contains("is a placeholder of"), "{msg}");
+        assert!(msg.contains("scripts/build-llama.sh"), "{msg}");
+        assert!(msg.contains("latest release"), "{msg}");
+        assert!(!msg.contains(dir.path().to_str().unwrap()), "no path of its own: {msg}");
+    }
+
+    #[test]
+    fn a_text_file_of_that_name_is_not_a_program_either() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("lu-llama-server");
+        std::fs::write(&p, b"hello").unwrap();
+        assert_eq!(sidecar_file(&p), SidecarFile::NotAProgram(5));
+    }
+
+    // Negative controls: a real program is still found, and no file at all
+    // keeps the call site's own sentence.
+    #[test]
+    fn a_real_program_is_the_engine() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("lu-llama-server");
+        std::fs::write(&p, program_bytes()).unwrap();
+        assert_eq!(sidecar_file(&p), SidecarFile::Program);
+        assert_eq!(pick_engine_binary(std::slice::from_ref(&p)), Some(p));
+    }
+
+    #[test]
+    fn no_file_at_all_keeps_the_sentence_of_the_call_site() {
+        let dir = tempfile::tempdir().unwrap();
+        let candidates = [dir.path().join("nothing-here")];
+        assert_eq!(sidecar_file(&candidates[0]), SidecarFile::Missing);
+        assert_eq!(engine_binary_error(&candidates, || "missing".into()), "missing");
     }
 }

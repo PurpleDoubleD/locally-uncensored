@@ -72,11 +72,17 @@ export function Select({
   const current = options.find((option) => option.value === value)
 
   const filtered = useMemo(() => {
-    if (!query.trim()) return options
+    // One row per value. A row's key is its value, and two rows with one key
+    // are not two rows to React: filtering them left a third, stale one behind
+    // (Discord 30.10.2026, a model listed twice showed three times after
+    // typing "tur"). Two rows with one value are one choice anyway.
+    const seen = new Set<string>()
+    const unique = options.filter((option) => !seen.has(option.value) && !!seen.add(option.value))
+    if (!query.trim()) return unique
 
     const normalizedQuery = query.toLowerCase()
 
-    return options.filter(
+    return unique.filter(
       (option) =>
         option.label.toLowerCase().includes(normalizedQuery) ||
         option.sublabel?.toLowerCase().includes(normalizedQuery) ||
