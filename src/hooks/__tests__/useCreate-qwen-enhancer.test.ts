@@ -39,7 +39,7 @@ vi.mock('../../api/comfyui', async (orig) => ({
 }))
 vi.mock('../../api/comfyui-ws', () => ({
   CLIENT_ID: 'lu-test',
-  comfyWS: { connect: vi.fn(async () => { throw new Error('no socket') }), mark: () => 0 },
+  comfyWS: { connect: vi.fn(async () => { throw new Error('no socket') }), mark: () => 0, onPreview: () => () => {} },
 }))
 vi.mock('../../api/vram-handoff', async (orig) => ({
   ...((await orig()) as Record<string, unknown>),

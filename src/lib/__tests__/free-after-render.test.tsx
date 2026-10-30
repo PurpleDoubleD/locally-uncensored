@@ -79,7 +79,7 @@ describe('both render paths plan it and call it off', () => {
   it('Create', () => {
     const create = src('hooks/useCreate.ts')
     expect(create).toMatch(/abortRef\.current = new AbortController\(\)\n\s+\/\/ B27[^\n]*\n\s+cancelFreeAfterRender\(\)/)
-    expect(create).toMatch(/if \(renderEviction\) void restoreChatBackendsAfterRender\(renderEviction\)\n\s+\/\/ B27[^\n]*\n\s+scheduleFreeAfterRender\(/)
+    expect(create).toMatch(/if \(renderEviction\) void restoreChatBackendsAfterRender\(renderEviction\)\n(.*\n){0,3}\s+\/\/ B27[^\n]*\n\s+scheduleFreeAfterRender\(/)
   })
   it('a picture or video the chat asked for', () => {
     const handoff = src('api/vram-handoff.ts')

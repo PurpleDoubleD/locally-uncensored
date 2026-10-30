@@ -1,4 +1,5 @@
 import { itemHasAlpha } from '../../../lib/transparent-image'
+import { useRenderPreviewStore } from '../../../stores/renderPreviewStore'
 import { Fragment, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { motion } from 'framer-motion'
 import { Cpu, Sparkles, ImageDown, Maximize2, Download, Wand2, MonitorOff, AudioLines, Film, Trash2, UserRoundPlus } from 'lucide-react'
@@ -91,6 +92,8 @@ export function GeneratingView() {
   const progressPhase = useCreateStore((s) => s.progressPhase)
   const progressText = useCreateStore((s) => s.progressText)
   const progress = useCreateStore((s) => s.progress)
+  // B28: the sampler's newest picture while a video renders.
+  const preview = useRenderPreviewStore((s) => s.url)
   const isLoading = progressPhase === 'loading-model' || progressPhase === 'loading-clip' || progressPhase === 'loading-vae'
   const beat = phaseBeat(progressPhase)
 
@@ -123,6 +126,14 @@ export function GeneratingView() {
           </div>
         </div>
         <BatchQueue />
+        {preview && (
+          <figure className="flex flex-col items-center gap-1" data-testid="render-live-preview">
+            <img src={preview} alt="Live preview of the video being rendered" className="max-h-56 max-w-[22rem] rounded-lg border border-white/10 object-contain" />
+            <figcaption className="t-micro text-gray-500 text-center max-w-[22rem]">
+              Rough preview of the first frame, sharper with every step. Cancel if it is going the wrong way.
+            </figcaption>
+          </figure>
+        )}
         <p className="t-body text-gray-300 tracking-wide">{progressText || 'Generating…'}</p>
         {isLoading && !isMlxImageHost() && <ColdLoadLine />}
         {progress > 0 && (

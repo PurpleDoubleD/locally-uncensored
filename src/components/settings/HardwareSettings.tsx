@@ -339,7 +339,7 @@ export function HardwareSettings() {
           Mac: its image engine lets go of its model when the picture is out. */}
       {!isMlxImageHost() && (
       <div className="pt-2 border-t border-white/[0.06]" data-testid="free-after-render">
-        <div className="text-[0.7rem] text-gray-700 dark:text-gray-300 font-medium mb-1">After a render</div>
+        <div className="t-label text-gray-700 dark:text-gray-300 font-medium mb-1">After a render</div>
         <div className="grid grid-cols-1 gap-1">
           {([
             ['idle', 'Free memory after 5 minutes (recommended)', 'Renders in a row stay fast. When nothing renders for 5 minutes, the image and video models leave the graphics card and the RAM.'],
@@ -355,8 +355,8 @@ export function HardwareSettings() {
                 className="mt-0.5"
               />
               <div className="flex-1 min-w-0">
-                <div className="text-[0.65rem] text-gray-300">{label}</div>
-                <div className="text-[0.55rem] text-gray-500 mt-0.5 leading-relaxed">{help}</div>
+                <div className="t-micro text-gray-300">{label}</div>
+                <div className="t-micro text-gray-500 mt-0.5 leading-relaxed">{help}</div>
               </div>
             </label>
           ))}

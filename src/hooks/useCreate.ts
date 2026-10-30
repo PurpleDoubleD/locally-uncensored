@@ -102,6 +102,7 @@ import { buildStyleCaption, missingNameLine, trainedLine, trainedLoraFile } from
 import { useCreateStore, EDIT_MAX_DENOISE, characterImageRun, deriveIntent, type CreateState, type GalleryItem } from '../stores/createStore'
 import { useWorkflowStore } from '../stores/workflowStore'
 import { useSettingsStore } from '../stores/settingsStore'
+import { useRenderPreviewStore } from '../stores/renderPreviewStore'
 import { renderStallLimitMs, renderStallMessage } from '../lib/tool-timeout'
 import { injectParameters, injectLaneParameters } from '../api/workflows'
 import { applyNativeHiresFix, latentDownscale } from '../api/hires-fix'
@@ -1755,6 +1756,8 @@ export function useCreate() {
     // render's restore to finish reading the chat model back in. The line
     // says which it is and counts like every other waiting line.
     let renderEviction: RenderEviction | null = null
+    // B28: the live preview of a video run, taken down in the finally below.
+    let offPreview: (() => void) | null = null
     const handoff = elapsedLine((text) => setProgress(0, text), HANDOFF_LINE.freeing)
     try {
       renderEviction = await evictChatBackendsForRender((phase) => handoff.setLabel(HANDOFF_LINE[phase]))
@@ -2141,9 +2144,18 @@ export function useCreate() {
         : {}
 
       setProgress(10, 'Submitting to ComfyUI...')
+      // B28: a video asks ComfyUI for a picture per sampling step, so a wrong
+      // start shows long before the end and Cancel can stop it. ComfyUI sends
+      // previews only to this client and one prompt runs at a time here, so
+      // every preview that arrives belongs to this run.
+      const livePreview = mode === 'video'
+      if (livePreview) {
+        useRenderPreviewStore.getState().setUrl(null)
+        offPreview = comfyWS.onPreview((url) => useRenderPreviewStore.getState().setUrl(url))
+      }
       let promptId: string
       try {
-        promptId = await submitWorkflow(workflow, CLIENT_ID)
+        promptId = await submitWorkflow(workflow, CLIENT_ID, livePreview ? { previewMethod: 'auto' } : {})
       } catch (err) {
         setError(`Failed to submit: ${err instanceof Error ? err.message : String(err)}`)
         setIsGenerating(false)
@@ -2540,6 +2552,8 @@ export function useCreate() {
       // next render (the helper serialises and a follow-up render inherits
       // the haul instead of waiting for it to load).
       if (renderEviction) void restoreChatBackendsAfterRender(renderEviction)
+      offPreview?.()
+      useRenderPreviewStore.getState().setUrl(null)
       // B27: and ComfyUI's memory goes back when the setting says so.
       scheduleFreeAfterRender(
         freeAfterRenderMode(useSettingsStore.getState().settings.freeAfterRender),

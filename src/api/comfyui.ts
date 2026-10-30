@@ -2245,10 +2245,19 @@ async function findAnimateDiffModel(): Promise<string> {
 
 // ─── Workflow Submission ───
 
-export async function submitWorkflow(workflow: ComfyApiGraph, clientId?: string): Promise<string> {
+export async function submitWorkflow(
+  workflow: ComfyApiGraph,
+  clientId?: string,
+  opts: { previewMethod?: 'auto' | 'latent2rgb' | 'taesd' } = {},
+): Promise<string> {
   // Every run its own output names (comfyui-graph tagOutputPrefixes).
   const payload: Record<string, unknown> = { prompt: tagOutputPrefixes(workflow, newRunTag()) }
   if (clientId) payload.client_id = clientId
+  // B28: live previews for this prompt only. ComfyUI starts with previews off
+  // (--preview-method none) and takes a per-prompt override in extra_data
+  // since PR 11261 (2025-12-15, execution.py set_preview_method); an older
+  // one ignores the key and renders as before, without pictures.
+  if (opts.previewMethod) payload.extra_data = { preview_method: opts.previewMethod }
   // Use localFetch (Rust proxy in Tauri, direct fetch in dev). The previous
   // direct-only fetch broke for any ComfyUI not started by LU itself —
   // `--enable-cors-header` is the LU spawn flag, but a user-run ComfyUI
