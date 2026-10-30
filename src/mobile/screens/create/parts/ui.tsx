@@ -15,12 +15,12 @@ import { useCreateStore, type GalleryItem } from '../../../../stores/createStore
 import { galleryLabelShort } from '../../../../lib/render/gallery-label'
 import { nav, useSheet } from '../../../nav'
 import { Icon, type IconType } from '../../../ui'
-import { onTextZoomChange, textUnitPx } from '../../../ui/text-zoom'
+import { useHeldScreenShape } from '../../../ui/screen-shape'
 import { CREATE_STRINGS as T } from '../../../strings/create'
 import { itemUrl, resignItem } from './adapters/result-url'
 import { isComputerItem } from './computer-media'
 import { CheckerBoard, useChecker } from './checker'
-import { screenShape, type ScreenShape } from './layout'
+import type { ScreenShape } from './layout'
 import type { ToolId } from './tools'
 import './create.css'
 
@@ -152,28 +152,18 @@ export function itemName(item: GalleryItem, max = 48): string {
   return galleryLabelShort(item, max)
 }
 
-function shapeNow(): ScreenShape {
-  if (typeof window === 'undefined') return 'tall'
-  // The size text is drawn at: on Android the root stays at 16 px and the WebView enlarges every letter (ui/text-zoom.ts).
-  return screenShape(window.innerWidth, window.innerHeight, textUnitPx())
+function layoutHeight(): number {
+  return window.innerHeight
 }
 
-/** The arrangement that fits the screen right now. Follows rotation, the keyboard and the text size. */
+/**
+ * The arrangement that fits the screen right now. Follows rotation and the text size, not the keyboard:
+ * the composer of Create moves between the arrangements, and a move while typing closed the keyboard on
+ * Android (ui/screen-shape.ts nextShapeState). The size text is drawn at counts: on Android the root stays
+ * at 16 px and the WebView enlarges every letter (ui/text-zoom.ts).
+ */
 export function useScreenShape(): ScreenShape {
-  const [shape, setShape] = useState<ScreenShape>(shapeNow)
-  useEffect(() => {
-    const update = () => setShape(shapeNow())
-    update()
-    window.addEventListener('resize', update)
-    window.addEventListener('orientationchange', update)
-    const offZoom = onTextZoomChange(update)
-    return () => {
-      window.removeEventListener('resize', update)
-      window.removeEventListener('orientationchange', update)
-      offZoom()
-    }
-  }, [])
-  return shape
+  return useHeldScreenShape(layoutHeight)
 }
 
 /**

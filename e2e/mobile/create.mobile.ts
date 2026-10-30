@@ -3904,3 +3904,48 @@ test.describe('create fits on one screen (round 45)', () => {
     fs.writeFileSync(path.join(R45_DIR, `messung-${label}.json`), `${JSON.stringify(rows, null, 1)}\n`)
   })
 })
+
+// Customer mail of 30.10. (package M1, 3.0.9): "the keyboard keeps closing" on Create, Android. Android shrinks the
+// window by the keyboard (adjustResize, MainActivity pads by the IME inset), which the viewport below does too. Below
+// 30 text units of height Create went to one scrolling column, the prompt field was built anew in it, lost the focus,
+// and Android took the keyboard away. Screenshots for the report: LU_M1_SHOTS=<folder>.
+test.describe('the keyboard stays open on Create (M1)', () => {
+  for (const v of [
+    { name: '360x740', w: 360, h: 740, kb: 300, fs: 100 },
+    { name: '412x840 text 115', w: 412, h: 840, kb: 330, fs: 115 },
+  ]) {
+    for (const tool of ['image', 'video'] as const) {
+      test(`${v.name}, ${tool}: the prompt keeps its place and the focus while the window shrinks`, async ({ page }) => {
+        await page.setViewportSize({ width: v.w, height: v.h })
+        const cloud = new Cloud()
+        await openCreate(page, cloud, { fontScale: v.fs })
+        if (tool !== 'image') await chooseTool(page, tool)
+        const prompt = tid(page, 'm-create-prompt')
+        await prompt.tap()
+        await page.keyboard.type('a cat')
+        await prompt.evaluate((n) => ((n as HTMLElement & { m1?: boolean }).m1 = true))
+        const shots = process.env.LU_M1_SHOTS
+        const slug = `${v.name.replace(/\s+/g, '-')}-${tool}`
+        if (shots) await page.screenshot({ path: path.join(shots, `${slug}-1-tastatur-zu.png`) })
+
+        await page.setViewportSize({ width: v.w, height: v.h - v.kb })
+        // Android sends more than one resize while the keyboard slides in; give React every one of them.
+        await page.waitForTimeout(400)
+        const after = await page.evaluate(() => {
+          const el = document.activeElement as (HTMLElement & { m1?: boolean }) | null
+          return { focused: el?.dataset.testid ?? null, same: el?.m1 === true, layout: document.querySelector('[data-testid="m-create-layout"]')?.getAttribute('data-state') ?? 'tall' }
+        })
+        expect(after).toEqual({ focused: 'm-create-prompt', same: true, layout: 'tall' })
+        await page.keyboard.type(' on a roof')
+        await expect(prompt).toHaveValue('a cat on a roof')
+        if (shots) await page.screenshot({ path: path.join(shots, `${slug}-2-tastatur-offen.png`) })
+
+        // The keyboard goes with the focus: the page measures again.
+        await prompt.evaluate((n) => (n as HTMLElement).blur())
+        await page.setViewportSize({ width: v.w, height: v.h })
+        await expect(prompt).toHaveValue('a cat on a roof')
+        await expect(tid(page, 'm-create-layout')).toHaveCount(0)
+      })
+    }
+  }
+})
