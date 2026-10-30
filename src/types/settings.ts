@@ -368,6 +368,13 @@ export interface Settings {
   /** VRAM exclusivity policy for image/video generation. Default 'auto'. */
   exclusiveVramMode: 'auto' | 'always' | 'never'
   /**
+   * B27 (3.0.9): give ComfyUI's memory back after a render
+   * (lib/free-after-render). 'idle' (default) after five minutes without a
+   * new render, 'now' right after it, 'keep' never. Optional: a profile from
+   * before 3.0.9 reads as the default, no store version bump.
+   */
+  freeAfterRender?: 'idle' | 'now' | 'keep'
+  /**
    * A picture or video the chat asked for that takes longer than a few
    * seconds goes on in the background (3.0.8, A2). The turn ends, the chat can
    * be used, and the result appears in the call's own block when it is done.

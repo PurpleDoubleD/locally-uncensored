@@ -25,6 +25,28 @@ export type ComfyWSEvent =
   | { type: 'execution_cached'; data: { prompt_id: string; nodes: string[] } }
 
 export type ComfyWSListener = (event: ComfyWSEvent) => void
+/** A live preview from the sampler, as a data URL (B28). */
+export type ComfyPreviewListener = (dataUrl: string) => void
+
+/**
+ * ComfyUI's PREVIEW_IMAGE frame as a data URL, or null for any other binary
+ * frame. Layout (server.py `send_image`): a big-endian u32 event type 1, a
+ * big-endian u32 image type (1 JPEG, 2 PNG), then the image. The desktop gets
+ * the same frame decoded by Rust (commands/comfy_ws.rs `preview_payload`).
+ */
+export function previewDataUrl(frame: ArrayBuffer | Uint8Array): string | null {
+  const bytes = frame instanceof Uint8Array ? frame : new Uint8Array(frame)
+  if (bytes.length <= 8) return null
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+  if (view.getUint32(0) !== 1) return null
+  const kind = view.getUint32(4)
+  const mime = kind === 1 ? 'image/jpeg' : kind === 2 ? 'image/png' : null
+  if (!mime) return null
+  let text = ''
+  const image = bytes.subarray(8)
+  for (let i = 0; i < image.length; i += 0x8000) text += String.fromCharCode(...image.subarray(i, i + 0x8000))
+  return `data:${mime};base64,${btoa(text)}`
+}
 
 // Loader node class types that indicate model loading. The GGUF loaders must
 // be here too: without them a GGUF video run never shows "Loading model" and
@@ -69,6 +91,9 @@ export const WS_REPLAY_BUFFER = 400
 class ComfyWSClient {
   private ws: WebSocket | null = null
   private listeners = new Set<ComfyWSListener>()
+  /** Previews are not kept for replay: only the newest one is ever shown,
+   *  and 400 pictures in the buffer would be megabytes. */
+  private previewListeners = new Set<ComfyPreviewListener>()
   /** The last frames that came in, newest last, for `on(listener, since)`. */
   private buffer: { seq: number; event: ComfyWSEvent }[] = []
   private seq = 0
@@ -135,6 +160,10 @@ class ComfyWSClient {
           if (msg.type && msg.data) this.dispatch(msg as ComfyWSEvent)
         } catch { /* ignore non-JSON messages */ }
       })
+      await listen<{ mime?: string; data?: string }>('comfy-ws-preview', (ev) => {
+        const { mime, data } = ev.payload ?? {}
+        if (mime && data) this.dispatchPreview(`data:${mime};base64,${data}`)
+      })
       await listen('comfy-ws-closed', () => {
         // Upstream socket died (ComfyUI stopped/restarted) — mirror onclose.
         if (!this._connected) return
@@ -157,6 +186,7 @@ class ComfyWSClient {
 
       try {
         this.ws = new WebSocket(`${comfyuiWsUrl()}?clientId=${CLIENT_ID}`)
+        this.ws.binaryType = 'arraybuffer'
 
         this.ws.onopen = () => {
           clearTimeout(timer)
@@ -168,6 +198,11 @@ class ComfyWSClient {
         }
 
         this.ws.onmessage = (ev) => {
+          if (ev.data instanceof ArrayBuffer) {
+            const preview = previewDataUrl(ev.data)
+            if (preview) this.dispatchPreview(preview)
+            return
+          }
           try {
             const msg = JSON.parse(ev.data)
             if (msg.type && msg.data) this.dispatch(msg as ComfyWSEvent)
@@ -215,6 +250,17 @@ class ComfyWSClient {
         this.reconnectDelay = Math.min(this.reconnectDelay * 2, this.maxReconnectDelay)
       })
     }, this.reconnectDelay)
+  }
+
+  private dispatchPreview(dataUrl: string) {
+    for (const listener of this.previewListeners) listener(dataUrl)
+  }
+
+  /** Listen for live previews (B28). ComfyUI sends them only to the client
+   *  that queued the prompt, and only when the prompt asked for them. */
+  onPreview(listener: ComfyPreviewListener) {
+    this.previewListeners.add(listener)
+    return () => { this.previewListeners.delete(listener) }
   }
 
   /** Hand one frame to everyone listening, and keep it for a late listener. */

@@ -50,6 +50,7 @@ vi.mock('../../api/comfyui-ws', () => ({
   comfyWS: {
     connect: vi.fn(async () => {}),
     mark: () => 0,
+    onPreview: () => () => {},
     on: (cb: (e: unknown) => void) => {
       const id = `p${seen.submits}`
       setTimeout(() => cb({ type: 'execution_complete', data: { prompt_id: id } }), 0)

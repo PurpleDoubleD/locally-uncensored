@@ -1,6 +1,7 @@
 import { useRef, useState, useCallback, useEffect } from 'react'
 import { frameFlush } from '../lib/frame-flush'
 import { useRunActivityStore, toolProgressActivity, waitBeforeRetry, readingActivity, endFirstWait, hiddenThoughtArrived, waitForChatCard } from '../stores/runActivityStore'
+import { watchChatFirstWait } from '../lib/first-wait-vram'
 import { markCannotThink } from '../lib/model-compatibility'
 import {
   type ApprovalEntry,
@@ -2015,7 +2016,12 @@ export function useAgentChat() {
           // A7: the first wait of a turn is the model reading the request.
           // Said in words and with its size instead of a bare "Starting"; the
           // first word, shown thought or tool call takes the line back.
-          if (stepNo === 1) useRunActivityStore.getState().setActivity(convId, readingActivity(estPrompt))
+          if (stepNo === 1) {
+            useRunActivityStore.getState().setActivity(convId, readingActivity(estPrompt))
+            // B26: a long first wait on a local Ollama model gets its reason
+            // (lib/first-wait-vram). It ends by itself at the first sign.
+            watchChatFirstWait(convId, activeModel, abort.signal)
+          }
           // A7: one line in the log file per message, with where the first
           // wait went: the setup before the request, and the model reading
           // until its first word, thought or call. Measured instead of

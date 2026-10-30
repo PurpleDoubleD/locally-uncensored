@@ -78,9 +78,10 @@ import { knownMacMemoryGb } from '../lib/mac-memory'
 import { MIN_TRAIN_IMAGES, maxTrainImages, tooFewTrainPhotosLine } from '../lib/train-image-cap'
 import { improveKindForIntent, IMPROVING_PROMPT, type ImproveOutcome } from '../lib/render/improve-prompt'
 import { elapsedLine } from '../lib/elapsed-line'
+import { cancelFreeAfterRender, freeAfterRenderMode, scheduleFreeAfterRender } from '../lib/free-after-render'
 import { improvePrompt } from '../lib/render/improve-prompt-run'
 import { currentChatModelList, currentHelperModel } from '../lib/cloud-helper-model'
-import { enhancerNames, pickQwenEnhancer, rewrittenByName, type ImproveWriter } from '../lib/render/qwen-enhancer'
+import { enhancerLine, enhancerNames, pickQwenEnhancer, rewrittenByName, type ImproveWriter } from '../lib/render/qwen-enhancer'
 import { buildQwenEnhancerWorkflow, runQwenEnhancer } from '../api/qwen-enhancer'
 import { enhancePromptOnMac } from '../api/mlx-enhancer'
 import { extraReferenceSlots, referenceSide } from '../lib/edit-references'
@@ -102,6 +103,7 @@ import { buildStyleCaption, missingNameLine, trainedLine, trainedLoraFile } from
 import { useCreateStore, EDIT_MAX_DENOISE, characterImageRun, deriveIntent, type CreateState, type GalleryItem } from '../stores/createStore'
 import { useWorkflowStore } from '../stores/workflowStore'
 import { useSettingsStore } from '../stores/settingsStore'
+import { useRenderPreviewStore } from '../stores/renderPreviewStore'
 import { renderStallLimitMs, renderStallMessage } from '../lib/tool-timeout'
 import { injectParameters, injectLaneParameters } from '../api/workflows'
 import { applyEditBatch } from '../api/edit-batch'
@@ -1755,6 +1757,8 @@ export function useCreate() {
     }
 
     abortRef.current = new AbortController()
+    // B27: a render starts, so a planned free of ComfyUI's memory is off.
+    cancelFreeAfterRender()
 
     // Make VRAM room for the render. On a single local GPU a resident chat LLM
     // (Ollama / LM Studio / the bundled engine) squats the card, which forces
@@ -1774,6 +1778,8 @@ export function useCreate() {
     // render's restore to finish reading the chat model back in. The line
     // says which it is and counts like every other waiting line.
     let renderEviction: RenderEviction | null = null
+    // B28: the live preview of a video run, taken down in the finally below.
+    let offPreview: (() => void) | null = null
     const handoff = elapsedLine((text) => setProgress(0, text), HANDOFF_LINE.freeing)
     try {
       renderEviction = await evictChatBackendsForRender((phase) => handoff.setLabel(HANDOFF_LINE[phase]))
@@ -1801,7 +1807,13 @@ export function useCreate() {
         // The rewrite is the long wait (70 to 175 s on a 12 GB card), so the
         // line counts from here; the build above has its own status lines.
         const improving = elapsedLine((text) => setProgress(3, text), IMPROVING_PROMPT)
-        const out = await runQwenEnhancer(enhancerGraph, scenePrompt, { clientId: CLIENT_ID, signal }).finally(improving.stop)
+        // B41: the line says which part runs and, while it writes, how many
+        // tokens it has and how fast, from ComfyUI's own progress stream.
+        const out = await runQwenEnhancer(enhancerGraph, scenePrompt, {
+          clientId: CLIENT_ID,
+          signal,
+          onProgress: (p) => improving.setLabel(enhancerLine(p, qwenEnhancer.mode)),
+        }).finally(improving.stop)
         if (signal?.aborted) throw new Error('Cancelled')
         takeRewrite(out, qwenEnhancer.variant)
       }
@@ -2161,9 +2173,18 @@ export function useCreate() {
         : {}
 
       setProgress(10, 'Submitting to ComfyUI...')
+      // B28: a video asks ComfyUI for a picture per sampling step, so a wrong
+      // start shows long before the end and Cancel can stop it. ComfyUI sends
+      // previews only to this client and one prompt runs at a time here, so
+      // every preview that arrives belongs to this run.
+      const livePreview = mode === 'video'
+      if (livePreview) {
+        useRenderPreviewStore.getState().setUrl(null)
+        offPreview = comfyWS.onPreview((url) => useRenderPreviewStore.getState().setUrl(url))
+      }
       let promptId: string
       try {
-        promptId = await submitWorkflow(workflow, CLIENT_ID)
+        promptId = await submitWorkflow(workflow, CLIENT_ID, livePreview ? { previewMethod: 'auto' } : {})
       } catch (err) {
         setError(`Failed to submit: ${err instanceof Error ? err.message : String(err)}`)
         setIsGenerating(false)
@@ -2560,6 +2581,13 @@ export function useCreate() {
       // next render (the helper serialises and a follow-up render inherits
       // the haul instead of waiting for it to load).
       if (renderEviction) void restoreChatBackendsAfterRender(renderEviction)
+      offPreview?.()
+      useRenderPreviewStore.getState().setUrl(null)
+      // B27: and ComfyUI's memory goes back when the setting says so.
+      scheduleFreeAfterRender(
+        freeAfterRenderMode(useSettingsStore.getState().settings.freeAfterRender),
+        () => useCreateStore.getState().isGenerating,
+      )
     }
     // `videoModelsList` ist State: seine Referenz wechselt nur, wenn
     // setVideoModelsList wirklich eine neue Liste schreibt (fetchModels), und

@@ -14,6 +14,7 @@ import { conversationChunksNow, useRAGStore } from "../stores/ragStore"
 import { useMemoryStore } from "../stores/memoryStore"
 import { useVoiceStore } from "../stores/voiceStore"
 import { useRunActivityStore, readingActivity, endFirstWait, hiddenThoughtArrived, waitForChatCard } from "../stores/runActivityStore"
+import { watchChatFirstWait } from "../lib/first-wait-vram"
 import { autoSpeak } from "../lib/ttsBridge"
 import { retrieveContext } from "../api/rag"
 import { NO_EMBED_MODEL_MOBILE_MESSAGE, isSingleSlotConflict } from "../lib/model-slot"
@@ -1836,6 +1837,11 @@ export function useChat() {
       // A7: until the first token the model reads the request; say so, with
       // its size, instead of a bare "Starting" (stores/runActivityStore).
       useRunActivityStore.getState().setActivity(convId, readingActivity(estimateMessageTokens(messages as unknown as Parameters<typeof estimateMessageTokens>[0])))
+      // B26: a long first wait on a local Ollama model gets its reason: still
+      // loading, or partly on the CPU because it does not fit on the card.
+      // It ends by itself at the first word, on Stop, or once endFirstWait
+      // below has taken the reading line back.
+      watchChatFirstWait(convId, activeModel, abort.signal)
 
       for await (const chunk of stream) {
         // Abort fast-path: if the user hit Stop while a thinking-heavy model
