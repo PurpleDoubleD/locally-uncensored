@@ -17,10 +17,9 @@
  * The words are pure, so every sentence is a test; the watch is small.
  */
 
-import { readLoadedModels, type LoadedOllamaModel } from '../api/ollama'
+import { listModels, readLoadedModels, type LoadedOllamaModel } from '../api/ollama'
 import { getProviderIdFromModel } from '../api/providers/model-name'
 import { cpuSharePercent } from './ollama-window-fit'
-import { useModelStore } from '../stores/modelStore'
 import { useRunActivityStore, type RunActivity } from '../stores/runActivityStore'
 
 /** How long a first wait runs before LU looks why. A turn that answers sooner needs no sentence. */
@@ -108,7 +107,7 @@ export function watchFirstWait(opts: {
   model: string
   signal?: AbortSignal
   readLoaded: () => Promise<LoadedOllamaModel[]>
-  readInstalled: () => InstalledSize[]
+  readInstalled: () => Promise<InstalledSize[]>
   getActivity: () => RunActivity | undefined
   setActivity: (activity: RunActivity) => void
   firstLookMs?: number
@@ -120,6 +119,7 @@ export function watchFirstWait(opts: {
   // can go back to it (a load that finished turns "Loading the model" back
   // into reading, a hidden thought turns reading into "Thinking").
   let reading: RunActivity | null = null
+  let installed: InstalledSize[] | null = null
   const stop = () => {
     stopped = true
     if (timer) clearTimeout(timer)
@@ -146,7 +146,12 @@ export function watchFirstWait(opts: {
     if (!after || !waiting(after)) { stop(); return }
     if (after.label !== 'Loading the model') reading = own(after)
     const base = reading ?? { label: 'Reading the conversation', kind: 'reading' as const }
-    const next = firstWaitActivity({ reading: base, model: opts.model, loaded, installed: opts.readInstalled() })
+    // Read once, and only when it is needed: when part of the model is on the CPU.
+    if (!installed && loaded?.some((m) => sameModel(m.name, opts.model) && m.sizeVram < m.size)) {
+      installed = await opts.readInstalled().catch(() => [])
+      if (stopped) return
+    }
+    const next = firstWaitActivity({ reading: base, model: opts.model, loaded, installed: installed ?? [] })
     if (next) opts.setActivity(next)
     else if (loaded) opts.setActivity(base)
     timer = setTimeout(() => void look(), opts.everyMs ?? FIRST_WAIT_LOOK_EVERY_MS)
@@ -168,9 +173,9 @@ export function watchChatFirstWait(conversationId: string | null | undefined, mo
     model,
     signal,
     readLoaded: () => readLoadedModels(signal),
-    readInstalled: () => useModelStore.getState().models
-      .filter((m) => m.type === 'text' && getProviderIdFromModel(m.name) === 'ollama')
-      .map((m) => ({ name: m.name, size: 'size' in m && typeof m.size === 'number' ? m.size : 0 })),
+    // Ollama's own list: the model store carries no file sizes (size 0 for
+    // every entry, Mac run 30.10.), /api/tags does.
+    readInstalled: async () => (await listModels()).map((m) => ({ name: m.name, size: m.size })),
     getActivity: () => useRunActivityStore.getState().activity[conversationId],
     setActivity: (activity) => useRunActivityStore.getState().setActivity(conversationId, activity),
   })

@@ -70,7 +70,7 @@ describe('the watch', () => {
     useRunActivityStore.getState().setActivity('c1', reading)
     const answers = [[], [bigOnCpu]]
     const readLoaded = vi.fn(async () => answers.shift() ?? [bigOnCpu])
-    watchFirstWait({ conversationId: 'c1', model: 'qwen3.8-27b:iq2_m', readLoaded, readInstalled: () => installed, getActivity: store.get, setActivity: store.set, firstLookMs: 10_000, everyMs: 5_000 })
+    watchFirstWait({ conversationId: 'c1', model: 'qwen3.8-27b:iq2_m', readLoaded, readInstalled: async () => installed, getActivity: store.get, setActivity: store.set, firstLookMs: 10_000, everyMs: 5_000 })
 
     await vi.advanceTimersByTimeAsync(9_000)
     expect(readLoaded).not.toHaveBeenCalled()
@@ -79,6 +79,8 @@ describe('the watch', () => {
     await vi.advanceTimersByTimeAsync(5_000)
     expect(store.get()).toMatchObject({ label: 'Reading the conversation', detail: '5.6k tokens' })
     expect(store.get()?.hint).toContain('fit on your graphics card')
+    // Sizes from Ollama's own list: the model store has none (Mac run 30.10.).
+    expect(store.get()?.hint).toContain('for example gemma4:e4b (5.1 GB)')
 
     // The first word takes the line back (endFirstWait): the watch stops.
     useRunActivityStore.getState().setActivity('c1', null)
@@ -91,7 +93,7 @@ describe('the watch', () => {
   it('keeps the sentence through hidden thinking, which is just as slow on the CPU (Mac run 30.10.)', async () => {
     useRunActivityStore.getState().setActivity('c1', reading)
     const readLoaded = vi.fn(async () => [bigOnCpu])
-    watchFirstWait({ conversationId: 'c1', model: 'qwen3.8-27b:iq2_m', readLoaded, readInstalled: () => installed, getActivity: store.get, setActivity: store.set, firstLookMs: 10_000, everyMs: 5_000 })
+    watchFirstWait({ conversationId: 'c1', model: 'qwen3.8-27b:iq2_m', readLoaded, readInstalled: async () => installed, getActivity: store.get, setActivity: store.set, firstLookMs: 10_000, everyMs: 5_000 })
     await vi.advanceTimersByTimeAsync(10_000)
     expect(store.get()?.hint).toContain('fit on your graphics card')
     // hiddenThoughtArrived: the run says "Thinking", without the sentence.
@@ -105,7 +107,7 @@ describe('the watch', () => {
     useRunActivityStore.getState().setActivity('c1', reading)
     const abort = new AbortController()
     const readLoaded = vi.fn(async () => [bigOnCpu])
-    watchFirstWait({ conversationId: 'c1', model: 'm', signal: abort.signal, readLoaded, readInstalled: () => [], getActivity: store.get, setActivity: store.set })
+    watchFirstWait({ conversationId: 'c1', model: 'm', signal: abort.signal, readLoaded, readInstalled: async () => [], getActivity: store.get, setActivity: store.set })
     abort.abort()
     await vi.advanceTimersByTimeAsync(60_000)
     expect(readLoaded).not.toHaveBeenCalled()
