@@ -1280,9 +1280,18 @@ async function mainModelLane(
     if (isStrayAddonFile(name)) continue
     candidates.push({ name, type: classifyModel(name), source: 'checkpoint' })
   }
+  // The picker offers a name once (Discord #bug-reports 30.10.2026: Edit listed
+  // "krea2TurboOfficialComfy krea2TurboInt8" three times). A file that sits in
+  // checkpoints/ and in diffusion_models/ (two copies, or one folder that
+  // extra_model_paths.yaml names for both) came back from both loaders. Every
+  // run looks a name up with `find`, which takes the checkpoint entry, so
+  // that is the one kept. The inventory lanes (hidePartialDownloads false) are
+  // left as they were.
+  const listed = new Set(hidePartialDownloads ? candidates.map((m) => m.name) : [])
   for (const name of unets) {
     if (complete && !complete.has(name)) continue
     if (isStrayAddonFile(name)) continue
+    if (listed.has(name)) continue
     candidates.push({ name, type: classifyModel(name), source: 'diffusion_model' })
   }
   await applyHeaderSniff(candidates)
