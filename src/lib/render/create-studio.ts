@@ -184,6 +184,13 @@ export function studioPhotoCap(model: string): number {
   return Math.min(studioSchema(model).properties?.[field]?.maxItems ?? 1, MAX_STUDIO_PHOTOS)
 }
 
+/** Liest dieses Studio-Modell ein Endbild (last_image_path)? Animate bietet
+ *  dann neben dem Startbild ein zweites Feld an (B38, Discord 30.10.2026). */
+export function studioReadsEndImage(model: string | null | undefined): boolean {
+  if (!model) return false
+  return Object.values(STUDIO_MODELS[model]?.inputs ?? {}).includes('last_image_path')
+}
+
 /** Wie viele WEITERE Fotos neben dem Standbild die Referenzleiste fuer dieses
  *  Modell anbietet. */
 export function studioExtraPhotoSlots(model: string): number {

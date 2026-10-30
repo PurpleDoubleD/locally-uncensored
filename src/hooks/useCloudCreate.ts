@@ -544,6 +544,13 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
             params.image_paths = [params.source_path, ...more]
           }
           if (!reads.includes('source_path')) delete params.source_path
+          // B38: an end image for a Studio model that reads one
+          // (last_image_path). The Stage shows the slot only for those.
+          if (intent === 'animate' && s.endImage && reads.includes('last_image_path')) {
+            if (ac.signal.aborted) return
+            s.setProgress(7, 'Uploading the end image…')
+            params.last_image_path = await uploadInput(dataUrlToBlob(s.endImage.url), 'source', ...uploadEnds(ac))
+          }
         }
       }
       if ((op === 'edit' && !editIsMaskless) || op === 'eraser') {

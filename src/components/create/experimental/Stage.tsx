@@ -29,6 +29,7 @@ import { getVideoBundles } from '../../../api/discover'
 import { lipsyncFitLine } from './lipsyncFit'
 import { useGraphicsCardGb } from '../../../hooks/useGraphicsMemory'
 import { ReferenceStrip } from './ReferenceStrip'
+import { EndImageSlot, ImageReferenceStrip, useImageReferenceSupport } from './FrameRefs'
 import { FitStage, FIT_SIDE_FROM } from './FitStage'
 import { BatchStrip, UseOriginalButton, useBatchPickers } from './BatchStrip'
 import { addBatchFiles, useBatchOffered, useBatchOriginalOffer } from './batchRun'
@@ -136,6 +137,12 @@ export function Stage({ displayed, onOpenMaskEditor, onEditResult, onAnimateResu
   // source was loaded — otherwise an older gallery item would hijack the stage.
   const freshResult = displayed && displayed.createdAt >= sourceSetAt
 
+  // B45: the Image tab's references stand beside a result too, where the
+  // model reads them or some are kept, so the next run shows what it uses.
+  const imageRefCount = useCreateStore((s) => s.imageReferences.length)
+  const imageRefSlots = useImageReferenceSupport().slots
+  const imageRefSide = intent === 'image' && (imageRefSlots > 0 || imageRefCount > 0)
+
   const characterTab = useCreateStore((s) => s.characterTab)
   const characterTrain = intent === 'character' && characterTab === 'train'
   // The example chips of Music are style descriptions. Where the prompt of a
@@ -197,7 +204,7 @@ export function Stage({ displayed, onOpenMaskEditor, onEditResult, onAnimateResu
         onSaveCharacter={displayed.type === 'video' && onSaveCharacter ? () => onSaveCharacter(displayed) : undefined}
         // The source and its references stay on screen beside the result
         // (FitStage), so the next run shows what it starts from.
-        side={meta.needsSource && source ? <ResultInputs /> : undefined}
+        side={meta.needsSource && source ? <ResultInputs /> : imageRefSide ? <ImageReferenceStrip /> : undefined}
       />
     )
   } else {
@@ -227,6 +234,7 @@ export function Stage({ displayed, onOpenMaskEditor, onEditResult, onAnimateResu
             ))}
           </div>
         )}
+        {intent === 'image' && <ImageReferenceStrip />}
         {/* How it works: the cloud tabs only, the films show the cloud. */}
         {howtoTopic && (
           <div className="pt-1">
@@ -527,6 +535,7 @@ function SourcePreview({ onOpenMaskEditor }: { onOpenMaskEditor: () => void }) {
   const controls = (
       <>
         <ReferenceStrip />
+        <EndImageSlot />
         {!batchOn && (
           <div className="flex items-center gap-2 mt-4">
             {meta.allowsMask && !noMask && (
@@ -603,6 +612,7 @@ function ResultInputs() {
         </div>
       </div>
       <ReferenceStrip />
+      <EndImageSlot />
       <BatchStrip />
     </div>
   )

@@ -40,7 +40,8 @@ describe('who uses it', () => {
   it('the source preview and the result of a source tool, on every platform', () => {
     const stage = source('Stage.tsx')
     expect(stage).toContain('return <FitStage picture={picture} side={controls} capVh={52} onDragOver={onDragOver} onDrop={onDrop} />')
-    expect(stage).toContain('side={meta.needsSource && source ? <ResultInputs /> : undefined}')
+    // B45: the Image tab hands the result its reference images as the side.
+    expect(stage).toContain('side={meta.needsSource && source ? <ResultInputs /> : imageRefSide ? <ImageReferenceStrip /> : undefined}')
     // No host is asked, and the column that scrolled is gone.
     expect(stage).not.toMatch(/isMlxImageHost\(\)[^\n]*FitStage|FitStage[^\n]*isMlxImageHost\(\)/)
     expect(stage).not.toContain('ResultSourceActions')
