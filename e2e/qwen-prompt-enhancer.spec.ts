@@ -100,7 +100,7 @@ for (const [weights, model] of WEIGHTS) {
     await expect(writers(page).getByRole('radio')).toHaveText(['Qwen enhancer', 'Qwen enhancer, No Filter'])
   })
 
-  test(`${weights}: without an enhancer the switch is the chat model switch: no row, and none on Edit`, async ({ page }) => {
+  test(`${weights}: without an enhancer the switch is the chat model switch: no row, on Edit too (B48)`, async ({ page }) => {
     await bootWithFakeComfy(page, model, [ENCODER])
     await openAdvanced(page, 'Image')
     await expect(theSwitch(page)).toBeVisible({ timeout: 15_000 })
@@ -111,6 +111,7 @@ for (const [weights, model] of WEIGHTS) {
     await page.getByRole('radio', { name: 'Edit / Image to Image', exact: true }).click()
     await page.getByRole('button', { name: 'Advanced settings' }).click()
     await expect(page.getByRole('button', { name: 'Quality' })).toBeVisible()
-    await expect(theSwitch(page)).toHaveCount(0)
+    await expect(theSwitch(page)).toBeVisible()
+    await expect(writers(page)).toHaveCount(0)
   })
 }
