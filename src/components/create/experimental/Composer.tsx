@@ -5,6 +5,7 @@ import { isMlxImageHost, MAC_UPSCALE_FACTORS, type MacUpscaleFactor } from '../.
 import { laneImageModel, runsAtOwnSampling } from '../../../lib/image-engines'
 import { MLX_VIDEO_MIN_FRAMES, mlxFramesOnGrid, mlxVideoLaneEntry, mlxVideoMaxFrames, mlxTalking } from '../../../api/mlx-video'
 import { useMacMemoryGb } from '../../../lib/mac-memory'
+import { applyAspect } from '../../../lib/create-resolution'
 import { useCreateStore, MODEL_TYPE_DEFAULTS, EDIT_MAX_DENOISE, imageQualityLadder, type ImageQuality } from '../../../stores/createStore'
 import { classifyModel, resolveLocalOpPick } from '../../../api/comfyui'
 import { editIgnoresStrength } from '../../../lib/edit-references'
@@ -790,7 +791,10 @@ function LaneControls() {
                 size="sm"
                 layoutId="aspect"
                 value={aspectKey(width, height)}
-                onChange={(k) => { const p = aspectPresets(imageModelType)[k as AspectKey]; setSize(p.w, p.h) }}
+                // B49 (3.0.9, Discord): the same rule as the ratio buttons in
+                // Advanced settings (lib/create-resolution applyAspect), so
+                // 16:9 here and 16:9 there give the same size.
+                onChange={(k) => { const [rw, rh] = k.split(':').map(Number); const p = applyAspect(width, height, rw, rh); setSize(p.width, p.height) }}
                 options={[
                   { value: '1:1', label: '1:1', icon: Square },
                   { value: '3:4', label: '3:4' },
@@ -969,21 +973,9 @@ function LabeledControl({ label, children }: { label: string; children: React.Re
 type AspectKey = '1:1' | '3:4' | '4:3' | '16:9'
 const RATIO: Record<AspectKey, number> = { '1:1': 1, '3:4': 3 / 4, '4:3': 4 / 3, '16:9': 16 / 9 }
 
-function snap64(n: number): number { return Math.max(64, Math.round(n / 64) * 64) }
 // Video dims want a multiple of 16 (the VAE/latent grid of the WAN/S2V/VACE
 // families) — snap the resolution tiers to it so the graph never rejects them.
 function snap16(n: number): number { return Math.max(128, Math.round(n / 16) * 16) }
-
-function aspectPresets(modelType: string): Record<AspectKey, { w: number; h: number }> {
-  const def = MODEL_TYPE_DEFAULTS[modelType as keyof typeof MODEL_TYPE_DEFAULTS] ?? MODEL_TYPE_DEFAULTS.sdxl
-  const baseLong = Math.max(def.width, def.height)
-  const out = {} as Record<AspectKey, { w: number; h: number }>
-  for (const k of Object.keys(RATIO) as AspectKey[]) {
-    const r = RATIO[k]
-    out[k] = r >= 1 ? { w: baseLong, h: snap64(baseLong / r) } : { w: snap64(baseLong * r), h: baseLong }
-  }
-  return out
-}
 
 function aspectKey(w: number, h: number): AspectKey {
   const r = w / h

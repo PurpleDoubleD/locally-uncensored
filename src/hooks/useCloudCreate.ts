@@ -344,8 +344,15 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
     // below either way; this only saves the round trip when the client
     // already knows the verdict (B3).
     {
-      // The negative prompt is read apart (B30, safety.ts).
-      const verdict = clientSafety(`${prompt} ${s.musicLyrics} ${s.triggerWord}`, s.negativePrompt)
+      // The negative prompt is read apart (B30, safety.ts). Only what this
+      // run sends is read, same conditions as the params below: the store
+      // keeps negative prompt, lyrics and trigger word across modes, and a
+      // field this mode neither shows nor sends must not block it unseen
+      // (B30, web fix fb714de4).
+      const sendsClassicKnobs = !studioModel && !specialOp && op !== 'removebg' && op !== 'upscale' && op !== 'eraser'
+      const lyrics = op === 'music' && !studioModel ? s.musicLyrics : ''
+      const triggerWord = op === 'lora-train' ? s.triggerWord : ''
+      const verdict = clientSafety(`${prompt} ${lyrics} ${triggerWord}`, sendsClassicKnobs ? s.negativePrompt : '')
       if (verdict.blocked) {
         s.setError(blockMessageFor(verdict.reason))
         return

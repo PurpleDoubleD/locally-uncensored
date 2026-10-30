@@ -1,5 +1,5 @@
 import { itemHasAlpha } from '../../../lib/transparent-image'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { X, Sparkles, UserRoundPlus, FolderInput, ChevronLeft, ChevronRight } from 'lucide-react'
 import { useCreateStore, type GalleryItem } from '../../../stores/createStore'
@@ -58,8 +58,15 @@ export function Lightbox({ item, onClose, onSaveCharacter, onNavigate, promptOpe
   const folderOpen = useCreateStore((s) => s.galleryFolderOpen)
   const prev = item && onNavigate ? galleryNeighbor(all, folderOpen, item.id, -1) : null
   const next = item && onNavigate ? galleryNeighbor(all, folderOpen, item.id, 1) : null
-  const [zoom, setZoom] = useState({ id: '', scale: 1, x: 50, y: 50 })
+  const [zoom, setZoom] = useState({ id: '', scale: 1, x: 50, y: 50, panX: 0, panY: 0 })
   const scale = item && zoom.id === item.id ? zoom.scale : 1
+  const panX = scale > 1 ? zoom.panX : 0
+  const panY = scale > 1 ? zoom.panY : 0
+  // B47 (3.0.9, Discord 30.10.2026): a zoomed picture is moved
+  // with the mouse button held, as in a photo viewer. The drag goes on outside
+  // the picture, and letting go there does not close the view.
+  const [dragging, setDragging] = useState(false)
+  const dragMoved = useRef(false)
 
   useEffect(() => {
     if (!item) return
@@ -83,7 +90,39 @@ export function Lightbox({ item, onClose, onSaveCharacter, onNavigate, promptOpe
     const y = box.height > 0 ? ((e.clientY - box.top) / box.height) * 100 : 50
     const factor = e.deltaY < 0 ? ZOOM_STEP : 1 / ZOOM_STEP
     const nextScale = Math.min(MAX_ZOOM, Math.max(1, scale * factor))
-    setZoom({ id: item.id, scale: nextScale, x: scale === 1 ? x : zoom.x, y: scale === 1 ? y : zoom.y })
+    // Back at the fitted size the picture is centred again.
+    const keep = nextScale > 1 ? { panX, panY } : { panX: 0, panY: 0 }
+    setZoom({ id: item.id, scale: nextScale, x: scale === 1 ? x : zoom.x, y: scale === 1 ? y : zoom.y, ...keep })
+  }
+
+  const onPanStart = (e: React.MouseEvent<HTMLImageElement>) => {
+    if (!item || scale <= 1 || e.button !== 0) return
+    // No ghost image of the browser's own drag.
+    e.preventDefault()
+    const box = e.currentTarget.getBoundingClientRect()
+    // How far the picture may go: its own zoomed size beyond the fitted one,
+    // so a part of it always stays in view.
+    const limitX = (box.width / scale) * (scale - 1)
+    const limitY = (box.height / scale) * (scale - 1)
+    const start = { x: e.clientX, y: e.clientY, panX, panY }
+    const id = item.id
+    const zoomed = { scale, x: zoom.x, y: zoom.y }
+    dragMoved.current = false
+    setDragging(true)
+    const clamp = (v: number, limit: number) => Math.max(-limit, Math.min(limit, v))
+    const onMove = (m: MouseEvent) => {
+      const dx = m.clientX - start.x
+      const dy = m.clientY - start.y
+      if (Math.abs(dx) + Math.abs(dy) > 2) dragMoved.current = true
+      setZoom({ id, ...zoomed, panX: clamp(start.panX + dx, limitX), panY: clamp(start.panY + dy, limitY) })
+    }
+    const onUp = () => {
+      setDragging(false)
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
   }
 
   // Video super-resolution: only for finished CLOUD renders (jobId = the
@@ -106,7 +145,11 @@ export function Lightbox({ item, onClose, onSaveCharacter, onNavigate, promptOpe
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          onClick={onClose}
+          onClick={() => {
+            // A drag of the zoomed picture that ended outside it is no click.
+            if (dragMoved.current) { dragMoved.current = false; return }
+            onClose()
+          }}
           className="lu-on-dark fixed inset-0 z-[80] bg-black/85 flex flex-col items-center justify-center gap-3 p-8"
         >
           <button onClick={onClose} className="absolute top-4 right-4 w-9 h-9 flex items-center justify-center rounded-lg bg-white/10 text-gray-200 hover:bg-white/20">
@@ -215,18 +258,27 @@ export function Lightbox({ item, onClose, onSaveCharacter, onNavigate, promptOpe
                   // The wheel zoom rides on the same scale the opening
                   // animation uses: a style scale next to it would be
                   // animated back to 1.
-                  animate={{ scale }}
+                  animate={{ scale, x: panX, y: panY }}
+                  // While the mouse moves the picture it follows at once.
+                  transition={dragging ? { duration: 0 } : undefined}
                   exit={{ scale: 0.95 }}
                   src={mediaUrl}
                   alt={item.prompt}
+                  draggable={false}
                   onError={onMediaError}
-                  onClick={(e) => e.stopPropagation()}
+                  onClick={(e) => { e.stopPropagation(); dragMoved.current = false }}
                   onWheel={onWheel}
-                  onDoubleClick={(e) => { e.stopPropagation(); setZoom({ id: item.id, scale: 1, x: 50, y: 50 }) }}
+                  onMouseDown={onPanStart}
+                  onDoubleClick={(e) => { e.stopPropagation(); setZoom({ id: item.id, scale: 1, x: 50, y: 50, panX: 0, panY: 0 }) }}
                   data-testid="lightbox-image"
                   data-zoom={scale}
+                  data-pan={`${Math.round(panX)},${Math.round(panY)}`}
                   style={{ originX: (scale > 1 ? zoom.x : 50) / 100, originY: (scale > 1 ? zoom.y : 50) / 100 }}
-                  className={cn('max-w-full max-h-full object-contain rounded-lg', itemHasAlpha(item) && 'lu-checker')}
+                  className={cn(
+                    'max-w-full max-h-full object-contain rounded-lg',
+                    scale > 1 && (dragging ? 'cursor-grabbing' : 'cursor-grab'),
+                    itemHasAlpha(item) && 'lu-checker',
+                  )}
                 />
               )}
             </div>

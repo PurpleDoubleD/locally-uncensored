@@ -37,8 +37,8 @@ beforeEach(() => {
 afterEach(() => { cleanup() })
 
 describe('Schalter Improve my prompt (Desktop)', () => {
-  it('steht bei Bild, Video und Musik und fehlt bei Bearbeiten', () => {
-    for (const [intent, shown] of [['image', true], ['video', true], ['music', true], ['edit', false], ['upscale', false]] as const) {
+  it('steht bei Bild, Video, Musik und Bearbeiten (B48)', () => {
+    for (const [intent, shown] of [['image', true], ['video', true], ['music', true], ['edit', true], ['upscale', false]] as const) {
       useCreateStore.getState().setIntent(intent)
       const { unmount } = render(<ImproveToggle />)
       expect(!!screen.queryByRole('switch', { name: /improve my prompt/i })).toBe(shown)

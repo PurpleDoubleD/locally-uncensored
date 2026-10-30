@@ -12,9 +12,19 @@ describe('Improve my prompt: welche Laeufe es kennen', () => {
   })
 
   it('alles, was Worte des Kunden woertlich braucht, bleibt unberuehrt', () => {
-    for (const intent of ['edit', 'removebg', 'upscale', 'eraser', 'character', 'lipsync', 'extend', 'motion', 'tts']) {
+    for (const intent of ['removebg', 'upscale', 'eraser', 'character', 'lipsync', 'extend', 'motion', 'tts']) {
       expect(improveKindForIntent(intent)).toBeNull()
     }
+  })
+})
+
+describe('B48: Bearbeiten kennt Improve my prompt', () => {
+  it('ein Edit wird als Anweisung umgeschrieben, nie als Beschreibung des ganzen Bildes', () => {
+    expect(improveKindForIntent('edit')).toBe('edit')
+    const system = buildImproveMessages({ kind: 'edit', modelLabel: 'FLUX.1 Krea' }, 'make her jacket red')[0].content
+    expect(system).toMatch(/instructions for an image editing model/)
+    expect(system).toMatch(/Do not describe the whole picture/)
+    expect(system).toMatch(/FLUX.1 Krea/)
   })
 })
 

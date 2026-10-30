@@ -103,6 +103,8 @@ import { useWorkflowStore } from '../stores/workflowStore'
 import { useSettingsStore } from '../stores/settingsStore'
 import { renderStallLimitMs, renderStallMessage } from '../lib/tool-timeout'
 import { injectParameters, injectLaneParameters } from '../api/workflows'
+import { applyEditBatch } from '../api/edit-batch'
+import { ranLoras } from '../lib/render/run-settings'
 import { applyNativeHiresFix, latentDownscale } from '../api/hires-fix'
 import { editHiresBase } from '../lib/edit-hires'
 import { lorasForRun, skippedLorasLine } from '../lib/lora-stack'
@@ -1231,6 +1233,7 @@ export function useCreate() {
             createdAt: Date.now(), builderUsed: 'dynamic', intent,
             ...(transparent ? { transparent: true as const } : {}),
             ...(macSkippedNote ? { runNote: macSkippedNote } : {}),
+            ...ranLoras(runLoras),
           })
         }
         if (!own.signal.aborted) {
@@ -1492,6 +1495,7 @@ export function useCreate() {
                   width: clipSize?.width ?? width, height: clipSize?.height ?? height, batchSize: 1,
                   createdAt: Date.now(), builderUsed: 'dynamic', intent,
                   ...(videoSkippedNote ? { runNote: videoSkippedNote } : {}),
+                  ...ranLoras(videoLoras),
                 })
                 resolve()
                 return
@@ -2067,6 +2071,12 @@ export function useCreate() {
         }
       }
 
+      // B35: an edit starts from a latent of one; the batch size repeats it,
+      // so an edit run makes as many pictures as a Generate run (api/edit-batch).
+      if (intent === 'edit' && isI2I && !isRemoveBg && effInputImage) {
+        workflow = applyEditBatch(workflow, batchSize)
+      }
+
       // Native HiRes is a graph transform, not a special workflow. Apply
       // it after Auto/custom workflow construction so the same switch works on
       // every compatible local text-to-image graph. Unsupported custom graphs
@@ -2260,7 +2270,7 @@ export function useCreate() {
                       prompt, ...improveFields, ...transparentFields(), negativePrompt, model: activeModel,
                       modelType: mode === 'image' ? imageModelType : (videoModelsList.find(m => m.name === activeModel)?.type ?? 'wan'),
                       seed: runSeed,
-                      steps, cfgScale, sampler, scheduler, width: outputWidth, height: outputHeight, batchSize,
+                      steps, cfgScale, sampler, scheduler, width: outputWidth, height: outputHeight, batchSize, ...ranLoras(runLoras),
                       createdAt: Date.now(), builderUsed, intent, ...toolFields, ...(skippedNote ? { runNote: skippedNote } : {}),
                     })
                   }
@@ -2365,7 +2375,7 @@ export function useCreate() {
                         prompt, ...improveFields, ...transparentFields(), negativePrompt, model: activeModel,
                         modelType: mode === 'image' ? imageModelType : (videoModelsList.find(m => m.name === activeModel)?.type ?? 'wan'),
                         seed: runSeed,
-                        steps, cfgScale, sampler, scheduler, width: outputWidth, height: outputHeight, batchSize,
+                        steps, cfgScale, sampler, scheduler, width: outputWidth, height: outputHeight, batchSize, ...ranLoras(runLoras),
                         createdAt: Date.now(), builderUsed, intent, ...toolFields, ...(skippedNote ? { runNote: skippedNote } : {}),
                       })
                     }
@@ -2472,7 +2482,7 @@ export function useCreate() {
                       prompt, ...improveFields, ...transparentFields(), negativePrompt, model: activeModel,
                       modelType: mode === 'image' ? imageModelType : (videoModelsList.find(m => m.name === activeModel)?.type ?? 'wan'),
                       seed: runSeed,
-                      steps, cfgScale, sampler, scheduler, width: outputWidth, height: outputHeight, batchSize,
+                      steps, cfgScale, sampler, scheduler, width: outputWidth, height: outputHeight, batchSize, ...ranLoras(runLoras),
                       createdAt: Date.now(), builderUsed, intent, ...toolFields, ...(skippedNote ? { runNote: skippedNote } : {}),
                     })
                   }

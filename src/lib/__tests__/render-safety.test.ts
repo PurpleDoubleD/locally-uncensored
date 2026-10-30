@@ -160,9 +160,12 @@ describe('both render paths gate the same fields', () => {
     expect(negativeField(local)).toBe('negativePrompt')
   })
 
-  it('and the cloud path reads exactly the same, the negative prompt apart as well', () => {
-    expect(gatedFields(cloud)).toEqual(gatedFields(local))
-    expect(negativeField(cloud)).toBe(negativeField(local))
+  it('the cloud path reads the same fields, each only when its run sends it (B30-Rest)', () => {
+    // Bare names there: the lyrics of a classic music run, the trigger word of
+    // a training run, the negative prompt where the classic knobs go out.
+    expect(cloud).toMatch(/clientSafety\(`\$\{prompt\} \$\{lyrics\} \$\{triggerWord\}`, sendsClassicKnobs \? s\.negativePrompt : ''\)/)
+    expect(cloud).toMatch(/const lyrics = op === 'music' && !studioModel \? s\.musicLyrics : ''/)
+    expect(cloud).toMatch(/const triggerWord = op === 'lora-train' \? s\.triggerWord : ''/)
   })
 
   it('the local audio lane really does carry the lyrics, so the gate is not theoretical', () => {

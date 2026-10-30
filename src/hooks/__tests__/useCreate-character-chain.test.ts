@@ -119,7 +119,10 @@ function on(intent: CreateIntent, extra: Record<string, unknown> = {}) {
     selectedLoras: [{ name: 'film_grain.safetensors', strength: 0.5 }], loraStrengths: {},
   } as never)
   useCreateStore.getState().setIntent(intent)
+  // B24: the LoRA picks belong to the task and model, so they are picked on
+  // the lane the run is on (a model in `extra` is a lane change).
   useCreateStore.setState({ selectedCharacter: MIRA, ...extra } as never)
+  useCreateStore.setState({ selectedLoras: [{ name: 'film_grain.safetensors', strength: 0.5 }] })
   useCreateStore.getState().setPrompt('walking through the rain')
 }
 
@@ -274,6 +277,8 @@ describe('the character in Image and Edit', () => {
     expect(seen.builds).toHaveLength(1)
     expect(imageBuild()?.lora).toEqual(['film_grain.safetensors', CHAR])
     expect(imageBuild()?.prompt).toBe('mira, walking through the rain')
+    // B40: the picture remembers the LoRAs it was made with.
+    expect(useCreateStore.getState().gallery[0].loras?.map((l) => l.name)).toEqual(['film_grain.safetensors', CHAR])
 
     seen.builds.length = 0
     on('image', { imageModel: Z_IMAGE, imageModelType: 'zimage' })
