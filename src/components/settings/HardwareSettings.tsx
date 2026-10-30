@@ -4,6 +4,7 @@
 // next Ollama / ComfyUI spawn (current processes need a restart).
 
 import { useEffect, useMemo, useState } from 'react'
+import { freeAfterRenderMode } from '../../lib/free-after-render'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { backendCall, isTauri } from '../../api/backend'
 import { isMlxImageHost } from '../../api/mlx-image'
@@ -119,6 +120,7 @@ export function HardwareSettings() {
   }, [])
 
   const comfyGpuMode = (settings.comfyGpuMode || 'auto') as 'auto' | 'cpu' | 'gpu'
+  const freeAfter = freeAfterRenderMode(settings.freeAfterRender)
   const setComfyGpuMode = (mode: 'auto' | 'cpu' | 'gpu') => {
     updateSettings({ comfyGpuMode: mode })
     // Desktop-only command; the web build points at a remote ComfyUI and never
@@ -330,6 +332,35 @@ export function HardwareSettings() {
             )}
           </div>
         )}
+      </div>
+      )}
+
+      {/* B27 (3.0.9): give ComfyUI's memory back after a render. Not on the
+          Mac: its image engine lets go of its model when the picture is out. */}
+      {!isMlxImageHost() && (
+      <div className="pt-2 border-t border-white/[0.06]" data-testid="free-after-render">
+        <div className="text-[0.7rem] text-gray-700 dark:text-gray-300 font-medium mb-1">After a render</div>
+        <div className="grid grid-cols-1 gap-1">
+          {([
+            ['idle', 'Free memory after 5 minutes (recommended)', 'Renders in a row stay fast. When nothing renders for 5 minutes, the image and video models leave the graphics card and the RAM.'],
+            ['now', 'Free memory right away', 'The models leave the graphics card and the RAM a few seconds after each render. The next render loads them again, which can take a minute.'],
+            ['keep', 'Keep the models loaded', 'The fastest next render. The memory stays taken until ComfyUI stops.'],
+          ] as const).map(([val, label, help]) => (
+            <label key={val} className="flex items-start gap-2 cursor-pointer p-1.5 rounded hover:bg-white/[0.04] border border-transparent has-[input:checked]:border-white/10 has-[input:checked]:bg-white/[0.03]">
+              <input
+                type="radio"
+                name="free-after-render"
+                checked={freeAfter === val}
+                onChange={() => updateSettings({ freeAfterRender: val })}
+                className="mt-0.5"
+              />
+              <div className="flex-1 min-w-0">
+                <div className="text-[0.65rem] text-gray-300">{label}</div>
+                <div className="text-[0.55rem] text-gray-500 mt-0.5 leading-relaxed">{help}</div>
+              </div>
+            </label>
+          ))}
+        </div>
       </div>
       )}
 

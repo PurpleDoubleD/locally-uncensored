@@ -229,6 +229,7 @@ export const CATALOG: readonly CatalogEntry[] = [
   e('builtinEngine.cacheTypeK', 'KV cache K (LU Engine)', 'backends', 'K cache type, f16 = unquantized.', oneOf(['f16', 'bf16', 'q8_0', 'q4_0'])),
   e('builtinEngine.cacheTypeV', 'KV cache V (LU Engine)', 'backends', 'V cache type; quantized needs flash attention.', oneOf(['f16', 'bf16', 'q8_0', 'q4_0'])),
   e('exclusiveVramMode', 'Free VRAM for images', 'backends', 'Unload the chat model while an image or video renders.', oneOf(['auto', 'always', 'never'])),
+  e('freeAfterRender', 'Free memory after a render', 'backends', 'Unload the image and video models from VRAM and RAM: idle = after 5 minutes without a new render, now = right after, keep = never.', oneOf(['idle', 'now', 'keep'])),
   e('comfyGpuMode', 'ComfyUI device', 'backends', 'Run ComfyUI on the GPU or the CPU.', oneOf(['auto', 'cpu', 'gpu'])),
   e('downloadLimitMBps', 'Download limit', 'backends', 'Cap for model downloads.', int(0, 10_000, 'MB/s', 'no limit')),
   // Code

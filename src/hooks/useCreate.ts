@@ -78,6 +78,7 @@ import { knownMacMemoryGb } from '../lib/mac-memory'
 import { MIN_TRAIN_IMAGES, maxTrainImages, tooFewTrainPhotosLine } from '../lib/train-image-cap'
 import { improveKindForIntent, IMPROVING_PROMPT, type ImproveOutcome } from '../lib/render/improve-prompt'
 import { elapsedLine } from '../lib/elapsed-line'
+import { cancelFreeAfterRender, freeAfterRenderMode, scheduleFreeAfterRender } from '../lib/free-after-render'
 import { improvePrompt } from '../lib/render/improve-prompt-run'
 import { currentChatModelList, currentHelperModel } from '../lib/cloud-helper-model'
 import { enhancerLine, enhancerNames, pickQwenEnhancer, rewrittenByName, type ImproveWriter } from '../lib/render/qwen-enhancer'
@@ -1733,6 +1734,8 @@ export function useCreate() {
     }
 
     abortRef.current = new AbortController()
+    // B27: a render starts, so a planned free of ComfyUI's memory is off.
+    cancelFreeAfterRender()
 
     // Make VRAM room for the render. On a single local GPU a resident chat LLM
     // (Ollama / LM Studio / the bundled engine) squats the card, which forces
@@ -2537,6 +2540,11 @@ export function useCreate() {
       // next render (the helper serialises and a follow-up render inherits
       // the haul instead of waiting for it to load).
       if (renderEviction) void restoreChatBackendsAfterRender(renderEviction)
+      // B27: and ComfyUI's memory goes back when the setting says so.
+      scheduleFreeAfterRender(
+        freeAfterRenderMode(useSettingsStore.getState().settings.freeAfterRender),
+        () => useCreateStore.getState().isGenerating,
+      )
     }
     // `videoModelsList` ist State: seine Referenz wechselt nur, wenn
     // setVideoModelsList wirklich eine neue Liste schreibt (fetchModels), und
