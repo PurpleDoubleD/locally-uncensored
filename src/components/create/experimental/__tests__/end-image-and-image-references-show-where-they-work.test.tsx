@@ -16,7 +16,7 @@ vi.mock('../../../../lib/render/create-studio', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../../lib/render/create-studio')>()
   return { ...actual, createRunModel: (_: string, p: { video: string }) => p.video }
 })
-import { EndImageSlot, ImageReferenceStrip } from '../FrameRefs'
+import { EndImageSlot, ImageReferenceStrip, cloudEndFrameHint } from '../FrameRefs'
 import { ReferenceStrip } from '../ReferenceStrip'
 import { useCreateStore } from '../../../../stores/createStore'
 import { useCloudCatalogStore } from '../../../../stores/cloudCatalogStore'
@@ -73,6 +73,11 @@ describe('Animate: end image', () => {
     const line = screen.getByTestId('end-image-unsupported').textContent ?? ''
     expect(line).toContain('These also end on your image:')
     expect(line).toContain('Seedance 2.5 Uncensored')
+  })
+  it('the line names three models and counts the rest', () => {
+    const m = (label: string) => ({ label, end_image: true })
+    expect(cloudEndFrameHint([m('A'), m('B')])).toBe('This model starts from one image. These also end on your image: A, B.')
+    expect(cloudEndFrameHint([m('A'), m('B'), m('C'), m('D'), m('E'), { label: 'F' }])).toBe('This model starts from one image. These also end on your image: A, B, C and 2 more.')
   })
   it('LU Cloud before W6: no model offers one, the line says where it works', () => {
     useCloudCatalogStore.setState({ models: neuerServer() })

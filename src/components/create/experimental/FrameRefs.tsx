@@ -32,7 +32,9 @@ export const CLOUD_END_FRAME_MODELS = 'The LU Cloud video models here start from
 export function cloudEndFrameHint(models: readonly { label: string; end_image?: boolean }[]): string {
   const names = [...new Set(models.filter((m) => m.end_image === true).map((m) => m.label))]
   if (names.length === 0) return CLOUD_END_FRAME_MODELS
-  return `This model starts from one image. These also end on your image: ${names.join(', ')}.`
+  // Three names read as a hint; seven read as a wall (Mac run, 30.10.2026).
+  const shown = names.length > 3 ? `${names.slice(0, 3).join(', ')} and ${names.length - 3} more` : names.join(', ')
+  return `This model starts from one image. These also end on your image: ${shown}.`
 }
 
 /** Does the Animate model on screen take an end image? */
