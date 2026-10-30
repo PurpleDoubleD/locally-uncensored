@@ -14,7 +14,11 @@ import { VIEWPORTS, type Viewport } from '../../lib/html-preview'
 import { sandboxAttr } from '../../lib/file-preview'
 
 interface FrameProps {
-  doc: string
+  /** The page as text, loaded as srcdoc. Ignored when `src` is given. */
+  doc?: string
+  /** The page on the `luprev` scheme (chat snippets in the app, B29). It
+   *  carries its own policy instead of inheriting the app's. */
+  src?: string
   viewport: Viewport
   allowScripts: boolean
   /** Bumping this remounts the iframe, which is how "reload" works. */
@@ -25,6 +29,7 @@ interface FrameProps {
 
 export function HtmlPreviewFrame({
   doc,
+  src,
   viewport,
   allowScripts,
   reloadKey = 0,
@@ -35,7 +40,7 @@ export function HtmlPreviewFrame({
   return (
     <iframe
       key={reloadKey}
-      srcDoc={doc}
+      {...(src ? { src } : { srcDoc: doc ?? '' })}
       sandbox={sandboxAttr(allowScripts)}
       referrerPolicy="no-referrer"
       title={title}
