@@ -116,8 +116,9 @@ export function watchFirstWait(opts: {
 }): () => void {
   let stopped = false
   let timer: ReturnType<typeof setTimeout> | null = null
-  // The reading line as the run set it, so a later look can go back to it
-  // (a load that finished turns "Loading the model" back into reading).
+  // The run's own line without anything this watch added, so a later look
+  // can go back to it (a load that finished turns "Loading the model" back
+  // into reading, a hidden thought turns reading into "Thinking").
   let reading: RunActivity | null = null
   const stop = () => {
     stopped = true
@@ -125,17 +126,25 @@ export function watchFirstWait(opts: {
     opts.signal?.removeEventListener('abort', stop)
   }
   opts.signal?.addEventListener('abort', stop, { once: true })
+  // The first wait, and the hidden thinking after it: a model partly on the
+  // CPU writes its hidden thoughts just as slowly (Mac run 30.10.: "Thinking"
+  // for seven minutes on 5.6 of 18.1 GB on the card). Any other line, or
+  // none, ends the watch: the model answers, or the turn is over.
+  const waiting = (a: RunActivity | undefined) => a?.kind === 'reading' || a?.kind === 'thinking'
+  const own = (a: RunActivity): RunActivity => ({ label: a.label, kind: a.kind, ...(a.detail ? { detail: a.detail } : {}) })
   const look = async () => {
     timer = null
     if (stopped) return
     const now = opts.getActivity()
-    if (now?.kind !== 'reading') { stop(); return }
-    if (!reading) reading = now.label === 'Loading the model' ? null : { label: now.label, kind: now.kind, ...(now.detail ? { detail: now.detail } : {}) }
+    if (!now || !waiting(now)) { stop(); return }
+    if (now.label !== 'Loading the model') reading = own(now)
     let loaded: LoadedOllamaModel[] | null = null
     try { loaded = await opts.readLoaded() } catch { loaded = null }
     if (stopped) return
     // The first word may have come in while /api/ps was being read.
-    if (opts.getActivity()?.kind !== 'reading') { stop(); return }
+    const after = opts.getActivity()
+    if (!after || !waiting(after)) { stop(); return }
+    if (after.label !== 'Loading the model') reading = own(after)
     const base = reading ?? { label: 'Reading the conversation', kind: 'reading' as const }
     const next = firstWaitActivity({ reading: base, model: opts.model, loaded, installed: opts.readInstalled() })
     if (next) opts.setActivity(next)

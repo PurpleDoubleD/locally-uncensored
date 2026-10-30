@@ -88,6 +88,19 @@ describe('the watch', () => {
     expect(store.get()).toBeUndefined()
   })
 
+  it('keeps the sentence through hidden thinking, which is just as slow on the CPU (Mac run 30.10.)', async () => {
+    useRunActivityStore.getState().setActivity('c1', reading)
+    const readLoaded = vi.fn(async () => [bigOnCpu])
+    watchFirstWait({ conversationId: 'c1', model: 'qwen3.8-27b:iq2_m', readLoaded, readInstalled: () => installed, getActivity: store.get, setActivity: store.set, firstLookMs: 10_000, everyMs: 5_000 })
+    await vi.advanceTimersByTimeAsync(10_000)
+    expect(store.get()?.hint).toContain('fit on your graphics card')
+    // hiddenThoughtArrived: the run says "Thinking", without the sentence.
+    useRunActivityStore.getState().setActivity('c1', { label: 'Thinking', kind: 'thinking' })
+    await vi.advanceTimersByTimeAsync(5_000)
+    expect(store.get()).toMatchObject({ label: 'Thinking', kind: 'thinking' })
+    expect(store.get()?.hint).toContain('fit on your graphics card')
+  })
+
   it('Stop ends it before the first look', async () => {
     useRunActivityStore.getState().setActivity('c1', reading)
     const abort = new AbortController()
@@ -103,6 +116,13 @@ describe('the status line shows the sentence', () => {
   it('under "Reading the conversation" while that is the line', () => {
     useRunActivityStore.setState({ activity: { c9: { ...reading, hint: 'Only 6.9 GB of x fit on your graphics card.' } } })
     render(createElement(WorkingAnchor, { isRunning: true, conversationId: 'c9', message: { content: '', agentBlocks: [] } }))
+    expect(screen.getByTestId('working-anchor-hint').textContent).toContain('fit on your graphics card')
+  })
+
+  it('under the chat\'s own "Loading model" too, which a local model keeps until its first token', () => {
+    useRunActivityStore.setState({ activity: { c9: { ...reading, hint: 'Only 6.9 GB of x fit on your graphics card.' } } })
+    render(createElement(WorkingAnchor, { isRunning: true, conversationId: 'c9', loadingModel: true, message: { content: '', agentBlocks: [] } }))
+    expect(screen.getByTestId('working-anchor').textContent).toContain('Loading model')
     expect(screen.getByTestId('working-anchor-hint').textContent).toContain('fit on your graphics card')
   })
 
