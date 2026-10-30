@@ -61,6 +61,20 @@ describe('a model in two folders', () => {
     expect(names).toContain('krealism_v31TurboBf16.safetensors')
   })
 
+  // The reporter has ONE file (Discord 30.10. 18:47Z, "i have only one").
+  // One file comes back from several loaders when ComfyUI reads one folder
+  // for several keys (a shared model folder, extra_model_paths.yaml). Every
+  // loader that names it, here all three, still makes one entry.
+  it('is offered once when one file is named by every loader', async () => {
+    localFetch.mockImplementation(async (url: string) => {
+      if (url.includes('CheckpointLoaderSimple')) return okJson({ CheckpointLoaderSimple: { input: { required: { ckpt_name: [[KREA]] } } } })
+      if (url.includes('UnetLoaderGGUF')) return okJson({ UnetLoaderGGUF: { input: { required: { unet_name: [[KREA]] } } } })
+      if (url.includes('UNETLoader')) return okJson({ UNETLoader: { input: { required: { unet_name: [[KREA]] } } } })
+      return okJson({})
+    })
+    expect((await getImageModels()).map((m) => m.name)).toEqual([KREA])
+  })
+
   it('keeps the checkpoint entry, the one every run finds first', async () => {
     const krea = (await getImageModels()).find((m) => m.name === KREA)
     expect(krea?.source).toBe('checkpoint')
@@ -94,5 +108,18 @@ describe('the picker with one value twice', () => {
       expect.arrayContaining([expect.stringContaining('krea2Turbo18For'), expect.stringContaining('krealism')]),
     )
     expect(screen.queryAllByRole('option').some((o) => o.textContent?.includes('flux1'))).toBe(false)
+  })
+
+  // Whatever hands the picker one value more than once, it is one row.
+  it('shows a value that comes three times once', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const thrice = [...options, { value: KREA, label: LABEL, group: 'Best' }]
+    render(<Select ariaLabel="Model" searchable options={thrice} value={KREA} onChange={() => {}} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Model' }))
+    const search = screen.getByPlaceholderText('Search...')
+    for (const q of ['', 't', 'tu', 'tur', 'tu', '']) {
+      fireEvent.change(search, { target: { value: q } })
+      expect(rows()).toHaveLength(1)
+    }
   })
 })
