@@ -119,7 +119,10 @@ function on(intent: CreateIntent, extra: Record<string, unknown> = {}) {
     selectedLoras: [{ name: 'film_grain.safetensors', strength: 0.5 }], loraStrengths: {},
   } as never)
   useCreateStore.getState().setIntent(intent)
+  // B24: the LoRA picks belong to the task and model, so they are picked on
+  // the lane the run is on (a model in `extra` is a lane change).
   useCreateStore.setState({ selectedCharacter: MIRA, ...extra } as never)
+  useCreateStore.setState({ selectedLoras: [{ name: 'film_grain.safetensors', strength: 0.5 }] })
   useCreateStore.getState().setPrompt('walking through the rain')
 }
 

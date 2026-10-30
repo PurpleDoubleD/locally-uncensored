@@ -66,6 +66,7 @@ import { createRunModel } from '../lib/render/create-studio'
 import { DEFAULT_UPSCALE_FACTOR, normalizeUpscaleFactor, type UpscaleFactor } from '../lib/local-upscale'
 import { characterLoraFile, isLocalCharacter, type CharacterRef } from '../lib/character-ref'
 import { triggerWordNote, typedTriggerWord } from '../lib/train-trigger'
+import { loraLaneKey, sanitizeLoraLanes, switchLoraLane, type LoraPick } from '../lib/render/lora-lanes'
 // ModelType includes: flux, flux2, zimage, sdxl, sd15, wan, hunyuan, unknown
 
 export type ProgressPhase = 'idle' | 'queued' | 'loading-model' | 'loading-clip' | 'loading-vae' | 'sampling' | 'decoding' | 'complete'
@@ -464,6 +465,10 @@ export interface CreateState {
   /** The last strength set for each LoRA file, kept while the LoRA is off, so
    *  ticking it again brings its own value back instead of the default. */
   loraStrengths: Record<string, number>
+  /** B24: the LoRA picks of every task + model the user left, keyed by
+   *  lib/render/lora-lanes `loraLaneKey`. `selectedLoras` is the lane on
+   *  screen; the subscriber at the end of this file swaps them. */
+  loraLanes: Record<string, LoraPick[]>
   selectedVae: string
   clipSkip: number
   growMaskBy: number  // inpaint mask edge feather (VAEEncodeForInpaint grow_mask_by)
@@ -1115,6 +1120,7 @@ export const useCreateStore = create<CreateState>()(
       expertOpen: false,
       selectedLoras: [] as { name: string; strength: number }[],
       loraStrengths: {} as Record<string, number>,
+      loraLanes: {} as Record<string, LoraPick[]>,
       selectedVae: 'auto',
       clipSkip: 0,
       growMaskBy: 6,
@@ -1902,6 +1908,7 @@ export const useCreateStore = create<CreateState>()(
         showNegative: state.showNegative,
         selectedLoras: state.selectedLoras,
         loraStrengths: state.loraStrengths,
+        loraLanes: state.loraLanes,
         selectedVae: state.selectedVae,
         clipSkip: state.clipSkip,
         growMaskBy: state.growMaskBy,
@@ -1975,6 +1982,8 @@ export const useCreateStore = create<CreateState>()(
         // Gallery folders came in 3.0.7. An older blob has no list (the
         // default stays), a damaged one is cleaned instead of trusted.
         if ('galleryFolders' in safe) safe.galleryFolders = sanitizeFolders(safe.galleryFolders)
+        // 3.0.9 B24: an older blob has no lanes, a damaged one is cleaned.
+        if ('loraLanes' in safe) safe.loraLanes = sanitizeLoraLanes(safe.loraLanes)
         // 3.0.8 D20: an unknown recipe name would reach the trainer as text.
         if ('trainVramPreset' in safe && !isTrainVramPreset(safe.trainVramPreset)) safe.trainVramPreset = TRAIN_VRAM_PRESET_DEFAULT
         // 3.0.9 P8: same for the mode, it picks the LoRA's file name.
@@ -2012,4 +2021,23 @@ useCreateStore.subscribe((s, prev) => {
   } else if (s.cloudOpModel !== prev.cloudOpModel && s.cloudOpPicks[slot] !== s.cloudOpModel) {
     useCreateStore.setState({ cloudOpPicks: { ...s.cloudOpPicks, [slot]: s.cloudOpModel } })
   }
+})
+
+// B24: the LoRA picks belong to the task and the local model on screen. A
+// change of either puts the picks aside under the lane that was left and
+// brings back the ones of the lane entered (none for a new one), so a video
+// LoRA never stays on after the change to Image. A change that set the picks
+// itself (a trained style switched on with its tab) keeps them, and so does
+// the LoRA of the picked character.
+function loraLaneOf(s: CreateState): string | null {
+  return loraLaneKey(deriveIntent(s), s.mode === 'video' ? s.videoModel : s.imageModel)
+}
+useCreateStore.subscribe((s, prev) => {
+  const swap = switchLoraLane(
+    { key: loraLaneOf(prev), picks: prev.selectedLoras },
+    { key: loraLaneOf(s), picks: s.selectedLoras },
+    s.loraLanes,
+    s.selectedLoras !== prev.selectedLoras,
+  )
+  if (swap) useCreateStore.setState(swap)
 })
