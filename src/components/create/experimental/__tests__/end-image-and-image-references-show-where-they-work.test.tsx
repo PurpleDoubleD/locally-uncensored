@@ -57,15 +57,17 @@ describe('Animate: end image', () => {
     expect(screen.getByTestId('end-image-slot').querySelector('[data-not-sent="true"]')).toBeTruthy()
     expect(screen.getByTestId('end-image-line').textContent).toContain('not sent')
   })
-  it('LU Cloud: Wan 3.0 takes one, Wan 3.0 Reference does not', () => {
+  // Wan 3.0 is a Studio model with last_image; a catalogue model such as
+  // seedance-2.5-spicy (what the Animate picker lists) has none.
+  it('LU Cloud: a Studio model with last_image takes one, a catalogue model does not', () => {
     animateWith(A14B, 'wan')
     useCreateStore.setState({ backend: 'cloud', cloudVideoModel: 'wan-3.0' })
     render(<EndImageSlot />)
     expect(screen.getByTestId('end-image-add')).toBeTruthy()
     cleanup()
-    useCreateStore.setState({ cloudVideoModel: 'wan-3.0-ref' })
+    useCreateStore.setState({ cloudVideoModel: 'seedance-2.5-spicy' })
     render(<EndImageSlot />)
-    expect(screen.getByTestId('end-image-unsupported').textContent).toContain('Wan 3.0, Seedance 2.5, LTX 2.5 and MiniMax H3')
+    expect(screen.getByTestId('end-image-unsupported').textContent).toContain('The LU Cloud video models here start from one image.')
   })
   it('a removed start image takes the end image with it', () => {
     animateWith(A14B, 'wan')

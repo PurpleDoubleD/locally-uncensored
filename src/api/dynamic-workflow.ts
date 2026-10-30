@@ -634,7 +634,7 @@ export async function buildDynamicWorkflow(
     throw new WorkflowUnavailableError(`${params.model} starts from one image and cannot also take an end image. ${LOCAL_END_FRAME_MODELS}`, 'unavailable')
   }
   if (isVideo && (gp.referenceImages?.length ?? 0) > 0 && localAnimateReferenceSlots(params.model) === 0) {
-    throw new WorkflowUnavailableError(`${params.model} reads one picture. Several references work with MiniMax H3 Reference (ref2va) here, and in LU Cloud with Wan 3.0 Reference and MiniMax H3 Reference.`, 'unavailable')
+    throw new WorkflowUnavailableError(`${params.model} reads one picture. Several references work with MiniMax H3 Reference (ref2va).`, 'unavailable')
   }
   if (refFamily && (videoParams.inputImage || refFamily === 'vace')) {
     const refusal = ref2vRefusal(params.model)

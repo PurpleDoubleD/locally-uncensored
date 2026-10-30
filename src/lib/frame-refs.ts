@@ -36,7 +36,7 @@ export function localEndFrame(model: string | null | undefined): boolean {
 }
 
 /** The line Animate shows where a local model takes the start image only. */
-export const LOCAL_END_FRAME_MODELS = 'An end image works with Wan 2.2 14B i2v, Wan 2.1 FLF2V and MiniMax H3 here, and in LU Cloud with Wan 3.0, Seedance 2.5, LTX 2.5 and MiniMax H3.'
+export const LOCAL_END_FRAME_MODELS = 'An end image works with Wan 2.2 14B i2v, Wan 2.1 FLF2V and MiniMax H3.'
 
 /** A long clip is made in sections (B18), and only one clip can end on the
  *  end image. */

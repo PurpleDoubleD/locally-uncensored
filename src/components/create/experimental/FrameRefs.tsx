@@ -22,7 +22,10 @@ import { cn } from '../ui/cn'
 const TILE = 'w-16 h-16 rounded-lg shrink-0'
 
 /** The cloud line where the Studio model on Animate starts from one image. */
-export const CLOUD_END_FRAME_MODELS = 'This model starts from one image. Wan 3.0, Seedance 2.5, LTX 2.5 and MiniMax H3 also take an end image.'
+// The Animate picker of LU Cloud lists the server catalogue's video models,
+// and the render worker hands an end image only to Studio models (Mac run,
+// 30.10.2026). So in the cloud this line is what Animate shows today.
+export const CLOUD_END_FRAME_MODELS = 'The LU Cloud video models here start from one image. An end image works on your own ComfyUI with Wan 2.2 14B i2v, Wan 2.1 FLF2V and MiniMax H3.'
 
 /** Does the Animate model on screen take an end image? */
 export function useEndImageSupport(): { supported: boolean; hint: string } {
@@ -127,7 +130,7 @@ export function useImageReferenceSupport(): { slots: number; kind?: CreateRefere
   const model = useCreateStore((s) => laneImageModel(s.imageModelList, s.imageModel, 'image'))
   const listedType = useCreateStore((s) => s.imageModelList.find((m) => m.name === laneImageModel(s.imageModelList, s.imageModel, 'image'))?.type)
   if (backend === 'cloud') {
-    return { slots: 0, hint: 'The LU Cloud image models make the picture from the prompt alone. To work from your own images, use Edit with Seedream 5, Qwen-Image 2.1 Edit or MiniMax H3 Edit.' }
+    return { slots: 0, hint: 'The LU Cloud image models make the picture from the prompt alone. To work from your own image, use Edit. Reference images work on your own ComfyUI with Krea 2, Qwen-Image 2.1 and FLUX.2.' }
   }
   // The Mac's own image engine runs prompt to picture only.
   if (isMlxImageHost()) return { slots: 0, hint: 'The image engine of this Mac makes the picture from the prompt alone. Reference images work through ComfyUI with Krea 2, Qwen-Image 2.1 and FLUX.2.' }
