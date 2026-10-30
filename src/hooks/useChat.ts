@@ -73,6 +73,7 @@ import { builtinReloadNeeded, ensureBuiltinEngineAlive } from "../api/builtin-en
 import { emptyAnswerExplanation } from "../lib/answer-notes"
 import { beginModelSwitchWatch, cutByModelSwitch, finishReasonAfterSwitch, MODEL_SWITCH_FINISH } from "../lib/model-switch-stop"
 import { log } from "../lib/logger"
+import { recallForTurn } from "../lib/chat-recall-run"
 import { CREDITS_EXHAUSTED_MESSAGE } from '../lib/credits-exhausted'
 import { messageErrorFor } from '../lib/message-error'
 import { thinkingClock } from '../lib/thinking-clock'
@@ -1514,6 +1515,20 @@ export function useChat() {
     // see it. The binding above was taken before the turn started.
     const convNow = useChatStore.getState().conversations.find((c) => c.id === convId) ?? conv
 
+    // 3.0.9 (B33, GH #205): the messages the compaction keeps out of the
+    // payload, recalled by meaning and sent word for word in the turn note.
+    // After the auto-compact above, so a summary written this turn already
+    // counts. Off unless switched on, local embedder only (lib/chat-recall-run).
+    const recallNote = settings.chatRecall === true && !phoneSystemNote
+      ? await recallForTurn({
+          conversationId: convId,
+          messages: convNow.messages,
+          compactions: convNow.compactions,
+          query: content,
+          embeddingModel: useRAGStore.getState().embeddingModel,
+        })
+      : ''
+
     // GH #180: a thread that has been a group keeps who said what. The other
     // speakers' turns go out as tagged user turns, as in the group itself,
     // instead of as this model's own.
@@ -1579,7 +1594,7 @@ export function useChat() {
             ...(m.tool_calls?.length ? { tool_calls: m.tool_calls } : {}),
             ...(m.tool_call_id ? { tool_call_id: m.tool_call_id } : {}),
           })),
-      ], turnContext))
+      ], [turnContext, recallNote].filter(Boolean).join('\n\n')))
     // Phone only, and only for the small window of its own engine: ONE rule decides what a request leaves out,
     // the one below (fitChatForPhone), which is also the rule the context chip runs over the chat. The send
     // budget of the desktop ran in front of it and had its own idea: it cut the first long message of a chat

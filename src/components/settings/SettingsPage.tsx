@@ -19,6 +19,7 @@ import { useUIStore } from '../../stores/uiStore'
 import { SliderControl } from './SliderControl'
 import { THINK_BUDGET_STEP, normalizeThinkBudget } from '../../lib/think-budget'
 import { InlineToggle } from './InlineToggle'
+import { ChatRecallToggle } from './ChatRecallToggle'
 import { composerHint, enterKeyMode } from '../../lib/enter-key'
 import { SpeechSettings } from './SpeechSettings'
 import { LogFileSettings } from './LogFileSettings'
@@ -2113,6 +2114,7 @@ export function SettingsPage() {
             <div className="t-micro text-gray-500 dark:text-gray-500 leading-relaxed pt-0.5">
               0 = fit the model: runs from a 32K context window up, and compacts earlier on smaller windows than on large ones, because the summary and the answer need room too. Below 32K older turns are only shortened. Set 30 to 95 for a fixed point that runs on every window. Works before a message and in the middle of long tool runs, and the chat says each time it happened. Costs one extra model call each time it fires. You can always run it yourself with <span className="font-mono">/compact</span>.
             </div>
+            <ChatRecallToggle />
             {/* GH #171: how much of an attached text file one message may
                 carry. 0 is "what the model's context allows", the same shape
                 as the two rows above. */}

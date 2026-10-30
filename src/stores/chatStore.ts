@@ -27,6 +27,7 @@ import { useCodexStore } from './codexStore'
 import { useAgentTaskStore } from './agentTaskStore'
 import { useAgentModeStore } from './agentModeStore'
 import { log } from '../lib/logger'
+import { deleteRecallConversation } from '../lib/chatRecallDB'
 import { isRecord, prop } from '../types/json-guards'
 import { activeConversationAtStart } from '../lib/conversation-mode'
 import { cardChatStart } from '../lib/character-card'
@@ -153,6 +154,8 @@ export function dropConversationSideState(id: string): void {
     // delegierter Agent laeuft in einem eigenen Versprechen weiter, auch wenn
     // sein Chat weg ist.
     ['agent-tasks', () => useAgentTaskStore.getState().clearConv(id)],
+    // 3.0.9 (B33): the recall vectors of the chat's old messages.
+    ['chat-recall', () => { void deleteRecallConversation(id).catch(() => {}) }],
   ]
   for (const [what, run] of steps) {
     try { run() } catch (err) {

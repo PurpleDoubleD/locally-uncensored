@@ -297,6 +297,14 @@ export interface Settings {
    */
   autoCompact: boolean
   /**
+   * Recall for long chats (B33, 3.0.9, GitHub #205). When a compaction keeps
+   * the older part of a chat out of the payload, those messages are embedded
+   * on this machine and the few closest in meaning to the new message ride
+   * along in the turn note (lib/chat-recall.ts). Off unless switched on, and
+   * it only runs on a local embedder (bundled server or Ollama on loopback).
+   */
+  chatRecall?: boolean
+  /**
    * Auto-compact trigger, as a fraction of the send window. 2.6.8.
    *
    * 0 = fit the model: the threshold follows the context window, earlier on a
