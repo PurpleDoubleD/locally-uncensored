@@ -31,18 +31,44 @@ export function screenShape(width: number, height: number, rootPx: number): Scre
   return 'low'
 }
 
-function shapeNow(): ScreenShape {
-  if (typeof window === 'undefined') return 'tall'
-  // The visible height: with the keyboard open the window is as high as before on iOS.
-  const height = window.visualViewport?.height ?? window.innerHeight
-  return screenShape(window.innerWidth, height, textUnitPx())
+export interface ShapeSample {
+  width: number
+  height: number
+  unitPx: number
+  /** A text field has the focus, so a keyboard may have taken part of the height. */
+  editing: boolean
 }
 
-/** The arrangement that fits the screen right now. Follows rotation, the keyboard and the text size. */
-export function useScreenShape(): ScreenShape {
-  const [shape, setShape] = useState<ScreenShape>(shapeNow)
+export interface ShapeState {
+  shape: ScreenShape
+  width: number
+  unitPx: number
+}
+
+/**
+ * Pure: the next arrangement from the last one and a new measurement. While a
+ * field is being edited and neither the width nor the text size changed, only
+ * the keyboard moved: the arrangement stays. A page that puts its input
+ * somewhere else in another arrangement (Create: in the fixed footer when
+ * tall, at the top of the column when low) would otherwise build the field
+ * anew the moment the keyboard opens. The new field has no focus, Android
+ * closes the keyboard, the window grows back, the old arrangement returns,
+ * and so on: the keyboard kept closing on Create (customer mail of 30.10.,
+ * package M1).
+ */
+export function nextShapeState(prev: ShapeState | null, sample: ShapeSample): ShapeState {
+  if (prev && sample.editing && sample.width === prev.width && sample.unitPx === prev.unitPx) return prev
+  return { shape: screenShape(sample.width, sample.height, sample.unitPx), width: sample.width, unitPx: sample.unitPx }
+}
+
+/** The arrangement of a page, held while the keyboard moves. `height` reads the height the page goes by. */
+export function useHeldScreenShape(height: () => number): ScreenShape {
+  const sample = (editing: boolean): ShapeSample => ({ width: window.innerWidth, height: height(), unitPx: textUnitPx(), editing })
+  const [state, setState] = useState<ShapeState>(() =>
+    typeof window === 'undefined' ? { shape: 'tall', width: 0, unitPx: 16 } : nextShapeState(null, sample(false)),
+  )
   useEffect(() => {
-    const update = () => setShape(shapeNow())
+    const update = () => setState((prev) => nextShapeState(prev, sample(editingNow())))
     update()
     const viewport = window.visualViewport
     window.addEventListener('resize', update)
@@ -57,8 +83,15 @@ export function useScreenShape(): ScreenShape {
       viewport?.removeEventListener('resize', update)
       offZoom()
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- read at every event, the reader of the page stays the same
   }, [])
-  return shape
+  return state.shape
+}
+
+/** The arrangement that fits the screen right now. Follows rotation and the text size; the keyboard only once the field lets go. */
+export function useScreenShape(): ScreenShape {
+  // The visible height: with the keyboard open the window is as high as before on iOS.
+  return useHeldScreenShape(() => window.visualViewport?.height ?? window.innerHeight)
 }
 
 // ---------- where the footer of a page goes ----------
@@ -108,7 +141,7 @@ export function nextFootState(prev: FootState | null, sample: FootSample): FootS
   return { scrolls: footScrolls(sample.width, sample.height, sample.unitPx), width: sample.width, unitPx: sample.unitPx }
 }
 
-function editingNow(): boolean {
+export function editingNow(): boolean {
   const el = typeof document === 'undefined' ? null : document.activeElement
   if (!el) return false
   if (el.tagName === 'TEXTAREA') return true
