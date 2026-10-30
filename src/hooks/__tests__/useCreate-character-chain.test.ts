@@ -277,6 +277,8 @@ describe('the character in Image and Edit', () => {
     expect(seen.builds).toHaveLength(1)
     expect(imageBuild()?.lora).toEqual(['film_grain.safetensors', CHAR])
     expect(imageBuild()?.prompt).toBe('mira, walking through the rain')
+    // B40: the picture remembers the LoRAs it was made with.
+    expect(useCreateStore.getState().gallery[0].loras?.map((l) => l.name)).toEqual(['film_grain.safetensors', CHAR])
 
     seen.builds.length = 0
     on('image', { imageModel: Z_IMAGE, imageModelType: 'zimage' })

@@ -92,8 +92,8 @@ export function PromptDetails({ item, className, open = false }: {
               <CopyText text={runSettingsText(item)} label="Copy prompt and settings" />
             </div>
             <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5">
-              {settings.map((s) => (
-                <div key={s.label} className="contents">
+              {settings.map((s, i) => (
+                <div key={`${s.label}-${i}`} className="contents">
                   <dt className="t-label text-gray-500">{s.label}</dt>
                   <dd className="t-mono min-w-0 select-text break-words text-gray-300">{s.value}</dd>
                 </div>

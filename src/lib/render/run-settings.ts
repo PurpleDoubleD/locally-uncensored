@@ -23,8 +23,14 @@ const NO_SLIDER_INTENTS: ReadonlySet<string> = new Set([
 ])
 
 export type RunSettingsSource = Partial<Pick<GalleryItem,
-  'type' | 'intent' | 'model' | 'toolModel' | 'negativePrompt' | 'seed' | 'steps' | 'cfgScale' | 'sampler' | 'width' | 'height'
+  'type' | 'intent' | 'model' | 'toolModel' | 'negativePrompt' | 'seed' | 'steps' | 'cfgScale' | 'sampler' | 'width' | 'height' | 'loras'
 >>
+
+/** B40: the LoRAs of a run, for its gallery entry. Nothing when none ran, so
+ *  an entry without LoRAs stays as it was. */
+export function ranLoras(loras: readonly { name: string; strength: number }[]): Pick<GalleryItem, 'loras'> {
+  return loras.length ? { loras: loras.map((l) => ({ name: l.name, strength: l.strength })) } : {}
+}
 
 export interface RunSetting {
   label: string
@@ -51,7 +57,7 @@ export function ranNegativePrompt(item: RunSettingsSource): string {
   return item.negativePrompt?.trim() ?? ''
 }
 
-/** The settings of a run, in the order they are read: model, steps, CFG,
+/** The settings of a run, in the order they are read: model, LoRAs, steps, CFG,
  *  sampler, seed, size. Empty for an entry that carries none (a result from
  *  the chat, which only brings its prompt). */
 export function runSettings(item: RunSettingsSource): RunSetting[] {
@@ -59,6 +65,13 @@ export function runSettings(item: RunSettingsSource): RunSetting[] {
   const tool = !!item.intent && TOOL_INTENTS.has(item.intent)
   const model = tool ? item.toolModel : item.model
   if (model?.trim()) out.push({ label: 'Model', value: prettyModel(model.trim()) })
+  // B40: each LoRA with the strength it ran at, right under the model it
+  // steered. A tool runs no diffusion model, so it has none.
+  if (!tool) {
+    for (const l of item.loras ?? []) {
+      if (l?.name?.trim() && Number.isFinite(l.strength)) out.push({ label: 'LoRA', value: `${prettyModel(l.name.trim().split(/[\\/]/).pop() ?? l.name)} · ${cfgText(l.strength)}` })
+    }
+  }
   // A track: the model and its seed, the one value a music run takes that
   // makes it again (the Mac's engine runs its own steps and guidance).
   if (item.type === 'audio') {

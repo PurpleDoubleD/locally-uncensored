@@ -104,6 +104,7 @@ import { useSettingsStore } from '../stores/settingsStore'
 import { renderStallLimitMs, renderStallMessage } from '../lib/tool-timeout'
 import { injectParameters, injectLaneParameters } from '../api/workflows'
 import { applyEditBatch } from '../api/edit-batch'
+import { ranLoras } from '../lib/render/run-settings'
 import { applyNativeHiresFix, latentDownscale } from '../api/hires-fix'
 import { editHiresBase } from '../lib/edit-hires'
 import { lorasForRun, skippedLorasLine } from '../lib/lora-stack'
@@ -1232,6 +1233,7 @@ export function useCreate() {
             createdAt: Date.now(), builderUsed: 'dynamic', intent,
             ...(transparent ? { transparent: true as const } : {}),
             ...(macSkippedNote ? { runNote: macSkippedNote } : {}),
+            ...ranLoras(runLoras),
           })
         }
         if (!own.signal.aborted) {
@@ -1493,6 +1495,7 @@ export function useCreate() {
                   width: clipSize?.width ?? width, height: clipSize?.height ?? height, batchSize: 1,
                   createdAt: Date.now(), builderUsed: 'dynamic', intent,
                   ...(videoSkippedNote ? { runNote: videoSkippedNote } : {}),
+                  ...ranLoras(videoLoras),
                 })
                 resolve()
                 return
@@ -2267,7 +2270,7 @@ export function useCreate() {
                       prompt, ...improveFields, ...transparentFields(), negativePrompt, model: activeModel,
                       modelType: mode === 'image' ? imageModelType : (videoModelsList.find(m => m.name === activeModel)?.type ?? 'wan'),
                       seed: runSeed,
-                      steps, cfgScale, sampler, scheduler, width: outputWidth, height: outputHeight, batchSize,
+                      steps, cfgScale, sampler, scheduler, width: outputWidth, height: outputHeight, batchSize, ...ranLoras(runLoras),
                       createdAt: Date.now(), builderUsed, intent, ...toolFields, ...(skippedNote ? { runNote: skippedNote } : {}),
                     })
                   }
@@ -2372,7 +2375,7 @@ export function useCreate() {
                         prompt, ...improveFields, ...transparentFields(), negativePrompt, model: activeModel,
                         modelType: mode === 'image' ? imageModelType : (videoModelsList.find(m => m.name === activeModel)?.type ?? 'wan'),
                         seed: runSeed,
-                        steps, cfgScale, sampler, scheduler, width: outputWidth, height: outputHeight, batchSize,
+                        steps, cfgScale, sampler, scheduler, width: outputWidth, height: outputHeight, batchSize, ...ranLoras(runLoras),
                         createdAt: Date.now(), builderUsed, intent, ...toolFields, ...(skippedNote ? { runNote: skippedNote } : {}),
                       })
                     }
@@ -2479,7 +2482,7 @@ export function useCreate() {
                       prompt, ...improveFields, ...transparentFields(), negativePrompt, model: activeModel,
                       modelType: mode === 'image' ? imageModelType : (videoModelsList.find(m => m.name === activeModel)?.type ?? 'wan'),
                       seed: runSeed,
-                      steps, cfgScale, sampler, scheduler, width: outputWidth, height: outputHeight, batchSize,
+                      steps, cfgScale, sampler, scheduler, width: outputWidth, height: outputHeight, batchSize, ...ranLoras(runLoras),
                       createdAt: Date.now(), builderUsed, intent, ...toolFields, ...(skippedNote ? { runNote: skippedNote } : {}),
                     })
                   }

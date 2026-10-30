@@ -273,6 +273,9 @@ export interface GalleryItem {
   /** What the run left out of the request, e.g. "Skipping LoRA no longer in
    *  models/loras: style". Shown under the result. */
   runNote?: string
+  /** B40 (3.0.9): the LoRAs the run took, with their strengths. Shown in the
+   *  settings of the result (lib/render/run-settings). Unset where none ran. */
+  loras?: { name: string; strength: number }[]
   resolvedVAE?: string
   resolvedCLIP?: string
   /** Self-contained media URL for backends that don't serve files over
