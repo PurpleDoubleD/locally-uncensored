@@ -32,6 +32,7 @@ import { MOTION_OWN_WORKFLOW_NOTE, useMotionOwnWorkflow } from './motionWorkflow
 import { ImageCountChip } from './ImageCountChip'
 import { CharacterChip, CharacterNote, characterMakesStart } from './CharacterChip'
 import { PromptHistory } from './PromptHistory'
+import { PromptAssistant } from './PromptAssistant'
 import { SpecialControls } from './SpecialIntentControls'
 import { CreditsMeter } from './CreditsMeter'
 import { Button } from '../ui/Button'
@@ -504,6 +505,7 @@ export function Composer({ onOpenAdvanced, onOpenWorkflows }: Props) {
                 Negative
               </button>
             )}
+            {needPrompt && <PromptAssistant onUse={setPrompt} />}
             {needPrompt && <PromptHistory onPick={setPrompt} />}
             <div className="flex-1" />
             {/* The backend axis moved to the global header switch (2.5.7) —
