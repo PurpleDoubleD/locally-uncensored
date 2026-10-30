@@ -190,14 +190,14 @@ describe('an edit with Qwen-Image 2.1 on a Mac', () => {
     })
   })
 
-  it('without the edit enhancer nobody rewrites an edit: a chat model cannot see the picture', async () => {
+  it('without the edit enhancer the chat model rewrites an edit as an instruction (B48)', async () => {
     arrange('edit', [T2I])
     useCreateStore.setState({ source: img('a') } as never)
     const { result } = renderHook(() => useCreate())
     await result.current.generate()
     expect(seen.enhancer).toEqual([])
-    expect(seen.chat).toEqual([])
-    expect(seen.runs[0].prompt).toBe('a fox')
+    expect(seen.chat).toHaveLength(1)
+    expect(seen.runs[0].prompt).not.toBe('a fox')
   })
 
   it('Cancel while the enhancer writes starts no image and shows no error', async () => {

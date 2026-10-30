@@ -8,16 +8,17 @@
 // censors, never adds a subject the user did not write, and writes English,
 // because the render models read English best.
 
-export type ImproveKind = 'image' | 'video' | 'music'
+export type ImproveKind = 'image' | 'edit' | 'video' | 'music'
 
 /** Which kind of prompt a Create intent writes, or null when the intent has no
- *  prompt worth rewriting. Edit is left out on purpose: an edit instruction is
- *  tied to the picture and the mask, and a rewrite can change what it means.
- *  Speech, lip sync, motion, extend and character runs carry text the user
+ *  prompt worth rewriting. An edit instruction is rewritten as an instruction
+ *  (B48, 3.0.9): the chat model cannot see the picture, so it only sharpens
+ *  what to change and never describes the whole picture. Speech, lip sync, motion, extend and character runs carry text the user
  *  chose word for word (a spoken line, a trigger word) and are never touched. */
 export function improveKindForIntent(intent: string): ImproveKind | null {
   switch (intent) {
     case 'image': return 'image'
+    case 'edit': return 'edit'
     case 'video':
     case 'animate': return 'video'
     case 'music': return 'music'
@@ -72,6 +73,8 @@ function kindBrief(target: ImproveTarget): string {
       return target.tags
         ? 'You rewrite prompts for an image model trained on tags. Write one line of comma separated tags and short phrases: subject first, then details, setting, lighting, style. Up to about 60 words.'
         : 'You rewrite prompts for an image model that reads natural language. Write one flowing description of the picture in plain sentences: subject, details, setting, light, composition, style. 40 to 120 words.'
+    case 'edit':
+      return 'You rewrite instructions for an image editing model. The user\'s text says what to change in a picture you cannot see. Keep it an instruction: name exactly what changes and how, in clear words, and say that everything else stays as it is. Do not describe the whole picture and do not invent what is in it. One or two sentences, 10 to 60 words.'
     case 'video':
       return 'You rewrite prompts for a video model. Write one flowing paragraph in the present tense, in the order things happen: the subject, what moves and how, the camera (shot size and movement), the light and the setting. If sound is part of the idea, say it. If the prompt already describes several shots joined by cuts, keep every shot in order and keep each cut written out in words. 60 to 160 words.'
     case 'music':

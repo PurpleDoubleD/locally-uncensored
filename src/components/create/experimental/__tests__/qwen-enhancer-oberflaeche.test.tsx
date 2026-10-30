@@ -61,20 +61,26 @@ describe('one switch, also on Edit when the enhancer is there', () => {
     expect(screen.getAllByRole('switch')).toHaveLength(1)
   })
 
-  it('Edit stays without it when no edit enhancer is installed, or on another model, or in the cloud', () => {
+  it('Edit without an edit enhancer, on another model or in the cloud: the chat model writes (B48)', () => {
     useCreateStore.getState().setIntent('edit')
+    useCreateStore.setState({ improvePrompt: true })
+    const chatOnly = () => {
+      expect(theSwitch()).not.toBeNull()
+      expect(screen.queryByTestId('improve-enhancer-line')).toBeNull()
+      expect(screen.queryByRole('radiogroup')).toBeNull()
+    }
     local([T2I, T2I_FREE])
     const a = render(<ImproveToggle />)
-    expect(theSwitch()).toBeNull()
+    chatOnly()
     a.unmount()
     local([T2I, I2I], { name: 'flux2-klein.safetensors', type: 'flux2' })
     const b = render(<ImproveToggle />)
-    expect(theSwitch()).toBeNull()
+    chatOnly()
     b.unmount()
     local([T2I, I2I])
     useCreateStore.setState({ backend: 'cloud' })
     render(<ImproveToggle />)
-    expect(theSwitch()).toBeNull()
+    chatOnly()
   })
 
   it('the enhancer needs no chat model: the switch works without one', async () => {
