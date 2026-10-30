@@ -22,6 +22,7 @@ import {
   type ModelTileProps, type BundleTileProps,
 } from '../ModelTiles'
 import { CloudOfferLine } from '../../cloud/CloudOffer'
+import { DescriptionDetails } from '../DescriptionDetails'
 
 // ─── Drei Rollen, drei Erscheinungen ────────────────────────────────
 //
@@ -289,6 +290,13 @@ export function ClassicBundleTile(props: BundleTileProps) {
           )}
           {bundleOffersCloud(fit, props) && <CloudOfferLine task={props.cloudTask!} sharedMemory={props.sharedMemory} />}
         </div>
+        {bundle.description && (
+          <DescriptionDetails
+            name={bundle.name}
+            description={bundle.description}
+            className="shrink-0 p-1 rounded-md hover:bg-gray-200 dark:hover:bg-white/10 text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition-colors"
+          />
+        )}
         {bundle.url && (
           <button
             onClick={() => onOpenUrl(bundle.url!)}
