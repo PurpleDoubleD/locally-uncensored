@@ -41,7 +41,7 @@ export function HtmlPreviewPanel({ code, language, variant, onClose, onExpand }:
         <div className="flex items-center gap-0.5">
           <button
             onClick={toggleNetwork}
-            className={`${ICON_BTN} flex items-center gap-1 t-micro ${allowNetwork ? 'text-amber-500 dark:text-amber-400' : ''}`}
+            className={`${ICON_BTN} flex items-center gap-1 t-micro ${allowNetwork ? 'text-emerald-500 dark:text-emerald-400' : ''}`}
             aria-pressed={allowNetwork}
             title={allowNetwork ? 'This page may load from the internet (https). Click to turn off.' : 'This page cannot reach the internet. Click to allow it.'}
             data-testid="html-preview-network"
@@ -63,11 +63,11 @@ export function HtmlPreviewPanel({ code, language, variant, onClose, onExpand }:
         </div>
       </div>
       {askingNetwork && (
-        <div className="flex flex-wrap items-center gap-2 px-3 py-2 t-label text-gray-600 dark:text-gray-300 bg-amber-50 dark:bg-amber-500/10 border-b border-amber-200 dark:border-amber-500/20" data-testid="html-preview-network-ask">
+        <div className="flex flex-wrap items-center gap-2 px-3 py-2 t-label text-gray-600 dark:text-gray-300 bg-gray-50 dark:bg-white/[0.04] border-b border-gray-200 dark:border-white/10" data-testid="html-preview-network-ask">
           <span className="flex-1 min-w-[12rem]">
             Let this page load from the internet? It can then fetch scripts and pictures over https and send what it contains to any website. Your computer, LU and local servers stay closed to it.
           </span>
-          <button className="px-2 py-0.5 rounded-md border border-amber-300 dark:border-amber-500/30 hover:bg-amber-100 dark:hover:bg-amber-500/20" onClick={() => { setAllowNetwork(true); setAskingNetwork(false) }}>
+          <button className="px-2 py-0.5 rounded-md border border-gray-300 dark:border-white/15 hover:bg-gray-100 dark:hover:bg-white/10" onClick={() => { setAllowNetwork(true); setAskingNetwork(false) }}>
             Allow for this page
           </button>
           <button className="px-2 py-0.5 rounded-md hover:bg-gray-100 dark:hover:bg-white/10" onClick={() => setAskingNetwork(false)}>

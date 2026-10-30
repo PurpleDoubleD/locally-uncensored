@@ -2,6 +2,7 @@ import { useSettingsStore } from '../../stores/settingsStore'
 import { useEmbedLane } from '../../hooks/useEmbedLane'
 import { laneIsOnThisMachine } from '../../api/embed-availability'
 import { InlineToggle } from './InlineToggle'
+import { HINWEIS_TEXT } from '../../lib/hinweis'
 
 /**
  * B33: the switch for recall in long chats, under Auto-compact. Off by
@@ -30,7 +31,7 @@ export function ChatRecallToggle() {
       />
       <div className="t-micro text-gray-500 dark:text-gray-500 leading-relaxed pt-0.5">
         After a compaction, the messages the summary stands for are indexed on this computer. With each new message, the few that relate to it most are sent along word for word, so details the summary dropped are not lost.
-        {why && <span className="block text-amber-600 dark:text-amber-400/80 pt-0.5">{why}</span>}
+        {why && <span className={`block pt-0.5 ${HINWEIS_TEXT.ruhig}`}>{why}</span>}
       </div>
     </div>
   )
