@@ -80,8 +80,8 @@ import { improveKindForIntent, IMPROVING_PROMPT, type ImproveOutcome } from '../
 import { elapsedLine } from '../lib/elapsed-line'
 import { improvePrompt } from '../lib/render/improve-prompt-run'
 import { currentChatModelList, currentHelperModel } from '../lib/cloud-helper-model'
-import { enhancerNames, pickQwenEnhancer, rewrittenByName, type ImproveWriter } from '../lib/render/qwen-enhancer'
-import { buildQwenEnhancerWorkflow, runQwenEnhancer } from '../api/qwen-enhancer'
+import { enhancerLine, enhancerNames, pickQwenEnhancer, rewrittenByName, type ImproveWriter } from '../lib/render/qwen-enhancer'
+import { buildQwenEnhancerWorkflow, runQwenEnhancer, QWEN_ENHANCER_TIMEOUT_MS } from '../api/qwen-enhancer'
 import { enhancePromptOnMac } from '../api/mlx-enhancer'
 import { extraReferenceSlots, referenceSide } from '../lib/edit-references'
 import { canonicalImageRefs } from '../lib/image-ref-names'
@@ -1779,7 +1779,14 @@ export function useCreate() {
         // The rewrite is the long wait (70 to 175 s on a 12 GB card), so the
         // line counts from here; the build above has its own status lines.
         const improving = elapsedLine((text) => setProgress(3, text), IMPROVING_PROMPT)
-        const out = await runQwenEnhancer(enhancerGraph, scenePrompt, { clientId: CLIENT_ID, signal }).finally(improving.stop)
+        // B41: the line says which part runs and, while it writes, how many
+        // tokens it has and how fast, from ComfyUI's own progress stream.
+        const limitMinutes = Math.round(QWEN_ENHANCER_TIMEOUT_MS / 60_000)
+        const out = await runQwenEnhancer(enhancerGraph, scenePrompt, {
+          clientId: CLIENT_ID,
+          signal,
+          onProgress: (p) => improving.setLabel(enhancerLine(p, qwenEnhancer.mode, limitMinutes)),
+        }).finally(improving.stop)
         if (signal?.aborted) throw new Error('Cancelled')
         takeRewrite(out, qwenEnhancer.variant)
       }

@@ -19,8 +19,9 @@ import type { ComfyApiGraph, ComfyNodeInputs } from '../types/comfy-graph'
 import { isRecord } from '../types/json-guards'
 import { getAllNodeInfo } from './comfyui-nodes'
 import { submitWorkflow, getHistory, freeMemory, abandonPrompt } from './comfyui'
+import { comfyWS, type ComfyWSEvent } from './comfyui-ws'
 import { WorkflowUnavailableError } from './dynamic-workflow'
-import { enhancedOutcome, type QwenEnhancerMode } from '../lib/render/qwen-enhancer'
+import { enhancedOutcome, type EnhancerPhase, type QwenEnhancerMode } from '../lib/render/qwen-enhancer'
 import type { ImproveOutcome } from '../lib/render/improve-prompt'
 import { QWEN_PE_I2I_SYSTEM_PROMPT, QWEN_PE_T2I_SYSTEM_PROMPT } from './qwen-enhancer-prompts'
 
@@ -36,13 +37,32 @@ export const QWEN_ENHANCER_NEEDS_UPDATE = 'The Qwen prompt enhancer needs ComfyU
 export const QWEN_ENHANCER_MAX_LENGTH = 4096
 
 /** How long the rewrite may take, loading the 9 GB file included. After this
- *  the job is taken out of the queue and the run goes on with the user's prompt. */
-export const QWEN_ENHANCER_TIMEOUT_MS = 15 * 60_000
+ *  the job is taken out of the queue and the run goes on with the user's prompt.
+ *  B41 (3.0.9): was 15 minutes, and a user gave up after 530 s of a line that
+ *  only counted. The box needs 70 s for a new picture and 175 s for an edit
+ *  on a 12 GB card; eight minutes leaves a slower card room and no more. */
+export const QWEN_ENHANCER_TIMEOUT_MS = 8 * 60_000
+
+/** How long the enhancer may go without a word from ComfyUI once it has
+ *  started reporting: no token, no node. A stuck job ends here instead of at
+ *  the time limit. Only counted while the progress stream is connected. */
+export const QWEN_ENHANCER_STALL_MS = 3 * 60_000
 
 const POLL_MS = 1500
 
 /** The node whose text is the answer. */
 export const QWEN_ENHANCER_OUTPUT_NODE = '9'
+/** The loader and the writer, by id, so their progress can be told apart. */
+const LOADER_NODE = '1'
+const WRITER_NODE = '4'
+
+/**
+ * Where the enhancer is, from ComfyUI's progress stream (B41). TextGenerate
+ * counts its tokens through ComfyUI's ProgressBar, one `progress` event per
+ * token with `max` = max_length (comfy/text_encoders/llama.py `generate`), so
+ * the line can say how far it is instead of only counting seconds.
+ */
+export type EnhancerProgress = EnhancerPhase
 
 export interface QwenEnhancerRequest {
   /** The enhancer file as ComfyUI lists it. */
@@ -165,16 +185,50 @@ const wait = (ms: number, signal?: AbortSignal) => new Promise<void>((resolve) =
 export async function runQwenEnhancer(
   workflow: ComfyApiGraph,
   original: string,
-  opts: { clientId?: string; signal?: AbortSignal; timeoutMs?: number } = {},
+  opts: { clientId?: string; signal?: AbortSignal; timeoutMs?: number; stallMs?: number; onProgress?: (p: EnhancerProgress) => void } = {},
 ): Promise<ImproveOutcome> {
   const { signal } = opts
   if (signal?.aborted) return { status: 'failed' }
   let promptId: string | null = null
+  // B41: the card is handed over BEFORE the enhancer too. LU keeps the last
+  // picture's model warm in ComfyUI on purpose (vram-handoff), so after an
+  // edit without the rewrite, Qwen-Image 2.1 Edit still sat on the card when
+  // the 9 GB enhancer loaded next to it, which then wrote its tokens partly
+  // from system memory. ComfyUI frees the card between jobs, so this lands
+  // before the enhancer's job starts. The picture after it loads again
+  // anyway: the enhancer's own free below drops everything.
+  await freeMemory()
+  // Ask for the stream; a run without it still ends, by /history below.
+  void comfyWS.connect().catch(() => {})
+  const since = comfyWS.mark()
+  let lastSign = 0
+  let firstTokenAt = 0
+  let firstTokenCount = 0
+  const report = (p: EnhancerProgress) => { try { opts.onProgress?.(p) } catch { /* the line is the caller's */ } }
+  const onEvent = (ev: ComfyWSEvent) => {
+    if (!promptId || !('prompt_id' in ev.data) || ev.data.prompt_id !== promptId) return
+    lastSign = Date.now()
+    if (ev.type === 'executing' && ev.data.node === LOADER_NODE) report({ phase: 'loading' })
+    else if (ev.type === 'executing' && ev.data.node === WRITER_NODE) report({ phase: 'reading' })
+    else if (ev.type === 'progress') {
+      const { value, max } = ev.data
+      if (!firstTokenAt) { firstTokenAt = Date.now(); firstTokenCount = value }
+      const secs = (Date.now() - firstTokenAt) / 1000
+      const rate = secs >= 2 && value > firstTokenCount ? (value - firstTokenCount) / secs : null
+      report({ phase: 'writing', tokens: value, max, tokensPerSecond: rate })
+    }
+  }
+  let off: (() => void) | null = null
   try {
+    report({ phase: 'queued' })
     promptId = await submitWorkflow(workflow, opts.clientId)
+    off = comfyWS.on(onEvent, since)
     const deadline = Date.now() + (opts.timeoutMs ?? QWEN_ENHANCER_TIMEOUT_MS)
+    const stallMs = opts.stallMs ?? QWEN_ENHANCER_STALL_MS
     for (;;) {
       if (signal?.aborted || Date.now() > deadline) break
+      // Silence only counts once the stream has spoken for this job.
+      if (lastSign && comfyWS.connected && Date.now() - lastSign > stallMs) break
       const entry = await getHistory(promptId)
       const status = entry?.status?.status_str
       if (status === 'success') {
@@ -191,6 +245,7 @@ export async function runQwenEnhancer(
   } catch {
     return { status: 'failed' }
   } finally {
+    off?.()
     // Cancelled or out of time: our job must not keep the card busy.
     if (promptId) await abandonPrompt(promptId).catch(() => {})
     await freeMemory()
