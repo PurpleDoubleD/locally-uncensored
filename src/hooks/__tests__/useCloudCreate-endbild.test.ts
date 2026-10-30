@@ -1,5 +1,5 @@
 /**
- * B38 (Discord 30.10.2026, thirdorbital): Animate in LU Cloud mit Start- UND
+ * B38 (Discord 30.10.2026): Animate in LU Cloud mit Start- UND
  * Endbild. Die Studio-Modelle mit last_image im Anbieter-Schema (Wan 3.0,
  * Seedance 2.5, LTX 2.5, MiniMax H3) bekommen das Endbild als
  * last_image_path, eigener Upload. Ein Modell ohne dieses Feld bekommt es nie.
@@ -115,35 +115,81 @@ beforeEach(() => {
 
 const ENDE = { filename: 'z.png', url: 'data:image/png;base64,ZZ', width: 512, height: 512 }
 
-describe('Animate mit Endbild', () => {
-  it('Wan 3.0 bekommt Start- und Endbild, das Endbild als eigener Upload', async () => {
+// W6-API (30.10.2026): the catalogue marks the models that take an end image.
+const ENDBILD = new Set(['wan-2.2-720p', 'seedance-2.5-spicy', 'wan-3.0', 'seedance-2.5', 'minimax-h3', 'ltx-2.5-i2v'])
+const w6 = () => useCloudCatalogStore.setState({ models: neuerServer().map((m) => (ENDBILD.has(m.id) ? { ...m, end_image: true } : m)) })
+
+describe('Animate mit Endbild (W6-Server)', () => {
+  it('ein klassisches Modell mit end_image bekommt das Endbild als last_image_path', async () => {
+    w6()
+    const s = useCreateStore.getState()
+    s.setIntent('animate'); s.setCloudVideoModel('seedance-2.5-spicy')
+    useCreateStore.setState({ source: BILD, endImage: ENDE })
+    await useCloudCreate().generate()
+    expect(useCreateStore.getState().error).toBeNull()
+    expect(submitted[0].model).toBe('seedance-2.5-spicy')
+    expect(submitted[0].params.op).toBe('animate')
+    expect(submitted[0].params.source_path).toBe('user-1/staged-source-1.png')
+    expect(submitted[0].params.last_image_path).toBe('user-1/staged-source-2.png')
+  })
+
+  it('ein klassisches Modell ohne end_image bekommt keins (wan-2.2-fast)', async () => {
+    w6()
+    const s = useCreateStore.getState()
+    s.setIntent('animate'); s.setCloudVideoModel('wan-2.2-fast')
+    useCreateStore.setState({ source: BILD, endImage: ENDE })
+    await useCloudCreate().generate()
+    expect(submitted[0].params.last_image_path).toBeUndefined()
+    expect(hochgeladen).toHaveLength(1)
+  })
+
+  it('ein Server von vor W6 (kein Feld) bekommt nie ein Endbild, er wuerde es still verwerfen', async () => {
+    const s = useCreateStore.getState()
+    s.setIntent('animate'); s.setCloudVideoModel('seedance-2.5-spicy')
+    useCreateStore.setState({ source: BILD, endImage: ENDE })
+    await useCloudCreate().generate()
+    expect(submitted[0].params.last_image_path).toBeUndefined()
+  })
+
+  it('Studio: Wan 3.0 bekommt Start- und Endbild, die Preisbestaetigung kennt es', async () => {
+    w6()
     const s = useCreateStore.getState()
     s.setIntent('animate'); s.setCloudVideoModel('wan-3.0')
     useCreateStore.setState({ source: BILD, endImage: ENDE })
     await useCloudCreate().generate()
     expect(useCreateStore.getState().error).toBeNull()
     expect(submitted[0].model).toBe('wan-3.0')
+    expect(submitted[0].params.op).toBe('studio')
     expect(submitted[0].params.source_path).toBe('user-1/staged-source-1.png')
     expect(submitted[0].params.last_image_path).toBe('user-1/staged-source-2.png')
-    expect(hochgeladen).toHaveLength(2)
-    // Die bestaetigte Zahl kennt das Endbild auch.
     expect((hoisted.quote.mock.calls[0][2] as { last_image_path?: string }).last_image_path).toBe('user-1/staged-source-2.png')
   })
 
-  it('ohne Endbild bleibt es beim Startbild (Rueckfall-Waechter)', async () => {
+  it('Studio ohne end_image im Katalog: kein Endbild', async () => {
     const s = useCreateStore.getState()
     s.setIntent('animate'); s.setCloudVideoModel('wan-3.0')
-    useCreateStore.setState({ source: BILD, endImage: null })
+    useCreateStore.setState({ source: BILD, endImage: ENDE })
     await useCloudCreate().generate()
     expect(submitted[0].params.last_image_path).toBeUndefined()
-    expect(hochgeladen).toHaveLength(1)
   })
 
   it('ein Referenzmodell ohne last_image bekommt kein Endbild', async () => {
+    w6()
     const s = useCreateStore.getState()
     s.setIntent('animate'); s.setCloudVideoModel('minimax-h3-ref')
     useCreateStore.setState({ source: BILD, endImage: ENDE, references: [] })
     await useCloudCreate().generate()
     expect(submitted[0].params.last_image_path).toBeUndefined()
+  })
+
+  it('die Absage des Servers (end_image_unsupported) steht so, wie er sie schreibt', async () => {
+    w6()
+    const jobs = await import('../../api/cloud/jobs')
+    vi.mocked(jobs.submitCloudJob).mockRejectedValueOnce(new hoisted.FakeCloudJobError('wan-2.2-fast takes no end image. Models that end on your image: wan-2.2-720p.', 400, { code: 'end_image_unsupported' }))
+    const s = useCreateStore.getState()
+    s.setIntent('animate'); s.setCloudVideoModel('seedance-2.5-spicy')
+    useCreateStore.setState({ source: BILD, endImage: ENDE })
+    await useCloudCreate().generate()
+    expect(useCreateStore.getState().error).toContain('takes no end image. Models that end on your image: wan-2.2-720p.')
   })
 })

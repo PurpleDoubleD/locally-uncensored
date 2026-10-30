@@ -10,15 +10,17 @@
 import { describe, expect, it, beforeEach, vi } from 'vitest'
 import { cleanup, render, screen } from '@testing-library/react'
 
-// The cloud catalog is not loaded in a unit test, so the Animate pick is the
-// stored one (the real resolution is studioPickFor's own tests).
+// The Animate pick is the stored one here (the real resolution, which needs
+// the whole catalogue, is createRunModel's own tests).
 vi.mock('../../../../lib/render/create-studio', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../../lib/render/create-studio')>()
-  return { ...actual, studioPickFor: (_: string, s: { cloudVideoModel: string }) => s.cloudVideoModel || undefined }
+  return { ...actual, createRunModel: (_: string, p: { video: string }) => p.video }
 })
 import { EndImageSlot, ImageReferenceStrip } from '../FrameRefs'
 import { ReferenceStrip } from '../ReferenceStrip'
 import { useCreateStore } from '../../../../stores/createStore'
+import { useCloudCatalogStore } from '../../../../stores/cloudCatalogStore'
+import { neuerServer } from '../../../../lib/render/__tests__/fixtures/test-catalogs'
 
 const PIC = { filename: 'p.png', url: 'data:image/png;base64,p', width: 8, height: 8 }
 const A14B = 'wan2.2_i2v_high_noise_14B_fp8_scaled.safetensors'
@@ -57,16 +59,27 @@ describe('Animate: end image', () => {
     expect(screen.getByTestId('end-image-slot').querySelector('[data-not-sent="true"]')).toBeTruthy()
     expect(screen.getByTestId('end-image-line').textContent).toContain('not sent')
   })
-  // Wan 3.0 is a Studio model with last_image; a catalogue model such as
-  // seedance-2.5-spicy (what the Animate picker lists) has none.
-  it('LU Cloud: a Studio model with last_image takes one, a catalogue model does not', () => {
+  // W6-API (30.10.2026): the server's catalogue marks the models that take an
+  // end image. Without the field (a server from before W6) none is offered.
+  it('LU Cloud: a model the catalogue marks takes one, the others name those', () => {
+    useCloudCatalogStore.setState({ models: neuerServer().map((m) => (m.id === 'seedance-2.5-spicy' || m.id === 'wan-3.0' ? { ...m, end_image: true } : m)) })
     animateWith(A14B, 'wan')
-    useCreateStore.setState({ backend: 'cloud', cloudVideoModel: 'wan-3.0' })
+    useCreateStore.setState({ backend: 'cloud', cloudVideoModel: 'seedance-2.5-spicy' })
     render(<EndImageSlot />)
     expect(screen.getByTestId('end-image-add')).toBeTruthy()
     cleanup()
-    useCreateStore.setState({ cloudVideoModel: 'seedance-2.5-spicy' })
+    useCreateStore.setState({ cloudVideoModel: 'wan-2.2-fast' })
     render(<EndImageSlot />)
+    const line = screen.getByTestId('end-image-unsupported').textContent ?? ''
+    expect(line).toContain('These also end on your image:')
+    expect(line).toContain('Seedance 2.5 Uncensored')
+  })
+  it('LU Cloud before W6: no model offers one, the line says where it works', () => {
+    useCloudCatalogStore.setState({ models: neuerServer() })
+    animateWith(A14B, 'wan')
+    useCreateStore.setState({ backend: 'cloud', cloudVideoModel: 'seedance-2.5-spicy' })
+    render(<EndImageSlot />)
+    expect(screen.queryByTestId('end-image-add')).toBeNull()
     expect(screen.getByTestId('end-image-unsupported').textContent).toContain('The LU Cloud video models here start from one image.')
   })
   it('a removed start image takes the end image with it', () => {

@@ -12,7 +12,8 @@ import {
   CREATE_REFERENCE_MODELS, LOCAL_END_FRAME_MODELS, createReferenceLine, createReferenceSupport,
   laneVideoModel, localEndFrame, type CreateReferenceKind,
 } from '../../../lib/frame-refs'
-import { studioPickFor, studioReadsEndImage } from '../../../lib/render/create-studio'
+import { cloudTakesEndImage, createRunModel } from '../../../lib/render/create-studio'
+import { animatePickerModels, useCloudCatalogStore } from '../../../stores/cloudCatalogStore'
 import { laneImageModel } from '../../../lib/image-engines'
 import { imageRefWords, withImageRef } from '../../../lib/image-ref-names'
 import { loadImageRef } from './loadImage'
@@ -22,18 +23,29 @@ import { cn } from '../ui/cn'
 const TILE = 'w-16 h-16 rounded-lg shrink-0'
 
 /** The cloud line where the Studio model on Animate starts from one image. */
-// The Animate picker of LU Cloud lists the server catalogue's video models,
-// and the render worker hands an end image only to Studio models (Mac run,
-// 30.10.2026). So in the cloud this line is what Animate shows today.
+// A server from before W6 (30.10.2026) has no `end_image` in its catalogue
+// and dropped an end image without a word, so then no cloud model offers one.
 export const CLOUD_END_FRAME_MODELS = 'The LU Cloud video models here start from one image. An end image works on your own ComfyUI with Wan 2.2 14B i2v, Wan 2.1 FLF2V and MiniMax H3.'
+
+/** The cloud line for a model without an end image: the Animate models that
+ *  take one, by name, where the catalogue marks them. */
+export function cloudEndFrameHint(models: readonly { label: string; end_image?: boolean }[]): string {
+  const names = [...new Set(models.filter((m) => m.end_image === true).map((m) => m.label))]
+  if (names.length === 0) return CLOUD_END_FRAME_MODELS
+  return `This model starts from one image. These also end on your image: ${names.join(', ')}.`
+}
 
 /** Does the Animate model on screen take an end image? */
 export function useEndImageSupport(): { supported: boolean; hint: string } {
   const backend = useCreateStore((s) => s.backend)
-  const cloudModel = useCreateStore((s) => studioPickFor('animate', s))
+  // The model the Animate run really uses (classic or Studio), as the run
+  // resolves it. The server's catalogue says whether it takes an end image.
+  // Re-read when the catalogue arrives or changes.
+  useCloudCatalogStore((c) => c.models)
+  const cloudModel = useCreateStore((s) => createRunModel('animate', { image: s.cloudImageModel, video: s.cloudVideoModel, op: s.cloudOpModel }))
   const localModel = useCreateStore((s) => laneVideoModel(s.videoModelList, s.videoModel, 'animate'))
   if (backend === 'cloud') {
-    return studioReadsEndImage(cloudModel) ? { supported: true, hint: '' } : { supported: false, hint: CLOUD_END_FRAME_MODELS }
+    return cloudTakesEndImage(cloudModel) ? { supported: true, hint: '' } : { supported: false, hint: cloudEndFrameHint(animatePickerModels()) }
   }
   // The Mac's own video engine takes one start image.
   if (isMlxImageHost()) return { supported: false, hint: `The video engine of this Mac starts from one image. ${LOCAL_END_FRAME_MODELS}` }

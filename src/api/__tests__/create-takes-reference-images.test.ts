@@ -1,5 +1,5 @@
 /**
- * B45 (Discord 30.10.2026, boromirofgeo): reference images in Create, text to
+ * B45 (Discord 30.10.2026): reference images in Create, text to
  * image, not Edit, for style, pose and camera angle, above all with Krea 2.
  * Each family reads them the way its official Comfy-Org template does
  * (workflow_templates abb9cf64, ComfyUI master b5a43215):

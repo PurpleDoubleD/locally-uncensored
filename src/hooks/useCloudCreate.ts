@@ -36,7 +36,7 @@ import { contentPolicySnapshot, loadContentPolicy } from './useContentPolicy'
 import { effectiveContentPolicy } from '../lib/content-policy-cap'
 import { signalCreditsExhausted } from '../lib/credits-exhausted'
 import { resolveRunSeed } from '../lib/run-seed'
-import { intentRoles, intentRequiredInputs, isStudioModel, resolveIntentPick, studioExtraPhotoSlots } from '../lib/render/create-studio'
+import { intentRoles, intentRequiredInputs, isStudioModel, resolveIntentPick, studioExtraPhotoSlots, cloudTakesEndImage } from '../lib/render/create-studio'
 import { bumpSeed, runImageCount } from '../lib/render/image-count'
 import { STUDIO_MODELS, studioFields } from '../lib/render/studio-contract'
 import { modelLabel } from '../lib/render/preset-models'
@@ -545,12 +545,19 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
           }
           if (!reads.includes('source_path')) delete params.source_path
           // B38: an end image for a Studio model that reads one
-          // (last_image_path). The Stage shows the slot only for those.
-          if (intent === 'animate' && s.endImage && reads.includes('last_image_path')) {
+          // (last_image_path) and that the server's catalogue marks
+          // (W6-API `end_image`). The Stage shows the slot only for those.
+          if (intent === 'animate' && s.endImage && reads.includes('last_image_path') && cloudTakesEndImage(studioModel)) {
             if (ac.signal.aborted) return
             s.setProgress(7, 'Uploading the end image…')
             params.last_image_path = await uploadInput(dataUrlToBlob(s.endImage.url), 'source', ...uploadEnds(ac))
           }
+        } else if (op === 'animate' && s.endImage && cloudTakesEndImage(model)) {
+          // B38: a classic Animate model the catalogue marks (W6-API
+          // `end_image`): the end image rides along as last_image_path.
+          if (ac.signal.aborted) return
+          s.setProgress(7, 'Uploading the end image…')
+          params.last_image_path = await uploadInput(dataUrlToBlob(s.endImage.url), 'source', ...uploadEnds(ac))
         }
       }
       if ((op === 'edit' && !editIsMaskless) || op === 'eraser') {

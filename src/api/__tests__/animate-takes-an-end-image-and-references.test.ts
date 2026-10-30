@@ -1,5 +1,5 @@
 /**
- * B38 (Discord 29.10.2026 .molot, 30.10.2026 thirdorbital): Animate took one
+ * B38 (Discord 29.10. and 30.10.2026): Animate took one
  * picture. Asked for: several references where the model takes them, and a
  * start AND an end image (FL2V). Read off ComfyUI master b5a43215 and the
  * Comfy-Org templates video_wan2_2_14B_flf2v, wan2.1_flf2v_720_f16,
