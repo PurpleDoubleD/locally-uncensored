@@ -129,7 +129,10 @@ describe('scripts are off in the Explorer preview', () => {
   })
 
   it('counter-test: the model-snippet modal keeps running scripts', () => {
-    const src = code('../../components/chat/HtmlPreviewModal.tsx')
+    // Since B29 (3.0.9) the modal shows the chat's preview panel, which
+    // owns the frame.
+    expect(code('../../components/chat/HtmlPreviewModal.tsx')).toMatch(/<HtmlPreviewPanel/)
+    const src = code('../../components/chat/HtmlPreviewPanel.tsx')
     expect(src).toMatch(/<HtmlPreviewFrame[^>]*allowScripts/)
   })
 

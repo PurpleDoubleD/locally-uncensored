@@ -177,6 +177,7 @@ const e = (
 export const CATALOG: readonly CatalogEntry[] = [
   // Context. Three different knobs, the help says which is which.
   e('autoCompact', 'Auto-compact', 'general', 'Summarise older turns automatically when the chat nears the context window.', bool()),
+  e('chatRecall', 'Recall older messages', 'general', 'After a compaction, send the older messages that relate to the new one along, found by a local embedding model.', bool()),
   e('autoCompactThreshold', 'Auto-compact at', 'general', 'How full the context window gets before auto-compact runs.', compactThreshold),
   e('contextWindowOverride', 'Context window (Ollama)', 'general', 'num_ctx sent to Ollama, in tokens. Other backends ignore it.', int(0, CONTEXT_WINDOW_MAX, 'tokens', 'auto')),
   e('engineIdleUnloadMinutes', 'Unload the model when unused', 'backends', 'Minutes without use before LU Engine frees the model.', int(0, 1_440, 'min', 'never')),

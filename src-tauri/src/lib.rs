@@ -18,6 +18,7 @@ mod android_entry;
 #[cfg(target_os = "linux")]
 mod linux_media;
 mod app_identity;
+mod html_preview;
 mod cancel_registry;
 mod commands;
 mod crash_report;
@@ -661,6 +662,10 @@ pub fn run() {
         // commands/mobile_guard.rs), on the desktop it does nothing.
         .mobile_guard()
         .invoke_handler(tauri::generate_handler![
+            // The chat's HTML preview: a loopback page with its own closed
+            // policy, served while a preview is open (html_preview.rs).
+            html_preview::html_preview_put,
+            html_preview::html_preview_close,
             // Hugging Face "Use this model": the page takes the waiting link
             #[cfg(desktop)]
             hf_link::hf_link_take,

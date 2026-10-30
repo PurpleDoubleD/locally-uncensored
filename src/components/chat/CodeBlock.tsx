@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { lazy, Suspense, useState } from 'react'
 // PrismLight, NOT the `Prism` barrel. The barrel pulls refractor's ~300
 // grammars into the boot chunk (~570 kB of a 2.61 MB App chunk) for a
 // highlighter that realistically sees a dozen languages. PrismLight ships the
@@ -6,7 +6,11 @@ import { useState } from 'react'
 import SyntaxHighlighter from 'react-syntax-highlighter/dist/esm/prism-light'
 // Deep path on purpose: `styles/prism` is a barrel over 46 themes.
 import oneDark from 'react-syntax-highlighter/dist/esm/styles/prism/one-dark'
-import { Copy, Check, ChevronDown } from 'lucide-react'
+import { Copy, Check, ChevronDown, Play } from 'lucide-react'
+
+// Loaded on the first Preview click only: most chats never open one.
+const HtmlPreviewPanel = lazy(() => import('./HtmlPreviewPanel').then((m) => ({ default: m.HtmlPreviewPanel })))
+const HtmlPreviewModal = lazy(() => import('./HtmlPreviewModal').then((m) => ({ default: m.HtmlPreviewModal })))
 
 // ── Grammars ───────────────────────────────────────────────────────────────
 //
@@ -171,6 +175,10 @@ export function CodeBlock({ code, language }: Props) {
   const lineCount = code.split('\n').length
   const isLong = lineCount > COLLAPSE_THRESHOLD
   const [expanded, setExpanded] = useState(!isLong)
+  // B29: the preview exists only after the user asks for it. It is component
+  // state, never stored, so reopening a chat shows code and runs nothing.
+  const canPreview = isHtmlSnippet(code, language)
+  const [preview, setPreview] = useState<'off' | 'inline' | 'large'>('off')
 
   const handleCopy = () => {
     navigator.clipboard.writeText(code)
@@ -184,41 +192,79 @@ export function CodeBlock({ code, language }: Props) {
     <div className="relative group rounded-lg overflow-hidden my-1.5 border border-gray-200 dark:border-white/5">
       <div className="flex items-center justify-between px-3 py-1 bg-gray-50 dark:bg-white/5 border-b border-gray-200 dark:border-white/5">
         <span className="t-micro text-gray-400 font-mono">{language || 'code'}</span>
-        <button
-          onClick={handleCopy}
-          className="flex items-center gap-1 t-micro text-gray-400 hover:text-gray-700 dark:hover:text-white transition-colors"
-          aria-label="Copy code"
-        >
-          {copied ? <Check size={11} /> : <Copy size={11} />}
-          {copied ? 'Copied' : 'Copy'}
-        </button>
+        <div className="flex items-center gap-3">
+          {canPreview && (
+            <button
+              onClick={() => setPreview(preview === 'off' ? 'inline' : 'off')}
+              className="flex items-center gap-1 t-micro text-gray-400 hover:text-gray-700 dark:hover:text-white transition-colors"
+              aria-pressed={preview !== 'off'}
+              data-testid="code-preview-button"
+            >
+              <Play size={11} />
+              {preview === 'off' ? 'Preview' : 'Code'}
+            </button>
+          )}
+          <button
+            onClick={handleCopy}
+            className="flex items-center gap-1 t-micro text-gray-400 hover:text-gray-700 dark:hover:text-white transition-colors"
+            aria-label="Copy code"
+          >
+            {copied ? <Check size={11} /> : <Copy size={11} />}
+            {copied ? 'Copied' : 'Copy'}
+          </button>
+        </div>
       </div>
-      <SyntaxHighlighter
-        // The RAW tag stays in the header label above; only the highlighter
-        // gets the normalised one, so an unknown fence still shows what the
-        // model called it while rendering as plain text.
-        language={highlightLanguageFor(language)}
-        style={oneDark}
-        customStyle={{
-          margin: 0,
-          padding: '0.75rem',
-          background: 'rgba(0, 0, 0, 0.3)',
-          fontSize: '0.75rem',
-        }}
-        // The theme gives the inner <code> its own background. It is an
-        // inline element, so that colour showed as a band behind every line.
-        codeTagProps={{ style: { background: 'transparent' } }}
-      >
-        {displayCode}
-      </SyntaxHighlighter>
-      {isLong && (
-        <button
-          onClick={() => setExpanded(!expanded)}
-          className="w-full flex items-center justify-center gap-1 py-1 bg-gray-50 dark:bg-white/5 text-[0.55rem] text-gray-400 hover:text-gray-700 dark:hover:text-white border-t border-gray-200 dark:border-white/5 transition-colors"
-        >
-          <ChevronDown size={9} className={`transition-transform ${expanded ? 'rotate-180' : ''}`} />
-          {expanded ? 'Collapse' : `Show all ${lineCount} lines`}
-        </button>
+      {preview !== 'off' && (
+        <Suspense fallback={null}>
+          {preview === 'inline' && (
+            // The panel has no width of its own (the frame is 100%), and an
+            // answer bubble sizes to its content: without a wish the block
+            // shrank to the toolbar (Mac run). 48rem, never wider than the column.
+            <div className="h-[360px] w-[48rem] max-w-full" data-testid="code-preview-inline">
+              <HtmlPreviewPanel
+                code={code}
+                language={language}
+                variant="inline"
+                onClose={() => setPreview('off')}
+                onExpand={() => setPreview('large')}
+              />
+            </div>
+          )}
+          {preview === 'large' && (
+            <HtmlPreviewModal code={code} language={language} onClose={() => setPreview('inline')} />
+          )}
+        </Suspense>
+      )}
+      {preview === 'off' && (
+        <>
+          <SyntaxHighlighter
+            // The RAW tag stays in the header label above; only the highlighter
+            // gets the normalised one, so an unknown fence still shows what the
+            // model called it while rendering as plain text.
+            language={highlightLanguageFor(language)}
+            style={oneDark}
+            customStyle={{
+              margin: 0,
+              padding: '0.75rem',
+              background: 'rgba(0, 0, 0, 0.3)',
+              fontSize: '0.75rem',
+            }}
+            // The theme gives the inner <code> its own background. It is an
+            // inline element, so that colour showed as a band behind every line.
+            codeTagProps={{ style: { background: 'transparent' } }}
+          >
+            {displayCode}
+          </SyntaxHighlighter>
+          {isLong && (
+            <button
+              onClick={() => setExpanded(!expanded)}
+              className="w-full flex items-center justify-center gap-1 py-1 bg-gray-50 dark:bg-white/5 text-[0.55rem] text-gray-400 hover:text-gray-700 dark:hover:text-white border-t border-gray-200 dark:border-white/5 transition-colors"
+            >
+              <ChevronDown size={9} className={`transition-transform ${expanded ? 'rotate-180' : ''}`} />
+              {expanded ? 'Collapse' : `Show all ${lineCount} lines`}
+            </button>
+          )}
+        </>
       )}
     </div>
   )

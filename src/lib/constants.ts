@@ -97,6 +97,7 @@ export const DEFAULT_SETTINGS: Settings = {
   // into true. A version bump that buys nothing costs a full state loss on
   // downgrade (lib/persist-version.ts, DOWNGRADE-KONTRAKT).
   autoCompact: true,
+  chatRecall: false,
   autoCompactThreshold: 0,
   // GH #171: 0 = an attached file takes what the model's context allows.
   // Additive like the key above, no version bump.
