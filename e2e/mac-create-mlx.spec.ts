@@ -736,10 +736,11 @@ test('mac local: without the enhancer installed the switch is the chat model one
   await expect(improveSwitch(page)).toBeVisible()
   await expect(drawer(page).getByRole('radiogroup', { name: 'Rewritten by' })).toHaveCount(0)
   await page.keyboard.press('Escape')
-  // Edit has no writer at all then.
+  // Edit: the chat model writes there too (B48), still no row to choose.
   await page.getByRole('radio', { name: 'Edit / Image to Image', exact: true }).click()
   await openDrawer(page)
-  await expect(improveSwitch(page)).toHaveCount(0)
+  await expect(improveSwitch(page)).toBeVisible()
+  await expect(drawer(page).getByRole('radiogroup', { name: 'Rewritten by' })).toHaveCount(0)
   expect((await mlxCalls(page)).some((c) => c.cmd === 'mlx_enhance_prompt')).toBe(false)
 })
 
@@ -1064,10 +1065,13 @@ test('mac local: Turbo, an edit and a batch each carry the stack', async ({ page
   // Turbo's own adapter is the engine's business: the request names no steps.
   expect(runs[0].steps).toBeUndefined()
 
-  // The same stack on Edit, with the image.
+  // Edit keeps its own picks (B24): none until one is ticked there, then
+  // the same stack goes out with the image.
   await page.getByRole('radio', { name: 'Edit / Image to Image', exact: true }).click()
   await page.locator('input[type="file"]').first().setInputFiles({ name: 'car.png', mimeType: 'image/png', buffer: ONE_PIXEL_PNG })
   await openStack(page)
+  await expect(drawer(page).getByText('· 1 active')).toHaveCount(0)
+  await drawer(page).getByRole('button', { name: /qwen\/detail/ }).click()
   await expect(drawer(page).getByText('· 1 active')).toBeVisible()
   await slider(page, 'Batch size').fill('1')
   await page.keyboard.press('Escape')
