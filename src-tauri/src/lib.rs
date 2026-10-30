@@ -18,6 +18,8 @@ mod android_entry;
 #[cfg(target_os = "linux")]
 mod linux_media;
 mod app_identity;
+// The chat's HTML preview server. A phone starts no server (mobile_guard.rs).
+#[cfg(desktop)]
 mod html_preview;
 mod cancel_registry;
 mod commands;
@@ -663,8 +665,11 @@ pub fn run() {
         .mobile_guard()
         .invoke_handler(tauri::generate_handler![
             // The chat's HTML preview: a loopback page with its own closed
-            // policy, served while a preview is open (html_preview.rs).
+            // policy, served while a preview is open (html_preview.rs). Desktop
+            // only: a phone starts no server, and its agent preview has its own.
+            #[cfg(desktop)]
             html_preview::html_preview_put,
+            #[cfg(desktop)]
             html_preview::html_preview_close,
             // Hugging Face "Use this model": the page takes the waiting link
             #[cfg(desktop)]
