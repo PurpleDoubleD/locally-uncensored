@@ -85,7 +85,12 @@ describe('B29: in the app the page comes from the luprev scheme', () => {
     await waitFor(() => expect(tauri.calls).toHaveLength(1))
     fireEvent.click(screen.getByTestId('html-preview-network'))
     // One click only asks.
-    expect(screen.getByTestId('html-preview-network-ask')).toBeTruthy()
+    const ask = screen.getByTestId('html-preview-network-ask')
+    // Mac run: as an uppercase label inside the monospace code block the
+    // question did not wrap and ran under its own buttons.
+    expect(ask.className).not.toMatch(/\bt-label\b/)
+    expect(ask.className).toMatch(/whitespace-normal/)
+    expect(screen.getByTestId('html-preview-panel').className).toMatch(/\bfont-sans\b/)
     expect(screen.getByTestId('html-preview-panel').dataset.network).toBe('off')
     fireEvent.click(screen.getByText('Keep offline'))
     expect(screen.queryByTestId('html-preview-network-ask')).toBeNull()

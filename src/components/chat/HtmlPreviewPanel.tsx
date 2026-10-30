@@ -35,7 +35,7 @@ export function HtmlPreviewPanel({ code, language, variant, onClose, onExpand }:
   }
 
   return (
-    <div className="flex flex-col min-h-0 h-full" data-testid="html-preview-panel" data-network={allowNetwork ? 'on' : 'off'}>
+    <div className="flex flex-col min-h-0 h-full font-sans" data-testid="html-preview-panel" data-network={allowNetwork ? 'on' : 'off'}>
       <div className="flex items-center justify-between gap-2 px-2 py-1 border-b border-gray-200 dark:border-white/5 bg-gray-50 dark:bg-white/[0.03]">
         <ViewportSwitcher viewport={viewport} onChange={setViewport} compact={variant === 'inline'} />
         <div className="flex items-center gap-0.5">
@@ -63,8 +63,8 @@ export function HtmlPreviewPanel({ code, language, variant, onClose, onExpand }:
         </div>
       </div>
       {askingNetwork && (
-        <div className="flex flex-wrap items-center gap-2 px-3 py-2 t-label text-gray-600 dark:text-gray-300 bg-gray-50 dark:bg-white/[0.04] border-b border-gray-200 dark:border-white/10" data-testid="html-preview-network-ask">
-          <span className="flex-1 min-w-[12rem]">
+        <div className="flex flex-wrap items-center gap-2 px-3 py-2 t-control whitespace-normal text-gray-600 dark:text-gray-300 bg-gray-50 dark:bg-white/[0.04] border-b border-gray-200 dark:border-white/10" data-testid="html-preview-network-ask">
+          <span className="flex-1 min-w-[12rem] break-words">
             Let this page load from the internet? It can then fetch scripts and pictures over https and send what it contains to any website. Your computer, LU and local servers stay closed to it.
           </span>
           <button className="px-2 py-0.5 rounded-md border border-gray-300 dark:border-white/15 hover:bg-gray-100 dark:hover:bg-white/10" onClick={() => { setAllowNetwork(true); setAskingNetwork(false) }}>
@@ -85,9 +85,9 @@ export function HtmlPreviewPanel({ code, language, variant, onClose, onExpand }:
             reloadKey={reloadKey}
           />
         ) : state.status === 'error' ? (
-          <p className="t-label text-red-500">The preview could not start: {state.message}</p>
+          <p className="t-control text-red-500">The preview could not start: {state.message}</p>
         ) : (
-          <p className="t-label text-gray-400">Starting preview…</p>
+          <p className="t-control text-gray-400">Starting preview…</p>
         )}
       </div>
     </div>
