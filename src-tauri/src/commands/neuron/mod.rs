@@ -522,6 +522,18 @@ pub(crate) fn ask(port: u16, question: &str, seed: u64, max_tokens: u32) -> Resu
     Ok(answer_text(&v))
 }
 
+/// What one check answer means for calibration: `Some(text)` to judge,
+/// `None` when the server could not even return the answer (HTTP 5xx on a
+/// garbled output), which is a broken answer. A server that did not answer at
+/// all stays an error.
+pub(crate) fn check_outcome(answer: Result<String, String>) -> Result<Option<String>, String> {
+    match answer {
+        Ok(text) => Ok(Some(text)),
+        Err(e) if e.starts_with("The model answered with HTTP 5") => Ok(None),
+        Err(e) => Err(e),
+    }
+}
+
 /// The measured full strength of `cv` (calib.rs), probing a private engine
 /// per scale. `both_signs`: a slider goes both ways, a feature only up.
 fn calibrate(app: &tauri::AppHandle, model_path: &str, facts: &model::ModelFacts, cv: &cvec::ControlVector, start: f32, both_signs: bool, work: &Path) -> Result<f32, String> {
@@ -541,9 +553,11 @@ fn calibrate(app: &tauri::AppHandle, model_path: &str, facts: &model::ModelFacts
             let answer = ask(port, PROBE_QUESTION, 42, 60);
             let _ = child.kill();
             let _ = child.wait();
-            let answer = answer?;
-            let ok = calib::coherent(&answer);
-            log(format!("  {:+.3}: {} — {}", scale * sign, if ok { "reads well" } else { "breaks" }, answer.chars().take(90).collect::<String>().replace('\n', " ")));
+            let (ok, shown) = match check_outcome(answer)? {
+                Some(answer) => (calib::coherent(&answer), answer.chars().take(90).collect::<String>().replace('\n', " ")),
+                None => (false, "(the engine could not return this answer)".to_string()),
+            };
+            log(format!("  {:+.3}: {} — {}", scale * sign, if ok { "reads well" } else { "breaks" }, shown));
             tries += 1;
             step(tries.min(11));
             if !ok {
@@ -978,6 +992,20 @@ mod tests {
         assert_eq!(super::answer_text(&thinking), "The sky is blue because of Rayleigh scattering.");
         let plain = serde_json::json!({ "choices": [{ "message": { "content": "Blue.", "reasoning_content": "hm" } }] });
         assert_eq!(super::answer_text(&plain), "Blue.");
+    }
+
+    /// P11 FEHLER 10, third step (Mac, David's model): at +4.0 the answer
+    /// was so garbled that llama-server could not parse it and said HTTP 500
+    /// ("does not match the expected peg-native format"). That is a broken
+    /// answer, not a broken job: up to ±2.0 everything had read well.
+    #[test]
+    fn a_server_error_on_a_check_counts_as_broken() {
+        let garbled = super::check_outcome(Err("The model answered with HTTP 500 Internal Server Error.".into()));
+        assert_eq!(garbled, Ok(None));
+        let fine = super::check_outcome(Ok("Rain is amazing!".into()));
+        assert_eq!(fine, Ok(Some("Rain is amazing!".to_string())));
+        // A server that never answered is still a failure of the job.
+        assert!(super::check_outcome(Err("The model did not answer: connection refused".into())).is_err());
     }
 
     /// P11 FEHLER 10: a model the patched generator cannot read is named as
