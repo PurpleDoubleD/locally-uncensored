@@ -21,6 +21,7 @@ import { bundleGetPlan } from '../../lib/bundle-state'
 import { ICON_SM } from '../ui/icon-size'
 import { downloadSizeGB, gbOf } from '../../lib/image-part'
 import { CloudOfferLine } from '../cloud/CloudOffer'
+import { DescriptionDetails } from './DescriptionDetails'
 import type { CloudOfferTask } from '../../lib/cloud-offer'
 
 // ─── Hardware fit ───────────────────────────────────────────────────
@@ -801,6 +802,9 @@ export function BundleTile(props: BundleTileProps) {
           )}
           {bundleOffersCloud(fit, props) && <CloudOfferLine task={props.cloudTask!} sharedMemory={props.sharedMemory} />}
         </div>
+        {bundle.description && (
+          <DescriptionDetails name={bundle.name} description={bundle.description} className="lu-control lu-control--icon -mt-1" />
+        )}
         {bundle.url && (
           <button
             onClick={() => onOpenUrl(bundle.url!)}

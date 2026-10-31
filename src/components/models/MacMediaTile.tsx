@@ -13,6 +13,7 @@ import { splitTileNotes } from './macTileNotes'
 import { fitsMacMemory, memoryNeedGb } from '../../lib/mac-memory-fit'
 import { macGetBytes } from '../../lib/mac-setup-sizes'
 import { CloudOfferLine } from '../cloud/CloudOffer'
+import { DescriptionDetails } from './DescriptionDetails'
 import type { CloudOfferTask } from '../../lib/cloud-offer'
 
 // ─── Mac media tile ─────────────────────────────────────────────────
@@ -119,6 +120,9 @@ export function MacMediaTile({ model, memoryGb, state, onGet, onCancel, onRemove
             </p>
           )}
         </div>
+        {model.description && (
+          <DescriptionDetails name={model.name} description={model.description} className="lu-control lu-control--icon -mt-1" />
+        )}
         <button
           onClick={() => onOpenUrl(`https://huggingface.co/${model.repo}`)}
           className="lu-control lu-control--icon -mr-1.5 -mt-1"
