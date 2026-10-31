@@ -4,6 +4,7 @@
 // (lib/frame-refs). An image kept from an earlier model stays on screen,
 // marked "not sent", the way the Edit references do.
 import { useRef, useState } from 'react'
+import { useIsPresent } from 'framer-motion'
 import { ImagePlus, Loader2, X } from 'lucide-react'
 import { useCreateStore } from '../../../stores/createStore'
 import { classifyModel } from '../../../api/comfyui'
@@ -164,6 +165,10 @@ export function ImageReferenceStrip() {
   const inputRef = useRef<HTMLInputElement>(null)
   const [loading, setLoading] = useState(false)
   const [open, setOpen] = useState(false)
+  // While the Image tab fades out (Stage's AnimatePresence) its file input
+  // must not be the first one on the page: a file meant for the next tab's
+  // drop zone landed here (I1, FEHLER-Q2 #1, e2e mac-persona-walk).
+  const present = useIsPresent()
 
   const takeFiles = async (files: File[]) => {
     let room = slots - refs.length
@@ -183,6 +188,7 @@ export function ImageReferenceStrip() {
     }
   }
 
+  if (!present) return null
   if (slots === 0 && refs.length === 0) {
     // One quiet line, opened on demand: the empty Image tab is not crowded
     // with a sentence about a feature most of its models do not have.
