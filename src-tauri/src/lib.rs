@@ -1460,10 +1460,10 @@ pub fn run() {
                             tauri::tray::TrayIconEvent::DoubleClick { .. } => {
                                 onboarding_window::bring_to_front(tray.app_handle());
                             }
-                            // Fresh lines for the menu that is about to open
-                            // (or already is: they change in place). Enter
-                            // comes first on a Mac and Windows, so most of the
-                            // time the menu opens with them already there.
+                            // Fresh lines for the menu that is about to open.
+                            // Enter (the pointer reaching the icon) comes
+                            // before the click; an open Mac menu does not
+                            // change any more (tray_menu.rs).
                             tauri::tray::TrayIconEvent::Click { .. } | tauri::tray::TrayIconEvent::Enter { .. } => {
                                 let _ = tray.app_handle().emit(tray_menu::OPENED_EVENT, ());
                             }

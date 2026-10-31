@@ -14,14 +14,17 @@
 // engine and the model, so it sends the lines (`tray_update`); this side
 // only checks and lays them out. The action is one of two fixed actions with
 // labels from here, so a page can change what the menu says but never what
-// a click does. A click on the icon emits `lu-tray-opened`, and the frontend
-// answers with fresh lines; texts change in place, so a menu that is
-// already open on a Mac updates while it is open.
+// a click does. Hovering or clicking the icon emits `lu-tray-opened`, and
+// the frontend answers with fresh lines; it also refreshes on its own timer.
 //
-// Only a different number of grey lines builds a new menu, and a new menu
-// closes one that is open (seen in the Mac test build, 31.10.). So the action
-// is one item whose label changes, and the page keeps the line count steady
-// (three lines in every state once the memory figure is in).
+// An open menu does NOT change on a Mac (test build, 31.10.): while it is
+// open, AppKit's menu loop holds the main thread, and the update lands when
+// the menu has closed. So the lines have to be fresh before the click, which
+// is what the hover and the timer are for.
+//
+// Texts, dots and the action's label change in place; only a different
+// number of grey lines builds a new menu. The page keeps that number at
+// three, so the menu is built once and then only relabelled.
 
 use serde::Deserialize;
 
@@ -62,7 +65,9 @@ pub(crate) enum TrayAction {
 impl TrayAction {
     pub(crate) fn label(self) -> &'static str {
         match self {
-            TrayAction::Plan => "Plan & Credits…",
+            // `&&`: a single `&` marks a keyboard mnemonic in a native menu
+            // and disappears ("Plan  Credits…" in the first Mac build).
+            TrayAction::Plan => "Plan && Credits…",
             TrayAction::Models => "Models…",
         }
     }
@@ -91,17 +96,21 @@ pub(crate) struct TrayStatus {
 }
 
 /// One line as the menu shows it: no control characters (a newline would
-/// break a native menu item), no padding, cut to `MAX_LINE_CHARS`.
+/// break a native menu item), no padding, cut to `MAX_LINE_CHARS`, and every
+/// `&` doubled, because a single one is a mnemonic marker to the native menu
+/// and would vanish from a model name like "R&D-7B".
 pub(crate) fn clean_line(text: &str) -> String {
     let flat: String = text.chars().map(|c| if c.is_control() { ' ' } else { c }).collect();
     let flat = flat.split_whitespace().collect::<Vec<_>>().join(" ");
-    if flat.chars().count() <= MAX_LINE_CHARS {
-        return flat;
-    }
-    let mut cut: String = flat.chars().take(MAX_LINE_CHARS - 1).collect();
-    cut.truncate(cut.trim_end().len());
-    cut.push('…');
-    cut
+    let cut = if flat.chars().count() <= MAX_LINE_CHARS {
+        flat
+    } else {
+        let mut cut: String = flat.chars().take(MAX_LINE_CHARS - 1).collect();
+        cut.truncate(cut.trim_end().len());
+        cut.push('…');
+        cut
+    };
+    cut.replace('&', "&&")
 }
 
 /// What the frontend sent, made safe to show: empty lines dropped, at most
@@ -405,6 +414,11 @@ mod tests {
     }
 
     #[test]
+    fn an_ampersand_survives_the_native_menu() {
+        assert_eq!(clean_line("R&D-7B · ready"), "R&&D-7B · ready");
+    }
+
+    #[test]
     fn a_long_model_name_is_cut_with_an_ellipsis() {
         let long = "Llama-3.3-70B-Instruct-abliterated-Q4_K_M-imatrix-final.gguf · ready";
         let cut = clean_line(long);
@@ -419,7 +433,7 @@ mod tests {
         assert!(serde_json::from_str::<TrayStatus>(r#"{"action":"delete-everything"}"#).is_err());
         let s: TrayStatus = serde_json::from_str(r#"{"lines":[{"text":"x","dot":"green"}],"action":"models"}"#).unwrap();
         assert_eq!(s.action, Some(TrayAction::Models));
-        assert_eq!(TrayAction::Plan.label(), "Plan & Credits…");
+        assert_eq!(TrayAction::Plan.label(), "Plan && Credits…", "a single & would vanish");
         assert_eq!(TrayAction::Models.event_name(), "models");
     }
 

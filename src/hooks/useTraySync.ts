@@ -1,9 +1,10 @@
 // Keeps the tray menu's grey lines current (T2, 3.0.9; lines: lib/tray-menu).
 //
 // Sent on every change of mode, account or selected model, and again when the
-// tray icon is clicked or hovered (`lu-tray-opened`): then the engine, Ollama
-// and the memory are asked fresh, and the account at most once a minute. A
-// menu that is already open on a Mac takes the new texts in place.
+// tray icon is hovered or clicked (`lu-tray-opened`) and every 15 seconds:
+// then the engine, Ollama and the memory are asked fresh, and the account at
+// most once a minute. The lines must be fresh BEFORE the click: an open menu
+// on a Mac does not change (tray_menu.rs).
 // `lu-tray-action` is the click on "Plan & Credits…" or "Models…"; the window
 // is already in front by then (tray_menu.rs).
 
@@ -36,6 +37,9 @@ const ACTION_EVENT = 'lu-tray-action'
 /** Hovering the icon on the way to somewhere else must not hammer anything. */
 const LOCAL_REFRESH_MS = 3_000
 const ACCOUNT_REFRESH_MS = 60_000
+/** The timer that keeps the local lines fresh without a hover. Asks the
+ *  engine status, Ollama's /api/ps and the memory: all local and cheap. */
+const BACKGROUND_REFRESH_MS = 15_000
 
 type Memory = TrayLocalInput['memory']
 interface LocalProbe {
@@ -161,6 +165,10 @@ export function useTraySync(): void {
       if (s.activeModel !== prev.activeModel) void refresh()
     }))
     void refresh().then(sync)
+    const timer = setInterval(() => {
+      if (useSettingsStore.getState().settings.appMode !== 'cloud') void refresh()
+    }, BACKGROUND_REFRESH_MS)
+    offs.push(() => clearInterval(timer))
     void import('@tauri-apps/api/event').then(async ({ listen }) => {
       const offOpened = await listen(OPENED_EVENT, () => { void refresh() })
       const offAction = await listen(ACTION_EVENT, (e) => openTrayAction(e.payload))

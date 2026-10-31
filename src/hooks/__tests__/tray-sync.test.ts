@@ -28,7 +28,11 @@ vi.mock('../../api/ollama', async (orig) => ({
   }),
 }))
 
-import { currentTrayStatus, openTrayAction, probeModelState, trayEngineName } from '../useTraySync'
+vi.mock('../../api/in-tauri', () => ({ isTauri: () => true }))
+vi.mock('@tauri-apps/api/event', () => ({ listen: vi.fn(async () => () => {}) }))
+
+import { renderHook } from '@testing-library/react'
+import { currentTrayStatus, openTrayAction, probeModelState, trayEngineName, useTraySync } from '../useTraySync'
 import { useCloudAuthStore } from '../../stores/cloudAuthStore'
 import { useModelStore } from '../../stores/modelStore'
 import { useSettingsStore } from '../../stores/settingsStore'
@@ -125,5 +129,23 @@ describe('tray sync (T2)', () => {
     useUIStore.getState().setView('chat')
     openTrayAction('delete')
     expect(useUIStore.getState().currentView).toBe('chat')
+  })
+
+  it('local lines are measured again every 15 s, so a click finds them fresh', async () => {
+    vi.useFakeTimers()
+    try {
+      const { unmount } = renderHook(() => useTraySync())
+      await vi.advanceTimersByTimeAsync(1_000)
+      const before = calls.filter((c) => c.cmd === 'tray_memory').length
+      await vi.advanceTimersByTimeAsync(15_000)
+      expect(calls.filter((c) => c.cmd === 'tray_memory').length).toBeGreaterThan(before)
+      // and nothing more once the app is gone
+      unmount()
+      const after = calls.length
+      await vi.advanceTimersByTimeAsync(60_000)
+      expect(calls.length).toBe(after)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })
