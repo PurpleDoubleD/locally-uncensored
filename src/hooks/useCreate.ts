@@ -2183,8 +2183,8 @@ export function useCreate() {
       // customer blames his settings for a hardware switch.
       void cpuRenderFacts()
 
-      // A finished history entry's files into the gallery. The heartbeat
-      // uses it, and so does the late look after a stall verdict.
+      // A finished history entry's files into the gallery, for the late look
+      // after a stall verdict. Same fields as the heartbeat's collection below.
       const galleryFromOutputs = (outputs: ComfyHistoryEntry['outputs']): boolean => {
         let found = false
         for (const nodeId of Object.keys(outputs ?? {})) {
@@ -2310,7 +2310,28 @@ export function useCreate() {
                   ? ((endMsg[1].timestamp - startMsg[1].timestamp) / 1000).toFixed(1) : null
                 setProgress(100, 'Complete!')
                 useCreateStore.getState().setLastGenTime(comfyTime ? `${comfyTime}s` : null)
-                if (!galleryFromOutputs(history.outputs)) setError('Generation completed but no output was produced.')
+                const outputs = history.outputs ?? {}
+                let found = false
+                for (const nodeId of Object.keys(outputs)) {
+                  // Extract files from ANY keyed array, not just images/gifs/
+                  // videos — custom save nodes post under other keys (audio,
+                  // result, files, …); previously those outputs were dropped
+                  // even though they existed on disk.
+                  const files: ComfyUIOutput[] = extractComfyOutputFiles(outputs[nodeId])
+                  for (const file of files) {
+                    found = true
+                    addToGallery({
+                      id: uuid(), type: galleryTypeForFile(file.filename, mode),
+                      filename: file.filename, subfolder: file.subfolder ?? '', comfyType: file.type ?? 'output',
+                      prompt, ...improveFields, ...transparentFields(), negativePrompt, model: activeModel,
+                      modelType: mode === 'image' ? imageModelType : (videoModelsList.find(m => m.name === activeModel)?.type ?? 'wan'),
+                      seed: runSeed,
+                      steps, cfgScale, sampler, scheduler, width: outputWidth, height: outputHeight, batchSize,
+                      createdAt: Date.now(), builderUsed, intent, ...toolFields, ...(skippedNote ? { runNote: skippedNote } : {}),
+                    })
+                  }
+                }
+                if (!found) setError('Generation completed but no output was produced.')
                 resolve()
               } else if (statusStr === 'error') {
                 completionHandled = true
