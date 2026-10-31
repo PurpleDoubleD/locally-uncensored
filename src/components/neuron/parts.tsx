@@ -124,6 +124,22 @@ export function SliderRow({ id, left, right, value, computed, disabled, tag, onC
   )
 }
 
+/** Before computing on a model that was changed before (P11 FEHLER 10,
+ *  David 31.10.2026). Calm, blocks nothing; the words are lib/neuron's. */
+export function TweakedNote({ title, text, original, onGetOriginal }: { title: string; text: string; original: string | null; onGetOriginal: () => void }) {
+  return (
+    <div className="mb-4 border-l-2 border-lu-accent/50 pl-3 py-0.5" role="note" data-testid="neuron-tweaked-note">
+      <p className="t-body font-medium text-gray-100">{title}</p>
+      <p className={`t-body ${HINWEIS_TEXT.ruhig}`}>{text}</p>
+      {original && (
+        <button type="button" className="lu-tonal mt-2" onClick={onGetOriginal} data-testid="neuron-get-original">
+          Get the original: {original}
+        </button>
+      )}
+    </div>
+  )
+}
+
 /** The ways to make a slider, as tabs. */
 export function WayTabs<T extends string>({ ways, current, onPick }: {
   ways: Array<{ id: T; label: string; count?: number }>
@@ -178,7 +194,7 @@ export function ScopeButton({ on, onClick, children }: { on: boolean; onClick: (
   )
 }
 
-export function JobPanel({ job, onStop, onDismiss }: { job: NeuronJob; onStop: () => void; onDismiss: () => void }) {
+export function JobPanel({ job, onStop, onDismiss, onGetOriginal, original }: { job: NeuronJob; onStop: () => void; onDismiss: () => void; onGetOriginal?: () => void; original?: string | null }) {
   const share = jobShare(job)
   if (job.status === 'running') {
     return (
@@ -201,7 +217,16 @@ export function JobPanel({ job, onStop, onDismiss }: { job: NeuronJob; onStop: (
   return (
     <div className="mb-4" data-testid="neuron-job-ended">
       {job.status === 'done' && <Hinweis onDismiss={onDismiss}>{job.title}: done{job.elapsedSecs ? ` in ${job.elapsedSecs} s` : ''}.{strength ? ` ${strength}.` : ''}</Hinweis>}
-      {job.status === 'failed' && <Hinweis ton="fehler" onDismiss={onDismiss}>{job.title} failed: {job.error}</Hinweis>}
+      {job.status === 'failed' && (
+        <>
+          <Hinweis ton="fehler" onDismiss={onDismiss}>{job.title} failed: {job.error}</Hinweis>
+          {onGetOriginal && original && (
+            <button type="button" className="lu-tonal mt-2" onClick={onGetOriginal} data-testid="neuron-get-original-failed">
+              Get the original: {original}
+            </button>
+          )}
+        </>
+      )}
       {job.status === 'cancelled' && <Hinweis onDismiss={onDismiss}>{job.title}: stopped.</Hinweis>}
     </div>
   )

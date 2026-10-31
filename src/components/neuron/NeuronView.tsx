@@ -17,7 +17,7 @@ import { preservedSwapCtx } from '../../lib/builtin-ctx'
 import { builtinModelMatches } from '../../lib/builtin-model-identity'
 import {
   backendNote, effectiveStrengths, entriesFor, hasPersonaProfile,
-  clampStrength, steeringPersona, strengthWarning, warningText, type BackendKind, type Strengths,
+  clampStrength, steeringPersona, strengthWarning, tweakedModelNote, warningText, type BackendKind, type Strengths,
 } from '../../lib/neuron'
 import { featureVectorId, neuronVectorId, recipeOwnId, type Recipe, type RecipeEntry } from '../../lib/neuron-recipe'
 import { editingKey, useNeuronStore } from '../../stores/neuronStore'
@@ -26,7 +26,7 @@ import { useChatStore } from '../../stores/chatStore'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { useUIStore } from '../../stores/uiStore'
 import type { BuiltinEngineTuning } from '../../types/settings'
-import { JobPanel, ScopeButton, SliderRow, StepCard, WayIntro, WayTabs, signedValue } from './parts'
+import { JobPanel, ScopeButton, SliderRow, StepCard, TweakedNote, WayIntro, WayTabs, signedValue } from './parts'
 import { ComparePanel, CoordinatesPanel, FeaturePanel, OwnSliderForm, SharePanel, entryState, type NeuronInfoPlus } from './panels'
 import { NeuronIntroHost } from './NeuronIntro'
 import { useNeuronIntroRequest } from '../../stores/neuronIntroStore'
@@ -315,6 +315,16 @@ export function NeuronView() {
 
   const showIntro = useNeuronIntroRequest((s) => s.show)
 
+  // A model changed before (fine-tune, merge, heretic …): say so before
+  // computing, and offer its original in Discover (David, 31.10.2026).
+  const tweak = info ? tweakedModelNote(info.facts) : null
+  const original = info?.facts.original ?? null
+  const getOriginal = () => {
+    if (!original) return
+    useModelStore.getState().setCategoryFilter('text')
+    useUIStore.getState().openDiscoverFor('builtin', original)
+  }
+
   if (modelsLoaded && models.length === 0) {
     return (
       <>
@@ -390,7 +400,8 @@ export function NeuronView() {
         testId="neuron-step-sliders"
       >
         {error && <Hinweis ton="fehler" className="mb-3" onDismiss={() => setError(null)}>{error}</Hinweis>}
-        {job && job.status !== 'idle' && <JobPanel job={job} onStop={() => { setQueue([]); void neuronCancel().then(poll) }} onDismiss={() => void neuronDismiss().then(poll)} />}
+        {tweak && <TweakedNote title={tweak.title} text={tweak.text} original={tweak.original} onGetOriginal={getOriginal} />}
+        {job && job.status !== 'idle' && <JobPanel job={job} onStop={() => { setQueue([]); void neuronCancel().then(poll) }} onDismiss={() => void neuronDismiss().then(poll)} onGetOriginal={getOriginal} original={original} />}
         {queue.length > 0 && <p className={`t-micro ${HINWEIS_TEXT.ruhig} mb-3`} data-testid="neuron-queue">{queue.length} more to prepare from the recipe, one after the other.</p>}
         {info && !info.generator && (
           <Hinweis className="mb-3">This install is missing its vector tool, so ready-made and own sliders cannot be computed. Reinstall LU to bring it back. Feature sliders still work where the model has one.</Hinweis>

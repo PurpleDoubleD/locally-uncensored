@@ -19,7 +19,8 @@ const apply = vi.fn(async (_path: string, _entries: unknown[], _tuning?: unknown
 const buildPreset = vi.fn(async (_path: string, _id: string) => ({ started: true }))
 const buildOwn = vi.fn(async (..._a: unknown[]) => ({ started: true }))
 const vectors: Array<Record<string, unknown>> = []
-const job = vi.hoisted(() => ({ status: 'idle' }))
+const job = vi.hoisted(() => ({ status: 'idle', error: null as string | null }))
+const facts = vi.hoisted(() => ({ tweaked: [] as string[], original: null as string | null }))
 
 vi.mock('../../../api/neuron', () => ({
   neuronPresets: async () => [
@@ -28,10 +29,10 @@ vi.mock('../../../api/neuron', () => ({
     { id: 'cheerful', left: 'Serious', right: 'Cheerful' },
   ],
   neuronInfo: async () => ({
-    facts: { arch: 'qwen2', nLayer: 24, nEmbd: 896, template: 'chatMl', name: 'Qwen2.5 0.5B Instruct' },
+    facts: { arch: 'qwen2', nLayer: 24, nEmbd: 896, template: 'chatMl', name: 'Qwen2.5 0.5B Instruct', tweaked: [...facts.tweaked], original: facts.original },
     modelKey: 'qwen-1', generator: true, band: [3, 20], vectors: [...vectors], sae: null, activeMix: null,
   }),
-  neuronStatus: async () => ({ status: job.status, kind: '', title: 'Computing', modelPath: '/models/qwen.gguf', phaseLabel: '', step: 0, total: 0, bytesDone: 0, bytesTotal: 0, rateBps: 0, etaSecs: null, elapsedSecs: 0, resultId: null, error: null, logs: [] }),
+  neuronStatus: async () => ({ status: job.status, kind: '', title: 'Computing', modelPath: '/models/qwen.gguf', phaseLabel: '', step: 0, total: 0, bytesDone: 0, bytesTotal: 0, rateBps: 0, etaSecs: null, elapsedSecs: 0, resultId: null, error: job.error, logs: [] }),
   neuronApply: (p: string, e: unknown[], t?: unknown) => apply(p, e, t),
   neuronBuildPreset: (p: string, id: string) => buildPreset(p, id),
   neuronBuildOwn: (...a: unknown[]) => buildOwn(...a),
@@ -49,6 +50,7 @@ vi.mock('../../../api/builtin-ensure', () => ({ isManagedBuiltinSlot: () => true
 
 import { NeuronView } from '../NeuronView'
 import { useModelStore } from '../../../stores/modelStore'
+import { useUIStore } from '../../../stores/uiStore'
 import { useNeuronStore } from '../../../stores/neuronStore'
 import { useNeuronIntroRequest } from '../../../stores/neuronIntroStore'
 import { buildCommands } from '../../ui/command-actions'
@@ -62,6 +64,9 @@ beforeEach(() => {
   buildOwn.mockClear()
   vectors.length = 0
   job.status = 'idle'
+  job.error = null
+  facts.tweaked = []
+  facts.original = null
   useNeuronStore.setState({ profiles: {}, scopeByModel: {}, introSeen: true })
   useNeuronIntroRequest.setState({ open: false })
   useModelStore.setState({ activeModel: 'openai::qwen2.5-0.5b-instruct-q8_0' })
@@ -200,10 +205,25 @@ describe('coordinates', () => {
     fireEvent.click(await screen.findByTestId('neuron-way-coords'))
     fireEvent.change(await screen.findByTestId('neuron-coords-input'), { target: { value: 'Qwen3.5-4B: L13N7956-1.0 L14N8949+1.0' } })
     expect(screen.getByTestId('neuron-coords-other-model').textContent).toMatch(/one exact model/)
-    expect(screen.getAllByTestId('neuron-coords-line')[0].textContent).toMatch(/not in this build yet/)
-    expect((screen.getByTestId('neuron-coords-use') as HTMLButtonElement).disabled).toBe(true)
+    expect(screen.getAllByTestId('neuron-coords-line')[0].textContent).toMatch(/arrive with the next LU Engine update.*Next update$/)
     // Nothing the box could unlock, so no box.
     expect(screen.queryByTestId('neuron-coords-anyway')).toBeNull()
+    // Zentrale 31.10.: never silent. Use says plainly why nothing changed.
+    const before = JSON.stringify(useNeuronStore.getState().profiles)
+    fireEvent.click(screen.getByTestId('neuron-coords-use'))
+    expect(screen.getByTestId('neuron-coords-later').textContent).toBe('2 single neurons were not applied. Single neurons arrive with the next LU Engine update. LU already reads, checks and shares these lines.')
+    expect(JSON.stringify(useNeuronStore.getState().profiles)).toBe(before)
+  })
+
+  it('applies the rest of a mixed recipe and names the neuron it left out', async () => {
+    vectors.push(CHEERFUL)
+    render(createElement(NeuronView))
+    await screen.findByTestId('neuron-slider-cheerful')
+    fireEvent.click(screen.getByTestId('neuron-way-coords'))
+    fireEvent.change(await screen.findByTestId('neuron-coords-input'), { target: { value: '@cheerful+0.4 L14N8949+1.0' } })
+    fireEvent.click(screen.getByTestId('neuron-coords-use'))
+    expect(useNeuronStore.getState().profiles['qwen-1']).toEqual({ cheerful: 0.4 })
+    expect(screen.getByTestId('neuron-coords-later').textContent).toMatch(/^One single neuron was not applied\./)
   })
 })
 
@@ -219,5 +239,44 @@ describe('sharing', () => {
     fireEvent.click(screen.getByTestId('neuron-share-copy'))
     await waitFor(() => expect(writeText).toHaveBeenCalled())
     expect(writeText.mock.calls[0][0]).toBe('LU neurons · Qwen2.5 0.5B Instruct · @cheerful+0.60\nlocallyuncensored://neuron?v=1&model=Qwen2.5+0.5B+Instruct&c=%40cheerful%2B0.60')
+  })
+})
+
+// P11 FEHLER 10, David 31.10.2026: a model changed before computes worse or
+// not at all. Say so before computing, and after a failure, with the way to
+// its original.
+describe('tweaked models', () => {
+  it('says before computing that originals work best, and finds the original in Discover', async () => {
+    facts.tweaked = ['fine-tune', 'merge', 'heretic', 'uncensored']
+    facts.original = 'Qwen3.5 9B'
+    useUIStore.setState({ currentView: 'neuron', discoverTarget: null, discoverQuery: null })
+    render(createElement(NeuronView))
+    const note = await screen.findByTestId('neuron-tweaked-note')
+    expect(note.textContent).toMatch(/^Works best with original, untweaked models/)
+    expect(note.textContent).toMatch(/fine-tune, merge, heretic, uncensored/)
+    // Above the ways and their compute buttons, blocking nothing.
+    expect(note.compareDocumentPosition(screen.getByTestId('neuron-way-ready')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect((screen.getByTestId('neuron-compute-creative') as HTMLButtonElement).disabled).toBe(false)
+    fireEvent.click(screen.getByTestId('neuron-get-original'))
+    const ui = useUIStore.getState()
+    expect([ui.currentView, ui.discoverTarget, ui.discoverQuery]).toEqual(['models', 'builtin', 'Qwen3.5 9B'])
+    expect(useModelStore.getState().categoryFilter).toBe('text')
+  })
+
+  it('stays quiet on an original model', async () => {
+    render(createElement(NeuronView))
+    await screen.findByTestId('neuron-compute-creative')
+    expect(screen.queryByTestId('neuron-tweaked-note')).toBeNull()
+  })
+
+  it('puts the way to the original next to a failure', async () => {
+    facts.tweaked = ['heretic']
+    facts.original = 'Qwen3.5 9B'
+    job.status = 'failed'
+    job.error = 'The vector tool cannot read this model. The Neuron tweaker works best with original, untweaked models: try the original of this model.'
+    render(createElement(NeuronView))
+    const ended = await screen.findByTestId('neuron-job-ended')
+    expect(ended.textContent).toMatch(/try the original of this model/)
+    expect((await within(ended).findByTestId('neuron-get-original-failed')).textContent).toBe('Get the original: Qwen3.5 9B')
   })
 })
