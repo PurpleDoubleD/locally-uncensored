@@ -568,3 +568,31 @@ cmake() {
     expect(existsSync(join(r.repoRoot, 'src-tauri', 'bin', 'lu-llama-cvector-generator-aarch64-apple-darwin'))).toBe(true)
   })
 })
+
+describe('build-llama.sh --check: a failed boot leaves no server behind (E1)', { timeout: 30_000 }, () => {
+  it('kills the server itself, not only the subshell that started it', () => {
+    if (process.platform === 'win32') return
+    const root = mkdtempSync(join(tmpdir(), 'bl-check-'))
+    try {
+      const triple = runScript('host_triple').out
+      const bin = join(root, 'src-tauri', 'bin')
+      execFileSync('mkdir', ['-p', bin])
+      const pidFile = join(root, 'server.pid')
+      // A server that never answers /health: it only records its PID and waits.
+      const fake = join(bin, `lu-llama-server-${triple}`)
+      writeFileSync(fake, `#!/bin/sh\n[ "$1" = "--version" ] && exit 0\necho $$ > '${pidFile}'\nexec sleep 30\n`, { mode: 0o755 })
+      const r = runScript('check_binary', { BUILD_LLAMA_REPO_ROOT: root, BUILD_LLAMA_CHECK_TRIES: '3' })
+      expect(r.code).not.toBe(0)
+      expect(r.out).toMatch(/health endpoint never came up/)
+      const pid = Number(readFileSync(pidFile, 'utf8').trim())
+      let alive = true
+      for (let i = 0; i < 20 && alive; i++) {
+        try { process.kill(pid, 0); execFileSync('sleep', ['0.1']) } catch { alive = false }
+      }
+      if (alive) process.kill(pid, 'SIGKILL')
+      expect(alive).toBe(false)
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+})

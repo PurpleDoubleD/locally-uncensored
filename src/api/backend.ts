@@ -642,6 +642,7 @@ export async function backendCall<T = unknown>(
     computer_surface: { path: "/local-api/computer-surface", method: "POST" },
     computer_surface_corner: { path: "/local-api/computer-surface-corner", method: "POST" },
     transcribe: { path: "/local-api/transcribe", method: "POST" },
+    transcribe_external: { path: "/local-api/transcribe-external", method: "POST" },
     execute_code: { path: "/local-api/execute-code", method: "POST" },
     // file_read / file_write: ABSICHTLICH NICHT HIER. Die beiden Dev-Endpunkte
     // sind entfernt (siehe vite.config.ts), weil sie keinen Aufrufer mehr

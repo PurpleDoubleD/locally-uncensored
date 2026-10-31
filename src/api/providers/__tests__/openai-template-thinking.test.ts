@@ -124,8 +124,15 @@ describe('the built-in engine is told to think', () => {
     expect(sent[0].body.chat_template_kwargs).toEqual({ enable_thinking: true })
   })
 
-  it('reasoning_effort still rides along, so a template-less local server keeps working', async () => {
+  it('E1 (b11960): beside the template switch the engine gets no top-level reasoning_effort, it would land in the template', async () => {
     const p = await makeProvider(BUILTIN)
+    await drain(p.chatStream('kw-both', [{ role: 'user', content: 'hi' }], { thinking: true }))
+    expect(sent[0].body.chat_template_kwargs).toEqual({ enable_thinking: true })
+    expect('reasoning_effort' in sent[0].body).toBe(false)
+  })
+
+  it('a self-hosted local server still gets reasoning_effort beside the switch', async () => {
+    const p = await makeProvider({ ...BUILTIN, managed: undefined, baseUrl: 'http://127.0.0.1:8080/v1' })
     await drain(p.chatStream('kw-both', [{ role: 'user', content: 'hi' }], { thinking: true }))
     expect(sent[0].body.reasoning_effort).toBe('high')
   })

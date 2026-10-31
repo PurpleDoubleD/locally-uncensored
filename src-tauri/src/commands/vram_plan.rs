@@ -10,10 +10,15 @@
 //! the card where about 27 fit. At 8K it went the other way: 4.1 GiB real
 //! against 1.9 priced, so too many layers and the risk of running out.
 //!
-//! WHAT. Everything here follows the pinned llama.cpp (b9949,
-//! scripts/build-llama.sh) line by line, and the tests check it against that
-//! llama.cpp's own numbers (`llama-fit-params --fit-print` and the buffer
+//! WHAT. Everything here follows llama.cpp b9949 line by line, and the tests
+//! check it against that llama.cpp's own numbers (`llama-fit-params --fit-print` and the buffer
 //! sizes `llama-server -lv 4` reports) for real model heads:
+//!
+//!   E1 (3.0.9) moved the pin to b11960 without new oracle files. Measured
+//!   there with the same argv (Qwen3.5-9B Q4_K_M, Metal, 8K): weights and
+//!   KV/RS buffers identical, compute buffers +16 MiB on the card and +16 MiB
+//!   on the processor (120.02/40.02 against 104.39/24.02). The after-start
+//!   check reads the real numbers, so that gap is caught there.
 //!
 //!   * weights: summed per layer from the tensor table (llama-model.cpp,
 //!     `load_tensors`). `-ngl N` puts the OUTPUT layer on the card first and

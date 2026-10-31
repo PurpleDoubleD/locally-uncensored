@@ -18,7 +18,9 @@
  * der HF-Dateiliste), erscheinen aber erst, wenn `ENGINE_OPENS_GATED_ARCHS`
  * die Architektur nennt. Das ist der Schalter, und er gehoert erst umgelegt,
  * wenn LLAMA_TAG/LLAMA_COMMIT gehoben UND ein echter Ladelauf gemacht ist.
- * __tests__/kimi-k3-catalog.test.ts haelt ihn fest, solange b9949 gepinnt ist,
+ * E1 (3.0.9, Pin b11960): b11960 fuehrt `kimi-k3` in src/llama-arch.cpp,
+ * geladen hat es noch niemand, also bleibt das Tor zu.
+ * __tests__/kimi-k3-catalog.test.ts haelt ihn fest, solange kein Ladelauf da ist,
  * und der Architektur-Waechter (katalog-architektur.live.test.ts) liest die
  * Kopfbytes, sobald die K3-Eintraege in getMainstreamTextModels stehen.
  *
@@ -58,7 +60,7 @@ import { log } from '../lib/logger'
 
 /**
  * Architekturen aus den Kimi-K3-Familien, die die ausgelieferte Engine
- * oeffnet. Leer, solange LLAMA_TAG b9949 gepinnt ist (siehe Kopf).
+ * oeffnet. Leer bis zum echten Ladelauf (siehe Kopf).
  * Umlegen heisst: 'kimi-k3' eintragen, nachdem Tag gehoben und geladen ist.
  */
 export const ENGINE_OPENS_GATED_ARCHS: ReadonlySet<string> = new Set<string>([])

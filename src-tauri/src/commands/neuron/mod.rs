@@ -19,7 +19,7 @@
 //! The active sliders are mixed into one file (`cvec.rs`), whose name is a
 //! hash of its content, and the engine is restarted with it. llama-server
 //! cannot change control vectors while it runs (no endpoint for it in
-//! b9949), so "live" is a restart of a few seconds.
+//! b9949, none in b11960 either), so "live" is a restart of a few seconds.
 //!
 //! ── Files ──────────────────────────────────────────────────────────────────
 //!

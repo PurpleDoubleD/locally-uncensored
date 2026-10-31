@@ -59,6 +59,17 @@ interface VoiceState {
   externalTtsUrl: string;
   /** Voice name passed to the external engine (e.g. "af_bella" / "alloy"). */
   externalTtsVoice: string;
+  /** Model name for the external TTS engine; empty sends OpenAI's "tts-1".
+   *  Ollama needs its own name here, e.g. "lfm3-audio:2b" (N1). */
+  externalTtsModel: string;
+  /** Speech-to-text engine for dictation: the local faster-whisper, or an
+   *  OpenAI-compatible /v1/audio/transcriptions endpoint such as Ollama
+   *  serving LFM3 Audio (N1). */
+  sttMode: "whisper" | "external";
+  /** External STT endpoint, e.g. http://localhost:11434/v1/audio/transcriptions. */
+  externalSttUrl: string;
+  /** Model the external STT endpoint transcribes with, e.g. "lfm3-audio:2b". */
+  externalSttModel: string;
   /** MiniMax voice for the cloud TTS endpoint (appMode 'cloud'). */
   cloudTtsVoice: string;
   /** The microphone for dictation and Voice, empty for the system default. */
@@ -104,6 +115,10 @@ interface VoiceState {
       ttsMode: "piper" | "external";
       externalTtsUrl: string;
       externalTtsVoice: string;
+      externalTtsModel: string;
+      sttMode: "whisper" | "external";
+      externalSttUrl: string;
+      externalSttModel: string;
       cloudTtsVoice: string;
       micId: string;
       micLabel: string;
@@ -153,6 +168,10 @@ export const useVoiceStore = create<VoiceState>()(
       ttsMode: "piper",
       externalTtsUrl: "",
       externalTtsVoice: "",
+      externalTtsModel: "",
+      sttMode: "whisper",
+      externalSttUrl: "",
+      externalSttModel: "",
       cloudTtsVoice: "Wise_Woman",
       micId: "",
       micLabel: "",
@@ -201,6 +220,10 @@ export const useVoiceStore = create<VoiceState>()(
           ttsMode: "piper",
           externalTtsUrl: "",
           externalTtsVoice: "",
+          externalTtsModel: "",
+          sttMode: "whisper",
+          externalSttUrl: "",
+          externalSttModel: "",
           cloudTtsVoice: "Wise_Woman",
           micId: "",
       micLabel: "",
@@ -228,6 +251,10 @@ export const useVoiceStore = create<VoiceState>()(
         externalTtsUrl: state.externalTtsUrl,
         cloudTtsVoice: state.cloudTtsVoice,
         externalTtsVoice: state.externalTtsVoice,
+        externalTtsModel: state.externalTtsModel,
+        sttMode: state.sttMode,
+        externalSttUrl: state.externalSttUrl,
+        externalSttModel: state.externalSttModel,
         micId: state.micId,
         micLabel: state.micLabel,
         loopStartMuted: state.loopStartMuted,

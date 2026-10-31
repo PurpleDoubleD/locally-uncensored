@@ -56,6 +56,9 @@ const AGENT_COMPATIBLE = [
   // this, the sub-4GB Granite 4.0 Micro tool-caller had Agent Mode grayed out.
   'granite',
   'nemotron',
+  // Liquid LFM3 (N1, 30.10.2026): every Ollama manifest of the family (lfm3,
+  // lfm3-vl, lfm3-omni, lfm3-audio) names the capability "tools".
+  'lfm3',
 ]
 
 /**
@@ -190,7 +193,14 @@ const THINKING_COMPATIBLE = [
   'glm4.5', 'glm4.6', 'glm4.7',  // GLM hybrid reasoning (NOT plain glm4:9b)
   'kimi-k2-thinking',
   'minimax-m2',
+  // Liquid LFM3 text and VL: "thinking" in their Ollama manifests. The `lfm3`
+  // word also matches lfm3-omni and lfm3-audio, whose manifests do NOT name
+  // it, so those two stand in THINKING_EXCLUDED below.
+  'lfm3',
 ]
+
+/** Members of a THINKING_COMPATIBLE family that do not think (N1). */
+const THINKING_EXCLUDED = ['lfm3-omni', 'lfm3-audio']
 
 /**
  * Check if a model supports thinking/chain-of-thought mode.
@@ -241,6 +251,7 @@ export function isThinkingCompatible(modelName: string | null): boolean {
   if (isNativeToolProvider(providerId)) return true
 
   const baseName = normalizeFamily(modelName)
+  if (THINKING_EXCLUDED.some(f => containsFamily(f, baseName))) return false
   return THINKING_COMPATIBLE.some(f => containsFamily(f, baseName))
 }
 
@@ -271,6 +282,9 @@ const VISION_COMPATIBLE = [
   // alone misses the real `internvl2` / `internvl2.5` / `internvl3` tags
   // (trailing digit breaks the word boundary), so list those prefixes.
   'granite3.2-vision', 'internvl', 'internvl2', 'internvl3', 'glm4v',
+  // Liquid LFM3 VL and Omni: "vision" in their Ollama manifests (N1). The
+  // text model and LFM3 Audio take no images.
+  'lfm3-vl', 'lfm3-omni',
 ]
 
 /**
