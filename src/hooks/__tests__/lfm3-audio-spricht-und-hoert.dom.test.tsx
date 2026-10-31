@@ -120,4 +120,21 @@ describe('Einstellungen: ein Klick traegt LFM3 Audio in Ollama ein', () => {
       externalTtsVoice: '',
     })
   })
+
+  it('mit externem Diktat sagt die Seite nicht mehr, faster-whisper sei noetig', async () => {
+    backend.tauri.on = false
+    backend.backendCall.mockImplementation(async (cmd: string) => (cmd === 'installed_piper_voices' ? [] : { available: false }))
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ available: false, backend: null }), { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+    useVoiceStore.getState().updateVoiceSettings({ sttMode: 'whisper' })
+    const { unmount } = render(createElement(SpeechSettings))
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)) })
+    expect(screen.queryByText(/Required for the microphone/)).not.toBeNull()
+    unmount()
+    useVoiceStore.getState().updateVoiceSettings({ sttMode: 'external' })
+    render(createElement(SpeechSettings))
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)) })
+    expect(screen.queryByText(/Required for the microphone/)).toBeNull()
+    vi.unstubAllGlobals()
+  })
 })

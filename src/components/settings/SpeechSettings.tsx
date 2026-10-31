@@ -298,7 +298,8 @@ export function SpeechSettings() {
     {whisper.installError && (
       <p className={`text-[0.55rem] leading-snug ${HINWEIS_TEXT.fehler}`}>{whisper.installError}</p>
     )}
-    {showsHint(whisper) && (
+    {/* N1: with an external dictation engine faster-whisper is not required. */}
+    {showsHint(whisper) && voiceSettings.sttMode !== 'external' && (
       <p className="text-[0.55rem] text-gray-500 leading-snug">
         Required for the microphone. Installs faster-whisper into LU's Python; first run also downloads a small model.
       </p>
@@ -318,7 +319,7 @@ export function SpeechSettings() {
         <SettingInput value={voiceSettings.externalSttModel} onChange={(v) => voiceSettings.updateVoiceSettings({ externalSttModel: v })} placeholder="model (e.g. lfm3-audio:2b)" />
         <OllamaSpeechPreset onUse={() => voiceSettings.updateVoiceSettings({ externalSttUrl: ollamaSpeechUrls(getOllamaBase()).stt, externalSttModel: OLLAMA_SPEECH_MODEL })} />
         <p className="t-micro text-gray-500 leading-snug">
-          Any OpenAI-compatible speech-to-text endpoint. With Ollama 0.40.13 or newer, LFM3 Audio (lfm3-audio:2b, 1.7 GB) transcribes the microphone; get it in Models first. Stays on your machine when the endpoint is local.
+          Any OpenAI-compatible speech-to-text endpoint. With Ollama 0.40.13 or newer, LFM3 Audio (lfm3-audio:2b, 1.6 GB) transcribes the microphone; get it in Models first. Stays on your machine when the endpoint is local.
         </p>
       </div>
     )}
