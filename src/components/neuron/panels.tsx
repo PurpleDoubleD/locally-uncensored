@@ -23,7 +23,6 @@ const field = `w-full ${fieldBase}`
 
 /** What the engine piece for single neurons adds to the model's info
  *  (AN-P11-N2.md). Absent until that piece is in. */
-export type NeuronInfoPlus = NeuronInfo & { mlpNeurons?: boolean; nFf?: number }
 
 // ── From examples ─────────────────────────────────────────────────────
 
@@ -157,7 +156,7 @@ export type EntryState =
 export const NEURON_NO_MLP = 'This model routes each word through a few of many experts (MoE), so a single neuron has no fixed place in it.'
 
 /** Whether a recipe line can run on this model, and if not, why. */
-export function entryState(e: RecipeEntry, info: NeuronInfoPlus, vectorIds: ReadonlySet<string>, ids: { feature: (n: number) => string; neuron: (l: number, n: number) => string; own: (e: Extract<RecipeEntry, { kind: 'own' }>) => string }): EntryState {
+export function entryState(e: RecipeEntry, info: NeuronInfo, vectorIds: ReadonlySet<string>, ids: { feature: (n: number) => string; neuron: (l: number, n: number) => string; own: (e: Extract<RecipeEntry, { kind: 'own' }>) => string }): EntryState {
   switch (e.kind) {
     case 'preset':
       if (vectorIds.has(e.id)) return { state: 'ready' }

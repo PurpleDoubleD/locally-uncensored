@@ -5,10 +5,9 @@ import { HINWEIS_TEXT } from '../../lib/hinweis'
 import { HOWTO } from '../../lib/howto'
 import { ICON_SM } from '../ui/icon-size'
 import { addGgufFile, listBundledModels, bundledEngineStatus, isEmbeddingGgufName, type BundledModel } from '../../api/engine'
-import * as neuronApi from '../../api/neuron'
 import {
   neuronApply, neuronBuildOwn, neuronBuildPreset, neuronCancel, neuronDelete, neuronDismiss,
-  neuronFeatureAdd, neuronInfo, neuronPresets, neuronSaeDownload, neuronStatus,
+  neuronFeatureAdd, neuronInfo, neuronMlpAdd, neuronPresets, neuronSaeDownload, neuronStatus,
   type NeuronInfo, type NeuronJob, type NeuronPreset,
 } from '../../api/neuron'
 import { getProviderIdFromModel } from '../../api/providers/model-name'
@@ -27,7 +26,7 @@ import { useSettingsStore } from '../../stores/settingsStore'
 import { useUIStore } from '../../stores/uiStore'
 import type { BuiltinEngineTuning } from '../../types/settings'
 import { JobPanel, ScopeButton, SliderRow, StepCard, TimeNote, TweakedNote, WayIntro, WayTabs, signedValue } from './parts'
-import { ComparePanel, CoordinatesPanel, FeaturePanel, OwnSliderForm, SharePanel, entryState, type NeuronInfoPlus } from './panels'
+import { ComparePanel, CoordinatesPanel, FeaturePanel, OwnSliderForm, SharePanel, entryState } from './panels'
 import { NeuronIntroHost } from './NeuronIntro'
 import { useNeuronIntroRequest } from '../../stores/neuronIntroStore'
 
@@ -69,17 +68,6 @@ async function restartTuning(model: BundledModel | undefined): Promise<BuiltinEn
   }
 }
 
-/** The engine piece for single neurons (AN-P11-N2.md), when this build has
- *  it. Read through the module, so the page needs no change once it lands. */
-function mlpAdd(): ((modelPath: string, layer: number, neuron: number) => Promise<unknown>) | null {
-  try {
-    const fn = (neuronApi as Record<string, unknown>).neuronMlpAdd
-    return typeof fn === 'function' ? fn as (p: string, l: number, n: number) => Promise<unknown> : null
-  } catch {
-    return null
-  }
-}
-
 export function NeuronView() {
   const activeModel = useModelStore((s) => s.activeModel)
   const appMode = useSettingsStore((s) => s.settings.appMode)
@@ -111,7 +99,7 @@ export function NeuronView() {
 
   const backend = chatBackend(activeModel, appMode)
   const model = models.find((m) => m.path === modelPath)
-  const info = loadedInfo?.path === modelPath ? loadedInfo.info as NeuronInfoPlus : null
+  const info = loadedInfo?.path === modelPath ? loadedInfo.info : null
   const pathRef = useRef(modelPath)
   pathRef.current = modelPath
 
@@ -247,11 +235,10 @@ export function NeuronView() {
     neuron: neuronVectorId,
     own: recipeOwnId,
   }), [info])
-  const mlp = info?.mlpNeurons ? mlpAdd() : null
   const states = useCallback((e: RecipeEntry) => {
     if (!info) return { state: 'blocked' as const, why: 'The model is still loading.' }
-    return entryState(e, { ...info, mlpNeurons: !!mlp }, available, ids)
-  }, [info, mlp, available, ids])
+    return entryState(e, info, available, ids)
+  }, [info, available, ids])
 
   /** A recipe replaces the sliders (one Undo brings them back); what is not
    *  computed for this model yet is queued and prepared one by one. */
@@ -275,7 +262,7 @@ export function NeuronView() {
         if (st.state === 'prepare') jobs.push(() => neuronBuildOwn(modelPath, e.name, e.more, e.less, id))
       } else {
         next[neuronVectorId(e.layer, e.neuron)] = clampStrength(e.dose, neuronVectorId(e.layer, e.neuron))
-        if (st.state === 'prepare' && mlp) jobs.push(() => mlp(modelPath, e.layer, e.neuron))
+        if (st.state === 'prepare') jobs.push(() => neuronMlpAdd(modelPath, e.layer, e.neuron))
       }
     }
     setProfile(editKey, next)
