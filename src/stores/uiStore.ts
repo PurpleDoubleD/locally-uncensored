@@ -152,9 +152,12 @@ interface UIState {
    *  "Get the original"). Read once by the Models page, then cleared. Never
    *  persisted. */
   discoverQuery: string | null
+  /** The query looks for the maker's original model: Discover lists the
+   *  changed versions after the originals (FEHLER-N2 #1). */
+  discoverOriginal: boolean
   /** Open Models on Discover's chat lane with downloads going to `target`,
    *  optionally searching for `query`. */
-  openDiscoverFor: (target: 'builtin', query?: string) => void
+  openDiscoverFor: (target: 'builtin', query?: string, opts?: { original?: boolean }) => void
   clearDiscoverTarget: () => void
   clearDiscoverQuery: () => void
   setView: (view: View) => void
@@ -235,9 +238,10 @@ export const useUIStore = create<UIState>()(
       askForModel: () => set((s) => ({ modelAskSeq: s.modelAskSeq + 1 })),
       discoverTarget: null,
       discoverQuery: null,
-      openDiscoverFor: (target, query) => set({ currentView: 'models', settingsFocus: null, discoverTarget: target, discoverQuery: query?.trim() || null }),
+      discoverOriginal: false,
+      openDiscoverFor: (target, query, opts) => set({ currentView: 'models', settingsFocus: null, discoverTarget: target, discoverQuery: query?.trim() || null, discoverOriginal: !!(opts?.original && query?.trim()) }),
       clearDiscoverTarget: () => set({ discoverTarget: null }),
-      clearDiscoverQuery: () => set({ discoverQuery: null }),
+      clearDiscoverQuery: () => set({ discoverQuery: null, discoverOriginal: false }),
 
       // Navigation no longer touches sidebarOpen. The conversation list only
       // makes sense in Chat, and that rule now lives in the Sidebar itself

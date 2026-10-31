@@ -287,7 +287,7 @@ export function CoordinatesPanel({ presets, modelNames, states, onUse, disabled 
               data-testid="neuron-coords-use"
               className="lu-control lu-primary"
             >
-              {usable.length === 0 && later.length === 0 ? 'Nothing usable on this model' : usable.length === parsed.recipe.entries.length || usable.length === 0 ? 'Use these values' : `Use the ${usable.length} usable values`} <ArrowRight size={ICON_SM} />
+              {usable.length === 0 && later.length === 0 ? 'Nothing usable on this model' : usable.length === parsed.recipe.entries.length || usable.length === 0 ? 'Use these values' : usable.length === 1 ? 'Use the one usable value' : `Use the ${usable.length} usable values`} <ArrowRight size={ICON_SM} />
             </button>
             <span className={`t-micro ${HINWEIS_TEXT.ruhig}`}>{usable.length ? 'Replaces your current sliders. You can undo.' : 'Nothing changes on your sliders.'}</span>
           </div>
