@@ -13,6 +13,9 @@ const REPO_ROOT = resolve(__dirname, '../../..')
 // Not the bare name 'bash': on Windows that resolves to the WSL alias stub in
 // WindowsApps and never reaches a shell. See bash-interpreter.ts.
 const BASH = bashInterpreter()
+// The repo's own llama.cpp patches only apply to the real pinned source; the
+// fake upstreams below get none unless a test hands some in.
+const NO_PATCHES = mkdtempSync(join(tmpdir(), 'lu-no-patches-'))
 
 /** Run a snippet with the script sourced. Returns stdout+stderr, both wanted:
  *  the pin guards report through die(), which writes to stderr. */
@@ -24,7 +27,7 @@ function runScript(
     const out = execFileSync(BASH, ['-c', `source '${SCRIPT}'; ${snippet}`], {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
-      env: { ...process.env, ...env },
+      env: { ...process.env, LLAMA_LU_PATCH_DIR: NO_PATCHES, ...env },
     })
     return { code: 0, out: out.trim() }
   } catch (err) {
@@ -401,6 +404,67 @@ describe('build-llama.sh — the llama.cpp revision is pinned to a commit', { ti
     const extra = runScript('ensure_src', env)
     expect(extra.code, 'an untracked file in the source tree was accepted').not.toBe(0)
     expect(extra.out).toContain('extra.cmake')
+  })
+
+  // P11 FEHLER 10 (David's test build, 31.10.2026): the vector tool aborted
+  // on Qwen3.5. The fix is LU's own patch to the generator, so the build
+  // applies reviewed patches and still compiles nothing but the pinned
+  // commit plus exactly those patches.
+  it('applies LU\'s patches to a clean checkout and accepts exactly that tree again', () => {
+    const up = fakeUpstream()
+    const cache = tmp('llama-cache-patched-')
+    const patches = tmp('llama-patches-')
+    writeFileSync(join(patches, '0001-lu.patch'), '--- a/CMakeLists.txt\n+++ b/CMakeLists.txt\n@@ -1 +1,2 @@\n project(fake)\n+# LU\n')
+    const env = { LLAMA_BUILD_CACHE: cache, LLAMA_REPO: up.path, LLAMA_TAG: up.tag, LLAMA_COMMIT: up.sha, LLAMA_LU_PATCH_DIR: patches }
+    const first = runScript('ensure_src', env)
+    expect(first.code, first.out).toBe(0)
+    expect(readFileSync(join(cache, 'llama.cpp', 'CMakeLists.txt'), 'utf8')).toBe('project(fake)\n# LU\n')
+    // The cached, already patched tree is checked, not patched twice.
+    const again = runScript('ensure_src', env)
+    expect(again.code, again.out).toBe(0)
+    expect(readFileSync(join(cache, 'llama.cpp', 'CMakeLists.txt'), 'utf8')).toBe('project(fake)\n# LU\n')
+    // A change on top of the patch in the patched file is refused.
+    writeFileSync(join(cache, 'llama.cpp', 'CMakeLists.txt'), 'project(fake)\n# LU\nadd_definitions(-DBACKDOOR)\n')
+    const tampered = runScript('ensure_src', env)
+    expect(tampered.code).not.toBe(0)
+    expect(tampered.out).toContain('CMakeLists.txt differs')
+  })
+
+  it('refuses a patched tree that carries a change in a file no patch touches', () => {
+    const up = fakeUpstream()
+    const cache = tmp('llama-cache-patched-extra-')
+    const patches = tmp('llama-patches-extra-')
+    writeFileSync(join(patches, '0001-lu.patch'), '--- a/CMakeLists.txt\n+++ b/CMakeLists.txt\n@@ -1 +1,2 @@\n project(fake)\n+# LU\n')
+    const env = { LLAMA_BUILD_CACHE: cache, LLAMA_REPO: up.path, LLAMA_TAG: up.tag, LLAMA_COMMIT: up.sha, LLAMA_LU_PATCH_DIR: patches }
+    expect(runScript('ensure_src', env).code).toBe(0)
+    writeFileSync(join(cache, 'llama.cpp', 'extra.cmake'), '# not in the pinned commit\n')
+    const smuggled = runScript('ensure_src', env)
+    expect(smuggled.code).not.toBe(0)
+    expect(smuggled.out).toContain('does not match')
+  })
+
+  it('stops when a patch does not apply to the pinned source', () => {
+    const up = fakeUpstream()
+    const patches = tmp('llama-patches-bad-')
+    writeFileSync(join(patches, '0001-lu.patch'), '--- a/CMakeLists.txt\n+++ b/CMakeLists.txt\n@@ -1 +1,2 @@\n project(other)\n+# LU\n')
+    const env = { LLAMA_BUILD_CACHE: tmp('llama-cache-bad-'), LLAMA_REPO: up.path, LLAMA_TAG: up.tag, LLAMA_COMMIT: up.sha, LLAMA_LU_PATCH_DIR: patches }
+    const r = runScript('ensure_src', env)
+    expect(r.code).not.toBe(0)
+    expect(r.out).toContain('0001-lu.patch does not apply')
+  })
+
+  it('the repo\'s generator patch keeps the vector on the real blocks and exits cleanly on a model it cannot read', () => {
+    const dir = join(REPO_ROOT, 'scripts', 'llama-patches')
+    const patch = readFileSync(join(dir, '0001-cvector-generator-real-blocks.patch'), 'utf8')
+    // It touches the generator only, so the server stays the pinned source.
+    expect([...patch.matchAll(/^\+\+\+ b\/(.+)$/gm)].map((m) => m[1])).toEqual(['tools/cvector-generator/cvector-generator.cpp'])
+    // Only the blocks before the last one, picked by their layer index.
+    expect(patch).toContain('+    if (il < 0 || il >= cb_data->n_layers - 1) {')
+    // A mismatch is a line and exit 1, not GGML_ASSERT's abort.
+    expect(patch).toContain('+            fprintf(stderr, "LU: unsupported model:')
+    expect(patch).toContain('+            return 1;')
+    // And it is what the build applies.
+    expect(runScript('printf "%s" "$LU_PATCH_DIR"', { LLAMA_LU_PATCH_DIR: '' }).out).toBe(`${REPO_ROOT}/scripts/llama-patches`.replace(/\\/g, '/'))
   })
 
   it('hashes a digest of the binary it installed', () => {

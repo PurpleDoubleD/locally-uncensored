@@ -339,7 +339,81 @@ ensure_src() {
   have="$(git -C "$SRC_DIR" rev-parse HEAD)"
   [ "$have" = "$LLAMA_COMMIT" ] \
     || die "llama.cpp checkout is at $have, expected $LLAMA_COMMIT ($LLAMA_TAG) — upstream tag moved, or the build cache is stale"
-  assert_clean_tree
+  # A clean tree gets LU's patches; a tree that carries them already (a
+  # cache from an earlier run) is checked to carry exactly them.
+  if [ -z "$(git -C "$SRC_DIR" status --porcelain --untracked-files=all 2>/dev/null)" ]; then
+    apply_lu_patches
+  fi
+  assert_patched_tree
+}
+
+# LU's own changes to the pinned source, reviewed in this repo
+# (scripts/llama-patches/*.patch). They only touch tools/cvector-generator,
+# so the server binary is the pinned source unchanged.
+#
+# P11 FEHLER 10 (David's test build, 31.10.2026): the vector tool aborted
+# on Qwen3.5 (GGML_ASSERT diff_filtered.size() == n_layers - 1): b9949 keeps
+# the last block's full rows there, so one layer too many came through.
+LU_PATCH_DIR="${LLAMA_LU_PATCH_DIR:-$REPO_ROOT/scripts/llama-patches}"
+
+lu_patches() {
+  [ -d "$LU_PATCH_DIR" ] || return 0
+  find "$LU_PATCH_DIR" -maxdepth 1 -name '*.patch' | LC_ALL=C sort
+}
+
+apply_lu_patches() {
+  local p
+  for p in $(lu_patches); do
+    log "applying $(basename "$p")"
+    git -C "$SRC_DIR" apply "$p" || die "LU patch $(basename "$p") does not apply to $LLAMA_COMMIT ($LLAMA_TAG)"
+  done
+}
+
+# The files LU's patches touch, one per line.
+lu_patched_files() {
+  local p
+  for p in $(lu_patches); do
+    sed -n 's|^+++ b/||p' "$p"
+  done | LC_ALL=C sort -u
+}
+
+# What is compiled is the pinned commit plus LU's patches and nothing else:
+# every change in the tree is a file a patch touches, and each such file is
+# byte for byte the pinned file with the patches applied.
+assert_patched_tree() {
+  git -C "$SRC_DIR" update-index -q --really-refresh >/dev/null 2>&1 || true
+  local dirty allowed line path
+  dirty="$(git -C "$SRC_DIR" status --porcelain --untracked-files=all 2>/dev/null || true)"
+  allowed="$(lu_patched_files)"
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    path="${line:3}"
+    case "$line" in
+      " M "*) printf '%s\n' "$allowed" | grep -qxF "$path" && continue ;;
+    esac
+    die "llama.cpp source tree does not match $LLAMA_COMMIT ($LLAMA_TAG) plus LU's patches — the checkout carries local changes, so the build would not be the pinned source:
+$dirty"
+  done <<EOF_DIRTY
+$dirty
+EOF_DIRTY
+  [ -n "$allowed" ] || return 0
+  local tmp p f
+  tmp="$(mktemp -d)"
+  while IFS= read -r f; do
+    mkdir -p "$tmp/$(dirname "$f")"
+    git -C "$SRC_DIR" show "HEAD:$f" > "$tmp/$f"
+  done <<EOF_FILES
+$allowed
+EOF_FILES
+  for p in $(lu_patches); do
+    (cd "$tmp" && git apply "$p") || { rm -rf "$tmp"; die "LU patch $(basename "$p") does not apply to $LLAMA_COMMIT ($LLAMA_TAG)"; }
+  done
+  while IFS= read -r f; do
+    cmp -s "$tmp/$f" "$SRC_DIR/$f" || { rm -rf "$tmp"; die "llama.cpp source tree does not match $LLAMA_COMMIT ($LLAMA_TAG) plus LU's patches: $f differs"; }
+  done <<EOF_FILES
+$allowed
+EOF_FILES
+  rm -rf "$tmp"
 }
 
 # rev-parse only proves where HEAD POINTS. cmake does not compile HEAD, it
