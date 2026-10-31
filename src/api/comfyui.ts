@@ -2465,15 +2465,23 @@ export async function getHistory(promptId: string): Promise<ComfyHistoryEntry | 
  *  not a stall — only silence from BOTH the socket and the queue aborts.
  *  Queue entries are `[number, prompt_id, ...]` tuples. */
 export async function isPromptQueued(promptId: string): Promise<boolean> {
+  return (await promptQueueState(promptId)) === 'queued'
+}
+
+/** Like isPromptQueued, but says when ComfyUI gave no answer. A busy ComfyUI
+ *  can leave HTTP unanswered for minutes (I1, 12 GB box: a Z-Image VAE decode
+ *  through shared memory, 22 min), and "no answer" is not "gone": only
+ *  'gone' lets the Create watchdog call a render stalled. */
+export async function promptQueueState(promptId: string): Promise<'queued' | 'gone' | 'unknown'> {
   try {
     const res = await localFetch(comfyuiUrl('/queue'), { timeoutMs: COMFY_POLL_TIMEOUT_MS })
-    if (!res.ok) return false
+    if (!res.ok) return 'unknown'
     const q = await res.json()
     const inList = (list: unknown) => Array.isArray(list)
       && list.some((e) => Array.isArray(e) && e[1] === promptId)
-    return inList(q.queue_running) || inList(q.queue_pending)
+    return inList(q.queue_running) || inList(q.queue_pending) ? 'queued' : 'gone'
   } catch {
-    return false
+    return 'unknown'
   }
 }
 
