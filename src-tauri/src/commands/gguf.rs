@@ -519,6 +519,11 @@ fn read_meta(r: &mut R, ty: u32) -> Option<Meta> {
 /// Read a GGUF head from any reader: every key and the tensor table, nothing
 /// of the data behind it.
 pub fn parse_head(reader: &mut dyn Read) -> Option<GgufHead> {
+    parse_head_with_offsets(reader).map(|(h, _)| h)
+}
+
+/// `parse_head` plus each tensor's offset inside the data section.
+fn parse_head_with_offsets(reader: &mut dyn Read) -> Option<(GgufHead, Vec<u64>)> {
     let mut r = R(reader);
     let mut magic = [0u8; 4];
     r.0.read_exact(&mut magic).ok()?;
@@ -542,6 +547,7 @@ pub fn parse_head(reader: &mut dyn Read) -> Option<GgufHead> {
         head.keys.insert(key, val);
     }
     head.tensors.reserve(tensor_count.min(65_536) as usize);
+    let mut offsets = Vec::with_capacity(tensor_count.min(65_536) as usize);
     for _ in 0..tensor_count {
         let name = r.string(MAX_TENSOR_NAME)?;
         let n_dims = r.u32()?;
@@ -553,10 +559,60 @@ pub fn parse_head(reader: &mut dyn Read) -> Option<GgufHead> {
             dims.push(r.u64()?);
         }
         let ggml_type = r.u32()?;
-        let _offset = r.u64()?;
+        offsets.push(r.u64()?);
         head.tensors.push(TensorInfo { name, dims, ggml_type });
     }
-    Some(head)
+    Some((head, offsets))
+}
+
+/// Counts what goes through, so the end of the head is known.
+struct Counted<T> {
+    inner: T,
+    read: u64,
+}
+
+impl<T: Read> Read for Counted<T> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let n = self.inner.read(buf)?;
+        self.read += n as u64;
+        Ok(n)
+    }
+}
+
+/// Where one tensor's bytes are in a model file (3.0.9, P11: a neuron's
+/// weights are read straight from the user's own GGUF).
+#[derive(Debug, Clone, PartialEq)]
+pub struct TensorAt {
+    pub info: TensorInfo,
+    pub file: std::path::PathBuf,
+    /// Absolute byte position of the tensor's first block in `file`.
+    pub at: u64,
+}
+
+/// Finds a tensor by name in a model, in whichever part of a split model
+/// holds it. The data section starts after the head, at the file's alignment
+/// (`general.alignment`, 32 when absent).
+pub fn locate_tensor(path: &str, name: &str) -> Option<TensorAt> {
+    let first = std::path::Path::new(path);
+    let mut files = vec![first.to_path_buf()];
+    let head = read_model_head(path)?;
+    let parts = head.split_count();
+    if parts > 1 {
+        files = split_parts(first, parts)?;
+    }
+    for file in files {
+        let mut c = Counted { inner: BufReader::new(File::open(&file).ok()?), read: 0 };
+        let (h, offsets) = parse_head_with_offsets(&mut c)?;
+        let align = match h.keys.get("general.alignment") {
+            Some(Meta::Int(a)) if *a > 0 => *a as u64,
+            _ => 32,
+        };
+        let data = c.read.div_ceil(align) * align;
+        if let Some(i) = h.tensors.iter().position(|t| t.name == name) {
+            return Some(TensorAt { info: h.tensors[i].clone(), file, at: data.checked_add(offsets[i])? });
+        }
+    }
+    None
 }
 
 /// The sibling parts of a split model (`name-00001-of-00003.gguf`), in order,
@@ -948,6 +1004,25 @@ mod tests {
         assert_eq!(t.bytes(), None);
         // A truncated head is not a head.
         assert!(super::parse_head(&mut &raw[..raw.len() - 3]).is_none());
+    }
+
+    #[test]
+    fn a_tensor_is_found_where_its_bytes_are() {
+        let dir = fixtures("locate");
+        let p = dir.join("m.gguf");
+        let mut raw = head_with_tensor(None, "blk.3.ffn_down.weight");
+        let head_len = raw.len() as u64;
+        // Data starts at the next multiple of 32 after the head; the offset
+        // in the table is 0.
+        let data = head_len.div_ceil(32) * 32;
+        raw.resize(data as usize, 0);
+        raw.extend_from_slice(b"WEIGHTS");
+        std::fs::write(&p, &raw).unwrap();
+        let t = super::locate_tensor(p.to_str().unwrap(), "blk.3.ffn_down.weight").expect("found");
+        assert_eq!(t.at, data);
+        assert_eq!(t.info.dims, vec![4096, 4096]);
+        assert_eq!(&std::fs::read(&p).unwrap()[t.at as usize..t.at as usize + 7], b"WEIGHTS");
+        assert!(super::locate_tensor(p.to_str().unwrap(), "blk.9.ffn_down.weight").is_none());
     }
 
     #[test]

@@ -478,6 +478,18 @@ describe('build-llama.sh — the llama.cpp revision is pinned to a commit', { ti
     expect(patch).toMatch(/^ {13}\(int\) t\.max_seq_len\);\n(\+ {8}\/\/.*\n)*\+ {8}fflush\(stdout\);$/m)
   })
 
+  // Single neurons (David, 31.10.2026): a dose is the median length of the
+  // residual stream after the neuron's block, which only the model run can
+  // measure. The app reads these lines (neuron/mod.rs parse_norm).
+  it('the repo\'s generator patches measure the layer lengths a neuron dose is counted in', () => {
+    const patch = readFileSync(join(REPO_ROOT, 'scripts', 'llama-patches', '0004-cvector-generator-layer-norms.patch'), 'utf8')
+    expect([...patch.matchAll(/^\+\+\+ b\/(.+)$/gm)].map((m) => m[1])).toEqual(['tools/cvector-generator/cvector-generator.cpp'])
+    expect(patch).toContain('+    const bool lu_norms = getenv("LU_LAYER_NORMS") != nullptr;')
+    // The first token (BOS) is left out, as the shared recipes measure it.
+    expect(patch).toContain('+                for (int64_t r = 1; r < h->ne[1]; r++) {')
+    expect(patch).toContain('+            printf("LU norm %d %.6f\\n", (int) il, v[v.size() / 2]);')
+  })
+
   it('hashes a digest of the binary it installed', () => {
     const probe = join(tmp('llama-digest-'), 'artifact')
     writeFileSync(probe, 'llama-server')
