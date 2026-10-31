@@ -1053,10 +1053,10 @@ mod tests {
 
     #[test]
     fn the_time_before_computing_covers_a_ready_made_and_an_own_slider() {
-        // I1 on the box: LFM3 1.7B, a ready-made slider, ~25 min with the
-        // CPU baseline tool. An own slider has half the pairs.
-        let (preset, own) = build_estimates(1_099_627_808, super::model::Template::ChatMl, Some(estimate::SHIPPED_TOOL_CPU_BASELINE));
-        assert!(preset.low_secs <= 25 * 60 && preset.high_secs >= 25 * 60, "{preset:?}");
+        // I1 on the box: LFM3 1.7B, a ready-made slider, 31 s with E1's
+        // fast tool. An own slider has half the pairs.
+        let (preset, own) = build_estimates(1_099_627_808, super::model::Template::ChatMl, Some(estimate::SHIPPED_TOOL_CPU));
+        assert!(preset.low_secs <= 31 && preset.high_secs >= 31, "{preset:?}");
         assert!(own.high_secs < preset.high_secs && own.low_secs < preset.low_secs, "{own:?}");
         assert!(preset.measured);
     }

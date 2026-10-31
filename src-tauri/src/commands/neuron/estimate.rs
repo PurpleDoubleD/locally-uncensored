@@ -3,31 +3,33 @@
 //! The vector tool reads every example pair through the whole model, so its
 //! time grows with the model file and the number of pairs. How fast it is
 //! depends on the build that ships: the Mac's runs on Metal, the Windows and
-//! Linux release tool is (for now) a static CPU build on the K1 baseline,
-//! without AVX, and takes minutes where the Mac takes seconds (I1 on the
-//! box, 31.10.2026). After the first run on a PC LU knows that PC's real
-//! speed and uses it, keyed to the tool file, so a new tool is measured anew.
+//! Linux tool comes out of the server build with its CPU variants (E1,
+//! 31.10.2026; the static K1-baseline tool before it took ~25 min where this
+//! one takes half a minute). After the first run on a PC LU knows that PC's
+//! real speed and uses it, keyed to the tool file, so a new tool is measured
+//! anew.
 
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
-/// Seconds per GB of model file and example pair for the static CPU
-/// baseline tool (Windows, Linux release). I1 on the box, CI artifact
-/// 41211851481: LFM3 1.7B Q4_K_M (1.10 GB), 40 pairs, about 25 min in all,
-/// of which roughly a minute is the strength check on the engine.
-/// E1: change this with the fast build (Vulkan / CPU variants).
-pub const SHIPPED_TOOL_CPU_BASELINE: f64 = 33.0;
+/// Seconds per GB of model file and example pair for the Windows and Linux
+/// tool with E1's CPU variants. I1 on the box: LFM3 1.7B Q4_K_M (1.10 GB),
+/// 40 pairs, 31 s in all with the strength check. A Vulkan card is faster,
+/// which the measured speed then shows.
+pub const SHIPPED_TOOL_CPU: f64 = 0.5;
 
 /// The same for the Mac's Metal tool: Qwen3.5 9B Q4_K_M (6.8 GB), 40 pairs,
 /// 30 s in all with the strength check (P11, FEHLER 10).
 pub const SHIPPED_TOOL_METAL: f64 = 0.05;
 
 /// The strength check after the tool runs on the chat engine: up to 11 short
-/// answers, seconds on a GPU, longer on a processor alone.
-const CHECK_SECS: (f64, f64) = (15.0, 120.0);
+/// answers of a few tokens each. Ten seconds or so on the Mac and the box;
+/// the top of the range must stay under the 2 min the page speaks up at, or
+/// every quick run gets the "takes a while" note (Zentrale, 31.10.2026).
+const CHECK_SECS: (f64, f64) = (8.0, 40.0);
 
 pub fn shipped_speed() -> f64 {
-    if cfg!(target_os = "macos") { SHIPPED_TOOL_METAL } else { SHIPPED_TOOL_CPU_BASELINE }
+    if cfg!(target_os = "macos") { SHIPPED_TOOL_METAL } else { SHIPPED_TOOL_CPU }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize)]
@@ -96,12 +98,27 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_box_case_comes_out_as_the_box_measured_it() {
-        // LFM3 1.7B on the CPU baseline tool: I1 measured about 25 min.
-        let e = estimate(1_099_627_808, 40, Some(SHIPPED_TOOL_CPU_BASELINE));
-        assert!(e.low_secs <= 25 * 60 && e.high_secs >= 25 * 60, "{e:?}");
+    fn the_measured_runs_fall_inside_their_range() {
+        // I1 on the box with E1's fast tool (CPU variants): LFM3 1.7B, 31 s.
+        let e = estimate(1_099_627_808, 40, Some(SHIPPED_TOOL_CPU));
+        assert!(e.low_secs <= 31 && e.high_secs >= 31, "{e:?}");
+        // The Mac (Metal): Qwen3.5 9B, 30 s.
         let mac = estimate(6_828_993_824, 40, Some(SHIPPED_TOOL_METAL));
         assert!(mac.low_secs <= 30 && mac.high_secs >= 30, "{mac:?}");
+    }
+
+    #[test]
+    fn a_quick_run_stays_under_the_line_the_page_says_something_at() {
+        // Zentrale, 31.10.2026: the "takes a while" note showed on every Mac,
+        // because the range itself never came out under 2 min. lib/neuron's
+        // buildTimeNote says nothing below 120 s.
+        for bytes in [400_000_000, 1_100_000_000, 6_828_993_824, 9_000_000_000] {
+            assert!(estimate(bytes, 40, None).high_secs < 120 || !cfg!(target_os = "macos"), "Mac, {bytes} bytes");
+            assert!(estimate(bytes, 40, Some(SHIPPED_TOOL_METAL)).high_secs < 120, "Metal, {bytes} bytes");
+        }
+        assert!(estimate(1_099_627_808, 40, Some(SHIPPED_TOOL_CPU)).high_secs < 120, "fast tool, 1.7B");
+        // A slow PC, measured, still gets the note.
+        assert!(estimate(1_099_627_808, 40, Some(33.0)).high_secs > 120);
     }
 
     #[test]
