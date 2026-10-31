@@ -19,7 +19,12 @@ import { useClickAway } from '../ui/useClickAway'
  * model through the same call as "Improve my prompt". Nothing replaces the
  * prompt until the user presses Use.
  */
-export function PromptAssistant({ onUse }: { onUse: (prompt: string) => void }) {
+export function PromptAssistant({ onUse, align = 'left' }: {
+  onUse: (prompt: string) => void
+  /** Which edge of the button the panel lines up with. In the prompt field's
+   *  right corner it opens leftwards, so it stays inside the composer. */
+  align?: 'left' | 'right'
+}) {
   const intent = useCreateStore((s) => s.intent())
   const kind = improveKindForIntent(intent)
   const runModel = useCreateStore((s) =>
@@ -86,7 +91,7 @@ export function PromptAssistant({ onUse }: { onUse: (prompt: string) => void }) 
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: panel.nachOben ? 4 : -4 }}
             transition={{ duration: 0.12 }}
-            className={cn('lu-elevated absolute left-0 z-50 w-80 rounded-lg p-2.5 space-y-2 overflow-y-auto scrollbar-thin', panel.nachOben ? 'bottom-full mb-1.5' : 'top-full mt-1.5')}
+            className={cn('lu-elevated absolute z-50 w-80', align === 'right' ? 'right-0' : 'left-0', 'rounded-lg p-2.5 space-y-2 overflow-y-auto scrollbar-thin', panel.nachOben ? 'bottom-full mb-1.5' : 'top-full mt-1.5')}
             data-testid="prompt-assistant"
             data-family={family}
           >
