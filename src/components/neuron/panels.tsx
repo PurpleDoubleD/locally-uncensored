@@ -304,9 +304,11 @@ export function CoordinatesPanel({ presets, modelNames, states, onUse, disabled 
 
 // ── Before and after ──────────────────────────────────────────────────
 
-export function ComparePanel({ modelPath, entries, disabled, model, tuning, onError, onDone }: {
+export function ComparePanel({ modelPath, entries, labelOf, disabled, model, tuning, onError, onDone }: {
   modelPath: string
   entries: ReturnType<typeof entriesFor>
+  /** The slider's name as "On right now" shows it ("L13 N7956", "Cheerful"). */
+  labelOf?: (id: string) => string
   disabled: boolean
   model: BundledModel | undefined
   tuning: (m: BundledModel | undefined) => Promise<BuiltinEngineTuning | undefined>
@@ -354,7 +356,7 @@ export function ComparePanel({ modelPath, entries, disabled, model, tuning, onEr
               <p className="t-body text-gray-100 whitespace-pre-wrap" data-testid="neuron-compare-before">{result.before}</p>
             </div>
             <div className="rounded-lg border border-lu-accent/40 bg-lu-accent/[0.05] p-3">
-              <p className="t-label text-lu-accent mb-1.5">After · {result.entries.map((e) => `${e.id} ${signedValue(e.strength)}`).join(', ') || 'all at 0'}</p>
+              <p className="t-label text-lu-accent mb-1.5">After · {result.entries.map((e) => `${labelOf ? labelOf(e.id) : e.id} ${signedValue(e.strength)}`).join(', ') || 'all at 0'}</p>
               <p className="t-body text-gray-100 whitespace-pre-wrap" data-testid="neuron-compare-after">{result.after}</p>
             </div>
           </div>

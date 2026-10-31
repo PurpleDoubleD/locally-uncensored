@@ -22,6 +22,7 @@ const vectors: Array<Record<string, unknown>> = []
 const job = vi.hoisted(() => ({ status: 'idle', error: null as string | null, kind: '', phaseLabel: '', step: 0, total: 0, etaSecs: null as number | null, elapsedSecs: 0 }))
 const est = vi.hoisted(() => ({ build: { lowSecs: 4, highSecs: 30, measured: false }, own: { lowSecs: 6, highSecs: 45, measured: false } }))
 const facts = vi.hoisted(() => ({ tweaked: [] as string[], original: null as string | null, name: 'Qwen2.5 0.5B Instruct', nLayer: 24, mlpNeurons: false, nFf: null as number | null }))
+const compare = vi.fn(async (..._a: unknown[]) => ({ before: 'People are kind.', after: 'I want to scare you.' }))
 const mlpAdd = vi.fn(async (_path: string, _layer: number, _neuron: number) => ({ started: true }))
 
 vi.mock('../../../api/neuron', () => ({
@@ -41,7 +42,7 @@ vi.mock('../../../api/neuron', () => ({
   neuronBuildPreset: (p: string, id: string) => buildPreset(p, id),
   neuronBuildOwn: (...a: unknown[]) => buildOwn(...a),
   neuronMlpAdd: (p: string, l: number, n: number) => mlpAdd(p, l, n),
-  neuronCancel: vi.fn(), neuronCompare: vi.fn(), neuronDelete: vi.fn(), neuronDismiss: vi.fn(),
+  neuronCancel: vi.fn(), neuronCompare: (...a: unknown[]) => compare(...a), neuronDelete: vi.fn(), neuronDismiss: vi.fn(),
   neuronFeatureAdd: vi.fn(), neuronSaeDownload: vi.fn(), neuronSaeSearch: vi.fn(),
 }))
 vi.mock('../../../api/engine', () => ({
@@ -269,6 +270,16 @@ describe('single neurons', () => {
     expect(apply.mock.calls.at(-1)![1]).toEqual([{ id: 'n-L14-N8949', strength: 1.5 }])
     fireEvent.change(range, { target: { value: '2.5' } })
     expect(useNeuronStore.getState().profiles['qwen-1']).toEqual({ 'n-L14-N8949': 2.5 })
+  })
+
+  it('names the neurons in the comparison as the mix does, not by their ids', async () => {
+    vectors.push({ id: 'n-L13-N7956', kind: 'neuron', name: 'L13 N7956', left: 'Less', right: 'More', unit: 30, builtAt: 1, more: [], less: [] })
+    useNeuronStore.setState({ profiles: { 'qwen-1': { 'n-L13-N7956': -1 } } })
+    render(createElement(NeuronView))
+    await within(await screen.findByTestId('neuron-mix')).findByText('L13 N7956')
+    fireEvent.click(screen.getByTestId('neuron-compare-run'))
+    const after = await screen.findByTestId('neuron-compare-after')
+    expect(after.previousElementSibling!.textContent).toBe('After · L13 N7956 −1.00')
   })
 
   it('names the layers and neurons a model has before anything runs', async () => {

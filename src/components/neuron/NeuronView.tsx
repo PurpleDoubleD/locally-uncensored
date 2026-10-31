@@ -535,7 +535,7 @@ export function NeuronView() {
         done={compared}
         testId="neuron-step-compare"
       >
-        <ComparePanel modelPath={modelPath} entries={entries} disabled={running || !modelPath} model={model} tuning={restartTuning} onError={setError} onDone={() => setCompared(true)} />
+        <ComparePanel modelPath={modelPath} entries={entries} labelOf={labelOf} disabled={running || !modelPath} model={model} tuning={restartTuning} onError={setError} onDone={() => setCompared(true)} />
       </StepCard>
 
       <StepCard
