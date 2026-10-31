@@ -144,7 +144,7 @@ export const RELEASE_NOTES: ReleaseNote[] = [
       },
       {
         title: 'Neurons: sliders that steer a local LU Engine model.',
-        detail: 'Ready made sliders such as Serious to Cheerful or Fewer refusals, sliders from your own examples, and a before and after on the same question. LU measures how far each slider can push on your model; on a Qwen3.5 9B that took 36 seconds on a Mac and about five minutes on a CPU. Ollama and LM Studio cannot take these sliders.',
+        detail: 'Ready made sliders such as Serious to Cheerful or Fewer refusals, sliders from your own examples, and a before and after on the same question. LU measures how far each slider can push on your model; for small models that takes under a minute, and before a longer run Neurons says how long it will take and shows its progress. Ollama and LM Studio cannot take these sliders.',
       },
       {
         title: 'End images and reference pictures in Animate and Create.',
@@ -160,6 +160,15 @@ export const RELEASE_NOTES: ReleaseNote[] = [
       },
     ],
     details: [
+      {
+        title: 'Desktop',
+        items: [
+          {
+            title: 'A status menu in the menu bar and tray.',
+            detail: 'With LU Cloud it shows your plan and credits left, locally the engine, the loaded model and the memory in use, with Open LU and Quit LU. On Linux it needs the tray library.',
+          },
+        ],
+      },
       {
         title: 'Fixes',
         items: [
