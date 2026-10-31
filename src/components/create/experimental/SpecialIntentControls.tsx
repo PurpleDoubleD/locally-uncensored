@@ -44,7 +44,7 @@ import { trainerPathPlaceholder } from '../../../lib/trainer-path-placeholder'
 import { trainerRootHint } from '../../../lib/trainer-root-hint'
 import { useCreateExp } from './CreateContext'
 import { CharacterUseLocally } from './CharacterUseLocally'
-import { CLOUD_TRAINING_FAMILY_NOTE } from '../../../api/character-import'
+import { CLOUD_TRAINING_FAMILY_NOTE, localTrainingFamilyNote } from '../../../api/character-import'
 import { useLocalPick } from './localPick'
 import { characterBaseModel, characterRunBlock } from '../../../lib/character-base'
 import { HINWEIS_TEXT } from '../../../lib/hinweis'
@@ -773,6 +773,9 @@ function LocalTrainControls() {
             {busy === 'install' ? 'Reinstalling…' : 'Reinstall trainer'}
           </button>
         </div>
+      )}
+      {!isGenerating && (
+        <div className="t-label text-gray-600 max-w-[560px] text-center" data-testid="local-train-family-note">{localTrainingFamilyNote(trainKind)}</div>
       )}
       {!isGenerating && trainVramPreset === 'low-vram' && (
         <div className="t-label text-gray-600 max-w-[560px] text-center" data-testid="low-vram-note">{LOW_VRAM_NOTE}</div>
