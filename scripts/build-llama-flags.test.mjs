@@ -109,5 +109,15 @@ test('P11 #9: the Windows vector tool puts jump tables in .rdata, without replac
   assert.doesNotMatch(flags, /-DCMAKE_(C|CXX)_FLAGS=/, 'CMAKE_<LANG>_FLAGS would drop /EHsc and the other MSVC defaults');
   assert.doesNotMatch(flags, /\/jumptablerdata/, 'MSYS rewrites a leading slash into a path, as with /MAP');
   assert.doesNotMatch(sourced('cvector_cmake_flags_for x86_64-unknown-linux-gnu'), /jumptablerdata/);
-  assert.doesNotMatch(cmakeFlagsFor('x86_64-pc-windows-msvc'), /jumptablerdata/, 'the server build stays as it is');
+});
+
+test('E1 #1: the Windows server build puts jump tables in .rdata too, without replacing the MSVC defaults', () => {
+  const flags = cmakeFlagsFor('x86_64-pc-windows-msvc');
+  assert.match(flags, /-DCMAKE_C_FLAGS_INIT=-jumptablerdata\b/);
+  assert.match(flags, /-DCMAKE_CXX_FLAGS_INIT=-jumptablerdata\b/);
+  assert.doesNotMatch(flags, /-DCMAKE_(C|CXX)_FLAGS=/, 'CMAKE_<LANG>_FLAGS would drop /EHsc and the other MSVC defaults');
+  assert.doesNotMatch(flags, /\/jumptablerdata/, 'MSYS rewrites a leading slash into a path, as with /MAP');
+  assert.match(flags, /-DCMAKE_MODULE_LINKER_FLAGS=-MAP\b/, 'the linker maps stay');
+  assert.doesNotMatch(cmakeFlagsFor('x86_64-unknown-linux-gnu'), /jumptablerdata/, 'MSVC only');
+  assert.doesNotMatch(cmakeFlagsFor('aarch64-apple-darwin'), /jumptablerdata/, 'MSVC only');
 });
