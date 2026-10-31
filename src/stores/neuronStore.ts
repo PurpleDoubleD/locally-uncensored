@@ -22,6 +22,9 @@ interface NeuronState {
   removeProfile: (key: string) => void
   removeSlider: (modelKey: string, id: string) => void
   setScope: (modelKey: string, scope: 'model' | 'persona') => void
+  /** The introduction was shown once (N2): it comes back only on request. */
+  introSeen: boolean
+  setIntroSeen: (seen: boolean) => void
 }
 
 export const useNeuronStore = create<NeuronState>()(
@@ -50,6 +53,8 @@ export const useNeuronStore = create<NeuronState>()(
           return { profiles: next }
         }),
       setScope: (modelKey, scope) => set((s) => ({ scopeByModel: { ...s.scopeByModel, [modelKey]: scope } })),
+      introSeen: false,
+      setIntroSeen: (seen) => set({ introSeen: seen }),
     }),
     { name: 'lu-neuron-tweaker', storage: safeJSONStorage() },
   ),
