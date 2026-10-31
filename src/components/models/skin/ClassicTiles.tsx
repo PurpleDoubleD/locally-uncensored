@@ -87,7 +87,7 @@ export function SizePill({ sizeGB, bytes }: { sizeGB?: number; bytes?: number })
 
 export function ClassicModelTile(props: ModelTileProps) {
   const { variants, vramGb, sharedMemory = false, isInstalled, dlState, onDownload, onInfo, onOpenUrl, onUse, highlight } = props
-  const { pickerOpen, setPickerOpen, setChosen, pickerRef, variantListRef, variantList, sel, groupTitle, dl, downloading, fit, action, sizeOf, selSize, downloadTitle } = useModelTile(props)
+  const { pickerOpen, setPickerOpen, setChosen, pickerRef, variantListRef, variantList, sel, groupTitle, dl, downloading, fit, action, sizeOf, selSize, downloadTitle, target } = useModelTile(props)
 
   return (
     <div
@@ -222,7 +222,7 @@ export function ClassicModelTile(props: ModelTileProps) {
               className={TILE_ACTION}
               title={downloadTitle}
             >
-              <Download size={ICON_SM} /> Get
+              <Download size={ICON_SM} /> Get{target && <span className="opacity-70">→ {target}</span>}
             </button>
           )}
         </div>

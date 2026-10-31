@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Loader2, RotateCcw, Search, Sliders, Trash2 } from 'lucide-react'
+import { Download, FilePlus, Loader2, RotateCcw, Search, Sliders, Trash2 } from 'lucide-react'
 import { Hinweis } from '../ui/Hinweis'
 import { HINWEIS_TEXT } from '../../lib/hinweis'
 import { ICON_SM } from '../ui/icon-size'
 import { openExternal } from '../../api/backend'
-import { listBundledModels, bundledEngineStatus, isEmbeddingGgufName, type BundledModel } from '../../api/engine'
+import { addGgufFile, listBundledModels, bundledEngineStatus, isEmbeddingGgufName, type BundledModel } from '../../api/engine'
 import {
   neuronApply, neuronBuildOwn, neuronBuildPreset, neuronCancel, neuronCompare, neuronDelete, neuronDismiss,
   neuronFeatureAdd, neuronInfo, neuronPresets, neuronSaeDownload, neuronSaeSearch, neuronStatus,
@@ -22,11 +22,14 @@ import { editingKey, useNeuronStore } from '../../stores/neuronStore'
 import { useModelStore } from '../../stores/modelStore'
 import { useChatStore } from '../../stores/chatStore'
 import { useSettingsStore } from '../../stores/settingsStore'
+import { useUIStore } from '../../stores/uiStore'
 import type { BuiltinEngineTuning } from '../../types/settings'
 
 const APPLY_DELAY_MS = 700
 
-const NO_CHAT_MODEL = 'There is no chat model for LU Engine yet. Download one to start. An embedding model (the one Document Chat uses) cannot be tweaked.'
+const NO_CHAT_MODEL = 'The tweaker works on chat models the LU Engine runs. Download one, or use a GGUF file you already have. An embedding model (the one Document Chat uses) cannot be tweaked.'
+/** Why a model the user already has in Ollama or LM Studio is not offered. */
+const OTHER_APPS = 'Models in Ollama or LM Studio do not show up here: those programs take no control vectors, so the sliders cannot reach them.'
 
 /** Which program answers the chat's model right now. */
 function chatBackend(activeModel: string | null, appMode: string | undefined): BackendKind {
@@ -87,9 +90,13 @@ export function NeuronView() {
   const pathRef = useRef(modelPath)
   pathRef.current = modelPath
 
-  // Models and presets once; the loaded model (or the chat's) preselected.
+  // Presets once; the models once and again after a GGUF file was added
+  // from the empty state. The loaded model (or the chat's) preselected.
+  const [modelsSeq, setModelsSeq] = useState(0)
   useEffect(() => {
     void neuronPresets().then(setPresets).catch(() => setPresets([]))
+  }, [])
+  useEffect(() => {
     void listBundledModels().then((all) => {
       // Chat models only: an embedding model (Document Chat's) has no chat
       // turn to steer, and the vector tool aborts on it.
@@ -100,7 +107,7 @@ export function NeuronView() {
       setModelPath((cur) => cur || (chat ?? loaded ?? list[0])?.path || '')
     }).catch(() => setModels([])).finally(() => setModelsLoaded(true))
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [modelsSeq])
 
   const refreshInfo = useCallback(async (path: string) => {
     if (!path) return
@@ -200,10 +207,21 @@ export function NeuronView() {
 
   if (modelsLoaded && models.length === 0) {
     return (
-      <Shell>
-        {backend !== 'lu-engine' && backend !== 'none' && <Hinweis className="mb-3">{backendNote(backend)}</Hinweis>}
-        <Hinweis><span data-testid="neuron-no-chat-model">{NO_CHAT_MODEL}</span></Hinweis>
-      </Shell>
+      <NoModel
+        onDownload={() => {
+          useModelStore.getState().setCategoryFilter('text')
+          useUIStore.getState().openDiscoverFor('builtin')
+        }}
+        onAddFile={async () => {
+          try {
+            if (await addGgufFile()) setModelsSeq((n) => n + 1)
+          } catch (e) {
+            setError(String(e))
+          }
+        }}
+        error={error}
+        onDismissError={() => setError(null)}
+      />
     )
   }
 
@@ -336,6 +354,37 @@ export function NeuronView() {
         </ul>
       </Section>
     </Shell>
+  )
+}
+
+/** No LU Engine chat model yet: one centred state with the two ways to get
+ *  one (David, 2026-10-30: the line used to sit at the top, "hingeklatscht").
+ *  Download opens Discover with the LU Engine as the target whatever the chat
+ *  model is, so the file lands where the tweaker can read it. */
+function NoModel({ onDownload, onAddFile, error, onDismissError }: {
+  onDownload: () => void
+  onAddFile: () => void
+  error: string | null
+  onDismissError: () => void
+}) {
+  return (
+    <div className="h-full overflow-y-auto scrollbar-thin flex items-center justify-center px-6 py-8" data-testid="neuron-view">
+      <div className="max-w-md flex flex-col items-center text-center gap-3" data-testid="neuron-empty">
+        <Sliders size={32} className="text-gray-400 dark:text-gray-500" aria-hidden />
+        <h1 className="t-title text-gray-900 dark:text-white">No chat model for the LU Engine yet</h1>
+        <p className="t-body text-gray-600 dark:text-gray-300" data-testid="neuron-no-chat-model">{NO_CHAT_MODEL}</p>
+        <p className={`t-body ${HINWEIS_TEXT.ruhig}`} data-testid="neuron-other-apps">{OTHER_APPS}</p>
+        <div className="flex flex-wrap items-center justify-center gap-2 pt-1">
+          <button className="lu-tonal" onClick={onDownload} data-testid="neuron-get-model">
+            <Download size={ICON_SM} /> Get a model for the LU Engine
+          </button>
+          <button className="lu-control" onClick={onAddFile} data-testid="neuron-add-gguf" title="Use a GGUF file from your drive as a chat model on the LU Engine">
+            <FilePlus size={ICON_SM} /> GGUF file
+          </button>
+        </div>
+        {error && <Hinweis ton="fehler" className="mt-2 text-left" onDismiss={onDismissError}>{error}</Hinweis>}
+      </div>
+    </div>
   )
 }
 

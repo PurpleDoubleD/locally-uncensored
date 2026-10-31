@@ -84,6 +84,31 @@ export function resolveTextDownloadTarget(input: TextDownloadTargetInput): TextD
 }
 
 /**
+ * What the Get button and the line over the list call a target (P11, David
+ * 2026-10-30). The target used to be decided out of sight: with an Ollama
+ * model in the chat a GGUF went into Ollama, and the Neuron tweaker, which
+ * only works on LU Engine files, never saw it.
+ */
+export function textDownloadTargetLabel(target: TextDownloadTarget, serverName?: string): string {
+  switch (target) {
+    case 'builtin': return 'LU Engine'
+    case 'ollama': return 'Ollama'
+    case 'lmstudio': return 'LM Studio'
+    case 'openai-compat': return serverName?.trim() || 'your server'
+  }
+}
+
+/**
+ * The target of a download once the user's choice for this visit of
+ * Discover counts: "LU Engine" sends the file to the app's own engine
+ * whatever the chat model is, without switching the chat model first.
+ * No choice: the rule above.
+ */
+export function chosenTextDownloadTarget(input: TextDownloadTargetInput, choice: 'builtin' | null): TextDownloadTarget {
+  return choice === 'builtin' ? 'builtin' : resolveTextDownloadTarget(input)
+}
+
+/**
  * Why an Ollama-only model (one listed by its Ollama tag) cannot be pulled
  * right now, or null when the pull may go ahead.
  *

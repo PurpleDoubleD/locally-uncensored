@@ -144,6 +144,13 @@ interface UIState {
    *  again. Never persisted: it describes one click, not a preference. */
   modelAskSeq: number
   askForModel: () => void
+  /** Where Discover's chat downloads go for the next visit, when a button
+   *  elsewhere already knows (the Neuron tweaker needs LU Engine files).
+   *  Read once by Discover, then cleared. Never persisted. */
+  discoverTarget: 'builtin' | null
+  /** Open Models on Discover's chat lane with downloads going to `target`. */
+  openDiscoverFor: (target: 'builtin') => void
+  clearDiscoverTarget: () => void
   setView: (view: View) => void
   /** Open Settings on a given tab, optionally with one section unfolded. */
   openSettingsAt: (focus: SettingsFocus) => void
@@ -220,6 +227,9 @@ export const useUIStore = create<UIState>()(
       settingsFocus: null,
       modelAskSeq: 0,
       askForModel: () => set((s) => ({ modelAskSeq: s.modelAskSeq + 1 })),
+      discoverTarget: null,
+      openDiscoverFor: (target) => set({ currentView: 'models', settingsFocus: null, discoverTarget: target }),
+      clearDiscoverTarget: () => set({ discoverTarget: null }),
 
       // Navigation no longer touches sidebarOpen. The conversation list only
       // makes sense in Chat, and that rule now lives in the Sidebar itself
