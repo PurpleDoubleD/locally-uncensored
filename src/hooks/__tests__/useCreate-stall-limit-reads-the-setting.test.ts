@@ -31,6 +31,7 @@ vi.mock('../../api/comfyui', async (orig) => ({
   checkComfyConnection: vi.fn(async () => true),
   submitWorkflow: vi.fn(async () => 'p1'),
   isPromptQueued: vi.fn(async () => false),
+  promptQueueState: vi.fn(async () => 'gone'),
   getHistory: vi.fn(async () => null),
 }))
 vi.mock('../../api/comfyui-ws', async (orig) => ({
@@ -127,21 +128,21 @@ describe('the Create stall watchdog', () => {
 describe('a run ComfyUI still holds (d308-a)', () => {
   it('is not called stalled at a 1 minute limit while it sits in the queue, and the message says "1 minute"', async () => {
     const comfy = await import('../../api/comfyui')
-    const queued = vi.mocked(comfy.isPromptQueued)
+    const queued = vi.mocked(comfy.promptQueueState)
     // A long VAE decode on the Windows box: no event for 100 s, the prompt
     // still running in ComfyUI. At a 1 minute limit it was dropped.
-    queued.mockResolvedValue(true)
+    queued.mockResolvedValue('queued')
     useSettingsStore.setState((s) => ({ settings: { ...s.settings, imageGenTimeoutMinutes: 1 } }))
     const { done } = await startAndGoSilent()
     await silence(4)
     expect(useCreateStore.getState().error).toBeNull()
     expect(useCreateStore.getState().isGenerating).toBe(true)
     // Then ComfyUI loses it: gone from the queue, no event, no history.
-    queued.mockResolvedValue(false)
+    queued.mockResolvedValue('gone')
     await silence(2)
     expect(useCreateStore.getState().error ?? '').toMatch(/Generation stalled: no progress from ComfyUI for 1 minute\./)
     await done
-    queued.mockResolvedValue(false)
+    queued.mockResolvedValue('gone')
   }, 60_000)
 })
 

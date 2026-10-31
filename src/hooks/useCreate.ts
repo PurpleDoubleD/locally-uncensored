@@ -23,6 +23,7 @@ import {
   submitWorkflow,
   getHistory,
   isPromptQueued,
+  promptQueueState,
   buildTxt2ImgWorkflow,
   buildTxt2VidWorkflow,
   legacyBuilderFits,
@@ -91,6 +92,7 @@ import { macEditReferenceRoom } from '../lib/mac-edit-memory'
 import { getSharedMemoryGb } from '../lib/hardware'
 import { resolveRunSeed } from '../lib/run-seed'
 import { bumpSeed } from '../lib/render/image-count'
+import { collectLateResult, LATE_RESULT_PROMISE } from '../lib/render/late-result'
 import {
   clearTrainingSet, stageTrainingImage, startCharacterTraining,
   characterTrainingStatus, cancelCharacterTraining,
@@ -1780,6 +1782,8 @@ export function useCreate() {
     let renderEviction: RenderEviction | null = null
     // B28: the live preview of a video run, taken down in the finally below.
     let offPreview: (() => void) | null = null
+    // Set once the run is in ComfyUI: hands a finished history entry's files to the gallery.
+    let toGallery: ((outputs: ComfyHistoryEntry['outputs']) => boolean) | null = null
     const handoff = elapsedLine((text) => setProgress(0, text), HANDOFF_LINE.freeing)
     try {
       renderEviction = await evictChatBackendsForRender((phase) => handoff.setLabel(HANDOFF_LINE[phase]))
@@ -2208,6 +2212,40 @@ export function useCreate() {
       // customer blames his settings for a hardware switch.
       void cpuRenderFacts()
 
+      // A finished history entry's files into the gallery, for the late look
+      // after a stall verdict. Same fields as the heartbeat's collection below.
+      const galleryFromOutputs = (outputs: ComfyHistoryEntry['outputs']): boolean => {
+        let found = false
+        for (const nodeId of Object.keys(outputs ?? {})) {
+          // Extract files from ANY keyed array, not just images/gifs/
+          // videos — custom save nodes post under other keys (audio,
+          // result, files, …); previously those outputs were dropped
+          // even though they existed on disk.
+          const files: ComfyUIOutput[] = extractComfyOutputFiles(outputs![nodeId])
+          for (const file of files) {
+            found = true
+            addToGallery({
+              id: uuid(), type: galleryTypeForFile(file.filename, mode),
+              filename: file.filename, subfolder: file.subfolder ?? '', comfyType: file.type ?? 'output',
+              prompt, ...improveFields, ...transparentFields(), negativePrompt, model: activeModel,
+              modelType: mode === 'image' ? imageModelType : (videoModelsList.find(m => m.name === activeModel)?.type ?? 'wan'),
+              seed: runSeed,
+              steps, cfgScale, sampler, scheduler, width: outputWidth, height: outputHeight, batchSize,
+              createdAt: Date.now(), builderUsed, intent, ...toolFields, ...(skippedNote ? { runNote: skippedNote } : {}),
+            })
+          }
+        }
+        return found
+      }
+      toGallery = galleryFromOutputs
+      // The stall verdict. ComfyUI has said the prompt is not in its queue
+      // and has no history for it, so there is nothing to take off the queue;
+      // its pictures are still looked for (lib/render/late-result).
+      const stalled = () => {
+        const message = `${renderStallMessage(maxTime)}${cpuCauseSuffix(lastCpuRenderFacts())} ${LATE_RESULT_PROMISE}`
+        return Object.assign(new Error(message), { lateLook: promptId })
+      }
+
       if (useWS) {
         // ── WebSocket-driven progress ──
         await new Promise<void>((resolve, reject) => {
@@ -2247,15 +2285,22 @@ export function useCreate() {
             if (stallCheck || Date.now() - lastActivity <= maxTime) return
             stallCheck = true
             try {
-              if (await isPromptQueued(promptId).catch(() => false)) {
+              const state = await promptQueueState(promptId).catch(() => 'unknown' as const)
+              if (state === 'queued') {
                 lastActivity = Date.now()
                 return
               }
+              // I1 (30.10.2026, 12 GB box): no answer at all is a ComfyUI too
+              // busy to serve HTTP (a 22 min VAE decode through shared
+              // memory), not a lost prompt. Only its own "not in my queue"
+              // ends the run; a ComfyUI that is really gone refuses the
+              // connection, and the heartbeat says so.
+              if (state === 'unknown') return
               // Finished a moment ago: the heartbeat's next history poll
               // collects the pictures, so this is no stall either.
               if (completionHandled || await getHistory(promptId).catch(() => null)) return
               cleanup()
-              reject(new Error(`${renderStallMessage(maxTime)}${cpuCauseSuffix(lastCpuRenderFacts())}`))
+              reject(stalled())
             } finally {
               stallCheck = false
             }
@@ -2464,11 +2509,12 @@ export function useCreate() {
 
             const elapsed = Date.now() - startTime
             if (Date.now() - lastActivity > maxTime) {
-              if (await isPromptQueued(promptId).catch(() => false)) {
+              const state = await promptQueueState(promptId).catch(() => 'unknown' as const)
+              if (state === 'queued') {
                 lastActivity = Date.now()
-              } else {
+              } else if (state === 'gone' && !(await getHistory(promptId).catch(() => null))) {
                 if (pollRef.current) clearInterval(pollRef.current)
-                reject(new Error(`${renderStallMessage(maxTime)}${cpuCauseSuffix(lastCpuRenderFacts())}`))
+                reject(stalled())
                 return
               }
             }
@@ -2556,8 +2602,21 @@ export function useCreate() {
       // /interrupt here would kill the Create render or the external ComfyUI
       // tab that is actually running.
       const ownPromptId = useCreateStore.getState().currentPromptId
-      if (ownPromptId) {
+      const lateLook = (err as { lateLook?: string } | null)?.lateLook
+      if (ownPromptId && !lateLook) {
         try { await abandonPrompt(ownPromptId) } catch { /* best effort */ }
+      }
+      // A stall verdict is LU giving up, not ComfyUI: what it still delivers
+      // goes to the gallery, and the stall line goes away with it.
+      if (lateLook && toGallery) {
+        const errorShown = `Generation failed: ${err instanceof Error ? err.message : String(err)}`
+        const add = toGallery
+        collectLateResult(lateLook, {
+          getHistory,
+          onSuccess: (h) => {
+            if (add(h.outputs) && useCreateStore.getState().error === errorShown) useCreateStore.getState().setError(null)
+          },
+        })
       }
       if (err instanceof Error && err.message === 'Cancelled') {
         // User cancelled, not an error
