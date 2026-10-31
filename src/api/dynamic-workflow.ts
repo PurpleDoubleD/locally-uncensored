@@ -65,7 +65,7 @@ import { extraReferenceSlots, isQwenImageEditModel, referenceSide } from '../lib
 import { canonicalImageRefs } from '../lib/image-ref-names'
 import { KREA2_STYLE_LORA, LOCAL_END_FRAME_MODELS, createReferenceSupport, localAnimateReferenceSlots, localEndFrame, CREATE_REFERENCE_MODELS } from '../lib/frame-refs'
 import { nativeUpscaleScale, upscaleTarget, type UpscaleFactor } from '../lib/local-upscale'
-import { WAN_FAST, findWanSpeedLora, isFastSampling, wanSamplingFor, wanSpeedKind, wanSpeedLoraNames } from '../lib/wan-speed'
+import { WAN_FAST, findWanSpeedLora, isFastSampling, isWanSpeedLoraName, wanSamplingFor, wanSpeedKind, wanSpeedLoraNames } from '../lib/wan-speed'
 import { addAudioStitch, addContextWindows, addContinueSource, addStitch, CONTINUE_NEEDS_UPDATE, type ContinueSource } from './video-continue'
 
 // ─── Strategy Detection ───
@@ -1013,12 +1013,22 @@ export async function buildDynamicWorkflow(
   // All three are skipped (no extra nodes) when the corresponding
   // param is unset, so workflows without F2/F3 enabled stay byte-
   // identical to the previous behaviour.
-  const loraNames = normalizeLoraList(params.lora)
+  // FEHLER-Q1 #1 (3.0.9): a fast Wan 14B run gets its lightx2v LoRAs from
+  // Fast mode below, once per half at the model card's 1.0. The same LoRA
+  // picked in the stack would go in a second time (0.8 + 1.0 on the high
+  // half), so in a fast run the stack's speed LoRAs are left out; every
+  // other stack LoRA stays, and a quality run keeps the stack as it is.
+  const fastWan = isVideo && type === 'wan' && strategy === 'unet_video' && !fromCheckpoint
+    && !!wanSpeedKind(params.model) && isFastSampling(params.steps, params.cfgScale)
+  const stackNames = normalizeLoraList(params.lora)
+  const stackStrengths = normalizeLoraStrengths(params.loraStrength, stackNames.length)
+  const keepInStack = stackNames.map((l) => !(fastWan && isWanSpeedLoraName(l)))
+  const loraNames = stackNames.filter((_, i) => keepInStack[i])
   if (loraNames.length > 0) {
     const installed: string[] =
       readComboOptions(allNodes?.LoraLoader?.input?.required?.lora_name) ?? []
     const resolved = resolveLoraNames(loraNames, installed)
-    const strengths = normalizeLoraStrengths(params.loraStrength, resolved.length)
+    const strengths = stackStrengths.filter((_, i) => keepInStack[i])
     resolved.forEach((loraName, i) => {
       const loraId = String(n++)
       workflow[loraId] = {

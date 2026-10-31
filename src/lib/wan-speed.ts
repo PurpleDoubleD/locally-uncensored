@@ -94,6 +94,14 @@ export function findWanSpeedLora(kind: WanSpeedKind, half: 'high' | 'low' | 'sin
   return [...hits].sort((a, b) => stamp(b) - stamp(a))[0]
 }
 
+/** A lightx2v 4 step speed LoRA of any Wan release or spelling (FEHLER-Q1
+ *  #1). In a fast run Fast mode hangs these in itself, so the same file
+ *  picked in the LoRA stack would distil the model a second time. */
+export function isWanSpeedLoraName(name: string): boolean {
+  const b = name.replace(/^.*[\\/]/, '').toLowerCase()
+  return /lightx2v/.test(b) && /4[_-]?steps?/.test(b)
+}
+
 /** The file names a fast run needs, for the message when one is missing. */
 export function wanSpeedLoraNames(kind: WanSpeedKind): string[] {
   switch (kind) {
