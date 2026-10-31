@@ -587,7 +587,21 @@ jobs:
           [ -s "$moved/direction.gguf" ] || { cat /tmp/cvector.log; echo "FAIL: no control vector written" >&2; exit 1; }
           grep -E "file=$moved/llama/libggml-cpu-[a-z0-9_]+\.so .*dynamically loaded by" /tmp/cvector.log \
             || { cat /tmp/cvector.log; echo "FAIL: the vector tool did not load a ggml-cpu variant from $moved/llama" >&2; exit 1; }
-          echo "OK: the vector tool computes a control vector from $moved on a ggml-cpu variant from there, nowhere near the build directory"
+          # LU patches 0003 and 0004 (P11): the progress line the app reads,
+          # and the measuring mode single-neuron doses are counted in.
+          grep -q 'Evaluating prompt\[2/2\]' /tmp/cvector.log \
+            || { cat /tmp/cvector.log; echo "FAIL: no progress line for the last prompt (patch 0003)" >&2; exit 1; }
+          ( cd "$moved/llama" && LU_LAYER_NORMS=1 "$moved/lu-llama-cvector-generator-${{ matrix.sidecar_triple }}" -m "$model" \
+              --positive-file "$moved/more.txt" --negative-file "$moved/less.txt" \
+              -o "$moved/norms.gguf" --method mean -c 256 ) >/tmp/cvector-norms.log 2>&1 || {
+            cat /tmp/cvector-norms.log
+            echo "FAIL: the vector tool's measuring mode (LU_LAYER_NORMS, patch 0004) exited non-zero" >&2
+            exit 1
+          }
+          norms="$(grep -cE '^LU norm [0-9]+ [0-9]+\.[0-9]{6}$' /tmp/cvector-norms.log || true)"
+          [ "$norms" -ge 1 ] && [ ! -e "$moved/norms.gguf" ] \
+            || { cat /tmp/cvector-norms.log; echo "FAIL: LU_LAYER_NORMS printed $norms 'LU norm' lines (want at least 1) or wrote a vector" >&2; exit 1; }
+          echo "OK: the vector tool computes a control vector from $moved on a ggml-cpu variant from there, nowhere near the build directory, and measures $norms layer lengths"
 
       # Nachbesserung N5 (review-sidecar.md, Runde 2): before this step,
       # release.yml had no real model-load proof for EITHER platform (the
@@ -668,6 +682,42 @@ jobs:
             throw "a ggml-cpu-*.dll was loaded from outside the resource layout: $($cpuModules -join ', ')"
           }
           Write-Host "OK - sidecar boots from the resource layout, loads a model, answers /health, and has a ggml-cpu-*.dll from $runDir mapped"
+
+      # E1, P11: the vector tool is an exe of the server build (LU patch 0002)
+      # and the app starts it from the companions directory like the server
+      # (engine.rs prepare_tool_command). A real run on the tiny model: it
+      # writes a control vector, prints the progress line the app reads (patch
+      # 0003) and measures the layer lengths single-neuron doses are counted
+      # in (LU_LAYER_NORMS, patch 0004).
+      - name: "Vector tool computes from the resource layout (P11)"
+        if: matrix.sidecar_triple == 'x86_64-pc-windows-msvc'
+        shell: pwsh
+        timeout-minutes: 5
+        run: |
+          $tool = (Resolve-Path "src-tauri\bin\lu-llama-cvector-generator-${{ matrix.sidecar_triple }}.exe").Path
+          $runDir = (Resolve-Path "src-tauri\resources\llama\${{ matrix.sidecar_triple }}").Path
+          $model = "$env:RUNNER_TEMP\stories260K.gguf"
+          if (-not (Test-Path $model)) { throw "the boot smoke's model is missing: $model" }
+          $work = "$env:RUNNER_TEMP\cvector"
+          New-Item -ItemType Directory -Force -Path $work | Out-Null
+          Set-Content -Path "$work\more.txt" -Value 'Once upon a time there was a happy dog.', 'The sun was bright and everyone smiled.'
+          Set-Content -Path "$work\less.txt" -Value 'Once upon a time there was a sad dog.', 'The rain fell and everyone cried.'
+          Push-Location $runDir
+          & $tool -m $model --positive-file "$work\more.txt" --negative-file "$work\less.txt" -o "$work\direction.gguf" --method mean -c 256 *> "$work\cvector.log"
+          $vectorExit = $LASTEXITCODE
+          $env:LU_LAYER_NORMS = '1'
+          & $tool -m $model --positive-file "$work\more.txt" --negative-file "$work\less.txt" -o "$work\norms.gguf" --method mean -c 256 *> "$work\cvector-norms.log"
+          $normsExit = $LASTEXITCODE
+          Remove-Item Env:\LU_LAYER_NORMS
+          Pop-Location
+          Get-Content "$work\cvector.log", "$work\cvector-norms.log"
+          if ($vectorExit -ne 0) { throw "lu-llama-cvector-generator exited $vectorExit (run from $runDir)" }
+          if (-not (Test-Path "$work\direction.gguf")) { throw "no control vector written" }
+          if (-not (Select-String -Path "$work\cvector.log" -Pattern 'Evaluating prompt[2/2]' -SimpleMatch -Quiet)) { throw "no progress line for the last prompt (patch 0003)" }
+          if ($normsExit -ne 0) { throw "the measuring mode (LU_LAYER_NORMS, patch 0004) exited $normsExit" }
+          $norms = @(Select-String -Path "$work\cvector-norms.log" -Pattern '^LU norm [0-9]+ [0-9]+\.[0-9]{6}$').Count
+          if ($norms -lt 1 -or (Test-Path "$work\norms.gguf")) { throw "LU_LAYER_NORMS printed $norms 'LU norm' lines (want at least 1) or wrote a vector" }
+          Write-Host "OK - the vector tool computes a control vector from $runDir and measures $norms layer lengths"
 
       # ── App build ────────────────────────────────────────────────────────
       - name: Install npm dependencies
@@ -1386,6 +1436,45 @@ jobs:
             exit 1
           fi
           echo "OK: the sidecar starts outside its build directory, loads a model and answers /health"
+
+      # P11: a real run of the vector tool on the tiny model, as on Linux and
+      # Windows: it writes a control vector, prints the progress line the app
+      # reads (LU patch 0003) and measures the layer lengths single-neuron
+      # doses are counted in (LU_LAYER_NORMS, patch 0004). `-ngl 0` for the
+      # reason the boot smoke above gives.
+      - name: "Vector tool computes outside its build directory (P11)"
+        shell: bash
+        timeout-minutes: 5
+        run: |
+          set -euo pipefail
+          tool="$PWD/src-tauri/bin/lu-llama-cvector-generator-$SIDECAR_TRIPLE"
+          model="$RUNNER_TEMP/stories260K.gguf"
+          echo "${STORIES260K_SHA256}  $model" | shasum -a 256 -c - \
+            || { echo "FAIL: the boot smoke's stories260K.gguf is missing or does not match the pinned sha256" >&2; exit 1; }
+          work="$RUNNER_TEMP/cvector"
+          rm -rf "$work"
+          mkdir -p "$work"
+          printf 'Once upon a time there was a happy dog.\nThe sun was bright and everyone smiled.\n' > "$work/more.txt"
+          printf 'Once upon a time there was a sad dog.\nThe rain fell and everyone cried.\n' > "$work/less.txt"
+          ( cd "$work" && "$tool" -m "$model" --positive-file more.txt --negative-file less.txt \
+              -o direction.gguf --method mean -ngl 0 -c 256 ) >"$work/cvector.log" 2>&1 || {
+            cat "$work/cvector.log"
+            echo "FAIL: lu-llama-cvector-generator exited non-zero" >&2
+            exit 1
+          }
+          [ -s "$work/direction.gguf" ] || { cat "$work/cvector.log"; echo "FAIL: no control vector written" >&2; exit 1; }
+          grep -q 'Evaluating prompt\[2/2\]' "$work/cvector.log" \
+            || { cat "$work/cvector.log"; echo "FAIL: no progress line for the last prompt (patch 0003)" >&2; exit 1; }
+          ( cd "$work" && LU_LAYER_NORMS=1 "$tool" -m "$model" --positive-file more.txt --negative-file less.txt \
+              -o norms.gguf --method mean -ngl 0 -c 256 ) >"$work/cvector-norms.log" 2>&1 || {
+            cat "$work/cvector-norms.log"
+            echo "FAIL: the vector tool's measuring mode (LU_LAYER_NORMS, patch 0004) exited non-zero" >&2
+            exit 1
+          }
+          norms="$(grep -cE '^LU norm [0-9]+ [0-9]+\.[0-9]{6}$' "$work/cvector-norms.log" || true)"
+          [ "$norms" -ge 1 ] && [ ! -e "$work/norms.gguf" ] \
+            || { cat "$work/cvector-norms.log"; echo "FAIL: LU_LAYER_NORMS printed $norms 'LU norm' lines (want at least 1) or wrote a vector" >&2; exit 1; }
+          echo "OK: the vector tool computes a control vector outside its build directory and measures $norms layer lengths"
 
       # ── App build, signing, notarization: nothing is uploaded yet ────────
       - name: Install npm dependencies
