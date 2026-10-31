@@ -16,6 +16,7 @@
 // So a state with nothing to say on a line says so instead of leaving it out.
 
 import { PLAN_NAMES } from './past-due'
+import { creditsLeftLine } from './credits-left'
 
 export type TrayDot = 'green' | 'amber' | 'grey'
 export interface TrayLine {
@@ -61,7 +62,7 @@ export function cloudTrayStatus(c: TrayCloudInput): TrayStatus {
     lines.push({ text: 'No active plan', dot: 'grey' })
   }
   lines.push({
-    text: c.credits === null ? 'Credits …' : `${Math.max(0, Math.floor(c.credits)).toLocaleString('en-US')} credits left`,
+    text: c.credits === null ? 'Credits …' : creditsLeftLine({ total: Math.max(0, Math.floor(c.credits)), topup: 0 }, { short: true }),
   })
   return { lines, action: 'plan' }
 }

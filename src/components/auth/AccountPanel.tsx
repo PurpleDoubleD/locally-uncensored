@@ -13,6 +13,7 @@ import { CLOUD_BASE } from '../../api/cloud/config'
 import { MONOGRAM } from '../layout/brand'
 import { openExternal } from '../../api/backend'
 import { formatCount } from '../../lib/formatters'
+import { creditsLeft, creditsLeftLine } from '../../lib/credits-left'
 import { countUnsyncedAccountMemories } from '../../lib/memory-unsynced'
 import { PAST_DUE_ACTION, PAST_DUE_BADGE, PAST_DUE_WALLET_LINE, pastDueLine } from '../../lib/past-due'
 import { Modal } from '../ui/Modal'
@@ -338,6 +339,10 @@ export function AccountPanel() {
             used={Number(quota.used.credits_used)}
             limit={quota.limits.credits}
           />
+          {/* The tray's "credits left" (Plan & Credits… lands here), same sum. */}
+          <p data-testid="credits-left" className="text-[0.65rem] text-gray-500 dark:text-gray-500 tabular-nums">
+            {creditsLeftLine(creditsLeft(quota))}
+          </p>
         </div>
       ) : (
         !pastDue && (
