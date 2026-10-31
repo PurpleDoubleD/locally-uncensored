@@ -2299,6 +2299,7 @@ export function SettingsPage() {
 
           <Section title="Storage">
             <HowtoRow topic="storage" />
+            <HowtoRow topic="gguf-file" />
             {/* Discord "Storage Management": one folder for the models, the
                 gallery and the runtime, and a safe move of what is there. The
                 rows below place each part on its own. Desktop only. */}

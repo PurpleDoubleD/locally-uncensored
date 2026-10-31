@@ -65,9 +65,11 @@ import { useNeuronStore } from '../../../stores/neuronStore'
 import { useSettingsStore } from '../../../stores/settingsStore'
 import { useChatStore } from '../../../stores/chatStore'
 import { useUIStore } from '../../../stores/uiStore'
+import { HOWTO } from '../../../lib/howto'
 import type { Persona } from '../../../types/settings'
 
 beforeEach(() => {
+  addGgufFile.mockClear()
   apply.mockClear()
   buildPreset.mockClear()
   vectors.length = 0
@@ -197,6 +199,23 @@ describe('Neuron tweaker view', () => {
     expect(useModelStore.getState().categoryFilter).toBe('text')
     // The chat model is not touched.
     expect(useModelStore.getState().activeModel).toBe('llama3:8b')
+  })
+
+  // David, 30.10.2026: how to bring a GGUF file in, in three short steps,
+  // with the button that opens exactly that dialog. The lines are the
+  // how-to's (lib/howto.ts 'gguf-file'), so Help says the same.
+  it('says in three steps how a GGUF file becomes an LU Engine model, next to its button', async () => {
+    disk.models = []
+    render(createElement(NeuronView))
+    const box = await screen.findByTestId('neuron-gguf-steps')
+    const lines = [...box.querySelectorAll('ol > li')].map((li) => li.textContent)
+    expect(lines).toEqual(HOWTO['gguf-file'].films[0].steps.map((st) => st.text))
+    expect(lines[0]).toMatch(/GGUF file/)
+    const button = screen.getByTestId('neuron-add-gguf')
+    expect(box.contains(button)).toBe(true)
+    expect(button.textContent).toMatch(/GGUF file/)
+    fireEvent.click(button)
+    await waitFor(() => expect(addGgufFile).toHaveBeenCalledTimes(1))
   })
 
   it('its GGUF file button adds a file and the tweaker opens on it', async () => {

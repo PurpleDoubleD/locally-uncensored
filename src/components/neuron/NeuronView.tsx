@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Download, FilePlus, Loader2, RotateCcw, Search, Sliders, Trash2 } from 'lucide-react'
 import { Hinweis } from '../ui/Hinweis'
 import { HINWEIS_TEXT } from '../../lib/hinweis'
+import { HOWTO } from '../../lib/howto'
 import { ICON_SM } from '../ui/icon-size'
 import { openExternal } from '../../api/backend'
 import { addGgufFile, listBundledModels, bundledEngineStatus, isEmbeddingGgufName, type BundledModel } from '../../api/engine'
@@ -28,6 +29,7 @@ import type { BuiltinEngineTuning } from '../../types/settings'
 const APPLY_DELAY_MS = 700
 
 const NO_CHAT_MODEL = 'The tweaker works on chat models the LU Engine runs. Download one, or use a GGUF file you already have. An embedding model (the one Document Chat uses) cannot be tweaked.'
+const GGUF_STEPS = HOWTO['gguf-file'].films[0].steps
 /** Why a model the user already has in Ollama or LM Studio is not offered. */
 const OTHER_APPS = 'Models in Ollama or LM Studio do not show up here: those programs take no control vectors, so the sliders cannot reach them.'
 
@@ -370,7 +372,7 @@ function NoModel({ onDownload, onAddFile, error, onDismissError }: {
   return (
     <div className="h-full overflow-y-auto scrollbar-thin flex items-center justify-center px-6 py-8" data-testid="neuron-view">
       <div className="max-w-md flex flex-col items-center text-center gap-3" data-testid="neuron-empty">
-        <Sliders size={32} className="text-gray-400 dark:text-gray-500" aria-hidden />
+        <Sliders size={28} className="text-gray-400 dark:text-gray-500" aria-hidden />
         <h1 className="t-title text-gray-900 dark:text-white">No chat model for the LU Engine yet</h1>
         <p className="t-body text-gray-600 dark:text-gray-300" data-testid="neuron-no-chat-model">{NO_CHAT_MODEL}</p>
         <p className={`t-body ${HINWEIS_TEXT.ruhig}`} data-testid="neuron-other-apps">{OTHER_APPS}</p>
@@ -378,7 +380,15 @@ function NoModel({ onDownload, onAddFile, error, onDismissError }: {
           <button className="lu-tonal" onClick={onDownload} data-testid="neuron-get-model">
             <Download size={ICON_SM} /> Get a model for the LU Engine
           </button>
-          <button className="lu-control" onClick={onAddFile} data-testid="neuron-add-gguf" title="Use a GGUF file from your drive as a chat model on the LU Engine">
+        </div>
+        {/* A file the user already has, in three steps (David, 30.10.2026).
+            The lines are the how-to's, so Help and this state say the same. */}
+        <div className="mt-3 w-full text-left rounded-lg border border-gray-200 dark:border-white/[0.06] px-4 py-3" data-testid="neuron-gguf-steps">
+          <p className="t-body font-semibold text-gray-900 dark:text-white mb-1.5">Already have a GGUF file?</p>
+          <ol className="t-body text-gray-600 dark:text-gray-300 space-y-1 list-decimal pl-5">
+            {GGUF_STEPS.map((s) => <li key={s.from}>{s.text}</li>)}
+          </ol>
+          <button className="lu-control mt-2.5" onClick={onAddFile} data-testid="neuron-add-gguf" title="Use a GGUF file from your drive as a chat model on the LU Engine">
             <FilePlus size={ICON_SM} /> GGUF file
           </button>
         </div>

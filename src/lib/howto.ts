@@ -234,6 +234,15 @@ export const HOWTO: Record<string, HowtoTopic> = {
       },
     ],
   },
+  // P11 (David, 30.10.2026): a GGUF the user already has becomes an LU
+  // Engine model, which is what the Neuron tweaker needs. The same three
+  // lines stand in the tweaker's empty state, next to the button they name.
+  // No film is online yet; until it is, the card shows these lines as a list.
+  'gguf-file': one('How to add a GGUF file', 'gguf-file', [
+    { from: 0, text: 'Press GGUF file and pick a .gguf chat model on your drive.' },
+    { from: 3, text: 'LU links it into the LU Engine folder, without a copy. File and folder must be on one drive.' },
+    { from: 6, text: 'It shows up in Neurons and under Models, Installed, where Use starts a chat with it.' },
+  ], '/guide/storage/'),
   remote: one('How remote access works', 'remote', [
     { from: 0, text: 'Remote access starts in the Remote tab of the sidebar.' },
     { from: 1.58, text: 'Dispatch splits in two: LAN for your own network, Internet for anywhere.' },
