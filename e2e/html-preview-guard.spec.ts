@@ -41,14 +41,14 @@ function tauriLike(key: string) {
   ;(function () {
     const __TAURI_INVOKE_KEY__ = key
     let failed = false
-    function sendIpcMessage(message: { cmd: string; payload: unknown; options?: { headers?: Record<string, string> } }) {
+    function sendIpcMessage(message: { cmd: string; payload: unknown; options?: { headers?: Record<string, string> } }): Promise<unknown> {
       if (!failed) {
         const headers = new Headers((message.options && message.options.headers) || {})
         headers.set('Content-Type', 'application/json')
         headers.set('Tauri-Invoke-Key', __TAURI_INVOKE_KEY__)
         return fetch('http://ipc.localhost/' + message.cmd, { method: 'POST', body: JSON.stringify(message.payload), headers }).then(
           (r) => r,
-          () => {
+          (): Promise<unknown> => {
             failed = true
             return sendIpcMessage(message)
           },
