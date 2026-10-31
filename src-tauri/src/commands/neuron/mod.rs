@@ -393,6 +393,11 @@ pub fn parse_progress(line: &str) -> Option<(u64, u64)> {
 /// own output (a backtrace on an abort) goes to the log, not on the page;
 /// only a missing library is named, since that is what the user can act on.
 pub fn tool_failure(stderr: &str) -> String {
+    // LU's patch to the generator says so instead of aborting when a model's
+    // layers do not come out the way it reads them (P11 FEHLER 10).
+    if stderr.contains("LU: unsupported model") {
+        return "The vector tool cannot read this model's layers, so ready-made and own sliders do not work on it. Other models and feature sliders still work.".into();
+    }
     let missing = stderr.lines().map(str::trim).find(|l| {
         let low = l.to_lowercase();
         // Linux's loader says "error while loading shared libraries: x.so";
@@ -935,6 +940,15 @@ mod tests {
         assert!(so.contains("libllama-common.so"), "{so}");
         let frame = super::tool_failure("2 libggml-base.so 0x00007f0000001234 ggml_abort + 160 (no such frame info)");
         assert!(frame.contains("app log"), "{frame}");
+    }
+
+    /// P11 FEHLER 10: a model the patched generator cannot read is named as
+    /// such, not as a tool that "stopped without a result".
+    #[test]
+    fn a_model_the_tool_cannot_read_is_said_plainly() {
+        let msg = super::tool_failure("llama_print_build_info: build = 1 (049326a)\nLU: unsupported model: 32 layer outputs for 31 blocks\n");
+        assert!(msg.contains("cannot read this model's layers"), "{msg}");
+        assert!(!msg.contains("without a result"), "{msg}");
     }
 
     use super::*;
