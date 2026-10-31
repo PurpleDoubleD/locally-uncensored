@@ -392,7 +392,16 @@ pub fn parse_progress(line: &str) -> Option<(u64, u64)> {
 /// One readable sentence for a generator that ended without a direction. Its
 /// own output (a backtrace on an abort) goes to the log, not on the page;
 /// only a missing library is named, since that is what the user can act on.
+/// David, 31.10.2026: a failure always says what helps most. Changed models
+/// (abliterated, merged, …) are where the vector tool fails.
+const ORIGINAL_ADVICE: &str = "The Neuron tweaker works best with original, untweaked models: try the original of this model.";
+
 pub fn tool_failure(stderr: &str) -> String {
+    // LU's patch to the generator says so instead of aborting when a model's
+    // layers do not come out the way it reads them (P11 FEHLER 10).
+    if stderr.contains("LU: unsupported model") {
+        return format!("The vector tool cannot read this model's layers, so ready-made and own sliders do not work on it. {ORIGINAL_ADVICE}");
+    }
     let missing = stderr.lines().map(str::trim).find(|l| {
         let low = l.to_lowercase();
         // Linux's loader says "error while loading shared libraries: x.so";
@@ -403,7 +412,7 @@ pub fn tool_failure(stderr: &str) -> String {
     });
     match missing {
         Some(line) => format!("The vector tool could not start: a library is missing ({line})."),
-        None => "The vector tool stopped on this model without a result. Its last output is in the app log (target neuron).".into(),
+        None => format!("The vector tool stopped on this model without a result. {ORIGINAL_ADVICE} Its last output is in the app log (target neuron)."),
     }
 }
 
@@ -475,22 +484,54 @@ fn free_port() -> Result<u16, String> {
 
 /// One answer from an engine on `port`, deterministic: temperature 0 and a
 /// fixed seed.
-pub(crate) fn ask(port: u16, question: &str, seed: u64, max_tokens: u32) -> Result<String, String> {
-    let client = reqwest::blocking::Client::builder().timeout(std::time::Duration::from_secs(300)).build().map_err(|e| crate::os_error::english(&e))?;
-    let body = json!({
+/// The request of a check. Thinking is off: a thinking model (Qwen3.5,
+/// Qwen3) spends a short check on reasoning and leaves no answer to judge
+/// (P11 FEHLER 10). Templates without the switch ignore it.
+pub(crate) fn check_request(question: &str, seed: u64, max_tokens: u32) -> Value {
+    json!({
         "messages": [{ "role": "user", "content": question }],
         "temperature": 0,
         "seed": seed,
         "max_tokens": max_tokens,
         "stream": false,
-    });
+        "chat_template_kwargs": { "enable_thinking": false },
+    })
+}
+
+/// The answer of a check: the content, or the reasoning when a model that
+/// thinks anyway left the content empty.
+pub(crate) fn answer_text(v: &Value) -> String {
+    let msg = &v["choices"][0]["message"];
+    let content = msg["content"].as_str().unwrap_or("");
+    if content.trim().is_empty() {
+        msg["reasoning_content"].as_str().unwrap_or("").to_string()
+    } else {
+        content.to_string()
+    }
+}
+
+pub(crate) fn ask(port: u16, question: &str, seed: u64, max_tokens: u32) -> Result<String, String> {
+    let client = reqwest::blocking::Client::builder().timeout(std::time::Duration::from_secs(300)).build().map_err(|e| crate::os_error::english(&e))?;
+    let body = check_request(question, seed, max_tokens);
     let req = client.post(format!("http://127.0.0.1:{port}/v1/chat/completions")).json(&body);
     let resp = crate::commands::engine_key::authorize_blocking(req).send().map_err(|e| format!("The model did not answer: {}", crate::os_error::english(&e)))?;
     if !resp.status().is_success() {
         return Err(format!("The model answered with HTTP {}.", resp.status()));
     }
     let v: Value = resp.json().map_err(|e| crate::os_error::english(&e))?;
-    Ok(v["choices"][0]["message"]["content"].as_str().unwrap_or("").to_string())
+    Ok(answer_text(&v))
+}
+
+/// What one check answer means for calibration: `Some(text)` to judge,
+/// `None` when the server could not even return the answer (HTTP 5xx on a
+/// garbled output), which is a broken answer. A server that did not answer at
+/// all stays an error.
+pub(crate) fn check_outcome(answer: Result<String, String>) -> Result<Option<String>, String> {
+    match answer {
+        Ok(text) => Ok(Some(text)),
+        Err(e) if e.starts_with("The model answered with HTTP 5") => Ok(None),
+        Err(e) => Err(e),
+    }
 }
 
 /// The measured full strength of `cv` (calib.rs), probing a private engine
@@ -512,9 +553,11 @@ fn calibrate(app: &tauri::AppHandle, model_path: &str, facts: &model::ModelFacts
             let answer = ask(port, PROBE_QUESTION, 42, 60);
             let _ = child.kill();
             let _ = child.wait();
-            let answer = answer?;
-            let ok = calib::coherent(&answer);
-            log(format!("  {:+.3}: {} — {}", scale * sign, if ok { "reads well" } else { "breaks" }, answer.chars().take(90).collect::<String>().replace('\n', " ")));
+            let (ok, shown) = match check_outcome(answer)? {
+                Some(answer) => (calib::coherent(&answer), answer.chars().take(90).collect::<String>().replace('\n', " ")),
+                None => (false, "(the engine could not return this answer)".to_string()),
+            };
+            log(format!("  {:+.3}: {} — {}", scale * sign, if ok { "reads well" } else { "breaks" }, shown));
             tries += 1;
             step(tries.min(11));
             if !ok {
@@ -523,7 +566,7 @@ fn calibrate(app: &tauri::AppHandle, model_path: &str, facts: &model::ModelFacts
         }
         Ok(true)
     };
-    let unit = calib::find_unit(start, &mut probe)?;
+    let unit = calib::find_unit(start, &mut probe).map_err(|e| format!("{e} {ORIGINAL_ADVICE}"))?;
     let _ = std::fs::remove_file(&probe_file);
     log(format!("  full strength = {unit:.3}"));
     Ok(unit)
@@ -935,6 +978,47 @@ mod tests {
         assert!(so.contains("libllama-common.so"), "{so}");
         let frame = super::tool_failure("2 libggml-base.so 0x00007f0000001234 ggml_abort + 160 (no such frame info)");
         assert!(frame.contains("app log"), "{frame}");
+    }
+
+    /// P11 FEHLER 10, second half: Qwen3.5 thinks first, so a 60-token check
+    /// answer was all reasoning and `content` empty, and every strength
+    /// counted as broken ("Even a small push breaks this model's answers").
+    #[test]
+    fn a_check_asks_without_thinking_and_reads_the_reasoning_when_content_is_empty() {
+        let body = super::check_request("Hi?", 42, 60);
+        assert_eq!(body["chat_template_kwargs"]["enable_thinking"], serde_json::json!(false));
+        assert_eq!(body["max_tokens"], serde_json::json!(60));
+        let thinking = serde_json::json!({ "choices": [{ "message": { "content": "", "reasoning_content": "The sky is blue because of Rayleigh scattering." } }] });
+        assert_eq!(super::answer_text(&thinking), "The sky is blue because of Rayleigh scattering.");
+        let plain = serde_json::json!({ "choices": [{ "message": { "content": "Blue.", "reasoning_content": "hm" } }] });
+        assert_eq!(super::answer_text(&plain), "Blue.");
+    }
+
+    /// P11 FEHLER 10, third step (Mac, David's model): at +4.0 the answer
+    /// was so garbled that llama-server could not parse it and said HTTP 500
+    /// ("does not match the expected peg-native format"). That is a broken
+    /// answer, not a broken job: up to ±2.0 everything had read well.
+    #[test]
+    fn a_server_error_on_a_check_counts_as_broken() {
+        let garbled = super::check_outcome(Err("The model answered with HTTP 500 Internal Server Error.".into()));
+        assert_eq!(garbled, Ok(None));
+        let fine = super::check_outcome(Ok("Rain is amazing!".into()));
+        assert_eq!(fine, Ok(Some("Rain is amazing!".to_string())));
+        // A server that never answered is still a failure of the job.
+        assert!(super::check_outcome(Err("The model did not answer: connection refused".into())).is_err());
+    }
+
+    /// P11 FEHLER 10: a model the patched generator cannot read is named as
+    /// such, not as a tool that "stopped without a result".
+    #[test]
+    fn a_model_the_tool_cannot_read_is_said_plainly() {
+        let msg = super::tool_failure("llama_print_build_info: build = 1 (049326a)\nLU: unsupported model: 32 layer outputs for 31 blocks\n");
+        assert!(msg.contains("cannot read this model's layers"), "{msg}");
+        assert!(!msg.contains("without a result"), "{msg}");
+        // David, 31.10.2026: every failure says what helps most.
+        for m in [msg, super::tool_failure("GGML_ASSERT(x) failed")] {
+            assert!(m.contains("works best with original, untweaked models"), "{m}");
+        }
     }
 
     use super::*;

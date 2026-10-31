@@ -40,7 +40,8 @@ import { findInstalledForDiscoverModel } from '../../lib/discover-installed'
 import { isBuiltinEngineEntry } from '../../lib/lmstudio-match'
 import { ensureLuEngineIsChatProvider, announceLuEngineSwitch } from '../../api/lu-engine-switch'
 import { LuEngineSwitchBar } from '../chat/LuEngineSwitchBar'
-import { ollamaOnlyDownloadBlock, resolveTextDownloadTarget } from '../../lib/text-download-target'
+import { chosenTextDownloadTarget, ollamaOnlyDownloadBlock, resolveTextDownloadTarget, textDownloadTargetLabel } from '../../lib/text-download-target'
+import { useUIStore } from '../../stores/uiStore'
 import { mayBeStartHerePick } from '../../lib/start-here-picks'
 import { modelInfoTitle } from '../../lib/model-info-title'
 import { hfUrlToOllamaRef, hfUrlToLmStudioSubdir, parseHfUrl, isShardedOrIncompatibleGguf } from '../../lib/hf-to-provider'
@@ -487,6 +488,12 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
   // heisst in dieser App „kaputt oder wird geloescht" (siehe die Begruendung
   // am `.lu-control`-Rezept in index.css).
   const [installNotice, setInstallNotice] = useState<string | null>(null)
+  // Where Get sends a chat model on this visit (P11, David 2026-10-30). Null
+  // follows the chat model (resolveTextDownloadTarget); 'builtin' is the
+  // user's choice of the LU Engine for these downloads, without switching the
+  // chat model first. A button elsewhere (the Neuron tweaker) can hand it in.
+  const [targetChoice, setTargetChoice] = useState<'builtin' | null>(() => useUIStore.getState().discoverTarget)
+  useEffect(() => { useUIStore.getState().clearDiscoverTarget() }, [])
   // T-69: ein Controller pro Installationsversuch. Er bricht ab, wenn die
   // Ansicht verschwindet — AppShell haengt Models an `currentView === 'models'`
   // (`AppShell.tsx:955`), ein Wechsel haengt sie also wirklich ab — und wenn
@@ -705,6 +712,18 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
     return `Download failed: ${msg}`
   }
 
+  const targetInput = {
+    activeChatModel,
+    openai: providers.openai,
+    ollamaEnabled: !!providers.ollama?.enabled,
+  }
+  const followTarget = resolveTextDownloadTarget(targetInput)
+  const shownTarget = chosenTextDownloadTarget(targetInput, targetChoice)
+  const targetName = (t: typeof shownTarget) => textDownloadTargetLabel(t, providers.openai?.name)
+  /** What a tile's Get says it fills. An entry only Ollama can pull goes
+   *  there whatever was chosen (handleTextDownload). */
+  const getTargetOf = (m: DiscoverModel) => (m.ollamaModel ? 'Ollama' : targetName(shownTarget))
+
   // `confirmed`: the user already said yes to the size and the parts in the
   // Hugging Face link dialog, so a split set starts without a second question.
   const handleTextDownload = async (model: DiscoverModel, opts: { confirmed?: boolean } = {}) => {
@@ -725,11 +744,10 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
     // them and the file went down the LM Studio branch into a nested folder
     // the built-in engine never scans. resolveTextDownloadTarget keeps the
     // active-model rule and adds the missing fallback.
-    const downloadTarget = resolveTextDownloadTarget({
-      activeChatModel,
-      openai: providers.openai,
-      ollamaEnabled: !!providers.ollama?.enabled,
-    })
+    const downloadTarget = chosenTextDownloadTarget(targetInput, targetChoice)
+    // Chosen against the chat model: the file goes to the LU Engine, and the
+    // chat stays on the model the user is talking to.
+    const keepChatModel = downloadTarget === 'builtin' && resolveTextDownloadTarget(targetInput) !== 'builtin'
     const isActiveBuiltin = downloadTarget === 'builtin'
     const isActiveLmStudio = downloadTarget === 'lmstudio'
     const isActiveOllama = downloadTarget === 'ollama'
@@ -884,7 +902,9 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
       }
       const plan = planModelDownload(model, realUrl, realName, realBytes, single?.sha256, { part, withImagePart: withPart })
       await startPlannedDownload(plan, targetDir, model.group || model.name)
-      if (isActiveBuiltin) {
+      if (isActiveBuiltin && keepChatModel) {
+        setInstallNotice(`${model.name} is downloading to the LU Engine. Your chat stays on its model; the Neuron tweaker and the model list show it once it is done.`)
+      } else if (isActiveBuiltin) {
         // Built-in engine: await the flat GGUF, then make it the active chat
         // model so the freshly-added model is chat-ready without a manual switch.
         // The projector is awaited too: booting before it lands would bring the
@@ -1015,6 +1035,7 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
         isInstalled={isModelFullyInstalled}
         dlState={getModelDownloadState}
         onDownload={handleTextDownload}
+        getTarget={getTargetOf}
         onUse={handleUseInstalled}
         canUse={canUseInstalled}
         isUsing={(m) => installedEntryFor(m)?.name === usingModel && usingModel !== null}
@@ -1094,6 +1115,24 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
         // also so nah wie moeglich an dem Raster, das sie erklaert.
         legend={isText && (uncensoredModels.length > 0 || mainstreamModels.length > 0)}
       />
+
+      {/* Where Get puts a chat model, and the way to choose the LU Engine
+          for it (P11). Only where it is a choice: when the chat model already
+          runs on the LU Engine there is nothing to pick. */}
+      {isText && (
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 t-body text-gray-600 dark:text-gray-300" data-testid="discover-target">
+          <span>Get downloads to <span className="font-semibold text-gray-900 dark:text-white" data-testid="discover-target-name">{targetName(shownTarget)}</span>{targetChoice === 'builtin' && followTarget !== 'builtin' ? ' for now.' : '.'}</span>
+          {followTarget !== 'builtin' && (targetChoice === 'builtin' ? (
+            <button className="lu-control" onClick={() => setTargetChoice(null)} data-testid="discover-target-follow">
+              Back to {targetName(followTarget)}
+            </button>
+          ) : (
+            <button className="lu-control" onClick={() => setTargetChoice('builtin')} data-testid="discover-target-builtin" title="The Neuron tweaker and the LU Engine only use files in the LU Engine. Your chat model stays as it is.">
+              Send to LU Engine instead
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* Install error banner */}
       {installError && (
@@ -1260,6 +1299,7 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
                       isInstalled={isModelFullyInstalled}
                       dlState={getModelDownloadState}
                       onDownload={handleTextDownload}
+                      getTarget={getTargetOf}
                       onUse={handleUseInstalled}
                       canUse={canUseInstalled}
                       isUsing={(m) => installedEntryFor(m)?.name === usingModel && usingModel !== null}

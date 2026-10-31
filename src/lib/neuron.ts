@@ -146,3 +146,26 @@ export function backendNote(kind: BackendKind): string | null {
       return 'Pick or download a model for LU Engine to start.'
   }
 }
+
+/** What the engine reads in a model's head about earlier changes
+ *  (`facts.tweaked`, `facts.original`; commands/neuron/model.rs). */
+export interface TweakFacts {
+  tweaked?: string[]
+  original?: string | null
+}
+
+/**
+ * The friendly note before computing on a model that was changed before
+ * (P11 FEHLER 10, David 31.10.2026: "works best with original models that
+ * were not tweaked before"). Null for an original model. `original` is what
+ * to search for in Discover ("Qwen3.5 9B"), when the head names it.
+ */
+export function tweakedModelNote(facts: TweakFacts): { title: string; text: string; original: string | null } | null {
+  const why = facts.tweaked ?? []
+  if (why.length === 0) return null
+  return {
+    title: 'Works best with original, untweaked models',
+    text: `This model looks changed before (${why.join(', ')}). Sliders may come out weaker or fail on it. The original model gives the cleanest result.`,
+    original: facts.original ?? null,
+  }
+}

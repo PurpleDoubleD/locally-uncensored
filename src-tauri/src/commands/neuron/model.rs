@@ -75,6 +75,62 @@ pub struct ModelFacts {
     pub n_embd: usize,
     pub template: Template,
     pub name: String,
+    /// Why this model looks changed before (abliterated, merge, …); empty
+    /// for an original. The view says "works best with original, untweaked
+    /// models" before computing when it is not empty.
+    pub tweaked: Vec<&'static str>,
+    /// The original to offer instead, family and size ("Qwen3.5 9B").
+    pub original: Option<String>,
+}
+
+/// What a GGUF head says about where a model came from.
+pub struct Signs<'a> {
+    pub file: &'a str,
+    pub name: &'a str,
+    pub finetune: Option<&'a str>,
+    pub base_names: &'a [String],
+    pub base_count: i64,
+    pub nextn: i64,
+}
+
+/// Words in a name that mean the weights were changed after the maker's
+/// release. Lower case, matched inside the name.
+const TWEAK_WORDS: [(&str, &str); 7] = [
+    ("abliterat", "abliterated"),
+    ("obliterat", "abliterated"),
+    ("heretic", "heretic"),
+    ("uncensor", "uncensored"),
+    ("decensor", "uncensored"),
+    ("merge", "merge"),
+    ("-mtp", "MTP"),
+];
+
+/// A maker's own fine-tunes (Qwen's "instruct", Gemma's "it") are originals.
+const MAKER_FINETUNES: [&str; 6] = ["instruct", "it", "chat", "base", "thinking", "reasoning"];
+
+/// Why a model looks tweaked, in the order the note names it (P11 FEHLER 10:
+/// the vector tool works best on original models; David, 31.10.2026).
+pub fn tweak_signs(s: &Signs) -> Vec<&'static str> {
+    let mut out: Vec<&'static str> = Vec::new();
+    let mut add = |w: &'static str| if !out.contains(&w) { out.push(w) };
+    if let Some(ft) = s.finetune {
+        let low = ft.to_lowercase();
+        let maker = low.split(|c: char| !c.is_ascii_alphanumeric()).any(|w| MAKER_FINETUNES.contains(&w));
+        if !low.is_empty() && !maker { add("fine-tune") }
+    }
+    if s.base_count > 1 { add("merge") }
+    let text = std::iter::once(s.file).chain(std::iter::once(s.name)).chain(s.base_names.iter().map(String::as_str))
+        .collect::<Vec<_>>().join(" ").to_lowercase();
+    for (needle, word) in TWEAK_WORDS {
+        if text.contains(needle) { add(word) }
+    }
+    if s.nextn > 0 { add("MTP") }
+    out
+}
+
+/// The original to offer: the family and size the head names.
+pub fn original_of(basename: Option<&str>, size: Option<&str>) -> Option<String> {
+    Some(format!("{} {}", basename?.trim(), size?.trim())).filter(|s| s.len() > 2)
 }
 
 /// Embedding and diffusion models (the architectures llama.cpp gives no
@@ -99,7 +155,26 @@ pub fn facts(path: &str) -> Result<ModelFacts, String> {
         Some(Meta::Str(s)) => s.clone(),
         _ => Path::new(path).file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default(),
     };
-    Ok(ModelFacts { template: Template::detect(template_text, &arch), arch, n_layer, n_embd, name })
+    let text = |k: &str| match head.keys.get(k) {
+        Some(Meta::Str(s)) => Some(s.as_str()),
+        _ => None,
+    };
+    let base_count = match head.keys.get("general.base_model.count") {
+        Some(Meta::Int(n)) => *n,
+        _ => 0,
+    };
+    let base_names: Vec<String> = (0..base_count.clamp(0, 16)).filter_map(|i| text(&format!("general.base_model.{i}.name")).map(str::to_string)).collect();
+    let file = Path::new(path).file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+    let tweaked = tweak_signs(&Signs {
+        file: &file,
+        name: &name,
+        finetune: text("general.finetune"),
+        base_names: &base_names,
+        base_count,
+        nextn: head.arch_int("nextn_predict_layers").unwrap_or(0),
+    });
+    let original = original_of(text("general.basename"), text("general.size_label"));
+    Ok(ModelFacts { template: Template::detect(template_text, &arch), arch, n_layer, n_embd, name, tweaked, original })
 }
 
 /// Reads one string array (`tokenizer.ggml.tokens`) out of a GGUF head,
@@ -274,5 +349,38 @@ mod tests {
         let ok = facts(head_file(dir.path(), "qwen2").to_str().unwrap()).unwrap();
         assert_eq!((ok.n_layer, ok.n_embd), (12, 768));
         assert!(!is_chat_arch("bert") && !is_chat_arch("gemma-embedding") && is_chat_arch("gemma3"));
+    }
+    /// P11 FEHLER 10 (David, 31.10.2026): a model that was changed before
+    /// (abliterated, heretic, uncensored fine-tunes, merges, MTP) gets a note
+    /// before computing, "works best with original, untweaked models".
+    #[test]
+    fn a_tweaked_model_is_recognised_and_an_original_is_not() {
+        // David's model: Qwen3.5-9B-The-Defiant, a fine-tune merged from six
+        // models, three of them "Uncensored Heretic".
+        let bases: Vec<String> = vec![
+            "Qwen3.5 9B TNG PKD Qwopus Coder".into(),
+            "Qwen3.5 9B Pro Writer 1984 Orwell Uncensored Heretic".into(),
+        ];
+        let defiant = tweak_signs(&Signs {
+            file: "Qwen3.5-9B-The-Defiant-Q4_K_M", name: "Qwen3.5 9B DS9 USS Defiant NM",
+            finetune: Some("DS9-USS-Defiant-NM"), base_names: &bases, base_count: 6, nextn: 0,
+        });
+        assert!(defiant.contains(&"fine-tune") && defiant.contains(&"merge") && defiant.contains(&"heretic") && defiant.contains(&"uncensored"), "{defiant:?}");
+        // Abliterated in the file name alone, and an MTP block alone.
+        assert_eq!(tweak_signs(&Signs { file: "Llama-3.1-8B-Instruct-abliterated.Q4_K_M", name: "", finetune: None, base_names: &[], base_count: 0, nextn: 0 }), vec!["abliterated"]);
+        assert_eq!(tweak_signs(&Signs { file: "Qwen3.5-9B", name: "Qwen3.5 9B", finetune: None, base_names: &[], base_count: 0, nextn: 1 }), vec!["MTP"]);
+        // The originals on this Mac: Qwen's instruct and Gemma's "it" with
+        // their one base model are no tweak.
+        assert!(tweak_signs(&Signs { file: "qwen2.5-0.5b-instruct-q8_0", name: "qwen2.5-0.5b-instruct", finetune: Some("qwen2.5-0.5b-instruct"), base_names: &[], base_count: 0, nextn: 0 }).is_empty());
+        let gemma_base: Vec<String> = vec!["Gemma 3 270m".into()];
+        assert!(tweak_signs(&Signs { file: "gemma-3-270m-it-Q8_0", name: "Gemma 3 270m It", finetune: Some("it"), base_names: &gemma_base, base_count: 1, nextn: 0 }).is_empty());
+        assert!(tweak_signs(&Signs { file: "Qwen3-4B-Thinking-2507-Q4_K_M", name: "Qwen3 4B Thinking 2507", finetune: Some("Thinking-2507"), base_names: &[], base_count: 0, nextn: 0 }).is_empty());
+    }
+
+    #[test]
+    fn the_original_to_offer_is_family_and_size() {
+        assert_eq!(original_of(Some("Qwen3.5"), Some("9B")), Some("Qwen3.5 9B".into()));
+        assert_eq!(original_of(Some("gemma-3"), Some("270M")), Some("gemma-3 270M".into()));
+        assert_eq!(original_of(None, Some("9B")), None);
     }
 }
