@@ -61,6 +61,15 @@ describe('LFM3 steht im Katalog', () => {
     for (const m of haupt) expect(m.description, m.name).toMatch(/revenue limit of 10 million a year/)
   })
 
+  it('jede Kachel sagt, wofuer das Modell gut ist, auch wenn der Mac den MLX-Build vorwaehlt', () => {
+    // Am Mac zeigte die VL- und die Omni-Kachel "NVFP4, an MLX build ..." als
+    // Kurzzeile, weil die Kachel ohne `blurb` den Text der gewaehlten Variante nimmt.
+    for (const m of lfm3()) {
+      expect(m.blurb, m.name).toBeTruthy()
+      expect(m.blurb, m.name).not.toMatch(/NVFP4|MLX/)
+    }
+  })
+
   it('das VL-Modell traegt Vision, das Textmodell nicht', () => {
     expect(lfm3().find((m) => m.ollamaModel === 'lfm3-vl:2b')!.tags).toContain('Vision')
     expect(lfm3().find((m) => m.ollamaModel === 'lfm3:1.7b')!.tags).not.toContain('Vision')
