@@ -36,6 +36,7 @@
 
 pub mod calib;
 pub mod cvec;
+pub mod estimate;
 pub mod model;
 pub mod presets;
 pub mod sae;
@@ -54,6 +55,15 @@ use tauri::Manager;
 const GENERATOR: &str = "lu-llama-cvector-generator";
 const PROBE_QUESTION: &str = "Write one sentence about rain.";
 const LOG_LINES: usize = 40;
+/// How the vector tool runs. `-ngl auto`: with a GPU backend (E1, 3.0.9:
+/// the tool comes out of the server build with BACKEND_DL) llama.cpp puts
+/// as many layers on the card as fit, as the engine does when the card was
+/// not measured (GH #156); a fixed 99 would fail on a model the card cannot
+/// hold. The chat engine is stopped first, so the tool has the card alone.
+/// LU only uses `mean`; PCA never runs. 1024 tokens hold the longest pair.
+const TOOL_ARGS: [&str; 6] = ["--method", "mean", "-ngl", "auto", "-c", "1024"];
+/// The speed the vector tool showed on this PC (`estimate`).
+const SPEED_FILE: &str = "tool-speed.json";
 
 // ── paths ─────────────────────────────────────────────────────────────────
 
@@ -431,12 +441,13 @@ fn generate(app: &tauri::AppHandle, model_path: &str, plus: &[String], minus: &[
         .arg("--positive-file").arg(&pos)
         .arg("--negative-file").arg(&neg)
         .arg("-o").arg(&out)
-        .args(["--method", "mean", "-ngl", "99", "-c", "1024"])
+        .args(TOOL_ARGS)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     crate::commands::engine::prepare_tool_command(app, &mut cmd);
     log(format!("$ {} …", binary.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default()));
+    let ran = Instant::now();
     let mut child = cmd.spawn().map_err(|e| format!("The vector tool did not start: {}", crate::os_error::english(&e)))?;
     let stderr = child.stderr.take().map(crate::commands::shell::drain);
     let stdout = child.stdout.take().ok_or("no output")?;
@@ -472,6 +483,10 @@ fn generate(app: &tauri::AppHandle, model_path: &str, plus: &[String], minus: &[
         return Err(tool_failure(&why));
     }
     with_job(|j| j.step = j.total);
+    let bytes = std::fs::metadata(model_path).map(|m| m.len()).unwrap_or(0);
+    if let (Some(key), Some(speed)) = (estimate::tool_key(&binary), estimate::speed_of_run(ran.elapsed().as_secs_f64(), bytes, plus.len())) {
+        estimate::remember(&root().join(SPEED_FILE), &key, speed);
+    }
     let cv = cvec::read(&out)?;
     let _ = std::fs::remove_file(&pos);
     let _ = std::fs::remove_file(&neg);
@@ -613,6 +628,14 @@ fn own_id(name: &str) -> String {
     if base.is_empty() { format!("own-{tag}") } else { format!("own-{base}-{tag}") }
 }
 
+/// The time range for a ready-made slider (the largest set of pairs) and for
+/// an own one, said before either starts.
+pub fn build_estimates(model_bytes: u64, template: model::Template, measured: Option<f64>) -> (estimate::Estimate, estimate::Estimate) {
+    let preset_pairs = presets::PRESETS.iter().map(|p| presets::pairs(p, template).0.len()).max().unwrap_or(0);
+    let own_pairs = presets::custom_pairs(&["a".into()], &["b".into()], template).map(|(p, _)| p.len()).unwrap_or(0);
+    (estimate::estimate(model_bytes, preset_pairs, measured), estimate::estimate(model_bytes, own_pairs, measured))
+}
+
 #[tauri::command]
 pub fn neuron_presets() -> Value {
     json!(presets::PRESETS.iter().map(|p| json!({ "id": p.id, "left": p.left, "right": p.right })).collect::<Vec<_>>())
@@ -635,6 +658,9 @@ pub async fn neuron_info(app: tauri::AppHandle, model_path: String) -> Result<Va
             })
         });
         let active = control_vector_for(&model_path);
+        let measured = generator_binary(&app).and_then(|b| estimate::tool_key(&b)).and_then(|k| estimate::remembered(&root.join(SPEED_FILE), &k));
+        let bytes = std::fs::metadata(&model_path).map(|m| m.len()).unwrap_or(0);
+        let (build_estimate, own_estimate) = build_estimates(bytes, facts.template, measured);
         Ok(json!({
             "facts": facts,
             "modelKey": model_key(&model_path),
@@ -643,6 +669,8 @@ pub async fn neuron_info(app: tauri::AppHandle, model_path: String) -> Result<Va
             "vectors": list_vectors(&root, &model_path),
             "sae": sae,
             "activeMix": active,
+            "buildEstimate": build_estimate,
+            "ownEstimate": own_estimate,
         }))
     })
     .await
@@ -1022,6 +1050,23 @@ mod tests {
     }
 
     use super::*;
+
+    #[test]
+    fn the_time_before_computing_covers_a_ready_made_and_an_own_slider() {
+        // I1 on the box: LFM3 1.7B, a ready-made slider, ~25 min with the
+        // CPU baseline tool. An own slider has half the pairs.
+        let (preset, own) = build_estimates(1_099_627_808, super::model::Template::ChatMl, Some(estimate::SHIPPED_TOOL_CPU_BASELINE));
+        assert!(preset.low_secs <= 25 * 60 && preset.high_secs >= 25 * 60, "{preset:?}");
+        assert!(own.high_secs < preset.high_secs && own.low_secs < preset.low_secs, "{own:?}");
+        assert!(preset.measured);
+    }
+
+    #[test]
+    fn the_tool_lets_llama_cpp_fit_the_layers_to_the_card() {
+        let ngl = TOOL_ARGS.windows(2).find(|w| w[0] == "-ngl").map(|w| w[1]);
+        assert_eq!(ngl, Some("auto"));
+        assert!(TOOL_ARGS.windows(2).any(|w| w == ["--method", "mean"]));
+    }
 
     #[test]
     fn progress_lines_of_the_generator_parse() {

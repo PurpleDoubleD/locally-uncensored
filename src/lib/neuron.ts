@@ -1,7 +1,7 @@
 // The Neuron tweaker's rules that need no backend: which slider values apply
 // to which chat, how a job's progress reads, when to warn.
 
-import type { NeuronEntry, NeuronJob } from '../api/neuron'
+import type { NeuronEntry, NeuronEstimate, NeuronJob } from '../api/neuron'
 import type { Persona } from '../types/settings'
 import { plainChatSpeaker } from './chat-persona'
 import { isGroupChat } from './group-chat'
@@ -167,5 +167,26 @@ export function tweakedModelNote(facts: TweakFacts): { title: string; text: stri
     title: 'Works best with original, untweaked models',
     text: `This model looks changed before (${why.join(', ')}). Sliders may come out weaker or fail on it. The original model gives the cleanest result.`,
     original: facts.original ?? null,
+  }
+}
+
+/**
+ * How long one slider will take, said before it starts (I1 on the box,
+ * 31.10.2026: ~25 min on Windows with the CPU-only vector tool, and nothing
+ * said so). Null when it is a moment, as on the Mac.
+ */
+export function buildTimeNote(est: NeuronEstimate): { title: string; text: string } | null {
+  if (est.highSecs < 120) return null
+  const lowMin = Math.round(est.lowSecs / 60)
+  const highMin = Math.round(est.highSecs / 60)
+  const range = est.lowSecs >= 60 && highMin < 60
+    ? `${lowMin}–${highMin} min`
+    : `${shortDuration(est.lowSecs)} to ${shortDuration(est.highSecs)}`
+  const basis = est.measured
+    ? 'That is what the last run on this PC took.'
+    : 'LU reads every example pair through the whole model, and its vector tool is slow on this PC.'
+  return {
+    title: 'This takes a while on this PC',
+    text: `Expect about ${range} for one slider. ${basis} The chat pauses while LU computes; you can stop it any time.`,
   }
 }

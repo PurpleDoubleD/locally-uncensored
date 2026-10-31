@@ -468,6 +468,17 @@ describe('build-llama.sh — the llama.cpp revision is pinned to a commit', { ti
     expect(runScript('printf "%s" "$LU_PATCH_DIR"', { LLAMA_LU_PATCH_DIR: '' }).out).toBe(`${REPO_ROOT}/scripts/llama-patches`.replace(/\\/g, '/'))
   })
 
+  // I1 on the box (31.10.2026): the Windows tool took ~25 min and the app
+  // showed no progress. Over a pipe the generator's printf is fully
+  // buffered, so its "Evaluating prompt[i/n]" lines, which the app reads for
+  // progress and time left, came in batches or only at the end.
+  it('the repo\'s generator patches hand every progress line to the app at once', () => {
+    const dir = join(REPO_ROOT, 'scripts', 'llama-patches')
+    const patch = readFileSync(join(dir, '0003-cvector-generator-progress-flush.patch'), 'utf8')
+    expect([...patch.matchAll(/^\+\+\+ b\/(.+)$/gm)].map((m) => m[1])).toEqual(['tools/cvector-generator/cvector-generator.cpp'])
+    expect(patch).toMatch(/^ {13}\(int\) t\.max_seq_len\);\n(\+ {8}\/\/.*\n)*\+ {8}fflush\(stdout\);$/m)
+  })
+
   it('hashes a digest of the binary it installed', () => {
     const probe = join(tmp('llama-digest-'), 'artifact')
     writeFileSync(probe, 'llama-server')

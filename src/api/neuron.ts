@@ -46,6 +46,16 @@ export interface NeuronInfo {
   vectors: NeuronVector[]
   sae: NeuronSae | null
   activeMix: string | null
+  /** How long one slider takes on this PC, said before it starts. */
+  buildEstimate: NeuronEstimate
+  ownEstimate: NeuronEstimate
+}
+
+export interface NeuronEstimate {
+  lowSecs: number
+  highSecs: number
+  /** From a run on this PC with this vector tool, not the shipped default. */
+  measured: boolean
 }
 
 export interface NeuronJob {
