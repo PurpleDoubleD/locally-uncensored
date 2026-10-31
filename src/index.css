@@ -2830,3 +2830,131 @@ html[data-computer-surface]:not([data-computer-surface='window']) #root {
 @media (prefers-reduced-motion: reduce) {
   .lu-develop { animation: none; }
 }
+
+/* ──────────────────────────────────────────────────────────────────
+   Neurons introduction (N2, 3.0.9). Calm loops of 3–6 s, nothing that
+   blinks. Colours from the house tokens: the accent for what the user
+   adds, the greys of the page for the model. With reduced motion every
+   drawing stands still in its finished state.
+   ───────────────────────────────────────────────────────────────── */
+.neuron-intro .nintro-label { font-size: 10px; font-weight: 600; letter-spacing: 0.04em; }
+.neuron-intro .nintro-code { font-size: 12px; font-family: ui-monospace, 'JetBrains Mono', 'SF Mono', Menlo, monospace; fill: #111827; }
+.dark .neuron-intro .nintro-code { fill: #f3f4f6; }
+.neuron-intro .nintro-muted-text { fill: #6b7280; }
+.dark .neuron-intro .nintro-muted-text { fill: #9ca3af; }
+.neuron-intro .nintro-accent-text { fill: var(--color-lu-accent); }
+.neuron-intro .nintro-accent-stroke { stroke: var(--color-lu-accent); }
+.neuron-intro .nintro-accent-fill { fill: var(--color-lu-accent); }
+.neuron-intro .nintro-accent-fill-soft { fill: color-mix(in srgb, var(--color-lu-accent) 16%, transparent); }
+.neuron-intro .nintro-layer { fill: #e5e7eb; }
+.dark .neuron-intro .nintro-layer { fill: rgba(255, 255, 255, 0.10); }
+.neuron-intro .nintro-layer--hit { animation: lu-nintro-hit 3s ease-in-out infinite; }
+.neuron-intro .nintro-token { fill: #9ca3af; animation: lu-nintro-rise 2.1s ease-in infinite; }
+.neuron-intro .nintro-push { animation: lu-nintro-push 3s ease-in-out infinite; }
+.neuron-intro .nintro-track { stroke: #d1d5db; }
+.dark .neuron-intro .nintro-track { stroke: rgba(255, 255, 255, 0.16); }
+.neuron-intro .nintro-knob-fill { fill: #ffffff; stroke: #9ca3af; stroke-width: 1.5; }
+.dark .neuron-intro .nintro-knob-fill { fill: #2a2a2a; stroke: #6b7280; }
+.neuron-intro .nintro-knob { animation: lu-nintro-knob 4.2s ease-in-out infinite; }
+.neuron-intro .nintro-card { fill: #ffffff; stroke: #e5e7eb; stroke-width: 1; }
+.dark .neuron-intro .nintro-card { fill: rgba(255, 255, 255, 0.04); stroke: rgba(255, 255, 255, 0.10); }
+.neuron-intro .nintro-card--accent { fill: color-mix(in srgb, var(--color-lu-accent) 8%, transparent); stroke: color-mix(in srgb, var(--color-lu-accent) 45%, transparent); }
+.neuron-intro .nintro-line { fill: #d1d5db; transform-box: fill-box; transform-origin: left center; animation: lu-nintro-write 4.4s ease-out infinite; }
+.dark .neuron-intro .nintro-line { fill: rgba(255, 255, 255, 0.18); }
+.neuron-intro .nintro-line--accent,
+.dark .neuron-intro .nintro-line--accent { fill: var(--color-lu-accent); }
+/* WebKit draws no clip-path on SVG groups: the code slides in instead of being typed. */
+.neuron-intro .nintro-type { opacity: 0; animation: lu-nintro-type 5s ease-out infinite; }
+.neuron-intro .nintro-glow { opacity: 0; animation: lu-nintro-glow 5s ease-in-out infinite; }
+.neuron-intro .nintro-dash { stroke-dashoffset: 40; animation: lu-nintro-dash 5s linear infinite; }
+.neuron-intro .nintro-arrive { opacity: 0; animation: lu-nintro-arrive 5s ease-out infinite; }
+.neuron-intro .nintro-tile { opacity: 0; animation: lu-nintro-tile 0.5s ease-out forwards; }
+
+@keyframes lu-nintro-rise {
+  0% { transform: translateY(0); opacity: 0; }
+  15% { opacity: 1; }
+  85% { opacity: 1; }
+  100% { transform: translateY(-150px); opacity: 0; }
+}
+@keyframes lu-nintro-hit {
+  0%, 30%, 100% { fill: #e5e7eb; }
+  50%, 70% { fill: color-mix(in srgb, var(--color-lu-accent) 55%, transparent); }
+}
+.dark .neuron-intro .nintro-layer--hit { animation-name: lu-nintro-hit-dark; }
+@keyframes lu-nintro-hit-dark {
+  0%, 30%, 100% { fill: rgba(255, 255, 255, 0.10); }
+  50%, 70% { fill: color-mix(in srgb, var(--color-lu-accent) 60%, transparent); }
+}
+@keyframes lu-nintro-push {
+  0%, 20% { transform: translateX(14px); opacity: 0.2; }
+  50%, 80% { transform: translateX(0); opacity: 1; }
+  100% { transform: translateX(14px); opacity: 0.2; }
+}
+@keyframes lu-nintro-knob {
+  0%, 100% { transform: translateY(0); }
+  45%, 70% { transform: translateY(var(--nintro-to, 0px)); }
+}
+@keyframes lu-nintro-write {
+  0% { transform: scaleX(0); }
+  30%, 85% { transform: scaleX(1); }
+  100% { transform: scaleX(1); opacity: 0; }
+}
+@keyframes lu-nintro-type {
+  0% { opacity: 0; transform: translateX(-8px); }
+  25%, 100% { opacity: 1; transform: none; }
+}
+@keyframes lu-nintro-glow {
+  0%, 25% { opacity: 0; }
+  35%, 80% { opacity: 1; }
+  100% { opacity: 0; }
+}
+@keyframes lu-nintro-dash {
+  0%, 35% { stroke-dashoffset: 40; opacity: 0; }
+  40% { opacity: 1; }
+  100% { stroke-dashoffset: 0; opacity: 1; }
+}
+@keyframes lu-nintro-arrive {
+  0%, 50% { opacity: 0; }
+  60%, 100% { opacity: 1; }
+}
+@keyframes lu-nintro-tile {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .neuron-intro .nintro-layer--hit,
+  .neuron-intro .nintro-token,
+  .neuron-intro .nintro-push,
+  .neuron-intro .nintro-knob,
+  .neuron-intro .nintro-line,
+  .neuron-intro .nintro-type,
+  .neuron-intro .nintro-glow,
+  .neuron-intro .nintro-dash,
+  .neuron-intro .nintro-arrive,
+  .neuron-intro .nintro-tile { animation: none; }
+  .neuron-intro .nintro-token { opacity: 0; }
+  .neuron-intro .nintro-type,
+  .neuron-intro .nintro-glow,
+  .neuron-intro .nintro-arrive,
+  .neuron-intro .nintro-tile,
+  .neuron-intro .nintro-dash { opacity: 1; }
+  .neuron-intro .nintro-knob { transform: translateY(var(--nintro-to, 0px)); }
+}
+
+/* Neurons slider (N2): the house range (track and knob above), with a
+   mark at 0 so "unchanged" can be seen, and a taller hit area. */
+input[type="range"].neuron-range,
+.light input[type="range"].neuron-range {
+  height: 18px;
+  cursor: pointer;
+  background:
+    linear-gradient(to right, transparent calc(50% - 1px), rgba(0, 0, 0, 0.35) calc(50% - 1px), rgba(0, 0, 0, 0.35) calc(50% + 1px), transparent calc(50% + 1px)) center / 100% 12px no-repeat,
+    linear-gradient(rgba(0, 0, 0, 0.1), rgba(0, 0, 0, 0.1)) center / 100% 4px no-repeat;
+}
+.dark input[type="range"].neuron-range {
+  background:
+    linear-gradient(to right, transparent calc(50% - 1px), rgba(255, 255, 255, 0.35) calc(50% - 1px), rgba(255, 255, 255, 0.35) calc(50% + 1px), transparent calc(50% + 1px)) center / 100% 12px no-repeat,
+    linear-gradient(rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.1)) center / 100% 4px no-repeat;
+}
+input[type="range"].neuron-range:disabled { cursor: not-allowed; opacity: 0.5; }

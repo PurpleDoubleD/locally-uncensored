@@ -77,7 +77,7 @@ beforeEach(() => {
   job.status = 'idle'
   job.modelPath = ''
   disk.models = [NOMIC, QWEN]
-  useNeuronStore.setState({ profiles: {}, scopeByModel: {} })
+  useNeuronStore.setState({ profiles: {}, scopeByModel: {}, introSeen: true })
   useModelStore.setState({ activeModel: 'openai::qwen2.5-0.5b-instruct-q8_0' })
 })
 afterEach(() => cleanup())

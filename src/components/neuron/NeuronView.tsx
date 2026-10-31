@@ -1,30 +1,35 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Download, FilePlus, Loader2, RotateCcw, Search, Sliders, Trash2 } from 'lucide-react'
+import { CircleHelp, Download, FilePlus, FlaskConical, Hash, Loader2, RotateCcw, Sliders, Sparkles } from 'lucide-react'
 import { Hinweis } from '../ui/Hinweis'
 import { HINWEIS_TEXT } from '../../lib/hinweis'
 import { HOWTO } from '../../lib/howto'
 import { ICON_SM } from '../ui/icon-size'
-import { openExternal } from '../../api/backend'
 import { addGgufFile, listBundledModels, bundledEngineStatus, isEmbeddingGgufName, type BundledModel } from '../../api/engine'
+import * as neuronApi from '../../api/neuron'
 import {
-  neuronApply, neuronBuildOwn, neuronBuildPreset, neuronCancel, neuronCompare, neuronDelete, neuronDismiss,
-  neuronFeatureAdd, neuronInfo, neuronPresets, neuronSaeDownload, neuronSaeSearch, neuronStatus,
-  type CompareResult, type FeatureHit, type NeuronInfo, type NeuronJob, type NeuronPreset, type NeuronVector,
+  neuronApply, neuronBuildOwn, neuronBuildPreset, neuronCancel, neuronDelete, neuronDismiss,
+  neuronFeatureAdd, neuronInfo, neuronPresets, neuronSaeDownload, neuronStatus,
+  type NeuronInfo, type NeuronJob, type NeuronPreset,
 } from '../../api/neuron'
 import { getProviderIdFromModel } from '../../api/providers/model-name'
 import { isManagedBuiltinSlot } from '../../api/builtin-ensure'
 import { preservedSwapCtx } from '../../lib/builtin-ctx'
 import { builtinModelMatches } from '../../lib/builtin-model-identity'
 import {
-  backendNote, effectiveStrengths, entriesFor, hasPersonaProfile, jobProgressText, jobShare, sameEntries,
-  clampStrength, steeringPersona, strengthWarning, warningText, type BackendKind,
+  backendNote, effectiveStrengths, entriesFor, hasPersonaProfile,
+  clampStrength, steeringPersona, strengthWarning, warningText, type BackendKind, type Strengths,
 } from '../../lib/neuron'
+import { featureVectorId, neuronVectorId, recipeOwnId, type Recipe, type RecipeEntry } from '../../lib/neuron-recipe'
 import { editingKey, useNeuronStore } from '../../stores/neuronStore'
 import { useModelStore } from '../../stores/modelStore'
 import { useChatStore } from '../../stores/chatStore'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { useUIStore } from '../../stores/uiStore'
 import type { BuiltinEngineTuning } from '../../types/settings'
+import { JobPanel, ScopeButton, SliderRow, StepCard, WayIntro, WayTabs, signedValue } from './parts'
+import { ComparePanel, CoordinatesPanel, FeaturePanel, OwnSliderForm, SharePanel, entryState, type NeuronInfoPlus } from './panels'
+import { NeuronIntroHost } from './NeuronIntro'
+import { useNeuronIntroRequest } from '../../stores/neuronIntroStore'
 
 const APPLY_DELAY_MS = 700
 
@@ -32,6 +37,8 @@ const NO_CHAT_MODEL = 'The tweaker works on chat models the LU Engine runs. Down
 const GGUF_STEPS = HOWTO['gguf-file'].films[0].steps
 /** Why a model the user already has in Ollama or LM Studio is not offered. */
 const OTHER_APPS = 'Models in Ollama or LM Studio do not show up here: those programs take no control vectors, so the sliders cannot reach them.'
+
+type Way = 'ready' | 'own' | 'features' | 'coords'
 
 /** Which program answers the chat's model right now. */
 function chatBackend(activeModel: string | null, appMode: string | undefined): BackendKind {
@@ -62,6 +69,17 @@ async function restartTuning(model: BundledModel | undefined): Promise<BuiltinEn
   }
 }
 
+/** The engine piece for single neurons (AN-P11-N2.md), when this build has
+ *  it. Read through the module, so the page needs no change once it lands. */
+function mlpAdd(): ((modelPath: string, layer: number, neuron: number) => Promise<unknown>) | null {
+  try {
+    const fn = (neuronApi as Record<string, unknown>).neuronMlpAdd
+    return typeof fn === 'function' ? fn as (p: string, l: number, n: number) => Promise<unknown> : null
+  } catch {
+    return null
+  }
+}
+
 export function NeuronView() {
   const activeModel = useModelStore((s) => s.activeModel)
   const appMode = useSettingsStore((s) => s.settings.appMode)
@@ -85,10 +103,15 @@ export function NeuronView() {
   const [error, setError] = useState<string | null>(null)
   const [applyState, setApplyState] = useState<'idle' | 'applying' | 'applied'>('idle')
   const [lastApplied, setLastApplied] = useState<string>('')
+  const [way, setWay] = useState<Way>('ready')
+  const [compared, setCompared] = useState(false)
+  // Jobs a recipe asked for, run one after the other.
+  const [queue, setQueue] = useState<Array<() => Promise<unknown>>>([])
+  const [undo, setUndo] = useState<{ key: string; prev: Strengths | undefined } | null>(null)
 
   const backend = chatBackend(activeModel, appMode)
   const model = models.find((m) => m.path === modelPath)
-  const info = loadedInfo?.path === modelPath ? loadedInfo.info : null
+  const info = loadedInfo?.path === modelPath ? loadedInfo.info as NeuronInfoPlus : null
   const pathRef = useRef(modelPath)
   pathRef.current = modelPath
 
@@ -183,7 +206,7 @@ export function NeuronView() {
     return () => window.clearTimeout(t)
   }, [entries, modelPath, info, lastApplied, model, refreshInfo])
 
-  const startJob = async (start: () => Promise<unknown>) => {
+  const startJob = useCallback(async (start: () => Promise<unknown>) => {
     setError(null)
     try {
       await start()
@@ -191,7 +214,17 @@ export function NeuronView() {
     } catch (e) {
       setError(String(e))
     }
-  }
+  }, [poll])
+
+  // A recipe's jobs, one at a time: the next starts when nothing runs.
+  const [starting, setStarting] = useState(false)
+  useEffect(() => {
+    if (running || starting || queue.length === 0) return
+    const [next, ...rest] = queue
+    setStarting(true)
+    setQueue(rest)
+    void startJob(next).finally(() => setStarting(false))
+  }, [running, starting, queue, startJob])
 
   // A persona without its own profile shows the model's; its first move
   // starts from what is shown, so the other sliders keep their place (T1:
@@ -207,154 +240,327 @@ export function NeuronView() {
     else setProfile(editKey, {})
   }
 
+  const deleteVector = (id: string) => void neuronDelete(modelPath, id).then(() => { removeSlider(modelKey, id); return refreshInfo(modelPath) })
+
+  const ids = useMemo(() => ({
+    feature: (n: number) => featureVectorId(info?.sae?.id ?? '', n),
+    neuron: neuronVectorId,
+    own: recipeOwnId,
+  }), [info])
+  const mlp = info?.mlpNeurons ? mlpAdd() : null
+  const states = useCallback((e: RecipeEntry) => {
+    if (!info) return { state: 'blocked' as const, why: 'The model is still loading.' }
+    return entryState(e, { ...info, mlpNeurons: !!mlp }, available, ids)
+  }, [info, mlp, available, ids])
+
+  /** A recipe replaces the sliders (one Undo brings them back); what is not
+   *  computed for this model yet is queued and prepared one by one. */
+  const applyRecipe = (recipe: Recipe) => {
+    if (!modelKey || !info) return
+    setUndo({ key: editKey, prev: profiles[editKey] })
+    const next: Strengths = {}
+    const jobs: Array<() => Promise<unknown>> = []
+    for (const e of recipe.entries) {
+      const st = states(e)
+      if (st.state === 'blocked') continue
+      if (e.kind === 'preset') {
+        next[e.id] = clampStrength(e.strength)
+        if (st.state === 'prepare') jobs.push(() => neuronBuildPreset(modelPath, e.id))
+      } else if (e.kind === 'feature') {
+        next[ids.feature(e.feature)] = clampStrength(e.strength)
+        if (st.state === 'prepare') jobs.push(() => neuronFeatureAdd(modelPath, e.feature))
+      } else if (e.kind === 'own') {
+        const id = recipeOwnId(e)
+        next[id] = clampStrength(e.strength)
+        if (st.state === 'prepare') jobs.push(() => neuronBuildOwn(modelPath, e.name, e.more, e.less, id))
+      } else {
+        next[neuronVectorId(e.layer, e.neuron)] = clampStrength(e.dose)
+        if (st.state === 'prepare' && mlp) jobs.push(() => mlp(modelPath, e.layer, e.neuron))
+      }
+    }
+    setProfile(editKey, next)
+    setQueue(jobs)
+  }
+
+  const undoRecipe = () => {
+    if (!undo) return
+    if (undo.prev) setProfile(undo.key, undo.prev)
+    else removeProfile(undo.key)
+    setQueue([])
+    setUndo(null)
+  }
+
+  // The mix as a recipe to share: what is on, by its kind.
+  const share = useMemo(() => {
+    const out: RecipeEntry[] = []
+    const skipped: string[] = []
+    for (const e of entries) {
+      const v = vectors.find((x) => x.id === e.id)
+      if (!v) continue
+      const nm = /^n-L(\d+)-N(\d+)$/.exec(v.id)
+      if (v.kind === 'preset') out.push({ kind: 'preset', id: v.id, strength: e.strength })
+      else if (v.kind === 'feature' && v.feature != null) out.push({ kind: 'feature', feature: v.feature, strength: e.strength })
+      else if (v.kind === 'own') {
+        const clean = (ls: string[]) => ls.map((l) => l.replace(/\s+/g, ' ').trim().slice(0, 300)).filter(Boolean).slice(0, 40)
+        const more = clean(v.more)
+        const less = clean(v.less)
+        if (more.length && less.length) out.push({ kind: 'own', name: v.name.slice(0, 40), more, less, strength: e.strength })
+        else skipped.push(v.name)
+      } else if (nm) out.push({ kind: 'neuron', layer: Number(nm[1]), neuron: Number(nm[2]), dose: e.strength })
+      else skipped.push(v.name)
+    }
+    const recipe: Recipe = { model: info?.facts.name || model?.name || null, entries: out }
+    return { recipe, skipped }
+  }, [entries, vectors, info, model])
+
+  const showIntro = useNeuronIntroRequest((s) => s.show)
+
   if (modelsLoaded && models.length === 0) {
     return (
-      <NoModel
-        onDownload={() => {
-          useModelStore.getState().setCategoryFilter('text')
-          useUIStore.getState().openDiscoverFor('builtin')
-        }}
-        onAddFile={async () => {
-          try {
-            if (await addGgufFile()) setModelsSeq((n) => n + 1)
-          } catch (e) {
-            setError(String(e))
-          }
-        }}
-        error={error}
-        onDismissError={() => setError(null)}
-      />
+      <>
+        <NoModel
+          onDownload={() => {
+            useModelStore.getState().setCategoryFilter('text')
+            useUIStore.getState().openDiscoverFor('builtin')
+          }}
+          onAddFile={async () => {
+            try {
+              if (await addGgufFile()) setModelsSeq((n) => n + 1)
+            } catch (e) {
+              setError(String(e))
+            }
+          }}
+          onIntro={showIntro}
+          error={error}
+          onDismissError={() => setError(null)}
+        />
+        <NeuronIntroHost />
+      </>
     )
   }
 
+  const presetRows = presets.map((p) => ({ p, v: vectors.find((x) => x.id === p.id) }))
+  const own = vectors.filter((v) => v.kind === 'own')
+  const features = vectors.filter((v) => v.kind === 'feature')
+  const neurons = vectors.filter((v) => /^n-L\d+-N\d+$/.test(v.id))
+  const onCount = (pred: (id: string) => boolean) => entries.filter((e) => pred(e.id)).length
+  const labelOf = (id: string) => {
+    const v = vectors.find((x) => x.id === id)
+    if (!v) return id
+    if (v.kind === 'preset') return v.right
+    return v.name
+  }
+
   return (
-    <Shell>
-      {backend !== 'lu-engine' && <Hinweis className="mb-3">{backendNote(backend)}</Hinweis>}
-      {error && <Hinweis ton="fehler" className="mb-3" onDismiss={() => setError(null)}>{error}</Hinweis>}
-
-      <div className="flex flex-wrap items-center gap-2 mb-1">
-        <label className="t-body text-gray-600 dark:text-gray-300" htmlFor="neuron-model">Model</label>
-        <select
-          id="neuron-model"
-          data-testid="neuron-model"
-          className="t-body rounded-md bg-gray-100 dark:bg-white/[0.06] px-2 py-1 text-gray-900 dark:text-white max-w-full"
-          value={modelPath}
-          onChange={(e) => { setModelPath(e.target.value); setLastApplied('') }}
-        >
-          {models.map((m) => <option key={m.path} value={m.path}>{m.name}{m.loaded ? ' (loaded)' : ''}</option>)}
-        </select>
-        {applyState === 'applying' && <span className={`t-micro ${HINWEIS_TEXT.ruhig} inline-flex items-center gap-1`}><Loader2 size={12} className="animate-spin" /> Restarting the engine with your sliders…</span>}
-        {applyState === 'applied' && <span className={`t-micro ${HINWEIS_TEXT.ruhig}`} data-testid="neuron-applied">{entries.length ? `Active in chat: ${entries.length} slider${entries.length > 1 ? 's' : ''}` : 'Off: the model runs unchanged'}</span>}
-      </div>
-      {info && (
-        <p className={`t-micro ${HINWEIS_TEXT.ruhig} mb-3`}>
-          {info.facts.arch} · {info.facts.nLayer} layers · sliders act on layers {info.band[0]}–{info.band[1]}
-        </p>
-      )}
-
-      {persona && modelKey && (
-        <div className="flex flex-wrap items-center gap-1 mb-4 t-body" role="radiogroup" aria-label="Save sliders for">
-          <span className="text-gray-600 dark:text-gray-300 mr-1">Save for</span>
-          <ScopeButton on={scope === 'model'} onClick={() => setScope(modelKey, 'model')}>This model</ScopeButton>
-          <ScopeButton on={scope === 'persona'} onClick={() => { setScope(modelKey, 'persona'); if (!hasPersonaProfile(profiles, modelKey, persona.id)) setProfile(editingKey(modelKey, persona.id, 'persona'), { ...(profiles[modelKey] ?? {}) }) }}>
-            This model with “{persona.name}”
-          </ScopeButton>
+    <Shell onIntro={showIntro}>
+      <StepCard
+        n={1}
+        title="Pick a model"
+        lead="Neurons works on chat models that run in the LU Engine."
+        done={!!info && backend === 'lu-engine'}
+        testId="neuron-step-model"
+      >
+        <div className="grid grid-cols-[auto_1fr] items-center gap-x-3 gap-y-2">
+          <label className="t-body font-medium text-gray-200" htmlFor="neuron-model">Model</label>
+          <select
+            id="neuron-model"
+            data-testid="neuron-model"
+            className="t-body rounded-md border border-gray-200 dark:border-white/[0.08] bg-white dark:bg-white/[0.04] px-2.5 py-1.5 text-gray-900 dark:text-white min-w-0 w-full"
+            value={modelPath}
+            onChange={(e) => { setModelPath(e.target.value); setLastApplied(''); setCompared(false) }}
+          >
+            {models.map((m) => <option key={m.path} value={m.path}>{m.name}{m.loaded ? ' (loaded)' : ''}</option>)}
+          </select>
+          <span />
+          <p className={`t-micro ${HINWEIS_TEXT.ruhig}`}>
+            {info ? `${info.facts.arch} · ${info.facts.nLayer} layers · sliders act on layers ${info.band[0]}–${info.band[1]}` : 'Reading the model…'}
+          </p>
         </div>
-      )}
-
-      {steering.group && (
-        <Hinweis className="mb-3"><span data-testid="neuron-group-note">This chat is a group chat: the model&apos;s sliders apply to every speaker. Sliders saved for one persona apply in its own chats (per speaker: later version).</span></Hinweis>
-      )}
-
-      {job && job.status !== 'idle' && <JobPanel job={job} onStop={() => void neuronCancel().then(poll)} onDismiss={() => void neuronDismiss().then(poll)} />}
-
-      <Section title="Sliders">
-        {info && !info.generator && (
-          <Hinweis className="mb-2">This install is missing its vector tool, so ready-made and own sliders cannot be computed. Reinstall LU to bring it back. Feature sliders still work where the model has one.</Hinweis>
+        {backend !== 'lu-engine' && <Hinweis className="mt-3">{backendNote(backend)}</Hinweis>}
+        {steering.group && (
+          <Hinweis className="mt-3"><span data-testid="neuron-group-note">This chat is a group chat: the model&apos;s sliders apply to every speaker. Sliders saved for one persona apply in its own chats (per speaker: later version).</span></Hinweis>
         )}
-        <div className="space-y-2" data-testid="neuron-presets">
-          {presets.map((p) => {
-            const v = vectors.find((x) => x.id === p.id)
-            return (
-              <SliderRow
-                key={p.id}
-                id={p.id}
-                left={p.left}
-                right={p.right}
-                value={strengths[p.id] ?? 0}
-                computed={!!v}
-                disabled={running || !modelPath || (!v && !info?.generator)}
-                onCompute={() => void startJob(() => neuronBuildPreset(modelPath, p.id))}
-                onChange={(x) => move(p.id, x)}
-              />
-            )
-          })}
+      </StepCard>
+
+      <StepCard
+        n={2}
+        title="Choose your sliders"
+        lead="Pick a way to change the model. Everything you turn on is listed at the bottom of this step."
+        done={entries.length > 0}
+        testId="neuron-step-sliders"
+      >
+        {error && <Hinweis ton="fehler" className="mb-3" onDismiss={() => setError(null)}>{error}</Hinweis>}
+        {job && job.status !== 'idle' && <JobPanel job={job} onStop={() => { setQueue([]); void neuronCancel().then(poll) }} onDismiss={() => void neuronDismiss().then(poll)} />}
+        {queue.length > 0 && <p className={`t-micro ${HINWEIS_TEXT.ruhig} mb-3`} data-testid="neuron-queue">{queue.length} more to prepare from the recipe, one after the other.</p>}
+        {info && !info.generator && (
+          <Hinweis className="mb-3">This install is missing its vector tool, so ready-made and own sliders cannot be computed. Reinstall LU to bring it back. Feature sliders still work where the model has one.</Hinweis>
+        )}
+
+        <WayTabs<Way>
+          current={way}
+          onPick={setWay}
+          ways={[
+            { id: 'ready', label: 'Ready-made', count: onCount((id) => presets.some((p) => p.id === id)) },
+            { id: 'own', label: 'From examples', count: onCount((id) => id.startsWith('own-')) },
+            { id: 'features', label: 'Features', count: onCount((id) => id.startsWith('f-')) },
+            { id: 'coords', label: 'Coordinates', count: onCount((id) => id.startsWith('n-')) },
+          ]}
+        />
+
+        <div role="tabpanel" id={`neuron-way-${way}`} aria-labelledby={`neuron-way-tab-${way}`}>
+          {way === 'ready' && (
+            <>
+              <WayIntro icon={<Sliders size={16} />} title="Ready-made sliders">
+                Five common traits. The first time, LU prepares each one for your model (it reads short example pairs and measures how far it can push).
+              </WayIntro>
+              <div className="grid grid-cols-1 gap-2" data-testid="neuron-presets">
+                {presetRows.map(({ p, v }) => (
+                  <SliderRow
+                    key={p.id}
+                    id={p.id}
+                    left={p.left}
+                    right={p.right}
+                    value={strengths[p.id] ?? 0}
+                    computed={!!v}
+                    disabled={running || !modelPath || (!v && !info?.generator)}
+                    onCompute={() => void startJob(() => neuronBuildPreset(modelPath, p.id))}
+                    onChange={(x) => move(p.id, x)}
+                  />
+                ))}
+              </div>
+            </>
+          )}
+
+          {way === 'own' && (
+            <>
+              <WayIntro icon={<Sparkles size={16} />} title="Your own slider, from examples">
+                Write a few lines in the style you want more of, and a few you want less of. LU turns the difference into a slider. This is how most people make new traits (control vectors).
+              </WayIntro>
+              <div className="space-y-2 mb-3" data-testid="neuron-own">
+                {own.map((v) => (
+                  <SliderRow key={v.id} id={v.id} left={v.left} right={v.right} value={strengths[v.id] ?? 0} computed disabled={running} onChange={(x) => move(v.id, x)} onDelete={() => deleteVector(v.id)} />
+                ))}
+              </div>
+              <OwnSliderForm disabled={running || !info?.generator || !modelPath} onCompute={(name, more, less) => void startJob(() => neuronBuildOwn(modelPath, name, more, less))} />
+            </>
+          )}
+
+          {way === 'features' && (
+            <>
+              <WayIntro icon={<FlaskConical size={16} />} title="Features: what the model knows">
+                Some models come with a map of their inner concepts (a sparse autoencoder). Search a word, add the concept, and turn it up or down.
+              </WayIntro>
+              {info?.sae ? (
+                <FeaturePanel
+                  info={info}
+                  modelPath={modelPath}
+                  vectors={features}
+                  strengths={strengths}
+                  disabled={running}
+                  onDownload={() => void startJob(() => neuronSaeDownload(modelPath))}
+                  onAdd={(hit) => void startJob(() => neuronFeatureAdd(modelPath, hit.feature, hit.label))}
+                  onChange={(id, x) => move(id, x)}
+                  onDelete={deleteVector}
+                  onError={setError}
+                />
+              ) : (
+                <p className={`t-body ${HINWEIS_TEXT.ruhig}`} data-testid="neuron-features-none">
+                  This model has no official feature map. Features exist for Gemma 3 270M IT and Gemma 3 1B IT (Gemma Scope 2 by Google DeepMind, CC-BY-4.0). Pick one of those in step 1, or use the other ways.
+                </p>
+              )}
+            </>
+          )}
+
+          {way === 'coords' && (
+            <>
+              <WayIntro icon={<Hash size={16} />} title="Coordinates people share">
+                A coordinate points at one spot inside a model, like “layer 14, neuron 8949, +1.0”. Paste what someone shared, check what it does, then use it.
+              </WayIntro>
+              {neurons.length > 0 && (
+                <div className="space-y-2 mb-4">
+                  {neurons.map((v) => (
+                    <SliderRow key={v.id} id={v.id} left="Less" right={v.name} value={strengths[v.id] ?? 0} computed disabled={running} onChange={(x) => move(v.id, x)} onDelete={() => deleteVector(v.id)} />
+                  ))}
+                </div>
+              )}
+              {info ? (
+                <CoordinatesPanel
+                  presets={presets}
+                  modelNames={[info.facts.name, model?.name]}
+                  states={states}
+                  onUse={applyRecipe}
+                  disabled={running || !modelPath}
+                />
+              ) : <p className={`t-body ${HINWEIS_TEXT.ruhig}`}>Reading the model…</p>}
+            </>
+          )}
         </div>
-      </Section>
 
-      <Section title="Your own sliders">
-        <div className="space-y-2" data-testid="neuron-own">
-          {vectors.filter((v) => v.kind === 'own').map((v) => (
-            <SliderRow
-              key={v.id}
-              id={v.id}
-              left={v.left}
-              right={v.right}
-              value={strengths[v.id] ?? 0}
-              computed
-              disabled={running}
-              onChange={(x) => move(v.id, x)}
-              onDelete={() => void neuronDelete(modelPath, v.id).then(() => { removeSlider(modelKey, v.id); return refreshInfo(modelPath) })}
-            />
-          ))}
+        <div className="mt-5 pt-4 border-t border-gray-200 dark:border-white/[0.06]" data-testid="neuron-mix">
+          <div className="flex items-center justify-between gap-2 mb-2">
+            <p className="t-body font-medium text-gray-900 dark:text-white">On right now</p>
+            <button type="button" data-testid="neuron-reset" onClick={reset} className="lu-control lu-control--outline">
+              <RotateCcw size={ICON_SM} /> Reset all
+            </button>
+          </div>
+          {entries.length === 0 ? (
+            <p className={`t-body ${HINWEIS_TEXT.ruhig}`}>Nothing. The model answers exactly as without Neurons.</p>
+          ) : (
+            <ul className="flex flex-wrap gap-1.5">
+              {entries.map((e) => (
+                <li key={e.id} className="t-control inline-flex items-center gap-1.5 rounded-full border border-lu-accent/40 bg-lu-accent/[0.08] px-2.5 py-1 text-gray-900 dark:text-white">
+                  {labelOf(e.id)} <span className="tabular-nums text-lu-accent">{signedValue(e.strength)}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+          {warning && <Hinweis className="mt-2">{warning}</Hinweis>}
+          <p className={`t-micro ${HINWEIS_TEXT.ruhig} mt-2 flex items-center gap-1`} aria-live="polite">
+            {applyState === 'applying' && <><Loader2 size={12} className="animate-spin" /> Restarting the engine with your sliders…</>}
+            {applyState === 'applied' && <span data-testid="neuron-applied">{entries.length ? `Active in chat: ${entries.length} slider${entries.length > 1 ? 's' : ''}` : 'Off: the model runs unchanged'}</span>}
+          </p>
         </div>
-        <OwnSliderForm disabled={running || !info?.generator || !modelPath} onCompute={(name, more, less) => void startJob(() => neuronBuildOwn(modelPath, name, more, less))} />
-      </Section>
+      </StepCard>
 
-      {info?.sae && (
-        <Section title="Features">
-          <FeaturePanel
-            info={info}
-            modelPath={modelPath}
-            vectors={vectors.filter((v) => v.kind === 'feature')}
-            strengths={strengths}
-            disabled={running}
-            onDownload={() => void startJob(() => neuronSaeDownload(modelPath))}
-            onAdd={(hit) => void startJob(() => neuronFeatureAdd(modelPath, hit.feature, hit.label))}
-            onChange={(id, x) => move(id, x)}
-            onDelete={(id) => void neuronDelete(modelPath, id).then(() => { removeSlider(modelKey, id); return refreshInfo(modelPath) })}
-            onError={setError}
-          />
-        </Section>
-      )}
+      <StepCard
+        n={3}
+        title="Try it: before and after"
+        lead="Ask one question and see the answer without and with your sliders."
+        done={compared}
+        testId="neuron-step-compare"
+      >
+        <ComparePanel modelPath={modelPath} entries={entries} disabled={running || !modelPath} model={model} tuning={restartTuning} onError={setError} onDone={() => setCompared(true)} />
+      </StepCard>
 
-      {warning && <Hinweis className="mb-3" >{warning}</Hinweis>}
+      <StepCard
+        n={4}
+        title="Keep and share"
+        lead="Your sliders stay for this model, also after a restart of LU. Every new chat uses them."
+        testId="neuron-step-share"
+      >
+        {persona && modelKey && (
+          <div className="flex flex-wrap items-center gap-2 mb-4 t-body" role="radiogroup" aria-label="Save sliders for">
+            <span className="text-gray-200 font-medium mr-1">Save for</span>
+            <ScopeButton on={scope === 'model'} onClick={() => setScope(modelKey, 'model')}>This model</ScopeButton>
+            <ScopeButton on={scope === 'persona'} onClick={() => { setScope(modelKey, 'persona'); if (!hasPersonaProfile(profiles, modelKey, persona.id)) setProfile(editingKey(modelKey, persona.id, 'persona'), { ...(profiles[modelKey] ?? {}) }) }}>
+              This model with “{persona.name}”
+            </ScopeButton>
+          </div>
+        )}
+        <SharePanel recipe={share.recipe} skipped={share.skipped} onUndo={undo ? undoRecipe : undefined} />
+      </StepCard>
 
-      <div className="flex items-center gap-2 mb-6">
-        <button
-          type="button"
-          data-testid="neuron-reset"
-          onClick={reset}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md t-body bg-gray-100 dark:bg-white/[0.06] hover:bg-gray-200 dark:hover:bg-white/10 text-gray-800 dark:text-gray-100"
-        >
-          <RotateCcw size={ICON_SM} /> Reset
-        </button>
-        <span className={`t-micro ${HINWEIS_TEXT.ruhig}`}>All sliders to 0: the model answers exactly as without the tweaker.</span>
-      </div>
-
-      <Section title="Before and after">
-        <ComparePanel modelPath={modelPath} entries={entries} disabled={running || !modelPath} model={model} onError={setError} />
-      </Section>
-
-      <Section title="What this can and cannot do">
-        <ul className={`t-micro ${HINWEIS_TEXT.ruhig} list-disc pl-4 space-y-1`}>
+      <details className="ml-10 mt-1 mb-8 rounded-xl border border-gray-200 dark:border-white/[0.08] px-4 py-3" data-testid="neuron-limits">
+        <summary className="t-body font-medium text-gray-900 dark:text-white cursor-pointer">What this can and cannot do</summary>
+        <ul className={`t-micro ${HINWEIS_TEXT.ruhig} list-disc pl-4 space-y-1 mt-2`}>
           <li>Works with models in LU Engine (llama.cpp control vectors). Ollama, LM Studio and cloud models take no control vectors, so the sliders cannot reach them.</li>
           <li>Each slider is computed for this model the first time: LU reads short example pairs through the model and measures how far it can push before answers break. Seconds for small models, a few minutes for large ones. The chat pauses meanwhile.</li>
           <li>±1 is just under where the measured answer started to break. Strong settings or many sliders at once can still make text repeat or wander.</li>
           <li>A change restarts the engine with the new sliders (a few seconds). The settings stay for this model across restarts of LU.</li>
           <li>Features exist only for models with an official sparse autoencoder: Gemma 3 270M IT and 1B IT (Gemma Scope 2, CC-BY-4.0). Their names come from the words each feature pushes, and some are hard to name.</li>
+          <li>Small models (under 1B) show traits weakly; special ones like a pirate voice need a bigger model.</li>
         </ul>
-      </Section>
+      </details>
     </Shell>
   )
 }
@@ -363,9 +569,10 @@ export function NeuronView() {
  *  one (David, 2026-10-30: the line used to sit at the top, "hingeklatscht").
  *  Download opens Discover with the LU Engine as the target whatever the chat
  *  model is, so the file lands where the tweaker can read it. */
-function NoModel({ onDownload, onAddFile, error, onDismissError }: {
+function NoModel({ onDownload, onAddFile, onIntro, error, onDismissError }: {
   onDownload: () => void
   onAddFile: () => void
+  onIntro: () => void
   error: string | null
   onDismissError: () => void
 }) {
@@ -374,18 +581,21 @@ function NoModel({ onDownload, onAddFile, error, onDismissError }: {
       <div className="max-w-md flex flex-col items-center text-center gap-3" data-testid="neuron-empty">
         <Sliders size={28} className="text-gray-400 dark:text-gray-500" aria-hidden />
         <h1 className="t-title text-gray-900 dark:text-white">No chat model for the LU Engine yet</h1>
-        <p className="t-body text-gray-600 dark:text-gray-300" data-testid="neuron-no-chat-model">{NO_CHAT_MODEL}</p>
+        <p className="t-body text-gray-300" data-testid="neuron-no-chat-model">{NO_CHAT_MODEL}</p>
         <p className={`t-body ${HINWEIS_TEXT.ruhig}`} data-testid="neuron-other-apps">{OTHER_APPS}</p>
         <div className="flex flex-wrap items-center justify-center gap-2 pt-1">
           <button className="lu-tonal" onClick={onDownload} data-testid="neuron-get-model">
             <Download size={ICON_SM} /> Get a model for the LU Engine
+          </button>
+          <button className="lu-control" onClick={onIntro} data-testid="neuron-intro-open">
+            <CircleHelp size={ICON_SM} /> How Neurons works
           </button>
         </div>
         {/* A file the user already has, in three steps (David, 30.10.2026).
             The lines are the how-to's, so Help and this state say the same. */}
         <div className="mt-3 w-full text-left rounded-lg border border-gray-200 dark:border-white/[0.06] px-4 py-3" data-testid="neuron-gguf-steps">
           <p className="t-body font-semibold text-gray-900 dark:text-white mb-1.5">Already have a GGUF file?</p>
-          <ol className="t-body text-gray-600 dark:text-gray-300 space-y-1 list-decimal pl-5">
+          <ol className="t-body text-gray-300 space-y-1 list-decimal pl-5">
             {GGUF_STEPS.map((s) => <li key={s.from}>{s.text}</li>)}
           </ol>
           <button className="lu-control mt-2.5" onClick={onAddFile} data-testid="neuron-add-gguf" title="Use a GGUF file from your drive as a chat model on the LU Engine">
@@ -398,278 +608,25 @@ function NoModel({ onDownload, onAddFile, error, onDismissError }: {
   )
 }
 
-function Shell({ children }: { children: React.ReactNode }) {
+function Shell({ onIntro, children }: { onIntro: () => void; children: React.ReactNode }) {
   return (
     <div className="h-full overflow-y-auto scrollbar-thin" data-testid="neuron-view">
-      <div className="max-w-2xl mx-auto px-4 py-4">
-        <div className="flex items-center gap-2 mb-1">
-          <Sliders size={16} className="text-gray-500" />
-          <h1 className="t-title text-gray-900 dark:text-white">Neuron tweaker</h1>
-        </div>
-        <p className={`t-body ${HINWEIS_TEXT.ruhig} mb-4`}>Turn your local model’s traits up or down, like an equalizer. It acts inside the model, not in the prompt.</p>
+      <div className="max-w-3xl mx-auto px-6 py-6">
+        <header className="flex items-start justify-between gap-4 mb-6">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <Sliders size={18} className="text-lu-accent" aria-hidden />
+              <h1 className="t-display text-gray-900 dark:text-white">Neurons</h1>
+            </div>
+            <p className={`t-body ${HINWEIS_TEXT.ruhig} mt-1 max-w-xl`}>Turn traits of your local model up or down, like an equalizer. It acts inside the model, not in your prompt. Four steps, top to bottom.</p>
+          </div>
+          <button type="button" className="lu-control lu-control--outline flex-none" onClick={onIntro} data-testid="neuron-intro-open">
+            <CircleHelp size={ICON_SM} /> How it works
+          </button>
+        </header>
         {children}
       </div>
-    </div>
-  )
-}
-
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <section className="mb-6">
-      <h2 className="t-body font-medium text-gray-900 dark:text-white mb-2">{title}</h2>
-      {children}
-    </section>
-  )
-}
-
-function ScopeButton({ on, onClick, children }: { on: boolean; onClick: () => void; children: React.ReactNode }) {
-  return (
-    <button
-      type="button"
-      role="radio"
-      aria-checked={on}
-      onClick={onClick}
-      className={`px-2 py-0.5 rounded-md ${on ? 'bg-lu-accent/20 text-gray-900 dark:text-white' : 'bg-gray-100 dark:bg-white/[0.06] text-gray-600 dark:text-gray-300'}`}
-    >
-      {children}
-    </button>
-  )
-}
-
-interface SliderRowProps {
-  id: string
-  left: string
-  right: string
-  value: number
-  computed: boolean
-  disabled?: boolean
-  onChange: (v: number) => void
-  onCompute?: () => void
-  onDelete?: () => void
-}
-
-function SliderRow({ id, left, right, value, computed, disabled, onChange, onCompute, onDelete }: SliderRowProps) {
-  return (
-    <div className="grid grid-cols-[7rem_1fr_7rem_3rem_auto] items-center gap-2" data-testid={`neuron-slider-${id}`}>
-      <span className="t-body text-right text-gray-700 dark:text-gray-200 truncate" title={left}>{left}</span>
-      {computed ? (
-        <input
-          type="range"
-          min={-1}
-          max={1}
-          step={0.05}
-          value={value}
-          disabled={disabled}
-          aria-label={`${left} to ${right}`}
-          onChange={(e) => onChange(Number(e.target.value))}
-          onDoubleClick={() => onChange(0)}
-          className="w-full accent-lu-accent"
-        />
-      ) : (
-        <button
-          type="button"
-          disabled={disabled}
-          onClick={onCompute}
-          data-testid={`neuron-compute-${id}`}
-          className="t-micro rounded-md px-2 py-1 bg-gray-100 dark:bg-white/[0.06] hover:bg-gray-200 dark:hover:bg-white/10 text-gray-700 dark:text-gray-200 disabled:opacity-50"
-        >
-          Compute for this model
-        </button>
-      )}
-      <span className="t-body text-gray-700 dark:text-gray-200 truncate" title={right}>{right}</span>
-      <span className={`t-micro tabular-nums ${HINWEIS_TEXT.ruhig}`}>{computed ? (value > 0 ? `+${value.toFixed(2)}` : value.toFixed(2)) : ''}</span>
-      {onDelete ? (
-        <button type="button" onClick={onDelete} aria-label={`Delete ${right}`} className="p-1 text-gray-400 hover:text-red-500"><Trash2 size={ICON_SM} /></button>
-      ) : <span />}
-    </div>
-  )
-}
-
-function JobPanel({ job, onStop, onDismiss }: { job: NeuronJob; onStop: () => void; onDismiss: () => void }) {
-  const share = jobShare(job)
-  if (job.status === 'running') {
-    return (
-      <div className="space-y-1.5 mb-5" data-testid="neuron-job">
-        <p className="flex items-center gap-1.5 t-body text-gray-700 dark:text-gray-200">
-          <Loader2 size={ICON_SM} className="animate-spin" /> {job.title}: {job.phaseLabel || 'starting…'}
-        </p>
-        <div className="h-1 rounded-full bg-gray-200 dark:bg-white/[0.08] overflow-hidden">
-          <div className="h-full rounded-full bg-lu-accent transition-[width]" style={{ width: share == null ? '0%' : `${Math.round(share * 100)}%` }} />
-        </div>
-        <p className={`t-micro font-mono ${HINWEIS_TEXT.ruhig}`} data-testid="neuron-job-progress">{jobProgressText(job)}</p>
-        {job.logs.length > 0 && <p className={`t-micro ${HINWEIS_TEXT.ruhig} truncate`}>{job.logs[job.logs.length - 1]}</p>}
-        <button type="button" onClick={onStop} className="t-micro text-red-600 dark:text-red-400 hover:underline">Stop</button>
-      </div>
-    )
-  }
-  return (
-    <div className="mb-5" data-testid="neuron-job-ended">
-      {job.status === 'done' && <Hinweis onDismiss={onDismiss}>{job.title}: done{job.elapsedSecs ? ` in ${job.elapsedSecs} s` : ''}.{job.logs.find((l) => l.includes('full strength')) ? ` ${job.logs.find((l) => l.includes('full strength'))?.trim()}.` : ''}</Hinweis>}
-      {job.status === 'failed' && <Hinweis ton="fehler" onDismiss={onDismiss}>{job.title} failed: {job.error}</Hinweis>}
-      {job.status === 'cancelled' && <Hinweis onDismiss={onDismiss}>{job.title}: stopped.</Hinweis>}
-    </div>
-  )
-}
-
-function OwnSliderForm({ disabled, onCompute }: { disabled: boolean; onCompute: (name: string, more: string[], less: string[]) => void }) {
-  const [open, setOpen] = useState(false)
-  const [name, setName] = useState('')
-  const [more, setMore] = useState('')
-  const [less, setLess] = useState('')
-  const lines = (t: string) => t.split('\n').map((l) => l.trim()).filter(Boolean)
-  if (!open) {
-    return (
-      <button type="button" disabled={disabled} onClick={() => setOpen(true)} data-testid="neuron-own-new" className="mt-2 t-body text-lu-accent hover:underline disabled:opacity-50">
-        + New slider from examples
-      </button>
-    )
-  }
-  const ok = name.trim() && lines(more).length > 0 && lines(less).length > 0
-  return (
-    <div className="mt-3 space-y-2" data-testid="neuron-own-form">
-      <input
-        className="w-full t-body rounded-md bg-gray-100 dark:bg-white/[0.06] px-2 py-1 text-gray-900 dark:text-white"
-        placeholder="Name, e.g. Pirate"
-        value={name}
-        maxLength={40}
-        onChange={(e) => setName(e.target.value)}
-        data-testid="neuron-own-name"
-      />
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-        <label className="t-micro text-gray-600 dark:text-gray-300">More like this (one per line)
-          <textarea rows={4} className="mt-1 w-full t-body rounded-md bg-gray-100 dark:bg-white/[0.06] px-2 py-1 text-gray-900 dark:text-white" placeholder={'Talk like a pirate.\nSay arr and matey.'} value={more} onChange={(e) => setMore(e.target.value)} data-testid="neuron-own-more" />
-        </label>
-        <label className="t-micro text-gray-600 dark:text-gray-300">Less like this (one per line)
-          <textarea rows={4} className="mt-1 w-full t-body rounded-md bg-gray-100 dark:bg-white/[0.06] px-2 py-1 text-gray-900 dark:text-white" placeholder={'Talk in plain modern English.'} value={less} onChange={(e) => setLess(e.target.value)} data-testid="neuron-own-less" />
-        </label>
-      </div>
-      <div className="flex gap-2">
-        <button type="button" disabled={disabled || !ok} onClick={() => { onCompute(name.trim(), lines(more), lines(less)); setOpen(false); setName(''); setMore(''); setLess('') }} data-testid="neuron-own-compute" className="px-3 py-1.5 rounded-md t-body bg-lu-accent text-white disabled:opacity-50">
-          Compute slider
-        </button>
-        <button type="button" onClick={() => setOpen(false)} className="px-3 py-1.5 rounded-md t-body text-gray-600 dark:text-gray-300">Cancel</button>
-      </div>
-    </div>
-  )
-}
-
-interface FeaturePanelProps {
-  info: NeuronInfo
-  modelPath: string
-  vectors: NeuronVector[]
-  strengths: Record<string, number>
-  disabled: boolean
-  onDownload: () => void
-  onAdd: (hit: FeatureHit) => void
-  onChange: (id: string, v: number) => void
-  onDelete: (id: string) => void
-  onError: (e: string) => void
-}
-
-function FeaturePanel({ info, modelPath, vectors, strengths, disabled, onDownload, onAdd, onChange, onDelete, onError }: FeaturePanelProps) {
-  const sae = info.sae!
-  const [query, setQuery] = useState('')
-  const [hits, setHits] = useState<FeatureHit[] | null>(null)
-  const [searching, setSearching] = useState(false)
-  const search = async () => {
-    if (!query.trim()) return
-    setSearching(true)
-    try {
-      setHits((await neuronSaeSearch(modelPath, query)).hits)
-    } catch (e) {
-      onError(String(e))
-    } finally {
-      setSearching(false)
-    }
-  }
-  return (
-    <div data-testid="neuron-features">
-      <p className={`t-micro ${HINWEIS_TEXT.ruhig} mb-2`}>
-        {sae.title}. License {sae.license}.{' '}
-        <button type="button" className="underline" onClick={() => void openExternal(sae.source)}>Source</button>
-        {!sae.instruct && ' This file does not look like the instruction-tuned model the features were trained on; they may act weaker.'}
-      </p>
-      {!sae.downloaded ? (
-        <button type="button" disabled={disabled} onClick={onDownload} data-testid="neuron-sae-download" className="px-3 py-1.5 rounded-md t-body bg-gray-100 dark:bg-white/[0.06] hover:bg-gray-200 dark:hover:bg-white/10 text-gray-800 dark:text-gray-100 disabled:opacity-50">
-          Download feature data ({Math.round(sae.bytes / 1e6)} MB)
-        </button>
-      ) : (
-        <>
-          <form className="flex gap-2 mb-2" onSubmit={(e) => { e.preventDefault(); void search() }}>
-            <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search features, e.g. location, love, #1234" data-testid="neuron-feature-query" className="flex-1 t-body rounded-md bg-gray-100 dark:bg-white/[0.06] px-2 py-1 text-gray-900 dark:text-white" />
-            <button type="submit" disabled={searching} data-testid="neuron-feature-search" className="px-2 rounded-md bg-gray-100 dark:bg-white/[0.06] text-gray-700 dark:text-gray-200">
-              {searching ? <Loader2 size={ICON_SM} className="animate-spin" /> : <Search size={ICON_SM} />}
-            </button>
-          </form>
-          {hits && hits.length === 0 && <p className={`t-micro ${HINWEIS_TEXT.ruhig}`}>No feature pushes that word. Try another word or a feature number (#1234).</p>}
-          {hits && hits.length > 0 && (
-            <ul className="mb-3 max-h-56 overflow-y-auto scrollbar-thin space-y-1" data-testid="neuron-feature-hits">
-              {hits.map((h) => (
-                <li key={h.feature} className="flex items-center gap-2 t-micro">
-                  <span className="tabular-nums text-gray-500 w-12">#{h.feature}</span>
-                  <span className="flex-1 truncate text-gray-700 dark:text-gray-200" title={h.label}>{h.label}</span>
-                  <button type="button" disabled={disabled || vectors.some((v) => v.feature === h.feature)} onClick={() => onAdd(h)} className="text-lu-accent hover:underline disabled:opacity-40">Add</button>
-                </li>
-              ))}
-            </ul>
-          )}
-          <div className="space-y-2">
-            {vectors.map((v) => (
-              <SliderRow key={v.id} id={v.id} left="Less" right={v.name} value={strengths[v.id] ?? 0} computed disabled={disabled} onChange={(x) => onChange(v.id, x)} onDelete={() => onDelete(v.id)} />
-            ))}
-          </div>
-        </>
-      )}
-    </div>
-  )
-}
-
-function ComparePanel({ modelPath, entries, disabled, model, onError }: { modelPath: string; entries: ReturnType<typeof entriesFor>; disabled: boolean; model: BundledModel | undefined; onError: (e: string) => void }) {
-  const [question, setQuestion] = useState('Write two sentences about rain.')
-  const [seed, setSeed] = useState(42)
-  const [busy, setBusy] = useState(false)
-  const [result, setResult] = useState<(CompareResult & { entries: typeof entries }) | null>(null)
-  const run = async () => {
-    setBusy(true)
-    try {
-      const r = await neuronCompare(modelPath, question, seed, entries, await restartTuning(model))
-      setResult({ ...r, entries })
-    } catch (e) {
-      onError(String(e))
-    } finally {
-      setBusy(false)
-    }
-  }
-  const stale = result && !sameEntries(result.entries, entries)
-  return (
-    <div data-testid="neuron-compare">
-      <div className="flex flex-wrap gap-2 mb-2">
-        <input value={question} onChange={(e) => setQuestion(e.target.value)} data-testid="neuron-compare-question" className="flex-1 min-w-[12rem] t-body rounded-md bg-gray-100 dark:bg-white/[0.06] px-2 py-1 text-gray-900 dark:text-white" />
-        <label className={`t-micro ${HINWEIS_TEXT.ruhig} flex items-center gap-1`}>Seed
-          <input type="number" value={seed} onChange={(e) => setSeed(Math.max(0, Math.floor(Number(e.target.value) || 0)))} className="w-20 t-body rounded-md bg-gray-100 dark:bg-white/[0.06] px-2 py-1 text-gray-900 dark:text-white" />
-        </label>
-        <button type="button" disabled={disabled || busy || !question.trim()} onClick={() => void run()} data-testid="neuron-compare-run" className="px-3 py-1.5 rounded-md t-body bg-lu-accent text-white disabled:opacity-50 inline-flex items-center gap-1.5">
-          {busy && <Loader2 size={ICON_SM} className="animate-spin" />} Compare
-        </button>
-      </div>
-      <p className={`t-micro ${HINWEIS_TEXT.ruhig} mb-2`}>Same question, same seed, temperature 0: once with the sliders off, once on. The engine restarts twice.</p>
-      {result && (
-        <>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3" data-testid="neuron-compare-result">
-            <div>
-              <p className="t-micro text-gray-500 mb-1">Before (sliders off)</p>
-              <p className="t-body text-gray-800 dark:text-gray-100 whitespace-pre-wrap" data-testid="neuron-compare-before">{result.before}</p>
-            </div>
-            <div>
-              <p className="t-micro text-gray-500 mb-1">After ({result.entries.map((e) => `${e.id} ${e.strength > 0 ? '+' : ''}${e.strength}`).join(', ') || 'all at 0'})</p>
-              <p className="t-body text-gray-800 dark:text-gray-100 whitespace-pre-wrap" data-testid="neuron-compare-after">{result.after}</p>
-            </div>
-          </div>
-          <p className={`t-micro ${HINWEIS_TEXT.ruhig} mt-1`} data-testid="neuron-compare-same">
-            {result.same ? 'Identical answers.' : 'The answers differ.'}{stale ? ' The sliders changed since; compare again.' : ''}
-          </p>
-        </>
-      )}
+      <NeuronIntroHost />
     </div>
   )
 }
