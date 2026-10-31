@@ -221,6 +221,8 @@ describe('coordinates', () => {
     await screen.findByTestId('neuron-slider-cheerful')
     fireEvent.click(screen.getByTestId('neuron-way-coords'))
     fireEvent.change(await screen.findByTestId('neuron-coords-input'), { target: { value: '@cheerful+0.4 L14N8949+1.0' } })
+    // FEHLER-N2 #1: one value, said as one.
+    expect(screen.getByTestId('neuron-coords-use').textContent?.trim()).toBe('Use the one usable value')
     fireEvent.click(screen.getByTestId('neuron-coords-use'))
     expect(useNeuronStore.getState().profiles['qwen-1']).toEqual({ cheerful: 0.4 })
     expect(screen.getByTestId('neuron-coords-later').textContent).toMatch(/^One single neuron was not applied\./)
@@ -259,7 +261,7 @@ describe('tweaked models', () => {
     expect((screen.getByTestId('neuron-compute-creative') as HTMLButtonElement).disabled).toBe(false)
     fireEvent.click(screen.getByTestId('neuron-get-original'))
     const ui = useUIStore.getState()
-    expect([ui.currentView, ui.discoverTarget, ui.discoverQuery]).toEqual(['models', 'builtin', 'Qwen3.5 9B'])
+    expect([ui.currentView, ui.discoverTarget, ui.discoverQuery, ui.discoverOriginal]).toEqual(['models', 'builtin', 'Qwen3.5 9B', true])
     expect(useModelStore.getState().categoryFilter).toBe('text')
   })
 

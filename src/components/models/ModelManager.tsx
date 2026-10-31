@@ -123,6 +123,8 @@ export function ModelManager() {
   // original"): it starts the field and the catalog search once.
   const [searchQuery, setSearchQuery] = useState(() => useUIStore.getState().discoverQuery ?? '')
   const [searchSubmitToken, setSearchSubmitToken] = useState(() => (useUIStore.getState().discoverQuery ? 1 : 0))
+  // That search looks for an original model: its changed versions go last.
+  const [originalFor] = useState(() => { const s = useUIStore.getState(); return s.discoverOriginal ? s.discoverQuery : null })
   useEffect(() => {
     if (useUIStore.getState().discoverQuery) useUIStore.getState().clearDiscoverQuery()
   }, [])
@@ -620,6 +622,7 @@ export function ModelManager() {
                 category={mode}
                 search={searchQuery}
                 searchSubmitToken={searchSubmitToken}
+                originalFor={originalFor}
               />
             )
           )}

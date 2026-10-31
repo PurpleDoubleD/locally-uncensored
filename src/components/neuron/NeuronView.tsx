@@ -322,7 +322,7 @@ export function NeuronView() {
   const getOriginal = () => {
     if (!original) return
     useModelStore.getState().setCategoryFilter('text')
-    useUIStore.getState().openDiscoverFor('builtin', original)
+    useUIStore.getState().openDiscoverFor('builtin', original, { original: true })
   }
 
   if (modelsLoaded && models.length === 0) {

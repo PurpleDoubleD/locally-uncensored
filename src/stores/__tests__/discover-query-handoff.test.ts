@@ -20,6 +20,17 @@ describe('Discover search hand-off', () => {
     expect(useUIStore.getState().discoverQuery).toBeNull()
   })
 
+  it('marks a search for an original model, and forgets it with the query', () => {
+    useUIStore.getState().openDiscoverFor('builtin', 'Qwen3.5 9B', { original: true })
+    expect(useUIStore.getState().discoverOriginal).toBe(true)
+    useUIStore.getState().clearDiscoverQuery()
+    expect(useUIStore.getState().discoverOriginal).toBe(false)
+    useUIStore.getState().openDiscoverFor('builtin', '   ', { original: true })
+    expect(useUIStore.getState().discoverOriginal).toBe(false)
+    useUIStore.getState().openDiscoverFor('builtin', 'Qwen3.5 9B')
+    expect(useUIStore.getState().discoverOriginal).toBe(false)
+  })
+
   it('is not saved, and the Models page starts its search with it once', () => {
     const store = readFileSync(resolve(__dirname, '../uiStore.ts'), 'utf8')
     const kept = store.slice(store.indexOf('partialize:'))
@@ -27,5 +38,10 @@ describe('Discover search hand-off', () => {
     const page = readFileSync(resolve(__dirname, '../../components/models/ModelManager.tsx'), 'utf8')
     expect(page).toMatch(/useState\(\(\) => useUIStore\.getState\(\)\.discoverQuery \?\? ''\)/)
     expect(page).toMatch(/clearDiscoverQuery\(\)/)
+    // The original search reaches Discover, which sorts only while the field holds it.
+    expect(page).toMatch(/originalFor=\{originalFor\}/)
+    const discover = readFileSync(resolve(__dirname, '../../components/models/DiscoverModels.tsx'), 'utf8')
+    expect(discover).toMatch(/const wantsOriginal = !!originalFor && search\.trim\(\) === originalFor/)
+    expect(discover).toMatch(/originalsFirst\(hfSearchResults, originalFor\)/)
   })
 })

@@ -48,6 +48,7 @@ import { modelInfoTitle } from '../../lib/model-info-title'
 import { partInputWord } from '../../lib/image-part'
 import { hfUrlToOllamaRef, hfUrlToLmStudioSubdir, parseHfUrl, isShardedOrIncompatibleGguf } from '../../lib/hf-to-provider'
 import { HINWEIS_TEXT } from '../../lib/hinweis'
+import { originalsFirst } from '../../lib/original-search'
 import { Modal } from '../ui/Modal'
 import { ModalActions, ModalButton } from '../ui/ModalActions'
 import { countLabel } from '../../lib/formatters'
@@ -68,6 +69,10 @@ interface Props {
   search?: string
   /** Bumped by ModelManager whenever the user submits the search (Enter). */
   searchSubmitToken?: number
+  /** The search that looks for a maker's original model (Neurons' "Get the
+   *  original"). While the field still holds it, changed versions of the
+   *  model are listed after the originals, under their own heading. */
+  originalFor?: string | null
 }
 
 // Size buckets stay EXACTLY the ones from the old VRAM-tier filter (the owner
@@ -234,7 +239,7 @@ export function awaitDownloadedFile(
   })
 }
 
-export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }: Props) {
+export function DiscoverModels({ category, search = '', searchSubmitToken = 0, originalFor = null }: Props) {
   const [loading, setLoading] = useState(false)
   const systemVRAM = useGraphicsMemoryGb()
   const [ramGb, setRamGb] = useState<number | null>(null)
@@ -1297,32 +1302,49 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
           )}
 
           {/* HuggingFace Search Results */}
-          {hfSearchResults.length > 0 && (
-            <div className={`${skin.cls.group} mt-6`}>
-              <skin.Head place="hf-results" Icon={Search} title="HuggingFace results" />
-              <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-2.5">
-                {hfSearchResults.map((model, i) => (
-                  <motion.div key={model.name + i} className={skin.cls.tileWrap} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: Math.min(i, 12) * 0.025 }}>
-                    <skin.ModelTile
-                      variants={[model]}
-                      vramGb={chatFitGb}
-                      sharedMemory={sharedMemory}
-                      isInstalled={isModelFullyInstalled}
-                      dlState={getModelDownloadState}
-                      onDownload={handleTextDownload}
-                      getTarget={getTargetOf}
-                      onUse={handleUseInstalled}
-                      canUse={canUseInstalled}
-                      isUsing={(m) => installedEntryFor(m)?.name === usingModel && usingModel !== null}
-                      onInfo={openInfo}
-                      withImagePart={wantsImagePart}
-                      onOpenUrl={(u) => openExternal(u)}
-                    />
-                  </motion.div>
-                ))}
+          {hfSearchResults.length > 0 && (() => {
+            const wantsOriginal = !!originalFor && search.trim() === originalFor
+            const { originals, changed } = wantsOriginal ? originalsFirst(hfSearchResults, originalFor) : { originals: hfSearchResults, changed: [] }
+            const tiles = (list: DiscoverModel[]) => list.map((model, i) => (
+              <motion.div key={model.name + i} className={skin.cls.tileWrap} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: Math.min(i, 12) * 0.025 }}>
+                <skin.ModelTile
+                  variants={[model]}
+                  vramGb={chatFitGb}
+                  sharedMemory={sharedMemory}
+                  isInstalled={isModelFullyInstalled}
+                  dlState={getModelDownloadState}
+                  onDownload={handleTextDownload}
+                  getTarget={getTargetOf}
+                  onUse={handleUseInstalled}
+                  canUse={canUseInstalled}
+                  isUsing={(m) => installedEntryFor(m)?.name === usingModel && usingModel !== null}
+                  onInfo={openInfo}
+                  withImagePart={wantsImagePart}
+                  onOpenUrl={(u) => openExternal(u)}
+                />
+              </motion.div>
+            ))
+            return (
+              <div className={`${skin.cls.group} mt-6`} data-testid="hf-results">
+                <skin.Head place="hf-results" Icon={Search} title={wantsOriginal ? 'Original models on Hugging Face' : 'HuggingFace results'} />
+                {wantsOriginal && originals.length === 0 && (
+                  <p className={`t-body ${HINWEIS_TEXT.ruhig} mb-2`}>No original of this model in the results. Try a shorter search.</p>
+                )}
+                <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-2.5" data-testid="hf-results-originals">
+                  {tiles(originals)}
+                </div>
+                {changed.length > 0 && (
+                  <div className="mt-5" data-testid="hf-results-changed">
+                    <p className="t-label text-gray-300 mb-0.5">Changed by others, not the original</p>
+                    <p className={`t-micro ${HINWEIS_TEXT.ruhig} mb-2`}>Uncensored, merged or fine-tuned versions. Neuron sliders work best on the originals above.</p>
+                    <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-2.5">
+                      {tiles(changed)}
+                    </div>
+                  </div>
+                )}
               </div>
-            </div>
-          )}
+            )
+          })()}
         </>
       ) : null}
 
