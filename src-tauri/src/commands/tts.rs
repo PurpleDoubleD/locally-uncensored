@@ -312,6 +312,104 @@ fn synthesize_blocking(
     Ok(serde_json::json!({ "audio_base64": b64, "mime": "audio/wav" }))
 }
 
+/// The OpenAI-compatible `/v1/audio/speech` request body.
+///
+/// Kokoro-FastAPI and OpenAI take any model name and need a voice, so with
+/// neither set this stays what it always was: `tts-1` and OpenAI's `alloy`.
+/// Ollama (0.40.8+) serves speech the same way, but it answers 400 to a model
+/// it has not pulled (`tts-1`) and to a voice the model does not have
+/// (`alloy`). Its docs say to omit the voice for the model's own default one.
+/// So a model named here is sent as named, and with a named model and no
+/// voice the field is left out (N1, LFM3 Audio, 30.10.2026).
+fn external_tts_body(text: &str, model: Option<&str>, voice: Option<&str>) -> serde_json::Value {
+    let model = model.map(str::trim).filter(|m| !m.is_empty());
+    let voice = voice.map(str::trim).filter(|v| !v.is_empty());
+    let mut body = serde_json::json!({
+        "model": model.unwrap_or("tts-1"),
+        "input": text,
+        "response_format": "wav",
+    });
+    match (voice, model) {
+        (Some(v), _) => body["voice"] = v.into(),
+        (None, None) => body["voice"] = "alloy".into(),
+        (None, Some(_)) => {}
+    }
+    body
+}
+
+/// The endpoint must be a well-formed http(s) URL. Localhost/LAN is allowed on
+/// purpose (see the SSRF note on `synthesize_external`).
+fn external_voice_url(url: &str, what: &str) -> Result<url::Url, String> {
+    let parsed = url::Url::parse(url.trim()).map_err(|e| format!("invalid {what} endpoint URL: {e}"))?;
+    match parsed.scheme() {
+        "http" | "https" => Ok(parsed),
+        other => Err(format!("{what} endpoint must be http or https, got '{other}'")),
+    }
+}
+
+/// The text out of an OpenAI-compatible transcription answer
+/// (`{"text": "..."}`, `response_format` json, the default).
+fn transcript_of(answer: &serde_json::Value) -> Option<String> {
+    answer.get("text").and_then(|t| t.as_str()).map(|t| t.trim().to_string())
+}
+
+/// Speech to text through a user-configured OpenAI-compatible
+/// `/v1/audio/transcriptions` endpoint, the counterpart of
+/// `synthesize_external` for the microphone. Ollama (0.40.13+) serves it for
+/// models that take audio, such as `lfm3-audio` and `lfm3-omni` (N1). The
+/// take is the WAV `createAudioRecorder` writes; Ollama accepts WAV only.
+///
+/// SSRF: the same reasoning as `synthesize_external`, the URL comes from the
+/// voice settings, never from model output.
+#[tauri::command]
+pub async fn transcribe_external(
+    audio_base64: String,
+    content_type: String,
+    url: String,
+    model: String,
+) -> Result<serde_json::Value, String> {
+    let parsed = external_voice_url(&url, "transcription")?;
+    let model = model.trim().to_string();
+    if model.is_empty() {
+        return Err("No speech-to-text model is set. Enter one in Settings, Voice.".to_string());
+    }
+    let audio = base64::engine::general_purpose::STANDARD
+        .decode(&audio_base64)
+        .map_err(|e| format!("base64 decode: {e}"))?;
+    if audio.is_empty() {
+        return Err("Empty audio data".to_string());
+    }
+    let mime = if content_type.trim().is_empty() { "audio/wav".to_string() } else { content_type };
+    let part = reqwest::multipart::Part::bytes(audio)
+        .file_name("take.wav")
+        .mime_str(&mime)
+        .map_err(|e| e.to_string())?;
+    let form = reqwest::multipart::Form::new()
+        .part("file", part)
+        .text("model", model.clone())
+        .text("response_format", "json");
+
+    let client = reqwest::Client::builder()
+        .user_agent(crate::app_identity::outgoing_agent!("2.0"))
+        .timeout(std::time::Duration::from_secs(300))
+        .build()
+        .map_err(|e| e.to_string())?;
+    let resp = client
+        .post(parsed.as_str())
+        .multipart(form)
+        .send()
+        .await
+        .map_err(|e| format!("speech-to-text request failed: {}", os_error::english(&e)))?;
+    if !resp.status().is_success() {
+        let code = resp.status().as_u16();
+        let detail: String = resp.text().await.unwrap_or_default().chars().take(200).collect();
+        return Err(format!("speech-to-text HTTP {code} from {model}: {detail}"));
+    }
+    let answer: serde_json::Value = resp.json().await.map_err(|e| format!("speech-to-text answer was not JSON: {e}"))?;
+    let transcript = transcript_of(&answer).ok_or_else(|| "speech-to-text answer carried no text".to_string())?;
+    Ok(serde_json::json!({ "transcript": transcript }))
+}
+
 /// Synthesize `text` via a user-configured external HTTP TTS engine and return
 /// it base64-encoded for the frontend to play (GitHub #58). The endpoint is an
 /// OpenAI-compatible `/v1/audio/speech` URL — e.g. Kokoro-FastAPI on
@@ -328,26 +426,14 @@ pub async fn synthesize_external(
     text: String,
     url: String,
     voice: Option<String>,
+    model: Option<String>,
 ) -> Result<serde_json::Value, String> {
     let text = text.trim().to_string();
     if text.is_empty() {
         return Err("empty text".to_string());
     }
 
-    // Light validation only — must be a well-formed http(s) URL. Localhost/LAN
-    // is allowed on purpose (see the SSRF note above).
-    let parsed = url::Url::parse(url.trim()).map_err(|e| format!("invalid TTS endpoint URL: {}", e))?;
-    match parsed.scheme() {
-        "http" | "https" => {}
-        other => return Err(format!("TTS endpoint must be http or https, got '{}'", other)),
-    }
-
-    // OpenAI-compatible engines require a voice. Default to OpenAI's "alloy";
-    // Kokoro users set their own (e.g. "af_bella") in Settings.
-    let voice = voice
-        .map(|v| v.trim().to_string())
-        .filter(|v| !v.is_empty())
-        .unwrap_or_else(|| "alloy".to_string());
+    let parsed = external_voice_url(&url, "TTS")?;
 
     let client = reqwest::Client::builder()
         .user_agent(crate::app_identity::outgoing_agent!("2.0"))
@@ -355,13 +441,7 @@ pub async fn synthesize_external(
         .build()
         .map_err(|e| e.to_string())?;
 
-    // OpenAI-compatible TTS request body. Kokoro-FastAPI + OpenAI both accept it.
-    let body = serde_json::json!({
-        "model": "tts-1",
-        "input": text,
-        "voice": voice,
-        "response_format": "wav",
-    });
+    let body = external_tts_body(&text, model.as_deref(), voice.as_deref());
 
     let resp = client
         .post(parsed.as_str())
@@ -474,5 +554,45 @@ mod voice_completeness_tests {
         for good in ["en_US-lessac-medium", "en_GB-alba-medium", "de_DE-thorsten-high"] {
             assert!(is_valid_voice(good), "refused {good:?}");
         }
+    }
+}
+
+#[cfg(test)]
+mod external_voice_tests {
+    use super::*;
+
+    #[test]
+    fn without_model_and_voice_the_body_stays_what_kokoro_and_openai_got() {
+        let b = external_tts_body("Hi", None, None);
+        assert_eq!(b["model"], "tts-1");
+        assert_eq!(b["voice"], "alloy");
+        assert_eq!(b["response_format"], "wav");
+    }
+
+    #[test]
+    fn a_named_model_is_sent_and_without_a_voice_ollama_picks_its_own() {
+        // Ollama answers 400 to `tts-1` (not pulled) and to `alloy` (not a voice of lfm3-audio).
+        let b = external_tts_body("Hi", Some(" lfm3-audio:2b "), Some("  "));
+        assert_eq!(b["model"], "lfm3-audio:2b");
+        assert!(b.get("voice").is_none(), "{b}");
+    }
+
+    #[test]
+    fn a_named_voice_always_travels() {
+        let b = external_tts_body("Hi", Some("lfm3-audio:2b"), Some("Freya"));
+        assert_eq!(b["voice"], "Freya");
+        assert_eq!(external_tts_body("Hi", None, Some("af_bella"))["voice"], "af_bella");
+    }
+
+    #[test]
+    fn the_transcript_is_the_text_field() {
+        assert_eq!(transcript_of(&serde_json::json!({"text": " Hello there. "})).as_deref(), Some("Hello there."));
+        assert_eq!(transcript_of(&serde_json::json!({"error": "x"})), None);
+    }
+
+    #[test]
+    fn only_http_endpoints_are_taken() {
+        assert!(external_voice_url("http://localhost:11434/v1/audio/transcriptions", "transcription").is_ok());
+        assert!(external_voice_url("file:///etc/passwd", "transcription").unwrap_err().contains("http or https"));
     }
 }

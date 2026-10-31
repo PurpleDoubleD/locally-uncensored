@@ -809,6 +809,7 @@ pub fn run() {
             commands::tts::tts_status,
             commands::tts::synthesize,
             commands::tts::synthesize_external,
+            commands::tts::transcribe_external,
             commands::tts::download_voice,
             commands::tts::installed_piper_voices,
             // Agent tools (legacy)

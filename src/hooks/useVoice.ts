@@ -19,6 +19,7 @@ import {
   createAudioRecorder,
   transcribeAudio,
   transcribeAudioCloud,
+  transcribeExternal,
   getLastTtsStatus,
   LocalSttError,
   type AudioRecorder,
@@ -115,6 +116,17 @@ export function sttErrorMessage(err: unknown): string {
  * nothing to transcribe with, so it says so instead of calling a local
  * Whisper that does not exist there.
  */
+/**
+ * The external speech-to-text endpoint, when it is chosen and complete (N1).
+ * Half filled in is not chosen: dictation stays on faster-whisper then, as it
+ * was before the switch existed.
+ */
+export function externalStt(s: { sttMode: string; externalSttUrl: string; externalSttModel: string }): { url: string; model: string } | null {
+  const url = s.externalSttUrl.trim();
+  const model = s.externalSttModel.trim();
+  return s.sttMode === "external" && url && model ? { url, model } : null;
+}
+
 export async function transcribeTake(blob: Blob, cloudVoice: boolean): Promise<string> {
   const store = useVoiceStore.getState();
   if (!cloudVoice && !hasLocalVoice()) {
@@ -139,7 +151,10 @@ export async function transcribeTake(blob: Blob, cloudVoice: boolean): Promise<s
         return "";
       }
     }
-    const transcript = cloudVoice ? await transcribeAudioCloud(blob) : await transcribeAudio(blob);
+    const ext = externalStt(store);
+    const transcript = cloudVoice
+      ? await transcribeAudioCloud(blob)
+      : ext ? await transcribeExternal(blob, ext.url, ext.model) : await transcribeAudio(blob);
     discardFailedTake();
     store.setTranscript(transcript);
     // A silent take is not an error, but it must not be silence in the UI
@@ -638,7 +653,7 @@ export function useVoice() {
   // Reactive: the source of truth is the store flag set by the startup probe
   // (App.tsx) and the in-app install (Settings). Reading a module-level boolean
   // here was the bug — it never re-rendered when Whisper came up.
-  const sttSupported = cloudVoice || store.sttAvailable;
+  const sttSupported = cloudVoice || store.sttAvailable || externalStt(store) !== null;
   const ttsSupported = systemVoiceUsable();
 
   // Reactive neural-TTS availability (Piper), same model as sttAvailable.
@@ -868,7 +883,7 @@ export function useVoice() {
         // External HTTP TTS engine takes precedence when selected + configured.
         if (externalReady) {
           try {
-            const url = await synthesizeExternal(text, store.externalTtsUrl.trim(), store.externalTtsVoice || undefined);
+            const url = await synthesizeExternal(text, store.externalTtsUrl.trim(), store.externalTtsVoice || undefined, store.externalTtsModel || undefined);
             if (stopped()) return;
             await playNeuralAudio(url);
             store.setTtsFallbackReason(null);

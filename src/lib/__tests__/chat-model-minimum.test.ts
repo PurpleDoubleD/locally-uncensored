@@ -37,7 +37,9 @@ describe('chat catalog minimum', () => {
     // quants of nine current small models for 8 GB machines.
     // 31 -> 32 the same day: Gemma 4 E4B HauhauCS Q8_K_P (4.5B), reachable
     // once the download took the named file instead of resolving by quant.
-    expect(small.length).toBe(32)
+    // 32 -> 40 on 2026-10-30 (N1): LFM3 1.7B, VL 2B, Omni 2B and Audio 2B,
+    // each as Ollama tag and as MLX NVFP4 build.
+    expect(small.length).toBe(40)
     const picks = chatRecommendationGroups(models.map(model => [model]))
     expect(picks.flat().some(isBelowChatMinimum)).toBe(false)
     expect(picks.length).toBe(models.length - small.length)

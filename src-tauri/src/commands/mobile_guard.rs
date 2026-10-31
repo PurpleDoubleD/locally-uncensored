@@ -108,6 +108,7 @@ pub const BLOCKED: &[&str] = &[
     "transcribe",
     "synthesize",
     "synthesize_external",
+    "transcribe_external",
     "log_reveal",
     // The desktop update lane: stops the engines and starts LU again. A phone
     // is updated by its store.

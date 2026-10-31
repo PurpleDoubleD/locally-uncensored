@@ -2923,6 +2923,28 @@ fn stderr_blames_the_model_file(stderr: &str) -> bool {
     MARKERS.iter().any(|m| lower.contains(m))
 }
 
+/// The architecture name llama.cpp says it does not know, when it names one.
+///
+/// N1, 30.10.2026: LiquidAI/LFM3-1.7B-GGUF carries `lfm3`, which the pinned
+/// b9949 does not know, and the engine said `unknown model architecture:
+/// 'lfm3'`. The app answered "may be damaged, cut short ... download it
+/// again", and a second download of a perfectly good file changes nothing. An
+/// EMPTY name stays with the damaged-file answer: that is what a truncated
+/// GGUF prints (`KAPUTTE_GGUF_STDERR`, measured 03.09.2026).
+fn stderr_names_an_unknown_architecture(stderr: &str) -> Option<String> {
+    const MARKER: &str = "unknown model architecture";
+    for line in stderr.lines() {
+        let lower = line.to_ascii_lowercase();
+        let Some(at) = lower.find(MARKER) else { continue };
+        let rest = line[at + MARKER.len()..].trim_start_matches([':', ' ']);
+        let Some(name) = rest.strip_prefix('\'').and_then(|r| r.split('\'').next()) else { continue };
+        if !name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || "-_.".contains(c)) {
+            return Some(name.to_string());
+        }
+    }
+    None
+}
+
 /// Der Anfang einer GGUF: die Marke und die Formatversion.
 const GGUF_MAGIC: &[u8; 4] = b"GGUF";
 
@@ -3122,6 +3144,8 @@ fn illegal_instruction_repair_sentence(module_count: Option<usize>, is_macos: bo
 fn died_failure_hint(stderr: &str, backend_dir_too_long: bool, on_linux: bool) -> String {
     if let Some(lib) = stderr_names_a_missing_system_library(stderr) {
         missing_library_hint(&lib, on_linux)
+    } else if let Some(arch) = stderr_names_an_unknown_architecture(stderr) {
+        format!(" The model file is a {arch} model, and this LU Engine does not know that architecture yet. Downloading it again will not help. Run it through Ollama, or pick another model.")
     } else if backend_dir_too_long {
         format!(" {}", long_install_path_hint())
     } else if stderr_blames_the_model(stderr) {
@@ -10077,7 +10101,9 @@ mod tests {
             stderr: "llama_model_load: error loading model: unknown model architecture 'wanx'".into(),
             exit_code: None, signal: None };
         let msg = start_failure_message(&f, 8127, Duration::from_secs(60), SecondAttempt::SameOffload, None);
-        assert!(msg.contains("could not read the model file"), "{msg}");
+        // A NAMED architecture is the engine's age, not the file (N1, LFM3).
+        assert!(msg.contains("a wanx model"), "{msg}");
+        assert!(msg.contains("does not know that architecture"), "{msg}");
         assert!(!msg.contains("GPU Layers"), "{msg}");
     }
 

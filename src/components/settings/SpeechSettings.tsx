@@ -2,10 +2,10 @@ import { useCallback, useEffect, useReducer, useState } from 'react'
 import { Check, Download, Loader2, Mic, Volume2, X } from 'lucide-react'
 import { withInstallerOutput } from '../../lib/error-text'
 import { HINWEIS_TEXT } from '../../lib/hinweis'
-import { backendCall } from '../../api/backend'
+import { backendCall, getOllamaBase } from '../../api/backend'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { useVoiceStore } from '../../stores/voiceStore'
-import { checkWhisperAvailable, checkTtsAvailable, downloadPiperVoice, listInstalledPiperVoices } from '../../api/voice'
+import { checkWhisperAvailable, checkTtsAvailable, downloadPiperVoice, listInstalledPiperVoices, ollamaSpeechUrls, OLLAMA_SPEECH_MODEL } from '../../api/voice'
 import { InlineToggle } from './InlineToggle'
 import { MicrophoneSetting } from './MicrophoneSetting'
 import { initialProbe, makeProbeReducer, needsInstall, showsHint } from './probe-install'
@@ -304,6 +304,25 @@ export function SpeechSettings() {
       </p>
     )}
 
+    {/* N1: dictation through an OpenAI-compatible transcription endpoint,
+        e.g. Ollama serving Liquid AI LFM3 Audio, instead of faster-whisper. */}
+    <EngineSwitch
+      label="Dictation"
+      value={voiceSettings.sttMode}
+      options={[['whisper', 'faster-whisper'], ['external', 'External HTTP']]}
+      onPick={(m) => voiceSettings.updateVoiceSettings({ sttMode: m })}
+    />
+    {voiceSettings.sttMode === 'external' && (
+      <div className="space-y-1.5">
+        <SettingInput value={voiceSettings.externalSttUrl} onChange={(v) => voiceSettings.updateVoiceSettings({ externalSttUrl: v })} placeholder="http://localhost:11434/v1/audio/transcriptions" />
+        <SettingInput value={voiceSettings.externalSttModel} onChange={(v) => voiceSettings.updateVoiceSettings({ externalSttModel: v })} placeholder="model (e.g. lfm3-audio:2b)" />
+        <OllamaSpeechPreset onUse={() => voiceSettings.updateVoiceSettings({ externalSttUrl: ollamaSpeechUrls(getOllamaBase()).stt, externalSttModel: OLLAMA_SPEECH_MODEL })} />
+        <p className="text-[0.55rem] text-gray-500 leading-snug">
+          Any OpenAI-compatible speech-to-text endpoint. With Ollama 0.40.13 or newer, LFM3 Audio (lfm3-audio:2b, 1.7 GB) transcribes the microphone; get it in Models first. Stays on your machine when the endpoint is local.
+        </p>
+      </div>
+    )}
+
     <MicrophoneSetting coversVoice />
 
     {/* Text-to-Speech, Piper neural (read responses aloud) */}
@@ -421,8 +440,10 @@ export function SpeechSettings() {
           spellCheck={false}
           className="w-full px-2 py-1 rounded bg-transparent border border-white/8 text-[0.65rem] text-gray-300 placeholder-gray-600 focus:outline-none focus:border-white/20"
         />
+        <SettingInput value={voiceSettings.externalTtsModel} onChange={(v) => voiceSettings.updateVoiceSettings({ externalTtsModel: v })} placeholder="model (empty sends tts-1)" />
+        <OllamaSpeechPreset onUse={() => voiceSettings.updateVoiceSettings({ externalTtsUrl: ollamaSpeechUrls(getOllamaBase()).tts, externalTtsModel: OLLAMA_SPEECH_MODEL, externalTtsVoice: '' })} />
         <p className="text-[0.55rem] text-gray-500 leading-snug">
-          Any OpenAI-compatible TTS endpoint (e.g. Kokoro-FastAPI). Used for read-aloud instead of Piper. Stays on your machine when the endpoint is local.
+          Any OpenAI-compatible TTS endpoint (e.g. Kokoro-FastAPI, or Ollama 0.40.13+ with LFM3 Audio). Used for read-aloud instead of Piper. With a model and no voice, the engine speaks in the model's own voice. Stays on your machine when the endpoint is local.
         </p>
         {/* B11: the external voice fell back to the system voice in silence. */}
         {voiceSettings.ttsFallbackReason && (
@@ -431,4 +452,54 @@ export function SpeechSettings() {
       </div>
     )}
   </>)
+}
+
+function SettingInput({ value, onChange, placeholder }: { value: string; onChange: (v: string) => void; placeholder: string }) {
+  return (
+    <input
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      placeholder={placeholder}
+      spellCheck={false}
+      className="w-full px-2 py-1 rounded bg-transparent border border-white/8 text-[0.65rem] text-gray-300 placeholder-gray-600 focus:outline-none focus:border-white/20"
+    />
+  )
+}
+
+/** Fills in the local Ollama address and LFM3 Audio (N1). Fills only, it pulls nothing. */
+function OllamaSpeechPreset({ onUse }: { onUse: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onUse}
+      className="px-2 py-0.5 rounded border border-white/8 text-[0.6rem] text-gray-400 hover:text-gray-200 transition-colors"
+    >
+      Use LFM3 Audio in Ollama
+    </button>
+  )
+}
+
+function EngineSwitch<T extends string>({ label, value, options, onPick }: { label: string; value: T; options: [T, string][]; onPick: (v: T) => void }) {
+  return (
+    <div className="flex items-center justify-between gap-2 pt-1">
+      <span className="text-[0.7rem] text-gray-500">{label}</span>
+      <div className="flex items-center gap-1 text-[0.6rem]">
+        {options.map(([m, text]) => (
+          <button
+            key={m}
+            onClick={() => onPick(m)}
+            aria-pressed={value === m}
+            className={
+              'px-2 py-0.5 rounded border transition-colors ' +
+              (value === m
+                ? 'bg-lu-accent-soft text-gray-900 dark:text-white border-lu-accent-edge dark:border-lu-accent'
+                : 'text-gray-500 border-white/8 hover:text-gray-300')
+            }
+          >
+            {text}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
 }
