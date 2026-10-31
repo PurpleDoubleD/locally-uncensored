@@ -1025,8 +1025,9 @@ export function getUncensoredTextModels(): DiscoverModel[] {
     // Two independent uncensors of the same dense 27B base. Both are native
     // vision-language models, so every entry carries the repo's own mmproj and
     // LU downloads it with the model (see `mmprojFileName`). The MTP head that
-    // ships inside these GGUFs loads fine on the pinned llama.cpp b9949, which
+    // ships inside these GGUFs loads fine on llama.cpp b9949, which
     // implements the qwen35 MTP block, so we point at the plain files.
+    // (E1, 3.0.9: the pin is b11960 now; these two were not loaded there.)
     //
     // The uncensored build is OrcaRouter's abliteration. Its own GGUF repo
     // (orcarouter/Qwen3.8-27B-Uncensored-GGUF) is gated: every file answers

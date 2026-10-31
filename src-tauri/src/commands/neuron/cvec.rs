@@ -341,8 +341,8 @@ mod tests {
 
     #[test]
     fn reads_a_file_cvector_generator_wrote() {
-        // A real file from the pinned llama-cvector-generator (b9949) is too
-        // big to keep; the generator's layout is what to_bytes writes, and a
+        // A real file of a large model is too big to keep (a small one is,
+        // see the next test); the generator's layout is what to_bytes writes, and a
         // tensor of another type must be refused, not summed.
         let mut bytes = to_bytes(&sample(), "x", 3);
         // Flip the type of the first tensor to F16 (1).
@@ -350,6 +350,23 @@ mod tests {
         let at = bytes.windows(name.len()).position(|w| w == name).unwrap() + name.len() + 4 + 8;
         bytes[at] = 1;
         assert!(read_from(&mut bytes.as_slice()).unwrap_err().contains("not F32"));
+    }
+
+    #[test]
+    fn reads_a_real_file_of_the_pinned_generator() {
+        // E1 (3.0.9): a real direction from lu-llama-cvector-generator b11960
+        // (Qwen2.5-0.5B-Instruct Q8_0, --method mean, the 18 pairs beside it
+        // in fixtures/cvec). Small enough to keep, so an engine bump that
+        // changes the generator's layout turns this red instead of the slider.
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/cvec/qwen2.5-0.5b-anger-b11960.gguf");
+        let cv = read(&path).expect("the generator's own file reads");
+        assert_eq!(cv.n_embd, 896, "Qwen2.5-0.5B hidden size");
+        assert_eq!(cv.layers.len(), 23, "one direction per layer after the first");
+        assert!(cv.layers.values().flatten().all(|v| v.is_finite()));
+        assert!(!cv.is_zero());
+        // What the mixer writes from it reads back the same.
+        let again = read_from(&mut to_bytes(&cv, "qwen2.5-0.5b", 24).as_slice()).unwrap();
+        assert_eq!(again.layers, cv.layers);
     }
 
     #[test]

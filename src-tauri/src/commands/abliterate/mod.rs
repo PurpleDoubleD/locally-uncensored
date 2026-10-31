@@ -57,8 +57,11 @@ const HERETIC_VERSION: &str = "1.4.0";
 /// PyTorch for Apple Silicon from PyPI: the version the prototype ran on.
 const TORCH_MAC: &str = "torch==2.14.1";
 
-/// llama.cpp's converter, at the commit `scripts/build-llama.sh` builds the
-/// engine from (b9949). The archive was fetched from GitHub's codeload host
+/// llama.cpp's converter at b9949, the engine's pin until 3.0.9. E1 moved the
+/// engine to b11960 and left this one on purpose: the newer engine reads what
+/// this converter writes, and a newer converter brings new Python packages
+/// that need a refusal-removal run of their own (E1-ENGINE-UPGRADE-RUNBOOK.md,
+/// section 7). The archive was fetched from GitHub's codeload host
 /// on 25.10.2026 and compared with the prototype's copy; size and digest are
 /// fixed here, so nothing read at run time decides what runs.
 const LLAMA_COMMIT: &str = "049326a00025d00b08cc188ed716b681e984a3f8";

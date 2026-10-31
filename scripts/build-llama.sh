@@ -52,8 +52,8 @@ set -euo pipefail
 # CI reuses a cached checkout keyed on hashFiles('scripts/build-llama.sh')
 # (release.yml, sidecar-windows.yml), so both values below are inside the cache
 # key by construction — bumping one cannot silently reuse the old source tree.
-LLAMA_TAG="${LLAMA_TAG:-b9949}"
-LLAMA_COMMIT="${LLAMA_COMMIT:-049326a00025d00b08cc188ed716b681e984a3f8}"
+LLAMA_TAG="${LLAMA_TAG:-b11960}"
+LLAMA_COMMIT="${LLAMA_COMMIT:-8642541b255bfb5dc39cd351a178be09013a55d6}"
 LLAMA_REPO="${LLAMA_REPO:-https://github.com/ggml-org/llama.cpp.git}"
 
 # --- Paths -----------------------------------------------------------------
@@ -602,7 +602,12 @@ check_binary() {
   local pid=$!
   trap 'kill "$pid" 2>/dev/null || true' EXIT
   local ok=""
-  for _ in $(seq 1 30); do
+  # E1 (b11960): the first start of a freshly built Metal binary compiles its
+  # embedded shader libraries (measured 9.3 s on an M5 Pro, "loaded 36
+  # libraries ... in 9.314 sec"; later starts come out of the system's shader
+  # cache in 0.3 s). The 9 s this loop used to allow is exactly that first
+  # start, so it waits up to 60 s now.
+  for _ in $(seq 1 200); do
     if curl -fsS "http://127.0.0.1:$port/health" >/dev/null 2>&1; then ok=1; break; fi
     sleep 0.3
   done
