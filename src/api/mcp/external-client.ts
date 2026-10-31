@@ -110,6 +110,36 @@ function isToolInputSchema(v: unknown): v is MCPToolDefinition['inputSchema'] {
  *  otherwise (the handshake can, see MCPServerConfig.initializeTimeoutMs). */
 export const REQUEST_TIMEOUT_MS = 30_000
 
+/**
+ * The handshake of an external server waits as long as the server is still
+ * busy. Every server LU starts is a uvx or npx package, and its first start
+ * downloads that package and its dependencies before it answers `initialize`.
+ * On a slow line that took longer than the old fixed wait; LU then stopped
+ * uvx in the middle of the download and the next Connect started it over
+ * (box test, 31.10.2026: three failures in a row, instant once the cache was
+ * warm). uv and npm report each download on stderr, so every stderr line buys
+ * the handshake another HANDSHAKE_QUIET_MS, up to HANDSHAKE_CAP_MS in all.
+ */
+export const HANDSHAKE_QUIET_MS = 120_000
+export const HANDSHAKE_CAP_MS = 10 * 60_000
+
+/** What the panel shows while a connecting server prints to stderr, i.e.
+ *  while uvx or npx is still fetching the server. */
+export const INSTALLING_NOTE = 'Installing server dependencies … the first start can take a few minutes.'
+
+/**
+ * How much longer the handshake waits, or null when it gives up: the server
+ * has been quiet for `quietMs`, or the whole handshake reached `capMs`.
+ */
+export function handshakeWaitLeft(
+  now: number, startedAt: number, lastOutputAt: number, quietMs: number, capMs: number,
+): number | null {
+  const capLeft = startedAt + capMs - now
+  const quietLeft = Math.max(startedAt, lastOutputAt) + quietMs - now
+  if (capLeft <= 0 || quietLeft <= 0) return null
+  return Math.min(capLeft, quietLeft)
+}
+
 const EMPTY_INPUT_SCHEMA: MCPToolDefinition['inputSchema'] = {
   type: 'object',
   properties: {},
@@ -203,11 +233,21 @@ export class MCPExternalClient {
    */
   private onExit?: (serverId: string) => void
 
+  /** Told INSTALLING_NOTE once the connecting server prints to stderr, and
+   *  null when the connect is over, whichever way. */
+  private onProgress?: (note: string | null) => void
+  /** When the server last printed to stderr; the handshake waits on it. */
+  private lastOutputAt = 0
+
   private readonly config: MCPServerConfig
 
-  constructor(config: MCPServerConfig, opts?: { onExit?: (serverId: string) => void }) {
+  constructor(config: MCPServerConfig, opts?: {
+    onExit?: (serverId: string) => void
+    onProgress?: (note: string | null) => void
+  }) {
     this.config = config
     this.onExit = opts?.onExit
+    this.onProgress = opts?.onProgress
   }
 
   async connect(): Promise<MCPToolDefinition[]> {
@@ -252,6 +292,8 @@ export class MCPExternalClient {
 
         command.stderr.on('data', (data: string) => {
           log.warn(`[MCP:${this.config.name}] stderr`, { data })
+          this.lastOutputAt = Date.now()
+          if (!this.registered) this.onProgress?.(INSTALLING_NOTE)
         })
 
         command.on('close', () => {
@@ -285,14 +327,18 @@ export class MCPExternalClient {
       // removes it again if the handshake fails outright.
       liveClients.add(this)
 
-      // Initialize the MCP connection. The server's own config may give the
-      // handshake longer: an npx server installs its packages before it
-      // answers (d307-k, 19.10.2026: REA's first start on a slow line).
+      // Initialize the MCP connection. It waits while the server still
+      // prints (HANDSHAKE_QUIET_MS); the server's own config may give it
+      // longer still (d307-k, 19.10.2026: REA's first start on a slow line).
+      const quietMs = Math.max(this.config.initializeTimeoutMs ?? 0, HANDSHAKE_QUIET_MS)
+      const capMs = Math.max(quietMs, HANDSHAKE_CAP_MS)
+      const startedAt = Date.now()
       await this.sendRequest('initialize', {
         protocolVersion: '2024-11-05',
         capabilities: {},
         clientInfo: { name: 'locally-uncensored', version: APP_VERSION },
-      }, this.config.initializeTimeoutMs)
+      }, quietMs, () => handshakeWaitLeft(Date.now(), startedAt, this.lastOutputAt, quietMs, capMs),
+      `no answer and no progress for ${Math.round(quietMs / 60_000)} min`)
 
       // Discover tools
       const toolsResult = await this.sendRequest('tools/list', {})
@@ -318,8 +364,10 @@ export class MCPExternalClient {
       }
 
       this.registered = true
+      this.onProgress?.(null)
       return tools
     } catch (err) {
+      this.onProgress?.(null)
       this.connected = false
       // A failure after spawn (handshake refused, tools/list timed out) leaves
       // the server process running with nobody holding a handle to it — the
@@ -444,7 +492,17 @@ export class MCPExternalClient {
 
   // ── Private ─────────────────────────────────────────────────
 
-  private sendRequest(method: string, params?: unknown, timeoutMs: number = REQUEST_TIMEOUT_MS): Promise<unknown> {
+  /**
+   * `waitMore`, when given, is asked each time the wait runs out: a number is
+   * how much longer to wait, null ends the request with a timeout.
+   */
+  private sendRequest(
+    method: string,
+    params?: unknown,
+    timeoutMs: number = REQUEST_TIMEOUT_MS,
+    waitMore?: () => number | null,
+    timeoutWhy?: string,
+  ): Promise<unknown> {
     return new Promise((resolve, reject) => {
       if (!this.child) {
         reject(new Error('Not connected'))
@@ -458,11 +516,18 @@ export class MCPExternalClient {
         params,
       }
 
-      const timer = setTimeout(() => {
-        if (this.pendingRequests.delete(id)) {
-          reject(new Error(`Request ${method} timed out`))
+      const expire = () => {
+        const entry = this.pendingRequests.get(id)
+        if (!entry) return
+        const more = waitMore?.() ?? null
+        if (more !== null) {
+          entry.timer = setTimeout(expire, more)
+          return
         }
-      }, timeoutMs > 0 ? timeoutMs : REQUEST_TIMEOUT_MS)
+        this.pendingRequests.delete(id)
+        reject(new Error(`Request ${method} timed out${timeoutWhy ? ` (${timeoutWhy})` : ''}`))
+      }
+      const timer = setTimeout(expire, timeoutMs > 0 ? timeoutMs : REQUEST_TIMEOUT_MS)
 
       this.pendingRequests.set(id, { resolve, reject, timer })
 
@@ -470,8 +535,9 @@ export class MCPExternalClient {
       // of becoming an unhandled rejection and letting it sit for 30 s.
       const msg = JSON.stringify(request) + '\n'
       Promise.resolve(this.child.write(msg)).catch((err: unknown) => {
-        if (this.pendingRequests.delete(id)) {
-          clearTimeout(timer)
+        const entry = this.pendingRequests.get(id)
+        if (entry && this.pendingRequests.delete(id)) {
+          clearTimeout(entry.timer)
           reject(err instanceof Error ? err : new Error(String(err)))
         }
       })

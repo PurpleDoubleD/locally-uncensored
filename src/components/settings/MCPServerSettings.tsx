@@ -5,6 +5,7 @@ import { useMCPStore } from '../../stores/mcpStore'
 import { toolRegistry } from '../../api/mcp'
 import type { MCPServerConfig } from '../../api/mcp/types'
 import { joinArgs, parseArgs } from '../../lib/mcp-args'
+import { HINWEIS_TEXT } from '../../lib/hinweis'
 // `import type` und nicht `import`: die Klasse wird unten bewusst dynamisch
 // geladen, damit der Tauri-Import im Dev-Modus nicht mitkommt. Ein Typ-Import
 // wird beim Uebersetzen geloescht und erzeugt keine Laufzeit-Abhaengigkeit —
@@ -38,6 +39,15 @@ export function MCPServerSettings() {
   const [connecting, setConnecting] = useState<string[]>(() => [...inFlight.keys()])
   const markConnecting = (id: string, on: boolean) =>
     setConnecting((ids) => (on ? [...ids.filter((x) => x !== id), id] : ids.filter((x) => x !== id)))
+  // What a connecting server is busy with (uvx/npx fetching it), per server.
+  const [progress, setProgress] = useState<Record<string, string>>({})
+  const markProgress = (id: string, note: string | null) =>
+    setProgress((all) => {
+      const next = { ...all }
+      if (note) next[id] = note
+      else delete next[id]
+      return next
+    })
   const [error, setError] = useState<string | null>(null)
 
   // Add form state. `editingId` entscheidet, ob Speichern anlegt oder aendert.
@@ -117,6 +127,7 @@ export function MCPServerSettings() {
           clearServerTools(id)
           clients.delete(id)
         },
+        onProgress: (note) => markProgress(server.id, note),
       })
       attempt.client = client
       let tools: Awaited<ReturnType<MCPExternalClient['connect']>>
@@ -151,6 +162,7 @@ export function MCPServerSettings() {
     } finally {
       if (inFlight.get(server.id) === attempt) inFlight.delete(server.id)
       markConnecting(server.id, false)
+      markProgress(server.id, null)
     }
   }
 
@@ -258,6 +270,12 @@ export function MCPServerSettings() {
                 <Trash2 size={11} />
               </button>
             </div>
+
+            {isLoading && progress[server.id] && (
+              <p data-testid="mcp-installing-note" className={`mt-1 t-micro leading-snug ${HINWEIS_TEXT.ruhig}`}>
+                {progress[server.id]}
+              </p>
+            )}
 
             {/* Expanded tool list */}
             {isConnected && tools.length > 0 && (
