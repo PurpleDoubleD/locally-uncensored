@@ -203,7 +203,7 @@ function IntroCards({ onClose }: { onClose: () => void }) {
         <div className="px-6 pt-4 pb-5">
           <p className="t-label text-lu-accent mb-1.5" data-testid="neuron-intro-step">Step {i + 1} of {INTRO_CARDS.length}</p>
           <h2 className="t-display text-gray-900 dark:text-white" data-testid="neuron-intro-title">{card.title}</h2>
-          <p className="t-body text-gray-600 dark:text-gray-300 mt-2 min-h-[4.5em]">{card.text}</p>
+          <p className="t-body text-gray-300 mt-2 min-h-[4.5em]">{card.text}</p>
           <div className="flex items-center justify-between mt-4">
             <div className="flex items-center gap-1.5" role="tablist" aria-label="Introduction cards">
               {INTRO_CARDS.map((c, k) => (
@@ -228,7 +228,7 @@ function IntroCards({ onClose }: { onClose: () => void }) {
               {last ? (
                 <button type="button" className="lu-control lu-primary" onClick={onClose} data-testid="neuron-intro-done">Start tweaking</button>
               ) : (
-                <button type="button" className="lu-control lu-primary" onClick={() => go(i + 1)} data-testid="neuron-intro-next">
+                <button type="button" className="lu-control lu-primary" onClick={() => go(i + 1)} data-testid="neuron-intro-next" data-autofocus>
                   Next <ArrowRight size={ICON_SM} />
                 </button>
               )}

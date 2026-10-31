@@ -2863,7 +2863,8 @@ html[data-computer-surface]:not([data-computer-surface='window']) #root {
 .dark .neuron-intro .nintro-line { fill: rgba(255, 255, 255, 0.18); }
 .neuron-intro .nintro-line--accent,
 .dark .neuron-intro .nintro-line--accent { fill: var(--color-lu-accent); }
-.neuron-intro .nintro-type { clip-path: inset(0 100% 0 0); animation: lu-nintro-type 5s steps(26, end) infinite; }
+/* WebKit draws no clip-path on SVG groups: the code slides in instead of being typed. */
+.neuron-intro .nintro-type { opacity: 0; animation: lu-nintro-type 5s ease-out infinite; }
 .neuron-intro .nintro-glow { opacity: 0; animation: lu-nintro-glow 5s ease-in-out infinite; }
 .neuron-intro .nintro-dash { stroke-dashoffset: 40; animation: lu-nintro-dash 5s linear infinite; }
 .neuron-intro .nintro-arrive { opacity: 0; animation: lu-nintro-arrive 5s ease-out infinite; }
@@ -2899,22 +2900,22 @@ html[data-computer-surface]:not([data-computer-surface='window']) #root {
   100% { transform: scaleX(1); opacity: 0; }
 }
 @keyframes lu-nintro-type {
-  0% { clip-path: inset(0 100% 0 0); }
-  45%, 100% { clip-path: inset(0 0 0 0); }
+  0% { opacity: 0; transform: translateX(-8px); }
+  25%, 100% { opacity: 1; transform: none; }
 }
 @keyframes lu-nintro-glow {
-  0%, 45% { opacity: 0; }
-  55%, 80% { opacity: 1; }
+  0%, 25% { opacity: 0; }
+  35%, 80% { opacity: 1; }
   100% { opacity: 0; }
 }
 @keyframes lu-nintro-dash {
-  0%, 55% { stroke-dashoffset: 40; opacity: 0; }
-  60% { opacity: 1; }
+  0%, 35% { stroke-dashoffset: 40; opacity: 0; }
+  40% { opacity: 1; }
   100% { stroke-dashoffset: 0; opacity: 1; }
 }
 @keyframes lu-nintro-arrive {
-  0%, 70% { opacity: 0; }
-  80%, 100% { opacity: 1; }
+  0%, 50% { opacity: 0; }
+  60%, 100% { opacity: 1; }
 }
 @keyframes lu-nintro-tile {
   from { opacity: 0; transform: translateY(6px); }
@@ -2933,7 +2934,7 @@ html[data-computer-surface]:not([data-computer-surface='window']) #root {
   .neuron-intro .nintro-arrive,
   .neuron-intro .nintro-tile { animation: none; }
   .neuron-intro .nintro-token { opacity: 0; }
-  .neuron-intro .nintro-type { clip-path: none; }
+  .neuron-intro .nintro-type,
   .neuron-intro .nintro-glow,
   .neuron-intro .nintro-arrive,
   .neuron-intro .nintro-tile,

@@ -30,7 +30,7 @@ export function StepCard({ n, title, lead, done, aside, children, testId }: {
       <span aria-hidden className="absolute left-[13px] top-7 bottom-0 w-px bg-gray-200 dark:bg-white/[0.08] neuron-step-line" />
       <span
         aria-hidden
-        className={`absolute left-0 top-0 w-7 h-7 rounded-full flex items-center justify-center t-control tabular-nums ${done ? 'bg-lu-accent text-white' : 'border border-gray-300 dark:border-white/20 text-gray-600 dark:text-gray-300 bg-white dark:bg-[#1a1a1a]'}`}
+        className={`absolute left-0 top-0 w-7 h-7 rounded-full flex items-center justify-center t-control tabular-nums ${done ? 'bg-lu-accent text-white' : 'border border-gray-300 dark:border-white/20 text-gray-300 bg-white dark:bg-[#1a1a1a]'}`}
         data-step-done={done ? 'true' : 'false'}
       >
         {done ? <Check size={ICON_SM} /> : n}
@@ -79,12 +79,12 @@ export function SliderRow({ id, left, right, value, computed, disabled, tag, onC
       data-testid={`neuron-slider-${id}`}
     >
       <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
-        <span className="t-body text-gray-700 dark:text-gray-200 truncate" title={left}>{left}</span>
+        <span className="t-body text-gray-200 truncate" title={left}>{left}</span>
         <span className={`t-control tabular-nums px-1.5 py-0.5 rounded ${on ? 'text-lu-accent' : HINWEIS_TEXT.ruhig}`} data-testid={`neuron-value-${id}`}>
           {computed ? signedValue(value) : tag ?? ''}
         </span>
         <span className="flex items-center justify-end gap-1 min-w-0">
-          <span className="t-body text-gray-700 dark:text-gray-200 truncate text-right" title={right}>{right}</span>
+          <span className="t-body text-gray-200 truncate text-right" title={right}>{right}</span>
           {onDelete && (
             <button type="button" onClick={onDelete} aria-label={`Delete ${right}`} className="p-0.5 text-gray-400 hover:text-red-500 flex-none">
               <Trash2 size={ICON_SM} />
@@ -142,7 +142,7 @@ export function WayTabs<T extends string>({ ways, current, onPick }: {
           aria-controls={`neuron-way-${w.id}`}
           data-testid={`neuron-way-${w.id}`}
           onClick={() => onPick(w.id)}
-          className={`flex-1 min-w-[7rem] t-control px-2.5 py-1.5 rounded-md transition-colors ${current === w.id ? 'bg-white dark:bg-white/[0.10] text-gray-900 dark:text-white shadow-sm' : 'text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white'}`}
+          className={`flex-1 min-w-[7rem] t-control px-2.5 py-1.5 rounded-md transition-colors ${current === w.id ? 'bg-white dark:bg-white/[0.10] text-gray-900 dark:text-white shadow-sm' : 'text-gray-300 hover:text-gray-900 dark:hover:text-white'}`}
         >
           {w.label}{w.count ? <span className="ml-1 tabular-nums text-lu-accent">{w.count}</span> : null}
         </button>
@@ -171,7 +171,7 @@ export function ScopeButton({ on, onClick, children }: { on: boolean; onClick: (
       role="radio"
       aria-checked={on}
       onClick={onClick}
-      className={`t-control px-2.5 py-1.5 rounded-md border ${on ? 'border-lu-accent/50 bg-lu-accent/10 text-gray-900 dark:text-white' : 'border-gray-200 dark:border-white/[0.08] text-gray-600 dark:text-gray-300'}`}
+      className={`t-control px-2.5 py-1.5 rounded-md border ${on ? 'border-lu-accent/50 bg-lu-accent/10 text-gray-900 dark:text-white' : 'border-gray-200 dark:border-white/[0.08] text-gray-300'}`}
     >
       {children}
     </button>
@@ -183,7 +183,7 @@ export function JobPanel({ job, onStop, onDismiss }: { job: NeuronJob; onStop: (
   if (job.status === 'running') {
     return (
       <div className="space-y-1.5 mb-4 rounded-lg border border-lu-accent/30 bg-lu-accent/[0.05] px-3 py-2.5" data-testid="neuron-job" aria-live="polite">
-        <p className="flex items-center gap-1.5 t-body text-gray-800 dark:text-gray-100">
+        <p className="flex items-center gap-1.5 t-body text-gray-100">
           <Loader2 size={ICON_SM} className="animate-spin" /> {job.title}: {job.phaseLabel || 'starting…'}
         </p>
         <div className="h-1 rounded-full bg-gray-200 dark:bg-white/[0.08] overflow-hidden">

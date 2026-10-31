@@ -104,6 +104,16 @@ describe('Neurons for beginners: one page in steps', () => {
   })
 })
 
+// Mac check 31.10.: the slider ends read grey on dark. The house remaps
+// `.dark .text-gray-700` to gray-500 (index.css, contrast layer), which beats
+// a `dark:text-gray-200` next to it. The page uses the house's own greys.
+it('uses the greys the house does not dim', () => {
+  for (const f of ['NeuronView.tsx', 'parts.tsx', 'panels.tsx', 'NeuronIntro.tsx']) {
+    const src = readFileSync(resolve(__dirname, '..', f), 'utf8')
+    expect(src, f).not.toMatch(/text-gray-[67]00 dark:text-gray-/)
+  }
+})
+
 describe('the introduction', () => {
   it('opens by itself the first time, once, and Help brings it back', async () => {
     useNeuronStore.setState({ introSeen: false })
@@ -138,6 +148,12 @@ describe('the introduction', () => {
       expect(reduced).toContain(`.neuron-intro .${cls}`)
     }
     expect(reduced).toMatch(/animation: none/)
+    // What starts hidden and fades in must stand there, finished, when it
+    // does not move (the code on card 5 was invisible otherwise).
+    const shown = reduced.slice(reduced.lastIndexOf('.neuron-intro .nintro-type,'))
+    const rule = shown.slice(0, shown.indexOf('}'))
+    for (const cls of ['nintro-type', 'nintro-glow', 'nintro-arrive', 'nintro-tile', 'nintro-dash']) expect(rule).toContain(`.${cls}`)
+    expect(rule).toMatch(/opacity: 1/)
   })
 })
 
@@ -186,6 +202,8 @@ describe('coordinates', () => {
     expect(screen.getByTestId('neuron-coords-other-model').textContent).toMatch(/one exact model/)
     expect(screen.getAllByTestId('neuron-coords-line')[0].textContent).toMatch(/not in this build yet/)
     expect((screen.getByTestId('neuron-coords-use') as HTMLButtonElement).disabled).toBe(true)
+    // Nothing the box could unlock, so no box.
+    expect(screen.queryByTestId('neuron-coords-anyway')).toBeNull()
   })
 })
 

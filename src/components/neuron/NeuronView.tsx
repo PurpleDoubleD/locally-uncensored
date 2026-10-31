@@ -361,7 +361,7 @@ export function NeuronView() {
         testId="neuron-step-model"
       >
         <div className="grid grid-cols-[auto_1fr] items-center gap-x-3 gap-y-2">
-          <label className="t-body font-medium text-gray-700 dark:text-gray-200" htmlFor="neuron-model">Model</label>
+          <label className="t-body font-medium text-gray-200" htmlFor="neuron-model">Model</label>
           <select
             id="neuron-model"
             data-testid="neuron-model"
@@ -540,7 +540,7 @@ export function NeuronView() {
       >
         {persona && modelKey && (
           <div className="flex flex-wrap items-center gap-2 mb-4 t-body" role="radiogroup" aria-label="Save sliders for">
-            <span className="text-gray-700 dark:text-gray-200 font-medium mr-1">Save for</span>
+            <span className="text-gray-200 font-medium mr-1">Save for</span>
             <ScopeButton on={scope === 'model'} onClick={() => setScope(modelKey, 'model')}>This model</ScopeButton>
             <ScopeButton on={scope === 'persona'} onClick={() => { setScope(modelKey, 'persona'); if (!hasPersonaProfile(profiles, modelKey, persona.id)) setProfile(editingKey(modelKey, persona.id, 'persona'), { ...(profiles[modelKey] ?? {}) }) }}>
               This model with “{persona.name}”
@@ -581,7 +581,7 @@ function NoModel({ onDownload, onAddFile, onIntro, error, onDismissError }: {
       <div className="max-w-md flex flex-col items-center text-center gap-3" data-testid="neuron-empty">
         <Sliders size={28} className="text-gray-400 dark:text-gray-500" aria-hidden />
         <h1 className="t-title text-gray-900 dark:text-white">No chat model for the LU Engine yet</h1>
-        <p className="t-body text-gray-600 dark:text-gray-300" data-testid="neuron-no-chat-model">{NO_CHAT_MODEL}</p>
+        <p className="t-body text-gray-300" data-testid="neuron-no-chat-model">{NO_CHAT_MODEL}</p>
         <p className={`t-body ${HINWEIS_TEXT.ruhig}`} data-testid="neuron-other-apps">{OTHER_APPS}</p>
         <div className="flex flex-wrap items-center justify-center gap-2 pt-1">
           <button className="lu-tonal" onClick={onDownload} data-testid="neuron-get-model">
@@ -595,7 +595,7 @@ function NoModel({ onDownload, onAddFile, onIntro, error, onDismissError }: {
             The lines are the how-to's, so Help and this state say the same. */}
         <div className="mt-3 w-full text-left rounded-lg border border-gray-200 dark:border-white/[0.06] px-4 py-3" data-testid="neuron-gguf-steps">
           <p className="t-body font-semibold text-gray-900 dark:text-white mb-1.5">Already have a GGUF file?</p>
-          <ol className="t-body text-gray-600 dark:text-gray-300 space-y-1 list-decimal pl-5">
+          <ol className="t-body text-gray-300 space-y-1 list-decimal pl-5">
             {GGUF_STEPS.map((s) => <li key={s.from}>{s.text}</li>)}
           </ol>
           <button className="lu-control mt-2.5" onClick={onAddFile} data-testid="neuron-add-gguf" title="Use a GGUF file from your drive as a chat model on the LU Engine">

@@ -43,17 +43,17 @@ export function OwnSliderForm({ disabled, onCompute }: { disabled: boolean; onCo
   const ok = name.trim() && lines(more).length > 0 && lines(less).length > 0
   return (
     <div className="space-y-3 rounded-lg border border-gray-200 dark:border-white/[0.08] p-3" data-testid="neuron-own-form">
-      <label className="block t-body text-gray-700 dark:text-gray-200">
+      <label className="block t-body text-gray-200">
         <span className="block mb-1 font-medium">1. Name the trait</span>
         <input className={field} placeholder="e.g. Pirate" value={name} maxLength={40} onChange={(e) => setName(e.target.value)} data-testid="neuron-own-name" />
       </label>
       <div>
-        <p className="t-body font-medium text-gray-700 dark:text-gray-200 mb-1">2. Write a few lines for each side</p>
+        <p className="t-body font-medium text-gray-200 mb-1">2. Write a few lines for each side</p>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <label className="block t-micro text-gray-600 dark:text-gray-300">More like this (one per line)
+          <label className="block t-micro text-gray-300">More like this (one per line)
             <textarea rows={4} className={`${field} mt-1`} placeholder={'Talk like a pirate.\nSay arr and matey.'} value={more} onChange={(e) => setMore(e.target.value)} data-testid="neuron-own-more" />
           </label>
-          <label className="block t-micro text-gray-600 dark:text-gray-300">Less like this (one per line)
+          <label className="block t-micro text-gray-300">Less like this (one per line)
             <textarea rows={4} className={`${field} mt-1`} placeholder={'Talk in plain modern English.'} value={less} onChange={(e) => setLess(e.target.value)} data-testid="neuron-own-less" />
           </label>
         </div>
@@ -125,7 +125,7 @@ export function FeaturePanel({ info, modelPath, vectors, strengths, disabled, on
               {hits.map((h) => (
                 <li key={h.feature} className="grid grid-cols-[4.5rem_1fr_auto] items-center gap-2 px-3 py-1.5 t-body">
                   <span className="tabular-nums t-mono text-gray-500">#{h.feature}</span>
-                  <span className="truncate text-gray-700 dark:text-gray-200" title={h.label}>{h.label}</span>
+                  <span className="truncate text-gray-200" title={h.label}>{h.label}</span>
                   <button type="button" disabled={disabled || vectors.some((v) => v.feature === h.feature)} onClick={() => onAdd(h)} className="lu-tonal">Add</button>
                 </li>
               ))}
@@ -203,16 +203,19 @@ export function CoordinatesPanel({ presets, modelNames, states, onUse, disabled 
   const presetIds = useMemo(() => new Set(presets.map((p) => p.id)), [presets])
   const parsed = useMemo(() => (text.trim() ? parseRecipe(text, presetIds) : null), [text, presetIds])
   const fit: ModelFit = parsed?.ok ? modelFit(parsed.recipe.model, ...modelNames) : 'unknown'
-  const modelBound = parsed?.ok && parsed.recipe.entries.some((e) => e.kind === 'neuron' || e.kind === 'feature')
+  const bound = (e: RecipeEntry) => e.kind === 'neuron' || e.kind === 'feature'
+  const modelBound = parsed?.ok && parsed.recipe.entries.some(bound)
+  // The "anyway" box only where it would change something.
+  const boundUsable = parsed?.ok && parsed.recipe.entries.some((e) => bound(e) && states(e).state !== 'blocked')
   const presetName = (id: string) => {
     const p = presets.find((x) => x.id === id)
     return p ? `${p.left} ↔ ${p.right}` : id
   }
   const usable = parsed?.ok ? parsed.recipe.entries.filter((e) => states(e).state !== 'blocked') : []
-  const blockedByModel = fit === 'other' && modelBound && !anyway
+  const blockedByModel = fit === 'other' && boundUsable && !anyway
   return (
     <div className="space-y-3" data-testid="neuron-coords">
-      <label className="block t-body text-gray-700 dark:text-gray-200">
+      <label className="block t-body text-gray-200">
         <span className="block mb-1 font-medium">Paste coordinates or an LU link</span>
         <textarea
           rows={3}
@@ -235,7 +238,7 @@ export function CoordinatesPanel({ presets, modelNames, states, onUse, disabled 
 
       {parsed?.ok && (
         <div className="space-y-2" data-testid="neuron-coords-preview">
-          <p className="t-body text-gray-700 dark:text-gray-200">
+          <p className="t-body text-gray-200">
             {parsed.recipe.model ? <>Made on <span className="font-medium">{parsed.recipe.model}</span>. </> : null}
             {fit === 'same' && <span className="text-emerald-600 dark:text-emerald-400">That is the model you picked.</span>}
             {fit === 'other' && <span className="font-medium text-gray-900 dark:text-white" data-testid="neuron-coords-other-model">You picked another model.{modelBound ? ' Neuron and feature numbers belong to one exact model; on another they point at something unrelated.' : ' Ready-made and own sliders are computed fresh for yours, so they still work.'}</span>}
@@ -249,7 +252,7 @@ export function CoordinatesPanel({ presets, modelNames, states, onUse, disabled 
                   <div className="min-w-0">
                     <p className="t-mono text-gray-900 dark:text-white truncate">{entryCode(e)}</p>
                     <p className={`t-micro ${HINWEIS_TEXT.ruhig}`}>{describe(e, presetName)}</p>
-                    {st.state === 'blocked' && <p className="t-micro text-gray-700 dark:text-gray-200 mt-0.5">{st.why}</p>}
+                    {st.state === 'blocked' && <p className="t-micro text-gray-200 mt-0.5">{st.why}</p>}
                   </div>
                   <span className={`t-micro pt-1 ${st.state === 'ready' ? 'text-emerald-600 dark:text-emerald-400' : st.state === 'prepare' ? 'text-lu-accent' : HINWEIS_TEXT.ruhig}`}>
                     {st.state === 'ready' ? 'Ready' : st.state === 'prepare' ? 'Will be prepared' : 'Not usable'}
@@ -259,8 +262,8 @@ export function CoordinatesPanel({ presets, modelNames, states, onUse, disabled 
             })}
           </ul>
           {parsed.notes.map((n) => <p key={n} className={`t-micro ${HINWEIS_TEXT.ruhig}`}>{n}</p>)}
-          {fit === 'other' && modelBound && (
-            <label className="flex items-center gap-2 t-body text-gray-700 dark:text-gray-200">
+          {fit === 'other' && boundUsable && (
+            <label className="flex items-center gap-2 t-body text-gray-200">
               <input type="checkbox" checked={anyway} onChange={(e) => setAnyway(e.target.checked)} className="accent-lu-accent" data-testid="neuron-coords-anyway" />
               Use the numbers on my model anyway
             </label>
@@ -324,11 +327,11 @@ export function ComparePanel({ modelPath, entries, disabled, model, tuning, onEr
   return (
     <div data-testid="neuron-compare" className="space-y-3">
       <div className="grid grid-cols-[1fr_auto_auto] items-end gap-2">
-        <label className="block t-body text-gray-700 dark:text-gray-200 min-w-0">
+        <label className="block t-body text-gray-200 min-w-0">
           <span className="block mb-1 font-medium">Question</span>
           <input value={question} onChange={(e) => setQuestion(e.target.value)} data-testid="neuron-compare-question" className={field} />
         </label>
-        <label className="block t-body text-gray-700 dark:text-gray-200">
+        <label className="block t-body text-gray-200">
           <span className="block mb-1 font-medium">Seed</span>
           <input type="number" value={seed} onChange={(e) => setSeed(Math.max(0, Math.floor(Number(e.target.value) || 0)))} className={`${fieldBase} w-20`} />
         </label>
@@ -342,11 +345,11 @@ export function ComparePanel({ modelPath, entries, disabled, model, tuning, onEr
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3" data-testid="neuron-compare-result">
             <div className="rounded-lg border border-gray-200 dark:border-white/[0.08] p-3">
               <p className="t-label text-gray-500 mb-1.5">Before · sliders off</p>
-              <p className="t-body text-gray-800 dark:text-gray-100 whitespace-pre-wrap" data-testid="neuron-compare-before">{result.before}</p>
+              <p className="t-body text-gray-100 whitespace-pre-wrap" data-testid="neuron-compare-before">{result.before}</p>
             </div>
             <div className="rounded-lg border border-lu-accent/40 bg-lu-accent/[0.05] p-3">
               <p className="t-label text-lu-accent mb-1.5">After · {result.entries.map((e) => `${e.id} ${signedValue(e.strength)}`).join(', ') || 'all at 0'}</p>
-              <p className="t-body text-gray-800 dark:text-gray-100 whitespace-pre-wrap" data-testid="neuron-compare-after">{result.after}</p>
+              <p className="t-body text-gray-100 whitespace-pre-wrap" data-testid="neuron-compare-after">{result.after}</p>
             </div>
           </div>
           <p className={`t-micro ${HINWEIS_TEXT.ruhig}`} data-testid="neuron-compare-same">
@@ -382,7 +385,7 @@ export function SharePanel({ recipe, skipped, onUndo }: { recipe: Recipe; skippe
     <div className="space-y-2" data-testid="neuron-share">
       {hasAny ? (
         <>
-          <p className="t-body text-gray-700 dark:text-gray-200">Your mix as coordinates. Others paste it under <span className="font-medium">Coordinates</span>.</p>
+          <p className="t-body text-gray-200">Your mix as coordinates. Others paste it under <span className="font-medium">Coordinates</span>.</p>
           <pre className="t-mono whitespace-pre-wrap break-all rounded-lg bg-gray-100 dark:bg-white/[0.05] px-3 py-2 text-gray-900 dark:text-white" data-testid="neuron-share-line">
             {[recipe.model, line || null].filter(Boolean).join(' · ')}
             {recipe.entries.some((e) => e.kind === 'own') ? `${line ? ' ' : ''}+ ${recipe.entries.filter((e) => e.kind === 'own').length} own slider(s) in the link` : ''}
