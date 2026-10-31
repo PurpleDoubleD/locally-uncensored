@@ -41,8 +41,10 @@ permissions:
 #
 # Sidecar: every platform must build the bundled llama.cpp `llama-server`
 # BEFORE tauri-action runs — tauri-build hard-fails on a missing externalBin.
-# The build is cached on (hash of scripts/build-llama.sh × triple); it only
-# recompiles when the script (tag pin or cmake flags) changes.
+# The build is cached on (hash of scripts/build-llama.sh and LU's llama.cpp
+# patches in scripts/llama-patches × triple); it only recompiles when the
+# script (tag pin or cmake flags) or a patch changes. A patch outside the key
+# would hit the old cache and stop in assert_patched_tree (E1).
 env:
   # Vulkan SDK pin for the GGML_VULKAN sidecar builds: the Windows lane uses
   # the full installer version, the Linux lane derives the 3-part family for
@@ -316,7 +318,7 @@ jobs:
           # ./.llama-build while the real build sits in D:/lb — every run then
           # recompiles llama.cpp from scratch (~20 min) on a "cache hit".
           path: ${{ matrix.platform == 'windows-latest' && 'D:/lb' || '.llama-build' }}
-          key: llama-${{ hashFiles('scripts/build-llama.sh') }}-${{ matrix.sidecar_triple }}-v1
+          key: llama-${{ hashFiles('scripts/build-llama.sh', 'scripts/llama-patches/**') }}-${{ matrix.sidecar_triple }}-v1
 
       - name: Install Vulkan SDK (Windows)
         if: matrix.platform == 'windows-latest'
@@ -1314,7 +1316,7 @@ jobs:
           path: .llama-build
           # The deployment target is part of the key: a cached binary built
           # for another minimum OS must not be reused.
-          key: llama-${{ hashFiles('scripts/build-llama.sh') }}-aarch64-apple-darwin-min${{ env.MACOSX_DEPLOYMENT_TARGET }}-v1
+          key: llama-${{ hashFiles('scripts/build-llama.sh', 'scripts/llama-patches/**') }}-aarch64-apple-darwin-min${{ env.MACOSX_DEPLOYMENT_TARGET }}-v1
 
       - name: Build llama-server sidecar
         shell: bash
