@@ -141,8 +141,10 @@ test('the tick taken out downloads the model alone', async ({ page }) => {
   await tick.getByRole('checkbox').uncheck()
   await expect(tick).toContainText('Without it the model answers text only. You can add it later under Installed.')
   await page.keyboard.press('Escape')
-  // The tile now names the model alone.
-  await page.getByTitle('Download 5 GB', { exact: true }).first().click()
+  // The tile now names the model alone. Since P11 the title also names where
+  // the download goes ("Download 5 GB to LU Engine"), so only the size part is
+  // pinned here: model alone, no image input in it.
+  await page.getByTitle(/^Download 5 GB( to .+)?$/).first().click()
   await expect.poll(async () => (await dlCalls(page)).length).toBe(1)
   await page.waitForTimeout(500)
   expect((await dlCalls(page)).map((c) => c.filename)).toEqual([MODEL_FILE])
