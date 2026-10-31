@@ -2958,3 +2958,14 @@ input[type="range"].neuron-range,
     linear-gradient(rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.1)) center / 100% 4px no-repeat;
 }
 input[type="range"].neuron-range:disabled { cursor: not-allowed; opacity: 0.5; }
+
+/* Neurons job bar while the share is not known yet (model loading): a
+   short piece runs along the track instead of a bar stuck at 0 %. */
+.neuron-bar-wait { animation: lu-neuron-wait 1.6s ease-in-out infinite; }
+@keyframes lu-neuron-wait {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(400%); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .neuron-bar-wait { animation: none; transform: none; }
+}

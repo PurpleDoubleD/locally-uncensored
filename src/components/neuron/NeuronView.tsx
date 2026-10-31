@@ -17,7 +17,7 @@ import { preservedSwapCtx } from '../../lib/builtin-ctx'
 import { builtinModelMatches } from '../../lib/builtin-model-identity'
 import {
   backendNote, effectiveStrengths, entriesFor, hasPersonaProfile,
-  clampStrength, steeringPersona, strengthWarning, tweakedModelNote, warningText, type BackendKind, type Strengths,
+  clampStrength, steeringPersona, strengthWarning, tweakedModelNote, buildTimeNote, warningText, type BackendKind, type Strengths,
 } from '../../lib/neuron'
 import { featureVectorId, neuronVectorId, recipeOwnId, type Recipe, type RecipeEntry } from '../../lib/neuron-recipe'
 import { editingKey, useNeuronStore } from '../../stores/neuronStore'
@@ -26,7 +26,7 @@ import { useChatStore } from '../../stores/chatStore'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { useUIStore } from '../../stores/uiStore'
 import type { BuiltinEngineTuning } from '../../types/settings'
-import { JobPanel, ScopeButton, SliderRow, StepCard, TweakedNote, WayIntro, WayTabs, signedValue } from './parts'
+import { JobPanel, ScopeButton, SliderRow, StepCard, TimeNote, TweakedNote, WayIntro, WayTabs, signedValue } from './parts'
 import { ComparePanel, CoordinatesPanel, FeaturePanel, OwnSliderForm, SharePanel, entryState, type NeuronInfoPlus } from './panels'
 import { NeuronIntroHost } from './NeuronIntro'
 import { useNeuronIntroRequest } from '../../stores/neuronIntroStore'
@@ -318,6 +318,12 @@ export function NeuronView() {
   // A model changed before (fine-tune, merge, heretic …): say so before
   // computing, and offer its original in Discover (David, 31.10.2026).
   const tweak = info ? tweakedModelNote(info.facts) : null
+  // How long one slider takes, said before it starts (P11 5b67ef9fe): on the
+  // ways that compute, while something there still needs it, not while a
+  // job runs (its own line counts down then).
+  const estimate = way === 'own' ? info?.ownEstimate : way === 'ready' || way === 'coords' ? info?.buildEstimate : undefined
+  const needsCompute = way === 'own' || presets.some((p) => !vectors.some((x) => x.id === p.id))
+  const timeNote = estimate && info?.generator && needsCompute && !running ? buildTimeNote(estimate) : null
   const original = info?.facts.original ?? null
   const getOriginal = () => {
     if (!original) return
@@ -401,6 +407,7 @@ export function NeuronView() {
       >
         {error && <Hinweis ton="fehler" className="mb-3" onDismiss={() => setError(null)}>{error}</Hinweis>}
         {tweak && <TweakedNote title={tweak.title} text={tweak.text} original={tweak.original} onGetOriginal={getOriginal} />}
+        {timeNote && <TimeNote title={timeNote.title} text={timeNote.text} />}
         {job && job.status !== 'idle' && <JobPanel job={job} onStop={() => { setQueue([]); void neuronCancel().then(poll) }} onDismiss={() => void neuronDismiss().then(poll)} onGetOriginal={getOriginal} original={original} />}
         {queue.length > 0 && <p className={`t-micro ${HINWEIS_TEXT.ruhig} mb-3`} data-testid="neuron-queue">{queue.length} more to prepare from the recipe, one after the other.</p>}
         {info && !info.generator && (
@@ -436,6 +443,7 @@ export function NeuronView() {
                     disabled={running || !modelPath || (!v && !info?.generator)}
                     onCompute={() => void startJob(() => neuronBuildPreset(modelPath, p.id))}
                     onChange={(x) => move(p.id, x)}
+                    prepareHint={timeNote ? 'Once per model. How long it takes is said above.' : undefined}
                   />
                 ))}
               </div>
