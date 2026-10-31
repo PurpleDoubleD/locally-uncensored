@@ -53,6 +53,7 @@ import type { TextChunk } from '../../types/rag'
 import type { Role } from '../../types/chat'
 import { useKeyboardShortcuts } from '../../hooks/useKeyboardShortcuts'
 import { useCloudAuth } from '../../hooks/useCloudAuth'
+import { useTraySync } from '../../hooks/useTraySync'
 import { useCloudOutageWatch } from '../../hooks/useCloudOutageWatch'
 import { useCloudAuthStore, deriveCloudAvailable } from '../../stores/cloudAuthStore'
 import { useCreateStore } from '../../stores/createStore'
@@ -179,6 +180,8 @@ export function AppShell() {
   // LU Cloud account boot: keychain session restore + /api/me probe; keeps
   // the cloud Create axis and the lu-cloud chat provider in sync.
   useCloudAuth()
+  // T2: the tray menu's lines (account or engine, model, memory).
+  useTraySync()
   useCloudOutageWatch()
   useNeuronFollowsPersona()
 

@@ -217,6 +217,9 @@ describe('endpointMap covers every backendCall/invokeMedia site the frontend can
     // Put up and closed only behind isTauri(): the browser build loads the
     // page as srcdoc and has no loopback server to serve it from.
     'html_preview_close', 'html_preview_put',
+    // The tray menu's lines and memory figure (T2, 3.0.9, hooks/useTraySync.ts).
+    // Sent only behind isTauri(): the browser build has no tray.
+    'tray_memory', 'tray_update',
     'exit_app', 'file_read', 'find_orphan_downloads', 'fix_comfyui_cors', 'funnel_ping',
     'get_comfy_gpu_status', 'get_current_time', 'import_local_model', 'install_character_trainer',
     'install_lmstudio', 'install_lmstudio_status', 'install_method', 'install_python',

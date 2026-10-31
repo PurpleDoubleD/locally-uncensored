@@ -56,6 +56,7 @@ mod e2e_remote;
 mod runtime_root;
 mod storage_move;
 mod system_tray;
+mod tray_menu;
 mod state;
 // Test-only OS helpers (a shell, a sleeper, "is this pid alive"), shared by
 // the process tests in state.rs, commands/engine.rs and commands/bg_tasks.rs
@@ -70,7 +71,6 @@ use tauri::Manager;
 #[cfg(desktop)]
 use tauri::{
     Emitter,
-    menu::{Menu, MenuItem},
     tray::TrayIconBuilder,
     image::Image,
 };
@@ -302,7 +302,7 @@ fn should_offload_after_hide(visible_now: bool, hide_generation: u64, current_ge
 /// icon, or Cmd+Tab to the app, is the way every Mac user gets a window back,
 /// and macOS reports it as `RunEvent::Reopen`. Nobody handled it, so the app
 /// sat in the Dock without a window and looked hung; the only way back was the
-/// "Show" item of the menu bar icon.
+/// "Open LU" item of the menu bar icon.
 ///
 /// With a window on screen macOS already does the right thing by itself
 /// (it activates the app and raises that window), so only the case without
@@ -674,6 +674,11 @@ pub fn run() {
             // Hugging Face "Use this model": the page takes the waiting link
             #[cfg(desktop)]
             hf_link::hf_link_take,
+            // T2: the grey lines of the tray menu
+            #[cfg(desktop)]
+            tray_menu::tray_update,
+            #[cfg(desktop)]
+            tray_menu::tray_memory,
             // LU Cloud OAuth loopback (Google/GitHub via system browser)
             commands::oauth::oauth_start,
             commands::oauth::oauth_wait,
@@ -1391,12 +1396,12 @@ pub fn run() {
             // Desktop only, like the two sections after it: a phone has no
             // tray to hide in, and no Ollama or ComfyUI to start. Each
             // statement carries its own gate so the code keeps its place.
+            // T2: the menu is built in tray_menu.rs; it starts as "Open LU" /
+            // "Quit LU" and the frontend fills in the grey lines above them.
             #[cfg(desktop)]
-            let show = MenuItem::with_id(app, "show", "Show", true, None::<&str>)?;
+            app.manage(tray_menu::TrayMenuState::<tauri::Wry>::default());
             #[cfg(desktop)]
-            let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
-            #[cfg(desktop)]
-            let menu = Menu::with_items(app, &[&show, &quit])?;
+            let (menu, menu_items) = tray_menu::build_menu(app, &tray_menu::TrayStatus::default())?;
 
             // GH #204: on Linux the tray needs libayatana-appindicator, and
             // building it without that library aborts the whole app. Without
@@ -1419,7 +1424,7 @@ pub fn run() {
                     let _ = tray_icon;
                     Image::new_owned(menu_bar_template_rgba(source.rgba()), source.width(), source.height())
                 };
-                let tray = TrayIconBuilder::new()
+                let tray = TrayIconBuilder::with_id(tray_menu::TRAY_ID)
                     .icon(tray_icon)
                     .tooltip("LU");
                 #[cfg(target_os = "macos")]
@@ -1427,9 +1432,18 @@ pub fn run() {
                 tray
                     .menu(&menu)
                     .on_menu_event(|app, event| {
-                        match event.id().as_ref() {
-                            "show" => onboarding_window::bring_to_front(app),
-                            "quit" => {
+                        let id = event.id().as_ref();
+                        match id {
+                            tray_menu::OPEN_ID | tray_menu::ACTION_ID => {
+                                onboarding_window::bring_to_front(app);
+                                // The page opens Plan & Credits or Models.
+                                if id == tray_menu::ACTION_ID {
+                                    if let Some(action) = tray_menu::current_action(app) {
+                                        let _ = app.emit(tray_menu::ACTION_EVENT, action.event_name());
+                                    }
+                                }
+                            }
+                            tray_menu::QUIT_ID => {
                                 // Tauri's AppState Drop doesn't fire reliably on
                                 // Windows after `app.exit(0)` — run the explicit
                                 // subprocess shutdown here so tray Quit doesn't
@@ -1442,11 +1456,22 @@ pub fn run() {
                         }
                     })
                     .on_tray_icon_event(|tray, event| {
-                        if let tauri::tray::TrayIconEvent::DoubleClick { .. } = event {
-                            onboarding_window::bring_to_front(tray.app_handle());
+                        match event {
+                            tauri::tray::TrayIconEvent::DoubleClick { .. } => {
+                                onboarding_window::bring_to_front(tray.app_handle());
+                            }
+                            // Fresh lines for the menu that is about to open.
+                            // Enter (the pointer reaching the icon) comes
+                            // before the click; an open Mac menu does not
+                            // change any more (tray_menu.rs).
+                            tauri::tray::TrayIconEvent::Click { .. } | tauri::tray::TrayIconEvent::Enter { .. } => {
+                                let _ = tray.app_handle().emit(tray_menu::OPENED_EVENT, ());
+                            }
+                            _ => {}
                         }
                     })
                     .build(app)?;
+                tray_menu::remember(app.handle(), tray_menu::TrayStatus::default(), menu_items);
             }
 
             // ─── Close → hide to tray instead of quit ───
@@ -1573,11 +1598,11 @@ pub fn run() {
                 android_entry::leave_process(0);
             }
             // A click on the Dock icon while the window is hidden. Same call
-            // as the menu bar's "Show": the window is shown again, and that is
+            // as the menu bar's "Open LU": the window is shown again, and that is
             // also what takes back the unload after the hide. Inside
             // HIDE_OFFLOAD_GRACE the timer finds the window visible and does
             // nothing (`should_offload_after_hide`); after it, the backends
-            // start again on first use, exactly as after "Show".
+            // start again on first use, exactly as after "Open LU".
             #[cfg(target_os = "macos")]
             if let tauri::RunEvent::Reopen { has_visible_windows, .. } = event {
                 if reopen_needs_a_window(has_visible_windows) {
@@ -1600,7 +1625,7 @@ mod tests {
     }
 
     /// The rule above is worth nothing unless the run loop asks it, and the
-    /// way back is the one "Show" takes.
+    /// way back is the one "Open LU" takes.
     #[test]
     fn the_run_loop_answers_the_dock_click_the_way_show_does() {
         let src = include_str!("lib.rs");
