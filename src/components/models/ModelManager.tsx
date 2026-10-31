@@ -117,8 +117,13 @@ export function ModelManager() {
 
   // Header search: always visible (no hidden magnifier), live filter +
   // Enter submits the HuggingFace catalog search in Discover.
-  const [searchQuery, setSearchQuery] = useState('')
-  const [searchSubmitToken, setSearchSubmitToken] = useState(0)
+  // A button elsewhere may open Models with a search (Neurons' "Get the
+  // original"): it starts the field and the catalog search once.
+  const [searchQuery, setSearchQuery] = useState(() => useUIStore.getState().discoverQuery ?? '')
+  const [searchSubmitToken, setSearchSubmitToken] = useState(() => (useUIStore.getState().discoverQuery ? 1 : 0))
+  useEffect(() => {
+    if (useUIStore.getState().discoverQuery) useUIStore.getState().clearDiscoverQuery()
+  }, [])
   const searchInputRef = useRef<HTMLInputElement>(null)
 
   // The store still defaults categoryFilter to 'all' for legacy reasons, but

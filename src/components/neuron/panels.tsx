@@ -149,7 +149,11 @@ export function FeaturePanel({ info, modelPath, vectors, strengths, disabled, on
 export type EntryState =
   | { state: 'ready' }
   | { state: 'prepare' }
-  | { state: 'blocked'; why: string }
+  | { state: 'blocked'; why: string; later?: boolean }
+
+/** Single neurons need an LU Engine piece that is not in 3.0.9 (Zentrale,
+ *  31.10.2026: never look broken, say it plainly when applied). */
+export const NEURONS_LATER = 'Single neurons arrive with the next LU Engine update. LU already reads, checks and shares these lines.'
 
 /** Whether a recipe line can run on this model, and if not, why. */
 export function entryState(e: RecipeEntry, info: NeuronInfoPlus, vectorIds: ReadonlySet<string>, ids: { feature: (n: number) => string; neuron: (l: number, n: number) => string; own: (e: Extract<RecipeEntry, { kind: 'own' }>) => string }): EntryState {
@@ -169,7 +173,7 @@ export function entryState(e: RecipeEntry, info: NeuronInfoPlus, vectorIds: Read
       if (e.layer >= info.facts.nLayer) return { state: 'blocked', why: `This model has ${info.facts.nLayer} layers (0–${info.facts.nLayer - 1}).` }
       if (info.nFf && e.neuron >= info.nFf) return { state: 'blocked', why: `Layers of this model have ${info.nFf} neurons.` }
       if (vectorIds.has(ids.neuron(e.layer, e.neuron))) return { state: 'ready' }
-      if (!info.mlpNeurons) return { state: 'blocked', why: 'Pushing single neurons needs an LU Engine piece that is not in this build yet. You can still read and pass on the line.' }
+      if (!info.mlpNeurons) return { state: 'blocked', why: NEURONS_LATER, later: true }
       return { state: 'prepare' }
   }
 }
@@ -200,6 +204,7 @@ export function CoordinatesPanel({ presets, modelNames, states, onUse, disabled 
 }) {
   const [text, setText] = useState('')
   const [anyway, setAnyway] = useState(false)
+  const [laterNote, setLaterNote] = useState<string | null>(null)
   const presetIds = useMemo(() => new Set(presets.map((p) => p.id)), [presets])
   const parsed = useMemo(() => (text.trim() ? parseRecipe(text, presetIds) : null), [text, presetIds])
   const fit: ModelFit = parsed?.ok ? modelFit(parsed.recipe.model, ...modelNames) : 'unknown'
@@ -212,6 +217,7 @@ export function CoordinatesPanel({ presets, modelNames, states, onUse, disabled 
     return p ? `${p.left} ↔ ${p.right}` : id
   }
   const usable = parsed?.ok ? parsed.recipe.entries.filter((e) => states(e).state !== 'blocked') : []
+  const later = parsed?.ok ? parsed.recipe.entries.filter((e) => { const st = states(e); return st.state === 'blocked' && !!st.later }) : []
   const blockedByModel = fit === 'other' && boundUsable && !anyway
   return (
     <div className="space-y-3" data-testid="neuron-coords">
@@ -220,7 +226,7 @@ export function CoordinatesPanel({ presets, modelNames, states, onUse, disabled 
         <textarea
           rows={3}
           value={text}
-          onChange={(e) => { setText(e.target.value); setAnyway(false) }}
+          onChange={(e) => { setText(e.target.value); setAnyway(false); setLaterNote(null) }}
           placeholder={'Qwen3.5-4B: L13N7956-1.0 L14N8949+1.0\n@cheerful+0.5 F11690+0.8\nlocallyuncensored://neuron?v=1&…'}
           spellCheck={false}
           className={`${field} t-mono`}
@@ -255,7 +261,7 @@ export function CoordinatesPanel({ presets, modelNames, states, onUse, disabled 
                     {st.state === 'blocked' && <p className="t-micro text-gray-200 mt-0.5">{st.why}</p>}
                   </div>
                   <span className={`t-micro pt-1 ${st.state === 'ready' ? 'text-emerald-600 dark:text-emerald-400' : st.state === 'prepare' ? 'text-lu-accent' : HINWEIS_TEXT.ruhig}`}>
-                    {st.state === 'ready' ? 'Ready' : st.state === 'prepare' ? 'Will be prepared' : 'Not usable'}
+                    {st.state === 'ready' ? 'Ready' : st.state === 'prepare' ? 'Will be prepared' : st.later ? 'Next update' : 'Not usable'}
                   </span>
                 </li>
               )
@@ -271,15 +277,21 @@ export function CoordinatesPanel({ presets, modelNames, states, onUse, disabled 
           <div className="flex flex-wrap items-center gap-2 pt-1">
             <button
               type="button"
-              disabled={disabled || usable.length === 0 || blockedByModel}
-              onClick={() => onUse({ model: parsed.recipe.model, entries: usable })}
+              disabled={disabled || (usable.length === 0 && later.length === 0) || blockedByModel}
+              onClick={() => {
+                if (usable.length) onUse({ model: parsed.recipe.model, entries: usable })
+                setLaterNote(later.length
+                  ? `${later.length === 1 ? 'One single neuron was' : `${later.length} single neurons were`} not applied. ${NEURONS_LATER}`
+                  : null)
+              }}
               data-testid="neuron-coords-use"
               className="lu-control lu-primary"
             >
-              {usable.length === 0 ? 'Nothing usable on this model' : usable.length === parsed.recipe.entries.length ? 'Use these values' : `Use the ${usable.length} usable values`} <ArrowRight size={ICON_SM} />
+              {usable.length === 0 && later.length === 0 ? 'Nothing usable on this model' : usable.length === parsed.recipe.entries.length || usable.length === 0 ? 'Use these values' : `Use the ${usable.length} usable values`} <ArrowRight size={ICON_SM} />
             </button>
-            <span className={`t-micro ${HINWEIS_TEXT.ruhig}`}>Replaces your current sliders. You can undo.</span>
+            <span className={`t-micro ${HINWEIS_TEXT.ruhig}`}>{usable.length ? 'Replaces your current sliders. You can undo.' : 'Nothing changes on your sliders.'}</span>
           </div>
+          {laterNote && <p className="t-body text-gray-200" role="status" data-testid="neuron-coords-later">{laterNote}</p>}
         </div>
       )}
 

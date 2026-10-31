@@ -148,9 +148,15 @@ interface UIState {
    *  elsewhere already knows (the Neuron tweaker needs LU Engine files).
    *  Read once by Discover, then cleared. Never persisted. */
   discoverTarget: 'builtin' | null
-  /** Open Models on Discover's chat lane with downloads going to `target`. */
-  openDiscoverFor: (target: 'builtin') => void
+  /** What Discover's search starts with on the next visit (N2: Neurons'
+   *  "Get the original"). Read once by the Models page, then cleared. Never
+   *  persisted. */
+  discoverQuery: string | null
+  /** Open Models on Discover's chat lane with downloads going to `target`,
+   *  optionally searching for `query`. */
+  openDiscoverFor: (target: 'builtin', query?: string) => void
   clearDiscoverTarget: () => void
+  clearDiscoverQuery: () => void
   setView: (view: View) => void
   /** Open Settings on a given tab, optionally with one section unfolded. */
   openSettingsAt: (focus: SettingsFocus) => void
@@ -228,8 +234,10 @@ export const useUIStore = create<UIState>()(
       modelAskSeq: 0,
       askForModel: () => set((s) => ({ modelAskSeq: s.modelAskSeq + 1 })),
       discoverTarget: null,
-      openDiscoverFor: (target) => set({ currentView: 'models', settingsFocus: null, discoverTarget: target }),
+      discoverQuery: null,
+      openDiscoverFor: (target, query) => set({ currentView: 'models', settingsFocus: null, discoverTarget: target, discoverQuery: query?.trim() || null }),
       clearDiscoverTarget: () => set({ discoverTarget: null }),
+      clearDiscoverQuery: () => set({ discoverQuery: null }),
 
       // Navigation no longer touches sidebarOpen. The conversation list only
       // makes sense in Chat, and that rule now lives in the Sidebar itself
