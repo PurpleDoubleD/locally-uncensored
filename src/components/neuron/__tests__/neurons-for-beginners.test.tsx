@@ -21,7 +21,8 @@ const buildOwn = vi.fn(async (..._a: unknown[]) => ({ started: true }))
 const vectors: Array<Record<string, unknown>> = []
 const job = vi.hoisted(() => ({ status: 'idle', error: null as string | null, kind: '', phaseLabel: '', step: 0, total: 0, etaSecs: null as number | null, elapsedSecs: 0 }))
 const est = vi.hoisted(() => ({ build: { lowSecs: 4, highSecs: 30, measured: false }, own: { lowSecs: 6, highSecs: 45, measured: false } }))
-const facts = vi.hoisted(() => ({ tweaked: [] as string[], original: null as string | null }))
+const facts = vi.hoisted(() => ({ tweaked: [] as string[], original: null as string | null, name: 'Qwen2.5 0.5B Instruct', nLayer: 24, mlpNeurons: false, nFf: null as number | null }))
+const mlpAdd = vi.fn(async (_path: string, _layer: number, _neuron: number) => ({ started: true }))
 
 vi.mock('../../../api/neuron', () => ({
   neuronPresets: async () => [
@@ -30,7 +31,8 @@ vi.mock('../../../api/neuron', () => ({
     { id: 'cheerful', left: 'Serious', right: 'Cheerful' },
   ],
   neuronInfo: async () => ({
-    facts: { arch: 'qwen2', nLayer: 24, nEmbd: 896, template: 'chatMl', name: 'Qwen2.5 0.5B Instruct', tweaked: [...facts.tweaked], original: facts.original },
+    facts: { arch: 'qwen2', nLayer: facts.nLayer, nEmbd: 896, template: 'chatMl', name: facts.name, tweaked: [...facts.tweaked], original: facts.original },
+    mlpNeurons: facts.mlpNeurons, nFf: facts.nFf,
     modelKey: 'qwen-1', generator: true, band: [3, 20], vectors: [...vectors], sae: null, activeMix: null,
     buildEstimate: { ...est.build }, ownEstimate: { ...est.own },
   }),
@@ -38,6 +40,7 @@ vi.mock('../../../api/neuron', () => ({
   neuronApply: (p: string, e: unknown[], t?: unknown) => apply(p, e, t),
   neuronBuildPreset: (p: string, id: string) => buildPreset(p, id),
   neuronBuildOwn: (...a: unknown[]) => buildOwn(...a),
+  neuronMlpAdd: (p: string, l: number, n: number) => mlpAdd(p, l, n),
   neuronCancel: vi.fn(), neuronCompare: vi.fn(), neuronDelete: vi.fn(), neuronDismiss: vi.fn(),
   neuronFeatureAdd: vi.fn(), neuronSaeDownload: vi.fn(), neuronSaeSearch: vi.fn(),
 }))
@@ -68,8 +71,8 @@ beforeEach(() => {
   Object.assign(job, { status: 'idle', error: null, kind: '', phaseLabel: '', step: 0, total: 0, etaSecs: null, elapsedSecs: 0 })
   est.build = { lowSecs: 4, highSecs: 30, measured: false }
   est.own = { lowSecs: 6, highSecs: 45, measured: false }
-  facts.tweaked = []
-  facts.original = null
+  Object.assign(facts, { tweaked: [], original: null, name: 'Qwen2.5 0.5B Instruct', nLayer: 24, mlpNeurons: false, nFf: null })
+  mlpAdd.mockClear()
   useNeuronStore.setState({ profiles: {}, scopeByModel: {}, introSeen: true })
   useNeuronIntroRequest.setState({ open: false })
   useModelStore.setState({ activeModel: 'openai::qwen2.5-0.5b-instruct-q8_0' })
@@ -203,32 +206,80 @@ describe('coordinates', () => {
     expect(screen.queryByTestId('neuron-coords-use')).toBeNull()
   })
 
-  it('names what it cannot do yet: single neurons and other models', async () => {
+  it('says when the numbers belong to another model', async () => {
+    Object.assign(facts, { mlpNeurons: true, nFf: 4864 })
     render(createElement(NeuronView))
     fireEvent.click(await screen.findByTestId('neuron-way-coords'))
     fireEvent.change(await screen.findByTestId('neuron-coords-input'), { target: { value: 'Qwen3.5-4B: L13N7956-1.0 L14N8949+1.0' } })
     expect(screen.getByTestId('neuron-coords-other-model').textContent).toMatch(/one exact model/)
-    expect(screen.getAllByTestId('neuron-coords-line')[0].textContent).toMatch(/arrive with the next LU Engine update.*Next update$/)
-    // Nothing the box could unlock, so no box.
+    // Neuron 7956 is past this model's 4864: nothing the box could unlock.
+    expect(screen.getAllByTestId('neuron-coords-line')[0].textContent).toMatch(/This layer has 4864 neurons, numbered 0 to 4863\.Not usable$/)
     expect(screen.queryByTestId('neuron-coords-anyway')).toBeNull()
-    // Zentrale 31.10.: never silent. Use says plainly why nothing changed.
-    const before = JSON.stringify(useNeuronStore.getState().profiles)
-    fireEvent.click(screen.getByTestId('neuron-coords-use'))
-    expect(screen.getByTestId('neuron-coords-later').textContent).toBe('2 single neurons were not applied. Single neurons arrive with the next LU Engine update. LU already reads, checks and shares these lines.')
-    expect(JSON.stringify(useNeuronStore.getState().profiles)).toBe(before)
+    expect((screen.getByTestId('neuron-coords-use') as HTMLButtonElement).disabled).toBe(true)
   })
 
-  it('applies the rest of a mixed recipe and names the neuron it left out', async () => {
+  it('applies the rest of a mixed recipe on a model without single neurons, and says why', async () => {
     vectors.push(CHEERFUL)
     render(createElement(NeuronView))
     await screen.findByTestId('neuron-slider-cheerful')
     fireEvent.click(screen.getByTestId('neuron-way-coords'))
     fireEvent.change(await screen.findByTestId('neuron-coords-input'), { target: { value: '@cheerful+0.4 L14N8949+1.0' } })
+    expect(screen.getAllByTestId('neuron-coords-line')[1].textContent).toMatch(/experts \(MoE\).*Not usable$/)
     // FEHLER-N2 #1: one value, said as one.
     expect(screen.getByTestId('neuron-coords-use').textContent?.trim()).toBe('Use the one usable value')
     fireEvent.click(screen.getByTestId('neuron-coords-use'))
     expect(useNeuronStore.getState().profiles['qwen-1']).toEqual({ cheerful: 0.4 })
-    expect(screen.getByTestId('neuron-coords-later').textContent).toMatch(/^One single neuron was not applied\./)
+    expect(mlpAdd).not.toHaveBeenCalled()
+  })
+})
+
+// David, 31.10.2026: single neurons come in 3.0.9 (P11 neuron_mlp_add).
+// The shared "Evil Qwen" recipe (Lyra, 23.10.) is applied for real.
+describe('single neurons', () => {
+  beforeEach(() => Object.assign(facts, { name: 'Qwen3.5 4B', nLayer: 32, mlpNeurons: true, nFf: 9216 }))
+
+  it('prepares and sets the shared Qwen3.5-4B neurons, one after the other', async () => {
+    render(createElement(NeuronView))
+    fireEvent.click(await screen.findByTestId('neuron-way-coords'))
+    fireEvent.click(await screen.findByText('A shared neuron (Qwen3.5-4B)'))
+    await waitFor(() => expect(screen.getAllByTestId('neuron-coords-line')).toHaveLength(2))
+    expect(screen.getByTestId('neuron-coords-preview').textContent).toMatch(/That is the model you picked/)
+    for (const line of screen.getAllByTestId('neuron-coords-line')) expect(line.textContent).toMatch(/Will be prepared$/)
+    expect(screen.queryByText(/next LU Engine update/)).toBeNull()
+    fireEvent.click(screen.getByTestId('neuron-coords-use'))
+    expect(useNeuronStore.getState().profiles['qwen-1']).toEqual({ 'n-L13-N7956': -1, 'n-L14-N8949': 1 })
+    await waitFor(() => expect(mlpAdd).toHaveBeenCalledWith('/models/qwen.gguf', 13, 7956))
+    expect(mlpAdd).toHaveBeenCalledTimes(1)
+    expect(screen.getByTestId('neuron-queue').textContent).toMatch(/^1 more to prepare/)
+  })
+
+  it('keeps a dose above 1 and gives the neuron slider room to ±3', async () => {
+    vectors.push({ id: 'n-L14-N8949', kind: 'neuron', name: 'L14 N8949', left: 'Less', right: 'More', unit: 31.5, builtAt: 1, more: [], less: [] })
+    render(createElement(NeuronView))
+    fireEvent.click(await screen.findByTestId('neuron-way-coords'))
+    fireEvent.change(await screen.findByTestId('neuron-coords-input'), { target: { value: 'L14N8949+1.5' } })
+    expect(screen.getAllByTestId('neuron-coords-line')[0].textContent).toMatch(/Ready$/)
+    fireEvent.click(screen.getByTestId('neuron-coords-use'))
+    expect(useNeuronStore.getState().profiles['qwen-1']).toEqual({ 'n-L14-N8949': 1.5 })
+    const range = within(await screen.findByTestId('neuron-slider-n-L14-N8949')).getByRole('slider') as HTMLInputElement
+    expect([range.min, range.max, range.value]).toEqual(['-3', '3', '1.5'])
+    expect(mlpAdd).not.toHaveBeenCalled()
+    // The engine gets the dose, not one cut to 1 (AN-N2-P11.md).
+    await waitFor(() => expect(apply).toHaveBeenCalled())
+    expect(apply.mock.calls.at(-1)![1]).toEqual([{ id: 'n-L14-N8949', strength: 1.5 }])
+    fireEvent.change(range, { target: { value: '2.5' } })
+    expect(useNeuronStore.getState().profiles['qwen-1']).toEqual({ 'n-L14-N8949': 2.5 })
+  })
+
+  it('names the layers and neurons a model has before anything runs', async () => {
+    render(createElement(NeuronView))
+    fireEvent.click(await screen.findByTestId('neuron-way-coords'))
+    fireEvent.change(await screen.findByTestId('neuron-coords-input'), { target: { value: 'L0N5+1 L31N5+1 L13N9216+1' } })
+    const lines = screen.getAllByTestId('neuron-coords-line').map((l) => l.textContent)
+    expect(lines[0]).toMatch(/Single neurons work in layers 1 to 30 of this model\.Not usable$/)
+    expect(lines[1]).toMatch(/Single neurons work in layers 1 to 30 of this model\.Not usable$/)
+    expect(lines[2]).toMatch(/This layer has 9216 neurons, numbered 0 to 9215\.Not usable$/)
+    expect(screen.getByTestId('neuron-coords-use').textContent?.trim()).toBe('Nothing usable on this model')
   })
 })
 

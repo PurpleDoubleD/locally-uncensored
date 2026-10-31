@@ -40,6 +40,7 @@ export const RECIPE_MAX_ENTRIES = 24
 /** Neuron doses are in median residual norms (the neuronary unit); shared
  *  recipes stay within about ±1.2, and ±3 already wrecks any model. */
 export const NEURON_MAX_DOSE = 3
+
 const MAX_LAYER = 511
 const MAX_INDEX = 1 << 20
 const OWN_MAX_LINES = 40

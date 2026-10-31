@@ -19,7 +19,7 @@ import {
   backendNote, effectiveStrengths, entriesFor, hasPersonaProfile,
   clampStrength, steeringPersona, strengthWarning, tweakedModelNote, buildTimeNote, warningText, type BackendKind, type Strengths,
 } from '../../lib/neuron'
-import { featureVectorId, neuronVectorId, recipeOwnId, type Recipe, type RecipeEntry } from '../../lib/neuron-recipe'
+import { NEURON_MAX_DOSE, featureVectorId, neuronVectorId, recipeOwnId, type Recipe, type RecipeEntry } from '../../lib/neuron-recipe'
 import { editingKey, useNeuronStore } from '../../stores/neuronStore'
 import { useModelStore } from '../../stores/modelStore'
 import { useChatStore } from '../../stores/chatStore'
@@ -231,7 +231,7 @@ export function NeuronView() {
   // they fell to 0 when the saved scope was already "persona").
   const move = (id: string, value: number) => {
     if (editKey in profiles) setStrength(editKey, id, value)
-    else setProfile(editKey, { ...strengths, [id]: clampStrength(value) })
+    else setProfile(editKey, { ...strengths, [id]: clampStrength(value, id) })
   }
 
   const reset = () => {
@@ -274,7 +274,7 @@ export function NeuronView() {
         next[id] = clampStrength(e.strength)
         if (st.state === 'prepare') jobs.push(() => neuronBuildOwn(modelPath, e.name, e.more, e.less, id))
       } else {
-        next[neuronVectorId(e.layer, e.neuron)] = clampStrength(e.dose)
+        next[neuronVectorId(e.layer, e.neuron)] = clampStrength(e.dose, neuronVectorId(e.layer, e.neuron))
         if (st.state === 'prepare' && mlp) jobs.push(() => mlp(modelPath, e.layer, e.neuron))
       }
     }
@@ -498,7 +498,7 @@ export function NeuronView() {
               {neurons.length > 0 && (
                 <div className="space-y-2 mb-4">
                   {neurons.map((v) => (
-                    <SliderRow key={v.id} id={v.id} left="Less" right={v.name} value={strengths[v.id] ?? 0} computed disabled={running} onChange={(x) => move(v.id, x)} onDelete={() => deleteVector(v.id)} />
+                    <SliderRow key={v.id} id={v.id} left={v.left || 'Less'} right={v.name} value={strengths[v.id] ?? 0} max={NEURON_MAX_DOSE} computed disabled={running} onChange={(x) => move(v.id, x)} onDelete={() => deleteVector(v.id)} />
                   ))}
                 </div>
               )}

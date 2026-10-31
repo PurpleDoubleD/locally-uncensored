@@ -51,18 +51,25 @@ export function hasPersonaProfile(profiles: Profiles, modelKey: string, personaI
   return personaProfileKey(modelKey, personaId) in profiles
 }
 
-export function clampStrength(v: number): number {
+/** A single neuron's slider (`n-L13-N7956`) carries the recipe dose, up to
+ *  ±3 (P11 NEURON_MAX_DOSE, the same in Rust); every other slider ±1. */
+export function strengthLimit(id?: string): number {
+  return id && /^n-L\d+-N\d+$/.test(id) ? 3 : 1
+}
+
+export function clampStrength(v: number, id?: string): number {
   if (!Number.isFinite(v)) return 0
+  const lim = strengthLimit(id)
   // Two decimals, so a slider dragged back to the middle is exactly 0 and the
   // mix (and with it the engine) is exactly the unsteered one.
-  const r = Math.round(Math.max(-1, Math.min(1, v)) * 100) / 100
+  const r = Math.round(Math.max(-lim, Math.min(lim, v)) * 100) / 100
   return Math.abs(r) < 0.02 ? 0 : r
 }
 
 /** What goes to Rust: only sliders that are on and computed for this model. */
 export function entriesFor(strengths: Strengths, available: ReadonlySet<string>): NeuronEntry[] {
   return Object.entries(strengths)
-    .map(([id, s]) => ({ id, strength: clampStrength(s) }))
+    .map(([id, s]) => ({ id, strength: clampStrength(s, id) }))
     .filter((e) => e.strength !== 0 && available.has(e.id))
     .sort((a, b) => a.id.localeCompare(b.id))
 }

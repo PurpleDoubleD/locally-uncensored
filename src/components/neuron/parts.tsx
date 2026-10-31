@@ -63,6 +63,8 @@ export interface SliderRowProps {
   onDelete?: () => void
   /** The line next to "Prepare": how long it takes, when that is said above. */
   prepareHint?: string
+  /** How far the slider goes each way: 1, or a single neuron's dose limit. */
+  max?: number
 }
 
 /** Next to "Prepare" when nothing above says how long it takes. */
@@ -76,7 +78,7 @@ export function signedValue(v: number): string {
 /** A slider as one card row: both ends and the value on one line, the
  *  slider under it across the whole row. Not computed yet: the same line,
  *  and in place of the slider the button that prepares it. */
-export function SliderRow({ id, left, right, value, computed, disabled, tag, onChange, onCompute, onDelete, prepareHint = PREPARE_HINT }: SliderRowProps) {
+export function SliderRow({ id, left, right, value, computed, disabled, tag, onChange, onCompute, onDelete, prepareHint = PREPARE_HINT, max = 1 }: SliderRowProps) {
   const on = computed && value !== 0
   return (
     <div
@@ -100,8 +102,8 @@ export function SliderRow({ id, left, right, value, computed, disabled, tag, onC
       {computed ? (
         <input
           type="range"
-          min={-1}
-          max={1}
+          min={-max}
+          max={max}
           step={0.05}
           value={value}
           disabled={disabled}
