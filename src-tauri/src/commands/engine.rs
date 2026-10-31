@@ -4341,6 +4341,12 @@ fn note_image_part(state: &AppState, answer: &mut serde_json::Value, note: Optio
 }
 
 /// The image part a finished argv passes along, when it passes one.
+/// Whether a process started with these arguments can see a picture: it got
+/// a part, and that part is an image part (N1: LFM3 Audio's part only hears).
+pub(crate) fn started_seeing(args: &[String]) -> bool {
+    image_part_in(args).is_some_and(projector_sees_images)
+}
+
 pub(crate) fn image_part_in(args: &[String]) -> Option<&str> {
     let at = args.iter().position(|a| a == "--mmproj")?;
     args.get(at + 1).map(String::as_str)
@@ -4925,7 +4931,7 @@ fn list_bundled_models_blocking(
         let guard = state.bundled_engine.lock().unwrap();
         (
             guard.as_ref().map(|e| e.model_path.clone()),
-            guard.as_ref().is_some_and(|e| image_part_in(&e.args).is_some()),
+            guard.as_ref().is_some_and(|e| started_seeing(&e.args)),
         )
     };
     let dirs = bundled_scan_dirs(&dir, extra_dirs);
@@ -6739,6 +6745,22 @@ mod tests {
             b.push(u8::from(*on));
         }
         b
+    }
+
+    #[test]
+    fn a_loaded_audio_model_does_not_see_either() {
+        // Measured in the Mac app: LFM3-Audio loaded in the LU Engine was
+        // listed with vision=true, because the loaded model answered with
+        // "started with --mmproj".
+        let dir = tempfile::tempdir().unwrap();
+        let audio = dir.path().join("a.mmproj.gguf");
+        std::fs::write(&audio, projector_head(&[("clip.has_audio_encoder", true)])).unwrap();
+        let vision = dir.path().join("v.mmproj.gguf");
+        std::fs::write(&vision, projector_head(&[("clip.has_vision_encoder", true)])).unwrap();
+        let args = |p: &std::path::Path| vec!["-m".to_string(), "/m.gguf".into(), "--mmproj".into(), p.to_string_lossy().to_string()];
+        assert!(!started_seeing(&args(&audio)));
+        assert!(started_seeing(&args(&vision)));
+        assert!(!started_seeing(&["-m".to_string(), "/m.gguf".into()]));
     }
 
     #[test]

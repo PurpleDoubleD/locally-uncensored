@@ -362,7 +362,8 @@ export function SpeechSettings() {
         {voiceSettings.ttsFallbackReason} If an antivirus quarantined Piper, whitelist it or reinstall the voice below.
       </p>
     )}
-    {showsHint(tts) && (
+    {/* N1: Piper is only required when it is the engine that reads aloud. */}
+    {showsHint(tts) && voiceSettings.ttsMode === 'piper' && (
       <p className="text-[0.55rem] text-gray-500 leading-snug">
         Required for read-aloud. Installs Piper + a neural voice locally (~63 MB).
       </p>

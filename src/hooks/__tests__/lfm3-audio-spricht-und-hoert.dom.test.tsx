@@ -132,6 +132,7 @@ describe('Einstellungen: ein Klick traegt LFM3 Audio in Ollama ein', () => {
     expect(useVoiceStore.getState()).toMatchObject({ sttMode: 'engine', ttsMode: 'engine' })
     expect(screen.getAllByText(/LFM3 Audio or LFM3 Omni/).length).toBe(2)
     expect(screen.queryByText(/Required for the microphone/)).toBeNull()
+    expect(screen.queryByText(/Required for read-aloud/)).toBeNull()
     vi.unstubAllGlobals()
   })
 
