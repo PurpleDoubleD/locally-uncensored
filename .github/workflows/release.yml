@@ -545,13 +545,14 @@ jobs:
           esac
           echo "OK: sidecar boots from $moved, loads a real model, /health answers, and has a libggml-cpu-*.so from $moved/llama mapped, nowhere near the build directory it was compiled in"
 
-      # FEHLER-P11 #7/#8: the vector tool is a static baseline build of its
-      # own (build-llama.sh cvector_cmake_flags_for); the app starts it the
-      # way it starts the server (cwd and LD_LIBRARY_PATH on the companions
-      # directory, engine.rs prepare_tool_command), which it does not need
-      # but must not trip over. Same moved-directory proof as above, with a
-      # real run: two example lines each way through the tiny model, and the
-      # control vector it writes must be there.
+      # FEHLER-P11 #7, E1: the vector tool is an exe of the server build and
+      # loads the same ggml modules (build-llama.sh cvector_ships_for); the
+      # app starts it the way it starts the server (cwd and LD_LIBRARY_PATH
+      # on the companions directory, engine.rs prepare_tool_command). Same
+      # moved-directory proof as above, with a real run: two example lines
+      # each way through the tiny model, the control vector it writes must
+      # be there, and it must load the ggml-cpu variants from the moved
+      # directory (a baseline-only tool took hours on 9B models).
       - name: "Vector tool computes from a moved directory (P11)"
         if: matrix.sidecar_triple == 'x86_64-unknown-linux-gnu'
         shell: bash
@@ -574,7 +575,9 @@ jobs:
             || { echo "FAIL: stories260K.gguf did not match the pinned sha256" >&2; exit 1; }
           printf 'Once upon a time there was a happy dog.\nThe sun was bright and everyone smiled.\n' > "$moved/more.txt"
           printf 'Once upon a time there was a sad dog.\nThe rain fell and everyone cried.\n' > "$moved/less.txt"
-          ( cd "$moved/llama" && "$moved/lu-llama-cvector-generator-${{ matrix.sidecar_triple }}" -m "$model" \
+          # LD_DEBUG=files: glibc names every library it loads; the tool logs
+          # nothing about ggml's backend loading itself.
+          ( cd "$moved/llama" && LD_DEBUG=files "$moved/lu-llama-cvector-generator-${{ matrix.sidecar_triple }}" -m "$model" \
               --positive-file "$moved/more.txt" --negative-file "$moved/less.txt" \
               -o "$moved/direction.gguf" --method mean -c 256 ) >/tmp/cvector.log 2>&1 || {
             cat /tmp/cvector.log
@@ -582,7 +585,9 @@ jobs:
             exit 1
           }
           [ -s "$moved/direction.gguf" ] || { cat /tmp/cvector.log; echo "FAIL: no control vector written" >&2; exit 1; }
-          echo "OK: the vector tool computes a control vector from $moved, nowhere near the build directory"
+          grep -E "file=$moved/llama/libggml-cpu-[a-z0-9_]+\.so .*dynamically loaded by" /tmp/cvector.log \
+            || { cat /tmp/cvector.log; echo "FAIL: the vector tool did not load a ggml-cpu variant from $moved/llama" >&2; exit 1; }
+          echo "OK: the vector tool computes a control vector from $moved on a ggml-cpu variant from there, nowhere near the build directory"
 
       # Nachbesserung N5 (review-sidecar.md, Runde 2): before this step,
       # release.yml had no real model-load proof for EITHER platform (the

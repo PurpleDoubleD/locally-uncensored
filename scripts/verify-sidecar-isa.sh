@@ -546,10 +546,10 @@ if [[ "$TRIPLE" == *-windows-* ]]; then
     vlog "no exe found at $exe_path, skipping the exe-itself check (build first for the full check)"
   fi
 
-  # FEHLER-P11 #8: the Neuron tweaker's vector tool is a static exe of its
-  # own (build-llama.sh cvector_cmake_flags_for), so every ggml-cpu line it
-  # carries is the baseline one and must hold the same rule as the server
-  # exe. Its map lies in its own build directory.
+  # The Neuron tweaker's vector tool (P11) is an exe of the server build
+  # (build-llama.sh, cvector_ships_for) that loads the same ggml modules, so
+  # it holds the same rule as the server exe. Its map lies beside the
+  # server's (cvector_build_dir_for).
   cv_path="$BIN_DIR/$(cvector_out_name_for "$TRIPLE")"
   if [ -f "$cv_path" ]; then
     cv_map="$(find "${WIN_CVEC_MAP_DIR_OVERRIDE:-$(cvector_build_dir_for "$TRIPLE")}" -type f -iname 'llama-cvector-generator.map' -print -quit 2>/dev/null)"
@@ -926,8 +926,8 @@ else
   vlog "no exe found at $exe_path, skipping the exe-itself check (build first for the full check)"
 fi
 
-# FEHLER-P11 #8: the vector tool, a static baseline exe of its own (see the
-# Windows branch above), holds the server exe's rule.
+# The vector tool, an exe of the server build (see the Windows branch above),
+# holds the server exe's rule.
 cv_path="$BIN_DIR/$(cvector_out_name_for "$TRIPLE")"
 if [ -f "$cv_path" ]; then
   asm="$(disassemble "$cv_path")"

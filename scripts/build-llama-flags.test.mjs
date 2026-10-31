@@ -15,6 +15,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
@@ -64,51 +65,43 @@ test('mac and Linux cmake flags are untouched by the Windows -MAP fix', () => {
   assert.doesNotMatch(cmakeFlagsFor('x86_64-unknown-linux-gnu'), /MAP/);
 });
 
-// FEHLER-P11 #8: the pinned llama.cpp defines the cvector-generator target
-// only with GGML_BACKEND_DL OFF (tools/CMakeLists.txt:35-39), which the
-// Windows/Linux server build needs ON (K1). The vector tool gets a cmake run
-// of its own there: static, CPU only, every ISA option off by name, since
-// GGML_NATIVE=OFF alone turns AVX/AVX2 on (INS_ENB). The server flags stay
-// as they were.
+// E1 (3.0.9): the vector tool comes out of the server build on every
+// platform. Upstream defines its target only without GGML_BACKEND_DL; LU's
+// patch 0002 lifts that, so on Windows/Linux it loads the same CPU variants
+// and Vulkan as the server. The static CPU-only baseline build it had there
+// before (FEHLER-P11 #8) made Neurons take hours on 9B models.
 function sourced(call) {
   return execFileSync('bash', ['-c', `source "${SCRIPT}"; ${call}`], { encoding: 'utf8' }).trim();
 }
 
-const ISA_OPTIONS = ['SSE42', 'AVX', 'AVX_VNNI', 'AVX2', 'BMI2', 'FMA', 'F16C', 'AVX512', 'AVX512_VBMI', 'AVX512_VNNI', 'AVX512_BF16', 'AMX_TILE', 'AMX_INT8', 'AMX_BF16'];
-
-for (const triple of ['x86_64-pc-windows-msvc', 'x86_64-unknown-linux-gnu']) {
-  test(`P11 #8: ${triple} builds the vector tool apart from the server`, () => {
-    assert.equal(sourced(`cvector_separate_build_for ${triple} && echo yes || echo no`), 'yes');
-    const flags = sourced(`cvector_cmake_flags_for ${triple}`);
-    for (const f of ['BUILD_SHARED_LIBS=OFF', 'GGML_BACKEND_DL=OFF', 'GGML_CPU_ALL_VARIANTS=OFF', 'GGML_VULKAN=OFF', 'GGML_OPENMP=OFF', 'GGML_NATIVE=OFF']) {
-      assert.match(flags, new RegExp(`-D${f}\\b`), f);
-    }
-    for (const isa of ISA_OPTIONS) assert.match(flags, new RegExp(`-DGGML_${isa}=OFF\\b`), `GGML_${isa} must be off by name`);
-    assert.doesNotMatch(flags, /=ON\b/, 'nothing in the vector tool build is switched on');
-    assert.notEqual(sourced(`cvector_build_dir_for ${triple}`), sourced(`echo "$CACHE_DIR/build-${triple}"`), 'its own build directory');
-    // The server build is the K1 one, untouched.
-    assert.match(cmakeFlagsFor(triple), /-DGGML_BACKEND_DL=ON\b/);
-    assert.match(cmakeFlagsFor(triple), /-DGGML_CPU_ALL_VARIANTS=ON\b/);
+for (const triple of ['x86_64-pc-windows-msvc', 'x86_64-unknown-linux-gnu', 'aarch64-apple-darwin']) {
+  test(`E1: ${triple} builds the vector tool in the server build`, () => {
+    assert.equal(sourced(`cvector_ships_for ${triple} && echo yes || echo no`), 'yes');
+    assert.equal(sourced(`cvector_build_dir_for ${triple}`), sourced(`echo "$CACHE_DIR/build-${triple}"`), 'the server build directory');
+    assert.equal(sourced(`type cvector_cmake_flags_for >/dev/null 2>&1 && echo yes || echo no`), 'no', 'no separate baseline build');
   });
 }
 
-test('P11 #8: the Windows vector tool keeps its linker map for the ISA guard', () => {
-  assert.match(sourced('cvector_cmake_flags_for x86_64-pc-windows-msvc'), /-DCMAKE_EXE_LINKER_FLAGS=-MAP\b/);
-  assert.doesNotMatch(sourced('cvector_cmake_flags_for x86_64-unknown-linux-gnu'), /MAP/);
+test('E1: the Windows/Linux server build the tool comes from is the K1 one', () => {
+  for (const triple of ['x86_64-pc-windows-msvc', 'x86_64-unknown-linux-gnu']) {
+    assert.match(cmakeFlagsFor(triple), /-DGGML_BACKEND_DL=ON\b/);
+    assert.match(cmakeFlagsFor(triple), /-DGGML_CPU_ALL_VARIANTS=ON\b/);
+    assert.match(cmakeFlagsFor(triple), /-DGGML_VULKAN=ON\b/);
+  }
 });
 
-test('P11 #8: the Mac builds the vector tool in its server build (static there already)', () => {
-  assert.equal(sourced('cvector_separate_build_for aarch64-apple-darwin && echo yes || echo no'), 'no');
-  assert.equal(sourced('cvector_ships_for aarch64-apple-darwin && echo yes || echo no'), 'yes');
-});
-
-test('P11 #9: the Windows vector tool puts jump tables in .rdata, without replacing the MSVC defaults', () => {
-  const flags = sourced('cvector_cmake_flags_for x86_64-pc-windows-msvc');
-  assert.match(flags, /-DCMAKE_C_FLAGS_INIT=-jumptablerdata\b/);
-  assert.match(flags, /-DCMAKE_CXX_FLAGS_INIT=-jumptablerdata\b/);
-  assert.doesNotMatch(flags, /-DCMAKE_(C|CXX)_FLAGS=/, 'CMAKE_<LANG>_FLAGS would drop /EHsc and the other MSVC defaults');
-  assert.doesNotMatch(flags, /\/jumptablerdata/, 'MSYS rewrites a leading slash into a path, as with /MAP');
-  assert.doesNotMatch(sourced('cvector_cmake_flags_for x86_64-unknown-linux-gnu'), /jumptablerdata/);
+test('E1: LU patch 0002 lets the vector tool build with GGML_BACKEND_DL', () => {
+  const patch = readFileSync(new URL('./llama-patches/0002-cvector-generator-backend-dl.patch', import.meta.url), 'utf8');
+  const touched = [...patch.matchAll(/^\+\+\+ b\/(.+)$/gm)].map((m) => m[1]).sort();
+  assert.deepEqual(touched, ['tools/CMakeLists.txt', 'tools/cvector-generator/cvector-generator.cpp', 'tools/cvector-generator/mean.hpp', 'tools/cvector-generator/pca.hpp']);
+  assert.match(patch, /^\+    if \(GGML_CPU\)$/m);
+  assert.match(patch, /^\+        add_subdirectory\(cvector-generator\)$/m);
+  // Every call into ggml-cpu goes; the registry replaces it.
+  for (const gone of ['ggml_backend_cpu_init', 'ggml_backend_cpu_set_n_threads', 'ggml_get_f32_nd', 'ggml_set_f32_nd', 'ggml_get_f32_1d', 'ggml_set_f32_1d']) {
+    assert.doesNotMatch(patch, new RegExp(`^\\+.*\\b${gone}\\(`, 'm'), `${gone} still called`);
+  }
+  assert.match(patch, /ggml_backend_init_by_type\(GGML_BACKEND_DEVICE_TYPE_CPU/);
+  assert.match(patch, /ggml_backend_reg_get_proc_address\(reg, "ggml_backend_set_n_threads"\)/);
 });
 
 test('E1 #1: the Windows server build puts jump tables in .rdata too, without replacing the MSVC defaults', () => {

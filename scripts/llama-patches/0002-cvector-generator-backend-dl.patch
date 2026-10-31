@@ -1,0 +1,151 @@
+diff --git a/tools/CMakeLists.txt b/tools/CMakeLists.txt
+index 6a6592c..1e0f8ac 100644
+--- a/tools/CMakeLists.txt
++++ b/tools/CMakeLists.txt
+@@ -35,9 +35,13 @@ else()
+     if (LLAMA_CONNECT)
+         add_subdirectory(connect)
+     endif()
++    if (GGML_CPU)
++        # LU: cvector-generator reaches its backends through the registry, so
++        # it also builds with GGML_BACKEND_DL (LU's Windows/Linux sidecar)
++        add_subdirectory(cvector-generator)
++    endif()
+     if (NOT GGML_BACKEND_DL AND GGML_CPU)
+         # these tools use backends directly (no dynamic loading) and depend on CPU backend symbols
+-        add_subdirectory(cvector-generator)
+         add_subdirectory(export-lora)
+     endif()
+     add_subdirectory(fit-params)
+diff --git a/tools/cvector-generator/cvector-generator.cpp b/tools/cvector-generator/cvector-generator.cpp
+index 829fb35..60af47e 100644
+--- a/tools/cvector-generator/cvector-generator.cpp
++++ b/tools/cvector-generator/cvector-generator.cpp
+@@ -121,7 +121,7 @@ struct callback_data {
+             // check if given row containing all zero elements
+             int n_cols = t->ne[0]; // hint: should be equal to n_embd
+             for (int col = 0; col < n_cols; ++col) {
+-                if (ggml_get_f32_nd(t, col, row, 0, 0) > eps) {
++                if (lu_get_f32_nd(t, col, row, 0, 0) > eps) {
+                     return false;
+                 }
+             }
+@@ -150,8 +150,8 @@ struct callback_data {
+         for (int dest_row = 0; dest_row < n_nonzero_rows; dest_row++) {
+             int src_row = rows_to_copy[dest_row];
+             for (int i = 0; i < n_embd; i++) {
+-                float src_elem = ggml_get_f32_nd(a, i, src_row, 0, 0);
+-                ggml_set_f32_nd(diff_filtered, i, dest_row, 0, 0, src_elem);
++                float src_elem = lu_get_f32_nd(a, i, src_row, 0, 0);
++                lu_set_f32_nd(diff_filtered, i, dest_row, 0, 0, src_elem);
+             }
+         }
+ 
+@@ -248,7 +248,7 @@ struct train_context {
+                 for (int ir = 0; ir < n_rows; ++ir) {
+                     for (int ic = 0; ic < n_embd; ++ic) {
+                         float f = arr[ir*n_embd + ic];
+-                        ggml_set_f32_nd(diff, ir, ic, 0, 0, f);
++                        lu_set_f32_nd(diff, ir, ic, 0, 0, f);
+                     }
+                 }
+             } else {
+diff --git a/tools/cvector-generator/mean.hpp b/tools/cvector-generator/mean.hpp
+index 4eeac1e..bdbc556 100644
+--- a/tools/cvector-generator/mean.hpp
++++ b/tools/cvector-generator/mean.hpp
+@@ -23,22 +23,22 @@ static void run(
+         for (int ic = 0; ic < t_layer->ne[0]; ic++) {
+             float f = 0.0;
+             for (int ir = 0; ir < t_layer->ne[1]; ir++) {
+-                f += ggml_get_f32_nd(t_layer, ic, ir, 0, 0);
++                f += lu_get_f32_nd(t_layer, ic, ir, 0, 0);
+             }
+             f /= t_layer->ne[1];
+-            ggml_set_f32_1d(ctrl_out, ic, f);
++            lu_set_f32_1d(ctrl_out, ic, f);
+         }
+ 
+         // normalize output vector
+         float norm = 0.0;
+         for (int i = 0; i < ggml_nelements(ctrl_out); i++) {
+-            float f = ggml_get_f32_1d(ctrl_out, i);
++            float f = lu_get_f32_1d(ctrl_out, i);
+             norm += f*f;
+         }
+         norm = sqrt(norm);
+         for (int i = 0; i < ggml_nelements(ctrl_out); i++) {
+-            float f = ggml_get_f32_1d(ctrl_out, i);
+-            ggml_set_f32_1d(ctrl_out, i, f / norm);
++            float f = lu_get_f32_1d(ctrl_out, i);
++            lu_set_f32_1d(ctrl_out, i, f / norm);
+         }
+ 
+         printf("%s: Done layer %d / %d\n", __func__, (int) il+1, (int) v_input.size());
+diff --git a/tools/cvector-generator/pca.hpp b/tools/cvector-generator/pca.hpp
+index afd3bf6..b629b04 100644
+--- a/tools/cvector-generator/pca.hpp
++++ b/tools/cvector-generator/pca.hpp
+@@ -16,6 +16,30 @@
+ #include <string>
+ #include <vector>
+ 
++// LU: the generator reads and writes its own host F32 tensors with these
++// instead of ggml-cpu's ggml_{get,set}_f32_{1d,nd}, and reaches the CPU
++// backend through the registry, so it builds with GGML_BACKEND_DL as well
++// and runs on the server's dynamically loaded backends (CPU variants, GPU).
++static float lu_get_f32_nd(const struct ggml_tensor * t, int i0, int i1, int i2, int i3) {
++    GGML_ASSERT(t->type == GGML_TYPE_F32);
++    return *(const float *) ((const char *) t->data + i0*t->nb[0] + i1*t->nb[1] + i2*t->nb[2] + i3*t->nb[3]);
++}
++
++static void lu_set_f32_nd(const struct ggml_tensor * t, int i0, int i1, int i2, int i3, float value) {
++    GGML_ASSERT(t->type == GGML_TYPE_F32);
++    *(float *) ((char *) t->data + i0*t->nb[0] + i1*t->nb[1] + i2*t->nb[2] + i3*t->nb[3]) = value;
++}
++
++static float lu_get_f32_1d(const struct ggml_tensor * t, int i) {
++    GGML_ASSERT(t->type == GGML_TYPE_F32 && ggml_is_contiguous(t));
++    return ((const float *) t->data)[i];
++}
++
++static void lu_set_f32_1d(const struct ggml_tensor * t, int i, float value) {
++    GGML_ASSERT(t->type == GGML_TYPE_F32 && ggml_is_contiguous(t));
++    ((float *) t->data)[i] = value;
++}
++
+ #define DEBUG_POS 5
+ 
+ static void print_debug_tensor(struct ggml_tensor * t, bool with_data = true) {
+@@ -23,7 +47,7 @@ static void print_debug_tensor(struct ggml_tensor * t, bool with_data = true) {
+     if (!with_data) return;
+     printf("%s: %s[0] = [", __func__, t->name);
+     for (size_t i = 0; i <= DEBUG_POS; i++) {
+-        printf(" %f,", ggml_get_f32_nd(t, i, 0, 0, 0));
++        printf(" %f,", lu_get_f32_nd(t, i, 0, 0, 0));
+     }
+     printf(" ... ]\n");
+ }
+@@ -80,7 +104,7 @@ struct pca_model {
+ 
+         // if there aren't GPU Backends fallback to CPU backend
+         if (!backend) {
+-            backend = ggml_backend_cpu_init();
++            backend = ggml_backend_init_by_type(GGML_BACKEND_DEVICE_TYPE_CPU, nullptr);
+         }
+ 
+         const int num_tensors = 4;
+@@ -200,8 +224,11 @@ static ggml_status compute_piter(
+     // allocate tensors
+     ggml_gallocr_alloc_graph(allocr, gf);
+ 
+-    if (ggml_backend_is_cpu(model.backend)) {
+-        ggml_backend_cpu_set_n_threads(model.backend, params.n_threads);
++    ggml_backend_dev_t dev = ggml_backend_get_device(model.backend);
++    ggml_backend_reg_t reg = dev ? ggml_backend_dev_backend_reg(dev) : nullptr;
++    auto set_n_threads = reg ? (ggml_backend_set_n_threads_t) ggml_backend_reg_get_proc_address(reg, "ggml_backend_set_n_threads") : nullptr;
++    if (set_n_threads) {
++        set_n_threads(model.backend, params.n_threads);
+     }
+ 
+     ggml_status res = ggml_backend_graph_compute(model.backend, gf);
