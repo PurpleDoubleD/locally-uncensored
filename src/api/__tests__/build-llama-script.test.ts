@@ -507,14 +507,15 @@ describe('build-llama.sh — the llama.cpp revision is pinned to a commit', { ti
 })
 
 /**
- * FEHLER-P11 #8: the pinned llama.cpp defines the cvector-generator target
- * only without GGML_BACKEND_DL, which the Windows/Linux server build needs.
- * build_triple therefore configures the vector tool apart from the server.
- * Run with a stand-in `cmake` that records its calls and writes the files a
- * real build would, in a throwaway checkout: the order and the directories
- * are the point, not the compile.
+ * E1: the vector tool comes out of the server build on every platform (LU
+ * patch 0002 lets it build with GGML_BACKEND_DL), so on Windows/Linux it
+ * runs on the server's CPU variants and Vulkan instead of a static baseline
+ * build of its own (FEHLER-P11 #8, hours on 9B models). Run with a stand-in
+ * `cmake` that records its calls and writes the files a real build would, in
+ * a throwaway checkout: the order and the directories are the point, not the
+ * compile.
  */
-describe('build-llama.sh: the vector tool gets a cmake run of its own on Windows and Linux', () => {
+describe('build-llama.sh: the vector tool comes out of the server build', () => {
   const temps: string[] = []
   const tmp = (prefix: string) => {
     const dir = mkdtempSync(join(tmpdir(), prefix))
@@ -552,22 +553,18 @@ cmake() {
   }
 
   for (const triple of ['x86_64-unknown-linux-gnu', 'x86_64-pc-windows-msvc']) {
-    it(`${triple}: server as before, the tool from its own static baseline build`, () => {
+    it(`${triple}: one K1 build makes the server and the tool`, () => {
       const r = build(triple)
       expect(r.code, r.out).toBe(0)
       const server = `${r.cache}/build-${triple}`
-      const tool = `${r.cache}/build-${triple}-cvector`
       const configures = r.calls.filter((c) => c.startsWith('configure '))
-      expect(configures).toHaveLength(2)
+      expect(configures).toHaveLength(1)
       expect(configures[0]).toContain(`configure ${server} `)
       expect(configures[0]).toContain('-DGGML_BACKEND_DL=ON')
-      expect(configures[1]).toContain(`configure ${tool} `)
-      expect(configures[1]).toContain('-DGGML_BACKEND_DL=OFF')
-      expect(configures[1]).toContain('-DBUILD_SHARED_LIBS=OFF')
-      expect(configures[1]).toContain('-DGGML_AVX2=OFF')
+      expect(configures[0]).toContain('-DGGML_CPU_ALL_VARIANTS=ON')
       expect(r.calls).toContain(`build ${server} llama-server`)
-      expect(r.calls).toContain(`build ${tool} llama-cvector-generator`)
-      expect(r.calls).not.toContain(`build ${server} llama-cvector-generator`)
+      expect(r.calls).toContain(`build ${server} llama-cvector-generator`)
+      expect(r.calls.some((c) => c.includes(`build-${triple}-cvector`))).toBe(false)
       const exe = triple.includes('windows') ? '.exe' : ''
       expect(existsSync(join(r.repoRoot, 'src-tauri', 'bin', `lu-llama-cvector-generator-${triple}${exe}`))).toBe(true)
       expect(existsSync(join(r.repoRoot, 'src-tauri', 'bin', `lu-llama-server-${triple}${exe}`))).toBe(true)

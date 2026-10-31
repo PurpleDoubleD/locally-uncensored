@@ -165,12 +165,16 @@ cmake_flags_for() {
       # since they are where an unconditional-AVX regression would actually
       # ship. All three linker-flags variables now carry -MAP.
       #
-      # -jumptablerdata (FEHLER-E1 #1): same reason and spelling as the vector
-      # tool's build (cvector_cmake_flags_for, FEHLER-P11 #9). With b11960 the
-      # guard read a switch jump table that MSVC had put in llama.dll's .text
-      # as "vsqrtph zmm28" at $LN954 of unicode.obj; nothing in that object
-      # can emit EVEX (no /arch outside ggml-cpu). In .rdata the guard no
-      # longer reads tables as code, so a hit that stays is real code.
+      # -jumptablerdata (FEHLER-E1 #1, FEHLER-P11 #9): MSVC puts switch jump
+      # tables in .text beside the code by default (learn.microsoft.com,
+      # /jumptablerdata), and their entries are image RVAs that the ISA guard
+      # decodes as instructions. With b11960 it read one in llama.dll as
+      # "vsqrtph zmm28" at $LN954 of unicode.obj; nothing in that object can
+      # emit EVEX (no /arch outside ggml-cpu). In .rdata the guard no longer
+      # reads tables as code, so a hit that stays is real code. Set through
+      # CMAKE_<LANG>_FLAGS_INIT, which CMake's Windows-MSVC module appends its
+      # defaults (/EHsc and the rest) to; CMAKE_<LANG>_FLAGS would replace
+      # them. Dash spelling for the same MSYS reason as -MAP. MSVC 17.7+, x64.
       echo "$common -DBUILD_SHARED_LIBS=ON -DGGML_BACKEND_DL=ON -DGGML_CPU_ALL_VARIANTS=ON -DGGML_VULKAN=ON -DCMAKE_SHARED_LINKER_FLAGS=-MAP -DCMAKE_EXE_LINKER_FLAGS=-MAP -DCMAKE_MODULE_LINKER_FLAGS=-MAP -DCMAKE_C_FLAGS_INIT=-jumptablerdata -DCMAKE_CXX_FLAGS_INIT=-jumptablerdata" ;;
     x86_64-unknown-linux-gnu)
       # CMAKE_BUILD_RPATH_USE_ORIGIN=ON (BLOCKER B3): without it,
@@ -236,11 +240,21 @@ quantize_out_name_for() {
 # llama-cvector-generator (3.0.9, P11 Neuron tweaker) ships on all three
 # desktop platforms: it turns two short lists of example prompts into a
 # control vector for the model the user has, which llama-server then applies
-# with --control-vector. Same pinned source tree. On the Mac it comes out of
-# the server's own static build; on Windows and Linux out of a static build
-# of its own (cvector_cmake_flags_for below, FEHLER-P11 #8), one file that
-# needs no library beside it. FEHLER-P11 #7: everything a feature needs must
-# come with the install.
+# with --control-vector. FEHLER-P11 #7: everything a feature needs must come
+# with the install.
+#
+# It comes out of the server's own build on every platform, linked against
+# the same libraries: on the Mac the static Metal build, on Windows and Linux
+# the GGML_BACKEND_DL build with the CPU variants and Vulkan as loadable
+# modules (K1). Upstream defines the target only without GGML_BACKEND_DL,
+# because the generator calls ggml-cpu directly; LU's patch
+# 0002-cvector-generator-backend-dl.patch reaches those through the backend
+# registry instead and lifts that condition. So the tool computes on the
+# GPU (LU passes -ngl 99) and otherwise on the best CPU variant, like the
+# server. Until E1 (3.0.9) Windows and Linux had a static CPU-only baseline
+# build of their own (FEHLER-P11 #8), without SSE4.2/AVX/AVX2: LFM3 1.7B
+# took ~25 min on the box against 30 s on the Mac, a 9B model hours. That
+# build is gone; its ISA rules hold for the tool as for the server exe.
 cvector_ships_for() {
   case "$1" in
     *-apple-darwin | x86_64-pc-windows-msvc | x86_64-unknown-linux-gnu) return 0 ;;
@@ -248,59 +262,10 @@ cvector_ships_for() {
   esac
 }
 
-# FEHLER-P11 #8: the pinned llama.cpp only defines the cvector-generator
-# target when GGML_BACKEND_DL is OFF (tools/CMakeLists.txt:35-39, "these
-# tools use backends directly ... and depend on CPU backend symbols"). The
-# server build on Windows and Linux needs BACKEND_DL ON (K1, the dynamic
-# CPU variants), so there the generator gets a cmake run of its own, in its
-# own build directory, and the server build is left exactly as it was.
-#
-# What that run builds, and why:
-#   - static (BUILD_SHARED_LIBS=OFF): one self-contained file, no companion
-#     library to stage, find or keep in step with the server's;
-#   - CPU only (no GGML_VULKAN): no hard link to vulkan-1.dll/libvulkan.so,
-#     so the tool starts on a machine without a GPU driver as well. It reads
-#     some 40 short example pairs once per slider; the strength check after
-#     it runs on the engine (GPU), not here;
-#   - the K1 baseline: GGML_NATIVE=OFF alone switches SSE4.2/AVX/AVX2/FMA/
-#     F16C/BMI2 ON (ggml/CMakeLists.txt:141-166, INS_ENB), the exact K1
-#     crash on older CPUs, and a static build has no CPU variants to fall
-#     back on. So every ISA option is set OFF by name, and
-#     verify-sidecar-isa.sh checks the built file like the server exe
-#     (baseline: no AVX instruction);
-#   - no OpenMP: ggml's own thread pool, so no vcomp140.dll/libgomp.so is
-#     needed beside it;
-#   - Windows keeps -MAP, the ISA guard reads the linker map;
-#   - Windows puts switch jump tables in .rdata (-jumptablerdata, MSVC 17.7+,
-#     x64 only). By default MSVC places them in .text beside the code
-#     (learn.microsoft.com, /jumptablerdata), and their entries are image
-#     RVAs, so in this exe they decode as instructions that are not there:
-#     FEHLER-P11 #9, an "unprotected" EVEX vfmadd132ss xmm21 at a $LN label
-#     of speculative.obj, while the same object in the server's
-#     llama-common.dll (other RVAs) reads clean. Nothing in this build may
-#     emit EVEX (no /arch, every ISA option off), so moving the tables out
-#     of .text is the fix and the proof at once: if the guard still finds
-#     the hit, it is real code. Set through CMAKE_<LANG>_FLAGS_INIT, which
-#     CMake's Windows-MSVC module appends its defaults (/EHsc and the rest)
-#     to; CMAKE_<LANG>_FLAGS itself would replace them. Dash spelling for
-#     the same MSYS reason as -MAP.
-cvector_separate_build_for() {
-  is_dynamic_isa_triple "$1"
-}
-
-cvector_cmake_flags_for() {
-  local triple="$1"
-  local common="-DLLAMA_OPENSSL=OFF -DLLAMA_BUILD_UI=OFF -DLLAMA_USE_PREBUILT_UI=OFF -DCMAKE_BUILD_TYPE=Release"
-  local cpu="-DBUILD_SHARED_LIBS=OFF -DGGML_BACKEND_DL=OFF -DGGML_CPU_ALL_VARIANTS=OFF -DGGML_VULKAN=OFF -DGGML_OPENMP=OFF -DGGML_NATIVE=OFF -DGGML_SSE42=OFF -DGGML_AVX=OFF -DGGML_AVX_VNNI=OFF -DGGML_AVX2=OFF -DGGML_BMI2=OFF -DGGML_FMA=OFF -DGGML_F16C=OFF -DGGML_AVX512=OFF -DGGML_AVX512_VBMI=OFF -DGGML_AVX512_VNNI=OFF -DGGML_AVX512_BF16=OFF -DGGML_AMX_TILE=OFF -DGGML_AMX_INT8=OFF -DGGML_AMX_BF16=OFF"
-  case "$triple" in
-    x86_64-pc-windows-msvc)   echo "$common $cpu -DCMAKE_EXE_LINKER_FLAGS=-MAP -DCMAKE_C_FLAGS_INIT=-jumptablerdata -DCMAKE_CXX_FLAGS_INIT=-jumptablerdata" ;;
-    x86_64-unknown-linux-gnu) echo "$common $cpu" ;;
-    *) die "no separate vector-tool build for $triple" ;;
-  esac
-}
-
+# Where the tool is built, and where verify-sidecar-isa.sh finds its linker
+# map on Windows: the server's build directory.
 cvector_build_dir_for() {
-  echo "$CACHE_DIR/build-$1-cvector"
+  echo "$CACHE_DIR/build-$1"
 }
 
 cvector_out_name_for() {
@@ -585,16 +550,8 @@ build_triple() {
   if quantize_ships_for "$triple"; then
     cmake --build "$build_dir" --config Release --target llama-quantize -j "${BUILD_JOBS:-4}"
   fi
-  local cv_build_dir="$build_dir"
   if cvector_ships_for "$triple"; then
-    if cvector_separate_build_for "$triple"; then
-      cv_build_dir="$(cvector_build_dir_for "$triple")"
-      local cv_flags; cv_flags="$(cvector_cmake_flags_for "$triple")"
-      log "configuring the vector tool for $triple apart from the server  ($cv_flags)"
-      # shellcheck disable=SC2086
-      cmake -S "$SRC_DIR" -B "$cv_build_dir" $cv_flags
-    fi
-    cmake --build "$cv_build_dir" --config Release --target llama-cvector-generator -j "${BUILD_JOBS:-4}"
+    cmake --build "$build_dir" --config Release --target llama-cvector-generator -j "${BUILD_JOBS:-4}"
   fi
   # Locate the produced binary (path differs by generator/platform).
   local built
@@ -613,8 +570,8 @@ build_triple() {
   fi
   if cvector_ships_for "$triple"; then
     local built_cv
-    built_cv="$(find "$cv_build_dir" -type f \( -name 'llama-cvector-generator' -o -name 'llama-cvector-generator.exe' \) -print -quit)"
-    [ -n "$built_cv" ] || die "llama-cvector-generator binary not found under $cv_build_dir"
+    built_cv="$(find "$build_dir" -type f \( -name 'llama-cvector-generator' -o -name 'llama-cvector-generator.exe' \) -print -quit)"
+    [ -n "$built_cv" ] || die "llama-cvector-generator binary not found under $build_dir"
     cp "$built_cv" "$BIN_DIR/$(cvector_out_name_for "$triple")"
     chmod +x "$BIN_DIR/$(cvector_out_name_for "$triple")"
   fi
