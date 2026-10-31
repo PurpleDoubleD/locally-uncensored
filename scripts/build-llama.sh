@@ -164,7 +164,14 @@ cmake_flags_for() {
       # files verify-sidecar-isa.sh's Windows guard most needs a map for,
       # since they are where an unconditional-AVX regression would actually
       # ship. All three linker-flags variables now carry -MAP.
-      echo "$common -DBUILD_SHARED_LIBS=ON -DGGML_BACKEND_DL=ON -DGGML_CPU_ALL_VARIANTS=ON -DGGML_VULKAN=ON -DCMAKE_SHARED_LINKER_FLAGS=-MAP -DCMAKE_EXE_LINKER_FLAGS=-MAP -DCMAKE_MODULE_LINKER_FLAGS=-MAP" ;;
+      #
+      # -jumptablerdata (FEHLER-E1 #1): same reason and spelling as the vector
+      # tool's build (cvector_cmake_flags_for, FEHLER-P11 #9). With b11960 the
+      # guard read a switch jump table that MSVC had put in llama.dll's .text
+      # as "vsqrtph zmm28" at $LN954 of unicode.obj; nothing in that object
+      # can emit EVEX (no /arch outside ggml-cpu). In .rdata the guard no
+      # longer reads tables as code, so a hit that stays is real code.
+      echo "$common -DBUILD_SHARED_LIBS=ON -DGGML_BACKEND_DL=ON -DGGML_CPU_ALL_VARIANTS=ON -DGGML_VULKAN=ON -DCMAKE_SHARED_LINKER_FLAGS=-MAP -DCMAKE_EXE_LINKER_FLAGS=-MAP -DCMAKE_MODULE_LINKER_FLAGS=-MAP -DCMAKE_C_FLAGS_INIT=-jumptablerdata -DCMAKE_CXX_FLAGS_INIT=-jumptablerdata" ;;
     x86_64-unknown-linux-gnu)
       # CMAKE_BUILD_RPATH_USE_ORIGIN=ON (BLOCKER B3): without it,
       # CMAKE_BUILD_WITH_INSTALL_RPATH's OFF default still makes CMake write
