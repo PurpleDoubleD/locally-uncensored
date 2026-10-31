@@ -53,6 +53,16 @@ describe('reading coordinates people share', () => {
     expect(bad('@cheerful0.5')).toMatch(/not a coordinate/)
   })
 
+  // VentureBeat, 30.10.2026, writes neurons as "L34 N3838", without a dose.
+  it('reads a neuron named without a strength at the usual dose, and says so', () => {
+    const r = ok('Qwen3.8-27B: L34 N3838, L38N17180')
+    expect(r.recipe.entries).toEqual([
+      { kind: 'neuron', layer: 34, neuron: 3838, dose: 1 },
+      { kind: 'neuron', layer: 38, neuron: 17180, dose: 1 },
+    ])
+    expect(r.notes.join(' ')).toMatch(/No strength given for L34N3838: LU uses \+1\.0/)
+  })
+
   it('reads LU sliders and features', () => {
     expect(ok('@cheerful+0.6 F11690+0.8').recipe.entries).toEqual([
       { kind: 'preset', id: 'cheerful', strength: 0.6 },

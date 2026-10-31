@@ -83,6 +83,10 @@ function glue(tokens: string[]): string[] {
     } else if (/^L\d{1,3}N\d{1,7}$/i.test(t) && /^[-+−]\d/.test(tokens[i + 1] ?? '')) {
       out.push(`${t}${tokens[i + 1]}`)
       i += 1
+    } else if (/^L\d{1,3}$/i.test(t) && /^N\d{1,7}$/i.test(tokens[i + 1] ?? '')) {
+      // "L34 N3838" without a strength, as articles write it.
+      out.push(`${t}${tokens[i + 1]}`)
+      i += 1
     } else out.push(t)
   }
   return out
@@ -176,9 +180,9 @@ function entryKey(e: RecipeEntry): string {
   }
 }
 
-function finish(model: string | null, entries: RecipeEntry[]): RecipeParse {
+function finish(model: string | null, entries: RecipeEntry[], extra: string[] = []): RecipeParse {
   if (entries.length === 0) return { ok: false, error: 'No coordinates found. Paste a line like “L14N8949+1.0 @cheerful+0.5”, or an LU link.' }
-  const notes: string[] = []
+  const notes: string[] = [...extra]
   const byKey = new Map<string, RecipeEntry>()
   for (const e of entries) {
     const k = entryKey(e)
@@ -190,10 +194,23 @@ function finish(model: string | null, entries: RecipeEntry[]): RecipeParse {
   return { ok: true, recipe: { model, entries: [...byKey.values()] }, notes: [...new Set(notes)] }
 }
 
-function parseCoords(text: string, presetIds: ReadonlySet<string>): RecipeEntry[] | string {
+/** Neurons named without a strength get the dose shared recipes use. */
+export const NEURON_DEFAULT_DOSE = 1
+const RE_NEURON_BARE = /^L(\d{1,3})N(\d{1,7})$/i
+
+function parseCoords(text: string, presetIds: ReadonlySet<string>, notes: string[] = []): RecipeEntry[] | string {
   const tokens = glue(text.split(/[\s,;]+/).filter(Boolean))
   const out: RecipeEntry[] = []
   for (const t of tokens) {
+    const bare = RE_NEURON_BARE.exec(t)
+    if (bare) {
+      const layer = Number(bare[1])
+      const neuron = Number(bare[2])
+      if (layer > MAX_LAYER || neuron >= MAX_INDEX) return `“${short(t)}”: layer or neuron number too large.`
+      out.push({ kind: 'neuron', layer, neuron, dose: NEURON_DEFAULT_DOSE })
+      notes.push(`No strength given for ${t.toUpperCase()}: LU uses +1.0, the usual dose. Change it on the slider.`)
+      continue
+    }
     const e = parseToken(t, presetIds)
     if (typeof e === 'string') return e
     out.push(e)
@@ -225,10 +242,11 @@ function parseLink(link: string, presetIds: ReadonlySet<string>): RecipeParse {
   if (url.searchParams.get('v') !== '1') return { ok: false, error: 'This link is from a newer LU. Update LU to read it.' }
   const model = url.searchParams.get('model')
   const entries: RecipeEntry[] = []
+  const linkNotes: string[] = []
   const c = url.searchParams.get('c')
   if (c) {
     if (hasControl(c)) return { ok: false, error: 'The link has hidden characters. Nothing was read.' }
-    const coords = parseCoords(c, presetIds)
+    const coords = parseCoords(c, presetIds, linkNotes)
     if (typeof coords === 'string') return { ok: false, error: coords }
     entries.push(...coords)
   }
@@ -238,7 +256,7 @@ function parseLink(link: string, presetIds: ReadonlySet<string>): RecipeParse {
     if (typeof own === 'string') return { ok: false, error: own }
     entries.push(...own)
   }
-  return finish(model?.trim() || null, entries)
+  return finish(model?.trim() || null, entries, linkNotes)
 }
 
 /**
@@ -273,9 +291,10 @@ export function parseRecipe(input: string, presetIds: ReadonlySet<string>): Reci
       coords = colon[2]
     }
   }
-  const entries = parseCoords(coords, presetIds)
+  const notes: string[] = []
+  const entries = parseCoords(coords, presetIds, notes)
   if (typeof entries === 'string') return { ok: false, error: entries }
-  return finish(model, entries)
+  return finish(model, entries, notes)
 }
 
 function signed(v: number): string {
