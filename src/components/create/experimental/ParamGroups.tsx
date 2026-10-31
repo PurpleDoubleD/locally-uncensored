@@ -27,6 +27,7 @@ import { HINWEIS_TEXT } from '../../../lib/hinweis'
 import { filterLoraRows, loraCopyText, lorasForRun, loraRows } from '../../../lib/lora-stack'
 import { loraStackView, setLoraStackQuery, setLoraStackScroll } from './loraStackView'
 import { LoraStrength } from './LoraStrength'
+import { cfgHint, loraStrengthHint } from '../../../lib/param-hints'
 import { MOTION_OWN_WORKFLOW_NOTE, useMotionOwnWorkflow } from './motionWorkflow'
 import { supportsTransparent } from '../../../lib/transparent-image'
 import { isQwenImage21Turbo } from '../../../lib/render/qwen21-turbo'
@@ -238,6 +239,8 @@ export function ParamGroups() {
   // its LoRAs too. The real values are in Workflow parameters below.
   const motionWorkflow = useMotionOwnWorkflow() !== null
 
+  const cfgNote = cfgHint(laneType, s.cfgScale)
+
   const samplers = samplerList.length ? samplerList : SAMPLERS_FALLBACK
   const schedulers = schedulerList.length ? schedulerList : SCHEDULERS_FALLBACK
   const vaes = vaeList.length ? vaeList : ['auto']
@@ -260,6 +263,8 @@ export function ParamGroups() {
             {s.cfgScale > 1 && ` CFG ${s.cfgScale.toFixed(1)} is above the 1 Turbo is made for and can overcook it.`}
           </p>
         )}
+        {/* B50: far above what the model takes, a note with the range that works. It never blocks. */}
+        {showCfg && !isVideo && cfgNote && <p className={`t-micro ${HINWEIS_TEXT.ruhig}`} data-testid="cfg-hint">{cfgNote}</p>}
         {showSize && (macSize && macClip ? (
           // The Mac: the model's grid and bounds. What runs is said below.
           <div className="grid grid-cols-2 gap-2">
@@ -601,6 +606,7 @@ export function ParamGroups() {
                 // the strength set here on Qwen-Image 2.1, and says so where
                 // the strength is set.
                 const alphaNote = isMlxLocal && laneType === 'qwenimage' ? mlxLoraAlphaNote(loraAlpha?.[name]) : null
+                const strengthNote = active ? loraStrengthHint(file, active.strength) : null
                 return (
                   <div key={name} className={cn('rounded-md border transition-colors', active ? 'border-white/15 bg-white/[0.06]' : 'border-white/[0.06]')}>
                     <div className="flex items-stretch">
@@ -614,6 +620,7 @@ export function ParamGroups() {
                       <div className="px-2.5 pb-2">
                         <LoraStrength name={label} value={active.strength} onChange={(v) => s.setLoraStrengthFor(name, v)} />
                         {alphaNote && <p className="mt-1.5 t-micro text-gray-500" data-testid="lora-alpha-note">{alphaNote}</p>}
+                        {strengthNote && <p className={`mt-1.5 t-micro ${HINWEIS_TEXT.ruhig}`} data-testid="lora-strength-hint">{strengthNote}</p>}
                       </div>
                     )}
                   </div>
