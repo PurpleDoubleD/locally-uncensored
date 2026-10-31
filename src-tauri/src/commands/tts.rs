@@ -591,6 +591,11 @@ mod external_voice_tests {
     }
 
     #[test]
+    fn only_http_endpoints_are_taken_for_speech() {
+        assert!(external_voice_url("https://example.org/v1/audio/speech", "TTS").is_ok());
+    }
+
+    #[test]
     fn only_http_endpoints_are_taken() {
         assert!(external_voice_url("http://localhost:11434/v1/audio/transcriptions", "transcription").is_ok());
         assert!(external_voice_url("file:///etc/passwd", "transcription").unwrap_err().contains("http or https"));

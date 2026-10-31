@@ -135,7 +135,11 @@ describe('D-S26 · was das Raster wirklich kostet', () => {
     //
     // 49 -> 50 am 08.10.2026: Hermes 3 3B ist ein offizielles NousResearch-
     // Modell und steht jetzt hier neben Hermes 4.3 statt unter Unfiltered.
-    expect(messeReiter(getMainstreamTextModels()).kacheln).toBe(50)
+    //
+    // 50 -> 54 am 30.10.2026 (N1): Liquid LFM3 als vier Gruppen, Text 1.7B,
+    // VL 2B, Omni 2B und Audio 2B (je Ollama-Tag plus MLX-Build). Die Kurve
+    // oben traegt weiter: 54 liegt am unteren Ende.
+    expect(messeReiter(getMainstreamTextModels()).kacheln).toBe(54)
     //
     // 56 -> 57 am 05.09.2026, vierte Bewegung. Der Inhaber: „orcarouter ist ein
     // muss." Die sechs Qwen-3.8-27B-Uncensored-Quants zeigen jetzt auf
@@ -167,7 +171,11 @@ describe('D-S26 · was das Raster wirklich kostet', () => {
     for (const models of [getMainstreamTextModels(), getUncensoredTextModels()]) {
       const { knoten } = messeReiter(models)
       expect(knoten).toBeGreaterThan(1000)
-      expect(knoten).toBeLessThan(2000)
+      // 2000 -> 2200 am 30.10.2026 (N1): der Mainstream-Reiter zaehlt mit den
+      // vier LFM3-Kacheln 2009 Elemente. Die Browsermessung oben hat 303
+      // Kacheln (rund 7500 Knoten) bei 1,1 ms gezeigt; die Grenze sagt nur
+      // "Groessenordnung des Audits", und die steht.
+      expect(knoten).toBeLessThan(2200)
     }
   })
 

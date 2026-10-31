@@ -58,7 +58,7 @@ describe('LFM3 steht im Katalog', () => {
     for (const m of lfm3()) expect(m.description, m.name).toContain('Ollama 0.40.13')
     const haupt = lfm3().filter((m) => !m.tags.includes('MLX'))
     expect(haupt.length).toBe(4)
-    for (const m of haupt) expect(m.description, m.name).toMatch(/10 M USD/)
+    for (const m of haupt) expect(m.description, m.name).toMatch(/revenue limit of 10 million a year/)
   })
 
   it('das VL-Modell traegt Vision, das Textmodell nicht', () => {

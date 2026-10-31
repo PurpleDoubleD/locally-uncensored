@@ -10124,6 +10124,39 @@ common_fit_params: encountered an error while trying to fit params to free devic
 cmn    common_init_: failed to load model 'C:\\Users\\x\\models\\diag-kaputt.gguf'
 srv    llama_server: exiting due to model loading error";
 
+    /// Wort fuer Wort, was lu-llama-server 049326a (b9949, aus LU 3.0.7) am
+    /// 30.10.2026 am Mac zu LiquidAI/LFM3-1.7B-GGUF Q4_K_M (sha256 3793e1e6…,
+    /// heil) gesagt hat (N1). Die Datei ist in Ordnung, die Engine zu alt.
+    const LFM3_AUF_B9949_STDERR: &str = "\
+0.00.167.117 E llama_model_load: error loading model: unknown model architecture: 'lfm3'
+0.00.167.232 E llama_model_load_from_file_impl: failed to load model
+0.00.167.484 E common_fit_params: encountered an error while trying to fit params to free device memory: failed to load model
+0.00.221.539 E cmn  common_init_: failed to load model 'dl-gguf/LFM3-1.7B-Q4_K_M.gguf'
+0.00.221.540 E srv    load_model: failed to load model, 'dl-gguf/LFM3-1.7B-Q4_K_M.gguf'
+0.00.221.928 E srv  llama_server: exiting due to model loading error";
+
+    #[test]
+    fn a_model_newer_than_the_engine_is_not_called_a_damaged_file() {
+        let f = StartFailure { died: true, port_taken: false, stderr: LFM3_AUF_B9949_STDERR.into(), exit_code: Some(1), signal: None };
+        let msg = start_failure_message(&f, 8127, Duration::from_secs(60), SecondAttempt::SameOffload, None);
+        assert!(msg.contains("a lfm3 model"), "{msg}");
+        assert!(msg.contains("does not know that architecture"), "{msg}");
+        assert!(msg.contains("Downloading it again will not help"), "{msg}");
+        assert!(!msg.contains("download it again"), "{msg}");
+        assert!(!msg.contains("GPU Layers"), "{msg}");
+        // Auch nach dem zweiten Versuch auf der CPU bleibt es dieselbe Ursache.
+        let cpu = start_failure_message(&f, 8127, Duration::from_secs(60), SecondAttempt::CpuOnly, None);
+        assert!(cpu.contains("does not know that architecture"), "{cpu}");
+    }
+
+    #[test]
+    fn the_architecture_name_is_read_in_both_spellings_and_never_empty() {
+        assert_eq!(stderr_names_an_unknown_architecture(LFM3_AUF_B9949_STDERR).as_deref(), Some("lfm3"));
+        assert_eq!(stderr_names_an_unknown_architecture("error loading model: unknown model architecture 'wanx'").as_deref(), Some("wanx"));
+        assert_eq!(stderr_names_an_unknown_architecture(KAPUTTE_GGUF_STDERR), None);
+        assert_eq!(stderr_names_an_unknown_architecture("unknown model architecture: '<script>'"), None);
+    }
+
     #[test]
     fn a_broken_file_is_not_reported_as_a_graphics_card_problem() {
         let f = StartFailure {
