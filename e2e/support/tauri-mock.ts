@@ -408,6 +408,21 @@ export function tauriMockInit(opts: TauriMockOptions) {
   }))
   const IMAGE_PART_NO_ROOM_NOTE =
     'Loaded without image input: the graphics memory has no room for the image part next to the model. A smaller context makes room.'
+  // A fresh profile has no GGUF on disk: the starter lands there only when
+  // the onboarding's download of it finishes. Since 3.0.9 the model step
+  // lists the engine's GGUFs under "Models you already have" (FEHLER-N1 #1),
+  // so a starter that was "on disk" from the first frame turned every fresh
+  // run into a returning user. Specs that describe their disk
+  // (`bundledModels`) or start past the onboarding keep the file from the
+  // start, as before.
+  // Read at the call, not at init: `seedOnboardingDone` adds its init script
+  // after this one, so the seeded settings are not there yet when it runs.
+  const onboardingDone = () => {
+    try {
+      return JSON.parse(w.localStorage.getItem('chat-settings') || 'null')?.state?.settings?.onboardingDone === true
+    } catch { return false }
+  }
+  let starterOnDisk = !!opts.bundledModels
   const loaded = { path: bundled[0].path, withPart: false, note: null as string | null }
   function loadModel(path: string) {
     const m = bundled.find((b) => b.path === path)
@@ -931,6 +946,7 @@ export function tauriMockInit(opts: TauriMockOptions) {
             ? { progress: Math.round(total * 0.4), total, speed: 1024 * 1024, filename: fn, status: 'downloading' }
             : { progress: total, total, speed: 0, filename: fn, status: 'complete' }
           if (!held) {
+            if (fn.endsWith('.gguf') && !fn.endsWith('.mmproj.gguf')) starterOnDisk = true
             // A finished image part lies next to its model from now on.
             const owner = bundled.find((b) => `${b.name}.mmproj.gguf` === fn)
             if (owner) owner.imagePart = true
@@ -987,7 +1003,7 @@ export function tauriMockInit(opts: TauriMockOptions) {
           // real Qwen2.5 starter, so specs can assert the preset cap.
           // `vision` as engine.rs answers it: the loaded model by what it was
           // started with, every other model by the part on disk.
-          models: bundled.map((b) => ({
+          models: (starterOnDisk || onboardingDone() ? bundled : []).map((b) => ({
             name: b.name,
             path: b.path,
             size: b.size,
