@@ -13,6 +13,7 @@ import {
   shortDuration,
   strengthWarning,
   tweakedModelNote,
+  buildTimeNote,
 } from '../neuron'
 import type { NeuronJob } from '../../api/neuron'
 import type { Profiles } from '../neuron'
@@ -119,5 +120,29 @@ describe('the note for a tweaked model', () => {
   })
   it('says nothing for an original model', () => {
     expect(tweakedModelNote({ tweaked: [], original: 'Qwen2.5 0.5B' })).toBeNull()
+  })
+})
+
+// I1 on the box (31.10.2026): one slider took ~25 min on Windows with the
+// CPU-only vector tool, and nothing said so before. The page now says how
+// long it will take, before the start, whenever it is more than a moment.
+describe('the time a slider takes, said before computing', () => {
+  it('says nothing when it is quick', () => {
+    expect(buildTimeNote({ lowSecs: 20, highSecs: 110, measured: false })).toBeNull()
+  })
+  it('gives the range, why, and that it can be stopped', () => {
+    const note = buildTimeNote({ lowSecs: 741, highSecs: 3023, measured: false })!
+    expect(note.title).toBe('This takes a while on this PC')
+    expect(note.text).toContain('about 12–50 min for one slider')
+    expect(note.text).toMatch(/slow on this PC/)
+    expect(note.text).toMatch(/stop it any time/)
+  })
+  it('says when the range comes from a run on this PC', () => {
+    const note = buildTimeNote({ lowSecs: 1176, highSecs: 2297, measured: true })!
+    expect(note.text).toContain('about 20–38 min for one slider')
+    expect(note.text).toMatch(/last run on this PC/)
+  })
+  it('reads across units', () => {
+    expect(buildTimeNote({ lowSecs: 1800, highSecs: 7300, measured: false })!.text).toContain('about 30 min to 2 h 2 min')
   })
 })
