@@ -15,6 +15,7 @@ import type { EngineStatus } from '../api/engine'
 import { readLoadedModels } from '../api/ollama'
 import { displayModelName, getProviderIdFromModel } from '../api/providers/model-name'
 import { isMobile } from '../lib/device-kind'
+import { creditsLeft } from '../lib/credits-left'
 import { builtinModelMatches, builtinModelNameFromPath } from '../lib/builtin-model-identity'
 import { isBuiltinEngineEntry } from '../lib/lmstudio-match'
 import { LU_ENGINE_NAME } from '../lib/engine-name'
@@ -68,7 +69,7 @@ export function currentTrayStatus(): TrayStatus {
       tier: a.tier ?? q?.tier ?? null,
       licenseActive: a.licenseActive,
       pastDue: a.pastDue,
-      credits: q ? q.remaining.credits + (q.topup?.credits ?? 0) : null,
+      credits: q ? creditsLeft(q).total : null,
     })
   }
   const { models, activeModel } = useModelStore.getState()

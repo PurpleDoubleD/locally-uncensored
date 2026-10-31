@@ -102,3 +102,23 @@ describe('no failed payment', () => {
     expect(screen.queryByTestId('past-due-notice')).toBeNull()
   })
 })
+
+describe('credits left (FEHLER-T2 #1)', () => {
+  it('shows the same "credits left" as the tray under the meter, top-up named', () => {
+    signIn({
+      licenseActive: true,
+      tier: 'hosted-pro',
+      quota: { ...walletQuota, limits: { credits: 2000 }, used: { credits_used: 1060 }, remaining: { credits: 940 }, topup: { credits: 300 } },
+      paidPlan: true,
+    })
+    render(<AccountPanel />)
+    expect(screen.getByText('1,060 / 2,000')).toBeTruthy()
+    expect(screen.getByTestId('credits-left').textContent).toBe('1,240 credits left (incl. 300 top-up)')
+  })
+
+  it('without a top-up it is the monthly rest alone', () => {
+    signIn({ licenseActive: true, tier: 'hosted', quota: { ...walletQuota, tier: 'hosted' }, paidPlan: true })
+    render(<AccountPanel />)
+    expect(screen.getByTestId('credits-left').textContent).toBe('3,800 credits left')
+  })
+})
