@@ -356,8 +356,10 @@ fn transcript_of(answer: &serde_json::Value) -> Option<String> {
 /// Speech to text through a user-configured OpenAI-compatible
 /// `/v1/audio/transcriptions` endpoint, the counterpart of
 /// `synthesize_external` for the microphone. Ollama (0.40.13+) serves it for
-/// models that take audio, such as `lfm3-audio` and `lfm3-omni` (N1). The
-/// take is the WAV `createAudioRecorder` writes; Ollama accepts WAV only.
+/// models that take audio, such as `lfm3-audio` and `lfm3-omni` (N1), and so
+/// does the LU Engine (llama-server b11960) with one of them loaded; that
+/// request carries the engine key. The take is the WAV `createAudioRecorder`
+/// writes; Ollama accepts WAV only.
 ///
 /// SSRF: the same reasoning as `synthesize_external`, the URL comes from the
 /// voice settings, never from model output.
@@ -367,8 +369,10 @@ pub async fn transcribe_external(
     content_type: String,
     url: String,
     model: String,
+    state: State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
     let parsed = external_voice_url(&url, "transcription")?;
+    let ports = super::engine_key::engine_ports(&state);
     let model = model.trim().to_string();
     if model.is_empty() {
         return Err("No speech-to-text model is set. Enter one in Settings, Voice.".to_string());
@@ -394,8 +398,9 @@ pub async fn transcribe_external(
         .timeout(std::time::Duration::from_secs(300))
         .build()
         .map_err(|e| e.to_string())?;
-    let resp = client
-        .post(parsed.as_str())
+    // The LU Engine (llama-server b11960 with LFM3 Audio or Omni) answers
+    // only with its key; any other service never sees it.
+    let resp = super::engine_key::authorize(client.post(parsed.as_str()), parsed.as_str(), &ports)
         .multipart(form)
         .send()
         .await
@@ -427,6 +432,7 @@ pub async fn synthesize_external(
     url: String,
     voice: Option<String>,
     model: Option<String>,
+    state: State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
     let text = text.trim().to_string();
     if text.is_empty() {
@@ -443,8 +449,8 @@ pub async fn synthesize_external(
 
     let body = external_tts_body(&text, model.as_deref(), voice.as_deref());
 
-    let resp = client
-        .post(parsed.as_str())
+    let ports = super::engine_key::engine_ports(&state);
+    let resp = super::engine_key::authorize(client.post(parsed.as_str()), parsed.as_str(), &ports)
         .json(&body)
         .send()
         .await

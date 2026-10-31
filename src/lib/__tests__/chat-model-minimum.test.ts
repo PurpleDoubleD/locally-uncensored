@@ -41,7 +41,8 @@ describe('chat catalog minimum', () => {
     // each as Ollama tag and as MLX NVFP4 build.
     // 40 -> 46 the same day, after E1: six LFM3 GGUF rows (1.7B Q4_K_M, QAD
     // Q4_0, Q8_0; VL Q4_K_M, Q8_0; Omni Q4_K_M).
-    expect(small.length).toBe(46)
+    // 46 -> 47: LFM3 Audio 2B GGUF, once the LU Engine heard and spoke with it.
+    expect(small.length).toBe(47)
     const picks = chatRecommendationGroups(models.map(model => [model]))
     expect(picks.flat().some(isBelowChatMinimum)).toBe(false)
     expect(picks.length).toBe(models.length - small.length)

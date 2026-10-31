@@ -38,6 +38,17 @@ export function imagePartFileName(modelFilename: string): string {
   return `${stem}.mmproj.gguf`
 }
 
+/**
+ * What the part beside the model does, in the words a tile uses. Most parts
+ * are image parts; LFM3 Audio's carries only an audio encoder (N1, the
+ * projector's head says `clip.has_audio_encoder`), and the catalog marks such
+ * an entry with the tag "Audio" and without "Vision".
+ */
+export function partInputWord(model: { tags?: string[] }): 'image input' | 'sound input' {
+  const tags = model.tags ?? []
+  return tags.includes('Audio') && !tags.includes('Vision') ? 'sound input' : 'image input'
+}
+
 /** True for the on-disk name of an image part. */
 export function isImagePartFile(filename: string): boolean {
   return /\.mmproj\.gguf$/i.test(filename)

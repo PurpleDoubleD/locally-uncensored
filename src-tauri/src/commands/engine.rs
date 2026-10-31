@@ -326,8 +326,30 @@ pub(crate) fn existing_mmproj(model_path: &str) -> Option<String> {
 /// gemma-3-4b conversion is a gemma3 by name, the app fed it the picture it
 /// had just generated, and the run ended on a red "This model can't read
 /// images" line under a picture that came out fine.
+///
+/// N1, 30.10.2026: a projector is not always an image part. llama.cpp b11960
+/// loads audio encoders through the same `--mmproj`, and the projector of
+/// LiquidAI/LFM3-Audio-2B-GGUF carries `clip.has_audio_encoder` and no vision
+/// encoder at all (Omni carries both, VL only vision). Such a model hears and
+/// does not see, and an image sent to it ends on a 501 from the engine. The
+/// projector's own head says which; a head without the flag (older and
+/// hand-made projectors, the dummies in the tests below) stays a vision part,
+/// as every projector was before audio ones existed.
 pub(crate) fn model_can_see_images(model_path: &str) -> bool {
-    existing_mmproj(model_path).is_some()
+    existing_mmproj(model_path).is_some_and(|p| projector_sees_images(&p))
+}
+
+/// `clip.has_vision_encoder` of a projector. A head without it is a vision
+/// part unless it names an audio encoder instead (LFM3 Audio writes only
+/// `clip.has_audio_encoder`); an unreadable head stays a vision part.
+pub(crate) fn projector_sees_images(projector_path: &str) -> bool {
+    use crate::commands::gguf::{read_model_head, Meta};
+    let Some(head) = read_model_head(projector_path) else { return true };
+    let flag = |key: &str| match head.keys.get(key) {
+        Some(Meta::Int(n)) => Some(*n != 0),
+        _ => None,
+    };
+    flag("clip.has_vision_encoder").unwrap_or_else(|| flag("clip.has_audio_encoder") != Some(true))
 }
 
 // ── How much of a model a card can actually hold (3.0.0 list, bugs u and a) ──
@@ -4319,6 +4341,12 @@ fn note_image_part(state: &AppState, answer: &mut serde_json::Value, note: Optio
 }
 
 /// The image part a finished argv passes along, when it passes one.
+/// Whether a process started with these arguments can see a picture: it got
+/// a part, and that part is an image part (N1: LFM3 Audio's part only hears).
+pub(crate) fn started_seeing(args: &[String]) -> bool {
+    image_part_in(args).is_some_and(projector_sees_images)
+}
+
 pub(crate) fn image_part_in(args: &[String]) -> Option<&str> {
     let at = args.iter().position(|a| a == "--mmproj")?;
     args.get(at + 1).map(String::as_str)
@@ -4903,7 +4931,7 @@ fn list_bundled_models_blocking(
         let guard = state.bundled_engine.lock().unwrap();
         (
             guard.as_ref().map(|e| e.model_path.clone()),
-            guard.as_ref().is_some_and(|e| image_part_in(&e.args).is_some()),
+            guard.as_ref().is_some_and(|e| started_seeing(&e.args)),
         )
     };
     let dirs = bundled_scan_dirs(&dir, extra_dirs);
@@ -6701,6 +6729,60 @@ mod tests {
             mmproj_sibling_path("C:\\Models\\a.Gguf").to_string_lossy().replace('\\', "/").rsplit('/').next(),
             Some("a.mmproj.gguf")
         );
+    }
+
+    /// A GGUF head with nothing but these bool keys, as a projector writes them.
+    fn projector_head(flags: &[(&str, bool)]) -> Vec<u8> {
+        let mut b = Vec::new();
+        b.extend_from_slice(b"GGUF");
+        b.extend_from_slice(&3u32.to_le_bytes());
+        b.extend_from_slice(&0u64.to_le_bytes());
+        b.extend_from_slice(&(flags.len() as u64).to_le_bytes());
+        for (key, on) in flags {
+            b.extend_from_slice(&(key.len() as u64).to_le_bytes());
+            b.extend_from_slice(key.as_bytes());
+            b.extend_from_slice(&7u32.to_le_bytes());
+            b.push(u8::from(*on));
+        }
+        b
+    }
+
+    #[test]
+    fn a_loaded_audio_model_does_not_see_either() {
+        // Measured in the Mac app: LFM3-Audio loaded in the LU Engine was
+        // listed with vision=true, because the loaded model answered with
+        // "started with --mmproj".
+        let dir = tempfile::tempdir().unwrap();
+        let audio = dir.path().join("a.mmproj.gguf");
+        std::fs::write(&audio, projector_head(&[("clip.has_audio_encoder", true)])).unwrap();
+        let vision = dir.path().join("v.mmproj.gguf");
+        std::fs::write(&vision, projector_head(&[("clip.has_vision_encoder", true)])).unwrap();
+        let args = |p: &std::path::Path| vec!["-m".to_string(), "/m.gguf".into(), "--mmproj".into(), p.to_string_lossy().to_string()];
+        assert!(!started_seeing(&args(&audio)));
+        assert!(started_seeing(&args(&vision)));
+        assert!(!started_seeing(&["-m".to_string(), "/m.gguf".into()]));
+    }
+
+    #[test]
+    fn an_audio_projector_hears_and_does_not_see() {
+        // The flags of the three LFM3 projectors, read from the files on
+        // Hugging Face (LiquidAI/LFM3-{Audio,Omni,VL}-2B-GGUF, Q8_0) on the Mac.
+        let dir = tempfile::tempdir().unwrap();
+        for (name, flags, sees) in [
+            ("LFM3-Audio-2B-Q4_K_M", vec![("clip.has_audio_encoder", true)], false),
+            ("LFM3-Omni-2B-Q4_K_M", vec![("clip.has_vision_encoder", true), ("clip.has_audio_encoder", true)], true),
+            ("LFM3-VL-2B-Q4_K_M", vec![("clip.has_vision_encoder", true)], true),
+            ("Older-Vision-Q4_K_M", vec![], true),
+            ("Off-Q4_K_M", vec![("clip.has_vision_encoder", false), ("clip.has_audio_encoder", true)], false),
+        ] {
+            let model = dir.path().join(format!("{name}.gguf"));
+            std::fs::write(&model, b"weights").unwrap();
+            std::fs::write(dir.path().join(format!("{name}.mmproj.gguf")), projector_head(&flags)).unwrap();
+            let path = model.to_string_lossy().to_string();
+            assert_eq!(model_can_see_images(&path), sees, "{name}");
+            // The engine still starts with the projector: it is the model's ear.
+            assert!(existing_mmproj(&path).is_some(), "{name}");
+        }
     }
 
     #[test]

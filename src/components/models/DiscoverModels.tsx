@@ -24,7 +24,8 @@ import { getTotalRamGb } from '../../lib/hardware'
 import { vramFit } from '../../lib/vram-fit'
 import { chatModelBudgetGb, sharedMemoryWording } from '../../lib/shared-memory-wording'
 import { useGraphicsMemoryGb } from '../../hooks/useGraphicsMemory'
-import { openExternal, isMacOS } from '../../api/backend'
+import { openExternal, isMacOS, backendCall } from '../../api/backend'
+import { isLfm3Model, lmStudioRuntimeNote } from '../../lib/lmstudio-runtime'
 import { bundleCloudTask } from '../../lib/cloud-offer'
 import { forThisPlatform } from '../../lib/mlx-only-builds'
 import { useModels } from '../../hooks/useModels'
@@ -44,6 +45,7 @@ import { chosenTextDownloadTarget, ollamaOnlyDownloadBlock, resolveTextDownloadT
 import { useUIStore } from '../../stores/uiStore'
 import { mayBeStartHerePick } from '../../lib/start-here-picks'
 import { modelInfoTitle } from '../../lib/model-info-title'
+import { partInputWord } from '../../lib/image-part'
 import { hfUrlToOllamaRef, hfUrlToLmStudioSubdir, parseHfUrl, isShardedOrIncompatibleGguf } from '../../lib/hf-to-provider'
 import { HINWEIS_TEXT } from '../../lib/hinweis'
 import { Modal } from '../ui/Modal'
@@ -770,6 +772,15 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
     if (!model.downloadUrl || !model.filename) return
     setInstallNotice(null)
 
+    // N1: an LFM3 GGUF for LM Studio needs its runtime 2.65.1+. Said before
+    // the download, which still runs: the file is right, the runtime is old.
+    if (isActiveLmStudio && isLfm3Model(model.filename)) {
+      void backendCall<string | null>('lmstudio_gguf_runtime').catch(() => null).then((runtime) => {
+        const note = lmStudioRuntimeNote(model.filename!, runtime)
+        if (note) setInstallNotice(note)
+      })
+    }
+
     // Resolve the REAL file(s) on HuggingFace before downloading. The curated /
     // search-derived (url, filename) is only a *guess* — the repo may host the
     // quant in a subfolder, split it into multiple parts, or not have that
@@ -897,7 +908,7 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
         ])
         if (both && !both.fits && alone?.fits) {
           withPart = false
-          setInstallNotice(`${model.name} is downloading without image input: the drive has no room for the extra ${gbOf(part.sizeBytes)} GB. You can add it later under Installed.`)
+          setInstallNotice(`${model.name} is downloading without ${partInputWord(model)}: the drive has no room for the extra ${gbOf(part.sizeBytes)} GB. You can add it later under Installed.`)
         }
       }
       const plan = planModelDownload(model, realUrl, realName, realBytes, single?.sha256, { part, withImagePart: withPart })

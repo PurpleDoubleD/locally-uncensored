@@ -316,7 +316,8 @@ describe('read-aloud on a phone', () => {
     const speak = hookSource.slice(hookSource.indexOf('const speakInternal = useCallback('))
     expect(speak).toMatch(/async \(text: string, streaming: boolean\) => \{\s*\/\/[^\n]*\n\s*\/\/[^\n]*\n\s*if \(!hasLocalVoice\(\)\) return speakOnPhone\(text, streaming, cloudVoice\);\s*if \(!store\.ttsEnabled\) return;/)
     // The desktop road still knows its three engines.
-    expect(speak).toContain('synthesizeExternal(text, store.externalTtsUrl.trim()')
+    // N1: the external road resolves its address first (External HTTP or LU Engine).
+    expect(speak).toContain('synthesizeExternal(text, ttsExt!.url')
     expect(speak).toContain('piperReady = await recheckTtsAvailable(store.piperVoice);')
     expect(speak).toContain('"Piper is installed but not responding, so read-aloud used the system voice instead."')
   })

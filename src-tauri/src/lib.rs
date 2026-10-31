@@ -732,6 +732,8 @@ pub fn run() {
             #[cfg(desktop)]
             commands::install::lmstudio_load_model,
             #[cfg(desktop)]
+            commands::install::lmstudio_gguf_runtime,
+            #[cfg(desktop)]
             commands::install::lmstudio_model_context,
             #[cfg(desktop)]
             commands::install::lmstudio_unload_model,

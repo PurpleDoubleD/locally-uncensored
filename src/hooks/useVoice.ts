@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useSyncExternalStore } from "react";
 import { useVoiceStore } from "../stores/voiceStore";
 import { useSettingsStore } from "../stores/settingsStore";
 import { useCloudAuthStore, deriveCloudAvailable } from "../stores/cloudAuthStore";
+import { useProviderStore } from "../stores/providerStore";
+import { sttRoute, ttsRoute, speechRefusalText, type SpeechRoute } from "../lib/speech-route";
 import {
   recheckWhisperAvailable,
   recheckTtsAvailable,
@@ -116,15 +118,24 @@ export function sttErrorMessage(err: unknown): string {
  * nothing to transcribe with, so it says so instead of calling a local
  * Whisper that does not exist there.
  */
+/** The managed LU Engine's `…/v1` base, or null when the slot is not the LU Engine. */
+function engineBaseUrl(): string | null {
+  const slot = useProviderStore.getState().providers.openai;
+  return slot?.enabled && slot.managed === true ? slot.baseUrl : null;
+}
+
 /**
- * The external speech-to-text endpoint, when it is chosen and complete (N1).
- * Half filled in is not chosen: dictation stays on faster-whisper then, as it
- * was before the switch existed.
+ * Where dictation goes when it does not use faster-whisper (N1): an external
+ * OpenAI-compatible service or the LU Engine. Half filled in is not chosen:
+ * dictation stays on faster-whisper then, as it was before the switch existed.
  */
-export function externalStt(s: { sttMode: string; externalSttUrl: string; externalSttModel: string }): { url: string; model: string } | null {
-  const url = s.externalSttUrl.trim();
-  const model = s.externalSttModel.trim();
-  return s.sttMode === "external" && url && model ? { url, model } : null;
+export function externalStt(s: Parameters<typeof sttRoute>[0]): SpeechRoute | null {
+  return sttRoute(s, engineBaseUrl());
+}
+
+/** Where read-aloud goes when it does not use Piper (N1), or null. */
+export function externalTts(s: Parameters<typeof ttsRoute>[0]): SpeechRoute | null {
+  return ttsRoute(s, engineBaseUrl());
 }
 
 export async function transcribeTake(blob: Blob, cloudVoice: boolean): Promise<string> {
@@ -154,7 +165,10 @@ export async function transcribeTake(blob: Blob, cloudVoice: boolean): Promise<s
     const ext = externalStt(store);
     const transcript = cloudVoice
       ? await transcribeAudioCloud(blob)
-      : ext ? await transcribeExternal(blob, ext.url, ext.model) : await transcribeAudio(blob);
+      : ext ? await transcribeExternal(blob, ext.url, ext.model).catch((err: unknown) => {
+          const refusal = speechRefusalText(err instanceof Error ? err.message : String(err), ext);
+          throw refusal ? refusal : err;
+        }) : await transcribeAudio(blob);
     discardFailedTake();
     store.setTranscript(transcript);
     // A silent take is not an error, but it must not be silence in the UI
@@ -661,7 +675,7 @@ export function useVoice() {
 
   // External HTTP TTS engine configured + selected (#58). Lets the read-aloud
   // button light up even on a machine without Piper or browser voices.
-  const ttsExternalReady = store.ttsMode === "external" && !!store.externalTtsUrl.trim();
+  const ttsExternalReady = externalTts(store) !== null;
 
   // Re-probe Whisper on demand (mic mount / after install) and sync the store.
   const recheckStt = useCallback(async (): Promise<boolean> => {
@@ -841,7 +855,8 @@ export function useVoice() {
       // An external HTTP engine (#58) needs a configured URL; Piper needs to be
       // installed; the browser path needs SpeechSynthesis; cloud mode brings
       // its own hosted engine. Bail only if none of them can speak.
-      const externalReady = store.ttsMode === "external" && !!store.externalTtsUrl.trim();
+      const ttsExt = externalTts(store);
+      const externalReady = ttsExt !== null;
       if (!cloudVoice && !externalReady && !store.ttsAvailable && !ttsSupported) return;
 
       const gen = ++speakGen;
@@ -883,7 +898,7 @@ export function useVoice() {
         // External HTTP TTS engine takes precedence when selected + configured.
         if (externalReady) {
           try {
-            const url = await synthesizeExternal(text, store.externalTtsUrl.trim(), store.externalTtsVoice || undefined, store.externalTtsModel || undefined);
+            const url = await synthesizeExternal(text, ttsExt!.url, ttsExt!.voice, ttsExt!.model || undefined);
             if (stopped()) return;
             await playNeuralAudio(url);
             store.setTtsFallbackReason(null);
@@ -894,7 +909,8 @@ export function useVoice() {
             // Jaeger B, B11: the same silent switch as Piper had (#77). Who
             // set up an own voice heard another one and was told nothing.
             // The reason is shown at the Read aloud button and in Settings.
-            store.setTtsFallbackReason(externalTtsFallbackReason(err, ttsSupported));
+            const refusal = speechRefusalText(String(err instanceof Error ? err.message : err), ttsExt);
+            store.setTtsFallbackReason(refusal ?? externalTtsFallbackReason(err, ttsSupported));
           }
         } else {
           // Local neural (Piper). Trust the cached availability flag, but if it
@@ -903,7 +919,7 @@ export function useVoice() {
           // permanently silence Piper (#77). A positive re-probe is
           // written back to the store so later reads skip straight to Piper.
           let piperReady = store.ttsAvailable;
-          if (!piperReady && lazyTtsReprobes < MAX_LAZY_TTS_REPROBES && store.ttsMode !== "external") {
+          if (!piperReady && lazyTtsReprobes < MAX_LAZY_TTS_REPROBES && store.ttsMode === "piper") {
             lazyTtsReprobes++;
             piperReady = await recheckTtsAvailable(store.piperVoice);
             if (stopped()) return;
@@ -926,7 +942,7 @@ export function useVoice() {
                 `Piper failed to speak (${err instanceof Error ? err.message : String(err)}). Read-aloud used the system voice instead.`,
               );
             }
-          } else if (store.ttsMode !== "external") {
+          } else if (store.ttsMode === "piper") {
             // Say which of the three things is actually missing. The old text
             // asserted "installed but not responding" for all of them, so a
             // user who had never set Piper up was sent looking for a fault

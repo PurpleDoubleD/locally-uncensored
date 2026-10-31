@@ -26,7 +26,10 @@ describe('the image parts of the chat catalog', () => {
     expect(gguf.length).toBeGreaterThan(100)
     for (const m of gguf) {
       const seesByTag = m.tags.includes('Vision')
-      expect(seesByTag, `${m.name}: the Vision tag and the image part must agree`).toBe(!!m.mmprojUrl)
+      // N1: LFM3 Audio's part is a sound part (an audio encoder through the
+      // same --mmproj). It carries the tag "Audio" and no "Vision".
+      const hearsOnly = m.tags.includes('Audio') && !seesByTag
+      expect(seesByTag || hearsOnly, `${m.name}: the Vision tag and the image part must agree`).toBe(!!m.mmprojUrl)
     }
   })
 

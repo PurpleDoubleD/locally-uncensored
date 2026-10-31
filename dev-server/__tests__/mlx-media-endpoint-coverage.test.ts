@@ -193,6 +193,9 @@ describe('endpointMap covers every backendCall/invokeMedia site the frontend can
     // has no dev route (it is in the list below), so there is nothing a dev
     // route for its cancel could end.
     'lmstudio_cancel_load',
+    // N1: the LM Studio runtime check before an LFM3 load (api/lmstudio.ts),
+    // inside the same load that has no dev route.
+    'lmstudio_gguf_runtime',
     // The folder of the voice engine and LU's own Python (Discord D2,
     // components/settings/RuntimeFolderSetting.tsx). The row only renders
     // behind isTauri(): the browser build has no voice engine and no Python
