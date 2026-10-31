@@ -39,7 +39,7 @@ export interface NeuronSae {
 }
 
 export interface NeuronInfo {
-  facts: { arch: string; nLayer: number; nEmbd: number; template: string; name: string }
+  facts: { arch: string; nLayer: number; nEmbd: number; template: string; name: string; tweaked: string[]; original: string | null }
   modelKey: string
   generator: boolean
   band: [number, number]

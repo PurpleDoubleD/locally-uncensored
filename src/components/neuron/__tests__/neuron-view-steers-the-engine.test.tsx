@@ -43,7 +43,9 @@ vi.mock('../../../api/neuron', () => ({
   neuronBuildOwn: vi.fn(), neuronCancel: vi.fn(), neuronCompare: vi.fn(), neuronDelete: vi.fn(), neuronDismiss: vi.fn(),
   neuronFeatureAdd: vi.fn(), neuronSaeDownload: vi.fn(), neuronSaeSearch: vi.fn(),
 }))
+const addGgufFile = vi.hoisted(() => vi.fn(async (): Promise<string | null> => null))
 vi.mock('../../../api/engine', () => ({
+  addGgufFile: () => addGgufFile(),
   listBundledModels: async () => [...disk.models],
   isEmbeddingGgufName: (name: string) => /embed/.test(name.toLowerCase()),
   bundledEngineStatus: async () => ({ running: true, healthy: true, port: 8127, model_path: '/models/qwen.gguf', ctx: 8192 }),
@@ -62,9 +64,12 @@ import { useModelStore } from '../../../stores/modelStore'
 import { useNeuronStore } from '../../../stores/neuronStore'
 import { useSettingsStore } from '../../../stores/settingsStore'
 import { useChatStore } from '../../../stores/chatStore'
+import { useUIStore } from '../../../stores/uiStore'
+import { HOWTO } from '../../../lib/howto'
 import type { Persona } from '../../../types/settings'
 
 beforeEach(() => {
+  addGgufFile.mockClear()
   apply.mockClear()
   buildPreset.mockClear()
   vectors.length = 0
@@ -161,9 +166,65 @@ describe('Neuron tweaker view', () => {
     disk.models = [NOMIC]
     useModelStore.setState({ activeModel: 'ollama::llama3:8b' })
     render(createElement(NeuronView))
-    expect((await screen.findByTestId('neuron-no-chat-model')).textContent).toMatch(/no chat model/)
-    expect(screen.getByText(/Ollama takes no control vectors/)).toBeTruthy()
+    expect((await screen.findByTestId('neuron-empty')).textContent).toMatch(/No chat model for the LU Engine yet/)
+    expect(screen.getByTestId('neuron-no-chat-model').textContent).toMatch(/embedding model/)
+    // Why the Ollama model the user has is not offered, in one sentence.
+    expect(screen.getByTestId('neuron-other-apps').textContent).toMatch(/Ollama or LM Studio .* take no control vectors/)
     expect(screen.queryByTestId('neuron-model')).toBeNull()
+  })
+
+  // David, 30.10.2026: the line sat at the top, "hingeklatscht". It is one
+  // state in the middle of the panel, both ways, with its text centred.
+  it('stands in the middle of the panel when there is no model', async () => {
+    disk.models = []
+    render(createElement(NeuronView))
+    const box = await screen.findByTestId('neuron-empty')
+    const panel = screen.getByTestId('neuron-view')
+    expect(panel.className).toMatch(/\bh-full\b/)
+    expect(panel.className).toMatch(/\bflex\b/)
+    expect(panel.className).toMatch(/\bitems-center\b/)
+    expect(panel.className).toMatch(/\bjustify-center\b/)
+    expect(box.className).toMatch(/\btext-center\b/)
+    expect(box.className).toMatch(/\bitems-center\b/)
+  })
+
+  it('its download button opens Discover on the chat lane with the LU Engine as target', async () => {
+    disk.models = []
+    useModelStore.setState({ activeModel: 'llama3:8b', categoryFilter: 'image' })
+    useUIStore.setState({ currentView: 'neuron', discoverTarget: null })
+    render(createElement(NeuronView))
+    fireEvent.click(await screen.findByTestId('neuron-get-model'))
+    expect(useUIStore.getState().currentView).toBe('models')
+    expect(useUIStore.getState().discoverTarget).toBe('builtin')
+    expect(useModelStore.getState().categoryFilter).toBe('text')
+    // The chat model is not touched.
+    expect(useModelStore.getState().activeModel).toBe('llama3:8b')
+  })
+
+  // David, 30.10.2026: how to bring a GGUF file in, in three short steps,
+  // with the button that opens exactly that dialog. The lines are the
+  // how-to's (lib/howto.ts 'gguf-file'), so Help says the same.
+  it('says in three steps how a GGUF file becomes an LU Engine model, next to its button', async () => {
+    disk.models = []
+    render(createElement(NeuronView))
+    const box = await screen.findByTestId('neuron-gguf-steps')
+    const lines = [...box.querySelectorAll('ol > li')].map((li) => li.textContent)
+    expect(lines).toEqual(HOWTO['gguf-file'].films[0].steps.map((st) => st.text))
+    expect(lines[0]).toMatch(/GGUF file/)
+    const button = screen.getByTestId('neuron-add-gguf')
+    expect(box.contains(button)).toBe(true)
+    expect(button.textContent).toMatch(/GGUF file/)
+    fireEvent.click(button)
+    await waitFor(() => expect(addGgufFile).toHaveBeenCalledTimes(1))
+  })
+
+  it('its GGUF file button adds a file and the tweaker opens on it', async () => {
+    disk.models = []
+    addGgufFile.mockImplementationOnce(async () => { disk.models = [QWEN]; return QWEN.name })
+    render(createElement(NeuronView))
+    fireEvent.click(await screen.findByTestId('neuron-add-gguf'))
+    expect(await screen.findByTestId('neuron-model')).toBeTruthy()
+    expect(addGgufFile).toHaveBeenCalledTimes(1)
   })
 
   it('says plainly when the chat model runs in Ollama', async () => {

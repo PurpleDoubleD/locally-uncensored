@@ -390,6 +390,10 @@ export interface ModelTileProps {
   isInstalled: (m: DiscoverModel) => boolean
   dlState: (m: DiscoverModel) => DownloadProgress | null
   onDownload: (m: DiscoverModel) => void
+  /** Where Get puts THIS row ("LU Engine", "Ollama", …). Shown on the
+   *  button, so a download never lands somewhere the user did not see (P11).
+   *  Absent: the plain Get. */
+  getTarget?: (m: DiscoverModel) => string
   onInfo: (m: DiscoverModel) => void
   onOpenUrl: (url: string) => void
   /** Load an already installed model into the chat. GH #118: without this the
@@ -416,7 +420,7 @@ export interface ModelTileProps {
  *  open state with its two ways out. The two faces of the tile (this file for
  *  the Mac, skin/ClassicTiles.tsx for Windows and Linux) both stand on it, so
  *  the rules exist once. */
-export function useModelTile({ variants, vramGb, isInstalled, dlState, onUse, canUse, isUsing, withImagePart }: ModelTileProps) {
+export function useModelTile({ variants, vramGb, isInstalled, dlState, onUse, canUse, isUsing, withImagePart, getTarget }: ModelTileProps) {
   const [pickerOpen, setPickerOpen] = useState(false)
   const [chosen, setChosen] = useState<string | null>(null)
   const pickerRef = useRef<HTMLDivElement>(null)
@@ -464,18 +468,20 @@ export function useModelTile({ variants, vramGb, isInstalled, dlState, onUse, ca
 
   // What the Get button says it fetches. With an image part that comes along
   // the two halves are named, so the sum on the tile is not a surprise.
-  const downloadTitle = !selSize
+  const target = getTarget?.(sel) ?? null
+  const downloadWhat = !selSize
     ? 'Download'
     : partComes
       ? `Download ${selSize} GB (model ${sel.sizeGB} GB, image input ${gbOf(sel.mmprojBytes)} GB)`
       : `Download ${selSize} GB`
+  const downloadTitle = target ? `${downloadWhat} to ${target}` : downloadWhat
 
-  return { pickerOpen, setPickerOpen, setChosen, pickerRef, variantListRef, variantList, sel, groupTitle, dl, downloading, fit, action, sizeOf, selSize, downloadTitle }
+  return { target, pickerOpen, setPickerOpen, setChosen, pickerRef, variantListRef, variantList, sel, groupTitle, dl, downloading, fit, action, sizeOf, selSize, downloadTitle }
 }
 
 export function ModelTile(props: ModelTileProps) {
   const { variants, vramGb, sharedMemory = false, isInstalled, dlState, onDownload, onInfo, onOpenUrl, onUse, highlight } = props
-  const { pickerOpen, setPickerOpen, setChosen, pickerRef, variantListRef, variantList, sel, groupTitle, dl, downloading, fit, action, sizeOf, selSize, downloadTitle } = useModelTile(props)
+  const { pickerOpen, setPickerOpen, setChosen, pickerRef, variantListRef, variantList, sel, groupTitle, dl, downloading, fit, action, sizeOf, selSize, downloadTitle, target } = useModelTile(props)
 
   // A model past what this machine can give it keeps its Get, without the
   // tint that recommends it, and its name steps back one tone.
@@ -634,7 +640,7 @@ export function ModelTile(props: ModelTileProps) {
               className={fitsHere ? TILE_ACTION : TILE_ACTION_QUIET}
               title={downloadTitle}
             >
-              <Download size={ICON_SM} /> Get
+              <Download size={ICON_SM} /> Get{target && <span className="opacity-70">→ {target}</span>}
             </button>
           )}
         </div>
