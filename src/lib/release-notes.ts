@@ -136,7 +136,7 @@ export const RELEASE_NOTES: ReleaseNote[] = [
   // oder auf einer Karte lief, sagt die Zeile selbst knapp.
   {
     version: '3.0.9',
-    headline: 'Group chats send every speaker the context you picked, Neurons puts sliders on a local model, and Animate and Create take end images and reference pictures.',
+    headline: 'Group chats send every speaker the context you picked, Neurons puts sliders on a local model, Animate takes an end image, and Create takes reference pictures.',
     lines: [
       {
         title: 'Group chat: every speaker gets the context you picked.',
@@ -144,7 +144,7 @@ export const RELEASE_NOTES: ReleaseNote[] = [
       },
       {
         title: 'Neurons: sliders that steer a local LU Engine model.',
-        detail: 'Ready made sliders such as Serious to Cheerful or Fewer refusals, sliders from your own examples, and a before and after on the same question. LU measures how far each slider can push on your model; on a Qwen3.5 9B that took about five minutes on a CPU. Ollama and LM Studio cannot take these sliders.',
+        detail: 'Ready made sliders such as Serious to Cheerful or Fewer refusals, sliders from your own examples, and a before and after on the same question. LU measures how far each slider can push on your model; on a Qwen3.5 9B that took 36 seconds on a Mac and about five minutes on a CPU. Ollama and LM Studio cannot take these sliders.',
       },
       {
         title: 'End images and reference pictures in Animate and Create.',
@@ -152,11 +152,22 @@ export const RELEASE_NOTES: ReleaseNote[] = [
       },
       {
         title: 'A compaction is one line, and what came before stays readable.',
-        detail: 'The chat starts at the newest compaction, and marks on the left open each earlier stretch, read only. A new setting, off by default, brings back up to four older messages close in meaning to the new one.',
+        detail: 'The chat starts at the newest compaction, and marks on the left open each earlier stretch, read only. A new setting, off by default, brings back up to four older messages close in meaning to the new one after a compaction, in the plain chat.',
       },
       {
         title: 'Liquid LFM3 and a newer llama.cpp in the LU Engine.',
-        detail: 'LFM3 text, vision, omni and audio models run in the LU Engine, which now uses llama.cpp b11960. The onboarding lists the LU Engine models you already have, and Train new on Windows and Linux says it trains Z-Image (GitHub #210).',
+        detail: 'Liquid\'s LFM3 text, vision, omni and audio models run in the LU Engine, which now uses llama.cpp b11960, and through Ollama 0.40.13 or newer. The onboarding lists the LU Engine models you already have.',
+      },
+    ],
+    details: [
+      {
+        title: 'Fixes',
+        items: [
+          {
+            title: 'Train new on Windows and Linux says it trains Z-Image.',
+            detail: 'The local trainer only trains on Z-Image Base, so Train new no longer offers a list of image models there (GitHub #210).',
+          },
+        ],
       },
     ],
   },
