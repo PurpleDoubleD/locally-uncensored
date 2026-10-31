@@ -94,8 +94,8 @@ test('E1: LU patch 0002 lets the vector tool build with GGML_BACKEND_DL', () => 
   const patch = readFileSync(new URL('./llama-patches/0002-cvector-generator-backend-dl.patch', import.meta.url), 'utf8');
   const touched = [...patch.matchAll(/^\+\+\+ b\/(.+)$/gm)].map((m) => m[1]).sort();
   assert.deepEqual(touched, ['tools/CMakeLists.txt', 'tools/cvector-generator/cvector-generator.cpp', 'tools/cvector-generator/mean.hpp', 'tools/cvector-generator/pca.hpp']);
-  assert.match(patch, /^\+    if \(GGML_CPU\)$/m);
-  assert.match(patch, /^\+        add_subdirectory\(cvector-generator\)$/m);
+  assert.match(patch, /^\+ {4}if \(GGML_CPU\)$/m);
+  assert.match(patch, /^\+ {8}add_subdirectory\(cvector-generator\)$/m);
   // Every call into ggml-cpu goes; the registry replaces it.
   for (const gone of ['ggml_backend_cpu_init', 'ggml_backend_cpu_set_n_threads', 'ggml_get_f32_nd', 'ggml_set_f32_nd', 'ggml_get_f32_1d', 'ggml_set_f32_1d']) {
     assert.doesNotMatch(patch, new RegExp(`^\\+.*\\b${gone}\\(`, 'm'), `${gone} still called`);
