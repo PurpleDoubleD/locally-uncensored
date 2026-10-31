@@ -484,22 +484,42 @@ fn free_port() -> Result<u16, String> {
 
 /// One answer from an engine on `port`, deterministic: temperature 0 and a
 /// fixed seed.
-pub(crate) fn ask(port: u16, question: &str, seed: u64, max_tokens: u32) -> Result<String, String> {
-    let client = reqwest::blocking::Client::builder().timeout(std::time::Duration::from_secs(300)).build().map_err(|e| crate::os_error::english(&e))?;
-    let body = json!({
+/// The request of a check. Thinking is off: a thinking model (Qwen3.5,
+/// Qwen3) spends a short check on reasoning and leaves no answer to judge
+/// (P11 FEHLER 10). Templates without the switch ignore it.
+pub(crate) fn check_request(question: &str, seed: u64, max_tokens: u32) -> Value {
+    json!({
         "messages": [{ "role": "user", "content": question }],
         "temperature": 0,
         "seed": seed,
         "max_tokens": max_tokens,
         "stream": false,
-    });
+        "chat_template_kwargs": { "enable_thinking": false },
+    })
+}
+
+/// The answer of a check: the content, or the reasoning when a model that
+/// thinks anyway left the content empty.
+pub(crate) fn answer_text(v: &Value) -> String {
+    let msg = &v["choices"][0]["message"];
+    let content = msg["content"].as_str().unwrap_or("");
+    if content.trim().is_empty() {
+        msg["reasoning_content"].as_str().unwrap_or("").to_string()
+    } else {
+        content.to_string()
+    }
+}
+
+pub(crate) fn ask(port: u16, question: &str, seed: u64, max_tokens: u32) -> Result<String, String> {
+    let client = reqwest::blocking::Client::builder().timeout(std::time::Duration::from_secs(300)).build().map_err(|e| crate::os_error::english(&e))?;
+    let body = check_request(question, seed, max_tokens);
     let req = client.post(format!("http://127.0.0.1:{port}/v1/chat/completions")).json(&body);
     let resp = crate::commands::engine_key::authorize_blocking(req).send().map_err(|e| format!("The model did not answer: {}", crate::os_error::english(&e)))?;
     if !resp.status().is_success() {
         return Err(format!("The model answered with HTTP {}.", resp.status()));
     }
     let v: Value = resp.json().map_err(|e| crate::os_error::english(&e))?;
-    Ok(v["choices"][0]["message"]["content"].as_str().unwrap_or("").to_string())
+    Ok(answer_text(&v))
 }
 
 /// The measured full strength of `cv` (calib.rs), probing a private engine
@@ -532,7 +552,7 @@ fn calibrate(app: &tauri::AppHandle, model_path: &str, facts: &model::ModelFacts
         }
         Ok(true)
     };
-    let unit = calib::find_unit(start, &mut probe)?;
+    let unit = calib::find_unit(start, &mut probe).map_err(|e| format!("{e} {ORIGINAL_ADVICE}"))?;
     let _ = std::fs::remove_file(&probe_file);
     log(format!("  full strength = {unit:.3}"));
     Ok(unit)
@@ -944,6 +964,20 @@ mod tests {
         assert!(so.contains("libllama-common.so"), "{so}");
         let frame = super::tool_failure("2 libggml-base.so 0x00007f0000001234 ggml_abort + 160 (no such frame info)");
         assert!(frame.contains("app log"), "{frame}");
+    }
+
+    /// P11 FEHLER 10, second half: Qwen3.5 thinks first, so a 60-token check
+    /// answer was all reasoning and `content` empty, and every strength
+    /// counted as broken ("Even a small push breaks this model's answers").
+    #[test]
+    fn a_check_asks_without_thinking_and_reads_the_reasoning_when_content_is_empty() {
+        let body = super::check_request("Hi?", 42, 60);
+        assert_eq!(body["chat_template_kwargs"]["enable_thinking"], serde_json::json!(false));
+        assert_eq!(body["max_tokens"], serde_json::json!(60));
+        let thinking = serde_json::json!({ "choices": [{ "message": { "content": "", "reasoning_content": "The sky is blue because of Rayleigh scattering." } }] });
+        assert_eq!(super::answer_text(&thinking), "The sky is blue because of Rayleigh scattering.");
+        let plain = serde_json::json!({ "choices": [{ "message": { "content": "Blue.", "reasoning_content": "hm" } }] });
+        assert_eq!(super::answer_text(&plain), "Blue.");
     }
 
     /// P11 FEHLER 10: a model the patched generator cannot read is named as
