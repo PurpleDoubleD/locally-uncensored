@@ -172,6 +172,9 @@ async def main() -> int:
     p.add_argument("--llm-extra", default="{}")
     p.add_argument("--wav", action="append", default=[])
     p.add_argument("--barge-in")
+    # Further session fields, e.g. '{"stt": {...}, "tts": {...}}' to hear and
+    # speak through LFM3 Audio in Ollama or the LU Engine (N1).
+    p.add_argument("--session-extra", default="{}")
     args = p.parse_args()
 
     base = "http://127.0.0.1:%d" % args.port
@@ -180,6 +183,7 @@ async def main() -> int:
         "llm": {"base_url": args.llm_base_url, "model": args.llm_model, "extra": json.loads(args.llm_extra)},
         "system_prompt": SYSTEM_PROMPT,
         "tools": TOOLS,
+        **json.loads(args.session_extra),
     }
     async with httpx.AsyncClient() as http:
         for _ in range(600):
@@ -230,6 +234,10 @@ async def main() -> int:
 
         print("\ntool calls relayed to client: %d, settled: %d" % (c.tool_calls, c.tool_results_seen))
         print("audio received: %.1f s" % (c.audio_bytes / 2 / 24000))
+        heard = [d.get("text", "") for _, e, d in c.events if e == "user-transcription" and d.get("final", True)]
+        said = "".join(d.get("text", "") for _, e, d in c.events if e == "bot-llm-text")
+        print("heard: %s" % json.dumps(heard))
+        print("said:  %s" % json.dumps(said[:400]))
         errors = [d for _, e, d in c.events if e == "error"]
         if errors:
             print("RTVI errors: %d" % len(errors))
