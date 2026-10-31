@@ -5,12 +5,12 @@
 // rows that read the same way everywhere (both ends on one line, the slider
 // under them across the whole card).
 
-import { Check, Loader2, Trash2 } from 'lucide-react'
+import { Check, Clock, Loader2, Trash2 } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { Hinweis } from '../ui/Hinweis'
 import { HINWEIS_TEXT } from '../../lib/hinweis'
 import { ICON_SM } from '../ui/icon-size'
-import { jobProgressText, jobShare } from '../../lib/neuron'
+import { jobProgressText, jobShare, shortDuration } from '../../lib/neuron'
 import type { NeuronJob } from '../../api/neuron'
 
 /** One step of the page: number, title, one line on what it is for, then
@@ -61,7 +61,12 @@ export interface SliderRowProps {
   onChange: (v: number) => void
   onCompute?: () => void
   onDelete?: () => void
+  /** The line next to "Prepare": how long it takes, when that is said above. */
+  prepareHint?: string
 }
+
+/** Next to "Prepare" when nothing above says how long it takes. */
+export const PREPARE_HINT = 'Once per model, seconds to a few minutes.'
 
 export function signedValue(v: number): string {
   if (v === 0) return '0'
@@ -71,7 +76,7 @@ export function signedValue(v: number): string {
 /** A slider as one card row: both ends and the value on one line, the
  *  slider under it across the whole row. Not computed yet: the same line,
  *  and in place of the slider the button that prepares it. */
-export function SliderRow({ id, left, right, value, computed, disabled, tag, onChange, onCompute, onDelete }: SliderRowProps) {
+export function SliderRow({ id, left, right, value, computed, disabled, tag, onChange, onCompute, onDelete, prepareHint = PREPARE_HINT }: SliderRowProps) {
   const on = computed && value !== 0
   return (
     <div
@@ -117,7 +122,7 @@ export function SliderRow({ id, left, right, value, computed, disabled, tag, onC
           >
             Prepare for this model
           </button>
-          <span className={`t-micro ${HINWEIS_TEXT.ruhig}`}>Once per model, seconds to a few minutes.</span>
+          <span className={`t-micro ${HINWEIS_TEXT.ruhig}`}>{prepareHint}</span>
         </div>
       )}
     </div>
@@ -136,6 +141,21 @@ export function TweakedNote({ title, text, original, onGetOriginal }: { title: s
           Get the original: {original}
         </button>
       )}
+    </div>
+  )
+}
+
+/** Before computing on a PC where one slider takes minutes (I1 on the box,
+ *  31.10.2026: ~25 min, said nowhere). Calm like the original note, blocks
+ *  nothing; the words are lib/neuron's buildTimeNote. */
+export function TimeNote({ title, text }: { title: string; text: string }) {
+  return (
+    <div className="mb-4 border-l-2 border-lu-accent/50 pl-3 py-0.5 flex items-start gap-2" role="note" data-testid="neuron-time-note">
+      <Clock size={ICON_SM} className="flex-none mt-1 text-lu-accent" aria-hidden />
+      <div className="min-w-0">
+        <p className="t-body font-medium text-gray-100">{title}</p>
+        <p className={`t-body ${HINWEIS_TEXT.ruhig}`}>{text}</p>
+      </div>
     </div>
   )
 }
@@ -194,6 +214,14 @@ export function ScopeButton({ on, onClick, children }: { on: boolean; onClick: (
   )
 }
 
+/** P11's progress line, and on a long run how long it has run so far: at
+ *  25 minutes "12 min left" alone does not show that it is still moving. */
+function progressLine(job: NeuronJob): string {
+  const line = jobProgressText(job)
+  if (job.elapsedSecs < 60 || !line || /running for/.test(line)) return line
+  return `${line} · ${shortDuration(job.elapsedSecs)} so far`
+}
+
 export function JobPanel({ job, onStop, onDismiss, onGetOriginal, original }: { job: NeuronJob; onStop: () => void; onDismiss: () => void; onGetOriginal?: () => void; original?: string | null }) {
   const share = jobShare(job)
   if (job.status === 'running') {
@@ -203,10 +231,12 @@ export function JobPanel({ job, onStop, onDismiss, onGetOriginal, original }: { 
           <Loader2 size={ICON_SM} className="animate-spin" /> {job.title}: {job.phaseLabel || 'starting…'}
         </p>
         <div className="h-1 rounded-full bg-gray-200 dark:bg-white/[0.08] overflow-hidden">
-          <div className="h-full rounded-full bg-lu-accent transition-[width]" style={{ width: share == null ? '0%' : `${Math.round(share * 100)}%` }} />
+          {share == null
+            ? <div className="h-full w-1/4 rounded-full bg-lu-accent/60 neuron-bar-wait" data-testid="neuron-job-waiting" />
+            : <div className="h-full rounded-full bg-lu-accent transition-[width]" style={{ width: `${Math.round(share * 100)}%` }} />}
         </div>
         <div className="flex items-center justify-between gap-2">
-          <p className={`t-micro font-mono ${HINWEIS_TEXT.ruhig}`} data-testid="neuron-job-progress">{jobProgressText(job)}</p>
+          <p className={`t-micro font-mono ${HINWEIS_TEXT.ruhig}`} data-testid="neuron-job-progress">{progressLine(job)}</p>
           <button type="button" onClick={onStop} className="t-micro text-red-600 dark:text-red-400 hover:underline">Stop</button>
         </div>
         {job.logs.length > 0 && <p className={`t-micro ${HINWEIS_TEXT.ruhig} truncate`}>{job.logs[job.logs.length - 1]}</p>}

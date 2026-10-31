@@ -19,7 +19,8 @@ const apply = vi.fn(async (_path: string, _entries: unknown[], _tuning?: unknown
 const buildPreset = vi.fn(async (_path: string, _id: string) => ({ started: true }))
 const buildOwn = vi.fn(async (..._a: unknown[]) => ({ started: true }))
 const vectors: Array<Record<string, unknown>> = []
-const job = vi.hoisted(() => ({ status: 'idle', error: null as string | null }))
+const job = vi.hoisted(() => ({ status: 'idle', error: null as string | null, kind: '', phaseLabel: '', step: 0, total: 0, etaSecs: null as number | null, elapsedSecs: 0 }))
+const est = vi.hoisted(() => ({ build: { lowSecs: 4, highSecs: 30, measured: false }, own: { lowSecs: 6, highSecs: 45, measured: false } }))
 const facts = vi.hoisted(() => ({ tweaked: [] as string[], original: null as string | null }))
 
 vi.mock('../../../api/neuron', () => ({
@@ -31,8 +32,9 @@ vi.mock('../../../api/neuron', () => ({
   neuronInfo: async () => ({
     facts: { arch: 'qwen2', nLayer: 24, nEmbd: 896, template: 'chatMl', name: 'Qwen2.5 0.5B Instruct', tweaked: [...facts.tweaked], original: facts.original },
     modelKey: 'qwen-1', generator: true, band: [3, 20], vectors: [...vectors], sae: null, activeMix: null,
+    buildEstimate: { ...est.build }, ownEstimate: { ...est.own },
   }),
-  neuronStatus: async () => ({ status: job.status, kind: '', title: 'Computing', modelPath: '/models/qwen.gguf', phaseLabel: '', step: 0, total: 0, bytesDone: 0, bytesTotal: 0, rateBps: 0, etaSecs: null, elapsedSecs: 0, resultId: null, error: job.error, logs: [] }),
+  neuronStatus: async () => ({ status: job.status, kind: job.kind, title: 'Computing', modelPath: '/models/qwen.gguf', phaseLabel: job.phaseLabel, step: job.step, total: job.total, bytesDone: 0, bytesTotal: 0, rateBps: 0, etaSecs: job.etaSecs, elapsedSecs: job.elapsedSecs, resultId: null, error: job.error, logs: [] }),
   neuronApply: (p: string, e: unknown[], t?: unknown) => apply(p, e, t),
   neuronBuildPreset: (p: string, id: string) => buildPreset(p, id),
   neuronBuildOwn: (...a: unknown[]) => buildOwn(...a),
@@ -63,8 +65,9 @@ beforeEach(() => {
   buildPreset.mockClear()
   buildOwn.mockClear()
   vectors.length = 0
-  job.status = 'idle'
-  job.error = null
+  Object.assign(job, { status: 'idle', error: null, kind: '', phaseLabel: '', step: 0, total: 0, etaSecs: null, elapsedSecs: 0 })
+  est.build = { lowSecs: 4, highSecs: 30, measured: false }
+  est.own = { lowSecs: 6, highSecs: 45, measured: false }
   facts.tweaked = []
   facts.original = null
   useNeuronStore.setState({ profiles: {}, scopeByModel: {}, introSeen: true })
@@ -280,5 +283,58 @@ describe('tweaked models', () => {
     const ended = await screen.findByTestId('neuron-job-ended')
     expect(ended.textContent).toMatch(/try the original of this model/)
     expect((await within(ended).findByTestId('neuron-get-original-failed')).textContent).toBe('Get the original: Qwen3.5 9B')
+  })
+})
+
+// P11 5b67ef9fe, I1 on the box 31.10.2026: one slider took ~25 min on
+// Windows and nothing said so. Say the time before, show it moving during.
+describe('how long it takes', () => {
+  it('says the time before computing on a slow PC, on the ways that compute', async () => {
+    est.build = { lowSecs: 720, highSecs: 3000, measured: false }
+    est.own = { lowSecs: 1500, highSecs: 5400, measured: true }
+    render(createElement(NeuronView))
+    const note = await screen.findByTestId('neuron-time-note')
+    expect(note.textContent).toMatch(/^This takes a while on this PC/)
+    expect(note.textContent).toMatch(/Expect about 12–50 min for one slider\./)
+    // Above the ways, next to the original note; the row points up to it.
+    expect(note.compareDocumentPosition(screen.getByTestId('neuron-way-ready')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(within(screen.getByTestId('neuron-slider-creative')).getByText('Once per model. How long it takes is said above.')).toBeTruthy()
+    fireEvent.click(screen.getByTestId('neuron-way-own'))
+    expect(screen.getByTestId('neuron-time-note').textContent).toMatch(/25 min to 1 h 30 min.*last run on this PC/)
+    fireEvent.click(screen.getByTestId('neuron-way-features'))
+    expect(screen.queryByTestId('neuron-time-note')).toBeNull()
+  })
+
+  it('says nothing where it is a moment, or nothing is left to compute', async () => {
+    render(createElement(NeuronView))
+    await screen.findByTestId('neuron-slider-creative')
+    expect(screen.queryByTestId('neuron-time-note')).toBeNull()
+    expect(within(screen.getByTestId('neuron-slider-creative')).getByText('Once per model, seconds to a few minutes.')).toBeTruthy()
+    cleanup()
+    est.build = { lowSecs: 720, highSecs: 3000, measured: false }
+    vectors.push(CHEERFUL, { ...CHEERFUL, id: 'creative' }, { ...CHEERFUL, id: 'detailed' })
+    render(createElement(NeuronView))
+    await screen.findByTestId('neuron-slider-creative')
+    expect(screen.queryByTestId('neuron-time-note')).toBeNull()
+  })
+
+  it('shows the run moving: a waiting bar before the first example, then examples, time left and time so far', async () => {
+    est.build = { lowSecs: 720, highSecs: 3000, measured: false }
+    Object.assign(job, { status: 'running', kind: 'build', phaseLabel: 'Loading the model', elapsedSecs: 20 })
+    render(createElement(NeuronView))
+    await screen.findByTestId('neuron-job-waiting')
+    expect(screen.getByTestId('neuron-job-progress').textContent).toBe('running for 20 s')
+    // The job counts down itself; the note before the start is gone.
+    expect(screen.queryByTestId('neuron-time-note')).toBeNull()
+    cleanup()
+    Object.assign(job, { phaseLabel: 'Reading the examples through the model', step: 12, total: 40, etaSecs: 840, elapsedSecs: 360 })
+    render(createElement(NeuronView))
+    await waitFor(() => expect(screen.getByTestId('neuron-job-progress').textContent).toBe('Example 12 of 40 · 30% · 14 min left · 6 min so far'))
+    expect(screen.queryByTestId('neuron-job-waiting')).toBeNull()
+  })
+
+  it('lets the waiting bar stand still with reduced motion', () => {
+    const css = readFileSync(resolve(__dirname, '../../../index.css'), 'utf8')
+    expect(css).toMatch(/@media \(prefers-reduced-motion: reduce\) \{\s*\.neuron-bar-wait \{ animation: none;/)
   })
 })
