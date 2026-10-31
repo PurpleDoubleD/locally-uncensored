@@ -42,6 +42,7 @@ import { TASK_TIME_LIMIT_MS } from './computer-task'
 import { COMPUTER_TASK_TOOL_NAME } from '../lib/computer/prompt'
 import { COMPUTER_TASK_TOOL } from './computer-task'
 import { backendCall, isTauri } from './backend'
+import { voiceSessionSpeech } from './voice-speech'
 import { rememberedFolderRefusal } from './agents/workspace-validate'
 import { levelInScope, scopePromptLine, scopeRefusal, thinkingBudgetStep, toolInScope } from '../lib/voice/work-scope'
 import type { VoiceWork } from '../lib/voice/work-scope'
@@ -626,6 +627,10 @@ export async function startVoiceSession(): Promise<void> {
     const hasTask = tools.defs.some((tool) => tool.name === COMPUTER_TASK_TOOL_NAME)
     const thinking = thinkingConfig(brain)
 
+    // N1: hear and speak through LFM3 Audio when Settings, Voice says so.
+    const speech = await voiceSessionSpeech()
+    guard(session)
+
     // 4. The connection.
     dispatch({ type: 'start-step', step: 'connecting' })
     const response = await fetch(`${loop.baseUrl}/session`, {
@@ -647,6 +652,7 @@ export async function startVoiceSession(): Promise<void> {
         // keeps them. Without this the first answer waits for that.
         prewarm: brain.local,
         context_limit_tokens: voiceContextLimit(brain.local),
+        ...speech,
       }),
       signal: session.abort.signal,
     }).catch((error: unknown) => {

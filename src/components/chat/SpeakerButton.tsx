@@ -13,7 +13,7 @@ export function SpeakerButton({ text }: Props) {
   // Jaeger B, B11: when the external voice fails, read-aloud switches to the
   // system voice. The bubble whose button was pressed says so, with the
   // error, instead of speaking in another voice without a word.
-  const fallbackReason = useVoiceStore((s) => (s.ttsMode === "external" ? s.ttsFallbackReason : null))
+  const fallbackReason = useVoiceStore((s) => (s.ttsMode !== "piper" ? s.ttsFallbackReason : null))
   const [pressed, setPressed] = useState(false)
 
   // Show the read-aloud button only when the feature is on AND some TTS engine

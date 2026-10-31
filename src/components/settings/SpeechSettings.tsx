@@ -299,7 +299,7 @@ export function SpeechSettings() {
       <p className={`text-[0.55rem] leading-snug ${HINWEIS_TEXT.fehler}`}>{whisper.installError}</p>
     )}
     {/* N1: with an external dictation engine faster-whisper is not required. */}
-    {showsHint(whisper) && voiceSettings.sttMode !== 'external' && (
+    {showsHint(whisper) && voiceSettings.sttMode === 'whisper' && (
       <p className="text-[0.55rem] text-gray-500 leading-snug">
         Required for the microphone. Installs faster-whisper into LU's Python; first run also downloads a small model.
       </p>
@@ -310,9 +310,10 @@ export function SpeechSettings() {
     <EngineSwitch
       label="Dictation"
       value={voiceSettings.sttMode}
-      options={[['whisper', 'faster-whisper'], ['external', 'External HTTP']]}
+      options={[['whisper', 'faster-whisper'], ['external', 'External HTTP'], ['engine', 'LU Engine']]}
       onPick={(m) => voiceSettings.updateVoiceSettings({ sttMode: m })}
     />
+    {voiceSettings.sttMode === 'engine' && <EngineSpeechNote what="hears" />}
     {voiceSettings.sttMode === 'external' && (
       <div className="space-y-1.5">
         <SettingInput value={voiceSettings.externalSttUrl} onChange={(v) => voiceSettings.updateVoiceSettings({ externalSttUrl: v })} placeholder="http://localhost:11434/v1/audio/transcriptions" />
@@ -404,7 +405,7 @@ export function SpeechSettings() {
     <div className="flex items-center justify-between gap-2 pt-1">
       <span className="text-[0.7rem] text-gray-500">Engine</span>
       <div className="flex items-center gap-1 text-[0.6rem]">
-        {(['piper', 'external'] as const).map((m) => (
+        {(['piper', 'external', 'engine'] as const).map((m) => (
           <button
             key={m}
             onClick={() => voiceSettings.updateVoiceSettings({ ttsMode: m })}
@@ -420,11 +421,19 @@ export function SpeechSettings() {
                 : 'text-gray-500 border-white/8 hover:text-gray-300')
             }
           >
-            {m === 'piper' ? 'Piper neural' : 'External HTTP'}
+            {m === 'piper' ? 'Piper neural' : m === 'external' ? 'External HTTP' : 'LU Engine'}
           </button>
         ))}
       </div>
     </div>
+    {voiceSettings.ttsMode === 'engine' && (
+      <div className="space-y-1.5">
+        <EngineSpeechNote what="speaks" />
+        {voiceSettings.ttsFallbackReason && (
+          <p className={`t-micro leading-snug ${HINWEIS_TEXT.fehler}`}>{voiceSettings.ttsFallbackReason}</p>
+        )}
+      </div>
+    )}
     {voiceSettings.ttsMode === 'external' && (
       <div className="space-y-1.5">
         <input
@@ -502,5 +511,14 @@ function EngineSwitch<T extends string>({ label, value, options, onPick }: { lab
         ))}
       </div>
     </div>
+  )
+}
+
+/** N1: what "LU Engine" means for speech. The engine runs one model, the chat model. */
+function EngineSpeechNote({ what }: { what: 'hears' | 'speaks' }) {
+  return (
+    <p className="t-micro text-gray-500 leading-snug">
+      The LU Engine {what} with the model it has loaded, so that model must take sound: LFM3 Audio or LFM3 Omni (get them in Models). Chat with it in the LU Engine, and dictation and read-aloud use the same model. Nothing is installed.
+    </p>
   )
 }

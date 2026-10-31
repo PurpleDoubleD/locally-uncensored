@@ -321,3 +321,140 @@ class SharedPocketTTSService(TTSService):
             yield ErrorFrame(error="Speech synthesis failed (%s)." % type(e).__name__)
         finally:
             await self.stop_ttfb_metrics()
+
+
+# ── Speech through an HTTP service (N1, Liquid LFM3 Audio) ──────────────────
+#
+# The app can point a session at an OpenAI-compatible speech service instead
+# of the models in this process: Ollama 0.40.13+ with lfm3-audio or lfm3-omni,
+# or the LU Engine (llama-server b11960) with one of them loaded. Both take a
+# WAV at /v1/audio/transcriptions; Ollama speaks at /v1/audio/speech and
+# llama-server at /tts, both with the same JSON body and a WAV answer.
+
+# The longest a single request may take. A speech model next to the chat
+# model on the same machine can be slow, but an answer that hangs must end.
+HTTP_SPEECH_TIMEOUT_SECS = 120.0
+
+
+def pcm_to_wav(pcm: bytes, rate: int) -> bytes:
+    """16-bit mono PCM as a WAV file, the one format every such service takes."""
+    import io
+    import wave
+
+    out = io.BytesIO()
+    with wave.open(out, "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(rate)
+        w.writeframes(pcm)
+    return out.getvalue()
+
+
+def wav_pcm(data: bytes) -> tuple[bytes, int]:
+    """The 16-bit mono samples and the rate of a WAV answer.
+
+    Read by hand, not with the wave module: Ollama streams its WAV and writes
+    the header before it knows the length, so the size fields hold the maximum
+    value. Everything after the data chunk header is taken as samples.
+    """
+    if data[:4] != b"RIFF" or data[8:12] != b"WAVE":
+        raise ValueError("the speech service did not answer with a WAV file")
+    rate = None
+    at = 12
+    while at + 8 <= len(data):
+        kind, size = data[at:at + 4], int.from_bytes(data[at + 4:at + 8], "little")
+        if kind == b"fmt ":
+            channels = int.from_bytes(data[at + 10:at + 12], "little")
+            rate = int.from_bytes(data[at + 12:at + 16], "little")
+            bits = int.from_bytes(data[at + 22:at + 24], "little")
+            if channels != 1 or bits != 16:
+                raise ValueError("the speech service answered %d channels at %d bits, expected mono 16-bit" % (channels, bits))
+        elif kind == b"data":
+            if rate is None:
+                raise ValueError("the WAV answer has no format chunk")
+            pcm = data[at + 8:]
+            return pcm[: len(pcm) - len(pcm) % 2], rate
+        at += 8 + size + (size % 2)
+    raise ValueError("the WAV answer has no data chunk")
+
+
+def tts_body(text: str, model: str, voice: str | None) -> dict[str, Any]:
+    """The request body, the same the app sends for read-aloud (tts.rs)."""
+    body: dict[str, Any] = {"model": model, "input": text, "response_format": "wav"}
+    if voice:
+        body["voice"] = voice
+    return body
+
+
+def _auth(api_key: Any) -> dict[str, str]:
+    key = api_key.get_secret_value() if api_key is not None else None
+    return {"Authorization": "Bearer %s" % key} if key else {}
+
+
+class HttpSTTService(SharedWhisperSTTService):
+    """The same turn handling and lead-in as Whisper, the words from a service."""
+
+    def __init__(self, *, url: str, model: str, api_key: Any = None, **kwargs):
+        super().__init__(whisper_model=None, **kwargs)
+        self._url = url
+        self._model_name = model
+        self._api_key = api_key
+
+    async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
+        import httpx
+
+        await self.start_processing_metrics()
+        try:
+            async with httpx.AsyncClient(timeout=HTTP_SPEECH_TIMEOUT_SECS) as client:
+                answer = await client.post(
+                    self._url,
+                    headers=_auth(self._api_key),
+                    files={"file": ("take.wav", pcm_to_wav(audio, WHISPER_SAMPLE_RATE), "audio/wav")},
+                    data={"model": self._model_name, "response_format": "json"},
+                )
+            if answer.status_code >= 400:
+                raise RuntimeError("HTTP %d: %s" % (answer.status_code, answer.text[:200]))
+            text = str(answer.json().get("text") or "").strip()
+        except Exception as e:
+            await self.stop_processing_metrics()
+            logger.error("Speech recognition failed (%s)." % safe_error_text(e))
+            yield ErrorFrame(error="Speech recognition through %s failed (%s)." % (self._model_name, safe_error_text(e)))
+            return
+        await self.stop_processing_metrics()
+        if text:
+            yield TranscriptionFrame(text, self._user_id, time_now_iso8601(), Language.EN)
+
+
+class HttpTTSService(SharedPocketTTSService):
+    """The same sentence cutting as Pocket TTS, the sound from a service."""
+
+    def __init__(self, *, url: str, model: str, voice: str | None = None, api_key: Any = None, **kwargs):
+        super().__init__(tts_model=None, voice_state=None, voice=voice or "default", **kwargs)
+        self._url = url
+        self._model_name = model
+        self._voice_name = voice
+        self._api_key = api_key
+
+    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
+        import httpx
+
+        async def pcm_chunks(pcm: bytes) -> AsyncIterator[bytes]:
+            step = 9600
+            for at in range(0, len(pcm), step):
+                yield pcm[at:at + step]
+
+        try:
+            await self.start_tts_usage_metrics(text)
+            async with httpx.AsyncClient(timeout=HTTP_SPEECH_TIMEOUT_SECS) as client:
+                answer = await client.post(self._url, headers=_auth(self._api_key), json=tts_body(text, self._model_name, self._voice_name))
+            if answer.status_code >= 400:
+                raise RuntimeError("HTTP %d: %s" % (answer.status_code, answer.text[:200]))
+            pcm, rate = wav_pcm(answer.content)
+            async for frame in self._stream_audio_frames_from_iterator(pcm_chunks(pcm), in_sample_rate=rate, context_id=context_id):
+                await self.stop_ttfb_metrics()
+                yield frame
+        except Exception as e:
+            logger.error("Speech synthesis failed (%s)." % safe_error_text(e))
+            yield ErrorFrame(error="Speech synthesis through %s failed (%s)." % (self._model_name, safe_error_text(e)))
+        finally:
+            await self.stop_ttfb_metrics()

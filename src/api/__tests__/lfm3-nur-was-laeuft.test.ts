@@ -91,7 +91,7 @@ describe('LFM3 als GGUF fuer LU Engine und LM Studio', () => {
     const g = lfm3Gguf()
     expect(g.map((m) => m.filename).sort()).toEqual([
       'LFM3-1.7B-Q4_K_M.gguf', 'LFM3-1.7B-Q8_0.gguf', 'LFM3-1.7B-QAD-Q4_0.gguf',
-      'LFM3-Omni-2B-Q4_K_M.gguf', 'LFM3-VL-2B-Q4_K_M.gguf', 'LFM3-VL-2B-Q8_0.gguf',
+      'LFM3-Audio-2B-Q4_K_M.gguf', 'LFM3-Omni-2B-Q4_K_M.gguf', 'LFM3-VL-2B-Q4_K_M.gguf', 'LFM3-VL-2B-Q8_0.gguf',
     ])
     for (const m of g) {
       expect(m.downloadUrl).toMatch(/^https:\/\/huggingface\.co\/LiquidAI\/LFM3-/)
@@ -101,20 +101,24 @@ describe('LFM3 als GGUF fuer LU Engine und LM Studio', () => {
     }
   })
 
-  it('VL und Omni bringen ihren Projektor mit, der Text nicht', () => {
+  it('VL, Omni und Audio bringen ihren Projektor mit, der Text nicht', () => {
     for (const m of lfm3Gguf()) {
-      const sieht = /VL|Omni/.test(m.name)
-      expect(Boolean(m.mmprojUrl), m.name).toBe(sieht)
-      if (sieht) {
-        expect(m.mmprojUrl).toMatch(/LiquidAI\/LFM3-(VL|Omni)-2B-GGUF\/resolve\/main\/mmproj-/)
+      const teil = /VL|Omni|Audio/.test(m.name)
+      expect(Boolean(m.mmprojUrl), m.name).toBe(teil)
+      if (teil) {
+        expect(m.mmprojUrl).toMatch(/LiquidAI\/LFM3-(VL|Omni|Audio)-2B-GGUF\/resolve\/main\/mmproj-/)
         expect(m.mmprojSha256).toMatch(/^[0-9a-f]{64}$/)
-        expect(m.tags).toContain('Vision')
       }
+      // Audio hoert nur: kein Vision, damit Kachel und Bildfilter nicht luegen.
+      expect(m.tags.includes('Vision'), m.name).toBe(/VL|Omni/.test(m.name))
     }
   })
 
-  it('kein Audio-GGUF: in der Engine waere es nur ein Textmodell', () => {
-    expect(lfm3Gguf().some((m) => /Audio/.test(m.name))).toBe(false)
+  it('Audio und Omni sagen, dass die LU Engine mit ihnen hoert und spricht', () => {
+    for (const m of lfm3Gguf().filter((x) => /Audio|Omni/.test(x.name))) {
+      expect(m.description, m.name).toMatch(/LU Engine/)
+      expect(m.description, m.name).toMatch(/Settings, Voice/)
+    }
   })
 })
 

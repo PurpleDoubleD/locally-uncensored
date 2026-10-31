@@ -1,3 +1,4 @@
+import type { SttMode, TtsMode } from "../lib/speech-route";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { safeJSONStorage } from "../lib/storage-quota"
@@ -54,7 +55,7 @@ interface VoiceState {
   ttsPitch: number;
   /** TTS engine: bundled Piper (local) or a user-configured external HTTP
    *  endpoint (OpenAI-compatible, e.g. Kokoro-FastAPI) — GitHub #58. */
-  ttsMode: "piper" | "external";
+  ttsMode: TtsMode;
   /** External TTS endpoint URL, e.g. http://localhost:8880/v1/audio/speech. */
   externalTtsUrl: string;
   /** Voice name passed to the external engine (e.g. "af_bella" / "alloy"). */
@@ -62,10 +63,11 @@ interface VoiceState {
   /** Model name for the external TTS engine; empty sends OpenAI's "tts-1".
    *  Ollama needs its own name here, e.g. "lfm3-audio:2b" (N1). */
   externalTtsModel: string;
-  /** Speech-to-text engine for dictation: the local faster-whisper, or an
+  /** Speech-to-text engine for dictation: the local faster-whisper, an
    *  OpenAI-compatible /v1/audio/transcriptions endpoint such as Ollama
-   *  serving LFM3 Audio (N1). */
-  sttMode: "whisper" | "external";
+   *  serving LFM3 Audio, or the LU Engine with LFM3 Audio/Omni loaded (N1,
+   *  lib/speech-route.ts). */
+  sttMode: SttMode;
   /** External STT endpoint, e.g. http://localhost:11434/v1/audio/transcriptions. */
   externalSttUrl: string;
   /** Model the external STT endpoint transcribes with, e.g. "lfm3-audio:2b". */
@@ -112,11 +114,11 @@ interface VoiceState {
       ttsVoice: string;
       ttsRate: number;
       ttsPitch: number;
-      ttsMode: "piper" | "external";
+      ttsMode: TtsMode;
       externalTtsUrl: string;
       externalTtsVoice: string;
       externalTtsModel: string;
-      sttMode: "whisper" | "external";
+      sttMode: SttMode;
       externalSttUrl: string;
       externalSttModel: string;
       cloudTtsVoice: string;

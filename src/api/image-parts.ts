@@ -81,6 +81,9 @@ export const IMAGE_PART = {
   // halves them. The Omni part carries the audio encoder as well; LU passes
   // it as --mmproj and uses it for images.
   'LiquidAI/LFM3-VL-2B-GGUF/mmproj-LFM3-VL-2B-Q8_0.gguf': part('LiquidAI/LFM3-VL-2B-GGUF', 'mmproj-LFM3-VL-2B-Q8_0.gguf', 203031872, 'c5c5b58d544a18da919172d2d0368090ea1a4a351b6feb7f8a326a264a5918ab'),
+  // LFM3 Audio's part is an audio encoder only (clip.has_audio_encoder): the
+  // LU Engine hears and speaks with it and reports the model as not seeing.
+  'LiquidAI/LFM3-Audio-2B-GGUF/mmproj-LFM3-Audio-2B-Q8_0.gguf': part('LiquidAI/LFM3-Audio-2B-GGUF', 'mmproj-LFM3-Audio-2B-Q8_0.gguf', 303811840, '2b6648b1fd48af16aa0877b0592b144d15070783673e038a379fdbc51d40e365'),
   'LiquidAI/LFM3-Omni-2B-GGUF/mmproj-LFM3-Omni-2B-Q8_0.gguf': part('LiquidAI/LFM3-Omni-2B-GGUF', 'mmproj-LFM3-Omni-2B-Q8_0.gguf', 506842528, '8a25f9d1931244429de404fccacfb7fb933970a36aa5688d2f5069f29c6b27b1'),
   'bartowski/FrogNano-4B-2609-GGUF/mmproj-FrogNano-4B-2609-f16.gguf': part('bartowski/FrogNano-4B-2609-GGUF', 'mmproj-FrogNano-4B-2609-f16.gguf', 672423104, 'e6fba76cf8cd2e2e8793807ee54147c1f5a5209bc4780e53e79878e7c9887020'),
   'bartowski/Hcompany_Holo4-35B-A3B-GGUF/mmproj-Hcompany_Holo4-35B-A3B-f16.gguf': part('bartowski/Hcompany_Holo4-35B-A3B-GGUF', 'mmproj-Hcompany_Holo4-35B-A3B-f16.gguf', 899283488, '9fe08693f0ae3c02b3ef76a2762475366c98dcdced879ff90e8258734b5bf6d1'),

@@ -121,6 +121,20 @@ describe('Einstellungen: ein Klick traegt LFM3 Audio in Ollama ein', () => {
     })
   })
 
+  it('Diktat und Vorlesen bieten die LU Engine an und sagen, welches Modell sie dort braucht', async () => {
+    backend.tauri.on = false
+    backend.backendCall.mockImplementation(async (cmd: string) => (cmd === 'installed_piper_voices' ? [] : { available: false }))
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ available: false, backend: null }), { status: 200 })))
+    render(createElement(SpeechSettings))
+    const engine = screen.getAllByRole('button', { name: 'LU Engine' })
+    expect(engine).toHaveLength(2)
+    for (const b of engine) await act(async () => { fireEvent.click(b) })
+    expect(useVoiceStore.getState()).toMatchObject({ sttMode: 'engine', ttsMode: 'engine' })
+    expect(screen.getAllByText(/LFM3 Audio or LFM3 Omni/).length).toBe(2)
+    expect(screen.queryByText(/Required for the microphone/)).toBeNull()
+    vi.unstubAllGlobals()
+  })
+
   it('mit externem Diktat sagt die Seite nicht mehr, faster-whisper sei noetig', async () => {
     backend.tauri.on = false
     backend.backendCall.mockImplementation(async (cmd: string) => (cmd === 'installed_piper_voices' ? [] : { available: false }))

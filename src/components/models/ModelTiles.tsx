@@ -13,6 +13,7 @@ import {
 import type { LucideIcon } from 'lucide-react'
 import type { DiscoverModel, DownloadProgress, ModelBundle } from '../../api/discover'
 import { formatBytes, countLabel } from '../../lib/formatters'
+import { partInputWord } from '../../lib/image-part'
 import { vramFit, vramFitLine, vramNeedTitle, type VramFit } from '../../lib/vram-fit'
 import { sharedFitWords, sharedMemoryWording } from '../../lib/shared-memory-wording'
 import { tierMarks } from '../../lib/render/model-tier'
@@ -466,7 +467,7 @@ export function useModelTile({ variants, vramGb, isInstalled, dlState, onUse, ca
   const downloadTitle = !selSize
     ? 'Download'
     : partComes
-      ? `Download ${selSize} GB (model ${sel.sizeGB} GB, image input ${gbOf(sel.mmprojBytes)} GB)`
+      ? `Download ${selSize} GB (model ${sel.sizeGB} GB, ${partInputWord(sel)} ${gbOf(sel.mmprojBytes)} GB)`
       : `Download ${selSize} GB`
 
   return { pickerOpen, setPickerOpen, setChosen, pickerRef, variantListRef, variantList, sel, groupTitle, dl, downloading, fit, action, sizeOf, selSize, downloadTitle }

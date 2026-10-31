@@ -914,6 +914,52 @@ fn should_run_lms_unload(daemon_answers: bool, process_running: impl FnOnce() ->
     daemon_answers || process_running()
 }
 
+/// The llama.cpp runtime LM Studio runs GGUF models with, e.g. "2.55.0".
+///
+/// N1, 30.10.2026: Liquid LFM3 needs LM Studio's llama.cpp runtime 2.65.1 or
+/// newer (model card of LiquidAI/LFM3-1.7B-GGUF). LM Studio keeps the runtime
+/// it uses per format in `~/.lmstudio/.internal/backend-preferences-v1.json`
+/// (read on the Mac: `[{"model_format":"gguf","name":"llama.cpp-mac-arm64-
+/// apple-metal-advsimd","version":"2.55.0"}, …]`). An internal file, so
+/// anything that does not read as that shape answers None and LU says nothing.
+/// Read only; LU never changes LM Studio's runtime.
+#[tauri::command]
+pub fn lmstudio_gguf_runtime() -> Option<String> {
+    let path = dirs::home_dir()?.join(".lmstudio").join(".internal").join("backend-preferences-v1.json");
+    gguf_runtime_of(&std::fs::read_to_string(path).ok()?)
+}
+
+fn gguf_runtime_of(preferences: &str) -> Option<String> {
+    let entries: Vec<serde_json::Value> = serde_json::from_str(preferences).ok()?;
+    entries.iter().find_map(|e| {
+        let gguf = e.get("model_format")?.as_str()? == "gguf";
+        let llama = e.get("name")?.as_str()?.starts_with("llama.cpp");
+        let version = e.get("version")?.as_str()?;
+        (gguf && llama && !version.is_empty()).then(|| version.to_string())
+    })
+}
+
+#[cfg(test)]
+mod gguf_runtime_tests {
+    use super::gguf_runtime_of;
+
+    #[test]
+    fn the_gguf_runtime_is_read_from_lm_studios_preferences() {
+        // The file as it lies on the Mac (LM Studio, 30.10.2026).
+        let mac = r#"[{"model_format":"gguf","name":"llama.cpp-mac-arm64-apple-metal-advsimd","version":"2.55.0"},{"model_format":"safetensors","name":"mlx-llm-mac-arm64-apple-metal-nax-advsimd","version":"1.13.1"}]"#;
+        assert_eq!(gguf_runtime_of(mac).as_deref(), Some("2.55.0"));
+        let windows = r#"[{"model_format":"gguf","name":"llama.cpp-win-x86_64-nvidia-cuda12-avx2","version":"2.66.0"}]"#;
+        assert_eq!(gguf_runtime_of(windows).as_deref(), Some("2.66.0"));
+    }
+
+    #[test]
+    fn another_shape_says_nothing() {
+        assert_eq!(gguf_runtime_of("{}"), None);
+        assert_eq!(gguf_runtime_of("not json"), None);
+        assert_eq!(gguf_runtime_of(r#"[{"model_format":"safetensors","name":"mlx","version":"1.0"}]"#), None);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     /// Security pass of 2026-10-13: the server was started with a flag that
