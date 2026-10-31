@@ -32,4 +32,11 @@ describe('original search', () => {
     expect(originals.map((m) => m.description)).toEqual(['unsloth/Qwen3.5-9B-GGUF', 'mradermacher/Qwen3.5-9B-GGUF'])
     expect(changed.map((m) => m.description)).toEqual(['DavidAU/Qwen3.5-9B-The-Defiant-Heretic-GGUF', 'x/Qwen3.5-9B-abliterated-GGUF'])
   })
+
+  it('counts an unknown uploader\'s name that says more than the search as changed (Mac, 31.10.)', () => {
+    const hf = ['unsloth/Qwen3.5-9B-GGUF', 'Jackrong/Qwen3.5-9B-DeepSeek-V4-Flash-GGUF', 'AtomicChat/Qwen3.5-9B-DFlash-GGUF', 'AtomicChat/Qwen3.5-9B-GGUF', 'bartowski/Qwen_Qwen3.5-9B-GGUF'].map(hit)
+    const { originals, changed } = originalsFirst(hf, 'Qwen3.5 9B')
+    expect(originals.map((m) => m.description)).toEqual(['unsloth/Qwen3.5-9B-GGUF', 'bartowski/Qwen_Qwen3.5-9B-GGUF', 'AtomicChat/Qwen3.5-9B-GGUF'])
+    expect(changed.map((m) => m.description)).toEqual(['Jackrong/Qwen3.5-9B-DeepSeek-V4-Flash-GGUF', 'AtomicChat/Qwen3.5-9B-DFlash-GGUF'])
+  })
 })

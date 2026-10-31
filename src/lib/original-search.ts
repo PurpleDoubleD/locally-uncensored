@@ -27,16 +27,32 @@ export function looksTweaked(repoId: string): boolean {
   return TWEAK_WORDS.some((w) => words.includes(w))
 }
 
+/** Name parts that say nothing about a change. */
+const NEUTRAL_WORDS = ['gguf', 'instruct', 'it', 'chat', 'base', 'i1', 'imatrix', 'imat']
+
 function repoOf(m: DiscoverModel): string {
   return m.description || m.name
 }
 
+const words = (t: string) => t.toLowerCase().split(/[^a-z0-9.]+/).filter(Boolean)
+
+/** A repo from an unknown uploader whose name says more than the search
+ *  ("Qwen3.5-9B-DeepSeek-V4-Flash" for "Qwen3.5 9B") is someone's own
+ *  version (Mac proof 31.10.2026: two such hits sat among the originals). */
+function saysMore(repoId: string, query: string): boolean {
+  const asked = words(query)
+  if (asked.length === 0) return false
+  const [uploader, name = ''] = repoId.split('/')
+  if (PLAIN_UPLOADERS.includes(uploader.toLowerCase())) return false
+  return words(name).some((w) => !NEUTRAL_WORDS.includes(w) && !asked.some((a) => a === w || a.startsWith(w)))
+}
+
 /** Originals first (plain uploaders before the rest, the search's own order
  *  kept inside each group), then the changed versions. */
-export function originalsFirst(models: DiscoverModel[]): { originals: DiscoverModel[]; changed: DiscoverModel[] } {
+export function originalsFirst(models: DiscoverModel[], query = ''): { originals: DiscoverModel[]; changed: DiscoverModel[] } {
   const originals: DiscoverModel[] = []
   const changed: DiscoverModel[] = []
-  for (const m of models) (looksTweaked(repoOf(m)) ? changed : originals).push(m)
+  for (const m of models) (looksTweaked(repoOf(m)) || saysMore(repoOf(m), query) ? changed : originals).push(m)
   const plain = (m: DiscoverModel) => PLAIN_UPLOADERS.includes(repoOf(m).split('/')[0].toLowerCase()) ? 0 : 1
   originals.sort((a, b) => plain(a) - plain(b))
   return { originals, changed }

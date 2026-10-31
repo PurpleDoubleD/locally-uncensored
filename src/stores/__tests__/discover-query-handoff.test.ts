@@ -42,6 +42,6 @@ describe('Discover search hand-off', () => {
     expect(page).toMatch(/originalFor=\{originalFor\}/)
     const discover = readFileSync(resolve(__dirname, '../../components/models/DiscoverModels.tsx'), 'utf8')
     expect(discover).toMatch(/const wantsOriginal = !!originalFor && search\.trim\(\) === originalFor/)
-    expect(discover).toMatch(/originalsFirst\(hfSearchResults\)/)
+    expect(discover).toMatch(/originalsFirst\(hfSearchResults, originalFor\)/)
   })
 })

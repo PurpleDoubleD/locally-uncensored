@@ -1252,7 +1252,7 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0, o
           {/* HuggingFace Search Results */}
           {hfSearchResults.length > 0 && (() => {
             const wantsOriginal = !!originalFor && search.trim() === originalFor
-            const { originals, changed } = wantsOriginal ? originalsFirst(hfSearchResults) : { originals: hfSearchResults, changed: [] }
+            const { originals, changed } = wantsOriginal ? originalsFirst(hfSearchResults, originalFor) : { originals: hfSearchResults, changed: [] }
             const tiles = (list: DiscoverModel[]) => list.map((model, i) => (
               <motion.div key={model.name + i} className={skin.cls.tileWrap} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: Math.min(i, 12) * 0.025 }}>
                 <skin.ModelTile
