@@ -41,7 +41,8 @@ import { startPlannedDownload } from '../../api/model-download'
 import { gbOf, imagePartFileName } from '../../lib/image-part'
 import { hfUrlToOllamaRef, hfUrlToLmStudioSubdir } from '../../lib/hf-to-provider'
 import { pullModelTauri, checkConnection as checkOllama } from '../../api/ollama'
-import { activateBuiltinModel } from '../../api/engine'
+import { activateBuiltinModel, bundledToAIModels, isEmbeddingGgufName, listBundledModels } from '../../api/engine'
+import { LU_ENGINE_NAME } from '../../lib/engine-name'
 import { builtinModelNameFromPath } from '../../lib/builtin-model-identity'
 import { mayEnableFromWizard } from '../../lib/onboarding-provider-gate'
 import { syncOllamaBaseFromRust } from '../../lib/ollama-host-sync'
@@ -77,6 +78,14 @@ interface ModelsStepProps {
  * to the model under the name the engine looks for, with its own size and
  * digest, and both are filed as one download.
  */
+/** One row of "Models you already have": the id the picker uses, the raw
+ *  name the composer shows, and the engine that serves it. */
+interface InstalledChoice {
+  id: string
+  label: string
+  engine: 'ollama' | 'lu-engine'
+}
+
 export function onboardingPlan(model: OnboardingModel): PlannedDownload[] {
   const expectedBytes = model.expectedBytes ?? (model.sizeGB ? Math.round(model.sizeGB * 1_073_741_824) : undefined)
   const plan: PlannedDownload[] = [{ url: model.downloadUrl, filename: model.filename, expectedBytes, sha256: model.sha256 }]
@@ -356,34 +365,48 @@ export function ModelsStep({ skin, scan, fleet, step, setStep, pulledModels, set
   // `> 0` sofort auf den Einbettungsschritt sprang. Die Namen sind der
   // Unterschied zwischen „wir wissen, dass er welche hat" und „er kann eins
   // davon waehlen": ohne sie liesse sich der Schritt gar nicht zeigen.
-  const [installedModels, setInstalledModels] = useState<string[] | null>(null)
-  // Die Liste ist eine OLLAMA-Liste (`/api/tags`), und deshalb haengt sie an
-  // Ollamas Schalter. Wer den Anbieter in Settings ausgeschaltet hat, bekommt
-  // hier nichts angeboten, was der Assistent nicht einschalten darf: sonst
-  // waehlt ein Klick ein Modell, dessen Maschine dunkel bleibt. Erstlauf und
-  // frische Ablage tragen die Marke nicht, dort bleibt alles wie vorher.
+  const [installedModels, setInstalledModels] = useState<InstalledChoice[] | null>(null)
+  // Ollamas Teil der Liste haengt an Ollamas Schalter. Wer den Anbieter in
+  // Settings ausgeschaltet hat, bekommt hier nichts angeboten, was der
+  // Assistent nicht einschalten darf: sonst waehlt ein Klick ein Modell, dessen
+  // Maschine dunkel bleibt. Erstlauf und frische Ablage tragen die Marke
+  // nicht, dort bleibt alles wie vorher.
+  //
+  // Die GGUFs der LU Engine stehen seit 3.0.9 mit in der Liste, aus derselben
+  // Quelle wie Model Manager und Waehler (`list_bundled_models`, App-Ordner
+  // plus der eigene Ordner aus Storage). Befund I1 auf der Box, r2 6545eac24:
+  // wer nur LU-Engine-Modelle hatte, sah hier nichts davon und bekam den
+  // Starter angeboten, als haette er keins.
   const ollamaOffenbarUnerwuenscht = !mayEnableFromWizard(
     useProviderStore(s => s.providers.ollama),
   )
   useEffect(() => {
     if (step !== 'models') return
-    if (ollamaOffenbarUnerwuenscht) { setInstalledModels([]); return }
     let cancelled = false
     // Erst Rusts Ollama-Adresse holen: im eigenen Assistentenfenster stand
     // sonst der Default 11434 in backend.ts (lib/ollama-host-sync.ts).
-    syncOllamaBaseFromRust()
-      .then(() => import('../../api/ollama'))
-      .then(({ listModels }) =>
-      listModels()
-        .then(models => {
-          const chatCapable = models.filter(m => {
+    const ollamaRows: Promise<InstalledChoice[]> = ollamaOffenbarUnerwuenscht
+      ? Promise.resolve([])
+      : syncOllamaBaseFromRust()
+        .then(() => import('../../api/ollama'))
+        .then(({ listModels }) => listModels())
+        .then(models => models
+          .filter(m => {
             const lower = (m.name || '').toLowerCase()
             return !lower.includes('embed') && !lower.includes('bge-') && !lower.includes('nomic')
           })
-          if (!cancelled) setInstalledModels(chatCapable.map(m => m.name))
-        })
-        .catch(() => { if (!cancelled) setInstalledModels([]) })
-    )
+          .map(m => ({ id: m.name, label: m.name, engine: 'ollama' as const })))
+        .catch(() => [])
+    // Eine Antwort ohne Sidecar (Web, Bruecke) ist ein Fehler und heisst hier
+    // schlicht: keine eigenen GGUFs.
+    const engineRows: Promise<InstalledChoice[]> = Promise.resolve()
+      .then(() => listBundledModels())
+      .then(models => bundledToAIModels(models.filter(m => !isEmbeddingGgufName(m.name)))
+        .map(m => ({ id: m.name, label: m.model, engine: 'lu-engine' as const })))
+      .catch(() => [])
+    Promise.all([ollamaRows, engineRows]).then(([ollama, engine]) => {
+      if (!cancelled) setInstalledModels([...ollama, ...engine])
+    })
     return () => { cancelled = true }
   }, [step, ollamaOffenbarUnerwuenscht])
 
@@ -426,7 +449,7 @@ export function ModelsStep({ skin, scan, fleet, step, setStep, pulledModels, set
   const activeModel = useModelStore(s => s.activeModel)
   const setActiveModel = useModelStore(s => s.setActiveModel)
   const setProviderConfig = useProviderStore(s => s.setProviderConfig)
-  const eigenesGewaehlt = !!activeModel && (installedModels ?? []).includes(activeModel)
+  const eigenesGewaehlt = !!activeModel && (installedModels ?? []).some(m => m.id === activeModel)
 
   /**
    * Ein installiertes Modell waehlen, und zwar so, dass die Wahl im Chat
@@ -452,13 +475,17 @@ export function ModelsStep({ skin, scan, fleet, step, setStep, pulledModels, set
    * Backend-Schritt macht es bei einer bewussten Ollama-Wahl anders, weil
    * dort die PRIMAERE Maschine bestimmt wird, hier ein einzelnes Modell).
    */
-  const waehleInstalliertes = (name: string) => {
+  const waehleInstalliertes = (choice: InstalledChoice) => {
+    // Eine GGUF der LU Engine: die Wahl im Store reicht, denn
+    // `modelStore.setActiveModel` startet die Engine auf `openai::<name>`
+    // selbst um (derselbe Weg wie der Use-Knopf im Model Manager).
+    if (choice.engine === 'lu-engine') { setActiveModel(choice.id); return }
     // Der Guertel zum Hosentraeger oben: einschalten nur, wenn der Nutzer den
     // Anbieter nicht selbst ausgeschaltet hat. Beides zusammen ist EINE Regel,
     // gefragt an der Stelle, die anbietet, und an der, die schreibt.
     if (!mayEnableFromWizard(useProviderStore.getState().providers.ollama)) return
     setProviderConfig('ollama', { enabled: true })
-    setActiveModel(name)
+    setActiveModel(choice.id)
   }
 
   // GGUF download progress from downloadStore
@@ -498,19 +525,22 @@ export function ModelsStep({ skin, scan, fleet, step, setStep, pulledModels, set
         <div className="space-y-1.5">
           <p className={`t-micro ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>Models you already have</p>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-[30vh] overflow-y-auto scrollbar-thin pr-1">
-            {(installedModels ?? []).map((name) => {
-              const gewaehlt = activeModel === name
+            {(installedModels ?? []).map((choice) => {
+              const gewaehlt = activeModel === choice.id
               return (
                 <button
-                  key={name}
-                  onClick={() => waehleInstalliertes(name)}
+                  key={choice.id}
+                  onClick={() => waehleInstalliertes(choice)}
                   className={`flex items-center justify-between gap-2 text-left p-2.5 rounded-lg border transition-colors ${
                     gewaehlt
                       ? isDark ? 'bg-white/10 border-white/30' : 'bg-gray-100 border-gray-900'
                       : isDark ? 'border-white/10 hover:border-white/20' : 'border-gray-200 hover:border-gray-400'
                   }`}
                 >
-                  <span className="t-mono truncate">{name}</span>
+                  <span className="min-w-0 flex flex-col">
+                    <span className="t-mono truncate">{choice.label}</span>
+                    <span className={`t-micro ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>{choice.engine === 'lu-engine' ? LU_ENGINE_NAME : 'Ollama'}</span>
+                  </span>
                   {gewaehlt ? (
                     <Check size={14} className="text-green-600 dark:text-green-400 shrink-0" />
                   ) : (
