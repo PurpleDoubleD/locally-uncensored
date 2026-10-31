@@ -98,11 +98,14 @@ describe('Kimi K3 (offene Gewichte seit 27.07.2026)', () => {
     expect(shown).toHaveLength(ENGINE_OPENS_GATED_ARCHS.has(KIMI_K3_ARCH) ? 3 : 0)
   })
 
-  it('das Tor bleibt zu, solange scripts/build-llama.sh b9949 pinnt (kennt kimi-k3 nicht)', () => {
+  it('das Tor bleibt zu ohne echten Ladelauf (b9949 kennt kimi-k3 nicht, b11960 kennt es, geladen hat es noch niemand)', () => {
     const skript = readFileSync(resolve(hier, '../../../scripts/build-llama.sh'), 'utf8')
     const tag = parsePinnedLlamaTag(skript)
     expect(tag).not.toBeNull()
-    if (tag === 'b9949') expect(ENGINE_OPENS_GATED_ARCHS.size).toBe(0)
+    // E1 (3.0.9): b11960 fuehrt LLM_ARCH_KIMI_K3 in src/llama-arch.cpp. Das
+    // Tor ist trotzdem kein Pin-Schalter: umgelegt wird es erst nach einem
+    // echten Ladelauf (466 GB), siehe Kopf von kimi-k3-catalog.ts.
+    if (tag === 'b9949' || tag === 'b11960') expect(ENGINE_OPENS_GATED_ARCHS.size).toBe(0)
   })
 })
 

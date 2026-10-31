@@ -14,6 +14,9 @@ import { normalizeThinkBudget } from './think-budget'
  *
  *  - LU Engine (llama-server b9949, commit 049326a0): the server itself has
  *    no `reasoning_effort` field (no match anywhere under tools/server).
+ *    b11960 (the pin since 3.0.9, E1) reads a top-level one and writes it
+ *    over the template variable; LU keeps it off the engine's wire
+ *    (openai-provider.ts keepEffortOffEngineTopLevel), so what follows holds.
  *    It passes `chat_template_kwargs` into the model's Jinja template
  *    (tools/server/server-common.cpp), and the templates that know effort
  *    read a `reasoning_effort` variable there (models/templates/

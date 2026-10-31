@@ -364,9 +364,10 @@ impl TensorInfo {
 }
 
 /// (elements per block, bytes per block) of a ggml type, as ggml.c's
-/// `type_traits` define them for the pinned llama.cpp (b9949). The block
-/// sizes were measured with `sizeof(block_*)` from ggml-common.h of that
-/// tree, not copied from documentation.
+/// `type_traits` define them for llama.cpp b9949. The block sizes were
+/// measured with `sizeof(block_*)` from ggml-common.h of that tree, not
+/// copied from documentation. b11960 (the pin since E1, 3.0.9) has the same
+/// type list (up to Q2_0 = 42, GGML_TYPE_COUNT 43) and the same block structs.
 pub fn ggml_type_block(t: u32) -> Option<(u64, u64)> {
     Some(match t {
         0 => (1, 4),     // F32

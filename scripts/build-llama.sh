@@ -52,8 +52,8 @@ set -euo pipefail
 # CI reuses a cached checkout keyed on hashFiles('scripts/build-llama.sh')
 # (release.yml, sidecar-windows.yml), so both values below are inside the cache
 # key by construction — bumping one cannot silently reuse the old source tree.
-LLAMA_TAG="${LLAMA_TAG:-b9949}"
-LLAMA_COMMIT="${LLAMA_COMMIT:-049326a00025d00b08cc188ed716b681e984a3f8}"
+LLAMA_TAG="${LLAMA_TAG:-b11960}"
+LLAMA_COMMIT="${LLAMA_COMMIT:-8642541b255bfb5dc39cd351a178be09013a55d6}"
 LLAMA_REPO="${LLAMA_REPO:-https://github.com/ggml-org/llama.cpp.git}"
 
 # --- Paths -----------------------------------------------------------------
@@ -598,11 +598,20 @@ check_binary() {
   ( cd "$run_dir" && "$bin" --version >/dev/null 2>&1 ) || die "$bin --version failed (run from $run_dir, LD_LIBRARY_PATH=${LD_LIBRARY_PATH:-unset})"
   local port=8129
   log "boot check: $bin on 127.0.0.1:$port, cwd=$run_dir (no model, router mode, /health only)"
-  ( cd "$run_dir" && "$bin" --host 127.0.0.1 --port "$port" >/dev/null 2>&1 ) &
+  # exec: $! has to be the server itself. Without it $! was the subshell, the
+  # kill below ended only that, and a check that failed (E1: the 9 s Metal
+  # first start) left a llama-server holding port 8129 behind.
+  ( cd "$run_dir" && exec "$bin" --host 127.0.0.1 --port "$port" >/dev/null 2>&1 ) &
   local pid=$!
   trap 'kill "$pid" 2>/dev/null || true' EXIT
   local ok=""
-  for _ in $(seq 1 30); do
+  # E1 (b11960): the first start of a freshly built Metal binary compiles its
+  # embedded shader libraries (measured 9.3 s on an M5 Pro, "loaded 36
+  # libraries ... in 9.314 sec"; later starts come out of the system's shader
+  # cache in 0.3 s). The 9 s this loop used to allow is exactly that first
+  # start, so it waits up to 60 s now.
+  # BUILD_LLAMA_CHECK_TRIES only for build-llama-script.test.ts.
+  for _ in $(seq 1 "${BUILD_LLAMA_CHECK_TRIES:-200}"); do
     if curl -fsS "http://127.0.0.1:$port/health" >/dev/null 2>&1; then ok=1; break; fi
     sleep 0.3
   done

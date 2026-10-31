@@ -112,9 +112,9 @@ pub struct EngineTuning {
     /// GPU layers to offload. <0 = all (999, today's behavior); >=0 explicit
     /// (0 = CPU-only is a valid expert choice on RAM-starved boxes).
     pub gpu_layers: i32,
-    /// Pin model in RAM (`--mlock`).
+    /// Pin model in RAM (`--load-mode mlock`, see `load_mode`).
     pub mlock: bool,
-    /// Disable mmap (`--no-mmap`): slower load, fewer pageouts. On Windows
+    /// Disable mmap (`--load-mode none`): slower load, fewer pageouts. On Windows
     /// a start with layers on the card has it off anyway (`mmap_off`).
     pub no_mmap: bool,
     /// The person chose `ctx` (Settings or the chat's context menu, GH #129
@@ -645,7 +645,8 @@ pub(crate) fn stderr_blames_the_image_part(stderr: &str) -> bool {
 /// the engine never starts. `-m` and `--mmproj` open through UTF-16
 /// (`ggml_fopen`, `open_ifstream_binary`), and so do the slot files
 /// themselves, so it is only this check that fails (read in b9949:
-/// common/arg.cpp, common/common.cpp).
+/// common/arg.cpp, common/common.cpp; unchanged in b11960, arg.cpp still
+/// calls `fs_is_directory` on it).
 ///
 /// An ASCII path passes the check in every code page. A path that is not
 /// ASCII gets its 8.3 short name, when Windows made an ASCII one; a volume
@@ -772,7 +773,7 @@ pub(crate) fn same_measured_request(running: &[String], requested: &[String], ct
         && (ctx_in(running).unwrap_or(0) >= asked || running_asked == Some(asked))
 }
 
-/// Whether a start goes without mmap (`--no-mmap`).
+/// Whether a start goes without mmap (`--load-mode none`, see `load_mode`).
 ///
 /// Discord (21.10.2026): with gemma-4-31b-it-q4_k_m on a 32 GB Windows PC
 /// all memory was in use right after the start, while the engine's own
@@ -792,6 +793,22 @@ pub(crate) fn same_measured_request(running: &[String], requested: &[String], ct
 /// reading it into a second copy would only cost the time.
 pub(crate) fn mmap_off(tuning: &EngineTuning, ngl: &str, windows: bool) -> bool {
     tuning.no_mmap || (windows && ngl != "0")
+}
+
+/// The `--load-mode` value for the two load settings, `None` for neither.
+///
+/// 3.0.9 (E1): llama.cpp b11960 removed `--mlock` and `--no-mmap` (upstream
+/// #20834 folded them into `--load-mode`, #28334 dropped the old spellings),
+/// and an argument the server does not know ends it before it loads. Same
+/// meaning as before: `mlock` alone kept the mapping and pinned it, both
+/// together read the file into memory and pinned that.
+pub(crate) fn load_mode(mlock: bool, no_mmap: bool) -> Option<&'static str> {
+    match (mlock, no_mmap) {
+        (false, false) => None,
+        (false, true) => Some("none"),
+        (true, false) => Some("mmap+mlock"),
+        (true, true) => Some("mlock"),
+    }
 }
 
 /// Build the `llama-server` argv for a chat engine.
@@ -866,11 +883,9 @@ pub(crate) fn server_args(
         args.push("-t".into());
         args.push(tuning.threads.to_string());
     }
-    if tuning.mlock {
-        args.push("--mlock".into());
-    }
-    if no_mmap {
-        args.push("--no-mmap".into());
+    if let Some(mode) = load_mode(tuning.mlock, no_mmap) {
+        args.push("--load-mode".into());
+        args.push(mode.into());
     }
     // 3.0.8 (A25): what the VRAM plan decided beyond the layer count. The
     // experts of the first layers of an MoE model stay on the processor
@@ -2193,12 +2208,13 @@ pub(crate) fn pick_save_slot(slots: &serde_json::Value) -> u32 {
 }
 
 /// Whether llama-server can save and restore a slot for an engine started with
-/// these arguments. Not with an image part: in the pinned b9949 every slot
-/// save, restore and erase first runs `check_no_mtmd`, which answers 501 "This
-/// feature is not supported by multimodal" as soon as a projector is loaded
-/// (tools/server/server-context.cpp). No flag of that build lifts the check
-/// while the projector stays loaded. `--no-mmproj` turns the image part off
-/// and counts as without one.
+/// these arguments. Not with an image part: in b9949 every slot save, restore
+/// and erase first ran `check_no_mtmd`, which answered 501 "This feature is
+/// not supported by multimodal" as soon as a projector was loaded
+/// (tools/server/server-context.cpp). b11960 (E1, 3.0.9) no longer has that
+/// check; until a hand-off with an image part has been measured on the card
+/// it stays off here. `--no-mmproj` turns the image part off and counts as
+/// without one.
 pub(crate) fn kv_handoff_possible(args: &[String]) -> bool {
     !args.iter().any(|a| {
         let flag = a.split('=').next().unwrap_or(a);
@@ -6267,7 +6283,7 @@ mod tests {
     #[test]
     fn windows_starts_without_mmap_when_layers_go_to_the_card() {
         let auto = EngineTuning::default();
-        let has = |args: &[String]| args.iter().any(|a| a == "--no-mmap");
+        let has = |args: &[String]| args.windows(2).any(|w| w[0] == "--load-mode" && w[1] == "none");
         // Every layer on the card, a measured count, and the engine's own fit.
         assert!(has(&server_args("/m.gguf", &auto, 8127, None, None, None, true)));
         assert!(has(&server_args("/m.gguf", &auto, 8127, None, None, Some(35), true)));
@@ -6277,13 +6293,13 @@ mod tests {
         // Once, also when the user ticked it as well.
         let ticked = EngineTuning { no_mmap: true, ..Default::default() };
         let args = server_args("/m.gguf", &ticked, 8127, None, None, None, true);
-        assert_eq!(args.iter().filter(|a| *a == "--no-mmap").count(), 1);
+        assert_eq!(args.iter().filter(|a| *a == "--load-mode").count(), 1);
     }
 
     #[test]
     fn windows_keeps_mmap_on_the_processor_and_other_systems_keep_it_always() {
         let auto = EngineTuning::default();
-        let has = |args: &[String]| args.iter().any(|a| a == "--no-mmap");
+        let has = |args: &[String]| args.windows(2).any(|w| w[0] == "--load-mode" && w[1] == "none");
         // Every layer on the processor: the mapping is the model.
         let cpu = EngineTuning { gpu_layers: 0, ..Default::default() };
         assert!(!has(&server_args("/m.gguf", &cpu, 8127, None, None, None, true)));
@@ -6416,7 +6432,7 @@ mod tests {
     #[test]
     fn the_flag_follows_the_machine_it_is_built_for() {
         let args = super::build_server_args("/m.gguf", &EngineTuning::default(), 8127, None, None, None);
-        assert_eq!(args.iter().any(|a| a == "--no-mmap"), cfg!(target_os = "windows"));
+        assert_eq!(args.iter().any(|a| a == "--load-mode"), cfg!(target_os = "windows"));
     }
 
     #[test]
@@ -6763,10 +6779,84 @@ mod tests {
                 "-ctk", "q8_0",
                 "-ctv", "q8_0",
                 "-t", "8",
-                "--mlock",
-                "--no-mmap",
+                "--load-mode", "mlock",
             ]
         );
+    }
+
+    /// E1 (3.0.9): every option LU hands the bundled llama.cpp, checked
+    /// against the option list of the pinned tag. b11960 dropped `--mlock`
+    /// and `--no-mmap`, and an option the server does not know ends it before
+    /// it loads a byte: nothing but a real start would have shown that. The
+    /// list is per tag (fixtures/llama-flags/<tag>.txt), so a bump without a
+    /// new list turns this red, and a new list shows every option that went.
+    #[test]
+    fn flags_lu_passes_exist_in_the_pinned_engine() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let script = std::fs::read_to_string(root.join("../scripts/build-llama.sh")).unwrap();
+        let tag = script
+            .lines()
+            .find_map(|l| l.strip_prefix("LLAMA_TAG=\"${LLAMA_TAG:-")?.strip_suffix("}\""))
+            .expect("LLAMA_TAG in build-llama.sh");
+        let list = std::fs::read_to_string(root.join(format!("fixtures/llama-flags/{tag}.txt")))
+            .unwrap_or_else(|_| panic!("fixtures/llama-flags/{tag}.txt is missing: make it from common/arg.cpp of {tag} (see its first lines)"));
+        let known: std::collections::HashSet<&str> = list.lines().filter(|l| l.starts_with('-')).collect();
+
+        let everything = EngineTuning {
+            ctx: 16384,
+            flash_attn: "on".into(),
+            cache_type_k: "q8_0".into(),
+            cache_type_v: "q8_0".into(),
+            threads: 8,
+            gpu_layers: 20,
+            mlock: true,
+            no_mmap: true,
+            plan_cpu_moe: 4,
+            plan_cache_ram_mib: Some(2048),
+            control_vector: Some("/cv.gguf".into()),
+            ..Default::default()
+        };
+        let mut argvs = vec![
+            server_args("/m/qwen.gguf", &everything, 8127, Some("/slots"), Some("/m/qwen.mmproj.gguf"), None, true),
+            server_args("/m.gguf", &EngineTuning::default(), 8127, None, None, None, false),
+            build_embed_args("/e.gguf", 8128),
+        ];
+        // spawn_private_server_with, the GPU choice and the device probe,
+        // and the Neuron tweaker's generator (neuron/mod.rs `generate`).
+        argvs.push(["-c", "-np", "--device", "--list-devices", "--control-vector"].map(String::from).to_vec());
+        argvs.push(["--positive-file", "--negative-file", "-o", "--method", "-ngl", "-c"].map(String::from).to_vec());
+        let src = std::fs::read_to_string(root.join("src/commands/neuron/mod.rs")).unwrap();
+        for flag in ["\"--positive-file\"", "\"--negative-file\"", "\"--method\""] {
+            assert!(src.contains(flag), "the generator call changed, update this list: {flag}");
+        }
+        for argv in &argvs {
+            for a in argv.iter().filter(|a| a.starts_with('-') && a.parse::<f64>().is_err()) {
+                assert!(known.contains(a.as_str()), "llama.cpp {tag} has no option {a} (argv {argv:?})");
+            }
+        }
+    }
+
+    #[test]
+    fn load_settings_become_one_load_mode_the_pinned_engine_knows() {
+        // E1: b11960 ends on `--mlock` and `--no-mmap` ("invalid argument"),
+        // so neither may ever reach the argv again, in any combination.
+        assert_eq!(load_mode(false, false), None);
+        assert_eq!(load_mode(false, true), Some("none"));
+        assert_eq!(load_mode(true, false), Some("mmap+mlock"));
+        assert_eq!(load_mode(true, true), Some("mlock"));
+        for (mlock, no_mmap) in [(false, false), (false, true), (true, false), (true, true)] {
+            let tuning = EngineTuning { mlock, no_mmap, ..Default::default() };
+            for windows in [false, true] {
+                let args = server_args("/m.gguf", &tuning, 8127, None, None, None, windows);
+                assert!(!args.iter().any(|a| a == "--mlock" || a == "--no-mmap" || a == "--mmap"), "{args:?}");
+                assert!(args.iter().filter(|a| *a == "--load-mode").count() <= 1, "{args:?}");
+            }
+        }
+        // Windows with layers on the card reads the file in, and a ticked
+        // mlock pins that copy.
+        let pinned = EngineTuning { mlock: true, ..Default::default() };
+        let args = server_args("/m.gguf", &pinned, 8127, None, None, None, true);
+        assert!(args.windows(2).any(|w| w[0] == "--load-mode" && w[1] == "mlock"), "{args:?}");
     }
 
     #[test]
@@ -6805,8 +6895,7 @@ mod tests {
             "-ctk q8_0",
             "-ctv q4_0",
             "-t 6",
-            "--mlock",
-            "--no-mmap",
+            "--load-mode mlock",
             "--slot-save-path /slots",
         ] {
             assert!(line.contains(wanted), "{wanted:?} missing from:\n{line}");
@@ -6829,7 +6918,7 @@ mod tests {
             Path::new("/opt/lu/lu-llama-server"),
             &build_server_args("/m.gguf", &EngineTuning::default(), 8127, None, None, None),
         );
-        for unwanted in ["-ctk", "-ctv", "-fa", "-t ", "--mlock", "--no-mmap", "--mmproj", "--slot-save-path"] {
+        for unwanted in ["-ctk", "-ctv", "-fa", "-t ", "--load-mode", "--mmproj", "--slot-save-path"] {
             assert!(!line.contains(unwanted), "{unwanted:?} invented in:\n{line}");
         }
         assert!(line.contains("-ngl 999"), "{line}");
