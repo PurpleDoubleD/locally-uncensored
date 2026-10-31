@@ -121,10 +121,15 @@ describe('B43: the assistant in the composer', () => {
 })
 
 describe('B43: where it sits', () => {
-  it('next to the prompt history in the composer, writing into the prompt', async () => {
+  it('in the prompt field\'s corner, writing into the prompt, and not in the action bar', async () => {
+    // FEHLER-Q4 #2: in the action bar it took the width the model chip needs
+    // to show its whole name at 760 px (e2e/mac-persona-walk.spec.ts).
     const { readFileSync } = await import('node:fs')
     const { resolve } = await import('node:path')
     const src = readFileSync(resolve(__dirname, '../Composer.tsx'), 'utf8')
-    expect(src).toMatch(/\{needPrompt && <PromptAssistant onUse=\{setPrompt\} \/>\}\n\s*\{needPrompt && <PromptHistory/)
+    expect(src.match(/<PromptAssistant /g)).toHaveLength(1)
+    expect(src).toMatch(/<div className="absolute top-2 right-2">\s*<PromptAssistant onUse=\{setPrompt\} align="right" \/>\s*<\/div>\s*<PromptField\s+className="pr-7"/)
+    const bar = src.slice(src.indexOf('{/* Action bar */}'))
+    expect(bar).not.toContain('<PromptAssistant')
   })
 })

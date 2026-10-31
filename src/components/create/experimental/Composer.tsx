@@ -399,8 +399,16 @@ export function Composer({ onOpenAdvanced, onOpenWorkflows }: Props) {
 
         <div className="rounded-[var(--radius-panel)] bg-white/[0.03] border border-white/[0.06] focus-within:border-white/15 transition-colors">
           {needPrompt && (
-            <div className="px-3.5 pt-3">
+            // The prompt assistant (B43) sits in the field's corner, not in the
+            // action bar: there every pixel is the model chip's, whose whole
+            // name has to fit at 760 px (FEHLER-Q4 #2). The field keeps its
+            // width and only leaves room for the button inside (pr-7).
+            <div className="relative px-3.5 pt-3">
+              <div className="absolute top-2 right-2">
+                <PromptAssistant onUse={setPrompt} align="right" />
+              </div>
               <PromptField
+                className="pr-7"
                 value={prompt}
                 onChange={setPrompt}
                 placeholder={
@@ -506,7 +514,6 @@ export function Composer({ onOpenAdvanced, onOpenWorkflows }: Props) {
                 Negative
               </button>
             )}
-            {needPrompt && <PromptAssistant onUse={setPrompt} />}
             {needPrompt && <PromptHistory onPick={setPrompt} />}
             <div className="flex-1" />
             {/* The backend axis moved to the global header switch (2.5.7) —
