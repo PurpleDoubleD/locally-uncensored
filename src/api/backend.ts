@@ -678,6 +678,7 @@ export async function backendCall<T = unknown>(
     neuron_info: { path: "/local-api/neuron-info", method: "POST" },
     neuron_build: { path: "/local-api/neuron-build", method: "POST" },
     neuron_feature_add: { path: "/local-api/neuron-feature-add", method: "POST" },
+    neuron_mlp_add: { path: "/local-api/neuron-mlp-add", method: "POST" },
     neuron_delete: { path: "/local-api/neuron-delete", method: "POST" },
     neuron_sae_download: { path: "/local-api/neuron-sae-download", method: "POST" },
     neuron_sae_search: { path: "/local-api/neuron-sae-search", method: "POST" },

@@ -799,6 +799,8 @@ pub fn run() {
             #[cfg(desktop)]
             commands::neuron::neuron_feature_add,
             #[cfg(desktop)]
+            commands::neuron::neuron_mlp_add,
+            #[cfg(desktop)]
             commands::neuron::neuron_delete,
             #[cfg(desktop)]
             commands::neuron::neuron_sae_download,
