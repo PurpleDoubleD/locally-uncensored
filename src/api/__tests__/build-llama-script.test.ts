@@ -1,7 +1,7 @@
 import { describe, it, expect, afterAll } from 'vitest'
 import { execFileSync } from 'node:child_process'
 import { resolve, join } from 'node:path'
-import { existsSync, statSync, mkdtempSync, rmSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, statSync, mkdtempSync, rmSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { createServer } from 'node:net'
 import { asNumber, prop } from '../../types/json-guards'
@@ -578,6 +578,34 @@ cmake() {
     expect(r.calls.filter((c) => c.startsWith('configure '))).toHaveLength(1)
     expect(r.calls).toContain(`build ${server} llama-cvector-generator`)
     expect(existsSync(join(r.repoRoot, 'src-tauri', 'bin', 'lu-llama-cvector-generator-aarch64-apple-darwin'))).toBe(true)
+  })
+
+  // P11's patches 0003 (progress line) and 0004 (LU_LAYER_NORMS, the unit of
+  // a single-neuron dose) come into every build through the patch directory;
+  // CI runs the built tool on each platform and reads both.
+  it('CI runs the patched tool for real on Mac, Windows and Linux', () => {
+    const patches = readdirSync(join(REPO_ROOT, 'scripts', 'llama-patches'))
+    expect(patches).toContain('0003-cvector-generator-progress-flush.patch')
+    expect(patches).toContain('0004-cvector-generator-layer-norms.patch')
+    const steps = (workflow: string) =>
+      readFileSync(resolve(REPO_ROOT, workflow), 'utf8')
+        .split(/^ {6}- name: /m)
+        .filter((step) => step.startsWith('"Vector tool computes'))
+    const release = steps('.github/workflows/release.yml')
+    const windows = steps('.github/workflows/sidecar-windows.yml')
+    expect(release.map((s) => s.match(/^\s+if: (.*)$/m)?.[1] ?? 'mac')).toEqual([
+      "matrix.sidecar_triple == 'x86_64-unknown-linux-gnu'",
+      "matrix.sidecar_triple == 'x86_64-pc-windows-msvc'",
+      'mac',
+    ])
+    expect(windows).toHaveLength(1)
+    for (const step of [...release, ...windows]) {
+      expect(step).toContain('stories260K.gguf')
+      expect(step).toContain('--method mean')
+      expect(step).toContain('Evaluating prompt')
+      expect(step).toMatch(/LU_LAYER_NORMS\s*=\s*'?1/)
+      expect(step).toContain('^LU norm [0-9]+ [0-9]+')
+    }
   })
 })
 
