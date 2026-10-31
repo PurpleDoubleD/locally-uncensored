@@ -27,14 +27,30 @@ describe('tray menu lines (T2)', () => {
     expect(cloudTrayStatus({ ...signedIn, licenseActive: false }).lines[1]).toEqual({ text: 'No active plan', dot: 'grey' })
   })
 
-  it('cloud: signed out and still asking say so in one line', () => {
-    expect(cloudTrayStatus({ ...signedIn, signedIn: false }).lines).toEqual([{ text: 'LU Cloud · Signed out' }])
-    expect(cloudTrayStatus({ ...signedIn, probing: true }).lines).toEqual([{ text: 'LU Cloud · Connecting…' }])
+  it('cloud: signed out and still asking keep the three lines', () => {
+    expect(cloudTrayStatus({ ...signedIn, signedIn: false }).lines.map((l) => l.text)).toEqual([
+      'LU Cloud · Signed out',
+      'No plan',
+      'Sign in under Plan & Credits',
+    ])
+    expect(cloudTrayStatus({ ...signedIn, probing: true }).lines.map((l) => l.text)).toEqual(['LU Cloud · Connecting…', 'Plan …', 'Credits …'])
   })
 
-  it('cloud: unknown credits leave the line out, never a 0', () => {
-    expect(cloudTrayStatus({ ...signedIn, credits: null }).lines).toHaveLength(2)
+  it('cloud: unknown credits say so, never a 0', () => {
+    expect(cloudTrayStatus({ ...signedIn, credits: null }).lines[2].text).toBe('Credits …')
     expect(cloudTrayStatus({ ...signedIn, credits: -3.5 }).lines[2].text).toBe('0 credits left')
+  })
+
+  it('every state has three lines, so the open menu is never rebuilt (and closed)', () => {
+    const states = [
+      cloudTrayStatus(signedIn),
+      cloudTrayStatus({ ...signedIn, signedIn: false }),
+      cloudTrayStatus({ ...signedIn, probing: true }),
+      cloudTrayStatus({ ...signedIn, pastDue: true, credits: null }),
+      localTrayStatus({ engine: null, model: null, state: 'unknown', memory: null }),
+      localTrayStatus({ engine: 'LU Engine', model: 'm', state: 'ready', memory: { label: 'Memory', usedGb: 1, totalGb: 8 } }),
+    ]
+    for (const s of states) expect(s.lines).toHaveLength(3)
   })
 
   it('a tier without a known name still reads like one', () => {
@@ -65,6 +81,7 @@ describe('tray menu lines (T2)', () => {
     expect(localTrayStatus({ engine: null, model: null, state: 'unknown', memory: null }).lines).toEqual([
       { text: 'Local' },
       { text: 'No model selected', dot: 'grey' },
+      { text: 'Memory …' },
     ])
     expect(localTrayStatus({ engine: 'Ollama', model: 'm', state: 'engine-off', memory: null }).lines[1]).toEqual({ text: 'm · not running', dot: 'amber' })
     expect(localTrayStatus({ engine: 'LM Studio', model: 'm', state: 'unknown', memory: null }).lines[1]).toEqual({ text: 'm' })

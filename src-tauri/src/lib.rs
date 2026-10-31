@@ -1401,7 +1401,7 @@ pub fn run() {
             #[cfg(desktop)]
             app.manage(tray_menu::TrayMenuState::<tauri::Wry>::default());
             #[cfg(desktop)]
-            let (menu, menu_infos) = tray_menu::build_menu(app, &tray_menu::TrayStatus::default())?;
+            let (menu, menu_items) = tray_menu::build_menu(app, &tray_menu::TrayStatus::default())?;
 
             // GH #204: on Linux the tray needs libayatana-appindicator, and
             // building it without that library aborts the whole app. Without
@@ -1433,13 +1433,14 @@ pub fn run() {
                     .menu(&menu)
                     .on_menu_event(|app, event| {
                         let id = event.id().as_ref();
-                        let action = tray_menu::TrayAction::from_id(id);
                         match id {
-                            tray_menu::OPEN_ID | "tray-plan" | "tray-models" => {
+                            tray_menu::OPEN_ID | tray_menu::ACTION_ID => {
                                 onboarding_window::bring_to_front(app);
                                 // The page opens Plan & Credits or Models.
-                                if let Some(action) = action {
-                                    let _ = app.emit(tray_menu::ACTION_EVENT, action.event_name());
+                                if id == tray_menu::ACTION_ID {
+                                    if let Some(action) = tray_menu::current_action(app) {
+                                        let _ = app.emit(tray_menu::ACTION_EVENT, action.event_name());
+                                    }
                                 }
                             }
                             tray_menu::QUIT_ID => {
@@ -1470,7 +1471,7 @@ pub fn run() {
                         }
                     })
                     .build(app)?;
-                tray_menu::remember(app.handle(), tray_menu::TrayStatus::default(), menu_infos);
+                tray_menu::remember(app.handle(), tray_menu::TrayStatus::default(), menu_items);
             }
 
             // ─── Close → hide to tray instead of quit ───

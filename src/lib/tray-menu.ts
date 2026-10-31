@@ -10,6 +10,10 @@
 //   Plan & Credits…                 Models…
 //
 // No e-mail address in the menu (David, 31.10.), only "Signed in".
+//
+// Always three lines: a different count makes the Rust side build a new
+// menu, and a new menu closes one that is open (Mac test build, 31.10.).
+// So a state with nothing to say on a line says so instead of leaving it out.
 
 import { PLAN_NAMES } from './past-due'
 
@@ -39,8 +43,15 @@ export function planName(tier: string): string {
 }
 
 export function cloudTrayStatus(c: TrayCloudInput): TrayStatus {
-  if (c.probing) return { lines: [{ text: 'LU Cloud · Connecting…' }], action: 'plan' }
-  if (!c.signedIn) return { lines: [{ text: 'LU Cloud · Signed out' }], action: 'plan' }
+  if (c.probing) {
+    return { lines: [{ text: 'LU Cloud · Connecting…' }, { text: 'Plan …', dot: 'grey' }, { text: 'Credits …' }], action: 'plan' }
+  }
+  if (!c.signedIn) {
+    return {
+      lines: [{ text: 'LU Cloud · Signed out' }, { text: 'No plan', dot: 'grey' }, { text: 'Sign in under Plan & Credits' }],
+      action: 'plan',
+    }
+  }
   const lines: TrayLine[] = [{ text: 'LU Cloud · Signed in' }]
   if (c.pastDue) {
     lines.push({ text: `${c.tier ? `${planName(c.tier)} plan` : 'Plan'} · payment failed`, dot: 'amber' })
@@ -49,9 +60,9 @@ export function cloudTrayStatus(c: TrayCloudInput): TrayStatus {
   } else {
     lines.push({ text: 'No active plan', dot: 'grey' })
   }
-  if (c.credits !== null) {
-    lines.push({ text: `${Math.max(0, Math.floor(c.credits)).toLocaleString('en-US')} credits left` })
-  }
+  lines.push({
+    text: c.credits === null ? 'Credits …' : `${Math.max(0, Math.floor(c.credits)).toLocaleString('en-US')} credits left`,
+  })
   return { lines, action: 'plan' }
 }
 
@@ -84,8 +95,11 @@ export function localTrayStatus(l: TrayLocalInput): TrayStatus {
     const s = STATE_WORDS[l.state]
     lines.push(s ? { text: `${l.model} · ${s.word}`, dot: s.dot } : { text: l.model })
   }
-  if (l.memory && l.memory.totalGb > 0) {
-    lines.push({ text: `${l.memory.label} ${l.memory.usedGb.toFixed(1)} of ${Math.round(l.memory.totalGb)} GB` })
-  }
+  lines.push({
+    text:
+      l.memory && l.memory.totalGb > 0
+        ? `${l.memory.label} ${l.memory.usedGb.toFixed(1)} of ${Math.round(l.memory.totalGb)} GB`
+        : 'Memory …',
+  })
   return { lines, action: 'models' }
 }

@@ -87,7 +87,7 @@ describe('tray sync (T2)', () => {
 
   it('a cloud model kept from the Cloud mode is not shown as the local model', () => {
     useModelStore.setState({ activeModel: 'lu-cloud::moonshotai/Kimi-K2.6' })
-    expect(currentTrayStatus().lines.map((l) => l.text)).toEqual(['Local', 'No model selected'])
+    expect(currentTrayStatus().lines.map((l) => l.text).slice(0, 2)).toEqual(['Local', 'No model selected'])
   })
 
   it('cloud mode: "Signed in", plan, credits incl. bought ones, never the e-mail', () => {

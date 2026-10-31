@@ -12,11 +12,16 @@
 //
 // The grey lines are disabled items. The frontend knows the account, the
 // engine and the model, so it sends the lines (`tray_update`); this side
-// only checks and lays them out. The action is one of two fixed ids with
+// only checks and lays them out. The action is one of two fixed actions with
 // labels from here, so a page can change what the menu says but never what
 // a click does. A click on the icon emits `lu-tray-opened`, and the frontend
 // answers with fresh lines; texts change in place, so a menu that is
 // already open on a Mac updates while it is open.
+//
+// Only a different number of grey lines builds a new menu, and a new menu
+// closes one that is open (seen in the Mac test build, 31.10.). So the action
+// is one item whose label changes, and the page keeps the line count steady
+// (three lines in every state once the memory figure is in).
 
 use serde::Deserialize;
 
@@ -28,6 +33,9 @@ pub(crate) const OPENED_EVENT: &str = "lu-tray-opened";
 pub(crate) const ACTION_EVENT: &str = "lu-tray-action";
 
 pub(crate) const OPEN_ID: &str = "open";
+/// The one action item: "Plan & Credits…" or "Models…", whichever the
+/// current status names.
+pub(crate) const ACTION_ID: &str = "tray-action";
 pub(crate) const QUIT_ID: &str = "quit";
 const INFO_ID_PREFIX: &str = "info-";
 
@@ -52,12 +60,6 @@ pub(crate) enum TrayAction {
 }
 
 impl TrayAction {
-    pub(crate) fn id(self) -> &'static str {
-        match self {
-            TrayAction::Plan => "tray-plan",
-            TrayAction::Models => "tray-models",
-        }
-    }
     pub(crate) fn label(self) -> &'static str {
         match self {
             TrayAction::Plan => "Plan & Credits…",
@@ -70,9 +72,6 @@ impl TrayAction {
             TrayAction::Plan => "plan",
             TrayAction::Models => "models",
         }
-    }
-    pub(crate) fn from_id(id: &str) -> Option<TrayAction> {
-        [TrayAction::Plan, TrayAction::Models].into_iter().find(|a| a.id() == id)
     }
 }
 
@@ -144,10 +143,11 @@ pub(crate) fn layout(status: &TrayStatus) -> Vec<Row> {
     rows
 }
 
-/// Two statuses with the same shape differ only in texts and dots, which
-/// change in place. Anything else needs a new menu.
+/// Two statuses with the same shape differ only in texts, dots and which
+/// action the action item names, all of which change in place. Anything else
+/// needs a new menu.
 pub(crate) fn same_shape(a: &TrayStatus, b: &TrayStatus) -> bool {
-    a.lines.len() == b.lines.len() && a.action == b.action
+    a.lines.len() == b.lines.len() && a.action.is_some() == b.action.is_some()
 }
 
 #[cfg(desktop)]
@@ -200,7 +200,13 @@ mod desktop {
 
     struct Live<R: Runtime> {
         status: TrayStatus,
+        items: MenuItems<R>,
+    }
+
+    /// The items whose text changes in place.
+    pub(crate) struct MenuItems<R: Runtime> {
         infos: Vec<IconMenuItem<R>>,
+        action: Option<MenuItem<R>>,
     }
 
     impl<R: Runtime> Default for TrayMenuState<R> {
@@ -213,13 +219,15 @@ mod desktop {
         dot.map(|d| Image::new_owned(dot_rgba(d, DOT_SIZE), DOT_SIZE, DOT_SIZE))
     }
 
-    /// Build the menu for `status`. Returns the menu and the info items.
+    /// Build the menu for `status`. Returns the menu and the items that
+    /// change in place.
     pub(crate) fn build_menu<R: Runtime, M: Manager<R>>(
         app: &M,
         status: &TrayStatus,
-    ) -> tauri::Result<(Menu<R>, Vec<IconMenuItem<R>>)> {
+    ) -> tauri::Result<(Menu<R>, MenuItems<R>)> {
         let menu = Menu::new(app)?;
         let mut infos = Vec::new();
+        let mut action = None;
         for (i, row) in layout(status).into_iter().enumerate() {
             match row {
                 Row::Info(line) => {
@@ -235,7 +243,11 @@ mod desktop {
                     infos.push(item);
                 }
                 Row::Separator => menu.append(&PredefinedMenuItem::separator(app)?)?,
-                Row::Action(a) => menu.append(&MenuItem::with_id(app, a.id(), a.label(), true, None::<&str>)?)?,
+                Row::Action(a) => {
+                    let item = MenuItem::with_id(app, ACTION_ID, a.label(), true, None::<&str>)?;
+                    menu.append(&item)?;
+                    action = Some(item);
+                }
                 Row::Open => menu.append(&MenuItem::with_id(app, OPEN_ID, "Open LU", true, None::<&str>)?)?,
                 Row::Quit => {
                     // ⌘Q next to Quit, as in every Mac menu. On Windows and
@@ -248,7 +260,7 @@ mod desktop {
                 }
             }
         }
-        Ok((menu, infos))
+        Ok((menu, MenuItems { infos, action }))
     }
 
     /// Show `status` in the tray menu. Same shape: texts and dots change in
@@ -260,7 +272,7 @@ mod desktop {
         let status = sanitize(status);
         let mut live = state.inner.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(cur) = live.as_mut().filter(|cur| same_shape(&cur.status, &status)) {
-            for (item, (old, new)) in cur.infos.iter().zip(cur.status.lines.iter().zip(&status.lines)) {
+            for (item, (old, new)) in cur.items.infos.iter().zip(cur.status.lines.iter().zip(&status.lines)) {
                 if old.text != new.text {
                     item.set_text(&new.text)?;
                 }
@@ -268,27 +280,39 @@ mod desktop {
                     item.set_icon(dot_image(new.dot))?;
                 }
             }
+            if let (Some(item), Some(new)) = (&cur.items.action, status.action) {
+                if cur.status.action != Some(new) {
+                    item.set_text(new.label())?;
+                }
+            }
             cur.status = status;
             return Ok(());
         }
-        let (menu, infos) = build_menu(app, &status)?;
+        let (menu, items) = build_menu(app, &status)?;
         tray.set_menu(Some(menu))?;
-        *live = Some(Live { status, infos });
+        *live = Some(Live { status, items });
         Ok(())
+    }
+
+    /// The action the action item names right now.
+    pub(crate) fn current_action<R: Runtime>(app: &AppHandle<R>) -> Option<TrayAction> {
+        let state = app.try_state::<TrayMenuState<R>>()?;
+        let live = state.inner.lock().unwrap_or_else(|e| e.into_inner());
+        live.as_ref()?.status.action
     }
 
     /// Record the menu the tray was built with, so the first update can
     /// change it in place.
-    pub(crate) fn remember<R: Runtime>(app: &AppHandle<R>, status: TrayStatus, infos: Vec<IconMenuItem<R>>) {
+    pub(crate) fn remember<R: Runtime>(app: &AppHandle<R>, status: TrayStatus, items: MenuItems<R>) {
         if let Some(state) = app.try_state::<TrayMenuState<R>>() {
-            *state.inner.lock().unwrap_or_else(|e| e.into_inner()) = Some(Live { status, infos });
+            *state.inner.lock().unwrap_or_else(|e| e.into_inner()) = Some(Live { status, items });
         }
     }
 
-    /// Memory in use for the menu's third line, measured where it can be:
-    /// an NVIDIA card through nvidia-smi ("GPU memory"), a Mac's unified
-    /// memory through sysinfo ("Memory": the model lives there). Elsewhere
-    /// nothing measures the card, and the line is left out.
+    /// Memory in use for the menu's third line: an NVIDIA card through
+    /// nvidia-smi ("GPU memory"), otherwise the computer's memory through
+    /// sysinfo ("Memory"; on a Mac that is where the model lives, the
+    /// unified memory). `None` only when neither can be read.
     #[derive(Debug, Clone, PartialEq, serde::Serialize)]
     #[serde(rename_all = "camelCase")]
     pub(crate) struct TrayMemory {
@@ -307,17 +331,10 @@ mod desktop {
         if let Some((free, total)) = crate::commands::gpu::nvidia_memory_mib() {
             return Some(memory_line("GPU memory", (total - free) as f64 / 1024.0, total as f64 / 1024.0));
         }
-        #[cfg(target_os = "macos")]
-        {
-            let mut sys = sysinfo::System::new();
-            sys.refresh_memory();
-            let total = sys.total_memory() as f64 / GIB;
-            if total > 0.0 {
-                return Some(memory_line("Memory", sys.used_memory() as f64 / GIB, total));
-            }
-        }
-        let _ = GIB;
-        None
+        let mut sys = sysinfo::System::new();
+        sys.refresh_memory();
+        let total = sys.total_memory() as f64 / GIB;
+        (total > 0.0).then(|| memory_line("Memory", sys.used_memory() as f64 / GIB, total))
     }
 
     /// The frontend's lines for the tray menu.
@@ -402,21 +419,23 @@ mod tests {
         assert!(serde_json::from_str::<TrayStatus>(r#"{"action":"delete-everything"}"#).is_err());
         let s: TrayStatus = serde_json::from_str(r#"{"lines":[{"text":"x","dot":"green"}],"action":"models"}"#).unwrap();
         assert_eq!(s.action, Some(TrayAction::Models));
-        assert_eq!(TrayAction::from_id("tray-models"), Some(TrayAction::Models));
-        assert_eq!(TrayAction::from_id("open"), None);
         assert_eq!(TrayAction::Plan.label(), "Plan & Credits…");
+        assert_eq!(TrayAction::Models.event_name(), "models");
     }
 
     #[test]
-    fn texts_and_dots_change_in_place_but_a_new_line_count_rebuilds() {
+    fn texts_dots_and_the_action_change_in_place_but_a_new_line_count_rebuilds() {
+        // A rebuild closes a menu that is open, so Local ↔ Cloud with three
+        // lines each must not be one.
         let a = TrayStatus { lines: vec![line("x"), line("y")], action: Some(TrayAction::Models) };
         let mut b = a.clone();
         b.lines[1] = TrayLine { text: "z".into(), dot: Some(TrayDot::Amber) };
         assert!(same_shape(&a, &b));
+        let c = TrayStatus { action: Some(TrayAction::Plan), ..a.clone() };
+        assert!(same_shape(&a, &c));
         b.lines.push(line("w"));
         assert!(!same_shape(&a, &b));
-        let c = TrayStatus { action: Some(TrayAction::Plan), ..a.clone() };
-        assert!(!same_shape(&a, &c));
+        assert!(!same_shape(&a, &TrayStatus { action: None, ..a.clone() }));
     }
 
     #[test]
