@@ -33,7 +33,7 @@ export const useNeuronStore = create<NeuronState>()(
       profiles: {},
       scopeByModel: {},
       setStrength: (key, id, value) =>
-        set((s) => ({ profiles: { ...s.profiles, [key]: { ...(s.profiles[key] ?? {}), [id]: clampStrength(value) } } })),
+        set((s) => ({ profiles: { ...s.profiles, [key]: { ...(s.profiles[key] ?? {}), [id]: clampStrength(value, id) } } })),
       setProfile: (key, strengths) => set((s) => ({ profiles: { ...s.profiles, [key]: strengths } })),
       removeProfile: (key) =>
         set((s) => {
