@@ -1,18 +1,21 @@
 name: Windows sidecar build + boot smoke
 
 # Proves the bundled llama.cpp sidecar builds and BOOTS on Windows without
-# waiting for a full release: runs when the build script (or this workflow)
-# changes, weekly against runner-image drift, and on demand. The GGML Vulkan
-# build keeps its CPU backend, so /health comes up on the GPU-less runner.
+# waiting for a full release: runs when the build script, LU's llama.cpp
+# patches (or this workflow) change, weekly against runner-image drift, and
+# on demand. The GGML Vulkan build keeps its CPU backend, so /health comes up
+# on the GPU-less runner.
 on:
   push:
     branches: [master]
     paths:
       - 'scripts/build-llama.sh'
+      - 'scripts/llama-patches/**'
       - '.github/workflows/sidecar-windows.yml'
   pull_request:
     paths:
       - 'scripts/build-llama.sh'
+      - 'scripts/llama-patches/**'
       - '.github/workflows/sidecar-windows.yml'
   schedule:
     - cron: '17 4 * * 1' # Mondays 04:17 UTC
@@ -62,7 +65,7 @@ jobs:
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: D:/lb
-          key: llama-${{ hashFiles('scripts/build-llama.sh') }}-x86_64-pc-windows-msvc-v1
+          key: llama-${{ hashFiles('scripts/build-llama.sh', 'scripts/llama-patches/**') }}-x86_64-pc-windows-msvc-v1
 
       - name: Install Vulkan SDK
         shell: pwsh

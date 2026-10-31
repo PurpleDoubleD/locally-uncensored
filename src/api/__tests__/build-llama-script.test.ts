@@ -486,8 +486,22 @@ describe('build-llama.sh — the llama.cpp revision is pinned to a commit', { ti
       const keys = text.match(/^\s*key:\s*.*llama.*$/gm) ?? []
       expect(keys.length, `${workflow} has no llama cache key`).toBeGreaterThan(0)
       for (const key of keys) {
-        expect(key, workflow).toContain("hashFiles('scripts/build-llama.sh')")
+        expect(key, workflow).toContain("hashFiles('scripts/build-llama.sh', 'scripts/llama-patches/**')")
       }
+    }
+  })
+
+  it("keys the cache and the Windows smoke on LU's llama.cpp patches as well (E1)", () => {
+    // The patches change the compiled tree without touching this script. Left
+    // out of the key, a patch change hits the old cache (assert_patched_tree
+    // then stops the build); left out of the path filter, the Windows smoke
+    // does not run for it at all.
+    const text = readFileSync(resolve(REPO_ROOT, '.github/workflows/sidecar-windows.yml'), 'utf8')
+    const filters = text.match(/^\s*paths:\n(?:\s*-\s*'[^']+'\n)+/gm) ?? []
+    expect(filters.length).toBe(2)
+    for (const filter of filters) {
+      expect(filter).toContain("- 'scripts/build-llama.sh'")
+      expect(filter).toContain("- 'scripts/llama-patches/**'")
     }
   })
 })
