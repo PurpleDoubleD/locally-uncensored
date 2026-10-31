@@ -40,6 +40,7 @@ pub mod estimate;
 pub mod model;
 pub mod presets;
 pub mod sae;
+pub mod weights;
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -94,7 +95,7 @@ fn model_dir(root: &Path, model_path: &str) -> PathBuf {
 /// Vector ids are ours ("creative") or made here ("own-…"): letters, digits,
 /// dashes. Anything else is refused, so an id never walks out of its folder.
 pub fn valid_id(id: &str) -> bool {
-    !id.is_empty() && id.len() <= 48 && id.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+    !id.is_empty() && id.len() <= 48 && id.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || (id.starts_with("n-L") && (c == 'L' || c == 'N')))
 }
 
 // ── what is active ────────────────────────────────────────────────────────
@@ -199,9 +200,13 @@ fn save_meta(root: &Path, model_path: &str, meta: &VectorMeta) -> Result<(), Str
 #[serde(rename_all = "camelCase")]
 pub struct Entry {
     pub id: String,
-    /// −1 … +1, clamped.
+    /// −1 … +1, clamped; a single neuron's dose up to ±`NEURON_MAX_DOSE`.
     pub strength: f32,
 }
+
+/// Neuron recipes go past 1 (1.5 is shared as "strong"); N2's recipe code
+/// stops at the same 3.
+pub const NEURON_MAX_DOSE: f32 = 3.0;
 
 /// Mixes the sliders into one vector. A slider at 0 is left out, so all at 0
 /// is no vector at all: the engine then starts with exactly the argv it has
@@ -211,11 +216,12 @@ pub fn mix(root: &Path, model_path: &str, n_embd: usize, entries: &[Entry]) -> R
     let mut out = cvec::ControlVector::new(n_embd);
     let mut any = false;
     for e in entries {
-        let strength = e.strength.clamp(-1.0, 1.0);
-        if strength == 0.0 || !strength.is_finite() {
+        if e.strength == 0.0 || !e.strength.is_finite() {
             continue;
         }
         let meta = metas.get(&e.id).ok_or_else(|| format!("The slider \"{}\" has not been computed for this model yet.", e.id))?;
+        let limit = if meta.kind == "neuron" { NEURON_MAX_DOSE } else { 1.0 };
+        let strength = e.strength.clamp(-limit, limit);
         let v = match (&meta.sae, meta.feature) {
             (Some(sae_id), Some(f)) => {
                 let spec = sae::by_id(sae_id).ok_or("Unknown feature set.")?;
@@ -426,39 +432,38 @@ pub fn tool_failure(stderr: &str) -> String {
     }
 }
 
-/// Runs the generator on the example pairs and returns the direction.
-fn generate(app: &tauri::AppHandle, model_path: &str, plus: &[String], minus: &[String], work: &Path) -> Result<cvec::ControlVector, String> {
+/// What one run of the vector tool printed that LU reads: the layer
+/// lengths of a measuring run (patch 0004), parsed, never the raw lines.
+struct ToolRun {
+    norms: BTreeMap<usize, f32>,
+}
+
+/// Runs the vector tool with `args` (and `env`), shows its progress lines
+/// on the job, stops it on cancel, and turns a failure into one sentence.
+fn run_tool(app: &tauri::AppHandle, args: &[std::ffi::OsString], env: &[(&str, &str)]) -> Result<ToolRun, String> {
     let binary = generator_binary(app).ok_or("This install of LU is missing its vector tool (lu-llama-cvector-generator). Reinstall LU to bring it back.")?;
-    std::fs::create_dir_all(work).map_err(|e| crate::os_error::english(&e))?;
-    let pos = work.join("more.txt");
-    let neg = work.join("less.txt");
-    let out = work.join("direction.gguf");
-    std::fs::write(&pos, plus.join("\n") + "\n").map_err(|e| crate::os_error::english(&e))?;
-    std::fs::write(&neg, minus.join("\n") + "\n").map_err(|e| crate::os_error::english(&e))?;
-    let _ = std::fs::remove_file(&out);
     let mut cmd = Command::new(&binary);
-    cmd.arg("-m").arg(model_path)
-        .arg("--positive-file").arg(&pos)
-        .arg("--negative-file").arg(&neg)
-        .arg("-o").arg(&out)
-        .args(TOOL_ARGS)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
+    cmd.args(args).args(TOOL_ARGS).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    for (k, v) in env {
+        cmd.env(k, v);
+    }
     crate::commands::engine::prepare_tool_command(app, &mut cmd);
     log(format!("$ {} …", binary.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default()));
-    let ran = Instant::now();
     let mut child = cmd.spawn().map_err(|e| format!("The vector tool did not start: {}", crate::os_error::english(&e)))?;
     let stderr = child.stderr.take().map(crate::commands::shell::drain);
     let stdout = child.stdout.take().ok_or("no output")?;
     let id = child.id();
     let watcher = std::thread::spawn(move || {
+        let mut norms = BTreeMap::new();
         for line in BufReader::new(stdout).lines().map_while(Result::ok) {
             if let Some((n, total)) = parse_progress(&line) {
                 with_job(|j| j.total = total);
                 step(n.saturating_sub(1));
+            } else if let Some((layer, len)) = parse_norm(&line) {
+                norms.insert(layer, len);
             }
         }
+        norms
     });
     let status = loop {
         if CANCEL.load(Ordering::SeqCst) {
@@ -472,9 +477,9 @@ fn generate(app: &tauri::AppHandle, model_path: &str, plus: &[String], minus: &[
         }
         std::thread::sleep(std::time::Duration::from_millis(200));
     };
-    let _ = watcher.join();
+    let norms = watcher.join().unwrap_or_default();
     tracing::info!(target: "neuron", pid = id, ?status, "vector tool finished");
-    if !status.success() || !out.is_file() {
+    if !status.success() {
         let why = stderr.map(|(buf, _)| crate::commands::shell::captured_text(&buf)).unwrap_or_default();
         let tail: Vec<&str> = why.lines().rev().take(12).collect::<Vec<_>>().into_iter().rev().collect();
         for line in &tail {
@@ -483,14 +488,113 @@ fn generate(app: &tauri::AppHandle, model_path: &str, plus: &[String], minus: &[
         return Err(tool_failure(&why));
     }
     with_job(|j| j.step = j.total);
+    Ok(ToolRun { norms })
+}
+
+/// Runs the generator on the example pairs and returns the direction.
+fn generate(app: &tauri::AppHandle, model_path: &str, plus: &[String], minus: &[String], work: &Path) -> Result<cvec::ControlVector, String> {
+    std::fs::create_dir_all(work).map_err(|e| crate::os_error::english(&e))?;
+    let pos = work.join("more.txt");
+    let neg = work.join("less.txt");
+    let out = work.join("direction.gguf");
+    std::fs::write(&pos, plus.join("\n") + "\n").map_err(|e| crate::os_error::english(&e))?;
+    std::fs::write(&neg, minus.join("\n") + "\n").map_err(|e| crate::os_error::english(&e))?;
+    let _ = std::fs::remove_file(&out);
+    let ran = Instant::now();
+    let args: Vec<std::ffi::OsString> = vec!["-m".into(), model_path.into(), "--positive-file".into(), pos.clone().into(), "--negative-file".into(), neg.clone().into(), "-o".into(), out.clone().into()];
+    run_tool(app, &args, &[])?;
+    if !out.is_file() {
+        return Err(tool_failure(""));
+    }
     let bytes = std::fs::metadata(model_path).map(|m| m.len()).unwrap_or(0);
-    if let (Some(key), Some(speed)) = (estimate::tool_key(&binary), estimate::speed_of_run(ran.elapsed().as_secs_f64(), bytes, plus.len())) {
+    let key = generator_binary(app).and_then(|b| estimate::tool_key(&b));
+    if let (Some(key), Some(speed)) = (key, estimate::speed_of_run(ran.elapsed().as_secs_f64(), bytes, plus.len())) {
         estimate::remember(&root().join(SPEED_FILE), &key, speed);
     }
     let cv = cvec::read(&out)?;
     let _ = std::fs::remove_file(&pos);
     let _ = std::fs::remove_file(&neg);
     Ok(cv)
+}
+
+// ── single MLP neurons (3.0.9, David 31.10.2026) ──────────────────────────
+//
+// Neuron recipes are shared as `L13N7956-1.0`: block 13, MLP neuron 7956,
+// dose −1. A dose of 1 adds the neuron's write direction (column 7956 of
+// block 13's down projection, made length 1) scaled to the median length of
+// the residual stream after that block. That length is the unit recipes are
+// written in (neuronary / neuron-explorer), so it is measured on the user's
+// own model with a fixed text, once per model, and the slider's +1 is
+// exactly one dose. Nothing from outside is loaded: the direction comes out
+// of the user's GGUF.
+
+/// The text the layer lengths are measured on: plain everyday sentences,
+/// one prompt per line.
+const NORM_TEXT: &[&str] = &[
+    "The river runs past the old mill, where children used to watch the wheel turn on summer afternoons and fish for small silver trout in the shallows.",
+    "To make bread at home you need flour, water, salt and yeast, a warm place for the dough to rise, and a little patience before it goes into the oven.",
+    "The committee met on Tuesday to discuss the budget for next year, and after a long debate the members agreed to spend more on schools and public parks.",
+    "Light from the sun takes about eight minutes to reach the Earth, travelling through the vacuum of space at nearly three hundred thousand kilometres per second.",
+    "She opened the letter slowly, read it twice by the window, and then folded it back into the envelope without saying a word to anyone in the room.",
+    "Most programming languages let you store values in variables, repeat work with loops, and group related steps into functions that can be called again.",
+    "In the mountains the weather changes quickly, so hikers carry warm layers, enough water and a map even when the morning sky looks perfectly clear.",
+    "The museum's new exhibition shows paintings, letters and tools from the eighteenth century, telling the story of a small fishing town on the coast.",
+];
+
+const NORMS_FILE: &str = "layer-norms.json";
+
+/// The id a neuron's slider gets; N2's recipe code builds the same.
+pub fn neuron_id(layer: usize, neuron: u64) -> String {
+    format!("n-L{layer}-N{neuron}")
+}
+
+/// `LU norm <block> <median>` (patch 0004) → (block, median length).
+pub fn parse_norm(line: &str) -> Option<(usize, f32)> {
+    let mut it = line.strip_prefix("LU norm ")?.split_whitespace();
+    let layer = it.next()?.parse().ok()?;
+    let v: f32 = it.next()?.parse().ok()?;
+    (v.is_finite() && v > 0.0).then_some((layer, v))
+}
+
+/// The neuron's write direction as a one-layer control vector of length 1.
+pub fn neuron_vector(column: &[f32], layer: usize, n_embd: usize) -> Result<cvec::ControlVector, String> {
+    if column.len() != n_embd {
+        return Err(format!("The neuron's weights have {} values, the model {n_embd}.", column.len()));
+    }
+    let len = column.iter().map(|x| (*x as f64) * (*x as f64)).sum::<f64>().sqrt();
+    if !(len.is_finite() && len > 0.0) {
+        return Err("This neuron writes nothing (its weights are all zero), so turning it changes nothing.".into());
+    }
+    let mut cv = cvec::ControlVector::new(n_embd);
+    cv.layers.insert(layer, column.iter().map(|x| (*x as f64 / len) as f32).collect());
+    Ok(cv)
+}
+
+/// The median residual length after every block of this model, measured once
+/// and kept beside its vectors.
+fn layer_norms(app: &tauri::AppHandle, model_path: &str, work: &Path) -> Result<BTreeMap<usize, f32>, String> {
+    let file = model_dir(&root(), model_path).join(NORMS_FILE);
+    if let Some(known) = std::fs::read(&file).ok().and_then(|b| serde_json::from_slice::<BTreeMap<usize, f32>>(&b).ok()).filter(|m| !m.is_empty()) {
+        return Ok(known);
+    }
+    free_the_model(app);
+    phase("Measuring the model's layers", NORM_TEXT.len() as u64);
+    std::fs::create_dir_all(work).map_err(|e| crate::os_error::english(&e))?;
+    let text = work.join("norm-text.txt");
+    std::fs::write(&text, NORM_TEXT.join("\n") + "\n").map_err(|e| crate::os_error::english(&e))?;
+    let args: Vec<std::ffi::OsString> = vec!["-m".into(), model_path.into(), "--positive-file".into(), text.clone().into(), "--negative-file".into(), text.clone().into(), "-o".into(), work.join("unused.gguf").into()];
+    let run = run_tool(app, &args, &[("LU_LAYER_NORMS", "1")])?;
+    let norms = run.norms;
+    if norms.is_empty() {
+        return Err("This install's vector tool cannot measure layers yet, which single neurons need. Update LU.".into());
+    }
+    let _ = std::fs::remove_file(&text);
+    if let Some(dir) = file.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let _ = std::fs::write(&file, serde_json::to_vec_pretty(&norms).unwrap_or_default());
+    log(format!("  layer lengths measured for {} blocks", norms.len()));
+    Ok(norms)
 }
 
 fn free_port() -> Result<u16, String> {
@@ -661,6 +765,7 @@ pub async fn neuron_info(app: tauri::AppHandle, model_path: String) -> Result<Va
         let measured = generator_binary(&app).and_then(|b| estimate::tool_key(&b)).and_then(|k| estimate::remembered(&root.join(SPEED_FILE), &k));
         let bytes = std::fs::metadata(&model_path).map(|m| m.len()).unwrap_or(0);
         let (build_estimate, own_estimate) = build_estimates(bytes, facts.template, measured);
+        let n_ff = weights::neurons_per_layer(&model_path);
         Ok(json!({
             "facts": facts,
             "modelKey": model_key(&model_path),
@@ -669,6 +774,8 @@ pub async fn neuron_info(app: tauri::AppHandle, model_path: String) -> Result<Va
             "vectors": list_vectors(&root, &model_path),
             "sae": sae,
             "activeMix": active,
+            "mlpNeurons": n_ff.is_some(),
+            "nFf": n_ff,
             "buildEstimate": build_estimate,
             "ownEstimate": own_estimate,
         }))
@@ -757,8 +864,41 @@ pub fn neuron_feature_add(app: tauri::AppHandle, model_path: String, feature: us
 }
 
 #[tauri::command]
+pub fn neuron_mlp_add(app: tauri::AppHandle, model_path: String, layer: usize, neuron: u64) -> Result<Value, String> {
+    let facts = model::facts(&model_path)?;
+    if layer == 0 || layer + 1 >= facts.n_layer {
+        return Err(format!("Single neurons work in layers 1 to {} of this model.", facts.n_layer.saturating_sub(2)));
+    }
+    if generator_binary(&app).is_none() {
+        return Err("This install of LU is missing its vector tool (lu-llama-cvector-generator). Reinstall LU to bring it back.".into());
+    }
+    let id = neuron_id(layer, neuron);
+    start_job("neuron", &format!("Neuron L{layer} N{neuron}"), &model_path.clone(), move || {
+        let root = root();
+        let work = model_dir(&root, &model_path).join("work");
+        phase("Reading the neuron's weights", 1);
+        let (column, _) = weights::neuron_column(&model_path, layer, neuron)?;
+        let cv = neuron_vector(&column, layer, facts.n_embd)?;
+        step(1);
+        cancelled()?;
+        let norms = layer_norms(&app, &model_path, &work)?;
+        let unit = *norms.get(&layer).ok_or_else(|| format!("Layer {layer} was not measured; single neurons work in layers 1 to {}.", facts.n_layer.saturating_sub(2)))?;
+        log(format!("  dose 1 = {unit:.3} (median length after block {layer})"));
+        cvec::write(&vectors_dir(&root, &model_path).join(format!("{id}.gguf")), &cv, &facts.arch, facts.n_layer)?;
+        let meta = VectorMeta {
+            id: id.clone(), kind: "neuron".into(), name: format!("L{layer} N{neuron}"), left: "Less".into(), right: "More".into(),
+            unit, built_at: now_ms(), more: Vec::new(), less: Vec::new(), feature: None, sae: None,
+        };
+        save_meta(&root, &model_path, &meta)?;
+        let _ = std::fs::remove_dir_all(&work);
+        log(format!("Saved {id}."));
+        Ok(id)
+    })
+}
+
+#[tauri::command]
 pub fn neuron_delete(model_path: String, id: String) -> Result<Value, String> {
-    if !valid_id(&id) || !(id.starts_with("own-") || id.starts_with("f-") || presets::find(&id).is_some()) {
+    if !valid_id(&id) || !(id.starts_with("own-") || id.starts_with("f-") || id.starts_with("n-L") || presets::find(&id).is_some()) {
         return Err("Unknown slider.".into());
     }
     let dir = vectors_dir(&root(), &model_path);
@@ -1130,6 +1270,48 @@ mod tests {
         let m = mix(dir.path(), &model, 4, &[e("creative", 7.0)]).unwrap().unwrap();
         assert!((m.layers[&2][0] - 0.8).abs() < 1e-6);
         assert!(mix(dir.path(), &model, 4, &[e("missing", 0.5)]).is_err());
+    }
+
+    // Single neurons (David, 31.10.2026, "Ja, in 3.0.9"): a recipe like
+    // `L13N7956-1.0` is block 13, neuron 7956, dose −1, one dose being the
+    // median residual length after that block.
+    #[test]
+    fn a_neuron_slider_is_its_unit_direction_scaled_by_the_dose() {
+        let cv = neuron_vector(&[3.0, 0.0, 4.0, 0.0], 13, 4).unwrap();
+        assert_eq!(cv.layers.keys().copied().collect::<Vec<_>>(), vec![13], "block 13 is direction.13");
+        assert_eq!(cv.layers[&13], vec![0.6, 0.0, 0.8, 0.0]);
+        assert!(neuron_vector(&[0.0; 4], 13, 4).is_err());
+        assert!(neuron_vector(&[1.0; 3], 13, 4).is_err());
+
+        let dir = tempfile::tempdir().unwrap();
+        let model = dir.path().join("m.gguf");
+        std::fs::write(&model, b"model").unwrap();
+        let model = model.to_string_lossy().into_owned();
+        let id = neuron_id(2, 7956);
+        assert_eq!(id, "n-L2-N7956", "the id N2's recipe code builds");
+        assert!(valid_id(&id));
+        assert!(!valid_id("n-L2-N79/56") && !valid_id("Own-x"));
+        setup_vector(dir.path(), &model, &id, 24.8);
+        let mut meta = list_vectors(dir.path(), &model).pop().unwrap();
+        meta.kind = "neuron".into();
+        save_meta(dir.path(), &model, &meta).unwrap();
+        let e = |s: f32| Entry { id: id.clone(), strength: s };
+        let m = mix(dir.path(), &model, 4, &[e(-1.0)]).unwrap().unwrap();
+        assert!((m.layers[&2][0] + 24.8).abs() < 1e-4, "dose −1 = −p50 along the neuron");
+        // Doses past 1 are recipes' "strong"; they stop at 3, not at 1.
+        let m = mix(dir.path(), &model, 4, &[e(1.5)]).unwrap().unwrap();
+        assert!((m.layers[&2][0] - 1.5 * 24.8).abs() < 1e-3);
+        let m = mix(dir.path(), &model, 4, &[e(9.0)]).unwrap().unwrap();
+        assert!((m.layers[&2][0] - 3.0 * 24.8).abs() < 1e-3);
+    }
+
+    #[test]
+    fn the_tool_s_layer_lengths_are_read() {
+        assert_eq!(parse_norm("LU norm 22 24.8"), Some((22, 24.8)));
+        assert_eq!(parse_norm("LU norm 0 6.9"), Some((0, 6.9)));
+        for bad in ["LU norm x 1", "LU norm 3 nan", "LU norm 4 -1", "LU other", "Evaluating prompt[1/8]"] {
+            assert_eq!(parse_norm(bad), None, "{bad}");
+        }
     }
 
     #[test]

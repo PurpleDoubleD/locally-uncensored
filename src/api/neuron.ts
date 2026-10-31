@@ -13,7 +13,7 @@ export interface NeuronPreset {
 export interface NeuronVector {
   id: string
   /** preset | own | feature */
-  kind: 'preset' | 'own' | 'feature'
+  kind: 'preset' | 'own' | 'feature' | 'neuron'
   name: string
   left: string
   right: string
@@ -46,6 +46,10 @@ export interface NeuronInfo {
   vectors: NeuronVector[]
   sae: NeuronSae | null
   activeMix: string | null
+  /** Single MLP neurons can be turned (a dense MLP in every block). */
+  mlpNeurons?: boolean
+  /** Neurons per block, null without a dense MLP. */
+  nFf?: number | null
   /** How long one slider takes on this PC, said before it starts. */
   buildEstimate: NeuronEstimate
   ownEstimate: NeuronEstimate
@@ -60,7 +64,7 @@ export interface NeuronEstimate {
 
 export interface NeuronJob {
   status: 'idle' | 'running' | 'done' | 'failed' | 'cancelled'
-  kind: '' | 'build' | 'feature' | 'download'
+  kind: '' | 'build' | 'feature' | 'neuron' | 'download'
   title: string
   modelPath: string
   phaseLabel: string
@@ -107,6 +111,11 @@ export const neuronBuildOwn = (modelPath: string, name: string, more: string[], 
 
 export const neuronFeatureAdd = (modelPath: string, feature: number, label?: string) =>
   backendCall<{ started: boolean }>('neuron_feature_add', { modelPath, feature, label })
+
+/** One MLP neuron of the user's own model as a slider (`n-L{layer}-N{neuron}`),
+ *  its +1 one dose of a shared recipe. Runs as a job like a build. */
+export const neuronMlpAdd = (modelPath: string, layer: number, neuron: number) =>
+  backendCall<{ started: boolean }>('neuron_mlp_add', { modelPath, layer, neuron })
 
 export const neuronDelete = (modelPath: string, id: string) => backendCall<{ deleted: string }>('neuron_delete', { modelPath, id })
 
