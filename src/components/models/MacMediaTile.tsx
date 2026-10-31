@@ -120,17 +120,21 @@ export function MacMediaTile({ model, memoryGb, state, onGet, onCancel, onRemove
             </p>
           )}
         </div>
-        {model.description && (
-          <DescriptionDetails name={model.name} description={model.description} className="lu-control lu-control--icon -mt-1" />
-        )}
-        <button
-          onClick={() => onOpenUrl(`https://huggingface.co/${model.repo}`)}
-          className="lu-control lu-control--icon -mr-1.5 -mt-1"
-          title="View on HuggingFace"
-          aria-label={`View ${model.name} on HuggingFace`}
-        >
-          <ExternalLink size={ICON_SM} />
-        </button>
+        {/* One column of icons: side by side they took the width the two
+            lines of text need, and the measured sentence fell out of them. */}
+        <div className="flex flex-col items-center -mr-1.5 -mt-1">
+          <button
+            onClick={() => onOpenUrl(`https://huggingface.co/${model.repo}`)}
+            className="lu-control lu-control--icon"
+            title="View on HuggingFace"
+            aria-label={`View ${model.name} on HuggingFace`}
+          >
+            <ExternalLink size={ICON_SM} />
+          </button>
+          {model.description && (
+            <DescriptionDetails name={model.name} description={model.description} className="lu-control lu-control--icon" />
+          )}
+        </div>
       </div>
 
       <div className="flex items-center gap-2 mt-auto pt-3 min-h-[var(--control-h-sm)]">
