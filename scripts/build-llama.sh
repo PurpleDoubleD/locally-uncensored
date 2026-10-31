@@ -670,7 +670,9 @@ check_binary() {
     export LD_LIBRARY_PATH="$ld_path"
   fi
   ( cd "$run_dir" && "$bin" --version >/dev/null 2>&1 ) || die "$bin --version failed (run from $run_dir, LD_LIBRARY_PATH=${LD_LIBRARY_PATH:-unset})"
-  local port=8129
+  # BUILD_LLAMA_CHECK_PORT only for build-llama-script.test.ts, which takes a
+  # free port so a server already on 8129 cannot answer for the one under test.
+  local port="${BUILD_LLAMA_CHECK_PORT:-8129}"
   log "boot check: $bin on 127.0.0.1:$port, cwd=$run_dir (no model, router mode, /health only)"
   # exec: $! has to be the server itself. Without it $! was the subshell, the
   # kill below ended only that, and a check that failed (E1: the 9 s Metal
