@@ -130,6 +130,36 @@ export interface ReleaseNote {
 }
 
 export const RELEASE_NOTES: ReleaseNote[] = [
+  // 3.0.9 (31.10.2026, Kandidat integ/309, I1). Der Umfang steht im
+  // CHANGELOG-Entwurf von T1 (Zentrale/entwuerfe/309-release); dieses Blatt
+  // nimmt vorn die fuenf Dinge, die ein Nutzer zuerst merkt. Was nur in Tests
+  // oder auf einer Karte lief, sagt die Zeile selbst knapp.
+  {
+    version: '3.0.9',
+    headline: 'Group chats send every speaker the context you picked, Neurons puts sliders on a local model, and Animate and Create take end images and reference pictures.',
+    lines: [
+      {
+        title: 'Group chat: every speaker gets the context you picked.',
+        detail: 'Local speakers get their chosen window minus room for the answer, no longer about half of it, and a grey line names messages that were not sent. One speaker can be regenerated on its own, and the speaking order can be changed with arrows or by dragging (GitHub #199, #200, #201).',
+      },
+      {
+        title: 'Neurons: sliders that steer a local LU Engine model.',
+        detail: 'Ready made sliders such as Serious to Cheerful or Fewer refusals, sliders from your own examples, and a before and after on the same question. LU measures how far each slider can push on your model; on a Qwen3.5 9B that took about five minutes on a CPU. Ollama and LM Studio cannot take these sliders.',
+      },
+      {
+        title: 'End images and reference pictures in Animate and Create.',
+        detail: 'Animate takes an end image for Wan 2.2 A14B, Wan 2.1 FLF2V and MiniMax H3, and up to nine reference pictures with MiniMax H3. Create takes reference pictures for Krea 2, Qwen-Image 2.1 and FLUX.2. A video shows a preview while it renders. The local end image and the preview ran on an RTX 3060; the reference pictures ran in automated tests only.',
+      },
+      {
+        title: 'A compaction is one line, and what came before stays readable.',
+        detail: 'The chat starts at the newest compaction, and marks on the left open each earlier stretch, read only. A new setting, off by default, brings back up to four older messages close in meaning to the new one.',
+      },
+      {
+        title: 'Liquid LFM3 and a newer llama.cpp in the LU Engine.',
+        detail: 'LFM3 text, vision, omni and audio models run in the LU Engine, which now uses llama.cpp b11960. The onboarding lists the LU Engine models you already have, and Train new on Windows and Linux says it trains Z-Image (GitHub #210).',
+      },
+    ],
+  },
   // 3.0.8 (26.10.2026, Kandidat integ/308-rc, A23). Der Umfang steht in
   // CHANGELOG.md unter [3.0.8]; dieses Blatt nimmt vorn die fuenf Dinge, die
   // ein Nutzer zuerst merkt, und darunter den Rest in Abschnitten. Das Blatt
