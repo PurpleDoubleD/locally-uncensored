@@ -14,7 +14,8 @@
 //! names a remote URL (tested in `html-preview-b29.test.tsx`). What stays the
 //! one lock for the app's own commands is Tauri's invoke key: this app has no
 //! app ACL manifest, and Tauri checks the ACL for plugin commands only then.
-//! The key is injected into the main frame only.
+//! The key is injected into the main frame only on macOS and Linux; for
+//! Windows see [`GUARD`].
 //!
 //! What keeps the preview away from the app, in layers:
 //!
@@ -27,6 +28,10 @@
 //!   `Host` it was reached under (no DNS rebinding) and a 128-bit token per
 //!   page in the path. It starts with the first open preview and stops when
 //!   the last one closes ([`html_preview_close`]).
+//! * Every page starts with [`GUARD`], before any script of its own. WebView2
+//!   (Windows) puts Tauri's init scripts into every frame, so there the
+//!   frame has `__TAURI_INTERNALS__`, non-configurable. The guard locks the
+//!   one door a page could take the invoke key through (html_preview_guard.js).
 //! * The page does not exist until the user clicks Preview. Opening a chat
 //!   runs nothing. Nothing is written to disk; at most [`KEEP`] pages live.
 use std::collections::VecDeque;
@@ -35,6 +40,43 @@ use std::net::{Shutdown, TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, LazyLock, Mutex};
 use std::time::Duration;
+
+/// The script in front of every page (see html_preview_guard.js).
+pub const GUARD: &str = include_str!("html_preview_guard.js");
+
+/// `doc` with [`GUARD`] as its first script. It goes right behind a leading
+/// doctype (before it a script would switch the page to quirks mode), else at
+/// the very start. Only whitespace and comments can stand in front of a
+/// doctype, so no script of the page runs before the guard.
+pub fn with_guard(doc: &str) -> String {
+    let tag = format!("<script>{GUARD}</script>");
+    let at = doctype_end(doc).unwrap_or(0);
+    format!("{}{tag}{}", &doc[..at], &doc[at..])
+}
+
+/// Where a leading `<!doctype …>` ends, past BOM, whitespace and comments.
+fn doctype_end(doc: &str) -> Option<usize> {
+    let mut i = 0;
+    let b = doc.as_bytes();
+    if doc.starts_with('\u{feff}') {
+        i = '\u{feff}'.len_utf8();
+    }
+    loop {
+        while i < b.len() && b[i].is_ascii_whitespace() {
+            i += 1;
+        }
+        if doc[i..].starts_with("<!--") {
+            i += doc[i..].find("-->")? + 3;
+            continue;
+        }
+        break;
+    }
+    let rest = doc.get(i..i + 9)?;
+    if !rest.eq_ignore_ascii_case("<!doctype") {
+        return None;
+    }
+    Some(i + doc[i..].find('>')? + 1)
+}
 
 /// How many previews stay servable. A reload asks for a new page, so this only
 /// has to cover the frames that are open at the same time.
@@ -209,7 +251,7 @@ pub fn respond(method: &str, path: &str, host: Option<&str>, port: u16) -> (u16,
             ("Cache-Control".into(), "no-store".into()),
             ("Cross-Origin-Resource-Policy".into(), "same-origin".into()),
         ],
-        doc.into_bytes(),
+        with_guard(&doc).into_bytes(),
     )
 }
 
@@ -385,4 +427,36 @@ mod tests {
         assert!(put("a".repeat(MAX_BYTES + 1), false).is_err());
         assert_eq!(running_port(), None, "a refused page starts no server");
     }
+
+    /// Windows (I1, box 31.10.): Tauri's globals reach the frame there. The
+    /// guard has to run before any script of the page, on every page served.
+    #[test]
+    fn every_page_starts_with_the_guard_before_its_own_scripts() {
+        let _t = turn();
+        let tag = format!("<script>{GUARD}</script>");
+        for (doc, before) in [
+            ("<!DOCTYPE html><html><head><script>evil()</script>", "<!DOCTYPE html>"),
+            ("\u{feff} <!-- a --> <!doctype html>\n<script>evil()</script>", "\u{feff} <!-- a --> <!doctype html>"),
+            ("<script>evil()</script><!DOCTYPE html>", ""),
+            ("<p>no doctype</p><script>evil()</script>", ""),
+            ("<!-- open comment <script>evil()</script>", ""),
+            ("", ""),
+        ] {
+            let out = with_guard(doc);
+            assert!(out.starts_with(&format!("{before}{tag}")), "{doc:?} -> {out:?}");
+            assert_eq!(out.find("<script"), Some(before.len()), "{doc:?}");
+            assert_eq!(out.replacen(&tag, "", 1), doc);
+        }
+        // And over the wire.
+        let p = put("<!doctype html><script>evil()</script>".into(), false).unwrap();
+        let port = running_port().unwrap();
+        let (code, _, body) = respond("GET", &format!("/{}", p.id), Some(&format!("127.0.0.1:{port}")), port);
+        assert_eq!(code, 200);
+        let body = String::from_utf8(body).unwrap();
+        assert!(body.starts_with(&format!("<!doctype html>{tag}<script>evil()")), "{body}");
+        // The guard keeps the key's header out and leaves the app's window alone.
+        assert!(GUARD.contains("if (window === window.top) return"));
+        assert!(GUARD.contains("'tauri-invoke-key'"));
+    }
+
 }
