@@ -38,6 +38,13 @@ export const CLOUD_ONLY_LABEL = 'Cloud only'
 export const CLOUD_TRAINING_FAMILY_NOTE =
   'Characters trained on Flux or Qwen run in LU Cloud only. Pick Z-Image to use the character on your machine too.'
 
+/** Under the local trainer (GH #210, 31.10.2026): it trains on Z-Image Base
+ *  alone, whatever image model is picked at the top. A tester on Qwen-Image
+ *  2.1 read the finished Z-Image character as the wrong model trained. */
+export function localTrainingFamilyNote(kind: 'character' | 'style'): string {
+  return `The local trainer makes a Z-Image ${kind}, whatever image model is picked. Use it with a Z-Image model.`
+}
+
 /** The line under a saved import, or null when nothing needs saying. */
 export function keyFormatNote(format: KeyFormat): string | null {
   if (format === 'unknown') {
