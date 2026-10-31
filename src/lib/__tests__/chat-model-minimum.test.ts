@@ -39,7 +39,9 @@ describe('chat catalog minimum', () => {
     // once the download took the named file instead of resolving by quant.
     // 32 -> 40 on 2026-10-30 (N1): LFM3 1.7B, VL 2B, Omni 2B and Audio 2B,
     // each as Ollama tag and as MLX NVFP4 build.
-    expect(small.length).toBe(40)
+    // 40 -> 46 the same day, after E1: six LFM3 GGUF rows (1.7B Q4_K_M, QAD
+    // Q4_0, Q8_0; VL Q4_K_M, Q8_0; Omni Q4_K_M).
+    expect(small.length).toBe(46)
     const picks = chatRecommendationGroups(models.map(model => [model]))
     expect(picks.flat().some(isBelowChatMinimum)).toBe(false)
     expect(picks.length).toBe(models.length - small.length)

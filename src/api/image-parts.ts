@@ -76,6 +76,12 @@ export const IMAGE_PART = {
   'LiconStudio/Gemma-4-31B-it-abliterated-GGUF/mmproj-F16.gguf': part('LiconStudio/Gemma-4-31B-it-abliterated-GGUF', 'mmproj-F16.gguf', 1198956512, '9f9063fbb6c7420c803a4f6c737ffc5dc9330220ff0912e03b121b81a09cb0ed'),
   'Stabhappy/gemma-4-31B-it-heretic-Gguf/mmproj-coder3101_gemma_4_31b_it_heretic-f16.gguf': part('Stabhappy/gemma-4-31B-it-heretic-Gguf', 'mmproj-coder3101_gemma_4_31b_it_heretic-f16.gguf', 1198956864, '862a415082ee8b767f5aa0633cad74818edd9eb5cff91bdfa38a6b8fa1f45440'),
   'Youssofal/Qwen3.6-35B-A3B-Abliterated-Heretic-GGUF/mmproj-Qwen3.6-35B-A3B-Abliterated-Heretic.gguf': part('Youssofal/Qwen3.6-35B-A3B-Abliterated-Heretic-GGUF', 'mmproj-Qwen3.6-35B-A3B-Abliterated-Heretic.gguf', 902822624, '42ef6d5f3564946163628d28ce1380b729ff3634dc37482506bb1eb951138f8c'),
+  // LFM3 VL and Omni (N1, 30.10.2026). Q8_0, not F16, on purpose: E1 measured
+  // these two parts with the b11960 engine on the Mac (AN-N1-E1.md), and Q8_0
+  // halves them. The Omni part carries the audio encoder as well; LU passes
+  // it as --mmproj and uses it for images.
+  'LiquidAI/LFM3-VL-2B-GGUF/mmproj-LFM3-VL-2B-Q8_0.gguf': part('LiquidAI/LFM3-VL-2B-GGUF', 'mmproj-LFM3-VL-2B-Q8_0.gguf', 203031872, 'c5c5b58d544a18da919172d2d0368090ea1a4a351b6feb7f8a326a264a5918ab'),
+  'LiquidAI/LFM3-Omni-2B-GGUF/mmproj-LFM3-Omni-2B-Q8_0.gguf': part('LiquidAI/LFM3-Omni-2B-GGUF', 'mmproj-LFM3-Omni-2B-Q8_0.gguf', 506842528, '8a25f9d1931244429de404fccacfb7fb933970a36aa5688d2f5069f29c6b27b1'),
   'bartowski/FrogNano-4B-2609-GGUF/mmproj-FrogNano-4B-2609-f16.gguf': part('bartowski/FrogNano-4B-2609-GGUF', 'mmproj-FrogNano-4B-2609-f16.gguf', 672423104, 'e6fba76cf8cd2e2e8793807ee54147c1f5a5209bc4780e53e79878e7c9887020'),
   'bartowski/Hcompany_Holo4-35B-A3B-GGUF/mmproj-Hcompany_Holo4-35B-A3B-f16.gguf': part('bartowski/Hcompany_Holo4-35B-A3B-GGUF', 'mmproj-Hcompany_Holo4-35B-A3B-f16.gguf', 899283488, '9fe08693f0ae3c02b3ef76a2762475366c98dcdced879ff90e8258734b5bf6d1'),
   'bartowski/MiMo-V2.6-Distill-Qwen-9B-GGUF/mmproj-MiMo-V2.6-Distill-Qwen-9B-f16.gguf': part('bartowski/MiMo-V2.6-Distill-Qwen-9B-GGUF', 'mmproj-MiMo-V2.6-Distill-Qwen-9B-f16.gguf', 918166048, 'ff348f3180a63188aa7285db85f550fe38acb61dd013c599eb8bad08d2cc2576'),

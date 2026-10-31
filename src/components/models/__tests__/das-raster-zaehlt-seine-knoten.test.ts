@@ -139,7 +139,9 @@ describe('D-S26 · was das Raster wirklich kostet', () => {
     // 50 -> 54 am 30.10.2026 (N1): Liquid LFM3 als vier Gruppen, Text 1.7B,
     // VL 2B, Omni 2B und Audio 2B (je Ollama-Tag plus MLX-Build). Die Kurve
     // oben traegt weiter: 54 liegt am unteren Ende.
-    expect(messeReiter(getMainstreamTextModels()).kacheln).toBe(54)
+    // 54 -> 57 am selben Tag, nach E1 (llama.cpp b11960): LFM3 1.7B, VL 2B
+    // und Omni 2B auch als GGUF-Gruppen fuer LU Engine und LM Studio.
+    expect(messeReiter(getMainstreamTextModels()).kacheln).toBe(57)
     //
     // 56 -> 57 am 05.09.2026, vierte Bewegung. Der Inhaber: „orcarouter ist ein
     // muss." Die sechs Qwen-3.8-27B-Uncensored-Quants zeigen jetzt auf

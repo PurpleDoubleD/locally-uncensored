@@ -13,9 +13,10 @@
  *   Ollama 0.40.13            laedt lfm3, lfm3-vl, lfm3-omni, lfm3-audio
  *
  * Ein GGUF-Eintrag landet bei der LU Engine oder in LM Studio. Die LU Engine
- * kann ihn am Pin b9949 nicht oeffnen; LM Studio erst ab llama.cpp-Runtime
- * 2.65.1. Deshalb steht LFM3 nur als Ollama-Tag da, die MLX-Builds davon nur
- * auf dem Mac.
+ * konnte ihn am Pin b9949 nicht oeffnen; LM Studio erst ab llama.cpp-Runtime
+ * 2.65.1. Bis E1 stand LFM3 deshalb nur als Ollama-Tag da (die MLX-Builds nur
+ * auf dem Mac). E1 hat den Pin am 30.10.2026 auf b11960 gehoben, seitdem
+ * stehen Text, VL und Omni auch als GGUF da.
  *
  * ── WANN DIESE DATEI FAELLT ────────────────────────────────────────────────
  *
@@ -33,7 +34,8 @@ import { parsePinnedLlamaTag } from '../gguf-arch'
 import { forThisPlatform } from '../../lib/mlx-only-builds'
 
 const alle = () => [...getUncensoredTextModels(), ...getMainstreamTextModels()]
-const lfm3 = () => alle().filter((m) => /^LFM3\b/.test(m.name))
+const lfm3 = () => alle().filter((m) => /^LFM3\b/.test(m.name) && m.ollamaModel)
+const lfm3Gguf = () => alle().filter((m) => /^LFM3\b/.test(m.name) && m.downloadUrl)
 const wurzel = resolve(dirname(fileURLToPath(import.meta.url)), '../../..')
 
 /** Erste llama.cpp-Version mit LLM_ARCH_LFM3 (Modellkarte LiquidAI/LFM3-1.7B-GGUF). */
@@ -81,6 +83,38 @@ describe('LFM3 steht im Katalog', () => {
     for (const m of mlx) expect(m.tags).toContain('MLX')
     expect(forThisPlatform(lfm3(), true).length).toBe(8)
     expect(forThisPlatform(lfm3(), false).map((m) => m.ollamaModel).sort()).toEqual(['lfm3-audio:2b', 'lfm3-omni:2b', 'lfm3-vl:2b', 'lfm3:1.7b'])
+  })
+})
+
+describe('LFM3 als GGUF fuer LU Engine und LM Studio', () => {
+  it('Text, VL und Omni, jede Datei mit Byte-Zahl und SHA-256 aus dem LiquidAI-Repo', () => {
+    const g = lfm3Gguf()
+    expect(g.map((m) => m.filename).sort()).toEqual([
+      'LFM3-1.7B-Q4_K_M.gguf', 'LFM3-1.7B-Q8_0.gguf', 'LFM3-1.7B-QAD-Q4_0.gguf',
+      'LFM3-Omni-2B-Q4_K_M.gguf', 'LFM3-VL-2B-Q4_K_M.gguf', 'LFM3-VL-2B-Q8_0.gguf',
+    ])
+    for (const m of g) {
+      expect(m.downloadUrl).toMatch(/^https:\/\/huggingface\.co\/LiquidAI\/LFM3-/)
+      expect(m.sha256).toMatch(/^[0-9a-f]{64}$/)
+      expect(m.sizeBytes).toBeGreaterThan(1_000_000_000)
+      expect(m.description, m.name).toMatch(/LU Engine|closest to|quantization-aware/)
+    }
+  })
+
+  it('VL und Omni bringen ihren Projektor mit, der Text nicht', () => {
+    for (const m of lfm3Gguf()) {
+      const sieht = /VL|Omni/.test(m.name)
+      expect(Boolean(m.mmprojUrl), m.name).toBe(sieht)
+      if (sieht) {
+        expect(m.mmprojUrl).toMatch(/LiquidAI\/LFM3-(VL|Omni)-2B-GGUF\/resolve\/main\/mmproj-/)
+        expect(m.mmprojSha256).toMatch(/^[0-9a-f]{64}$/)
+        expect(m.tags).toContain('Vision')
+      }
+    }
+  })
+
+  it('kein Audio-GGUF: in der Engine waere es nur ein Textmodell', () => {
+    expect(lfm3Gguf().some((m) => /Audio/.test(m.name))).toBe(false)
   })
 })
 
