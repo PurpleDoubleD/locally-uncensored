@@ -3,6 +3,7 @@ import { execFileSync } from 'node:child_process'
 import { resolve, join } from 'node:path'
 import { existsSync, statSync, mkdtempSync, rmSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
+import { createServer } from 'node:net'
 import { asNumber, prop } from '../../types/json-guards'
 import { bashInterpreter } from './bash-interpreter'
 
@@ -506,8 +507,18 @@ cmake() {
 })
 
 describe('build-llama.sh --check: a failed boot leaves no server behind (E1)', { timeout: 30_000 }, () => {
-  it('kills the server itself, not only the subshell that started it', () => {
+  it('kills the server itself, not only the subshell that started it', async () => {
     if (process.platform === 'win32') return
+    // A port nothing listens on: a real llama-server on 8129 (a running LU, a
+    // probe build) would answer /health for the fake and turn this green-red.
+    const port = await new Promise<number>((done, fail) => {
+      const srv = createServer()
+      srv.once('error', fail)
+      srv.listen(0, '127.0.0.1', () => {
+        const a = srv.address()
+        srv.close(() => done(typeof a === 'object' && a ? a.port : 0))
+      })
+    })
     const root = mkdtempSync(join(tmpdir(), 'bl-check-'))
     try {
       const triple = runScript('host_triple').out
@@ -517,7 +528,7 @@ describe('build-llama.sh --check: a failed boot leaves no server behind (E1)', {
       // A server that never answers /health: it only records its PID and waits.
       const fake = join(bin, `lu-llama-server-${triple}`)
       writeFileSync(fake, `#!/bin/sh\n[ "$1" = "--version" ] && exit 0\necho $$ > '${pidFile}'\nexec sleep 30\n`, { mode: 0o755 })
-      const r = runScript('check_binary', { BUILD_LLAMA_REPO_ROOT: root, BUILD_LLAMA_CHECK_TRIES: '3' })
+      const r = runScript('check_binary', { BUILD_LLAMA_REPO_ROOT: root, BUILD_LLAMA_CHECK_TRIES: '3', BUILD_LLAMA_CHECK_PORT: String(port) })
       expect(r.code).not.toBe(0)
       expect(r.out).toMatch(/health endpoint never came up/)
       const pid = Number(readFileSync(pidFile, 'utf8').trim())
