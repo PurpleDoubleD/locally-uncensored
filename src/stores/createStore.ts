@@ -66,7 +66,7 @@ import { createRunModel } from '../lib/render/create-studio'
 import { DEFAULT_UPSCALE_FACTOR, normalizeUpscaleFactor, type UpscaleFactor } from '../lib/local-upscale'
 import { characterLoraFile, isLocalCharacter, type CharacterRef } from '../lib/character-ref'
 import { triggerWordNote, typedTriggerWord } from '../lib/train-trigger'
-import { loraLaneKey, sanitizeLoraLanes, switchLoraLane, type LoraPick } from '../lib/render/lora-lanes'
+import { loraLaneKey, moveLoraPick, sanitizeLoraLanes, switchLoraLane, type LoraPick } from '../lib/render/lora-lanes'
 // ModelType includes: flux, flux2, zimage, sdxl, sd15, wan, hunyuan, unknown
 
 export type ProgressPhase = 'idle' | 'queued' | 'loading-model' | 'loading-clip' | 'loading-vae' | 'sampling' | 'decoding' | 'complete'
@@ -661,6 +661,9 @@ export interface CreateState {
   setExpertOpen: (open: boolean) => void
   toggleLora: (name: string) => void
   setLoraStrengthFor: (name: string, strength: number) => void
+  /** D4: moves a pick a place up (-1) or down (1) among `among` (the picks
+   *  the stack shows); the run chains them in this order. */
+  moveLora: (name: string, delta: -1 | 1, among?: string[]) => void
   clearLoras: () => void
   /** Drops picks whose file ComfyUI no longer lists (GH #146), and the local
    *  character that rode on one of them. */
@@ -1387,6 +1390,7 @@ export const useCreateStore = create<CreateState>()(
           loraStrengths: { ...s.loraStrengths, [name]: value },
         }
       }),
+      moveLora: (name, delta, among) => set((s) => ({ selectedLoras: moveLoraPick(s.selectedLoras, name, delta, among) })),
       clearLoras: () => set((s) => ({
         selectedLoras: [],
         selectedCharacter: isLocalCharacter(s.selectedCharacter) ? null : s.selectedCharacter,

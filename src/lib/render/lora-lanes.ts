@@ -43,6 +43,22 @@ export function switchLoraLane(
   return { selectedLoras: [...back, ...character], loraLanes: trimmed }
 }
 
+/** D4 (3.0.9): the picks with one moved a place up (-1) or down (1). The
+ *  run chains the LoRAs in this order. `among` names the picks the stack
+ *  shows (the ones this model runs): the move swaps with the next of those,
+ *  so a pick kept for another model never swallows a click. The same list
+ *  comes back when the move goes past either end or the name is not picked. */
+export function moveLoraPick(picks: LoraPick[], name: string, delta: -1 | 1, among?: string[]): LoraPick[] {
+  const from = picks.findIndex((p) => p.name === name)
+  if (from < 0) return picks
+  let to = from + delta
+  while (to >= 0 && to < picks.length && among && !among.includes(picks[to].name)) to += delta
+  if (to < 0 || to >= picks.length) return picks
+  const next = [...picks]
+  ;[next[from], next[to]] = [next[to], next[from]]
+  return next
+}
+
 /** A trained character's LoRA (`char_<name>_zimage.safetensors`, the trainer's
  *  own naming, api/trainer parseLocalCharacterLora). It belongs to the picked
  *  character, not to a lane. */
