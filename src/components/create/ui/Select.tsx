@@ -80,13 +80,17 @@ export function Select({
     const unique = options.filter((option) => !seen.has(option.value) && !!seen.add(option.value))
     if (!query.trim()) return unique
 
-    const normalizedQuery = query.toLowerCase()
+    // Spaces, underscores, dashes and dots do not count, so "euler a",
+    // "euler_a" and "Euler a" are one search, as are "dpmpp sde" and
+    // "dpmpp_sde" (C24, sampler names written two ways).
+    const loose = (text: string) => text.toLowerCase().replace(/[\s_.-]+/g, '')
+    const normalizedQuery = loose(query)
 
     return unique.filter(
       (option) =>
-        option.label.toLowerCase().includes(normalizedQuery) ||
-        option.sublabel?.toLowerCase().includes(normalizedQuery) ||
-        option.title?.toLowerCase().includes(normalizedQuery),
+        loose(option.label).includes(normalizedQuery) ||
+        (option.sublabel !== undefined && loose(option.sublabel).includes(normalizedQuery)) ||
+        (option.title !== undefined && loose(option.title).includes(normalizedQuery)),
     )
   }, [options, query])
 
