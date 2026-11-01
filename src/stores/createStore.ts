@@ -740,7 +740,8 @@ export interface CreateState {
   mergeGallery: (items: GalleryItem[]) => void
   removeFromGallery: (id: string) => void
   clearGallery: () => void
-  /** Make a folder. Returns its id, or null for an empty name or a full list. */
+  /** Make a folder. Returns its id (the one already there for a name it has,
+   *  in any case), or null for an empty name or a full list. */
   addGalleryFolder: (name: string) => string | null
   renameGalleryFolder: (id: string, name: string) => void
   /** Remove a folder. Its entries stay in the gallery and go back to "All";
@@ -1800,7 +1801,12 @@ export const useCreateStore = create<CreateState>()(
       addGalleryFolder: (name) => {
         const clean = cleanFolderName(name)
         const s = get()
-        if (!clean || s.galleryFolders.length >= FOLDER_CAP) return null
+        if (!clean) return null
+        // FEHLER-D3 #1: a name that is there already is that folder. Every
+        // typed "Win Test" used to make one more folder of the same name.
+        const same = s.galleryFolders.find((f) => f.name.toLowerCase() === clean.toLowerCase())
+        if (same) return same.id
+        if (s.galleryFolders.length >= FOLDER_CAP) return null
         const id = newFolderId(s.galleryFolders)
         set({ galleryFolders: [...s.galleryFolders, { id, name: clean }] })
         return id
