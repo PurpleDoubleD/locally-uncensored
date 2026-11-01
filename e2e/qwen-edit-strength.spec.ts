@@ -6,7 +6,7 @@ import { gradientPng } from './support/png'
 import { appModules, type AppWindow } from './support/ui'
 
 /**
- * 3.0.9 D6 / B46 (Discord boromirofgeo 30.10.2026): the Edit strength of a
+ * 3.0.9 D6 / B46 (Discord #bug-reports 30.10.2026): the Edit strength of a
  * Qwen-Image 2.1 edit through ComfyUI is back, and it reaches the graph.
  * Windows or Linux, local: a Mac runs this model on MLX, where the slider was
  * never gone.
