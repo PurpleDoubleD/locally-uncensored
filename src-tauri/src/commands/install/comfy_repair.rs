@@ -346,6 +346,10 @@ pub fn repair_comfyui_env(state: State<'_, AppState>) -> Result<serde_json::Valu
             "installing",
             "Downloading PyTorch into the new environment (~2 GB). Live pip output below.",
         );
+        // GH #211: an old pip cannot read the PyTorch index.
+        if let Some(line) = super::torch::lift_old_pip_before_torch(&venv_py, &install_status, Some(&cancel_flag)) {
+            update("installing", &line);
+        }
         let refs: Vec<&str> = torch_args.iter().map(|s| s.as_str()).collect();
         match pip_install_streaming_with_retry_cancellable(&refs, &venv_py, 3, &install_status, Some(&cancel_flag)) {
             Ok(()) => {
