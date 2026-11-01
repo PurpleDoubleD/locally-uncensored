@@ -1,7 +1,7 @@
 import { itemHasAlpha } from '../../../lib/transparent-image'
-import { useState } from 'react'
+import { useState, type MouseEvent as ReactMouseEvent } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Images, Play, PanelRightClose, Trash2, Download, MonitorOff, AudioLines, FolderInput } from 'lucide-react'
+import { Images, Play, PanelRightClose, Trash2, Download, MonitorOff, AudioLines, FolderInput, Check, X } from 'lucide-react'
 import { useCreateStore, type GalleryItem } from '../../../stores/createStore'
 import { galleryLabel } from '../../../lib/render/gallery-label'
 import { GALLERY_DRAG_TYPE, playsAsVideo } from './galleryUrl'
@@ -12,6 +12,13 @@ import { useComfyMedia } from './useComfyMedia'
 import { cn } from '../ui/cn'
 import { itemsInFolder } from '../../../lib/gallery-folders'
 import { FolderFilter, MoveToFolderModal, OnBody } from './GalleryFolders'
+import { ContextMenu } from '../../ui/ContextMenu'
+import { Modal } from '../../ui/Modal'
+import { ModalActions, ModalButton } from '../../ui/ModalActions'
+import {
+  EMPTY_SELECTION, buildGalleryMenu, clickSelection, deleteConfirmLine, keepShown, menuSelection, selectAll,
+  type GallerySelection,
+} from './gallerySelection'
 
 interface Props {
   open: boolean
@@ -34,6 +41,57 @@ export function CreatePanel({ open, onOpenChange, activeId, onSelect }: Props) {
   const gallery = folderOpen === null ? all : itemsInFolder(all, folderOpen)
   const [moving, setMoving] = useState<string[]>([])
   const count = gallery.length
+  // Several at once (D3, 3.0.9): Cmd/Ctrl-click, Shift range, Cmd/Ctrl+A,
+  // Escape. The menu and the bar act on `sel.ids` with the tile's own code.
+  const [stored, setSel] = useState<GallerySelection>(EMPTY_SELECTION)
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null)
+  const [confirming, setConfirming] = useState<readonly string[]>([])
+  const order = gallery.map((g) => g.id)
+  // Items no longer shown (another folder, deleted) are not selected.
+  const sel = keepShown(stored, order)
+  const picked = new Set(sel.ids)
+  const selecting = sel.ids.length > 0
+
+  const onTileClick = (e: ReactMouseEvent, id: string) => {
+    const mods = { toggle: e.metaKey || e.ctrlKey, range: e.shiftKey }
+    // From the state, not from this render: two clicks can land before the
+    // next render (seen on the Mac), and the first must not be lost.
+    setSel((prev) => clickSelection(keepShown(prev, order), order, id, mods))
+    if (!mods.toggle && !mods.range) onSelect(id)
+  }
+  const onTileMenu = (e: ReactMouseEvent, id: string) => {
+    e.preventDefault()
+    // From the state too; the menu acts on whatever is selected when it shows.
+    setSel((prev) => menuSelection(keepShown(prev, order), id))
+    setMenu({ x: e.clientX, y: e.clientY })
+  }
+  const onGridKey = (e: React.KeyboardEvent) => {
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'a' && order.length > 0) {
+      e.preventDefault()
+      setSel(selectAll(order))
+    } else if (e.key === 'Escape' && selecting) {
+      e.stopPropagation()
+      setSel(EMPTY_SELECTION)
+    }
+  }
+  // The same ways a single tile goes: the move dialog, downloadGalleryItem
+  // (one Save dialog after the other), removeFromGallery after the question.
+  const downloadAll = async (ids: readonly string[]) => {
+    for (const id of ids) {
+      const g = useCreateStore.getState().gallery.find((x) => x.id === id)
+      if (g) await downloadGalleryItem(g)
+    }
+  }
+  const deleteAll = () => {
+    for (const id of confirming) removeFromGallery(id)
+    setConfirming([])
+    setSel(EMPTY_SELECTION)
+  }
+  const actionsFor = (ids: readonly string[]) => ({
+    move: () => setMoving([...ids]),
+    download: () => { void downloadAll(ids) },
+    remove: () => setConfirming(ids),
+  })
 
   const bubble =
     'my-2 mr-2 rounded-xl bg-gray-50 dark:bg-[#1e1e1e] ring-1 ring-black/[0.04] dark:ring-white/[0.05] flex flex-col overflow-hidden shrink-0'
@@ -110,16 +168,54 @@ export function CreatePanel({ open, onOpenChange, activeId, onSelect }: Props) {
 
           <FolderFilter />
           <OnBody><MoveToFolderModal ids={moving} onClose={() => setMoving([])} /></OnBody>
+          <OnBody>
+            <Modal open={confirming.length > 0} onClose={() => setConfirming([])} title="Delete from the gallery" maxWidth="max-w-md">
+              <div data-testid="gallery-delete-confirm">
+                <p className="t-body text-gray-700 dark:text-gray-200">{deleteConfirmLine(confirming.length, isMlxImageHost())}</p>
+                <ModalActions>
+                  <ModalButton onClick={() => setConfirming([])}>Cancel</ModalButton>
+                  <ModalButton variant="danger" onClick={deleteAll}>
+                    {confirming.length > 1 ? `Delete ${confirming.length}` : 'Delete'}
+                  </ModalButton>
+                </ModalActions>
+              </div>
+            </Modal>
+          </OnBody>
+          {menu && selecting && (
+            <ContextMenu
+              items={buildGalleryMenu(actionsFor(sel.ids), sel.ids.length)}
+              x={menu.x}
+              y={menu.y}
+              label={sel.ids.length > 1 ? `Actions for ${sel.ids.length} items` : 'Actions for this item'}
+              onClose={() => setMenu(null)}
+            />
+          )}
+          {selecting && (
+            <div
+              role="toolbar"
+              aria-label="Selected items"
+              className="flex items-center gap-1 px-3 py-1.5 border-b border-gray-200 dark:border-white/[0.05] shrink-0"
+            >
+              <span className="t-label text-gray-500 dark:text-gray-400 mr-auto" aria-live="polite">{sel.ids.length} selected</span>
+              <BarBtn title="Move to folder" onClick={actionsFor(sel.ids).move}><FolderInput size={13} /></BarBtn>
+              <BarBtn title="Download" onClick={actionsFor(sel.ids).download}><Download size={13} /></BarBtn>
+              <BarBtn title="Delete" danger onClick={actionsFor(sel.ids).remove}><Trash2 size={13} /></BarBtn>
+              <BarBtn title="Clear selection" onClick={() => setSel(EMPTY_SELECTION)}><X size={13} /></BarBtn>
+            </div>
+          )}
 
           <div className="flex-1 min-h-0 overflow-y-auto scrollbar-thin p-3">
             {count === 0 ? (
               <p className="t-body text-gray-500 py-2">{all.length > 0 ? 'Nothing in this folder yet.' : 'Nothing generated yet.'}</p>
             ) : (
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-2 gap-2" role="group" aria-label="Gallery items" onKeyDown={onGridKey}>
                 {gallery.map((g) => (
                   <div key={g.id} className="relative group">
                     <button
-                      onClick={() => onSelect(g.id)}
+                      onClick={(e) => onTileClick(e, g.id)}
+                      onContextMenu={(e) => onTileMenu(e, g.id)}
+                      data-gallery-id={g.id}
+                      aria-pressed={selecting ? picked.has(g.id) : undefined}
                       title={g.sourceName ? `From ${g.sourceName}` : undefined}
                       draggable={g.type === 'image' && !g.unavailable}
                       onDragStart={(e) => {
@@ -128,7 +224,9 @@ export function CreatePanel({ open, onOpenChange, activeId, onSelect }: Props) {
                       }}
                       className={cn(
                         'w-full aspect-square rounded-lg overflow-hidden border-2 transition-colors relative',
-                        (activeId ?? gallery[0]?.id) === g.id ? 'border-gray-900/60 dark:border-white/60' : 'border-transparent hover:border-white/20',
+                        picked.has(g.id)
+                          ? 'border-blue-500 dark:border-blue-400'
+                          : (activeId ?? gallery[0]?.id) === g.id ? 'border-gray-900/60 dark:border-white/60' : 'border-transparent hover:border-white/20',
                         itemHasAlpha(g) && 'lu-checker',
                       )}
                     >
@@ -139,6 +237,11 @@ export function CreatePanel({ open, onOpenChange, activeId, onSelect }: Props) {
                           title={unavailableTitle(g.unavailableReason === 'gone', isMlxImageHost())}
                         >
                           <MonitorOff size={16} />
+                        </span>
+                      )}
+                      {picked.has(g.id) && (
+                        <span className="lu-on-dark absolute top-1 left-1 w-5 h-5 rounded-full bg-blue-500 text-white flex items-center justify-center shadow-sm" aria-hidden>
+                          <Check size={12} />
                         </span>
                       )}
                     </button>
@@ -171,6 +274,22 @@ export function CreatePanel({ open, onOpenChange, activeId, onSelect }: Props) {
         </motion.aside>
       )}
     </AnimatePresence>
+  )
+}
+
+function BarBtn({ children, title, onClick, danger }: { children: React.ReactNode; title: string; onClick: () => void; danger?: boolean }) {
+  return (
+    <button
+      onClick={onClick}
+      title={title}
+      aria-label={title}
+      className={cn(
+        'flex items-center justify-center w-6 h-6 rounded text-gray-500 hover:bg-gray-100 dark:hover:bg-white/5 transition-colors',
+        danger ? 'hover:text-red-600 dark:hover:text-red-400' : 'hover:text-gray-800 dark:hover:text-gray-200',
+      )}
+    >
+      {children}
+    </button>
   )
 }
 
