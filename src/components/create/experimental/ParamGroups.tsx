@@ -28,6 +28,7 @@ import { HINWEIS_TEXT } from '../../../lib/hinweis'
 import { filterLoraRows, loraCopyText, lorasForRun, loraRows } from '../../../lib/lora-stack'
 import { loraStackView, setLoraStackQuery, setLoraStackScroll } from './loraStackView'
 import { LoraStrength } from './LoraStrength'
+import { LoraOrder } from './LoraOrder'
 import { cfgHint, loraStrengthHint } from '../../../lib/param-hints'
 import { MOTION_OWN_WORKFLOW_NOTE, useMotionOwnWorkflow } from './motionWorkflow'
 import { supportsTransparent } from '../../../lib/transparent-image'
@@ -113,7 +114,8 @@ export function ParamGroups() {
     : !isCloud && !laneWithoutLoras && (!isVideo || VIDEO_LORA_FAMILIES.has(classifyModel(s.videoModel)))
   // GH #146: the count is what a run sends, the same rule useCreate applies.
   const laneType = (isVideo ? s.videoModelList : s.imageModelList).find((m) => m.name === laneModel)?.type ?? classifyModel(laneModel)
-  const activeLoras = lorasForRun(s.selectedLoras, loraList, laneType).use.length
+  const runLoras = lorasForRun(s.selectedLoras, loraList, laneType).use
+  const activeLoras = runLoras.length
   const stackRows = loraRows(loraList, s.selectedLoras, laneType)
   // The search and the scroll position outlive the drawer (loraStackView.ts).
   const [loraQuery, setLoraQuery] = useState(() => loraStackView().query)
@@ -535,6 +537,7 @@ export function ParamGroups() {
               </button>
               </div>
             </div>
+            <LoraOrder picks={runLoras} labelOf={(name) => stackRows.find((r) => r.name === name)?.label ?? name} />
             {loraList.length === 0 ? (
               isMlxLocal
                 ? <div className="t-control text-gray-600">No LoRAs found yet. Put .safetensors files into the LoRA folder (Open folder) and hit Rescan, or get one under Models, LoRAs.</div>
