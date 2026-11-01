@@ -63,6 +63,10 @@ export interface GenerateParams {
    *  Lets an all-in-one file in models/checkpoints use its own encoder/VAE. */
   modelParts?: { textEncoder: boolean; vae: boolean }
   denoise?: number      // I2I denoise strength (0.0–1.0, default 1.0 = full txt2img)
+  /** Qwen edits only (Qwen-Image 2.1, Qwen-Image-Edit 2509/2511): the Edit
+   *  strength, 0.05 to 1. 1 or unset is the template's edit from noise;
+   *  lower starts the sampler from the source and keeps more of it (B46). */
+  editStrength?: number
   removebg?: boolean    // Background removal: LoadImage → RMBG → SaveImage cutout (no diffusion)
   /** Qwen-Image 2.1 text-to-image only: ask for an RGBA picture with a
    *  transparent background (lib/transparent-image.ts). Ignored elsewhere. */

@@ -1857,6 +1857,9 @@ export function useCreate() {
         // dropped the source without a word. Edit always keeps the source;
         // 0.95 is the most it repaints (the slider tops out there too).
         ...(isI2I && !isRemoveBg && effInputImage ? { inputImage: effInputImage, denoise: Math.min(denoise, EDIT_MAX_DENOISE) } : {}),
+        // B46: a Qwen edit reads its own Edit strength (1 = as before); the
+        // builder ignores it on every other family.
+        ...(isI2I && !isRemoveBg && effInputImage && state.editStrength < 1 ? { editStrength: state.editStrength } : {}),
         // GH #144: further references ride along; the builder keeps only as
         // many as the model's family takes (lib/edit-references).
         ...(isI2I && !isRemoveBg && effInputImage && references.some((r) => r.filename)

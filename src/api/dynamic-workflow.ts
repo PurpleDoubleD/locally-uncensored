@@ -1159,6 +1159,21 @@ export async function buildDynamicWorkflow(
     ? await getSystemVRAM().catch(() => null)
     : null
   const fullImages = comfyEditFullImages(cardGb)
+  // B46 (Discord 30.10.2026, back in 3.0.9): the Edit strength of a Qwen
+  // edit. 1 is the template's edit from the empty latent, as before; below 1
+  // the sampler starts from the source itself at that denoise, so less of
+  // the picture changes. Up to 3.0.7 the slider showed here but its value
+  // never reached the graph (denoise stayed 1.0 on an empty latent).
+  const qwenEditStrength = (isQwenEdit || isQwen1Edit) && Number.isFinite(gp.editStrength) && gp.editStrength! < 1
+    ? Math.max(0.05, gp.editStrength!)
+    : 1
+  // The source and the side the encoder scales it to, for that start.
+  let qwenEditSource: [string, number] | null = null
+  let qwenEditSide = 0
+  if (isQwenEdit && qwenEditStrength < 1) {
+    requireRelease(allNodes, ['ImageScaleToTotalPixels', 'VAEEncode'],
+      'An Edit strength below 1 needs a newer ComfyUI. Update ComfyUI, or set the Edit strength to 1.', strategy)
+  }
   if (isQwen1Edit) {
     const over = qwenEditPlusOverCard(1 + references.length, cardGb)
     if (over) throw new WorkflowUnavailableError(over, strategy)
@@ -1230,6 +1245,8 @@ export async function buildDynamicWorkflow(
         qwenInputs[`images.image_${i + 1}`] = [loadId, 0]
       }
       qwenInputs.vae = [vaeSourceId, vaeOutputSlot]
+      qwenEditSource = qwenInputs['images.image_1'] as [string, number]
+      qwenEditSide = qwenInputs.resolution as number
     } else if (createRefs.length > 0) {
       // B45: references without a source. They are image_1 and up; the
       // picture still comes from the empty latent at the canvas size below.
@@ -1446,6 +1463,20 @@ export async function buildDynamicWorkflow(
       // calls out as required, because any other size shifts the edit.
       latentRef = [posId, 2]
       delete workflow[latentId]
+      if (qwenEditStrength < 1 && qwenEditSource) {
+        // B46: the source at exactly the size of that latent. The encoder
+        // scales image_1 to about side x side pixels on multiples of 32 in
+        // its own shape (nodes_qwen.py); ImageScaleToTotalPixels does the
+        // same sum with side² pixels and steps of 32.
+        const scaleId = String(n++)
+        workflow[scaleId] = {
+          class_type: 'ImageScaleToTotalPixels',
+          inputs: { image: qwenEditSource, upscale_method: 'lanczos', megapixels: (qwenEditSide * qwenEditSide) / (1024 * 1024), resolution_steps: 32 },
+        }
+        const encId = String(n++)
+        workflow[encId] = { class_type: 'VAEEncode', inputs: { pixels: [scaleId, 0], vae: [vaeSourceId, vaeOutputSlot] } }
+        latentRef = [encId, 0]
+      }
     }
   }
 
@@ -1824,6 +1855,10 @@ export async function buildDynamicWorkflow(
       sampler: part({ class_type: 'KSamplerSelect', inputs: { sampler_name: QWEN21_TURBO_SAMPLING.sampler } }),
       sigmas: part({ class_type: 'ManualSigmas', inputs: { sigmas: QWEN21_TURBO_SIGMAS } }),
     }
+    if (qwenEditStrength < 1) {
+      // B46 on Turbo: its own schedule, cut to the strength (low_sigmas).
+      qwenTurboCustom.sigmas = [part({ class_type: 'SplitSigmasDenoise', inputs: { sigmas: qwenTurboCustom.sigmas, denoise: qwenEditStrength } })[0], 1]
+    }
   }
 
   const samplerId = String(n++)
@@ -1856,7 +1891,8 @@ export async function buildDynamicWorkflow(
       cfg: params.cfgScale,
       sampler_name: qwenTurbo ? QWEN21_TURBO_SAMPLING.sampler : params.sampler,
       scheduler: qwenTurbo ? QWEN21_TURBO_SAMPLING.scheduler : params.scheduler,
-      denoise: isInpaint ? (params.denoise ?? 0.85) : isI2I ? (params.denoise ?? 0.7) : 1.0, // Qwen-Image-Edit: 1.0, like its template
+      // Qwen edits: 1.0 like their templates, or the Edit strength (B46).
+      denoise: isInpaint ? (params.denoise ?? 0.85) : isI2I ? (params.denoise ?? 0.7) : qwenEditStrength,
     },
   }
 

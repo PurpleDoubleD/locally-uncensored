@@ -8,7 +8,7 @@ import { useMacMemoryGb } from '../../../lib/mac-memory'
 import { applyAspect } from '../../../lib/create-resolution'
 import { useCreateStore, MODEL_TYPE_DEFAULTS, EDIT_MAX_DENOISE, imageQualityLadder, type ImageQuality } from '../../../stores/createStore'
 import { classifyModel, resolveLocalOpPick } from '../../../api/comfyui'
-import { editIgnoresStrength } from '../../../lib/edit-references'
+import { readsEditStrength } from '../../../lib/edit-references'
 import { useCreateExp } from './CreateContext'
 import { intentToJob } from '../../../lib/render/cloud-jobs'
 import { meterState } from '../../../lib/render/credits-meter'
@@ -662,6 +662,8 @@ function LaneControls() {
   const setSteps = useCreateStore((s) => s.setSteps)
   const denoise = useCreateStore((s) => s.denoise)
   const setDenoise = useCreateStore((s) => s.setDenoise)
+  const editStrength = useCreateStore((s) => s.editStrength)
+  const setEditStrength = useCreateStore((s) => s.setEditStrength)
   const imageModelType = useCreateStore((s) => s.imageModelType)
   const imageModel = useCreateStore((s) => s.imageModel)
   const setImageQuality = useCreateStore((s) => s.setImageQuality)
@@ -697,10 +699,10 @@ function LaneControls() {
   const macMemoryGb = useMacMemoryGb(mlxLocal)
   const macLengthGb = intent === 'motion' ? null : macMemoryGb
   const ownSampling = mlxLocal && runsAtOwnSampling(imageModelList, laneImageModel(imageModelList, imageModel, intent))
-  // A Qwen edit through ComfyUI samples at denoise 1.0 like its template, so
-  // an Edit strength there would be a dead control (lib/edit-references).
+  // A Qwen edit through ComfyUI reads its own Edit strength, 1 = the
+  // template's edit, as on the Mac (lib/edit-references, B46).
   const listedImageType = imageModelList.find((m) => m.name === imageModel)?.type
-  const strengthUnread = backend === 'local' && !mlxLocal && editIgnoresStrength(listedImageType ?? classifyModel(imageModel), imageModel)
+  const qwenStrength = backend === 'local' && !mlxLocal && readsEditStrength(listedImageType ?? classifyModel(imageModel), imageModel)
   const videoModelList = useCreateStore((s) => s.videoModelList)
   // Motion Control on the Mac runs the model of its own list.
   const motionModelList = useCreateStore((s) => s.motionModelList)
@@ -815,9 +817,14 @@ function LaneControls() {
           )}
         </div>
 
-        {meta.id === 'edit' && !mlxLocal && !strengthUnread && (
+        {meta.id === 'edit' && !mlxLocal && !qwenStrength && (
           <div className="w-44">
             <Slider label="Edit strength" min={0.05} max={EDIT_MAX_DENOISE} step={0.05} value={Math.min(denoise, EDIT_MAX_DENOISE)} onChange={setDenoise} format={(v) => v.toFixed(2)} />
+          </div>
+        )}
+        {meta.id === 'edit' && qwenStrength && (
+          <div className="w-44">
+            <Slider label="Edit strength" min={0.05} max={1} step={0.05} value={editStrength} onChange={setEditStrength} format={(v) => v.toFixed(2)} />
           </div>
         )}
       </div>

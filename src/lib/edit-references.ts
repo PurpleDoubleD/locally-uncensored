@@ -94,13 +94,15 @@ export const MANY_REFERENCES = 4
 export const MANY_REFERENCES_LINE = 'With this many images, say what each one brings, for example "the scarf from image 3".'
 
 /**
- * Whether a local ComfyUI edit with this model leaves the Edit strength
- * unread. Both Qwen edit families sample at denoise 1.0 from the latent their
- * encoder hands over, as the official templates do (dynamic-workflow.ts), so
- * a strength slider there set nothing (Discord #general 23.10.2026: "even
- * with strength at 95%" on Qwen Image 2.1 Edit). How close the result stays
- * to the images is set by the prompt and the images themselves.
+ * Whether a local ComfyUI edit with this model takes its strength from
+ * `editStrength` (the Mac's field, 1 = the template's edit) instead of the
+ * img2img `denoise`. Both Qwen edit families sample at denoise 1.0 from the
+ * latent their encoder hands over, as the official templates do. Up to 3.0.7
+ * the slider here set `denoise`, which the graph never read (Discord #general
+ * 23.10.2026: "even with strength at 95%"); 3.0.8 took it out. B46 (3.0.9):
+ * below 1 the run starts from the source at that denoise (dynamic-workflow.ts),
+ * so the slider is back and does what it says.
  */
-export function editIgnoresStrength(type: ModelType | null | undefined, modelName: string): boolean {
+export function readsEditStrength(type: ModelType | null | undefined, modelName: string): boolean {
   return type === 'qwenimage' || (type === 'qwenimage1' && isQwenImageEditModel(modelName))
 }
