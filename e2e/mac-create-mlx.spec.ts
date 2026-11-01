@@ -1021,11 +1021,11 @@ test('mac local: untick takes a LoRA out, a file gone from the folder leaves the
   await bootLocalCreate(page, { ...MAC_OPTS, mlx: QWEN_LORAS })
   await expect(page.getByRole('radio', { name: 'Image', exact: true })).toBeVisible({ timeout: 15_000 })
   await openStack(page)
-  await drawer(page).getByRole('button', { name: /slider/ }).click()
-  await drawer(page).getByRole('button', { name: /unused/ }).click()
+  await drawer(page).getByRole('button', { name: /^slider/ }).click()
+  await drawer(page).getByRole('button', { name: /^unused/ }).click()
   await expect(drawer(page).getByText('· 2 active')).toBeVisible()
   // Untick: the row stays, the LoRA is out.
-  await drawer(page).getByRole('button', { name: /unused/ }).click()
+  await drawer(page).getByRole('button', { name: /^unused/ }).click()
   await expect(drawer(page).getByText('· 1 active')).toBeVisible()
   await expect.poll(() => savedStack(page)).toEqual([{ name: 'slider.safetensors', strength: 0.8 }])
 
@@ -1035,7 +1035,7 @@ test('mac local: untick takes a LoRA out, a file gone from the folder leaves the
     w.__E2E_MLX_LORAS__ = w.__E2E_MLX_LORAS__.filter((l) => l.name !== 'slider.safetensors')
   })
   await drawer(page).getByRole('button', { name: /Rescan/ }).click()
-  await expect(drawer(page).getByRole('button', { name: /slider/ })).toHaveCount(0)
+  await expect(drawer(page).getByRole('button', { name: /^slider/ })).toHaveCount(0)
   await expect(drawer(page).getByText(/active/)).toHaveCount(0)
   await expect.poll(() => savedStack(page)).toEqual([])
   await page.keyboard.press('Escape')
