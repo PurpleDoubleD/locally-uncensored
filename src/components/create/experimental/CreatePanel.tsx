@@ -54,7 +54,9 @@ export function CreatePanel({ open, onOpenChange, activeId, onSelect }: Props) {
 
   const onTileClick = (e: ReactMouseEvent, id: string) => {
     const mods = { toggle: e.metaKey || e.ctrlKey, range: e.shiftKey }
-    setSel(clickSelection(sel, order, id, mods))
+    // From the state, not from this render: two clicks can land before the
+    // next render (seen on the Mac), and the first must not be lost.
+    setSel((prev) => clickSelection(keepShown(prev, order), order, id, mods))
     if (!mods.toggle && !mods.range) onSelect(id)
   }
   const onTileMenu = (e: ReactMouseEvent, id: string) => {

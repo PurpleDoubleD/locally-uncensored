@@ -10,7 +10,7 @@
  * Run: npx vitest run src/components/create/experimental/__tests__/galerie-mehrfachauswahl.test.tsx
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 
 vi.mock('../CreateContext', () => ({
   useCreateExp: () => ({ quota: null, enhanceVideo: vi.fn() }),
@@ -63,6 +63,22 @@ describe('selecting', () => {
     expect(selected()).toEqual(['a', 'c'])
     expect(onSelect).not.toHaveBeenCalled()
     expect(bar()!.textContent).toContain('2 selected')
+  })
+
+  it('two clicks before the next render both count (Mac run, D3 probe)', () => {
+    panel()
+    const click = (id: string, init: MouseEventInit) =>
+      tile(id).dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, ...init }))
+    act(() => {
+      click('a', { metaKey: true })
+      click('c', { metaKey: true })
+    })
+    expect(selected()).toEqual(['a', 'c'])
+    act(() => {
+      click('b', {})
+      click('d', { shiftKey: true })
+    })
+    expect(selected()).toEqual(['b', 'c', 'd'])
   })
 
   it('Shift-click takes the range from the last clicked item', () => {
