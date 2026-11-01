@@ -16,6 +16,7 @@ import { openMlxLoraFolder, mlxLoraAlphaNote, mlxLoraRefusal } from '../../../ap
 import { MLX_VIDEO_MIN_FRAMES, mlxFramesOnGrid, mlxVideoLaneEntry, mlxVideoMaxFrames, mlxVideoRunSize } from '../../../api/mlx-video'
 import { INTENT_MAP } from './intents'
 import { SAMPLERS as SAMPLERS_FALLBACK, SCHEDULERS as SCHEDULERS_FALLBACK } from './badges'
+import { samplerOptions, schedulerOptions } from '../../../lib/sampler-names'
 import { Section } from '../ui/Section'
 import { Slider } from '../ui/Slider'
 import { Select } from '../ui/Select'
@@ -483,11 +484,11 @@ export function ParamGroups() {
             rather than let the user tune a control that's silently dropped. */}
         {!isCloud && !isMlxLocal && (
           <>
-            <Field label="Sampler" help="The algorithm that turns noise into your image. dpmpp_2m / euler are safe all-rounders.">
-              <Select size="sm" options={samplers.map((x) => ({ value: x, label: x }))} value={s.sampler} onChange={s.setSampler} />
+            <Field label="Sampler" help="The algorithm that turns noise into your image. DPM++ 2M / Euler are safe all-rounders.">
+              <Select size="sm" searchable ariaLabel="Sampler" options={samplerOptions(samplers)} value={s.sampler} onChange={s.setSampler} />
             </Field>
-            <Field label="Scheduler" help="How the denoise steps are spaced. karras is a good default for SDXL; simple for FLUX.">
-              <Select size="sm" options={schedulers.map((x) => ({ value: x, label: x }))} value={s.scheduler} onChange={s.setScheduler} />
+            <Field label="Scheduler" help="How the denoise steps are spaced. Karras is a good default for SDXL; Simple for FLUX.">
+              <Select size="sm" searchable ariaLabel="Scheduler" options={schedulerOptions(schedulers)} value={s.scheduler} onChange={s.setScheduler} />
             </Field>
           </>
         )}

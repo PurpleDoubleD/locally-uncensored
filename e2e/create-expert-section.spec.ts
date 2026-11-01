@@ -169,7 +169,8 @@ test('windows lokal: Expert steht da, ist zu, und traegt nach dem Klick die Comf
 
   // Die Vorgabeliste traegt den Standardsampler, auch ohne laufendes ComfyUI.
   await fieldSelect(page, 'Sampler').click()
-  await expect(page.getByRole('option', { name: 'dpmpp_2m', exact: true })).toBeVisible()
+  // Lesbar, mit dem ComfyUI-Namen klein daneben (C24).
+  await expect(page.getByRole('option', { name: /^DPM\+\+ 2M\s*dpmpp_2m$/ })).toBeVisible()
 })
 
 /**
