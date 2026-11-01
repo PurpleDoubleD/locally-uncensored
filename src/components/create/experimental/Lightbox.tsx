@@ -8,7 +8,7 @@ import { useCreateExp } from './CreateContext'
 import { useComfyMedia } from './useComfyMedia'
 import { PromptDetails } from './PromptDetails'
 import { cn } from '../ui/cn'
-import { MoveToFolderModal } from './GalleryFolders'
+import { MoveToFolderModal, OnBody } from './GalleryFolders'
 import { playsAsVideo } from './galleryUrl'
 import { itemsInFolder } from '../../../lib/gallery-folders'
 
@@ -31,6 +31,18 @@ export function galleryNeighbor<T extends { id: string; folderId?: string }>(
   const at = shown.findIndex((g) => g.id === id)
   if (at < 0) return null
   return shown[at + step] ?? null
+}
+
+/**
+ * The entry to show once `id` has left the view (moved to another folder, one
+ * or several at once): the next one still shown, at the end the one before,
+ * null when none is left. `before` is the view while `id` was in it.
+ */
+export function viewSuccessor(before: readonly string[], now: readonly string[], id: string): string | null {
+  const at = before.indexOf(id)
+  if (at < 0) return null
+  const still = new Set(now)
+  return before.slice(at + 1).find((x) => still.has(x)) ?? before.slice(0, at).reverse().find((x) => still.has(x)) ?? null
 }
 
 export function Lightbox({ item, onClose, onSaveCharacter, onNavigate, promptOpen = false }: {
@@ -58,6 +70,24 @@ export function Lightbox({ item, onClose, onSaveCharacter, onNavigate, promptOpe
   const folderOpen = useCreateStore((s) => s.galleryFolderOpen)
   const prev = item && onNavigate ? galleryNeighbor(all, folderOpen, item.id, -1) : null
   const next = item && onNavigate ? galleryNeighbor(all, folderOpen, item.id, 1) : null
+  // D3 (Discord 01.11.2026): an entry moved out of the open folder is no
+  // longer in the view the arrows step through, and they were gone. The view
+  // goes on with the next entry of the folder, or closes when none is left.
+  // An entry opened while not in the view (from the stage) is left alone.
+  const viewKey = itemsInFolder(all, folderOpen).map((g) => g.id).join('\n')
+  const lastView = useRef<{ id: string; ids: string[] } | null>(null)
+  useEffect(() => {
+    if (!item) { lastView.current = null; return }
+    const ids = viewKey ? viewKey.split('\n') : []
+    if (ids.includes(item.id)) { lastView.current = { id: item.id, ids }; return }
+    const before = lastView.current
+    lastView.current = null
+    if (!before || before.id !== item.id) return
+    const to = viewSuccessor(before.ids, ids, item.id)
+    const target = to ? useCreateStore.getState().gallery.find((g) => g.id === to) : undefined
+    if (target && onNavigate) onNavigate(target)
+    else onClose()
+  }, [item, viewKey, onNavigate, onClose])
   const [zoom, setZoom] = useState({ id: '', scale: 1, x: 50, y: 50, panX: 0, panY: 0 })
   const scale = item && zoom.id === item.id ? zoom.scale : 1
   const panX = scale > 1 ? zoom.panX : 0
@@ -220,11 +250,20 @@ export function Lightbox({ item, onClose, onSaveCharacter, onNavigate, promptOpe
               <ChevronRight size={18} />
             </button>
           )}
-          {/* The dialog sits inside the large view, so a click in it must not
-              reach the backdrop that closes the view. */}
-          <div className="contents" onClick={(e) => e.stopPropagation()}>
-            <MoveToFolderModal ids={movingId === item.id ? [item.id] : []} onClose={() => setMovingId(null)} />
-          </div>
+          {/* The dialog goes onto the page, out of this dark surface: its
+              `lu-on-dark` turned the field text white on the white dialog of
+              the light theme (Discord 01.11.2026). The layer keeps it above
+              the large view (z-80). A click in it still bubbles through the
+              React tree, so it must not reach the backdrop that closes the view. */}
+          {movingId === item.id && (
+            <div className="contents" onClick={(e) => e.stopPropagation()}>
+              <OnBody>
+                <div className="fixed inset-0 z-[90]">
+                  <MoveToFolderModal ids={[item.id]} onClose={() => setMovingId(null)} />
+                </div>
+              </OnBody>
+            </div>
+          )}
           {item.type === 'audio' ? (
             <motion.div
               initial={{ scale: 0.95 }}
