@@ -1,5 +1,5 @@
 /**
- * B46 (Discord #bug-reports 30.10.2026, boromirofgeo; back in 3.0.9 on
+ * B46 (Discord #bug-reports 30.10.2026; back in 3.0.9 on
  * David's word 01.11.): the Edit strength of a Qwen edit through ComfyUI.
  *
  * Up to 3.0.7 the slider showed on a Qwen-Image 2.1 edit, but it set
