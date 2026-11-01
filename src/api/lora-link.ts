@@ -9,6 +9,7 @@
 import { fetchExternal } from './backend'
 import { startModelDownload, startModelDownloadToPath } from './discover'
 import { useDownloadStore } from '../stores/downloadStore'
+import { useModelSourceStore } from '../stores/modelSourceStore'
 import {
   civitaiLoraFromModel,
   civitaiLoraFromVersionAnswer,
@@ -117,6 +118,8 @@ export async function startLoraLinkDownload(info: LoraLinkInfo, destDir?: string
   const store = useDownloadStore.getState()
   const extra = { expectedBytes: info.sizeBytes, sha256: info.sha256 }
   store.setMeta(info.filename, info.downloadUrl, 'loras', destDir, extra)
+  // D1: the page the link pointed at, for Details in Models.
+  useModelSourceStore.getState().record(info.filename, info.pageUrl)
   const answer = destDir
     ? await startModelDownloadToPath(info.downloadUrl, destDir, info.filename, info.sizeBytes, info.sha256)
     : await startModelDownload(info.downloadUrl, 'loras', info.filename, info.sizeBytes, info.sha256)

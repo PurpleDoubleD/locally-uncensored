@@ -3,12 +3,12 @@
 // colours are the Mac's since 10.10.2026 (see classic.tsx). The Mac face is
 // ../LoraManager.tsx, which also owns the row type and the hint sentence both
 // faces say. Which one is drawn is decided in skin/which.ts.
-import { Layers, Trash2 } from 'lucide-react'
+import { Info, Layers, Trash2 } from 'lucide-react'
 import { parseLocalCharacterLora } from '../../../api/trainer'
 import { formatBytes } from '../../../lib/formatters'
 import { LORA_USE_HINT, type LoraManagerProps } from '../LoraManager'
 
-export function ClassicLoraManager({ rows, total, searchQuery, onDelete, onGetNew }: LoraManagerProps) {
+export function ClassicLoraManager({ rows, total, searchQuery, onDelete, onInfo, onGetNew }: LoraManagerProps) {
   if (total === 0) {
     return (
       <div className="flex flex-col items-center justify-center text-center py-16 px-6 gap-3">
@@ -63,6 +63,16 @@ export function ClassicLoraManager({ rows, total, searchQuery, onDelete, onGetNe
                   {character && <span className="font-mono">Trigger word: {character.trigger}</span>}
                 </div>
               </div>
+              {onInfo && (
+                <button
+                  onClick={() => onInfo(row.name)}
+                  title="Details"
+                  aria-label={`Details of ${row.name}`}
+                  className="shrink-0 p-1.5 rounded-lg text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/10 transition-colors"
+                >
+                  <Info size={13} />
+                </button>
+              )}
               <button
                 onClick={() => onDelete(row.name)}
                 title="Delete"

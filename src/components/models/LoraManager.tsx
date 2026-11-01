@@ -10,7 +10,7 @@
  * the `source: 'lora'` half of it), so there is no second reader and no second
  * answer about what is installed.
  */
-import { Layers, Trash2 } from 'lucide-react'
+import { Info, Layers, Trash2 } from 'lucide-react'
 import { parseLocalCharacterLora } from '../../api/trainer'
 import { formatBytes } from '../../lib/formatters'
 import { ModelEmptyState, SectionHead } from './ModelPageParts'
@@ -34,6 +34,8 @@ export interface LoraManagerProps {
   searchQuery: string
   /** Opens the shared delete confirmation of the Models view. */
   onDelete: (name: string) => void
+  /** Opens the Details dialog of that file (D1). */
+  onInfo?: (name: string) => void
   /** Sends the user to the Get new segment of this same rail. */
   onGetNew: () => void
 }
@@ -44,7 +46,7 @@ export interface LoraManagerProps {
  *  the list "LoRA stack" (ParamGroups.tsx). */
 export const LORA_USE_HINT = 'Use them in Create, Advanced settings, Expert, LoRA stack.'
 
-export function LoraManager({ rows, total, searchQuery, onDelete, onGetNew }: LoraManagerProps) {
+export function LoraManager({ rows, total, searchQuery, onDelete, onInfo, onGetNew }: LoraManagerProps) {
   if (total === 0) {
     return (
       <ModelEmptyState
@@ -91,6 +93,16 @@ export function LoraManager({ rows, total, searchQuery, onDelete, onGetNew }: Lo
                   {character && <span className="font-mono">Trigger word: {character.trigger}</span>}
                 </div>
               </div>
+              {onInfo && (
+                <button
+                  onClick={() => onInfo(row.name)}
+                  title="Details"
+                  aria-label={`Details of ${row.name}`}
+                  className="lu-control lu-control--icon lu-control--outline shrink-0"
+                >
+                  <Info size={ICON_SM} />
+                </button>
+              )}
               <button
                 onClick={() => onDelete(row.name)}
                 title="Delete"

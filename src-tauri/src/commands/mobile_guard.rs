@@ -229,6 +229,7 @@ pub const ALLOWED: &[&str] = &[
     "lmstudio_model_dir",
     "check_model_sizes",
     "delete_comfy_model",
+    "comfy_model_info",
     "set_hf_token",
     "hf_token_present",
     "start_bundled_engine",

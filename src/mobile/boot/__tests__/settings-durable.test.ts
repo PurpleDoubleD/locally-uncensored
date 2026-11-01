@@ -91,6 +91,7 @@ describe('which keys are kept', () => {
       'chat-models': 'the list of models, read from the device again at every start',
       'create-store': 'large (the gallery), rewritten while a job runs; a running paid job is kept through lu-pending-cloud-jobs',
       'locally-uncensored-downloads': 'downloads of the desktop; the phone keeps its own list on the native side',
+      'locally-uncensored-model-sources': 'source pages of the desktop model files (D1); the phone has no Models page',
       'lu-cloud-catalog': 'a cache of the cloud catalog',
       'lu-cloud-gate': 'the gate pop-up of the desktop (3.0.8): a cache of the public catalogue and the model clicked there',
       'lu-cloud-outage': 'which outage notice was closed (3.0.8, A28): shown once more at worst',

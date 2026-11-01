@@ -6,6 +6,7 @@ import { restartComfyForNewNodes } from "./comfy-restart"
 import type { ProviderId } from "./providers/types"
 import { log } from "../lib/logger"
 import { useWorkflowStore } from "../stores/workflowStore"
+import { recordSourceFromDownload } from "../stores/modelSourceStore"
 import { waitForModelsVisible } from "../lib/bundle-install"
 import { bundleBytesToFetch } from "../lib/bundle-state"
 import type { DownloadProgress } from "../types/downloads"
@@ -77,6 +78,8 @@ export function civitaiAuthToken(url: string): string | null {
 }
 
 export async function startModelDownload(url: string, subfolder: string, filename: string, expectedBytes?: number, sha256?: string): Promise<{ status: string; id: string; error?: string }> {
+  // D1: the page this file came from, for Details in Models.
+  recordSourceFromDownload(filename, url)
   return backendCall("download_model", {
     url,
     subfolder,
@@ -85,6 +88,24 @@ export async function startModelDownload(url: string, subfolder: string, filenam
     expectedSha256: sha256 ?? null,
     authToken: civitaiAuthToken(url),
   })
+}
+
+/** What `comfy_model_info` reads about one ComfyUI model file (D1). */
+export interface ComfyFileFacts {
+  path: string
+  folder: string
+  bytes: number
+  /** Seconds since 1970, or null when the system did not say. */
+  modified: number | null
+  /** The file sits in the user's own Storage folder, not ComfyUI's. */
+  ownFolder: boolean
+  /** How many copies of that name the model folders hold. */
+  copies: number
+}
+
+/** Details for a ComfyUI file of the Installed list. Throws with the reason. */
+export async function comfyModelInfo(filename: string): Promise<ComfyFileFacts> {
+  return backendCall('comfy_model_info', { filename, extraDirs: customModelDirs() })
 }
 
 export async function getDownloadProgress(): Promise<Record<string, DownloadProgress>> {
@@ -1963,6 +1984,7 @@ export async function startModelDownloadToPath(url: string, destDir: string, fil
   // from the CivitAI search into the Mac's LoRA folder). Every other caller
   // sends what it sent before.
   const authToken = civitaiAuthToken(url)
+  recordSourceFromDownload(filename, url)
   return backendCall('download_model_to_path', {
     url, destDir, filename, expectedBytes: expectedBytes ?? null, expectedSha256: sha256 ?? null,
     ...(authToken ? { authToken } : {}),
