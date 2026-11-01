@@ -10,6 +10,7 @@ import { isMlxImageHost } from '../../../api/mlx-image'
 import { downloadGalleryItem } from './galleryDownload'
 import { useComfyMedia } from './useComfyMedia'
 import { cn } from '../ui/cn'
+import { HINWEIS_TEXT, HINWEIS_ZEILE } from '../../../lib/hinweis'
 import { itemsInFolder } from '../../../lib/gallery-folders'
 import { FolderFilter, MoveToFolderModal, OnBody } from './GalleryFolders'
 import { ContextMenu } from '../../ui/ContextMenu'
@@ -37,6 +38,9 @@ export function CreatePanel({ open, onOpenChange, activeId, onSelect }: Props) {
   const all = useCreateStore((s) => s.gallery)
   const folderOpen = useCreateStore((s) => s.galleryFolderOpen)
   const removeFromGallery = useCreateStore((s) => s.removeFromGallery)
+  // D3b: the cap took older unsorted entries; said once, until closed.
+  const notice = useCreateStore((s) => s.galleryNotice)
+  const dismissNotice = useCreateStore((s) => s.dismissGalleryNotice)
   // D3: the panel shows the open folder, "All" when none is open.
   const gallery = folderOpen === null ? all : itemsInFolder(all, folderOpen)
   const [moving, setMoving] = useState<string[]>([])
@@ -167,6 +171,12 @@ export function CreatePanel({ open, onOpenChange, activeId, onSelect }: Props) {
           </div>
 
           <FolderFilter />
+          {notice && (
+            <div role="status" className={cn(HINWEIS_ZEILE, 'items-center mx-3 mt-2 shrink-0')}>
+              <p className={cn('flex-1', HINWEIS_TEXT.ruhig)}>{notice}</p>
+              <BarBtn title="Dismiss" onClick={dismissNotice}><X size={13} /></BarBtn>
+            </div>
+          )}
           <OnBody><MoveToFolderModal ids={moving} onClose={() => setMoving([])} /></OnBody>
           <OnBody>
             <Modal open={confirming.length > 0} onClose={() => setConfirming([])} title="Delete from the gallery" maxWidth="max-w-md">

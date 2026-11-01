@@ -34,6 +34,8 @@ const RUNTIME_ONLY_KEYS: readonly string[] = [
   'cloudImageCount',
   // The open gallery folder files new results, so it is never carried over.
   'galleryFolderOpen',
+  // The line about trimmed entries belongs to the moment it happened.
+  'galleryNotice',
   // Review A kleiner Punkt 1 (studio-r2): the cloud video length selection,
   // own fields since this bugfix. Session-scratch like source/mask, not a
   // preference worth remembering across restarts.
@@ -590,6 +592,8 @@ export interface CreateState {
    *  lands in it, and a folder picked yesterday must not file today's renders
    *  without the user seeing it. */
   galleryFolderOpen: string | null
+  /** Said once when the cap took older unsorted entries (D3b). Runtime only. */
+  galleryNotice: string | null
   promptHistory: string[]
   /** Runtime-only (not persisted): populated by useCreate.fetchModels so the
    * header-level CreateTopControls can render its model dropdown + Lichtschalter
@@ -749,6 +753,7 @@ export interface CreateState {
   /** File entries under a folder, or under none with null. */
   moveToGalleryFolder: (ids: readonly string[], folderId: string | null) => void
   setGalleryFolderOpen: (id: string | null) => void
+  dismissGalleryNotice: () => void
   addToPromptHistory: (prompt: string) => void
   /** Drop a single remembered prompt (the X next to the entry). */
   removeFromPromptHistory: (prompt: string) => void
@@ -760,8 +765,31 @@ export interface CreateState {
   setMlxUpscale: (installed: boolean) => void
 }
 
-/** The gallery keeps the newest N renders. */
+/** The gallery keeps the newest N unsorted renders. */
 const GALLERY_CAP = 200
+
+/** What the gallery says when the cap took entries (D3b). */
+export const GALLERY_TRIMMED_NOTICE =
+  'Older unsorted images were removed from the gallery, the files are still in your output folder.'
+
+/**
+ * The cap, applied to `items` (newest first). D3b (Discord 01.11.2026): it
+ * used to cut the whole list at 200, so new results pushed out the entries the
+ * user had sorted into folders, prompts and all, without a word. An entry in a
+ * folder is never dropped now; the cap counts unsorted entries only, the
+ * oldest go first. The caller frees the dropped ones' media and says so.
+ */
+export function capGallery(items: readonly GalleryItem[]): { kept: GalleryItem[]; dropped: GalleryItem[] } {
+  const kept: GalleryItem[] = []
+  const dropped: GalleryItem[] = []
+  let unsorted = 0
+  for (const g of items) {
+    if (g.folderId) kept.push(g)
+    else if (unsorted < GALLERY_CAP) { kept.push(g); unsorted++ }
+    else dropped.push(g)
+  }
+  return { kept, dropped }
+}
 
 /**
  * Hand a gallery item's in-memory media back to the renderer.
@@ -1183,6 +1211,7 @@ export const useCreateStore = create<CreateState>()(
       gallery: [],
       galleryFolders: [],
       galleryFolderOpen: null,
+      galleryNotice: null,
       promptHistory: [],
       imageModelList: [],
       videoModelList: [],
@@ -1726,17 +1755,17 @@ export const useCreateStore = create<CreateState>()(
         const filed = !item.folderId && s.galleryFolderOpen && s.galleryFolders.some((f) => f.id === s.galleryFolderOpen)
           ? { ...item, folderId: s.galleryFolderOpen }
           : item
-        const next = [filed, ...s.gallery]
         // The cap used to drop the oldest renders silently, taking the only
         // reference to their blob: URLs with them — the bytes stayed pinned
         // for the rest of the session with nothing left to revoke them by.
-        for (const dropped of next.slice(GALLERY_CAP)) releaseItemMedia(dropped)
-        const gallery = next.slice(0, GALLERY_CAP)
-        if (s.backend !== 'cloud') return { gallery }
+        const { kept: gallery, dropped } = capGallery([filed, ...s.gallery])
+        for (const g of dropped) releaseItemMedia(g)
+        const said = dropped.length > 0 ? { galleryNotice: GALLERY_TRIMMED_NOTICE } : {}
+        if (s.backend !== 'cloud') return { gallery, ...said }
         const id = STUDIO_MODELS[item.model]?.sourceModel ?? item.model
-        if (cloudModelsFor('image').some((m) => m.id === id)) return withOwnStudioOptions(s, { gallery, cloudImageModel: id })
-        if (cloudModelsFor('video').some((m) => m.id === id)) return withOwnStudioOptions(s, { gallery, cloudVideoModel: id })
-        return { gallery }
+        if (cloudModelsFor('image').some((m) => m.id === id)) return withOwnStudioOptions(s, { gallery, cloudImageModel: id, ...said })
+        if (cloudModelsFor('video').some((m) => m.id === id)) return withOwnStudioOptions(s, { gallery, cloudVideoModel: id, ...said })
+        return { gallery, ...said }
       }),
       updateGalleryItem: (id, patch) =>
         // NOT revoking a replaced dataUrl here on purpose: a patch lands while
@@ -1776,8 +1805,9 @@ export const useCreateStore = create<CreateState>()(
         // blob-URL frei. Ein lokaler MLX-Clip, den eine Wolken-Hydrierung vom
         // Deckel schiebt, hielt seine Bytes sonst fuer den Rest der
         // Fenster-Lebensdauer fest (lu-desktop-oom-persist).
-        for (const dropped of merged.slice(GALLERY_CAP)) releaseItemMedia(dropped)
-        return { gallery: merged.slice(0, GALLERY_CAP) }
+        const { kept, dropped } = capGallery(merged)
+        for (const g of dropped) releaseItemMedia(g)
+        return dropped.length > 0 ? { gallery: kept, galleryNotice: GALLERY_TRIMMED_NOTICE } : { gallery: kept }
       }),
       removeFromGallery: (id) => set((s) => {
         const gone = s.gallery.find((g) => g.id === id)
@@ -1822,6 +1852,7 @@ export const useCreateStore = create<CreateState>()(
           gallery: s.gallery.map((g) => (pick.has(g.id) ? { ...g, folderId: folderId ?? undefined } : g)),
         }
       }),
+      dismissGalleryNotice: () => set({ galleryNotice: null }),
       setGalleryFolderOpen: (id) => set((s) => ({
         galleryFolderOpen: id !== null && s.galleryFolders.some((f) => f.id === id) ? id : null,
       })),
