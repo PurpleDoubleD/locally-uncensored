@@ -169,7 +169,7 @@ export function CreatePanel({ open, onOpenChange, activeId, onSelect }: Props) {
           <OnBody>
             <Modal open={confirming.length > 0} onClose={() => setConfirming([])} title="Delete from the gallery" maxWidth="max-w-md">
               <div data-testid="gallery-delete-confirm">
-                <p className="t-body">{deleteConfirmLine(confirming.length, isMlxImageHost())}</p>
+                <p className="t-body text-gray-700 dark:text-gray-200">{deleteConfirmLine(confirming.length, isMlxImageHost())}</p>
                 <ModalActions>
                   <ModalButton onClick={() => setConfirming([])}>Cancel</ModalButton>
                   <ModalButton variant="danger" onClick={deleteAll}>
