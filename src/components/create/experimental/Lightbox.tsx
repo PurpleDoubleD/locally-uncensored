@@ -97,6 +97,12 @@ export function Lightbox({ item, onClose, onSaveCharacter, onNavigate, promptOpe
   // the picture, and letting go there does not close the view.
   const [dragging, setDragging] = useState(false)
   const dragMoved = useRef(false)
+  // Discord 01.11.2026 (3.0.8, Windows): zoomed in and back out, the picture
+  // stayed shifted with its last pixel column smeared in stripes beside it,
+  // although the zoom itself was back at 1 with no pan. WebView2 kept the
+  // composited layer of the zoom. Back at the fitted size the picture gets a
+  // fresh element (this key), without the opening animation.
+  const [layer, setLayer] = useState(0)
 
   useEffect(() => {
     if (!item) return
@@ -123,6 +129,7 @@ export function Lightbox({ item, onClose, onSaveCharacter, onNavigate, promptOpe
     // Back at the fitted size the picture is centred again.
     const keep = nextScale > 1 ? { panX, panY } : { panX: 0, panY: 0 }
     setZoom({ id: item.id, scale: nextScale, x: scale === 1 ? x : zoom.x, y: scale === 1 ? y : zoom.y, ...keep })
+    if (scale > 1 && nextScale === 1) setLayer((n) => n + 1)
   }
 
   const onPanStart = (e: React.MouseEvent<HTMLImageElement>) => {
@@ -180,7 +187,8 @@ export function Lightbox({ item, onClose, onSaveCharacter, onNavigate, promptOpe
             if (dragMoved.current) { dragMoved.current = false; return }
             onClose()
           }}
-          className="lu-on-dark fixed inset-0 z-[80] bg-black/85 flex flex-col items-center justify-center gap-3 p-8"
+          // Opaque: a stale layer of a zoom must never let the app show through.
+          className="lu-on-dark fixed inset-0 z-[80] bg-black flex flex-col items-center justify-center gap-3 p-8"
         >
           <button onClick={onClose} className="absolute top-4 right-4 w-9 h-9 flex items-center justify-center rounded-lg bg-white/10 text-gray-200 hover:bg-white/20">
             <X size={18} />
@@ -293,7 +301,8 @@ export function Lightbox({ item, onClose, onSaveCharacter, onNavigate, promptOpe
                 />
               ) : (
                 <motion.img
-                  initial={{ scale: 0.95 }}
+                  key={layer}
+                  initial={layer === 0 ? { scale: 0.95 } : false}
                   // The wheel zoom rides on the same scale the opening
                   // animation uses: a style scale next to it would be
                   // animated back to 1.
@@ -308,7 +317,11 @@ export function Lightbox({ item, onClose, onSaveCharacter, onNavigate, promptOpe
                   onClick={(e) => { e.stopPropagation(); dragMoved.current = false }}
                   onWheel={onWheel}
                   onMouseDown={onPanStart}
-                  onDoubleClick={(e) => { e.stopPropagation(); setZoom({ id: item.id, scale: 1, x: 50, y: 50, panX: 0, panY: 0 }) }}
+                  onDoubleClick={(e) => {
+                    e.stopPropagation()
+                    if (scale > 1) setLayer((n) => n + 1)
+                    setZoom({ id: item.id, scale: 1, x: 50, y: 50, panX: 0, panY: 0 })
+                  }}
                   data-testid="lightbox-image"
                   data-zoom={scale}
                   data-pan={`${Math.round(panX)},${Math.round(panY)}`}
