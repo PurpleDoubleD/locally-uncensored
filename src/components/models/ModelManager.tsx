@@ -25,6 +25,10 @@ import { LoraAddons } from './LoraAddons'
 import { Modal } from '../ui/Modal'
 import { ModalActions, ModalButton } from '../ui/ModalActions'
 import { showModel } from '../../api/ollama'
+import { comfyModelInfo } from '../../api/discover'
+import { ModelFileInfo, type ModelFileInfoState } from './ModelFileInfo'
+import { useModelSourceStore } from '../../stores/modelSourceStore'
+import { comfyKindLabel } from '../../lib/model-source'
 import { checkComfyConnection, refreshComfyModels } from '../../api/comfyui'
 import { isMlxImageHost } from '../../api/mlx-image'
 import { MacMediaLane } from './MacMediaLane'
@@ -113,6 +117,9 @@ export function ModelManager() {
   // das Ganze als JSON.stringify.
   const [modelInfo, setModelInfo] = useState<({ name: string } & Record<string, unknown>) | null>(null)
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
+  // D1: Details for a ComfyUI file (image or video model, LoRA, VAE, …).
+  const [fileInfo, setFileInfo] = useState<ModelFileInfoState | null>(null)
+  const fileInfoFor = useRef<string | null>(null)
   // Open on Discover by default — most opens are to find and install
   // something new. Installed is one click away in the segment control.
   const [tab, setTab] = useState<'installed' | 'discover'>('discover')
@@ -215,12 +222,42 @@ export function ModelManager() {
       setInfoOpen(true)
       return
     }
+    if (model && (model.type === 'image' || model.type === 'video')) {
+      await handleFileInfo(name)
+      return
+    }
     try {
       const info = await showModel(name)
       setModelInfo({ name, ...info })
-      setInfoOpen(true)
-    } catch {
-      // ignore
+    } catch (e) {
+      // D1: the click used to end here without a word.
+      setModelInfo({ name, error: `Ollama could not describe this model: ${e instanceof Error ? e.message : String(e)}` })
+    }
+    setInfoOpen(true)
+  }
+
+  /** D1 (a user on Discord, 01.11.2026): the ⓘ of an image model asked
+   *  Ollama, which knows no ComfyUI file, and the error went nowhere. The
+   *  dialog opens at once with what the list knows; the disk fills in the
+   *  rest, or the reason it could not. */
+  const handleFileInfo = async (name: string) => {
+    const row = models.find((m: AIModel) => m.name === name)
+    const source = row && 'source' in row ? row.source : undefined
+    fileInfoFor.current = name
+    const base: ModelFileInfoState = {
+      name,
+      kind: comfyKindLabel(source),
+      size: row?.size ?? 0,
+      facts: null,
+      error: null,
+      page: useModelSourceStore.getState().pageFor(name),
+    }
+    setFileInfo(base)
+    try {
+      const facts = await comfyModelInfo(name)
+      if (fileInfoFor.current === name) setFileInfo({ ...base, facts })
+    } catch (e) {
+      if (fileInfoFor.current === name) setFileInfo({ ...base, error: e instanceof Error ? e.message : String(e) })
     }
   }
 
@@ -461,6 +498,7 @@ export function ModelManager() {
                   total={loraRows.length}
                   searchQuery={searchQuery}
                   onDelete={(name) => setConfirmDelete(name)}
+                  onInfo={(name) => { void handleFileInfo(name) }}
                   onGetNew={() => setTab('discover')}
                 />
               ) : models.length === 0 ? (
@@ -671,7 +709,12 @@ export function ModelManager() {
         </ModalActions>
       </Modal>
 
+      <ModelFileInfo info={fileInfo} onClose={() => { fileInfoFor.current = null; setFileInfo(null) }} />
+
       <Modal open={infoOpen} onClose={() => setInfoOpen(false)} title={typeof modelInfo?.name === 'string' && modelInfo.name ? displayModelName(modelInfo.name) : 'Model Info'}>
+        {typeof modelInfo?.error === 'string' && (
+          <p role="alert" className="t-micro text-red-500 dark:text-red-400 mb-3 break-words">{modelInfo.error}</p>
+        )}
         {typeof modelInfo?.deleteHint === 'string' && (
           <p className="t-label text-gray-700 dark:text-gray-200 mb-3">{modelInfo.deleteHint}</p>
         )}

@@ -950,6 +950,7 @@ pub fn run() {
             commands::download::lmstudio_model_dir,
             commands::download::check_model_sizes,
             commands::download::delete_comfy_model,
+            commands::download::comfy_model_info,
             // Check files and Repair (GH #113)
             commands::model_verify::verify_model_files,
             commands::model_verify::verify_model_files_status,

@@ -656,6 +656,8 @@ export async function backendCall<T = unknown>(
     detect_model_path: { path: "/local-api/detect-model-path", method: "POST" },
     check_model_sizes: { path: "/local-api/check-model-sizes", method: "POST" },
     delete_comfy_model: { path: "/local-api/delete-comfy-model", method: "POST" },
+    // D1: Details for a ComfyUI file. Rust only, the dev server answers 501.
+    comfy_model_info: { path: "/local-api/comfy-model-info", method: "POST" },
     // Check files and Repair (GH #113): Rust only, the dev server answers
     // 501 (dev-server/remote-stubs.ts).
     verify_model_files: { path: "/local-api/verify-model-files", method: "POST" },

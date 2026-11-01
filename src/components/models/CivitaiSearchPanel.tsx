@@ -9,6 +9,7 @@
  */
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Search, Loader2, ExternalLink, Download, CheckCircle } from 'lucide-react'
+import { useModelSourceStore } from '../../stores/modelSourceStore'
 import { checkCivitaiInstalled, civitaiInstalledInFolder, searchCivitaiModels, startCivitaiDownload, startModelDownloadToPath, type CivitAIModelResult } from '../../api/discover'
 import { openExternal } from '../../api/backend'
 import { useDownloadStore } from '../../stores/downloadStore'
@@ -120,6 +121,8 @@ export function CivitaiSearchPanel({ modelType, title, placeholder, search = '',
 
   const download = async (model: CivitAIModelResult) => {
     if (!model.downloadUrl || !model.filename || !model.subfolder) return
+    // D1: the CivitAI page of the hit, for Details in Models.
+    useModelSourceStore.getState().record(model.filename, model.sourceUrl)
     if (destDir) {
       // The folder goes into the record with the file, so Retry and Resume
       // write to the same place and never look for a ComfyUI.
