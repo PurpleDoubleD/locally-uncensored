@@ -131,6 +131,9 @@ test('search, kept position, copy, and a wide negative strength that reaches the
   await expect(age).toHaveValue('-10.00')
   await expect(detail).toHaveValue('15.00')
   await expect(page.getByText('· 2 active')).toBeVisible()
+  // D4b: each slider widened to its typed value, 0 in the middle.
+  await expect(page.locator('input[type=range][min="-10"][max="10"]')).toHaveValue('-10')
+  await expect(page.locator('input[type=range][min="-15"][max="15"]')).toHaveValue('15')
   await shot(page, 'lora-4-staerke-minus10-und-15')
   // 25 is pulled back to the end of the range.
   await detail.fill('25')
