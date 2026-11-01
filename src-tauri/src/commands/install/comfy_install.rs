@@ -623,6 +623,15 @@ pub fn install_comfyui(
              lines appearing, the install is making progress, not hung.",
         );
 
+        // GH #211: an old pip cannot read the PyTorch index.
+        if let Some(line) = super::torch::lift_old_pip_before_torch(&effective_python, &install_status, Some(&cancel_flag)) {
+            update("installing", &line);
+        }
+        if cancelled() {
+            update("cancelled", "Install cancelled during PyTorch download.");
+            return;
+        }
+
         let torch_arg_refs: Vec<&str> = torch_args.iter().map(|s| s.as_str()).collect();
         match pip_install_streaming_with_retry_cancellable(&torch_arg_refs, &effective_python, 3, &install_status, Some(&cancel_flag)) {
             Ok(()) => {

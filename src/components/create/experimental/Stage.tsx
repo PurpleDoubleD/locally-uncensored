@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { motion, AnimatePresence, useIsPresent } from 'framer-motion'
-import { UploadCloud, ImagePlus, Scissors, Wand2, Sparkles, X, Loader2, Download, AlertTriangle, Image as ImageIcon, Film, Maximize2 } from 'lucide-react'
+import { UploadCloud, ImagePlus, Scissors, Wand2, Sparkles, X, Loader2, Download, AlertTriangle, Image as ImageIcon, Film, Maximize2, Play } from 'lucide-react'
 import { useCreateStore, type GalleryItem } from '../../../stores/createStore'
 import { useModelStore } from '../../../stores/modelStore'
 import { createRunModel } from '../../../lib/render/create-studio'
@@ -25,7 +25,8 @@ import { GALLERY_DRAG_TYPE, galleryItemUrl, fetchGalleryItemBlob, recoverGallery
 import { InstallCancelled } from '../../../lib/bundle-install'
 import { isMlxImageHost } from '../../../api/mlx-image'
 import { bundleForVideoIntent } from '../../../api/comfyui'
-import { getVideoBundles } from '../../../api/discover'
+import { getVideoBundles, checkBundlesOnDisk } from '../../../api/discover'
+import { starterBundleFor, type StarterKind } from '../../../lib/starter-bundle'
 import { lipsyncFitLine } from './lipsyncFit'
 import { useGraphicsCardGb } from '../../../hooks/useGraphicsMemory'
 import { ReferenceStrip } from './ReferenceStrip'
@@ -649,9 +650,12 @@ function ChangeImageButton({ onChange }: { onChange: (r: Awaited<ReturnType<type
 // install on Motion Control, got a spinner, and had no way to stop or even see
 // a 10.5 GB transfer. Cancel here aborts the install loop and kills the running
 // download in Rust; the partial file stays, so a later run resumes.
-function InstallCardBody({ run, installing, status, err, onDismiss, onCancel, cancelTitle }: {
+function InstallCardBody({ run, installing, status, err, onDismiss, onCancel, cancelTitle, startOnly }: {
   run: () => void; installing: boolean; status: string; err: string | null
   onDismiss: () => void; onCancel: () => void
+  /** Everything is on disk already and only ComfyUI is down: the button
+   *  starts it and says so, instead of offering a download (GH #209). */
+  startOnly?: boolean
   /** What Cancel actually does here. The MLX installer on macOS runs in Rust
    *  and outlives this view, so its Cancel stops watching, not downloading —
    *  claiming otherwise would be a lie the next screen exposes. */
@@ -674,7 +678,9 @@ function InstallCardBody({ run, installing, status, err, onDismiss, onCancel, ca
           </button>
         </div>
       ) : (
-        <Button variant="primary" icon={Download} onClick={run}>Download &amp; install</Button>
+        startOnly
+          ? <Button variant="primary" icon={Play} onClick={run}>Start ComfyUI</Button>
+          : <Button variant="primary" icon={Download} onClick={run}>Download &amp; install</Button>
       )}
       {err && (
         <div className="relative t-control text-gray-300 bg-white/[0.03] rounded-[var(--radius-control)] px-2.5 py-2 pr-7 max-w-sm text-left">
@@ -802,6 +808,35 @@ const MAC_BUNDLE_COPY = {
   },
 } as const
 
+/** GH #209 (31.10.2026): after 40 GB of downloads the card still read "needs
+ *  a one-time download" and offered the download again, because the gate also
+ *  opens it while ComfyUI is down. The button never fetched a file twice (the
+ *  installer skips what is on disk), but the card said it would. When the
+ *  lane's bundle is complete on disk and ComfyUI is merely not running, the
+ *  card says that and offers to start it. Asked only in that situation. */
+const ALREADY_ON_DISK_COPY = {
+  title: 'Your model files are already here',
+  description: 'ComfyUI is not running, so nothing can render yet. Start ComfyUI and LU picks up the files you have, nothing on disk is downloaded again.',
+}
+
+function useStarterOnDisk(kind: StarterKind, intent: string, ask: boolean): boolean {
+  // The answer belongs to the lane it was asked for: a switch of lane or a
+  // ComfyUI that came up drops it without a reset in the effect.
+  const key = ask ? `${kind}|${intent}` : null
+  const [onDiskFor, setOnDiskFor] = useState<string | null>(null)
+  useEffect(() => {
+    if (!key) return
+    const bundle = starterBundleFor(kind, intent)
+    if (!bundle) return
+    let stale = false
+    checkBundlesOnDisk([bundle])
+      .then((r) => { if (!stale) setOnDiskFor(r.installed[bundle.name] === true ? key : null) })
+      .catch(() => { /* the card keeps offering the download */ })
+    return () => { stale = true }
+  }, [key, kind, intent])
+  return key !== null && onDiskFor === key
+}
+
 /** The plan of the Mac's video setup, for the card. Null until it is read,
  *  and when it could not be read: the card then says what it always can. */
 function useMacVideoSetupPlan(enabled: boolean, installing: boolean): MacVideoSetupPlan | null {
@@ -868,7 +903,7 @@ function videoBundleLine(intent: string): string {
 }
 
 function ModelInstallCard({ kind }: { kind: 'image' | 'video' | 'audio' | 'lipsync' | 'motion' | 'upscale' }) {
-  const { installModelBundle } = useCreateExp()
+  const { installModelBundle, connected } = useCreateExp()
   const intent = useCreateStore((s) => s.intent())
   // The run outlives this card on purpose. Stage swaps the card away as soon as
   // a render starts or the lane list refills, and a 12 GB install must not lose
@@ -894,6 +929,7 @@ function ModelInstallCard({ kind }: { kind: 'image' | 'video' | 'audio' | 'lipsy
   // A Mac no video starter runs on: the card says so and offers no download.
   // A run that is already on its way, or left an error, keeps its body.
   const nothingToInstall = macKind === 'video' && !macVideo.canInstall && !installing && !err
+  const startOnly = useStarterOnDisk(kind, intent, !mac && connected === false && !installing)
 
   const run = () => startInstallRun(kind, (onStatus, signal) =>
     installModelBundle(kind, onStatus, signal).catch((e: unknown) => {
@@ -906,8 +942,8 @@ function ModelInstallCard({ kind }: { kind: 'image' | 'video' | 'audio' | 'lipsy
     <EmptyState
       icon={copy.icon}
       tone="accent"
-      title={installing ? 'Setting this up for you' : title}
-      description={installing ? (macKind ? BUSY_DESCRIPTION.macBundle[macKind] : BUSY_DESCRIPTION.bundle) : description}
+      title={installing ? 'Setting this up for you' : startOnly ? ALREADY_ON_DISK_COPY.title : title}
+      description={installing ? (macKind ? BUSY_DESCRIPTION.macBundle[macKind] : BUSY_DESCRIPTION.bundle) : startOnly ? ALREADY_ON_DISK_COPY.description : description}
     >
       {!nothingToInstall && (
         <InstallCardBody
@@ -915,6 +951,7 @@ function ModelInstallCard({ kind }: { kind: 'image' | 'video' | 'audio' | 'lipsy
           onDismiss={() => clearInstallRun(kind)}
           onCancel={() => cancelInstallRun(kind)}
           cancelTitle={macKind ? MAC_CANCEL_TITLE[macKind] : undefined}
+          startOnly={startOnly}
         />
       )}
     </EmptyState>

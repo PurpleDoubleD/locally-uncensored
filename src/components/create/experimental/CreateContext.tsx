@@ -4,9 +4,10 @@ import { useRereadOnReturn } from '../../../hooks/useRereadOnReturn'
 import { useCloudCreate, hasActiveCloudRun } from '../../../hooks/useCloudCreate'
 import { useCloudSession } from '../../../hooks/useCloudSession'
 import { useCreateStore, type GalleryItem } from '../../../stores/createStore'
-import { listedLoras, getVAEModels, checkComfyConnection, refreshComfyModels, bundleForVideoIntent } from '../../../api/comfyui'
+import { listedLoras, getVAEModels, checkComfyConnection, refreshComfyModels } from '../../../api/comfyui'
 import { getAllNodeInfo, clearNodeCache } from '../../../api/comfyui-nodes'
-import { installCustomNodes, nodePacksNotLoaded, assertBundleFits, checkBundlesOnDisk, getImageBundles, getVideoBundles, getAudioBundles, getLipsyncBundles, getMotionBundles, getUpscaleBundles, startModelDownload, getDownloadProgress, modelsNotVisibleInComfy, judgeableFolders } from '../../../api/discover'
+import { installCustomNodes, nodePacksNotLoaded, assertBundleFits, checkBundlesOnDisk, startModelDownload, getDownloadProgress, modelsNotVisibleInComfy, judgeableFolders } from '../../../api/discover'
+import { starterBundleFor } from '../../../lib/starter-bundle'
 import { CUSTOM_NODE_REGISTRY } from '../../../api/model-bundles'
 import { backendCall, isMacOS, isLinux } from '../../../api/backend'
 import { asComfyGpuMode, comfyCpuBannerText, type ComfyCpuBannerFacts } from '../../../lib/comfy-cpu-banner'
@@ -474,20 +475,8 @@ export function CreateExpProvider({ children }: { children: ReactNode }) {
       return
     }
     await ensureComfyRunning(onProgress, signal)
-    // The video lane picks by the SAME rule the gate uses, because the two
-    // disagreed: Stage counts an i2v lane as empty unless it sees an i2v
-    // model, and this always installed the first bundle, a Wan 2.1 T2V. On
-    // Extend Video and Animate Image that meant a 9.2 GB download that could
-    // not possibly make the card go away. See bundleForVideoIntent.
-    const bundle = kind === 'video'
-      ? bundleForVideoIntent(getVideoBundles(), useCreateStore.getState().intent())
-      : (
-        kind === 'image' ? getImageBundles()
-        : kind === 'audio' ? getAudioBundles()
-        : kind === 'lipsync' ? getLipsyncBundles()
-        : kind === 'upscale' ? getUpscaleBundles()
-        : getMotionBundles()
-      )[0]
+    // The same pick the setup card reads, see starterBundleFor.
+    const bundle = starterBundleFor(kind, useCreateStore.getState().intent())
     if (!bundle) throw new Error('No starter bundle available for this intent.')
     // Before anything is installed or restarted: does what is still missing
     // fit on the drive at all.

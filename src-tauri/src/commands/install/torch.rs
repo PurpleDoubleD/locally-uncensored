@@ -236,6 +236,74 @@ pub(crate) fn python_version_tuple(python_bin: &str) -> Option<(u32, u32)> {
     parse_version_tuple(String::from_utf8_lossy(&out.stdout).trim())
 }
 
+// ── GH #211: an old pip in front of the PyTorch index ──────────────────────
+
+/// GH #211 (31.10.2026, Windows, a ComfyUI venv on Python 3.10.11):
+/// "PyTorch installation failed … No matching distribution found for
+/// flit_core<4,>=3.11". Python 3.10.11 ships pip 23.0.1. Measured on the Mac
+/// on 01.11.2026 with the same pip: it throws away the typing_extensions
+/// 4.16.0 wheel from download.pytorch.org ("inconsistent Name: expected
+/// 'typing-extensions', but metadata has 'typing_extensions'"), falls back to
+/// the source archive, and building that needs flit_core, which the PyTorch
+/// index does not carry. pip 23.1 fails the same way, pip 24.0 resolves the
+/// whole set. Nothing about the Python itself was wrong, so the "no matching
+/// wheel, press Repair environment" sentence sent the user in a circle: the
+/// rebuild makes a venv with the same old pip.
+pub(crate) const MODERN_PIP_MAJOR: u32 = 24;
+
+/// The major of `python -m pip --version` ("pip 23.0.1 from … (python 3.10)").
+pub(crate) fn pip_major_from_version_line(line: &str) -> Option<u32> {
+    line.trim().strip_prefix("pip ")?.split('.').next()?.trim().parse().ok()
+}
+
+/// Pure: the pip args that lift an old pip before the PyTorch step, or None
+/// when the pip there is new enough or could not be read (an unreadable pip
+/// is left to the PyTorch step, which reports it with its own diagnosis).
+/// The upgrade goes to PyPI, the index pip itself comes from.
+pub(crate) fn pip_upgrade_before_torch_args(pip_version_line: Option<&str>) -> Option<Vec<String>> {
+    let major = pip_major_from_version_line(pip_version_line?)?;
+    if major >= MODERN_PIP_MAJOR {
+        return None;
+    }
+    Some(
+        ["-m", "pip", "install", "--progress-bar", "off", "--no-input", "--upgrade"]
+            .iter()
+            .map(|s| s.to_string())
+            .chain(std::iter::once(format!("pip>={MODERN_PIP_MAJOR}.0")))
+            .collect(),
+    )
+}
+
+/// The venv's pip version line, under the same deadline as every other probe.
+pub(crate) fn pip_version_line(python_bin: &str) -> Option<String> {
+    let mut cmd = crate::python::python_command(python_bin);
+    cmd.args(["-m", "pip", "--version"]);
+    let out = run_probe_with_timeout(cmd, PYTHON_PROBE_TIMEOUT)?;
+    if !out.status.success() {
+        return None;
+    }
+    Some(String::from_utf8_lossy(&out.stdout).trim().to_string())
+}
+
+/// Lift an old pip in `python_bin` before PyTorch is installed into it. A
+/// failed upgrade is not fatal: the PyTorch step runs anyway and keeps its
+/// own diagnosis. Returns the line for the install log, None when nothing
+/// had to be done.
+pub(crate) fn lift_old_pip_before_torch(
+    python_bin: &str,
+    install_state: &std::sync::Arc<std::sync::Mutex<crate::state::InstallState>>,
+    cancel: Option<&std::sync::Arc<std::sync::atomic::AtomicBool>>,
+) -> Option<String> {
+    let line = pip_version_line(python_bin);
+    let args = pip_upgrade_before_torch_args(line.as_deref())?;
+    let refs: Vec<&str> = args.iter().map(String::as_str).collect();
+    Some(match super::pip::pip_install_streaming_with_retry_cancellable(&refs, python_bin, 2, install_state, cancel) {
+        Ok(()) => format!("Updated pip in this environment ({}), the one it had cannot read the PyTorch index.", line.unwrap_or_default()),
+        Err(e) if e == "cancelled" => "pip update cancelled.".to_string(),
+        Err(e) => format!("Could not update pip in this environment, trying PyTorch with the one it has. {e}"),
+    })
+}
+
 pub(crate) fn parse_version_tuple(s: &str) -> Option<(u32, u32)> {
     let mut parts = s.split('.');
     let major = parts.next()?.parse().ok()?;
@@ -907,6 +975,29 @@ pub(crate) fn base_for_new_venv(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── GH #211 ────────────────────────────────────────────────────────────
+
+    #[test]
+    fn the_pip_of_python_3_10_11_is_lifted_before_torch() {
+        let line = "pip 23.0.1 from C:\\Users\\User\\ComfyUI\\venv\\lib\\site-packages\\pip (python 3.10)";
+        assert_eq!(pip_major_from_version_line(line), Some(23));
+        let args = pip_upgrade_before_torch_args(Some(line)).expect("pip 23 is lifted");
+        assert_eq!(&args[..3], ["-m", "pip", "install"]);
+        assert!(args.iter().any(|a| a == "--upgrade"));
+        assert_eq!(args.last().map(String::as_str), Some("pip>=24.0"));
+        assert!(!args.iter().any(|a| a.contains("index-url")), "pip comes from PyPI: {args:?}");
+        // 23.1 fails the same way on the Mac.
+        assert!(pip_upgrade_before_torch_args(Some("pip 23.1 from /x (python 3.10)")).is_some());
+    }
+
+    #[test]
+    fn a_pip_that_reads_the_index_is_left_alone() {
+        assert_eq!(pip_upgrade_before_torch_args(Some("pip 24.0 from /x (python 3.12)")), None);
+        assert_eq!(pip_upgrade_before_torch_args(Some("pip 26.0.1 from /x (python 3.13)")), None);
+        assert_eq!(pip_upgrade_before_torch_args(None), None);
+        assert_eq!(pip_upgrade_before_torch_args(Some("No module named pip")), None);
+    }
 
     // ── PyTorch-Kanalwahl (W2-Befund 16.08., comfy_kitchen braucht 2.6+) ─
 
