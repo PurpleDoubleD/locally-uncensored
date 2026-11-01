@@ -117,6 +117,18 @@ describe('the right-click menu', () => {
     expect(within(menu).getAllByRole('menuitem').map((m) => m.textContent)).toEqual(['Move 2 to folder…', 'Download 2', 'Delete 2…'])
   })
 
+  it('a right-click right after Cmd-clicks, before the next render, keeps them (Mac run)', () => {
+    panel()
+    const fire = (id: string, type: string, init: MouseEventInit) =>
+      tile(id).dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, ...init }))
+    act(() => {
+      fire('a', 'click', { metaKey: true })
+      fire('b', 'click', { metaKey: true })
+      fire('b', 'contextmenu', { clientX: 40, clientY: 40 })
+    })
+    expect(within(screen.getByRole('menu')).getAllByRole('menuitem').map((m) => m.textContent)).toEqual(['Move 2 to folder…', 'Download 2', 'Delete 2…'])
+  })
+
   it('on an unselected tile acts on that tile alone', () => {
     panel()
     fireEvent.click(tile('a'), { metaKey: true })

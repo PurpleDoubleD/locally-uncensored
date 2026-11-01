@@ -44,7 +44,7 @@ export function CreatePanel({ open, onOpenChange, activeId, onSelect }: Props) {
   // Several at once (D3, 3.0.9): Cmd/Ctrl-click, Shift range, Cmd/Ctrl+A,
   // Escape. The menu and the bar act on `sel.ids` with the tile's own code.
   const [stored, setSel] = useState<GallerySelection>(EMPTY_SELECTION)
-  const [menu, setMenu] = useState<{ x: number; y: number; ids: readonly string[] } | null>(null)
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null)
   const [confirming, setConfirming] = useState<readonly string[]>([])
   const order = gallery.map((g) => g.id)
   // Items no longer shown (another folder, deleted) are not selected.
@@ -61,9 +61,9 @@ export function CreatePanel({ open, onOpenChange, activeId, onSelect }: Props) {
   }
   const onTileMenu = (e: ReactMouseEvent, id: string) => {
     e.preventDefault()
-    const next = menuSelection(sel, id)
-    setSel(next)
-    setMenu({ x: e.clientX, y: e.clientY, ids: next.ids })
+    // From the state too; the menu acts on whatever is selected when it shows.
+    setSel((prev) => menuSelection(keepShown(prev, order), id))
+    setMenu({ x: e.clientX, y: e.clientY })
   }
   const onGridKey = (e: React.KeyboardEvent) => {
     if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'a' && order.length > 0) {
@@ -181,12 +181,12 @@ export function CreatePanel({ open, onOpenChange, activeId, onSelect }: Props) {
               </div>
             </Modal>
           </OnBody>
-          {menu && (
+          {menu && selecting && (
             <ContextMenu
-              items={buildGalleryMenu(actionsFor(menu.ids), menu.ids.length)}
+              items={buildGalleryMenu(actionsFor(sel.ids), sel.ids.length)}
               x={menu.x}
               y={menu.y}
-              label={menu.ids.length > 1 ? `Actions for ${menu.ids.length} items` : 'Actions for this item'}
+              label={sel.ids.length > 1 ? `Actions for ${sel.ids.length} items` : 'Actions for this item'}
               onClose={() => setMenu(null)}
             />
           )}
