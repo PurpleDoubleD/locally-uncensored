@@ -20,7 +20,10 @@ export function OnBody({ children }: { children: ReactNode }) {
 }
 
 const FIELD =
-  'flex-1 min-w-0 h-[var(--control-h-md)] px-2.5 rounded-[var(--radius-control)] bg-white/[0.04] border border-white/[0.08] focus:border-white/20 outline-none t-control text-gray-100'
+  'h-[var(--control-h-md)] px-2.5 rounded-[var(--radius-control)] bg-white/[0.04] border border-white/[0.08] focus:border-white/20 outline-none t-control text-gray-100'
+/** A field in a row next to a button. In the column of the move dialog
+ *  flex-1 shrank its height to the text (FEHLER-D3 #1, side finding). */
+const ROW_FIELD = `flex-1 min-w-0 ${FIELD}`
 
 /** The filter at the top of the gallery: "All" and every folder, with counts,
  *  and the button that manages the folders. */
@@ -103,7 +106,7 @@ function ManageFolders() {
                   else e.currentTarget.value = f.name
                 }}
                 onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur() }}
-                className={FIELD}
+                className={ROW_FIELD}
               />
               <span className="t-mono text-gray-500 w-8 text-right">{counts.get(f.id) ?? 0}</span>
               <button
@@ -127,7 +130,7 @@ function ManageFolders() {
           disabled={full}
           onChange={(e) => setName(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter') create() }}
-          className={FIELD}
+          className={ROW_FIELD}
         />
         <ModalButton onClick={create} disabled={full || !name.trim()}>Add</ModalButton>
       </div>
@@ -179,7 +182,7 @@ function MoveToFolder({ ids, onClose }: { ids: readonly string[]; onClose: () =>
         disabled={full}
         onChange={(e) => setName(e.target.value)}
         onKeyDown={(e) => { if (e.key === 'Enter') go() }}
-        className={FIELD}
+        className={`w-full ${FIELD}`}
       />
       <ModalActions>
         <ModalButton variant="quiet" onClick={onClose}>Cancel</ModalButton>
