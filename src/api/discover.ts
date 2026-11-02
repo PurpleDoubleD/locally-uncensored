@@ -1987,13 +1987,25 @@ export async function resolveHfGgufFiles(
   }
 }
 
+/** A model folder, or why there is none (the backend's own sentence). */
+export interface ModelFolder {
+  path: string | null
+  reason: string | null
+}
+
+/** Detect the model directory for the active local provider, with the reason when there is none. */
+export async function providerModelFolder(providerName: string): Promise<ModelFolder> {
+  try {
+    const path = await backendCall<string | null>('detect_model_path', { provider: providerName })
+    return { path: path || null, reason: null }
+  } catch (err) {
+    return { path: null, reason: err instanceof Error ? err.message : String(err ?? '') || null }
+  }
+}
+
 /** Detect the model directory for the active local provider */
 export async function detectProviderModelPath(providerName: string): Promise<string | null> {
-  try {
-    return await backendCall('detect_model_path', { provider: providerName })
-  } catch {
-    return null
-  }
+  return (await providerModelFolder(providerName)).path
 }
 
 /**
@@ -2013,9 +2025,14 @@ export async function detectProviderModelPath(providerName: string): Promise<str
  * den eigenen Ordner UND den gesetzten, vier Ebenen tief.
  */
 export async function luEngineDownloadDir(): Promise<string | null> {
+  return (await luEngineDownloadFolder()).path
+}
+
+/** `luEngineDownloadDir` with the reason when the folder cannot be had. */
+export async function luEngineDownloadFolder(): Promise<ModelFolder> {
   const gesetzt = customModelDirs()[0]
-  if (gesetzt) return gesetzt
-  return await detectProviderModelPath(BUILTIN_BACKEND_ID)
+  if (gesetzt) return { path: gesetzt, reason: null }
+  return await providerModelFolder(BUILTIN_BACKEND_ID)
 }
 
 /**

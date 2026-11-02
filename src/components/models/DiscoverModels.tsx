@@ -9,7 +9,7 @@ import {
   hfSearchFailureText,
   getImageBundles, getVideoBundles, getAudioBundles, getLipsyncBundles, getMotionBundles,
   getUncensoredTextModels, getMainstreamTextModels,
-  detectProviderModelPath, luEngineDownloadDir,
+  detectProviderModelPath, luEngineDownloadDir, luEngineDownloadFolder, providerModelFolder,
   startModelDownload,
   installBundleComplete, remoteBundleNotice, checkBundlesOnDisk, resolveHfGgufFiles, ggufRequestFor, quantBudgetBytes, planModelDownload,
   imagePartFor, imagePartOf, checkDownloadSpace,
@@ -237,6 +237,17 @@ export function awaitDownloadedFile(
     // Datei, die schon fertig ist.
     look()
   })
+}
+
+/**
+ * D9: when no folder for a GGUF can be had at all. The old sentence blamed
+ * "app permissions" for every cause; the backend's own reason says which.
+ */
+export function noModelFolderError(modelName: string, reason: string | null): string {
+  const why = (reason || '').trim().replace(/\.$/, '')
+  return why
+    ? `LU found no folder to download ${modelName} into: ${why}.`
+    : `LU found no folder to download ${modelName} into.`
 }
 
 /**
@@ -778,13 +789,7 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0, o
     // them and the file went down the LM Studio branch into a nested folder
     // the built-in engine never scans. resolveTextDownloadTarget keeps the
     // active-model rule and adds the missing fallback.
-    const downloadTarget = chosenTextDownloadTarget(targetInput, targetChoice)
-    // Chosen against the chat model: the file goes to the LU Engine, and the
-    // chat stays on the model the user is talking to.
-    const keepChatModel = downloadTarget === 'builtin' && resolveTextDownloadTarget(targetInput) !== 'builtin'
-    const isActiveBuiltin = downloadTarget === 'builtin'
-    const isActiveLmStudio = downloadTarget === 'lmstudio'
-    const isActiveOllama = downloadTarget === 'ollama'
+    let downloadTarget = chosenTextDownloadTarget(targetInput, targetChoice)
 
     // Ollama-native models land in Ollama whatever the picker holds.
     if (model.ollamaModel) {
@@ -803,6 +808,23 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0, o
     }
     if (!model.downloadUrl || !model.filename) return
     setInstallNotice(null)
+
+    // D9: a server of the user's own in the openai slot (vLLM, LiteLLM, a
+    // Custom one) may read no folder LU knows. Its GGUF goes to the LU Engine
+    // then, and the chat stays on that server, rather than every Get ending
+    // in "Could not determine model directory".
+    const serverName = providers.openai?.name || 'LM Studio'
+    let noFolderOn: string | null = null
+    if (downloadTarget === 'openai-compat' && !hfModelPath && !(await detectProviderModelPath(serverName))) {
+      noFolderOn = serverName
+      downloadTarget = 'builtin'
+    }
+    // Chosen against the chat model: the file goes to the LU Engine, and the
+    // chat stays on the model the user is talking to.
+    const keepChatModel = downloadTarget === 'builtin' && resolveTextDownloadTarget(targetInput) !== 'builtin'
+    const isActiveBuiltin = downloadTarget === 'builtin'
+    const isActiveLmStudio = downloadTarget === 'lmstudio'
+    const isActiveOllama = downloadTarget === 'ollama'
 
     // N1: an LFM3 GGUF for LM Studio needs its runtime 2.65.1+. Said before
     // the download, which still runs: the file is right, the runtime is old.
@@ -850,12 +872,16 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0, o
       if (isActiveBuiltin) {
         return await luEngineDownloadDir()
       }
-      const base = hfModelPath || (await detectProviderModelPath(providers.openai?.name || 'LM Studio'))
+      const base = hfModelPath || (await detectProviderModelPath(serverName))
       if (!base) return null
       setHfModelPath(base)
       const subdir = hfUrlToLmStudioSubdir(model.downloadUrl!)
       return subdir ? `${base}/${subdir}` : base
     }
+
+    // The backend's own sentence for a missing folder, asked only once it is missing.
+    const whyNoFolder = async (): Promise<string | null> =>
+      (isActiveBuiltin ? await luEngineDownloadFolder() : await providerModelFolder(serverName)).reason
 
     // ── Sharded / multi-part: `ollama pull` cannot load split GGUF
     // (ollama/ollama#5245), so the only sound path is a direct multi-part
@@ -866,7 +892,7 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0, o
     if (resolution?.sharded) {
       const targetDir = await ensureDirectDir()
       if (!targetDir) {
-        setInstallError('Could not determine model directory. Please check app permissions.')
+        setInstallError(noModelFolderError(model.name, await whyNoFolder()))
         return
       }
       // The note is about Ollama's split-GGUF gap, so it must only appear when
@@ -922,7 +948,7 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0, o
 
     const targetDir = await ensureDirectDir()
     if (!targetDir) {
-      setInstallError('Could not determine model directory. Please check app permissions.')
+      setInstallError(noModelFolderError(model.name, await whyNoFolder()))
       return
     }
     // A GGUF carries no image tower: llama.cpp reads it from a second file that
@@ -950,7 +976,9 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0, o
       const plan = planModelDownload(model, realUrl, realName, realBytes, single?.sha256, { part, withImagePart: withPart })
       await startPlannedDownload(plan, targetDir, model.group || model.name)
       if (isActiveBuiltin && keepChatModel) {
-        setInstallNotice(withFitNote(fitNote, `${model.name} is downloading to the LU Engine. Your chat stays on its model; the Neuron tweaker and the model list show it once it is done.`))
+        setInstallNotice(withFitNote(fitNote, noFolderOn
+          ? `${noFolderOn} reads no model folder LU knows, so ${model.name} is downloading to the LU Engine. Your chat stays on ${noFolderOn}; the model list shows it once it is done.`
+          : `${model.name} is downloading to the LU Engine. Your chat stays on its model; the Neuron tweaker and the model list show it once it is done.`))
       } else if (isActiveBuiltin) {
         // Built-in engine: await the flat GGUF, then make it the active chat
         // model so the freshly-added model is chat-ready without a manual switch.
