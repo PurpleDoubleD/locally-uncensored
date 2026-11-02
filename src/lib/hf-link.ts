@@ -136,9 +136,22 @@ export function choiceForFile(choices: readonly HfLinkChoice[], file: string): H
 
 /** The row preselected when the link names no file: Q4_K_M, else the
  *  smallest, a complete one before an incomplete split set. */
-export function defaultChoice(choices: readonly HfLinkChoice[]): HfLinkChoice | null {
+export function defaultChoice(choices: readonly HfLinkChoice[], budgetBytes?: number): HfLinkChoice | null {
   const loadable = choices.filter((c) => !c.incomplete)
-  return loadable.find((c) => c.quant === 'Q4_K_M') ?? loadable[0] ?? choices[0] ?? null
+  // D7 (GitHub #215): with the memory known, the largest file that leaves
+  // room for the context (quantBudgetBytes), not a Q4_K_M that does not fit.
+  if (budgetBytes && budgetBytes > 0) {
+    const fitting = loadable
+      .filter((c) => c.quant && c.bytes > 0 && c.bytes <= budgetBytes)
+      .sort((a, b) => b.bytes - a.bytes)[0]
+    if (fitting) return fitting
+  }
+  return loadable.find((c) => c.quant === 'Q4_K_M') ?? loadable.find((c) => c.quant) ?? loadable[0] ?? choices[0] ?? null
+}
+
+/** D7: the words after a file that will not fit fully in graphics memory. */
+export function overBudgetLabel(bytes: number, budgetBytes?: number): string {
+  return budgetBytes && bytes > budgetBytes ? " · won't fit fully in GPU memory" : ''
 }
 
 /** The line a split set with parts missing gets. */

@@ -1659,6 +1659,8 @@ export async function searchHuggingFaceModels(query: string): Promise<DiscoverMo
     if (typeof repo?.id !== 'string') continue
     const repoName = repo.id.split('/').pop() || ''
     const q4File = deriveQ4FilenameFromRepo(repoName)
+    // D7: the repo name named no quant, so Q4_K_M is only a guess.
+    const quantGuessed = q4File !== `${repoName.replace(/-GGUF$/i, '')}.gguf`
     const downloadUrl = `https://huggingface.co/${repo.id}/resolve/main/${q4File}`
 
     // Display name = repo basename without the GGUF suffix. The previous
@@ -1676,11 +1678,13 @@ export async function searchHuggingFaceModels(query: string): Promise<DiscoverMo
       name: displayName,
       description: repo.id,
       pulls: pullsStr,
-      tags: ['Q4_K_M', 'GGUF'],
+      // D7: a guessed quant is no promise, the download picks it by size.
+      tags: quantGuessed ? ['GGUF'] : ['Q4_K_M', 'GGUF'],
       updated: '',
       downloadUrl,
       filename: q4File,
       url: `https://huggingface.co/${repo.id}`,
+      ...(quantGuessed ? { quantGuessed: true } : {}),
     })
   }
   return models
@@ -1726,6 +1730,12 @@ export interface HfGgufResolution {
   /** The image part the same repository ships, when it ships one. For a model
    *  the catalog does not know, this is what is offered with it. */
   imagePart?: ImagePartSource
+  /** D7: the guessed quant did not fit the memory budget and this smaller one
+   *  was taken instead. `from` is what the guess would have fetched. */
+  fitSwap?: { from: string; fromBytes: number }
+  /** D7: even the chosen file is bigger than the memory budget (no quant of
+   *  the repository fits). It downloads and runs, partly on the CPU. */
+  overBudget?: boolean
   /** Set when the chosen file is a split set the repository holds only some
    *  parts of (an upload still running). `files` is empty then: llama.cpp
    *  cannot load the set, so nothing of it is downloaded. */
@@ -1780,6 +1790,9 @@ export function selectGgufFromTree(
   repoId: string,
   preferredQuant?: string,
   exactPath?: string,
+  /** D7: the most a guessed quant may weigh, in bytes (`quantBudgetBytes`).
+   *  Only for a quant nobody chose; a named file is never swapped. */
+  budgetBytes?: number,
 ): HfGgufResolution | null {
   const allGguf = entries.filter(e => e.type === 'file' && /\.gguf$/i.test(e.path))
   // An image part is a GGUF too and carries a quant token of its own
@@ -1811,14 +1824,39 @@ export function selectGgufFromTree(
   const wanted = preferredQuant?.toUpperCase()
   const byQuant = (g: GgufGroup) => g.quant === wanted
   const byKey = (g: GgufGroup) => !!wanted && g.key.toUpperCase().includes(wanted)
-  const picked =
-    groupOfNamedFile(all, exactPath) ||
+  const named = groupOfNamedFile(all, exactPath)
+  let picked =
+    named ||
     (wanted ? complete.find(byQuant) || all.find(byQuant) : undefined) ||
     (wanted ? complete.find(byKey) || all.find(byKey) : undefined) ||
     complete.find(g => g.quant === 'Q4_K_M') ||
+    // A file without a quant in its name (`…-imatrix1.gguf`, 26 MB of
+    // calibration data) is no model to fall back on while a quant is there.
+    complete.find(g => g.quant) ||
     complete[0] ||
     all[0]
   if (!picked) return null
+  // D7 (GitHub #215): a 16 GB card got the 15.8 GB Q4_K_M, which leaves no
+  // room for the context and runs mostly on the CPU. A quant nobody chose is
+  // taken from the list by size instead: the largest one that fits.
+  let fitSwap: HfGgufResolution['fitSwap']
+  let overBudget = false
+  // The image part loads next to the model, so it takes from the same room.
+  const room = budgetBytes ? budgetBytes - (upstreamPart?.size || upstreamPart?.lfs?.size || 0) : 0
+  if (!named && room > 0 && !picked.gap) {
+    const pickedBytes = groupBytes(picked)
+    if (pickedBytes > room || !picked.quant) {
+      const fitting = complete
+        .filter(g => g.quant && groupBytes(g) > 0 && groupBytes(g) <= room)
+        .sort((a, b) => groupBytes(b) - groupBytes(a))[0]
+      if (fitting) {
+        if (pickedBytes > room) fitSwap = { from: picked.quant ?? picked.key, fromBytes: pickedBytes }
+        picked = fitting
+      } else if (pickedBytes > room) {
+        overBudget = true
+      }
+    }
+  }
   if (picked.gap) {
     return { sharded: true, files: [], totalBytes: 0, quant: picked.quant, incomplete: picked.gap }
   }
@@ -1839,6 +1877,8 @@ export function selectGgufFromTree(
     files,
     totalBytes: files.reduce((s, f) => s + f.sizeBytes, 0),
     quant: picked.quant,
+    ...(fitSwap ? { fitSwap } : {}),
+    ...(overBudget ? { overBudget } : {}),
     ...(upstreamPart
       ? {
           imagePart: {
@@ -1851,6 +1891,23 @@ export function selectGgufFromTree(
   }
 }
 
+function groupBytes(g: GgufGroup): number {
+  return g.parts.reduce((s, p) => s + (p.size || p.lfs?.size || 0), 0)
+}
+
+/**
+ * D7: how much a quant LU picks by itself may weigh. The model shares the
+ * graphics memory with its context (KV cache) and with the system, so the
+ * file gets the memory minus max(1.5 GB, 10 %). 16 GB leaves 14.4 GB. The
+ * memory arrives in GiB (MiB / 1024), the file sizes in bytes.
+ */
+export function quantBudgetBytes(memoryGb: number | null | undefined): number | undefined {
+  if (!memoryGb || memoryGb <= 0) return undefined
+  const headroom = Math.max(1.5, memoryGb * 0.1)
+  const gb = memoryGb - headroom
+  return gb > 0 ? Math.floor(gb * 1_073_741_824) : undefined
+}
+
 /** What the download asks the repo tree for one entry. */
 export interface GgufRequest {
   repoId: string
@@ -1858,6 +1915,8 @@ export interface GgufRequest {
   exactPath?: string
   /** Read from the file name. Only the fallback, see `selectGgufFromTree`. */
   preferredQuant?: string
+  /** D7: the quant is a guess, so it may be swapped for one that fits. */
+  quantGuessed?: boolean
 }
 
 /**
@@ -1865,14 +1924,16 @@ export interface GgufRequest {
  * its address is not a HuggingFace file address. One place, so the Models tab
  * and the test that walks the whole catalog ask the same thing.
  */
-export function ggufRequestFor(model: Pick<DiscoverModel, 'downloadUrl' | 'filename'>): GgufRequest | null {
+export function ggufRequestFor(model: Pick<DiscoverModel, 'downloadUrl' | 'filename' | 'quantGuessed'>): GgufRequest | null {
   if (!model.downloadUrl) return null
   const parsed = parseHfUrl(model.downloadUrl)
   if (!parsed) return null
   return {
     repoId: `${parsed.user}/${parsed.repo}`,
-    exactPath: hfUrlToTreePath(model.downloadUrl) ?? undefined,
+    // A guessed file name is no choice: it must not pin the Q4_K_M (D7).
+    exactPath: model.quantGuessed ? undefined : hfUrlToTreePath(model.downloadUrl) ?? undefined,
     preferredQuant: model.filename ? extractGgufQuant(model.filename) : undefined,
+    ...(model.quantGuessed ? { quantGuessed: true } : {}),
   }
 }
 
@@ -1905,6 +1966,7 @@ export async function resolveHfGgufFiles(
   repoId: string,
   preferredQuant?: string,
   exactPath?: string,
+  budgetBytes?: number,
 ): Promise<HfGgufResolution | null> {
   try {
     const url = `https://huggingface.co/api/models/${repoId}/tree/main?recursive=true`
@@ -1918,7 +1980,7 @@ export async function resolveHfGgufFiles(
     }
     const entries = JSON.parse(json)
     if (!Array.isArray(entries)) return null
-    return selectGgufFromTree(entries as HfTreeEntry[], repoId, preferredQuant, exactPath)
+    return selectGgufFromTree(entries as HfTreeEntry[], repoId, preferredQuant, exactPath, budgetBytes)
   } catch (err) {
     log.warn('[discover] HF tree resolve failed', { repoId, err })
     return null

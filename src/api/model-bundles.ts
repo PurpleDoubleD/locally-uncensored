@@ -39,6 +39,10 @@ export interface DiscoverModel {
   /** Exact byte count, when the catalog knows it to the byte. A file of the same name
    *  and another size is NOT this file (a mirror's repack), so it never counts as installed. */
   sizeBytes?: number
+  /** D7 (GitHub #215): a search hit whose quant LU only guessed (the repo
+   *  name named none, so Q4_K_M was assumed). Its download picks the quant
+   *  from the repository's file list by the graphics memory instead. */
+  quantGuessed?: boolean
   // The image part that belongs to `downloadUrl` (llama.cpp calls it mmproj).
   // A text GGUF carries no image tower: the engine sees images only when this
   // second file lies next to the model and is passed along at start. When it
