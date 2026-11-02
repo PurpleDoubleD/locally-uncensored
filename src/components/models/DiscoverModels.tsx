@@ -11,7 +11,7 @@ import {
   getUncensoredTextModels, getMainstreamTextModels,
   detectProviderModelPath, luEngineDownloadDir,
   startModelDownload,
-  installBundleComplete, remoteBundleNotice, checkBundlesOnDisk, resolveHfGgufFiles, ggufRequestFor, planModelDownload,
+  installBundleComplete, remoteBundleNotice, checkBundlesOnDisk, resolveHfGgufFiles, ggufRequestFor, quantBudgetBytes, planModelDownload,
   imagePartFor, imagePartOf, checkDownloadSpace,
   type DiscoverModel, type DownloadProgress, type ModelBundle, type HfGgufFile, type ImagePartSource, type PlannedDownload,
 } from '../../api/discover'
@@ -237,6 +237,33 @@ export function awaitDownloadedFile(
     // Datei, die schon fertig ist.
     look()
   })
+}
+
+/**
+ * D7 (GitHub #215): the line that says which quant a search hit got and why.
+ * Null when nothing was swapped and the file fits.
+ */
+export function quantFitNote(
+  name: string,
+  resolution: { quant?: string; totalBytes: number; fitSwap?: { from: string; fromBytes: number }; overBudget?: boolean } | null | undefined,
+  memoryGb: number | null,
+  sharedMemory: boolean,
+): string | null {
+  if (!resolution || !memoryGb) return null
+  const gb = (b: number) => (b / 1_073_741_824).toFixed(1)
+  const where = sharedMemory ? `the ${Math.round(memoryGb)} GB this Mac can give a model` : `your ${Math.round(memoryGb)} GB of graphics memory`
+  if (resolution.fitSwap) {
+    return `${name}: LU picked ${resolution.quant ?? 'a smaller quant'} (${gb(resolution.totalBytes)} GB), so it fits ${where} with room for the context. ${resolution.fitSwap.from} (${gb(resolution.fitSwap.fromBytes)} GB) would not fit fully and would run partly on the CPU, much slower.`
+  }
+  if (resolution.overBudget) {
+    return `${name}: no quant of it fits fully in ${where}. LU fetches ${resolution.quant ?? 'the GGUF'} (${gb(resolution.totalBytes)} GB); it runs, partly on the CPU and much slower. A smaller model will be faster.`
+  }
+  return null
+}
+
+/** A later line of the same download keeps the quant line in front of it. */
+function withFitNote(fitNote: string | null, line: string): string {
+  return fitNote ? `${fitNote} ${line}` : line
 }
 
 export function DiscoverModels({ category, search = '', searchSubmitToken = 0, originalFor = null }: Props) {
@@ -795,9 +822,12 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0, o
     // name the repo does not carry: on its own it cannot tell two families in
     // one repo apart, and it reads nothing from `-0731.gguf` or `_K_P.gguf`.
     const request = ggufRequestFor(model)
+    // D7 (GitHub #215): a quant nobody chose is taken by the memory there is.
+    const budget = request?.quantGuessed ? quantBudgetBytes(chatFitGb) : undefined
     const resolution = request
-      ? await resolveHfGgufFiles(request.repoId, request.preferredQuant, request.exactPath)
+      ? await resolveHfGgufFiles(request.repoId, request.preferredQuant, request.exactPath, budget)
       : null
+    const fitNote = quantFitNote(model.name, resolution, chatFitGb, sharedMemory)
 
     // A split set the uploader has not finished: llama.cpp loads it only with
     // every part, so none of it is fetched.
@@ -805,6 +835,7 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0, o
       setInstallError(`${model.name} is not complete on Hugging Face yet: only ${resolution.incomplete.have} of ${resolution.incomplete.of} parts are there, and the model loads only with all of them. Try again later.`)
       return
     }
+    if (fitNote) setInstallNotice(fitNote)
 
     const lmStudioEnabled = !!providers.openai?.enabled && (providers.openai?.name || '').toLowerCase().includes('lm studio')
     const ollamaEnabledNow = !!providers.ollama?.enabled
@@ -913,13 +944,13 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0, o
         ])
         if (both && !both.fits && alone?.fits) {
           withPart = false
-          setInstallNotice(`${model.name} is downloading without ${partInputWord(model)}: the drive has no room for the extra ${gbOf(part.sizeBytes)} GB. You can add it later under Installed.`)
+          setInstallNotice(withFitNote(fitNote, `${model.name} is downloading without ${partInputWord(model)}: the drive has no room for the extra ${gbOf(part.sizeBytes)} GB. You can add it later under Installed.`))
         }
       }
       const plan = planModelDownload(model, realUrl, realName, realBytes, single?.sha256, { part, withImagePart: withPart })
       await startPlannedDownload(plan, targetDir, model.group || model.name)
       if (isActiveBuiltin && keepChatModel) {
-        setInstallNotice(`${model.name} is downloading to the LU Engine. Your chat stays on its model; the Neuron tweaker and the model list show it once it is done.`)
+        setInstallNotice(withFitNote(fitNote, `${model.name} is downloading to the LU Engine. Your chat stays on its model; the Neuron tweaker and the model list show it once it is done.`))
       } else if (isActiveBuiltin) {
         // Built-in engine: await the flat GGUF, then make it the active chat
         // model so the freshly-added model is chat-ready without a manual switch.

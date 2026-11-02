@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react'
-import { fetchExternal } from '../../api/backend'
-import { selectGgufFromTree, type HfTreeEntry } from '../../api/discover'
+import { fetchExternal, isMacOS } from '../../api/backend'
+import { getMaxVramGb } from '../../lib/hardware'
+import { chatModelBudgetGb } from '../../lib/shared-memory-wording'
+import { quantBudgetBytes, selectGgufFromTree, type HfTreeEntry } from '../../api/discover'
 import type { DiscoverModel } from '../../api/model-bundles'
 import {
-  choiceForFile, defaultChoice, ggufChoicesFromTree, hfRepoPage, hfTreeApi, incompleteLabel, linkModel, sizeLabel,
+  choiceForFile, defaultChoice, ggufChoicesFromTree, hfRepoPage, hfTreeApi, incompleteLabel, linkModel, overBudgetLabel, sizeLabel,
   type HfLinkChoice, type HfModelLink,
 } from '../../lib/hf-link'
 import { log } from '../../lib/logger'
@@ -33,6 +35,8 @@ interface Props {
 export function HfLinkDialog({ link, onCancel, onConfirm }: Props) {
   const [load, setLoad] = useState<Load>({ state: 'loading' })
   const [picked, setPicked] = useState<string | null>(null)
+  // D7: what a model may weigh here, for the preselection and the list.
+  const [budget, setBudget] = useState<number | undefined>(undefined)
 
   useEffect(() => {
     // A new link remounts the dialog (DiscoverModels keys it by the link),
@@ -40,8 +44,14 @@ export function HfLinkDialog({ link, onCancel, onConfirm }: Props) {
     let gone = false
     void (async () => {
       try {
-        const entries = JSON.parse(await fetchExternal(hfTreeApi(link.repo))) as unknown
+        const [text, memoryGb] = await Promise.all([
+          fetchExternal(hfTreeApi(link.repo)),
+          getMaxVramGb().catch(() => 0),
+        ])
+        const entries = JSON.parse(text) as unknown
         if (gone) return
+        const budgetBytes = quantBudgetBytes(chatModelBudgetGb(isMacOS(), memoryGb || null, null))
+        setBudget(budgetBytes)
         if (!Array.isArray(entries)) {
           setLoad({ state: 'failed', message: 'Hugging Face has no public model repository under this name.' })
           return
@@ -51,7 +61,7 @@ export function HfLinkDialog({ link, onCancel, onConfirm }: Props) {
           setLoad({ state: 'failed', message: 'This repository has no GGUF model file. Locally Uncensored runs GGUF models.' })
           return
         }
-        const named = link.file ? choiceForFile(choices, link.file) : defaultChoice(choices)
+        const named = link.file ? choiceForFile(choices, link.file) : defaultChoice(choices, budgetBytes)
         if (!named) {
           setLoad({ state: 'failed', message: 'The repository has no model file under the name the link gives.' })
           return
@@ -94,7 +104,7 @@ export function HfLinkDialog({ link, onCancel, onConfirm }: Props) {
                 >
                   {load.choices.map((c) => (
                     <option key={c.path} value={c.path} disabled={!!c.incomplete}>
-                      {c.path} · {c.quant ?? 'GGUF'} · {sizeLabel(c.bytes)}{c.incomplete ? ` · ${incompleteLabel(c.incomplete)}` : c.parts > 1 ? ` · ${c.parts} parts` : ''}
+                      {c.path} · {c.quant ?? 'GGUF'} · {sizeLabel(c.bytes)}{c.incomplete ? ` · ${incompleteLabel(c.incomplete)}` : c.parts > 1 ? ` · ${c.parts} parts` : ''}{c.incomplete ? '' : overBudgetLabel(c.bytes, budget)}
                     </option>
                   ))}
                 </select>
@@ -108,7 +118,7 @@ export function HfLinkDialog({ link, onCancel, onConfirm }: Props) {
                 <dd className="text-gray-800 dark:text-gray-100" data-testid="hf-link-quant">{choice.quant ?? 'not in the name'}</dd>
                 <dt className="text-gray-500">Size</dt>
                 <dd className="text-gray-800 dark:text-gray-100" data-testid="hf-link-size">
-                  {sizeLabel(choice.bytes)}{choice.parts > 1 ? ` in ${choice.parts} parts` : ''}
+                  {sizeLabel(choice.bytes)}{choice.parts > 1 ? ` in ${choice.parts} parts` : ''}{choice.incomplete ? '' : overBudgetLabel(choice.bytes, budget)}
                 </dd>
                 {choice.incomplete && (
                   <>
