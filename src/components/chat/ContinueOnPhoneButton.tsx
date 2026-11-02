@@ -1,6 +1,7 @@
 import { Smartphone } from 'lucide-react'
 import { useChatStore } from '../../stores/chatStore'
 import { HEADER_CHIP } from './header-chip'
+import { SHARED_CHATS_PHONE_NOTE } from './shared-chats-note'
 
 /**
  * "Continue on phone" in the chat's own strip (CHATS-V1.md): shares the open
@@ -12,6 +13,7 @@ export function ContinueOnPhoneButton() {
   const shared = useChatStore((s) => !!s.conversations.find((c) => c.id === s.activeConversationId)?.remoteShared)
   if (!id) return null
   const label = shared ? 'Shared with your phone. Click to stop sharing.' : 'Continue on phone'
+  const title = `${shared ? label : `${label}.`} ${SHARED_CHATS_PHONE_NOTE}`
   return (
     <button
       type="button"
@@ -21,7 +23,7 @@ export function ContinueOnPhoneButton() {
           ? 'border-green-500/40 text-green-600 dark:text-green-400 hover:border-green-500/70'
           : 'border-gray-200 dark:border-white/[0.06] hover:border-gray-400 dark:hover:border-white/15 text-gray-500'
       }`}
-      title={label}
+      title={title}
       aria-label={label}
       aria-pressed={shared}
       data-testid="continue-on-phone"
