@@ -146,7 +146,7 @@ export function defaultChoice(choices: readonly HfLinkChoice[], budgetBytes?: nu
       .sort((a, b) => b.bytes - a.bytes)[0]
     if (fitting) return fitting
   }
-  return loadable.find((c) => c.quant === 'Q4_K_M') ?? loadable[0] ?? choices[0] ?? null
+  return loadable.find((c) => c.quant === 'Q4_K_M') ?? loadable.find((c) => c.quant) ?? loadable[0] ?? choices[0] ?? null
 }
 
 /** D7: the words after a file that will not fit fully in graphics memory. */

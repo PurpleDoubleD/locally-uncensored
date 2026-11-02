@@ -84,6 +84,29 @@ describe('a search hit with a guessed quant', () => {
     expect(picked?.overBudget).toBe(true)
   })
 
+  it('a repo with only imatrix files and IQ3 quants (the report\'s own repo) gets the IQ3, not 26 MB of calibration data', () => {
+    const tree: HfTreeEntry[] = [
+      { type: 'file', path: 'abliterated-imatrix1.gguf', size: 26_000_000 },
+      { type: 'file', path: 'abliterated-imatrix2.gguf', size: 26_000_000 },
+      { type: 'file', path: 'M-27B-Coder-abliterated-IQ3_S1.gguf', size: 12.1 * GB },
+      { type: 'file', path: 'M-27B-Coder-abliterated-bf16.gguf', size: 54.6 * GB },
+    ]
+    expect(selectGgufFromTree(tree, REPO, 'Q4_K_M', undefined, BUDGET_16)?.files[0].filename).toBe('M-27B-Coder-abliterated-IQ3_S1.gguf')
+    // Without a known memory the fallback still takes a quant, never the imatrix.
+    expect(selectGgufFromTree(tree, REPO, 'Q4_K_M')?.files[0].filename).toBe('M-27B-Coder-abliterated-IQ3_S1.gguf')
+    expect(defaultChoice(ggufChoicesFromTree(tree))?.path).toBe('M-27B-Coder-abliterated-IQ3_S1.gguf')
+  })
+
+  it('the image part the repository ships takes from the same room', () => {
+    const tree = [...TREE, { type: 'file', path: 'mmproj-F16.gguf', size: 1.9 * GB }]
+    // 14.4 GiB budget minus 1.9 GB of image part leaves about 13.6 GB: the
+    // 12.9 GB Q3_K_M still fits, a 14.2 GB file would not any more.
+    expect(selectGgufFromTree(tree, REPO, 'Q4_K_M', undefined, BUDGET_16)?.quant).toBe('Q3_K_M')
+    const tight = [...tree, file('IQ4_XS', 14.2)]
+    expect(selectGgufFromTree(tight, REPO, 'Q4_K_M', undefined, BUDGET_16)?.quant).toBe('Q3_K_M')
+    expect(selectGgufFromTree([...TREE, file('IQ4_XS', 14.2)], REPO, 'Q4_K_M', undefined, BUDGET_16)?.quant).toBe('IQ4_XS')
+  })
+
   it('a file the caller names is never swapped, however big', () => {
     const named = selectGgufFromTree(TREE, REPO, 'Q4_K_M', TREE[3].path, BUDGET_16)
     expect(named?.quant).toBe('Q4_K_L')

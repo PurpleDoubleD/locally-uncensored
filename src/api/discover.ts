@@ -1830,6 +1830,9 @@ export function selectGgufFromTree(
     (wanted ? complete.find(byQuant) || all.find(byQuant) : undefined) ||
     (wanted ? complete.find(byKey) || all.find(byKey) : undefined) ||
     complete.find(g => g.quant === 'Q4_K_M') ||
+    // A file without a quant in its name (`…-imatrix1.gguf`, 26 MB of
+    // calibration data) is no model to fall back on while a quant is there.
+    complete.find(g => g.quant) ||
     complete[0] ||
     all[0]
   if (!picked) return null
@@ -1838,16 +1841,18 @@ export function selectGgufFromTree(
   // taken from the list by size instead: the largest one that fits.
   let fitSwap: HfGgufResolution['fitSwap']
   let overBudget = false
-  if (!named && budgetBytes && budgetBytes > 0 && !picked.gap) {
+  // The image part loads next to the model, so it takes from the same room.
+  const room = budgetBytes ? budgetBytes - (upstreamPart?.size || upstreamPart?.lfs?.size || 0) : 0
+  if (!named && room > 0 && !picked.gap) {
     const pickedBytes = groupBytes(picked)
-    if (pickedBytes > budgetBytes) {
+    if (pickedBytes > room || !picked.quant) {
       const fitting = complete
-        .filter(g => g.quant && groupBytes(g) > 0 && groupBytes(g) <= budgetBytes)
+        .filter(g => g.quant && groupBytes(g) > 0 && groupBytes(g) <= room)
         .sort((a, b) => groupBytes(b) - groupBytes(a))[0]
       if (fitting) {
-        fitSwap = { from: picked.quant ?? picked.key, fromBytes: pickedBytes }
+        if (pickedBytes > room) fitSwap = { from: picked.quant ?? picked.key, fromBytes: pickedBytes }
         picked = fitting
-      } else {
+      } else if (pickedBytes > room) {
         overBudget = true
       }
     }
