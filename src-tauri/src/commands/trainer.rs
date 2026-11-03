@@ -31,7 +31,7 @@ use std::process::{Command, Stdio};
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 use tauri::{Manager, State};
-use tracing::info;
+use tracing::{info, warn};
 
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
@@ -554,7 +554,18 @@ fn repo_dir(root: &Path) -> PathBuf {
     root.join("musubi-tuner")
 }
 
+/// A line LU itself says about the setup or a run. It also goes to the log
+/// file: C31 (Discord, 03.11.2026) sent a log that ended at "character
+/// trainer install start", because every later step, the Python LU picked
+/// and the final error lived only in this in-memory list.
 fn push_log(state: &Arc<Mutex<crate::state::InstallState>>, msg: &str) {
+    info!("trainer: {msg}");
+    push_child_line(state, msg);
+}
+
+/// A line a child process printed (pip, musubi, tqdm). Only the panel shows
+/// these; in the log file a training run would be thousands of progress lines.
+fn push_child_line(state: &Arc<Mutex<crate::state::InstallState>>, msg: &str) {
     if let Ok(mut s) = state.lock() {
         s.logs.push(msg.to_string());
         if s.logs.len() > 400 {
@@ -565,6 +576,13 @@ fn push_log(state: &Arc<Mutex<crate::state::InstallState>>, msg: &str) {
 }
 
 fn set_status(state: &Arc<Mutex<crate::state::InstallState>>, status: &str, msg: &str) {
+    // The headline, the error with its "Last steps" tail included, goes to
+    // the log file too (C31, see push_log).
+    if status == "error" {
+        warn!("trainer {status}: {msg}");
+    } else {
+        info!("trainer {status}: {msg}");
+    }
     if let Ok(mut s) = state.lock() {
         s.status = status.to_string();
         s.phase = msg.to_string();
@@ -1687,7 +1705,7 @@ fn run_child(
                         s.download_total = total;
                     }
                 }
-                push_log(&run, trimmed);
+                push_child_line(&run, trimmed);
             });
         }));
     }
@@ -2566,6 +2584,20 @@ fn provision_trainer_env(
         run_streamed(venv, "venv create", state, cancel, pid_slot)?;
     }
     let vpy = venv_python(root).to_string_lossy().to_string();
+
+    // C31 (Discord, 03.11.2026, Windows, Python 3.11.4): `python -m venv`
+    // puts the pip its Python shipped with into the venv, 23.1.2 for 3.11.4.
+    // A pip below 24 drops the jinja2 and typing_extensions wheels on the
+    // PyTorch index ("inconsistent Name"), falls back to their sources and
+    // dies on flit_core, which that index does not carry; the trainer then
+    // said its Python was one it cannot use, and every retry kept the venv
+    // and its pip. The same lift as the ComfyUI install (GH #211).
+    if let Some(line) = crate::commands::install::lift_old_pip_before_torch(&vpy, state, Some(cancel)) {
+        push_log(state, &line);
+    }
+    if cancel_requested(cancel) {
+        return Err("cancelled".to_string());
+    }
 
     // 3) torch, from the channel the plan above picked: Blackwell gets cu128,
     // every other NVIDIA card keeps cu121, an AMD card on Linux gets ROCm.
@@ -5773,7 +5805,7 @@ mod progress_line_tests {
         let body = &body[..body.find("let exit = loop").expect("wait loop")];
         let reader = &body[body.find("for_each_progress_line(stream").expect("reader")..];
         let gate = reader.find("if cancel.load(Ordering::SeqCst)").expect("the reader checks the cancel flag");
-        let log = reader.find("push_log(&run, trimmed)").expect("the reader logs");
+        let log = reader.find("push_child_line(&run, trimmed)").expect("the reader logs");
         assert!(gate < log, "the cancel check comes before anything reaches the log");
     }
 
@@ -6036,5 +6068,53 @@ mod captions_and_low_vram_tests {
         assert!(!run.contains("format!(\"char_{lora_name}_zimage\")"));
         let marker = run.find("write_training_marker").expect("the marker call");
         assert!(run[..marker].ends_with("if kind == TrainKind::Character {\n            crate::commands::character_files::"), "only a character's photos become references");
+    }
+}
+
+/// C31 (Discord, 03.11.2026): Windows, Python 3.11.4 and 3.12, the trainer
+/// setup said its Python was one it cannot use, and the log ended at
+/// "character trainer install start".
+#[cfg(test)]
+mod c31_old_pip_and_log_guard {
+    fn body_of<'a>(src: &'a str, start: &str, end: &str) -> &'a str {
+        let body = &src[src.find(start).expect(start)..];
+        &body[..body.find(end).expect(end)]
+    }
+
+    #[test]
+    fn an_old_pip_in_the_trainer_venv_is_lifted_before_pytorch() {
+        let src = include_str!("trainer.rs");
+        let body = body_of(src, "fn provision_trainer_env(", "\n}\n");
+        let venv = body.find("let vpy = venv_python(root)").expect("the venv is decided");
+        let lift = body.find("lift_old_pip_before_torch(&vpy, state, Some(cancel))").expect("the trainer lifts pip like the ComfyUI install");
+        let torch = body.find("(3/4): installing PyTorch").expect("the PyTorch step");
+        assert!(venv < lift && lift < torch, "after the venv (kept or new), before PyTorch");
+        // It runs on every path through here, the repair inside a run included:
+        // a kept venv is exactly the one that looped.
+        assert!(!body[venv..lift].contains("VenvAction::"), "not only for a new venv");
+    }
+
+    #[test]
+    fn the_lift_asks_for_pip_24_from_pypi() {
+        let line = "pip 23.1.2 from C:\\Users\\a\\AppData\\Roaming\\com.purpledoubled.locally-uncensored\\musubi\\venv\\Lib\\site-packages\\pip (python 3.11)";
+        let args = crate::commands::install::pip_upgrade_before_torch_args(Some(line)).expect("pip 23.1.2 from Python 3.11.4 is lifted");
+        assert_eq!(args.last().map(String::as_str), Some("pip>=24.0"));
+        assert!(!args.iter().any(|a| a.contains("index-url")), "pip comes from PyPI: {args:?}");
+        assert_eq!(crate::commands::install::pip_upgrade_before_torch_args(Some("pip 24.0 from x (python 3.12)")), None);
+    }
+
+    #[test]
+    fn the_setup_steps_and_the_error_reach_the_log_file() {
+        let src = include_str!("trainer.rs");
+        let push = body_of(src, "fn push_log(", "\n}\n");
+        assert!(push.contains("info!("), "LU's own lines go to the log file");
+        let status = body_of(src, "fn set_status(", "\n}\n");
+        assert!(status.contains("warn!(") && status.contains("info!("), "headlines go there, an error as a warning");
+        // pip, musubi and tqdm stay in the panel only.
+        let child = body_of(src, "fn push_child_line(", "\n}\n");
+        assert!(!child.contains("info!(") && !child.contains("warn!("));
+        let run = body_of(src, "fn run_child(", "let exit = loop");
+        assert!(run.contains("push_child_line(&run, trimmed)"));
+        assert!(!run.contains("push_log(&run, trimmed)"), "a training run would flood the log");
     }
 }
