@@ -519,28 +519,6 @@ fn python_in_conda() -> Option<String> {
     None
 }
 
-/// "3.11.7" for an interpreter that runs, None for a stub or one that dies
-/// during init. The version is asked from the interpreter itself, not read
-/// off a folder name or a pyvenv.cfg, because those describe what was
-/// installed once, not what starts today.
-///
-/// On Windows the only callers run behind `python_version_and_arch` instead
-/// (a 32-bit or ARM64 interpreter answers this check like a normal one, see
-/// its doc comment), so this is unused there outside the test that exercises
-/// it directly.
-#[cfg(any(not(windows), test))]
-pub fn python_version(exe: &str) -> Option<String> {
-    let out = python_command(exe)
-        .args(["-c", "import sys;print('%d.%d.%d'%sys.version_info[:3])"])
-        .output()
-        .ok()?;
-    if !out.status.success() {
-        return None;
-    }
-    let v = String::from_utf8_lossy(&out.stdout).trim().to_string();
-    if v.is_empty() { None } else { Some(v) }
-}
-
 /// True for a 64-bit x86 interpreter, the only architecture PyTorch's Windows
 /// CUDA wheels exist for. `bits` is `struct.calcsize('P') * 8`, which is what
 /// actually answers "32-bit or 64-bit": a 32-bit interpreter running under
@@ -552,42 +530,6 @@ pub fn python_version(exe: &str) -> Option<String> {
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 pub fn is_trainer_arch(bits: u32, machine: &str) -> bool {
     bits == 64 && machine.eq_ignore_ascii_case("AMD64")
-}
-
-/// [`python_version`] plus [`is_trainer_arch`] in one process spawn.
-///
-/// A user (Discord, 2026-09-16): "Set up trainer" kept reporting "the
-/// Python in the trainer environment ... needs 3.10, 3.11 or 3.12", rebuilt
-/// on request, and kept failing the same way. `python_version` alone cannot
-/// see why: it only reads `sys.version_info`, which a 32-bit or ARM64 Python
-/// 3.11/3.12 answers exactly like a normal one. Such an interpreter passes
-/// every check `trainer_base_python` runs, builds a venv that looks complete,
-/// and only dies once pip actually resolves torch, with "Could not find a
-/// version that satisfies the requirement torch", which `pip_failure_kind`
-/// reads as `NoMatchingWheel` and reports as the wrong-Python-version
-/// message. The version was never the problem, so the button that message
-/// points at chose the same interpreter again on every retry.
-#[cfg(target_os = "windows")]
-pub fn python_version_and_arch(exe: &str) -> Option<(String, bool)> {
-    let out = python_command(exe)
-        .args([
-            "-c",
-            "import struct,platform;print('%d.%d.%d'%__import__('sys').version_info[:3]);print(struct.calcsize('P')*8);print(platform.machine())",
-        ])
-        .output()
-        .ok()?;
-    if !out.status.success() {
-        return None;
-    }
-    let text = String::from_utf8_lossy(&out.stdout);
-    let mut lines = text.lines();
-    let version = lines.next().unwrap_or("").trim().to_string();
-    let bits: u32 = lines.next().and_then(|l| l.trim().parse().ok()).unwrap_or(0);
-    let machine = lines.next().unwrap_or("").trim().to_string();
-    if version.is_empty() {
-        return None;
-    }
-    Some((version, is_trainer_arch(bits, &machine)))
 }
 
 /// Every interpreter this machine has, LU's usual order, duplicates and the
