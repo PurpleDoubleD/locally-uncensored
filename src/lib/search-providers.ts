@@ -29,6 +29,7 @@ export const SEARCH_PROVIDERS: readonly SearchProviderOption[] = [
   { id: 'searxng', label: 'SearXNG', hint: 'Your own SearXNG on localhost:8888 first. Auto takes over when it fails.' },
   { id: 'duckduckgo', label: 'DuckDuckGo', hint: 'DuckDuckGo first. It often blocks apps with a bot check; Auto takes over then.' },
   { id: 'wikipedia', label: 'Wikipedia', hint: 'Wikipedia articles only, then Auto when nothing fits.' },
+  { id: 'keenable', label: 'Keenable', hint: 'Keenable first, free without a key. Auto takes over when it fails.' },
   { id: 'brave', label: 'Brave', hint: 'Brave Search first. Needs your Brave key below.' },
   { id: 'tavily', label: 'Tavily', hint: 'Tavily first. Needs your Tavily key below.' },
 ]
@@ -41,6 +42,7 @@ const TIER_NAMES: Record<string, string> = {
   wikipedia: 'Wikipedia',
   brave: 'Brave',
   tavily: 'Tavily',
+  keenable: 'Keenable',
 }
 
 export function searchProviderLabel(id: string | undefined): string {

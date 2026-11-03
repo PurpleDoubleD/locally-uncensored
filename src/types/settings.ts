@@ -15,6 +15,7 @@ export type SearchProvider =
   | 'wikipedia'
   | 'brave'
   | 'tavily'
+  | 'keenable'
 
 export type CavemanMode = 'off' | 'lite' | 'full' | 'ultra'
 

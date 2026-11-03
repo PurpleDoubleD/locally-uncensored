@@ -81,6 +81,33 @@ pub(crate) fn parse_tavily_results(json: &serde_json::Value, count: usize) -> Ve
         .unwrap_or_default()
 }
 
+/// Parse a Keenable API response body into results (unit-testable, no network).
+/// `description` is often empty, so the snippet falls back to `snippet`, cut
+/// to 500 characters (it can hold a whole page).
+pub(crate) fn parse_keenable_results(json: &serde_json::Value, count: usize) -> Vec<SearchResult> {
+    json.get("results")
+        .and_then(|r| r.as_array())
+        .map(|arr| {
+            arr.iter()
+                .take(count)
+                .filter_map(|r| {
+                    let text = r
+                        .get("description")
+                        .and_then(|c| c.as_str())
+                        .filter(|s| !s.trim().is_empty())
+                        .or_else(|| r.get("snippet").and_then(|c| c.as_str()))
+                        .unwrap_or("");
+                    Some(SearchResult {
+                        title: r.get("title")?.as_str()?.to_string(),
+                        url: r.get("url")?.as_str()?.to_string(),
+                        snippet: text.chars().take(500).collect(),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 /// Traegt der Text deutsche Signale? Umlaute und ss zaehlen sofort, danach
 /// haeufige Funktionswoerter, danach typische Endungen von Fachwoertern.
 ///
@@ -170,7 +197,7 @@ pub(crate) fn strip_html(s: &str) -> String {
 /// live in `search_tiers.rs`; this command only gathers what Settings sent.
 ///
 /// `provider` is `auto` or one tier (`exa`, `you`, `searxng`, `duckduckgo`,
-/// `wikipedia`, `brave`, `tavily`). A chosen tier is asked first and the rest
+/// `wikipedia`, `brave`, `tavily`, `keenable`). A chosen tier is asked first and the rest
 /// of Auto follows, with `providerError` saying why the chosen one did not
 /// answer. The keys come from the user's own Settings and stay on this
 /// computer; empty means that service is asked without one or not at all.
