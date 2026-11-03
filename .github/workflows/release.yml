@@ -785,6 +785,29 @@ jobs:
           rm -f "$RUNNER_TEMP/lu-dry-run/dry-run-updater.key"
           node scripts/release-dry-run.mjs check-binaries "$RUNNER_TEMP/lu-dry-run/receipt.json" src-tauri/target/release
 
+      # D10: the NSIS installer now carries Microsoft's WebView2 bootstrapper
+      # (bundle.windows.webviewInstallMode embedBootstrapper). tauri build
+      # fetches it from go.microsoft.com and checks nothing, because the file
+      # has no fixed version or hash. What can be checked is Microsoft's
+      # Authenticode signature on the copy that went into the installer.
+      - name: "Dry run: the embedded WebView2 bootstrapper is signed by Microsoft"
+        if: ${{ inputs.dry_run }}
+        shell: pwsh
+        timeout-minutes: 5
+        run: |
+          # The condition stays `inputs.dry_run` alone (release-dry-run.test.ts);
+          # Linux has no NSIS installer and so nothing to check.
+          if (-not $IsWindows) { 'no NSIS installer on this platform'; exit 0 }
+          $found = @(Get-ChildItem -Path src-tauri/target, "$env:LOCALAPPDATA\tauri" -Recurse -Filter MicrosoftEdgeWebview2Setup.exe -ErrorAction SilentlyContinue)
+          if ($found.Count -eq 0) { throw "no MicrosoftEdgeWebview2Setup.exe after the build" }
+          foreach ($f in $found) {
+            $sig = Get-AuthenticodeSignature $f.FullName
+            "{0}  {1:N0} bytes  {2}  {3}" -f $f.FullName, $f.Length, $sig.Status, $sig.SignerCertificate.Subject
+            if ($sig.Status -ne 'Valid' -or $sig.SignerCertificate.Subject -notmatch 'O=Microsoft Corporation') {
+              throw "$($f.FullName) is not validly signed by Microsoft"
+            }
+          }
+
       # ── Windows code signing, only with the secrets of one lane ──────────
       # Two lanes, and at most one of them signs a release:
       #   - Azure Artifact Signing signs inside `tauri build`.

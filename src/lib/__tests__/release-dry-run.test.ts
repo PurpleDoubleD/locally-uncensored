@@ -126,7 +126,9 @@ describe('release.yml, a dry run step and a release step are never the same step
   const dry = buildSteps.filter((s) => stepIf(s) === DRY)
 
   it('has its own steps for key, endpoint, build, check, collection and artifact', () => {
-    expect(dry).toHaveLength(6)
+    // Seven since D10: the signature check of the embedded WebView2
+    // bootstrapper, which only a build can reach.
+    expect(dry).toHaveLength(7)
     // No third kind of condition on the new input: a step is in the dry run
     // by exactly `inputs.dry_run`, or out of it by `!inputs.dry_run`.
     for (const step of buildSteps) {

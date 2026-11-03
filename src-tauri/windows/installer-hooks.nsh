@@ -220,3 +220,87 @@
   lu_wix_done:
 !endif
 !macroend
+
+; The window needs the Microsoft Edge WebView2 Runtime, and it has to be there
+; for the Windows user who starts LU, not just somewhere on the machine.
+;
+; 2026-11-03, a fresh Windows install: right after setup LU opened only
+; Tauri's "Could not find the WebView2 Runtime ... You may have it installed
+; on another user account, but it is not available for this one". The stock
+; WebView2 section (tauri-bundler 2.11, installer.nsi) has the gaps that let
+; that happen without a word:
+;   - it counts the runtime as present as soon as a "pv" value exists, and
+;     EdgeUpdate leaves "0.0.0.0" behind after a broken or removed runtime;
+;     Microsoft's own detection rule says that value means not installed;
+;   - it also counts a per-user runtime in HKCU, and an install for all users
+;     that a standard user starts with an admin's password runs under the
+;     admin's account, so it reads the admin's HKCU and skips the install for
+;     the person who will actually use the app;
+;   - it skips everything on an update (/UPDATE);
+;   - with the default downloadBootstrapper a blocked download ends the setup.
+; The bootstrapper is now embedded (bundle.windows.webviewInstallMode), and
+; this check runs after the stock section with Microsoft's rule. When it still
+; finds no runtime it runs the same bootstrapper itself.
+;
+; A copy of the bootstrapper stays in the install folder: the app runs it at
+; start (webview2_check.rs) for a Windows user who has no runtime even though
+; the install went fine, the "another user account" case. NSIS stores the
+; identical file once, so the copy costs no installer size.
+!macro LU_READ_WEBVIEW2 ROOT KEY
+  ${If} $R1 == ""
+    ReadRegStr $R1 ${ROOT} "${KEY}\Microsoft\EdgeUpdate\Clients\${WEBVIEW2APPGUID}" "pv"
+    ${If} $R1 == "0.0.0.0"
+      StrCpy $R1 ""
+    ${EndIf}
+  ${EndIf}
+!macroend
+
+!macro LU_ENSURE_WEBVIEW2
+  Push $R1
+  Push $R2
+  StrCpy $R1 ""
+  !insertmacro LU_READ_WEBVIEW2 HKLM "SOFTWARE\WOW6432Node"
+  !insertmacro LU_READ_WEBVIEW2 HKLM "SOFTWARE"
+  ; A per-user runtime counts only for a per-user install, the one case where
+  ; this HKCU belongs to the person who starts the app.
+  StrCpy $R2 "CurrentUser"
+  !if "${INSTALLMODE}" == "perMachine"
+    StrCpy $R2 "AllUsers"
+  !else if "${INSTALLMODE}" == "both"
+    StrCpy $R2 $MultiUser.InstallMode
+  !endif
+  ${If} $R2 != "AllUsers"
+    !insertmacro LU_READ_WEBVIEW2 HKCU "SOFTWARE"
+  ${EndIf}
+
+  !if "${INSTALLWEBVIEW2MODE}" == "embedBootstrapper"
+    File "/oname=$INSTDIR\MicrosoftEdgeWebview2Setup.exe" "${WEBVIEW2BOOTSTRAPPERPATH}"
+    ${If} $R1 == ""
+      DetailPrint "$(installingWebview2)"
+      ExecWait '"$INSTDIR\MicrosoftEdgeWebview2Setup.exe" ${WEBVIEW2INSTALLERARGS} /install' $R2
+      ${If} $R2 = 0
+        DetailPrint "$(webview2InstallSuccess)"
+      ${Else}
+        DetailPrint "$(webview2InstallError)"
+        ; Not an abort: LU itself is installed fine, and at its start it
+        ; offers the runtime again with Microsoft's download page as the
+        ; fallback. Silent updates show nothing here.
+        ${IfNot} ${Silent}
+          MessageBox MB_OK|MB_ICONEXCLAMATION "LU is installed, but the Microsoft Edge WebView2 Runtime it needs for its window could not be installed (code $R2).$\r$\n$\r$\nLU offers it again when it starts. You can also get it from Microsoft:$\r$\nhttps://developer.microsoft.com/microsoft-edge/webview2/"
+        ${EndIf}
+      ${EndIf}
+    ${EndIf}
+  !endif
+  Pop $R2
+  Pop $R1
+!macroend
+
+!macro NSIS_HOOK_POSTINSTALL
+  !insertmacro LU_ENSURE_WEBVIEW2
+!macroend
+
+; The stock uninstaller removes only the files it copied itself and then the
+; folder if it is empty, so the bootstrapper copy above would keep it alive.
+!macro NSIS_HOOK_PREUNINSTALL
+  Delete "$INSTDIR\MicrosoftEdgeWebview2Setup.exe"
+!macroend

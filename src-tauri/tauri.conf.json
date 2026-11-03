@@ -73,6 +73,10 @@
       "signingIdentity": "-"
     },
     "windows": {
+      "webviewInstallMode": {
+        "type": "embedBootstrapper",
+        "silent": true
+      },
       "wix": {
         "upgradeCode": "a32db5c6-2c3c-5e92-a20a-2464954554f9"
       },

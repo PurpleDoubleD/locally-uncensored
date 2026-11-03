@@ -57,6 +57,8 @@ mod runtime_root;
 mod storage_move;
 mod system_tray;
 mod tray_menu;
+#[cfg(any(windows, test))]
+mod webview2_check;
 mod state;
 // Test-only OS helpers (a shell, a sleeper, "is this pid alive"), shared by
 // the process tests in state.rs, commands/engine.rs and commands/bg_tasks.rs
@@ -615,6 +617,11 @@ pub fn run() {
         version = app_identity::APP_VERSION,
         "LU starting"
     );
+
+    // Before any window: without the WebView2 Runtime for this Windows user
+    // Tauri can only show a raw error and end (webview2_check.rs).
+    #[cfg(windows)]
+    webview2_check::ensure_runtime();
 
     let app_state = AppState::new();
 
