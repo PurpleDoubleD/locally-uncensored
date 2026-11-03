@@ -248,6 +248,11 @@ function cmdCollect(platform, bundleDir, outDir, receiptFile) {
   for (const kind of readdirSync(bundleDir).sort()) {
     const kindDir = join(bundleDir, kind)
     if (!statSync(kindDir).isDirectory()) continue
+    // msi-updater and nsis-updater: with the WebView2 bootstrapper embedded
+    // (D10) tauri build packs a second pair of installers without it, only to
+    // fill the updater archives in msi/ and nsis/. Same names, not a release
+    // file, and `tauri build` does not list them among its bundles either.
+    if (kind.endsWith('-updater')) continue
     for (const name of readdirSync(kindDir).sort()) {
       const file = join(kindDir, name)
       if (!statSync(file).isFile() || !KEPT.test(name)) continue

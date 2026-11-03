@@ -493,6 +493,18 @@ describe('release-dry-run.mjs collect, executed', () => {
     }
   })
 
+  it('leaves out the installers tauri build packs only for the updater archives', () => {
+    // CI 9 (D10): bundle/msi-updater and bundle/nsis-updater hold installers
+    // with the same names as the real ones, and the collection stopped on them.
+    const result = collect('windows', [
+      ...WINDOWS,
+      'nsis-updater/Locally Uncensored_3.0.6_x64-setup.exe',
+      'msi-updater/Locally Uncensored_3.0.6_x64_en-US.msi',
+    ])
+    expect(result.code).toBe(0)
+    expect(result.kept).toEqual(['DRY-RUN-NOT-FOR-RELEASE.txt', ...WINDOWS.map((f) => f.split('/')[1])].sort())
+  })
+
   it('writes one sha256 line per file into the job summary', () => {
     const result = collect('windows', WINDOWS)
     const lines = result.summary.split('\n').filter((l) => /^- `.+` sha256 `[0-9a-f]{64}`$/.test(l))
