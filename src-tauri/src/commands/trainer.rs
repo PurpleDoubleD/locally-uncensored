@@ -701,10 +701,87 @@ pub(crate) fn active_comfy_dir(state: &AppState) -> Option<PathBuf> {
 /// commonly has a second card for the screen), but that is a plausible read
 /// of the report, not a measurement; see the question drafted in
 /// `lu-301/bau/trainer.md`.
+///
+/// C31 (Discord, 03.11.2026, Windows): `PYTHONHOME` and `PYTHONPATH` are
+/// dropped on Windows, the way LU's own Python (`private_python`) already
+/// does. A `PYTHONHOME` left on a removed Python, or one LU still carries
+/// from before the user changed it, makes every Python LU starts die with
+/// "init_fs_encoding" and exit code 1, while the same Python runs fine in a
+/// new cmd window. The trainer then found "none that starts" on a machine
+/// with 3.11 and 3.12. Trainer children only: ComfyUI keeps its own rules.
 fn trainer_child_env(cmd: &mut Command) {
     cmd.env("PYTHONIOENCODING", "utf-8");
     cmd.env("PYTHONUTF8", "1");
     cmd.env("USE_LIBUV", "0");
+    #[cfg(target_os = "windows")]
+    cmd.env_remove("PYTHONHOME").env_remove("PYTHONPATH");
+}
+
+/// Version and architecture of an interpreter as the trainer starts it, or
+/// why it did not answer. Until C31 this was `python::python_version_and_arch`
+/// (and `python_version` off Windows); now it is asked with `trainer_child_env`, and a failure keeps its exit code and
+/// stderr: before C31 a Python that did not start was dropped without a
+/// line, so "this machine has none that starts" never said which Pythons LU
+/// had tried or why they failed. `arch_ok` is always true off Windows, where
+/// the trainer does not check the architecture.
+fn trainer_python_probe(exe: &str) -> Result<(String, bool), String> {
+    let mut cmd = crate::python::python_command(exe);
+    trainer_child_env(&mut cmd);
+    cmd.args([
+        "-c",
+        "import struct,platform,sys;print('%d.%d.%d'%sys.version_info[:3]);print(struct.calcsize('P')*8);print(platform.machine())",
+    ]);
+    let out = cmd.output().map_err(|e| format!("it could not be started: {}", os_error::english(&e)))?;
+    if !out.status.success() {
+        return Err(probe_failure_detail(out.status.code(), &String::from_utf8_lossy(&out.stderr)));
+    }
+    let text = String::from_utf8_lossy(&out.stdout);
+    let mut lines = text.lines();
+    let version = lines.next().unwrap_or("").trim().to_string();
+    if version.is_empty() {
+        return Err("it printed no version".to_string());
+    }
+    #[cfg(target_os = "windows")]
+    let arch_ok = {
+        let bits: u32 = lines.next().and_then(|l| l.trim().parse().ok()).unwrap_or(0);
+        crate::python::is_trainer_arch(bits, lines.next().unwrap_or("").trim())
+    };
+    #[cfg(not(target_os = "windows"))]
+    let arch_ok = true;
+    Ok((version, arch_ok))
+}
+
+/// "exit code 1: Fatal Python error: init_fs_encoding: ..." from a probe
+/// that failed. The line that names the failure, not simply the last one:
+/// a Python that dies during start-up ends its stderr with
+/// "Current thread ... <no Python frame>", which says nothing.
+pub(crate) fn probe_failure_detail(code: Option<i32>, stderr: &str) -> String {
+    let lines: Vec<&str> = stderr.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
+    let line = lines
+        .iter()
+        .find(|l| l.starts_with("Fatal Python error"))
+        .or_else(|| lines.iter().rev().find(|l| l.contains("Error")))
+        .or_else(|| lines.last())
+        .map(|l| l.chars().take(200).collect::<String>());
+    let code = code.map_or("no exit code".to_string(), |c| format!("exit code {c}"));
+    match line {
+        Some(l) => format!("{code}: {l}"),
+        None => code,
+    }
+}
+
+/// One line when LU itself carries `PYTHONHOME` or `PYTHONPATH`, which
+/// `trainer_child_env` drops for the trainer's Pythons: the log then says
+/// what was set, and that a Python failing elsewhere may be this.
+#[cfg(target_os = "windows")]
+fn python_env_note() -> Option<String> {
+    let set: Vec<String> = ["PYTHONHOME", "PYTHONPATH"]
+        .iter()
+        .filter_map(|k| std::env::var(k).ok().filter(|v| !v.trim().is_empty()).map(|v| format!("{k}={v}")))
+        .collect();
+    (!set.is_empty()).then(|| {
+        format!("LU's environment sets {}. The trainer starts its Pythons without it.", set.join(" and "))
+    })
 }
 
 /// The Pythons the trainer can be built with. musubi-tuner v0.3.4 declares
@@ -1267,7 +1344,7 @@ const PEP668_NEXT_STEP: &str = "This Python refuses installs outside a virtual e
 /// `UnsupportedPython` failure reaches, through `next_step_for_log`, and it
 /// still only said "needs 3.10, 3.11 or 3.12" with nothing about what was
 /// actually found. On Windows each interpreter's architecture is added too
-/// (`python_version_and_arch`): a 32-bit or ARM64 Python 3.11 answers the
+/// (`trainer_python_probe`): a 32-bit or ARM64 Python 3.11 answers the
 /// plain version check exactly like a real one and is why "rebuild the venv"
 /// alone never broke a user's loop -- see `venv_action`.
 fn python_version_next_step() -> String {
@@ -1278,18 +1355,15 @@ fn python_version_next_step() -> String {
             continue;
         }
         seen.push(p.clone());
-        #[cfg(target_os = "windows")]
-        {
-            if let Some((v, arch_ok)) = crate::python::python_version_and_arch(&p) {
+        // C31: one that does not start is listed with the reason instead of
+        // being left out, so "This machine has" matches what the user sees.
+        match trainer_python_probe(&p) {
+            Ok((v, _)) if !cfg!(target_os = "windows") => found.push(format!("Python {v} at {p}")),
+            Ok((v, arch_ok)) => {
                 let arch = if arch_ok { "64-bit x86" } else { "not 64-bit x86, no PyTorch wheel exists for it" };
                 found.push(format!("Python {v} at {p} ({arch})"));
             }
-        }
-        #[cfg(not(target_os = "windows"))]
-        {
-            if let Some(v) = crate::python::python_version(&p) {
-                found.push(format!("Python {v} at {p}"));
-            }
+            Err(why) => found.push(format!("Python at {p} (does not start from LU: {why})")),
         }
     }
     let have = if found.is_empty() {
@@ -1955,7 +2029,7 @@ pub(crate) enum VenvAction {
 /// -- a user's "3.11-Umgebung loeschen half nicht" (Rebuild only ever fired
 /// on the FIRST build; a Keep venv was never re-examined the same way) is
 /// exactly the gap this closes. `true` on a platform where architecture is
-/// not checked (see `python_version_and_arch`, Windows only) so this stays a
+/// not checked (see `trainer_python_probe`, Windows only) so this stays a
 /// no-op everywhere else.
 pub(crate) fn venv_action(python_exists: bool, python_version: Option<&str>, arch_ok: bool) -> VenvAction {
     match (python_exists, python_version) {
@@ -1989,7 +2063,7 @@ pub(crate) fn venv_create_args(action: VenvAction) -> &'static [&'static str] {
 ///
 /// K4, 2026-09-18: `found` used to be versions alone, so the message named
 /// what version was on the machine but not where LU looked or which install
-/// it was reading. a user's rebuild loop (see `python_version_and_arch`)
+/// it was reading. a user's rebuild loop (see `trainer_python_probe`)
 /// is exactly the case where two Pythons report the same version and only
 /// one of them is real; the path is what lets the customer, or us reading a
 /// Discord paste, tell which is which.
@@ -2044,22 +2118,24 @@ fn trainer_base_python(
             // interpreter. Excluding it here, before the venv is ever built,
             // is what makes the retry pick a different one instead of
             // looping (Discord 2026-09-16).
-            #[cfg(target_os = "windows")]
-            match crate::python::python_version_and_arch(&p) {
-                Some((v, true)) => seen.push((p, v)),
-                Some((v, false)) => push_log(
+            // C31: a Python that does not start says why, with its exit code
+            // and the stderr line that names the failure; it used to vanish
+            // from the list without a trace.
+            match trainer_python_probe(&p) {
+                Ok((v, true)) => seen.push((p, v)),
+                Ok((v, false)) => push_log(
                     state,
                     &format!("Skipping {p} (Python {v}): not a 64-bit x86 build, the trainer's PyTorch wheels do not exist for it."),
                 ),
-                None => {}
-            }
-            #[cfg(not(target_os = "windows"))]
-            if let Some(v) = crate::python::python_version(&p) {
-                seen.push((p, v));
+                Err(why) => push_log(state, &format!("Skipping {p}: it did not start from LU ({why}).")),
             }
         }
         seen
     };
+    #[cfg(target_os = "windows")]
+    if let Some(note) = python_env_note() {
+        push_log(state, &note);
+    }
     let mut paths = vec![python_bin.to_string()];
     paths.extend(crate::python::python_interpreters());
     let found = versioned(paths);
@@ -2082,10 +2158,7 @@ fn trainer_base_python(
         crate::commands::install::FOR_TRAINER,
     )?
     .ok_or_else(|| no_trainer_python_message(&found, std::env::consts::OS))?;
-    #[cfg(target_os = "windows")]
-    let own_version = |p: &str| crate::python::python_version_and_arch(p).map(|(v, _)| v);
-    #[cfg(not(target_os = "windows"))]
-    let own_version = crate::python::python_version;
+    let own_version = |p: &str| trainer_python_probe(p).ok().map(|(v, _)| v);
     let version = match machine {
         Some((_, v)) => v,
         None => own_version(&path)
@@ -2551,16 +2624,11 @@ fn provision_trainer_env(
     let (venv_version, venv_arch_ok) = if !exists {
         (None, true)
     } else {
-        #[cfg(target_os = "windows")]
-        {
-            match crate::python::python_version_and_arch(&vpy_path.to_string_lossy()) {
-                Some((v, ok)) => (Some(v), ok),
-                None => (None, true),
-            }
-        }
-        #[cfg(not(target_os = "windows"))]
-        {
-            (crate::python::python_version(&vpy_path.to_string_lossy()), true)
+        // Asked the way the trainer starts it (C31): a venv that only fails
+        // under LU's PYTHONHOME is not dead and must not be rebuilt for it.
+        match trainer_python_probe(&vpy_path.to_string_lossy()) {
+            Ok((v, ok)) => (Some(v), ok),
+            Err(_) => (None, true),
         }
     };
     let action = venv_action(exists, venv_version.as_deref(), venv_arch_ok);
@@ -5151,13 +5219,12 @@ mod shutdown_tests {
     /// fixture.
     #[test]
     fn presence_alone_never_counts_as_a_working_interpreter() {
-        use crate::python::python_version;
         let dir = crate::os_paths::test_dir("trainer-venv-probe");
         let fake = dir.join("python-not-an-interpreter");
         std::fs::write(&fake, b"pyvenv.cfg points at a home that is gone").unwrap();
         assert!(fake.exists(), "the file is there, which is all the old check asked");
-        assert_eq!(python_version(&fake.to_string_lossy()), None, "but it does not run, which is the question");
-        assert_eq!(python_version(&dir.join("nothing-here").to_string_lossy()), None);
+        assert!(super::trainer_python_probe(&fake.to_string_lossy()).is_err(), "but it does not run, which is the question");
+        assert!(super::trainer_python_probe(&dir.join("nothing-here").to_string_lossy()).is_err());
     }
 
     #[test]
@@ -6116,5 +6183,94 @@ mod c31_old_pip_and_log_guard {
         let run = body_of(src, "fn run_child(", "let exit = loop");
         assert!(run.contains("push_child_line(&run, trimmed)"));
         assert!(!run.contains("push_log(&run, trimmed)"), "a training run would flood the log");
+    }
+}
+
+/// C31 Nachtrag (Discord, 03.11.2026, Windows): the setup ended before the
+/// trainer folder existed, with "none that starts" on a machine whose
+/// Python 3.11 and 3.12 run in a cmd window. The trainer now starts its
+/// Pythons without PYTHONHOME/PYTHONPATH on Windows, and every Python it
+/// skips is logged with the reason.
+#[cfg(test)]
+mod c31_python_that_does_not_start {
+    use super::*;
+
+    fn body_of<'a>(src: &'a str, start: &str, end: &str) -> &'a str {
+        let body = &src[src.find(start).expect(start)..];
+        &body[..body.find(end).expect(end)]
+    }
+
+    const INIT_FS_ENCODING: &str = "Python path configuration:\r\n  PYTHONHOME = 'C:\\Users\\a\\AppData\\Local\\Programs\\Python\\Python313'\r\n  PYTHONPATH = (not set)\r\nFatal Python error: init_fs_encoding: failed to get the Python codec of the filesystem encoding\r\nPython runtime state: core initialized\r\nModuleNotFoundError: No module named 'encodings'\r\n\r\nCurrent thread 0x00001a2c (most recent call first):\r\n  <no Python frame>\r\n";
+
+    #[test]
+    fn a_python_that_dies_at_start_up_is_named_with_exit_code_and_cause() {
+        assert_eq!(
+            probe_failure_detail(Some(1), INIT_FS_ENCODING),
+            "exit code 1: Fatal Python error: init_fs_encoding: failed to get the Python codec of the filesystem encoding"
+        );
+        // Negative control: without the pick, the last line would be this.
+        assert!(INIT_FS_ENCODING.trim_end().ends_with("<no Python frame>"));
+        assert_eq!(
+            probe_failure_detail(Some(1), "Traceback (most recent call last):\n  File \"<string>\", line 1\nImportError: DLL load failed\n"),
+            "exit code 1: ImportError: DLL load failed"
+        );
+        assert_eq!(probe_failure_detail(Some(9009), ""), "exit code 9009");
+        assert_eq!(probe_failure_detail(None, "  \n"), "no exit code");
+    }
+
+    #[test]
+    fn the_trainer_drops_pythonhome_and_pythonpath_on_windows_only() {
+        let mut cmd = Command::new("python");
+        trainer_child_env(&mut cmd);
+        let removed = |k: &str| cmd.get_envs().any(|(n, v)| n == k && v.is_none());
+        assert_eq!(removed("PYTHONHOME"), cfg!(target_os = "windows"));
+        assert_eq!(removed("PYTHONPATH"), cfg!(target_os = "windows"));
+        // What the trainer sets stays set.
+        assert!(cmd.get_envs().any(|(n, v)| n == "PYTHONUTF8" && v.is_some()));
+    }
+
+    #[test]
+    fn every_trainer_python_question_goes_through_the_trainer_probe() {
+        let src = include_str!("trainer.rs");
+        let base = body_of(src, "fn trainer_base_python(", "\n}\n");
+        assert!(base.contains("trainer_python_probe(&p)"));
+        assert!(base.contains("it did not start from LU ({why})"), "a skipped Python says why");
+        assert!(!base.contains("None => {}"), "nothing is dropped without a line");
+        assert!(!base.contains("python_version_and_arch"));
+        let provision = body_of(src, "fn provision_trainer_env(", "\n}\n");
+        assert!(provision.contains("trainer_python_probe(&vpy_path.to_string_lossy())"), "the venv check too");
+        let listing = body_of(src, "fn python_version_next_step(", "\n}\n");
+        assert!(listing.contains("does not start from LU: {why}"));
+        let probe = body_of(src, "fn trainer_python_probe(", "\n}\n");
+        assert!(probe.contains("trainer_child_env(&mut cmd)"));
+    }
+
+    #[test]
+    fn comfyui_and_the_other_python_calls_keep_their_environment() {
+        // The fix is the trainer's: python_command, which ComfyUI and every
+        // other lane use, does not drop PYTHONHOME.
+        let python = include_str!("../python.rs");
+        let shared = body_of(python, "pub fn python_command<", "\n}\n");
+        assert!(shared.contains("let mut cmd = Command::new(python_bin)"), "the shared builder itself");
+        assert!(!shared.contains("env_remove"), "no variable is dropped there");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_probe_reports_a_failing_interpreter_and_reads_a_working_one() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let fake = dir.path().join("python3.11");
+        fs::write(&fake, "#!/bin/sh\necho 'Fatal Python error: init_fs_encoding: failed' >&2\necho '  <no Python frame>' >&2\nexit 1\n").unwrap();
+        fs::set_permissions(&fake, fs::Permissions::from_mode(0o755)).unwrap();
+        let err = trainer_python_probe(&fake.to_string_lossy()).unwrap_err();
+        assert_eq!(err, "exit code 1: Fatal Python error: init_fs_encoding: failed");
+        let gone = dir.path().join("python3.13");
+        assert!(trainer_python_probe(&gone.to_string_lossy()).unwrap_err().starts_with("it could not be started: "));
+        if let Ok(real) = which::which("python3") {
+            let (v, arch_ok) = trainer_python_probe(&real.to_string_lossy()).expect("a working python3 answers");
+            assert!(python_major_minor(&v).is_some(), "{v}");
+            assert!(arch_ok, "off Windows the architecture is not checked");
+        }
     }
 }
