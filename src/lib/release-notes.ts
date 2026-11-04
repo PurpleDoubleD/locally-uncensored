@@ -15,6 +15,7 @@
  */
 
 import { CLOUD_PITCH, CLOUD_REFUSAL_LINE, CLOUD_SUBSCRIBER_LINE, cloudSalesLines } from './cloud-pitch'
+import { NEURONS_ENABLED } from './features'
 
 /**
  * The two model numbers the 3.0.0 sheet quotes, in one place and read, never
@@ -136,16 +137,19 @@ export const RELEASE_NOTES: ReleaseNote[] = [
   // oder auf einer Karte lief, sagt die Zeile selbst knapp.
   {
     version: '3.0.9',
-    headline: 'Group chats send every speaker the context you picked, Neurons puts sliders on a local model, Animate takes an end image, and Create takes reference pictures.',
+    headline: NEURONS_ENABLED
+      ? 'Group chats send every speaker the context you picked, Neurons puts sliders on a local model, Animate takes an end image, and Create takes reference pictures.'
+      : 'Group chats send every speaker the context you picked, Animate takes an end image, and Create takes reference pictures.',
     lines: [
       {
         title: 'Group chat: every speaker gets the context you picked.',
         detail: 'Local speakers get their chosen window minus room for the answer, no longer about half of it, and a grey line names messages that were not sent. One speaker can be regenerated on its own, and the speaking order can be changed with arrows or by dragging (GitHub #199, #200, #201).',
       },
-      {
+      // Neurons is off in 3.0.9 (lib/features); the line comes back with it.
+      ...(NEURONS_ENABLED ? [{
         title: 'Neurons: sliders that steer a local LU Engine model.',
         detail: 'Ready made sliders such as Serious to Cheerful or Fewer refusals, sliders from your own examples, and a before and after on the same question. LU measures how far each slider can push on your model; for small models that takes under a minute, and before a longer run Neurons says how long it will take and shows its progress. Ollama and LM Studio cannot take these sliders.',
-      },
+      }] : []),
       {
         title: 'End images and reference pictures in Animate and Create.',
         detail: 'Animate takes an end image for Wan 2.2 A14B, Wan 2.1 FLF2V and MiniMax H3, and up to nine reference pictures with MiniMax H3. Create takes reference pictures for Krea 2, Qwen-Image 2.1 and FLUX.2. A video shows a preview while it renders. The local end image and the preview ran on an RTX 3060; the reference pictures ran in automated tests only.',

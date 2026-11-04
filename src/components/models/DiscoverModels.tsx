@@ -62,6 +62,7 @@ import { ICON_SM } from '../ui/icon-size'
 import { CivitaiSearchPanel } from './CivitaiSearchPanel'
 import { ModelFileCheck, type FileCheckSubject } from './ModelFileCheck'
 import { bundleCheckTargets, chatModelCheckTargets, chatModelCheckable } from '../../lib/model-file-check'
+import { NEURONS_ENABLED } from '../../lib/features'
 
 interface Props {
   category: ModelCategory
@@ -978,7 +979,7 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0, o
       if (isActiveBuiltin && keepChatModel) {
         setInstallNotice(withFitNote(fitNote, noFolderOn
           ? `${noFolderOn} reads no model folder LU knows, so ${model.name} is downloading to the LU Engine. Your chat stays on ${noFolderOn}; the model list shows it once it is done.`
-          : `${model.name} is downloading to the LU Engine. Your chat stays on its model; the Neuron tweaker and the model list show it once it is done.`))
+          : `${model.name} is downloading to the LU Engine. Your chat stays on its model; ${NEURONS_ENABLED ? 'the Neuron tweaker and ' : ''}the model list show${NEURONS_ENABLED ? '' : 's'} it once it is done.`))
       } else if (isActiveBuiltin) {
         // Built-in engine: await the flat GGUF, then make it the active chat
         // model so the freshly-added model is chat-ready without a manual switch.
@@ -1202,7 +1203,7 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0, o
               Back to {targetName(followTarget)}
             </button>
           ) : (
-            <button className="lu-control" onClick={() => setTargetChoice('builtin')} data-testid="discover-target-builtin" title="The Neuron tweaker and the LU Engine only use files in the LU Engine. Your chat model stays as it is.">
+            <button className="lu-control" onClick={() => setTargetChoice('builtin')} data-testid="discover-target-builtin" title={NEURONS_ENABLED ? 'The Neuron tweaker and the LU Engine only use files in the LU Engine. Your chat model stays as it is.' : 'The LU Engine only uses files in the LU Engine. Your chat model stays as it is.'}>
               Send to LU Engine instead
             </button>
           ))}
@@ -1395,7 +1396,7 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0, o
                 {changed.length > 0 && (
                   <div className="mt-5" data-testid="hf-results-changed">
                     <p className="t-label text-gray-300 mb-0.5">Changed by others, not the original</p>
-                    <p className={`t-micro ${HINWEIS_TEXT.ruhig} mb-2`}>Uncensored, merged or fine-tuned versions. Neuron sliders work best on the originals above.</p>
+                    <p className={`t-micro ${HINWEIS_TEXT.ruhig} mb-2`}>Uncensored, merged or fine-tuned versions.{NEURONS_ENABLED && ' Neuron sliders work best on the originals above.'}</p>
                     <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-2.5">
                       {tiles(changed)}
                     </div>

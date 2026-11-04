@@ -4,6 +4,8 @@
 // writes, so a line and its `from` second always belong to the film they were
 // recorded with. Cloud mode only: every line states what the cloud tabs do.
 
+import { NEURONS_ENABLED } from './features'
+
 export interface HowtoStep {
   /** Second of the film from which this line is shown. */
   from: number
@@ -241,7 +243,9 @@ export const HOWTO: Record<string, HowtoTopic> = {
   'gguf-file': one('How to add a GGUF file', 'gguf-file', [
     { from: 0, text: 'Press GGUF file and pick a .gguf chat model on your drive.' },
     { from: 3, text: 'LU links it into the LU Engine folder, without a copy. File and folder must be on one drive.' },
-    { from: 6, text: 'It shows up in Neurons and under Models, Installed, where Use starts a chat with it.' },
+    { from: 6, text: NEURONS_ENABLED
+      ? 'It shows up in Neurons and under Models, Installed, where Use starts a chat with it.'
+      : 'It shows up under Models, Installed, where Use starts a chat with it.' },
   ], '/guide/storage/'),
   remote: one('How remote access works', 'remote', [
     { from: 0, text: 'Remote access starts in the Remote tab of the sidebar.' },

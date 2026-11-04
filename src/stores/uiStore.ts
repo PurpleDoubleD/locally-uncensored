@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { safeJSONStorage } from '../lib/storage-quota'
 import type { SettingsTab } from '../lib/settings-reset'
+import { visibleView } from '../lib/features'
 
 export type View = 'chat' | 'models' | 'settings' | 'create' | 'benchmark' | 'voice' | 'neuron'
 
@@ -333,7 +334,8 @@ export const useUIStore = create<UIState>()(
       // Settings, which is exactly what the web parity round removes.
       // A plain setView is somebody navigating by hand, so it drops any focus
       // a previous deep link left behind rather than firing it late.
-      setView: (view) => set({ currentView: view, settingsFocus: null }),
+      // A view that is switched off (Neurons in 3.0.9) lands on Chat.
+      setView: (view) => set({ currentView: visibleView(view), settingsFocus: null }),
 
       openSettingsAt: (focus) =>
         set({ currentView: 'settings', settingsFocus: focus }),
@@ -370,6 +372,12 @@ export const useUIStore = create<UIState>()(
       storage: safeJSONStorage(),
       version: 1,
       migrate: migriereUiZustand,
+      // currentView is not written (partialize), but a blob from an older
+      // build may still carry one; a view that is off must not come back.
+      merge: (persisted, current) => {
+        const merged = { ...current, ...(persisted as Partial<UIState>) }
+        return { ...merged, currentView: visibleView(merged.currentView) }
+      },
       // What survives a restart is a stated PREFERENCE, never a leftover of
       // one session. currentView and cloudGateOpen stay out: the app would
       // otherwise reopen on whatever tab was left behind, or come up with the

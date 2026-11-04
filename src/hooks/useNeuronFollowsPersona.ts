@@ -4,6 +4,7 @@ import { neuronApply, neuronInfo } from '../api/neuron'
 import { entriesFor, effectiveStrengths, hasPersonaProfile, steeringPersona } from '../lib/neuron'
 import { useChatStore } from '../stores/chatStore'
 import { useNeuronStore } from '../stores/neuronStore'
+import { NEURONS_ENABLED } from '../lib/features'
 import { useSettingsStore } from '../stores/settingsStore'
 
 /**
@@ -36,6 +37,8 @@ export function currentSteeringPersona(): { id: string | null; group: boolean } 
 
 export function useNeuronFollowsPersona(): void {
   useEffect(() => {
+    // With Neurons hidden (lib/features) no slider may steer the engine unseen.
+    if (!NEURONS_ENABLED) return
     let prev = currentSteeringPersona().id
     const check = () => {
       const next = currentSteeringPersona().id
