@@ -274,15 +274,20 @@ pub(crate) fn pip_upgrade_before_torch_args(pip_version_line: Option<&str>) -> O
     )
 }
 
-/// The venv's pip version line, under the same deadline as every other probe.
-pub(crate) fn pip_version_line(python_bin: &str) -> Option<String> {
-    let mut cmd = crate::python::python_command(python_bin);
+/// The venv's pip version line, under the same deadline as every other probe,
+/// or why it could not be read. Asked the way a venv Python starts
+/// ([`super::pip::venv_python_command`]): with a leftover `PYTHONHOME` the
+/// plain `python_command` made the venv Python die here, and the lift fell
+/// out without a line (C31, box test D12).
+pub(crate) fn pip_version_line(python_bin: &str) -> Result<String, String> {
+    let mut cmd = super::pip::venv_python_command(python_bin);
     cmd.args(["-m", "pip", "--version"]);
-    let out = run_probe_with_timeout(cmd, PYTHON_PROBE_TIMEOUT)?;
+    let out = run_probe_with_timeout(cmd, PYTHON_PROBE_TIMEOUT)
+        .ok_or_else(|| "it did not start or did not answer in time".to_string())?;
     if !out.status.success() {
-        return None;
+        return Err(crate::commands::trainer::probe_failure_detail(out.status.code(), &String::from_utf8_lossy(&out.stderr)));
     }
-    Some(String::from_utf8_lossy(&out.stdout).trim().to_string())
+    Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
 }
 
 /// Lift an old pip in `python_bin` before PyTorch is installed into it. A
@@ -294,14 +299,24 @@ pub(crate) fn lift_old_pip_before_torch(
     install_state: &std::sync::Arc<std::sync::Mutex<crate::state::InstallState>>,
     cancel: Option<&std::sync::Arc<std::sync::atomic::AtomicBool>>,
 ) -> Option<String> {
-    let line = pip_version_line(python_bin);
-    let args = pip_upgrade_before_torch_args(line.as_deref())?;
+    let line = match pip_version_line(python_bin) {
+        Ok(line) => line,
+        Err(why) => return Some(pip_unreadable_line(&why)),
+    };
+    let args = pip_upgrade_before_torch_args(Some(&line))?;
     let refs: Vec<&str> = args.iter().map(String::as_str).collect();
-    Some(match super::pip::pip_install_streaming_with_retry_cancellable(&refs, python_bin, 2, install_state, cancel) {
-        Ok(()) => format!("Updated pip in this environment ({}), the one it had cannot read the PyTorch index.", line.unwrap_or_default()),
+    Some(match super::pip::venv_pip_install_streaming_with_retry_cancellable(&refs, python_bin, 2, install_state, cancel) {
+        Ok(()) => format!("Updated pip in this environment ({line}), the one it had cannot read the PyTorch index."),
         Err(e) if e == "cancelled" => "pip update cancelled.".to_string(),
         Err(e) => format!("Could not update pip in this environment, trying PyTorch with the one it has. {e}"),
     })
+}
+
+/// The log line when the pip in an environment could not even be asked for
+/// its version. Until C31 this case returned nothing, so the box log showed
+/// no lift and no reason, and PyTorch then ran with pip 23.
+fn pip_unreadable_line(why: &str) -> String {
+    format!("Could not read the pip version in this environment ({why}), so pip was not updated. Trying PyTorch with the pip it has.")
 }
 
 pub(crate) fn parse_version_tuple(s: &str) -> Option<(u32, u32)> {
@@ -1723,6 +1738,50 @@ mod tests {
         assert_eq!(common_python_versions([Some(torch.clone()), None]), None);
         assert_eq!(common_python_versions([Some(torch), Some(Default::default())]), None);
         assert_eq!(common_python_versions(Vec::new()), None);
+    }
+
+    // ── C31, box test D12: the lift with a leftover PYTHONHOME ────────────
+
+    #[test]
+    fn the_venv_pip_drops_pythonhome_and_pythonpath_on_windows_only() {
+        let cmd = super::super::pip::venv_python_command("python");
+        let removed = |k: &str| cmd.get_envs().any(|(n, v)| n == k && v.is_none());
+        assert_eq!(removed("PYTHONHOME"), cfg!(target_os = "windows"));
+        assert_eq!(removed("PYTHONPATH"), cfg!(target_os = "windows"));
+    }
+
+    #[test]
+    fn the_pip_lift_asks_and_upgrades_through_the_venv_command() {
+        let src = include_str!("torch.rs");
+        let version = &src[src.find("pub(crate) fn pip_version_line(").unwrap()..];
+        let version = &version[..version.find("\n}\n").unwrap()];
+        assert!(version.contains("venv_python_command(python_bin)"), "the version question");
+        let lift = &src[src.find("pub(crate) fn lift_old_pip_before_torch(").unwrap()..];
+        let lift = &lift[..lift.find("\n}\n").unwrap()];
+        assert!(lift.contains("venv_pip_install_streaming_with_retry_cancellable("), "the upgrade itself");
+        assert!(lift.contains("Err(why) => return Some(pip_unreadable_line(&why))"), "no silent fall-through");
+        let pip = include_str!("pip.rs");
+        let venv = &pip[pip.find("pub(crate) fn venv_python_command(").unwrap()..];
+        assert!(venv[..venv.find("\n}\n").unwrap()].contains("env_remove(\"PYTHONHOME\").env_remove(\"PYTHONPATH\")"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_pip_that_cannot_be_asked_leaves_a_line_with_the_cause() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let fake = dir.path().join("python");
+        std::fs::write(&fake, "#!/bin/sh\necho 'Fatal Python error: init_fs_encoding: failed' >&2\necho '  <no Python frame>' >&2\nexit 1\n").unwrap();
+        std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let state = std::sync::Arc::new(std::sync::Mutex::new(crate::state::InstallState::default()));
+        let line = lift_old_pip_before_torch(&fake.to_string_lossy(), &state, None).expect("a line, not silence");
+        assert_eq!(
+            line,
+            "Could not read the pip version in this environment (exit code 1: Fatal Python error: init_fs_encoding: failed), so pip was not updated. Trying PyTorch with the pip it has."
+        );
+        let gone = dir.path().join("missing");
+        let line = lift_old_pip_before_torch(&gone.to_string_lossy(), &state, None).expect("a line for a missing one too");
+        assert!(line.contains("did not start or did not answer in time"), "{line}");
     }
 
 }
