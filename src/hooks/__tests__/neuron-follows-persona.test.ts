@@ -73,7 +73,9 @@ describe('which persona steers', () => {
     expect(steeringPersona({ personaId: 'pirate', personaEnabled: true, groupModels: ['a', 'b'] }, [PIRATE], 'pirate', true)).toEqual({ id: null, group: true })
   })
 
-  it('restarts the engine when the user opens a chat that speaks as a persona with own sliders', async () => {
+  // D13 (3.0.9): with Neurons hidden (lib/features) a persona's sliders must
+  // not steer the engine unseen, so switching to it restarts nothing.
+  it('leaves the engine alone when the user opens a chat that speaks as a persona with own sliders', async () => {
     useSettingsStore.setState((s) => ({ personas: [PIRATE, CODER], activePersonaId: 'coder', settings: { ...s.settings, personasEnabled: true } }))
     useChatStore.setState({
       conversations: [
@@ -84,8 +86,8 @@ describe('which persona steers', () => {
     })
     const { unmount } = renderHook(() => useNeuronFollowsPersona())
     useChatStore.setState({ activeConversationId: 'b' })
-    await vi.waitFor(() => expect(apply).toHaveBeenCalled())
-    expect(apply.mock.calls[0][1]).toEqual([{ id: 'casual', strength: 0.8 }])
+    await new Promise((r) => setTimeout(r, 50))
+    expect(apply).not.toHaveBeenCalled()
     unmount()
   })
 })

@@ -21,6 +21,7 @@ import { checkModelCapability } from '../../api/ollama'
 import { closeDialog, isTopDialog, nextFocusIndex, openDialog } from '../ui/dialog-a11y'
 import { MONOGRAM, MONOGRAM_INVERT } from './brand'
 import type { View } from '../../stores/uiStore'
+import { visibleView } from '../../lib/features'
 import { modelListIsStale, openaiEntriesAreStale } from '../../lib/model-list-staleness'
 
 /**
@@ -242,6 +243,8 @@ export function Header() {
 
   /** Die sichtbaren Ziele in dieser Betriebsart. */
   const navTargets = NAV_TARGETS.filter((t) => !t.localOnly || settings.appMode !== 'cloud')
+    // A view that is switched off (Neurons in 3.0.9, lib/features) has no tab.
+    .filter((t) => t.view === null || visibleView(t.view) === t.view)
   const isNavActive = (t: NavTarget) =>
     t.view === null ? isComparing : currentView === t.view && !isComparing
   const goto = (t: NavTarget) => {

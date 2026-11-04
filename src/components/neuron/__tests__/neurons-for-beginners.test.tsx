@@ -143,12 +143,13 @@ describe('the introduction', () => {
     expect(screen.getByTestId('neuron-intro-step').textContent).toBe('Step 1 of 5')
   })
 
-  it('is in the command palette too', () => {
+  // D13 (3.0.9): Neurons is hidden, so neither the view nor its introduction
+  // is in the command palette; both come back with lib/features.
+  it('is not in the command palette while Neurons is hidden', () => {
     const actions = buildCommands({ shortcuts: SHORTCUT_ACTIONS, keysFor: shortcutKeys, localViewsAvailable: true, setView: vi.fn(), openCompare: vi.fn(), toggleSidebar: vi.fn(), setActiveModel: vi.fn(), models: [], activeModel: null, quit: null })
-    const intro = actions.find((a) => a.id === 'neuron-intro')
-    expect(intro?.label).toBe('Neurons: how it works')
-    intro!.run()
-    expect(useNeuronIntroRequest.getState().open).toBe(true)
+    expect(actions.find((a) => a.id === 'neuron-intro')).toBeUndefined()
+    expect(actions.find((a) => a.id === 'view-neuron')).toBeUndefined()
+    expect(useNeuronIntroRequest.getState().open).toBe(false)
   })
 
   it('stands still with reduced motion', () => {

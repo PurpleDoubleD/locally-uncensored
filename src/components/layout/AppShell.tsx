@@ -67,6 +67,7 @@ import { CreditsExhaustedModal } from './CreditsExhaustedModal'
 import { Titlebar } from './Titlebar'
 import { HfLinkInbox } from '../models/HfLinkInbox'
 import { useNeuronFollowsPersona } from '../../hooks/useNeuronFollowsPersona'
+import { NEURONS_ENABLED } from '../../lib/features'
 
 // Aus der Komponente herausgezogen: `new Set(STORE_KEYS)` entstand bei jedem
 // Render neu und war damit die instabile Referenz, wegen der der Restore-Effekt
@@ -1198,7 +1199,7 @@ export function AppShell() {
             {currentView === 'settings' && <LazyView load={loadSettingsPage} fallback={<SettingsSkeleton />} />}
             {currentView === 'create' && <LazyView load={loadCreateExperimental} fallback={<CreateSkeleton />} />}
             {currentView === 'voice' && <LazyView load={loadVoiceView} fallback={<VoiceSkeleton />} />}
-            {currentView === 'neuron' && <LazyView load={loadNeuronView} fallback={<BenchmarkSkeleton />} />}
+            {currentView === 'neuron' && NEURONS_ENABLED && <LazyView load={loadNeuronView} fallback={<BenchmarkSkeleton />} />}
           </main>
         </div>
       </div>
