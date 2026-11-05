@@ -377,8 +377,8 @@ describe('release.yml, nothing is attached before it was judged', () => {
     const order = [
       'xcrun notarytool submit "$dmg" "${auth[@]}" --wait',
       'if [ "$status" != "Accepted" ]; then',
-      'xcrun stapler staple -v "$dmg"',
-      'xcrun stapler validate "$dmg"',
+      'stapler_retry staple "$dmg"',
+      'stapler_retry validate "$dmg"',
       'spctl -a -t open --context context:primary-signature',
     ].map((needle) => fn.indexOf(needle))
     for (const at of order) expect(at).toBeGreaterThanOrEqual(0)
@@ -429,7 +429,7 @@ describe('release.yml, nothing is attached before it was judged', () => {
   it('asks the updater archive the same questions as the app', () => {
     const step = laneSteps[archive]
     expect(step).toContain('codesign --verify --deep --strict')
-    expect(step).toContain('xcrun stapler validate')
+    expect(step).toContain('macos-release-signing.sh stapler validate')
     expect(step).toContain('CDHash')
     expect(step).not.toMatch(/\|\|\s*true/)
   })
