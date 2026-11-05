@@ -107,6 +107,7 @@ const DRY = "${{ env.MAC_DRY_RUN == 'true' }}"
 const NOT_DRY = "${{ env.MAC_DRY_RUN != 'true' }}"
 /** What only the full dry run adds to this job. */
 const FULL_DRY = '${{ inputs.dry_run }}'
+const MAC_ONLY = "${{ env.MAC_ONLY == 'true' && env.MAC_DRY_RUN != 'true' }}"
 
 const lane = withoutComments(jobBlock(RELEASE_YML, 'build-tauri-macos'))
 const gate = withoutComments(jobBlock(CI_YML, 'macos-gate'))
@@ -139,14 +140,15 @@ describe('release.yml, the Mac lane can be skipped as a whole', () => {
   })
 
   it('is switched by a repository variable in the job condition', () => {
-    // Three ways in, and only three: the Mac dry run, a full dry run that
-    // asks for the Mac, or a release with the switch on whose Windows and
-    // Linux build is green. `!cancelled()` replaces the implicit `success()`,
+    // Four ways in, and only four: the Mac dry run, a full dry run that
+    // asks for the Mac, a release with the switch on whose Windows and
+    // Linux build is green, or, with the switch on, a Mac-only run for a
+    // release that has its Windows and Linux files already. `!cancelled()` replaces the implicit `success()`,
     // so the release branch has to ask for the green build-tauri itself, and
     // it has to rule the full dry run out: build-tauri is green there too.
     const condition = lane.match(/^ {4}if:\s*(.*?)\s*$/m)?.[1] ?? ''
     expect(condition).toBe(
-      "${{ !cancelled() && (inputs.mac_dry_run || (inputs.dry_run && inputs.dry_run_mac) || (!inputs.dry_run && vars.LU_MAC_RELEASE == '1' && needs.build-tauri.result == 'success')) }}",
+      "${{ !cancelled() && (inputs.mac_dry_run || (inputs.dry_run && inputs.dry_run_mac) || (!inputs.dry_run && vars.LU_MAC_RELEASE == '1' && (needs.build-tauri.result == 'success' || (inputs.mac_only && needs.build-tauri.result == 'skipped')))) }}",
     )
     // `secrets` is not available in a job level `if:`; a condition that names
     // one is always false or a syntax error, depending on the day.
@@ -377,8 +379,8 @@ describe('release.yml, nothing is attached before it was judged', () => {
     const order = [
       'xcrun notarytool submit "$dmg" "${auth[@]}" --wait',
       'if [ "$status" != "Accepted" ]; then',
-      'xcrun stapler staple -v "$dmg"',
-      'xcrun stapler validate "$dmg"',
+      'stapler_retry staple "$dmg"',
+      'stapler_retry validate "$dmg"',
       'spctl -a -t open --context context:primary-signature',
     ].map((needle) => fn.indexOf(needle))
     for (const at of order) expect(at).toBeGreaterThanOrEqual(0)
@@ -429,7 +431,7 @@ describe('release.yml, nothing is attached before it was judged', () => {
   it('asks the updater archive the same questions as the app', () => {
     const step = laneSteps[archive]
     expect(step).toContain('codesign --verify --deep --strict')
-    expect(step).toContain('xcrun stapler validate')
+    expect(step).toContain('macos-release-signing.sh stapler validate')
     expect(step).toContain('CDHash')
     expect(step).not.toMatch(/\|\|\s*true/)
   })
@@ -455,7 +457,7 @@ describe('release.yml, a Mac dry run reaches no release and no other platform', 
 
   it('skips the gate, and with it the Windows and Linux build', () => {
     const gateJob = withoutComments(jobBlock(RELEASE_YML, 'gate'))
-    expect(gateJob).toMatch(/^ {4}if:\s*\$\{\{ !inputs\.mac_dry_run && !inputs\.dry_run \}\}\s*$/m)
+    expect(gateJob).toMatch(/^ {4}if:\s*\$\{\{ !inputs\.mac_dry_run && !inputs\.dry_run && !inputs\.mac_only \}\}\s*$/m)
     // build-tauri needs the gate and nothing else, and the one condition
     // that lets it build past a skipped gate asks for `dry_run`, which a Mac
     // dry run does not carry. release-dry-run.test.ts holds the whole line.
@@ -476,7 +478,7 @@ describe('release.yml, a Mac dry run reaches no release and no other platform', 
 
   it('attaches the SBOMs and checksums only to a real release', () => {
     expect(withoutComments(jobBlock(RELEASE_YML, 'sbom-and-checksums')))
-      .toMatch(/^ {4}if:\s*\$\{\{ always\(\) && !inputs\.mac_dry_run && !inputs\.dry_run && needs\.build-tauri\.result == 'success' \}\}\s*$/m)
+      .toMatch(/^ {4}if:\s*\$\{\{ always\(\) && !inputs\.mac_dry_run && !inputs\.dry_run && \(needs\.build-tauri\.result == 'success' \|\| \(inputs\.mac_only && needs\.build-tauri-macos\.result == 'success'\)\) \}\}\s*$/m)
   })
 
   it('has no job besides these six, so none is left unaccounted for', () => {
@@ -514,10 +516,90 @@ describe('release.yml, a Mac dry run reaches no release and no other platform', 
   it('runs every build and judgement step in both modes', () => {
     // The dry run adds its key, its marker and its artifact and leaves out
     // the two release steps. The full dry run adds two more, for the updater
-    // of the build. Everything else is the same code path in a dry run and
-    // in a release, which is the point.
+    // of the build, and a Mac-only run one, which checks the release it adds
+    // to. Everything else is the same code path in a dry run and in a
+    // release, which is the point.
     const conditional = laneSteps.filter((s) => stepIf(s) !== '').map(stepIf)
-    expect(conditional.sort()).toEqual(['always()', DRY, DRY, DRY, NOT_DRY, NOT_DRY, FULL_DRY, FULL_DRY].sort())
+    expect(conditional.sort()).toEqual(
+      ['always()', DRY, DRY, DRY, NOT_DRY, NOT_DRY, FULL_DRY, FULL_DRY, MAC_ONLY].sort(),
+    )
+  })
+})
+
+describe('release.yml, a Mac-only run adds to an existing release and touches nothing else', () => {
+  const dispatch = RELEASE_YML.slice(RELEASE_YML.indexOf('  workflow_dispatch:'), RELEASE_YML.indexOf('\npermissions:'))
+  const check = stepIndex(laneSteps, (s) => stepIf(s) === MAC_ONLY)
+  const checkout = stepIndex(laneSteps, (s) => s.includes('name: Checkout repository'))
+  const upload = stepIndex(laneSteps, isUpload)
+
+  it('is a boolean input that is off unless someone ticks it', () => {
+    const input = dispatch.slice(dispatch.indexOf('      mac_only:'))
+    expect(input).toMatch(/^ {8}type:\s*boolean\s*$/m)
+    expect(input).toMatch(/^ {8}default:\s*false\s*$/m)
+    expect(input).toMatch(/^ {8}required:\s*false\s*$/m)
+  })
+
+  it('runs neither the gate nor the Windows and Linux build', () => {
+    // build-tauri builds only past a green gate, or past a skipped one in a
+    // full dry run; a Mac-only run is neither, so build-tauri is skipped.
+    expect(withoutComments(jobBlock(RELEASE_YML, 'gate'))).toContain('!inputs.mac_only')
+    const condition = withoutComments(jobBlock(RELEASE_YML, 'build-tauri')).match(/^ {4}if:\s*(.*?)\s*$/m)?.[1] ?? ''
+    expect(condition).toBe(
+      "${{ !cancelled() && (needs.gate.result == 'success' || (inputs.dry_run && needs.gate.result == 'skipped')) }}",
+    )
+  })
+
+  it('first proves the release is there, with its files, and holds no token for it', () => {
+    expect(check).toBeGreaterThan(0)
+    expect(check).toBeLessThan(checkout)
+    const step = laneSteps[check]
+    expect(step).toContain('releases/tags/$RELEASE_TAG')
+    expect(step).toContain('_x64-setup')
+    expect(step).toContain('AppImage')
+    expect(step).toContain('latest.json')
+    expect(step).toMatch(/rel\.draft/)
+    expect(step).not.toMatch(/GITHUB_TOKEN|GH_TOKEN|secrets\./)
+    expect(step).not.toMatch(/\|\|\s*true/)
+  })
+
+  it('attaches through the one upload step, which proves darwin and the other platforms in latest.json', () => {
+    // No upload of its own: the Mac-only run uses the release path of the lane.
+    expect(laneSteps.filter(isUpload)).toHaveLength(1)
+    expect(laneSteps[upload + 1]).toContain('kept the other platforms')
+  })
+
+  it('proves after the upload that nothing but the Mac was added', () => {
+    const before = laneSteps[check]
+    expect(before).toContain('mac-only-before.json')
+    expect(before).toContain('mac-only-latest-before.json')
+    const after = laneSteps[upload + 1]
+    expect(after).toMatch(/if \[ "\$MAC_ONLY" = true \]; then/)
+    expect(after).toContain('mac-only-before.json')
+    expect(after).toContain("changed: ' + digest")
+    expect(after).toContain("latest.json entry ' + key + ' changed")
+    expect(after).toContain("!k.startsWith('darwin-')")
+  })
+
+  it('changes nothing for a release or a dry run: every Mac-only step and check asks for the input', () => {
+    // The input is read in five places only: the gate, the Mac lane's
+    // condition and its MAC_ONLY, the checksums job's condition and its
+    // MAC_ONLY.
+    expect(withoutComments(RELEASE_YML).match(/inputs\.mac_only/g) ?? []).toHaveLength(5)
+    expect(withoutComments(lane).match(/^ {6}MAC_ONLY:\s*\$\{\{ inputs\.mac_only && 'true' \|\| 'false' \}\}\s*$/m)).not.toBeNull()
+    expect(withoutComments(jobBlock(RELEASE_YML, 'sbom-and-checksums')))
+      .toMatch(/^ {6}MAC_ONLY:\s*\$\{\{ inputs\.mac_only && 'true' \|\| 'false' \}\}\s*$/m)
+    // Every use of MAC_ONLY in a step is a guard on that value.
+    const uses = withoutComments(RELEASE_YML).split('\n').filter((l) => /MAC_ONLY/.test(l) && !/^ {6}MAC_ONLY:/.test(l))
+    for (const line of uses) expect(line).toMatch(/env\.MAC_ONLY == 'true'|"\$MAC_ONLY" = true/)
+  })
+
+  it('leaves the Latest flag alone and rebuilds the checksums', () => {
+    // enforce-prerelease reads PUBLISHED_TAG, which a dispatch does not set.
+    expect(withoutComments(jobBlock(RELEASE_YML, 'enforce-prerelease'))).toContain('PUBLISHED_TAG: ${{ github.event.release.tag_name }}')
+    const sums = withoutComments(jobBlock(RELEASE_YML, 'sbom-and-checksums'))
+    expect(sums).toContain("inputs.mac_only && needs.build-tauri-macos.result == 'success'")
+    expect(sums).toContain('SHA256SUMS.txt lists no .dmg')
+    expect(sums).toContain('SHA256SUMS.txt lists no updater archive')
   })
 })
 

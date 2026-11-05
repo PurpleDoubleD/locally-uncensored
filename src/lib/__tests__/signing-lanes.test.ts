@@ -40,7 +40,7 @@
 import { describe, it, expect } from 'vitest'
 import { execFileSync } from 'node:child_process'
 import { generateKeyPairSync } from 'node:crypto'
-import { readFileSync, mkdtempSync, rmSync, existsSync, statSync } from 'node:fs'
+import { readFileSync, mkdtempSync, rmSync, existsSync, statSync, writeFileSync, chmodSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve, join } from 'node:path'
@@ -372,6 +372,64 @@ describe('the signing identity, judged by execution', () => {
   it('a team ID that is no team ID is refused before it is used as a pattern', () => {
     const got = pick([row(1, SHA, `Developer ID Application: Jane Doe (${TEAM})`), footer(1)].join('\n'), '.*')
     expect(got.ok).toBe(false)
+  })
+})
+
+describe('stapler, retried by execution', () => {
+  // stapler fetches the ticket from Apple's CloudKit. The 3.0.10 Mac job lost
+  // that connection five times in a row; a stand-in xcrun plays it here.
+  const SCRIPT = resolve(root, 'scripts/macos-release-signing.sh')
+  function run(failures: number, message: string, tries = 3): { ok: boolean; out: string; calls: number } {
+    const dir = mkdtempSync(join(tmpdir(), 'lu-stapler-'))
+    try {
+      writeFileSync(
+        join(dir, 'xcrun'),
+        [
+          '#!/bin/bash',
+          'n=$(cat "$(dirname "$0")/calls" 2>/dev/null || echo 0); n=$((n+1)); echo $n > "$(dirname "$0")/calls"',
+          `if [ $n -le ${failures} ]; then echo '${message}'; exit 68; fi`,
+          'echo "The $2 action worked!"',
+        ].join('\n'),
+      )
+      chmodSync(join(dir, 'xcrun'), 0o755)
+      const env = { PATH: `${dir}:${process.env.PATH ?? ''}`, STAPLER_TRIES: String(tries), STAPLER_PAUSE: '0' }
+      const calls = () => Number(existsSync(join(dir, 'calls')) ? readFileSync(join(dir, 'calls'), 'utf8') : 0)
+      try {
+        const out = execFileSync(BASH, [SCRIPT, 'stapler', 'staple', join(dir, 'LU.dmg')], {
+          encoding: 'utf8',
+          stdio: ['ignore', 'pipe', 'pipe'],
+          env,
+        })
+        return { ok: true, out, calls: calls() }
+      } catch (error) {
+        const e = error as { stdout?: string; stderr?: string }
+        return { ok: false, out: `${e.stdout ?? ''}${e.stderr ?? ''}`, calls: calls() }
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  }
+  const LOST = 'The network connection was lost. The staple and validate action failed! Error 68.'
+
+  it('a lost connection is tried again, and every try is in the log', () => {
+    const got = run(2, LOST)
+    expect(got.ok).toBe(true)
+    expect(got.calls).toBe(3)
+    expect(got.out).toContain('failed on try 1 of 3')
+    expect(got.out).toContain('OK on try 3 of 3')
+  })
+
+  it('gives up after the last try', () => {
+    const got = run(5, LOST)
+    expect(got.ok).toBe(false)
+    expect(got.calls).toBe(3)
+    expect(got.out).toContain('failed 3 times')
+  })
+
+  it('a file without a ticket is not tried again', () => {
+    const got = run(5, 'LU.dmg does not have a ticket stapled to it.')
+    expect(got.ok).toBe(false)
+    expect(got.calls).toBe(1)
   })
 })
 
