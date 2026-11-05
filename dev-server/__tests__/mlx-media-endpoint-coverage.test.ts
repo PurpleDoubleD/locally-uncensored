@@ -220,6 +220,8 @@ describe('endpointMap covers every backendCall/invokeMedia site the frontend can
     // The tray menu's lines and memory figure (T2, 3.0.9, hooks/useTraySync.ts).
     // Sent only behind isTauri(): the browser build has no tray.
     'tray_memory', 'tray_update',
+    // Restore chats from backup (3.0.10): reads store_backup*.json, only behind isTauri().
+    'chat_backup_conversations',
     'exit_app', 'file_read', 'find_orphan_downloads', 'fix_comfyui_cors', 'funnel_ping',
     'get_comfy_gpu_status', 'get_current_time', 'import_local_model', 'install_character_trainer',
     'install_lmstudio', 'install_lmstudio_status', 'install_method', 'install_python',

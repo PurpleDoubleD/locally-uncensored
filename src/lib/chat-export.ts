@@ -318,6 +318,20 @@ export function parseImportedChats(json: string): Conversation[] {
     throw new Error('That file is not valid JSON.')
   }
   let raw: unknown[]
+  // A store backup (store_backup*.json from the app data folder, 3.0.10): the
+  // chats are a JSON string under chat-conversations. The desktop already
+  // unpacks it natively (externalize_import); this covers the web build.
+  const backupChats = data && typeof data === 'object' && !Array.isArray(data)
+    ? (data as Record<string, unknown>)['chat-conversations']
+    : undefined
+  if (typeof backupChats === 'string') {
+    try {
+      const inner = JSON.parse(backupChats) as { state?: { conversations?: unknown } }
+      data = Array.isArray(inner?.state?.conversations) ? inner.state.conversations : []
+    } catch {
+      throw new Error('The chats in that backup could not be read.')
+    }
+  }
   if (Array.isArray(data)) {
     raw = data
   } else if (data && typeof data === 'object' && Array.isArray((data as { conversations?: unknown[] }).conversations)) {

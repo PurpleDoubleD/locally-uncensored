@@ -195,6 +195,7 @@ pub const ALLOWED: &[&str] = &[
     "get_current_time",
     "backup_stores",
     "restore_stores",
+    "chat_backup_conversations",
     "backup_rag_chunks",
     "restore_rag_chunks",
     "saved_characters_backup_missing",

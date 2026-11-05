@@ -2,6 +2,27 @@
 
 All notable changes to Locally Uncensored are documented here.
 
+## [3.0.10] - 2026-11-05
+
+A fix for lost chats. When the chat list came back without its chats, the
+next backup replaced the only complete copy in `store_backup.json`, and the
+check at launch did not notice the empty list. The bug is in 3.0.8 and 3.0.9.
+LU Cloud keeps its open models: seventeen video models and nine image models
+in the cloud catalogue.
+
+### Fixed
+- A backup whose chat list lost chats keeps the previous backup as
+  `store_backup.chats-<time>.json` first (the newest five stay). Images in
+  those chats are not cleaned up while an archive points at them.
+- The check at launch counts a chat store as there only when it can be read,
+  so an empty or unreadable store is restored from the backup again.
+- Settings, Chat Backup: "Restore chats from backup" brings back every chat
+  the backup files hold that is not in the list. Chats that are there stay as
+  they are, and nothing is added twice. "Choose a backup file..." takes a
+  `store_backup*.json` from anywhere, and "Import chats" reads one too.
+- A note at launch says when the backup holds such chats. It restores
+  nothing by itself.
+
 ## [3.0.9] - 2026-11-05
 
 A group chat sends every speaker the context you picked, can redo one
