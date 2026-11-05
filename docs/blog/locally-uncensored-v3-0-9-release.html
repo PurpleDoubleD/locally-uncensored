@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Locally Uncensored v3.0.9: LFM3 for Small Machines, Group Chats with Full Context, End Images in Animate</title>
+<meta name="description" content="v3.0.9 release notes: Liquid LFM3 for small machines with llama.cpp b11960 in the LU Engine, group chats that send every speaker the context you picked, end images and reference pictures in Animate and Create, local videos up to 15 seconds, style training in beta, Use this model from Hugging Face and a status menu in the menu bar and tray.">
+<meta name="keywords" content="locally uncensored 3.0.9, locally uncensored release, liquid lfm3 local, lfm3 small pc, group chat local llm, wan 2.2 end image, minimax h3 reference to video, style lora training local, hugging face use this model, llama.cpp b11960">
+<meta property="og:title" content="Locally Uncensored v3.0.9: LFM3 for Small Machines, Group Chats with Full Context, End Images in Animate">
+<meta property="og:description" content="Liquid LFM3 for small machines, group chats with the full context, end images and reference pictures, 15 second local videos, style training and Use this model from Hugging Face.">
+<meta property="og:image" content="https://raw.githubusercontent.com/PurpleDoubleD/locally-uncensored/master/docs/social-preview.png">
+<meta property="og:url" content="https://locallyuncensored.com/blog/locally-uncensored-v3-0-9-release.html">
+<meta property="og:type" content="article">
+<meta property="article:published_time" content="2026-11-05">
+<meta property="article:author" content="PurpleDoubleD">
+<meta property="article:tag" content="Release">
+<meta property="article:tag" content="LFM3">
+<meta property="article:tag" content="Group chat">
+<meta property="article:tag" content="Create">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Locally Uncensored v3.0.9: LFM3 for Small Machines, Group Chats with Full Context, End Images in Animate">
+<meta name="twitter:description" content="Liquid LFM3 for small machines, group chats with the full context, end images and reference pictures, 15 second local videos, style training and Use this model from Hugging Face.">
+<meta name="twitter:image" content="https://raw.githubusercontent.com/PurpleDoubleD/locally-uncensored/master/docs/social-preview.png">
+<link rel="canonical" href="https://locallyuncensored.com/blog/locally-uncensored-v3-0-9-release.html">
+<meta name="robots" content="index, follow">
+<meta name="theme-color" content="#0a0a0a">
+<link rel="icon" href="../favicon.png">
+<!-- Privacy: No external fonts loaded. Using system fonts. -->
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"BlogPosting","headline":"Locally Uncensored v3.0.9: LFM3 for Small Machines, Group Chats with Full Context, End Images in Animate","description":"v3.0.9 release notes: Liquid LFM3 for small machines with llama.cpp b11960 in the LU Engine, group chats that send every speaker the context you picked, end images and reference pictures in Animate and Create, local videos up to 15 seconds, style training in beta, Use this model from Hugging Face and a status menu in the menu bar and tray.","image":"https://raw.githubusercontent.com/PurpleDoubleD/locally-uncensored/master/docs/social-preview.png","datePublished":"2026-11-05","dateModified":"2026-11-05","inLanguage":"en","author":{"@type":"Person","name":"PurpleDoubleD","url":"https://github.com/PurpleDoubleD"},"publisher":{"@type":"Organization","name":"Locally Uncensored","url":"https://locallyuncensored.com/"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://locallyuncensored.com/blog/locally-uncensored-v3-0-9-release.html"},"keywords":"locally uncensored 3.0.9, locally uncensored release, liquid lfm3 local, lfm3 small pc, group chat local llm, wan 2.2 end image, minimax h3 reference to video, style lora training local, hugging face use this model, llama.cpp b11960"}
+</script>
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"FAQPage","mainEntity":[{"@type":"Question","name":"What is new in Locally Uncensored 3.0.9?","acceptedAnswer":{"@type":"Answer","text":"Liquid's LFM3 models run on small machines, and the LU Engine moves to llama.cpp b11960. A group chat sends every speaker the context you picked, can redo one speaker and lets you set who speaks when. Animate takes an end image and, with MiniMax H3, up to nine reference pictures, and Create takes reference pictures for Krea 2, Qwen-Image 2.1 and FLUX.2. Local videos run up to 15 seconds, the trainer learns a style next to a character (Beta), Use this model on Hugging Face opens the download in LU, and a status menu sits in the menu bar and tray."}},{"@type":"Question","name":"Does LFM3 run on a small PC?","acceptedAnswer":{"@type":"Answer","text":"Yes. LFM3 1.7B is about 1 GB, and the 2B models for pictures and speech are 1.2 to 1.7 GB. They run on the LU Engine, on Ollama 0.40.13 or newer and as MLX builds on a Mac. They are small models: good for quick answers, pictures and speech, and LU recommends a model of 7B or more for long chats and agent work."}},{"@type":"Question","name":"Why did the Linux AppImage of 3.0.8 not start?","acceptedAnswer":{"@type":"Answer","text":"On systems where the tray library could not be loaded, the AppImage stopped at start (GitHub issues 204 and 208). 3.0.9 carries the tray libraries again and starts without a tray icon if one still fails. A 3.0.8 AppImage that does not start cannot update itself, so download 3.0.9 by hand."}},{"@type":"Question","name":"Is the Windows installer signed?","acceptedAnswer":{"@type":"Answer","text":"The Windows installers of this release are not code signed, so SmartScreen and some antivirus engines can warn about them. Updates are checked against a signature by the app itself. The page Is Locally Uncensored safe? explains the warning and how to check a download."}}]}
+</script>
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://locallyuncensored.com/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://locallyuncensored.com/blog/"},{"@type":"ListItem","position":3,"name":"V3.0.9: LFM3 for Small Machines, Group Chats with the Full Context, and End Images in Animate","item":"https://locallyuncensored.com/blog/locally-uncensored-v3-0-9-release.html"}]}
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@200;300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/assets/lu.css">
+<script defer src="/assets/lu.js"></script>
+  <script data-goatcounter="https://purple47.goatcounter.com/count" async src="//gc.zgo.at/count.js"></script>
+</head>
+<body>
+<nav class="lu-nav">
+  <a class="lu-nav-brand" href="/" aria-label="Locally Uncensored">
+    <span class="lu-mono" data-mono="nav" data-size="40" aria-hidden="true"></span>
+    <span class="lu-nav-word">Locally <span class="accent">Uncensored</span></span>
+  </a>
+  <div class="lu-nav-links" id="lu-nav-links">
+    <a class="lu-nav-link" href="/">Home</a>
+    <a class="lu-nav-link" href="/pricing/">Pricing</a>
+    <a class="lu-nav-link" href="/blog/">Blog</a>
+    <a class="lu-nav-link" href="/guide/">Guide</a>
+    <a class="lu-nav-link" href="/remote-access/">Remote</a>
+  </div>
+  <div class="lu-nav-right">
+    <a class="lu-nav-icon" href="https://github.com/PurpleDoubleD/locally-uncensored" title="GitHub" aria-label="GitHub"><svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.37.5 0 5.87 0 12.5c0 5.3 3.44 9.8 8.21 11.39.6.11.82-.26.82-.58 0-.29-.01-1.04-.02-2.05-3.34.73-4.04-1.61-4.04-1.61-.55-1.39-1.33-1.76-1.33-1.76-1.09-.75.08-.73.08-.73 1.2.08 1.84 1.24 1.84 1.24 1.07 1.83 2.81 1.3 3.5.99.11-.78.42-1.3.76-1.6-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.13-.3-.54-1.52.11-3.18 0 0 1.01-.32 3.3 1.23a11.5 11.5 0 0 1 6.01 0c2.29-1.55 3.3-1.23 3.3-1.23.65 1.66.24 2.88.12 3.18.77.84 1.23 1.91 1.23 3.22 0 4.61-2.8 5.63-5.48 5.92.43.37.81 1.1.81 2.22 0 1.6-.01 2.9-.01 3.29 0 .32.21.7.82.58A12.01 12.01 0 0 0 24 12.5C24 5.87 18.63.5 12 .5Z"/></svg><span class="lu-nav-badge">3000+&#8202;⭐</span></a>
+    <a class="lu-nav-icon discord" href="https://locallyuncensored.com/discord" target="_blank" rel="noopener" title="Discord" aria-label="Discord"><svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M20.32 4.37A19.8 19.8 0 0 0 15.45 3c-.2.36-.44.85-.6 1.23a18.3 18.3 0 0 0-5.7 0c-.16-.38-.4-.87-.6-1.23a19.7 19.7 0 0 0-4.87 1.37C.55 8.9-.32 13.3.11 17.63a19.9 19.9 0 0 0 6 3.03c.48-.66.9-1.36 1.27-2.1-.7-.26-1.36-.58-1.99-.96.17-.12.33-.25.49-.38a14.2 14.2 0 0 0 12.24 0c.16.13.32.26.49.38-.63.38-1.3.7-2 .96.37.74.8 1.44 1.27 2.1a19.8 19.8 0 0 0 6-3.03c.5-5.03-.85-9.39-3.55-13.26ZM8.02 15c-1.18 0-2.15-1.09-2.15-2.42 0-1.34.95-2.43 2.15-2.43 1.2 0 2.17 1.09 2.15 2.43 0 1.33-.95 2.42-2.15 2.42Zm7.96 0c-1.18 0-2.15-1.09-2.15-2.42 0-1.34.95-2.43 2.15-2.43 1.2 0 2.17 1.09 2.15 2.43 0 1.33-.94 2.42-2.15 2.42Z"/></svg><span class="lu-nav-badge">1100+&#8202;<span style="font-size:0.715em">🟢</span></span></a>
+    <span class="lu-nav-sep"></span>
+    <div class="switch" id="theme-switch" role="button" aria-label="Toggle theme"></div>
+    <a class="he-cta" href="/pricing/" aria-label="LU Cloud plans and what they include"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/></svg>Cloud</a>
+    <a class="lu-nav-dl" href="https://github.com/PurpleDoubleD/locally-uncensored/releases/latest"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m0 0 4-4m-4 4-4-4"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>Download</a>
+    <button type="button" class="lu-nav-toggle" aria-label="Menu"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+  </div>
+</nav>
+<div class="container lu-doc">
+  <div class="breadcrumb"><a href="../">Locally Uncensored</a> / <a href="./">Blog</a> / This Post</div>
+
+  <div class="post-meta">
+    <span class="post-tag">Release</span>
+    <span>November 5, 2026</span>
+    <span>&middot;</span>
+    <span>12 min read</span>
+  </div>
+
+
+  <article>
+    <h1>v3.0.9: LFM3 for Small Machines, Group Chats with the Full Context, and End Images in Animate</h1>
+
+    <p><a href="https://github.com/PurpleDoubleD/locally-uncensored">Locally Uncensored</a> 3.0.9 came out on November 5, 2026. Liquid's LFM3 models bring text, pictures and speech to machines with little memory, and the LU Engine moves to llama.cpp b11960 for them. A group chat now sends every speaker the context you picked. Animate takes an end image and reference pictures, local videos run up to 15 seconds, and the trainer learns a style next to a character.</p>
+
+    <p>Most of the requests in this release came from the Discord and from GitHub issues. Most of it was clicked through in builds made like the release on a Mac, and a test build ran on Windows with an RTX 3060. What has only run in automated tests is listed at the end of this post.</p>
+
+    <p>The short version:</p>
+
+    <ul>
+      <li>Liquid LFM3 for small machines: a 1.7B text model and three 2B models for pictures and speech, on the LU Engine, Ollama or MLX on a Mac</li>
+      <li>Group chats send every speaker the context you picked, can redo one speaker, and let you set who speaks when</li>
+      <li>A compaction is one quiet line, and the conversation before it stays one click away</li>
+      <li>Animate takes an end image and, with MiniMax H3, up to nine reference pictures. Krea 2, Qwen-Image 2.1 and FLUX.2 take reference pictures in Create</li>
+      <li>Local videos up to 15 seconds that keep the colours of the first section, and a rough preview while a video renders</li>
+      <li>Train a style, a concept or a pose next to a character (Beta)</li>
+      <li>"Use this model" on Hugging Face opens the download in LU, and a model from the search comes in a quant that fits your graphics card</li>
+      <li>A status menu in the Mac menu bar and the Windows and Linux tray, and a Linux AppImage that starts again</li>
+    </ul>
+
+    <h2>LFM3 for small machines, and a newer engine</h2>
+
+    <p>Liquid's LFM3 family is small on purpose. LFM3 1.7B is a text model of about 1 GB, with a thinking part and tool calls. LFM3-VL 2B reads pictures, LFM3 Audio 2B hears and speaks, and LFM3 Omni 2B does both. All four run in the LU Engine as GGUF files and through Ollama 0.40.13 or newer, and on a Mac as MLX builds. The text and picture models also run in LM Studio.</p>
+
+    <ul>
+      <li><strong>Speech with the same small model.</strong> LFM3 Audio and LFM3 Omni can take over dictation and read aloud, in the chat and in the Voice area, through the LU Engine or Ollama. The setting is under Settings, Voice &amp; Remote, Speech</li>
+      <li><strong>Honest about the size.</strong> Every LFM3 tile says that a model this small is good for quick answers, pictures and speech, and that a model of 7B or more does more in long chats and agent work</li>
+      <li><strong>The license on the tile.</strong> The LFM Open License allows commercial use only below a revenue limit of $10 million a year, and each tile says so</li>
+      <li><strong>LM Studio.</strong> Below runtime 2.65.1, LU says the runtime is too old instead of failing without a word</li>
+    </ul>
+
+    <p>The LU Engine now runs llama.cpp b11960 (v0.8.0) instead of b9949, the first version that loads LFM3. LU passes the new memory loading option, keeps the thinking level where the template expects it, and a test checks that every option LU sends exists in the pinned version. An empty placeholder file is no longer taken for the engine (<a href="https://github.com/PurpleDoubleD/locally-uncensored/issues/207">issue 207</a>). The onboarding's "Models you already have" now lists the LU Engine's models too, each with the engine that runs it.</p>
+
+    <h2>Group chats with the full context</h2>
+
+    <ul>
+      <li><strong>Every speaker gets the context you picked</strong> (<a href="https://github.com/PurpleDoubleD/locally-uncensored/issues/201">issue 201</a>). A local model with a 256K window got about 128K of the conversation, because the group chat used the agent's trimming rule. Each speaker now gets its chosen window minus room for the answer. When older messages no longer fit, a grey line above the answer says how many were not sent to that speaker. The chat itself keeps them</li>
+      <li><strong>Regenerate one speaker</strong> (<a href="https://github.com/PurpleDoubleD/locally-uncensored/issues/199">issue 199</a>). Regenerate on a speaker's answer asks only that speaker again. If later speakers already answered, LU asks whether to keep their answers or regenerate from there. The old answer stays as a version, and "Regenerate whole round" is its own button</li>
+      <li><strong>Speaking order and skipping</strong> (<a href="https://github.com/PurpleDoubleD/locally-uncensored/issues/200">issue 200</a>). Plugins, Group chat lists the order with arrows and drag. A bar above the message field shows the next round, and a click lets a member sit out one round. During a round you can skip a speaker or stop the round, and what a skipped speaker already wrote stays</li>
+    </ul>
+
+    <h2>A tidier chat</h2>
+
+    <ul>
+      <li><strong>Compaction is one line.</strong> Instead of a long notice the chat shows, for example, "Compacted, 11.6K &rarr; 7.1K". Small marks at the left edge open the conversation as it was before each compaction, read only, until you go back or send. A compaction never deleted anything; now you can see that</li>
+      <li><strong>Recall older messages</strong> (<a href="https://github.com/PurpleDoubleD/locally-uncensored/issues/205">issue 205</a>, off by default). After a compaction LU can bring back up to four older messages closest in meaning to your new one, word for word. The search runs on your machine with the bundled embeddings server or a local Ollama</li>
+      <li><strong>Preview HTML the model writes.</strong> A code block with a page gets a Preview button. The page runs in a sandboxed frame from a small server on 127.0.0.1 with a random port and a token per page, with no access to LU and no network unless you allow it for that page. Desktop only</li>
+      <li><strong>Large text fields and an editor</strong> (<a href="https://github.com/PurpleDoubleD/locally-uncensored/issues/197">issue 197</a>) for persona prompts, reminders and memory, with search and a character and token count</li>
+      <li><strong>Custom sampling parameters</strong> (<a href="https://github.com/PurpleDoubleD/locally-uncensored/issues/198">issue 198</a>) by name, type and value, in the persona or in the chat's sampling popup</li>
+      <li><strong>Enter key setting</strong> (<a href="https://github.com/PurpleDoubleD/locally-uncensored/issues/202">issue 202</a>): Enter sends, or Enter makes a new line and Ctrl+Enter (Cmd+Enter on a Mac) sends</li>
+      <li><strong>Why the first answer takes so long.</strong> When a local Ollama model waits more than 10 seconds before its first word and part of it runs on the processor, the chat says how much fits on the graphics card and names a smaller installed model that would answer faster</li>
+      <li>Right-click "Copy text" copies plain text, and "Copy as Markdown" is the new entry for the source. The message field fits a 375 px wide window, long words and links wrap inside the bubble, and a prompt longer than the context window says so</li>
+    </ul>
+
+    <h2>Create and Animate</h2>
+
+    <ul>
+      <li><strong>Long local videos up to 15 seconds, held to the first section.</strong> Each new section is matched to the first one in colour, contrast, saturation and sharpness. The whole clip also no longer grows brighter with every section, because it is not encoded again each time. In a 30 second test run the brightness stayed within one step</li>
+      <li><strong>End image and reference pictures in Animate.</strong> Locally, an end image for Wan 2.2 A14B image to video, Wan 2.1 FLF2V and MiniMax H3, and up to nine reference pictures for MiniMax H3 reference to video. In LU Cloud, an end image for the models the server offers it for. Models that cannot do it say so</li>
+      <li><strong>Reference pictures in Create.</strong> Krea 2 takes up to three pictures for its style, Qwen-Image 2.1 up to ten and FLUX.2 up to four, for a person, a pose, an angle or a style</li>
+      <li><strong>A rough preview while a video renders</strong>, so you can stop early if it goes the wrong way</li>
+      <li><strong>Give memory back after a render.</strong> Settings, Hardware, "After a render" frees graphics memory and RAM after 5 minutes without a new render, right away, or never</li>
+      <li><strong>LoRAs in the order they run</strong>, kept per task and model, with strengths from -2 to +2 (and up to &plusmn;20 typed in). A video LoRA no longer stays on when you switch to Image, and the gallery shows which LoRAs made a picture</li>
+      <li><strong>Samplers by the names people use</strong>, such as DPM++ 2M SDE, Euler a and Karras, with ComfyUI's own name beside them</li>
+      <li><strong>Edit strength for Qwen-Image edits works now.</strong> Before 3.0.8 the slider's value never reached the workflow. Below 1.0 the edit starts from your picture; at 1.0, the default, it comes out as before</li>
+      <li><strong>Details for installed models and LoRAs</strong>: type, size, folder and date. A model or LoRA downloaded from now on remembers its Hugging Face or CivitAI page</li>
+      <li><strong>Select several pictures and videos in the gallery</strong> (desktop) and move, download or delete them together</li>
+      <li><strong>Gallery folders no longer empty themselves.</strong> The gallery kept at most 200 entries, and every new picture pushed the oldest one out, sorted pictures too. Now a picture in a folder is never removed automatically, and the limit counts only unsorted pictures. Folders and prompts lost before 3.0.9 cannot be brought back; the files themselves are still in your output folder</li>
+      <li>Improve my prompt works in Edit too, a prompt assistant turns a few keywords into a prompt for the picked model, a local Edit makes as many pictures as the batch size says, and Qwen Image 2.1 Turbo runs its own 8 step schedule. Comfy-Org's LTX 2.5 image to video template imports and runs (<a href="https://github.com/PurpleDoubleD/locally-uncensored/issues/196">issue 196</a>)</li>
+    </ul>
+
+    <h2>Trainer</h2>
+
+    <ul>
+      <li><strong>Train a style, a concept or a pose</strong> next to a character (Beta). Train new has a Character | Style / concept switch. The style mode captions by content, has its own steps and turns the result on in the LoRA stack</li>
+      <li>Local training uses the full LoRA strength: LU now passes the network alpha equal to the rank</li>
+      <li>Train new on Windows and Linux says "Local training uses Z-Image" instead of offering image models the local trainer cannot use (<a href="https://github.com/PurpleDoubleD/locally-uncensored/issues/210">issue 210</a>)</li>
+      <li>The trainer setup updates pip first, finds your Python again when a leftover PYTHONHOME or PYTHONPATH got in the way, and writes every skipped Python to the log</li>
+    </ul>
+
+    <h2>Models</h2>
+
+    <ul>
+      <li><strong>"Use this model" on Hugging Face opens LU.</strong> The link shows repo, file, quant and size, and the download starts only after you click, through the same path as a Discover card with its checksum. Links are checked strictly and anything else is refused</li>
+      <li><strong>A quant that fits your graphics card</strong> (<a href="https://github.com/PurpleDoubleD/locally-uncensored/issues/215">issue 215</a>). For a search result that names no quant, LU used to fetch Q4_K_M whatever its size. Now it takes the largest quant that fits in graphics memory with room for the context and says so. A file you named yourself is never swapped</li>
+      <li><strong>"Could not determine model directory" is gone.</strong> Every GGUF download from Discover failed with it when another OpenAI-compatible server was set up in LU. Such a model now goes to the LU Engine</li>
+      <li>Remove refusals shows size, percent, speed and time left for every download, and its knowledge check asks 1000 questions. A split GGUF set with parts missing is not downloaded, and the CivitAI search loads small still previews</li>
+    </ul>
+
+    <h2>Agent, MCP and ComfyUI</h2>
+
+    <ul>
+      <li><strong>MCP servers with uvx start on Windows</strong>, a missing uv says how to install it, and a first start says "Installing server dependencies &hellip;" while it downloads. A Mac LU started from the Finder finds uvx and npx</li>
+      <li><strong>PyTorch installs with an old pip</strong> (<a href="https://github.com/PurpleDoubleD/locally-uncensored/issues/211">issue 211</a>): LU updates pip first</li>
+      <li><strong>Model files already on disk are not offered again</strong> (<a href="https://github.com/PurpleDoubleD/locally-uncensored/issues/209">issue 209</a>). Create says "Your model files are already here" and offers "Start ComfyUI"</li>
+      <li><strong>ComfyUI is no longer started without being asked.</strong> LU connects to a running ComfyUI, starting one at launch is a setting, and Comfy Desktop on port 8000 is found</li>
+      <li>REA on Apple Silicon says which Ghidra it uses and whether its decompiler is built for this Mac</li>
+    </ul>
+
+    <h2>Menu bar and tray</h2>
+
+    <p>A status menu sits in the Mac menu bar and the Windows and Linux tray. With LU Cloud it shows your plan and the credits left. Locally it names the engine, the loaded model and whether it is ready, and the memory in use. Both have Open LU and Quit LU, and the lines stay current while LU runs.</p>
+
+    <h2>Linux, phone, Windows and updates</h2>
+
+    <ul>
+      <li><strong>The Linux AppImage starts again</strong> on systems where the tray library cannot be loaded (<a href="https://github.com/PurpleDoubleD/locally-uncensored/issues/204">issue 204</a>, <a href="https://github.com/PurpleDoubleD/locally-uncensored/issues/208">issue 208</a>). If one still fails, LU starts without a tray icon. A 3.0.8 AppImage that does not start cannot update itself, so please download 3.0.9 by hand</li>
+      <li><strong>Windows: no more "Could not find the WebView2 Runtime" after setup.</strong> The installer carries Microsoft's WebView2 setup and installs the runtime when it is missing</li>
+      <li><strong>Android: the keyboard stays open on Create.</strong> It closed after every tap into the prompt field on many phones</li>
+      <li><strong>Updates are bound to their version.</strong> The updater checks that a signed update is the version it claims, and an update you dismissed stays dismissed after a restart</li>
+      <li>"Continue on phone" says where a shared chat shows up: chats shared from the desktop come with the next LU phone app</li>
+    </ul>
+
+    <h2>What we have not tested</h2>
+
+    <p>The <a href="https://github.com/PurpleDoubleD/locally-uncensored/releases/tag/v3.0.9">release notes on GitHub</a> have the full list. These are the points to know before you rely on something:</p>
+
+    <ul>
+      <li>Most of this release was clicked through in builds made like the release on a Mac. On Windows a test build ran on an RTX 3060 (12 GB)</li>
+      <li>LFM3 in LM Studio has not been run, and on a Mac only the LFM3 1.7B MLX build has. The LU Engine with b11960 ran text, pictures, dictation and read aloud on a Mac, text and pictures on Windows, and on Linux automated tests only</li>
+      <li>Long videos of 15 and 30 seconds ran on one RTX 3060 with Wan 2.2 A14B. A local end image rendered with Wan 2.2 A14B; reference pictures and the LU Cloud end image have not rendered on a graphics card yet</li>
+      <li>Style training is Beta: in our test a woodcut style was not learned at 600 steps, and photos of real people were not measured</li>
+      <li>Picking a quant by graphics memory ran on Windows and on a Mac, but every test download was stopped at the start, so no swapped model has been run to the end. The fix for "Could not determine model directory" ran on a Mac only</li>
+      <li>The status menu was clicked through on a Mac. On Windows the tray showed the right memory figure, but its entries have not been clicked there yet. On Linux without a loadable tray library there is no status menu</li>
+      <li>The AppImage fix ran in containers on Arch, Ubuntu and Fedora; a tray icon on a real Linux desktop has not been seen</li>
+      <li>If LU installed your ComfyUI before 3.0.9, it no longer starts by itself when LU opens. Turn on "Start ComfyUI when LU starts" in Settings, ComfyUI once, or just generate something in Create</li>
+      <li>Recall works only in the plain chat, not in Agent or Code</li>
+      <li>The Windows installers of this release are not code signed, so SmartScreen and some antivirus engines can warn about them. <a href="/is-locally-uncensored-safe/">Is Locally Uncensored safe?</a> explains the warning and how to check a download</li>
+    </ul>
+
+    <h2>Download</h2>
+
+    <p>Each link loads the file directly.</p>
+
+    <ul>
+      <li>Windows: <a href="https://github.com/PurpleDoubleD/locally-uncensored/releases/download/v3.0.9/Locally.Uncensored_3.0.9_x64-setup.exe" download>Locally.Uncensored_3.0.9_x64-setup.exe</a></li>
+      <li>Mac with Apple Silicon, macOS 14 or newer (Beta): <a href="https://github.com/PurpleDoubleD/locally-uncensored/releases/download/v3.0.9/LU_3.0.9_aarch64.dmg" download>LU_3.0.9_aarch64.dmg</a></li>
+      <li>Linux: <a href="https://github.com/PurpleDoubleD/locally-uncensored/releases/download/v3.0.9/Locally.Uncensored_3.0.9_amd64.AppImage" download>AppImage</a>, <a href="https://github.com/PurpleDoubleD/locally-uncensored/releases/download/v3.0.9/Locally.Uncensored_3.0.9_amd64.deb" download>deb</a> or <a href="https://github.com/PurpleDoubleD/locally-uncensored/releases/download/v3.0.9/Locally.Uncensored-3.0.9-1.x86_64.rpm" download>rpm</a></li>
+    </ul>
+
+    <p>Already on 3.0.x? The signed update channel offers new releases on start and waits for your click before it restarts. On Linux, a 3.0.8 AppImage that does not start needs the file above. New here? The <a href="/guide/">handbook</a> takes you from installer to first generation, and the <a href="/guide/install/">install chapter</a> explains the SmartScreen warning and how updates arrive.</p>
+
+    <h2>Related</h2>
+
+    <ul>
+      <li><a href="run-vision-models-locally.html">Run vision models locally</a>, the image part a model like LFM3-VL needs</li>
+      <li><a href="talk-to-local-llm-voice-chat.html">Talk to a local LLM</a>, Voice on your own machine</li>
+      <li><a href="character-lora-training-local.html">Train a character LoRA locally</a>, the guide to Character Studio</li>
+      <li><a href="/mac/">Locally Uncensored for Mac</a>, the current state of the Mac build</li>
+      <li><a href="locally-uncensored-v3-0-7-release.html">v3.0.7 release notes</a>, and the <a href="https://github.com/PurpleDoubleD/locally-uncensored/releases/tag/v3.0.8">3.0.8 release on GitHub</a></li>
+    </ul>
+
+    <p><strong>Thanks</strong> to everyone who reported and asked, on GitHub and on the Discord. The GitHub release names them.</p>
+
+    <hr>
+
+    <p><em>Locally Uncensored 3.0.9. AGPL-3.0 licensed. Built by <a href="https://github.com/PurpleDoubleD">PurpleDoubleD</a>. Bug reports and feature requests on <a href="https://github.com/PurpleDoubleD/locally-uncensored/issues">GitHub Issues</a> or in the <a href="https://locallyuncensored.com/discord">Discord</a>.</em></p>
+    <h2>In the handbook</h2>
+
+    <ul>
+      <li><a href="/guide/create/">Create</a>, every tab and what it needs</li>
+      <li><a href="/guide/character-studio/">Character Studio</a>, training a character and using it</li>
+      <li><a href="/guide/install/">Install and update</a>, the SmartScreen warning and how updates arrive</li>
+      <li><a href="/guide/settings-and-troubleshooting/">Settings and troubleshooting</a>, every settings tab in one line each and where the log file is</li>
+    </ul>
+
+  </article>
+
+  <div class="post-footer">
+    <p>Small models for small machines, with the limits written down</p>
+    <a href="https://github.com/PurpleDoubleD/locally-uncensored/releases/latest" class="cta-btn" target="_blank">
+      Download the latest version
+    </a>
+    <p style="margin-top:14px;margin-bottom:0">No GPU? LU Cloud runs in a browser, paid from credit packs that start at 15 EUR and need no subscription. <a href="/pricing/">See what it costs</a> or <a href="https://lu-labs.ai/pricing?tab=credits&amp;src=luc-v309-end" target="_blank" rel="noopener">open LU Cloud</a>.</p>
+  </div>
+</div>
+
+<footer>
+  <div class="footer-row footer-meta"><span>&copy; 2026 &middot; Locally Uncensored &middot; AGPL-3.0</span></div>
+  <div class="footer-row footer-links">
+    <a href="https://locallyuncensored.com/blog/">Blog</a>
+    <a href="https://locallyuncensored.com/guide/">Guide</a>
+    <a href="https://locallyuncensored.com/pricing/">Pricing</a>
+    <a href="https://locallyuncensored.com/cloud/">LU Cloud</a>
+    <a href="https://locallyuncensored.com/uncensored-ai-chat-online/">Uncensored AI chat online</a>
+    <a href="https://locallyuncensored.com/uncensored-ai-image-generator-online/">Image generator online</a>
+    <a href="https://locallyuncensored.com/uncensored-ai-video-generator-online/">Video generator online</a>
+    <a href="https://locallyuncensored.com/alternatives/">Alternatives</a>
+    <a href="https://locallyuncensored.com/is-locally-uncensored-safe/">Is it safe?</a>
+    <a href="https://locallyuncensored.com/remote-access/">Remote access</a>
+    <a href="https://locallyuncensored.com/discord" target="_blank" rel="noopener">Discord</a>
+    <a href="https://github.com/PurpleDoubleD/locally-uncensored">GitHub</a>
+    <a href="https://github.com/PurpleDoubleD/locally-uncensored/discussions">Discussions</a>
+    <a href="https://github.com/PurpleDoubleD/locally-uncensored/issues">Issues</a>
+    <a href="https://reddit.com/user/GroundbreakingMall54">Reddit</a>
+    <a href="https://www.linkedin.com/in/david-drobnitza-locallyuncensored/" rel="me noopener" target="_blank">LinkedIn</a>
+    <a href="https://locallyuncensored.com/privacy/">Privacy</a>
+    <a href="https://locallyuncensored.com/terms/">Terms</a>
+    <a href="https://locallyuncensored.com/impressum/">Impressum</a>
+  </div>
+</footer>
+</body>
+</html>
