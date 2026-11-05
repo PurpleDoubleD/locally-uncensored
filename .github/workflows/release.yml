@@ -1698,7 +1698,8 @@ jobs:
           fi
 
           # The ticket is stapled to the app, so the first start works offline.
-          xcrun stapler validate "$app"
+          # Retried: stapler asks Apple's CloudKit, see stapler_retry.
+          bash scripts/macos-release-signing.sh stapler validate "$app"
 
           # The same question put to the signature itself: the requirement
           # `notarized` holds only for code Apple has a ticket for. Unlike
@@ -1755,7 +1756,7 @@ jobs:
       # reach a customer's Mac as an update Gatekeeper then refuses.
       - name: Verify the updater archive holds the same signed, stapled app
         shell: bash
-        timeout-minutes: 5
+        timeout-minutes: 10
         run: |
           set -euo pipefail
           dir="src-tauri/target/release/bundle/macos"
@@ -1767,7 +1768,7 @@ jobs:
           tar -xzf "$archive" -C "$out"
           [ -d "$out/LU.app" ] || { echo "FAIL: the updater archive does not unpack to LU.app" >&2; ls -la "$out" >&2; exit 1; }
           codesign --verify --deep --strict --verbose=2 "$out/LU.app"
-          xcrun stapler validate "$out/LU.app"
+          bash scripts/macos-release-signing.sh stapler validate "$out/LU.app"
           built="$(codesign -dvvv "$dir/LU.app" 2>&1 | awk -F= '/^CDHash=/{print $2}')"
           packed="$(codesign -dvvv "$out/LU.app" 2>&1 | awk -F= '/^CDHash=/{print $2}')"
           echo "CDHash built: $built, in the archive: $packed"
