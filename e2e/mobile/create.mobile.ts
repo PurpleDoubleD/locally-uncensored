@@ -3959,3 +3959,35 @@ test.describe('the keyboard stays open on Create (M1)', () => {
     }
   }
 })
+
+// Discord, mod report of 05.11. (3.0.10): "It has a prompt already loaded and I've tried to change it. Selected just
+// cancels my keyboard." Image, Image to Video and the rest. The same loop as M1, reached from a prompt that is
+// already there: the field is tapped again, the window shrinks by the keyboard, the field was built anew and the
+// old prompt could not be changed. Red on v3.0.8 (focus on BODY, old prompt kept), green since the M1 fix.
+test.describe('a prompt that is already there can be changed (3.0.10)', () => {
+  for (const tool of ['image', 'video', 'animate'] as const) {
+    test(`360x740, ${tool}: select the old prompt and type a new one while the keyboard is open`, async ({ page }) => {
+      await page.setViewportSize({ width: 360, height: 740 })
+      const cloud = new Cloud()
+      await openCreate(page, cloud)
+      if (tool !== 'image') await chooseTool(page, tool)
+      const prompt = tid(page, 'm-create-prompt')
+      await prompt.fill('a cat on a roof at night, rain, neon lights')
+      await prompt.evaluate((n) => (n as HTMLElement).blur())
+
+      await prompt.tap()
+      await prompt.evaluate((n) => ((n as HTMLElement & { kept?: boolean }).kept = true))
+      await page.setViewportSize({ width: 360, height: 440 })
+      await page.waitForTimeout(400)
+      await page.keyboard.press('ControlOrMeta+a')
+      await page.keyboard.type('a dog in the snow')
+
+      const after = await page.evaluate(() => {
+        const el = document.activeElement as (HTMLElement & { kept?: boolean }) | null
+        return { focused: el?.dataset.testid ?? el?.tagName ?? null, same: el?.kept === true }
+      })
+      expect(after).toEqual({ focused: 'm-create-prompt', same: true })
+      await expect(prompt).toHaveValue('a dog in the snow')
+    })
+  }
+})
