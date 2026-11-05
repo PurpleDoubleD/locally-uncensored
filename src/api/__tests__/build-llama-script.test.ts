@@ -650,6 +650,11 @@ describe('build-llama.sh --check: a failed boot leaves no server behind (E1)', {
       const triple = runScript('host_triple').out
       const bin = join(root, 'src-tauri', 'bin')
       execFileSync('mkdir', ['-p', bin])
+      // On a dynamic-ISA triple (x86_64 Linux) check_binary runs the server from
+      // its companion-library folder and stops early when that folder is missing,
+      // before any /health probe. The Mac never takes that branch, the Linux CI
+      // gate did (05.11.2026), so the folder is laid out here for every host.
+      execFileSync('mkdir', ['-p', join(root, 'src-tauri', 'resources', 'llama', triple)])
       const pidFile = join(root, 'server.pid')
       // A server that never answers /health: it only records its PID and waits.
       const fake = join(bin, `lu-llama-server-${triple}`)

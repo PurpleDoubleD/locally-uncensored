@@ -150,7 +150,7 @@ pub fn feature_vector(root: &Path, spec: &SaeSpec, feature: usize) -> Result<sup
     f.seek(SeekFrom::Start((feature * spec.n_embd * 4) as u64)).map_err(|e| crate::os_error::english(&e))?;
     let mut b = vec![0u8; spec.n_embd * 4];
     f.read_exact(&mut b).map_err(|e| crate::os_error::english(&e))?;
-    let row: Vec<f32> = b.chunks_exact(4).map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect();
+    let row: Vec<f32> = b.as_chunks::<4>().0.iter().map(|c| f32::from_le_bytes(*c)).collect();
     let mut cv = super::cvec::ControlVector::new(spec.n_embd);
     cv.layers.insert(spec.layer, row);
     Ok(cv)
@@ -231,7 +231,7 @@ pub fn search(labels: &[Vec<String>], query: &str, limit: usize) -> Vec<Hit> {
 
 pub fn read_i32s(path: &Path) -> Result<Vec<i32>, String> {
     let b = std::fs::read(path).map_err(|_| "The feature data is not downloaded yet.".to_string())?;
-    Ok(b.chunks_exact(4).map(|c| i32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect())
+    Ok(b.as_chunks::<4>().0.iter().map(|c| i32::from_le_bytes(*c)).collect())
 }
 
 #[cfg(test)]
