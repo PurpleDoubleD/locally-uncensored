@@ -15,16 +15,20 @@ unmaintained = "workspace"
 unsound = "workspace"
 yanked = "deny"
 ignore = [
-    # zip 4.6.1, pulled in by tauri-plugin-updater 2.10.1 (the newest 2.x).
+    # zip 4.6.1, pulled in by tauri-plugin-updater (2.12.0 today, the newest 2.x).
     # Our own zip dependency is on 9.x and not affected. The updater only
     # unpacks on Windows, and only an archive whose minisign signature it has
     # already checked against the key in tauri.conf.json, so the archive
-    # cannot come from anyone but our release workflow. The three advisories
-    # are about Unix permission bits and symlinks on extraction. Drop these
-    # lines when the updater moves to zip >= 9.
+    # cannot come from anyone but our release workflow (updater.rs: download()
+    # verifies the signature, install() extracts afterwards). The first three
+    # advisories are about Unix permission bits and symlinks on extraction;
+    # RUSTSEC-2026-0429 (05.11.2026) is an abort on a symlink entry with a
+    # huge declared size, i.e. a crash, again only from an archive we signed.
+    # Drop these lines when the updater moves to zip >= 9.
     { id = "RUSTSEC-2026-0367", reason = "zip 4.x inside tauri-plugin-updater, signed archives only, see comment" },
     { id = "RUSTSEC-2026-0368", reason = "zip 4.x inside tauri-plugin-updater, signed archives only, see comment" },
     { id = "RUSTSEC-2026-0369", reason = "zip 4.x inside tauri-plugin-updater, signed archives only, see comment" },
+    { id = "RUSTSEC-2026-0429", reason = "zip 4.x inside tauri-plugin-updater, signed archives only, see comment" },
 ]
 
 [licenses]
