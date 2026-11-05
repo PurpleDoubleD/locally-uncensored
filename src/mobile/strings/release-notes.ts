@@ -21,13 +21,13 @@ type NoteItem =
   | {
       text: string
       /** The line is about a feature that only exists where this switch is on. */
-      needs?: 'remoteDesktop' | 'externalProviders'
+      needs?: 'remoteDesktop' | 'remoteCreate' | 'externalProviders'
       /** The same line for a build that must not speak of prices (switch pricingWords). */
       unpriced?: string
     }
 
 /** Pure: the lines of a note as a build with this policy shows them. */
-export function noteItems(items: readonly NoteItem[], policy: Pick<StorePolicy, 'remoteDesktop' | 'externalProviders' | 'pricingWords'>): string[] {
+export function noteItems(items: readonly NoteItem[], policy: Pick<StorePolicy, 'remoteDesktop' | 'remoteCreate' | 'externalProviders' | 'pricingWords'>): string[] {
   const out: string[] = []
   for (const item of items) {
     if (typeof item === 'string') out.push(item)
@@ -48,6 +48,16 @@ function note(version: string, headline: string, items: readonly NoteItem[]): Mo
 }
 
 export const MOBILE_RELEASE_NOTES: readonly MobileReleaseNote[] = [
+  // 3.0.10 is the next phone app after 3.0.7 (3.0.8 and 3.0.9 shipped none): what came since then.
+  note('3.0.10', 'What changed since 3.0.7.', [
+    {
+      text: 'Chats on your computer: a chat you share there with "Continue on phone" shows up under Remote desktop. Write in it, start a new one in Chat, Agent or Code, and allow or deny its tools from here.',
+      needs: 'remoteDesktop',
+    },
+    { text: 'Create on your computer has all its tools, its gallery under "On my computer", an area to paint for edits and your trained characters.', needs: 'remoteCreate' },
+    'On Android the keyboard stays open in the Create prompt, so a prompt that is already there can be changed.',
+    'A character training you stop is no longer reported as trained.',
+  ]),
   // 3.0.7 is the first version the phone app ships with (the desktop of 3.0.5 and 3.0.6 had no phone app).
   note('3.0.7', 'LU is on your phone.', [
     'Chat with models that run on this phone. No connection needed, and such a chat is not sent to any server.',

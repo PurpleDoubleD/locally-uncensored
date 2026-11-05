@@ -11,7 +11,7 @@ import { describe, expect, it } from 'vitest'
 import { readdirSync, readFileSync } from 'fs'
 import { dirname, join } from 'path'
 import { fileURLToPath } from 'url'
-import { MOBILE_RELEASE_NOTES } from '../strings/release-notes'
+import { mobileReleaseNoteFor } from '../strings/release-notes'
 
 const DIR = join(dirname(fileURLToPath(import.meta.url)), '../strings')
 
@@ -28,7 +28,7 @@ describe('what the app says about data leaving the phone', () => {
   })
 
   it('the first release note and the welcome page say the narrow thing that is true', () => {
-    expect(MOBILE_RELEASE_NOTES[0].items[0]).toBe('Chat with models that run on this phone. No connection needed, and such a chat is not sent to any server.')
+    expect(mobileReleaseNoteFor('3.0.7')?.items[0]).toBe('Chat with models that run on this phone. No connection needed, and such a chat is not sent to any server.')
     expect(readFileSync(join(DIR, 'models.ts'), 'utf8')).toContain('then chat without a connection. A chat with a model on this phone is not sent to any server.')
   })
 

@@ -1648,7 +1648,7 @@ for (const size of SIZES) {
       await page.getByTestId('m-settings-about-whats-new').tap()
       await expect(page.getByTestId('m-whats-new-screen')).toBeVisible()
       await expect(page.getByTestId('m-whats-new-version')).toHaveText(`Version ${version.split(' ')[0]}`)
-      await expect(page.getByTestId('m-whats-new-notes')).toContainText('LU is on your phone.')
+      await expect(page.getByTestId('m-whats-new-notes')).toContainText('What changed since 3.0.7.')
       await expectClean(page)
       await page.getByTestId('m-whats-new-got-it').tap()
       await expect(page.getByTestId('m-whats-new-screen')).toHaveCount(0)
