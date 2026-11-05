@@ -30,7 +30,7 @@ import { CLOUD_BASE } from '../api/cloud/config'
 // In-memory we always hold the OBFUSCATED form so the sync getters
 // (getProviderApiKey / getEnabledProviders) are identical on every platform.
 
-function obfuscate(key: string): string {
+export function obfuscate(key: string): string {
   if (!key) return ''
   try {
     return btoa(key.split('').reverse().join(''))

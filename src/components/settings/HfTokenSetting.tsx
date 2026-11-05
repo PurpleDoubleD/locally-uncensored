@@ -16,8 +16,9 @@
  */
 import { useEffect, useState } from 'react'
 import { KeyRound, Check } from 'lucide-react'
-import { secretGet, secretSet, openExternal } from '../../api/backend'
-import { applyHfToken, HF_TOKEN_ACCOUNT } from '../../api/mlx-image'
+import { openExternal } from '../../api/backend'
+import { applyHfToken } from '../../api/mlx-image'
+import { loadHfToken, saveHfToken } from '../../lib/hf-token-store'
 
 /** Where Hugging Face issues tokens. A read token is enough. */
 export const HF_TOKEN_PAGE = 'https://huggingface.co/settings/tokens'
@@ -30,7 +31,7 @@ export function HfTokenSetting() {
 
   useEffect(() => {
     void (async () => {
-      const value = await secretGet(HF_TOKEN_ACCOUNT).catch(() => null)
+      const value = await loadHfToken()
       if (!value) return
       setDraft(value)
       setStored(true)
@@ -40,7 +41,7 @@ export function HfTokenSetting() {
   async function commit(value: string) {
     setError(null)
     try {
-      await secretSet(HF_TOKEN_ACCOUNT, value)
+      await saveHfToken(value)
       await applyHfToken(value)
       setDraft(value)
       setStored(value.length > 0)
