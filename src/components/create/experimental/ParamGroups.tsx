@@ -5,7 +5,7 @@ import { useCreateStore } from '../../../stores/createStore'
 import { useCreateExp } from './CreateContext'
 import { cloudModelById, defaultCloudModel } from '../../../stores/cloudCatalogStore'
 import { classifyModel } from '../../../api/comfyui'
-import { editIgnoresStrength } from '../../../lib/edit-references'
+import { readsEditStrength } from '../../../lib/edit-references'
 import { latentDownscale, nativeHiresFinalSize, type HiresUpscaleMethod } from '../../../api/hires-fix'
 import { isMlxImageHost } from '../../../api/mlx-image'
 import { macHiresPass } from '../../../lib/mac-hires'
@@ -16,6 +16,7 @@ import { openMlxLoraFolder, mlxLoraAlphaNote, mlxLoraRefusal } from '../../../ap
 import { MLX_VIDEO_MIN_FRAMES, mlxFramesOnGrid, mlxVideoLaneEntry, mlxVideoMaxFrames, mlxVideoRunSize } from '../../../api/mlx-video'
 import { INTENT_MAP } from './intents'
 import { SAMPLERS as SAMPLERS_FALLBACK, SCHEDULERS as SCHEDULERS_FALLBACK } from './badges'
+import { samplerOptions, schedulerOptions } from '../../../lib/sampler-names'
 import { Section } from '../ui/Section'
 import { Slider } from '../ui/Slider'
 import { Select } from '../ui/Select'
@@ -27,11 +28,15 @@ import { HINWEIS_TEXT } from '../../../lib/hinweis'
 import { filterLoraRows, loraCopyText, lorasForRun, loraRows } from '../../../lib/lora-stack'
 import { loraStackView, setLoraStackQuery, setLoraStackScroll } from './loraStackView'
 import { LoraStrength } from './LoraStrength'
+import { LoraOrder } from './LoraOrder'
+import { cfgHint, loraStrengthHint } from '../../../lib/param-hints'
 import { MOTION_OWN_WORKFLOW_NOTE, useMotionOwnWorkflow } from './motionWorkflow'
 import { supportsTransparent } from '../../../lib/transparent-image'
+import { isQwenImage21Turbo } from '../../../lib/render/qwen21-turbo'
 import { QWEN_ENCODER_HELP, pickQwenEncoder, qwenEncoderOptions, type QwenEncoderVariant } from '../../../lib/render/qwen-text-encoder'
 import { MAX_SHOTS, MAX_SHOT_CHARS, supportsMultishot } from '../../../lib/ltx-multishot'
 import { frameRangeFor, framesOnRange, lengthHint } from '../../../lib/video-length'
+import { LongVideoControls } from './LongVideoControls'
 import { useMacMemoryGb } from '../../../lib/mac-memory'
 
 // Video families whose dynamic-workflow strategy actually wires a LoRA node:
@@ -109,7 +114,8 @@ export function ParamGroups() {
     : !isCloud && !laneWithoutLoras && (!isVideo || VIDEO_LORA_FAMILIES.has(classifyModel(s.videoModel)))
   // GH #146: the count is what a run sends, the same rule useCreate applies.
   const laneType = (isVideo ? s.videoModelList : s.imageModelList).find((m) => m.name === laneModel)?.type ?? classifyModel(laneModel)
-  const activeLoras = lorasForRun(s.selectedLoras, loraList, laneType).use.length
+  const runLoras = lorasForRun(s.selectedLoras, loraList, laneType).use
+  const activeLoras = runLoras.length
   const stackRows = loraRows(loraList, s.selectedLoras, laneType)
   // The search and the scroll position outlive the drawer (loraStackView.ts).
   const [loraQuery, setLoraQuery] = useState(() => loraStackView().query)
@@ -167,6 +173,10 @@ export function ParamGroups() {
   const showSteps = !(isCloud && isVideo) && !ownSampling && (!macVideo || macSteps) && !macMusic
   const showSize = !isAudio && (!macVideo || macSize)
   const showCfg = isCloud ? cloudModelById(cloudModelId)?.cfg === true : !ownSampling && !macVideo && !macMusic
+  // Qwen-Image 2.1 Turbo on ComfyUI runs the eight step schedule of its
+  // official template (lib/render/qwen21-turbo): a line says which sliders
+  // reach it. The Mac's Turbo pack is another model and hides the sliders.
+  const qwenTurbo = !isCloud && !isVideo && !isMlxLocal && isQwenImage21Turbo(laneModel)
   // Native HiRes rewrites the local ComfyUI image graph: text to image, and
   // since 3.0.8 Edit too (Discord feature request 21.10.2026). It has no
   // cloud or video path, so keep the control honest and scoped to the lanes
@@ -232,6 +242,8 @@ export function ParamGroups() {
   // its LoRAs too. The real values are in Workflow parameters below.
   const motionWorkflow = useMotionOwnWorkflow() !== null
 
+  const cfgNote = cfgHint(laneType, s.cfgScale)
+
   const samplers = samplerList.length ? samplerList : SAMPLERS_FALLBACK
   const schedulers = schedulerList.length ? schedulerList : SCHEDULERS_FALLBACK
   const vaes = vaeList.length ? vaeList : ['auto']
@@ -248,6 +260,14 @@ export function ParamGroups() {
       >
         {showSteps && <Slider label="Steps" min={1} max={macVideo ? (macClip?.maxSteps ?? 60) : 60} step={1} value={s.steps} onChange={s.setSteps} />}
         {showCfg && <Slider label={isVideo ? 'Guidance' : 'CFG scale'} min={0} max={30} step={0.5} value={s.cfgScale} onChange={s.setCfgScale} format={(v) => v.toFixed(1)} />}
+        {qwenTurbo && (
+          <p className="t-micro text-gray-500" data-testid="qwen21-turbo-hint">
+            Turbo runs its own 8-step schedule at CFG 1. Steps, sampler and scheduler are not used.
+            {s.cfgScale > 1 && ` CFG ${s.cfgScale.toFixed(1)} is above the 1 Turbo is made for and can overcook it.`}
+          </p>
+        )}
+        {/* B50: far above what the model takes, a note with the range that works. It never blocks. */}
+        {showCfg && !isVideo && cfgNote && <p className={`t-micro ${HINWEIS_TEXT.ruhig}`} data-testid="cfg-hint">{cfgNote}</p>}
         {showSize && (macSize && macClip ? (
           // The Mac: the model's grid and bounds. What runs is said below.
           <div className="grid grid-cols-2 gap-2">
@@ -432,6 +452,11 @@ export function ParamGroups() {
             {framesHint && (
               <p className="col-span-2 t-micro text-gray-500" data-testid="video-length-hint">{framesHint}</p>
             )}
+            {!isCloud && (
+              <div className="col-span-2">
+                <LongVideoControls model={laneModel} intent={meta.id} />
+              </div>
+            )}
           </div>
         )}
         {macClip && (
@@ -461,21 +486,22 @@ export function ParamGroups() {
             rather than let the user tune a control that's silently dropped. */}
         {!isCloud && !isMlxLocal && (
           <>
-            <Field label="Sampler" help="The algorithm that turns noise into your image. dpmpp_2m / euler are safe all-rounders.">
-              <Select size="sm" options={samplers.map((x) => ({ value: x, label: x }))} value={s.sampler} onChange={s.setSampler} />
+            <Field label="Sampler" help="The algorithm that turns noise into your image. DPM++ 2M / Euler are safe all-rounders.">
+              <Select size="sm" searchable ariaLabel="Sampler" options={samplerOptions(samplers)} value={s.sampler} onChange={s.setSampler} />
             </Field>
-            <Field label="Scheduler" help="How the denoise steps are spaced. karras is a good default for SDXL; simple for FLUX.">
-              <Select size="sm" options={schedulers.map((x) => ({ value: x, label: x }))} value={s.scheduler} onChange={s.setScheduler} />
+            <Field label="Scheduler" help="How the denoise steps are spaced. Karras is a good default for SDXL; Simple for FLUX.">
+              <Select size="sm" searchable ariaLabel="Scheduler" options={schedulerOptions(schedulers)} value={s.scheduler} onChange={s.setScheduler} />
             </Field>
           </>
         )}
 
-        {isEdit && !isMlxLocal && !(!isCloud && editIgnoresStrength(laneType, laneModel)) && (
+        {isEdit && !isMlxLocal && !(!isCloud && readsEditStrength(laneType, laneModel)) && (
           <Slider label="Denoise (raw)" min={0.05} max={1} step={0.05} value={s.denoise} onChange={s.setDenoise} format={(v) => v.toFixed(2)} />
         )}
-        {macEdit && (
+        {(macEdit || (isEdit && !isCloud && readsEditStrength(laneType, laneModel))) && (
           // 1.00 is the edit from the prompt alone, as before. Lower starts
-          // from the image and keeps more of it.
+          // from the image and keeps more of it. A Qwen edit through ComfyUI
+          // reads the same field (B46).
           <Slider label="Edit strength" min={0.05} max={1} step={0.05} value={s.editStrength} onChange={s.setEditStrength} format={(v) => v.toFixed(2)} />
         )}
         {meta.allowsMask && !isCloud && (
@@ -512,6 +538,7 @@ export function ParamGroups() {
               </button>
               </div>
             </div>
+            <LoraOrder picks={runLoras} labelOf={(name) => stackRows.find((r) => r.name === name)?.label ?? name} />
             {loraList.length === 0 ? (
               isMlxLocal
                 ? <div className="t-control text-gray-600">No LoRAs found yet. Put .safetensors files into the LoRA folder (Open folder) and hit Rescan, or get one under Models, LoRAs.</div>
@@ -584,6 +611,7 @@ export function ParamGroups() {
                 // the strength set here on Qwen-Image 2.1, and says so where
                 // the strength is set.
                 const alphaNote = isMlxLocal && laneType === 'qwenimage' ? mlxLoraAlphaNote(loraAlpha?.[name]) : null
+                const strengthNote = active ? loraStrengthHint(file, active.strength) : null
                 return (
                   <div key={name} className={cn('rounded-md border transition-colors', active ? 'border-white/15 bg-white/[0.06]' : 'border-white/[0.06]')}>
                     <div className="flex items-stretch">
@@ -597,6 +625,7 @@ export function ParamGroups() {
                       <div className="px-2.5 pb-2">
                         <LoraStrength name={label} value={active.strength} onChange={(v) => s.setLoraStrengthFor(name, v)} />
                         {alphaNote && <p className="mt-1.5 t-micro text-gray-500" data-testid="lora-alpha-note">{alphaNote}</p>}
+                        {strengthNote && <p className={`mt-1.5 t-micro ${HINWEIS_TEXT.ruhig}`} data-testid="lora-strength-hint">{strengthNote}</p>}
                       </div>
                     )}
                   </div>

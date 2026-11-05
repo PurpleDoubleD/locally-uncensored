@@ -81,6 +81,33 @@ class LlmExtra(_Strict):
         return _no_reserved_fields(value, "extra")
 
 
+class SpeechEndpoint(_Strict):
+    """An OpenAI-compatible speech service the session hears or speaks through.
+
+    Set by the app when the user picked "External HTTP" or "LU Engine" for
+    dictation or read-aloud (N1, Liquid LFM3 Audio): Ollama and llama-server
+    both take a WAV at /v1/audio/transcriptions, and speak at
+    /v1/audio/speech (Ollama) or /tts (llama-server). Without it the session
+    keeps its own Whisper and Pocket TTS.
+    """
+
+    url: str = Field(max_length=2048)
+    model: str = Field(min_length=1, max_length=512)
+    # None lets the service speak in the model's own voice.
+    voice: str | None = Field(default=None, max_length=100)
+    api_key: SecretStr | None = None
+
+    @field_validator("url")
+    @classmethod
+    def _http_url(cls, value: str) -> str:
+        parts = urlsplit(value)
+        if parts.scheme not in ("http", "https") or not parts.hostname:
+            raise ValueError("url must be an http or https URL")
+        if parts.username or parts.password:
+            raise ValueError("url must not contain credentials, use api_key")
+        return value
+
+
 class ThinkingConfig(_Strict):
     """How a session deals with a model that reasons before it answers."""
 
@@ -159,6 +186,10 @@ class SessionConfig(_Strict):
     # Thoughts are never spoken, with or without this. It adds the limit and
     # the fields of the second try.
     thinking: ThinkingConfig = Field(default_factory=ThinkingConfig)
+    # Hear through this service instead of the built-in Whisper.
+    stt: SpeechEndpoint | None = None
+    # Speak through this service instead of the built-in Pocket TTS.
+    tts: SpeechEndpoint | None = None
 
     @model_validator(mode="after")
     def _tools_consistent(self) -> "SessionConfig":

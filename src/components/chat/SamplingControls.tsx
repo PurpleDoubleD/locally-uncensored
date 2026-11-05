@@ -6,9 +6,11 @@ import { useChatStore } from '../../stores/chatStore'
 import { useAgentModeStore } from '../../stores/agentModeStore'
 import { HINWEIS_TEXT } from '../../lib/hinweis'
 import { useDismissOnEscape } from '../../hooks/useDismissOnEscape'
-import { SAMPLING_DEFAULTS, TEMPERATURE_MAX, AGENT_TEMPERATURE_MAX, effectiveSampling, samplingIsChanged, hasOwnSampling, isHighTemperature } from '../../lib/sampling'
+import { SAMPLING_DEFAULTS, TEMPERATURE_MAX, AGENT_TEMPERATURE_MAX, TEMPERATURE_HELP, TEMPERATURE_HELP_LABEL, effectiveSampling, samplingIsChanged, hasOwnSampling, isHighTemperature } from '../../lib/sampling'
 import { resetTemperatureToDefault } from '../../lib/temperature-reset'
 import { HighTemperatureWarning } from './HighTemperatureWarning'
+import { HelpMark } from '../ui/HelpMark'
+import { CustomParamsEditor, CUSTOM_PARAMS_LABEL } from './CustomParamsEditor'
 import type { SamplingOverrides } from '../../lib/sampling'
 import { isGroupChat } from '../../lib/group-chat'
 import { speakerSamplingLines, type SpeakerSamplingLine } from '../../lib/speaker-sampling-lines'
@@ -162,10 +164,11 @@ function ThinkBudgetRow() {
 
 export function SamplingControls() {
   const [open, setOpen] = useState(false)
+  const [tempHelp, setTempHelp] = useState(false)
   const [draft, setDraft] = useState<string | null>(null)
   const wrapRef = useRef<HTMLDivElement>(null)
   const panelRef = useRef<HTMLDivElement>(null)
-  const lage = usePopoverPlatz(panelRef, open, { bevorzugt: 'oben', abstand: 6 })
+  const lage = usePopoverPlatz(panelRef, open, { bevorzugt: 'oben', abstand: 6, breiteDeckeln: true })
   const panelId = useId()
   const settings = useSettingsStore((s) => s.settings)
   const activeId = useChatStore((s) => s.activeConversationId)
@@ -177,6 +180,13 @@ export function SamplingControls() {
       : undefined
   )
   const setSampling = useChatStore((s) => s.setConversationSampling)
+  // GH #198: this chat's own custom rows.
+  const customRows = useChatStore((s) =>
+    s.activeConversationId
+      ? s.conversations.find((c) => c.id === s.activeConversationId)?.customParams
+      : undefined
+  )
+  const setCustomRows = useChatStore((s) => s.setConversationCustomParams)
   const agentMode = useAgentModeStore((s) => (activeId ? s.agentModeActive[activeId] === true : false))
   const resetSampling = useChatStore((s) => s.resetConversationSampling)
   // GH #175: who speaks in this chat, and which persona preset holds for
@@ -195,7 +205,7 @@ export function SamplingControls() {
   useProviderStore((s) => s.openaiEntries)
   const lines: SpeakerSamplingLine[] = speakerSamplingLines({
     settings,
-    conv: { personaId, systemPrompt: keptPrompt, personaEnabled, groupModels, groupPersonas, sampling: overrides },
+    conv: { personaId, systemPrompt: keptPrompt, personaEnabled, groupModels, groupPersonas, sampling: overrides, customParams: customRows },
     activeModel,
     personas,
     activePersonaId,
@@ -210,13 +220,13 @@ export function SamplingControls() {
   const sliderPreset = isGroupChat(groupModels) ? undefined : lines[0]?.preset
 
   const value = effectiveSampling(settings, overrides, sliderPreset)
-  const changed = samplingIsChanged(settings, overrides, sliderPreset)
+  const changed = samplingIsChanged(settings, overrides, sliderPreset) || (customRows?.length ?? 0) > 0
   // F1 (review-w2ui.md, 18.09.2026): Reset only deletes THIS chat's own
   // override, so it must go by whether one exists, not by whether the
   // EFFECTIVE value differs from the shipped default (`changed` above): that
   // is also true when only the Settings page moved and this chat never
   // touched its own slider, and Reset then has nothing to delete.
-  const ownSampling = hasOwnSampling(overrides)
+  const ownSampling = hasOwnSampling(overrides) || (customRows?.length ?? 0) > 0
   const write = (patch: SamplingOverrides) => {
     if (activeId) setSampling(activeId, patch)
   }
@@ -352,8 +362,20 @@ export function SamplingControls() {
           </div>
 
           {FIELDS.map((f) => (
-            <label key={f.key} className="flex items-center gap-2">
-              <span className="w-20 shrink-0 text-gray-400">{f.label}</span>
+            <div key={f.key}>
+            <label className="flex items-center gap-2">
+              <span className="w-20 shrink-0 flex items-center gap-1 text-gray-400">
+                {f.label}
+                {f.key === 'temperature' && (
+                  <HelpMark
+                    text={TEMPERATURE_HELP}
+                    label={TEMPERATURE_HELP_LABEL}
+                    open={tempHelp}
+                    onToggle={() => setTempHelp((v) => !v)}
+                    testId="temperature-help"
+                  />
+                )}
+              </span>
               <input
                 type="range"
                 className="min-w-0 flex-1"
@@ -366,6 +388,10 @@ export function SamplingControls() {
               />
               <span className="w-10 shrink-0 text-right tabular-nums text-gray-300">{value[f.key]}</span>
             </label>
+            {f.key === 'temperature' && tempHelp && (
+              <p className="mt-1 leading-relaxed text-gray-500" data-testid="temperature-help-text">{TEMPERATURE_HELP}</p>
+            )}
+            </div>
           ))}
 
           <HighTemperatureWarning
@@ -402,6 +428,17 @@ export function SamplingControls() {
           </label>
 
           <ThinkBudgetRow />
+
+          <div className="space-y-1 border-t border-gray-700/50 pt-1.5">
+            <div className="text-gray-400">{CUSTOM_PARAMS_LABEL}</div>
+            <CustomParamsEditor
+              rows={customRows ?? []}
+              onChange={(rows) => { if (activeId) setCustomRows(activeId, rows) }}
+              inherited={!isGroupChat(groupModels) && lines[0]?.personaCustom?.length
+                ? { source: lines[0].source.replace(/^Persona /, 'persona '), rows: lines[0].personaCustom }
+                : undefined}
+            />
+          </div>
 
           {lines.length > 0 && (
             <div data-testid="sampling-speakers" className="space-y-1 border-t border-gray-700/50 pt-1.5">

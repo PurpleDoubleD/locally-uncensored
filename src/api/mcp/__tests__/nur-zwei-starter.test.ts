@@ -65,7 +65,14 @@ describe('was das Hauptfenster starten darf', () => {
     // Der Shim gehoert dazu, nicht als dritter Starter: unter Windows gibt es
     // npx nur als npx.cmd, und Rusts spawn findet .exe vom blanken Namen, aber
     // nie .cmd.
-    expect(erlaubteBefehle().sort()).toEqual(['npx', 'npx.cmd', 'uvx'])
+    //
+    // uvx steht dreimal da, als ein Programm: der blanke Name (uv liefert
+    // unter Windows uvx.exe), ein Shim, wo jemand einen gebaut hat, und der
+    // feste Ort des offiziellen Installers fuer ein LU mit altem PATH
+    // (Discord 27.10.2026, siehe uvx-unter-windows.test.ts).
+    expect(erlaubteBefehle().sort()).toEqual(
+      ['$HOME/.local/bin/uvx.exe', 'npx', 'npx.cmd', 'uvx', 'uvx.cmd'],
+    )
   })
 
   it('kein allgemeiner Interpreter und keine Containerlaufzeit', () => {
@@ -81,7 +88,9 @@ describe('was das Hauptfenster starten darf', () => {
     // Zwei Listen fuer dieselbe Sache sind das teuerste Muster im Haus. Die
     // Capability ist die Wahrheit, MCP_STARTER die Kopie fuer die Meldung, und
     // dieser Fall ist die Klammer dazwischen.
-    const ohneShim = [...new Set(erlaubteBefehle().map((c) => c.replace(/\.cmd$/, '')))].sort()
+    const ohneShim = [...new Set(erlaubteBefehle().map(
+      (c) => c.replace(/^.*[\\/]/, '').replace(/\.(cmd|exe)$/, ''),
+    ))].sort()
     expect([...MCP_STARTER].sort()).toEqual(ohneShim)
   })
 })

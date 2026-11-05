@@ -126,21 +126,21 @@ describe('the number field', () => {
 })
 
 describe('the slider next to it', () => {
-  it('covers the usual 0 to 2 in steps of 0.05 and writes into the same value', () => {
+  it('covers -2 to 2 in steps of 0.05 and writes into the same value', () => {
     render(<Harness />)
-    expect([slider().min, slider().max, slider().step]).toEqual(['0', '2', '0.05'])
+    expect([slider().min, slider().max, slider().step]).toEqual(['-2', '2', '0.05'])
     fireEvent.change(slider(), { target: { value: '1.35' } })
     expect(seen.at(-1)).toBe(1.35)
     expect(field().value).toBe('1.35')
   })
 
-  it('rests at its end when the typed value is beyond it, the field keeps the truth', () => {
+  it('widens to a value beyond it (D4b), the field keeps the truth', () => {
     render(<Harness start={-6} />)
-    expect(slider().value).toBe('0')
+    expect([slider().min, slider().max, slider().value]).toEqual(['-6', '6', '-6'])
     expect(field().value).toBe('-6.00')
     cleanup()
     render(<Harness start={8} />)
-    expect(slider().value).toBe('2')
+    expect([slider().min, slider().max, slider().value]).toEqual(['-8', '8', '8'])
     expect(field().value).toBe('8.00')
   })
 })

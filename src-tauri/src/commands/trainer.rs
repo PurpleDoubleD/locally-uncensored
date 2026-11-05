@@ -31,7 +31,7 @@ use std::process::{Command, Stdio};
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 use tauri::{Manager, State};
-use tracing::info;
+use tracing::{info, warn};
 
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
@@ -141,6 +141,13 @@ impl TrainPreset {
         }
     }
 
+    /// `--network_alpha`, the same as the rank. musubi's default is 1, which
+    /// scales the LoRA by 1/rank: at 1e-4 a 600-step style run on the 3060
+    /// drew no style at strength 1.0 (3.0.9 P8 box run).
+    pub(crate) fn network_alpha(self) -> &'static str {
+        self.network_dim()
+    }
+
     /// `--gradient_checkpointing_cpu_offload` (needs `--gradient_checkpointing`,
     /// which every recipe sets).
     pub(crate) fn offloads_activations(self) -> bool {
@@ -159,6 +166,49 @@ impl TrainPreset {
         match self {
             TrainPreset::Standard => "Normal",
             TrainPreset::LowVram => "Low VRAM",
+        }
+    }
+}
+
+/// 3.0.9 P8: what a run learns. Both kinds run the same recipe on the same
+/// bases; the frontend writes the captions (`lib/train-kind.ts`), so the
+/// kind only decides the file name, the closing line and whether the set's
+/// photos become a character's reference images.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TrainKind {
+    Character,
+    Style,
+}
+
+impl TrainKind {
+    /// `"style"` from the frontend; anything else, a missing value from an
+    /// older frontend included, is a character.
+    pub(crate) fn from_arg(arg: Option<&str>) -> Self {
+        match arg.map(str::trim) {
+            Some("style") => TrainKind::Style,
+            _ => TrainKind::Character,
+        }
+    }
+
+    /// The trained file's stem. `char_<name>_zimage` is what the Use shelf
+    /// reads (`parseLocalCharacterLora`); a style must not land there.
+    pub(crate) fn output_name(self, name: &str) -> String {
+        match self {
+            TrainKind::Character => format!("char_{name}_zimage"),
+            TrainKind::Style => format!("style_{name}_zimage"),
+        }
+    }
+
+    pub(crate) fn finished_line(self, file: &str, at: &Path, trigger: &str) -> String {
+        match self {
+            TrainKind::Character => format!(
+                "Character ready: {file} is saved at {} and already in the LoRA picker on the Image tab. Put '{trigger}' in a prompt with the LoRA active.",
+                at.display(),
+            ),
+            TrainKind::Style => format!(
+                "Style ready: {file} is saved at {} and switched on in the LoRA picker on the Image tab. Set its strength there.",
+                at.display(),
+            ),
         }
     }
 }
@@ -504,7 +554,18 @@ fn repo_dir(root: &Path) -> PathBuf {
     root.join("musubi-tuner")
 }
 
+/// A line LU itself says about the setup or a run. It also goes to the log
+/// file: C31 (Discord, 03.11.2026) sent a log that ended at "character
+/// trainer install start", because every later step, the Python LU picked
+/// and the final error lived only in this in-memory list.
 fn push_log(state: &Arc<Mutex<crate::state::InstallState>>, msg: &str) {
+    info!("trainer: {msg}");
+    push_child_line(state, msg);
+}
+
+/// A line a child process printed (pip, musubi, tqdm). Only the panel shows
+/// these; in the log file a training run would be thousands of progress lines.
+fn push_child_line(state: &Arc<Mutex<crate::state::InstallState>>, msg: &str) {
     if let Ok(mut s) = state.lock() {
         s.logs.push(msg.to_string());
         if s.logs.len() > 400 {
@@ -515,6 +576,13 @@ fn push_log(state: &Arc<Mutex<crate::state::InstallState>>, msg: &str) {
 }
 
 fn set_status(state: &Arc<Mutex<crate::state::InstallState>>, status: &str, msg: &str) {
+    // The headline, the error with its "Last steps" tail included, goes to
+    // the log file too (C31, see push_log).
+    if status == "error" {
+        warn!("trainer {status}: {msg}");
+    } else {
+        info!("trainer {status}: {msg}");
+    }
     if let Ok(mut s) = state.lock() {
         s.status = status.to_string();
         s.phase = msg.to_string();
@@ -633,10 +701,87 @@ pub(crate) fn active_comfy_dir(state: &AppState) -> Option<PathBuf> {
 /// commonly has a second card for the screen), but that is a plausible read
 /// of the report, not a measurement; see the question drafted in
 /// `lu-301/bau/trainer.md`.
+///
+/// C31 (Discord, 03.11.2026, Windows): `PYTHONHOME` and `PYTHONPATH` are
+/// dropped on Windows, the way LU's own Python (`private_python`) already
+/// does. A `PYTHONHOME` left on a removed Python, or one LU still carries
+/// from before the user changed it, makes every Python LU starts die with
+/// "init_fs_encoding" and exit code 1, while the same Python runs fine in a
+/// new cmd window. The trainer then found "none that starts" on a machine
+/// with 3.11 and 3.12. Trainer children only: ComfyUI keeps its own rules.
 fn trainer_child_env(cmd: &mut Command) {
     cmd.env("PYTHONIOENCODING", "utf-8");
     cmd.env("PYTHONUTF8", "1");
     cmd.env("USE_LIBUV", "0");
+    #[cfg(target_os = "windows")]
+    cmd.env_remove("PYTHONHOME").env_remove("PYTHONPATH");
+}
+
+/// Version and architecture of an interpreter as the trainer starts it, or
+/// why it did not answer. Until C31 this was `python::python_version_and_arch`
+/// (and `python_version` off Windows); now it is asked with `trainer_child_env`, and a failure keeps its exit code and
+/// stderr: before C31 a Python that did not start was dropped without a
+/// line, so "this machine has none that starts" never said which Pythons LU
+/// had tried or why they failed. `arch_ok` is always true off Windows, where
+/// the trainer does not check the architecture.
+fn trainer_python_probe(exe: &str) -> Result<(String, bool), String> {
+    let mut cmd = crate::python::python_command(exe);
+    trainer_child_env(&mut cmd);
+    cmd.args([
+        "-c",
+        "import struct,platform,sys;print('%d.%d.%d'%sys.version_info[:3]);print(struct.calcsize('P')*8);print(platform.machine())",
+    ]);
+    let out = cmd.output().map_err(|e| format!("it could not be started: {}", os_error::english(&e)))?;
+    if !out.status.success() {
+        return Err(probe_failure_detail(out.status.code(), &String::from_utf8_lossy(&out.stderr)));
+    }
+    let text = String::from_utf8_lossy(&out.stdout);
+    let mut lines = text.lines();
+    let version = lines.next().unwrap_or("").trim().to_string();
+    if version.is_empty() {
+        return Err("it printed no version".to_string());
+    }
+    #[cfg(target_os = "windows")]
+    let arch_ok = {
+        let bits: u32 = lines.next().and_then(|l| l.trim().parse().ok()).unwrap_or(0);
+        crate::python::is_trainer_arch(bits, lines.next().unwrap_or("").trim())
+    };
+    #[cfg(not(target_os = "windows"))]
+    let arch_ok = true;
+    Ok((version, arch_ok))
+}
+
+/// "exit code 1: Fatal Python error: init_fs_encoding: ..." from a probe
+/// that failed. The line that names the failure, not simply the last one:
+/// a Python that dies during start-up ends its stderr with
+/// "Current thread ... <no Python frame>", which says nothing.
+pub(crate) fn probe_failure_detail(code: Option<i32>, stderr: &str) -> String {
+    let lines: Vec<&str> = stderr.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
+    let line = lines
+        .iter()
+        .find(|l| l.starts_with("Fatal Python error"))
+        .or_else(|| lines.iter().rev().find(|l| l.contains("Error")))
+        .or_else(|| lines.last())
+        .map(|l| l.chars().take(200).collect::<String>());
+    let code = code.map_or("no exit code".to_string(), |c| format!("exit code {c}"));
+    match line {
+        Some(l) => format!("{code}: {l}"),
+        None => code,
+    }
+}
+
+/// One line when LU itself carries `PYTHONHOME` or `PYTHONPATH`, which
+/// `trainer_child_env` drops for the trainer's Pythons: the log then says
+/// what was set, and that a Python failing elsewhere may be this.
+#[cfg(target_os = "windows")]
+fn python_env_note() -> Option<String> {
+    let set: Vec<String> = ["PYTHONHOME", "PYTHONPATH"]
+        .iter()
+        .filter_map(|k| std::env::var(k).ok().filter(|v| !v.trim().is_empty()).map(|v| format!("{k}={v}")))
+        .collect();
+    (!set.is_empty()).then(|| {
+        format!("LU's environment sets {}. The trainer starts its Pythons without it.", set.join(" and "))
+    })
 }
 
 /// The Pythons the trainer can be built with. musubi-tuner v0.3.4 declares
@@ -1199,7 +1344,7 @@ const PEP668_NEXT_STEP: &str = "This Python refuses installs outside a virtual e
 /// `UnsupportedPython` failure reaches, through `next_step_for_log`, and it
 /// still only said "needs 3.10, 3.11 or 3.12" with nothing about what was
 /// actually found. On Windows each interpreter's architecture is added too
-/// (`python_version_and_arch`): a 32-bit or ARM64 Python 3.11 answers the
+/// (`trainer_python_probe`): a 32-bit or ARM64 Python 3.11 answers the
 /// plain version check exactly like a real one and is why "rebuild the venv"
 /// alone never broke a user's loop -- see `venv_action`.
 fn python_version_next_step() -> String {
@@ -1210,18 +1355,15 @@ fn python_version_next_step() -> String {
             continue;
         }
         seen.push(p.clone());
-        #[cfg(target_os = "windows")]
-        {
-            if let Some((v, arch_ok)) = crate::python::python_version_and_arch(&p) {
+        // C31: one that does not start is listed with the reason instead of
+        // being left out, so "This machine has" matches what the user sees.
+        match trainer_python_probe(&p) {
+            Ok((v, _)) if !cfg!(target_os = "windows") => found.push(format!("Python {v} at {p}")),
+            Ok((v, arch_ok)) => {
                 let arch = if arch_ok { "64-bit x86" } else { "not 64-bit x86, no PyTorch wheel exists for it" };
                 found.push(format!("Python {v} at {p} ({arch})"));
             }
-        }
-        #[cfg(not(target_os = "windows"))]
-        {
-            if let Some(v) = crate::python::python_version(&p) {
-                found.push(format!("Python {v} at {p}"));
-            }
+            Err(why) => found.push(format!("Python at {p} (does not start from LU: {why})")),
         }
     }
     let have = if found.is_empty() {
@@ -1637,7 +1779,7 @@ fn run_child(
                         s.download_total = total;
                     }
                 }
-                push_log(&run, trimmed);
+                push_child_line(&run, trimmed);
             });
         }));
     }
@@ -1887,7 +2029,7 @@ pub(crate) enum VenvAction {
 /// -- a user's "3.11-Umgebung loeschen half nicht" (Rebuild only ever fired
 /// on the FIRST build; a Keep venv was never re-examined the same way) is
 /// exactly the gap this closes. `true` on a platform where architecture is
-/// not checked (see `python_version_and_arch`, Windows only) so this stays a
+/// not checked (see `trainer_python_probe`, Windows only) so this stays a
 /// no-op everywhere else.
 pub(crate) fn venv_action(python_exists: bool, python_version: Option<&str>, arch_ok: bool) -> VenvAction {
     match (python_exists, python_version) {
@@ -1921,7 +2063,7 @@ pub(crate) fn venv_create_args(action: VenvAction) -> &'static [&'static str] {
 ///
 /// K4, 2026-09-18: `found` used to be versions alone, so the message named
 /// what version was on the machine but not where LU looked or which install
-/// it was reading. a user's rebuild loop (see `python_version_and_arch`)
+/// it was reading. a user's rebuild loop (see `trainer_python_probe`)
 /// is exactly the case where two Pythons report the same version and only
 /// one of them is real; the path is what lets the customer, or us reading a
 /// Discord paste, tell which is which.
@@ -1976,22 +2118,24 @@ fn trainer_base_python(
             // interpreter. Excluding it here, before the venv is ever built,
             // is what makes the retry pick a different one instead of
             // looping (Discord 2026-09-16).
-            #[cfg(target_os = "windows")]
-            match crate::python::python_version_and_arch(&p) {
-                Some((v, true)) => seen.push((p, v)),
-                Some((v, false)) => push_log(
+            // C31: a Python that does not start says why, with its exit code
+            // and the stderr line that names the failure; it used to vanish
+            // from the list without a trace.
+            match trainer_python_probe(&p) {
+                Ok((v, true)) => seen.push((p, v)),
+                Ok((v, false)) => push_log(
                     state,
                     &format!("Skipping {p} (Python {v}): not a 64-bit x86 build, the trainer's PyTorch wheels do not exist for it."),
                 ),
-                None => {}
-            }
-            #[cfg(not(target_os = "windows"))]
-            if let Some(v) = crate::python::python_version(&p) {
-                seen.push((p, v));
+                Err(why) => push_log(state, &format!("Skipping {p}: it did not start from LU ({why}).")),
             }
         }
         seen
     };
+    #[cfg(target_os = "windows")]
+    if let Some(note) = python_env_note() {
+        push_log(state, &note);
+    }
     let mut paths = vec![python_bin.to_string()];
     paths.extend(crate::python::python_interpreters());
     let found = versioned(paths);
@@ -2014,10 +2158,7 @@ fn trainer_base_python(
         crate::commands::install::FOR_TRAINER,
     )?
     .ok_or_else(|| no_trainer_python_message(&found, std::env::consts::OS))?;
-    #[cfg(target_os = "windows")]
-    let own_version = |p: &str| crate::python::python_version_and_arch(p).map(|(v, _)| v);
-    #[cfg(not(target_os = "windows"))]
-    let own_version = crate::python::python_version;
+    let own_version = |p: &str| trainer_python_probe(p).ok().map(|(v, _)| v);
     let version = match machine {
         Some((_, v)) => v,
         None => own_version(&path)
@@ -2483,16 +2624,11 @@ fn provision_trainer_env(
     let (venv_version, venv_arch_ok) = if !exists {
         (None, true)
     } else {
-        #[cfg(target_os = "windows")]
-        {
-            match crate::python::python_version_and_arch(&vpy_path.to_string_lossy()) {
-                Some((v, ok)) => (Some(v), ok),
-                None => (None, true),
-            }
-        }
-        #[cfg(not(target_os = "windows"))]
-        {
-            (crate::python::python_version(&vpy_path.to_string_lossy()), true)
+        // Asked the way the trainer starts it (C31): a venv that only fails
+        // under LU's PYTHONHOME is not dead and must not be rebuilt for it.
+        match trainer_python_probe(&vpy_path.to_string_lossy()) {
+            Ok((v, ok)) => (Some(v), ok),
+            Err(_) => (None, true),
         }
     };
     let action = venv_action(exists, venv_version.as_deref(), venv_arch_ok);
@@ -2516,6 +2652,20 @@ fn provision_trainer_env(
         run_streamed(venv, "venv create", state, cancel, pid_slot)?;
     }
     let vpy = venv_python(root).to_string_lossy().to_string();
+
+    // C31 (Discord, 03.11.2026, Windows, Python 3.11.4): `python -m venv`
+    // puts the pip its Python shipped with into the venv, 23.1.2 for 3.11.4.
+    // A pip below 24 drops the jinja2 and typing_extensions wheels on the
+    // PyTorch index ("inconsistent Name"), falls back to their sources and
+    // dies on flit_core, which that index does not carry; the trainer then
+    // said its Python was one it cannot use, and every retry kept the venv
+    // and its pip. The same lift as the ComfyUI install (GH #211).
+    if let Some(line) = crate::commands::install::lift_old_pip_before_torch(&vpy, state, Some(cancel)) {
+        push_log(state, &line);
+    }
+    if cancel_requested(cancel) {
+        return Err("cancelled".to_string());
+    }
 
     // 3) torch, from the channel the plan above picked: Blackwell gets cu128,
     // every other NVIDIA card keeps cu121, an AMD card on Linux gets ROCm.
@@ -2844,6 +2994,7 @@ fn training_command(vpy: &str, repo: &Path, step: &TrainStep<'_>) -> Command {
     cmd.args([
         "--max_data_loader_n_workers", "2", "--persistent_data_loader_workers",
         "--network_module", "networks.lora_zimage", "--network_dim", step.preset.network_dim(),
+        "--network_alpha", step.preset.network_alpha(),
         "--max_train_steps", step.steps,
         "--save_precision", step.precision.save_precision,
         "--seed", "42",
@@ -2854,6 +3005,8 @@ fn training_command(vpy: &str, repo: &Path, step: &TrainStep<'_>) -> Command {
 }
 
 #[allow(non_snake_case)]
+// The arguments are the fields of the IPC call (api/trainer.ts), one each.
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub fn start_character_training(
     app: tauri::AppHandle,
@@ -2863,8 +3016,10 @@ pub fn start_character_training(
     triggerWord: String,
     steps: Option<u32>,
     preset: Option<String>,
+    kind: Option<String>,
 ) -> Result<serde_json::Value, String> {
     let preset = TrainPreset::from_arg(preset.as_deref());
+    let kind = TrainKind::from_arg(kind.as_deref());
     {
         let mut run = state.trainer_run.lock().unwrap();
         if run.status == "running" {
@@ -3167,7 +3322,7 @@ pub fn start_character_training(
         }
         set_status(&run, "running", &format!("Step 3/4: Training ({steps} steps). This runs for a while, the counter follows every step."));
         let steps_s = steps.to_string();
-        let out_name = format!("char_{lora_name}_zimage");
+        let out_name = kind.output_name(&lora_name);
         let out_dir_s = out_dir.to_string_lossy().to_string();
         let mut c3 = training_command(&vpy_s, &repo, &TrainStep {
             dit: &dit_s,
@@ -3219,17 +3374,13 @@ pub fn start_character_training(
             return;
         }
         // The set's photos now belong to this file: Edit hands them out as
-        // reference images of the character (character_files.rs).
-        crate::commands::character_files::write_training_marker(&set_dir, &final_path);
+        // reference images of the character (character_files.rs). A style's
+        // pictures are no one's likeness, so they stay out of that.
+        if kind == TrainKind::Character {
+            crate::commands::character_files::write_training_marker(&set_dir, &final_path);
+        }
 
-        set_status(
-            &run,
-            "complete",
-            &format!(
-                "Character ready: {out_name}.safetensors is saved at {} and already in the LoRA picker on the Image tab. Put '{trigger}' in a prompt with the LoRA active.",
-                final_path.display(),
-            ),
-        );
+        set_status(&run, "complete", &kind.finished_line(&format!("{out_name}.safetensors"), &final_path, &trigger));
         info!("character training complete");
     });
 
@@ -5068,13 +5219,12 @@ mod shutdown_tests {
     /// fixture.
     #[test]
     fn presence_alone_never_counts_as_a_working_interpreter() {
-        use crate::python::python_version;
         let dir = crate::os_paths::test_dir("trainer-venv-probe");
         let fake = dir.join("python-not-an-interpreter");
         std::fs::write(&fake, b"pyvenv.cfg points at a home that is gone").unwrap();
         assert!(fake.exists(), "the file is there, which is all the old check asked");
-        assert_eq!(python_version(&fake.to_string_lossy()), None, "but it does not run, which is the question");
-        assert_eq!(python_version(&dir.join("nothing-here").to_string_lossy()), None);
+        assert!(super::trainer_python_probe(&fake.to_string_lossy()).is_err(), "but it does not run, which is the question");
+        assert!(super::trainer_python_probe(&dir.join("nothing-here").to_string_lossy()).is_err());
     }
 
     #[test]
@@ -5722,7 +5872,7 @@ mod progress_line_tests {
         let body = &body[..body.find("let exit = loop").expect("wait loop")];
         let reader = &body[body.find("for_each_progress_line(stream").expect("reader")..];
         let gate = reader.find("if cancel.load(Ordering::SeqCst)").expect("the reader checks the cancel flag");
-        let log = reader.find("push_log(&run, trimmed)").expect("the reader logs");
+        let log = reader.find("push_child_line(&run, trimmed)").expect("the reader logs");
         assert!(gate < log, "the cancel check comes before anything reaches the log");
     }
 
@@ -5875,6 +6025,7 @@ mod captions_and_low_vram_tests {
         let args = args_for(TrainPreset::Standard);
         assert_eq!(value_of(&args, "--blocks_to_swap"), Some("16"));
         assert_eq!(value_of(&args, "--network_dim"), Some("32"));
+        assert_eq!(value_of(&args, "--network_alpha"), Some("32"));
         assert!(!args.iter().any(|a| a == "--gradient_checkpointing_cpu_offload"), "{args:?}");
         assert!(args.iter().any(|a| a == "--gradient_checkpointing"));
         assert!(args.iter().any(|a| a == "--fp8_base") && args.iter().any(|a| a == "--fp8_scaled"));
@@ -5886,6 +6037,7 @@ mod captions_and_low_vram_tests {
         // 28 = num_blocks (30) - 2, the assert in zimage_model.py enable_block_swap.
         assert_eq!(value_of(&args, "--blocks_to_swap"), Some("28"));
         assert_eq!(value_of(&args, "--network_dim"), Some("16"));
+        assert_eq!(value_of(&args, "--network_alpha"), Some("16"));
         assert!(args.iter().any(|a| a == "--gradient_checkpointing_cpu_offload"), "{args:?}");
         // The offload only works on top of gradient checkpointing.
         assert!(args.iter().any(|a| a == "--gradient_checkpointing"));
@@ -5896,7 +6048,7 @@ mod captions_and_low_vram_tests {
             "--fp8_scaled", "--blocks_to_swap", "--timestep_sampling", "--weighting_scheme", "--discrete_flow_shift",
             "--optimizer_type", "--learning_rate", "--gradient_checkpointing", "--gradient_checkpointing_cpu_offload",
             "--max_data_loader_n_workers", "--persistent_data_loader_workers", "--network_module", "--network_dim",
-            "--max_train_steps", "--save_precision", "--seed", "--output_dir", "--output_name",
+            "--network_alpha", "--max_train_steps", "--save_precision", "--seed", "--output_dir", "--output_name",
         ];
         for a in args.iter().filter(|a| a.starts_with("--")) {
             assert!(known.contains(&a.as_str()), "{a} is not an argument this recipe has evidence for");
@@ -5954,5 +6106,171 @@ mod captions_and_low_vram_tests {
         assert!(run.contains("vram_verdict(vram_mib, &precision, preset)"));
         assert!(run.contains("preset.text_encoder_batch()"));
         assert!(run.contains("            preset,\n        });"), "the training step gets the preset");
+    }
+
+    #[test]
+    fn a_style_run_writes_a_style_file_and_an_older_frontend_trains_a_character() {
+        assert_eq!(TrainKind::from_arg(Some("style")), TrainKind::Style);
+        assert_eq!(TrainKind::from_arg(Some(" style ")), TrainKind::Style);
+        assert_eq!(TrainKind::from_arg(Some("character")), TrainKind::Character);
+        assert_eq!(TrainKind::from_arg(Some("pose")), TrainKind::Character);
+        assert_eq!(TrainKind::from_arg(None), TrainKind::Character, "an older frontend sends nothing");
+        assert_eq!(TrainKind::Character.output_name("anna"), "char_anna_zimage");
+        assert_eq!(TrainKind::Style.output_name("inkwash"), "style_inkwash_zimage");
+        // The Use shelf and the Edit references read `char_..._zimage`; a style
+        // must not look like one (character_files.rs `trigger_of`).
+        assert!(crate::commands::character_files::trigger_of("style_inkwash_zimage.safetensors").is_none());
+        let style = TrainKind::Style.finished_line("style_inkwash_zimage.safetensors", Path::new("/l/x"), "inkwash");
+        assert!(style.starts_with("Style ready"), "{style}");
+        assert!(!style.contains("Character"), "{style}");
+    }
+
+    #[test]
+    fn the_run_threads_the_kind_into_the_file_name_and_keeps_a_style_out_of_the_references() {
+        let src = include_str!("trainer.rs");
+        let run = &src[src.find("pub fn start_character_training").expect("start fn")..];
+        let run = &run[..run.find("pub fn character_training_status").expect("end of run")];
+        assert!(run.contains("TrainKind::from_arg(kind.as_deref())"));
+        assert!(run.contains("let out_name = kind.output_name(&lora_name);"));
+        assert!(!run.contains("format!(\"char_{lora_name}_zimage\")"));
+        let marker = run.find("write_training_marker").expect("the marker call");
+        assert!(run[..marker].ends_with("if kind == TrainKind::Character {\n            crate::commands::character_files::"), "only a character's photos become references");
+    }
+}
+
+/// C31 (Discord, 03.11.2026): Windows, Python 3.11.4 and 3.12, the trainer
+/// setup said its Python was one it cannot use, and the log ended at
+/// "character trainer install start".
+#[cfg(test)]
+mod c31_old_pip_and_log_guard {
+    fn body_of<'a>(src: &'a str, start: &str, end: &str) -> &'a str {
+        let body = &src[src.find(start).expect(start)..];
+        &body[..body.find(end).expect(end)]
+    }
+
+    #[test]
+    fn an_old_pip_in_the_trainer_venv_is_lifted_before_pytorch() {
+        let src = include_str!("trainer.rs");
+        let body = body_of(src, "fn provision_trainer_env(", "\n}\n");
+        let venv = body.find("let vpy = venv_python(root)").expect("the venv is decided");
+        let lift = body.find("lift_old_pip_before_torch(&vpy, state, Some(cancel))").expect("the trainer lifts pip like the ComfyUI install");
+        let torch = body.find("(3/4): installing PyTorch").expect("the PyTorch step");
+        assert!(venv < lift && lift < torch, "after the venv (kept or new), before PyTorch");
+        // It runs on every path through here, the repair inside a run included:
+        // a kept venv is exactly the one that looped.
+        assert!(!body[venv..lift].contains("VenvAction::"), "not only for a new venv");
+    }
+
+    #[test]
+    fn the_lift_asks_for_pip_24_from_pypi() {
+        let line = "pip 23.1.2 from C:\\Users\\a\\AppData\\Roaming\\com.purpledoubled.locally-uncensored\\musubi\\venv\\Lib\\site-packages\\pip (python 3.11)";
+        let args = crate::commands::install::pip_upgrade_before_torch_args(Some(line)).expect("pip 23.1.2 from Python 3.11.4 is lifted");
+        assert_eq!(args.last().map(String::as_str), Some("pip>=24.0"));
+        assert!(!args.iter().any(|a| a.contains("index-url")), "pip comes from PyPI: {args:?}");
+        assert_eq!(crate::commands::install::pip_upgrade_before_torch_args(Some("pip 24.0 from x (python 3.12)")), None);
+    }
+
+    #[test]
+    fn the_setup_steps_and_the_error_reach_the_log_file() {
+        let src = include_str!("trainer.rs");
+        let push = body_of(src, "fn push_log(", "\n}\n");
+        assert!(push.contains("info!("), "LU's own lines go to the log file");
+        let status = body_of(src, "fn set_status(", "\n}\n");
+        assert!(status.contains("warn!(") && status.contains("info!("), "headlines go there, an error as a warning");
+        // pip, musubi and tqdm stay in the panel only.
+        let child = body_of(src, "fn push_child_line(", "\n}\n");
+        assert!(!child.contains("info!(") && !child.contains("warn!("));
+        let run = body_of(src, "fn run_child(", "let exit = loop");
+        assert!(run.contains("push_child_line(&run, trimmed)"));
+        assert!(!run.contains("push_log(&run, trimmed)"), "a training run would flood the log");
+    }
+}
+
+/// C31 Nachtrag (Discord, 03.11.2026, Windows): the setup ended before the
+/// trainer folder existed, with "none that starts" on a machine whose
+/// Python 3.11 and 3.12 run in a cmd window. The trainer now starts its
+/// Pythons without PYTHONHOME/PYTHONPATH on Windows, and every Python it
+/// skips is logged with the reason.
+#[cfg(test)]
+mod c31_python_that_does_not_start {
+    use super::*;
+
+    fn body_of<'a>(src: &'a str, start: &str, end: &str) -> &'a str {
+        let body = &src[src.find(start).expect(start)..];
+        &body[..body.find(end).expect(end)]
+    }
+
+    const INIT_FS_ENCODING: &str = "Python path configuration:\r\n  PYTHONHOME = 'C:\\Users\\a\\AppData\\Local\\Programs\\Python\\Python313'\r\n  PYTHONPATH = (not set)\r\nFatal Python error: init_fs_encoding: failed to get the Python codec of the filesystem encoding\r\nPython runtime state: core initialized\r\nModuleNotFoundError: No module named 'encodings'\r\n\r\nCurrent thread 0x00001a2c (most recent call first):\r\n  <no Python frame>\r\n";
+
+    #[test]
+    fn a_python_that_dies_at_start_up_is_named_with_exit_code_and_cause() {
+        assert_eq!(
+            probe_failure_detail(Some(1), INIT_FS_ENCODING),
+            "exit code 1: Fatal Python error: init_fs_encoding: failed to get the Python codec of the filesystem encoding"
+        );
+        // Negative control: without the pick, the last line would be this.
+        assert!(INIT_FS_ENCODING.trim_end().ends_with("<no Python frame>"));
+        assert_eq!(
+            probe_failure_detail(Some(1), "Traceback (most recent call last):\n  File \"<string>\", line 1\nImportError: DLL load failed\n"),
+            "exit code 1: ImportError: DLL load failed"
+        );
+        assert_eq!(probe_failure_detail(Some(9009), ""), "exit code 9009");
+        assert_eq!(probe_failure_detail(None, "  \n"), "no exit code");
+    }
+
+    #[test]
+    fn the_trainer_drops_pythonhome_and_pythonpath_on_windows_only() {
+        let mut cmd = Command::new("python");
+        trainer_child_env(&mut cmd);
+        let removed = |k: &str| cmd.get_envs().any(|(n, v)| n == k && v.is_none());
+        assert_eq!(removed("PYTHONHOME"), cfg!(target_os = "windows"));
+        assert_eq!(removed("PYTHONPATH"), cfg!(target_os = "windows"));
+        // What the trainer sets stays set.
+        assert!(cmd.get_envs().any(|(n, v)| n == "PYTHONUTF8" && v.is_some()));
+    }
+
+    #[test]
+    fn every_trainer_python_question_goes_through_the_trainer_probe() {
+        let src = include_str!("trainer.rs");
+        let base = body_of(src, "fn trainer_base_python(", "\n}\n");
+        assert!(base.contains("trainer_python_probe(&p)"));
+        assert!(base.contains("it did not start from LU ({why})"), "a skipped Python says why");
+        assert!(!base.contains("None => {}"), "nothing is dropped without a line");
+        assert!(!base.contains("python_version_and_arch"));
+        let provision = body_of(src, "fn provision_trainer_env(", "\n}\n");
+        assert!(provision.contains("trainer_python_probe(&vpy_path.to_string_lossy())"), "the venv check too");
+        let listing = body_of(src, "fn python_version_next_step(", "\n}\n");
+        assert!(listing.contains("does not start from LU: {why}"));
+        let probe = body_of(src, "fn trainer_python_probe(", "\n}\n");
+        assert!(probe.contains("trainer_child_env(&mut cmd)"));
+    }
+
+    #[test]
+    fn comfyui_and_the_other_python_calls_keep_their_environment() {
+        // The fix is the trainer's: python_command, which ComfyUI and every
+        // other lane use, does not drop PYTHONHOME.
+        let python = include_str!("../python.rs");
+        let shared = body_of(python, "pub fn python_command<", "\n}\n");
+        assert!(shared.contains("let mut cmd = Command::new(python_bin)"), "the shared builder itself");
+        assert!(!shared.contains("env_remove"), "no variable is dropped there");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_probe_reports_a_failing_interpreter_and_reads_a_working_one() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let fake = dir.path().join("python3.11");
+        fs::write(&fake, "#!/bin/sh\necho 'Fatal Python error: init_fs_encoding: failed' >&2\necho '  <no Python frame>' >&2\nexit 1\n").unwrap();
+        fs::set_permissions(&fake, fs::Permissions::from_mode(0o755)).unwrap();
+        let err = trainer_python_probe(&fake.to_string_lossy()).unwrap_err();
+        assert_eq!(err, "exit code 1: Fatal Python error: init_fs_encoding: failed");
+        let gone = dir.path().join("python3.13");
+        assert!(trainer_python_probe(&gone.to_string_lossy()).unwrap_err().starts_with("it could not be started: "));
+        if let Ok(real) = which::which("python3") {
+            let (v, arch_ok) = trainer_python_probe(&real.to_string_lossy()).expect("a working python3 answers");
+            assert!(python_major_minor(&v).is_some(), "{v}");
+            assert!(arch_ok, "off Windows the architecture is not checked");
+        }
     }
 }

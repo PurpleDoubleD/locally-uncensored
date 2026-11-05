@@ -14,7 +14,7 @@
  * The sentence is the hover text of the mark. It says what Beta means for
  * this feature, in plain words, and what the customer should do about it.
  */
-export type BetaFeature = 'computer-control' | 'voice' | 'create-in-chat' | 'direct-models'
+export type BetaFeature = 'computer-control' | 'voice' | 'create-in-chat' | 'direct-models' | 'style-training'
 
 export const BETA_LABEL = 'Beta'
 
@@ -27,6 +27,10 @@ export const BETA_FEATURES: Partial<Record<BetaFeature, string>> = {
     'Beta: Create in chat is new. A small chat model often gets an order wrong, so read the order before you press Start.',
   'direct-models':
     'Beta: these models are new in LU Cloud. How they hold up when many people use them at once is not measured yet.',
+  // 3.0.9 P8 (David, 29.10.2026): the style mode runs, but a short run did
+  // not learn a clear style in our test. More steps are not measured yet.
+  'style-training':
+    'Beta: style training is new. A short run may change the look only a little, so try Standard or Thorough and compare with the LoRA off.',
 }
 
 /** The hover sentence of a feature that is still Beta, null once it is not. */

@@ -93,11 +93,13 @@ describe('the Mac without the enhancer is as before', () => {
     expect(screen.queryByRole('radiogroup')).toBeNull()
   })
 
-  it('Edit: no switch, even with an enhancer file in a ComfyUI list', () => {
+  it('Edit: an enhancer file in a ComfyUI list is not offered, the chat model writes (B48)', () => {
     mac([T2I])
     useCreateStore.getState().setIntent('edit')
     render(<ImproveToggle />)
-    expect(theSwitch()).toBeNull()
+    expect(theSwitch()).not.toBeNull()
+    expect(screen.queryByTestId('improve-enhancer-line')).toBeNull()
+    expect(screen.queryByRole('radiogroup')).toBeNull()
   })
 
   it('a ComfyUI Qwen-Image on a Mac: the chat model writes, as the run does', async () => {

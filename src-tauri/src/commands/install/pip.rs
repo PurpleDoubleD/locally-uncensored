@@ -187,6 +187,34 @@ pub fn pip_install_streaming_with_retry_cancellable(
         .map_err(|f| f.diagnosis)
 }
 
+/// `python_bin` as a venv's own interpreter starts it: without `PYTHONHOME`
+/// and `PYTHONPATH` on Windows. A venv carries its home in `pyvenv.cfg`, so
+/// for a venv Python those two are never right, only harmful: a leftover
+/// `PYTHONHOME` from another install makes it die at start-up
+/// (init_fs_encoding, exit code 1). C31, box test D12: the pip lift before
+/// PyTorch asked through plain `python_command`, its venv Python did not
+/// start, and the lift fell out without a line.
+pub(crate) fn venv_python_command(python_bin: &str) -> std::process::Command {
+    let mut cmd = python_command(python_bin);
+    if cfg!(target_os = "windows") {
+        cmd.env_remove("PYTHONHOME").env_remove("PYTHONPATH");
+    }
+    cmd
+}
+
+/// [`pip_install_streaming_with_retry_cancellable`] for a venv's own pip,
+/// started through [`venv_python_command`].
+pub(crate) fn venv_pip_install_streaming_with_retry_cancellable(
+    args: &[&str],
+    python_bin: &str,
+    max_attempts: u32,
+    install_state: &Arc<Mutex<InstallState>>,
+    cancel: Option<&Arc<AtomicBool>>,
+) -> Result<(), String> {
+    pip_install_streaming_with_retry_using(args, python_bin, venv_python_command, max_attempts, install_state, cancel)
+        .map_err(|f| f.diagnosis)
+}
+
 /// Bytes a pip "Downloading <thing> (<size>)" stdout line announces. pip
 /// prints decimal units, kB means 1000 bytes. "Using cached" lines are not
 /// network traffic and must not count.
@@ -767,6 +795,20 @@ pub(crate) fn pip_install_streaming_with_retry_raw(
     install_state: &Arc<Mutex<InstallState>>,
     cancel: Option<&Arc<AtomicBool>>,
 ) -> Result<(), PipFailure> {
+    pip_install_streaming_with_retry_using(args, python_bin, |p| python_command(p), max_attempts, install_state, cancel)
+}
+
+/// The retry loop with the way pip's interpreter is started passed in:
+/// [`python_command`] for every caller but the venv pip lift, which passes
+/// [`venv_python_command`].
+fn pip_install_streaming_with_retry_using(
+    args: &[&str],
+    python_bin: &str,
+    command: fn(&str) -> std::process::Command,
+    max_attempts: u32,
+    install_state: &Arc<Mutex<InstallState>>,
+    cancel: Option<&Arc<AtomicBool>>,
+) -> Result<(), PipFailure> {
     let mut delay_seconds = 10u64;
     let mut last_stderr = String::new();
     // Review Runde 2, Punkt 11: bounded to ONE retry, and only for this one
@@ -807,7 +849,7 @@ pub(crate) fn pip_install_streaming_with_retry_raw(
         // Announced bytes of the wheels pip is through with.
         let finished_total = Arc::new(AtomicU64::new(0));
 
-        let mut cmd = python_command(python_bin);
+        let mut cmd = command(python_bin);
         cmd.args(args)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());

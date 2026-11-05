@@ -47,7 +47,7 @@ describe('der Satz unter dem Personen-Hauptschalter', () => {
     // Der Satz zeigt auf ein Menue. Steht dort ein anderer Name, schickt er
     // den Kunden ins Leere, also wird der Name gegen die Quelle gehalten.
     const quelle = readFileSync(join(__dirname, '../../chat/PluginsDropdown.tsx'), 'utf8')
-    expect(quelle).toContain('<span>Plugins</span>')
+    expect(quelle).toContain('>Plugins</span>')
     expect(quelle).toContain('aria-label="Plugins"')
     expect(quelle).toContain("'Enable persona for this chat'")
     expect(SATZ).toContain('Plugins menu')

@@ -96,6 +96,8 @@ export function CodexModeDropdown({ openUpward = false }: { openUpward?: boolean
     <div className="relative shrink-0">
       <button
         onClick={() => setOpen(!open)}
+        aria-haspopup="true"
+        aria-expanded={open}
         title={
           runActive
             ? 'A run is in flight. A change here applies to the next message.'

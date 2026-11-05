@@ -34,6 +34,14 @@
 //!   Onboarding-Fenster zu, Marker fehlt → die App beendet sich. Das
 //!                            Onboarding ist nicht fertig; ein unsichtbares
 //!                            Hauptfenster wäre eine App ohne Fenster.
+//!   Dasselbe beim erneuten Durchlauf → kein Beenden. Die App WAR schon
+//!                            eingerichtet, der Nutzer bricht nur ab: der Marker
+//!                            wird wieder geschrieben und die Fenster folgen
+//!                            ihm wie nach einem Abschluss (`follow_marker(true)`).
+//!                            Woran Rust das erkennt: `follow_marker(false)`
+//!                            merkt es sich (`RERUN`), denn nur „Onboarding
+//!                            zurücksetzen" löscht den Marker. Die Erstinstallation
+//!                            kommt nie dort vorbei und beendet weiter.
 //!
 //! ── Warum das Hauptfenster trotzdem existiert ─────────────────────────────
 //!
@@ -65,7 +73,7 @@
 //! Die `#[cfg]`-Zeilen in `open()` sind die einzigen plattformabhängigen
 //! Zeilen dieses Moduls.
 
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::Duration;
 
 // Ein Handy baut und zeigt kein Fenster (siehe unten), dort bleibt die Haelfte ungenutzt.
@@ -303,13 +311,60 @@ pub fn open(app: &AppHandle) -> tauri::Result<WebviewWindow> {
     let handle = app.clone();
     window.on_window_event(move |event| {
         if let tauri::WindowEvent::CloseRequested { .. } = event {
-            if !is_onboarding_done() {
-                quit(&handle);
+            match on_close(is_onboarding_done(), RERUN.load(Ordering::SeqCst)) {
+                OnClose::Nothing => {}
+                OnClose::Quit => quit(&handle),
+                OnClose::BackToTheApp => back_to_the_app(&handle),
             }
         }
     });
 
     Ok(window)
+}
+
+/// Läuft gerade ein freiwilliger erneuter Durchlauf? Gesetzt von
+/// `follow_marker(false)` (nur „Onboarding zurücksetzen" löscht den Marker),
+/// gelöscht, sobald der Marker wieder steht. Nur im Speicher: ein Neustart
+/// mitten im Durchlauf findet den Abschluss im Store-Backup, weil die
+/// Einstellungen `onboardingDone` dafür nicht mehr umlegen
+/// (`SettingsPage.tsx`), und `decide_first_window` schreibt den Marker nach.
+#[cfg_attr(mobile, allow(dead_code))]
+static RERUN: AtomicBool = AtomicBool::new(false);
+
+/// Was das Schließen des Onboarding-Fensters auslöst.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OnClose {
+    /// Der Marker steht: das Onboarding ist fertig, nichts zu tun.
+    Nothing,
+    /// Erstinstallation abgebrochen: die App beendet sich.
+    Quit,
+    /// Erneuter Durchlauf abgebrochen: zurück in die eingerichtete App.
+    BackToTheApp,
+}
+
+/// Die reine Regel hinter dem CloseRequested-Handler.
+pub fn on_close(marker: bool, rerun: bool) -> OnClose {
+    match (marker, rerun) {
+        (true, _) => OnClose::Nothing,
+        (false, false) => OnClose::Quit,
+        (false, true) => OnClose::BackToTheApp,
+    }
+}
+
+/// Der erneute Durchlauf wurde abgebrochen: Marker zurück, und die Fenster
+/// folgen ihm wie nach einem Abschluss. Das wartende Hauptfenster bootet auf
+/// `DONE_EVENT` und zeigt sich. Scheitert das Schreiben, bleibt nur der
+/// alte Weg, sonst stünde ein unsichtbares Hauptfenster ohne Gegenüber da.
+#[cfg(desktop)]
+fn back_to_the_app(app: &AppHandle) {
+    tracing::info!("re-run of the onboarding closed, back to the set-up app");
+    match write_onboarding_marker(true) {
+        Ok(()) => follow_marker(app, true),
+        Err(e) => {
+            tracing::error!("onboarding marker could not be restored: {e}");
+            quit(app);
+        }
+    }
 }
 
 /// Das Onboarding-Fenster wurde geschlossen, bevor das Onboarding fertig war:
@@ -371,6 +426,7 @@ pub fn onboarding_window_open(app: AppHandle) -> bool {
 #[cfg(desktop)]
 pub fn follow_marker(app: &AppHandle, done: bool) {
     let onboarding = app.get_webview_window(ONBOARDING);
+    RERUN.store(!done, Ordering::SeqCst);
     if done {
         if onboarding.is_none() {
             // Die Migration aus `AppShell.tsx` (Marker nachschreiben) oder ein
@@ -539,6 +595,34 @@ mod tests {
     }
 
     // ── Die Regel hinter show_window ──────────────────────────────────────
+
+    // ── Schließen des Onboarding-Fensters ─────────────────────────────────
+
+    #[test]
+    fn erstinstallation_abgebrochen_beendet_die_app() {
+        assert_eq!(on_close(false, false), OnClose::Quit);
+    }
+
+    #[test]
+    fn erneuter_durchlauf_abgebrochen_fuehrt_zurueck_in_die_app() {
+        assert_eq!(on_close(false, true), OnClose::BackToTheApp);
+    }
+
+    #[test]
+    fn fertiges_onboarding_schliesst_ohne_folgen() {
+        assert_eq!(on_close(true, false), OnClose::Nothing);
+        assert_eq!(on_close(true, true), OnClose::Nothing);
+    }
+
+    #[test]
+    fn nur_das_zuruecksetzen_merkt_sich_den_erneuten_durchlauf() {
+        let src = include_str!("onboarding_window.rs");
+        let follow = &src[src.find("pub fn follow_marker(app: &AppHandle, done: bool)").unwrap()..];
+        let body = &follow[..follow.find("\n}\n").unwrap()];
+        assert!(body.contains("RERUN.store(!done"), "follow_marker must record the re-run");
+        let handler = &src[src.find("window.on_window_event").unwrap()..];
+        assert!(handler[..400].contains("on_close(is_onboarding_done(), RERUN.load"));
+    }
 
     #[test]
     fn das_onboarding_fenster_darf_sich_immer_zeigen() {

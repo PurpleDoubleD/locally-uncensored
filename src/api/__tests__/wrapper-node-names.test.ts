@@ -88,6 +88,23 @@ const CORE_NODES = new Set([
   'LTXVSeparateAVLatent', 'LTXVEmptyLatentAudio', 'LTXVAudioVAEDecode', 'LTXVLatentUpsampler',
   'LatentUpscaleModelLoader', 'ManualSigmas',
   'MiniMaxH3SigmaShift', 'BlockSparseAttention',
+  // Qwen-Image 2.1 Turbo, read in ComfyUI v0.42.4 on 28.10.2026: CFGGuider
+  // [nodes_custom_sampler.py 823, registered at 1219] and QwenImage21Cache
+  // [nodes_qwen.py 185, in the QwenExtension list at 244]. The builder adds
+  // either only when /object_info lists it.
+  'CFGGuider', 'QwenImage21Cache',
+  // B38/B45, read in ComfyUI master b5a43215 on 30.10.2026 (schema node_id or
+  // NODE_CLASS_MAPPINGS key, the file in brackets) and used by the official
+  // Comfy-Org templates named in lib/frame-refs.ts: WanFirstLastFrameToVideo
+  // [nodes_wan.py 188], FluxKontextMultiReferenceLatentMethod [nodes_flux.py
+  // 158], ModelSamplingFlux [nodes_model_advanced.py 166], ReferenceLatent
+  // [nodes_edit_model.py], ImageScaleToTotalPixels [nodes_post_processing.py 234].
+  'WanFirstLastFrameToVideo', 'FluxKontextMultiReferenceLatentMethod', 'ModelSamplingFlux', 'ReferenceLatent',
+  'ImageScaleToTotalPixels',
+  // B46 (Qwen edit strength on Turbo), read in ComfyUI master on 01.11.2026:
+  // SplitSigmasDenoise [nodes_custom_sampler.py 228, outputs high_sigmas,
+  // low_sigmas].
+  'SplitSigmasDenoise',
   'YuE2GenerateMusic', 'EmptyYuE2LatentAudio',
   // lora
   'LoraLoader', 'LoraLoaderModelOnly',

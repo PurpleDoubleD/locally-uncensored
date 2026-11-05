@@ -7,7 +7,7 @@ import { create } from 'zustand'
 import { toolRegistry } from '../../api/mcp/tool-registry'
 import type { MCPExternalClient } from '../../api/mcp/external-client'
 import { isTauri } from '../../api/backend'
-import { REA_PLUGIN, reaFetch, reaGuard, reaServerConfig, reaStatus } from './rea'
+import { REA_PLUGIN, reaFetch, reaGuard, reaServerConfig, reaStatus, type ReaGhidra } from './rea'
 import { reaArgsFromModel, reaResultForModel, reaToolForModel } from './rea-model'
 
 export type ReaPhase = 'off' | 'fetching' | 'starting' | 'on' | 'error'
@@ -17,9 +17,11 @@ interface ReaRuntimeState {
   /** How many tools REA gave the agents. */
   tools: number
   error: string | null
+  /** What the last status said about Ghidra (B11), for the row. */
+  ghidra?: ReaGhidra | null
 }
 
-export const useReaRuntime = create<ReaRuntimeState>(() => ({ phase: 'off', tools: 0, error: null }))
+export const useReaRuntime = create<ReaRuntimeState>(() => ({ phase: 'off', tools: 0, error: null, ghidra: null }))
 
 let client: MCPExternalClient | null = null
 
@@ -51,6 +53,7 @@ export async function startRea(): Promise<void> {
       status = await reaStatus()
       if (mine !== turn) return
     }
+    set({ ghidra: status.ghidra ?? null })
     const config = reaServerConfig(status)
     set({ phase: 'starting' })
     const { MCPExternalClient } = await import('../../api/mcp/external-client')

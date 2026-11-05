@@ -1684,8 +1684,11 @@ export async function stageChatAttachment(merged: VramHandoffArgs, run?: AgentRu
  *  the model. Every string argument goes in, after the character's words were
  *  merged, the same way the cloud path checks every free-text option. */
 export function localRenderBlocked(args: Record<string, unknown>): string | null {
-  const text = Object.values(args).filter((v): v is string => typeof v === 'string').join(' ')
-  const verdict = checkPromptSafety(text)
+  // The negative prompt goes apart (B30, safety.ts): the engines read it only
+  // as what to keep out.
+  const { negativePrompt, ...rest } = args
+  const text = Object.values(rest).filter((v): v is string => typeof v === 'string').join(' ')
+  const verdict = checkPromptSafety(text, { negative: typeof negativePrompt === 'string' ? negativePrompt : undefined })
   return verdict.blocked ? `Error: ${blockMessageFor(verdict.reason)}` : null
 }
 

@@ -1,3 +1,4 @@
+import type { SttMode, TtsMode } from "../lib/speech-route";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { safeJSONStorage } from "../lib/storage-quota"
@@ -54,11 +55,23 @@ interface VoiceState {
   ttsPitch: number;
   /** TTS engine: bundled Piper (local) or a user-configured external HTTP
    *  endpoint (OpenAI-compatible, e.g. Kokoro-FastAPI) — GitHub #58. */
-  ttsMode: "piper" | "external";
+  ttsMode: TtsMode;
   /** External TTS endpoint URL, e.g. http://localhost:8880/v1/audio/speech. */
   externalTtsUrl: string;
   /** Voice name passed to the external engine (e.g. "af_bella" / "alloy"). */
   externalTtsVoice: string;
+  /** Model name for the external TTS engine; empty sends OpenAI's "tts-1".
+   *  Ollama needs its own name here, e.g. "lfm3-audio:2b" (N1). */
+  externalTtsModel: string;
+  /** Speech-to-text engine for dictation: the local faster-whisper, an
+   *  OpenAI-compatible /v1/audio/transcriptions endpoint such as Ollama
+   *  serving LFM3 Audio, or the LU Engine with LFM3 Audio/Omni loaded (N1,
+   *  lib/speech-route.ts). */
+  sttMode: SttMode;
+  /** External STT endpoint, e.g. http://localhost:11434/v1/audio/transcriptions. */
+  externalSttUrl: string;
+  /** Model the external STT endpoint transcribes with, e.g. "lfm3-audio:2b". */
+  externalSttModel: string;
   /** MiniMax voice for the cloud TTS endpoint (appMode 'cloud'). */
   cloudTtsVoice: string;
   /** The microphone for dictation and Voice, empty for the system default. */
@@ -101,9 +114,13 @@ interface VoiceState {
       ttsVoice: string;
       ttsRate: number;
       ttsPitch: number;
-      ttsMode: "piper" | "external";
+      ttsMode: TtsMode;
       externalTtsUrl: string;
       externalTtsVoice: string;
+      externalTtsModel: string;
+      sttMode: SttMode;
+      externalSttUrl: string;
+      externalSttModel: string;
       cloudTtsVoice: string;
       micId: string;
       micLabel: string;
@@ -153,6 +170,10 @@ export const useVoiceStore = create<VoiceState>()(
       ttsMode: "piper",
       externalTtsUrl: "",
       externalTtsVoice: "",
+      externalTtsModel: "",
+      sttMode: "whisper",
+      externalSttUrl: "",
+      externalSttModel: "",
       cloudTtsVoice: "Wise_Woman",
       micId: "",
       micLabel: "",
@@ -172,7 +193,13 @@ export const useVoiceStore = create<VoiceState>()(
       setRetryTakeReady: (ready) => set({ retryTakeReady: ready }),
       setPiperVoice: (voice) => set({ piperVoice: voice }),
 
-      updateVoiceSettings: (settings) => set((state) => ({ ...state, ...settings })),
+      // A fallback reason belongs to the engine that failed: switching the
+      // engine drops it, so a Piper reason never shows under External (B11).
+      updateVoiceSettings: (settings) => set((state) => ({
+        ...state,
+        ...settings,
+        ...(settings.ttsMode !== undefined && settings.ttsMode !== state.ttsMode ? { ttsFallbackReason: null } : {}),
+      })),
 
       resetTransient: () =>
         set({
@@ -195,6 +222,10 @@ export const useVoiceStore = create<VoiceState>()(
           ttsMode: "piper",
           externalTtsUrl: "",
           externalTtsVoice: "",
+          externalTtsModel: "",
+          sttMode: "whisper",
+          externalSttUrl: "",
+          externalSttModel: "",
           cloudTtsVoice: "Wise_Woman",
           micId: "",
       micLabel: "",
@@ -222,6 +253,10 @@ export const useVoiceStore = create<VoiceState>()(
         externalTtsUrl: state.externalTtsUrl,
         cloudTtsVoice: state.cloudTtsVoice,
         externalTtsVoice: state.externalTtsVoice,
+        externalTtsModel: state.externalTtsModel,
+        sttMode: state.sttMode,
+        externalSttUrl: state.externalSttUrl,
+        externalSttModel: state.externalSttModel,
         micId: state.micId,
         micLabel: state.micLabel,
         loopStartMuted: state.loopStartMuted,

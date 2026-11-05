@@ -75,7 +75,7 @@ export function BenchmarkView() {
         )}
         {/* Header */}
         <div className="flex items-center gap-2 mb-4">
-          <button onClick={() => setView('models')} className="p-1 rounded hover:bg-gray-200 dark:hover:bg-white/5 text-gray-500 hover:text-gray-900 dark:hover:text-white transition-colors">
+          <button onClick={() => setView('models')} aria-label="Back to models" className="p-1 rounded hover:bg-gray-200 dark:hover:bg-white/5 text-gray-500 hover:text-gray-900 dark:hover:text-white transition-colors">
             <ArrowLeft size={16} />
           </button>
           {/* Der Pokal war golden, weil Pokale golden sind, nicht weil die

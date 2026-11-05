@@ -136,6 +136,7 @@ describe('the agent loop actually wires the N3 rules', () => {
     expect(rust).toContain('let image_part = model_can_see_images(&m.path);')
     expect(rust).toContain('"vision": if is_loaded { loaded_sees } else { image_part }')
     // The same file the engine turns into --mmproj, not a second opinion.
-    expect(rust).toContain('existing_mmproj(model_path).is_some()')
+    // N1: and only when that part is an image part (an LFM3 Audio part hears).
+    expect(rust).toContain('existing_mmproj(model_path).is_some_and(|p| projector_sees_images(&p))')
   })
 })

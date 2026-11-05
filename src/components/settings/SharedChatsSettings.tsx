@@ -2,6 +2,7 @@ import { Smartphone, X } from 'lucide-react'
 import { useChatStore } from '../../stores/chatStore'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { useUIStore } from '../../stores/uiStore'
+import { SHARED_CHATS_PHONE_NOTE_LONG } from '../chat/shared-chats-note'
 
 /** The id and title of every shared chat, as a stable string so a streaming
  *  answer does not repaint this list. */
@@ -25,6 +26,7 @@ export function SharedChatsSettings() {
         <Smartphone size={12} className="text-gray-500" />
         <span className="t-micro font-medium text-gray-400">Shared with your phone</span>
       </div>
+      <p className="t-micro text-gray-500 dark:text-gray-600" data-testid="shared-chats-phone-note">{SHARED_CHATS_PHONE_NOTE_LONG}</p>
       <label className="flex items-start gap-2 cursor-pointer">
         <input
           type="checkbox"

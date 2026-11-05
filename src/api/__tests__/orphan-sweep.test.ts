@@ -119,7 +119,7 @@ describe('ownership marker and wiring', () => {
   })
 
   it('NEGATIVE CONTROL: the Create tab still submits under the same live id', () => {
-    expect(read('../../hooks/useCreate.ts')).toContain('submitWorkflow(workflow, CLIENT_ID)')
+    expect(read('../../hooks/useCreate.ts')).toContain('submitWorkflow(workflow, CLIENT_ID,')
   })
 
   it('NEGATIVE CONTROL: the user Stop path and the G19-1 budget path still work by owner', () => {

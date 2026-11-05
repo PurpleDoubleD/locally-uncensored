@@ -29,6 +29,7 @@ import { requestLimitMessage } from '../../lib/request-limit'
 import { localFetch, localFetchStream, isPrivateOrLanHost, isDirectFetchAllowed, hostnameOf, ensureProxyAllowsHost, backendCall } from '../backend'
 import { chatBackendsBack } from '../../lib/chat-backends-gate'
 import { openAiSamplerFields } from './sampler-fields'
+import { openAiCustomFields } from '../../lib/custom-params'
 import { topPForTemperature } from '../../lib/sampling'
 import { ensureBuiltinEngineAlive, explainDeadEngine, explainEngineTransportMessage, isManagedBuiltinSlot } from '../builtin-ensure'
 import { isLocalTransportFailure, localBackendUnreachableMessage, remoteBackendUnreachableMessage } from '../../lib/local-backend-transport'
@@ -701,12 +702,24 @@ export class OpenAIProvider implements ProviderClient {
   /**
    * Think budget (D12), for the app's own engine only.
    *
-   * The pinned llama-server b9949 reads `thinking_budget_tokens` on every
+   * The bundled llama-server (b9949, and b11960 since 3.0.9) reads `thinking_budget_tokens` on every
    * chat request and ends the thought by force once that many tokens are
    * spent (tools/server/server-common.cpp, reasoning budget sampler). Any
    * other server in this slot is a version we do not know, and the cloud
    * endpoints refuse unknown fields, so nobody else gets it.
    */
+  /**
+   * GH #198: the custom sampling rows of the persona and the chat, as top
+   * level fields, under the names typed. A field LU sets itself is never
+   * taken from a row (lib/custom-params.ts). Not for LU Cloud, whose proxy
+   * refuses a field it does not know. A strict remote server may refuse one
+   * too; the person added the row for that server and sees its answer.
+   */
+  private applyCustomParams(body: OpenAIChatRequest, options?: ChatOptions): void {
+    if (this.config.id === 'lu-cloud') return
+    Object.assign(body, openAiCustomFields(options?.customParams))
+  }
+
   private applyThinkBudget(body: OpenAIChatRequest, options?: ChatOptions): void {
     if (this.config.managed !== true) return
     const budget = thinkBudgetForRequest(options?.thinking, options?.thinkingBudget)
@@ -760,6 +773,30 @@ export class OpenAIProvider implements ProviderClient {
     if (this.localEffortWaits(model, options)) return
     applyLocalEffort(body, await this.localEffortServer(), options?.thinkingBudget)
   }
+
+  /**
+   * E1 (3.0.9): no top-level `reasoning_effort` to the LU Engine. b9949
+   * ignored the field; b11960 reads it and writes it over the template
+   * variable (tools/server/server-common.cpp: "Parse the OAI
+   * reasoning_effort field"), after `chat_template_kwargs`. So the 'high'
+   * every Think-on request carries would set gpt-oss to High although the
+   * user never picked a rung (see localEffortWaits), Max would reach a
+   * template as 'max' instead of the 'high' applyLocalEffort chose, and
+   * 'none' would switch thinking off a second way. The rung travels where
+   * applyLocalEffort put it, the request stays the one b9949 got. Only while
+   * `chat_template_kwargs` carries the switch: where they were refused the
+   * top-level field is the one signal left (the phone engine reads it then,
+   * engine_inproc.rs `thinking_wish`).
+   */
+  private keepEffortOffEngineTopLevel(body: OpenAIChatRequest): void {
+    if (this.config.managed !== true || !body.chat_template_kwargs || body.reasoning_effort === undefined) return
+    OpenAIProvider.engineEffortHeld.set(body, body.reasoning_effort)
+    delete body.reasoning_effort
+  }
+
+  /** The top-level rung keepEffortOffEngineTopLevel took off a body, for the
+   *  retry without `chat_template_kwargs` that needs it back. */
+  private static engineEffortHeld = new WeakMap<OpenAIChatRequest, string>()
 
   /** The LU Engine or a server on this machine or the LAN, LU Cloud aside. */
   private get isLocalEffortSlot(): boolean {
@@ -858,6 +895,8 @@ export class OpenAIProvider implements ProviderClient {
     // the extra round trip is paid once and not on every message.
     if (!stopped() && refused(res) && 'chat_template_kwargs' in body) {
       delete body.chat_template_kwargs
+      const held = OpenAIProvider.engineEffortHeld.get(body)
+      if (held !== undefined) body.reasoning_effort = held
       res = await post()
       if (res.ok) OpenAIProvider.templateKwargsRefused.add(this.baseUrl)
     }
@@ -1029,6 +1068,7 @@ export class OpenAIProvider implements ProviderClient {
     // server on this machine or the LAN counts as local whether its preset
     // said so or only its address does, an additional entry (#173) included.
     if (options) Object.assign(body, openAiSamplerFields(this.samplerTarget, options))
+    this.applyCustomParams(body, options)
     // Streaming tool turn: same wire shape as chatWithTools, but the calls
     // come back as deltas which the accumulator below already merges.
     if (options?.tools?.length) {
@@ -1048,6 +1088,7 @@ export class OpenAIProvider implements ProviderClient {
     if (tmplKwargs) body.chat_template_kwargs = tmplKwargs
     this.applyThinkBudget(body, options)
     await this.applyLocalEffortForm(body, model, options)
+    this.keepEffortOffEngineTopLevel(body)
     // Round 10, phone only: the caller ends the messages with a cut answer
     // and the engine of the phone goes on inside it. Absent on every other send.
     if (options?.continueFinalMessage) body.continue_final_message = true
@@ -1284,6 +1325,7 @@ export class OpenAIProvider implements ProviderClient {
     if (options?.topK !== undefined && this.config.id !== 'lu-cloud') body.top_k = options.topK
     // GH #175: the extra samplers, under the names this backend reads.
     if (options) Object.assign(body, openAiSamplerFields(this.samplerTarget, options))
+    this.applyCustomParams(body, options)
     await this.applyMaxTokens(model, body, options)
     // Same reasoning_effort gate as chatStream.
     const effort = this.thinkingEffort(model, options?.thinking, options)
@@ -1293,6 +1335,7 @@ export class OpenAIProvider implements ProviderClient {
     if (tmplKwargs) body.chat_template_kwargs = tmplKwargs
     this.applyThinkBudget(body, options)
     await this.applyLocalEffortForm(body, model, options)
+    this.keepEffortOffEngineTopLevel(body)
     if (options?.jsonSchema && this.config.id !== 'lu-cloud') {
       body.response_format = { type: 'json_schema', json_schema: { name: 'answer', schema: options.jsonSchema } }
     }

@@ -679,6 +679,54 @@ pub(crate) fn not_ours_to_delete(filename: &str, base: &str, extra_dirs: &[Strin
     format!("{} was not found in the ComfyUI models folders", filename)
 }
 
+/// Every copy of one ComfyUI model file in the folders LU downloads into and
+/// ComfyUI enumerates from. Delete and Details look a file up the same way,
+/// so the two buttons beside a row can never disagree about which file it is.
+async fn comfy_model_hits(
+    state: &State<'_, AppState>,
+    comfy_path: &str,
+    sub: &str,
+    base: &str,
+) -> Vec<PathBuf> {
+    let models_root = PathBuf::from(comfy_path).join("models");
+    // Both trees, because the download may have written into either: the
+    // engine's own folders when it was running and could be asked, the classic
+    // guess when it could not (see models_dir_in). A file the app put there is
+    // a file the app has to be able to take away again.
+    //
+    // R1-4: asked fresh via engine_folders (a running ComfyUI's own answer),
+    // not the stale process-wide cache from before this ComfyUI ever
+    // started, a model the running engine had just remapped to a custom
+    // folder looked like a foreign file and refused to delete.
+    let mut roots: Vec<PathBuf> = MODEL_SUBDIRS.iter().map(|d| models_root.join(d)).collect();
+    if let Some(folders) = engine_folders(state).await {
+        for dir in folders.all_dirs() {
+            if !roots.contains(&dir) {
+                roots.push(dir);
+            }
+        }
+    }
+    // GH #183: the folders the user configured for ComfyUI, where a download
+    // writes now even while ComfyUI is shut down.
+    for dir in comfy_user_paths::for_comfy(&Some(comfy_path.to_string())).all_dirs() {
+        if !roots.contains(&dir) {
+            roots.push(dir);
+        }
+    }
+    let mut hits: Vec<PathBuf> = Vec::new();
+    for root in &roots {
+        let cand = if sub.is_empty() {
+            root.join(base)
+        } else {
+            root.join(sub).join(base)
+        };
+        if cand.is_file() && !hits.contains(&cand) {
+            hits.push(cand);
+        }
+    }
+    hits
+}
+
 /// Delete one installed model file from the ComfyUI models tree (the Model
 /// Hub's trash action — Discord 2026-07-19: a 27 GB video
 /// model his PC couldn't run had no in-app way back out). The name is the
@@ -716,42 +764,7 @@ pub async fn delete_comfy_model(
         safe_subfolder(&sub)?;
     }
     let base = sanitize_filename(&base);
-    let models_root = PathBuf::from(&comfy_path).join("models");
-    // Both trees, because the download may have written into either: the
-    // engine's own folders when it was running and could be asked, the classic
-    // guess when it could not (see models_dir_in). A file the app put there is
-    // a file the app has to be able to take away again.
-    //
-    // R1-4: asked fresh via engine_folders (a running ComfyUI's own answer),
-    // not the stale process-wide cache from before this ComfyUI ever
-    // started, a model the running engine had just remapped to a custom
-    // folder looked like a foreign file and refused to delete.
-    let mut roots: Vec<PathBuf> = MODEL_SUBDIRS.iter().map(|d| models_root.join(d)).collect();
-    if let Some(folders) = engine_folders(&state).await {
-        for dir in folders.all_dirs() {
-            if !roots.contains(&dir) {
-                roots.push(dir);
-            }
-        }
-    }
-    // GH #183: the folders the user configured for ComfyUI, where a download
-    // writes now even while ComfyUI is shut down.
-    for dir in comfy_user_paths::for_comfy(&Some(comfy_path.clone())).all_dirs() {
-        if !roots.contains(&dir) {
-            roots.push(dir);
-        }
-    }
-    let mut hits: Vec<PathBuf> = Vec::new();
-    for root in &roots {
-        let cand = if sub.is_empty() {
-            root.join(&base)
-        } else {
-            root.join(&sub).join(&base)
-        };
-        if cand.is_file() && !hits.contains(&cand) {
-            hits.push(cand);
-        }
-    }
+    let hits = comfy_model_hits(&state, &comfy_path, &sub, &base).await;
     match hits.len() {
         0 => Err(not_ours_to_delete(
             &filename,
@@ -782,6 +795,84 @@ pub async fn delete_comfy_model(
             filename
         )),
     }
+}
+
+/// Details for one ComfyUI model file (D1, a user on Discord,
+/// 01.11.2026: the ⓘ beside the bin did nothing for an image model or a
+/// LoRA, because it asked Ollama, which knows no ComfyUI file). Found the
+/// way Delete finds it; a file in the user's own Storage folder is shown
+/// too, since reading is not deleting. Never a path outside those folders.
+#[allow(non_snake_case)]
+#[tauri::command]
+pub async fn comfy_model_info(
+    filename: String,
+    extraDirs: Option<Vec<String>>,
+    state: State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    if let Some(remote) = remote_comfy(&state) {
+        return Err(format!(
+            "{} is on the ComfyUI machine ({}). LU cannot read files there.",
+            filename, remote.host
+        ));
+    }
+    let comfy_path = state
+        .comfy_path
+        .lock()
+        .unwrap()
+        .clone()
+        .ok_or("ComfyUI path not set. Please set it in settings or install ComfyUI first.")?;
+    let (sub, base) = split_model_ref(&filename);
+    if !sub.is_empty() {
+        safe_subfolder(&sub)?;
+    }
+    let base = sanitize_filename(&base);
+    let mut hits = comfy_model_hits(&state, &comfy_path, &sub, &base).await;
+    let mut own_folder = false;
+    if hits.is_empty() {
+        hits = own_folder_hits(&base, &extraDirs.unwrap_or_default());
+        own_folder = !hits.is_empty();
+    }
+    let file = hits
+        .first()
+        .ok_or_else(|| format!("{} was not found in the ComfyUI models folders", filename))?;
+    Ok(file_facts(file, own_folder, hits.len()))
+}
+
+/// A file of that name in the user's own model folder (Storage), the place
+/// `not_ours_to_delete` names.
+fn own_folder_hits(base: &str, extra_dirs: &[String]) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    for raw in extra_dirs {
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        for (_, folder) in crate::commands::custom_models::comfy_shaped_subdirs(Path::new(trimmed)) {
+            let cand = folder.join(base);
+            if cand.is_file() && !out.contains(&cand) {
+                out.push(cand);
+            }
+        }
+    }
+    out
+}
+
+/// What the Details dialog shows about a file on disk.
+fn file_facts(file: &Path, own_folder: bool, copies: usize) -> serde_json::Value {
+    let meta = fs::metadata(file).ok();
+    let modified = meta
+        .as_ref()
+        .and_then(|m| m.modified().ok())
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_secs());
+    serde_json::json!({
+        "path": file.to_string_lossy(),
+        "folder": file.parent().map(|p| p.to_string_lossy().to_string()).unwrap_or_default(),
+        "bytes": meta.map(|m| m.len()).unwrap_or(0),
+        "modified": modified,
+        "ownFolder": own_folder,
+        "copies": copies,
+    })
 }
 
 /// The delete with `trash`: the file goes to the system's Trash and can be
@@ -3316,6 +3407,35 @@ mod tests {
     }
 
     #[test]
+    fn d1_details_read_a_file_in_the_users_own_folder_and_nothing_outside() {
+        let dir = std::env::temp_dir().join(format!("lu-d1-own-{}", std::process::id()));
+        let loras = dir.join("loras");
+        fs::create_dir_all(&loras).unwrap();
+        fs::write(loras.join("style.safetensors"), b"12345").unwrap();
+        fs::write(dir.join("outside.safetensors"), b"x").unwrap();
+        let extra = vec![dir.to_string_lossy().to_string()];
+        let hits = own_folder_hits("style.safetensors", &extra);
+        assert_eq!(hits, vec![loras.join("style.safetensors")]);
+        // A file beside the model folders is not a model of that folder.
+        assert!(own_folder_hits("outside.safetensors", &extra).is_empty());
+        let facts = file_facts(&hits[0], true, 1);
+        assert_eq!(facts["bytes"], 5);
+        assert_eq!(facts["ownFolder"], true);
+        assert_eq!(facts["folder"], loras.to_string_lossy().to_string());
+        assert!(facts["modified"].as_u64().is_some());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn d1_details_and_delete_find_a_file_the_same_way() {
+        let src = include_str!("download.rs");
+        let info = fn_body(src, "pub async fn comfy_model_info(");
+        assert!(info.contains("comfy_model_hits(&state"), "{info}");
+        assert!(info.contains("safe_subfolder(&sub)"), "{info}");
+        assert!(info.contains("sanitize_filename(&base)"), "{info}");
+    }
+
+    #[test]
     fn the_trash_delete_never_removes_for_good() {
         // Quelltextwaechter: der Zweig mit `trash` geht an den System-Papierkorb
         // und kehrt zurueck, bevor das endgueltige remove_file erreicht wird.
@@ -3346,7 +3466,11 @@ mod tests {
             !space_body.contains("comfy_folders::cached()"),
             "check_download_space still reads the stale cache instead of asking the engine"
         );
-        assert!(delete_body.contains("engine_folders(&state).await"), "{delete_body}");
+        // Delete and Details share one lookup (D1), which asks the engine.
+        assert!(delete_body.contains("comfy_model_hits(&state"), "{delete_body}");
+        let hits_body = fn_body(src, "async fn comfy_model_hits(");
+        assert!(!hits_body.contains("comfy_folders::cached()"), "{hits_body}");
+        assert!(hits_body.contains("engine_folders(state).await"), "{hits_body}");
         // The space check goes through comfy_models_dir since GH #143 (a
         // remote ComfyUI measures the Storage folder), and that one asks
         // the engine fresh for everything else.

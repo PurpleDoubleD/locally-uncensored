@@ -41,7 +41,9 @@ export function DocsButton({ availability, open, ragEnabled, docCount, onToggle 
       className={'lu-control' + (availability.needsSetup ? ' opacity-60' : '')}
     >
       <FileText size={11} />
-      <span>Docs</span>
+      {/* In a narrow composer only the icon shows; the name stays for the
+          screen reader (ChatInput.tsx, the row is the @container). */}
+      <span className="@max-[26rem]:sr-only">Docs</span>
       {docCount > 0 && (
         <span
           className={

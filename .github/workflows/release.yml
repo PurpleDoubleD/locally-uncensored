@@ -41,8 +41,10 @@ permissions:
 #
 # Sidecar: every platform must build the bundled llama.cpp `llama-server`
 # BEFORE tauri-action runs — tauri-build hard-fails on a missing externalBin.
-# The build is cached on (hash of scripts/build-llama.sh × triple); it only
-# recompiles when the script (tag pin or cmake flags) changes.
+# The build is cached on (hash of scripts/build-llama.sh and LU's llama.cpp
+# patches in scripts/llama-patches × triple); it only recompiles when the
+# script (tag pin or cmake flags) or a patch changes. A patch outside the key
+# would hit the old cache and stop in assert_patched_tree (E1).
 env:
   # Vulkan SDK pin for the GGML_VULKAN sidecar builds: the Windows lane uses
   # the full installer version, the Linux lane derives the 3-part family for
@@ -316,7 +318,7 @@ jobs:
           # ./.llama-build while the real build sits in D:/lb — every run then
           # recompiles llama.cpp from scratch (~20 min) on a "cache hit".
           path: ${{ matrix.platform == 'windows-latest' && 'D:/lb' || '.llama-build' }}
-          key: llama-${{ hashFiles('scripts/build-llama.sh') }}-${{ matrix.sidecar_triple }}-v1
+          key: llama-${{ hashFiles('scripts/build-llama.sh', 'scripts/llama-patches/**') }}-${{ matrix.sidecar_triple }}-v1
 
       - name: Install Vulkan SDK (Windows)
         if: matrix.platform == 'windows-latest'
@@ -367,6 +369,13 @@ jobs:
           case "${{ matrix.sidecar_triple }}" in
             *-windows-*) test -f "src-tauri/bin/lu-llama-server-${{ matrix.sidecar_triple }}.exe" ;;
             *)           test -x "src-tauri/bin/lu-llama-server-${{ matrix.sidecar_triple }}" ;;
+          esac
+          # The Neuron tweaker's vector tool (3.0.9, P11) ships on every
+          # desktop platform (FEHLER-P11 #7): without it the ready-made and
+          # own sliders cannot be computed, so a build without it is not one.
+          case "${{ matrix.sidecar_triple }}" in
+            *-windows-*) test -f "src-tauri/bin/lu-llama-cvector-generator-${{ matrix.sidecar_triple }}.exe" ;;
+            *)           test -x "src-tauri/bin/lu-llama-cvector-generator-${{ matrix.sidecar_triple }}" ;;
           esac
           ls -la src-tauri/bin/
 
@@ -536,6 +545,64 @@ jobs:
           esac
           echo "OK: sidecar boots from $moved, loads a real model, /health answers, and has a libggml-cpu-*.so from $moved/llama mapped, nowhere near the build directory it was compiled in"
 
+      # FEHLER-P11 #7, E1: the vector tool is an exe of the server build and
+      # loads the same ggml modules (build-llama.sh cvector_ships_for); the
+      # app starts it the way it starts the server (cwd and LD_LIBRARY_PATH
+      # on the companions directory, engine.rs prepare_tool_command). Same
+      # moved-directory proof as above, with a real run: two example lines
+      # each way through the tiny model, the control vector it writes must
+      # be there, and it must load the ggml-cpu variants from the moved
+      # directory (a baseline-only tool took hours on 9B models).
+      - name: "Vector tool computes from a moved directory (P11)"
+        if: matrix.sidecar_triple == 'x86_64-unknown-linux-gnu'
+        shell: bash
+        timeout-minutes: 5
+        run: |
+          set -euo pipefail
+          moved="$RUNNER_TEMP/moved-cvector"
+          rm -rf "$moved"
+          mkdir -p "$moved"
+          cp "src-tauri/bin/lu-llama-cvector-generator-${{ matrix.sidecar_triple }}" "$moved/"
+          cp -r "src-tauri/resources/llama/${{ matrix.sidecar_triple }}" "$moved/llama"
+          chmod +x "$moved/lu-llama-cvector-generator-${{ matrix.sidecar_triple }}"
+          export LD_LIBRARY_PATH="$moved/llama${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+          model="$RUNNER_TEMP/stories260K.gguf"
+          if [ ! -f "$model" ]; then
+            curl -fsSL --retry 3 --max-time 60 -o "$model" \
+              "https://huggingface.co/ggml-org/models/resolve/${STORIES260K_REVISION}/tinyllamas/stories260K.gguf"
+          fi
+          echo "${STORIES260K_SHA256}  $model" | sha256sum -c - \
+            || { echo "FAIL: stories260K.gguf did not match the pinned sha256" >&2; exit 1; }
+          printf 'Once upon a time there was a happy dog.\nThe sun was bright and everyone smiled.\n' > "$moved/more.txt"
+          printf 'Once upon a time there was a sad dog.\nThe rain fell and everyone cried.\n' > "$moved/less.txt"
+          # LD_DEBUG=files: glibc names every library it loads; the tool logs
+          # nothing about ggml's backend loading itself.
+          ( cd "$moved/llama" && LD_DEBUG=files "$moved/lu-llama-cvector-generator-${{ matrix.sidecar_triple }}" -m "$model" \
+              --positive-file "$moved/more.txt" --negative-file "$moved/less.txt" \
+              -o "$moved/direction.gguf" --method mean -c 256 ) >/tmp/cvector.log 2>&1 || {
+            cat /tmp/cvector.log
+            echo "FAIL: lu-llama-cvector-generator exited non-zero from $moved" >&2
+            exit 1
+          }
+          [ -s "$moved/direction.gguf" ] || { cat /tmp/cvector.log; echo "FAIL: no control vector written" >&2; exit 1; }
+          grep -E "file=$moved/llama/libggml-cpu-[a-z0-9_]+\.so .*dynamically loaded by" /tmp/cvector.log \
+            || { cat /tmp/cvector.log; echo "FAIL: the vector tool did not load a ggml-cpu variant from $moved/llama" >&2; exit 1; }
+          # LU patches 0003 and 0004 (P11): the progress line the app reads,
+          # and the measuring mode single-neuron doses are counted in.
+          grep -q 'Evaluating prompt\[2/2\]' /tmp/cvector.log \
+            || { cat /tmp/cvector.log; echo "FAIL: no progress line for the last prompt (patch 0003)" >&2; exit 1; }
+          ( cd "$moved/llama" && LU_LAYER_NORMS=1 "$moved/lu-llama-cvector-generator-${{ matrix.sidecar_triple }}" -m "$model" \
+              --positive-file "$moved/more.txt" --negative-file "$moved/less.txt" \
+              -o "$moved/norms.gguf" --method mean -c 256 ) >/tmp/cvector-norms.log 2>&1 || {
+            cat /tmp/cvector-norms.log
+            echo "FAIL: the vector tool's measuring mode (LU_LAYER_NORMS, patch 0004) exited non-zero" >&2
+            exit 1
+          }
+          norms="$(grep -cE '^LU norm [0-9]+ [0-9]+\.[0-9]{6}$' /tmp/cvector-norms.log || true)"
+          [ "$norms" -ge 1 ] && [ ! -e "$moved/norms.gguf" ] \
+            || { cat /tmp/cvector-norms.log; echo "FAIL: LU_LAYER_NORMS printed $norms 'LU norm' lines (want at least 1) or wrote a vector" >&2; exit 1; }
+          echo "OK: the vector tool computes a control vector from $moved on a ggml-cpu variant from there, nowhere near the build directory, and measures $norms layer lengths"
+
       # Nachbesserung N5 (review-sidecar.md, Runde 2): before this step,
       # release.yml had no real model-load proof for EITHER platform (the
       # only place that existed was sidecar-windows.yml, a different
@@ -616,6 +683,42 @@ jobs:
           }
           Write-Host "OK - sidecar boots from the resource layout, loads a model, answers /health, and has a ggml-cpu-*.dll from $runDir mapped"
 
+      # E1, P11: the vector tool is an exe of the server build (LU patch 0002)
+      # and the app starts it from the companions directory like the server
+      # (engine.rs prepare_tool_command). A real run on the tiny model: it
+      # writes a control vector, prints the progress line the app reads (patch
+      # 0003) and measures the layer lengths single-neuron doses are counted
+      # in (LU_LAYER_NORMS, patch 0004).
+      - name: "Vector tool computes from the resource layout (P11)"
+        if: matrix.sidecar_triple == 'x86_64-pc-windows-msvc'
+        shell: pwsh
+        timeout-minutes: 5
+        run: |
+          $tool = (Resolve-Path "src-tauri\bin\lu-llama-cvector-generator-${{ matrix.sidecar_triple }}.exe").Path
+          $runDir = (Resolve-Path "src-tauri\resources\llama\${{ matrix.sidecar_triple }}").Path
+          $model = "$env:RUNNER_TEMP\stories260K.gguf"
+          if (-not (Test-Path $model)) { throw "the boot smoke's model is missing: $model" }
+          $work = "$env:RUNNER_TEMP\cvector"
+          New-Item -ItemType Directory -Force -Path $work | Out-Null
+          Set-Content -Path "$work\more.txt" -Value 'Once upon a time there was a happy dog.', 'The sun was bright and everyone smiled.'
+          Set-Content -Path "$work\less.txt" -Value 'Once upon a time there was a sad dog.', 'The rain fell and everyone cried.'
+          Push-Location $runDir
+          & $tool -m $model --positive-file "$work\more.txt" --negative-file "$work\less.txt" -o "$work\direction.gguf" --method mean -c 256 *> "$work\cvector.log"
+          $vectorExit = $LASTEXITCODE
+          $env:LU_LAYER_NORMS = '1'
+          & $tool -m $model --positive-file "$work\more.txt" --negative-file "$work\less.txt" -o "$work\norms.gguf" --method mean -c 256 *> "$work\cvector-norms.log"
+          $normsExit = $LASTEXITCODE
+          Remove-Item Env:\LU_LAYER_NORMS
+          Pop-Location
+          Get-Content "$work\cvector.log", "$work\cvector-norms.log"
+          if ($vectorExit -ne 0) { throw "lu-llama-cvector-generator exited $vectorExit (run from $runDir)" }
+          if (-not (Test-Path "$work\direction.gguf")) { throw "no control vector written" }
+          if (-not (Select-String -Path "$work\cvector.log" -Pattern 'Evaluating prompt[2/2]' -SimpleMatch -Quiet)) { throw "no progress line for the last prompt (patch 0003)" }
+          if ($normsExit -ne 0) { throw "the measuring mode (LU_LAYER_NORMS, patch 0004) exited $normsExit" }
+          $norms = @(Select-String -Path "$work\cvector-norms.log" -Pattern '^LU norm [0-9]+ [0-9]+\.[0-9]{6}$').Count
+          if ($norms -lt 1 -or (Test-Path "$work\norms.gguf")) { throw "LU_LAYER_NORMS printed $norms 'LU norm' lines (want at least 1) or wrote a vector" }
+          Write-Host "OK - the vector tool computes a control vector from $runDir and measures $norms layer lengths"
+
       # ── App build ────────────────────────────────────────────────────────
       - name: Install npm dependencies
         run: npm ci
@@ -681,6 +784,29 @@ jobs:
           set -euo pipefail
           rm -f "$RUNNER_TEMP/lu-dry-run/dry-run-updater.key"
           node scripts/release-dry-run.mjs check-binaries "$RUNNER_TEMP/lu-dry-run/receipt.json" src-tauri/target/release
+
+      # D10: the NSIS installer now carries Microsoft's WebView2 bootstrapper
+      # (bundle.windows.webviewInstallMode embedBootstrapper). tauri build
+      # fetches it from go.microsoft.com and checks nothing, because the file
+      # has no fixed version or hash. What can be checked is Microsoft's
+      # Authenticode signature on the copy that went into the installer.
+      - name: "Dry run: the embedded WebView2 bootstrapper is signed by Microsoft"
+        if: ${{ inputs.dry_run }}
+        shell: pwsh
+        timeout-minutes: 5
+        run: |
+          # The condition stays `inputs.dry_run` alone (release-dry-run.test.ts);
+          # Linux has no NSIS installer and so nothing to check.
+          if (-not $IsWindows) { 'no NSIS installer on this platform'; exit 0 }
+          $found = @(Get-ChildItem -Path src-tauri/target, "$env:LOCALAPPDATA\tauri" -Recurse -Filter MicrosoftEdgeWebview2Setup.exe -ErrorAction SilentlyContinue)
+          if ($found.Count -eq 0) { throw "no MicrosoftEdgeWebview2Setup.exe after the build" }
+          foreach ($f in $found) {
+            $sig = Get-AuthenticodeSignature $f.FullName
+            "{0}  {1:N0} bytes  {2}  {3}" -f $f.FullName, $f.Length, $sig.Status, $sig.SignerCertificate.Subject
+            if ($sig.Status -ne 'Valid' -or $sig.SignerCertificate.Subject -notmatch 'O=Microsoft Corporation') {
+              throw "$($f.FullName) is not validly signed by Microsoft"
+            }
+          }
 
       # ── Windows code signing, only with the secrets of one lane ──────────
       # Two lanes, and at most one of them signs a release:
@@ -923,6 +1049,11 @@ jobs:
           done
           [ "$missing" -eq 0 ] || exit 1
           echo "OK: every staged sidecar companion is present inside the built AppImage ($extracted_llama_dir)"
+          for exe in lu-llama-server lu-llama-cvector-generator; do
+            [ -x "$workdir/squashfs-root/usr/bin/$exe" ] \
+              || { echo "FAIL: usr/bin/$exe is missing from the built AppImage (FEHLER-P11 #7)" >&2; exit 1; }
+          done
+          echo "OK: lu-llama-server and lu-llama-cvector-generator are in the AppImage's usr/bin"
           # GH #191: .DirIcon and the .desktop file at the AppImage's root are
           # symlinks, and they must be RELATIVE. The bundler before
           # @tauri-apps/cli 2.11.4 wrote the build machine's absolute path
@@ -937,6 +1068,16 @@ jobs:
             [ -e "$link" ] || { echo "FAIL: $(basename "$link") -> $target does not resolve inside the AppImage (GH #191)" >&2; exit 1; }
           done
           echo "OK: .DirIcon and the .desktop link are relative and resolve (GH #191)"
+          # GH #204: 3.0.8 shipped without the tray library, and on a system
+          # without it the app aborted at start. @tauri-apps/cli adds it only
+          # when it sees `tray-icon` on the FIRST `tauri` entry of Cargo.toml,
+          # and since 3.0.8 that sits in the desktop target block, so
+          # tauri.linux.conf.json now names it. It has to be here, and so do
+          # the libraries it needs that linuxdeploy pulls in after it.
+          for lib in libayatana-appindicator3.so.1 libayatana-indicator3.so.7 libayatana-ido3-0.4.so.0 libdbusmenu-glib.so.4 libdbusmenu-gtk3.so.4; do
+            [ -e "$workdir/squashfs-root/usr/lib/$lib" ] || { echo "FAIL: usr/lib/$lib is missing from the built AppImage; without it the tray cannot be built (GH #204)" >&2; exit 1; }
+          done
+          echo "OK: the AppImage carries libayatana-appindicator3 and what it needs (GH #204)"
 
       # SKEPTIKER-LINUX-WEB-K1.md: the AppImage check above proves nothing
       # about the .deb, a completely different bundler (dpkg-deb, not
@@ -976,6 +1117,11 @@ jobs:
           done
           [ "$missing" -eq 0 ] || exit 1
           echo "OK: every staged sidecar companion is present inside the built .deb ($extracted_llama_dir)"
+          for exe in lu-llama-server lu-llama-cvector-generator; do
+            [ -x "$workdir/usr/bin/$exe" ] \
+              || { echo "FAIL: usr/bin/$exe is missing from the built .deb (FEHLER-P11 #7)" >&2; exit 1; }
+          done
+          echo "OK: lu-llama-server and lu-llama-cvector-generator are in the .deb's usr/bin"
 
       # ── Dry run: the judged files, and no release ────────────────────────
       # Last, so that only a build that passed every check above is handed
@@ -1248,7 +1394,7 @@ jobs:
           path: .llama-build
           # The deployment target is part of the key: a cached binary built
           # for another minimum OS must not be reused.
-          key: llama-${{ hashFiles('scripts/build-llama.sh') }}-aarch64-apple-darwin-min${{ env.MACOSX_DEPLOYMENT_TARGET }}-v1
+          key: llama-${{ hashFiles('scripts/build-llama.sh', 'scripts/llama-patches/**') }}-aarch64-apple-darwin-min${{ env.MACOSX_DEPLOYMENT_TARGET }}-v1
 
       - name: Build llama-server sidecar
         shell: bash
@@ -1262,6 +1408,8 @@ jobs:
           set -euo pipefail
           bin="src-tauri/bin/lu-llama-server-$SIDECAR_TRIPLE"
           test -x "$bin"
+          # The Neuron tweaker's vector tool ships here too (FEHLER-P11 #7).
+          test -x "src-tauri/bin/lu-llama-cvector-generator-$SIDECAR_TRIPLE"
           ls -la src-tauri/bin/
           file "$bin" | grep -q 'arm64' || { echo "FAIL: the sidecar is not an arm64 binary" >&2; exit 1; }
           minos="$(otool -l "$bin" | awk '/LC_BUILD_VERSION/{f=1} f && /minos/ && !done {print $2; done=1}')"
@@ -1311,6 +1459,45 @@ jobs:
             exit 1
           fi
           echo "OK: the sidecar starts outside its build directory, loads a model and answers /health"
+
+      # P11: a real run of the vector tool on the tiny model, as on Linux and
+      # Windows: it writes a control vector, prints the progress line the app
+      # reads (LU patch 0003) and measures the layer lengths single-neuron
+      # doses are counted in (LU_LAYER_NORMS, patch 0004). `-ngl 0` for the
+      # reason the boot smoke above gives.
+      - name: "Vector tool computes outside its build directory (P11)"
+        shell: bash
+        timeout-minutes: 5
+        run: |
+          set -euo pipefail
+          tool="$PWD/src-tauri/bin/lu-llama-cvector-generator-$SIDECAR_TRIPLE"
+          model="$RUNNER_TEMP/stories260K.gguf"
+          echo "${STORIES260K_SHA256}  $model" | shasum -a 256 -c - \
+            || { echo "FAIL: the boot smoke's stories260K.gguf is missing or does not match the pinned sha256" >&2; exit 1; }
+          work="$RUNNER_TEMP/cvector"
+          rm -rf "$work"
+          mkdir -p "$work"
+          printf 'Once upon a time there was a happy dog.\nThe sun was bright and everyone smiled.\n' > "$work/more.txt"
+          printf 'Once upon a time there was a sad dog.\nThe rain fell and everyone cried.\n' > "$work/less.txt"
+          ( cd "$work" && "$tool" -m "$model" --positive-file more.txt --negative-file less.txt \
+              -o direction.gguf --method mean -ngl 0 -c 256 ) >"$work/cvector.log" 2>&1 || {
+            cat "$work/cvector.log"
+            echo "FAIL: lu-llama-cvector-generator exited non-zero" >&2
+            exit 1
+          }
+          [ -s "$work/direction.gguf" ] || { cat "$work/cvector.log"; echo "FAIL: no control vector written" >&2; exit 1; }
+          grep -q 'Evaluating prompt\[2/2\]' "$work/cvector.log" \
+            || { cat "$work/cvector.log"; echo "FAIL: no progress line for the last prompt (patch 0003)" >&2; exit 1; }
+          ( cd "$work" && LU_LAYER_NORMS=1 "$tool" -m "$model" --positive-file more.txt --negative-file less.txt \
+              -o norms.gguf --method mean -ngl 0 -c 256 ) >"$work/cvector-norms.log" 2>&1 || {
+            cat "$work/cvector-norms.log"
+            echo "FAIL: the vector tool's measuring mode (LU_LAYER_NORMS, patch 0004) exited non-zero" >&2
+            exit 1
+          }
+          norms="$(grep -cE '^LU norm [0-9]+ [0-9]+\.[0-9]{6}$' "$work/cvector-norms.log" || true)"
+          [ "$norms" -ge 1 ] && [ ! -e "$work/norms.gguf" ] \
+            || { cat "$work/cvector-norms.log"; echo "FAIL: LU_LAYER_NORMS printed $norms 'LU norm' lines (want at least 1) or wrote a vector" >&2; exit 1; }
+          echo "OK: the vector tool computes a control vector outside its build directory and measures $norms layer lengths"
 
       # ── App build, signing, notarization: nothing is uploaded yet ────────
       - name: Install npm dependencies

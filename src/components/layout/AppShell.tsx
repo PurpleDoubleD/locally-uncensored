@@ -19,10 +19,10 @@ import {
   SettingsSkeleton,
   VoiceSkeleton,
 } from './ViewSkeletons'
-import { useUIStore } from '../../stores/uiStore'
+import { useUIStore, readViewportWidth } from '../../stores/uiStore'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { useCompareStore } from '../../stores/compareStore'
-import { useProviderStore } from '../../stores/providerStore'
+import { useProviderStore, rememberOllamaResetBase } from '../../stores/providerStore'
 import { mayEnableFromWizard } from '../../lib/onboarding-provider-gate'
 import { sameEndpoint } from '../../lib/openai-entries'
 import { useChatStore } from '../../stores/chatStore'
@@ -53,6 +53,7 @@ import type { TextChunk } from '../../types/rag'
 import type { Role } from '../../types/chat'
 import { useKeyboardShortcuts } from '../../hooks/useKeyboardShortcuts'
 import { useCloudAuth } from '../../hooks/useCloudAuth'
+import { useTraySync } from '../../hooks/useTraySync'
 import { useCloudOutageWatch } from '../../hooks/useCloudOutageWatch'
 import { useCloudAuthStore, deriveCloudAvailable } from '../../stores/cloudAuthStore'
 import { useCreateStore } from '../../stores/createStore'
@@ -64,6 +65,9 @@ import { RenderFixupModal } from '../create/experimental/RenderFixupModal'
 import { CommandPalette } from '../ui/CommandPalette'
 import { CreditsExhaustedModal } from './CreditsExhaustedModal'
 import { Titlebar } from './Titlebar'
+import { HfLinkInbox } from '../models/HfLinkInbox'
+import { useNeuronFollowsPersona } from '../../hooks/useNeuronFollowsPersona'
+import { NEURONS_ENABLED } from '../../lib/features'
 
 // Aus der Komponente herausgezogen: `new Set(STORE_KEYS)` entstand bei jedem
 // Render neu und war damit die instabile Referenz, wegen der der Restore-Effekt
@@ -125,6 +129,7 @@ const loadModelManager = () => import('../models/ModelManager').then((m) => ({ d
 const loadBenchmarkView = () => import('../models/BenchmarkView').then((m) => ({ default: m.BenchmarkView }))
 const loadSettingsPage = () => import('../settings/SettingsPage').then((m) => ({ default: m.SettingsPage }))
 const loadCreateExperimental = () => import('../create/experimental/CreateExperimental').then((m) => ({ default: m.CreateExperimental }))
+const loadNeuronView = () => import('../neuron/NeuronView').then((m) => ({ default: m.NeuronView }))
 const loadVoiceView = () => import('../voice/VoiceView').then((m) => ({ default: m.VoiceView }))
 const loadOnboarding = () => import('../onboarding/Onboarding').then((m) => ({ default: m.Onboarding }))
 
@@ -161,10 +166,25 @@ export function AppShell() {
   const [showSelector, setShowSelector] = useState(false)
 
   useKeyboardShortcuts()
+
+  // Issue 309 T1: die Seitenpanels gegen die Fensterbreite halten, beim
+  // Einhaengen und bei jedem Resize (NARROW_VIEWPORT_WIDTH in uiStore).
+  // Layout-Effekt, damit ein schmal startendes Fenster nicht erst einen
+  // Rahmen lang die gequetschte Spalte zeigt. getState statt Abo: diese
+  // Komponente soll von der Breite nicht neu rendern.
+  useLayoutEffect(() => {
+    const fit = () => useUIStore.getState().fitToViewport(readViewportWidth())
+    fit()
+    window.addEventListener('resize', fit)
+    return () => window.removeEventListener('resize', fit)
+  }, [])
   // LU Cloud account boot: keychain session restore + /api/me probe; keeps
   // the cloud Create axis and the lu-cloud chat provider in sync.
   useCloudAuth()
+  // T2: the tray menu's lines (account or engine, model, memory).
+  useTraySync()
   useCloudOutageWatch()
+  useNeuronFollowsPersona()
 
   // ── Global Local/Cloud mode (2.5.7) — appMode drives everything ──
   const appMode = settings.appMode
@@ -268,7 +288,7 @@ export function AppShell() {
   // unmount), so there is no second stop here.
   useEffect(() => {
     const ui = useUIStore.getState()
-    if (appMode === 'cloud' && (ui.currentView === 'voice' || ui.currentView === 'models' || ui.currentView === 'benchmark')) {
+    if (appMode === 'cloud' && (ui.currentView === 'voice' || ui.currentView === 'models' || ui.currentView === 'benchmark' || ui.currentView === 'neuron')) {
       ui.setView('chat')
     }
   }, [appMode])
@@ -799,7 +819,9 @@ export function AppShell() {
       if (!cancelled) armSubscription()
 
       try {
-        const res = await backendCall<{ base?: string }>('get_ollama_host')
+        const res = await backendCall<{ base?: string; defaultBase?: string }>('get_ollama_host')
+        // Where "Reset AI Backends" points Ollama (OLLAMA_HOST, else default).
+        rememberOllamaResetBase(res?.defaultBase)
         if (!cancelled && res?.base) {
           setOllamaBase(res.base)
           const current = useProviderStore.getState().providers.ollama?.baseUrl
@@ -1177,6 +1199,7 @@ export function AppShell() {
             {currentView === 'settings' && <LazyView load={loadSettingsPage} fallback={<SettingsSkeleton />} />}
             {currentView === 'create' && <LazyView load={loadCreateExperimental} fallback={<CreateSkeleton />} />}
             {currentView === 'voice' && <LazyView load={loadVoiceView} fallback={<VoiceSkeleton />} />}
+            {currentView === 'neuron' && NEURONS_ENABLED && <LazyView load={loadNeuronView} fallback={<BenchmarkSkeleton />} />}
           </main>
         </div>
       </div>
@@ -1197,6 +1220,7 @@ export function AppShell() {
       <ReleaseNotesModal />
       <ShortcutsModal />
       <RemotePairPrompt />
+      <HfLinkInbox />
       <RemoteSigninPrompt />
       <PhoneContinuedBar />
       {/* Cmd/Ctrl+K. Hoert auf `lu-command-palette`, genau wie die

@@ -35,6 +35,7 @@ import { announceEngineCpuFallback } from '../lib/engine-offload'
 import { customModelDirs } from '../lib/custom-model-dirs'
 import { singleModelSlot } from '../lib/capabilities'
 import { claimSlotForChatLoad, getMobileContextCap } from '../lib/model-slot'
+import { clampContextWindow } from '../lib/number-limits'
 
 interface EngineStatusLite {
   running: boolean
@@ -427,9 +428,10 @@ export async function ensureBuiltinAgentCtx(modelName: string): Promise<void> {
   const hit = models.find((m) => m.name === bare)
   if (!hit) return
 
-  const override = settings.contextWindowOverride
+  // Clamped (B13), the same bound the Settings field and set_setting use.
+  const override = clampContextWindow(settings.contextWindowOverride)
   let want = 0
-  if (typeof override === 'number' && override > 0) {
+  if (override > 0) {
     want = override
   } else if (typeof hit.ctx_train === 'number' && hit.ctx_train > 0) {
     want = Math.max(ENGINE_DEFAULT_CTX, Math.min(hit.ctx_train, AGENT_CONTEXT_CAP))

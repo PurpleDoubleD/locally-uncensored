@@ -1,3 +1,4 @@
+import type { CustomParam } from '../lib/custom-params'
 import type { AgentBlock } from './agent-mode'
 import type { SamplingOverrides } from '../lib/sampling'
 
@@ -134,6 +135,10 @@ export interface Message {
    *  gets a persona stamped on later, so turning group chat back on does not
    *  hand it to whichever persona that model plays then. */
   noGroupPersona?: true
+  /** GH #201: the request behind this answer left out `dropped` older
+   *  messages to fit `window` tokens. The chat says so next to the answer.
+   *  Absent when the whole conversation went out. */
+  historyTrim?: { dropped: number; window: number; shortened?: number }
   timestamp: number
   images?: ImageAttachment[]
   /** Files attached to this user message. `content` already carries their
@@ -240,6 +245,18 @@ export interface CompactionRecord {
    * and on a run whose merge failed and fell back to a plain link.
    */
   merged?: boolean
+  /**
+   * The whole payload before and after, estimated, for the transcript line
+   * "Compacted, 28.9K → 17.9K" (3.0.9). `tokensBefore`/`tokensAfter` above
+   * only measure the replaced turns against their summary, which is not the
+   * number the context counter shows. Absent on records from before 3.0.9.
+   */
+  contextBefore?: number
+  contextAfter?: number
+  /** Id of the newest message when it ran: where the view "before this
+   *  compaction" ends (lib/compact-layers.ts). Absent on older records,
+   *  which fall back to `atMessageCount`. */
+  endMessageId?: string
 }
 
 /**
@@ -286,6 +303,10 @@ export interface Conversation {
    *  follows the chat's own persona setting, which is how every group worked
    *  before this field existed. */
   groupPersonas?: Record<string, string>
+  /** Group chat (GH #200): members set to sit out the NEXT round only. The
+   *  round that starts takes it away again, so it never lingers. Absent:
+   *  everyone answers, in the order of `groupModels`. */
+  groupSitOut?: string[]
   /**
    * Compactions that have happened in this chat, oldest first. The payload
    * carries the newest merged state and any plain links after it; a chat from
@@ -305,6 +326,10 @@ export interface Conversation {
    *  defaults into it, so a reset chat keeps following the Settings page even
    *  if its sliders move again afterwards. */
   sampling?: SamplingOverrides
+  /** GH #198: this chat's own custom sampling parameters. They win over the
+   *  speaker's persona rows with the same key; in a group they hold for every
+   *  member. Absent on every chat from before. */
+  customParams?: CustomParam[]
   /**
    * Kept versions (GH #172, #174), keyed by the id of the message they follow,
    * or FORK_ROOT (lib/chat-forks.ts) for a change of the very first message.

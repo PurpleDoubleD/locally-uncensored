@@ -18,11 +18,16 @@ mod android_entry;
 #[cfg(target_os = "linux")]
 mod linux_media;
 mod app_identity;
+// The chat's HTML preview server. A phone starts no server (mobile_guard.rs).
+#[cfg(desktop)]
+mod html_preview;
 mod cancel_registry;
 mod commands;
 mod crash_report;
 mod disk;
 mod finder_path;
+#[cfg(desktop)]
+mod hf_link;
 mod host_kind;
 mod install_state;
 mod media_store;
@@ -50,6 +55,10 @@ mod shown_path;
 mod e2e_remote;
 mod runtime_root;
 mod storage_move;
+mod system_tray;
+mod tray_menu;
+#[cfg(any(windows, test))]
+mod webview2_check;
 mod state;
 // Test-only OS helpers (a shell, a sleeper, "is this pid alive"), shared by
 // the process tests in state.rs, commands/engine.rs and commands/bg_tasks.rs
@@ -64,7 +73,6 @@ use tauri::Manager;
 #[cfg(desktop)]
 use tauri::{
     Emitter,
-    menu::{Menu, MenuItem},
     tray::TrayIconBuilder,
     image::Image,
 };
@@ -296,7 +304,7 @@ fn should_offload_after_hide(visible_now: bool, hide_generation: u64, current_ge
 /// icon, or Cmd+Tab to the app, is the way every Mac user gets a window back,
 /// and macOS reports it as `RunEvent::Reopen`. Nobody handled it, so the app
 /// sat in the Dock without a window and looked hung; the only way back was the
-/// "Show" item of the menu bar icon.
+/// "Open LU" item of the menu bar icon.
 ///
 /// With a window on screen macOS already does the right thing by itself
 /// (it activates the app and raises that window), so only the case without
@@ -610,6 +618,11 @@ pub fn run() {
         "LU starting"
     );
 
+    // Before any window: without the WebView2 Runtime for this Windows user
+    // Tauri can only show a raw error and end (webview2_check.rs).
+    #[cfg(windows)]
+    webview2_check::ensure_runtime();
+
     let app_state = AppState::new();
 
     let builder = tauri::Builder::default();
@@ -628,12 +641,12 @@ pub fn run() {
     // phone), before the page runs. The page decides by it which interface
     // loads, instead of guessing from the navigator (host_kind.rs).
     let builder = builder.plugin(host_kind::plugin());
-    // The native layer of the phones (plugins/lu-native) and the links that
-    // open the app: lu://oauth/callback and lu://remote.
+    // The native layer of the phones (plugins/lu-native).
     #[cfg(mobile)]
-    let builder = builder
-        .plugin(tauri_plugin_lu_native::init())
-        .plugin(tauri_plugin_deep_link::init());
+    let builder = builder.plugin(tauri_plugin_lu_native::init());
+    // The links that open the app: lu://oauth/callback and lu://remote on a
+    // phone, locallyuncensored://open-model on the desktop (hf_link.rs).
+    let builder = builder.plugin(tauri_plugin_deep_link::init());
     // Updates of a phone app come through the store.
     #[cfg(desktop)]
     let builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
@@ -658,6 +671,21 @@ pub fn run() {
         // commands/mobile_guard.rs), on the desktop it does nothing.
         .mobile_guard()
         .invoke_handler(tauri::generate_handler![
+            // The chat's HTML preview: a loopback page with its own closed
+            // policy, served while a preview is open (html_preview.rs). Desktop
+            // only: a phone starts no server, and its agent preview has its own.
+            #[cfg(desktop)]
+            html_preview::html_preview_put,
+            #[cfg(desktop)]
+            html_preview::html_preview_close,
+            // Hugging Face "Use this model": the page takes the waiting link
+            #[cfg(desktop)]
+            hf_link::hf_link_take,
+            // T2: the grey lines of the tray menu
+            #[cfg(desktop)]
+            tray_menu::tray_update,
+            #[cfg(desktop)]
+            tray_menu::tray_memory,
             // LU Cloud OAuth loopback (Google/GitHub via system browser)
             commands::oauth::oauth_start,
             commands::oauth::oauth_wait,
@@ -676,6 +704,7 @@ pub fn run() {
             commands::process::get_comfy_gpu_status,
             commands::process::comfy_torch_plan,
             commands::process::set_comfyui_port,
+            commands::process::set_comfyui_autostart,
             commands::process::set_comfyui_host,
             commands::process::set_ollama_host,
             commands::process::get_ollama_host,
@@ -714,6 +743,8 @@ pub fn run() {
             commands::install::lmstudio_cancel_load,
             #[cfg(desktop)]
             commands::install::lmstudio_load_model,
+            #[cfg(desktop)]
+            commands::install::lmstudio_gguf_runtime,
             #[cfg(desktop)]
             commands::install::lmstudio_model_context,
             #[cfg(desktop)]
@@ -765,6 +796,33 @@ pub fn run() {
             commands::abliterate::abliterate_dismiss,
             commands::abliterate::abliterate_runs,
             commands::abliterate::abliterate_trash_copy,
+            // Neuron tweaker (3.0.9, P11)
+            #[cfg(desktop)]
+            commands::neuron::neuron_presets,
+            #[cfg(desktop)]
+            commands::neuron::neuron_info,
+            #[cfg(desktop)]
+            commands::neuron::neuron_build,
+            #[cfg(desktop)]
+            commands::neuron::neuron_feature_add,
+            #[cfg(desktop)]
+            commands::neuron::neuron_mlp_add,
+            #[cfg(desktop)]
+            commands::neuron::neuron_delete,
+            #[cfg(desktop)]
+            commands::neuron::neuron_sae_download,
+            #[cfg(desktop)]
+            commands::neuron::neuron_sae_search,
+            #[cfg(desktop)]
+            commands::neuron::neuron_status,
+            #[cfg(desktop)]
+            commands::neuron::neuron_cancel,
+            #[cfg(desktop)]
+            commands::neuron::neuron_dismiss,
+            #[cfg(desktop)]
+            commands::neuron::neuron_apply,
+            #[cfg(desktop)]
+            commands::neuron::neuron_compare,
             // Whisper STT
             commands::whisper::whisper_status,
             commands::whisper::transcribe,
@@ -772,6 +830,7 @@ pub fn run() {
             commands::tts::tts_status,
             commands::tts::synthesize,
             commands::tts::synthesize_external,
+            commands::tts::transcribe_external,
             commands::tts::download_voice,
             commands::tts::installed_piper_voices,
             // Agent tools (legacy)
@@ -785,6 +844,7 @@ pub fn run() {
             // Shell
             // REA as an agent plugin: the pinned package and what its start needs.
             commands::plugin_rea::plugin_rea_status,
+            commands::plugin_rea::mcp_child_path,
             commands::plugin_rea::plugin_rea_fetch,
             commands::plugin_rea::plugin_rea_guard,
             commands::shell::shell_execute,
@@ -897,6 +957,7 @@ pub fn run() {
             commands::download::lmstudio_model_dir,
             commands::download::check_model_sizes,
             commands::download::delete_comfy_model,
+            commands::download::comfy_model_info,
             // Check files and Repair (GH #113)
             commands::model_verify::verify_model_files,
             commands::model_verify::verify_model_files_status,
@@ -1001,6 +1062,9 @@ pub fn run() {
             commands::media_cmds::video_stage_motion_video,
             #[cfg(desktop)]
             commands::media_cmds::video_stage_voice,
+            // Colour settle across the seams of a long ComfyUI video (3.0.9).
+            #[cfg(desktop)]
+            commands::video_settle::video_color_settle,
             // The music engine of the Mac (ACE-Step 1.5). See commands/music.rs.
             #[cfg(desktop)]
             commands::media_cmds::mlx_music_status,
@@ -1272,6 +1336,11 @@ pub fn run() {
             #[cfg(desktop)]
             media_store::settle_at_start(&app.state::<AppState>());
 
+            // locallyuncensored://open-model: the link that started the app
+            // and every later one go to the inbox the page reads (hf_link.rs).
+            #[cfg(desktop)]
+            hf_link::setup(app.handle());
+
             // Remove Windows DWM shadow/border (the 1mm border around the window)
             #[cfg(target_os = "windows")]
             if let Some(window) = app.get_webview_window("main") {
@@ -1337,57 +1406,83 @@ pub fn run() {
             // Desktop only, like the two sections after it: a phone has no
             // tray to hide in, and no Ollama or ComfyUI to start. Each
             // statement carries its own gate so the code keeps its place.
+            // T2: the menu is built in tray_menu.rs; it starts as "Open LU" /
+            // "Quit LU" and the frontend fills in the grey lines above them.
             #[cfg(desktop)]
-            let show = MenuItem::with_id(app, "show", "Show", true, None::<&str>)?;
+            app.manage(tray_menu::TrayMenuState::<tauri::Wry>::default());
             #[cfg(desktop)]
-            let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
+            let (menu, menu_items) = tray_menu::build_menu(app, &tray_menu::TrayStatus::default())?;
+
+            // GH #204: on Linux the tray needs libayatana-appindicator, and
+            // building it without that library aborts the whole app. Without
+            // it LU starts with no tray, and the close button quits.
             #[cfg(desktop)]
-            let menu = Menu::with_items(app, &[&show, &quit])?;
+            let tray_present = system_tray::system_tray_available();
 
             #[cfg(desktop)]
-            let tray_icon = Image::from_path("icons/icon.png")
-                .or_else(|_| Image::from_path("icons/32x32.png"))
-                .unwrap_or_else(|_| Image::from_bytes(include_bytes!("../icons/32x32.png")).expect("embedded icon"));
+            if tray_present {
+                let tray_icon = Image::from_path("icons/icon.png")
+                    .or_else(|_| Image::from_path("icons/32x32.png"))
+                    .unwrap_or_else(|_| Image::from_bytes(include_bytes!("../icons/32x32.png")).expect("embedded icon"));
 
-            // On a Mac the menu bar gets a template image (see
-            // `menu_bar_template_rgba`), built from the embedded icon so it
-            // does not depend on the working directory of a bundled app.
-            #[cfg(target_os = "macos")]
-            let tray_icon = {
-                let source = Image::from_bytes(include_bytes!("../icons/128x128.png")).expect("embedded icon");
-                let _ = tray_icon;
-                Image::new_owned(menu_bar_template_rgba(source.rgba()), source.width(), source.height())
-            };
-            #[cfg(desktop)]
-            let tray = TrayIconBuilder::new()
-                .icon(tray_icon)
-                .tooltip("LU");
-            #[cfg(target_os = "macos")]
-            let tray = tray.icon_as_template(true);
-            #[cfg(desktop)]
-            tray
-                .menu(&menu)
-                .on_menu_event(|app, event| {
-                    match event.id().as_ref() {
-                        "show" => onboarding_window::bring_to_front(app),
-                        "quit" => {
-                            // Tauri's AppState Drop doesn't fire reliably on
-                            // Windows after `app.exit(0)` — run the explicit
-                            // subprocess shutdown here so tray Quit doesn't
-                            // leak Ollama / ComfyUI (a user V/b, v2.4.9).
-                            let state = app.state::<AppState>();
-                            state.shutdown_subprocesses();
-                            app.exit(0);
+                // On a Mac the menu bar gets a template image (see
+                // `menu_bar_template_rgba`), built from the embedded icon so it
+                // does not depend on the working directory of a bundled app.
+                #[cfg(target_os = "macos")]
+                let tray_icon = {
+                    let source = Image::from_bytes(include_bytes!("../icons/128x128.png")).expect("embedded icon");
+                    let _ = tray_icon;
+                    Image::new_owned(menu_bar_template_rgba(source.rgba()), source.width(), source.height())
+                };
+                let tray = TrayIconBuilder::with_id(tray_menu::TRAY_ID)
+                    .icon(tray_icon)
+                    .tooltip("LU");
+                #[cfg(target_os = "macos")]
+                let tray = tray.icon_as_template(true);
+                tray
+                    .menu(&menu)
+                    .on_menu_event(|app, event| {
+                        let id = event.id().as_ref();
+                        match id {
+                            tray_menu::OPEN_ID | tray_menu::ACTION_ID => {
+                                onboarding_window::bring_to_front(app);
+                                // The page opens Plan & Credits or Models.
+                                if id == tray_menu::ACTION_ID {
+                                    if let Some(action) = tray_menu::current_action(app) {
+                                        let _ = app.emit(tray_menu::ACTION_EVENT, action.event_name());
+                                    }
+                                }
+                            }
+                            tray_menu::QUIT_ID => {
+                                // Tauri's AppState Drop doesn't fire reliably on
+                                // Windows after `app.exit(0)` — run the explicit
+                                // subprocess shutdown here so tray Quit doesn't
+                                // leak Ollama / ComfyUI (a user V/b, v2.4.9).
+                                let state = app.state::<AppState>();
+                                state.shutdown_subprocesses();
+                                app.exit(0);
+                            }
+                            _ => {}
                         }
-                        _ => {}
-                    }
-                })
-                .on_tray_icon_event(|tray, event| {
-                    if let tauri::tray::TrayIconEvent::DoubleClick { .. } = event {
-                        onboarding_window::bring_to_front(tray.app_handle());
-                    }
-                })
-                .build(app)?;
+                    })
+                    .on_tray_icon_event(|tray, event| {
+                        match event {
+                            tauri::tray::TrayIconEvent::DoubleClick { .. } => {
+                                onboarding_window::bring_to_front(tray.app_handle());
+                            }
+                            // Fresh lines for the menu that is about to open.
+                            // Enter (the pointer reaching the icon) comes
+                            // before the click; an open Mac menu does not
+                            // change any more (tray_menu.rs).
+                            tauri::tray::TrayIconEvent::Click { .. } | tauri::tray::TrayIconEvent::Enter { .. } => {
+                                let _ = tray.app_handle().emit(tray_menu::OPENED_EVENT, ());
+                            }
+                            _ => {}
+                        }
+                    })
+                    .build(app)?;
+                tray_menu::remember(app.handle(), tray_menu::TrayStatus::default(), menu_items);
+            }
 
             // ─── Close → hide to tray instead of quit ───
             #[cfg(desktop)]
@@ -1397,6 +1492,14 @@ pub fn run() {
                 window.on_window_event(move |event| {
                     if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                         api.prevent_close();
+                        // No tray (GH #204): a hidden window could never come
+                        // back, so the close button is the Quit item.
+                        if !system_tray::close_hides_to_tray(tray_present) {
+                            let app = w.app_handle();
+                            app.state::<AppState>().shutdown_subprocesses();
+                            app.exit(0);
+                            return;
+                        }
                         // The hidden webview stays fully alive — read-aloud
                         // would keep talking and a running dictation would
                         // keep the mic hot behind a window the user believes
@@ -1505,11 +1608,11 @@ pub fn run() {
                 android_entry::leave_process(0);
             }
             // A click on the Dock icon while the window is hidden. Same call
-            // as the menu bar's "Show": the window is shown again, and that is
+            // as the menu bar's "Open LU": the window is shown again, and that is
             // also what takes back the unload after the hide. Inside
             // HIDE_OFFLOAD_GRACE the timer finds the window visible and does
             // nothing (`should_offload_after_hide`); after it, the backends
-            // start again on first use, exactly as after "Show".
+            // start again on first use, exactly as after "Open LU".
             #[cfg(target_os = "macos")]
             if let tauri::RunEvent::Reopen { has_visible_windows, .. } = event {
                 if reopen_needs_a_window(has_visible_windows) {
@@ -1532,7 +1635,7 @@ mod tests {
     }
 
     /// The rule above is worth nothing unless the run loop asks it, and the
-    /// way back is the one "Show" takes.
+    /// way back is the one "Open LU" takes.
     #[test]
     fn the_run_loop_answers_the_dock_click_the_way_show_does() {
         let src = include_str!("lib.rs");
@@ -1761,6 +1864,33 @@ mod tests {
         assert!(
             after.contains("offload_local_models_blocking"),
             "hiding to the tray must release the local model backends"
+        );
+    }
+
+    #[test]
+    fn the_tray_is_only_built_when_its_library_loads() {
+        // GH #204: 3.0.8 built the tray unconditionally, and on a Linux
+        // without libayatana-appindicator that aborted the app at start. The
+        // probe in `system_tray` is worth nothing unless the build sits
+        // behind it and the close button knows there may be no tray.
+        let src = include_str!("lib.rs");
+        let builder = src
+            .find("let tray = TrayIconBuilder::new()")
+            .expect("tray builder should exist");
+        let gate = src[..builder]
+            .rfind("if tray_present {")
+            .expect("the tray build must sit inside `if tray_present`");
+        let probe = src[..gate]
+            .rfind("system_tray::system_tray_available()")
+            .expect("tray_present must come from the library probe");
+        assert!(probe < gate && gate < builder);
+        let close = src
+            .find("if let tauri::WindowEvent::CloseRequested { api, .. } = event {")
+            .expect("close handler should exist");
+        let hide = src.find("let _ = w.hide();").expect("hide call should exist");
+        assert!(
+            src[close..hide].contains("system_tray::close_hides_to_tray(tray_present)"),
+            "without a tray the close button must not hide the window"
         );
     }
 

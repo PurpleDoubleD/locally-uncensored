@@ -60,6 +60,10 @@ function useSearch(query: string, online: boolean): SearchState {
       if (!alive) return
       setResult({ query, hits })
       loadVariantsOf(hits.map(repoOfHit))
+    }, () => {
+      // The search now throws when HuggingFace does not answer. This screen
+      // keeps its earlier behaviour: an empty list instead of a spinner forever.
+      if (alive) setResult({ query, hits: [] })
     })
     return () => {
       alive = false

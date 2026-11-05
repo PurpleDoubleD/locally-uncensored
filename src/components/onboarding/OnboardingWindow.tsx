@@ -15,6 +15,8 @@
  *                    beim Hauptfenster.
  *   pushPersisted…   HF-Token und GPU-Wahl nach Rust, bevor der Assistent
  *                    lädt oder spawnt (siehe `lib/rust-boot-sync.ts`).
+ *   syncOllama…      Rusts Ollama-Adresse (config.json > OLLAMA_HOST),
+ *                    die sonst AppShell holt (`lib/ollama-host-sync.ts`).
  *
  * Der LucideProvider (Strichstärke der Icon-Leiter) fehlt hier NICHT aus
  * Versehen: er liegt in `main.tsx` über beiden Bäumen, einmal.
@@ -27,6 +29,7 @@
 import { useEffect } from 'react'
 import { MotionConfig } from 'framer-motion'
 import { pushPersistedChoicesToRust } from '../../lib/rust-boot-sync'
+import { syncOllamaBaseFromRust } from '../../lib/ollama-host-sync'
 import { Onboarding } from './Onboarding'
 
 export function OnboardingWindow() {
@@ -35,6 +38,7 @@ export function OnboardingWindow() {
       invoke('show_window').catch(() => {})
     })
     void pushPersistedChoicesToRust().catch(() => {})
+    void syncOllamaBaseFromRust()
   }, [])
 
   return (

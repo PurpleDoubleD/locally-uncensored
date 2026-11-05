@@ -32,6 +32,7 @@ import { GoalBar } from './GoalBar'
 import { PlanBar } from './PlanBar'
 import { LoopBar } from './LoopBar'
 import { GroupCostHint } from './GroupCostHint'
+import { GroupRoundBar } from './GroupRoundBar'
 import { MemoryDebugToggle } from './MemoryDebugPanel'
 import { TokenCounter } from './TokenCounter'
 import { ContextDropdown } from './ContextDropdown'
@@ -65,7 +66,7 @@ interface Landing {
 }
 
 export function ChatView() {
-  const { sendMessage, stopGeneration, isGenerating, isLoadingModel, regenerateMessage, editAndResend, pendingApproval, approveToolCall, rejectToolCall } = useChat()
+  const { sendMessage, stopGeneration, isGenerating, isLoadingModel, regenerateMessage, regenerateSpeaker, editAndResend, pendingApproval, approveToolCall, rejectToolCall } = useChat()
   // A message from the paired phone in a shared chat goes through this very
   // send path (lib/remote-chats-bridge, lib/remote-chat-senders).
   useEffect(() => registerChatSender('chat', {
@@ -482,6 +483,7 @@ export function ChatView() {
                       isThisChatGenerating={activeGenerating}
                       isLoadingModel={isLoadingModel}
                       onRegenerate={regenerateMessage}
+                      onRegenerateSpeaker={regenerateSpeaker}
                       onEdit={editAndResend}
                       pendingApprovalId={pendingApproval?.id ?? null}
                       onApprove={approveToolCall}
@@ -657,6 +659,9 @@ export function ChatView() {
                           Flash-Modell, verschiebt also nichts, wenn es fehlt. */}
                       <FlashChatNotice />
                       <AgentWorkspaceBadge />
+                      {/* GH #200: who answers the next round, and Skip /
+                          Stop while one runs. Null outside a group chat. */}
+                      <GroupRoundBar onStop={stopGeneration} />
 
                       {/* Spacer */}
                       <div className="flex-1" />

@@ -14,6 +14,8 @@
 
 import type { ShortcutId } from '../../hooks/useKeyboardShortcuts'
 import type { View } from '../../stores/uiStore'
+import { useNeuronIntroRequest } from '../../stores/neuronIntroStore'
+import { NEURONS_ENABLED } from '../../lib/features'
 // Das Blattmodul und nicht die Sammelstelle `api/providers`: diese Datei laeuft
 // im Test ohne DOM und soll dabei keine Provider-Klassen und keinen Store
 // mitziehen. `model-name.ts` ist reine Zeichenkettenarbeit ohne Laufzeit-Import.
@@ -125,6 +127,11 @@ export function buildCommands(ctx: CommandContext): Command[] {
   if (ctx.localViewsAvailable) {
     out.push({ id: 'view-voice', label: 'Voice', group: GROUP_VIEW, run: () => ctx.setView('voice') })
     out.push({ id: 'view-benchmark', label: 'Benchmark', group: GROUP_VIEW, run: () => ctx.setView('benchmark') })
+    if (NEURONS_ENABLED) {
+      out.push({ id: 'view-neuron', label: 'Neuron tweaker', group: GROUP_VIEW, run: () => ctx.setView('neuron') })
+      // N2 (3.0.9): the Neurons introduction again, after its one showing.
+      out.push({ id: 'neuron-intro', label: 'Neurons: how it works', group: GROUP_VIEW, run: () => { ctx.setView('neuron'); useNeuronIntroRequest.getState().show() } })
+    }
     out.push({ id: 'view-models', label: 'Models', group: GROUP_VIEW, run: () => ctx.setView('models') })
   }
   out.push({ id: 'view-settings', label: 'Settings', group: GROUP_VIEW, run: () => ctx.setView('settings') })

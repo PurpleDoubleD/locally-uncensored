@@ -2284,7 +2284,14 @@ for (const size of SIZES) {
       await seedMemory()
       await page.getByTestId('m-account-signout').tap()
       await page.getByTestId('m-dialog-confirm').tap()
-      await expect(page.getByTestId('m-account-state')).toHaveAttribute('data-state', /signed-out|signed-in/)
+      // Wait for the end of the attempt. Right after the tap the page still says signed-in, because the sign out is
+      // running: reading the state then took that for "stayed signed in" and waited for an error that a sign out
+      // finishing on the phone never shows (1 of a CI-like run without retries).
+      // An attempt ends either with the notice (still signed in) or signed out; AccountPage has no third way.
+      await expect.poll(async () => {
+        if (await page.getByTestId('m-account-signout-error').isVisible().catch(() => false)) return 'error'
+        return page.getByTestId('m-account-state').getAttribute('data-state').catch(() => null)
+      }).toMatch(/^(error|signed-out)$/)
       const state = await page.getByTestId('m-account-state').getAttribute('data-state')
       if (state === 'signed-in') await expect(page.getByTestId('m-account-signout-error')).toContainText('Sign out did not finish.')
       else await expect(page.getByTestId('m-account-signout-error')).toHaveCount(0)

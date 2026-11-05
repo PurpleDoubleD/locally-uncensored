@@ -143,7 +143,11 @@ describe('AS-09: der Abschnitt ist ausgezogen, nicht nur verschoben', () => {
     // Seite bei jedem Schreibvorgang im Voice-Store neu rendern — auch beim
     // Tippen in ein Feld eines anderen Tabs.
     expect(PAGE).not.toContain('const voiceSettings = useVoiceStore()')
-    expect(PAGE).toContain('useVoiceStore((s) => s.resetVoiceDefaults)')
+    expect(PAGE).not.toMatch(/useVoiceStore\(\s*\)/)
+    // Since B2 the reset reads the action once when it fires, through
+    // getState() in lib/run-settings-reset.ts, and subscribes to nothing.
+    expect(readFileSync(resolve(__dirname, '../../../lib/run-settings-reset.ts'), 'utf8'))
+      .toContain('useVoiceStore.getState().resetVoiceDefaults()')
   })
 
   it('der Zeilenschalter steht einmal, nicht zweimal', () => {

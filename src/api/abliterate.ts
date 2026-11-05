@@ -74,6 +74,10 @@ export interface Check {
   falseAlarms: number
   mmlu: number
   n: number
+  /** MMLU questions asked; records before 3.0.9 asked `n`. */
+  mmluN?: number | null
+  /** '1' right, '0' wrong per question, same order in both checks. */
+  mmluMarks?: string | null
 }
 
 export interface RunRecord {
@@ -119,6 +123,9 @@ export interface RunStatus {
   startedAt: number
   elapsedSecs: number
   etaSecs: number | null
+  /** step and total count bytes (a download). */
+  bytes?: boolean
+  rateBps?: number | null
   logs: string[]
   error: string | null
   result: RunRecord | null
@@ -196,4 +203,77 @@ export function gb(bytes: number | null | undefined): string {
   // LU's own Python (23 MB) read "0.0 GB of 0.0 GB" on the box.
   if (v < 0.1) return `${Math.max(1, Math.round(bytes / 1e6))} MB`
   return v < 10 ? `${v.toFixed(1)} GB` : `${Math.round(v)} GB`
+}
+
+/** "740 MB", "1.24 GB": a download as it moves. */
+export function sizeText(bytes: number): string {
+  if (bytes < 1e9) return `${Math.round(bytes / 1e6)} MB`
+  return bytes < 10e9 ? `${(bytes / 1e9).toFixed(2)} GB` : `${(bytes / 1e9).toFixed(1)} GB`
+}
+
+/** "740 MB of 1.99 GB · 37% · 4.2 MB/s · about 5 min left", the line under
+ *  the bar while a run downloads. Speed and time come once Rust has a few
+ *  seconds to measure. */
+export function downloadLine(s: Pick<RunStatus, 'step' | 'total' | 'rateBps' | 'etaSecs'>): string {
+  const parts = [`${sizeText(s.step)} of ${sizeText(s.total)}`]
+  const share = phaseShare(s)
+  if (share != null) parts.push(`${Math.floor(share * 100)}%`)
+  if (s.rateBps != null) parts.push(s.rateBps >= 1e6 ? `${(s.rateBps / 1e6).toFixed(1)} MB/s` : `${Math.round(s.rateBps / 1e3)} kB/s`)
+  if (s.etaSecs != null && s.step < s.total) {
+    parts.push(s.etaSecs < 60 ? `${Math.max(1, s.etaSecs)} s left` : `about ${roughDuration(s.etaSecs)} left`)
+  }
+  return parts.join(' · ')
+}
+
+export interface MmluVerdict {
+  /** Right in the copy minus right in the original. */
+  delta: number
+  /** Answers that went from right to wrong and the other way, or null when
+   *  a record has no marks (before 3.0.9). */
+  worse: number | null
+  better: number | null
+  /** 'loss' and 'gain' only when the change is larger than chance explains. */
+  reading: 'same' | 'chance' | 'loss' | 'gain'
+  text: string
+}
+
+/** The knowledge check, read honestly. Both checks ask the same questions,
+ *  so only the answers that changed carry information: with b turned wrong
+ *  and c turned right, chance alone gives a net change of about ±2·√(b+c)
+ *  (McNemar). Without marks, two totals of the same questions can only be
+ *  reported, not judged. */
+export function mmluVerdict(before: Check, after: Check): MmluVerdict {
+  const n = after.mmluN ?? after.n
+  const delta = after.mmlu - before.mmlu
+  const signed = delta > 0 ? `+${delta}` : `${delta}`
+  const a = before.mmluMarks
+  const b = after.mmluMarks
+  if (!a || !b || a.length !== b.length) {
+    const text = delta === 0
+      ? `Same score on ${n} questions`
+      : `${signed} of ${n} questions; too few to tell a loss from chance`
+    return { delta, worse: null, better: null, reading: delta === 0 ? 'same' : 'chance', text }
+  }
+  let worse = 0
+  let better = 0
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] === '1' && b[i] === '0') worse++
+    else if (a[i] === '0' && b[i] === '1') better++
+  }
+  const changed = worse + better
+  const answers = (k: number) => `${k} answer${k === 1 ? '' : 's'}`
+  if (changed === 0) {
+    return { delta, worse, better, reading: 'same', text: `All ${n} answers the same as the original` }
+  }
+  const noise = 2 * Math.sqrt(changed)
+  const reading = Math.abs(delta) <= noise ? 'chance' : delta < 0 ? 'loss' : 'gain'
+  const verdict = reading === 'chance'
+    ? 'within chance'
+    : reading === 'loss'
+      ? `a real loss of ${((-delta / n) * 100).toFixed(1)} points`
+      : `a real gain of ${((delta / n) * 100).toFixed(1)} points`
+  return {
+    delta, worse, better, reading,
+    text: `${answers(worse)} turned wrong, ${answers(better)} turned right (${signed} of ${n}): ${verdict}`,
+  }
 }

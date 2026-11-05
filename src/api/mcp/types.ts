@@ -2,7 +2,11 @@
 import { isMobile } from '../../lib/device-kind'
 import { mobilePermissionDefaults } from '../../lib/mobile-permission-defaults'
 
-export type ToolCategory = 'filesystem' | 'terminal' | 'desktop' | 'web' | 'system' | 'image' | 'video' | 'workflow'
+// 'mcp' holds every tool of an external MCP server (B12, 28.10.2026). Those
+// tools used to be filed under 'workflow', so "Workflows: Auto" ran a shell or
+// file MCP server unattended while "Terminal: Blocked" never saw it. A server
+// can do anything, so its tools get a row of their own that asks first.
+export type ToolCategory = 'filesystem' | 'terminal' | 'desktop' | 'web' | 'system' | 'image' | 'video' | 'workflow' | 'mcp'
 
 export type PermissionLevel = 'blocked' | 'confirm' | 'auto'
 
@@ -21,6 +25,7 @@ export const DEFAULT_PERMISSIONS: PermissionMap = {
   // old persisted 'blocked' (which was UI-locked, never a user choice) up.
   video: 'confirm',
   workflow: 'confirm',
+  mcp: 'confirm',
 }
 
 /**

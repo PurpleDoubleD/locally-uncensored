@@ -5,9 +5,10 @@ import { isMlxImageHost, MAC_UPSCALE_FACTORS, type MacUpscaleFactor } from '../.
 import { laneImageModel, runsAtOwnSampling } from '../../../lib/image-engines'
 import { MLX_VIDEO_MIN_FRAMES, mlxFramesOnGrid, mlxVideoLaneEntry, mlxVideoMaxFrames, mlxTalking } from '../../../api/mlx-video'
 import { useMacMemoryGb } from '../../../lib/mac-memory'
+import { applyAspect } from '../../../lib/create-resolution'
 import { useCreateStore, MODEL_TYPE_DEFAULTS, EDIT_MAX_DENOISE, imageQualityLadder, type ImageQuality } from '../../../stores/createStore'
 import { classifyModel, resolveLocalOpPick } from '../../../api/comfyui'
-import { editIgnoresStrength } from '../../../lib/edit-references'
+import { readsEditStrength } from '../../../lib/edit-references'
 import { useCreateExp } from './CreateContext'
 import { intentToJob } from '../../../lib/render/cloud-jobs'
 import { meterState } from '../../../lib/render/credits-meter'
@@ -32,6 +33,7 @@ import { MOTION_OWN_WORKFLOW_NOTE, useMotionOwnWorkflow } from './motionWorkflow
 import { ImageCountChip } from './ImageCountChip'
 import { CharacterChip, CharacterNote, characterMakesStart } from './CharacterChip'
 import { PromptHistory } from './PromptHistory'
+import { PromptAssistant } from './PromptAssistant'
 import { SpecialControls } from './SpecialIntentControls'
 import { CreditsMeter } from './CreditsMeter'
 import { Button } from '../ui/Button'
@@ -78,6 +80,7 @@ export function Composer({ onOpenAdvanced, onOpenWorkflows }: Props) {
   // the short gap between two of its images: the button stays Cancel.
   const isGenerating = useCreateStore((s) => s.isGenerating || s.batchRun !== null)
   const backend = useCreateStore((s) => s.backend)
+  const trainKind = useCreateStore((s) => s.trainKind)
   const targetResolution = useCreateStore((s) => s.targetResolution)
   const setTargetResolution = useCreateStore((s) => s.setTargetResolution)
   const upscaleFactor = useCreateStore((s) => s.upscaleFactor)
@@ -369,7 +372,7 @@ export function Composer({ onOpenAdvanced, onOpenWorkflows }: Props) {
   // A caption that names the missing inputs is a note above the prompt
   // window (laneHint.ts isInputHint); the action captions stay inside it.
   const inputNote = showNoPromptHint && !needsMask && isInputHint(intent)
-  const laneCaption = noPromptHint(meta.id, backend, backend === 'local' && isMlxImageHost())
+  const laneCaption = noPromptHint(meta.id, backend, backend === 'local' && isMlxImageHost(), trainKind)
   // The disabled button says which input it waits for (laneHint.ts).
   const missingSource = missingSourceHint({ intent, needsSource: meta.needsSource, hasSource: hasStart })
 
@@ -396,8 +399,16 @@ export function Composer({ onOpenAdvanced, onOpenWorkflows }: Props) {
 
         <div className="rounded-[var(--radius-panel)] bg-white/[0.03] border border-white/[0.06] focus-within:border-white/15 transition-colors">
           {needPrompt && (
-            <div className="px-3.5 pt-3">
+            // The prompt assistant (B43) sits in the field's corner, not in the
+            // action bar: there every pixel is the model chip's, whose whole
+            // name has to fit at 760 px (FEHLER-Q4 #2). The field keeps its
+            // width and only leaves room for the button inside (pr-7).
+            <div className="relative px-3.5 pt-3">
+              <div className="absolute top-2 right-2">
+                <PromptAssistant onUse={setPrompt} align="right" />
+              </div>
               <PromptField
+                className="pr-7"
                 value={prompt}
                 onChange={setPrompt}
                 placeholder={
@@ -651,6 +662,8 @@ function LaneControls() {
   const setSteps = useCreateStore((s) => s.setSteps)
   const denoise = useCreateStore((s) => s.denoise)
   const setDenoise = useCreateStore((s) => s.setDenoise)
+  const editStrength = useCreateStore((s) => s.editStrength)
+  const setEditStrength = useCreateStore((s) => s.setEditStrength)
   const imageModelType = useCreateStore((s) => s.imageModelType)
   const imageModel = useCreateStore((s) => s.imageModel)
   const setImageQuality = useCreateStore((s) => s.setImageQuality)
@@ -686,10 +699,10 @@ function LaneControls() {
   const macMemoryGb = useMacMemoryGb(mlxLocal)
   const macLengthGb = intent === 'motion' ? null : macMemoryGb
   const ownSampling = mlxLocal && runsAtOwnSampling(imageModelList, laneImageModel(imageModelList, imageModel, intent))
-  // A Qwen edit through ComfyUI samples at denoise 1.0 like its template, so
-  // an Edit strength there would be a dead control (lib/edit-references).
+  // A Qwen edit through ComfyUI reads its own Edit strength, 1 = the
+  // template's edit, as on the Mac (lib/edit-references, B46).
   const listedImageType = imageModelList.find((m) => m.name === imageModel)?.type
-  const strengthUnread = backend === 'local' && !mlxLocal && editIgnoresStrength(listedImageType ?? classifyModel(imageModel), imageModel)
+  const qwenStrength = backend === 'local' && !mlxLocal && readsEditStrength(listedImageType ?? classifyModel(imageModel), imageModel)
   const videoModelList = useCreateStore((s) => s.videoModelList)
   // Motion Control on the Mac runs the model of its own list.
   const motionModelList = useCreateStore((s) => s.motionModelList)
@@ -789,7 +802,10 @@ function LaneControls() {
                 size="sm"
                 layoutId="aspect"
                 value={aspectKey(width, height)}
-                onChange={(k) => { const p = aspectPresets(imageModelType)[k as AspectKey]; setSize(p.w, p.h) }}
+                // B49 (3.0.9, Discord): the same rule as the ratio buttons in
+                // Advanced settings (lib/create-resolution applyAspect), so
+                // 16:9 here and 16:9 there give the same size.
+                onChange={(k) => { const [rw, rh] = k.split(':').map(Number); const p = applyAspect(width, height, rw, rh); setSize(p.width, p.height) }}
                 options={[
                   { value: '1:1', label: '1:1', icon: Square },
                   { value: '3:4', label: '3:4' },
@@ -801,9 +817,14 @@ function LaneControls() {
           )}
         </div>
 
-        {meta.id === 'edit' && !mlxLocal && !strengthUnread && (
+        {meta.id === 'edit' && !mlxLocal && !qwenStrength && (
           <div className="w-44">
             <Slider label="Edit strength" min={0.05} max={EDIT_MAX_DENOISE} step={0.05} value={Math.min(denoise, EDIT_MAX_DENOISE)} onChange={setDenoise} format={(v) => v.toFixed(2)} />
+          </div>
+        )}
+        {meta.id === 'edit' && qwenStrength && (
+          <div className="w-44">
+            <Slider label="Edit strength" min={0.05} max={1} step={0.05} value={editStrength} onChange={setEditStrength} format={(v) => v.toFixed(2)} />
           </div>
         )}
       </div>
@@ -968,21 +989,9 @@ function LabeledControl({ label, children }: { label: string; children: React.Re
 type AspectKey = '1:1' | '3:4' | '4:3' | '16:9'
 const RATIO: Record<AspectKey, number> = { '1:1': 1, '3:4': 3 / 4, '4:3': 4 / 3, '16:9': 16 / 9 }
 
-function snap64(n: number): number { return Math.max(64, Math.round(n / 64) * 64) }
 // Video dims want a multiple of 16 (the VAE/latent grid of the WAN/S2V/VACE
 // families) — snap the resolution tiers to it so the graph never rejects them.
 function snap16(n: number): number { return Math.max(128, Math.round(n / 16) * 16) }
-
-function aspectPresets(modelType: string): Record<AspectKey, { w: number; h: number }> {
-  const def = MODEL_TYPE_DEFAULTS[modelType as keyof typeof MODEL_TYPE_DEFAULTS] ?? MODEL_TYPE_DEFAULTS.sdxl
-  const baseLong = Math.max(def.width, def.height)
-  const out = {} as Record<AspectKey, { w: number; h: number }>
-  for (const k of Object.keys(RATIO) as AspectKey[]) {
-    const r = RATIO[k]
-    out[k] = r >= 1 ? { w: baseLong, h: snap64(baseLong / r) } : { w: snap64(baseLong * r), h: baseLong }
-  }
-  return out
-}
 
 function aspectKey(w: number, h: number): AspectKey {
   const r = w / h

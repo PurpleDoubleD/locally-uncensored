@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { motion, AnimatePresence, useIsPresent } from 'framer-motion'
-import { UploadCloud, ImagePlus, Scissors, Wand2, Sparkles, X, Loader2, Download, AlertTriangle, Image as ImageIcon, Film, Maximize2 } from 'lucide-react'
+import { UploadCloud, ImagePlus, Scissors, Wand2, Sparkles, X, Loader2, Download, AlertTriangle, Image as ImageIcon, Film, Maximize2, Play } from 'lucide-react'
 import { useCreateStore, type GalleryItem } from '../../../stores/createStore'
 import { useModelStore } from '../../../stores/modelStore'
 import { createRunModel } from '../../../lib/render/create-studio'
@@ -25,10 +25,12 @@ import { GALLERY_DRAG_TYPE, galleryItemUrl, fetchGalleryItemBlob, recoverGallery
 import { InstallCancelled } from '../../../lib/bundle-install'
 import { isMlxImageHost } from '../../../api/mlx-image'
 import { bundleForVideoIntent } from '../../../api/comfyui'
-import { getVideoBundles } from '../../../api/discover'
+import { getVideoBundles, checkBundlesOnDisk } from '../../../api/discover'
+import { starterBundleFor, type StarterKind } from '../../../lib/starter-bundle'
 import { lipsyncFitLine } from './lipsyncFit'
 import { useGraphicsCardGb } from '../../../hooks/useGraphicsMemory'
 import { ReferenceStrip } from './ReferenceStrip'
+import { EndImageSlot, ImageReferenceStrip, useImageReferenceSupport } from './FrameRefs'
 import { FitStage, FIT_SIDE_FROM } from './FitStage'
 import { BatchStrip, UseOriginalButton, useBatchPickers } from './BatchStrip'
 import { addBatchFiles, useBatchOffered, useBatchOriginalOffer } from './batchRun'
@@ -39,6 +41,7 @@ import { SavedCharacterChips } from './SavedCharacters'
 import { loadPhotosAsReferences, sendPhotosToStudio } from './characterPhotos'
 import { MIN_TRAIN_IMAGES, maxTrainImages } from '../../../lib/train-image-cap'
 import { TRAIN_CAPTION_HELP, TRAIN_CAPTION_MAX, TRAIN_CAPTION_PLACEHOLDER } from '../../../lib/train-captions'
+import { STYLE_CAPTION_HELP, STYLE_CAPTION_PLACEHOLDER, STYLE_DROP_HINT, STYLE_DROP_TITLE } from '../../../lib/train-kind'
 import { describeAvailability, describeTrainPhoto, type DescribeAvailability } from '../../../lib/render/describe-train-photos'
 import { MAC_IMAGE_SETUP_SIZE, macVideoSetupCopy } from '../../../lib/mac-setup-sizes'
 import { macVideoSetupPlan, type MacVideoSetupPlan } from '../../../api/mlx-starter'
@@ -135,6 +138,12 @@ export function Stage({ displayed, onOpenMaskEditor, onEditResult, onAnimateResu
   // source was loaded — otherwise an older gallery item would hijack the stage.
   const freshResult = displayed && displayed.createdAt >= sourceSetAt
 
+  // B45: the Image tab's references stand beside a result too, where the
+  // model reads them or some are kept, so the next run shows what it uses.
+  const imageRefCount = useCreateStore((s) => s.imageReferences.length)
+  const imageRefSlots = useImageReferenceSupport().slots
+  const imageRefSide = intent === 'image' && (imageRefSlots > 0 || imageRefCount > 0)
+
   const characterTab = useCreateStore((s) => s.characterTab)
   const characterTrain = intent === 'character' && characterTab === 'train'
   // The example chips of Music are style descriptions. Where the prompt of a
@@ -196,7 +205,7 @@ export function Stage({ displayed, onOpenMaskEditor, onEditResult, onAnimateResu
         onSaveCharacter={displayed.type === 'video' && onSaveCharacter ? () => onSaveCharacter(displayed) : undefined}
         // The source and its references stay on screen beside the result
         // (FitStage), so the next run shows what it starts from.
-        side={meta.needsSource && source ? <ResultInputs /> : undefined}
+        side={meta.needsSource && source ? <ResultInputs /> : imageRefSide ? <ImageReferenceStrip /> : undefined}
       />
     )
   } else {
@@ -226,6 +235,7 @@ export function Stage({ displayed, onOpenMaskEditor, onEditResult, onAnimateResu
             ))}
           </div>
         )}
+        {intent === 'image' && <ImageReferenceStrip />}
         {/* How it works: the cloud tabs only, the films show the cloud. */}
         {howtoTopic && (
           <div className="pt-1">
@@ -526,6 +536,7 @@ function SourcePreview({ onOpenMaskEditor }: { onOpenMaskEditor: () => void }) {
   const controls = (
       <>
         <ReferenceStrip />
+        <EndImageSlot />
         {!batchOn && (
           <div className="flex items-center gap-2 mt-4">
             {meta.allowsMask && !noMask && (
@@ -602,6 +613,7 @@ function ResultInputs() {
         </div>
       </div>
       <ReferenceStrip />
+      <EndImageSlot />
       <BatchStrip />
     </div>
   )
@@ -638,9 +650,12 @@ function ChangeImageButton({ onChange }: { onChange: (r: Awaited<ReturnType<type
 // install on Motion Control, got a spinner, and had no way to stop or even see
 // a 10.5 GB transfer. Cancel here aborts the install loop and kills the running
 // download in Rust; the partial file stays, so a later run resumes.
-function InstallCardBody({ run, installing, status, err, onDismiss, onCancel, cancelTitle }: {
+function InstallCardBody({ run, installing, status, err, onDismiss, onCancel, cancelTitle, startOnly }: {
   run: () => void; installing: boolean; status: string; err: string | null
   onDismiss: () => void; onCancel: () => void
+  /** Everything is on disk already and only ComfyUI is down: the button
+   *  starts it and says so, instead of offering a download (GH #209). */
+  startOnly?: boolean
   /** What Cancel actually does here. The MLX installer on macOS runs in Rust
    *  and outlives this view, so its Cancel stops watching, not downloading —
    *  claiming otherwise would be a lie the next screen exposes. */
@@ -663,7 +678,9 @@ function InstallCardBody({ run, installing, status, err, onDismiss, onCancel, ca
           </button>
         </div>
       ) : (
-        <Button variant="primary" icon={Download} onClick={run}>Download &amp; install</Button>
+        startOnly
+          ? <Button variant="primary" icon={Play} onClick={run}>Start ComfyUI</Button>
+          : <Button variant="primary" icon={Download} onClick={run}>Download &amp; install</Button>
       )}
       {err && (
         <div className="relative t-control text-gray-300 bg-white/[0.03] rounded-[var(--radius-control)] px-2.5 py-2 pr-7 max-w-sm text-left">
@@ -791,6 +808,35 @@ const MAC_BUNDLE_COPY = {
   },
 } as const
 
+/** GH #209 (31.10.2026): after 40 GB of downloads the card still read "needs
+ *  a one-time download" and offered the download again, because the gate also
+ *  opens it while ComfyUI is down. The button never fetched a file twice (the
+ *  installer skips what is on disk), but the card said it would. When the
+ *  lane's bundle is complete on disk and ComfyUI is merely not running, the
+ *  card says that and offers to start it. Asked only in that situation. */
+const ALREADY_ON_DISK_COPY = {
+  title: 'Your model files are already here',
+  description: 'ComfyUI is not running, so nothing can render yet. Start ComfyUI and LU picks up the files you have, nothing on disk is downloaded again.',
+}
+
+function useStarterOnDisk(kind: StarterKind, intent: string, ask: boolean): boolean {
+  // The answer belongs to the lane it was asked for: a switch of lane or a
+  // ComfyUI that came up drops it without a reset in the effect.
+  const key = ask ? `${kind}|${intent}` : null
+  const [onDiskFor, setOnDiskFor] = useState<string | null>(null)
+  useEffect(() => {
+    if (!key) return
+    const bundle = starterBundleFor(kind, intent)
+    if (!bundle) return
+    let stale = false
+    checkBundlesOnDisk([bundle])
+      .then((r) => { if (!stale) setOnDiskFor(r.installed[bundle.name] === true ? key : null) })
+      .catch(() => { /* the card keeps offering the download */ })
+    return () => { stale = true }
+  }, [key, kind, intent])
+  return key !== null && onDiskFor === key
+}
+
 /** The plan of the Mac's video setup, for the card. Null until it is read,
  *  and when it could not be read: the card then says what it always can. */
 function useMacVideoSetupPlan(enabled: boolean, installing: boolean): MacVideoSetupPlan | null {
@@ -857,7 +903,7 @@ function videoBundleLine(intent: string): string {
 }
 
 function ModelInstallCard({ kind }: { kind: 'image' | 'video' | 'audio' | 'lipsync' | 'motion' | 'upscale' }) {
-  const { installModelBundle } = useCreateExp()
+  const { installModelBundle, connected } = useCreateExp()
   const intent = useCreateStore((s) => s.intent())
   // The run outlives this card on purpose. Stage swaps the card away as soon as
   // a render starts or the lane list refills, and a 12 GB install must not lose
@@ -883,6 +929,7 @@ function ModelInstallCard({ kind }: { kind: 'image' | 'video' | 'audio' | 'lipsy
   // A Mac no video starter runs on: the card says so and offers no download.
   // A run that is already on its way, or left an error, keeps its body.
   const nothingToInstall = macKind === 'video' && !macVideo.canInstall && !installing && !err
+  const startOnly = useStarterOnDisk(kind, intent, !mac && connected === false && !installing)
 
   const run = () => startInstallRun(kind, (onStatus, signal) =>
     installModelBundle(kind, onStatus, signal).catch((e: unknown) => {
@@ -895,8 +942,8 @@ function ModelInstallCard({ kind }: { kind: 'image' | 'video' | 'audio' | 'lipsy
     <EmptyState
       icon={copy.icon}
       tone="accent"
-      title={installing ? 'Setting this up for you' : title}
-      description={installing ? (macKind ? BUSY_DESCRIPTION.macBundle[macKind] : BUSY_DESCRIPTION.bundle) : description}
+      title={installing ? 'Setting this up for you' : startOnly ? ALREADY_ON_DISK_COPY.title : title}
+      description={installing ? (macKind ? BUSY_DESCRIPTION.macBundle[macKind] : BUSY_DESCRIPTION.bundle) : startOnly ? ALREADY_ON_DISK_COPY.description : description}
     >
       {!nothingToInstall && (
         <InstallCardBody
@@ -904,6 +951,7 @@ function ModelInstallCard({ kind }: { kind: 'image' | 'video' | 'audio' | 'lipsy
           onDismiss={() => clearInstallRun(kind)}
           onCancel={() => cancelInstallRun(kind)}
           cancelTitle={macKind ? MAC_CANCEL_TITLE[macKind] : undefined}
+          startOnly={startOnly}
         />
       )}
     </EmptyState>
@@ -926,6 +974,12 @@ export function TrainSetBoard() {
   // Windows and Linux, mflux on a Mac; both read the photo's .txt caption).
   // The cloud trainer takes photos only, so it shows no field it would not use.
   const captions = backend !== 'cloud'
+  // 3.0.9 P8: a style / concept set is captioned by what is in each picture,
+  // not by what changes about a person. The cloud trains characters only.
+  const trainKind = useCreateStore((s) => s.trainKind)
+  const style = captions && trainKind === 'style'
+  const captionHelp = style ? STYLE_CAPTION_HELP : TRAIN_CAPTION_HELP
+  const captionPlaceholder = style ? STYLE_CAPTION_PLACEHOLDER : TRAIN_CAPTION_PLACEHOLDER
   const [describe, setDescribe] = useState<DescribeAvailability | null>(null)
   const [describing, setDescribing] = useState<{ done: number; total: number } | null>(null)
   const describeAbort = useRef<AbortController | null>(null)
@@ -949,7 +1003,7 @@ export function TrainSetBoard() {
     setDescribing({ done: 0, total: todo.length })
     for (const [n, img] of todo.entries()) {
       if (own.signal.aborted) break
-      const text = await describeTrainPhoto(img.blob as Blob, own.signal)
+      const text = await describeTrainPhoto(img.blob as Blob, own.signal, style ? 'style' : 'character')
       if (text && !(useCreateStore.getState().trainCaptions[img.name] ?? '').trim()) setTrainCaption(img.name, text)
       setDescribing({ done: n + 1, total: todo.length })
     }
@@ -960,7 +1014,9 @@ export function TrainSetBoard() {
   const addFiles = (files: FileList | File[]) => {
     // One mint, one release: `mediaRefFrom` is the only place a staged file
     // gets a blob: URL, and `addTrainImages` gives back every ref it does not
-    // keep (a name duplicate, anything past the 30 cap). This used to be an
+    // keep (a re-drop of a photo already in the set, anything past the cap).
+    // Two different photos under one name both stay: the store numbers the
+    // second one on. This used to be an
     // inline copy of those two lines with nothing on the other end.
     const imgs = Array.from(files)
       .filter((f) => f.type.startsWith('image/'))
@@ -988,9 +1044,9 @@ export function TrainSetBoard() {
           className="flex-1 rounded-xl border-2 border-dashed border-white/10 hover:border-white/25 transition-colors flex flex-col items-center justify-center gap-2 text-gray-500 hover:text-gray-300"
         >
           <UploadCloud size={28} />
-          <div className="t-body">Drop {MIN_TRAIN_IMAGES} to {maxTrainImages(backend)} photos of your character here</div>
+          <div className="t-body">Drop {MIN_TRAIN_IMAGES} to {maxTrainImages(backend)} {style ? STYLE_DROP_TITLE : 'photos of your character here'}</div>
           <div className="t-label text-gray-600">
-            One person or character, varied angles and lighting works best
+            {style ? STYLE_DROP_HINT : 'One person or character, varied angles and lighting works best'}
           </div>
         </button>
       ) : null}
@@ -1003,7 +1059,7 @@ export function TrainSetBoard() {
         <>
           {captions && (
             <div className="flex items-start justify-center gap-2 flex-wrap shrink-0" data-testid="train-caption-help">
-              <span className="t-label text-gray-500 max-w-[640px] text-center">{TRAIN_CAPTION_HELP}</span>
+              <span className="t-label text-gray-500 max-w-[640px] text-center">{captionHelp}</span>
               {describing ? (
                 <button
                   type="button"
@@ -1047,9 +1103,9 @@ export function TrainSetBoard() {
                       onChange={(e) => setTrainCaption(img.name, e.target.value)}
                       maxLength={TRAIN_CAPTION_MAX}
                       disabled={isGenerating}
-                      placeholder={TRAIN_CAPTION_PLACEHOLDER}
-                      title={trainCaptions[img.name] || TRAIN_CAPTION_PLACEHOLDER}
-                      aria-label={`What changes in ${img.name}`}
+                      placeholder={captionPlaceholder}
+                      title={trainCaptions[img.name] || captionPlaceholder}
+                      aria-label={style ? `What is in ${img.name}` : `What changes in ${img.name}`}
                       className="t-label w-full px-1.5 h-6 rounded-md bg-white/[0.03] border border-white/[0.06] text-gray-300 placeholder-gray-600 focus:outline-none focus:border-white/15 disabled:opacity-60"
                     />
                   )}
@@ -1071,8 +1127,8 @@ export function TrainSetBoard() {
               // A Mac trains with its own image engine, on Z-Image Turbo, and
               // keeps the character in the Mac's LoRA folder (api/mlx-train).
               : isMlxImageHost()
-                ? "Training runs on this Mac and lands the character in the Mac's LoRA folder."
-                : 'Training runs on your GPU and lands the character in your local LoRAs.'}
+                ? `Training runs on this Mac and lands the ${style ? 'style' : 'character'} in the Mac's LoRA folder.`
+                : `Training runs on your GPU and lands the ${style ? 'style' : 'character'} in your local LoRAs.`}
           </div>
         </>
       )}

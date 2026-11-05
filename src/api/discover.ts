@@ -6,6 +6,7 @@ import { restartComfyForNewNodes } from "./comfy-restart"
 import type { ProviderId } from "./providers/types"
 import { log } from "../lib/logger"
 import { useWorkflowStore } from "../stores/workflowStore"
+import { recordSourceFromDownload } from "../stores/modelSourceStore"
 import { waitForModelsVisible } from "../lib/bundle-install"
 import { bundleBytesToFetch } from "../lib/bundle-state"
 import type { DownloadProgress } from "../types/downloads"
@@ -18,6 +19,7 @@ import { extractGgufQuant, hfUrlToTreePath, parseHfUrl } from '../lib/hf-to-prov
 import { IMAGE_PART } from './image-parts'
 import { kimiK3CatalogEntries } from './kimi-k3-catalog'
 import { imagePartFileName, isUpstreamImagePart, pickUpstreamImagePart } from '../lib/image-part'
+import { shardSetGap, type ShardGap } from '../lib/gguf-shards'
 import {
   CUSTOM_NODE_REGISTRY,
   getImageBundles, getVideoBundles, getAudioBundles, getLipsyncBundles, getMotionBundles, getUpscaleBundles,
@@ -76,6 +78,8 @@ export function civitaiAuthToken(url: string): string | null {
 }
 
 export async function startModelDownload(url: string, subfolder: string, filename: string, expectedBytes?: number, sha256?: string): Promise<{ status: string; id: string; error?: string }> {
+  // D1: the page this file came from, for Details in Models.
+  recordSourceFromDownload(filename, url)
   return backendCall("download_model", {
     url,
     subfolder,
@@ -84,6 +88,24 @@ export async function startModelDownload(url: string, subfolder: string, filenam
     expectedSha256: sha256 ?? null,
     authToken: civitaiAuthToken(url),
   })
+}
+
+/** What `comfy_model_info` reads about one ComfyUI model file (D1). */
+export interface ComfyFileFacts {
+  path: string
+  folder: string
+  bytes: number
+  /** Seconds since 1970, or null when the system did not say. */
+  modified: number | null
+  /** The file sits in the user's own Storage folder, not ComfyUI's. */
+  ownFolder: boolean
+  /** How many copies of that name the model folders hold. */
+  copies: number
+}
+
+/** Details for a ComfyUI file of the Installed list. Throws with the reason. */
+export async function comfyModelInfo(filename: string): Promise<ComfyFileFacts> {
+  return backendCall('comfy_model_info', { filename, extraDirs: customModelDirs() })
 }
 
 export async function getDownloadProgress(): Promise<Record<string, DownloadProgress>> {
@@ -1024,8 +1046,9 @@ export function getUncensoredTextModels(): DiscoverModel[] {
     // Two independent uncensors of the same dense 27B base. Both are native
     // vision-language models, so every entry carries the repo's own mmproj and
     // LU downloads it with the model (see `mmprojFileName`). The MTP head that
-    // ships inside these GGUFs loads fine on the pinned llama.cpp b9949, which
+    // ships inside these GGUFs loads fine on llama.cpp b9949, which
     // implements the qwen35 MTP block, so we point at the plain files.
+    // (E1, 3.0.9: the pin is b11960 now; these two were not loaded there.)
     //
     // The uncensored build is OrcaRouter's abliteration. Its own GGUF repo
     // (orcarouter/Qwen3.8-27B-Uncensored-GGUF) is gated: every file answers
@@ -1413,6 +1436,42 @@ export function getMainstreamTextModels(): DiscoverModel[] {
     // Gemma 4 12B QAT: Google's own quantization-aware file, one quant only
     { name: 'Gemma 4 12B QAT', description: 'Gemma 4 12B QAT · Google\'s own Q4 file from quantization-aware training, which is meant to hold quality at this size. Vision and tool calling. The 0.2 GB vision projector comes with it.', pulls: '780K+', tags: ['12B', 'Vision', 'QAT Q4_0', '7 GB'], updated: 'New', agent: true, released: '2026-06', downloadUrl: HF('google/gemma-4-12B-it-qat-q4_0-gguf', 'gemma-4-12b-it-qat-q4_0.gguf'), filename: 'gemma-4-12b-it-qat-q4_0.gguf', sizeGB: 6.98, ...IMAGE_PART['google/gemma-4-12B-it-qat-q4_0-gguf/mmproj-gemma-4-12b-it-qat-q4_0.gguf'] },
     // Small models for 8 GB machines (all below the 7B chat minimum)
+    // LFM3 (Liquid AI, 28.10.2026): Text, VL, Omni and Audio as Ollama tags,
+    // and below as GGUF for the LU Engine and LM Studio. The GGUF
+    // header says `general.architecture = lfm3`, which llama.cpp knows from
+    // b11960 on, the pin since E1 (scripts/build-llama.sh); before it a GGUF
+    // entry would download and then not open
+    // (src/api/__tests__/lfm3-nur-was-laeuft.test.ts holds that line). Ollama
+    // runs it from 0.40.13 on all platforms (0.40.12 was Apple only; the
+    // manifest config says `"requires":"0.40.13"`). The lfm3:1.7b model layer
+    // is byte for byte LiquidAI/LFM3-1.7B-GGUF Q4_K_M (sha256 3793e1e6…).
+    // Sizes are the manifest layer sums, read 30.10.2026. LFM Open License
+    // v1.0, like LFM 2.5: commercial use is licensed below 10 million revenue a year.
+    // GGUF for the LU Engine and LM Studio (N1 after E1): llama.cpp knows
+    // `lfm3` from b11960, the pin E1 set. Bytes and SHA-256 are the LFS values
+    // of the LiquidAI repositories, read 30.10.2026. LFM3 Audio and Omni hear
+    // and speak in the engine too: llama-server b11960 answers
+    // /v1/audio/transcriptions and /tts (lib/speech-route.ts).
+    { name: 'LFM3 1.7B', group: 'LFM3 1.7B', blurb: "very small, fast model for quick answers, summaries and simple tool calls", description: 'Liquid AI LFM3 1.7B · very small, fast model for quick answers, summaries, extraction and simple tool calls, 256K context. Weaker at long reasoning than 7B+ models. Runs in the LU Engine from 3.0.9 (llama.cpp b11960) and in LM Studio with its llama.cpp runtime 2.65.1 or newer. LFM Open License: commercial use is licensed only below a revenue limit of 10 million a year.', pulls: '97K+', tags: ['1.7B', 'Q4_K_M', '1.0 GB', 'Tools'], updated: 'New', agent: true, released: '2026-10', downloadUrl: HF('LiquidAI/LFM3-1.7B-GGUF', 'LFM3-1.7B-Q4_K_M.gguf'), filename: 'LFM3-1.7B-Q4_K_M.gguf', sizeGB: 1.02, sizeBytes: 1099627808, sha256: '3793e1e6e2266919d6e015287221b41100175a98eddaba92e111aed3b05c93c4' },
+    { name: 'LFM3 1.7B QAD Q4_0', group: 'LFM3 1.7B', blurb: "very small, fast model for quick answers, summaries and simple tool calls", description: 'Liquid AI LFM3 1.7B · Q4_0 from quantization-aware distillation, trained by Liquid AI to keep the quality of the full model at 4 bits.', pulls: '97K+', tags: ['1.7B', 'QAD Q4_0', '1.0 GB', 'Tools'], updated: 'New', agent: true, released: '2026-10', downloadUrl: HF('LiquidAI/LFM3-1.7B-GGUF', 'LFM3-1.7B-QAD-Q4_0.gguf'), filename: 'LFM3-1.7B-QAD-Q4_0.gguf', sizeGB: 0.98, sizeBytes: 1049615680, sha256: '43a7d09a0e9cba91b63eb7052488b9564569bddfd65754d2e426465e572a7452' },
+    { name: 'LFM3 1.7B Q8_0', group: 'LFM3 1.7B', blurb: "very small, fast model for quick answers, summaries and simple tool calls", description: 'Liquid AI LFM3 1.7B · Q8_0, closest to the original weights.', pulls: '97K+', tags: ['1.7B', 'Q8_0', '1.7 GB', 'Tools'], updated: 'New', agent: true, released: '2026-10', downloadUrl: HF('LiquidAI/LFM3-1.7B-GGUF', 'LFM3-1.7B-Q8_0.gguf'), filename: 'LFM3-1.7B-Q8_0.gguf', sizeGB: 1.72, sizeBytes: 1846238496, sha256: '8f6b24182258205e9e01e21f1f24a1f208c1e8115578825d202ce39976af20b6' },
+    { name: 'LFM3 VL 2B', group: 'LFM3 VL 2B', blurb: "small model with image input: photos, screenshots, documents", description: 'Liquid AI LFM3 VL 2B · LFM3 with image input: describe photos, read screenshots and documents. Small, so expect short and simple answers. The 0.2 GB image part comes with it. Runs in the LU Engine from 3.0.9 (llama.cpp b11960) and in LM Studio with its llama.cpp runtime 2.65.1 or newer. LFM Open License: commercial use is licensed only below a revenue limit of 10 million a year.', pulls: '36K+', tags: ['2B', 'Vision', 'Q4_K_M', '1.0 GB'], updated: 'New', released: '2026-10', downloadUrl: HF('LiquidAI/LFM3-VL-2B-GGUF', 'LFM3-VL-2B-Q4_K_M.gguf'), filename: 'LFM3-VL-2B-Q4_K_M.gguf', sizeGB: 1.02, sizeBytes: 1099627808, sha256: '56dac2e192ff0d9ab8507f4f1aeb4aed0463449bbbefaac79497f041c95f21eb', ...IMAGE_PART['LiquidAI/LFM3-VL-2B-GGUF/mmproj-LFM3-VL-2B-Q8_0.gguf'] },
+    { name: 'LFM3 VL 2B Q8_0', group: 'LFM3 VL 2B', blurb: "small model with image input: photos, screenshots, documents", description: 'Liquid AI LFM3 VL 2B · Q8_0, closest to the original weights. The 0.2 GB image part comes with it.', pulls: '36K+', tags: ['2B', 'Vision', 'Q8_0', '1.7 GB'], updated: 'New', released: '2026-10', downloadUrl: HF('LiquidAI/LFM3-VL-2B-GGUF', 'LFM3-VL-2B-Q8_0.gguf'), filename: 'LFM3-VL-2B-Q8_0.gguf', sizeGB: 1.72, sizeBytes: 1846238496, sha256: 'e138e54189a751d90ea8c0b236360490613ecd465d28d68fa6094d3db7fa6727', ...IMAGE_PART['LiquidAI/LFM3-VL-2B-GGUF/mmproj-LFM3-VL-2B-Q8_0.gguf'] },
+    { name: 'LFM3 Omni 2B', group: 'LFM3 Omni 2B', blurb: "text, images and sound in one small model", description: 'Liquid AI LFM3 Omni 2B · text, images and sound in one small model. Chats with image input; in the LU Engine it also hears and speaks (Settings, Voice, "LU Engine" for dictation and read-aloud). The 0.5 GB image and sound part comes with it. Runs in the LU Engine from 3.0.9 (llama.cpp b11960) and in LM Studio with its llama.cpp runtime 2.65.1 or newer. LFM Open License: commercial use is licensed only below a revenue limit of 10 million a year.', pulls: 'New', tags: ['2B', 'Vision', 'Q4_K_M', '1.0 GB'], updated: 'New', released: '2026-10', downloadUrl: HF('LiquidAI/LFM3-Omni-2B-GGUF', 'LFM3-Omni-2B-Q4_K_M.gguf'), filename: 'LFM3-Omni-2B-Q4_K_M.gguf', sizeGB: 1.02, sizeBytes: 1099630080, sha256: '9f8d30e9d4fd7a9349d586e077988229b3ca0a0e4ad730897563d1eccc9893e2', ...IMAGE_PART['LiquidAI/LFM3-Omni-2B-GGUF/mmproj-LFM3-Omni-2B-Q8_0.gguf'] },
+    { name: 'LFM3 Audio 2B', group: 'LFM3 Audio 2B', blurb: "speech in and out for LU's dictation and read-aloud, 18 languages", description: 'Liquid AI LFM3 Audio 2B · speech recognition, translation and text-to-speech. Load it in the LU Engine and pick "LU Engine" for dictation and read-aloud in Settings, Voice. The 0.3 GB sound part comes with it. Runs in the LU Engine from 3.0.9 (llama.cpp b11960). LFM Open License: commercial use is licensed only below a revenue limit of 10 million a year.', pulls: 'New', tags: ['2B', 'Audio', 'Q4_K_M', '1.0 GB'], updated: 'New', released: '2026-10', downloadUrl: HF('LiquidAI/LFM3-Audio-2B-GGUF', 'LFM3-Audio-2B-Q4_K_M.gguf'), filename: 'LFM3-Audio-2B-Q4_K_M.gguf', sizeGB: 1.02, sizeBytes: 1099626016, sha256: '9a773289bd321ed879cd3a76545f6aca506e403851a45fb315420aee45625be2', ...IMAGE_PART['LiquidAI/LFM3-Audio-2B-GGUF/mmproj-LFM3-Audio-2B-Q8_0.gguf'] },
+    { name: 'LFM3 1.7B (Ollama)', group: 'LFM3 1.7B (Ollama)', blurb: "very small, fast model for quick answers, summaries and simple tool calls", description: 'Liquid AI LFM3 1.7B · very small, fast model for quick answers, summaries, extraction and simple tool calls, 256K context. Weaker at long reasoning than 7B+ models. Needs Ollama 0.40.13 or newer. LFM Open License: commercial use is licensed only below a revenue limit of 10 million a year.', pulls: 'New', tags: ['1.7B', 'Q4_K_M', '1.0 GB', 'Tools'], updated: 'New', agent: true, released: '2026-10', ollamaModel: 'lfm3:1.7b', sizeGB: 1.02 },
+    { name: 'LFM3 1.7B (Ollama) NVFP4', group: 'LFM3 1.7B (Ollama)', blurb: "very small, fast model for quick answers, summaries and simple tool calls", description: 'Liquid AI LFM3 1.7B · NVFP4, an MLX build in Ollama made for Apple Silicon Macs. Needs Ollama 0.40.13 or newer. Not officially supported on Windows or Linux, take the Q4_K_M tag there.', pulls: 'New', tags: ['1.7B', 'NVFP4', 'MLX', '1.6 GB', 'Tools'], updated: 'New', agent: true, released: '2026-10', ollamaModel: 'lfm3:1.7b-nvfp4', sizeGB: 1.57 },
+    { name: 'LFM3 VL 2B (Ollama)', group: 'LFM3 VL 2B (Ollama)', blurb: "small model with image input: photos, screenshots, documents", description: 'Liquid AI LFM3 VL 2B · LFM3 with image input: describe photos, read screenshots and documents. Small, so expect short and simple answers. Projector included. Needs Ollama 0.40.13 or newer. LFM Open License: commercial use is licensed only below a revenue limit of 10 million a year.', pulls: 'New', tags: ['2B', 'Vision', 'Q4_K_M', '1.4 GB'], updated: 'New', released: '2026-10', ollamaModel: 'lfm3-vl:2b', sizeGB: 1.38 },
+    { name: 'LFM3 VL 2B (Ollama) NVFP4', group: 'LFM3 VL 2B (Ollama)', blurb: "small model with image input: photos, screenshots, documents", description: 'Liquid AI LFM3 VL 2B · NVFP4, an MLX build in Ollama made for Apple Silicon Macs. Needs Ollama 0.40.13 or newer. Not officially supported on Windows or Linux, take the Q4_K_M tag there.', pulls: 'New', tags: ['2B', 'Vision', 'NVFP4', 'MLX', '1.6 GB'], updated: 'New', released: '2026-10', ollamaModel: 'lfm3-vl:2b-nvfp4', sizeGB: 1.63 },
+    // Omni and Audio take sound as well. Ollama hears through its
+    // /v1/audio/transcriptions route and speaks through /v1/audio/speech, not
+    // through chat, so in LU the sound side runs in Settings, Voice
+    // ("Use LFM3 Audio in Ollama"). The Omni manifest names the capabilities
+    // vision, audio, speech and tools; Audio names audio, speech and tools.
+    { name: 'LFM3 Omni 2B (Ollama)', group: 'LFM3 Omni 2B (Ollama)', blurb: "text, images and sound in one small model", description: 'Liquid AI LFM3 Omni 2B · text, images and sound in one small model. Chats with image input, and can also transcribe the microphone and read answers aloud (set it in Settings, Voice). Needs Ollama 0.40.13 or newer. LFM Open License: commercial use is licensed only below a revenue limit of 10 million a year.', pulls: 'New', tags: ['2B', 'Vision', 'Audio', 'Q4_K_M', '1.9 GB'], updated: 'New', released: '2026-10', ollamaModel: 'lfm3-omni:2b', sizeGB: 1.91 },
+    { name: 'LFM3 Omni 2B (Ollama) NVFP4', group: 'LFM3 Omni 2B (Ollama)', blurb: "text, images and sound in one small model", description: 'Liquid AI LFM3 Omni 2B · NVFP4, an MLX build in Ollama made for Apple Silicon Macs. Needs Ollama 0.40.13 or newer. Not officially supported on Windows or Linux, take the Q4_K_M tag there.', pulls: 'New', tags: ['2B', 'Vision', 'Audio', 'NVFP4', 'MLX', '2.2 GB'], updated: 'New', released: '2026-10', ollamaModel: 'lfm3-omni:2b-nvfp4', sizeGB: 2.23 },
+    { name: 'LFM3 Audio 2B (Ollama)', group: 'LFM3 Audio 2B (Ollama)', blurb: "speech in and out for LU's dictation and read-aloud, 18 languages", description: 'Liquid AI LFM3 Audio 2B · speech recognition, translation and text-to-speech in 18 languages. In LU it is the voice and the ear: Settings, Voice, "Use LFM3 Audio in Ollama" for dictation and read-aloud. Needs Ollama 0.40.13 or newer. LFM Open License: commercial use is licensed only below a revenue limit of 10 million a year.', pulls: 'New', tags: ['2B', 'Audio', 'Q4_K_M', '1.6 GB'], updated: 'New', released: '2026-10', ollamaModel: 'lfm3-audio:2b', sizeGB: 1.56 },
+    { name: 'LFM3 Audio 2B (Ollama) NVFP4', group: 'LFM3 Audio 2B (Ollama)', blurb: "speech in and out for LU's dictation and read-aloud, 18 languages", description: 'Liquid AI LFM3 Audio 2B · NVFP4, an MLX build in Ollama made for Apple Silicon Macs. Needs Ollama 0.40.13 or newer. Not officially supported on Windows or Linux, take the Q4_K_M tag there.', pulls: 'New', tags: ['2B', 'Audio', 'NVFP4', 'MLX', '1.9 GB'], updated: 'New', released: '2026-10', ollamaModel: 'lfm3-audio:2b-nvfp4', sizeGB: 1.92 },
     { name: 'LFM 2.5 2.6B', group: 'LFM 2.5 2.6B', description: 'Liquid AI LFM 2.5 2.6B · small on-device model with native tool calling, fits 8 GB machines. Liquid AI license, check the terms for commercial use.', pulls: '1.0M', tags: ['2.6B', 'Q4_K_M', '1.7 GB', 'Tools'], updated: 'New', agent: true, lightweight: true, released: '2026-08', downloadUrl: HF('LiquidAI/LFM2.5-2.6B-GGUF', 'LFM2.5-2.6B-Q4_K_M.gguf'), filename: 'LFM2.5-2.6B-Q4_K_M.gguf', sizeGB: 1.67 },
     { name: 'LFM 2.5 2.6B Q8_0', group: 'LFM 2.5 2.6B', description: 'Liquid AI LFM 2.5 2.6B · largest quant, closest to the original weights.', pulls: '1.0M', tags: ['2.6B', 'Q8_0', '2.9 GB', 'Tools'], updated: 'New', agent: true, lightweight: true, released: '2026-08', downloadUrl: HF('LiquidAI/LFM2.5-2.6B-GGUF', 'LFM2.5-2.6B-Q8_0.gguf'), filename: 'LFM2.5-2.6B-Q8_0.gguf', sizeGB: 2.87 },
     { name: 'FrogNano 4B', group: 'FrogNano 4B', description: 'Microsoft FrogNano 4B · Microsoft\'s small model from September 2026, successor to Phi-4 Mini. Vision. The 0.7 GB vision projector comes with it. MIT.', pulls: '21K+', tags: ['4B', 'Vision', 'Q4_K_M', '2.8 GB'], updated: 'New', lightweight: true, released: '2026-09', downloadUrl: HF('bartowski/FrogNano-4B-2609-GGUF', 'FrogNano-4B-2609-Q4_K_M.gguf'), filename: 'FrogNano-4B-2609-Q4_K_M.gguf', sizeGB: 2.8, ...IMAGE_PART['bartowski/FrogNano-4B-2609-GGUF/mmproj-FrogNano-4B-2609-f16.gguf'] },
@@ -1538,7 +1597,32 @@ export function deriveQ4FilenameFromRepo(repoName: string): string {
   return QUANT_SUFFIX.test(baseName) ? `${baseName}.gguf` : `${baseName}-Q4_K_M.gguf`
 }
 
+/**
+ * The HuggingFace search could not answer: no connection, the free rate limit,
+ * or a reply that is not a list of repos. Thrown instead of an empty list so
+ * the page can tell "nothing matches" from "nobody answered".
+ */
+export class HfSearchError extends Error {
+  readonly kind: 'offline' | 'rate-limit'
+  constructor(kind: 'offline' | 'rate-limit', detail: string) {
+    super(detail)
+    this.name = 'HfSearchError'
+    this.kind = kind
+  }
+}
+
+/** The sentence the user reads when the HuggingFace search failed. */
+export function hfSearchFailureText(err: unknown): string {
+  if (err instanceof HfSearchError && err.kind === 'rate-limit') {
+    return 'Hugging Face is limiting searches right now. Wait a minute and search again.'
+  }
+  return 'Hugging Face could not be reached. Check the connection and search again.'
+}
+
+const RATE_LIMIT = /rate.?limit|too many requests|\b429\b/i
+
 export async function searchHuggingFaceModels(query: string): Promise<DiscoverModel[]> {
+  let repos: Array<{ id: string; downloads?: number; modelId?: string }>
   try {
     // Case-insensitive · HF repos almost always end in `-GGUF` (uppercase),
     // and the previous case-sensitive `includes('gguf')` missed those, so a
@@ -1554,43 +1638,56 @@ export async function searchHuggingFaceModels(query: string): Promise<DiscoverMo
     } else {
       const res = await fetch(url)
       json = await res.text()
+      if (res.status === 429) throw new HfSearchError('rate-limit', `HTTP 429: ${json.slice(0, 200)}`)
     }
 
-    const repos: Array<{ id: string; downloads?: number; modelId?: string }> = JSON.parse(json)
-
-    const models: DiscoverModel[] = []
-    for (const repo of repos) {
-      const repoName = repo.id.split('/').pop() || ''
-      const q4File = deriveQ4FilenameFromRepo(repoName)
-      const downloadUrl = `https://huggingface.co/${repo.id}/resolve/main/${q4File}`
-
-      // Display name = repo basename without the GGUF suffix. The previous
-      // version referenced an undefined `baseName` here, throwing a
-      // ReferenceError that the catch silently turned into an empty array
-      // · the user-facing P11 search was returning "No models found" for
-      // every query, even ones that match plenty of HF results.
-      const displayName = repoName.replace(/-GGUF$/i, '').replace(/-gguf$/i, '')
-
-      const downloads = repo.downloads || 0
-      const pullsStr = downloads > 1000000 ? `${(downloads / 1000000).toFixed(1)}M` :
-        downloads > 1000 ? `${Math.round(downloads / 1000)}K` : `${downloads}`
-
-      models.push({
-        name: displayName,
-        description: repo.id,
-        pulls: pullsStr,
-        tags: ['Q4_K_M', 'GGUF'],
-        updated: '',
-        downloadUrl,
-        filename: q4File,
-        url: `https://huggingface.co/${repo.id}`,
-      })
+    const parsed: unknown = JSON.parse(json)
+    if (!Array.isArray(parsed)) {
+      // HF answers a limit or an outage with {"error": "..."} instead of a list.
+      const said = isRecord(parsed) && typeof parsed.error === 'string' ? parsed.error : json.slice(0, 200)
+      throw new HfSearchError(RATE_LIMIT.test(said) ? 'rate-limit' : 'offline', said)
     }
-    return models
+    repos = parsed
   } catch (err) {
     log.warn('[discover] HF search failed', { err })
-    return []
+    if (err instanceof HfSearchError) throw err
+    throw new HfSearchError(RATE_LIMIT.test(String(err)) ? 'rate-limit' : 'offline', String(err))
   }
+
+  const models: DiscoverModel[] = []
+  for (const repo of repos) {
+    if (typeof repo?.id !== 'string') continue
+    const repoName = repo.id.split('/').pop() || ''
+    const q4File = deriveQ4FilenameFromRepo(repoName)
+    // D7: the repo name named no quant, so Q4_K_M is only a guess.
+    const quantGuessed = q4File !== `${repoName.replace(/-GGUF$/i, '')}.gguf`
+    const downloadUrl = `https://huggingface.co/${repo.id}/resolve/main/${q4File}`
+
+    // Display name = repo basename without the GGUF suffix. The previous
+    // version referenced an undefined `baseName` here, throwing a
+    // ReferenceError that the catch silently turned into an empty array
+    // · the user-facing P11 search was returning "No models found" for
+    // every query, even ones that match plenty of HF results.
+    const displayName = repoName.replace(/-GGUF$/i, '').replace(/-gguf$/i, '')
+
+    const downloads = repo.downloads || 0
+    const pullsStr = downloads > 1000000 ? `${(downloads / 1000000).toFixed(1)}M` :
+      downloads > 1000 ? `${Math.round(downloads / 1000)}K` : `${downloads}`
+
+    models.push({
+      name: displayName,
+      description: repo.id,
+      pulls: pullsStr,
+      // D7: a guessed quant is no promise, the download picks it by size.
+      tags: quantGuessed ? ['GGUF'] : ['Q4_K_M', 'GGUF'],
+      updated: '',
+      downloadUrl,
+      filename: q4File,
+      url: `https://huggingface.co/${repo.id}`,
+      ...(quantGuessed ? { quantGuessed: true } : {}),
+    })
+  }
+  return models
 }
 
 // ─── HuggingFace file-tree resolution (sharded / multi-part GGUF) ───
@@ -1633,6 +1730,16 @@ export interface HfGgufResolution {
   /** The image part the same repository ships, when it ships one. For a model
    *  the catalog does not know, this is what is offered with it. */
   imagePart?: ImagePartSource
+  /** D7: the guessed quant did not fit the memory budget and this smaller one
+   *  was taken instead. `from` is what the guess would have fetched. */
+  fitSwap?: { from: string; fromBytes: number }
+  /** D7: even the chosen file is bigger than the memory budget (no quant of
+   *  the repository fits). It downloads and runs, partly on the CPU. */
+  overBudget?: boolean
+  /** Set when the chosen file is a split set the repository holds only some
+   *  parts of (an upload still running). `files` is empty then: llama.cpp
+   *  cannot load the set, so nothing of it is downloaded. */
+  incomplete?: ShardGap
 }
 
 // 5-digit llama.cpp split convention: `<name>-00001-of-00002.gguf`. A few
@@ -1645,7 +1752,7 @@ const GGUF_QUANT_TOKEN = /(IQ\d_[A-Z0-9]+|Q\d_K(?:_[A-Z]+)?|Q\d_[01]|BF16|F16|F3
 
 /** One downloadable unit of a repo tree: a single file, or every part of a
  *  split set. */
-interface GgufGroup { key: string; quant?: string; parts: HfTreeEntry[] }
+interface GgufGroup { key: string; quant?: string; parts: HfTreeEntry[]; gap?: ShardGap | null }
 
 /**
  * The group that holds the file the caller named, or undefined.
@@ -1683,6 +1790,9 @@ export function selectGgufFromTree(
   repoId: string,
   preferredQuant?: string,
   exactPath?: string,
+  /** D7: the most a guessed quant may weigh, in bytes (`quantBudgetBytes`).
+   *  Only for a quant nobody chose; a named file is never swapped. */
+  budgetBytes?: number,
 ): HfGgufResolution | null {
   const allGguf = entries.filter(e => e.type === 'file' && /\.gguf$/i.test(e.path))
   // An image part is a GGUF too and carries a quant token of its own
@@ -1706,14 +1816,50 @@ export function selectGgufFromTree(
   }
 
   const all = [...groups.values()]
+  for (const g of all) g.gap = shardSetGap(g.parts.map(p => p.path))
+  // A split set with parts missing never loads. A loadable group is taken
+  // over it wherever the choice is ours; when the caller's own file or quant
+  // is only there incomplete, the answer says so instead of fetching another.
+  const complete = all.filter(g => !g.gap)
   const wanted = preferredQuant?.toUpperCase()
-  const picked =
-    groupOfNamedFile(all, exactPath) ||
-    (wanted ? all.find(g => g.quant === wanted) : undefined) ||
-    (wanted ? all.find(g => g.key.toUpperCase().includes(wanted)) : undefined) ||
-    all.find(g => g.quant === 'Q4_K_M') ||
+  const byQuant = (g: GgufGroup) => g.quant === wanted
+  const byKey = (g: GgufGroup) => !!wanted && g.key.toUpperCase().includes(wanted)
+  const named = groupOfNamedFile(all, exactPath)
+  let picked =
+    named ||
+    (wanted ? complete.find(byQuant) || all.find(byQuant) : undefined) ||
+    (wanted ? complete.find(byKey) || all.find(byKey) : undefined) ||
+    complete.find(g => g.quant === 'Q4_K_M') ||
+    // A file without a quant in its name (`…-imatrix1.gguf`, 26 MB of
+    // calibration data) is no model to fall back on while a quant is there.
+    complete.find(g => g.quant) ||
+    complete[0] ||
     all[0]
   if (!picked) return null
+  // D7 (GitHub #215): a 16 GB card got the 15.8 GB Q4_K_M, which leaves no
+  // room for the context and runs mostly on the CPU. A quant nobody chose is
+  // taken from the list by size instead: the largest one that fits.
+  let fitSwap: HfGgufResolution['fitSwap']
+  let overBudget = false
+  // The image part loads next to the model, so it takes from the same room.
+  const room = budgetBytes ? budgetBytes - (upstreamPart?.size || upstreamPart?.lfs?.size || 0) : 0
+  if (!named && room > 0 && !picked.gap) {
+    const pickedBytes = groupBytes(picked)
+    if (pickedBytes > room || !picked.quant) {
+      const fitting = complete
+        .filter(g => g.quant && groupBytes(g) > 0 && groupBytes(g) <= room)
+        .sort((a, b) => groupBytes(b) - groupBytes(a))[0]
+      if (fitting) {
+        if (pickedBytes > room) fitSwap = { from: picked.quant ?? picked.key, fromBytes: pickedBytes }
+        picked = fitting
+      } else if (pickedBytes > room) {
+        overBudget = true
+      }
+    }
+  }
+  if (picked.gap) {
+    return { sharded: true, files: [], totalBytes: 0, quant: picked.quant, incomplete: picked.gap }
+  }
 
   const sorted = [...picked.parts].sort((a, b) => {
     const ai = parseInt(a.path.match(GGUF_SHARD_RE)?.[1] || '0', 10)
@@ -1731,6 +1877,8 @@ export function selectGgufFromTree(
     files,
     totalBytes: files.reduce((s, f) => s + f.sizeBytes, 0),
     quant: picked.quant,
+    ...(fitSwap ? { fitSwap } : {}),
+    ...(overBudget ? { overBudget } : {}),
     ...(upstreamPart
       ? {
           imagePart: {
@@ -1743,6 +1891,23 @@ export function selectGgufFromTree(
   }
 }
 
+function groupBytes(g: GgufGroup): number {
+  return g.parts.reduce((s, p) => s + (p.size || p.lfs?.size || 0), 0)
+}
+
+/**
+ * D7: how much a quant LU picks by itself may weigh. The model shares the
+ * graphics memory with its context (KV cache) and with the system, so the
+ * file gets the memory minus max(1.5 GB, 10 %). 16 GB leaves 14.4 GB. The
+ * memory arrives in GiB (MiB / 1024), the file sizes in bytes.
+ */
+export function quantBudgetBytes(memoryGb: number | null | undefined): number | undefined {
+  if (!memoryGb || memoryGb <= 0) return undefined
+  const headroom = Math.max(1.5, memoryGb * 0.1)
+  const gb = memoryGb - headroom
+  return gb > 0 ? Math.floor(gb * 1_073_741_824) : undefined
+}
+
 /** What the download asks the repo tree for one entry. */
 export interface GgufRequest {
   repoId: string
@@ -1750,6 +1915,8 @@ export interface GgufRequest {
   exactPath?: string
   /** Read from the file name. Only the fallback, see `selectGgufFromTree`. */
   preferredQuant?: string
+  /** D7: the quant is a guess, so it may be swapped for one that fits. */
+  quantGuessed?: boolean
 }
 
 /**
@@ -1757,14 +1924,16 @@ export interface GgufRequest {
  * its address is not a HuggingFace file address. One place, so the Models tab
  * and the test that walks the whole catalog ask the same thing.
  */
-export function ggufRequestFor(model: Pick<DiscoverModel, 'downloadUrl' | 'filename'>): GgufRequest | null {
+export function ggufRequestFor(model: Pick<DiscoverModel, 'downloadUrl' | 'filename' | 'quantGuessed'>): GgufRequest | null {
   if (!model.downloadUrl) return null
   const parsed = parseHfUrl(model.downloadUrl)
   if (!parsed) return null
   return {
     repoId: `${parsed.user}/${parsed.repo}`,
-    exactPath: hfUrlToTreePath(model.downloadUrl) ?? undefined,
+    // A guessed file name is no choice: it must not pin the Q4_K_M (D7).
+    exactPath: model.quantGuessed ? undefined : hfUrlToTreePath(model.downloadUrl) ?? undefined,
     preferredQuant: model.filename ? extractGgufQuant(model.filename) : undefined,
+    ...(model.quantGuessed ? { quantGuessed: true } : {}),
   }
 }
 
@@ -1797,6 +1966,7 @@ export async function resolveHfGgufFiles(
   repoId: string,
   preferredQuant?: string,
   exactPath?: string,
+  budgetBytes?: number,
 ): Promise<HfGgufResolution | null> {
   try {
     const url = `https://huggingface.co/api/models/${repoId}/tree/main?recursive=true`
@@ -1810,20 +1980,32 @@ export async function resolveHfGgufFiles(
     }
     const entries = JSON.parse(json)
     if (!Array.isArray(entries)) return null
-    return selectGgufFromTree(entries as HfTreeEntry[], repoId, preferredQuant, exactPath)
+    return selectGgufFromTree(entries as HfTreeEntry[], repoId, preferredQuant, exactPath, budgetBytes)
   } catch (err) {
     log.warn('[discover] HF tree resolve failed', { repoId, err })
     return null
   }
 }
 
+/** A model folder, or why there is none (the backend's own sentence). */
+export interface ModelFolder {
+  path: string | null
+  reason: string | null
+}
+
+/** Detect the model directory for the active local provider, with the reason when there is none. */
+export async function providerModelFolder(providerName: string): Promise<ModelFolder> {
+  try {
+    const path = await backendCall<string | null>('detect_model_path', { provider: providerName })
+    return { path: path || null, reason: null }
+  } catch (err) {
+    return { path: null, reason: err instanceof Error ? err.message : String(err ?? '') || null }
+  }
+}
+
 /** Detect the model directory for the active local provider */
 export async function detectProviderModelPath(providerName: string): Promise<string | null> {
-  try {
-    return await backendCall('detect_model_path', { provider: providerName })
-  } catch {
-    return null
-  }
+  return (await providerModelFolder(providerName)).path
 }
 
 /**
@@ -1843,9 +2025,14 @@ export async function detectProviderModelPath(providerName: string): Promise<str
  * den eigenen Ordner UND den gesetzten, vier Ebenen tief.
  */
 export async function luEngineDownloadDir(): Promise<string | null> {
+  return (await luEngineDownloadFolder()).path
+}
+
+/** `luEngineDownloadDir` with the reason when the folder cannot be had. */
+export async function luEngineDownloadFolder(): Promise<ModelFolder> {
   const gesetzt = customModelDirs()[0]
-  if (gesetzt) return gesetzt
-  return await detectProviderModelPath(BUILTIN_BACKEND_ID)
+  if (gesetzt) return { path: gesetzt, reason: null }
+  return await providerModelFolder(BUILTIN_BACKEND_ID)
 }
 
 /**
@@ -1876,6 +2063,7 @@ export async function startModelDownloadToPath(url: string, destDir: string, fil
   // from the CivitAI search into the Mac's LoRA folder). Every other caller
   // sends what it sent before.
   const authToken = civitaiAuthToken(url)
+  recordSourceFromDownload(filename, url)
   return backendCall('download_model_to_path', {
     url, destDir, filename, expectedBytes: expectedBytes ?? null, expectedSha256: sha256 ?? null,
     ...(authToken ? { authToken } : {}),
@@ -2076,6 +2264,48 @@ export function civitaiHostSwap(url: string | undefined, host: string): string |
 }
 
 /**
+ * Das Vorschaubild eines CivitAI-Treffers als kleines Standbild.
+ *
+ * Discord #bug-reports, 29.10.2026 (Ubuntu): „when searching for models in app
+ * from civitai searchbox, the app crashes". Die API nennt als erstes Bild einer
+ * Version die Originaldatei (`…/original=true/123.mp4`). Gemessen für „wan“,
+ * 20 Treffer mit 19 Vorschaubildern: 13 davon MP4-Videos, zusammen 68 MB (das größte 15,9 MB) für
+ * Kärtchen von 56 px. Auf Linux dekodiert WebKitGTK ein Video im `<img>` mit
+ * GStreamer (WebView2 unter Windows zeigt es gar nicht), also
+ * zwanzig Videodekoder auf einmal, mit echter GPU über VA-API/GL.
+ *
+ * Der Bild-CDN von CivitAI liefert dieselbe Datei verkleinert, und mit
+ * `anim=false` auch ein Video als einzelnes JPEG (gemessen: 111 KB statt
+ * 695 KB bis 16 MB, image/jpeg statt video/mp4; alle 19 zusammen
+ * 1,89 MB). Dieselbe Angabe benutzt die CivitAI-Seite selbst. Ein Video, das
+ * nicht auf diesem CDN liegt, bekommt KEIN Vorschaubild: ein Video gehört nicht
+ * in ein `<img>`.
+ */
+const CIVITAI_THUMB_PARAMS = 'anim=false,width=450,optimized=true'
+
+export function civitaiThumbUrl(url: string | undefined, type?: string): string | undefined {
+  if (!url) return undefined
+  const isVideo = type === 'video' || /\.(mp4|webm|mov|m4v)(\?|#|$)/i.test(url)
+  let parsed: URL
+  try {
+    parsed = new URL(url)
+  } catch {
+    return undefined
+  }
+  if (parsed.protocol !== 'https:' || parsed.hostname !== 'image.civitai.com') {
+    return isVideo ? undefined : url
+  }
+  // /<Schlüssel>/<uuid>/<Angaben>/<Name>, ältere Antworten ohne Angaben-Teil.
+  const segs = parsed.pathname.split('/').filter(Boolean)
+  if (segs.length === 4 && segs[2].includes('=')) segs[2] = CIVITAI_THUMB_PARAMS
+  else if (segs.length === 3) segs.splice(2, 0, CIVITAI_THUMB_PARAMS)
+  else return isVideo ? undefined : url
+  // `pathname` ist schon kodiert, die Teile gehen unverändert zurück.
+  parsed.pathname = '/' + segs.join('/')
+  return parsed.toString()
+}
+
+/**
  * Eine CivitAI-Beschreibung als Text, nicht als Markup.
  *
  * Befund am echten Windows-Bau (21.09.2026, C4-search-pixel-results.png): in
@@ -2235,7 +2465,8 @@ export async function searchCivitaiModels(
       const version = asRecordArray(prop(item, 'modelVersions'))[0]
       const files = asRecordArray(prop(version, 'files'))
       const file = only?.safetensorsOnly ? files.find(isSafetensors) : files[0]
-      const thumb = asString(propPath(asRecordArray(prop(version, 'images'))[0], 'url'))
+      const firstImage = asRecordArray(prop(version, 'images'))[0]
+      const thumb = civitaiThumbUrl(asString(prop(firstImage, 'url')), asString(prop(firstImage, 'type')))
       // The version's own address is that of its first file. Where a later
       // file was picked, only that file's address fetches it.
       const downloadUrl = only?.safetensorsOnly

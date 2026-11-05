@@ -6,7 +6,7 @@
 import { Microscope } from 'lucide-react'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { useReaRuntime } from '../../lib/plugins/rea-runtime'
-import { REA_PLUGIN, REA_TOOLS_NOTE } from '../../lib/plugins/rea'
+import { REA_PLUGIN, REA_TOOLS_NOTE, reaGhidraLine } from '../../lib/plugins/rea'
 import { HINWEIS_TEXT } from '../../lib/hinweis'
 
 /** The line under the switch for the step a start is at. */
@@ -23,8 +23,10 @@ export function reaPhaseLine(phase: string, tools: number, error: string | null)
 export function ReaPluginRow() {
   const enabled = useSettingsStore((s) => s.settings.reaPluginEnabled === true)
   const updateSettings = useSettingsStore((s) => s.updateSettings)
-  const { phase, tools, error } = useReaRuntime()
+  const { phase, tools, error, ghidra } = useReaRuntime()
   const line = enabled ? reaPhaseLine(phase, tools, error) : null
+  // Only once REA runs: before that the row has its own step to tell.
+  const ghidraLine = enabled && phase === 'on' ? reaGhidraLine(ghidra) : null
   return (
     <div className="px-2.5" data-testid="plugins-rea">
       <div className="w-full flex items-center justify-between py-1.5 gap-2">
@@ -55,6 +57,14 @@ export function ReaPluginRow() {
           className={`pb-1.5 t-micro leading-snug ${phase === 'error' ? 'text-red-400' : HINWEIS_TEXT.ruhig}`}
         >
           {line}
+        </div>
+      )}
+      {ghidraLine && (
+        <div
+          data-testid="plugins-rea-ghidra"
+          className={`pb-1.5 t-micro leading-snug break-words ${ghidra?.needsNatives ? HINWEIS_TEXT.fehler : HINWEIS_TEXT.ruhig}`}
+        >
+          {ghidraLine}
         </div>
       )}
     </div>

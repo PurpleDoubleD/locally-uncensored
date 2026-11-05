@@ -6,11 +6,12 @@ import { Search, XCircle, Sparkles, Unlock, ShieldCheck, ExternalLink, Info } fr
 import { X } from 'lucide-react'
 import {
   searchHuggingFaceModels,
+  hfSearchFailureText,
   getImageBundles, getVideoBundles, getAudioBundles, getLipsyncBundles, getMotionBundles,
   getUncensoredTextModels, getMainstreamTextModels,
-  detectProviderModelPath, luEngineDownloadDir,
+  detectProviderModelPath, luEngineDownloadDir, luEngineDownloadFolder, providerModelFolder,
   startModelDownload,
-  installBundleComplete, remoteBundleNotice, checkBundlesOnDisk, resolveHfGgufFiles, ggufRequestFor, planModelDownload,
+  installBundleComplete, remoteBundleNotice, checkBundlesOnDisk, resolveHfGgufFiles, ggufRequestFor, quantBudgetBytes, planModelDownload,
   imagePartFor, imagePartOf, checkDownloadSpace,
   type DiscoverModel, type DownloadProgress, type ModelBundle, type HfGgufFile, type ImagePartSource, type PlannedDownload,
 } from '../../api/discover'
@@ -23,7 +24,8 @@ import { getTotalRamGb } from '../../lib/hardware'
 import { vramFit } from '../../lib/vram-fit'
 import { chatModelBudgetGb, sharedMemoryWording } from '../../lib/shared-memory-wording'
 import { useGraphicsMemoryGb } from '../../hooks/useGraphicsMemory'
-import { openExternal, isMacOS } from '../../api/backend'
+import { openExternal, isMacOS, backendCall } from '../../api/backend'
+import { isLfm3Model, lmStudioRuntimeNote } from '../../lib/lmstudio-runtime'
 import { bundleCloudTask } from '../../lib/cloud-offer'
 import { forThisPlatform } from '../../lib/mlx-only-builds'
 import { useModels } from '../../hooks/useModels'
@@ -39,14 +41,19 @@ import { findInstalledForDiscoverModel } from '../../lib/discover-installed'
 import { isBuiltinEngineEntry } from '../../lib/lmstudio-match'
 import { ensureLuEngineIsChatProvider, announceLuEngineSwitch } from '../../api/lu-engine-switch'
 import { LuEngineSwitchBar } from '../chat/LuEngineSwitchBar'
-import { ollamaOnlyDownloadBlock, resolveTextDownloadTarget } from '../../lib/text-download-target'
+import { chosenTextDownloadTarget, ollamaOnlyDownloadBlock, resolveTextDownloadTarget, textDownloadTargetLabel } from '../../lib/text-download-target'
+import { useUIStore } from '../../stores/uiStore'
 import { mayBeStartHerePick } from '../../lib/start-here-picks'
 import { modelInfoTitle } from '../../lib/model-info-title'
+import { partInputWord } from '../../lib/image-part'
 import { hfUrlToOllamaRef, hfUrlToLmStudioSubdir, parseHfUrl, isShardedOrIncompatibleGguf } from '../../lib/hf-to-provider'
 import { HINWEIS_TEXT } from '../../lib/hinweis'
+import { originalsFirst } from '../../lib/original-search'
 import { Modal } from '../ui/Modal'
 import { ModalActions, ModalButton } from '../ui/ModalActions'
 import { countLabel } from '../../lib/formatters'
+import { useHfLinkStore } from '../../stores/hfLinkStore'
+import { HfLinkDialog } from './HfLinkDialog'
 import type { ModelCategory } from '../../types/models'
 import { log } from '../../lib/logger'
 import { groupModels, pickDefaultVariant, computeFit, modelFootprintGb } from './ModelTiles'
@@ -55,6 +62,7 @@ import { ICON_SM } from '../ui/icon-size'
 import { CivitaiSearchPanel } from './CivitaiSearchPanel'
 import { ModelFileCheck, type FileCheckSubject } from './ModelFileCheck'
 import { bundleCheckTargets, chatModelCheckTargets, chatModelCheckable } from '../../lib/model-file-check'
+import { NEURONS_ENABLED } from '../../lib/features'
 
 interface Props {
   category: ModelCategory
@@ -62,6 +70,10 @@ interface Props {
   search?: string
   /** Bumped by ModelManager whenever the user submits the search (Enter). */
   searchSubmitToken?: number
+  /** The search that looks for a maker's original model (Neurons' "Get the
+   *  original"). While the field still holds it, changed versions of the
+   *  model are listed after the originals, under their own heading. */
+  originalFor?: string | null
 }
 
 // Size buckets stay EXACTLY the ones from the old VRAM-tier filter (the owner
@@ -228,7 +240,45 @@ export function awaitDownloadedFile(
   })
 }
 
-export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }: Props) {
+/**
+ * D9: when no folder for a GGUF can be had at all. The old sentence blamed
+ * "app permissions" for every cause; the backend's own reason says which.
+ */
+export function noModelFolderError(modelName: string, reason: string | null): string {
+  const why = (reason || '').trim().replace(/\.$/, '')
+  return why
+    ? `LU found no folder to download ${modelName} into: ${why}.`
+    : `LU found no folder to download ${modelName} into.`
+}
+
+/**
+ * D7 (GitHub #215): the line that says which quant a search hit got and why.
+ * Null when nothing was swapped and the file fits.
+ */
+export function quantFitNote(
+  name: string,
+  resolution: { quant?: string; totalBytes: number; fitSwap?: { from: string; fromBytes: number }; overBudget?: boolean } | null | undefined,
+  memoryGb: number | null,
+  sharedMemory: boolean,
+): string | null {
+  if (!resolution || !memoryGb) return null
+  const gb = (b: number) => (b / 1_073_741_824).toFixed(1)
+  const where = sharedMemory ? `the ${Math.round(memoryGb)} GB this Mac can give a model` : `your ${Math.round(memoryGb)} GB of graphics memory`
+  if (resolution.fitSwap) {
+    return `${name}: LU picked ${resolution.quant ?? 'a smaller quant'} (${gb(resolution.totalBytes)} GB), so it fits ${where} with room for the context. ${resolution.fitSwap.from} (${gb(resolution.fitSwap.fromBytes)} GB) would not fit fully and would run partly on the CPU, much slower.`
+  }
+  if (resolution.overBudget) {
+    return `${name}: no quant of it fits fully in ${where}. LU fetches ${resolution.quant ?? 'the GGUF'} (${gb(resolution.totalBytes)} GB); it runs, partly on the CPU and much slower. A smaller model will be faster.`
+  }
+  return null
+}
+
+/** A later line of the same download keeps the quant line in front of it. */
+function withFitNote(fitNote: string | null, line: string): string {
+  return fitNote ? `${fitNote} ${line}` : line
+}
+
+export function DiscoverModels({ category, search = '', searchSubmitToken = 0, originalFor = null }: Props) {
   const [loading, setLoading] = useState(false)
   const systemVRAM = useGraphicsMemoryGb()
   const [ramGb, setRamGb] = useState<number | null>(null)
@@ -252,6 +302,10 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
   // backends and a bare name for Ollama.
   const activeChatModel = useModelStore(s => s.activeModel)
   const [hfModelPath, setHfModelPath] = useState<string | null>(null)
+  // A locallyuncensored://open-model link waiting for its question (HfLinkInbox).
+  const hfLink = useHfLinkStore(s => s.pending)
+  const hfNeedsLocal = useHfLinkStore(s => s.needsLocal)
+  const clearHfLink = useHfLinkStore(s => s.clear)
   const { pullModel, models: installedModels, fetchModels, setActiveModel } = useModels()
 
   // Refresh installed-model list on mount + when category switches to text
@@ -480,6 +534,12 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
   // heisst in dieser App „kaputt oder wird geloescht" (siehe die Begruendung
   // am `.lu-control`-Rezept in index.css).
   const [installNotice, setInstallNotice] = useState<string | null>(null)
+  // Where Get sends a chat model on this visit (P11, David 2026-10-30). Null
+  // follows the chat model (resolveTextDownloadTarget); 'builtin' is the
+  // user's choice of the LU Engine for these downloads, without switching the
+  // chat model first. A button elsewhere (the Neuron tweaker) can hand it in.
+  const [targetChoice, setTargetChoice] = useState<'builtin' | null>(() => useUIStore.getState().discoverTarget)
+  useEffect(() => { useUIStore.getState().clearDiscoverTarget() }, [])
   // T-69: ein Controller pro Installationsversuch. Er bricht ab, wenn die
   // Ansicht verschwindet — AppShell haengt Models an `currentView === 'models'`
   // (`AppShell.tsx:955`), ein Wechsel haengt sie also wirklich ab — und wenn
@@ -603,15 +663,31 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
   }
 
   const [hfSearchResults, setHfSearchResults] = useState<DiscoverModel[]>([])
+  // Each Enter is a new search. Only the newest one may write the results and
+  // end the spinner: a slow answer to an older query arriving late used to
+  // overwrite the hits of the query now in the box.
+  const hfSearchSeq = useRef(0)
+  // Offline or rate limited is not "No models found": the user would go on
+  // trying other words instead of checking the connection.
+  const [hfSearchError, setHfSearchError] = useState<string | null>(null)
 
   const handleSearch = async () => {
     if (!search.trim() || !isText) return
+    const mine = ++hfSearchSeq.current
     setLoading(true)
     try {
       const results = await searchHuggingFaceModels(search.trim())
-      setHfSearchResults(results)
-    } catch { /* keep existing */ }
-    setLoading(false)
+      if (mine === hfSearchSeq.current) {
+        setHfSearchResults(results)
+        setHfSearchError(null)
+      }
+    } catch (err) {
+      if (mine === hfSearchSeq.current) {
+        setHfSearchResults([])
+        setHfSearchError(hfSearchFailureText(err))
+      }
+    }
+    if (mine === hfSearchSeq.current) setLoading(false)
   }
 
   // The search input lives in the ModelManager header. It feeds `search`
@@ -682,7 +758,21 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
     return `Download failed: ${msg}`
   }
 
-  const handleTextDownload = async (model: DiscoverModel) => {
+  const targetInput = {
+    activeChatModel,
+    openai: providers.openai,
+    ollamaEnabled: !!providers.ollama?.enabled,
+  }
+  const followTarget = resolveTextDownloadTarget(targetInput)
+  const shownTarget = chosenTextDownloadTarget(targetInput, targetChoice)
+  const targetName = (t: typeof shownTarget) => textDownloadTargetLabel(t, providers.openai?.name)
+  /** What a tile's Get says it fills. An entry only Ollama can pull goes
+   *  there whatever was chosen (handleTextDownload). */
+  const getTargetOf = (m: DiscoverModel) => (m.ollamaModel ? 'Ollama' : targetName(shownTarget))
+
+  // `confirmed`: the user already said yes to the size and the parts in the
+  // Hugging Face link dialog, so a split set starts without a second question.
+  const handleTextDownload = async (model: DiscoverModel, opts: { confirmed?: boolean } = {}) => {
     // Bug Y/a v2.5.0 — a user Discord. Pre-v2.5.0 we picked the
     // download backend by "whichever is enabled" with LM Studio winning when
     // both were on. That decoupled the download path from the active chat
@@ -700,14 +790,7 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
     // them and the file went down the LM Studio branch into a nested folder
     // the built-in engine never scans. resolveTextDownloadTarget keeps the
     // active-model rule and adds the missing fallback.
-    const downloadTarget = resolveTextDownloadTarget({
-      activeChatModel,
-      openai: providers.openai,
-      ollamaEnabled: !!providers.ollama?.enabled,
-    })
-    const isActiveBuiltin = downloadTarget === 'builtin'
-    const isActiveLmStudio = downloadTarget === 'lmstudio'
-    const isActiveOllama = downloadTarget === 'ollama'
+    let downloadTarget = chosenTextDownloadTarget(targetInput, targetChoice)
 
     // Ollama-native models land in Ollama whatever the picker holds.
     if (model.ollamaModel) {
@@ -727,6 +810,32 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
     if (!model.downloadUrl || !model.filename) return
     setInstallNotice(null)
 
+    // D9: a server of the user's own in the openai slot (vLLM, LiteLLM, a
+    // Custom one) may read no folder LU knows. Its GGUF goes to the LU Engine
+    // then, and the chat stays on that server, rather than every Get ending
+    // in "Could not determine model directory".
+    const serverName = providers.openai?.name || 'LM Studio'
+    let noFolderOn: string | null = null
+    if (downloadTarget === 'openai-compat' && !hfModelPath && !(await detectProviderModelPath(serverName))) {
+      noFolderOn = serverName
+      downloadTarget = 'builtin'
+    }
+    // Chosen against the chat model: the file goes to the LU Engine, and the
+    // chat stays on the model the user is talking to.
+    const keepChatModel = downloadTarget === 'builtin' && resolveTextDownloadTarget(targetInput) !== 'builtin'
+    const isActiveBuiltin = downloadTarget === 'builtin'
+    const isActiveLmStudio = downloadTarget === 'lmstudio'
+    const isActiveOllama = downloadTarget === 'ollama'
+
+    // N1: an LFM3 GGUF for LM Studio needs its runtime 2.65.1+. Said before
+    // the download, which still runs: the file is right, the runtime is old.
+    if (isActiveLmStudio && isLfm3Model(model.filename)) {
+      void backendCall<string | null>('lmstudio_gguf_runtime').catch(() => null).then((runtime) => {
+        const note = lmStudioRuntimeNote(model.filename!, runtime)
+        if (note) setInstallNotice(note)
+      })
+    }
+
     // Resolve the REAL file(s) on HuggingFace before downloading. The curated /
     // search-derived (url, filename) is only a *guess* — the repo may host the
     // quant in a subfolder, split it into multiple parts, or not have that
@@ -736,9 +845,20 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
     // name the repo does not carry: on its own it cannot tell two families in
     // one repo apart, and it reads nothing from `-0731.gguf` or `_K_P.gguf`.
     const request = ggufRequestFor(model)
+    // D7 (GitHub #215): a quant nobody chose is taken by the memory there is.
+    const budget = request?.quantGuessed ? quantBudgetBytes(chatFitGb) : undefined
     const resolution = request
-      ? await resolveHfGgufFiles(request.repoId, request.preferredQuant, request.exactPath)
+      ? await resolveHfGgufFiles(request.repoId, request.preferredQuant, request.exactPath, budget)
       : null
+    const fitNote = quantFitNote(model.name, resolution, chatFitGb, sharedMemory)
+
+    // A split set the uploader has not finished: llama.cpp loads it only with
+    // every part, so none of it is fetched.
+    if (resolution?.incomplete) {
+      setInstallError(`${model.name} is not complete on Hugging Face yet: only ${resolution.incomplete.have} of ${resolution.incomplete.of} parts are there, and the model loads only with all of them. Try again later.`)
+      return
+    }
+    if (fitNote) setInstallNotice(fitNote)
 
     const lmStudioEnabled = !!providers.openai?.enabled && (providers.openai?.name || '').toLowerCase().includes('lm studio')
     const ollamaEnabledNow = !!providers.ollama?.enabled
@@ -753,12 +873,16 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
       if (isActiveBuiltin) {
         return await luEngineDownloadDir()
       }
-      const base = hfModelPath || (await detectProviderModelPath(providers.openai?.name || 'LM Studio'))
+      const base = hfModelPath || (await detectProviderModelPath(serverName))
       if (!base) return null
       setHfModelPath(base)
       const subdir = hfUrlToLmStudioSubdir(model.downloadUrl!)
       return subdir ? `${base}/${subdir}` : base
     }
+
+    // The backend's own sentence for a missing folder, asked only once it is missing.
+    const whyNoFolder = async (): Promise<string | null> =>
+      (isActiveBuiltin ? await luEngineDownloadFolder() : await providerModelFolder(serverName)).reason
 
     // ── Sharded / multi-part: `ollama pull` cannot load split GGUF
     // (ollama/ollama#5245), so the only sound path is a direct multi-part
@@ -769,7 +893,7 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
     if (resolution?.sharded) {
       const targetDir = await ensureDirectDir()
       if (!targetDir) {
-        setInstallError('Could not determine model directory. Please check app permissions.')
+        setInstallError(noModelFolderError(model.name, await whyNoFolder()))
         return
       }
       // The note is about Ollama's split-GGUF gap, so it must only appear when
@@ -777,6 +901,11 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
       // built-in engine as the target the parts land in the app's own flat
       // models dir and the Rust scan collapses the set, so the note would lie.
       const ollamaCantLoad = isActiveOllama || (!isActiveBuiltin && !isActiveLmStudio && !lmStudioEnabled && ollamaEnabledNow)
+      if (opts.confirmed) {
+        const part = imagePartFor(model, resolution)
+        await startDirectDownload(resolution.files, targetDir, model.name, wantsImagePart(model) ? part : null)
+        return
+      }
       setConfirmDownload({
         model,
         name: model.name,
@@ -820,7 +949,7 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
 
     const targetDir = await ensureDirectDir()
     if (!targetDir) {
-      setInstallError('Could not determine model directory. Please check app permissions.')
+      setInstallError(noModelFolderError(model.name, await whyNoFolder()))
       return
     }
     // A GGUF carries no image tower: llama.cpp reads it from a second file that
@@ -842,12 +971,16 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
         ])
         if (both && !both.fits && alone?.fits) {
           withPart = false
-          setInstallNotice(`${model.name} is downloading without image input: the drive has no room for the extra ${gbOf(part.sizeBytes)} GB. You can add it later under Installed.`)
+          setInstallNotice(withFitNote(fitNote, `${model.name} is downloading without ${partInputWord(model)}: the drive has no room for the extra ${gbOf(part.sizeBytes)} GB. You can add it later under Installed.`))
         }
       }
       const plan = planModelDownload(model, realUrl, realName, realBytes, single?.sha256, { part, withImagePart: withPart })
       await startPlannedDownload(plan, targetDir, model.group || model.name)
-      if (isActiveBuiltin) {
+      if (isActiveBuiltin && keepChatModel) {
+        setInstallNotice(withFitNote(fitNote, noFolderOn
+          ? `${noFolderOn} reads no model folder LU knows, so ${model.name} is downloading to the LU Engine. Your chat stays on ${noFolderOn}; the model list shows it once it is done.`
+          : `${model.name} is downloading to the LU Engine. Your chat stays on its model; ${NEURONS_ENABLED ? 'the Neuron tweaker and ' : ''}the model list show${NEURONS_ENABLED ? '' : 's'} it once it is done.`))
+      } else if (isActiveBuiltin) {
         // Built-in engine: await the flat GGUF, then make it the active chat
         // model so the freshly-added model is chat-ready without a manual switch.
         // The projector is awaited too: booting before it lands would bring the
@@ -978,6 +1111,7 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
         isInstalled={isModelFullyInstalled}
         dlState={getModelDownloadState}
         onDownload={handleTextDownload}
+        getTarget={getTargetOf}
         onUse={handleUseInstalled}
         canUse={canUseInstalled}
         isUsing={(m) => installedEntryFor(m)?.name === usingModel && usingModel !== null}
@@ -1057,6 +1191,24 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
         // also so nah wie moeglich an dem Raster, das sie erklaert.
         legend={isText && (uncensoredModels.length > 0 || mainstreamModels.length > 0)}
       />
+
+      {/* Where Get puts a chat model, and the way to choose the LU Engine
+          for it (P11). Only where it is a choice: when the chat model already
+          runs on the LU Engine there is nothing to pick. */}
+      {isText && (
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 t-body text-gray-600 dark:text-gray-300" data-testid="discover-target">
+          <span>Get downloads to <span className="font-semibold text-gray-900 dark:text-white" data-testid="discover-target-name">{targetName(shownTarget)}</span>{targetChoice === 'builtin' && followTarget !== 'builtin' ? ' for now.' : '.'}</span>
+          {followTarget !== 'builtin' && (targetChoice === 'builtin' ? (
+            <button className="lu-control" onClick={() => setTargetChoice(null)} data-testid="discover-target-follow">
+              Back to {targetName(followTarget)}
+            </button>
+          ) : (
+            <button className="lu-control" onClick={() => setTargetChoice('builtin')} data-testid="discover-target-builtin" title={NEURONS_ENABLED ? 'The Neuron tweaker and the LU Engine only use files in the LU Engine. Your chat model stays as it is.' : 'The LU Engine only uses files in the LU Engine. Your chat model stays as it is.'}>
+              Send to LU Engine instead
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* Install error banner */}
       {installError && (
@@ -1205,36 +1357,58 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
             )}
           </div>
 
-          {/* HuggingFace Search Results */}
-          {hfSearchResults.length > 0 && (
-            <div className={`${skin.cls.group} mt-6`}>
-              <skin.Head place="hf-results" Icon={Search} title="HuggingFace results" />
-              <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-2.5">
-                {hfSearchResults.map((model, i) => (
-                  <motion.div key={model.name + i} className={skin.cls.tileWrap} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: Math.min(i, 12) * 0.025 }}>
-                    <skin.ModelTile
-                      variants={[model]}
-                      vramGb={chatFitGb}
-                      sharedMemory={sharedMemory}
-                      isInstalled={isModelFullyInstalled}
-                      dlState={getModelDownloadState}
-                      onDownload={handleTextDownload}
-                      onUse={handleUseInstalled}
-                      canUse={canUseInstalled}
-                      isUsing={(m) => installedEntryFor(m)?.name === usingModel && usingModel !== null}
-                      onInfo={openInfo}
-                      withImagePart={wantsImagePart}
-                      onOpenUrl={(u) => openExternal(u)}
-                    />
-                  </motion.div>
-                ))}
-              </div>
-            </div>
+          {hfSearchError && (
+            <p role="alert" className={skin.cls.searchEmpty} data-testid="hf-search-failed">{hfSearchError}</p>
           )}
+
+          {/* HuggingFace Search Results */}
+          {hfSearchResults.length > 0 && (() => {
+            const wantsOriginal = !!originalFor && search.trim() === originalFor
+            const { originals, changed } = wantsOriginal ? originalsFirst(hfSearchResults, originalFor) : { originals: hfSearchResults, changed: [] }
+            const tiles = (list: DiscoverModel[]) => list.map((model, i) => (
+              <motion.div key={model.name + i} className={skin.cls.tileWrap} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: Math.min(i, 12) * 0.025 }}>
+                <skin.ModelTile
+                  variants={[model]}
+                  vramGb={chatFitGb}
+                  sharedMemory={sharedMemory}
+                  isInstalled={isModelFullyInstalled}
+                  dlState={getModelDownloadState}
+                  onDownload={handleTextDownload}
+                  getTarget={getTargetOf}
+                  onUse={handleUseInstalled}
+                  canUse={canUseInstalled}
+                  isUsing={(m) => installedEntryFor(m)?.name === usingModel && usingModel !== null}
+                  onInfo={openInfo}
+                  withImagePart={wantsImagePart}
+                  onOpenUrl={(u) => openExternal(u)}
+                />
+              </motion.div>
+            ))
+            return (
+              <div className={`${skin.cls.group} mt-6`} data-testid="hf-results">
+                <skin.Head place="hf-results" Icon={Search} title={wantsOriginal ? 'Original models on Hugging Face' : 'HuggingFace results'} />
+                {wantsOriginal && originals.length === 0 && (
+                  <p className={`t-body ${HINWEIS_TEXT.ruhig} mb-2`}>No original of this model in the results. Try a shorter search.</p>
+                )}
+                <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-2.5" data-testid="hf-results-originals">
+                  {tiles(originals)}
+                </div>
+                {changed.length > 0 && (
+                  <div className="mt-5" data-testid="hf-results-changed">
+                    <p className="t-label text-gray-300 mb-0.5">Changed by others, not the original</p>
+                    <p className={`t-micro ${HINWEIS_TEXT.ruhig} mb-2`}>Uncensored, merged or fine-tuned versions.{NEURONS_ENABLED && ' Neuron sliders work best on the originals above.'}</p>
+                    <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-2.5">
+                      {tiles(changed)}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )
+          })()}
         </>
       ) : null}
 
-      {!loading && filteredBundles.length === 0 && filteredUncensored.length === 0 && filteredMainstream.length === 0 && (
+      {!loading && !(isText && hfSearchError) && filteredBundles.length === 0 && filteredUncensored.length === 0 && filteredMainstream.length === 0 && (
         <p className={skin.cls.searchEmpty}>No models found</p>
       )}
 
@@ -1294,6 +1468,21 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
           refreshBundleStatuses()
         }}
       />
+
+      {hfLink && !hfNeedsLocal && category === 'text' && (
+        <HfLinkDialog
+          key={`${hfLink.repo}|${hfLink.file ?? ''}`}
+          link={hfLink}
+          onCancel={clearHfLink}
+          onConfirm={(model) => {
+            clearHfLink()
+            handleTextDownload(model, { confirmed: true }).catch((e) => {
+              log.error('Hugging Face link download failed', { err: e })
+              setInstallError(`Download failed: ${e instanceof Error ? e.message : String(e)}`)
+            })
+          }}
+        />
+      )}
 
       <Modal open={!!confirmDownload} onClose={() => setConfirmDownload(null)} title="Download split model">
         {confirmDownload && (

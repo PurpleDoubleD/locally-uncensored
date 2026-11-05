@@ -36,7 +36,7 @@ import { contentPolicySnapshot, loadContentPolicy } from './useContentPolicy'
 import { effectiveContentPolicy } from '../lib/content-policy-cap'
 import { signalCreditsExhausted } from '../lib/credits-exhausted'
 import { resolveRunSeed } from '../lib/run-seed'
-import { intentRoles, intentRequiredInputs, isStudioModel, resolveIntentPick, studioExtraPhotoSlots } from '../lib/render/create-studio'
+import { intentRoles, intentRequiredInputs, isStudioModel, resolveIntentPick, studioExtraPhotoSlots, cloudTakesEndImage } from '../lib/render/create-studio'
 import { bumpSeed, runImageCount } from '../lib/render/image-count'
 import { STUDIO_MODELS, studioFields } from '../lib/render/studio-contract'
 import { modelLabel } from '../lib/render/preset-models'
@@ -65,7 +65,7 @@ import { forgetStaged, stagedMayBeStale, uploadTrainPhotos } from '../lib/train-
 // If the account policy has not loaded yet, this checks CSAM only ('off'):
 // never block on a guessed rule, the server is the authority for the rest,
 // same reasoning as the web app's own comment on clientSafety().
-function clientSafety(text: string): SafetyVerdict {
+function clientSafety(text: string, negative?: string): SafetyVerdict {
   const account = contentPolicySnapshot()
   if (!account) void loadContentPolicy() // for the next run
   // A store build of the phone app caps the level (lib/content-policy-cap.ts):
@@ -73,7 +73,7 @@ function clientSafety(text: string): SafetyVerdict {
   // level here, and an unknown level is the cap, never 'off'. No cap on the
   // desktop: the line is what it was.
   const policy = effectiveContentPolicy(account)
-  return checkPromptSafety(text, { tier: 'cloud', policy: policy ?? 'off' })
+  return checkPromptSafety(text, { tier: 'cloud', policy: policy ?? 'off', negative })
 }
 
 // Gallery label for ops that never read the composer prompt. Without this
@@ -344,7 +344,15 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
     // below either way; this only saves the round trip when the client
     // already knows the verdict (B3).
     {
-      const verdict = clientSafety(`${prompt} ${s.negativePrompt} ${s.musicLyrics} ${s.triggerWord}`)
+      // The negative prompt is read apart (B30, safety.ts). Only what this
+      // run sends is read, same conditions as the params below: the store
+      // keeps negative prompt, lyrics and trigger word across modes, and a
+      // field this mode neither shows nor sends must not block it unseen
+      // (B30, web fix fb714de4).
+      const sendsClassicKnobs = !studioModel && !specialOp && op !== 'removebg' && op !== 'upscale' && op !== 'eraser'
+      const lyrics = op === 'music' && !studioModel ? s.musicLyrics : ''
+      const triggerWord = op === 'lora-train' ? s.triggerWord : ''
+      const verdict = clientSafety(`${prompt} ${lyrics} ${triggerWord}`, sendsClassicKnobs ? s.negativePrompt : '')
       if (verdict.blocked) {
         s.setError(blockMessageFor(verdict.reason))
         return
@@ -543,6 +551,20 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
             params.image_paths = [params.source_path, ...more]
           }
           if (!reads.includes('source_path')) delete params.source_path
+          // B38: an end image for a Studio model that reads one
+          // (last_image_path) and that the server's catalogue marks
+          // (W6-API `end_image`). The Stage shows the slot only for those.
+          if (intent === 'animate' && s.endImage && reads.includes('last_image_path') && cloudTakesEndImage(studioModel)) {
+            if (ac.signal.aborted) return
+            s.setProgress(7, 'Uploading the end image…')
+            params.last_image_path = await uploadInput(dataUrlToBlob(s.endImage.url), 'source', ...uploadEnds(ac))
+          }
+        } else if (op === 'animate' && s.endImage && cloudTakesEndImage(model)) {
+          // B38: a classic Animate model the catalogue marks (W6-API
+          // `end_image`): the end image rides along as last_image_path.
+          if (ac.signal.aborted) return
+          s.setProgress(7, 'Uploading the end image…')
+          params.last_image_path = await uploadInput(dataUrlToBlob(s.endImage.url), 'source', ...uploadEnds(ac))
         }
       }
       if ((op === 'edit' && !editIsMaskless) || op === 'eraser') {

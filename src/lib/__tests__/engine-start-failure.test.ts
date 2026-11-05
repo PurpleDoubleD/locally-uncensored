@@ -43,6 +43,8 @@ describe('engineStartIsWorthRetrying', () => {
       'The built-in engine program (lu-llama-server.exe) is missing from this installation. Reinstall Locally Uncensored.',
       'Model file not found: C:\\models\\gone.gguf',
       'The built-in engine has no model file named "Cydonia-24B-v4.1-Q4_K_M".',
+      // GH #207, the sentence engine_binary_error writes for CI's 0-byte stub
+      'The LU Engine program (lu-llama-server.exe) in this build is a placeholder of 0 bytes, not the engine, so it cannot start. A build from source needs the real file: run scripts/build-llama.sh, or take it from the latest release (CONTRIBUTING.md, "The LU Engine").',
     ]) {
       expect(engineStartIsWorthRetrying(new Error(msg))).toBe(false)
     }

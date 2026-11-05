@@ -6,6 +6,7 @@ import { MarkdownRenderer } from './MarkdownRenderer'
 import { StatusChip } from '../status/StatusChip'
 import { deriveRunStatus } from '../status/run-status'
 import { stripModelNoise } from '../../lib/strip-model-noise'
+import { compareFailureText } from '../../lib/compare-failure'
 import { ArrowLeft, Send, Square, Zap, Clock, Hash } from 'lucide-react'
 import { displayModelName } from '../../api/providers/registry'
 
@@ -62,6 +63,7 @@ export function ABCompare() {
         <div className="flex items-center gap-3 justify-self-start">
           <button
             onClick={() => { setComparing(false); reset() }}
+            aria-label="Back"
             className="p-1 rounded-lg hover:bg-white/10 text-gray-400 hover:text-white transition-colors"
           >
             <ArrowLeft size={14} />
@@ -77,6 +79,7 @@ export function ABCompare() {
           <select
             value={modelA}
             onChange={(e) => setModelA(e.target.value)}
+            aria-label="Model A"
             className="px-2 py-1 rounded-lg bg-red-500/10 border border-red-500/30 t-micro text-red-300 focus:outline-none"
           >
             <option value="">Model A</option>
@@ -88,6 +91,7 @@ export function ABCompare() {
           <select
             value={modelB}
             onChange={(e) => setModelB(e.target.value)}
+            aria-label="Model B"
             className="px-2 py-1 rounded-lg bg-blue-500/10 border border-blue-500/30 t-micro text-blue-300 focus:outline-none"
           >
             <option value="">Model B</option>
@@ -117,9 +121,14 @@ export function ABCompare() {
             {messagesA.map(msg => (
               <div key={msg.id} className={`text-[0.7rem] ${msg.role === 'user' ? 'text-gray-400 italic' : 'text-gray-200'}`}>
                 {msg.role === 'assistant' ? (
-                  cleanA.get(msg.id) || !isStreamingA
-                    ? <MarkdownRenderer content={cleanA.get(msg.id) || ''} />
-                    : <div role="status" data-testid="compare-status-a"><StatusChip {...deriveRunStatus({ message: { content: '' } })} /></div>
+                  <>
+                    {cleanA.get(msg.id) || (!isStreamingA && !msg.error)
+                      ? <MarkdownRenderer content={cleanA.get(msg.id) || ''} />
+                      : !msg.error && <div role="status" data-testid="compare-status-a"><StatusChip {...deriveRunStatus({ message: { content: '' } })} /></div>}
+                    {msg.error && (
+                      <p role="alert" data-testid="compare-error-a" className="mt-1 whitespace-pre-wrap text-red-300/90">{compareFailureText(msg.error)}</p>
+                    )}
+                  </>
                 ) : (
                   <p>{msg.content}</p>
                 )}
@@ -144,9 +153,14 @@ export function ABCompare() {
             {messagesB.map(msg => (
               <div key={msg.id} className={`text-[0.7rem] ${msg.role === 'user' ? 'text-gray-400 italic' : 'text-gray-200'}`}>
                 {msg.role === 'assistant' ? (
-                  cleanB.get(msg.id) || !isStreamingB
-                    ? <MarkdownRenderer content={cleanB.get(msg.id) || ''} />
-                    : <div role="status" data-testid="compare-status-b"><StatusChip {...deriveRunStatus({ message: { content: '' } })} /></div>
+                  <>
+                    {cleanB.get(msg.id) || (!isStreamingB && !msg.error)
+                      ? <MarkdownRenderer content={cleanB.get(msg.id) || ''} />
+                      : !msg.error && <div role="status" data-testid="compare-status-b"><StatusChip {...deriveRunStatus({ message: { content: '' } })} /></div>}
+                    {msg.error && (
+                      <p role="alert" data-testid="compare-error-b" className="mt-1 whitespace-pre-wrap text-red-300/90">{compareFailureText(msg.error)}</p>
+                    )}
+                  </>
                 ) : (
                   <p>{msg.content}</p>
                 )}
@@ -163,18 +177,20 @@ export function ABCompare() {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && handleSend()}
+            aria-label="Prompt for both models"
             placeholder={modelA && modelB ? 'Same prompt, two models...' : 'Select both models first'}
             disabled={!modelA || !modelB || isStreaming}
             className="flex-1 px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-[0.7rem] text-white placeholder-gray-500 focus:outline-none focus:border-white/25 disabled:opacity-40"
           />
           {isStreaming ? (
-            <button onClick={stopCompare} className="px-3 py-2 rounded-lg bg-red-500/20 text-red-400 hover:bg-red-500/30 transition-colors">
+            <button onClick={stopCompare} aria-label="Stop" className="px-3 py-2 rounded-lg bg-red-500/20 text-red-400 hover:bg-red-500/30 transition-colors">
               <Square size={14} />
             </button>
           ) : (
             <button
               onClick={handleSend}
               disabled={!input.trim() || !modelA || !modelB}
+              aria-label="Send to both models"
               className="px-3 py-2 rounded-lg bg-white/10 text-white hover:bg-white/15 transition-colors disabled:opacity-30"
             >
               <Send size={14} />

@@ -177,7 +177,7 @@ describe('the effort control in the composer says what it is and what it costs',
     // Showing Max while sending high would be a control that lies, on the one
     // axis where the user is paying attention because it costs money.
     expect(chatInput).toMatch(/const effortNow = clampEffort\(effortLevels, /)
-    expect(chatInput).toMatch(/<span>\{effortText\}<\/span>/)
+    expect(chatInput).toMatch(/<span[^>]*>\{effortText\}<\/span>/)
   })
 
   it('it is drawn only where it is true: a declared ladder and thinking really on', () => {

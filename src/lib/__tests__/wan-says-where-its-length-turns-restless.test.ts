@@ -15,11 +15,11 @@ describe('the length hint under the Frames slider', () => {
     expect(lengthHint('wan', WAN_STEADY_FRAMES)).toBeNull()
   })
 
-  it('names the steady length and Extend Video past it', () => {
+  it('names the steady length and the Length control past it (B18)', () => {
     expect(frameRangeFor('wan').max).toBeGreaterThan(WAN_STEADY_FRAMES)
     const hint = lengthHint('wan', WAN_STEADY_FRAMES + 4)
     expect(hint).toMatch(/81 frames/)
-    expect(hint).toMatch(/Extend Video/)
+    expect(hint).toMatch(/Length in seconds/)
   })
 
   it('is for Wan 2.1 only: Wan 2.2 and LTX learned longer clips', () => {

@@ -35,8 +35,10 @@ describe('every speaker gets its own model loaded', () => {
     expect(groupRound).not.toMatch(/builtinReloadNeeded|ensureBuiltinEngineAlive/)
     // The round still does nothing but hand each model its own turn, and the
     // turn is where the model is loaded.
-    expect(groupRound).toMatch(/for \(const model of models\)/)
-    expect(groupRound).toMatch(/await runGroupTurn\(convId, model, models, abort\)/)
+    // (3.0.9, GH #200: each turn runs under a controller of its own, so a
+    // speaker can be skipped without ending the round.)
+    expect(groupRound).toMatch(/for \(const \[index, model\] of models\.entries\(\)\)/)
+    expect(groupRound).toMatch(/await runGroupTurn\(convId, model, table, turn\)/)
   })
 
   it('reloads BEFORE the provider call, not after', () => {

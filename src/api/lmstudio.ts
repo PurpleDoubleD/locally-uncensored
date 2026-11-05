@@ -4,6 +4,7 @@
 // The frontend talks only to the bridge, there is no CLI shell-out from the
 // browser.
 
+import { isLfm3Model, lmStudioRuntimeNote } from '../lib/lmstudio-runtime'
 import { backendCall } from './backend'
 import { callLimit, CallTimeoutError, type CallLimitOptions } from '../lib/call-limit'
 import { lmStudioReason } from '../lib/lmstudio-switch'
@@ -153,6 +154,13 @@ export async function loadLmStudioModel(model: string, contextLength?: number, o
     // stays somebody else's, and so does one behind a list nobody could read.
     ours = window !== null
       || await limit.race(readLoadedLmStudioModels().then((loaded) => !loaded.includes(model), () => false))
+    // N1: LFM3 needs LM Studio's runtime 2.65.1+; an older one fails the load
+    // without saying why, so LU says it first (lib/lmstudio-runtime.ts).
+    if (isLfm3Model(model)) {
+      const runtime = await limit.race(backendCall<string | null>('lmstudio_gguf_runtime').catch(() => null))
+      const note = lmStudioRuntimeNote(model, runtime)
+      if (note) throw new LmStudioSwitchError(note, note)
+    }
     limit.signal.addEventListener('abort', endLoad, { once: true })
     bridge = backendCall('lmstudio_load_model', {
       model,

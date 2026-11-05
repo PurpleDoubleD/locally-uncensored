@@ -1,3 +1,5 @@
+import type { EnterKeyMode } from '../lib/enter-key'
+import type { CustomParam } from '../lib/custom-params'
 import type { AgentWorkspace } from './agent-workspace'
 import type { EffortLevel } from '../lib/effort'
 
@@ -90,6 +92,9 @@ export interface Settings {
   /** Emoticons such as :) become emojis while typing in the chat composer
    *  (Chat, Agent, Code; not Create). Default on (lib/emoticons.ts). */
   emojiAutoReplace: boolean
+  /** GH #202: what Enter does in the composer and in the edit field of an
+   *  earlier message, 'send' (the default) or 'newline' (lib/enter-key.ts). */
+  enterKey?: EnterKeyMode
   /** REA, the reverse engineering plugin of the agents (lib/plugins/rea.ts):
    *  on starts its local MCP server. Default off. */
   reaPluginEnabled: boolean
@@ -292,6 +297,14 @@ export interface Settings {
    */
   autoCompact: boolean
   /**
+   * Recall for long chats (B33, 3.0.9, GitHub #205). When a compaction keeps
+   * the older part of a chat out of the payload, those messages are embedded
+   * on this machine and the few closest in meaning to the new message ride
+   * along in the turn note (lib/chat-recall.ts). Off unless switched on, and
+   * it only runs on a local embedder (bundled server or Ollama on loopback).
+   */
+  chatRecall?: boolean
+  /**
    * Auto-compact trigger, as a fraction of the send window. 2.6.8.
    *
    * 0 = fit the model: the threshold follows the context window, earlier on a
@@ -362,6 +375,13 @@ export interface Settings {
   // local VRAM and are always skipped.
   /** VRAM exclusivity policy for image/video generation. Default 'auto'. */
   exclusiveVramMode: 'auto' | 'always' | 'never'
+  /**
+   * B27 (3.0.9): give ComfyUI's memory back after a render
+   * (lib/free-after-render). 'idle' (default) after five minutes without a
+   * new render, 'now' right after it, 'keep' never. Optional: a profile from
+   * before 3.0.9 reads as the default, no store version bump.
+   */
+  freeAfterRender?: 'idle' | 'now' | 'keep'
   /**
    * A picture or video the chat asked for that takes longer than a few
    * seconds goes on in the background (3.0.8, A2). The turn ends, the chat can
@@ -507,6 +527,10 @@ export interface Persona {
    *  persona speaks (its chat, or its seat in a group); a chat's own values
    *  from the Sampling popup still win. Absent on every persona from before. */
   sampling?: SamplerValues
+  /** GH #198: sampling parameters LU has no field for, sent as typed where
+   *  the backend takes them (lib/custom-params.ts). A chat's own row with the
+   *  same key wins. Absent on every persona from before. */
+  customParams?: CustomParam[]
   /** GH #181: a short reminder sent near the end of the prompt on every turn
    *  this persona speaks (lib/persona-note.ts). Payload only, never stored
    *  in a chat. Absent on every persona from before. */

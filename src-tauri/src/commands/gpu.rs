@@ -97,6 +97,14 @@ fn run_cmd(program: &str, args: &[&str]) -> Option<String> {
     crate::commands::shell::output_bounded(cmd, std::time::Duration::from_secs(5))
 }
 
+/// (free, total) MiB of the biggest NVIDIA card right now, for the tray
+/// menu's memory line. `None` without nvidia-smi.
+pub(crate) fn nvidia_memory_mib() -> Option<(u64, u64)> {
+    run_cmd("nvidia-smi", &["--query-gpu=memory.free,memory.total", "--format=csv,noheader,nounits"])
+        .as_deref()
+        .and_then(parse_nvidia_memory)
+}
+
 /// nvidia-smi's cards alone, for a caller that needs only those (the chat
 /// role's engine device, gpu_roles.rs).
 pub(crate) fn detect_nvidia_cards() -> Vec<DetectedGpu> {

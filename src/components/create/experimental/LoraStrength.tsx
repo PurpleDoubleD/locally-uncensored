@@ -1,8 +1,8 @@
 import { useId, useState } from 'react'
 import { Slider } from '../ui/Slider'
 import {
-  LORA_SLIDER_MAX, LORA_SLIDER_MIN, LORA_STRENGTH_MAX, LORA_STRENGTH_MIN, LORA_STRENGTH_STEP,
-  parseLoraStrength, stepLoraStrength,
+  LORA_STRENGTH_MAX, LORA_STRENGTH_MIN, LORA_STRENGTH_STEP,
+  loraSliderReach, parseLoraStrength, stepLoraStrength,
 } from '../../../lib/lora-strength'
 
 interface Props {
@@ -16,11 +16,13 @@ interface Props {
 const shown = (v: number) => v.toFixed(2)
 
 /**
- * The strength of one LoRA in the stack: the slider for the usual 0 to 2 and
- * a number field for the exact value, which also takes what the slider cannot
- * reach (Discord 2026-10-02: slider LoRAs for Krea 2 are made
+ * The strength of one LoRA in the stack: the slider for -2 to 2 with 0 marked
+ * in the middle, and a number field for the exact value, which takes -20 to 20
+ * (Discord 2026-10-02: slider LoRAs for Krea 2 are made
  * for about -10 to 10, negative included; Discord 2026-10-23: some for -10 to
- * 15, so the field takes -20 to 20).
+ * 15). A typed value beyond 2 widens the slider to it (Discord 2026-11-01), and
+ * the slider stays that wide while the control is open, so dragging back
+ * towards 0 does not shrink the track under the thumb.
  *
  * The field is a text input on purpose. While someone types, "-" and "1," are
  * not numbers yet, and a number input hands those back as an empty string, so
@@ -31,6 +33,8 @@ const shown = (v: number) => v.toFixed(2)
 export function LoraStrength({ name, value, onChange }: Props) {
   const id = useId()
   const [draft, setDraft] = useState<string | null>(null)
+  const [reach, setReach] = useState(() => loraSliderReach(value))
+  if (loraSliderReach(value) > reach) setReach(loraSliderReach(value))
   const label = name.replace(/^.*[\\/]/, '').replace(/\.safetensors$/i, '')
   return (
     <div className="space-y-1.5">
@@ -64,10 +68,11 @@ export function LoraStrength({ name, value, onChange }: Props) {
         />
       </div>
       <Slider
-        min={LORA_SLIDER_MIN}
-        max={LORA_SLIDER_MAX}
+        min={-reach}
+        max={reach}
         step={LORA_STRENGTH_STEP}
-        value={Math.max(LORA_SLIDER_MIN, Math.min(LORA_SLIDER_MAX, value))}
+        origin={0}
+        value={Math.max(-reach, Math.min(reach, value))}
         onChange={onChange}
       />
     </div>

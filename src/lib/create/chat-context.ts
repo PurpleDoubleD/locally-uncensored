@@ -68,7 +68,7 @@ export function defaultCreateToolEnv(conversationId: string | null): CreateToolE
     openAllowed: async () => (await policy()) === 'off',
     checkSafety: async () => {
       const p = await policy()
-      return (text: string) => checkPromptSafety(text, { tier: 'cloud', policy: p })
+      return (text: string, negative?: string) => checkPromptSafety(text, { tier: 'cloud', policy: p, negative })
     },
     characters: async () => {
       try {

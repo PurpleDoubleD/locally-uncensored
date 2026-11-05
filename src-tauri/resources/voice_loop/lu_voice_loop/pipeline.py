@@ -52,7 +52,7 @@ from .engines import Engines
 from .latency import LatencyReport
 from .log import pipeline_error_line, safe_error_text
 from .ollama_native import OllamaNativeTransport
-from .speech import SharedPocketTTSService, SharedWhisperSTTService
+from .speech import HttpSTTService, HttpTTSService, SharedPocketTTSService, SharedWhisperSTTService
 from .thinking import (
     CHARS_PER_TOKEN,
     DIRECT_INSTRUCTION,
@@ -573,6 +573,21 @@ def user_turn_params(gate: VoiceCommandGate, **kwargs) -> LLMUserAggregatorParam
     return LLMUserAggregatorParams(empty_user_turn=EmptyTurnUnlessCommand(gate), **kwargs)
 
 
+def speech_services(config: SessionConfig, engines: Engines) -> tuple[FrameProcessor, FrameProcessor]:
+    """The ear and the voice of a session: the app's choice, else the built-in models."""
+    if config.stt is not None:
+        stt = HttpSTTService(url=config.stt.url, model=config.stt.model, api_key=config.stt.api_key)
+    else:
+        stt = SharedWhisperSTTService(whisper_model=engines.whisper)
+    if config.tts is not None:
+        tts = HttpTTSService(url=config.tts.url, model=config.tts.model, voice=config.tts.voice, api_key=config.tts.api_key)
+    else:
+        tts = SharedPocketTTSService(
+            tts_model=engines.tts, voice_state=engines.voice_state(config.voice), voice=config.voice,
+        )
+    return stt, tts
+
+
 def build_worker(websocket, config: SessionConfig, engines: Engines) -> tuple[PipelineWorker, ToolRelay]:
     """Assemble the pipeline for one accepted WebSocket."""
     transport = FastAPIWebsocketTransport(
@@ -587,11 +602,8 @@ def build_worker(websocket, config: SessionConfig, engines: Engines) -> tuple[Pi
         ),
     )
 
-    stt = SharedWhisperSTTService(whisper_model=engines.whisper)
+    stt, tts = speech_services(config, engines)
     llm = build_llm(config)
-    tts = SharedPocketTTSService(
-        tts_model=engines.tts, voice_state=engines.voice_state(config.voice), voice=config.voice,
-    )
 
     relay = ToolRelay(frozenset(config.long_running_tools))
     register_tools(llm, relay, config)

@@ -6,6 +6,7 @@
 import { backendCall } from './backend'
 import { customModelDirs } from '../lib/custom-model-dirs'
 import type { TrainVramPreset } from '../lib/trainer-presets'
+import type { TrainKind } from '../lib/train-kind'
 
 export interface TrainerInstallState {
   status: string
@@ -222,11 +223,14 @@ export async function startCharacterTraining(
   /** 3.0.8 D20: 'standard' or 'low-vram'. Unknown or missing means Normal on
    *  the Rust side (`TrainPreset::from_arg`). */
   preset?: TrainVramPreset,
+  /** 3.0.9 P8: 'style' writes `style_<name>_zimage`. Missing means a
+   *  character on the Rust side (`TrainKind::from_arg`). */
+  kind?: TrainKind,
 ): Promise<{ status: string }> {
   const mac = await onMac()
   // The Mac trainer has one recipe; Normal / Low VRAM is a CUDA matter (D20).
-  if (mac) return mac.startMacTraining(setId, triggerWord, steps)
-  return backendCall('start_character_training', { setId, name, triggerWord, steps: steps ?? null, preset: preset ?? null })
+  if (mac) return mac.startMacTraining(setId, name, steps, kind)
+  return backendCall('start_character_training', { setId, name, triggerWord, steps: steps ?? null, preset: preset ?? null, kind: kind ?? null })
 }
 
 export async function characterTrainingStatus(): Promise<TrainingRunStatus> {
@@ -251,6 +255,15 @@ export function parseLocalCharacterLora(file: string): { file: string; trigger: 
   const m = /(?:^|[\\/])char_(.+)_zimage\.safetensors$/i.exec(file.trim())
   if (!m) return null
   return { file: file.trim(), trigger: m[1] }
+}
+
+/** 3.0.9 P8: a local style / concept LoRA, `style_<name>_zimage.safetensors`
+ *  (start_character_training with kind 'style'). Not a character: the Use
+ *  shelf leaves it out, the LoRA stack offers it as a Z-Image LoRA. */
+export function parseLocalStyleLora(file: string): { file: string; name: string } | null {
+  const m = /(?:^|[\\/])style_(.+)_zimage\.safetensors$/i.exec(file.trim())
+  if (!m) return null
+  return { file: file.trim(), name: m[1] }
 }
 
 /** Takes a local character off the disk: its LoRA file goes to the system's

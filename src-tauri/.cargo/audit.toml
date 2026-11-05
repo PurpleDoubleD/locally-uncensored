@@ -5,4 +5,5 @@ ignore = [
     "RUSTSEC-2026-0367", # zip 4.x inside tauri-plugin-updater, signed archives only
     "RUSTSEC-2026-0368", # same
     "RUSTSEC-2026-0369", # same
+    "RUSTSEC-2026-0429", # same
 ]

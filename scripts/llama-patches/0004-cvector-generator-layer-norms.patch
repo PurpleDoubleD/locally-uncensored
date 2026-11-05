@@ -1,0 +1,69 @@
+--- a/tools/cvector-generator/cvector-generator.cpp
++++ b/tools/cvector-generator/cvector-generator.cpp
+@@ -9,6 +9,9 @@
+ #include "mean.hpp"
+ 
+ #include <clocale>
++#include <algorithm>
++#include <cmath>
++#include <cstdlib>
+ 
+ #ifdef GGML_USE_CUDA
+ #include "ggml-cuda.h"
+@@ -466,6 +469,14 @@ int main(int argc, char ** argv) {
+ 
+     std::cout << "n_total_tokens: " << n_total_tokens << std::endl;
+ 
++    // LU: with LU_LAYER_NORMS set the tool measures instead of building a
++    // vector: the length of the residual stream after each block, over every
++    // token but the first, for the positive lines. The app takes the median
++    // per block as the unit of a single-neuron slider (the unit neuron
++    // recipes are shared in). The negative lines are not read.
++    const bool lu_norms = getenv("LU_LAYER_NORMS") != nullptr;
++    std::vector<std::vector<float>> lu_norms_by_layer;
++
+     for(size_t i = 0; i < ctx_train.positive_entries.size(); ++i) {
+         bool success = false;
+         tokenized_prompt t = tokenized_prompts[i];
+@@ -485,6 +496,23 @@ int main(int argc, char ** argv) {
+         success = get_hidden_layers(ctx, t.tokens_pos);
+         if (!success) break;
+ 
++        if (lu_norms) {
++            lu_norms_by_layer.resize(cb_data.v_pos.size());
++            for (size_t il = 0; il < cb_data.v_pos.size(); il++) {
++                const ggml_tensor * h = cb_data.v_pos[il];
++                for (int64_t r = 1; r < h->ne[1]; r++) {
++                    const float * row = (const float *) ((const char *) h->data + r * h->nb[1]);
++                    double sum = 0.0;
++                    for (int64_t j = 0; j < h->ne[0]; j++) {
++                        sum += (double) row[j] * row[j];
++                    }
++                    lu_norms_by_layer[il].push_back((float) std::sqrt(sum));
++                }
++            }
++            cb_data.reset();
++            continue;
++        }
++
+         cb_data.is_eval_pos = false;
+         success = get_hidden_layers(ctx, t.tokens_neg);
+         if (!success) break;
+@@ -506,6 +534,17 @@ int main(int argc, char ** argv) {
+         cb_data.reset();
+     }
+ 
++    if (lu_norms) {
++        for (size_t il = 0; il < lu_norms_by_layer.size(); il++) {
++            auto & v = lu_norms_by_layer[il];
++            if (v.empty()) continue;
++            std::nth_element(v.begin(), v.begin() + v.size() / 2, v.end());
++            printf("LU norm %d %.6f\n", (int) il, v[v.size() / 2]);
++        }
++        fflush(stdout);
++        return 0;
++    }
++
+     // done with the model, we can now free it to make gain some memory
+     printf("Done evaluate prompts, unload model...\n");
+ 

@@ -112,6 +112,8 @@ describe('one version, one source', () => {
       if (/@tauri-apps\/api\/app['"]/.test(text) && /\bgetVersion\b/.test(text)) offenders.push(`${rel}: getVersion()`)
       // The release notes are a list of past versions by design, the phone's as well.
       if (rel === 'src/lib/release-notes.ts' || rel === 'src/mobile/strings/release-notes.ts') continue
+      // LM Studio's runtime number that LFM3 needs (N1), not a version of LU.
+      if (rel === 'src/lib/lmstudio-runtime.ts') continue
       for (const m of text.matchAll(typedIn)) {
         const n = Number(m[1])
         if (n >= 2 && n <= major) offenders.push(`${rel}: ${m[0]}`)

@@ -13,6 +13,7 @@ import { CLOUD_BASE } from '../../api/cloud/config'
 import { MONOGRAM } from '../layout/brand'
 import { openExternal } from '../../api/backend'
 import { formatCount } from '../../lib/formatters'
+import { creditsLeft, creditsLeftLine } from '../../lib/credits-left'
 import { countUnsyncedAccountMemories } from '../../lib/memory-unsynced'
 import { PAST_DUE_ACTION, PAST_DUE_BADGE, PAST_DUE_WALLET_LINE, pastDueLine } from '../../lib/past-due'
 import { Modal } from '../ui/Modal'
@@ -212,6 +213,7 @@ export function AccountPanel() {
           value={email}
           onChange={(e) => setEmail(e.target.value)}
           placeholder="Email"
+          aria-label="Email"
           autoComplete="email"
           className="w-full px-2 py-1.5 rounded text-[0.7rem] bg-gray-100 dark:bg-white/5 border border-gray-200 dark:border-white/10 text-gray-900 dark:text-gray-100 placeholder-gray-400 outline-none focus:border-gray-400 dark:focus:border-white/30"
         />
@@ -220,6 +222,7 @@ export function AccountPanel() {
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           placeholder="Password"
+          aria-label="Password"
           autoComplete={mode === 'signin' ? 'current-password' : 'new-password'}
           className="w-full px-2 py-1.5 rounded text-[0.7rem] bg-gray-100 dark:bg-white/5 border border-gray-200 dark:border-white/10 text-gray-900 dark:text-gray-100 placeholder-gray-400 outline-none focus:border-gray-400 dark:focus:border-white/30"
         />
@@ -336,6 +339,10 @@ export function AccountPanel() {
             used={Number(quota.used.credits_used)}
             limit={quota.limits.credits}
           />
+          {/* The tray's "credits left" (Plan & Credits… lands here), same sum. */}
+          <p data-testid="credits-left" className="text-[0.65rem] text-gray-500 dark:text-gray-500 tabular-nums">
+            {creditsLeftLine(creditsLeft(quota))}
+          </p>
         </div>
       ) : (
         !pastDue && (

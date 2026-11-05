@@ -7,7 +7,7 @@ import { ParamGroups } from '../ParamGroups'
 
 const host = vi.hoisted(() => ({ mlx: false }))
 vi.mock('../../../../api/mlx-image', () => ({ isMlxImageHost: () => host.mlx }))
-vi.mock('../../../../api/comfyui', () => ({ classifyModel: (name?: string) => (name?.startsWith('wan') ? 'wan' : 'sdxl'), resolveLocalOpPick: (pick: string) => pick }))
+vi.mock('../../../../api/comfyui', () => ({ classifyModel: (name?: string) => (name?.startsWith('wan') ? 'wan' : 'sdxl'), resolveLocalOpPick: (pick: string) => pick, getSystemVRAM: async () => null }))
 vi.mock('../CreateContext', () => ({ useCreateExp: () => ({
   samplerList: [], schedulerList: [], loraList: [], vaeList: [], refreshModelLists: vi.fn(),
 }) }))

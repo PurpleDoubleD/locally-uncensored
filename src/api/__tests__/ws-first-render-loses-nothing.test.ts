@@ -115,7 +115,7 @@ describe('the Create render opens the socket before it submits', () => {
   const src = read('src/hooks/useCreate.ts')
   const connectAt = src.indexOf('await comfyWS.connect(3000)')
   const markAt = src.indexOf('wsMark = comfyWS.mark()')
-  const submitAt = src.indexOf('await submitWorkflow(workflow, CLIENT_ID)')
+  const submitAt = src.indexOf('await submitWorkflow(workflow, CLIENT_ID,')
 
   it('connect and mark both come before the submit', () => {
     expect(connectAt).toBeGreaterThan(-1)

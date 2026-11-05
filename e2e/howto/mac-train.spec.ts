@@ -7,7 +7,7 @@ import { Rec, HOWTO_OUT } from './rec'
 //    Train new tab is MacTrainControls (isMlxImageHost), no longer a note
 //    that training does not run on a Mac.
 //  - SpecialIntentControls.tsx MacTrainControls: without the image engine and
-//    Z-Image Turbo it reads "Training a character on this Mac needs Z-Image
+//    Z-Image Turbo it reads "Training on this Mac needs Z-Image
 //    Turbo. Install it in the Model Manager first, then come back here."
 //    With them: the field "Trigger word, e.g. davechar", the lengths Quick,
 //    Standard, Thorough (lib/trainer-presets.ts TRAIN_PRESETS: 400, 1200,

@@ -126,7 +126,9 @@ describe('release.yml, a dry run step and a release step are never the same step
   const dry = buildSteps.filter((s) => stepIf(s) === DRY)
 
   it('has its own steps for key, endpoint, build, check, collection and artifact', () => {
-    expect(dry).toHaveLength(6)
+    // Seven since D10: the signature check of the embedded WebView2
+    // bootstrapper, which only a build can reach.
+    expect(dry).toHaveLength(7)
     // No third kind of condition on the new input: a step is in the dry run
     // by exactly `inputs.dry_run`, or out of it by `!inputs.dry_run`.
     for (const step of buildSteps) {
@@ -289,7 +291,8 @@ describe('release-dry-run.mjs rewrite-updater, executed', () => {
       expect(result.out).not.toContain('::error')
       expect(result.code).toBe(0)
       const after = box.conf()
-      expect(after.plugins.updater).toEqual({ endpoints: [DRY_RUN_ENDPOINT], pubkey: THROWAWAY_PUBKEY })
+      // Everything else of the section stays, requireSignedVersion too: the dry run builds with the same CLI.
+      expect(after.plugins.updater).toEqual({ ...CHECKED_IN.plugins.updater, endpoints: [DRY_RUN_ENDPOINT], pubkey: THROWAWAY_PUBKEY })
       expect({ ...after, plugins: { ...after.plugins, updater: CHECKED_IN.plugins.updater } }).toEqual(CHECKED_IN)
       const text = readFileSync(join(box.dir, 'src-tauri/tauri.conf.json'), 'utf8')
       expect(text).not.toContain(PUBLIC_ENDPOINT)
@@ -488,6 +491,18 @@ describe('release-dry-run.mjs collect, executed', () => {
       expect(result.out, platform).not.toContain('::error')
       expect(result.kept, platform).toEqual(['DRY-RUN-NOT-FOR-RELEASE.txt', ...files.map((f) => f.split('/')[1])].sort())
     }
+  })
+
+  it('leaves out the installers tauri build packs only for the updater archives', () => {
+    // CI 9 (D10): bundle/msi-updater and bundle/nsis-updater hold installers
+    // with the same names as the real ones, and the collection stopped on them.
+    const result = collect('windows', [
+      ...WINDOWS,
+      'nsis-updater/Locally Uncensored_3.0.6_x64-setup.exe',
+      'msi-updater/Locally Uncensored_3.0.6_x64_en-US.msi',
+    ])
+    expect(result.code).toBe(0)
+    expect(result.kept).toEqual(['DRY-RUN-NOT-FOR-RELEASE.txt', ...WINDOWS.map((f) => f.split('/')[1])].sort())
   })
 
   it('writes one sha256 line per file into the job summary', () => {

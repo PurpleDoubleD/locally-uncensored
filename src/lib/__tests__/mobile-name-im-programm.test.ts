@@ -51,6 +51,12 @@ type Allowed = { file: string; has: string; klasse: 'c' | 'd'; grund: string }
  */
 const ALLOWED: Allowed[] = [
   {
+    file: 'src-tauri/src/hf_link.rs',
+    has: 'pub const SCHEME: &str = "locallyuncensored";',
+    klasse: 'd',
+    grund: 'Link-Schema von Hugging Face "Use this model" (P9, 3.0.9): Name, unter dem das System die App findet. Modul unter cfg(desktop), am Handy nicht uebersetzt.',
+  },
+  {
     file: 'src-tauri/src/commands/plugin_rea.rs',
     has: '"locally uncensored",',
     klasse: 'd',

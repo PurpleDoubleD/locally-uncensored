@@ -111,8 +111,16 @@ describe('the install path uses it, and says something honest when it runs out',
     // bundle that their own gate rejects. 9.2 GB later the card was still
     // there, and pressing the button again did the same thing. Measured on the
     // box 2026-08-15.
-    expect(src).toMatch(/bundleForVideoIntent\(getVideoBundles\(\), useCreateStore\.getState\(\)\.intent\(\)\)/)
+    // GH #209: the pick moved into lib/starter-bundle.ts, because the setup
+    // card needs the same bundle to see whether it is already on disk.
+    const starterSrc = readFileSync(
+      resolve(dirname(fileURLToPath(import.meta.url)), '../starter-bundle.ts'),
+      'utf8',
+    )
+    expect(src).toMatch(/starterBundleFor\(kind, useCreateStore\.getState\(\)\.intent\(\)\)/)
+    expect(starterSrc).toMatch(/if \(kind === 'video'\) return bundleForVideoIntent\(getVideoBundles\(\), intent\)/)
     expect(src).not.toMatch(/kind === 'video' \? getVideoBundles\(\)/)
+    expect(starterSrc).not.toMatch(/kind === 'video' \? getVideoBundles\(\)/)
   })
 
   it('only the folders THIS engine enumerates are checked', () => {

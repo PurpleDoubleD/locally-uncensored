@@ -21,6 +21,7 @@ import { checkModelCapability } from '../../api/ollama'
 import { closeDialog, isTopDialog, nextFocusIndex, openDialog } from '../ui/dialog-a11y'
 import { MONOGRAM, MONOGRAM_INVERT } from './brand'
 import type { View } from '../../stores/uiStore'
+import { visibleView } from '../../lib/features'
 import { modelListIsStale, openaiEntriesAreStale } from '../../lib/model-list-staleness'
 
 /**
@@ -52,6 +53,8 @@ const NAV_TARGETS: readonly NavTarget[] = [
   { id: 'voice', label: 'Voice', view: 'voice', localOnly: true },
   { id: 'compare', label: 'Compare', view: null },
   { id: 'benchmark', label: 'Benchmark', view: 'benchmark', localOnly: true },
+  // The Neuron tweaker (3.0.9, P11) steers local LU Engine models only.
+  { id: 'neuron', label: 'Neurons', view: 'neuron', localOnly: true },
   { id: 'models', label: 'Models', view: 'models', localOnly: true },
   { id: 'settings', label: 'Settings', view: 'settings' },
 ]
@@ -240,6 +243,8 @@ export function Header() {
 
   /** Die sichtbaren Ziele in dieser Betriebsart. */
   const navTargets = NAV_TARGETS.filter((t) => !t.localOnly || settings.appMode !== 'cloud')
+    // A view that is switched off (Neurons in 3.0.9, lib/features) has no tab.
+    .filter((t) => t.view === null || visibleView(t.view) === t.view)
   const isNavActive = (t: NavTarget) =>
     t.view === null ? isComparing : currentView === t.view && !isComparing
   const goto = (t: NavTarget) => {

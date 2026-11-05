@@ -25,6 +25,8 @@ const HOPELESS = [
   'could not open a local port',
   // the sidecar is not in this installation
   'is missing from this installation',
+  // a build from source with CI's empty sidecar stub (GH #207)
+  'is a placeholder of',
   // the GGUF the caller named is gone
   'model file not found',
   'has no model file named',

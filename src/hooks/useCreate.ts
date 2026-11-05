@@ -23,6 +23,7 @@ import {
   submitWorkflow,
   getHistory,
   isPromptQueued,
+  promptQueueState,
   buildTxt2ImgWorkflow,
   buildTxt2VidWorkflow,
   legacyBuilderFits,
@@ -75,31 +76,40 @@ import { transparentPrompt, wantsTransparent } from '../lib/transparent-image'
 import { scenePromptFor } from '../lib/ltx-multishot'
 import { intentTakesOptionalPrompt, intentTakesPrompt } from '../components/create/experimental/intents'
 import { knownMacMemoryGb } from '../lib/mac-memory'
-import { MIN_TRAIN_IMAGES, tooFewTrainPhotosLine } from '../lib/train-image-cap'
+import { MIN_TRAIN_IMAGES, maxTrainImages, tooFewTrainPhotosLine } from '../lib/train-image-cap'
 import { improveKindForIntent, IMPROVING_PROMPT, type ImproveOutcome } from '../lib/render/improve-prompt'
 import { elapsedLine } from '../lib/elapsed-line'
+import { cancelFreeAfterRender, freeAfterRenderMode, scheduleFreeAfterRender } from '../lib/free-after-render'
 import { improvePrompt } from '../lib/render/improve-prompt-run'
 import { currentChatModelList, currentHelperModel } from '../lib/cloud-helper-model'
-import { enhancerNames, pickQwenEnhancer, rewrittenByName, type ImproveWriter } from '../lib/render/qwen-enhancer'
+import { enhancerLine, enhancerNames, pickQwenEnhancer, rewrittenByName, type ImproveWriter } from '../lib/render/qwen-enhancer'
 import { buildQwenEnhancerWorkflow, runQwenEnhancer } from '../api/qwen-enhancer'
 import { enhancePromptOnMac } from '../api/mlx-enhancer'
 import { extraReferenceSlots, referenceSide } from '../lib/edit-references'
+import { END_IMAGE_ONE_CLIP, createReferenceSupport, localAnimateReferenceSlots, localEndFrame } from '../lib/frame-refs'
 import { canonicalImageRefs } from '../lib/image-ref-names'
 import { macEditReferenceRoom } from '../lib/mac-edit-memory'
 import { getSharedMemoryGb } from '../lib/hardware'
 import { resolveRunSeed } from '../lib/run-seed'
 import { bumpSeed } from '../lib/render/image-count'
+import { collectLateResult, LATE_RESULT_PROMISE } from '../lib/render/late-result'
 import {
   clearTrainingSet, stageTrainingImage, startCharacterTraining,
   characterTrainingStatus, cancelCharacterTraining,
 } from '../api/trainer'
 import { getMacTrainStatus, macTrainMissing } from '../api/mlx-train'
 import { buildTrainCaption } from '../lib/train-captions'
-import { useCreateStore, EDIT_MAX_DENOISE, characterImageRun, deriveIntent, type CreateState } from '../stores/createStore'
+import { trainTriggerWord } from '../lib/train-trigger'
+import { characterThisWouldReplace, useTrainReplaceStore } from '../stores/trainReplaceStore'
+import { buildStyleCaption, missingNameLine, trainedLine, trainedLoraFile } from '../lib/train-kind'
+import { useCreateStore, EDIT_MAX_DENOISE, characterImageRun, deriveIntent, type CreateState, type GalleryItem } from '../stores/createStore'
 import { useWorkflowStore } from '../stores/workflowStore'
 import { useSettingsStore } from '../stores/settingsStore'
+import { useRenderPreviewStore } from '../stores/renderPreviewStore'
 import { renderStallLimitMs, renderStallMessage } from '../lib/tool-timeout'
 import { injectParameters, injectLaneParameters } from '../api/workflows'
+import { applyEditBatch } from '../api/edit-batch'
+import { ranLoras } from '../lib/render/run-settings'
 import { applyNativeHiresFix, latentDownscale } from '../api/hires-fix'
 import { editHiresBase } from '../lib/edit-hires'
 import { lorasForRun, skippedLorasLine } from '../lib/lora-stack'
@@ -113,13 +123,16 @@ import { anyImageEngineReady, editCanvas, imageLaneModels, installedMlxEnhancers
 import { characterBaseModel, characterRunBlock } from '../lib/character-base'
 import {
   CHAIN_STEP_IMAGE, CHAIN_STEP_VIDEO, CharacterChainCancelled, characterLoraFile, characterStartImage,
-  isLocalCharacter, withTriggerWord,
+  isLocalCharacter, listLocalCharacters, withTriggerWord,
 } from '../lib/characters'
 import {
   characterImagePrompt, characterImageSize, characterRunPlan, characterVideoLaneEmpty, CHARACTER_VIDEO_LANES, withCharacterLora, withoutCharacterLoras,
 } from '../lib/character-run'
 import { defaultLoraStrength } from '../lib/lora-strength'
 import { fetchGalleryItemBlob } from '../components/create/experimental/galleryUrl'
+import { LongRunStopped, longVideoRequest, runLongVideo, type ClipItem } from '../lib/long-video-run'
+import { settleSeams } from '../api/video-settle'
+import { ownWorkflowMisfit } from '../lib/own-workflow-fit'
 import { loadImageRef } from '../components/create/experimental/loadImage'
 import { listMlxLoras } from '../api/mlx-loras'
 import {
@@ -185,6 +198,19 @@ interface RunOpts {
   stepLabel?: string
   /** The character's trigger word, kept in a prompt the chat model rewrote. */
   trigger?: string
+  /** A later section of a long clip (B18): the clip so far in ComfyUI's
+   *  input folder and the frames this section repeats from it. */
+  continueFrom?: { video: string; overlap: number }
+  /** One pass with context windows past the native length (B18). */
+  contextWindows?: boolean
+}
+
+/** The long clip fields of one run, as the workflow builder takes them. */
+function longVideoParams(opts: RunOpts): { continueFrom?: { video: string; overlap: number }; contextWindows?: boolean } {
+  return {
+    ...(opts.continueFrom ? { continueFrom: opts.continueFrom } : {}),
+    ...(opts.contextWindows ? { contextWindows: true } : {}),
+  }
 }
 
 /** The store as one run reads it: the live state with this run's fields
@@ -554,9 +580,16 @@ export function useCreate() {
     // below go there by themselves (api/trainer.ts); what differs is how the
     // memory is handed over.
     const mac = isMlxImageHost()
-    const trigger = state.triggerWord.trim()
+    // 3.0.9 P8: a style / concept run shares the whole path; it differs in
+    // the captions, the file name and where it lands (lib/train-kind.ts).
+    // The field holds the character's trigger word or the style's name.
+    // C7: the same word Rust names the LoRA file after, so captions, file
+    // name and the Use shelf's prompt token are one word (lib/train-trigger.ts).
+    // Also catches a persisted "Jörg" saved before the field cleaned it.
+    const kind = state.trainKind
+    const trigger = trainTriggerWord(state.triggerWord)
     if (!trigger) {
-      setError('Pick a trigger word first, e.g. davechar. It becomes the token that summons your character.')
+      setError(missingNameLine(kind))
       return
     }
     // Blobs are runtime-only — after an app restart the thumbnails would
@@ -567,7 +600,9 @@ export function useCreate() {
         ? 'Your photos did not survive the app restart. Re-add them, then train.'
         // The local trainer's cap (100), the one the drop zone names, not
         // the cloud's 30. A Mac trains locally too.
-        : tooFewTrainPhotosLine('local'))
+        : kind === 'style'
+          ? `Add at least ${MIN_TRAIN_IMAGES} pictures in the style first (up to ${maxTrainImages('local')}).`
+          : tooFewTrainPhotosLine('local'))
       return
     }
     // GH #194: the Train tab of a Mac without Z-Image Turbo takes a trigger
@@ -577,6 +612,17 @@ export function useCreate() {
       const missing = st && (st.memoryRefusal ?? macTrainMissing(st))
       if (missing) {
         setError(st.memoryRefusal ?? `${missing} Install it in the Model Manager, then hit Create again.`)
+        return
+      }
+    }
+    // C8: the run ends by writing char_<trigger>_zimage.safetensors, the same
+    // path an existing character of that name lives at. Ask before that
+    // character is replaced, not after (stores/trainReplaceStore.ts). A list
+    // that cannot be read (ComfyUI not up) does not block the run.
+    const existing = characterThisWouldReplace(trigger, await listLocalCharacters().catch(() => []))
+    if (existing) {
+      if (await useTrainReplaceStore.getState().ask(existing) !== 'replace') {
+        setError(`A character named “${existing}” already exists. Pick another trigger word, or confirm that the new training replaces it.`)
         return
       }
     }
@@ -592,7 +638,10 @@ export function useCreate() {
     // back in the finally below. exclusiveVramMode 'never' skips it.
     let trainingEviction: RenderEviction | null = null
     try {
-      const setId = trigger
+      // A style gets a set of its own: a character's set holds the photos
+      // Edit hands out as that character's references (character_files.rs),
+      // and clearing it for a style of the same name would take them.
+      const setId = kind === 'style' ? `style-${trigger}` : trigger
       await clearTrainingSet(setId)
       let n = 0
       for (const img of staged) {
@@ -600,7 +649,12 @@ export function useCreate() {
         // Musubi has no trigger flag, the token must lead every caption. A
         // photo's own description (D28: clothes, hair, place) follows it, so
         // only what stays the same is learned into the trigger word.
-        await stageTrainingImage(setId, img.name, bytes, buildTrainCaption(trigger, state.trainCaptions[img.name]))
+        // A style's line names what is in the picture, with the name in front
+        // only when it is to be a trigger word (P8).
+        const caption = kind === 'style'
+          ? buildStyleCaption(state.trainStyleTrigger ? trigger : '', state.trainCaptions[img.name])
+          : buildTrainCaption(trigger, state.trainCaptions[img.name])
+        await stageTrainingImage(setId, img.name, bytes, caption)
         n += 1
         setProgress(2 + Math.round((n / staged.length) * 5), `Staging photos (${n}/${staged.length})...`)
       }
@@ -619,7 +673,7 @@ export function useCreate() {
       // step 27 while the chat model was brought back beside it).
       if (trainingCancelRequested.current) return
       setProgress(8, 'Starting the training run...')
-      await startCharacterTraining(setId, trigger, trigger, state.trainSteps, state.trainVramPreset)
+      await startCharacterTraining(setId, trigger, trigger, state.trainSteps, state.trainVramPreset, kind)
       let cancelRounds = 0
       for (;;) {
         await new Promise((r) => setTimeout(r, 3000))
@@ -648,12 +702,21 @@ export function useCreate() {
             setProgress(10, headline || 'Preparing training data...')
           }
         } else if (s.status === 'complete') {
-          setProgress(100, 'Character ready!')
+          setProgress(100, trainedLine(kind))
           // The LoRA file just landed in models/loras — drop the node cache so
           // the Use shelf and the LoRA picker list it without a restart.
           clearNodeCache()
-          useCreateStore.getState().bumpCharactersVersion()
-          useCreateStore.getState().setCharacterTab('use')
+          const store = useCreateStore.getState()
+          store.bumpCharactersVersion()
+          if (kind === 'style') {
+            // No shelf for a style: it is a LoRA of the Image tab, switched
+            // on there, with its strength slider (P8).
+            const file = trainedLoraFile('style', trigger)
+            store.setIntent('image')
+            if (!useCreateStore.getState().selectedLoras.some((l) => l.name === file)) store.toggleLora(file)
+          } else {
+            store.setCharacterTab('use')
+          }
           return
         } else if (s.status === 'cancelled') {
           return
@@ -722,8 +785,11 @@ export function useCreate() {
       ? state.negativePrompt
       : ''
     {
+      // The negative prompt is read apart (B30, safety.ts): there it keeps
+      // things out of the picture.
       const verdict = checkPromptSafety(
-        `${typedPrompt} ${state.negativePrompt} ${state.musicLyrics} ${state.triggerWord} ${state.videoShots.join(' ')}`,
+        `${typedPrompt} ${state.musicLyrics} ${state.triggerWord} ${state.videoShots.join(' ')}`,
+        { negative: state.negativePrompt },
       )
       if (verdict.blocked) {
         state.setError(SAFETY_BLOCK_MESSAGE)
@@ -1172,6 +1238,7 @@ export function useCreate() {
             createdAt: Date.now(), builderUsed: 'dynamic', intent,
             ...(transparent ? { transparent: true as const } : {}),
             ...(macSkippedNote ? { runNote: macSkippedNote } : {}),
+            ...ranLoras(runLoras),
           })
         }
         if (!own.signal.aborted) {
@@ -1433,6 +1500,7 @@ export function useCreate() {
                   width: clipSize?.width ?? width, height: clipSize?.height ?? height, batchSize: 1,
                   createdAt: Date.now(), builderUsed: 'dynamic', intent,
                   ...(videoSkippedNote ? { runNote: videoSkippedNote } : {}),
+                  ...ranLoras(videoLoras),
                 })
                 resolve()
                 return
@@ -1551,6 +1619,23 @@ export function useCreate() {
     const listedModel = (mode === 'image' ? state.imageModelList : state.videoModelList)
       .find((m) => m.name === activeModel)
     const imageModelType = localOp ? classifyModel(activeModel) : (listedModel?.type ?? classifyModel(activeModel))
+    // B38: Animate hands the builder an end image and further references only
+    // for a model that reads them (lib/frame-refs). The Stage marks the ones
+    // a model does not read as not sent, so nothing is dropped unseen.
+    const animateSlots = intent === 'animate' ? localAnimateReferenceSlots(activeModel) : 0
+    const animateExtras = intent === 'animate'
+      ? {
+        ...(state.endImage?.filename && localEndFrame(activeModel) ? { endImage: state.endImage.filename } : {}),
+        ...(animateSlots > 0 && references.some((r) => r.filename)
+          ? { referenceImages: references.map((r) => r.filename).filter(Boolean).slice(0, animateSlots) }
+          : {}),
+      }
+      : {}
+    // B45: reference images for text to image, as many as the model reads.
+    const createRefSlots = intent === 'image' && !isI2I ? createReferenceSupport(imageModelType, activeModel).slots : 0
+    const createRefNames = createRefSlots > 0
+      ? state.imageReferences.map((r) => r.filename).filter(Boolean).slice(0, createRefSlots)
+      : []
 
     // Background removal is prompt-free and model-independent (RMBG node);
     // lipsync/motion drive off their media inputs (the builder supplies a
@@ -1629,7 +1714,7 @@ export function useCreate() {
     // feeding a start image to a t2v-only checkpoint — that either errors in
     // ComfyUI or silently ignores the source. The ModelChip already filters
     // the picker; this guards a stale store selection reaching submit.
-    if (intent === 'animate' || intent === 'extend') {
+    if ((intent === 'animate' || intent === 'extend') && !opts.continueFrom) {
       if (!effI2vImage) {
         setError(intent === 'extend'
           ? 'Pick the clip to extend first. Its last frame becomes the starting point.'
@@ -1674,6 +1759,8 @@ export function useCreate() {
     }
 
     abortRef.current = new AbortController()
+    // B27: a render starts, so a planned free of ComfyUI's memory is off.
+    cancelFreeAfterRender()
 
     // Make VRAM room for the render. On a single local GPU a resident chat LLM
     // (Ollama / LM Studio / the bundled engine) squats the card, which forces
@@ -1693,6 +1780,10 @@ export function useCreate() {
     // render's restore to finish reading the chat model back in. The line
     // says which it is and counts like every other waiting line.
     let renderEviction: RenderEviction | null = null
+    // B28: the live preview of a video run, taken down in the finally below.
+    let offPreview: (() => void) | null = null
+    // Set once the run is in ComfyUI: hands a finished history entry's files to the gallery.
+    let toGallery: ((outputs: ComfyHistoryEntry['outputs']) => boolean) | null = null
     const handoff = elapsedLine((text) => setProgress(0, text), HANDOFF_LINE.freeing)
     try {
       renderEviction = await evictChatBackendsForRender((phase) => handoff.setLabel(HANDOFF_LINE[phase]))
@@ -1720,7 +1811,13 @@ export function useCreate() {
         // The rewrite is the long wait (70 to 175 s on a 12 GB card), so the
         // line counts from here; the build above has its own status lines.
         const improving = elapsedLine((text) => setProgress(3, text), IMPROVING_PROMPT)
-        const out = await runQwenEnhancer(enhancerGraph, scenePrompt, { clientId: CLIENT_ID, signal }).finally(improving.stop)
+        // B41: the line says which part runs and, while it writes, how many
+        // tokens it has and how fast, from ComfyUI's own progress stream.
+        const out = await runQwenEnhancer(enhancerGraph, scenePrompt, {
+          clientId: CLIENT_ID,
+          signal,
+          onProgress: (p) => improving.setLabel(enhancerLine(p, qwenEnhancer.mode)),
+        }).finally(improving.stop)
         if (signal?.aborted) throw new Error('Cancelled')
         takeRewrite(out, qwenEnhancer.variant)
       }
@@ -1760,11 +1857,15 @@ export function useCreate() {
         // dropped the source without a word. Edit always keeps the source;
         // 0.95 is the most it repaints (the slider tops out there too).
         ...(isI2I && !isRemoveBg && effInputImage ? { inputImage: effInputImage, denoise: Math.min(denoise, EDIT_MAX_DENOISE) } : {}),
+        // B46: a Qwen edit reads its own Edit strength (1 = as before); the
+        // builder ignores it on every other family.
+        ...(isI2I && !isRemoveBg && effInputImage && state.editStrength < 1 ? { editStrength: state.editStrength } : {}),
         // GH #144: further references ride along; the builder keeps only as
         // many as the model's family takes (lib/edit-references).
         ...(isI2I && !isRemoveBg && effInputImage && references.some((r) => r.filename)
           ? { referenceImages: references.map((r) => r.filename).filter(Boolean) }
           : {}),
+        ...(createRefNames.length > 0 ? { referenceImages: createRefNames } : {}),
         ...(!isRemoveBg && maskFilename ? { maskImage: maskFilename, growMaskBy } : {}),
         // Advanced adjustments. LoRA feeds the builder's `lora`/`loraStrength`
         // contract (string[] + number[]); the old `loras` key was read by nobody,
@@ -1882,15 +1983,9 @@ export function useCreate() {
       // Check for custom workflow assignment — but verify it's compatible with the model
       let customWf = localOp || isUpscale ? null : useWorkflowStore.getState().getWorkflowForModel(activeModel, imageModelType)
       if (customWf) {
-        const wfNodes = apiNodes(customWf.workflow).map(([, n]) => n.class_type)
-        const needsUnet = imageModelType === 'flux' || imageModelType === 'flux2' || imageModelType === 'zimage' || imageModelType === 'wan' || imageModelType === 'hunyuan'
-        const hasUnet = wfNodes.includes('UNETLoader')
-        const hasCheckpoint = wfNodes.includes('CheckpointLoaderSimple')
-        if (needsUnet && !hasUnet && hasCheckpoint) {
-          console.warn('[useCreate] Custom workflow incompatible: model needs UNETLoader but workflow has CheckpointLoaderSimple. Using auto.')
-          customWf = null
-        } else if (!needsUnet && hasUnet && !hasCheckpoint) {
-          console.warn('[useCreate] Custom workflow incompatible: model needs CheckpointLoaderSimple but workflow has UNETLoader. Using auto.')
+        const misfit = ownWorkflowMisfit(apiNodes(customWf.workflow).map(([, n]) => n.class_type), imageModelType, listedModel?.source)
+        if (misfit) {
+          console.warn(`[useCreate] Custom workflow incompatible: ${misfit}. Using auto.`)
           customWf = null
         }
       }
@@ -1899,7 +1994,7 @@ export function useCreate() {
       if (customWf) {
         builderUsed = 'custom'
         setProgress(5, `Using workflow: ${customWf.name}...`)
-        const params = mode === 'video' ? { ...baseParams, frames, fps, ...(effI2vImage ? { inputImage: effI2vImage } : {}) } : baseParams
+        const params = mode === 'video' ? { ...baseParams, frames, fps, ...(effI2vImage ? { inputImage: effI2vImage } : {}), ...animateExtras } : baseParams
         // The values changed under "Workflow parameters" go in last (GitHub wish #8).
         const overrides = useWorkflowStore.getState().paramOverrides[customWf.id]
         workflow = await injectParameters(customWf.workflow, customWf.parameterMap, params, imageModelType, overrides)
@@ -1907,7 +2002,7 @@ export function useCreate() {
         // Dynamic workflow builder — auto-detects nodes and builds the right pipeline
         setProgress(5, 'Building workflow...')
         try {
-          const genParams = mode === 'video' ? { ...baseParams, frames, fps, ...(effI2vImage ? { inputImage: effI2vImage } : {}) } : baseParams
+          const genParams = mode === 'video' ? { ...baseParams, frames, fps, ...(effI2vImage ? { inputImage: effI2vImage } : {}), ...animateExtras, ...longVideoParams(opts) } : baseParams
           // A missing text encoder / VAE or a too-old ComfyUI is fixed in
           // place after one question, then the build runs again.
           workflow = await buildWithFixups(
@@ -1997,7 +2092,7 @@ export function useCreate() {
                     return
                   }
                   // Re-build the workflow now that the new node is available
-                  const genParams = { ...baseParams, frames, fps, ...(effI2vImage ? { inputImage: effI2vImage } : {}) }
+                  const genParams = { ...baseParams, frames, fps, ...(effI2vImage ? { inputImage: effI2vImage } : {}), ...animateExtras, ...longVideoParams(opts) }
                   workflow = await buildDynamicWorkflow(genParams, imageModelType)
                   setProgress(10, 'VHS installed, generating MP4...')
                 } catch (instErr) {
@@ -2012,6 +2107,12 @@ export function useCreate() {
             }
           } catch { /* non-fatal */ }
         }
+      }
+
+      // B35: an edit starts from a latent of one; the batch size repeats it,
+      // so an edit run makes as many pictures as a Generate run (api/edit-batch).
+      if (intent === 'edit' && isI2I && !isRemoveBg && effInputImage) {
+        workflow = applyEditBatch(workflow, batchSize)
       }
 
       // Native HiRes is a graph transform, not a special workflow. Apply
@@ -2079,9 +2180,18 @@ export function useCreate() {
         : {}
 
       setProgress(10, 'Submitting to ComfyUI...')
+      // B28: a video asks ComfyUI for a picture per sampling step, so a wrong
+      // start shows long before the end and Cancel can stop it. ComfyUI sends
+      // previews only to this client and one prompt runs at a time here, so
+      // every preview that arrives belongs to this run.
+      const livePreview = mode === 'video'
+      if (livePreview) {
+        useRenderPreviewStore.getState().setUrl(null)
+        offPreview = comfyWS.onPreview((url) => useRenderPreviewStore.getState().setUrl(url))
+      }
       let promptId: string
       try {
-        promptId = await submitWorkflow(workflow, CLIENT_ID)
+        promptId = await submitWorkflow(workflow, CLIENT_ID, livePreview ? { previewMethod: 'auto' } : {})
       } catch (err) {
         setError(`Failed to submit: ${err instanceof Error ? err.message : String(err)}`)
         setIsGenerating(false)
@@ -2104,6 +2214,40 @@ export function useCreate() {
       // a stall message that never names the processor is the reason an AMD
       // customer blames his settings for a hardware switch.
       void cpuRenderFacts()
+
+      // A finished history entry's files into the gallery, for the late look
+      // after a stall verdict. Same fields as the heartbeat's collection below.
+      const galleryFromOutputs = (outputs: ComfyHistoryEntry['outputs']): boolean => {
+        let found = false
+        for (const nodeId of Object.keys(outputs ?? {})) {
+          // Extract files from ANY keyed array, not just images/gifs/
+          // videos — custom save nodes post under other keys (audio,
+          // result, files, …); previously those outputs were dropped
+          // even though they existed on disk.
+          const files: ComfyUIOutput[] = extractComfyOutputFiles(outputs![nodeId])
+          for (const file of files) {
+            found = true
+            addToGallery({
+              id: uuid(), type: galleryTypeForFile(file.filename, mode),
+              filename: file.filename, subfolder: file.subfolder ?? '', comfyType: file.type ?? 'output',
+              prompt, ...improveFields, ...transparentFields(), negativePrompt, model: activeModel,
+              modelType: mode === 'image' ? imageModelType : (videoModelsList.find(m => m.name === activeModel)?.type ?? 'wan'),
+              seed: runSeed,
+              steps, cfgScale, sampler, scheduler, width: outputWidth, height: outputHeight, batchSize,
+              createdAt: Date.now(), builderUsed, intent, ...toolFields, ...(skippedNote ? { runNote: skippedNote } : {}),
+            })
+          }
+        }
+        return found
+      }
+      toGallery = galleryFromOutputs
+      // The stall verdict. ComfyUI has said the prompt is not in its queue
+      // and has no history for it, so there is nothing to take off the queue;
+      // its pictures are still looked for (lib/render/late-result).
+      const stalled = () => {
+        const message = `${renderStallMessage(maxTime)}${cpuCauseSuffix(lastCpuRenderFacts())} ${LATE_RESULT_PROMISE}`
+        return Object.assign(new Error(message), { lateLook: promptId })
+      }
 
       if (useWS) {
         // ── WebSocket-driven progress ──
@@ -2144,15 +2288,22 @@ export function useCreate() {
             if (stallCheck || Date.now() - lastActivity <= maxTime) return
             stallCheck = true
             try {
-              if (await isPromptQueued(promptId).catch(() => false)) {
+              const state = await promptQueueState(promptId).catch(() => 'unknown' as const)
+              if (state === 'queued') {
                 lastActivity = Date.now()
                 return
               }
+              // I1 (30.10.2026, 12 GB box): no answer at all is a ComfyUI too
+              // busy to serve HTTP (a 22 min VAE decode through shared
+              // memory), not a lost prompt. Only its own "not in my queue"
+              // ends the run; a ComfyUI that is really gone refuses the
+              // connection, and the heartbeat says so.
+              if (state === 'unknown') return
               // Finished a moment ago: the heartbeat's next history poll
               // collects the pictures, so this is no stall either.
               if (completionHandled || await getHistory(promptId).catch(() => null)) return
               cleanup()
-              reject(new Error(`${renderStallMessage(maxTime)}${cpuCauseSuffix(lastCpuRenderFacts())}`))
+              reject(stalled())
             } finally {
               stallCheck = false
             }
@@ -2207,7 +2358,7 @@ export function useCreate() {
                       prompt, ...improveFields, ...transparentFields(), negativePrompt, model: activeModel,
                       modelType: mode === 'image' ? imageModelType : (videoModelsList.find(m => m.name === activeModel)?.type ?? 'wan'),
                       seed: runSeed,
-                      steps, cfgScale, sampler, scheduler, width: outputWidth, height: outputHeight, batchSize,
+                      steps, cfgScale, sampler, scheduler, width: outputWidth, height: outputHeight, batchSize, ...ranLoras(runLoras),
                       createdAt: Date.now(), builderUsed, intent, ...toolFields, ...(skippedNote ? { runNote: skippedNote } : {}),
                     })
                   }
@@ -2312,7 +2463,7 @@ export function useCreate() {
                         prompt, ...improveFields, ...transparentFields(), negativePrompt, model: activeModel,
                         modelType: mode === 'image' ? imageModelType : (videoModelsList.find(m => m.name === activeModel)?.type ?? 'wan'),
                         seed: runSeed,
-                        steps, cfgScale, sampler, scheduler, width: outputWidth, height: outputHeight, batchSize,
+                        steps, cfgScale, sampler, scheduler, width: outputWidth, height: outputHeight, batchSize, ...ranLoras(runLoras),
                         createdAt: Date.now(), builderUsed, intent, ...toolFields, ...(skippedNote ? { runNote: skippedNote } : {}),
                       })
                     }
@@ -2361,11 +2512,12 @@ export function useCreate() {
 
             const elapsed = Date.now() - startTime
             if (Date.now() - lastActivity > maxTime) {
-              if (await isPromptQueued(promptId).catch(() => false)) {
+              const state = await promptQueueState(promptId).catch(() => 'unknown' as const)
+              if (state === 'queued') {
                 lastActivity = Date.now()
-              } else {
+              } else if (state === 'gone' && !(await getHistory(promptId).catch(() => null))) {
                 if (pollRef.current) clearInterval(pollRef.current)
-                reject(new Error(`${renderStallMessage(maxTime)}${cpuCauseSuffix(lastCpuRenderFacts())}`))
+                reject(stalled())
                 return
               }
             }
@@ -2419,7 +2571,7 @@ export function useCreate() {
                       prompt, ...improveFields, ...transparentFields(), negativePrompt, model: activeModel,
                       modelType: mode === 'image' ? imageModelType : (videoModelsList.find(m => m.name === activeModel)?.type ?? 'wan'),
                       seed: runSeed,
-                      steps, cfgScale, sampler, scheduler, width: outputWidth, height: outputHeight, batchSize,
+                      steps, cfgScale, sampler, scheduler, width: outputWidth, height: outputHeight, batchSize, ...ranLoras(runLoras),
                       createdAt: Date.now(), builderUsed, intent, ...toolFields, ...(skippedNote ? { runNote: skippedNote } : {}),
                     })
                   }
@@ -2453,8 +2605,21 @@ export function useCreate() {
       // /interrupt here would kill the Create render or the external ComfyUI
       // tab that is actually running.
       const ownPromptId = useCreateStore.getState().currentPromptId
-      if (ownPromptId) {
+      const lateLook = (err as { lateLook?: string } | null)?.lateLook
+      if (ownPromptId && !lateLook) {
         try { await abandonPrompt(ownPromptId) } catch { /* best effort */ }
+      }
+      // A stall verdict is LU giving up, not ComfyUI: what it still delivers
+      // goes to the gallery, and the stall line goes away with it.
+      if (lateLook && toGallery) {
+        const errorShown = `Generation failed: ${err instanceof Error ? err.message : String(err)}`
+        const add = toGallery
+        collectLateResult(lateLook, {
+          getHistory,
+          onSuccess: (h) => {
+            if (add(h.outputs) && useCreateStore.getState().error === errorShown) useCreateStore.getState().setError(null)
+          },
+        })
       }
       if (err instanceof Error && err.message === 'Cancelled') {
         // User cancelled, not an error
@@ -2478,6 +2643,13 @@ export function useCreate() {
       // next render (the helper serialises and a follow-up render inherits
       // the haul instead of waiting for it to load).
       if (renderEviction) void restoreChatBackendsAfterRender(renderEviction)
+      offPreview?.()
+      useRenderPreviewStore.getState().setUrl(null)
+      // B27: and ComfyUI's memory goes back when the setting says so.
+      scheduleFreeAfterRender(
+        freeAfterRenderMode(useSettingsStore.getState().settings.freeAfterRender),
+        () => useCreateStore.getState().isGenerating,
+      )
     }
     // `videoModelsList` ist State: seine Referenz wechselt nur, wenn
     // setVideoModelsList wirklich eine neue Liste schreibt (fetchModels), und
@@ -2495,6 +2667,65 @@ export function useCreate() {
   const generateInner = useCallback(async () => {
     const s = useCreateStore.getState()
     const mac = isMlxImageHost()
+    // A long local clip (B18): several sections, each continuing the clip so
+    // far, or one pass with context windows. ComfyUI only; the Mac's MLX
+    // lanes keep their own lengths.
+    if (!mac && s.backend === 'local' && !isLocalCharacter(s.selectedCharacter)) {
+      const intent = s.intent()
+      const lane = s.videoModelList.length > 0 ? videoLaneModels(s.videoModelList, intent) : []
+      const model = lane.length > 0 && !lane.some((m) => m.name === s.videoModel) ? lane[0].name : s.videoModel
+      const long = longVideoRequest({
+        mode: s.mode, intent, model,
+        type: s.videoModelList.find((m) => m.name === model)?.type ?? classifyModel(model),
+        installed: s.videoModelList.map((m) => m.name),
+        longVideoSeconds: s.longVideoSeconds, longVideoMode: s.longVideoMode,
+        fps: s.fps, frames: s.frames, extendClip: s.extendClip,
+      })
+      if (long?.kind === 'error') { s.setError(long.message); return }
+      // B38: a clip in sections would end its FIRST section on the end
+      // image. Said instead of done wrong.
+      if (long && intent === 'animate' && s.endImage && localEndFrame(model)) {
+        s.setError(END_IMAGE_ONE_CLIP)
+        return
+      }
+      if (long?.kind === 'one-pass') { await runOnce({ frames: long.frames }, { contextWindows: true }); return }
+      if (long?.kind === 'sections') {
+        const own = new AbortController()
+        chainAbort.current = own
+        s.setError(null)
+        try {
+          await runLongVideo(long.plan, long.start, {
+            run: (override, opts) => runOnce(override as Partial<CreateState>, opts),
+            gallery: () => useCreateStore.getState().gallery,
+            error: () => useCreateStore.getState().error,
+            fetchBlob: (item) => fetchGalleryItemBlob(item as GalleryItem),
+            upload: (blob, name) => uploadMediaFile(blob, name),
+            remove: (id) => useCreateStore.getState().removeFromGallery(id),
+            settle: async (item: ClipItem, seams, anchorEnd, base) => {
+              const settled = await settleSeams(item, seams, anchorEnd, base)
+              if (!settled) return null
+              const st = useCreateStore.getState()
+              const old = st.gallery.find((g) => g.id === item.id)
+              if (!old) return null
+              const next = { ...old, id: uuid(), filename: settled.filename, subfolder: settled.subfolder }
+              st.addToGallery(next)
+              st.removeFromGallery(old.id)
+              return next
+            },
+            aborted: () => own.signal.aborted,
+          })
+        } catch (e) {
+          if (!(e instanceof LongRunStopped) || e.message !== 'Stopped.') {
+            useCreateStore.getState().setError(e instanceof Error ? e.message : String(e))
+          }
+        } finally {
+          if (chainAbort.current === own) chainAbort.current = null
+          useCreateStore.getState().setIsGenerating(false)
+          useCreateStore.getState().setProgress(0)
+        }
+        return
+      }
+    }
     if (s.backend !== 'local' || !isLocalCharacter(s.selectedCharacter)) {
       await runOnce()
       return

@@ -156,7 +156,10 @@ export class ToolRegistry {
             (executor as ExternalToolExecutor)(name, args)
         : (executor as LegacyToolExecutor)
       this.tools.set(name, {
-        definition: { ...tool, source: 'external', serverId },
+        // Whatever category a definition claims, an external tool sits in
+        // 'mcp' (B12): a server must not file its own shell tool under a row
+        // the user set to Auto.
+        definition: { ...tool, category: 'mcp', source: 'external', serverId },
         executor: bound,
       })
     }
@@ -212,7 +215,8 @@ export class ToolRegistry {
 
   getPermissionLevel(toolName: string, permissions: PermissionMap): PermissionLevel {
     const tool = this.tools.get(toolName)?.definition
-    if (tool) return permissions[tool.category]
+    // A map from before a category existed has no key for it: ask.
+    if (tool) return permissions[tool.category] ?? 'confirm'
     // A9: a retired name has no definition to read a category off, and the
     // 'confirm' below meant Agent mode opened an approval dialog for
     // `git_status`, whose executor is one fixed read. Read-only retired names

@@ -89,6 +89,7 @@ import { renderStallLimitMs } from '../lib/tool-timeout'
 import { aspectFrame, parseAspectRatio } from '../lib/aspect-frame'
 import { buildWithFixups, wasDeclined } from '../lib/render-fixups'
 import { renderFixupDeps } from './render-fixup-deps'
+import { cancelFreeAfterRender, freeAfterRenderMode, scheduleFreeAfterRender } from '../lib/free-after-render'
 
 /**
  * Is the ComfyUI we are about to render on running on the processor?
@@ -1195,6 +1196,7 @@ async function runHandoff(
     // counter and a later plain-chat Stop would wrongly /interrupt + clear an
     // unrelated Create-tab render (the exact bug this counter prevents).
     _activeHandoffs++
+    cancelFreeAfterRender() // B27: about to use what was planned to be freed
     if (willUnload || willUnloadLms || willUnloadBundled) {
       releaseChatHold = holdChatBackends(kind === 'video' ? 'video' : 'image')
     }
@@ -1393,6 +1395,9 @@ async function runHandoff(
     }
     releaseChatHold?.()
     emitHandoff('done', { kind })
+    // B27: ComfyUI's memory goes back when the setting says so, unless
+    // another generation is running by then.
+    scheduleFreeAfterRender(freeAfterRenderMode(useSettingsStore.getState().settings.freeAfterRender), () => _activeHandoffs > 0)
   }
 }
 

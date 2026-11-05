@@ -99,7 +99,7 @@ afterEach(() => {
   vi.resetModules()
 })
 
-describe('LU Engine (llama-server b9949): template variable plus budget', () => {
+describe('LU Engine (llama-server b9949, b11960): template variable plus budget', () => {
   const levels = ['low', 'medium', 'high']
 
   it('Low goes into the template and sets a 1024 token budget when the Think budget is Auto', async () => {
@@ -137,6 +137,36 @@ describe('LU Engine (llama-server b9949): template variable plus budget', () => 
     }))
     expect(chatBody().chat_template_kwargs).toEqual({ enable_thinking: false })
     expect('thinking_budget_tokens' in chatBody()).toBe(false)
+  })
+
+  it('E1: the rung never goes out top-level, b11960 would write it over the template variable', async () => {
+    const p = await makeOpenAI(ENGINE)
+    // Think on, no rung picked: before 3.0.7 and after, the template keeps its own default.
+    await drain(p.chatStream('gpt-oss-20b', [{ role: 'user', content: 'hi' }], { thinking: true, effortLevels: levels }))
+    expect('reasoning_effort' in chatBody()).toBe(false)
+    expect(chatBody().chat_template_kwargs).toEqual({ enable_thinking: true })
+    // Max: the template gets the 'high' applyLocalEffort chose, nothing says 'max'.
+    await drain(p.chatStream('gpt-oss-20b', [{ role: 'user', content: 'hi' }], {
+      thinking: true, reasoningEffort: 'max', localEffortChosen: true, effortLevels: levels,
+    }))
+    const max = sent.filter((s) => s.url.endsWith('/chat/completions')).map((s) => s.body)[1]
+    expect('reasoning_effort' in max).toBe(false)
+    expect(max.chat_template_kwargs?.reasoning_effort).toBe('high')
+    // Think off: enable_thinking false, no 'none' beside it.
+    await drain(p.chatStream('gpt-oss-20b', [{ role: 'user', content: 'hi' }], { thinking: false, effortLevels: levels }))
+    const off = sent.filter((s) => s.url.endsWith('/chat/completions')).map((s) => s.body)[2]
+    expect('reasoning_effort' in off).toBe(false)
+    expect(off.chat_template_kwargs).toEqual({ enable_thinking: false })
+  })
+
+  it('E1: the same holds for the tool turn', async () => {
+    const p = await makeOpenAI(ENGINE)
+    await p.chatWithTools('qwen3-8b', [{ role: 'user', content: 'hi' }], [], {
+      thinking: true, reasoningEffort: 'low', localEffortChosen: true, effortLevels: levels, thinkingBudget: 0,
+    })
+    expect('reasoning_effort' in chatBody()).toBe(false)
+    expect(chatBody().chat_template_kwargs).toEqual({ enable_thinking: true, reasoning_effort: 'low' })
+    expect(chatBody().thinking_budget_tokens).toBe(1024)
   })
 
   it('every engine model offers the three rungs', async () => {
@@ -240,11 +270,17 @@ describe('a backend we cannot place', () => {
  * ladder, so thinkingEffort answered DEFAULT_EFFORT and chatStream put
  * `reasoning_effort: 'high'` at the top level and `chat_template_kwargs:
  * { enable_thinking: true }` beside it, and nothing else. LM Studio and
- * KoboldCpp read that top-level 'high'; the LU Engine and llama.cpp ignore it,
+ * KoboldCpp read that top-level 'high'; the LU Engine and llama.cpp ignored it,
  * so gpt-oss ran on the Medium its template sets for itself.
+ *
+ * E1 (3.0.9): the LU Engine (b11960) reads that top-level field now and puts
+ * it into the template, so for the engine the same result means the field
+ * stays off the wire (keepEffortOffEngineTopLevel). The effect is pinned, not
+ * the bytes: nothing reaches the template.
  */
 describe('no rung picked for a local model yet: the request from before 3.0.7', () => {
   const PRE_307 = { reasoning_effort: 'high', chat_template_kwargs: { enable_thinking: true } }
+  const ENGINE_PRE_307 = { reasoning_effort: undefined, chat_template_kwargs: { enable_thinking: true } }
   const shape = (b: OpenAIChatRequest) => ({
     reasoning_effort: b.reasoning_effort,
     chat_template_kwargs: b.chat_template_kwargs,
@@ -258,7 +294,7 @@ describe('no rung picked for a local model yet: the request from before 3.0.7', 
       localEffortChosen: false,
     }))
     expect(chatBody().chat_template_kwargs).toEqual({ enable_thinking: true })
-    expect(shape(chatBody())).toEqual({ ...PRE_307, budget: false })
+    expect(shape(chatBody())).toEqual({ ...ENGINE_PRE_307, budget: false })
   })
 
   it('LU Engine: a caller that does not say counts as not picked, Low included', async () => {
@@ -266,7 +302,7 @@ describe('no rung picked for a local model yet: the request from before 3.0.7', 
     await drain(p.chatStream('gpt-oss-20b', [{ role: 'user', content: 'hi' }], {
       thinking: true, reasoningEffort: 'low', effortLevels: ['low', 'medium', 'high'], thinkingBudget: 0,
     }))
-    expect(shape(chatBody())).toEqual({ ...PRE_307, budget: false })
+    expect(shape(chatBody())).toEqual({ ...ENGINE_PRE_307, budget: false })
   })
 
   it('LU Engine, the non-streaming path too', async () => {
@@ -274,7 +310,7 @@ describe('no rung picked for a local model yet: the request from before 3.0.7', 
     await p.chatWithTools('gpt-oss-20b', [{ role: 'user', content: 'hi' }], [], {
       thinking: true, reasoningEffort: 'medium', effortLevels: ['low', 'medium', 'high'],
     })
-    expect(shape(chatBody())).toEqual({ ...PRE_307, budget: false })
+    expect(shape(chatBody())).toEqual({ ...ENGINE_PRE_307, budget: false })
   })
 
   it('LU Engine: a Think budget of your own still goes out, it is a pick of its own', async () => {

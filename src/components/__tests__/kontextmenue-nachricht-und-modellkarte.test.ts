@@ -65,9 +65,13 @@ describe('Nachricht: das Menü ruft die Funktionen der Aktionsleiste', () => {
     // GH #174: no branch where the bar has no branch button.
     const noBranch = buildMessageMenu(messageHandlers({ branch: null }), state)
     expect(byId(noBranch, 'branch')).toBeUndefined()
-    // Kopieren und Löschen kann man immer.
+    // Kopieren und Löschen kann man sonst immer.
     expect(byId(noEdit, 'copy')).toBeDefined()
     expect(byId(noEdit, 'delete')).toBeDefined()
+    // 3.0.9: eine fruehere Compact-Ebene ist nur lesbar. Kopieren ja,
+    // Loeschen nicht (Mac-Lauf 28.10.: der Muelleimer stand noch da).
+    const readOnly = buildMessageMenu(messageHandlers({ edit: null, regenerate: null, branch: null, remove: null }), state)
+    expect(readOnly.map((i) => i.id)).toEqual(['copy'])
   })
 
   it('Löschen ist als zerstörend markiert — nichts anderes ist es', () => {

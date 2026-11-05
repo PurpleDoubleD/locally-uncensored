@@ -5,9 +5,10 @@
  *     image 2, or IMAGE 2.?" Each tile now carries its name, says how to use
  *     it, and a click adds it to the prompt.
  *   - #general: "even with strength at 95% and cfg 3" on Qwen Image 2.1
- *     Edit. Through ComfyUI both Qwen edit families sample at denoise 1.0,
- *     so the Edit strength slider set nothing there and is gone; an edit that
- *     does read it keeps it.
+ *     Edit. Through ComfyUI both Qwen edit families sampled at denoise 1.0,
+ *     so the slider set nothing there and 3.0.8 took it out. B46 (3.0.9,
+ *     Discord 30.10.2026): it is back on its own field, `editStrength`
+ *     (1 = as before), which the graph now reads (qwen-edit-strength.test.ts).
  *
  * Run: npx vitest run src/components/create/experimental/__tests__/image-refs-in-the-strip.test.tsx
  */
@@ -37,7 +38,7 @@ vi.mock('../../../../hooks/useGraphicsMemory', () => ({ useGraphicsCardGb: () =>
 import { Composer } from '../Composer'
 import { ReferenceStrip } from '../ReferenceStrip'
 import { useCreateStore } from '../../../../stores/createStore'
-import { editIgnoresStrength } from '../../../../lib/edit-references'
+import { readsEditStrength } from '../../../../lib/edit-references'
 
 const SOURCE = { filename: 'scene.png', url: 'data:image/png;base64,scene', width: 8, height: 8 }
 const QWEN21 = 'qwen_image_2.1_int8_convrot.safetensors'
@@ -97,37 +98,44 @@ describe('each reference tile names itself', () => {
 })
 
 describe('the Edit strength shows only where the run reads it', () => {
-  const slider = () => screen.queryByText('Edit strength')
+  const slider = () => screen.queryByRole('slider', { name: 'Edit strength' }) ?? screen.queryByText('Edit strength')
   const composer = () => render(<Composer onOpenAdvanced={() => {}} onOpenWorkflows={() => {}} />)
+  const value = () => screen.getByText('Edit strength').parentElement!.parentElement!.textContent
 
-  it('Qwen-Image 2.1 through ComfyUI: no slider, the edit runs at denoise 1.0', () => {
+  it('B46: Qwen-Image 2.1 through ComfyUI has it again, on editStrength, at 1.00 by default', () => {
     editWith(QWEN21, 'qwenimage')
+    useCreateStore.setState({ editStrength: 1, denoise: 0.7 })
     composer()
-    expect(slider()).toBeNull()
-  })
-
-  it('Qwen-Image-Edit 2509 through ComfyUI: no slider either', () => {
-    editWith(EDIT_PLUS, 'qwenimage1')
-    composer()
-    expect(slider()).toBeNull()
-  })
-
-  it('COUNTER-CHECK: an SDXL edit and plain Qwen-Image keep it, they repaint at that strength', () => {
-    editWith(SDXL, 'sdxl')
-    const first = composer()
     expect(slider()).toBeTruthy()
+    // Not the img2img denoise (0.70): the Qwen edit's own field.
+    expect(value()).toContain('1.00')
+    expect(value()).not.toContain('0.70')
+  })
+
+  it('B46: Qwen-Image-Edit 2509 through ComfyUI has it too', () => {
+    editWith(EDIT_PLUS, 'qwenimage1')
+    useCreateStore.setState({ editStrength: 0.4 })
+    composer()
+    expect(value()).toContain('0.40')
+  })
+
+  it('COUNTER-CHECK: an SDXL edit and plain Qwen-Image keep the denoise slider', () => {
+    editWith(SDXL, 'sdxl')
+    useCreateStore.setState({ editStrength: 1, denoise: 0.7 })
+    const first = composer()
+    expect(value()).toContain('0.70')
     first.unmount()
     editWith(QWEN1, 'qwenimage1')
     composer()
-    expect(slider()).toBeTruthy()
+    expect(value()).toContain('0.70')
   })
 
-  it('which families leave it unread', () => {
-    expect(editIgnoresStrength('qwenimage', QWEN21)).toBe(true)
-    expect(editIgnoresStrength('qwenimage1', EDIT_PLUS)).toBe(true)
-    expect(editIgnoresStrength('qwenimage1', QWEN1)).toBe(false)
-    expect(editIgnoresStrength('sdxl', SDXL)).toBe(false)
-    expect(editIgnoresStrength(null, QWEN21)).toBe(false)
+  it('which families read editStrength', () => {
+    expect(readsEditStrength('qwenimage', QWEN21)).toBe(true)
+    expect(readsEditStrength('qwenimage1', EDIT_PLUS)).toBe(true)
+    expect(readsEditStrength('qwenimage1', QWEN1)).toBe(false)
+    expect(readsEditStrength('sdxl', SDXL)).toBe(false)
+    expect(readsEditStrength(null, QWEN21)).toBe(false)
   })
 })
 

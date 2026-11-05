@@ -1,0 +1,12 @@
+--- a/tools/cvector-generator/cvector-generator.cpp
++++ b/tools/cvector-generator/cvector-generator.cpp
+@@ -477,6 +477,9 @@ int main(int argc, char ** argv) {
+             tokens_to_str(ctx, t.tokens_pos.cbegin(), t.tokens_pos.cend()).c_str(),
+             tokens_to_str(ctx, t.tokens_neg.cbegin(), t.tokens_neg.cend()).c_str(),
+             (int) t.max_seq_len);
++        // LU: the app reads this line for progress and time left; over a
++        // pipe stdout is fully buffered and the lines came only in batches.
++        fflush(stdout);
+ 
+         cb_data.is_eval_pos = true;
+         success = get_hidden_layers(ctx, t.tokens_pos);

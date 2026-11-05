@@ -12,7 +12,7 @@ import type { ProviderId } from '../api/providers/types'
  * Which backends really take a token budget (read from their sources and API
  * references, 14.10.2026):
  *
- *  - Bundled engine (llama-server b9949, commit 049326a0): per request
+ *  - Bundled engine (llama-server b9949, commit 049326a0; unchanged in b11960): per request
  *    `thinking_budget_tokens` on /v1/chat/completions, see
  *    tools/server/server-common.cpp. The server hands it to its reasoning
  *    budget sampler, which forces the end of the thought once the budget is

@@ -2,8 +2,9 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { safeJSONStorage } from '../lib/storage-quota'
 import type { SettingsTab } from '../lib/settings-reset'
+import { visibleView } from '../lib/features'
 
-export type View = 'chat' | 'models' | 'settings' | 'create' | 'benchmark' | 'voice'
+export type View = 'chat' | 'models' | 'settings' | 'create' | 'benchmark' | 'voice' | 'neuron'
 
 /** Which collapsible section of the Settings page a deep link wants open.
  *  Only sections a hint elsewhere in the app sends people to. */
@@ -104,6 +105,79 @@ export function clampSidebarWidth(width: number, viewportWidth: number): number 
   return Math.round(Math.min(Math.max(width, SIDEBAR_MIN_WIDTH), max))
 }
 
+/**
+ * Schmales Fenster (Issue 309, T1, gemessen am 29.10.2026 im Release-Bau bei
+ * 375x812).
+ *
+ * Die Klemmen oben liefen nur beim ZIEHEN. Ein Fenster, das schmal startet
+ * oder schmal gezogen wird, behielt die gespeicherte Breite: die Chatspalte
+ * blieb bei ~290 px und der Verlauf daneben wurde ein 30-px-Streifen, im
+ * Code-Reiter blieb der Explorer offen und der Composer stapelte seine
+ * Knoepfe senkrecht.
+ *
+ * Unter dieser Breite starten beide Seitenpanels zugeklappt. Das ist ein
+ * Zustand des FENSTERS, keine Vorliebe: die gespeicherte Wahl fuer breite
+ * Fenster liegt solange in `narrowStash`, `partialize` schreibt sie statt des
+ * schmalen Werts, und beim Breiterwerden kommt sie zurueck. Wer im schmalen
+ * Fenster ein Panel ausdruecklich aufklappt, bekommt es als Ueberlagerung
+ * (Sidebar.tsx, ExplorerPanel.tsx), der Verlauf darunter behaelt seine Breite.
+ * 640 ist die `sm`-Stufe von Tailwind, dieselbe Grenze, ab der die App
+ * ueberhaupt zwei Spalten nebeneinander tragen will.
+ */
+export const NARROW_VIEWPORT_WIDTH = 640
+
+/** Breite, die ohne echtes Fenster gilt (Node-Tests, erster Aufruf vor dem
+ *  Einhaengen). Eine Desktop-Breite, damit nichts zuklappt, was niemand
+ *  gemessen hat. */
+const FALLBACK_VIEWPORT_WIDTH = 1280
+
+export function readViewportWidth(): number {
+  const w = typeof window !== 'undefined' ? window.innerWidth : undefined
+  return typeof w === 'number' && Number.isFinite(w) && w > 0 ? w : FALLBACK_VIEWPORT_WIDTH
+}
+
+export function isNarrowViewport(viewportWidth: number): boolean {
+  return Number.isFinite(viewportWidth) && viewportWidth < NARROW_VIEWPORT_WIDTH
+}
+
+/** Die Wahl fuer breite Fenster, waehrend das Fenster schmal ist. */
+export interface NarrowStash {
+  sidebarOpen: boolean
+  explorerCollapsed: boolean
+}
+
+export interface ViewportSlice {
+  viewportWidth: number
+  sidebarOpen: boolean
+  explorerCollapsed: boolean
+  narrowStash: NarrowStash | null
+}
+
+/**
+ * Rein, damit die Regel ohne DOM pruefbar ist. Klappt nur beim UEBERSCHREITEN
+ * der Grenze, nie bei jedem Resize: wer im schmalen Fenster die Liste
+ * aufklappt, dem klappt das naechste Pixel Breite sie nicht wieder zu.
+ */
+export function fitPanelsToViewport(state: ViewportSlice, viewportWidth: number): ViewportSlice {
+  const vw = Number.isFinite(viewportWidth) && viewportWidth > 0 ? viewportWidth : FALLBACK_VIEWPORT_WIDTH
+  if (isNarrowViewport(vw)) {
+    if (state.narrowStash) return { ...state, viewportWidth: vw }
+    return {
+      viewportWidth: vw,
+      sidebarOpen: false,
+      explorerCollapsed: true,
+      narrowStash: { sidebarOpen: state.sidebarOpen, explorerCollapsed: state.explorerCollapsed },
+    }
+  }
+  if (!state.narrowStash) return { ...state, viewportWidth: vw }
+  return {
+    viewportWidth: vw,
+    sidebarOpen: state.narrowStash.sidebarOpen,
+    explorerCollapsed: state.narrowStash.explorerCollapsed,
+    narrowStash: null,
+  }
+}
+
 interface UIState {
   currentView: View
   sidebarOpen: boolean
@@ -135,6 +209,12 @@ interface UIState {
   explorerWidth: number
   /** Explorer panel collapsed to its rail, persisted. */
   explorerCollapsed: boolean
+  /** Current window width in px (fitToViewport). Never persisted. */
+  viewportWidth: number
+  /** The wide-window choice while the window is narrow, see
+   *  NARROW_VIEWPORT_WIDTH. Never persisted itself; partialize writes its
+   *  values in place of the narrow ones. */
+  narrowStash: NarrowStash | null
   /** Read once by SettingsPage when it mounts, then cleared. Never persisted:
    *  it describes one navigation, not a preference. */
   settingsFocus: SettingsFocus | null
@@ -144,6 +224,22 @@ interface UIState {
    *  again. Never persisted: it describes one click, not a preference. */
   modelAskSeq: number
   askForModel: () => void
+  /** Where Discover's chat downloads go for the next visit, when a button
+   *  elsewhere already knows (the Neuron tweaker needs LU Engine files).
+   *  Read once by Discover, then cleared. Never persisted. */
+  discoverTarget: 'builtin' | null
+  /** What Discover's search starts with on the next visit (N2: Neurons'
+   *  "Get the original"). Read once by the Models page, then cleared. Never
+   *  persisted. */
+  discoverQuery: string | null
+  /** The query looks for the maker's original model: Discover lists the
+   *  changed versions after the originals (FEHLER-N2 #1). */
+  discoverOriginal: boolean
+  /** Open Models on Discover's chat lane with downloads going to `target`,
+   *  optionally searching for `query`. */
+  openDiscoverFor: (target: 'builtin', query?: string, opts?: { original?: boolean }) => void
+  clearDiscoverTarget: () => void
+  clearDiscoverQuery: () => void
   setView: (view: View) => void
   /** Open Settings on a given tab, optionally with one section unfolded. */
   openSettingsAt: (focus: SettingsFocus) => void
@@ -160,6 +256,8 @@ interface UIState {
   setAgentPanelCollapsed: (collapsed: boolean) => void
   setExplorerWidth: (width: number, viewportWidth: number) => void
   setExplorerCollapsed: (collapsed: boolean) => void
+  /** Re-fit the side panels to the window (AppShell, on mount and resize). */
+  fitToViewport: (viewportWidth: number) => void
 }
 
 /**
@@ -217,9 +315,17 @@ export const useUIStore = create<UIState>()(
       agentPanelCollapsed: true,
       explorerWidth: EXPLORER_DEFAULT_WIDTH,
       explorerCollapsed: false,
+      viewportWidth: readViewportWidth(),
+      narrowStash: null,
       settingsFocus: null,
       modelAskSeq: 0,
       askForModel: () => set((s) => ({ modelAskSeq: s.modelAskSeq + 1 })),
+      discoverTarget: null,
+      discoverQuery: null,
+      discoverOriginal: false,
+      openDiscoverFor: (target, query, opts) => set({ currentView: 'models', settingsFocus: null, discoverTarget: target, discoverQuery: query?.trim() || null, discoverOriginal: !!(opts?.original && query?.trim()) }),
+      clearDiscoverTarget: () => set({ discoverTarget: null }),
+      clearDiscoverQuery: () => set({ discoverQuery: null, discoverOriginal: false }),
 
       // Navigation no longer touches sidebarOpen. The conversation list only
       // makes sense in Chat, and that rule now lives in the Sidebar itself
@@ -228,7 +334,8 @@ export const useUIStore = create<UIState>()(
       // Settings, which is exactly what the web parity round removes.
       // A plain setView is somebody navigating by hand, so it drops any focus
       // a previous deep link left behind rather than firing it late.
-      setView: (view) => set({ currentView: view, settingsFocus: null }),
+      // A view that is switched off (Neurons in 3.0.9) lands on Chat.
+      setView: (view) => set({ currentView: visibleView(view), settingsFocus: null }),
 
       openSettingsAt: (focus) =>
         set({ currentView: 'settings', settingsFocus: focus }),
@@ -249,12 +356,28 @@ export const useUIStore = create<UIState>()(
       setExplorerWidth: (width, viewportWidth) =>
         set({ explorerWidth: clampExplorerWidth(width, viewportWidth) }),
       setExplorerCollapsed: (collapsed) => set({ explorerCollapsed: collapsed }),
+      fitToViewport: (viewportWidth) =>
+        set((state) => {
+          const next = fitPanelsToViewport(state, viewportWidth)
+          return next.viewportWidth === state.viewportWidth &&
+            next.sidebarOpen === state.sidebarOpen &&
+            next.explorerCollapsed === state.explorerCollapsed &&
+            next.narrowStash === state.narrowStash
+            ? state
+            : next
+        }),
     }),
     {
       name: 'locally-uncensored-ui',
       storage: safeJSONStorage(),
       version: 1,
       migrate: migriereUiZustand,
+      // currentView is not written (partialize), but a blob from an older
+      // build may still carry one; a view that is off must not come back.
+      merge: (persisted, current) => {
+        const merged = { ...current, ...(persisted as Partial<UIState>) }
+        return { ...merged, currentView: visibleView(merged.currentView) }
+      },
       // What survives a restart is a stated PREFERENCE, never a leftover of
       // one session. currentView and cloudGateOpen stay out: the app would
       // otherwise reopen on whatever tab was left behind, or come up with the
@@ -262,11 +385,14 @@ export const useUIStore = create<UIState>()(
       partialize: (state) => ({
         // The two explorer fields (plan C3 / R1).
         explorerWidth: state.explorerWidth,
-        explorerCollapsed: state.explorerCollapsed,
+        // Im schmalen Fenster die Wahl fuer breite Fenster, nicht der
+        // erzwungene Zustand (NARROW_VIEWPORT_WIDTH): sonst kaeme nach einem
+        // Neustart im breiten Fenster alles zugeklappt hoch.
+        explorerCollapsed: state.narrowStash?.explorerCollapsed ?? state.explorerCollapsed,
         // Joined in the web-parity round: the rail-or-list choice is a stated
         // preference ("I want the rail" / "I want the list"), and the app
         // would forget it on every restart otherwise.
-        sidebarOpen: state.sidebarOpen,
+        sidebarOpen: state.narrowStash?.sidebarOpen ?? state.sidebarOpen,
         // 2.6.8: die zwei Felder des Agenten-Panels. Geometrie ist eine
         // Vorliebe und ueberlebt einen Neustart; die AUFGABEN selbst tun das
         // ausdruecklich nicht (siehe agentTaskStore), ein wiederhergestelltes

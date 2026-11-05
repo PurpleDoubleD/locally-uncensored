@@ -39,7 +39,7 @@ vi.mock('../../api/comfyui', async (orig) => ({
 }))
 vi.mock('../../api/comfyui-ws', () => ({
   CLIENT_ID: 'lu-test',
-  comfyWS: { connect: vi.fn(async () => { throw new Error('no socket') }), mark: () => 0 },
+  comfyWS: { connect: vi.fn(async () => { throw new Error('no socket') }), mark: () => 0, onPreview: () => () => {} },
 }))
 vi.mock('../../api/vram-handoff', async (orig) => ({
   ...((await orig()) as Record<string, unknown>),
@@ -234,13 +234,13 @@ describe.each(QWEN21_WEIGHTS)('local Qwen-Image 2.1, %s', (_weights, QWEN) => {
       expect(seen.chat).toHaveLength(1)
     })
 
-    it('Edit without an edit enhancer: nobody rewrites, as before', async () => {
+    it('Edit without an edit enhancer: the chat model rewrites it as an edit (B48)', async () => {
       useCreateStore.getState().setIntent('edit')
       useCreateStore.setState({ source: image('street.png'), textEncoderList: [T2I, T2I_FREE] } as never)
       await run()
       expect(seen.enhancer).toHaveLength(0)
-      expect(seen.chat).toHaveLength(0)
-      expect(seen.built[0].prompt).toBe('a fox in snow')
+      expect(seen.chat).toHaveLength(1)
+      expect(seen.built[0].prompt).toBe('A rewrite from the chat model.')
     })
   })
 })

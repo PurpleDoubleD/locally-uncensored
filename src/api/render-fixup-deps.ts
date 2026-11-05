@@ -37,7 +37,7 @@ export function renderFixupDeps(onStatus: (line: string) => void, signal?: Abort
       for (const f of files) dl.setMeta(f.downloadFilename, f.downloadUrl, f.subfolder)
       dl.startPolling()
       await downloadBundleFiles(
-        files.map((f) => ({ filename: f.downloadFilename, subfolder: f.subfolder, downloadUrl: f.downloadUrl, sizeGB: f.sizeGB, sha256: catalogDigestFor(f.downloadFilename, f.downloadUrl).sha256 })),
+        files.map((f) => ({ filename: f.downloadFilename, subfolder: f.subfolder, downloadUrl: f.downloadUrl, sizeGB: f.sizeGB, sha256: f.sha256 ?? catalogDigestFor(f.downloadFilename, f.downloadUrl).sha256 })),
         {
           start: startModelDownload,
           progress: getDownloadProgress,

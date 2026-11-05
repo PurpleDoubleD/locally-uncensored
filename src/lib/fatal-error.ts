@@ -14,6 +14,8 @@
  * Deliberately EXCLUDES user DATA so a reset never destroys content:
  *   chat-conversations (chats) · rag-store (knowledge) ·
  *   locally-uncensored-memory (curated memory/brain).
+ * create-store holds both: its settings go, its gallery and folders stay
+ * (see resetSettingsAndReload).
  */
 export const SETTINGS_STORAGE_KEYS = [
   'chat-settings',
@@ -47,11 +49,38 @@ export function forceShowWindow(): void {
   } catch { /* ignore — best effort */ }
 }
 
-/** Clear settings/state keys (keeps chats/knowledge/memory) and reload. */
+/**
+ * The part of the create-store that is the user's content, not a setting: the
+ * gallery entries (prompts, settings of each render) and the folders sorted by
+ * hand (D3b, Discord 01.11.2026). Null when the blob is not readable, then the
+ * whole key goes as before, since a broken blob may be what took the app down.
+ */
+function createStoreContent(raw: string | null): string | null {
+  if (!raw) return null
+  try {
+    const blob: unknown = JSON.parse(raw)
+    const state = typeof blob === 'object' && blob !== null ? (blob as { state?: unknown }).state : null
+    if (typeof state !== 'object' || state === null) return null
+    const { gallery, galleryFolders } = state as { gallery?: unknown; galleryFolders?: unknown }
+    if (!Array.isArray(gallery) && !Array.isArray(galleryFolders)) return null
+    const kept: Record<string, unknown> = {}
+    if (Array.isArray(gallery)) kept.gallery = gallery
+    if (Array.isArray(galleryFolders)) kept.galleryFolders = galleryFolders
+    return JSON.stringify({ state: kept, version: (blob as { version?: unknown }).version })
+  } catch {
+    return null
+  }
+}
+
+/** Clear settings/state keys (keeps chats/knowledge/memory and the gallery) and reload. */
 export function resetSettingsAndReload(): void {
   try {
     for (const k of SETTINGS_STORAGE_KEYS) {
-      try { localStorage.removeItem(k) } catch { /* ignore one bad key */ }
+      try {
+        const content = k === 'create-store' ? createStoreContent(localStorage.getItem(k)) : null
+        if (content) localStorage.setItem(k, content)
+        else localStorage.removeItem(k)
+      } catch { /* ignore one bad key */ }
     }
   } finally {
     window.location.reload()

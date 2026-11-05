@@ -49,6 +49,7 @@ pub const BLOCKED: &[&str] = &[
     "trash_model_file",
     "comfy_torch_plan",
     "plugin_rea_status",
+    "mcp_child_path",
     "plugin_rea_fetch",
     "plugin_rea_guard",
     "storage_status",
@@ -107,6 +108,7 @@ pub const BLOCKED: &[&str] = &[
     "transcribe",
     "synthesize",
     "synthesize_external",
+    "transcribe_external",
     "log_reveal",
     // The desktop update lane: stops the engines and starts LU again. A phone
     // is updated by its store.
@@ -139,6 +141,7 @@ pub const ALLOWED: &[&str] = &[
     "set_comfy_gpu_mode",
     "get_comfy_gpu_status",
     "set_comfyui_port",
+    "set_comfyui_autostart",
     "set_comfyui_host",
     "set_ollama_host",
     "get_ollama_host",
@@ -226,6 +229,7 @@ pub const ALLOWED: &[&str] = &[
     "lmstudio_model_dir",
     "check_model_sizes",
     "delete_comfy_model",
+    "comfy_model_info",
     "set_hf_token",
     "hf_token_present",
     "start_bundled_engine",

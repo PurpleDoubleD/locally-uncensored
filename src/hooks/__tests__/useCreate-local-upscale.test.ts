@@ -46,6 +46,7 @@ vi.mock('../../api/comfyui-ws', async (orig) => ({
   comfyWS: {
     connect: vi.fn(async () => {}),
     mark: () => 0,
+    onPreview: () => () => {},
     on: (l: Listener) => { ws.listener = l; return () => { ws.listener = null } },
   },
 }))

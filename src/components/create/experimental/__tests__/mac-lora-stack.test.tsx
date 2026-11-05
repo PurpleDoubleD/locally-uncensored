@@ -130,7 +130,7 @@ describe('the stack is handled as on Windows', () => {
     expect(stack()[0]).toEqual({ name: SLIDER, strength: -4 })
     expect(strength.value).toBe('-4.00')
 
-    fireEvent.click(screen.getByRole('button', { name: /slider/ }))
+    fireEvent.click(screen.getByRole('button', { name: /^slider/ }))
     expect(stack().map((l) => l.name)).toEqual([DETAIL])
     expect(screen.getByText('· 1 active')).toBeTruthy()
 

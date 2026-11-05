@@ -17,6 +17,7 @@ import {
   listWorkflowParams, workflowNodeTypes,
   type ParamValue, type WorkflowParamField, type WorkflowParamNode, type WorkflowRunPath,
 } from '../../../api/workflow-params'
+import { workflowOptionText } from '../../../lib/sampler-names'
 import { useWorkflowStore } from '../../../stores/workflowStore'
 import { baseFieldClass, label } from './SchemaControl'
 import { cn } from '../ui/cn'
@@ -135,7 +136,7 @@ function FieldControl({ field, value, onChange, id }: {
           onChange(typeof field.fileValue === 'number' && Number.isFinite(Number(v)) ? Number(v) : v)
         }}>
         {field.autoByLu && <option value="">Auto (LU picks a match)</option>}
-        {c.options.map((o) => <option key={o} value={o}>{o}</option>)}
+        {c.options.map((o) => <option key={o} value={o}>{workflowOptionText(field.inputKey, o)}</option>)}
       </select>
     )
   }

@@ -1,5 +1,6 @@
 import { DEFAULT_SETTINGS } from './constants'
 import type { Settings, SamplerValues } from '../types/settings'
+import { clampMaxTokens, MAX_TOKENS_MAX } from './number-limits'
 
 /**
  * Sampling for one conversation: temperature, top_p and a max output cap,
@@ -78,6 +79,19 @@ export const TEMPERATURE_WARN = 1.2
 export const HIGH_TEMPERATURE_WARNING = 'High values make the model produce random text.'
 
 /**
+ * What the temperature slider does, behind the "?" next to it, in the chat
+ * popup, the Settings page and the persona editor. The warning above only
+ * speaks once the value is high; this says what the slider is for before
+ * anyone gets there (David, 27.10.2026). The web app shows the same words,
+ * and a test on each side pins them.
+ */
+export const TEMPERATURE_HELP =
+  'Temperature controls how random the answers are. Low (0.2 to 0.5): focused and repeatable. '
+  + 'Around 0.7: balanced, the default. Above 1.2: answers can turn into random text.'
+/** Accessible name of the "?" button. */
+export const TEMPERATURE_HELP_LABEL = 'What temperature does'
+
+/**
  * The most Agent turns use, whatever the chat, the persona or the Settings
  * page say. A tool call is a JSON object that must parse; a run of them at
  * a creative temperature breaks long before plain chat does.
@@ -141,7 +155,7 @@ const BOUNDS: Record<keyof SamplingOverrides, [number, number]> = {
   topP: [0, 1],
   // A cap above any context window served is the same as no cap; the ceiling
   // here only stops a hand-edited store from putting nonsense on the wire.
-  maxTokens: [0, 1_000_000],
+  maxTokens: [0, MAX_TOKENS_MAX],
   topK: [0, 1000],
   minP: [0, 1],
   repeatPenalty: [0, 2],
@@ -185,7 +199,8 @@ export function effectiveSampling(
   return {
     temperature: Number.isFinite(temperature) ? Math.min(TEMPERATURE_MAX, Math.max(0, temperature)) : SAMPLING_DEFAULTS.temperature,
     topP: overrides?.topP ?? preset?.topP ?? settings.topP ?? SAMPLING_DEFAULTS.topP,
-    maxTokens: overrides?.maxTokens ?? preset?.maxTokens ?? settings.maxTokens ?? SAMPLING_DEFAULTS.maxTokens,
+    // Clamped (B13) like the temperature above, 0 stays "model default".
+    maxTokens: clampMaxTokens(overrides?.maxTokens ?? preset?.maxTokens ?? settings.maxTokens ?? SAMPLING_DEFAULTS.maxTokens),
   }
 }
 

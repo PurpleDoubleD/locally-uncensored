@@ -36,15 +36,26 @@ describe('the Train tab on a Mac', () => {
     expect(screen.queryByText('MLX SD Turbo')).toBeNull()
   })
 
-  it('COUNTER-CHECK: Use character keeps the picker, and Windows keeps it on Train', () => {
+  it('COUNTER-CHECK: Use character keeps the picker', () => {
     arrange('use')
     render(<ModelChip />)
     expect(screen.queryByTestId('mac-train-base')).toBeNull()
-    cleanup()
+    expect(screen.queryByTestId('local-train-base')).toBeNull()
+  })
+
+  // GH #210: Windows and Linux showed the picker on Train, and a pick there
+  // read as the training model. Their trainer is Z-Image Base alone.
+  it('Windows and Linux: Train names Z-Image instead of offering a model', () => {
     host.mac = false
     arrange('train')
     render(<ModelChip />)
     expect(screen.queryByTestId('mac-train-base')).toBeNull()
+    expect(screen.getByTestId('local-train-base').textContent).toBe('Local training uses Z-Image')
+    expect(screen.queryByText('MLX SD Turbo')).toBeNull()
+    cleanup()
+    arrange('use')
+    render(<ModelChip />)
+    expect(screen.queryByTestId('local-train-base')).toBeNull()
   })
 })
 

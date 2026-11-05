@@ -1,7 +1,6 @@
 import { useRef, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Images } from 'lucide-react'
-import { isMlxImageHost } from '../../../api/mlx-image'
 import { useCreateStore } from '../../../stores/createStore'
 import { clampImageCount, composerImageCountMax } from '../../../lib/render/image-count'
 import { usePopoverPlatz } from '../../../hooks/usePopoverPlatz'
@@ -34,7 +33,7 @@ export function ImageCountChip() {
   const panel = usePopoverPlatz(panelRef, open, { bevorzugt: 'oben', abstand: 6 })
   useClickAway(ref, () => setOpen(false), open)
 
-  const max = composerImageCountMax(backend, intent, backend === 'local' && isMlxImageHost())
+  const max = composerImageCountMax(backend, intent)
   if (max == null) return null
   const cloud = backend === 'cloud'
   const value = cloud ? clampImageCount(cloudImageCount) : Math.max(1, Math.min(max, batchSize))

@@ -516,3 +516,100 @@ describe('subgraphs: files that are turned down', () => {
     expect(r.ok && r.graph).toBe(g)
   })
 })
+
+// ── V3 dynamic inputs (GitHub #196) ─────────────────────────────
+//
+// The node definitions are the excerpt of object-info-ltx25.json, written
+// down from the ComfyUI v0.42.4 sources (templates/SOURCE.md names file and
+// line of every node). The widget values are those of the LTX 2.5 i2v
+// template of Comfy-Org.
+
+const v3 = load<ComfyNodeDefs>('object-info-ltx25.json')
+
+/** One node of the given type wired into a Save Video, as the canvas saves it. */
+function oneNode(type: string, widgets: unknown[], inputs: UiNode['inputs'] = [], extra: UiNode[] = [], links: unknown[] = []): UiGraph {
+  return {
+    nodes: [
+      { id: 1, type, mode: 0, inputs, outputs: [{ name: 'out', type: '*' }], widgets_values: widgets },
+      { id: 2, type: 'PreviewAny', mode: 0, inputs: [{ name: 'source', type: '*', link: 1 }], widgets_values: [] },
+      ...extra,
+    ],
+    links: [[1, 1, 0, 2, 0, '*'], ...links],
+  }
+}
+
+describe('V3 dynamic inputs: DynamicCombo (TextGenerateLTX2Prompt.sampling_mode)', () => {
+  const clip = { id: 3, type: 'CLIPLoader', mode: 0, inputs: [], outputs: [{ name: 'CLIP', type: 'CLIP' }], widgets_values: ['gemma4_e2b_it_int8_convrot.safetensors', 'ltxv', 'default'] }
+  const wired = [{ name: 'clip', type: 'CLIP', link: 2 }]
+  const values = ['', 600, 'on', 0.7, 64, 0.95, 0.05, 1.15, 0, 0, false, true]
+
+  it('names the values of the chosen option "<combo>.<input>" and reads on after them', () => {
+    const r = convertOk(oneNode('TextGenerateLTX2Prompt', values, wired, [clip], [[2, 3, 0, 1, 0, 'CLIP']]), v3)
+    expect(r.graph['1'].inputs).toEqual({
+      clip: ['3', 0],
+      prompt: '',
+      max_length: 600,
+      sampling_mode: 'on',
+      'sampling_mode.temperature': 0.7,
+      'sampling_mode.top_k': 64,
+      'sampling_mode.top_p': 0.95,
+      'sampling_mode.min_p': 0.05,
+      'sampling_mode.repetition_penalty': 1.15,
+      'sampling_mode.seed': 0,
+      'sampling_mode.presence_penalty': 0,
+      thinking: false,
+      use_default_template: true,
+    })
+  })
+
+  it('an option without inputs ("off") takes no values of its own', () => {
+    const r = convertOk(oneNode('TextGenerateLTX2Prompt', ['', 600, 'off', true, false], wired, [clip], [[2, 3, 0, 1, 0, 'CLIP']]), v3)
+    expect(r.graph['1'].inputs).toMatchObject({ sampling_mode: 'off', thinking: true, use_default_template: false })
+    expect(Object.keys(r.graph['1'].inputs ?? {}).some((k) => k.startsWith('sampling_mode.'))).toBe(false)
+  })
+
+  it('a value that is no option of the combo turns the file down instead of shifting the rest', () => {
+    const r = convertUiGraph(oneNode('TextGenerateLTX2Prompt', ['', 600, 'sometimes', 0.7], wired, [clip], [[2, 3, 0, 1, 0, 'CLIP']]), v3)
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.reason).toMatch(/saved settings do not match/)
+  })
+
+  it('nested combos: Save Video format "auto" with its own codec "auto"', () => {
+    const g: UiGraph = {
+      nodes: [
+        { id: 1, type: 'LoadImage', mode: 0, inputs: [], outputs: [{ name: 'IMAGE', type: 'IMAGE' }], widgets_values: ['neon_cyborg_portrait.png', 'image'] },
+        { id: 2, type: 'CreateVideo', mode: 0, inputs: [{ name: 'images', type: 'IMAGE', link: 1 }], outputs: [{ name: 'VIDEO', type: 'VIDEO' }], widgets_values: [24, 8] },
+        { id: 3, type: 'SaveVideo', mode: 0, inputs: [{ name: 'video', type: 'VIDEO', link: 2 }], widgets_values: ['video/x', 'auto', 'auto'] },
+      ],
+      links: [[1, 1, 0, 2, 0, 'IMAGE'], [2, 2, 0, 3, 0, 'VIDEO']],
+    }
+    expect(convertOk(g, v3).graph['3'].inputs).toEqual({ video: ['2', 0], filename_prefix: 'video/x', format: 'auto', 'format.codec': 'auto' })
+  })
+})
+
+describe('V3 dynamic inputs: Autogrow (ComfyMathExpression.values)', () => {
+  const int = { id: 3, type: 'PrimitiveInt', mode: 0, inputs: [], outputs: [{ name: 'INT', type: 'INT' }], widgets_values: [1280, 'fixed'] }
+  const sockets = (linkA: number | null) => [
+    { name: 'values.a', type: 'FLOAT,INT,BOOLEAN', link: linkA },
+    { name: 'values.b', type: 'FLOAT,INT,BOOLEAN', link: null },
+  ]
+
+  it('reads the sockets "values.a", "values.b" and does not ask for "values" itself', () => {
+    const r = convertOk(oneNode('ComfyMathExpression', ['a/2'], sockets(2), [int], [[2, 3, 0, 1, 0, 'INT']]), v3)
+    expect(r.graph['1'].inputs).toEqual({ expression: 'a/2', 'values.a': ['3', 0] })
+  })
+
+  it('the first name is required: an open "values.a" is named', () => {
+    const r = convertUiGraph(oneNode('ComfyMathExpression', ['a/2'], sockets(null)), v3)
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.reason).toMatch(/has no "values\.a" connected/)
+  })
+})
+
+describe('V3 widgets of more than one type (widgetType)', () => {
+  it('LTXVEmptyLatentAudio keeps frame_rate in its widget values, batch_size stays 1', () => {
+    const vae = { id: 3, type: 'VAELoader', mode: 0, inputs: [], outputs: [{ name: 'VAE', type: 'VAE' }], widgets_values: ['ltx-2.5-audio-vae-bf16.safetensors'] }
+    const r = convertOk(oneNode('LTXVEmptyLatentAudio', [97, 25, 1], [{ name: 'audio_vae', type: 'VAE', link: 2 }], [vae], [[2, 3, 0, 1, 0, 'VAE']]), v3)
+    expect(r.graph['1'].inputs).toEqual({ frames_number: 97, frame_rate: 25, batch_size: 1, audio_vae: ['3', 0] })
+  })
+})

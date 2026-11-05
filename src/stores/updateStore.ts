@@ -613,6 +613,11 @@ export const useUpdateStore = create<UpdateState>()(
         updateAvailable: state.updateAvailable,
         releaseNotes: state.releaseNotes,
         autoDownload: state.autoDownload,
+        // "Dismiss" gilt fuer genau diese Version und muss den Neustart
+        // ueberstehen (T1-Nachttest 3.0.9: der Hinweis stand nach jedem Start
+        // wieder da). Eine neuere Version vergleicht sich in UpdateBadge gegen
+        // diesen Wert und erscheint wieder.
+        dismissed: state.dismissed,
       }),
       // Reset stale persisted state when the binary has been updated out-of-band
       // (e.g. user manually installed a newer .deb / .exe than what the persisted

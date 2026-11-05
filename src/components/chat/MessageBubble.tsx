@@ -2,7 +2,7 @@ import { ChatAttachment } from './ChatAttachment'
 import { ChatFileChip } from './ChatFileChip'
 import { FILE_ONLY_TEXT } from '../../lib/chat-files'
 import { motion } from 'framer-motion'
-import { User, Copy, Check, Pencil, RefreshCw, Wrench, Trash2, Scissors, Unlink, Film, Music, GitBranch } from 'lucide-react'
+import { User, Copy, Check, Pencil, RefreshCw, Wrench, Trash2, Scissors, Unlink, Film, Music, GitBranch, ListRestart } from 'lucide-react'
 import { useState, useRef, useEffect, useMemo, memo } from 'react'
 import { MarkdownRenderer } from './MarkdownRenderer'
 import { closeOpenMarkdown } from '../../lib/streaming-markdown'
@@ -30,6 +30,7 @@ import { extractToolCallsFromContent, looksLikeToolIntent } from '../../lib/tool
 import { isAgentCompatible } from '../../lib/model-compatibility'
 import { ContextMenu } from '../ui/ContextMenu'
 import { buildMessageMenu, type MessageMenuHandlers } from '../ui/menu-actions'
+import { plainTextToCopy } from '../../lib/copy-plain'
 import { MONOGRAM, MONOGRAM_INVERT } from '../layout/brand'
 import { AVATAR_SLOT, MODEL_MARK, MODEL_MARK_SLOT } from './avatar-slot'
 import { MOTION_S } from '../ui/motion'
@@ -38,6 +39,8 @@ import { RefusalNotice } from './RefusalNotice'
 import { RequestUsageLine } from './RequestUsageLine'
 import { fitTextarea } from '../../lib/fit-textarea'
 import { editableText } from '../../lib/message-edit'
+import { editKeyAction, editShortcuts, enterKeyMode } from '../../lib/enter-key'
+import { isMacOS } from '../../lib/device-kind'
 import { ForkSwitcher } from './ForkSwitcher'
 
 interface Props {
@@ -46,6 +49,9 @@ interface Props {
    *  ONE stable function to every bubble — a per-message closure would be a new
    *  prop on every render and defeat the memo() below. */
   onRegenerate?: (messageId: string) => void
+  /** GH #199: a group speaker's answer also offers the whole round again,
+   *  as an action of its own beside Regenerate. */
+  onRegenerateRound?: (messageId: string) => void
   /** "Save & resend" of an edited user message. False when nothing could be
    *  sent; the edit is then saved instead of lost. */
   onEdit?: (messageId: string, newContent: string) => boolean
@@ -58,6 +64,10 @@ interface Props {
   onSwitchFork?: (key: string, index: number) => void
   /** GH #174: a new chat that ends with this message. */
   onBranch?: (messageId: string) => void
+  /** An earlier compact layer (3.0.9): the message can be read and copied,
+   *  nothing else. The parent already leaves edit/regenerate/branch out;
+   *  this also takes delete and the assistant's own edit away. */
+  readOnly?: boolean
   /** Tool-call id awaiting user approval. When the matching block in
    *  this message has that id, ToolCallBlock renders Approve/Reject
    *  inline instead of a popup over the chat input. */
@@ -77,12 +87,15 @@ interface Props {
   declined?: boolean
 }
 
-function MessageBubbleImpl({ message, onRegenerate, onEdit, pendingApprovalId, onApprove, onReject, isLast, isStreaming, speakerName, declined, forkKey, forkIndex, forkTotal, onSwitchFork, onBranch }: Props) {
+function MessageBubbleImpl({ message, onRegenerate, onRegenerateRound, onEdit, pendingApprovalId, onApprove, onReject, isLast, isStreaming, speakerName, declined, forkKey, forkIndex, forkTotal, onSwitchFork, onBranch, readOnly }: Props) {
   const [copied, setCopied] = useState(false)
   const [isEditing, setIsEditing] = useState(false)
   const [editContent, setEditContent] = useState('')
   const [confirmDelete, setConfirmDelete] = useState(false)
-  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null)
+  // `text` is what "Copy text" will copy, taken when the menu opens: the
+  // click into the menu may clear the selection.
+  const [menu, setMenu] = useState<{ x: number; y: number; text: string } | null>(null)
+  const columnRef = useRef<HTMLDivElement>(null)
   const editRef = useRef<HTMLTextAreaElement>(null)
   const isUser = message.role === 'user'
 
@@ -106,6 +119,9 @@ function MessageBubbleImpl({ message, onRegenerate, onEdit, pendingApprovalId, o
   )
   const toggleAgentMode = useAgentModeStore((s) => s.toggleAgentMode)
   const userAvatarDataUrl = useSettingsStore((s) => s.settings.userAvatarDataUrl)
+  // GH #202: the Enter key in the edit field follows the same setting as the composer.
+  const enterMode = enterKeyMode(useSettingsStore((s) => s.settings.enterKey))
+  const editKeys = editShortcuts(enterMode, isMacOS())
   // Chat Tools (v2.5.3) gives plain chat web/file/image/video WITHOUT Agent Mode.
   // When it's on, the "turn Agent Mode on" banners below are wrong + contradictory
   // (the tool IS available in normal chat) — they predate Chat Tools and only
@@ -187,6 +203,14 @@ function MessageBubbleImpl({ message, onRegenerate, onEdit, pendingApprovalId, o
     setTimeout(() => setCopied(false), 2000)
   }
 
+  // Right-click "Copy text": what Ctrl+C would give (lib/copy-plain.ts).
+  const handleCopyText = () => {
+    if (!menu) return
+    navigator.clipboard.writeText(menu.text)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }
+
   const startEdit = () => {
     // User: edit the short slash command, not its expanded instruction.
     // Assistant: edit what the model actually said.
@@ -253,13 +277,14 @@ function MessageBubbleImpl({ message, onRegenerate, onEdit, pendingApprovalId, o
   //
   // `edit` und `regenerate` sind `null`, wo die Leiste den Knopf auch nicht
   // zeigt; das Menue laesst den Eintrag dann ebenfalls weg.
-  const canEdit = (isUser && !!onEdit) || canEditAssistant
+  const canEdit = !readOnly && ((isUser && !!onEdit) || canEditAssistant)
   const actions: MessageMenuHandlers = {
     copy: handleCopy,
+    copyText: handleCopyText,
     edit: canEdit ? startEdit : null,
     regenerate: !isUser && onRegenerate ? () => onRegenerate(message.id) : null,
     branch: onBranch ? () => onBranch(message.id) : null,
-    remove: handleDelete,
+    remove: readOnly ? null : handleDelete,
   }
   // Die Leiste haengt an `!isEditing && !isStreaming` — das Menue bietet
   // dieselben Aktionen an, also gilt fuer es dieselbe Bedingung.
@@ -315,7 +340,8 @@ function MessageBubbleImpl({ message, onRegenerate, onEdit, pendingApprovalId, o
       onContextMenu={(e) => {
         if (!actionsAvailable) return
         e.preventDefault()
-        setMenu({ x: e.clientX, y: e.clientY })
+        const text = columnRef.current ? plainTextToCopy(columnRef.current, window.getSelection()) : ''
+        setMenu({ x: e.clientX, y: e.clientY, text })
       }}
       initial={{ opacity: 0, y: 6 }}
       animate={{ opacity: 1, y: 0 }}
@@ -336,7 +362,7 @@ function MessageBubbleImpl({ message, onRegenerate, onEdit, pendingApprovalId, o
 
       {/* A reply with a Create order takes the full width in a narrow window:
           the card and the result need the room. */}
-      <div className={(hasCreateOrder ? 'min-w-0 flex-1 sm:flex-none sm:max-w-[80%]' : 'max-w-[80%]') + ' space-y-0.5'}>
+      <div ref={columnRef} className={(hasCreateOrder ? 'min-w-0 flex-1 sm:flex-none sm:max-w-[80%]' : 'max-w-[80%]') + ' space-y-0.5'}>
         {/* Name the model that produced this answer. Group chats have always
             done this; since the R5 re-measure (2026-08-30) every assistant
             turn carries it, because the app had no model name at a single
@@ -433,7 +459,7 @@ function MessageBubbleImpl({ message, onRegenerate, onEdit, pendingApprovalId, o
                   const istSchluss = gruppenIndex === gruppen.length - 1
                   return (
                     <div key={block.id} className="px-1 py-0.5">
-                      <div className={'text-[0.8rem] leading-relaxed' + (isStreaming && istSchluss ? ' lu-caret' : '')}>
+                      <div data-copy-text className={'text-[0.8rem] leading-relaxed' + (isStreaming && istSchluss ? ' lu-caret' : '')}>
                         <MarkdownRenderer content={isStreaming && istSchluss ? closeOpenMarkdown(clean) : clean} />
                       </div>
                     </div>
@@ -511,10 +537,12 @@ function MessageBubbleImpl({ message, onRegenerate, onEdit, pendingApprovalId, o
                 onKeyDown={(e) => {
                   // Enter saves, Ctrl or Cmd with Enter resends, Shift with
                   // Enter is a new line. Enter used to resend and drop every
-                  // later turn (GH #172).
-                  if (e.key === 'Enter' && !e.shiftKey) {
+                  // later turn (GH #172). GH #202: in "new line" mode Enter is a
+                  // line, Ctrl/Cmd+Enter saves and with Shift resends.
+                  const action = editKeyAction({ key: e.key, shiftKey: e.shiftKey, ctrlKey: e.ctrlKey, metaKey: e.metaKey, altKey: e.altKey, isComposing: e.nativeEvent.isComposing }, enterMode)
+                  if (action !== 'none') {
                     e.preventDefault()
-                    if ((e.ctrlKey || e.metaKey) && isUser && onEdit) resendEdit()
+                    if (action === 'resend' && isUser && onEdit) resendEdit()
                     else saveEdit()
                   }
                   if (e.key === 'Escape') cancelEdit()
@@ -523,10 +551,11 @@ function MessageBubbleImpl({ message, onRegenerate, onEdit, pendingApprovalId, o
                 className="w-full bg-transparent text-[0.78rem] leading-relaxed text-gray-800 dark:text-gray-200 resize-none focus:outline-none"
               />
               <div className="flex items-center gap-1 justify-end t-micro">
+                <span className="mr-auto text-gray-500" data-testid="edit-key-hint">{editKeys.hint}</span>
                 <button onClick={cancelEdit} className="px-1.5 py-0.5 rounded text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-white/10 transition-colors">Cancel</button>
-                <button onClick={saveEdit} title="Change the text only (Enter)" className="px-1.5 py-0.5 rounded text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-white/10 transition-colors">Save</button>
+                <button onClick={saveEdit} title={`Change the text only (${editKeys.save})`} className="px-1.5 py-0.5 rounded text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-white/10 transition-colors">Save</button>
                 {isUser && onEdit && (
-                  <button onClick={resendEdit} title="Ask again from here and keep the current answers as a version (Ctrl+Enter)" className="px-1.5 py-0.5 rounded border border-gray-300 dark:border-white/15 text-gray-800 dark:text-gray-100 hover:bg-gray-200 dark:hover:bg-white/10 transition-colors">Save &amp; resend</button>
+                  <button onClick={resendEdit} title={`Ask again from here and keep the current answers as a version (${editKeys.resend})`} className="px-1.5 py-0.5 rounded border border-gray-300 dark:border-white/15 text-gray-800 dark:text-gray-100 hover:bg-gray-200 dark:hover:bg-white/10 transition-colors">Save &amp; resend</button>
                 )}
               </div>
             </div>
@@ -538,7 +567,7 @@ function MessageBubbleImpl({ message, onRegenerate, onEdit, pendingApprovalId, o
             // long expanded instruction held in content (which drives the model).
             // The same holds for a message with files: content carries their
             // summaries for the model, the bubble shows what was typed.
-            <p className="text-[0.78rem] leading-relaxed text-gray-800 dark:text-gray-200 whitespace-pre-wrap">{message.displayContent || message.content}</p>
+            <p data-copy-text className="text-[0.78rem] leading-relaxed text-gray-800 dark:text-gray-200 whitespace-pre-wrap wrap-anywhere">{message.displayContent || message.content}</p>
           ) : (
             // Answer-blocks (when present) already rendered the per-iteration
             // text chronologically above; skip message.content here to avoid
@@ -555,7 +584,7 @@ function MessageBubbleImpl({ message, onRegenerate, onEdit, pendingApprovalId, o
                 // eine reine Funktion des vorhandenen `isStreaming`-Props —
                 // kein Zustand, kein Timer, keine Subscription, also auch
                 // kein Rerender, den der Stream nicht ohnehin ausloest.
-                <div className={'text-[0.78rem] leading-relaxed' + (isStreaming ? ' lu-caret' : '')}>
+                <div data-copy-text className={'text-[0.78rem] leading-relaxed' + (isStreaming ? ' lu-caret' : '')}>
                   {/* While it streams, an open ` or ** is closed for the frame
                       (lib/streaming-markdown.ts); the stored text is untouched. */}
                   <MarkdownRenderer content={isStreaming ? closeOpenMarkdown(cleanContent) : cleanContent} />
@@ -688,7 +717,10 @@ function MessageBubbleImpl({ message, onRegenerate, onEdit, pendingApprovalId, o
               <button onClick={actions.edit} className="p-1 rounded-md text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/10 transition-colors" aria-label="Edit response" title="Edit"><Pencil size={12} /></button>
             )}
             {actions.regenerate && (
-              <button onClick={actions.regenerate} className="p-1 rounded-md text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/10 transition-colors" aria-label="Regenerate response" title="Regenerate"><RefreshCw size={12} /></button>
+              <button onClick={actions.regenerate} className="p-1 rounded-md text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/10 transition-colors" aria-label="Regenerate response" title={onRegenerateRound ? 'Regenerate this answer' : 'Regenerate'}><RefreshCw size={12} /></button>
+            )}
+            {!isUser && onRegenerateRound && (
+              <button onClick={() => onRegenerateRound(message.id)} data-testid="regenerate-round" className="p-1 rounded-md text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/10 transition-colors" aria-label="Regenerate whole round" title="Regenerate whole round: every speaker answers this message again"><ListRestart size={12} /></button>
             )}
             <button onClick={actions.copy} className="p-1 rounded-md text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/10 transition-colors" aria-label="Copy message" title={copied ? 'Copied' : 'Copy'}>
               {copied ? <Check size={12} className="text-green-500" /> : <Copy size={12} />}
@@ -697,9 +729,9 @@ function MessageBubbleImpl({ message, onRegenerate, onEdit, pendingApprovalId, o
             {actions.branch && (
               <button onClick={actions.branch} className="p-1 rounded-md text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/10 transition-colors" aria-label="Branch from here" title="Branch from here: a new chat up to this message"><GitBranch size={12} /></button>
             )}
-            <button onClick={actions.remove} className={'p-1 rounded-md transition-colors hover:bg-gray-100 dark:hover:bg-white/10 ' + (confirmDelete ? 'text-red-500' : 'text-gray-400 dark:text-gray-500 hover:text-red-500')} aria-label="Delete message" title={confirmDelete ? 'Click again to delete' : 'Delete message'}>
+            {actions.remove && <button onClick={actions.remove} className={'p-1 rounded-md transition-colors hover:bg-gray-100 dark:hover:bg-white/10 ' + (confirmDelete ? 'text-red-500' : 'text-gray-400 dark:text-gray-500 hover:text-red-500')} aria-label="Delete message" title={confirmDelete ? 'Click again to delete' : 'Delete message'}>
               <Trash2 size={12} />
-            </button>
+            </button>}
             {!isUser && <RequestUsageLine usage={message.requestUsage} className="pl-1.5" />}
           </div>
         )}

@@ -37,8 +37,14 @@ function inputBloecke(quelle: string): string[] {
   return bloecke
 }
 
+/** Jeder `<BoundedNumberInput …/>`-Block (B9, B13): ein Zahlenfeld mit
+ *  Obergrenze, sein Name kommt als `ariaLabel` und landet als aria-label. */
+function begrenzteBloecke(quelle: string): string[] {
+  return [...quelle.matchAll(/<BoundedNumberInput[\s\S]*?\/>/g)].map((m) => m[0].replace('ariaLabel=', 'aria-label='))
+}
+
 describe('Zahlenfelder in den Einstellungen', () => {
-  const zahlenfelder = inputBloecke(JSX).filter((b) => b.includes('type="number"'))
+  const zahlenfelder = [...inputBloecke(JSX).filter((b) => b.includes('type="number"')), ...begrenzteBloecke(JSX)]
 
   it('es gibt ueberhaupt welche — sonst prueft die Zeile darunter nichts', () => {
     expect(zahlenfelder.length).toBeGreaterThanOrEqual(9)

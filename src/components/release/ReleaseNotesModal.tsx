@@ -35,6 +35,7 @@ import { useSettingsStore } from '../../stores/settingsStore'
 import { useUIStore } from '../../stores/uiStore'
 import { useCloudAuthStore, deriveCloudAvailable } from '../../stores/cloudAuthStore'
 import { useReleaseNotesStore, shouldShowReleaseNotes } from '../../stores/releaseNotesStore'
+import { useHfLinkStore } from '../../stores/hfLinkStore'
 import { releaseNoteFor, itemDetail, itemTitle, type ReleaseNote, type ReleaseNoteItem } from '../../lib/release-notes'
 
 export function ReleaseNotesModal() {
@@ -46,7 +47,11 @@ export function ReleaseNotesModal() {
   const setCloudGateOpen = useUIStore((s) => s.setCloudGateOpen)
   const cloudAvailable = useCloudAuthStore(deriveCloudAvailable)
 
-  const open = reopened || shouldShowReleaseNotes(currentVersion, lastNotesVersion, onboardingDone)
+  // A Hugging Face link the user just clicked comes first: the sheet waits
+  // until its question is answered instead of covering it (P9, Mac test of
+  // 3.0.9: the first start after an update put the sheet on top of it).
+  const hfLinkOpen = useHfLinkStore((s) => s.pending !== null || s.rejected !== null)
+  const open = !hfLinkOpen && (reopened || shouldShowReleaseNotes(currentVersion, lastNotesVersion, onboardingDone))
   const note = releaseNoteFor(currentVersion)
   const close = () => markNotesSeen(currentVersion)
 

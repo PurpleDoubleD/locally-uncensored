@@ -1,18 +1,21 @@
 name: Windows sidecar build + boot smoke
 
 # Proves the bundled llama.cpp sidecar builds and BOOTS on Windows without
-# waiting for a full release: runs when the build script (or this workflow)
-# changes, weekly against runner-image drift, and on demand. The GGML Vulkan
-# build keeps its CPU backend, so /health comes up on the GPU-less runner.
+# waiting for a full release: runs when the build script, LU's llama.cpp
+# patches (or this workflow) change, weekly against runner-image drift, and
+# on demand. The GGML Vulkan build keeps its CPU backend, so /health comes up
+# on the GPU-less runner.
 on:
   push:
     branches: [master]
     paths:
       - 'scripts/build-llama.sh'
+      - 'scripts/llama-patches/**'
       - '.github/workflows/sidecar-windows.yml'
   pull_request:
     paths:
       - 'scripts/build-llama.sh'
+      - 'scripts/llama-patches/**'
       - '.github/workflows/sidecar-windows.yml'
   schedule:
     - cron: '17 4 * * 1' # Mondays 04:17 UTC
@@ -62,7 +65,7 @@ jobs:
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: D:/lb
-          key: llama-${{ hashFiles('scripts/build-llama.sh') }}-x86_64-pc-windows-msvc-v1
+          key: llama-${{ hashFiles('scripts/build-llama.sh', 'scripts/llama-patches/**') }}-x86_64-pc-windows-msvc-v1
 
       - name: Install Vulkan SDK
         shell: pwsh
@@ -220,6 +223,41 @@ jobs:
           }
           Write-Host "OK - sidecar boots from the resource layout, loads a model, answers /health, and has a ggml-cpu-*.dll from $runDir mapped"
 
+      # E1, P11: the vector tool is an exe of the server build (LU patch 0002)
+      # and the app starts it from the companions directory like the server
+      # (engine.rs prepare_tool_command). A real run on the tiny model: it
+      # writes a control vector, prints the progress line the app reads (patch
+      # 0003) and measures the layer lengths single-neuron doses are counted
+      # in (LU_LAYER_NORMS, patch 0004).
+      - name: "Vector tool computes from the resource layout (P11)"
+        shell: pwsh
+        timeout-minutes: 5
+        run: |
+          $tool = (Resolve-Path "src-tauri\bin\lu-llama-cvector-generator-x86_64-pc-windows-msvc.exe").Path
+          $runDir = (Resolve-Path "src-tauri\resources\llama\x86_64-pc-windows-msvc").Path
+          $model = "D:\lb\stories260K.gguf"
+          if (-not (Test-Path $model)) { throw "the boot smoke's model is missing: $model" }
+          $work = "$env:RUNNER_TEMP\cvector"
+          New-Item -ItemType Directory -Force -Path $work | Out-Null
+          Set-Content -Path "$work\more.txt" -Value 'Once upon a time there was a happy dog.', 'The sun was bright and everyone smiled.'
+          Set-Content -Path "$work\less.txt" -Value 'Once upon a time there was a sad dog.', 'The rain fell and everyone cried.'
+          Push-Location $runDir
+          & $tool -m $model --positive-file "$work\more.txt" --negative-file "$work\less.txt" -o "$work\direction.gguf" --method mean -c 256 *> "$work\cvector.log"
+          $vectorExit = $LASTEXITCODE
+          $env:LU_LAYER_NORMS = '1'
+          & $tool -m $model --positive-file "$work\more.txt" --negative-file "$work\less.txt" -o "$work\norms.gguf" --method mean -c 256 *> "$work\cvector-norms.log"
+          $normsExit = $LASTEXITCODE
+          Remove-Item Env:\LU_LAYER_NORMS
+          Pop-Location
+          Get-Content "$work\cvector.log", "$work\cvector-norms.log"
+          if ($vectorExit -ne 0) { throw "lu-llama-cvector-generator exited $vectorExit (run from $runDir)" }
+          if (-not (Test-Path "$work\direction.gguf")) { throw "no control vector written" }
+          if (-not (Select-String -Path "$work\cvector.log" -Pattern 'Evaluating prompt[2/2]' -SimpleMatch -Quiet)) { throw "no progress line for the last prompt (patch 0003)" }
+          if ($normsExit -ne 0) { throw "the measuring mode (LU_LAYER_NORMS, patch 0004) exited $normsExit" }
+          $norms = @(Select-String -Path "$work\cvector-norms.log" -Pattern '^LU norm [0-9]+ [0-9]+\.[0-9]{6}$').Count
+          if ($norms -lt 1 -or (Test-Path "$work\norms.gguf")) { throw "LU_LAYER_NORMS printed $norms 'LU norm' lines (want at least 1) or wrote a vector" }
+          Write-Host "OK - the vector tool computes a control vector from $runDir and measures $norms layer lengths"
+
       - name: Upload sidecar artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
@@ -228,7 +266,10 @@ jobs:
           # ggml-cpu-*/ggml-vulkan DLLs staged next to it (see above):
           # shipping only the exe from this artifact would be shipping
           # something that cannot boot.
+          # P11, E1: the Neuron tweaker's vector tool is an exe of the same
+          # server build, needs the same companions and ships with the app.
           path: |
             src-tauri/bin/lu-llama-server-x86_64-pc-windows-msvc.exe
+            src-tauri/bin/lu-llama-cvector-generator-x86_64-pc-windows-msvc.exe
             src-tauri/resources/llama/x86_64-pc-windows-msvc/*
           retention-days: 14

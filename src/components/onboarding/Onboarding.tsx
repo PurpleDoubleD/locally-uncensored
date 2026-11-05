@@ -176,6 +176,10 @@ export function Onboarding() {
       // zurueck, und die Marke ist genau die Frage, die
       // `lib/onboarding-provider-gate.ts` dem Assistenten stellt.
       setProviderConfig('ollama', { enabled: true, disabledByUser: false })
+      // Die Adresse, an der der Scan ihn gefunden hat (Rusts aufgeloeste
+      // Adresse, siehe lib/ollama-host-sync.ts), nicht das Preset.
+      const detectedOllama = detectedBackends.find(b => b.id === 'ollama')
+      if (detectedOllama) setProviderConfig('ollama', { baseUrl: detectedOllama.baseUrl })
       setProviderConfig('openai', { enabled: false, managed: false })
       // Opus review, R13D follow-up: a deliberate pick here, not an eviction
       // bug, so the missing-engine notice must not read this as LU Engine

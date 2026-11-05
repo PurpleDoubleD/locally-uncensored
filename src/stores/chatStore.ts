@@ -4,6 +4,7 @@ import { v4 as uuid } from 'uuid'
 import type { Conversation, Message, MessageError, ChatArtifact, CompactionRecord, RequestUsage } from '../types/chat'
 import type { AgentBlock } from '../types/agent-mode'
 import { clampSampling, storedTemperature, type SamplingOverrides } from '../lib/sampling'
+import { cleanCustomParams, type CustomParam } from '../lib/custom-params'
 import { idbStorage } from '../lib/idbStorage'
 import { externalizeConversations, hasInlineImages } from '../lib/chat-attachments'
 import { FILE_ONLY_TEXT } from '../lib/chat-files'
@@ -26,6 +27,7 @@ import { useCodexStore } from './codexStore'
 import { useAgentTaskStore } from './agentTaskStore'
 import { useAgentModeStore } from './agentModeStore'
 import { log } from '../lib/logger'
+import { deleteRecallConversation } from '../lib/chatRecallDB'
 import { isRecord, prop } from '../types/json-guards'
 import { activeConversationAtStart } from '../lib/conversation-mode'
 import { cardChatStart } from '../lib/character-card'
@@ -152,6 +154,8 @@ export function dropConversationSideState(id: string): void {
     // delegierter Agent laeuft in einem eigenen Versprechen weiter, auch wenn
     // sein Chat weg ist.
     ['agent-tasks', () => useAgentTaskStore.getState().clearConv(id)],
+    // 3.0.9 (B33): the recall vectors of the chat's old messages.
+    ['chat-recall', () => { void deleteRecallConversation(id).catch(() => {}) }],
   ]
   for (const [what, run] of steps) {
     try { run() } catch (err) {
@@ -249,11 +253,17 @@ interface ChatState {
    *  so it goes back to following the Settings page instead of pinning
    *  today's defaults into the conversation forever. */
   resetConversationSampling: (id: string) => void
+  /** GH #198: replace this chat's custom sampling rows. An empty list
+   *  deletes the field, so the chat follows its persona's rows again. */
+  setConversationCustomParams: (id: string, rows: CustomParam[]) => void
   /** Group chat v1: the models that answer in turn (capped at 4). */
   setGroupModels: (id: string, models: string[]) => void
   /** Group chat: the persona ONE participant speaks as in this chat, or
    *  `null` to let it follow the chat's own persona setting again. */
   setGroupPersona: (id: string, model: string, personaId: string | null) => void
+  /** Group chat (GH #200): who sits out the next round. An empty list takes
+   *  the pick away. */
+  setGroupSitOut: (id: string, models: string[]) => void
   /** Write the model the open chat is actually running on.
    *
    *  Befund 4 of the abnahme counter-check (2026-08-29): switching the model
@@ -280,6 +290,9 @@ interface ChatState {
   /** The summed counts of one request (lib/request-usage.ts), replaced whole. */
   updateMessageRequestUsage: (conversationId: string, messageId: string, requestUsage: RequestUsage) => void
   updateMessageFinishReason: (conversationId: string, messageId: string, finishReason: string) => void
+  /** GH #201: how much older history the request behind this answer left
+   *  out, or null when it went out whole. */
+  updateMessageHistoryTrim: (conversationId: string, messageId: string, trim: Message['historyTrim'] | null) => void
   /** The kind of error a run ended with, or null to take it away again. */
   updateMessageError: (conversationId: string, messageId: string, error: MessageError | null) => void
   /** How long the model thought before it answered, in milliseconds. */
@@ -666,12 +679,25 @@ export const useChatStore = create<ChatState>()(
           ),
         })),
 
+      setConversationCustomParams: (id, rows) =>
+        set((state) => ({
+          conversations: state.conversations.map((c) => {
+            if (c.id !== id) return c
+            const clean = cleanCustomParams(rows)
+            const next: Conversation = { ...c, customParams: clean, updatedAt: Date.now() }
+            if (clean.length === 0) delete next.customParams
+            return next
+          }),
+        })),
+
       resetConversationSampling: (id) =>
         set((state) => ({
           conversations: state.conversations.map((c) => {
             if (c.id !== id) return c
             const next = { ...c, updatedAt: Date.now() }
             delete next.sampling
+            // GH #198: the chat's custom rows are its own values too.
+            delete next.customParams
             return next
           }),
         })),
@@ -692,6 +718,22 @@ export const useChatStore = create<ChatState>()(
             // persona stays their author once another model takes it over.
             const leaving = Object.entries(c.groupPersonas ?? {}).filter(([model]) => !groupModels.includes(model))
             if (leaving.length > 0) next.messages = stampGroupPersonas(c.messages, Object.fromEntries(leaving))
+            // GH #200: a member that left cannot sit out a round either.
+            const sitOut = (c.groupSitOut ?? []).filter((m) => groupModels.includes(m))
+            if (sitOut.length > 0) next.groupSitOut = sitOut
+            else delete next.groupSitOut
+            return next
+          }),
+        })),
+
+      setGroupSitOut: (id, models) =>
+        set((state) => ({
+          conversations: state.conversations.map((c) => {
+            if (c.id !== id) return c
+            const sitOut = models.filter((m) => c.groupModels?.includes(m))
+            const next = { ...c }
+            if (sitOut.length > 0) next.groupSitOut = sitOut
+            else delete next.groupSitOut
             return next
           }),
         })),
@@ -871,6 +913,24 @@ export const useChatStore = create<ChatState>()(
           ),
         })),
 
+      updateMessageHistoryTrim: (conversationId, messageId, trim) =>
+        set((state) => ({
+          conversations: state.conversations.map((c) => {
+            if (c.id !== conversationId) return c
+            return {
+              ...c,
+              messages: c.messages.map((m) => {
+                if (m.id !== messageId) return m
+                if (trim && (trim.dropped > 0 || (trim.shortened ?? 0) > 0)) return { ...m, historyTrim: trim }
+                if (!m.historyTrim) return m
+                const next = { ...m }
+                delete next.historyTrim
+                return next
+              }),
+            }
+          }),
+        })),
+
       updateMessageError: (conversationId, messageId, error) =>
         set((state) => ({
           conversations: state.conversations.map((c) =>
@@ -1043,8 +1103,11 @@ export const useChatStore = create<ChatState>()(
         const lower = query.toLowerCase()
         return conversations.filter(
           (c) =>
-            c.title.toLowerCase().includes(lower) ||
-            c.messages.some((m) => m.content.toLowerCase().includes(lower))
+            // String() and the typeof: a chat from an old or edited backup may
+            // carry a message that is not text, and the search must not take
+            // the whole app down on it (T1 night test 3.0.9, A4).
+            String(c.title ?? '').toLowerCase().includes(lower) ||
+            c.messages.some((m) => typeof m.content === 'string' && m.content.toLowerCase().includes(lower))
         )
       },
 
