@@ -568,11 +568,38 @@ describe('release.yml, a Mac-only run adds to an existing release and touches no
     expect(laneSteps[upload + 1]).toContain('kept the other platforms')
   })
 
+  it('proves after the upload that nothing but the Mac was added', () => {
+    const before = laneSteps[check]
+    expect(before).toContain('mac-only-before.json')
+    expect(before).toContain('mac-only-latest-before.json')
+    const after = laneSteps[upload + 1]
+    expect(after).toMatch(/if \[ "\$MAC_ONLY" = true \]; then/)
+    expect(after).toContain('mac-only-before.json')
+    expect(after).toContain("changed: ' + digest")
+    expect(after).toContain("latest.json entry ' + key + ' changed")
+    expect(after).toContain("!k.startsWith('darwin-')")
+  })
+
+  it('changes nothing for a release or a dry run: every Mac-only step and check asks for the input', () => {
+    // The input is read in five places only: the gate, the Mac lane's
+    // condition and its MAC_ONLY, the checksums job's condition and its
+    // MAC_ONLY.
+    expect(withoutComments(RELEASE_YML).match(/inputs\.mac_only/g) ?? []).toHaveLength(5)
+    expect(withoutComments(lane).match(/^ {6}MAC_ONLY:\s*\$\{\{ inputs\.mac_only && 'true' \|\| 'false' \}\}\s*$/m)).not.toBeNull()
+    expect(withoutComments(jobBlock(RELEASE_YML, 'sbom-and-checksums')))
+      .toMatch(/^ {6}MAC_ONLY:\s*\$\{\{ inputs\.mac_only && 'true' \|\| 'false' \}\}\s*$/m)
+    // Every use of MAC_ONLY in a step is a guard on that value.
+    const uses = withoutComments(RELEASE_YML).split('\n').filter((l) => /MAC_ONLY/.test(l) && !/^ {6}MAC_ONLY:/.test(l))
+    for (const line of uses) expect(line).toMatch(/env\.MAC_ONLY == 'true'|"\$MAC_ONLY" = true/)
+  })
+
   it('leaves the Latest flag alone and rebuilds the checksums', () => {
     // enforce-prerelease reads PUBLISHED_TAG, which a dispatch does not set.
     expect(withoutComments(jobBlock(RELEASE_YML, 'enforce-prerelease'))).toContain('PUBLISHED_TAG: ${{ github.event.release.tag_name }}')
-    expect(withoutComments(jobBlock(RELEASE_YML, 'sbom-and-checksums')))
-      .toContain("inputs.mac_only && needs.build-tauri-macos.result == 'success'")
+    const sums = withoutComments(jobBlock(RELEASE_YML, 'sbom-and-checksums'))
+    expect(sums).toContain("inputs.mac_only && needs.build-tauri-macos.result == 'success'")
+    expect(sums).toContain('SHA256SUMS.txt lists no .dmg')
+    expect(sums).toContain('SHA256SUMS.txt lists no updater archive')
   })
 })
 
