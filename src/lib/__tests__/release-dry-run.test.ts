@@ -95,7 +95,7 @@ describe('release.yml, the dry run inputs', () => {
 
 describe('release.yml, which jobs a full dry run starts', () => {
   it('skips the gate', () => {
-    expect(jobIf('gate')).toBe('${{ !inputs.mac_dry_run && !inputs.dry_run }}')
+    expect(jobIf('gate')).toBe('${{ !inputs.mac_dry_run && !inputs.dry_run && !inputs.mac_only }}')
   })
 
   it('builds past the skipped gate, and a release still only after a green one', () => {

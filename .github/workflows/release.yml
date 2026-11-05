@@ -30,6 +30,11 @@ on:
         type: boolean
         required: false
         default: false
+      mac_only:
+        description: 'Mac only, for a release that already has its Windows and Linux files: build, sign, notarize and attach the Mac app to the release of the tag above, and add darwin-aarch64 to its latest.json. The gate, Windows and Linux are not run again and their files are not touched. The Mac lane has to be switched on for releases.'
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: write
@@ -179,7 +184,7 @@ jobs:
     # Skipped in either dry run. In a Mac dry run build-tauri is skipped with
     # it; in a full dry run build-tauri goes ahead without it (see there).
     # `inputs` is empty on the `release` trigger, so this is true there.
-    if: ${{ !inputs.mac_dry_run && !inputs.dry_run }}
+    if: ${{ !inputs.mac_dry_run && !inputs.dry_run && !inputs.mac_only }}
     uses: ./.github/workflows/ci.yml
     with:
       ref: ${{ github.event.release.tag_name || github.event.inputs.tag }}
@@ -1238,7 +1243,11 @@ jobs:
   # scripts/macos-release-signing.sh that need no private key.
   build-tauri-macos:
     needs: build-tauri
-    if: ${{ !cancelled() && (inputs.mac_dry_run || (inputs.dry_run && inputs.dry_run_mac) || (!inputs.dry_run && vars.LU_MAC_RELEASE == '1' && needs.build-tauri.result == 'success')) }}
+    # mac_only is the fourth way in: a release whose Windows and Linux files
+    # are attached and checked already (the step after the secret check
+    # proves that), and whose Mac half failed. build-tauri is skipped then,
+    # not green, because the gate is not run again for a tag it passed.
+    if: ${{ !cancelled() && (inputs.mac_dry_run || (inputs.dry_run && inputs.dry_run_mac) || (!inputs.dry_run && vars.LU_MAC_RELEASE == '1' && (needs.build-tauri.result == 'success' || (inputs.mac_only && needs.build-tauri.result == 'skipped')))) }}
     # macos-15 is an Apple Silicon image (arm64). macos-14 is deprecated and
     # macos-latest moves; a pinned label keeps the toolchain a decision.
     runs-on: macos-15
@@ -1247,6 +1256,8 @@ jobs:
       # Dry run or release, for every step of this job (see "DRY RUN" above).
       # `inputs` is empty on the `release` trigger, which makes this 'false'.
       MAC_DRY_RUN: ${{ (inputs.mac_dry_run || (inputs.dry_run && inputs.dry_run_mac)) && 'true' || 'false' }}
+      # 'true' only for a Mac-only run on an existing release (input mac_only).
+      MAC_ONLY: ${{ inputs.mac_only && 'true' || 'false' }}
       # The oldest macOS LU supports (VOICE.md, bundle.macOS
       # .minimumSystemVersion in tauri.macos.conf.json). Without it cmake
       # stamps the llama-server sidecar with the RUNNER's OS version as its
@@ -1332,6 +1343,38 @@ jobs:
           else
             echo "OK: the six Apple secrets and the updater key are set, the runner is arm64."
           fi
+
+      # A Mac-only run adds to a release, it does not make one. The release
+      # has to exist, be published, and carry the Windows and Linux files and
+      # a latest.json of its own version, or there is nothing to add to: the
+      # gate that would otherwise judge the tag is not run in this mode. Read
+      # through the public API, without a token (no step before the upload
+      # holds one).
+      - name: "Mac only: the release is there, with its Windows and Linux files"
+        if: ${{ env.MAC_ONLY == 'true' && env.MAC_DRY_RUN != 'true' }}
+        shell: bash
+        timeout-minutes: 5
+        run: |
+          set -euo pipefail
+          rel="$RUNNER_TEMP/release.json"
+          curl -fsSL --retry 3 "https://api.github.com/repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" -o "$rel" \
+            || { echo "::error::no published release for $RELEASE_TAG; mac_only adds to an existing release" >&2; exit 1; }
+          node - "$rel" "$RELEASE_TAG" <<'JS'
+          const fs = require('fs')
+          const [file, tag] = process.argv.slice(2)
+          const rel = JSON.parse(fs.readFileSync(file, 'utf8'))
+          const names = (rel.assets || []).map((a) => a.name)
+          const fail = (m) => { console.error('::error::' + m); process.exit(1) }
+          if (rel.draft) fail(tag + ' is a draft')
+          for (const [what, re] of [['the Windows installer', /_x64-setup\.exe$/], ['the AppImage', /_amd64\.AppImage$/], ['latest.json', /^latest\.json$/]]) {
+            if (!names.some((n) => re.test(n))) fail(tag + ' has no ' + what + '; run the whole release, not mac_only')
+          }
+          if (names.some((n) => /_aarch64\.dmg$/.test(n))) console.log('::warning::' + tag + ' already has a disk image; this run replaces the Mac files')
+          console.log('OK: ' + tag + ' is published with ' + names.length + ' files; the Mac app is added to it.')
+          JS
+          json="$RUNNER_TEMP/latest.json"
+          curl -fsSL --retry 3 "https://github.com/$GITHUB_REPOSITORY/releases/download/$RELEASE_TAG/latest.json" -o "$json"
+          node -e 'const d=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));const want=process.argv[2].replace(/^v/,"");if(d.version!==want){console.error("::error::latest.json of "+process.argv[2]+" says version "+d.version);process.exit(1)}console.log("OK: latest.json is version "+d.version+" with "+Object.keys(d.platforms||{}).join(", "))' "$json" "$RELEASE_TAG"
 
       - name: Checkout repository
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
@@ -1941,7 +1984,7 @@ jobs:
   # the files (--clobber).
   sbom-and-checksums:
     needs: [build-tauri, build-tauri-macos]
-    if: ${{ always() && !inputs.mac_dry_run && !inputs.dry_run && needs.build-tauri.result == 'success' }}
+    if: ${{ always() && !inputs.mac_dry_run && !inputs.dry_run && (needs.build-tauri.result == 'success' || (inputs.mac_only && needs.build-tauri-macos.result == 'success')) }}
     runs-on: ubuntu-22.04
     timeout-minutes: 30
     env:
