@@ -211,6 +211,7 @@ Locally Uncensored is a free, open-source (AGPL-3.0) local AI studio for the des
 - How to Run DeepSeek V4 Pro: https://locallyuncensored.com/blog/how-to-run-deepseek-v4-pro.html
 - DeepSeek V4 Flash vs V4 Pro: https://locallyuncensored.com/blog/deepseek-v4-flash-vs-v4-pro.html
 - Abliterated Models Guide: https://locallyuncensored.com/blog/abliterated-models-guide.html
+- Remove Refusals, Measured (Qwen2.5 0.5B before and after: JailbreakBench refusals 39 to 3 of 50, harmless refusals 15 to 2 of 50, MMLU 409 to 410 of 1000, and why 200 questions showed a false loss): https://locallyuncensored.com/blog/remove-refusals-measured.html
 - Kimi K3 online (browser, desktop app and API key): https://locallyuncensored.com/blog/kimi-k3-online-guide.html
 - Kimi K3 vs DeepSeek V4 (price, thinking, vision, and which plan): https://locallyuncensored.com/blog/kimi-k3-vs-deepseek-v4.html
 - How to run Qwen 3.8 without a GPU (hosted Studio, API key, or the 27B at home): https://locallyuncensored.com/blog/run-qwen-3-8-without-gpu.html
