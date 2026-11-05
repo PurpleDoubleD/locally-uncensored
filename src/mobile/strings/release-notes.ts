@@ -57,6 +57,7 @@ export const MOBILE_RELEASE_NOTES: readonly MobileReleaseNote[] = [
     { text: 'Create on your computer has all its tools, its gallery under "On my computer", an area to paint for edits and your trained characters.', needs: 'remoteCreate' },
     'On Android the keyboard stays open in the Create prompt, so a prompt that is already there can be changed.',
     'A character training you stop is no longer reported as trained.',
+    'When the chat list comes back without its chats, the backup on this phone keeps the previous copy of those chats instead of replacing it.',
   ]),
   // 3.0.7 is the first version the phone app ships with (the desktop of 3.0.5 and 3.0.6 had no phone app).
   note('3.0.7', 'LU is on your phone.', [
