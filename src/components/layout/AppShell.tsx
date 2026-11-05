@@ -40,7 +40,7 @@ import { extractMemoriesFromPair } from '../../hooks/useMemory'
 import { detectLocalBackends, type DetectedBackend } from '../../lib/backend-detector'
 import { whenRunsIdle } from '../../lib/run-idle'
 import { backendCall, isTauri } from '../../api/backend'
-import { idbStorage, hasStoredItem } from '../../lib/idbStorage'
+import { idbStorage, hasReadableItem } from '../../lib/idbStorage'
 import { recoverChatsFromBackup } from '../../lib/chat-backup-recovery'
 import { STORE_KEYS, IDB_STORE_KEYS, backupStoresIfChanged, flushSyncStoreBackup } from '../../lib/store-backup'
 import { idbKeysToRestore, mayReloadForIdbRestore } from '../../lib/idb-restore'
@@ -65,6 +65,7 @@ import { RenderFixupModal } from '../create/experimental/RenderFixupModal'
 import { CommandPalette } from '../ui/CommandPalette'
 import { CreditsExhaustedModal } from './CreditsExhaustedModal'
 import { Titlebar } from './Titlebar'
+import { ChatRescueHint } from './ChatRescueHint'
 import { HfLinkInbox } from '../models/HfLinkInbox'
 import { useNeuronFollowsPersona } from '../../hooks/useNeuronFollowsPersona'
 import { NEURONS_ENABLED } from '../../lib/features'
@@ -420,14 +421,14 @@ export function AppShell() {
           try {
             const live: Record<string, string | null> = {}
             for (const key of IDB_STORE_KEYS) {
-              // Presence only. Only an absent store is restored, and reading
-              // the whole value here doubled the largest string at launch.
-              const present = await hasStoredItem(key)
-              live[key] = present === true
-                ? 'present'
-                : present === false
-                  ? null
-                  : await Promise.resolve(idbStorage.getItem(key)).catch(() => null)
+              // A value hydration can use, not just a row (3.0.10, perrt):
+              // a row that is no string, or a leftover localStorage copy,
+              // used to count as present while the store hydrated empty, and
+              // nothing was restored. A read that failed counts as present:
+              // what could not be read must never be written over.
+              const readable = await hasReadableItem(key)
+              live[key] = readable === false ? null : 'present'
+              if (readable === null) log.warn('[AppShell] could not read an IndexedDB store at launch, not restoring it', { key })
             }
             if (Object.values(live).some((v) => !v)) {
               const raw = await backendCall<string | null>('restore_stores')
@@ -440,7 +441,10 @@ export function AppShell() {
                 try {
                   await Promise.resolve(idbStorage.setItem(key, (parsed as Record<string, string>)[key]))
                   back++
-                } catch { /* one key failing must not stop the rest */ }
+                } catch (err) {
+                  // One key failing must not stop the rest.
+                  log.warn('[AppShell] restoring an IndexedDB store from the appData backup failed', { key, err: String(err) })
+                }
               }
               if (back > 0) {
                 log.warn('[AppShell] IndexedDB stores were empty, restored from the appData backup', { keys: wanted })
@@ -453,7 +457,12 @@ export function AppShell() {
                 }
               }
             }
-          } catch { /* best-effort, the RAG restore below still runs */ }
+          } catch (err) {
+            // Best effort, the RAG restore below still runs. Said out loud
+            // since 3.0.10: this branch failing silently is how a good backup
+            // sat unused while the chats looked gone.
+            log.warn('[AppShell] the IndexedDB restore at launch failed', { err: String(err) })
+          }
           // Chats a failed IndexedDB save never kept, see chat-backup-recovery.ts.
           // Before resolveRestoreDecided below: the first backup must not
           // replace store_backup.json before it has been looked at.
@@ -1185,6 +1194,8 @@ export function AppShell() {
             </button>
           </div>
         )}
+        {/* 3.0.10: the backup files hold chats the list does not (lib/chat-rescue.ts). */}
+        <ChatRescueHint />
         <StorageQuotaToast />
         <div className="flex-1 flex overflow-hidden gap-2 p-2">
           {!isComparing && <Sidebar />}

@@ -31,7 +31,7 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 pub(crate) const PREFIX: &str = "lu-attachment:v1:";
-const CHAT_KEY: &str = "chat-conversations";
+pub(crate) const CHAT_KEY: &str = "chat-conversations";
 
 pub(crate) fn attachment_dir() -> Result<PathBuf, String> {
     Ok(crate::commands::system::persistent_dir()?.join("chat-attachments"))
@@ -99,7 +99,7 @@ pub async fn read_chat_attachment(id: String) -> Result<String, String> {
 /// Replace every inline image in a list of conversations by a reference.
 /// An image whose file cannot be written keeps its inline data: slower, never
 /// lost. Returns how many images moved.
-fn externalize_conversations(conversations: &mut Value, dir: &Path) -> usize {
+pub(crate) fn externalize_conversations(conversations: &mut Value, dir: &Path) -> usize {
     let mut moved = 0;
     let Some(list) = conversations.as_array_mut() else { return 0 };
     for conversation in list {
@@ -150,6 +150,14 @@ pub(crate) fn externalize_store_backup(raw: &str, dir: &Path) -> Option<String> 
 /// hands the file back in the same shape.
 pub(crate) fn externalize_import(raw: &str, dir: &Path) -> Result<String, String> {
     let mut data: Value = serde_json::from_str(raw).map_err(|_| "That file is not valid JSON.".to_string())?;
+    // A store backup (store_backup*.json from the app data folder, perhaps
+    // copied back from a rescue folder, 3.0.10): its chats are a JSON string
+    // under chat-conversations. They are handed on as a plain list, the shape
+    // the import already reads, and the rest of the backup stays out of it.
+    if let Some(chat) = data.get(CHAT_KEY).and_then(Value::as_str) {
+        let inner: Value = serde_json::from_str(chat).map_err(|_| "The chats in that backup could not be read.".to_string())?;
+        data = inner.pointer("/state/conversations").filter(|v| v.is_array()).cloned().unwrap_or(Value::Array(Vec::new()));
+    }
     if data.is_array() {
         externalize_conversations(&mut data, dir);
     } else if let Some(list) = data.get_mut("conversations").filter(|v| v.is_array()) {
@@ -588,6 +596,19 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         assert!(externalize_store_backup("not json \\\"images\\\"", dir.path()).is_none());
         assert!(externalize_store_backup(r#"{"settings":"{}"}"#, dir.path()).is_none());
+    }
+
+    /// A store_backup*.json picked in "Import chats" comes out as the plain
+    /// list of its chats (3.0.10, Restore chats from backup).
+    #[test]
+    fn a_store_backup_imports_as_its_chat_list() {
+        let dir = tempfile::tempdir().unwrap();
+        let chat = serde_json::json!({ "state": { "conversations": [{ "id": "a", "title": "a", "messages": [] }] } });
+        let raw = serde_json::json!({ "__ts": "x", CHAT_KEY: chat.to_string(), "chat-settings": "{}" }).to_string();
+        let out: Value = serde_json::from_str(&externalize_import(&raw, dir.path()).unwrap()).unwrap();
+        assert_eq!(out, serde_json::json!([{ "id": "a", "title": "a", "messages": [] }]));
+        let garbled = serde_json::json!({ CHAT_KEY: "not json" }).to_string();
+        assert!(externalize_import(&garbled, dir.path()).is_err());
     }
 
     #[test]

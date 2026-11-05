@@ -900,6 +900,7 @@ pub fn run() {
             #[cfg(desktop)]
             commands::gallery_files::trash_comfy_output,
             commands::system::restore_stores,
+            commands::system::chat_backup_conversations,
             commands::system::backup_rag_chunks,
             commands::system::restore_rag_chunks,
             commands::system::exit_app,
