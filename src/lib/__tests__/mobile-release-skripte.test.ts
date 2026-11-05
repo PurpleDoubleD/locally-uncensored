@@ -898,13 +898,16 @@ describe.skipIf(!onMac)('die Skripte im Lauf (nur macOS, Trockenlauf und Attrapp
   })
 
   it('version-setzen.sh rechnet die Baunummer aus und schreibt im Trockenlauf nichts', () => {
-    const r = run('version-setzen.sh', ['3.0.7', '1', '--dry-run'])
+    // The version the phone files carry (3.0.10 since the APK on that
+    // release): a lower one is refused on purpose, a store only counts up.
+    const r = run('version-setzen.sh', ['3.0.10', '1', '--dry-run'])
     expect(r.status, r.out).toBe(0)
-    expect(r.out).toContain('version 3.0.7, build 1, code 30007001')
+    expect(r.out).toContain('version 3.0.10, build 1, code 30010001')
     expect(r.out).toContain('nothing was written')
-    expect(run('version-setzen.sh', ['3.0.7']).status).toBe(2)
-    expect(run('version-setzen.sh', ['3.0.7', '0', '--dry-run']).status).toBe(2)
-    expect(run('version-setzen.sh', ['3.0.7', '1000', '--dry-run']).status).toBe(2)
+    expect(run('version-setzen.sh', ['3.0.10']).status).toBe(2)
+    expect(run('version-setzen.sh', ['3.0.10', '0', '--dry-run']).status).toBe(2)
+    expect(run('version-setzen.sh', ['3.0.10', '1000', '--dry-run']).status).toBe(2)
+    expect(run('version-setzen.sh', ['3.0.7', '1', '--dry-run']).status).toBe(2)
   })
 })
 
