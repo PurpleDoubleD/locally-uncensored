@@ -262,7 +262,7 @@
   // uses LU Cloud in the browser until then. A computer sees nothing; closed
   // stays closed in this browser.
   var PHONE_KEY = "lu_phone_app_banner_closed";
-  var APK_URL = "https://github.com/PurpleDoubleD/locally-uncensored/releases/download/v3.0.7/LU-3.0.7-Android.apk";
+  var APK_URL = "https://github.com/PurpleDoubleD/locally-uncensored/releases/download/v3.0.10/LU-3.0.10-Android.apk";
   function phoneKind() {
     var ua = navigator.userAgent || "";
     if (/android/i.test(ua)) return "android";
@@ -286,7 +286,7 @@
     box.innerHTML = icon + (kind === "android"
       ? '<div class="lu-phone-app-text"><p class="lu-phone-app-title">LU on your phone</p>' +
         '<p class="lu-phone-app-note">iPhone in review, Play soon. <a href="/android/">Install help</a></p></div>' +
-        '<a class="lu-phone-app-cta" href="' + APK_URL + '" aria-label="Download the Android app (APK, about 27 MB)">Get APK</a>'
+        '<a class="lu-phone-app-cta" href="' + APK_URL + '" aria-label="Download the Android app (APK, about 31 MB)">Get APK</a>'
       : '<div class="lu-phone-app-text"><p class="lu-phone-app-title">LU for iPhone soon</p>' +
         '<p class="lu-phone-app-note">In App Store review. Try LU&nbsp;Cloud.</p></div>' +
         '<a class="lu-phone-app-cta" href="https://lu-labs.ai/app?src=luc-phone-banner">LU Cloud</a>');

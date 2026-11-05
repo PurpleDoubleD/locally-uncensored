@@ -37,10 +37,10 @@ Take the latest build from [Releases](https://github.com/PurpleDoubleD/locally-u
 
 | Platform | File | Status |
 |----------|------|--------|
-| Windows 10 and 11 | [`Locally.Uncensored_3.0.9_x64-setup.exe`](https://github.com/PurpleDoubleD/locally-uncensored/releases/latest/download/Locally.Uncensored_3.0.9_x64-setup.exe) (NSIS, recommended) or [`Locally.Uncensored_3.0.9_x64_en-US.msi`](https://github.com/PurpleDoubleD/locally-uncensored/releases/latest/download/Locally.Uncensored_3.0.9_x64_en-US.msi) | Tested every release, signed auto update channel |
-| Linux | [`Locally.Uncensored_3.0.9_amd64.AppImage`](https://github.com/PurpleDoubleD/locally-uncensored/releases/latest/download/Locally.Uncensored_3.0.9_amd64.AppImage), [`Locally.Uncensored_3.0.9_amd64.deb`](https://github.com/PurpleDoubleD/locally-uncensored/releases/latest/download/Locally.Uncensored_3.0.9_amd64.deb) or [`Locally.Uncensored-3.0.9-1.x86_64.rpm`](https://github.com/PurpleDoubleD/locally-uncensored/releases/latest/download/Locally.Uncensored-3.0.9-1.x86_64.rpm) | Built on every release |
-| macOS 14 or newer, Apple Silicon (Beta) | [`LU_3.0.9_aarch64.dmg`](https://github.com/PurpleDoubleD/locally-uncensored/releases/latest/download/LU_3.0.9_aarch64.dmg) | Signed with an Apple Developer ID and notarized by Apple. Intel Macs are not supported. The app has run on one Mac so far. Voice has been tried by hand in the app on a Mac and works. Computer control is in the Mac app but not fully tested yet on macOS. Remote Access and the automatic update are not confirmed on macOS |
-| Android 7.0 or newer (arm64) | [`LU-3.0.7-Android.apk`](https://github.com/PurpleDoubleD/locally-uncensored/releases/download/v3.0.7/LU-3.0.7-Android.apk) | The phone app. Not in the Play Store yet: install the file from this page. SHA-256 `2f4e2c60f2edde2705c31ca324b5ba952a84efa8eec3075f4f45f2a29a806fb6` |
+| Windows 10 and 11 | [`Locally.Uncensored_3.0.10_x64-setup.exe`](https://github.com/PurpleDoubleD/locally-uncensored/releases/latest/download/Locally.Uncensored_3.0.10_x64-setup.exe) (NSIS, recommended) or [`Locally.Uncensored_3.0.10_x64_en-US.msi`](https://github.com/PurpleDoubleD/locally-uncensored/releases/latest/download/Locally.Uncensored_3.0.10_x64_en-US.msi) | Tested every release, signed auto update channel |
+| Linux | [`Locally.Uncensored_3.0.10_amd64.AppImage`](https://github.com/PurpleDoubleD/locally-uncensored/releases/latest/download/Locally.Uncensored_3.0.10_amd64.AppImage), [`Locally.Uncensored_3.0.10_amd64.deb`](https://github.com/PurpleDoubleD/locally-uncensored/releases/latest/download/Locally.Uncensored_3.0.10_amd64.deb) or [`Locally.Uncensored-3.0.10-1.x86_64.rpm`](https://github.com/PurpleDoubleD/locally-uncensored/releases/latest/download/Locally.Uncensored-3.0.10-1.x86_64.rpm) | Built on every release |
+| macOS 14 or newer, Apple Silicon (Beta) | [`LU_3.0.10_aarch64.dmg`](https://github.com/PurpleDoubleD/locally-uncensored/releases/latest/download/LU_3.0.10_aarch64.dmg) | Signed with an Apple Developer ID and notarized by Apple. Intel Macs are not supported. The app has run on one Mac so far. Voice has been tried by hand in the app on a Mac and works. Computer control is in the Mac app but not fully tested yet on macOS. Remote Access and the automatic update are not confirmed on macOS |
+| Android 7.0 or newer (arm64) | [`LU-3.0.10-Android.apk`](https://github.com/PurpleDoubleD/locally-uncensored/releases/download/v3.0.10/LU-3.0.10-Android.apk) | The phone app. Not in the Play Store yet: install the file from this page. SHA-256 `dbd515d81bbc8ab70f21b850424f9f8b57ae88ae24962225beefc4116d139d2f` |
 
 <!-- MAC: the macOS row above is the one place in this file that says whether there is a Mac build. This is the Mac version of the row. It is true only for the .dmg that the release run built, signed and notarized, so it goes out after that run is green. -->
 
@@ -48,7 +48,9 @@ Some antivirus engines flag unsigned NSIS installers that download other binarie
 
 Code signing for the Windows installers: free code signing provided by [SignPath.io](https://about.signpath.io), certificate by [SignPath Foundation](https://signpath.org). SignPath Foundation has accepted the project. The production certificate is not in place yet, and until it is the installers ship unsigned.
 
-Current release: **v3.0.9** (November 2026). Every change since 1.0.0 is in [CHANGELOG.md](CHANGELOG.md).
+Current release: **v3.0.10** (November 2026). Every change since 1.0.0 is in [CHANGELOG.md](CHANGELOG.md).
+
+3.0.10 fixes lost chats from 3.0.8 and 3.0.9. A backup no longer replaces the only complete copy of your chats, a note at launch says when the backup holds chats that are missing from your list, and Settings, Chat Backup has Restore chats from backup. The Android app is back as an APK, with the keyboard staying open in the Create prompt.
 
 3.0.9 brings Liquid's LFM3 models for small machines: 1.7B and 2B, about 1 to 1.7 GB each, for text, pictures and speech, on the LU Engine, on Ollama or as MLX builds on a Mac; the LU Engine moves to llama.cpp b11960 for them. A group chat now sends every speaker the context you picked, can redo one speaker and lets you set who speaks when. A compaction is one quiet line in the chat, and the conversation before it stays one click away. Animate takes an end image and, with MiniMax H3, up to nine reference pictures, and Krea 2, Qwen-Image 2.1 and FLUX.2 take reference pictures for a style, a person or a pose. Local videos run up to 15 seconds without drifting in colour, and a video shows a rough preview while it renders. The trainer learns a style, a concept or a pose next to a character (Beta). "Use this model" on Hugging Face opens the download in LU, and a model from the search comes in a quant that fits your graphics card. A status menu sits in the Mac menu bar and the Windows and Linux tray, and the Linux AppImage starts again on systems without the tray library. What has only run in automated tests is listed under Known limits in the [release notes](https://github.com/PurpleDoubleD/locally-uncensored/releases/tag/v3.0.9).
 
@@ -74,9 +76,9 @@ Current release: **v3.0.9** (November 2026). Every change since 1.0.0 is in [CHA
 
 ## Mobile app (Android, iPhone)
 
-LU is also available as an app for your phone. The current APK comes from the 3.0.7 release.
+LU is also available as an app for your phone. The current APK comes from the 3.0.10 release.
 
-- **Android:** download `LU-3.0.7-Android.apk` from the [3.0.7 release](https://github.com/PurpleDoubleD/locally-uncensored/releases/tag/v3.0.7). Needs Android 7.0 or newer on a 64-bit (arm64) phone. Allow installing apps from your browser or file app when Android asks. SHA-256: `2f4e2c60f2edde2705c31ca324b5ba952a84efa8eec3075f4f45f2a29a806fb6`
+- **Android:** download `LU-3.0.10-Android.apk` from the [3.0.10 release](https://github.com/PurpleDoubleD/locally-uncensored/releases/tag/v3.0.10). Needs Android 7.0 or newer on a 64-bit (arm64) phone. Allow installing apps from your browser or file app when Android asks. SHA-256: `dbd515d81bbc8ab70f21b850424f9f8b57ae88ae24962225beefc4116d139d2f`
 - **iPhone:** in review at the App Store.
 - **Google Play:** coming later.
 
@@ -230,9 +232,14 @@ The macOS row of the [Download](#download) table says whether the current releas
 
 ## Roadmap
 
-Updated 5 November 2026. Everything up to 3.0.9 has shipped; [Releases](https://github.com/PurpleDoubleD/locally-uncensored/releases) has the history.
+Updated 5 November 2026. Everything up to 3.0.10 has shipped; [Releases](https://github.com/PurpleDoubleD/locally-uncensored/releases) has the history.
 
-**Just out: 3.0.9**
+**Just out: 3.0.10**
+
+- Lost chats from 3.0.8 and 3.0.9: a note at launch when the backup still holds them, and Restore chats from backup in Settings
+- The Android app as an APK again, with the keyboard staying open in the Create prompt
+
+**3.0.9**
 
 - Liquid LFM3 for small machines: text, pictures and speech, with llama.cpp b11960 in the LU Engine
 - Group chat with the full context you picked, one speaker redone at a time, and a speaking order
