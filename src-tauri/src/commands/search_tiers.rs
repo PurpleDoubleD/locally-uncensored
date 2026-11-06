@@ -63,6 +63,7 @@ pub(crate) struct Endpoints {
     pub wikipedia: String,
     pub brave: String,
     pub tavily: String,
+    pub keenable: String,
 }
 
 impl Default for Endpoints {
@@ -77,6 +78,7 @@ impl Default for Endpoints {
             wikipedia: "https://{lang}.wikipedia.org/w/api.php".into(),
             brave: "https://api.search.brave.com/res/v1/web/search".into(),
             tavily: "https://api.tavily.com/search".into(),
+            keenable: "https://api.keenable.ai/v1/search/public".into(),
         }
     }
 }
@@ -116,6 +118,7 @@ pub(crate) enum Tier {
     Tavily,
     Exa,
     You,
+    Keenable,
     Searxng,
     DuckDuckGo,
     Wikipedia,
@@ -128,6 +131,7 @@ impl Tier {
             Tier::Tavily => "tavily",
             Tier::Exa => "exa",
             Tier::You => "you",
+            Tier::Keenable => "keenable",
             Tier::Searxng => "searxng",
             Tier::DuckDuckGo => "duckduckgo",
             Tier::Wikipedia => "wikipedia",
@@ -140,6 +144,7 @@ impl Tier {
             "tavily" => Tier::Tavily,
             "exa" => Tier::Exa,
             "you" | "youcom" | "you.com" => Tier::You,
+            "keenable" => Tier::Keenable,
             "searxng" => Tier::Searxng,
             "duckduckgo" | "ddg" => Tier::DuckDuckGo,
             "wikipedia" => Tier::Wikipedia,
@@ -153,6 +158,7 @@ impl Tier {
             Tier::Tavily => "Tavily",
             Tier::Exa => "Exa",
             Tier::You => "You.com",
+            Tier::Keenable => "Keenable",
             Tier::Searxng => "SearXNG",
             Tier::DuckDuckGo => "DuckDuckGo",
             Tier::Wikipedia => "Wikipedia",
@@ -289,6 +295,7 @@ async fn ask(tier: Tier, req: &Request<'_>, count: usize, ends: &Endpoints, timi
                 exa_rest(req.query, count, key, &ends.exa_rest_search, within(timing.hosted)).await
             }
         }
+        Tier::Keenable => keenable(req.query, count, &ends.keenable, within(timing.hosted)).await,
         Tier::You => you_hosted(req.query, count, &ends.you_mcp, within(timing.hosted)).await,
         Tier::Searxng => searxng(req.query, count, &ends.searxng, within(timing.searxng)).await,
         Tier::DuckDuckGo => {
@@ -713,6 +720,27 @@ async fn tavily(query: &str, count: usize, key: &str, endpoint: &str, timeout: D
     };
     match serde_json::from_str::<Value>(&text) {
         Ok(v) => hits_or_empty(super::search::parse_tavily_results(&v, count), count),
+        Err(e) => Outcome::Failed(format!("invalid JSON: {e}")),
+    }
+}
+
+/// Keenable over its keyless public endpoint. Only asked when chosen in
+/// Settings; Auto is unchanged.
+async fn keenable(query: &str, count: usize, endpoint: &str, timeout: Duration) -> Outcome {
+    let client = match client(timeout, &APP_USER_AGENT) {
+        Ok(c) => c,
+        Err(e) => return Outcome::Failed(e),
+    };
+    let req = client
+        .post(endpoint)
+        .header("X-Keenable-Title", "Locally Uncensored")
+        .json(&json!({ "query": query, "max_results": count.min(20) }));
+    let text = match read_ok(req).await {
+        Ok(t) => t,
+        Err(e) => return Outcome::Failed(e),
+    };
+    match serde_json::from_str::<Value>(&text) {
+        Ok(v) => hits_or_empty(super::search::parse_keenable_results(&v, count), count),
         Err(e) => Outcome::Failed(format!("invalid JSON: {e}")),
     }
 }

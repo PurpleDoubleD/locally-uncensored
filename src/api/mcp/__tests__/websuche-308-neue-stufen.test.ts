@@ -154,14 +154,14 @@ describe('keine Grenze fuer die Zahl der Suchen', () => {
 describe('Settings, Search Provider', () => {
   it('jede Stufe ist waehlbar, kurz benannt, und Rust kennt jede', () => {
     const ids = SEARCH_PROVIDERS.map((p) => p.id)
-    const all: SearchProvider[] = ['auto', 'exa', 'you', 'searxng', 'duckduckgo', 'wikipedia', 'brave', 'tavily']
+    const all: SearchProvider[] = ['auto', 'exa', 'you', 'searxng', 'duckduckgo', 'wikipedia', 'keenable', 'brave', 'tavily']
     expect(ids).toEqual(all)
     for (const p of SEARCH_PROVIDERS) {
       expect(p.label.length, p.label).toBeLessThanOrEqual(10)
       expect(p.hint).not.toMatch(/\u2014|\u2013/)
       if (p.id !== 'auto') expect(rustTiers).toContain(`=> "${p.id}",`)
     }
-    expect(SEARCH_PROVIDERS.map((p) => p.label)).toEqual(['Auto', 'Exa', 'You.com', 'SearXNG', 'DuckDuckGo', 'Wikipedia', 'Brave', 'Tavily'])
+    expect(SEARCH_PROVIDERS.map((p) => p.label)).toEqual(['Auto', 'Exa', 'You.com', 'SearXNG', 'DuckDuckGo', 'Wikipedia', 'Keenable', 'Brave', 'Tavily'])
   })
 
   it('Auto nennt die Reihenfolge, in der Rust fragt', () => {
