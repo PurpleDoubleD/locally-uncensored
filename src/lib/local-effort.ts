@@ -134,3 +134,47 @@ export function applyLocalEffort(body: EffortBody, server: LocalEffortServer, ow
       return
   }
 }
+
+/**
+ * 3.0.11: the rungs this model's chat template really renders.
+ *
+ * llama.cpp b11960 (the LU Engine pin since 3.0.9) tries every rung on the
+ * template once at load time and reports the ones that render distinctly in
+ * /props, `chat_template_caps.reasoning_effort_levels`, lowest first
+ * (common/jinja/caps.cpp, tools/server/README.md). A template that raises on
+ * a rung leaves it out; rungs that render the same are aliases and only the
+ * highest name is listed. Undefined when the server reports no such list
+ * (an older llama.cpp, LM Studio, KoboldCpp) or the template has no rungs.
+ */
+export function templateEffortLevels(props: unknown): string[] | undefined {
+  const levels = asStringArray(prop(prop(props, 'chat_template_caps'), 'reasoning_effort_levels'))
+  return levels.length > 0 ? levels : undefined
+}
+
+/** The order llama.cpp tries the rungs in (common/jinja/caps.cpp, b11960). */
+const TEMPLATE_RUNG_ORDER: readonly string[] = ['minimal', 'low', 'medium', 'high', 'xhigh', 'max']
+
+/**
+ * A rung, fitted onto the rungs the template renders (bug report 3.0.10:
+ * a Qwen3.8 27B template knows only low, medium and xhigh and raises
+ * "Unexpected reasoning effort high", so every message died).
+ *
+ *  - Listed: unchanged.
+ *  - Not listed: the next listed rung ABOVE it. Aliases are listed under
+ *    their highest name, so a rung that is an alias is always found above
+ *    itself, and for a template that raised on it the next one up is the
+ *    nearest rung the template has. 'minimal' is never a target, it is a
+ *    way of saying off (lib/effort.ts).
+ *  - Nothing above it, or a word llama.cpp does not try: undefined, the
+ *    caller drops the field and the template keeps its own default. A
+ *    template that falls back silently lists its default nowhere, because
+ *    it renders like an unknown word, so dropping is what that rung meant.
+ *
+ * No list at all: unchanged, which is the request from before this fix.
+ */
+export function fitRungToTemplate(rung: string, levels: readonly string[] | undefined): string | undefined {
+  if (!levels || levels.length === 0 || levels.includes(rung)) return rung
+  const at = TEMPLATE_RUNG_ORDER.indexOf(rung)
+  if (at < 0) return undefined
+  return TEMPLATE_RUNG_ORDER.slice(at + 1).find((r) => r !== 'minimal' && levels.includes(r))
+}
