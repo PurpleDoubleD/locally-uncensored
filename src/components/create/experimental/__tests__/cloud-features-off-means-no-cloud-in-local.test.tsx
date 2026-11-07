@@ -64,9 +64,13 @@ describe('the rule', () => {
 })
 
 describe('the bar', () => {
-  it('on: Erase carries the cloud tag and opens the Cloud sheet, Enhance is a local tab', () => {
+  it('on: Erase and Swap carry the cloud tag and open the Cloud sheet, Enhance is a local tab', () => {
     render(<IntentBar />)
-    expect(cloudTagged().map((b) => b.textContent)).toEqual(['Erase'])
+    // Swap Character (07.11.2026) has no local lane either: a cloud pill.
+    expect(cloudTagged().map((b) => b.textContent)).toEqual(['Erase', 'Swap'])
+    fireEvent.click(screen.getByRole('radio', { name: /Swap Character/ }))
+    expect(useUIStore.getState().cloudTeaser).toEqual({ surface: 'intent', intent: 'swap_character' })
+    useUIStore.setState({ cloudTeaser: null })
     fireEvent.click(screen.getByRole('radio', { name: /Erase Object/ }))
     expect(useUIStore.getState().cloudTeaser).toEqual({ surface: 'intent', intent: 'eraser' })
     useUIStore.setState({ cloudTeaser: null })

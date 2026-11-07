@@ -12,7 +12,7 @@ import { AnimatePresence, motion } from 'framer-motion'
 import {
   AudioLines, Download, Film, ImagePlus, Info, Loader2, Mic, Music2, Trash2, Upload, Wand2, X,
 } from 'lucide-react'
-import { useCreateStore, type CreateIntent, type GalleryItem } from '../../../stores/createStore'
+import { useCreateStore, type CreateIntent, type GalleryItem, type SwapFigure } from '../../../stores/createStore'
 import { useCloudCatalogStore, cloudModelById, lengthCredits, lengthPrice, modelForOp } from '../../../stores/cloudCatalogStore'
 import { listLoras, deleteLora, downloadLora, type CloudLora, type LoraDownloadProgress } from '../../../api/cloud/loras'
 import { errorText } from '../../../types/json-guards'
@@ -35,6 +35,14 @@ import { isWindows, isMacOS } from '../../../api/backend'
 import { LOCAL_MUSIC_TEXT, SECONDS_LENGTH, musicHowtoLines, musicLength, musicText } from '../../../lib/render/music-ui'
 import { MAC_MUSIC_MIN_SECONDS } from '../../../lib/mac-music'
 import { createRunModel, studioShownValue } from '../../../lib/render/create-studio'
+import { STUDIO_MODELS, studioFields } from '../../../lib/render/studio-contract'
+import { modelLabel } from '../../../lib/render/preset-models'
+import {
+  SWAP_CONSENT_TEXT, SWAP_LONG_MODEL, SWAP_MAIN_MODEL, SWAP_TIPS, swapAutoModel, swapBilledPhotos, swapClipLimits,
+  swapMaxPeople, swapNeedsConsent, swapReadsRoles,
+} from '../../../lib/render/swap'
+import { mediaSeconds } from './useStudioPrice'
+import { ClipLength } from './ClipLength'
 import { galleryLabelShort } from '../../../lib/render/gallery-label'
 import { TRAIN_VRAM_PRESETS, LOW_VRAM_NOTE, trainStepsNote, trainVramSuggestion, type TrainVramPreset } from '../../../lib/trainer-presets'
 import { STYLE_MODE_NOTE, STYLE_NAME_PLACEHOLDER, STYLE_TRIGGER_HINT_OFF, STYLE_TRIGGER_HINT_ON, STYLE_TRIGGER_LABEL, TRAIN_KINDS, trainPresetsFor, type TrainKind } from '../../../lib/train-kind'
@@ -69,6 +77,7 @@ export function SpecialControls({ intent }: { intent: CreateIntent }) {
     case 'music': return <MusicControls />
     case 'extend': return <ExtendControls />
     case 'motion': return <MotionControls />
+    case 'swap_character': return <SwapControls />
     default: return null
   }
 }
@@ -1725,6 +1734,199 @@ function MotionControls() {
       <PortraitChip empty="Add character image" />
       <DrivingVideoChip empty="Add driving video (dance/pose)" />
     </div>
+  )
+}
+
+// ── Swap Character (07.11.2026, port of the web's C52) ─────────────────────
+//
+// The order of the web panel: the notes first (what the models cannot do, so
+// it is not learned from a failed run), the video and the resolution, the
+// people (photo and role each, up to four), the length with its price, and
+// the consent box for the models that need it. Create and its price stand in
+// the Composer's action bar below.
+
+export function SwapControls() {
+  const videoInput = useCreateStore((s) => s.videoInput)
+  const figures = useCreateStore((s) => s.swapFigures)
+  const setFigures = useCreateStore((s) => s.setSwapFigures)
+  const swapSeconds = useCreateStore((s) => s.swapSeconds)
+  const setSwapSeconds = useCreateStore((s) => s.setSwapSeconds)
+  const consent = useCreateStore((s) => s.swapConsent)
+  const setConsent = useCreateStore((s) => s.setSwapConsent)
+  const options = useCreateStore((s) => s.cloudStudioOptions)
+  const setOptions = useCreateStore((s) => s.setCloudStudioOptions)
+  const opModel = useCreateStore((s) => s.cloudOpModel)
+  const setOpModel = useCreateStore((s) => s.setCloudOpModel)
+  const isGenerating = useCreateStore((s) => s.isGenerating)
+  const model = createRunModel('swap_character', { image: '', video: '', op: opModel })
+  // The length of the customer's video, measured in the app (as the price).
+  const [measured, setMeasured] = useState<{ url: string; seconds: number | undefined } | null>(null)
+  useEffect(() => {
+    let alive = true
+    if (!videoInput) return
+    void mediaSeconds(videoInput.url, 'video').then((v) => { if (alive) setMeasured({ url: videoInput.url, seconds: v }) })
+    return () => { alive = false }
+  }, [videoInput])
+  const videoSeconds = measured && videoInput && measured.url === videoInput.url ? measured.seconds : undefined
+
+  // The model follows the length and the number of people: up to 15 s the
+  // main model, longer Wan 2.2 Animate (one person). Only between these two;
+  // SCAIL 2 picked by hand stays. It switches when the limit is crossed, not
+  // on every move of the slider, and a sentence below says so.
+  const auto = model === SWAP_MAIN_MODEL || model === SWAP_LONG_MODEL
+  const wanted = videoSeconds !== undefined ? Math.min(videoSeconds, swapSeconds ?? Infinity) : swapSeconds ?? undefined
+  const target = swapAutoModel(wanted, figures.length)
+  const known = !!STUDIO_MODELS[model]
+  useEffect(() => {
+    if (auto && known && target !== model) setOpModel(target)
+  }, [auto, known, target, model, setOpModel])
+  const span = auto
+    ? { min: swapClipLimits(SWAP_MAIN_MODEL).min, max: figures.length > 1 ? swapClipLimits(SWAP_MAIN_MODEL).max : swapClipLimits(SWAP_LONG_MODEL).max }
+    : undefined
+
+  if (!known) {
+    // The server's catalogue does not list the swap models yet.
+    return (
+      <p className="t-body text-gray-500 text-center" data-swap-unavailable>
+        Swap Character is not available on this LU Cloud yet.
+      </p>
+    )
+  }
+
+  const maxPeople = swapMaxPeople(model)
+  const roles = swapReadsRoles(model)
+  const resolutions = (studioFields(model).resolution?.enum ?? []) as string[]
+  const resolution = String(studioShownValue(model, options, 'resolution') ?? '')
+  const setFigure = (i: number, patch: Partial<SwapFigure>) => setFigures(figures.map((f, j) => (j === i ? { ...f, ...patch } : f)))
+
+  return (
+    <div className="flex flex-col items-center gap-2.5" data-swap-controls>
+      <p className="flex w-full items-start gap-1.5 t-control text-gray-500" data-swap-tips>
+        <Info size={12} className="mt-[2px] shrink-0" />
+        <span>{SWAP_TIPS.join(' ')}</span>
+      </p>
+      <div className="flex w-full items-center justify-between gap-2 flex-wrap">
+        <DrivingVideoChip empty="Add original video" />
+        {resolutions.length > 1 && (
+          <Segmented
+            size="sm"
+            layoutId="swap-resolution"
+            ariaLabel="Resolution"
+            value={resolution}
+            onChange={(v) => setOptions({ ...options, resolution: v })}
+            options={resolutions.map((r) => ({ value: r, label: r }))}
+          />
+        )}
+      </div>
+
+      <div className="w-full space-y-1" data-swap-figures={figures.length}>
+        {figures.map((f, i) => (
+          <div key={i} className="flex items-center gap-2" data-swap-figure={i + 1}>
+            <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-lu-accent/15 t-micro font-semibold text-lu-accent">{i + 1}</span>
+            <FigurePhoto image={f.image} index={i} onImage={(image) => setFigure(i, { image })} />
+            {roles ? (
+              <input
+                type="text"
+                value={f.role}
+                maxLength={200}
+                disabled={isGenerating}
+                aria-label={`Who person ${i + 1} replaces`}
+                placeholder={figures.length > 1 ? 'Who? e.g. the woman in black on the left' : 'Optional: who to replace (default: the most prominent person)'}
+                onChange={(e) => setFigure(i, { role: e.target.value })}
+                className="t-control h-[var(--control-h-sm)] min-w-0 flex-1 rounded-md border border-white/[0.08] bg-white/[0.03] px-2 text-gray-200 placeholder:text-gray-500"
+              />
+            ) : (
+              <span className="t-body flex-1 text-gray-500">{i === 0 ? 'Replaces the main person' : ''}</span>
+            )}
+            {figures.length > 1 && (
+              <button
+                type="button"
+                aria-label={`Remove person ${i + 1}`}
+                disabled={isGenerating}
+                onClick={() => setFigures(figures.filter((_, j) => j !== i))}
+                className="rounded p-1 text-gray-500 hover:text-gray-200"
+              >
+                <X size={13} />
+              </button>
+            )}
+          </div>
+        ))}
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            disabled={figures.length >= 4 || isGenerating}
+            onClick={() => {
+              // Several people only the main model can do. The switch is
+              // said in the sentence below, it does not happen silently.
+              if (maxPeople < 2) setOpModel(SWAP_MAIN_MODEL)
+              setFigures([...figures, { image: null, role: '' }])
+            }}
+            className="t-control h-[var(--control-h-sm)] rounded-md px-2 text-gray-400 hover:text-gray-200 disabled:opacity-40"
+          >
+            + Add person ({figures.length}/4)
+          </button>
+          {figures.length > 1 && maxPeople < figures.length && (
+            <span className="t-body text-gray-500 dark:text-gray-400" data-swap-note="one-person-model">
+              {modelLabel(model)} replaces one person.
+            </span>
+          )}
+        </div>
+      </div>
+
+      <ClipLength
+        model={model}
+        options={options}
+        videoSeconds={videoSeconds}
+        chosen={swapSeconds}
+        onChange={setSwapSeconds}
+        photos={swapBilledPhotos(model, figures.length)}
+        span={span}
+        disabled={isGenerating}
+      />
+      {auto && model === SWAP_LONG_MODEL && (
+        <p className="w-full t-body text-gray-500" data-swap-note="long-model">
+          Longer than 15 s: {modelLabel(SWAP_LONG_MODEL)} runs the whole clip (one person, up to 120 s). Set 15 s or less for {modelLabel(SWAP_MAIN_MODEL)}.
+        </p>
+      )}
+      {swapNeedsConsent(model) && (
+        <label className="flex w-full items-start gap-2 t-control text-gray-300 cursor-pointer" data-swap-consent>
+          <input
+            type="checkbox"
+            checked={consent}
+            disabled={isGenerating}
+            onChange={(e) => setConsent(e.target.checked)}
+            className="mt-[3px] shrink-0 accent-[var(--color-lu-accent)]"
+          />
+          <span>{SWAP_CONSENT_TEXT}</span>
+        </label>
+      )}
+    </div>
+  )
+}
+
+/** The photo of one person: a small field to click, with a preview. */
+function FigurePhoto({ image, index, onImage }: { image: SwapFigure['image']; index: number; onImage: (image: SwapFigure['image']) => void }) {
+  const ref = useRef<HTMLInputElement>(null)
+  return (
+    <button
+      type="button"
+      aria-label={image ? `Change photo of person ${index + 1}` : `Add photo of person ${index + 1}`}
+      onClick={() => ref.current?.click()}
+      className={cn(
+        'relative grid h-9 w-7 shrink-0 place-items-center overflow-hidden rounded-md border',
+        image ? 'border-white/10' : 'border-dashed border-white/20 text-gray-500 hover:text-gray-300',
+      )}
+    >
+      {image ? <img src={image.url} alt={`New person ${index + 1}`} className="h-full w-full object-cover" /> : <ImagePlus size={14} />}
+      <input
+        ref={ref}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        data-swap-photo-input={index + 1}
+        onChange={(e) => { const f = e.target.files?.[0]; if (f) void loadImageRef(f).then(onImage); e.target.value = '' }}
+      />
+    </button>
   )
 }
 

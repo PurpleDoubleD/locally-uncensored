@@ -13,7 +13,7 @@ import type { TrainKind } from '../../../lib/train-kind'
 /** Captions that name the inputs a lane is waiting for. These go stale the
  *  moment the chips are filled, so they hide once the lane reports ready. */
 const INPUT_HINT_INTENTS: ReadonlySet<CreateIntent> =
-  new Set(['character', 'lipsync', 'motion'] as CreateIntent[])
+  new Set(['character', 'lipsync', 'motion', 'swap_character'] as CreateIntent[])
 
 /**
  * Does the caption name inputs the lane waits for? Such a caption stands
@@ -58,6 +58,8 @@ export function noPromptHint(id: CreateIntent, backend: CreateBackend = 'local',
       return backend === 'local'
         ? 'Add a character image and a driving dance/pose video above, then hit Create. The prompt is optional.'
         : 'No prompt needed. Add a character image and a driving dance/pose video above, then hit Create.'
+    case 'swap_character':
+      return 'No prompt needed. Add the video and a photo of each new person above, then hit Create.'
     default:
       return 'No prompt needed. Just hit Create to remove the background.'
   }

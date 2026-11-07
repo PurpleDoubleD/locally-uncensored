@@ -6,6 +6,7 @@ import { useModelStore } from '../../../stores/modelStore'
 import { createRunModel } from '../../../lib/render/create-studio'
 import { musicText } from '../../../lib/render/music-ui'
 import { useCreateExp } from './CreateContext'
+import { SwapStage } from './SwapStage'
 import { INTENT_MAP } from './intents'
 import { editNeedsMask, defaultCloudModel, modelForOp } from '../../../stores/cloudCatalogStore'
 import { stageShowsSetupCard, laneModelCount } from './stageGate'
@@ -196,6 +197,9 @@ export function Stage({ displayed, onOpenMaskEditor, onEditResult, onAnimateResu
     body = <SourcePreview onOpenMaskEditor={onOpenMaskEditor} />
     howtoAtFoot = true
     howtoOnlyWide = true
+  } else if (intent === 'swap_character' && !(displayed && displayed.intent === 'swap_character')) {
+    // Swap Character: original + new people -> result, until a swap is there.
+    body = <SwapStage />
   } else if (displayed) {
     body = (
       <ResultView

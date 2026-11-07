@@ -4,15 +4,23 @@ import { resolve } from 'node:path'
 import { HOWTO, HOWTO_GUIDE_BASE, HOWTO_VIDEO_BASE, howtoGuideUrl, howtoLineAt, howtoVideoUrl, stageHowtoTopic } from '../howto'
 import { INTENTS } from '../../components/create/experimental/intents'
 
+// Swap Character (07.11.2026) has no film yet: it is recorded once the tab is
+// live on the cloud. Until then the tab names none (stageHowtoTopic below
+// finds no topic, and its Stage shows no how-to line), instead of a link to
+// a film that is not there.
+const NO_FILM_YET = new Set(['swap_character'])
+const FILMED = INTENTS.filter((i) => !NO_FILM_YET.has(i.id))
+
 describe('how it works', () => {
   it('has a film for every Create tab, for Code and for Agent', () => {
-    for (const intent of INTENTS) expect(HOWTO[intent.id], intent.id).toBeTruthy()
+    for (const intent of FILMED) expect(HOWTO[intent.id], intent.id).toBeTruthy()
+    for (const id of NO_FILM_YET) expect(stageHowtoTopic(id, 'cloud'), id).toBeNull()
     expect(HOWTO.code.films.map((f) => f.label)).toEqual(['Modes', 'Slash commands'])
     expect(HOWTO.agent).toBeTruthy()
   })
 
   it('names each Create film after the tab it stands on', () => {
-    for (const intent of INTENTS) expect(HOWTO[intent.id].title).toBe(`How ${intent.short} works`)
+    for (const intent of FILMED) expect(HOWTO[intent.id].title).toBe(`How ${intent.short} works`)
   })
 
   it('keeps the lines of every film in the order they are shown', () => {

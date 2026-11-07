@@ -24,7 +24,7 @@
 // behaupten, die die Testumgebung ohne Netz gar nicht hat.
 import { beforeEach, describe, expect, it } from 'vitest'
 import {
-  ALL_ROLES, classicCredits, presetModels, requiredRoleInputs, roleForModel,
+  ALL_ROLES, SWAP_ROLES, classicCredits, presetModels, requiredRoleInputs, roleForModel,
   roleHasChoice, roleInputs,
 } from '../preset-models'
 import { CREATE_PRESETS } from '../create-presets'
@@ -135,7 +135,11 @@ describe('jedes waehlbare Modell faehrt seinen Schritt', () => {
 
   it('jedes Studio-Modell gehoert zu genau einer Rolle', () => {
     for (const id of Object.keys(STUDIO_MODELS)) {
-      const roles = ALL_ROLES.filter((r) => presetModels(r).some((m) => m.id === id))
+      // Swap Character uses SCAIL 2 of Motion on purpose (SWAP_ROLES, as on
+      // the web). The rule holds for every other role; a model that is only
+      // in a swap role belongs to that one.
+      const others = ALL_ROLES.filter((r) => !SWAP_ROLES.includes(r) && presetModels(r).some((m) => m.id === id))
+      const roles = others.length ? others : ALL_ROLES.filter((r) => presetModels(r).some((m) => m.id === id))
       expect(roles, id).toHaveLength(1)
       expect(roleForModel(id), id).toBe(roles[0])
     }

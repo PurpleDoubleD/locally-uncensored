@@ -1,6 +1,6 @@
 import {
   Image as ImageIcon, Wand2, Scissors, Video, Film, Maximize2, Eraser,
-  UserRound, Mic, Music, FastForward, PersonStanding,
+  UserRound, Mic, Music, FastForward, PersonStanding, Replace,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import type { CreateBackend, CreateIntent } from '../../../stores/createStore'
@@ -176,6 +176,19 @@ export const INTENTS: IntentMeta[] = [
     needsSource: false, needsPrompt: false, localPrompt: true, allowsMask: false, isVideo: true,
     capability: 'dwpose',
     cloudOnly: true, hasLocalLane: true, requiresModels: 'motion',
+    examples: [],
+  },
+  {
+    // Swap Character (07.11.2026, port of the web's C52): a real video keeps
+    // its motion, camera, sound and scene, and its people become the people
+    // of the customer's photos. Studio models only (lib/render/swap.ts), no
+    // local lane: in local mode it is a locked cloud pill like Erase. The
+    // pill says "Swap" (the web's desktop word), the full name stands in
+    // title and aria-label; the bar has no room for two more words.
+    id: 'swap_character', label: 'Swap Character', short: 'Swap', icon: Replace,
+    placeholder: '',
+    needsSource: false, needsPrompt: false, allowsMask: false, isVideo: true,
+    cloudOnly: true,
     examples: [],
   },
 ]

@@ -108,7 +108,13 @@ export const LOCAL_UTILITY_OPS: ReadonlySet<UtilityOp> = new Set(['upscale'])
  *  Character-Studio (LoRA training + generation), talking character (lipsync),
  *  music, video extend and motion control. Like `utilityOp`, an escape hatch
  *  over the image/video mode axis: when set it wins the intent derivation. */
-export type CloudOp = 'character' | 'lipsync' | 'music' | 'extend' | 'motion'
+export type CloudOp = 'character' | 'lipsync' | 'music' | 'extend' | 'motion' | 'swap_character'
+
+/** A new person for Swap Character (07.11.2026): the photo, and who it
+ *  replaces when several people are in the video ("the woman on the left"). */
+export interface SwapFigure { image: ImageRef | null; role: string }
+
+const ONE_FIGURE: SwapFigure[] = [{ image: null, role: '' }]
 
 /** Which of the specialized categories ALSO run on the local ComfyUI backend
  *  (2.5.8 local lanes: ACE music, Wan S2V talking character, last-frame-chain
@@ -465,6 +471,16 @@ export interface CreateState {
   /** Extend: the prior cloud render to continue ({jobId} → fresh signed URL
    *  at submit). Runtime-only. */
   extendSource: { jobId: string; url: string; label: string } | null
+  /** Swap Character: how many seconds of the video run. null = the whole
+   *  video, at most up to the limit of the model. Runtime-only. */
+  swapSeconds: number | null
+  /** Swap Character: 1 to 4 new people, a photo and a role each.
+   *  Runtime-only. */
+  swapFigures: SwapFigure[]
+  /** Swap Character: the customer confirmed the rights and the consent of
+   *  the people shown (lib/render/swap.ts SWAP_CONSENT_TEXT). Runtime-only,
+   *  never persisted: every session confirms again. */
+  swapConsent: boolean
   /** Music track length in seconds (billed per second on the cloud). */
   musicDuration: number
   /** Music: optional lyrics passed to models that take them. Runtime-only. */
@@ -721,6 +737,9 @@ export interface CreateState {
   setAudioInput: (m: MediaRef | null) => void
   setVoiceFromJob: (v: { jobId: string; label: string } | null) => void
   setVideoInput: (m: MediaRef | null) => void
+  setSwapSeconds: (seconds: number | null) => void
+  setSwapFigures: (figures: SwapFigure[]) => void
+  setSwapConsent: (consent: boolean) => void
   bumpCharactersVersion: () => void
   setLoraListKey: (names: readonly string[]) => void
   setCloudOpModel: (id: string) => void
@@ -1216,6 +1235,9 @@ export const useCreateStore = create<CreateState>()(
       voiceFromJob: null as { jobId: string; label: string } | null,
       videoInput: null as MediaRef | null,
       extendSource: null as { jobId: string; url: string; label: string } | null,
+      swapSeconds: null as number | null,
+      swapFigures: ONE_FIGURE,
+      swapConsent: false,
       musicDuration: 60,
       musicLyrics: '',
       talkingWords: '',
@@ -1424,6 +1446,10 @@ export const useCreateStore = create<CreateState>()(
             return { ...base, cloudOp: 'extend' as const, mode: 'video' as const, videoSubMode: 't2v' as const, ...dropAll,
               ...videoModelParams(s.videoModel, s.videoModelList, 'extend', s.videoSpeed) }
           }
+          case 'swap_character':
+            // Its inputs are its own slots (video, figures); the Stage's
+            // source and mask are not read.
+            return { ...base, cloudOp: 'swap_character' as const, mode: 'video' as const, videoSubMode: 'i2v' as const, mask: null }
           case 'motion': {
             // Keeps the source slot (the character image the video drives).
             // On the Mac the lane runs an LTX-2.3 pack, and its catalogue
@@ -1588,10 +1614,15 @@ export const useCreateStore = create<CreateState>()(
         set({ audioInput, ...(audioInput ? { voiceFromJob: null } : {}) })
       },
       setVoiceFromJob: (voiceFromJob) => set({ voiceFromJob, ...(voiceFromJob ? { audioInput: null } : {}) }),
+      // Another video: the chosen length belonged to the old one.
       setVideoInput: (videoInput) => {
         releaseReplacedMediaRef(get().videoInput, videoInput)
-        set({ videoInput })
+        set(videoInput?.url === get().videoInput?.url ? { videoInput } : { videoInput, swapSeconds: null })
       },
+      setSwapSeconds: (swapSeconds) => set({ swapSeconds: swapSeconds == null ? null : Math.max(1, Math.round(swapSeconds)) }),
+      // Always at least one person, at most four (the main model's limit).
+      setSwapFigures: (figures) => set({ swapFigures: (figures.length ? figures : ONE_FIGURE).slice(0, 4) }),
+      setSwapConsent: (swapConsent) => set({ swapConsent }),
       bumpCharactersVersion: () => set((s) => ({ charactersVersion: s.charactersVersion + 1 })),
       setLoraListKey: (names) => set((s) => {
         const key = names.join('\n')

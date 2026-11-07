@@ -77,6 +77,12 @@ const TOOL: Record<CreateIntent, ToolText> = {
     empty: 'Add a portrait and a video. The portrait moves like the person in the video.',
     show: 'Move a figure from a photo the way someone moves in a video.',
   },
+  // Not a phone tool (TOOLS leaves it out); the type names every intent.
+  swap_character: {
+    name: 'Swap Character', short: 'Swap', placeholder: '',
+    empty: 'Add a video and a photo of the new person.',
+    show: 'Put a new person into a real video. Same moves, same scene.',
+  },
 }
 
 /** A getter here is a text in two wordings; the store switches of the build pick one (policy/gates.ts). */

@@ -40,6 +40,8 @@ import { intentRoles, intentRequiredInputs, isStudioModel, resolveIntentPick, st
 import { bumpSeed, runImageCount } from '../lib/render/image-count'
 import { STUDIO_MODELS, studioFields } from '../lib/render/studio-contract'
 import { modelLabel } from '../lib/render/preset-models'
+import { isSwapIntent, SWAP_GALLERY_LABEL } from '../lib/render/swap'
+import { swapInputError, swapRunParams } from '../lib/create/swap-run'
 import { IMPROVING_PROMPT } from '../lib/render/improve-prompt'
 import { improveKindForRun } from '../lib/render/music-ui'
 import { intentTakesPrompt } from '../components/create/experimental/intents'
@@ -407,7 +409,21 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
       s.setError('Pick one of your cloud videos to extend.')
       return
     }
-    if (op === 'motion' && (!s.source || !s.videoInput)) {
+    // Swap Character (07.11.2026): runs studio models only. A server whose
+    // catalogue does not list them yet leaves the pick without a studio model;
+    // that run would go out as a plain motion job, so it stops here.
+    const swap = isSwapIntent(intent)
+    if (swap) {
+      if (!studioModel) {
+        s.setError('Swap Character needs a newer LU Cloud. Try again later.')
+        return
+      }
+      const invalid = swapInputError(studioModel, { hasVideo: !!s.videoInput, figures: s.swapFigures, consent: s.swapConsent })
+      if (invalid) {
+        s.setError(invalid)
+        return
+      }
+    } else if (op === 'motion' && (!s.source || !s.videoInput)) {
       s.setError('Motion control needs a character image and a driving video.')
       return
     }
@@ -530,7 +546,8 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
       // Also exactly what a Studio role's `image` input needs (source_path),
       // the SAME staged upload, studio-contract.ts just names it a schema
       // field instead of a fixed param.
-      if (op !== 'generate' && s.source) {
+      // Swap reads its own people (below), never the Stage's source.
+      if (op !== 'generate' && s.source && !swap) {
         params.source_path = await uploadInput(dataUrlToBlob(s.source.url), 'source', ...uploadEnds(ac))
         // Ein Studio-Modell, das eine Bilderliste liest (Edit mit mehreren
         // Vorlagen, Referenz zu Video), bekommt das Standbild der Oberflaeche als
@@ -583,6 +600,21 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
       if ((op === 'lipsync' || op === 'motion') && s.videoInput) {
         s.setProgress(6, 'Uploading video…')
         params.video_path = await uploadInput(s.videoInput.blob, 'video', ...uploadEnds(ac))
+      }
+      if (swap && studioModel) {
+        // The people of the panel: a photo each (a list with roles for the
+        // main model, the first photo as the still for a one-person model),
+        // the options the mode fixes, the length and the consent.
+        Object.assign(params, await swapRunParams(
+          studioModel,
+          { hasVideo: !!s.videoInput, figures: s.swapFigures, consent: s.swapConsent, chosenSeconds: s.swapSeconds },
+          studioOptionsFiltered ?? {},
+          async (image, i, total) => {
+            s.setProgress(7, `Uploading photos… ${i + 1}/${total}`)
+            return uploadInput(dataUrlToBlob(image.url), 'source', ...uploadEnds(ac))
+          },
+        ))
+        if (ac.signal.aborted) return
       }
       if (op === 'lipsync') {
         if (s.audioInput) {
@@ -697,12 +729,15 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
       if (studioModel) {
         s.setProgress(9, 'Confirming the price…')
         const quoteFields: Record<string, unknown> = {}
-        for (const k of ['source_path', 'image_paths', 'mask_path', 'audio_path', 'audio2_path', 'video_path', 'last_image_path', 'shot_type'] as const) {
+        // clip_seconds: the server cuts a swap video for the quote as for the
+        // run, so both price the same seconds.
+        for (const k of ['source_path', 'image_paths', 'mask_path', 'audio_path', 'audio2_path', 'video_path', 'last_image_path', 'shot_type', 'clip_seconds', 'swap_consent'] as const) {
           if (params[k] !== undefined) quoteFields[k] = params[k]
         }
         const quote = await studioQuote(studioModel, runPrompt, {
           op: 'studio',
-          studio_options: studioOptionsFiltered ?? {},
+          // A swap run carries its roles and fixed mode in params.studio_options.
+          studio_options: params.studio_options ?? studioOptionsFiltered ?? {},
           ...quoteFields,
         })
         // Review A kleiner Punkt 1 (Runde 3, 20.09.2026): the cap is the
@@ -749,7 +784,7 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
       // list view (GET /api/jobs), not the only source of the gallery name.
       let label: string | undefined
       if (studioModel) {
-        label = prompt.trim() ? undefined : modelLabel(studioModel)
+        label = swap ? SWAP_GALLERY_LABEL : prompt.trim() ? undefined : modelLabel(studioModel)
         if (label) params.label = label
       } else if (OP_GALLERY_LABEL[op]) {
         label = OP_GALLERY_LABEL[op]

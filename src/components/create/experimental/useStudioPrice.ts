@@ -99,6 +99,8 @@ export function useStudioPrice(
   seconds: number | undefined,
   /** Fotos der Referenzleiste neben dem Standbild. */
   extraPhotos = 0,
+  /** Bilder, die einzeln kosten (price.perReference, Swap Character). */
+  referenceCount = 0,
 ): StudioPrice | null {
   // Die Bildzahl, die der Start wirklich schickt: der Anbieter rechnet sie ein
   // (MiniMax H3 Reference, je Bild). Ohne sie bliebe der Vorab-Preis aus.
@@ -116,7 +118,7 @@ export function useStudioPrice(
   const [error, setError] = useState<{ key: string; message: string } | null>(null)
   const abort = useRef<AbortController | null>(null)
   const debouncedPromptLen = useDebouncedValue(prompt.length, PROMPT_DEBOUNCE_MS)
-  const key = model ? JSON.stringify([model, options, debouncedPromptLen, seconds, images, quotesImages]) : ''
+  const key = model ? JSON.stringify([model, options, debouncedPromptLen, seconds, images, quotesImages, referenceCount]) : ''
 
   useEffect(() => {
     abort.current?.abort()
@@ -176,8 +178,8 @@ export function useStudioPrice(
 
   if (!model) return null
   if (error && error.key === key) {
-    return { credits: createStudioCost(model, options, Array.from(prompt).length, seconds, images ?? 1), live: false, error: error.message }
+    return { credits: createStudioCost(model, options, Array.from(prompt).length, seconds, images ?? 1, referenceCount), live: false, error: error.message }
   }
   if (live && live.key === key) return { credits: live.credits, live: true }
-  return { credits: createStudioCost(model, options, Array.from(prompt).length, seconds, images ?? 1), live: false }
+  return { credits: createStudioCost(model, options, Array.from(prompt).length, seconds, images ?? 1, referenceCount), live: false }
 }

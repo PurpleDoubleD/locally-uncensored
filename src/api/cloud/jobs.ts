@@ -66,6 +66,12 @@ export interface CloudJobParams {
   trigger_word?: string // character training
   name?: string // character shelf label
   loras?: { id: string; scale?: number }[] // OWN user_loras rows — server resolves to URLs
+  // Swap Character (07.11.2026). The server cuts the video to the first
+  // clip_seconds seconds (1 to 120), runs and bills exactly that. The models
+  // of SWAP_CONSENT_MODELS (lib/render/swap.ts) need swap_consent true: the
+  // customer confirmed the rights and the consent of the people shown.
+  clip_seconds?: number
+  swap_consent?: boolean
 }
 
 export interface CloudJobSubmit {

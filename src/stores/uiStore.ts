@@ -28,7 +28,7 @@ export interface SettingsFocus {
 export type CloudTeaserTarget =
   | {
       surface: 'intent'
-      intent: 'upscale' | 'eraser' | 'character' | 'lipsync' | 'music' | 'extend' | 'motion'
+      intent: 'upscale' | 'eraser' | 'character' | 'lipsync' | 'music' | 'extend' | 'motion' | 'swap_character'
     }
   | { surface: 'create-model'; kind: 'image' | 'video'; modelId: string }
 

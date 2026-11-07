@@ -32,7 +32,8 @@ describe('der alte Katalog ist wirklich der alte', () => {
       expect(m.weights, m.id).toBeUndefined()
     }
     const ids = new Set(alt.map((m) => m.id))
-    expect(neueIds()).toHaveLength(8)
+    // Eight from 02.10.2026, plus the two Swap Character models (07.11.2026).
+    expect(neueIds()).toHaveLength(10)
     for (const id of neueIds()) expect(ids.has(id), id).toBe(false)
     // Der neue Katalog hat dagegen alles.
     expect(neuerServer().length).toBeGreaterThanOrEqual(alt.length + 8)

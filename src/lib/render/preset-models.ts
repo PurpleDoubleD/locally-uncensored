@@ -15,12 +15,15 @@ import {
   STUDIO_EDIT_MODELS, studioImageToVideo, studioReferenceVideo, studioTextToVideo,
 } from './studio-roles'
 import type { RenderKind, RenderOp } from './cloud-jobs'
+import { SWAP_MODELS } from './swap'
 
 export type StepRole =
   | 'image' | 'animate' | 'soundtrack' | 'speech' | 'music' | 'talking' | 'presenter'
   | 'duo' | 'extend' | 'motion' | 'restyle' | 'angles' | 'edit' | 'upscale'
   // 02.10.2026: Text zu Video, Referenz zu Video.
   | 'video' | 'reference'
+  // 07.11.2026: Swap Character (lib/render/swap.ts).
+  | 'swap-character'
 
 export interface PresetModel {
   id: string
@@ -43,6 +46,7 @@ const ROLE_OP: Record<StepRole, RenderOp> = {
   extend: 'extend', motion: 'motion', restyle: 'studio', angles: 'studio',
   edit: 'edit', upscale: 'upscale',
   video: 'generate', reference: 'studio',
+  'swap-character': 'studio',
 }
 
 /** The staged inputs a NON-studio member consumes, as provider field -> job
@@ -56,6 +60,7 @@ export const ROLE_INPUTS: Record<StepRole, Record<string, string>> = {
   edit: { image: 'source_path' },
   upscale: { video: 'video_path' },
   video: {}, reference: {},
+  'swap-character': {},
 }
 
 function studioIds(match: (id: string) => boolean): string[] {
@@ -117,6 +122,9 @@ const ROLE_MEMBERS: Record<StepRole, () => string[]> = {
   edit: () => [...STUDIO_EDIT_MODELS, 'qwen-image-edit'],
   // A finished clip goes in, the same clip at more pixels comes out.
   upscale: () => ['video-upscaler', 'flashvsr', 'video-upscaler-pro', 'ultimate-video-upscaler', 'crystal-upscaler', 'flux-3-upscale'],
+  // A real video stays, its people become the customer's (lib/render/swap.ts).
+  // The one role that shares a model with another (SCAIL 2, see SWAP_ROLES).
+  'swap-character': () => [...SWAP_MODELS],
 }
 
 /** Classic ids that a studio entry already covers on the same endpoint. The
@@ -308,6 +316,7 @@ const CLASSIC_PROMPT: Record<StepRole, boolean> = {
   video: true, reference: true,
   talking: false, presenter: false, motion: false, soundtrack: false, duo: false,
   angles: false, upscale: false,
+  'swap-character': false,
 }
 
 export function rolePrompts(role: StepRole): boolean {
@@ -320,6 +329,10 @@ export function roleHasChoice(role: StepRole, openOnly = false): boolean {
 }
 
 export const ALL_ROLES = Object.keys(ROLE_MEMBERS) as StepRole[]
+
+/** Roles that share models with another role on purpose (as on the web).
+ *  The rule "every studio model in exactly one role" holds for all others. */
+export const SWAP_ROLES: readonly StepRole[] = ['swap-character']
 
 /** The role a model plays. Every studio model belongs to exactly one, which a
  *  contract test holds true; the ad-hoc single-model workspace needs it to

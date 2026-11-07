@@ -16,6 +16,8 @@ import { runImageCount } from '../../../lib/render/image-count'
 import { useCloudCatalogStore, cloudModelById, defaultCloudModel, editNeedsMask, modelForOp, runCredits, lengthCredits, lengthPrice } from '../../../stores/cloudCatalogStore'
 import { createRunModel, intentRequiredInputs, isStudioModel } from '../../../lib/render/create-studio'
 import { STUDIO_MODELS } from '../../../lib/render/studio-contract'
+import { swapBilledPhotos, swapPricedSeconds, swapShortCredits } from '../../../lib/render/swap'
+import { swapReady } from '../../../lib/create/swap-run'
 import { effectiveVideoDurations, snapToVideoDuration } from '../../../lib/render/video-duration'
 import { mediaSeconds, useStudioPrice } from './useStudioPrice'
 import { getJob } from '../../../api/cloud/jobs'
@@ -105,6 +107,10 @@ export function Composer({ onOpenAdvanced, onOpenWorkflows }: Props) {
   const videoInput = useCreateStore((s) => s.videoInput)
   const extendSource = useCreateStore((s) => s.extendSource)
   const musicDuration = useCreateStore((s) => s.musicDuration)
+  // Swap Character: the people, the chosen length and the consent.
+  const swapFigures = useCreateStore((s) => s.swapFigures)
+  const swapSeconds = useCreateStore((s) => s.swapSeconds)
+  const swapConsent = useCreateStore((s) => s.swapConsent)
   const managerNoticeSeen = useWorkflowStore((s) => s.managerNoticeSeen)
   const { generate, cancel, quota, mlxMissing, modelsLoaded } = useCreateExp()
   const imageModels = useCreateStore((s) => s.imageModelList)
@@ -136,7 +142,8 @@ export function Composer({ onOpenAdvanced, onOpenWorkflows }: Props) {
   // 2.5.8 categories with their own composer surfaces + input contracts.
   const special =
     intent === 'character' || intent === 'lipsync' || intent === 'music' ||
-    intent === 'extend' || intent === 'motion'
+    intent === 'extend' || intent === 'motion' || intent === 'swap_character'
+  const swap = intent === 'swap_character'
   const characterUse = intent === 'character' && characterTab === 'use'
   let { kind: intentKind, op: intentOp } = intentToJob(intent)
   if (characterUse) {
@@ -189,7 +196,7 @@ export function Composer({ onOpenAdvanced, onOpenWorkflows }: Props) {
   const lengthRate = backend === 'cloud' && !studioPick ? lengthPrice(runModel, intentOp) : undefined
   const mediaUrl =
     intent === 'lipsync' ? (lengthRate?.basis === 'video' ? videoInput?.url : audioInput?.url)
-      : intent === 'motion' ? videoInput?.url
+      : intent === 'motion' || swap ? videoInput?.url
         : intent === 'extend' ? extendSource?.url
           : undefined
   const mediaKind = intent === 'lipsync' && lengthRate?.basis !== 'video' ? ('audio' as const) : ('video' as const)
@@ -240,7 +247,11 @@ export function Composer({ onOpenAdvanced, onOpenWorkflows }: Props) {
   const cloudImageCount = useCreateStore((s) => s.cloudImageCount)
   const extraPhotos = intent === 'edit' || intent === 'animate' ? references.length : 0
   const imageCount = backend === 'cloud' ? runImageCount(intent, cloudImageCount, characterUse) : 1
-  const studioPrice = useStudioPrice(studioPick, cloudStudioOptions, prompt, runSeconds ?? inputSeconds, extraPhotos)
+  // Swap: the chosen length counts, not the whole video, and every photo is
+  // billed on its own (the same seconds as the slider and the server).
+  const priceSeconds = swap && studioPick && inputSeconds !== undefined ? swapPricedSeconds(studioPick, swapSeconds, inputSeconds) : inputSeconds
+  const billedPhotos = swap && studioPick ? swapBilledPhotos(studioPick, swapFigures.length) : 0
+  const studioPrice = useStudioPrice(studioPick, cloudStudioOptions, prompt, runSeconds ?? priceSeconds, extraPhotos, billedPhotos)
   const setCloudStudioCredits = useCreateStore((s) => s.setCloudStudioCredits)
   // Der Preis der gemessenen Laenge, bei einer Stimme der Zeichen des Textes.
   // Er steht im selben Speicher wie ein Studio-Preis, geht als Deckel mit dem
@@ -328,7 +339,11 @@ export function Composer({ onOpenAdvanced, onOpenWorkflows }: Props) {
           ? (backend === 'cloud' ? !!extendSource : hasStart)
           : intent === 'motion'
             ? hasStart && !!videoInput
-            : true
+            : swap
+              // Studio models only: without one in the server's catalogue the
+              // tab says so (SwapControls) and the button stays off.
+              ? !!studioPick && swapReady(studioPick, { hasVideo: !!videoInput, figures: swapFigures, consent: swapConsent })
+              : true
   // A half-installed bundle is pickable long before it is usable: the lane
   // list refills as soon as the diffusion model lands, while the VAE it needs
   // is still coming down. Measured on the box 2026-08-15 at 88 percent of the
@@ -390,7 +405,8 @@ export function Composer({ onOpenAdvanced, onOpenWorkflows }: Props) {
           Befund und hier nicht behoben. */}
       <div className="mx-auto w-full max-w-[660px] space-y-2.5">
         {special && <SpecialControls intent={intent} />}
-        {!isUtility && <LaneControls />}
+        {/* Swap Character's options are its own panel above (SpecialControls). */}
+        {!isUtility && !swap && <LaneControls />}
         <CharacterNote />
         {inputNote && (
           <p className="t-body text-gray-500 text-center px-3.5" data-testid="lane-input-note">{laneCaption}</p>
@@ -596,7 +612,11 @@ export function Composer({ onOpenAdvanced, onOpenWorkflows }: Props) {
               // The span carries the hint: a disabled button takes no pointer,
               // so a title on the button itself would never show.
               <span className="inline-flex" title={macSetupFirst ? MAC_SETUP_FIRST : (missingSource ?? (upscaleReady ? undefined : UPSCALE_MODEL_FIRST))}>
-                <Button variant="primary" size="lg" icon={Sparkles} disabled={!canGenerate} onClick={guardedGenerate}>Create</Button>
+                <Button variant="primary" size="lg" icon={Sparkles} disabled={!canGenerate} onClick={guardedGenerate}>
+                  {/* Swap Character names its price on the button (the web's
+                      CreateButton): a paid video run, priced by its length. */}
+                  {swap && backend === 'cloud' && priceSeconds !== undefined && studioPrice ? `Create · ${swapShortCredits(studioPrice.credits)}` : 'Create'}
+                </Button>
               </span>
             )}
           </div>

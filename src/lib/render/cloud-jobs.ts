@@ -12,7 +12,7 @@
 // too and which therefore cannot name CreateIntent either.
 export type CreateIntentLike =
   | 'image' | 'edit' | 'removebg' | 'video' | 'animate' | 'upscale' | 'eraser'
-  | 'character' | 'lipsync' | 'music' | 'extend' | 'motion'
+  | 'character' | 'lipsync' | 'music' | 'extend' | 'motion' | 'swap_character'
 
 export type RenderKind = 'image' | 'video' | 'audio'
 // 'upscale'/'eraser' are hosted utility endpoints (super-resolution /
@@ -78,6 +78,10 @@ export function intentToJob(intent: CreateIntentLike): { kind: RenderKind; op: R
     case 'extend':
       return { kind: 'video', op: 'extend' }
     case 'motion':
+      return { kind: 'video', op: 'motion' }
+    // Swap Character runs studio models only (op 'studio' at submit). The op
+    // here says which inputs are gathered: a video, as for Motion.
+    case 'swap_character':
       return { kind: 'video', op: 'motion' }
     default:
       return { kind: 'image', op: 'generate' }
