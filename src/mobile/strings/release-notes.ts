@@ -48,6 +48,14 @@ function note(version: string, headline: string, items: readonly NoteItem[]): Mo
 }
 
 export const MOBILE_RELEASE_NOTES: readonly MobileReleaseNote[] = [
+  // 3.1.0 (N2, 08.11.2026): what of CHANGELOG [3.1.0] exists on the phone.
+  note('3.1.0', 'Your chats and your gallery.', [
+    'Settings, Backup and import has "Restore chats from the automatic backup". It brings back chats the backup on this phone holds that are not in your list, and the chat list shows a note when there are any.',
+    'A chat you deleted on this phone is not offered back.',
+    'When the chats on this phone cannot be read at start, they are restored from the backup.',
+    'The gallery keeps every picture, not only the newest 200.',
+    'The gallery on this phone has no hide or tag buttons.',
+  ]),
   // 3.0.10 is the next phone app after 3.0.7 (3.0.8 and 3.0.9 shipped none): what came since then.
   note('3.0.10', 'What changed since 3.0.7.', [
     {

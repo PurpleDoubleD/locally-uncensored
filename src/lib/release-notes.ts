@@ -179,6 +179,113 @@ const NOTE_309: ReleaseNote = {
 }
 
 export const RELEASE_NOTES: ReleaseNote[] = [
+  // 3.1.0 (N2, 08.11.2026, Stand integ/310 2bed36e0b). Aus CHANGELOG.md [3.1.0];
+  // vorn die fuenf Dinge, die ein Nutzer zuerst merkt, darunter der Rest und
+  // die bekannten Grenzen.
+  {
+    version: '3.1.0',
+    headline: 'The gallery keeps every picture, Edit strength works again on Qwen edit models, and chat tools work in any language.',
+    lines: [
+      {
+        title: 'The gallery keeps every picture.',
+        detail: 'The limit of 200 entries is gone. The gallery is backed up with your chats and loads 60 tiles at a time as you scroll. You can hide a picture from the gallery and bring it back under Hidden with Show again, and tag pictures and filter by tag. Restore from the output folder lists what ComfyUI saved and reads prompt, seed, sampler, model and LoRAs from PNGs made by ComfyUI or A1111. Nothing on disk changes.',
+      },
+      {
+        title: 'Edit strength below 1.00 changes the picture again.',
+        detail: 'On Qwen-Image 2.1 and Qwen-Image-Edit the strength now steers between the edit and no edit inside the sampler. A lighter edit takes longer per step.',
+      },
+      {
+        title: 'Chat tools work in any language.',
+        detail: 'They used to reach only messages in English and German (GitHub #224).',
+      },
+      {
+        title: 'The agent reads its input pictures through LU.',
+        detail: 'Edits, reference pictures and start images no longer fail with "Failed to fetch" on Qwen-Image 2.1 and MiniMax H3, and the agent finds a picture this chat made by its path on disk.',
+      },
+      {
+        title: 'A chat you deleted is not offered back.',
+        detail: 'The restore note and the Restore button leave out chats you deleted on purpose. A backup file you pick by hand still brings everything back.',
+      },
+    ],
+    details: [
+      {
+        title: 'Create',
+        items: [
+          {
+            title: 'Enhance takes any size on local ComfyUI.',
+            detail: 'Any factor from 1x to 8x, or a long side in pixels, and a choice of upscale model when you have more than one.',
+          },
+          {
+            title: 'Start ComfyUI when LU starts, right on the Start ComfyUI card.',
+            detail: 'It is the same setting as the one in Settings.',
+          },
+          {
+            title: 'The video preview says what it shows.',
+            detail: 'It says it is a still of the first frame, and says so when ComfyUI sends no preview at all.',
+          },
+          {
+            title: 'ComfyUI from Comfy Desktop finds its own model folders.',
+            detail: 'LU now finds the model folders of a ComfyUI that was installed with Comfy Desktop (GitHub #196).',
+          },
+        ],
+      },
+      {
+        title: 'Chat and agent',
+        items: [
+          {
+            title: 'Reasoning effort fits the chat template.',
+            detail: 'A template that only knows low, medium and xhigh gets xhigh for High and Max, instead of refusing every message.',
+          },
+          {
+            title: 'The chat image tool runs the model\'s workflow.',
+            detail: 'The chat image tool runs the workflow assigned to the model (GitHub #192).',
+          },
+          {
+            title: 'No "video generated" after a retry that never ran.',
+            detail: 'A video retry that never ran no longer reports "video generated".',
+          },
+          {
+            title: 'A Loop guard switch.',
+            detail: 'Settings, Agent Permissions. It is on by default.',
+          },
+          {
+            title: 'The workspace dialog can change the primary folder.',
+            detail: 'In Voice and agent chats you can change the primary folder, make an extra folder the primary, or remove the primary (GitHub #223).',
+          },
+          {
+            title: 'REA installs the dependencies LU checked.',
+            detail: 'The agent plugin installs its dependencies as they were when LU checked the package, and npm warnings stay out of the server log.',
+          },
+        ],
+      },
+      {
+        title: 'Phone',
+        items: [
+          {
+            title: 'The Android app gets the chat rescue the desktop has.',
+            detail: 'Settings, Backup and import, Restore chats from the automatic backup brings back chats the backup holds that are not in your list, and the chat list shows a note when there are any. Chats you deleted on the phone are not offered back.',
+          },
+        ],
+      },
+      {
+        title: 'Known limits',
+        items: [
+          {
+            title: 'Edit strength on the Mac works the old way.',
+            detail: 'The Mac image engine (mflux) still takes Edit strength its old way.',
+          },
+          {
+            title: 'Enhance on the Mac and on LU Cloud keeps its sizes.',
+            detail: 'Enhance on the Mac stays at 2x and 4x, LU Cloud at 2K, 4K and 8K.',
+          },
+          {
+            title: 'No hide or tag buttons in the phone gallery.',
+            detail: 'The phone app has no hide or tag buttons in its own gallery. Pictures are hidden and tagged in the desktop app.',
+          },
+        ],
+      },
+    ],
+  },
   // 3.0.10 (05.11.2026, Hotfix Chat-Rettung, I1). Wer von 3.0.8 kommt, hat
   // 3.0.9 nie gesehen (releaseNotesStore zeigt nur die laufende Version),
   // darum steht hier das Blatt von 3.0.9 mit der Rettung als erster Zeile.
