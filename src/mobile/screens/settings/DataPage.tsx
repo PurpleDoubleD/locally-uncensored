@@ -5,11 +5,12 @@
  * the import from other chat apps, the automatic backup in the app folder,
  * and deleting every chat behind two questions.
  */
-import { useState, useSyncExternalStore } from 'react'
-import { DatabaseBackup, FileDown, FileUp, Import, Save, Trash2 } from 'lucide-react'
+import { useEffect, useState, useSyncExternalStore } from 'react'
+import { ArchiveRestore, DatabaseBackup, FileDown, FileUp, Import, Save, Trash2 } from 'lucide-react'
 import { portableConversation, serializeAllConversations } from '../../../lib/chat-export'
 import { backupStoresNow, lastStoreBackupAt, onStoreBackupWritten } from '../../../lib/store-backup'
 import { useChatStore } from '../../../stores/chatStore'
+import { restorableChats, restoreChatsFromPhoneBackup } from '../../lib/chat-rescue'
 import type { Conversation } from '../../../types/chat'
 import { nav } from '../../nav'
 import { hasNativeBridge, isNativeUnavailable, pickFiles, saveToDevice, shareFile } from '../../platform'
@@ -49,6 +50,20 @@ export default function DataPage() {
   const [restore, setRestore] = useState<Restore>({ kind: 'idle' })
   const [backingUp, setBackingUp] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  /** Chats of the automatic backup that are not in the list (C46). null: still looking; 'unreadable': the backup could not be read. */
+  const [inBackup, setInBackup] = useState<number | 'unreadable' | null>(hasNativeBridge() ? null : 0)
+  const [rescuing, setRescuing] = useState(false)
+
+  const lookInBackup = async () => {
+    try {
+      setInBackup((await restorableChats()).length)
+    } catch {
+      setInBackup('unreadable')
+    }
+  }
+  useEffect(() => {
+    if (hasNativeBridge()) void lookInBackup()
+  }, [count])
 
   /**
    * One file with every chat, out of the app in one of two ways: into a folder
@@ -128,6 +143,23 @@ export default function DataPage() {
     }
     setRestore({ kind: 'idle' })
     toast(T.restoreDone(added, skipped), { testid: 'restore-done' })
+  }
+
+  /** Every chat of the automatic backup that is not in the list, "restored" only once it is written. */
+  const rescue = async () => {
+    if (rescuing) return
+    setRescuing(true)
+    try {
+      const ids = await restoreChatsFromPhoneBackup()
+      const written = ids.length === 0 || (await chatsAreWritten({ present: ids }))
+      if (written) toast(T.rescueDone(ids.length), { testid: 'rescue-done' })
+      else toast(T.restoreNotSaved, { tone: 'error', testid: 'rescue-not-saved' })
+    } catch {
+      toast(T.rescueUnreadable, { tone: 'error', testid: 'rescue-unreadable' })
+    } finally {
+      setRescuing(false)
+      void lookInBackup()
+    }
   }
 
   const backupNow = async () => {
@@ -257,6 +289,22 @@ export default function DataPage() {
           testid="m-settings-data-auto"
           el="E16.4"
         />
+        {hasNativeBridge() ? (
+          <Row
+            icon={ArchiveRestore}
+            title={T.rescue}
+            subtitle={
+              rescuing ? T.rescueWorking : inBackup === null ? T.rescueLooking : inBackup === 'unreadable' ? T.rescueUnreadable : inBackup > 0 ? T.rescueFound(inBackup) : T.rescueNone
+            }
+            chevron={false}
+            disabled={rescuing || inBackup === null || inBackup === 'unreadable' || inBackup === 0}
+            disabledReason={inBackup === 0 ? T.rescueNone : inBackup === 'unreadable' ? T.rescueUnreadable : T.rescueLooking}
+            onPress={() => void rescue()}
+            testid="m-settings-data-rescue"
+            state={typeof inBackup === 'number' ? `found-${inBackup}` : inBackup === null ? 'looking' : inBackup}
+            el="E16.4"
+          />
+        ) : null}
       </ListGroup>
       <Block>
         <Hint>{T.autoText}</Hint>

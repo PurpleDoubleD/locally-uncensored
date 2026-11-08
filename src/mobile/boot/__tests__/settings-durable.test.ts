@@ -113,6 +113,7 @@ describe('which keys are kept', () => {
       'LU-create-orders': 'the orders of Create in chat, which is locked on the phone until it has the order card',
       'lu-mobile-switched-under-answer': 'a note per answer; lost, the chat says "interrupted" instead of "you switched models"',
       'lu-mobile-settings-stamp': 'the stamp of this copy itself; in the native backup it dates the settings there (L5)',
+      'lu-mobile-chats-deleted': 'chats deleted on the phone (C46); lost, the restore hint offers them once and Not now keeps it away',
     }
     for (const key of STORE_KEYS) {
       const copied = DURABLE_SETTINGS_KEYS.includes(key)

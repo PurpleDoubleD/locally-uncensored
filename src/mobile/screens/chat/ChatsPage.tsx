@@ -15,12 +15,14 @@ import { useModelStore } from '../../../stores/modelStore'
 import { nav, useChatsSegment } from '../../nav'
 import { CHAT_STRINGS } from '../../strings/chat'
 import { useFootScrolls } from '../../ui/screen-shape'
-import { Button, EmptyState, ErrorState, Field, IconButton, ListGroup, RootPage, Row, Segmented, SkeletonRows, Sparse } from '../../ui'
+import { Button, EmptyState, ErrorState, Field, IconButton, ListGroup, Notice, RootPage, Row, Segmented, SkeletonRows, Sparse, toast } from '../../ui'
 import { RemoteHome } from '../remote/RemoteHome'
 import { remoteDesktopOffered } from '../../policy/gates'
 import { CloudSwitch } from '../settings/cloud/CloudSwitch'
 import { useChatsUnreadable } from '../../lib/storage-alerts'
 import { useBackupFound } from './parts/adapters/backup-found'
+import { dismissRescueHint, lookForRescue, restoreFromHint, useRescueHint } from './parts/adapters/chat-rescue-hint'
+import { installDeletionNote } from '../../lib/chat-rescue'
 import './parts/chat.css'
 import { chatModelLabel } from './parts/model-name'
 import { useChatsHydrated } from './parts/hooks'
@@ -38,6 +40,8 @@ installChatPreload()
 // The catalogue of the phone knows which of its models think (parts/model-name.ts).
 installCatalogueFacts()
 installThinkingDefault()
+// A chat that leaves the list from here on was deleted on purpose: the restore from the backup does not offer it (C46).
+installDeletionNote()
 
 
 function ChatRow(props: { chat: Conversation; answering: boolean; model: string; now: number }) {
@@ -106,7 +110,18 @@ export default function ChatsPage() {
   const shown = useMemo(() => matchChats(chats, deferredQuery), [chats, deferredQuery])
   // Not read is not empty: no "no chats yet", no restore offer, no new chat that could not be saved (F11).
   const unreadable = useChatsUnreadable()
-  const backupFound = useBackupFound(hydrated && chats.length === 0 && !unreadable)
+  const rescue = useRescueHint()
+  useEffect(() => {
+    void lookForRescue()
+  }, [])
+  const showRescue = segment === 'phone' && hydrated && !unreadable && rescue.count > 0
+  // The hint carries the restore itself; the quiet link of the empty list would be a second way to the same.
+  const backupFound = useBackupFound(hydrated && chats.length === 0 && !unreadable) && !showRescue
+  const restoreRescue = async () => {
+    const { outcome, added } = await restoreFromHint()
+    if (outcome === 'restored') toast(S.rescueDone(added), { testid: 'm-chats-rescue-done' })
+    else toast(outcome === 'not-saved' ? S.rescueNotSaved : S.rescueFailed, { tone: 'error', testid: 'm-chats-rescue-error' })
+  }
   const newChat = () => nav.push('/chat/:id', { id: 'new' })
   const searching = query.trim().length > 0
   // On a page too low for a fixed footer (a phone on its side) "New chat" stands at the end of the list; the
@@ -230,6 +245,24 @@ export default function ChatsPage() {
           <Field label={S.search} hideLabel placeholder={S.search} type="search" icon={Search} clearable value={query} onChange={setQuery} testid="m-chats-search" el="C1.3" />
         ) : null}
       </div>
+      {showRescue ? (
+        <Notice
+          title={S.rescueTitle(rescue.count)}
+          testid="m-chats-rescue"
+          actions={
+            <>
+              <Button compact variant="primary" busy={rescue.busy} onPress={() => void restoreRescue()} testid="m-chats-rescue-restore">
+                {S.rescueRestore}
+              </Button>
+              <Button compact variant="quiet" onPress={dismissRescueHint} testid="m-chats-rescue-dismiss">
+                {S.rescueNotNow}
+              </Button>
+            </>
+          }
+        >
+          {S.rescueText(rescue.count)}
+        </Notice>
+      ) : null}
       {segment === 'phone' ? list : <RemoteHome />}
       {segment === 'phone' && searching && shown.length > 0 ? <span className="m-sr" role="status">{`${shown.length}`}</span> : null}
     </RootPage>

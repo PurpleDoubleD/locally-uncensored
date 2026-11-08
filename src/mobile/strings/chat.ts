@@ -29,6 +29,15 @@ export const CHAT_STRINGS = {
     noMessages: 'No messages yet',
     untitled: 'New chat',
     restore: 'Restore from backup',
+    // The automatic backup holds chats the list does not (C46). Said, never done by itself.
+    rescueTitle: (n: number) => `${n} ${n === 1 ? 'chat' : 'chats'} in your backup`,
+    rescueText: (n: number) =>
+      `The automatic backup on this phone holds ${n === 1 ? 'a chat that is' : `${n} chats that are`} not in your list. Restore ${n === 1 ? 'it' : 'them'}? The chats in your list stay as they are.`,
+    rescueRestore: 'Restore',
+    rescueNotNow: 'Not now',
+    rescueDone: (n: number) => `${n} ${n === 1 ? 'chat' : 'chats'} restored`,
+    rescueNotSaved: 'The chats are in your list, but they could not be saved on this phone. Free some storage, then restore them again in Settings, Backup and import.',
+    rescueFailed: 'The backup could not be read.',
     // The stored chats could not be read at the start. They are not gone, and the list never says "no chats" then (F11).
     unreadableTitle: 'Your chats could not be read',
     unreadableNoSpace: 'LU cannot open your saved chats right now. This happens when the phone is out of storage. Your chats are still on this phone and are not changed. Free up space, then try again.',
