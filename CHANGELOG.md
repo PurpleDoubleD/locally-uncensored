@@ -2,6 +2,58 @@
 
 All notable changes to Locally Uncensored are documented here.
 
+## [3.1.0] - 2026-11-1X
+
+The gallery keeps every picture, with pages, tags and hiding. Edit strength
+works again on Qwen edit models, chat tools work in any language, and the
+agent reads its input pictures through LU. A chat you deleted is no longer
+offered back by the restore, on the phone and on the desktop.
+LU Cloud keeps its open models: seventeen video models and nine image models
+in the cloud catalogue.
+
+### Added
+- Gallery: no limit of 200 entries any more. The list lives in IndexedDB,
+  is backed up with the chats, and loads 60 tiles at a time as you scroll.
+  Pictures can be hidden from the gallery (Hidden view, Show again) and
+  tagged, with a tag filter. "Restore from the output folder" lists what
+  ComfyUI saved and reads prompt, seed, sampler, model and LoRAs from PNGs
+  made by ComfyUI or A1111; nothing on disk changes.
+- Enhance (local, ComfyUI): any factor from 1x to 8x or a long side in
+  pixels, and a choice of upscale model when there is more than one.
+- Create: "Start ComfyUI when LU starts" on the Start ComfyUI card, the same
+  setting as in Settings.
+- Settings, Agent Permissions: a Loop guard switch, on by default.
+- The workspace dialog (Voice, agent chats) can change the primary folder,
+  make an extra folder the primary, and remove the primary (GitHub #223).
+
+### Fixed
+- Edit strength below 1.00 changes the picture again on Qwen-Image 2.1 and
+  Qwen-Image-Edit: the strength now steers between the edit and no edit
+  inside the sampler. A lighter edit takes longer per step.
+- Reasoning effort fits the chat template: a template that only knows low,
+  medium and xhigh gets xhigh for High and Max instead of refusing every
+  message.
+- Chat tools work in any language, not only English and German (GitHub #224).
+- The agent reads the input picture for edits, references and start images
+  through LU instead of the browser ("Failed to fetch" with Qwen-Image 2.1 and
+  MiniMax H3), and finds a picture this chat made by its path on disk.
+- A video retry that never ran no longer reports "video generated".
+- The chat image tool runs the workflow assigned to the model (GitHub #192).
+- The video preview says it is a still of the first frame, and says so when
+  ComfyUI sends no preview at all.
+- ComfyUI started from Comfy Desktop finds the model folders of its own
+  installation (GitHub #196).
+- A chat you deleted on purpose is no longer offered by the restore hint or
+  the Restore button; a backup file you pick by hand still brings everything
+  back. The Android app gets the same chat rescue as the desktop.
+- REA (agent plugin) installs its dependencies as they were when LU checked
+  the package, and npm's warnings stay out of the server log.
+
+### Known limits
+- The Mac image engine (mflux) still takes Edit strength its old way.
+- Enhance on the Mac stays at 2x and 4x, LU Cloud at 2K, 4K and 8K.
+- The phone app has no hide or tag buttons in its own gallery yet.
+
 ## [3.0.10] - 2026-11-05
 
 A fix for lost chats. When the chat list came back without its chats, the
