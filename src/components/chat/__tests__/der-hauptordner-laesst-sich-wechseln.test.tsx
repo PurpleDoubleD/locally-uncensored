@@ -33,7 +33,7 @@ const C = 'D:\\code\\other'
 beforeEach(() => {
   cleanup()
   call.mockReset()
-  useAgentModeStore.setState({ lastFolder: null, workspaces: {} })
+  useAgentModeStore.setState({ lastFolder: undefined, workspaces: {} })
 })
 
 function openOn(initial: AgentWorkspace) {
