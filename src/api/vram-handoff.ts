@@ -47,7 +47,10 @@
 import { setChatBackendsRestore, holdChatBackends } from '../lib/chat-backends-gate'
 import { gpuRolesSeparate } from '../lib/gpu-roles'
 import { backendCall, ollamaUrl, localFetch, isOllamaLocal, isWindows, fetchLocalhostBytes } from './backend'
-import type { ComfyApiGraph } from '../types/comfy-graph'
+import { apiNodes, type ComfyApiGraph } from '../types/comfy-graph'
+import { injectParameters } from './workflows'
+import { ownWorkflowMisfit } from '../lib/own-workflow-fit'
+import type { ComfyModelSource } from '../types/models'
 import { asNumber, asRecordArray, asString, prop } from '../types/json-guards'
 import { listRunningModels, loadModel, unloadModel } from './ollama'
 import { startBundledEngine } from './engine'
@@ -78,6 +81,7 @@ import {
   isPromptQueued,
   type VideoBackend,
 } from './comfyui'
+import type { GenerateParams, ModelType } from './comfyui'
 import type { ModelCapabilities } from './comfyui-nodes'
 import { getActiveAgentModel } from './agent-context'
 import { comfyWS, CLIENT_ID } from './comfyui-ws'
@@ -1494,8 +1498,7 @@ async function generateImage(
     // with the same one.
     const { useCreateStore } = await import('../stores/createStore')
     const qwenTextEncoder = useCreateStore.getState().qwenTextEncoder
-    const workflow = await buildFixable('image', () => buildDynamicWorkflow(
-      {
+    const params: GenerateParams = {
         prompt,
         negativePrompt: typeof args.negativePrompt === 'string' ? args.negativePrompt : '',
         model,
@@ -1531,9 +1534,17 @@ async function generateImage(
           ? { maskImage: stagedNames([a.maskImage])[0], growMaskBy: clampInt(a.growMaskBy, 6, 0, 64) }
           : {}),
         ...(listed?.parts ? { modelParts: listed.parts } : {}),
-      },
-      type,
-    ))
+      }
+    // GH #192 part 3, C29: a workflow the user assigned to this model runs in
+    // the chat as it does in Create (useCreate), with the values set under
+    // "Workflow parameters"; one whose loader does not fit the model is set
+    // aside the same way. Before, the chat always built LU's own graph, so a
+    // model that only runs with its own workflow could not be used here.
+    const own = await ownWorkflowFor(model, type, listed?.source)
+    const workflow = own
+      ? await injectParameters(own.workflow, own.parameterMap, params, type, own.overrides)
+      : await buildFixable('image', () => buildDynamicWorkflow(params, type))
+    if (own) log.info('vram_handoff.image.own_workflow', { model, workflow: own.name })
     // Phase markers (chat-agent hang 2026-06-03): make it obvious in the log
     // whether a stall is in the workflow build (/object_info) or the submit
     // (/prompt). Both are now timeout-bounded, so neither can strand the
@@ -1548,6 +1559,24 @@ async function generateImage(
     // Surface ComfyUI's message verbatim — an OOM must NOT be masked.
     return buildErrorResult('image', err)
   }
+}
+
+/**
+ * The workflow the user assigned to `model` (workflowStore), when its loader
+ * fits the model (lib/own-workflow-fit, the same check as Create), with the
+ * values the user set under "Workflow parameters". Null: LU builds the graph.
+ */
+export async function ownWorkflowFor(model: string, type: ModelType, source?: ComfyModelSource) {
+  const { useWorkflowStore } = await import('../stores/workflowStore')
+  const store = useWorkflowStore.getState()
+  const wf = store.getWorkflowForModel(model, type)
+  if (!wf) return null
+  const misfit = ownWorkflowMisfit(apiNodes(wf.workflow).map(([, n]) => n.class_type), type, source)
+  if (misfit) {
+    log.info('vram_handoff.own_workflow_set_aside', { model, workflow: wf.name, misfit })
+    return null
+  }
+  return { ...wf, overrides: store.paramOverrides[wf.id] }
 }
 
 /** Video path — buildTxt2VidWorkflow with MODEL_TYPE_DEFAULTS + snapToVideoGrid. */
