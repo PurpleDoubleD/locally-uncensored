@@ -560,7 +560,7 @@ describe('the notes table', () => {
     // Konstanten. Vorher stand der Nenner des Katalogs darin, der Waechter
     // haette den falschen Nenner also mitgetragen statt ihn zu melden.
     const phrase = `${CLOUD_PITCH.unfilteredChatModels} of the ${CLOUD_PITCH.measuredChatModels}`
-    expect(phrase).toBe('19 of the 44')
+    expect(phrase).toBe('13 of the 36')
     // Entscheid vom 12.09.2026: EIN Satz traegt die Aussage, und er sagt
     // "in full". Vorher standen zwei Saetze mit zwei Formulierungen derselben
     // Messung auf demselben Blatt, einer im Kurztext, einer im Ausklapper.

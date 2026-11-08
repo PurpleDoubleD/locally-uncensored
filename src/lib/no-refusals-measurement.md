@@ -34,7 +34,16 @@ meta-llama/Llama-4-Scout-17B-16E-Instruct, deepseek-ai/DeepSeek-V4-Flash-0731
 and Qwen/Qwen3.5-397B-A17B. Their two strict columns still show what the runs
 of 2026-09-10 recorded. Source: the report
 `lu-305/mail/MARKIERUNGEN-TEST-2026-10-05.md`. No other row changed, in either
-direction. 19 rows are `full` since then, 24 are `partial`.
+direction. 19 rows were `full` from then on, 24 `partial`.
+
+Eight rows left the table on 2026-11-08 because the upstream retired those
+models and served another model under each old id (web
+`lib/chat/tier-models.ts`, RETIRED_MODELS): six `full`
+(Qwen/Qwen3.8-2.4T-A95B, Gryphe/MythoMax-L2-13b,
+NousResearch/Hermes-3-Llama-3.1-70B, NousResearch/Hermes-3-Llama-3.1-405B,
+meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8, moonshotai/Kimi-K2.7-Code)
+and two `partial` (zai-org/GLM-5, MiniMaxAI/MiniMax-M2.7). No remaining row
+changed. Since then 36 rows: 13 `full`, 20 `partial`.
 
 | model id | strict 200 | strict 600 | mark |
 |---|---|---|---|
@@ -45,12 +54,9 @@ direction. 19 rows are `full` since then, 24 are `partial`.
 | Qwen/Qwen3.6-35B-A3B | partial | partial | partial |
 | zai-org/GLM-5.3-Flash | full | partial | partial |
 | Sao10K/L3-8B-Lunaris-v1-Turbo | full | full | full |
-| Gryphe/MythoMax-L2-13b | full | full | full |
-| NousResearch/Hermes-3-Llama-3.1-70B | full | full | full |
 | Sao10K/L3.1-70B-Euryale-v2.2 | partial | partial | partial |
 | openai/gpt-oss-120b | none | partial | none |
 | deepseek-ai/DeepSeek-V3.2 | full | full | full |
-| NousResearch/Hermes-3-Llama-3.1-405B | full | full | full |
 | Qwen/Qwen3-Coder-480B-A35B-Instruct-Turbo | full | full | partial |
 | moonshotai/Kimi-K3 | partial | full | partial |
 | deepseek-ai/DeepSeek-V3.1 | full | full | full |
@@ -66,20 +72,15 @@ direction. 19 rows are `full` since then, 24 are `partial`.
 | Qwen/Qwen3-VL-235B-A22B-Instruct | full | full | full |
 | Qwen/Qwen3.8-27B | partial | partial | partial |
 | Qwen/Qwen3.8-Max | partial | none | none |
-| Qwen/Qwen3.8-2.4T-A95B | full | full | full |
 | meta-llama/Llama-3.3-70B-Instruct-Turbo | full | full | full |
-| meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8 | full | full | full |
 | meta-llama/Llama-4-Scout-17B-16E-Instruct | full | full | partial |
 | google/gemma-4-31B-it-turbo | full | full | full |
 | zai-org/GLM-4.7 | full | full | full |
-| zai-org/GLM-5 | full | partial | partial |
 | zai-org/GLM-5.2 | partial | full | partial |
 | zai-org/GLM-5.3 | partial | full | partial |
 | nvidia/NVIDIA-Nemotron-3-Super-120B-A12B | full | partial | partial |
 | openai/gpt-oss-20b | none | partial | none |
 | moonshotai/Kimi-K2.6 | full | full | full |
-| moonshotai/Kimi-K2.7-Code | full | full | full |
-| MiniMaxAI/MiniMax-M2.7 | partial | full | partial |
 | MiniMaxAI/MiniMax-M3 | full | full | full |
 | mistralai/Mistral-Small-3.2-24B-Instruct-2506 | full | full | full |
 
