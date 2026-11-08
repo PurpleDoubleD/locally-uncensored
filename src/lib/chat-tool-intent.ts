@@ -261,35 +261,55 @@ export interface ChatToolRoute {
 // does read the language, decides whether to call one. English and German
 // stay exactly as before.
 
-/** Short, frequent words of English and German that the neighbouring
- *  languages do not share (no "de", "es", "me", "no", "a", "in"). One of them
- *  in a Latin-script message means the patterns above can judge it. */
+/** Short, frequent words of English and German. */
 const EN_DE_WORDS = new Set([
   'the', 'and', 'is', 'are', 'you', 'your', 'what', 'how', 'why', 'when', 'where', 'who', 'which',
   'please', 'can', 'could', 'would', 'should', 'this', 'that', 'with', 'for', 'my', 'it', 'of', 'to',
   'an', 'be', 'do', 'does', 'was', 'were', 'have', 'has', 'will', 'about', 'from', 'write', 'make',
-  'tell', 'hi', 'hello', 'hey', 'thanks', 'thank', 'yes', 'i', 'me',
+  'tell', 'hi', 'hello', 'hey', 'thanks', 'thank', 'yes', 'i', 'me', 'a', 'in', 'on', 'one', 'name',
   'und', 'der', 'die', 'das', 'ist', 'ich', 'du', 'nicht', 'ein', 'eine', 'einen', 'mit', 'auf',
-  'fuer', 'wie', 'was', 'bitte', 'mir', 'mich', 'kannst', 'kann', 'schreib', 'mach', 'zeig',
-  'hallo', 'danke', 'ja', 'nein', 'sind', 'wer', 'warum', 'wo', 'wann', 'welche', 'welcher',
+  'fuer', 'wie', 'bitte', 'mir', 'mich', 'kannst', 'kann', 'schreib', 'mach', 'zeig', 'es', 'sie',
+  'hallo', 'danke', 'ja', 'nein', 'sind', 'wer', 'warum', 'wo', 'wann', 'welche', 'welcher', 'da',
+])
+
+/** Function words of the neighbouring languages that English and German do
+ *  not use (Spanish, French, Italian, Portuguese, Dutch, Polish, Turkish).
+ *  Words both sides share ("de", "a", "in", "die", "da", "per") are left out:
+ *  only a positive sign of another language counts. */
+const OTHER_WORDS = new Set([
+  'el', 'la', 'los', 'las', 'un', 'una', 'unos', 'del', 'y', 'que', 'en', 'por', 'para', 'con', 'como',
+  'pero', 'haz', 'dibuja', 'quiero', 'puedes', 'hola', 'gracias', 'busca',
+  'le', 'les', 'une', 'des', 'et', 'est', 'pour', 'avec', 'dans', 'sur', 'je', 'moi', 'bonjour',
+  'merci', 'peux', 'fais', 'dessine', 'cherche',
+  'il', 'lo', 'gli', 'di', 'che', 'su', 'sono', 'ciao', 'grazie', 'fammi', 'disegna', 'puoi', 'cerca',
+  'os', 'uma', 'voce', 'obrigado', 'faca',
+  'het', 'een', 'ik', 'niet', 'maak', 'zoek',
+  'w', 'z', 'na', 'jest', 'czy', 'jak', 'prosze', 'zrob', 'narysuj',
+  'bir', 've', 'bu', 'icin',
 ])
 
 /**
  * Can the patterns above judge this message? False for a message mostly in a
- * non-Latin script (Japanese, Chinese, Russian, Arabic, ...) and for a Latin
- * one of three words or more without a single English or German word
- * (Spanish, French, Italian, Polish, ...). A message without letters, and one
- * or two Latin words ("hola", "ok"), count as read: those stay on the plain
- * path as before. A wrong "read" only keeps the old behaviour.
+ * non-Latin script (Japanese, Chinese, Russian, Arabic, ...), and for a Latin
+ * one that plainly is another language: more of its words are function words
+ * of Spanish, French, Italian, Portuguese, Dutch, Polish or Turkish than of
+ * English and German, or it carries accents German does not use and no
+ * English or German word at all. Everything else counts as read and stays on
+ * the plain path as before, so a wrong "read" only keeps the old behaviour.
  */
 export function detectorReads(text: string): boolean {
   const letters = (text || '').match(/\p{L}/gu) ?? []
   if (letters.length === 0) return true
   const latin = letters.filter((ch) => /\p{Script=Latin}/u.test(ch)).length
   if (latin / letters.length < 0.7) return false
+  // Umlauts and eszett are spelled out first (entumlauten), so what is left
+  // with an accent is not German.
   const words = lower(text).match(/\p{L}+/gu) ?? []
-  if (words.some((w) => EN_DE_WORDS.has(w))) return true
-  return words.length <= 2
+  const own = words.filter((w) => EN_DE_WORDS.has(w)).length
+  const other = words.filter((w) => OTHER_WORDS.has(w.normalize('NFD').replace(/\p{M}/gu, ''))).length
+  if (other > own) return false
+  const accented = words.some((w) => /[\u00c0-\u024f]/.test(w))
+  return !(own === 0 && accented)
 }
 
 /** How far back to look for the in-progress media task. */

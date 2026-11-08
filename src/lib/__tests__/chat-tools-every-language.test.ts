@@ -18,6 +18,9 @@ const OTHER_LANGUAGES = [
   'dessine un chat sur la lune', // French
   'cerca su internet il meteo di Roma', // Italian
   'wygeneruj obraz kota w kosmosie', // Polish
+  'spróbuj ponownie', // Polish: try again
+  'maak een foto van een kat', // Dutch
+  'hola', // Spanish greeting: the model answers it, with tools at hand
 ]
 
 describe('GH #224: a message the detector cannot read carries the tools', () => {
@@ -36,12 +39,17 @@ describe('GH #224: a message the detector cannot read carries the tools', () => 
 describe('English and German stay as before', () => {
   for (const text of [
     'how are you today?',
+    'Name one colour.',
+    'Say hello.',
+    'first-A-message',
+    'erste Nachricht, wirft',
+    'zweite Nachricht, laeuft echt',
+    'what is a café',
     'explain recursion to me',
     'what is the capital of France',
     'wie geht es dir?',
     'erklär mir bitte die Photosynthese',
     'hallo',
-    'hola',
     'ok',
     'thanks!',
     '42',
