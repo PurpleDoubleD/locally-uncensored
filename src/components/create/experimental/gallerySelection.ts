@@ -71,12 +71,20 @@ export interface GalleryMenuHandlers {
   readonly download: () => void
   /** Opens the question; nothing is deleted before it is answered. */
   readonly remove: () => void
+  /** Opens the tag dialog (D27, 3.1.0). */
+  readonly tags?: () => void
+  /** Hides the entries, or shows them again in the Hidden view (D27). */
+  readonly hide?: () => void
+  /** True in the Hidden view: the entry is shown again instead. */
+  readonly hidden?: boolean
 }
 
 export function buildGalleryMenu(h: GalleryMenuHandlers, count: number): MenuAction[] {
   const n = count > 1 ? ` ${count}` : ''
   return [
     { id: 'move', label: count > 1 ? `Move${n} to folder…` : 'Move to folder…', run: h.move },
+    ...(h.tags ? [{ id: 'tags', label: count > 1 ? `Tag${n}…` : 'Tags…', run: h.tags }] : []),
+    ...(h.hide ? [{ id: 'hide', label: h.hidden ? `Show${n} again` : `Hide${n} from gallery`, run: h.hide }] : []),
     { id: 'download', label: `Download${n}`, run: h.download },
     { id: 'delete', label: `Delete${n}…`, run: h.remove, destructive: true },
   ]

@@ -1,5 +1,5 @@
-// Hide and tag gallery entries (3.1.0, Discord D27, promised 05.11.2026 to
-// boromirofgeo: "hide from gallery" and tags).
+// Hide and tag gallery entries (3.1.0, Discord D27, promised 05.11.2026:
+// "hide from gallery" and tags).
 //
 // Both are labels inside the app, like folders (lib/gallery-folders.ts):
 // hiding an entry takes it out of the list and keeps its file, its prompt and

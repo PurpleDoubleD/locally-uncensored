@@ -10,7 +10,7 @@ import { PromptDetails } from './PromptDetails'
 import { cn } from '../ui/cn'
 import { MoveToFolderModal, OnBody } from './GalleryFolders'
 import { playsAsVideo } from './galleryUrl'
-import { itemsInFolder } from '../../../lib/gallery-folders'
+import { itemsInView } from '../../../lib/gallery-tags'
 
 /** How far the mouse wheel zooms a picture in the large view, and the step per notch. */
 const MAX_ZOOM = 5
@@ -21,13 +21,14 @@ const ZOOM_STEP = 1.2
  * them (the open folder, else all). Null at either end, and for an entry the
  * panel does not show.
  */
-export function galleryNeighbor<T extends { id: string; folderId?: string }>(
+export function galleryNeighbor<T extends { id: string; folderId?: string; hidden?: boolean; tags?: string[] }>(
   all: readonly T[],
   folderOpen: string | null,
   id: string,
   step: -1 | 1,
+  filter: { tag?: string | null; hidden?: boolean } = {},
 ): T | null {
-  const shown = itemsInFolder(all, folderOpen)
+  const shown = itemsInView(all, { folderId: folderOpen, tag: filter.tag ?? null, hidden: filter.hidden ?? false })
   const at = shown.findIndex((g) => g.id === id)
   if (at < 0) return null
   return shown[at + step] ?? null
@@ -68,13 +69,17 @@ export function Lightbox({ item, onClose, onSaveCharacter, onNavigate, promptOpe
   // and zoom a picture with the mouse wheel, as a photo viewer does.
   const all = useCreateStore((s) => s.gallery)
   const folderOpen = useCreateStore((s) => s.galleryFolderOpen)
-  const prev = item && onNavigate ? galleryNeighbor(all, folderOpen, item.id, -1) : null
-  const next = item && onNavigate ? galleryNeighbor(all, folderOpen, item.id, 1) : null
+  // 3.1.0 (D27): the tag filter and the Hidden view are part of the view too.
+  const tagOpen = useCreateStore((s) => s.galleryTagOpen)
+  const showHidden = useCreateStore((s) => s.galleryShowHidden)
+  const filter = { tag: tagOpen, hidden: showHidden }
+  const prev = item && onNavigate ? galleryNeighbor(all, folderOpen, item.id, -1, filter) : null
+  const next = item && onNavigate ? galleryNeighbor(all, folderOpen, item.id, 1, filter) : null
   // D3 (Discord 01.11.2026): an entry moved out of the open folder is no
   // longer in the view the arrows step through, and they were gone. The view
   // goes on with the next entry of the folder, or closes when none is left.
   // An entry opened while not in the view (from the stage) is left alone.
-  const viewKey = itemsInFolder(all, folderOpen).map((g) => g.id).join('\n')
+  const viewKey = itemsInView(all, { folderId: folderOpen, ...filter }).map((g) => g.id).join('\n')
   const lastView = useRef<{ id: string; ids: string[] } | null>(null)
   useEffect(() => {
     if (!item) { lastView.current = null; return }

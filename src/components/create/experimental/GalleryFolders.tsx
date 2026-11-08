@@ -28,7 +28,11 @@ const ROW_FIELD = `flex-1 min-w-0 ${FIELD}`
 /** The filter at the top of the gallery: "All" and every folder, with counts,
  *  and the button that manages the folders. */
 export function FolderFilter() {
-  const gallery = useCreateStore((s) => s.gallery)
+  const all = useCreateStore((s) => s.gallery)
+  // 3.1.0 (D27): the counts are of the entries the view can show, the hidden
+  // ones in the Hidden view and the others everywhere else.
+  const showHidden = useCreateStore((s) => s.galleryShowHidden)
+  const gallery = all.filter((g) => !!g.hidden === showHidden)
   const folders = useCreateStore((s) => s.galleryFolders)
   const open = useCreateStore((s) => s.galleryFolderOpen)
   const setOpen = useCreateStore((s) => s.setGalleryFolderOpen)

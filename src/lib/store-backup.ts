@@ -112,15 +112,15 @@ export const STORE_KEYS = [
   //                                    (at most SWITCHED_MAX ids)
   // Guard: src/mobile/boot/__tests__/local-keys-backup.test.ts
   'lu-mobile-thinking-default-v1', 'lu-mobile-report-queue', 'lu-mobile-switched-under-answer',
+  // 3.1.0 (C27): the gallery list without the cap, on IndexedDB
+  // (lib/gallery-persist.ts). The create-store blob keeps only a short copy.
+  'lu-gallery',
   // L5, check of package 17 (mobile-docs/r41/funde.md). When the settings were
   // last written (boot/settings-durable.ts). The start compares it with the
   // stamp in localStorage when the copy in IndexedDB is gone, and takes the
   // settings of this backup when they are newer. Listed last, so a snapshot
   // reads it after the settings it stamps.
   'lu-mobile-settings-stamp',
-  // 3.1.0 (C27): the gallery list without the cap, on IndexedDB
-  // (lib/gallery-persist.ts). The create-store blob keeps only a short copy.
-  'lu-gallery',
 ]
 
 /** The phone keys of STORE_KEYS, for the tests that hold the two lists together. */

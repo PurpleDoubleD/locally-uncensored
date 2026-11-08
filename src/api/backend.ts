@@ -548,6 +548,9 @@ export async function backendCall<T = unknown>(
     mlx_loras_open_folder: { path: "/local-api/mlx-loras-open-folder", method: "POST" },
     mlx_lora_delete: { path: "/local-api/mlx-lora-delete", method: "POST" },
     mlx_output_trash: { path: "/local-api/mlx-output-trash", method: "POST" },
+    // C27 (3.1.0): "Restore from the output folder" reads a local ComfyUI's
+    // output folder from the Rust process; desktop-only answer in the browser.
+    scan_comfy_output: { path: "/local-api/scan-comfy-output" },
     mlx_cutout: { path: "/local-api/mlx-cutout", method: "POST" },
     mlx_image_models: { path: "/local-api/mlx-image-models" },
     mlx_image_install_model: { path: "/local-api/mlx-image-install-model", method: "POST" },

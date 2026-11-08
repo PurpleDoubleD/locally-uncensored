@@ -48,6 +48,8 @@ pub const BLOCKED: &[&str] = &[
     "verify_model_files_cancel",
     "trash_model_file",
     "comfy_torch_plan",
+    // 3.1.0 (C27): reads a ComfyUI output folder on the computer; a phone has none.
+    "scan_comfy_output",
     "plugin_rea_status",
     "mcp_child_path",
     "plugin_rea_fetch",

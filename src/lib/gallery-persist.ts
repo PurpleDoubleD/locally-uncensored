@@ -1,6 +1,6 @@
 // The gallery list on IndexedDB, without the cap (3.1.0, C27).
 //
-// boromirofgeo, Discord 05.11. and 06.11.2026: "200 not enough", after the
+// Discord 05.11. and 06.11.2026: "200 not enough", after the
 // gallery had dropped his sorted folders (D3b). Until 3.1.0 the list sat in the
 // create-store blob in localStorage, about 5 MB for the whole origin, so it was
 // cut at 200 unsorted entries.
@@ -317,7 +317,7 @@ export async function startGalleryPersistence<T extends StoredEntry>(deps: Galle
       }
     } catch (err) {
       // No copy, no move: the old way holds until a copy can be made.
-      log.error('[gallery] could not keep a copy of the old gallery list, not moving it yet', { err: String(err) })
+      log.error('[gallery] could not keep a copy of the old gallery list, the move waits for the next start', { err: String(err) })
       state = 'unreadable'
       return handle
     }

@@ -227,9 +227,16 @@ function CreateExperimentalInner() {
   // so a persisted item is never mistaken for a just-made result; only a genuinely
   // new top id (an in-session generation) auto-shows.
   const prevTop = useRef<string | undefined>(gallery[0]?.id)
+  // 3.1.0 (C27): the full list from IndexedDB, or entries restored from the
+  // output folder, can put an older entry on top. Only one made in this
+  // session counts as a new result.
+  const sessionStart = useRef(Date.now() - 60_000)
   useEffect(() => {
-    const top = gallery[0]?.id
-    if (top && top !== prevTop.current) { setShownId(top); prevTop.current = top }
+    const top = gallery[0]
+    if (top && top.id !== prevTop.current) {
+      prevTop.current = top.id
+      if (top.createdAt >= sessionStart.current) setShownId(top.id)
+    }
   }, [gallery])
 
   // Switching intent/mode returns the Stage to empty — the newest gallery item

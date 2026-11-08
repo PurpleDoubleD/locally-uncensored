@@ -114,7 +114,7 @@ describe('the right-click menu', () => {
     fireEvent.click(tile('b'), { metaKey: true })
     fireEvent.contextMenu(tile('b'), { clientX: 40, clientY: 40 })
     const menu = screen.getByRole('menu')
-    expect(within(menu).getAllByRole('menuitem').map((m) => m.textContent)).toEqual(['Move 2 to folder…', 'Download 2', 'Delete 2…'])
+    expect(within(menu).getAllByRole('menuitem').map((m) => m.textContent)).toEqual(['Move 2 to folder…', 'Tag 2…', 'Hide 2 from gallery', 'Download 2', 'Delete 2…'])
   })
 
   it('a right-click right after Cmd-clicks, before the next render, keeps them (Mac run)', () => {
@@ -126,7 +126,7 @@ describe('the right-click menu', () => {
       fire('b', 'click', { metaKey: true })
       fire('b', 'contextmenu', { clientX: 40, clientY: 40 })
     })
-    expect(within(screen.getByRole('menu')).getAllByRole('menuitem').map((m) => m.textContent)).toEqual(['Move 2 to folder…', 'Download 2', 'Delete 2…'])
+    expect(within(screen.getByRole('menu')).getAllByRole('menuitem').map((m) => m.textContent)).toEqual(['Move 2 to folder…', 'Tag 2…', 'Hide 2 from gallery', 'Download 2', 'Delete 2…'])
   })
 
   it('on an unselected tile acts on that tile alone', () => {
@@ -134,7 +134,7 @@ describe('the right-click menu', () => {
     fireEvent.click(tile('a'), { metaKey: true })
     fireEvent.contextMenu(tile('d'), { clientX: 40, clientY: 40 })
     expect(selected()).toEqual(['d'])
-    expect(within(screen.getByRole('menu')).getAllByRole('menuitem').map((m) => m.textContent)).toEqual(['Move to folder…', 'Download', 'Delete…'])
+    expect(within(screen.getByRole('menu')).getAllByRole('menuitem').map((m) => m.textContent)).toEqual(['Move to folder…', 'Tags…', 'Hide from gallery', 'Download', 'Delete…'])
   })
 
   it('Delete asks with the count first; Cancel keeps everything', () => {

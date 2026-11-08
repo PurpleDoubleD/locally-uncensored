@@ -421,9 +421,12 @@ export const FROM_YOUR_PHONE = 'From your phone'
 export function galleryForRemote(items: readonly {
   id: string; type: 'image' | 'video' | 'audio'; filename: string; subfolder: string; comfyType?: string
   localPath?: string; remoteUrl?: string; prompt: string; model: string; createdAt: number; label?: string
+  hidden?: boolean
 }[]): GalleryOut[] {
   const out: GalleryOut[] = []
   for (const it of items) {
+    // Hidden on the computer (D27, 3.1.0): not shown on the phone either.
+    if (it.hidden) continue
     const base = { key: it.id, media: it.type, prompt: it.prompt ?? '', model: it.model ?? '', created_at: it.createdAt ?? 0, from_phone: it.label === FROM_YOUR_PHONE }
     if (it.localPath) out.push({ ...base, path: it.localPath })
     else if (!it.remoteUrl && it.filename && (it.comfyType ?? 'output') === 'output') out.push({ ...base, comfy_filename: it.filename, comfy_subfolder: it.subfolder ?? '' })
