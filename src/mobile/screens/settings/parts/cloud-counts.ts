@@ -10,10 +10,11 @@
  *
  * Derivation, counted 17.10.2026 (mobile-docs/r51/cloudseite.md), chat
  * counted again for the catalogue of 24.10.2026:
- *  - chat 48: the 44 rows of lib/no-refusals-measurement.md (DeepSeek R1 and
- *    GLM 5.1 left the catalogue on 24.10.) plus four that joined after that
- *    run: DeepSeek V4.1 Flash, Kimi K3.1 Pro, MiMo V2.6 Pro and Nemotron 3.5
- *    Super VL (the same 48 as lib/cloud-pitch.ts chatModels).
+ *  - chat 40: the 36 rows of lib/no-refusals-measurement.md (DeepSeek R1 and
+ *    GLM 5.1 left the catalogue on 24.10., eight retired upstream models on
+ *    08.11.) plus four that joined after that run: DeepSeek V4.1 Flash, Kimi
+ *    K3.1 Pro, MiMo V2.6 Pro and Nemotron 3.5 Super VL (the same 40 as
+ *    lib/cloud-pitch.ts chatModels).
  *  - image 15: the 10 classic image models of lib/render/cloud-models.ts and
  *    5 studio models that make a picture from words (Z-Image Base, Nucleus,
  *    JibMix Qwen, Wan 2.2 Realism, Qwen Image 2.1). Not the 3 studio twins.
@@ -49,7 +50,7 @@ export interface CloudCounts {
 export const CLOUD_COUNTED_ON = '2026-10-24'
 
 /** The counts of the whole catalogue, as the app carries it. */
-export const CATALOGUE_COUNTS = { chat: 48, image: 15, video: 24 } as const
+export const CATALOGUE_COUNTS = { chat: 40, image: 15, video: 24 } as const
 
 const withTotal = (c: { chat: number; image: number; video: number }): CloudCounts => ({ ...c, total: c.chat + c.image + c.video })
 

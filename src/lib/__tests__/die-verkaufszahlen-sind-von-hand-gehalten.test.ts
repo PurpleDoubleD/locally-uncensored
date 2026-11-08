@@ -42,8 +42,8 @@ import {
  * sonst faellt es durch.
  */
 const ERWARTET = {
-  chatModels: 48,
-  measuredChatModels: 44,
+  chatModels: 40,
+  measuredChatModels: 36,
   flashModels: 12,
   flashDailyTokens: 500_000,
   imageModels: 18,

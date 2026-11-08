@@ -224,7 +224,11 @@ const zahlenseiten = [['docs/pricing/index.html', pricing], ['docs/cloud/index.h
 // Entscheid vom 05.10.2026: fuenf der 24 haben im Drei-Runden-Test in
 // Runde zwei oder drei abgelehnt und tragen die Marke nicht mehr, seither 19
 // (Bericht lu-305/mail/MARKIERUNGEN-TEST-2026-10-05.md).
-const MARKED_MODELS = 19
+// 08.11.2026: sechs der 19 hat der Anbieter abgekuendigt und unter der alten
+// Id ein anderes Modell geliefert. Sie stehen im Web unter RETIRED_MODELS und
+// sind aus Katalog und Messtabelle heraus, seither 13. An der Messung der
+// uebrigen hat sich nichts geaendert.
+const MARKED_MODELS = 13
 // Strenger lesen kann die Menge nur verkleinern: ein Modell, das die lockere
 // Regel schon durchfallen liess, kommt unter der strengen nicht dazu. Sinkt
 // `unfiltered: 'full'` im Katalog unter die Entscheidzahl, ist der Entscheid
@@ -249,7 +253,8 @@ for (const [name, doc] of zahlenseiten) {
 // und das steht in der Messtabelle: die Zeilen VOR der Zaehlzeile.
 const factsTable = readWeb('apps/web/lib/chat/model-facts.md').split('\nCounts:')[0]
 const measuredSize = factsTable.split('\n').filter((line) => /^\|\s*\S+\/\S+\s*\|\s*(full|partial|none|unknown)\s*\|/.test(line)).length
-assert.ok(measuredSize > 40 && measuredSize <= catalogSize, `measured set ${measuredSize} out of range`)
+// Seit dem 08.11.2026 (acht abgekuendigte Zeilen heraus) 36.
+assert.ok(measuredSize > 30 && measuredSize <= catalogSize, `measured set ${measuredSize} out of range`)
 for (const [name, doc] of zahlenseiten) {
   const claimedMeasured = doc.querySelector('[data-measured-count]')
   assert.ok(claimedMeasured, `${name}: measured count anchor missing`)
