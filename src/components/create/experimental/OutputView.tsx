@@ -94,6 +94,9 @@ export function GeneratingView() {
   const progress = useCreateStore((s) => s.progress)
   // B28: the sampler's newest picture while a video renders.
   const preview = useRenderPreviewStore((s) => s.url)
+  const previewAsked = useRenderPreviewStore((s) => s.asked)
+  // C45: asked for, the sampler is running, and still no picture.
+  const noPreview = previewAsked && !preview && (progressPhase === 'sampling' || progressPhase === 'decoding')
   const isLoading = progressPhase === 'loading-model' || progressPhase === 'loading-clip' || progressPhase === 'loading-vae'
   const beat = phaseBeat(progressPhase)
 
@@ -129,10 +132,18 @@ export function GeneratingView() {
         {preview && (
           <figure className="flex flex-col items-center gap-1" data-testid="render-live-preview">
             <img src={preview} alt="Live preview of the video being rendered" className="max-h-56 max-w-[22rem] rounded-lg border border-white/10 object-contain" />
+            {/* C45 (Discord 05.11.): read as a broken video preview.
+                ComfyUI decodes one frame of the video latent per step, never
+                the motion, so the caption says it is a still on purpose. */}
             <figcaption className="t-micro text-gray-500 text-center max-w-[22rem]">
-              Rough preview of the first frame, sharper with every step. Cancel if it is going the wrong way.
+              Still of the first frame, not the motion: ComfyUI previews one frame while it renders. It gets sharper with every step, the video plays when it is done. Cancel if it is going the wrong way.
             </figcaption>
           </figure>
+        )}
+        {noPreview && (
+          <p data-testid="render-no-preview" className="t-micro text-gray-500 text-center max-w-[22rem]">
+            No preview picture for this run. ComfyUI sends one from its December 2025 versions on, and not for every model. The video shows here when it is done.
+          </p>
         )}
         <p className="t-body text-gray-300 tracking-wide">{progressText || 'Generating…'}</p>
         {isLoading && !isMlxImageHost() && <ColdLoadLine />}

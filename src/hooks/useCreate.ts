@@ -2187,6 +2187,7 @@ export function useCreate() {
       const livePreview = mode === 'video'
       if (livePreview) {
         useRenderPreviewStore.getState().setUrl(null)
+        useRenderPreviewStore.getState().setAsked(true)
         offPreview = comfyWS.onPreview((url) => useRenderPreviewStore.getState().setUrl(url))
       }
       let promptId: string
@@ -2645,6 +2646,7 @@ export function useCreate() {
       if (renderEviction) void restoreChatBackendsAfterRender(renderEviction)
       offPreview?.()
       useRenderPreviewStore.getState().setUrl(null)
+      useRenderPreviewStore.getState().setAsked(false)
       // B27: and ComfyUI's memory goes back when the setting says so.
       scheduleFreeAfterRender(
         freeAfterRenderMode(useSettingsStore.getState().settings.freeAfterRender),

@@ -13,9 +13,17 @@ import { create } from 'zustand'
 interface RenderPreviewState {
   url: string | null
   setUrl: (url: string | null) => void
+  /** C45 (3.1.0): this run asked ComfyUI for previews. With none arriving
+   *  by the time it samples, the waiting area says why instead of staying
+   *  blank (an older ComfyUI ignores the request, and not every model has
+   *  a preview decoder). */
+  asked: boolean
+  setAsked: (asked: boolean) => void
 }
 
 export const useRenderPreviewStore = create<RenderPreviewState>((set) => ({
   url: null,
   setUrl: (url) => set({ url }),
+  asked: false,
+  setAsked: (asked) => set({ asked }),
 }))
