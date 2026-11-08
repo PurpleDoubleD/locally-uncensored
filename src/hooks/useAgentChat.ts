@@ -1637,7 +1637,7 @@ export function useAgentChat() {
     // loop relied on the exact-repeat set alone, which the epoch reset (B1)
     // rightly weakened. Windowed batch repeats, per-epoch identical reads and
     // repeated narration now watch this loop too.
-    const loopGuard = new AgentLoopGuard()
+    const loopGuard = new AgentLoopGuard({ enabled: useSettingsStore.getState().settings.agentLoopGuard !== false })
     // The closing line a turn gets when the model itself said nothing usable.
     // Read from the live counters at call time, so both the normal end of the
     // run and the swallowed multimodal refusal below produce the same text.

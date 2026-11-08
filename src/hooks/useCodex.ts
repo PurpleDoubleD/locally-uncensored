@@ -1231,7 +1231,7 @@ export function useCodex() {
       // alternating calls, an injected nudge, or one varying argument reset
       // it forever while the budget allowed 200 iterations of the loop
       // (Morgan's 5-minute file_read loop, 2026-07-26).
-      const loopGuard = new AgentLoopGuard()
+      const loopGuard = new AgentLoopGuard({ enabled: useSettingsStore.getState().settings.agentLoopGuard !== false })
       // Which read produced which result message. The request builder reports
       // back the results it sent CAPPED, and this map turns those messages
       // into the loop-guard keys that must not be counted as a repeat (plan

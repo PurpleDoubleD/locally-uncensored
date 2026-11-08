@@ -2397,6 +2397,16 @@ export function SettingsPage() {
           {FEATURE_FLAGS.AGENT_MODE && (
             <Section title="Agent Permissions">
               <PermissionSettings />
+              {/* C44 (Discord 05.11.2026): the loop guard can be switched off
+                  completely. On by default (owner, 05.11.). */}
+              <InlineToggle
+                label="Loop guard"
+                enabled={settings.agentLoopGuard !== false}
+                onChange={() => updateSettings({ agentLoopGuard: settings.agentLoopGuard === false })}
+              />
+              <div className="t-micro text-gray-500 dark:text-gray-500 leading-relaxed pt-0.5">
+                Stops an agent run that keeps repeating the same steps (&quot;Loop guard halted the run&quot;). Off: the run goes on until its step limit or until you press Stop.
+              </div>
               <button
                 onClick={() => useAgentModeStore.getState().resetTutorial()}
                 className="text-[0.6rem] text-gray-500 hover:text-gray-300 transition-colors"

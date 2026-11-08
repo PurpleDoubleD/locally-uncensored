@@ -61,6 +61,7 @@ export const DEFAULT_SETTINGS: Settings = {
   // surfaces in finite wall-clock.
   agentMaxToolCalls: 400,
   agentMaxIterations: 200,
+  agentLoopGuard: true,
   // Die heutigen festen Werte aus sub-agent.ts, unveraendert uebernommen:
   // wer nichts einstellt, bekommt exakt das Verhalten von 2.6.7.
   subAgentMaxToolCalls: 10,

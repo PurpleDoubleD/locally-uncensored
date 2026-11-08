@@ -140,6 +140,14 @@ const READ_ONLY_TOOLS = new Set<string>([
 ])
 
 export class AgentLoopGuard {
+  /** Off (Settings → Agent Permissions, C44): every verdict is `ok`, the run
+   *  goes on until its step and tool call limits or the user's Stop. */
+  private readonly enabled: boolean
+
+  constructor(opts: { enabled?: boolean } = {}) {
+    this.enabled = opts.enabled !== false
+  }
+
   private lastSig: string | null = null
   private consecutive = 0
   /** Batch signatures since the last mutating batch (pure-read epoch). */
@@ -178,7 +186,7 @@ export class AgentLoopGuard {
     calls: Array<{ name: string; args: string }>,
     opts: { trimmedReadKeys?: ReadonlySet<string> } = {},
   ): LoopGuardVerdict {
-    if (calls.length === 0) return { action: 'ok' }
+    if (!this.enabled || calls.length === 0) return { action: 'ok' }
     const keys = calls.map((c) => `${c.name}|${c.args}`)
     const sig = [...keys].sort().join('||')
     const trimmed = opts.trimmedReadKeys
@@ -268,7 +276,7 @@ export class AgentLoopGuard {
   recordResults(
     results: Array<{ name: string; failed: boolean; rejected?: boolean; error?: string; args?: Record<string, unknown> }>,
   ): LoopGuardVerdict {
-    if (results.length === 0) return { action: 'ok' }
+    if (!this.enabled || results.length === 0) return { action: 'ok' }
 
     // ── Detector 7: the user keeps saying no to the same thing ──
     // A declined call ran nothing, so it is no success: it resets no count
@@ -372,6 +380,7 @@ export class AgentLoopGuard {
 
   /** Record the assistant text of one iteration (before its tools run). */
   recordNarration(text: string): LoopGuardVerdict {
+    if (!this.enabled) return { action: 'ok' }
     const norm = text.trim().replace(/\s+/g, ' ').toLowerCase()
     if (norm.length < MIN_NARRATION_LEN) {
       this.lastNarration = ''
