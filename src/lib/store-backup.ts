@@ -118,6 +118,9 @@ export const STORE_KEYS = [
   // settings of this backup when they are newer. Listed last, so a snapshot
   // reads it after the settings it stamps.
   'lu-mobile-settings-stamp',
+  // 3.1.0 (C27): the gallery list without the cap, on IndexedDB
+  // (lib/gallery-persist.ts). The create-store blob keeps only a short copy.
+  'lu-gallery',
 ]
 
 /** The phone keys of STORE_KEYS, for the tests that hold the two lists together. */
@@ -257,6 +260,8 @@ export const IDB_STORE_KEYS = new Set([
   'chat-conversations', 'locally-uncensored-memory', 'staged-changes',
   // The Remote chats of the phone shell (mobile/remote/remoteClientStore.ts).
   'lu-mobile-remote',
+  // The gallery list (lib/gallery-persist.ts, 3.1.0).
+  'lu-gallery',
 ])
 
 /**
