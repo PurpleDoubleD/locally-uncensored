@@ -667,7 +667,7 @@ export const SETTINGS_STRINGS = {
     autoNow: 'Back up now',
     autoDone: 'Backup written',
     autoUnavailable: 'The automatic backup is not available on this device.',
-    // C46: the chats of the automatic backup that are not in the list. Chats deleted on this phone are not offered.
+    // C46: the chats of the automatic backup that are not in the list. Chats deleted on purpose are not offered.
     rescue: 'Restore chats from the automatic backup',
     rescueLooking: 'Looking in the backup',
     rescueFound: (n: number) => `${n} ${n === 1 ? 'chat' : 'chats'} not in your list`,

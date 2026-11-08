@@ -19,6 +19,7 @@
  * back when the user presses the button (Settings, or the hint).
  */
 import { backendCall, isTauri } from '../api/backend'
+import { readDeletedChats } from './chat-deletions'
 import { log } from './logger'
 import type { Conversation } from '../types/chat'
 
@@ -38,6 +39,15 @@ export function chatsMissingFrom(live: readonly Conversation[], backup: readonly
   return out
 }
 
+/**
+ * What the restore offers: the chats the store does not have, without the ones
+ * deleted on purpose (lib/chat-deletions.ts). A chat lost at the start was never
+ * noted, so it stays on offer; a backup file picked by hand does not go through here.
+ */
+export function offeredChats(live: readonly Conversation[], backup: readonly unknown[], deleted: ReadonlySet<string> = readDeletedChats()): Conversation[] {
+  return chatsMissingFrom(live, backup).filter((c) => !deleted.has(c.id))
+}
+
 /** Every chat the backup files hold, as one list. Empty outside the desktop app. */
 export async function readBackupChats(): Promise<unknown[]> {
   if (!isTauri()) return []
@@ -46,9 +56,9 @@ export async function readBackupChats(): Promise<unknown[]> {
   return Array.isArray(list) ? list : []
 }
 
-/** How many chats the backups hold that the store does not. */
+/** How many chats the backups hold that the store does not and that were not deleted on purpose. */
 export async function countRestorableChats(live: () => readonly Conversation[]): Promise<number> {
-  return chatsMissingFrom(live(), await readBackupChats()).length
+  return offeredChats(live(), await readBackupChats()).length
 }
 
 /**
@@ -59,7 +69,7 @@ export async function restoreChatsFromBackup(
   live: () => readonly Conversation[],
   importConversations: (chats: Conversation[], mode: 'merge') => { added: number; skipped: number },
 ): Promise<number> {
-  const missing = chatsMissingFrom(live(), await readBackupChats())
+  const missing = offeredChats(live(), await readBackupChats())
   if (missing.length === 0) return 0
   const { added } = importConversations(missing, 'merge')
   log.warn('[chat-rescue] chats restored from the backup files', { count: added })

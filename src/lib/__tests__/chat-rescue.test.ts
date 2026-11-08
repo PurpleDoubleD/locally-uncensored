@@ -13,6 +13,9 @@ import { useChatStore } from '../../stores/chatStore'
 import type { Conversation } from '../../types/chat'
 import { parseImportedChats } from '../chat-export'
 import { chatsMissingFrom, restoreChatsFromBackup, countRestorableChats, shouldShowRescueHint, readDismissedAt, rememberDismissed } from '../chat-rescue'
+// Static, like the store: a block below resets the modules, and a dynamic import would watch another store.
+import { __resetDeletionNoteForTests, installDeletionNote } from '../chat-deletion-note'
+import { readDeletedChats } from '../chat-deletions'
 
 /**
  * Conversations in the shape 3.0.8 persisted them (src/types/chat.ts at
@@ -223,5 +226,73 @@ describe('the launch check sees what hydration sees', () => {
     const { hasStoredItem, hasReadableItem } = await load({ 'chat-conversations': value })
     expect(await hasStoredItem('chat-conversations')).toBe(true)
     expect(await hasReadableItem('chat-conversations')).toBe(true)
+  })
+})
+
+// ── Deleted is not lost (C46, 3.1.0) ───────────────────────────────────────
+
+describe('a chat deleted on purpose is not offered back, a lost one still is', () => {
+  const savedLs = Reflect.get(globalThis, 'localStorage')
+
+  beforeEach(() => {
+    backend.mockReset()
+    Object.defineProperty(globalThis, 'localStorage', { value: fakeLocalStorage(), configurable: true, writable: true })
+    __resetDeletionNoteForTests()
+  })
+
+  afterEach(() => {
+    __resetDeletionNoteForTests()
+    Object.defineProperty(globalThis, 'localStorage', { value: savedLs, configurable: true, writable: true })
+    useChatStore.setState({ conversations: [], activeConversationId: null })
+  })
+
+  it('deleted ≠ lost: the deleted chat stays away, the lost one comes back', async () => {
+    // The store came up with a and b; c was lost before this start (it never was in this list).
+    useChatStore.setState({ conversations: [chat308('a', 100), chat308('b', 200)] })
+    installDeletionNote()
+    expect(useChatStore.persist.hasHydrated()).toBe(true)
+    // The user deletes b. The backup archive keeps it, together with the lost c.
+    useChatStore.getState().deleteConversation('b')
+    backupAnswer([chat308('a', 100), chat308('b', 200), chat308('c', 300)])
+
+    const live = () => useChatStore.getState().conversations
+    expect(await countRestorableChats(live)).toBe(1)
+    expect(shouldShowRescueHint(live().length, 1, null)).toBe(false)
+    expect(await restoreChatsFromBackup(live, useChatStore.getState().importConversations)).toBe(1)
+    expect(live().map((c) => c.id).sort()).toEqual(['a', 'c'])
+  })
+
+  it('"Delete all chats" does not come back as a hint at the next start', async () => {
+    useChatStore.setState({ conversations: [chat308('a', 1), chat308('b', 2), chat308('c', 3)] })
+    installDeletionNote()
+    for (const id of ['a', 'b', 'c']) useChatStore.getState().deleteConversation(id)
+    // The next start: an empty list, the archive holds all three.
+    backupAnswer([chat308('a', 1), chat308('b', 2), chat308('c', 3)])
+    const restorable = await countRestorableChats(() => useChatStore.getState().conversations)
+    expect(restorable).toBe(0)
+    expect(shouldShowRescueHint(0, restorable, null)).toBe(false)
+  })
+
+  it('the check the other way: a list that came up empty is a loss, nothing is noted, every chat is offered', async () => {
+    // perrt: hydration brought nothing. That is the start value, not a deletion.
+    useChatStore.setState({ conversations: [] })
+    installDeletionNote()
+    // He starts a new chat after the loss; that is no deletion either.
+    useChatStore.setState({ conversations: [chat308('new', 900)] })
+    expect(readDeletedChats().size).toBe(0)
+    backupAnswer([chat308('a', 100), chat308('b', 200), chat308('c', 300)])
+    const live = () => useChatStore.getState().conversations
+    expect(await countRestorableChats(live)).toBe(3)
+    expect(shouldShowRescueHint(live().length, 3, null)).toBe(true)
+    expect(await restoreChatsFromBackup(live, useChatStore.getState().importConversations)).toBe(3)
+  })
+
+  it('a deleted chat that comes back (a file picked by hand) leaves the note', async () => {
+    useChatStore.setState({ conversations: [chat308('a', 1)] })
+    installDeletionNote()
+    useChatStore.getState().deleteConversation('a')
+    expect([...readDeletedChats()]).toEqual(['a'])
+    useChatStore.getState().importConversations([chat308('a', 1)], 'merge')
+    expect(readDeletedChats().size).toBe(0)
   })
 })
