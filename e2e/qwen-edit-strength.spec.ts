@@ -7,8 +7,8 @@ import { appModules, type AppWindow } from './support/ui'
 
 /**
  * B46 / D8 (Discord #bug-reports 30.10.2026, help chat 06.11.2026): the Edit
- * strength of a Qwen-Image 2.1 edit through ComfyUI. The edit runs as at
- * 1.00, and below 1 its result is mixed with the source in that share.
+ * strength of a Qwen-Image 2.1 edit through ComfyUI. Below 1 it is the CFG
+ * between the edit and the same image without an instruction.
  * Windows or Linux, local: a Mac runs this model on MLX, where the slider was
  * never gone.
  *
@@ -41,7 +41,7 @@ async function boot(page: Page) {
       VAELoader: { input: { required: { vae_name: combo(['qwen_image_2.1_vae_bf16.safetensors']) } } },
       KSampler: { input: { required: { sampler_name: combo(['euler']), scheduler: combo(['simple']) } } },
       TextEncodeQwenImage21: { input: { required: { clip: ['CLIP'], prompt: ['STRING'], negative_prompt: ['STRING'], resolution: ['INT'] }, optional: { vae: ['VAE'], 'images.image_1': ['IMAGE'] } } },
-      ImageScaleToTotalPixels: { input: { required: {} } }, ImageBlend: { input: { required: {} } },
+      ImageScaleToTotalPixels: { input: { required: {} } },
       EmptyLatentImage: { input: { required: {} } }, VAEEncode: { input: { required: {} } }, VAEDecode: { input: { required: {} } },
       SaveImage: { input: { required: {} } }, LoadImage: { input: { required: { image: combo(['source.png']) } } },
       VAEEncodeForInpaint: { input: { required: {} } }, InpaintModelConditioning: { input: { required: {} } }, LoadImageMask: { input: { required: {} } },
@@ -96,14 +96,14 @@ async function openEdit(page: Page) {
 /** The Edit strength row under the prompt: label, value, range input. */
 const strengthRow = (page: Page) => page.locator('div.space-y-1\\.5').filter({ has: page.getByText('Edit strength', { exact: true }) }).first()
 
-test('B46 / D8: Qwen-Image 2.1 Edit through ComfyUI at 0.40 is the full edit, 40 % of it over the source', async ({ page }) => {
+test('B46 / D8: Qwen-Image 2.1 Edit through ComfyUI at 0.40 runs at CFG 0.4 between the edit and the source as it is', async ({ page }) => {
   await openEdit(page)
 
   // At 1.00 by default: the run of today.
   const row = strengthRow(page)
   await expect(row).toBeVisible({ timeout: 15_000 })
   await expect(row).toContainText('1.00')
-  await expect(row).toContainText('1.00 is the full edit. Lower keeps more of the original.')
+  await expect(row).toContainText('1.00 is the full edit. Lower makes a lighter edit and takes longer.')
   await shot(page, 'D6-B46-1')
 
   // The real range input, moved down to 0.40 with the keyboard.
@@ -118,16 +118,18 @@ test('B46 / D8: Qwen-Image 2.1 Edit through ComfyUI at 0.40 is the full edit, 40
   await expect.poll(async () => (await posted(page)).length, { timeout: 20_000 }).toBe(1)
   const low = (await posted(page))[0]
   const sampler = Object.values(low).find((n) => n.class_type === 'KSampler')!
-  // The edit itself as at 1.00 (3.0.9 started here from the source at 0.4,
-  // and the source came back).
+  // One path from noise as at 1.00 (3.0.9 started here from the source at
+  // 0.4, and the source came back), guided 0.4 of the way from the source
+  // as it is (the encoder's negative: the image, no text) to the edit.
   expect(sampler.inputs.denoise).toBe(1)
-  expect(low[(sampler.inputs.latent_image as [string, number])[0]].class_type).toBe('TextEncodeQwenImage21')
-  const save = Object.values(low).find((n) => n.class_type === 'SaveImage')!
-  const blend = low[(save.inputs.images as [string, number])[0]]
-  expect(blend.class_type).toBe('ImageBlend')
-  expect(low[(blend.inputs.image1 as [string, number])[0]].class_type).toBe('VAEDecode')
-  expect(low[(blend.inputs.image2 as [string, number])[0]].inputs.image).toBe('source.png')
-  expect(blend.inputs.blend_factor).toBe(0.6)
+  expect(sampler.inputs.cfg).toBe(0.4)
+  const [encLink] = sampler.inputs.latent_image as [string, number]
+  const enc = low[encLink]
+  expect(enc.class_type).toBe('TextEncodeQwenImage21')
+  expect(sampler.inputs.positive).toEqual([encLink, 0])
+  expect(sampler.inputs.negative).toEqual([encLink, 1])
+  expect(enc.inputs.negative_prompt).toBe('')
+  expect(low[(enc.inputs['images.image_1'] as [string, number])[0]].inputs.image).toBe('source.png')
 
   if (SHOTS) {
     writeFileSync(`${SHOTS}/D6-workflow-staerke-0.40.json`, JSON.stringify(low, null, 2))
@@ -155,6 +157,6 @@ test('COUNTER-CHECK B46: at 1.00 (the default) the run is the template edit of t
   const sampler = Object.values(full).find((n) => n.class_type === 'KSampler')!
   expect(sampler.inputs.denoise).toBe(1)
   expect(full[(sampler.inputs.latent_image as [string, number])[0]].class_type).toBe('TextEncodeQwenImage21')
-  expect(Object.values(full).some((n) => n.class_type === 'ImageBlend')).toBe(false)
+  expect(sampler.inputs.cfg).toBe(1)
   if (SHOTS) writeFileSync(`${SHOTS}/D6-workflow-staerke-1.00.json`, JSON.stringify(full, null, 2))
 })

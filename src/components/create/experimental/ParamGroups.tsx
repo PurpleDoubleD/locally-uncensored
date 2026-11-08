@@ -5,7 +5,7 @@ import { useCreateStore } from '../../../stores/createStore'
 import { useCreateExp } from './CreateContext'
 import { cloudModelById, defaultCloudModel } from '../../../stores/cloudCatalogStore'
 import { classifyModel } from '../../../api/comfyui'
-import { readsEditStrength, EDIT_STRENGTH_HINT } from '../../../lib/edit-references'
+import { readsEditStrength, EDIT_STRENGTH_HINT, EDIT_STRENGTH_HINT_MAC } from '../../../lib/edit-references'
 import { latentDownscale, nativeHiresFinalSize, type HiresUpscaleMethod } from '../../../api/hires-fix'
 import { isMlxImageHost } from '../../../api/mlx-image'
 import { macHiresPass } from '../../../lib/mac-hires'
@@ -501,8 +501,8 @@ export function ParamGroups() {
         {(macEdit || (isEdit && !isCloud && readsEditStrength(laneType, laneModel))) && (
           // 1.00 is the edit from the prompt alone, as before. Lower keeps
           // more of the image. A Qwen edit through ComfyUI reads the same
-          // field and mixes its result with the source (B46 / D8).
-          <Slider label="Edit strength" min={0.05} max={1} step={0.05} value={s.editStrength} onChange={s.setEditStrength} format={(v) => v.toFixed(2)} hint={EDIT_STRENGTH_HINT} />
+          // field as guidance between the edit and no edit (B46 / D8).
+          <Slider label="Edit strength" min={0.05} max={1} step={0.05} value={s.editStrength} onChange={s.setEditStrength} format={(v) => v.toFixed(2)} hint={macEdit ? EDIT_STRENGTH_HINT_MAC : EDIT_STRENGTH_HINT} />
         )}
         {meta.allowsMask && !isCloud && (
           <Slider label="Mask edge feather" min={0} max={64} step={1} value={s.growMaskBy} onChange={s.setGrowMaskBy} unit="px" />

@@ -6,8 +6,10 @@
  * started the sampler from the source at denoise = strength: the box run of
  * 01.11. came back as the source at 0.40 and 0.10, only 1.00 edited, because
  * these edit models copy their reference unless they start from pure noise.
- * Now the edit always runs as the template runs it, and below 1 the result is
- * mixed with the source in that share (ImageBlend after the decode).
+ * Now the strength is guidance between the edit and the same images without
+ * an instruction (identity): identity + strength x (edit - identity), on one
+ * path from noise. At CFG 1 that is the sampler's CFG with identity as the
+ * negative; above it the nested DualCFGGuider keeps the user's negative.
  *
  * Run: npx vitest run src/api/__tests__/qwen-edit-strength.test.ts
  */
@@ -44,7 +46,7 @@ function nodes(without: string[] = []): Record<string, unknown> {
   const n: Record<string, unknown> = {}
   for (const k of ['CLIPTextEncode', 'KSampler', 'EmptyLatentImage', 'EmptySD3LatentImage', 'LoadImage', 'VAEEncode', 'VAEDecode',
     'SaveImage', 'ModelSamplingAuraFlow', 'TextEncodeQwenImageEditPlus', 'CFGNorm', 'FluxKontextImageScale', 'ImageScaleToTotalPixels',
-    'RandomNoise', 'KSamplerSelect', 'CFGGuider', 'ManualSigmas', 'SamplerCustomAdvanced', 'ImageBlend'])
+    'RandomNoise', 'KSamplerSelect', 'CFGGuider', 'ManualSigmas', 'SamplerCustomAdvanced', 'DualCFGGuider', 'BasicScheduler'])
     n[k] = { input: { required: {} } }
   n.UNETLoader = { input: { required: { unet_name: [[EDIT_PLUS, QWEN21_OFFICIAL_MODEL, TURBO]] } } }
   n.CheckpointLoaderSimple = { input: { required: { ckpt_name: [[SDXL]] } } }
@@ -80,129 +82,156 @@ beforeEach(() => {
   } as never)
 })
 
-/** The edit as the template runs it: denoise 1.0, nothing between the
- *  decode and SaveImage. */
-function expectTemplateEdit(wf: ComfyApiGraph) {
-  const [, save] = nodeOf(wf, 'SaveImage')!
-  expect(classAt(wf, save.inputs.images)).toBe('VAEDecode')
-  expect(classTypes(wf)).not.toContain('ImageBlend')
+const ref = (wf: ComfyApiGraph, r: unknown) => nodeAt(wf, String((r as [string, number])[0]))!
+
+/** The edit as the template runs it: denoise 1.0, the template's negative
+ *  and CFG, no second guidance. */
+function expectTemplateEdit(wf: ComfyApiGraph, cfg: number) {
+  expect(classTypes(wf)).not.toContain('DualCFGGuider')
+  const sampler = nodeOf(wf, 'KSampler')?.[1] ?? nodeOf(wf, 'CFGGuider')![1]
+  expect(sampler.inputs.cfg).toBe(cfg)
+  if (sampler.class_type === 'KSampler') expect(sampler.inputs.denoise).toBe(1)
 }
 
-/** The ImageBlend in front of SaveImage: the decoded edit as image1, the
- *  source as image2, at 1 - strength. */
-function blendOf(wf: ComfyApiGraph) {
-  const [, save] = nodeOf(wf, 'SaveImage')!
-  expect(classAt(wf, save.inputs.images)).toBe('ImageBlend')
-  const blend = nodeAt(wf, String((save.inputs.images as [string, number])[0]))!
-  expect(classAt(wf, blend.inputs.image1)).toBe('VAEDecode')
-  expect(blend.inputs.blend_mode).toBe('normal')
-  return blend
-}
-
-describe('Qwen-Image 2.1 edit: the Edit strength reaches the picture', () => {
-  it('0.4: the edit runs at denoise 1.0 from the encoder latent, then 40 % of it over 60 % of the source', async () => {
-    const wf = await build(QWEN21_OFFICIAL_MODEL, 'qwenimage', { editStrength: 0.4 })
+describe('Qwen-Image 2.1 edit (CFG 1): the strength is the CFG between the edit and the source as it is', () => {
+  it('0.4: KSampler at CFG 0.4, positive the edit, negative the same images without an instruction, denoise 1 from the encoder latent', async () => {
+    const wf = await build(QWEN21_OFFICIAL_MODEL, 'qwenimage', { editStrength: 0.4, cfgScale: 1 })
     const [encId, enc] = nodeOf(wf, 'TextEncodeQwenImage21')!
     const [, sampler] = nodeOf(wf, 'KSampler')!
-    // The run that edits, unchanged: the 3.0.9 start from the source at
-    // denoise 0.4 is what gave the source back.
+    expect(sampler.inputs.cfg).toBe(0.4)
     expect(sampler.inputs.denoise).toBe(1)
     expect(sampler.inputs.latent_image).toEqual([encId, 2])
-    expect(classTypes(wf)).not.toContain('VAEEncode')
-    const blend = blendOf(wf)
-    expect(blend.inputs.blend_factor).toBe(0.6)
-    // image2 is the source the encoder reads as image_1.
-    expect(blend.inputs.image2).toEqual(enc.inputs['images.image_1'])
-    expect(nodeAt(wf, String((blend.inputs.image2 as [string, number])[0]))!.inputs.image).toBe('jacket.png')
+    expect(sampler.inputs.positive).toEqual([encId, 0])
+    // The node's negative: the images with the (empty) negative prompt.
+    expect(sampler.inputs.negative).toEqual([encId, 1])
+    expect(enc.inputs.negative_prompt).toBe('')
+    expect(enc.inputs['images.image_1']).toBeDefined()
+    // One path from noise: no blend, no start from the source.
+    for (const c of ['ImageBlend', 'VAEEncode', 'DualCFGGuider']) expect(classTypes(wf)).not.toContain(c)
   })
 
-  it('every step of the slider gives its own share: 0.05 to 0.95', async () => {
-    for (const s of [0.05, 0.25, 0.5, 0.75, 0.95]) {
-      const wf = await build(QWEN21_OFFICIAL_MODEL, 'qwenimage', { editStrength: s })
-      expect(blendOf(wf).inputs.blend_factor).toBeCloseTo(1 - s, 6)
-      expect(nodeOf(wf, 'KSampler')![1].inputs.denoise).toBe(1)
+  it('every step of the slider is its own CFG: 0.05 to 0.95', async () => {
+    for (const s of [0.05, 0.3, 0.5, 0.7, 0.95]) {
+      const wf = await build(QWEN21_OFFICIAL_MODEL, 'qwenimage', { editStrength: s, cfgScale: 1 })
+      expect(nodeOf(wf, 'KSampler')![1].inputs.cfg).toBe(s)
     }
   })
 
-  it('with references the source is still image_1, not a reference', async () => {
-    const wf = await build(QWEN21_OFFICIAL_MODEL, 'qwenimage', { editStrength: 0.5, referenceImages: ['ref2.png', 'ref3.png'] })
-    const blend = blendOf(wf)
-    expect(nodeAt(wf, String((blend.inputs.image2 as [string, number])[0]))!.inputs.image).toBe('jacket.png')
+  it('with a negative prompt the identity is an encode of its own, the same images and no text', async () => {
+    const wf = await build(QWEN21_OFFICIAL_MODEL, 'qwenimage', { editStrength: 0.5, cfgScale: 1, negativePrompt: 'blurry' })
+    const encoders = Object.entries(wf).filter(([, node]) => node.class_type === 'TextEncodeQwenImage21')
+    expect(encoders).toHaveLength(2)
+    const [, sampler] = nodeOf(wf, 'KSampler')!
+    const identity = ref(wf, sampler.inputs.negative)
+    expect(identity.class_type).toBe('TextEncodeQwenImage21')
+    expect(identity.inputs.prompt).toBe('')
+    expect(identity.inputs.negative_prompt).toBe('')
+    const edit = ref(wf, sampler.inputs.positive)
+    expect(identity.inputs['images.image_1']).toEqual(edit.inputs['images.image_1'])
+    expect(identity.inputs.resolution).toBe(edit.inputs.resolution)
+    expect(sampler.inputs.negative).toEqual([encoders.find(([, n]) => n === identity)![0], 0])
   })
 
-  it('COUNTER-CHECK: 1 or unset is the graph of today, denoise 1.0 on the encoder latent, no blend', async () => {
+  it('COUNTER-CHECK: 1 or unset is the graph of today', async () => {
     for (const extra of [{}, { editStrength: 1 }]) {
-      const wf = await build(QWEN21_OFFICIAL_MODEL, 'qwenimage', extra)
+      const wf = await build(QWEN21_OFFICIAL_MODEL, 'qwenimage', { ...extra, cfgScale: 1 })
       const [encId] = nodeOf(wf, 'TextEncodeQwenImage21')!
-      const [, sampler] = nodeOf(wf, 'KSampler')!
-      expect(sampler.inputs.denoise).toBe(1)
-      expect(sampler.inputs.latent_image).toEqual([encId, 2])
-      expectTemplateEdit(wf)
+      expectTemplateEdit(wf, 1)
+      expect(nodeOf(wf, 'KSampler')![1].inputs.latent_image).toEqual([encId, 2])
     }
   })
 
   it('COUNTER-CHECK: the img2img denoise alone changes nothing on a Qwen edit', async () => {
-    const wf = await build(QWEN21_OFFICIAL_MODEL, 'qwenimage', { denoise: 0.3 })
-    expect(nodeOf(wf, 'KSampler')![1].inputs.denoise).toBe(1)
-    expectTemplateEdit(wf)
+    const wf = await build(QWEN21_OFFICIAL_MODEL, 'qwenimage', { denoise: 0.3, cfgScale: 1 })
+    expectTemplateEdit(wf, 1)
   })
 
   it('below 0.05 it holds at 0.05', async () => {
-    const wf = await build(QWEN21_OFFICIAL_MODEL, 'qwenimage', { editStrength: 0.01 })
-    expect(blendOf(wf).inputs.blend_factor).toBe(0.95)
+    const wf = await build(QWEN21_OFFICIAL_MODEL, 'qwenimage', { editStrength: 0.01, cfgScale: 1 })
+    expect(nodeOf(wf, 'KSampler')![1].inputs.cfg).toBe(0.05)
   })
 
-  it('a ComfyUI without ImageBlend says so instead of failing in the run', async () => {
-    const err = await build(QWEN21_OFFICIAL_MODEL, 'qwenimage', { editStrength: 0.4 }, ['ImageBlend']).catch((e: unknown) => e)
+  it('Turbo: its whole schedule, the CFGGuider at the strength against the identity', async () => {
+    const wf = await build(TURBO, 'qwenimage', { editStrength: 0.5, cfgScale: 1 })
+    const [encId] = nodeOf(wf, 'TextEncodeQwenImage21')!
+    const [, custom] = nodeOf(wf, 'SamplerCustomAdvanced')!
+    expect(classAt(wf, custom.inputs.sigmas)).toBe('ManualSigmas')
+    const guider = ref(wf, custom.inputs.guider)
+    expect(guider.class_type).toBe('CFGGuider')
+    expect(guider.inputs.cfg).toBe(0.5)
+    expect(guider.inputs.negative).toEqual([encId, 1])
+    expect(custom.inputs.latent_image).toEqual([encId, 2])
+  })
+
+  it('COUNTER-CHECK Turbo at 1: the template chain as before', async () => {
+    const wf = await build(TURBO, 'qwenimage', { editStrength: 1, cfgScale: 1 })
+    const guider = ref(wf, nodeOf(wf, 'SamplerCustomAdvanced')![1].inputs.guider)
+    expect(guider.inputs.cfg).toBe(1)
+    expect(classTypes(wf)).not.toContain('DualCFGGuider')
+  })
+})
+
+describe('a Qwen edit above CFG 1: the nested DualCFGGuider keeps the negative', () => {
+  it('Qwen-Image-Edit 2509 at CFG 4, 0.4: cond1 the edit, cond2 the identity, cfg_conds 0.4, cfg_cond2_negative 4, nested', async () => {
+    const wf = await build(EDIT_PLUS, 'qwenimage1', { editStrength: 0.4, cfgScale: 4 })
+    expect(classTypes(wf)).not.toContain('KSampler')
+    const [, custom] = nodeOf(wf, 'SamplerCustomAdvanced')!
+    const guider = ref(wf, custom.inputs.guider)
+    expect(guider.class_type).toBe('DualCFGGuider')
+    expect(guider.inputs).toMatchObject({ cfg_conds: 0.4, cfg_cond2_negative: 4, style: 'nested' })
+    const edit = ref(wf, guider.inputs.cond1)
+    const identity = ref(wf, guider.inputs.cond2)
+    expect(edit.class_type).toBe('TextEncodeQwenImageEditPlus')
+    expect(identity.class_type).toBe('TextEncodeQwenImageEditPlus')
+    expect(identity.inputs.prompt).toBe('')
+    expect(identity.inputs.image1).toEqual(edit.inputs.image1)
+    // Empty negative prompt: the identity IS the negative encode.
+    expect(guider.inputs.negative).toEqual(guider.inputs.cond2)
+    // The KSampler's steps, scheduler, sampler and seed, denoise 1 on the
+    // encoded source as the template.
+    const sigmas = ref(wf, custom.inputs.sigmas)
+    expect(sigmas).toMatchObject({ class_type: 'BasicScheduler', inputs: { scheduler: 'simple', steps: 20, denoise: 1 } })
+    expect(ref(wf, custom.inputs.sampler).inputs.sampler_name).toBe('euler')
+    expect(ref(wf, custom.inputs.noise).inputs.noise_seed).toBe(7)
+    expect(classAt(wf, custom.inputs.latent_image)).toBe('VAEEncode')
+  })
+
+  it('with a negative prompt the identity is its own encode and the negative stays the negative', async () => {
+    const wf = await build(EDIT_PLUS, 'qwenimage1', { editStrength: 0.6, cfgScale: 4, negativePrompt: 'blurry' })
+    const guider = ref(wf, nodeOf(wf, 'SamplerCustomAdvanced')![1].inputs.guider)
+    const identity = ref(wf, guider.inputs.cond2)
+    const negative = ref(wf, guider.inputs.negative)
+    expect(identity.inputs.prompt).toBe('')
+    expect(String(negative.inputs.prompt)).toContain('blurry')
+    expect(guider.inputs.cond2).not.toEqual(guider.inputs.negative)
+  })
+
+  it('Qwen-Image 2.1 at CFG 4 takes the same guider', async () => {
+    const wf = await build(QWEN21_OFFICIAL_MODEL, 'qwenimage', { editStrength: 0.5, cfgScale: 4 })
+    const [encId] = nodeOf(wf, 'TextEncodeQwenImage21')!
+    const [, custom] = nodeOf(wf, 'SamplerCustomAdvanced')!
+    const guider = ref(wf, custom.inputs.guider)
+    expect(guider.inputs).toMatchObject({ cond1: [encId, 0], cond2: [encId, 1], negative: [encId, 1], cfg_conds: 0.5, cfg_cond2_negative: 4 })
+    expect(custom.inputs.latent_image).toEqual([encId, 2])
+  })
+
+  it('a ComfyUI without DualCFGGuider says so instead of failing in the run', async () => {
+    const err = await build(EDIT_PLUS, 'qwenimage1', { editStrength: 0.4, cfgScale: 4 }, ['DualCFGGuider']).catch((e: unknown) => e)
     expect(err).toBeInstanceOf(WorkflowUnavailableError)
     expect(String((err as Error).message)).toMatch(/Edit strength below 1 needs a newer ComfyUI/)
   })
 
-  it('Turbo: its whole schedule as at 1, then the same blend', async () => {
-    const wf = await build(TURBO, 'qwenimage', { editStrength: 0.5 })
-    const [samplerId, custom] = nodeOf(wf, 'SamplerCustomAdvanced')!
-    expect(classAt(wf, custom.inputs.sigmas)).toBe('ManualSigmas')
-    expect(classTypes(wf)).not.toContain('SplitSigmasDenoise')
-    expect(classAt(wf, custom.inputs.latent_image)).toBe('TextEncodeQwenImage21')
-    const blend = blendOf(wf)
-    expect(blend.inputs.blend_factor).toBe(0.5)
-    const decode = nodeAt(wf, String((blend.inputs.image1 as [string, number])[0]))!
-    expect(decode.inputs.samples).toEqual([samplerId, 0])
-  })
-
-  it('COUNTER-CHECK Turbo at 1: the template chain as before', async () => {
-    const wf = await build(TURBO, 'qwenimage', { editStrength: 1 })
-    expect(classAt(wf, nodeOf(wf, 'SamplerCustomAdvanced')![1].inputs.sigmas)).toBe('ManualSigmas')
-    expectTemplateEdit(wf)
-  })
-})
-
-describe('Qwen-Image-Edit 2509/2511: the same field, the same blend', () => {
-  it('0.4: the template edit at denoise 1.0, then mixed with the scaled source it edited', async () => {
-    const wf = await build(EDIT_PLUS, 'qwenimage1', { editStrength: 0.4 })
-    const [, sampler] = nodeOf(wf, 'KSampler')!
-    expect(sampler.inputs.denoise).toBe(1)
-    expect(classAt(wf, sampler.inputs.latent_image)).toBe('VAEEncode')
-    const blend = blendOf(wf)
-    expect(blend.inputs.blend_factor).toBe(0.6)
-    // The source the latent was encoded from (FluxKontextImageScale), so
-    // both images have the same size.
-    const [, enc] = nodeOf(wf, 'VAEEncode')!
-    expect(blend.inputs.image2).toEqual(enc.inputs.pixels)
-    expect(classAt(wf, blend.inputs.image2)).toBe('FluxKontextImageScale')
-  })
-
-  it('COUNTER-CHECK: unset stays at 1.0, the template', async () => {
-    const wf = await build(EDIT_PLUS, 'qwenimage1')
-    expect(nodeOf(wf, 'KSampler')![1].inputs.denoise).toBe(1)
-    expectTemplateEdit(wf)
+  it('COUNTER-CHECK: 2509 unset stays the template, KSampler at CFG 4', async () => {
+    const wf = await build(EDIT_PLUS, 'qwenimage1', { cfgScale: 4 })
+    expectTemplateEdit(wf, 4)
   })
 })
 
 describe('every other edit ignores it', () => {
-  it('SDXL keeps the img2img denoise and no blend', async () => {
-    const wf = await build(SDXL, 'sdxl', { editStrength: 0.2 })
-    expect(nodeOf(wf, 'KSampler')![1].inputs.denoise).toBe(0.7)
-    expectTemplateEdit(wf)
+  it('SDXL keeps the img2img denoise and its CFG', async () => {
+    const wf = await build(SDXL, 'sdxl', { editStrength: 0.2, cfgScale: 7 })
+    const [, sampler] = nodeOf(wf, 'KSampler')!
+    expect(sampler.inputs.denoise).toBe(0.7)
+    expect(sampler.inputs.cfg).toBe(7)
   })
 })
