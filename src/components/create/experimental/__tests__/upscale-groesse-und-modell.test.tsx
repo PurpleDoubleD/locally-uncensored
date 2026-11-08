@@ -141,7 +141,7 @@ describe('the rules', () => {
     const scaleOf = (model: string, factor: number) => {
       const g = buildUpscaleWorkflow({ image: 'p.png', model, factor, sourceWidth: 640, sourceHeight: 480 }, nodes(model))
       const n = Object.values(g).find((x) => x.class_type === 'ImageScaleBy')
-      return [n?.inputs.scale_by, n?.inputs.upscale_method]
+      return [n?.inputs?.scale_by, n?.inputs?.upscale_method]
     }
     expect(scaleOf(X4, 8)).toEqual([2, 'lanczos'])
     expect(scaleOf(X2, 1.5)).toEqual([0.75, 'area'])
