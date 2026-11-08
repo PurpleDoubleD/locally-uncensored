@@ -22,10 +22,9 @@ const SERVER_ONLY: Record<string, Record<string, string>> = {
   'api/cloud/memory-sync.ts': { '`${CLOUD_BASE}${path}${suffix}`': 'the cloud API' },
   'api/comfyui.ts': { "comfyuiUrl('/upload/image')": 'the local image engine' },
   'api/discover.ts': { url: 'model catalogue pages' },
-  'api/vram-handoff.ts': {
-    url: 'an http(s) address or a /view address of the local image engine',
-    "getImageUrl(name, '', 'input')": 'a /view address of the local image engine, its input folder',
-  },
+  // D4: a file of the local image engine goes through the proxy now; only a
+  // web address the call named itself is fetched by the browser.
+  'api/vram-handoff.ts': { url: 'an http(s) address the call named, never a file of the local image engine' },
   'lib/backend-detector.ts': { url: 'probes of local server ports' },
   'hooks/useCloudCreate.ts': { 'vj.result_url': 'signed result URL of a cloud job', 'src.result_url': 'signed result URL of a cloud job' },
   'components/create/experimental/PresetWorkshop.tsx': { 'fresh.result_url': 'signed result URL of a cloud job' },

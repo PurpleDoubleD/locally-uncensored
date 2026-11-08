@@ -21,7 +21,8 @@ const src = readFileSync(join(__dirname, '../useCodex.ts'), 'utf8')
 
 describe('useCodex loop-detector (Bug #5 → AgentLoopGuard)', () => {
   it('instantiates the shared AgentLoopGuard for the run', () => {
-    expect(src).toMatch(/new AgentLoopGuard\(\)/)
+    // C44: built with the Settings switch (on unless switched off).
+    expect(src).toMatch(/new AgentLoopGuard\(\{ enabled: useSettingsStore\.getState\(\)\.settings\.agentLoopGuard !== false \}\)/)
     expect(src).toContain("from '../lib/agent-loop-guard'")
   })
 
