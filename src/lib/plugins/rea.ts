@@ -26,6 +26,13 @@ export const REA_PLUGIN = {
 } as const
 
 /**
+ * The newest publish date npm may pick for anything REA pulls in. REA 6.5.0
+ * came out on 14.10.2026, LU checked it on 17.10.2026. A new REA version moves
+ * this together with REA_VERSION and REA_INTEGRITY (commands/plugin_rea.rs).
+ */
+export const REA_RESOLVE_BEFORE = '2026-10-17T00:00:00.000Z'
+
+/**
  * How long REA's first `initialize` may take. `npx` installs REA's pinned
  * dependencies before the server answers, and on the first start that is a
  * download: on the Windows box (d307-k, 19.10.2026, a slow line) it took
@@ -163,6 +170,14 @@ export function reaServerConfig(status: ReaStatus): MCPServerConfig {
   if (why) throw new Error(why)
   const env: Record<string, string> = {
     npm_config_ignore_scripts: 'true',
+    // The tarball pins REA's own dependencies exactly; theirs are ranges, and
+    // npm resolved them on each user's first start (marky_7777, 07.11.2026:
+    // the start of 27.10. pulled four packages newer than LU's check). With a
+    // cutoff every range resolves to what existed when LU checked REA.
+    npm_config_before: REA_RESOLVE_BEFORE,
+    // npm's own warnings (prebuild-install is deprecated, it comes with Frida's
+    // optional package and never runs here) are no errors of REA's.
+    npm_config_loglevel: 'error',
     npm_config_update_notifier: 'false',
     npm_config_fund: 'false',
     npm_config_audit: 'false',

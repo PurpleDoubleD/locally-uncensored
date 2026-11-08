@@ -128,6 +128,17 @@ export const HANDSHAKE_CAP_MS = 10 * 60_000
 export const INSTALLING_NOTE = 'Installing server dependencies … the first start can take a few minutes.'
 
 /**
+ * Whether a stderr chunk is only npm talking while npx installs the server
+ * ("npm warn deprecated prebuild-install@7.1.3 …"). That is no error of the
+ * server's, and as a WARN in the log it read like one (marky_7777,
+ * 07.11.2026). A chunk with any other line in it stays a warning.
+ */
+export function isNpmNotice(data: string): boolean {
+  const lines = data.split(/\r?\n/).map((l) => l.trim()).filter(Boolean)
+  return lines.length > 0 && lines.every((l) => /^npm (warn|notice)\b/i.test(l))
+}
+
+/**
  * How much longer the handshake waits, or null when it gives up: the server
  * has been quiet for `quietMs`, or the whole handshake reached `capMs`.
  */
@@ -291,7 +302,8 @@ export class MCPExternalClient {
         })
 
         command.stderr.on('data', (data: string) => {
-          log.warn(`[MCP:${this.config.name}] stderr`, { data })
+          if (isNpmNotice(data)) log.info(`[MCP:${this.config.name}] npm`, { data })
+          else log.warn(`[MCP:${this.config.name}] stderr`, { data })
           this.lastOutputAt = Date.now()
           if (!this.registered) this.onProgress?.(INSTALLING_NOTE)
         })
