@@ -71,12 +71,14 @@ describe('the bar', () => {
 })
 
 describe('the factor', () => {
-  it('starts at 2x and takes only 2 or 4', () => {
+  it('starts at 2x and takes any factor from 1x to 8x', () => {
     expect(st().upscaleFactor).toBe(2)
     st().setUpscaleFactor(4)
     expect(st().upscaleFactor).toBe(4)
-    st().setUpscaleFactor(3 as never)
-    expect(st().upscaleFactor).toBe(2)
+    st().setUpscaleFactor(3)
+    expect(st().upscaleFactor).toBe(3)
+    st().setUpscaleFactor(20)
+    expect(st().upscaleFactor).toBe(8)
   })
 })
 

@@ -65,7 +65,7 @@ import { MAC_EDIT_DEAD_SIDE, MAC_EDIT_SIDE_INSTEAD, imageLaneModels, mlxTakesEdi
 import { STUDIO_MODELS } from '../lib/render/studio-contract'
 import { cloudModelsFor } from './cloudCatalogStore'
 import { createRunModel } from '../lib/render/create-studio'
-import { DEFAULT_UPSCALE_FACTOR, normalizeUpscaleFactor, type UpscaleFactor } from '../lib/local-upscale'
+import { DEFAULT_UPSCALE_FACTOR, normalizeUpscaleFactor, normalizeUpscaleLongSide, type UpscaleFactor } from '../lib/local-upscale'
 import { characterLoraFile, isLocalCharacter, type CharacterRef } from '../lib/character-ref'
 import { triggerWordNote, typedTriggerWord } from '../lib/train-trigger'
 import { loraLaneKey, moveLoraPick, sanitizeLoraLanes, switchLoraLane, type LoraPick } from '../lib/render/lora-lanes'
@@ -609,8 +609,15 @@ export interface CreateState {
   /** Local Enhance Image: the files ComfyUI lists in models/upscale_models.
    *  Mirrored by fetchModels. Runtime-only. */
   upscaleModelList: string[]
-  /** Local Enhance Image: 2x or 4x the side. A preference, persisted. */
+  /** Local Enhance Image: how much larger per side, 1x to 8x. A
+   *  preference, persisted. */
   upscaleFactor: UpscaleFactor
+  /** Local Enhance Image: a target long side in pixels instead of the
+   *  factor, or null for the factor. Persisted. */
+  upscaleLongSide: number | null
+  /** Local Enhance Image: the upscale model picked in the Composer, or null
+   *  for the automatic choice (pickUpscaleModel). Persisted. */
+  upscaleModelPick: string | null
   comfyRunning: boolean
   /** Runtime-only: an upscaler is installed on this Mac (SeedVR2 on the
    *  second engine), so Enhance Image is a local tab there. Set by
@@ -702,6 +709,8 @@ export interface CreateState {
   setMotionModelList: (list: ClassifiedModel[]) => void
   setUpscaleModelList: (list: string[]) => void
   setUpscaleFactor: (f: UpscaleFactor) => void
+  setUpscaleLongSide: (px: number | null) => void
+  setUpscaleModelPick: (model: string | null) => void
   setExtendSource: (s: { jobId: string; url: string; label: string } | null) => void
   setMusicDuration: (s: number) => void
   setMusicLyrics: (l: string) => void
@@ -1221,6 +1230,8 @@ export const useCreateStore = create<CreateState>()(
       motionModelList: [],
       upscaleModelList: [] as string[],
       upscaleFactor: DEFAULT_UPSCALE_FACTOR as UpscaleFactor,
+      upscaleLongSide: null as number | null,
+      upscaleModelPick: null as string | null,
       comfyRunning: false,
       mlxUpscale: false,
       vhsInstallPrompt: null,
@@ -1576,7 +1587,9 @@ export const useCreateStore = create<CreateState>()(
       setLipsyncModelList: (lipsyncModelList) => set({ lipsyncModelList }),
       setMotionModelList: (motionModelList) => set({ motionModelList }),
       setUpscaleModelList: (upscaleModelList) => set({ upscaleModelList }),
-      setUpscaleFactor: (f) => set({ upscaleFactor: normalizeUpscaleFactor(f) }),
+      setUpscaleFactor: (f) => set({ upscaleFactor: normalizeUpscaleFactor(f), upscaleLongSide: null }),
+      setUpscaleLongSide: (px) => set({ upscaleLongSide: normalizeUpscaleLongSide(px) }),
+      setUpscaleModelPick: (upscaleModelPick) => set({ upscaleModelPick }),
       setExtendSource: (extendSource) => set({ extendSource }),
       setMusicDuration: (s2) => set({ musicDuration: Math.max(5, Math.min(240, Math.floor(s2))) }),
       setMusicLyrics: (musicLyrics) => set({ musicLyrics: musicLyrics.slice(0, 2000) }),
@@ -1990,6 +2003,8 @@ export const useCreateStore = create<CreateState>()(
         // price from yesterday is a lie, see the field's own doc comment.
         cloudStudioOptions: state.cloudStudioOptions,
         upscaleFactor: state.upscaleFactor,
+        upscaleLongSide: state.upscaleLongSide,
+        upscaleModelPick: state.upscaleModelPick,
       }),
       // Future schema bumps hook into migrate. NOTE: zustand only invokes it
       // when the stored blob carries a NUMERIC version that differs — legacy
@@ -2035,6 +2050,8 @@ export const useCreateStore = create<CreateState>()(
         // plus imageSubMode 'img2img'. Fixed on the raw blob, because the
         // value is not a member of the current union any more.
         if ('upscaleFactor' in safe) safe.upscaleFactor = normalizeUpscaleFactor(safe.upscaleFactor)
+        if ('upscaleLongSide' in safe) safe.upscaleLongSide = normalizeUpscaleLongSide(safe.upscaleLongSide)
+        if ('upscaleModelPick' in safe && typeof safe.upscaleModelPick !== 'string') safe.upscaleModelPick = null
         if (safe.mode === 'i2i') {
           safe.mode = 'image'
           safe.imageSubMode = 'img2img'

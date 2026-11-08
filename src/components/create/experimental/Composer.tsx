@@ -25,7 +25,8 @@ import { subscribeInstallRuns, getInstallRun } from '../../../lib/model-install-
 import { useWorkflowStore, shouldShowManagerNotice } from '../../../stores/workflowStore'
 import { isInputHint, missingSourceHint, noPromptHint, shouldShowLaneHint } from './laneHint'
 import { stageShowsSetupCard, laneModelCount } from './stageGate'
-import { localUpscaleReady, normalizeUpscaleFactor } from '../../../lib/local-upscale'
+import { localUpscaleReady } from '../../../lib/local-upscale'
+import { UpscaleSizeControls } from './UpscaleSizeControls'
 import { frameRangeFor, framesOnRange } from '../../../lib/video-length'
 import { needsMaskFor } from './maskGate'
 import { ModelChip } from './ModelChip'
@@ -83,8 +84,6 @@ export function Composer({ onOpenAdvanced, onOpenWorkflows }: Props) {
   const trainKind = useCreateStore((s) => s.trainKind)
   const targetResolution = useCreateStore((s) => s.targetResolution)
   const setTargetResolution = useCreateStore((s) => s.setTargetResolution)
-  const upscaleFactor = useCreateStore((s) => s.upscaleFactor)
-  const setUpscaleFactor = useCreateStore((s) => s.setUpscaleFactor)
   const upscaleModelCount = useCreateStore((s) => s.upscaleModelList.length)
   // Enhance Image on a Mac runs SeedVR2, which takes a factor and nothing
   // else from Create (commands/mlx.rs mlx_upscale).
@@ -527,20 +526,7 @@ export function Composer({ onOpenAdvanced, onOpenWorkflows }: Props) {
             {studioPick && studioPrice?.error && (
               <span className="t-control text-red-300">{studioPrice.error}</span>
             )}
-            {meta.id === 'upscale' && backend === 'local' && !macUpscale && (
-              <Tooltip content="How much larger the result is, per side.">
-                <div>
-                  <Segmented
-                    size="sm"
-                    layoutId="upscale-factor"
-                    ariaLabel="Upscale factor"
-                    value={String(normalizeUpscaleFactor(upscaleFactor))}
-                    onChange={(v) => setUpscaleFactor(normalizeUpscaleFactor(Number(v)))}
-                    options={[{ value: '2', label: '2x' }, { value: '4', label: '4x' }]}
-                  />
-                </div>
-              </Tooltip>
-            )}
+            {meta.id === 'upscale' && backend === 'local' && !macUpscale && <UpscaleSizeControls />}
             {meta.id === 'upscale' && macUpscale && (
               <Tooltip content="How much larger the picture gets. Up to 4096 pixels on the longest side.">
                 <div>

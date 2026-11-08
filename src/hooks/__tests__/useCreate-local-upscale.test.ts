@@ -25,7 +25,7 @@ vi.mock('../../api/comfyui-nodes', async (orig) => ({
   ...((await orig()) as Record<string, unknown>),
   getAllNodeInfo: vi.fn(async () => ({
     LoadImage: {}, ImageUpscaleWithModel: {}, SaveImage: {}, ImageScale: {},
-    UpscaleModelLoader: { input: { required: { model_name: [['RealESRGAN_x4plus.safetensors']] } } },
+    UpscaleModelLoader: { input: { required: { model_name: [['RealESRGAN_x4plus.safetensors', '2x-AnimeSharp.pth']] } } },
     ImageScaleBy: { input: { required: { upscale_method: [['nearest-exact', 'bilinear', 'area', 'bicubic', 'lanczos']] } } },
   })),
 }))
@@ -134,6 +134,35 @@ describe('a local Enhance', () => {
     const { result } = renderHook(() => useCreate())
     await result.current.generate()
     expect(sent.graphs).toEqual([])
-    expect(useCreateStore.getState().error).toMatch(/Try 2x or a smaller image/)
+    expect(useCreateStore.getState().error).toMatch(/Pick a smaller size or a smaller image/)
+  })
+})
+
+describe('3.1.0: any size and a picked model (Discord 08.11.)', () => {
+  it('a long side of 1920 px on a 640×480 photo is 3x, through the 4x model and down', async () => {
+    useCreateStore.getState().setUpscaleLongSide(1920)
+    await run()
+    const scale = Object.values(sent.graphs[0]).find((n) => n.class_type === 'ImageScaleBy')?.inputs.scale_by
+    expect(scale).toBe(0.75)
+    expect([useCreateStore.getState().gallery[0].width, useCreateStore.getState().gallery[0].height]).toEqual([1920, 1440])
+  }, 15_000)
+
+  it('1.5x runs, and the model picked in the Composer is the one loaded', async () => {
+    useCreateStore.setState({ upscaleModelList: [UPSCALER, '2x-AnimeSharp.pth'] })
+    useCreateStore.getState().setUpscaleModelPick('2x-AnimeSharp.pth')
+    useCreateStore.getState().setUpscaleFactor(1.5)
+    await run()
+    const g = sent.graphs[0]
+    expect(Object.values(g).find((n) => n.class_type === 'UpscaleModelLoader')?.inputs.model_name).toBe('2x-AnimeSharp.pth')
+    expect(Object.values(g).find((n) => n.class_type === 'ImageScaleBy')?.inputs.scale_by).toBe(0.75)
+    expect(useCreateStore.getState().gallery[0].width).toBe(960)
+  }, 15_000)
+
+  it('a long side that does not enlarge is refused before ComfyUI is asked', async () => {
+    useCreateStore.getState().setUpscaleLongSide(512)
+    const { result } = renderHook(() => useCreate())
+    await result.current.generate()
+    expect(sent.graphs).toEqual([])
+    expect(useCreateStore.getState().error).toMatch(/already 640×480, larger than 512 px/)
   })
 })
