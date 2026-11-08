@@ -63,7 +63,10 @@ export function CreatePanel({ open, onOpenChange, activeId, onSelect }: Props) {
   // thousands opens as fast as one of sixty. A new view starts at the top.
   const viewKey = `${folderOpen ?? ''}\n${tagOpen ?? ''}\n${showHidden}`
   const [page, setPage] = useState({ key: viewKey, n: GALLERY_PAGE })
-  const limit = page.key === viewKey ? page.n : GALLERY_PAGE
+  // Without IntersectionObserver nothing would load the next page, so all of
+  // it is shown at once.
+  const canPage = typeof IntersectionObserver !== 'undefined'
+  const limit = !canPage ? count : page.key === viewKey ? page.n : GALLERY_PAGE
   const shown = limit >= count ? gallery : gallery.slice(0, limit)
   const scroller = useRef<HTMLDivElement | null>(null)
   const sentinel = useRef<HTMLDivElement | null>(null)
@@ -71,10 +74,6 @@ export function CreatePanel({ open, onOpenChange, activeId, onSelect }: Props) {
   useEffect(() => {
     const end = sentinel.current
     if (!more || !end) return
-    if (typeof IntersectionObserver === 'undefined') {
-      setPage({ key: viewKey, n: count })
-      return
-    }
     const io = new IntersectionObserver((entries) => {
       if (entries.some((e) => e.isIntersecting)) setPage((p) => ({ key: viewKey, n: (p.key === viewKey ? p.n : GALLERY_PAGE) + GALLERY_PAGE }))
     }, { root: scroller.current, rootMargin: '400px 0px' })
