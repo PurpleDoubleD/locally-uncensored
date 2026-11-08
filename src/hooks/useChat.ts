@@ -1106,6 +1106,8 @@ export function useChat() {
           const media = m.role === 'assistant' ? lastMediaFromBlocks(m) : null
           return { role: m.role, content: m.content, mediaKind: media?.kind, mediaArgs: media?.args }
         })
+      // A message in a language the detector cannot read comes back as an
+      // `open` route: the tools ride along and the model decides (GH #224).
       const route = resolveChatToolRoute(content, !!images?.length, recent)
       // Cloud mode has no local ComfyUI pipeline: media intents stay on the
       // plain-chat path (cloud renders live in the Create tab) instead of

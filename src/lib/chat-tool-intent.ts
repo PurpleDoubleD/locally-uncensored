@@ -14,7 +14,8 @@
  * explanation request, or normal Q&A must NOT match (otherwise every message
  * would route through the tool loop). It errs toward the concrete signals a
  * user gives when they actually want a web lookup, a file written, or an
- * image/video made — in both English and German.
+ * image/video made — in both English and German. A message in any other
+ * language carries the tools and the model decides (detectorReads, GH #224).
  */
 
 /** The exact tools surfaced in plain chat. Order is irrelevant. */
@@ -241,10 +242,54 @@ export interface ChatToolRouteMsg {
 }
 
 export interface ChatToolRoute {
-  capability: ChatToolCapability
+  /** `open`: the message is in a language the detector above cannot read
+   *  (GH #224), so the tools ride along and the model decides. */
+  capability: ChatToolCapability | 'open'
   /** Present for media routes; `args` carries the prior generation's parameters
    *  (prompt, inputImage, duration…) for a faithful regenerate. */
   mediaHint?: { kind: 'image' | 'video'; args?: Record<string, unknown> }
+}
+
+// ── Languages the detector does not read (GH #224, C51) ───────────
+//
+// Every pattern above is English or German. A Japanese "猫の画像を作って", a
+// Spanish "dibuja un gato" or a Russian "найди в интернете" matched none of
+// them, and the turn went to the plain path, where no tool exists: Chat Tools
+// were, for everyone writing in another language, never on. Keyword lists for
+// every language would never be complete. So the detector says when it cannot
+// judge a message at all, and such a turn carries the tools; the model, which
+// does read the language, decides whether to call one. English and German
+// stay exactly as before.
+
+/** Short, frequent words of English and German that the neighbouring
+ *  languages do not share (no "de", "es", "me", "no", "a", "in"). One of them
+ *  in a Latin-script message means the patterns above can judge it. */
+const EN_DE_WORDS = new Set([
+  'the', 'and', 'is', 'are', 'you', 'your', 'what', 'how', 'why', 'when', 'where', 'who', 'which',
+  'please', 'can', 'could', 'would', 'should', 'this', 'that', 'with', 'for', 'my', 'it', 'of', 'to',
+  'an', 'be', 'do', 'does', 'was', 'were', 'have', 'has', 'will', 'about', 'from', 'write', 'make',
+  'tell', 'hi', 'hello', 'hey', 'thanks', 'thank', 'yes', 'i', 'me',
+  'und', 'der', 'die', 'das', 'ist', 'ich', 'du', 'nicht', 'ein', 'eine', 'einen', 'mit', 'auf',
+  'fuer', 'wie', 'was', 'bitte', 'mir', 'mich', 'kannst', 'kann', 'schreib', 'mach', 'zeig',
+  'hallo', 'danke', 'ja', 'nein', 'sind', 'wer', 'warum', 'wo', 'wann', 'welche', 'welcher',
+])
+
+/**
+ * Can the patterns above judge this message? False for a message mostly in a
+ * non-Latin script (Japanese, Chinese, Russian, Arabic, ...) and for a Latin
+ * one of three words or more without a single English or German word
+ * (Spanish, French, Italian, Polish, ...). A message without letters, and one
+ * or two Latin words ("hola", "ok"), count as read: those stay on the plain
+ * path as before. A wrong "read" only keeps the old behaviour.
+ */
+export function detectorReads(text: string): boolean {
+  const letters = (text || '').match(/\p{L}/gu) ?? []
+  if (letters.length === 0) return true
+  const latin = letters.filter((ch) => /\p{Script=Latin}/u.test(ch)).length
+  if (latin / letters.length < 0.7) return false
+  const words = lower(text).match(/\p{L}+/gu) ?? []
+  if (words.some((w) => EN_DE_WORDS.has(w))) return true
+  return words.length <= 2
 }
 
 /** How far back to look for the in-progress media task. */
@@ -267,7 +312,7 @@ export function resolveChatToolRoute(
       ? { capability: direct, mediaHint: { kind: direct } }
       : { capability: direct }
   }
-  if (!isMediaContinuation(text)) return null
+  if (!isMediaContinuation(text)) return detectorReads(text) ? null : { capability: 'open' }
 
   const window = recent.slice(-MEDIA_CONTEXT_WINDOW)
   for (let i = window.length - 1; i >= 0; i--) {
@@ -282,5 +327,5 @@ export function resolveChatToolRoute(
       if (cap === 'image' || cap === 'video') return { capability: cap, mediaHint: { kind: cap } }
     }
   }
-  return null
+  return detectorReads(text) ? null : { capability: 'open' }
 }
