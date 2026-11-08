@@ -10,11 +10,13 @@ interface Props {
   /** Where the bar starts and a small mark sits, for a range around zero
    *  (the LoRA strength). Without it the bar starts at min, as before. */
   origin?: number
+  /** One short line under the slider: what its ends mean. */
+  hint?: string
 }
 
 // Upgrade of src/components/settings/SliderControl.tsx — same neutral-grey fill
 // and thumb as the live app, plus a unit + tabular-mono value readout.
-export function Slider({ label, value, min, max, step, onChange, unit, format, origin }: Props) {
+export function Slider({ label, value, min, max, step, onChange, unit, format, origin, hint }: Props) {
   // Held inside the track: a value outside min..max (a stored setting from a
   // wider range) drew the bar and the thumb past the end of the slider.
   const at = (v: number) => max > min ? Math.min(100, Math.max(0, ((v - min) / (max - min)) * 100)) : 0
@@ -50,6 +52,7 @@ export function Slider({ label, value, min, max, step, onChange, unit, format, o
           style={{ left: `calc(${pct}% - 7px)`, zIndex: 1, boxShadow: '0 1px 4px rgba(0,0,0,0.4)' }}
         />
       </div>
+      {hint && <p className="t-micro text-gray-500 leading-snug">{hint}</p>}
     </div>
   )
 }

@@ -241,7 +241,12 @@ export function applyNativeHiresFix(
   const terminalDecodeIds = new Set<string>()
   for (const [, node] of apiNodes(workflow)) {
     if (!IMAGE_OUTPUT_NODES.has(node.class_type)) continue
-    const imageRef = nodeInput(node, 'images')
+    let imageRef = nodeInput(node, 'images')
+    if (!isComfyLinkRef(imageRef)) continue
+    // The Edit strength of a Qwen edit (B46 / D8) mixes the decoded edit,
+    // image1, with its source; the pass goes on the edit, the mix stays.
+    const blend = nodeAt(workflow, String(imageRef[0]))
+    if (blend?.class_type === 'ImageBlend') imageRef = nodeInput(blend, 'image1')
     if (!isComfyLinkRef(imageRef)) continue
     const decodeId = String(imageRef[0])
     const decode = nodeAt(workflow, decodeId)

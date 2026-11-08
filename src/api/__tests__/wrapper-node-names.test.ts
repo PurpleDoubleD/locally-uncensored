@@ -101,10 +101,11 @@ const CORE_NODES = new Set([
   // [nodes_edit_model.py], ImageScaleToTotalPixels [nodes_post_processing.py 234].
   'WanFirstLastFrameToVideo', 'FluxKontextMultiReferenceLatentMethod', 'ModelSamplingFlux', 'ReferenceLatent',
   'ImageScaleToTotalPixels',
-  // B46 (Qwen edit strength on Turbo), read in ComfyUI master on 01.11.2026:
-  // SplitSigmasDenoise [nodes_custom_sampler.py 228, outputs high_sigmas,
-  // low_sigmas].
-  'SplitSigmasDenoise',
+  // B46 / D8 (Qwen edit strength), read in ComfyUI master on 08.11.2026:
+  // ImageBlend [nodes_post_processing.py, class Blend: image1, image2,
+  // blend_factor 0..1, blend_mode; out = image1 x (1 - f) + image2 x f, at
+  // the size of image1].
+  'ImageBlend',
   'YuE2GenerateMusic', 'EmptyYuE2LatentAudio',
   // lora
   'LoraLoader', 'LoraLoaderModelOnly',

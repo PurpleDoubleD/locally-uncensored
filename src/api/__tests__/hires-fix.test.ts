@@ -118,6 +118,26 @@ describe('applyNativeHiresFix', () => {
     expect(result).toEqual(expect.objectContaining({ width: 1280, height: 1280 }))
   })
 
+  it('B46 / D8: an Edit strength below 1 (ImageBlend before SaveImage) gets the pass on the edit, the mix stays', () => {
+    const workflow: ComfyApiGraph = baseWorkflow()
+    workflow['9'] = { class_type: 'LoadImage', inputs: { image: 'source.png' } }
+    workflow['10'] = { class_type: 'ImageBlend', inputs: { image1: ['5', 0], image2: ['9', 0], blend_factor: 0.6, blend_mode: 'normal' } }
+    workflow['6'] = { class_type: 'SaveImage', inputs: { images: ['10', 0], filename_prefix: 'LU' } }
+
+    const result = applyNativeHiresFix(workflow, {
+      baseWidth: 1024,
+      baseHeight: 1024,
+      scale: 1.5,
+      denoise: 0.35,
+      steps: 12,
+      upscaleMethod: 'bislerp',
+    })
+
+    expect(nodeInput(result.workflow['5'], 'samples')).toEqual([result.samplerNodeId, 0])
+    expect(nodeInput(result.workflow['10'], 'image1')).toEqual(['5', 0])
+    expect(nodeInput(result.workflow['6'], 'images')).toEqual(['10', 0])
+  })
+
   it('rejects workflows whose final decode is not fed by a core KSampler', () => {
     const workflow: ComfyApiGraph = baseWorkflow()
     workflow['4'].class_type = 'SamplerCustom'

@@ -1159,19 +1159,21 @@ export async function buildDynamicWorkflow(
     ? await getSystemVRAM().catch(() => null)
     : null
   const fullImages = comfyEditFullImages(cardGb)
-  // B46 (Discord 30.10.2026, back in 3.0.9): the Edit strength of a Qwen
-  // edit. 1 is the template's edit from the empty latent, as before; below 1
-  // the sampler starts from the source itself at that denoise, so less of
-  // the picture changes. Up to 3.0.7 the slider showed here but its value
-  // never reached the graph (denoise stayed 1.0 on an empty latent).
+  // B46 / D8 (Discord 06.11.2026, 3.0.10): the Edit strength of a Qwen edit.
+  // The edit itself always runs as the template runs it, 1 is that result.
+  // Below 1 the result is mixed with the source in that share (ImageBlend
+  // after the decode), so 0.40 keeps 60 % of the source. 3.0.9 started the
+  // sampler from the source at denoise = strength instead: these edit models
+  // copy their reference unless they start from (nearly) pure noise, so
+  // every value below 1 came back as the source (box run 01.11., 0.40 and
+  // 0.10 equal to the source, only 1.00 red).
   const qwenEditStrength = (isQwenEdit || isQwen1Edit) && Number.isFinite(gp.editStrength) && gp.editStrength! < 1
     ? Math.max(0.05, gp.editStrength!)
     : 1
-  // The source and the side the encoder scales it to, for that start.
+  // The source the result is mixed with.
   let qwenEditSource: [string, number] | null = null
-  let qwenEditSide = 0
-  if (isQwenEdit && qwenEditStrength < 1) {
-    requireRelease(allNodes, ['ImageScaleToTotalPixels', 'VAEEncode'],
+  if (qwenEditStrength < 1) {
+    requireRelease(allNodes, ['ImageBlend'],
       'An Edit strength below 1 needs a newer ComfyUI. Update ComfyUI, or set the Edit strength to 1.', strategy)
   }
   if (isQwen1Edit) {
@@ -1246,7 +1248,6 @@ export async function buildDynamicWorkflow(
       }
       qwenInputs.vae = [vaeSourceId, vaeOutputSlot]
       qwenEditSource = qwenInputs['images.image_1'] as [string, number]
-      qwenEditSide = qwenInputs.resolution as number
     } else if (createRefs.length > 0) {
       // B45: references without a source. They are image_1 and up; the
       // picture still comes from the empty latent at the canvas size below.
@@ -1268,6 +1269,7 @@ export async function buildDynamicWorkflow(
       workflow[scaleId] = { class_type: 'FluxKontextImageScale', inputs: { image: [loadId, 0] } }
       qwen1EditImageRef = [scaleId, 0]
     }
+    qwenEditSource = qwen1EditImageRef
     // References go in unscaled as image2 and image3: the node resizes every
     // extra image itself, only image1 sets the canvas.
     const refInputs: ComfyNodeInputs = {}
@@ -1463,20 +1465,6 @@ export async function buildDynamicWorkflow(
       // calls out as required, because any other size shifts the edit.
       latentRef = [posId, 2]
       delete workflow[latentId]
-      if (qwenEditStrength < 1 && qwenEditSource) {
-        // B46: the source at exactly the size of that latent. The encoder
-        // scales image_1 to about side x side pixels on multiples of 32 in
-        // its own shape (nodes_qwen.py); ImageScaleToTotalPixels does the
-        // same sum with side² pixels and steps of 32.
-        const scaleId = String(n++)
-        workflow[scaleId] = {
-          class_type: 'ImageScaleToTotalPixels',
-          inputs: { image: qwenEditSource, upscale_method: 'lanczos', megapixels: (qwenEditSide * qwenEditSide) / (1024 * 1024), resolution_steps: 32 },
-        }
-        const encId = String(n++)
-        workflow[encId] = { class_type: 'VAEEncode', inputs: { pixels: [scaleId, 0], vae: [vaeSourceId, vaeOutputSlot] } }
-        latentRef = [encId, 0]
-      }
     }
   }
 
@@ -1855,10 +1843,6 @@ export async function buildDynamicWorkflow(
       sampler: part({ class_type: 'KSamplerSelect', inputs: { sampler_name: QWEN21_TURBO_SAMPLING.sampler } }),
       sigmas: part({ class_type: 'ManualSigmas', inputs: { sigmas: QWEN21_TURBO_SIGMAS } }),
     }
-    if (qwenEditStrength < 1) {
-      // B46 on Turbo: its own schedule, cut to the strength (low_sigmas).
-      qwenTurboCustom.sigmas = [part({ class_type: 'SplitSigmasDenoise', inputs: { sigmas: qwenTurboCustom.sigmas, denoise: qwenEditStrength } })[0], 1]
-    }
   }
 
   const samplerId = String(n++)
@@ -1891,8 +1875,8 @@ export async function buildDynamicWorkflow(
       cfg: params.cfgScale,
       sampler_name: qwenTurbo ? QWEN21_TURBO_SAMPLING.sampler : params.sampler,
       scheduler: qwenTurbo ? QWEN21_TURBO_SAMPLING.scheduler : params.scheduler,
-      // Qwen edits: 1.0 like their templates, or the Edit strength (B46).
-      denoise: isInpaint ? (params.denoise ?? 0.85) : isI2I ? (params.denoise ?? 0.7) : qwenEditStrength,
+      // Qwen edits: 1.0 like their templates, whatever the Edit strength.
+      denoise: isInpaint ? (params.denoise ?? 0.85) : isI2I ? (params.denoise ?? 0.7) : 1.0,
     },
   }
 
@@ -1909,6 +1893,20 @@ export async function buildDynamicWorkflow(
           vae: [vaeSourceId, vaeOutputSlot],
         },
       }
+  let imageOut: [string, number] = [decodeId, 0]
+
+  // B46 / D8: an Edit strength below 1 mixes the edit with its source. The
+  // edit is image1, so the output keeps its size; ImageBlend scales the
+  // source to it. Out = edit x strength + source x (1 - strength).
+  if (qwenEditStrength < 1 && qwenEditSource) {
+    const blendId = String(n++)
+    workflow[blendId] = {
+      class_type: 'ImageBlend',
+      inputs: { image1: imageOut, image2: qwenEditSource, blend_factor: Number((1 - qwenEditStrength).toFixed(4)), blend_mode: 'normal' },
+      _meta: { title: `Edit strength ${qwenEditStrength.toFixed(2)}` },
+    }
+    imageOut = [blendId, 0]
+  }
 
   // ─── Phase 6: Output ───
 
@@ -1927,7 +1925,7 @@ export async function buildDynamicWorkflow(
     workflow[String(n)] = {
       class_type: 'SaveImage',
       inputs: {
-        images: [decodeId, 0],
+        images: imageOut,
         filename_prefix: promptFilenamePrefix(params.prompt, false),
       },
     }

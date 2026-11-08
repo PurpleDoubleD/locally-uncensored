@@ -1,14 +1,13 @@
 /**
- * B46 (Discord #bug-reports 30.10.2026; back in 3.0.9 on
- * David's word 01.11.): the Edit strength of a Qwen edit through ComfyUI.
+ * B46 / D8 (Discord #bug-reports 30.10.2026, help chat 06.11.2026 on 3.0.10):
+ * the Edit strength of a Qwen edit through ComfyUI.
  *
- * Up to 3.0.7 the slider showed on a Qwen-Image 2.1 edit, but it set
- * `denoise`, and the graph sampled at 1.0 from the empty latent of
- * TextEncodeQwenImage21 whatever it said; 3.0.8 took it out as dead. Now it
- * is the Edit strength (`editStrength`, 1 = as before): below 1 the sampler
- * starts from the source, scaled to exactly the latent the encoder hands
- * over, at that denoise. Qwen-Image-Edit 2509/2511 already samples from the
- * encoded source and only needs the denoise.
+ * Up to 3.0.7 the slider set `denoise`, which the graph never read. 3.0.9
+ * started the sampler from the source at denoise = strength: the box run of
+ * 01.11. came back as the source at 0.40 and 0.10, only 1.00 edited, because
+ * these edit models copy their reference unless they start from pure noise.
+ * Now the edit always runs as the template runs it, and below 1 the result is
+ * mixed with the source in that share (ImageBlend after the decode).
  *
  * Run: npx vitest run src/api/__tests__/qwen-edit-strength.test.ts
  */
@@ -45,7 +44,7 @@ function nodes(without: string[] = []): Record<string, unknown> {
   const n: Record<string, unknown> = {}
   for (const k of ['CLIPTextEncode', 'KSampler', 'EmptyLatentImage', 'EmptySD3LatentImage', 'LoadImage', 'VAEEncode', 'VAEDecode',
     'SaveImage', 'ModelSamplingAuraFlow', 'TextEncodeQwenImageEditPlus', 'CFGNorm', 'FluxKontextImageScale', 'ImageScaleToTotalPixels',
-    'RandomNoise', 'KSamplerSelect', 'CFGGuider', 'ManualSigmas', 'SamplerCustomAdvanced', 'SplitSigmasDenoise'])
+    'RandomNoise', 'KSamplerSelect', 'CFGGuider', 'ManualSigmas', 'SamplerCustomAdvanced', 'ImageBlend'])
     n[k] = { input: { required: {} } }
   n.UNETLoader = { input: { required: { unet_name: [[EDIT_PLUS, QWEN21_OFFICIAL_MODEL, TURBO]] } } }
   n.CheckpointLoaderSimple = { input: { required: { ckpt_name: [[SDXL]] } } }
@@ -81,99 +80,129 @@ beforeEach(() => {
   } as never)
 })
 
-describe('Qwen-Image 2.1 edit: the Edit strength reaches the graph', () => {
-  it('0.4: the KSampler runs at denoise 0.4 from the encoded source, not the empty latent', async () => {
+/** The edit as the template runs it: denoise 1.0, nothing between the
+ *  decode and SaveImage. */
+function expectTemplateEdit(wf: ComfyApiGraph) {
+  const [, save] = nodeOf(wf, 'SaveImage')!
+  expect(classAt(wf, save.inputs.images)).toBe('VAEDecode')
+  expect(classTypes(wf)).not.toContain('ImageBlend')
+}
+
+/** The ImageBlend in front of SaveImage: the decoded edit as image1, the
+ *  source as image2, at 1 - strength. */
+function blendOf(wf: ComfyApiGraph) {
+  const [, save] = nodeOf(wf, 'SaveImage')!
+  expect(classAt(wf, save.inputs.images)).toBe('ImageBlend')
+  const blend = nodeAt(wf, String((save.inputs.images as [string, number])[0]))!
+  expect(classAt(wf, blend.inputs.image1)).toBe('VAEDecode')
+  expect(blend.inputs.blend_mode).toBe('normal')
+  return blend
+}
+
+describe('Qwen-Image 2.1 edit: the Edit strength reaches the picture', () => {
+  it('0.4: the edit runs at denoise 1.0 from the encoder latent, then 40 % of it over 60 % of the source', async () => {
     const wf = await build(QWEN21_OFFICIAL_MODEL, 'qwenimage', { editStrength: 0.4 })
     const [encId, enc] = nodeOf(wf, 'TextEncodeQwenImage21')!
     const [, sampler] = nodeOf(wf, 'KSampler')!
-    expect(sampler.inputs.denoise).toBe(0.4)
-    expect(sampler.inputs.latent_image).not.toEqual([encId, 2])
-    expect(classAt(wf, sampler.inputs.latent_image)).toBe('VAEEncode')
-    const [, vaeEnc] = nodeOf(wf, 'VAEEncode')!
-    expect(vaeEnc.inputs.vae).toEqual(enc.inputs.vae)
-    // The source the encoder reads as image_1, scaled the way the encoder
-    // scales it: side² pixels, multiples of 32, lanczos.
-    const [scaleId, scale] = nodeOf(wf, 'ImageScaleToTotalPixels')!
-    expect(vaeEnc.inputs.pixels).toEqual([scaleId, 0])
-    expect(scale.inputs.image).toEqual(enc.inputs['images.image_1'])
-    expect(nodeAt(wf, String((scale.inputs.image as [string, number])[0]))!.inputs.image).toBe('jacket.png')
-    expect(scale.inputs.resolution_steps).toBe(32)
-    expect(scale.inputs.upscale_method).toBe('lanczos')
-    const side = enc.inputs.resolution as number
-    expect(side).toBe(1344) // 1328 on the grid of 32 (qwenEditResolution)
-    expect((scale.inputs.megapixels as number) * 1024 * 1024).toBeCloseTo(side * side, 6)
+    // The run that edits, unchanged: the 3.0.9 start from the source at
+    // denoise 0.4 is what gave the source back.
+    expect(sampler.inputs.denoise).toBe(1)
+    expect(sampler.inputs.latent_image).toEqual([encId, 2])
+    expect(classTypes(wf)).not.toContain('VAEEncode')
+    const blend = blendOf(wf)
+    expect(blend.inputs.blend_factor).toBe(0.6)
+    // image2 is the source the encoder reads as image_1.
+    expect(blend.inputs.image2).toEqual(enc.inputs['images.image_1'])
+    expect(nodeAt(wf, String((blend.inputs.image2 as [string, number])[0]))!.inputs.image).toBe('jacket.png')
   })
 
-  it('the shared side of many images is the side the source is scaled to', async () => {
-    const refs = Array.from({ length: 6 }, (_, i) => `ref${i + 2}.png`)
-    const wf = await build(QWEN21_OFFICIAL_MODEL, 'qwenimage', { editStrength: 0.5, referenceImages: refs })
-    const side = nodeOf(wf, 'TextEncodeQwenImage21')![1].inputs.resolution as number
-    expect(side).toBeLessThan(1328)
-    expect((nodeOf(wf, 'ImageScaleToTotalPixels')![1].inputs.megapixels as number) * 1024 * 1024).toBeCloseTo(side * side, 6)
+  it('every step of the slider gives its own share: 0.05 to 0.95', async () => {
+    for (const s of [0.05, 0.25, 0.5, 0.75, 0.95]) {
+      const wf = await build(QWEN21_OFFICIAL_MODEL, 'qwenimage', { editStrength: s })
+      expect(blendOf(wf).inputs.blend_factor).toBeCloseTo(1 - s, 6)
+      expect(nodeOf(wf, 'KSampler')![1].inputs.denoise).toBe(1)
+    }
   })
 
-  it('COUNTER-CHECK: 1 or unset is the graph of today, denoise 1.0 on the encoder latent', async () => {
+  it('with references the source is still image_1, not a reference', async () => {
+    const wf = await build(QWEN21_OFFICIAL_MODEL, 'qwenimage', { editStrength: 0.5, referenceImages: ['ref2.png', 'ref3.png'] })
+    const blend = blendOf(wf)
+    expect(nodeAt(wf, String((blend.inputs.image2 as [string, number])[0]))!.inputs.image).toBe('jacket.png')
+  })
+
+  it('COUNTER-CHECK: 1 or unset is the graph of today, denoise 1.0 on the encoder latent, no blend', async () => {
     for (const extra of [{}, { editStrength: 1 }]) {
       const wf = await build(QWEN21_OFFICIAL_MODEL, 'qwenimage', extra)
       const [encId] = nodeOf(wf, 'TextEncodeQwenImage21')!
       const [, sampler] = nodeOf(wf, 'KSampler')!
       expect(sampler.inputs.denoise).toBe(1)
       expect(sampler.inputs.latent_image).toEqual([encId, 2])
-      expect(classTypes(wf)).not.toContain('VAEEncode')
-      expect(classTypes(wf)).not.toContain('ImageScaleToTotalPixels')
+      expectTemplateEdit(wf)
     }
   })
 
   it('COUNTER-CHECK: the img2img denoise alone changes nothing on a Qwen edit', async () => {
     const wf = await build(QWEN21_OFFICIAL_MODEL, 'qwenimage', { denoise: 0.3 })
     expect(nodeOf(wf, 'KSampler')![1].inputs.denoise).toBe(1)
+    expectTemplateEdit(wf)
   })
 
   it('below 0.05 it holds at 0.05', async () => {
     const wf = await build(QWEN21_OFFICIAL_MODEL, 'qwenimage', { editStrength: 0.01 })
-    expect(nodeOf(wf, 'KSampler')![1].inputs.denoise).toBe(0.05)
+    expect(blendOf(wf).inputs.blend_factor).toBe(0.95)
   })
 
-  it('a ComfyUI without ImageScaleToTotalPixels says so instead of failing in the run', async () => {
-    const err = await build(QWEN21_OFFICIAL_MODEL, 'qwenimage', { editStrength: 0.4 }, ['ImageScaleToTotalPixels']).catch((e: unknown) => e)
+  it('a ComfyUI without ImageBlend says so instead of failing in the run', async () => {
+    const err = await build(QWEN21_OFFICIAL_MODEL, 'qwenimage', { editStrength: 0.4 }, ['ImageBlend']).catch((e: unknown) => e)
     expect(err).toBeInstanceOf(WorkflowUnavailableError)
     expect(String((err as Error).message)).toMatch(/Edit strength below 1 needs a newer ComfyUI/)
   })
 
-  it('Turbo: its own sigmas, cut to the strength by SplitSigmasDenoise (low sigmas)', async () => {
+  it('Turbo: its whole schedule as at 1, then the same blend', async () => {
     const wf = await build(TURBO, 'qwenimage', { editStrength: 0.5 })
-    const [, custom] = nodeOf(wf, 'SamplerCustomAdvanced')!
-    const [splitId, split] = nodeOf(wf, 'SplitSigmasDenoise')!
-    expect(custom.inputs.sigmas).toEqual([splitId, 1])
-    expect(split.inputs.denoise).toBe(0.5)
-    expect(classAt(wf, split.inputs.sigmas)).toBe('ManualSigmas')
-    expect(classAt(wf, custom.inputs.latent_image)).toBe('VAEEncode')
+    const [samplerId, custom] = nodeOf(wf, 'SamplerCustomAdvanced')!
+    expect(classAt(wf, custom.inputs.sigmas)).toBe('ManualSigmas')
+    expect(classTypes(wf)).not.toContain('SplitSigmasDenoise')
+    expect(classAt(wf, custom.inputs.latent_image)).toBe('TextEncodeQwenImage21')
+    const blend = blendOf(wf)
+    expect(blend.inputs.blend_factor).toBe(0.5)
+    const decode = nodeAt(wf, String((blend.inputs.image1 as [string, number])[0]))!
+    expect(decode.inputs.samples).toEqual([samplerId, 0])
   })
 
   it('COUNTER-CHECK Turbo at 1: the template chain as before', async () => {
     const wf = await build(TURBO, 'qwenimage', { editStrength: 1 })
-    expect(classTypes(wf)).not.toContain('SplitSigmasDenoise')
     expect(classAt(wf, nodeOf(wf, 'SamplerCustomAdvanced')![1].inputs.sigmas)).toBe('ManualSigmas')
+    expectTemplateEdit(wf)
   })
 })
 
-describe('Qwen-Image-Edit 2509/2511: the same field', () => {
-  it('0.4 is the denoise of its KSampler, still on the encoded source', async () => {
+describe('Qwen-Image-Edit 2509/2511: the same field, the same blend', () => {
+  it('0.4: the template edit at denoise 1.0, then mixed with the scaled source it edited', async () => {
     const wf = await build(EDIT_PLUS, 'qwenimage1', { editStrength: 0.4 })
     const [, sampler] = nodeOf(wf, 'KSampler')!
-    expect(sampler.inputs.denoise).toBe(0.4)
+    expect(sampler.inputs.denoise).toBe(1)
     expect(classAt(wf, sampler.inputs.latent_image)).toBe('VAEEncode')
+    const blend = blendOf(wf)
+    expect(blend.inputs.blend_factor).toBe(0.6)
+    // The source the latent was encoded from (FluxKontextImageScale), so
+    // both images have the same size.
+    const [, enc] = nodeOf(wf, 'VAEEncode')!
+    expect(blend.inputs.image2).toEqual(enc.inputs.pixels)
+    expect(classAt(wf, blend.inputs.image2)).toBe('FluxKontextImageScale')
   })
 
   it('COUNTER-CHECK: unset stays at 1.0, the template', async () => {
     const wf = await build(EDIT_PLUS, 'qwenimage1')
     expect(nodeOf(wf, 'KSampler')![1].inputs.denoise).toBe(1)
+    expectTemplateEdit(wf)
   })
 })
 
 describe('every other edit ignores it', () => {
-  it('SDXL keeps the img2img denoise', async () => {
+  it('SDXL keeps the img2img denoise and no blend', async () => {
     const wf = await build(SDXL, 'sdxl', { editStrength: 0.2 })
     expect(nodeOf(wf, 'KSampler')![1].inputs.denoise).toBe(0.7)
+    expectTemplateEdit(wf)
   })
 })
