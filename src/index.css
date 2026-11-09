@@ -1089,10 +1089,13 @@ input:is(
     -webkit-backdrop-filter: blur(28px) saturate(150%);
     backdrop-filter: blur(28px) saturate(150%);
   }
+  /* C25 (3.1.0): light stays fully opaque. At 95 percent white the text,
+     cards and images of the page behind showed through every dialog, the
+     dark glass hides that, white glass does not. */
   .light .lu-dialog {
-    background: rgba(255, 255, 255, 0.95);
-    -webkit-backdrop-filter: blur(28px) saturate(160%);
-    backdrop-filter: blur(28px) saturate(160%);
+    background: #ffffff;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
   }
 }
 
