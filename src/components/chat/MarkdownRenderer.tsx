@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
@@ -10,6 +10,8 @@ import { openExternal } from '../../api/backend'
 import { useComfyViewRescue, isInlineVideoUrl } from './comfyViewRescue'
 import { log } from '../../lib/logger'
 import type { Components, Options } from 'react-markdown'
+import { rehypeQuoteHighlight } from '../../lib/chat-highlight'
+import { useChatHighlight } from './ChatLookScope'
 
 interface Props {
   content: string
@@ -193,7 +195,11 @@ const components: Components = {
 }
 
 export function MarkdownRenderer({ content }: Props) {
-  const rehypePlugins = useRehypePlugins(content)
+  const math = useRehypePlugins(content)
+  // Quoted speech in its own colour, only where the chat look asks for it
+  // (ChatLookScope, 3.1.0 C58). After KaTeX, so a formula is never split.
+  const { quotes } = useChatHighlight()
+  const rehypePlugins = useMemo(() => (quotes ? [...math, rehypeQuoteHighlight] : math), [quotes, math])
   return (
     // wrap-anywhere: a URL, hash or base64 run without a space used to run out
     // of the bubble and get cut at the window edge (T1 night test 3.0.9, A5).

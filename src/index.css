@@ -2969,3 +2969,70 @@ input[type="range"].neuron-range:disabled { cursor: not-allowed; opacity: 0.5; }
 @media (prefers-reduced-motion: reduce) {
   .neuron-bar-wait { animation: none; transform: none; }
 }
+
+/* ── Chat look (3.1.0, C58 / C42) ──────────────────────────────────────
+   Rules for components/chat/ChatLookScope.tsx. Every colour arrives as a
+   custom property that lib/chat-look.ts has already checked for 4.5:1
+   against the pane in the current mode, and a rule only applies when the
+   scope carries its class, i.e. when the user picked that colour. With no
+   choice made, nothing here matches and the chat looks as before.
+   Unlayered on purpose: these must win over the Tailwind utilities on the
+   same elements (text-gray-800, leading-relaxed, max-w-[80%]). */
+
+/* The reading zoom. The ONE sanctioned zoom besides --ui-scale on the app
+   root (ein-massstab.test.ts): it is the user's own text size, set with
+   Ctrl/Cmd + wheel like browser zoom, on the message column only. */
+.lu-chat-zoom { zoom: var(--lu-chat-zoom, 1); }
+
+.lu-look-model-color .lu-msg-model-text .markdown-content { color: var(--lu-look-model-text); }
+.lu-look-user-color .lu-msg-user-text { color: var(--lu-look-user-text); }
+.lu-look-user-bubble .lu-msg-user-bubble {
+  background-color: var(--lu-look-user-bubble);
+  border-color: color-mix(in srgb, var(--lu-look-user-bubble), currentColor 14%);
+}
+.lu-look-quotes .lu-quote { color: var(--lu-look-quote); }
+.lu-look-actions .lu-msg-text em,
+.lu-look-actions .lu-action { color: var(--lu-look-action); font-style: italic; }
+.lu-look-font .lu-msg-text { font-family: var(--lu-look-font); }
+.lu-look-leading .lu-msg-text,
+.lu-look-leading .lu-msg-text :is(p, li) { line-height: var(--lu-look-leading); }
+
+/* Layout "bubbles": the reply gets a bubble too. */
+.lu-look-bubbles .lu-msg-model-bubble {
+  border-radius: 0.5rem;
+  padding: 0.375rem 0.625rem;
+  background-color: var(--lu-look-model-bubble, #f3f4f6);
+  border: 1px solid rgba(0, 0, 0, 0.06);
+}
+.lu-look-bubbles[data-mode="dark"] .lu-msg-model-bubble {
+  background-color: var(--lu-look-model-bubble, rgba(255, 255, 255, 0.04));
+  border-color: rgba(255, 255, 255, 0.07);
+}
+
+/* Layout "document": one flowing text, no avatars, every turn left. */
+.lu-look-document .lu-msg-row { flex-direction: row; }
+.lu-look-document [data-msg-avatar] { display: none; }
+.lu-look-document .lu-msg-column { max-width: 100%; flex: 1 1 auto; min-width: 0; }
+.lu-look-document .lu-msg-row-user .lu-msg-column > * { justify-content: flex-start; }
+.lu-look-document .lu-msg-user-bubble {
+  background-color: transparent;
+  border-width: 0 0 0 2px;
+  border-radius: 0;
+  padding-left: 0.625rem;
+}
+
+/* The background picture lies BEHIND the transcript (isolation makes the
+   scope a stacking context, the picture sits at -1 inside it) under a scrim
+   of the pane colour, whose strength has a floor (lib/chat-look SCRIM_MIN). */
+.lu-look-has-bg { isolation: isolate; }
+.lu-look-has-bg > .lu-chat-bg {
+  z-index: -1;
+  /* Soft edge toward the session strip and the prompt box below, which
+     keep the plain pane colour: no hard line under the last message. */
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 64px), transparent);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 64px), transparent);
+}
+.lu-chat-scrim { background-color: #ffffff; }
+.lu-look[data-mode="dark"] .lu-chat-scrim { background-color: #1e1e1e; }
+.lu-look-has-bg .lu-msg-text { text-shadow: 0 0 6px rgba(255, 255, 255, 0.55); }
+.lu-look-has-bg[data-mode="dark"] .lu-msg-text { text-shadow: 0 0 6px rgba(0, 0, 0, 0.6); }

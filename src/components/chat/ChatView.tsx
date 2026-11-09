@@ -34,6 +34,7 @@ import { LoopBar } from './LoopBar'
 import { GroupCostHint } from './GroupCostHint'
 import { GroupRoundBar } from './GroupRoundBar'
 import { MemoryDebugToggle } from './MemoryDebugPanel'
+import { ChatLookButton } from './ChatLookPanel'
 import { TokenCounter } from './TokenCounter'
 import { ContextDropdown } from './ContextDropdown'
 import { SmallModelModeToggle } from './SmallModelModeToggle'
@@ -648,7 +649,7 @@ export function ChatView() {
                       Composers, `COMPOSER_MAX_W` plus dessen `px-3`; zwei
                       eigene Zahlen koennten wieder auseinanderlaufen. */}
                   <div className={`w-full ${COMPOSER_MAX_W} mx-auto px-3`}>
-                    <div data-testid="chat-session-strip" data-computer-note-yields="" className="flex items-center gap-1.5 px-2 py-0.5">
+                    <div data-testid="chat-session-strip" data-computer-note-yields="" className="flex flex-wrap items-center gap-x-1.5 gap-y-1 px-2 py-0.5">
                       <AgentModeToggle />
                       {appMode === 'cloud' && <HowItWorks topic="agent" variant="mark" placement="above-start" markSize={10} />}
                       {appMode !== 'cloud' && <HowItWorks topic="chats" variant="mark" placement="above-start" markSize={10} />}
@@ -680,6 +681,10 @@ export function ChatView() {
                       {/* Memory, standalone, top-right (moved out of the header model
                           picker; 2026-07-11). View / add / delete injected context. */}
                       <MemoryDebugToggle />
+
+                      {/* Chat look (3.1.0, C58): colours, font, width,
+                          background, text size. */}
+                      <ChatLookButton />
 
                       {/* Shared chats (CHATS-V1.md): this chat on the paired phone. */}
                       <ContinueOnPhoneButton />

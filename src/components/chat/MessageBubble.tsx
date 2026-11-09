@@ -5,6 +5,7 @@ import { motion } from 'framer-motion'
 import { User, Copy, Check, Pencil, RefreshCw, Wrench, Trash2, Scissors, Unlink, Film, Music, GitBranch, ListRestart } from 'lucide-react'
 import { useState, useRef, useEffect, useMemo, memo } from 'react'
 import { MarkdownRenderer } from './MarkdownRenderer'
+import { UserText } from './ChatLookScope'
 import { closeOpenMarkdown } from '../../lib/streaming-markdown'
 import { ThinkingBlock } from './ThinkingBlock'
 import { ToolCallBand } from './ToolCallBand'
@@ -336,7 +337,7 @@ function MessageBubbleImpl({ message, onRegenerate, onRegenerateRound, onEdit, p
 
   return (
     <motion.div
-      className={'flex gap-2 px-3 py-1 group ' + (isUser ? 'flex-row-reverse' : '')}
+      className={'flex gap-2 px-3 py-1 group ' + (isUser ? 'flex-row-reverse lu-msg-row lu-msg-row-user' : 'lu-msg-row lu-msg-row-model')}
       onContextMenu={(e) => {
         if (!actionsAvailable) return
         e.preventDefault()
@@ -349,20 +350,20 @@ function MessageBubbleImpl({ message, onRegenerate, onRegenerateRound, onEdit, p
     >
       {/* The avatar column (avatar-slot.ts): a chip for the user, the bare mark for the model. */}
       {isUser ? (
-        <div className={AVATAR_SLOT}>
+        <div className={AVATAR_SLOT} data-msg-avatar="">
           {userAvatarDataUrl
             ? <img src={userAvatarDataUrl} alt="" className="w-full h-full object-cover" />
             : <User size={11} className="text-gray-400" />}
         </div>
       ) : (
-        <div className={MODEL_MARK_SLOT} data-testid="model-mark">
+        <div className={MODEL_MARK_SLOT} data-msg-avatar="" data-testid="model-mark">
           <img src={MONOGRAM} alt="" className={`${MODEL_MARK} ${MONOGRAM_INVERT}`} />
         </div>
       )}
 
       {/* A reply with a Create order takes the full width in a narrow window:
           the card and the result need the room. */}
-      <div ref={columnRef} className={(hasCreateOrder ? 'min-w-0 flex-1 sm:flex-none sm:max-w-[80%]' : 'max-w-[80%]') + ' space-y-0.5'}>
+      <div ref={columnRef} className={'lu-msg-column ' + (hasCreateOrder ? 'min-w-0 flex-1 sm:flex-none sm:max-w-[80%]' : 'max-w-[80%]') + ' space-y-0.5'}>
         {/* Name the model that produced this answer. Group chats have always
             done this; since the R5 re-measure (2026-08-30) every assistant
             turn carries it, because the app had no model name at a single
@@ -459,7 +460,7 @@ function MessageBubbleImpl({ message, onRegenerate, onRegenerateRound, onEdit, p
                   const istSchluss = gruppenIndex === gruppen.length - 1
                   return (
                     <div key={block.id} className="px-1 py-0.5">
-                      <div data-copy-text className={'text-[0.8rem] leading-relaxed' + (isStreaming && istSchluss ? ' lu-caret' : '')}>
+                      <div data-copy-text className={'lu-msg-text lu-msg-model-text ' + 'text-[0.8rem] leading-relaxed' + (isStreaming && istSchluss ? ' lu-caret' : '')}>
                         <MarkdownRenderer content={isStreaming && istSchluss ? closeOpenMarkdown(clean) : clean} />
                       </div>
                     </div>
@@ -518,8 +519,8 @@ function MessageBubbleImpl({ message, onRegenerate, onRegenerateRound, onEdit, p
           className={
             'relative ' +
             (isUser
-              ? 'rounded-lg px-2.5 py-1.5 bg-gray-100 dark:bg-white/[0.06] border border-gray-200 dark:border-white/[0.08] focus-within:border-gray-400 dark:focus-within:border-white/20 transition-colors'
-              : 'px-1 py-0.5')
+              ? 'lu-msg-user-bubble rounded-lg px-2.5 py-1.5 bg-gray-100 dark:bg-white/[0.06] border border-gray-200 dark:border-white/[0.08] focus-within:border-gray-400 dark:focus-within:border-white/20 transition-colors'
+              : 'lu-msg-model-bubble px-1 py-0.5')
           }
         >
           {isEditing ? (
@@ -567,7 +568,7 @@ function MessageBubbleImpl({ message, onRegenerate, onRegenerateRound, onEdit, p
             // long expanded instruction held in content (which drives the model).
             // The same holds for a message with files: content carries their
             // summaries for the model, the bubble shows what was typed.
-            <p data-copy-text className="text-[0.78rem] leading-relaxed text-gray-800 dark:text-gray-200 whitespace-pre-wrap wrap-anywhere">{message.displayContent || message.content}</p>
+            <p data-copy-text className="lu-msg-text lu-msg-user-text text-[0.78rem] leading-relaxed text-gray-800 dark:text-gray-200 whitespace-pre-wrap wrap-anywhere"><UserText text={message.displayContent || message.content} /></p>
           ) : (
             // Answer-blocks (when present) already rendered the per-iteration
             // text chronologically above; skip message.content here to avoid
@@ -584,7 +585,7 @@ function MessageBubbleImpl({ message, onRegenerate, onRegenerateRound, onEdit, p
                 // eine reine Funktion des vorhandenen `isStreaming`-Props —
                 // kein Zustand, kein Timer, keine Subscription, also auch
                 // kein Rerender, den der Stream nicht ohnehin ausloest.
-                <div data-copy-text className={'text-[0.78rem] leading-relaxed' + (isStreaming ? ' lu-caret' : '')}>
+                <div data-copy-text className={'lu-msg-text lu-msg-model-text ' + 'text-[0.78rem] leading-relaxed' + (isStreaming ? ' lu-caret' : '')}>
                   {/* While it streams, an open ` or ** is closed for the frame
                       (lib/streaming-markdown.ts); the stored text is untouched. */}
                   <MarkdownRenderer content={isStreaming ? closeOpenMarkdown(cleanContent) : cleanContent} />

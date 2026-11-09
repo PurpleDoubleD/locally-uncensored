@@ -100,7 +100,14 @@ describe('die 15 % sind ein Token und werden genau einmal angewandt', () => {
   })
 
   it('es gibt genau EINE zoom-Deklaration, und sie liest das Token', () => {
-    const withZoom = RULES.filter(([, body]) => /(^|[;\s])zoom\s*:/.test(body))
+    // Ausnahme mit Namen (3.1.0, C42): der Lese-Zoom des Transkripts. Er ist
+    // kein Layout-Massstab, sondern die Textgroesse, die der Nutzer selbst
+    // mit Strg/Cmd + Mausrad waehlt, wie der Zoom eines Browsers, und er
+    // steht auf 1, bis der Nutzer ihn aendert. Genau diese eine Regel, genau
+    // dieses Token, sonst keine.
+    const reading = RULES.filter(([sel, body]) => sel === '.lu-chat-zoom' && /zoom\s*:\s*var\(--lu-chat-zoom,\s*1\)/.test(body))
+    expect(reading).toHaveLength(1)
+    const withZoom = RULES.filter(([sel, body]) => sel !== '.lu-chat-zoom' && /(^|[;\s])zoom\s*:/.test(body))
     expect(withZoom).toHaveLength(1)
     const [selector, body] = withZoom[0]
     expect(/zoom\s*:\s*var\(--ui-scale\)/.test(body)).toBe(true)

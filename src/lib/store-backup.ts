@@ -41,6 +41,10 @@ export const STORE_KEYS = [
   'lu-cloud-outage',
   // Neuron tweaker slider values per model and persona (3.0.9, P11).
   'lu-neuron-tweaker',
+  // Chat look, reading zoom and the background references per chat and
+  // persona (3.1.0, C58/C42). Also what keeps those background files alive:
+  // the attachment collector keeps every reference it finds in the backup.
+  'lu-chat-look',
   'locally-uncensored-agent-goal',
   // Computer control: the switch and the always allowed apps.
   'locally-uncensored-computer',

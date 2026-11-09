@@ -12,6 +12,7 @@ import { CompactBlock } from './CompactBlock'
 import { CompactLayerBanner, CompactLayerRail, useCompactLayers } from './CompactLayerRail'
 import { Hinweis } from '../ui/Hinweis'
 import { TRANSCRIPT_MAX_PX } from './composer-width'
+import { ChatLookScope } from './ChatLookScope'
 import { useAgentModeStore } from '../../stores/agentModeStore'
 import { latestRefusalId, refusalNoticeApplies } from '../../lib/refusal-detect'
 import { GreetingSwitcher } from './GreetingSwitcher'
@@ -244,7 +245,7 @@ export function MessageList({ isGenerating, isThisChatGenerating, isLoadingModel
 
   return (
     <>
-    <div className="relative flex-1 min-h-0 flex flex-col">
+    <ChatLookScope variant="chat" className="relative flex-1 min-h-0 flex flex-col">
     <CompactLayerBanner view={layers} />
     <div
       ref={scrollRef}
@@ -268,7 +269,7 @@ export function MessageList({ isGenerating, isThisChatGenerating, isLoadingModel
           der Promptbox aus, damit hier keine zweite Zahl neben der einen
           steht; als `style`, weil Tailwind Klassennamen scannt und eine
           gerechnete Breite deshalb keine Regel bekaeme. */}
-      <div ref={contentRef} className="mx-auto w-full" style={{ maxWidth: TRANSCRIPT_MAX_PX }}>
+      <div ref={contentRef} className="lu-chat-zoom mx-auto w-full" style={{ maxWidth: `calc(${TRANSCRIPT_MAX_PX}px * var(--lu-chat-width, 1))` }}>
         {items
           .map((item, index) => {
             if (item.kind === 'line') return <CompactBlock key={item.cut.key} cut={item.cut} />
@@ -367,7 +368,7 @@ export function MessageList({ isGenerating, isThisChatGenerating, isLoadingModel
       </div>
     </div>
     <CompactLayerRail view={layers} />
-    </div>
+    </ChatLookScope>
     {/* GH #199: later speakers of this round already answered. Ask before
         anything moves. Outside the scrolling list, whose mask would clip it. */}
     <Modal open={!!askRegen} onClose={() => setAskRegen(null)} title="Regenerate this answer" maxWidth="max-w-md">
