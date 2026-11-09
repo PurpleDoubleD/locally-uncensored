@@ -66,6 +66,7 @@ const DEUTSCH_MIT_GRUND: Record<string, string> = {
   'lib/create/media-wish.ts': 'Deutsche Medienwuensche, gegen die getippte Saetze gelesen werden (aus dem Web gespiegelt).',
   'lib/create/chat-control.ts': 'Muster, gegen die der Schlusstext eines Modells gelesen wird, auch der deutsche (aus dem Web gespiegelt). Nichts davon wird angezeigt.',
   'lib/explicit-search.ts': 'Deutsche Suchauftraege, gegen die getippte Saetze gelesen werden.',
+  'lib/settings-tool-names.ts': 'Deutsche Wendungen fuer LUs Aussehen, gegen die getippte Saetze gelesen werden (C60). Nichts davon wird angezeigt.',
 }
 
 /** Jede .ts und .tsx unter den Ordnern, ohne die Testbaeume. */
