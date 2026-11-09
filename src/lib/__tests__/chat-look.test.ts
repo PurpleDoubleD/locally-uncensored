@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   DEFAULT_LOOK, LOOK_PRESETS, MIN_CONTRAST, PANE, clampZoom, cleanFontName, contrast, keyZoom, lookVars,
-  normalizeBackground, normalizeLook, parseHex, pickBackground, readableOn, scenePrompt, wheelZoom, widthFactor,
+  gestureZoom, normalizeBackground, normalizeLook, parseHex, pickBackground, readableOn, scenePrompt, wheelZoom, widthFactor,
 } from '../chat-look'
 
 const ref = 'lu-attachment:v1:' + 'a'.repeat(64)
@@ -96,6 +96,13 @@ describe('zoom (C42)', () => {
     expect(wheelZoom(2, -100)).toBe(2)
     expect(wheelZoom(0.7, 100)).toBe(0.7)
     expect(clampZoom(Number.NaN)).toBe(1)
+  })
+  it('a WebKit pinch follows the fingers from where it began', () => {
+    expect(gestureZoom(1, 1.5)).toBe(1.5)
+    expect(gestureZoom(1.2, 0.5)).toBe(0.7)
+    expect(gestureZoom(1, 9)).toBe(2)
+    expect(gestureZoom(1, Number.NaN)).toBeNull()
+    expect(gestureZoom(1, undefined)).toBeNull()
   })
   it('keys', () => {
     expect(keyZoom(1, '=')).toBe(1.1)

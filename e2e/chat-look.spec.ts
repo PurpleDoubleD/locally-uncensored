@@ -90,6 +90,25 @@ test('Ctrl + wheel zooms the messages only, and the zoom stays', async ({ page }
   await expect.poll(() => zoomOf(page)).toBe(1)
 })
 
+test('a trackpad pinch zooms in WebKit, where it arrives as gesture events', async ({ page, browserName }) => {
+  test.skip(browserName !== 'webkit', 'gesture events are WebKit only (the Mac app)')
+  await boot(page)
+  const scope = page.getByTestId('chat-look-chat')
+  const prevented = await scope.evaluate((el) => {
+    const fire = (type: string, scale: number) => {
+      const e = new Event(type, { bubbles: true, cancelable: true })
+      Object.defineProperty(e, 'scale', { value: scale })
+      el.querySelector('.lu-chat-zoom')!.dispatchEvent(e)
+      return e.defaultPrevented
+    }
+    return [fire('gesturestart', 1), fire('gesturechange', 1.25), fire('gesturechange', 1.5), fire('gestureend', 1.5)]
+  })
+  // Prevented: the WebView must not magnify the whole page at the same time.
+  expect(prevented).toEqual([true, true, true, true])
+  await expect.poll(() => zoomOf(page)).toBeCloseTo(1.5, 2)
+  await expect(page.getByTestId('chat-zoom-badge')).toContainText('150%')
+})
+
 test('a right click in a zoomed transcript opens the menu at the pointer', async ({ page }) => {
   await boot(page)
   await page.evaluate(() => localStorage.setItem('lu-chat-look', JSON.stringify({ state: { look: {}, zoom: 1.5, backgrounds: {} }, version: 0 })))

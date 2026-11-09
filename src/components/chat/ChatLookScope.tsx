@@ -3,7 +3,7 @@ import { useChatLookStore } from '../../stores/chatLookStore'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { useChatStore } from '../../stores/chatStore'
 import { highlightPlain } from '../../lib/chat-highlight'
-import { keyZoom, lookVars, pickBackground, wheelZoom, widthFactor, DEFAULT_LOOK } from '../../lib/chat-look'
+import { gestureZoom, keyZoom, lookVars, pickBackground, wheelZoom, widthFactor, DEFAULT_LOOK } from '../../lib/chat-look'
 import { sanitizeChatCss } from '../../lib/chat-css-sanitize'
 import { readAttachment } from '../../lib/chat-attachments'
 import { log } from '../../lib/logger'
@@ -105,8 +105,31 @@ export function ChatLookScope({ variant, className, children }: ScopeProps) {
       if (next !== now) setZoom(next)
       setBadge(Date.now())
     }
+    // WebKit (the Mac app, Safari) sends a pinch as gesture events, not as
+    // ctrl + wheel; without these the pinch did nothing in the Mac app.
+    let atStart = 1
+    const onGestureStart = (e: Event) => {
+      e.preventDefault()
+      atStart = useChatLookStore.getState().zoom
+    }
+    const onGestureChange = (e: Event) => {
+      e.preventDefault()
+      const next = gestureZoom(atStart, (e as Event & { scale?: unknown }).scale)
+      if (next === null) return
+      if (next !== useChatLookStore.getState().zoom) setZoom(next)
+      setBadge(Date.now())
+    }
+    const stop = (e: Event) => e.preventDefault()
     el.addEventListener('wheel', onWheel, { passive: false })
-    return () => el.removeEventListener('wheel', onWheel)
+    el.addEventListener('gesturestart', onGestureStart, { passive: false })
+    el.addEventListener('gesturechange', onGestureChange, { passive: false })
+    el.addEventListener('gestureend', stop, { passive: false })
+    return () => {
+      el.removeEventListener('wheel', onWheel)
+      el.removeEventListener('gesturestart', onGestureStart)
+      el.removeEventListener('gesturechange', onGestureChange)
+      el.removeEventListener('gestureend', stop)
+    }
   }, [setZoom])
 
   // Ctrl/Cmd with + - 0, while this transcript is on screen.

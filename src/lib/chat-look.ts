@@ -317,6 +317,17 @@ export function wheelZoom(current: number, deltaY: number, deltaMode = 0): numbe
   return clampZoom(current * Math.exp(-deltaY * 0.01))
 }
 
+/**
+ * A trackpad pinch in WebKit (the macOS app's WKWebView, Safari). WebKit does
+ * not turn a pinch into ctrl + wheel the way Chromium does; it sends
+ * `gesturestart` / `gesturechange` with `scale` relative to the start of the
+ * gesture. The zoom follows the fingers from where the gesture began.
+ */
+export function gestureZoom(atStart: number, scale: unknown): number | null {
+  if (typeof scale !== 'number' || !Number.isFinite(scale) || scale <= 0) return null
+  return clampZoom(atStart * scale)
+}
+
 /** Ctrl/Cmd with + / = / - / 0, as in a browser. */
 export function keyZoom(current: number, key: string): number | null {
   if (key === '+' || key === '=') return clampZoom(Math.round((current + ZOOM_STEP) * 10) / 10)
