@@ -8,7 +8,7 @@ import type {
 import type { ToolRegistry } from './tool-registry'
 import { reserveCreateTools } from './create-tools'
 import { registerSettingsTools } from './settings-tools'
-import { registerSelfControlTools } from './self-control-tools'
+import { registerSelfControlTools } from './self-control-defs'
 import { SETTINGS_TOOL_NAMES, SELF_CONTROL_ACTION_NAMES } from '../../lib/settings-tool-names'
 import { v4 as uuid } from 'uuid'
 import { backendCall, isTauri } from '../backend'

@@ -74,7 +74,10 @@ export function settingsGateWords(): string[] {
     const words = new Set<string>([...ACTION_WORDS.map((w) => w.toLowerCase()), ...catalogWords()])
     // Words that are everywhere in normal talk would open the gate on every
     // turn; they still count inside the intent check of a single setting.
-    for (const w of ['code', 'bild', 'image', 'video', 'size', 'such', 'search', 'wait', 'enter', 'design', 'hell', 'light', 'option', 'lade', 'load', 'starte', 'card', 'karte', 'cache', 'layer', 'block', 'allow', 'erlaub', 'merk', 'review', 'edits', 'command', 'befehl', 'agent', 'loop', 'werkzeug', 'clip', 'frames', 'batch', 'denk', 'think', 'budget', 'lokal', 'cloud', 'render', 'cpu', 'flash', 'idle', 'farbe', 'random', 'zufall', 'kreativ', 'creative', 'stell', 'install', 'record', 'confirm']) {
+    for (const w of ['code', 'bild', 'image', 'video', 'size', 'such', 'search', 'wait', 'enter', 'design', 'hell', 'light', 'option', 'lade', 'load', 'starte', 'card', 'karte', 'cache', 'layer', 'block', 'allow', 'erlaub', 'merk', 'review', 'edits', 'command', 'befehl', 'agent', 'loop', 'werkzeug', 'clip', 'frames', 'batch', 'denk', 'think', 'budget', 'lokal', 'cloud', 'render', 'cpu', 'flash', 'idle', 'farbe', 'random', 'zufall', 'kreativ', 'creative', 'stell', 'install', 'record', 'confirm',
+      // Talk about a search or a memory is not talk about LU's settings (the
+      // phone's "Websuche: …" went to the settings tools instead of the search).
+      'websuche', 'wikipedia', 'duckduckgo', 'erinner', 'remember', 'memory', 'memories', 'gedächtnis', 'gedaechtnis']) {
       words.delete(w)
     }
     cachedGateWords = [...words]

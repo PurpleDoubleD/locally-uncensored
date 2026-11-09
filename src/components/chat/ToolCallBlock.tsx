@@ -16,7 +16,7 @@ import { ComputerChatPermission, useComputerChatAsk } from '../computer/Computer
 import { SettingChangeAsk, SettingChangeDone, SelfControlDone } from './SettingChangeCard'
 import { useSettingsConfirmStore, pendingForCall } from '../../stores/settingsConfirmStore'
 import { parseSettingChanges } from '../../api/mcp/settings-tools'
-import { parseSelfControlAction } from '../../api/mcp/self-control-tools'
+import { parseSelfControlAction } from '../../api/mcp/self-control-defs'
 import { isSelfControlToolName } from '../../lib/settings-tool-names'
 import { useChatStore } from '../../stores/chatStore'
 import { commandIcon } from '../../lib/shell-command-classify'

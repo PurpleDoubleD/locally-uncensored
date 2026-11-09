@@ -22,15 +22,18 @@ import {
 } from '../../lib/settings-tool-names'
 import { useSettingsConfirmStore, type SettingChangeItem } from '../../stores/settingsConfirmStore'
 import { useSettingsAuditStore } from '../../stores/settingsAuditStore'
-import { useModelStore } from '../../stores/modelStore'
 import {
   CATALOG, LOCK_RULES, SETTINGS_AREAS, areaOf, findEntry, isArea, isHiddenKey, lockedRule, normKey,
   sameValue, similarKeys, tabName, textNames, type CatalogEntry, type SettingsArea,
 } from '../../lib/settings-catalog'
-import {
-  describeEntryNow, entryState, normalizeForStore, prepareEntry, readEntry, refuseValue, writeEntry,
-} from '../../lib/settings-stores'
-import { checkSelfControl, noteCard } from '../../lib/self-control-policy'
+// The stores behind the catalog (Voice, Create, Memory …) load on first use:
+// this module is imported by the tool registry, and those stores pull half the
+// app, with code that runs at import time, into every module that only
+// registers the tools (found by phone-file-results.test.ts).
+const stores = () => import('../../lib/settings-stores')
+// Same for the policy: it reads the chat store.
+const policy = () => import('../../lib/self-control-policy')
+type Stores = Awaited<ReturnType<typeof stores>>
 import { taintLabel } from '../../lib/run-taint'
 
 export { GET_SETTINGS, SET_SETTING, SET_SETTINGS, SET_SETTINGS_MAX, SETTINGS_TOOL_NAMES, isSettingsToolName, SETTINGS_PROMPT_LINE }
@@ -85,20 +88,21 @@ function lockedReply(key: string): string | null {
   return `Refused: ${rule.what} is locked. Nothing changed. Only the user can change it, in ${rule.where}. Tell the user so.`
 }
 
-function listed(entries: readonly CatalogEntry[], head: string): string {
-  const shown = entries.slice(0, GET_SETTINGS_MAX).map(describeEntryNow)
+function listed(st: Stores, entries: readonly CatalogEntry[], head: string): string {
+  const shown = entries.slice(0, GET_SETTINGS_MAX).map(st.describeEntryNow)
   const more = entries.length - shown.length
   return [head, ...shown, ...(more > 0 ? [`(+${more} more: narrow with query)`] : [])].join('\n')
 }
 
 export async function executeGetSettings(args: ToolArgs): Promise<string> {
+  const st = await stores()
   const query = typeof args?.query === 'string' ? args.query.trim() : ''
   const areaArg = typeof args?.area === 'string' ? args.area.trim().toLowerCase() : ''
   const qArea = query.toLowerCase()
   const area: SettingsArea | null = isArea(areaArg) ? areaArg : isArea(qArea) ? qArea : null
   if (area) {
     const inArea = CATALOG.filter((c) => areaOf(c) === area)
-    return listed(inArea, `LU settings, ${SETTINGS_AREAS[area].label} (key = value | allowed | what):`)
+    return listed(st, inArea, `LU settings, ${SETTINGS_AREAS[area].label} (key = value | allowed | what):`)
   }
   if (!query) {
     // The map, not the territory: seventy lines would fill a small model's
@@ -108,14 +112,14 @@ export async function executeGetSettings(args: ToolArgs): Promise<string> {
     return ['LU settings by area. Call get_settings with area or query for the keys:', ...counts, LOCKED_LINE].join('\n')
   }
   const exact = findEntry(query)
-  if (exact) return describeEntryNow(exact)
+  if (exact) return st.describeEntryNow(exact)
   const q = normKey(query)
   const words = query.toLowerCase().split(/[^a-z0-9äöüß]+/).filter((w) => w.length >= 3)
   const hits = CATALOG.filter((c) => {
     const hay = `${c.key} ${c.label} ${c.help} ${(c.synonyms ?? []).join(' ')}`.toLowerCase()
     return (q.length >= 3 && normKey(hay).includes(q)) || words.some((w) => hay.includes(w))
   })
-  if (hits.length) return listed(hits, `LU settings matching "${query}":`)
+  if (hits.length) return listed(st, hits, `LU settings matching "${query}":`)
   const locked = lockedReply(query)
   if (locked) return locked
   return `No setting matches "${query}". Call get_settings with an area: ${AREA_NAMES}.`
@@ -162,7 +166,7 @@ type Checked =
 
 /** Everything short of the card: known, not locked, a valid value, the safe
  *  direction, a real change. */
-async function checkOne(keyRaw: unknown, valueRaw: unknown): Promise<Checked> {
+async function checkOne(st: Stores, keyRaw: unknown, valueRaw: unknown): Promise<Checked> {
   const key = typeof keyRaw === 'string' ? keyRaw.trim() : ''
   if (!key) return { ok: false, reply: 'Error: key is missing. Call get_settings for the keys. Nothing changed.' }
   const entry = findEntry(key)
@@ -172,15 +176,15 @@ async function checkOne(keyRaw: unknown, valueRaw: unknown): Promise<Checked> {
     const near = isHiddenKey(key) ? [] : similarKeys(key)
     return { ok: false, reply: `Error: there is no setting "${key}". ${near.length ? `Closest: ${near.join(', ')}. ` : ''}Call get_settings. Nothing changed.` }
   }
-  await prepareEntry(entry)
+  await st.prepareEntry(entry)
   const parsed = entry.parse(valueRaw)
   if (!parsed.ok) {
     return { ok: false, reply: `Error: ${entry.label} (${entry.key}) ${parsed.error}. Allowed: ${entry.allowed}. Nothing changed.` }
   }
-  const refused = refuseValue(entry, parsed.value)
+  const refused = st.refuseValue(entry, parsed.value)
   if (refused) return { ok: false, reply: `Error: ${entry.label} ${String(parsed.value)}: ${refused}. Nothing changed.` }
-  const value = normalizeForStore(entry, parsed.value)
-  const before = readEntry(entry)
+  const value = st.normalizeForStore(entry, parsed.value)
+  const before = st.readEntry(entry)
   if (entry.safe && !entry.safe(value, before)) {
     return { ok: false, reply: `Refused: from the chat ${entry.label} can only be set to ${entry.allowed}. ${entry.safeWhy}. Nothing changed. The user can change it in ${tabName(entry.tab)}.` }
   }
@@ -188,13 +192,13 @@ async function checkOne(keyRaw: unknown, valueRaw: unknown): Promise<Checked> {
   return { ok: true, entry, before, value, item: { key: entry.key, label: entry.label, from: entry.show(before), to: entry.show(value), note: noteFor(entry) } }
 }
 
-function audit(run: AgentRunContext | undefined, row: {
+function audit(run: AgentRunContext | undefined, model: string | null, row: {
   key: string; label: string; from: string; to: string; outcome: 'applied' | 'declined' | 'timeout' | 'refused' | 'failed';
   rawFrom?: unknown; rawTo?: unknown; why?: string; tainted?: string
 }): void {
   useSettingsAuditStore.getState().record({
     conversationId: run?.conversationId ?? null,
-    model: useModelStore.getState().activeModel ?? null,
+    model,
     kind: 'setting',
     ...row,
   })
@@ -203,15 +207,19 @@ function audit(run: AgentRunContext | undefined, row: {
 const namesOf = (entry: CatalogEntry) => (text: string, strict: boolean) => textNames(entry, text, strict)
 
 export async function executeSetSetting(args: ToolArgs, run?: AgentRunContext, signal?: AbortSignal): Promise<string> {
+  if (typeof args?.key !== 'string' || !args.key.trim()) return 'Error: key is missing. Call get_settings for the keys. Nothing changed.'
   if (!run?.settingsCard) {
     return 'Error: settings can only be changed in a chat where the user sees the confirmation card. Nothing changed.'
   }
-  const c = await checkOne(args?.key, args?.value)
+  const st = await stores()
+  const { checkSelfControl, noteCard } = await policy()
+  const model = st.activeModelName()
+  const c = await checkOne(st, args?.key, args?.value)
   if (!c.ok) return c.reply
   const { entry, before, value, item } = c
   const verdict = checkSelfControl(run, { names: namesOf(entry), strong: entry.risk === 'strong', what: entry.label })
   if (!verdict.ok) {
-    audit(run, { ...item, outcome: 'refused', why: verdict.why })
+    audit(run, model, { ...item, outcome: 'refused', why: verdict.why })
     return verdict.reply
   }
   noteCard(run)
@@ -228,24 +236,24 @@ export async function executeSetSetting(args: ToolArgs, run?: AgentRunContext, s
     taintedBy: verdict.taintedBy,
   }, signal ?? run.abortSignal)
   if (!answer.allow) {
-    audit(run, { ...item, outcome: answer.reason === 'timeout' ? 'timeout' : 'declined', tainted: verdict.taintedBy })
+    audit(run, model, { ...item, outcome: answer.reason === 'timeout' ? 'timeout' : 'declined', tainted: verdict.taintedBy })
     return answer.reason === 'timeout'
       ? `No answer on the card for 10 minutes, so no. ${entry.label} stays ${item.from}. Do not ask again unless the user asks.`
       : `The user declined. ${entry.label} stays ${item.from}. Do not ask again unless the user asks.`
   }
   // The value may have moved while the card was open (by hand, another chat).
-  const now = readEntry(entry)
+  const now = st.readEntry(entry)
   if (!sameValue(now, before)) {
-    audit(run, { ...item, outcome: 'refused', why: 'moved' })
+    audit(run, model, { ...item, outcome: 'refused', why: 'moved' })
     return `${entry.label} changed to ${entry.show(now)} while the card was open. Nothing applied. Ask the user again if it is still wanted.`
   }
   try {
-    writeEntry(entry, value)
+    st.writeEntry(entry, value)
   } catch (e) {
-    audit(run, { ...item, outcome: 'failed', why: String(e) })
+    audit(run, model, { ...item, outcome: 'failed', why: String(e) })
     return `Error: ${entry.label} could not be changed: ${String(e)}. Nothing changed.`
   }
-  audit(run, { ...item, outcome: 'applied', rawFrom: before, rawTo: value, tainted: verdict.taintedBy })
+  audit(run, model, { ...item, outcome: 'applied', rawFrom: before, rawTo: value, tainted: verdict.taintedBy })
   return `Changed: ${entry.label} ${item.from} → ${item.to}.${item.note ? ` ${item.note}` : ''} The user can undo it on the card.\n${markOf({ key: entry.key, from: before, to: value })}`
 }
 
@@ -256,15 +264,18 @@ export async function executeSetSettings(args: ToolArgs, run?: AgentRunContext, 
   const raw = Array.isArray(args?.changes) ? (args.changes as unknown[]) : []
   if (raw.length === 0) return 'Error: changes is empty. Pass [{"key":…,"value":…}]. Nothing changed.'
   if (raw.length > SET_SETTINGS_MAX) return `Error: at most ${SET_SETTINGS_MAX} changes on one card. Nothing changed.`
+  const st = await stores()
+  const { checkSelfControl, noteCard } = await policy()
+  const model = st.activeModelName()
   const lines: string[] = []
   const ok: Extract<Checked, { ok: true }>[] = []
   for (const r of raw) {
     const o = (r && typeof r === 'object' ? r : {}) as { key?: unknown; value?: unknown }
-    const c = await checkOne(o.key, o.value)
+    const c = await checkOne(st, o.key, o.value)
     if (!c.ok) { lines.push(c.reply); continue }
     if (ok.some((x) => x.entry.key === c.entry.key)) { lines.push(`Error: ${c.entry.label} twice. The first one counts.`); continue }
     const v = checkSelfControl(run, { names: namesOf(c.entry), strong: c.entry.risk === 'strong', what: c.entry.label })
-    if (!v.ok) { audit(run, { ...c.item, outcome: 'refused', why: v.why }); lines.push(`${c.entry.label}: ${v.reply}`); continue }
+    if (!v.ok) { audit(run, model, { ...c.item, outcome: 'refused', why: v.why }); lines.push(`${c.entry.label}: ${v.reply}`); continue }
     ok.push(c)
   }
   if (ok.length === 0) return lines.join('\n')
@@ -281,7 +292,7 @@ export async function executeSetSettings(args: ToolArgs, run?: AgentRunContext, 
     taintedBy,
   }, signal ?? run.abortSignal)
   if (!answer.allow) {
-    for (const c of ok) audit(run, { ...c.item, outcome: answer.reason === 'timeout' ? 'timeout' : 'declined', tainted: taintedBy })
+    for (const c of ok) audit(run, model, { ...c.item, outcome: answer.reason === 'timeout' ? 'timeout' : 'declined', tainted: taintedBy })
     lines.push(answer.reason === 'timeout'
       ? 'No answer on the card for 10 minutes, so no. Nothing changed. Do not ask again unless the user asks.'
       : 'The user declined the card. Nothing changed. Do not ask again unless the user asks.')
@@ -291,24 +302,24 @@ export async function executeSetSettings(args: ToolArgs, run?: AgentRunContext, 
   const marks: string[] = []
   for (const c of ok) {
     if (!selected.has(c.entry.key)) {
-      audit(run, { ...c.item, outcome: 'declined', tainted: taintedBy })
+      audit(run, model, { ...c.item, outcome: 'declined', tainted: taintedBy })
       lines.push(`Unticked by the user: ${c.entry.label} stays ${c.item.from}.`)
       continue
     }
-    const now = readEntry(c.entry)
+    const now = st.readEntry(c.entry)
     if (!sameValue(now, c.before)) {
-      audit(run, { ...c.item, outcome: 'refused', why: 'moved' })
+      audit(run, model, { ...c.item, outcome: 'refused', why: 'moved' })
       lines.push(`${c.entry.label} changed to ${c.entry.show(now)} while the card was open. Not applied.`)
       continue
     }
     try {
-      writeEntry(c.entry, c.value)
+      st.writeEntry(c.entry, c.value)
     } catch (e) {
-      audit(run, { ...c.item, outcome: 'failed', why: String(e) })
+      audit(run, model, { ...c.item, outcome: 'failed', why: String(e) })
       lines.push(`Error: ${c.entry.label} could not be changed: ${String(e)}.`)
       continue
     }
-    audit(run, { ...c.item, outcome: 'applied', rawFrom: c.before, rawTo: c.value, tainted: taintedBy })
+    audit(run, model, { ...c.item, outcome: 'applied', rawFrom: c.before, rawTo: c.value, tainted: taintedBy })
     lines.push(`Changed: ${c.entry.label} ${c.item.from} → ${c.item.to}.${c.item.note ? ` ${c.item.note}` : ''}`)
     marks.push(markOf({ key: c.entry.key, from: c.before, to: c.value }))
   }
@@ -316,32 +327,9 @@ export async function executeSetSettings(args: ToolArgs, run?: AgentRunContext, 
   return lines.join('\n')
 }
 
-/** Undo from the card: back to the value before, through the same catalog. */
-export function undoSettingChange(change: SettingChange): boolean {
-  const entry = findEntry(change.key)
-  if (!entry) return false
-  writeEntry(entry, change.from)
-  useSettingsAuditStore.getState().record({
-    conversationId: null, model: null, kind: 'setting', key: entry.key, label: entry.label,
-    from: entry.show(change.to), to: entry.show(change.from), outcome: 'undone',
-  })
-  return true
-}
-
-/** Apply a change again (the card's "Apply again"). */
-export function redoSettingChange(change: SettingChange): boolean {
-  const entry = findEntry(change.key)
-  if (!entry) return false
-  writeEntry(entry, change.to)
-  return true
-}
-
-/** Where the value stands now against the change on the card. */
-export function settingChangeState(change: SettingChange): 'applied' | 'undone' | 'moved' {
-  const entry = findEntry(change.key)
-  if (!entry) return 'moved'
-  return entryState(entry, change.from, change.to)
-}
+// Undo, Apply again and the state of a change live with the stores
+// (lib/settings-stores.ts: undoSettingChange, redoSettingChange,
+// settingChangeState), so the card does not load this module's dependencies.
 
 export function registerSettingsTools(registry: ToolRegistry): void {
   registry.registerBuiltin(SETTINGS_TOOLS[0], (a) => executeGetSettings(a))
