@@ -62,6 +62,7 @@ impl Stub {
             wikipedia: format!("{}/wiki/{{lang}}/w/api.php", self.base),
             brave: format!("{}/brave", self.base),
             tavily: format!("{}/tavily", self.base),
+            keenable: format!("{}/keenable", self.base),
         }
     }
 }
@@ -642,6 +643,25 @@ async fn tavily_with_a_key_answers() {
     assert_eq!(v["provider"], "tavily");
     let t = &s.hits("/tavily")[0];
     assert_eq!(t.header("authorization"), Some("Bearer tvly-1"));
+}
+
+#[tokio::test]
+async fn keenable_chosen_answers_without_a_key() {
+    let s = stub(|r| match r.path.as_str() {
+        "/keenable" => reply(200, JSON, json!({"results": [{"title": "Doc", "url": "https://docs.example/", "description": "", "snippet": "Body"}]}).to_string()),
+        _ => dead(r),
+    })
+    .await;
+    let v = run(&request("rust", "keenable"), &s.endpoints(), &fast()).await;
+    assert_eq!(v["provider"], "keenable");
+    assert_eq!(v["results"][0]["snippet"], "Body");
+    assert_eq!(s.hits("/keenable")[0].header("x-keenable-title"), Some("Locally Uncensored"));
+}
+
+#[test]
+fn keenable_is_not_in_auto() {
+    assert!(!chain(&request("q", "auto")).contains(&Tier::Keenable));
+    assert_eq!(chain(&request("q", "keenable"))[0], Tier::Keenable);
 }
 
 #[tokio::test]
