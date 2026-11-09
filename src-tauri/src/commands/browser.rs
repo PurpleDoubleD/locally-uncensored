@@ -96,7 +96,7 @@ pub(crate) fn snapshot_script() -> String {
   const SKIP = new Set(['SCRIPT','STYLE','NOSCRIPT','TEMPLATE','SVG','IFRAME','HEAD','CANVAS','SELECT','OPTION','BUTTON','TEXTAREA']);
   const hidden = (el) => {{ for (let e = el; e && e !== document.documentElement; e = e.parentElement) {{ if (SKIP.has(e.tagName)) return true; const s = cs(e); if (s.display === 'none' || s.visibility === 'hidden') return true; if (e.getAttribute && e.getAttribute('aria-hidden') === 'true') return true; }} return false; }};
   const blockOf = (el) => {{ for (let e = el; e && e !== document.body; e = e.parentElement) {{ const d = cs(e).display; if (d && !d.startsWith('inline') && d !== 'contents') return e; }} return document.body; }};
-  const links = []; const byHref = new Map();
+  const links = []; const byHref = new Map(); const here = location.href.split('#')[0];
   let text = ''; let lastBlock = null; let openLink = null; let cut = false;
   const closeLink = () => {{ if (openLink) {{ text += ' [L' + openLink + ']'; openLink = null; }} }};
   const root = document.body || document.documentElement;
@@ -113,8 +113,9 @@ pub(crate) fn snapshot_script() -> String {
       try {{ href = new URL(a.getAttribute('href'), document.baseURI).href; }} catch (e) {{}}
       if (/^https?:/i.test(href)) {{
         href = href.split('#')[0];
-        ref = byHref.get(href);
-        if (!ref && links.length < 120) {{ links.push({{ ref: 'L' + (links.length + 1), text: (a.innerText || a.title || '').trim().slice(0, 100), href }}); ref = links.length; byHref.set(href, ref); }}
+        if (href === here) href = '';
+        ref = href ? byHref.get(href) : null;
+        if (href && !ref && links.length < 120) {{ links.push({{ ref: 'L' + (links.length + 1), text: (a.innerText || a.title || '').trim().slice(0, 100), href }}); ref = links.length; byHref.set(href, ref); }}
       }}
     }}
     if (openLink && openLink !== ref) closeLink();
