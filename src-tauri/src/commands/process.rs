@@ -2286,7 +2286,14 @@ pub(crate) fn start_comfyui_blocking(state: &AppState) -> Result<serde_json::Val
     // 3.0.8 (A2): the ComfyUI role's card when one is set, the global pick
     // otherwise. With a role set, ComfyUI sees that one card only, so a video
     // can never spill onto the chat's card.
+    // 3.1.0 (C56): with "One model across two cards" ComfyUI sees both
+    // cards, the model card first (gpu_roles.rs, ComfySplit).
     let gpu_selection = crate::commands::gpu_roles::effective_selection(state, crate::commands::gpu_roles::GpuRole::Comfy);
+    if let Some(split) = crate::commands::gpu_roles::comfy_split(state) {
+        let line = format!("[start] {}", crate::commands::gpu_roles::split_note(&split));
+        println!("[ComfyUI] {line}");
+        info!(model = split.model.index, helper = split.helper.index, "comfyui split over two cards");
+    }
     if let Some(sel) = gpu_selection {
         crate::commands::gpu::apply_gpu_env(&mut cmd, &sel);
     }

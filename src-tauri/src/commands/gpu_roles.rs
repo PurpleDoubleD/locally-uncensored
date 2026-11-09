@@ -52,6 +52,39 @@ pub struct GpuRoles {
     pub chat: Option<GpuRef>,
     #[serde(default)]
     pub comfy: Option<GpuRef>,
+    /// 3.1.0 (C56): one picture or video model across two cards. Set, it
+    /// wins over `comfy` for ComfyUI: ComfyUI sees both cards, `model` first.
+    #[serde(default, rename = "comfySplit", alias = "comfy_split")]
+    pub comfy_split: Option<ComfySplit>,
+}
+
+/// One ComfyUI over two cards (3.1.0, C56).
+///
+/// ComfyUI gets both cards, `model` first, so torch calls it `cuda:0` and
+/// ComfyUI's own default device: the diffusion model and the sampling stay
+/// there. `helper` becomes `cuda:1`, which ComfyUI's own nodes call `gpu:1`;
+/// the app puts ComfyUI's core nodes "Select CLIP Device" and "Select VAE
+/// Device" (comfy_extras/nodes_multigpu.py, in ComfyUI since 0.42) with
+/// `gpu:1` behind every text encoder and VAE loader of a workflow
+/// (src/lib/comfy-split.ts). No custom node, no foreign code.
+///
+/// NVIDIA only: the order of two cards is pinned by their UUIDs in
+/// CUDA_VISIBLE_DEVICES, which nothing guarantees for HIP or oneAPI, and on
+/// Windows ComfyUI forces a single card unless CUDA_VISIBLE_DEVICES is set
+/// (main.py), which this sets.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ComfySplit {
+    /// The diffusion model and the sampling.
+    pub model: GpuRef,
+    /// The text encoder and the VAE.
+    pub helper: GpuRef,
+}
+
+impl ComfySplit {
+    /// Two different NVIDIA cards; anything else is no split.
+    pub fn usable(&self) -> bool {
+        self.model.vendor == "nvidia" && self.helper.vendor == "nvidia" && self.model.index != self.helper.index
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -74,11 +107,23 @@ impl GpuRoles {
         };
         r.filter(|r| known_vendor(&r.vendor))
     }
+
+    /// The split, when it can be applied.
+    pub fn split(&self) -> Option<&ComfySplit> {
+        self.comfy_split.as_ref().filter(|s| s.usable())
+    }
 }
 
 /// What a service is started with: its role's card when one is set, the
 /// global pick otherwise. Pure, so the whole matrix is a unit test.
 pub fn selection_for_role(role: GpuRole, global: &GpuSelection, roles: &GpuRoles) -> GpuSelection {
+    // C56: the split gives ComfyUI both cards, the model card first. The
+    // order is the point: it is what makes the model card `cuda:0`.
+    if role == GpuRole::Comfy {
+        if let Some(split) = roles.split() {
+            return GpuSelection { vendor: "nvidia".into(), indices: vec![split.model.index, split.helper.index] };
+        }
+    }
     match roles.get(role) {
         Some(card) => GpuSelection { vendor: card.vendor.clone(), indices: vec![card.index] },
         None => global.clone(),
@@ -92,6 +137,19 @@ pub fn effective_selection(state: &AppState, role: GpuRole) -> Option<GpuSelecti
     let global = state.gpu_selection.lock().ok().map(|s| s.clone())?;
     let roles = state.gpu_roles.lock().ok().map(|r| r.clone()).unwrap_or_default();
     Some(selection_for_role(role, &global, &roles))
+}
+
+/// The split, when one is set and usable.
+pub fn comfy_split(state: &AppState) -> Option<ComfySplit> {
+    state.gpu_roles.lock().ok().and_then(|r| r.split().cloned())
+}
+
+/// The ComfyUI line of the readout when the split is on, in words.
+pub fn split_note(split: &ComfySplit) -> String {
+    format!(
+        "One model across two cards: the diffusion model on #{} {}, text encoders and VAE on #{} {} (ComfyUI calls it gpu:1).",
+        split.model.index, split.model.name, split.helper.index, split.helper.name
+    )
 }
 
 /// The chat role's card, when one is set.
@@ -393,25 +451,97 @@ Available devices:
     #[test]
     fn each_service_gets_its_own_card() {
         let global = GpuSelection::default();
-        let roles = GpuRoles { chat: Some(card(0, "A")), comfy: Some(card(1, "B")) };
+        let roles = GpuRoles { chat: Some(card(0, "A")), comfy: Some(card(1, "B")), ..Default::default() };
         assert_eq!(selection_for_role(GpuRole::Chat, &global, &roles).indices, vec![0]);
         assert_eq!(selection_for_role(GpuRole::Comfy, &global, &roles).indices, vec![1]);
         // One role set: the other service keeps the global pick.
-        let only_comfy = GpuRoles { chat: None, comfy: Some(card(1, "B")) };
+        let only_comfy = GpuRoles { chat: None, comfy: Some(card(1, "B")), ..Default::default() };
         assert_eq!(selection_for_role(GpuRole::Chat, &global, &only_comfy).vendor, "auto");
         assert_eq!(selection_for_role(GpuRole::Comfy, &global, &only_comfy).indices, vec![1]);
+    }
+
+    fn split(model: u32, helper: u32) -> Option<ComfySplit> {
+        Some(ComfySplit { model: card(model, "RTX 4090"), helper: card(helper, "RTX 5080") })
+    }
+
+    /// C56: the 4090 + 5080 machine from Discord, simulated. ComfyUI gets
+    /// both UUIDs, the model card FIRST, whatever the bus order says.
+    #[test]
+    fn the_split_gives_comfyui_both_cards_model_card_first() {
+        let global = GpuSelection::default();
+        let roles = GpuRoles { comfy_split: split(1, 0), ..Default::default() };
+        let s = selection_for_role(GpuRole::Comfy, &global, &roles);
+        assert_eq!((s.vendor.as_str(), s.indices.as_slice()), ("nvidia", [1u32, 0].as_slice()));
+        // The chat is not touched by the split.
+        assert_eq!(selection_for_role(GpuRole::Chat, &global, &roles).vendor, "auto");
+    }
+
+    #[test]
+    fn the_split_wins_over_the_comfy_card_and_leaves_the_chat_card() {
+        let global = GpuSelection::default();
+        let roles = GpuRoles { chat: Some(card(2, "C")), comfy: Some(card(1, "B")), comfy_split: split(0, 1) };
+        assert_eq!(selection_for_role(GpuRole::Comfy, &global, &roles).indices, vec![0, 1]);
+        assert_eq!(selection_for_role(GpuRole::Chat, &global, &roles).indices, vec![2]);
+    }
+
+    #[test]
+    fn a_split_that_cannot_work_changes_nothing() {
+        let global = GpuSelection { vendor: "nvidia".into(), indices: vec![0] };
+        // The same card twice.
+        let same = GpuRoles { comfy_split: split(0, 0), ..Default::default() };
+        assert_eq!(selection_for_role(GpuRole::Comfy, &global, &same).indices, vec![0]);
+        // Not NVIDIA.
+        let amd = GpuRoles {
+            comfy_split: Some(ComfySplit {
+                model: GpuRef { vendor: "amd".into(), index: 0, name: "RX".into() },
+                helper: GpuRef { vendor: "amd".into(), index: 1, name: "RX".into() },
+            }),
+            comfy: Some(GpuRef { vendor: "amd".into(), index: 1, name: "RX".into() }),
+            ..Default::default()
+        };
+        let s = selection_for_role(GpuRole::Comfy, &global, &amd);
+        assert_eq!((s.vendor.as_str(), s.indices.as_slice()), ("amd", [1u32].as_slice()), "the comfy card applies as before");
+    }
+
+    #[test]
+    fn the_split_env_pins_the_order_without_an_nvidia_smi() {
+        // No nvidia-smi on this test machine: the fallback is the bare
+        // indices in the given order, plus the bus order net.
+        let roles = GpuRoles { comfy_split: split(1, 0), ..Default::default() };
+        let env = env_of(&selection_for_role(GpuRole::Comfy, &GpuSelection::default(), &roles));
+        assert!(env.contains(&"CUDA_DEVICE_ORDER=PCI_BUS_ID".to_string()), "{env:?}");
+        let cvd = env.iter().find(|e| e.starts_with("CUDA_VISIBLE_DEVICES=")).expect("CUDA_VISIBLE_DEVICES");
+        let value = cvd.trim_start_matches("CUDA_VISIBLE_DEVICES=");
+        let parts: Vec<&str> = value.split(',').collect();
+        assert_eq!(parts.len(), 2, "{value}");
+        if !parts[0].starts_with("GPU-") {
+            assert_eq!(parts, ["1", "0"]);
+        }
+    }
+
+    #[test]
+    fn the_split_from_the_frontend_deserializes() {
+        let r: GpuRoles = serde_json::from_str(
+            r#"{"chat":null,"comfy":null,"comfySplit":{"model":{"vendor":"nvidia","index":0,"name":"RTX 4090"},"helper":{"vendor":"nvidia","index":1,"name":"RTX 5080"}}}"#,
+        )
+        .unwrap();
+        assert_eq!(r.split().map(|s| (s.model.index, s.helper.index)), Some((0, 1)));
+        // A roles value from 3.0.8 has no split at all.
+        let old: GpuRoles = serde_json::from_str(r#"{"chat":null,"comfy":{"vendor":"nvidia","index":1}}"#).unwrap();
+        assert_eq!(old.comfy_split, None);
+        assert!(split_note(r.split().unwrap()).contains("gpu:1"));
     }
 
     #[test]
     fn a_role_with_an_unknown_vendor_is_ignored() {
         let global = GpuSelection { vendor: "amd".into(), indices: vec![0] };
-        let roles = GpuRoles { chat: Some(GpuRef { vendor: "apple".into(), index: 0, name: "M3".into() }), comfy: None };
+        let roles = GpuRoles { chat: Some(GpuRef { vendor: "apple".into(), index: 0, name: "M3".into() }), comfy: None, ..Default::default() };
         assert_eq!(selection_for_role(GpuRole::Chat, &global, &roles).vendor, "amd");
     }
 
     #[test]
     fn an_amd_role_is_forwarded_as_hip() {
-        let roles = GpuRoles { chat: None, comfy: Some(GpuRef { vendor: "amd".into(), index: 1, name: "RX".into() }) };
+        let roles = GpuRoles { chat: None, comfy: Some(GpuRef { vendor: "amd".into(), index: 1, name: "RX".into() }), ..Default::default() };
         let env = env_of(&selection_for_role(GpuRole::Comfy, &GpuSelection::default(), &roles));
         assert!(env.contains(&"HIP_VISIBLE_DEVICES=1".to_string()), "{env:?}");
         assert!(env.contains(&"ROCR_VISIBLE_DEVICES=1".to_string()), "{env:?}");

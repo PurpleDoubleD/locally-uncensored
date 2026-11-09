@@ -2260,8 +2260,13 @@ export async function submitWorkflow(
   clientId?: string,
   opts: { previewMethod?: 'auto' | 'latent2rgb' | 'taesd' } = {},
 ): Promise<string> {
+  // 3.1.0 (C56): with "One model across two cards" on and a ComfyUI that
+  // sees both cards, the text encoders and the VAE go to the second card.
+  // Off, or anything missing: the workflow goes out unchanged.
+  const { withComfySplit } = await import('./comfy-split')
+  const placed = await withComfySplit(workflow)
   // Every run its own output names (comfyui-graph tagOutputPrefixes).
-  const payload: Record<string, unknown> = { prompt: tagOutputPrefixes(workflow, newRunTag()) }
+  const payload: Record<string, unknown> = { prompt: tagOutputPrefixes(placed, newRunTag()) }
   if (clientId) payload.client_id = clientId
   // B28: live previews for this prompt only. ComfyUI starts with previews off
   // (--preview-method none) and takes a per-prompt override in extra_data
@@ -2293,7 +2298,7 @@ export async function submitWorkflow(
     } catch {
       if (rawText) errMsg = rawText.slice(0, 500)
     }
-    log.error('comfyui.workflow_rejected', { errMsg, workflow: JSON.stringify(workflow).slice(0, 2000) })
+    log.error('comfyui.workflow_rejected', { errMsg, workflow: JSON.stringify(placed).slice(0, 2000) })
     throw new Error(`ComfyUI rejected workflow: ${errMsg}`)
   }
   const data: unknown = await res.json()
@@ -2308,7 +2313,7 @@ export async function submitWorkflow(
   if (isRecord(nodeErrors) && Object.keys(nodeErrors).length > 0) {
     if (promptId) await abandonPrompt(promptId)
     const errMsg = describeComfyRejection(data) ?? 'some output nodes failed validation'
-    log.error('comfyui.workflow_rejected', { errMsg, partial: true, workflow: JSON.stringify(workflow).slice(0, 2000) })
+    log.error('comfyui.workflow_rejected', { errMsg, partial: true, workflow: JSON.stringify(placed).slice(0, 2000) })
     throw new Error(`ComfyUI rejected workflow: ${errMsg}`)
   }
   if (!promptId) throw new Error('ComfyUI accepted the workflow but returned no prompt_id.')

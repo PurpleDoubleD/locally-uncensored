@@ -6,8 +6,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { backendCall, isTauri } from '../../api/backend'
-import { normalizeGpuRoles, gpuRolesSeparate, sameCard } from '../../lib/gpu-roles'
-import type { GpuRef, GpuRoles } from '../../types/settings'
+import { normalizeGpuRoles, gpuRolesSeparate, sameCard, comfySplitOf, comfyCards } from '../../lib/gpu-roles'
+import type { ComfySplit, GpuRef } from '../../types/settings'
 import { Hinweis } from '../ui/Hinweis'
 import { HINWEIS_TEXT } from '../../lib/hinweis'
 import { formatBytes } from '../../lib/formatters'
@@ -31,6 +31,29 @@ const PICKABLE = new Set(['nvidia', 'amd', 'intel'])
 /** The cards a role can be pinned to: the vendors LU can forward a pick to. */
 export function roleCards(gpus: RoleCard[]): RoleCard[] {
   return gpus.filter((g) => PICKABLE.has(g.vendor))
+}
+
+/** The cards the split can use: NVIDIA only (gpu_roles.rs, ComfySplit). */
+export function splitCards(gpus: RoleCard[]): RoleCard[] {
+  return gpus.filter((g) => g.vendor === 'nvidia')
+}
+
+function refOf(g: RoleCard): GpuRef {
+  return { vendor: g.vendor as GpuRef['vendor'], index: g.index, name: g.name }
+}
+
+/**
+ * The split a fresh tick starts with: the model on the ComfyUI card when
+ * one is picked, else on the card with the most memory; the text encoders and
+ * the VAE on the biggest of the others.
+ */
+export function defaultSplit(cards: RoleCard[], comfy: GpuRef | null): ComfySplit | null {
+  const nv = splitCards(cards)
+  if (nv.length < 2) return null
+  const bySize = [...nv].sort((a, b) => (b.memory_mib ?? 0) - (a.memory_mib ?? 0) || a.index - b.index)
+  const model = (comfy && nv.find((g) => sameCard(refOf(g), comfy))) || bySize[0]
+  const helper = bySize.find((g) => g.index !== model.index)!
+  return { model: refOf(model), helper: refOf(helper) }
 }
 
 function keyOf(r: GpuRef | null): string {
@@ -67,21 +90,45 @@ export function GpuRolesPicker({ gpus }: { gpus: RoleCard[] }) {
 
   if (cards.length < 2) return null
 
-  const pick = (role: keyof GpuRoles, key: string) => {
+  const split = comfySplitOf(roles)
+  const nvCards = splitCards(cards)
+
+  const pick = (role: 'chat' | 'comfy', key: string) => {
     const card = cards.find((g) => `${g.vendor}:${g.index}` === key)
-    const ref: GpuRef | null = card ? { vendor: card.vendor as GpuRef['vendor'], index: card.index, name: card.name } : null
+    const ref: GpuRef | null = card ? refOf(card) : null
     updateSettings({ gpuRoles: { ...roles, [role]: ref } })
     setChanged(true)
   }
 
-  const select = (role: keyof GpuRoles, title: string, help: string) => (
+  const setSplit = (next: ComfySplit | null) => {
+    const { comfySplit: _old, ...rest } = roles
+    void _old
+    updateSettings({ gpuRoles: next ? { ...rest, comfySplit: next } : rest })
+    setChanged(true)
+  }
+
+  const pickSplit = (part: 'model' | 'helper', key: string) => {
+    if (!split) return
+    const card = nvCards.find((g) => `${g.vendor}:${g.index}` === key)
+    if (!card) return
+    const other = part === 'model' ? 'helper' : 'model'
+    const next: ComfySplit = { ...split, [part]: refOf(card) }
+    // Picking the other part's card swaps the two, so they never coincide.
+    if (sameCard(next[part], next[other])) next[other] = split[part]
+    setSplit(next)
+  }
+
+  const selectClass = 'mt-0.5 w-full rounded border border-gray-300 dark:border-white/10 bg-white dark:bg-white/[0.03] px-1.5 py-1 t-micro text-gray-800 dark:text-gray-200 disabled:opacity-50'
+
+  const select = (role: 'chat' | 'comfy', title: string, help: string, disabled = false) => (
     <label className="block">
       <span className="t-micro text-gray-700 dark:text-gray-300">{title}</span>
       <select
         value={keyOf(roles[role])}
         onChange={(e) => pick(role, e.target.value)}
         aria-label={title}
-        className="mt-0.5 w-full rounded border border-gray-300 dark:border-white/10 bg-white dark:bg-white/[0.03] px-1.5 py-1 t-micro text-gray-800 dark:text-gray-200"
+        disabled={disabled}
+        className={selectClass}
       >
         <option value="">Same as above</option>
         {cards.map((g) => (
@@ -92,7 +139,7 @@ export function GpuRolesPicker({ gpus }: { gpus: RoleCard[] }) {
     </label>
   )
 
-  const shared = !!roles.chat && !!roles.comfy && sameCard(roles.chat, roles.comfy)
+  const shared = !!roles.chat && comfyCards(roles).some((c) => sameCard(roles.chat, c))
 
   return (
     <div className="pt-2 border-t border-white/[0.06] space-y-2" data-testid="gpu-roles">
@@ -103,7 +150,53 @@ export function GpuRolesPicker({ gpus }: { gpus: RoleCard[] }) {
         </div>
       </div>
       {select('chat', 'Chat (LU Engine, Ollama)', 'The chat model loads onto this card only.')}
-      {select('comfy', 'Pictures and video (ComfyUI)', 'ComfyUI sees this card only.')}
+      {select(
+        'comfy',
+        'Pictures and video (ComfyUI)',
+        split ? 'ComfyUI uses both cards below, so this pick waits until the split is off.' : 'ComfyUI sees this card only.',
+        !!split,
+      )}
+      {nvCards.length >= 2 && (
+        <div className="space-y-1.5" data-testid="comfy-split">
+          <label className="flex items-start gap-1.5 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={!!split}
+              onChange={(e) => setSplit(e.target.checked ? defaultSplit(nvCards, roles.comfy) : null)}
+              aria-label="One big model across two cards"
+              className="mt-0.5"
+            />
+            <span>
+              <span className="block t-micro text-gray-700 dark:text-gray-300">One big model across two cards</span>
+              <span className="block t-micro text-gray-500 leading-relaxed">
+                For a picture or video model that does not fit on one card. The model keeps the first card to itself, the text encoder and the VAE load onto the second, instead of spilling into system memory.
+              </span>
+            </span>
+          </label>
+          {split && (
+            <div className="pl-5 space-y-1.5">
+              {(['model', 'helper'] as const).map((part) => {
+                const title = part === 'model' ? 'Model on' : 'Text encoder and VAE on'
+                return (
+                  <label key={part} className="block">
+                    <span className="t-micro text-gray-700 dark:text-gray-300">{title}</span>
+                    <select
+                      value={keyOf(split[part])}
+                      onChange={(e) => pickSplit(part, e.target.value)}
+                      aria-label={title}
+                      className={selectClass}
+                    >
+                      {nvCards.map((g) => (
+                        <option key={`${g.vendor}:${g.index}`} value={`${g.vendor}:${g.index}`}>{label(g)}</option>
+                      ))}
+                    </select>
+                  </label>
+                )
+              })}
+            </div>
+          )}
+        </div>
+      )}
       {gpuRolesSeparate(roles) && (
         <Hinweis>
           Two cards: LU no longer takes the chat model off its card to make room for a picture or a video.
