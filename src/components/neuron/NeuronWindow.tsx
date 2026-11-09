@@ -3,15 +3,28 @@
 // bar, folded to that bar while one chats, and closed; closing hides the
 // window only, the sliders keep steering until the plugin is switched off.
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useLayoutEffect, useRef, useState } from 'react'
 import { motion, useReducedMotion } from 'framer-motion'
 import { NeuronPanel } from './NeuronPanel'
 import {
   NEURON_WINDOW_GAP, NEURON_WINDOW_MAX_H, NEURON_WINDOW_W, clampWindowPos, defaultWindowPos, useNeuronWindow,
 } from '../../stores/neuronWindowStore'
 
-function viewport(): { vw: number; vh: number } {
-  return { vw: window.innerWidth, vh: window.innerHeight }
+/** The `zoom` the app shell sits under (1.15, the UI scale), read up the
+ *  chain. A fixed element inside it takes its left/top/width in the zoomed
+ *  units, so the screen is innerWidth / zoom wide in those units, and a
+ *  pointer moved by n pixels moves the window by n / zoom. */
+export function zoomAbove(el: Element | null): number {
+  let z = 1
+  for (let e = el; e; e = e.parentElement) {
+    const v = parseFloat(getComputedStyle(e).zoom)
+    if (Number.isFinite(v) && v > 0) z *= v
+  }
+  return z
+}
+
+function viewport(zoom: number): { vw: number; vh: number } {
+  return { vw: window.innerWidth / zoom, vh: window.innerHeight / zoom }
 }
 
 export function NeuronWindow() {
@@ -23,12 +36,19 @@ export function NeuronWindow() {
   const setPos = useNeuronWindow((s) => s.setPos)
   const reduced = useReducedMotion()
 
-  const [{ vw, vh }, setView] = useState(viewport)
-  useEffect(() => {
-    const on = () => setView(viewport())
+  const anchor = useRef<HTMLSpanElement>(null)
+  const [zoom, setZoom] = useState(1)
+  const [{ vw, vh }, setView] = useState(() => viewport(1))
+  useLayoutEffect(() => {
+    const on = () => {
+      const z = zoomAbove(anchor.current?.parentElement ?? null)
+      setZoom(z)
+      setView(viewport(z))
+    }
+    on()
     window.addEventListener('resize', on)
     return () => window.removeEventListener('resize', on)
-  }, [])
+  }, [open])
 
   const width = Math.min(NEURON_WINDOW_W, vw - 2 * NEURON_WINDOW_GAP)
   const pos = clampWindowPos(saved ?? defaultWindowPos(vw), vw, vh)
@@ -45,7 +65,7 @@ export function NeuronWindow() {
     const move = (ev: PointerEvent) => {
       const s = start.current
       if (!s) return
-      setDrag(clampWindowPos({ x: s.x + ev.clientX - s.px, y: s.y + ev.clientY - s.py }, window.innerWidth, window.innerHeight))
+      setDrag(clampWindowPos({ x: s.x + (ev.clientX - s.px) / zoom, y: s.y + (ev.clientY - s.py) / zoom }, window.innerWidth / zoom, window.innerHeight / zoom))
     }
     const up = (ev: PointerEvent) => {
       const s = start.current
@@ -54,16 +74,18 @@ export function NeuronWindow() {
       window.removeEventListener('pointerup', up)
       setDrag(null)
       if (s && (Math.abs(ev.clientX - s.px) > 2 || Math.abs(ev.clientY - s.py) > 2)) {
-        setPos(clampWindowPos({ x: s.x + ev.clientX - s.px, y: s.y + ev.clientY - s.py }, window.innerWidth, window.innerHeight))
+        setPos(clampWindowPos({ x: s.x + (ev.clientX - s.px) / zoom, y: s.y + (ev.clientY - s.py) / zoom }, window.innerWidth / zoom, window.innerHeight / zoom))
       }
     }
     window.addEventListener('pointermove', move)
     window.addEventListener('pointerup', up)
-  }, [pos.x, pos.y, setPos])
+  }, [pos.x, pos.y, setPos, zoom])
 
-  if (!open) return null
+  if (!open) return <span ref={anchor} hidden />
   const at = drag ?? pos
   return (
+    <>
+    <span ref={anchor} hidden />
     <motion.div
       role="dialog"
       aria-label="Neurons"
@@ -77,5 +99,6 @@ export function NeuronWindow() {
     >
       <NeuronPanel chrome={{ onDragStart, collapsed, onCollapse: setCollapsed, onClose: hide }} />
     </motion.div>
+    </>
   )
 }
