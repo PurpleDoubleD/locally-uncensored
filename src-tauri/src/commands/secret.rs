@@ -68,13 +68,18 @@ const SERVICE: &str = crate::app_identity::KEYCHAIN_SERVICE;
 // log, not just visible as a dead login. The alternative (a `lu-cloud-session*`
 // prefix family) was rejected: it would leave a writable corner of the vault
 // open, which is the half of the finding about writes.
-const ALLOWED_ACCOUNTS: [&str; 6] = [
+const ALLOWED_ACCOUNTS: [&str; 7] = [
     "ollama",
     "openai",
     "anthropic",
     "huggingface-token",
     "lu-cloud-session",
     "lu-cloud-session-code-verifier",
+    // stores/workflowStore.ts CIVITAI_KEY_ACCOUNT (C60/S7, 3.1.0). Missing
+    // until then: every secret_get for it was refused, hydrateCivitaiApiKey
+    // read that as "no vault here", and the key stayed in plaintext in
+    // localStorage although a vault was there.
+    "civitai-api-key",
 ];
 
 /// The accounts only the Android and iOS builds store under. The desktop has
@@ -116,7 +121,7 @@ fn check_account(account: &str) -> Result<(), String> {
 //
 // When one OpenAI-compatible-slot backend takes over the slot from another
 // (openai-slot-handover.ts, chat branch), the displaced backend's API key had
-// nowhere safe to go: ALLOWED_ACCOUNTS above is a fixed six-entry list with no
+// nowhere safe to go: ALLOWED_ACCOUNTS above is a fixed list with no
 // room for "whichever backend just lost the slot", and letting the caller
 // name an arbitrary vault account here would reopen exactly what T-61 closed.
 // This adds a narrow second door instead: one fixed prefix, plus a backend id
@@ -669,7 +674,7 @@ mod account_allowlist_tests {
             assert_eq!(check_account(account).is_ok(), cfg!(mobile), "{account} in this build");
             assert!(!ALLOWED_ACCOUNTS.contains(&account), "{account} is in both lists");
         }
-        // The six of the desktop are the six of the phone.
+        // The accounts of the desktop are the accounts of the phone.
         for account in ALLOWED_ACCOUNTS {
             assert!(account_allowed(account, true) && account_allowed(account, false), "{account}");
         }
@@ -722,6 +727,7 @@ mod account_allowlist_tests {
         const MLX_IMAGE: &str = include_str!("../../../src/api/mlx-image.ts");
         const SUPABASE: &str = include_str!("../../../src/api/cloud/supabase.ts");
         const LU_NATIVE: &str = include_str!("../../../src/lib/lu-native.ts");
+        const WORKFLOW_STORE: &str = include_str!("../../../src/stores/workflowStore.ts");
 
         let mut wanted: Vec<String> = Vec::new();
 
@@ -743,6 +749,11 @@ mod account_allowlist_tests {
 
         // api/mlx-image.ts — the HuggingFace token.
         wanted.push(quoted_after(MLX_IMAGE, "HF_TOKEN_ACCOUNT ="));
+
+        // stores/workflowStore.ts — the CivitAI key (hydrateCivitaiApiKey,
+        // setCivitaiApiKey). It was missing from this list and from the
+        // allowlist until 3.1.0, so the key never reached the vault.
+        wanted.push(quoted_after(WORKFLOW_STORE, "export const CIVITAI_KEY_ACCOUNT ="));
 
         // api/cloud/supabase.ts — the session, plus the PKCE verifier that
         // supabase-js writes through the same adapter under
