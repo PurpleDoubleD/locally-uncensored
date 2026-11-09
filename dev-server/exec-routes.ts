@@ -6,6 +6,7 @@ import type { RouteMount } from './routes'
 import { requirePost, withJsonBody } from './http'
 import { bodyNumber, bodyString } from '../src/dev/http-body'
 import { devWorkspaceRoot } from '../src/lib/dev-fs-jail'
+import { fenceShell } from './bench-sandbox'
 
 /**
  * The folder a dev-server shell command runs in, the same rule as
@@ -61,7 +62,13 @@ export function registerExecRoutes(routes: RouteMount): void {
             return real ? '"' + real.trim() + '"' : 'python'
           } catch { return 'python' }
         })()
-        const proc = spawn(pythonBin, ['-c', code], {
+        const fencedPy = fenceShell(pythonBin, ['-c', code])
+        if ('refused' in fencedPy) {
+          res.writeHead(200, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ stdout: '', stderr: fencedPy.refused, exitCode: 1 }))
+          return
+        }
+        const proc = spawn(fencedPy.bin, fencedPy.args, {
           cwd: tmpDir,
           stdio: ['ignore', 'pipe', 'pipe'],
           shell: false,
@@ -132,7 +139,14 @@ export function registerExecRoutes(routes: RouteMount): void {
         let stderr = ''
         let killed = false
 
-        const proc = spawn(shellBin, shellArgs, {
+        // The bench runs every shell command in its sandbox (bench-sandbox.ts).
+        const fenced = fenceShell(shellBin, shellArgs)
+        if ('refused' in fenced) {
+          res.writeHead(200, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ stdout: '', stderr: fenced.refused, exitCode: 1 }))
+          return
+        }
+        const proc = spawn(fenced.bin, fenced.args, {
           cwd: devShellCwd(cwd, bodyString(body, 'chatId'), bodyString(body, 'workingDirectory')),
           stdio: ['ignore', 'pipe', 'pipe'],
           shell: false,

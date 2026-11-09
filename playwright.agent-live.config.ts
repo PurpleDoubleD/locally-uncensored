@@ -52,6 +52,8 @@ export default defineConfig({
     timeout: 120_000,
     stdout: 'ignore',
     stderr: 'pipe',
-    env: { HOME: home, USERPROFILE: home },
+    // LU_BENCH_SANDBOX: every shell command of a bench run is fenced off from
+    // the real home folder (dev-server/bench-sandbox.ts). Not optional.
+    env: { HOME: home, USERPROFILE: home, LU_BENCH_SANDBOX: '1' },
   },
 })

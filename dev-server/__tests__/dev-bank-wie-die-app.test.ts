@@ -73,3 +73,41 @@ describe('the folder a dev shell command runs in', () => {
     same(devShellCwd('', 'mein-chat', undefined, heim), join(heim, AGENT_WORKSPACE_DIR, 'mein-chat'))
   })
 })
+
+describe('the bench fence (C59, Zentrale 09.11.2026)', () => {
+  it('off unless the bench asks for it, refused rather than unfenced where there is no sandbox', async () => {
+    const { fenceShell } = await import('../bench-sandbox')
+    expect(fenceShell('bash', ['-c', 'ls'], {})).toEqual({ bin: 'bash', args: ['-c', 'ls'] })
+    expect(fenceShell('bash', ['-c', 'ls'], { LU_BENCH_SANDBOX: '1' }, 'linux')).toHaveProperty('refused')
+  })
+
+  it.runIf(process.platform === 'darwin')('a fenced command cannot read or list the real home folder, node still runs', async () => {
+    const { fenceShell } = await import('../bench-sandbox')
+    const { spawnSync } = await import('node:child_process')
+    const os = await import('node:os')
+    const home = os.userInfo().homedir
+    const run = (cmd: string) => {
+      const f = fenceShell('/bin/bash', ['-c', cmd], { LU_BENCH_SANDBOX: '1' })
+      if ('refused' in f) throw new Error(f.refused)
+      return spawnSync(f.bin, f.args, { encoding: 'utf8' })
+    }
+    const ls = run(`ls ${JSON.stringify(home + '/Desktop')}`)
+    expect(ls.status).not.toBe(0)
+    expect(ls.stderr).toMatch(/Operation not permitted/)
+    const write = run(`echo x > ${JSON.stringify(home + '/c59-fence-probe.txt')}`)
+    expect(write.status).not.toBe(0)
+    expect(run(`${JSON.stringify(process.execPath)} -e "console.log(6*7)"`).stdout.trim()).toBe('42')
+  })
+
+  it('the file tools are already caged: an absolute path outside the workspace is refused', async () => {
+    const heim = frischesHeim()
+    const ws = arbeitsordnerIn(heim)
+    const draussen = join(heim, 'Desktop', 'privat.txt')
+    mkdirSync(join(heim, 'Desktop'), { recursive: true })
+    writeFileSync(draussen, 'nicht für den Agenten')
+    const res = await lesen({ path: draussen, workingDirectory: ws }, heim)
+    expect(res.status).toBe(403)
+    const rel = await lesen({ path: '../Desktop/privat.txt', workingDirectory: ws }, heim)
+    expect(rel.status).toBe(403)
+  })
+})
