@@ -65,6 +65,16 @@
  *     declined call also no longer counts as a success anywhere.
  */
 
+/*
+ * C59 A5: every detector now says it once before it ends the run. Detectors
+ * 1, 2 and the in-a-row half of 4 used to halt on first sight, with no word
+ * to the model in between: a 9B model planning a logging change in the Code
+ * tab re-listed the folder a third time and the run was over (bench CO6,
+ * 09.11.2026), and morphantos asked for the guard to go (C44). Gemini CLI and
+ * koda do the same: feedback on the first detection, stop on the second.
+ * So: the threshold steers, one more of the same halts.
+ */
+
 export type LoopGuardVerdict =
   | { action: 'ok' }
   | { action: 'steer'; message: string }
@@ -154,6 +164,10 @@ export class AgentLoopGuard {
   private pureWindow: string[] = []
   private readCounts = new Map<string, number>()
   private steeredKeys = new Set<string>()
+  /** Detectors 1, 2, 4 (in a row): the signature that has been warned once. */
+  private consecutiveSteered = false
+  private windowSteered = new Set<string>()
+  private narrationRowSteered = false
   private lastNarration = ''
   private narrationSeen = 0
   /** Detector 4, windowed: the last plans written, newest last. */
@@ -199,9 +213,14 @@ export class AgentLoopGuard {
     } else {
       this.lastSig = sig
       this.consecutive = 1
+      this.consecutiveSteered = false
     }
     if (this.consecutive >= CONSECUTIVE_HALT_AT) {
-      return { action: 'halt', reason: `same tool sequence repeated ${this.consecutive}× in a row` }
+      if (this.consecutiveSteered) {
+        return { action: 'halt', reason: `same tool sequence repeated ${this.consecutive}× in a row` }
+      }
+      this.consecutiveSteered = true
+      return { action: 'steer', message: repeatSteer(calls.map((c) => c.name), this.consecutive, 'in a row') }
     }
 
     const hasMutation = calls.some((c) => !READ_ONLY_TOOLS.has(c.name))
@@ -215,10 +234,14 @@ export class AgentLoopGuard {
       if (this.pureWindow.length > BATCH_WINDOW) this.pureWindow.shift()
       const repeats = this.pureWindow.filter((s) => s === sig).length
       if (repeats >= WINDOW_HALT_REPEATS) {
-        return {
-          action: 'halt',
-          reason: `same tool sequence repeated ${repeats}× within the last ${this.pureWindow.length} steps with no workspace change`,
+        if (this.windowSteered.has(sig)) {
+          return {
+            action: 'halt',
+            reason: `same tool sequence repeated ${repeats}× within the last ${this.pureWindow.length} steps with no workspace change`,
+          }
         }
+        this.windowSteered.add(sig)
+        return { action: 'steer', message: repeatSteer(calls.map((c) => c.name), repeats, `within the last ${this.pureWindow.length} steps`) }
       }
     }
 
@@ -392,11 +415,21 @@ export class AgentLoopGuard {
     } else {
       this.lastNarration = norm
       this.narrationSeen = 1
+      this.narrationRowSteered = false
     }
     if (this.narrationSeen >= NARRATION_HALT_AT) {
+      if (this.narrationRowSteered) {
+        return {
+          action: 'halt',
+          reason: `the model repeated the same message ${this.narrationSeen}× without making progress`,
+        }
+      }
+      this.narrationRowSteered = true
       return {
-        action: 'halt',
-        reason: `the model repeated the same message ${this.narrationSeen}× without making progress`,
+        action: 'steer',
+        message:
+          `You wrote the same message ${this.narrationSeen} times in a row. Do not write it again. `
+          + 'Make the one tool call that moves the task forward, or, if the task is done, give your final answer now.',
       }
     }
     if (norm.length < MIN_PLAN_LEN) return { action: 'ok' }
@@ -423,4 +456,12 @@ export class AgentLoopGuard {
     }
     return { action: 'ok' }
   }
+}
+
+/** What the model reads when it repeated a whole batch (detectors 1 and 2). */
+function repeatSteer(names: string[], times: number, where: string): string {
+  const list = [...new Set(names)].join(', ')
+  return `You sent exactly the same tool calls (${list}) ${times} times ${where}, and the results did not change. `
+    + 'Do not send them again: everything they return is already above. Take the next step of the task with what you have, '
+    + 'or, if the task is done, give your final answer now. The same calls once more end the run.'
 }

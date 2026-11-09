@@ -222,3 +222,46 @@ export function applyEdits(content: string, edits: EditSpec[]): MultiEditOutcome
   }
   return { ok: true, content: cur, matches: replacements, fuzzyCount, replacements }
 }
+
+/** Edit distance of two short strings, the classic two-row version. */
+function levenshtein(a: string, b: string): number {
+  if (a === b) return 0
+  let prev = Array.from({ length: b.length + 1 }, (_, i) => i)
+  for (let i = 1; i <= a.length; i++) {
+    const cur = [i]
+    for (let j = 1; j <= b.length; j++) {
+      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1))
+    }
+    prev = cur
+  }
+  return prev[b.length]
+}
+
+/**
+ * Where old_string most likely meant to point, for the "not found" answer
+ * (C59 A5). A small model that misses by a word used to get "read the file
+ * and copy the exact text", which costs a full re-read of the file and
+ * another round trip; often it then guessed again. Now the answer shows the
+ * closest lines with their number, so the next try can copy from there.
+ *
+ * Compared on the first non-blank line of old_string, trimmed, against every
+ * line of the file (files up to 5 000 lines, lines up to 300 characters, to
+ * keep the cost flat). Below 60 % similarity nothing is offered: a wrong
+ * pointer is worse than none.
+ */
+export function closestLines(content: string, oldString: string, context = 3): { line: number; text: string } | null {
+  const first = toLf(oldString).split('\n').map((l) => l.trim()).find((l) => l.length > 0)
+  if (!first || first.length > 300) return null
+  const lines = toLf(content).split('\n')
+  if (lines.length > 5000) return null
+  let best = -1
+  let bestScore = 0
+  for (let i = 0; i < lines.length; i++) {
+    const t = lines[i].trim()
+    if (!t || t.length > 300) continue
+    const score = 1 - levenshtein(t, first) / Math.max(t.length, first.length)
+    if (score > bestScore) { bestScore = score; best = i }
+  }
+  if (best < 0 || bestScore < 0.6) return null
+  return { line: best + 1, text: lines.slice(best, best + context).join('\n') }
+}

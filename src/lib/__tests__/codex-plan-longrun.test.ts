@@ -72,8 +72,9 @@ describe('a long read-only plan run is not mistaken for a loop', () => {
 
   it('negative control: the guard still halts a genuine stall inside a plan run', () => {
     const guard = new AgentLoopGuard()
-    // Same batch three times in a row is a stall whatever the decay says.
-    const verdicts = [1, 2, 3].map(() =>
+    // Same batch four times in a row is a stall whatever the decay says
+    // (the third gets a warning first, C59 A5).
+    const verdicts = [1, 2, 3, 4].map(() =>
       guard.recordBatch([ROUTER], { trimmedReadKeys: new Set([keyOf(ROUTER)]) }),
     )
     expect(verdicts.some((v) => v.action === 'halt')).toBe(true)

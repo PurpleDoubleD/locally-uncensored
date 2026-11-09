@@ -127,6 +127,7 @@ import { capHiddenToolHistory } from './codex/hidden-history'
 import { withHouseConduct } from '../lib/system-prompt'
 import { yieldSilentRunsTo } from '../lib/silent-runs-yield'
 import { gatePlanTool, codePlanAllowed, planNudgeDue, PLAN_NUDGE } from '../lib/plan-gate'
+import { newVerifyState, recordVerifyRound, verifyNudgeDue, VERIFY_NUDGE } from '../lib/verify-nudge'
 
 /** A name the model wrote in its text is a call only when it is one of the
  *  agent's tools, after the usual name repair (GH #147). */
@@ -1299,6 +1300,7 @@ export function useCodex() {
       let planReconcilesRemaining = PLAN_RECONCILE_BUDGET
       let codeToolRounds = 0
       let planNudged = false
+      const verifyState = newVerifyState()
       // Raised from 20 → 50 (v2.3.7): large refactors across 10+ files
       // legitimately need >20 tool calls. Budget still caps via
       // agentMaxToolCalls/agentMaxIterations.
@@ -2178,6 +2180,12 @@ export function useCodex() {
               continue
             }
           }
+          // C59 A5: it changed files and checked nothing; once, before it ends.
+          if (verifyNudgeDue(verifyState, { readOnly: readOnlyTurn, reviewMode })) {
+            diagLog('verify-nudge', { iter: i })
+            messages.push({ role: 'user', content: VERIFY_NUDGE })
+            continue
+          }
           // Fehler D, Symptom 2: bis hierher war ein Zug, den das Modell nie
           // zu Ende schreiben konnte, von einem fertigen Modell nicht zu
           // unterscheiden: derselbe leere Werkzeugsatz, derselbe wortlose
@@ -2691,6 +2699,11 @@ export function useCodex() {
         if (failVerdict.action === 'steer') {
           messages.push({ role: 'user', content: failVerdict.message })
         }
+        recordVerifyRound(verifyState, results.map((r) => ({
+          name: r.toolName,
+          failed: resultFailed(r) || r.status === 'rejected',
+          command: typeof r.dispatchedArgs?.command === 'string' ? r.dispatchedArgs.command : undefined,
+        })))
         // C59 A4: three tool rounds in and still no plan: ask for it, once.
         codeToolRounds++
         if (convId && planNudgeDue({

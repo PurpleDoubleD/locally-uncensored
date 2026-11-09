@@ -23,7 +23,7 @@ import {
   buildCheckTasksExecutor,
   buildMessageAgentExecutor,
 } from '../agents/agent-task-tools'
-import { applyEdits, editsFromArgs, type EditSpec } from '../../lib/surgical-edit'
+import { applyEdits, closestLines, editsFromArgs, type EditSpec } from '../../lib/surgical-edit'
 import { sliceFileReadResult } from '../../lib/file-read-window'
 import { writeTodos, summarizeTodos } from '../../stores/todoStore'
 import { isMlxImageHost, generateMlxImageDataUrl, listMlxImageModels, mlxModelType, type MlxImageModel } from '../mlx-image'
@@ -846,8 +846,15 @@ async function executeFileEdit(args: ToolArgs, run?: AgentRunContext): Promise<s
         return 'Error: file_edit requires a non-empty old_string. To create a new file use file_write.'
       case 'noop':
         return 'Error: old_string and new_string are identical, nothing to change.'
-      case 'not_found':
-        return `Error: old_string was not found in ${path}${which}. Read the file and copy the exact text you want to replace.`
+      case 'not_found': {
+        // C59 A5: point at the closest lines instead of sending the model
+        // back to read the whole file again.
+        const failed = res.failedIndex !== undefined ? edits[res.failedIndex] : edits[0]
+        const near = failed?.old_string ? closestLines(content, failed.old_string) : null
+        return near
+          ? `Error: old_string was not found in ${path}${which}. The closest text is at line ${near.line}:\n${near.text}\nCopy old_string exactly from there (or file_read with offset ${near.line}) and retry.`
+          : `Error: old_string was not found in ${path}${which}. Read the file and copy the exact text you want to replace.`
+      }
       case 'not_unique':
         return `Error: old_string matches ${res.matches} places in ${path}${which}. Add surrounding lines so it identifies ONE location, or set replace_all, then retry.`
       default:
@@ -951,7 +958,7 @@ async function executeShellExecute(
   const command = argString(args, 'command').trim()
   if (!command) return 'shell_execute: `command` is required (or pass task: "status" | "list" | "kill").'
 
-  const { rejectShellCommand, commandTimeoutMs, commandKind, isReadOnlyCommand, READ_ONLY_SHELL_HINT } = await import(
+  const { rejectShellCommand, hardBlockedShellCommand, commandTimeoutMs, commandKind, isReadOnlyCommand, READ_ONLY_SHELL_HINT } = await import(
     '../../lib/shell-command-classify'
   )
   // Read-only turn (/review …): the classifier is the gate now that the typed
@@ -966,7 +973,7 @@ async function executeShellExecute(
   // Betriebsart. Stand sie darunter, streifte ein Modell sie durch simples
   // Anhaengen von `background: true` ab — eine harte Sperre, die man mit einem
   // Flag abwaehlt, ist keine.
-  const refusal = rejectShellCommand(command)
+  const refusal = rejectShellCommand(command) ?? hardBlockedShellCommand(command)
   if (refusal) return refusal
 
   // `shell` muss mit: das Backend leitet die Argumentform seit ba9557df aus dem
@@ -1156,8 +1163,8 @@ async function executeShellExecuteBg(
   // Hauptpfad, das ist ein Regex und der Preis fuer eine Sperre ohne Hintertuer.
   // Whitespace ist kein Schlupfloch: commandKind() trimmt selbst, ein
   // ungetrimmtes `command` aus dem Redirect wird also genauso erkannt.
-  const { rejectShellCommand } = await import('../../lib/shell-command-classify')
-  const refusal = rejectShellCommand(command)
+  const { rejectShellCommand, hardBlockedShellCommand } = await import('../../lib/shell-command-classify')
+  const refusal = rejectShellCommand(command) ?? hardBlockedShellCommand(command)
   if (refusal) return refusal
   // Thread the chat context through, or the task starts in LU's own directory
   // instead of the workspace the foreground shell tool uses.
