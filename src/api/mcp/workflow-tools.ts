@@ -311,6 +311,10 @@ export async function executeWorkflowInstall(args: ToolArgs, run?: AgentRunConte
   if (r.light === 'red') {
     return `${reportForAgent(r, c.id, c.title)}\nRefused: a red workflow is never installed from the chat. Nothing changed.`
   }
+  if (!r.comfyChecked) {
+    return 'Refused: ComfyUI is not running, so LU cannot check which nodes and models are there. '
+      + 'Ask the user to start ComfyUI (Create, or Settings, AI Backends), then check again. Nothing changed.'
+  }
   const foreign = foreignContent(run)
   if (r.light === 'yellow' && foreign) {
     return 'Refused: this run read content from elsewhere before (' + cleanName(foreign, 60) + '), and a yellow workflow '

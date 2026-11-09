@@ -145,6 +145,9 @@ export interface FieldFinding { node: string; type: string; what: 'code' | 'path
 
 export interface InspectReport {
   light: Light
+  /** False when ComfyUI could not be asked: nodes and models are unchecked,
+   *  and nothing is installed from the chat until it can be. */
+  comfyChecked: boolean
   /** Short reasons, most serious first, written by LU, never quoted from the file. */
   reasons: string[]
   nodes: NodeFinding[]
@@ -448,6 +451,7 @@ export function inspectWorkflow(input: InspectInput): InspectReport {
 
   return {
     light,
+    comfyChecked: input.installed !== null,
     reasons: ordered,
     nodes,
     models,

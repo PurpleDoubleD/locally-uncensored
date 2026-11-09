@@ -173,6 +173,13 @@ describe('workflow_install', () => {
     expect(await executeWorkflowInstall({ id: candidateId() }, run())).toMatch(/^Refused: the user did not ask/)
   })
 
+  it('nothing is installed while ComfyUI cannot be asked', async () => {
+    userSays('install it')
+    h.check.mockResolvedValue(checked({ installed: null }))
+    expect(await executeWorkflowInstall({ id: candidateId() }, run())).toMatch(/^Refused: ComfyUI is not running/)
+    expect(queue()).toHaveLength(0)
+  })
+
   it('never installs red', async () => {
     userSays('Bau ihn ein')
     h.check.mockResolvedValue(checked({}, { ...GRAPH, '10': { class_type: 'RunPythonCode', inputs: { code: 'import os' } } }))
