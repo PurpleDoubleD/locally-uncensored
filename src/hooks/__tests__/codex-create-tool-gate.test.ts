@@ -178,7 +178,7 @@ describe('the prompt and the tool list answer the same question', () => {
 
 describe('the wiring in useCodex', () => {
   it('the gate runs on the routed list, so it covers all three branches', () => {
-    expect(src).toMatch(/const relevantDefs = gatePlanTool\(\s*gateCreateTools\(routedDefs, lastUserMsg, createGateOpened\),/)
+    expect(src).toMatch(/const gatedDefs = gatePlanTool\(\s*gateCreateTools\(routedDefs, lastUserMsg, createGateOpened\),/)
   })
 
   it('the hermes fallback is gated too, it carries the weakest models', () => {

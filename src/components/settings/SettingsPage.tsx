@@ -2407,6 +2407,15 @@ export function SettingsPage() {
               <div className="t-micro text-gray-500 dark:text-gray-500 leading-relaxed pt-0.5">
                 Stops an agent run that keeps repeating the same steps (&quot;Loop guard halted the run&quot;). Off: the run goes on until its step limit or until you press Stop.
               </div>
+              {/* C59 A2: the compact profile for local models, on by default. */}
+              <InlineToggle
+                label="Short tool list for local models"
+                enabled={settings.agentCompactAuto !== false}
+                onChange={() => updateSettings({ agentCompactAuto: settings.agentCompactAuto === false })}
+              />
+              <div className="t-micro text-gray-500 dark:text-gray-500 leading-relaxed pt-0.5">
+                A local model up to about 35B sees the core tools with short descriptions and finds every other tool with tool_search. Small model mode still wins.
+              </div>
               <button
                 onClick={() => useAgentModeStore.getState().resetTutorial()}
                 className="text-[0.6rem] text-gray-500 hover:text-gray-300 transition-colors"

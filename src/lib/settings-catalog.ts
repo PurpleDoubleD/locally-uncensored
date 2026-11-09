@@ -208,6 +208,7 @@ export const CATALOG: readonly CatalogEntry[] = [
   // Agent limits: read at the start of a run, so a run cannot raise its own.
   e('agentMaxToolCalls', 'Agent tool call limit', 'agent', 'Most tool calls per message. Applies from the next message.', int(0, 10_000, '', 'unlimited')),
   e('agentMaxIterations', 'Agent step limit', 'agent', 'Most steps per message. Applies from the next message.', int(0, 10_000, '', 'unlimited')),
+  e('agentCompactAuto', 'Short tool list for local models', 'agent', 'Local models up to about 35B see the core tools and find the rest with tool_search.', bool()),
   e('agentLoopGuard', 'Loop guard', 'agent', 'Stops an agent run that repeats the same steps. Off: the run goes on until its step limit or Stop.', bool()),
   e('subAgentMaxToolCalls', 'Sub-agent tool call limit', 'agent', 'Most tool calls of one sub-agent.', int(0, SUB_AGENT_LIMIT_MAX, '', 'default')),
   e('subAgentMaxIterations', 'Sub-agent step limit', 'agent', 'Most steps of one sub-agent.', int(0, SUB_AGENT_LIMIT_MAX, '', 'default')),

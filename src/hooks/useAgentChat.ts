@@ -171,6 +171,8 @@ import { asString, errorText, isRecord, prop } from '../types/json-guards'
 import type { ToolArgs } from '../api/mcp/types'
 import { CREDITS_EXHAUSTED_MESSAGE } from '../lib/credits-exhausted'
 import { buildChatSystemPrompt } from '../lib/system-prompt'
+import { agentProfileFor, resultCharsFor, COMPACT_MAX_TOOLS } from '../lib/agent-profile'
+import { TOOL_SEARCH, TOOL_SEARCH_DEF, briefFor, clearUnlockedTools, runToolSearch, withToolSearch } from '../lib/tool-search'
 import { withChatPersona, samplingPresetFor, speakerCustomParams, speakerPersonaFor } from '../lib/chat-persona'
 import { injectPersonaNote, noteTokens, personaNoteOf } from '../lib/persona-note'
 
@@ -1227,6 +1229,21 @@ export function useAgentChat() {
       userText: userContent,
       todos: convId ? useTodoStore.getState().getTodos(convId) : [],
     })
+    // C59 A2: a local model up to ~35B gets the compact profile (short tool
+    // list, one-line descriptions, tool_search), decided once per run.
+    const agentProfile = agentProfileFor({
+      smallModelMode: settings.smallModelMode,
+      compactAuto: settings.agentCompactAuto,
+      local: isLocalModelByName(activeModel),
+      modelName: activeModel,
+      parameterSize: (useModelStore.getState().models.find((m) => m.name === activeModel) as { details?: { parameter_size?: string } } | undefined)?.details?.parameter_size,
+    })
+    const compactRun = agentProfile === 'compact'
+    clearUnlockedTools(convId)
+    /** The tools offered in the step that is running, for tool_search. */
+    let stepOfferedNames = new Set<string>()
+    const briefDefs = <T extends { name: string; description: string }>(defs: T[]): T[] =>
+      compactRun ? defs.map((t) => ({ ...t, description: briefFor(t) })) : defs
     // Round 9, N15: a phone with a small window gets the short tool list
     // (lib/phone-context-fit.ts). 0 everywhere else, and then nothing changes.
     const phoneToolCtx: number = singleModelSlot()
@@ -1238,7 +1255,7 @@ export function useAgentChat() {
       .find((c) => c.id === convId)?.messages ?? [])
       .filter((m) => m.role === 'user').map((m) => m.content))
     const hermesToolDefs = strategy === 'hermes_xml'
-      ? withCreateTools(gatePlanTool(await selectRelevantToolsAsync(
+      ? briefDefs(withCreateTools(gatePlanTool(await selectRelevantToolsAsync(
           toolRoutingText(userContent, attachedFiles),
           toolRegistry.getAll().filter((t) => toolMatchesCurated(t.name)),
           permissions,
@@ -1249,7 +1266,7 @@ export function useAgentChat() {
             ),
             reaText,
           },
-        ), planAllowed), toolRegistry.getAll())
+        ), planAllowed), toolRegistry.getAll()))
       : []
     // Small-Model Mode (Knob 2): swap the ~3000-char agent prompt for a lean
     // ~750-char one on the native path. Der Hermes-Zweig behaelt seine eigene
@@ -1292,6 +1309,9 @@ export function useAgentChat() {
     // Computer control: the rules for the screen travel with the tool. The
     // section is only there when the user switched the tool on.
     agentSystemPrompt = withComputerUsePrompt(agentSystemPrompt, offeredTools.map((t) => t.name))
+    if (compactRun && strategy !== 'hermes_xml' && !opts?.chatToolsMode) {
+      agentSystemPrompt += '\n\nYour tool list is kept short on purpose. When you need a tool that is not in it, call tool_search with a few words first; the tools it finds are in your list from the next step on.'
+    }
     if (opts?.settingsTools) agentSystemPrompt += `\n\n${SETTINGS_PROMPT_LINE}`
     // Create in chat: on = the paragraph; outside Cloud mode and without the
     // account's release not a word. Off = not a word, unless the customer
@@ -1966,7 +1986,7 @@ export function useAgentChat() {
           // Als sie hier standen, gab es sie nur an DIESER Stelle — der
           // hermes_xml-Zweig oben nahm stattdessen den ganzen Katalog, und
           // niemandem fiel es auf, weil nichts brach.
-          const relevantDefs = withCreateTools(gatePlanTool(await selectRelevantToolsAsync(
+          const selectedDefs = withCreateTools(gatePlanTool(await selectRelevantToolsAsync(
             lastUserMsg,
             toolRegistry.getAll().filter((t) => toolMatchesCurated(t.name)),
             permissions,
@@ -1975,9 +1995,16 @@ export function useAgentChat() {
                 toolSelectionOpts(!!settings.smallModelMode, (texts) => generateEmbeddings(texts, undefined, { purpose: 'tool-selection' })),
                 phoneToolCtx, SMALL_MODEL_MAX_TOOLS,
               ),
+              ...(compactRun ? { maxTools: COMPACT_MAX_TOOLS } : {}),
               reaText,
             },
           ), planAllowed), toolRegistry.getAll())
+          // C59 A2: on the compact profile the cut tools stay reachable
+          // through tool_search, and whatever a search unlocked rides along.
+          const relevantDefs = compactRun
+            ? briefDefs(withToolSearch(selectedDefs, offeredTools, convId, TOOL_SEARCH_DEF))
+            : selectedDefs
+          stepOfferedNames = new Set(relevantDefs.map((t) => t.name))
           const tools: ToolDefinition[] = relevantDefs.map(t => ({
             type: 'function' as const,
             function: { name: t.name, description: t.description, parameters: t.inputSchema },
@@ -3045,11 +3072,16 @@ export function useAgentChat() {
           // naming a terminal tool. A tool the run never offered does not
           // exist for this run, and the model gets told so and can retry with
           // one that does.
-          getTool: (name) => (toolMatchesCurated(name) ? toolRegistry.resolveExecutable(name) : undefined),
+          getTool: (name) => (compactRun && name === TOOL_SEARCH && stepOfferedNames.has(TOOL_SEARCH)
+            ? TOOL_SEARCH_DEF
+            : toolMatchesCurated(name) ? toolRegistry.resolveExecutable(name) : undefined),
           // Timeout backstop shared with Codex (audit B9): before this the
           // Agent loop had NO ceiling around a tool call, so one hung tool
           // wedged the whole run with no way out but a restart.
           execute: (name: string, args: ToolArgs, callRun?: AgentRunContext, signal?: AbortSignal) => {
+            if (compactRun && name === TOOL_SEARCH) {
+              return Promise.resolve(runToolSearch(convId, args, offeredTools, stepOfferedNames))
+            }
             const timed = (base: AbortSignal) => raceWithToolTimeout(
               name,
               toolCallCapMs(name, args, settings),
@@ -3241,7 +3273,7 @@ export function useAgentChat() {
           // Die Notiz haengt NACH dem Kuerzen dran, sonst schneidet ein
           // langes Fehlerprotokoll sie gerade dann weg, wenn sie gebraucht wird.
           return (
-            truncateToolResult(text, phoneResultChars(agentCtx, settings.smallModelMode ? 1500 : 60000)) +
+            truncateToolResult(text, phoneResultChars(agentCtx, resultCharsFor(agentProfile))) +
             toolFailureNote(r.status)
           )
         }

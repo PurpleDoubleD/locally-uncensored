@@ -165,6 +165,10 @@ export function resolveApprovalLevel(toolName: string, d: FrontDecision): Permis
 
   // 3. Ein Werkzeug mit eigenem Riegel fragt selbst (siehe SELF_GATED_TOOLS).
   if (SELF_GATED_TOOLS.has(toolName)) return 'auto'
+  // tool_search reads the tool catalog of this run and touches nothing
+  // (lib/tool-search.ts, C59). It is not in the registry, so its category
+  // would read as the unknown tool's 'confirm'.
+  if (toolName === 'tool_search') return 'auto'
 
   if (d.codexMode !== null) {
     // Code-Oberflaeche: das Preset IST die Entscheidung von vorne. Der
