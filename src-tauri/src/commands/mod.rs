@@ -105,6 +105,13 @@ pub mod saved_characters_backup;
 pub mod search;
 pub mod search_tiers;
 pub mod secret;
+// Where the keychain commands keep values on Linux (GitHub #226). The file
+// store is built for the tests everywhere, it is plain std.
+#[cfg(any(all(desktop, target_os = "linux"), test))]
+#[cfg_attr(not(all(desktop, target_os = "linux")), allow(dead_code))]
+pub mod secret_file;
+#[cfg(all(desktop, target_os = "linux"))]
+pub mod secret_linux;
 pub mod shell;
 pub mod system;
 pub mod torch_wheels;

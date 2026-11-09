@@ -165,6 +165,8 @@ export interface TauriMockOptions {
    * behaviour must pin it; the default matches the historical CI target.
    */
   platform?: 'mac' | 'windows'
+  /** What `secret_store_info` answers (GitHub #226). Default: the OS store. */
+  secretStore?: { kind: 'os' | 'file' | 'none'; path?: string | null }
   /**
    * Deliver `assistantReply` as N separate SSE frames, `replyChunkDelayMs`
    * apart, instead of one. A real engine emits a frame per token, which is what
@@ -2019,6 +2021,8 @@ export function tauriMockInit(opts: TauriMockOptions) {
         if (w.__E2E_SECRETS__) delete w.__E2E_SECRETS__[args?.account]
         return Promise.resolve(null)
       }
+      case 'secret_store_info':
+        return Promise.resolve(opts.secretStore ?? { kind: 'os' })
 
       // ── agent file/shell tools ────────────────────────────────────
       // Enough of the bridge for the ReAct loop to actually complete a step.

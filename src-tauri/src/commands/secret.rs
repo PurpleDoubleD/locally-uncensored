@@ -16,11 +16,10 @@
 //! short values are stored identically on both platforms, and plain values
 //! written by older builds read back unchanged.
 //!
-//! Linux desktop and the web build have no robust uniform secret store here
-//! (the secret-service backend needs libdbus/gnome-keyring and breaks on
-//! headless/minimal setups), so those keep the obfuscated-localStorage path:
-//! on those targets the commands compile to a stub that reports "unsupported",
-//! and the frontend (providerStore.hydrateProviderKeys) falls back.
+//! Linux desktop (since 3.1.0, GitHub #226) stores through the desktop's
+//! Secret Service, with a 0600 file in the app's data folder where none
+//! answers: `secret_linux` and `secret_file`. The web build has no Rust side;
+//! there the frontend keeps its obfuscated-localStorage path.
 
 /// Keychain service name. The "account" is the provider id (ollama / openai /
 /// anthropic). Keep this stable: changing it would orphan stored keys.
@@ -30,7 +29,7 @@
 /// mehr und legt beim nächsten Speichern einen zweiten Satz daneben. Deshalb
 /// kommt er aus `crate::app_identity`, wo ein Test seinen Wert festhält, und
 /// nicht als Literal aus dieser Datei.
-#[cfg(any(target_os = "windows", target_os = "macos"))]
+#[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
 const SERVICE: &str = crate::app_identity::KEYCHAIN_SERVICE;
 
 // ── T-61: the account name is an argument, so it needs an allowlist ─────────
@@ -328,7 +327,7 @@ mod chunked {
 /// so a same-user process cannot drop `~/.lu-no-keychain` (or set the env var) to
 /// silently downgrade the Supabase session + provider keys to plaintext
 /// localStorage. Only builds made with `--features insecure-test-keychain` honor it.
-#[cfg(any(target_os = "windows", target_os = "macos"))]
+#[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
 fn keychain_disabled() -> bool {
     #[cfg(not(feature = "insecure-test-keychain"))]
     {
@@ -549,47 +548,158 @@ pub async fn secret_park_delete(app: tauri::AppHandle, backend_id: String) -> Re
     crate::commands::mobile_native::vault(app, move |v| v.secret_delete(&account)).await
 }
 
-// ── Non-keychain platforms (Linux desktop) ──────────────────────────────
-// The commands still exist so `invoke('secret_get', …)` resolves, but they
-// report unsupported. The frontend treats any error here as "no keychain" and
-// keeps using the obfuscated-localStorage path — identical to today's behavior.
+// ── Linux desktop (GitHub #226) ─────────────────────────────────────────
+// The Secret Service, or the 0600 file where none answers. One async lock
+// serializes the operations, as KEYCHAIN_LOCK does on Windows and macOS: the
+// file is read, changed and written back whole.
 
-#[cfg(all(desktop, not(any(target_os = "windows", target_os = "macos"))))]
+#[cfg(all(desktop, target_os = "linux"))]
+static LINUX_VAULT_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+#[cfg(all(desktop, target_os = "linux"))]
+fn linux_vault() -> super::secret_linux::LinuxVault {
+    super::secret_linux::LinuxVault::new(
+        SERVICE,
+        super::secret_file::FileStore::new(crate::os_paths::data_dir().join(super::secret_file::FILE_NAME)),
+    )
+}
+
+#[cfg(all(desktop, target_os = "linux"))]
+fn linux_disabled() -> Result<(), String> {
+    if keychain_disabled() {
+        return Err("keychain unavailable (LU_NO_KEYCHAIN test mode)".into());
+    }
+    Ok(())
+}
+
+#[cfg(all(desktop, target_os = "linux"))]
+#[tauri::command]
+pub async fn secret_set(account: String, value: String) -> Result<(), String> {
+    check_account(&account)?;
+    linux_disabled()?;
+    let _serialized = LINUX_VAULT_LOCK.lock().await;
+    linux_vault().set(&account, &value).await.map(|_| ())
+}
+
+#[cfg(all(desktop, target_os = "linux"))]
+#[tauri::command]
+pub async fn secret_get(account: String) -> Result<Option<String>, String> {
+    check_account(&account)?;
+    linux_disabled()?;
+    let _serialized = LINUX_VAULT_LOCK.lock().await;
+    linux_vault().get(&account).await
+}
+
+#[cfg(all(desktop, target_os = "linux"))]
+#[tauri::command]
+pub async fn secret_delete(account: String) -> Result<(), String> {
+    check_account(&account)?;
+    linux_disabled()?;
+    let _serialized = LINUX_VAULT_LOCK.lock().await;
+    linux_vault().delete(&account).await
+}
+
+#[cfg(all(desktop, target_os = "linux"))]
+#[tauri::command]
+pub async fn secret_park_set(backend_id: String, value: String) -> Result<(), String> {
+    let account = parked_account(&backend_id)?;
+    linux_disabled()?;
+    let _serialized = LINUX_VAULT_LOCK.lock().await;
+    linux_vault().set(&account, &value).await.map(|_| ())
+}
+
+#[cfg(all(desktop, target_os = "linux"))]
+#[tauri::command]
+pub async fn secret_park_get(backend_id: String) -> Result<Option<String>, String> {
+    let account = parked_account(&backend_id)?;
+    linux_disabled()?;
+    let _serialized = LINUX_VAULT_LOCK.lock().await;
+    linux_vault().get(&account).await
+}
+
+#[cfg(all(desktop, target_os = "linux"))]
+#[tauri::command]
+pub async fn secret_park_delete(backend_id: String) -> Result<(), String> {
+    let account = parked_account(&backend_id)?;
+    linux_disabled()?;
+    let _serialized = LINUX_VAULT_LOCK.lock().await;
+    linux_vault().delete(&account).await
+}
+
+// ── Where secrets go on this machine ────────────────────────────────────
+// For the hint under the Hugging Face token field. `kind` is "os" (the
+// platform's credential store), "file" (Linux without a Secret Service:
+// `path` names the 0600 file) or "none" (no Rust-side store at all).
+
+#[derive(serde::Serialize)]
+pub struct SecretStoreInfo {
+    kind: &'static str,
+    path: Option<String>,
+}
+
+#[cfg(all(desktop, target_os = "linux"))]
+#[tauri::command]
+pub async fn secret_store_info() -> SecretStoreInfo {
+    if keychain_disabled() {
+        return SecretStoreInfo { kind: "none", path: None };
+    }
+    let vault = linux_vault();
+    match vault.target().await {
+        super::secret_linux::Where::Keyring => SecretStoreInfo { kind: "os", path: None },
+        super::secret_linux::Where::File => SecretStoreInfo {
+            kind: "file",
+            path: Some(vault.file().path().display().to_string()),
+        },
+    }
+}
+
+#[cfg(not(all(desktop, target_os = "linux")))]
+#[tauri::command]
+pub async fn secret_store_info() -> SecretStoreInfo {
+    let kind = if cfg!(any(mobile, target_os = "windows", target_os = "macos")) { "os" } else { "none" };
+    SecretStoreInfo { kind, path: None }
+}
+
+// ── Other desktop systems ───────────────────────────────────────────────
+// LU ships for none, the stub only keeps the crate building there. The
+// frontend treats the error as "no keychain" and keeps its localStorage path.
+
+#[cfg(all(desktop, not(any(target_os = "windows", target_os = "macos", target_os = "linux"))))]
 #[tauri::command]
 pub fn secret_set(account: String, _value: String) -> Result<(), String> {
     check_account(&account)?;
     Err("keychain unsupported on this platform".into())
 }
 
-#[cfg(all(desktop, not(any(target_os = "windows", target_os = "macos"))))]
+#[cfg(all(desktop, not(any(target_os = "windows", target_os = "macos", target_os = "linux"))))]
 #[tauri::command]
 pub fn secret_get(account: String) -> Result<Option<String>, String> {
     check_account(&account)?;
     Err("keychain unsupported on this platform".into())
 }
 
-#[cfg(all(desktop, not(any(target_os = "windows", target_os = "macos"))))]
+#[cfg(all(desktop, not(any(target_os = "windows", target_os = "macos", target_os = "linux"))))]
 #[tauri::command]
 pub fn secret_delete(account: String) -> Result<(), String> {
     check_account(&account)?;
     Err("keychain unsupported on this platform".into())
 }
 
-#[cfg(all(desktop, not(any(target_os = "windows", target_os = "macos"))))]
+#[cfg(all(desktop, not(any(target_os = "windows", target_os = "macos", target_os = "linux"))))]
 #[tauri::command]
 pub fn secret_park_set(backend_id: String, _value: String) -> Result<(), String> {
     parked_account(&backend_id)?;
     Err("keychain unsupported on this platform".into())
 }
 
-#[cfg(all(desktop, not(any(target_os = "windows", target_os = "macos"))))]
+#[cfg(all(desktop, not(any(target_os = "windows", target_os = "macos", target_os = "linux"))))]
 #[tauri::command]
 pub fn secret_park_get(backend_id: String) -> Result<Option<String>, String> {
     parked_account(&backend_id)?;
     Err("keychain unsupported on this platform".into())
 }
 
-#[cfg(all(desktop, not(any(target_os = "windows", target_os = "macos"))))]
+#[cfg(all(desktop, not(any(target_os = "windows", target_os = "macos", target_os = "linux"))))]
 #[tauri::command]
 pub fn secret_park_delete(backend_id: String) -> Result<(), String> {
     parked_account(&backend_id)?;
@@ -776,10 +886,11 @@ mod account_allowlist_tests {
     }
 
     /// Every command body checks the name before it does anything else.
-    /// Eighteen commands total: the original three (account allowlist) plus
-    /// the three R9 parked-key commands (backend-id pattern), each present
-    /// once for the keychain platforms, once for the phones and once for the
-    /// stub platforms.
+    /// Twenty-four value commands: the original three (account allowlist)
+    /// plus the three R9 parked-key commands (backend-id pattern), each
+    /// present once for Windows/macOS, once for the phones, once for Linux
+    /// (GitHub #226) and once for the stub platforms. Plus the two
+    /// `secret_store_info` variants, which take no name and touch no value.
     #[test]
     fn no_command_reaches_the_vault_without_the_check() {
         const SECRET_RS: &str = include_str!("secret.rs");
@@ -792,13 +903,15 @@ mod account_allowlist_tests {
         let parked_checks = SECRET_RS
             .matches(concat!("parked_account", "(&backend_id)?;"))
             .count();
-        assert_eq!(commands, 18, "command count changed, recount the checks");
+        let info = SECRET_RS.matches(concat!("pub async fn secret_store", "_info()")).count();
+        assert_eq!(info, 2, "secret_store_info changed, recount the checks");
+        assert_eq!(commands - info, 24, "command count changed, recount the checks");
         assert_eq!(
-            account_checks, 9,
+            account_checks, 12,
             "a plain secret command runs without the account name check"
         );
         assert_eq!(
-            parked_checks, 9,
+            parked_checks, 12,
             "a parked-key command runs without the backend-id check"
         );
     }

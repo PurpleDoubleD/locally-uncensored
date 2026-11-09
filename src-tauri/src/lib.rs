@@ -1172,6 +1172,9 @@ pub fn run() {
             commands::secret::secret_park_set,
             commands::secret::secret_park_get,
             commands::secret::secret_park_delete,
+            // Where those land: OS store, or the 0600 file on a Linux
+            // without a Secret Service (GitHub #226).
+            commands::secret::secret_store_info,
             // Web search
             commands::search::web_search,
             commands::search::web_fetch,
