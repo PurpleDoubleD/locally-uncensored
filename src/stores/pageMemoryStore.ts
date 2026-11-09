@@ -47,7 +47,6 @@ interface PageMemoryState {
   modelsTab: ModelsTab
   modelsExtraRail: ModelsExtraRail
   modelsSearch: string
-  modelsScroll: Record<string, number>
   discover: Record<string, DiscoverLaneMemory>
   hfSearch: HfSearchMemory | null
   civitai: Record<string, CivitaiSearchMemory>
@@ -60,7 +59,6 @@ interface PageMemoryState {
   setModelsTab: (tab: ModelsTab) => void
   setModelsExtraRail: (rail: ModelsExtraRail) => void
   setModelsSearch: (q: string) => void
-  setModelsScroll: (key: string, top: number) => void
   setDiscoverLane: (lane: string, patch: Partial<DiscoverLaneMemory>) => void
   setHfSearch: (m: HfSearchMemory | null) => void
   setCivitai: (key: string, m: CivitaiSearchMemory) => void
@@ -71,7 +69,7 @@ interface PageMemoryState {
 }
 
 type PageMemoryData = Pick<PageMemoryState,
-  'modelsTab' | 'modelsExtraRail' | 'modelsSearch' | 'modelsScroll' | 'discover' | 'hfSearch' | 'civitai'
+  'modelsTab' | 'modelsExtraRail' | 'modelsSearch' | 'discover' | 'hfSearch' | 'civitai'
   | 'settingsSections' | 'settingsScroll' | 'lorasShowHidden'>
 
 /** A fresh session: nothing remembered yet. */
@@ -81,7 +79,6 @@ const FRESH: PageMemoryData = {
   modelsTab: 'discover',
   modelsExtraRail: null,
   modelsSearch: '',
-  modelsScroll: {},
   discover: {},
   hfSearch: null,
   civitai: {},
@@ -96,7 +93,6 @@ export const usePageMemoryStore = create<PageMemoryState>()((set) => ({
   setModelsTab: (modelsTab) => set({ modelsTab }),
   setModelsExtraRail: (modelsExtraRail) => set({ modelsExtraRail }),
   setModelsSearch: (modelsSearch) => set({ modelsSearch }),
-  setModelsScroll: (key, top) => set((s) => ({ modelsScroll: { ...s.modelsScroll, [key]: top } })),
   setDiscoverLane: (lane, patch) => set((s) => ({
     discover: { ...s.discover, [lane]: { ...(s.discover[lane] ?? DEFAULT_DISCOVER_LANE), ...patch } },
   })),
@@ -112,11 +108,6 @@ export const usePageMemoryStore = create<PageMemoryState>()((set) => ({
   setSettingsScroll: (settingsScroll) => set({ settingsScroll }),
   setLorasShowHidden: (lorasShowHidden) => set({ lorasShowHidden }),
 }))
-
-/** The remembered filters of one Discover lane, or the defaults. */
-export function discoverLaneMemory(lane: string): DiscoverLaneMemory {
-  return usePageMemoryStore.getState().discover[lane] ?? DEFAULT_DISCOVER_LANE
-}
 
 /** Forget everything (a test starts each case as a fresh session). */
 export function resetPageMemory(): void {
