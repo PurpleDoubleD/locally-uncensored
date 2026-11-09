@@ -111,18 +111,45 @@ export function lastUserText(conversationId: string | null | undefined): string 
   return last.displayContent ?? last.content ?? ''
 }
 
+/** A short yes to the model's own question ("ja", "ok, mach"). */
+const SHORT_YES = /^\s*(ja|jo|yes|yep|ok(ay)?|sure|klar|gerne?|bitte|mach( das| es)?|do it|go( ahead)?|einverstanden|passt)\b/i
+
+/**
+ * The intent rule for a write (C60, 5.3): the user's own last message asks
+ * for it, or it is a short yes to the model's own question that did. The
+ * model's question counts only in its own words, never a tool's result.
+ */
+export function userAsked(conversationId: string | null | undefined, asks: (text: string) => boolean): boolean {
+  if (!conversationId) return false
+  const msgs = useChatStore.getState().conversations.find((c) => c.id === conversationId)?.messages ?? []
+  let u = -1
+  for (let i = msgs.length - 1; i >= 0; i--) if (msgs[i].role === 'user') { u = i; break }
+  if (u < 0) return false
+  const user = msgs[u].displayContent ?? msgs[u].content ?? ''
+  if (asks(user)) return true
+  if (user.trim().length > 120 || !SHORT_YES.test(user)) return false
+  for (let i = u - 1; i >= 0; i--) {
+    if (msgs[i].role !== 'assistant') continue
+    const own = [msgs[i].content ?? '', ...(msgs[i].agentBlocks ?? []).filter((b) => b.phase !== 'tool_call').map((b) => b.content ?? '')].join('\n')
+    return asks(own)
+  }
+  return false
+}
+
 /**
  * Whether this run read foreign content before (C60-S3 taint). The flag is
  * the run's; this module only reads it. The workflow tools' own answers do not
  * set it: they hand the model LU's structured report, never text of the source.
  */
 export function foreignContent(run: AgentRunContext | undefined): string | null {
-  const t = (run as unknown as { tainted?: unknown; taint?: unknown } | undefined)
-  const v = t?.tainted ?? t?.taint
+  // C60-S3 marks the run (`run.taint`, set by the executor, lib/run-taint.ts
+  // on that branch); older shapes are read too until the branches meet.
+  const r = run as unknown as { taint?: { tool?: unknown }; tainted?: unknown } | undefined
+  const tool = r?.taint && typeof r.taint.tool === 'string' ? r.taint.tool : null
+  if (tool) return `output of ${tool}`
+  const v = r?.tainted
   if (!v) return null
-  if (typeof v === 'string') return v
-  if (typeof v === 'object' && v && typeof (v as { source?: unknown }).source === 'string') return (v as { source: string }).source
-  return 'content from elsewhere'
+  return typeof v === 'string' ? v : 'content from elsewhere'
 }
 
 const NOT_HERE = 'Error: workflows can only be installed in a chat where the user sees the confirmation card. Nothing changed.'
@@ -268,8 +295,7 @@ export async function executeWorkflowInstall(args: ToolArgs, run?: AgentRunConte
   const c = candidateById(id)
   if (!c) return `Error: there is no workflow "${cleanName(id, 40)}" from this session. Call workflow_find first.`
 
-  const userText = lastUserText(run.conversationId)
-  if (!userAskedToInstall(userText)) {
+  if (!userAsked(run.conversationId, userAskedToInstall)) {
     return 'Refused: the user did not ask to install a workflow in their last message. '
       + 'Show them the check and ask whether to install it. Nothing changed.'
   }
@@ -404,7 +430,7 @@ export async function executeWorkflowAssign(args: ToolArgs, run?: AgentRunContex
   if (!want) return 'Error: workflow is missing (name or id of an installed workflow). Nothing changed.'
   if (!rawModel) return 'Error: model is missing (a model file name as ComfyUI lists it). Nothing changed.'
   if (!run?.settingsCard) return NOT_HERE
-  if (!userAskedToAssign(lastUserText(run.conversationId))) {
+  if (!userAsked(run.conversationId, userAskedToAssign)) {
     return 'Refused: the user did not ask to use a workflow for a model in their last message. Suggest it in words. Nothing changed.'
   }
   const list = useWorkflowStore.getState().installedWorkflows
