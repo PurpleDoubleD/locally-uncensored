@@ -86,7 +86,7 @@ import { withChatPersona, speakerSamplingOptions, plainChatSpeaker, speakerPerso
 import { personaNoteOf } from '../lib/persona-note'
 import { toolRegistry } from '../api/mcp'
 import { syncCreateTools } from '../api/mcp/create-tools'
-import { isSettingsToolName, PLAIN_CHAT_SETTINGS_TOOL_NAMES } from '../lib/settings-tool-names'
+import { isSettingsToolName, isSelfControlToolName, asksAboutSelfControl, SETTINGS_TOOL_NAMES } from '../lib/settings-tool-names'
 import { asksAboutSettings } from '../lib/tool-selection'
 import { CREATE_TOOL_NAMES, createSystemText, withCreateText } from '../lib/create/chat-switch'
 // Create in chat only where the order card exists: not on the phone (lib/create-order-surface.ts).
@@ -122,12 +122,16 @@ function lastMediaFromBlocks(m: Message): { kind: 'image' | 'video'; args?: Reco
 }
 
 /** A11: the message is about LU's settings, or answers a question the model
- *  asked while it was reading or changing one ("80", "yes, dark"). */
-export function wantsSettingsTools(content: string, history: readonly Message[]): boolean {
-  if (asksAboutSettings(content)) return true
+ *  asked while it was reading or changing one ("80", "yes, dark").
+ *  C60: in Agent mode the wider gate of the self-control tools (models,
+ *  services, downloads), generated from the settings catalog; plain chat keeps
+ *  its narrow list, so a plain chat message stays a plain chat. */
+export function wantsSettingsTools(content: string, history: readonly Message[], agentMode = false): boolean {
+  if (agentMode ? asksAboutSelfControl(content) : asksAboutSettings(content)) return true
   const lastAssistant = [...history].reverse().find((m) => m.role === 'assistant')
+  const used = agentMode ? isSelfControlToolName : isSettingsToolName
   return !!lastAssistant?.agentBlocks?.some((b) =>
-    (b.toolCalls?.length ? b.toolCalls : b.toolCall ? [b.toolCall] : []).some((c) => isSettingsToolName(c.toolName)))
+    (b.toolCalls?.length ? b.toolCalls : b.toolCall ? [b.toolCall] : []).some((c) => used(c.toolName)))
 }
 
 /** One model's turn in a group round. Deliberately the PLAIN conversation
@@ -988,6 +992,7 @@ export function useChat() {
     const settingsOn = !inGroup && wantsSettingsTools(
       content,
       store.conversations.find((c) => c.id === store.activeConversationId)?.messages ?? [],
+      !!store.activeConversationId && useAgentModeStore.getState().isActive(store.activeConversationId),
     )
 
     // The short answer to an order on the table: "yes", "ja", "go" approves
@@ -1127,8 +1132,8 @@ export function useChat() {
           // Create on (Cloud mode only): its two tools ride along with web
           // and file.
           curatedTools: cloudMode
-            ? [...CHAT_TOOLS.filter((t) => t !== 'image_generate' && t !== 'video_generate'), ...(createOn ? CREATE_TOOL_NAMES : []), ...(settingsOn ? PLAIN_CHAT_SETTINGS_TOOL_NAMES : [])]
-            : [...CHAT_TOOLS, ...(settingsOn ? PLAIN_CHAT_SETTINGS_TOOL_NAMES : [])],
+            ? [...CHAT_TOOLS.filter((t) => t !== 'image_generate' && t !== 'video_generate'), ...(createOn ? CREATE_TOOL_NAMES : []), ...(settingsOn ? SETTINGS_TOOL_NAMES : [])]
+            : [...CHAT_TOOLS, ...(settingsOn ? SETTINGS_TOOL_NAMES : [])],
           chatToolsMode: true,
           mediaHint: route?.mediaHint,
           files,
@@ -1141,7 +1146,7 @@ export function useChat() {
       // two when Create is on); nothing changes without the card.
       if (settingsOn) {
         return sendAgentMessage(content, images, {
-          curatedTools: [...PLAIN_CHAT_SETTINGS_TOOL_NAMES, ...(createOn ? CREATE_TOOL_NAMES : [])],
+          curatedTools: [...SETTINGS_TOOL_NAMES, ...(createOn ? CREATE_TOOL_NAMES : [])],
           chatToolsMode: true,
           settingsTools: true,
           createTools: createOn,

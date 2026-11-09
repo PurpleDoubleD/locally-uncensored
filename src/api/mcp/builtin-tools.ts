@@ -8,8 +8,10 @@ import type {
 import type { ToolRegistry } from './tool-registry'
 import { reserveCreateTools } from './create-tools'
 import { registerSettingsTools } from './settings-tools'
+import { registerSelfControlTools } from './self-control-tools'
 import { registerWorkflowTools } from './workflow-tools'
-import { SETTINGS_TOOL_NAMES } from '../../lib/settings-tool-names'
+import { WORKFLOW_TOOL_NAMES } from '../../lib/workflow-tool-names'
+import { SETTINGS_TOOL_NAMES, SELF_CONTROL_ACTION_NAMES } from '../../lib/settings-tool-names'
 import { v4 as uuid } from 'uuid'
 import { backendCall, isTauri } from '../backend'
 import { getActiveChatId, getActiveConversationId, getActiveWorkspace, isChatArtifactMode, captureChatArtifact, isReadOnlyShellTurn } from '../agent-context'
@@ -2425,11 +2427,12 @@ export function registerBuiltinTools(registry: ToolRegistry) {
   // App settings from the chat (A11). Registered, but offered only to a turn
   // about settings and only where the card is drawn (settings-tools.ts).
   // Not on a phone (lib/mobile-tools.ts, MOBILE_UNBUILT_TOOLS).
-  if (SETTINGS_TOOL_NAMES.every(toolExistsOnThisDevice)) {
-    registerSettingsTools(registry)
-    // ComfyUI workflows from the chat (C60-S5), on the same gate and surfaces.
-    registerWorkflowTools(registry)
-  }
+  if (SETTINGS_TOOL_NAMES.every(toolExistsOnThisDevice)) registerSettingsTools(registry)
+  // C60 (3.1.0): the batch change and the actions (models, services,
+  // downloads, the settings page). Agent and Code only, same gate and card.
+  if (SELF_CONTROL_ACTION_NAMES.every(toolExistsOnThisDevice)) registerSelfControlTools(registry)
+  // C60-S5: ComfyUI workflows from the chat, same gate, surfaces and policy.
+  if (WORKFLOW_TOOL_NAMES.every(toolExistsOnThisDevice)) registerWorkflowTools(registry)
 }
 
 // ── Retired tools (2.6.6 merge, plan E5) ────────────────────────

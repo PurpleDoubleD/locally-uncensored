@@ -84,7 +84,7 @@ import { getProviderIdFromModel } from '../api/providers'
 import { markToolsUnsupported } from '../api/tool-capability'
 import { extractMemoriesFromPair } from './useMemory'
 import { createSystemText, isCreateToolName, withCreateText } from '../lib/create/chat-switch'
-import { isSettingsToolName, SETTINGS_PROMPT_LINE } from '../lib/settings-tool-names'
+import { isSettingsToolName, isSelfControlToolName, SETTINGS_PROMPT_LINE, SELF_CONTROL_PROMPT_LINE } from '../lib/settings-tool-names'
 import { WORKFLOW_PROMPT_LINE } from '../lib/workflow-tool-names'
 // Create in chat only where the order card exists: not on the phone (lib/create-order-surface.ts).
 import { createLiveHere } from '../lib/create-order-surface'
@@ -1181,7 +1181,7 @@ export function useAgentChat() {
     const toolMatchesCurated = (name: string) =>
       (!curated || curated.includes(name)) && !(opts?.readOnly && !allowedInReadOnlyTurn(name)) && !(screenByTaskOnly && name === COMPUTER_USE_TOOL_NAME)
       && !(localMediaOff && isMediaTool(name))
-      && (opts?.settingsTools === true || !isSettingsToolName(name))
+      && (opts?.settingsTools === true || !isSelfControlToolName(name))
     // Cloud mode AND Create in chat released for the account. Without the
     // release every text and rule in this loop is the one that shipped before.
     const createLive = createLiveHere()
@@ -1191,7 +1191,7 @@ export function useAgentChat() {
     // The settings pair likewise: the router has no say once the message is
     // about settings.
     const withCreateTools = <T extends { name: string }>(chosen: T[], all: T[]): T[] => {
-      const extra = (n: string) => (opts?.createTools && isCreateToolName(n)) || (opts?.settingsTools && isSettingsToolName(n))
+      const extra = (n: string) => (opts?.createTools && isCreateToolName(n)) || (opts?.settingsTools && isSelfControlToolName(n))
       return opts?.createTools || opts?.settingsTools
         ? [...chosen, ...all.filter((t) => extra(t.name) && toolMatchesCurated(t.name) && !chosen.some((c) => c.name === t.name))]
         : chosen
@@ -1293,8 +1293,8 @@ export function useAgentChat() {
     // Computer control: the rules for the screen travel with the tool. The
     // section is only there when the user switched the tool on.
     agentSystemPrompt = withComputerUsePrompt(agentSystemPrompt, offeredTools.map((t) => t.name))
-    if (opts?.settingsTools) agentSystemPrompt += `\n\n${SETTINGS_PROMPT_LINE}`
-    // C60-S5: the workflow tools come with the pair outside plain chat.
+    if (opts?.settingsTools) agentSystemPrompt += `\n\n${opts?.chatToolsMode ? SETTINGS_PROMPT_LINE : SELF_CONTROL_PROMPT_LINE}`
+    // C60-S5: the workflow tools ride with the actions, outside plain chat.
     if (opts?.settingsTools && !opts?.chatToolsMode) agentSystemPrompt += `\n${WORKFLOW_PROMPT_LINE}`
     // Create in chat: on = the paragraph; outside Cloud mode and without the
     // account's release not a word. Off = not a word, unless the customer

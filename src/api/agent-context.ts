@@ -151,6 +151,14 @@ export interface AgentRunContext {
    * later turn in the same chat must not cancel it.
    */
   generationOwner?: string
+  /**
+   * C60 S3: the first tool of this run whose output came from outside LU (a
+   * web page, a file, a sub-agent). Set by the executor (lib/run-taint.ts),
+   * read by the self-control tools before they show a card.
+   */
+  taint?: { tool: string; at: number }
+  /** C60: cards the self-control tools showed in this run, capped there. */
+  selfControlCards?: number
 }
 
 /**
@@ -197,6 +205,47 @@ let _runSeq = 0
 /** Runs between beginAgentRun and endAgentRun. */
 const openRuns = new Set<string>()
 
+/**
+ * The last runs of each conversation, newest last (C60 S3). The self-control
+ * tools ask whether the run BEFORE this one read foreign content: when the
+ * user answers "ja" to the model's own question, the question must not have
+ * come out of a web page. Only in memory: after a restart there is no earlier
+ * run, and the answer is "unknown", which counts as foreign.
+ */
+const runsByConversation = new Map<string, AgentRunContext[]>()
+
+function rememberRun(run: AgentRunContext): void {
+  if (!run.conversationId) return
+  const list = [...(runsByConversation.get(run.conversationId) ?? []), run].slice(-3)
+  runsByConversation.set(run.conversationId, list)
+}
+
+/**
+ * Work that has to wait until this run is over (C60): a model switch or an
+ * engine restart in the middle of the agent's own run would take the engine
+ * from under the run that asked for it. Runs at once when the run is already
+ * closed, or when there is no run.
+ */
+const afterRunJobs = new Map<string, (() => unknown)[]>()
+
+export function afterAgentRun(run: AgentRunContext | null | undefined, job: () => unknown): 'now' | 'after-run' {
+  if (!run || !openRuns.has(run.token)) {
+    void Promise.resolve().then(job).catch(() => {})
+    return 'now'
+  }
+  afterRunJobs.set(run.token, [...(afterRunJobs.get(run.token) ?? []), job])
+  return 'after-run'
+}
+
+/** The run of this conversation that started before `token`, if this app
+ *  session saw it. */
+export function previousRunOf(conversationId: string | null, token: string): AgentRunContext | undefined {
+  if (!conversationId) return undefined
+  const list = runsByConversation.get(conversationId) ?? []
+  const i = list.findIndex((r) => r.token === token)
+  return i > 0 ? list[i - 1] : undefined
+}
+
 /** Is this run still going? False for a token no run was opened with. */
 export function isAgentRunOpen(token: string | null | undefined): boolean {
   return !!token && openRuns.has(token)
@@ -225,6 +274,7 @@ export function beginAgentRun(init: {
     ...(init.settingsCard ? { settingsCard: true } : {}),
   }
   openRuns.add(run.token)
+  rememberRun(run)
   ctx.runToken = run.token
   ctx.chatId = run.chatId
   ctx.conversationId = run.conversationId
@@ -247,6 +297,13 @@ export function endAgentRun(run: AgentRunContext | null | undefined): void {
   }
   run.artifacts = []
   openRuns.delete(run.token)
+  const after = afterRunJobs.get(run.token)
+  if (after) {
+    afterRunJobs.delete(run.token)
+    // After the close, so a job that starts a new run (a model switch, an
+    // engine restart) does not race the run that asked for it.
+    for (const job of after) queueMicrotask(() => { void Promise.resolve().then(job).catch(() => {}) })
+  }
   if (ctx.runToken !== run.token) return
   clearActiveChatId()
 }

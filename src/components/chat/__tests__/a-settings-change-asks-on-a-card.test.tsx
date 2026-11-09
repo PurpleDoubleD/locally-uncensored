@@ -36,7 +36,13 @@ const waitForCard = async () => {
 beforeEach(() => {
   useSettingsStore.setState({ settings: structuredClone(DEFAULT_SETTINGS) })
   useSettingsConfirmStore.setState({ queue: [] })
-  useChatStore.setState({ activeConversationId: 'chat-a' })
+  // C60: one shared run object here; its card count starts at zero per test.
+  run.selfControlCards = 0
+  // C60: the user asked for it in their own message (the intent check).
+  useChatStore.setState({
+    activeConversationId: 'chat-a',
+    conversations: [{ id: 'chat-a', title: 't', messages: [{ id: 'u1', role: 'user', content: 'set auto compact to 80 and the theme', timestamp: 1 }] }],
+  } as never)
 })
 afterEach(cleanup)
 

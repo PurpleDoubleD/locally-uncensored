@@ -140,7 +140,7 @@ describe('workflow_install', () => {
   it('refuses when the user did not ask for an install', async () => {
     userSays('what does this workflow do?')
     h.check.mockResolvedValue(checked())
-    expect(await executeWorkflowInstall({ id: candidateId() }, run())).toMatch(/^Refused: the user did not ask to install/)
+    expect(await executeWorkflowInstall({ id: candidateId() }, run())).toMatch(/^Refused: the user did not ask about installing a workflow/)
     expect(queue()).toHaveLength(0)
   })
 
@@ -255,8 +255,8 @@ describe('workflow_install', () => {
   it('yellow after foreign content is refused', async () => {
     userSays('install it')
     h.check.mockResolvedValue(yellow())
-    const text = await executeWorkflowInstall({ id: candidateId() }, run({ tainted: 'web_fetch example.org' } as Partial<AgentRunContext>))
-    expect(text).toMatch(/^Refused: this run read content from elsewhere/)
+    const text = await executeWorkflowInstall({ id: candidateId() }, run({ taint: { tool: 'web_fetch', at: 1 } }))
+    expect(text).toMatch(/^Refused: this run read a web page \(web_fetch\) before/)
     expect(queue()).toHaveLength(0)
   })
 
@@ -296,7 +296,7 @@ describe('workflow_assign', () => {
 
   it('needs the user to ask', async () => {
     userSays('nice')
-    expect(await executeWorkflowAssign({ workflow: 'Flux Upscale', model: 'flux1-dev' }, run())).toMatch(/^Refused: the user did not ask to use/)
+    expect(await executeWorkflowAssign({ workflow: 'Flux Upscale', model: 'flux1-dev' }, run())).toMatch(/^Refused: the user did not ask/)
   })
 
   it('card, yes, assigned; an unknown model is refused', async () => {
@@ -307,5 +307,22 @@ describe('workflow_assign', () => {
     expect(req.kind).toBe('assign')
     expect(await pending).toMatch(/flux1-dev\.safetensors now generates with "Flux Upscale"/)
     expect(useWorkflowStore.getState().modelNameAssignments['flux1-dev.safetensors']).toBe('w1')
+  })
+})
+
+describe('the shared policy (C60-S3)', () => {
+  it('a run that showed three cards gets no fourth', async () => {
+    userSays('install it')
+    h.check.mockResolvedValue(checked())
+    expect(await executeWorkflowInstall({ id: candidateId() }, run({ selfControlCards: 3 }))).toMatch(/^Refused: 3 cards in this run already/)
+  })
+
+  it('green after foreign content still gets its card, with the source named', async () => {
+    userSays('install it')
+    h.check.mockResolvedValue(checked())
+    const pending = executeWorkflowInstall({ id: candidateId() }, run({ taint: { tool: 'web_fetch', at: 1 } }))
+    const req = await answerCard(false)
+    expect(req.foreign).toBe('a web page (web_fetch)')
+    await pending
   })
 })

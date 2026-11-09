@@ -7,7 +7,6 @@
  */
 
 import type { MCPToolDefinition, PermissionMap } from '../api/mcp/types'
-import { WORKFLOW_GATE_WORDS, asksAboutWorkflows } from './workflow-tool-names'
 
 interface ToolGroup {
   keywords: string[]
@@ -97,7 +96,7 @@ export const SETTINGS_KEYWORDS = [
 /** True when a chat message is about LU's own settings. */
 export function asksAboutSettings(userMessage: string): boolean {
   const msg = (userMessage || '').toLowerCase()
-  return SETTINGS_KEYWORDS.some((k) => msg.includes(k)) || asksAboutWorkflows(msg)
+  return SETTINGS_KEYWORDS.some((k) => msg.includes(k))
 }
 
 /**
@@ -136,13 +135,9 @@ const GATE_KEYWORDS: Record<string, readonly string[]> = {
   check_tasks: DELEGATE_KEYWORDS,
   message_agent: DELEGATE_KEYWORDS,
   // A11: in Code only on a message about settings, like everywhere else.
-  get_settings: SETTINGS_KEYWORDS,
-  set_setting: SETTINGS_KEYWORDS,
-  // C60-S5: the four ComfyUI workflow tools, on a message about a workflow.
-  workflow_find: WORKFLOW_GATE_WORDS,
-  workflow_inspect: WORKFLOW_GATE_WORDS,
-  workflow_install: WORKFLOW_GATE_WORDS,
-  workflow_assign: WORKFLOW_GATE_WORDS,
+  // C60: all self-control tools (settings, models, services, downloads) on
+  // the wider gate generated from the settings catalog.
+  ...Object.fromEntries(SELF_CONTROL_TOOL_NAMES.map((n) => [n, settingsGateWords()])),
 }
 
 /**
@@ -237,8 +232,9 @@ const TOOL_GROUPS: ToolGroup[] = [
     tools: ['run_workflow'],
   },
   {
-    keywords: SETTINGS_KEYWORDS,
-    tools: ['get_settings', 'set_setting'],
+    // C60: the self-control tools on the gate generated from the catalog.
+    keywords: settingsGateWords(),
+    tools: [...SELF_CONTROL_TOOL_NAMES],
   },
 ]
 
@@ -288,6 +284,7 @@ export const EMBEDDING_ROUTING_THRESHOLD = 15
 
 import type { EmbeddingFn } from '../api/agents/embedding-router'
 import { REA_SERVER_ID, reaToolsFor } from './plugins/rea-tools'
+import { SELF_CONTROL_TOOL_NAMES, settingsGateWords } from './settings-tool-names'
 import { selectToolsByEmbedding } from '../api/agents/embedding-router'
 
 /**

@@ -13,12 +13,14 @@ import { DiffView } from './DiffView'
 import { ScreenTaskSteps } from './ScreenTaskSteps'
 import { ScreenShotStrip } from '../computer/ScreenShotStrip'
 import { ComputerChatPermission, useComputerChatAsk } from '../computer/ComputerChatPermission'
-import { SettingChangeAsk, SettingChangeDone } from './SettingChangeCard'
+import { SettingChangeAsk, SettingChangeDone, SelfControlDone } from './SettingChangeCard'
 import { useSettingsConfirmStore, pendingForCall } from '../../stores/settingsConfirmStore'
-import { parseSettingChange } from '../../api/mcp/settings-tools'
+import { parseSettingChanges } from '../../api/mcp/settings-tools'
+import { parseSelfControlAction } from '../../api/mcp/self-control-tools'
 import { WorkflowCardAsk, WorkflowCardDone } from './WorkflowInstallCard'
 import { useWorkflowCardStore, workflowCardForCall } from '../../stores/workflowInstallConfirmStore'
 import { parseWorkflowMark } from '../../api/mcp/workflow-tools'
+import { isSelfControlToolName } from '../../lib/settings-tool-names'
 import { useChatStore } from '../../stores/chatStore'
 import { commandIcon } from '../../lib/shell-command-classify'
 import { requestGenerationCancel } from '../../api/vram-handoff'
@@ -269,11 +271,14 @@ function ToolCallBlockImpl({ toolCall, onApprove, onReject }: Props) {
   const isFailed = toolCall.status === 'failed' || toolCall.status === 'rejected'
   // The first use of computer control in a chat waits here for the user's yes.
   const chatAsk = useComputerChatAsk(toolCall.toolName, isRunning, useChatStore((s) => s.activeConversationId))
-  // A11: a settings change waits here for Accept, and stays with Undo.
-  const isSetSetting = toolCall.toolName === 'set_setting'
+  // A11 / C60: a change LU makes to itself waits here for Accept, and stays
+  // with Undo: one setting, several on one card, or an action.
+  const isSetSetting = isSelfControlToolName(toolCall.toolName) && toolCall.toolName !== 'get_settings' && toolCall.toolName !== 'lu_open_settings'
   const settingAsk = useSettingsConfirmStore((s) => (isSetSetting && isRunning ? pendingForCall(s.queue, toolCall.id) : null))
-  const settingChange = isSetSetting && toolCall.status === 'completed' ? parseSettingChange(toolCall.result) : null
-  // C60-S5: a workflow install or assignment waits here, and stays with Undo.
+  const settingChanges = isSetSetting && toolCall.status === 'completed' ? parseSettingChanges(toolCall.result) : []
+  const selfAction = isSetSetting && toolCall.status === 'completed' ? parseSelfControlAction(toolCall.result) : null
+  // C60-S5: a workflow install or assignment waits here with its traffic
+  // light check, and stays with Undo for the assignment.
   const isWorkflowWrite = toolCall.toolName === 'workflow_install' || toolCall.toolName === 'workflow_assign'
   const workflowAsk = useWorkflowCardStore((s) => (isWorkflowWrite && isRunning ? workflowCardForCall(s.queue, toolCall.id) : null))
   const workflowMark = isWorkflowWrite && toolCall.status === 'completed' ? parseWorkflowMark(toolCall.result) : null
@@ -439,7 +444,8 @@ function ToolCallBlockImpl({ toolCall, onApprove, onReject }: Props) {
       )}
       {chatAsk && <div className="ml-3.5 pl-2"><ComputerChatPermission ask={chatAsk} /></div>}
       {settingAsk && <div className="ml-3.5 pl-2"><SettingChangeAsk req={settingAsk} /></div>}
-      {settingChange && <div className="ml-3.5 pl-2"><SettingChangeDone change={settingChange} /></div>}
+      {settingChanges.map((c) => <div key={c.key} className="ml-3.5 pl-2"><SettingChangeDone change={c} /></div>)}
+      {selfAction && <div className="ml-3.5 pl-2"><SelfControlDone action={selfAction} /></div>}
       {workflowAsk && <div className="ml-3.5 pl-2"><WorkflowCardAsk req={workflowAsk} /></div>}
       {workflowMark && <div className="ml-3.5 pl-2"><WorkflowCardDone mark={workflowMark} /></div>}
       {isRunning && toolCall.toolName === 'computer_task' && <ScreenTaskSteps />}

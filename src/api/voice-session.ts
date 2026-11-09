@@ -24,7 +24,7 @@ import { beginAgentRun, endAgentRun, renderWorkspaceSection } from './agent-cont
 import type { AgentRunContext } from './agent-context'
 import { resolveWorkspace } from './agents/workspace-resolve'
 import { toolRegistry } from './mcp'
-import { isSettingsToolName } from '../lib/settings-tool-names'
+import { isSelfControlToolName } from '../lib/settings-tool-names'
 import type { MCPToolDefinition } from './mcp/types'
 import { resolveVoiceBrain, describeVoiceBrain, takesTheEngineFrom, VoiceBrainError } from './voice-brain'
 import type { VoiceBrain } from './voice-brain'
@@ -347,7 +347,7 @@ function selectTools(brain: VoiceBrain, conversationId: string, run: AgentRunCon
     toolRegistry.getAvailableTools(categories),
     planToolAllowed({ mode: null, userText: '', todos: [] }),
   // Nobody sees a card while speaking: no settings changes by voice (A11).
-  ).filter((tool) => TOOL_NAME.test(tool.name) && !isSettingsToolName(tool.name) && voiceToolLevel(tool.name, toolRegistry, permissions(), run) !== 'blocked')
+  ).filter((tool) => TOOL_NAME.test(tool.name) && !isSelfControlToolName(tool.name) && voiceToolLevel(tool.name, toolRegistry, permissions(), run) !== 'blocked')
   if (!defs.some((tool) => tool.name === COMPUTER_TASK_TOOL_NAME) && categories[COMPUTER_TASK_TOOL.category] !== 'blocked') {
     defs.push(COMPUTER_TASK_TOOL)
   }

@@ -36,6 +36,10 @@ import {
   WORKFLOW_ASSIGN, WORKFLOW_FIND, WORKFLOW_INSPECT, WORKFLOW_INSTALL, userAskedToAssign, userAskedToInstall,
 } from '../../lib/workflow-tool-names'
 import { useChatStore } from '../../stores/chatStore'
+import { useModelStore } from '../../stores/modelStore'
+import { useSettingsAuditStore } from '../../stores/settingsAuditStore'
+import { checkSelfControl, noteCard } from '../../lib/self-control-policy'
+import { taintLabel } from '../../lib/run-taint'
 import { useWorkflowStore } from '../../stores/workflowStore'
 import { useWorkflowCardStore } from '../../stores/workflowInstallConfirmStore'
 import type { WorkflowTemplate } from '../../types/workflows'
@@ -111,46 +115,21 @@ export function lastUserText(conversationId: string | null | undefined): string 
   return last.displayContent ?? last.content ?? ''
 }
 
-/** A short yes to the model's own question ("ja", "ok, mach"). */
-const SHORT_YES = /^\s*(ja|jo|yes|yep|ok(ay)?|sure|klar|gerne?|bitte|mach( das| es)?|do it|go( ahead)?|einverstanden|passt)\b/i
-
-/**
- * The intent rule for a write (C60, 5.3): the user's own last message asks
- * for it, or it is a short yes to the model's own question that did. The
- * model's question counts only in its own words, never a tool's result.
- */
-export function userAsked(conversationId: string | null | undefined, asks: (text: string) => boolean): boolean {
-  if (!conversationId) return false
-  const msgs = useChatStore.getState().conversations.find((c) => c.id === conversationId)?.messages ?? []
-  let u = -1
-  for (let i = msgs.length - 1; i >= 0; i--) if (msgs[i].role === 'user') { u = i; break }
-  if (u < 0) return false
-  const user = msgs[u].displayContent ?? msgs[u].content ?? ''
-  if (asks(user)) return true
-  if (user.trim().length > 120 || !SHORT_YES.test(user)) return false
-  for (let i = u - 1; i >= 0; i--) {
-    if (msgs[i].role !== 'assistant') continue
-    const own = [msgs[i].content ?? '', ...(msgs[i].agentBlocks ?? []).filter((b) => b.phase !== 'tool_call').map((b) => b.content ?? '')].join('\n')
-    return asks(own)
-  }
-  return false
+/** Audit row for the agent's change log (Settings, Agent), C60-S2. */
+function audit(run: AgentRunContext | undefined, title: string, outcome: 'applied' | 'declined' | 'timeout' | 'refused' | 'failed', why?: string) {
+  useSettingsAuditStore.getState().record({
+    conversationId: run?.conversationId ?? null,
+    model: useModelStore.getState().activeModel ?? null,
+    kind: 'action', key: 'workflow', label: title, from: '', to: '', outcome, why, tainted: taintLabel(run),
+  })
 }
 
-/**
- * Whether this run read foreign content before (C60-S3 taint). The flag is
- * the run's; this module only reads it. The workflow tools' own answers do not
- * set it: they hand the model LU's structured report, never text of the source.
- */
-export function foreignContent(run: AgentRunContext | undefined): string | null {
-  // C60-S3 marks the run (`run.taint`, set by the executor, lib/run-taint.ts
-  // on that branch); older shapes are read too until the branches meet.
-  const r = run as unknown as { taint?: { tool?: unknown }; tainted?: unknown } | undefined
-  const tool = r?.taint && typeof r.taint.tool === 'string' ? r.taint.tool : null
-  if (tool) return `output of ${tool}`
-  const v = r?.tainted
-  if (!v) return null
-  return typeof v === 'string' ? v : 'content from elsewhere'
-}
+/** Strong words: only these count for a yellow install (strict) and for the
+ *  short "ja" to the model's own question. */
+const STRONG_INSTALL = /\b(install|installier|einbau|einbauen|bau(?:e|t)?\b[^.?!\n]{0,40}\bein\b)/i
+
+const installNames = (text: string, strict: boolean) => (strict ? STRONG_INSTALL.test(text) : userAskedToInstall(text))
+const assignNames = (text: string, strict: boolean) => (strict ? STRONG_INSTALL.test(text) || /\b(assign|zuweis|zuweisen)/i.test(text) : userAskedToAssign(text))
 
 const NOT_HERE = 'Error: workflows can only be installed in a chat where the user sees the confirmation card. Nothing changed.'
 
@@ -295,10 +274,9 @@ export async function executeWorkflowInstall(args: ToolArgs, run?: AgentRunConte
   const c = candidateById(id)
   if (!c) return `Error: there is no workflow "${cleanName(id, 40)}" from this session. Call workflow_find first.`
 
-  if (!userAsked(run.conversationId, userAskedToInstall)) {
-    return 'Refused: the user did not ask to install a workflow in their last message. '
-      + 'Show them the check and ask whether to install it. Nothing changed.'
-  }
+  // Policy first (C60-S3): surface, card cap and the user's own words.
+  const first = checkSelfControl(run, { names: installNames, strong: false, what: 'installing a workflow' })
+  if (!first.ok) { audit(run, c.title, 'refused', first.why); return first.reply }
 
   // Checked again now: ComfyUI, the packs and the models may have changed.
   let checked: Checked
@@ -315,11 +293,13 @@ export async function executeWorkflowInstall(args: ToolArgs, run?: AgentRunConte
     return 'Refused: ComfyUI is not running, so LU cannot check which nodes and models are there. '
       + 'Ask the user to start ComfyUI (Create, or Settings, AI Backends), then check again. Nothing changed.'
   }
-  const foreign = foreignContent(run)
-  if (r.light === 'yellow' && foreign) {
-    return 'Refused: this run read content from elsewhere before (' + cleanName(foreign, 60) + '), and a yellow workflow '
-      + 'installs node packs or downloads files. Ask the user to request the install in a message of its own. Nothing changed.'
-  }
+  // Yellow installs packs or downloads files: the strong rule, no foreign
+  // content in this run and the user's own install words.
+  const verdict = r.light === 'yellow'
+    ? checkSelfControl(run, { names: installNames, strong: true, what: 'A workflow that installs node packs or downloads files' })
+    : first
+  if (!verdict.ok) { audit(run, c.title, 'refused', verdict.why); return verdict.reply }
+  const foreign = verdict.taintedBy ?? null
 
   let model: string | undefined
   if (typeof args?.model === 'string' && args.model.trim()) {
@@ -328,10 +308,15 @@ export async function executeWorkflowInstall(args: ToolArgs, run?: AgentRunConte
     model = m.name
   }
 
+  noteCard(run)
   const allowed = await useWorkflowCardStore.getState().ask(installCard(checked, model, run, foreign), signal ?? run.abortSignal)
-  if (!allowed) return 'The user declined. Nothing was installed. Do not ask again unless the user asks.'
-
-  return applyInstall(checked, model)
+  if (!allowed) {
+    audit(run, c.title, 'declined')
+    return 'The user declined. Nothing was installed. Do not ask again unless the user asks.'
+  }
+  const result = await applyInstall(checked, model)
+  audit(run, c.title, parseWorkflowMark(result) ? 'applied' : 'failed')
+  return result
 }
 
 /** After the yes: packs, downloads, the workflow, the assignment. */
@@ -434,9 +419,8 @@ export async function executeWorkflowAssign(args: ToolArgs, run?: AgentRunContex
   if (!want) return 'Error: workflow is missing (name or id of an installed workflow). Nothing changed.'
   if (!rawModel) return 'Error: model is missing (a model file name as ComfyUI lists it). Nothing changed.'
   if (!run?.settingsCard) return NOT_HERE
-  if (!userAsked(run.conversationId, userAskedToAssign)) {
-    return 'Refused: the user did not ask to use a workflow for a model in their last message. Suggest it in words. Nothing changed.'
-  }
+  const verdict = checkSelfControl(run, { names: assignNames, strong: false, what: 'which workflow a model uses' })
+  if (!verdict.ok) { audit(run, want, 'refused', verdict.why); return verdict.reply }
   const list = useWorkflowStore.getState().installedWorkflows
   const wf = list.find((w) => w.id === want)
     ?? list.find((w) => w.name.toLowerCase() === want.toLowerCase())
@@ -449,6 +433,7 @@ export async function executeWorkflowAssign(args: ToolArgs, run?: AgentRunContex
   const before = useWorkflowStore.getState().modelNameAssignments[m.name]
   if (before === wf.id) return `${m.name} already generates with "${wf.name}". Nothing changed.`
 
+  noteCard(run)
   const allowed = await useWorkflowCardStore.getState().ask({
     id: uuid(),
     toolCallId: run.toolCallId,
@@ -457,9 +442,13 @@ export async function executeWorkflowAssign(args: ToolArgs, run?: AgentRunContex
     title: wf.name,
     strong: false,
     assign: { workflow: wf.name, model: m.name, ...(before ? { before: list.find((w) => w.id === before)?.name ?? before } : {}) },
-    ...(foreignContent(run) ? { foreign: foreignContent(run)! } : {}),
+    ...(verdict.taintedBy ? { foreign: verdict.taintedBy } : {}),
   }, signal ?? run.abortSignal)
-  if (!allowed) return 'The user declined. Nothing changed. Do not ask again unless the user asks.'
+  if (!allowed) {
+    audit(run, wf.name, 'declined')
+    return 'The user declined. Nothing changed. Do not ask again unless the user asks.'
+  }
+  audit(run, wf.name, 'applied')
 
   useWorkflowStore.getState().assignToModelName(m.name, wf.id)
   const mark: WorkflowInstallMark = { workflowId: wf.id, name: wf.name, model: m.name, ...(before ? { before } : {}) }
