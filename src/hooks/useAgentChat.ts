@@ -3993,7 +3993,7 @@ Creative tools, image_generate, video_generate:
 - Emit these as REAL tool calls through the tool channel — never write the call as plain text like image_generate(prompt="…") in your answer.
 
 Other rules:
-- You MUST use tools — NEVER answer from memory or guess file contents.
+- Use tools for anything about files, this computer, the web or current facts, and never guess file contents. A plain question you can answer from knowledge (an explanation, a definition, advice) gets a direct short answer without any tool call.
 - To CHANGE part of an existing file use file_edit (replace a UNIQUE old_string with new_string), never file_write: rewriting a large file to change three lines truncates it and costs a fortune in tokens. file_write is for creating a new file or fully replacing one.
 - PATHS: use paths relative to your working directory (e.g. \`package.json\`, \`src/app.ts\`, \`.\` for the current folder). Never start a path with \`/\` or a drive letter (\`C:\\\`), that escapes your workspace and fails. To list the current folder, use file_list with path \`.\`.
 - For filesystem READ tasks: file_list first if needed, then file_read.

@@ -87,7 +87,7 @@ export function buildHermesToolPrompt(tools: (AgentToolDef | ToolLike)[]): strin
   const notes: string[] = []
   if (has('todo_write')) {
     notes.push(
-      'PLAN: for a task of more than about three calls, call todo_write FIRST with the whole plan, then again after each step with the COMPLETE list (finished item completed, next one in_progress). The user sees that list while you work.',
+      'PLAN: for a task of more than about three calls, send todo_write with the whole plan TOGETHER WITH your first real tool call, and later updates together with the next real call (finished item completed, next one in_progress), never as a step of its own. The user sees that list while you work.',
     )
   }
   if (has('web_search') && has('web_fetch')) {

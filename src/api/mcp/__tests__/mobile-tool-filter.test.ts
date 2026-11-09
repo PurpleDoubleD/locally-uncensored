@@ -98,7 +98,7 @@ describe('the catalog on a phone', () => {
       const tool = registry.getToolByName(name)!
       expect(tool.description, name).toMatch(/working folder/)
       expect(tool.description, name).not.toMatch(/absolute|home or drive/)
-      expect(JSON.stringify(tool.inputSchema), name).not.toMatch(/absolute preferred/)
+      expect(JSON.stringify(tool.inputSchema), name).not.toMatch(/absolute preferred|relative to the workspace/)
     }
     expect(registry.getToolByName('run_workflow')!.description).not.toMatch(/Code Review/)
     // The roster in the prompt is rendered from these, so it is clean as well.
@@ -116,7 +116,7 @@ describe('the catalog on a desktop is what it was', () => {
       for (const name of RETIRED_TOOL_NAMES) {
         expect(registry.resolveExecutable(name), name).toEqual({ name })
       }
-      expect(registry.getToolByName('file_read')!.description).toMatch(/PREFER absolute paths/)
+      expect(registry.getToolByName('file_read')!.description).toMatch(/relative to the workspace/)
       expect(registry.getToolByName('run_workflow')!.description).toMatch(/Code Review/)
     })
   }
@@ -194,10 +194,11 @@ describe('the prompt builders', () => {
   }
 
   // The three hashes were taken from the builders at 0448401e, the commit
-  // before the mobile groundwork, and are identical to today's desktop output.
+  // before the mobile groundwork. The agent prompt's changed on purpose in C59
+  // (A1: plain questions get a direct answer instead of "MUST use tools").
   it('desktop: the three prompts are byte for byte the ones from before this change', () => {
     standOn('windows')
-    expect(sha(buildAgentSystemPrompt('BASE', roster))).toBe('77aaeb9e2b171556fec07ba6e45ac202f5a5ed971ac77286ce512ba8ffb8b4db')
+    expect(sha(buildAgentSystemPrompt('BASE', roster))).toBe('f7991c99c432ca58aeba38cbb340179ae0dedff4e1a47dad62cb98e1fe64e2fa')
     expect(sha(buildAgentSystemPromptLean('BASE', 'file_read, file_write'))).toBe('28489a4807fe126dbef27f057b0414996a7618ca58d3c822cd51f7e6796184fd')
     expect(sha(buildChatToolsSystemPrompt('BASE'))).toBe('926d2c3e5a07a832f89af62d849248c3e4c01baa5ae73031ca7fdf257a4dc498')
     expect(buildAgentSystemPrompt('', roster)).toContain('with full access to this computer')

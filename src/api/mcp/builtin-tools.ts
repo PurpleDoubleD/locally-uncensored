@@ -280,7 +280,7 @@ const BUILTIN_TOOLS: MCPToolDefinition[] = [
   {
     name: 'file_read',
     description:
-      'Read a file. PREFER absolute paths; relative paths resolve against the agent workspace. '
+      'Read a file. Use a path relative to the workspace; an absolute path works only inside it. '
       + 'Omitting offset/limit returns the whole file. For LARGE files pass offset (1-based start line) and limit '
       + '(number of lines): the response names the window, the total line count and the offset of the next page. '
       + 'A very long whole-file read gets its middle truncated, so page large files. '
@@ -288,7 +288,7 @@ const BUILTIN_TOOLS: MCPToolDefinition[] = [
     inputSchema: {
       type: 'object',
       properties: {
-        path: { type: 'string', description: 'Path to the file (absolute preferred)' },
+        path: { type: 'string', description: 'Path relative to the workspace' },
         offset: { type: 'number', description: '1-based line to start reading from (optional)' },
         limit: { type: 'number', description: 'Maximum number of lines to return (optional)' },
       },
@@ -302,11 +302,11 @@ const BUILTIN_TOOLS: MCPToolDefinition[] = [
     description:
       'Write a WHOLE file: use it to CREATE a new file or fully replace one, and PREFER file_edit to change part of an existing one. '
       + 'Creates parent directories if missing. OVERWRITES existing content, there is no append mode. '
-      + 'PREFER absolute paths.',
+      + 'Use a path relative to the workspace.',
     inputSchema: {
       type: 'object',
       properties: {
-        path: { type: 'string', description: 'Path to the file (absolute preferred)' },
+        path: { type: 'string', description: 'Path relative to the workspace' },
         content: { type: 'string', description: 'The complete new content of the file' },
       },
       required: ['path', 'content'],
@@ -400,7 +400,7 @@ const BUILTIN_TOOLS: MCPToolDefinition[] = [
       type: 'object',
       properties: {
         command: { type: 'string', description: 'The full command to execute. Omit only for task actions.' },
-        cwd: { type: 'string', description: 'Working directory (optional, absolute preferred)' },
+        cwd: { type: 'string', description: 'Working directory (optional, relative to the workspace)' },
         timeout: { type: 'number', description: 'Timeout in milliseconds (default: 120000)' },
         shell: { type: 'string', description: 'Override shell: "powershell" | "cmd" | "bash" (default: auto)' },
         stdin: { type: 'string', description: 'Text piped to the command\'s stdin, e.g. a Python script for `python3 -`.' },

@@ -86,7 +86,7 @@ export function toolDefinitionForThisDevice(tool: MCPToolDefinition): MCPToolDef
   if (!description) return tool
   const properties = tool.inputSchema?.properties
   const path = properties?.path
-  if (path && typeof path.description === 'string' && /absolute preferred/.test(path.description)) {
+  if (path && typeof path.description === 'string' && /relative to the workspace|absolute preferred/.test(path.description)) {
     return {
       ...tool,
       description,
