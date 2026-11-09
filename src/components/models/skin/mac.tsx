@@ -288,7 +288,7 @@ function MacHead({ place, title, Icon, count, note }: HeadProps) {
 /** One row since 08.10.2026: which catalogue, then how big. They stood in two
  *  rows with the hardware chip floating beside the first one. Narrow windows
  *  break the row between the two groups. */
-function MacFilterBar({ catalogue, sizes, hardware, switchBar, legend }: FilterBarProps) {
+function MacFilterBar({ catalogue, sizes, categories, hardware, switchBar, legend }: FilterBarProps) {
   return (
     <div>
       <div className="flex items-center gap-2 flex-wrap">
@@ -299,6 +299,8 @@ function MacFilterBar({ catalogue, sizes, hardware, switchBar, legend }: FilterB
           <HardwareChip vramGb={hardware.vramGb} ramGb={hardware.ramGb} sharedMemory={hardware.sharedMemory} />
         </div>
       </div>
+
+      {categories && <div className="mt-2">{categories}</div>}
 
       {/* The box of the switch line is always in the tree (it is a live
           region), so it gets its distance only while it holds a sentence. As a

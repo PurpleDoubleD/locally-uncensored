@@ -4866,11 +4866,40 @@ pub(crate) fn gguf_delete_plan(path: &Path, roots: &[PathBuf]) -> Result<Vec<Pat
 /// the mapped file cannot be removed while the engine holds it, and a delete
 /// that half works is worse than one that says why. The frontend stops the
 /// engine first when the row is the active one.
+/// C17: what Delete would take off the disk for an LU Engine row, without
+/// taking it: every file of the model (all parts of a split set, the image
+/// part) with its size. The same plan `delete_bundled_model` acts on, so the
+/// dialog cannot list other files than the ones that go.
+#[tauri::command]
+pub async fn bundled_model_delete_plan(
+    path: String,
+    extra_dirs: Option<Vec<String>>,
+) -> Result<serde_json::Value, String> {
+    tokio::task::spawn_blocking(move || {
+        let roots = bundled_scan_dirs(&builtin_models_dir()?, &extra_dirs.unwrap_or_default());
+        let files = gguf_delete_plan(Path::new(&path), &roots)?;
+        let rows: Vec<serde_json::Value> = files
+            .iter()
+            .map(|f| {
+                let bytes = std::fs::metadata(f).map(|m| m.len()).unwrap_or(0);
+                serde_json::json!({ "path": f.to_string_lossy(), "bytes": bytes })
+            })
+            .collect();
+        let bytes: u64 = files.iter().map(|f| std::fs::metadata(f).map(|m| m.len()).unwrap_or(0)).sum();
+        Ok(serde_json::json!({ "files": rows, "bytes": bytes }))
+    })
+    .await
+    .map_err(|e| format!("bundled_model_delete_plan task: {e}"))?
+}
+
+/// `trash`: move the files to the system's Trash instead of deleting them
+/// (C17, the uninstall dialog offers it), so a misclick can be put back.
 #[tauri::command]
 pub async fn delete_bundled_model(
     app: tauri::AppHandle,
     path: String,
     extra_dirs: Option<Vec<String>>,
+    trash: Option<bool>,
 ) -> Result<serde_json::Value, String> {
     tokio::task::spawn_blocking(move || {
         let state = app.state::<AppState>();
@@ -4903,10 +4932,16 @@ pub async fn delete_bundled_model(
         let roots = bundled_scan_dirs(&builtin_models_dir()?, &extra_dirs.unwrap_or_default());
         let files = gguf_delete_plan(Path::new(&path), &roots)?;
         let mut bytes = 0u64;
+        let to_bin = trash.unwrap_or(false);
         for f in &files {
             bytes += std::fs::metadata(f).map(|m| m.len()).unwrap_or(0);
-            std::fs::remove_file(f)
-                .map_err(|e| format!("Could not delete {}: {}", f.display(), os_error::english(&e)))?;
+            if to_bin {
+                crate::commands::os_trash::system_trash(f)
+                    .map_err(|e| format!("Could not move {} to the Trash: {}", f.display(), e))?;
+            } else {
+                std::fs::remove_file(f)
+                    .map_err(|e| format!("Could not delete {}: {}", f.display(), os_error::english(&e)))?;
+            }
         }
         #[cfg(desktop)]
         let answer = serde_json::json!({ "deleted": files.len(), "bytes": bytes });

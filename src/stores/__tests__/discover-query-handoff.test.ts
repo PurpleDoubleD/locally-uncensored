@@ -36,7 +36,9 @@ describe('Discover search hand-off', () => {
     const kept = store.slice(store.indexOf('partialize:'))
     expect(kept.slice(0, kept.indexOf('}),'))).not.toMatch(/discoverQuery/)
     const page = readFileSync(resolve(__dirname, '../../components/models/ModelManager.tsx'), 'utf8')
-    expect(page).toMatch(/useState\(\(\) => useUIStore\.getState\(\)\.discoverQuery \?\? ''\)/)
+    // C22 (3.1.0): without a handed-over search the field opens with the one
+    // of the last visit in this session (stores/pageMemoryStore.ts).
+    expect(page).toMatch(/useState\(\(\) => useUIStore\.getState\(\)\.discoverQuery \?\? usePageMemoryStore\.getState\(\)\.modelsSearch\)/)
     expect(page).toMatch(/clearDiscoverQuery\(\)/)
     // The original search reaches Discover, which sorts only while the field holds it.
     expect(page).toMatch(/originalFor=\{originalFor\}/)

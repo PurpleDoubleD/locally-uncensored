@@ -838,6 +838,77 @@ pub async fn comfy_model_info(
     Ok(file_facts(file, own_folder, hits.len()))
 }
 
+/// C41: show a ComfyUI model file (a LoRA, a checkpoint) in the file
+/// manager. Found the way Details finds it, so it can only ever point at a
+/// file in the models folders or the user's own Storage folder.
+#[cfg(desktop)]
+#[allow(non_snake_case)]
+#[tauri::command]
+pub async fn comfy_model_reveal(
+    filename: String,
+    extraDirs: Option<Vec<String>>,
+    state: State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    if let Some(remote) = remote_comfy(&state) {
+        return Err(format!(
+            "{} is on the ComfyUI machine ({}). Open the models folder there.",
+            filename, remote.host
+        ));
+    }
+    let comfy_path = state
+        .comfy_path
+        .lock()
+        .unwrap()
+        .clone()
+        .ok_or("ComfyUI path not set. Please set it in settings or install ComfyUI first.")?;
+    let (sub, base) = split_model_ref(&filename);
+    if !sub.is_empty() {
+        safe_subfolder(&sub)?;
+    }
+    let base = sanitize_filename(&base);
+    let mut hits = comfy_model_hits(&state, &comfy_path, &sub, &base).await;
+    if hits.is_empty() {
+        hits = own_folder_hits(&base, &extraDirs.unwrap_or_default());
+    }
+    let file = hits
+        .first()
+        .ok_or_else(|| format!("{} was not found in the ComfyUI models folders", filename))?;
+    reveal_in_file_manager(file)?;
+    Ok(serde_json::json!({ "path": file.to_string_lossy() }))
+}
+
+/// The file selected in Finder or Explorer; on Linux, where there is no
+/// common way to select a file, its folder.
+#[cfg(desktop)]
+fn reveal_in_file_manager(file: &Path) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    let mut cmd = {
+        let mut c = std::process::Command::new("open");
+        c.arg("-R").arg(file);
+        c
+    };
+    #[cfg(target_os = "windows")]
+    let mut cmd = {
+        // One argument, the comma belongs to it.
+        let mut c = std::process::Command::new("explorer");
+        let mut arg = std::ffi::OsString::from("/select,");
+        arg.push(file.as_os_str());
+        c.arg(arg);
+        c
+    };
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let mut cmd = {
+        let mut c = crate::process_util::foreign_system_command("xdg-open");
+        c.arg(file.parent().unwrap_or(file));
+        c
+    };
+    crate::process_util::suppress_window(&mut cmd);
+    // explorer.exe answers 1 even when it worked, so only a failed spawn counts.
+    cmd.spawn()
+        .map(|_| ())
+        .map_err(|e| format!("Could not open the folder: {}", os_error::english(&e)))
+}
+
 /// A file of that name in the user's own model folder (Storage), the place
 /// `not_ours_to_delete` names.
 fn own_folder_hits(base: &str, extra_dirs: &[String]) -> Vec<PathBuf> {

@@ -38,6 +38,7 @@ import { MAX_SHOTS, MAX_SHOT_CHARS, supportsMultishot } from '../../../lib/ltx-m
 import { frameRangeFor, framesOnRange, lengthHint } from '../../../lib/video-length'
 import { LongVideoControls } from './LongVideoControls'
 import { useMacMemoryGb } from '../../../lib/mac-memory'
+import { useLoraNotesStore, applyLoraNotes } from '../../../stores/loraNotesStore'
 
 // Video families whose dynamic-workflow strategy actually wires a LoRA node:
 // the generic UNET path (wan/hunyuan/ltx/mochi/cosmos) plus Wan 2.2's dedicated
@@ -116,7 +117,10 @@ export function ParamGroups() {
   const laneType = (isVideo ? s.videoModelList : s.imageModelList).find((m) => m.name === laneModel)?.type ?? classifyModel(laneModel)
   const runLoras = lorasForRun(s.selectedLoras, loraList, laneType).use
   const activeLoras = runLoras.length
-  const stackRows = loraRows(loraList, s.selectedLoras, laneType)
+  // C41: the names the user gave the LoRAs in Models, and the ones hidden
+  // there left out (a ticked one stays, so it can be turned off).
+  const loraNotes = useLoraNotesStore((st) => st.notes)
+  const stackRows = applyLoraNotes(loraRows(loraList, s.selectedLoras, laneType), loraNotes, { picked: new Set(s.selectedLoras.map((l) => l.name)) })
   // The search and the scroll position outlive the drawer (loraStackView.ts).
   const [loraQuery, setLoraQuery] = useState(() => loraStackView().query)
   const shownRows = filterLoraRows(stackRows, loraQuery)
@@ -615,7 +619,7 @@ export function ParamGroups() {
                 return (
                   <div key={name} className={cn('rounded-md border transition-colors', active ? 'border-white/15 bg-white/[0.06]' : 'border-white/[0.06]')}>
                     <div className="flex items-stretch">
-                      <button onClick={() => s.toggleLora(name)} title={file} className="flex-1 min-w-0 flex items-center justify-between gap-2 pl-2.5 pr-1 py-1.5 t-control text-left text-gray-300">
+                      <button onClick={() => s.toggleLora(name)} title={loraNotes[name]?.note ? `${file}\n${loraNotes[name]?.note}` : file} className="flex-1 min-w-0 flex items-center justify-between gap-2 pl-2.5 pr-1 py-1.5 t-control text-left text-gray-300">
                         <span className="min-w-0 [overflow-wrap:anywhere]">{label}</span>
                         <span className={cn('t-mono shrink-0', active && fits ? (isMlxLocal ? 'text-emerald-600 dark:text-emerald-400' : 'text-emerald-400') : 'text-gray-600')}>{fits ? (active ? 'on' : 'off') : `${familyLabel} only`}</span>
                       </button>

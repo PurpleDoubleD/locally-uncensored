@@ -8,9 +8,11 @@
  * is decided once, in `searchCivitaiModels`, from that same type.
  */
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Search, Loader2, ExternalLink, Download, CheckCircle } from 'lucide-react'
+import { Search, Loader2, ExternalLink, Download, CheckCircle, Info } from 'lucide-react'
 import { useModelSourceStore } from '../../stores/modelSourceStore'
-import { checkCivitaiInstalled, civitaiInstalledInFolder, searchCivitaiModels, startCivitaiDownload, startModelDownloadToPath, type CivitAIModelResult } from '../../api/discover'
+import { checkCivitaiInstalled, civitaiHitWithFile, civitaiInstalledInFolder, searchCivitaiModels, startCivitaiDownload, startModelDownloadToPath, type CivitAIModelResult } from '../../api/discover'
+import { CivitaiHitDetails } from './CivitaiHitDetails'
+import { usePageMemoryStore } from '../../stores/pageMemoryStore'
 import { openExternal } from '../../api/backend'
 import { useDownloadStore } from '../../stores/downloadStore'
 import { useWorkflowStore } from '../../stores/workflowStore'
@@ -49,15 +51,30 @@ interface Props {
 }
 
 export function CivitaiSearchPanel({ modelType, title, placeholder, search = '', searchSubmitToken = 0, baseModel, destDir, installed }: Props) {
-  const [results, setResults] = useState<CivitAIModelResult[]>([])
+  // C22: the last search of this panel and its hits stay for the session.
+  // Keyed by what the panel searches and where it writes (the Mac's LoRA
+  // folder is its own panel).
+  const memoryKey = `${modelType}|${baseModel ?? ''}|${destDir ?? ''}`
+  const remembered = usePageMemoryStore.getState().civitai[memoryKey]
+  const [hits, setHits] = useState<CivitAIModelResult[]>(() => remembered?.results ?? [])
+  // C21: a hit whose file the user picked in Details downloads, shows its
+  // progress and says Installed as that file.
+  const [picked, setPicked] = useState<Record<number, CivitAIModelResult>>({})
+  const results = useMemo(() => hits.map((h) => picked[h.id] ?? h), [hits, picked])
+  const setResults = (next: CivitAIModelResult[], forQuery: string) => {
+    setHits(next)
+    setPicked({})
+    usePageMemoryStore.getState().setCivitai(memoryKey, { query: forQuery, results: next })
+  }
+  const [details, setDetails] = useState<CivitAIModelResult | null>(null)
   const [searching, setSearching] = useState(false)
-  const [query, setQuery] = useState(search)
+  const [query, setQuery] = useState(search || remembered?.query || '')
   // Track whether the *latest* CivitAI search has been issued at least once,
   // so an empty-state hint can render between "before-first-search" and
   // "search returned 0 hits". Without this we fall through to the silent gap
   // A user described: empty list, no console output, looks like the
   // button did nothing.
-  const [searched, setSearched] = useState(false)
+  const [searched, setSearched] = useState(() => !!remembered)
   // CivitAI mirror host (#53), civitai.red for regions where .com is blocked.
   const civitaiHost = useWorkflowStore((s) => s.civitaiHost)
   const setCivitaiHost = useWorkflowStore((s) => s.setCivitaiHost)
@@ -104,7 +121,7 @@ export function CivitaiSearchPanel({ modelType, title, placeholder, search = '',
       ? await searchCivitaiModels(text, modelType, apiKey, host, { baseModel, safetensorsOnly: !!destDir })
       : await searchCivitaiModels(text, modelType, apiKey, host)
     if (mine !== searchSeq.current) return
-    setResults(hits)
+    setResults(hits, text)
     setSearching(false)
   }
 
@@ -198,6 +215,7 @@ export function CivitaiSearchPanel({ modelType, title, placeholder, search = '',
                   <div className="flex items-center gap-2">
                     <span className="text-sm font-medium text-gray-900 dark:text-white truncate">{model.name}</span>
                     {model.sizeGB && <span className="t-micro text-gray-400 flex-shrink-0">{model.sizeGB} GB</span>}
+                    {picked[model.id] && <span className="t-micro text-gray-500 dark:text-gray-400 font-mono truncate" title="The file you picked in Details">{model.filename}</span>}
                   </div>
                   {model.description && <p className="t-micro text-gray-500 line-clamp-1 mt-0.5">{model.description}</p>}
                   {isDl && dlState && dlState.total > 0 && (
@@ -222,6 +240,21 @@ export function CivitaiSearchPanel({ modelType, title, placeholder, search = '',
                       <Download size={14} />
                     </button>
                   ) : null}
+                  <button
+                    onClick={() => {
+                      const hit = hits.find((h) => h.id === model.id) ?? model
+                      // The Mac's LoRA folder lists .safetensors only.
+                      setDetails(destDir
+                        ? { ...hit, versions: hit.versions?.map((v) => ({ ...v, files: v.files.filter((f) => /\.safetensors$/i.test(f.name)) })).filter((v) => v.files.length > 0) }
+                        : hit)
+                    }}
+                    className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-white/10 text-gray-500 transition-colors"
+                    title="Details: full description, versions and files"
+                    aria-label={`Details of ${model.name}`}
+                    data-testid="civitai-details-open"
+                  >
+                    <Info size={14} />
+                  </button>
                   <button onClick={() => openExternal(model.sourceUrl)} className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-white/10 text-gray-500 transition-colors" title="View on CivitAI" aria-label="View on CivitAI">
                     <ExternalLink size={14} />
                   </button>
@@ -231,6 +264,17 @@ export function CivitaiSearchPanel({ modelType, title, placeholder, search = '',
           })}
         </div>
       )}
+
+      <CivitaiHitDetails
+        hit={details}
+        onClose={() => setDetails(null)}
+        onDownload={(version, file) => {
+          if (!details) return
+          const chosen = civitaiHitWithFile(details, version, file)
+          setPicked((p) => ({ ...p, [details.id]: chosen }))
+          void download(chosen)
+        }}
+      />
 
       {/* Listen-Ladezustand 2 von 4: dieselbe Begruendung eine Karte weiter
           oben, nur mit der Zeilengeometrie der Trefferliste. */}

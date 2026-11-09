@@ -20,6 +20,9 @@ import { formatBytes } from '../../lib/formatters'
 import { installedRowMatchesSearch } from '../../lib/model-search'
 import { deleteMlxLora, mlxLoraAlphaNote, mlxLoraKeysNote, openMlxLoraFolder, MLX_LORAS_CHANGED, MAC_LORA_MODELS } from '../../api/mlx-loras'
 import type { MlxLoraFolder } from '../../hooks/useMlxLoras'
+import { useLoraNotesStore } from '../../stores/loraNotesStore'
+import { usePageMemoryStore } from '../../stores/pageMemoryStore'
+import { LoraRowActions, LoraRowDetails, LoraRowName, ShowHiddenLoras } from './LoraManager'
 
 /** Where a LoRA is used. The names are the labels Create shows: the drawer
  *  "Advanced settings", the group "Expert", the list "LoRA stack". */
@@ -34,9 +37,14 @@ interface Props {
   search: string
   searchSubmitToken: number
   onGetNew: () => void
+  /** C41: opens the rename-and-note dialog of the Models page. */
+  onEdit?: (name: string) => void
 }
 
-export function MacLoraLane({ folder, tab, search, searchSubmitToken, onGetNew }: Props) {
+export function MacLoraLane({ folder, tab, search, searchSubmitToken, onGetNew, onEdit }: Props) {
+  // C41: names, notes and hidden marks, the same store the other lane uses.
+  const notes = useLoraNotesStore((s) => s.notes)
+  const showHidden = usePageMemoryStore((s) => s.lorasShowHidden)
   const [removing, setRemoving] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
@@ -49,6 +57,7 @@ export function MacLoraLane({ folder, tab, search, searchSubmitToken, onGetNew }
     setRemoving(null)
     try {
       await deleteMlxLora(name)
+      useLoraNotesStore.getState().forget(name)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     }
@@ -106,7 +115,15 @@ export function MacLoraLane({ folder, tab, search, searchSubmitToken, onGetNew }
 
   if (!folder.loaded) return <ModelQuietLine>Reading your LoRA folder…</ModelQuietLine>
 
-  const rows = search ? folder.loras.filter((l) => installedRowMatchesSearch(l.name, search)) : folder.loras
+  const withNotes = folder.loras.map((l) => {
+    const n = notes[l.name]
+    return { ...l, size: l.sizeBytes, ...(n?.label ? { label: n.label } : {}), ...(n?.note ? { note: n.note } : {}), ...(n?.hidden ? { hidden: true } : {}) }
+  })
+  const hiddenCount = withNotes.filter((l) => l.hidden).length
+  const q = search.trim().toLowerCase()
+  const rows = withNotes
+    .filter((l) => showHidden || !l.hidden)
+    .filter((l) => !search || installedRowMatchesSearch(l.name, search) || (!!l.label && installedRowMatchesSearch(l.label, search)) || (!!l.note && l.note.toLowerCase().includes(q)))
 
   return (
     <div className="space-y-4" data-testid="mac-lora-lane">
@@ -127,7 +144,10 @@ export function MacLoraLane({ folder, tab, search, searchSubmitToken, onGetNew }
       ) : (
         <section className="space-y-2">
           <SectionHead level="h2" icon={<Layers size={ICON_SM} />} title="Installed LoRAs" count={rows.length} />
-          <p className="t-micro text-gray-500 dark:text-gray-400">{MAC_LORA_USE_HINT}</p>
+          <div className="flex items-center gap-3">
+            <p className="t-micro text-gray-500 dark:text-gray-400 flex-1">{MAC_LORA_USE_HINT}</p>
+            <ShowHiddenLoras count={hiddenCount} show={showHidden} onShow={(v) => usePageMemoryStore.getState().setLorasShowHidden(v)} className="t-micro text-gray-500 dark:text-gray-400" />
+          </div>
           <div className="space-y-1.5">
             {rows.map((row) => {
               const note = mlxLoraKeysNote(row.keys)
@@ -135,13 +155,25 @@ export function MacLoraLane({ folder, tab, search, searchSubmitToken, onGetNew }
               return (
                 <div key={row.name} data-testid="lora-row" className="lu-tile flex items-center gap-3 px-3.5 py-2.5">
                   <div className="min-w-0 flex-1">
-                    <span className="block truncate text-xs font-medium text-gray-900 dark:text-gray-100">{row.name}</span>
+                    <div className="flex items-center gap-2">
+                      <LoraRowName row={row} nameClass="text-xs font-medium text-gray-900 dark:text-gray-100" />
+                    </div>
                     <div className="flex flex-wrap items-center gap-x-2 mt-1 t-micro text-gray-500 dark:text-gray-400">
                       {row.sizeBytes > 0 && <span className="tabular-nums">{formatBytes(row.sizeBytes)}</span>}
                       {note && <span data-testid="lora-keys-note">{note}</span>}
                       {alphaNote && <span data-testid="lora-alpha-note">{alphaNote}</span>}
                     </div>
+                    <LoraRowDetails row={row} />
                   </div>
+                  <LoraRowActions
+                    row={row}
+                    onEdit={onEdit}
+                    onToggleHidden={(name) => useLoraNotesStore.getState().setNote(name, { hidden: !notes[name]?.hidden })}
+                    // The Mac's LoRAs all lie in the one folder.
+                    onReveal={openFolder}
+                    buttonClass="lu-control lu-control--icon shrink-0"
+                    iconSize={ICON_SM}
+                  />
                   <button
                     onClick={() => setRemoving(row.name)}
                     title="Delete"

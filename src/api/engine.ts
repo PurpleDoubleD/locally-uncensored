@@ -197,12 +197,23 @@ export async function startBundledEngine(modelPath: string, tuning?: BuiltinEngi
 /** Delete an LU Engine row's file(s): the GGUF, or every part of a split.
  *  The backend refuses the loaded model, so the caller stops the engine first
  *  when the row is the active one. */
-export async function deleteBundledModel(path: string): Promise<{ deleted: number; bytes: number }> {
+export async function deleteBundledModel(path: string, opts: { trash?: boolean } = {}): Promise<{ deleted: number; bytes: number }> {
   const res = await backendCall<{ deleted?: number; bytes?: number }>('delete_bundled_model', {
     path,
     extraDirs: customModelDirs(),
+    ...(opts.trash ? { trash: true } : {}),
   })
   return { deleted: res?.deleted ?? 0, bytes: res?.bytes ?? 0 }
+}
+
+/** C17: the files Delete takes for an LU Engine row (all parts, the image
+ *  part), with their sizes, before anything is deleted. */
+export async function bundledModelDeletePlan(path: string): Promise<{ files: { path: string; bytes: number }[]; bytes: number }> {
+  const res = await backendCall<{ files?: { path: string; bytes: number }[]; bytes?: number }>('bundled_model_delete_plan', {
+    path,
+    extraDirs: customModelDirs(),
+  })
+  return { files: res?.files ?? [], bytes: res?.bytes ?? 0 }
 }
 
 export function stopBundledEngine() {

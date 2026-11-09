@@ -108,6 +108,19 @@ export async function comfyModelInfo(filename: string): Promise<ComfyFileFacts> 
   return backendCall('comfy_model_info', { filename, extraDirs: customModelDirs() })
 }
 
+/** C41: show a ComfyUI model file in Finder or Explorer. Throws with the reason. */
+export async function revealComfyModel(filename: string): Promise<void> {
+  await backendCall('comfy_model_reveal', { filename, extraDirs: customModelDirs() })
+}
+
+/** C17: delete one ComfyUI model file, or move it to the Trash. */
+export async function deleteComfyModelFile(filename: string, opts: { trash?: boolean } = {}): Promise<{ bytes: number }> {
+  const res = await backendCall<{ bytes?: number }>('delete_comfy_model', {
+    filename, extraDirs: customModelDirs(), ...(opts.trash ? { trash: true } : {}),
+  })
+  return { bytes: res?.bytes ?? 0 }
+}
+
 export async function getDownloadProgress(): Promise<Record<string, DownloadProgress>> {
   try {
     return await backendCall("download_progress")
@@ -1891,6 +1904,85 @@ export function selectGgufFromTree(
   }
 }
 
+/** C21: one downloadable choice of a repository, a single file or a whole
+ *  split set. */
+export interface GgufChoice {
+  /** The path of the file (of the first part, for a split set). */
+  path: string
+  /** The file name the download is known by. */
+  filename: string
+  quant?: string
+  parts: number
+  totalBytes: number
+  /** A split set the repository holds only some parts of. Not offered as a
+   *  download: llama.cpp cannot load it. */
+  incomplete: boolean
+}
+
+/**
+ * C21 (Discord, 31.10. and 01.11.2026): every GGUF a repository offers,
+ * so the user can pick the quant instead of LU picking it. Pure; the image
+ * part is no choice of its own (it comes with the model). Sorted small to
+ * large, which is the order a quant table reads in.
+ */
+export function listGgufChoices(entries: HfTreeEntry[]): GgufChoice[] {
+  const ggufs = entries.filter(e => e.type === 'file' && /\.gguf$/i.test(e.path) && !isUpstreamImagePart(e.path))
+  const groups = new Map<string, GgufGroup>()
+  for (const f of ggufs) {
+    const key = f.path.replace(GGUF_SHARD_RE, '')
+    const leaf = (f.path.split('/').pop() || '').replace(GGUF_SHARD_RE, '.gguf')
+    const quant = (GGUF_QUANT_TOKEN.exec(leaf)?.[1] || GGUF_QUANT_TOKEN.exec(f.path)?.[1])?.toUpperCase()
+    let g = groups.get(key)
+    if (!g) { g = { key, quant, parts: [] }; groups.set(key, g) }
+    g.parts.push(f)
+  }
+  return [...groups.values()]
+    .map((g) => {
+      const first = [...g.parts].sort((a, b) => a.path.localeCompare(b.path))[0]
+      return {
+        path: first.path,
+        filename: first.path.split('/').pop() as string,
+        quant: g.quant,
+        parts: g.parts.length,
+        totalBytes: groupBytes(g),
+        incomplete: !!shardSetGap(g.parts.map(p => p.path)),
+      }
+    })
+    .sort((a, b) => a.totalBytes - b.totalBytes || a.path.localeCompare(b.path))
+}
+
+/** C21: the GGUF choices of a Hugging Face repository, or null when its file
+ *  list cannot be read (offline, rate limited, gated). */
+export async function fetchGgufChoices(repoId: string): Promise<GgufChoice[] | null> {
+  try {
+    const url = `https://huggingface.co/api/models/${repoId}/tree/main?recursive=true`
+    const { isTauri, fetchExternal } = await import('./backend')
+    const json = isTauri() ? await fetchExternal(url) : await (await fetch(url)).text()
+    const entries = JSON.parse(json)
+    return Array.isArray(entries) ? listGgufChoices(entries as HfTreeEntry[]) : null
+  } catch (err) {
+    log.warn('[discover] HF tree listing failed', { repoId, err })
+    return null
+  }
+}
+
+/** C21: a catalog or search entry, made to fetch the file the user picked.
+ *  The picked path is named, so the download resolves exactly that file (and
+ *  every part of it) and never swaps it for another quant. */
+export function discoverModelForChoice(model: DiscoverModel, repoId: string, choice: GgufChoice): DiscoverModel {
+  const sizeGB = choice.totalBytes > 0 ? Math.round(choice.totalBytes / 1_073_741_824 * 10) / 10 : undefined
+  return {
+    ...model,
+    downloadUrl: `https://huggingface.co/${repoId}/resolve/main/${choice.path}`,
+    filename: choice.filename,
+    sizeGB,
+    sizeBytes: choice.parts === 1 && choice.totalBytes > 0 ? choice.totalBytes : undefined,
+    quantGuessed: false,
+    // Its own checksum, not the one of the catalog's file.
+    sha256: undefined,
+  }
+}
+
 function groupBytes(g: GgufGroup): number {
   return g.parts.reduce((s, p) => s + (p.size || p.lfs?.size || 0), 0)
 }
@@ -2247,6 +2339,37 @@ export interface CivitAIModelResult {
   stats?: { downloads: number; likes: number }
   creator?: string
   sourceUrl: string
+  /** C18: the whole description as text, paragraphs kept, for the Details
+   *  dialog. `description` above stays the one short line of the hit row. */
+  fullDescription?: string
+  /** C21: every version of the hit with its model files, newest first, so the
+   *  user can fetch another version or another precision than the default. */
+  versions?: CivitaiVersionChoice[]
+  /** The id of the version the default download takes (the newest). */
+  versionId?: number
+}
+
+/** One downloadable model file of a CivitAI version (C21). */
+export interface CivitaiFileChoice {
+  name: string
+  sizeBytes?: number
+  downloadUrl: string
+  /** CivitAI's own words for the file: fp16 / bf16 / fp8, pruned / full,
+   *  SafeTensor / GGUF. Shown as they are. */
+  fp?: string
+  size?: string
+  format?: string
+  /** The file CivitAI downloads for the version by default. */
+  primary: boolean
+  sha256?: string
+}
+
+export interface CivitaiVersionChoice {
+  id: number
+  name: string
+  baseModel?: string
+  published?: string
+  files: CivitaiFileChoice[]
 }
 
 export const CIVITAI_DEFAULT_HOST = 'civitai.com'
@@ -2331,6 +2454,92 @@ export function civitaiDescriptionToText(html: string): string {
     .replace(/&nbsp;/g, ' ')
     .replace(/&amp;/g, '&')
     .trim()
+}
+
+/**
+ * C18: the full description of a CivitAI hit as readable text. The HTML is
+ * reduced to its paragraphs and list items; no markup survives, so nothing of
+ * CivitAI's page is ever rendered as HTML inside the app.
+ */
+export function civitaiDescriptionToParagraphs(html: string): string {
+  const withBreaks = html
+    .replace(/<\s*br\s*\/?>/gi, '\n')
+    .replace(/<\s*li[^>]*>/gi, '\n• ')
+    .replace(/<\/\s*(p|div|h[1-6]|li|ul|ol|blockquote|pre|tr)\s*>/gi, '\n')
+  return civitaiDescriptionToText(withBreaks)
+    .split('\n')
+    .map((line) => line.replace(/[ \t]+/g, ' ').trim())
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+}
+
+/** Files that load as a model. Pickle files (.ckpt, .pt, .bin) can run code
+ *  when they are opened, and training data, archives and configs are no
+ *  model, so neither is offered as a choice. */
+const CIVITAI_MODEL_FILE = /\.(safetensors|sft|gguf)$/i
+
+/** C21: the versions of one CivitAI item and their model files, pure. */
+export function civitaiVersionChoices(item: unknown, host: string = CIVITAI_DEFAULT_HOST): CivitaiVersionChoice[] {
+  return asRecordArray(prop(item, 'modelVersions')).map((v) => {
+    const files = asRecordArray(prop(v, 'files'))
+      .filter((f) => CIVITAI_MODEL_FILE.test(asString(prop(f, 'name')) ?? ''))
+      .map((f): CivitaiFileChoice | null => {
+        const url = civitaiHostSwap(asString(prop(f, 'downloadUrl')), host)
+        const name = asString(prop(f, 'name'))
+        if (!url || !name) return null
+        const kb = asNumber(prop(f, 'sizeKB'))
+        const sha = asString(propPath(f, 'hashes', 'SHA256'))?.toLowerCase()
+        return {
+          name,
+          downloadUrl: url,
+          sizeBytes: kb && kb > 0 ? Math.round(kb * 1024) : undefined,
+          fp: asString(propPath(f, 'metadata', 'fp')) ?? undefined,
+          size: asString(propPath(f, 'metadata', 'size')) ?? undefined,
+          format: asString(propPath(f, 'metadata', 'format')) ?? undefined,
+          primary: prop(f, 'primary') === true,
+          sha256: sha && /^[0-9a-f]{64}$/.test(sha) ? sha : undefined,
+        }
+      })
+      .filter((f): f is CivitaiFileChoice => f !== null)
+    return {
+      id: asNumber(prop(v, 'id')) ?? 0,
+      name: asString(prop(v, 'name')) ?? 'Version',
+      baseModel: asString(prop(v, 'baseModel')) ?? undefined,
+      published: (asString(prop(v, 'publishedAt')) ?? asString(prop(v, 'createdAt')))?.slice(0, 10),
+      files,
+    }
+  }).filter((v) => v.files.length > 0)
+}
+
+/** Which models folder a CivitAI file goes to. One rule for the default hit
+ *  and for a file the user picked (C21). */
+export function civitaiSubfolder(type: string, itemName: string, filename: string): string {
+  if (type === 'LORA') return 'loras'
+  if (type === 'VAE') return 'vae'
+  if (type === 'TextualInversion') return 'embeddings'
+  // Only for a checkpoint search: the name of a LORA, a VAE or an embedding
+  // says which base model it was trained against, not what kind of file it
+  // is, so "Flux Realism LoRA" used to be written into diffusion_models.
+  // A GGUF quant is a bare diffusion model whatever its name says, and the
+  // only loader that lists .gguf (ComfyUI-GGUF's UnetLoaderGGUF) reads
+  // diffusion_models/unet (a user, Discord 2026-09-23).
+  const name = itemName.toLowerCase()
+  if (name.includes('flux') || name.includes('wan') || name.includes('hunyuan') || isGgufFile(filename)) return 'diffusion_models'
+  return 'checkpoints'
+}
+
+/** C21: the hit as it downloads with the file the user picked. */
+export function civitaiHitWithFile(hit: CivitAIModelResult, version: CivitaiVersionChoice, file: CivitaiFileChoice): CivitAIModelResult {
+  return {
+    ...hit,
+    downloadUrl: file.downloadUrl,
+    filename: file.name,
+    subfolder: civitaiSubfolder(hit.type, hit.name, file.name),
+    sizeBytes: file.sizeBytes,
+    sizeGB: file.sizeBytes ? Math.round(file.sizeBytes / 1_073_741_824 * 10) / 10 : undefined,
+    versionId: version.id,
+  }
 }
 
 /** A GGUF quant, read by the ComfyUI-GGUF pack and by nothing else. */
@@ -2479,32 +2688,16 @@ export async function searchCivitaiModels(
       const downloadCount = asNumber(prop(stats, 'downloadCount'))
       const creator = asString(propPath(item, 'creator', 'username'))
 
-      // Determine subfolder based on model type
-      let subfolder = 'checkpoints'
-      if (type === 'LORA') subfolder = 'loras'
-      else if (type === 'VAE') subfolder = 'vae'
-      else if (type === 'TextualInversion') subfolder = 'embeddings'
-      // Check if it's a diffusion model (FLUX, Wan, etc.). Only for a
-      // checkpoint search: the name of a LORA, a VAE or an embedding says
-      // which base model it was trained against, not what kind of file it is,
-      // so "Flux Realism LoRA" used to be written into diffusion_models, where
-      // the LoRA loader does not look and the LoRA stack in Create could never
-      // offer it.
-      const name = (itemName ?? '').toLowerCase()
-      if (type === 'Checkpoint' && (name.includes('flux') || name.includes('wan') || name.includes('hunyuan'))) {
-        subfolder = 'diffusion_models'
-      }
-
       const filename = asString(prop(file, 'name'))
         || `${(itemName ?? '').replace(/[^a-zA-Z0-9._-]/g, '_')}.safetensors`
-      // A GGUF quant is a bare diffusion model whatever its name says, and the
-      // only loader that lists .gguf (ComfyUI-GGUF's UnetLoaderGGUF) reads
-      // diffusion_models/unet. In checkpoints/ nothing ever saw it (a user,
-      // Discord 2026-09-23: qwenImageEdit2511_q50.gguf "Complete", Installed 0).
-      if (type === 'Checkpoint' && isGgufFile(filename)) subfolder = 'diffusion_models'
+      // The folder follows from the type, see civitaiSubfolder.
+      const subfolder = civitaiSubfolder(type, itemName ?? '', filename)
 
       const descParts: string[] = []
-      const rawDesc = civitaiDescriptionToText(asString(prop(item, 'description')) ?? '')
+      const rawHtml = asString(prop(item, 'description')) ?? ''
+      const rawDesc = civitaiDescriptionToText(rawHtml)
+      // The row shows one line of it; the whole text goes to the Details
+      // dialog (C18), where it used to be lost to this cut.
       if (rawDesc) descParts.push(rawDesc.slice(0, 120))
       if (downloadCount) descParts.push(`${formatCount(downloadCount)} downloads`)
       if (creator) descParts.push(`by ${creator}`)
@@ -2525,6 +2718,9 @@ export async function searchCivitaiModels(
           : undefined,
         creator,
         sourceUrl: `https://${host}/models/${itemId}`,
+        fullDescription: rawHtml ? civitaiDescriptionToParagraphs(rawHtml) : undefined,
+        versions: civitaiVersionChoices(item, host),
+        versionId: asNumber(prop(version, 'id')) ?? undefined,
       }
     })
   } catch (err) {

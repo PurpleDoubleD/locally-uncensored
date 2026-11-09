@@ -37,7 +37,7 @@ import { useMlxLoras } from '../../hooks/useMlxLoras'
 import { modelSkin, type RailEntry } from './skin'
 import { useMlxMedia } from '../../hooks/useMlxMedia'
 import { backendCall } from '../../api/backend'
-import { addGgufFile, customModelDirs, deleteBundledModel, stopBundledEngine } from '../../api/engine'
+import { addGgufFile, customModelDirs } from '../../api/engine'
 import { counterView } from '../../lib/inventory-counter'
 import { groupInstalledByProvider, needsBackendSwitchHeading, foldedRowsSentence, LU_ENGINE_GROUP } from '../../lib/lu-engine-rows'
 import { isBuiltinEngineEntry } from '../../lib/lmstudio-match'
@@ -48,6 +48,10 @@ import { useBuiltinEngineStatus, engineIsIdle } from '../../hooks/useBuiltinEngi
 import { LuEngineSwitchBar } from '../chat/LuEngineSwitchBar'
 import type { InstalledModelLike } from '../../lib/lmstudio-match'
 import type { ModelCategory, AIModel } from '../../types/models'
+import { usePageMemoryStore } from '../../stores/pageMemoryStore'
+import { UninstallDialog, type UninstallRequest } from './UninstallDialog'
+import { useLoraNotesStore } from '../../stores/loraNotesStore'
+import { revealComfyModel } from '../../api/discover'
 
 // One category drives BOTH views (Discover + Installed) — the old split
 // discoverMode/categoryFilter pair collapsed into the persisted store value.
@@ -116,24 +120,46 @@ export function ModelManager() {
   // der Rest ist `unknown`. Gelesen wird ohnehin nur `name` (Modal-Titel) und
   // das Ganze als JSON.stringify.
   const [modelInfo, setModelInfo] = useState<({ name: string } & Record<string, unknown>) | null>(null)
+  // The plain confirm of one file: the LoRA lane (a LoRA is one file).
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
+  // C17: a model row's bin opens the uninstall dialog, which lists every file
+  // of the model and the space it frees before anything goes.
+  const [uninstall, setUninstall] = useState<UninstallRequest | null>(null)
   // D1: Details for a ComfyUI file (image or video model, LoRA, VAE, …).
   const [fileInfo, setFileInfo] = useState<ModelFileInfoState | null>(null)
   const fileInfoFor = useRef<string | null>(null)
   // Open on Discover by default — most opens are to find and install
   // something new. Installed is one click away in the segment control.
-  const [tab, setTab] = useState<'installed' | 'discover'>('discover')
+  // C22: Installed or Get new, the lane and the search are the page memory's,
+  // so going to Chat or Create and back lands where the user left.
+  const tab = usePageMemoryStore((s) => s.modelsTab)
+  const setTab = usePageMemoryStore((s) => s.setModelsTab)
 
   // Header search: always visible (no hidden magnifier), live filter +
   // Enter submits the HuggingFace catalog search in Discover.
   // A button elsewhere may open Models with a search (Neurons' "Get the
   // original"): it starts the field and the catalog search once.
-  const [searchQuery, setSearchQuery] = useState(() => useUIStore.getState().discoverQuery ?? '')
+  const [searchQuery, setSearchQueryState] = useState(() => useUIStore.getState().discoverQuery ?? usePageMemoryStore.getState().modelsSearch)
+  const setSearchQuery = (q: string) => {
+    setSearchQueryState(q)
+    usePageMemoryStore.getState().setModelsSearch(q)
+  }
   const [searchSubmitToken, setSearchSubmitToken] = useState(() => (useUIStore.getState().discoverQuery ? 1 : 0))
   // That search looks for an original model: its changed versions go last.
   const [originalFor] = useState(() => { const s = useUIStore.getState(); return s.discoverOriginal ? s.discoverQuery : null })
   useEffect(() => {
-    if (useUIStore.getState().discoverQuery) useUIStore.getState().clearDiscoverQuery()
+    const ui = useUIStore.getState()
+    // A button elsewhere that opens Get new (with or without a search) wins
+    // over the remembered tab: it says where it sends the user.
+    if (ui.discoverQuery || ui.discoverTarget) {
+      setTab('discover')
+      setExtraRail(null)
+    }
+    if (ui.discoverQuery) {
+      usePageMemoryStore.getState().setModelsSearch(ui.discoverQuery)
+      ui.clearDiscoverQuery()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
   const searchInputRef = useRef<HTMLInputElement>(null)
 
@@ -163,7 +189,8 @@ export function ModelManager() {
   // Mac local media is MLX: there the lane is the LoRA folder of the Mac's
   // image engine (MacLoraLane), which the LoRA stack in Create reads. Until
   // that folder existed the rail was not offered on the Mac at all.
-  const [extraRail, setExtraRail] = useState<'lora' | 'music' | null>(null)
+  const extraRail = usePageMemoryStore((s) => s.modelsExtraRail)
+  const setExtraRail = usePageMemoryStore((s) => s.setModelsExtraRail)
 
   // A Hugging Face link (HfLinkInbox) opens the Chat lane of Discover, where
   // its dialog lives, whatever lane or tab was open.
@@ -262,6 +289,9 @@ export function ModelManager() {
   }
 
   const [deleteError, setDeleteError] = useState<string | null>(null)
+  // C41: the rename-and-note dialog of a LoRA, and what a folder open said.
+  const [loraEdit, setLoraEdit] = useState<{ name: string; label: string; note: string } | null>(null)
+  const [loraNotice, setLoraNotice] = useState<string | null>(null)
 
   // D17: a GGUF from anywhere on the drive. The dialog picks it, the import
   // links it into the LU Engine folder, and the Installed list shows it with
@@ -277,6 +307,12 @@ export function ModelManager() {
     } catch (e) {
       setGgufNote({ ok: false, text: e instanceof Error ? e.message : String(e) })
     }
+  }
+  /** C17: what the uninstall dialog is asked about for this row. */
+  const uninstallRequestFor = (model: AIModel): UninstallRequest => {
+    if (model.type === 'image' || model.type === 'video') return { kind: 'comfy-file', name: model.name }
+    if (luEngineFile(model)) return { kind: 'engine', name: displayModelName(model.name), path: model.path, active: model.name === activeModel }
+    return { kind: 'ollama', name: model.name, bytes: model.size ?? 0 }
   }
   const handleDelete = async (name: string) => {
     try {
@@ -297,20 +333,15 @@ export function ModelManager() {
         // word.
         setConfirmDelete(null)
         useModelStore.getState().removeInventoryModel(name)
+        // C41: the note of a file that is gone goes too.
+        useLoraNotesStore.getState().forget(name)
         await refreshComfyModels().catch(() => { /* rescan is best-effort */ })
         await fetchModels()
         return
       }
-      if (model && luEngineFile(model)) {
-        // The loaded file is locked on Windows, so the engine is stopped first
-        // when the row is the active one; the backend refuses otherwise.
-        if (model.name === activeModel) await stopBundledEngine()
-        await deleteBundledModel(model.path)
-        setConfirmDelete(null)
-        await fetchModels()
-        return
-      }
-      await removeModel(name)
+      // Every other row goes through the uninstall dialog (C17), which knows
+      // the LU Engine's files and Ollama's models; this confirm is the LoRA
+      // lane's, and a LoRA is a ComfyUI file.
       setConfirmDelete(null)
     } catch (e) {
       setDeleteError(e instanceof Error ? e.message : String(e))
@@ -325,7 +356,16 @@ export function ModelManager() {
   // encoders and the rest of the addon folders stay exactly where they were,
   // since nothing else has a place to go to.
   const loraModels = models.filter((m: AIModel) => isLoraRow(m))
-  const loraRows: LoraRow[] = loraModels.map((m) => ({ name: m.name, size: m.size ?? 0 }))
+  // C41: the user's names, notes and hidden marks, kept by LU beside the files.
+  const loraNotes = useLoraNotesStore((s) => s.notes)
+  const showHiddenLoras = usePageMemoryStore((s) => s.lorasShowHidden)
+  const loraRows: LoraRow[] = loraModels.map((m) => {
+    const n = loraNotes[m.name]
+    return { name: m.name, size: m.size ?? 0, ...(n?.label ? { label: n.label } : {}), ...(n?.note ? { note: n.note } : {}), ...(n?.hidden ? { hidden: true } : {}) }
+  })
+  const hiddenLoraCount = loraRows.filter((r) => r.hidden).length
+  const loraMatches = (r: LoraRow, q: string) =>
+    installedRowMatchesSearch(r.name, q) || (!!r.label && installedRowMatchesSearch(r.label, q)) || (!!r.note && r.note.toLowerCase().includes(q.trim().toLowerCase()))
   const filteredModels = models.filter((m: AIModel) => m.type === mode && !isLoraRow(m))
   const modeMeta = RAIL_ITEMS.find(r => r.key === mode)!
   /** What the Installed counter and the Installed view are about right now. */
@@ -444,6 +484,10 @@ export function ModelManager() {
               search={searchQuery}
               searchSubmitToken={searchSubmitToken}
               onGetNew={() => setTab('discover')}
+              onEdit={(name) => {
+                const n = useLoraNotesStore.getState().notes[name]
+                setLoraEdit({ name, label: n?.label ?? '', note: n?.note ?? '' })
+              }}
             />
           )}
 
@@ -494,12 +538,28 @@ export function ModelManager() {
                 )
               ) : rail === 'lora' ? (
                 <skin.LoraManager
-                  rows={searchQuery ? loraRows.filter((r) => installedRowMatchesSearch(r.name, searchQuery)) : loraRows}
+                  rows={loraRows
+                    .filter((r) => showHiddenLoras || !r.hidden)
+                    .filter((r) => !searchQuery || loraMatches(r, searchQuery))}
                   total={loraRows.length}
                   searchQuery={searchQuery}
                   onDelete={(name) => setConfirmDelete(name)}
                   onInfo={(name) => { void handleFileInfo(name) }}
                   onGetNew={() => setTab('discover')}
+                  onEdit={(name) => {
+                    const n = useLoraNotesStore.getState().notes[name]
+                    setLoraEdit({ name, label: n?.label ?? '', note: n?.note ?? '' })
+                  }}
+                  onToggleHidden={(name) => {
+                    const hidden = !!useLoraNotesStore.getState().notes[name]?.hidden
+                    useLoraNotesStore.getState().setNote(name, { hidden: !hidden })
+                  }}
+                  onReveal={(name) => {
+                    revealComfyModel(name).catch((e) => setLoraNotice(e instanceof Error ? e.message : String(e)))
+                  }}
+                  hiddenCount={hiddenLoraCount}
+                  showHidden={showHiddenLoras}
+                  onShowHidden={(v) => usePageMemoryStore.getState().setLorasShowHidden(v)}
                 />
               ) : models.length === 0 ? (
                 <skin.EmptyState
@@ -599,7 +659,7 @@ export function ModelManager() {
                               // Zeile: welche davon sie bedient, entscheidet
                               // die Karte selbst.
                               engineStopped={engineRuht}
-                              onDelete={() => setConfirmDelete(model.name)}
+                              onDelete={() => setUninstall(uninstallRequestFor(model))}
                               onInfo={() => handleInfo(model.name)}
                               // A14: where the file names its original weights
                               // and is not itself a copy the tool made.
@@ -675,12 +735,6 @@ export function ModelManager() {
           Are you sure you want to delete <span className="text-gray-900 dark:text-white font-mono">{confirmDelete ? displayModelName(confirmDelete) : null}</span>?
           This removes the model file from your disk and frees the space.
         </p>
-        {(() => {
-          const row = models.find((m: AIModel) => m.name === confirmDelete)
-          return row && luEngineFile(row) ? (
-            <p className="t-micro font-mono text-gray-500 dark:text-gray-400 mb-3 break-all" data-testid="delete-file-path">{row.path}</p>
-          ) : null
-        })()}
         <ModalActions>
           <ModalButton variant="quiet" onClick={() => setConfirmDelete(null)}>
             Cancel
@@ -689,6 +743,64 @@ export function ModelManager() {
             Delete
           </ModalButton>
         </ModalActions>
+      </Modal>
+
+      <UninstallDialog
+        request={uninstall}
+        onClose={() => setUninstall(null)}
+        onDone={async () => { await fetchModels() }}
+        removeOllamaModel={async (name) => { await removeModel(name) }}
+      />
+
+      <Modal open={!!loraEdit} onClose={() => setLoraEdit(null)} title="Rename and note">
+        {loraEdit && (
+          <form
+            className="space-y-3"
+            data-testid="lora-edit"
+            onSubmit={(e) => {
+              e.preventDefault()
+              useLoraNotesStore.getState().setNote(loraEdit.name, { label: loraEdit.label, note: loraEdit.note })
+              setLoraEdit(null)
+            }}
+          >
+            <p className="t-micro text-gray-500 dark:text-gray-400">
+              The name is how LU shows this LoRA, here and in the LoRA stack of Create. The file keeps its own name, <span className="font-mono break-all">{loraEdit.name}</span>, so saved settings and workflows still find it.
+            </p>
+            <label className="block t-label text-gray-700 dark:text-gray-200">
+              Name
+              <input
+                autoFocus
+                value={loraEdit.label}
+                onChange={(e) => setLoraEdit({ ...loraEdit, label: e.target.value })}
+                placeholder={loraEdit.name.replace(/\.safetensors$/i, '')}
+                maxLength={120}
+                className="mt-1 w-full px-3 py-2 rounded-lg bg-gray-100 dark:bg-white/5 border border-gray-200 dark:border-white/10 text-sm text-gray-900 dark:text-white"
+                data-testid="lora-edit-name"
+              />
+            </label>
+            <label className="block t-label text-gray-700 dark:text-gray-200">
+              Note
+              <textarea
+                value={loraEdit.note}
+                onChange={(e) => setLoraEdit({ ...loraEdit, note: e.target.value })}
+                placeholder="Trigger words, a strength that works, what it is good for…"
+                rows={4}
+                maxLength={2000}
+                className="mt-1 w-full px-3 py-2 rounded-lg bg-gray-100 dark:bg-white/5 border border-gray-200 dark:border-white/10 text-sm text-gray-900 dark:text-white"
+                data-testid="lora-edit-note"
+              />
+            </label>
+            <ModalActions>
+              <ModalButton variant="quiet" onClick={() => setLoraEdit(null)}>Cancel</ModalButton>
+              <ModalButton variant="primary" type="submit" data-testid="lora-edit-save">Save</ModalButton>
+            </ModalActions>
+          </form>
+        )}
+      </Modal>
+
+      <Modal open={!!loraNotice} onClose={() => setLoraNotice(null)} title="Could not open the folder">
+        <p className="t-micro text-red-500 dark:text-red-400 mb-3">{loraNotice}</p>
+        <ModalActions><ModalButton onClick={() => setLoraNotice(null)}>Close</ModalButton></ModalActions>
       </Modal>
 
       <Modal open={!!deleteError} onClose={() => setDeleteError(null)} title="Delete failed">

@@ -373,19 +373,23 @@ describe('D-S25 · zwei Segmented-Sprachen 47px uebereinander', () => {
     expect(rows).toContain('aria-label="Size"')
   })
 
+  // Seit 3.1.0 (Better Categories, Discord 09.11.2026) gibt es eine dritte
+  // Reihe, die Kategorien. Sie spricht dieselbe Sprache: dieselbe Spur,
+  // dasselbe Segment, Zustand aus aria-pressed. Die Sortierung daneben ist
+  // ein `select` mit demselben Rezept.
   it('beide Reihen stehen in derselben Spur', () => {
-    expect((rows.match(/className=\{SEGMENT_TRACK\}/g) ?? []).length).toBe(2)
+    expect((rows.match(/className=\{SEGMENT_TRACK\}/g) ?? []).length).toBe(3)
     expect(SCREEN).toMatch(/const SEGMENT_TRACK\s*=/)
   })
 
   it('beide Reihen benutzen dasselbe Segment-Rezept', () => {
     // Vier Mainstream-/Unfiltered- plus sechs Groessen-Segmente, alle
     // `className="lu-control"` ohne Zusatz.
-    expect((rows.match(/className="lu-control"/g) ?? []).length).toBe(3)
+    expect((rows.match(/className="lu-control"/g) ?? []).length).toBe(5)
   })
 
   it('kein Segment faerbt sich mehr selbst — der Zustand kommt aus aria-pressed', () => {
-    expect((rows.match(/aria-pressed=/g) ?? []).length).toBe(3)
+    expect((rows.match(/aria-pressed=/g) ?? []).length).toBe(4)
     expect(rows).not.toMatch(/subTab === '(mainstream|uncensored)'\s*\n?\s*\?\s*'bg-/)
     expect(rows).not.toMatch(/vramTier === tier\.key\s*\n?[^\n]*\n?\s*\?\s*'bg-/)
   })

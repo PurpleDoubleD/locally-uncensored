@@ -98,6 +98,8 @@ export function registerRemoteStubs(routes: RouteMount): void {
     '/local-api/list-custom-nodes', '/local-api/remove-custom-node', '/local-api/custom-node-log',
     '/local-api/verify-model-files', '/local-api/verify-model-files-status', '/local-api/verify-model-files-cancel',
     '/local-api/comfy-model-info',
+    '/local-api/comfy-model-reveal',
+    '/local-api/bundled-model-delete-plan',
     '/local-api/trash-model-file', '/local-api/set-engine-idle-unload', '/local-api/transcribe-external',
     '/local-api/set-gpu-roles', '/local-api/describe-gpu-roles',
     '/local-api/abliterate-plan', '/local-api/abliterate-start', '/local-api/abliterate-status',
