@@ -16,6 +16,9 @@ import { ComputerChatPermission, useComputerChatAsk } from '../computer/Computer
 import { SettingChangeAsk, SettingChangeDone } from './SettingChangeCard'
 import { useSettingsConfirmStore, pendingForCall } from '../../stores/settingsConfirmStore'
 import { parseSettingChange } from '../../api/mcp/settings-tools'
+import { WorkflowCardAsk, WorkflowCardDone } from './WorkflowInstallCard'
+import { useWorkflowCardStore, workflowCardForCall } from '../../stores/workflowInstallConfirmStore'
+import { parseWorkflowMark } from '../../api/mcp/workflow-tools'
 import { useChatStore } from '../../stores/chatStore'
 import { commandIcon } from '../../lib/shell-command-classify'
 import { requestGenerationCancel } from '../../api/vram-handoff'
@@ -270,6 +273,10 @@ function ToolCallBlockImpl({ toolCall, onApprove, onReject }: Props) {
   const isSetSetting = toolCall.toolName === 'set_setting'
   const settingAsk = useSettingsConfirmStore((s) => (isSetSetting && isRunning ? pendingForCall(s.queue, toolCall.id) : null))
   const settingChange = isSetSetting && toolCall.status === 'completed' ? parseSettingChange(toolCall.result) : null
+  // C60-S5: a workflow install or assignment waits here, and stays with Undo.
+  const isWorkflowWrite = toolCall.toolName === 'workflow_install' || toolCall.toolName === 'workflow_assign'
+  const workflowAsk = useWorkflowCardStore((s) => (isWorkflowWrite && isRunning ? workflowCardForCall(s.queue, toolCall.id) : null))
+  const workflowMark = isWorkflowWrite && toolCall.status === 'completed' ? parseWorkflowMark(toolCall.result) : null
   // Real cancel (2026-06-16): only image/video generation supports a true
   // abort (ComfyUI /interrupt + loop abort). Local "cancelling" state flips the
   // mini button to a "stopping…" indicator the moment it's clicked.
@@ -433,6 +440,8 @@ function ToolCallBlockImpl({ toolCall, onApprove, onReject }: Props) {
       {chatAsk && <div className="ml-3.5 pl-2"><ComputerChatPermission ask={chatAsk} /></div>}
       {settingAsk && <div className="ml-3.5 pl-2"><SettingChangeAsk req={settingAsk} /></div>}
       {settingChange && <div className="ml-3.5 pl-2"><SettingChangeDone change={settingChange} /></div>}
+      {workflowAsk && <div className="ml-3.5 pl-2"><WorkflowCardAsk req={workflowAsk} /></div>}
+      {workflowMark && <div className="ml-3.5 pl-2"><WorkflowCardDone mark={workflowMark} /></div>}
       {isRunning && toolCall.toolName === 'computer_task' && <ScreenTaskSteps />}
       {(toolCall.toolName === 'computer_task' || toolCall.toolName === 'computer_use') && (
         <ScreenShotStrip callId={toolCall.id} className="ml-3.5 mb-1 pl-2" />

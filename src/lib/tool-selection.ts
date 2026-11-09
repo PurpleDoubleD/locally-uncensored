@@ -7,6 +7,7 @@
  */
 
 import type { MCPToolDefinition, PermissionMap } from '../api/mcp/types'
+import { WORKFLOW_GATE_WORDS, asksAboutWorkflows } from './workflow-tool-names'
 
 interface ToolGroup {
   keywords: string[]
@@ -96,7 +97,7 @@ export const SETTINGS_KEYWORDS = [
 /** True when a chat message is about LU's own settings. */
 export function asksAboutSettings(userMessage: string): boolean {
   const msg = (userMessage || '').toLowerCase()
-  return SETTINGS_KEYWORDS.some((k) => msg.includes(k))
+  return SETTINGS_KEYWORDS.some((k) => msg.includes(k)) || asksAboutWorkflows(msg)
 }
 
 /**
@@ -137,6 +138,11 @@ const GATE_KEYWORDS: Record<string, readonly string[]> = {
   // A11: in Code only on a message about settings, like everywhere else.
   get_settings: SETTINGS_KEYWORDS,
   set_setting: SETTINGS_KEYWORDS,
+  // C60-S5: the four ComfyUI workflow tools, on a message about a workflow.
+  workflow_find: WORKFLOW_GATE_WORDS,
+  workflow_inspect: WORKFLOW_GATE_WORDS,
+  workflow_install: WORKFLOW_GATE_WORDS,
+  workflow_assign: WORKFLOW_GATE_WORDS,
 }
 
 /**

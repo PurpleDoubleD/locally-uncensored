@@ -8,6 +8,7 @@ import type {
 import type { ToolRegistry } from './tool-registry'
 import { reserveCreateTools } from './create-tools'
 import { registerSettingsTools } from './settings-tools'
+import { registerWorkflowTools } from './workflow-tools'
 import { SETTINGS_TOOL_NAMES } from '../../lib/settings-tool-names'
 import { v4 as uuid } from 'uuid'
 import { backendCall, isTauri } from '../backend'
@@ -2424,7 +2425,11 @@ export function registerBuiltinTools(registry: ToolRegistry) {
   // App settings from the chat (A11). Registered, but offered only to a turn
   // about settings and only where the card is drawn (settings-tools.ts).
   // Not on a phone (lib/mobile-tools.ts, MOBILE_UNBUILT_TOOLS).
-  if (SETTINGS_TOOL_NAMES.every(toolExistsOnThisDevice)) registerSettingsTools(registry)
+  if (SETTINGS_TOOL_NAMES.every(toolExistsOnThisDevice)) {
+    registerSettingsTools(registry)
+    // ComfyUI workflows from the chat (C60-S5), on the same gate and surfaces.
+    registerWorkflowTools(registry)
+  }
 }
 
 // ── Retired tools (2.6.6 merge, plan E5) ────────────────────────

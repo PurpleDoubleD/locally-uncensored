@@ -130,8 +130,12 @@ const CODING_TOKEN_CEILING = 1730
 // 3.0.8 (A11): +762 Zeichen fuer get_settings und set_setting im VOLLEN
 // Katalog (18.370 -> 19.132). Der codierende Zug bleibt gleich: beide stehen
 // hinter dem Tor und fahren nur auf einer Nachricht ueber Einstellungen mit.
-const FULL_CHAR_CEILING = 19170
-const FULL_TOKEN_CEILING = 4090
+// 3.1.0 (C60-S5): +1.370 Zeichen fuer workflow_find/_inspect/_install/_assign
+// im VOLLEN Katalog (19.132 -> 20.502). Der codierende Zug bleibt gleich: die
+// vier stehen hinter dem Tor und fahren nur auf einer Nachricht ueber einen
+// ComfyUI-Workflow mit. Token-Decke geschaetzt im selben Verhaeltnis.
+const FULL_CHAR_CEILING = 20540
+const FULL_TOKEN_CEILING = 4420
 
 describe('the coding step carries a catalog the diet actually shrank', () => {
   it('the gate really is what a plain coding turn gets', () => {

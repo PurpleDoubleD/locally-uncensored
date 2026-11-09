@@ -757,6 +757,7 @@ pub fn run() {
             commands::install::python_check,
             #[cfg(desktop)]
             commands::install::install_custom_node,
+            commands::install::install_lu_node_pack,
             #[cfg(desktop)]
             commands::install::list_custom_nodes,
             #[cfg(desktop)]
@@ -1228,6 +1229,7 @@ pub fn run() {
             commands::proxy::ollama_search,
             commands::proxy::fetch_external,
             commands::proxy::fetch_external_bytes,
+            commands::workflow_fetch::workflow_fetch,
             commands::proxy::proxy_localhost,
             commands::proxy::cancel_proxy_call,
             commands::proxy::proxy_localhost_stream,

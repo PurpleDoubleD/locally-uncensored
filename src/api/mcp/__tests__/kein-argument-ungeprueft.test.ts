@@ -81,6 +81,10 @@ const PFLICHT: Record<string, Record<string, string>> = {
   message_agent: { task_id: 'task-1-abcdef', message: 'halte dich kurz' },
   // A11: ohne Schluessel keine Karte und keine Aenderung.
   set_setting: { key: 'theme' },
+  // C60-S5: ohne Fund keine Pruefung, ohne Fund und Modell keine Karte.
+  workflow_inspect: { id: 'civ1' },
+  workflow_install: { id: 'civ1' },
+  workflow_assign: { workflow: 'Flux Upscale', model: 'flux1-dev.safetensors' },
 }
 
 /**

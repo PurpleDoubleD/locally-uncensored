@@ -86,7 +86,7 @@ import { withChatPersona, speakerSamplingOptions, plainChatSpeaker, speakerPerso
 import { personaNoteOf } from '../lib/persona-note'
 import { toolRegistry } from '../api/mcp'
 import { syncCreateTools } from '../api/mcp/create-tools'
-import { isSettingsToolName, SETTINGS_TOOL_NAMES } from '../lib/settings-tool-names'
+import { isSettingsToolName, PLAIN_CHAT_SETTINGS_TOOL_NAMES } from '../lib/settings-tool-names'
 import { asksAboutSettings } from '../lib/tool-selection'
 import { CREATE_TOOL_NAMES, createSystemText, withCreateText } from '../lib/create/chat-switch'
 // Create in chat only where the order card exists: not on the phone (lib/create-order-surface.ts).
@@ -1127,8 +1127,8 @@ export function useChat() {
           // Create on (Cloud mode only): its two tools ride along with web
           // and file.
           curatedTools: cloudMode
-            ? [...CHAT_TOOLS.filter((t) => t !== 'image_generate' && t !== 'video_generate'), ...(createOn ? CREATE_TOOL_NAMES : []), ...(settingsOn ? SETTINGS_TOOL_NAMES : [])]
-            : [...CHAT_TOOLS, ...(settingsOn ? SETTINGS_TOOL_NAMES : [])],
+            ? [...CHAT_TOOLS.filter((t) => t !== 'image_generate' && t !== 'video_generate'), ...(createOn ? CREATE_TOOL_NAMES : []), ...(settingsOn ? PLAIN_CHAT_SETTINGS_TOOL_NAMES : [])]
+            : [...CHAT_TOOLS, ...(settingsOn ? PLAIN_CHAT_SETTINGS_TOOL_NAMES : [])],
           chatToolsMode: true,
           mediaHint: route?.mediaHint,
           files,
@@ -1141,7 +1141,7 @@ export function useChat() {
       // two when Create is on); nothing changes without the card.
       if (settingsOn) {
         return sendAgentMessage(content, images, {
-          curatedTools: [...SETTINGS_TOOL_NAMES, ...(createOn ? CREATE_TOOL_NAMES : [])],
+          curatedTools: [...PLAIN_CHAT_SETTINGS_TOOL_NAMES, ...(createOn ? CREATE_TOOL_NAMES : [])],
           chatToolsMode: true,
           settingsTools: true,
           createTools: createOn,

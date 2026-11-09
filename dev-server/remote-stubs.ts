@@ -93,7 +93,10 @@ export function registerRemoteStubs(routes: RouteMount): void {
   // side starts, reads and stops.
   // Dictation through an external transcription endpoint (N1) is a Rust
   // multipart request as well.
+  // The chat's workflow tools (C60-S5): the fetch with its host allowlist and
+  // the node pack install by key are Rust; the tools say so before calling.
   for (const path of [
+    '/local-api/workflow-fetch', '/local-api/install-lu-node-pack',
     '/local-api/local-api-usage', '/local-api/set-download-limit', '/local-api/character-photos', '/local-api/pick-gguf-file',
     '/local-api/list-custom-nodes', '/local-api/remove-custom-node', '/local-api/custom-node-log',
     '/local-api/verify-model-files', '/local-api/verify-model-files-status', '/local-api/verify-model-files-cancel',

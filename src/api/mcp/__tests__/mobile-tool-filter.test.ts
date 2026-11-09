@@ -45,7 +45,8 @@ function registryHere(): ToolRegistry {
 
 const GONE = ['shell_execute', 'pr_resume', 'screenshot', 'image_generate', 'video_generate']
 /** The settings tools of A11 (3.0.8): desktop only, see MOBILE_UNBUILT_TOOLS. */
-const SETTINGS = ['get_settings', 'set_setting']
+// The settings pair and, since C60-S5, the four ComfyUI workflow tools.
+const SETTINGS = ['get_settings', 'set_setting', 'workflow_find', 'workflow_inspect', 'workflow_install', 'workflow_assign']
 const STAYS = [
   'todo_write', 'web_search', 'web_fetch', 'file_read', 'file_write', 'file_edit', 'file_list',
   'file_search', 'run_workflow', 'delegate_task', 'check_tasks', 'message_agent',
@@ -108,7 +109,7 @@ describe('the catalog on a phone', () => {
 
 describe('the catalog on a desktop is what it was', () => {
   for (const device of DESKTOPS) {
-    it(`${device}: all nineteen tools, the old names redirect`, () => {
+    it(`${device}: every tool, the old names redirect`, () => {
       standOn(device)
       const registry = registryHere()
       const names = registry.getAll().map((t) => t.name)

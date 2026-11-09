@@ -41,7 +41,13 @@ describe('AGENT_TOOL_DEFS', () => {
     // 3.0.8 (A11): +2, get_settings und set_setting. Sie stehen in keinem
     // Prompt, der nicht nach Einstellungen fragt: im Chat und in Agent nur
     // ueber SETTINGS_KEYWORDS, in Code hinter dem Tor (GATE_KEYWORDS).
-    expect(AGENT_TOOL_DEFS).toHaveLength(19)
+    //
+    // 3.1.0 (C60-S5): +4, workflow_find/_inspect/_install/_assign. Kein
+    // vorhandenes Werkzeug passt: run_workflow startet LUs eigene Ablaeufe,
+    // set_setting aendert Werte, das hier holt fremde Dateien mit Ampel und
+    // Karte. Sie fahren nur auf einer Nachricht ueber einen Workflow mit
+    // (WORKFLOW_GATE_WORDS), nie im Plain Chat, nie im Unteragenten.
+    expect(AGENT_TOOL_DEFS).toHaveLength(23)
   })
 
   const expectedTools = [
@@ -95,8 +101,12 @@ describe('AGENT_TOOL_DEFS', () => {
     // 3.0.8 (A11): get_settings liest nur, set_setting fragt mit seiner
     // eigenen Karte (alt -> neu), auch im Bypass. Eine zweite Rueckfrage
     // davor fragte doppelt, wie bei create_order.
+    // 3.1.0 (C60-S5): die vier Workflow-Werkzeuge aus demselben Grund: find
+    // und inspect lesen nur (wie web_fetch), install und assign fragen mit
+    // ihrer eigenen Karte mit Ampel, auch im Bypass.
     expect(autoNames).toEqual([
       'check_tasks', 'get_settings', 'message_agent', 'set_setting', 'todo_write', 'web_fetch', 'web_search',
+      'workflow_assign', 'workflow_find', 'workflow_inspect', 'workflow_install',
     ])
   })
 
