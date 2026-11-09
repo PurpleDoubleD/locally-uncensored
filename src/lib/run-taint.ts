@@ -20,6 +20,11 @@ const OWN_OUTPUT_TOOLS: ReadonlySet<string> = new Set([
   'todo_write', 'file_write', 'file_edit',
   'get_settings', 'set_setting', 'set_settings', 'lu_models', 'lu_service', 'lu_download', 'lu_open_settings',
   'image_generate', 'video_generate', 'create_options', 'create_order',
+  // C60 S5: LU's own structured workflow report. Names from a source are cut
+  // to letters, digits and ._-+()/ (at most 80), descriptions, notes and
+  // prompt texts never reach the model, only their length (workflow-tools.ts,
+  // tested there).
+  'workflow_find', 'workflow_inspect', 'workflow_install', 'workflow_assign',
 ])
 
 /** True when this tool's output is content from outside LU. */

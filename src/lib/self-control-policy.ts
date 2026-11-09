@@ -59,7 +59,10 @@ export function turnTextOf(conversationId: string | null): TurnText | null {
   if (u < 0) return null
   let a: Message | undefined
   for (let i = u - 1; i >= 0; i--) if (msgs[i].role === 'assistant') { a = msgs[i]; break }
-  return { user: msgs[u].content ?? '', previousAssistant: textOf(a) }
+  // What the user typed: with an attached file or a slash command, `content`
+  // carries the file or the command's template, foreign words that could
+  // satisfy the intent check (found by S5, 09.11.2026).
+  return { user: msgs[u].displayContent ?? msgs[u].content ?? '', previousAssistant: textOf(a) }
 }
 
 export type PolicyVerdict =
