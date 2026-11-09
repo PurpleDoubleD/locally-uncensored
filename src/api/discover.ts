@@ -2342,7 +2342,7 @@ export interface CivitAIModelResult {
   /** C18: the whole description as text, paragraphs kept, for the Details
    *  dialog. `description` above stays the one short line of the hit row. */
   fullDescription?: string
-  /** C21: every version of the hit with its model files, newest first, so the
+  /** C21: every version of the hit with its model files, in CivitAI's order (the first is the one Download takes), so the
    *  user can fetch another version or another precision than the default. */
   versions?: CivitaiVersionChoice[]
   /** The id of the version the default download takes (the newest). */

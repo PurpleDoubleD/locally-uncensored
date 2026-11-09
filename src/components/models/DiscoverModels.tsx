@@ -1586,8 +1586,12 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0, o
                     </p>
                     <div className="max-h-56 overflow-y-auto scrollbar-thin space-y-1 pr-1">
                       {fileChoices.list.map((c) => {
-                        const gb = c.totalBytes / 1_073_741_824
-                        const fit = chatFitGb && gb > 0 ? computeFit(gb, chatFitGb) : null
+                        // The fit compares in GiB like the rest of the page; the
+                        // size reads in decimal GB, the unit the catalog's cards
+                        // print, so one file never shows two sizes.
+                        const gib = c.totalBytes / 1_073_741_824
+                        const gb = c.totalBytes / 1e9
+                        const fit = chatFitGb && gib > 0 ? computeFit(gib, chatFitGb) : null
                         const current = !!infoModel.filename && infoModel.filename === c.filename
                         return (
                           <div key={c.path} className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg border border-gray-200 dark:border-white/10" data-testid="gguf-choice">

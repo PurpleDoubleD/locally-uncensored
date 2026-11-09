@@ -84,7 +84,7 @@ function Body({ hit, onClose, onDownload }: { hit: CivitAIModelResult; onClose: 
             >
               {versions.map((v, i) => (
                 <option key={v.id} value={v.id}>
-                  {v.name}{v.baseModel ? ` · ${v.baseModel}` : ''}{v.published ? ` · ${v.published}` : ''}{i === 0 ? ' (newest)' : ''}
+                  {v.name}{v.baseModel ? ` · ${v.baseModel}` : ''}{v.published ? ` · ${v.published}` : ''}{i === 0 ? ' (default)' : ''}
                 </option>
               ))}
             </select>
