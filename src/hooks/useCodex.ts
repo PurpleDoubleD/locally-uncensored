@@ -1,3 +1,4 @@
+import { NOT_IN_CODE_TAB } from '../lib/browser-tools'
 import { useRef, useState, useCallback } from 'react'
 import { markCannotThink } from '../lib/model-compatibility'
 import { v4 as uuid } from 'uuid'
@@ -1521,7 +1522,10 @@ export function useCodex() {
           // which is exactly the kind of per-schema drift the 2.6.3 matrix is
           // looking for.
           const codexToolsAll = toolRegistry.getAvailableTools(permissions).filter(
-            (t) => (CODEX_CATEGORIES as readonly string[]).includes(t.category),
+            // web_research and the LU browser (P-L) are for Chat and Agent; a
+            // coding turn reads pages with web_fetch and keeps its tool budget
+            // for files (lib/browser-tools.ts, NOT_IN_CODE_TAB).
+            (t) => (CODEX_CATEGORIES as readonly string[]).includes(t.category) && !NOT_IN_CODE_TAB.has(t.name),
           )
           // Code-Review Mode (B13): strip mutating tools so the model
           // physically cannot fire them. Belt-and-braces with the

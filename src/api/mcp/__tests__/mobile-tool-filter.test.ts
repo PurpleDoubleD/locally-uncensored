@@ -14,6 +14,7 @@
  * Run: npx vitest run src/api/mcp/__tests__/mobile-tool-filter.test.ts
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { browserExistsHere } from '../../../lib/browser-tools'
 import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
@@ -47,9 +48,11 @@ const GONE = ['shell_execute', 'pr_resume', 'screenshot', 'image_generate', 'vid
 /** The settings tools of A11 (3.0.8): desktop only, see MOBILE_UNBUILT_TOOLS. */
 const SETTINGS = ['get_settings', 'set_setting']
 const STAYS = [
-  'todo_write', 'web_search', 'web_fetch', 'file_read', 'file_write', 'file_edit', 'file_list',
+  'todo_write', 'web_research', 'web_search', 'web_fetch', 'file_read', 'file_write', 'file_edit', 'file_list',
   'file_search', 'run_workflow', 'delegate_task', 'check_tasks', 'message_agent',
 ]
+/** The LU browser (P-L, 3.1.0): macOS and Windows desktop only. */
+const BROWSER = ['browser_open', 'browser_snapshot', 'browser_scroll', 'browser_click_link', 'browser_screenshot']
 const DESKTOP_WORDS = /this computer|shell_execute|image_generate|video_generate|PowerShell|drive letter|uname|Get-ComputerInfo|ComfyUI|Finder/
 
 afterEach(() => { vi.unstubAllGlobals() })
@@ -112,7 +115,9 @@ describe('the catalog on a desktop is what it was', () => {
       standOn(device)
       const registry = registryHere()
       const names = registry.getAll().map((t) => t.name)
-      expect(names.sort()).toEqual([...STAYS, ...GONE, ...SETTINGS].sort())
+      // Registered only in the app (isTauri) on macOS and Windows.
+      const browser = browserExistsHere() ? BROWSER : []
+      expect(names.sort()).toEqual([...STAYS, ...GONE, ...SETTINGS, ...browser].sort())
       for (const name of RETIRED_TOOL_NAMES) {
         expect(registry.resolveExecutable(name), name).toEqual({ name })
       }
@@ -195,11 +200,13 @@ describe('the prompt builders', () => {
 
   // The three hashes were taken from the builders at 0448401e, the commit
   // before the mobile groundwork, and are identical to today's desktop output.
+  // P-L (3.1.0) changed the web line of the agent and the chat prompt on
+  // purpose (web_research first); the two hashes are new from there.
   it('desktop: the three prompts are byte for byte the ones from before this change', () => {
     standOn('windows')
-    expect(sha(buildAgentSystemPrompt('BASE', roster))).toBe('77aaeb9e2b171556fec07ba6e45ac202f5a5ed971ac77286ce512ba8ffb8b4db')
+    expect(sha(buildAgentSystemPrompt('BASE', roster))).toBe('e756fef25255897881e7746319edaeffc0340d50050a7a7f7ce39ca507a2aedb')
     expect(sha(buildAgentSystemPromptLean('BASE', 'file_read, file_write'))).toBe('28489a4807fe126dbef27f057b0414996a7618ca58d3c822cd51f7e6796184fd')
-    expect(sha(buildChatToolsSystemPrompt('BASE'))).toBe('926d2c3e5a07a832f89af62d849248c3e4c01baa5ae73031ca7fdf257a4dc498')
+    expect(sha(buildChatToolsSystemPrompt('BASE'))).toBe('91e7f3ef8669ea15f7cca78a8789e842248ada2920505d4c23025d37ac416a0e')
     expect(buildAgentSystemPrompt('', roster)).toContain('with full access to this computer')
     expect(buildChatToolsSystemPrompt('')).toContain('- image_generate, create an image')
   })

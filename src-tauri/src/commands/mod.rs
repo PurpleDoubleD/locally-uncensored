@@ -114,6 +114,8 @@ pub mod video;
 pub mod voice_loop;
 pub mod web_body;
 pub mod web_reach;
+pub mod web_research;
+pub mod browser;
 pub mod funnel;
 // Moves a ComfyUI render to the system trash. No ComfyUI and no trash on a
 // phone, and the `trash` crate does not compile there.

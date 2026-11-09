@@ -23,6 +23,8 @@
  * Run: npx vitest run src/api/mcp/__tests__/web-fetch-nennt-den-grund-des-fallbacks.test.ts
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+// P-L (3.1.0): the address gate has its own tests (lib/__tests__/web-research-und-quellen.test.ts).
+vi.mock('../../../lib/web-url-provenance', () => ({ guardWebUrl: async () => null, rememberUrls: () => {} }))
 
 /** Was der Rust-Weg wirft. Im Browser-/Dev-Modus IMMER dasselbe. */
 const PRIMARY = 'Tauri backend not available'

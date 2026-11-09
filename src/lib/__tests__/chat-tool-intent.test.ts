@@ -9,9 +9,10 @@ import {
 } from '../chat-tool-intent'
 
 describe('detectChatToolCapability', () => {
-  it('exposes exactly the five curated tools', () => {
+  it('exposes exactly the six curated tools', () => {
+    // 3.1.0 (P-L): web_research, search and read in one call.
     expect([...CHAT_TOOLS].sort()).toEqual(
-      ['file_write', 'image_generate', 'video_generate', 'web_fetch', 'web_search'].sort(),
+      ['file_write', 'image_generate', 'video_generate', 'web_fetch', 'web_research', 'web_search'].sort(),
     )
   })
 

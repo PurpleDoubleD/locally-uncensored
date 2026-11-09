@@ -1,6 +1,6 @@
 import { useState, useEffect, memo } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Search, Globe, FileText, FileEdit, Terminal, Image, Film, Loader2, Check, X, Clock, AlertCircle, FolderOpen, Monitor, GitBranch, GitCommitHorizontal, GitPullRequest, FlaskConical, History, Users, Database, Download, Square } from 'lucide-react'
+import { Search, Globe, BookOpenText, AppWindowMac as AppWindow, FileText, FileEdit, Terminal, Image, Film, Loader2, Check, X, Clock, AlertCircle, FolderOpen, Monitor, GitBranch, GitCommitHorizontal, GitPullRequest, FlaskConical, History, Users, Database, Download, Square } from 'lucide-react'
 import type { AgentToolCall } from '../../types/agent-mode'
 import { getBlockToolCalls } from '../../api/agents/block-helpers'
 import { getComfyHost, getComfyPort, downloadComfyFile } from '../../api/backend'
@@ -14,6 +14,10 @@ import { ScreenTaskSteps } from './ScreenTaskSteps'
 import { ScreenShotStrip } from '../computer/ScreenShotStrip'
 import { ComputerChatPermission, useComputerChatAsk } from '../computer/ComputerChatPermission'
 import { SettingChangeAsk, SettingChangeDone } from './SettingChangeCard'
+import { WebSourceCards, WebUrlAsk } from './WebSourceCards'
+import { BrowserControls, BrowserShot } from './BrowserControls'
+import { parseSourceCards, stripSourcesMarker } from '../../lib/web-evidence'
+import { useWebUrlConfirmStore, pendingUrlForCall } from '../../stores/webUrlConfirmStore'
 import { useSettingsConfirmStore, pendingForCall } from '../../stores/settingsConfirmStore'
 import { parseSettingChange } from '../../api/mcp/settings-tools'
 import { useChatStore } from '../../stores/chatStore'
@@ -162,9 +166,18 @@ interface Props {
 // a surgical file_edit like a plain write. Every builtin has a face now.
 // Since the 2.6.6 merge, shell_execute derives its face from the COMMAND
 // (commandIcon), so a commit still looks like a commit.
+/** Web tools: they may ask before an address and they carry source cards. */
+const WEB_URL_TOOLS: ReadonlySet<string> = new Set(['web_fetch', 'web_research', 'browser_open', 'browser_snapshot', 'browser_scroll', 'browser_click_link', 'browser_screenshot'])
+
 const TOOL_ICONS: Record<string, typeof Search> = {
   web_search: Search,
   web_fetch: Globe,
+  web_research: BookOpenText,
+  browser_open: AppWindow,
+  browser_snapshot: AppWindow,
+  browser_scroll: AppWindow,
+  browser_click_link: AppWindow,
+  browser_screenshot: AppWindow,
   file_read: FileText,
   file_write: FileEdit,
   file_edit: FileEdit,
@@ -270,6 +283,11 @@ function ToolCallBlockImpl({ toolCall, onApprove, onReject }: Props) {
   const isSetSetting = toolCall.toolName === 'set_setting'
   const settingAsk = useSettingsConfirmStore((s) => (isSetSetting && isRunning ? pendingForCall(s.queue, toolCall.id) : null))
   const settingChange = isSetSetting && toolCall.status === 'completed' ? parseSettingChange(toolCall.result) : null
+  // P-L: a web address the model made up waits here for Open; the sources of
+  // a web tool stay visible under it, from the tool result and not the model.
+  const isWebTool = WEB_URL_TOOLS.has(toolCall.toolName)
+  const urlAsk = useWebUrlConfirmStore((s) => (isWebTool && isRunning ? pendingUrlForCall(s.queue, toolCall.id) : null))
+  const sourceCards = isWebTool && toolCall.status === 'completed' ? parseSourceCards(toolCall.result) : []
   // Real cancel (2026-06-16): only image/video generation supports a true
   // abort (ComfyUI /interrupt + loop abort). Local "cancelling" state flips the
   // mini button to a "stopping…" indicator the moment it's clicked.
@@ -433,6 +451,10 @@ function ToolCallBlockImpl({ toolCall, onApprove, onReject }: Props) {
       {chatAsk && <div className="ml-3.5 pl-2"><ComputerChatPermission ask={chatAsk} /></div>}
       {settingAsk && <div className="ml-3.5 pl-2"><SettingChangeAsk req={settingAsk} /></div>}
       {settingChange && <div className="ml-3.5 pl-2"><SettingChangeDone change={settingChange} /></div>}
+      {urlAsk && <div className="ml-3.5 pl-2"><WebUrlAsk req={urlAsk} /></div>}
+      {sourceCards.length > 0 && <div className="ml-3.5 pl-2"><WebSourceCards cards={sourceCards} /></div>}
+      {toolCall.toolName === 'browser_screenshot' && <div className="ml-3.5 pl-2"><BrowserShot toolCallId={toolCall.id} /></div>}
+      {toolCall.toolName.startsWith('browser_') && <div className="ml-3.5 pl-2"><BrowserControls live={isRunning} /></div>}
       {isRunning && toolCall.toolName === 'computer_task' && <ScreenTaskSteps />}
       {(toolCall.toolName === 'computer_task' || toolCall.toolName === 'computer_use') && (
         <ScreenShotStrip callId={toolCall.id} className="ml-3.5 mb-1 pl-2" />
@@ -566,7 +588,7 @@ A user 2026-06-07 fix this lived inside the collapsed details, so a
                   always-visible above the collapsible (a user 2026-06-07). */}
               {toolCall.result && !toolCall.diff && (
                 <pre className="text-[0.55rem] leading-relaxed text-gray-600 dark:text-gray-400 bg-gray-50 dark:bg-white/[0.02] rounded px-2 py-1 overflow-auto scrollbar-thin max-h-[300px]">
-                  {toolCall.result}
+                  {isWebTool ? stripSourcesMarker(toolCall.result) : toolCall.result}
                 </pre>
               )}
 

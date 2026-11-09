@@ -11,6 +11,8 @@
  * Run: npx vitest run src/api/mcp/__tests__/websuche-308-neue-stufen.test.ts
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+// P-L (3.1.0): the address gate has its own tests (lib/__tests__/web-research-und-quellen.test.ts).
+vi.mock('../../../lib/web-url-provenance', () => ({ guardWebUrl: async () => null, rememberUrls: () => {} }))
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
@@ -145,7 +147,8 @@ describe('keine Grenze fuer die Zahl der Suchen', () => {
     backendCall.mockResolvedValue({ results: [{ title: 't', url: 'https://x.example/', snippet: 's' }], provider: 'exa' })
     for (let i = 0; i < 10; i++) {
       const out = (await registry.execute('web_search', { query: `topic ${i}` })) as string
-      expect(out.startsWith('1. t')).toBe(true)
+      // 3.1.0 (P-L): the snippets come inside the data block.
+      expect(out).toContain('\n1. t\n')
     }
     expect(backendCall).toHaveBeenCalledTimes(10)
   })

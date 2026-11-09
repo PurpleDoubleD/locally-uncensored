@@ -95,6 +95,10 @@ const TOOL_HINTS: Record<string, HintRule[]> = {
     { pattern: /5\d\d|server error/i, hint: 'Server error. Do not retry immediately; try a different URL.' },
     { pattern: /empty body|empty content/i, hint: 'Page returned empty body. Try a different URL or a web_search snippet instead.' },
   ],
+  web_research: [
+    { pattern: /unavailable right now/i, hint: 'Do not search again in this answer. Answer from what you know and say that search was unavailable.' },
+    { pattern: /none could be read/i, hint: 'Pages were found but not readable. Try web_search for links, or other words.' },
+  ],
   web_search: [
     // 3.0.8: every tier failed. The sentence itself says what to do; the
     // hints below (rate limit, no results) would invite another search.

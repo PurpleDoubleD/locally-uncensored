@@ -2498,6 +2498,14 @@ export function SettingsPage() {
                     {' '}Searches run on this computer, also for LU Cloud chats. Keys stay on this computer.
                   </span>
                 </div>
+                <div data-testid="web-strict-urls">
+                  <InlineToggle
+                    label="Ask before unknown web addresses (an address the model made up can carry chat text out)"
+                    enabled={settings.webStrictUrls !== false}
+                    onChange={() => updateSettings({ webStrictUrls: settings.webStrictUrls === false })}
+                  />
+                  <span className="t-micro text-gray-500 mt-0.5 block">On: web tools open addresses you wrote or that came from web results; anything else asks first.</span>
+                </div>
                 <div>
                   <label className="text-[0.6rem] text-gray-500 block mb-1">Brave Search API Key</label>
                   <input
@@ -2507,7 +2515,7 @@ export function SettingsPage() {
                     placeholder="BSA-..."
                     className="w-full px-2.5 py-1.5 rounded-lg bg-gray-100 dark:bg-white/5 border border-gray-200 dark:border-white/10 text-[0.65rem] text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:border-gray-400 dark:focus:border-white/25"
                   />
-                  <span className="text-[0.5rem] text-gray-500 mt-0.5 block">Free tier: 2000 queries/month. Get key at brave.com/search/api</span>
+                  <span className="text-[0.5rem] text-gray-500 mt-0.5 block">$5 free credit each month (about 1000 searches). Get key at brave.com/search/api</span>
                 </div>
                 <div>
                   <label className="text-[0.6rem] text-gray-500 block mb-1">Tavily API Key</label>

@@ -47,7 +47,7 @@ Other rules:
 - To CHANGE part of an existing file use file_edit (replace a UNIQUE old_string with new_string), never file_write: rewriting a large file to change three lines truncates it and costs a fortune in tokens. file_write is for creating a new file or fully replacing one.
 - PATHS: use paths relative to the working folder (e.g. \`notes.md\`, \`drafts/plan.md\`, \`.\` for the folder itself). Never start a path with \`/\`, that leaves the working folder and fails.
 - For filesystem READ tasks: file_list first if needed, then file_read.
-- For web tasks: web_search, then web_fetch on the best URL, then answer based on real data. web_search returns ONLY short snippets, ALWAYS call web_fetch to read the page.
+- For web tasks: web_research first (it searches AND reads the best pages, cite its sources as [1], [2]). Use web_fetch on one URL for more detail. web_search returns ONLY short snippets.
 - Device, clock and timezone are stated in this prompt, so do not spend a call finding them out. There is no shell: do not try to run commands, and do not tell the user to run any.
 - Chain multiple tools as needed. If a tool fails, try a different approach.
 - Be concise in text. All the work happens in tool calls.
@@ -77,12 +77,12 @@ Rules:
 
 export function buildMobileChatToolsSystemPrompt(basePrompt: string): string {
   const p = `You are a helpful chat assistant in LU, having a normal conversation. You also have a few tools for things you cannot do from memory, use one ONLY when the user's request actually needs it, otherwise just reply normally:
-- web_search, look up current/real-world facts (returns short snippets)
-- web_fetch, read a specific web page or URL (after a search, or when the user gives a link)
+- web_research, look up current/real-world facts: searches and reads the best pages in one call, cite its sources as [1], [2]
+- web_fetch, read a specific web page or URL (when the user gives a link, or for more detail)
 - file_write, save text to a file when the user asks you to write/create/save a file
 
 ${NO_MEDIA_TOOLS}
 
-Emit tool calls through the real tool channel, never as plain text like web_search("..."). After a tool runs, give a short, natural reply about the result. For web questions, prefer web_search then web_fetch on the best result before answering. Reply in the user's language.`
+Emit tool calls through the real tool channel, never as plain text like web_search("..."). After a tool runs, give a short, natural reply about the result. For web questions, call web_research and answer from its sources with [n] citations. Reply in the user's language.`
   return basePrompt ? `${p}\n\n${basePrompt}` : p
 }

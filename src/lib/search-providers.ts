@@ -8,6 +8,7 @@
 
 import type { SearchProvider } from '../types/settings'
 import type { WebSearchResult, WebSearchTry } from '../types/bridge'
+import { WEB_DATA_SENTENCE, webDataBlock } from './web-evidence'
 
 export interface SearchProviderOption {
   id: SearchProvider
@@ -89,7 +90,8 @@ export function webSearchResultText(data: WebSearchResult, query: string): strin
     const note = typeof data.providerError === 'string' && data.providerError
       ? `\n\n[Note: the chosen search service did not answer (${data.providerError}). Results above are from ${searchProviderLabel(data.provider)}.]`
       : ''
-    return lines + note
+    // P-L: snippets are text of foreign pages too, so they come as data.
+    return `${WEB_DATA_SENTENCE}\n${webDataBlock(lines)}${note}`
   }
   if (data.noResults) {
     return `No results for "${query}". Try other words or a broader query, or answer from what you know.`

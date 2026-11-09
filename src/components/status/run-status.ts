@@ -48,7 +48,7 @@ face('running', 'Running', 'Preparing to run', 'run a command', [
   'shell_execute', 'shell_execute_background', 'shell_task_status', 'shell_task_kill', 'shell_task_list',
   'code_execute', 'run_tests', 'pr_resume', 'git_status', 'git_log', 'git_diff', 'git_commit', 'git_push', 'gh_pr_create',
 ])
-face('searching', 'Searching', 'Preparing to search', 'use the web', ['web_search', 'web_fetch'])
+face('searching', 'Searching', 'Preparing to search', 'use the web', ['web_search', 'web_fetch', 'web_research', 'browser_open', 'browser_snapshot', 'browser_scroll', 'browser_click_link', 'browser_screenshot'])
 face('looking', 'Looking', 'Preparing to look', 'look at the screen', ['screenshot'])
 // Computer control clicks and types as well as looks. The mark keeps the
 // viewfinder; the word says that the work happens on the screen.

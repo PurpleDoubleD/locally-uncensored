@@ -206,6 +206,50 @@ pub async fn web_search(
     Ok(search_tiers::run(&request, &search_tiers::Endpoints::default(), &search_tiers::Timing::default()).await)
 }
 
+/// `web_research`: one call that searches, reads the best pages at the same
+/// time and answers the passages that fit the question, numbered as sources
+/// (`web_research.rs`). Same tiers, keys and User-Agent as `web_search`.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub async fn web_research(
+    query: String,
+    max_sources: Option<usize>,
+    provider: Option<String>,
+    brave_api_key: Option<String>,
+    tavily_api_key: Option<String>,
+    user_agent: Option<String>,
+    exa_api_key: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let user_agent = custom_user_agent(user_agent.as_deref());
+    let provider = provider.unwrap_or_else(|| "auto".to_string());
+    let query = query.trim().to_string();
+    let request = search_tiers::Request {
+        query: &query,
+        count: crate::commands::web_research::SEARCH_COUNT,
+        provider: provider.trim(),
+        keys: search_tiers::Keys {
+            brave: brave_api_key.unwrap_or_default(),
+            tavily: tavily_api_key.unwrap_or_default(),
+            exa: exa_api_key.unwrap_or_default(),
+        },
+        user_agent: user_agent.as_deref(),
+        searxng_running: state.searxng_available.load(Ordering::Relaxed),
+    };
+    // The search gets less time here than alone: the reading follows, and the
+    // tool call ends at 60 s (`tool-timeout.ts`).
+    let timing = search_tiers::Timing { total: std::time::Duration::from_secs(25), ..search_tiers::Timing::default() };
+    let found = search_tiers::run(&request, &search_tiers::Endpoints::default(), &timing).await;
+    Ok(crate::commands::web_research::research(
+        &query,
+        max_sources.unwrap_or(crate::commands::web_research::DEFAULT_SOURCES),
+        found,
+        crate::commands::web_research::app_reader(user_agent),
+        crate::commands::web_research::READ_DEADLINE,
+    )
+    .await)
+}
+
 #[tauri::command]
 pub async fn search_status(state: State<'_, AppState>) -> Result<serde_json::Value, String> {
     let client = reqwest::Client::builder()

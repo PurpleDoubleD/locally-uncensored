@@ -90,7 +90,11 @@ export function buildHermesToolPrompt(tools: (AgentToolDef | ToolLike)[]): strin
       'PLAN: for a task of more than about three calls, call todo_write FIRST with the whole plan, then again after each step with the COMPLETE list (finished item completed, next one in_progress). The user sees that list while you work.',
     )
   }
-  if (has('web_search') && has('web_fetch')) {
+  if (has('web_research')) {
+    notes.push(
+      'WEB: for questions about current or real-world facts call web_research. It searches and reads the best pages in one call. Answer from its sources and cite them as [1], [2]. Use web_fetch only for one more page.',
+    )
+  } else if (has('web_search') && has('web_fetch')) {
     notes.push(
       'IMPORTANT: web_search returns ONLY short snippets, NOT real data. You MUST ALWAYS call web_fetch on the best URL to read actual page content before answering.\nWorkflow: web_search → get URLs → web_fetch → read page → answer based on real data.',
     )

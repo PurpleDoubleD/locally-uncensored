@@ -161,6 +161,8 @@ export const DEFAULT_SETTINGS: Settings = {
   // H2 security gate. OFF by default = the autonomous coding agent keeps
   // running shell/code unattended; ON pauses each exec for a confirm.
   codexConfirmShell: false,
+  // P-L: ask before a web address the model made up (lib/web-url-provenance.ts).
+  webStrictUrls: true,
   // Cloud arm of the same gate, now an opt-in. OFF = a cloud model follows the
   // same rule as a local one, so Bypass and permission level auto run
   // unattended (2026-08-22, replacing the ON default of 2.5.9/G15a).

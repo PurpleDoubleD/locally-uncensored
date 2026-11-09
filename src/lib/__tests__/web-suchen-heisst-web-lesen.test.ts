@@ -101,8 +101,15 @@ const LOKAL = [
 describe('Das Web-Paar bleibt zusammen', () => {
   it.each(GENERISCH)('%s — mit web_search kommt web_fetch', (frage) => {
     const gewaehlt = namen(selectRelevantTools(frage, katalog(), DEFAULT_PERMISSIONS))
-    if (!gewaehlt.includes('web_search')) return // diese Frage zieht gar kein Web-Werkzeug
+    if (!gewaehlt.includes('web_search') && !gewaehlt.includes('web_research')) return // diese Frage zieht gar kein Web-Werkzeug
     expect(gewaehlt).toContain('web_fetch')
+  })
+
+  it('3.1.0 (P-L): auf dem Desktop steht web_research an der Stelle von web_search', () => {
+    const gewaehlt = namen(selectRelevantTools('was ist die hauptstadt von frankreich', katalog(), DEFAULT_PERMISSIONS))
+    expect(gewaehlt).toContain('web_research')
+    expect(gewaehlt).toContain('web_fetch')
+    expect(gewaehlt).not.toContain('web_search')
   })
 
   it('auch unter dem Small-Model-Deckel ueberlebt das Paar', async () => {
@@ -114,7 +121,8 @@ describe('Das Web-Paar bleibt zusammen', () => {
       'was ist die hauptstadt von frankreich', katalog(), DEFAULT_PERMISSIONS, toolSelectionOpts(true),
     ))
     expect(gewaehlt.length).toBeLessThanOrEqual(SMALL_MODEL_MAX_TOOLS)
-    if (!gewaehlt.includes('web_search')) return
+    // 3.1.0 (P-L): das Paar heisst jetzt web_research + web_fetch.
+    expect(gewaehlt).toContain('web_research')
     expect(gewaehlt).toContain('web_fetch')
   })
 
@@ -125,9 +133,10 @@ describe('Das Web-Paar bleibt zusammen', () => {
       'was ist die hauptstadt von frankreich', katalog(), DEFAULT_PERMISSIONS, toolSelectionOpts(true),
     )
     const prompt = buildHermesToolPrompt(gewaehlt)
-    if (!namen(gewaehlt).includes('web_search')) return
-    expect(prompt).toContain('web_search returns ONLY short snippets')
-    expect(prompt).toContain('web_fetch')
+    // 3.1.0 (P-L): mit web_research steht dort der Satz, der zum Lesen in einem Aufruf fuehrt.
+    expect(namen(gewaehlt)).toContain('web_research')
+    expect(prompt).toContain('call web_research')
+    expect(prompt).toContain('cite them as [1], [2]')
   })
 })
 
@@ -137,6 +146,7 @@ describe('Und es kommt nicht ungefragt', () => {
     // Sperren jahrelang gruen gehalten, waehrend web_search laengst mitfuhr.
     const gewaehlt = namen(selectRelevantTools(frage, katalog(), DEFAULT_PERMISSIONS))
     expect(gewaehlt).not.toContain('web_search')
+    expect(gewaehlt).not.toContain('web_research')
     expect(gewaehlt).not.toContain('web_fetch')
   })
 
@@ -178,7 +188,8 @@ describe('Und es kommt nicht ungefragt', () => {
     // Sonst zoege jedes einzelne web_fetch ein web_search nach sich und
     // kostete unter dem Sechser-Deckel einen von zwei freien Plaetzen.
     const quelle = readFileSync(resolve(here, '../tool-selection.ts'), 'utf8')
-    expect(quelle).toContain("if (selectedNames.has('web_search')) selectedNames.add('web_fetch')")
+    // P-L (3.1.0): web_research zieht web_fetch ebenso nach, in dieselbe Richtung.
+    expect(quelle).toContain("if (selectedNames.has('web_search') || selectedNames.has('web_research')) selectedNames.add('web_fetch')")
     expect(quelle).not.toContain("if (selectedNames.has('web_fetch')) selectedNames.add('web_search')")
   })
 })

@@ -12,6 +12,8 @@
  * Run: npx vitest run src/lib/__tests__/search-offline.test.ts
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+// P-L (3.1.0): the address gate has its own tests (lib/__tests__/web-research-und-quellen.test.ts).
+vi.mock('../web-url-provenance', () => ({ guardWebUrl: async () => null, rememberUrls: () => {} }))
 
 const backendCall = vi.fn(async (..._args: unknown[]) => ({}) as unknown)
 vi.mock('../../api/backend', async (orig) => ({

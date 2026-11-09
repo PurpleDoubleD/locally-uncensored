@@ -32,6 +32,7 @@ import { resolve } from 'node:path'
 import { toolRegistry, DEFAULT_PERMISSIONS } from '../index'
 import { gateCreateTools } from '../../../lib/tool-selection'
 import { estimateTokens } from '../../../lib/context-compaction'
+import { NOT_IN_CODE_TAB } from '../../../lib/browser-tools'
 
 /** Mirrors CODEX_CATEGORIES in useCodex.ts (same reason as the sibling tests). */
 const CODEX_CATEGORIES = ['filesystem', 'terminal', 'system', 'web', 'image', 'video', 'workflow']
@@ -42,7 +43,7 @@ const PLAIN_CODING_ASK = 'fix the failing test in parser.ts and run the suite'
 const codingCatalog = () =>
   toolRegistry
     .getAvailableTools(DEFAULT_PERMISSIONS)
-    .filter((t) => CODEX_CATEGORIES.includes(t.category))
+    .filter((t) => CODEX_CATEGORIES.includes(t.category) && !NOT_IN_CODE_TAB.has(t.name))
 
 /** Exactly the object useCodex builds for the request (`tools:` on the wire). */
 function wireTools(defs: { name: string; description: string; inputSchema: unknown }[]) {
