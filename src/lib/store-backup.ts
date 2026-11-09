@@ -41,6 +41,8 @@ export const STORE_KEYS = [
   'lu-cloud-outage',
   // Neuron tweaker slider values per model and persona (3.0.9, P11).
   'lu-neuron-tweaker',
+  // Where the Neurons window stood and whether it was folded (3.1.0).
+  'lu-neuron-window',
   'locally-uncensored-agent-goal',
   // Computer control: the switch and the always allowed apps.
   'locally-uncensored-computer',

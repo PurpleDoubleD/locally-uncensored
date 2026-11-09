@@ -68,7 +68,8 @@ import { Titlebar } from './Titlebar'
 import { ChatRescueHint } from './ChatRescueHint'
 import { HfLinkInbox } from '../models/HfLinkInbox'
 import { useNeuronFollowsPersona } from '../../hooks/useNeuronFollowsPersona'
-import { NEURONS_ENABLED } from '../../lib/features'
+import { useNeuronPluginSync } from '../../hooks/useNeuronPlugin'
+import { NeuronWindowHost } from '../neuron/NeuronWindowHost'
 
 // Aus der Komponente herausgezogen: `new Set(STORE_KEYS)` entstand bei jedem
 // Render neu und war damit die instabile Referenz, wegen der der Restore-Effekt
@@ -130,7 +131,6 @@ const loadModelManager = () => import('../models/ModelManager').then((m) => ({ d
 const loadBenchmarkView = () => import('../models/BenchmarkView').then((m) => ({ default: m.BenchmarkView }))
 const loadSettingsPage = () => import('../settings/SettingsPage').then((m) => ({ default: m.SettingsPage }))
 const loadCreateExperimental = () => import('../create/experimental/CreateExperimental').then((m) => ({ default: m.CreateExperimental }))
-const loadNeuronView = () => import('../neuron/NeuronView').then((m) => ({ default: m.NeuronView }))
 const loadVoiceView = () => import('../voice/VoiceView').then((m) => ({ default: m.VoiceView }))
 const loadOnboarding = () => import('../onboarding/Onboarding').then((m) => ({ default: m.Onboarding }))
 
@@ -186,6 +186,9 @@ export function AppShell() {
   useTraySync()
   useCloudOutageWatch()
   useNeuronFollowsPersona()
+  // Neurons is a plugin (3.1.0): Rust's switch follows the Plugins row.
+  useNeuronPluginSync()
+  const neuronsOn = settings.neuronsPluginEnabled === true && settings.appMode !== 'cloud' && isTauri()
 
   // ── Global Local/Cloud mode (2.5.7) — appMode drives everything ──
   const appMode = settings.appMode
@@ -1210,10 +1213,12 @@ export function AppShell() {
             {currentView === 'settings' && <LazyView load={loadSettingsPage} fallback={<SettingsSkeleton />} />}
             {currentView === 'create' && <LazyView load={loadCreateExperimental} fallback={<CreateSkeleton />} />}
             {currentView === 'voice' && <LazyView load={loadVoiceView} fallback={<VoiceSkeleton />} />}
-            {currentView === 'neuron' && NEURONS_ENABLED && <LazyView load={loadNeuronView} fallback={<BenchmarkSkeleton />} />}
           </main>
         </div>
       </div>
+
+      {/* Neurons (3.1.0): its window floats over Chat, Code and Agent. */}
+      {neuronsOn && currentView === 'chat' && <NeuronWindowHost />}
 
       {/* Backend selection dialog (shown when multiple local backends detected) */}
       <BackendSelector

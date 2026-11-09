@@ -103,11 +103,11 @@ describe('5. Code mode trigger', () => {
   })
 })
 
-describe('6. Neurons view', () => {
-  // NeuronView needs the bundled engine bridge to render its picker; its own
+describe('6. Neurons window', () => {
+  // The panel needs the bundled engine bridge to render its picker; its own
   // render test is the known flaky one, so this item is pinned on the source.
   it('ties the Model caption to the select', () => {
-    const src = readFileSync(resolve(here, '../neuron/NeuronView.tsx'), 'utf8')
+    const src = readFileSync(resolve(here, '../neuron/NeuronPanel.tsx'), 'utf8')
     expect(src).toMatch(/<label[^>]*htmlFor="neuron-model"[^>]*>Model<\/label>/)
     expect(src).toMatch(/<select\s+id="neuron-model"/)
   })

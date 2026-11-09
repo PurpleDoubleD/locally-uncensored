@@ -130,8 +130,47 @@ pub(crate) fn mix_path_is_ours(root: &Path, path: &str) -> bool {
         && p.is_file()
 }
 
-/// The control vector the engine starts this model with, if any.
+// ── the plugin switch ─────────────────────────────────────────────────────
+//
+// 3.1.0: Neurons is a plugin, off until the user turns it on under Plugins.
+// While it is off no saved mix reaches the engine, for any model: sliders
+// set in a 3.0.9 pre-release no longer steer unseen (D13). The switch lives
+// here, as a file next to active.json, and not only in the app's settings,
+// so an engine start that comes before the app has told Rust anything
+// already starts plain.
+
+const PLUGIN_ON_FILE: &str = "plugin-on";
+
+static PLUGIN_ON: LazyLock<Mutex<Option<bool>>> = LazyLock::new(|| Mutex::new(None));
+
+/// Whether the Neurons plugin is on (the marker file under `root`).
+pub(crate) fn plugin_on_at(root: &Path) -> bool {
+    root.join(PLUGIN_ON_FILE).is_file()
+}
+
+fn plugin_on() -> bool {
+    let mut guard = PLUGIN_ON.lock().unwrap_or_else(|p| p.into_inner());
+    *guard.get_or_insert_with(|| plugin_on_at(&root()))
+}
+
+/// Writes or removes the marker. Returns whether it is on afterwards.
+pub(crate) fn set_plugin_on_at(root: &Path, on: bool) -> Result<bool, String> {
+    let marker = root.join(PLUGIN_ON_FILE);
+    if on {
+        std::fs::create_dir_all(root).map_err(|e| crate::os_error::english(&e))?;
+        std::fs::write(&marker, b"1").map_err(|e| crate::os_error::english(&e))?;
+    } else if marker.exists() {
+        std::fs::remove_file(&marker).map_err(|e| crate::os_error::english(&e))?;
+    }
+    Ok(plugin_on_at(root))
+}
+
+/// The control vector the engine starts this model with, if any. None while
+/// the plugin is off.
 pub(crate) fn control_vector_for(model_path: &str) -> Option<String> {
+    if !plugin_on() {
+        return None;
+    }
     let path = with_active(|m| m.get(model_path).cloned())?;
     if mix_path_is_ours(&root(), &path) {
         Some(path)
@@ -1090,6 +1129,40 @@ pub async fn neuron_apply(app: tauri::AppHandle, model_path: String, entries: Ve
     .map_err(|e| crate::os_error::english(&e))?
 }
 
+/// Turns the Neurons plugin on or off (3.1.0). When the engine runs a model,
+/// it is started again so its control vector follows the switch; a start
+/// that resolves to the same argv (no saved mix for that model) keeps the
+/// running process.
+#[tauri::command]
+pub async fn neuron_plugin_set(app: tauri::AppHandle, enabled: bool, tuning: Option<crate::commands::engine::EngineTuning>) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let on = set_plugin_on_at(&root(), enabled)?;
+        *PLUGIN_ON.lock().unwrap_or_else(|p| p.into_inner()) = Some(on);
+        let held = {
+            let state = app.state::<crate::state::AppState>();
+            let guard = state.bundled_engine.lock().unwrap_or_else(|p| p.into_inner());
+            guard.as_ref().map(|e| e.model_path.clone())
+        };
+        let mut out = json!({ "enabled": on, "restarted": false });
+        if let Some(model_path) = held {
+            if with_active(|m| m.contains_key(&model_path)) {
+                let started = restart(&app, &model_path, tuning)?;
+                out["restarted"] = json!(started["status"] != "already_running");
+            }
+        }
+        tracing::info!(target: "neuron", enabled = on, restarted = %out["restarted"], "plugin switched");
+        Ok(out)
+    })
+    .await
+    .map_err(|e| crate::os_error::english(&e))?
+}
+
+/// Whether the plugin is on, for the app's first look.
+#[tauri::command]
+pub fn neuron_plugin_status() -> Value {
+    json!({ "enabled": plugin_on() })
+}
+
 /// The same question to the same model with the sliders off and on, side by
 /// side: temperature 0 and a fixed seed, so a difference is the sliders'.
 /// The engine is left with the sliders on (what the user set).
@@ -1132,6 +1205,23 @@ pub async fn neuron_compare(
 
 #[cfg(test)]
 mod tests {
+    /// 3.1.0: Neurons is a plugin. Off is the default (no marker), and the
+    /// switch survives as a file, so an engine start before the app has
+    /// spoken starts plain.
+    #[test]
+    fn the_plugin_switch_is_off_by_default_and_kept_as_a_file() {
+        let dir = std::env::temp_dir().join(format!("lu-neuron-plugin-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(!super::plugin_on_at(&dir));
+        assert!(super::set_plugin_on_at(&dir, true).unwrap());
+        assert!(super::plugin_on_at(&dir));
+        assert!(!super::set_plugin_on_at(&dir, false).unwrap());
+        assert!(!super::plugin_on_at(&dir));
+        // Off twice is fine.
+        assert!(!super::set_plugin_on_at(&dir, false).unwrap());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// T1 (3.0.9): an abort put the raw backtrace on the page.
     #[test]
     fn a_tool_failure_reads_as_one_sentence() {

@@ -32,6 +32,7 @@ export const DEFAULT_SETTINGS: Settings = {
   enterKey: 'send',
   // REA plugin (3.0.7): a local MCP server, off until the user turns it on.
   reaPluginEnabled: false,
+  neuronsPluginEnabled: false,
   // Reasoning effort (2.6.8). 'high' is not a taste, it is the rung this
   // client has always sent for thinking ON. Any other default would move every
   // existing customer's token bill on update without them touching anything.

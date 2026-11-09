@@ -59,7 +59,7 @@ const slot = vi.hoisted(() => ({ managed: true }))
 const job = vi.hoisted(() => ({ status: 'idle', modelPath: '' }))
 vi.mock('../../../api/builtin-ensure', () => ({ isManagedBuiltinSlot: () => slot.managed }))
 
-import { NeuronView } from '../NeuronView'
+import { NeuronPanel as NeuronView } from '../NeuronPanel'
 import { useModelStore } from '../../../stores/modelStore'
 import { useNeuronStore } from '../../../stores/neuronStore'
 import { useSettingsStore } from '../../../stores/settingsStore'
@@ -147,7 +147,7 @@ describe('Neuron tweaker view', () => {
     useSettingsStore.setState((s) => ({ personas: [{ id: 'coder', name: 'Coder', systemPrompt: 'Code.' } as Persona], activePersonaId: 'coder', settings: { ...s.settings, personasEnabled: true } }))
     render(createElement(NeuronView))
     const row = await screen.findByTestId('neuron-slider-creative')
-    await screen.findByText(/This model with/)
+    await waitFor(() => expect(row.querySelector('input[type=range]')).toBeTruthy())
     fireEvent.change(row.querySelector('input[type=range]') as HTMLInputElement, { target: { value: '0.2' } })
     expect(useNeuronStore.getState().profiles['qwen-1::persona:coder']).toEqual({ creative: 0.2, cheerful: 0.4 })
     await waitFor(() => expect(apply.mock.calls.at(-1)?.[1]).toEqual([{ id: 'cheerful', strength: 0.4 }, { id: 'creative', strength: 0.2 }]), { timeout: 3000 })
@@ -174,16 +174,14 @@ describe('Neuron tweaker view', () => {
   })
 
   // David, 30.10.2026: the line sat at the top, "hingeklatscht". It is one
-  // state in the middle of the panel, both ways, with its text centred.
-  it('stands in the middle of the panel when there is no model', async () => {
+  // state filling the window under its title bar, both ways, text centred.
+  it('stands in the middle of the window when there is no model', async () => {
     disk.models = []
     render(createElement(NeuronView))
     const box = await screen.findByTestId('neuron-empty')
     const panel = screen.getByTestId('neuron-view')
     expect(panel.className).toMatch(/\bh-full\b/)
     expect(panel.className).toMatch(/\bflex\b/)
-    expect(panel.className).toMatch(/\bitems-center\b/)
-    expect(panel.className).toMatch(/\bjustify-center\b/)
     expect(box.className).toMatch(/\btext-center\b/)
     expect(box.className).toMatch(/\bitems-center\b/)
   })

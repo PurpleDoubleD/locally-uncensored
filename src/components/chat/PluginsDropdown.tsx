@@ -15,6 +15,7 @@ import { BetaMark } from '../ui/BetaMark'
 import { isTauri } from '../../api/backend'
 import { createChatLive, createInChatOf, createSupport, servedWindowOf } from '../../lib/create/chat-switch'
 import { useCreateChatReleased } from '../../lib/create/chat-release'
+import { NeuronPluginRow } from './NeuronPluginRow'
 
 /** Whether the Plugins menu carries REA: desktop app, Agent or Code only. */
 export function reaInPlugins(desktop: boolean, agentTools: boolean): boolean {
@@ -140,7 +141,11 @@ export function PluginsDropdown({
   // only where its tools go: Agent and Code.
   const reaShown = reaInPlugins(isTauri(), agentTools)
   const reaOn = useSettingsStore((s) => s.settings.reaPluginEnabled === true) && reaShown
-  const anyPluginActive = !!(isCavemanActive || isPersonaActive || isGroupActive || createOn || reaOn)
+  // Neurons (3.1.0): steers the local LU Engine, so the desktop app only, and
+  // in every surface: Chat, Agent and Code all talk to the same engine.
+  const neuronsShown = isTauri()
+  const neuronsOn = useSettingsStore((s) => s.settings.neuronsPluginEnabled === true && s.settings.appMode !== 'cloud') && neuronsShown
+  const anyPluginActive = !!(isCavemanActive || isPersonaActive || isGroupActive || createOn || reaOn || neuronsOn)
 
   return (
     <div className="relative">
@@ -176,6 +181,7 @@ export function PluginsDropdown({
             <div className="flex gap-0.5">
               {createOn && <div data-testid="plugins-dot-create" className="w-1 h-1 rounded-full bg-lu-accent" />}
               {reaOn && <div data-testid="plugins-dot-rea" className="w-1 h-1 rounded-full bg-teal-400" />}
+              {neuronsOn && <div data-testid="plugins-dot-neurons" className="w-1 h-1 rounded-full bg-sky-400" />}
               {/* Rosa, nicht mehr Bernstein: die vier Punkte sind Kategorien,
                   keine Zustaende, und Gelb hat hier nie eine Warnung gemeint.
                   Blau, Gruen und Violett waren schon vergeben, Rot gehoert
@@ -239,6 +245,9 @@ export function PluginsDropdown({
 
             {/* ── REA, reverse engineering for the agents ────── */}
             {reaShown && <Suspense fallback={null}><ReaPluginRow /></Suspense>}
+
+            {/* ── Neurons, the neuron tweaker (3.1.0) ─────────── */}
+            {neuronsShown && <NeuronPluginRow onOpenWindow={() => setOpen(false)} />}
 
             <div className="border-t border-gray-200 dark:border-white/[0.06] my-1" />
 

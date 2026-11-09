@@ -688,6 +688,9 @@ export async function backendCall<T = unknown>(
     neuron_cancel: { path: "/local-api/neuron-cancel", method: "POST" },
     neuron_dismiss: { path: "/local-api/neuron-dismiss", method: "POST" },
     neuron_apply: { path: "/local-api/neuron-apply", method: "POST" },
+    // 3.1.0: Neurons as a plugin, its on/off switch in Rust.
+    neuron_plugin_set: { path: "/local-api/neuron-plugin-set", method: "POST" },
+    neuron_plugin_status: { path: "/local-api/neuron-plugin-status" },
     neuron_compare: { path: "/local-api/neuron-compare", method: "POST" },
     abliterate_plan: { path: "/local-api/abliterate-plan", method: "POST" },
     abliterate_start: { path: "/local-api/abliterate-start", method: "POST" },

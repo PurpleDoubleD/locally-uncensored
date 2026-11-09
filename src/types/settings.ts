@@ -98,6 +98,10 @@ export interface Settings {
   /** REA, the reverse engineering plugin of the agents (lib/plugins/rea.ts):
    *  on starts its local MCP server. Default off. */
   reaPluginEnabled: boolean
+  /** Neurons, the neuron tweaker as a plugin (3.1.0, components/neuron):
+   *  on lets saved sliders steer the LU Engine in Chat, Code and Agent and
+   *  offers its window. Default off; off starts the engine without sliders. */
+  neuronsPluginEnabled?: boolean
   /**
    * How hard a reasoning model should think (2.6.8). One global rung, the same
    * way thinkingEnabled is one global switch, and it reaches Chat, Agent mode
