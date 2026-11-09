@@ -83,7 +83,7 @@ export function codePlanAllowed(input: PlanToolInput & { reviewMode: boolean }):
 export const PLAN_NUDGE_AFTER_ROUNDS = 3
 
 export const PLAN_NUDGE =
-  'This task has several steps and there is no plan yet. Send todo_write with every remaining step now, '
+  'This task has several steps and has no plan. Send todo_write with every remaining step now, '
   + 'together with your next real tool call (finished steps completed, the current one in_progress).'
 
 export function planNudgeDue(input: {

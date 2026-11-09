@@ -29,7 +29,7 @@ export const TOOL_SEARCH_LIMIT = 5
 export const TOOL_SEARCH_DEF: MCPToolDefinition = {
   name: TOOL_SEARCH,
   description:
-    'Find a tool that is not in your list yet. Describe what you need in a few words '
+    'Find a tool that is not in your list. Describe what you need in a few words '
     + '(e.g. "make a video", "list running processes"). The matching tools are added to your list for the next step.',
   inputSchema: {
     type: 'object',

@@ -74,6 +74,6 @@ describe('the turn after a stopped run keeps the REA tools', () => {
     expect(read('useCodex.ts')).toMatch(/maxTools: SMALL_MODEL_MAX_TOOLS,\s+reaText,/)
     // Since the phone line joined (3.0.8) the options go through withPhoneToolCap
     // first; reaText rides next to it in the same object.
-    expect(read('useAgentChat.ts').match(/phoneToolCtx, SMALL_MODEL_MAX_TOOLS,\s+\),\s+reaText,\s+\}/g)).toHaveLength(2)
+    expect(read('useAgentChat.ts').match(/phoneToolCtx, SMALL_MODEL_MAX_TOOLS,\s+\),\s+(?:\.\.\.\(compactRun \? \{ maxTools: COMPACT_MAX_TOOLS \} : \{\}\),\s+)?reaText,\s+\}/g)).toHaveLength(2)
   })
 })
