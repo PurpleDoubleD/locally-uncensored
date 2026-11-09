@@ -121,12 +121,16 @@ async function drive(page: Page, convId: string, sc: Scenario): Promise<{ end: s
       await card.screenshot({ path: shot })
       await page.screenshot({ path: join(OUT, `C60-${sc.id}-card${n}-page.png`) })
       cards.push({
-        title: (await card.locator('p').first().textContent()) ?? '',
-        risk: (await card.getAttribute('data-risk')) ?? '',
-        taint: await page.getByTestId('setting-change-taint').first().textContent().catch(() => null),
+        title: (await card.locator('p').first().textContent({ timeout: 5_000 }).catch(() => '')) ?? '',
+        risk: (await card.getAttribute('data-risk', { timeout: 5_000 }).catch(() => '')) ?? '',
+        // count() does not wait: a card without a taint note has none, and a
+        // textContent() here waited until the card itself timed out (run 1).
+        taint: (await card.getByTestId('setting-change-taint').count()) > 0
+          ? await card.getByTestId('setting-change-taint').textContent({ timeout: 5_000 }).catch(() => null)
+          : null,
         shot,
       })
-      await card.getByTestId(sc.answer === 'accept' ? 'setting-change-accept' : 'setting-change-decline').click()
+      await card.getByTestId(sc.answer === 'accept' ? 'setting-change-accept' : 'setting-change-decline').click({ timeout: 15_000 })
       await page.waitForTimeout(800)
       continue
     }

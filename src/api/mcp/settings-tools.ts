@@ -238,8 +238,8 @@ export async function executeSetSetting(args: ToolArgs, run?: AgentRunContext, s
   if (!answer.allow) {
     audit(run, model, { ...item, outcome: answer.reason === 'timeout' ? 'timeout' : 'declined', tainted: verdict.taintedBy })
     return answer.reason === 'timeout'
-      ? `No answer on the card for 10 minutes, so no. ${entry.label} stays ${item.from}. Do not ask again unless the user asks.`
-      : `The user declined. ${entry.label} stays ${item.from}. Do not ask again unless the user asks.`
+      ? `NOT CHANGED. No answer on the card for 10 minutes, so no. ${entry.label} stays ${item.from}. Tell the user it was not changed. Do not ask again unless the user asks.`
+      : `NOT CHANGED. The user declined. ${entry.label} stays ${item.from}. Tell the user it was not changed. Do not ask again unless the user asks.`
   }
   // The value may have moved while the card was open (by hand, another chat).
   const now = st.readEntry(entry)
@@ -294,8 +294,8 @@ export async function executeSetSettings(args: ToolArgs, run?: AgentRunContext, 
   if (!answer.allow) {
     for (const c of ok) audit(run, model, { ...c.item, outcome: answer.reason === 'timeout' ? 'timeout' : 'declined', tainted: taintedBy })
     lines.push(answer.reason === 'timeout'
-      ? 'No answer on the card for 10 minutes, so no. Nothing changed. Do not ask again unless the user asks.'
-      : 'The user declined the card. Nothing changed. Do not ask again unless the user asks.')
+      ? 'NOT CHANGED. No answer on the card for 10 minutes, so no. Nothing changed. Tell the user so. Do not ask again unless the user asks.'
+      : 'NOT CHANGED. The user declined the card. Nothing changed. Tell the user so. Do not ask again unless the user asks.')
     return lines.join('\n')
   }
   const selected = new Set(answer.selected ?? ok.map((c) => c.entry.key))
