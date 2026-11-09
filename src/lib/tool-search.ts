@@ -20,6 +20,7 @@
  * user turn drops them again.
  */
 import type { MCPToolDefinition } from '../api/mcp/types'
+import { neutralizeToolTags } from '../api/hermes-tool-calling'
 
 export const TOOL_SEARCH = 'tool_search'
 
@@ -120,6 +121,8 @@ export const CORE_BRIEFS: Readonly<Record<string, string>> = {
   todo_write: 'The task plan the user sees. Send the COMPLETE list each time, together with your next real tool call, never on its own.',
   web_search: 'Search the web: titles, URLs and short snippets. Read the best page with web_fetch before you answer.',
   web_fetch: 'Read one web page (full URL) as text.',
+  // P-L (C53) builds web_research for 3.1.0; the line is ready when it lands.
+  web_research: 'Search the web and read the best pages in one call; cite sources as [n].',
   file_read: 'Read a text file (path relative to the workspace). For a big file pass offset and limit.',
   file_write: 'Create a file or replace a WHOLE file. To change part of a file use file_edit.',
   file_edit: 'Change part of a file: replace old_string (copied exactly from file_read, unique) with new_string.',
@@ -128,9 +131,18 @@ export const CORE_BRIEFS: Readonly<Record<string, string>> = {
   shell_execute: 'Run one shell command in the workspace (git, tests, scripts, mv, mkdir). Returns stdout, stderr and exit code.',
 }
 
-/** The line a compact run shows for a tool. */
-export function briefFor(tool: { name: string; description: string }): string {
-  return CORE_BRIEFS[tool.name] ?? briefDescription(tool.description)
+/**
+ * The line a compact run shows for a tool: ours for the core tools, then the
+ * tool's own `brief` (C60 adds the field to MCPToolDefinition), then the
+ * first sentence. An external MCP server wrote its own description, so that
+ * text is foreign: tool tags are neutralised and it stays on one line, the
+ * same treatment the Hermes prompt gives it.
+ */
+export function briefFor(tool: { name: string; description: string; brief?: string; source?: string }): string {
+  const own = CORE_BRIEFS[tool.name]
+  if (own) return own
+  const line = briefDescription(typeof tool.brief === 'string' && tool.brief.trim() ? tool.brief : tool.description)
+  return tool.source === 'external' ? neutralizeToolTags(line) : line
 }
 
 /** The first sentence of a description, at most `max` characters. */
