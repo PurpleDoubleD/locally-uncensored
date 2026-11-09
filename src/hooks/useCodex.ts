@@ -85,6 +85,7 @@ import { streamOllamaChatWithTools } from '../lib/ollama-stream-tools'
 import { repairToolCall } from '../lib/loose-tool-parse'
 import { selectRelevantTools, selectRelevantToolsAsync, SMALL_MODEL_MAX_TOOLS, gateCreateTools, wantsMediaTools, isGatedTool, applyMaxTools } from '../lib/tool-selection'
 import { agentProfileFor, resultCharsFor, COMPACT_MAX_TOOLS, COMPACT_PREFER } from '../lib/agent-profile'
+import { secretAccessOf, secretNotice } from '../lib/secret-paths'
 import type { MCPToolDefinition } from '../api/mcp/types'
 import { TOOL_SEARCH, TOOL_SEARCH_DEF, briefFor, clearUnlockedTools, runToolSearch, withToolSearch } from '../lib/tool-search'
 import { reaRoutingText } from '../lib/plugins/rea-tools'
@@ -2276,6 +2277,12 @@ export function useCodex() {
             content: `↻ Loop guard steered the model: ${batchVerdict.message}`,
             timestamp: Date.now(),
           })
+        }
+        // C59: a call on a secret path is refused by the tool itself
+        // (builtin-tools guardSecrets); the user sees it here, not only the model.
+        for (const tc of toolCalls) {
+          const hit = secretAccessOf(tc.function?.name ?? '', tc.function?.arguments as Record<string, unknown>)
+          if (hit) addBlock({ id: uuid(), phase: 'reflection', content: secretNotice(tc.function.name, hit), timestamp: Date.now() })
         }
 
         type BatchEntry = { tc: typeof toolCalls[number]; ac: AgentToolCall; blockId: string; injectedArgs: ToolArgs }

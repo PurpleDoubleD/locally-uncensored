@@ -51,6 +51,7 @@ import { macEditSide } from '../../lib/image-engines'
 import { aspectFrame, aspectRatioReject, parseAspectRatio } from '../../lib/aspect-frame'
 import { CHARACTER_ARG_SCHEMA, characterImageArgs, characterVideoArgs, type CharacterChatDeps } from '../../lib/character-chat'
 import { blockMessageFor, checkPromptSafety } from '../../lib/render/safety'
+import { dropSecretLines, secretAccessOf, secretRefusal } from '../../lib/secret-paths'
 
 /**
  * Helper: current chat id (+ folder workspace) as a fragment to spread into
@@ -2414,7 +2415,7 @@ export function registerBuiltinTools(registry: ToolRegistry) {
     if (!toolExistsOnThisDevice(tool.name)) continue
     const executor = EXECUTOR_MAP[tool.name]
     if (executor) {
-      registry.registerBuiltin(toolDefinitionForThisDevice(tool), executor)
+      registry.registerBuiltin(toolDefinitionForThisDevice(tool), guardSecrets(tool.name, executor))
     }
   }
   // M7 / Audit W-T2: der Redirect für zurückgezogene Namen wird hier ANGEMELDET,
@@ -2500,14 +2501,33 @@ export const RETIRED_EXECUTOR_NAMES: ReadonlySet<string> = new Set(Object.keys(R
  * never ours. The appended note is one line so the model learns the new way
  * without the step being wasted.
  */
+type Executor = (args: ToolArgs, run?: AgentRunContext, signal?: AbortSignal) => Promise<string>
+
+/**
+ * Every built-in tool goes through this: a call that names a secret path
+ * (lib/secret-paths.ts) is refused before anything runs, in every mode,
+ * Bypass included. It sits at registration, so both tabs, sub agents,
+ * workflows and the phone's dispatch meet the same floor. file_search over a
+ * folder also loses the lines that came from secret files.
+ */
+export function guardSecrets(name: string, executor: Executor): Executor {
+  return async (args, run, signal) => {
+    const hit = secretAccessOf(name, args as Record<string, unknown>)
+    if (hit) return secretRefusal(hit)
+    const out = await executor(args, run, signal)
+    return name === 'file_search' ? dropSecretLines(out) : out
+  }
+}
+
 export async function runRetiredTool(
   name: string,
   args: ToolArgs,
   run?: AgentRunContext,
   signal?: AbortSignal,
 ): Promise<string | null> {
-  const exec = RETIRED_EXECUTORS[name]
-  if (!exec) return null
+  const raw = RETIRED_EXECUTORS[name]
+  if (!raw) return null
+  const exec = guardSecrets(name, raw)
   // On a phone the old names must not be a back door to the shell: all but
   // the clock answer as a name that was never ours.
   if (!retiredToolRunsOnThisDevice(name)) return null

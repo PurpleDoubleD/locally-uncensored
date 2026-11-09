@@ -172,6 +172,7 @@ import type { ToolArgs } from '../api/mcp/types'
 import { CREDITS_EXHAUSTED_MESSAGE } from '../lib/credits-exhausted'
 import { buildChatSystemPrompt } from '../lib/system-prompt'
 import { agentProfileFor, resultCharsFor, COMPACT_MAX_TOOLS, COMPACT_PREFER } from '../lib/agent-profile'
+import { secretAccessOf, secretNotice } from '../lib/secret-paths'
 import { TOOL_SEARCH, TOOL_SEARCH_DEF, briefFor, clearUnlockedTools, runToolSearch, withToolSearch } from '../lib/tool-search'
 import { withChatPersona, samplingPresetFor, speakerCustomParams, speakerPersonaFor } from '../lib/chat-persona'
 import { injectPersonaNote, noteTokens, personaNoteOf } from '../lib/persona-note'
@@ -2973,6 +2974,16 @@ export function useAgentChat() {
             content: `↻ Loop guard steered the model: ${pendingSteer}`,
             timestamp: Date.now(),
           })
+        }
+        // C59: a call on a secret path is refused by the tool itself
+        // (builtin-tools guardSecrets); the user sees it here, not only the model.
+        for (const tc of toolCalls) {
+          const hit = secretAccessOf(tc.function?.name ?? '', tc.function?.arguments as Record<string, unknown>)
+          if (hit) {
+            addBlock(runState, convId!, assistantMessage.id, {
+              id: uuid(), phase: 'reflection', content: secretNotice(tc.function.name, hit), timestamp: Date.now(),
+            })
+          }
         }
 
         // Every call carries an id from here on. Only the NATIVE channel gives

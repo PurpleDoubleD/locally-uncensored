@@ -1163,6 +1163,12 @@ async fn handle_agent_tool(
         }
     };
 
+    // C59: secret paths are off limits for every remote tool call, before
+    // any permission or workspace logic runs (crate::secret_paths).
+    if let Some((path, why)) = crate::secret_paths::hit_in_args(&body.args) {
+        return graceful_error(&crate::secret_paths::refusal(&path, why));
+    }
+
     let result: Result<serde_json::Value, String> = match tool_name.as_str() {
         "file_read" => {
             let path = body.args.get("path").and_then(|v| v.as_str()).unwrap_or("").to_string();
