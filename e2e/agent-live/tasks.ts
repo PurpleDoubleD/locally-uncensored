@@ -147,6 +147,67 @@ const DATE_JS = `export function addDays(date, days) {
 }
 `
 
+
+// ── harder tasks (added after the first baseline showed 9B solving ~90 % of
+//    the first set; run before AND after like the others) ─────────────────
+
+const CUSTOMERS = ['Anna', 'Ben', 'Cem', 'Dora', 'Emil']
+const ORDERS: Record<string, string> = Object.fromEntries(
+  Array.from({ length: 12 }, (_, i) => [
+    `orders/2026-10-${String(i + 1).padStart(2, '0')}.json`,
+    JSON.stringify({ id: 100 + i, customer: CUSTOMERS[(i * 3) % 5], items: [{ sku: 'A', price: 10 + i, qty: 1 + (i % 3) }, { sku: 'B', price: 5, qty: i % 2 }] }, null, 2) + '\n',
+  ]),
+)
+const ORDER_TOTALS = (() => {
+  const t: Record<string, number> = {}
+  for (const c of Object.values(ORDERS)) {
+    const o = JSON.parse(c) as { customer: string; items: Array<{ price: number; qty: number }> }
+    t[o.customer] = (t[o.customer] ?? 0) + o.items.reduce((a, it) => a + it.price * it.qty, 0)
+  }
+  return Object.entries(t).sort((a, b) => b[1] - a[1])
+})()
+
+const TODO_TREE: Record<string, string> = {}
+let todoCount = 0
+for (let d = 0; d < 4; d++) {
+  for (let f = 0; f < 5; f++) {
+    const lines = Array.from({ length: 30 }, (_, l) => {
+      if ((d * 5 + f + l) % 11 === 0) { todoCount++; return `  // TODO: punkt ${d}-${f}-${l}` }
+      return `  const v${l} = ${l}`
+    })
+    TODO_TREE[`projekt/modul${d}/datei${f}.js`] = `export function f() {\n${lines.join('\n')}\n}\n`
+  }
+}
+TODO_TREE['projekt/README.md'] = '# Projekt\n\nKein TODO-Kommentar hier, nur das Wort im Text.\n'
+const TODO_COUNT = todoCount
+
+const CLI_FILES: Record<string, string> = {
+  'package.json': PKG,
+  'src/format.mjs': `export function formatName(first, last) {\n  return \`\${first} \${last}\`\n}\n`,
+  'src/cli.mjs': `import { formatName } from './format.mjs'\n\nexport function run(argv) {\n  const [first, last] = argv\n  return formatName(first, last)\n}\n`,
+  'test/cli.test.mjs': `import { test } from 'node:test'\nimport assert from 'node:assert/strict'\nimport { run } from '../src/cli.mjs'\n\ntest('plain', () => assert.equal(run(['Ada', 'Lovelace']), 'Ada Lovelace'))\ntest('--upper', () => assert.equal(run(['--upper', 'Ada', 'Lovelace']), 'ADA LOVELACE'))\ntest('--last-first', () => assert.equal(run(['--last-first', 'Ada', 'Lovelace']), 'Lovelace, Ada'))\ntest('both flags', () => assert.equal(run(['--upper', '--last-first', 'Ada', 'Lovelace']), 'LOVELACE, ADA'))\n`,
+}
+
+const SHARED_BUG: Record<string, string> = {
+  'package.json': PKG,
+  'src/money.mjs': `/** Cents to a euro string: 1234 -> "12,34 €". */\nexport function euro(cents) {\n  const e = Math.floor(cents / 100)\n  const c = cents % 100\n  return \`\${e},\${c} €\`\n}\n`,
+  'src/invoice.mjs': `import { euro } from './money.mjs'\n\nexport function total(lines) {\n  return euro(lines.reduce((a, l) => a + l.cents * l.qty, 0))\n}\n`,
+  'src/receipt.mjs': `import { euro } from './money.mjs'\n\nexport function line(name, cents) {\n  return \`\${name}: \${euro(cents)}\`\n}\n`,
+  'test/invoice.test.mjs': `import { test } from 'node:test'\nimport assert from 'node:assert/strict'\nimport { total } from '../src/invoice.mjs'\nimport { line } from '../src/receipt.mjs'\n\ntest('total', () => assert.equal(total([{ cents: 250, qty: 2 }, { cents: 105, qty: 1 }]), '6,05 €'))\ntest('line', () => assert.equal(line('Brot', 309), 'Brot: 3,09 €'))\ntest('round euros', () => assert.equal(line('Milch', 200), 'Milch: 2,00 €'))\n`,
+}
+
+const LRU_TEST = `import { test } from 'node:test'
+import assert from 'node:assert/strict'
+import { LruCache } from './lru.mjs'
+
+test('get returns what was set', () => { const c = new LruCache(2); c.set('a', 1); assert.equal(c.get('a'), 1) })
+test('missing key is undefined', () => assert.equal(new LruCache(2).get('x'), undefined))
+test('evicts the least recently used', () => { const c = new LruCache(2); c.set('a', 1); c.set('b', 2); c.get('a'); c.set('c', 3); assert.equal(c.get('b'), undefined); assert.equal(c.get('a'), 1) })
+test('set on an existing key refreshes it', () => { const c = new LruCache(2); c.set('a', 1); c.set('b', 2); c.set('a', 9); c.set('c', 3); assert.equal(c.get('a'), 9); assert.equal(c.get('b'), undefined) })
+test('size', () => { const c = new LruCache(3); c.set('a', 1); c.set('b', 2); assert.equal(c.size, 2) })
+test('delete', () => { const c = new LruCache(2); c.set('a', 1); assert.equal(c.delete('a'), true); assert.equal(c.get('a'), undefined); assert.equal(c.delete('a'), false) })
+`
+
 // ── the tasks ────────────────────────────────────────────────────────────
 
 export const TASKS: BenchTask[] = [
@@ -319,6 +380,63 @@ export const TASKS: BenchTask[] = [
       if (sh(ws, 'node', ['--test']).code !== 0) return fail('node --test rot')
       const ran = run.toolCalls.some((c) => c.name === 'shell_execute' && /test/.test(JSON.stringify(c.args)))
       return ran ? ok() : fail('Tests nicht selbst gelaufen')
+    },
+  },
+  {
+    id: 'AG8', tab: 'agent',
+    prompt: 'In orders/ liegen 12 Bestellungen als JSON. Rechne für jeden Kunden die Summe aller Positionen (price × qty) aus und schreib sie nach kunden.csv mit den Spalten kunde,summe, absteigend nach Summe sortiert.',
+    files: ORDERS,
+    check: (ws) => {
+      const s = read(ws, 'kunden.csv')
+      if (s === null) return fail('kunden.csv fehlt')
+      const rows = s.trim().split('\n').map((l) => l.split(',').map((x) => x.trim()))
+      const body = /^kunde/i.test(rows[0]?.[0] ?? '') ? rows.slice(1) : rows
+      const got = body.map(([k, v]) => [k, Number(v)])
+      const want = ORDER_TOTALS
+      if (got.length !== want.length) return fail(`${got.length} Zeilen statt ${want.length}`)
+      const wrong = want.filter(([k, v], i) => got[i]?.[0] !== k || got[i]?.[1] !== v)
+      return wrong.length ? fail(`falsch: ${wrong.map(([k]) => k).join(', ')}`) : ok()
+    },
+  },
+  {
+    id: 'AG9', tab: 'agent',
+    prompt: 'Finde in projekt/ alle TODO-Kommentare in den .js-Dateien und schreib sie nach todos.md, eine Zeile je Fund im Format `datei:zeile: text`. Sag mir am Ende, wie viele es sind.',
+    files: TODO_TREE,
+    check: (ws, answer) => {
+      const s = read(ws, 'todos.md')
+      if (s === null) return fail('todos.md fehlt')
+      const hits = s.split('\n').filter((l) => /TODO/.test(l) && /datei\d\.js:\d+/.test(l))
+      if (hits.length !== TODO_COUNT) return fail(`${hits.length} Funde statt ${TODO_COUNT}`)
+      if (/README/.test(s)) return fail('README mitgezählt')
+      return new RegExp(`\\b${TODO_COUNT}\\b`).test(answer) ? ok() : fail(`Anzahl ${TODO_COUNT} nicht genannt`)
+    },
+  },
+  {
+    id: 'CO8', tab: 'code',
+    prompt: 'Die CLI in src/cli.mjs soll zwei Schalter bekommen: --upper (alles groß) und --last-first ("Nachname, Vorname"). Beide sind kombinierbar. Die Tests in test/cli.test.mjs zeigen das gewünschte Verhalten, ändere sie nicht.',
+    files: CLI_FILES,
+    check: (ws) => {
+      if (read(ws, 'test/cli.test.mjs') !== CLI_FILES['test/cli.test.mjs']) return fail('Testdatei verändert')
+      return sh(ws, 'node', ['--test']).code === 0 ? ok() : fail('node --test rot')
+    },
+  },
+  {
+    id: 'CO9', tab: 'code',
+    prompt: 'Die Rechnungen zeigen manchmal falsche Beträge (z. B. "6,5 €" statt "6,05 €"). Finde die Ursache, behebe sie an der richtigen Stelle und lass die Tests laufen.',
+    files: SHARED_BUG,
+    check: (ws) => {
+      if (read(ws, 'test/invoice.test.mjs') !== SHARED_BUG['test/invoice.test.mjs']) return fail('Testdatei verändert')
+      if (read(ws, 'src/invoice.mjs') !== SHARED_BUG['src/invoice.mjs'] || read(ws, 'src/receipt.mjs') !== SHARED_BUG['src/receipt.mjs']) return fail('an der falschen Stelle geflickt')
+      return sh(ws, 'node', ['--test']).code === 0 ? ok() : fail('node --test rot')
+    },
+  },
+  {
+    id: 'CO10', tab: 'code',
+    prompt: 'Schreib lru.mjs: eine Klasse LruCache(capacity) mit get, set, delete und size, die bei voller Kapazität den am längsten nicht benutzten Eintrag verdrängt. Die Tests in lru.test.mjs müssen grün werden.',
+    files: { 'package.json': PKG, 'lru.test.mjs': LRU_TEST },
+    check: (ws) => {
+      if (read(ws, 'lru.test.mjs') !== LRU_TEST) return fail('Testdatei verändert')
+      return sh(ws, 'node', ['--test']).code === 0 ? ok() : fail('node --test rot')
     },
   },
 ]
