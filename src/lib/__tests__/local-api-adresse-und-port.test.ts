@@ -82,7 +82,7 @@ describe('Der Start', () => {
     // ausgraut, statt in einen Fehler zu laufen.
     const u = kannStarten('   ', LOCAL_API_DEFAULT_PORT)
     expect(u.ok).toBe(false)
-    expect(u.ok === false && u.grund).toContain('token')
+    expect(u.ok === false && u.grund).toContain('API key')
   })
 
   it('mit Token und freiem Port ja', () => {

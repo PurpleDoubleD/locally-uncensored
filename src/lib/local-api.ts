@@ -96,6 +96,43 @@ export function clientFelder(base: string, token: string): Array<{ feld: string;
 }
 
 /**
+ * Die kurze Anleitung "Use with SillyTavern / other apps" in der Einstellung.
+ *
+ * GitHub Discussion #14 (micnorian14): "API key not working even though I
+ * haven't set one". Niemand setzt hier einen Schluessel selbst: LU erzeugt
+ * ihn, und jede Anfrage braucht ihn. Discord: SillyTavern zeigte "no model
+ * loaded", weil die Liste leer war (C57). Die Schritte nennen deshalb die
+ * Felder so, wie SillyTavern sie nennt, und sagen, dass LU-Engine-Modelle beim
+ * ersten Aufruf geladen werden.
+ */
+export interface AnleitungsAbschnitt {
+  titel: string
+  schritte: string[]
+}
+
+export function clientAnleitung(base: string): AnleitungsAbschnitt[] {
+  return [
+    {
+      titel: 'SillyTavern',
+      schritte: [
+        'API Connections: API "Chat Completion", source "Custom (OpenAI-compatible)".',
+        `Custom Endpoint (Base URL): ${base}`,
+        'Custom API Key: the API Key above (copy button).',
+        'Press Connect, then pick a model. lu/… are LU Engine models, ollama/… and lmstudio/… the other apps.',
+      ],
+    },
+    {
+      titel: 'Any other OpenAI-compatible app',
+      schritte: [
+        'Set the Base URL and the API Key from above. The key is required, also on this machine.',
+        'Model: an id from GET /v1/models, for example lu/<model name>.',
+        'An LU Engine model that is not loaded is loaded by the first request, so the first answer takes longer.',
+      ],
+    },
+  ]
+}
+
+/**
  * Was die Oberflaeche ueber die Reichweite sagt.
  *
  * Der LAN-Satz ist bewusst konkret statt beruhigend: "andere Geraete" ist
@@ -110,7 +147,7 @@ export function reichweiteText(lan: boolean): string {
 
 /** Ob der aktuelle Stand ueberhaupt startbar ist. */
 export function kannStarten(token: string, port: number): PortUrteil {
-  if (!token.trim()) return { ok: false, grund: 'The API will not start without a token. Generate one first.' }
+  if (!token.trim()) return { ok: false, grund: 'The API will not start without an API key. Press Generate below first.' }
   return pruefePort(port)
 }
 

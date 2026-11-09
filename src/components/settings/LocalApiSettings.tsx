@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react'
-import { Copy, Check, KeyRound, Eye, EyeOff, Globe } from 'lucide-react'
+import { Copy, Check, KeyRound, Eye, EyeOff, Globe, ChevronDown, ChevronRight } from 'lucide-react'
 import { useLocalApiStore } from '../../stores/localApiStore'
 import {
   localApiBaseUrl, curlBeispiel, clientFelder, reichweiteText, kannStarten, pruefePort,
-  corsText, nutzungZeilen, ohneZahlenText, type LocalApiNutzung,
+  corsText, nutzungZeilen, ohneZahlenText, clientAnleitung, type LocalApiNutzung,
 } from '../../lib/local-api'
 import { backendCall } from '../../api/backend'
 import { InlineToggle } from './InlineToggle'
@@ -28,6 +28,7 @@ export function LocalApiSettings() {
   const { port, lan, token, corsOrigins, mitLuStarten, laeuft, fehler, setPort, setLan, setCors, setMitLuStarten, neuesToken, starten, stoppen, auffrischen } = useLocalApiStore()
   const [zeigeToken, setZeigeToken] = useState(false)
   const [kopiert, setKopiert] = useState<string | null>(null)
+  const [anleitungOffen, setAnleitungOffen] = useState(false)
   // Der Rohtext bleibt lokal: gespeichert wird nur, was die Pruefung
   // uebersteht. Sonst stuende in der Datei eine Freigabe, die nie greift.
   const [corsRoh, setCorsRoh] = useState(corsOrigins.join(', '))
@@ -71,7 +72,8 @@ export function LocalApiSettings() {
       <p className="t-micro text-gray-600">
         One OpenAI-compatible address for every model on this machine: LU Engine, Ollama
         and LM Studio under a single URL. Anything that can talk to OpenAI can talk to your
-        local models through it.
+        local models through it. It always needs the API key LU generates below, also on
+        this machine.
       </p>
 
       <div className="flex items-center justify-between">
@@ -175,7 +177,7 @@ export function LocalApiSettings() {
       <div className="space-y-1">
         <div className="flex items-center gap-2">
           <KeyRound className="w-3 h-3 text-gray-500" />
-          <span className="t-micro text-gray-500">Token. Every request needs it, including from this machine.</span>
+          <span className="t-micro text-gray-500">API key. LU makes it, you do not choose one. Every request needs it, also from this machine: paste it into your app's API key field.</span>
         </div>
         <div className="flex items-center gap-2">
           <input
@@ -218,6 +220,34 @@ export function LocalApiSettings() {
           </button>
         </div>
       )}
+
+      {/* GH Discussion #14 und C57: wer SillyTavern oder eine andere App
+          anschliesst, soll hier lesen koennen, welches Feld welches ist. */}
+      <div className="pt-1">
+        <button
+          onClick={() => setAnleitungOffen((v) => !v)}
+          aria-expanded={anleitungOffen}
+          data-testid="local-api-howto"
+          className="flex items-center gap-1 t-micro text-gray-400 hover:text-gray-200"
+        >
+          {anleitungOffen ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+          Use with SillyTavern / other apps
+        </button>
+        {anleitungOffen && (
+          <div className="mt-2 space-y-2">
+            {clientAnleitung(base).map((a) => (
+              <div key={a.titel}>
+                <div className="t-micro text-gray-400">{a.titel}</div>
+                <ol className="list-decimal pl-4 space-y-0.5">
+                  {a.schritte.map((s) => (
+                    <li key={s} className="t-micro text-gray-500 break-words">{s}</li>
+                  ))}
+                </ol>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   )
 }
