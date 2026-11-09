@@ -123,6 +123,17 @@ const SCROLL_TOOLS = new Set<string>(['browser_scroll'])
 const SCROLL_STEER_AT = 10
 const SCROLL_HALT_AT = 20
 
+/**
+ * Web searches in a row with nothing read or done in between (C59 bench).
+ * Each query differs by a word, so the repeat detectors never fire: a 9B
+ * that lacked the shell searched the web 23 times for "mv" in one turn.
+ * Six searches without opening a page is a model that has stopped reading
+ * its results; twelve is a stall.
+ */
+const SEARCH_TOOLS = new Set<string>(['web_search'])
+const SEARCH_STEER_AT = 6
+const SEARCH_HALT_AT = 12
+
 /** Tools whose args carry a shell command whose first token names the work. */
 const EXEC_TOOLS = new Set<string>(['shell_execute', 'shell_execute_background'])
 
@@ -174,6 +185,9 @@ export class AgentLoopGuard {
   /** Batches of nothing but browser_scroll in a row (P-L, C53). */
   private scrollStreak = 0
   private scrollSteered = false
+  /** Batches of nothing but web_search in a row (C59). */
+  private searchStreak = 0
+  private searchSteered = false
   private windowSteered = new Set<string>()
   private narrationRowSteered = false
   private lastNarration = ''
@@ -229,6 +243,22 @@ export class AgentLoopGuard {
     }
     this.scrollStreak = 0
     this.scrollSteered = false
+    if (calls.every((c) => SEARCH_TOOLS.has(c.name))) {
+      this.searchStreak++
+      if (this.searchStreak >= SEARCH_HALT_AT) {
+        return { action: 'halt', reason: `${this.searchStreak} web searches in a row without reading a page or doing anything else` }
+      }
+      if (this.searchStreak >= SEARCH_STEER_AT && !this.searchSteered) {
+        this.searchSteered = true
+        return {
+          action: 'steer',
+          message: `You searched the web ${this.searchStreak} times in a row. Stop searching: read the best result with web_fetch, or do the task with the tools you have. If a tool you need is missing, ask tool_search once.`,
+        }
+      }
+    } else {
+      this.searchStreak = 0
+      this.searchSteered = false
+    }
     const keys = calls.map((c) => `${c.name}|${c.args}`)
     const sig = [...keys].sort().join('||')
     const trimmed = opts.trimmedReadKeys

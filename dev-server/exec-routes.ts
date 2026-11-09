@@ -1,10 +1,27 @@
 import { spawn, execSync } from 'child_process'
-import { mkdirSync, rmSync } from 'fs'
+import { existsSync, mkdirSync, rmSync, statSync } from 'fs'
 import os from 'os'
-import { join } from 'path'
+import { join, resolve as resolvePath } from 'path'
 import type { RouteMount } from './routes'
 import { requirePost, withJsonBody } from './http'
 import { bodyNumber, bodyString } from '../src/dev/http-body'
+import { devWorkspaceRoot } from '../src/lib/dev-fs-jail'
+
+/**
+ * The folder a dev-server shell command runs in, the same rule as
+ * shell.rs (cwd_in_workspace): the chat's workspace, a relative cwd inside it,
+ * an absolute folder as it is. It used to be the Vite process folder (the
+ * repo itself) whenever the model sent no cwd (C59 bench, 2026-11-09).
+ */
+export function devShellCwd(cwd?: string, chatId?: string, workingDirectory?: string, home = os.homedir()): string {
+  const base = devWorkspaceRoot(home, chatId, workingDirectory)
+  mkdirSync(base, { recursive: true })
+  const want = (cwd ?? '').trim()
+  if (!want) return base
+  // resolve() keeps an absolute cwd as it is and joins a relative one onto base.
+  const p = resolvePath(base, want)
+  return existsSync(p) && statSync(p).isDirectory() ? p : base
+}
 
 /**
  * Die beiden Endpunkte, die aus einem Request heraus einen Prozess starten.
@@ -116,7 +133,7 @@ export function registerExecRoutes(routes: RouteMount): void {
         let killed = false
 
         const proc = spawn(shellBin, shellArgs, {
-          cwd: cwd || undefined,
+          cwd: devShellCwd(cwd, bodyString(body, 'chatId'), bodyString(body, 'workingDirectory')),
           stdio: ['ignore', 'pipe', 'pipe'],
           shell: false,
         })

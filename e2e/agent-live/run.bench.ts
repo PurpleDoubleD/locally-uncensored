@@ -131,7 +131,7 @@ async function waitForRun(page: Page, convId: string): Promise<'done' | 'timeout
 
 interface Facts {
   answer: string
-  toolCalls: Array<{ name: string; args: unknown; status: string }>
+  toolCalls: Array<{ name: string; args: unknown; status: string; result?: string }>
   reflections: string[]
   usage: unknown
   errors: string[]
@@ -144,11 +144,11 @@ async function collect(page: Page, convId: string): Promise<Facts> {
     const msgs = (conv?.messages ?? []) as Array<{ role: string; content: string; agentBlocks?: Array<{ phase: string; content: string; toolCalls?: Array<{ toolName: string; args: unknown; status: string }> }>; requestUsage?: unknown; error?: { kind: string; detail: string } }>
     const assistant = msgs.filter((m) => m.role === 'assistant')
     const blocks = assistant.flatMap((m) => m.agentBlocks ?? [])
-    const audit = (A['/src/stores/toolAuditStore.ts'].useToolAuditStore.getState().entries[id] ?? []) as Array<{ toolName: string; args: unknown; status: string }>
+    const audit = (A['/src/stores/toolAuditStore.ts'].useToolAuditStore.getState().entries[id] ?? []) as Array<{ toolName: string; args: unknown; status: string; resultPreview?: string; error?: string }>
     const fromBlocks = blocks.flatMap((b) => (b.toolCalls ?? []).map((c) => ({ name: c.toolName, args: c.args, status: c.status })))
     return {
       answer: assistant.map((m) => m.content).join('\n').trim(),
-      toolCalls: (audit.length ? audit.map((e) => ({ name: e.toolName, args: e.args, status: e.status })) : fromBlocks).filter((c) => c.name !== 'context_decay'),
+      toolCalls: (audit.length ? audit.map((e) => ({ name: e.toolName, args: e.args, status: e.status, result: String(e.resultPreview ?? e.error ?? '').slice(0, 240) })) : fromBlocks).filter((c) => c.name !== 'context_decay'),
       reflections: blocks.filter((b) => b.phase === 'reflection').map((b) => b.content.slice(0, 300)),
       usage: assistant.map((m) => m.requestUsage ?? null),
       errors: assistant.flatMap((m) => (m.error ? [`${m.error.kind}: ${m.error.detail}`] : [])),
@@ -183,6 +183,8 @@ for (const model of MODELS) {
           ok: check.ok, detail: check.detail,
           calls: facts.toolCalls.length, failedCalls: failed,
           tools: facts.toolCalls.map((c) => c.name),
+          // What each call sent and got back, short: enough to see why a run went wrong.
+          trace: facts.toolCalls.map((c) => ({ name: c.name, status: c.status, args: JSON.stringify(c.args ?? {}).slice(0, 240), result: c.result ?? '' })),
           planned: facts.toolCalls.some((c) => c.name === 'todo_write'),
           guardSteer: facts.reflections.filter((s) => /Loop guard steered/i.test(s)).length,
           guardHalt: facts.reflections.filter((s) => /Loop guard halted/i.test(s)).length + (/\(halted:/.test(facts.answer) ? 1 : 0),

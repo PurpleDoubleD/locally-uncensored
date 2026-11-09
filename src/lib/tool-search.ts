@@ -86,7 +86,9 @@ function scoreTools(query: string, catalog: readonly MCPToolDefinition[]): Score
     .filter((t) => t.name !== TOOL_SEARCH)
     .map((t) => {
       const name = words(t.name)
-      const desc = words(t.description)
+      // The one-line brief counts too: it names jobs ("rename", "move") the
+      // long description only shows as commands, and a 9B searches by job.
+      const desc = words(`${t.description} ${CORE_BRIEFS[t.name] ?? ''}`)
       let score = 0
       for (const w of q) {
         if (name.some((n) => close(n, w))) score += 3
@@ -128,7 +130,7 @@ export const CORE_BRIEFS: Readonly<Record<string, string>> = {
   file_edit: 'Change part of a file: replace old_string (copied exactly from file_read, unique) with new_string.',
   file_list: 'List a folder ("." is the workspace). recursive and pattern ("*.md") are optional.',
   file_search: 'Search file contents with a regex across a folder: file, line number and text of each match.',
-  shell_execute: 'Run one shell command in the workspace (git, tests, scripts, mv, mkdir). Returns stdout, stderr and exit code.',
+  shell_execute: 'Run one shell command in the workspace: git, tests, scripts, and to rename, move, copy or delete files (mv, cp, mkdir). Returns stdout, stderr, exit code.',
 }
 
 /**

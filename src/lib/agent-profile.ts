@@ -21,8 +21,24 @@ export type AgentProfile = 'tiny' | 'compact' | 'full'
 /** Above this many billion parameters a local model gets the full profile. */
 export const COMPACT_MAX_PARAMS_B = 35
 
-/** The tool list of a compact run, before tool_search and unlocked tools. */
-export const COMPACT_MAX_TOOLS = 8
+/**
+ * The tool list of a compact run, before tool_search and unlocked tools.
+ * 8 was too few: the four always-on tools plus a semantic ranking left
+ * shell_execute out of "rename these photos", and the 9B tried file_edit on
+ * the folder and then searched the web 25 times for "mv" (C59 bench). Ten
+ * holds the four, the local trio and the web pair, with one slot to spare.
+ */
+export const COMPACT_MAX_TOOLS = 10
+
+/**
+ * The keyword router's picks that a compact list keeps before the semantic
+ * ranking fills the rest: the tools for working on this computer, then the
+ * web. Only names the keyword router chose are moved forward, so a pure file
+ * task never gets the web pair this way and a web question keeps both halves.
+ */
+export const COMPACT_PREFER: readonly string[] = [
+  'shell_execute', 'file_list', 'file_search', 'web_search', 'web_fetch', 'web_research',
+]
 
 /** A tool result in a compact run: about 4k tokens, an eighth of a 32k window. */
 export const COMPACT_RESULT_CHARS = 16_000

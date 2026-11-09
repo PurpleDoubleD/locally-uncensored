@@ -84,7 +84,7 @@ import { CREDITS_EXHAUSTED_MESSAGE } from '../lib/credits-exhausted'
 import { streamOllamaChatWithTools } from '../lib/ollama-stream-tools'
 import { repairToolCall } from '../lib/loose-tool-parse'
 import { selectRelevantTools, selectRelevantToolsAsync, SMALL_MODEL_MAX_TOOLS, gateCreateTools, wantsMediaTools, isGatedTool, applyMaxTools } from '../lib/tool-selection'
-import { agentProfileFor, resultCharsFor, COMPACT_MAX_TOOLS } from '../lib/agent-profile'
+import { agentProfileFor, resultCharsFor, COMPACT_MAX_TOOLS, COMPACT_PREFER } from '../lib/agent-profile'
 import type { MCPToolDefinition } from '../api/mcp/types'
 import { TOOL_SEARCH, TOOL_SEARCH_DEF, briefFor, clearUnlockedTools, runToolSearch, withToolSearch } from '../lib/tool-search'
 import { reaRoutingText } from '../lib/plugins/rea-tools'
@@ -1604,7 +1604,7 @@ export function useCodex() {
             : !isLocalModelByName(activeModel)
               ? codexTools
               : compactRun
-                ? applyMaxTools(selectRelevantTools(lastUserMsg, codexTools, permissions, undefined, reaText), COMPACT_MAX_TOOLS)
+                ? applyMaxTools(selectRelevantTools(lastUserMsg, codexTools, permissions, undefined, reaText), COMPACT_MAX_TOOLS, [...COMPACT_PREFER])
                 : selectRelevantTools(lastUserMsg, codexTools, permissions, undefined, reaText)
           // Planning is opt-in (lib/plan-gate.ts): without Plan mode, a plan
           // request or an open plan, todo_write is not offered at all.

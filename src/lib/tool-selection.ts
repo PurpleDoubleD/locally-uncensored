@@ -575,13 +575,18 @@ export async function selectRelevantToolsAsync(
   userMessage: string,
   allTools: MCPToolDefinition[],
   permissions: PermissionMap,
-  opts?: { embed?: EmbeddingFn; embeddingThreshold?: number; topN?: number; maxTools?: number; reaText?: string },
+  opts?: {
+    embed?: EmbeddingFn; embeddingThreshold?: number; topN?: number; maxTools?: number; reaText?: string
+    /** Keyword picks that go ahead of the semantic ranking under the cap
+     *  (agent-profile COMPACT_PREFER). Unset: the ranking alone, as before. */
+    prefer?: readonly string[]
+  },
 ): Promise<MCPToolDefinition[]> {
   const threshold = opts?.embeddingThreshold ?? EMBEDDING_ROUTING_THRESHOLD
   const available = allTools.filter((t) => permissions[t.category] !== 'blocked')
   const pinned = mentionedToolNames(userMessage, available)
   if (!opts?.embed || available.length <= threshold) {
-    return applyMaxTools(selectRelevantTools(userMessage, allTools, permissions, undefined, opts?.reaText), opts?.maxTools, undefined, pinned)
+    return applyMaxTools(selectRelevantTools(userMessage, allTools, permissions, undefined, opts?.reaText), opts?.maxTools, opts?.prefer ? [...opts.prefer] : undefined, pinned)
   }
   try {
     const semanticNames = await selectToolsByEmbedding(
@@ -593,13 +598,17 @@ export async function selectRelevantToolsAsync(
     const keyword = selectRelevantTools(userMessage, allTools, permissions, undefined, opts?.reaText)
     const union = new Set<string>([...semanticNames, ...keyword.map((t) => t.name)])
     const selected = available.filter((t) => union.has(t.name))
+    const keywordNames = new Set(keyword.map((t) => t.name))
+    const rank = opts.prefer
+      ? [...opts.prefer.filter((n) => keywordNames.has(n)), ...semanticNames]
+      : semanticNames
     // Small-Model Mode (Knob 1): cap the union to maxTools, filling from
     // embedding-rank order so the most relevant tools survive. No-op when
     // maxTools is unset → `selected` (and its original order) is returned
     // byte-identical, so big-model behaviour is unchanged. Verbatim-named
     // tools are pinned past the cap on both paths.
-    return applyMaxTools(selected, opts.maxTools, semanticNames, pinned)
+    return applyMaxTools(selected, opts.maxTools, rank, pinned)
   } catch {
-    return applyMaxTools(selectRelevantTools(userMessage, allTools, permissions, undefined, opts?.reaText), opts?.maxTools, undefined, pinned)
+    return applyMaxTools(selectRelevantTools(userMessage, allTools, permissions, undefined, opts?.reaText), opts?.maxTools, opts?.prefer ? [...opts.prefer] : undefined, pinned)
   }
 }

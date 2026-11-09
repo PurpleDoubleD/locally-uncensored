@@ -294,15 +294,21 @@ pub(crate) async fn shell_task_start_impl(args: &Value) -> CmdResult {
     // `pnpm install` / `cargo build`, so a task the model started "in the
     // project" ran somewhere else entirely. Fall back to the workspace the
     // foreground shell tool resolves.
-    let cwd = match a.cwd.clone() {
+    let root = crate::commands::filesystem::workspace_root(
+        a.chat_id.as_deref(),
+        a.working_directory.as_deref(),
+    );
+    let cwd = match a.cwd.clone().filter(|c| !c.trim().is_empty()) {
+        // A relative cwd is relative to the workspace, as the tool says,
+        // not to LU's own process folder (C59).
+        Some(c) if std::path::Path::new(c.trim()).is_relative() => {
+            root.join(c.trim()).to_str().map(|s| s.to_string())
+        }
         Some(c) => Some(c),
-        None => crate::commands::filesystem::workspace_root(
-            a.chat_id.as_deref(),
-            a.working_directory.as_deref(),
-        )
-        .to_str()
-        .map(|s| s.to_string())
-        .filter(|s| std::path::Path::new(s).is_dir()),
+        None => root
+            .to_str()
+            .map(|s| s.to_string())
+            .filter(|s| std::path::Path::new(s).is_dir()),
     };
     if let Some(cwd) = &cwd {
         let p = std::path::Path::new(cwd);
@@ -1180,6 +1186,29 @@ mod cwd_default_tests {
         );
         // Negative control: the folder that must NOT have won.
         assert!(!same_directory(&seen, &a), "the task ran in the fallback {a:?}");
+    }
+
+    /// The tool says cwd is relative to the workspace. A relative one used to
+    /// be taken against LU's own process folder (C59).
+    #[tokio::test]
+    async fn a_relative_cwd_is_inside_the_workspace() {
+        let _isolation = super::sweep_isolation().await;
+        let ws = crate::os_paths::test_dir("bg-rel");
+        std::fs::create_dir_all(ws.join("sub")).unwrap();
+
+        let start = shell_task_start_impl(&super::a_task_that_prints_its_directory(json!({
+            "cwd": "sub",
+            "working_directory": ws.to_string_lossy(),
+        })))
+        .await
+        .expect("start");
+        let id = start["id"].as_str().unwrap().to_string();
+
+        let seen = reported_directory(&id).await;
+        assert!(
+            same_directory(&seen, &ws.join("sub")),
+            "relative cwd not joined onto the workspace: reported {seen:?}",
+        );
     }
 }
 

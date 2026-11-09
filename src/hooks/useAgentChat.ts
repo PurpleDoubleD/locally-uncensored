@@ -171,7 +171,7 @@ import { asString, errorText, isRecord, prop } from '../types/json-guards'
 import type { ToolArgs } from '../api/mcp/types'
 import { CREDITS_EXHAUSTED_MESSAGE } from '../lib/credits-exhausted'
 import { buildChatSystemPrompt } from '../lib/system-prompt'
-import { agentProfileFor, resultCharsFor, COMPACT_MAX_TOOLS } from '../lib/agent-profile'
+import { agentProfileFor, resultCharsFor, COMPACT_MAX_TOOLS, COMPACT_PREFER } from '../lib/agent-profile'
 import { TOOL_SEARCH, TOOL_SEARCH_DEF, briefFor, clearUnlockedTools, runToolSearch, withToolSearch } from '../lib/tool-search'
 import { withChatPersona, samplingPresetFor, speakerCustomParams, speakerPersonaFor } from '../lib/chat-persona'
 import { injectPersonaNote, noteTokens, personaNoteOf } from '../lib/persona-note'
@@ -1995,7 +1995,7 @@ export function useAgentChat() {
                 toolSelectionOpts(!!settings.smallModelMode, (texts) => generateEmbeddings(texts, undefined, { purpose: 'tool-selection' })),
                 phoneToolCtx, SMALL_MODEL_MAX_TOOLS,
               ),
-              ...(compactRun ? { maxTools: COMPACT_MAX_TOOLS } : {}),
+              ...(compactRun ? { maxTools: COMPACT_MAX_TOOLS, prefer: COMPACT_PREFER } : {}),
               reaText,
             },
           ), planAllowed), toolRegistry.getAll())

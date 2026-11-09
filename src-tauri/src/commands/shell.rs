@@ -28,6 +28,23 @@ fn workspace_cwd(chat_id: Option<&str>) -> PathBuf {
         .join(crate::commands::agent::sanitize_chat_slug(chat_id.unwrap_or("default")))
 }
 
+/// The folder a command runs in. The tool tells the model that `cwd` is
+/// "relative to the workspace", so a relative one is joined onto the
+/// workspace; it used to be checked against the app's own process folder,
+/// failed there, and the command ran in the workspace root instead of the
+/// subfolder the model asked for (C59 bench, 2026-11-09). An absolute cwd
+/// that exists is used as is; anything that is not a folder falls back to
+/// the workspace.
+pub(crate) fn cwd_in_workspace(cwd: Option<&str>, base: &Path) -> PathBuf {
+    match cwd.map(str::trim).filter(|s| !s.is_empty()).map(Path::new) {
+        Some(p) => {
+            let p = if p.is_absolute() { p.to_path_buf() } else { base.join(p) };
+            if p.is_dir() { p } else { base.to_path_buf() }
+        }
+        None => base.to_path_buf(),
+    }
+}
+
 /// How much of a command's output travels back to the model. Anything past this
 /// is still read off the pipe — it has to be, or the child blocks — but dropped.
 const MAX_CAPTURE: usize = 256 * 1024;
@@ -953,19 +970,17 @@ fn shell_execute_sync(
     // back to the per-chat agent workspace (created if missing) so a relative
     // command never runs in the app's ambient cwd and scatters files into
     // ~/Documents (2026-06-04). Mirrors the file tools' path resolution.
-    let workdir: PathBuf = match cwd.as_ref().map(Path::new) {
-        Some(p) if p.is_dir() => p.to_path_buf(),
-        _ => match working_directory.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
-            // Folder workspace (the user's repo, from chatCtx.workingDirectory)
-            // wins over the per-chat sandbox for relative commands (#62).
-            Some(wd) => PathBuf::from(wd),
-            None => {
-                let w = workspace_cwd(chat_id.as_deref());
-                let _ = std::fs::create_dir_all(&w);
-                w
-            }
-        },
+    let base: PathBuf = match working_directory.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        // Folder workspace (the user's repo, from chatCtx.workingDirectory)
+        // wins over the per-chat sandbox for relative commands (#62).
+        Some(wd) => PathBuf::from(wd),
+        None => {
+            let w = workspace_cwd(chat_id.as_deref());
+            let _ = std::fs::create_dir_all(&w);
+            w
+        }
     };
+    let workdir = cwd_in_workspace(cwd.as_deref(), &base);
     if workdir.is_dir() {
         cmd.current_dir(&workdir);
     }
@@ -1711,5 +1726,26 @@ mod stranger_tests {
     fn children_of_the_same_second_or_later_are_its_own() {
         let table = [(Some(40), 1000), (Some(40), 1003), (None, 1), (Some(41), 2)];
         assert!(!is_a_stranger_under(40, 1000, table.into_iter()));
+    }
+}
+
+#[cfg(test)]
+mod cwd_in_workspace_tests {
+    use super::cwd_in_workspace;
+
+    #[test]
+    fn a_relative_cwd_lands_inside_the_workspace() {
+        let ws = std::env::temp_dir().join(format!("lu-cwd-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(ws.join("fotos")).unwrap();
+        assert_eq!(cwd_in_workspace(Some("fotos"), &ws), ws.join("fotos"));
+        assert_eq!(cwd_in_workspace(Some(" fotos "), &ws), ws.join("fotos"));
+        // Not a folder there: the workspace, never the app's own folder.
+        assert_eq!(cwd_in_workspace(Some("fehlt"), &ws), ws);
+        assert_eq!(cwd_in_workspace(None, &ws), ws);
+        assert_eq!(cwd_in_workspace(Some(""), &ws), ws);
+        // An absolute folder is used as it is.
+        let abs = ws.join("fotos");
+        assert_eq!(cwd_in_workspace(abs.to_str(), &ws), abs);
+        let _ = std::fs::remove_dir_all(&ws);
     }
 }

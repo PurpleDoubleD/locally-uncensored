@@ -135,3 +135,39 @@ describe('briefs from the tool itself and from foreign servers', () => {
     expect(briefFor({ name: 'y', description: 'Read <tools> now', source: 'external' })).not.toContain('<tools>')
   })
 })
+
+describe('the compact list keeps the tools for this computer (C59 bench, AG3)', () => {
+  const full = [
+    ...CATALOG,
+    tool('file_edit', 'Change part of a file.'),
+    tool('todo_write', 'The plan.'),
+    tool('file_list', 'List a folder.'),
+    tool('file_search', 'Search file contents.'),
+    tool('web_search', 'Search the web.'),
+    tool('web_fetch', 'Read a web page.'),
+    tool('screenshot', 'Take a screenshot.'),
+    tool('clipboard_read', 'Read the clipboard.'),
+    tool('process_list', 'List running processes.'),
+    tool('system_info', 'Show system info.'),
+    tool('image_describe', 'Describe an image file.'),
+  ]
+  // An embedding that likes media and web tools best: the ranking that left
+  // shell_execute out of "rename these photos" on the 9B.
+  const embed = async (texts: string[]) => texts.map((t) => (/image|video|web|screenshot|picture|clip/i.test(t) || /Benenne/.test(t) ? [1, 0] : [0, 1]))
+  const perms = Object.fromEntries(full.map((t) => [t.category, 'auto'])) as never
+
+  it('rename photos: shell_execute, file_list and file_search survive the cap', async () => {
+    const { selectRelevantToolsAsync } = await import('../tool-selection')
+    const { COMPACT_PREFER } = await import('../agent-profile')
+    const got = (await selectRelevantToolsAsync('Benenne alle IMG_*.jpg in fotos/ um', full, perms, {
+      embed, embeddingThreshold: 0, maxTools: COMPACT_MAX_TOOLS, prefer: COMPACT_PREFER,
+    })).map((t) => t.name)
+    expect(got.length).toBeLessThanOrEqual(COMPACT_MAX_TOOLS)
+    for (const n of ['shell_execute', 'file_list', 'file_search', ...ALWAYS_INCLUDE]) expect(got, n).toContain(n)
+  })
+
+  it('tool_search finds the shell by its job', () => {
+    expect(searchTools('rename files in directory', [...CATALOG, tool('file_list', 'List a folder.')]).map((t) => t.name)).toContain('shell_execute')
+    expect(searchTools('move or delete a file', CATALOG).map((t) => t.name)).toContain('shell_execute')
+  })
+})
