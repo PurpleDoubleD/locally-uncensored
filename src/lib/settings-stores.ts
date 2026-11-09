@@ -11,12 +11,14 @@ import { useVoiceStore } from '../stores/voiceStore'
 import { useCreateStore } from '../stores/createStore'
 import { useMemoryStore } from '../stores/memoryStore'
 import { usePermissionStore } from '../stores/permissionStore'
+import { useModelStore } from '../stores/modelStore'
+import { useSettingsAuditStore } from '../stores/settingsAuditStore'
 import { backendCall, isTauri } from '../api/backend'
 import { normalizeGpuRoles } from './gpu-roles'
 import type { GpuRef } from '../types/settings'
 import type { ToolCategory, PermissionLevel } from '../api/mcp/types'
 import {
-  patchFor, readValue, sameValue, setKnownGpuCards, storeOf, type CatalogEntry, type KnownGpuCard,
+  findEntry, patchFor, readValue, sameValue, setKnownGpuCards, storeOf, type CatalogEntry, type KnownGpuCard,
 } from './settings-catalog'
 
 const field = (entry: CatalogEntry) => entry.key.slice(entry.key.indexOf('.') + 1)
@@ -72,7 +74,7 @@ export function refuseValue(entry: CatalogEntry, value: unknown): string | null 
     const hits = list.filter((m) => m.name.toLowerCase() === want || m.name.toLowerCase().includes(want))
     if (hits.length === 1) return null
     const names = list.slice(0, 8).map((m) => m.name).join(', ')
-    if (list.length === 0) return 'no model of this kind is installed (or Create has not listed them yet: open Create once)'
+    if (list.length === 0) return 'no model of this kind is installed, or Create has not listed them: open Create once'
     return hits.length === 0 ? `not installed. Installed: ${names}` : `ambiguous, matches ${hits.length}: ${hits.slice(0, 5).map((m) => m.name).join(', ')}`
   }
   return null
@@ -169,4 +171,39 @@ export function useAnyEntryStore(): number {
   const d = useMemoryStore((s) => s.settings)
   const e = usePermissionStore((s) => s.globalPermissions)
   return [a, b, c, d, e].length
+}
+
+/** The chat model that asks, for the log. */
+export function activeModelName(): string | null {
+  return useModelStore.getState().activeModel ?? null
+}
+
+/** One change as the mark under a tool result carries it (settings-tools.ts). */
+export interface SettingChangeMark { key: string; from: unknown; to: unknown }
+
+/** Undo from the card: back to the value before, through the same catalog. */
+export function undoSettingChange(change: SettingChangeMark): boolean {
+  const entry = findEntry(change.key)
+  if (!entry) return false
+  writeEntry(entry, change.from)
+  useSettingsAuditStore.getState().record({
+    conversationId: null, model: null, kind: 'setting', key: entry.key, label: entry.label,
+    from: entry.show(change.to), to: entry.show(change.from), outcome: 'undone',
+  })
+  return true
+}
+
+/** Apply a change again (the card's "Apply again"). */
+export function redoSettingChange(change: SettingChangeMark): boolean {
+  const entry = findEntry(change.key)
+  if (!entry) return false
+  writeEntry(entry, change.to)
+  return true
+}
+
+/** Where the value stands now against the change on the card. */
+export function settingChangeState(change: SettingChangeMark): 'applied' | 'undone' | 'moved' {
+  const entry = findEntry(change.key)
+  if (!entry) return 'moved'
+  return entryState(entry, change.from, change.to)
 }

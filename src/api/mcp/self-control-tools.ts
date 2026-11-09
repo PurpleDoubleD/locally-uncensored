@@ -19,168 +19,44 @@
 // the remote, delete anything, install a custom node, MCP server or plugin.
 
 import { v4 as uuid } from 'uuid'
-import type { MCPToolDefinition, ToolArgs } from './types'
-import type { ToolRegistry } from './tool-registry'
+import type { ToolArgs } from './types'
 import { afterAgentRun, type AgentRunContext } from '../agent-context'
-import {
-  SET_SETTINGS, SET_SETTINGS_MAX, LU_MODELS, LU_SERVICE, LU_DOWNLOAD, LU_OPEN_SETTINGS,
-} from '../../lib/settings-tool-names'
-import { executeSetSettings } from './settings-tools'
 import { useSettingsConfirmStore } from '../../stores/settingsConfirmStore'
 import { useSettingsAuditStore } from '../../stores/settingsAuditStore'
 import { useModelStore } from '../../stores/modelStore'
 import { useSettingsStore } from '../../stores/settingsStore'
-import { useLocalApiStore } from '../../stores/localApiStore'
-import { useRemoteStore } from '../../stores/remoteStore'
-import { useDownloadStore } from '../../stores/downloadStore'
 import { useUIStore } from '../../stores/uiStore'
 import { backendCall, isTauri } from '../backend'
-import { activateBuiltinModel, stopBundledEngine } from '../engine'
-import { checkDownloadSpace, installBundleComplete, startChatLinkDownload } from '../discover'
-import {
-  getAudioBundles, getImageBundles, getLipsyncBundles, getMotionBundles, getUpscaleBundles, getVideoBundles,
-  type ModelBundle,
-} from '../model-bundles'
 import { getProviderIdFromModel } from '../providers/model-name'
-import { isManagedBuiltinSlot } from '../builtin-ensure'
 import { checkSelfControl, noteCard, turnTextOf } from '../../lib/self-control-policy'
 import { taintLabel } from '../../lib/run-taint'
-import { SETTINGS_AREAS, isArea, type SettingsArea } from '../../lib/settings-catalog'
+import { isArea, type SettingsArea } from '../../lib/settings-catalog'
 import type { SettingsTab } from '../../lib/settings-reset'
+import type { ModelBundle } from '../model-bundles'
 
-// ── Schemas ──────────────────────────────────────────────────────
-
-// Defined here, not in settings-tools.ts: this module registers it, and a
-// definition imported across the settings-tools ↔ stores ↔ mcp cycle can be
-// undefined at registration time when settings-tools is loaded first.
-const SET_SETTINGS_TOOL: MCPToolDefinition = {
-  name: SET_SETTINGS,
-  description: `Change several LU app settings at once (up to ${SET_SETTINGS_MAX}) on one card; the user can untick each. `
-    + 'Use it instead of several set_setting calls.',
-  brief: 'Change several LU app settings on one confirmation card.',
-  inputSchema: {
-    type: 'object',
-    properties: {
-      changes: {
-        type: 'array',
-        description: 'The changes, e.g. [{"key":"temperature","value":0.6},{"key":"builtinEngine.ctx","value":16384}].',
-        items: {
-          type: 'object',
-          properties: {
-            key: { type: 'string' },
-            value: { type: ['string', 'number', 'boolean'] },
-          },
-          required: ['key', 'value'],
-        },
-      },
-    },
-    required: ['changes'],
-  },
-  category: 'system',
-  source: 'builtin',
-}
-
-
-const LU_MODELS_TOOL: MCPToolDefinition = {
-  name: LU_MODELS,
-  description: 'LU chat models. action list: installed chat models. status: the active one. '
-    + 'switch: change the chat model (name from list); it happens when this answer is done, after the user confirms.',
-  brief: 'List LU chat models or switch the active chat model.',
-  inputSchema: {
-    type: 'object',
-    properties: {
-      action: { type: 'string', enum: ['list', 'status', 'switch'], description: 'list, status or switch.' },
-      name: { type: 'string', description: 'For switch: the model name, or a unique part of it.' },
-    },
-    required: ['action'],
-  },
-  category: 'system',
-  source: 'builtin',
-}
-
-const LU_SERVICE_TOOL: MCPToolDefinition = {
-  name: LU_SERVICE,
-  description: 'Start, stop or restart a part of LU: comfyui, engine (LU Engine, e.g. after engine settings), '
-    + 'local_api (OpenAI-compatible API on this computer only), remote (phone access in the home network). '
-    + 'status needs no card; every other action waits for the user\'s card.',
-  brief: 'Start, stop or restart ComfyUI, LU Engine, the local API or the phone remote.',
-  inputSchema: {
-    type: 'object',
-    properties: {
-      service: { type: 'string', enum: ['comfyui', 'engine', 'local_api', 'remote'] },
-      action: { type: 'string', enum: ['status', 'start', 'stop', 'restart'] },
-    },
-    required: ['service', 'action'],
-  },
-  category: 'system',
-  source: 'builtin',
-}
-
-const LU_DOWNLOAD_TOOL: MCPToolDefinition = {
-  name: LU_DOWNLOAD,
-  description: 'Models from the LU catalog for Create (image, video, audio, upscale). action search: find by words. '
-    + 'start: download one by its id from search. status: running downloads. '
-    + 'start_link: a .safetensors or .gguf link to huggingface.co or civitai.com that the user pasted in their own message, into a ComfyUI model folder.',
-  brief: 'Search the LU model catalog and download a model, after the user confirms.',
-  inputSchema: {
-    type: 'object',
-    properties: {
-      action: { type: 'string', enum: ['search', 'start', 'status', 'start_link'] },
-      query: { type: 'string', description: 'For search.' },
-      id: { type: 'string', description: 'For start: the id search returned.' },
-      url: { type: 'string', description: 'For start_link: the link exactly as the user sent it.' },
-      folder: { type: 'string', description: 'For start_link: checkpoints, diffusion_models, unet, loras, vae, text_encoders, clip, clip_vision, upscale_models or controlnet.' },
-      filename: { type: 'string', description: 'For start_link: the file name, if the link does not end in it.' },
-    },
-    required: ['action'],
-  },
-  category: 'system',
-  source: 'builtin',
-}
-
-const LU_OPEN_SETTINGS_TOOL: MCPToolDefinition = {
-  name: LU_OPEN_SETTINGS,
-  description: 'Open LU\'s Settings at the place for an area, so the user can change what only they may change '
-    + '(keys, permissions looser, remote, paths, MCP). Changes nothing.',
-  brief: 'Open LU Settings at a given area for the user.',
-  inputSchema: {
-    type: 'object',
-    properties: {
-      area: { type: 'string', description: `An area (${Object.keys(SETTINGS_AREAS).join(', ')}) or one of keys, remote, local_api, mcp, comfyui, models.` },
-    },
-    required: ['area'],
-  },
-  category: 'system',
-  source: 'builtin',
-}
-
-export const SELF_CONTROL_TOOLS: MCPToolDefinition[] = [SET_SETTINGS_TOOL, LU_MODELS_TOOL, LU_SERVICE_TOOL, LU_DOWNLOAD_TOOL, LU_OPEN_SETTINGS_TOOL]
-
-// ── Shared ───────────────────────────────────────────────────────
-
-/** The line an action puts under its answer, for the card that stays. */
-const ACTION_MARK = /<!-- lu-action (\{.*?\}) -->/
-
-export interface SelfControlAction {
-  kind: 'model' | 'service' | 'download'
-  title: string
-  /** For a model switch: the model before and after, for Undo. */
-  from?: string | null
-  to?: string | null
-}
-
-export function parseSelfControlAction(result: string | null | undefined): SelfControlAction | null {
-  const m = typeof result === 'string' ? ACTION_MARK.exec(result) : null
-  if (!m) return null
-  try {
-    const v = JSON.parse(m[1]) as Partial<SelfControlAction>
-    return typeof v.kind === 'string' && typeof v.title === 'string' ? (v as SelfControlAction) : null
-  } catch {
-    return null
+/**
+ * The heavy parts load on first use, not with the tool registry: the engine,
+ * the downloader and the bundle catalog pull half the app (and code that runs
+ * at import time) into every module that only registers these tools.
+ */
+async function deps() {
+  const [localApi, remote, downloads, engine, discover, bundles, ensure] = await Promise.all([
+    import('../../stores/localApiStore'), import('../../stores/remoteStore'), import('../../stores/downloadStore'),
+    import('../engine'), import('../discover'), import('../model-bundles'), import('../builtin-ensure'),
+  ])
+  return {
+    useLocalApiStore: localApi.useLocalApiStore, useRemoteStore: remote.useRemoteStore, useDownloadStore: downloads.useDownloadStore,
+    activateBuiltinModel: engine.activateBuiltinModel, stopBundledEngine: engine.stopBundledEngine,
+    checkDownloadSpace: discover.checkDownloadSpace, installBundleComplete: discover.installBundleComplete,
+    startChatLinkDownload: discover.startChatLinkDownload, bundles, isManagedBuiltinSlot: ensure.isManagedBuiltinSlot,
   }
 }
 
-const markOf = (a: SelfControlAction) => `<!-- lu-action ${JSON.stringify(a)} -->`
+// The schemas, the result mark and the registration live in
+// self-control-defs.ts, which imports nothing heavy; this module is loaded on
+// the first call.
+import { markOf } from './self-control-mark'
+export { parseSelfControlAction, type SelfControlAction } from './self-control-mark'
 
 const lower = (s: unknown) => String(s ?? '').toLowerCase()
 const has = (text: string, words: readonly string[]) => { const t = lower(text); return words.some((w) => t.includes(w)) }
@@ -232,14 +108,14 @@ export async function executeLuModels(args: ToolArgs, run?: AgentRunContext, sig
   const active = useModelStore.getState().activeModel
   if (action === 'list') {
     const list = chatModels()
-    if (list.length === 0) return 'No chat model is installed or listed yet.'
+    if (list.length === 0) return 'No chat model is installed or listed.'
     const shown = list.slice(0, 30).map((m) => `${m.name === active ? '* ' : '  '}${m.name}`)
     return [`Chat models (* = active), ${list.length}:`, ...shown, ...(list.length > 30 ? [`(+${list.length - 30} more)`] : [])].join('\n')
   }
   if (action === 'status') {
     if (!active) return 'No chat model is selected.'
     const provider = getProviderIdFromModel(active)
-    const engine = provider === 'openai' && isManagedBuiltinSlot() ? 'LU Engine' : String(provider)
+    const engine = provider === 'openai' && (await deps()).isManagedBuiltinSlot() ? 'LU Engine' : String(provider)
     return `Active chat model: ${active} (${engine}).`
   }
   if (action !== 'switch') return 'Error: action is list, status or switch.'
@@ -270,10 +146,6 @@ export async function executeLuModels(args: ToolArgs, run?: AgentRunContext, sig
     + `The user can undo it on the card.\n${markOf({ kind: 'model', title, from: active, to: target })}`
 }
 
-/** Undo of a model switch from the card. */
-export function undoModelSwitch(a: SelfControlAction): void {
-  if (a.kind === 'model' && a.from) useModelStore.getState().setActiveModel(a.from)
-}
 
 // ── lu_service ───────────────────────────────────────────────────
 
@@ -287,12 +159,13 @@ async function comfyRunning(): Promise<boolean | null> {
   try { return !!(await backendCall<{ running?: boolean }>('comfyui_status'))?.running } catch { return null }
 }
 
-function luEngineActive(): boolean {
+async function luEngineActive(): Promise<boolean> {
   const active = useModelStore.getState().activeModel
-  return !!active && getProviderIdFromModel(active) === 'openai' && isManagedBuiltinSlot()
+  return !!active && getProviderIdFromModel(active) === 'openai' && (await deps()).isManagedBuiltinSlot()
 }
 
 export async function executeLuService(args: ToolArgs, run?: AgentRunContext, signal?: AbortSignal): Promise<string> {
+  const { useLocalApiStore, useRemoteStore, activateBuiltinModel, stopBundledEngine } = await deps()
   const service = lower(args?.service)
   const action = lower(args?.action)
   if (!['comfyui', 'engine', 'local_api', 'remote'].includes(service)) return 'Error: service is comfyui, engine, local_api or remote.'
@@ -300,7 +173,7 @@ export async function executeLuService(args: ToolArgs, run?: AgentRunContext, si
 
   if (action === 'status') {
     if (service === 'comfyui') { const r = await comfyRunning(); return r === null ? 'ComfyUI: unknown here.' : `ComfyUI is ${r ? 'running' : 'stopped'}.` }
-    if (service === 'engine') return luEngineActive() ? `LU Engine serves the chat model ${useModelStore.getState().activeModel}.` : 'LU Engine does not serve the active chat model.'
+    if (service === 'engine') return await luEngineActive() ? `LU Engine serves the chat model ${useModelStore.getState().activeModel}.` : 'LU Engine does not serve the active chat model.'
     if (service === 'local_api') { const s = useLocalApiStore.getState(); return `Local API is ${s.laeuft ? 'running' : 'stopped'}${s.lan ? ', LAN access is on' : ', this computer only'}.` }
     const r = useRemoteStore.getState()
     return `Phone remote is ${r.enabled ? 'on' : 'off'}${r.tunnelActive ? ', reachable from the internet' : ''}.`
@@ -326,7 +199,7 @@ export async function executeLuService(args: ToolArgs, run?: AgentRunContext, si
   }
 
   if (service === 'engine') {
-    if (!luEngineActive()) return 'LU Engine does not serve the active chat model, so there is nothing to restart. Nothing changed.'
+    if (!await luEngineActive()) return 'LU Engine does not serve the active chat model, so there is nothing to restart. Nothing changed.'
     if (action === 'start') return 'LU Engine starts by itself with the next message. Nothing changed.'
     const model = useModelStore.getState().activeModel as string
     const title = action === 'stop' ? 'Stop LU Engine' : 'Restart LU Engine with the current engine settings'
@@ -364,7 +237,7 @@ export async function executeLuService(args: ToolArgs, run?: AgentRunContext, si
       return 'Refused: the local API is set to answer the network (LAN). With that on, only the user starts it, in Settings → Voice & Remote → Local API. Nothing changed. Tell the user so.'
     }
     if (!s.token) {
-      return 'Refused: the local API has no access token yet. The user creates one in Settings → Voice & Remote → Local API (lu_open_settings area local_api). Nothing changed.'
+      return 'Refused: the local API has no access token. The user creates one in Settings → Voice & Remote → Local API (lu_open_settings area local_api). Nothing changed.'
     }
     const title = action === 'restart' ? 'Restart the local API' : 'Start the local API'
     const refused = await confirmAction(run, signal, {
@@ -426,7 +299,8 @@ export async function executeLuService(args: ToolArgs, run?: AgentRunContext, si
 const DOWNLOAD_WORDS = ['download', 'herunterlad', 'runterlad', 'herunter', 'install', 'hol ', 'besorg', 'get ']
 const LINK_FOLDERS = ['checkpoints', 'diffusion_models', 'unet', 'loras', 'vae', 'text_encoders', 'clip', 'clip_vision', 'upscale_models', 'controlnet']
 
-function catalog(): { kind: string; b: ModelBundle }[] {
+async function catalog(): Promise<{ kind: string; b: ModelBundle }[]> {
+  const { getImageBundles, getVideoBundles, getAudioBundles, getLipsyncBundles, getMotionBundles, getUpscaleBundles } = (await deps()).bundles
   const out: { kind: string; b: ModelBundle }[] = []
   const add = (kind: string, list: ModelBundle[]) => { for (const b of list) out.push({ kind, b }) }
   add('image', getImageBundles()); add('video', getVideoBundles()); add('audio', getAudioBundles())
@@ -434,9 +308,9 @@ function catalog(): { kind: string; b: ModelBundle }[] {
   return out
 }
 
-function findBundle(id: string): { kind: string; b: ModelBundle }[] {
+async function findBundle(id: string): Promise<{ kind: string; b: ModelBundle }[]> {
   const want = id.trim().toLowerCase()
-  const all = catalog()
+  const all = await catalog()
   const exact = all.filter((x) => x.b.name.toLowerCase() === want)
   return exact.length ? exact : all.filter((x) => x.b.name.toLowerCase().includes(want))
 }
@@ -449,10 +323,11 @@ function fileNameOfLink(url: string): string {
 }
 
 export async function executeLuDownload(args: ToolArgs, run?: AgentRunContext, signal?: AbortSignal): Promise<string> {
+  const { useDownloadStore, checkDownloadSpace, installBundleComplete, startChatLinkDownload } = await deps()
   const action = lower(args?.action)
   if (action === 'search') {
     const words = lower(args?.query).split(/[^a-z0-9.äöüß]+/).filter((w) => w.length >= 2)
-    const hits = catalog().filter(({ b }) => {
+    const hits = (await catalog()).filter(({ b }) => {
       const hay = `${b.name} ${b.tags.join(' ')} ${b.description}`.toLowerCase()
       return words.length === 0 || words.every((w) => hay.includes(w))
     }).slice(0, 10)
@@ -472,7 +347,7 @@ export async function executeLuDownload(args: ToolArgs, run?: AgentRunContext, s
   if (action === 'start') {
     const id = String(args?.id ?? '').trim()
     if (!id) return 'Error: id is missing. Call lu_download with action search first.'
-    const hits = findBundle(id)
+    const hits = await findBundle(id)
     if (hits.length !== 1) {
       return hits.length === 0 ? `Error: no catalog entry "${id}". Call lu_download search. Nothing changed.`
         : `Error: "${id}" matches ${hits.length}: ${hits.slice(0, 5).map((h) => h.b.name).join(', ')}. Say which. Nothing changed.`
@@ -550,6 +425,7 @@ const OPEN_AT: Record<string, SettingsTab> = {
 
 export async function executeLuOpenSettings(args: ToolArgs): Promise<string> {
   const area = lower(args?.area).trim().replace(/[\s-]+/g, '_')
+  if (!area) return 'Error: area is missing, e.g. keys, permissions, remote, local_api, mcp, comfyui. Nothing opened.'
   const tab: SettingsTab = OPEN_AT[area] ?? (isArea(area) ? tabOfArea(area) : 'general')
   useUIStore.getState().openSettingsAt(area === 'comfyui' ? { tab, section: 'comfyui' } : { tab })
   return `Opened Settings → ${tab}. Nothing changed; the user changes it there.`
@@ -562,12 +438,3 @@ function tabOfArea(a: SettingsArea): SettingsTab {
   return 'general'
 }
 
-// ── Registration ─────────────────────────────────────────────────
-
-export function registerSelfControlTools(registry: ToolRegistry): void {
-  registry.registerBuiltin(SET_SETTINGS_TOOL, (a, run, signal) => executeSetSettings(a, run, signal))
-  registry.registerBuiltin(LU_MODELS_TOOL, (a, run, signal) => executeLuModels(a, run, signal))
-  registry.registerBuiltin(LU_SERVICE_TOOL, (a, run, signal) => executeLuService(a, run, signal))
-  registry.registerBuiltin(LU_DOWNLOAD_TOOL, (a, run, signal) => executeLuDownload(a, run, signal))
-  registry.registerBuiltin(LU_OPEN_SETTINGS_TOOL, (a) => executeLuOpenSettings(a))
-}

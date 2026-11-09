@@ -16,7 +16,7 @@ import { ComputerChatPermission, useComputerChatAsk } from '../computer/Computer
 import { SettingChangeAsk, SettingChangeDone, SelfControlDone } from './SettingChangeCard'
 import { useSettingsConfirmStore, pendingForCall } from '../../stores/settingsConfirmStore'
 import { parseSettingChanges } from '../../api/mcp/settings-tools'
-import { parseSelfControlAction } from '../../api/mcp/self-control-tools'
+import { parseSelfControlAction } from '../../api/mcp/self-control-defs'
 import { WorkflowCardAsk, WorkflowCardDone } from './WorkflowInstallCard'
 import { useWorkflowCardStore, workflowCardForCall } from '../../stores/workflowInstallConfirmStore'
 import { parseWorkflowMark } from '../../api/mcp/workflow-mark'

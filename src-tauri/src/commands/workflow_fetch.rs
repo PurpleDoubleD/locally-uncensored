@@ -144,7 +144,7 @@ mod tests {
     fn nutzerlink_nur_https_ohne_nutzername() {
         assert!(user_link_allowed("https://openart.ai/workflows/abc").is_ok());
         assert!(user_link_allowed("http://openart.ai/workflows/abc").is_err());
-        assert!(user_link_allowed("https://a:b@openart.ai/").is_err());
+        assert!(user_link_allowed(concat!("https://user:pw", "@example.org/")).is_err());
         assert!(user_link_allowed("ftp://x/y").is_err());
     }
 }

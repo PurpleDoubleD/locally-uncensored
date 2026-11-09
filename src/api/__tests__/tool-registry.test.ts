@@ -42,12 +42,17 @@ describe('AGENT_TOOL_DEFS', () => {
     // Prompt, der nicht nach Einstellungen fragt: im Chat und in Agent nur
     // ueber SETTINGS_KEYWORDS, in Code hinter dem Tor (GATE_KEYWORDS).
     //
-    // 3.1.0 (C60-S5): +4, workflow_find/_inspect/_install/_assign. Kein
+    // 3.1.0 (C60): +5, set_settings, lu_models, lu_service, lu_download und
+    // lu_open_settings. LU bedient sich selbst; eine Aktion (Modell, Dienst,
+    // Download) hat Nebenwirkungen und eine eigene Karte und passt deshalb
+    // nicht in set_setting. Alle fuenf stehen hinter demselben Tor wie
+    // get_settings und fahren nur auf einer Nachricht ueber LU selbst mit.
+    // 3.1.0 (C60-S5): +4 (zusammen mit C60: 28), workflow_find/_inspect/_install/_assign. Kein
     // vorhandenes Werkzeug passt: run_workflow startet LUs eigene Ablaeufe,
     // set_setting aendert Werte, das hier holt fremde Dateien mit Ampel und
     // Karte. Sie fahren nur auf einer Nachricht ueber einen Workflow mit
     // (WORKFLOW_GATE_WORDS), nie im Plain Chat, nie im Unteragenten.
-    expect(AGENT_TOOL_DEFS).toHaveLength(23)
+    expect(AGENT_TOOL_DEFS).toHaveLength(28)
   })
 
   const expectedTools = [
@@ -101,11 +106,11 @@ describe('AGENT_TOOL_DEFS', () => {
     // 3.0.8 (A11): get_settings liest nur, set_setting fragt mit seiner
     // eigenen Karte (alt -> neu), auch im Bypass. Eine zweite Rueckfrage
     // davor fragte doppelt, wie bei create_order.
-    // 3.1.0 (C60-S5): die vier Workflow-Werkzeuge aus demselben Grund: find
-    // und inspect lesen nur (wie web_fetch), install und assign fragen mit
-    // ihrer eigenen Karte mit Ampel, auch im Bypass.
+    // 3.1.0 (C60): die fuenf Selbststeuerungswerkzeuge aus demselben Grund
+    // wie set_setting: jede Aenderung fragt mit ihrer eigenen Karte.
     expect(autoNames).toEqual([
-      'check_tasks', 'get_settings', 'message_agent', 'set_setting', 'todo_write', 'web_fetch', 'web_search',
+      'check_tasks', 'get_settings', 'lu_download', 'lu_models', 'lu_open_settings', 'lu_service', 'message_agent',
+      'set_setting', 'set_settings', 'todo_write', 'web_fetch', 'web_search',
       'workflow_assign', 'workflow_find', 'workflow_inspect', 'workflow_install',
     ])
   })

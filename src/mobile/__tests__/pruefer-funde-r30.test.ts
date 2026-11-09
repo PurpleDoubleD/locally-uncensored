@@ -127,6 +127,8 @@ const ALLOWED: readonly Allowed[] = [
         'Three uncensored models that were missing', 'Voice is a new surface in the main navigation', 'Computer control is in beta: it is new and not proven in every app yet',
         'Speech has a Microphone field', 'the Restart Now button closed the app on Linux', 'When Create runs on ComfyUI, Image, Edit and every video tab have a character chip', 'The Workflows view takes a workflow saved with Save or Export in ComfyUI', 'On your own machine the reference strip takes up to nine images', 'Use locally on the cloud character shelf saves a Z Image character', 'The reference strip in Edit has a Trained characters row', 'local character training has a second setting, Low VRAM', 'The Frames slider ran from 1 to 120 for every local video model', 'With a Wan 2.1 VACE model installed, Animate uses your picture', 'Import from other chatbots takes the .zip', 'Adding KoboldCpp while LM Studio or the LU Engine is on', 'Plugins has a new switch, REA', 'have a Check files button', 'KoboldCpp behind its Ollama API sends no context length', 'A size picked in the context picker is now saved for that model', 'LU estimated every text at four characters per token', 'LU counted a digit at a quarter of a token', 'Signed out, or with an account that cannot use them yet', 'The Mac parts of this release have not been clicked through'],
       'lib/chat-attachments.ts': ['[chat-attachments] attachment write failed'],
+      // C60 (3.1.0): reached through the self-control tools (lu_service), which a phone never registers (MOBILE_UNBUILT_TOOLS).
+      'lib/local-api.ts': ['none yet'],
     },
   },
   {

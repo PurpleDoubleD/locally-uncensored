@@ -1,6 +1,6 @@
 import { Fragment, useState, type ReactNode } from 'react'
 import { parseSettingChange } from '../../api/mcp/settings-tools'
-import { parseSelfControlAction } from '../../api/mcp/self-control-tools'
+import { parseSelfControlAction } from '../../api/mcp/self-control-defs'
 import { AnimatePresence, motion } from 'framer-motion'
 import { AlertCircle, Check, ChevronDown, Wrench } from 'lucide-react'
 import type { AgentBlock, AgentToolCall } from '../../types/agent-mode'

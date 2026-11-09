@@ -81,6 +81,12 @@ const PFLICHT: Record<string, Record<string, string>> = {
   message_agent: { task_id: 'task-1-abcdef', message: 'halte dich kurz' },
   // A11: ohne Schluessel keine Karte und keine Aenderung.
   set_setting: { key: 'theme' },
+  // C60: die Aktionen sagen ohne ihre Pflichtangabe, was fehlt, und beruehren
+  // dabei kein Backend.
+  lu_models: { action: 'list' },
+  lu_service: { service: 'comfyui', action: 'status' },
+  lu_download: { action: 'status' },
+  lu_open_settings: { area: 'keys' },
   // C60-S5: ohne Fund keine Pruefung, ohne Fund und Modell keine Karte.
   workflow_inspect: { id: 'civ1' },
   workflow_install: { id: 'civ1' },

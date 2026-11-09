@@ -1,10 +1,10 @@
 import { useState } from 'react'
 import { AlertTriangle, Check, RotateCcw, ShieldAlert, SlidersHorizontal, X, Zap } from 'lucide-react'
 import { useSettingsConfirmStore, type SettingChangeRequest } from '../../stores/settingsConfirmStore'
-import { redoSettingChange, settingChangeState, undoSettingChange, type SettingChange } from '../../api/mcp/settings-tools'
-import { undoModelSwitch, type SelfControlAction } from '../../api/mcp/self-control-tools'
+import type { SettingChange } from '../../api/mcp/settings-tools'
+import type { SelfControlAction } from '../../api/mcp/self-control-defs'
 import { findEntry } from '../../lib/settings-catalog'
-import { useAnyEntryStore } from '../../lib/settings-stores'
+import { redoSettingChange, settingChangeState, undoSettingChange, useAnyEntryStore } from '../../lib/settings-stores'
 import { useModelStore } from '../../stores/modelStore'
 
 const box = 'mt-1 mb-1.5 max-w-xl rounded-lg border border-gray-200 dark:border-white/[0.1] bg-gray-50 dark:bg-white/[0.03]'
@@ -156,7 +156,7 @@ export function SelfControlDone({ action }: { action: SelfControlAction }) {
       <span className="t-body text-gray-900 dark:text-gray-100">{action.title}</span>
       {undoable && (
         <button type="button" data-testid="self-control-undo" className={btnNo}
-          onClick={(e) => { e.stopPropagation(); undoModelSwitch(action) }}>
+          onClick={(e) => { e.stopPropagation(); if (action.from) useModelStore.getState().setActiveModel(action.from) }}>
           <RotateCcw size={10} /> Back to {action.from}
         </button>
       )}
