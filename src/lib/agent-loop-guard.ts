@@ -118,6 +118,11 @@ const EXEC_FAIL_HALT_AT = 6
 const DECLINED_STEER_AT = 3
 const DECLINED_HALT_AT = 6
 
+/** Scrolling moves the page with the same arguments each time (P-L, C53). */
+const SCROLL_TOOLS = new Set<string>(['browser_scroll'])
+const SCROLL_STEER_AT = 10
+const SCROLL_HALT_AT = 20
+
 /** Tools whose args carry a shell command whose first token names the work. */
 const EXEC_TOOLS = new Set<string>(['shell_execute', 'shell_execute_background'])
 
@@ -166,6 +171,9 @@ export class AgentLoopGuard {
   private steeredKeys = new Set<string>()
   /** Detectors 1, 2, 4 (in a row): the signature that has been warned once. */
   private consecutiveSteered = false
+  /** Batches of nothing but browser_scroll in a row (P-L, C53). */
+  private scrollStreak = 0
+  private scrollSteered = false
   private windowSteered = new Set<string>()
   private narrationRowSteered = false
   private lastNarration = ''
@@ -201,6 +209,26 @@ export class AgentLoopGuard {
     opts: { trimmedReadKeys?: ReadonlySet<string> } = {},
   ): LoopGuardVerdict {
     if (!this.enabled || calls.length === 0) return { action: 'ok' }
+    // browser_scroll (P-L, C53) repeats its arguments by design: every call
+    // moves the page and its answer names the new position. A batch of
+    // nothing but scrolls is therefore not a repeat; it gets its own, wider
+    // count instead, so a model scrolling forever still meets the guard.
+    if (calls.every((c) => SCROLL_TOOLS.has(c.name))) {
+      this.scrollStreak++
+      if (this.scrollStreak >= SCROLL_HALT_AT) {
+        return { action: 'halt', reason: `${this.scrollStreak} scroll steps in a row without reading or doing anything else` }
+      }
+      if (this.scrollStreak >= SCROLL_STEER_AT && !this.scrollSteered) {
+        this.scrollSteered = true
+        return {
+          action: 'steer',
+          message: `You scrolled ${this.scrollStreak} times in a row. Use what the page has shown so far: answer, or open a better page. Scroll on only if the part you need is still below.`,
+        }
+      }
+      return { action: 'ok' }
+    }
+    this.scrollStreak = 0
+    this.scrollSteered = false
     const keys = calls.map((c) => `${c.name}|${c.args}`)
     const sig = [...keys].sort().join('||')
     const trimmed = opts.trimmedReadKeys
