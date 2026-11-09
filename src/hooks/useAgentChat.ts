@@ -48,7 +48,7 @@ import { stripVisionFeedbackMessages, reportMultimodalRefusal } from '../lib/vis
 import { log } from '../lib/logger'
 import { gatePlanTool, planToolAllowed } from '../lib/plan-gate'
 import { buildHermesToolPrompt, buildHermesToolResult, buildHermesToolCall, parseHermesToolCalls, stripToolCallTags, hasToolCallTags } from '../api/hermes-tool-calling'
-import { parseLooseToolCalls, stripMatchedCalls, stripToolCallText, repairToolCall } from '../lib/loose-tool-parse'
+import { parseLooseToolCalls, stripMatchedCalls, stripToolCallText, repairToolCall, toolCallsFromReasoning } from '../lib/loose-tool-parse'
 import { isMediaTool, mediaCallSucceeded } from '../lib/media-result'
 import { mediaTurnCaps, droppedMediaNote } from '../lib/media-turn-caps'
 import { isLocalModelByName } from '../api/agents/model-locality'
@@ -2446,6 +2446,16 @@ export function useAgentChat() {
             toolCalls = loose.calls.map((c) => ({ function: { name: c.name, arguments: c.arguments } }))
             turnContent = stripMatchedCalls(turnContent, loose.matched)
             log.info('agent.loose_tool_call_recovered', { count: toolCalls.length, names: toolCalls.map((t) => t.function.name) })
+          }
+        }
+
+        // C59 A3: the calls sat in the reasoning channel and the answer is
+        // empty (a server that took the model for a thinking model).
+        {
+          const fromReasoning = toolCallsFromReasoning(turnThinking, turnContent, toolCalls.length, [...knownToolNames, ...(compactRun ? [TOOL_SEARCH] : [])])
+          if (fromReasoning.length) {
+            toolCalls = fromReasoning.map((c) => ({ function: { name: c.name, arguments: c.arguments } }))
+            log.info('agent.reasoning_tool_call_recovered', { count: toolCalls.length, names: toolCalls.map((t) => t.function.name) })
           }
         }
 

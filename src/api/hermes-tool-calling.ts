@@ -143,6 +143,43 @@ export interface ParsedToolCall {
  * Looks for <tool_call>...</tool_call> XML tags containing JSON.
  * Returns array of parsed tool calls (can be 0 or more).
  */
+/**
+ * The XML call format of Qwen3-Coder and Qwen3.5 templates (C59 A3):
+ *
+ *   <function=file_read>
+ *   <parameter=path>
+ *   notes.txt
+ *   </parameter>
+ *   </function>
+ *
+ * usually inside <tool_call>…</tool_call>, sometimes without it. A server whose
+ * parser does not know the format (llama.cpp issues #20260/#20837, Ollama
+ * #14745) hands it through as plain text, and the run stopped on it. A value
+ * that reads as JSON (number, true/false, object, array) is taken as that,
+ * everything else as the string between the tags, trimmed of the one newline
+ * the template puts on each side.
+ */
+const FUNCTION_XML = /<function=([A-Za-z0-9_.:-]+)>\s*([\s\S]*?)\s*<\/function>/g
+const PARAMETER_XML = /<parameter=([A-Za-z0-9_.-]+)>\n?([\s\S]*?)\n?<\/parameter>/g
+
+export function parseFunctionXmlCalls(text: string): ParsedToolCall[] {
+  const calls: ParsedToolCall[] = []
+  for (const m of text.matchAll(FUNCTION_XML)) {
+    const args: ToolArgs = {}
+    for (const p of m[2].matchAll(PARAMETER_XML)) {
+      const raw = p[2]
+      const trimmed = raw.trim()
+      let value: unknown = raw
+      if (/^(-?\d+(\.\d+)?|true|false|null)$/.test(trimmed) || /^[[{]/.test(trimmed)) {
+        try { value = JSON.parse(trimmed) } catch { value = raw }
+      }
+      args[p[1]] = value as ToolArgs[string]
+    }
+    calls.push({ name: m[1], arguments: args })
+  }
+  return calls
+}
+
 export function parseHermesToolCalls(output: string): ParsedToolCall[] {
   const calls: ParsedToolCall[] = []
 
@@ -152,6 +189,11 @@ export function parseHermesToolCalls(output: string): ParsedToolCall[] {
 
   while ((match = regex.exec(output)) !== null) {
     const jsonStr = match[1].trim()
+    // Qwen's XML form inside the wrapper (see parseFunctionXmlCalls).
+    if (/^<function=/.test(jsonStr)) {
+      calls.push(...parseFunctionXmlCalls(jsonStr))
+      continue
+    }
     // Try direct parse, then repair
     const parsed = repairJson(jsonStr)
     if (parsed && parsed.name) {
@@ -173,6 +215,8 @@ export function parseHermesToolCalls(output: string): ParsedToolCall[] {
       }
     }
   }
+  // The same XML form without the <tool_call> wrapper.
+  if (!calls.length && output.includes('<function=')) calls.push(...parseFunctionXmlCalls(output))
 
   return calls
 }
@@ -183,6 +227,7 @@ export function parseHermesToolCalls(output: string): ParsedToolCall[] {
 export function stripToolCallTags(output: string): string {
   return output
     .replace(/<tool_call>[\s\S]*?<\/tool_call>/g, '')
+    .replace(/<function=[A-Za-z0-9_.:-]+>[\s\S]*?<\/function>/g, '')
     .replace(/<tool_response>[\s\S]*?<\/tool_response>/g, '')
     .trim()
 }

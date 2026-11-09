@@ -1,4 +1,5 @@
 import { extractToolCallsWithRanges, stripRanges } from '../../lib/tool-call-repair'
+import { toolCallsFromReasoning } from '../../lib/loose-tool-parse'
 import type { ToolCall } from '../../api/providers/types'
 
 /**
@@ -110,4 +111,19 @@ export function recoverKnownToolCallsFromContent(
     return isKnown(tc.function.name, args && typeof args === 'object' && !Array.isArray(args) ? args as Record<string, unknown> : {})
   })
   return allKnown ? recovered : { toolCalls, content, extractedFromContent: false }
+}
+
+/**
+ * C59 A3: the calls of a turn that sat in the reasoning channel while the
+ * answer stayed empty (lib/loose-tool-parse.ts, toolCallsFromReasoning).
+ * Unchanged when there is an answer or a call already.
+ */
+export function recoverToolCallsFromReasoning(
+  toolCalls: ToolCall[],
+  content: string,
+  thinking: string | undefined,
+  known: readonly string[],
+): ToolCall[] {
+  const lifted = toolCallsFromReasoning(thinking ?? '', content, toolCalls.length, known)
+  return lifted.length ? lifted.map((c) => ({ function: { name: c.name, arguments: c.arguments } })) : toolCalls
 }

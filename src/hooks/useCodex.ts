@@ -118,7 +118,7 @@ import { createLivePaint } from './codex/live-paint'
 import { seedEstimatedUsage, reportTurnUsage } from './codex/turn-usage'
 import { lastRequestUsageNotice, requestUsageTracker } from '../lib/request-usage'
 import { shouldDowngradeThinking, engineDeniedThinking } from './codex/thinking-downgrade'
-import { recoverToolCallsFromContent, recoverKnownToolCallsFromContent } from './codex/tool-call-recovery'
+import { recoverToolCallsFromContent, recoverKnownToolCallsFromContent, recoverToolCallsFromReasoning } from './codex/tool-call-recovery'
 import { codexStallVerdict } from './codex/stall-verdict'
 import { createStagedWriter } from './codex/staged-writes'
 import { codexCutoffNote, dropCutOffCall } from './codex/turn-cutoff'
@@ -134,6 +134,11 @@ function isCodexTool(name: string, args: Record<string, unknown>): boolean {
   const tools = toolRegistry.getAll()
   const repaired = repairToolCall(name, args, tools).name
   return tools.some((t) => t.name === repaired)
+}
+
+/** Every name a call lifted out of the reasoning channel may carry (C59 A3). */
+function codexKnownNames(): string[] {
+  return [...toolRegistry.getAll().map((t) => t.name), TOOL_SEARCH]
 }
 
 // Why a run ended, or was pushed on, belongs in the support log. This used to
@@ -1740,6 +1745,7 @@ export function useCodex() {
               const recovered = recoverToolCallsFromContent(toolCalls, turnContent)
               toolCalls = recovered.toolCalls
               turnContent = recovered.content
+              toolCalls = recoverToolCallsFromReasoning(toolCalls, turnContent, turn.thinking, codexKnownNames())
             }
           } else {
             // ── Streaming path for OpenAI-compat / Anthropic / LU Cloud ──
@@ -1786,6 +1792,7 @@ export function useCodex() {
               const recovered = recoverKnownToolCallsFromContent(toolCalls, turnContent, isCodexTool)
               toolCalls = recovered.toolCalls
               turnContent = recovered.content
+              toolCalls = recoverToolCallsFromReasoning(toolCalls, turnContent, turn.thinking, codexKnownNames())
             }
             if (keepThinking && turn.thinking) {
               thinkingContent += (thinkingContent ? '\n\n' : '') + turn.thinking

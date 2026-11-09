@@ -413,3 +413,31 @@ export function stripToolCallText(text: string, known: string[]): string {
     .replace(/\n{3,}/g, '\n\n')
     .trim()
 }
+
+/**
+ * Calls that landed in the reasoning channel instead of the answer (C59 A3).
+ *
+ * A server that takes a model for a thinking model puts everything up to the
+ * end of the turn into `reasoning_content`, the calls included (llama.cpp
+ * #20809, Qwen3-2507; the same seen with Qwen3.5 templates). The turn then
+ * reads as "thought, said nothing, called nothing" and the run ended or got
+ * a continue steer the model could not act on.
+ *
+ * Deliberately narrow, because reasoning is where a model THINKS about calls
+ * it may not make: only when the turn has no call and no answer at all, only
+ * the structured forms (a <tool_call> block or Qwen's <function=…> XML), never
+ * the prose `name(arg=…)` form, and only names the run knows.
+ */
+export function toolCallsFromReasoning(
+  thinking: string,
+  answer: string,
+  existingCalls: number,
+  known: readonly string[],
+): LooseToolCall[] {
+  if (existingCalls > 0 || answer.trim() || !thinking) return []
+  if (!/<tool_call>|<function=/.test(thinking)) return []
+  const calls = parseHermesToolCalls(thinking)
+  return calls
+    .filter((c) => known.includes(c.name))
+    .map((c) => ({ name: c.name, arguments: (isRecord(c.arguments) ? c.arguments : {}) as Record<string, unknown> }))
+}
