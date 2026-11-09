@@ -46,6 +46,7 @@ mod phone_version;
 mod private_python;
 mod private_tmp;
 mod process_util;
+mod quit_signal;
 mod python;
 // End-to-end sealed remote channel (REMOTE-PROTOKOLL v2). Pure: no network,
 // no platform, used unchanged by the desktop server and the phone client.
@@ -1553,6 +1554,12 @@ pub fn run() {
             // load its model (~360 MB) at launch even in Cloud mode. It now starts
             // LAZILY on the first transcription (whisper::transcribe) and is
             // released by offload_local_models whenever the app is in Cloud mode.
+            // A kill, Ctrl+C or a service stop (SIGTERM/SIGINT/SIGHUP) quits
+            // like the menu does: the engine and every other child go with
+            // the app (quit_signal.rs). Windows has its job object for that.
+            #[cfg(all(unix, desktop))]
+            quit_signal::install(app.handle().clone());
+
             #[cfg(desktop)]
             {
                 let handle = app.handle().clone();
