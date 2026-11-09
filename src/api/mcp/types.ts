@@ -73,6 +73,9 @@ export interface MCPToolDefinition {
   category: ToolCategory
   source: 'builtin' | 'external'
   serverId?: string // for external MCP server tools
+  /** One line, at most 150 characters, for a tool search that lists tools
+   *  without their schema (C59/C60, 3.1.0). Never sent as the description. */
+  brief?: string
 }
 
 export interface MCPServerConfig {

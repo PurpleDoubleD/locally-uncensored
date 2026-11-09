@@ -18,6 +18,7 @@
 
 import type { AgentToolCall } from '../../types/agent-mode'
 import { toolResultIsFailure } from '../../lib/tool-result-failure'
+import { markRunTaint } from '../../lib/run-taint'
 import { runForCall } from '../agent-context'
 import type { AgentRunContext } from '../agent-context'
 import { deriveSideEffectKey } from './side-effect-key'
@@ -402,6 +403,8 @@ async function runSingle(
       runtime.execute(req.toolName, dispatchedArgs, req.run && runForCall(req.run, req.id), signal),
       signal,
     )
+    // C60 S3: output from outside LU marks the run, before anything reads it.
+    markRunTaint(req.run, req.toolName)
     if (result === ABORTED) {
       // The tool got the signal and is expected to wind itself down; what this
       // guarantees is that the RUN stops waiting. Without it, Stop was still a
@@ -435,6 +438,8 @@ async function runSingle(
       schemaValidated,
     })
   } catch (err) {
+    // An error text can carry foreign content too (a page's body in a fetch error).
+    markRunTaint(req.run, req.toolName)
     const errorText = err instanceof Error ? err.message : String(err)
     const hint = runtime.explainError?.(req.toolName, errorText)
     return finalize({

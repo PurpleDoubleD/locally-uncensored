@@ -13,9 +13,11 @@ import { DiffView } from './DiffView'
 import { ScreenTaskSteps } from './ScreenTaskSteps'
 import { ScreenShotStrip } from '../computer/ScreenShotStrip'
 import { ComputerChatPermission, useComputerChatAsk } from '../computer/ComputerChatPermission'
-import { SettingChangeAsk, SettingChangeDone } from './SettingChangeCard'
+import { SettingChangeAsk, SettingChangeDone, SelfControlDone } from './SettingChangeCard'
 import { useSettingsConfirmStore, pendingForCall } from '../../stores/settingsConfirmStore'
-import { parseSettingChange } from '../../api/mcp/settings-tools'
+import { parseSettingChanges } from '../../api/mcp/settings-tools'
+import { parseSelfControlAction } from '../../api/mcp/self-control-tools'
+import { isSelfControlToolName } from '../../lib/settings-tool-names'
 import { useChatStore } from '../../stores/chatStore'
 import { commandIcon } from '../../lib/shell-command-classify'
 import { requestGenerationCancel } from '../../api/vram-handoff'
@@ -266,10 +268,12 @@ function ToolCallBlockImpl({ toolCall, onApprove, onReject }: Props) {
   const isFailed = toolCall.status === 'failed' || toolCall.status === 'rejected'
   // The first use of computer control in a chat waits here for the user's yes.
   const chatAsk = useComputerChatAsk(toolCall.toolName, isRunning, useChatStore((s) => s.activeConversationId))
-  // A11: a settings change waits here for Accept, and stays with Undo.
-  const isSetSetting = toolCall.toolName === 'set_setting'
+  // A11 / C60: a change LU makes to itself waits here for Accept, and stays
+  // with Undo: one setting, several on one card, or an action.
+  const isSetSetting = isSelfControlToolName(toolCall.toolName) && toolCall.toolName !== 'get_settings' && toolCall.toolName !== 'lu_open_settings'
   const settingAsk = useSettingsConfirmStore((s) => (isSetSetting && isRunning ? pendingForCall(s.queue, toolCall.id) : null))
-  const settingChange = isSetSetting && toolCall.status === 'completed' ? parseSettingChange(toolCall.result) : null
+  const settingChanges = isSetSetting && toolCall.status === 'completed' ? parseSettingChanges(toolCall.result) : []
+  const selfAction = isSetSetting && toolCall.status === 'completed' ? parseSelfControlAction(toolCall.result) : null
   // Real cancel (2026-06-16): only image/video generation supports a true
   // abort (ComfyUI /interrupt + loop abort). Local "cancelling" state flips the
   // mini button to a "stopping…" indicator the moment it's clicked.
@@ -432,7 +436,8 @@ function ToolCallBlockImpl({ toolCall, onApprove, onReject }: Props) {
       )}
       {chatAsk && <div className="ml-3.5 pl-2"><ComputerChatPermission ask={chatAsk} /></div>}
       {settingAsk && <div className="ml-3.5 pl-2"><SettingChangeAsk req={settingAsk} /></div>}
-      {settingChange && <div className="ml-3.5 pl-2"><SettingChangeDone change={settingChange} /></div>}
+      {settingChanges.map((c) => <div key={c.key} className="ml-3.5 pl-2"><SettingChangeDone change={c} /></div>)}
+      {selfAction && <div className="ml-3.5 pl-2"><SelfControlDone action={selfAction} /></div>}
       {isRunning && toolCall.toolName === 'computer_task' && <ScreenTaskSteps />}
       {(toolCall.toolName === 'computer_task' || toolCall.toolName === 'computer_use') && (
         <ScreenShotStrip callId={toolCall.id} className="ml-3.5 mb-1 pl-2" />

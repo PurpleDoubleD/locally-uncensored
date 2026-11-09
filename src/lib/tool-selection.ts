@@ -135,8 +135,9 @@ const GATE_KEYWORDS: Record<string, readonly string[]> = {
   check_tasks: DELEGATE_KEYWORDS,
   message_agent: DELEGATE_KEYWORDS,
   // A11: in Code only on a message about settings, like everywhere else.
-  get_settings: SETTINGS_KEYWORDS,
-  set_setting: SETTINGS_KEYWORDS,
+  // C60: all self-control tools (settings, models, services, downloads) on
+  // the wider gate generated from the settings catalog.
+  ...Object.fromEntries(SELF_CONTROL_TOOL_NAMES.map((n) => [n, settingsGateWords()])),
 }
 
 /**
@@ -231,8 +232,9 @@ const TOOL_GROUPS: ToolGroup[] = [
     tools: ['run_workflow'],
   },
   {
-    keywords: SETTINGS_KEYWORDS,
-    tools: ['get_settings', 'set_setting'],
+    // C60: the self-control tools on the gate generated from the catalog.
+    keywords: settingsGateWords(),
+    tools: [...SELF_CONTROL_TOOL_NAMES],
   },
 ]
 
@@ -282,6 +284,7 @@ export const EMBEDDING_ROUTING_THRESHOLD = 15
 
 import type { EmbeddingFn } from '../api/agents/embedding-router'
 import { REA_SERVER_ID, reaToolsFor } from './plugins/rea-tools'
+import { SELF_CONTROL_TOOL_NAMES, settingsGateWords } from './settings-tool-names'
 import { selectToolsByEmbedding } from '../api/agents/embedding-router'
 
 /**

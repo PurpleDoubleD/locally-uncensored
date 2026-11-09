@@ -24,7 +24,7 @@ import { buildSamplingRequest } from './sampling'
 // Beides sind generische Module ohne Rückkante. Der Shim bleibt für seine
 // verbliebenen Aufrufer bestehen.
 import { toolRegistry } from '../api/mcp/tool-registry'
-import { isSettingsToolName } from './settings-tool-names'
+import { isSelfControlToolName } from './settings-tool-names'
 import type { ToolArgs } from '../api/mcp/types'
 import { streamProviderTurn } from './provider-stream'
 import { runInLane, type HeldLocalLane } from './run-slot'
@@ -792,7 +792,7 @@ export class WorkflowEngine {
       // decision but not this catalog, or the reverse.
       const permissions = usePermissionStore.getState().getEffectivePermissions(this.effectiveConversationId())
       // A workflow step has no card to confirm a settings change on (A11).
-      const tools: ToolDefinition[] = toolRegistry.toOllamaTools(permissions).filter((t) => !isSettingsToolName(t.function.name))
+      const tools: ToolDefinition[] = toolRegistry.toOllamaTools(permissions).filter((t) => !isSelfControlToolName(t.function.name))
       const allowedTools = step.allowedTools
         ? tools.filter(t => step.allowedTools!.includes(t.function.name))
         : tools

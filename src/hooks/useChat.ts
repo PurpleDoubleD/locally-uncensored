@@ -86,7 +86,7 @@ import { withChatPersona, speakerSamplingOptions, plainChatSpeaker, speakerPerso
 import { personaNoteOf } from '../lib/persona-note'
 import { toolRegistry } from '../api/mcp'
 import { syncCreateTools } from '../api/mcp/create-tools'
-import { isSettingsToolName, SETTINGS_TOOL_NAMES } from '../lib/settings-tool-names'
+import { isSettingsToolName, isSelfControlToolName, asksAboutSelfControl, SETTINGS_TOOL_NAMES } from '../lib/settings-tool-names'
 import { asksAboutSettings } from '../lib/tool-selection'
 import { CREATE_TOOL_NAMES, createSystemText, withCreateText } from '../lib/create/chat-switch'
 // Create in chat only where the order card exists: not on the phone (lib/create-order-surface.ts).
@@ -122,12 +122,16 @@ function lastMediaFromBlocks(m: Message): { kind: 'image' | 'video'; args?: Reco
 }
 
 /** A11: the message is about LU's settings, or answers a question the model
- *  asked while it was reading or changing one ("80", "yes, dark"). */
-export function wantsSettingsTools(content: string, history: readonly Message[]): boolean {
-  if (asksAboutSettings(content)) return true
+ *  asked while it was reading or changing one ("80", "yes, dark").
+ *  C60: in Agent mode the wider gate of the self-control tools (models,
+ *  services, downloads), generated from the settings catalog; plain chat keeps
+ *  its narrow list, so a plain chat message stays a plain chat. */
+export function wantsSettingsTools(content: string, history: readonly Message[], agentMode = false): boolean {
+  if (agentMode ? asksAboutSelfControl(content) : asksAboutSettings(content)) return true
   const lastAssistant = [...history].reverse().find((m) => m.role === 'assistant')
+  const used = agentMode ? isSelfControlToolName : isSettingsToolName
   return !!lastAssistant?.agentBlocks?.some((b) =>
-    (b.toolCalls?.length ? b.toolCalls : b.toolCall ? [b.toolCall] : []).some((c) => isSettingsToolName(c.toolName)))
+    (b.toolCalls?.length ? b.toolCalls : b.toolCall ? [b.toolCall] : []).some((c) => used(c.toolName)))
 }
 
 /** One model's turn in a group round. Deliberately the PLAIN conversation
@@ -988,6 +992,7 @@ export function useChat() {
     const settingsOn = !inGroup && wantsSettingsTools(
       content,
       store.conversations.find((c) => c.id === store.activeConversationId)?.messages ?? [],
+      !!store.activeConversationId && useAgentModeStore.getState().isActive(store.activeConversationId),
     )
 
     // The short answer to an order on the table: "yes", "ja", "go" approves

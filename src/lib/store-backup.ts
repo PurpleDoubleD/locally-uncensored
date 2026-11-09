@@ -47,6 +47,9 @@ export const STORE_KEYS = [
   // Create in chat: the orders of every conversation, so a card and its
   // result survive a lost WebView profile like the chat they stand in.
   'LU-create-orders',
+  // C60 (3.1.0): what the agent changed in LU itself, with the values to undo
+  // it. Names and shown values only, no key or token.
+  'lu-settings-audit',
   // Added 2.6.8. Every one of these was persisted and none of them was listed,
   // so the NSIS/WebView2 wipe this file exists to survive destroyed them:
   //   staged-changes            approved edits that are not on disk yet — the

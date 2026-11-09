@@ -13,6 +13,7 @@ import { CATALOG, HIDDEN_KEYS, LOCK_RULES, type LockedCategory } from '../settin
 import { DEFAULT_SETTINGS } from '../constants'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { useSettingsConfirmStore } from '../../stores/settingsConfirmStore'
+import { useChatStore } from '../../stores/chatStore'
 import { executeGetSettings, executeSetSetting, parseSettingChange, SETTINGS_TOOLS } from '../../api/mcp/settings-tools'
 import { asksAboutSettings, gateCreateTools, selectRelevantTools } from '../tool-selection'
 import { allowedInReadOnlyTurn } from '../mutating-tools'
@@ -36,9 +37,19 @@ async function answerCard(allow: boolean) {
   return req!
 }
 
+/** C60: a card only comes when the user's own message asks for the setting.
+ *  These tests are about what happens after that, so the user asked. */
+const ASKED = 'Settings: auto compact threshold 80, theme light, temperature 1.5, engine context 16384, default coding mode ask'
+function seedTurn(text = ASKED) {
+  useChatStore.setState({
+    conversations: [{ id: 'chat-a', title: 't', messages: [{ id: 'u1', role: 'user', content: text, timestamp: 1 }] }],
+  } as never)
+}
+
 beforeEach(() => {
   useSettingsStore.setState({ settings: structuredClone(DEFAULT_SETTINGS) })
   useSettingsConfirmStore.setState({ queue: [] })
+  seedTurn()
 })
 
 describe('every setting is classified', () => {
@@ -187,8 +198,9 @@ describe('where the tools ride along', () => {
     const defs = toolRegistry.getAvailableTools(DEFAULT_PERMISSIONS)
     const names = (list: { name: string }[]) => list.map((t) => t.name).filter((n) => n.includes('setting'))
     expect(names(gateCreateTools(defs, 'refactor the parser'))).toEqual([])
-    expect(names(gateCreateTools(defs, 'set the temperature to 0.3'))).toEqual(['get_settings', 'set_setting'])
-    expect(names(selectRelevantTools('set the temperature to 0.3', defs, DEFAULT_PERMISSIONS))).toEqual(['get_settings', 'set_setting'])
+    // C60: the batch change and the settings page come along on the same gate.
+    expect(names(gateCreateTools(defs, 'set the temperature to 0.3'))).toEqual(['get_settings', 'set_setting', 'set_settings', 'lu_open_settings'])
+    expect(names(selectRelevantTools('set the temperature to 0.3', defs, DEFAULT_PERMISSIONS))).toEqual(['get_settings', 'set_setting', 'set_settings', 'lu_open_settings'])
     expect(allowedInReadOnlyTurn('set_setting')).toBe(false)
     expect(allowedInReadOnlyTurn('get_settings')).toBe(true)
   })
