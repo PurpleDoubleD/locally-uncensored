@@ -126,7 +126,7 @@ import { codexToolDiff, codexEventKind } from './codex/tool-result-view'
 import { capHiddenToolHistory } from './codex/hidden-history'
 import { withHouseConduct } from '../lib/system-prompt'
 import { yieldSilentRunsTo } from '../lib/silent-runs-yield'
-import { gatePlanTool, planToolAllowed } from '../lib/plan-gate'
+import { gatePlanTool, codePlanAllowed, planNudgeDue, PLAN_NUDGE } from '../lib/plan-gate'
 
 /** A name the model wrote in its text is a call only when it is one of the
  *  agent's tools, after the usual name repair (GH #147). */
@@ -181,7 +181,7 @@ AUTONOMY CONTRACT (read carefully):
 - Narrative "I'm about to do X" text with no tool call after it = premature stop. Don't do it.
 
 Workflow per task:
-1. Understand the task (optional brief sentence)
+1. Understand the task. If it takes more than three steps, send todo_write with the whole plan together with your first exploring calls, and keep it current together with later calls.
 2. Explore the codebase, file_list / file_read / file_search
 3. Implement ALL required changes, file_edit to change existing files, file_write for new ones
 4. Verify, shell_execute to run tests, lint, or build
@@ -226,6 +226,7 @@ const CODEX_SYSTEM_PROMPT_LEAN = `You are a coding agent in LU. Use tools to do 
 Rules:
 - Put independent tool calls into one response (several reads or edits at once). Every step costs the user money.
 - Read a file before you edit it.
+- A task of more than three steps: send todo_write with the plan together with your first calls, update it together with later calls.
 - To change an existing file use file_edit (replace a unique old_string with new_string), not file_write. Use file_write only to create a new file.
 - PATHS: use relative paths (e.g. \`package.json\`, \`.\`). Never start with \`/\` or a drive letter, it escapes the workspace and fails.
 - Emit the tool call as your FIRST output, no "Okay, let me…" preamble. Valid JSON.
@@ -1296,6 +1297,8 @@ export function useCodex() {
       // from the nudges above, because a nudge fires on an EMPTY turn while
       // this fires on a turn that claims to be done.
       let planReconcilesRemaining = PLAN_RECONCILE_BUDGET
+      let codeToolRounds = 0
+      let planNudged = false
       // Raised from 20 → 50 (v2.3.7): large refactors across 10+ files
       // legitimately need >20 tool calls. Budget still caps via
       // agentMaxToolCalls/agentMaxIterations.
@@ -1605,10 +1608,11 @@ export function useCodex() {
           // request or an open plan, todo_write is not offered at all.
           const gatedDefs = gatePlanTool(
             gateCreateTools(routedDefs, lastUserMsg, createGateOpened),
-            planToolAllowed({
+            codePlanAllowed({
               mode: codexMode,
               userText: lastUserMsg,
               todos: convId ? useTodoStore.getState().getTodos(convId) : [],
+              reviewMode,
             }),
           )
           // C59 A2: on the compact profile the cut tools stay reachable
@@ -2686,6 +2690,19 @@ export function useCodex() {
         }
         if (failVerdict.action === 'steer') {
           messages.push({ role: 'user', content: failVerdict.message })
+        }
+        // C59 A4: three tool rounds in and still no plan: ask for it, once.
+        codeToolRounds++
+        if (convId && planNudgeDue({
+          rounds: codeToolRounds,
+          todos: useTodoStore.getState().getTodos(convId),
+          alreadyNudged: planNudged,
+          readOnly: readOnlyTurn,
+          reviewMode,
+        })) {
+          planNudged = true
+          diagLog('plan-nudge', { iter: i })
+          messages.push({ role: 'user', content: PLAN_NUDGE })
         }
       }
 
