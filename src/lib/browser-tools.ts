@@ -9,7 +9,8 @@
 // every web text (lib/web-evidence.ts), and an address the model put together
 // itself waits for the user's yes (lib/web-url-provenance.ts).
 
-import { backendCall, isTauri } from '../api/backend'
+import { backendCall } from '../api/backend'
+import { isTauri } from '../api/in-tauri'
 import type { AgentRunContext } from '../api/agent-context'
 import type { MCPToolDefinition, ToolArgs } from '../api/mcp/types'
 import { hostPlatform } from './host-platform'

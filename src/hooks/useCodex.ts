@@ -1,3 +1,4 @@
+import { stripSourcesMarker } from '../lib/web-evidence'
 import { NOT_IN_CODE_TAB } from '../lib/browser-tools'
 import { useRef, useState, useCallback } from 'react'
 import { markCannotThink } from '../lib/model-compatibility'
@@ -2534,7 +2535,7 @@ export function useCodex() {
         const resultTextFor = (r: typeof results[number]): string => {
           const text =
             r.status === 'completed' || r.status === 'cached'
-              ? (r.result ?? '')
+              ? stripSourcesMarker(r.result ?? '') // P-L: the source cards' marker is for the chat, not the model
               : r.status === 'rejected'
                 ? REJECTED_CALL_FOR_MODEL
               : r.errorHint

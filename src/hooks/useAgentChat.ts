@@ -1,3 +1,4 @@
+import { stripSourcesMarker } from '../lib/web-evidence'
 import { useRef, useState, useCallback, useEffect } from 'react'
 import { frameFlush } from '../lib/frame-flush'
 import { useRunActivityStore, toolProgressActivity, waitBeforeRetry, readingActivity, endFirstWait, hiddenThoughtArrived, waitForChatCard } from '../stores/runActivityStore'
@@ -3224,7 +3225,7 @@ export function useAgentChat() {
             r.status === 'rejected'
               ? REJECTED_CALL_FOR_MODEL
               : r.status === 'completed' || r.status === 'cached'
-                ? (r.result ?? '')
+                ? stripSourcesMarker(r.result ?? '') // P-L: the source cards' marker is for the chat, not the model
                 : r.errorHint
                   ? `${r.error ?? 'Tool failed'}, ${r.errorHint}`
                   : (r.error ?? 'Tool failed')

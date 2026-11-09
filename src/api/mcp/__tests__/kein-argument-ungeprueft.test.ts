@@ -126,7 +126,8 @@ describe('die Tabelle deckt den Katalog ab', () => {
 })
 
 describe('eine Anfrage ohne ihre Pflichtangabe geht gar nicht erst hinaus', () => {
-  for (const [tool, voll] of Object.entries(PFLICHT)) {
+  // The LU browser is registered only inside the app on macOS and Windows.
+  for (const [tool, voll] of Object.entries(PFLICHT).filter(([t]) => !t.startsWith('browser_') || registry.getToolByName(t))) {
     for (const fehlt of Object.keys(voll)) {
       it(`${tool} ohne \`${fehlt}\``, async () => {
         const args: Record<string, unknown> = { ...voll }
