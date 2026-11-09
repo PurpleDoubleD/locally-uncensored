@@ -6,6 +6,8 @@ import { lazy, Suspense, useState } from 'react'
 import SyntaxHighlighter from 'react-syntax-highlighter/dist/esm/prism-light'
 // Deep path on purpose: `styles/prism` is a barrel over 46 themes.
 import oneDark from 'react-syntax-highlighter/dist/esm/styles/prism/one-dark'
+import a11yOneLight from 'react-syntax-highlighter/dist/esm/styles/prism/a11y-one-light'
+import { useSettingsStore } from '../../stores/settingsStore'
 import { Copy, Check, ChevronDown, Play } from 'lucide-react'
 
 // Loaded on the first Preview click only: most chats never open one.
@@ -170,7 +172,34 @@ export function isHtmlSnippet(code: string, language?: string): boolean {
   return false
 }
 
+/**
+ * The code colours per mode (3.1.0, P-M). Until then every block used the
+ * dark theme on a 30 % black wash, also in light mode: on white that is a
+ * mid grey under dark-theme colours, and plain code measured 1.02:1 there,
+ * comments 2.9:1. Light mode now takes a11y-one-light, whose every token
+ * reaches 4.5:1 on its pale ground. Dark mode keeps one-dark, with the
+ * comments lifted from 3.0:1 to about 5:1 and the template-string braces
+ * from 3.9:1 (__tests__/code-colours-read.test.ts).
+ */
+const LIFTED_COMMENT = 'hsl(220, 10%, 58%)'
+const lift = (key: string, color = LIFTED_COMMENT) => ({ ...oneDark[key], color })
+const INTERPOLATION = '.language-javascript .token.template-string > .token.interpolation > .token.interpolation-punctuation.punctuation'
+export const CODE_THEME_DARK: typeof oneDark = {
+  ...oneDark,
+  comment: lift('comment'),
+  prolog: lift('prolog'),
+  cdata: lift('cdata'),
+  '.language-markdown .token.blockquote.punctuation': lift('.language-markdown .token.blockquote.punctuation'),
+  '.language-markdown .token.hr.punctuation': lift('.language-markdown .token.hr.punctuation'),
+  // The `${` `}` of a template string, a dim red at 3.9:1; one step lighter.
+  [INTERPOLATION]: lift(INTERPOLATION, 'hsl(5, 60%, 62%)'),
+}
+export const CODE_THEME_LIGHT = a11yOneLight
+/** The ground each theme is read on, over the pane. */
+export const CODE_GROUND = { light: 'rgba(15, 23, 42, 0.035)', dark: 'rgba(0, 0, 0, 0.3)' } as const
+
 export function CodeBlock({ code, language }: Props) {
+  const light = useSettingsStore((s) => s.settings.theme === 'light')
   const [copied, setCopied] = useState(false)
   const lineCount = code.split('\n').length
   const isLong = lineCount > COLLAPSE_THRESHOLD
@@ -242,11 +271,11 @@ export function CodeBlock({ code, language }: Props) {
             // gets the normalised one, so an unknown fence still shows what the
             // model called it while rendering as plain text.
             language={highlightLanguageFor(language)}
-            style={oneDark}
+            style={light ? CODE_THEME_LIGHT : CODE_THEME_DARK}
             customStyle={{
               margin: 0,
               padding: '0.75rem',
-              background: 'rgba(0, 0, 0, 0.3)',
+              background: light ? CODE_GROUND.light : CODE_GROUND.dark,
               fontSize: '0.75rem',
             }}
             // The theme gives the inner <code> its own background. It is an
