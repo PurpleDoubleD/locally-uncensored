@@ -110,11 +110,13 @@ impl LadeFehler {
                 "The LU Engine is still answering with another model, so 'lu/{}' could not be loaded within {} s. Send the request again when that answer is done.",
                 name, sekunden
             ),
-            LadeFehler::Start { name, grund } => format!(
-                "The LU Engine could not load 'lu/{}': {}. Open LU → Models to load it by hand and see the details.",
-                name,
-                grund.trim().trim_end_matches('.')
-            ),
+            LadeFehler::Start { name, grund } => {
+                let grund = grund.trim().trim_end_matches('.');
+                // Many engine errors already say where to go (measured: "not a
+                // GGUF at all. Open Models, Get new …"); the hint once is enough.
+                let hinweis = if grund.contains("Models") { "" } else { " Open LU → Models to load it by hand and see the details." };
+                format!("The LU Engine could not load 'lu/{}': {}.{}", name, grund, hinweis)
+            }
         }
     }
 
@@ -320,6 +322,9 @@ mod tests {
         let e = LadeFehler::Start { name: "q".into(), grund: "Model file not found: /x.".into() };
         assert_eq!(e.code(), "model_load_failed");
         assert!(e.message().contains("'lu/q'") && e.message().contains("Model file not found: /x") && e.message().contains("Models"));
+        // The engine's own words already name Models: no second hint.
+        let e = LadeFehler::Start { name: "k".into(), grund: "not a GGUF at all. Open Models, Get new and download it again.".into() };
+        assert_eq!(e.message().matches("Models").count(), 1, "{}", e.message());
         let b = LadeFehler::Belegt { name: "q".into(), sekunden: 300 };
         assert_eq!(b.code(), "engine_busy");
         assert!(b.message().contains("300 s"));
