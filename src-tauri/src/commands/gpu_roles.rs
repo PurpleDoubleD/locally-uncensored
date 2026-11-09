@@ -159,11 +159,95 @@ pub fn chat_card(state: &AppState) -> Option<GpuRef> {
 
 #[tauri::command]
 pub fn set_gpu_roles(state: State<'_, AppState>, roles: GpuRoles) -> Result<(), String> {
-    let mut r = state.gpu_roles.lock().map_err(|e| e.to_string())?;
-    *r = roles;
+    {
+        let mut r = state.gpu_roles.lock().map_err(|e| e.to_string())?;
+        *r = roles.clone();
+    }
     // A device found for the old pick must not be reused for the new one.
     clear_device_cache();
+    persist_pick(CONFIG_KEY_ROLES, &roles);
     Ok(())
+}
+
+// ── The picks across a restart ─────────────────────────────────────────
+//
+// Until 3.1.0 both picks lived only in memory and came down from the
+// frontend after the window loaded. The boot path starts ComfyUI and Ollama
+// before that (lib.rs, auto_start_*), and neither start applied a card at all,
+// so "Card per task" (3.0.8) never reached a ComfyUI or an Ollama that LU
+// started together with itself; LU's own ComfyUI install turns that
+// autostart on. Now every pick is also written to config.json, read back
+// into AppState when the app starts, and both boot starts apply it the same
+// way the manual starts do. The frontend stays the source: its sync on every
+// boot writes the same values again.
+
+pub const CONFIG_KEY_SELECTION: &str = "gpu_selection";
+pub const CONFIG_KEY_ROLES: &str = "gpu_roles";
+
+/// The picks stored in a config.json value. Anything missing or unreadable
+/// is "no pick", which is what a machine that never set one has.
+pub fn picks_from_config(config: &serde_json::Value) -> (GpuSelection, GpuRoles) {
+    let selection = config
+        .get(CONFIG_KEY_SELECTION)
+        .and_then(|v| serde_json::from_value::<GpuSelection>(v.clone()).ok())
+        .unwrap_or_default();
+    let roles = config
+        .get(CONFIG_KEY_ROLES)
+        .and_then(|v| serde_json::from_value::<GpuRoles>(v.clone()).ok())
+        .unwrap_or_default();
+    (selection, roles)
+}
+
+/// The picks stored in the config file at `path`.
+pub fn picks_from_file(path: &std::path::Path) -> (GpuSelection, GpuRoles) {
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
+        .map(|v| picks_from_config(&v))
+        .unwrap_or_default()
+}
+
+/// The picks of this install, for AppState at startup.
+pub fn load_persisted_picks() -> (GpuSelection, GpuRoles) {
+    picks_from_file(&crate::os_paths::app_config_json())
+}
+
+/// Write one pick into the config file at `path`, only when it changed (the
+/// frontend sends both on every boot). Other keys stay as they are.
+pub fn persist_pick_in<T: Serialize>(path: &std::path::Path, key: &str, value: &T) {
+    let Ok(value) = serde_json::to_value(value) else { return };
+    let mut config = std::fs::read_to_string(path)
+        .ok()
+        .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
+        .filter(|v| v.is_object())
+        .unwrap_or_else(|| serde_json::json!({}));
+    if config.get(key) == Some(&value) {
+        return;
+    }
+    config[key] = value;
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let _ = std::fs::write(path, serde_json::to_string_pretty(&config).unwrap_or_default());
+}
+
+pub fn persist_pick<T: Serialize>(key: &str, value: &T) {
+    persist_pick_in(&crate::os_paths::app_config_json(), key, value);
+}
+
+/// Put the card of `role` on a command about to start ComfyUI (`Comfy`) or
+/// Ollama (`Chat`). The one place both the manual and the boot starts go
+/// through, so the two can no longer drift apart. Returns the split when it
+/// applies, for the start log.
+pub fn apply_role_env(state: &AppState, role: GpuRole, cmd: &mut std::process::Command) -> Option<ComfySplit> {
+    // The roles are cloned out of their lock inside effective_selection;
+    // apply_gpu_env may run nvidia-smi and must never hold a lock (B2).
+    let selection = effective_selection(state, role);
+    let split = if role == GpuRole::Comfy { comfy_split(state) } else { None };
+    if let Some(sel) = selection {
+        crate::commands::gpu::apply_gpu_env(cmd, &sel);
+    }
+    split
 }
 
 #[tauri::command]
@@ -530,6 +614,76 @@ Available devices:
         let old: GpuRoles = serde_json::from_str(r#"{"chat":null,"comfy":{"vendor":"nvidia","index":1}}"#).unwrap();
         assert_eq!(old.comfy_split, None);
         assert!(split_note(r.split().unwrap()).contains("gpu:1"));
+    }
+
+    /// The autostart fix: a pick written by set_gpu_* comes back after a
+    /// restart, other config keys survive, garbage reads as "no pick".
+    #[test]
+    fn the_picks_survive_a_restart_through_config_json() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.json");
+        std::fs::write(&path, r#"{"comfyui_autostart":true,"comfyui_port":8188}"#).unwrap();
+        let roles = GpuRoles { chat: Some(card(0, "RTX 4090")), comfy: Some(card(1, "RTX 3060")), ..Default::default() };
+        let selection = GpuSelection { vendor: "nvidia".into(), indices: vec![0, 1] };
+        persist_pick_in(&path, CONFIG_KEY_ROLES, &roles);
+        persist_pick_in(&path, CONFIG_KEY_SELECTION, &selection);
+        let (s, r) = picks_from_file(&path);
+        assert_eq!(r, roles);
+        assert_eq!((s.vendor.as_str(), s.indices.as_slice()), ("nvidia", [0u32, 1].as_slice()));
+        let raw: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(raw["comfyui_autostart"], serde_json::json!(true), "other keys are kept");
+        // The split too, under the frontend's name.
+        let with_split = GpuRoles { comfy_split: split(1, 0), ..Default::default() };
+        persist_pick_in(&path, CONFIG_KEY_ROLES, &with_split);
+        assert!(std::fs::read_to_string(&path).unwrap().contains("comfySplit"));
+        assert_eq!(picks_from_file(&path).1, with_split);
+    }
+
+    #[test]
+    fn no_file_or_a_broken_one_is_no_pick() {
+        let dir = tempfile::tempdir().unwrap();
+        let (s, r) = picks_from_file(&dir.path().join("missing.json"));
+        assert_eq!((s.vendor.as_str(), s.indices.len(), r), ("auto", 0, GpuRoles::default()));
+        let bad = dir.path().join("bad.json");
+        std::fs::write(&bad, r#"{"gpu_roles":"nonsense","gpu_selection":{"vendor":5}}"#).unwrap();
+        let (s, r) = picks_from_file(&bad);
+        assert_eq!((s.vendor.as_str(), r), ("auto", GpuRoles::default()));
+        // A config that is not an object is not overwritten into one silently
+        // with lost keys: it was unreadable anyway, the pick starts it fresh.
+        std::fs::write(&bad, "[]").unwrap();
+        persist_pick_in(&bad, CONFIG_KEY_ROLES, &GpuRoles::default());
+        assert!(serde_json::from_str::<serde_json::Value>(&std::fs::read_to_string(&bad).unwrap()).unwrap().is_object());
+    }
+
+    /// The autostart path and the manual one put the same card on the
+    /// command, because both go through apply_role_env.
+    #[test]
+    fn apply_role_env_puts_the_comfy_card_and_the_chat_card_on_the_command() {
+        let state = AppState::new();
+        *state.gpu_selection.lock().unwrap() = GpuSelection::default();
+        *state.gpu_roles.lock().unwrap() =
+            GpuRoles { chat: Some(GpuRef { vendor: "amd".into(), index: 0, name: "RX A".into() }), comfy: Some(GpuRef { vendor: "amd".into(), index: 1, name: "RX B".into() }), ..Default::default() };
+        let env = |cmd: &std::process::Command| -> Vec<String> {
+            let mut v: Vec<String> = cmd.get_envs().filter_map(|(k, v)| v.map(|v| format!("{}={}", k.to_string_lossy(), v.to_string_lossy()))).collect();
+            v.sort();
+            v
+        };
+        let mut comfy = std::process::Command::new("never-run");
+        assert_eq!(apply_role_env(&state, GpuRole::Comfy, &mut comfy), None);
+        assert!(env(&comfy).contains(&"HIP_VISIBLE_DEVICES=1".to_string()), "{:?}", env(&comfy));
+        let mut chat = std::process::Command::new("never-run");
+        apply_role_env(&state, GpuRole::Chat, &mut chat);
+        assert!(env(&chat).contains(&"HIP_VISIBLE_DEVICES=0".to_string()), "{:?}", env(&chat));
+        // With the split, ComfyUI gets both NVIDIA cards and says so.
+        *state.gpu_roles.lock().unwrap() = GpuRoles { comfy_split: split(1, 0), ..Default::default() };
+        let mut comfy = std::process::Command::new("never-run");
+        assert!(apply_role_env(&state, GpuRole::Comfy, &mut comfy).is_some());
+        assert!(env(&comfy).iter().any(|e| e.starts_with("CUDA_VISIBLE_DEVICES=")), "{:?}", env(&comfy));
+        // No pick at all: no variable, exactly as before 3.0.8.
+        *state.gpu_roles.lock().unwrap() = GpuRoles::default();
+        let mut none = std::process::Command::new("never-run");
+        apply_role_env(&state, GpuRole::Comfy, &mut none);
+        assert!(env(&none).iter().all(|e| !e.contains("VISIBLE_DEVICES")), "{:?}", env(&none));
     }
 
     #[test]

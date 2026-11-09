@@ -1730,10 +1730,8 @@ fn start_ollama_blocking(state: &AppState) -> Result<serde_json::Value, String> 
     // long that subprocess I/O takes.
     // 3.0.8 (A2): the chat role's card when one is set, the global pick
     // otherwise (commands/gpu_roles.rs).
-    let gpu_selection = crate::commands::gpu_roles::effective_selection(state, crate::commands::gpu_roles::GpuRole::Chat);
-    if let Some(sel) = gpu_selection {
-        crate::commands::gpu::apply_gpu_env(&mut cmd, &sel);
-    }
+    // 3.1.0: through apply_role_env, the one helper the boot start uses too.
+    crate::commands::gpu_roles::apply_role_env(state, crate::commands::gpu_roles::GpuRole::Chat, &mut cmd);
     #[cfg(target_os = "windows")]
     cmd.creation_flags(CREATE_NO_WINDOW);
     let result = cmd.spawn();
@@ -2288,14 +2286,10 @@ pub(crate) fn start_comfyui_blocking(state: &AppState) -> Result<serde_json::Val
     // can never spill onto the chat's card.
     // 3.1.0 (C56): with "One model across two cards" ComfyUI sees both
     // cards, the model card first (gpu_roles.rs, ComfySplit).
-    let gpu_selection = crate::commands::gpu_roles::effective_selection(state, crate::commands::gpu_roles::GpuRole::Comfy);
-    if let Some(split) = crate::commands::gpu_roles::comfy_split(state) {
-        let line = format!("[start] {}", crate::commands::gpu_roles::split_note(&split));
-        println!("[ComfyUI] {line}");
+    // 3.1.0: through apply_role_env, the one helper the boot start uses too.
+    if let Some(split) = crate::commands::gpu_roles::apply_role_env(state, crate::commands::gpu_roles::GpuRole::Comfy, &mut cmd) {
+        println!("[ComfyUI] [start] {}", crate::commands::gpu_roles::split_note(&split));
         info!(model = split.model.index, helper = split.helper.index, "comfyui split over two cards");
-    }
-    if let Some(sel) = gpu_selection {
-        crate::commands::gpu::apply_gpu_env(&mut cmd, &sel);
     }
     #[cfg(target_os = "windows")]
     cmd.creation_flags(CREATE_NO_WINDOW);
@@ -3410,6 +3404,8 @@ pub fn auto_start_ollama(state: &AppState) {
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
+    // 3.1.0: the chat card, like start_ollama. This start applied none.
+    crate::commands::gpu_roles::apply_role_env(state, crate::commands::gpu_roles::GpuRole::Chat, &mut cmd);
     #[cfg(target_os = "windows")]
     cmd.creation_flags(CREATE_NO_WINDOW);
     match cmd.spawn() {
@@ -3785,6 +3781,14 @@ pub fn auto_start_comfyui(state: &AppState) {
                 .stdin(Stdio::null())
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped());
+            // 3.1.0: the card, like the manual start. Until now this path
+            // applied none, so "Card per task" (3.0.8) never reached a
+            // ComfyUI started with LU, and LU's own ComfyUI install turns this
+            // start on. The pick comes from config.json (AppState::new).
+            if let Some(split) = crate::commands::gpu_roles::apply_role_env(state, crate::commands::gpu_roles::GpuRole::Comfy, &mut cmd) {
+                println!("[ComfyUI] Auto-start: {}", crate::commands::gpu_roles::split_note(&split));
+                info!(model = split.model.index, helper = split.helper.index, "comfyui split over two cards");
+            }
             #[cfg(target_os = "windows")]
             cmd.creation_flags(CREATE_NO_WINDOW);
             match cmd.spawn() {
@@ -6216,5 +6220,33 @@ mod process_tree_kill_tests {
             body.contains("process_util::kill_pid_tree("),
             "kill_process_tree grew its own kill instead of using the shared one"
         );
+    }
+}
+
+#[cfg(test)]
+mod boot_start_gpu_tests {
+    /// 3.1.0: the boot starts of ComfyUI and Ollama applied no card at all
+    /// since 3.0.8, so "Card per task" never reached a ComfyUI or Ollama LU
+    /// started together with itself. Every start, manual and boot, now goes
+    /// through the one helper with its service's role. Read as source, like
+    /// the extra-model-paths guard above, because the property is "what does
+    /// each spawn site call"; the helper itself is tested in gpu_roles.rs.
+    #[test]
+    fn every_comfyui_and_ollama_start_applies_its_card() {
+        let src = std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/commands/process.rs")).unwrap();
+        let src = &src[..src.find("#[cfg(test)]").unwrap()];
+        for (name, role) in [
+            ("fn start_comfyui_blocking", "GpuRole::Comfy"),
+            ("pub fn auto_start_comfyui", "GpuRole::Comfy"),
+            ("fn start_ollama_blocking", "GpuRole::Chat"),
+            ("pub fn auto_start_ollama", "GpuRole::Chat"),
+        ] {
+            let start = src.find(name).unwrap_or_else(|| panic!("{name} is gone"));
+            let body = &src[start..start + src[start..].find("\n}\n").expect("unterminated fn")];
+            let call = body.find("gpu_roles::apply_role_env(state,").unwrap_or_else(|| panic!("{name} applies no card"));
+            assert!(body[call..].starts_with(&format!("gpu_roles::apply_role_env(state, crate::commands::gpu_roles::{role}")), "{name} applies the wrong role");
+            let spawn = body.rfind(".spawn()").unwrap_or_else(|| panic!("{name} spawns nothing"));
+            assert!(call < spawn, "{name} applies the card after the spawn");
+        }
     }
 }
