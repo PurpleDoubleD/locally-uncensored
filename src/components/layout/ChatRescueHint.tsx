@@ -4,6 +4,7 @@ import { isTauri } from '../../api/backend'
 import {
   countRestorableChats, restoreChatsFromBackup, shouldShowRescueHint, readDismissedAt, rememberDismissed,
 } from '../../lib/chat-rescue'
+import { installDeletionNote } from '../../lib/chat-deletion-note'
 
 /** After the restore at launch has had its turn (it may reload the window). */
 const LOOK_AFTER_MS = 4000
@@ -15,6 +16,9 @@ const LOOK_AFTER_MS = 4000
  */
 export function ChatRescueHint() {
   const importConversations = useChatStore((s) => s.importConversations)
+  // A chat that leaves the list from here on was deleted on purpose: the restore does not offer it back (C46).
+  // The shell mounts this once for the whole session.
+  useEffect(() => { installDeletionNote() }, [])
   const [count, setCount] = useState(0)
   const [busy, setBusy] = useState(false)
   const [done, setDone] = useState<string | null>(null)

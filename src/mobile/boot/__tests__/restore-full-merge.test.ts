@@ -28,6 +28,7 @@ vi.mock('../../../api/backend', () => ({
 }))
 vi.mock('../../../lib/idbStorage', () => ({
   hasStoredItem: async (key: string) => world.idb.has(key),
+  hasReadableItem: async (key: string) => world.idb.has(key),
   hasFailedRead: () => false,
   onIdbWrite: () => () => {},
   idbStorage: {

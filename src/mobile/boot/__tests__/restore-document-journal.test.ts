@@ -33,6 +33,7 @@ vi.mock('../../policy/decision-vault', () => ({
 }))
 vi.mock('../../../lib/idbStorage', () => ({
   hasStoredItem: async () => true,
+  hasReadableItem: async () => true,
   hasFailedRead: () => false,
   onIdbWrite: () => () => {},
   idbStorage: { getItem: async () => 'present', setItem: async () => {}, removeItem: async () => {} },

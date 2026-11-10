@@ -84,6 +84,10 @@ export const STORE_KEYS = [
   //   lu-mobile-unload-in-background  model settings: free the model in the background
   'lu-mobile-theme', 'lu-mobile-settings-prefs', 'lu-mobile-remote-desktops',
   'lu-mobile-resume-seen', 'lu-mobile-download-wifi-only', 'lu-mobile-unload-in-background',
+  // C46 (3.1.0): the chats deleted on purpose, phone and desktop
+  // (lib/chat-deletions.ts). The chat archives of the backup keep them; after
+  // a lost storage this note keeps the restore from offering them back.
+  'lu-chats-deleted',
   // Round 3 (M8). Found missing by the review: the text of the backup says
   // "chats and settings", and these did not come back.
   //   lu-mobile-remote            the chats held with a paired desktop, on

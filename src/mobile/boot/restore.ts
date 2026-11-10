@@ -21,7 +21,7 @@
 import { backendCall, isTauri } from '../../api/backend'
 import { recoverChatsFromBackup } from '../../lib/chat-backup-recovery'
 import { idbKeysToRestore, mayReloadForIdbRestore, mergeIdbStoreValue } from '../../lib/idb-restore'
-import { hasFailedRead, hasStoredItem, idbStorage } from '../../lib/idbStorage'
+import { hasFailedRead, hasReadableItem, idbStorage } from '../../lib/idbStorage'
 import { log } from '../../lib/logger'
 import { IDB_STORE_KEYS, STORE_KEYS } from '../../lib/store-backup'
 import { useChatStore } from '../../stores/chatStore'
@@ -114,7 +114,10 @@ async function quietRepair(): Promise<boolean> {
   try {
     const live: Record<string, string | null> = {}
     for (const key of IDB_STORE_KEYS) {
-      const present = await hasStoredItem(key)
+      // Present means a value hydration can read, not a row count() sees: a row that is no string, or a
+      // leftover "[object Object]" in localStorage, hydrated the chat store empty while the old check
+      // (hasStoredItem) took it for chats and put nothing back (perrt on the desktop, 05.11.2026; C46).
+      const present = await hasReadableItem(key)
       live[key] = present === true ? 'present' : present === false ? null : await Promise.resolve(idbStorage.getItem(key)).catch(() => null)
       // Not readable is not empty. With a full phone IndexedDB cannot be opened at all, every key
       // looked empty here, and the backup was "restored" over stores that were all still there
@@ -235,7 +238,7 @@ async function quietRepair(): Promise<boolean> {
  * Not readable: left alone, like the quiet repair does (F11).
  */
 async function restoreIdbStore(key: string, saved: string): Promise<boolean> {
-  const present = await hasStoredItem(key)
+  const present = await hasReadableItem(key)
   if (present === null || hasFailedRead(key)) return false
   if (!present) {
     await Promise.resolve(idbStorage.setItem(key, saved))

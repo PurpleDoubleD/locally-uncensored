@@ -29,6 +29,7 @@ vi.mock('../../../api/backend', () => ({
 vi.mock('../../../lib/idbStorage', () => ({
   // null: IndexedDB could not be asked.
   hasStoredItem: async () => (idb.unreadable ? null : false),
+  hasReadableItem: async () => (idb.unreadable ? null : false),
   hasFailedRead: () => idb.unreadable,
   onIdbWrite: () => () => {},
   idbStorage: {
