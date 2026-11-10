@@ -572,6 +572,10 @@ fn engine_requirements_current(on_disk: Option<&str>) -> bool {
 /// requirements of this build. With nothing to change, this is one file
 /// comparison.
 fn bring_engine_up_to_date(slot: &crate::install_state::InstallSlot) -> Result<(), String> {
+    // A model install and an engine start can both find the record stale;
+    // one pip at a time in the venv, and the second then finds it current.
+    static ONE_UPDATE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _one = ONE_UPDATE.lock().unwrap_or_else(|e| e.into_inner());
     let root = mlx_root();
     let on_disk = std::fs::read_to_string(root.join("requirements.txt")).ok();
     if engine_requirements_current(on_disk.as_deref()) {
@@ -2924,6 +2928,30 @@ pub fn mlx_start(_state: &AppState, _args: &Value) -> CmdResult {
     }
     let log_path = root.join("server.log");
     let started = json!({"ok": true, "port": MLX_PORT, "log": log_path.to_string_lossy()});
+    // An engine set up by an older LU keeps its old packages until a model
+    // is installed (`bring_engine_up_to_date`). A model that is already on
+    // the Mac never goes through that, so Chroma1-HD, installed under 3.0.10,
+    // kept failing for want of protobuf after the update that pins it. The
+    // start is where every render passes, off the main thread (media_cmds),
+    // and the frontend waits for it: bring the packages up to date here.
+    // With nothing to change this is one file comparison. Before the
+    // sidecar's lock is taken: the update stops the sidecar, which takes the
+    // same lock. And only while no sidecar is up, which may be at an image.
+    let record = std::fs::read_to_string(root.join("requirements.txt")).ok();
+    if !engine_requirements_current(record.as_deref()) && !sidecar().is_alive() {
+        let slot = _state.install_mlx_diffusion();
+        if slot.try_start() {
+            match bring_engine_up_to_date(&slot) {
+                Ok(()) => slot.complete("image engine updated"),
+                Err(e) => {
+                    slot.fail(e.clone());
+                    return Err(crate::commands::internal(format!(
+                        "The image engine could not be updated to this version's packages. {e}"
+                    )));
+                }
+            }
+        }
+    }
     let mut side = sidecar();
     // Still coming up, or up: a second click must not start a second server.
     if side.is_alive() {
@@ -3702,7 +3730,10 @@ mod tests {
         assert!(!body.contains(".start();"), "is_running() then start() lets a double click through");
         assert!(!body.contains("std::thread::spawn"), "an install thread outside spawn_install can die silently");
         assert_eq!(body.matches("spawn_install(").count(), 2, "the engine setup and the model download");
-        assert_eq!(body.matches(".try_start()").count(), 2);
+        // Three claims: the two installs, and the engine update at the start
+        // (`mlx_start`, 3.1.0). That one runs in the start's own blocking
+        // thread and ends the slot itself; a release build aborts on a panic.
+        assert_eq!(body.matches(".try_start()").count(), 3);
         // Fund 4 and 13: nothing waits on a child behind `.output()` any more
         // except the two version probes, and no path is unwrapped into a str.
         assert!(!body.contains("to_str().unwrap()"));
@@ -4355,6 +4386,42 @@ mod tests {
     fn image_cache_dir_follows_hub_layout() {
         let d = image_model_cache_dir("stabilityai/sd-turbo");
         assert!(d.ends_with("cache/hub/models--stabilityai--sd-turbo"));
+    }
+
+    /// Discord (M1 Max, 3.0.10): Chroma1-HD ships its T5 tokenizer as
+    /// spiece.model only, transformers 5 converts it with protobuf, and
+    /// without protobuf the load ends in "`tiktoken` is required". Measured in
+    /// a fresh venv from this file on 10.11.2026: fails without, loads with
+    /// protobuf 7.35.1 alone. An engine set up from the 3.0.10 file must read
+    /// as out of date, so the next start pulls it in.
+    #[test]
+    fn the_engine_pins_protobuf_for_sentencepiece_only_tokenizers() {
+        assert!(REQUIREMENTS_TXT.lines().any(|l| l.trim() == "protobuf==7.35.1"));
+        let as_of_3_0_10: String = REQUIREMENTS_TXT
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("protobuf=="))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(!engine_requirements_current(Some(&as_of_3_0_10)));
+        // The same version the video engine runs on, not a second one.
+        let video = include_str!("video.rs");
+        assert!(video.contains("\"protobuf==7.35.1\""));
+    }
+
+    /// A model that is already installed never goes through the install path,
+    /// so the start brings the engine up to date. Before it takes the
+    /// sidecar's lock: the update stops the sidecar through the same lock, and
+    /// std's Mutex does not let one thread take it twice.
+    #[test]
+    fn the_start_updates_a_stale_engine_before_it_takes_the_sidecar_lock() {
+        let src = include_str!("mlx.rs");
+        let start = &src[src.find("pub fn mlx_start(").unwrap()..];
+        let start = &start[..start.find("\n}\n").unwrap()];
+        let update = start.find("bring_engine_up_to_date(&slot)").expect("mlx_start updates the engine");
+        let lock = start.find("let mut side = sidecar();").expect("mlx_start takes the sidecar");
+        assert!(update < lock, "the update has to run before the sidecar lock is held");
+        let check = start.find("engine_requirements_current(").unwrap();
+        assert!(check < update, "a current engine costs one file comparison, no pip");
     }
 
     #[test]

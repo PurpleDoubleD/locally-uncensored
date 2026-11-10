@@ -24,6 +24,12 @@ accelerate==1.14.0
 safetensors==0.8.0
 huggingface_hub==1.21.0
 sentencepiece==0.2.1
+# Chroma1-HD ships its T5 tokenizer as spiece.model only, no tokenizer.json.
+# transformers 5 converts it on load and needs protobuf for that; without it
+# the load falls through to the tiktoken reader and fails with "`tiktoken` is
+# required to read a `tiktoken` file" (Discord, M1 Max, 3.0.10). Same version
+# as the video engine's pins (commands/video.rs).
+protobuf==7.35.1
 tokenizers==0.22.2
 numpy==2.4.6
 
