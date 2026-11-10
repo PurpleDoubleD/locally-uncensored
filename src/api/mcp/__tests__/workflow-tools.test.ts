@@ -112,6 +112,11 @@ describe('workflow_find', () => {
     expect(await executeWorkflowFind({ url: 'https://evil.example/wf.json' }, run())).toMatch(/^Refused: LU only opens a workflow link the user wrote/)
   })
 
+  it('a link in the user\'s message leads, whatever the model searched for', async () => {
+    userSays('Bau mir diesen Workflow ein: https://github.com/a/b/blob/main/wf.png, für Realistic Vision.')
+    expect(await executeWorkflowFind({ query: 'hires fix' }, run())).toMatch(/^The user sent a workflow link, id url\d+\. Next: workflow_inspect/)
+  })
+
   it('asks for a query', async () => {
     userSays('find a workflow')
     expect(await executeWorkflowFind({}, run())).toMatch(/^Error: query is missing/)

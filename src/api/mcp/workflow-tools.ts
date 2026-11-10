@@ -72,6 +72,11 @@ const STRONG_INSTALL = /\b(install|installier|einbau|einbauen|bau(?:e|t)?\b[^.?!
 const installNames = (text: string, strict: boolean) => (strict ? STRONG_INSTALL.test(text) : userAskedToInstall(text))
 const assignNames = (text: string, strict: boolean) => (strict ? STRONG_INSTALL.test(text) || /\b(assign|zuweis|zuweisen)/i.test(text) : userAskedToAssign(text))
 
+/** The https links the user wrote, in order. */
+export function linksInUserText(text: string): string[] {
+  return [...text.matchAll(/https:\/\/[^\s<>"'\])]+/g)].map((m) => m[0].replace(/[.,;:!?]+$/, '')).filter((u) => linkIsFromUser(u, text)).slice(0, 3)
+}
+
 /** A failure in words. A Tauri command rejects with a plain string, not an Error. */
 function errText(e: unknown, max: number): string {
   const t = e instanceof Error ? e.message : typeof e === 'string' ? e : ''
@@ -109,6 +114,15 @@ export async function executeWorkflowFind(args: ToolArgs, run?: AgentRunContext)
     }
     const c = userLinkCandidate(url)
     return `Workflow link from the user, id ${c.id}. Next: workflow_inspect with id ${c.id}.`
+  }
+  // The user's own message holds a link: that is the workflow they mean. A
+  // small model tends to search for its name instead, so the link leads the
+  // list whatever the query was.
+  const sent = linksInUserText(lastUserText(run?.conversationId))
+  if (sent.length) {
+    const c = userLinkCandidate(sent[0])
+    return `The user sent a workflow link, id ${c.id}. Next: workflow_inspect with id ${c.id}. `
+      + 'Do not search the web for it; workflow_inspect reads JSON and PNG workflow files from the link.'
   }
   if (!query) return 'Error: query is missing. Say what the workflow should do, e.g. "flux upscale".'
 
