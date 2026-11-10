@@ -4931,10 +4931,10 @@ pub async fn delete_bundled_model(
         let stopped = loaded.as_deref().is_some_and(|l| same(l, &path)) && stop_engine_locked(&state);
         let roots = bundled_scan_dirs(&builtin_models_dir()?, &extra_dirs.unwrap_or_default());
         let files = gguf_delete_plan(Path::new(&path), &roots)?;
-        let mut bytes = 0u64;
+        // Summed before anything moves; an unreadable size counts as 0.
+        let bytes: u64 = files.iter().map(|f| std::fs::metadata(f).map(|m| m.len()).unwrap_or(0)).sum();
         let to_bin = trash.unwrap_or(false);
         for f in &files {
-            bytes += std::fs::metadata(f).map(|m| m.len()).unwrap_or(0);
             if to_bin {
                 crate::commands::os_trash::system_trash(f)
                     .map_err(|e| format!("Could not move {} to the Trash: {}", f.display(), e))?;
