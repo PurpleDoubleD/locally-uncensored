@@ -53,8 +53,8 @@ const NAV_TARGETS: readonly NavTarget[] = [
   { id: 'voice', label: 'Voice', view: 'voice', localOnly: true },
   { id: 'compare', label: 'Compare', view: null },
   { id: 'benchmark', label: 'Benchmark', view: 'benchmark', localOnly: true },
-  // The Neuron tweaker (3.0.9, P11) steers local LU Engine models only.
-  { id: 'neuron', label: 'Neurons', view: 'neuron', localOnly: true },
+  // Neurons (P11, 3.0.9) left the header in 3.1.0: it is a plugin now, with
+  // a window of its own (Plugins in the composer).
   { id: 'models', label: 'Models', view: 'models', localOnly: true },
   { id: 'settings', label: 'Settings', view: 'settings' },
 ]

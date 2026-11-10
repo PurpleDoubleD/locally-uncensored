@@ -228,6 +228,8 @@ export const useSettingsStore = create<SettingsState>()(
         }
         // REA plugin (3.0.7): only a real true starts a process.
         state.settings.reaPluginEnabled = state.settings.reaPluginEnabled === true
+        // Neurons plugin (3.1.0): only a real true lets sliders steer.
+        state.settings.neuronsPluginEnabled = state.settings.neuronsPluginEnabled === true
         // 3.0.8 (A2): background generations are on unless switched off, and
         // the card per service is read defensively, a hand-edited profile
         // must not send a half pick to the backend.

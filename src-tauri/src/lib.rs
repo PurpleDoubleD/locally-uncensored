@@ -827,6 +827,10 @@ pub fn run() {
             #[cfg(desktop)]
             commands::neuron::neuron_apply,
             #[cfg(desktop)]
+            commands::neuron::neuron_plugin_set,
+            #[cfg(desktop)]
+            commands::neuron::neuron_plugin_status,
+            #[cfg(desktop)]
             commands::neuron::neuron_compare,
             // Whisper STT
             commands::whisper::whisper_status,

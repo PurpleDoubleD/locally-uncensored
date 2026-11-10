@@ -26,8 +26,8 @@ const field = `w-full ${fieldBase}`
 
 // ── From examples ─────────────────────────────────────────────────────
 
-export function OwnSliderForm({ disabled, onCompute }: { disabled: boolean; onCompute: (name: string, more: string[], less: string[]) => void }) {
-  const [open, setOpen] = useState(false)
+export function OwnSliderForm({ disabled, onCompute, startOpen = false }: { disabled: boolean; onCompute: (name: string, more: string[], less: string[]) => void; startOpen?: boolean }) {
+  const [open, setOpen] = useState(startOpen)
   const [name, setName] = useState('')
   const [more, setMore] = useState('')
   const [less, setLess] = useState('')
@@ -48,7 +48,7 @@ export function OwnSliderForm({ disabled, onCompute }: { disabled: boolean; onCo
       </label>
       <div>
         <p className="t-body font-medium text-gray-200 mb-1">2. Write a few lines for each side</p>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 @lg:grid-cols-2 gap-3">
           <label className="block t-micro text-gray-300">More like this (one per line)
             <textarea rows={4} className={`${field} mt-1`} placeholder={'Talk like a pirate.\nSay arr and matey.'} value={more} onChange={(e) => setMore(e.target.value)} data-testid="neuron-own-more" />
           </label>
@@ -62,7 +62,7 @@ export function OwnSliderForm({ disabled, onCompute }: { disabled: boolean; onCo
         <button type="button" disabled={disabled || !ok} onClick={() => { onCompute(name.trim(), lines(more), lines(less)); setOpen(false); setName(''); setMore(''); setLess('') }} data-testid="neuron-own-compute" className="lu-control lu-primary">
           3. Compute slider
         </button>
-        <button type="button" onClick={() => setOpen(false)} className="lu-control">Cancel</button>
+        {!startOpen && <button type="button" onClick={() => setOpen(false)} className="lu-control">Cancel</button>}
       </div>
     </div>
   )
@@ -347,10 +347,10 @@ export function ComparePanel({ modelPath, entries, labelOf, disabled, model, tun
           {busy && <Loader2 size={ICON_SM} className="animate-spin" />} Compare
         </button>
       </div>
-      {entries.length === 0 && !result && <p className={`t-micro ${HINWEIS_TEXT.ruhig}`}>All sliders are at 0, so both answers will be the same. Move a slider in step 2 first.</p>}
+      {entries.length === 0 && !result && <p className={`t-micro ${HINWEIS_TEXT.ruhig}`}>All sliders are at 0, so both answers will be the same. Move a slider first.</p>}
       {result && (
         <>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3" data-testid="neuron-compare-result">
+          <div className="grid grid-cols-1 @lg:grid-cols-2 gap-3" data-testid="neuron-compare-result">
             <div className="rounded-lg border border-gray-200 dark:border-white/[0.08] p-3">
               <p className="t-label text-gray-500 mb-1.5">Before · sliders off</p>
               <p className="t-body text-gray-100 whitespace-pre-wrap" data-testid="neuron-compare-before">{result.before}</p>
@@ -393,7 +393,7 @@ export function SharePanel({ recipe, skipped, onUndo }: { recipe: Recipe; skippe
     <div className="space-y-2" data-testid="neuron-share">
       {hasAny ? (
         <>
-          <p className="t-body text-gray-200">Your mix as coordinates. Others paste it under <span className="font-medium">Coordinates</span>.</p>
+          <p className="t-body text-gray-200">Your mix as coordinates. Others paste it under <span className="font-medium">Add slider, Coordinates</span>.</p>
           <pre className="t-mono whitespace-pre-wrap break-all rounded-lg bg-gray-100 dark:bg-white/[0.05] px-3 py-2 text-gray-900 dark:text-white" data-testid="neuron-share-line">
             {[recipe.model, line || null].filter(Boolean).join(' · ')}
             {recipe.entries.some((e) => e.kind === 'own') ? `${line ? ' ' : ''}+ ${recipe.entries.filter((e) => e.kind === 'own').length} own slider(s) in the link` : ''}

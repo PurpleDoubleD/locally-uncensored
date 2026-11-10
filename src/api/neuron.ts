@@ -135,3 +135,10 @@ export const neuronApply = (modelPath: string, entries: NeuronEntry[], tuning?: 
 
 export const neuronCompare = (modelPath: string, question: string, seed: number, entries: NeuronEntry[], tuning?: BuiltinEngineTuning) =>
   backendCall<CompareResult>('neuron_compare', { modelPath, question, seed, entries, tuning })
+
+/** The Neurons plugin switch (3.1.0). Off: no saved mix reaches the engine,
+ *  for any model; the engine is started again when it runs a steered one. */
+export const neuronPluginSet = (enabled: boolean, tuning?: BuiltinEngineTuning) =>
+  backendCall<{ enabled: boolean; restarted: boolean }>('neuron_plugin_set', { enabled, tuning })
+
+export const neuronPluginStatus = () => backendCall<{ enabled: boolean }>('neuron_plugin_status')
