@@ -66,6 +66,8 @@ export interface Candidate {
   page?: string
   /** A link the user sent, fetched with `userLink`. */
   userLink?: boolean
+  /** CivitAI hands out files only with an API key; none is set. */
+  needsKey?: boolean
 }
 
 const candidates = new Map<string, Candidate>()
@@ -200,6 +202,7 @@ export async function searchCivitai(query: string): Promise<Candidate[]> {
       license: civitaiLicense(item),
       host,
       page: typeof item.id === 'number' ? `https://${host}/models/${item.id}` : undefined,
+      ...(civitaiApiKey ? {} : { needsKey: true }),
     }, 'civ'))
   }
   return out
@@ -375,7 +378,17 @@ export async function loadCandidate(c: Candidate): Promise<LoadedWorkflow> {
   } else {
     if (!c.fileUrl) throw new Error('This hit has no file to read.')
     const auth = c.source === 'civitai' ? useWorkflowStore.getState().civitaiApiKey || null : null
-    raw = await invokeFetch(c.fileUrl, { userLink: c.userLink, auth })
+    try {
+      raw = await invokeFetch(c.fileUrl, { userLink: c.userLink, auth })
+    } catch (e) {
+      const t = e instanceof Error ? e.message : String(e)
+      if (c.source === 'civitai' && /HTTP 40[13]/.test(t)) {
+        throw new Error(auth
+          ? 'CivitAI refused the download with the saved API key (it may be expired). Pick a hit from another source.'
+          : 'CivitAI only hands out workflow files with an API key, and none is set. The user can add one in Settings (CivitAI key); until then pick a hit from another source.')
+      }
+      throw e instanceof Error ? e : new Error(t)
+    }
     if (c.sha256) publishedShaOk = (await sha256Hex(raw)) === c.sha256
   }
   if (raw.length > 4 * 1024 * 1024) throw new Error('The file is larger than 4 MB.')

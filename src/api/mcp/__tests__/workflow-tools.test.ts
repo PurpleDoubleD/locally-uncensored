@@ -326,3 +326,10 @@ describe('the shared policy (C60-S3)', () => {
     await pending
   })
 })
+
+describe('errors in words', () => {
+  it('a Tauri rejection is a string and still reaches the model', async () => {
+    h.check.mockRejectedValue('HTTP 401: https://civitai.com/api/download/models/1')
+    expect(await executeWorkflowInspect({ id: candidateId() })).toMatch(/Could not read workflow url\d+: HTTP 401/)
+  })
+})

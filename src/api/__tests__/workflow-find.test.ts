@@ -79,6 +79,16 @@ describe('loading a candidate', () => {
     expect(h.backendCall).toHaveBeenCalledWith('workflow_fetch', { url: 'https://example.org/wf.json', userLink: true, authToken: null })
   })
 
+  it('CivitAI without a key: the hit says so, and a 401 becomes a sentence', async () => {
+    h.backendCall.mockResolvedValueOnce([...new TextEncoder().encode(JSON.stringify({
+      items: [{ id: 7, name: 'Simple SD 1.5', modelVersions: [{ files: [{ name: 'wf.zip', sizeKB: 2, downloadUrl: 'https://civitai.com/api/download/models/9' }] }] }],
+    }))])
+    const [hit] = await searchCivitai('sd')
+    expect(hit.needsKey).toBe(true)
+    h.backendCall.mockRejectedValueOnce('HTTP 401: https://civitai.com/api/download/models/9')
+    await expect(loadCandidate(hit)).rejects.toThrow(/only hands out workflow files with an API key/)
+  })
+
   it('a page that is not a workflow says what to do', async () => {
     h.backendCall.mockResolvedValue([...new TextEncoder().encode('<html>OpenArt</html>')])
     const { userLinkCandidate } = await import('../workflow-find')

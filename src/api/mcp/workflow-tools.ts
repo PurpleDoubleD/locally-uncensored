@@ -71,6 +71,12 @@ const STRONG_INSTALL = /\b(install|installier|einbau|einbauen|bau(?:e|t)?\b[^.?!
 const installNames = (text: string, strict: boolean) => (strict ? STRONG_INSTALL.test(text) : userAskedToInstall(text))
 const assignNames = (text: string, strict: boolean) => (strict ? STRONG_INSTALL.test(text) || /\b(assign|zuweis|zuweisen)/i.test(text) : userAskedToAssign(text))
 
+/** A failure in words. A Tauri command rejects with a plain string, not an Error. */
+function errText(e: unknown, max: number): string {
+  const t = e instanceof Error ? e.message : typeof e === 'string' ? e : ''
+  return (t || 'unknown error').replace(/\s+/g, ' ').slice(0, max)
+}
+
 const NOT_HERE = 'Error: workflows can only be installed in a chat where the user sees the confirmation card. Nothing changed.'
 
 // ── workflow_find ───────────────────────────────────────────────────────────
@@ -79,6 +85,7 @@ function hitLine(c: Candidate): string {
   const bits: string[] = [c.source]
   if (c.author) bits.push(`by ${c.author}`)
   if (c.baseModel) bits.push(cleanName(c.baseModel, 30))
+  if (c.needsKey) bits.push('download needs a CivitAI key')
   if (c.downloads !== undefined) bits.push(`${c.downloads} downloads`)
   if (c.date) bits.push(c.date)
   if (c.sizeKB !== undefined) bits.push(`${c.sizeKB} KB`)
@@ -107,12 +114,15 @@ export async function executeWorkflowFind(args: ToolArgs, run?: AgentRunContext)
       const hits = await f()
       if (hits.length) lines.push(`${name}:`, ...hits.map(hitLine))
     } catch (e) {
-      errors.push(`${name}: ${e instanceof Error ? e.message.slice(0, 160) : 'not reachable'}`)
+      errors.push(`${name}: ${errText(e, 160)}`)
     }
   }
   if (source === 'all' || source === 'local') await take('Local (LU and ComfyUI)', () => searchLocal(query))
-  if (source === 'all' || source === 'civitai') await take('CivitAI', () => searchCivitai(query))
-  if (source === 'all' || source === 'github') await take('GitHub (Comfy Registry)', () => searchGithub(query))
+  // Without a CivitAI key its files cannot be fetched, so GitHub comes first.
+  const civitaiFirst = !!useWorkflowStore.getState().civitaiApiKey
+  const civitai = () => (source === 'all' || source === 'civitai') && take('CivitAI', () => searchCivitai(query))
+  const github = () => (source === 'all' || source === 'github') && take('GitHub (Comfy Registry)', () => searchGithub(query))
+  if (civitaiFirst) { await civitai(); await github() } else { await github(); await civitai() }
 
   if (!lines.length) {
     return `No workflow found for "${cleanName(query, 80)}".${errors.length ? ` Not reached: ${errors.join('; ')}.` : ''} `
@@ -138,7 +148,7 @@ export async function executeWorkflowInspect(args: ToolArgs): Promise<string> {
     const others = checked.loaded.others ? `\nThe file holds ${checked.loaded.others + 1} workflows; the first one was checked.` : ''
     return reportForAgent(checked.report, c.id, c.title) + others
   } catch (e) {
-    return `Could not read workflow ${c.id}: ${e instanceof Error ? e.message.slice(0, 240) : 'unknown error'}`
+    return `Could not read workflow ${c.id}: ${errText(e, 240)}`
   }
 }
 
@@ -205,7 +215,7 @@ export async function executeWorkflowInstall(args: ToolArgs, run?: AgentRunConte
   try {
     checked = await checkCandidate(c)
   } catch (e) {
-    return `Could not read workflow ${c.id}: ${e instanceof Error ? e.message.slice(0, 240) : 'unknown error'}. Nothing changed.`
+    return `Could not read workflow ${c.id}: ${errText(e, 240)}. Nothing changed.`
   }
   const r = checked.report
   if (r.light === 'red') {
@@ -255,7 +265,7 @@ export async function applyInstall(checked: Checked, model: string | undefined):
         if (res && typeof res === 'object' && res.status === 'error') throw new Error(res.error ?? 'failed')
         done.push(`Installed node pack ${p.name}${p.commit ? ` at ${p.commit.slice(0, 8)}` : ''}.`)
       } catch (e) {
-        return `${done.join(' ')} Installing ${p.name} failed: ${e instanceof Error ? e.message.slice(0, 200) : 'unknown'}. The workflow was not installed.`
+        return `${done.join(' ')} Installing ${p.name} failed: ${errText(e, 200)}. The workflow was not installed.`
       }
     }
     try {
@@ -263,7 +273,7 @@ export async function applyInstall(checked: Checked, model: string | undefined):
       clearNodeCache()
       done.push('ComfyUI restarted.')
     } catch (e) {
-      notes.push(`ComfyUI did not restart by itself (${e instanceof Error ? e.message.slice(0, 120) : 'unknown'}); restart it before generating.`)
+      notes.push(`ComfyUI did not restart by itself (${errText(e, 120)}); restart it before generating.`)
     }
   }
 
@@ -277,7 +287,7 @@ export async function applyInstall(checked: Checked, model: string | undefined):
       if (res?.status === 'error') throw new Error(res.error ?? 'failed')
       done.push(`Download started: ${file}${m.sizeGB ? ` (${m.sizeGB} GB)` : ''} to ${m.folder}.`)
     } catch (e) {
-      notes.push(`Download of ${file} did not start: ${e instanceof Error ? e.message.slice(0, 160) : 'unknown'}.`)
+      notes.push(`Download of ${file} did not start: ${errText(e, 160)}.`)
     }
   }
   for (const m of r.models.filter((x) => x.state === 'missing')) notes.push(`${m.name} is missing; the user gets it.`)
