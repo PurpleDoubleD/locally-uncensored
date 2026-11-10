@@ -238,8 +238,8 @@ export async function executeSetSetting(args: ToolArgs, run?: AgentRunContext, s
   if (!answer.allow) {
     audit(run, model, { ...item, outcome: answer.reason === 'timeout' ? 'timeout' : 'declined', tainted: verdict.taintedBy })
     return answer.reason === 'timeout'
-      ? `No answer on the card for 10 minutes, so no. ${entry.label} stays ${item.from}. Do not ask again unless the user asks.`
-      : `The user declined. ${entry.label} stays ${item.from}. Do not ask again unless the user asks.`
+      ? `NOT CHANGED. No answer on the card for 10 minutes, so no. ${entry.label} stays ${item.from}. Tell the user it was not changed. Do not ask again unless the user asks.`
+      : `NOT CHANGED. The user declined. ${entry.label} stays ${item.from}. Tell the user it was not changed. Do not ask again unless the user asks.`
   }
   // The value may have moved while the card was open (by hand, another chat).
   const now = st.readEntry(entry)
@@ -254,7 +254,7 @@ export async function executeSetSetting(args: ToolArgs, run?: AgentRunContext, s
     return `Error: ${entry.label} could not be changed: ${String(e)}. Nothing changed.`
   }
   audit(run, model, { ...item, outcome: 'applied', rawFrom: before, rawTo: value, tainted: verdict.taintedBy })
-  return `Changed: ${entry.label} ${item.from} → ${item.to}.${item.note ? ` ${item.note}` : ''} The user can undo it on the card.\n${markOf({ key: entry.key, from: before, to: value })}`
+  return `Changed: ${entry.label} ${item.from} → ${item.to}.${item.note ? ` ${item.note}` : ''} The user accepted the card, the change is done. They can undo it on the card.\n${markOf({ key: entry.key, from: before, to: value })}`
 }
 
 export async function executeSetSettings(args: ToolArgs, run?: AgentRunContext, signal?: AbortSignal): Promise<string> {
@@ -294,8 +294,8 @@ export async function executeSetSettings(args: ToolArgs, run?: AgentRunContext, 
   if (!answer.allow) {
     for (const c of ok) audit(run, model, { ...c.item, outcome: answer.reason === 'timeout' ? 'timeout' : 'declined', tainted: taintedBy })
     lines.push(answer.reason === 'timeout'
-      ? 'No answer on the card for 10 minutes, so no. Nothing changed. Do not ask again unless the user asks.'
-      : 'The user declined the card. Nothing changed. Do not ask again unless the user asks.')
+      ? 'NOT CHANGED. No answer on the card for 10 minutes, so no. Nothing changed. Tell the user so. Do not ask again unless the user asks.'
+      : 'NOT CHANGED. The user declined the card. Nothing changed. Tell the user so. Do not ask again unless the user asks.')
     return lines.join('\n')
   }
   const selected = new Set(answer.selected ?? ok.map((c) => c.entry.key))
@@ -323,7 +323,7 @@ export async function executeSetSettings(args: ToolArgs, run?: AgentRunContext, 
     lines.push(`Changed: ${c.entry.label} ${c.item.from} → ${c.item.to}.${c.item.note ? ` ${c.item.note}` : ''}`)
     marks.push(markOf({ key: c.entry.key, from: c.before, to: c.value }))
   }
-  if (marks.length) lines.push('The user can undo each on the card.', ...marks)
+  if (marks.length) lines.push('The user accepted the card, these changes are done. They can undo each on the card.', ...marks)
   return lines.join('\n')
 }
 

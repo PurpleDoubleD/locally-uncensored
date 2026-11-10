@@ -227,7 +227,9 @@ describe('the card', () => {
     await vi.advanceTimersByTimeAsync(0)
     expect(queue()).toHaveLength(1)
     await vi.advanceTimersByTimeAsync(CARD_TIMEOUT_MS + 1)
-    expect(await p).toMatch(/No answer on the card for 10 minutes/)
+    const said = await p
+    expect(said).toMatch(/No answer on the card for 10 minutes/)
+    expect(said).toMatch(/^NOT CHANGED./)
     expect(settings().theme).toBe(DEFAULT_SETTINGS.theme)
   })
 
@@ -316,6 +318,9 @@ describe('the gate', () => {
     expect(asksAboutSelfControl('Wechsel auf Gemma 4')).toBe(true)
     expect(asksAboutSelfControl('Schalt die Local API an')).toBe(true)
     expect(asksAboutSelfControl('Lade Flux Schnell herunter')).toBe(true)
+    expect(asksAboutSelfControl('Stell das Design von LU auf hell.')).toBe(true)
+    expect(asksAboutSelfControl('LU soll dunkel aussehen')).toBe(true)
+    expect(asksAboutSelfControl('Wie lustig ist das?')).toBe(false)
     expect(asksAboutSelfControl('Erzähl mir einen Witz')).toBe(false)
     expect(asksAboutSettings('Erinnerst du dich an gestern?')).toBe(false)
   })

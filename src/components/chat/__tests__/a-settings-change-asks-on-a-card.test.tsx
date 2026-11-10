@@ -29,8 +29,13 @@ const call = (over: Partial<AgentToolCall> = {}): AgentToolCall => ({
 })
 const q = (id: string) => document.querySelector(`[data-testid="${id}"]`) as HTMLElement | null
 const threshold = () => useSettingsStore.getState().settings.autoCompactThreshold
+// The tool loads its stores lazily (C60), so the first card can take a real
+// moment on a cold import: wait on time, not on a count of ticks.
 const waitForCard = async () => {
-  for (let i = 0; i < 50 && useSettingsConfirmStore.getState().queue.length === 0; i++) await act(async () => {})
+  const until = Date.now() + 4_000
+  while (useSettingsConfirmStore.getState().queue.length === 0 && Date.now() < until) {
+    await act(async () => { await new Promise((r) => setTimeout(r, 10)) })
+  }
 }
 
 beforeEach(() => {

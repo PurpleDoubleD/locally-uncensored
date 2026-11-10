@@ -62,6 +62,12 @@ const ACTION_WORDS = [
   'local api', 'lokale api', 'localapi', 'api server', 'api-server',
   'remote', 'handy', 'phone', 'smartphone', 'fernzugriff',
   ...WORKFLOW_GATE_WORDS,
+  // The look, in the words people use (the old A11 list had them; the live
+  // probe of 09.11.2026 lost "Stell das Design von LU auf hell" without them).
+  'dark mode', 'light mode', 'darkmode', 'dunkelmodus', 'dunklen modus', 'hellen modus', 'dark theme', 'light theme',
+  'auf hell', 'auf dunkel', 'helles design', 'dunkles design', 'design auf', 'design von lu', 'aussehen von lu',
+  // The app by its name, as a word of its own: "von LU", "in LU", "LU's".
+  ' lu ', ' lu.', ' lu?', ' lu!', ' lu,', " lu's", ' lus ',
   ...SELF_CONTROL_TOOL_NAMES,
 ]
 
@@ -91,7 +97,8 @@ export function settingsGateWords(): string[] {
 
 /** True when a chat message is about LU itself. */
 export function asksAboutSelfControl(userMessage: string): boolean {
-  const msg = (userMessage || '').toLowerCase()
+  // Padded, so " lu " also finds LU at the start or the end of the message.
+  const msg = ` ${(userMessage || '').toLowerCase()} `
   return settingsGateWords().some((k) => msg.includes(k))
 }
 

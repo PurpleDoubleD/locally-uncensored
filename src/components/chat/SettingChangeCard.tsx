@@ -43,7 +43,7 @@ export function SettingChangeAsk({ req }: { req: SettingChangeRequest }) {
   const Icon = strong ? ShieldAlert : req.action ? Zap : SlidersHorizontal
   const title = req.action
     ? req.action.title
-    : items ? `Change these ${items.length} settings?` : 'Change this setting?'
+    : items ? (items.length === 1 ? 'Change this setting?' : `Change these ${items.length} settings?`) : 'Change this setting?'
   return (
     <div role="group" aria-label={req.action ? 'Confirm an action of LU' : 'Change an app setting'} data-testid="setting-change-ask"
       data-risk={strong ? 'strong' : 'card'} className={`${strong ? boxStrong : box} px-3 py-2.5`}>

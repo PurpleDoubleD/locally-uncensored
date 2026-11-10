@@ -91,8 +91,8 @@ async function confirmAction(
   if (answer.allow) return null
   auditAction(run, o.key, o.title, answer.reason === 'timeout' ? 'timeout' : 'declined')
   return answer.reason === 'timeout'
-    ? 'No answer on the card for 10 minutes, so no. Nothing changed. Do not ask again unless the user asks.'
-    : 'The user declined. Nothing changed. Do not ask again unless the user asks.'
+    ? 'NOT DONE. No answer on the card for 10 minutes, so no. Nothing happened. Tell the user so. Do not ask again unless the user asks.'
+    : 'NOT DONE. The user declined. Nothing happened. Tell the user so. Do not ask again unless the user asks.'
 }
 
 // ── lu_models ────────────────────────────────────────────────────
