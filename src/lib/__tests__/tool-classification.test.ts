@@ -36,6 +36,8 @@ const READ_ONLY_TOOLS: ReadonlySet<string> = new Set([
   // a read-only turn on purpose: /plan asking for a plan and then having no
   // tool to write one with would be absurd.
   'todo_write',
+  // 3.1.0 (P-L): searches and reads pages, GET only, nothing leaves but the query.
+  'web_research',
   'file_read',
   'file_list',
   'file_search',

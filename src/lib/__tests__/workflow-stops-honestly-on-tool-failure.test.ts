@@ -22,6 +22,9 @@
  * Run: npx vitest run src/lib/__tests__/workflow-stops-honestly-on-tool-failure.test.ts
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
+// P-L (3.1.0): the address gate has its own tests (web-research-und-quellen.test.ts); here the
+// mocked model picks no real address.
+vi.mock('../web-url-provenance', () => ({ guardWebUrl: async () => null, rememberUrls: () => {} }))
 
 const backendCall = vi.fn(async (..._args: unknown[]) => ({}))
 

@@ -10,6 +10,7 @@ import { argLines, callDuration, callFailure, callName, callState, CALL_STATE_TE
 const TOOL_ICON: Record<string, IconType> = {
   web_search: Search,
   web_fetch: Globe,
+  web_research: Globe,
   file_read: FileText,
   file_write: FileText,
   file_edit: FileText,

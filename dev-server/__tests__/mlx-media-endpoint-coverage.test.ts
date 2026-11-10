@@ -220,6 +220,10 @@ describe('endpointMap covers every backendCall/invokeMedia site the frontend can
     // The tray menu's lines and memory figure (T2, 3.0.9, hooks/useTraySync.ts).
     // Sent only behind isTauri(): the browser build has no tray.
     'tray_memory', 'tray_update',
+    // P-L (3.1.0): web_research falls back to web_search outside the app
+    // (api/mcp/builtin-tools.ts); the LU browser is registered only behind
+    // isTauri() (lib/browser-tools.ts, browserExistsHere).
+    'web_research', 'browser_control', 'browser_screenshot',
     // Restore chats from backup (3.0.10): reads store_backup*.json, only behind isTauri().
     'chat_backup_conversations',
     'exit_app', 'file_read', 'find_orphan_downloads', 'fix_comfyui_cors', 'funnel_ping',

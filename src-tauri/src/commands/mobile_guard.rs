@@ -26,6 +26,13 @@ pub const REFUSAL: &str = "This function is not available in the phone app.";
 /// Never reachable on a phone: starts a process, runs code, opens a port,
 /// hands out a token for one, reads the screen or the process table.
 pub const BLOCKED: &[&str] = &[
+    // The LU browser opens a desktop window (browser.rs, P-L 3.1.0).
+    "browser_open",
+    "browser_snapshot",
+    "browser_scroll",
+    "browser_click_link",
+    "browser_screenshot",
+    "browser_control",
     // Desktop commands of 3.0.8, sorted when the phone line joined the
     // 3.0.8 candidate: the host side of Remote, storage and the runtime
     // folder, Abliteration, the model check, GPU roles, the REA plugin. A
@@ -275,6 +282,7 @@ pub const ALLOWED: &[&str] = &[
     // The network, each with its own address checks.
     "web_search",
     "web_fetch",
+    "web_research",
     "ollama_search",
     "fetch_external",
     "fetch_external_bytes",

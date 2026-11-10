@@ -65,6 +65,15 @@ const AGENT_LOOP_TOOLS = new Set(['delegate_task', 'run_workflow'])
  */
 const HUMAN_PACED_TOOLS = new Set(['computer_use', 'computer_task', 'set_setting'])
 
+/**
+ * P-L (3.1.0): web tools that may stop for the user's yes before an address
+ * (lib/web-url-provenance.ts). The page itself has its own deadline in Rust
+ * (20 s for a fetch, 30 s for a browser load), so a long cap here only waits
+ * for a person, never for a hung connection.
+ */
+export const URL_CARD_TOOLS = new Set(['web_fetch', 'browser_open', 'browser_click_link'])
+export const URL_CARD_CAP_MS = 10 * 60_000
+
 export interface ToolTimeoutSettings {
   imageGenTimeoutMinutes?: number
   videoGenTimeoutMinutes?: number
@@ -117,6 +126,7 @@ export function toolCallCapMs(
   if (HUMAN_PACED_TOOLS.has(name)) {
     return NO_PRACTICAL_CAP_MS
   }
+  if (URL_CARD_TOOLS.has(name)) return URL_CARD_CAP_MS
   if (LONG_RUNNING.has(name)) {
     const own = Number(args?.timeout)
     return Number.isFinite(own) && own > 0 ? own + 15_000 : SHELL_EXECUTE_DEFAULT_TIMEOUT_MS + 15_000

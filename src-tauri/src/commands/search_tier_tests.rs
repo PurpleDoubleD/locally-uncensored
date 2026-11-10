@@ -905,3 +905,25 @@ async fn live_search_against_the_real_services() {
         }
     }
 }
+
+// ── DuckDuckGo pause after a bot check (P-L, 09.11.2026) ─────────────────
+
+#[tokio::test]
+async fn after_a_bot_check_duckduckgo_is_skipped_on_the_next_search() {
+    let s = stub(|r| match r.path.as_str() {
+        "/lite/" | "/html/" => reply(202, HTML, DDG_BOT_PAGE),
+        p if p.starts_with("/wiki/en/") => wiki_hits("en"),
+        _ => dead(r),
+    })
+    .await;
+    let first = run(&request("rust language", "auto"), &s.endpoints(), &fast()).await;
+    assert_eq!(first["provider"], "wikipedia");
+    assert_eq!(s.hits("/lite/").len(), 1);
+    assert!(ddg_cooling(&s.endpoints().ddg_lite).is_some());
+
+    let second = run(&request("rust language", "auto"), &s.endpoints(), &fast()).await;
+    assert_eq!(second["provider"], "wikipedia");
+    assert_eq!(s.hits("/lite/").len(), 1, "DuckDuckGo is not asked again while it is cooling down");
+    let ddg = second["tried"].as_array().unwrap().iter().find(|t| t["tier"] == "duckduckgo").unwrap();
+    assert!(ddg["detail"].as_str().unwrap().starts_with("skipped"), "{ddg}");
+}

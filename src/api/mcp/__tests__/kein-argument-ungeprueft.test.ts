@@ -28,6 +28,8 @@
  * Run: npx vitest run src/api/mcp/__tests__/kein-argument-ungeprueft.test.ts
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+// P-L (3.1.0): the address gate has its own tests (lib/__tests__/web-research-und-quellen.test.ts).
+vi.mock('../../../lib/web-url-provenance', () => ({ guardWebUrl: async () => null, rememberUrls: () => {} }))
 
 const backendCalls: { cmd: string; body: Record<string, unknown> }[] = []
 
@@ -65,6 +67,9 @@ registerBuiltinTools(registry)
 /** Jede Pflichtangabe vom Typ string, mit einem Wert, der durchginge. */
 const PFLICHT: Record<string, Record<string, string>> = {
   web_search: { query: 'lu experiment' },
+  web_research: { query: 'lu experiment' },
+  browser_open: { url: 'https://example.com/a' },
+  browser_click_link: { link: 'L1' },
   web_fetch: { url: 'https://example.com/a' },
   file_read: { path: 'a.ts' },
   file_write: { path: 'a.ts', content: 'neu' },
@@ -121,7 +126,8 @@ describe('die Tabelle deckt den Katalog ab', () => {
 })
 
 describe('eine Anfrage ohne ihre Pflichtangabe geht gar nicht erst hinaus', () => {
-  for (const [tool, voll] of Object.entries(PFLICHT)) {
+  // The LU browser is registered only inside the app on macOS and Windows.
+  for (const [tool, voll] of Object.entries(PFLICHT).filter(([t]) => !t.startsWith('browser_') || registry.getToolByName(t))) {
     for (const fehlt of Object.keys(voll)) {
       it(`${tool} ohne \`${fehlt}\``, async () => {
         const args: Record<string, unknown> = { ...voll }

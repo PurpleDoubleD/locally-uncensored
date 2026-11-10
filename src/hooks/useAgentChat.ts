@@ -1,3 +1,4 @@
+import { stripSourcesMarker } from '../lib/web-evidence'
 import { useRef, useState, useCallback, useEffect } from 'react'
 import { frameFlush } from '../lib/frame-flush'
 import { useRunActivityStore, toolProgressActivity, waitBeforeRetry, readingActivity, endFirstWait, hiddenThoughtArrived, waitForChatCard } from '../stores/runActivityStore'
@@ -3227,7 +3228,7 @@ export function useAgentChat() {
             r.status === 'rejected'
               ? REJECTED_CALL_FOR_MODEL
               : r.status === 'completed' || r.status === 'cached'
-                ? (r.result ?? '')
+                ? stripSourcesMarker(r.result ?? '') // P-L: the source cards' marker is for the chat, not the model
                 : r.errorHint
                   ? `${r.error ?? 'Tool failed'}, ${r.errorHint}`
                   : (r.error ?? 'Tool failed')
@@ -3997,7 +3998,7 @@ Other rules:
 - To CHANGE part of an existing file use file_edit (replace a UNIQUE old_string with new_string), never file_write: rewriting a large file to change three lines truncates it and costs a fortune in tokens. file_write is for creating a new file or fully replacing one.
 - PATHS: use paths relative to your working directory (e.g. \`package.json\`, \`src/app.ts\`, \`.\` for the current folder). Never start a path with \`/\` or a drive letter (\`C:\\\`), that escapes your workspace and fails. To list the current folder, use file_list with path \`.\`.
 - For filesystem READ tasks: file_list first if needed, then file_read.
-- For web tasks: web_search → web_fetch on the best URL → answer based on real data. web_search returns ONLY short snippets, ALWAYS call web_fetch to read the page.
+- For web tasks: web_research first (it searches AND reads the best pages, cite its sources as [1], [2]). Use web_fetch on one URL for more detail. web_search returns ONLY short snippets.
 - OS, clock and timezone are stated in this prompt (platform up top, clock at the very end, where a volatile line cannot spoil the prompt cache), so do not spend a call finding them out. For hardware details or running processes, use shell_execute (macOS/Linux: \`uname -a\`, \`ps aux\`; Windows: \`Get-ComputerInfo\`, \`Get-Process\`).
 - Chain multiple tools as needed. If a tool fails, try a different approach.
 - Be concise in text. All the work happens in tool calls.
@@ -4061,10 +4062,10 @@ export function buildChatToolsSystemPrompt(
 - video_generate, create a short video/animation when the user asks for one (to animate an image you just made, pass its filename as inputImage)`
   const example = opts.media === false ? 'web_search("…")' : 'image_generate("…")'
   const p = `You are a helpful chat assistant in LU, having a normal conversation. You also have a few tools for things you cannot do from memory, use one ONLY when the user's request actually needs it, otherwise just reply normally:
-- web_search, look up current/real-world facts (returns short snippets)
-- web_fetch, read a specific web page or URL (after a search, or when the user gives a link)
+- web_research, look up current/real-world facts: searches and reads the best pages in one call, cite its sources as [1], [2]
+- web_fetch, read a specific web page or URL (when the user gives a link, or for more detail)
 - file_write, save text to a file when the user asks you to write/create/save a file${media}
 
-Emit tool calls through the real tool channel, never as plain text like ${example}. After a tool runs, give a short, natural reply about the result. For web questions, prefer web_search then web_fetch on the best result before answering. Reply in the user's language.`
+Emit tool calls through the real tool channel, never as plain text like ${example}. After a tool runs, give a short, natural reply about the result. For web questions, call web_research and answer from its sources with [n] citations. Reply in the user's language.`
   return basePrompt ? `${p}\n\n${basePrompt}` : p
 }

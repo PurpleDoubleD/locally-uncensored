@@ -1187,6 +1187,13 @@ pub fn run() {
             // Web search
             commands::search::web_search,
             commands::search::web_fetch,
+            commands::search::web_research,
+            commands::browser::browser_open,
+            commands::browser::browser_snapshot,
+            commands::browser::browser_scroll,
+            commands::browser::browser_click_link,
+            commands::browser::browser_screenshot,
+            commands::browser::browser_control,
             commands::search::search_status,
             commands::search::install_searxng,
             commands::search::searxng_status,

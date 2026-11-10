@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest'
+import { BROWSER_TOOL_NAMES, browserExistsHere } from '../../lib/browser-tools'
 import {
   AGENT_TOOL_DEFS,
   getOllamaTools,
@@ -41,7 +42,11 @@ describe('AGENT_TOOL_DEFS', () => {
     // 3.0.8 (A11): +2, get_settings und set_setting. Sie stehen in keinem
     // Prompt, der nicht nach Einstellungen fragt: im Chat und in Agent nur
     // ueber SETTINGS_KEYWORDS, in Code hinter dem Tor (GATE_KEYWORDS).
-    expect(AGENT_TOOL_DEFS).toHaveLength(19)
+    //
+    // 3.1.0 (P-L): +1, web_research. Es ersetzt fuer kleine Modelle das Paar
+    // web_search+web_fetch in einem Aufruf (lib/tool-selection.ts). Dazu die
+    // fuenf Werkzeuge des LU-Browsers, nur auf macOS und Windows registriert.
+    expect(AGENT_TOOL_DEFS).toHaveLength(20 + (browserExistsHere() ? BROWSER_TOOL_NAMES.length : 0))
   })
 
   const expectedTools = [
@@ -49,6 +54,7 @@ describe('AGENT_TOOL_DEFS', () => {
     'message_agent',
     'todo_write',
     'web_search',
+    'web_research',
     'web_fetch',
     'file_read',
     'file_write',
@@ -95,9 +101,11 @@ describe('AGENT_TOOL_DEFS', () => {
     // 3.0.8 (A11): get_settings liest nur, set_setting fragt mit seiner
     // eigenen Karte (alt -> neu), auch im Bypass. Eine zweite Rueckfrage
     // davor fragte doppelt, wie bei create_order.
+    // 3.1.0 (P-L): web_research and the browser read only, like web_fetch.
     expect(autoNames).toEqual([
-      'check_tasks', 'get_settings', 'message_agent', 'set_setting', 'todo_write', 'web_fetch', 'web_search',
-    ])
+      ...(browserExistsHere() ? [...BROWSER_TOOL_NAMES] : []),
+      'check_tasks', 'get_settings', 'message_agent', 'set_setting', 'todo_write', 'web_fetch', 'web_research', 'web_search',
+    ].sort())
   })
 
   it('confirm-permission tools include file ops, code, shell, image, workflow, screenshot, delegate_task, sprint A/B/C tools', () => {

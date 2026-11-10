@@ -292,6 +292,13 @@ async fn ask(tier: Tier, req: &Request<'_>, count: usize, ends: &Endpoints, timi
         Tier::You => you_hosted(req.query, count, &ends.you_mcp, within(timing.hosted)).await,
         Tier::Searxng => searxng(req.query, count, &ends.searxng, within(timing.searxng)).await,
         Tier::DuckDuckGo => {
+            // DuckDuckGo answered with its bot check a short while ago: it
+            // keeps doing so for this address for a while (09.11.2026, five of
+            // five probes 202). Asking again costs the user two page timeouts
+            // for a refusal that is certain, so the tier is skipped.
+            if let Some(left) = ddg_cooling(&ends.ddg_lite) {
+                return Outcome::Failed(format!("skipped, bot check in the last {} min", (DDG_COOLDOWN - left).as_secs() / 60 + 1));
+            }
             let started = Instant::now();
             let ua = req.user_agent.unwrap_or(DDG_USER_AGENT);
             let lite = ddg(req.query, count, &ends.ddg_lite, DdgPage::Lite, ua, within(timing.page)).await;
@@ -306,7 +313,12 @@ async fn ask(tier: Tier, req: &Request<'_>, count: usize, ends: &Endpoints, timi
             match (lite, html) {
                 (_, hits @ Outcome::Hits(_)) => hits,
                 (Outcome::Empty, _) | (_, Outcome::Empty) => Outcome::Empty,
-                (Outcome::Failed(a), Outcome::Failed(b)) => Outcome::Failed(format!("Lite: {a}; HTML: {b}")),
+                (Outcome::Failed(a), Outcome::Failed(b)) => {
+                    if a.contains("bot check") || b.contains("bot check") {
+                        ddg_cool_down(&ends.ddg_lite);
+                    }
+                    Outcome::Failed(format!("Lite: {a}; HTML: {b}"))
+                }
                 (a, _) => a,
             }
         }
@@ -314,6 +326,28 @@ async fn ask(tier: Tier, req: &Request<'_>, count: usize, ends: &Endpoints, timi
             let ua = req.user_agent.unwrap_or(APP_USER_AGENT.as_str());
             wikipedia(req.query, count, &ends.wikipedia, ua, timing.page, left).await
         }
+    }
+}
+
+/// How long DuckDuckGo is left out after it answered with its bot check.
+pub(crate) const DDG_COOLDOWN: Duration = Duration::from_secs(30 * 60);
+
+/// When DuckDuckGo last showed its bot check, per Lite address. Keyed by the
+/// address so the tests, each with its own stub, do not see one another.
+static DDG_BLOCKED: LazyLock<std::sync::Mutex<std::collections::HashMap<String, Instant>>> =
+    LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+
+/// How much of the pause is left for this address, `None` when it may be asked.
+pub(crate) fn ddg_cooling(endpoint: &str) -> Option<Duration> {
+    let map = DDG_BLOCKED.lock().ok()?;
+    let at = map.get(endpoint)?;
+    let since = at.elapsed();
+    (since < DDG_COOLDOWN).then(|| DDG_COOLDOWN - since)
+}
+
+pub(crate) fn ddg_cool_down(endpoint: &str) {
+    if let Ok(mut map) = DDG_BLOCKED.lock() {
+        map.insert(endpoint.to_string(), Instant::now());
     }
 }
 

@@ -11,6 +11,7 @@
  * filtering, the model has no syntactically valid path to recurse.
  */
 
+import { stripSourcesMarker } from '../../lib/web-evidence'
 import { settleThinking } from '../../lib/thinking-stripper'
 import { toolResultIsFailure } from '../../lib/tool-result-failure'
 import { isRunStopped } from '../../lib/run-stop'
@@ -670,7 +671,7 @@ export async function defaultSubAgentRunner(
         // fuer eine Fortsetzung im Store liegen kann, waere ein 4-MB-Protokoll
         // aus einem file_read eine Zeile, die niemand mehr loswird.
         content: clampTaskResult(
-          r.result ?? gates.refusals.get(r.id) ?? r.error ?? '(no output)',
+          (r.result !== undefined ? stripSourcesMarker(r.result) : undefined) ?? gates.refusals.get(r.id) ?? r.error ?? '(no output)',
         ),
         tool_call_id: turn.toolCalls[i]?.id,
       })

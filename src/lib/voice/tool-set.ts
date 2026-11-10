@@ -20,7 +20,7 @@ import type { MCPToolDefinition } from '../../api/mcp/types'
 import { COMPUTER_TASK_TOOL_NAME, COMPUTER_USE_TOOL_NAME } from '../computer/prompt'
 
 export const LOCAL_VOICE_TOOLS: ReadonlySet<string> = new Set([
-  'web_search', 'web_fetch',
+  'web_search', 'web_fetch', 'web_research',
   'file_read', 'file_write', 'file_edit', 'file_list', 'file_search',
   'shell_execute',
   COMPUTER_TASK_TOOL_NAME,

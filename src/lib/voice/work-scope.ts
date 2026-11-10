@@ -65,7 +65,7 @@ const SHELL_TOOLS: ReadonlySet<string> = new Set(['shell_execute'])
  * computer changes. The chat's other three write a file or start a render,
  * which a spoken conversation does not do without the agent.
  */
-export const CONVERSATION_TOOLS: ReadonlySet<string> = new Set(['web_search', 'web_fetch'])
+export const CONVERSATION_TOOLS: ReadonlySet<string> = new Set(['web_search', 'web_fetch', 'web_research'])
 
 export const AGENT_OFF_REFUSAL =
   'With the agent off this voice session can only look things up on the web. Tell the user that the Agent switch at the top of Voice lets it work with files, commands and the screen.'

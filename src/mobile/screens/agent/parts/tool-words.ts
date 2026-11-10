@@ -60,6 +60,7 @@ export function toolTarget(name: string, rawArgs: unknown): string {
   const args: Args = rawArgs && typeof rawArgs === 'object' ? (rawArgs as Args) : {}
   switch (name) {
     case 'web_search':
+    case 'web_research':
       return text(args, 'query', 'q')
     case 'web_fetch':
       return hostOf(text(args, 'url'))
@@ -141,6 +142,7 @@ export function argLines(rawArgs: unknown, max = 600): Array<{ key: string; valu
 const TOOL_GROUP: Record<string, PermissionGroupId> = {
   web_search: 'web',
   web_fetch: 'web',
+  web_research: 'web',
   file_read: 'files',
   file_write: 'files',
   file_edit: 'files',

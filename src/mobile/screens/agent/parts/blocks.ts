@@ -136,7 +136,7 @@ export function orderedSearchDidNotRun(userText: string | undefined, message: Pi
   if (message.role !== 'assistant' || !Array.isArray(message.agentBlocks)) return false
   if (!userText || explicitSearchQuery(userText) === null) return false
   const calls = message.agentBlocks.flatMap((block) => (block.phase === 'tool_call' ? (block.toolCalls?.length ? block.toolCalls : block.toolCall ? [block.toolCall] : []) : []))
-  return !calls.some((call) => call.toolName === 'web_search' || call.toolName === 'web_fetch')
+  return !calls.some((call) => call.toolName === 'web_search' || call.toolName === 'web_fetch' || call.toolName === 'web_research')
 }
 
 /** Pure: what the user typed for the run this answer belongs to. */

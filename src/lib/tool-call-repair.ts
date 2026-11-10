@@ -378,7 +378,7 @@ export function looksLikeToolIntent(text: string): boolean {
   if (extractToolCallsFromContent(text).length > 0) return true
   // name({...}) / name(query=…) call shapes, or an LU builtin named verbatim.
   if (/\b[a-z][a-z0-9_]{2,}\s*\(\s*[{"']/.test(text)) return true
-  return /\b(web_search|web_fetch|image_generate|video_generate|file_read|file_write|file_list|file_search|shell_execute|system_info)\b/.test(text)
+  return /\b(web_research|web_search|web_fetch|image_generate|video_generate|file_read|file_write|file_list|file_search|shell_execute|system_info)\b/.test(text)
 }
 
 /**
@@ -429,7 +429,7 @@ export function extractToolCallsWithRanges(content: string): {
 
   // Pattern 2: tool_name(arg1, arg2) — function call syntax
   if (calls.length === 0) {
-    const pattern2 = /\b(web_search|web_fetch|file_read|file_write|file_list|file_search|shell_execute|code_execute|system_info|process_list|screenshot)\s*\(\s*([^)]*)\)/gi
+    const pattern2 = /\b(web_research|web_search|web_fetch|file_read|file_write|file_list|file_search|shell_execute|code_execute|system_info|process_list|screenshot)\s*\(\s*([^)]*)\)/gi
     let match: RegExpExecArray | null
     while ((match = pattern2.exec(content)) !== null) {
       ranges.push([match.index, match.index + match[0].length - 1])

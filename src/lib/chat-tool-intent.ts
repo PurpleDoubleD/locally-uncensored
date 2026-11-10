@@ -20,6 +20,7 @@
 
 /** The exact tools surfaced in plain chat. Order is irrelevant. */
 export const CHAT_TOOLS = [
+  'web_research',
   'web_search',
   'web_fetch',
   'file_write',

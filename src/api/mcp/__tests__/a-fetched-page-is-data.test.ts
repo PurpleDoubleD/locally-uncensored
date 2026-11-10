@@ -7,6 +7,8 @@
  * Run: npx vitest run src/api/mcp/__tests__/a-fetched-page-is-data.test.ts
  */
 import { describe, it, expect, vi } from 'vitest'
+// P-L (3.1.0): the address gate has its own tests (lib/__tests__/web-research-und-quellen.test.ts).
+vi.mock('../../../lib/web-url-provenance', () => ({ guardWebUrl: async () => null, rememberUrls: () => {} }))
 
 const backendCall = vi.fn(async (..._args: unknown[]) => ({}))
 

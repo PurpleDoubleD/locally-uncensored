@@ -466,6 +466,13 @@ export interface Settings {
    */
   codexConfirmShell: boolean
   /**
+   * P-L (3.1.0): a web tool opens without asking only an address the user
+   * wrote or one that came back from a web tool in this conversation. Any
+   * other address gets a card (lib/web-url-provenance.ts). Default ON; off
+   * opens every public address unasked, as before 3.1.0.
+   */
+  webStrictUrls: boolean
+  /**
    * Opt in to confirming shell/code on LU Cloud models even when
    * `codexConfirmShell` is off. Governs BOTH surfaces (Code tab and Agent
    * mode), and rides on top of Agent's per-tool permission levels.

@@ -32,7 +32,7 @@ export const SETTINGS_TAB_RESET_KEYS: Record<SettingsTab, (keyof Settings)[]> = 
     'personasEnabled', 'defaultWorkspace',
     'agentMaxToolCalls', 'agentMaxIterations', 'agentLoopGuard',
     'subAgentMaxToolCalls', 'subAgentMaxIterations', 'loopMaxPasses',
-    'searchProvider', 'braveApiKey', 'tavilyApiKey', 'exaApiKey', 'searchUserAgent',
+    'searchProvider', 'braveApiKey', 'tavilyApiKey', 'exaApiKey', 'searchUserAgent', 'webStrictUrls',
     'codexArchitectMode', 'codexArchitectModel', 'codexArchitectAllowCloud',
     'codexRepoMapEnabled', 'codexRepoMapLimit', 'codexAutoApply', 'codexReviewMode',
     'codexConfirmShell', 'codexCloudConfirmOptIn',

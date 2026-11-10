@@ -227,7 +227,7 @@ const TOOL_NAME_ALIASES: Record<string, string> = {
   video_generation: 'video_generate', generate_video: 'video_generate', videogen: 'video_generate',
   create_video: 'video_generate', make_video: 'video_generate', animate: 'video_generate', animate_image: 'video_generate',
   text_to_video: 'video_generate', image_to_video: 'video_generate',
-  web: 'web_search', search: 'web_search', fetch: 'web_fetch', read_file: 'file_read', write_file: 'file_write',
+  web: 'web_search', search: 'web_search', fetch: 'web_fetch', research: 'web_research', read_file: 'file_read', write_file: 'file_write',
   list_files: 'file_list', search_files: 'file_search', run_shell: 'shell_execute', run_code: 'code_execute',
   // Retired targets (A9). These resolve only because the retired list is the
   // second ladder in canonicalToolName; while the name was registered they

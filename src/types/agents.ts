@@ -18,6 +18,12 @@ export type TaskStatus =
 export type ToolName =
   | "web_search"
   | "web_fetch"
+  | "web_research"
+  | "browser_open"
+  | "browser_snapshot"
+  | "browser_scroll"
+  | "browser_click_link"
+  | "browser_screenshot"
   | "file_read"
   | "file_write"
   | "image_generate";

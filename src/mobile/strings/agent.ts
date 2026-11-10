@@ -42,6 +42,7 @@ export const AGENT_STRINGS = {
     names: {
       web_search: 'Search the web',
       web_fetch: 'Read a page',
+      web_research: 'Research the web',
       file_read: 'Read a file',
       file_write: 'Write a file',
       file_edit: 'Change a file',

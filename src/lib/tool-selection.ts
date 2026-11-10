@@ -166,7 +166,12 @@ const TOOL_GROUPS: ToolGroup[] = [
       'news', 'web search', 'websearch', 'search online', 'search the web', 'browse', 'website', 'webseite',
       'url', 'http://', 'https://', 'weather', 'wetter',
       'such nach', 'such im', 'im internet', 'recherch', 'nachrichten', 'neueste'],
-    tools: ['web_search', 'web_fetch'],
+    tools: ['web_research', 'web_fetch'],
+  },
+  {
+    // P-L (3.1.0): the LU browser, only when the user asks for a browser.
+    keywords: ['browser', 'im browser', 'in the browser', 'browse to', 'open the page', 'oeffne die seite', 'zeig mir die seite', 'show me the page'],
+    tools: ['browser_open', 'browser_scroll', 'browser_click_link'],
   },
   {
     keywords: ['read', 'open', 'show', 'cat', 'content of', 'what does', 'look at', 'check file'],
@@ -283,6 +288,7 @@ export const EMBEDDING_ROUTING_THRESHOLD = 15
 import type { EmbeddingFn } from '../api/agents/embedding-router'
 import { REA_SERVER_ID, reaToolsFor } from './plugins/rea-tools'
 import { selectToolsByEmbedding } from '../api/agents/embedding-router'
+import { isMobile } from './device-kind'
 
 /**
  * Select relevant tools based on user message content.
@@ -365,8 +371,12 @@ export function selectRelevantTools(
     // Der Coding-Zug verlor damit sein letztes Werkzeug, um Dateien zu finden
     // — dieselbe Regression, gegen die die Sperren in tool-selection.test.ts
     // ("coding intent routing") gebaut wurden.
+    // P-L (3.1.0): web_research takes the place of web_search here. It
+    // searches AND reads in one call, so a small model under the cap gets
+    // real page text without a second round, and the pair still costs only
+    // two places.
     if (!lokaleArbeit) {
-      selectedNames.add('web_search')
+      selectedNames.add('web_research')
       selectedNames.add('web_fetch')
     }
   }
@@ -399,7 +409,14 @@ export function selectRelevantTools(
   // NUR in diese Richtung: web_fetch kommt zu web_search, nicht umgekehrt. Wer
   // eine URL hat, braucht keine Suche, und unter dem Small-Model-Deckel kostet
   // jedes ungefragte Werkzeug einen von zwei freien Plaetzen.
-  if (selectedNames.has('web_search')) selectedNames.add('web_fetch')
+  if (selectedNames.has('web_search') || selectedNames.has('web_research')) selectedNames.add('web_fetch')
+  // A catalog without web_research (a surface that does not register it)
+  // keeps the old pair. So does the phone: its ordered search ("Websuche:
+  // …") pins web_search, and web_research was not checked on a phone yet.
+  if (selectedNames.has('web_research') && (isMobile() || !allTools.some((t) => t.name === 'web_research'))) {
+    selectedNames.delete('web_research')
+    selectedNames.add('web_search')
+  }
 
   // Filter by permissions (blocked categories excluded)
   const available = allTools.filter(t => permissions[t.category] !== 'blocked')
