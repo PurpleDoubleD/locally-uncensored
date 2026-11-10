@@ -14,6 +14,8 @@
  * and the file is a few hundred kB, not the 10 MB a render can be.
  */
 import { storeAttachment } from './chat-attachments'
+import { resultMediaUrl } from './chat-media-refs'
+import { fileUrlToPath } from './local-media-url'
 
 export const BG_EDGE = 1920
 const MAX_INPUT_BYTES = 40 * 1024 * 1024
@@ -49,20 +51,32 @@ export async function storeBackground(blob: Blob): Promise<string> {
 }
 
 /** The address of the picture in an image_generate result
- *  (`Image generated: <file> (prompt: "...")\n<url>`), or null. */
+ *  (`Image generated: <file> (prompt: "...")\n<url>`), or null. The same
+ *  reading as the chat's own media (lib/chat-media-refs): a ComfyUI /view
+ *  address, absolute or the dev proxy's relative `/comfyui/view?…`, a
+ *  `file://` the Mac wrote, or a `data:` picture. */
 export function resultUrl(result: string): string | null {
-  const lines = result.split('\n').map((l) => l.trim()).filter(Boolean)
-  for (let i = lines.length - 1; i >= 0; i--) {
-    const m = /^(https?:\/\/\S+|blob:\S+|data:image\/\S+)$/.exec(lines[i])
-    if (m) return m[1]
-  }
-  return null
+  const url = resultMediaUrl(result)
+  return url && !/^data:video\//i.test(url) ? url : null
 }
 
 /** Whether the tool said it made a picture. Its refusals and failures are
  *  sentences ("Error: ...", "Cannot generate: ...", "... cancelled."). */
 export function generatedOk(result: string): boolean {
   return /^Image generated:/i.test(result.trim()) && resultUrl(result) !== null
+}
+
+/** The bytes behind a result address, base64. A Mac render is a file the
+ *  app wrote; it is read the way the vision loop reads it (read_media_file). */
+export async function readResultPicture(url: string): Promise<string> {
+  if (/^file:\/\//i.test(url)) {
+    const path = fileUrlToPath(url)
+    if (!path) throw new Error('The picture file could not be found.')
+    const { backendCall } = await import('../api/backend')
+    return backendCall<string>('read_media_file', { path })
+  }
+  const { fetchComfyImageBase64 } = await import('../api/comfyui')
+  return fetchComfyImageBase64(url)
 }
 
 /**
@@ -73,11 +87,9 @@ export async function renderSceneBackground(prompt: string, conversationId: stri
   const { generateMediaForRemote } = await import('../api/mcp/builtin-tools')
   const result = await generateMediaForRemote('image', { prompt, aspectRatio: '16:9' }, conversationId)
   if (!generatedOk(result)) throw new Error(result.trim().split('\n')[0] || 'The picture was not made.')
-  const url = resultUrl(result)!
-  const { fetchComfyImageBase64 } = await import('../api/comfyui')
-  const b64 = await fetchComfyImageBase64(url)
+  const b64 = await readResultPicture(resultUrl(result)!)
   const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))
-  return storeBackground(new Blob([bytes], { type: 'image/png' }))
+  return storeBackground(new Blob([bytes]))
 }
 
 /** Stop a render started by renderSceneBackground. */
