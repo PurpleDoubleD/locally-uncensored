@@ -46,8 +46,10 @@ function registryHere(): ToolRegistry {
 
 const GONE = ['shell_execute', 'pr_resume', 'screenshot', 'image_generate', 'video_generate']
 /** The settings tools of A11 (3.0.8): desktop only, see MOBILE_UNBUILT_TOOLS. */
-// A11 (3.0.8) and C60 (3.1.0): LU's own settings and actions, desktop only.
-const SETTINGS = ['get_settings', 'set_setting', 'set_settings', 'lu_models', 'lu_service', 'lu_download', 'lu_open_settings']
+// A11 (3.0.8), C60 (3.1.0) and C60-S5: LU's own settings, actions and the
+// ComfyUI workflow tools, desktop only.
+const SETTINGS = ['get_settings', 'set_setting', 'set_settings', 'lu_models', 'lu_service', 'lu_download', 'lu_open_settings',
+  'workflow_find', 'workflow_inspect', 'workflow_install', 'workflow_assign']
 const STAYS = [
   'todo_write', 'web_research', 'web_search', 'web_fetch', 'file_read', 'file_write', 'file_edit', 'file_list',
   'file_search', 'run_workflow', 'delegate_task', 'check_tasks', 'message_agent',
@@ -112,7 +114,7 @@ describe('the catalog on a phone', () => {
 
 describe('the catalog on a desktop is what it was', () => {
   for (const device of DESKTOPS) {
-    it(`${device}: all nineteen tools, the old names redirect`, () => {
+    it(`${device}: every tool, the old names redirect`, () => {
       standOn(device)
       const registry = registryHere()
       const names = registry.getAll().map((t) => t.name)

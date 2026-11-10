@@ -21,6 +21,9 @@ import { useWebUrlConfirmStore, pendingUrlForCall } from '../../stores/webUrlCon
 import { useSettingsConfirmStore, pendingForCall } from '../../stores/settingsConfirmStore'
 import { parseSettingChanges } from '../../api/mcp/settings-tools'
 import { parseSelfControlAction } from '../../api/mcp/self-control-defs'
+import { WorkflowCardAsk, WorkflowCardDone } from './WorkflowInstallCard'
+import { useWorkflowCardStore, workflowCardForCall } from '../../stores/workflowInstallConfirmStore'
+import { parseWorkflowMark } from '../../api/mcp/workflow-mark'
 import { isSelfControlToolName } from '../../lib/settings-tool-names'
 import { useChatStore } from '../../stores/chatStore'
 import { commandIcon } from '../../lib/shell-command-classify'
@@ -292,6 +295,11 @@ function ToolCallBlockImpl({ toolCall, onApprove, onReject }: Props) {
   const isWebTool = WEB_URL_TOOLS.has(toolCall.toolName)
   const urlAsk = useWebUrlConfirmStore((s) => (isWebTool && isRunning ? pendingUrlForCall(s.queue, toolCall.id) : null))
   const sourceCards = isWebTool && toolCall.status === 'completed' ? parseSourceCards(toolCall.result) : []
+  // C60-S5: a workflow install or assignment waits here with its traffic
+  // light check, and stays with Undo for the assignment.
+  const isWorkflowWrite = toolCall.toolName === 'workflow_install' || toolCall.toolName === 'workflow_assign'
+  const workflowAsk = useWorkflowCardStore((s) => (isWorkflowWrite && isRunning ? workflowCardForCall(s.queue, toolCall.id) : null))
+  const workflowMark = isWorkflowWrite && toolCall.status === 'completed' ? parseWorkflowMark(toolCall.result) : null
   // Real cancel (2026-06-16): only image/video generation supports a true
   // abort (ComfyUI /interrupt + loop abort). Local "cancelling" state flips the
   // mini button to a "stopping…" indicator the moment it's clicked.
@@ -460,6 +468,8 @@ function ToolCallBlockImpl({ toolCall, onApprove, onReject }: Props) {
       {sourceCards.length > 0 && <div className="ml-3.5 pl-2"><WebSourceCards cards={sourceCards} /></div>}
       {toolCall.toolName === 'browser_screenshot' && <div className="ml-3.5 pl-2"><BrowserShot toolCallId={toolCall.id} /></div>}
       {toolCall.toolName.startsWith('browser_') && <div className="ml-3.5 pl-2"><BrowserControls live={isRunning} /></div>}
+      {workflowAsk && <div className="ml-3.5 pl-2"><WorkflowCardAsk req={workflowAsk} /></div>}
+      {workflowMark && <div className="ml-3.5 pl-2"><WorkflowCardDone mark={workflowMark} /></div>}
       {isRunning && toolCall.toolName === 'computer_task' && <ScreenTaskSteps />}
       {(toolCall.toolName === 'computer_task' || toolCall.toolName === 'computer_use') && (
         <ScreenShotStrip callId={toolCall.id} className="ml-3.5 mb-1 pl-2" />

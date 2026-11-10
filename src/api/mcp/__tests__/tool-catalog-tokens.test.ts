@@ -137,8 +137,12 @@ const CODING_TOKEN_CEILING = 1730
 // get_settings und fahren nur auf einer Nachricht ueber LU selbst mit. Die
 // Beschreibungen sind auf einen Satz gekuerzt; die Token-Decke ist geschaetzt
 // (Zeichen / 4 auf die alte Decke), der Tokenizer-Lauf ist hier uebersprungen.
-const FULL_CHAR_CEILING = 21330
-const FULL_TOKEN_CEILING = 4630
+// 3.1.0 (C60-S5): +1.370 Zeichen fuer workflow_find/_inspect/_install/_assign
+// im VOLLEN Katalog (zusammen mit C60 gemessen 23.161, mit brief-Feldern). Der codierende Zug bleibt gleich: die
+// vier stehen hinter dem Tor und fahren nur auf einer Nachricht ueber einen
+// ComfyUI-Workflow mit. Token-Decke geschaetzt im selben Verhaeltnis.
+const FULL_CHAR_CEILING = 23200
+const FULL_TOKEN_CEILING = 5040
 
 describe('the coding step carries a catalog the diet actually shrank', () => {
   it('the gate really is what a plain coding turn gets', () => {

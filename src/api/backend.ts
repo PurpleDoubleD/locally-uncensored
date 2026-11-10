@@ -511,6 +511,9 @@ export async function backendCall<T = unknown>(
     set_ollama_host: { path: "/local-api/set-ollama-host", method: "POST" },
     get_ollama_host: { path: "/local-api/get-ollama-host" },
     install_custom_node: { path: "/local-api/install-custom-node", method: "POST" },
+    // C60-S5: desktop app only (dev-server/remote-stubs.ts answers 501).
+    install_lu_node_pack: { path: "/local-api/install-lu-node-pack", method: "POST" },
+    workflow_fetch: { path: "/local-api/workflow-fetch", method: "POST" },
     // The node pack manager (Settings, ComfyUI node packs) lives in Rust; the
     // plain vite server answers these three with the desktop-only 501.
     list_custom_nodes: { path: "/local-api/list-custom-nodes" },

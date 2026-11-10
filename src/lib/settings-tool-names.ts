@@ -4,6 +4,7 @@
 // voice, workflow, agent chat, tool search) can know them without importing
 // the stores behind api/mcp/settings-tools.ts and self-control-tools.ts.
 import { catalogWords } from './settings-catalog'
+import { WORKFLOW_TOOL_NAMES, WORKFLOW_GATE_WORDS } from './workflow-tool-names'
 
 export const GET_SETTINGS = 'get_settings'
 export const SET_SETTING = 'set_setting'
@@ -23,6 +24,8 @@ export const SETTINGS_TOOL_NAMES = [GET_SETTINGS, SET_SETTING] as const
  *  a turn about settings; sub-agents, voice, workflows and the local API never. */
 export const SELF_CONTROL_TOOL_NAMES = [
   GET_SETTINGS, SET_SETTING, SET_SETTINGS, LU_MODELS, LU_SERVICE, LU_DOWNLOAD, LU_OPEN_SETTINGS,
+  // C60-S5: find, check, install and assign ComfyUI workflows.
+  ...WORKFLOW_TOOL_NAMES,
 ] as const
 
 /** The actions, which only Agent and Code get. */
@@ -58,6 +61,7 @@ const ACTION_WORDS = [
   'comfyui', 'comfy', 'neustart', 'restart', 'starte', 'stoppe', 'start comfy', 'stop comfy',
   'local api', 'lokale api', 'localapi', 'api server', 'api-server',
   'remote', 'handy', 'phone', 'smartphone', 'fernzugriff',
+  ...WORKFLOW_GATE_WORDS,
   // The look, in the words people use (the old A11 list had them; the live
   // probe of 09.11.2026 lost "Stell das Design von LU auf hell" without them).
   'dark mode', 'light mode', 'darkmode', 'dunkelmodus', 'dunklen modus', 'hellen modus', 'dark theme', 'light theme',

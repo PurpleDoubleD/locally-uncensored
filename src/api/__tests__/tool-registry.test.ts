@@ -51,7 +51,12 @@ describe('AGENT_TOOL_DEFS', () => {
     // Download) hat Nebenwirkungen und eine eigene Karte und passt deshalb
     // nicht in set_setting. Alle fuenf stehen hinter demselben Tor wie
     // get_settings und fahren nur auf einer Nachricht ueber LU selbst mit.
-    expect(AGENT_TOOL_DEFS).toHaveLength(25 + (browserExistsHere() ? BROWSER_TOOL_NAMES.length : 0))
+    // 3.1.0 (C60-S5): +4 (zusammen mit C60: 28, mit P-L 29 plus Browser), workflow_find/_inspect/_install/_assign. Kein
+    // vorhandenes Werkzeug passt: run_workflow startet LUs eigene Ablaeufe,
+    // set_setting aendert Werte, das hier holt fremde Dateien mit Ampel und
+    // Karte. Sie fahren nur auf einer Nachricht ueber einen Workflow mit
+    // (WORKFLOW_GATE_WORDS), nie im Plain Chat, nie im Unteragenten.
+    expect(AGENT_TOOL_DEFS).toHaveLength(29 + (browserExistsHere() ? BROWSER_TOOL_NAMES.length : 0))
   })
 
   const expectedTools = [
@@ -113,6 +118,7 @@ describe('AGENT_TOOL_DEFS', () => {
       ...(browserExistsHere() ? [...BROWSER_TOOL_NAMES] : []),
       'check_tasks', 'get_settings', 'lu_download', 'lu_models', 'lu_open_settings', 'lu_service', 'message_agent',
       'set_setting', 'set_settings', 'todo_write', 'web_fetch', 'web_research', 'web_search',
+      'workflow_assign', 'workflow_find', 'workflow_inspect', 'workflow_install',
     ].sort())
   })
 

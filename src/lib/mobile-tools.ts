@@ -35,6 +35,8 @@ export const MOBILE_UNBUILT_TOOLS: ReadonlySet<string> = new Set([
   'get_settings', 'set_setting',
   // C60 (3.1.0): the batch change and the actions, desktop only as well.
   'set_settings', 'lu_models', 'lu_service', 'lu_download', 'lu_open_settings',
+  // C60-S5: the ComfyUI workflow tools.
+  'workflow_find', 'workflow_inspect', 'workflow_install', 'workflow_assign',
 ])
 
 /** The retired names that still run on a phone. All others end in a shell,

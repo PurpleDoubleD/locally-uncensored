@@ -73,6 +73,7 @@ mod python;
 mod voice;
 mod custom_nodes;
 mod custom_node_packs;
+mod lu_node_packs;
 
 pub(crate) use self::{
     base_python::*,
@@ -90,6 +91,7 @@ pub(crate) use self::{
     voice::*,
     custom_nodes::*,
     custom_node_packs::*,
+    lu_node_packs::*,
 };
 // The voice loop setup verifies its downloads with the same digest code the
 // installer downloads use.
@@ -114,6 +116,7 @@ mod tests {
         ("env_check.rs", include_str!("env_check.rs")),
         ("git.rs", include_str!("git.rs")),
         ("lmstudio.rs", include_str!("lmstudio.rs")),
+        ("lu_node_packs.rs", include_str!("lu_node_packs.rs")),
         ("lmstudio_install.rs", include_str!("lmstudio_install.rs")),
         ("ollama.rs", include_str!("ollama.rs")),
         ("pip.rs", include_str!("pip.rs")),

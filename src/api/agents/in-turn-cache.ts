@@ -75,6 +75,11 @@ const NON_CACHEABLE_TOOLS = new Set<string>([
   'lu_service',
   'lu_download',
   'lu_open_settings',
+  // C60-S5: a search may differ a minute later, and install and assign ask the user.
+  'workflow_find',
+  'workflow_inspect',
+  'workflow_install',
+  'workflow_assign',
 ])
 
 /**

@@ -86,6 +86,7 @@ import { markToolsUnsupported } from '../api/tool-capability'
 import { extractMemoriesFromPair } from './useMemory'
 import { createSystemText, isCreateToolName, withCreateText } from '../lib/create/chat-switch'
 import { isSettingsToolName, isSelfControlToolName, SETTINGS_PROMPT_LINE, SELF_CONTROL_PROMPT_LINE } from '../lib/settings-tool-names'
+import { WORKFLOW_PROMPT_LINE } from '../lib/workflow-tool-names'
 // Create in chat only where the order card exists: not on the phone (lib/create-order-surface.ts).
 import { createLiveHere } from '../lib/create-order-surface'
 import {
@@ -1294,6 +1295,8 @@ export function useAgentChat() {
     // section is only there when the user switched the tool on.
     agentSystemPrompt = withComputerUsePrompt(agentSystemPrompt, offeredTools.map((t) => t.name))
     if (opts?.settingsTools) agentSystemPrompt += `\n\n${opts?.chatToolsMode ? SETTINGS_PROMPT_LINE : SELF_CONTROL_PROMPT_LINE}`
+    // C60-S5: the workflow tools ride with the actions, outside plain chat.
+    if (opts?.settingsTools && !opts?.chatToolsMode) agentSystemPrompt += `\n${WORKFLOW_PROMPT_LINE}`
     // Create in chat: on = the paragraph; outside Cloud mode and without the
     // account's release not a word. Off = not a word, unless the customer
     // plainly asks for a medium in this message: then the note that points at

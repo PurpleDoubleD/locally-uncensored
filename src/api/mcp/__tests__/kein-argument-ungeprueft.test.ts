@@ -92,6 +92,10 @@ const PFLICHT: Record<string, Record<string, string>> = {
   lu_service: { service: 'comfyui', action: 'status' },
   lu_download: { action: 'status' },
   lu_open_settings: { area: 'keys' },
+  // C60-S5: ohne Fund keine Pruefung, ohne Fund und Modell keine Karte.
+  workflow_inspect: { id: 'civ1' },
+  workflow_install: { id: 'civ1' },
+  workflow_assign: { workflow: 'Flux Upscale', model: 'flux1-dev.safetensors' },
 }
 
 /**

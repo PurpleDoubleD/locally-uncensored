@@ -81,6 +81,7 @@ pub mod neuron;
 pub mod oauth;
 pub mod process;
 pub mod proxy;
+pub mod workflow_fetch;
 pub mod lan_address;
 pub mod remote;
 pub mod remote_chats;

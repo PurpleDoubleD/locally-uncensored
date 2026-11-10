@@ -9,6 +9,8 @@ import type { ToolRegistry } from './tool-registry'
 import { reserveCreateTools } from './create-tools'
 import { registerSettingsTools } from './settings-tools'
 import { registerSelfControlTools } from './self-control-defs'
+import { registerWorkflowTools } from './workflow-defs'
+import { WORKFLOW_TOOL_NAMES } from '../../lib/workflow-tool-names'
 import { SETTINGS_TOOL_NAMES, SELF_CONTROL_ACTION_NAMES } from '../../lib/settings-tool-names'
 import { v4 as uuid } from 'uuid'
 import { backendCall, isTauri } from '../backend'
@@ -2498,6 +2500,8 @@ export function registerBuiltinTools(registry: ToolRegistry) {
   // C60 (3.1.0): the batch change and the actions (models, services,
   // downloads, the settings page). Agent and Code only, same gate and card.
   if (SELF_CONTROL_ACTION_NAMES.every(toolExistsOnThisDevice)) registerSelfControlTools(registry)
+  // C60-S5: ComfyUI workflows from the chat, same gate, surfaces and policy.
+  if (WORKFLOW_TOOL_NAMES.every(toolExistsOnThisDevice)) registerWorkflowTools(registry)
 }
 
 // ── Retired tools (2.6.6 merge, plan E5) ────────────────────────

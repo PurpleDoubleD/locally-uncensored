@@ -524,7 +524,7 @@ pub(crate) fn pinned_client_as(
 /// `bearer` is the user's CivitAI API key. It is attached per hop and ONLY while
 /// that hop is a CivitAI host, so a redirect off CivitAI drops the credential
 /// instead of handing it to whoever the catalogue pointed at.
-async fn ssrf_safe_fetch(
+pub(crate) async fn ssrf_safe_fetch(
     url: &str,
     label: &str,
     timeout: Duration,
