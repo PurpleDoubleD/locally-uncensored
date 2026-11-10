@@ -118,6 +118,43 @@ describe('applyNativeHiresFix', () => {
     expect(result).toEqual(expect.objectContaining({ width: 1280, height: 1280 }))
   })
 
+  it('B46 / D8: a Qwen edit below Edit strength 1 on DualCFGGuider gets its pass on the same guider', () => {
+    const workflow: ComfyApiGraph = baseWorkflow()
+    workflow['10'] = { class_type: 'RandomNoise', inputs: { noise_seed: 123 } }
+    workflow['11'] = {
+      class_type: 'DualCFGGuider',
+      inputs: { model: ['1', 0], cond1: ['2', 0], cond2: ['3', 0], negative: ['3', 0], cfg_conds: 0.4, cfg_cond2_negative: 4, style: 'nested' },
+    }
+    workflow['12'] = { class_type: 'KSamplerSelect', inputs: { sampler_name: 'euler' } }
+    workflow['13'] = { class_type: 'BasicScheduler', inputs: { model: ['1', 0], scheduler: 'beta', steps: 20, denoise: 1 } }
+    workflow['4'] = {
+      class_type: 'SamplerCustomAdvanced',
+      inputs: { noise: ['10', 0], guider: ['11', 0], sampler: ['12', 0], sigmas: ['13', 0], latent_image: ['8', 0] },
+    }
+
+    const result = applyNativeHiresFix(workflow, {
+      baseWidth: 1024,
+      baseHeight: 1024,
+      scale: 1.5,
+      denoise: 0.35,
+      steps: 12,
+      upscaleMethod: 'bislerp',
+    })
+
+    const pass = result.workflow[result.samplerNodeId]
+    expect(pass.class_type).toBe('SamplerCustomAdvanced')
+    expect(nodeInput(pass, 'guider')).toEqual(['11', 0])
+    expect(nodeInput(pass, 'noise')).toEqual(['10', 0])
+    expect(nodeInput(pass, 'sampler')).toEqual(['12', 0])
+    expect(nodeInput(pass, 'latent_image')).toEqual([result.upscaleNodeId, 0])
+    const sigmas = nodeInput(pass, 'sigmas') as [string, number]
+    expect(result.workflow[sigmas[0]]).toEqual(expect.objectContaining({
+      class_type: 'BasicScheduler',
+      inputs: { model: ['1', 0], scheduler: 'beta', steps: 12, denoise: 0.35 },
+    }))
+    expect(nodeInput(result.workflow['5'], 'samples')).toEqual([result.samplerNodeId, 0])
+  })
+
   it('rejects workflows whose final decode is not fed by a core KSampler', () => {
     const workflow: ComfyApiGraph = baseWorkflow()
     workflow['4'].class_type = 'SamplerCustom'

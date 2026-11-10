@@ -8,7 +8,7 @@ import { useMacMemoryGb } from '../../../lib/mac-memory'
 import { applyAspect } from '../../../lib/create-resolution'
 import { useCreateStore, MODEL_TYPE_DEFAULTS, EDIT_MAX_DENOISE, imageQualityLadder, type ImageQuality } from '../../../stores/createStore'
 import { classifyModel, resolveLocalOpPick } from '../../../api/comfyui'
-import { readsEditStrength } from '../../../lib/edit-references'
+import { readsEditStrength, EDIT_STRENGTH_HINT, EDIT_DENOISE_HINT } from '../../../lib/edit-references'
 import { useCreateExp } from './CreateContext'
 import { intentToJob } from '../../../lib/render/cloud-jobs'
 import { meterState } from '../../../lib/render/credits-meter'
@@ -819,12 +819,12 @@ function LaneControls() {
 
         {meta.id === 'edit' && !mlxLocal && !qwenStrength && (
           <div className="w-44">
-            <Slider label="Edit strength" min={0.05} max={EDIT_MAX_DENOISE} step={0.05} value={Math.min(denoise, EDIT_MAX_DENOISE)} onChange={setDenoise} format={(v) => v.toFixed(2)} />
+            <Slider label="Edit strength" min={0.05} max={EDIT_MAX_DENOISE} step={0.05} value={Math.min(denoise, EDIT_MAX_DENOISE)} onChange={setDenoise} format={(v) => v.toFixed(2)} hint={EDIT_DENOISE_HINT} />
           </div>
         )}
         {meta.id === 'edit' && qwenStrength && (
           <div className="w-44">
-            <Slider label="Edit strength" min={0.05} max={1} step={0.05} value={editStrength} onChange={setEditStrength} format={(v) => v.toFixed(2)} />
+            <Slider label="Edit strength" min={0.05} max={1} step={0.05} value={editStrength} onChange={setEditStrength} format={(v) => v.toFixed(2)} hint={EDIT_STRENGTH_HINT} />
           </div>
         )}
       </div>

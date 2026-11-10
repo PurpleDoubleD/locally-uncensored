@@ -99,10 +99,21 @@ export const MANY_REFERENCES_LINE = 'With this many images, say what each one br
  * img2img `denoise`. Both Qwen edit families sample at denoise 1.0 from the
  * latent their encoder hands over, as the official templates do. Up to 3.0.7
  * the slider here set `denoise`, which the graph never read (Discord #general
- * 23.10.2026: "even with strength at 95%"); 3.0.8 took it out. B46 (3.0.9):
- * below 1 the run starts from the source at that denoise (dynamic-workflow.ts),
- * so the slider is back and does what it says.
+ * 23.10.2026: "even with strength at 95%"); 3.0.8 took it out. B46 (3.0.9)
+ * started the run from the source at that denoise, which gave the source back
+ * (D8, 3.0.10). Now it is guidance between the edit and the same images
+ * without an instruction (dynamic-workflow.ts).
  */
+/** The line under the Edit strength of a Qwen edit (1.00 = the edit). Below
+ *  1 a run through ComfyUI samples the edit and the source as it is in each
+ *  step, so it takes about twice as long. */
+export const EDIT_STRENGTH_HINT = '1.00 is the full edit. Lower makes a lighter edit and takes longer.'
+/** The same line on a Mac, whose engine starts a lower strength from the
+ *  image and so takes no longer. */
+export const EDIT_STRENGTH_HINT_MAC = '1.00 is the full edit. Lower keeps more of the original.'
+/** The line under the Edit strength of an img2img edit (the denoise). */
+export const EDIT_DENOISE_HINT = 'Higher lets the prompt change more. Lower keeps more of the original.'
+
 export function readsEditStrength(type: ModelType | null | undefined, modelName: string): boolean {
   return type === 'qwenimage' || (type === 'qwenimage1' && isQwenImageEditModel(modelName))
 }

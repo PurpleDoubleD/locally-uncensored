@@ -1159,19 +1159,30 @@ export async function buildDynamicWorkflow(
     ? await getSystemVRAM().catch(() => null)
     : null
   const fullImages = comfyEditFullImages(cardGb)
-  // B46 (Discord 30.10.2026, back in 3.0.9): the Edit strength of a Qwen
-  // edit. 1 is the template's edit from the empty latent, as before; below 1
-  // the sampler starts from the source itself at that denoise, so less of
-  // the picture changes. Up to 3.0.7 the slider showed here but its value
-  // never reached the graph (denoise stayed 1.0 on an empty latent).
+  // B46 / D8 (Discord 06.11.2026, 3.0.10): the Edit strength of a Qwen edit,
+  // as guidance between the edit and no edit. Both encoders also give a
+  // conditioning of the same images without an instruction ("identity",
+  // the source as it is); every step the sampler follows
+  //   identity + strength x (edit - identity)
+  // the way InstructPix2Pix scales its text guidance. 1 is the template's
+  // edit exactly; lower is the same edit taken less far, on one path from
+  // noise, so nothing is laid over anything. At CFG 1 (Qwen-Image 2.1, its
+  // Turbo) that is the sampler's own CFG = strength with identity as the
+  // negative; at a higher CFG (Qwen-Image-Edit 2509/2511 at 4) DualCFGGuider
+  // in its nested form, so the user's negative still counts:
+  //   negative + cfg x (identity + strength x (edit - identity) - negative)
+  // 3.0.9 started the sampler from the source at denoise = strength instead:
+  // these edit models copy their reference unless they start from pure
+  // noise, so every value below 1 came back as the source (box run 01.11.).
   const qwenEditStrength = (isQwenEdit || isQwen1Edit) && Number.isFinite(gp.editStrength) && gp.editStrength! < 1
     ? Math.max(0.05, gp.editStrength!)
     : 1
-  // The source and the side the encoder scales it to, for that start.
-  let qwenEditSource: [string, number] | null = null
-  let qwenEditSide = 0
-  if (isQwenEdit && qwenEditStrength < 1) {
-    requireRelease(allNodes, ['ImageScaleToTotalPixels', 'VAEEncode'],
+  const qwenStrengthCfg1 = qwenEditStrength < 1 && Math.abs(params.cfgScale - 1) < 1e-6
+  const qwenStrengthDual = qwenEditStrength < 1 && !qwenStrengthCfg1
+  // The conditioning without an instruction, set where the encoder is built.
+  let qwenIdentityRef: [string, number] | null = null
+  if (qwenStrengthDual) {
+    requireRelease(allNodes, ['DualCFGGuider', 'SamplerCustomAdvanced', 'RandomNoise', 'KSamplerSelect', 'BasicScheduler'],
       'An Edit strength below 1 needs a newer ComfyUI. Update ComfyUI, or set the Edit strength to 1.', strategy)
   }
   if (isQwen1Edit) {
@@ -1245,8 +1256,6 @@ export async function buildDynamicWorkflow(
         qwenInputs[`images.image_${i + 1}`] = [loadId, 0]
       }
       qwenInputs.vae = [vaeSourceId, vaeOutputSlot]
-      qwenEditSource = qwenInputs['images.image_1'] as [string, number]
-      qwenEditSide = qwenInputs.resolution as number
     } else if (createRefs.length > 0) {
       // B45: references without a source. They are image_1 and up; the
       // picture still comes from the empty latent at the canvas size below.
@@ -1258,6 +1267,17 @@ export async function buildDynamicWorkflow(
       qwenInputs.vae = [vaeSourceId, vaeOutputSlot]
     }
     workflow[posId] = { class_type: 'TextEncodeQwenImage21', inputs: qwenInputs }
+    if (isQwenEdit && qwenEditStrength < 1) {
+      // The node's negative is the images with the negative prompt, so with
+      // none it is the identity already; with one, a second encode.
+      if ((params.negativePrompt || '').trim() === '') {
+        qwenIdentityRef = [posId, 1]
+      } else {
+        const idId = String(n++)
+        workflow[idId] = { class_type: 'TextEncodeQwenImage21', inputs: { ...qwenInputs, prompt: '', negative_prompt: '' }, _meta: { title: 'Edit strength: the source as it is' } }
+        qwenIdentityRef = [idId, 0]
+      }
+    }
   } else if (isQwen1Edit) {
     const loadId = String(n++)
     workflow[loadId] = { class_type: 'LoadImage', inputs: { image: gp.inputImage } }
@@ -1284,6 +1304,17 @@ export async function buildDynamicWorkflow(
     const pictures = (text: string) => canonicalImageRefs(text, 1 + references.length, 'qwenEditPlus')
     workflow[posId] = { class_type: 'TextEncodeQwenImageEditPlus', inputs: editInputs(pictures(params.prompt)) }
     workflow[negId] = { class_type: 'TextEncodeQwenImageEditPlus', inputs: editInputs(pictures(params.negativePrompt || '')) }
+    if (qwenEditStrength < 1) {
+      // The same images without an instruction: the negative when it is
+      // empty, else an encode of its own.
+      if ((params.negativePrompt || '').trim() === '') {
+        qwenIdentityRef = [negId, 0]
+      } else {
+        const idId = String(n++)
+        workflow[idId] = { class_type: 'TextEncodeQwenImageEditPlus', inputs: editInputs(''), _meta: { title: 'Edit strength: the source as it is' } }
+        qwenIdentityRef = [idId, 0]
+      }
+    }
   } else if (krea2StyleRef) {
     // B45: the official Krea 2 style reference template. The images go
     // through TextEncodeQwenImageEditPlus (image1 to image3), the reference
@@ -1463,20 +1494,6 @@ export async function buildDynamicWorkflow(
       // calls out as required, because any other size shifts the edit.
       latentRef = [posId, 2]
       delete workflow[latentId]
-      if (qwenEditStrength < 1 && qwenEditSource) {
-        // B46: the source at exactly the size of that latent. The encoder
-        // scales image_1 to about side x side pixels on multiples of 32 in
-        // its own shape (nodes_qwen.py); ImageScaleToTotalPixels does the
-        // same sum with side² pixels and steps of 32.
-        const scaleId = String(n++)
-        workflow[scaleId] = {
-          class_type: 'ImageScaleToTotalPixels',
-          inputs: { image: qwenEditSource, upscale_method: 'lanczos', megapixels: (qwenEditSide * qwenEditSide) / (1024 * 1024), resolution_steps: 32 },
-        }
-        const encId = String(n++)
-        workflow[encId] = { class_type: 'VAEEncode', inputs: { pixels: [scaleId, 0], vae: [vaeSourceId, vaeOutputSlot] } }
-        latentRef = [encId, 0]
-      }
     }
   }
 
@@ -1838,26 +1855,51 @@ export async function buildDynamicWorkflow(
     log.info(`[dynamic-workflow] Wan 2.2 A14B pair: ${params.model} → ${lowNoisePartner}, split at step ${split}`)
   }
 
+  // B46 / D8: the Edit strength at CFG 1 is the sampler's CFG, with the
+  // identity as its negative (see qwenEditStrength above).
+  const samplerNegative: [string, number] = qwenStrengthCfg1 && qwenIdentityRef ? qwenIdentityRef : negativeRef
+  const samplerCfg = qwenStrengthCfg1 && qwenIdentityRef ? qwenEditStrength : params.cfgScale
+  const part = (node: { class_type: string; inputs: ComfyNodeInputs; _meta?: { title: string } }): [string, number] => {
+    const id = String(n++)
+    workflow[id] = node
+    return [id, 0]
+  }
+  // ...and at a higher CFG the nested DualCFGGuider.
+  const dualGuider = (): [string, number] => part({
+    class_type: 'DualCFGGuider',
+    inputs: {
+      model: [samplerModelId, 0], cond1: positiveRef, cond2: qwenIdentityRef!, negative: negativeRef,
+      cfg_conds: qwenEditStrength, cfg_cond2_negative: params.cfgScale, style: 'nested',
+    },
+    _meta: { title: `Edit strength ${qwenEditStrength.toFixed(2)}` },
+  })
+  const useDual = qwenStrengthDual && !!qwenIdentityRef
+
   // The four inputs of the Turbo chain besides the latent, one node each.
   let qwenTurboCustom: ComfyNodeInputs | null = null
   if (qwenTurboChain) {
-    const part = (node: { class_type: string; inputs: ComfyNodeInputs }): [string, number] => {
-      const id = String(n++)
-      workflow[id] = node
-      return [id, 0]
-    }
     qwenTurboCustom = {
       noise: part({ class_type: 'RandomNoise', inputs: { noise_seed: seed } }),
-      guider: part({
+      guider: useDual ? dualGuider() : part({
         class_type: 'CFGGuider',
-        inputs: { model: [samplerModelId, 0], positive: positiveRef, negative: negativeRef, cfg: params.cfgScale },
+        inputs: { model: [samplerModelId, 0], positive: positiveRef, negative: samplerNegative, cfg: samplerCfg },
       }),
       sampler: part({ class_type: 'KSamplerSelect', inputs: { sampler_name: QWEN21_TURBO_SAMPLING.sampler } }),
       sigmas: part({ class_type: 'ManualSigmas', inputs: { sigmas: QWEN21_TURBO_SIGMAS } }),
     }
-    if (qwenEditStrength < 1) {
-      // B46 on Turbo: its own schedule, cut to the strength (low_sigmas).
-      qwenTurboCustom.sigmas = [part({ class_type: 'SplitSigmasDenoise', inputs: { sigmas: qwenTurboCustom.sigmas, denoise: qwenEditStrength } })[0], 1]
+  } else if (useDual) {
+    // A guider needs the custom sampler; its steps are the KSampler's.
+    qwenTurboCustom = {
+      noise: part({ class_type: 'RandomNoise', inputs: { noise_seed: seed } }),
+      guider: dualGuider(),
+      sampler: part({ class_type: 'KSamplerSelect', inputs: { sampler_name: qwenTurbo ? QWEN21_TURBO_SAMPLING.sampler : params.sampler } }),
+      sigmas: part({
+        class_type: 'BasicScheduler',
+        inputs: {
+          model: [samplerModelId, 0], scheduler: qwenTurbo ? QWEN21_TURBO_SAMPLING.scheduler : params.scheduler,
+          steps: qwenTurbo ? QWEN21_TURBO_SAMPLING.steps : params.steps, denoise: 1.0,
+        },
+      }),
     }
   }
 
@@ -1878,21 +1920,21 @@ export async function buildDynamicWorkflow(
       ...qwenTurboCustom,
       latent_image: latentRef,
     },
-    _meta: { title: 'Qwen-Image 2.1 Turbo' },
+    _meta: { title: qwenTurboChain ? 'Qwen-Image 2.1 Turbo' : 'Qwen edit' },
   } : {
     class_type: 'KSampler',
     inputs: {
       model: [samplerModelId, 0],
       positive: positiveRef,
-      negative: negativeRef,
+      negative: samplerNegative,
       latent_image: latentRef,
       seed,
       steps: qwenTurbo ? QWEN21_TURBO_SAMPLING.steps : params.steps,
-      cfg: params.cfgScale,
+      cfg: samplerCfg,
       sampler_name: qwenTurbo ? QWEN21_TURBO_SAMPLING.sampler : params.sampler,
       scheduler: qwenTurbo ? QWEN21_TURBO_SAMPLING.scheduler : params.scheduler,
-      // Qwen edits: 1.0 like their templates, or the Edit strength (B46).
-      denoise: isInpaint ? (params.denoise ?? 0.85) : isI2I ? (params.denoise ?? 0.7) : qwenEditStrength,
+      // Qwen edits: 1.0 like their templates, whatever the Edit strength.
+      denoise: isInpaint ? (params.denoise ?? 0.85) : isI2I ? (params.denoise ?? 0.7) : 1.0,
     },
   }
 

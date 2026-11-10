@@ -184,6 +184,27 @@ function customAsKSampler(workflow: ComfyApiGraph, custom: ComfyApiNode): ComfyA
   return { class_type: 'KSampler', inputs }
 }
 
+/** The parts of a SamplerCustomAdvanced on a DualCFGGuider (the Edit
+ *  strength of a Qwen edit at a CFG above 1), or undefined for any other. */
+function dualGuided(workflow: ComfyApiGraph, custom: ComfyApiNode) {
+  const ref = (key: string) => {
+    const r = nodeInput(custom, key)
+    return isComfyLinkRef(r) ? r : undefined
+  }
+  const guider = ref('guider')
+  const guiderNode = guider ? nodeAt(workflow, String(guider[0])) : undefined
+  if (guiderNode?.class_type !== 'DualCFGGuider') return undefined
+  const noise = ref('noise')
+  const sampler = ref('sampler')
+  const latent = ref('latent_image')
+  const model = nodeInput(guiderNode, 'model')
+  if (!guider || !noise || !sampler || !latent || !isComfyLinkRef(model)) return undefined
+  const sigmas = ref('sigmas')
+  const schedule = sigmas ? nodeAt(workflow, String(sigmas[0])) : undefined
+  const scheduler = schedule?.class_type === 'BasicScheduler' ? nodeInput(schedule, 'scheduler') : undefined
+  return { guider, noise, sampler, latent, model, scheduler: typeof scheduler === 'string' ? scheduler : 'simple' }
+}
+
 /**
  * Adds a native latent-upscale refinement pass to a simple image workflow:
  *
@@ -270,20 +291,26 @@ export function applyNativeHiresFix(
   // Qwen-Image 2.1 Turbo's chain (lib/render/qwen21-turbo) ends in a
   // SamplerCustomAdvanced; its pass reads the same model, prompt, CFG, seed
   // and sampler off the CFGGuider, RandomNoise and KSamplerSelect.
-  const firstSampler = found?.class_type === 'SamplerCustomAdvanced' ? customAsKSampler(workflow, found) : found
-  if (!firstSampler || firstSampler.class_type !== 'KSampler') {
+  // A Qwen edit below Edit strength 1 at a CFG above 1 (B46 / D8) samples
+  // through DualCFGGuider, which no KSampler can say; its pass reuses that
+  // guider, the noise and the sampler.
+  const dual = found?.class_type === 'SamplerCustomAdvanced' ? dualGuided(workflow, found) : undefined
+  const firstSampler = dual ? undefined : found?.class_type === 'SamplerCustomAdvanced' ? customAsKSampler(workflow, found) : found
+  if (!dual && (!firstSampler || firstSampler.class_type !== 'KSampler')) {
     throw new NativeHiresFixError(
       `Native HiRes currently requires a core KSampler before the final decode; this workflow uses ${found?.class_type ?? 'an unknown node'}.`,
     )
   }
 
-  const requiredInputs = ['model', 'positive', 'negative', 'latent_image']
-  const missing = requiredInputs.filter((key) => nodeInput(firstSampler, key) === undefined)
-  if (missing.length > 0) {
-    throw new NativeHiresFixError(`The final KSampler is missing required inputs: ${missing.join(', ')}.`)
+  if (firstSampler) {
+    const requiredInputs = ['model', 'positive', 'negative', 'latent_image']
+    const missing = requiredInputs.filter((key) => nodeInput(firstSampler, key) === undefined)
+    if (missing.length > 0) {
+      throw new NativeHiresFixError(`The final KSampler is missing required inputs: ${missing.join(', ')}.`)
+    }
   }
 
-  const latentRef = nodeInput(firstSampler, 'latent_image')
+  const latentRef = dual ? dual.latent : nodeInput(firstSampler, 'latent_image')
   let latentSource = isComfyLinkRef(latentRef) ? nodeAt(workflow, String(latentRef[0])) : undefined
   // An edit batch (api/edit-batch) repeats the source latent; the mask is
   // the one of the latent it repeats.
@@ -312,20 +339,36 @@ export function applyNativeHiresFix(
   }
   workflow[upscaleNodeId] = upscaleNode
 
-  const samplerNodeId = nextNodeId(workflow)
-  const refinementNode: HiresNode = {
-    class_type: 'KSampler',
-    inputs: {
-      ...firstSampler.inputs,
-      latent_image: [upscaleNodeId, 0],
-      steps: Math.floor(options.steps),
-      denoise: options.denoise,
-    },
-    _meta: {
-      title: 'LU Native HiRes — refinement pass',
-      luNativeHiresFix: true,
-    },
+  let refinementNode: HiresNode
+  if (dual) {
+    const scheduleId = nextNodeId(workflow)
+    const scheduleNode: HiresNode = {
+      class_type: 'BasicScheduler',
+      inputs: { model: dual.model, scheduler: dual.scheduler, steps: Math.floor(options.steps), denoise: options.denoise },
+      _meta: { title: 'LU Native HiRes — refinement steps', luNativeHiresFix: true },
+    }
+    workflow[scheduleId] = scheduleNode
+    refinementNode = {
+      class_type: 'SamplerCustomAdvanced',
+      inputs: { noise: dual.noise, guider: dual.guider, sampler: dual.sampler, sigmas: [scheduleId, 0], latent_image: [upscaleNodeId, 0] },
+      _meta: { title: 'LU Native HiRes — refinement pass', luNativeHiresFix: true },
+    }
+  } else {
+    refinementNode = {
+      class_type: 'KSampler',
+      inputs: {
+        ...firstSampler!.inputs,
+        latent_image: [upscaleNodeId, 0],
+        steps: Math.floor(options.steps),
+        denoise: options.denoise,
+      },
+      _meta: {
+        title: 'LU Native HiRes — refinement pass',
+        luNativeHiresFix: true,
+      },
+    }
   }
+  const samplerNodeId = nextNodeId(workflow)
   workflow[samplerNodeId] = refinementNode
 
   decode.inputs = {
