@@ -271,7 +271,7 @@ const SAVE_BTN = 'flex items-center gap-1 px-2.5 py-1 rounded t-micro font-mediu
 const MEMORY_TYPES: MemoryType[] = ['user', 'feedback', 'project', 'reference']
 
 /**
- * One memory in the quick menu (C38, testowanie642): the line used to stop
+ * One memory in the quick menu (C38): the line used to stop
  * after about 90 characters with no way to see or change the rest, so a
  * long memory could only be deleted and typed again. A click on the row
  * opens the whole text; Edit changes title, kind and text in place. The

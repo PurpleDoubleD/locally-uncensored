@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 /**
- * C38 (3.1.0, testowanie642): the Memory quick menu cut every memory after
+ * C38 (3.1.0): the Memory quick menu cut every memory after
  * about 90 characters, and there was no way to read or change the rest. A row
  * now opens to the whole text, and Edit changes it in place.
  *

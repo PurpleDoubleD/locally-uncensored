@@ -1,8 +1,8 @@
 /**
  * Chat look (3.1.0, C58 / C42): how the transcript reads.
  *
- * Who asked: micnorian14 (GitHub Discussion #14) wants enough say over the
- * chat's look to move over from SillyTavern; boromirofgeo wants Ctrl/Cmd +
+ * Who asked: a user in GitHub Discussion #14 wants enough say over the
+ * chat's look to move over from SillyTavern; a Discord user wants Ctrl/Cmd +
  * wheel to zoom the chat text like a browser does.
  *
  * What SillyTavern offers (docs, "UI Theme"): free colours for main, italics,
