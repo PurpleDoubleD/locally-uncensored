@@ -329,7 +329,7 @@ function InputSlot() {
   // 2026-07-10: ops never auto-adopt a gallery image — instead the slot
   // offers the recent gallery images as an EXPLICIT pick, next to drag&drop
   // and the file picker ("aus Galerie ODER vom Desktop").
-  const galleryImages = gallery.filter((g) => g.type === 'image' && !g.unavailable).slice(0, 8)
+  const galleryImages = gallery.filter((g) => g.type === 'image' && !g.unavailable && !g.hidden).slice(0, 8)
   // The image a list was made from is not in the gallery, and a batch can push
   // every older result out of the strip. It stays pinned at the front.
   const original = useBatchOriginalOffer()

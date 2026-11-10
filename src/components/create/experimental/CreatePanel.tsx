@@ -1,7 +1,7 @@
 import { itemHasAlpha } from '../../../lib/transparent-image'
-import { useState, type MouseEvent as ReactMouseEvent } from 'react'
+import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Images, Play, PanelRightClose, Trash2, Download, MonitorOff, AudioLines, FolderInput, Check, X } from 'lucide-react'
+import { Images, Play, PanelRightClose, Trash2, Download, MonitorOff, AudioLines, FolderInput, Check, X, Eye, EyeOff, Tag } from 'lucide-react'
 import { useCreateStore, type GalleryItem } from '../../../stores/createStore'
 import { galleryLabel } from '../../../lib/render/gallery-label'
 import { GALLERY_DRAG_TYPE, playsAsVideo } from './galleryUrl'
@@ -11,8 +11,11 @@ import { downloadGalleryItem } from './galleryDownload'
 import { useComfyMedia } from './useComfyMedia'
 import { cn } from '../ui/cn'
 import { HINWEIS_TEXT, HINWEIS_ZEILE } from '../../../lib/hinweis'
-import { itemsInFolder } from '../../../lib/gallery-folders'
+import { hiddenCount, itemsInView } from '../../../lib/gallery-tags'
 import { FolderFilter, MoveToFolderModal, OnBody } from './GalleryFolders'
+import { TagFilter, TagsModal } from './GalleryTags'
+import { RestoreFromOutputButton } from './GalleryRestore'
+import { isTauri } from '../../../api/backend'
 import { ContextMenu } from '../../ui/ContextMenu'
 import { Modal } from '../../ui/Modal'
 import { ModalActions, ModalButton } from '../../ui/ModalActions'
@@ -20,6 +23,10 @@ import {
   EMPTY_SELECTION, buildGalleryMenu, clickSelection, deleteConfirmLine, keepShown, menuSelection, selectAll,
   type GallerySelection,
 } from './gallerySelection'
+
+/** Tiles drawn at first, and added each time the end of the list scrolls into
+ *  view (C27, 3.1.0: the gallery has no cap any more, thousands of entries). */
+export const GALLERY_PAGE = 60
 
 interface Props {
   open: boolean
@@ -38,13 +45,42 @@ export function CreatePanel({ open, onOpenChange, activeId, onSelect }: Props) {
   const all = useCreateStore((s) => s.gallery)
   const folderOpen = useCreateStore((s) => s.galleryFolderOpen)
   const removeFromGallery = useCreateStore((s) => s.removeFromGallery)
+  // C27: the output folder of a local ComfyUI. The Mac has none, the cloud neither.
+  const canRestore = useCreateStore((s) => s.backend === 'local') && isTauri() && !isMlxImageHost()
   // D3b: the cap took older unsorted entries; said once, until closed.
   const notice = useCreateStore((s) => s.galleryNotice)
   const dismissNotice = useCreateStore((s) => s.dismissGalleryNotice)
-  // D3: the panel shows the open folder, "All" when none is open.
-  const gallery = folderOpen === null ? all : itemsInFolder(all, folderOpen)
+  // D3: the panel shows the open folder, "All" when none is open. 3.1.0
+  // (D27): and the picked tag, and either the hidden entries or the others.
+  const tagOpen = useCreateStore((s) => s.galleryTagOpen)
+  const showHidden = useCreateStore((s) => s.galleryShowHidden)
+  const setHidden = useCreateStore((s) => s.setGalleryHidden)
+  const gallery = itemsInView(all, { folderId: folderOpen, tag: tagOpen, hidden: showHidden })
   const [moving, setMoving] = useState<string[]>([])
+  const [tagging, setTagging] = useState<string[]>([])
   const count = gallery.length
+  // C27: the tiles come in pages as the list scrolls, so a gallery of
+  // thousands opens as fast as one of sixty. A new view starts at the top.
+  const viewKey = `${folderOpen ?? ''}\n${tagOpen ?? ''}\n${showHidden}`
+  const [page, setPage] = useState({ key: viewKey, n: GALLERY_PAGE })
+  const limit = page.key === viewKey ? page.n : GALLERY_PAGE
+  const shown = limit >= count ? gallery : gallery.slice(0, limit)
+  const scroller = useRef<HTMLDivElement | null>(null)
+  const sentinel = useRef<HTMLDivElement | null>(null)
+  const more = shown.length < count
+  useEffect(() => {
+    const end = sentinel.current
+    if (!more || !end) return
+    if (typeof IntersectionObserver === 'undefined') {
+      setPage({ key: viewKey, n: count })
+      return
+    }
+    const io = new IntersectionObserver((entries) => {
+      if (entries.some((e) => e.isIntersecting)) setPage((p) => ({ key: viewKey, n: (p.key === viewKey ? p.n : GALLERY_PAGE) + GALLERY_PAGE }))
+    }, { root: scroller.current, rootMargin: '400px 0px' })
+    io.observe(end)
+    return () => io.disconnect()
+  }, [more, viewKey, count, limit])
   // Several at once (D3, 3.0.9): Cmd/Ctrl-click, Shift range, Cmd/Ctrl+A,
   // Escape. The menu and the bar act on `sel.ids` with the tile's own code.
   const [stored, setSel] = useState<GallerySelection>(EMPTY_SELECTION)
@@ -95,7 +131,12 @@ export function CreatePanel({ open, onOpenChange, activeId, onSelect }: Props) {
     move: () => setMoving([...ids]),
     download: () => { void downloadAll(ids) },
     remove: () => setConfirming(ids),
+    tags: () => setTagging([...ids]),
+    // In the Hidden view the same action shows them again.
+    hide: () => { setHidden(ids, !showHidden); setSel(EMPTY_SELECTION) },
+    hidden: showHidden,
   })
+  const visibleTotal = all.length - hiddenCount(all)
 
   const bubble =
     'my-2 mr-2 rounded-xl bg-gray-50 dark:bg-[#1e1e1e] ring-1 ring-black/[0.04] dark:ring-white/[0.05] flex flex-col overflow-hidden shrink-0'
@@ -136,9 +177,9 @@ export function CreatePanel({ open, onOpenChange, activeId, onSelect }: Props) {
           >
             <span className="relative">
               <Images size={16} />
-              {all.length > 0 && (
+              {visibleTotal > 0 && (
                 <span className="absolute -top-1.5 -right-2 min-w-[14px] h-[14px] px-0.5 flex items-center justify-center rounded-full text-[0.5rem] font-bold bg-gray-300 dark:bg-white/20 text-gray-700 dark:text-gray-200">
-                  {all.length}
+                  {visibleTotal}
                 </span>
               )}
             </span>
@@ -168,9 +209,11 @@ export function CreatePanel({ open, onOpenChange, activeId, onSelect }: Props) {
             <Images size={13} className="text-gray-500" />
             <span className="t-label text-gray-400">Gallery</span>
             {count > 0 && <span className="t-mono text-gray-600">{count}</span>}
+            {canRestore && <RestoreFromOutputButton />}
           </div>
 
           <FolderFilter />
+          <TagFilter />
           {notice && (
             <div role="status" className={cn(HINWEIS_ZEILE, 'items-center mx-3 mt-2 shrink-0')}>
               <p className={cn('flex-1', HINWEIS_TEXT.ruhig)}>{notice}</p>
@@ -178,6 +221,7 @@ export function CreatePanel({ open, onOpenChange, activeId, onSelect }: Props) {
             </div>
           )}
           <OnBody><MoveToFolderModal ids={moving} onClose={() => setMoving([])} /></OnBody>
+          <OnBody><TagsModal ids={tagging} onClose={() => setTagging([])} /></OnBody>
           <OnBody>
             <Modal open={confirming.length > 0} onClose={() => setConfirming([])} title="Delete from the gallery" maxWidth="max-w-md">
               <div data-testid="gallery-delete-confirm">
@@ -208,18 +252,22 @@ export function CreatePanel({ open, onOpenChange, activeId, onSelect }: Props) {
             >
               <span className="t-label text-gray-500 dark:text-gray-400 mr-auto" aria-live="polite">{sel.ids.length} selected</span>
               <BarBtn title="Move to folder" onClick={actionsFor(sel.ids).move}><FolderInput size={13} /></BarBtn>
+              <BarBtn title="Tags" onClick={actionsFor(sel.ids).tags}><Tag size={13} /></BarBtn>
+              <BarBtn title={showHidden ? 'Show again' : 'Hide from gallery'} onClick={actionsFor(sel.ids).hide}>
+                {showHidden ? <Eye size={13} /> : <EyeOff size={13} />}
+              </BarBtn>
               <BarBtn title="Download" onClick={actionsFor(sel.ids).download}><Download size={13} /></BarBtn>
               <BarBtn title="Delete" danger onClick={actionsFor(sel.ids).remove}><Trash2 size={13} /></BarBtn>
               <BarBtn title="Clear selection" onClick={() => setSel(EMPTY_SELECTION)}><X size={13} /></BarBtn>
             </div>
           )}
 
-          <div className="flex-1 min-h-0 overflow-y-auto scrollbar-thin p-3">
+          <div ref={scroller} className="flex-1 min-h-0 overflow-y-auto scrollbar-thin p-3">
             {count === 0 ? (
-              <p className="t-body text-gray-500 py-2">{all.length > 0 ? 'Nothing in this folder yet.' : 'Nothing generated yet.'}</p>
+              <p className="t-body text-gray-500 py-2">{emptyLine(all.length, { folder: folderOpen !== null, tag: tagOpen !== null, hidden: showHidden })}</p>
             ) : (
               <div className="grid grid-cols-2 gap-2" role="group" aria-label="Gallery items" onKeyDown={onGridKey}>
-                {gallery.map((g) => (
+                {shown.map((g) => (
                   <div key={g.id} className="relative group">
                     <button
                       onClick={(e) => onTileClick(e, g.id)}
@@ -262,6 +310,16 @@ export function CreatePanel({ open, onOpenChange, activeId, onSelect }: Props) {
                     >
                       <Trash2 size={12} />
                     </button>
+                    {!picked.has(g.id) && (
+                      <button
+                        onClick={() => setHidden([g.id], !showHidden)}
+                        className="lu-on-dark absolute top-1 left-1 w-6 h-6 rounded-md bg-black/55 hover:bg-black/70 text-gray-100 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center shadow-sm"
+                        title={showHidden ? 'Show again' : 'Hide from gallery. The file stays.'}
+                        aria-label={showHidden ? 'Show again' : 'Hide from gallery'}
+                      >
+                        {showHidden ? <Eye size={12} /> : <EyeOff size={12} />}
+                      </button>
+                    )}
                     <button
                       onClick={() => setMoving([g.id])}
                       className="lu-on-dark absolute bottom-1 left-1 w-6 h-6 rounded-md bg-black/55 hover:bg-black/70 text-gray-100 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center shadow-sm"
@@ -280,11 +338,24 @@ export function CreatePanel({ open, onOpenChange, activeId, onSelect }: Props) {
                 ))}
               </div>
             )}
+            {more && (
+              <div ref={sentinel} className="py-3 text-center t-label text-gray-500" data-testid="gallery-more">
+                {shown.length} of {count}
+              </div>
+            )}
           </div>
         </motion.aside>
       )}
     </AnimatePresence>
   )
+}
+
+/** What an empty view says. */
+export function emptyLine(total: number, filter: { folder: boolean; tag: boolean; hidden: boolean }): string {
+  if (total === 0) return 'Nothing generated yet.'
+  if (filter.hidden) return 'Nothing hidden here.'
+  if (filter.tag) return 'No items with this tag here.'
+  return filter.folder ? 'Nothing in this folder yet.' : 'Everything here is hidden.'
 }
 
 function BarBtn({ children, title, onClick, danger }: { children: React.ReactNode; title: string; onClick: () => void; danger?: boolean }) {
@@ -320,10 +391,10 @@ function GalleryThumb({ g }: { g: GalleryItem }) {
   }
   return playsAsVideo(g) ? (
     <>
-      <video src={src} muted playsInline onError={onError} onLoadedData={onLoad} className="w-full h-full object-cover" />
+      <video src={src} muted playsInline preload="metadata" onError={onError} onLoadedData={onLoad} className="w-full h-full object-cover" />
       <span className="absolute inset-0 flex items-center justify-center bg-black/20"><Play size={16} className="text-white/90" /></span>
     </>
   ) : (
-    <img src={src} alt="" onError={onError} onLoad={onLoad} className="w-full h-full object-cover" />
+    <img src={src} alt="" loading="lazy" decoding="async" onError={onError} onLoad={onLoad} className="w-full h-full object-cover" />
   )
 }

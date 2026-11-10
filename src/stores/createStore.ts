@@ -15,6 +15,8 @@ import { TRAIN_CAPTION_MAX } from '../lib/train-captions'
 import { isMobile } from '../lib/device-kind'
 import { isRecord } from '../types/json-guards'
 import { cleanFolderName, newFolderId, sanitizeFolders, FOLDER_CAP, type GalleryFolder } from '../lib/gallery-folders'
+import { withTag, withoutTag } from '../lib/gallery-tags'
+import { downgradeMirror, sanitizeEntries } from '../lib/gallery-persist'
 
 /**
  * Fields a persisted blob must never put back into live state: they steer the
@@ -36,6 +38,8 @@ const RUNTIME_ONLY_KEYS: readonly string[] = [
   'galleryFolderOpen',
   // The line about trimmed entries belongs to the moment it happened.
   'galleryNotice',
+  // The tag filter and the Hidden view belong to the session, like the open folder.
+  'galleryTagOpen', 'galleryShowHidden',
   // Review A kleiner Punkt 1 (studio-r2): the cloud video length selection,
   // own fields since this bugfix. Session-scratch like source/mask, not a
   // preference worth remembering across restarts.
@@ -339,6 +343,11 @@ export interface GalleryItem {
    *  Only a label in the app, the file stays where it is. Absent: no folder,
    *  the entry is found under "All" only. */
   folderId?: string
+  /** Hidden from the gallery (3.1.0, D27). The file, the prompt and the folder
+   *  stay; the entry shows only in the Hidden view (lib/gallery-tags.ts). */
+  hidden?: boolean
+  /** Short words the gallery filters by (3.1.0, D27). Labels in the app only. */
+  tags?: string[]
 }
 
 export interface CreateState {
@@ -592,6 +601,10 @@ export interface CreateState {
    *  lands in it, and a folder picked yesterday must not file today's renders
    *  without the user seeing it. */
   galleryFolderOpen: string | null
+  /** The tag the gallery filters by, null for none. Runtime only. */
+  galleryTagOpen: string | null
+  /** The gallery shows its hidden entries instead of the others. Runtime only. */
+  galleryShowHidden: boolean
   /** Said once when the cap took older unsorted entries (D3b). Runtime only. */
   galleryNotice: string | null
   promptHistory: string[]
@@ -763,6 +776,17 @@ export interface CreateState {
   /** File entries under a folder, or under none with null. */
   moveToGalleryFolder: (ids: readonly string[], folderId: string | null) => void
   setGalleryFolderOpen: (id: string | null) => void
+  /** Hide entries or show them again (3.1.0, D27). The files stay. */
+  setGalleryHidden: (ids: readonly string[], hidden: boolean) => void
+  /** Put a tag on entries; a tag they carry already is left alone. */
+  tagGalleryItems: (ids: readonly string[], tag: string) => void
+  /** Take a tag off entries. */
+  untagGalleryItems: (ids: readonly string[], tag: string) => void
+  setGalleryTagOpen: (tag: string | null) => void
+  setGalleryShowHidden: (on: boolean) => void
+  /** Entries found again in the output folder (3.1.0, C27). Ids it has
+   *  already, and files it already lists, are left out. Returns how many came in. */
+  restoreGalleryItems: (items: readonly GalleryItem[]) => number
   dismissGalleryNotice: () => void
   addToPromptHistory: (prompt: string) => void
   /** Drop a single remembered prompt (the X next to the entry). */
@@ -775,8 +799,23 @@ export interface CreateState {
   setMlxUpscale: (installed: boolean) => void
 }
 
-/** The gallery keeps the newest N unsorted renders. */
+/** Without IndexedDB the gallery keeps the newest N unsorted renders. */
 const GALLERY_CAP = 200
+
+/**
+ * True once the gallery list has its own IndexedDB key (lib/gallery-persist.ts,
+ * 3.1.0, C27). From then on nothing is capped: the create-store blob only
+ * keeps the small copy for a downgrade. Until then, and wherever IndexedDB
+ * cannot be read, the cap of 200 holds as before, because the whole list then
+ * still lives in localStorage.
+ */
+let galleryUncapped = false
+export function setGalleryUncapped(on: boolean): void {
+  galleryUncapped = on
+}
+export function isGalleryUncapped(): boolean {
+  return galleryUncapped
+}
 
 /** What the gallery says when the cap took entries (D3b). */
 export const GALLERY_TRIMMED_NOTICE =
@@ -790,6 +829,7 @@ export const GALLERY_TRIMMED_NOTICE =
  * oldest go first. The caller frees the dropped ones' media and says so.
  */
 export function capGallery(items: readonly GalleryItem[]): { kept: GalleryItem[]; dropped: GalleryItem[] } {
+  if (galleryUncapped) return { kept: items as GalleryItem[], dropped: [] }
   const kept: GalleryItem[] = []
   const dropped: GalleryItem[] = []
   let unsorted = 0
@@ -1221,6 +1261,8 @@ export const useCreateStore = create<CreateState>()(
       gallery: [],
       galleryFolders: [],
       galleryFolderOpen: null,
+      galleryTagOpen: null,
+      galleryShowHidden: false,
       galleryNotice: null,
       promptHistory: [],
       imageModelList: [],
@@ -1875,6 +1917,49 @@ export const useCreateStore = create<CreateState>()(
       setGalleryFolderOpen: (id) => set((s) => ({
         galleryFolderOpen: id !== null && s.galleryFolders.some((f) => f.id === id) ? id : null,
       })),
+      // Hidden and tags (D27). Labels only, like folders: nothing reaches a file.
+      setGalleryHidden: (ids, hidden) => set((s) => {
+        const pick = new Set(ids)
+        return {
+          gallery: s.gallery.map((g) => (pick.has(g.id) && !!g.hidden !== hidden ? { ...g, hidden: hidden || undefined } : g)),
+        }
+      }),
+      tagGalleryItems: (ids, tag) => set((s) => {
+        const pick = new Set(ids)
+        return {
+          gallery: s.gallery.map((g) => {
+            if (!pick.has(g.id)) return g
+            const tags = withTag(g.tags, tag)
+            return tags === g.tags ? g : { ...g, tags }
+          }),
+        }
+      }),
+      untagGalleryItems: (ids, tag) => set((s) => {
+        const pick = new Set(ids)
+        const gallery = s.gallery.map((g) => {
+          if (!pick.has(g.id)) return g
+          const tags = withoutTag(g.tags, tag)
+          return tags === g.tags ? g : { ...g, tags }
+        })
+        // A filter on a tag nobody carries any more would show an empty list.
+        const open = s.galleryTagOpen
+        const still = open !== null && gallery.some((g) => (g.tags ?? []).some((t) => t.toLocaleLowerCase() === open.toLocaleLowerCase()))
+        return { gallery, galleryTagOpen: still ? open : null }
+      }),
+      setGalleryTagOpen: (tag) => set({ galleryTagOpen: tag }),
+      setGalleryShowHidden: (on) => set({ galleryShowHidden: on }),
+      restoreGalleryItems: (items) => {
+        const s = get()
+        const ids = new Set(s.gallery.map((g) => g.id))
+        const files = new Set(s.gallery.map((g) => `${g.subfolder ?? ''}/${g.filename}`))
+        const fresh = items.filter((g) => !ids.has(g.id) && !files.has(`${g.subfolder ?? ''}/${g.filename}`))
+        if (fresh.length === 0) return 0
+        const joined = [...s.gallery, ...fresh].sort((a, b) => b.createdAt - a.createdAt)
+        const { kept, dropped } = capGallery(joined)
+        for (const g of dropped) releaseItemMedia(g)
+        set(dropped.length > 0 ? { gallery: kept, galleryNotice: GALLERY_TRIMMED_NOTICE } : { gallery: kept })
+        return fresh.length - dropped.length
+      },
       addToPromptHistory: (prompt) => set((s) => {
         const filtered = s.promptHistory.filter(p => p !== prompt)
         return { promptHistory: [prompt, ...filtered].slice(0, 50) }
@@ -1970,7 +2055,13 @@ export const useCreateStore = create<CreateState>()(
         // dataUrls would blow the origin quota (~5-10 MB in WebView2/WKWebView)
         // and every subsequent set() would throw, killing ALL create-store
         // persistence. Cloud items carry remoteUrl + jobId and re-sign lazily.
-        gallery: state.gallery.map(({ dataUrl, unavailable, unavailableReason, reloadKey, ...g }: GalleryItem) => g),
+        //
+        // 3.1.0 (C27): once the full list has its own IndexedDB key
+        // (lib/gallery-persist.ts) this is only the small copy an older LU
+        // reads after a downgrade. Before that, and wherever IndexedDB cannot
+        // be read, it is the whole (capped) list, as it always was.
+        gallery: (galleryUncapped ? downgradeMirror(state.gallery) : state.gallery)
+          .map(({ dataUrl, unavailable, unavailableReason, reloadKey, ...g }: GalleryItem) => g),
         // Folders are an id and a short name each, capped (lib/gallery-folders.ts).
         // Additive: an older blob has none and merge() gives it the empty list.
         galleryFolders: state.galleryFolders,
@@ -2059,6 +2150,9 @@ export const useCreateStore = create<CreateState>()(
         // Gallery folders came in 3.0.7. An older blob has no list (the
         // default stays), a damaged one is cleaned instead of trusted.
         if ('galleryFolders' in safe) safe.galleryFolders = sanitizeFolders(safe.galleryFolders)
+        // 3.1.0: entries carry tags and a hidden flag the gallery reads. A
+        // damaged list loses only what cannot be an entry at all.
+        if ('gallery' in safe) safe.gallery = sanitizeEntries<GalleryItem>(safe.gallery)
         // 3.0.9 B24: an older blob has no lanes, a damaged one is cleaned.
         if ('loraLanes' in safe) safe.loraLanes = sanitizeLoraLanes(safe.loraLanes)
         // 3.0.8 D20: an unknown recipe name would reach the trainer as text.

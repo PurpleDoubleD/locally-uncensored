@@ -69,6 +69,7 @@ import { ChatRescueHint } from './ChatRescueHint'
 import { HfLinkInbox } from '../models/HfLinkInbox'
 import { useNeuronFollowsPersona } from '../../hooks/useNeuronFollowsPersona'
 import { NEURONS_ENABLED } from '../../lib/features'
+import { startGalleryStore } from '../../lib/gallery-persist-wiring'
 
 // Aus der Komponente herausgezogen: `new Set(STORE_KEYS)` entstand bei jedem
 // Render neu und war damit die instabile Referenz, wegen der der Restore-Effekt
@@ -640,6 +641,10 @@ export function AppShell() {
       // state over the only good store_backup.json.
       await restoreDecided
       if (disposed) return
+      // The gallery list to IndexedDB (3.1.0, C27), after the restore above
+      // wrote its copy back. Its failure keeps the old way and must not cost
+      // the backups below.
+      void startGalleryStore().catch(() => {})
 
       let backupInflight = false
       const doBackup = async () => {

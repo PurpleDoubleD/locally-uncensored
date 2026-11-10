@@ -116,6 +116,9 @@ export const STORE_KEYS = [
   //                                    (at most SWITCHED_MAX ids)
   // Guard: src/mobile/boot/__tests__/local-keys-backup.test.ts
   'lu-mobile-thinking-default-v1', 'lu-mobile-report-queue', 'lu-mobile-switched-under-answer',
+  // 3.1.0 (C27): the gallery list without the cap, on IndexedDB
+  // (lib/gallery-persist.ts). The create-store blob keeps only a short copy.
+  'lu-gallery',
   // L5, check of package 17 (mobile-docs/r41/funde.md). When the settings were
   // last written (boot/settings-durable.ts). The start compares it with the
   // stamp in localStorage when the copy in IndexedDB is gone, and takes the
@@ -261,6 +264,8 @@ export const IDB_STORE_KEYS = new Set([
   'chat-conversations', 'locally-uncensored-memory', 'staged-changes',
   // The Remote chats of the phone shell (mobile/remote/remoteClientStore.ts).
   'lu-mobile-remote',
+  // The gallery list (lib/gallery-persist.ts, 3.1.0).
+  'lu-gallery',
 ])
 
 /**

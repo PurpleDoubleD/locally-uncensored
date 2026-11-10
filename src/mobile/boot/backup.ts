@@ -18,6 +18,7 @@ import { useSettingsStore } from '../../stores/settingsStore'
 import { installSavedCharactersBackup, restoreSavedCharactersAtStart } from '../lib/saved-characters-backup'
 import { onLifecycle } from '../platform/lifecycle'
 import { restoreDecided } from './restore'
+import { startGalleryStore } from '../../lib/gallery-persist-wiring'
 
 const STORE_INTERVAL_MS = 5_000
 const CHAT_DEBOUNCE_MS = 1_000
@@ -50,6 +51,9 @@ export function startBackup(): () => void {
     // Never write the first backup before the restore looked at the old one.
     await restoreDecided
     if (disposed) return
+    // The gallery list to IndexedDB (3.1.0, C27), after the restore wrote its
+    // copy back. Its failure keeps the old way and must not cost the backups.
+    void startGalleryStore().catch(() => {})
 
     let storesBusy = false
     const backupStores = async () => {

@@ -50,6 +50,7 @@ export function registerMlxMediaStubs(routes: RouteMount): void {
     '/local-api/mlx-loras-open-folder',
     '/local-api/mlx-lora-delete',
     '/local-api/mlx-output-trash',
+    '/local-api/scan-comfy-output',
     '/local-api/mlx-cutout',
     '/local-api/mlx-upscale',
     '/local-api/mlx-image-models',
