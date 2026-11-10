@@ -448,6 +448,13 @@ interface RemoteState {
   signinRequests: SigninRequest[]
   legacy: LegacyAccess
 
+  /** C60: the chat agent asked to start the remote, the user said yes on a
+   *  strong card. The sidebar takes it through its own Dispatch button, folder
+   *  picker included, and clears it. Only 'lan': the internet is never asked
+   *  for from the chat. Not persisted. */
+  chatDispatchRequest: { mode: 'lan'; at: number } | null
+  requestChatDispatch: (mode: 'lan') => void
+  clearChatDispatch: () => void
   startServer: (model?: string, systemPrompt?: string) => Promise<void>
   stopServer: () => Promise<boolean>
   refreshStatus: () => Promise<void>
@@ -499,6 +506,9 @@ export const useRemoteStore = create<RemoteState>()((set, get) => ({
   tunnelActive: false,
   tunnelUrl: '',
   tunnelLoading: false,
+  chatDispatchRequest: null,
+  requestChatDispatch: (mode) => set({ chatDispatchRequest: { mode, at: Date.now() } }),
+  clearChatDispatch: () => set({ chatDispatchRequest: null }),
   awaitingTunnel: false,
   loading: false,
   error: null,

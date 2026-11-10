@@ -13,13 +13,15 @@ import { DiffView } from './DiffView'
 import { ScreenTaskSteps } from './ScreenTaskSteps'
 import { ScreenShotStrip } from '../computer/ScreenShotStrip'
 import { ComputerChatPermission, useComputerChatAsk } from '../computer/ComputerChatPermission'
-import { SettingChangeAsk, SettingChangeDone } from './SettingChangeCard'
+import { SettingChangeAsk, SettingChangeDone, SelfControlDone } from './SettingChangeCard'
 import { WebSourceCards, WebUrlAsk } from './WebSourceCards'
 import { BrowserControls, BrowserShot } from './BrowserControls'
 import { parseSourceCards, stripSourcesMarker } from '../../lib/web-evidence'
 import { useWebUrlConfirmStore, pendingUrlForCall } from '../../stores/webUrlConfirmStore'
 import { useSettingsConfirmStore, pendingForCall } from '../../stores/settingsConfirmStore'
-import { parseSettingChange } from '../../api/mcp/settings-tools'
+import { parseSettingChanges } from '../../api/mcp/settings-tools'
+import { parseSelfControlAction } from '../../api/mcp/self-control-defs'
+import { isSelfControlToolName } from '../../lib/settings-tool-names'
 import { useChatStore } from '../../stores/chatStore'
 import { commandIcon } from '../../lib/shell-command-classify'
 import { requestGenerationCancel } from '../../api/vram-handoff'
@@ -279,10 +281,12 @@ function ToolCallBlockImpl({ toolCall, onApprove, onReject }: Props) {
   const isFailed = toolCall.status === 'failed' || toolCall.status === 'rejected'
   // The first use of computer control in a chat waits here for the user's yes.
   const chatAsk = useComputerChatAsk(toolCall.toolName, isRunning, useChatStore((s) => s.activeConversationId))
-  // A11: a settings change waits here for Accept, and stays with Undo.
-  const isSetSetting = toolCall.toolName === 'set_setting'
+  // A11 / C60: a change LU makes to itself waits here for Accept, and stays
+  // with Undo: one setting, several on one card, or an action.
+  const isSetSetting = isSelfControlToolName(toolCall.toolName) && toolCall.toolName !== 'get_settings' && toolCall.toolName !== 'lu_open_settings'
   const settingAsk = useSettingsConfirmStore((s) => (isSetSetting && isRunning ? pendingForCall(s.queue, toolCall.id) : null))
-  const settingChange = isSetSetting && toolCall.status === 'completed' ? parseSettingChange(toolCall.result) : null
+  const settingChanges = isSetSetting && toolCall.status === 'completed' ? parseSettingChanges(toolCall.result) : []
+  const selfAction = isSetSetting && toolCall.status === 'completed' ? parseSelfControlAction(toolCall.result) : null
   // P-L: a web address the model made up waits here for Open; the sources of
   // a web tool stay visible under it, from the tool result and not the model.
   const isWebTool = WEB_URL_TOOLS.has(toolCall.toolName)
@@ -450,7 +454,8 @@ function ToolCallBlockImpl({ toolCall, onApprove, onReject }: Props) {
       )}
       {chatAsk && <div className="ml-3.5 pl-2"><ComputerChatPermission ask={chatAsk} /></div>}
       {settingAsk && <div className="ml-3.5 pl-2"><SettingChangeAsk req={settingAsk} /></div>}
-      {settingChange && <div className="ml-3.5 pl-2"><SettingChangeDone change={settingChange} /></div>}
+      {settingChanges.map((c) => <div key={c.key} className="ml-3.5 pl-2"><SettingChangeDone change={c} /></div>)}
+      {selfAction && <div className="ml-3.5 pl-2"><SelfControlDone action={selfAction} /></div>}
       {urlAsk && <div className="ml-3.5 pl-2"><WebUrlAsk req={urlAsk} /></div>}
       {sourceCards.length > 0 && <div className="ml-3.5 pl-2"><WebSourceCards cards={sourceCards} /></div>}
       {toolCall.toolName === 'browser_screenshot' && <div className="ml-3.5 pl-2"><BrowserShot toolCallId={toolCall.id} /></div>}

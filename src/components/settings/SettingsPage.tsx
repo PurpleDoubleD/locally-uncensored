@@ -9,6 +9,7 @@ import { type SettingsTab } from '../../lib/settings-reset'
 import { runSettingsReset } from '../../lib/run-settings-reset'
 import { armedScopeFor, type ResetArm, type ResetArmScope } from '../../lib/reset-arming'
 import { sectionAnchorId, sectionsFor, type SettingsSectionFlags } from './settings-nav'
+import { AgentChangeLog } from './AgentChangeLog'
 import { ChatReplyTimeoutSettings } from './ChatReplyTimeoutSettings'
 import { CompactThresholdInput } from './CompactThresholdInput'
 import { HowItWorks } from '../ui/HowItWorks'
@@ -2446,6 +2447,13 @@ export function SettingsPage() {
               >
                 Reset tutorial
               </button>
+            </Section>
+          )}
+
+          {FEATURE_FLAGS.AGENT_MODE && (
+            <Section title="Changes by the agent">
+              {/* C60 (3.1.0): what the agent asked to change in LU, the answer, Undo. */}
+              <AgentChangeLog />
             </Section>
           )}
 

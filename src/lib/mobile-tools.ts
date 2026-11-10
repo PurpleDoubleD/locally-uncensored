@@ -31,7 +31,11 @@ export const MOBILE_REMOVED_TOOLS: ReadonlySet<string> = new Set([
  * pages, and nothing of A11 was checked on one. Kept apart from the five
  * above, which the audit named.
  */
-export const MOBILE_UNBUILT_TOOLS: ReadonlySet<string> = new Set(['get_settings', 'set_setting'])
+export const MOBILE_UNBUILT_TOOLS: ReadonlySet<string> = new Set([
+  'get_settings', 'set_setting',
+  // C60 (3.1.0): the batch change and the actions, desktop only as well.
+  'set_settings', 'lu_models', 'lu_service', 'lu_download', 'lu_open_settings',
+])
 
 /** The retired names that still run on a phone. All others end in a shell,
  *  a process list or a repository. */

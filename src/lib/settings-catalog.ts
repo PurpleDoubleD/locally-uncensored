@@ -24,8 +24,25 @@ import { CONTEXT_WINDOW_MAX, MAX_TOKENS_MAX, SUB_AGENT_LIMIT_MAX } from './numbe
 
 type Parsed = { ok: true; value: unknown } | { ok: false; error: string }
 
+/**
+ * Where a value lives (C60, 3.1.0). The catalog itself imports no store; the
+ * read and write of each one is lib/settings-stores.ts. A store that is not
+ * named here cannot be written from the chat at all: there is no generic
+ * write path, only these entries.
+ */
+export type SettingsStoreId = 'settings' | 'voice' | 'create' | 'memory' | 'permission' | 'gpu'
+
+/** The groups get_settings lists and the user's words open (C60). */
+export type SettingsArea =
+  | 'context' | 'sampling' | 'thinking' | 'timeouts' | 'agent' | 'code' | 'look' | 'search'
+  | 'engine' | 'gpu' | 'comfyui' | 'create' | 'voice' | 'memory' | 'downloads' | 'cloud' | 'permissions'
+
+/** When a change takes effect, for the card and the model. */
+export type SettingApplies = 'now' | 'next-message' | 'engine-restart' | 'comfy-restart' | 'next-render'
+
 export interface CatalogEntry {
-  /** Settings key, or `builtinEngine.<field>` for the engine tuning. */
+  /** Settings key, or `builtinEngine.<field>` for the engine tuning. Other
+   *  stores: `<store>.<field>` (voice.ttsEnabled, create.steps …). */
   key: string
   label: string
   /** One line for the model. */
@@ -35,9 +52,24 @@ export interface CatalogEntry {
   tab: SettingsTab
   parse: (v: unknown) => Parsed
   show: (stored: unknown) => string
-  /** One-way keys: the only direction the chat may move them. */
-  safe?: (next: unknown) => boolean
+  /** One-way keys: the only direction the chat may move them. `current` is
+   *  the value now, for keys whose safe direction depends on it. */
+  safe?: (next: unknown, current?: unknown) => boolean
   safeWhy?: string
+  /** Default 'settings'. */
+  store?: SettingsStoreId
+  /** Default from AREA_BY_KEY, else from the tab. */
+  area?: SettingsArea
+  /** 'strong': red card, never after foreign content in the same run, and the
+   *  user's own message must name it outright (C60 S3). Default 'card'. */
+  risk?: 'card' | 'strong'
+  applies?: SettingApplies
+  /** More words, DE and EN, that name this setting in a user's message. */
+  synonyms?: readonly string[]
+  /** A catalog entry whose name matches a LOCK_RULES pattern wins over the
+   *  lock (findEntry comes first). That must be a decision, not an accident:
+   *  the test wants the reason here. */
+  lockOverride?: string
 }
 
 const TAB_NAME: Record<SettingsTab, string> = {
@@ -166,6 +198,51 @@ const text = (max: number): Pick<CatalogEntry, 'parse' | 'show' | 'allowed'> => 
   show: (s) => (s ? `"${String(s)}"` : '(default)'),
 })
 
+// ── GPU cards (Card per task) ───────────────────────────────────
+
+/** A card as the hardware detection reports it (detect_gpus). */
+export interface KnownGpuCard { vendor: 'nvidia' | 'amd' | 'intel'; index: number; name: string }
+
+let knownGpuCards: KnownGpuCard[] = []
+/** settings-stores.ts fills this before a gpuRoles value is parsed. */
+export function setKnownGpuCards(cards: KnownGpuCard[]): void { knownGpuCards = cards }
+
+function gpuCard(): Pick<CatalogEntry, 'parse' | 'show' | 'allowed'> {
+  return {
+    allowed: 'auto, or a detected card by number or name',
+    parse: (v) => {
+      const s = String(v ?? '').trim().toLowerCase().replace(/^#/, '')
+      if (/^(auto|automatic|automatisch|none|default|standard|keine)$/.test(s)) return { ok: true, value: null }
+      if (knownGpuCards.length === 0) return { ok: false, error: 'no GPU detected on this computer, only auto' }
+      const byIndex = /^\d+$/.test(s) ? knownGpuCards.filter((c) => c.index === Number(s)) : []
+      const byName = knownGpuCards.filter((c) => c.name.toLowerCase().includes(s))
+      const hit = byIndex.length === 1 ? byIndex : byName
+      if (hit.length !== 1) {
+        return { ok: false, error: `expects auto or one of ${knownGpuCards.map((c) => `#${c.index} ${c.name}`).join(', ')}` }
+      }
+      const c = hit[0]
+      return { ok: true, value: { vendor: c.vendor, index: c.index, name: c.name } }
+    },
+    show: (s) => {
+      const r = s as { index?: number; name?: string } | null | undefined
+      return r && typeof r.index === 'number' ? `#${r.index} ${r.name ?? ''}`.trim() : 'auto'
+    },
+  }
+}
+
+// ── Permissions, stricter only ──────────────────────────────────
+
+export const PERMISSION_CATEGORIES = ['filesystem', 'terminal', 'desktop', 'web', 'system', 'image', 'video', 'workflow', 'mcp'] as const
+const STRICTNESS: Record<string, number> = { auto: 0, confirm: 1, blocked: 2 }
+
+/** True when `next` is as strict as `current` or stricter. Unknown current
+ *  counts as the loosest, so the check never trusts a value it cannot read. */
+export function stricterOrSame(next: unknown, current: unknown): boolean {
+  const n = STRICTNESS[String(next)]
+  const c = STRICTNESS[String(current)] ?? 0
+  return n !== undefined && n >= c
+}
+
 // ── The whitelist ───────────────────────────────────────────────
 
 const e = (
@@ -182,15 +259,15 @@ export const CATALOG: readonly CatalogEntry[] = [
   e('contextWindowOverride', 'Context window (Ollama)', 'general', 'num_ctx sent to Ollama, in tokens. Other backends ignore it.', int(0, CONTEXT_WINDOW_MAX, 'tokens', 'auto')),
   e('engineIdleUnloadMinutes', 'Unload the model when unused', 'backends', 'Minutes without use before LU Engine frees the model.', int(0, 1_440, 'min', 'never')),
   e('builtinEngine.ctx', 'Context window (LU Engine)', 'backends', 'Context size of LU Engine, in tokens. Applies on the next engine start.', int(0, 1_048_576, 'tokens', 'default 8192')),
-  e('attachmentTokenLimit', 'Attachment limit', 'general', 'Most tokens one attached text file may take.', int(0, 1_048_576, 'tokens', 'no limit')),
+  e('attachmentTokenLimit', 'Attachment limit', 'general', 'Most tokens one attached text file may take.', int(0, 1_048_576, 'tokens', 'no limit'), { lockOverride: 'A number of tokens, not a token.' }),
   e('contextDecay', 'Context decay', 'agent', 'Shorten old tool results in long agent runs.', bool()),
-  e('codexSendWindowTokens', 'Send window (paid models)', 'agent', 'Most tokens one agent step sends to a paid provider.', int(4_096, 2_000_000, 'tokens')),
+  e('codexSendWindowTokens', 'Send window (paid models)', 'agent', 'Most tokens one agent step sends to a paid provider.', int(4_096, 2_000_000, 'tokens'), { lockOverride: 'A number of tokens, not a token.' }),
   // Sampling
   // The ceiling of the slider since A33: above it every model writes noise.
   e('temperature', 'Temperature', 'general', 'Randomness of answers.', real(0, TEMPERATURE_MAX)),
   e('topP', 'Top P', 'general', 'Nucleus sampling.', real(0, 1)),
   e('topK', 'Top K', 'general', 'Sample from the K most likely tokens.', int(1, 100)),
-  e('maxTokens', 'Max tokens', 'general', 'Longest answer in tokens.', int(0, MAX_TOKENS_MAX, 'tokens', 'model default')),
+  e('maxTokens', 'Max tokens', 'general', 'Longest answer in tokens.', int(0, MAX_TOKENS_MAX, 'tokens', 'model default'), { lockOverride: 'A number of tokens, not a token.' }),
   // Thinking
   e('thinkingEnabled', 'Thinking', 'general', 'Let reasoning models think before answering.', bool()),
   e('reasoningEffort', 'Reasoning effort', 'general', 'How hard a reasoning model thinks.', oneOf(EFFORT_STEPS)),
@@ -215,14 +292,16 @@ export const CATALOG: readonly CatalogEntry[] = [
   // Look and feel
   e('theme', 'Theme', 'general', 'Light or dark app theme.', oneOf(['light', 'dark'])),
   e('emojiAutoReplace', 'Emoji replacement', 'general', 'Turn :) into an emoji while typing.', bool()),
-  e('enterKey', 'Enter key', 'general', 'Enter sends the message, or adds a new line (then Ctrl/Cmd+Enter sends).', oneOf(['send', 'newline'])),
+  e('enterKey', 'Enter key', 'general', 'Enter sends the message, or adds a new line (then Ctrl/Cmd+Enter sends).', oneOf(['send', 'newline']), { lockOverride: 'The Enter key of the keyboard, not an API key.' }),
   e('backgroundMediaTools', 'Keep chatting while it renders', 'general', 'A long picture or video from the chat goes on in the background.', bool()),
   e('cloudTeasersEnabled', 'Cloud features in Local mode', 'general', 'Show LU Cloud hints in Local mode.', bool()),
   e('cavemanMode', 'Caveman mode', 'general', 'Shorter, terser answers.', oneOf(['off', 'lite', 'full', 'ultra'])),
   e('smallModelMode', 'Small model mode', 'general', 'Lean prompts and fewer tools for 3B–8B models.', bool()),
   e('personasEnabled', 'Personas', 'agent', 'Use the persona system prompt in new chats. Persona texts stay locked.', bool()),
   // Search
-  e('searchProvider', 'Search provider', 'agent', 'Which web search the chat uses. Brave and Tavily need a key in Settings → Agent.', oneOf(['auto', 'brave', 'tavily'])),
+  // C60: the providers without a key (duckduckgo, wikipedia) and the local
+  // SearXNG too; brave, tavily, exa and you need a key the user enters.
+  e('searchProvider', 'Search provider', 'agent', 'Which web search the chat uses. brave, tavily, exa and you need a key in Settings → Agent; searxng needs a local SearXNG.', oneOf(['auto', 'duckduckgo', 'wikipedia', 'searxng', 'brave', 'tavily', 'exa', 'you'])),
   e('searchUserAgent', 'Search user agent', 'agent', 'User-Agent of web search and web_fetch.', text(200)),
   // Hardware
   e('builtinEngine.gpuLayers', 'GPU layers (LU Engine)', 'backends', 'Layers offloaded to the GPU, -1 = all. Applies on the next engine start.', int(-1, 999)),
@@ -247,6 +326,7 @@ export const CATALOG: readonly CatalogEntry[] = [
   }),
   e('codexConfirmShell', 'Ask before commands', 'agent', 'Coding agent asks before running a command.', bool(), {
     allowed: 'on (off only by hand)', safe: (v) => v === true, safeWhy: 'Turning the question off is the user\'s choice',
+    lockOverride: 'One way only, towards asking before a shell command.',
   }),
   e('webStrictUrls', 'Ask before unknown web addresses', 'agent', 'Web tools ask before opening an address that neither you nor a web result gave.', bool(), {
     allowed: 'on (off only by hand)', safe: (v) => v === true, safeWhy: 'Turning the question off is the user\'s choice',
@@ -266,6 +346,83 @@ export const CATALOG: readonly CatalogEntry[] = [
   e('codexArchitectAllowCloud', 'Architect may use cloud', 'agent', 'Let architect mode plan with a cloud model.', bool(), {
     allowed: 'off (on only by hand)', safe: (v) => v === false, safeWhy: 'It sends code to the cloud',
   }),
+
+  // ── C60 (3.1.0): the other stores ────────────────────────────────
+  // Voice (stores/voiceStore.ts). Endpoints, the microphone and the voice
+  // session's own tool switches stay with the user.
+  e('voice.ttsEnabled', 'Read aloud (TTS)', 'voice-remote', 'Speaker button under answers.', bool(), { store: 'voice', area: 'voice' }),
+  e('voice.autoReadAloud', 'Read every answer aloud', 'voice-remote', 'Read each finished answer aloud by itself.', bool(), { store: 'voice', area: 'voice' }),
+  e('voice.sttEnabled', 'Dictation (STT)', 'voice-remote', 'Microphone button in the composer.', bool(), { store: 'voice', area: 'voice' }),
+  e('voice.ttsRate', 'Speech rate', 'voice-remote', 'How fast the voice speaks, 1 = normal.', real(0.5, 2), { store: 'voice', area: 'voice' }),
+  e('voice.ttsPitch', 'Speech pitch', 'voice-remote', 'Pitch of the browser voice, 1 = normal.', real(0.5, 2), { store: 'voice', area: 'voice' }),
+  e('voice.ttsMode', 'Voice engine', 'voice-remote', 'piper = local neural voice, engine = LU Engine audio model. An external endpoint only by hand.', oneOf(['piper', 'engine']), { store: 'voice', area: 'voice' }),
+  e('voice.sttMode', 'Dictation engine', 'voice-remote', 'whisper = local faster-whisper, engine = LU Engine audio model. An external endpoint only by hand.', oneOf(['whisper', 'engine']), { store: 'voice', area: 'voice' }),
+  e('voice.loopThinking', 'Voice: think first', 'voice-remote', 'In a Voice session the model may think before it answers.', bool(), { store: 'voice', area: 'voice' }),
+  e('voice.loopAgent', 'Voice: agent tools', 'voice-remote', 'In a Voice session the model may use the agent tools.', bool(), {
+    store: 'voice', area: 'voice', allowed: 'off (on only by hand)', safe: (v) => v === false,
+    safeWhy: 'Tools in a spoken session are the user\'s choice',
+  }),
+
+  // Create (stores/createStore.ts): the defaults of the Create tab. The image
+  // and video model are also what the chat's own picture tools take first
+  // (api/model-pick.ts).
+  e('create.imageModel', 'Create image model', 'general', 'Image model of the Create tab and of pictures from the chat. An installed one, by name.', text(300), {
+    store: 'create', area: 'create', allowed: 'the name of an installed image model', synonyms: ['bildmodell', 'image model'],
+  }),
+  e('create.videoModel', 'Create video model', 'general', 'Video model of the Create tab and of clips from the chat. An installed one, by name.', text(300), {
+    store: 'create', area: 'create', allowed: 'the name of an installed video model', synonyms: ['videomodell', 'video model'],
+  }),
+  e('create.steps', 'Create steps', 'general', 'Sampling steps of an image.', int(1, 200), { store: 'create', area: 'create', applies: 'next-render', synonyms: ['schritte'] }),
+  e('create.cfgScale', 'Create CFG', 'general', 'Prompt strength (CFG scale).', real(0, 30), { store: 'create', area: 'create', applies: 'next-render', synonyms: ['cfg', 'guidance'] }),
+  e('create.size', 'Create size', 'general', 'Width x height in pixels, 64–4096 each, e.g. 1024x1024.', {
+    allowed: 'WIDTHxHEIGHT, 64–4096 each',
+    parse: (v) => {
+      const m = /^\s*(\d{2,4})\s*[x×*,]\s*(\d{2,4})\s*$/i.exec(String(v ?? ''))
+      if (!m) return { ok: false, error: 'expects WIDTHxHEIGHT, e.g. 1024x1024' }
+      const w = Number(m[1]); const h = Number(m[2])
+      if (w < 64 || h < 64 || w > 4096 || h > 4096) return { ok: false, error: 'out of range' }
+      return { ok: true, value: [w, h] }
+    },
+    show: (s) => (Array.isArray(s) ? `${s[0]}×${s[1]}` : String(s)),
+  }, { store: 'create', area: 'create', applies: 'next-render', synonyms: ['auflösung', 'aufloesung', 'resolution', 'größe', 'groesse', 'format'] }),
+  e('create.sampler', 'Create sampler', 'general', 'ComfyUI sampler name, e.g. euler, dpmpp_2m.', {
+    ...text(64), allowed: 'a ComfyUI sampler name',
+    parse: (v) => { const s = String(v ?? '').trim().toLowerCase(); return /^[a-z0-9_+-]{1,64}$/.test(s) ? { ok: true, value: s } : { ok: false, error: 'expects a sampler name like euler' } },
+  }, { store: 'create', area: 'create', applies: 'next-render' }),
+  e('create.scheduler', 'Create scheduler', 'general', 'ComfyUI scheduler name, e.g. normal, karras, simple.', {
+    ...text(64), allowed: 'a ComfyUI scheduler name',
+    parse: (v) => { const s = String(v ?? '').trim().toLowerCase(); return /^[a-z0-9_+-]{1,64}$/.test(s) ? { ok: true, value: s } : { ok: false, error: 'expects a scheduler name like karras' } },
+  }, { store: 'create', area: 'create', applies: 'next-render' }),
+  e('create.batchSize', 'Create batch', 'general', 'Images per run.', int(1, 8), { store: 'create', area: 'create', applies: 'next-render' }),
+  e('create.frames', 'Create video frames', 'general', 'Frames of a clip.', int(1, 2_000), { store: 'create', area: 'create', applies: 'next-render', synonyms: ['frames'] }),
+  e('create.fps', 'Create video fps', 'general', 'Frames per second of a clip.', int(1, 120), { store: 'create', area: 'create', applies: 'next-render', synonyms: ['fps'] }),
+  e('create.hiresFixEnabled', 'Create hires fix', 'general', 'Second, upscaled pass for images.', bool(), { store: 'create', area: 'create', applies: 'next-render', synonyms: ['hires', 'upscale'] }),
+
+  // Memory (stores/memoryStore.ts, MemorySettings).
+  e('memory.autoExtractEnabled', 'Remember facts automatically', 'agent', 'Save memories from chats by itself. Costs one extra model call per answer.', bool(), { store: 'memory', area: 'memory' }),
+  e('memory.autoExtractInAllModes', 'Remember outside Agent', 'agent', 'Also save memories from plain chats.', bool(), { store: 'memory', area: 'memory' }),
+  e('memory.maxMemoriesOverride', 'Memories per prompt', 'agent', 'How many memories go into a prompt; 0 = fits the model.', int(0, 100, '', 'auto'), { store: 'memory', area: 'memory' }),
+  e('memory.maxMemoryChars', 'Memory length', 'agent', 'Most characters of one memory.', int(200, 20_000, 'chars'), { store: 'memory', area: 'memory' }),
+
+  // GPU per task (Card per task, 3.0.8 A2). The card list comes from the
+  // hardware detection; settings-stores.ts loads it before the parse.
+  e('gpuRoles.chat', 'GPU for chat models', 'backends', 'The card Ollama and LU Engine use: auto, or a card by number or name. Applies on the next start of the engine.', gpuCard(), {
+    store: 'gpu', area: 'gpu', applies: 'engine-restart', synonyms: ['grafikkarte', 'karte für den chat', 'card for chat'],
+  }),
+  e('gpuRoles.comfy', 'GPU for ComfyUI', 'backends', 'The card ComfyUI renders on: auto, or a card by number or name. Applies on the next start of ComfyUI.', gpuCard(), {
+    store: 'gpu', area: 'gpu', applies: 'comfy-restart', synonyms: ['grafikkarte', 'karte für comfyui', 'card for comfyui'],
+  }),
+
+  // Permissions, stricter only (stores/permissionStore.ts). Looser is the
+  // user's own hand: the safe check compares with the level now.
+  ...PERMISSION_CATEGORIES.map((cat) => e(`permission.${cat}`, `Permission: ${cat}`, 'agent',
+    `What a ${cat} tool may do without asking: auto, confirm (ask first) or blocked. From the chat only stricter.`, oneOf(['blocked', 'confirm', 'auto']), {
+      store: 'permission', area: 'permissions',
+      allowed: 'stricter than now only (auto → confirm → blocked)',
+      safe: (next, current) => stricterOrSame(next, current),
+      safeWhy: 'Loosening a permission is the user\'s choice',
+      lockOverride: 'A permission may only get stricter from the chat; the safe check enforces it.',
+    })),
 ]
 
 // ── Locked ──────────────────────────────────────────────────────
@@ -339,10 +496,101 @@ export const HIDDEN_KEYS: readonly string[] = [
 
 export const normKey = (s: string) => String(s ?? '').toLowerCase().replace(/[^a-z0-9]/g, '')
 
+/** The key without its store prefix: builtinEngine.ctx → ctx, voice.ttsRate → ttsRate. */
+const bareKey = (key: string) => key.replace(/^(builtinEngine|voice|create|memory|permission)\./, '')
+
 export function findEntry(key: string): CatalogEntry | undefined {
   const k = normKey(key)
   if (!k) return undefined
-  return CATALOG.find((c) => normKey(c.key) === k || normKey(c.key.replace(/^builtinEngine\./, '')) === k || normKey(c.label) === k)
+  return CATALOG.find((c) => normKey(c.key) === k || normKey(bareKey(c.key)) === k || normKey(c.label) === k)
+}
+
+// ── Areas and the words that name them (C60) ────────────────────
+
+/**
+ * The groups get_settings lists, and the words in a user's own message that
+ * open them (DE and EN). The same words decide the intent check in
+ * settings-tools.ts: a card only comes when the user's message names the area
+ * of the setting, or answers the model's question about it.
+ */
+export const SETTINGS_AREAS: Record<SettingsArea, { label: string; words: readonly string[] }> = {
+  context: { label: 'Context and compaction', words: ['context', 'kontext', 'num_ctx', 'compact', 'kompakt', 'kontextfenster', 'recall', 'attachment', 'anhang', 'decay', 'send window'] },
+  sampling: { label: 'Sampling', words: ['temperature', 'temperatur', 'top p', 'top_p', 'top k', 'top_k', 'sampling', 'max tokens', 'kreativ', 'creative', 'random', 'zufäll', 'zufall'] },
+  thinking: { label: 'Thinking', words: ['think', 'denk', 'reasoning', 'effort', 'nachdenk', 'budget'] },
+  timeouts: { label: 'Time limits', words: ['timeout', 'zeitlimit', 'time limit', 'wartezeit', 'wait'] },
+  agent: { label: 'Agent', words: ['agent', 'loop', 'schleife', 'sub-agent', 'unteragent', 'tool call', 'werkzeug', 'step limit', 'schrittlimit', 'persona', 'loop guard', 'endlos'] },
+  code: { label: 'Code tab', words: ['code', 'coding', 'codex', 'repo map', 'review', 'architect', 'architekt', 'befehl', 'command', 'auto-apply', 'edits'] },
+  look: { label: 'Look and input', words: ['theme', 'design', 'dark', 'dunkel', 'hell', 'light', 'emoji', 'enter', 'caveman', 'small model', 'kleine modell', 'aussehen', 'farbe', 'teaser'] },
+  search: { label: 'Web search', words: ['search', 'such', 'websuche', 'user agent', 'user-agent', 'brave', 'tavily', 'duckduckgo', 'wikipedia', 'searxng'] },
+  engine: { label: 'LU Engine', words: ['engine', 'gpu layers', 'layer', 'threads', 'kerne', 'flash', 'kv cache', 'kv-cache', 'cache', 'vram', 'unload', 'entlad', 'idle', 'llama'] },
+  gpu: { label: 'GPU per task', words: ['gpu', 'grafikkarte', 'karte', 'card', 'vram', 'device', 'cpu'] },
+  comfyui: { label: 'ComfyUI and memory', words: ['comfy', 'comfyui', 'render', 'vram', 'speicher frei', 'free memory'] },
+  create: { label: 'Create defaults', words: ['create', 'bild', 'image', 'video', 'clip', 'steps', 'schritte', 'cfg', 'sampler', 'scheduler', 'auflösung', 'aufloesung', 'resolution', 'größe', 'groesse', 'size', 'batch', 'frames', 'fps', 'hires'] },
+  voice: { label: 'Voice', words: ['voice', 'stimme', 'sprach', 'speech', 'tts', 'stt', 'vorlesen', 'vorles', 'read aloud', 'diktat', 'diktier', 'dictation', 'whisper', 'piper'] },
+  memory: { label: 'Memory', words: ['memory', 'memories', 'gedächtnis', 'gedaechtnis', 'erinner', 'remember', 'merk'] },
+  downloads: { label: 'Downloads', words: ['download', 'herunterlad', 'runterlad', 'bandbreite', 'bandwidth'] },
+  cloud: { label: 'Cloud', words: ['cloud', 'local mode', 'lokal', 'offline'] },
+  permissions: { label: 'Permissions (stricter only)', words: ['permission', 'berechtigung', 'erlaub', 'allow', 'block', 'sperr', 'nachfrag', 'frag vorher', 'ask before', 'confirm', 'bestätig', 'bestaetig'] },
+}
+
+/** Area of the entries written before C60, by key; the rest by tab. */
+const AREA_BY_KEY: Record<string, SettingsArea> = {
+  autoCompact: 'context', chatRecall: 'context', autoCompactThreshold: 'context', contextWindowOverride: 'context',
+  'builtinEngine.ctx': 'context', attachmentTokenLimit: 'context', contextDecay: 'context', codexSendWindowTokens: 'context',
+  temperature: 'sampling', topP: 'sampling', topK: 'sampling', maxTokens: 'sampling',
+  thinkingEnabled: 'thinking', reasoningEffort: 'thinking', thinkingBudget: 'thinking',
+  chatFirstReplyTimeoutSeconds: 'timeouts', imageGenTimeoutMinutes: 'timeouts', videoGenTimeoutMinutes: 'timeouts',
+  agentMaxToolCalls: 'agent', agentMaxIterations: 'agent', agentLoopGuard: 'agent', subAgentMaxToolCalls: 'agent',
+  subAgentMaxIterations: 'agent', loopMaxPasses: 'agent', personasEnabled: 'agent',
+  theme: 'look', emojiAutoReplace: 'look', enterKey: 'look', backgroundMediaTools: 'look', cloudTeasersEnabled: 'cloud',
+  cavemanMode: 'look', smallModelMode: 'look',
+  searchProvider: 'search', searchUserAgent: 'search',
+  engineIdleUnloadMinutes: 'engine', 'builtinEngine.gpuLayers': 'engine', 'builtinEngine.threads': 'engine',
+  'builtinEngine.flashAttn': 'engine', 'builtinEngine.cacheTypeK': 'engine', 'builtinEngine.cacheTypeV': 'engine',
+  exclusiveVramMode: 'comfyui', freeAfterRender: 'comfyui', comfyGpuMode: 'gpu', downloadLimitMBps: 'downloads',
+  codexRepoMapEnabled: 'code', codexRepoMapLimit: 'code', codexReviewMode: 'code', codexArchitectMode: 'code',
+  codexDefaultMode: 'code', codexConfirmShell: 'code', codexCloudConfirmOptIn: 'code', codexAutoApply: 'code',
+  appMode: 'cloud', memoryCloudOptIn: 'memory', codexArchitectAllowCloud: 'code',
+}
+
+export function areaOf(entry: CatalogEntry): SettingsArea {
+  return entry.area ?? AREA_BY_KEY[entry.key] ?? (entry.tab === 'backends' ? 'engine' : entry.tab === 'voice-remote' ? 'voice' : entry.tab === 'agent' ? 'agent' : 'look')
+}
+
+export function storeOf(entry: CatalogEntry): SettingsStoreId {
+  return entry.store ?? 'settings'
+}
+
+export function isArea(s: string): s is SettingsArea {
+  return Object.prototype.hasOwnProperty.call(SETTINGS_AREAS, s)
+}
+
+/** Every word that may name a setting in a user's message: the area words,
+ *  each label and every synonym, lower case, at least 3 characters. */
+export function catalogWords(): string[] {
+  const out = new Set<string>()
+  for (const a of Object.values(SETTINGS_AREAS)) for (const w of a.words) out.add(w.toLowerCase())
+  for (const c of CATALOG) {
+    out.add(c.label.toLowerCase())
+    for (const s of c.synonyms ?? []) out.add(s.toLowerCase())
+  }
+  return [...out].filter((w) => w.length >= 3)
+}
+
+/**
+ * Does this text name the setting? Its area's words, its label, its key or a
+ * synonym. `strict` (strong entries): the label, key or a synonym only, the
+ * area alone is not enough.
+ */
+export function textNames(entry: CatalogEntry, text: string, strict = false): boolean {
+  const t = String(text ?? '').toLowerCase()
+  if (!t) return false
+  const tn = normKey(t)
+  if (tn.includes(normKey(entry.key)) || tn.includes(normKey(bareKey(entry.key)))) return true
+  if (t.includes(entry.label.toLowerCase())) return true
+  if ((entry.synonyms ?? []).some((s) => t.includes(s.toLowerCase()))) return true
+  if (strict) return false
+  return SETTINGS_AREAS[areaOf(entry)].words.some((w) => t.includes(w))
 }
 
 export function lockedRule(key: string): LockRule | undefined {

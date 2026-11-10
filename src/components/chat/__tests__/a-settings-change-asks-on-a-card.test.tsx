@@ -29,14 +29,25 @@ const call = (over: Partial<AgentToolCall> = {}): AgentToolCall => ({
 })
 const q = (id: string) => document.querySelector(`[data-testid="${id}"]`) as HTMLElement | null
 const threshold = () => useSettingsStore.getState().settings.autoCompactThreshold
+// The tool loads its stores lazily (C60), so the first card can take a real
+// moment on a cold import: wait on time, not on a count of ticks.
 const waitForCard = async () => {
-  for (let i = 0; i < 50 && useSettingsConfirmStore.getState().queue.length === 0; i++) await act(async () => {})
+  const until = Date.now() + 4_000
+  while (useSettingsConfirmStore.getState().queue.length === 0 && Date.now() < until) {
+    await act(async () => { await new Promise((r) => setTimeout(r, 10)) })
+  }
 }
 
 beforeEach(() => {
   useSettingsStore.setState({ settings: structuredClone(DEFAULT_SETTINGS) })
   useSettingsConfirmStore.setState({ queue: [] })
-  useChatStore.setState({ activeConversationId: 'chat-a' })
+  // C60: one shared run object here; its card count starts at zero per test.
+  run.selfControlCards = 0
+  // C60: the user asked for it in their own message (the intent check).
+  useChatStore.setState({
+    activeConversationId: 'chat-a',
+    conversations: [{ id: 'chat-a', title: 't', messages: [{ id: 'u1', role: 'user', content: 'set auto compact to 80 and the theme', timestamp: 1 }] }],
+  } as never)
 })
 afterEach(cleanup)
 

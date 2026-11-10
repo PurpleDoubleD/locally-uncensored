@@ -90,6 +90,24 @@ export async function startModelDownload(url: string, subfolder: string, filenam
   })
 }
 
+/**
+ * A download the chat agent starts from a link the user sent (C60, 3.1.0).
+ * Rust checks the link again (`chat_download_allowed`): https on
+ * huggingface.co or civitai.com, a .safetensors or .gguf file, a model folder.
+ */
+export async function startChatLinkDownload(url: string, subfolder: string, filename: string): Promise<{ status: string; id: string; error?: string }> {
+  recordSourceFromDownload(filename, url)
+  return backendCall("download_model", {
+    url,
+    subfolder,
+    filename,
+    expectedBytes: null,
+    expectedSha256: null,
+    authToken: civitaiAuthToken(url),
+    chatOrigin: true,
+  })
+}
+
 /** What `comfy_model_info` reads about one ComfyUI model file (D1). */
 export interface ComfyFileFacts {
   path: string

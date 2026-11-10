@@ -112,6 +112,7 @@ describe('which keys are kept', () => {
       'locally-uncensored-computer': 'desktop only: the settings of computer use, which the phone does not have',
       'lu-neuron-tweaker': 'desktop only (3.0.9, P11): the Neuron tweaker steers LU Engine, which the phone does not have',
       'lu-neuron-window': 'desktop only (3.1.0): where the Neurons window stood, a window the phone does not have',
+      'lu-settings-audit': 'desktop only (3.1.0, C60): what the agent changed in the desktop app; the phone has no self-control tools',
       'LU-create-orders': 'the orders of Create in chat, which is locked on the phone until it has the order card',
       'lu-mobile-switched-under-answer': 'a note per answer; lost, the chat says "interrupted" instead of "you switched models"',
       'lu-mobile-settings-stamp': 'the stamp of this copy itself; in the native backup it dates the settings there (L5)',

@@ -69,6 +69,12 @@ const NON_CACHEABLE_TOOLS = new Set<string>([
   // the user every time. Neither may be answered from an earlier call.
   'get_settings',
   'set_setting',
+  // C60: the batch change and the actions read and change live state.
+  'set_settings',
+  'lu_models',
+  'lu_service',
+  'lu_download',
+  'lu_open_settings',
 ])
 
 /**

@@ -344,6 +344,18 @@ export function Sidebar() {
     }
   }
 
+  // C60: the chat agent asked to start the remote and the user said yes on
+  // the strong card. Same door as the Dispatch button: folder picker, the
+  // dispatch, the QR code here. Home network only, never 'internet'.
+  const chatDispatch = useRemoteStore((s) => s.chatDispatchRequest)
+  useEffect(() => {
+    if (!chatDispatch) return
+    useRemoteStore.getState().clearChatDispatch()
+    void handleDispatch('lan')
+    // handleDispatch is a fresh closure each render; the request is the trigger.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chatDispatch])
+
   const handleRename = (id: string) => {
     if (editTitle.trim()) {
       renameConversation(id, editTitle.trim())

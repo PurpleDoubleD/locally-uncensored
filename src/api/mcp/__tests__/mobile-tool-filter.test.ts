@@ -46,7 +46,8 @@ function registryHere(): ToolRegistry {
 
 const GONE = ['shell_execute', 'pr_resume', 'screenshot', 'image_generate', 'video_generate']
 /** The settings tools of A11 (3.0.8): desktop only, see MOBILE_UNBUILT_TOOLS. */
-const SETTINGS = ['get_settings', 'set_setting']
+// A11 (3.0.8) and C60 (3.1.0): LU's own settings and actions, desktop only.
+const SETTINGS = ['get_settings', 'set_setting', 'set_settings', 'lu_models', 'lu_service', 'lu_download', 'lu_open_settings']
 const STAYS = [
   'todo_write', 'web_research', 'web_search', 'web_fetch', 'file_read', 'file_write', 'file_edit', 'file_list',
   'file_search', 'run_workflow', 'delegate_task', 'check_tasks', 'message_agent',
@@ -69,12 +70,12 @@ describe('the catalog on a phone', () => {
 
   it('what the sub agent offers is what is registered, so it offers none of them either', () => {
     // api/agents/sub-agent.ts builds its tool list from toolRegistry.getAll()
-    // minus delegate_task and the settings tools (A11), and applies no device
+    // minus delegate_task and the self-control tools (A11, C60), and applies no device
     // filter of its own.
     standOn('android')
     const offered = registryHere().getAll().map((t) => t.name).filter((n) => n !== 'delegate_task')
     for (const name of GONE) expect(offered).not.toContain(name)
-    expect(src('api/agents/sub-agent.ts')).toMatch(/toolRegistry\s*\.getAll\(\)\s*(\/\/[^\n]*\s*)?\.filter\(\(t\) => t\.name !== DELEGATE_TASK_TOOL_DEF\.name && !isSettingsToolName\(t\.name\)\)/)
+    expect(src('api/agents/sub-agent.ts')).toMatch(/toolRegistry\s*\.getAll\(\)\s*(\/\/[^\n]*\s*)?\.filter\(\(t\) => t\.name !== DELEGATE_TASK_TOOL_DEF\.name && !isSelfControlToolName\(t\.name\)\)/)
   })
 
   it('the old names are no back door: all but the clock are unknown', async () => {

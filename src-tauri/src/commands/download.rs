@@ -1113,6 +1113,71 @@ pub(crate) async fn engine_folders(state: &State<'_, AppState>) -> Option<comfy_
     }
 }
 
+/// The model folders a download from the chat may write to (C60).
+const CHAT_DOWNLOAD_FOLDERS: [&str; 10] = [
+    "checkpoints", "diffusion_models", "unet", "loras", "vae", "text_encoders",
+    "clip", "clip_vision", "upscale_models", "controlnet",
+];
+
+/// The hosts a link from the user may point at, for a download the chat
+/// starts (C60, David's decision 3 of 09.11.2026). Exact names: a subdomain is
+/// not the host. The SSRF guard still checks every redirect on the way.
+const CHAT_DOWNLOAD_HOSTS: [&str; 2] = ["huggingface.co", "civitai.com"];
+
+/// May the chat start this download? Pure, so it is under test.
+pub(crate) fn chat_download_allowed(url: &str, subfolder: &str, filename: &str) -> Result<(), String> {
+    let parsed = url::Url::parse(url).map_err(|_| "refused: not a valid link".to_string())?;
+    if parsed.scheme() != "https" {
+        return Err("refused: a download from the chat needs an https link".into());
+    }
+    let host = parsed.host_str().unwrap_or("").to_ascii_lowercase();
+    if !CHAT_DOWNLOAD_HOSTS.contains(&host.as_str()) {
+        return Err(format!("refused: from the chat only links to {} are downloaded", CHAT_DOWNLOAD_HOSTS.join(" or ")));
+    }
+    if parsed.username() != "" || parsed.password().is_some() || parsed.port().is_some() {
+        return Err("refused: a link with a login or a port is not downloaded from the chat".into());
+    }
+    let name = sanitize_filename(filename).to_ascii_lowercase();
+    if !(name.ends_with(".safetensors") || name.ends_with(".gguf")) {
+        return Err("refused: from the chat only .safetensors and .gguf files are downloaded".into());
+    }
+    if !CHAT_DOWNLOAD_FOLDERS.contains(&subfolder) {
+        return Err(format!("refused: '{subfolder}' is not a model folder"));
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod chat_download_tests {
+    use super::chat_download_allowed;
+
+    #[test]
+    fn a_link_to_huggingface_or_civitai_for_a_safetensors_file_is_allowed() {
+        assert!(chat_download_allowed("https://huggingface.co/a/b/resolve/main/m.safetensors", "loras", "m.safetensors").is_ok());
+        assert!(chat_download_allowed("https://civitai.com/api/download/models/123", "checkpoints", "x.safetensors").is_ok());
+        assert!(chat_download_allowed("https://huggingface.co/a/b/resolve/main/m.gguf", "unet", "m.gguf").is_ok());
+    }
+
+    #[test]
+    fn everything_else_is_refused() {
+        for (u, f, n) in [
+            ("http://huggingface.co/a/m.safetensors", "loras", "m.safetensors"),
+            ("https://evil.example/m.safetensors", "loras", "m.safetensors"),
+            ("https://huggingface.co.evil.example/m.safetensors", "loras", "m.safetensors"),
+            ("https://cdn.huggingface.co/m.safetensors", "loras", "m.safetensors"),
+            ("https://user:pw@huggingface.co/m.safetensors", "loras", "m.safetensors"),
+            ("https://huggingface.co:8443/m.safetensors", "loras", "m.safetensors"),
+            ("https://huggingface.co/a/m.ckpt", "checkpoints", "m.ckpt"),
+            ("https://huggingface.co/a/m.pt", "checkpoints", "m.pt"),
+            ("https://huggingface.co/a/m.safetensors", "custom_nodes", "m.safetensors"),
+            ("https://huggingface.co/a/m.safetensors", "../../etc", "m.safetensors"),
+            ("not a link", "loras", "m.safetensors"),
+        ] {
+            assert!(chat_download_allowed(u, f, n).is_err(), "{u} {f} {n}");
+        }
+    }
+}
+
 #[allow(non_snake_case)]
 #[tauri::command]
 pub async fn download_model(
@@ -1125,8 +1190,16 @@ pub async fn download_model(
     // and ONLY to a CivitAI host (see do_download). Absent for every other
     // catalog, which is every other download in the app.
     authToken: Option<String>,
+    // C60 (3.1.0): set when the chat agent starts this download from a link
+    // the user sent. Then only https on huggingface.co or civitai.com, only a
+    // .safetensors or .gguf file, only a model folder of ComfyUI; checked here
+    // and not only in the frontend, which a prompt-injected run could reach.
+    chatOrigin: Option<bool>,
     state: State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
+    if chatOrigin == Some(true) {
+        chat_download_allowed(&url, &subfolder, &filename)?;
+    }
     let expected_bytes = expectedBytes;
     let auth_token = authToken;
     let comfy_path = {

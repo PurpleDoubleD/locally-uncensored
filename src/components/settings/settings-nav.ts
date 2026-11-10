@@ -108,6 +108,8 @@ export function sectionsFor(tab: SettingsTab, flags: SettingsSectionFlags): stri
         'Personas',
         'Memory',
         ...(flags.agentMode ? ['Agent Permissions'] : []),
+        // C60 (3.1.0): what the agent changed in LU itself, with Undo.
+        ...(flags.agentMode ? ['Changes by the agent'] : []),
         // Die Kappen fuer delegierte Agenten. Sie standen bis zum
         // 03.09.2026 unter General → Generation, zwischen Temperatur und
         // Auto-Compact; eine Persona suchte sie beim Agenten und fand sie

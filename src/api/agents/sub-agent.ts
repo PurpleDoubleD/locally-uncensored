@@ -51,7 +51,7 @@ import { istNurAnkuendigung, ANKUENDIGUNG_STEER } from './ankuendigung'
 import { MAX_EXPLICIT_FANOUT } from '../../lib/agent-fanout'
 import { resolveApprovalLevel } from '../../lib/agent-approval-policy'
 import { allowedInReadOnlyTurn } from '../../lib/mutating-tools'
-import { isSettingsToolName } from '../../lib/settings-tool-names'
+import { isSelfControlToolName } from '../../lib/settings-tool-names'
 import { clampSubAgentLimit } from '../../lib/number-limits'
 
 // NOTE: the toolRegistry import is done LAZILY inside defaultSubAgentRunner
@@ -512,7 +512,7 @@ export async function defaultSubAgentRunner(
   const tools: MCPToolDefinition[] = toolRegistry
     .getAll()
     // A sub-agent runs without the user watching: no settings changes (A11).
-    .filter((t) => t.name !== DELEGATE_TASK_TOOL_DEF.name && !isSettingsToolName(t.name))
+    .filter((t) => t.name !== DELEGATE_TASK_TOOL_DEF.name && !isSelfControlToolName(t.name))
 
   const llmTools = tools.map((t) => ({
     type: 'function' as const,
@@ -639,7 +639,7 @@ export async function defaultSubAgentRunner(
       {
         getTool: (name) => registry.resolveExecutable(name),
         execute: (name: string, args: ToolArgs, callRun?: AgentRunContext) =>
-          isSettingsToolName(name)
+          isSelfControlToolName(name)
             ? Promise.resolve('Error: a sub-agent cannot read or change the app settings. Nothing changed.')
             : registry.execute(name, args, 1, callRun),
         explainError: (toolName, err) => explainToolError(toolName, err),

@@ -46,7 +46,12 @@ describe('AGENT_TOOL_DEFS', () => {
     // 3.1.0 (P-L): +1, web_research. Es ersetzt fuer kleine Modelle das Paar
     // web_search+web_fetch in einem Aufruf (lib/tool-selection.ts). Dazu die
     // fuenf Werkzeuge des LU-Browsers, nur auf macOS und Windows registriert.
-    expect(AGENT_TOOL_DEFS).toHaveLength(20 + (browserExistsHere() ? BROWSER_TOOL_NAMES.length : 0))
+    // 3.1.0 (C60): +5, set_settings, lu_models, lu_service, lu_download und
+    // lu_open_settings. LU bedient sich selbst; eine Aktion (Modell, Dienst,
+    // Download) hat Nebenwirkungen und eine eigene Karte und passt deshalb
+    // nicht in set_setting. Alle fuenf stehen hinter demselben Tor wie
+    // get_settings und fahren nur auf einer Nachricht ueber LU selbst mit.
+    expect(AGENT_TOOL_DEFS).toHaveLength(25 + (browserExistsHere() ? BROWSER_TOOL_NAMES.length : 0))
   })
 
   const expectedTools = [
@@ -102,9 +107,12 @@ describe('AGENT_TOOL_DEFS', () => {
     // eigenen Karte (alt -> neu), auch im Bypass. Eine zweite Rueckfrage
     // davor fragte doppelt, wie bei create_order.
     // 3.1.0 (P-L): web_research and the browser read only, like web_fetch.
+    // 3.1.0 (C60): die fuenf Selbststeuerungswerkzeuge aus demselben Grund
+    // wie set_setting: jede Aenderung fragt mit ihrer eigenen Karte.
     expect(autoNames).toEqual([
       ...(browserExistsHere() ? [...BROWSER_TOOL_NAMES] : []),
-      'check_tasks', 'get_settings', 'message_agent', 'set_setting', 'todo_write', 'web_fetch', 'web_research', 'web_search',
+      'check_tasks', 'get_settings', 'lu_download', 'lu_models', 'lu_open_settings', 'lu_service', 'message_agent',
+      'set_setting', 'set_settings', 'todo_write', 'web_fetch', 'web_research', 'web_search',
     ].sort())
   })
 
