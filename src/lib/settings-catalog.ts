@@ -330,6 +330,7 @@ export const CATALOG: readonly CatalogEntry[] = [
   }),
   e('webStrictUrls', 'Ask before unknown web addresses', 'agent', 'Web tools ask before opening an address that neither you nor a web result gave.', bool(), {
     allowed: 'on (off only by hand)', safe: (v) => v === true, safeWhy: 'Turning the question off is the user\'s choice',
+    lockOverride: 'One way only, towards asking before a web address the model made up.',
   }),
   e('codexCloudConfirmOptIn', 'Ask before cloud commands', 'agent', 'Ask before a cloud model runs a command.', bool(), {
     allowed: 'on (off only by hand)', safe: (v) => v === true, safeWhy: 'Turning the question off is the user\'s choice',
