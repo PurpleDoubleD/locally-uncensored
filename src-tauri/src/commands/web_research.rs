@@ -216,6 +216,33 @@ pub(crate) fn defuse(text: &str) -> String {
     MARKERS.replace_all(text, " ").into_owned()
 }
 
+/// HTML entities in a title: numeric ones and the named ones a title carries
+/// in practice (German umlauts, dashes, quotes). Unknown names stay as written.
+pub(crate) fn decode_entities(s: &str) -> String {
+    static ENT: std::sync::LazyLock<regex::Regex> =
+        std::sync::LazyLock::new(|| regex::Regex::new(r"&(#[0-9]{1,7}|#[xX][0-9a-fA-F]{1,6}|[a-zA-Z]{2,8});").unwrap());
+    ENT.replace_all(s, |c: &regex::Captures| {
+        let e = &c[1];
+        let ch = if let Some(hex) = e.strip_prefix("#x").or_else(|| e.strip_prefix("#X")) {
+            u32::from_str_radix(hex, 16).ok().and_then(char::from_u32)
+        } else if let Some(dec) = e.strip_prefix('#') {
+            dec.parse::<u32>().ok().and_then(char::from_u32)
+        } else {
+            Some(match e {
+                "amp" => '&', "lt" => '<', "gt" => '>', "quot" => '"', "apos" => '\'', "nbsp" => ' ',
+                "auml" => 'ä', "ouml" => 'ö', "uuml" => 'ü', "Auml" => 'Ä', "Ouml" => 'Ö', "Uuml" => 'Ü', "szlig" => 'ß',
+                "eacute" => 'é', "egrave" => 'è', "agrave" => 'à', "ccedil" => 'ç', "ntilde" => 'ñ',
+                "ndash" => '–', "mdash" => '—', "hellip" => '…', "laquo" => '«', "raquo" => '»',
+                "lsquo" => '‘', "rsquo" => '’', "ldquo" => '“', "rdquo" => '”', "bdquo" => '„', "middot" => '·',
+                "copy" => '©', "reg" => '®', "trade" => '™', "euro" => '€', "deg" => '°',
+                _ => return c[0].to_string(),
+            })
+        };
+        ch.map(|c| c.to_string()).unwrap_or_else(|| c[0].to_string())
+    })
+    .into_owned()
+}
+
 /// The best passages of each source for the question, in page order, within
 /// the budget per source. A source whose passages all score zero keeps its
 /// first passages: the page was chosen by the search, the words may differ.
@@ -319,7 +346,8 @@ pub(crate) async fn gather(query: &str, sources: Vec<SearchResult>, read: Reader
             domain: domain_of(final_url.as_deref().unwrap_or(&src.url)),
             url: src.url.clone(),
             final_url,
-            title: defuse(title.trim()),
+            // Titles of search results may still carry entities (`Fu&szlig;ball`).
+            title: defuse(decode_entities(title.trim()).trim()),
             passages,
             via,
             flags,
@@ -496,6 +524,14 @@ mod tests {
         )]);
         let v = research("weather today", 4, search, read, Duration::from_secs(1)).await;
         assert_eq!(v["sources"][0]["flags"][0], "injection-suspect");
+    }
+
+    #[tokio::test]
+    async fn an_entity_in_a_title_is_decoded() {
+        let search = json!({"results": [{"title": "1. Bundesliga Fu&szlig;ball", "url": "https://f.de/", "snippet": "Tabelle"}], "provider": "exa"});
+        let v = research("tabelle", 4, search, reader(vec![]), Duration::from_millis(200)).await;
+        assert_eq!(v["sources"][0]["title"], "1. Bundesliga Fußball");
+        assert_eq!(decode_entities("A &amp; B &#8211; &#x2014; &bogus; &uuml;"), "A & B – — &bogus; ü");
     }
 
     #[tokio::test]
