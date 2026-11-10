@@ -71,6 +71,7 @@ export async function streamOllamaChatWithTools(
   const ollamaMessages = applyTemplateContract(messages, {
     toolRole: 'native',
     alternate: false,
+    model: modelId,
   }).map((m): OllamaRequestMessage => {
     const msg: OllamaRequestMessage = { role: m.role, content: m.content }
     if (m.tool_calls) msg.tool_calls = m.tool_calls
