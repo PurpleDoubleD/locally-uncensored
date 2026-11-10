@@ -162,8 +162,20 @@ describe('workflow_inspect traffic light', () => {
     expect(r.light).toBe('green')
   })
 
-  it('red: a missing .ckpt is never downloaded', () => {
+  it('yellow: a missing .ckpt is never downloaded, the user picks a .safetensors model', () => {
     const r = run(apiGraph({}, 'old.ckpt'))
+    expect(r.light).toBe('yellow')
+    expect(r.models[0].state).toBe('missing')
+  })
+
+  it('red: a .ckpt the workflow wants downloaded', () => {
+    const c = collectWorkflow(apiGraph({}, 'old.ckpt'))
+    if (!c.ok) throw new Error()
+    const r = inspectWorkflow({
+      bytes: 100, format: 'api', nodes: c.nodes, installed: BASE_INSTALLED, luPacks: [], registry: {}, catalog: () => null,
+      source: { kind: 'github' },
+      models: [{ name: 'old.ckpt', url: 'https://huggingface.co/a/b/resolve/main/old.ckpt', directory: 'checkpoints', hash: 'c'.repeat(64) }],
+    })
     expect(r.light).toBe('red')
     expect(r.models[0].state).toBe('refused')
   })

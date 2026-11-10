@@ -399,8 +399,16 @@ export function inspectWorkflow(input: InspectInput): InspectReport {
     }
     const d = declared.get(base)
     if (PICKLE_EXT.test(base)) {
-      models.push({ name, state: 'refused', why: 'a pickle file (.ckpt/.pt/.pth/.bin) can run code when loaded, LU does not fetch one' })
-      flag(input.installed === null ? 'yellow' : 'red', `${name} is missing, and LU does not download pickle files (.ckpt, .pt, .pth, .bin).`)
+      // Missing and never fetched: nothing runs, so this is no risk of its own.
+      // The user picks a .safetensors model instead (an assignment replaces
+      // the loader's file). A pickle the file wants FETCHED stays red below.
+      if (d?.url) {
+        models.push({ name, state: 'refused', why: 'a pickle file (.ckpt/.pt/.pth/.bin) can run code when loaded, LU does not fetch one' })
+        flag('red', `${name} would be downloaded as a pickle file (.ckpt, .pt, .pth, .bin); LU never fetches those.`)
+      } else {
+        models.push({ name, state: 'missing', why: 'a pickle file LU never fetches; use a .safetensors model instead' })
+        flag('yellow', `${name} is missing. LU never fetches pickle files (.ckpt, .pt, .pth, .bin); use a .safetensors model for it, e.g. by assigning the workflow to one.`)
+      }
       continue
     }
     if (d?.url) {
