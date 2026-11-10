@@ -17,6 +17,9 @@
  */
 
 export interface TauriMockOptions {
+  /** Keep chat attachments (write/read_chat_attachment) for real, in
+   *  sessionStorage. Off by default: other specs keep the old no-op. */
+  attachmentStore?: boolean
   /** Assistant text the mocked built-in engine "generates" for the first chat. */
   assistantReply: string
   /** Picker id of the bundled starter model the engine reports as loaded. */
@@ -2055,6 +2058,20 @@ export function tauriMockInit(opts: TauriMockOptions) {
         return afterToolDelay({ stdout: 'e2e shell ok', stderr: '', exitCode: 0, timedOut: false })
       case 'repo_map':
         return Promise.resolve({ files: [], count: 0 })
+
+      // The attachment store (lib/chat-attachments.ts): in memory, kept in
+      // sessionStorage so a reload in the same test still finds the file,
+      // as the native folder would.
+      case 'write_chat_attachment': {
+        if (!opts.attachmentStore) return Promise.resolve(null)
+        sessionStorage.setItem(`e2e-attachment:${m.id}`, String(m.data))
+        return Promise.resolve(null)
+      }
+      case 'read_chat_attachment': {
+        if (!opts.attachmentStore) return Promise.resolve(null)
+        const data = sessionStorage.getItem(`e2e-attachment:${m.id}`)
+        return data === null ? Promise.reject('Chat attachment is missing. Please attach the original image again.') : Promise.resolve(data)
+      }
 
       default:
         // Tauri v2 unlisten calls the injected event registry before IPC.

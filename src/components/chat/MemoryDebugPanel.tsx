@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react'
 import { useDismissOnEscape } from '../../hooks/useDismissOnEscape'
 import { createPortal } from 'react-dom'
-import { Brain, X, Plus, Trash2, ChevronDown, Archive, ListChecks } from 'lucide-react'
+import { Brain, X, Plus, Trash2, ChevronDown, ChevronRight, Archive, ListChecks, Pencil, Check } from 'lucide-react'
+import type { MemoryFile, MemoryType } from '../../types/agent-mode'
 import { useMemoryStore } from '../../stores/memoryStore'
 import { useModelStore } from '../../stores/modelStore'
 import { getModelMaxTokens } from '../../lib/context-compaction'
@@ -98,8 +99,8 @@ function MemoryPopover({ onClose }: { onClose: () => void }) {
   // Gruen und Grau haengen an den drei anderen Kategorien, Violett traegt die
   // Panel-Umrandung, Rot den Loeschknopf.
   const typeColors: Record<string, string> = {
-    user: 'text-blue-400', feedback: 'text-green-400',
-    project: 'text-cyan-400', reference: 'text-gray-400',
+    user: 'text-blue-600 dark:text-blue-400', feedback: 'text-green-700 dark:text-green-400',
+    project: 'text-cyan-700 dark:text-cyan-400', reference: 'text-gray-500 dark:text-gray-400',
   }
 
   const handleAdd = () => {
@@ -150,7 +151,7 @@ function MemoryPopover({ onClose }: { onClose: () => void }) {
                 onClick={() => { setSelecting((on) => !on); setSelected(new Set()); setConfirm(null) }}
                 title="Select several memories to delete"
                 aria-pressed={selecting}
-                className={'flex items-center gap-1 px-1.5 py-0.5 rounded t-micro font-medium transition-colors ' + (selecting ? 'bg-purple-500/15 text-purple-300' : 'text-gray-500 hover:text-gray-300 hover:bg-white/10')}
+                className={'flex items-center gap-1 px-1.5 py-0.5 rounded t-micro font-medium transition-colors ' + (selecting ? 'bg-purple-500/15 text-purple-700 dark:text-purple-300' : 'text-gray-500 hover:text-gray-800 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/10')}
               >
                 <ListChecks size={11} /> Select
               </button>
@@ -167,11 +168,11 @@ function MemoryPopover({ onClose }: { onClose: () => void }) {
             <button
               onClick={() => setAdding((a) => !a)}
               title="Add a memory"
-              className={'flex items-center gap-1 px-1.5 py-0.5 rounded text-[0.55rem] font-medium transition-colors ' + (adding ? 'bg-purple-500/15 text-purple-300' : 'text-gray-500 hover:text-gray-300 hover:bg-white/10')}
+              className={'flex items-center gap-1 px-1.5 py-0.5 rounded text-[0.55rem] font-medium transition-colors ' + (adding ? 'bg-purple-500/15 text-purple-700 dark:text-purple-300' : 'text-gray-500 hover:text-gray-800 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/10')}
             >
               <Plus size={11} /> Add
             </button>
-            <button onClick={onClose} className="p-0.5 rounded hover:bg-white/10 text-gray-500"><X size={12} /></button>
+            <button onClick={onClose} aria-label="Close" className="p-0.5 rounded hover:bg-gray-100 dark:hover:bg-white/10 text-gray-500"><X size={12} /></button>
           </div>
         </div>
 
@@ -180,10 +181,10 @@ function MemoryPopover({ onClose }: { onClose: () => void }) {
         )}
 
         {selecting && !confirm && (
-          <div className="flex items-center gap-2 px-3 py-1 border-b border-white/[0.06] t-micro text-gray-500 shrink-0">
+          <div className="flex items-center gap-2 px-3 py-1 border-b border-gray-100 dark:border-white/[0.06] t-micro text-gray-500 shrink-0">
             <button
               onClick={() => setSelected(selectedIds.length === entries.length ? new Set() : new Set(entries.map((e) => e.id)))}
-              className="underline hover:text-gray-300"
+              className="underline hover:text-gray-800 dark:hover:text-gray-300"
             >
               {selectedIds.length === entries.length ? 'Select none' : 'Select all'}
             </button>
@@ -191,7 +192,7 @@ function MemoryPopover({ onClose }: { onClose: () => void }) {
             <button
               onClick={() => setConfirm({ ids: selectedIds, all: selectedIds.length === entries.length })}
               disabled={selectedIds.length === 0}
-              className="flex items-center gap-1 px-2 py-0.5 rounded font-medium bg-red-500/15 border border-red-500/30 text-red-300 hover:bg-red-500/25 disabled:opacity-40"
+              className="flex items-center gap-1 px-2 py-0.5 rounded font-medium bg-red-500/15 border border-red-500/30 text-red-700 dark:text-red-300 hover:bg-red-500/25 disabled:opacity-40"
             >
               <Trash2 size={10} /> Delete {selectedIds.length > 0 ? memoriesWord(selectedIds.length) : 'selected'}
             </button>
@@ -200,12 +201,12 @@ function MemoryPopover({ onClose }: { onClose: () => void }) {
 
         {/* Add form */}
         {adding && (
-          <div className="px-3 py-2 border-b border-white/[0.06] bg-white/[0.02] space-y-1.5 shrink-0">
+          <div className="px-3 py-2 border-b border-gray-100 dark:border-white/[0.06] bg-gray-50 dark:bg-white/[0.02] space-y-1.5 shrink-0">
             <input
               value={newTitle}
               onChange={(e) => setNewTitle(e.target.value)}
               placeholder="Title (optional)"
-              className="w-full px-2 py-1 rounded bg-black/20 border border-white/10 t-micro text-gray-200 placeholder-gray-600 focus:outline-none focus:border-purple-500/40"
+              className={FIELD}
             />
             <LongTextField
               value={newContent}
@@ -214,11 +215,11 @@ function MemoryPopover({ onClose }: { onClose: () => void }) {
               label="Memory"
               placeholder="What should the model always remember? (injected into every prompt)"
               rows={3}
-              className="block w-full px-2 py-1 rounded bg-black/20 border border-white/10 t-micro text-gray-200 placeholder-gray-600 focus:outline-none focus:border-purple-500/40"
+              className={`block ${FIELD}`}
             />
             <div className="flex justify-end gap-1.5">
-              <button onClick={() => { setAdding(false); setNewTitle(''); setNewContent('') }} className="px-2 py-1 rounded t-micro text-gray-400 hover:text-gray-200 hover:bg-white/10">Cancel</button>
-              <button onClick={handleAdd} disabled={!newContent.trim()} className="flex items-center gap-1 px-2.5 py-1 rounded t-micro font-medium bg-purple-500/20 border border-purple-500/30 text-purple-200 hover:bg-purple-500/30 disabled:opacity-40">
+              <button onClick={() => { setAdding(false); setNewTitle(''); setNewContent('') }} className={QUIET_BTN}>Cancel</button>
+              <button onClick={handleAdd} disabled={!newContent.trim()} className={SAVE_BTN}>
                 <Plus size={10} /> Save memory
               </button>
             </div>
@@ -228,35 +229,21 @@ function MemoryPopover({ onClose }: { onClose: () => void }) {
         {/* Memory list: every row has its own delete, always visible (A27) */}
         <div className="overflow-y-auto flex-1 scrollbar-thin">
           {entries.length === 0 ? (
-            <p className="t-micro text-gray-600 px-3 py-5 text-center">No memories yet, click <span className="text-purple-400">Add</span> to write one.</p>
+            <p className="t-micro text-gray-500 dark:text-gray-400 px-3 py-5 text-center">No memories yet, click <span className="text-purple-600 dark:text-purple-400">Add</span> to write one.</p>
           ) : (
             // All of them. Until A27 only the first 50 were listed, so number
             // 51 and later could not be deleted here at all.
-            entries.map((entry) => {
-              const stale = entry.stale === true || typeof entry.supersededBy === 'string'
-              return (
-                <div key={entry.id} className={`group px-3 py-1.5 border-b border-white/[0.03] hover:bg-white/[0.02] ${stale ? 'opacity-50' : ''}`}>
-                  <div className="flex items-center gap-1.5">
-                    {selecting && (
-                      <input
-                        type="checkbox"
-                        checked={selected.has(entry.id)}
-                        onChange={() => toggleSelected(entry.id)}
-                        aria-label={`Select ${entry.title}`}
-                        className="shrink-0 accent-purple-500"
-                      />
-                    )}
-                    <span className={`text-[0.5rem] uppercase font-bold tracking-wider ${typeColors[entry.type] || 'text-gray-500'}`}>{entry.type}</span>
-                    <span className="t-micro text-gray-300 font-medium truncate flex-1">{entry.title}</span>
-                    {stale && (
-                      <span className="flex items-center gap-0.5 text-[0.45rem] uppercase tracking-wider text-gray-500 shrink-0" title="Outdated, not injected"><Archive size={8} /> outdated</span>
-                    )}
-                    {!selecting && <MemoryRowDelete title={entry.title} onDelete={() => remove([entry.id])} />}
-                  </div>
-                  <p className="text-[0.55rem] text-gray-600 truncate mt-0.5">{entry.content.substring(0, 120)}</p>
-                </div>
-              )
-            })
+            entries.map((entry) => (
+              <MemoryRow
+                key={entry.id}
+                entry={entry}
+                selecting={selecting}
+                selected={selected.has(entry.id)}
+                onToggleSelected={() => toggleSelected(entry.id)}
+                onDelete={() => remove([entry.id])}
+                typeColor={typeColors[entry.type] || 'text-gray-500'}
+              />
+            ))
           )}
         </div>
 
@@ -264,16 +251,128 @@ function MemoryPopover({ onClose }: { onClose: () => void }) {
 
         {/* Injection preview — exactly what gets prepended to the prompt */}
         {injectedPreview && (
-          <div className="border-t border-white/[0.06] px-3 py-2 shrink-0">
+          <div className="border-t border-gray-100 dark:border-white/[0.06] px-3 py-2 shrink-0">
             <div className="flex items-center gap-1 mb-1">
-              <ChevronDown size={10} className="text-gray-600" />
-              <span className="text-[0.5rem] uppercase tracking-wider text-gray-600 font-semibold">Injected into prompt</span>
+              <ChevronDown size={10} className="text-gray-500" />
+              <span className="text-[0.5rem] uppercase tracking-wider text-gray-500 font-semibold">Injected into prompt</span>
             </div>
-            <pre className="text-[0.5rem] text-gray-500 font-mono whitespace-pre-wrap max-h-20 overflow-y-auto scrollbar-thin leading-relaxed">{injectedPreview.substring(0, 800)}</pre>
+            <pre className="text-[0.5rem] text-gray-600 dark:text-gray-400 font-mono whitespace-pre-wrap max-h-20 overflow-y-auto scrollbar-thin leading-relaxed">{injectedPreview.substring(0, 800)}</pre>
           </div>
         )}
       </div>
     </motion.div>,
     document.body,
+  )
+}
+
+const FIELD = 'w-full px-2 py-1 rounded bg-white dark:bg-black/20 border border-gray-200 dark:border-white/10 t-micro text-gray-800 dark:text-gray-200 placeholder-gray-400 dark:placeholder-gray-600 focus:outline-none focus:border-purple-500/40'
+const QUIET_BTN = 'px-2 py-1 rounded t-micro text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/10'
+const SAVE_BTN = 'flex items-center gap-1 px-2.5 py-1 rounded t-micro font-medium bg-purple-500/15 dark:bg-purple-500/20 border border-purple-500/30 text-purple-800 dark:text-purple-200 hover:bg-purple-500/25 dark:hover:bg-purple-500/30 disabled:opacity-40'
+const MEMORY_TYPES: MemoryType[] = ['user', 'feedback', 'project', 'reference']
+
+/**
+ * One memory in the quick menu (C38, testowanie642): the line used to stop
+ * after about 90 characters with no way to see or change the rest, so a
+ * long memory could only be deleted and typed again. A click on the row
+ * opens the whole text; Edit changes title, kind and text in place. The
+ * store re-embeds a memory whose title or text changed (memoryStore
+ * updateMemory), so search keeps finding it by its new words.
+ */
+function MemoryRow({ entry, selecting, selected, onToggleSelected, onDelete, typeColor }: {
+  entry: MemoryFile
+  selecting: boolean
+  selected: boolean
+  onToggleSelected: () => void
+  onDelete: () => void
+  typeColor: string
+}) {
+  const updateMemory = useMemoryStore((s) => s.updateMemory)
+  const [open, setOpen] = useState(false)
+  const [editing, setEditing] = useState(false)
+  const [title, setTitle] = useState(entry.title)
+  const [content, setContent] = useState(entry.content)
+  const [type, setType] = useState<MemoryType>(entry.type)
+  const stale = entry.stale === true || typeof entry.supersededBy === 'string'
+
+  const startEdit = () => {
+    setTitle(entry.title)
+    setContent(entry.content)
+    setType(entry.type)
+    setEditing(true)
+    setOpen(true)
+  }
+  const save = () => {
+    const text = content.trim()
+    if (!text) return
+    const derived = !entry.description || entry.description === entry.content.slice(0, 120)
+    updateMemory(entry.id, {
+      title: title.trim() || text.slice(0, 60),
+      content: text,
+      type,
+      ...(derived ? { description: text.slice(0, 120) } : {}),
+    })
+    setEditing(false)
+  }
+
+  return (
+    <div className={`group px-3 py-1.5 border-b border-gray-100 dark:border-white/[0.03] hover:bg-gray-50 dark:hover:bg-white/[0.02] ${stale ? 'opacity-50' : ''}`} data-testid="memory-row">
+      <div className="flex items-center gap-1.5">
+        {selecting && (
+          <input
+            type="checkbox"
+            checked={selected}
+            onChange={onToggleSelected}
+            aria-label={`Select ${entry.title}`}
+            className="shrink-0 accent-purple-500"
+          />
+        )}
+        <button
+          type="button"
+          onClick={() => !editing && setOpen((o) => !o)}
+          aria-expanded={open}
+          className="flex min-w-0 flex-1 items-center gap-1.5 text-left"
+          title={open ? 'Collapse' : 'Show the whole memory'}
+        >
+          {open ? <ChevronDown size={10} className="shrink-0 text-gray-400" /> : <ChevronRight size={10} className="shrink-0 text-gray-400" />}
+          <span className={`text-[0.5rem] uppercase font-bold tracking-wider ${typeColor}`}>{entry.type}</span>
+          <span className="t-micro text-gray-800 dark:text-gray-300 font-medium truncate flex-1">{entry.title}</span>
+        </button>
+        {stale && (
+          <span className="flex items-center gap-0.5 text-[0.45rem] uppercase tracking-wider text-gray-500 shrink-0" title="Outdated, not injected"><Archive size={8} /> outdated</span>
+        )}
+        {!selecting && !editing && (
+          <button type="button" onClick={startEdit} title="Edit this memory" aria-label={`Edit ${entry.title}`} className="p-0.5 rounded text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/10" data-testid="memory-edit">
+            <Pencil size={10} />
+          </button>
+        )}
+        {!selecting && <MemoryRowDelete title={entry.title} onDelete={onDelete} />}
+      </div>
+      {editing ? (
+        <div className="mt-1 space-y-1.5" onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); setEditing(false) } }}>
+          <div className="flex gap-1">
+            <select value={type} onChange={(e) => setType(e.target.value as MemoryType)} aria-label="Kind of memory" className={`${FIELD} w-auto`}>
+              {MEMORY_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+            </select>
+            <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Title" aria-label="Memory title" className={FIELD} />
+          </div>
+          <LongTextField
+            value={content}
+            onChange={setContent}
+            storageKey="memory-edit-content"
+            label="Memory"
+            rows={5}
+            className={`block ${FIELD}`}
+          />
+          <div className="flex justify-end gap-1.5">
+            <button type="button" onClick={() => setEditing(false)} className={QUIET_BTN}>Cancel</button>
+            <button type="button" onClick={save} disabled={!content.trim()} className={SAVE_BTN} data-testid="memory-save"><Check size={10} /> Save</button>
+          </div>
+        </div>
+      ) : open ? (
+        <p className="mt-1 max-h-48 overflow-y-auto scrollbar-thin whitespace-pre-wrap wrap-anywhere t-micro leading-relaxed text-gray-700 dark:text-gray-300" data-testid="memory-full">{entry.content}</p>
+      ) : (
+        <p className="text-[0.55rem] text-gray-500 dark:text-gray-500 truncate mt-0.5">{entry.content}</p>
+      )}
+    </div>
   )
 }

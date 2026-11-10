@@ -80,10 +80,11 @@ export default defineConfig({
         isMobile: true,
       },
     },
-    // WebKit is the engine of the macOS app (WKWebView). Only the voice
-    // session runs on it: its audio path is the part of the app where the two
-    // engines really differ. `npx playwright test --project=webkit`.
-    { name: 'webkit', testMatch: /voice-(session|cold-start|thinking)-live\.spec\.ts/, use: { ...devices['Desktop Safari'] } },
+    // WebKit is the engine of the macOS app (WKWebView). Two parts of the app
+    // run on it, where the engines really differ: the voice session (audio
+    // path) and the chat look (3.1.0: a pinch arrives as gesture events, not
+    // as ctrl + wheel; CSS zoom). `npx playwright test --project=webkit`.
+    { name: 'webkit', testMatch: /(voice-(session|cold-start|thinking)-live|chat-look)\.spec\.ts/, use: { ...devices['Desktop Safari'] } },
   ],
   webServer: [
     {

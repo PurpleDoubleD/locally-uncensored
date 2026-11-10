@@ -64,11 +64,26 @@ const KEIN_STIL: CSSProperties = {}
 
 /** Was die Engine ueber Zoom und Kastenmass verraet, an der App-Wurzel des Elements abgelesen. */
 export function massstab(el: Element): Massstab {
+  // Seit 3.1.0 (C42) kann zwischen Wurzel und Element ein zweiter Zoom
+  // liegen, der Lese-Zoom des Transkripts (.lu-chat-zoom). Gezaehlt wird
+  // deshalb die KETTE: das Produkt aller Zooms bis zum Body, gemessen am
+  // tiefsten gezoomten Vorfahren, denn dort ist das Verhaeltnis von Kasten
+  // zu CSS-Mass genau dieses Produkt (oder 1, je nach Engine). Ohne Lese-
+  // Zoom ist der tiefste gezoomte Vorfahr die Wurzel, alles wie bisher.
   let wurzel = el
-  while (wurzel.parentElement && wurzel.parentElement !== document.body) wurzel = wurzel.parentElement
-  const zoom = parseFloat(getComputedStyle(wurzel).zoom) || 1
-  const r = wurzel.getBoundingClientRect()
-  const css = wurzel instanceof HTMLElement ? wurzel.offsetWidth + wurzel.offsetHeight : 0
+  let zoom = 1
+  let tiefster: Element | null = null
+  for (let p: Element | null = el; p && p !== document.body; p = p.parentElement) {
+    const z = parseFloat(getComputedStyle(p).zoom) || 1
+    if (z !== 1) {
+      zoom *= z
+      tiefster ??= p
+    }
+    wurzel = p
+  }
+  const messen = tiefster ?? wurzel
+  const r = messen.getBoundingClientRect()
+  const css = messen instanceof HTMLElement ? messen.offsetWidth + messen.offsetHeight : 0
   return {
     zoom,
     verhaeltnis: css > 0 ? (r.width + r.height) / css : zoom,

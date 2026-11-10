@@ -55,6 +55,11 @@ async function read(data: string): Promise<string> {
   })
 }
 
+/** The data URL behind a stored reference (chat backgrounds, 3.1.0). */
+export function readAttachment(ref: string): Promise<string> {
+  return read(ref)
+}
+
 /** The reference an inline image object already got. Keyed by the object, so
  *  a state snapshot taken before the swap does not hash and write the same
  *  megabytes a second time. */

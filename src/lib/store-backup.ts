@@ -43,6 +43,10 @@ export const STORE_KEYS = [
   'lu-neuron-tweaker',
   // Where the Neurons window stood and whether it was folded (3.1.0).
   'lu-neuron-window',
+  // Chat look, reading zoom and the background references per chat and
+  // persona (3.1.0, C58/C42). Also what keeps those background files alive:
+  // the attachment collector keeps every reference it finds in the backup.
+  'lu-chat-look',
   'locally-uncensored-agent-goal',
   // C59 A7: the skills the user saved, and the proposals waiting for them.
   'lu-skills',

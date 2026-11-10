@@ -16,6 +16,7 @@ import { ToolCallBand } from './ToolCallBand'
 import { groupAgentBlocks } from '../../lib/tool-call-groups'
 import { ThinkingBlock } from './ThinkingBlock'
 import { MarkdownRenderer } from './MarkdownRenderer'
+import { ChatLookScope } from './ChatLookScope'
 import { closeOpenMarkdown } from '../../lib/streaming-markdown'
 import { TokenCounter } from './TokenCounter'
 import { ContextDropdown } from './ContextDropdown'
@@ -393,6 +394,9 @@ export function CodexView() {
 
         {/* Messages */}
         <div className="relative flex-1 min-h-[10rem] flex flex-col">
+        {/* `contents`: the scope adds no box, the floor above stays the one
+            box that holds banner, transcript and rail (die-karte-bleibt-erreichbar). */}
+        <ChatLookScope variant="code" className="contents">
         <CompactLayerBanner view={layers} />
         <div
           ref={scrollRef}
@@ -427,7 +431,7 @@ export function CodexView() {
               )}
             </div>
           ) : (
-            <div ref={contentRef} className="py-1">
+            <div ref={contentRef} className="lu-chat-zoom py-1">
               {shownItems.map((item) => {
                 if (item.kind === 'line') return <CompactBlock key={item.cut.key} cut={item.cut} />
                 const msg = item.message
@@ -754,6 +758,7 @@ export function CodexView() {
           )}
         </div>
         <CompactLayerRail view={layers} />
+        </ChatLookScope>
         </div>
 
         {/* Die stehenden Sitzungsbaender und die Zeilen, die frueher IM

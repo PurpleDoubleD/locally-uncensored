@@ -65,6 +65,13 @@ declare module 'react-syntax-highlighter/dist/esm/styles/prism/one-dark' {
   export default style
 }
 
+/** Light mode code colours (3.1.0, P-M): every token meets 4.5:1. */
+declare module 'react-syntax-highlighter/dist/esm/styles/prism/a11y-one-light' {
+  import type { CSSProperties } from 'react'
+  const style: Record<string, CSSProperties>
+  export default style
+}
+
 // ── Grammars ───────────────────────────────────────────────────────────────
 //
 // One block per grammar `CodeBlock.tsx` registers. Listing them individually

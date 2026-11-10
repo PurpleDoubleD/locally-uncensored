@@ -13,6 +13,9 @@ describe('a word without spaces in a chat bubble', () => {
     expect(src('MarkdownRenderer.tsx')).toMatch(/className="markdown-content[^"]*\bwrap-anywhere\b/)
   })
   it('wraps in the user bubble', () => {
-    expect(src('MessageBubble.tsx')).toMatch(/whitespace-pre-wrap wrap-anywhere">\{message\.displayContent \|\| message\.content\}/)
+    // 3.1.0 (C58): the text goes through <UserText>, which only colours
+    // quotes and actions when the chat look asks for it; the paragraph and
+    // its wrapping are unchanged.
+    expect(src('MessageBubble.tsx')).toMatch(/whitespace-pre-wrap wrap-anywhere">(\{message\.displayContent \|\| message\.content\}|<UserText text=\{message\.displayContent \|\| message\.content\} \/>)/)
   })
 })
