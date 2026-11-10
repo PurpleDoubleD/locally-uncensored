@@ -297,7 +297,7 @@ function ClassicHead({ place, title, Icon, count, note }: HeadProps) {
 
 /** Two rows: which catalogue with the hardware chip beside it, then how big.
  *  All four pieces are children of the page's spaced column, as they were. */
-function ClassicFilterBar({ catalogue, sizes, hardware, switchBar, legend }: FilterBarProps) {
+function ClassicFilterBar({ catalogue, sizes, categories, hardware, switchBar, legend }: FilterBarProps) {
   return (
     <>
       <div className="flex items-center gap-2 flex-wrap">
@@ -309,6 +309,8 @@ function ClassicFilterBar({ catalogue, sizes, hardware, switchBar, legend }: Fil
       </div>
 
       {sizes}
+
+      {categories}
 
       {switchBar}
 

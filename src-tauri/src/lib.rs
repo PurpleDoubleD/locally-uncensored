@@ -961,6 +961,8 @@ pub fn run() {
             commands::download::check_model_sizes,
             commands::download::delete_comfy_model,
             commands::download::comfy_model_info,
+            #[cfg(desktop)]
+            commands::download::comfy_model_reveal,
             // Check files and Repair (GH #113)
             commands::model_verify::verify_model_files,
             commands::model_verify::verify_model_files_status,
@@ -975,6 +977,7 @@ pub fn run() {
             commands::engine::swap_bundled_model,
             commands::engine::list_bundled_models,
             commands::engine::delete_bundled_model,
+            commands::engine::bundled_model_delete_plan,
             #[cfg(desktop)]
             commands::engine::list_importable_models,
             // The user's own model folder, handed to ComfyUI (GH #122)

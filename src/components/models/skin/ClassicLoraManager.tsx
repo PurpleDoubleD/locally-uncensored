@@ -6,9 +6,9 @@
 import { Info, Layers, Trash2 } from 'lucide-react'
 import { parseLocalCharacterLora } from '../../../api/trainer'
 import { formatBytes } from '../../../lib/formatters'
-import { LORA_USE_HINT, type LoraManagerProps } from '../LoraManager'
+import { LORA_USE_HINT, LoraRowActions, LoraRowDetails, LoraRowName, ShowHiddenLoras, type LoraManagerProps } from '../LoraManager'
 
-export function ClassicLoraManager({ rows, total, searchQuery, onDelete, onInfo, onGetNew }: LoraManagerProps) {
+export function ClassicLoraManager({ rows, total, searchQuery, onDelete, onInfo, onGetNew, onEdit, onToggleHidden, onReveal, hiddenCount, showHidden, onShowHidden }: LoraManagerProps) {
   if (total === 0) {
     return (
       <div className="flex flex-col items-center justify-center text-center py-16 px-6 gap-3">
@@ -38,6 +38,7 @@ export function ClassicLoraManager({ rows, total, searchQuery, onDelete, onInfo,
         <h2 className="t-micro font-semibold uppercase tracking-[0.12em] text-gray-700 dark:text-gray-300">LoRAs</h2>
         <span className="text-[0.55rem] text-gray-500 dark:text-gray-400 tabular-nums">{rows.length}</span>
         <div className="flex-1 h-px bg-gray-200 dark:bg-white/[0.07]" />
+        <ShowHiddenLoras count={hiddenCount} show={showHidden} onShow={onShowHidden} className="t-micro text-gray-500 dark:text-gray-400" />
       </div>
       <p className="px-1 text-[0.55rem] text-gray-500 dark:text-gray-400">{LORA_USE_HINT}</p>
       <div className="space-y-1.5">
@@ -51,7 +52,7 @@ export function ClassicLoraManager({ rows, total, searchQuery, onDelete, onInfo,
             >
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">
-                  <span className="truncate t-control text-gray-900 dark:text-gray-100">{row.name}</span>
+                  <LoraRowName row={row} nameClass="t-control text-gray-900 dark:text-gray-100" />
                   {character && (
                     <span className="shrink-0 px-1.5 py-0.5 rounded t-micro border border-lu-accent/30 bg-lu-accent-soft text-lu-accent-ink dark:text-lu-accent">
                       Character
@@ -62,7 +63,16 @@ export function ClassicLoraManager({ rows, total, searchQuery, onDelete, onInfo,
                   {row.size > 0 && <span className="tabular-nums">{formatBytes(row.size)}</span>}
                   {character && <span className="font-mono">Trigger word: {character.trigger}</span>}
                 </div>
+                <LoraRowDetails row={row} />
               </div>
+              <LoraRowActions
+                row={row}
+                onEdit={onEdit}
+                onToggleHidden={onToggleHidden}
+                onReveal={onReveal}
+                buttonClass="shrink-0 p-1.5 rounded-lg text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/10 transition-colors"
+                iconSize={13}
+              />
               {onInfo && (
                 <button
                   onClick={() => onInfo(row.name)}

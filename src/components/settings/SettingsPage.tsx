@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, type ReactNode, type ChangeEvent } from 'react'
+import { useState, useEffect, useLayoutEffect, useRef, type ReactNode, type ChangeEvent } from 'react'
 import { withDetail } from '../../lib/error-text'
 // `X` steht hier weiterhin, obwohl der Sprachabschnitt mit seinen Symbolen
 // nach ./SpeechSettings.tsx gezogen ist: der Dismiss-Knopf der ComfyUI-Notiz
@@ -92,6 +92,7 @@ import { TEMPERATURE_MAX, TEMPERATURE_HELP, TEMPERATURE_HELP_LABEL } from '../..
 import { HighTemperatureWarning } from '../chat/HighTemperatureWarning'
 import { BoundedNumberInput } from './BoundedNumberInput'
 import { CONTEXT_WINDOW_MAX, MAX_TOKENS_MAX, SUB_AGENT_LIMIT_MAX } from '../../lib/number-limits'
+import { usePageMemoryStore } from '../../stores/pageMemoryStore'
 
 // ── User profile picture (Appearance) ───────────────────────────
 // Self-contained like HfDownloadPathSetting. Stores the picture as a
@@ -176,7 +177,13 @@ function HowtoRow({ topic }: { topic: string }) {
 }
 
 function Section({ title, children, defaultOpen = false }: { title: string; children: ReactNode; defaultOpen?: boolean }) {
-  const [open, setOpen] = useState(defaultOpen)
+  // C22: a section the user opened or closed stays so on the next visit of
+  // this session, instead of folding back each time Chat was looked at.
+  const [open, setOpenState] = useState(() => usePageMemoryStore.getState().settingsSections[title] ?? defaultOpen)
+  const setOpen = (v: boolean) => {
+    setOpenState(v)
+    usePageMemoryStore.getState().setSettingsSection(title, v)
+  }
   const [animating, setAnimating] = useState(false)
   return (
     // D-S27: `id` + `scroll-mt` machen die Sektion zum Sprungziel der Rail.
@@ -203,7 +210,10 @@ function Section({ title, children, defaultOpen = false }: { title: string; chil
         </span>
         <ChevronRight size={12} className={`text-gray-400 transition-transform duration-200 ${open ? 'rotate-90' : ''}`} />
       </button>
-      <AnimatePresence>
+      {/* initial={false}: a section that is open when the page mounts (its
+          default, or remembered from the last visit, C22) is simply there,
+          so the scroll position can be put back at once. */}
+      <AnimatePresence initial={false}>
         {open && (
           <motion.div
             id={`${sectionAnchorId(title)}-body`}
@@ -1753,6 +1763,29 @@ export function SettingsPage() {
   // initial value, so a focus that vanished from the store on the next render
   // would fold the section straight back up (Nebenbefund 3, R8 re-measure).
   const [entryFocus] = useState(() => useUIStore.getState().settingsFocus)
+  // C22: a button that sends the user to a section opens it, whatever the
+  // memory of this session says about it. Once, before the sections mount.
+  useState(() => {
+    const titles: Record<string, string> = { comfyui: 'ComfyUI (Image & Video)', 'comfyui-nodes': 'ComfyUI node packs' }
+    const title = entryFocus?.section ? titles[entryFocus.section] : undefined
+    if (title) usePageMemoryStore.getState().forgetSettingsSection(title)
+    return null
+  })
+  // C22: where the page was scrolled to, put back on the next visit of the
+  // session. Not when a button sent the user to a section: that one scrolls.
+  const scrollRef = useRef<HTMLDivElement>(null)
+  useLayoutEffect(() => {
+    const el = scrollRef.current
+    if (!el) return
+    if (!entryFocus) {
+      const top = usePageMemoryStore.getState().settingsScroll
+      if (top > 0) el.scrollTop = top
+    }
+    const save = () => usePageMemoryStore.getState().setSettingsScroll(el.scrollTop)
+    el.addEventListener('scroll', save, { passive: true })
+    return () => el.removeEventListener('scroll', save)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
   useEffect(() => { useUIStore.getState().clearSettingsFocus() }, [])
   // The node pack section sits below the long ComfyUI section, so a button
   // that sends the user there (the workflow import) also scrolls to it.
@@ -1796,7 +1829,7 @@ export function SettingsPage() {
   }
 
   return (
-    <div className="h-full overflow-y-auto scrollbar-thin">
+    <div ref={scrollRef} className="h-full overflow-y-auto scrollbar-thin">
       {/* D-S27 / D-S48: vorher `max-w-lg mx-auto`, eine 552px-Spalte, die in
           der Fenstermitte schwebte und bei 1600px links und rechts je ~524px
           Leere stehen liess. Die Zeilenlaenge war richtig, die Aufhaengung

@@ -13,6 +13,7 @@ import {
   startModelDownload,
   installBundleComplete, remoteBundleNotice, checkBundlesOnDisk, resolveHfGgufFiles, ggufRequestFor, quantBudgetBytes, planModelDownload,
   imagePartFor, imagePartOf, checkDownloadSpace,
+  fetchGgufChoices, discoverModelForChoice, type GgufChoice,
   type DiscoverModel, type DownloadProgress, type ModelBundle, type HfGgufFile, type ImagePartSource, type PlannedDownload,
 } from '../../api/discover'
 import { startPlannedDownload } from '../../api/model-download'
@@ -63,6 +64,12 @@ import { CivitaiSearchPanel } from './CivitaiSearchPanel'
 import { ModelFileCheck, type FileCheckSubject } from './ModelFileCheck'
 import { bundleCheckTargets, chatModelCheckTargets, chatModelCheckable } from '../../lib/model-file-check'
 import { NEURONS_ENABLED } from '../../lib/features'
+import { UninstallDialog, type UninstallRequest } from './UninstallDialog'
+import { usePageMemoryStore, DEFAULT_DISCOVER_LANE, type DiscoverLaneMemory } from '../../stores/pageMemoryStore'
+import {
+  TEXT_CATEGORIES, IMAGE_CATEGORIES, VIDEO_CATEGORIES, SORTS,
+  filterByCategory, categoryCounts, sortItems, type CategoryDef, type VideoItem,
+} from '../../lib/discover-categories'
 
 interface Props {
   category: ModelCategory
@@ -284,8 +291,18 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0, o
   const [ramGb, setRamGb] = useState<number | null>(null)
   // Mainstream is the default + first tab (2026-07-17) — Unfiltered is
   // one click away but new users land on the neutral list.
-  const [subTab, setSubTab] = useState<'uncensored' | 'mainstream'>('mainstream')
-  const [vramTier, setVramTier] = useState<SizeTier>('all')
+  // C22: the filters of each lane live in the page memory, so a trip to Chat
+  // or Create and back finds them as they were.
+  const laneMemory: DiscoverLaneMemory = usePageMemoryStore((s) => s.discover[category]) ?? DEFAULT_DISCOVER_LANE
+  const setLane = usePageMemoryStore((s) => s.setDiscoverLane)
+  const subTab = laneMemory.subTab
+  const setSubTab = (v: 'uncensored' | 'mainstream') => setLane(category, { subTab: v })
+  const vramTier: SizeTier = laneMemory.sizeTier
+  const setVramTier = (v: SizeTier) => setLane(category, { sizeTier: v })
+  const categoryId = laneMemory.category
+  const setCategoryId = (v: string) => setLane(category, { category: v })
+  const sortId = laneMemory.sort
+  const setSortId = (v: string) => setLane(category, { sort: v })
   // Details modal — the card shows one calm line; the FULL catalog description
   // (incl. per-model tips like "run thinking-OFF") lives here.
   const [infoModel, setInfoModel] = useState<DiscoverModel | null>(null)
@@ -431,7 +448,15 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0, o
     return vram > 20 // highend (open-ended)
   })
 
-  const filteredBundles = vramFilteredBundles
+  // "Better Categories": what the bundle is for, the lanes of Create.
+  const videoItems: VideoItem[] = vramFilteredBundles.map((bundle) => ({ bundle, lane: laneOf.get(bundle.name) }))
+  const categorizedBundles: ModelBundle[] = isVideo
+    ? filterByCategory(videoItems, VIDEO_CATEGORIES, categoryId).map((v) => v.bundle)
+    : isImage ? filterByCategory(vramFilteredBundles, IMAGE_CATEGORIES, categoryId) : vramFilteredBundles
+  const filteredBundles = sortItems(categorizedBundles, sortId, {
+    size: (b) => b.totalSizeGB || undefined,
+    name: (b) => b.name,
+  })
 
   // Which model the Use button is currently loading. A GGUF start blocks for
   // seconds to minutes, and without this the button stayed live and a second
@@ -527,6 +552,8 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0, o
   }
 
   const [installingBundle, setInstallingBundle] = useState<string | null>(null)
+  // C17: the bundle whose uninstall dialog is open.
+  const [uninstall, setUninstall] = useState<UninstallRequest | null>(null)
   const [installError, setInstallError] = useState<string | null>(null)
   // Kein Fehler, sondern eine Auskunft: der Nutzer hat den Download angehalten
   // oder abgebrochen, und die Installation sagt, was das fuer die Engine
@@ -662,7 +689,13 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0, o
     }
   }
 
-  const [hfSearchResults, setHfSearchResults] = useState<DiscoverModel[]>([])
+  // C22: the hits of the last search stay for the session, with the words
+  // they were found for.
+  const [hfSearchResults, setHfSearchResultsState] = useState<DiscoverModel[]>(() => usePageMemoryStore.getState().hfSearch?.results ?? [])
+  const setHfSearchResults = (results: DiscoverModel[], query = '') => {
+    setHfSearchResultsState(results)
+    usePageMemoryStore.getState().setHfSearch(results.length ? { query, results } : null)
+  }
   // Each Enter is a new search. Only the newest one may write the results and
   // end the spinner: a slow answer to an older query arriving late used to
   // overwrite the hits of the query now in the box.
@@ -678,7 +711,7 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0, o
     try {
       const results = await searchHuggingFaceModels(search.trim())
       if (mine === hfSearchSeq.current) {
-        setHfSearchResults(results)
+        setHfSearchResults(results, search.trim())
         setHfSearchError(null)
       }
     } catch (err) {
@@ -1035,12 +1068,23 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0, o
   // ── Derived view data for the tile grid ─────────────────────────────
 
   const activeTextModels = subTab === 'uncensored' ? filteredUncensored : filteredMainstream
-  const textGroups = isText ? groupModels(activeTextModels) : []
+  const allTextGroups = isText ? groupModels(activeTextModels) : []
+  // A card is a group of quants of one model: it belongs to a category when
+  // any of its variants does (the tags of a family can differ per quant).
+  const groupCategories: CategoryDef<DiscoverModel[]>[] = TEXT_CATEGORIES.map((d) => ({ ...d, match: (g: DiscoverModel[]) => g.some(d.match) }))
+  const textGroups = sortItems(filterByCategory(allTextGroups, groupCategories, categoryId), sortId, {
+    size: (g) => {
+      const sizes = g.map((m) => modelFootprintGb(m)).filter((x): x is number => typeof x === 'number' && x > 0)
+      return sizes.length ? Math.min(...sizes) : undefined
+    },
+    released: (g) => g.map((m) => m.released).filter((r): r is string => !!r).sort().pop(),
+    name: (g) => g[0].group ?? g[0].name,
+  })
 
   // "Start here" — up to 3 derived picks for the current tab. Pure derivation
   // from existing flags (hot/agent/lightweight) + the hardware fit; no new
   // catalog data and no picks while searching or filtering.
-  const showPicks = isText && !search && vramTier === 'all' && textGroups.length > 4
+  const showPicks = isText && !search && vramTier === 'all' && categoryId === 'all' && sortId === 'recommended' && textGroups.length > 4
   const scoredGroups = showPicks
     ? chatRecommendationGroups(textGroups)
         .map(g => {
@@ -1079,14 +1123,50 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0, o
   // what a click does is decided in this file, once, for both.
   const skin = modelSkin()
 
+  // The category chips with their counts. Counted on the list the other
+  // filters leave, so a number never promises cards the size filter hides.
+  const categoryChips: { id: string; label: string; hint: string; count: number }[] = (() => {
+    const pick = <T,>(items: readonly T[], defs: readonly CategoryDef<T>[]) => {
+      const counts = categoryCounts(items, defs)
+      return [
+        { id: 'all', label: 'All', hint: 'Every model of this list', count: counts.all },
+        ...defs.map((d) => ({ id: d.id, label: d.label, hint: d.hint, count: counts[d.id] ?? 0 })),
+      ]
+    }
+    if (isText) return pick(allTextGroups, groupCategories)
+    if (isVideo) return pick(videoItems, VIDEO_CATEGORIES)
+    if (isImage) return pick(vramFilteredBundles, IMAGE_CATEGORIES)
+    return []
+  })()
+  // An empty category is left out, except the one that is picked: the user
+  // has to be able to see what holds the list empty and click it away.
+  const shownCategoryChips = categoryChips.filter((c) => c.id === 'all' || c.count > 0 || c.id === categoryId)
+  const sortChoices = SORTS.filter((o) => isText || !o.textOnly)
+
   // The image part of the model in the details dialog: the catalog's, or for
   // a model the catalog does not know, the one its repository lists. That
   // second answer needs one request, asked when the dialog opens.
   const infoImagePart: ImagePartSource | null = infoModel
     ? imagePartOf(infoModel) ?? (infoPart?.model === infoModel.name ? infoPart.part : null)
     : null
+  // C21: the files of the repository behind the model in the details dialog,
+  // listed on request (one request to Hugging Face, not one per card).
+  const [fileChoices, setFileChoices] = useState<{ model: string; repoId: string; list: GgufChoice[] | null; loading: boolean } | null>(null)
+  const infoRepoId = (m: DiscoverModel | null): string | null => {
+    if (!m || m.ollamaModel || m.canPull === false || !m.downloadUrl) return null
+    return ggufRequestFor(m)?.repoId ?? null
+  }
+  const loadFileChoices = (m: DiscoverModel) => {
+    const repoId = infoRepoId(m)
+    if (!repoId) return
+    setFileChoices({ model: m.name, repoId, list: null, loading: true })
+    void fetchGgufChoices(repoId).then((list) => {
+      setFileChoices((cur) => (cur && cur.model === m.name ? { ...cur, list, loading: false } : cur))
+    })
+  }
   const openInfo = (model: DiscoverModel) => {
     setInfoModel(model)
+    setFileChoices(null)
     // The same question the download asks (`ggufRequestFor`): the file the
     // entry names decides, the quant is only the fallback.
     const request = ggufRequestFor(model)
@@ -1181,6 +1261,37 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0, o
             ))}
           </div>
         )}
+        categories={shownCategoryChips.length > 1 && (
+          <div className="flex items-center gap-2 flex-wrap" data-testid="discover-categories">
+            <div className={SEGMENT_TRACK} role="group" aria-label="Category">
+              {shownCategoryChips.map((c) => (
+                <button
+                  key={c.id}
+                  onClick={() => setCategoryId(c.id)}
+                  aria-pressed={categoryId === c.id || (c.id === 'all' && !categoryChips.some((x) => x.id === categoryId))}
+                  title={c.hint}
+                  className="lu-control"
+                  data-testid={`discover-category-${c.id}`}
+                >
+                  {c.label}
+                  <span className="opacity-60 ml-1 tabular-nums">{c.count}</span>
+                </button>
+              ))}
+            </div>
+            <label className="flex items-center gap-1.5 t-micro text-gray-500 dark:text-gray-400 ml-auto">
+              Sort
+              <select
+                value={sortChoices.some((o) => o.id === sortId) ? sortId : 'recommended'}
+                onChange={(e) => setSortId(e.target.value)}
+                className="lu-control"
+                aria-label="Sort models"
+                data-testid="discover-sort"
+              >
+                {sortChoices.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
+              </select>
+            </label>
+          </div>
+        )}
         hardware={{ vramGb: systemVRAM, ramGb, sharedMemory }}
         switchBar={<LuEngineSwitchBar />}
         // D-S22 · die Legende zu den Faehigkeitszeichen auf den Kacheln.
@@ -1259,6 +1370,7 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0, o
                 onRetry={() => retryBundle(bundle)}
                 onClear={() => clearBundle(bundle)}
                 onCheck={() => checkBundle(bundle)}
+                onUninstall={() => setUninstall({ kind: 'bundle', bundle })}
                 onOpenUrl={(u) => openExternal(u)}
               />
             </motion.div>
@@ -1268,7 +1380,9 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0, o
       )}
 
       {(isImage || isVideo) && sortedBundles.length > 0 && filteredBundles.length === 0 && (
-        <p className={skin.cls.sizeFilterEmpty}>No models match this size filter. Try a different one.</p>
+        <p className={skin.cls.sizeFilterEmpty}>
+          {categoryId !== 'all' ? 'No models match this size and category. Try another one, or All.' : 'No models match this size filter. Try a different one.'}
+        </p>
       )}
 
       {/* CivitAI Search (Image & Video). Checkpoints here; the LoRA rail
@@ -1350,6 +1464,9 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0, o
             <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-2.5">
               {gridGroups.map((g, i) => renderTile(g, i))}
             </div>
+            {activeTextModels.length > 0 && textGroups.length === 0 && (
+              <p className={skin.cls.searchEmpty}>No models of this category here. Pick All, or the other catalogue.</p>
+            )}
             {activeTextModels.length === 0 && (
               <p className={skin.cls.searchEmpty}>
                 {subTab === 'uncensored' ? 'No unfiltered models match your search' : 'No mainstream models match your search'}
@@ -1448,6 +1565,63 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0, o
                 </span>
               </label>
             )}
+            {/* C21: pick the file instead of LU picking it. */}
+            {infoRepoId(infoModel) && (
+              <div className="space-y-1.5 pt-1" data-testid="gguf-choices">
+                {!fileChoices || fileChoices.model !== infoModel.name ? (
+                  <button className="lu-control" onClick={() => loadFileChoices(infoModel)} data-testid="gguf-choices-load">
+                    Choose another file of this model…
+                  </button>
+                ) : fileChoices.loading ? (
+                  <p className="t-micro text-gray-500 dark:text-gray-400">Reading the files of {fileChoices.repoId}…</p>
+                ) : !fileChoices.list ? (
+                  <p className="t-micro text-gray-500 dark:text-gray-400">Hugging Face did not answer, so the files cannot be listed now. Try again in a moment.</p>
+                ) : fileChoices.list.length === 0 ? (
+                  <p className="t-micro text-gray-500 dark:text-gray-400">This repository has no GGUF file.</p>
+                ) : (
+                  <>
+                    <p className="t-micro text-gray-500 dark:text-gray-400">
+                      Files in {fileChoices.repoId}, smallest first. Get downloads the one you pick to {getTargetOf(infoModel)}.
+                      {chatFitGb ? ` A file well under ${Math.round(chatFitGb)} GB leaves room for the context.` : ''}
+                    </p>
+                    <div className="max-h-56 overflow-y-auto scrollbar-thin space-y-1 pr-1">
+                      {fileChoices.list.map((c) => {
+                        // The fit compares in GiB like the rest of the page; the
+                        // size reads in decimal GB, the unit the catalog's cards
+                        // print, so one file never shows two sizes.
+                        const gib = c.totalBytes / 1_073_741_824
+                        const gb = c.totalBytes / 1e9
+                        const fit = chatFitGb && gib > 0 ? computeFit(gib, chatFitGb) : null
+                        const current = !!infoModel.filename && infoModel.filename === c.filename
+                        return (
+                          <div key={c.path} className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg border border-gray-200 dark:border-white/10" data-testid="gguf-choice">
+                            <span className="flex-1 min-w-0">
+                              <span className="block truncate text-xs font-mono text-gray-900 dark:text-gray-100" title={c.path}>{c.quant ?? c.filename}</span>
+                              <span className="block t-micro text-gray-500 dark:text-gray-400 truncate">
+                                {[c.parts > 1 ? `${c.parts} parts` : c.filename, current ? 'the file of this card' : '', fit === 'big' ? (sharedMemory ? 'too big for this Mac' : 'too big for your GPU') : fit === 'tight' ? 'tight fit' : ''].filter(Boolean).join(' · ')}
+                              </span>
+                            </span>
+                            <span className="t-micro tabular-nums text-gray-500 dark:text-gray-400 shrink-0">{gb > 0 ? `${gb.toFixed(1)} GB` : ''}</span>
+                            <button
+                              className="lu-control shrink-0"
+                              disabled={c.incomplete}
+                              title={c.incomplete ? 'Not every part is uploaded yet, so this file cannot load.' : `Download ${c.filename}`}
+                              onClick={() => {
+                                const picked = discoverModelForChoice(infoModel, fileChoices.repoId, c)
+                                setInfoModel(null)
+                                void handleTextDownload(picked)
+                              }}
+                            >
+                              {c.incomplete ? 'Incomplete' : 'Get'}
+                            </button>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
             {infoRepoUrl(infoModel) && (
               <button
                 onClick={() => openExternal(infoRepoUrl(infoModel)!)}
@@ -1459,6 +1633,15 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0, o
           </div>
         )}
       </Modal>
+
+      <UninstallDialog
+        request={uninstall}
+        onClose={() => setUninstall(null)}
+        onDone={async () => {
+          refreshBundleStatuses()
+          await fetchModels().catch(() => {})
+        }}
+      />
 
       <ModelFileCheck
         subject={checkSubject}

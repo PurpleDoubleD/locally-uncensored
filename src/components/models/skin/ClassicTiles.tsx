@@ -18,7 +18,7 @@ import { tierMarks } from '../../../lib/render/model-tier'
 import { ICON_SM } from '../../ui/icon-size'
 import {
   FIT_META, FitHint, CapIcons, HotMark, computeFit, shortBlurb, variantLabel,
-  useModelTile, bundleTileFacts, bundleOffersCloud, bundleOffersCheck, CheckFilesButton,
+  useModelTile, bundleTileFacts, bundleOffersCloud, bundleOffersCheck, CheckFilesButton, UninstallButton,
   type ModelTileProps, type BundleTileProps,
 } from '../ModelTiles'
 import { CloudOfferLine } from '../../cloud/CloudOffer'
@@ -318,6 +318,7 @@ export function ClassicBundleTile(props: BundleTileProps) {
           {bundleOffersCheck(props, plan.present) && (
             <CheckFilesButton onClick={props.onCheck!} label={complete} name={bundle.name} className={TILE_CONTROL} />
           )}
+          {complete && props.onUninstall && <UninstallButton onClick={props.onUninstall} name={bundle.name} className={TILE_CONTROL} />}
           {complete ? (
             <span className={TILE_STATE}>
               <Check size={ICON_SM} /> Installed

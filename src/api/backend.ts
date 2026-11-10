@@ -661,6 +661,10 @@ export async function backendCall<T = unknown>(
     delete_comfy_model: { path: "/local-api/delete-comfy-model", method: "POST" },
     // D1: Details for a ComfyUI file. Rust only, the dev server answers 501.
     comfy_model_info: { path: "/local-api/comfy-model-info", method: "POST" },
+    // C41 / C17: show a model file in the file manager, and what Delete would
+    // take for an LU Engine row. Rust only, the dev server answers 501.
+    comfy_model_reveal: { path: "/local-api/comfy-model-reveal", method: "POST" },
+    bundled_model_delete_plan: { path: "/local-api/bundled-model-delete-plan", method: "POST" },
     // Check files and Repair (GH #113): Rust only, the dev server answers
     // 501 (dev-server/remote-stubs.ts).
     verify_model_files: { path: "/local-api/verify-model-files", method: "POST" },

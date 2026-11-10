@@ -8,7 +8,7 @@ import { usePopoverPlatz } from '../../hooks/usePopoverPlatz'
 import { isBelowChatMinimum, SMALL_CHAT_MODEL_WARNING } from '../../lib/chat-model-minimum'
 import {
   Download, ExternalLink, Info, Check, ChevronDown, Loader2, RefreshCw,
-  X, Flame, Wrench, Eye, Feather, HardDrive, FileCheck,
+  X, Flame, Wrench, Eye, Feather, HardDrive, FileCheck, Trash2,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import type { DiscoverModel, DownloadProgress, ModelBundle } from '../../api/discover'
@@ -689,6 +689,24 @@ export interface BundleTileProps {
   /** The Create tab this bundle serves, for the LU Cloud line on a bundle
    *  that does not fit (lib/cloud-offer.ts). Absent: no line. */
   cloudTask?: CloudOfferTask
+  /** C17: take the bundle off the disk, all its files, after a dialog that
+   *  lists them. Absent: no button. */
+  onUninstall?: () => void
+}
+
+/** C17: the bin beside "Installed" on a bundle tile, the same in both faces. */
+export function UninstallButton({ onClick, name, className = TILE_CONTROL }: { onClick: () => void; name: string; className?: string }) {
+  return (
+    <button
+      onClick={onClick}
+      className={`${className} lu-control--icon`}
+      title="Uninstall: shows every file and the space it frees before anything is deleted"
+      aria-label={`Uninstall ${name}`}
+      data-testid="bundle-uninstall"
+    >
+      <Trash2 size={ICON_SM} />
+    </button>
+  )
 }
 
 /** Whether a bundle tile names LU Cloud: its model does not fit and it is
@@ -835,6 +853,7 @@ export function BundleTile(props: BundleTileProps) {
           {bundleOffersCheck(props, plan.present) && (
             <CheckFilesButton onClick={props.onCheck!} label={complete} name={bundle.name} />
           )}
+          {complete && props.onUninstall && <UninstallButton onClick={props.onUninstall} name={bundle.name} />}
           {complete ? (
             <span className={TILE_STATE}>
               <Check size={ICON_SM} /> Installed

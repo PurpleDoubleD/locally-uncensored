@@ -74,6 +74,10 @@ export interface FilterBarProps {
   catalogue: ReactNode
   /** The size filter, or nothing where the lane has none. */
   sizes: ReactNode
+  /** What the models are for (Agent, Coding, Edit, Music, …) and how they are
+   *  sorted ("Better Categories", Discord 09.11.2026). Its own row in both
+   *  faces: it is the widest of the controls and wraps on its own. */
+  categories?: ReactNode
   hardware: { vramGb: number | null; ramGb: number | null; sharedMemory: boolean }
   /** The line that says a pick moved the chat backend. Always in the tree. */
   switchBar: ReactNode

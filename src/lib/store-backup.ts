@@ -63,6 +63,8 @@ export const STORE_KEYS = [
   // D1 (3.0.9): the Hugging Face or CivitAI page of each downloaded model
   // file, for "Open source page" in Models. Lost, it cannot be re-derived.
   'locally-uncensored-model-sources',
+  // C41: the names, notes and hidden marks the user gave the LoRAs.
+  'lu-lora-notes',
   // Die lokale Modell-API (2.6.8). Sie MUSS hier stehen, denn sie traegt das
   // einzige Geheimnis in dieser Liste: das API-Token. Geht es bei einem Update
   // verloren, antwortet die API allen bereits eingerichteten Programmen des

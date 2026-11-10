@@ -242,6 +242,7 @@ pub const ALLOWED: &[&str] = &[
     "swap_bundled_model",
     "list_bundled_models",
     "delete_bundled_model",
+    "bundled_model_delete_plan",
     "start_bundled_embed",
     "stop_bundled_embed",
     "bundled_embed_status",

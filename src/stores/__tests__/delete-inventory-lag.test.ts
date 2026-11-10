@@ -145,7 +145,9 @@ describe('ModelManager delete path', () => {
     // an active chat model from the store by hand would leave the picker
     // pointing at a dead name until the refetch landed, which is a new bug in
     // place of an old delay.
-    expect(body).toMatch(/await removeModel\(name\)/)
+    // C17 (3.1.0): the Ollama row's bin goes through the uninstall dialog,
+    // which hands the name to the same removeModel.
+    expect(src).toMatch(/removeOllamaModel=\{async \(name\) => \{ await removeModel\(name\) \}\}/)
     expect(body.match(/removeInventoryModel/g)?.length).toBe(1)
   })
 })

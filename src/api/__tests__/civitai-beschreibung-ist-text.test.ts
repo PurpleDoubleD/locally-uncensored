@@ -58,6 +58,12 @@ describe('civitaiDescriptionToText', () => {
 
   it('und die Suche schickt ihre Beschreibung wirklich durch diese Funktion', () => {
     const src = readFileSync(resolve(__dirname, '..', 'discover.ts'), 'utf8')
-    expect(src).toContain("civitaiDescriptionToText(asString(prop(item, 'description')) ?? '')")
+    // C18 (3.1.0): the HTML is read once; the line of the hit and the full
+    // text of the Details dialog both go through the text conversion.
+    expect(src).toContain("const rawHtml = asString(prop(item, 'description')) ?? ''")
+    expect(src).toContain('const rawDesc = civitaiDescriptionToText(rawHtml)')
+    expect(src).toContain('fullDescription: rawHtml ? civitaiDescriptionToParagraphs(rawHtml) : undefined')
+    const para = src.slice(src.indexOf('export function civitaiDescriptionToParagraphs'), src.indexOf('const CIVITAI_MODEL_FILE'))
+    expect(para).toContain('return civitaiDescriptionToText(withBreaks)')
   })
 })
