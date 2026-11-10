@@ -4,34 +4,124 @@ All notable changes to Locally Uncensored are documented here.
 
 ## [3.1.0] - 2026-11-1X
 
-The gallery keeps every picture, with pages, tags and hiding. Edit strength
-works again on Qwen edit models, chat tools work in any language, and the
-agent reads its input pictures through LU. A chat you deleted is no longer
-offered back by the restore, on the phone and on the desktop.
+LU learns to run itself from the chat, reads the web for you with sources, and
+the Agent and Code tabs work better with local models. The gallery keeps every
+picture, the chat gets its own look, and Neurons is back as a plugin.
 LU Cloud keeps its open models: seventeen video models and nine image models
 in the cloud catalogue.
 
 ### Added
-- Gallery: no limit of 200 entries any more. The list lives in IndexedDB,
-  is backed up with the chats, and loads 60 tiles at a time as you scroll.
-  Pictures can be hidden from the gallery (Hidden view, Show again) and
-  tagged, with a tag filter. "Restore from the output folder" lists what
-  ComfyUI saved and reads prompt, seed, sampler, model and LoRAs from PNGs
-  made by ComfyUI or A1111; nothing on disk changes.
-- Enhance (local, ComfyUI): any factor from 1x to 8x or a long side in
-  pixels, and a choice of upscale model when there is more than one.
-- Create: "Start ComfyUI when LU starts" on the Start ComfyUI card, the same
-  setting as in Settings.
-- Settings, Agent Permissions: a Loop guard switch, on by default.
-- The workspace dialog (Voice, agent chats) can change the primary folder,
-  make an extra folder the primary, and remove the primary (GitHub #223).
+
+**Agent, Code and chat**
+- LU can change its own settings and run its own services from the Agent chat:
+  ask for a lighter theme, a different model or a ComfyUI restart, confirm the
+  card, and undo it any time under Settings, Agent.
+- Agent and Code read AGENTS.md, keep facts with a memory tool, find things in
+  earlier chats, and use skills you approve in Settings.
+- Better with local models:
+  - a short tool list with tool search for models up to 35B;
+  - Qwen's XML tool calls are understood;
+  - the Code tab plans multi-step tasks;
+  - the loop guard warns before it stops a run;
+  - a batch with a shell command runs in order.
+- Safer agent:
+  - dangerous shell commands and any access to secret files (SSH keys, tokens,
+    .env, browser logins) are refused in every mode, with a visible notice;
+  - a Loop guard switch under Agent Permissions, on by default.
+- On Windows and Linux, Agent and Code can find a ComfyUI workflow for you:
+  your own, ComfyUI's templates, CivitAI with your key, GitHub, or a link you
+  send. They check it with a traffic light (nodes, models, size, license,
+  risks), and install it and use it for a model after you confirm on a card.
+  Node packs come only from LU's own pinned list; anything else you install
+  yourself.
+- Web search reads the best pages for you in one step and answers with
+  numbered sources under the reply. No setup needed.
+- New LU browser (macOS, Windows): the agent can open and read pages in a
+  window next to LU while you watch, and you can take over at any time.
+  Reading only; it never types, logs in or downloads.
+- Safer web tools: page text is always treated as data, and a web address the
+  AI made up waits for your OK (Settings, Search; can be turned off there, and
+  only there).
+- Neurons is back as a plugin. Turn it on under Plugins in Chat, Agent or Code,
+  and a window opens next to your chat with:
+  - ready-made sliders such as Serious to Cheerful;
+  - your own sliders made from examples;
+  - shared coordinates;
+  - a before and after on the same question.
+
+  The sliders act inside the LU Engine model, so tools keep working. Turn it
+  off under Plugins and the engine runs without them.
+
+**Chat look**
+- Colours for your messages and replies, coloured "quotes" and *actions*, font,
+  width, bubbles or document layout, and a background picture per chat or
+  persona, from a file, your gallery or the current scene.
+- Every colour stays readable in light and dark mode.
+- Advanced users can add their own CSS, kept safe: it cannot load anything from
+  the web.
+- Zoom the chat text with Ctrl/Cmd + mouse wheel (or pinch) in Chat, Agent and
+  Code. The size is remembered.
+- Memory quick menu: open a memory to read all of it, and edit it in place.
+
+**Models**
+- Filter and sort Get new by what a model is for (agents, vision, coding, edit,
+  music, lip sync and more).
+- Uninstall a model with one click, with all its files. LU first shows every
+  file and the space it frees, and keeps files another model still needs.
+- Pick the version and file you want from CivitAI and Hugging Face (fp16, fp8,
+  quants) instead of always the newest.
+- The full CivitAI description in the details.
+- LoRAs: rename, add notes, hide from the LoRA stack, show in folder.
+- Models and Settings stay where you left them when you switch to Chat or Create
+  and back.
+
+**Create and gallery**
+- Gallery: no limit of 200 entries any more.
+  - The list lives in IndexedDB, is backed up with the chats, and loads 60
+    tiles at a time as you scroll.
+  - Pictures can be hidden (Hidden view, Show again) and tagged, with a tag
+    filter.
+  - "Restore from the output folder" lists what ComfyUI saved and reads prompt,
+    seed, sampler, model and LoRAs from PNGs made by ComfyUI or A1111. Nothing
+    on disk changes.
+- Two graphics cards (NVIDIA): Settings, Hardware, "One big model across two
+  cards" keeps the diffusion model on your main card and moves the text encoder
+  and VAE to the second one, instead of spilling into system memory. It uses
+  ComfyUI's own multi-GPU nodes, no extra custom node.
+- Enhance (local, ComfyUI): any factor from 1x to 8x or a long side in pixels,
+  and a choice of upscale model when there is more than one.
+- "Start ComfyUI when LU starts" on the Start ComfyUI card, the same setting as
+  in Settings.
+
+**Local API and workspace**
+- Local API:
+  - a short "Use with SillyTavern / other apps" guide in Settings, Local API;
+  - clearer API key errors.
+- The workspace dialog (Voice, agent chats) can change the primary folder, make
+  an extra folder the primary, and remove the primary (GitHub #223).
 
 ### Fixed
+- Local API: LU Engine models are listed in `/v1/models` again (all installed
+  ones, not just the loaded one), and a request for a model that is not loaded
+  loads it first, like Ollama. Fixes SillyTavern showing "no model loaded" since
+  3.0.9.
+- Quitting LU with a signal (kill, Ctrl+C, a service stop) now also stops the LU
+  Engine instead of leaving it running on macOS and Linux.
+- Linux: the Hugging Face token, provider keys and the LU Cloud session are
+  stored in the system keyring (GNOME Keyring, KWallet, KeePassXC); without
+  one, in a file only your user can read (#226, thanks @cylon58).
+- Linux AppImage: no more "libgvfscommon.so: undefined symbol" warnings on
+  newer distributions.
+- Light theme: dialogs are no longer slightly see-through.
+- How-it-works videos can be enlarged to the whole window (button or
+  double-click).
+- Mac: Chroma1-HD loads again ("`tiktoken` is required"), and the image engine
+  updates itself at start when it is out of date.
 - Edit strength below 1.00 changes the picture again on Qwen-Image 2.1 and
-  Qwen-Image-Edit: the strength now steers between the edit and no edit
-  inside the sampler. A lighter edit takes longer per step.
+  Qwen-Image-Edit: the strength now steers between the edit and no edit inside
+  the sampler. A lighter edit takes longer per step.
 - Reasoning effort fits the chat template: a template that only knows low,
-  medium and xhigh gets xhigh for High and Max instead of refusing every
+  medium and xhigh gets xhigh for High and Max, instead of refusing every
   message.
 - Chat tools work in any language, not only English and German (GitHub #224).
 - The agent reads the input picture for edits, references and start images
@@ -43,16 +133,30 @@ in the cloud catalogue.
   ComfyUI sends no preview at all.
 - ComfyUI started from Comfy Desktop finds the model folders of its own
   installation (GitHub #196).
-- A chat you deleted on purpose is no longer offered by the restore hint or
-  the Restore button; a backup file you pick by hand still brings everything
-  back. The Android app gets the same chat rescue as the desktop.
-- REA (agent plugin) installs its dependencies as they were when LU checked
-  the package, and npm's warnings stay out of the server log.
+- A chat you deleted on purpose is no longer offered by the restore hint or the
+  Restore button; a backup file you pick by hand still brings everything back.
+  The Android app gets the same chat rescue as the desktop.
+- REA (agent plugin) installs its dependencies as they were when LU checked the
+  package, and npm's warnings stay out of the server log.
 
 ### Known limits
+- **Two graphics cards:** tested as far as we can without a dual-GPU machine
+  here, with simulated cards and LU's own tests. Feedback from two-card setups
+  is very welcome.
+  - A diffusion model that alone is bigger than the main card still partly sits
+    in system memory, only without the text encoder and VAE next to it.
+  - NVIDIA only.
+- **CivitAI workflows from the chat** need your CivitAI key (Settings, Agent).
+- **Your own ComfyUI workflows** (find, check, install from the chat) work on
+  Windows and Linux, not on the Mac, where pictures and video run on the MLX
+  engine.
+- **Neurons:** very strong slider settings can make a model ignore its task;
+  around half strength keeps tools and answers on track.
+- The LU browser reads only; it never types, logs in or downloads. Linux has no
+  LU browser.
 - The Mac image engine (mflux) still takes Edit strength its old way.
 - Enhance on the Mac stays at 2x and 4x, LU Cloud at 2K, 4K and 8K.
-- The phone app has no hide or tag buttons in its own gallery yet.
+- The phone app's own gallery has no hide or tag buttons.
 
 ## [3.0.10] - 2026-11-05
 

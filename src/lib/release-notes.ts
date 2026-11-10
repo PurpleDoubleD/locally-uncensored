@@ -184,36 +184,148 @@ export const RELEASE_NOTES: ReleaseNote[] = [
   // die bekannten Grenzen.
   {
     version: '3.1.0',
-    headline: 'The gallery keeps every picture, Edit strength works again on Qwen edit models, and chat tools work in any language.',
+    headline: 'LU runs itself from the chat, web search reads the pages for you, and Agent and Code work better with local models.',
     lines: [
       {
+        title: 'LU runs itself from the Agent chat.',
+        detail: 'Ask for a lighter theme, a different model or a ComfyUI restart, confirm the card, and undo it any time under Settings, Agent.',
+      },
+      {
+        title: 'Web search reads the pages for you.',
+        detail: 'One step searches, reads the best pages and answers with numbered sources under the reply. No setup needed. A web address the AI made up waits for your OK.',
+      },
+      {
+        title: 'The chat gets its own look.',
+        detail: 'Colours, font, width, bubbles or document layout, and a background picture per chat or persona. Zoom the chat text with Ctrl or Cmd and the mouse wheel.',
+      },
+      {
         title: 'The gallery keeps every picture.',
-        detail: 'The limit of 200 entries is gone. The gallery is backed up with your chats and loads 60 tiles at a time as you scroll. You can hide a picture from the gallery and bring it back under Hidden with Show again, and tag pictures and filter by tag. Restore from the output folder lists what ComfyUI saved and reads prompt, seed, sampler, model and LoRAs from PNGs made by ComfyUI or A1111. Nothing on disk changes.',
+        detail: 'The limit of 200 entries is gone. Hide pictures, tag them and filter by tag, and restore what ComfyUI saved from the output folder.',
       },
       {
-        title: 'Edit strength below 1.00 changes the picture again.',
-        detail: 'On Qwen-Image 2.1 and Qwen-Image-Edit the strength now steers between the edit and no edit inside the sampler. A lighter edit takes longer per step.',
-      },
-      {
-        title: 'Chat tools work in any language.',
-        detail: 'They used to reach only messages in English and German (GitHub #224).',
-      },
-      {
-        title: 'The agent reads its input pictures through LU.',
-        detail: 'Edits, reference pictures and start images no longer fail with "Failed to fetch" on Qwen-Image 2.1 and MiniMax H3, and the agent finds a picture this chat made by its path on disk.',
-      },
-      {
-        title: 'A chat you deleted is not offered back.',
-        detail: 'The restore note and the Restore button leave out chats you deleted on purpose. A backup file you pick by hand still brings everything back.',
+        title: 'Agent and Code work better with local models.',
+        detail: 'A short tool list with tool search for models up to 35B, a memory tool, skills you approve, search in earlier chats, and secret files are refused in every mode.',
       },
     ],
     details: [
       {
-        title: 'Create',
+        title: 'Agent and chat',
         items: [
           {
+            title: 'Agent and Code read AGENTS.md and remember facts.',
+            detail: 'They keep facts with a memory tool, find things in earlier chats, and use skills you approve in Settings.',
+          },
+          {
+            title: 'Better tool calls with local models.',
+            detail: 'Qwen\'s XML tool calls are understood, the Code tab plans multi-step tasks, the loop guard warns before it stops a run, and a batch with a shell command runs in order.',
+          },
+          {
+            title: 'Dangerous commands and secret files are refused.',
+            detail: 'Dangerous shell commands and any access to SSH keys, tokens, .env files or browser logins are refused in every mode, with a visible notice.',
+          },
+          {
+            title: 'ComfyUI workflows from the chat (Windows, Linux).',
+            detail: 'Agent and Code find a workflow (your own, ComfyUI\'s templates, CivitAI with your key, GitHub, or a link you send), check it with a traffic light and install it after you confirm. Node packs come only from LU\'s own pinned list.',
+          },
+          {
+            title: 'Neurons is back as a plugin.',
+            detail: 'Turn it on under Plugins in Chat, Agent or Code: a window with ready-made sliders, your own sliders from examples and a before and after. Tools keep working.',
+          },
+          {
+            title: 'Chat tools work in any language.',
+            detail: 'They used to reach only messages in English and German (GitHub #224).',
+          },
+          {
+            title: 'The agent reads its input pictures through LU.',
+            detail: 'Edits, reference pictures and start images no longer fail with "Failed to fetch" on Qwen-Image 2.1 and MiniMax H3.',
+          },
+          {
+            title: 'Reasoning effort fits the chat template.',
+            detail: 'A template that only knows low, medium and xhigh gets xhigh for High and Max, instead of refusing every message.',
+          },
+          {
+            title: 'The workspace dialog can change the primary folder.',
+            detail: 'In Voice and agent chats you can change the primary folder, make an extra folder the primary, or remove the primary (GitHub #223).',
+          },
+          {
+            title: 'A chat you deleted is not offered back.',
+            detail: 'The restore note and the Restore button leave out chats you deleted on purpose. A backup file you pick by hand still brings everything back.',
+          },
+          {
+            title: 'A Loop guard switch.',
+            detail: 'Settings, Agent Permissions. It is on by default.',
+          },
+        ],
+      },
+      {
+        title: 'Web',
+        items: [
+          {
+            title: 'The LU browser (Windows and macOS).',
+            detail: 'The agent can open and read pages in a window next to LU while you watch, and you can take over at any time. It only reads; it never types, logs in or downloads.',
+          },
+          {
+            title: 'Page text is data.',
+            detail: 'Text from a web page is never taken as an instruction, and a web address the AI made up waits for your OK (Settings, Search).',
+          },
+        ],
+      },
+      {
+        title: 'Chat look',
+        items: [
+          {
+            title: 'Colours that stay readable.',
+            detail: 'Your messages, replies, "quotes" and *actions* get their own colours, readable in light and dark mode. Advanced users can add their own CSS, which cannot load anything from the web.',
+          },
+          {
+            title: 'Zoom the chat text.',
+            detail: 'Ctrl or Cmd with the mouse wheel, or pinch, in Chat, Agent and Code. The size is remembered.',
+          },
+          {
+            title: 'Read and edit a memory in place.',
+            detail: 'The memory quick menu opens a memory in full and lets you edit it.',
+          },
+        ],
+      },
+      {
+        title: 'Models',
+        items: [
+          {
+            title: 'Filter Get new by what a model is for.',
+            detail: 'Agents, vision, coding, edit, music, lip sync and more.',
+          },
+          {
+            title: 'Uninstall a model with one click.',
+            detail: 'LU first shows every file and the space it frees, and keeps files another model still needs.',
+          },
+          {
+            title: 'Pick the version and file you want.',
+            detail: 'From CivitAI and Hugging Face (fp16, fp8, quants) instead of always the newest, with the full CivitAI description.',
+          },
+          {
+            title: 'LoRAs get names and notes.',
+            detail: 'Rename, add notes, hide from the LoRA stack, show in folder.',
+          },
+          {
+            title: 'Pages stay where you left them.',
+            detail: 'Models and Settings stay as they were when you switch to Chat or Create and back.',
+          },
+        ],
+      },
+      {
+        title: 'Create and gallery',
+        items: [
+          {
+            title: 'One big model across two cards.',
+            detail: 'Settings, Hardware: the diffusion model stays on your main card and the text encoder and VAE move to the second one. NVIDIA only.',
+          },
+          {
+            title: 'Edit strength below 1.00 changes the picture again.',
+            detail: 'On Qwen-Image 2.1 and Qwen-Image-Edit the strength steers between the edit and no edit inside the sampler. A lighter edit takes longer per step.',
+          },
+          {
             title: 'Enhance takes any size on local ComfyUI.',
-            detail: 'Any factor from 1x to 8x, or a long side in pixels, and a choice of upscale model when you have more than one.',
+            detail: 'Any factor from 1x to 8x, or a long side in pixels, and a choice of upscale model.',
           },
           {
             title: 'Start ComfyUI when LU starts, right on the Start ComfyUI card.',
@@ -225,16 +337,7 @@ export const RELEASE_NOTES: ReleaseNote[] = [
           },
           {
             title: 'ComfyUI from Comfy Desktop finds its own model folders.',
-            detail: 'LU now finds the model folders of a ComfyUI that was installed with Comfy Desktop (GitHub #196).',
-          },
-        ],
-      },
-      {
-        title: 'Chat and agent',
-        items: [
-          {
-            title: 'Reasoning effort fits the chat template.',
-            detail: 'A template that only knows low, medium and xhigh gets xhigh for High and Max, instead of refusing every message.',
+            detail: 'LU finds the model folders of a ComfyUI installed with Comfy Desktop (GitHub #196).',
           },
           {
             title: 'The chat image tool runs the model\'s workflow.',
@@ -245,12 +348,29 @@ export const RELEASE_NOTES: ReleaseNote[] = [
             detail: 'A video retry that never ran no longer reports "video generated".',
           },
           {
-            title: 'A Loop guard switch.',
-            detail: 'Settings, Agent Permissions. It is on by default.',
+            title: 'Chroma1-HD loads again on the Mac.',
+            detail: 'No more "tiktoken is required", and the image engine updates itself at start when it is out of date.',
+          },
+        ],
+      },
+      {
+        title: 'Local API and system',
+        items: [
+          {
+            title: 'SillyTavern sees LU Engine models again.',
+            detail: 'All installed LU Engine models are in /v1/models, and a request for a model that is not loaded loads it first. A short guide is in Settings, Local API.',
           },
           {
-            title: 'The workspace dialog can change the primary folder.',
-            detail: 'In Voice and agent chats you can change the primary folder, make an extra folder the primary, or remove the primary (GitHub #223).',
+            title: 'Quitting LU stops the LU Engine.',
+            detail: 'A kill, Ctrl+C or a service stop no longer leaves the engine running on macOS and Linux.',
+          },
+          {
+            title: 'Linux keeps keys in the system keyring.',
+            detail: 'The Hugging Face token, provider keys and the LU Cloud session go to GNOME Keyring, KWallet or KeePassXC, or a file only your user can read (#226, thanks @cylon58).',
+          },
+          {
+            title: 'Smaller fixes.',
+            detail: 'No gvfs warnings from the Linux AppImage, dialogs are no longer see-through in the light theme, and how-it-works videos open large.',
           },
           {
             title: 'REA installs the dependencies LU checked.',
@@ -271,6 +391,22 @@ export const RELEASE_NOTES: ReleaseNote[] = [
         title: 'Known limits',
         items: [
           {
+            title: 'Two cards are tested without a two-card machine.',
+            detail: 'We tested with simulated cards. A diffusion model bigger than the main card still partly sits in system memory. Feedback from two-card setups is welcome.',
+          },
+          {
+            title: 'CivitAI workflows need your key.',
+            detail: 'Finding workflows on CivitAI from the chat needs your CivitAI key.',
+          },
+          {
+            title: 'Your own ComfyUI workflows are for Windows and Linux.',
+            detail: 'On the Mac pictures and video run on the MLX engine, so the workflow tools do not apply there.',
+          },
+          {
+            title: 'Strong Neurons settings can derail a model.',
+            detail: 'Very strong slider settings can make a model ignore its task; around half strength keeps tools and answers on track.',
+          },
+          {
             title: 'Edit strength on the Mac works the old way.',
             detail: 'The Mac image engine (mflux) still takes Edit strength its old way.',
           },
@@ -280,7 +416,7 @@ export const RELEASE_NOTES: ReleaseNote[] = [
           },
           {
             title: 'No hide or tag buttons in the phone gallery.',
-            detail: 'The phone app has no hide or tag buttons in its own gallery. Pictures are hidden and tagged in the desktop app.',
+            detail: 'Pictures are hidden and tagged in the desktop app.',
           },
         ],
       },
