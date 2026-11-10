@@ -29,10 +29,10 @@ describe('the scale an upscale model is trained for, from its name', () => {
 })
 
 describe('the factor', () => {
-  it('defaults to 2x, and only 4 is 4', () => {
+  it('defaults to 2x and takes 1x to 8x on a grid of 0.05 (Discord 08.11.)', () => {
     expect(DEFAULT_UPSCALE_FACTOR).toBe(2)
-    expect(normalizeUpscaleFactor(4)).toBe(4)
-    for (const v of [2, 3, 8, '4', null, undefined, NaN]) expect(normalizeUpscaleFactor(v)).toBe(2)
+    expect([4, 3, 8, 1.5, 1.23, 0.5, 12].map(normalizeUpscaleFactor)).toEqual([4, 3, 8, 1.5, 1.25, 1, 8])
+    for (const v of ['4', null, undefined, NaN]) expect(normalizeUpscaleFactor(v)).toBe(2)
   })
 
   it('the result is the source times the factor, per side', () => {
@@ -43,8 +43,8 @@ describe('the factor', () => {
   it('a result past the longest side is refused with a sentence that names a way out', () => {
     expect(upscaleTooLargeLine(2048, 1536, 4)).toBeNull()
     expect(upscaleTooLargeLine(UPSCALE_MAX_SIDE / 2, 100, 2)).toBeNull()
-    expect(upscaleTooLargeLine(3000, 2000, 4)).toMatch(/12000×8000.*Try 2x or a smaller image\.$/)
-    expect(upscaleTooLargeLine(5000, 3000, 2)).toMatch(/10000×6000.*Try a smaller image\.$/)
+    expect(upscaleTooLargeLine(3000, 2000, 4)).toMatch(/^At 4x .*12000×8000.*Pick a smaller size or a smaller image\.$/)
+    expect(upscaleTooLargeLine(5000, 3000, 2)).toMatch(/10000×6000.*Pick a smaller size/)
   })
 })
 

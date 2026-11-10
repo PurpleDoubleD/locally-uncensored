@@ -63,7 +63,7 @@ import {
 } from '../api/comfyui-ws'
 import { phaseForExecutingNode, phaseForExecutionStart, phaseForProgressStep, phaseForSaveNode } from '../lib/render-phase-labels'
 import { buildDynamicWorkflow, buildLocalOpWorkflow, buildLocalUpscaleWorkflow, checkVideoOutputCapability, qwenEditResolution } from '../api/dynamic-workflow'
-import { normalizeUpscaleFactor, pickUpscaleModel, upscaleTarget, upscaleToolLabel, upscaleTooLargeLine } from '../lib/local-upscale'
+import { pickUpscaleModel, upscaleFactorFor, upscaleSizeLabel, upscaleTarget, upscaleToolLabel, upscaleTooLargeLine } from '../lib/local-upscale'
 import { getAllNodeInfo, clearNodeCache } from '../api/comfyui-nodes'
 import { cutoutModelOf, cutoutDownloadLine } from '../api/cutout-model'
 import { apiNodes, type ComfyApiGraph, type ComfyExecutionMessage, type ComfyHistoryEntry } from '../types/comfy-graph'
@@ -832,8 +832,9 @@ export function useCreate() {
     // model from models/upscale_models, no prompt and no picker model. A Mac
     // never gets here with it (setBackend closes the tab there).
     const isUpscale = mode === 'image' && state.utilityOp === 'upscale'
-    const upscaleModel = isUpscale ? pickUpscaleModel(state.upscaleModelList) : null
-    const upscaleFactor = normalizeUpscaleFactor(state.upscaleFactor)
+    const upscaleModel = isUpscale ? pickUpscaleModel(state.upscaleModelList, state.upscaleModelPick) : null
+    // A target long side becomes the factor of this picture (Discord 08.11.).
+    const upscaleFactor = upscaleFactorFor(source?.width || width, source?.height || height, state.upscaleFactor, state.upscaleLongSide)
 
     // ── 2.5.8 specialized local lanes. music / lipsync / motion build their
     // own core-node graphs (buildLocalOpWorkflow); extend rides the regular
@@ -1658,7 +1659,7 @@ export function useCreate() {
         setError('No upscale model installed. Use Download & install above, then hit Create again.')
         return
       }
-      const tooLarge = source ? upscaleTooLargeLine(source.width, source.height, upscaleFactor) : null
+      const tooLarge = source ? upscaleTooLargeLine(source.width, source.height, upscaleFactor, upscaleSizeLabel(state.upscaleFactor, state.upscaleLongSide)) : null
       if (tooLarge) {
         setError(tooLarge)
         return
@@ -2187,6 +2188,7 @@ export function useCreate() {
       const livePreview = mode === 'video'
       if (livePreview) {
         useRenderPreviewStore.getState().setUrl(null)
+        useRenderPreviewStore.getState().setAsked(true)
         offPreview = comfyWS.onPreview((url) => useRenderPreviewStore.getState().setUrl(url))
       }
       let promptId: string
@@ -2645,6 +2647,7 @@ export function useCreate() {
       if (renderEviction) void restoreChatBackendsAfterRender(renderEviction)
       offPreview?.()
       useRenderPreviewStore.getState().setUrl(null)
+      useRenderPreviewStore.getState().setAsked(false)
       // B27: and ComfyUI's memory goes back when the setting says so.
       scheduleFreeAfterRender(
         freeAfterRenderMode(useSettingsStore.getState().settings.freeAfterRender),

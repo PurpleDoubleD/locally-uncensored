@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 /**
- * Local Enhance Image (3.0.7) in the Composer: a 2x/4x choice instead of the
- * cloud's target resolution, no prompt field, no model picker, and a Create
- * button that waits for the source and for an upscale model.
+ * Local Enhance Image (3.0.7) in the Composer: a size menu instead of the
+ * cloud's target resolution (2x/4x until 3.1.0, see
+ * upscale-groesse-und-modell.test.tsx), no prompt field, no image model
+ * picker, and a Create button that waits for the source and an upscale model.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, cleanup, screen, fireEvent } from '@testing-library/react'
@@ -39,13 +40,13 @@ beforeEach(() => {
 afterEach(cleanup)
 
 describe('the local Enhance composer', () => {
-  it('offers 2x and 4x, 2x picked, and not the cloud target resolution', () => {
+  it('offers a size, 2x picked, and not the cloud target resolution', () => {
     composer()
-    const group = screen.getByRole('radiogroup', { name: 'Upscale factor' })
-    expect(group.textContent).toBe('2x4x')
+    expect(screen.getByRole('button', { name: 'Upscale size' }).textContent).toContain('2x')
     expect(screen.queryByText('8K')).toBeNull()
-    expect(screen.getByRole('radio', { name: '2x' }).getAttribute('aria-checked')).toBe('true')
-    fireEvent.click(screen.getByRole('radio', { name: '4x' }))
+    expect(screen.queryByRole('radiogroup', { name: 'Upscale factor' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Upscale size' }))
+    fireEvent.click(screen.getByRole('option', { name: /^4x/ }))
     expect(useCreateStore.getState().upscaleFactor).toBe(4)
   })
 

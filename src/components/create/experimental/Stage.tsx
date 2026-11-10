@@ -46,6 +46,7 @@ import { describeAvailability, describeTrainPhoto, type DescribeAvailability } f
 import { MAC_IMAGE_SETUP_SIZE, macVideoSetupCopy } from '../../../lib/mac-setup-sizes'
 import { macVideoSetupPlan, type MacVideoSetupPlan } from '../../../api/mlx-starter'
 import { HowItWorks } from '../../ui/HowItWorks'
+import { ComfyAutostartToggle } from './ComfyAutostartToggle'
 import { stageHowtoTopic } from '../../../lib/howto'
 
 interface Props {
@@ -679,7 +680,10 @@ function InstallCardBody({ run, installing, status, err, onDismiss, onCancel, ca
         </div>
       ) : (
         startOnly
-          ? <Button variant="primary" icon={Play} onClick={run}>Start ComfyUI</Button>
+          ? <>
+              <Button variant="primary" icon={Play} onClick={run}>Start ComfyUI</Button>
+              <ComfyAutostartToggle />
+            </>
           : <Button variant="primary" icon={Download} onClick={run}>Download &amp; install</Button>
       )}
       {err && (

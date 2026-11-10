@@ -25,6 +25,13 @@
 //!   * ComfyUI Desktop: `%APPDATA%\ComfyUI\extra_models_config.yaml` and the
 //!     `basePath` in `%APPDATA%\ComfyUI\config.json`, when the ComfyUI folder
 //!     LU uses is that install.
+//!   * Comfy Desktop, the launcher with several installs side by side (GH
+//!     #196 point 5): it starts an install with `--extra-model-paths-config
+//!     %APPDATA%\Comfy Desktop\instance-model-paths\inst-*.yaml`, one file
+//!     per install, listed in `installations.json` beside it. A ComfyUI that
+//!     LU started saw none of that file's shared folders, so a model the
+//!     launcher's ComfyUI listed was downloaded again. The file of the install
+//!     LU uses is read and handed on like a start script's.
 //!
 //! The rule for a write target, per key: the entry marked `is_default` (the
 //! last one loaded, because ComfyUI moves each to the front in turn), else the
@@ -635,6 +642,21 @@ impl UserComfyPaths {
                 }
             }
         }
+
+        // 4. Comfy Desktop, the launcher: the model-paths file of this install.
+        if let Some(appdata) = &env.appdata {
+            let launcher = appdata.join("Comfy Desktop");
+            let installs_root = env.localappdata.as_ref().map(|l| l.join("Comfy-Desktop").join("ComfyUI-Installs"));
+            match comfy_desktop_instance_yaml(&launcher, installs_root.as_deref(), comfy_dir) {
+                Ok(Some(yaml)) => {
+                    if !me.script_configs.iter().any(|c| same_path(c, &yaml)) && me.load_yaml(&yaml, env) {
+                        me.script_configs.push(yaml);
+                    }
+                }
+                Ok(None) => {}
+                Err(note) => me.problems.push(note),
+            }
+        }
         me
     }
 
@@ -759,6 +781,88 @@ impl UserComfyPaths {
     pub fn input_dir_or(&self, comfy_dir: &Path) -> PathBuf {
         self.input_dir.clone().unwrap_or_else(|| comfy_dir.join("input"))
     }
+}
+
+/// The `instance-model-paths` file Comfy Desktop starts the install in
+/// `comfy_dir` with, or `Ok(None)` when this ComfyUI is no install of it.
+///
+/// `installations.json` is the launcher's own file and its layout is not
+/// documented, so it is read for what it must contain without naming keys: a
+/// path that holds `comfy_dir` (the install folder or the ComfyUI in it) and,
+/// in the same entry, a string that names one of the files in
+/// `instance-model-paths` (`inst-abc.yaml` for `inst-abc` or `abc`). The
+/// smallest entry that has both decides, so a list of installs never hands
+/// one install another's folders. Without `installations.json`, an install
+/// under `ComfyUI-Installs` with exactly one such file takes that file.
+/// Anything that does not settle on one file is a note, never a guess.
+fn comfy_desktop_instance_yaml(launcher: &Path, installs_root: Option<&Path>, comfy_dir: &Path) -> Result<Option<PathBuf>, String> {
+    let dir = launcher.join("instance-model-paths");
+    let Ok(list) = std::fs::read_dir(&dir) else { return Ok(None) };
+    let mut stems: Vec<(String, PathBuf)> = list
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.is_file() && p.extension().map(|x| x.eq_ignore_ascii_case("yaml") || x.eq_ignore_ascii_case("yml")).unwrap_or(false))
+        .filter_map(|p| p.file_stem().map(|s| (s.to_string_lossy().to_string(), p.clone())))
+        .collect();
+    stems.sort();
+    if stems.is_empty() {
+        return Ok(None);
+    }
+    let Some(comfy) = normalize_abs(&comfy_dir.to_string_lossy()) else { return Ok(None) };
+    let names = |s: &str| -> Option<usize> {
+        stems.iter().position(|(stem, _)| stem.eq_ignore_ascii_case(s) || stem.eq_ignore_ascii_case(&format!("inst-{s}")))
+    };
+    let holds_comfy = |s: &str| -> bool {
+        is_absolute_any(s) && !is_root(s) && normalize_abs(s).map(|n| is_within(&comfy, &n)).unwrap_or(false)
+    };
+
+    let listed = launcher.join("installations.json");
+    if let Some(read) = read_small(&listed) {
+        let raw = read.map_err(|e| format!("{}: {e}", listed.display()))?;
+        let json: serde_json::Value = serde_json::from_str(&raw).map_err(|_| format!("{}: not readable as JSON, its model folders are not used.", listed.display()))?;
+        // (holds this ComfyUI, the files named below, the files of the
+        // smallest entry that has both)
+        fn walk(v: &serde_json::Value, holds: &dyn Fn(&str) -> bool, names: &dyn Fn(&str) -> Option<usize>) -> (bool, Vec<usize>, Option<Vec<usize>>) {
+            match v {
+                serde_json::Value::String(s) => (holds(s), names(s).into_iter().collect(), None),
+                serde_json::Value::Array(a) => fold(a.iter(), holds, names),
+                serde_json::Value::Object(o) => fold(o.values(), holds, names),
+                _ => (false, Vec::new(), None),
+            }
+        }
+        fn fold<'a>(items: impl Iterator<Item = &'a serde_json::Value>, holds: &dyn Fn(&str) -> bool, names: &dyn Fn(&str) -> Option<usize>) -> (bool, Vec<usize>, Option<Vec<usize>>) {
+            let (mut hit, mut ids, mut found) = (false, Vec::new(), None);
+            for item in items {
+                let (h, i, f) = walk(item, holds, names);
+                hit |= h;
+                for x in i {
+                    if !ids.contains(&x) {
+                        ids.push(x);
+                    }
+                }
+                if found.is_none() {
+                    found = f;
+                }
+            }
+            if found.is_none() && hit && !ids.is_empty() {
+                found = Some(ids.clone());
+            }
+            (hit, ids, found)
+        }
+        let (hit, _, found) = walk(&json, &holds_comfy, &names);
+        return match found {
+            Some(ids) if ids.len() == 1 => Ok(Some(stems[ids[0]].1.clone())),
+            Some(_) => Err(format!("{}: this ComfyUI matches several Comfy Desktop installs, so LU uses none of their model folders.", listed.display())),
+            None if hit && stems.len() == 1 => Ok(Some(stems[0].1.clone())),
+            None if hit => Err(format!("{}: this ComfyUI is listed, but LU cannot tell which file in {} is its own.", listed.display(), dir.display())),
+            None => Ok(None),
+        };
+    }
+    let under_installs = installs_root
+        .and_then(|r| normalize_abs(&r.to_string_lossy()))
+        .map(|r| is_within(&comfy, &r))
+        .unwrap_or(false);
+    Ok(if under_installs && stems.len() == 1 { Some(stems[0].1.clone()) } else { None })
 }
 
 /// The configured folders for the ComfyUI LU uses right now, or nothing.
@@ -1170,6 +1274,105 @@ comfyui:
         let u = UserComfyPaths::discover_with(&other, &env);
         assert!(u.entries().is_empty());
         assert_eq!(u.output_dir_or(&other), other.join("output"));
+    }
+
+    /// GH #196 point 5: a Comfy Desktop launcher with two installs, each with
+    /// its own model-paths file.
+    fn launcher(name: &str, listed: Option<serde_json::Value>) -> (PathBuf, Env, PathBuf, PathBuf) {
+        let root = scratch(name);
+        let appdata = root.join("AppData").join("Roaming");
+        let local = root.join("AppData").join("Local");
+        let launcher = appdata.join("Comfy Desktop");
+        let inst = launcher.join("instance-model-paths");
+        std::fs::create_dir_all(&inst).unwrap();
+        let shared = root.join("Comfy-Desktop").join("ComfyUI-Shared");
+        std::fs::create_dir_all(shared.join("models").join("vae")).unwrap();
+        std::fs::write(
+            inst.join("inst-a1.yaml"),
+            format!("comfy_desktop_shared:\n  base_path: '{}'\n  is_default: true\n  vae: models/vae/\n  loras: models/loras/\n", shared.display()),
+        )
+        .unwrap();
+        let other = root.join("Elsewhere");
+        std::fs::create_dir_all(other.join("vae")).unwrap();
+        std::fs::write(inst.join("inst-b2.yaml"), format!("other:\n  base_path: '{}'\n  vae: vae/\n", other.display())).unwrap();
+        let installs = local.join("Comfy-Desktop").join("ComfyUI-Installs");
+        let a = installs.join("LTX").join("ComfyUI");
+        let b = installs.join("Flux").join("ComfyUI");
+        std::fs::create_dir_all(&a).unwrap();
+        std::fs::create_dir_all(&b).unwrap();
+        if let Some(j) = listed {
+            let text = j.to_string()
+                .replace("@A", &installs.join("LTX").to_string_lossy().replace('\\', "\\\\"))
+                .replace("@B", &installs.join("Flux").to_string_lossy().replace('\\', "\\\\"));
+            std::fs::write(launcher.join("installations.json"), text).unwrap();
+        }
+        let env = Env { home: None, appdata: Some(appdata), localappdata: Some(local), var: Box::new(|_| None) };
+        (a, env, shared, b)
+    }
+
+    #[test]
+    fn comfy_desktop_launcher_install_reads_its_own_model_paths_file() {
+        let listed = serde_json::json!({ "installations": [
+            { "id": "inst-a1", "name": "LTX", "path": "@A" },
+            { "id": "inst-b2", "name": "Flux", "path": "@B" },
+        ] });
+        let (a, env, shared, b) = launcher("launcher-listed", Some(listed));
+        let u = UserComfyPaths::discover_with(&a, &env);
+        assert_eq!(u.write_dir("vae"), Some(shared.join("models").join("vae")));
+        assert_eq!(u.script_configs.len(), 1);
+        assert!(u.script_configs[0].ends_with("inst-a1.yaml"));
+        let args = u.launch_args();
+        assert_eq!(args[0], "--extra-model-paths-config");
+        assert!(args[1].ends_with("inst-a1.yaml"));
+        // The other install gets its own file, not this one's.
+        let u = UserComfyPaths::discover_with(&b, &env);
+        assert!(u.script_configs[0].ends_with("inst-b2.yaml"));
+        assert!(u.problems.is_empty(), "{:?}", u.problems);
+    }
+
+    #[test]
+    fn comfy_desktop_ids_without_the_prefix_and_paths_deeper_in_the_entry() {
+        let listed = serde_json::json!([
+            { "installId": "a1", "location": { "installPath": "@A" } },
+            { "installId": "b2", "location": { "installPath": "@B" } },
+        ]);
+        let (a, env, shared, _) = launcher("launcher-nested", Some(listed));
+        let u = UserComfyPaths::discover_with(&a, &env);
+        assert_eq!(u.write_dir("vae"), Some(shared.join("models").join("vae")));
+    }
+
+    #[test]
+    fn comfy_desktop_without_a_clear_answer_takes_nothing() {
+        // Listed, but the entry names no file and there are two: a note.
+        let listed = serde_json::json!({ "installations": [{ "path": "@A" }] });
+        let (a, env, _, _) = launcher("launcher-unclear", Some(listed));
+        let u = UserComfyPaths::discover_with(&a, &env);
+        assert!(u.script_configs.is_empty());
+        assert!(u.problems.iter().any(|p| p.contains("cannot tell which file")), "{:?}", u.problems);
+        // Broken JSON: a note, nothing used.
+        let (a, env, _, _) = launcher("launcher-broken", None);
+        let launcher_dir = env.appdata.as_ref().unwrap().join("Comfy Desktop");
+        std::fs::write(launcher_dir.join("installations.json"), "{ not json").unwrap();
+        let u = UserComfyPaths::discover_with(&a, &env);
+        assert!(u.script_configs.is_empty());
+        assert!(u.problems.iter().any(|p| p.contains("not readable as JSON")), "{:?}", u.problems);
+        // Not listed at all, and two files: nothing, no note.
+        std::fs::write(launcher_dir.join("installations.json"), "[]").unwrap();
+        let u = UserComfyPaths::discover_with(&a, &env);
+        assert!(u.script_configs.is_empty() && u.problems.is_empty());
+        // A ComfyUI that is no install of the launcher is left alone.
+        let elsewhere = scratch("launcher-foreign").join("ComfyUI");
+        std::fs::create_dir_all(&elsewhere).unwrap();
+        assert!(UserComfyPaths::discover_with(&elsewhere, &env).script_configs.is_empty());
+    }
+
+    #[test]
+    fn comfy_desktop_without_installations_json_and_one_file() {
+        let (a, env, shared, _) = launcher("launcher-one", None);
+        let inst = env.appdata.as_ref().unwrap().join("Comfy Desktop").join("instance-model-paths");
+        std::fs::remove_file(inst.join("inst-b2.yaml")).unwrap();
+        let u = UserComfyPaths::discover_with(&a, &env);
+        assert_eq!(u.write_dir("vae"), Some(shared.join("models").join("vae")));
     }
 
     #[test]

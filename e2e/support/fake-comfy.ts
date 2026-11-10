@@ -8,6 +8,8 @@ export interface FakeComfy {
   vaes?: string[]
   samplers?: string[]
   schedulers?: string[]
+  /** Files in models/upscale_models (Enhance Image). */
+  upscaleModels?: string[]
   /** The image model the stored Create state starts on. */
   imageModel: string
 }
@@ -34,6 +36,7 @@ export async function bootWithFakeComfy(page: Page, comfy: FakeComfy) {
       VAELoader: { input: { required: { vae_name: combo(c.vaes ?? ['ae.safetensors']) } } },
       KSampler: { input: { required: { sampler_name: combo(c.samplers ?? ['euler']), scheduler: combo(c.schedulers ?? ['simple']) } } },
     }
+    if (c.upscaleModels) nodes.UpscaleModelLoader = { input: { required: { model_name: combo(c.upscaleModels) } } }
     bridge.invoke = (command, args) => {
       // Rust answers a list for every file; the header itself is not under test.
       if (command === 'sniff_model_files') return Promise.resolve([])
