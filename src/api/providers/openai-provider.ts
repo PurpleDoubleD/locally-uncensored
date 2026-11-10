@@ -39,7 +39,7 @@ import { thinkBudgetForRequest } from '../../lib/think-budget'
 import { chatFirstReplyMs, FIRST_REPLY_TIMEOUT } from '../../lib/chat-reply-timeout'
 import {
   applyLocalEffort, isKoboldVersion, isLmStudioV1Models, lmStudioEffortLevels, localEffortNote,
-  templateReadsEffort, KOBOLD_EFFORT_LEVELS, LLAMACPP_EFFORT_LEVELS, type LocalEffortServer,
+  templateReadsEffort, templateEffortLevels, fitRungToTemplate, KOBOLD_EFFORT_LEVELS, LLAMACPP_EFFORT_LEVELS, type LocalEffortServer,
 } from '../../lib/local-effort'
 
 /** The server-wide facts cached per endpoint, see `serverFact`. */
@@ -798,6 +798,70 @@ export class OpenAIProvider implements ProviderClient {
    *  retry without `chat_template_kwargs` that needs it back. */
   private static engineEffortHeld = new WeakMap<OpenAIChatRequest, string>()
 
+  /**
+   * 3.0.11: every rung that can reach the template is fitted onto the rungs
+   * the template renders, read from /props (lib/local-effort.ts,
+   * templateEffortLevels). b11960 hands the template both
+   * `chat_template_kwargs.reasoning_effort` and a top-level
+   * `reasoning_effort`, and a template that raises on a rung kills the whole
+   * request before a token is made: "Unexpected reasoning effort high.
+   * Supported types are xhigh (default), medium, and low." (bug report on
+   * 3.0.10, LU Engine). The fixed ladder low, medium, high cannot know such
+   * a template; the server does. Runs here, after the engine is up, so
+   * /props describes the model this request goes to. The held top-level rung
+   * of the retry without kwargs is fitted too. 'none' and 'minimal' are the
+   * off switch and stay as they are.
+   */
+  private async fitEffortToTemplate(body: OpenAIChatRequest, model: string): Promise<void> {
+    if (!this.isLocalEffortSlot) return
+    const isRung = (v: unknown): v is string => typeof v === 'string' && v !== '' && v !== 'none' && v !== 'minimal'
+    const kwRung = body.chat_template_kwargs?.reasoning_effort
+    const held = OpenAIProvider.engineEffortHeld.get(body)
+    if (!isRung(body.reasoning_effort) && !isRung(kwRung) && !isRung(held)) return
+    const levels = await this.templateLevels(model)
+    if (!levels) return
+    if (isRung(body.reasoning_effort)) {
+      const fit = fitRungToTemplate(body.reasoning_effort, levels)
+      if (fit === undefined) delete body.reasoning_effort
+      else body.reasoning_effort = fit
+    }
+    if (isRung(kwRung) && body.chat_template_kwargs) {
+      const fit = fitRungToTemplate(kwRung, levels)
+      if (fit === undefined) {
+        const rest = { ...body.chat_template_kwargs }
+        delete rest.reasoning_effort
+        body.chat_template_kwargs = rest
+      } else {
+        body.chat_template_kwargs = { ...body.chat_template_kwargs, reasoning_effort: fit }
+      }
+    }
+    if (isRung(held)) {
+      const fit = fitRungToTemplate(held, levels)
+      if (fit === undefined) OpenAIProvider.engineEffortHeld.delete(body)
+      else OpenAIProvider.engineEffortHeld.set(body, fit)
+    }
+  }
+
+  /** The template rungs per endpoint and model, five minutes like the other
+   *  server facts. Keyed by model as well: /props describes the model that
+   *  is loaded, and the LU Engine swaps models behind one port. */
+  private templateLevels(model: string): Promise<string[] | undefined> {
+    const key = `${this.baseUrl}|${model}`
+    const now = Date.now()
+    const hit = OpenAIProvider.templateLevelsCache.get(key)
+    if (hit && now - hit.at < 300_000) return hit.levels
+    // No caller signal: a Stop must not leave an empty answer cached. The
+    // probe has its own short timeout (probeInit).
+    const entry = { at: now, levels: this.probeJson(`${serverRoot(this.baseUrl)}/props`).then(templateEffortLevels) }
+    // No list is asked again after 30 s instead of 5 min: an engine that
+    // was still loading must not keep a template's rungs away for long.
+    void entry.levels.then((l) => { if (!l) entry.at = now - 270_000 })
+    OpenAIProvider.templateLevelsCache.set(key, entry)
+    return entry.levels
+  }
+
+  private static templateLevelsCache = new Map<string, { at: number; levels: Promise<string[] | undefined> }>()
+
   /** The LU Engine or a server on this machine or the LAN, LU Cloud aside. */
   private get isLocalEffortSlot(): boolean {
     return this.config.managed === true || (this.isLanBackend && this.config.id !== 'lu-cloud')
@@ -867,6 +931,8 @@ export class OpenAIProvider implements ProviderClient {
       { signal },
     )
     const refused = (res: Response) => !res.ok && (res.status === 400 || res.status === 422)
+
+    await this.fitEffortToTemplate(body, model)
 
     const asked = body.reasoning_effort
     // 'none' and 'minimal' are the two ways of saying off; every other rung is
