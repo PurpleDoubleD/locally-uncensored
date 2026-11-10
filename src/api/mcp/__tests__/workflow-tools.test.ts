@@ -359,7 +359,7 @@ describe('a Mac has no ComfyUI to run a workflow on', () => {
         await executeWorkflowInspect({ id: 'x' }),
         await executeWorkflowInstall({ id: 'x' }, run()),
         await executeWorkflowAssign({ workflow: 'a', model: 'b' }, run()),
-      ]) expect(r).toMatch(/^ComfyUI workflows are not used on this computer/)
+      ]) expect(r).toMatch(/^Own ComfyUI workflows are not available on a Mac/)
       expect(queue()).toHaveLength(0)
     } finally {
       h.comfy = true

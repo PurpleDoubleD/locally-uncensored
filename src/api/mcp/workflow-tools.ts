@@ -84,7 +84,8 @@ function errText(e: unknown, max: number): string {
 }
 
 /** A Mac renders with MLX and never with ComfyUI (lib/capabilities.ts). */
-const NO_COMFY = 'ComfyUI workflows are not used on this computer: on a Mac, Create renders with MLX, not ComfyUI. Nothing changed.'
+const NO_COMFY = 'Own ComfyUI workflows are not available on a Mac: there Create renders with Apple MLX and never uses ComfyUI, '
+  + 'so Create has no workflow button either. They work on Windows and Linux. Nothing changed. Tell the user so in one sentence.'
 
 const NOT_HERE = 'Error: workflows can only be installed in a chat where the user sees the confirmation card. Nothing changed.'
 
