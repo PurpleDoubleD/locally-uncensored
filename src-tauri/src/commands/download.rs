@@ -1107,7 +1107,7 @@ mod chat_download_tests {
     }
 }
 
-#[allow(non_snake_case)]
+#[allow(non_snake_case, clippy::too_many_arguments)]
 #[tauri::command]
 pub async fn download_model(
     url: String,
