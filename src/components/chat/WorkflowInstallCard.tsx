@@ -92,6 +92,15 @@ export function WorkflowReportView({ report }: { report: InspectReport }) {
   )
 }
 
+/** Why the card is the strong one, from what the check found. */
+function strongNote(r: InspectReport | undefined): string {
+  if (!r) return 'Review: read the check before you say yes.'
+  const fetches = r.installPacks.length > 0 || r.models.some((m) => m.state === 'catalog' || m.state === 'download')
+  return fetches
+    ? 'Review: this installs node packs or downloads files. Read the list before you say yes.'
+    : 'Review: something this workflow needs is missing or has to be installed by you. Read the check before you say yes.'
+}
+
 /** The question in front of an install or an assignment from the chat. Only a
  *  click acts, also in Bypass; a yellow check is the strong card, with no
  *  default button. */
@@ -122,7 +131,7 @@ export function WorkflowCardAsk({ req }: { req: WorkflowCardRequest }) {
       )}
       {req.strong && (
         <p className="mt-1 t-micro font-medium text-gray-700 dark:text-gray-300" data-testid="workflow-card-strong">
-          Review: this installs node packs or downloads files. Read the list before you say yes.
+          {strongNote(req.report)}
         </p>
       )}
       {req.report && <WorkflowReportView report={req.report} />}
