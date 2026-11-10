@@ -232,6 +232,10 @@ export const RELEASE_NOTES: ReleaseNote[] = [
             detail: 'Turn it on under Plugins in Chat, Agent or Code: a window with ready-made sliders, your own sliders from examples and a before and after. Tools keep working.',
           },
           {
+            title: 'DeepSeek R1 answers a plain hi.',
+            detail: 'R1 and its distills get no system message, as their makers advise. LU puts a persona, the agent role and tools into the first message instead, so the model no longer puzzles over LU\'s rules.',
+          },
+          {
             title: 'Chat tools work in any language.',
             detail: 'They used to reach only messages in English and German (GitHub #224).',
           },

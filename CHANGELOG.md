@@ -117,6 +117,9 @@ in the cloud catalogue.
   double-click).
 - Mac: Chroma1-HD loads again ("`tiktoken` is required"), and the image engine
   updates itself at start when it is out of date.
+- DeepSeek R1 and its distills get no system message, as their makers advise:
+  LU folds a persona, the agent role and tools into the first message, so a
+  plain "hi" gets a short answer instead of the model puzzling over LU's rules.
 - Edit strength below 1.00 changes the picture again on Qwen-Image 2.1 and
   Qwen-Image-Edit: the strength now steers between the edit and no edit inside
   the sampler. A lighter edit takes longer per step.
