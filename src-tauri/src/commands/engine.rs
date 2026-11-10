@@ -5814,7 +5814,9 @@ fn describe_gpu_roles_blocking(app: &AppHandle, state: &AppState) -> Result<Vec<
     use crate::commands::gpu_roles::{effective_selection, env_of, GpuRole, RolePlan};
     let mut out = Vec::new();
     let comfy = effective_selection(state, GpuRole::Comfy).unwrap_or_default();
-    out.push(RolePlan { service: "ComfyUI".into(), env: env_of(&comfy), args: vec![], note: None });
+    // C56: with the split on, say which card holds which part.
+    let comfy_note = crate::commands::gpu_roles::comfy_split(state).map(|s| crate::commands::gpu_roles::split_note(&s));
+    out.push(RolePlan { service: "ComfyUI".into(), env: env_of(&comfy), args: vec![], note: comfy_note });
     let chat = effective_selection(state, GpuRole::Chat).unwrap_or_default();
     out.push(RolePlan {
         service: "Ollama".into(),

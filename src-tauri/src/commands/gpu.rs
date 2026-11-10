@@ -1653,8 +1653,14 @@ pub struct GpuSelection {
 
 #[tauri::command]
 pub fn set_gpu_selection(state: State<'_, AppState>, selection: GpuSelection) -> Result<(), String> {
-    let mut sel = state.gpu_selection.lock().map_err(|e| e.to_string())?;
-    *sel = selection;
+    {
+        let mut sel = state.gpu_selection.lock().map_err(|e| e.to_string())?;
+        *sel = selection.clone();
+    }
+    // 3.1.0: kept across a restart, so the boot starts of ComfyUI and Ollama
+    // have it before the frontend is up (gpu_roles.rs, "The picks across a
+    // restart").
+    crate::commands::gpu_roles::persist_pick(crate::commands::gpu_roles::CONFIG_KEY_SELECTION, &selection);
     Ok(())
 }
 
@@ -2010,8 +2016,10 @@ End of search: 3 match(es) found.
                 "{rel} still has the old lock-wraps-apply_gpu_env shape (the MutexGuard \
                  was alive for the whole call, including any nvidia-smi I/O inside it)"
             );
+            // 3.1.0: process.rs reads it through gpu_roles::apply_role_env,
+            // which calls effective_selection (checked below).
             assert!(
-                src.contains("gpu_roles::effective_selection(state,"),
+                src.contains("gpu_roles::effective_selection(state,") || src.contains("gpu_roles::apply_role_env(state,"),
                 "{rel} has no call site that reads the selection through gpu_roles::effective_selection"
             );
         }
@@ -2021,6 +2029,9 @@ End of search: 3 match(es) found.
         assert!(body.contains("state.gpu_selection.lock().ok().map(|s| s.clone())"), "the selection is not cloned out of its lock");
         assert!(body.contains("state.gpu_roles.lock().ok().map(|r| r.clone())"), "the roles are not cloned out of their lock");
         assert!(!body.contains("apply_gpu_env"), "effective_selection must not forward while it holds a lock");
+        let helper = roles.split("pub fn apply_role_env(").nth(1).expect("apply_role_env in gpu_roles.rs");
+        let helper = &helper[..helper.find("\n}\n").expect("end of apply_role_env")];
+        assert!(helper.contains("effective_selection(state, role)") && !helper.contains(".lock()"), "apply_role_env must read through effective_selection and hold no lock");
     }
 
     #[test]

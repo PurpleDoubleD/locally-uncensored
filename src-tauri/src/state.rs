@@ -466,6 +466,9 @@ impl AppState {
         // Fixes a pre-existing bug where `set_comfyui_port` wrote to disk but
         // startup never read it back. Same loader now handles the new host field.
         let (initial_port, initial_host) = load_comfy_config_values();
+        // 3.1.0: the GPU picks of the last session, so the boot starts of
+        // ComfyUI and Ollama apply them (commands/gpu_roles.rs).
+        let (initial_gpu_selection, initial_gpu_roles) = crate::commands::gpu_roles::load_persisted_picks();
         if initial_port != 8188 {
             println!("[ComfyUI] Loaded persisted port: {}", initial_port);
         }
@@ -525,8 +528,9 @@ impl AppState {
             chat_workspace_overrides: Arc::new(Mutex::new(HashMap::new())),
             // Bug BB v2.5.0 — start in "auto" mode so existing installs are
             // unchanged until the user explicitly picks a GPU in Settings.
-            gpu_selection: Mutex::new(GpuSelection::default()),
-            gpu_roles: Mutex::new(crate::commands::gpu_roles::GpuRoles::default()),
+            // "auto" unless the user picked a card in an earlier session.
+            gpu_selection: Mutex::new(initial_gpu_selection),
+            gpu_roles: Mutex::new(initial_gpu_roles),
             flash_attn_cache: Mutex::new(HashMap::new()),
             comfy_gpu_cache: Mutex::new(HashMap::new()),
             comfy_gpu_mode: Mutex::new("auto".to_string()),

@@ -609,4 +609,13 @@ export interface GpuRef {
 export interface GpuRoles {
   chat: GpuRef | null
   comfy: GpuRef | null
+  /** 3.1.0 (C56): one picture or video model across two cards. Set, ComfyUI
+   *  sees both cards and this wins over `comfy` (lib/comfy-split.ts). */
+  comfySplit?: ComfySplit | null
+}
+
+/** The diffusion model on `model`, the text encoders and the VAE on `helper`. */
+export interface ComfySplit {
+  model: GpuRef
+  helper: GpuRef
 }
