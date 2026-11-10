@@ -46,8 +46,11 @@
 
 import { setChatBackendsRestore, holdChatBackends } from '../lib/chat-backends-gate'
 import { gpuRolesSeparate } from '../lib/gpu-roles'
-import { backendCall, ollamaUrl, localFetch, isOllamaLocal, isWindows } from './backend'
-import type { ComfyApiGraph } from '../types/comfy-graph'
+import { backendCall, ollamaUrl, localFetch, isOllamaLocal, isWindows, fetchLocalhostBytes } from './backend'
+import { apiNodes, type ComfyApiGraph } from '../types/comfy-graph'
+import { injectParameters } from './workflows'
+import { ownWorkflowMisfit } from '../lib/own-workflow-fit'
+import type { ComfyModelSource } from '../types/models'
 import { asNumber, asRecordArray, asString, prop } from '../types/json-guards'
 import { listRunningModels, loadModel, unloadModel } from './ollama'
 import { startBundledEngine } from './engine'
@@ -78,6 +81,7 @@ import {
   isPromptQueued,
   type VideoBackend,
 } from './comfyui'
+import type { GenerateParams, ModelType } from './comfyui'
 import type { ModelCapabilities } from './comfyui-nodes'
 import { getActiveAgentModel } from './agent-context'
 import { comfyWS, CLIENT_ID } from './comfyui-ws'
@@ -1494,8 +1498,7 @@ async function generateImage(
     // with the same one.
     const { useCreateStore } = await import('../stores/createStore')
     const qwenTextEncoder = useCreateStore.getState().qwenTextEncoder
-    const workflow = await buildFixable('image', () => buildDynamicWorkflow(
-      {
+    const params: GenerateParams = {
         prompt,
         negativePrompt: typeof args.negativePrompt === 'string' ? args.negativePrompt : '',
         model,
@@ -1531,9 +1534,17 @@ async function generateImage(
           ? { maskImage: stagedNames([a.maskImage])[0], growMaskBy: clampInt(a.growMaskBy, 6, 0, 64) }
           : {}),
         ...(listed?.parts ? { modelParts: listed.parts } : {}),
-      },
-      type,
-    ))
+      }
+    // GH #192 part 3, C29: a workflow the user assigned to this model runs in
+    // the chat as it does in Create (useCreate), with the values set under
+    // "Workflow parameters"; one whose loader does not fit the model is set
+    // aside the same way. Before, the chat always built LU's own graph, so a
+    // model that only runs with its own workflow could not be used here.
+    const own = await ownWorkflowFor(model, type, listed?.source)
+    const workflow = own
+      ? await injectParameters(own.workflow, own.parameterMap, params, type, own.overrides)
+      : await buildFixable('image', () => buildDynamicWorkflow(params, type))
+    if (own) log.info('vram_handoff.image.own_workflow', { model, workflow: own.name })
     // Phase markers (chat-agent hang 2026-06-03): make it obvious in the log
     // whether a stall is in the workflow build (/object_info) or the submit
     // (/prompt). Both are now timeout-bounded, so neither can strand the
@@ -1548,6 +1559,24 @@ async function generateImage(
     // Surface ComfyUI's message verbatim — an OOM must NOT be masked.
     return buildErrorResult('image', err)
   }
+}
+
+/**
+ * The workflow the user assigned to `model` (workflowStore), when its loader
+ * fits the model (lib/own-workflow-fit, the same check as Create), with the
+ * values the user set under "Workflow parameters". Null: LU builds the graph.
+ */
+export async function ownWorkflowFor(model: string, type: ModelType, source?: ComfyModelSource) {
+  const { useWorkflowStore } = await import('../stores/workflowStore')
+  const store = useWorkflowStore.getState()
+  const wf = store.getWorkflowForModel(model, type)
+  if (!wf) return null
+  const misfit = ownWorkflowMisfit(apiNodes(wf.workflow).map(([, n]) => n.class_type), type, source)
+  if (misfit) {
+    log.info('vram_handoff.own_workflow_set_aside', { model, workflow: wf.name, misfit })
+    return null
+  }
+  return { ...wf, overrides: store.paramOverrides[wf.id] }
 }
 
 /** Video path — buildTxt2VidWorkflow with MODEL_TYPE_DEFAULTS + snapToVideoGrid. */
@@ -2276,21 +2305,18 @@ export async function resolveInputImage(ref: string): Promise<ResolvedInputImage
   if (VIDEO_FILE_RE.test(name)) {
     throw new Error(`"${name}" is a video clip, and inputImage takes a still image. Pass a picture (a generated image or "attachment N"); continuing a clip is not something this tool does.`)
   }
-  const resp = await fetch(url)
+  const read = await readInputFile(url, name, view !== null || !/^https?:\/\//i.test(ref))
   // A12 (20.10.2026): a bare name that is not in the output folder may
   // already sit in ComfyUI's input folder, where a chat attachment is staged
   // (builtin-tools, stageChatAttachment) and where a user puts a picture by
   // hand. LoadImage reads from there, so it needs no second upload.
-  if (resp.status === 404 && (view || !/^https?:\/\//i.test(ref))) {
-    const fromInput = await fetch(getImageUrl(name, '', 'input'))
-    if (fromInput.ok) {
-      const blob = await fromInput.blob()
-      if (blob && blob.size > 0) return { name, ...(await probeSize(blob)) }
-    }
+  if (read === 404 && (view || !/^https?:\/\//i.test(ref))) {
+    const fromInput = await readInputFile(getImageUrl(name, '', 'input'), name, true)
+    if (fromInput !== 404 && fromInput.size > 0) return { name, ...(await probeSize(fromInput)) }
     throw new Error(`could not find input image "${ref}": there is no file of that name in ComfyUI's output or input folder. A picture the user attached in the chat is passed as "attachment 1" (its number in the chat), not by a filename.`)
   }
-  if (!resp.ok) throw new Error(`could not read input image "${name}": ComfyUI answered HTTP ${resp.status}.`)
-  const blob = await resp.blob()
+  if (read === 404) throw new Error(`could not read input image "${name}": the address answered HTTP 404.`)
+  const blob = read
   if (!blob || blob.size === 0) {
     throw new Error(`could not read input image "${ref}", ComfyUI returned an empty file`)
   }
@@ -2302,6 +2328,32 @@ export async function resolveInputImage(ref: string): Promise<ResolvedInputImage
   const file = new File([blob], name, { type: blob.type || 'image/png' })
   const uploaded = await uploadImage(file)
   return { name: uploaded, ...size }
+}
+
+/**
+ * One input picture, read as a Blob, or 404. A file of ComfyUI goes through
+ * the app's localhost proxy, like every other ComfyUI read (D4, Discord
+ * 07.11.2026): the plain `fetch` this used before is a cross-origin request
+ * from the app's window, and against a ComfyUI that sends no CORS header for
+ * it (one LU did not start, or started without `--enable-cors-header`) it
+ * ended as "Image generation failed: Failed to fetch" on every edit and every
+ * start or reference image in the chat. A web address keeps the browser fetch.
+ */
+async function readInputFile(url: string, name: string, comfyFile: boolean): Promise<Blob | 404> {
+  const type = /\.jpe?g$/i.test(name) ? 'image/jpeg' : /\.webp$/i.test(name) ? 'image/webp' : 'image/png'
+  if (!comfyFile) {
+    const resp = await fetch(url)
+    if (resp.status === 404) return 404
+    if (!resp.ok) throw new Error(`could not read input image "${name}": the address answered HTTP ${resp.status}.`)
+    return resp.blob()
+  }
+  try {
+    return new Blob([await fetchLocalhostBytes(url)], { type })
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    if (/^HTTP 404\b/.test(msg)) return 404
+    throw new Error(`could not read input image "${name}" from ComfyUI: ${msg}`)
+  }
 }
 
 async function probeSize(blob: Blob): Promise<{ width: number; height: number }> {

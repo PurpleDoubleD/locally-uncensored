@@ -182,6 +182,9 @@ export interface Settings {
   agentMaxToolCalls: number
   /** Hard cap on ReAct loop iterations per user turn. 0 = unlimited. */
   agentMaxIterations: number
+  /** The agent loop guard (lib/agent-loop-guard.ts): steers and halts a run
+   *  that repeats itself. On unless switched off (C44, Discord 05.11.2026). */
+  agentLoopGuard?: boolean
   /**
    * Dieselben zwei Schranken, aber fuer einen delegierten Sub-Agenten.
    *

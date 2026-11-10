@@ -50,6 +50,7 @@ import { gatePlanTool, planToolAllowed } from '../lib/plan-gate'
 import { buildHermesToolPrompt, buildHermesToolResult, buildHermesToolCall, parseHermesToolCalls, stripToolCallTags, hasToolCallTags } from '../api/hermes-tool-calling'
 import { parseLooseToolCalls, stripMatchedCalls, stripToolCallText, repairToolCall } from '../lib/loose-tool-parse'
 import { isMediaTool, mediaCallSucceeded } from '../lib/media-result'
+import { mediaTurnCaps, droppedMediaNote } from '../lib/media-turn-caps'
 import { isLocalModelByName } from '../api/agents/model-locality'
 import {
   mayRunInBackground,
@@ -1575,13 +1576,13 @@ export function useAgentChat() {
     // order is never rebuilt from prose: it needs the customer's approval.
     const wantsImage = !opts?.createTools && (hintKind === 'image' || /\b(bild|bilder|foto|image|picture|pic|draw|zeichne|mal(e|en)?|grafik|illustration|render)\b/i.test(userPromptText))
     const wantsVideo = !opts?.createTools && (hintKind === 'video' || /\b(video|clip|animier\w*|animate|film|gif|bewegt|motion|mp4|webm)\b/i.test(userPromptText))
-    const maxImageGen = wantsVideo && !wantsImage ? 0 : 1
     // Video generation is turned OFF in the chat tools (video defaults to
     // 'blocked' + locked toggle, 2026-06-04). Respect that here so the
     // deterministic media-synthesis fallback below never force-creates a video
-    // the user disabled.
+    // the user disabled. A message that names no medium ("try again" after a
+    // declined call) leaves one clip open (D6, lib/media-turn-caps.ts).
     const videoAllowed = permissions.video !== 'blocked'
-    const maxVideoGen = wantsVideo && videoAllowed ? 1 : 0
+    const { maxImage: maxImageGen, maxVideo: maxVideoGen } = mediaTurnCaps({ wantsImage, wantsVideo, videoAllowed })
     let imageGenDone = 0
     let videoGenDone = 0
     // Track whether the generated media was actually fed back to the model
@@ -1636,7 +1637,7 @@ export function useAgentChat() {
     // loop relied on the exact-repeat set alone, which the epoch reset (B1)
     // rightly weakened. Windowed batch repeats, per-epoch identical reads and
     // repeated narration now watch this loop too.
-    const loopGuard = new AgentLoopGuard()
+    const loopGuard = new AgentLoopGuard({ enabled: useSettingsStore.getState().settings.agentLoopGuard !== false })
     // The closing line a turn gets when the model itself said nothing usable.
     // Read from the live counters at call time, so both the normal end of the
     // run and the swallowed multimodal refusal below produce the same text.
@@ -2460,6 +2461,7 @@ export function useAgentChat() {
           let blocked = false
           let blockedNonMedia = false
           let blockedCreate = false
+          let droppedVideo = false
           let createInTurn = 0
           const kept: ToolCall[] = []
           for (const tc of toolCalls) {
@@ -2469,7 +2471,7 @@ export function useAgentChat() {
             } else if (name === 'image_generate') {
               if (allowImg > 0) { allowImg--; kept.push(tc) } else { blocked = true }
             } else if (name === 'video_generate') {
-              if (allowVid > 0) { allowVid--; kept.push(tc) } else { blocked = true }
+              if (allowVid > 0) { allowVid--; kept.push(tc) } else { blocked = true; droppedVideo = true }
             } else if (executedCallKeys.has(callKey(tc))) {
               blocked = true
               blockedNonMedia = true
@@ -2504,7 +2506,8 @@ export function useAgentChat() {
                   ? 'Stop: you are repeating tool calls that already ran this turn — their results are shown above and have not changed. Do not call the same tool with the same arguments again. Use the results you already have and write your final answer now, without calling any tool.'
                   : blockedCreate
                   ? createCallSteer(createCalls)
-                  : 'Stop, the media you were asked for is already created and shown. Write ONLY a short, friendly closing line to the user in their own language (e.g. that their picture/clip is ready). Do not output JSON, do not repeat this note, and do not call any tool.',
+                  // "already created" only when this turn did create it (D6).
+                  : droppedMediaNote({ imagesDone: imageGenDone, videosDone: videoGenDone, droppedVideo, videoAllowed }),
               } as ChatMessage)
               continue
             }

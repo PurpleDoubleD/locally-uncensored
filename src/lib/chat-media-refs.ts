@@ -129,18 +129,20 @@ export function resolveChatInputRef(ref: string, messages: readonly ChatMessageL
   if (picked) return { kind: 'attachment', entry: picked.entry }
 
   if (/^file:\/\//i.test(raw)) {
+    let path: string
     try {
-      return { kind: 'path', path: decodeURI(raw.replace(/^file:\/\//i, '')) }
+      path = decodeURI(raw.replace(/^file:\/\//i, ''))
     } catch {
       return { kind: 'error', error: `inputImage "${raw}" is not a readable file address.` }
     }
+    return ownResultAt(path, results) ?? { kind: 'path', path }
   }
   // An address this chat produced is matched to its result, so a clip is
   // known as one even where its file name ends in .webp.
   const sameUrl = results.slice().reverse().find((r) => r.url === raw)
   if (sameUrl) return sameUrl.kind === 'video' ? { kind: 'error', error: clipError(sameUrl.name) } : { kind: 'result', media: sameUrl }
   if (/^(?:https?:\/\/|\/(?:comfyui\/)?view\?)/i.test(raw)) return { kind: 'url', url: raw }
-  if (/^(?:\/|[a-z]:[\\/])/i.test(raw) && /[\\/]/.test(raw.slice(1))) return { kind: 'path', path: raw }
+  if (/^(?:\/|[a-z]:[\\/])/i.test(raw) && /[\\/]/.test(raw.slice(1))) return ownResultAt(raw, results) ?? { kind: 'path', path: raw }
 
   const base = raw.replace(/^.*[\\/]/, '')
   if (!base) return { kind: 'error', error: `inputImage is empty. ${chatChoicesLine(attachments, results)}` }
@@ -150,6 +152,24 @@ export function resolveChatInputRef(ref: string, messages: readonly ChatMessageL
     return { kind: 'error', error: clipError(base) }
   }
   return { kind: 'unknown', name: base }
+}
+
+/**
+ * D5 (Discord 07.11.2026): a path on disk whose file is a picture this chat
+ * made is that result. An agent in its sandbox saw the picture in the chat,
+ * found the file on disk (file_list, a folder workspace, the address in the
+ * result) and passed the full path; the tool refused every path as "ComfyUI
+ * cannot read it from disk", so the picture it had just made could not be
+ * used again. The result's own address is what ComfyUI and the Mac read.
+ * A path to anything else is still refused, so no file of the computer goes
+ * into a render by this route.
+ */
+function ownResultAt(path: string, results: readonly ChatResultMedia[]): ChatInputRef | null {
+  const base = path.replace(/^.*[\\/]/, '').toLowerCase()
+  if (!base) return null
+  const hit = results.slice().reverse().find((r) => r.name.toLowerCase() === base)
+  if (!hit) return null
+  return hit.kind === 'video' ? { kind: 'error', error: clipError(hit.name) } : { kind: 'result', media: hit }
 }
 
 /** A "could not find input image" from ComfyUI's folders, with the pictures
