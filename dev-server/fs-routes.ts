@@ -71,8 +71,12 @@ export function registerFsRoutes(routes: RouteMount): void {
         res.writeHead(200, { 'Content-Type': 'application/json' })
         res.end(JSON.stringify({ content, encoding: 'utf8' }))
       } catch (err) {
-        res.writeHead(200, { 'Content-Type': 'application/json' })
-        res.end(JSON.stringify({ error: String(err) }))
+        // Wie fs_read in Rust: ein Lesefehler ist ein Fehler, keine leere Datei.
+        // Mit 200 + `error` las file_read daraus "" — ein 9B hielt eine
+        // fehlende Datei für leer, erfand Zahlen und schrieb sie hinein (C59).
+        const missing = (err as NodeJS.ErrnoException)?.code === 'ENOENT'
+        res.writeHead(missing ? 404 : 500, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: missing ? `File not found: ${bodyString(body, 'path') || resolved}` : String(err) }))
       }
     })
   })

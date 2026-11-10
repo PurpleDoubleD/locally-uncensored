@@ -26,7 +26,7 @@ const offeredDefNames = AGENT_TOOL_DEFS
 // ── AGENT_TOOL_DEFS ─────────────────────────────────────────────
 
 describe('AGENT_TOOL_DEFS', () => {
-  it('contains exactly 19 tool definitions', () => {
+  it('contains exactly 23 tool definitions', () => {
     // 2.6.6 tool merge (plan section E): the twelve typed shell wrappers,
     // system_info, process_list and get_current_time folded into
     // shell_execute plus the environment block in the system prompt, so the
@@ -56,7 +56,13 @@ describe('AGENT_TOOL_DEFS', () => {
     // set_setting aendert Werte, das hier holt fremde Dateien mit Ampel und
     // Karte. Sie fahren nur auf einer Nachricht ueber einen Workflow mit
     // (WORKFLOW_GATE_WORDS), nie im Plain Chat, nie im Unteragenten.
-    expect(AGENT_TOOL_DEFS).toHaveLength(29 + (browserExistsHere() ? BROWSER_TOOL_NAMES.length : 0))
+    // C59 A6–A8: +4, memory, skill_view, skill_save, session_search. Keines
+    // passt in ein vorhandenes: sie schreiben bzw. lesen LUs eigene Speicher
+    // (Gedaechtnis, Skills, Chats), nicht den Arbeitsordner. Im Katalog fahren
+    // sie nur mit, wenn sie gefragt sind: memory und session_search ueber ihre
+    // Woerter (TOOL_GROUPS, GATE_KEYWORDS), die Skill-Werkzeuge ueber
+    // withSkillTools, wenn es Skills gibt bzw. ein grosses Modell vorschlagen darf.
+    expect(AGENT_TOOL_DEFS).toHaveLength(33 + (browserExistsHere() ? BROWSER_TOOL_NAMES.length : 0))
   })
 
   const expectedTools = [
@@ -114,10 +120,14 @@ describe('AGENT_TOOL_DEFS', () => {
     // 3.1.0 (P-L): web_research and the browser read only, like web_fetch.
     // 3.1.0 (C60): die fuenf Selbststeuerungswerkzeuge aus demselben Grund
     // wie set_setting: jede Aenderung fragt mit ihrer eigenen Karte.
+    // C59 A6–A8: memory schreibt nur LUs Gedaechtnis (sichtbarer Hinweis im
+    // Lauf, Geheimnisse abgelehnt), skill_save legt nur einen Vorschlag ab,
+    // den allein der Nutzer in den Einstellungen speichert, skill_view und
+    // session_search lesen nur.
     expect(autoNames).toEqual([
       ...(browserExistsHere() ? [...BROWSER_TOOL_NAMES] : []),
-      'check_tasks', 'get_settings', 'lu_download', 'lu_models', 'lu_open_settings', 'lu_service', 'message_agent',
-      'set_setting', 'set_settings', 'todo_write', 'web_fetch', 'web_research', 'web_search',
+      'check_tasks', 'get_settings', 'lu_download', 'lu_models', 'lu_open_settings', 'lu_service', 'memory', 'message_agent',
+      'session_search', 'set_setting', 'set_settings', 'skill_save', 'skill_view', 'todo_write', 'web_fetch', 'web_research', 'web_search',
       'workflow_assign', 'workflow_find', 'workflow_inspect', 'workflow_install',
     ].sort())
   })

@@ -53,6 +53,8 @@ const SETTINGS = ['get_settings', 'set_setting', 'set_settings', 'lu_models', 'l
 const STAYS = [
   'todo_write', 'web_research', 'web_search', 'web_fetch', 'file_read', 'file_write', 'file_edit', 'file_list',
   'file_search', 'run_workflow', 'delegate_task', 'check_tasks', 'message_agent',
+  // C59 A6–A8: they work on LU's own stores, so a phone keeps them too.
+  'memory', 'skill_view', 'skill_save', 'session_search',
 ]
 /** The LU browser (P-L, 3.1.0): macOS and Windows desktop only. */
 const BROWSER = ['browser_open', 'browser_snapshot', 'browser_scroll', 'browser_click_link', 'browser_screenshot']
@@ -104,7 +106,7 @@ describe('the catalog on a phone', () => {
       const tool = registry.getToolByName(name)!
       expect(tool.description, name).toMatch(/working folder/)
       expect(tool.description, name).not.toMatch(/absolute|home or drive/)
-      expect(JSON.stringify(tool.inputSchema), name).not.toMatch(/absolute preferred/)
+      expect(JSON.stringify(tool.inputSchema), name).not.toMatch(/absolute preferred|relative to the workspace/)
     }
     expect(registry.getToolByName('run_workflow')!.description).not.toMatch(/Code Review/)
     // The roster in the prompt is rendered from these, so it is clean as well.
@@ -124,7 +126,7 @@ describe('the catalog on a desktop is what it was', () => {
       for (const name of RETIRED_TOOL_NAMES) {
         expect(registry.resolveExecutable(name), name).toEqual({ name })
       }
-      expect(registry.getToolByName('file_read')!.description).toMatch(/PREFER absolute paths/)
+      expect(registry.getToolByName('file_read')!.description).toMatch(/relative to the workspace/)
       expect(registry.getToolByName('run_workflow')!.description).toMatch(/Code Review/)
     })
   }
@@ -204,10 +206,12 @@ describe('the prompt builders', () => {
   // The three hashes were taken from the builders at 0448401e, the commit
   // before the mobile groundwork, and are identical to today's desktop output.
   // P-L (3.1.0) changed the web line of the agent and the chat prompt on
-  // purpose (web_research first); the two hashes are new from there.
+  // purpose (web_research first); C59 changed the agent prompt on purpose
+  // (A1: plain questions get a direct answer instead of "MUST use tools").
+  // The agent hash below is the one with both changes (integ/310).
   it('desktop: the three prompts are byte for byte the ones from before this change', () => {
     standOn('windows')
-    expect(sha(buildAgentSystemPrompt('BASE', roster))).toBe('e756fef25255897881e7746319edaeffc0340d50050a7a7f7ce39ca507a2aedb')
+    expect(sha(buildAgentSystemPrompt('BASE', roster))).toBe('9155fc04df15addacb1bd49778b7658fdf753b65d9570b9fe9468ea40a880a13')
     expect(sha(buildAgentSystemPromptLean('BASE', 'file_read, file_write'))).toBe('28489a4807fe126dbef27f057b0414996a7618ca58d3c822cd51f7e6796184fd')
     expect(sha(buildChatToolsSystemPrompt('BASE'))).toBe('91e7f3ef8669ea15f7cca78a8789e842248ada2920505d4c23025d37ac416a0e')
     expect(buildAgentSystemPrompt('', roster)).toContain('with full access to this computer')

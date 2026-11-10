@@ -73,9 +73,11 @@ describe('useAgentChat installs that gate on the executor', () => {
   const agent = read('../useAgentChat.ts')
 
   it('the allow-list is checked at the execution site, not only at catalog build', () => {
+    // C59 A2 put tool_search in front of it; the curated gate is unchanged.
     expect(agent).toContain(
-      'getTool: (name) => (toolMatchesCurated(name) ? toolRegistry.resolveExecutable(name) : undefined)',
+      ': toolMatchesCurated(name) ? toolRegistry.resolveExecutable(name) : undefined),',
     )
+    expect(agent).toMatch(/getTool: \(name\) => \(compactRun && name === TOOL_SEARCH && stepOfferedNames\.has\(TOOL_SEARCH\)\s*\? TOOL_SEARCH_DEF\s*: toolMatchesCurated\(name\)/)
   })
 
   it('the same predicate still filters the offered catalog, so the two cannot drift', () => {

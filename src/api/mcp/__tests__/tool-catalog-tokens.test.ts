@@ -141,8 +141,15 @@ const CODING_TOKEN_CEILING = 1730
 // im VOLLEN Katalog (zusammen mit C60 gemessen 23.161, mit brief-Feldern). Der codierende Zug bleibt gleich: die
 // vier stehen hinter dem Tor und fahren nur auf einer Nachricht ueber einen
 // ComfyUI-Workflow mit. Token-Decke geschaetzt im selben Verhaeltnis.
-const FULL_CHAR_CEILING = 23200
-const FULL_TOKEN_CEILING = 5040
+// C59 A6–A8: +1.365 Zeichen fuer memory, skill_view, skill_save und
+// session_search im VOLLEN Katalog (19.170 -> 20.535 allein). Der codierende Zug
+// bleibt gleich: alle vier stehen hinter dem Tor (GATE_KEYWORDS), auch wenn
+// ein kreativer Zug das Tor fuer die Medienwerkzeuge oeffnet.
+// integ/310: C60, C60-S5, C59 und P-L (web_research) zusammen, gemessen
+// 25.032 Zeichen. Token-Decke geschaetzt im selben Verhaeltnis wie oben
+// (5040 / 23200).
+const FULL_CHAR_CEILING = 25080
+const FULL_TOKEN_CEILING = 5450
 
 describe('the coding step carries a catalog the diet actually shrank', () => {
   it('the gate really is what a plain coding turn gets', () => {

@@ -1,10 +1,28 @@
 import { spawn, execSync } from 'child_process'
-import { mkdirSync, rmSync } from 'fs'
+import { existsSync, mkdirSync, rmSync, statSync } from 'fs'
 import os from 'os'
-import { join } from 'path'
+import { join, resolve as resolvePath } from 'path'
 import type { RouteMount } from './routes'
 import { requirePost, withJsonBody } from './http'
 import { bodyNumber, bodyString } from '../src/dev/http-body'
+import { devWorkspaceRoot } from '../src/lib/dev-fs-jail'
+import { fenceShell } from './bench-sandbox'
+
+/**
+ * The folder a dev-server shell command runs in, the same rule as
+ * shell.rs (cwd_in_workspace): the chat's workspace, a relative cwd inside it,
+ * an absolute folder as it is. It used to be the Vite process folder (the
+ * repo itself) whenever the model sent no cwd (C59 bench, 2026-11-09).
+ */
+export function devShellCwd(cwd?: string, chatId?: string, workingDirectory?: string, home = os.homedir()): string {
+  const base = devWorkspaceRoot(home, chatId, workingDirectory)
+  mkdirSync(base, { recursive: true })
+  const want = (cwd ?? '').trim()
+  if (!want) return base
+  // resolve() keeps an absolute cwd as it is and joins a relative one onto base.
+  const p = resolvePath(base, want)
+  return existsSync(p) && statSync(p).isDirectory() ? p : base
+}
 
 /**
  * Die beiden Endpunkte, die aus einem Request heraus einen Prozess starten.
@@ -44,7 +62,13 @@ export function registerExecRoutes(routes: RouteMount): void {
             return real ? '"' + real.trim() + '"' : 'python'
           } catch { return 'python' }
         })()
-        const proc = spawn(pythonBin, ['-c', code], {
+        const fencedPy = fenceShell(pythonBin, ['-c', code])
+        if ('refused' in fencedPy) {
+          res.writeHead(200, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ stdout: '', stderr: fencedPy.refused, exitCode: 1 }))
+          return
+        }
+        const proc = spawn(fencedPy.bin, fencedPy.args, {
           cwd: tmpDir,
           stdio: ['ignore', 'pipe', 'pipe'],
           shell: false,
@@ -115,8 +139,15 @@ export function registerExecRoutes(routes: RouteMount): void {
         let stderr = ''
         let killed = false
 
-        const proc = spawn(shellBin, shellArgs, {
-          cwd: cwd || undefined,
+        // The bench runs every shell command in its sandbox (bench-sandbox.ts).
+        const fenced = fenceShell(shellBin, shellArgs)
+        if ('refused' in fenced) {
+          res.writeHead(200, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ stdout: '', stderr: fenced.refused, exitCode: 1 }))
+          return
+        }
+        const proc = spawn(fenced.bin, fenced.args, {
+          cwd: devShellCwd(cwd, bodyString(body, 'chatId'), bodyString(body, 'workingDirectory')),
           stdio: ['ignore', 'pipe', 'pipe'],
           shell: false,
         })

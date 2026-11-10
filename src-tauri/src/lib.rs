@@ -19,6 +19,7 @@ mod android_entry;
 mod linux_media;
 mod app_identity;
 mod appimage_gio;
+mod secret_paths;
 // The chat's HTML preview server. A phone starts no server (mobile_guard.rs).
 #[cfg(desktop)]
 mod html_preview;

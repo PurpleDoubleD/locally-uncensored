@@ -44,6 +44,8 @@ export const STORE_KEYS = [
   // Where the Neurons window stood and whether it was folded (3.1.0).
   'lu-neuron-window',
   'locally-uncensored-agent-goal',
+  // C59 A7: the skills the user saved, and the proposals waiting for them.
+  'lu-skills',
   // Computer control: the switch and the always allowed apps.
   'locally-uncensored-computer',
   // Create in chat: the orders of every conversation, so a card and its

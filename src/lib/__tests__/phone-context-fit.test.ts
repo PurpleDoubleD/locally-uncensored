@@ -243,6 +243,6 @@ describe('the agent loop asks', () => {
   })
 
   it('caps a result where it enters the run, with the numbers of the desktop as the fallback', () => {
-    expect(hook).toContain('truncateToolResult(text, phoneResultChars(agentCtx, settings.smallModelMode ? 1500 : 60000))')
+    expect(hook).toContain('truncateToolResult(text, phoneResultChars(agentCtx, resultCharsFor(agentProfile)))')
   })
 })

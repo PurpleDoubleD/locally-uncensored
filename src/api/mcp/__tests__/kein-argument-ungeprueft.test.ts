@@ -96,6 +96,11 @@ const PFLICHT: Record<string, Record<string, string>> = {
   workflow_inspect: { id: 'civ1' },
   workflow_install: { id: 'civ1' },
   workflow_assign: { workflow: 'Flux Upscale', model: 'flux1-dev.safetensors' },
+  // C59 A6–A8: a sentence to the model, no bridge call.
+  memory: { action: 'search' },
+  skill_view: { name: 'release-notes' },
+  skill_save: { name: 'release-notes', description: 'How to write them', body: '## Procedure\n1. Plain English.' },
+  session_search: { query: 'rabattcode' },
 }
 
 /**

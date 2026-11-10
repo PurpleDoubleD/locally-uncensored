@@ -79,7 +79,9 @@ describe('a plain coding turn does not carry the generators', () => {
     // demselben Tor (set_settings, lu_models, lu_service, lu_download,
     // lu_open_settings).
     // C60-S5: dazu die vier Workflow-Werkzeuge, zusammen achtzehn.
-    expect(before.length - after.length).toBe(18)
+    // C59 A6–A8: +4 (memory, session_search, skill_view, skill_save), on demand only.
+    // Zusammen mit C60 und C60-S5: zweiundzwanzig.
+    expect(before.length - after.length).toBe(22)
     expect(before.filter((n) => !after.includes(n)).sort()).toEqual([...GATE_OPENING_TOOLS].sort())
   })
 
@@ -182,7 +184,7 @@ describe('the prompt and the tool list answer the same question', () => {
 
 describe('the wiring in useCodex', () => {
   it('the gate runs on the routed list, so it covers all three branches', () => {
-    expect(src).toMatch(/const relevantDefs = gatePlanTool\(\s*gateCreateTools\(routedDefs, lastUserMsg, createGateOpened\),/)
+    expect(src).toMatch(/const gatedDefs = gatePlanTool\(\s*gateCreateTools\(routedDefs, lastUserMsg, createGateOpened\),/)
   })
 
   it('the hermes fallback is gated too, it carries the weakest models', () => {
@@ -263,7 +265,9 @@ describe('a run that discovers halfway through that it needs a picture', () => {
     const TOR = [...CREATE_TOOLS, 'pr_resume', 'delegate_task', 'check_tasks', 'message_agent', 'get_settings', 'set_setting',
       'set_settings', 'lu_models', 'lu_service', 'lu_download', 'lu_open_settings',
       // C60-S5
-      'workflow_find', 'workflow_inspect', 'workflow_install', 'workflow_assign']
+      'workflow_find', 'workflow_inspect', 'workflow_install', 'workflow_assign',
+      // C59 A6–A8
+      'memory', 'session_search', 'skill_view', 'skill_save']
     for (const n of TOR) expect(isGatedTool(n), n).toBe(true)
     for (const n of ['file_read', 'file_edit', 'shell_execute', 'todo_write', 'web_search']) {
       expect(isGatedTool(n), n).toBe(false)

@@ -111,9 +111,11 @@ describe('A1 loop guard: detector 2 skips capped re-reads', () => {
     guard.recordBatch([READ('x.ts')])
     guard.recordBatch(other(2))
     const third = guard.recordBatch([READ('x.ts')])
-    // Detector 2 halts a third identical read batch inside the six-step window
-    // with no warning; that is the behaviour the decay had to be taught about.
-    expect(third.action).toBe('halt')
+    // Detector 2 warns on a third identical read batch inside the six-step
+    // window and halts the next one (C59 A5); the decay had to be taught about both.
+    expect(third.action).toBe('steer')
+    guard.recordBatch(other(3))
+    expect(guard.recordBatch([READ('x.ts')]).action).toBe('halt')
   })
 
   it('the same three batches pass when every read was capped', () => {
@@ -150,6 +152,7 @@ describe('A1 loop guard: the backstop is deliberately left in place', () => {
     guard.recordBatch([READ('y.ts')], { trimmedReadKeys: trimmed })
     guard.recordBatch([READ('y.ts')], { trimmedReadKeys: trimmed })
     const third = guard.recordBatch([READ('y.ts')], { trimmedReadKeys: trimmed })
-    expect(third.action).toBe('halt')
+    expect(third.action).toBe('steer')
+    expect(guard.recordBatch([READ('y.ts')], { trimmedReadKeys: trimmed }).action).toBe('halt')
   })
 })

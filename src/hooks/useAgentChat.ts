@@ -49,7 +49,7 @@ import { stripVisionFeedbackMessages, reportMultimodalRefusal } from '../lib/vis
 import { log } from '../lib/logger'
 import { gatePlanTool, planToolAllowed } from '../lib/plan-gate'
 import { buildHermesToolPrompt, buildHermesToolResult, buildHermesToolCall, parseHermesToolCalls, stripToolCallTags, hasToolCallTags } from '../api/hermes-tool-calling'
-import { parseLooseToolCalls, stripMatchedCalls, stripToolCallText, repairToolCall } from '../lib/loose-tool-parse'
+import { parseLooseToolCalls, stripMatchedCalls, stripToolCallText, repairToolCall, toolCallsFromReasoning } from '../lib/loose-tool-parse'
 import { isMediaTool, mediaCallSucceeded } from '../lib/media-result'
 import { mediaTurnCaps, droppedMediaNote } from '../lib/media-turn-caps'
 import { isLocalModelByName } from '../api/agents/model-locality'
@@ -85,7 +85,7 @@ import { getProviderIdFromModel } from '../api/providers'
 import { markToolsUnsupported } from '../api/tool-capability'
 import { extractMemoriesFromPair } from './useMemory'
 import { createSystemText, isCreateToolName, withCreateText } from '../lib/create/chat-switch'
-import { isSettingsToolName, isSelfControlToolName, SETTINGS_PROMPT_LINE, SELF_CONTROL_PROMPT_LINE } from '../lib/settings-tool-names'
+import { isSettingsToolName, isSelfControlToolName, withSelfControlTools, SETTINGS_PROMPT_LINE, SELF_CONTROL_PROMPT_LINE } from '../lib/settings-tool-names'
 import { WORKFLOW_PROMPT_LINE } from '../lib/workflow-tool-names'
 // Create in chat only where the order card exists: not on the phone (lib/create-order-surface.ts).
 import { createLiveHere } from '../lib/create-order-surface'
@@ -131,7 +131,7 @@ import { buildLoopRecheck, loopPassSaysDone } from '../lib/agent-commands'
 import { applyStoredCompaction } from '../lib/compact-summary'
 import { maybeAutoCompact } from '../lib/run-compact-command'
 import { autoCompactOn } from '../lib/compact-trigger'
-import { compactRunMidway, newRunCompactState } from '../lib/run-compact-midway'
+import { compactRunMidway, newRunCompactState, runCompactionDue, MEMORY_FLUSH_NOTE } from '../lib/run-compact-midway'
 import { generateEmbeddings } from '../api/rag'
 import { truncateToolResult } from '../lib/truncate-tool-result'
 import { fitRequestForPhone, measuredRequest, phoneFitApplies, phoneResultChars, questionOf, withPhoneToolCap, type PhoneMeasure } from '../lib/phone-context-fit'
@@ -173,6 +173,15 @@ import { asString, errorText, isRecord, prop } from '../types/json-guards'
 import type { ToolArgs } from '../api/mcp/types'
 import { CREDITS_EXHAUSTED_MESSAGE } from '../lib/credits-exhausted'
 import { buildChatSystemPrompt } from '../lib/system-prompt'
+import { agentProfileFor, resultCharsFor, COMPACT_MAX_TOOLS, COMPACT_PREFER } from '../lib/agent-profile'
+import { loadProjectFile, renderProjectFileSection } from '../lib/project-instructions'
+import { loadLurules, renderRulesSection } from '../lib/lurules'
+import { makeLurulesReader } from './codex/workspace-fs'
+import { secretAccessOf, secretNotice } from '../lib/secret-paths'
+import { takeRunNotices } from '../lib/run-notices'
+import { MEMORY_SKILL_PROMPT_LINE, renderSkillsSection, withSkillTools } from '../lib/skill-tools'
+import { useSkillStore } from '../stores/skillStore'
+import { TOOL_SEARCH, TOOL_SEARCH_DEF, briefFor, clearUnlockedTools, runToolSearch, withToolSearch } from '../lib/tool-search'
 import { withChatPersona, samplingPresetFor, speakerCustomParams, speakerPersonaFor } from '../lib/chat-persona'
 import { injectPersonaNote, noteTokens, personaNoteOf } from '../lib/persona-note'
 
@@ -1229,6 +1238,21 @@ export function useAgentChat() {
       userText: userContent,
       todos: convId ? useTodoStore.getState().getTodos(convId) : [],
     })
+    // C59 A2: a local model up to ~35B gets the compact profile (short tool
+    // list, one-line descriptions, tool_search), decided once per run.
+    const agentProfile = agentProfileFor({
+      smallModelMode: settings.smallModelMode,
+      compactAuto: settings.agentCompactAuto,
+      local: isLocalModelByName(activeModel),
+      modelName: activeModel,
+      parameterSize: (useModelStore.getState().models.find((m) => m.name === activeModel) as { details?: { parameter_size?: string } } | undefined)?.details?.parameter_size,
+    })
+    const compactRun = agentProfile === 'compact'
+    clearUnlockedTools(convId)
+    /** The tools offered in the step that is running, for tool_search. */
+    let stepOfferedNames = new Set<string>()
+    const briefDefs = <T extends { name: string; description: string }>(defs: T[]): T[] =>
+      compactRun ? defs.map((t) => ({ ...t, description: briefFor(t) })) : defs
     // Round 9, N15: a phone with a small window gets the short tool list
     // (lib/phone-context-fit.ts). 0 everywhere else, and then nothing changes.
     const phoneToolCtx: number = singleModelSlot()
@@ -1239,8 +1263,14 @@ export function useAgentChat() {
     const reaText = reaRoutingText(userContent, (useChatStore.getState().conversations
       .find((c) => c.id === convId)?.messages ?? [])
       .filter((m) => m.role === 'user').map((m) => m.content))
+    // C59 A7: the user's approved skills, and whether this run may propose one.
+    const activeSkills = useSkillStore.getState().activeSkills()
+    const fullToolRun = agentProfile === 'full' && !opts?.chatToolsMode
+    const skillToolOpts = { skills: activeSkills.length > 0, propose: fullToolRun, memory: fullToolRun }
+    // E6: once per run, before the first compaction of a big model's run.
+    let memoryFlushDone = false
     const hermesToolDefs = strategy === 'hermes_xml'
-      ? withCreateTools(gatePlanTool(await selectRelevantToolsAsync(
+      ? briefDefs(withSkillTools(withCreateTools(gatePlanTool(await selectRelevantToolsAsync(
           toolRoutingText(userContent, attachedFiles),
           toolRegistry.getAll().filter((t) => toolMatchesCurated(t.name)),
           permissions,
@@ -1251,7 +1281,7 @@ export function useAgentChat() {
             ),
             reaText,
           },
-        ), planAllowed), toolRegistry.getAll())
+        ), planAllowed), toolRegistry.getAll()), toolRegistry.getAll().filter((t) => toolMatchesCurated(t.name)), skillToolOpts))
       : []
     // Small-Model Mode (Knob 2): swap the ~3000-char agent prompt for a lean
     // ~750-char one on the native path. Der Hermes-Zweig behaelt seine eigene
@@ -1294,6 +1324,9 @@ export function useAgentChat() {
     // Computer control: the rules for the screen travel with the tool. The
     // section is only there when the user switched the tool on.
     agentSystemPrompt = withComputerUsePrompt(agentSystemPrompt, offeredTools.map((t) => t.name))
+    if (compactRun && strategy !== 'hermes_xml' && !opts?.chatToolsMode) {
+      agentSystemPrompt += '\n\nYour tool list is kept short on purpose. When you need a tool that is not in it, call tool_search with a few words first; the tools it finds are in your list from the next step on.'
+    }
     if (opts?.settingsTools) agentSystemPrompt += `\n\n${opts?.chatToolsMode ? SETTINGS_PROMPT_LINE : SELF_CONTROL_PROMPT_LINE}`
     // C60-S5: the workflow tools ride with the actions, outside plain chat.
     if (opts?.settingsTools && !opts?.chatToolsMode) agentSystemPrompt += `\n${WORKFLOW_PROMPT_LINE}`
@@ -1317,6 +1350,20 @@ export function useAgentChat() {
       if (ws?.kind === 'folder' && (ws.extraPaths?.length ?? 0) > 0) {
         agentSystemPrompt += renderWorkspaceSection(ws)
       }
+      // C59 A6: a folder workspace brings its project files, like the Code
+      // tab: AGENTS.md (or CLAUDE.md without one) and .lurules. Best effort.
+      if (ws?.kind === 'folder' && ws.path && convId) {
+        try {
+          const reader = makeLurulesReader(convId, ws.path)
+          agentSystemPrompt += renderProjectFileSection(await loadProjectFile(ws.path, reader))
+          agentSystemPrompt += renderRulesSection(await loadLurules(ws.path, reader))
+        } catch { /* no project files */ }
+      }
+    }
+    // C59 A6/A7: approved skills by name, and when to keep memory.
+    if (!opts?.chatToolsMode && !settings.smallModelMode) {
+      agentSystemPrompt += renderSkillsSection(activeSkills)
+      agentSystemPrompt += `\n\n${MEMORY_SKILL_PROMPT_LINE}`
     }
 
     // Caveman mode: append as response style modifier AFTER agent instructions
@@ -1858,7 +1905,19 @@ export function useAgentChat() {
           // are summarised by the run's own model instead of only dropped.
           // Copies only, so the chain saved at the end (werkzeugKette) keeps
           // every result complete. The trim below stays the safety net.
-          const verdichtet = await compactRunMidway({
+          // C59 E6: the first time this run would be compacted, a big model
+          // gets one step to keep durable facts with memory instead; the
+          // compaction comes on the next step. Small models skip it: the step
+          // costs them more than it brings.
+          if (fullToolRun && !memoryFlushDone && runCompactionDue({
+            messages: agentMessages, budgetTokens: sendBudget, modelWindow: agentCtx, activeModel, state: laufVerdichtung, decay: { enabled: decayOn },
+          })) {
+            memoryFlushDone = true
+            agentMessages.push({ role: 'user', content: MEMORY_FLUSH_NOTE } as ChatMessage)
+          }
+          const verdichtet = memoryFlushDone && agentMessages[agentMessages.length - 1]?.content === MEMORY_FLUSH_NOTE
+            ? { compacted: false as const, messages: agentMessages }
+            : await compactRunMidway({
             messages: agentMessages,
             budgetTokens: sendBudget,
             modelWindow: agentCtx,
@@ -1970,7 +2029,7 @@ export function useAgentChat() {
           // Als sie hier standen, gab es sie nur an DIESER Stelle — der
           // hermes_xml-Zweig oben nahm stattdessen den ganzen Katalog, und
           // niemandem fiel es auf, weil nichts brach.
-          const relevantDefs = withCreateTools(gatePlanTool(await selectRelevantToolsAsync(
+          const selectedDefs = withCreateTools(gatePlanTool(await selectRelevantToolsAsync(
             lastUserMsg,
             toolRegistry.getAll().filter((t) => toolMatchesCurated(t.name)),
             permissions,
@@ -1979,9 +2038,19 @@ export function useAgentChat() {
                 toolSelectionOpts(!!settings.smallModelMode, (texts) => generateEmbeddings(texts, undefined, { purpose: 'tool-selection' })),
                 phoneToolCtx, SMALL_MODEL_MAX_TOOLS,
               ),
+              ...(compactRun ? { maxTools: COMPACT_MAX_TOOLS, prefer: COMPACT_PREFER } : {}),
               reaText,
             },
           ), planAllowed), toolRegistry.getAll())
+          // C59 A2: on the compact profile the cut tools stay reachable
+          // through tool_search, and whatever a search unlocked rides along.
+          // C60: on a turn about LU itself the self-control tools come back
+          // past the cap, before C59's skills and tool_search are added.
+          const withSkills = withSkillTools(withSelfControlTools(selectedDefs, offeredTools, lastUserMsg), offeredTools, skillToolOpts)
+          const relevantDefs = compactRun
+            ? briefDefs(withToolSearch(withSkills, offeredTools, convId, TOOL_SEARCH_DEF))
+            : withSkills
+          stepOfferedNames = new Set(relevantDefs.map((t) => t.name))
           const tools: ToolDefinition[] = relevantDefs.map(t => ({
             type: 'function' as const,
             function: { name: t.name, description: t.description, parameters: t.inputSchema },
@@ -2423,6 +2492,16 @@ export function useAgentChat() {
             toolCalls = loose.calls.map((c) => ({ function: { name: c.name, arguments: c.arguments } }))
             turnContent = stripMatchedCalls(turnContent, loose.matched)
             log.info('agent.loose_tool_call_recovered', { count: toolCalls.length, names: toolCalls.map((t) => t.function.name) })
+          }
+        }
+
+        // C59 A3: the calls sat in the reasoning channel and the answer is
+        // empty (a server that took the model for a thinking model).
+        {
+          const fromReasoning = toolCallsFromReasoning(turnThinking, turnContent, toolCalls.length, [...knownToolNames, ...(compactRun ? [TOOL_SEARCH] : [])])
+          if (fromReasoning.length) {
+            toolCalls = fromReasoning.map((c) => ({ function: { name: c.name, arguments: c.arguments } }))
+            log.info('agent.reasoning_tool_call_recovered', { count: toolCalls.length, names: toolCalls.map((t) => t.function.name) })
           }
         }
 
@@ -2941,6 +3020,16 @@ export function useAgentChat() {
             timestamp: Date.now(),
           })
         }
+        // C59: a call on a secret path is refused by the tool itself
+        // (builtin-tools guardSecrets); the user sees it here, not only the model.
+        for (const tc of toolCalls) {
+          const hit = secretAccessOf(tc.function?.name ?? '', tc.function?.arguments as Record<string, unknown>)
+          if (hit) {
+            addBlock(runState, convId!, assistantMessage.id, {
+              id: uuid(), phase: 'reflection', content: secretNotice(tc.function.name, hit), timestamp: Date.now(),
+            })
+          }
+        }
 
         // Every call carries an id from here on. Only the NATIVE channel gives
         // us one; a call lifted out of prose (parseLooseToolCalls) or
@@ -3049,11 +3138,16 @@ export function useAgentChat() {
           // naming a terminal tool. A tool the run never offered does not
           // exist for this run, and the model gets told so and can retry with
           // one that does.
-          getTool: (name) => (toolMatchesCurated(name) ? toolRegistry.resolveExecutable(name) : undefined),
+          getTool: (name) => (compactRun && name === TOOL_SEARCH && stepOfferedNames.has(TOOL_SEARCH)
+            ? TOOL_SEARCH_DEF
+            : toolMatchesCurated(name) ? toolRegistry.resolveExecutable(name) : undefined),
           // Timeout backstop shared with Codex (audit B9): before this the
           // Agent loop had NO ceiling around a tool call, so one hung tool
           // wedged the whole run with no way out but a restart.
           execute: (name: string, args: ToolArgs, callRun?: AgentRunContext, signal?: AbortSignal) => {
+            if (compactRun && name === TOOL_SEARCH) {
+              return Promise.resolve(runToolSearch(convId, args, offeredTools, stepOfferedNames))
+            }
             const timed = (base: AbortSignal) => raceWithToolTimeout(
               name,
               toolCallCapMs(name, args, settings),
@@ -3145,6 +3239,10 @@ export function useAgentChat() {
           // firing. A stopped run has to stop doing things.
           abortSignal: abort.signal,
         })
+        // C59 A6/A7: what memory and skill_save did, for the user to see.
+        for (const note of takeRunNotices(convId)) {
+          addBlock(runState, convId!, assistantMessage.id, { id: uuid(), phase: 'reflection', content: note, timestamp: Date.now() })
+        }
 
         // Apply results back onto blocks + memory + LLM history.
         for (const entry of batch) {
@@ -3245,7 +3343,7 @@ export function useAgentChat() {
           // Die Notiz haengt NACH dem Kuerzen dran, sonst schneidet ein
           // langes Fehlerprotokoll sie gerade dann weg, wenn sie gebraucht wird.
           return (
-            truncateToolResult(text, phoneResultChars(agentCtx, settings.smallModelMode ? 1500 : 60000)) +
+            truncateToolResult(text, phoneResultChars(agentCtx, resultCharsFor(agentProfile))) +
             toolFailureNote(r.status)
           )
         }
@@ -3997,7 +4095,7 @@ Creative tools, image_generate, video_generate:
 - Emit these as REAL tool calls through the tool channel — never write the call as plain text like image_generate(prompt="…") in your answer.
 
 Other rules:
-- You MUST use tools — NEVER answer from memory or guess file contents.
+- Use tools for anything about files, this computer, the web or current facts, and never guess file contents. A plain question you can answer from knowledge (an explanation, a definition, advice) gets a direct short answer without any tool call.
 - To CHANGE part of an existing file use file_edit (replace a UNIQUE old_string with new_string), never file_write: rewriting a large file to change three lines truncates it and costs a fortune in tokens. file_write is for creating a new file or fully replacing one.
 - PATHS: use paths relative to your working directory (e.g. \`package.json\`, \`src/app.ts\`, \`.\` for the current folder). Never start a path with \`/\` or a drive letter (\`C:\\\`), that escapes your workspace and fails. To list the current folder, use file_list with path \`.\`.
 - For filesystem READ tasks: file_list first if needed, then file_read.

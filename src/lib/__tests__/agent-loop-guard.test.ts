@@ -49,13 +49,24 @@ describe('AgentLoopGuard — identical reads (Morgan repro)', () => {
 })
 
 describe('AgentLoopGuard — batch signatures', () => {
-  it('halts on 3 identical batches back-to-back (old-guard parity, any tool)', () => {
+  it('steers on 3 identical batches back-to-back and halts on the 4th (C59 A5, any tool)', () => {
     const g = new AgentLoopGuard()
     expect(g.recordBatch([write('f.py')]).action).toBe('ok')
     expect(g.recordBatch([write('f.py')]).action).toBe('ok')
+    const s = g.recordBatch([write('f.py')])
+    expect(s.action).toBe('steer')
+    expect(s.action === 'steer' && s.message).toMatch(/exactly the same tool calls \(file_write\) 3 times in a row/)
     const v = g.recordBatch([write('f.py')])
     expect(v.action).toBe('halt')
-    expect(v.action === 'halt' && v.reason).toMatch(/3× in a row/)
+    expect(v.action === 'halt' && v.reason).toMatch(/4× in a row/)
+  })
+
+  it('a different batch after the warning starts the count again', () => {
+    const g = new AgentLoopGuard()
+    for (let i = 0; i < 2; i++) g.recordBatch([write('f.py')])
+    expect(g.recordBatch([write('f.py')]).action).toBe('steer')
+    expect(g.recordBatch([shell('npm test')]).action).toBe('ok')
+    expect(g.recordBatch([write('f.py')]).action).toBe('ok')
   })
 
   it('halts on A,B,A,B,A read alternation the consecutive rule cannot see', () => {
@@ -64,6 +75,8 @@ describe('AgentLoopGuard — batch signatures', () => {
     expect(g.recordBatch([read('b.py')]).action).toBe('ok')
     expect(g.recordBatch([read('a.py')]).action).toBe('ok')
     expect(g.recordBatch([read('b.py')]).action).toBe('ok')
+    expect(g.recordBatch([read('a.py')]).action).toBe('steer')
+    g.recordBatch([read('b.py')])
     const v = g.recordBatch([read('a.py')])
     expect(v.action).toBe('halt')
     expect(v.action === 'halt' && v.reason).toMatch(/no workspace change/)
@@ -79,21 +92,22 @@ describe('AgentLoopGuard — batch signatures', () => {
 })
 
 describe('AgentLoopGuard — narration', () => {
-  it('halts when the model repeats the same line 3× in a row', () => {
+  it('steers when the model repeats the same line 3× in a row and halts on the 4th', () => {
     const g = new AgentLoopGuard()
     const line = 'Let me check the rotation engine to understand how spell priorities are determined:'
     expect(g.recordNarration(line).action).toBe('ok')
     expect(g.recordNarration(line).action).toBe('ok')
+    expect(g.recordNarration(line).action).toBe('steer')
     const v = g.recordNarration(line)
     expect(v.action).toBe('halt')
-    expect(v.action === 'halt' && v.reason).toMatch(/repeated the same message 3×/)
+    expect(v.action === 'halt' && v.reason).toMatch(/repeated the same message 4×/)
   })
 
   it('normalizes whitespace and case before comparing', () => {
     const g = new AgentLoopGuard()
     expect(g.recordNarration('Checking the   config file now').action).toBe('ok')
     expect(g.recordNarration('checking the config FILE now').action).toBe('ok')
-    expect(g.recordNarration('Checking the config file now').action).toBe('halt')
+    expect(g.recordNarration('Checking the config file now').action).toBe('steer')
   })
 
   it('ignores trivial short lines and resets on new content', () => {

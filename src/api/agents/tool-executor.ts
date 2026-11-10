@@ -172,6 +172,7 @@ export interface ExecutorOptions {
  * Run a batch of tool calls. Returns ordered results matching the input order.
  *
  * Scheduling:
+ *  - A batch with a shell call (key 'exec') runs serially, in input order.
  *  - Calls with no sideEffectKey run in parallel.
  *  - Calls sharing a key run serially within their group.
  *  - Groups with different keys run in parallel with each other and with the
@@ -217,6 +218,15 @@ export async function executeParallel(
     const res = await runSingle(tagged[index].req, tagged[index].key, runtime, opts)
     results[index] = res
     opts.onComplete?.(res)
+  }
+
+  // A shell command can read or change any file, so a batch that holds one
+  // runs in the order the model wrote it. Measured (C59 bench, 9B): in one
+  // turn `cp config.json config.json.bak` and an edit of config.json ran on
+  // two queues, the edit won, and the backup held the new port.
+  if (tagged.some((t) => t.key === 'exec')) {
+    for (let i = 0; i < tagged.length; i++) await runOne(i)
+    return results.map((r, i) => r ?? abortedResult(tagged[i]))
   }
 
   const solo = soloIndices.map(runOne)

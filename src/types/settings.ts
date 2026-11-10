@@ -189,6 +189,10 @@ export interface Settings {
   /** The agent loop guard (lib/agent-loop-guard.ts): steers and halts a run
    *  that repeats itself. On unless switched off (C44, Discord 05.11.2026). */
   agentLoopGuard?: boolean
+  /** Local models up to ~35B get a short tool list with one-line
+   *  descriptions plus tool_search (lib/agent-profile.ts, C59). On unless
+   *  switched off; Small-Model Mode still wins. */
+  agentCompactAuto?: boolean
   /**
    * Dieselben zwei Schranken, aber fuer einen delegierten Sub-Agenten.
    *

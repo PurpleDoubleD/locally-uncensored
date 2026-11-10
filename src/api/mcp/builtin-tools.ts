@@ -26,7 +26,7 @@ import {
   buildCheckTasksExecutor,
   buildMessageAgentExecutor,
 } from '../agents/agent-task-tools'
-import { applyEdits, editsFromArgs, type EditSpec } from '../../lib/surgical-edit'
+import { applyEdits, closestLines, editsFromArgs, type EditSpec } from '../../lib/surgical-edit'
 import { sliceFileReadResult } from '../../lib/file-read-window'
 import { writeTodos, summarizeTodos } from '../../stores/todoStore'
 import { isMlxImageHost, generateMlxImageDataUrl, listMlxImageModels, mlxModelType, type MlxImageModel } from '../mlx-image'
@@ -57,6 +57,12 @@ import { macEditSide } from '../../lib/image-engines'
 import { aspectFrame, aspectRatioReject, parseAspectRatio } from '../../lib/aspect-frame'
 import { CHARACTER_ARG_SCHEMA, characterImageArgs, characterVideoArgs, type CharacterChatDeps } from '../../lib/character-chat'
 import { blockMessageFor, checkPromptSafety } from '../../lib/render/safety'
+import { dropSecretLines, secretAccessOf, secretRefusal } from '../../lib/secret-paths'
+import { MEMORY_TOOL_DEF, runMemoryTool } from '../../lib/memory-tool'
+import { SKILL_SAVE_DEF, SKILL_VIEW_DEF, runSkillSave, runSkillView, type SkillPort } from '../../lib/skill-tools'
+import { SESSION_SEARCH_DEF, searchSessions } from '../../lib/session-search'
+import { pushRunNotice } from '../../lib/run-notices'
+import { useSkillStore } from '../../stores/skillStore'
 
 /**
  * Helper: current chat id (+ folder workspace) as a fragment to spread into
@@ -302,7 +308,7 @@ const BUILTIN_TOOLS: MCPToolDefinition[] = [
   {
     name: 'file_read',
     description:
-      'Read a file. PREFER absolute paths; relative paths resolve against the agent workspace. '
+      'Read a file. Use a path relative to the workspace; an absolute path works only inside it. '
       + 'Omitting offset/limit returns the whole file. For LARGE files pass offset (1-based start line) and limit '
       + '(number of lines): the response names the window, the total line count and the offset of the next page. '
       + 'A very long whole-file read gets its middle truncated, so page large files. '
@@ -310,7 +316,7 @@ const BUILTIN_TOOLS: MCPToolDefinition[] = [
     inputSchema: {
       type: 'object',
       properties: {
-        path: { type: 'string', description: 'Path to the file (absolute preferred)' },
+        path: { type: 'string', description: 'Path relative to the workspace' },
         offset: { type: 'number', description: '1-based line to start reading from (optional)' },
         limit: { type: 'number', description: 'Maximum number of lines to return (optional)' },
       },
@@ -324,11 +330,11 @@ const BUILTIN_TOOLS: MCPToolDefinition[] = [
     description:
       'Write a WHOLE file: use it to CREATE a new file or fully replace one, and PREFER file_edit to change part of an existing one. '
       + 'Creates parent directories if missing. OVERWRITES existing content, there is no append mode. '
-      + 'PREFER absolute paths.',
+      + 'Use a path relative to the workspace.',
     inputSchema: {
       type: 'object',
       properties: {
-        path: { type: 'string', description: 'Path to the file (absolute preferred)' },
+        path: { type: 'string', description: 'Path relative to the workspace' },
         content: { type: 'string', description: 'The complete new content of the file' },
       },
       required: ['path', 'content'],
@@ -422,7 +428,7 @@ const BUILTIN_TOOLS: MCPToolDefinition[] = [
       type: 'object',
       properties: {
         command: { type: 'string', description: 'The full command to execute. Omit only for task actions.' },
-        cwd: { type: 'string', description: 'Working directory (optional, absolute preferred)' },
+        cwd: { type: 'string', description: 'Working directory (optional, relative to the workspace)' },
         timeout: { type: 'number', description: 'Timeout in milliseconds (default: 120000)' },
         shell: { type: 'string', description: 'Override shell: "powershell" | "cmd" | "bash" (default: auto)' },
         stdin: { type: 'string', description: 'Text piped to the command\'s stdin, e.g. a Python script for `python3 -`.' },
@@ -570,6 +576,11 @@ const BUILTIN_TOOLS: MCPToolDefinition[] = [
   MESSAGE_AGENT_TOOL_DEF,
 
   // Local clock — so the agent never googles "what day is it".
+  // C59 A6–A8: memory, skills, earlier chats (defined next to their runners).
+  MEMORY_TOOL_DEF,
+  SKILL_VIEW_DEF,
+  SKILL_SAVE_DEF,
+  SESSION_SEARCH_DEF,
 ]
 
 // ── Executors ────────────────────────────────────────────────────
@@ -912,8 +923,15 @@ async function executeFileEdit(args: ToolArgs, run?: AgentRunContext): Promise<s
         return 'Error: file_edit requires a non-empty old_string. To create a new file use file_write.'
       case 'noop':
         return 'Error: old_string and new_string are identical, nothing to change.'
-      case 'not_found':
-        return `Error: old_string was not found in ${path}${which}. Read the file and copy the exact text you want to replace.`
+      case 'not_found': {
+        // C59 A5: point at the closest lines instead of sending the model
+        // back to read the whole file again.
+        const failed = res.failedIndex !== undefined ? edits[res.failedIndex] : edits[0]
+        const near = failed?.old_string ? closestLines(content, failed.old_string) : null
+        return near
+          ? `Error: old_string was not found in ${path}${which}. The closest text is at line ${near.line}:\n${near.text}\nCopy old_string exactly from there (or file_read with offset ${near.line}) and retry.`
+          : `Error: old_string was not found in ${path}${which}. Read the file and copy the exact text you want to replace.`
+      }
       case 'not_unique':
         return `Error: old_string matches ${res.matches} places in ${path}${which}. Add surrounding lines so it identifies ONE location, or set replace_all, then retry.`
       default:
@@ -1017,7 +1035,7 @@ async function executeShellExecute(
   const command = argString(args, 'command').trim()
   if (!command) return 'shell_execute: `command` is required (or pass task: "status" | "list" | "kill").'
 
-  const { rejectShellCommand, commandTimeoutMs, commandKind, isReadOnlyCommand, READ_ONLY_SHELL_HINT } = await import(
+  const { rejectShellCommand, hardBlockedShellCommand, commandTimeoutMs, commandKind, isReadOnlyCommand, READ_ONLY_SHELL_HINT } = await import(
     '../../lib/shell-command-classify'
   )
   // Read-only turn (/review …): the classifier is the gate now that the typed
@@ -1032,7 +1050,7 @@ async function executeShellExecute(
   // Betriebsart. Stand sie darunter, streifte ein Modell sie durch simples
   // Anhaengen von `background: true` ab — eine harte Sperre, die man mit einem
   // Flag abwaehlt, ist keine.
-  const refusal = rejectShellCommand(command)
+  const refusal = rejectShellCommand(command) ?? hardBlockedShellCommand(command)
   if (refusal) return refusal
 
   // `shell` muss mit: das Backend leitet die Argumentform seit ba9557df aus dem
@@ -1222,8 +1240,8 @@ async function executeShellExecuteBg(
   // Hauptpfad, das ist ein Regex und der Preis fuer eine Sperre ohne Hintertuer.
   // Whitespace ist kein Schlupfloch: commandKind() trimmt selbst, ein
   // ungetrimmtes `command` aus dem Redirect wird also genauso erkannt.
-  const { rejectShellCommand } = await import('../../lib/shell-command-classify')
-  const refusal = rejectShellCommand(command)
+  const { rejectShellCommand, hardBlockedShellCommand } = await import('../../lib/shell-command-classify')
+  const refusal = rejectShellCommand(command) ?? hardBlockedShellCommand(command)
   if (refusal) return refusal
   // Thread the chat context through, or the task starts in LU's own directory
   // instead of the workspace the foreground shell tool uses.
@@ -2441,6 +2459,57 @@ function htmlToText(html: string): string {
 
 // ── Registration ────────────────────────────────────────────────
 
+// ── C59 A6–A8 runners ───────────────────────────────────────────
+
+function convOf(run?: AgentRunContext): string | undefined {
+  return getActiveConversationId(run) ?? getActiveChatId(run) ?? undefined
+}
+
+async function executeMemory(args: ToolArgs, run?: AgentRunContext): Promise<string> {
+  // Dynamic, like the other store reads in this file: a static import would
+  // tie the tool catalog to the stores at module load.
+  const { useMemoryStore } = await import('../../stores/memoryStore')
+  const { useChatStore } = await import('../../stores/chatStore')
+  const store = useMemoryStore.getState()
+  const convId = convOf(run)
+  const scope = convId ? useChatStore.getState().conversations.find((c) => c.id === convId)?.memoryScope : undefined
+  const out = runMemoryTool(args as Record<string, unknown>, {
+    entries: () => useMemoryStore.getState().entries,
+    add: (m) => store.addMemory(m),
+    update: (id, u) => store.updateMemory(id, u),
+    remove: (id) => !!store.removeMemory(id),
+    search: (q, limit) => store.searchMemories(q, { limit }),
+  }, { convId, scope })
+  if (out.notice) pushRunNotice(convId, out.notice)
+  return out.text
+}
+
+function skillPort(): SkillPort {
+  const st = useSkillStore.getState()
+  return {
+    get: (name) => useSkillStore.getState().getSkill(name),
+    propose: (sk) => st.addSkill({ ...sk, status: 'proposed', source: 'agent' }),
+    names: () => useSkillStore.getState().activeSkills().map((x) => x.name),
+  }
+}
+
+async function executeSkillView(args: ToolArgs): Promise<string> {
+  return runSkillView(args as Record<string, unknown>, skillPort())
+}
+
+async function executeSkillSave(args: ToolArgs, run?: AgentRunContext): Promise<string> {
+  const convId = convOf(run)
+  const out = runSkillSave(args as Record<string, unknown>, skillPort(), convId)
+  if (out.notice) pushRunNotice(convId, out.notice)
+  return out.text
+}
+
+async function executeSessionSearch(args: ToolArgs, run?: AgentRunContext): Promise<string> {
+  const { useChatStore } = await import('../../stores/chatStore')
+  const a = args as Record<string, unknown>
+  return searchSessions(String(a.query ?? ''), useChatStore.getState().conversations, { excludeId: convOf(run), limit: Number(a.limit) || 5 })
+}
+
 const EXECUTOR_MAP: Record<
   string,
   (args: ToolArgs, run?: AgentRunContext, signal?: AbortSignal) => Promise<string>
@@ -2460,6 +2529,10 @@ const EXECUTOR_MAP: Record<
   image_generate: executeImageGenerate,
   video_generate: executeVideoGenerate,
   run_workflow: executeRunWorkflow,
+  memory: executeMemory,
+  skill_view: executeSkillView,
+  skill_save: executeSkillSave,
+  session_search: executeSessionSearch,
   delegate_task: buildDelegateExecutor(),
   check_tasks: buildCheckTasksExecutor(),
   message_agent: buildMessageAgentExecutor(),
@@ -2474,7 +2547,7 @@ export function registerBuiltinTools(registry: ToolRegistry) {
     if (!toolExistsOnThisDevice(tool.name)) continue
     const executor = EXECUTOR_MAP[tool.name]
     if (executor) {
-      registry.registerBuiltin(toolDefinitionForThisDevice(tool), executor)
+      registry.registerBuiltin(toolDefinitionForThisDevice(tool), guardSecrets(tool.name, executor))
     }
   }
   // P-L (3.1.0): the LU browser, reading only, where it is built (macOS and
@@ -2570,14 +2643,33 @@ export const RETIRED_EXECUTOR_NAMES: ReadonlySet<string> = new Set(Object.keys(R
  * never ours. The appended note is one line so the model learns the new way
  * without the step being wasted.
  */
+type Executor = (args: ToolArgs, run?: AgentRunContext, signal?: AbortSignal) => Promise<string>
+
+/**
+ * Every built-in tool goes through this: a call that names a secret path
+ * (lib/secret-paths.ts) is refused before anything runs, in every mode,
+ * Bypass included. It sits at registration, so both tabs, sub agents,
+ * workflows and the phone's dispatch meet the same floor. file_search over a
+ * folder also loses the lines that came from secret files.
+ */
+export function guardSecrets(name: string, executor: Executor): Executor {
+  return async (args, run, signal) => {
+    const hit = secretAccessOf(name, args as Record<string, unknown>)
+    if (hit) return secretRefusal(hit)
+    const out = await executor(args, run, signal)
+    return name === 'file_search' ? dropSecretLines(out) : out
+  }
+}
+
 export async function runRetiredTool(
   name: string,
   args: ToolArgs,
   run?: AgentRunContext,
   signal?: AbortSignal,
 ): Promise<string | null> {
-  const exec = RETIRED_EXECUTORS[name]
-  if (!exec) return null
+  const raw = RETIRED_EXECUTORS[name]
+  if (!raw) return null
+  const exec = guardSecrets(name, raw)
   // On a phone the old names must not be a back door to the shell: all but
   // the clock answer as a name that was never ours.
   if (!retiredToolRunsOnThisDevice(name)) return null

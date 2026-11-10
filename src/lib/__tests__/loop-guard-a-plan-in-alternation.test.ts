@@ -59,9 +59,9 @@ describe('a plan that comes back in alternation', () => {
     expect(lines.map((t) => g.recordNarration(t).action).every((a) => a === 'ok')).toBe(true)
   })
 
-  it('three in a row still halts at once, as before', () => {
+  it('three in a row are warned, the fourth halts (C59 A5)', () => {
     const g = new AgentLoopGuard()
-    expect([A, A, A].map((t) => g.recordNarration(t).action)).toEqual(['ok', 'ok', 'halt'])
+    expect([A, A, A, A].map((t) => g.recordNarration(t).action)).toEqual(['ok', 'ok', 'steer', 'halt'])
   })
 
   it('both loops pass a narration steer on instead of dropping it', () => {

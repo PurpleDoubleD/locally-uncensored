@@ -50,6 +50,7 @@ import { fitFilesForSend, requestTextOf } from './chat-file-room'
 import type { FileAttachment } from '../types/chat'
 import { useAgentModeStore } from '../stores/agentModeStore'
 import { loadLurules, renderRulesSection } from '../lib/lurules'
+import { loadProjectFile, renderProjectFileSection } from '../lib/project-instructions'
 import {
   parseAgentCommand, parseLoopSpec, buildLoopRecheck,
   loopPassSaysDone,
@@ -85,7 +86,14 @@ import type { ToolArgs } from '../api/mcp/types'
 import { CREDITS_EXHAUSTED_MESSAGE } from '../lib/credits-exhausted'
 import { streamOllamaChatWithTools } from '../lib/ollama-stream-tools'
 import { repairToolCall } from '../lib/loose-tool-parse'
-import { selectRelevantTools, selectRelevantToolsAsync, SMALL_MODEL_MAX_TOOLS, gateCreateTools, wantsMediaTools, isGatedTool } from '../lib/tool-selection'
+import { selectRelevantTools, selectRelevantToolsAsync, SMALL_MODEL_MAX_TOOLS, gateCreateTools, wantsMediaTools, isGatedTool, applyMaxTools } from '../lib/tool-selection'
+import { agentProfileFor, resultCharsFor, COMPACT_MAX_TOOLS, COMPACT_PREFER } from '../lib/agent-profile'
+import { secretAccessOf, secretNotice } from '../lib/secret-paths'
+import { takeRunNotices } from '../lib/run-notices'
+import { MEMORY_SKILL_PROMPT_LINE, renderSkillsSection, withSkillTools } from '../lib/skill-tools'
+import { useSkillStore } from '../stores/skillStore'
+import type { MCPToolDefinition } from '../api/mcp/types'
+import { TOOL_SEARCH, TOOL_SEARCH_DEF, briefFor, clearUnlockedTools, runToolSearch, withToolSearch } from '../lib/tool-search'
 import { reaRoutingText } from '../lib/plugins/rea-tools'
 import { generateEmbeddings } from '../api/rag'
 import { truncateToolResult } from '../lib/truncate-tool-result'
@@ -117,7 +125,7 @@ import { createLivePaint } from './codex/live-paint'
 import { seedEstimatedUsage, reportTurnUsage } from './codex/turn-usage'
 import { lastRequestUsageNotice, requestUsageTracker } from '../lib/request-usage'
 import { shouldDowngradeThinking, engineDeniedThinking } from './codex/thinking-downgrade'
-import { recoverToolCallsFromContent, recoverKnownToolCallsFromContent } from './codex/tool-call-recovery'
+import { recoverToolCallsFromContent, recoverKnownToolCallsFromContent, recoverToolCallsFromReasoning } from './codex/tool-call-recovery'
 import { codexStallVerdict } from './codex/stall-verdict'
 import { createStagedWriter } from './codex/staged-writes'
 import { codexCutoffNote, dropCutOffCall } from './codex/turn-cutoff'
@@ -125,7 +133,9 @@ import { codexToolDiff, codexEventKind } from './codex/tool-result-view'
 import { capHiddenToolHistory } from './codex/hidden-history'
 import { withHouseConduct } from '../lib/system-prompt'
 import { yieldSilentRunsTo } from '../lib/silent-runs-yield'
-import { gatePlanTool, planToolAllowed } from '../lib/plan-gate'
+import { gatePlanTool, codePlanAllowed, planNudgeDue, PLAN_NUDGE } from '../lib/plan-gate'
+import { newVerifyState, recordVerifyRound, verifyNudgeDue, VERIFY_NUDGE } from '../lib/verify-nudge'
+import { withSelfControlTools } from '../lib/settings-tool-names'
 
 /** A name the model wrote in its text is a call only when it is one of the
  *  agent's tools, after the usual name repair (GH #147). */
@@ -133,6 +143,11 @@ function isCodexTool(name: string, args: Record<string, unknown>): boolean {
   const tools = toolRegistry.getAll()
   const repaired = repairToolCall(name, args, tools).name
   return tools.some((t) => t.name === repaired)
+}
+
+/** Every name a call lifted out of the reasoning channel may carry (C59 A3). */
+function codexKnownNames(): string[] {
+  return [...toolRegistry.getAll().map((t) => t.name), TOOL_SEARCH]
 }
 
 // Why a run ended, or was pushed on, belongs in the support log. This used to
@@ -175,7 +190,7 @@ AUTONOMY CONTRACT (read carefully):
 - Narrative "I'm about to do X" text with no tool call after it = premature stop. Don't do it.
 
 Workflow per task:
-1. Understand the task (optional brief sentence)
+1. Understand the task. If it takes more than three steps, send todo_write with the whole plan together with your first exploring calls, and keep it current together with later calls.
 2. Explore the codebase, file_list / file_read / file_search
 3. Implement ALL required changes, file_edit to change existing files, file_write for new ones
 4. Verify, shell_execute to run tests, lint, or build
@@ -220,6 +235,7 @@ const CODEX_SYSTEM_PROMPT_LEAN = `You are a coding agent in LU. Use tools to do 
 Rules:
 - Put independent tool calls into one response (several reads or edits at once). Every step costs the user money.
 - Read a file before you edit it.
+- A task of more than three steps: send todo_write with the plan together with your first calls, update it together with later calls.
 - To change an existing file use file_edit (replace a unique old_string with new_string), not file_write. Use file_write only to create a new file.
 - PATHS: use relative paths (e.g. \`package.json\`, \`.\`). Never start with \`/\` or a drive letter, it escapes the workspace and fails.
 - Emit the tool call as your FIRST output, no "Okay, let me…" preamble. Valid JSON.
@@ -748,6 +764,21 @@ export function useCodex() {
     if (strategy === 'native' && (providerId === 'openai' || isCompatProviderId(providerId)) && provider.serverToolSupport) {
       if ((await provider.serverToolSupport(modelToUse)) === false) strategy = 'hermes_xml'
     }
+    // C59 A2: a local model up to ~35B gets the compact profile (short tool
+    // list, one-line descriptions, tool_search). Native transport only: the
+    // Hermes prompt is built once and cannot grow mid-run.
+    const codexProfile = agentProfileFor({
+      smallModelMode: settings.smallModelMode,
+      compactAuto: settings.agentCompactAuto,
+      local: isLocalModelByName(activeModel),
+      modelName: activeModel,
+      parameterSize: (useModelStore.getState().models.find((m) => m.name === activeModel) as { details?: { parameter_size?: string } } | undefined)?.details?.parameter_size,
+    })
+    const compactRun = codexProfile === 'compact' && strategy === 'native'
+    clearUnlockedTools(convId)
+    /** The tools offered in the step that is running, and the run's catalog, for tool_search. */
+    let stepOfferedNames = new Set<string>()
+    let searchCatalog: MCPToolDefinition[] = []
 
     // Pin the text model driving this Codex run — parity with useAgentChat.
     // The VRAM hand-off orchestrator (image/video generation in Code mode,
@@ -842,7 +873,10 @@ export function useCodex() {
     // Die Verhaltenszeile haengt an JEDER Oberflaeche (lib/system-prompt.ts).
     // Der Coding-Agent bringt seine eigene Rolle mit, deshalb nur die Zeile
     // und nicht der ganze Grundtext.
-    let systemPrompt = withHouseConduct(`${baseCodexPrompt}${assetLine}\n\n${platformPromptLine()}\n${workDirLine}`)
+    const toolSearchLine = compactRun && !reviewMode
+      ? '\n\nYour tool list is kept short on purpose. When you need a tool that is not in it, call tool_search with a few words first; the tools it finds are in your list from the next step on.'
+      : ''
+    let systemPrompt = withHouseConduct(`${baseCodexPrompt}${assetLine}${toolSearchLine}\n\n${platformPromptLine()}\n${workDirLine}`)
     // Standing goal (/goal) — ahead of the rules and the repo map so it frames
     // everything that follows instead of reading as an afterthought.
     systemPrompt += renderGoalSection(useAgentGoalStore.getState().getGoal(convId))
@@ -876,7 +910,10 @@ export function useCodex() {
     // by the reader so the codex loop still starts.
     if (workDir && workDir !== '.') {
       try {
-        const rules = await loadLurules(workDir, makeLurulesReader(convId, workDir))
+        const reader = makeLurulesReader(convId, workDir)
+        // C59 A6: AGENTS.md (or CLAUDE.md without one) next to .lurules.
+        systemPrompt += renderProjectFileSection(await loadProjectFile(workDir, reader))
+        const rules = await loadLurules(workDir, reader)
         if (rules) {
           systemPrompt += renderRulesSection(rules)
         }
@@ -884,6 +921,13 @@ export function useCodex() {
         // Belt-and-braces: reader already swallows errors, but if the
         // join logic ever throws we don't want it to wedge the loop.
       }
+    }
+
+    // C59 A6/A7: approved skills by name (read with skill_view), and when to
+    // keep memory. Not in Small-Model Mode: its lean prompt stays lean.
+    if (!settings.smallModelMode) {
+      systemPrompt += renderSkillsSection(useSkillStore.getState().activeSkills())
+      systemPrompt += `\n\n${MEMORY_SKILL_PROMPT_LINE}`
     }
 
     // For non-Ollama providers, inject thinking via system prompt — only for
@@ -1272,6 +1316,9 @@ export function useCodex() {
       // from the nudges above, because a nudge fires on an EMPTY turn while
       // this fires on a turn that claims to be done.
       let planReconcilesRemaining = PLAN_RECONCILE_BUDGET
+      let codeToolRounds = 0
+      let planNudged = false
+      const verifyState = newVerifyState()
       // Raised from 20 → 50 (v2.3.7): large refactors across 10+ files
       // legitimately need >20 tool calls. Budget still caps via
       // agentMaxToolCalls/agentMaxIterations.
@@ -1577,17 +1624,34 @@ export function useCodex() {
               })
             : !isLocalModelByName(activeModel)
               ? codexTools
-              : selectRelevantTools(lastUserMsg, codexTools, permissions, undefined, reaText)
+              : compactRun
+                ? applyMaxTools(selectRelevantTools(lastUserMsg, codexTools, permissions, undefined, reaText), COMPACT_MAX_TOOLS, [...COMPACT_PREFER])
+                : selectRelevantTools(lastUserMsg, codexTools, permissions, undefined, reaText)
           // Planning is opt-in (lib/plan-gate.ts): without Plan mode, a plan
           // request or an open plan, todo_write is not offered at all.
-          const relevantDefs = gatePlanTool(
+          const gatedDefs = gatePlanTool(
             gateCreateTools(routedDefs, lastUserMsg, createGateOpened),
-            planToolAllowed({
+            codePlanAllowed({
               mode: codexMode,
               userText: lastUserMsg,
               todos: convId ? useTodoStore.getState().getTodos(convId) : [],
+              reviewMode,
             }),
           )
+          // C59 A2: on the compact profile the cut tools stay reachable
+          // through tool_search, and whatever a search unlocked rides along.
+          searchCatalog = codexTools
+          // C60: on a turn about LU itself the self-control tools come back
+          // past the cap, before C59's skills and tool_search are added.
+          const skilled = withSkillTools(withSelfControlTools(gatedDefs, codexTools, lastUserMsg), codexTools, {
+            skills: useSkillStore.getState().activeSkills().length > 0,
+            propose: codexProfile === 'full',
+          })
+          const relevantDefs = compactRun
+            ? withToolSearch(skilled, codexTools, convId, TOOL_SEARCH_DEF)
+              .map((t) => ({ ...t, description: briefFor(t) }))
+            : skilled
+          stepOfferedNames = new Set(relevantDefs.map((t) => t.name))
           const tools: ToolDefinition[] = relevantDefs.map(t => ({
             type: 'function' as const,
             function: { name: t.name, description: t.description, parameters: t.inputSchema },
@@ -1714,6 +1778,7 @@ export function useCodex() {
               const recovered = recoverToolCallsFromContent(toolCalls, turnContent)
               toolCalls = recovered.toolCalls
               turnContent = recovered.content
+              toolCalls = recoverToolCallsFromReasoning(toolCalls, turnContent, turn.thinking, codexKnownNames())
             }
           } else {
             // ── Streaming path for OpenAI-compat / Anthropic / LU Cloud ──
@@ -1760,6 +1825,7 @@ export function useCodex() {
               const recovered = recoverKnownToolCallsFromContent(toolCalls, turnContent, isCodexTool)
               toolCalls = recovered.toolCalls
               turnContent = recovered.content
+              toolCalls = recoverToolCallsFromReasoning(toolCalls, turnContent, turn.thinking, codexKnownNames())
             }
             if (keepThinking && turn.thinking) {
               thinkingContent += (thinkingContent ? '\n\n' : '') + turn.thinking
@@ -2141,6 +2207,12 @@ export function useCodex() {
               continue
             }
           }
+          // C59 A5: it changed files and checked nothing; once, before it ends.
+          if (verifyNudgeDue(verifyState, { readOnly: readOnlyTurn, reviewMode })) {
+            diagLog('verify-nudge', { iter: i })
+            messages.push({ role: 'user', content: VERIFY_NUDGE })
+            continue
+          }
           // Fehler D, Symptom 2: bis hierher war ein Zug, den das Modell nie
           // zu Ende schreiben konnte, von einem fertigen Modell nicht zu
           // unterscheiden: derselbe leere Werkzeugsatz, derselbe wortlose
@@ -2231,6 +2303,12 @@ export function useCodex() {
             content: `↻ Loop guard steered the model: ${batchVerdict.message}`,
             timestamp: Date.now(),
           })
+        }
+        // C59: a call on a secret path is refused by the tool itself
+        // (builtin-tools guardSecrets); the user sees it here, not only the model.
+        for (const tc of toolCalls) {
+          const hit = secretAccessOf(tc.function?.name ?? '', tc.function?.arguments as Record<string, unknown>)
+          if (hit) addBlock({ id: uuid(), phase: 'reflection', content: secretNotice(tc.function.name, hit), timestamp: Date.now() })
         }
 
         type BatchEntry = { tc: typeof toolCalls[number]; ac: AgentToolCall; blockId: string; injectedArgs: ToolArgs }
@@ -2377,8 +2455,13 @@ export function useCodex() {
         }
 
         const results = await executeParallel(requests, {
-          getTool: (name) => toolRegistry.resolveExecutable(name),
+          getTool: (name) => (compactRun && name === TOOL_SEARCH && stepOfferedNames.has(TOOL_SEARCH)
+            ? TOOL_SEARCH_DEF
+            : toolRegistry.resolveExecutable(name)),
           execute: (name: string, args: ToolArgs, _run, signal) => {
+            if (compactRun && name === TOOL_SEARCH) {
+              return Promise.resolve(runToolSearch(convId, args, searchCatalog, stepOfferedNames))
+            }
             // A create tool the gate had closed still reaches the registry, so
             // the run self-heals: this call runs, and the next step offers the
             // schemas instead of pretending the capability is gone.
@@ -2476,6 +2559,10 @@ export function useCodex() {
           // firing. A stopped run has to stop doing things.
           abortSignal: abort.signal,
         })
+        // C59 A6/A7: what memory and skill_save did, for the user to see.
+        for (const note of takeRunNotices(convId)) {
+          addBlock({ id: uuid(), phase: 'reflection', content: note, timestamp: Date.now() })
+        }
 
         diagLog('executeParallel-done', {
           iter: i,
@@ -2548,7 +2635,7 @@ export function useCodex() {
           // file_read rode along VERBATIM in every following request via
           // compaction's KEEP_RECENT window — live 225k-token prompts per
           // iteration, slow turns and a drained wallet (Morgan, 2026-07-26).
-          return truncateToolResult(text, settings.smallModelMode ? 1500 : 60000)
+          return truncateToolResult(text, resultCharsFor(codexProfile))
         }
 
         // lu-cloud is OpenAI-compatible and STRICTLY validates the
@@ -2648,6 +2735,24 @@ export function useCodex() {
         }
         if (failVerdict.action === 'steer') {
           messages.push({ role: 'user', content: failVerdict.message })
+        }
+        recordVerifyRound(verifyState, results.map((r) => ({
+          name: r.toolName,
+          failed: resultFailed(r) || r.status === 'rejected',
+          command: typeof r.dispatchedArgs?.command === 'string' ? r.dispatchedArgs.command : undefined,
+        })))
+        // C59 A4: three tool rounds in and still no plan: ask for it, once.
+        codeToolRounds++
+        if (convId && planNudgeDue({
+          rounds: codeToolRounds,
+          todos: useTodoStore.getState().getTodos(convId),
+          alreadyNudged: planNudged,
+          readOnly: readOnlyTurn,
+          reviewMode,
+        })) {
+          planNudged = true
+          diagLog('plan-nudge', { iter: i })
+          messages.push({ role: 'user', content: PLAN_NUDGE })
         }
       }
 

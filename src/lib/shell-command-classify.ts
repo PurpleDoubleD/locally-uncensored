@@ -346,3 +346,59 @@ export function commandIcon(command: string): string {
       return 'terminal'
   }
 }
+
+/**
+ * Commands no agent run may start, in any mode, Bypass included (C59 A5,
+ * owner's decision E7, 09.11.2026). The Hermes Agent idea of a hard list that
+ * even its yolo mode cannot lift (hermes-agent docs, user-guide/security),
+ * kept to what has no honest use inside a project folder:
+ *
+ * - wiping a root, a home or a whole drive (rm -rf /, ~, $HOME, C:\);
+ * - formatting or overwriting a disk (mkfs, dd onto a device, diskutil erase,
+ *   format, Format-Volume);
+ * - a fork bomb;
+ * - piping a download straight into a shell or interpreter (curl … | sh,
+ *   iwr … | iex): the owner's rule since 24.10.2026, nothing from the net is
+ *   run.
+ *
+ * Everything else keeps its normal path (approval card, Ask/Bypass). The list
+ * is a floor against the worst mistakes, not a sandbox: the workspace jail
+ * and the approvals stay the actual boundary.
+ */
+/** rm with -r and -f (in any spelling) aimed at /, /*, ~ or $HOME itself. */
+function wipesRootOrHome(command: string): boolean {
+  for (const m of command.matchAll(/\brm\s+((?:-{1,2}[a-z-]+\s+)+)(\S+)/gi)) {
+    const flags = m[1].toLowerCase()
+    const recursive = /(^|\s)-[a-z]*r|--recursive/.test(flags)
+    const force = /(^|\s)-[a-z]*f|--force/.test(flags)
+    if (recursive && force && /^(?:\/|\/\*|~\/?|\$HOME\/?|\$\{HOME\}\/?)$/.test(m[2])) return true
+  }
+  return false
+}
+
+const HARD_BLOCKS: Array<{ test: RegExp | ((command: string) => boolean); why: string }> = [
+  { test: wipesRootOrHome, why: 'it deletes a whole root or home folder' },
+  { test: /--no-preserve-root\b/, why: 'it deletes the filesystem root' },
+  { test: /\b(?:rd|rmdir)\s+\/s\s+\/q\s+[a-z]:\\?(?:\s|$)/i, why: 'it deletes a whole drive' },
+  { test: /\bdel\s+(?:\/[a-z]\s+)*[a-z]:\\\*?(?:\s|$)/i, why: 'it deletes a whole drive' },
+  { test: /\bRemove-Item\b[^|;&]*-Recurse[^|;&]*\s[a-z]:\\?\*?(?:\s|$)/i, why: 'it deletes a whole drive' },
+  { test: /\bmkfs(?:\.[a-z0-9]+)?\b/i, why: 'it formats a disk' },
+  { test: /\bdd\b[^|;&]*\bof=\/dev\/(?:disk|rdisk|sd|nvme|hd|mmcblk)/i, why: 'it overwrites a disk' },
+  { test: /\bdiskutil\s+(?:erase\w*|partitionDisk|zeroDisk|randomDisk|secureErase)\b/i, why: 'it erases a disk' },
+  { test: /\bformat\s+[a-z]:(?:\s|$)/i, why: 'it formats a drive' },
+  { test: /\bFormat-Volume\b|\bClear-Disk\b/i, why: 'it formats a drive' },
+  { test: /:\s*\(\s*\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;\s*:/, why: 'it is a fork bomb' },
+  { test: /\b(?:curl|wget|fetch)\b[^|]*\|\s*(?:sudo\s+)?(?:ba|z|da|k|fi)?sh\b/i, why: 'it runs a download straight from the net' },
+  { test: /\b(?:curl|wget)\b[^|]*\|\s*(?:sudo\s+)?(?:python[0-9.]*|node|perl|ruby)\b/i, why: 'it runs a download straight from the net' },
+  { test: /\b(?:iwr|irm|Invoke-WebRequest|Invoke-RestMethod)\b[^|]*\|\s*(?:iex|Invoke-Expression)\b/i, why: 'it runs a download straight from the net' },
+  { test: /\b(?:iex|Invoke-Expression)\s*\(?\s*\(?\s*(?:New-Object\s+Net\.WebClient|iwr|irm|Invoke-WebRequest|Invoke-RestMethod)\b/i, why: 'it runs a download straight from the net' },
+  { test: /\b(?:ba|z)?sh\s+<\(\s*(?:curl|wget)\b/i, why: 'it runs a download straight from the net' },
+]
+
+/** The refusal for a command on the hard list, or null. */
+export function hardBlockedShellCommand(command: string): string | null {
+  const hit = HARD_BLOCKS.find((b) => (typeof b.test === 'function' ? b.test(command) : b.test.test(command)))
+  return hit
+    ? `Refused: LU never runs this command, in any mode, because ${hit.why}. Nothing was executed. Do the task another way, or tell the user what you would need.`
+    : null
+}

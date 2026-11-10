@@ -76,6 +76,8 @@ export const LOGIC_SETTINGS_KEYS: readonly string[] = [
   'lu-providers',
   'locally-uncensored-agent-mode',
   'locally-uncensored-agent-goal',
+  // C59 A7: saved skills and the proposals waiting for the user.
+  'lu-skills',
   'locally-uncensored-agent-workflows',
   'rag-store',
   'lu-pending-cloud-jobs',

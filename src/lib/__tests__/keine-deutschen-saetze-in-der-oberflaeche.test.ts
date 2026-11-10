@@ -67,6 +67,7 @@ const DEUTSCH_MIT_GRUND: Record<string, string> = {
   'lib/create/chat-control.ts': 'Muster, gegen die der Schlusstext eines Modells gelesen wird, auch der deutsche (aus dem Web gespiegelt). Nichts davon wird angezeigt.',
   'lib/explicit-search.ts': 'Deutsche Suchauftraege, gegen die getippte Saetze gelesen werden.',
   'lib/settings-tool-names.ts': 'Deutsche Wendungen fuer LUs Aussehen, gegen die getippte Saetze gelesen werden (C60). Nichts davon wird angezeigt.',
+  'lib/session-search.ts': 'Deutsche Fuellwoerter, die aus einer getippten Suchanfrage fallen.',
 }
 
 /** Jede .ts und .tsx unter den Ordnern, ohne die Testbaeume. */
