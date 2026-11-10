@@ -25,7 +25,7 @@ const offeredDefNames = AGENT_TOOL_DEFS
 // ── AGENT_TOOL_DEFS ─────────────────────────────────────────────
 
 describe('AGENT_TOOL_DEFS', () => {
-  it('contains exactly 19 tool definitions', () => {
+  it('contains exactly 23 tool definitions', () => {
     // 2.6.6 tool merge (plan section E): the twelve typed shell wrappers,
     // system_info, process_list and get_current_time folded into
     // shell_execute plus the environment block in the system prompt, so the
@@ -41,7 +41,14 @@ describe('AGENT_TOOL_DEFS', () => {
     // 3.0.8 (A11): +2, get_settings und set_setting. Sie stehen in keinem
     // Prompt, der nicht nach Einstellungen fragt: im Chat und in Agent nur
     // ueber SETTINGS_KEYWORDS, in Code hinter dem Tor (GATE_KEYWORDS).
-    expect(AGENT_TOOL_DEFS).toHaveLength(19)
+    //
+    // C59 A6–A8: +4, memory, skill_view, skill_save, session_search. Keines
+    // passt in ein vorhandenes: sie schreiben bzw. lesen LUs eigene Speicher
+    // (Gedaechtnis, Skills, Chats), nicht den Arbeitsordner. Im Katalog fahren
+    // sie nur mit, wenn sie gefragt sind: memory und session_search ueber ihre
+    // Woerter (TOOL_GROUPS, GATE_KEYWORDS), die Skill-Werkzeuge ueber
+    // withSkillTools, wenn es Skills gibt bzw. ein grosses Modell vorschlagen darf.
+    expect(AGENT_TOOL_DEFS).toHaveLength(23)
   })
 
   const expectedTools = [
@@ -95,8 +102,13 @@ describe('AGENT_TOOL_DEFS', () => {
     // 3.0.8 (A11): get_settings liest nur, set_setting fragt mit seiner
     // eigenen Karte (alt -> neu), auch im Bypass. Eine zweite Rueckfrage
     // davor fragte doppelt, wie bei create_order.
+    // C59 A6–A8: memory schreibt nur LUs Gedaechtnis (sichtbarer Hinweis im
+    // Lauf, Geheimnisse abgelehnt), skill_save legt nur einen Vorschlag ab,
+    // den allein der Nutzer in den Einstellungen speichert, skill_view und
+    // session_search lesen nur.
     expect(autoNames).toEqual([
-      'check_tasks', 'get_settings', 'message_agent', 'set_setting', 'todo_write', 'web_fetch', 'web_search',
+      'check_tasks', 'get_settings', 'memory', 'message_agent', 'session_search', 'set_setting', 'skill_save', 'skill_view',
+      'todo_write', 'web_fetch', 'web_search',
     ])
   })
 

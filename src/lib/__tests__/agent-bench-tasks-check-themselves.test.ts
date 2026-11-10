@@ -33,6 +33,12 @@ const SOL: Record<string, (ws: string) => string> = {
   },
   CO8: (ws) => { W(ws, 'src/cli.mjs', `import { formatName } from './format.mjs'\nexport function run(argv) {\n  const flags = argv.filter((a) => a.startsWith('--'))\n  const [first, last] = argv.filter((a) => !a.startsWith('--'))\n  let s = flags.includes('--last-first') ? \`\${last}, \${first}\` : formatName(first, last)\n  if (flags.includes('--upper')) s = s.toUpperCase()\n  return s\n}\n`); return '' },
   CO9: (ws) => { W(ws, 'src/money.mjs', `export function euro(cents) {\n  const e = Math.floor(cents / 100)\n  const c = String(cents % 100).padStart(2, '0')\n  return \`\${e},\${c} €\`\n}\n`); return '' },
+  // C59 A6–A8 tasks.
+  AG10: () => 'Du nutzt am liebsten Helix, und Commit-Messages schreibst du auf Englisch.',
+  AG11: (ws) => { W(ws, 'notes/treffen-anna.md', 'Status: Entwurf\n\nTreffen mit Anna am Freitag.\n'); return '' },
+  CO11: (ws) => { W(ws, 'util.mjs', `export function trim(s) {\n  return s.trim()\n}\n\n/**\n * Turns text into a slug.\n * @example slugify('Hallo Welt') // 'hallo-welt'\n */\nexport function slugify(text) {\n  return text.toLowerCase().trim().replace(/\\s+/g, '-')\n}\n`); return '' },
+  AG12: () => 'Der Code war WINTER-4711, gültig bis 31.01.',
+  AG13: (ws) => { W(ws, 'naechste.txt', 'RE-2026-0048-SR\n'); return '' },
   CO10: (ws) => { W(ws, 'lru.mjs', `export class LruCache {\n  constructor(cap) { this.cap = cap; this.m = new Map() }\n  get(k) { if (!this.m.has(k)) return undefined; const v = this.m.get(k); this.m.delete(k); this.m.set(k, v); return v }\n  set(k, v) { this.m.delete(k); this.m.set(k, v); if (this.m.size > this.cap) this.m.delete(this.m.keys().next().value) }\n  delete(k) { return this.m.delete(k) }\n  get size() { return this.m.size }\n}\n`); return '' },
 }
 for (const id of Object.keys(SOL)) {

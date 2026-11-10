@@ -31,6 +31,15 @@ export interface BenchTask {
   files: Record<string, string>
   /** Reads the workspace and the final visible answer. */
   check: (ws: string, answer: string, run: RunFacts) => CheckResult
+  /** Messages sent first, each in its own finished turn, in a conversation of
+   *  their own; the task prompt then goes to a NEW conversation (A6 memory). */
+  prelude?: string[]
+  /** State put into the app before the run (A7 skills, A8 earlier chats).
+   *  A build that has no place for it simply does not get it. */
+  seed?: {
+    conversations?: Array<{ title: string; daysAgo: number; messages: Array<{ role: 'user' | 'assistant'; content: string }> }>
+    skills?: Array<{ name: string; description: string; body: string }>
+  }
 }
 
 /** What the runner measured, for checks that judge the way, not the result. */
@@ -437,6 +446,89 @@ export const TASKS: BenchTask[] = [
     check: (ws) => {
       if (read(ws, 'lru.test.mjs') !== LRU_TEST) return fail('Testdatei verändert')
       return sh(ws, 'node', ['--test']).code === 0 ? ok() : fail('node --test rot')
+    },
+  },
+  // ── A6–A8 (10.11.2026): memory, project files, earlier chats, skills ──
+  {
+    id: 'AG10', tab: 'agent',
+    prelude: ['Merk dir bitte für später: Mein Lieblingseditor ist Helix, und Commit-Messages schreibe ich immer auf Englisch.'],
+    prompt: 'Welchen Editor nutze ich am liebsten, und in welcher Sprache schreibe ich Commit-Messages?',
+    files: {},
+    check: (_ws, answer) => {
+      if (!/helix/i.test(answer)) return fail('Helix fehlt')
+      return /englisch|english/i.test(answer) ? ok() : fail('Sprache fehlt')
+    },
+  },
+  {
+    id: 'AG11', tab: 'agent',
+    prompt: 'Leg eine kurze Notiz über das Treffen mit Anna am Freitag an.',
+    files: {
+      'AGENTS.md': '# Projektregeln\n\n- Neue Notizen kommen immer in den Ordner `notes/` und enden auf `.md`.\n- Jede Notiz beginnt mit der Zeile `Status: Entwurf`.\n',
+    },
+    check: (ws) => {
+      const dir = join(ws, 'notes')
+      if (!existsSync(dir)) return fail('notes/ fehlt')
+      const notes = readdirSync(dir).filter((n) => n.endsWith('.md'))
+      if (!notes.length) return fail('keine .md in notes/')
+      const first = (read(ws, join('notes', notes[0])) ?? '').split('\n')[0].trim()
+      return /^status:\s*entwurf$/i.test(first) ? ok() : fail(`erste Zeile: ${first.slice(0, 40)}`)
+    },
+  },
+  {
+    id: 'CO11', tab: 'code',
+    prompt: 'Füge in util.mjs eine Funktion slugify(text) hinzu: Kleinbuchstaben, Leerzeichen werden zu Bindestrichen.',
+    files: {
+      'package.json': PKG,
+      'util.mjs': 'export function trim(s) {\n  return s.trim()\n}\n',
+      'AGENTS.md': '# Konventionen\n\n- Jede exportierte Funktion bekommt einen JSDoc-Kommentar mit mindestens einem `@example`.\n',
+    },
+    check: (ws) => {
+      const src = read(ws, 'util.mjs') ?? ''
+      const at = src.search(/export\s+(async\s+)?function\s+slugify/)
+      if (at < 0) return fail('slugify fehlt')
+      const before = src.slice(0, at)
+      const doc = before.lastIndexOf('/**')
+      if (doc < 0 || before.slice(doc).includes('export ') || !/@example/.test(before.slice(doc))) return fail('JSDoc mit @example fehlt')
+      const r = sh(ws, 'node', ['--input-type=module', '-e', "import { slugify } from './util.mjs'; console.log(slugify('Hallo Welt'))"])
+      return r.out.trim() === 'hallo-welt' ? ok() : fail(`slugify ergibt ${r.out.trim().slice(0, 30)}`)
+    },
+  },
+  {
+    id: 'AG12', tab: 'agent',
+    seed: {
+      conversations: [{
+        title: 'Newsletter-Planung', daysAgo: 12,
+        messages: [
+          { role: 'user', content: 'Für die Winteraktion nehmen wir den Rabattcode WINTER-4711, gültig bis 31.01.' },
+          { role: 'assistant', content: 'Notiert: Rabattcode WINTER-4711, gültig bis 31.01. Soll ich den Newsletter-Text entwerfen?' },
+        ],
+      }, {
+        title: 'Urlaubsplanung', daysAgo: 5,
+        messages: [{ role: 'user', content: 'Wir fahren im März nach Lissabon.' }, { role: 'assistant', content: 'Schöne Wahl.' }],
+      }],
+    },
+    prompt: 'Wir hatten in einem früheren Chat einen Rabattcode für die Winteraktion festgelegt. Wie lautete er, und bis wann gilt er?',
+    files: {},
+    check: (_ws, answer) => {
+      if (!/WINTER-4711/.test(answer)) return fail('Code fehlt')
+      return /31\.\s?0?1|31\.\s?Januar/i.test(answer) ? ok() : fail('Datum fehlt')
+    },
+  },
+  {
+    id: 'AG13', tab: 'agent',
+    seed: {
+      skills: [{
+        name: 'rechnungsnummer',
+        description: 'Schema für Rechnungsnummern dieses Betriebs (Einzel- und Sammelrechnungen).',
+        body: '## When to use\nWenn eine neue Rechnungsnummer vergeben wird.\n\n## Procedure\n1. Format: RE-<Jahr>-<laufende Nummer, 4-stellig>-<Kürzel>.\n2. Die laufende Nummer steigt nicht um 1, sondern immer um 7.\n3. Kürzel: Sammelrechnungen SR, Einzelrechnungen ER.\n\n## Pitfalls\nNie um 1 hochzählen.\n\n## Verification\nDie neue Nummer ist die letzte plus 7, gleiches Jahr, gleiches Kürzel.\n',
+      }],
+    },
+    prompt: 'Die letzte Sammelrechnung hatte die Nummer RE-2026-0041-SR. Schreib die Nummer der nächsten Sammelrechnung nach unserem Schema in naechste.txt.',
+    files: {},
+    check: (ws) => {
+      const s = (read(ws, 'naechste.txt') ?? '').trim()
+      if (!s) return fail('naechste.txt fehlt')
+      return /RE-2026-0048-SR/.test(s) ? ok() : fail(`steht: ${s.slice(0, 30)}`)
     },
   },
 ]

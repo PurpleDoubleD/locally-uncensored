@@ -49,6 +49,8 @@ const SETTINGS = ['get_settings', 'set_setting']
 const STAYS = [
   'todo_write', 'web_search', 'web_fetch', 'file_read', 'file_write', 'file_edit', 'file_list',
   'file_search', 'run_workflow', 'delegate_task', 'check_tasks', 'message_agent',
+  // C59 A6–A8: they work on LU's own stores, so a phone keeps them too.
+  'memory', 'skill_view', 'skill_save', 'session_search',
 ]
 const DESKTOP_WORDS = /this computer|shell_execute|image_generate|video_generate|PowerShell|drive letter|uname|Get-ComputerInfo|ComfyUI|Finder/
 

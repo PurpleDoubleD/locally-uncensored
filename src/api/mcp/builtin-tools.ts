@@ -52,6 +52,11 @@ import { aspectFrame, aspectRatioReject, parseAspectRatio } from '../../lib/aspe
 import { CHARACTER_ARG_SCHEMA, characterImageArgs, characterVideoArgs, type CharacterChatDeps } from '../../lib/character-chat'
 import { blockMessageFor, checkPromptSafety } from '../../lib/render/safety'
 import { dropSecretLines, secretAccessOf, secretRefusal } from '../../lib/secret-paths'
+import { MEMORY_TOOL_DEF, runMemoryTool } from '../../lib/memory-tool'
+import { SKILL_SAVE_DEF, SKILL_VIEW_DEF, runSkillSave, runSkillView, type SkillPort } from '../../lib/skill-tools'
+import { SESSION_SEARCH_DEF, searchSessions } from '../../lib/session-search'
+import { pushRunNotice } from '../../lib/run-notices'
+import { useSkillStore } from '../../stores/skillStore'
 
 /**
  * Helper: current chat id (+ folder workspace) as a fragment to spread into
@@ -549,6 +554,11 @@ const BUILTIN_TOOLS: MCPToolDefinition[] = [
   MESSAGE_AGENT_TOOL_DEF,
 
   // Local clock — so the agent never googles "what day is it".
+  // C59 A6–A8: memory, skills, earlier chats (defined next to their runners).
+  MEMORY_TOOL_DEF,
+  SKILL_VIEW_DEF,
+  SKILL_SAVE_DEF,
+  SESSION_SEARCH_DEF,
 ]
 
 // ── Executors ────────────────────────────────────────────────────
@@ -2383,6 +2393,57 @@ function htmlToText(html: string): string {
 
 // ── Registration ────────────────────────────────────────────────
 
+// ── C59 A6–A8 runners ───────────────────────────────────────────
+
+function convOf(run?: AgentRunContext): string | undefined {
+  return getActiveConversationId(run) ?? getActiveChatId(run) ?? undefined
+}
+
+async function executeMemory(args: ToolArgs, run?: AgentRunContext): Promise<string> {
+  // Dynamic, like the other store reads in this file: a static import would
+  // tie the tool catalog to the stores at module load.
+  const { useMemoryStore } = await import('../../stores/memoryStore')
+  const { useChatStore } = await import('../../stores/chatStore')
+  const store = useMemoryStore.getState()
+  const convId = convOf(run)
+  const scope = convId ? useChatStore.getState().conversations.find((c) => c.id === convId)?.memoryScope : undefined
+  const out = runMemoryTool(args as Record<string, unknown>, {
+    entries: () => useMemoryStore.getState().entries,
+    add: (m) => store.addMemory(m),
+    update: (id, u) => store.updateMemory(id, u),
+    remove: (id) => !!store.removeMemory(id),
+    search: (q, limit) => store.searchMemories(q, { limit }),
+  }, { convId, scope })
+  if (out.notice) pushRunNotice(convId, out.notice)
+  return out.text
+}
+
+function skillPort(): SkillPort {
+  const st = useSkillStore.getState()
+  return {
+    get: (name) => useSkillStore.getState().getSkill(name),
+    propose: (sk) => st.addSkill({ ...sk, status: 'proposed', source: 'agent' }),
+    names: () => useSkillStore.getState().activeSkills().map((x) => x.name),
+  }
+}
+
+async function executeSkillView(args: ToolArgs): Promise<string> {
+  return runSkillView(args as Record<string, unknown>, skillPort())
+}
+
+async function executeSkillSave(args: ToolArgs, run?: AgentRunContext): Promise<string> {
+  const convId = convOf(run)
+  const out = runSkillSave(args as Record<string, unknown>, skillPort(), convId)
+  if (out.notice) pushRunNotice(convId, out.notice)
+  return out.text
+}
+
+async function executeSessionSearch(args: ToolArgs, run?: AgentRunContext): Promise<string> {
+  const { useChatStore } = await import('../../stores/chatStore')
+  const a = args as Record<string, unknown>
+  return searchSessions(String(a.query ?? ''), useChatStore.getState().conversations, { excludeId: convOf(run), limit: Number(a.limit) || 5 })
+}
+
 const EXECUTOR_MAP: Record<
   string,
   (args: ToolArgs, run?: AgentRunContext, signal?: AbortSignal) => Promise<string>
@@ -2401,6 +2462,10 @@ const EXECUTOR_MAP: Record<
   image_generate: executeImageGenerate,
   video_generate: executeVideoGenerate,
   run_workflow: executeRunWorkflow,
+  memory: executeMemory,
+  skill_view: executeSkillView,
+  skill_save: executeSkillSave,
+  session_search: executeSessionSearch,
   delegate_task: buildDelegateExecutor(),
   check_tasks: buildCheckTasksExecutor(),
   message_agent: buildMessageAgentExecutor(),

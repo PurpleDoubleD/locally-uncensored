@@ -32,6 +32,9 @@ export const MUTATING_TOOLS = new Set([
   'computer_task',
   // A11: changes an app setting (after the user's yes on the card).
   'set_setting',
+  // C59 A6/A7: write LU's memory, file a skill proposal.
+  'memory',
+  'skill_save',
 ])
 
 /** May this tool stay in the catalog during a read-only turn? */

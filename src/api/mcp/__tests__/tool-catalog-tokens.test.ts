@@ -130,7 +130,11 @@ const CODING_TOKEN_CEILING = 1730
 // 3.0.8 (A11): +762 Zeichen fuer get_settings und set_setting im VOLLEN
 // Katalog (18.370 -> 19.132). Der codierende Zug bleibt gleich: beide stehen
 // hinter dem Tor und fahren nur auf einer Nachricht ueber Einstellungen mit.
-const FULL_CHAR_CEILING = 19170
+// C59 A6–A8: +1.365 Zeichen fuer memory, skill_view, skill_save und
+// session_search im VOLLEN Katalog (19.170 -> 20.535). Der codierende Zug
+// bleibt gleich: alle vier stehen hinter dem Tor (GATE_KEYWORDS), auch wenn
+// ein kreativer Zug das Tor fuer die Medienwerkzeuge oeffnet.
+const FULL_CHAR_CEILING = 20580
 const FULL_TOKEN_CEILING = 4090
 
 describe('the coding step carries a catalog the diet actually shrank', () => {

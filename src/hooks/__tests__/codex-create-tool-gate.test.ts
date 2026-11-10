@@ -75,7 +75,8 @@ describe('a plain coding turn does not carry the generators', () => {
     const after = names(gateCreateTools(codingCatalog(), 'fix the failing test in parser.ts'))
     // 3.0.8 (A11): neun, get_settings und set_setting fahren nur auf einer
     // Nachricht ueber Einstellungen mit.
-    expect(before.length - after.length).toBe(9)
+    // C59 A6–A8: +4 (memory, session_search, skill_view, skill_save), on demand only.
+    expect(before.length - after.length).toBe(13)
     expect(before.filter((n) => !after.includes(n)).sort()).toEqual([...GATE_OPENING_TOOLS].sort())
   })
 
@@ -255,7 +256,8 @@ describe('a run that discovers halfway through that it needs a picture', () => {
     // NICHT aus GATE_KEYWORDS abgeleitet — sonst pruefte sie eine Karte gegen
     // sich selbst und waere fuer jeden kuenftigen Eintrag automatisch gruen.
     // 3.0.8 (A11): dazu die zwei Einstellungswerkzeuge.
-    const TOR = [...CREATE_TOOLS, 'pr_resume', 'delegate_task', 'check_tasks', 'message_agent', 'get_settings', 'set_setting']
+    const TOR = [...CREATE_TOOLS, 'pr_resume', 'delegate_task', 'check_tasks', 'message_agent', 'get_settings', 'set_setting',
+      'memory', 'session_search', 'skill_view', 'skill_save']
     for (const n of TOR) expect(isGatedTool(n), n).toBe(true)
     for (const n of ['file_read', 'file_edit', 'shell_execute', 'todo_write', 'web_search']) {
       expect(isGatedTool(n), n).toBe(false)

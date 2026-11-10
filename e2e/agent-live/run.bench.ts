@@ -95,6 +95,46 @@ async function openConversation(page: Page, task: BenchTask, model: string, ws: 
   return convId
 }
 
+/** Earlier chats and skills for A7/A8 tasks. A build without a skill store
+ *  (the before state) just does not get the skills. */
+async function seedApp(page: Page, task: BenchTask) {
+  if (!task.seed) return
+  await page.evaluate(async (sd) => {
+    const A = (window as unknown as AppWindow).__APP__
+    const chat = A['/src/stores/chatStore.ts'].useChatStore
+    const now = Date.now()
+    const convs = (sd.conversations ?? []).map((c, i) => {
+      const at = now - c.daysAgo * 86_400_000
+      return {
+        id: `seed-${i}-${at}`, title: c.title, model: 'seed', systemPrompt: '', mode: 'lu', createdAt: at, updatedAt: at,
+        messages: c.messages.map((m, j) => ({ id: `seed-${i}-${j}`, role: m.role, content: m.content, timestamp: at + j * 1000 })),
+      }
+    })
+    if (convs.length) chat.setState((st: { conversations: unknown[] }) => ({ conversations: [...convs, ...st.conversations] }))
+    if (sd.skills?.length) {
+      try {
+        const path = '/src/stores/skillStore.ts'
+        const mod = await import(/* @vite-ignore */ path)
+        for (const sk of sd.skills) mod.useSkillStore.getState().addSkill({ ...sk, status: 'active' })
+      } catch { /* no skills in this build */ }
+    }
+  }, task.seed)
+}
+
+/** Sends each prelude message in a conversation of its own and waits for it. */
+async function runPrelude(page: Page, task: BenchTask, model: string, ws: string) {
+  if (!task.prelude?.length) return
+  const convId = await openConversation(page, task, model, ws)
+  for (const text of task.prelude) {
+    const box = page.locator('textarea').first()
+    await box.fill(text)
+    await box.press('Enter')
+    await waitForRun(page, convId)
+  }
+  // The automatic memory extraction runs after the turn, in the background.
+  await page.waitForTimeout(15_000)
+}
+
 function seed(ws: string, files: Record<string, string>) {
   rmSync(ws, { recursive: true, force: true })
   mkdirSync(ws, { recursive: true })
@@ -167,6 +207,8 @@ for (const model of MODELS) {
         const ws = join(HOME, 'ws', runId)
         seed(ws, task.files)
         await boot(page)
+        await seedApp(page, task)
+        await runPrelude(page, task, model, ws)
         const convId = await openConversation(page, task, model, ws)
         const t0 = Date.now()
         const box = page.locator('textarea').first()

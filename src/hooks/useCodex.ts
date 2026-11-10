@@ -48,6 +48,7 @@ import { fitFilesForSend, requestTextOf } from './chat-file-room'
 import type { FileAttachment } from '../types/chat'
 import { useAgentModeStore } from '../stores/agentModeStore'
 import { loadLurules, renderRulesSection } from '../lib/lurules'
+import { loadProjectFile, renderProjectFileSection } from '../lib/project-instructions'
 import {
   parseAgentCommand, parseLoopSpec, buildLoopRecheck,
   loopPassSaysDone,
@@ -86,6 +87,9 @@ import { repairToolCall } from '../lib/loose-tool-parse'
 import { selectRelevantTools, selectRelevantToolsAsync, SMALL_MODEL_MAX_TOOLS, gateCreateTools, wantsMediaTools, isGatedTool, applyMaxTools } from '../lib/tool-selection'
 import { agentProfileFor, resultCharsFor, COMPACT_MAX_TOOLS, COMPACT_PREFER } from '../lib/agent-profile'
 import { secretAccessOf, secretNotice } from '../lib/secret-paths'
+import { takeRunNotices } from '../lib/run-notices'
+import { MEMORY_SKILL_PROMPT_LINE, renderSkillsSection, withSkillTools } from '../lib/skill-tools'
+import { useSkillStore } from '../stores/skillStore'
 import type { MCPToolDefinition } from '../api/mcp/types'
 import { TOOL_SEARCH, TOOL_SEARCH_DEF, briefFor, clearUnlockedTools, runToolSearch, withToolSearch } from '../lib/tool-search'
 import { reaRoutingText } from '../lib/plugins/rea-tools'
@@ -903,7 +907,10 @@ export function useCodex() {
     // by the reader so the codex loop still starts.
     if (workDir && workDir !== '.') {
       try {
-        const rules = await loadLurules(workDir, makeLurulesReader(convId, workDir))
+        const reader = makeLurulesReader(convId, workDir)
+        // C59 A6: AGENTS.md (or CLAUDE.md without one) next to .lurules.
+        systemPrompt += renderProjectFileSection(await loadProjectFile(workDir, reader))
+        const rules = await loadLurules(workDir, reader)
         if (rules) {
           systemPrompt += renderRulesSection(rules)
         }
@@ -911,6 +918,13 @@ export function useCodex() {
         // Belt-and-braces: reader already swallows errors, but if the
         // join logic ever throws we don't want it to wedge the loop.
       }
+    }
+
+    // C59 A6/A7: approved skills by name (read with skill_view), and when to
+    // keep memory. Not in Small-Model Mode: its lean prompt stays lean.
+    if (!settings.smallModelMode) {
+      systemPrompt += renderSkillsSection(useSkillStore.getState().activeSkills())
+      systemPrompt += `\n\n${MEMORY_SKILL_PROMPT_LINE}`
     }
 
     // For non-Ollama providers, inject thinking via system prompt — only for
@@ -1621,10 +1635,14 @@ export function useCodex() {
           // C59 A2: on the compact profile the cut tools stay reachable
           // through tool_search, and whatever a search unlocked rides along.
           searchCatalog = codexTools
+          const skilled = withSkillTools(gatedDefs, codexTools, {
+            skills: useSkillStore.getState().activeSkills().length > 0,
+            propose: codexProfile === 'full',
+          })
           const relevantDefs = compactRun
-            ? withToolSearch(gatedDefs, codexTools, convId, TOOL_SEARCH_DEF)
+            ? withToolSearch(skilled, codexTools, convId, TOOL_SEARCH_DEF)
               .map((t) => ({ ...t, description: briefFor(t) }))
-            : gatedDefs
+            : skilled
           stepOfferedNames = new Set(relevantDefs.map((t) => t.name))
           const tools: ToolDefinition[] = relevantDefs.map(t => ({
             type: 'function' as const,
@@ -2533,6 +2551,10 @@ export function useCodex() {
           // firing. A stopped run has to stop doing things.
           abortSignal: abort.signal,
         })
+        // C59 A6/A7: what memory and skill_save did, for the user to see.
+        for (const note of takeRunNotices(convId)) {
+          addBlock({ id: uuid(), phase: 'reflection', content: note, timestamp: Date.now() })
+        }
 
         diagLog('executeParallel-done', {
           iter: i,

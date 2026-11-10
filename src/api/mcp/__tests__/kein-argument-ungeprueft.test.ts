@@ -81,6 +81,11 @@ const PFLICHT: Record<string, Record<string, string>> = {
   message_agent: { task_id: 'task-1-abcdef', message: 'halte dich kurz' },
   // A11: ohne Schluessel keine Karte und keine Aenderung.
   set_setting: { key: 'theme' },
+  // C59 A6–A8: a sentence to the model, no bridge call.
+  memory: { action: 'search' },
+  skill_view: { name: 'release-notes' },
+  skill_save: { name: 'release-notes', description: 'How to write them', body: '## Procedure\n1. Plain English.' },
+  session_search: { query: 'rabattcode' },
 }
 
 /**

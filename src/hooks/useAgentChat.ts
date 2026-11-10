@@ -129,7 +129,7 @@ import { buildLoopRecheck, loopPassSaysDone } from '../lib/agent-commands'
 import { applyStoredCompaction } from '../lib/compact-summary'
 import { maybeAutoCompact } from '../lib/run-compact-command'
 import { autoCompactOn } from '../lib/compact-trigger'
-import { compactRunMidway, newRunCompactState } from '../lib/run-compact-midway'
+import { compactRunMidway, newRunCompactState, runCompactionDue, MEMORY_FLUSH_NOTE } from '../lib/run-compact-midway'
 import { generateEmbeddings } from '../api/rag'
 import { truncateToolResult } from '../lib/truncate-tool-result'
 import { fitRequestForPhone, measuredRequest, phoneFitApplies, phoneResultChars, questionOf, withPhoneToolCap, type PhoneMeasure } from '../lib/phone-context-fit'
@@ -172,7 +172,13 @@ import type { ToolArgs } from '../api/mcp/types'
 import { CREDITS_EXHAUSTED_MESSAGE } from '../lib/credits-exhausted'
 import { buildChatSystemPrompt } from '../lib/system-prompt'
 import { agentProfileFor, resultCharsFor, COMPACT_MAX_TOOLS, COMPACT_PREFER } from '../lib/agent-profile'
+import { loadProjectFile, renderProjectFileSection } from '../lib/project-instructions'
+import { loadLurules, renderRulesSection } from '../lib/lurules'
+import { makeLurulesReader } from './codex/workspace-fs'
 import { secretAccessOf, secretNotice } from '../lib/secret-paths'
+import { takeRunNotices } from '../lib/run-notices'
+import { MEMORY_SKILL_PROMPT_LINE, renderSkillsSection, withSkillTools } from '../lib/skill-tools'
+import { useSkillStore } from '../stores/skillStore'
 import { TOOL_SEARCH, TOOL_SEARCH_DEF, briefFor, clearUnlockedTools, runToolSearch, withToolSearch } from '../lib/tool-search'
 import { withChatPersona, samplingPresetFor, speakerCustomParams, speakerPersonaFor } from '../lib/chat-persona'
 import { injectPersonaNote, noteTokens, personaNoteOf } from '../lib/persona-note'
@@ -1255,8 +1261,14 @@ export function useAgentChat() {
     const reaText = reaRoutingText(userContent, (useChatStore.getState().conversations
       .find((c) => c.id === convId)?.messages ?? [])
       .filter((m) => m.role === 'user').map((m) => m.content))
+    // C59 A7: the user's approved skills, and whether this run may propose one.
+    const activeSkills = useSkillStore.getState().activeSkills()
+    const fullToolRun = agentProfile === 'full' && !opts?.chatToolsMode
+    const skillToolOpts = { skills: activeSkills.length > 0, propose: fullToolRun, memory: fullToolRun }
+    // E6: once per run, before the first compaction of a big model's run.
+    let memoryFlushDone = false
     const hermesToolDefs = strategy === 'hermes_xml'
-      ? briefDefs(withCreateTools(gatePlanTool(await selectRelevantToolsAsync(
+      ? briefDefs(withSkillTools(withCreateTools(gatePlanTool(await selectRelevantToolsAsync(
           toolRoutingText(userContent, attachedFiles),
           toolRegistry.getAll().filter((t) => toolMatchesCurated(t.name)),
           permissions,
@@ -1267,7 +1279,7 @@ export function useAgentChat() {
             ),
             reaText,
           },
-        ), planAllowed), toolRegistry.getAll()))
+        ), planAllowed), toolRegistry.getAll()), toolRegistry.getAll().filter((t) => toolMatchesCurated(t.name)), skillToolOpts))
       : []
     // Small-Model Mode (Knob 2): swap the ~3000-char agent prompt for a lean
     // ~750-char one on the native path. Der Hermes-Zweig behaelt seine eigene
@@ -1334,6 +1346,20 @@ export function useAgentChat() {
       if (ws?.kind === 'folder' && (ws.extraPaths?.length ?? 0) > 0) {
         agentSystemPrompt += renderWorkspaceSection(ws)
       }
+      // C59 A6: a folder workspace brings its project files, like the Code
+      // tab: AGENTS.md (or CLAUDE.md without one) and .lurules. Best effort.
+      if (ws?.kind === 'folder' && ws.path && convId) {
+        try {
+          const reader = makeLurulesReader(convId, ws.path)
+          agentSystemPrompt += renderProjectFileSection(await loadProjectFile(ws.path, reader))
+          agentSystemPrompt += renderRulesSection(await loadLurules(ws.path, reader))
+        } catch { /* no project files */ }
+      }
+    }
+    // C59 A6/A7: approved skills by name, and when to keep memory.
+    if (!opts?.chatToolsMode && !settings.smallModelMode) {
+      agentSystemPrompt += renderSkillsSection(activeSkills)
+      agentSystemPrompt += `\n\n${MEMORY_SKILL_PROMPT_LINE}`
     }
 
     // Caveman mode: append as response style modifier AFTER agent instructions
@@ -1875,7 +1901,19 @@ export function useAgentChat() {
           // are summarised by the run's own model instead of only dropped.
           // Copies only, so the chain saved at the end (werkzeugKette) keeps
           // every result complete. The trim below stays the safety net.
-          const verdichtet = await compactRunMidway({
+          // C59 E6: the first time this run would be compacted, a big model
+          // gets one step to keep durable facts with memory instead; the
+          // compaction comes on the next step. Small models skip it: the step
+          // costs them more than it brings.
+          if (fullToolRun && !memoryFlushDone && runCompactionDue({
+            messages: agentMessages, budgetTokens: sendBudget, modelWindow: agentCtx, activeModel, state: laufVerdichtung, decay: { enabled: decayOn },
+          })) {
+            memoryFlushDone = true
+            agentMessages.push({ role: 'user', content: MEMORY_FLUSH_NOTE } as ChatMessage)
+          }
+          const verdichtet = memoryFlushDone && agentMessages[agentMessages.length - 1]?.content === MEMORY_FLUSH_NOTE
+            ? { compacted: false as const, messages: agentMessages }
+            : await compactRunMidway({
             messages: agentMessages,
             budgetTokens: sendBudget,
             modelWindow: agentCtx,
@@ -2002,9 +2040,10 @@ export function useAgentChat() {
           ), planAllowed), toolRegistry.getAll())
           // C59 A2: on the compact profile the cut tools stay reachable
           // through tool_search, and whatever a search unlocked rides along.
+          const withSkills = withSkillTools(selectedDefs, offeredTools, skillToolOpts)
           const relevantDefs = compactRun
-            ? briefDefs(withToolSearch(selectedDefs, offeredTools, convId, TOOL_SEARCH_DEF))
-            : selectedDefs
+            ? briefDefs(withToolSearch(withSkills, offeredTools, convId, TOOL_SEARCH_DEF))
+            : withSkills
           stepOfferedNames = new Set(relevantDefs.map((t) => t.name))
           const tools: ToolDefinition[] = relevantDefs.map(t => ({
             type: 'function' as const,
@@ -3194,6 +3233,10 @@ export function useAgentChat() {
           // firing. A stopped run has to stop doing things.
           abortSignal: abort.signal,
         })
+        // C59 A6/A7: what memory and skill_save did, for the user to see.
+        for (const note of takeRunNotices(convId)) {
+          addBlock(runState, convId!, assistantMessage.id, { id: uuid(), phase: 'reflection', content: note, timestamp: Date.now() })
+        }
 
         // Apply results back onto blocks + memory + LLM history.
         for (const entry of batch) {

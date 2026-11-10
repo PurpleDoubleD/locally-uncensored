@@ -131,6 +131,10 @@ export const CORE_BRIEFS: Readonly<Record<string, string>> = {
   file_list: 'List a folder ("." is the workspace). recursive and pattern ("*.md") are optional.',
   file_search: 'Search file contents with a regex across a folder: file, line number and text of each match.',
   shell_execute: 'Run one shell command in the workspace: git, tests, scripts, and to rename, move, copy or delete files (mv, cp, mkdir). Returns stdout, stderr, exit code.',
+  memory: 'Keep a durable fact across conversations (add / replace / remove / search). One fact per entry, never secrets.',
+  skill_view: 'Read an approved skill (a stored procedure) by name before following it.',
+  skill_save: 'Propose a reusable procedure as a skill; the user reviews and decides.',
+  session_search: "Search the user's earlier LU chats; returns excerpts with chat title and date.",
 }
 
 /**

@@ -113,7 +113,7 @@ export function sectionsFor(tab: SettingsTab, flags: SettingsSectionFlags): stri
         // Auto-Compact; eine Persona suchte sie beim Agenten und fand sie
         // dort nicht. Ein delegierter Lauf hat keinen Zuschauer — das ist
         // ein anderer Gegenstand als die Werte des Zugs, vor dem man sitzt.
-        ...(flags.agentMode ? ['Sub-agents'] : []),
+        ...(flags.agentMode ? ['Sub-agents', 'Skills'] : []),
         ...(flags.agentWorkflows ? ['Agent Workflows'] : []),
         ...(flags.agentMode ? ['MCP Servers', 'Coding Agent', 'Search Provider'] : []),
       ]

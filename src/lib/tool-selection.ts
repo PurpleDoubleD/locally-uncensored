@@ -113,7 +113,27 @@ export const CREATE_TOOLS = ['image_generate', 'video_generate', 'run_workflow']
  * CREATE_TOOLS stays its own exported list because the Codex asset line keys
  * off exactly those three; this map is the superset the filter walks.
  */
+// C59 A6/A8: the words that bring memory and session_search (TOOL_GROUPS
+// below) also open them on a cloud coding step (gateCreateTools).
+const MEMORY_KEYWORDS: string[] = ['merk dir', 'merke dir', 'merk es', 'merk euch', 'remember', 'vergiss', 'forget that', 'notier dir',
+  'für später', 'for later', 'from now on', 'ab jetzt', 'in zukunft', 'in future', 'my preference', 'meine vorliebe']
+const SESSION_KEYWORDS: string[] = ['früheren chat', 'frueheren chat', 'anderen chat', 'letzten chat', 'alten chat', 'in welchem chat', 'previous chat',
+  'earlier chat', 'other chat', 'earlier conversation', 'last time we', 'letztes mal', 'neulich', 'besprochen', 'we discussed',
+  'wir hatten', 'we talked', 'we decided', 'hatten wir', 'haben wir festgelegt']
+
+/** The C59 tools that ride along only on their own words (see GATE_KEYWORDS). */
+const ON_DEMAND_TOOLS = new Set(['memory', 'session_search', 'skill_view', 'skill_save'])
+
 const GATE_KEYWORDS: Record<string, readonly string[]> = {
+  // C59 A6–A8: on demand only. Every step of a cloud coding run would pay
+  // ~2.5k characters for four tools a refactor never calls. memory and
+  // session_search open on their words; the skill tools are added by
+  // withSkillTools (lib/skill-tools.ts) when there are skills or the run may
+  // propose one, never by the catalog itself.
+  memory: MEMORY_KEYWORDS,
+  session_search: SESSION_KEYWORDS,
+  skill_view: [],
+  skill_save: [],
   image_generate: MEDIA_KEYWORDS,
   video_generate: MEDIA_KEYWORDS,
   run_workflow: WORKFLOW_KEYWORDS,
@@ -153,6 +173,16 @@ export function isGatedTool(name: string): boolean {
 }
 
 const TOOL_GROUPS: ToolGroup[] = [
+  {
+    // C59 A6: the user asks the agent to keep or drop something for later.
+    keywords: MEMORY_KEYWORDS,
+    tools: ['memory'],
+  },
+  {
+    // C59 A8: the user points at an earlier chat.
+    keywords: SESSION_KEYWORDS,
+    tools: ['session_search'],
+  },
   {
     // Web search intents. Only EXPLICIT web cues route here. Bare 'search',
     // 'latest', 'current', 'aktuell', 'neueste', 'suche' were removed: they
@@ -444,14 +474,16 @@ export function gateCreateTools<T extends { name: string }>(
   userMessage: string,
   opened: boolean | Iterable<string> = false,
 ): T[] {
-  if (opened === true) return defs
   // A caller that tracks WHICH tool reopened the gate may pass the names; the
-  // boolean form stays the run-wide "everything is open again" it always was.
-  const reopened = opened === false ? null : new Set(opened)
+  // boolean form stays the run-wide "everything is open again" it always was,
+  // for the create tools. The C59 tools stay on their own words: a creative
+  // run has no more use for them than a refactor.
+  const reopened = opened === false || opened === true ? null : new Set(opened)
   const msg = userMessage.toLowerCase()
   return defs.filter((t) => {
     const words = GATE_KEYWORDS[t.name]
     if (!words) return true
+    if (opened === true && !ON_DEMAND_TOOLS.has(t.name)) return true
     if (reopened?.has(t.name)) return true
     if (msg.includes(t.name)) return true
     return words.some((k) => msg.includes(k))

@@ -1,3 +1,4 @@
+import { SkillsSettings } from './SkillsSettings'
 import { useState, useEffect, useRef, type ReactNode, type ChangeEvent } from 'react'
 import { withDetail } from '../../lib/error-text'
 // `X` steht hier weiterhin, obwohl der Sprachabschnitt mit seinen Symbolen
@@ -2469,6 +2470,12 @@ export function SettingsPage() {
             <div className="t-micro text-gray-500 dark:text-gray-500 leading-relaxed pt-0.5">
               0 = use the defaults (10 calls, 5 steps), at most 1,000 each. A sub-agent runs unattended, so these stay deliberately tight, raise them only for a task you know is long.
             </div>
+            </Section>
+          )}
+
+          {FEATURE_FLAGS.AGENT_MODE && (
+            <Section title="Skills">
+              <SkillsSettings />
             </Section>
           )}
 

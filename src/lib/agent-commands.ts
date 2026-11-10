@@ -193,7 +193,7 @@ export function formatDuration(ms: number): string {
  * Executor. Modell und Waechter koennen also nicht mehr auseinanderlaufen.
  */
 const LOOK =
-  'Read the real code with file_read / file_list / file_search first, never answer from memory. ' +
+  'Read the real code with file_read / file_list / file_search first, never answer from what you remember. ' +
   `You cannot write files on this turn, and you cannot run arbitrary commands. ${READ_ONLY_SHELL_HINT}`
 
 export const AGENT_COMMANDS: AgentCommand[] = [

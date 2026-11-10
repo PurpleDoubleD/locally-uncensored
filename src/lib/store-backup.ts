@@ -42,6 +42,8 @@ export const STORE_KEYS = [
   // Neuron tweaker slider values per model and persona (3.0.9, P11).
   'lu-neuron-tweaker',
   'locally-uncensored-agent-goal',
+  // C59 A7: the skills the user saved, and the proposals waiting for them.
+  'lu-skills',
   // Computer control: the switch and the always allowed apps.
   'locally-uncensored-computer',
   // Create in chat: the orders of every conversation, so a card and its

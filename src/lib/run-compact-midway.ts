@@ -467,3 +467,18 @@ export async function compactRunMidway<T extends DecayMessage>(
     tokensAfter,
   }
 }
+
+/**
+ * Would compactRunMidway compact now? The same checks, no side effects
+ * (C59 E6: the memory step comes first).
+ */
+export function runCompactionDue<T extends DecayMessage>(input: Pick<RunCompactInput<T>, 'messages' | 'budgetTokens' | 'modelWindow' | 'activeModel' | 'state' | 'decay'>): boolean {
+  const settings = useSettingsStore.getState().settings
+  if (settings.autoCompact === false || !input.activeModel) return false
+  const threshold = resolveCompactThreshold(settings, input.budgetTokens, input.modelWindow ?? input.budgetTokens)
+  return planRunCompaction({ messages: input.messages, budgetTokens: input.budgetTokens, threshold, state: input.state, decay: input.decay }).reason === 'over'
+}
+
+/** The note a big model gets once, in place of its first compaction (E6). */
+export const MEMORY_FLUSH_NOTE =
+  'Older steps of this run will be summarized next. If this run taught you a durable fact worth keeping beyond this conversation (a user preference, a project fact, a correction), save it now with the memory tool, then go on with the task. If there is nothing, just go on.'
