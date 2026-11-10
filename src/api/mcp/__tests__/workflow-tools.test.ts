@@ -15,6 +15,7 @@ const h = vi.hoisted(() => ({
   checkpoints: vi.fn(),
   check: vi.fn(),
   readWorkflowText: vi.fn(),
+  comfy: true,
 }))
 
 vi.mock('../../backend', async (orig) => ({ ...(await orig<typeof import('../../backend')>()), backendCall: h.backendCall }))
@@ -22,6 +23,7 @@ vi.mock('../../discover', () => ({ startModelDownload: h.startModelDownload }))
 vi.mock('../../comfy-restart', () => ({ restartComfyForNewNodes: h.restart }))
 vi.mock('../../comfyui', async (orig) => ({ ...(await orig<typeof import('../../comfyui')>()), getCheckpoints: h.checkpoints, getDiffusionModels: async () => [] }))
 vi.mock('../../workflow-import', async (orig) => ({ ...(await orig<typeof import('../../workflow-import')>()), readWorkflowText: h.readWorkflowText }))
+vi.mock('../../../lib/capabilities', async (orig) => ({ ...(await orig<typeof import('../../../lib/capabilities')>()), hasComfy: () => h.comfy }))
 vi.mock('../../workflow-find', async (orig) => {
   const real = await orig<typeof import('../../workflow-find')>()
   return { ...real, checkCandidate: h.check }
@@ -331,5 +333,23 @@ describe('errors in words', () => {
   it('a Tauri rejection is a string and still reaches the model', async () => {
     h.check.mockRejectedValue('HTTP 401: https://civitai.com/api/download/models/1')
     expect(await executeWorkflowInspect({ id: candidateId() })).toMatch(/Could not read workflow url\d+: HTTP 401/)
+  })
+})
+
+describe('a Mac has no ComfyUI to run a workflow on', () => {
+  it('every workflow tool says so and changes nothing', async () => {
+    h.comfy = false
+    try {
+      userSays('install it')
+      for (const r of [
+        await executeWorkflowFind({ query: 'sd' }, run()),
+        await executeWorkflowInspect({ id: 'x' }),
+        await executeWorkflowInstall({ id: 'x' }, run()),
+        await executeWorkflowAssign({ workflow: 'a', model: 'b' }, run()),
+      ]) expect(r).toMatch(/^ComfyUI workflows are not used on this computer/)
+      expect(queue()).toHaveLength(0)
+    } finally {
+      h.comfy = true
+    }
   })
 })

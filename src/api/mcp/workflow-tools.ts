@@ -39,6 +39,7 @@ import { useModelStore } from '../../stores/modelStore'
 import { useSettingsAuditStore } from '../../stores/settingsAuditStore'
 import { checkSelfControl, noteCard } from '../../lib/self-control-policy'
 import { taintLabel } from '../../lib/run-taint'
+import { hasComfy } from '../../lib/capabilities'
 import { useWorkflowStore } from '../../stores/workflowStore'
 import { useWorkflowCardStore } from '../../stores/workflowInstallConfirmStore'
 import type { WorkflowTemplate } from '../../types/workflows'
@@ -77,6 +78,9 @@ function errText(e: unknown, max: number): string {
   return (t || 'unknown error').replace(/\s+/g, ' ').slice(0, max)
 }
 
+/** A Mac renders with MLX and never with ComfyUI (lib/capabilities.ts). */
+const NO_COMFY = 'ComfyUI workflows are not used on this computer: on a Mac, Create renders with MLX, not ComfyUI. Nothing changed.'
+
 const NOT_HERE = 'Error: workflows can only be installed in a chat where the user sees the confirmation card. Nothing changed.'
 
 // ── workflow_find ───────────────────────────────────────────────────────────
@@ -93,6 +97,7 @@ function hitLine(c: Candidate): string {
 }
 
 export async function executeWorkflowFind(args: ToolArgs, run?: AgentRunContext): Promise<string> {
+  if (!hasComfy()) return NO_COMFY
   const query = typeof args?.query === 'string' ? args.query.trim().slice(0, 120) : ''
   const url = typeof args?.url === 'string' ? args.url.trim() : ''
   const source = typeof args?.source === 'string' ? args.source : 'all'
@@ -141,6 +146,7 @@ export async function executeWorkflowFind(args: ToolArgs, run?: AgentRunContext)
 export async function executeWorkflowInspect(args: ToolArgs): Promise<string> {
   const id = typeof args?.id === 'string' ? args.id.trim() : ''
   if (!id) return 'Error: id is missing. Use an id from workflow_find.'
+  if (!hasComfy()) return NO_COMFY
   const c = candidateById(id)
   if (!c) return `Error: there is no workflow "${cleanName(id, 40)}" from this session. Call workflow_find first.`
   try {
@@ -202,6 +208,7 @@ async function apiGraphOf(checked: Checked): Promise<{ ok: true; graph: Workflow
 export async function executeWorkflowInstall(args: ToolArgs, run?: AgentRunContext, signal?: AbortSignal): Promise<string> {
   const id = typeof args?.id === 'string' ? args.id.trim() : ''
   if (!id) return 'Error: id is missing. Use an id from workflow_find, checked with workflow_inspect. Nothing changed.'
+  if (!hasComfy()) return NO_COMFY
   if (!run?.settingsCard) return NOT_HERE
   const c = candidateById(id)
   if (!c) return `Error: there is no workflow "${cleanName(id, 40)}" from this session. Call workflow_find first.`
@@ -350,6 +357,7 @@ export async function executeWorkflowAssign(args: ToolArgs, run?: AgentRunContex
   const rawModel = typeof args?.model === 'string' ? args.model.trim() : ''
   if (!want) return 'Error: workflow is missing (name or id of an installed workflow). Nothing changed.'
   if (!rawModel) return 'Error: model is missing (a model file name as ComfyUI lists it). Nothing changed.'
+  if (!hasComfy()) return NO_COMFY
   if (!run?.settingsCard) return NOT_HERE
   const verdict = checkSelfControl(run, { names: assignNames, strong: false, what: 'which workflow a model uses' })
   if (!verdict.ok) { audit(run, want, 'refused', verdict.why); return verdict.reply }
