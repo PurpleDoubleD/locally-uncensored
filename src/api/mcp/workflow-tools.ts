@@ -192,7 +192,11 @@ async function resolveModel(raw: string): Promise<{ ok: true; name: string } | {
   const want = raw.trim().toLowerCase()
   const exact = names.find((n) => n.toLowerCase() === want)
   if (exact) return { ok: true, name: exact }
-  const near = names.filter((n) => n.toLowerCase().includes(want) || want.includes(n.toLowerCase().replace(/\.[^.]+$/, '')))
+  // "Realistic Vision" is how a person names Realistic_Vision_V6.0_NV_B1_fp16.safetensors:
+  // separators and the extension do not count.
+  const norm = (t: string) => t.toLowerCase().replace(/\.(safetensors|sft|gguf|ckpt|pt|pth|bin)$/, '').replace(/[\s_\-./\\]+/g, ' ').trim()
+  const w = norm(raw)
+  const near = w.length < 3 ? [] : names.filter((n) => norm(n).includes(w) || w.includes(norm(n)))
   if (near.length === 1) return { ok: true, name: near[0] }
   return { ok: false, reply: `There is no installed model "${cleanName(raw, 80)}".${near.length ? ` Closest: ${near.slice(0, 4).join(', ')}.` : ''} Nothing changed.` }
 }

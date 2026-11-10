@@ -99,7 +99,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   useWorkflowCardStore.setState({ queue: [] })
   useWorkflowStore.setState({ installedWorkflows: [], modelNameAssignments: {}, modelTypeAssignments: {} })
-  h.checkpoints.mockResolvedValue(['sd15.safetensors', 'flux1-dev.safetensors'])
+  h.checkpoints.mockResolvedValue(['sd15.safetensors', 'flux1-dev.safetensors', 'Realistic_Vision_V6.0_NV_B1_fp16.safetensors'])
   h.backendCall.mockResolvedValue({ status: 'ok' })
   h.startModelDownload.mockResolvedValue({ status: 'started', id: 'd1' })
   h.restart.mockResolvedValue(undefined)
@@ -304,6 +304,14 @@ describe('workflow_assign', () => {
   it('needs the user to ask', async () => {
     userSays('nice')
     expect(await executeWorkflowAssign({ workflow: 'Flux Upscale', model: 'flux1-dev' }, run())).toMatch(/^Refused: the user did not ask/)
+  })
+
+  it('a model named the way a person says it is found', async () => {
+    userSays('nutze den Flux Upscale Workflow für Realistic Vision')
+    const pending = executeWorkflowAssign({ workflow: 'Flux Upscale', model: 'Realistic Vision' }, run())
+    const req = await answerCard(true)
+    expect(req.assign?.model).toBe('Realistic_Vision_V6.0_NV_B1_fp16.safetensors')
+    expect(await pending).toMatch(/now generates with "Flux Upscale"/)
   })
 
   it('card, yes, assigned; an unknown model is refused', async () => {
