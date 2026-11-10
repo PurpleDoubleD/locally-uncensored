@@ -567,11 +567,12 @@ export class OpenAIProvider implements ProviderClient {
    * this template has no branch for. That is exactly the payload the
    * counter-check killed the built-in engine with.
    */
-  private templateContract(messages: ChatMessage[], nativeTools: boolean): ChatMessage[] {
+  private templateContract(messages: ChatMessage[], nativeTools: boolean, model: string): ChatMessage[] {
     const rendersTemplate = this.isLanBackend && !nativeTools
     return applyTemplateContract(messages, {
       toolRole: rendersTemplate ? 'text' : 'native',
       alternate: rendersTemplate,
+      model,
     })
   }
 
@@ -1049,7 +1050,7 @@ export class OpenAIProvider implements ProviderClient {
       // render the model's own Jinja template, which raises "System message
       // must be at the beginning" on anything else and kills the whole turn
       // before a byte streams. See providers/normalize-system.ts.
-      messages: this.templateContract(messages, (options?.tools?.length ?? 0) > 0).map(m => this.toOpenAIMessage(m)),
+      messages: this.templateContract(messages, (options?.tools?.length ?? 0) > 0, model).map(m => this.toOpenAIMessage(m)),
       stream: true,
     }
 
@@ -1303,7 +1304,7 @@ export class OpenAIProvider implements ProviderClient {
     const body: OpenAIChatRequest = {
       model,
       // Bug B3: same invariant as chatStream, see providers/normalize-system.ts.
-      messages: this.templateContract(messages, tools.length > 0).map(m => this.toOpenAIMessage(m)),
+      messages: this.templateContract(messages, tools.length > 0, model).map(m => this.toOpenAIMessage(m)),
       stream: false,
     }
 

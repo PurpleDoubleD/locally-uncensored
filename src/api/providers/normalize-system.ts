@@ -37,6 +37,7 @@
  */
 
 import { buildHermesToolResult, buildHermesToolCall } from '../hermes-tool-calling'
+import { foldSystemForR1 } from '../../lib/r1-system-prompt'
 
 /** The shape this works on. Deliberately looser than ChatMessage so the same
  *  function serves the wire types of all providers. */
@@ -148,6 +149,12 @@ export interface TemplateContract {
   toolRole: 'native' | 'text'
   /** Enforce strict user/assistant alternation behind the system message. */
   alternate: boolean
+  /**
+   * The model the request goes to. C69: a DeepSeek R1 style model gets its
+   * system message folded into the first user turn (lib/r1-system-prompt.ts).
+   * Without it, or for any other model, nothing changes.
+   */
+  model?: string
 }
 
 /** The minimal turn used when two same-role turns cannot be merged. */
@@ -336,7 +343,7 @@ export function userTurnFirst<T extends RoledMessage>(messages: T[]): T[] {
 
 /**
  * The whole contract, in the order the rules depend on each other: system
- * first (round 1), then the tool channel, then the merge of same role turns,
+ * first (round 1), the R1 fold (C69), then the tool channel, then the merge of same role turns,
  * then alternation, because turning
  * a tool result into a user turn is what creates most of the consecutive
  * user turns alternation then has to merge.
@@ -350,6 +357,8 @@ export function applyTemplateContract<T extends ContractMessage>(
   contract: TemplateContract,
 ): T[] {
   let out = userTurnFirst(normalizeSystemMessages(messages))
+  // C69: before the merge and alternation, which tidy up after it.
+  out = foldSystemForR1(contract.model, out)
   if (contract.toolRole === 'text') out = toolRoleAsText(out)
   out = mergeSameRoleTurns(out)
   if (contract.alternate) out = alternateRoles(out)

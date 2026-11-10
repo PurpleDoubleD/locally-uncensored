@@ -143,6 +143,7 @@ export class OllamaProvider implements ProviderClient {
     const ollamaMessages = applyTemplateContract(messages, {
       toolRole: 'text',
       alternate: true,
+      model,
     }).map(m => {
       const msg: OllamaRequestMessage = { role: m.role, content: m.content }
       if (m.images?.length) msg.images = m.images.map(img => img.data)
@@ -314,6 +315,7 @@ export class OllamaProvider implements ProviderClient {
     const ollamaMessages = applyTemplateContract(messages, {
       toolRole: tools.length > 0 ? 'native' : 'text',
       alternate: tools.length === 0,
+      model,
     }).map(m => {
       const msg: OllamaRequestMessage = { role: m.role, content: m.content }
       if (m.tool_calls) msg.tool_calls = m.tool_calls
