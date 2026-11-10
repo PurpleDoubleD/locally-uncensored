@@ -51,7 +51,9 @@ describe('startLocalApiAtLaunch', () => {
     useLocalApiStore.setState({ mitLuStarten: true })
     await startLocalApiAtLaunch()
     const start = calls.find((c) => c.cmd === 'start_local_api')
-    expect(start?.args).toEqual({ port: 8129, lan: true, token: TOKEN, corsOrigins: [] })
+    expect(start?.args).toMatchObject({ port: 8129, lan: true, token: TOKEN, corsOrigins: [], engineDirs: [] })
+    // C57: the API loads LU Engine models itself, with the tuning the chat uses.
+    expect(start?.args).toHaveProperty('engineTuning')
     expect(useLocalApiStore.getState().laeuft).toBe(true)
   })
 

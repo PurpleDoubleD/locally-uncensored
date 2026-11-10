@@ -24,6 +24,8 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { safeJSONStorage } from '../lib/storage-quota'
 import { backendCall } from '../api/backend'
+import { customModelDirs } from '../lib/custom-model-dirs'
+import { useSettingsStore } from './settingsStore'
 import { LOCAL_API_DEFAULT_PORT, kannStarten, parseCorsOrigins, sollBeimStartStarten } from '../lib/local-api'
 
 interface LocalApiState {
@@ -85,8 +87,13 @@ export const useLocalApiStore = create<LocalApiState>()(
         const urteil = kannStarten(token, port)
         if (!urteil.ok) { set({ fehler: urteil.grund }); return }
         try {
+          // C57: die API laedt LU-Engine-Modelle bei Bedarf selbst. Dafuer
+          // braucht sie, was auch die Vorpruefung des Chats nimmt: die Ordner
+          // unter Storage und die Engine-Abstimmung aus den Einstellungen.
           const r = await backendCall<{ address?: string }>('start_local_api', {
             port, lan, token, corsOrigins,
+            engineDirs: customModelDirs(),
+            engineTuning: useSettingsStore.getState().settings.builtinEngine ?? null,
           })
           set({ laeuft: true, adresse: r?.address ?? null, fehler: null })
         } catch (e) {
