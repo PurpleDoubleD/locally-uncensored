@@ -13,11 +13,17 @@
  * paste into support threads. The keychain is the store of record; Rust holds
  * the token in memory only, so saving pushes it down at once and
  * lib/rust-boot-sync pushes it again on every start.
+ *
+ * GitHub #226: on Linux the save used to fail with "keychain unsupported on
+ * this platform". Rust now stores through the Secret Service and, where none
+ * answers, in a 0600 file; when the file is what took the token, the field
+ * says so and names it, so nobody believes it sits in a keyring.
  */
 import { useEffect, useState } from 'react'
 import { KeyRound, Check } from 'lucide-react'
-import { secretGet, secretSet, openExternal } from '../../api/backend'
+import { secretGet, secretSet, secretStoreInfo, openExternal, type SecretStoreInfo } from '../../api/backend'
 import { applyHfToken, HF_TOKEN_ACCOUNT } from '../../api/mlx-image'
+import { Hinweis } from '../ui/Hinweis'
 
 /** Where Hugging Face issues tokens. A read token is enough. */
 export const HF_TOKEN_PAGE = 'https://huggingface.co/settings/tokens'
@@ -27,6 +33,7 @@ export function HfTokenSetting() {
   const [stored, setStored] = useState(false)
   const [saved, setSaved] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [store, setStore] = useState<SecretStoreInfo | null>(null)
 
   useEffect(() => {
     void (async () => {
@@ -34,6 +41,7 @@ export function HfTokenSetting() {
       if (!value) return
       setDraft(value)
       setStored(true)
+      setStore(await secretStoreInfo().catch(() => null))
     })()
   }, [])
 
@@ -45,6 +53,7 @@ export function HfTokenSetting() {
       setDraft(value)
       setStored(value.length > 0)
       setSaved(value.length > 0)
+      setStore(value ? await secretStoreInfo().catch(() => null) : null)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     }
@@ -61,7 +70,8 @@ export function HfTokenSetting() {
         Sent to huggingface.co with every model download, and nowhere else. Without it downloads go out
         anonymous, which the hub throttles, and a gated repository (one whose licence you have to accept
         on its page) refuses the download with HTTP 401. A free read token is enough. It goes into your
-        system credential store where the OS has one and stays on this machine.
+        system credential store (on Linux the Secret Service: GNOME Keyring, KWallet, KeePassXC) and
+        stays on this machine.
       </div>
       <div className="flex items-center gap-2">
         <input
@@ -90,6 +100,14 @@ export function HfTokenSetting() {
           </button>
         )}
       </div>
+      {stored && store?.kind === 'file' && (
+        <Hinweis className="leading-relaxed">
+          No system keyring answered, so the token is saved in a file only your user account can read
+          {store.path ? <>: <span className="font-mono break-all">{store.path}</span></> : null}. Start a
+          keyring (GNOME Keyring, KWallet or KeePassXC with Secret Service on) and LU moves it there on
+          the next start.
+        </Hinweis>
+      )}
       {error && (
         <div role="alert" className="t-micro text-red-400">{error}</div>
       )}

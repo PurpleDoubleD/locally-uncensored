@@ -252,6 +252,8 @@ pub const ALLOWED: &[&str] = &[
     "secret_delete",
     "secret_park_set",
     "secret_park_get",
+    // Where secrets land; on a phone always "os" (Keystore / Keychain), reads nothing.
+    "secret_store_info",
     "secret_park_delete",
     // Remote client: private addresses and *.trycloudflare.com only. The
     // plain one only in the Wi-Fi (and the bare status over the tunnel).

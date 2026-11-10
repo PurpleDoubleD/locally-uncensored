@@ -18,6 +18,7 @@ mod android_entry;
 #[cfg(target_os = "linux")]
 mod linux_media;
 mod app_identity;
+mod appimage_gio;
 // The chat's HTML preview server. A phone starts no server (mobile_guard.rs).
 #[cfg(desktop)]
 mod html_preview;
@@ -598,6 +599,9 @@ pub fn run() {
     // from the tests.
     if cfg!(target_os = "linux") {
         apply_linux_webview_env();
+        // C9: no more gvfs "undefined symbol" lines from an AppImage on a
+        // newer distribution. Before GTK, which loads the GIO modules.
+        appimage_gio::apply();
     }
     // Before anything can spawn a child: an AppImage exports PYTHONHOME and
     // PYTHONPATH into its own mount, and every python3 we start inherits them
@@ -1177,6 +1181,9 @@ pub fn run() {
             commands::secret::secret_park_set,
             commands::secret::secret_park_get,
             commands::secret::secret_park_delete,
+            // Where those land: OS store, or the 0600 file on a Linux
+            // without a Secret Service (GitHub #226).
+            commands::secret::secret_store_info,
             // Web search
             commands::search::web_search,
             commands::search::web_fetch,

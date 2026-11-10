@@ -974,9 +974,10 @@ export async function downloadComfyFile(filename: string, subfolder: string = ''
 
 // ── Provider key keychain (H5) ──────────────────────────────────
 // Thin wrappers over the Rust secret_* commands (Windows Credential Manager /
-// macOS Keychain). They reject on the web build (no Tauri) and on Linux desktop
-// (the command reports unsupported), which is how providerStore detects "no
-// keychain here" and falls back to the obfuscated-localStorage path.
+// macOS Keychain / on Linux the Secret Service, else a 0600 file, GitHub
+// #226). They reject on the web build (no Tauri), which is how providerStore
+// detects "no keychain here" and falls back to the obfuscated-localStorage
+// path.
 export async function secretSet(account: string, value: string): Promise<void> {
   if (!isTauri()) throw new Error('keychain unavailable (web build)')
   const invoke = await getInvoke()
@@ -993,6 +994,22 @@ export async function secretDelete(account: string): Promise<void> {
   if (!isTauri()) throw new Error('keychain unavailable (web build)')
   const invoke = await getInvoke()
   await invoke('secret_delete', { account })
+}
+
+/**
+ * Where `secretSet` puts a value on this machine: the platform's credential
+ * store (`os`), a file only this user can read (`file`, Linux without a
+ * Secret Service, `path` names it), or nowhere Rust-side (`none`).
+ */
+export interface SecretStoreInfo {
+  kind: 'os' | 'file' | 'none'
+  path?: string | null
+}
+
+export async function secretStoreInfo(): Promise<SecretStoreInfo> {
+  if (!isTauri()) return { kind: 'none' }
+  const invoke = await getInvoke()
+  return (await invoke('secret_store_info')) as SecretStoreInfo
 }
 
 // ── Parked provider key keychain (R9) ────────────────────────────

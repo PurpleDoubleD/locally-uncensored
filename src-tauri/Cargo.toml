@@ -319,6 +319,15 @@ x11rb = { version = "0.13", features = ["randr"] }
 # The web view on Linux, already in Cargo.lock through tauri and wry. Only for
 # answering its microphone requests (src/linux_media.rs, GitHub #162).
 webkit2gtk = "=2.0.2"
+# The Secret Service client for the keychain commands on Linux (GitHub #226):
+# GNOME Keyring, KWallet 6, KeePassXC and every other org.freedesktop.secrets
+# provider. MIT OR Apache-2.0, by the keyring-rs maintainers. Pure Rust over the
+# zbus 5 that rfd and the single-instance plugin already bring, so no libdbus
+# or libsecret at build or run time. crypto-rust: the secret crosses the bus
+# encrypted (dh-ietf1024-sha256-aes128-cbc-pkcs7), as libsecret does it.
+# keyring 3's own Linux features were no option: its async backend wants zbus 4
+# (a second copy of the bus stack), its sync one links libdbus.
+secret-service = { version = "=5.2.0", default-features = false, features = ["rt-tokio-crypto-rust"] }
 
 [profile.release]
 panic = "abort"
