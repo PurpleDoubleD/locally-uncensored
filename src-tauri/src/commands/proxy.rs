@@ -1320,6 +1320,158 @@ pub fn cancel_proxy_call(
     Ok(())
 }
 
+/// What `mcp_http_request` hands back: the status, the two headers the
+/// Streamable HTTP transport of MCP lives on, and the body.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpHttpReply {
+    status: u16,
+    content_type: Option<String>,
+    session_id: Option<String>,
+    body: String,
+}
+
+/// An MCP answer is a few kilobytes; a tool result with an image maybe a few
+/// megabytes. Past this the server is not answering a request.
+const MCP_BODY_LIMIT: usize = 16 * 1024 * 1024;
+
+/// True once `buf` holds a complete event stream event whose data is the
+/// JSON-RPC response (result or error) to request `id`.
+fn sse_has_response(buf: &str, id: i64) -> bool {
+    let normalised = buf.replace("\r\n", "\n");
+    let mut events: Vec<&str> = normalised.split("\n\n").collect();
+    // The last piece is an event still being written.
+    events.pop();
+    events.iter().any(|event| {
+        let data: Vec<&str> = event
+            .lines()
+            .filter_map(|l| l.strip_prefix("data:"))
+            .map(|l| l.strip_prefix(' ').unwrap_or(l))
+            .collect();
+        if data.is_empty() {
+            return false;
+        }
+        match serde_json::from_str::<serde_json::Value>(&data.join("\n")) {
+            Ok(v) => {
+                v.get("id").and_then(|x| x.as_i64()) == Some(id)
+                    && v.get("method").is_none()
+                    && (v.get("result").is_some() || v.get("error").is_some())
+            }
+            Err(_) => false,
+        }
+    })
+}
+
+/// One request to an MCP server that the user added by its URL (M1, 3.1.0).
+///
+/// `proxy_localhost` returns the body alone, and Streamable HTTP needs two
+/// response headers besides it: the content type (one JSON answer or an
+/// event stream) and `Mcp-Session-Id`, which a stateful server issues on
+/// `initialize` and wants on every later request. Same allow list, redirect
+/// policy and cancel registry (`cancel_proxy_call`) as `proxy_localhost`. A
+/// non-2xx answer is returned, not turned into an error, so the frontend can
+/// tell an expired session (404) from a refused token (401). An event stream
+/// is read until the response to `expect_id` is in, because a server may
+/// keep the stream open after it (the spec says SHOULD close).
+///
+/// Headers are forwarded as given and never logged: they carry the user's
+/// token for that server.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub async fn mcp_http_request(
+    url: String,
+    method: Option<String>,
+    body: Option<String>,
+    headers: Option<std::collections::HashMap<String, String>>,
+    expect_id: Option<i64>,
+    timeout_ms: Option<u64>,
+    call_id: Option<String>,
+    state: tauri::State<'_, crate::state::AppState>,
+) -> Result<McpHttpReply, String> {
+    use futures_util::StreamExt;
+
+    let allow = ProxyAllowList::snapshot(&state);
+    allow.check(&url)?;
+    let timeout = Duration::from_millis(timeout_ms.unwrap_or(120_000).clamp(1_000, 600_000));
+    let client = proxy_client(timeout, allow)?;
+
+    let mut request = match method.as_deref().unwrap_or("POST") {
+        "GET" => client.get(&url),
+        "DELETE" => client.delete(&url),
+        _ => client.post(&url),
+    };
+    request = apply_body_and_headers(request, body, headers);
+
+    let (token, _guard) = match call_id {
+        Some(id) => {
+            let (token, guard) = state.call_tokens.register(id);
+            (token, Some(guard))
+        }
+        None => (tokio_util::sync::CancellationToken::new(), None),
+    };
+    if token.is_cancelled() {
+        return Err("mcp_http_request: cancelled".to_string());
+    }
+
+    let resp = tokio::select! {
+        biased;
+        _ = token.cancelled() => return Err("mcp_http_request: cancelled".to_string()),
+        r = request.send() => r.map_err(|e| format!("mcp_http_request: {}", os_error::english(&e)))?,
+    };
+
+    let status = resp.status().as_u16();
+    let header = |name: &str| {
+        resp.headers()
+            .get(name)
+            .and_then(|v| v.to_str().ok())
+            .map(|v| v.to_string())
+    };
+    let content_type = header("content-type");
+    let session_id = header("mcp-session-id");
+    let is_stream = content_type
+        .as_deref()
+        .is_some_and(|t| t.to_ascii_lowercase().contains("text/event-stream"));
+
+    let mut bytes: Vec<u8> = Vec::new();
+    let mut stream = resp.bytes_stream();
+    loop {
+        let next = tokio::select! {
+            biased;
+            _ = token.cancelled() => return Err("mcp_http_request: cancelled".to_string()),
+            n = stream.next() => n,
+        };
+        match next {
+            None => break,
+            Some(Err(e)) => {
+                // A stream that breaks after the answer was in is still an answer.
+                if is_stream && expect_id.is_some_and(|id| sse_has_response(&String::from_utf8_lossy(&bytes), id)) {
+                    break;
+                }
+                return Err(format!("mcp_http_request: {}", os_error::english(&e)));
+            }
+            Some(Ok(chunk)) => {
+                bytes.extend_from_slice(&chunk);
+                if bytes.len() > MCP_BODY_LIMIT {
+                    return Err("mcp_http_request: the answer is larger than 16 MB".to_string());
+                }
+                if is_stream
+                    && (200..300).contains(&status)
+                    && expect_id.is_some_and(|id| sse_has_response(&String::from_utf8_lossy(&bytes), id))
+                {
+                    break;
+                }
+            }
+        }
+    }
+
+    Ok(McpHttpReply {
+        status,
+        content_type,
+        session_id,
+        body: String::from_utf8_lossy(&bytes).into_owned(),
+    })
+}
+
 /// Streaming localhost proxy — BUFFERS the whole body (no streaming). Kept for
 /// non-streaming callers (e.g. proxy-download). For chat, use the chunked variant
 /// below so a long generation doesn't look like a multi-minute "model loading" hang.
@@ -1881,6 +2033,23 @@ pub async fn ollama_search(query: String) -> Result<serde_json::Value, String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn mcp_event_stream_is_done_once_the_answer_is_in() {
+        use super::sse_has_response;
+        // A progress notification first, then the answer to request 3.
+        let note = "event: message\ndata: {\"jsonrpc\":\"2.0\",\"method\":\"notifications/progress\",\"params\":{}}\n\n";
+        assert!(!sse_has_response(note, 3));
+        let half = format!("{note}data: {{\"jsonrpc\":\"2.0\",\"id\":3,\"result\":{{}}}}");
+        assert!(!sse_has_response(&half, 3), "an event still being written is not in yet");
+        let full = format!("{half}\n\n");
+        assert!(sse_has_response(&full, 3));
+        assert!(!sse_has_response(&full, 4), "an answer to another request does not count");
+        // A request from the server with the same id is no answer.
+        assert!(!sse_has_response("data: {\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"ping\"}\n\n", 3));
+        // CRLF framing and an error answer.
+        assert!(sse_has_response("data: {\"jsonrpc\":\"2.0\",\"id\":7,\"error\":{\"code\":-1,\"message\":\"x\"}}\r\n\r\n", 7));
+    }
+
     use super::*;
 
     fn built_headers(

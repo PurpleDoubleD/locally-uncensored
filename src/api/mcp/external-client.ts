@@ -2,7 +2,9 @@
  * MCP External Client — connects to external MCP servers via stdio JSON-RPC.
  *
  * Uses @tauri-apps/plugin-shell to spawn server processes
- * and communicate via stdin/stdout JSON-RPC 2.0.
+ * and communicate via stdin/stdout JSON-RPC 2.0. Servers reached over a URL
+ * (Streamable HTTP) use `http-client.ts`; the parsing of what a server sends
+ * back (responses, tool lists, tool results) is shared from here.
  */
 
 import type { Child } from '@tauri-apps/plugin-shell'
@@ -27,7 +29,7 @@ interface JsonRpcRequest {
   params?: unknown
 }
 
-interface JsonRpcResponse {
+export interface JsonRpcResponse {
   jsonrpc: '2.0'
   /** Absent on a notification — the server may talk without being asked. */
   id?: number
@@ -44,7 +46,7 @@ interface JsonRpcResponse {
  * than discarded — that is strictly better than the `Error: undefined` the
  * pre-typing code produced for exactly these lines.
  */
-function jsonRpcErrorMessage(raw: unknown): string {
+export function jsonRpcErrorMessage(raw: unknown): string {
   if (isRecord(raw)) {
     const msg = asString(raw.message)
     if (msg) return msg
@@ -66,7 +68,7 @@ function jsonRpcErrorMessage(raw: unknown): string {
  * Anything that is not a record, or carries no usable `id`, is a notification
  * or noise and is ignored.
  */
-function parseJsonRpcResponse(v: unknown): JsonRpcResponse | null {
+export function parseJsonRpcResponse(v: unknown): JsonRpcResponse | null {
   if (!isRecord(v)) return null
   const id = asNumber(v.id)
   const rawError = v.error
@@ -155,6 +157,53 @@ const EMPTY_INPUT_SCHEMA: MCPToolDefinition['inputSchema'] = {
   type: 'object',
   properties: {},
   required: [],
+}
+
+/**
+ * The tools of one `tools/list` result, as the registry takes them. Shared by
+ * both transports, so a server reached over a URL is held to the same checks
+ * as one LU starts itself.
+ */
+export function toolsFromListResult(result: unknown, config: Pick<MCPServerConfig, 'id' | 'name'>): MCPToolDefinition[] {
+  const tools: MCPToolDefinition[] = []
+  for (const t of asRecordArray(prop(result, 'tools'))) {
+    const toolName = asString(t.name)
+    // A tool with no name cannot be looked up, called or unregistered; it
+    // used to land in the registry under the key `undefined`.
+    if (!toolName) {
+      log.warn(`[MCP:${config.name}] ignoring a tool with no name in tools/list`)
+      continue
+    }
+    tools.push({
+      name: toolName,
+      description: asString(t.description) || '',
+      inputSchema: isToolInputSchema(t.inputSchema) ? t.inputSchema : EMPTY_INPUT_SCHEMA,
+      // Their own permission row (B12): an external tool can do anything
+      // its server does, and Ask First is the default for that row.
+      category: 'mcp',
+      source: 'external',
+      serverId: config.id,
+      serverName: config.name,
+    })
+  }
+  return tools
+}
+
+/** What the model reads back from a `tools/call` result. */
+export function toolResultText(result: unknown): string {
+  // MCP returns a content array of `{ type, ... }` blocks.
+  const content = prop(result, 'content')
+  if (Array.isArray(content)) {
+    return content
+      .map((c: unknown) => {
+        const type = prop(c, 'type')
+        if (type === 'text') return asString(prop(c, 'text')) ?? ''
+        if (type === 'image') return `[Image: ${String(prop(c, 'mimeType'))}]`
+        return JSON.stringify(c)
+      })
+      .join('\n')
+  }
+  return JSON.stringify(result)
 }
 
 /**
@@ -354,26 +403,7 @@ export class MCPExternalClient {
 
       // Discover tools
       const toolsResult = await this.sendRequest('tools/list', {})
-      const tools: MCPToolDefinition[] = []
-      for (const t of asRecordArray(prop(toolsResult, 'tools'))) {
-        const toolName = asString(t.name)
-        // A tool with no name cannot be looked up, called or unregistered — it
-        // used to land in the registry under the key `undefined`.
-        if (!toolName) {
-          log.warn(`[MCP:${this.config.name}] ignoring a tool with no name in tools/list`)
-          continue
-        }
-        tools.push({
-          name: toolName,
-          description: asString(t.description) || '',
-          inputSchema: isToolInputSchema(t.inputSchema) ? t.inputSchema : EMPTY_INPUT_SCHEMA,
-          // Their own permission row (B12): an external tool can do anything
-          // its server does, and Ask First is the default for that row.
-          category: 'mcp',
-          source: 'external',
-          serverId: this.config.id,
-        })
-      }
+      const tools = toolsFromListResult(toolsResult, this.config)
 
       this.registered = true
       this.onProgress?.(null)
@@ -394,20 +424,7 @@ export class MCPExternalClient {
     if (!this.connected) throw new Error('Not connected')
 
     const result = await this.sendRequest('tools/call', { name, arguments: args })
-
-    // MCP returns a content array of `{ type, ... }` blocks.
-    const content = prop(result, 'content')
-    if (Array.isArray(content)) {
-      return content
-        .map((c: unknown) => {
-          const type = prop(c, 'type')
-          if (type === 'text') return asString(prop(c, 'text')) ?? ''
-          if (type === 'image') return `[Image: ${String(prop(c, 'mimeType'))}]`
-          return JSON.stringify(c)
-        })
-        .join('\n')
-    }
-    return JSON.stringify(result)
+    return toolResultText(result)
   }
 
   async disconnect() {
@@ -645,6 +662,10 @@ export function isStartableMcpCommand(command: string): boolean {
  * weder ein SSE- noch ein HTTP-Transport. Ein Ausweg, den das Produkt nicht
  * hat, ist schlimmer als keiner, weil der Nutzer nach einem Feld sucht, das
  * es nie gab.
+ *
+ * Seit M1 (13.11.2026) gibt es den Weg: ein Server kann als URL eingetragen
+ * werden (http-client.ts, Streamable HTTP). Der Satz hier bleibt beim Befehl,
+ * weil er einem Eintrag mit Befehl antwortet.
  *
  * Am 05.09.2026 fiel ein zweiter Ausweg derselben Sorte auf, diesmal von einem
  * Tester, der die App zum ersten Mal bediente. Der Ersatzsatz sagte "Change the

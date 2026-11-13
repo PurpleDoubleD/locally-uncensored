@@ -15,6 +15,7 @@ import { useEffect, useRef } from 'react'
 import { Terminal } from 'lucide-react'
 import { useCodexConfirmStore } from '../../stores/codexConfirmStore'
 import { useSettingsStore } from '../../stores/settingsStore'
+import { toolRegistry } from '../../api/mcp/tool-registry'
 
 export function CodexConfirmDialog() {
   const pending = useCodexConfirmStore((s) => s.pending)
@@ -46,7 +47,7 @@ export function CodexConfirmDialog() {
       <div className="rounded-lg border border-purple-500/20 bg-purple-500/[0.04] px-2 py-1.5">
         <div className="flex items-center gap-1.5 t-micro text-gray-700 dark:text-gray-300">
           <Terminal size={10} className="text-purple-400 shrink-0" />
-          <span className="font-mono">{pending.toolName}</span>
+          <span className="font-mono">{toolRegistry.displayName(pending.toolName)}</span>
           <span className="text-gray-500">needs your ok</span>
         </div>
 

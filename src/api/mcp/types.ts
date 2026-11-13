@@ -73,14 +73,35 @@ export interface MCPToolDefinition {
   category: ToolCategory
   source: 'builtin' | 'external'
   serverId?: string // for external MCP server tools
+  /** The name the user gave the server, for `<server>: <tool>` in the UI. */
+  serverName?: string
   /** One line, at most 150 characters, for a tool search that lists tools
    *  without their schema (C59/C60, 3.1.0). Never sent as the description. */
   brief?: string
 }
 
+/**
+ * How LU reaches an external server: 'stdio' starts a local command (npx or
+ * uvx) and talks over its stdin and stdout, 'http' posts to one URL
+ * (Streamable HTTP, MCP 2025-03-26 and later). An entry from before M1 has no
+ * transport and is 'stdio'.
+ */
+export type MCPTransport = 'stdio' | 'http'
+
 export interface MCPServerConfig {
   id: string
   name: string
+  /** Left out on every entry saved before M1, which means 'stdio'. */
+  transport?: MCPTransport
+  /** The endpoint of an 'http' server. */
+  url?: string
+  /**
+   * True when a token or headers for this server sit in the vault
+   * (lib/mcp-secrets.ts). The values themselves are never in this object, so
+   * they never reach localStorage, a log line or an export.
+   */
+  hasAuth?: boolean
+  /** Empty for an 'http' server. */
   command: string
   args: string[]
   env?: Record<string, string>
@@ -92,6 +113,11 @@ export interface MCPServerConfig {
    *  its packages are in, and that can take minutes (lib/plugins/rea.ts). */
   initializeTimeoutMs?: number
   enabled: boolean
+}
+
+/** Is this entry reached over a URL? */
+export function isHttpServer(config: Pick<MCPServerConfig, 'transport'>): boolean {
+  return config.transport === 'http'
 }
 
 /**
