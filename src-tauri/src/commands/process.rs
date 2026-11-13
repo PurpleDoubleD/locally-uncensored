@@ -1533,6 +1533,12 @@ fn kill_port_owner(port: u16) {
     }
 }
 
+/// Pure: may the CORS fix end the listener on the ComfyUI port? Only when the
+/// port answers as ComfyUI, and never from a test build.
+fn comfy_port_may_be_freed(answers_as_comfyui: bool, test_build: bool) -> bool {
+    answers_as_comfyui && !test_build
+}
+
 /// One-click fix for the ComfyUI 0.19+ cross-origin block banner (#75/#82
 /// follow-up, 2026-07-17): stop the user-managed ComfyUI on the
 /// configured port and relaunch it under LU's management — LU-started
@@ -1591,7 +1597,12 @@ fn fix_comfyui_cors_blocking(state: &AppState) -> Result<serde_json::Value, Stri
             *proc = None;
         }
     }
-    kill_port_owner(port);
+    // Only a ComfyUI. The button exists for the ComfyUI behind the CORS
+    // banner; whatever else listens on the port (another app, a second LU's
+    // ComfyUI that stopped answering) is not this click's to end (N3, 3.1.0).
+    if comfy_port_may_be_freed(is_comfyui_running_on_port(port), cfg!(test)) {
+        kill_port_owner(port);
+    }
 
     // Wait for the port to actually free up — start_comfyui short-circuits
     // with "already_running" while the old process is still winding down.
@@ -6248,5 +6259,13 @@ mod boot_start_gpu_tests {
             let spawn = body.rfind(".spawn()").unwrap_or_else(|| panic!("{name} spawns nothing"));
             assert!(call < spawn, "{name} applies the card after the spawn");
         }
+    }
+
+    #[test]
+    fn the_cors_fix_ends_only_a_comfyui_and_never_from_a_test() {
+        use super::comfy_port_may_be_freed;
+        assert!(comfy_port_may_be_freed(true, false), "the ComfyUI behind the banner");
+        assert!(!comfy_port_may_be_freed(false, false), "a stranger on the port");
+        assert!(!comfy_port_may_be_freed(true, true), "a test build ends nothing");
     }
 }

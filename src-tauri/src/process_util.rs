@@ -803,52 +803,65 @@ pub fn kill_pid_tree(pid: u32) {
     }
 }
 
-/// Best-effort stop of whatever process is LISTENING on a local TCP port.
-/// Used by the "Stop" buttons for port-bound backends the bridge didn't spawn
-/// itself (so there's no `Child` handle to kill) — the MLX sidecar and the
-/// Ollama server. Only the listener is targeted (`-sTCP:LISTEN`), so the
-/// bridge's own client connections to that port aren't hit.
-// Gated like its only caller (state.rs, app quit): on Windows and Linux the
-// function had no caller and a unix-only body, and `-D warnings` on the
-// Windows CI row rejected it as dead. The gate says where it is alive.
+/// One process LISTENING on a local TCP port, as far as the process table
+/// knows it: its parent and its argv.
+#[cfg(any(target_os = "macos", test))]
+#[derive(Debug, Clone, PartialEq)]
+pub struct PortListener {
+    pub pid: u32,
+    pub parent: Option<u32>,
+    pub cmd: Vec<String>,
+}
+
+/// Every process listening on `port` (`lsof -sTCP:LISTEN`, so the bridge's
+/// own client connections to that port are not among them).
 #[cfg(target_os = "macos")]
-pub fn kill_listeners_on_port(port: u16) {
-    #[cfg(unix)]
-    {
-        if let Ok(out) = Command::new("lsof")
-            .args(["-ti", &format!("tcp:{port}"), "-sTCP:LISTEN"])
-            .stderr(Stdio::null())
-            .output()
-        {
-            for pid in String::from_utf8_lossy(&out.stdout)
-                .split_whitespace()
-                .filter_map(|s| s.parse::<i32>().ok())
-            {
-                unsafe {
-                    libc::kill(pid, libc::SIGTERM);
-                }
+pub fn listeners_on_port(port: u16) -> Vec<PortListener> {
+    let Ok(out) = foreign_system_command("lsof")
+        .args(["-nP", "-ti", &format!("tcp:{port}"), "-sTCP:LISTEN"])
+        .stderr(Stdio::null())
+        .output()
+    else {
+        return Vec::new();
+    };
+    let table = process_table_with_cmdlines();
+    String::from_utf8_lossy(&out.stdout)
+        .split_whitespace()
+        .filter_map(|s| s.parse::<u32>().ok())
+        .map(|pid| {
+            let process = table.process(sysinfo::Pid::from_u32(pid));
+            PortListener {
+                pid,
+                parent: process.and_then(|p| p.parent()).map(|p| p.as_u32()),
+                cmd: process.map(cmdline_of).unwrap_or_default(),
             }
+        })
+        .collect()
+}
+
+/// Stop the listeners on `port` that `owned` says are ours, and only those.
+/// Returns the pids that were asked to stop.
+///
+/// Until 3.1.0 this was `kill_listeners_on_port`: SIGTERM to whatever listened
+/// on the port, no questions asked (N2's finding, 13.11.2026). Its caller is
+/// the quit path, and the quit path also runs in `Drop for AppState`, so every
+/// `cargo test` that built and dropped an `AppState` ended the MLX sidecar of
+/// the real LU running on the same Mac. A second LU, or a test build with its
+/// own identity, lost its sidecar the same way when the other one quit. The
+/// caller now names what it owns; a stranger on the port is left alone.
+#[cfg(target_os = "macos")]
+pub fn kill_own_listeners_on_port(port: u16, owned: impl Fn(&PortListener) -> bool) -> Vec<u32> {
+    let mut stopped = Vec::new();
+    for listener in listeners_on_port(port) {
+        if listener.pid == std::process::id() || !owned(&listener) {
+            continue;
         }
-    }
-    #[cfg(windows)]
-    {
-        if let Ok(out) = Command::new("cmd")
-            .args(["/C", &format!("netstat -ano -p tcp | findstr LISTENING | findstr :{port}")])
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .output()
-        {
-            for line in String::from_utf8_lossy(&out.stdout).lines() {
-                if let Some(pid) = line.split_whitespace().last() {
-                    let _ = Command::new("taskkill")
-                        .args(["/F", "/PID", pid])
-                        .stdout(Stdio::null())
-                        .stderr(Stdio::null())
-                        .status();
-                }
-            }
+        unsafe {
+            libc::kill(listener.pid as i32, libc::SIGTERM);
         }
+        stopped.push(listener.pid);
     }
+    stopped
 }
 
 #[cfg(unix)]
@@ -1380,13 +1393,14 @@ mod command_new_coverage_guard {
     }
 }
 
-/// Windows-Gegenprobe, 09.10.2026: `kill_listeners_on_port` exists on the Mac
+/// Windows-Gegenprobe, 09.10.2026: the MLX port sweep (since 3.1.0
+/// `commands::mlx::sweep_orphaned_sidecar`) exists on the Mac
 /// alone, and a call without the same gate compiles on the Mac and nowhere
 /// else. `mlx.rs` had one, and the branch did not build on Windows. Nothing
 /// on a Mac says so, so this reads the sources on every platform.
 #[cfg(test)]
 mod mac_only_port_sweep_guard {
-    const CALL: &str = "kill_listeners_on_port(";
+    const CALL: &str = "sweep_orphaned_sidecar(";
     const GATE: &str = "#[cfg(target_os = \"macos\")]";
 
     /// The lines that call the sweep without the gate on one of the three
@@ -1435,10 +1449,10 @@ mod mac_only_port_sweep_guard {
 
     #[test]
     fn the_guard_sees_a_call_without_the_gate() {
-        let gated = "fn a() {\n    #[cfg(target_os = \"macos\")]\n    crate::process_util::kill_listeners_on_port(1);\n}\n";
-        let block = "fn a() {\n    #[cfg(target_os = \"macos\")]\n    {\n        kill_listeners_on_port(1);\n    }\n}\n";
-        let bare = "fn a() {\n    stop();\n    crate::process_util::kill_listeners_on_port(1);\n}\n";
-        let comment = "// kill_listeners_on_port(1) was here\n";
+        let gated = "fn a() {\n    #[cfg(target_os = \"macos\")]\n    crate::commands::mlx::sweep_orphaned_sidecar();\n}\n";
+        let block = "fn a() {\n    #[cfg(target_os = \"macos\")]\n    {\n        sweep_orphaned_sidecar();\n    }\n}\n";
+        let bare = "fn a() {\n    stop();\n    crate::commands::mlx::sweep_orphaned_sidecar();\n}\n";
+        let comment = "// sweep_orphaned_sidecar() was here\n";
         assert!(ungated_calls(gated).is_empty());
         assert!(ungated_calls(block).is_empty());
         assert!(ungated_calls(comment).is_empty());

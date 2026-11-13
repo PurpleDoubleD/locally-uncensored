@@ -754,10 +754,15 @@ impl AppState {
         crate::commands::music::stop();
         // And a character training, the same way.
         crate::commands::mlx::train::stop();
+        // Only a sidecar of THIS app (its server.py, started by this process
+        // or orphaned by an earlier run of it), and never from a test: this
+        // path also runs in `Drop for AppState`, and `cargo test` ended the
+        // real LU's sidecar through it (N2, 13.11.2026).
         #[cfg(target_os = "macos")]
         {
-            crate::process_util::kill_listeners_on_port(crate::commands::mlx::MLX_PORT);
-            println!("[MLX] image sidecar stopped (explicit shutdown)");
+            if !crate::commands::mlx::sweep_orphaned_sidecar().is_empty() {
+                println!("[MLX] image sidecar stopped (explicit shutdown)");
+            }
         }
 
         // MLX installs: pip and the hub downloads. Each one registers the
