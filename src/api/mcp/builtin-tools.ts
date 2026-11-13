@@ -1577,6 +1577,10 @@ async function executeImageGenerate(args: ToolArgs, run?: AgentRunContext, signa
   if (stop?.aborted) return 'Image generation cancelled.'
   const sizeRej = mediaSizeReject(merged)
   if (sizeRej) return sizeRej
+  // The gate first, on what the call asks for: a character renders nothing
+  // before it, and the checks below cover what the character adds.
+  const asked = localRenderBlocked({ ...merged, prompt })
+  if (asked) return asked
 
   // Hard rule: on macOS, local image generation is Apple MLX only — ComfyUI
   // never runs there (see isMlxImageHost() / useCreate.ts's MLX image
@@ -1651,6 +1655,10 @@ async function executeVideoGenerate(args: ToolArgs, run?: AgentRunContext, signa
   if (stop?.aborted) return 'Video generation cancelled.'
   const sizeRej = mediaSizeReject(merged)
   if (sizeRej) return sizeRej
+  // The gate first: a character's chain renders its picture before the clip,
+  // and that picture must not start on a prompt the gate refuses.
+  const asked = localRenderBlocked(merged)
+  if (asked) return asked
 
   // Hard rule: on macOS, local video generation is Apple MLX only — ComfyUI
   // never runs there. Route around vram-handoff entirely (no VRAM juggling —
@@ -1895,7 +1903,8 @@ async function characterChatDeps(run?: AgentRunContext, signal?: AbortSignal): P
   return {
     characters: () => listLocalCharacters(),
     imageModels: () => comfy.getImageModels(),
-    renderImage: (a) => vramHandoffGenerate('image', a, generationOwnerOf(run), { signal }),
+    // Every picture the chain renders passes the gate itself too.
+    renderImage: async (a) => localRenderBlocked(a) ?? vramHandoffGenerate('image', a, generationOwnerOf(run), { signal }),
     failed: isMediaFailureResult,
     takesStartImage: comfy.isI2VModel,
   }
@@ -1914,6 +1923,8 @@ async function macCharacterChatDeps(signal?: AbortSignal): Promise<CharacterChat
     characters: () => listLocalCharacters(),
     imageModels: async () => (await listMlxImageModels()).filter((m) => m.installed).map((m) => ({ name: m.name, type: mlxModelType(m) })),
     renderImage: async (a) => {
+      const blocked = localRenderBlocked(a)
+      if (blocked) return blocked
       const out = await executeImageGenerateMlx(String(a.prompt ?? ''), a, signal)
       const url = out.split('\n')[1] ?? ''
       if (!out.startsWith('Image generated:') || !url.startsWith('file:')) return out

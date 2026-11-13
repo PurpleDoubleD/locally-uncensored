@@ -24,6 +24,7 @@ import { backendCall, isTauri } from '../api/backend'
 import { fileUrlToPath } from './local-media-url'
 import { isMediaFailureResult } from './media-result'
 import { log } from './logger'
+import { blockMessageFor, checkPromptSafety } from './render/safety'
 import { FROM_YOUR_PHONE, type GalleryOut, type LaneCaps, type LaneInput, type LaneKind, type LaneWatch } from './remote-create-lanes'
 
 export const REMOTE_CREATE_EVENT = 'remote-create-job'
@@ -210,6 +211,12 @@ export function createRemoteCreateRunner(deps: RemoteCreateDeps): RemoteCreateRu
     const outputs: RemoteCreateOutput[] = []
     let error: string | null = null
     try {
+      // The same gate as Create and the chat (lib/render/safety.ts), before
+      // anything runs: a lane (edit, music, upscale, cut-out) reaches the
+      // engines without image_generate, so it would pass unchecked otherwise.
+      // The negative prompt is read apart (B30).
+      const verdict = checkPromptSafety(`${job.prompt} ${job.lyrics ?? ''} ${job.character ?? ''}`, { negative: job.negative })
+      if (verdict.blocked) throw new Error(blockMessageFor(verdict.reason))
       if (!(await deps.progress(job.id, { progress: 0, stepText: 'Starting', index: 0 }))) return
       stopWatch = deps.watchEngine?.(report)
       if (lane) {
