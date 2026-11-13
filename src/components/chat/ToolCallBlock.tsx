@@ -443,6 +443,9 @@ function ToolCallBlockImpl({ toolCall, onApprove, onReject }: Props) {
             isPending ? HINWEIS_TEXT.ruhig :
             'text-gray-500'
           } ${isRunning ? 'animate-spin' : ''}`} />
+          {isRunning && !waitsOnCard && toolCall.duration == null && (
+            <RunningFor since={toolCall.startedAt ?? toolCall.timestamp} />
+          )}
           {toolCall.duration != null && (
             <span className="t-micro text-gray-500 dark:text-gray-500">
               {toolCall.duration < 1000 ? `${toolCall.duration}ms` : `${(toolCall.duration / 1000).toFixed(1)}s`}
@@ -708,5 +711,24 @@ A user 2026-06-07 fix this lived inside the collapsed details, so a
         )}
       </AnimatePresence>
     </div>
+  )
+}
+
+/**
+ * CA U1: seconds on a call that is still going, so a long `npm install` reads
+ * as working, not stuck. Quiet for the first 3 s: most reads end before that.
+ */
+function RunningFor({ since }: { since: number }) {
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(t)
+  }, [])
+  const s = Math.floor((now - since) / 1000)
+  if (!Number.isFinite(s) || s < 3) return null
+  return (
+    <span className="t-micro tabular-nums text-gray-500 dark:text-gray-500" data-testid="tool-running-for">
+      {s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`}
+    </span>
   )
 }
