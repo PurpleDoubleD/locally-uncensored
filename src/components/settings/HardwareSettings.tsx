@@ -56,6 +56,7 @@ export function HardwareSettings() {
   // was picked, so Force GPU with the vendor on Auto changed the mode without
   // a word, and the running ComfyUI kept the flags it was started with.
   const [comfyModeChanged, setComfyModeChanged] = useState(false)
+  const [probeHint, setProbeHint] = useState<string | null>(null)
   const [comfyRestart, setComfyRestart] = useState<{ busy: boolean; done: boolean; error: string }>({ busy: false, done: false, error: '' })
 
   const vendor = (settings.gpuVendor || 'auto') as GpuVendor
@@ -69,7 +70,16 @@ export function HardwareSettings() {
     setError(null)
     try {
       const result = await backendCall<DetectedGpu[]>('detect_gpus')
-      setGpus(Array.isArray(result) ? result : [])
+      const list = Array.isArray(result) ? result : []
+      setGpus(list)
+      // C74: under Linux an empty list is often just a missing lspci
+      // (Distrobox, Toolbox, minimal systems). The backend says so, or null.
+      setProbeHint(null)
+      if (list.length === 0) {
+        backendCall<string | null>('gpu_probe_hint')
+          .then(h => setProbeHint(typeof h === 'string' && h ? h : null))
+          .catch(() => {})
+      }
     } catch (e) {
       setError(`GPU detection failed: ${e instanceof Error ? e.message : String(e)}`)
       setGpus([])
@@ -196,7 +206,12 @@ export function HardwareSettings() {
         )}
         {!error && gpus.length === 0 && !loading && (
           <Hinweis className="italic">
-            No GPUs detected via nvidia-smi / rocm-smi / lspci / wmic. The "Auto" vendor option still works, Ollama will use whatever the driver picks.
+            No GPUs detected via nvidia-smi / rocm-smi / lspci / sysfs / wmic. The "Auto" vendor option still works, Ollama will use whatever the driver picks.
+          </Hinweis>
+        )}
+        {!error && gpus.length === 0 && !loading && probeHint && (
+          <Hinweis className="mt-1.5" icon={<AlertTriangle size={11} className="shrink-0 mt-[3px]" />}>
+            <span data-testid="gpu-probe-hint">{probeHint}</span>
           </Hinweis>
         )}
         {gpusForVendor.length > 0 && (

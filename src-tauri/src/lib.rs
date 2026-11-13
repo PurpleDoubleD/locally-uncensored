@@ -1279,6 +1279,7 @@ pub fn run() {
             commands::logging::read_log_tail,
             // Bug BB v2.5.0 — a user GPU picker
             commands::gpu::detect_gpus,
+            commands::gpu::gpu_probe_hint,
             commands::gpu::set_gpu_selection,
             commands::gpu::get_gpu_selection,
             commands::gpu_roles::set_gpu_roles,

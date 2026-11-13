@@ -95,6 +95,7 @@ import { HighTemperatureWarning } from '../chat/HighTemperatureWarning'
 import { BoundedNumberInput } from './BoundedNumberInput'
 import { CONTEXT_WINDOW_MAX, MAX_TOKENS_MAX, SUB_AGENT_LIMIT_MAX } from '../../lib/number-limits'
 import { usePageMemoryStore } from '../../stores/pageMemoryStore'
+import { SeparateComfyInstall, COMFY_PATH_CONNECT_HINT } from './SeparateComfyInstall'
 
 // ── User profile picture (Appearance) ───────────────────────────
 // Self-contained like HfDownloadPathSetting. Stores the picture as a
@@ -1245,6 +1246,10 @@ export function ComfyUISettings() {
             Connect
           </button>
         </div>
+        {/* C80: the field alone does nothing; GitHub #230 read it as saved. */}
+        {customPath.trim() && customPath.trim() !== status?.path && !pathError && !pathSuccess && (
+          <p className={`t-micro ${HINWEIS_TEXT.ruhig}`} data-testid="comfy-path-connect-hint">{COMFY_PATH_CONNECT_HINT}</p>
+        )}
         {pathError && <p className="text-[0.55rem] text-red-400">{pathError}</p>}
         {pathSuccess && <p className="text-[0.55rem] text-green-400">Path set successfully</p>}
       </div>
@@ -1473,6 +1478,18 @@ export function ComfyUISettings() {
           </div>
         )}
       </div>
+      )}
+      {/* C80 (GitHub #230): a second, separate install next to the found one.
+          Its own row: the button row above does not wrap. */}
+      {status?.isLocal !== false && status?.found && status?.complete !== false && installIdle && (
+        <SeparateComfyInstall
+          currentPath={status?.path}
+          onInstall={(target) => {
+            clearInstallNotice()
+            void useComfyInstallStore.getState().runInstall(target)
+          }}
+          buttonClassName="flex items-center gap-1 px-2 py-1 rounded t-micro bg-white/5 text-gray-400 hover:text-gray-200 hover:bg-white/10 transition-colors"
+        />
       )}
       <ComfyUpdateConfirmModal
         open={updateConfirmOpen}

@@ -17,6 +17,12 @@
  */
 
 export interface TauriMockOptions {
+  /** Fixed answers for single commands, checked before the router (3.1.0,
+   *  N3): a spec that only needs one surface in a given state names the
+   *  command and its answer here instead of growing the router. Reads
+   *  `window.__E2E_INVOKE_OVERRIDES__` too, so a spec can change an answer
+   *  after the page has loaded. */
+  invokeOverrides?: Record<string, unknown>
   /** Keep chat attachments (write/read_chat_attachment) for real, in
    *  sessionStorage. Off by default: other specs keep the old no-op. */
   attachmentStore?: boolean
@@ -911,6 +917,8 @@ export function tauriMockInit(opts: TauriMockOptions) {
   }
 
   function router(cmd: string, args: any): Promise<any> {
+    const overrides = { ...(opts.invokeOverrides ?? {}), ...(w.__E2E_INVOKE_OVERRIDES__ ?? {}) }
+    if (Object.prototype.hasOwnProperty.call(overrides, cmd)) return Promise.resolve(overrides[cmd])
     // The MLX wrappers (api/mlx-image.ts invokeMedia) nest their payload under
     // an `args` key to match the Rust `args: Value` signature — unwrap once so
     // the cases below read the fields the caller actually sent.
@@ -2104,6 +2112,8 @@ export function tauriMockInit(opts: TauriMockOptions) {
       if (listener.event === event) callbacks[listener.handler]?.({ event, id: listener.handler, payload })
     }
   }
+  // A spec raises a backend event the way Rust would (lu-sidecar-gone, N3).
+  w.__E2E_EMIT__ = emit
 
   w.__TAURI_INTERNALS__ = {
     metadata: {

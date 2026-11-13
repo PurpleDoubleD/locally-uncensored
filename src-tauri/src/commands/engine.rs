@@ -4539,7 +4539,10 @@ fn spawn_engine_attempt(
             cpu_fallback: flags.cpu_fallback,
             sanity_note: None,
             image_part_note: None,
+            stderr: diagnostics.as_ref().map(|(buf, _)| std::sync::Arc::clone(buf)),
         });
+        // A new engine: what the last one died of is history (C81).
+        clear_last_engine_exit();
     }
 
     let outcome = wait_for_health_or_exit(state, port, health_timeout_for(model_path));
@@ -4699,6 +4702,8 @@ pub async fn bundled_engine_status(app: AppHandle) -> Result<serde_json::Value, 
                 "port": DEFAULT_ENGINE_PORT,
                 "model_path": null,
                 "ctx": null,
+                // C81: what the last engine died of, when it died on its own.
+                "lastExit": last_engine_exit_note(),
                 "cpuOnly": false,
                 "gpuLayers": null,
                 "sanityNote": null,
@@ -5328,21 +5333,197 @@ pub async fn import_local_model(
 /// its process. Reaping here also leaves the state fit for the next start,
 /// which would otherwise find a stale child in the slot.
 pub(crate) fn reap_dead_engine(slot: &mut Option<BundledEngine>) -> bool {
-    let gone = match slot.as_mut() {
+    reap_dead_engine_exit(slot).is_some()
+}
+
+/// How a sidecar ended, as far as the operating system and its own stderr say.
+///
+/// C81 (3.1.0): c1rrus, Linux/ROCm, the engine vanished mid-answer and the log
+/// said only "the sidecar is gone". The status the reap had in its hand was
+/// thrown away, and so was the stderr the drain thread kept collecting. Both
+/// are now carried here, logged, and turned into one sentence for the UI.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct SidecarExit {
+    pub code: Option<i32>,
+    pub signal: Option<i32>,
+    /// The last stderr lines, ANSI stripped. Empty when nothing was piped.
+    pub stderr_tail: String,
+    /// True for the `--embeddings` server, false for the chat engine.
+    pub embed: bool,
+}
+
+/// How many stderr lines a death carries into the log and the event.
+const EXIT_TAIL_LINES: usize = 20;
+
+/// The reap, with what it found. `None` while the child lives, or when the
+/// question could not be asked.
+pub(crate) fn reap_dead_engine_exit(slot: &mut Option<BundledEngine>) -> Option<SidecarExit> {
+    let status = match slot.as_mut() {
         // Ok(Some(status)) is an exited child; Ok(None) is a live one. An Err
         // means the question could not be asked, and a handle we cannot ask
         // about is not evidence of death, so it is left alone.
-        Some(e) => matches!(e.child.try_wait(), Ok(Some(_))),
-        None => false,
+        Some(e) => match e.child.try_wait() {
+            Ok(Some(status)) => status,
+            _ => return None,
+        },
+        None => return None,
     };
-    if gone {
-        if let Some(mut e) = slot.take() {
-            let _ = e.child.wait();
-            // Said for both sidecars, so the wording names neither.
-            tracing::warn!(target: "engine", port = e.port, "the sidecar is gone, clearing the handle");
+    let mut e = slot.take()?;
+    let _ = e.child.wait();
+    let exit = SidecarExit {
+        code: status.code(),
+        signal: unix_exit_signal(&status),
+        stderr_tail: e
+            .stderr
+            .as_ref()
+            .map(|buf| super::shell::captured_tail(buf, EXIT_TAIL_LINES))
+            .unwrap_or_default(),
+        embed: e.args.iter().any(|a| a == "--embeddings"),
+    };
+    // Said for both sidecars, so the wording names neither; the fields do.
+    tracing::warn!(
+        target: "engine",
+        port = e.port,
+        model = %e.model_path,
+        sidecar = if exit.embed { SIDECAR_EMBED } else { SIDECAR_ENGINE },
+        exit_code = exit.code.map(|c| c.to_string()).unwrap_or_else(|| "none".into()),
+        signal = exit.signal.map(|s| s.to_string()).unwrap_or_else(|| "none".into()),
+        cause = %exit_cause_words(exit.code, exit.signal),
+        "the sidecar is gone, clearing the handle"
+    );
+    if !exit.stderr_tail.is_empty() {
+        tracing::warn!(target: "engine", port = e.port, "last stderr lines of the sidecar:\n{}", exit.stderr_tail);
+    }
+    // The phone's in-process engine has no exit status of its own (its
+    // `try_wait` reports a made-up success), so only a real process speaks.
+    if !exit.embed && cfg!(desktop) {
+        if let Ok(mut last) = LAST_ENGINE_EXIT.lock() {
+            *last = Some(engine_exit_note(&exit));
         }
     }
-    gone
+    Some(exit)
+}
+
+/// What the chat engine died of last, as the sentence the status shows while
+/// no engine runs. Cleared by the next start.
+static LAST_ENGINE_EXIT: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+fn clear_last_engine_exit() {
+    if let Ok(mut last) = LAST_ENGINE_EXIT.lock() {
+        *last = None;
+    }
+}
+
+pub(crate) fn last_engine_exit_note() -> Option<String> {
+    LAST_ENGINE_EXIT.lock().ok().and_then(|g| g.clone())
+}
+
+/// The POSIX name of the signals a model server actually dies of.
+fn signal_name(signal: i32) -> Option<&'static str> {
+    Some(match signal {
+        2 => "SIGINT",
+        4 => "SIGILL",
+        6 => "SIGABRT",
+        7 => "SIGBUS",
+        9 => "SIGKILL",
+        11 => "SIGSEGV",
+        15 => "SIGTERM",
+        _ => return None,
+    })
+}
+
+/// What that signal usually means for a llama-server, in a user's words.
+fn signal_meaning(signal: i32) -> Option<&'static str> {
+    Some(match signal {
+        2 => "it was interrupted",
+        4 => "the processor does not support an instruction the engine uses",
+        6 => "the engine stopped itself on an internal error, often a graphics driver error",
+        7 => "a memory access failed, for example because the model file changed or its disk went away",
+        9 => "it was killed from outside, on Linux most often by the system's out-of-memory killer",
+        11 => "it crashed inside the engine or the graphics driver",
+        15 => "it was asked to stop from outside LU",
+        _ => return None,
+    })
+}
+
+/// Windows NTSTATUS crash codes, read back from `ExitStatus::code()`.
+fn windows_code_meaning(code: i32) -> Option<&'static str> {
+    match code as u32 {
+        0xC000_0005 => Some("it crashed inside the engine or the graphics driver (access violation)"),
+        0xC000_001D => Some("the processor lacks AVX2, which the engine needs"),
+        0xC000_0409 => Some("the engine stopped itself on an internal error"),
+        0xC000_00FD => Some("the engine ran out of stack"),
+        0xC000_0017 | 0xC000_012D => Some("the computer ran out of memory"),
+        0xC000_0135 => Some("a DLL the engine needs was not found"),
+        0xC000_013A => Some("it was stopped with Ctrl+C or Ctrl+Break"),
+        _ => None,
+    }
+}
+
+/// The short label: "signal 6, SIGABRT", "exit code 0xC0000005", "exit code 1".
+fn exit_label(code: Option<i32>, signal: Option<i32>) -> String {
+    match (code, signal) {
+        (_, Some(sig)) => match signal_name(sig) {
+            Some(name) => format!("signal {sig}, {name}"),
+            None => format!("signal {sig}"),
+        },
+        (Some(c), None) if windows_code_meaning(c).is_some() => format!("exit code 0x{:08X}", c as u32),
+        (Some(c), None) => format!("exit code {c}"),
+        (None, None) => "no exit code".into(),
+    }
+}
+
+fn exit_meaning(code: Option<i32>, signal: Option<i32>) -> Option<&'static str> {
+    match (code, signal) {
+        (_, Some(sig)) => signal_meaning(sig),
+        (Some(c), None) => windows_code_meaning(c),
+        (None, None) => None,
+    }
+}
+
+/// For the log: "signal 6, SIGABRT: the engine stopped itself on …".
+pub(crate) fn exit_cause_words(code: Option<i32>, signal: Option<i32>) -> String {
+    match exit_meaning(code, signal) {
+        Some(m) => format!("{}: {m}", exit_label(code, signal)),
+        None => exit_label(code, signal),
+    }
+}
+
+/// What the stderr tail says the trouble was, when it says something a user
+/// can act on. Read from the end: the last words are the cause.
+fn stderr_exit_hint(tail: &str) -> Option<&'static str> {
+    let lower = tail.to_ascii_lowercase();
+    if lower.contains("out of memory") || lower.contains("outofmemory") || lower.contains("failed to allocate") {
+        return Some("The graphics card ran out of memory. A smaller model, a shorter context or fewer GPU layers usually fixes this.");
+    }
+    if lower.contains("rocm error") || lower.contains("hip error") || lower.contains("hiperror") {
+        return Some("The ROCm driver reported an error. Updating the AMD driver or ROCm, or starting the engine on Vulkan, usually helps.");
+    }
+    if lower.contains("cuda error") {
+        return Some("The NVIDIA driver reported an error. Updating the NVIDIA driver usually helps.");
+    }
+    if lower.contains("vk::") || lower.contains("vulkan error") || lower.contains("devicelost") || lower.contains("device lost") {
+        return Some("The Vulkan driver lost the graphics card. Updating the graphics driver usually helps.");
+    }
+    None
+}
+
+/// The one sentence a user reads about an engine that stopped on its own.
+///
+/// What the engine itself said wins over what the signal usually means: a
+/// "ROCm error: out of memory" before a SIGABRT is the cause, the abort only
+/// the way it ended.
+pub(crate) fn engine_exit_note(exit: &SidecarExit) -> String {
+    let label = exit_label(exit.code, exit.signal);
+    let tail = "It starts again with your next message; details are in the log.";
+    if let Some(hint) = stderr_exit_hint(&exit.stderr_tail) {
+        return format!("The LU Engine stopped unexpectedly ({label}). {hint} {tail}");
+    }
+    let memory = if exit.signal == Some(9) { " A smaller model or a shorter context usually fixes this." } else { "" };
+    match exit_meaning(exit.code, exit.signal) {
+        Some(meaning) => format!("The LU Engine stopped unexpectedly ({label}): {meaning}.{memory} {tail}"),
+        None => format!("The LU Engine stopped unexpectedly ({label}). {tail}"),
+    }
 }
 
 /// What a status command should report for a sidecar slot: the port, the model
@@ -5430,9 +5611,23 @@ pub(crate) const SIDECAR_WATCH_INTERVAL: Duration = Duration::from_millis(1500);
 /// Split out from the loop so the decision is testable without a Tauri app:
 /// the port has to be read BEFORE the reap, because the reap is what throws
 /// the handle away.
-pub(crate) fn reaped_sidecar_port(slot: &mut Option<BundledEngine>) -> Option<u16> {
-    let port = slot.as_ref().map(|e| e.port);
-    if reap_dead_engine(slot) { port } else { None }
+pub(crate) fn reaped_sidecar_port(slot: &mut Option<BundledEngine>) -> Option<(u16, SidecarExit)> {
+    let port = slot.as_ref().map(|e| e.port)?;
+    reap_dead_engine_exit(slot).map(|exit| (port, exit))
+}
+
+/// The payload of `SIDECAR_GONE_EVENT`. `message` is the sentence for the
+/// chat engine; the embeddings server has no surface and gets none.
+pub(crate) fn sidecar_gone_payload(sidecar: &str, port: u16, exit: &SidecarExit) -> serde_json::Value {
+    serde_json::json!({
+        "sidecar": sidecar,
+        "port": port,
+        "exitCode": exit.code,
+        "signal": exit.signal,
+        "cause": exit_cause_words(exit.code, exit.signal),
+        "stderrTail": exit.stderr_tail,
+        "message": if exit.embed || !cfg!(desktop) { None } else { Some(engine_exit_note(exit)) },
+    })
 }
 
 /// Start the watch. One thread for both sidecars, for the life of the app.
@@ -5445,22 +5640,19 @@ pub fn spawn_sidecar_watch(app: AppHandle) {
         loop {
             std::thread::sleep(SIDECAR_WATCH_INTERVAL);
             let state = app.state::<AppState>();
-            let mut gone: Vec<(&'static str, u16)> = Vec::new();
+            let mut gone: Vec<(&'static str, u16, SidecarExit)> = Vec::new();
             if let Ok(mut guard) = state.bundled_engine.lock() {
-                if let Some(port) = reaped_sidecar_port(&mut guard) {
-                    gone.push((SIDECAR_ENGINE, port));
+                if let Some((port, exit)) = reaped_sidecar_port(&mut guard) {
+                    gone.push((SIDECAR_ENGINE, port, exit));
                 }
             }
             if let Ok(mut guard) = state.bundled_embed.lock() {
-                if let Some(port) = reaped_sidecar_port(&mut guard) {
-                    gone.push((SIDECAR_EMBED, port));
+                if let Some((port, exit)) = reaped_sidecar_port(&mut guard) {
+                    gone.push((SIDECAR_EMBED, port, exit));
                 }
             }
-            for (sidecar, port) in gone {
-                let _ = app.emit(SIDECAR_GONE_EVENT, serde_json::json!({
-                    "sidecar": sidecar,
-                    "port": port,
-                }));
+            for (sidecar, port, exit) in gone {
+                let _ = app.emit(SIDECAR_GONE_EVENT, sidecar_gone_payload(sidecar, port, &exit));
             }
         }
     });
@@ -5632,6 +5824,7 @@ fn start_bundled_embed_blocking(
         cpu_fallback: false,
         sanity_note: None,
         image_part_note: None,
+        stderr: diagnostics.as_ref().map(|(buf, _)| std::sync::Arc::clone(buf)),
     });
 
     if let Err(e) = wait_for_health(port, health_timeout_for(&model_path)) {
@@ -6059,6 +6252,7 @@ fn load_into(
         // The engine inside the app loads no image part (the phone catalogue
         // names none), so there is nothing that could have stayed out.
         image_part_note: None,
+        stderr: None,
     });
     tracing::info!(target: "engine", port, ctx = up.n_ctx, gpu_layers = up.gpu_layers, cpu_fallback = up.cpu_fallback, "the LU Engine is serving in-process");
     Ok(answer)
@@ -6130,6 +6324,7 @@ fn start_bundled_embed_blocking(
         cpu_fallback: false,
         sanity_note: None,
         image_part_note: None,
+        stderr: None,
     });
     // `low` and `critical` both take the embeddings model, so a kept warning
     // always means it is gone again.
@@ -8930,6 +9125,7 @@ mod tests {
             cpu_fallback: false,
             sanity_note: None,
             image_part_note: None,
+            stderr: None,
         });
     }
 
@@ -9190,6 +9386,7 @@ mod tests {
             cpu_fallback: false,
             sanity_note: None,
             image_part_note: None,
+            stderr: None,
         })
     }
 
@@ -9382,14 +9579,115 @@ mod tests {
         let mut slot = engine_around(child, DEFAULT_ENGINE_PORT);
 
         assert_eq!(
-            reaped_sidecar_port(&mut slot),
-            Some(DEFAULT_ENGINE_PORT),
+            reaped_sidecar_port(&mut slot).map(|(port, exit)| (port, exit.code)),
+            Some((DEFAULT_ENGINE_PORT, Some(0))),
             "the watch could not say which sidecar had gone",
         );
         assert!(slot.is_none(), "the handle survived its process");
         // A second tick has nothing to report: the event fires once, not on
         // every tick for the rest of the session.
         assert_eq!(reaped_sidecar_port(&mut slot), None);
+    }
+
+    // ── C81: how the sidecar died, not only that it did ─────────────────────
+
+    /// A real child that writes llama.cpp's last words to stderr and then
+    /// dies of `how`, with its stderr drained the way the start drains it.
+    #[cfg(unix)]
+    fn dying_engine(script: &str, embed: bool) -> Option<BundledEngine> {
+        let mut child = std::process::Command::new(crate::test_support::posix_shell())
+            .args(["-c", script])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("spawn a child that dies");
+        let (buf, done) = super::super::shell::drain(child.stderr.take().unwrap());
+        let mut slot = engine_around(child, DEFAULT_ENGINE_PORT);
+        if let Some(e) = slot.as_mut() {
+            e.stderr = Some(buf);
+            if embed {
+                e.args = vec!["--embeddings".into()];
+            }
+            // The death has to have happened before the reap asks.
+            let _ = e.child.wait();
+        }
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !done.load(std::sync::atomic::Ordering::Acquire) && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        slot
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn c1rrus_mid_answer_death_names_its_signal_and_its_last_lines() {
+        // The c1rrus case: ROCm, the engine gone mid-answer. Before 3.1.0 the
+        // log said "the sidecar is gone" and nothing else.
+        let mut slot = dying_engine(
+            "echo 'srv  update_slots: decoding' >&2; \
+             echo 'ggml_cuda_compute_forward: ROCm error: out of memory' >&2; \
+             kill -ABRT $$",
+            false,
+        );
+        let (port, exit) = reaped_sidecar_port(&mut slot).expect("reaped");
+        assert_eq!(port, DEFAULT_ENGINE_PORT);
+        assert_eq!(exit.signal, Some(6), "{exit:?}");
+        assert_eq!(exit.code, None);
+        assert!(exit.stderr_tail.ends_with("ROCm error: out of memory"), "{exit:?}");
+        let note = engine_exit_note(&exit);
+        assert!(note.starts_with("The LU Engine stopped unexpectedly (signal 6, SIGABRT). The graphics card ran out of memory."), "{note}");
+        assert!(note.contains("ran out of memory"), "{note}");
+        let payload = sidecar_gone_payload(SIDECAR_ENGINE, port, &exit);
+        assert_eq!(payload["signal"], 6);
+        assert_eq!(payload["message"], serde_json::Value::String(note));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_sigkill_without_words_points_at_memory() {
+        let mut slot = dying_engine("kill -KILL $$", false);
+        let (_, exit) = reaped_sidecar_port(&mut slot).expect("reaped");
+        assert_eq!(exit.signal, Some(9));
+        assert!(exit.stderr_tail.is_empty());
+        let note = engine_exit_note(&exit);
+        assert!(note.contains("(signal 9, SIGKILL): it was killed from outside") && note.contains("out-of-memory killer"), "{note}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_embeddings_server_is_logged_but_tells_the_chat_nothing() {
+        let mut slot = dying_engine("echo 'bye' >&2; exit 3", true);
+        let (port, exit) = reaped_sidecar_port(&mut slot).expect("reaped");
+        assert!(exit.embed);
+        assert_eq!(exit.code, Some(3));
+        assert_eq!(exit.stderr_tail, "bye");
+        let payload = sidecar_gone_payload(SIDECAR_EMBED, port, &exit);
+        assert!(payload["message"].is_null(), "{payload}");
+        assert_eq!(payload["cause"], "exit code 3");
+    }
+
+    #[test]
+    fn exit_causes_read_like_words_on_every_platform() {
+        assert_eq!(exit_cause_words(Some(1), None), "exit code 1");
+        assert_eq!(exit_cause_words(None, None), "no exit code");
+        assert!(exit_cause_words(None, Some(11)).starts_with("signal 11, SIGSEGV: it crashed"));
+        assert_eq!(exit_cause_words(None, Some(42)), "signal 42");
+        // Windows hands NTSTATUS back as a negative i32.
+        assert_eq!(
+            exit_cause_words(Some(0xC000_0005u32 as i32), None),
+            "exit code 0xC0000005: it crashed inside the engine or the graphics driver (access violation)",
+        );
+        assert!(exit_cause_words(Some(ILLEGAL_INSTRUCTION_EXIT_CODE), None).contains("AVX2"));
+        // A driver error in the tail beats the generic signal guess.
+        let exit = SidecarExit { code: None, signal: Some(9), stderr_tail: "CUDA error: an illegal memory access".into(), embed: false };
+        assert!(engine_exit_note(&exit).contains("NVIDIA driver"));
+        // Nothing to say beyond the cause: no invented advice.
+        let exit = SidecarExit { code: Some(1), signal: None, stderr_tail: "something".into(), embed: false };
+        assert_eq!(
+            engine_exit_note(&exit),
+            "The LU Engine stopped unexpectedly (exit code 1). It starts again with your next message; details are in the log.",
+        );
     }
 
     #[test]

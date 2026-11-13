@@ -35,6 +35,7 @@ import { isRunning, formatElapsed, lastLog, type InstallerStatusResponse } from 
 import type { Step } from './wizard-steps'
 import type { OnboardingSkin } from './onboarding-skin'
 import type { InstallerFleet } from './use-installer-fleet'
+import { SeparateComfyInstall, COMFY_PATH_CONNECT_HINT } from '../settings/SeparateComfyInstall'
 
 interface ComfyStepProps {
   skin: OnboardingSkin
@@ -248,6 +249,70 @@ export function ComfyStep({ skin, fleet, step, setStep }: ComfyStepProps) {
   // Installation nicht durchlaeuft und jemand Platz schaffen muss.
   const diskPressure = comfyInstall.logs.find(l => l.startsWith('⚠'))?.replace(/^⚠\s*/, '')
 
+  /** The install, with its Python pre-flight and its progress card. C80: an
+   *  `installPath` puts a separate ComfyUI there instead of the default. */
+  const startComfyInstall = async (installPath?: string) => {
+    // P14 pre-flight, install Python first if missing,
+    // then proceed with the original ComfyUI flow. Both
+    // progress cards animate from this single click; the
+    // user never has to interact mid-flight.
+    const pythonOk = await ensurePythonInstalled()
+    if (!pythonOk) return
+
+    comfyDo({ type: 'start', at: Date.now(), log: 'Starting ComfyUI installation...' })
+    try {
+      await (installPath ? backendCall('install_comfyui', { installPath }) : backendCall('install_comfyui'))
+      // Poll installation status
+      const poll = setInterval(async () => {
+        try {
+          const status = await backendCall<InstallerStatusResponse>('install_comfyui_status')
+          comfyDo({
+            type: 'progress',
+            status: status.status,
+            logs: status.logs || [],
+            received: status.download_progress || 0,
+            total: status.download_total || 0,
+            speed: status.download_speed || 0,
+          })
+          if (status.status === 'complete' || status.status === 'done') {
+            clearInterval(poll)
+            comfyDo({ type: 'ready' })
+            setComfyReady(true)
+            // C80: a separate install is now the one LU uses.
+            if (installPath) setComfyFound({ found: true, complete: true, path: installPath })
+            // Auto-start ComfyUI.
+            //
+            // Level (b): the install DID finish, which is what
+            // this step was for, so the wizard moves on to its
+            // ready state either way. But "ready" would then be
+            // claiming something that is not running, so say so.
+            try {
+              await backendCall('start_comfyui')
+            } catch (e) {
+              // `warn`, nicht `fail`: die Installation IST
+              // durch — nur der Start danach nicht.
+              comfyDo({ type: 'warn', error: withDetail(
+                'ComfyUI is installed but did not start. You can start it from Settings → ComfyUI later; the rest of the setup is unaffected.',
+                e,
+              ) })
+            }
+          } else if (status.status === 'cancelled') {
+            // Bug #1: install cancelled by user, close the
+            // progress card and surface the install options
+            // again so they can retry or pick another drive.
+            clearInterval(poll)
+            comfyDo({ type: 'fail', error: 'Install cancelled.' })
+          } else if (status.status === 'error') {
+            clearInterval(poll)
+            comfyDo({ type: 'fail', error: withInstallerOutput('Installing ComfyUI did not finish.', lastLog(status.logs)) })
+          }
+        } catch { /* keep polling */ }
+      }, 2000)
+    } catch (err) {
+      comfyDo({ type: 'fail', error: err instanceof Error ? err.message : 'Installation failed' })
+    }
+  }
+
   return (
     <>
       {/* D-S39: hier stand ein nackter 13,8px-Punkt in `bg-purple-400`
@@ -342,6 +407,18 @@ export function ComfyStep({ skin, fleet, step, setStep }: ComfyStepProps) {
             <span className="text-[0.7rem] font-medium">ComfyUI detected</span>
           </div>
           <p className={`text-[0.55rem] font-mono mt-1 ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>{comfyFound.path}</p>
+          {/* C80 (GitHub #230): keep the found one and install a separate one. */}
+          {!isMacOS() && (
+            <div className="mt-2 flex justify-center">
+              <SeparateComfyInstall
+                currentPath={comfyFound.path}
+                onInstall={(target) => void startComfyInstall(target)}
+                disabled={isRunning(pythonInstall)}
+                buttonClassName={secondaryBtn}
+                textClassName={`t-micro ${isDark ? 'text-gray-400' : 'text-gray-600'}`}
+              />
+            </div>
+          )}
         </div>
       )}
 
@@ -360,65 +437,7 @@ export function ComfyStep({ skin, fleet, step, setStep }: ComfyStepProps) {
             </Hinweis>
           )}
           <button
-            onClick={async () => {
-              // P14 pre-flight, install Python first if missing,
-              // then proceed with the original ComfyUI flow. Both
-              // progress cards animate from this single click; the
-              // user never has to interact mid-flight.
-              const pythonOk = await ensurePythonInstalled()
-              if (!pythonOk) return
-
-              comfyDo({ type: 'start', at: Date.now(), log: 'Starting ComfyUI installation...' })
-              try {
-                await backendCall('install_comfyui')
-                // Poll installation status
-                const poll = setInterval(async () => {
-                  try {
-                    const status = await backendCall<InstallerStatusResponse>('install_comfyui_status')
-                    comfyDo({
-                      type: 'progress',
-                      status: status.status,
-                      logs: status.logs || [],
-                      received: status.download_progress || 0,
-                      total: status.download_total || 0,
-                      speed: status.download_speed || 0,
-                    })
-                    if (status.status === 'complete' || status.status === 'done') {
-                      clearInterval(poll)
-                      comfyDo({ type: 'ready' })
-                      setComfyReady(true)
-                      // Auto-start ComfyUI.
-                      //
-                      // Level (b): the install DID finish, which is what
-                      // this step was for, so the wizard moves on to its
-                      // ready state either way. But "ready" would then be
-                      // claiming something that is not running, so say so.
-                      try {
-                        await backendCall('start_comfyui')
-                      } catch (e) {
-                        // `warn`, nicht `fail`: die Installation IST
-                        // durch — nur der Start danach nicht.
-                        comfyDo({ type: 'warn', error: withDetail(
-                          'ComfyUI is installed but did not start. You can start it from Settings → ComfyUI later; the rest of the setup is unaffected.',
-                          e,
-                        ) })
-                      }
-                    } else if (status.status === 'cancelled') {
-                      // Bug #1: install cancelled by user, close the
-                      // progress card and surface the install options
-                      // again so they can retry or pick another drive.
-                      clearInterval(poll)
-                      comfyDo({ type: 'fail', error: 'Install cancelled.' })
-                    } else if (status.status === 'error') {
-                      clearInterval(poll)
-                      comfyDo({ type: 'fail', error: withInstallerOutput('Installing ComfyUI did not finish.', lastLog(status.logs)) })
-                    }
-                  } catch { /* keep polling */ }
-                }, 2000)
-              } catch (err) {
-                comfyDo({ type: 'fail', error: err instanceof Error ? err.message : 'Installation failed' })
-              }
-            }}
+            onClick={() => void startComfyInstall()}
             className="lu-primary w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-[0.7rem] transition-all"
           >
             <Download size={14} /> Install ComfyUI (Recommended)
@@ -483,6 +502,9 @@ export function ComfyStep({ skin, fleet, step, setStep }: ComfyStepProps) {
                 Connect
               </button>
             </div>
+          )}
+          {comfyPathInput !== undefined && comfyPathInput.trim() !== '' && (
+            <Hinweis className="text-left">{COMFY_PATH_CONNECT_HINT}</Hinweis>
           )}
         </div>
       )}

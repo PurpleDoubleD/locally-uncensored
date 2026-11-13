@@ -299,8 +299,56 @@
   !insertmacro LU_ENSURE_WEBVIEW2
 !macroend
 
-; The stock uninstaller removes only the files it copied itself and then the
-; folder if it is empty, so the bootstrapper copy above would keep it alive.
+; C67 (3.1.0): the uninstaller left the llama.cpp libraries behind.
+;
+; P-J on the Windows box, 10.11.2026: after an uninstall the program folder
+; still held ggml*.dll, llama*.dll, mtmd.dll and llama-server-impl.dll, and
+; the folder itself stayed. The stock uninstaller deletes exactly the file list
+; of the build that wrote it and nothing else, which misses three cases:
+;   - a library an OLDER release shipped and this one no longer does: the
+;     companion set is whatever cmake built (build-llama.sh,
+;     stage_dynamic_isa_companions), so names come and go between llama.cpp
+;     versions, and an update only ever copies, it never removes;
+;   - a library still loaded by an orphaned lu-llama-server.exe (a crash, a
+;     hard kill): Windows refuses to delete a mapped image, Delete fails
+;     without a word, and CheckIfAppIsRunning only looks for the main exe;
+;   - the `.old` copies LU_FREE_SIDECAR renames aside when a lock outlives it.
+; Then `RMDir "$INSTDIR"` finds the folder not empty and leaves it.
+;
+; Only our own folder is swept: the families below are deleted only when the
+; main exe was there at the start of the uninstall (the same caution as the
+; index.html check in LU_SWEEP_OLD_FRONTEND), and only by the names llama.cpp
+; gives its libraries, never *.dll. The sweep runs AFTER the stock section, so
+; an uninstall that is cancelled at "the app is running" never loses a file.
+Var LuOwnInstall
+
 !macro NSIS_HOOK_PREUNINSTALL
+  ; The stock uninstaller removes only the files it copied itself and then the
+  ; folder if it is empty, so the bootstrapper copy above would keep it alive.
   Delete "$INSTDIR\MicrosoftEdgeWebview2Setup.exe"
+  StrCpy $LuOwnInstall 0
+  ${If} ${FileExists} "$INSTDIR\${MAINBINARYNAME}.exe"
+    StrCpy $LuOwnInstall 1
+  ${EndIf}
+!macroend
+
+!macro LU_SWEEP_ENGINE_LIBRARIES
+  ${If} $LuOwnInstall = 1
+    ; An orphaned engine still maps the libraries; end it by its exact path.
+    !insertmacro LU_FREE_SIDECAR "lu-llama-server.exe"
+    Delete "$INSTDIR\lu-llama-server.exe"
+    Delete "$INSTDIR\lu-llama-cvector-generator.exe"
+    Delete /REBOOTOK "$INSTDIR\lu-llama-server.exe.old"
+    Delete /REBOOTOK "$INSTDIR\llama-server.exe.old"
+    Delete /REBOOTOK "$INSTDIR\ggml*.dll"
+    Delete /REBOOTOK "$INSTDIR\llama*.dll"
+    Delete /REBOOTOK "$INSTDIR\mtmd*.dll"
+    ; The stock RMDir already ran and found these files. Ask again; it still
+    ; only removes an EMPTY folder, so anything of the user's keeps it.
+    RMDir "$INSTDIR"
+  ${EndIf}
+!macroend
+
+!macro NSIS_HOOK_POSTUNINSTALL
+  !insertmacro LU_SWEEP_ENGINE_LIBRARIES
 !macroend

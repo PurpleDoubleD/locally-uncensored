@@ -223,6 +223,7 @@ pub const ALLOWED: &[&str] = &[
     "log_write",
     "log_file_path",
     "detect_gpus",
+    "gpu_probe_hint",
     "set_gpu_selection",
     "get_gpu_selection",
     "funnel_ping",

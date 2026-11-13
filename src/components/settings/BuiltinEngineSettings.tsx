@@ -127,6 +127,12 @@ export function BuiltinEngineSettings() {
           'Engine not running, settings apply automatically on the next start.'
         )}
       </div>
+      {/* C81 (3.1.0): the last engine died on its own; say how, until the next start. */}
+      {!running && status?.lastExit ? (
+        <div className="t-micro text-red-600 dark:text-red-400 leading-relaxed" data-testid="builtin-engine-last-exit">
+          {status.lastExit}
+        </div>
+      ) : null}
       {/* A13: which port the engine really holds. It starts its walk at 8127
           and takes the next free one when that is held, and until now the only
           place that said so was the log. */}
