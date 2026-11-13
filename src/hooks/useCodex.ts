@@ -28,6 +28,9 @@ import {
 } from '../lib/agent-fanout'
 import { setExplicitFanout } from '../api/agents/sub-agent'
 import { appendTaskReport } from '../lib/agent-task-report'
+import { finishWithoutTools, finishSection } from '../lib/agent-core/finish'
+import { appendSteers } from '../lib/agent-core/steer'
+import { useSteerStore } from '../stores/steerStore'
 import { useAgentTaskStore } from '../stores/agentTaskStore'
 import { useAgentGoalStore, renderGoalSection } from '../stores/agentGoalStore'
 import { endLoopUnlessRearmed, useAgentLoopStore } from '../stores/agentLoopStore'
@@ -1322,15 +1325,20 @@ export function useCodex() {
           () => useAgentTaskStore.getState().takeUnreported(convId!),
           Date.now(),
         )
+        // CA U2: what the user wrote while the run was going (same seam).
+        for (const steer of appendSteers(messages, () => useSteerStore.getState().take(convId!), (content) => ({ role: 'user' as const, content }))) {
+          addBlock({ id: uuid(), phase: 'reflection', content: steer.text, steer: true, timestamp: Date.now() })
+          diagLog('steer-read', { chars: steer.text.length })
+        }
         budget.addIteration()
         const bx = budget.exceeded()
         if (bx.kind !== 'none') {
           diagLog('budget-halt', { iter: i, kind: bx.kind })
-          useChatStore.getState().updateMessageContent(
-            convId!,
-            assistantMsg.id,
-            (fullContent ? fullContent + '\n\n' : '') + budget.haltMessage()
-          )
+          const halted = (fullContent ? fullContent + '\n\n' : '') + budget.haltMessage()
+          useChatStore.getState().updateMessageContent(convId!, assistantMsg.id, halted)
+          // CA U6: one pass without tools says what is done and what is open.
+          const summary = await finishWithoutTools({ provider, model: modelToUse, messages, signal: abort.signal })
+          if (summary) useChatStore.getState().updateMessageContent(convId!, assistantMsg.id, halted + finishSection(summary))
           break
         }
         let toolCalls: ToolCall[] = []
@@ -2257,6 +2265,10 @@ export function useCodex() {
           diagLog('loop-guard-halt', { iter: i, reason: batchVerdict.reason })
           const msg = `\n\n_(halted: ${batchVerdict.reason}. The model is looping. Try a stronger model for multi-step code tasks, or rephrase the instruction.)_`
           useChatStore.getState().updateMessageContent(convId, assistantMsg.id, fullContent + msg)
+          {
+            const summary = await finishWithoutTools({ provider, model: modelToUse, messages, signal: abort.signal })
+            if (summary) useChatStore.getState().updateMessageContent(convId, assistantMsg.id, fullContent + msg + finishSection(summary))
+          }
           // A halt has to be visible in the thread itself, not only as a
           // suffix on the answer: support cannot otherwise tell a loop halt
           // apart from a model that simply stopped (plan A1, SICHTBARKEIT).
@@ -2720,6 +2732,10 @@ export function useCodex() {
         if (failVerdict.action === 'halt') {
           const msg = `\n\n_(halted: ${failVerdict.reason}. The model is looping. Try a stronger model for multi-step code tasks, or rephrase the instruction.)_`
           useChatStore.getState().updateMessageContent(convId, assistantMsg.id, fullContent + msg)
+          {
+            const summary = await finishWithoutTools({ provider, model: modelToUse, messages, signal: abort.signal })
+            if (summary) useChatStore.getState().updateMessageContent(convId, assistantMsg.id, fullContent + msg + finishSection(summary))
+          }
           addBlock({
             id: uuid(),
             phase: 'reflection',

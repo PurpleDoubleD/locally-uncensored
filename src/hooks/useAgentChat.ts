@@ -123,6 +123,9 @@ import {
 } from '../lib/agent-fanout'
 import { setExplicitFanout, buildSubAgentGates } from '../api/agents/sub-agent'
 import { appendTaskReport } from '../lib/agent-task-report'
+import { appendSteers } from '../lib/agent-core/steer'
+import { finishWithoutTools, finishSection } from '../lib/agent-core/finish'
+import { useSteerStore } from '../stores/steerStore'
 import { useAgentTaskStore } from '../stores/agentTaskStore'
 import { useAgentGoalStore, renderGoalSection } from '../stores/agentGoalStore'
 import { endLoopUnlessRearmed, useAgentLoopStore } from '../stores/agentLoopStore'
@@ -1754,6 +1757,12 @@ export function useAgentChat() {
           () => useAgentTaskStore.getState().takeUnreported(convId),
           Date.now(),
         )
+        // CA U2: what the user wrote while the run was going, read here, at
+        // the same seam and as the same kind of material as the report above.
+        for (const steer of appendSteers(agentMessages, () => useSteerStore.getState().take(convId), (content) => ({ role: 'user' as const, content }))) {
+          addBlock(runState, convId, assistantMessage.id, { id: uuid(), phase: 'reflection', content: steer.text, steer: true, timestamp: Date.now() })
+          log.info('agent.steer_read', { chars: steer.text.length })
+        }
         // One card, and a render from the chat has the chat model off it
         // (3.0.8, A2): wait for it here, visibly, instead of inside the
         // provider without a word.
@@ -1765,6 +1774,11 @@ export function useAgentChat() {
           runState.content =
             (runState.content ? runState.content + '\n\n' : '') + budget.haltMessage()
           scheduleUIUpdate()
+          // CA U6: one pass without tools says what is done and what is open.
+          {
+            const summary = await finishWithoutTools({ provider, model: modelToUse, messages: agentMessages, signal: abort.signal })
+            if (summary) { runState.content += finishSection(summary); scheduleUIUpdate() }
+          }
           break
         }
         let toolCalls: ToolCall[] = []
@@ -2996,6 +3010,11 @@ export function useAgentChat() {
             (runState.content ? runState.content + '\n\n' : '') +
             `_(halted: ${batchVerdict.reason}. The model is looping. Try a stronger model for multi-step tasks, or rephrase the instruction.)_`
           scheduleUIUpdate()
+          // CA U6: one pass without tools says what is done and what is open.
+          {
+            const summary = await finishWithoutTools({ provider, model: modelToUse, messages: agentMessages, signal: abort.signal })
+            if (summary) { runState.content += finishSection(summary); scheduleUIUpdate() }
+          }
           addBlock(runState, convId!, assistantMessage.id, {
             id: uuid(),
             phase: 'reflection',
@@ -3504,6 +3523,11 @@ export function useAgentChat() {
             (runState.content ? runState.content + '\n\n' : '') +
             `_(halted: ${failVerdict.reason}. The model is looping. Try a stronger model for multi-step tasks, or rephrase the instruction.)_`
           scheduleUIUpdate()
+          // CA U6: one pass without tools says what is done and what is open.
+          {
+            const summary = await finishWithoutTools({ provider, model: modelToUse, messages: agentMessages, signal: abort.signal })
+            if (summary) { runState.content += finishSection(summary); scheduleUIUpdate() }
+          }
           break
         }
 

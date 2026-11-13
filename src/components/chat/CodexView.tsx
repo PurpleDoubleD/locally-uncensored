@@ -9,6 +9,8 @@ import { useComputerStore } from '../../stores/computerStore'
 import { useBackgroundAgentWake } from '../../hooks/useBackgroundAgentWake'
 import { useGenerationStore } from '../../stores/generationStore'
 import { ChatInput } from './ChatInput'
+import { SteerNote } from './SteerNote'
+import { useSteerQueue } from '../../hooks/useSteerQueue'
 import { ChatFileChip } from './ChatFileChip'
 import { FILE_ONLY_TEXT } from '../../lib/chat-files'
 import { ToolCallBlock } from './ToolCallBlock'
@@ -124,6 +126,8 @@ export function CodexView() {
   // refs); the visual bits below read this conversation-scoped flag instead.
   const generatingMap = useGenerationStore((s) => s.generating)
   const codexGenerating = !!activeConversationId && !!generatingMap[activeConversationId]
+  // CA U2: typing during a run queues the message for the run's next step.
+  const steering = useSteerQueue(activeConversationId, isRunning || codexGenerating, true, (text) => sendInstruction(text, { shownMode }))
   const pendingConfirm = useCodexConfirmStore((s) => s.pending)
   // The question of the first use of computer control is open in this conversation.
   const chatAsked = useComputerStore((s) => !!s.chatAsk && !s.chatAsk.voice && (s.chatAsk.conversationId === null || s.chatAsk.conversationId === activeConversationId))
@@ -505,7 +509,9 @@ export function CodexView() {
                         const shown = (text: string) => (running ? closeOpenMarkdown(text) : text)
                         const hasBlocks = !!(msg.role === 'assistant' && msg.agentBlocks && msg.agentBlocks.length > 0)
                         const stepCount = msg.agentBlocks?.filter((b) => b.phase === 'tool_call' && b.toolCall).length ?? 0
-                        const hasAnswerBlock = !!(msg.agentBlocks && msg.agentBlocks.some((b) => b.phase === 'answer' && b.content.trim()))
+                        // A message the user wrote during the run (CA U2) needs
+                        // the chronological layout to sit where it was read.
+                        const hasAnswerBlock = !!(msg.agentBlocks && msg.agentBlocks.some((b) => (b.phase === 'answer' && b.content.trim()) || b.steer))
 
                         // Reflection blocks (Architect plan, RepoMap context) ,
                         // shown above the tool calls so the user sees what context
@@ -513,7 +519,7 @@ export function CodexView() {
                         const reflection = hasBlocks ? (
                           <div className="space-y-1">
                             {msg.agentBlocks!
-                              .filter((b) => b.phase === 'reflection' && b.content)
+                              .filter((b) => b.phase === 'reflection' && b.content && !b.steer)
                               .map((block) => (
                                 <div
                                   key={block.id}
@@ -542,6 +548,7 @@ export function CodexView() {
                                     (b) =>
                                       (b.phase === 'tool_call' && b.toolCall) ||
                                       (b.phase === 'answer' && stripChannelTags(b.content)) ||
+                                      (b.steer && b.content.trim()) ||
                                       // G21-2: per-round thoughts, chronological
                                       (b.phase === 'thinking' && b.content.trim()),
                                   )
@@ -588,6 +595,7 @@ export function CodexView() {
                                         )
                                       }
                                       const block = group.block
+                                      if (block.steer) return <SteerNote key={block.id} text={block.content} />
                                       if (block.phase === 'thinking') {
                                         // Trailing thought before the final
                                         // answer, in its collapsed G14-7 bubble.
@@ -799,6 +807,9 @@ export function CodexView() {
           // the header next to New, so this row carries ONE view-specific
           // control and stays a single quiet line in both states.
           composerActions={<CodexModeDropdown openUpward />}
+          onSteer={steering.steer}
+          steerQueue={steering.queue}
+          onUnsteer={steering.unsteer}
         />
       </div>
 

@@ -160,6 +160,10 @@ export interface AgentBlock {
    *  'reflection' and `content` carries the sentence, so a reader that does
    *  not know the field still shows something true. */
   compaction?: { before: number; after: number; replaced: number }
+  /** A message the user wrote while the run was going (CA U2). Phase
+   *  'reflection', `content` is the user's own text; the transcript draws it as
+   *  a small user note at the point where the run read it. */
+  steer?: true
 }
 
 // Sandbox configuration

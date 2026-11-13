@@ -55,7 +55,7 @@ describe('the trigger', () => {
     expect(mentionAt('@', 1)).toEqual({ start: 0, query: '' })
     expect(mentionAt('look at @src/ma', 15)).toEqual({ start: 8, query: 'src/ma' })
     expect(mentionAt('(@mat', 5)).toEqual({ start: 1, query: 'mat' })
-    expect(mentionAt('mail me@host.com', 16)).toBeNull()
+    expect(mentionAt('mail name@host', 14)).toBeNull()
     expect(mentionAt('@src/math.ts done', 17)).toBeNull()
     expect(mentionAt('plain text', 10)).toBeNull()
   })

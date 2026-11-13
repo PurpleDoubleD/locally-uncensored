@@ -102,7 +102,7 @@ export interface MentionQuery {
 
 /**
  * The mention the caret is in, or null. An `@` counts at the start of the
- * text or after whitespace or an opening bracket, so `me@mail.com` never
+ * text or after whitespace or an opening bracket, so `name@host` never
  * opens the list. The query ends at the caret and holds no whitespace.
  */
 export function mentionAt(text: string, caret: number | null | undefined): MentionQuery | null {

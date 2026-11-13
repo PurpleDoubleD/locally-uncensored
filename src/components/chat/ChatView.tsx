@@ -9,6 +9,7 @@ import { useAgentModeStore } from '../../stores/agentModeStore'
 import { AgentPanel } from './AgentPanel'
 import { MessageList } from './MessageList'
 import { ChatInput } from './ChatInput'
+import { useSteerQueue } from '../../hooks/useSteerQueue'
 import { COMPOSER_MAX_W } from './composer-width'
 import { RAGPanel } from './RAGPanel'
 import { DocsButton } from './DocsButton'
@@ -197,6 +198,9 @@ export function ChatView() {
   // `@` file mentions (U8): Agent mode reads its working folder, plain chat
   // only a real folder pinned on the chat or set as default.
   const mentionRoot = useMentionRoot(isAgentActive ? 'agent' : 'chat')
+  // CA U2: in Agent mode, typing during a run queues the message for the
+  // run's next step; plain chat keeps its one-answer-at-a-time rule.
+  const steering = useSteerQueue(activeConversationId, busy.thisChat, isAgentActive, (text) => sendMessage(text))
 
   // Remote-chat state: show a reactivate banner when the user is viewing a
   // Remote conversation whose server has been stopped.
@@ -849,6 +853,9 @@ export function ChatView() {
             // plain chat hands the model a summary of them.
             filesReachTools={isAgentActive}
             mentionRoot={mentionRoot}
+            onSteer={steering.steer}
+            steerQueue={steering.queue}
+            onUnsteer={steering.unsteer}
             composerModel={
               /* What this chat's answers were written by rides on the
                  picker itself now, as a dot plus a tooltip, instead of a

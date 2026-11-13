@@ -111,6 +111,12 @@ interface Props {
    * yet, and the list says so (hooks/useMentionRoot.ts).
    */
   mentionRoot?: MentionRoot | null
+  /** CA U2: set while a run of this chat can take a message mid-run. Enter
+   *  then queues the text instead of doing nothing. */
+  onSteer?: (text: string) => void
+  /** Messages waiting to be read by the run, shown above the field. */
+  steerQueue?: readonly { id: string; text: string }[]
+  onUnsteer?: (id: string) => void
 }
 
 /**
@@ -155,7 +161,7 @@ interface SendLock {
   message: string
 }
 
-export function ChatInput({ onSend, onStop, isGenerating, waitingForLocalLane, pendingApproval, onApprove, onReject, disabled, modelReady, slashCommands, composerModel, composerActions, composerAbove, filesReachTools = false, draftScope = 'chat', mentionRoot }: Props) {
+export function ChatInput({ onSend, onStop, isGenerating, waitingForLocalLane, pendingApproval, onApprove, onReject, disabled, modelReady, slashCommands, composerModel, composerActions, composerAbove, filesReachTools = false, draftScope = 'chat', mentionRoot, onSteer, steerQueue, onUnsteer }: Props) {
   // What this composer held when its view closed last (lib/chat-drafts.ts):
   // the draft of the open chat goes straight into the field, the rest into
   // `entwuerfe` below. Read once, on mount.
@@ -616,6 +622,14 @@ export function ChatInput({ onSend, onStop, isGenerating, waitingForLocalLane, p
   const handleSend = () => {
     // Enter ends the last word as a space would, so an emoticon there turns.
     const trimmed = (emojiOn ? turnOnSend(input) : input).trim()
+    // CA U2: during a run, a plain message waits for the run to read it after
+    // its current step. Attachments and commands still wait for the run's end.
+    if (isGenerating && onSteer && trimmed && !trimmed.startsWith('/') && images.length === 0 && files.length === 0 && media.length === 0 && !disabled) {
+      onSteer(trimmed)
+      setInput('')
+      setMention(null)
+      return
+    }
     if (imageJob.current.busy || fileJob.current.busy || (!trimmed && images.length === 0 && files.length === 0 && media.length === 0) || isGenerating || waitingForLocalLane || disabled) return
     // No chat model to answer: the send handlers return without a word in that
     // case, and the lines below would then empty the field and the chips for a
@@ -967,6 +981,29 @@ export function ChatInput({ onSend, onStop, isGenerating, waitingForLocalLane, p
             instruction that steers every turn is never invisible. */}
         {composerAbove}
 
+        {/* CA U2: what the user wrote during the run, until the run reads it. */}
+        {steerQueue && steerQueue.length > 0 && (
+          <div className="px-2.5 pt-2 space-y-1" data-testid="steer-queue">
+            {steerQueue.map((m) => (
+              <div key={m.id} className="flex items-start gap-2 rounded-md bg-gray-100 dark:bg-white/[0.05] px-2 py-1">
+                <span className="t-micro text-gray-500 dark:text-gray-400 shrink-0 pt-0.5">Next step reads</span>
+                <span className="t-control text-gray-700 dark:text-gray-200 flex-1 min-w-0 break-words line-clamp-3">{m.text}</span>
+                {onUnsteer && (
+                  <button
+                    type="button"
+                    onClick={() => onUnsteer(m.id)}
+                    aria-label="Take this message back"
+                    title="Take this message back"
+                    className="shrink-0 p-0.5 rounded text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-black/5 dark:hover:bg-white/10"
+                  >
+                    <X size={12} />
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+
         {/* G31: the run is STOPPED until this is answered, so the answer has to
             be where the user's eyes already are. The inline buttons on the tool
             block are still there and still the nicer place to decide from, but
@@ -1089,7 +1126,7 @@ export function ChatInput({ onSend, onStop, isGenerating, waitingForLocalLane, p
             onKeyDown={handleKeyDown}
             onBlur={() => setTimeout(() => { setCmdMenu([]); setMention(null) }, 120)}
             onPaste={handlePaste}
-            placeholder={disabled ? "Unavailable" : isDragOver ? "Drop files here..." : isTranscribing ? "Transcribing..." : isVoiceRecording ? "Recording..." : composerPlaceholder(enterMode, isMacOS())}
+            placeholder={disabled ? "Unavailable" : isGenerating && onSteer ? "Add to the task, the agent reads it after this step…" : isDragOver ? "Drop files here..." : isTranscribing ? "Transcribing..." : isVoiceRecording ? "Recording..." : composerPlaceholder(enterMode, isMacOS())}
             disabled={disabled}
             rows={1}
             className="lu-fokus-am-kasten w-full bg-transparent resize-none text-gray-800 dark:text-gray-200 placeholder-gray-400 dark:placeholder-gray-600 focus:outline-none text-[12px] leading-relaxed max-h-[200px] disabled:opacity-50 scrollbar-thin"

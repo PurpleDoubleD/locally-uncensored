@@ -10,6 +10,7 @@ import { closeOpenMarkdown } from '../../lib/streaming-markdown'
 import { ThinkingBlock } from './ThinkingBlock'
 import { ToolCallBand } from './ToolCallBand'
 import { ReflectionBlock } from './ReflectionBlock'
+import { SteerNote } from './SteerNote'
 import { groupAgentBlocks } from '../../lib/tool-call-groups'
 import { VramSwitchCard } from './VramSwitchCard'
 import { SpeakerButton } from './SpeakerButton'
@@ -444,6 +445,9 @@ function MessageBubbleImpl({ message, onRegenerate, onRegenerateRound, onEdit, p
                   // Trailing thought (after the last call, before the final
                   // answer) in its G14-7 bubble, collapsed, chronological.
                   return <ThinkingBlock key={block.id} thinking={block.content} />
+                }
+                if (block.phase === 'reflection' && block.steer) {
+                  return <SteerNote key={block.id} text={block.content} />
                 }
                 if (block.phase === 'reflection') {
                   return <ReflectionBlock key={block.id} content={block.content} />
