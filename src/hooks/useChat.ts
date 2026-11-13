@@ -71,6 +71,7 @@ import { laterAnswersInRound, nextRoundSpeakers, regenerateSpeakers, copiesForNe
 import { groupTurnStarted, groupRoundEnded } from "../stores/groupRoundStore"
 import { forkStart } from "../lib/chat-forks"
 import { builtinReloadNeeded, ensureBuiltinEngineAlive } from "../api/builtin-ensure"
+import { ensureImagePartLoaded, explainImageRefusal } from "../api/image-part-heal"
 import { emptyAnswerExplanation } from "../lib/answer-notes"
 import { beginModelSwitchWatch, cutByModelSwitch, finishReasonAfterSwitch, MODEL_SWITCH_FINISH } from "../lib/model-switch-stop"
 import { log } from "../lib/logger"
@@ -1856,6 +1857,14 @@ export function useChat() {
       // drives the honest empty-reply explanation below.
       let finishReason: string | undefined
 
+      // A22: a picture goes along. When the LU Engine runs this model without
+      // its image part (no room at start, or started before the part was
+      // there), load it again first; the server would refuse the picture.
+      if ((messages as Array<{ images?: unknown[] }>).some((m) => m.images?.length)) {
+        await ensureImagePartLoaded(activeModel, () =>
+          useRunActivityStore.getState().setActivity(convId, { label: 'Loading the image part of the model', kind: 'reading' }),
+        )
+      }
       // A7: until the first token the model reads the request; say so, with
       // its size, instead of a bare "Starting" (stores/runActivityStore).
       useRunActivityStore.getState().setActivity(convId, readingActivity(estimateMessageTokens(messages as unknown as Parameters<typeof estimateMessageTokens>[0])))
@@ -2095,10 +2104,11 @@ export function useChat() {
           // (lib/logic-notes.ts): the field says it is not the answer.
           useChatStore.getState().updateMessageError(run.convId, assistantMessage.id, { kind: 'generic', detail: rawMessage, at: run.content.length })
         } else if (isMultimodalUnsupportedError(errorMsg)) {
+          // A22: the true reason when it is the LU Engine's image part.
           useChatStore.getState().updateMessageContent(
             run.convId,
             assistantMessage.id,
-            MULTIMODAL_UNSUPPORTED_MESSAGE
+            await explainImageRefusal(activeModel).catch(() => MULTIMODAL_UNSUPPORTED_MESSAGE)
           )
         // An empty wallet gets the same plain explanation everywhere, next to
         // the dialog that offers the top-up (lib/credits-exhausted.ts).

@@ -49,10 +49,19 @@ describe('the icacls run from the R26 measurement', () => {
   ]
 
   it('NEGATIVE CONTROL: the call-shape detectors never fire on it', () => {
+    // The model wrote a new line before every attempt in the measurement, so
+    // detector 8 (silent near-copies, C83) stays out of it as well.
     const g = new AgentLoopGuard()
-    for (const args of REAL_ARGS) {
+    REAL_ARGS.forEach((args, i) => {
+      g.recordNarration(`Trying permission variant number ${i + 1} on the sandbox folder.`)
       expect(g.recordBatch([{ name: 'shell_execute', args }]).action).toBe('ok')
-    }
+    })
+  })
+
+  it('silent, the same six calls meet detector 8 on the fifth (C83)', () => {
+    const g = new AgentLoopGuard()
+    const actions = REAL_ARGS.map((args) => g.recordBatch([{ name: 'shell_execute', args }]).action)
+    expect(actions).toEqual(['ok', 'ok', 'ok', 'ok', 'steer', 'ok'])
   })
 
   it('but the result detector halts on the sixth failing round', () => {

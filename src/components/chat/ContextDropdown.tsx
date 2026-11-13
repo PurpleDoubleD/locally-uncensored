@@ -22,6 +22,8 @@ import { savedLmStudioContext, withLmStudioPick } from '../../lib/lmstudio-conte
 import { usePopoverPlatz } from '../../hooks/usePopoverPlatz'
 
 const PRESETS = [4096, 8192, 16384, 32768, 65536, 131072]
+/** C77: what a hosted model's own window commonly is. */
+const MODEL_WINDOW_PRESETS = [8192, 16384, 32768, 65536, 131072, 262144, 1048576]
 
 /**
  * Context-window picker for the active LOCAL model. Sets `contextWindowOverride`
@@ -140,6 +142,8 @@ export function ContextDropdown({ children }: { children?: ReactNode }) {
   // der `TokenCounter` `null` zurueckgibt. Bewusst ein BOOLEAN als Selektor:
   // ein Abo auf `s.conversations` wuerde diesen Knopf bei jedem Streaming-Flush
   // neu rendern (T-45), ein Boolean wechselt einmal pro Chat.
+  // C77: the model window the user gave a hosted API that names none.
+  const modelWindowPick = ctx.modelWindowKey ? byModel?.[ctx.modelWindowKey] ?? 0 : 0
   const hasFill = useChatStore(
     (s) => (s.conversations.find((c) => c.id === s.activeConversationId)?.messages.length ?? 0) > 0,
   )
@@ -183,6 +187,20 @@ export function ContextDropdown({ children }: { children?: ReactNode }) {
    * einer Zahl, die nirgends mehr in der Liste steht, waere unsichtbar.
    */
   const selectedNow = (ctx.clampedFrom ?? 0) > 0 ? ctx.contextWindow : selected
+
+  /*
+   * C77: the hosted API named no window, so this is what the model has, said
+   * by the user. Saved per endpoint and model; the provider's cascade reads
+   * it for the counter, the send window and the request budget. 0 = Auto.
+   */
+  const applyModelWindow = (value: number) => {
+    setOpen(false)
+    if (!ctx.modelWindowKey) return
+    const current = useSettingsStore.getState().settings.contextWindowByModel
+    updateSettings({ contextWindowByModel: withStoredWindow(current, ctx.modelWindowKey, value) })
+    setTick((t) => t + 1)
+    window.dispatchEvent(new Event('lu-context-reloaded'))
+  }
 
   const apply = async (value: number) => {
     setOpen(false)
@@ -289,7 +307,7 @@ export function ContextDropdown({ children }: { children?: ReactNode }) {
         disabled={busy}
         title={
           cloud
-            ? 'Context sent per step: how much of this chat the model sees on every step. More remembers more and costs more per step.'
+            ? `Context sent per step: how much of this chat the model sees on every step. More remembers more and costs more per step.${ctx.modelWindow ? ` Model context window: ${formatContextWindow(ctx.modelWindow)}, ${SOURCE_LABEL[ctx.modelWindowSource ?? ctx.source]}.` : ''}`
             : ctx.provider === 'custom'
             ? `Context window: ${SOURCE_LABEL[ctx.source]}. This server decides its own context; pick the value it actually runs with so the counter and the request budget match it.`
             : `Context window: ${ctx.provider === 'lmstudio' ? "LM Studio's loaded context" : ctx.provider === 'builtin' ? "the LU Engine's loaded context" : 'Ollama num_ctx'}. Changing it reloads the model so it takes effect now.`
@@ -360,6 +378,10 @@ export function ContextDropdown({ children }: { children?: ReactNode }) {
               platz.nachOben ? 'bottom-full mb-1' : 'top-full mt-1'
             }`}
           >
+            {(!cloud || ctx.sendAdjustable !== false) && (<>
+            {cloud && ctx.modelWindowSettable && (
+              <div className="px-2 pt-0.5 t-micro uppercase tracking-wide text-gray-400">Sent per message</div>
+            )}
             <button onClick={() => apply(0)} className={rowCls(selectedNow === 0)}>
               <span>Auto{ctx.provider === 'ollama' ? ` · ${formatContextWindow(ctx.autoWindow ?? ollamaWindowFor(windowUse, ctx.modelMax))}` : ctx.provider === 'builtin' ? ` · ${formatContextWindow(ENGINE_DEFAULT_CTX)}` : ctx.provider === 'custom' && ctx.source !== 'user' ? ` · ${formatContextWindow(ctx.contextWindow)}` : cloud ? ` · ${formatContextWindow(globalSendWindow)}` : ''}</span>
               {selectedNow === 0 && <Check size={10} />}
@@ -376,6 +398,25 @@ export function ContextDropdown({ children }: { children?: ReactNode }) {
                 {selectedNow === ctx.modelMax && <Check size={10} />}
               </button>
             )}
+            </>)}
+            {cloud && ctx.modelWindowSettable && (
+              <div data-testid="context-model-window" className="flex flex-col gap-0.5">
+                <div className={`px-2 pt-1 ${ctx.sendAdjustable !== false ? 'mt-0.5 border-t border-gray-100 dark:border-white/[0.06]' : ''} t-micro uppercase tracking-wide text-gray-400`}>Model context window</div>
+                <button onClick={() => applyModelWindow(0)} className={rowCls(modelWindowPick === 0)}>
+                  <span>Auto{modelWindowPick === 0 && ctx.modelWindow ? ` · ${formatContextWindow(ctx.modelWindow)}` : ''}</span>
+                  {modelWindowPick === 0 && <Check size={10} />}
+                </button>
+                {[...new Set([...MODEL_WINDOW_PRESETS, ...(modelWindowPick > 0 ? [modelWindowPick] : [])])].sort((a, b) => a - b).map((p) => (
+                  <button key={`m${p}`} onClick={() => applyModelWindow(p)} className={rowCls(modelWindowPick === p)}>
+                    <span>{formatContextWindow(p)}</span>
+                    {modelWindowPick === p && <Check size={10} />}
+                  </button>
+                ))}
+                <div className="px-2 pt-0.5 t-micro text-gray-400 leading-snug max-w-[220px]">
+                  {`Now ${formatContextWindow(ctx.modelWindow ?? 0)}, ${SOURCE_LABEL[ctx.modelWindowSource ?? 'guess']}. This API does not report the model's context window, so LU cannot check it. Pick the window its documentation names. Saved for this model.`}
+                </div>
+              </div>
+            )}
             {cpuNote && cpuNote.model === ollamaModel && (
               <div
                 data-testid="context-cpu-note"
@@ -385,11 +426,11 @@ export function ContextDropdown({ children }: { children?: ReactNode }) {
                 <span>{cpuNote.text}</span>
               </div>
             )}
-            <div className="mt-0.5 px-2 pt-1 border-t border-gray-100 dark:border-white/[0.06] text-[0.5rem] text-gray-400 leading-snug">
+            {!(cloud && ctx.sendAdjustable === false) && <div className="mt-0.5 px-2 pt-1 border-t border-gray-100 dark:border-white/[0.06] text-[0.5rem] text-gray-400 leading-snug">
               {raised
                 ? <span className="flex items-start gap-1"><AlertTriangle size={9} className="shrink-0 mt-px" />Once the chat is longer than {formatContextWindow(DEFAULT_SEND_WINDOW_TOKENS)}, every message sends more and costs more credits.</span>
                 : cloud
-                ? 'How much of the chat each message sends. Saved for this model.'
+                ? `How much of the chat each message sends. Saved for this model.${ctx.modelWindow && !ctx.modelWindowSettable ? ` Model window ${formatContextWindow(ctx.modelWindow)}, ${SOURCE_LABEL[ctx.modelWindowSource ?? ctx.source]}.` : ''}`
                 : unknownMax
                 ? "This server did not report the model's context length, so LU cannot check these sizes. Pick the size the server runs with. Reloads the model on change."
                 : ctx.provider !== 'custom'
@@ -397,7 +438,7 @@ export function ContextDropdown({ children }: { children?: ReactNode }) {
                 : (ctx.clampedFrom ?? 0) > 0
                   ? `Your saved ${formatContextWindow(ctx.clampedFrom ?? 0)} is more than this server runs, so ${formatContextWindow(ctx.contextWindow)} is used. Start the server larger to use it.`
                   : `Current value ${SOURCE_LABEL[ctx.source]}. Your pick is saved for this model on this server.`}
-            </div>
+            </div>}
           </div>
         </>
       )}

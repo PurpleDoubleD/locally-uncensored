@@ -63,6 +63,17 @@
  *     status and counted as neither success nor failure, so it reset detector
  *     5 and never fed detector 6. Steer at 3 per command, halt at 6. A
  *     declined call also no longer counts as a success anywhere.
+ *
+ *  8. Near-identical silent batches (C83, support case 10.11.2026): 233 tool
+ *     calls of one tool, one every ~4 s, no text at all, each request
+ *     420-447k tokens of input on a paid model. The arguments were 487-492
+ *     characters and never byte-identical, so detectors 1-3 never saw a
+ *     repeat. This one compares each batch with the one before it: same
+ *     tool, arguments at least NEAR_SIMILARITY alike (character bigrams),
+ *     and no new text from the model in between. Steer at NEAR_STEER_AT
+ *     such batches in a row, halt at NEAR_HALT_AT. A read that only pages
+ *     on (the arguments differ in numbers alone) is not counted, and any
+ *     new text, a different tool or clearly different arguments start over.
  */
 
 /*
@@ -134,6 +145,52 @@ const SEARCH_TOOLS = new Set<string>(['web_search'])
 const SEARCH_STEER_AT = 6
 const SEARCH_HALT_AT = 12
 
+/**
+ * Detector 8 (C83). Five silent near-copies in a row get one word, eight end
+ * the run. In the incident that is 8 calls instead of 233.
+ */
+const NEAR_SIMILARITY = 0.85
+const NEAR_STEER_AT = 5
+const NEAR_HALT_AT = 8
+
+/** Lower-cased, whitespace folded: the form two near-copies are compared in. */
+function normArgs(args: string): string {
+  return args.toLowerCase().replace(/\s+/g, ' ').trim()
+}
+
+function bigrams(s: string): Map<string, number> {
+  const m = new Map<string, number>()
+  for (let i = 0; i < s.length - 1; i++) {
+    const g = s.slice(i, i + 2)
+    m.set(g, (m.get(g) ?? 0) + 1)
+  }
+  return m
+}
+
+/**
+ * Sørensen–Dice over character bigrams, 0..1. Linear in the length, so a
+ * pair of 500-character argument strings costs nothing per step.
+ */
+export function argSimilarity(a: string, b: string): number {
+  const x = normArgs(a)
+  const y = normArgs(b)
+  if (x === y) return 1
+  if (x.length < 2 || y.length < 2) return 0
+  const ga = bigrams(x)
+  const gb = bigrams(y)
+  let both = 0
+  for (const [g, n] of ga) {
+    const m = gb.get(g)
+    if (m) both += Math.min(n, m)
+  }
+  return (2 * both) / (x.length - 1 + (y.length - 1))
+}
+
+/** Arguments that differ in numbers alone: an offset, a page, a line range. */
+function onlyNumbersDiffer(a: string, b: string): boolean {
+  return a !== b && a.replace(/\d+/g, '#') === b.replace(/\d+/g, '#')
+}
+
 /** Tools whose args carry a shell command whose first token names the work. */
 const EXEC_TOOLS = new Set<string>(['shell_execute', 'shell_execute_background'])
 
@@ -203,6 +260,17 @@ export class AgentLoopGuard {
   /** Detector 7: how often in a row the user declined the same command or tool. */
   private declinedStreaks = new Map<string, number>()
   private declinedSteeredKeys = new Set<string>()
+  /** Detector 8: the batch before, and how many silent near-copies in a row. */
+  private prevBatch: Array<{ name: string; args: string }> | null = null
+  private nearStreak = 0
+  private nearSteered = false
+  /**
+   * What recordNarration saw for the step now being recorded: true when the
+   * model wrote nothing new (no text, or the same text as the step before).
+   * Null when recordNarration was not called for it, which counts as silent:
+   * the guard can only judge the text it is shown.
+   */
+  private stepSilent: boolean | null = null
 
   /**
    * Record one iteration's tool-call batch BEFORE executing it. `args` must
@@ -259,6 +327,8 @@ export class AgentLoopGuard {
       this.searchStreak = 0
       this.searchSteered = false
     }
+    const near = this.recordNear(calls)
+    if (near.action === 'halt') return near
     const keys = calls.map((c) => `${c.name}|${c.args}`)
     const sig = [...keys].sort().join('||')
     const trimmed = opts.trimmedReadKeys
@@ -343,7 +413,65 @@ export class AgentLoopGuard {
       this.readCounts.clear()
       this.pureWindow = []
     }
-    return steer ?? { action: 'ok' }
+    return steer ?? (near.action === 'steer' ? near : { action: 'ok' })
+  }
+
+  /**
+   * Detector 8: is this batch a silent near-copy of the one before it? Every
+   * call must have a partner in the previous batch with the same tool and
+   * arguments at least NEAR_SIMILARITY alike. Byte-identical partners count
+   * too, so an exact repeat that slips past detector 1 (A, A', A, A') still
+   * lands here.
+   */
+  private recordNear(calls: Array<{ name: string; args: string }>): LoopGuardVerdict {
+    const silent = this.stepSilent !== false
+    this.stepSilent = null
+    // Searches differ by a word on purpose and have their own ladder above.
+    if (calls.every((c) => SEARCH_TOOLS.has(c.name))) {
+      this.prevBatch = null
+      this.nearStreak = 0
+      this.nearSteered = false
+      return { action: 'ok' }
+    }
+    const prev = this.prevBatch
+    this.prevBatch = calls.map((c) => ({ name: c.name, args: c.args }))
+    const alike =
+      silent &&
+      prev !== null &&
+      calls.every((c) =>
+        prev.some(
+          (p) =>
+            p.name === c.name &&
+            !(READ_ONLY_TOOLS.has(c.name) && onlyNumbersDiffer(normArgs(p.args), normArgs(c.args))) &&
+            argSimilarity(p.args, c.args) >= NEAR_SIMILARITY,
+        ),
+      )
+    if (!alike) {
+      // The first batch of a new streak is its first member.
+      this.nearStreak = 1
+      this.nearSteered = false
+      return { action: 'ok' }
+    }
+    this.nearStreak++
+    const names = [...new Set(calls.map((c) => c.name))].join(', ')
+    if (this.nearStreak >= NEAR_HALT_AT) {
+      return {
+        action: 'halt',
+        reason: `${this.nearStreak} nearly identical ${names} calls in a row with no new text from the model`,
+      }
+    }
+    if (this.nearStreak >= NEAR_STEER_AT && !this.nearSteered) {
+      this.nearSteered = true
+      return {
+        action: 'steer',
+        message:
+          `You have now sent ${this.nearStreak} nearly identical ${names} calls in a row without writing anything. ` +
+          'Changing a few characters does not make it a new step: the results will not change either. ' +
+          'Stop calling it. Say in one or two sentences what you found and what is blocking you, then either take a clearly different step or give your final answer. ' +
+          'The same call again ends the run.',
+      }
+    }
+    return { action: 'ok' }
   }
 
   /**
@@ -463,6 +591,8 @@ export class AgentLoopGuard {
   recordNarration(text: string): LoopGuardVerdict {
     if (!this.enabled) return { action: 'ok' }
     const norm = text.trim().replace(/\s+/g, ' ').toLowerCase()
+    // Detector 8 (C83): text the step before did not already have is news.
+    this.stepSilent = norm.length < MIN_NARRATION_LEN || norm === this.lastNarration
     if (norm.length < MIN_NARRATION_LEN) {
       this.lastNarration = ''
       this.narrationSeen = 0

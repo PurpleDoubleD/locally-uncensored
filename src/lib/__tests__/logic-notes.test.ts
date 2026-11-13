@@ -184,7 +184,8 @@ describe('guard: the hooks write the sentences this reader knows', () => {
   it('the catch of a plain send has the seven branches read here, the catch of an agent run its twelve', () => {
     // A new branch writes a new sentence into the answer. It belongs into lib/logic-notes.ts and into the list above.
     // The seventh and the twelfth (3.0.8, A28) are the LU Cloud outage: the server's sentence, so they write the field too.
-    const plain = catchOf(chatHook, 'MULTIMODAL_UNSUPPORTED_MESSAGE\n          )')
+    // A22: the multimodal branch now asks why (api/image-part-heal); its sentences are read above.
+    const plain = catchOf(chatHook, 'await explainImageRefusal(activeModel)')
     expect(plain.match(/updateMessageContent\(/g)).toHaveLength(7)
     const agent = catchOf(agentHook, "'\\n\\nAgent error: ' + errorMsg")
     expect(agent.match(/updateMessageContent\(/g)).toHaveLength(12)
@@ -194,5 +195,21 @@ describe('guard: the hooks write the sentences this reader knows', () => {
     // Twice for an empty turn, once for an answer that lost its model to a pick (SWITCHED_MODEL_HEAD in the reader).
     expect(chatHook.match(/emptyAnswerExplanation\(\{/g)).toHaveLength(3)
     expect(emptyAnswerExplanation({ finishReason: 'model_switch', captured: false, keepThinking: false }).startsWith(SWITCHED_MODEL_HEAD)).toBe(true)
+  })
+})
+
+describe('A22: the image part sentences are notes, not answers', () => {
+  it('each is read as a note of the app', async () => {
+    const { imagePartNotLoadedSentence, imagePartReloadedSentence, noImagePartSentence } = await import('../image-part-notes')
+    const { splitLogicNote } = await import('../logic-notes')
+    for (const s of [
+      noImagePartSentence('gemma-4-12b'),
+      imagePartNotLoadedSentence('gemma-4-12b', 'Loaded without image input: the graphics memory has no room for the image part next to the model. A smaller context makes room.'),
+      imagePartReloadedSentence('gemma-4-12b'),
+    ]) {
+      const note = splitLogicNote(s)
+      expect(note?.body ?? null, s).toBe('')
+      expect(note?.kind).toBe('generic')
+    }
   })
 })

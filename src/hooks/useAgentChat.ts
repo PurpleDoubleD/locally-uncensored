@@ -71,12 +71,13 @@ import { COMPUTER_USE_TOOL_NAME, onlyTheTaskForTheScreen, withComputerUsePrompt 
 import { memoryPairForRun } from '../lib/computer/memory-policy'
 import { getModelMaxTokens, estimateTokens } from '../lib/context-compaction'
 import { buildRequestMessages, trimWorkingHistory } from '../lib/context-decay'
-import { budgetBesideTheCatalog, effectiveSendWindow, sendWindowFor } from '../lib/send-window'
+import { budgetBesideTheCatalog, effectiveSendWindow, isPaidProvider, sendWindowFor } from '../lib/send-window'
 import { sendsToALanBackend } from '../lib/lan-openai-slot'
 import { speaksOpenAIProtocol } from '../api/providers/compat-id'
 import { useSendSizeStore } from '../stores/sendSizeStore'
 import { resolveAgentNumCtx } from '../lib/agent-num-ctx'
 import { ensureBuiltinAgentCtx } from '../api/builtin-ensure'
+import { ensureImagePartLoaded, explainImageRefusal } from '../api/image-part-heal'
 import { approvalIsMoot } from '../api/mcp/builtin-tools'
 import { useMemoryStore } from '../stores/memoryStore'
 import { useVoiceStore } from '../stores/voiceStore'
@@ -138,6 +139,7 @@ import { fitRequestForPhone, measuredRequest, phoneFitApplies, phoneResultChars,
 import { toolFailureNote } from '../lib/tool-failure-note'
 import { toolCallCapMs, raceWithToolTimeout, SHELL_EXECUTE_DEFAULT_TIMEOUT_MS } from '../lib/tool-timeout'
 import { AgentLoopGuard } from '../lib/agent-loop-guard'
+import { AgentCostBrake } from '../lib/agent-cost-brake'
 import { budgetFromSettings } from '../api/agents/budget'
 import type { ChatMessage, ToolCall, ToolCallProgress, ToolDefinition } from '../api/providers/types'
 import type { WorkflowEngineCallbacks } from '../types/agent-workflows'
@@ -1689,6 +1691,11 @@ export function useAgentChat() {
     // rightly weakened. Windowed batch repeats, per-epoch identical reads and
     // repeated narration now watch this loop too.
     const loopGuard = new AgentLoopGuard({ enabled: useSettingsStore.getState().settings.agentLoopGuard !== false })
+    // C83: what the run has cost so far, on providers that bill per token.
+    const costBrake = new AgentCostBrake({
+      paid: isPaidProvider(providerId, sendsToALanBackend(providerId, activeModel)),
+      loopGuardEnabled: useSettingsStore.getState().settings.agentLoopGuard !== false,
+    })
     // The closing line a turn gets when the model itself said nothing usable.
     // Read from the live counters at call time, so both the normal end of the
     // run and the swallowed multimodal refusal below produce the same text.
@@ -2090,6 +2097,14 @@ export function useAgentChat() {
           // A7: the first wait of a turn is the model reading the request.
           // Said in words and with its size instead of a bare "Starting"; the
           // first word, shown thought or tool call takes the line back.
+          // A22: a picture goes along and the LU Engine may be running this
+          // model without its image part. Load it again before the server
+          // refuses the picture.
+          if (stepNo === 1 && (sendMessages as Array<{ images?: unknown[] }>).some((m) => m.images?.length)) {
+            await ensureImagePartLoaded(activeModel, () =>
+              useRunActivityStore.getState().setActivity(convId, { label: 'Loading the image part of the model', kind: 'reading' }),
+            )
+          }
           if (stepNo === 1) {
             useRunActivityStore.getState().setActivity(convId, readingActivity(estPrompt))
             // B26: a long first wait on a local Ollama model gets its reason
@@ -2330,6 +2345,7 @@ export function useAgentChat() {
             })
           }
           requestUsage.add(turn)
+          costBrake.record(turn.promptEvalCount)
           // Native thinking field (Ollama; LU Cloud reasoning_content)
           if (turn.thinking) turnThinking = turn.thinking
 
@@ -2423,6 +2439,7 @@ export function useAgentChat() {
           // abschneiden, und dann steht hier ebenfalls kein Werkzeugaufruf.
           turnFinishReason = hermesTurn.finishReason
           requestUsage.add(hermesTurn)
+          costBrake.record(hermesTurn.promptEvalCount)
           notePhoneCount(hermesTurn.promptEvalCount)
           if (hermesTurn.thinking) {
             turnThinking = turnThinking
@@ -3010,6 +3027,24 @@ export function useAgentChat() {
             timestamp: Date.now(),
           })
           break
+        }
+        // C83: the cost brake looks at what the backend reported, not at the
+        // calls, so it holds even when every call honestly differs.
+        const brake = costBrake.take()
+        if (brake.action === 'halt') {
+          runState.content = (runState.content ? runState.content + '\n\n' : '') + `_(${brake.message})_`
+          scheduleUIUpdate()
+          addBlock(runState, convId!, assistantMessage.id, {
+            id: uuid(), phase: 'reflection', content: `⛔ ${brake.message}`, timestamp: Date.now(),
+          })
+          log.warn('agent.cost_brake_halt', { provider: providerId, inputTokens: costBrake.inputTokens })
+          break
+        }
+        if (brake.action === 'warn') {
+          addBlock(runState, convId!, assistantMessage.id, {
+            id: uuid(), phase: 'reflection', content: `⚠ ${brake.message}`, timestamp: Date.now(),
+          })
+          log.info('agent.cost_brake_warn', { provider: providerId, inputTokens: costBrake.inputTokens })
         }
         const pendingSteer = batchVerdict.action === 'steer' ? batchVerdict.message : null
         if (pendingSteer) {
@@ -3609,7 +3644,8 @@ export function useAgentChat() {
           useChatStore.getState().updateMessageContent(
             convId!, assistantMessage.id,
             reportMultimodalRefusal(visionFeedbackGiven)
-              ? MULTIMODAL_UNSUPPORTED_MESSAGE
+              // A22: the true reason when it is the LU Engine's image part.
+              ? await explainImageRefusal(activeModel).catch(() => MULTIMODAL_UNSUPPORTED_MESSAGE)
               : (runState.content.trim() || closingSummary())
           )
         } else if ((err as { code?: string })?.code === 'tools_unsupported' || errorMsg.includes('does not support tools')) {
