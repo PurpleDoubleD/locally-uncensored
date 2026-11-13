@@ -81,7 +81,10 @@ describe('a call stranded in the reasoning channel', () => {
 
   it('both loops call it', () => {
     const src = (p: string) => readFileSync(resolve(__dirname, '..', '..', p), 'utf8')
-    expect(src('hooks/useAgentChat.ts')).toMatch(/toolCallsFromReasoning\(turnThinking, turnContent, toolCalls\.length/)
-    expect(src('hooks/useCodex.ts').match(/recoverToolCallsFromReasoning\(toolCalls, turnContent, turn\.thinking/g)?.length).toBe(2)
+    // CA K2: both loops run the one chain (lib/agent-core/recover.ts), which
+    // ends with the reasoning step, and hand it the turn's thinking.
+    expect(src('hooks/useAgentChat.ts')).toMatch(/recoverTurnCalls\(\{[\s\S]{0,120}thinking: turnThinking/)
+    expect(src('hooks/useCodex.ts').match(/recoverTurnCalls\(\{ toolCalls, content: turnContent, thinking: turn\.thinking/g)?.length).toBe(2)
+    expect(src('lib/agent-core/recover.ts')).toContain('toolCallsFromReasoning(')
   })
 })

@@ -49,7 +49,7 @@ import { stripVisionFeedbackMessages, reportMultimodalRefusal } from '../lib/vis
 import { log } from '../lib/logger'
 import { gatePlanTool, planToolAllowed } from '../lib/plan-gate'
 import { buildHermesToolPrompt, buildHermesToolResult, buildHermesToolCall, parseHermesToolCalls, stripToolCallTags, hasToolCallTags } from '../api/hermes-tool-calling'
-import { parseLooseToolCalls, stripMatchedCalls, stripToolCallText, repairToolCall, toolCallsFromReasoning } from '../lib/loose-tool-parse'
+import { recoverTurnCalls } from '../lib/agent-core/recover'
 import { isMediaTool, mediaCallSucceeded } from '../lib/media-result'
 import { mediaTurnCaps, droppedMediaNote } from '../lib/media-turn-caps'
 import { isLocalModelByName } from '../api/agents/model-locality'
@@ -171,7 +171,7 @@ import { capHiddenToolHistory } from './codex/hidden-history'
 // derselbe, und zwei Wortlaute fuer einen abgeschnittenen Zug waeren zwei
 // Stellen, von denen eine gepflegt wird.
 import { codexCutoffNote, dropCutOffCall } from './codex/turn-cutoff'
-import { asString, errorText, isRecord, prop } from '../types/json-guards'
+import { asString, errorText, prop } from '../types/json-guards'
 import type { ToolArgs } from '../api/mcp/types'
 import { CREDITS_EXHAUSTED_MESSAGE } from '../lib/credits-exhausted'
 import { buildChatSystemPrompt } from '../lib/system-prompt'
@@ -2483,51 +2483,26 @@ export function useAgentChat() {
         // preserved as a `reflection` block so it renders above the tool
         // calls in chronological order. Only the final-turn content (no
         // tool_calls) becomes the message body.
-        const knownToolNames = toolRegistry.getAll().map((t) => t.name)
-
-        // Canonicalize near-miss tool names (2026-06-03): gemma4 emitted a
-        // NATIVE call to `video_generation` (not `video_generate`) → "Unknown
-        // tool" → it gave up. Map such close misses to the registered name.
-        if (toolCalls.length > 0) {
-          const tools = toolRegistry.getAll()
-          toolCalls = toolCalls.map((tc) => {
-            const fixed = repairToolCall(tc.function.name, isRecord(tc.function.arguments) ? tc.function.arguments : {}, tools)
-            return fixed.name === tc.function.name ? tc : { ...tc, function: { ...tc.function, name: fixed.name, arguments: fixed.arguments } }
-          })
-        }
-
-        // Loose tool-call fallback (2026-06-03): weak local models often
-        // WRITE the call into their answer text instead of using the structured
-        // tool_calls channel — gemma4:e4b answers in prose; qwen2.5-coder:14b
-        // wrote `image_generate(prompt="…")` as plain text and never emitted a
-        // real call, so the image/video flow never fired. If the native/Hermes
-        // channel produced nothing, lift any recognizable call out of the
-        // content (known tool names only) and strip it from the visible prose.
-        if (toolCalls.length === 0 && turnContent.trim()) {
-          const loose = parseLooseToolCalls(turnContent, knownToolNames)
-          if (loose.calls.length > 0) {
-            toolCalls = loose.calls.map((c) => ({ function: { name: c.name, arguments: c.arguments } }))
-            turnContent = stripMatchedCalls(turnContent, loose.matched)
-            log.info('agent.loose_tool_call_recovered', { count: toolCalls.length, names: toolCalls.map((t) => t.function.name) })
-          }
-        }
-
-        // C59 A3: the calls sat in the reasoning channel and the answer is
-        // empty (a server that took the model for a thinking model).
+        // One recovery chain for every loop (CA K2, lib/agent-core/recover.ts):
+        // repaired native names (gemma4 `video_generation`, GH #147 generic
+        // `function`), JSON in the answer, prose calls like
+        // `image_generate(prompt="…")` (qwen2.5-coder:14b, gemma4:e4b), calls
+        // stuck in the reasoning channel (C59 A3), and the call text cleaned
+        // out of the visible answer. Known tool names only.
         {
-          const fromReasoning = toolCallsFromReasoning(turnThinking, turnContent, toolCalls.length, [...knownToolNames, ...(compactRun ? [TOOL_SEARCH] : [])])
-          if (fromReasoning.length) {
-            toolCalls = fromReasoning.map((c) => ({ function: { name: c.name, arguments: c.arguments } }))
-            log.info('agent.reasoning_tool_call_recovered', { count: toolCalls.length, names: toolCalls.map((t) => t.function.name) })
+          const recovered = recoverTurnCalls({
+            toolCalls,
+            content: turnContent,
+            thinking: turnThinking,
+            tools: toolRegistry.getAll(),
+            extraNames: compactRun ? [TOOL_SEARCH] : [],
+          })
+          toolCalls = recovered.toolCalls
+          turnContent = recovered.content
+          if (recovered.source !== 'native' && recovered.source !== 'none') {
+            log.info('agent.tool_call_recovered', { from: recovered.source, count: toolCalls.length, names: toolCalls.map((t) => t.function.name) })
           }
         }
-
-        // Clean any tool-call text the model echoed into its prose (the owner
-        // 2026-06-04) — raw JSON like {"name":"image_generate",…} was leaking
-        // into the chat as a "notes"/JSON block. Runs even when a proper native
-        // call was emitted alongside the echo. Tool args/results stay in the
-        // agent's internal history; this only cleans the visible bubble.
-        turnContent = stripToolCallText(turnContent, knownToolNames)
 
         // A turn cut off by the token limit: its last call may stop halfway
         // (dropCutOffCall). Checked after the loose fallback, which reads the

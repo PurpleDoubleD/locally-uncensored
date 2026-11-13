@@ -130,7 +130,8 @@ describe('the sub-agent prompt carries both halves', () => {
     const runnerAt = sub.indexOf('export async function defaultSubAgentRunner')
     expect(runnerAt).toBeGreaterThan(-1)
     const runner = sub.slice(runnerAt)
-    expect(runner).toContain('content: buildSubAgentSystemPrompt(),')
+    // CA K3: on the prompt transport the tool block follows the same prompt.
+    expect(runner).toMatch(/content: promptTransport\s*\?\s*`\$\{buildSubAgentSystemPrompt\(\)\}[^`]*`\s*:\s*buildSubAgentSystemPrompt\(\),/)
     expect(runner).not.toContain("'You are a focused sub-agent.")
   })
 })

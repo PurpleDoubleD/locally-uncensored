@@ -13,11 +13,11 @@ import { useSettingsStore } from '../stores/settingsStore'
 import { useChatStore, flushChatPersist } from '../stores/chatStore'
 import { buildSamplingRequest } from '../lib/sampling'
 import { endTurnDurably } from '../stores/durability'
-import { getProviderForModel, getProviderIdFromModel } from '../api/providers'
+import { getProviderIdFromModel } from '../api/providers'
+import { resolveToolCallingStrategy } from '../lib/agent-strategy'
 import { markToolsUnsupported } from '../api/tool-capability'
 import { toolRegistry } from '../api/mcp'
 import { usePermissionStore } from '../stores/permissionStore'
-import { toolStrategyFor } from '../lib/tool-support'
 import { allowedInReadOnlyTurn } from '../lib/mutating-tools'
 import { applyGoalCommand } from '../lib/goal-command'
 import {
@@ -67,7 +67,7 @@ import { useStagedChangesStore, flushStagedPersist } from '../stores/stagedChang
 import { log } from '../lib/logger'
 import type { AgentToolCall } from '../types/agent-mode'
 import { isThinkingCompatible, isPlainTextPlanner } from '../lib/model-compatibility'
-import { isCompatProviderId, speaksOpenAIProtocol } from '../api/providers/compat-id'
+import { speaksOpenAIProtocol } from '../api/providers/compat-id'
 import type { ChatMessage, ToolCall, ToolCallProgress, ToolDefinition } from '../api/providers/types'
 import { useRunActivityStore, toolProgressActivity, waitBeforeRetry } from '../stores/runActivityStore'
 import { executeParallel, applyResultToToolCall, resultFailed, APPROVE_ALL, type ExecutionRequest } from '../api/agents/tool-executor'
@@ -126,7 +126,7 @@ import { createLivePaint } from './codex/live-paint'
 import { seedEstimatedUsage, reportTurnUsage } from './codex/turn-usage'
 import { lastRequestUsageNotice, requestUsageTracker } from '../lib/request-usage'
 import { shouldDowngradeThinking, engineDeniedThinking } from './codex/thinking-downgrade'
-import { recoverToolCallsFromContent, recoverKnownToolCallsFromContent, recoverToolCallsFromReasoning } from './codex/tool-call-recovery'
+import { recoverTurnCalls } from '../lib/agent-core/recover'
 import { codexStallVerdict } from './codex/stall-verdict'
 import { createStagedWriter } from './codex/staged-writes'
 import { codexCutoffNote, dropCutOffCall } from './codex/turn-cutoff'
@@ -137,19 +137,6 @@ import { yieldSilentRunsTo } from '../lib/silent-runs-yield'
 import { gatePlanTool, codePlanAllowed, planNudgeDue, PLAN_NUDGE } from '../lib/plan-gate'
 import { newVerifyState, recordVerifyRound, verifyNudgeDue, VERIFY_NUDGE } from '../lib/verify-nudge'
 import { withSelfControlTools } from '../lib/settings-tool-names'
-
-/** A name the model wrote in its text is a call only when it is one of the
- *  agent's tools, after the usual name repair (GH #147). */
-function isCodexTool(name: string, args: Record<string, unknown>): boolean {
-  const tools = toolRegistry.getAll()
-  const repaired = repairToolCall(name, args, tools).name
-  return tools.some((t) => t.name === repaired)
-}
-
-/** Every name a call lifted out of the reasoning channel may carry (C59 A3). */
-function codexKnownNames(): string[] {
-  return [...toolRegistry.getAll().map((t) => t.name), TOOL_SEARCH]
-}
 
 // Why a run ended, or was pushed on, belongs in the support log. This used to
 // be a no-op, and a run that never finished its task left nothing to read on
@@ -740,31 +727,13 @@ export function useCodex() {
     const addBlock = blockSink.add
     const updateBlockById = blockSink.update
 
-    // Resolve provider
-    const { provider, modelId } = getProviderForModel(activeModel)
-    const providerId = getProviderIdFromModel(activeModel)
-    // Every non-Ollama provider used to be hardcoded to 'native' here, which
-    // ignored both the server's `supports_tools` answer and the cache of models
-    // a previous run watched reject a `tools` payload. The request went out
-    // anyway, came back 405, and the negative expired 24 h later so the user
-    // paid for the same discovery again. toolStrategyFor applies the same
-    // precedence the dropdown and the Agent toggle use.
-    const pickerMeta = useModelStore.getState().models.find((m) => m.name === activeModel)
-    let strategy = toolStrategyFor({
-      name: activeModel,
-      supportsTools: pickerMeta && pickerMeta.type === 'text' ? pickerMeta.supportsTools : undefined,
-    })
-    // The registry already stripped the `provider::` prefix when it resolved
-    // the client; re-splitting the name here was a second copy of that rule.
-    const modelToUse = modelId
-    // G37b (R21d wire proof, 2026-08-08): the picker row is silent for the
-    // managed built-in engine (useModels synthesizes its rows without ever
-    // running listModels), so ask the server itself before the first request.
-    // Only a hard `false` downgrades to the prompt transport; cloud endpoints
-    // answer without a network call.
-    if (strategy === 'native' && (providerId === 'openai' || isCompatProviderId(providerId)) && provider.serverToolSupport) {
-      if ((await provider.serverToolSupport(modelToUse)) === false) strategy = 'hermes_xml'
-    }
+    // Resolve provider + tool calling strategy (CA K1): the one resolution
+    // every surface uses (Agent tab, workflows, voice, sub-agents). This tab
+    // used to carry its own copy without the Ollama half: no template fix
+    // (a fixable model ran on the prompt transport here and natively in the
+    // Agent tab) and no /api/show overlay (a model whose template cannot
+    // parse tools still got a native payload). One function, one verdict.
+    const { strategy, modelToUse, modelId, providerId, provider } = await resolveToolCallingStrategy(activeModel)
     // C59 A2: a local model up to ~35B gets the compact profile (short tool
     // list, one-line descriptions, tool_search). Native transport only: the
     // Hermes prompt is built once and cannot grow mid-run.
@@ -1265,8 +1234,10 @@ export function useCodex() {
       await ensureBuiltinAgentCtx(modelToUse)
     } catch { /* run with whatever the engine has */ }
 
+    // Keyed on the raw id, like the Agent tab: an Ollama agent variant
+    // (`<model>-agent`) has no picker row and no context entry of its own.
     const numCtx: number = await resolveAgentNumCtx(
-      modelToUse, providerId, settings.contextWindowOverride, activeModel,
+      modelId, providerId, settings.contextWindowOverride, activeModel,
     )
 
     try {
@@ -1782,10 +1753,10 @@ export function useCodex() {
             // Werkzeugaufrufe, die im Fliesstext stehen — und die Prosa, die dabei
             // stehen bleiben MUSS: hooks/codex/tool-call-recovery.ts.
             {
-              const recovered = recoverToolCallsFromContent(toolCalls, turnContent)
+              const recovered = recoverTurnCalls({ toolCalls, content: turnContent, thinking: turn.thinking, tools: toolRegistry.getAll(), extraNames: [TOOL_SEARCH] })
               toolCalls = recovered.toolCalls
               turnContent = recovered.content
-              toolCalls = recoverToolCallsFromReasoning(toolCalls, turnContent, turn.thinking, codexKnownNames())
+              if (recovered.source !== 'native' && recovered.source !== 'none') diagLog('calls-recovered', { from: recovered.source, count: toolCalls.length })
             }
           } else {
             // ── Streaming path for OpenAI-compat / Anthropic / LU Cloud ──
@@ -1830,10 +1801,10 @@ export function useCodex() {
             // only when every name in it is a tool this agent has, so example
             // JSON in an explanation is never run.
             {
-              const recovered = recoverKnownToolCallsFromContent(toolCalls, turnContent, isCodexTool)
+              const recovered = recoverTurnCalls({ toolCalls, content: turnContent, thinking: turn.thinking, tools: toolRegistry.getAll(), extraNames: [TOOL_SEARCH] })
               toolCalls = recovered.toolCalls
               turnContent = recovered.content
-              toolCalls = recoverToolCallsFromReasoning(toolCalls, turnContent, turn.thinking, codexKnownNames())
+              if (recovered.source !== 'native' && recovered.source !== 'none') diagLog('calls-recovered', { from: recovered.source, count: toolCalls.length })
             }
             if (keepThinking && turn.thinking) {
               thinkingContent += (thinkingContent ? '\n\n' : '') + turn.thinking
@@ -1978,10 +1949,10 @@ export function useCodex() {
             }))
             turnContent = stripToolCallTags(raw)
           } else {
-            // Kein <tool_call>-Tag, aber vielleicht ein ```json-Aufruf: dieselbe
-            // Wiederherstellung wie in den beiden Zweigen darueber, nur fuer
-            // bekannte Werkzeuge (T1-Nachttest 3.0.9).
-            const recovered = recoverKnownToolCallsFromContent([], raw, isCodexTool)
+            // Kein <tool_call>-Tag, aber vielleicht ein ```json- oder ein
+            // Prosa-Aufruf: dieselbe Kette wie in den Zweigen darueber, nur
+            // fuer bekannte Werkzeuge (T1-Nachttest 3.0.9, CA K2).
+            const recovered = recoverTurnCalls({ toolCalls: [], content: raw, thinking: hermesTurn.thinking, tools: toolRegistry.getAll(), extraNames: [TOOL_SEARCH] })
             toolCalls = recovered.toolCalls
             turnContent = recovered.content
           }
