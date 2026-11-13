@@ -10,6 +10,7 @@ import { useBackgroundAgentWake } from '../../hooks/useBackgroundAgentWake'
 import { useGenerationStore } from '../../stores/generationStore'
 import { ChatInput } from './ChatInput'
 import { SteerNote } from './SteerNote'
+import { RunErrorActions } from './RunErrorActions'
 import { useSteerQueue } from '../../hooks/useSteerQueue'
 import { ChatFileChip } from './ChatFileChip'
 import { FILE_ONLY_TEXT } from '../../lib/chat-files'
@@ -118,6 +119,13 @@ export function CodexView() {
 
   const conversation = conversations.find(c => c.id === activeConversationId)
   const messages = conversation?.messages || []
+  // CA U7: Try again under the newest failed answer sends the instruction it answered.
+  const lastAssistantId = [...messages].reverse().find((m) => m.role === 'assistant')?.id
+  const lastInstruction = (() => {
+    const at = messages.findIndex((m) => m.id === lastAssistantId)
+    for (let i = at - 1; i >= 0; i--) if (messages[i].role === 'user') return (messages[i].content || '').trim()
+    return ''
+  })()
 
   // Per-conversation generating flag (2026-06-12): the typing indicator
   // + realtime counter + a message's live-stream state must follow the coding
@@ -736,6 +744,13 @@ export function CodexView() {
                       })()}
                       {msg.role === 'assistant' && (
                         <RequestUsageLine usage={msg.requestUsage} className="block px-1" />
+                      )}
+                      {/* CA U7: the newest failed answer offers a way on. */}
+                      {!readOnly && msg.role === 'assistant' && msg.error && !codexGenerating && msg.id === lastAssistantId && (
+                        <RunErrorActions
+                          error={msg.error}
+                          onRetry={lastInstruction ? () => sendInstruction(lastInstruction, { shownMode }) : undefined}
+                        />
                       )}
                     </div>
                   </div>

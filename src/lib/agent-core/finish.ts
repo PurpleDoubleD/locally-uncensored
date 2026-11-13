@@ -7,8 +7,9 @@
  * what was done, what is open and what comes next. This is that pass: one call,
  * no tools, a short answer, and on any failure the old line stays alone.
  *
- * Not used for the cost brake (another paid call is the opposite of braking)
- * or for Stop (the user asked for silence).
+ * Local models only: on a paid provider the pass would send the whole run's
+ * history once more (C83: 400k tokens per request), which is the opposite of
+ * stopping. Never at the cost brake, never on Stop (the user asked for silence).
  */
 import type { ChatMessage } from '../../api/providers/types'
 import { settleThinking } from '../thinking-stripper'

@@ -29,6 +29,8 @@ import {
 import { setExplicitFanout } from '../api/agents/sub-agent'
 import { appendTaskReport } from '../lib/agent-task-report'
 import { finishWithoutTools, finishSection } from '../lib/agent-core/finish'
+import { useProviderStore } from '../stores/providerStore'
+import { networkHint, runErrorKind } from '../lib/agent-core/run-error'
 import { appendSteers } from '../lib/agent-core/steer'
 import { useSteerStore } from '../stores/steerStore'
 import { useAgentTaskStore } from '../stores/agentTaskStore'
@@ -1337,7 +1339,7 @@ export function useCodex() {
           const halted = (fullContent ? fullContent + '\n\n' : '') + budget.haltMessage()
           useChatStore.getState().updateMessageContent(convId!, assistantMsg.id, halted)
           // CA U6: one pass without tools says what is done and what is open.
-          const summary = await finishWithoutTools({ provider, model: modelToUse, messages, signal: abort.signal })
+          const summary = (isLocalModelByName(activeModel) ? await finishWithoutTools({ provider, model: modelToUse, messages, signal: abort.signal }) : null)
           if (summary) useChatStore.getState().updateMessageContent(convId!, assistantMsg.id, halted + finishSection(summary))
           break
         }
@@ -2266,7 +2268,7 @@ export function useCodex() {
           const msg = `\n\n_(halted: ${batchVerdict.reason}. The model is looping. Try a stronger model for multi-step code tasks, or rephrase the instruction.)_`
           useChatStore.getState().updateMessageContent(convId, assistantMsg.id, fullContent + msg)
           {
-            const summary = await finishWithoutTools({ provider, model: modelToUse, messages, signal: abort.signal })
+            const summary = (isLocalModelByName(activeModel) ? await finishWithoutTools({ provider, model: modelToUse, messages, signal: abort.signal }) : null)
             if (summary) useChatStore.getState().updateMessageContent(convId, assistantMsg.id, fullContent + msg + finishSection(summary))
           }
           // A halt has to be visible in the thread itself, not only as a
@@ -2733,7 +2735,7 @@ export function useCodex() {
           const msg = `\n\n_(halted: ${failVerdict.reason}. The model is looping. Try a stronger model for multi-step code tasks, or rephrase the instruction.)_`
           useChatStore.getState().updateMessageContent(convId, assistantMsg.id, fullContent + msg)
           {
-            const summary = await finishWithoutTools({ provider, model: modelToUse, messages, signal: abort.signal })
+            const summary = (isLocalModelByName(activeModel) ? await finishWithoutTools({ provider, model: modelToUse, messages, signal: abort.signal }) : null)
             if (summary) useChatStore.getState().updateMessageContent(convId, assistantMsg.id, fullContent + msg + finishSection(summary))
           }
           addBlock({
@@ -2841,7 +2843,9 @@ export function useCodex() {
         // which for a TypeError from fetch is just "Failed to fetch".
         let hint = ''
         if (/Failed to fetch|NetworkError|net::ERR/i.test(msg)) {
-          hint = '\n\nHint: the Ollama server is unreachable. Is `ollama serve` running on localhost:11434?'
+          // CA U7: the backend this run used, not always Ollama.
+          const cfg = (useProviderStore.getState().providers as Record<string, { name?: string; baseUrl?: string } | undefined>)[providerId]
+          hint = `\n\nHint: ${networkHint({ providerId, name: cfg?.name, baseUrl: cfg?.baseUrl, local: isLocalModelByName(activeModel) })}`
         } else if (code === 'tools_unsupported' || /does not support tools|tool.*not.*support/i.test(msg)) {
           markToolsUnsupported(modelToUse)
           hint = '\n\nHint: this model does not support tool calling, so Code mode cannot use it. Pick a model that supports tool calling (Qwen 3, Llama 3.1+, Gemma 4) or an LU Cloud model shown with the tools badge.'
@@ -2876,8 +2880,16 @@ export function useCodex() {
           })
           return
         }
+        const answerLength = fullContent.length
         fullContent += `\n\nError: ${msg}${hint}`
         useChatStore.getState().updateMessageContent(convId, assistantMsg.id, fullContent)
+        // The error as a field too (CA U7), like the Agent tab: the transcript
+        // offers Try again under it, and the phone draws its own box.
+        useChatStore.getState().updateMessageError(convId, assistantMsg.id, {
+          kind: runErrorKind({ message: msg, status, code }),
+          detail: `${msg}${hint}`.trim(),
+          at: answerLength,
+        })
         codexStore.addEvent(convId, {
           id: uuid(), type: 'error', content: msg, timestamp: Date.now(),
         })

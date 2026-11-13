@@ -1776,7 +1776,7 @@ export function useAgentChat() {
           scheduleUIUpdate()
           // CA U6: one pass without tools says what is done and what is open.
           {
-            const summary = await finishWithoutTools({ provider, model: modelToUse, messages: agentMessages, signal: abort.signal })
+            const summary = (isLocalModelByName(activeModel) ? await finishWithoutTools({ provider, model: modelToUse, messages: agentMessages, signal: abort.signal }) : null)
             if (summary) { runState.content += finishSection(summary); scheduleUIUpdate() }
           }
           break
@@ -3012,7 +3012,7 @@ export function useAgentChat() {
           scheduleUIUpdate()
           // CA U6: one pass without tools says what is done and what is open.
           {
-            const summary = await finishWithoutTools({ provider, model: modelToUse, messages: agentMessages, signal: abort.signal })
+            const summary = (isLocalModelByName(activeModel) ? await finishWithoutTools({ provider, model: modelToUse, messages: agentMessages, signal: abort.signal }) : null)
             if (summary) { runState.content += finishSection(summary); scheduleUIUpdate() }
           }
           addBlock(runState, convId!, assistantMessage.id, {
@@ -3525,7 +3525,7 @@ export function useAgentChat() {
           scheduleUIUpdate()
           // CA U6: one pass without tools says what is done and what is open.
           {
-            const summary = await finishWithoutTools({ provider, model: modelToUse, messages: agentMessages, signal: abort.signal })
+            const summary = (isLocalModelByName(activeModel) ? await finishWithoutTools({ provider, model: modelToUse, messages: agentMessages, signal: abort.signal }) : null)
             if (summary) { runState.content += finishSection(summary); scheduleUIUpdate() }
           }
           break

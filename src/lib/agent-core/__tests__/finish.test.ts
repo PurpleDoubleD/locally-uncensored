@@ -31,6 +31,8 @@ describe('a clean end at the limit (CA U6)', () => {
     const src = (p: string) => readFileSync(resolve(__dirname, '../../..', p), 'utf8')
     for (const f of ['hooks/useAgentChat.ts', 'hooks/useCodex.ts']) {
       expect(src(f).match(/finishWithoutTools\(/g)?.length).toBe(3)
+      // Local models only (C83: a paid run would send its whole history again).
+      expect(src(f).match(/isLocalModelByName\(activeModel\) \? await finishWithoutTools\(/g)?.length).toBe(3)
       const brake = src(f).indexOf("if (brake.action === 'halt')")
       expect(src(f).slice(brake, brake + 500)).not.toContain('finishWithoutTools')
     }
