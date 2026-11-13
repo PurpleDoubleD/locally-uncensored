@@ -69,6 +69,23 @@ export interface ActiveContext {
   maxUnknown?: boolean
   /** Ollama only: what Auto sends, which an unknown maximum keeps small. */
   autoWindow?: number
+  /**
+   * C77 (redapplevi, Discord 11.11.2026): a hosted OpenAI-compatible API
+   * that names no window for its model. The window was then a guess from the
+   * name, 8192 at the floor, and nothing could change it: the picker of a
+   * paid model only sets the send window, and "Context window (Ollama)" is
+   * Ollama's. Here the user may say what the model really has; saved per
+   * endpoint and model under `modelWindowKey` in `contextWindowByModel`,
+   * which the provider's cascade already reads (step 2, GH #129).
+   * Absent where the server says its window, or for other providers.
+   */
+  modelWindowSettable?: boolean
+  modelWindowKey?: string
+  /** The model's own window and where it comes from (cloud branch). */
+  modelWindow?: number
+  modelWindowSource?: ContextSource
+  /** Cloud only: the send window can be set (a paid provider with the cap on). */
+  sendAdjustable?: boolean
 }
 
 /** What the hook reports while there is no model, or none resolved yet. */
@@ -343,6 +360,13 @@ export async function resolveModelContext(model: string, use: WindowUse, k: Cont
     ? await cloudClient.getContextWindow(cloudId).catch(() => null)
     : null
   const max = cloudResolved?.tokens || await getModelMaxTokens(model).catch(() => 4096)
+  const sendAdjustable = k.capEnabled !== false && isPaidProvider(providerId, sendsToALanBackend(providerId, model))
+  const windowSource = remoteWindowSource(providerId, cloudResolved?.source, max)
+  // C77: an OpenAI-compatible endpoint (it has a per model window key) that
+  // did not say its window. A window the server named is never overridden
+  // from here: the cascade clamps a pick to it anyway.
+  const modelWindowKey = providerId !== 'lu-cloud' && cloudClient?.contextWindowKey ? cloudClient.contextWindowKey(cloudId) : ''
+  const modelWindowSettable = !!modelWindowKey && !!cloudResolved && (cloudResolved.source === 'guess' || cloudResolved.source === 'user')
   return {
     provider: 'cloud',
     contextWindow: max,
@@ -365,10 +389,14 @@ export async function resolveModelContext(model: string, use: WindowUse, k: Cont
     // conversation each step sends and pays for. The dropdown sets it per
     // model (settings.cloudSendWindowByModel). A LAN server that fell
     // through to here bills nobody, so there is nothing to choose.
-    adjustable: k.capEnabled !== false && isPaidProvider(providerId, sendsToALanBackend(providerId, model)),
+    adjustable: sendAdjustable || modelWindowSettable,
+    sendAdjustable,
     // Woher die Zahl kommt, auch wenn sie hier niemand verstellen kann.
-    source: remoteWindowSource(providerId, cloudResolved?.source, max),
+    source: windowSource,
     windowKey: model,
+    modelWindow: max,
+    modelWindowSource: windowSource,
+    ...(modelWindowSettable ? { modelWindowSettable, modelWindowKey } : {}),
   }
 }
 

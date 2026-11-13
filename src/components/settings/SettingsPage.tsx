@@ -2114,7 +2114,7 @@ export function SettingsPage() {
                 clips RAG / long chats). Bump up to use the model's full
                 context window. Ignored by Anthropic / OpenAI providers. */}
             <div className="flex items-center justify-between">
-              <span className="t-micro text-gray-700 dark:text-gray-400" title="Forwarded as Ollama num_ctx. 0 = provider default (Ollama defaults to 2048, which clips RAG and long chats). Bump up to use the model's full context. Ignored by cloud providers.">Context window (Ollama)</span>
+              <span className="t-micro text-gray-700 dark:text-gray-400" title="Forwarded as Ollama num_ctx. 0 = provider default (Ollama defaults to 2048, which clips RAG and long chats). Bump up to use the model's full context. Ignored by cloud providers: for an API model whose server reports no window, set it from the context button in the chat.">Context window (Ollama)</span>
               <BoundedNumberInput
                 ariaLabel="Context window (Ollama)"
                 value={settings.contextWindowOverride ?? 0}
