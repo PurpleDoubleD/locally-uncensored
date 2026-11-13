@@ -14,7 +14,8 @@ afterEach(() => cleanup())
 
 const open = (toolCall: AgentToolCall) => {
   const view = render(createElement(ToolCallBlock, { toolCall }))
-  fireEvent.click(view.getByText(toolCall.toolName))
+  // CA U1: the row reads as words; the tool's own name is its tooltip.
+  fireEvent.click(view.getByTitle(toolCall.toolName))
   return view.container.textContent ?? ''
 }
 const count = (text: string, needle: string) => text.split(needle).length - 1

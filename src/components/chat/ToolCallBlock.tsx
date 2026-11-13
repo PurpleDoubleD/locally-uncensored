@@ -28,6 +28,8 @@ import { isSelfControlToolName } from '../../lib/settings-tool-names'
 import { useChatStore } from '../../stores/chatStore'
 import { useCommandRulesStore } from '../../stores/commandRulesStore'
 import { suggestRuleFor } from '../../lib/agent-core/command-rules'
+import { toolCallTitle, diffStat, shellExitCode, hasToolTitle, stripAnsi } from '../../lib/tool-call-title'
+import { toolRegistry } from '../../api/mcp/tool-registry'
 import { commandIcon } from '../../lib/shell-command-classify'
 import { requestGenerationCancel } from '../../api/vram-handoff'
 import { cancelBackgroundJob } from '../../lib/background-cancels'
@@ -284,6 +286,13 @@ function ToolCallBlockImpl({ toolCall, onApprove, onReject }: Props) {
   const isRunning = toolCall.status === 'running'
   const isPending = toolCall.status === 'pending_approval'
   const isFailed = toolCall.status === 'failed' || toolCall.status === 'rejected'
+  const title = toolCallTitle(toolCall.toolName, toolCall.args, toolCall.status, toolRegistry.displayName(toolCall.toolName))
+  const stat = diffStat(toolCall.diff)
+  const isShell = toolCall.toolName === 'shell_execute'
+  const exitCode = isShell ? shellExitCode(toolCall.result) : null
+  // The raw arguments where the title cannot say what the call does, and on
+  // every call that waits for a yes: what it would write is part of the question.
+  const knownTool = hasToolTitle(toolCall.toolName) && !(isPending && !isShell)
   // CA K4: "Always allow `npm test` here", for a waiting shell call that knows its folder.
   const alwaysRule = isPending && toolCall.toolName === 'shell_execute' && toolCall.ruleScope && typeof toolCall.args?.command === 'string'
     ? suggestRuleFor(toolCall.args.command)
@@ -381,10 +390,29 @@ function ToolCallBlockImpl({ toolCall, onApprove, onReject }: Props) {
       <div className="flex items-center gap-1">
         <button
           onClick={() => setOpen(!open)}
-          className="flex items-center gap-1.5 py-0.5 text-left hover:opacity-80 transition-opacity flex-1 min-w-0"
+          className="flex items-center gap-2 py-1 text-left hover:opacity-80 transition-opacity flex-1 min-w-0"
+          title={toolCall.toolName}
         >
-          <ToolIcon size={10} className="text-gray-500 dark:text-gray-500 shrink-0" />
-          <span className={`t-micro italic pr-0.5 ${isRunning ? 'lu-tool-shimmer' : 'text-gray-600 dark:text-gray-400'}`}>{toolCall.toolName}</span>
+          <ToolIcon size={13} className="text-gray-400 dark:text-gray-500 shrink-0" />
+          {/* CA U1: what the call did, in words; the internal name is the tooltip. */}
+          <span data-testid="tool-title" className={`t-control truncate min-w-0 ${isRunning ? 'lu-tool-shimmer' : 'text-gray-600 dark:text-gray-400'}`}>
+            {title.verb}
+            {title.target && (
+              <>
+                {' '}
+                <span className={title.mono ? 'font-mono text-gray-800 dark:text-gray-200' : 'text-gray-800 dark:text-gray-200'}>{title.target}</span>
+              </>
+            )}
+          </span>
+          {stat && (
+            <span className="t-mono shrink-0" data-testid="tool-diffstat">
+              <span className="text-emerald-600 dark:text-emerald-400">+{stat.added}</span>{' '}
+              <span className="text-red-500 dark:text-red-400">−{stat.removed}</span>
+            </span>
+          )}
+          {exitCode !== null && (
+            <span className="t-micro shrink-0 text-red-500 dark:text-red-400" data-testid="tool-exit">exit {exitCode}</span>
+          )}
           {isRunning && (
             <span className="flex items-center gap-[3px] shrink-0" aria-hidden>
               {[0, 1, 2].map((i) => (
@@ -402,14 +430,14 @@ function ToolCallBlockImpl({ toolCall, onApprove, onReject }: Props) {
               offener Werkzeugaufruf ein halber Absturz. Gesehen wird er ueber
               die Uhr, ueber Approve/Reject darunter und ueber die Rueckfrage
               am Eingabefeld, nicht ueber die Farbe. */}
-          <StatusIcon size={9} className={`shrink-0 ${
+          <StatusIcon size={11} className={`shrink-0 ${
             toolCall.status === 'completed' ? 'text-gray-400 dark:text-gray-500' :
             isFailed ? 'text-red-400/60' :
             isPending ? HINWEIS_TEXT.ruhig :
             'text-gray-500'
           } ${isRunning ? 'animate-spin' : ''}`} />
           {toolCall.duration != null && (
-            <span className="text-[0.5rem] text-gray-500 dark:text-gray-600">
+            <span className="t-micro text-gray-500 dark:text-gray-500">
               {toolCall.duration < 1000 ? `${toolCall.duration}ms` : `${(toolCall.duration / 1000).toFixed(1)}s`}
             </span>
           )}
@@ -592,10 +620,13 @@ A user 2026-06-07 fix this lived inside the collapsed details, so a
             className="overflow-hidden"
           >
             <div className="pl-5 pb-1.5 space-y-1">
-              {/* Arguments */}
-              <pre className="text-[0.55rem] leading-relaxed text-gray-500 dark:text-gray-500 bg-gray-50 dark:bg-white/[0.02] rounded px-2 py-1 overflow-x-auto scrollbar-thin">
-                {JSON.stringify(toolCall.args, null, 2)}
-              </pre>
+              {/* Arguments: only where the title does not already say them, and
+                  for a shell call as the terminal block below. */}
+              {!knownTool && (
+                <pre className="t-mono leading-relaxed text-gray-500 dark:text-gray-500 bg-gray-50 dark:bg-white/[0.02] rounded px-2 py-1 overflow-x-auto scrollbar-thin">
+                  {JSON.stringify(toolCall.args, null, 2)}
+                </pre>
+              )}
 
               {/* Diff for the write tools (audit D5): a change view where a
                   change happened, not raw result text. */}
@@ -607,8 +638,14 @@ A user 2026-06-07 fix this lived inside the collapsed details, so a
 
               {/* Result (raw text). The inline media preview now renders
                   always-visible above the collapsible (a user 2026-06-07). */}
-              {toolCall.result && !toolCall.diff && (
-                <pre className="text-[0.55rem] leading-relaxed text-gray-600 dark:text-gray-400 bg-gray-50 dark:bg-white/[0.02] rounded px-2 py-1 overflow-auto scrollbar-thin max-h-[300px]">
+              {isShell && (
+                <pre data-testid="tool-terminal" className="t-mono leading-relaxed rounded-md bg-gray-950 dark:bg-black/50 text-gray-100 px-3 py-2 overflow-auto scrollbar-thin max-h-[300px] whitespace-pre-wrap break-words">
+                  <span className="select-none text-gray-500">$ </span>{typeof toolCall.args?.command === 'string' ? toolCall.args.command : ''}
+                  {toolCall.result ? `\n${stripAnsi(toolCall.result)}` : ''}
+                </pre>
+              )}
+              {toolCall.result && !toolCall.diff && !isShell && (
+                <pre className="t-mono leading-relaxed text-gray-600 dark:text-gray-400 bg-gray-50 dark:bg-white/[0.02] rounded px-2 py-1 overflow-auto scrollbar-thin max-h-[300px] whitespace-pre-wrap break-words">
                   {isWebTool ? stripSourcesMarker(toolCall.result) : toolCall.result}
                 </pre>
               )}
@@ -617,7 +654,7 @@ A user 2026-06-07 fix this lived inside the collapsed details, so a
                   path showed "Path escapes the allowed workspace" twice
                   (3.0.4 box run). */}
               {toolCall.error && !(toolCall.result ?? '').includes(toolCall.error.trim()) && (
-                <pre className="text-[0.55rem] leading-relaxed text-gray-500 dark:text-gray-500 bg-gray-50 dark:bg-white/[0.02] rounded px-2 py-1">
+                <pre className="t-mono leading-relaxed text-gray-500 dark:text-gray-500 bg-gray-50 dark:bg-white/[0.02] rounded px-2 py-1 whitespace-pre-wrap break-words">
                   {toolCall.error}
                 </pre>
               )}
@@ -656,7 +693,7 @@ A user 2026-06-07 fix this lived inside the collapsed details, so a
                   >
                     <X size={10} /> Reject
                   </button>
-                  <span className="ml-1 text-[0.5rem] text-gray-400 dark:text-gray-600 font-mono">⏎ / Esc</span>
+                  <span className="ml-1 t-micro text-gray-400 dark:text-gray-600 font-mono">⏎ / Esc</span>
                 </div>
               )}
             </div>

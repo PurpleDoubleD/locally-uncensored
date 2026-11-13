@@ -237,7 +237,8 @@ test('file_read pages a large file instead of dumping it whole', async ({ page }
   await expect(page.getByRole('main').getByText('Read lines 100 to 104.')).toBeVisible({ timeout: 30_000 })
 
   // Open the tool block and read what the window actually returned.
-  await page.getByRole('main').getByText('file_read').first().click()
+  // CA U1: the row says "Read src/big.ts"; the tool's own name is its tooltip.
+  await page.getByRole('main').getByTitle('file_read').first().click()
   const block = page.getByRole('main')
   await expect(block.getByText(/\[lines 100-104 of 200\]/)).toBeVisible({ timeout: 10_000 })
   await expect(block.getByText(/call file_read again with offset: 105/)).toBeVisible()
