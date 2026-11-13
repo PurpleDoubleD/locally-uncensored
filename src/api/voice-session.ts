@@ -63,7 +63,7 @@ import { log } from '../lib/logger'
 import { resolveExecutor } from './computer-executor'
 import { gatePlanTool, planToolAllowed } from '../lib/plan-gate'
 import { buildChatSystemPrompt } from '../lib/system-prompt'
-import { withChatPersona } from '../lib/chat-persona'
+import { voicePersonaFrom } from '../lib/voice/voice-persona'
 import { applyMaxTools, toolSelectionOpts } from '../lib/tool-selection'
 import { yieldSilentRunsTo } from '../lib/silent-runs-yield'
 import { startTimeout } from '../lib/voice/session-state'
@@ -557,7 +557,23 @@ export async function startVoiceSession(): Promise<void> {
     const settings = useSettingsStore.getState().settings
     const chat = useChatStore.getState()
     const shown = chat.activeConversationId
-    const conversationId = chat.createConversation(activeModel!, '')
+    // A19: the persona of the chat on screen when Start was pressed. The new
+    // record below starts with the persona off, like every new chat, so it
+    // is read here, before that record exists.
+    const shownConversation = shown ? chat.conversations.find((c) => c.id === shown) : undefined
+    const voicePersona = voicePersonaFrom(
+      shownConversation,
+      useSettingsStore.getState().personas,
+      useSettingsStore.getState().activePersonaId,
+      settings.personasEnabled !== false,
+    )
+    const conversationId = chat.createConversation(activeModel!, voicePersona?.prompt ?? '')
+    if (voicePersona) {
+      // The record speaks as the same persona, so its Plugins menu and any
+      // later typed message in it say what Voice spoke as.
+      if (voicePersona.persona) useChatStore.getState().setConversationPersona(conversationId, voicePersona.persona)
+      useChatStore.getState().setConversationPersonaEnabled(conversationId, true)
+    }
     // The new conversation is the session's record, not a place the user
     // asked to go. Whatever chat was open stays open.
     useChatStore.getState().setActiveConversation(shown)
@@ -592,12 +608,10 @@ export async function startVoiceSession(): Promise<void> {
       brain,
       all: tools.defs,
       slug,
-      // GH #170: the persona of THIS chat, the one its Plugins menu names.
+      // GH #170 + A19: the persona of the chat the user started Voice from.
       prompt: {
         base: buildChatSystemPrompt(
-          conversation
-            ? withChatPersona(conversation, useSettingsStore.getState().personas, useSettingsStore.getState().activePersonaId)
-            : {},
+          voicePersona ? { systemPrompt: voicePersona.prompt, personaEnabled: true } : {},
           settings.personasEnabled !== false,
         ),
         memory,
