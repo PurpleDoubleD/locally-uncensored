@@ -117,7 +117,7 @@ function installLine(st: { status: string; download_progress?: number; download_
 export function ThreeDSetupCard({ setup }: { setup: ThreeDSetup }) {
   const mac = isMlxImageHost()
   return (
-    <div className="flex flex-col items-center gap-3 max-w-[440px] text-center p-6" data-testid="three-d-setup">
+    <div className="m-auto flex flex-col items-center gap-3 max-w-[440px] text-center p-6" data-testid="three-d-setup">
       <Box size={30} className="text-gray-400" />
       <h3 className="t-title text-gray-100">{mac ? SETUP_TEXT.macTitle : SETUP_TEXT.pcTitle}</h3>
       <p className="t-body text-gray-400">{mac ? SETUP_TEXT.macBody : SETUP_TEXT.pcBody}</p>
@@ -127,7 +127,7 @@ export function ThreeDSetupCard({ setup }: { setup: ThreeDSetup }) {
           <Button variant="secondary" onClick={setup.cancel}>{SETUP_TEXT.cancel}</Button>
         </>
       ) : (
-        <Button onClick={setup.install} data-testid="three-d-setup-install">{SETUP_TEXT.install}</Button>
+        <Button variant="primary" onClick={setup.install} data-testid="three-d-setup-install">{SETUP_TEXT.install}</Button>
       )}
       {setup.error && <p className="t-meta text-red-300" role="alert">{setup.error}</p>}
     </div>
@@ -138,7 +138,7 @@ export function ThreeDSetupCard({ setup }: { setup: ThreeDSetup }) {
  *  first still frame will stand here. */
 export function ThreeDVideoHint() {
   return (
-    <div className="flex flex-col items-center gap-2 max-w-[420px] text-center p-6" data-testid="three-d-video-hint">
+    <div className="m-auto flex flex-col items-center gap-2 max-w-[420px] text-center p-6" data-testid="three-d-video-hint">
       <Film size={28} className="text-gray-400" />
       <p className="t-body text-gray-300">{T.dropVideo}</p>
       <p className="t-meta text-gray-500">{T.dropVideoSub}</p>

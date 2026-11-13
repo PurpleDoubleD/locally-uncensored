@@ -208,7 +208,6 @@ function VideoFrames({ maxViews }: { maxViews: number }) {
         <Film size={14} />
         {name ?? T.dropVideo}
       </button>
-      {!frames.length && !reading && <span className="t-meta text-gray-500">{T.dropVideoSub}</span>}
       {reading && <span className="t-meta text-gray-400">{T.framesReading}</span>}
       {frames.length > 0 && (
         <>

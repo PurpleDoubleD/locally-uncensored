@@ -1,3 +1,4 @@
+import { MAC_3D_MODEL, PC_3D_MODEL } from '../../../lib/three/run-local-3d'
 import { useCreateStore } from '../../../stores/createStore'
 import {
   useCloudCatalogStore, cloudModelById, defaultCloudModel, opPickerModels, modelCostHint, shortCount,
@@ -71,7 +72,25 @@ export const CLOUD_GROUP = 'LU Cloud'
 // (server-driven via cloudCatalogStore) and writes the cloud model slugs.
 export function ModelChip() {
   const backend = useCreateStore((s) => s.backend)
-  return backend === 'cloud' ? <CloudModelChip /> : <LocalModelChip />
+  const intent = useCreateStore((s) => s.intent())
+  if (backend === 'cloud') return <CloudModelChip />
+  // Local 3D has one model per machine (TripoSR on a Mac, TRELLIS.2 in
+  // ComfyUI): it is named, there is nothing to pick.
+  if (intent === '3d') return <LocalThreeDChip />
+  return <LocalModelChip />
+}
+
+function LocalThreeDChip() {
+  const name = isMlxImageHost() ? MAC_3D_MODEL : PC_3D_MODEL
+  return (
+    <span
+      className="inline-flex items-center gap-1.5 h-[var(--control-h-md)] px-3 rounded-lg border border-white/[0.08] t-control text-gray-300"
+      title={`${name} on this machine. Local 3D is never filtered.`}
+      data-testid="model-chip-3d"
+    >
+      {name}
+    </span>
+  )
 }
 
 function CloudModelChip() {

@@ -8,6 +8,7 @@ import { musicText } from '../../../lib/render/music-ui'
 import { useCreateExp } from './CreateContext'
 import { INTENT_MAP, intentNeedsSource } from './intents'
 import { ThreeDSetupCard, ThreeDVideoHint, useThreeDLocal } from './ThreeDStage'
+import { THREE_D_TEXT } from '../../../lib/three/three-d-text'
 import { editNeedsMask, defaultCloudModel, modelForOp } from '../../../stores/cloudCatalogStore'
 import { stageShowsSetupCard, laneModelCount } from './stageGate'
 import { needsMaskFor } from './maskGate'
@@ -185,7 +186,9 @@ export function Stage({ displayed, onOpenMaskEditor, onEditResult, onAnimateResu
   const howtoTopic = stageHowtoTopic(intent, backend, isMlxImageHost())
   if (isGenerating) {
     body = <GeneratingView />
-  } else if (intent === '3d' && threeDSetup.needsSetup) {
+  } else if (intent === '3d' && threeDSetup.needsSetup && !(displayed?.type === '3d' && !(needsSource && source && !freshResult))) {
+    // A model already made (in the cloud, or before) is shown; the setup
+    // takes the Stage when there is nothing to show.
     body = <ThreeDSetupCard setup={threeDSetup} />
   } else if (modelsMissing || installRun) {
     body = <ModelInstallCard kind={meta.requiresModels!} />
@@ -418,7 +421,8 @@ function InputSlot() {
               : <UploadCloud className="text-lu-accent drop-shadow-[0_0_7px_var(--color-lu-accent-ring)]" size={30} strokeWidth={ICON_STROKE_MARK} />
           )}
           <div className="text-center">
-            <div className="t-title text-gray-300">{meta.id === 'removebg' ? 'Drop an image to cut out' : meta.id === 'animate' ? 'Drop an image to animate' : meta.id === 'upscale' ? 'Drop an image to enhance' : 'Drop an image to edit'}</div>
+            <div className="t-title text-gray-300">{meta.id === '3d' ? THREE_D_TEXT.dropImage : meta.id === 'removebg' ? 'Drop an image to cut out' : meta.id === 'animate' ? 'Drop an image to animate' : meta.id === 'upscale' ? 'Drop an image to enhance' : 'Drop an image to edit'}</div>
+            {meta.id === '3d' && <div className="t-body text-gray-500">{THREE_D_TEXT.dropImageSub}</div>}
             <div className="t-body text-gray-600">or click to browse · PNG, JPG, WebP</div>
             {batchOffered && <div className="t-body text-gray-600">Pick several to give them all the same run</div>}
           </div>
