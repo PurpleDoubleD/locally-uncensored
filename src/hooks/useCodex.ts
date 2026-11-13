@@ -31,6 +31,7 @@ import { appendTaskReport } from '../lib/agent-task-report'
 import { finishWithoutTools, finishSection } from '../lib/agent-core/finish'
 import { useProviderStore } from '../stores/providerStore'
 import { networkHint, runErrorKind } from '../lib/agent-core/run-error'
+import { publishStepBreakdown } from '../stores/contextBreakdownStore'
 import { appendSteers } from '../lib/agent-core/steer'
 import { useSteerStore } from '../stores/steerStore'
 import { useAgentTaskStore } from '../stores/agentTaskStore'
@@ -134,7 +135,7 @@ import { lastRequestUsageNotice, requestUsageTracker } from '../lib/request-usag
 import { shouldDowngradeThinking, engineDeniedThinking } from './codex/thinking-downgrade'
 import { recoverTurnCalls } from '../lib/agent-core/recover'
 import { codexStallVerdict } from './codex/stall-verdict'
-import { createStagedWriter } from './codex/staged-writes'
+import { createStagedWriter, reviewNotesText } from './codex/staged-writes'
 import { codexCutoffNote, dropCutOffCall } from './codex/turn-cutoff'
 import { codexToolDiff, codexEventKind } from './codex/tool-result-view'
 import { capHiddenToolHistory } from './codex/hidden-history'
@@ -1004,6 +1005,17 @@ export function useCodex() {
           return msg
         }),
     ]
+    // CA U3: what the user rejected in the review since the last tool result
+    // (a change or some of its parts), in front of the new instruction, so a
+    // turn that calls no tool still learns it. Prefixed, not a turn of its
+    // own: two user turns in a row are refused by strict chat templates.
+    if (convId) {
+      const notes = useStagedChangesStore.getState().takeNotes(convId)
+      const lastUser = [...messages].reverse().find((m) => m.role === 'user')
+      if (notes.length && lastUser && typeof lastUser.content === 'string') {
+        lastUser.content = `${reviewNotesText(notes)}\n\n${lastUser.content}`
+      }
+    }
     // G27b: a new turn on a conversation whose plan is still open gets the
     // plan handed to it instead of being asked to find it again (the owner,
     // 2026-08-22: an interrupted run left the plan lying and "continue" was
@@ -1651,6 +1663,8 @@ export function useCodex() {
           stepToolsEstimate = estimateTokens(JSON.stringify(tools))
           if (convId) {
             useSendSizeStore.getState().reportTools(convId, stepToolsEstimate)
+            // CA U5: what this step sent, by kind, for the context breakdown.
+            publishStepBreakdown(convId, sendMessages, stepToolsEstimate)
           }
           diagLog('iter-start', {
             iter: i,

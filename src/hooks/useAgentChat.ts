@@ -124,6 +124,7 @@ import {
 import { setExplicitFanout, buildSubAgentGates } from '../api/agents/sub-agent'
 import { appendTaskReport } from '../lib/agent-task-report'
 import { appendSteers } from '../lib/agent-core/steer'
+import { publishStepBreakdown } from '../stores/contextBreakdownStore'
 import { finishWithoutTools, finishSection } from '../lib/agent-core/finish'
 import { useSteerStore } from '../stores/steerStore'
 import { useAgentTaskStore } from '../stores/agentTaskStore'
@@ -2082,6 +2083,8 @@ export function useAgentChat() {
           // it and the meter read low by the whole catalog.
           if (convId) {
             useSendSizeStore.getState().reportTools(convId, estimateTokens(JSON.stringify(tools)))
+            // CA U5: what this step sent, by kind, for the context breakdown.
+            publishStepBreakdown(convId, sendMessages, estimateTokens(JSON.stringify(tools)))
           }
           catalogTokens = estimateTokens(JSON.stringify(tools))
 
