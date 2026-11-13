@@ -193,19 +193,25 @@ export function ParamGroups() {
   const showHiresFix = !isCloud && !isVideo && hiresLane && (!isMlxLocal || macHires)
   // In Edit the picture comes out in the shape of the source, not of the
   // sliders (lib/edit-hires). Without a source there is nothing to name yet.
+  // C75: a Qwen-Image 2.1 edit picks its shape, on ComfyUI and on the Mac.
+  const qwenEditShapeShown = isEdit && !isCloud && laneType === 'qwenimage' && showSize
+  const macShapeChosen = qwenEditShapeShown && isMlxLocal && s.qwenEditShape === 'canvas'
   const hiresBase = isEdit && !macHires
     ? editHiresBase({ source: s.source, width: s.width, height: s.height, modelType: laneType, modelName: laneModel, editShape: s.qwenEditShape })
     : isEdit && macHires
       // The Mac's edit comes back in the shape of the source, on the canvas
       // the engine runs (1056 where the sliders say 1024, lib/image-engines).
-      ? (s.source ? editCanvas(macEditSide(qwenEditResolution(s.width, s.height)), s.source) : null)
+      // C75: in the shape of the fields when the picture is cut to them.
+      ? (s.source ? editCanvas(macEditSide(qwenEditResolution(s.width, s.height)), macShapeChosen ? { width: s.width, height: s.height } : s.source) : null)
       : { width: s.width, height: s.height }
-  // C75: a local Qwen-Image 2.1 edit on ComfyUI picks its shape. The Mac's
-  // engine edits in the shape of the source and has no such switch.
-  const qwenEditShapeShown = isEdit && !isCloud && !isMlxLocal && laneType === 'qwenimage' && showSize
-  const qwenEditOut = qwenEditShapeShown
-    ? editHiresBase({ source: s.source, width: s.width, height: s.height, modelType: 'qwenimage', editShape: s.qwenEditShape })
-    : null
+  // What the edit comes out at: the Mac's engine runs its own side (1056
+  // where the fields say 1024), ComfyUI the node's budget.
+  const qwenEditOut = !qwenEditShapeShown ? null
+    : isMlxLocal
+      ? (s.qwenEditShape === 'canvas' || s.source
+        ? editCanvas(macEditSide(qwenEditResolution(s.width, s.height)), s.qwenEditShape === 'canvas' ? { width: s.width, height: s.height } : s.source!)
+        : null)
+      : editHiresBase({ source: s.source, width: s.width, height: s.height, modelType: 'qwenimage', editShape: s.qwenEditShape })
   // The grid a typed width or height is rounded to: the local model's latent
   // cell. The cloud keeps the 64 its providers were checked against.
   const sizeGrid = isCloud ? 64 : latentDownscale(laneType)
