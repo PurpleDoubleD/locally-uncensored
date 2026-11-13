@@ -591,7 +591,7 @@ fn bring_engine_up_to_date(slot: &crate::install_state::InstallSlot) -> Result<(
     // The sweep exists on the Mac alone (see its gate in `process_util`), and
     // so does the sidecar it ends. Without this gate Windows did not compile.
     #[cfg(target_os = "macos")]
-    crate::process_util::kill_listeners_on_port(MLX_PORT);
+    sweep_orphaned_sidecar();
     slot.log("image engine updated");
     Ok(())
 }
@@ -2692,6 +2692,38 @@ pub(crate) fn stop_sidecar() {
     sidecar().stop();
 }
 
+/// End the image sidecar of THIS app that no handle reaches any more: one an
+/// earlier run of this app left behind after ending hard, or one this process
+/// started and lost the handle of. Returns the pids it stopped.
+///
+/// Ours means: the argv names this app's own `server.py` (the identity's data
+/// folder, so a test build or a second identity never matches) AND the parent
+/// is this process or launchd (an orphan). A sidecar whose parent is another
+/// live LU belongs to that LU and is left alone, and so is anything else on
+/// the port. In a test build it does nothing at all: `Drop for AppState` runs
+/// this, and a test must never end a process it did not start (N2, 13.11.).
+#[cfg(target_os = "macos")]
+pub(crate) fn sweep_orphaned_sidecar() -> Vec<u32> {
+    if cfg!(test) {
+        return Vec::new();
+    }
+    sweep_sidecar_at(MLX_PORT, &mlx_root().join("server.py"))
+}
+
+#[cfg(target_os = "macos")]
+fn sweep_sidecar_at(port: u16, server_py: &std::path::Path) -> Vec<u32> {
+    let own = std::process::id();
+    crate::process_util::kill_own_listeners_on_port(port, |l| is_our_sidecar(l, server_py, own))
+}
+
+/// Pure: is this listener a sidecar of ours? See `sweep_orphaned_sidecar`.
+#[cfg(any(target_os = "macos", test))]
+pub(crate) fn is_our_sidecar(listener: &crate::process_util::PortListener, server_py: &std::path::Path, own_pid: u32) -> bool {
+    let runs_our_server = listener.cmd.iter().any(|arg| std::path::Path::new(arg) == server_py);
+    let parent_is_us_or_gone = matches!(listener.parent, Some(p) if p == own_pid || p == 1);
+    runs_our_server && parent_is_us_or_gone
+}
+
 /// Whether an image is being made right now, by either engine. The music
 /// lane asks this before it loads its model into the same memory.
 pub(crate) fn image_engine_busy() -> bool {
@@ -3018,7 +3050,7 @@ pub fn mlx_start(_state: &AppState, _args: &Value) -> CmdResult {
 //     called from `src/api/mlx-image.ts`). It frees the resident model and
 //     leaves the sidecar up, which is the point of a sidecar — `mlx_status`
 //     returns `modelLoaded`/`idleSeconds` so the UI can offer exactly that.
-//   * Ending the PROCESS is the quit-time `kill_listeners_on_port(MLX_PORT)`
+//   * Ending the PROCESS is the quit-time `sweep_orphaned_sidecar()`
 //     in `state.rs::shutdown`. Same call, one line, on the path that actually
 //     runs.
 //
@@ -4431,5 +4463,109 @@ mod tests {
         // instead of an empty-write at install time.
         assert!(REQUIREMENTS_TXT.contains("torch"));
         assert!(SERVER_PY.contains("FastAPI"));
+    }
+
+    // ── N3 (3.1.0): the quit sweep ends only our own sidecar ──────────────
+
+    fn listener(pid: u32, parent: Option<u32>, cmd: &[&str]) -> crate::process_util::PortListener {
+        crate::process_util::PortListener { pid, parent, cmd: cmd.iter().map(|s| s.to_string()).collect() }
+    }
+
+    #[test]
+    fn only_our_server_py_under_us_or_orphaned_counts_as_ours() {
+        let server = std::path::Path::new("/Users/x/Library/Application Support/lu-labs/mlx/server.py");
+        let ours = ["/Users/x/Library/Application Support/lu-labs/mlx/venv/bin/python", "/Users/x/Library/Application Support/lu-labs/mlx/server.py"];
+        assert!(is_our_sidecar(&listener(10, Some(500), &ours), server, 500), "started by this process");
+        assert!(is_our_sidecar(&listener(10, Some(1), &ours), server, 500), "orphaned by an earlier run");
+        // The sidecar of a second, still running LU of the same identity.
+        assert!(!is_our_sidecar(&listener(10, Some(777), &ours), server, 500));
+        // A test build or another identity: another data folder.
+        let other = ["python", "/Users/x/Library/Application Support/lu-labs-n2/mlx/server.py"];
+        assert!(!is_our_sidecar(&listener(10, Some(1), &other), server, 500));
+        // Anything else on the port, and a process the table no longer knows.
+        assert!(!is_our_sidecar(&listener(10, Some(500), &["nc", "-l", "47712"]), server, 500));
+        assert!(!is_our_sidecar(&listener(10, None, &[]), server, 500));
+    }
+
+    #[test]
+    fn a_test_build_never_sweeps_the_port() {
+        // Drop for AppState runs the quit path in every test that builds one.
+        // A real LU on this Mac keeps its sidecar on MLX_PORT through all of them.
+        #[cfg(target_os = "macos")]
+        assert!(sweep_orphaned_sidecar().is_empty());
+        drop(crate::state::AppState::new());
+    }
+
+    /// A real listener: python3 running `script` that binds `port`.
+    #[cfg(target_os = "macos")]
+    fn python_listener(script: &std::path::Path, port: u16, via_shell: bool) -> Option<std::process::Child> {
+        let python = ["/usr/bin/python3", "/opt/homebrew/bin/python3"].into_iter().find(|p| std::path::Path::new(p).exists())?;
+        std::fs::write(
+            script,
+            "import socket,sys,time\ns=socket.socket()\ns.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1)\ns.bind(('127.0.0.1',int(sys.argv[1])))\ns.listen(64)\ntime.sleep(60)\n",
+        )
+        .ok()?;
+        let mut cmd = if via_shell {
+            // A parent of its own between us and the listener: the second-LU case.
+            let mut c = std::process::Command::new("/bin/sh");
+            c.args(["-c", &format!("'{python}' -I '{}' {port} & wait", script.display())]);
+            c
+        } else {
+            let mut c = std::process::Command::new(python);
+            c.args(["-I", &script.display().to_string(), &port.to_string()]);
+            c
+        };
+        let child = cmd.stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn().ok()?;
+        for _ in 0..100 {
+            if listening(port) {
+                return Some(child);
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        None
+    }
+
+    #[cfg(target_os = "macos")]
+    fn free_port() -> u16 {
+        std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port()
+    }
+
+    #[cfg(target_os = "macos")]
+    fn listening(port: u16) -> bool {
+        !crate::process_util::listeners_on_port(port).is_empty()
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_foreign_listener_survives_the_sweep_and_our_own_sidecar_does_not() {
+        let dir = tempfile::tempdir().unwrap();
+        let ours = dir.path().join("server.py");
+
+        // A stranger on the port (another program, another LU's own script).
+        let port = free_port();
+        let Some(mut foreign) = python_listener(&dir.path().join("foreign.py"), port, false) else {
+            eprintln!("no python3 on this Mac, skipped");
+            return;
+        };
+        assert!(sweep_sidecar_at(port, &ours).is_empty(), "a foreign listener was swept");
+        assert!(listening(port), "the foreign listener died");
+        let _ = foreign.kill();
+        let _ = foreign.wait();
+
+        // Our server.py, but under a parent that is not us: a second LU.
+        let port = free_port();
+        let mut second = python_listener(&ours, port, true).expect("listener under a shell");
+        assert!(sweep_sidecar_at(port, &ours).is_empty(), "another LU's sidecar was swept");
+        assert!(listening(port));
+        crate::process_util::kill_pid_tree(second.id());
+        let _ = second.wait();
+
+        // Our server.py, started by this process: that one goes.
+        let port = free_port();
+        let mut own = python_listener(&ours, port, false).expect("own listener");
+        let stopped = sweep_sidecar_at(port, &ours);
+        assert_eq!(stopped, vec![own.id()]);
+        let _ = own.wait();
+        assert!(!listening(port), "our own sidecar is still listening");
     }
 }
