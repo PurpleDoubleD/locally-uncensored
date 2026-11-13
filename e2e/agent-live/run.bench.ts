@@ -18,6 +18,11 @@ const RUNS = Number(process.env.LU_BENCH_RUNS) || 1
 const RUN_MS = Number(process.env.LU_BENCH_RUN_MS) || 10 * 60_000
 /** Cloud mode: the picker lists LU Cloud models. Needs a signed-in session. */
 const CLOUD = process.env.LU_BENCH_CLOUD === '1'
+/** CA: LU's own engine (the bundled llama-server, same binary and flags) run as
+ *  a test instance on its own port, e.g. http://127.0.0.1:18731/v1. The app
+ *  reaches it through the same OpenAI-compatible slot the built-in engine
+ *  uses; only the lifecycle is outside the app. Ollama stays off. */
+const ENGINE_URL = process.env.LU_BENCH_ENGINE_URL || ''
 
 const STORES = [
   '/src/stores/chatStore.ts',
@@ -27,6 +32,7 @@ const STORES = [
   '/src/stores/codexStore.ts',
   '/src/stores/toolAuditStore.ts',
   '/src/stores/generationStore.ts',
+  '/src/stores/providerStore.ts',
 ]
 
 const tasks = TASKS.filter((t) => !WANTED.length || WANTED.includes(t.id))
@@ -47,6 +53,17 @@ async function boot(page: Page) {
     // measured time.
     A['/src/stores/settingsStore.ts'].useSettingsStore.getState().updateSettings({ codexDefaultMode: 'bypass' })
   })
+  if (ENGINE_URL) {
+    await page.evaluate((url) => {
+      const A = (window as unknown as AppWindow).__APP__
+      const prov = A['/src/stores/providerStore.ts'].useProviderStore.getState()
+      prov.setProviderConfig('openai', { enabled: true, baseUrl: url, managed: false })
+      prov.setProviderConfig('ollama', { enabled: false })
+    }, ENGINE_URL)
+    // The picker reads the providers when it loads its list.
+    await page.reload()
+    await appModules(page, STORES)
+  }
 }
 
 async function pickModel(page: Page, label: string) {
