@@ -33,6 +33,7 @@ const STORES = [
   '/src/stores/toolAuditStore.ts',
   '/src/stores/generationStore.ts',
   '/src/stores/providerStore.ts',
+  '/src/stores/modelStore.ts',
 ]
 
 const tasks = TASKS.filter((t) => !WANTED.length || WANTED.includes(t.id))
@@ -63,6 +64,21 @@ async function boot(page: Page) {
     // The picker reads the providers when it loads its list.
     await page.reload()
     await appModules(page, STORES)
+    // With the engine up, the app finds it (and any Ollama) and asks which to
+    // use. The engine is preselected; Ollama stays off.
+    const pick = page.getByRole('button', { name: 'Use selected', exact: true })
+    if (await pick.waitFor({ state: 'visible', timeout: 8_000 }).then(() => true, () => false)) {
+      await expect(page.getByText('LU Engine', { exact: true }).first()).toBeVisible()
+      await pick.click()
+    }
+    // Never fall back to whatever model was active before (it can be one of
+    // the owner's Ollama models the dev server lists): the engine's model only.
+    await page.evaluate(() => {
+      const A = (window as unknown as AppWindow).__APP__
+      const ms = A['/src/stores/modelStore.ts']?.useModelStore?.getState()
+      const own = ms?.models?.find((m: { name: string }) => m.name.startsWith('openai::'))
+      if (own) ms.setActiveModel(own.name)
+    })
   }
 }
 
