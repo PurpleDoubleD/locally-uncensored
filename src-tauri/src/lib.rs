@@ -1256,6 +1256,7 @@ pub fn run() {
             commands::workflow_fetch::workflow_fetch,
             commands::proxy::proxy_localhost,
             commands::proxy::cancel_proxy_call,
+            commands::proxy::mcp_http_request,
             commands::proxy::proxy_localhost_stream,
             commands::proxy::proxy_localhost_stream_chunked,
             commands::proxy::cancel_proxy_stream,

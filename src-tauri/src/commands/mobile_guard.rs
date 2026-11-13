@@ -26,6 +26,8 @@ pub const REFUSAL: &str = "This function is not available in the phone app.";
 /// Never reachable on a phone: starts a process, runs code, opens a port,
 /// hands out a token for one, reads the screen or the process table.
 pub const BLOCKED: &[&str] = &[
+    // MCP servers reached by URL (M1): the phone app has no MCP servers.
+    "mcp_http_request",
     // The LU browser opens a desktop window (browser.rs, P-L 3.1.0).
     "browser_open",
     "browser_snapshot",

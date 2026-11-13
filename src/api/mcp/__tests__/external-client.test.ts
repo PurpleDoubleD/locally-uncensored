@@ -435,7 +435,7 @@ describe('the settings panel is what acts on that', () => {
       resolve(dirname(fileURLToPath(import.meta.url)), '../../../components/settings/MCPServerSettings.tsx'),
       'utf8',
     )
-    expect(panel).toContain('onExit: (id) => {')
+    expect(panel).toContain('const onExit = (id: string) => {')
     expect(panel).toContain('toolRegistry.unregisterServer(id)')
     expect(panel).toContain('setConnected(id, false)')
     expect(panel).toContain('clearServerTools(id)')

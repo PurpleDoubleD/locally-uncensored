@@ -21,6 +21,7 @@ import { useEffect, useRef } from 'react'
 import { Terminal } from 'lucide-react'
 import { useCodexConfirmStore } from '../../stores/codexConfirmStore'
 import { useSettingsStore } from '../../stores/settingsStore'
+import { toolRegistry } from '../../api/mcp/tool-registry'
 import { useCommandRulesStore } from '../../stores/commandRulesStore'
 import { suggestRuleFor } from '../../lib/agent-core/command-rules'
 
@@ -76,7 +77,7 @@ export function CodexConfirmDialog() {
         <div className="flex items-center gap-2 px-3 pt-2.5 pb-1.5">
           <Terminal size={14} className="text-gray-500 dark:text-gray-400 shrink-0" />
           <span className="t-body font-medium text-gray-800 dark:text-gray-100">
-            {isCommand ? 'Run this command?' : 'Allow this step?'}
+            {isCommand ? 'Run this command?' : <>Allow <span className="font-mono">{toolRegistry.displayName(pending.toolName)}</span>?</>}
           </span>
           {pending.cloudReason && (
             <span className="ml-auto t-micro text-gray-500 dark:text-gray-400">asked because a cloud model is driving</span>

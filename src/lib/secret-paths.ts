@@ -133,6 +133,71 @@ export function secretAccessOf(toolName: string, args: Record<string, unknown> |
   return null
 }
 
+/**
+ * Does this argument value read like a path on this machine? One line, no
+ * blanks around it, and a path shape: a slash or backslash, a leading `~`,
+ * `.` or `$HOME`, a drive letter, or `file://`. A web address is not a local
+ * file and is left to the `url` key above, as for the built-in tools.
+ */
+function looksLikeLocalPath(s: string): boolean {
+  const t = s.trim()
+  if (!t || t.length > 1024 || /[\r\n]/.test(t)) return false
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(t) && !/^file:\/\//i.test(t)) return false
+  const startsLikePath = /^(\/|~|\.|\$\{?HOME\}?|%USERPROFILE%|[a-z]:[\\/]|file:\/\/|\\\\)/i.test(t)
+  // A folder name may hold blanks ("/My Folder/.env"); a sentence that only
+  // mentions a path ("how do I rotate ~/.ssh/id_rsa") is text, not a path.
+  if (/\s/.test(t)) return startsLikePath
+  return startsLikePath || /[\\/]/.test(t)
+}
+
+/** Argument names an external tool uses for a command line. */
+const EXTERNAL_COMMAND_KEY = /^(cmd|command|commands|script|shell|exec|run|code)$/i
+
+/**
+ * The first secret path a call to an EXTERNAL tool names, or null (M1).
+ *
+ * An MCP server names its arguments as it likes (`filePath`, `uri`,
+ * `options.target`), so the fixed keys of `secretAccessOf` are checked first
+ * and then every string in the arguments, nested ones included, that reads
+ * like a local path. A key that holds a command line is split into words as
+ * for the shell. Same rules, same refusal: the server gets nothing.
+ */
+export function externalSecretAccessOf(args: Record<string, unknown> | undefined, home?: string): SecretHit | null {
+  if (!args || typeof args !== 'object') return null
+  const fixed = secretAccessOf('external', args, home)
+  if (fixed) return fixed
+  let budget = 500
+  const walk = (v: unknown, key: string, depth: number): SecretHit | null => {
+    if (budget-- <= 0 || depth > 6) return null
+    if (typeof v === 'string') {
+      if (EXTERNAL_COMMAND_KEY.test(key)) {
+        const hit = secretAccessOf('external', { command: v }, home)
+        if (hit) return hit
+      }
+      if (looksLikeLocalPath(v)) {
+        const why = secretPathReason(v, home)
+        if (why) return { path: v, why }
+      }
+      return null
+    }
+    if (Array.isArray(v)) {
+      for (const item of v) {
+        const hit = walk(item, key, depth + 1)
+        if (hit) return hit
+      }
+      return null
+    }
+    if (v && typeof v === 'object') {
+      for (const [k, item] of Object.entries(v as Record<string, unknown>)) {
+        const hit = walk(item, k, depth + 1)
+        if (hit) return hit
+      }
+    }
+    return null
+  }
+  return walk(args, '', 0)
+}
+
 /** What the model reads back. Starts with "Error:" so every caller counts it as a failed call. */
 export function secretRefusal(hit: SecretHit): string {
   return `Error: Refused: ${hit.path} holds ${hit.why}. LU never lets an agent read, list, search or run commands on secret files, in any mode. Nothing was read. Do the task without it; if you really need a value from it, ask the user to give it to you.`

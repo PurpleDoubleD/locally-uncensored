@@ -88,7 +88,7 @@ import { streamOllamaChatWithTools } from '../lib/ollama-stream-tools'
 import { repairToolCall } from '../lib/loose-tool-parse'
 import { selectRelevantTools, selectRelevantToolsAsync, SMALL_MODEL_MAX_TOOLS, gateCreateTools, wantsMediaTools, isGatedTool, applyMaxTools } from '../lib/tool-selection'
 import { agentProfileFor, resultCharsFor, COMPACT_MAX_TOOLS, COMPACT_PREFER } from '../lib/agent-profile'
-import { secretAccessOf, secretNotice } from '../lib/secret-paths'
+import { secretNotice } from '../lib/secret-paths'
 import { takeRunNotices } from '../lib/run-notices'
 import { MEMORY_SKILL_PROMPT_LINE, renderSkillsSection, withSkillTools } from '../lib/skill-tools'
 import { useSkillStore } from '../stores/skillStore'
@@ -2301,8 +2301,8 @@ export function useCodex() {
         // C59: a call on a secret path is refused by the tool itself
         // (builtin-tools guardSecrets); the user sees it here, not only the model.
         for (const tc of toolCalls) {
-          const hit = secretAccessOf(tc.function?.name ?? '', tc.function?.arguments as Record<string, unknown>)
-          if (hit) addBlock({ id: uuid(), phase: 'reflection', content: secretNotice(tc.function.name, hit), timestamp: Date.now() })
+          const hit = toolRegistry.secretHitOf(tc.function?.name ?? '', tc.function?.arguments as Record<string, unknown>)
+          if (hit) addBlock({ id: uuid(), phase: 'reflection', content: secretNotice(toolRegistry.displayName(tc.function.name), hit), timestamp: Date.now() })
         }
 
         type BatchEntry = { tc: typeof toolCalls[number]; ac: AgentToolCall; blockId: string; injectedArgs: ToolArgs }

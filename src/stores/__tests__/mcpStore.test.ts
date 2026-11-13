@@ -197,4 +197,22 @@ describe('mcpStore', () => {
       expect(useMCPStore.getState().serverTools).toEqual({})
     })
   })
+
+  // ── setServerError (M1) ────────────────────────────────────
+
+  describe('setServerError', () => {
+    it('sets, clears and goes with the server, and is not persisted', () => {
+      useMCPStore.setState({ serverErrors: {} })
+      useMCPStore.getState().addServer(makeServer('e1', { transport: 'http', url: 'http://localhost:1/mcp', hasAuth: true }))
+      useMCPStore.getState().setServerError('e1', 'Nothing answers at this address. Check the URL.')
+      expect(useMCPStore.getState().serverErrors.e1).toMatch(/Nothing answers/)
+      useMCPStore.getState().setServerError('e1', null)
+      expect(useMCPStore.getState().serverErrors.e1).toBeUndefined()
+      useMCPStore.getState().setServerError('e1', 'x')
+      useMCPStore.getState().removeServer('e1')
+      expect(useMCPStore.getState().serverErrors).toEqual({})
+      const persisted = useMCPStore.persist.getOptions().partialize!(useMCPStore.getState())
+      expect(Object.keys(persisted as object)).toEqual(['servers'])
+    })
+  })
 })

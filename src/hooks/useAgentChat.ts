@@ -180,7 +180,7 @@ import { agentProfileFor, resultCharsFor, COMPACT_MAX_TOOLS, COMPACT_PREFER } fr
 import { loadProjectFile, renderProjectFileSection } from '../lib/project-instructions'
 import { loadLurules, renderRulesSection } from '../lib/lurules'
 import { makeLurulesReader } from './codex/workspace-fs'
-import { secretAccessOf, secretNotice } from '../lib/secret-paths'
+import { secretNotice } from '../lib/secret-paths'
 import { takeRunNotices } from '../lib/run-notices'
 import { MEMORY_SKILL_PROMPT_LINE, renderSkillsSection, withSkillTools } from '../lib/skill-tools'
 import { useSkillStore } from '../stores/skillStore'
@@ -3034,10 +3034,10 @@ export function useAgentChat() {
         // C59: a call on a secret path is refused by the tool itself
         // (builtin-tools guardSecrets); the user sees it here, not only the model.
         for (const tc of toolCalls) {
-          const hit = secretAccessOf(tc.function?.name ?? '', tc.function?.arguments as Record<string, unknown>)
+          const hit = toolRegistry.secretHitOf(tc.function?.name ?? '', tc.function?.arguments as Record<string, unknown>)
           if (hit) {
             addBlock(runState, convId!, assistantMessage.id, {
-              id: uuid(), phase: 'reflection', content: secretNotice(tc.function.name, hit), timestamp: Date.now(),
+              id: uuid(), phase: 'reflection', content: secretNotice(toolRegistry.displayName(tc.function.name), hit), timestamp: Date.now(),
             })
           }
         }

@@ -7,6 +7,8 @@ interface MCPState {
   servers: MCPServerConfig[]
   connectedServers: string[]
   serverTools: Record<string, MCPToolDefinition[]>
+  /** Why the last connect of a server failed, one sentence; not persisted. */
+  serverErrors: Record<string, string>
 
   // CRUD
   addServer: (server: MCPServerConfig) => void
@@ -17,6 +19,8 @@ interface MCPState {
   setConnected: (id: string, connected: boolean) => void
   setServerTools: (id: string, tools: MCPToolDefinition[]) => void
   clearServerTools: (id: string) => void
+  /** Set (or with null clear) the sentence the server row shows. */
+  setServerError: (id: string, error: string | null) => void
 }
 
 export const useMCPStore = create<MCPState>()(
@@ -25,6 +29,7 @@ export const useMCPStore = create<MCPState>()(
       servers: [],
       connectedServers: [],
       serverTools: {},
+      serverErrors: {},
 
       addServer: (server) =>
         set((state) => ({ servers: [...state.servers, server] })),
@@ -40,6 +45,9 @@ export const useMCPStore = create<MCPState>()(
           connectedServers: state.connectedServers.filter((s) => s !== id),
           serverTools: Object.fromEntries(
             Object.entries(state.serverTools).filter(([k]) => k !== id)
+          ),
+          serverErrors: Object.fromEntries(
+            Object.entries(state.serverErrors).filter(([k]) => k !== id)
           ),
         })),
 
@@ -57,6 +65,12 @@ export const useMCPStore = create<MCPState>()(
         set((state) => {
           const { [id]: _, ...rest } = state.serverTools
           return { serverTools: rest }
+        }),
+
+      setServerError: (id, error) =>
+        set((state) => {
+          const { [id]: _, ...rest } = state.serverErrors
+          return { serverErrors: error ? { ...rest, [id]: error } : rest }
         }),
     }),
     {
