@@ -42,10 +42,13 @@
 //! of a Talking Character run, which makes it the engine's `a2v`),
 //! `LU_REAL_CANCEL_AFTER` (seconds into an install or a video),
 //! `LU_REAL_CANCEL_AT_STEP` (an image), `LU_REAL_NAME` (the name the result is
-//! kept under), `LU_REAL_OUT` (the folder for results and the record) and
-//! `LU_REAL_ANY_POWER` (`1`: do not wait for mains).
+//! kept under), `LU_REAL_OUT` (the folder for results and the record),
+//! `LU_REAL_ANY_POWER` (`1`: do not wait for mains) and `LU_REAL_RUN_HOME`
+//! (an absolute folder the run takes as the app's data, config and cache
+//! folders, so the real app's folders on this Mac stay untouched; the 3D
+//! runs use it, see `mesh_install`).
 
-use super::{media_cmds, mlx, music, video, CmdResult};
+use super::{media_cmds, mesh3d, mlx, music, video, CmdResult};
 use crate::state::AppState;
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
@@ -63,11 +66,19 @@ fn on() -> bool {
         return false;
     }
     let data = crate::os_paths::data_dir();
-    assert!(
-        data.ends_with("Library/Application Support/lu-labs"),
-        "the real run is not looking at the app's data folder: {}",
-        data.display()
-    );
+    match crate::os_paths::test_storage::real_run_home() {
+        // `LU_REAL_RUN_HOME`: a test folder of its own, never the app's.
+        Some(home) => assert!(
+            data.starts_with(&home) && !data.to_string_lossy().contains("Library/Application Support"),
+            "the real run is not looking at its own folder: {}",
+            data.display()
+        ),
+        None => assert!(
+            data.ends_with("Library/Application Support/lu-labs"),
+            "the real run is not looking at the app's data folder: {}",
+            data.display()
+        ),
+    }
     // What the app does at its start: the models an earlier build left in
     // the cache folder move to the data folder, unless something is at work
     // on them (a running app's download shows on its command line).
@@ -383,6 +394,17 @@ fn music_lane() -> Lane {
         status: music::music_install_status,
         cancel: music::music_cancel_install,
         weights: crate::os_paths::data_dir().join("acestep").join("checkpoints"),
+    }
+}
+
+/// The 3D lane installs its engine, its source and its weights on one slot.
+fn mesh_lane() -> Lane {
+    Lane {
+        name: "mesh3d",
+        install: mesh3d::mesh3d_install,
+        status: mesh3d::mesh3d_install_status,
+        cancel: mesh3d::mesh3d_cancel_install,
+        weights: crate::os_paths::data_dir().join("mesh3d").join("weights"),
     }
 }
 
@@ -1230,5 +1252,140 @@ fn train_run() {
         assert_eq!(last["status"], "cancelled", "the run was not cancelled: {last}");
     } else {
         assert_eq!(last["status"], "complete", "the training did not complete: {}", last["error"]);
+    }
+}
+
+// ── 3D ────────────────────────────────────────────────────────────────
+
+/// The 3D runs write only below `LU_REAL_RUN_HOME`: they are not to touch
+/// the app's own folders on this Mac.
+fn own_folder_only() -> bool {
+    if crate::os_paths::test_storage::real_run_home().is_none() {
+        eprintln!("the 3D real run needs LU_REAL_RUN_HOME, an absolute folder of its own");
+        return false;
+    }
+    true
+}
+
+/// The install of the 3D lane: LU's Python, the venv, the TripoSR source and
+/// the weights. `LU_REAL_MODEL` is `triposr`, the one entry.
+///
+/// ```sh
+/// LU_REAL_RUN=1 LU_REAL_RUN_HOME=/path/to/test LU_REAL_MODEL=triposr \
+///   cargo test real_run_mac::mesh_install -- --ignored --nocapture --test-threads=1
+/// ```
+#[test]
+#[ignore = "the real run: needs LU_REAL_RUN=1"]
+fn mesh_install() {
+    if on() && own_folder_only() {
+        install_model(mesh_lane());
+        let root = mesh3d::real_run_root();
+        record("mesh3d folders", json!({ "venvGB": dir_gb(&root.join("venv")), "weightsGB": dir_gb(&root.join("weights")), "sourceGB": dir_gb(&root.join("source")) }));
+    }
+}
+
+/// One model from one picture, as Create makes it: the picture of
+/// `LU_REAL_IMAGES` staged, then `mlx_mesh3d_generate` with the argument
+/// object of `generateMesh3d` in `src/api/mlx-3d.ts`, then the progress every
+/// second until it is through. `LU_REAL_RESOLUTION` is the grid,
+/// `LU_REAL_CANCEL_AFTER` stops it on the way and then looks that no process
+/// of the run is left.
+#[test]
+#[ignore = "the real run: needs LU_REAL_RUN=1"]
+fn mesh_run() {
+    if !on() || !own_folder_only() {
+        return;
+    }
+    let state = state();
+    let none = json!({});
+    let name = var("LU_REAL_NAME").unwrap_or_else(|| "mesh-run".to_string());
+    wait_for_mains();
+    let status = mesh3d::mesh3d_status(state, &none).expect("mlx_mesh3d_status");
+    assert_eq!(status["installed"], true, "the 3D model is not installed: {status}");
+    let picture = var("LU_REAL_IMAGES").expect("LU_REAL_IMAGES names the picture");
+    let staged = stage(&picture);
+    let run = format!("real-run-{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0));
+    let mut args = json!({ "run": run, "imagePath": staged });
+    if let Some(resolution) = number::<u32>("LU_REAL_RESOLUTION") {
+        args["resolution"] = json!(resolution);
+    }
+    println!("mlx_mesh3d_generate {args}");
+    let available_before = available_memory_gb();
+    let started = Instant::now();
+    let answer = runtime().block_on(mesh3d::mesh3d_generate(state, &args));
+    let Ok(job) = answer else {
+        record(&format!("mesh3d {name}"), json!({ "args": args, "error": answer.unwrap_err() }));
+        panic!("mlx_mesh3d_generate refused");
+    };
+    let sampler = sample_memory(move || mesh3d::mesh3d_progress(state, &json!({})).ok().and_then(|p| p["pid"].as_u64()).map(|p| p as u32));
+    let cancel_after = number::<u64>("LU_REAL_CANCEL_AFTER");
+    let mut stop = Value::Null;
+    let mut printed = String::new();
+    let mut seen_pid = None::<u32>;
+    let last = loop {
+        let p = mesh3d::mesh3d_progress(state, &none).expect("mlx_mesh3d_progress");
+        if let Some(pid) = p["pid"].as_u64() {
+            seen_pid = Some(pid as u32);
+        }
+        let line = format!("{} {}% {} {}", p["phase"], p["percent"], p["detail"], p["device"]);
+        if line != printed {
+            println!("[{:>6.1}s] {line}", seconds(started));
+            printed = line;
+        }
+        if p["running"] != true {
+            break p;
+        }
+        if stop.is_null() && cancel_after.is_some_and(|after| started.elapsed() >= Duration::from_secs(after)) {
+            let children = descendants();
+            let at = Instant::now();
+            let answer = mesh3d::mesh3d_cancel(state, &json!({ "run": run })).unwrap_or_else(|e| json!({ "ERROR": e }));
+            let mut gone = None::<u64>;
+            while at.elapsed() < Duration::from_secs(30) && gone.is_none() {
+                if children.iter().all(|(pid, _)| !alive(*pid)) {
+                    gone = Some(ms(at));
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            stop = json!({
+                "afterSeconds": cancel_after,
+                "phaseAtStop": p["phase"],
+                "cancelAnswer": answer,
+                "children": children.iter().map(|(pid, command)| format!("{pid} {}", shorten(command))).collect::<Vec<_>>(),
+                "processesGoneMs": gone,
+                "survivors": children.iter().filter(|(pid, _)| alive(*pid)).map(|(pid, _)| *pid).collect::<Vec<_>>(),
+            });
+        }
+        std::thread::sleep(Duration::from_secs(1));
+    };
+    let memory = sampler.finish();
+    let output = job["output"].as_str().unwrap_or("").to_string();
+    let left = descendants();
+    let mut result = json!({
+        "args": args,
+        "job": job,
+        "seconds": seconds(started),
+        "progress": last,
+        "view": mesh3d::real_run_view(),
+        "memory": memory,
+        "availableBeforeGB": available_before,
+        "availableAfterGB": available_memory_gb(),
+        "stop": stop,
+        "pid": seen_pid,
+        "processesLeft": left.iter().map(|(pid, command)| format!("{pid} {}", shorten(command))).collect::<Vec<_>>(),
+        "outputBytes": std::fs::metadata(&output).map(|m| m.len()).ok(),
+    });
+    if Path::new(&output).is_file() {
+        let kept = out_dir().join(format!("{name}.glb"));
+        std::fs::copy(&output, &kept).expect("keep the model");
+        result["kept"] = json!(kept);
+    }
+    record(&format!("mesh3d {name}"), result);
+    assert!(seen_pid.is_none_or(|pid| !alive(pid)), "the engine's process outlived the run");
+    if cancel_after.is_some() {
+        assert_eq!(last["status"], "cancelled", "the run was not cancelled: {}", last["error"]);
+        assert!(!Path::new(&output).is_file(), "a cancelled run left a model behind");
+        assert!(left.is_empty(), "a process of the run is left: {left:?}");
+    } else {
+        assert_eq!(last["status"], "complete", "the model did not complete: {}", last["error"]);
     }
 }

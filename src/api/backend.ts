@@ -592,6 +592,16 @@ export async function backendCall<T = unknown>(
     mlx_music_generate: { path: "/local-api/mlx-music-generate", method: "POST" },
     mlx_music_progress: { path: "/local-api/mlx-music-progress" },
     mlx_music_cancel: { path: "/local-api/mlx-music-cancel", method: "POST" },
+    // The 3D engine of the Mac (commands/mesh3d.rs, 3.1.0), desktop only:
+    // the dev server answers 501 (mlx-media-stubs.ts).
+    mlx_mesh3d_status: { path: "/local-api/mlx-mesh3d-status" },
+    mlx_mesh3d_install: { path: "/local-api/mlx-mesh3d-install", method: "POST" },
+    mlx_mesh3d_install_status: { path: "/local-api/mlx-mesh3d-install-status" },
+    mlx_mesh3d_cancel_install: { path: "/local-api/mlx-mesh3d-cancel-install", method: "POST" },
+    mlx_mesh3d_delete: { path: "/local-api/mlx-mesh3d-delete", method: "POST" },
+    mlx_mesh3d_generate: { path: "/local-api/mlx-mesh3d-generate", method: "POST" },
+    mlx_mesh3d_progress: { path: "/local-api/mlx-mesh3d-progress" },
+    mlx_mesh3d_cancel: { path: "/local-api/mlx-mesh3d-cancel", method: "POST" },
     mlx_train_status: { path: "/local-api/mlx-train-status" },
     mlx_train_stage: { path: "/local-api/mlx-train-stage", method: "POST" },
     mlx_train_clear: { path: "/local-api/mlx-train-clear", method: "POST" },

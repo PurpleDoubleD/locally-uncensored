@@ -21,15 +21,21 @@ use crate::commands::CmdResult;
 use crate::state::AppState;
 
 /// What the Mac's engines write: PNG stills (`mlx.rs`, `image_mflux.rs`),
-/// MP4 clips (`video.rs`) and WAV tracks (`music.rs`). The other endings are
-/// what a later engine may write. Nothing else in these folders is a render.
-const MEDIA_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg", "webp", "mp4", "mov", "webm", "wav"];
+/// MP4 clips (`video.rs`), WAV tracks (`music.rs`) and GLB models
+/// (`mesh3d.rs`). The other endings are what a later engine may write.
+/// Nothing else in these folders is a render.
+const MEDIA_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg", "webp", "mp4", "mov", "webm", "wav", "glb"];
 
 const NOT_OURS: &str = "That gallery entry does not name a file in LU's output folders.";
 
 /// The folders a gallery entry of the Mac may name a file in.
 pub(crate) fn output_roots() -> Vec<PathBuf> {
-    vec![crate::commands::mlx::images_root(), crate::commands::video::outputs_root(), crate::commands::music::outputs_root()]
+    vec![
+        crate::commands::mlx::images_root(),
+        crate::commands::video::outputs_root(),
+        crate::commands::music::outputs_root(),
+        crate::commands::mesh3d::outputs_root(),
+    ]
 }
 
 /// The file behind a path the interface sent.
@@ -135,7 +141,12 @@ mod tests {
     fn the_folders_are_the_ones_the_engines_write_to_and_playback_reads_from() {
         assert_eq!(
             output_roots(),
-            vec![crate::commands::mlx::images_root(), crate::commands::video::outputs_root(), crate::commands::music::outputs_root()]
+            vec![
+                crate::commands::mlx::images_root(),
+                crate::commands::video::outputs_root(),
+                crate::commands::music::outputs_root(),
+                crate::commands::mesh3d::outputs_root(),
+            ]
         );
         // The same three folders `read_media_file` serves: what the gallery
         // can show is what it can delete.
@@ -145,7 +156,8 @@ mod tests {
         assert!(allowed.contains("crate::commands::video::outputs_root()"));
         assert!(allowed.contains("crate::commands::mlx::images_root()"));
         assert!(allowed.contains("crate::commands::music::outputs_root()"));
-        assert_eq!(allowed.matches("crate::commands::").count(), 3, "read_media_file serves a folder that Delete does not know");
+        assert!(allowed.contains("crate::commands::mesh3d::outputs_root()"));
+        assert_eq!(allowed.matches("crate::commands::").count(), 4, "read_media_file serves a folder that Delete does not know");
     }
 
     #[test]
@@ -158,6 +170,19 @@ mod tests {
         let roots = vec![music.clone()];
         assert_eq!(resolve(&roots, &s(&music.join("music-j1.wav"))).unwrap(), Some(music.canonicalize().unwrap().join("music-j1.wav")));
         assert!(resolve(&roots, &s(&music.join("job.json"))).is_err(), "not a render");
+    }
+
+    #[test]
+    fn a_model_of_the_3d_engine_resolves_like_a_clip() {
+        let tmp = tempfile::tempdir().unwrap();
+        let models = tmp.path().join("3d");
+        std::fs::create_dir_all(&models).unwrap();
+        std::fs::write(models.join("mesh3d-run1.glb"), b"glTF").unwrap();
+        std::fs::write(models.join("input.png"), b"png").unwrap();
+        std::fs::write(models.join("mesh.obj"), b"v").unwrap();
+        let roots = vec![models.clone()];
+        assert_eq!(resolve(&roots, &s(&models.join("mesh3d-run1.glb"))).unwrap(), Some(models.canonicalize().unwrap().join("mesh3d-run1.glb")));
+        assert!(resolve(&roots, &s(&models.join("mesh.obj"))).is_err(), "not a render of this app");
     }
 
     #[test]

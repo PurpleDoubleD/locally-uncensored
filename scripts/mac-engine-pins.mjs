@@ -1,17 +1,17 @@
 #!/usr/bin/env node
-// mac-engine-pins.mjs: what the four Mac media engines hand to pip, read from
+// mac-engine-pins.mjs: what the Mac media engines hand to pip, read from
 // the place the app itself reads it from.
 //
 // WHY THIS EXISTS
 // ---------------
-// The four engines are not part of the .app. A customer's Mac resolves their
+// The engines are not part of the .app. A customer's Mac resolves their
 // packages from PyPI and GitHub the first time a model is installed, so a
 // yanked release or a wheel that is missing for arm64 shows up there and
 // nowhere else. `macos-gate` in ci.yml asks pip the same question ahead of
 // time (scripts/mac-engine-pins-dry-run.sh, `pip install --dry-run`).
 //
-// The lists are NOT copied into this file. Three of them are Rust constants,
-// the fourth is a requirements file, and a copy would be out of date the day
+// The lists are NOT copied into this file. Four of them are Rust constants,
+// one is a requirements file, and a copy would be out of date the day
 // somebody moves a pin. This file parses the sources and refuses to answer
 // when a source no longer has the shape it reads: a declared array length
 // that does not match, a constant that is gone, an entry that is neither
@@ -23,9 +23,12 @@
 //   mflux       src-tauri/src/commands/image_mflux.rs      PINNED
 //   mlx-video   src-tauri/src/commands/video.rs            MLX_VIDEO_PINNED, MLX_VIDEO_PIP_SPEC
 //   ltx-2-mlx   src-tauri/src/commands/video_ltx2mlx.rs    PINNED, PACKAGES, SOURCE, COMMIT
+//   mesh3d      src-tauri/src/commands/mesh3d.rs           PINNED (the TripoSR source is
+//                                                          not a pip package: Rust fetches
+//                                                          it by sha256, so pip never sees it)
 //
 // Usage:
-//   node scripts/mac-engine-pins.mjs                 # print the four lists
+//   node scripts/mac-engine-pins.mjs                 # print the lists
 //   node scripts/mac-engine-pins.mjs --json          # the same as JSON
 //   node scripts/mac-engine-pins.mjs --write <dir>   # one <engine>.txt per engine, for `pip -r`
 //
@@ -43,6 +46,7 @@ export const SOURCES = {
   mflux: 'src-tauri/src/commands/image_mflux.rs',
   'mlx-video': 'src-tauri/src/commands/video.rs',
   'ltx-2-mlx': 'src-tauri/src/commands/video_ltx2mlx.rs',
+  mesh3d: 'src-tauri/src/commands/mesh3d.rs',
 }
 
 /** The Python line the app's own interpreter is on, e.g. "3.12". */
@@ -125,7 +129,7 @@ function ltxSpecs(source) {
 }
 
 /**
- * The four lists. `read` takes a path relative to the repository and returns
+ * The five lists. `read` takes a path relative to the repository and returns
  * the file's text; the default reads the working tree.
  */
 export function readEnginePins(read = (rel) => readFileSync(join(REPO_ROOT, rel), 'utf8')) {
@@ -154,6 +158,7 @@ export function readEnginePins(read = (rel) => readFileSync(join(REPO_ROOT, rel)
     rustStrConst(src, 'MLX_VIDEO_PIP_SPEC'),
   ])
   add('ltx-2-mlx', 'second video engine (ltx-2-mlx)', ltxSpecs)
+  add('mesh3d', '3D engine (TripoSR)', (src) => rustStrArray(src, 'PINNED'))
   return engines
 }
 

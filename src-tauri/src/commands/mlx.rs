@@ -2551,6 +2551,9 @@ pub async fn mlx_generate(_state: &AppState, args: &Value) -> CmdResult {
     if let Some(why) = train::refusal() {
         return Err(crate::commands::bad_request(why));
     }
+    if let Some(why) = crate::commands::mesh3d::refusal() {
+        return Err(crate::commands::bad_request(why));
+    }
     if let Some(too_big) = memory_verdict(entry.name, entry.min_ram_gb, total_memory_bytes()) {
         return Err(crate::commands::bad_request(too_big));
     }
@@ -2998,6 +3001,9 @@ pub async fn mlx_upscale(_state: &AppState, args: &Value) -> CmdResult {
     let (entry, pack) = upscaler_for(req.model.as_deref()).map_err(crate::commands::bad_request)?;
     ensure_image_engine_supported()?;
     if let Some(why) = train::refusal() {
+        return Err(crate::commands::bad_request(why));
+    }
+    if let Some(why) = crate::commands::mesh3d::refusal() {
         return Err(crate::commands::bad_request(why));
     }
     if let Some(too_big) = memory_verdict(entry.name, entry.min_ram_gb, total_memory_bytes()) {

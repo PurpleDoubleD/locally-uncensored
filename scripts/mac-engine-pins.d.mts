@@ -2,7 +2,7 @@
  *  implementation stays .mjs and the types live here. */
 
 export interface EnginePins {
-  id: 'image' | 'mflux' | 'mlx-video' | 'ltx-2-mlx'
+  id: 'image' | 'mflux' | 'mlx-video' | 'ltx-2-mlx' | 'mesh3d'
   label: string
   source: string
   specs: string[]

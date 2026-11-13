@@ -1,7 +1,7 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
 import { blobFromUrl } from '../lib/render/data-url'
 import { THREE_D_TEXT } from '../lib/three/three-d-text'
-import { MAC_3D_MODEL, MAC_DETAIL_RESOLUTION, PC_3D_MODEL, threeDGalleryItem, threeDPicturePrompt, threeDProvenance } from '../lib/three/run-local-3d'
+import { MAC_3D_MODEL, PC_3D_MODEL, threeDGalleryItem, threeDPicturePrompt, threeDProvenance } from '../lib/three/run-local-3d'
 import { coverCropBlob } from '../lib/cover-crop'
 import { videoRunGivenUp, videoRunProgress, videoRunStatus } from '../lib/mlx-video-progress'
 import { featherMaskBlob } from '../lib/mask-feather'
@@ -213,7 +213,7 @@ async function runLocalThreeD(state: CreateState, seed: number, abortRef: { curr
       const api = await import('../api/mlx-3d')
       const staged = source.filename || await stageStartImage(await blobFromUrl(source.url))
       const made = await api.runMacMesh3d(
-        { imagePath: staged, resolution: MAC_DETAIL_RESOLUTION[state.threeDDetail], cutout: state.threeDCutout },
+        { imagePath: staged, resolution: api.mac3dResolution(state.threeDDetail), cutout: state.threeDCutout },
         { signal: own.signal, onProgress: (percent, text) => onProgress(percent, text) },
       )
       if (own.signal.aborted) return
@@ -236,7 +236,12 @@ async function runLocalThreeD(state: CreateState, seed: number, abortRef: { curr
     useCreateStore.getState().setProgressPhase('complete')
     setProgress(100, 'Complete!')
   } catch (e) {
-    if (!own.signal.aborted) {
+    const name = e instanceof Error ? e.name : ''
+    if (own.signal.aborted || name === 'Mesh3dRunCancelled') {
+      // Stopped by the user: nothing to say.
+    } else if (name === 'Mesh3dNoObject') {
+      useCreateStore.getState().setError(THREE_D_TEXT.noObject)
+    } else {
       useCreateStore.getState().setError(`3D failed: ${e instanceof Error ? e.message : String(e)}`)
     }
   } finally {

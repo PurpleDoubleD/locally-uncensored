@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { checkPromptSafety } from '../../render/safety'
-import { threeDProvenance, threeDPicturePrompt, threeDGalleryItem, MAC_DETAIL_RESOLUTION } from '../run-local-3d'
+import { threeDProvenance, threeDPicturePrompt, threeDGalleryItem } from '../run-local-3d'
+import { mac3dResolution } from '../../mac-3d'
 import { studioIntentOf, intentRoles } from '../../render/create-studio'
 import { intentToJob, quotaCostKind } from '../../render/cloud-jobs'
 import { evenPick } from '../../../components/create/experimental/ThreeDControls'
@@ -67,8 +68,8 @@ describe('3D helpers', () => {
     expect(galleryLabel(named)).toBe('a robot')
   })
   it('the detail steps map onto growing grids', () => {
-    expect(MAC_DETAIL_RESOLUTION.draft).toBeLessThan(MAC_DETAIL_RESOLUTION.standard)
-    expect(MAC_DETAIL_RESOLUTION.standard).toBeLessThan(MAC_DETAIL_RESOLUTION.fine)
+    expect(mac3dResolution('draft')).toBeLessThan(mac3dResolution('standard'))
+    expect(mac3dResolution('standard')).toBeLessThan(mac3dResolution('fine'))
   })
 })
 

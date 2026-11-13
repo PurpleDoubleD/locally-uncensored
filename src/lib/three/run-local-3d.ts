@@ -8,7 +8,7 @@
 //
 // The content gate has run before this is called (useCreate runOnce), on the
 // prompt and on where every picture came from (threeDProvenance).
-import type { GalleryItem, ImageRef, ThreeDDetail, ThreeDWay } from '../../stores/createStore'
+import type { GalleryItem, ImageRef, ThreeDWay } from '../../stores/createStore'
 import { THREE_D_TEXT } from './three-d-text'
 
 export const MAC_3D_MODEL = 'TripoSR'
@@ -54,7 +54,3 @@ export function threeDGalleryItem(args: {
     createdAt: Date.now(), builderUsed: 'dynamic', intent: '3d',
   }
 }
-
-/** The marching-cubes grid of TripoSR per detail step. 256 is the engine's
- *  own default (run.py `--mc-resolution`). */
-export const MAC_DETAIL_RESOLUTION: Record<ThreeDDetail, number> = { draft: 192, standard: 256, fine: 320 }

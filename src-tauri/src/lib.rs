@@ -1098,6 +1098,23 @@ pub fn run() {
             commands::media_cmds::mlx_music_progress,
             #[cfg(desktop)]
             commands::media_cmds::mlx_music_cancel,
+            // The 3D engine of the Mac (TripoSR). See commands/mesh3d.rs.
+            #[cfg(desktop)]
+            commands::media_cmds::mlx_mesh3d_status,
+            #[cfg(desktop)]
+            commands::media_cmds::mlx_mesh3d_install,
+            #[cfg(desktop)]
+            commands::media_cmds::mlx_mesh3d_install_status,
+            #[cfg(desktop)]
+            commands::media_cmds::mlx_mesh3d_cancel_install,
+            #[cfg(desktop)]
+            commands::media_cmds::mlx_mesh3d_delete,
+            #[cfg(desktop)]
+            commands::media_cmds::mlx_mesh3d_generate,
+            #[cfg(desktop)]
+            commands::media_cmds::mlx_mesh3d_progress,
+            #[cfg(desktop)]
+            commands::media_cmds::mlx_mesh3d_cancel,
             #[cfg(desktop)]
             commands::media_cmds::mlx_train_status,
             #[cfg(desktop)]
@@ -1603,6 +1620,11 @@ pub fn run() {
                     #[cfg(target_os = "macos")]
                     if let Some(pid) = commands::music::reap_orphaned_run() {
                         tracing::warn!(target: "music", pid, "ended a track orphaned by a previous run");
+                    }
+                    // And a 3D model of the 3D engine, the same way.
+                    #[cfg(target_os = "macos")]
+                    if let Some(pid) = commands::mesh3d::reap_orphaned_run() {
+                        tracing::warn!(target: "mesh3d", pid, "ended a 3D run orphaned by a previous run");
                     }
                     // And a character training, the same way.
                     #[cfg(target_os = "macos")]

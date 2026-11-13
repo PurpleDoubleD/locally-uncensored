@@ -1181,6 +1181,9 @@ pub async fn music_generate(state: &AppState, args: &Value) -> CmdResult {
     if crate::commands::mlx::image_engine_busy() {
         return Err(bad_request("An image is being generated on this Mac. Wait for it to finish, then make the track."));
     }
+    if let Some(why) = crate::commands::mesh3d::refusal() {
+        return Err(bad_request(why));
+    }
     if state.video_process().lock().map(|p| p.is_some()).unwrap_or(true) {
         return Err(bad_request("A video is being generated on this Mac. Wait for it to finish, then make the track."));
     }

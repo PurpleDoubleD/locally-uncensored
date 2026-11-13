@@ -720,6 +720,9 @@ pub async fn train_start(state: &AppState, args: &Value) -> CmdResult {
     if crate::commands::music::busy() {
         return Err(bad_request("A track is being made on this Mac. Wait for it to finish, then train."));
     }
+    if let Some(why) = crate::commands::mesh3d::refusal() {
+        return Err(bad_request(why));
+    }
     if state.video_process().lock().map(|p| p.is_some()).unwrap_or(true) {
         return Err(bad_request("A video is being generated on this Mac. Wait for it to finish, then train."));
     }
