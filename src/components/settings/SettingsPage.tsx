@@ -1826,7 +1826,8 @@ export function SettingsPage() {
     comfyui: !isMlxImageHost(),
     agentMode: FEATURE_FLAGS.AGENT_MODE,
     agentWorkflows: FEATURE_FLAGS.AGENT_WORKFLOWS,
-    mediaTimeouts: settings.appMode !== 'cloud' && !isMlxImageHost(),
+    // C71: the Mac's image engine goes by the Image timeout too.
+    mediaTimeouts: settings.appMode !== 'cloud',
     chatTimeout: settings.appMode !== 'cloud',
   }
 

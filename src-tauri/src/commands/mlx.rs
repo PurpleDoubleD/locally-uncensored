@@ -2409,6 +2409,12 @@ fn parse_sidecar_progress(answer: &str) -> Option<SidecarProgress> {
     serde_json::from_str(body).ok()
 }
 
+/// The last answer of the sidecar, `since` later with no new one: nothing
+/// has moved in between.
+fn still_quiet(p: &SidecarProgress, since: std::time::Duration) -> SidecarProgress {
+    SidecarProgress { quiet_seconds: p.quiet_seconds + since.as_secs_f64(), ..p.clone() }
+}
+
 /// "1 minute", "20 minutes", "90 seconds".
 fn human_span(d: std::time::Duration) -> String {
     let s = d.as_secs();
@@ -2661,9 +2667,19 @@ pub async fn mlx_generate(_state: &AppState, args: &Value) -> CmdResult {
     let started = std::time::Instant::now();
     let model = entry.name;
     let watch = async move {
+        // The last answer and when it came: a sidecar that stops answering
+        // (frozen, swapping) is as quiet as one that answers "no new step".
+        let mut last: Option<(SidecarProgress, std::time::Instant)> = None;
         loop {
             tokio::time::sleep(SIDECAR_WATCH_EVERY).await;
-            let progress = tokio::task::spawn_blocking(sidecar_progress).await.ok().flatten();
+            let answer = tokio::task::spawn_blocking(sidecar_progress).await.ok().flatten();
+            let progress = match answer {
+                Some(p) => {
+                    last = Some((p.clone(), std::time::Instant::now()));
+                    Some(p)
+                }
+                None => last.as_ref().map(|(p, at)| still_quiet(p, at.elapsed())),
+            };
             if let Some(why) = sidecar_stall_verdict(model, progress.as_ref(), started.elapsed(), limit) {
                 break why;
             }
@@ -3571,6 +3587,16 @@ mod tests {
         assert!(sidecar_stall_verdict("X", None, Duration::from_secs(1200), limit).is_some());
         // Idle: the request has not arrived yet or the image is through.
         assert_eq!(sidecar_stall_verdict("X", Some(&p("idle", 0, 99_999.0)), long, limit), None);
+    }
+
+    #[test]
+    fn a_sidecar_that_stops_answering_is_quiet_from_its_last_answer() {
+        use std::time::Duration;
+        let at_step = SidecarProgress { phase: "steps".into(), step: 7, steps: 40, step_hook: true, quiet_seconds: 3.0 };
+        let later = still_quiet(&at_step, Duration::from_secs(60));
+        assert_eq!((later.step, later.quiet_seconds), (7, 63.0));
+        let why = sidecar_stall_verdict("SD Turbo", Some(&later), Duration::from_secs(90), sidecar_stall_limit(Some(60))).expect("a minute of silence");
+        assert!(why.starts_with("SD Turbo timed out at step 7 of 40: no new step for 1 minute."), "{why}");
     }
 
     #[test]

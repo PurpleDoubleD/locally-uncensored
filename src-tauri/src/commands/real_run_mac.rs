@@ -35,7 +35,7 @@
 //!
 //! The steps are steered by variables so that one binary serves every run:
 //! `LU_REAL_MODEL`, `LU_REAL_PROMPT`, `LU_REAL_NEGATIVE`, `LU_REAL_LORAS` (`name:strength|...`), `LU_REAL_STEPS`,
-//! `LU_REAL_GUIDANCE`, `LU_REAL_SEED`, `LU_REAL_WIDTH`, `LU_REAL_HEIGHT`,
+//! `LU_REAL_GUIDANCE`, `LU_REAL_SEED`, `LU_REAL_WIDTH`, `LU_REAL_HEIGHT`, `LU_REAL_STALL_SECS`,
 //! `LU_REAL_IMAGES` (paths, separated by `|`), `LU_REAL_MOTION` (the motion
 //! video of a Motion Control run), `LU_REAL_RESOLUTION` (the side
 //! an edit scales its images to), `LU_REAL_SECONDS`, `LU_REAL_AUDIO` (the voice
@@ -706,6 +706,10 @@ fn image() {
     }
     if let Some(negative) = var("LU_REAL_NEGATIVE") {
         args["negative_prompt"] = json!(negative);
+    }
+    // `LU_REAL_STALL_SECS`: Settings' Image timeout for a sidecar model (C71).
+    if let Some(stall) = number::<u64>("LU_REAL_STALL_SECS") {
+        args["stall_timeout_secs"] = json!(stall);
     }
     // `LU_REAL_LORAS`: names in LU's LoRA folder, each with its strength
     // after a colon, separated by `|`, as the stack of Create sends them.
