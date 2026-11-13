@@ -74,6 +74,10 @@ in the cloud catalogue.
 - LoRAs: rename, add notes, hide from the LoRA stack, show in folder.
 - Models and Settings stay where you left them when you switch to Chat or Create
   and back.
+- Search finds models by their file name too, in Get new and Installed.
+- API models whose server does not report a context window: set the window
+  from the context button. LU shows where the number comes from (server, you,
+  or estimated).
 
 **Create and gallery**
 - Gallery: no limit of 200 entries any more.
@@ -92,6 +96,9 @@ in the cloud catalogue.
   and a choice of upscale model when there is more than one.
 - "Start ComfyUI when LU starts" on the Start ComfyUI card, the same setting as
   in Settings.
+- Install a separate ComfyUI next to one LU already found ("Install a
+  separate ComfyUI…" in Settings and the setup). The path field says that only
+  Connect applies a typed path.
 
 **Local API and workspace**
 - Local API:
@@ -101,6 +108,21 @@ in the cloud catalogue.
   an extra folder the primary, and remove the primary (GitHub #223).
 
 ### Fixed
+- Agent runs stop when the model keeps sending nearly identical tool calls
+  without a word, and a cost brake ends a paid run after 3M input tokens (with
+  a warning on any single request over 400k).
+- Voice speaks as the persona of the chat you start it from.
+- A vision model on the LU Engine without its image part: LU reloads the image
+  part before it sends a picture, and names the real reason if that fails,
+  instead of saying the model can't read images.
+- When the LU Engine stops on its own, LU logs its exit code or signal and its
+  last output lines, and tells you what happened (for example that the graphics
+  card ran out of memory).
+- Uninstalling LU on Windows also removes the LU Engine's libraries and
+  leftovers, and the program folder with them.
+- Linux without pciutils (Distrobox, Toolbox, minimal systems): LU finds AMD,
+  NVIDIA and Intel cards through the kernel, so ComfyUI gets the GPU build of
+  PyTorch. If no card is visible at all, Settings says to install pciutils.
 - Local API: LU Engine models are listed in `/v1/models` again (all installed
   ones, not just the loaded one), and a request for a model that is not loaded
   loads it first, like Ollama. Fixes SillyTavern showing "no model loaded" since

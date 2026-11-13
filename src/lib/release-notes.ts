@@ -259,6 +259,22 @@ export const RELEASE_NOTES: ReleaseNote[] = [
             title: 'A Loop guard switch.',
             detail: 'Settings, Agent Permissions. It is on by default.',
           },
+          {
+            title: 'A looping agent stops, and a cost brake guards paid runs.',
+            detail: 'A run stops when the model keeps sending nearly identical tool calls without a word. A paid run ends after 3M input tokens, with a warning on any single request over 400k.',
+          },
+          {
+            title: 'Voice speaks as the persona of your chat.',
+            detail: 'A voice session started from a chat uses that chat\'s persona.',
+          },
+          {
+            title: 'Vision models get their image part back.',
+            detail: 'When the LU Engine runs a vision model without its image part, LU reloads it before it sends a picture, and names the real reason if that fails.',
+          },
+          {
+            title: 'Set the context window of an API model.',
+            detail: 'When the server does not report one, set it from the context button. LU shows where the number comes from.',
+          },
         ],
       },
       {
@@ -314,6 +330,10 @@ export const RELEASE_NOTES: ReleaseNote[] = [
             title: 'Pages stay where you left them.',
             detail: 'Models and Settings stay as they were when you switch to Chat or Create and back.',
           },
+          {
+            title: 'Search models by file name.',
+            detail: 'Get new and Installed find a model by its file name too.',
+          },
         ],
       },
       {
@@ -334,6 +354,10 @@ export const RELEASE_NOTES: ReleaseNote[] = [
           {
             title: 'Start ComfyUI when LU starts, right on the Start ComfyUI card.',
             detail: 'It is the same setting as the one in Settings.',
+          },
+          {
+            title: 'Install a separate ComfyUI.',
+            detail: 'Next to one LU already found, from Settings or the setup. The path field says that only Connect applies a typed path.',
           },
           {
             title: 'The video preview says what it shows.',
@@ -367,6 +391,18 @@ export const RELEASE_NOTES: ReleaseNote[] = [
           {
             title: 'Quitting LU stops the LU Engine.',
             detail: 'A kill, Ctrl+C or a service stop no longer leaves the engine running on macOS and Linux.',
+          },
+          {
+            title: 'LU says why the LU Engine stopped.',
+            detail: 'When the engine stops on its own, LU logs its exit code and last output lines and tells you what happened, for example that the graphics card ran out of memory.',
+          },
+          {
+            title: 'Uninstalling on Windows leaves nothing behind.',
+            detail: 'The uninstaller also removes the LU Engine\'s libraries and leftovers, and the program folder with them.',
+          },
+          {
+            title: 'Linux finds the graphics card without pciutils.',
+            detail: 'On Distrobox, Toolbox and minimal systems LU finds AMD, NVIDIA and Intel cards through the kernel, so ComfyUI gets the GPU build of PyTorch.',
           },
           {
             title: 'Linux keeps keys in the system keyring.',
