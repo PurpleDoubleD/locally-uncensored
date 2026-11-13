@@ -116,8 +116,8 @@ in the cloud catalogue.
   keeps making steps, a stuck one is reported with the step it stopped at, and
   the limit is the Image timeout in Settings.
 - Imported ComfyUI workflows use the LoRAs picked in Create. If a workflow's
-  loader does not fit the model, Create says so instead of quietly running its
-  own workflow.
+  loader does not fit the model, Create and the chat image tool say so instead
+  of quietly running another workflow.
 - A painted Edit mask stays when you open the mask editor again, and it shows
   on the picture before you edit.
 - MiniMax H3 Image is listed as an image model, not a video model. Run it with

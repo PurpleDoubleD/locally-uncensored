@@ -365,7 +365,7 @@ export const RELEASE_NOTES: ReleaseNote[] = [
           },
           {
             title: 'Imported workflows use your LoRAs.',
-            detail: 'The LoRAs picked in Create go into an imported ComfyUI workflow. If its loader does not fit the model, Create says so.',
+            detail: 'The LoRAs picked in Create go into an imported ComfyUI workflow. If its loader does not fit the model, Create and the chat image tool say so.',
           },
           {
             title: 'The Edit mask stays.',
