@@ -205,6 +205,12 @@ describe('endpointMap covers every backendCall/invokeMedia site the frontend can
     // components/settings/HardwareSettings.tsx). Asked only behind isTauri():
     // the browser build never builds a ComfyUI environment.
     'comfy_torch_plan',
+    // C74 (3.1.0): why the card list is empty under Linux without lspci
+    // (components/settings/HardwareSettings.tsx). Asked only after a
+    // `detect_gpus` answered with an empty list, and `detect_gpus` itself has
+    // no dev route (pre-existing list above): the browser build lands in the
+    // error branch and never asks.
+    'gpu_probe_hint',
     // Settings, Storage folder (components/settings/StorageFolderSetting.tsx):
     // behind isTauri() for the same reason, the browser build has no files of
     // its own to place.
