@@ -86,13 +86,14 @@ describe('D-S31: die Regel gibt es genau einmal', () => {
   })
 
   it('der Balken haengt an ihr', () => {
-    expect(CREATE).toMatch(/setupCardOwnsStage \|\| comfyStarting \? null : modelLoadError/)
+    // 3.1.0: the Mac's 3D tab runs its own engine and is silent too (threeDOwnEngine).
+    expect(CREATE).toMatch(/setupCardOwnsStage \|\| comfyStarting \|\| threeDOwnEngine \? null : modelLoadError/)
   })
 
   it('schweigt, waehrend ComfyUI startet (Gegenprobe 8, 02.10.)', () => {
     // "is not running" in Rot neben "is starting up" sagte zweimal Gegensaetzliches.
     const b = CREATE.match(/const banner = ([^\n]+)/)
-    expect(b![1]).toContain('comfyStarting ? null')
+    expect(b![1]).toContain('comfyStarting || threeDOwnEngine ? null')
   })
 
   it('schweigt im Cloud-Modus: dort rendert nichts lokal (12.10.2026)', () => {

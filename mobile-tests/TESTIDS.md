@@ -140,3 +140,17 @@ Altersfrage (vor der Shell, Wort `age`, Android und iOS gleich):
 - `m-age-confirm-back` ("Go back"): zurueck zur ersten Frage, nichts ist gespeichert.
 - `m-age-confirm-minor` ("Yes, I am under 18"): erst diese Antwort speichert. Traegt `data-m-risk="destructive"`, weil sie sich auf dem Geraet nicht zuruecknehmen laesst; ein Fluss tippt sie nur ueber `tapBewusst` (`flows/alter.mjs`).
 - Die Sperrseite `m-age-blocked` hat weiter keinen Knopf.
+
+## Neu in 3.1.0: 3D in Create (Handy, nur LU Cloud)
+
+Das Werkzeug `3d` steht als letztes in der Leiste (`m-create-tool-3d`, im Blatt `m-create-tools-3d`). Es erscheint nur, wenn der Katalog ein 3D-Modell fuehrt. Auf "My computer" gibt es 3D in v1 nicht.
+
+- `m-create-3d-way` (Segmented) mit `m-create-3d-way-text`, `m-create-3d-way-image`, `m-create-3d-way-video`: der Weg. Die Zeile darum heisst `m-create-3d-way-row`.
+- Weg Image: die Quelle wie bei jedem Werkzeug (`m-create-source`, `m-create-source-add`). Nimmt das Modell mehrere Seiten: `m-create-3d-sides` (`data-state` ist die Zahl der weiteren Seiten), `m-create-3d-side-add` (traegt `sensor`), `m-create-3d-side-remove`.
+- Weg Video: `m-create-3d-video` mit `data-state` `empty`, `reading` oder `ready`; `m-create-3d-video-add` (traegt `sensor`), `m-create-3d-video-remove`, `m-create-3d-video-error`. Die Standbilder: `m-create-3d-frames` mit je `m-create-3d-frame` (`data-m-id` ist die Nummer des Moments, `aria-pressed` sagt, ob er gewaehlt ist). `data-m-picked` am Kasten nennt die gewaehlten Nummern. Das Video wird nie hochgeladen.
+- Im Blatt "Add source" (`m-sheet-source`) beim Werkzeug 3D zusaetzlich `m-create-source-video` (traegt `sensor`).
+- Detailstufe, wo das Modell eine hat: `m-create-3d-detail-card`, `m-create-3d-detail` (Segmented) mit `m-create-3d-detail-draft`, `m-create-3d-detail-standard`, `m-create-3d-detail-fine`.
+- Sperrgrund ohne Video: `m-create-blocked` mit `data-m-reason="no-3d-video"`.
+- Ergebnis auf der Buehne: `m-create-result` mit `data-m-kind="3d"`, darin `m-create-result-3d` mit dem 3D-Betrachter (`model-viewer`, `data-phase` `loading`, `ready`, `heavy`, `error` oder `no-webgl`; Leiste `model-viewer-bar` mit `mv-turn`, `mv-look-color`, `mv-look-clay`, `mv-look-wireframe`, `mv-backdrop`, `mv-reset`, `mv-fullscreen`, `mv-download`, Faktenzeile `model-viewer-facts`). Die Kennungen des Betrachters kommen aus `src/components/three` und folgen nicht dem Schema `m-*`.
+- Grosser Blick (`/create/item/:id`): `m-create-item-3d` im `m-create-item-stage`. Speichern und Teilen gehen als `.glb` nach Files.
+- Galerie: die Kachel `m-create-gallery-tile` mit `data-m-kind="3d"` zeigt `thumb-3d` (Standbild oder Wuerfel). Der Filter `m-create-gallery-filter-3d` erscheint nur, wenn die Galerie ein 3D-Modell hat.

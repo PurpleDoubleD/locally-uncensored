@@ -4,12 +4,13 @@
  * K5.1 Take photo, K5.2 Photo library (several photos start a batch where
  * the tool can run one), K5.3 File, K5.4 From gallery (opens K6 as a
  * picker), K5.5 Saved characters (sub page), K5.6 Close is the close button
- * of the sheet.
+ * of the sheet. 3D (3.1.0) adds Video: LU reads still frames of it, the
+ * video itself stays on the phone.
  * States: the photo is being prepared, the file is too large, the format
  * cannot be read.
  */
 import { useEffect, useState } from 'react'
-import { Camera, FolderOpen, Images, LayoutGrid, Trash2, UsersRound } from 'lucide-react'
+import { Camera, Film, FolderOpen, Images, LayoutGrid, Trash2, UsersRound } from 'lucide-react'
 import { useCreateStore } from '../../../stores/createStore'
 import { deleteSavedCharacter, listSavedCharacters, subscribeSavedCharacters, type SavedCharacter } from '../../../lib/saved-characters'
 import { MAX_STORED_REFERENCES } from '../../../lib/edit-references'
@@ -22,7 +23,10 @@ import { CREATE_STRINGS as T } from '../../strings/create'
 import { EmptyState, IconButton, ListGroup, Notice, Progress, Row, Sheet, SkeletonRows, toast } from '../../ui'
 import { addSourceFiles, fileProblemText, takeImageAsSource } from './parts/actions'
 import { loadPhoneImageFromBlob } from './parts/photos'
-import { toolFacts } from './parts/tools'
+import { toolFacts, toolTakesPhoto } from './parts/tools'
+import { pickVideoFor3d } from './parts/ThreeDCards'
+import { threeDModelFacts } from './parts/three-d'
+import { useCreateFacts } from './parts/facts'
 
 function SavedCharacters({ onDone }: { onDone: () => void }) {
   const [list, setList] = useState<SavedCharacter[] | null>(null)
@@ -99,7 +103,8 @@ export default function SourceSheet() {
   const [busy, setBusy] = useState(false)
   const [problem, setProblem] = useState<string | null>(null)
   const facts = toolFacts(tool)
-  const takesSource = facts.needsSource || tool === 'lipsync' || tool === 'motion'
+  const takesSource = toolTakesPhoto(tool)
+  const model = useCreateFacts().model
 
   if (sub === 'saved') {
     return (
@@ -122,6 +127,15 @@ export default function SourceSheet() {
     if (result.batch > 1) toast(result.leftOut > 0 ? T.source.batchLeftOut(result.batch) : T.source.batchStarted(result.batch), { testid: 'create-batch-started' })
     else if (result.skipped > 0) toast(T.file.skipped(result.skipped), { testid: 'create-files-skipped' })
     close()
+  }
+
+  const takeVideo = async () => {
+    setBusy(true)
+    setProblem(null)
+    const out = await pickVideoFor3d(threeDModelFacts(model.studio ? model.id : undefined).maxViews)
+    setBusy(false)
+    if (out.status === 'failed') setProblem(out.message)
+    else if (out.status === 'ok') close()
   }
 
   return (
@@ -170,6 +184,9 @@ export default function SourceSheet() {
           testid="m-create-source-file"
           el="K5.3"
         />
+        {tool === '3d' ? (
+          <Row icon={Film} title={T.source.video} subtitle={T.source.videoSub} chevron={false} disabled={busy} onPress={() => void takeVideo()} risk="sensor" testid="m-create-source-video" />
+        ) : null}
         <Row icon={LayoutGrid} title={T.source.fromGallery} subtitle={T.source.fromGallerySub} disabled={busy} onPress={() => openGalleryPicker('source')} testid="m-create-source-gallery" el="K5.4" />
         <Row icon={UsersRound} title={T.source.saved} subtitle={T.source.savedSub} disabled={busy} onPress={() => pushSub('saved')} testid="m-create-source-saved" el="K5.5" />
       </ListGroup>

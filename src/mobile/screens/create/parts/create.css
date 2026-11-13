@@ -1234,3 +1234,53 @@
   position: relative;
   background: transparent;
 }
+
+/* ---------- 3D (3.1.0) ---------- */
+/* The 3D view needs a height of its own: a canvas has none. */
+.m-app .m-k-media--3d {
+  height: min(56vh, 420px);
+  display: flex;
+}
+.m-app .m-k-viewer-3d {
+  width: 100%;
+  height: 100%;
+  display: flex;
+}
+.m-k-frames {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--m-s2);
+}
+.m-app .m-k-frame {
+  position: relative;
+  aspect-ratio: 1 / 1;
+  min-height: 44px;
+  border-radius: var(--m-r-md);
+  overflow: hidden;
+  background: var(--m-fill);
+  border: 2px solid transparent;
+  padding: 0;
+}
+.m-app .m-k-frame[aria-pressed='true'] {
+  border-color: var(--m-accent);
+}
+.m-k-frame img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.m-k-frame-no {
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  min-width: 18px;
+  padding: 0 4px;
+  border-radius: 9px;
+  background: var(--m-accent);
+  color: var(--m-on-accent);
+  font-size: var(--m-text-label);
+  line-height: 18px;
+  text-align: center;
+}

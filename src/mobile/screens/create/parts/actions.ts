@@ -19,7 +19,7 @@ import { applyStyleText, type PromptStyle } from './styles'
 import { aspectSize } from './params'
 import { nav } from '../../../nav'
 import { imageBaseLong } from './catalog'
-import { toolFacts, toolNeedsMask, type ToolId } from './tools'
+import { toolFacts, toolNeedsMask, toolTakesPhoto, type ToolId } from './tools'
 import type { PickPurpose } from './pick'
 
 const store = () => useCreateStore.getState()
@@ -51,8 +51,10 @@ export function fileProblemText(err: unknown, kind: MediaKind = 'image'): string
 /** Make `ref` the source image. A tool without a source becomes Edit. */
 export function takeImageAsSource(ref: ImageRef, tool?: ToolId): void {
   const st = store()
-  const want = tool ?? (toolFacts(st.intent()).needsSource || st.intent() === 'lipsync' || st.intent() === 'motion' ? st.intent() : 'edit')
+  const want = tool ?? (toolTakesPhoto(st.intent()) ? st.intent() : 'edit')
   if (st.intent() !== want) st.setIntent(want)
+  // 3D: a photo is the way "From image". Words and a video have no photo of their own.
+  if (want === '3d' && store().threeDWay !== 'image') store().setThreeDWay('image')
   const now = store()
   if (now.batchSources.length) now.setBatchSources([])
   now.setMask(null)
@@ -69,7 +71,7 @@ export async function addSourceFiles(files: readonly File[]): Promise<AddResult>
   if (files.length === 0) return { ok: false, message: '' }
   const st = store()
   const intent = st.intent()
-  const target: ToolId = toolFacts(intent).needsSource || intent === 'lipsync' || intent === 'motion' ? intent : 'edit'
+  const target: ToolId = toolTakesPhoto(intent) ? intent : 'edit'
   const usable = files.filter((f) => checkFile(f, 'image') === null)
   const skipped = files.length - usable.length
   if (usable.length === 0) {

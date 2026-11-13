@@ -43,6 +43,7 @@ import { explainError } from './parts/errors'
 import { cancelGuided, isGuidedRunning } from './parts/guided-run'
 import { useCreateFacts, useGate, type CreateFacts, type GateState } from './parts/facts'
 import { CharacterCard, EnhanceCard, ExtendCard, MusicCard, ReferenceCard, SourceCard, VideoInputCard, VoiceCard } from './parts/InputCards'
+import { ThreeDDetailCard, ThreeDSidesCard, ThreeDVideoCard, ThreeDWaySwitch } from './parts/ThreeDCards'
 import { creditsLabel, formatClock, formatCredits } from './parts/params'
 import { stylesFor, useStyleStore } from './parts/styles'
 import { purchaseView, reportItem, storePolicy, withAiConsent } from './parts/policy'
@@ -274,7 +275,7 @@ function Result({ item, ids, busy }: { item: GalleryItem; ids: string[]; busy: b
               data-m-id={g.id}
               onClick={() => dispatch({ type: 'show', id: g.id })}
             >
-              {g.type === 'image' && (g.remoteUrl ?? g.dataUrl) ? <img src={g.remoteUrl ?? g.dataUrl} alt="" loading="lazy" /> : <Icon icon={TOOL_ICON[g.type === 'video' ? 'video' : 'music']} />}
+              {g.type === 'image' && (g.remoteUrl ?? g.dataUrl) ? <img src={g.remoteUrl ?? g.dataUrl} alt="" loading="lazy" /> : <Icon icon={TOOL_ICON[g.type === 'video' ? 'video' : g.type === '3d' ? '3d' : 'music']} />}
             </button>
           ))}
         </div>
@@ -370,6 +371,9 @@ function Stage({ f, onRetry, onCancel, onMakeVoice }: { f: CreateFacts; onRetry:
 
       {stageError && error ? <ErrorNotice message={error} stillBooked={pending.length > 0} onRetry={onRetry} retryDisabled={isGenerating || f.block !== null} /> : null}
 
+      {/* 3D: the way heads the tool (C3D-PLAN 1.1), Text, Image or Video. */}
+      {tool === '3d' ? <ThreeDWaySwitch f={f} disabled={isGenerating} /> : null}
+
       {showRunning ? <Running f={f} onCancel={onCancel} /> : null}
       {showResult && item ? <Result item={item} ids={run.resultIds} busy={isGenerating} /> : null}
 
@@ -388,7 +392,12 @@ function Stage({ f, onRetry, onCancel, onMakeVoice }: { f: CreateFacts; onRetry:
 
       {/* The inputs of the tool. */}
       {tool === 'character' ? <CharacterCard f={f} /> : null}
-      {f.facts.needsSource ? <SourceCard f={f} disabled={isGenerating} /> : null}
+      {f.facts.needsSource && !(tool === '3d' && f.threeDWay === 'video') ? (
+        tool === '3d' ? <SourceCard f={f} title={T.threeD.sourceTitle} sub={T.threeD.sourceSub} disabled={isGenerating} /> : <SourceCard f={f} disabled={isGenerating} />
+      ) : null}
+      {tool === '3d' && f.threeDWay === 'image' ? <ThreeDSidesCard f={f} disabled={isGenerating} /> : null}
+      {tool === '3d' && f.threeDWay === 'video' ? <ThreeDVideoCard f={f} disabled={isGenerating} /> : null}
+      {tool === '3d' ? <ThreeDDetailCard f={f} disabled={isGenerating} /> : null}
       {tool === 'lipsync' && f.needsClip ? <VideoInputCard f={f} title={T.presenterClip} sub={T.presenterClipSub} disabled={isGenerating} testid="m-create-clip" /> : null}
       {tool === 'lipsync' && f.needsPortrait ? <SourceCard f={f} title={T.presenter} sub={T.presenterSub} disabled={isGenerating} /> : null}
       {tool === 'lipsync' && !f.needsClip && !f.needsPortrait ? (
@@ -413,7 +422,7 @@ function Stage({ f, onRetry, onCancel, onMakeVoice }: { f: CreateFacts; onRetry:
       ) : null}
 
       {/* A tool without an input card says in one line what it wants. The tool row above names it, the cards say it for the others. */}
-      {!showRunning && !showResult && HINT_TOOLS.includes(tool) ? (
+      {!showRunning && !showResult && (HINT_TOOLS.includes(tool) || (tool === '3d' && f.threeDWay === 'text')) ? (
         <p className="m-k-hint" data-testid="m-create-empty">
           <Icon icon={ToolGlyph} />
           {text.empty}

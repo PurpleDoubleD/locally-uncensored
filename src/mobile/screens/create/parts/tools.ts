@@ -5,14 +5,14 @@
  * image, a prompt, a painted area) is written down here once, so the page,
  * the sheets and the tests read the same table.
  */
-import type { CreateIntent } from '../../../../stores/createStore'
+import type { CreateIntent, ThreeDWay } from '../../../../stores/createStore'
 
 export type ToolId = CreateIntent
 
 export interface ToolFacts {
   id: ToolId
   /** What the result is. */
-  kind: 'image' | 'video' | 'audio'
+  kind: 'image' | 'video' | 'audio' | '3d'
   /** The tool starts from an image the user brings. */
   needsSource: boolean
   /** yes: a prompt is required. optional: it may stay empty. no: there is no prompt field. */
@@ -40,7 +40,12 @@ export const TOOLS: readonly ToolFacts[] = [
   { id: 'music', kind: 'audio', needsSource: false, prompt: 'yes', mask: 'none', batch: false, styles: false, hasModels: true },
   { id: 'extend', kind: 'video', needsSource: false, prompt: 'yes', mask: 'none', batch: false, styles: false, hasModels: true },
   { id: 'motion', kind: 'video', needsSource: false, prompt: 'optional', mask: 'none', batch: false, styles: false, hasModels: true },
+  // 3D (3.1.0): last in the row, so no tool moves. Source and prompt follow the way (toolFacts).
+  { id: '3d', kind: '3d', needsSource: false, prompt: 'yes', mask: 'none', batch: false, styles: false, hasModels: true },
 ]
+
+/** The three ways of the 3D tool, in the order of its switch. */
+export const THREE_D_WAYS: readonly ThreeDWay[] = ['text', 'image', 'video']
 
 export const TOOL_IDS: readonly ToolId[] = TOOLS.map((t) => t.id)
 
@@ -58,8 +63,21 @@ export function toolChoiceRisk(id: ToolId): 'paid' | undefined {
   return MARKED_TOOL_CHOICES.includes(id) ? 'paid' : undefined
 }
 
-export function toolFacts(id: ToolId): ToolFacts {
-  return TOOLS.find((t) => t.id === id) ?? TOOLS[0]
+/**
+ * The facts of a tool. 3D reads its way: from words it wants a prompt and no
+ * picture, from a photo or a video it wants a picture (a still frame of the
+ * video stands there) and no prompt.
+ */
+export function toolFacts(id: ToolId, threeDWay: ThreeDWay = 'image'): ToolFacts {
+  const facts = TOOLS.find((t) => t.id === id) ?? TOOLS[0]
+  if (facts.id !== '3d') return facts
+  const words = threeDWay === 'text'
+  return { ...facts, needsSource: !words, prompt: words ? 'yes' : 'no' }
+}
+
+/** Whether a photo the user adds stays with this tool. Every other tool hands it to Edit. */
+export function toolTakesPhoto(id: ToolId): boolean {
+  return id === '3d' || id === 'lipsync' || id === 'motion' || toolFacts(id).needsSource
 }
 
 /** Which tools the catalog can run right now. A missing answer counts as no. */

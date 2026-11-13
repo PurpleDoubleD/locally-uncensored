@@ -146,11 +146,11 @@ export default function ModelViewer({ item, className, onFullscreen, touch }: Mo
           )}
         </div>
       )}
-      <div className="absolute top-2 right-2 flex gap-1" data-testid="model-viewer-bar">
+      <div className="absolute top-2 right-2 left-2 flex flex-wrap justify-end gap-1 pointer-events-none [&>*]:pointer-events-auto" data-testid="model-viewer-bar">
         {phase === 'ready' && (
           <>
-            <Btn title={VIEWER_TEXT.turn} pressed={turning} onClick={() => setTurning((t) => !t)} testid="mv-turn"><RefreshCw size={14} /></Btn>
-            <div className="flex rounded-lg bg-black/50 backdrop-blur overflow-hidden" role="group" aria-label="Look">
+            <Btn touch={touch} title={VIEWER_TEXT.turn} pressed={turning} onClick={() => setTurning((t) => !t)} testid="mv-turn"><RefreshCw size={14} /></Btn>
+            <div className="flex gap-px rounded-lg bg-black/50 backdrop-blur overflow-hidden" role="group" aria-label="Look">
               {LOOKS.map((l) => (
                 <button
                   key={l}
@@ -158,21 +158,21 @@ export default function ModelViewer({ item, className, onFullscreen, touch }: Mo
                   aria-pressed={look === l}
                   data-testid={`mv-look-${l}`}
                   onClick={() => setLook(l)}
-                  className={cn('lu-on-dark px-2 h-7 t-control', look === l ? 'text-white bg-white/10' : 'text-gray-300 hover:text-white')}
+                  className={cn('lu-on-dark px-2 t-control', touch ? 'h-11 px-3' : 'h-7', look === l ? 'text-white bg-white/10' : 'text-gray-300 hover:text-white')}
                 >
                   {VIEWER_TEXT.looks[l]}
                 </button>
               ))}
             </div>
-            <Btn title={VIEWER_TEXT.backdrop} onClick={() => setBackdrop((b) => (b === 'dark' ? 'light' : 'dark'))} testid="mv-backdrop">
+            <Btn touch={touch} title={VIEWER_TEXT.backdrop} onClick={() => setBackdrop((b) => (b === 'dark' ? 'light' : 'dark'))} testid="mv-backdrop">
               {backdrop === 'dark' ? <Sun size={14} /> : <Moon size={14} />}
             </Btn>
-            <Btn title={VIEWER_TEXT.reset} onClick={() => viewerRef.current?.reset()} testid="mv-reset"><RotateCcw size={14} /></Btn>
+            <Btn touch={touch} title={VIEWER_TEXT.reset} onClick={() => viewerRef.current?.reset()} testid="mv-reset"><RotateCcw size={14} /></Btn>
           </>
         )}
-        {onFullscreen && <Btn title={VIEWER_TEXT.fullscreen} onClick={onFullscreen} testid="mv-fullscreen"><Maximize2 size={14} /></Btn>}
+        {onFullscreen && <Btn touch={touch} title={VIEWER_TEXT.fullscreen} onClick={onFullscreen} testid="mv-fullscreen"><Maximize2 size={14} /></Btn>}
         <div className="relative">
-          <Btn title={VIEWER_TEXT.download} onClick={() => (canExport ? setMenu((m) => !m) : void save('glb'))} testid="mv-download"><Download size={14} /></Btn>
+          <Btn touch={touch} title={VIEWER_TEXT.download} onClick={() => (canExport ? setMenu((m) => !m) : void save('glb'))} testid="mv-download"><Download size={14} /></Btn>
           {menu && (
             <div className="absolute right-0 top-8 z-10 min-w-[230px] rounded-lg bg-[var(--lu-surface,#1c1d22)] border border-white/10 shadow-xl py-1" role="menu">
               {MESH_FORMATS.map((f) => (
@@ -194,7 +194,7 @@ export default function ModelViewer({ item, className, onFullscreen, touch }: Mo
       {phase === 'ready' && (
         <div className="absolute bottom-2 left-3 right-3 flex justify-between gap-3 t-mono text-gray-400 pointer-events-none">
           <span data-testid="model-viewer-facts">{facts}</span>
-          <span className="hidden sm:inline">{touch ? VIEWER_TEXT.hintTouch : VIEWER_TEXT.hint}</span>
+          <span className={touch ? undefined : 'hidden sm:inline'}>{touch ? VIEWER_TEXT.hintTouch : VIEWER_TEXT.hint}</span>
         </div>
       )}
       {phase === 'ready' && message && (
@@ -204,7 +204,7 @@ export default function ModelViewer({ item, className, onFullscreen, touch }: Mo
   )
 }
 
-function Btn({ children, title, onClick, pressed, testid }: { children: React.ReactNode; title: string; onClick: () => void; pressed?: boolean; testid: string }) {
+function Btn({ children, title, onClick, pressed, testid, touch }: { children: React.ReactNode; title: string; onClick: () => void; pressed?: boolean; testid: string; touch?: boolean }) {
   return (
     <button
       type="button"
@@ -214,7 +214,9 @@ function Btn({ children, title, onClick, pressed, testid }: { children: React.Re
       onClick={onClick}
       data-testid={testid}
       className={cn(
-        'lu-on-dark w-7 h-7 flex items-center justify-center rounded-lg bg-black/50 backdrop-blur transition-colors',
+        'lu-on-dark flex items-center justify-center rounded-lg bg-black/50 backdrop-blur transition-colors',
+        // A finger needs 44 px (the phone's rule), a mouse 28.
+        touch ? 'w-11 h-11' : 'w-7 h-7',
         pressed ? 'text-white bg-white/15' : 'text-gray-200 hover:text-white hover:bg-black/70',
       )}
     >

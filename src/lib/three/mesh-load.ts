@@ -29,7 +29,7 @@ export class MeshLoadError extends Error {
 }
 
 export const NOT_A_MODEL = 'This file is not a 3D model LU can show. You can still download it.'
-export const COMPRESSED = 'This model is packed in a way the 3D view cannot open yet. You can still download it.'
+export const COMPRESSED = 'This model is packed in a way the 3D view cannot open. You can still download it.'
 
 /** Only addresses that carry their bytes with them may load. */
 export function allowedUrl(url: string): boolean {

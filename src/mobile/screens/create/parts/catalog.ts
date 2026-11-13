@@ -5,7 +5,7 @@
  * the logic layer. The screens ask it three things: which tools can run,
  * which models a tool has, and what the picked model is.
  */
-import { useCreateStore, MODEL_TYPE_DEFAULTS, type CharacterRef } from '../../../../stores/createStore'
+import { useCreateStore, MODEL_TYPE_DEFAULTS, type CharacterRef, type ThreeDWay } from '../../../../stores/createStore'
 import {
   useCloudCatalogStore,
   animatePickerModels,
@@ -20,7 +20,7 @@ import {
   videoPickerModels,
 } from '../../../../stores/cloudCatalogStore'
 import type { CloudModel } from '../../../../lib/render/cloud-models'
-import { createRunModel, createStudioCost, intentPickerModels, intentRoles, isStudioModel } from '../../../../lib/render/create-studio'
+import { createRunModel, createStudioCost, intentPickerModels, intentRoles, isStudioModel, studioIntentOf } from '../../../../lib/render/create-studio'
 import { groupForPicker, tierMarks } from '../../../../lib/render/model-tier'
 import { modelLabel } from '../../../../lib/render/preset-models'
 import { effectiveVideoDurations } from '../../../../lib/render/video-duration'
@@ -63,6 +63,8 @@ export function toolProbe(): ToolProbe {
     music: intentPickerModels('music').length > 0,
     extend: intentPickerModels('extend').length > 0,
     motion: intentPickerModels('motion').length > 0,
+    // The tab is there as soon as the catalog lists one 3D model, whatever its way.
+    '3d': intentPickerModels('3d').length > 0,
   }
 }
 
@@ -105,18 +107,20 @@ function rowCredits(id: string, tool: ToolId, musicSeconds: number, fallback: nu
 }
 
 /** The models of a tool, grouped and marked the way the desktop picker does it. */
-export function toolModels(tool: ToolId, opts: { character: CharacterRef | null; characterUse: boolean; musicSeconds: number; fallbackCredits: Record<'image' | 'video' | 'audio', number | null> }): ModelRow[] {
-  const facts = toolFacts(tool)
+export function toolModels(tool: ToolId, opts: { character: CharacterRef | null; characterUse: boolean; musicSeconds: number; fallbackCredits: Record<'image' | 'video' | 'audio', number | null>; threeDWay?: ThreeDWay }): ModelRow[] {
+  const facts = toolFacts(tool, opts.threeDWay)
   if (!facts.hasModels) return []
+  // 3D lists the models of its way: words, one photo, or the frames of a video.
+  const pickIntent = studioIntentOf(tool, opts.threeDWay)
   let list: Listable[]
   if (tool === 'character') {
     list = opts.characterUse ? characterGenerationModels(opts.character?.family ?? '') : opPickerModels('lora-train')
-  } else if (intentRoles(tool).length > 0) list = intentPickerModels(tool)
+  } else if (intentRoles(pickIntent).length > 0) list = intentPickerModels(pickIntent)
   else if (tool === 'edit') list = editCapableModels()
   else if (tool === 'animate') list = animatePickerModels()
   else if (tool === 'video') list = videoPickerModels()
   else list = imageModels()
-  const fallback = opts.fallbackCredits[facts.kind]
+  const fallback = facts.kind === '3d' ? null : opts.fallbackCredits[facts.kind]
   return groupForPicker(list).map(({ model, group }) => ({
     id: model.id,
     // The name and the head of the group as this build may show them: a store build writes no word it may not show.
@@ -161,10 +165,10 @@ export interface RunModel {
 
 type Picks = { cloudImageModel: string; cloudVideoModel: string; cloudOpModel: string }
 
-/** The model a run of `tool` uses with the current picks. */
-export function runModel(tool: ToolId, picks: Picks, character: CharacterRef | null, characterUse: boolean): RunModel {
+/** The model a run of `tool` uses with the current picks. 3D runs the model of its way. */
+export function runModel(tool: ToolId, picks: Picks, character: CharacterRef | null, characterUse: boolean, threeDWay?: ThreeDWay): RunModel {
   const id = createRunModel(
-    tool,
+    studioIntentOf(tool, threeDWay),
     { image: picks.cloudImageModel, video: picks.cloudVideoModel, op: picks.cloudOpModel },
     characterUse ? character?.family ?? '' : undefined,
   )

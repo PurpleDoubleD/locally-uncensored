@@ -11,6 +11,7 @@
  */
 import { memo, useRef } from 'react'
 import { AudioLines, Box, Play } from 'lucide-react'
+import { ModelThumb } from '../../../components/three/ModelThumb'
 import { useCreateStore, type GalleryItem } from '../../../stores/createStore'
 import { useContentPolicy } from '../../../hooks/useContentPolicy'
 import { useSheet } from '../../nav'
@@ -41,7 +42,7 @@ const PickTile = memo(function PickTile({ item, onPick }: { item: GalleryItem; o
         {show && item.type === 'image' ? <img src={media.url ?? undefined} alt="" loading="lazy" decoding="async" onError={media.onError} /> : null}
         {show && item.type === 'video' ? <video src={`${media.url}#t=0.1`} muted playsInline preload="metadata" onError={media.onError} /> : null}
         {item.type === 'audio' && media.state === 'ok' ? <Icon icon={AudioLines} /> : null}
-        {item.type === '3d' && media.state === 'ok' ? <Icon icon={Box} /> : null}
+        {near && item.type === '3d' && media.state === 'ok' ? <ModelThumb item={item} small /> : null}
         {media.state !== 'ok' ? <MediaStateBox state={media.state} compact /> : null}
       </button>
       {item.type !== 'image' && media.state === 'ok' ? (

@@ -13,6 +13,7 @@ import { Button, Icon, Page } from '../../ui'
 import { useGate } from './parts/facts'
 import { purchaseView } from './parts/policy'
 import { TOOLS, type ToolId } from './parts/tools'
+import { toolProbe, useCatalogVersion } from './parts/catalog'
 import { TOOL_ICON } from './parts/ui'
 import './parts/create.css'
 
@@ -49,6 +50,7 @@ function Card({ tool, index }: { tool: ToolId; index: number }) {
 
 export default function ShowcasePage() {
   const { gate } = useGate()
+  useCatalogVersion()
   const purchase = purchaseView().mode
   const open = gate === 'open'
   const first = gate === 'signed-out' || gate === 'checking' ? T.showcase.signIn : T.showcase.turnOn
@@ -85,7 +87,8 @@ export default function ShowcasePage() {
       }
     >
       <p className="m-k-pad m-k-card-sub m-k-intro">{T.showcase.intro}</p>
-      {TOOLS.map((tool, i) => (
+      {/* 3D (3.1.0) shows only once the catalog lists a 3D model: the page never names what LU Cloud cannot make. */}
+      {TOOLS.filter((tool) => tool.id !== '3d' || toolProbe()['3d']).map((tool, i) => (
         <Card key={tool.id} tool={tool.id} index={i} />
       ))}
     </Page>

@@ -7,6 +7,7 @@
 import type { CreateIntent } from '../../stores/createStore'
 import { MIN_TRAIN_IMAGES, maxTrainImages } from '../../lib/train-image-cap'
 import { UNFILTERED_MARK_LABEL } from '../../lib/unfiltered-mark'
+import { THREE_D_TEXT } from '../../lib/three/three-d-text'
 import { priced } from '../policy/gates'
 import { POLICY } from './policy'
 
@@ -244,6 +245,7 @@ export const CREATE_STRINGS = {
     'no-portrait': 'Add a portrait first',
     'no-clip': 'Pick a clip first',
     'no-motion-video': 'Add a motion video first',
+    'no-3d-video': 'Add a short video first',
     'no-model': 'No model is available for this tool',
     get 'price-unavailable'() {
       return priced('Price could not be confirmed', 'Credits could not be confirmed')
@@ -503,6 +505,8 @@ export const CREATE_STRINGS = {
     savedDeleteTitle: (name: string) => `Delete ${name}?`,
     savedDeleteText: 'Its photos are removed from this phone.',
     switchesToEdit: 'Adding a photo switches to Edit.',
+    video: 'Video',
+    videoSub: 'LU takes still frames. The video stays on this phone.',
     batchStarted: (n: number) => `${n} images added to the batch`,
     batchLeftOut: (n: number) => `Only the first ${n} were added. A batch takes up to 50 images.`,
   },
@@ -517,6 +521,7 @@ export const CREATE_STRINGS = {
     images: 'Images',
     video: 'Video',
     audio: 'Audio',
+    threeD: '3D',
     select: 'Select',
     done: 'Done',
     selected: (n: number) => `${n} selected`,
@@ -957,6 +962,33 @@ export const CREATE_STRINGS = {
   },
 
   // ---------- store rules: report, consent, buying ----------
+  // ---------- 3D (3.1.0) ----------
+  threeD: {
+    wayLabel: 'How to make the model',
+    ways: THREE_D_TEXT.waysShort,
+    sourceTitle: 'Photo of one object',
+    sourceSub: 'One thing, fully in frame. A plain background works best.',
+    moreSides: THREE_D_TEXT.moreSides,
+    moreSidesSub: THREE_D_TEXT.moreSidesSub,
+    sides: THREE_D_TEXT.sides,
+    addSide: (side: string) => `Add the ${side.toLowerCase()} side`,
+    removeSide: (side: string) => `Remove the ${side.toLowerCase()} side`,
+    videoTitle: 'Video of one object',
+    videoSub: THREE_D_TEXT.dropVideoSub,
+    addVideo: 'Add a video',
+    otherVideo: 'Another video',
+    reading: THREE_D_TEXT.framesReading,
+    framesMany: THREE_D_TEXT.framesMany,
+    framesOne: THREE_D_TEXT.framesOne,
+    framesSome: (n: number) => `LU picked ${n} moments from your video. Swap any of them.`,
+    frame: (i: number, n: number) => `Moment ${i} of ${n}`,
+    honest: THREE_D_TEXT.videoHonest,
+    videoFailed: 'LU could not read this video. Try another one.',
+    detail: THREE_D_TEXT.detail,
+    details: THREE_D_TEXT.details,
+    viewer: 'Your 3D model',
+  },
+
   policy: {
     report: 'Report',
     reportLabel: (name: string) => `Report ${name}`,

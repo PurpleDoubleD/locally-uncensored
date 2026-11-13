@@ -137,6 +137,8 @@ export type BlockReason =
   | 'no-portrait'
   | 'no-clip'
   | 'no-motion-video'
+  /** 3D from a video: no video read yet. */
+  | 'no-3d-video'
   | 'no-model'
   | 'price-unavailable'
   | 'price-measuring'
@@ -163,6 +165,8 @@ export interface ReadyInput {
   hasVideo: boolean
   /** Extend. */
   hasExtendClip: boolean
+  /** 3D: the way of the tool. Its source is a still frame on the video way. */
+  threeDWay?: 'text' | 'image' | 'video'
   hasModel: boolean
   /** A model whose price the server confirms. */
   /** pending only changes the label, the server confirms again at the start. */
@@ -189,6 +193,7 @@ export function blockReason(i: ReadyInput): BlockReason | null {
     if (!i.hasSource) return 'no-portrait'
     if (!i.hasVideo) return 'no-motion-video'
   }
+  if (i.tool === '3d' && i.threeDWay === 'video' && !i.hasSource) return 'no-3d-video'
   if (i.sourceNeeded && !i.hasSource) return 'no-source'
   if (i.maskNeeded && !i.hasMask) return 'no-mask'
   if (i.promptNeeded && i.prompt.trim().length === 0) return 'no-prompt'

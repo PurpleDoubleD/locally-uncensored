@@ -13,6 +13,7 @@ import {
 } from 'lucide-react'
 import { useCreateStore, type GalleryItem } from '../../../../stores/createStore'
 import { galleryLabelShort } from '../../../../lib/render/gallery-label'
+import { LazyModelViewer } from '../../../../components/three/LazyModelViewer'
 import { nav, useSheet } from '../../../nav'
 import { Icon, type IconType } from '../../../ui'
 import { useHeldScreenShape } from '../../../ui/screen-shape'
@@ -213,6 +214,14 @@ export function ResultMediaView({ item, openTestid, el }: { item: GalleryItem; o
     return (
       <div className="m-k-media">
         <video src={media.url} controls playsInline preload="metadata" aria-label={itemName(item, 80)} onError={media.onError} />
+      </div>
+    )
+  }
+  if (item.type === '3d') {
+    // The 3D view turns right here. Its full screen is the result view (K7).
+    return (
+      <div className="m-k-media m-k-media--3d" data-testid="m-create-result-3d" data-el={el} aria-label={T.threeD.viewer}>
+        <LazyModelViewer item={item} touch onFullscreen={open} />
       </div>
     )
   }

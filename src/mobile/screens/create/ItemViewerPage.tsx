@@ -8,6 +8,7 @@
  * (opens the prompt, with Copy). Where the store rules ask for it there is
  * "Report".
  * The id "source" shows the current source image of K1 (K1.18).
+ * A 3D model (3.1.0) shows the 3D view: drag turns it, two fingers zoom.
  */
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type PointerEvent } from 'react'
 import { ChevronLeft, ChevronRight, Download, Ellipsis, Flag, Share2, X, ZoomIn, ZoomOut } from 'lucide-react'
@@ -21,6 +22,7 @@ import { Button, IconButton } from '../../ui'
 import { copyWithToast, saveWithToast, shareWithToast } from './parts/actions'
 import { VIEW_START, clampView, pinchView, type Point, type Size, type View } from './parts/mask-strokes'
 import { reportItem, shownCreateLabel, storePolicy } from './parts/policy'
+import { LazyModelViewer } from '../../../components/three/LazyModelViewer'
 import { MediaStateBox, itemName, useGalleryItem, useItemMedia } from './parts/ui'
 import { CheckerBoard, useChecker } from './parts/checker'
 
@@ -234,6 +236,12 @@ function ItemView({ item }: { item: GalleryItem }) {
         </div>
       ) : item.type === 'image' ? (
         <ZoomImage src={media.url} alt={name} view={view} setView={setView} onSwipe={go} onError={media.onError} />
+      ) : item.type === '3d' ? (
+        <div className="m-viewer-stage" data-testid="m-create-item-stage" data-el="K7.7" aria-label={name}>
+          <div className="m-k-viewer-3d" data-testid="m-create-item-3d">
+            <LazyModelViewer key={item.id} item={item} touch />
+          </div>
+        </div>
       ) : (
         <div className="m-viewer-stage" data-testid="m-create-item-stage" data-el="K7.7">
           {item.type === 'video' ? (

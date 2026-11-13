@@ -419,7 +419,17 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
       s.setError('Motion control needs a character image and a driving video.')
       return
     }
-    if (!specialOp && op !== 'generate' && !s.source) {
+    // 3D from text builds from words alone, under op 'studio'.
+    const threeDFromText = intent === '3d' && s.threeDWay === 'text'
+    if (intent === '3d' && !threeDFromText && !s.source) {
+      s.setError(s.threeDWay === 'video' ? THREE_D_TEXT.needVideo : THREE_D_TEXT.needSource)
+      return
+    }
+    if (threeDFromText && !prompt.trim()) {
+      s.setError('Describe the object first.')
+      return
+    }
+    if (!specialOp && op !== 'generate' && !s.source && !threeDFromText) {
       s.setError('Add a source image first.')
       return
     }
