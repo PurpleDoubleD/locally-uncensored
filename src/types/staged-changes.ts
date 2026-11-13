@@ -47,4 +47,19 @@ export interface StagedChange {
   diff: string
   /** Wall-clock when the model staged this change. */
   stagedAt: number
+  /**
+   * Per hunk review (lib/hunks): index of a hunk of oldContent -> newContent
+   * to the user's decision. A hunk without an entry is still open and counts
+   * as accepted when the file is applied. The hunks are rebuilt from the two
+   * contents, which never change for one id, so the indices stay valid.
+   */
+  hunkDecisions?: Record<number, 'accepted' | 'rejected'>
+}
+
+/** What the model is told about a review it did not see happen: a file the
+ *  user rejected, or hunks of a file left out on apply. */
+export interface ReviewNote {
+  changeId: string
+  path: string
+  text: string
 }

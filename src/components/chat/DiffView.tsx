@@ -1,4 +1,5 @@
 import { parseUnifiedDiff, displayPath } from '../../lib/diff'
+import { DIFF_TONE, DIFF_LINE_NO, DIFF_ADDED_COUNT, DIFF_REMOVED_COUNT, DIFF_SURFACE, DIFF_HUNK_HEAD } from './diff-tones'
 
 interface Props {
   /** Raw unified-diff string as produced by `computeUnifiedDiff`. */
@@ -28,75 +29,47 @@ export function DiffView({ diff, maxLines = 200, showPath = true }: Props) {
   const lines = truncated ? parsed.lines.slice(0, maxLines) : parsed.lines
   const hiddenCount = parsed.lines.length - lines.length
 
+  // Light and dark from one palette (diff-tones.ts); it was dark only and
+  // grey on grey in the light theme.
   return (
-    <div className="rounded border border-white/10 bg-black/30 overflow-hidden">
+    <div className={`rounded border ${DIFF_SURFACE} overflow-hidden`}>
       {showPath && (parsed.added > 0 || parsed.removed > 0) && (
-        <div className="flex items-center justify-between px-2 py-1 border-b border-white/5 text-[0.55rem] font-mono">
-          <span className="text-gray-500 truncate">{displayPath(parsed.path) || 'diff'}</span>
+        <div className="flex items-center justify-between px-2 py-1 border-b border-gray-100 dark:border-white/5 t-mono">
+          <span className="text-gray-600 dark:text-gray-400 truncate">{displayPath(parsed.path) || 'diff'}</span>
           <span className="flex gap-2 shrink-0">
-            {parsed.added > 0 && (
-              <span className="text-emerald-400">+{parsed.added}</span>
-            )}
-            {parsed.removed > 0 && (
-              <span className="text-red-400">-{parsed.removed}</span>
-            )}
+            {parsed.added > 0 && <span className={DIFF_ADDED_COUNT}>+{parsed.added}</span>}
+            {parsed.removed > 0 && <span className={DIFF_REMOVED_COUNT}>-{parsed.removed}</span>}
           </span>
         </div>
       )}
-      <pre className="t-micro leading-relaxed font-mono overflow-auto scrollbar-thin max-h-[300px]">
-        {lines.map((l, i) => {
-          if (l.kind === 'hunk') {
+      <div className="t-mono leading-5 overflow-auto scrollbar-thin max-h-[300px] [font-variant-ligatures:none]">
+        <div className="min-w-max">
+          {lines.map((l, i) => {
+            if (l.kind === 'hunk') {
+              return (
+                <div key={i} className={`px-2 t-micro border-y border-gray-100 dark:border-white/5 ${DIFF_HUNK_HEAD}`}>
+                  {l.text}
+                </div>
+              )
+            }
+            const kind = l.kind === 'add' || l.kind === 'remove' ? l.kind : 'context'
+            const no = kind === 'remove' ? l.oldLine : l.newLine
+            const sign = kind === 'add' ? '+' : kind === 'remove' ? '-' : ' '
             return (
-              <div
-                key={i}
-                className="px-2 bg-blue-500/5 text-blue-300/70 border-y border-white/5"
-              >
-                {l.text}
+              <div key={i} className={`flex pr-3 ${DIFF_TONE[kind].row}`}>
+                <span className={`w-9 shrink-0 select-none pr-2 text-right ${DIFF_LINE_NO}`}>{no}</span>
+                <span className={`w-3 shrink-0 select-none ${DIFF_TONE[kind].sign}`}>{sign}</span>
+                <span className="whitespace-pre">{l.text || ' '}</span>
               </div>
             )
-          }
-          if (l.kind === 'add') {
-            return (
-              <div key={i} className="px-2 bg-emerald-500/10 text-emerald-200">
-                {l.newLine !== undefined && (
-                  <span className="inline-block w-8 text-right pr-2 text-emerald-500/50">
-                    {l.newLine}
-                  </span>
-                )}
-                <span>{`+${l.text}`}</span>
-              </div>
-            )
-          }
-          if (l.kind === 'remove') {
-            return (
-              <div key={i} className="px-2 bg-red-500/10 text-red-200">
-                {l.oldLine !== undefined && (
-                  <span className="inline-block w-8 text-right pr-2 text-red-500/50">
-                    {l.oldLine}
-                  </span>
-                )}
-                <span>{`-${l.text}`}</span>
-              </div>
-            )
-          }
-          // context
-          return (
-            <div key={i} className="px-2 text-gray-400">
-              {l.newLine !== undefined && (
-                <span className="inline-block w-8 text-right pr-2 text-gray-700">
-                  {l.newLine}
-                </span>
-              )}
-              <span>{` ${l.text}`}</span>
+          })}
+          {truncated && (
+            <div className="px-2 py-1 t-micro text-gray-500 italic">
+              … {hiddenCount} more lines
             </div>
-          )
-        })}
-        {truncated && (
-          <div className="px-2 py-1 text-gray-600 italic">
-            … {hiddenCount} more lines
-          </div>
-        )}
-      </pre>
+          )}
+        </div>
+      </div>
     </div>
   )
 }
