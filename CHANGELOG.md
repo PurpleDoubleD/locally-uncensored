@@ -167,6 +167,11 @@ in the cloud catalogue.
   through LU instead of the browser ("Failed to fetch" with Qwen-Image 2.1 and
   MiniMax H3), and finds a picture this chat made by its path on disk.
 - A video retry that never ran no longer reports "video generated".
+- The content filter no longer refuses a harmless prompt because of the
+  negative prompt, for example "teen" in the prompt and "nsfw" kept out (#231).
+  It now also checks agent videos with a character before the character's
+  picture renders, and jobs from the phone (edit, music, upscale, cut-out).
+  The Mac image engine never blacks out a picture.
 - The chat image tool runs the workflow assigned to the model (GitHub #192).
 - The video preview says it is a still of the first frame, and says so when
   ComfyUI sends no preview at all.

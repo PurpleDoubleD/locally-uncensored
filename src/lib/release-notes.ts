@@ -400,6 +400,10 @@ export const RELEASE_NOTES: ReleaseNote[] = [
             detail: 'A video retry that never ran no longer reports "video generated".',
           },
           {
+            title: 'The negative prompt no longer trips the content filter.',
+            detail: 'A harmless prompt with words like "nsfw" kept out in the negative prompt is no longer refused (GitHub #231). The filter now also checks agent videos with a character before anything renders, and jobs sent from your phone. The Mac image engine never blacks out a picture.',
+          },
+          {
             title: 'Chroma1-HD loads again on the Mac.',
             detail: 'No more "tiktoken is required", and the image engine updates itself at start when it is out of date.',
           },
