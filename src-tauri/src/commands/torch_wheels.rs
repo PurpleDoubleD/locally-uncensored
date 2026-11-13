@@ -827,7 +827,20 @@ pub(crate) fn comfy_wheel_plan_here() -> WheelPlan {
     let cap = if has_nvidia { crate::commands::install::detect_nvidia_compute_cap() } else { None };
     let amd_refs: Vec<&str> = amd_names.iter().map(String::as_str).collect();
     let intel_refs: Vec<&str> = intel.iter().map(String::as_str).collect();
-    comfy_wheel_plan_for(has_nvidia, cap, has_amd, &amd_refs, &intel_refs, std::env::consts::OS)
+    let plan = comfy_wheel_plan_for(has_nvidia, cap, has_amd, &amd_refs, &intel_refs, std::env::consts::OS);
+    let found = usize::from(has_nvidia) + amd_names.len() + intel.len();
+    with_probe_gap_hint(plan, crate::commands::gpu::pciutils_hint_here(found))
+}
+
+/// C74: der Prozessor-Plan sagt dazu, warum, wenn die Karte nur deshalb
+/// fehlt, weil unter Linux lspci fehlt. Ohne diesen Satz las c1rrus (Bazzite,
+/// RX 6900 XT, Distrobox) nur "No GPU detected" und bekam still die
+/// Prozessor-Wheels.
+pub(crate) fn with_probe_gap_hint(plan: WheelPlan, hint: Option<String>) -> WheelPlan {
+    match (plan, hint) {
+        (WheelPlan::Cpu { note }, Some(hint)) => WheelPlan::Cpu { note: format!("{note} {hint}") },
+        (plan, _) => plan,
+    }
 }
 
 /// The line the installer adds after the PyTorch download, when the build was

@@ -373,7 +373,7 @@ fn note_for(vendor: &str) -> Option<String> {
 /// rustc still reports them as dead code. Gating at run time on a constant
 /// keeps the chain intact everywhere (the early return folds away) and lets
 /// `-D warnings` stay on without an `allow` per parser.
-fn detect_other_via_lspci(have_rocm: bool) -> Vec<DetectedGpu> {
+fn detect_other_via_lspci(have_rocm: bool, have_nvidia: bool) -> Vec<DetectedGpu> {
     if !cfg!(target_os = "linux") {
         return vec![];
     }
@@ -383,11 +383,15 @@ fn detect_other_via_lspci(have_rocm: bool) -> Vec<DetectedGpu> {
     // AlderLake-S GT1 [Intel UHD Graphics 770] [8086:4680]". We parse the
     // vendor ID ([8086:...] = Intel, [10de:...] = NVIDIA fallback,
     // [1002:...] = AMD).
-    let raw = match run_cmd("lspci", &["-nn"]) {
-        Some(s) => s,
-        None => return vec![],
-    };
-    detect_other_via_lspci_from(&raw, have_rocm, &read_sysfs_drm_cards())
+    let sysfs = read_sysfs_drm_cards();
+    match run_cmd("lspci", &["-nn"]) {
+        Some(raw) => detect_other_via_lspci_from(&raw, have_rocm, &sysfs),
+        // C74: kein lspci (Distrobox, Toolbox, Container, Minimalsystem ohne
+        // pciutils). Bis 3.1.0 blieb die Liste dann leer, und der
+        // ComfyUI-Installer nahm still die Prozessor-Wheels. Der Kernel
+        // listet die Karten trotzdem unter /sys/class/drm.
+        None => detect_via_sysfs_from(&sysfs, have_rocm, have_nvidia, &read_pci_ids()),
+    }
 }
 
 /// The parser, split from the command so it can be run against real captured
@@ -539,11 +543,10 @@ fn lspci_device_name(line: &str) -> String {
 // auch. Die Maschine, die den Fehler zeigt, ist nicht die Maschine, auf der
 // die Tests laufen: hier steckt keine AMD-Karte.
 //
-// Wo das hier aufhoert, ausgeschrieben statt verschwiegen: gelesen wird nur
-// fuer Karten, die lspci schon gefunden hat. Fehlt lspci selbst, weil pciutils
-// nicht installiert ist, bleibt die Liste leer wie bisher. sysfs kennt zwar
-// die Groesse, aber keinen Namen, nur die Geraetenummer, und eine Liste aus
-// Nummern ist eine zweite Aenderung mit einer eigenen Beweislast.
+// Wo das hier aufhoert: gelesen wird nur fuer Karten, die lspci schon
+// gefunden hat. Fehlt lspci selbst, weil pciutils nicht installiert ist,
+// uebernimmt seit 3.1.0 (C74) `detect_via_sysfs_from` weiter unten die ganze
+// Liste aus denselben Eintraegen.
 
 /// Die PCI-Herstellernummer von AMD, wie sie in /sys/.../vendor steht. lspci
 /// druckt dieselbe Zahl als [1002:....].
@@ -587,6 +590,10 @@ struct SysfsDrmCard {
     pci_address: String,
     /// Inhalt von "vendor", oder None wenn die Datei fehlt oder zu ist.
     vendor_id: Option<String>,
+    /// Inhalt von "device", also die PCI-Geraetenummer ("0x73bf"). Nur der
+    /// sysfs-Rueckfall ohne lspci (C74) braucht sie, um der Karte einen Namen
+    /// zu geben.
+    device_id: Option<String>,
     /// Inhalt von "mem_info_vram_total", ungeprueft.
     vram_total: Option<String>,
 }
@@ -741,6 +748,7 @@ fn read_sysfs_drm_cards_at(root: &std::path::Path) -> Vec<SysfsDrmCard> {
         cards.push(SysfsDrmCard {
             pci_address,
             vendor_id: read_sysfs_value(&device.join("vendor")),
+            device_id: read_sysfs_value(&device.join("device")),
             vram_total: read_sysfs_value(&device.join("mem_info_vram_total")),
         });
     }
@@ -756,6 +764,246 @@ fn read_sysfs_drm_cards_at(root: &std::path::Path) -> Vec<SysfsDrmCard> {
 /// nicht, und dann kommt eine leere Liste zurueck.
 fn read_sysfs_drm_cards() -> Vec<SysfsDrmCard> {
     read_sysfs_drm_cards_at(std::path::Path::new("/sys/class/drm"))
+}
+
+// ----------------------------------------------------------------------
+// C74 (3.1.0): Linux ganz ohne lspci
+//
+// c1rrus, help-chat 10.11.2026: Bazzite, RX 6900 XT, LU in einer Distrobox.
+// Dort fehlen pciutils und rocm-smi, die Liste der Karten blieb leer, und der
+// ComfyUI-Installer hat ohne ein Wort die Prozessor-Wheels genommen. Der
+// Kernel kennt die Karte trotzdem: /sys/class/drm/card<N>/device traegt
+// Hersteller- und Geraetenummer, bei amdgpu auch die Speichergroesse.
+//
+// Den Namen liefert sysfs nicht. Liegt die Namensliste pci.ids (Paket hwdata,
+// oft auch ohne pciutils vorhanden) auf der Platte, kommt er von dort, in
+// derselben Form, die lspci druckt, sodass `amd_gfx_target` ihn genauso liest.
+// Sonst steht die Nummer im Namen und die Notiz sagt, was fehlt.
+
+/// Die PCI-Herstellernummern, die der Rueckfall kennt.
+const PCI_VENDOR_NVIDIA: u16 = 0x10de;
+const PCI_VENDOR_INTEL: u16 = 0x8086;
+
+/// Hoechstens so viel wird aus pci.ids gelesen. Die Datei hat heute rund
+/// 1,4 MB; das Vierfache ist Luft, ein Vielfaches davon ist keine Namensliste.
+const PCI_IDS_READ_LIMIT: u64 = 8 * 1024 * 1024;
+
+/// Wo die Distributionen pci.ids ablegen (hwdata bzw. pciutils).
+const PCI_IDS_PATHS: &[&str] = &[
+    "/usr/share/hwdata/pci.ids",
+    "/usr/share/misc/pci.ids",
+    "/usr/share/pci.ids",
+];
+
+/// pci.ids als Text, oder leer, wenn keine der Dateien lesbar ist.
+fn read_pci_ids() -> String {
+    use std::io::Read;
+    for path in PCI_IDS_PATHS {
+        let Ok(file) = std::fs::File::open(path) else { continue };
+        let mut bytes = Vec::new();
+        if file.take(PCI_IDS_READ_LIMIT).read_to_end(&mut bytes).is_ok() {
+            // pci.ids ist UTF-8, alte Fassungen hatten Latin-1-Reste. Lossy
+            // statt ganz verwerfen: ein kaputtes Zeichen in einem fremden
+            // Herstellernamen darf den Namen dieser Karte nicht kosten.
+            return String::from_utf8_lossy(&bytes).into_owned();
+        }
+    }
+    String::new()
+}
+
+/// (Herstellername, Geraetename) aus pci.ids, oder None.
+///
+/// Das Format: eine Herstellerzeile "1002  Advanced Micro Devices, ..." am
+/// Zeilenanfang, darunter Geraete mit einem Tab ("\t73bf  Navi 21 [...]") und
+/// Untergeraete mit zwei Tabs, die hier nicht gebraucht werden. Kommentare
+/// beginnen mit '#', und nach den Herstellern folgen Klassenlisten ("C 03 ..."),
+/// an denen die Suche endet.
+fn pci_ids_names(pci_ids: &str, vendor: u16, device: u16) -> Option<(String, String)> {
+    let vendor_hex = format!("{vendor:04x}");
+    let device_hex = format!("{device:04x}");
+    let mut vendor_name: Option<String> = None;
+    for line in pci_ids.lines() {
+        if line.starts_with('#') || line.trim().is_empty() {
+            continue;
+        }
+        if !line.starts_with('\t') {
+            if vendor_name.is_some() {
+                // Naechster Hersteller: das Geraet steht nicht in der Liste.
+                return None;
+            }
+            if line.starts_with("C ") {
+                return None;
+            }
+            let (id, name) = line.split_once(char::is_whitespace)?;
+            if id.eq_ignore_ascii_case(&vendor_hex) {
+                vendor_name = Some(name.trim().to_string());
+            }
+            continue;
+        }
+        let Some(vname) = vendor_name.as_ref() else { continue };
+        if line.starts_with("\t\t") {
+            continue;
+        }
+        let body = &line[1..];
+        let Some((id, name)) = body.split_once(char::is_whitespace) else { continue };
+        if id.eq_ignore_ascii_case(&device_hex) {
+            let name = name.trim();
+            if name.is_empty() {
+                return None;
+            }
+            return Some((vname.clone(), name.to_string()));
+        }
+    }
+    None
+}
+
+/// Der Name einer Karte, die nur sysfs kennt.
+fn sysfs_card_name(vendor: &str, vendor_id: u16, device_id: Option<u16>, pci_ids: &str) -> (String, bool) {
+    if let Some(dev) = device_id {
+        if let Some((vname, dname)) = pci_ids_names(pci_ids, vendor_id, dev) {
+            return (format!("{vname} {dname}"), true);
+        }
+    }
+    let label = match vendor {
+        "amd" => "AMD Radeon GPU",
+        "nvidia" => "NVIDIA GPU",
+        _ => "Intel GPU",
+    };
+    let name = match device_id {
+        Some(dev) => format!("{label} (PCI {vendor_id:04x}:{dev:04x})"),
+        None => label.to_string(),
+    };
+    (name, false)
+}
+
+/// Was der Nutzer zu einer Karte lesen soll, die nur sysfs gefunden hat.
+fn sysfs_card_note(vendor: &str, named: bool) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    match vendor {
+        "amd" => parts.push(note_for("amd").unwrap_or_default()),
+        "nvidia" => parts.push(
+            "Found without nvidia-smi, so LU cannot confirm the NVIDIA driver here. Inside a \
+             container (Distrobox, Toolbox) the driver has to be passed through for ComfyUI \
+             and Ollama to use the card."
+                .to_string(),
+        ),
+        _ => {}
+    }
+    parts.push(if named {
+        "Listed from the kernel (/sys/class/drm) because lspci is not installed.".to_string()
+    } else {
+        "Listed from the kernel (/sys/class/drm) because lspci is not installed. Install \
+         pciutils to see the card's full name."
+            .to_string()
+    });
+    parts.retain(|p| !p.is_empty());
+    parts.join(" ")
+}
+
+/// Die Karten aus sysfs, wenn lspci fehlt. Rein, damit ein Test einen
+/// gefaelschten Baum (oder schon eingelesene Eintraege) hineingeben kann.
+///
+/// Dieselben Regeln wie auf dem lspci-Weg: NVIDIA nur, wenn nvidia-smi nichts
+/// gesagt hat, AMD nur, wenn rocm-smi nichts gesagt hat, Zaehler je Hersteller.
+/// Die Reihenfolge ist die der PCI-Adressen, nicht die von read_dir, damit
+/// HIP_VISIBLE_DEVICES und CUDA_VISIBLE_DEVICES (mit PCI_BUS_ID) auf dieselbe
+/// Karte zeigen wie die Liste.
+fn detect_via_sysfs_from(
+    cards: &[SysfsDrmCard],
+    have_rocm: bool,
+    have_nvidia: bool,
+    pci_ids: &str,
+) -> Vec<DetectedGpu> {
+    let mut sorted: Vec<(String, &SysfsDrmCard)> = cards
+        .iter()
+        .filter_map(|c| normalised_pci_address(&c.pci_address).map(|a| (a, c)))
+        .collect();
+    sorted.sort_by(|a, b| a.0.cmp(&b.0));
+    // Eine Karte mit zwei DRM-Knoten (selten, aber moeglich) einmal.
+    sorted.dedup_by(|a, b| a.0 == b.0);
+
+    let mut gpus: Vec<DetectedGpu> = Vec::new();
+    let mut next: HashMap<&str, u32> = HashMap::new();
+    for (_, card) in sorted {
+        let Some(vendor_id) = card.vendor_id.as_deref().and_then(parse_sysfs_hex_id) else {
+            continue;
+        };
+        let vendor = match vendor_id {
+            PCI_VENDOR_AMD => "amd",
+            PCI_VENDOR_NVIDIA => "nvidia",
+            PCI_VENDOR_INTEL => "intel",
+            // virtio-gpu, QXL, Aspeed-BMC und Co. rechnen nicht.
+            _ => continue,
+        };
+        if vendor == "nvidia" && have_nvidia {
+            continue;
+        }
+        if vendor == "amd" && have_rocm {
+            continue;
+        }
+        let device_id = card.device_id.as_deref().and_then(parse_sysfs_hex_id);
+        let (name, named) = sysfs_card_name(vendor, vendor_id, device_id, pci_ids);
+        let memory_mib = match vendor {
+            "amd" => card.vram_total.as_deref().and_then(parse_sysfs_vram_mib),
+            _ => None,
+        };
+        let note = sysfs_card_note(vendor, named);
+        let index = next.entry(vendor).or_insert(0);
+        gpus.push(DetectedGpu {
+            index: *index,
+            vendor: vendor.into(),
+            name,
+            memory_mib,
+            source: "sysfs".into(),
+            note: Some(note),
+            note_severity: Some("warn".to_string()),
+            arch: None,
+            uuid: None,
+            shared_memory_mib: None,
+        });
+        *index += 1;
+    }
+    gpus
+}
+
+/// Der Satz fuer eine leere Kartenliste, wenn sie wahrscheinlich nur leer ist,
+/// weil das Werkzeug fehlt. Nur Linux, nur ohne lspci, nur wenn auch sysfs
+/// nichts lieferte. Rein, damit jeder Fall ohne Linux-Maschine pruefbar ist.
+fn pciutils_hint_for(os: &str, gpus_found: usize, lspci_available: bool) -> Option<String> {
+    if os != "linux" || gpus_found > 0 || lspci_available {
+        return None;
+    }
+    Some(
+        "No graphics card found, and the lspci tool is missing on this system, so LU may simply \
+         not see your card. Install pciutils (Fedora/Bazzite: sudo dnf install pciutils, \
+         Debian/Ubuntu: sudo apt install pciutils, Arch: sudo pacman -S pciutils). Inside a \
+         container (Distrobox, Toolbox) install it there, and make sure the GPU is passed \
+         through. Without a detected card ComfyUI gets the slow processor build of PyTorch."
+            .to_string(),
+    )
+}
+
+/// Ist lspci aufrufbar? Eigener, kurzer Aufruf statt einer Schlussfolgerung
+/// aus der leeren Liste: leer ist auch eine Maschine ohne Karte.
+fn lspci_available() -> bool {
+    cfg!(target_os = "linux") && run_cmd("lspci", &["--version"]).is_some()
+}
+
+/// Der Hinweis fuer diese Maschine, oder None.
+pub(crate) fn pciutils_hint_here(gpus_found: usize) -> Option<String> {
+    if !cfg!(target_os = "linux") {
+        return None;
+    }
+    pciutils_hint_for(std::env::consts::OS, gpus_found, lspci_available())
+}
+
+/// C74: der Satz unter "Detected GPUs", wenn die Liste leer ist, weil unter
+/// Linux lspci fehlt. None ueberall sonst. Eigener Befehl, damit
+/// `detect_gpus` seine Form behaelt, auf die sich ein Dutzend Aufrufer stuetzt.
+#[tauri::command(async)]
+pub fn gpu_probe_hint() -> Option<String> {
+    let found = detect_gpus().map(|g| g.len()).unwrap_or(0);
+    pciutils_hint_here(found)
 }
 
 #[cfg(target_os = "macos")]
@@ -1550,13 +1798,14 @@ fn detect_rocm_facts() -> Option<RocmFacts> {
 pub fn detect_gpus() -> Result<Vec<DetectedGpu>, String> {
     let mut gpus = Vec::new();
     gpus.extend(detect_nvidia());
+    let have_nvidia = !gpus.is_empty();
     let amd = detect_amd();
     // The fallbacks list AMD cards only when rocm-smi produced nothing, so a
     // machine WITH ROCm keeps the richer entry (it carries VRAM) and a machine
     // without it still sees its card instead of an empty picker.
     let have_rocm = !amd.is_empty();
     gpus.extend(amd);
-    gpus.extend(detect_other_via_lspci(have_rocm));
+    gpus.extend(detect_other_via_lspci(have_rocm, have_nvidia));
     gpus.extend(detect_other_on_windows(have_rocm));
     gpus.extend(detect_macos());
     // The HIP SDK answers LAST and never suppresses a probe, which is the whole
@@ -2211,6 +2460,7 @@ card0,AMD Instinct Mi325X VF,0x74b9,0x00,0x74a5,43855,274542362624,299687936,AMD
         let sysfs = vec![SysfsDrmCard {
             pci_address: "0000:83:00.0".into(),
             vendor_id: Some("0x1002".into()),
+            device_id: None,
             vram_total: Some("274542362624".into()),
         }];
         let gpus = detect_other_via_lspci_from(LSPCI_INSTINCT, false, &sysfs);
@@ -3047,6 +3297,7 @@ gcnArchName:                      gfx942:sramecc+:xnack-
         SysfsDrmCard {
             pci_address: pci.to_string(),
             vendor_id: Some(vendor.to_string()),
+            device_id: None,
             vram_total: Some(vram.to_string()),
         }
     }
@@ -3140,6 +3391,7 @@ gcnArchName:                      gfx942:sramecc+:xnack-
             let cards = vec![SysfsDrmCard {
                 pci_address: "0000:03:00.0".to_string(),
                 vendor_id: Some(AMD_VENDOR_FILE.to_string()),
+                device_id: None,
                 vram_total: vram.map(|s| s.to_string()),
             }];
             let found = detect_other_via_lspci_from(LSPCI_AMD, false, &cards);
@@ -3257,6 +3509,7 @@ gcnArchName:                      gfx942:sramecc+:xnack-
         let silent = vec![SysfsDrmCard {
             pci_address: "0000:03:00.0".to_string(),
             vendor_id: None,
+            device_id: None,
             vram_total: Some(VRAM_16_GB.to_string()),
         }];
         assert_eq!(
@@ -3325,6 +3578,7 @@ gcnArchName:                      gfx942:sramecc+:xnack-
             SysfsDrmCard {
                 pci_address: "0000:03:00.0".to_string(),
                 vendor_id: Some("0x1002".to_string()),
+                device_id: None,
                 vram_total: Some(VRAM_16_GB.to_string()),
             },
         );
@@ -3344,5 +3598,203 @@ gcnArchName:                      gfx942:sramecc+:xnack-
         assert!(read_sysfs_drm_cards_at(&tmp.path().join("no/such/place")).is_empty());
         assert!(read_sysfs_value(&tmp.path().join("no/such/file")).is_none());
         assert!(sysfs_pci_address(&tmp.path().join("no/such/link")).is_none());
+    }
+
+    // ------------------------------------------------------------------
+    // C74: Linux ohne lspci (c1rrus, Bazzite + Distrobox, RX 6900 XT)
+
+    /// Ein Ausschnitt aus pci.ids in der echten Form: Kommentar, Hersteller,
+    /// Geraete mit Tab, Untergeraete mit zwei Tabs, danach die Klassenliste.
+    const PCI_IDS_SAMPLE: &str = "# List of PCI ID's\n\
+#\n\
+1002  Advanced Micro Devices, Inc. [AMD/ATI]\n\
+\t73a5  Navi 21 [Radeon RX 6950 XT]\n\
+\t73bf  Navi 21 [Radeon RX 6800/6800 XT / 6900 XT]\n\
+\t\t1002 0e3a  Radeon RX 6900 XT\n\
+\t7550  Navi 48 [Radeon RX 9070/9070 XT/9070 GRE]\n\
+10de  NVIDIA Corporation\n\
+\t2684  AD102 [GeForce RTX 4090]\n\
+8086  Intel Corporation\n\
+\t56a0  DG2 [Arc A770]\n\
+C 03  Display controller\n\
+\t00  VGA compatible controller\n";
+
+    /// Legt /sys/class/drm so an, wie es auf einer Bazzite-Maschine aussieht:
+    /// card<N>/device ist ein Verweis auf das PCI-Verzeichnis, darin vendor,
+    /// device und bei amdgpu mem_info_vram_total.
+    #[cfg(unix)]
+    fn fake_drm_tree(root: &std::path::Path, cards: &[(&str, &str, &str, &str, Option<&str>)]) -> std::path::PathBuf {
+        use std::os::unix::fs::symlink;
+        let drm = root.join("sys/class/drm");
+        let pci = root.join("sys/devices/pci0000:00");
+        std::fs::create_dir_all(&drm).expect("drm dir");
+        for (card, addr, vendor, device, vram) in cards {
+            let dir = pci.join(addr);
+            std::fs::create_dir_all(&dir).expect("pci dir");
+            std::fs::write(dir.join("vendor"), format!("{vendor}\n")).expect("vendor");
+            std::fs::write(dir.join("device"), format!("{device}\n")).expect("device");
+            if let Some(v) = vram {
+                std::fs::write(dir.join("mem_info_vram_total"), format!("{v}\n")).expect("vram");
+            }
+            std::fs::create_dir_all(drm.join(card)).expect("card dir");
+            symlink(&dir, drm.join(card).join("device")).expect("device link");
+            // Ein Anschluss zur Karte, wie er auf jeder echten Maschine danebenliegt.
+            std::fs::create_dir_all(drm.join(format!("{card}-DP-1"))).expect("connector");
+        }
+        drm
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn c1rrus_rx_6900_xt_is_found_from_sysfs_when_lspci_is_missing() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let drm = fake_drm_tree(
+            tmp.path(),
+            &[("card1", "0000:03:00.0", "0x1002", "0x73bf", Some(VRAM_16_GB))],
+        );
+        let cards = read_sysfs_drm_cards_at(&drm);
+        let found = detect_via_sysfs_from(&cards, false, false, PCI_IDS_SAMPLE);
+        assert_eq!(found.len(), 1, "{found:?}");
+        let g = &found[0];
+        assert_eq!(g.vendor, "amd");
+        assert_eq!(g.index, 0);
+        assert_eq!(g.source, "sysfs");
+        assert_eq!(g.memory_mib, Some(16368));
+        assert_eq!(g.name, "Advanced Micro Devices, Inc. [AMD/ATI] Navi 21 [Radeon RX 6800/6800 XT / 6900 XT]");
+        // Der Name ist in der Form, die die Wheel-Wahl liest: die Karte bekommt
+        // ihr gfx-Ziel und damit die ROCm-Wheels statt der Prozessor-Wheels.
+        assert_eq!(crate::commands::torch_wheels::amd_gfx_target(&g.name), Some("gfx1030"));
+        let note = g.note.as_deref().unwrap_or("");
+        assert!(note.contains("/sys/class/drm"), "{note}");
+        assert!(!note.contains("Install pciutils"), "named card needs no pciutils advice: {note}");
+
+        // Und ComfyUI bekommt fuer diese Karte unter Linux die ROCm-Wheels.
+        let plan = crate::commands::torch_wheels::comfy_wheel_plan(false, None, true, &[g.name.as_str()], "linux");
+        assert_eq!(crate::commands::torch_wheels::plan_kind(&plan), "rocm", "{plan:?}");
+    }
+
+    #[test]
+    fn a_card_without_a_name_list_keeps_its_number_and_points_at_pciutils() {
+        let cards = vec![SysfsDrmCard {
+            pci_address: "0000:03:00.0".into(),
+            vendor_id: Some("0x1002".into()),
+            device_id: Some("0x73bf".into()),
+            vram_total: Some(VRAM_16_GB.into()),
+        }];
+        let found = detect_via_sysfs_from(&cards, false, false, "");
+        assert_eq!(found[0].name, "AMD Radeon GPU (PCI 1002:73bf)");
+        assert_eq!(found[0].memory_mib, Some(16368));
+        assert!(found[0].note.as_deref().unwrap_or("").contains("Install pciutils"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn sysfs_lists_nvidia_amd_and_intel_in_pci_order_with_per_vendor_numbers() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        // read_dir-Reihenfolge ist zufaellig; card-Nummern absichtlich verdreht.
+        let drm = fake_drm_tree(
+            tmp.path(),
+            &[
+                ("card0", "0000:0b:00.0", "0x1002", "0x7550", Some(VRAM_16_GB)),
+                ("card1", "0000:00:02.0", "0x8086", "0x56a0", None),
+                ("card2", "0000:03:00.0", "0x1002", "0x73bf", Some(VRAM_24_GB)),
+                ("card3", "0000:41:00.0", "0x10de", "0x2684", None),
+                // virtio-gpu einer VM: keine Rechenkarte.
+                ("card4", "0000:00:01.0", "0x1af4", "0x1050", None),
+            ],
+        );
+        let cards = read_sysfs_drm_cards_at(&drm);
+        let found = detect_via_sysfs_from(&cards, false, false, PCI_IDS_SAMPLE);
+        let summary: Vec<(String, u32)> = found.iter().map(|g| (g.vendor.clone(), g.index)).collect();
+        assert_eq!(
+            summary,
+            vec![
+                ("intel".to_string(), 0),
+                ("amd".to_string(), 0),
+                ("amd".to_string(), 1),
+                ("nvidia".to_string(), 0),
+            ],
+        );
+        assert!(found[1].name.contains("6900 XT"), "{:?}", found[1].name);
+        assert!(found[2].name.contains("9070"), "{:?}", found[2].name);
+        assert_eq!(found[3].name, "NVIDIA Corporation AD102 [GeForce RTX 4090]");
+        assert!(found[3].note.as_deref().unwrap_or("").contains("nvidia-smi"));
+        assert_eq!(found[3].memory_mib, None, "sysfs has no size for NVIDIA");
+        assert!(crate::commands::torch_wheels::is_intel_arc(&found[0].name));
+    }
+
+    #[test]
+    fn the_vendor_tools_still_win_over_sysfs() {
+        let cards = vec![
+            SysfsDrmCard { pci_address: "0000:03:00.0".into(), vendor_id: Some("0x1002".into()), device_id: Some("0x73bf".into()), vram_total: None },
+            SysfsDrmCard { pci_address: "0000:41:00.0".into(), vendor_id: Some("0x10de".into()), device_id: Some("0x2684".into()), vram_total: None },
+        ];
+        // rocm-smi und nvidia-smi haben geantwortet: sysfs fuegt nichts doppelt hinzu.
+        assert!(detect_via_sysfs_from(&cards, true, true, PCI_IDS_SAMPLE).is_empty());
+        let only_amd = detect_via_sysfs_from(&cards, false, true, PCI_IDS_SAMPLE);
+        assert_eq!(only_amd.len(), 1);
+        assert_eq!(only_amd[0].vendor, "amd");
+    }
+
+    #[test]
+    fn broken_sysfs_entries_invent_no_cards() {
+        let cards = vec![
+            SysfsDrmCard { pci_address: "not-an-address".into(), vendor_id: Some("0x1002".into()), device_id: None, vram_total: None },
+            SysfsDrmCard { pci_address: "0000:03:00.0".into(), vendor_id: None, device_id: None, vram_total: None },
+            SysfsDrmCard { pci_address: "0000:04:00.0".into(), vendor_id: Some("garbage".into()), device_id: None, vram_total: None },
+        ];
+        assert!(detect_via_sysfs_from(&cards, false, false, PCI_IDS_SAMPLE).is_empty());
+        // Gleiche Karte zweimal (zwei DRM-Knoten): einmal gelistet.
+        let twice = vec![
+            SysfsDrmCard { pci_address: "0000:03:00.0".into(), vendor_id: Some("0x1002".into()), device_id: None, vram_total: None },
+            SysfsDrmCard { pci_address: "03:00.0".into(), vendor_id: Some("0x1002".into()), device_id: None, vram_total: None },
+        ];
+        let found = detect_via_sysfs_from(&twice, false, false, "");
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].name, "AMD Radeon GPU");
+    }
+
+    #[test]
+    fn pci_ids_lookup_stays_inside_its_vendor() {
+        assert_eq!(
+            pci_ids_names(PCI_IDS_SAMPLE, 0x10de, 0x2684),
+            Some(("NVIDIA Corporation".to_string(), "AD102 [GeForce RTX 4090]".to_string())),
+        );
+        // 73bf ist eine AMD-Nummer und darf unter NVIDIA nicht gefunden werden.
+        assert_eq!(pci_ids_names(PCI_IDS_SAMPLE, 0x10de, 0x73bf), None);
+        // Untergeraete-Zeilen sind keine Geraete.
+        assert_eq!(pci_ids_names(PCI_IDS_SAMPLE, 0x1002, 0x0e3a), None);
+        // Klassenliste beendet die Suche.
+        assert_eq!(pci_ids_names(PCI_IDS_SAMPLE, 0x0003, 0x0000), None);
+        assert_eq!(pci_ids_names("", 0x1002, 0x73bf), None);
+    }
+
+    #[test]
+    fn the_pciutils_hint_only_speaks_on_linux_with_nothing_found_and_no_lspci() {
+        let hint = pciutils_hint_for("linux", 0, false).expect("hint");
+        assert!(hint.contains("pciutils") && hint.contains("dnf") && hint.contains("Distrobox"), "{hint}");
+        assert_eq!(pciutils_hint_for("linux", 1, false), None, "a card was found");
+        assert_eq!(pciutils_hint_for("linux", 0, true), None, "lspci ran, the machine has no card");
+        assert_eq!(pciutils_hint_for("windows", 0, false), None);
+        assert_eq!(pciutils_hint_for("macos", 0, false), None);
+    }
+
+    #[test]
+    fn the_processor_plan_names_the_missing_tool_and_other_plans_stay_untouched() {
+        use crate::commands::torch_wheels::{with_probe_gap_hint, WheelPlan};
+        let cpu = WheelPlan::Cpu { note: "No GPU detected, installing the processor build of PyTorch.".into() };
+        let WheelPlan::Cpu { note } = with_probe_gap_hint(cpu, Some("Install pciutils.".into())) else { panic!() };
+        assert!(note.ends_with("Install pciutils."), "{note}");
+        let cpu = WheelPlan::Cpu { note: "x".into() };
+        let WheelPlan::Cpu { note } = with_probe_gap_hint(cpu, None) else { panic!() };
+        assert_eq!(note, "x");
+    }
+
+    /// Auf diesem Rechner (kein Linux) bleibt alles still.
+    #[test]
+    fn no_hint_outside_linux() {
+        if !cfg!(target_os = "linux") {
+            assert_eq!(pciutils_hint_here(0), None);
+        }
     }
 }
