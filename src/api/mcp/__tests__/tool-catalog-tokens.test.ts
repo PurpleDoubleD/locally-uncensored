@@ -148,7 +148,11 @@ const CODING_TOKEN_CEILING = 1730
 // integ/310: C60, C60-S5, C59 und P-L (web_research) zusammen, gemessen
 // 25.032 Zeichen. Token-Decke geschaetzt im selben Verhaeltnis wie oben
 // (5040 / 23200).
-const FULL_CHAR_CEILING = 25080
+// T1 (CA rebuild): +88 Zeichen fuer den einen Satz in shell_execute, dass ein
+// Befehl ueber die Zeitgrenze hinaus als Hintergrundaufgabe weiterlaeuft.
+// Gemessen 25.120, Deckel plus Rand. Der codierende Zug bleibt unter seiner
+// Decke.
+const FULL_CHAR_CEILING = 25150
 const FULL_TOKEN_CEILING = 5450
 
 describe('the coding step carries a catalog the diet actually shrank', () => {

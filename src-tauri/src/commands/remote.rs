@@ -1309,7 +1309,10 @@ async fn handle_agent_tool(
                 // nicht abbrechbar, und das ist ehrlicher als eine Kennung, die
                 // niemand je ruft. Der Weg dahin ist derselbe wie im Fenster:
                 // ein `shell_execute_cancel` in der Fernliste.
-                crate::commands::shell::shell_execute(command, None, cwd, timeout, shell, stdin, chat_id.clone(), None, None).await
+                // `Some(true)` (T1): a command that outruns its timeout keeps
+                // running as a task the phone reaches with task "status" /
+                // "kill" above, as the shared tool description promises.
+                crate::commands::shell::shell_execute(command, None, cwd, timeout, shell, stdin, chat_id.clone(), None, None, Some(true)).await
             }
         }
         "system_info" => crate::commands::system::system_info(),

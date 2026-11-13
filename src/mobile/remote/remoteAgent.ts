@@ -271,6 +271,15 @@ export function toolObservation(result: AgentToolResult, args: Record<string, un
   if (obj.exitCode !== undefined || obj.stdout !== undefined) {
     const out = typeof obj.stdout === 'string' ? obj.stdout : ''
     const err = typeof obj.stderr === 'string' ? obj.stderr : ''
+    // T1: the desktop moved a command that outran its timeout into a
+    // background task instead of killing it (same text as mobile-client/client.js).
+    if (obj.timedOut && typeof obj.taskId === 'string' && obj.taskId) {
+      let soFar = `${out}${err ? `\n[stderr]\n${err}` : ''}`.replace(/\s+$/, '')
+      if (soFar.length > 2000) soFar = `…${soFar.slice(-2000)}`
+      return `Still running after its timeout, so it was not stopped: it keeps running in the background as task ${obj.taskId}.\n`
+        + (soFar ? `Output so far:\n${soFar}\n` : '')
+        + `Use shell_execute with task "status" and task_id "${obj.taskId}" to read its output, or task "kill" to stop it.`
+    }
     if (obj.timedOut) return 'Execution timed out.'
     if (typeof obj.exitCode === 'number' && obj.exitCode !== 0) return `Error (${obj.exitCode}):\n${err || out}`
     return out || (err ? `stderr: ${err}` : 'Done.')

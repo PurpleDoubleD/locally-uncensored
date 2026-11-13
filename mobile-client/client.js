@@ -292,6 +292,15 @@ import {
           if(data.exitCode!==undefined || data.stdout!==undefined){
             var out = data.stdout || '';
             var err = data.stderr || '';
+            // T1: the desktop moved a command that outran its timeout into a
+            // background task instead of killing it.
+            if(data.timedOut && data.taskId){
+              var soFar = (out + (err ? '\n[stderr]\n' + err : '')).replace(/\s+$/, '');
+              if(soFar.length > 2000) soFar = '…' + soFar.slice(-2000);
+              return 'Still running after its timeout, so it was not stopped: it keeps running in the background as task ' + data.taskId + '.\n'
+                + (soFar ? 'Output so far:\n' + soFar + '\n' : '')
+                + 'Use shell_execute with task "status" and task_id "' + data.taskId + '" to read its output, or task "kill" to stop it.';
+            }
             if(data.timedOut) return 'Execution timed out.';
             if(data.exitCode && data.exitCode!==0) return 'Error ('+data.exitCode+'):\n'+(err||out);
             return out || (err ? 'stderr: '+err : 'Done.');
