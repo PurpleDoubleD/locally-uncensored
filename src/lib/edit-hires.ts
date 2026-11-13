@@ -22,10 +22,15 @@ export function editHiresBase(opts: {
   height: number
   modelType?: string
   modelName?: string
+  /** C75: a Qwen-Image 2.1 edit in the shape of the size fields. */
+  editShape?: 'source' | 'canvas'
 }): { width: number; height: number } | null {
   const { source, width, height, modelType, modelName } = opts
   if (!source || !(source.width > 0) || !(source.height > 0)) return null
-  if (modelType === 'qwenimage') return editCanvas(qwenEditResolution(width, height), source)
+  if (modelType === 'qwenimage') {
+    // The source is cropped to the fields' shape first, so the canvas takes it.
+    return editCanvas(qwenEditResolution(width, height), opts.editShape === 'canvas' ? { width, height } : source)
+  }
   if (modelType === 'qwenimage1' && modelName && isQwenImageEditModel(modelName)) return editCanvas(1024, source)
   return { width: source.width, height: source.height }
 }

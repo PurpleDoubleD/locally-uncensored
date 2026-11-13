@@ -56,6 +56,9 @@ export interface GenerateParams {
   seed: number
   batchSize: number
   inputImage?: string   // I2I source image filename (uploaded to ComfyUI)
+  /** C75: a Qwen-Image 2.1 edit in the shape of width x height instead of
+   *  the source's. Absent or 'source': the source's shape, as before. */
+  editShape?: 'source' | 'canvas'
   /** Edit: further reference images (ComfyUI upload names) after the source,
    *  for the families lib/edit-references names. GH #144. */
   referenceImages?: string[]

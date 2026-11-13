@@ -1861,6 +1861,9 @@ export function useCreate() {
         // B46: a Qwen edit reads its own Edit strength (1 = as before); the
         // builder ignores it on every other family.
         ...(isI2I && !isRemoveBg && effInputImage && state.editStrength < 1 ? { editStrength: state.editStrength } : {}),
+        // C75: a Qwen-Image 2.1 edit in the shape of the size fields. Only
+        // the edit graph of that model reads it (dynamic-workflow.ts).
+        ...(isI2I && !isRemoveBg && effInputImage && imageModelType === 'qwenimage' && state.qwenEditShape === 'canvas' ? { editShape: 'canvas' as const } : {}),
         // GH #144: further references ride along; the builder keeps only as
         // many as the model's family takes (lib/edit-references).
         ...(isI2I && !isRemoveBg && effInputImage && references.some((r) => r.filename)
@@ -2132,7 +2135,7 @@ export function useCreate() {
       if (hiresFixEnabled && (intent === 'image' || hiresEdit)) {
         setProgress(8, 'Adding native HiRes Fix...')
         const editBase = hiresEdit
-          ? editHiresBase({ source, width, height, modelType: imageModelType, modelName: activeModel })
+          ? editHiresBase({ source, width, height, modelType: imageModelType, modelName: activeModel, editShape: state.qwenEditShape })
           : null
         const hires = applyNativeHiresFix(workflow, {
           baseWidth: editBase?.width ?? width,

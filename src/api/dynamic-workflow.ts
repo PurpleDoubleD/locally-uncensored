@@ -1266,7 +1266,28 @@ export async function buildDynamicWorkflow(
       for (const [i, image] of images.entries()) {
         const loadId = String(n++)
         workflow[loadId] = { class_type: 'LoadImage', inputs: { image } }
-        qwenInputs[`images.image_${i + 1}`] = [loadId, 0]
+        let imageRef: [string, number] = [loadId, 0]
+        if (i === 0 && gp.editShape === 'canvas') {
+          // C75 (Discord feature-requests 11.11.2026): an edit in a shape of
+          // its own. The node's latent follows the first image and has to
+          // (any other latent size shifts the edit), so the source itself is
+          // brought to the shape first: scaled to cover width x height and
+          // cropped from its centre. The pixel budget below stays the size.
+          const scaleId = String(n++)
+          workflow[scaleId] = {
+            class_type: 'ImageScale',
+            inputs: {
+              image: [loadId, 0],
+              upscale_method: resizeMethod(allNodes, 'ImageScale', false),
+              width: params.width,
+              height: params.height,
+              crop: 'center',
+            },
+            _meta: { title: 'Edit shape' },
+          }
+          imageRef = [scaleId, 0]
+        }
+        qwenInputs[`images.image_${i + 1}`] = imageRef
       }
       qwenInputs.vae = [vaeSourceId, vaeOutputSlot]
     } else if (createRefs.length > 0) {

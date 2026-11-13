@@ -191,6 +191,9 @@ export type VideoBackendKind = 'comfy' | 'mlx'
 
 // ─── Optimal defaults per model type (research-backed: Draw Things, Fooocus, ComfyUI) ───
 
+/** C75: see `qwenEditShape`. */
+export type QwenEditShape = 'source' | 'canvas'
+
 export const MODEL_TYPE_DEFAULTS: Record<ModelType, {
   steps: number; cfgScale: number; sampler: string; scheduler: string
   width: number; height: number; frames?: number; fps?: number
@@ -404,6 +407,11 @@ export interface CreateState {
    *  `denoise`: that one starts at 0.7 for the Windows graph, and the Mac's
    *  edits ran at 1 until now. */
   editStrength: number
+  /** C75: the shape a local Qwen-Image 2.1 edit (ComfyUI) comes out in.
+   *  'source', the default: the shape of the picture, at the pixel budget of
+   *  the size fields. 'canvas': the width and height set below; the picture
+   *  is scaled and cropped from its centre to that shape before the encode. */
+  qwenEditShape: QwenEditShape
   /** Native text-to-image latent upscale + refinement pass (local ComfyUI). */
   hiresFixEnabled: boolean
   hiresScale: number
@@ -671,6 +679,7 @@ export interface CreateState {
   setCloudFps: (fps: number) => void
   setDenoise: (denoise: number) => void
   setEditStrength: (strength: number) => void
+  setQwenEditShape: (shape: QwenEditShape) => void
   setHiresFixEnabled: (enabled: boolean) => void
   setHiresScale: (scale: number) => void
   setHiresDenoise: (denoise: number) => void
@@ -1177,6 +1186,7 @@ export const useCreateStore = create<CreateState>()(
       imageLaneKept: null,
       denoise: 0.7,
       editStrength: 1,
+      qwenEditShape: 'source' as QwenEditShape,
       hiresFixEnabled: false,
       hiresScale: 1.5,
       hiresDenoise: 0.5,
@@ -1344,6 +1354,7 @@ export const useCreateStore = create<CreateState>()(
       setCloudFrames: (frames) => set({ cloudFrames: Math.max(1, Math.min(3600, Math.floor(frames))) }),
       setCloudFps: (fps) => set({ cloudFps: Math.max(1, Math.min(60, Math.floor(fps))) }),
       setDenoise: (denoise) => set({ denoise: Math.max(0, Math.min(1, denoise)) }),
+      setQwenEditShape: (qwenEditShape) => set({ qwenEditShape: qwenEditShape === 'canvas' ? 'canvas' : 'source' }),
       setEditStrength: (strength) => set({ editStrength: Number.isFinite(strength) ? Math.max(0.05, Math.min(1, strength)) : 1 }),
       setHiresFixEnabled: (hiresFixEnabled) => set({ hiresFixEnabled }),
       setHiresScale: (hiresScale) => set({
@@ -2047,6 +2058,7 @@ export const useCreateStore = create<CreateState>()(
         ...restartSampling(state),
         denoise: state.denoise,
         editStrength: state.editStrength,
+        qwenEditShape: state.qwenEditShape,
         hiresFixEnabled: state.hiresFixEnabled,
         hiresScale: state.hiresScale,
         hiresDenoise: state.hiresDenoise,
@@ -2161,6 +2173,8 @@ export const useCreateStore = create<CreateState>()(
         // 3.0.9 P8: same for the mode, it picks the LoRA's file name.
         if ('trainKind' in safe && !isTrainKind(safe.trainKind)) safe.trainKind = TRAIN_KIND_DEFAULT
         if ('trainStyleTrigger' in safe && typeof safe.trainStyleTrigger !== 'boolean') safe.trainStyleTrigger = true
+        // 3.1.0 C75: anything but the one other shape is the source's.
+        if ('qwenEditShape' in safe && safe.qwenEditShape !== 'canvas') safe.qwenEditShape = 'source'
         // The persisted slice is ~30 independent scalar preferences (see
         // partialize). They are adopted as written, which is what the store
         // has always done; the fields that could actually do damage — the
