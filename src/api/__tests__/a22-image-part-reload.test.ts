@@ -42,7 +42,7 @@ vi.mock('../backend', () => ({
 
 import { __resetImagePartReloads, ensureImagePartLoaded, explainImageRefusal, imagePartState } from '../image-part-heal'
 import { useProviderStore } from '../../stores/providerStore'
-import { MULTIMODAL_UNSUPPORTED_MESSAGE } from '../../lib/ollama-errors'
+import { MULTIMODAL_UNSUPPORTED_MESSAGE, isMultimodalUnsupportedError } from '../../lib/ollama-errors'
 
 const MODEL = 'openai::gemma-4-12b-it-abliterated-Q4_K_M'
 
@@ -124,5 +124,12 @@ describe('A22: the image part of a vision model on the LU Engine', () => {
     useProviderStore.setState((s) => ({ providers: { ...s.providers, openai: { ...s.providers.openai, managed: false } } }) as never)
     expect(await explainImageRefusal(MODEL)).toBe(MULTIMODAL_UNSUPPORTED_MESSAGE)
     expect(engine.swaps).toEqual([])
+  })
+})
+
+describe('A22: the refusal of the real llama-server', () => {
+  it('is the one the chat recognises (measured 13.11.2026, llama.cpp 8642541, LFM3 VL 2B without --mmproj)', () => {
+    const real = '{"error":{"code":500,"message":"image input is not supported - hint: if this is unexpected, you may need to provide the mmproj","type":"server_error"}}'
+    expect(isMultimodalUnsupportedError(real)).toBe(true)
   })
 })
