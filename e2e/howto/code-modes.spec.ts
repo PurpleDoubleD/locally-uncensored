@@ -48,8 +48,8 @@ test('code-modes', async ({ page }) => {
     until: () => expect(page.getByText('The edit to greet.py is staged')).toBeVisible({ timeout: 30_000 }),
   })
 
-  rec.scene('The edits wait under Pending: apply or reject each file, or all at once.')
-  await rec.move(page.getByTitle('Apply'), { dur: 0.7 })
+  rec.scene('The edits wait for your review: accept or reject each part, each file, or all at once.')
+  await rec.move(page.getByTitle('Accept file'), { dur: 0.7 })
   rec.hold(0.8)
   await rec.move(page.getByTestId('apply-all'), { dur: 0.5 })
   rec.hold(0.8)

@@ -22,7 +22,11 @@ describe('the approval card stays reachable', () => {
   it('caps the Pending list inside the column and lets it scroll on its own', () => {
     const src = read('../StagedChangesPanel.tsx')
     const list = src.slice(src.indexOf('data-testid="staged-changes-list"') - 200, src.indexOf('data-testid="staged-changes-list"'))
-    expect(list).toMatch(/max-h-\[40vh\]/)
+    // 3.1.0 (U3, per hunk review): 30vh on a phone, 36vh from sm up, instead
+    // of 40vh. The header line with Apply all / Reject all now sits above the
+    // list, and list plus header together have to stay under ~40 % of the
+    // window (measured in the 375 px review shots).
+    expect(list).toMatch(/max-h-\[30vh\] sm:max-h-\[36vh\]/)
     expect(list).toMatch(/overflow-y-auto/)
     // The panel itself never grows at the transcript's expense.
     expect(src).toMatch(/className="shrink-0 border-b[^"]*" data-testid="staged-changes-panel"/)
@@ -30,15 +34,22 @@ describe('the approval card stays reachable', () => {
 
   it('keeps Apply all and Reject all outside the scroll cap, so they never scroll away with the diffs', () => {
     const src = read('../StagedChangesPanel.tsx')
+    // 3.1.0 (U3): the two buttons moved from a footer under the list into the
+    // one line header above it, so the closed panel is a single bar ("2
+    // changes waiting, Review, Apply all") at 375 px. The rule this test
+    // guards is unchanged: they are siblings of the list, never inside it.
+    const header = src.indexOf('data-testid="staged-changes-header"')
     const listOpen = src.indexOf('data-testid="staged-changes-list"')
-    const footer = src.indexOf('data-testid="apply-all"')
-    expect(listOpen).toBeGreaterThan(0)
-    expect(footer).toBeGreaterThan(listOpen)
-    // Between the list and the footer the list is closed and a second
-    // `expanded` block opens: the footer is a sibling of the list, not a child.
-    const between = src.slice(listOpen, footer)
-    expect(between).toMatch(/\{expanded && \(\s*<div className="px-1\.5 pb-2">/)
-    expect(src.indexOf('data-testid="reject-all"')).toBeGreaterThan(footer)
+    const applyAll = src.indexOf('data-testid="apply-all"')
+    const rejectAll = src.indexOf('data-testid="reject-all"')
+    expect(header).toBeGreaterThan(0)
+    expect(applyAll).toBeGreaterThan(header)
+    expect(rejectAll).toBeGreaterThan(header)
+    expect(listOpen).toBeGreaterThan(applyAll)
+    expect(listOpen).toBeGreaterThan(rejectAll)
+    // The header is closed before the list opens: not a parent of the list.
+    const between = src.slice(applyAll, listOpen)
+    expect(between).toMatch(/<\/div>\s*\{\/\*[\s\S]*?\*\/\}\s*\{expanded && \(\s*<div className="px-1\.5 pb-2 space-y-1\.5 max-h/)
   })
 
   it('gives the transcript a floor so no side panel can squeeze it to nothing', () => {
