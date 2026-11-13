@@ -79,6 +79,34 @@ def _stop_if_cancelled(pipe, step, timestep, callback_kwargs):
     return callback_kwargs
 
 
+# How far the image is (C71). The app used to give a whole request 900 s,
+# model load included, and Chroma1-HD at 40 steps and 1024 on an M1 Max needs
+# longer than that: the render was cut off and reported as "mlx unreachable".
+# The app now asks here and ends a run only when nothing has moved for its
+# limit. `changed` is when the phase or the step last moved.
+_progress_lock = threading.Lock()
+_progress = {"phase": "idle", "step": 0, "steps": 0, "step_hook": False, "changed": time.monotonic()}
+
+
+def _note_progress(phase=None, step=None, steps=None, step_hook=None):
+    with _progress_lock:
+        if phase is not None:
+            _progress["phase"] = phase
+        if step is not None:
+            _progress["step"] = step
+        if steps is not None:
+            _progress["steps"] = steps
+        if step_hook is not None:
+            _progress["step_hook"] = step_hook
+        _progress["changed"] = time.monotonic()
+
+
+def _on_step_end(pipe, step, timestep, callback_kwargs):
+    # `step` counts from 0 and the call comes at the end of that step.
+    _note_progress(step=step + 1)
+    return _stop_if_cancelled(pipe, step, timestep, callback_kwargs)
+
+
 def _takes_step_callback(pipe) -> bool:
     """Whether this pipeline calls back after a step. One that does not runs
     to its end, and the app drops what it returns."""
@@ -198,6 +226,17 @@ def health():
     }
 
 
+@app.get("/progress")
+def progress():
+    """Where the image under way is: `phase` is idle, waiting, loading, steps
+    or saving; `step` of `steps` once the steps run (only a pipeline with the
+    step hook counts them, `step_hook`); `quiet_seconds` since anything moved."""
+    with _progress_lock:
+        snap = dict(_progress)
+    snap["quiet_seconds"] = round(time.monotonic() - snap.pop("changed"), 1)
+    return snap
+
+
 @app.post("/unload")
 def unload():
     """Free the resident model now, keeping the server up. Idempotent — the
@@ -228,6 +267,7 @@ def generate(req: GenerateRequest):
     global _active
     with _active_lock:
         _active += 1
+    _note_progress(phase="waiting", step=0, steps=req.steps, step_hook=False)
     try:
         return _generate(req)
     finally:
@@ -235,6 +275,7 @@ def generate(req: GenerateRequest):
             _active -= 1
             if _active == 0:
                 _cancel.clear()
+                _note_progress(phase="idle", step=0, steps=0, step_hook=False)
 
 
 def _generate(req: GenerateRequest):
@@ -245,6 +286,7 @@ def _generate(req: GenerateRequest):
         # Cancelled while it waited for the image before it.
         if _cancel.is_set():
             raise _cancelled_answer()
+        _note_progress(phase="loading")
         try:
             pipe = _ensure_pipe(
                 req.model_repo,
@@ -275,8 +317,10 @@ def _generate(req: GenerateRequest):
         }
         if req.negative_prompt:
             gen_kwargs["negative_prompt"] = req.negative_prompt
-        if _takes_step_callback(pipe):
-            gen_kwargs["callback_on_step_end"] = _stop_if_cancelled
+        hook = _takes_step_callback(pipe)
+        if hook:
+            gen_kwargs["callback_on_step_end"] = _on_step_end
+        _note_progress(phase="steps", step=0, steps=req.steps, step_hook=hook)
 
         # Cancelled while the model loaded: no step is run for it.
         if _cancel.is_set():
@@ -292,6 +336,7 @@ def _generate(req: GenerateRequest):
             # unloaded mid-run and the countdown starts from completion.
             _last_activity = time.monotonic()
 
+    _note_progress(phase="saving")
     img = result.images[0]
     buf = io.BytesIO()
     img.save(buf, format="PNG")

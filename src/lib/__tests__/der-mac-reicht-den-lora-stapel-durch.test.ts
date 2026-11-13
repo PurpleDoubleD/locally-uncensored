@@ -131,7 +131,7 @@ describe('a run hands the stack to the second engine', () => {
 
   it('COUNTER-CHECK: a model of the sidecar is never sent one', async () => {
     await generateMlxImageDataUrl({ prompt: 'x', model: 'sd-turbo', steps: 4, seed: 1, loras: STACK })
-    expect(sent()).toEqual({ prompt: 'x', model: 'sd-turbo', steps: 4, seed: 1, run: expect.any(String) })
+    expect(sent()).toEqual({ prompt: 'x', model: 'sd-turbo', steps: 4, seed: 1, run: expect.any(String), stall_timeout_secs: expect.any(Number) })
   })
 })
 

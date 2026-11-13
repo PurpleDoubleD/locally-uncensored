@@ -2212,12 +2212,15 @@ export function SettingsPage() {
           </Section>
           )}
 
-          {/* ComfyUI-only knobs, cloud renders use server-side limits, and the
-              Mac's MLX pipeline has its own fixed timeout, so hide there too. */}
-          {settings.appMode !== 'cloud' && !isMlxImageHost() && (
+          {/* Cloud renders use server-side limits. On a Mac the image limit is
+              also the one the MLX image engine goes by (C71); video there has
+              its own, so its row stays ComfyUI-only. */}
+          {settings.appMode !== 'cloud' && (
           <Section title="Image / Video Generation Timeouts">
             <div className="text-[0.6rem] text-gray-500 dark:text-gray-500 leading-relaxed pb-1.5">
-              Minutes a ComfyUI generation may go without any progress before LU stops it. Raise these if you run on iGPU or CPU only, because a single step of a 1024px image on integrated graphics can take many minutes.
+              {isMlxImageHost()
+                ? 'Minutes an image may go without any progress before LU stops it. Loading a model always gets at least 15 minutes. Raise this for large models with many steps, where a single step can take minutes.'
+                : 'Minutes a ComfyUI generation may go without any progress before LU stops it. Raise these if you run on iGPU or CPU only, because a single step of a 1024px image on integrated graphics can take many minutes.'}
             </div>
             <div className="flex items-center justify-between">
               <span className="text-[0.7rem] text-gray-700 dark:text-gray-400">Image timeout (min)</span>
@@ -2232,19 +2235,21 @@ export function SettingsPage() {
                 className="w-20 px-1.5 py-0.5 rounded bg-transparent border border-white/8 text-[0.65rem] text-right text-gray-300 font-mono focus:outline-none focus:border-white/20"
               />
             </div>
-            <div className="flex items-center justify-between">
-              <span className="text-[0.7rem] text-gray-700 dark:text-gray-400">Video timeout (min)</span>
-              <input
-                aria-label="Video timeout (min)"
-                type="number"
-                value={settings.videoGenTimeoutMinutes ?? 60}
-                onChange={(e) => updateSettings({ videoGenTimeoutMinutes: Math.min(480, Math.max(1, parseInt(e.target.value) || 60)) })}
-                min={1}
-                max={480}
-                placeholder="60"
-                className="w-20 px-1.5 py-0.5 rounded bg-transparent border border-white/8 text-[0.65rem] text-right text-gray-300 font-mono focus:outline-none focus:border-white/20"
-              />
-            </div>
+            {!isMlxImageHost() && (
+              <div className="flex items-center justify-between">
+                <span className="text-[0.7rem] text-gray-700 dark:text-gray-400">Video timeout (min)</span>
+                <input
+                  aria-label="Video timeout (min)"
+                  type="number"
+                  value={settings.videoGenTimeoutMinutes ?? 60}
+                  onChange={(e) => updateSettings({ videoGenTimeoutMinutes: Math.min(480, Math.max(1, parseInt(e.target.value) || 60)) })}
+                  min={1}
+                  max={480}
+                  placeholder="60"
+                  className="w-20 px-1.5 py-0.5 rounded bg-transparent border border-white/8 text-[0.65rem] text-right text-gray-300 font-mono focus:outline-none focus:border-white/20"
+                />
+              </div>
+            )}
           </Section>
           )}
 

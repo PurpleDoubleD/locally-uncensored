@@ -14,6 +14,8 @@ import { invokeMedia } from './mlx-invoke'
 import { siGbToBytes } from '../lib/formatters'
 import type { ClassifiedModel } from './comfyui'
 import { MFLUX_FAMILY, imageModelBringsItsEngine, isMlxEnhancer } from '../lib/image-engines'
+import { renderStallLimitMs } from '../lib/tool-timeout'
+import { useSettingsStore } from '../stores/settingsStore'
 
 export interface MlxStatus {
   /** The engine can run: venv, the record of a finished pip run and the
@@ -113,6 +115,9 @@ export interface MlxGenerateArgs {
   /** The LoRA stack: files of the Mac's LoRA folder (api/mlx-loras) by name,
    *  in the order they were picked. Reaches the second engine alone. */
   loras?: { name: string; strength: number }[]
+  /** C71: how long an image of the sidecar may go without any progress, in
+   *  seconds. `generateMlxImageDataUrl` sends Settings' Image timeout. */
+  stallTimeoutSecs?: number
 }
 
 export interface MlxGenerateResult {
@@ -156,13 +161,14 @@ export async function mlxGenerate(args: MlxGenerateArgs): Promise<MlxGenerateRes
   if (args.strength != null && args.strength < 1) body.strength = args.strength
   if (args.run) body.run = args.run
   if (args.loras?.length) body.loras = args.loras.map((l) => ({ name: l.name, strength: l.strength }))
+  if (args.stallTimeoutSecs != null) body.stall_timeout_secs = args.stallTimeoutSecs
   // A single long-blocking request (model load + diffusion) — in-process
   // invoke has no per-call timeout to pass (unlike the old HTTP bridgeCmd).
   return invokeMedia<MlxGenerateResult>('mlx_generate', body)
 }
 
-/** How far the image is that the second engine is making. `running` is false
- *  for an image in the sidecar, which reports no steps. */
+/** How far the image is that the second engine or the sidecar is making.
+ *  `running` is false for a sidecar pipeline that counts no steps. */
 export async function mlxGenerateProgress(): Promise<{ running: boolean; step: number; steps: number }> {
   return invokeMedia('mlx_generate_progress')
 }
@@ -418,7 +424,10 @@ export async function generateMlxImageDataUrl(
   // The sidecar makes images from text at the catalogue's guidance. An edit
   // never reaches it: Rust refuses one, and it is not sent a field it drops.
   // It has no place for a LoRA either, and Create offers it no stack.
-  const plain = { ...args, guidance: undefined, resolution: undefined, mask: undefined, strength: undefined, loras: undefined, run }
+  // C71: Rust ends it only when it stops moving for this long, the same Image
+  // timeout ComfyUI renders go by (Settings).
+  const stallTimeoutSecs = Math.round(renderStallLimitMs('image', useSettingsStore.getState().settings) / 1000)
+  const plain = { ...args, guidance: undefined, resolution: undefined, mask: undefined, strength: undefined, loras: undefined, run, stallTimeoutSecs }
   if (status.broken) {
     throw new Error('The image engine is incomplete. Set it up again in the Model Manager.')
   }
