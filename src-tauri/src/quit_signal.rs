@@ -27,14 +27,17 @@
 //! SIGKILL cannot be caught by anyone; for that the reap at the next start
 //! stays.
 
+#[cfg(unix)]
 use std::time::Duration;
 
 /// How long the cleanup may take before the process leaves anyway. Under
 /// systemd's default stop timeout (90 s), and long enough for the slowest
 /// branch of `shutdown_subprocesses` (the trainer's process-table walk).
+#[cfg(unix)]
 pub const GNADENFRIST: Duration = Duration::from_secs(10);
 
 /// The exit code of a process that ended because of `signal`.
+#[cfg(unix)]
 pub fn exit_code(signal: i32) -> i32 {
     128 + signal
 }
