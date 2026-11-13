@@ -703,6 +703,10 @@ fn image() {
     if user_sampling {
         args["steps"] = json!(steps);
         args["guidance"] = json!(guidance);
+    } else if model["family"] == "diffusers" {
+        // A model of the sidecar takes Create's steps and no guidance
+        // (`generateMlxImageDataUrl`, the `plain` request).
+        args["steps"] = json!(steps);
     }
     if let Some(negative) = var("LU_REAL_NEGATIVE") {
         args["negative_prompt"] = json!(negative);
@@ -738,6 +742,18 @@ fn image() {
         args["images"] = json!(staged);
     }
     println!("mlx_generate {args}");
+    // A model of the sidecar: start it and wait for its port, as Create does
+    // (`mlxStart`, `waitForMlxRunning`). It is ended again below.
+    let sidecar = model["family"] == "diffusers";
+    if sidecar {
+        mlx::mlx_start(state, &none).expect("mlx_start");
+        let up = Instant::now();
+        while !mlx::real_run_sidecar_up() {
+            assert!(up.elapsed() < Duration::from_secs(120), "the sidecar did not come up");
+            std::thread::sleep(Duration::from_millis(250));
+        }
+        println!("sidecar up after {:.1}s", seconds(up));
+    }
 
     let images_before = std::fs::read_dir(mlx::images_root()).map(|d| d.count()).unwrap_or(0);
     let available_before = available_memory_gb();
@@ -796,6 +812,9 @@ fn image() {
     }
     let answer = rt.block_on(job).expect("the generate task");
     let took = seconds(started);
+    if sidecar {
+        mlx::real_run_stop_sidecar();
+    }
     let memory = sampler.finish();
 
     let stepping: Vec<f64> = steps_seen.windows(2).filter(|w| w[1].1 == w[0].1 + 1).map(|w| w[1].0 - w[0].0).collect();

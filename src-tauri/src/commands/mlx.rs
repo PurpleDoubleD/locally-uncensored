@@ -2409,16 +2409,22 @@ fn parse_sidecar_progress(answer: &str) -> Option<SidecarProgress> {
     serde_json::from_str(body).ok()
 }
 
-/// The last answer of the sidecar, `since` later with no new one: nothing
-/// has moved in between.
-fn still_quiet(p: &SidecarProgress, since: std::time::Duration) -> SidecarProgress {
-    SidecarProgress { quiet_seconds: p.quiet_seconds + since.as_secs_f64(), ..p.clone() }
+/// A sidecar that answered before and has not answered for `silent`: ended
+/// once that is as long as a model load may take, never sooner.
+fn sidecar_silence_verdict(model: &str, silent: std::time::Duration, limit: std::time::Duration) -> Option<String> {
+    let load_limit = limit.max(SIDECAR_LOAD_FLOOR);
+    (silent >= load_limit).then(|| {
+        format!(
+            "{model} timed out: the image engine has not answered for {}. Raise Image timeout in Settings, or try fewer steps or a smaller size.",
+            human_span(load_limit)
+        )
+    })
 }
 
 /// "1 minute", "20 minutes", "90 seconds".
 fn human_span(d: std::time::Duration) -> String {
     let s = d.as_secs();
-    if s >= 60 && s % 60 == 0 {
+    if s >= 60 && s.is_multiple_of(60) {
         let m = s / 60;
         format!("{m} {}", if m == 1 { "minute" } else { "minutes" })
     } else {
@@ -2667,20 +2673,24 @@ pub async fn mlx_generate(_state: &AppState, args: &Value) -> CmdResult {
     let started = std::time::Instant::now();
     let model = entry.name;
     let watch = async move {
-        // The last answer and when it came: a sidecar that stops answering
-        // (frozen, swapping) is as quiet as one that answers "no new step".
-        let mut last: Option<(SidecarProgress, std::time::Instant)> = None;
+        // When the sidecar last answered. An ask that goes unanswered is not
+        // taken for a stall: a busy sidecar can be slow to answer and still
+        // be making steps. Only a long silence ends the run (see
+        // `sidecar_silence_verdict`).
+        let mut answered: Option<std::time::Instant> = None;
         loop {
             tokio::time::sleep(SIDECAR_WATCH_EVERY).await;
-            let answer = tokio::task::spawn_blocking(sidecar_progress).await.ok().flatten();
-            let progress = match answer {
+            let why = match tokio::task::spawn_blocking(sidecar_progress).await.ok().flatten() {
                 Some(p) => {
-                    last = Some((p.clone(), std::time::Instant::now()));
-                    Some(p)
+                    answered = Some(std::time::Instant::now());
+                    sidecar_stall_verdict(model, Some(&p), started.elapsed(), limit)
                 }
-                None => last.as_ref().map(|(p, at)| still_quiet(p, at.elapsed())),
+                None => match answered {
+                    Some(at) => sidecar_silence_verdict(model, at.elapsed(), limit),
+                    None => sidecar_stall_verdict(model, None, started.elapsed(), limit),
+                },
             };
-            if let Some(why) = sidecar_stall_verdict(model, progress.as_ref(), started.elapsed(), limit) {
+            if let Some(why) = why {
                 break why;
             }
         }
@@ -2855,6 +2865,18 @@ pub(crate) fn reap_orphaned_mflux() {
     if let Some(pid) = mflux::reap_orphaned_run() {
         tracing::warn!(target: "mflux", pid, "ended an image generation orphaned by a previous run");
     }
+}
+
+/// For `commands::real_run_mac`: whether the sidecar's port answers.
+#[cfg(all(test, target_os = "macos"))]
+pub(crate) fn real_run_sidecar_up() -> bool {
+    sidecar_running()
+}
+
+/// For `commands::real_run_mac`: end the sidecar the run started.
+#[cfg(all(test, target_os = "macos"))]
+pub(crate) fn real_run_stop_sidecar() {
+    stop_sidecar();
 }
 
 /// For `commands::real_run_mac`: see `mflux::install_engine_alone`.
@@ -3589,14 +3611,22 @@ mod tests {
         assert_eq!(sidecar_stall_verdict("X", Some(&p("idle", 0, 99_999.0)), long, limit), None);
     }
 
+    /// Real run, 12.11.2026: SD Turbo at 300 steps went on stepping while its
+    /// progress asks went unanswered from step 67 (its listener had been
+    /// ended by a SIGTERM on the port; uvicorn then finishes the request it
+    /// has), and the run was ended as stalled after a minute. Silence is not
+    /// a stall: only as long as a load may take.
     #[test]
-    fn a_sidecar_that_stops_answering_is_quiet_from_its_last_answer() {
+    fn a_sidecar_that_does_not_answer_is_ended_only_after_the_load_limit() {
         use std::time::Duration;
-        let at_step = SidecarProgress { phase: "steps".into(), step: 7, steps: 40, step_hook: true, quiet_seconds: 3.0 };
-        let later = still_quiet(&at_step, Duration::from_secs(60));
-        assert_eq!((later.step, later.quiet_seconds), (7, 63.0));
-        let why = sidecar_stall_verdict("SD Turbo", Some(&later), Duration::from_secs(90), sidecar_stall_limit(Some(60))).expect("a minute of silence");
-        assert!(why.starts_with("SD Turbo timed out at step 7 of 40: no new step for 1 minute."), "{why}");
+        let minute = sidecar_stall_limit(Some(60));
+        assert_eq!(sidecar_silence_verdict("SD Turbo", Duration::from_secs(120), minute), None);
+        assert_eq!(sidecar_silence_verdict("SD Turbo", Duration::from_secs(899), minute), None);
+        let why = sidecar_silence_verdict("SD Turbo", Duration::from_secs(900), minute).expect("15 minutes without an answer");
+        assert!(why.starts_with("SD Turbo timed out: the image engine has not answered for 15 minutes."), "{why}");
+        // A longer Image timeout is longer here too.
+        assert_eq!(sidecar_silence_verdict("X", Duration::from_secs(1700), sidecar_stall_limit(Some(30 * 60))), None);
+        assert!(!why.contains("unreachable"));
     }
 
     #[test]

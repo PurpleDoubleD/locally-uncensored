@@ -5,6 +5,7 @@ fastapi, pydantic, uvicorn and torch are replaced by stand-ins, and the
 pipeline is a loop that calls back after each step the way diffusers does.
 """
 
+import asyncio
 import importlib.util
 import sys
 import threading
@@ -210,10 +211,10 @@ class ProgressTest(unittest.TestCase):
 
     def test_idle_before_and_after_an_image(self):
         server = self.server
-        self.assertEqual(server.progress()["phase"], "idle")
+        self.assertEqual(asyncio.run(server.progress())["phase"], "idle")
         server._ensure_pipe = lambda *args, **kwargs: Pipe()
         server.generate(server.GenerateRequest(prompt="a cat", steps=3))
-        snap = server.progress()
+        snap = asyncio.run(server.progress())
         self.assertEqual((snap["phase"], snap["step"], snap["steps"]), ("idle", 0, 0))
 
     def test_each_step_is_counted_while_the_image_runs(self):
@@ -221,12 +222,12 @@ class ProgressTest(unittest.TestCase):
         seen = []
 
         def look(step):
-            seen.append(server.progress())
+            seen.append(asyncio.run(server.progress()))
 
         loads = []
 
         def load(*args, **kwargs):
-            loads.append(server.progress()["phase"])
+            loads.append(asyncio.run(server.progress())["phase"])
             return Pipe(on_step=look)
 
         server._ensure_pipe = load
@@ -240,6 +241,6 @@ class ProgressTest(unittest.TestCase):
     def test_a_pipeline_without_the_hook_says_it_counts_no_steps(self):
         server = self.server
         seen = []
-        server._ensure_pipe = lambda *args, **kwargs: OldPipe(on_step=lambda step: seen.append(server.progress()))
+        server._ensure_pipe = lambda *args, **kwargs: OldPipe(on_step=lambda step: seen.append(asyncio.run(server.progress())))
         server.generate(server.GenerateRequest(prompt="a cat", steps=2))
         self.assertEqual([(s["phase"], s["step"], s["step_hook"]) for s in seen], [("steps", 0, False)] * 2)

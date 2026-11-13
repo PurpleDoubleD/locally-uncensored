@@ -227,12 +227,15 @@ def health():
 
 
 @app.get("/progress")
-def progress():
+async def progress():
     """Where the image under way is: `phase` is idle, waiting, loading, steps
     or saving; `step` of `steps` once the steps run (only a pipeline with the
-    step hook counts them, `step_hook`); `quiet_seconds` since anything moved."""
-    with _progress_lock:
-        snap = dict(_progress)
+    step hook counts them, `step_hook`); `quiet_seconds` since anything moved.
+
+    `async` on purpose: it is answered on the event loop itself and never
+    waits for a worker thread next to the image. Copying the dict needs no
+    lock: the writers replace whole values."""
+    snap = dict(_progress)
     snap["quiet_seconds"] = round(time.monotonic() - snap.pop("changed"), 1)
     return snap
 
