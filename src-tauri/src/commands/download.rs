@@ -283,6 +283,86 @@ mod model_folder_tests {
             );
         }
     }
+
+    /// Checking whether a model file is there creates none of its folders.
+    #[test]
+    fn checking_for_a_model_creates_no_folder() {
+        use super::{check_one_file, CheckFileRequest};
+        use crate::commands::comfy_user_paths::{Env, UserComfyPaths};
+        let ask = |subfolder: &str, filename: &str, expected_bytes: u64| CheckFileRequest {
+            subfolder: subfolder.to_string(),
+            filename: filename.to_string(),
+            expected_bytes,
+        };
+        let root = scratch("look-only");
+        let comfy = root.join("ComfyUI");
+        let shared = root.join("shared");
+        std::fs::create_dir_all(&comfy).unwrap();
+        std::fs::create_dir_all(&shared).unwrap();
+        std::fs::write(
+            comfy.join("extra_model_paths.yaml"),
+            format!("comfyui:\n  base_path: '{}'\n  loras: loras/\n", shared.display()),
+        )
+        .unwrap();
+        let cp = Some(comfy.to_string_lossy().to_string());
+        let env = Env { home: None, appdata: None, localappdata: None, var: Box::new(|_| None) };
+        let user = UserComfyPaths::discover_with(&comfy, &env);
+        let engine_dir = root.join("engine").join("checkpoints");
+        let engine = ComfyFolders::parse(&json!({"checkpoints": [engine_dir.to_string_lossy()]}));
+        let remote = root.join("remote");
+        std::fs::create_dir_all(&remote).unwrap();
+
+        // Every way a folder is resolved, asked about a file that is not there.
+        let pack = "custom_nodes/ComfyUI-AnimateDiff-Evolved/models";
+        for (subfolder, folders, remote_root, made) in [
+            (pack, None, None, comfy.join(pack)),
+            ("vae", None, None, comfy.join("models").join("vae")),
+            ("loras", None, None, shared.join("loras")),
+            ("checkpoints", Some(&engine), None, engine_dir.clone()),
+            ("loras", None, Some(remote.as_path()), remote.join("loras")),
+            (pack, None, Some(remote.as_path()), remote.join(pack)),
+        ] {
+            let r = check_one_file(&ask(subfolder, "missing.safetensors", 0), remote_root, &user, folders, &cp);
+            assert!(!r.exists, "{subfolder}");
+            assert!(!made.exists(), "the check created {}", made.display());
+        }
+        assert!(!comfy.join("custom_nodes").exists(), "the check created custom_nodes");
+        assert!(!comfy.join("models").exists(), "the check created models");
+        assert!(!root.join("engine").exists(), "the check created the engine folder");
+
+        // POSITIVE CONTROL: a file that is there is still found, with its bytes.
+        for (subfolder, remote_root, dir) in [
+            (pack, None, comfy.join(pack)),
+            ("vae", None, comfy.join("models").join("vae")),
+            ("loras", None, shared.join("loras")),
+            ("loras", Some(remote.as_path()), remote.join("loras")),
+        ] {
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(dir.join("there.safetensors"), b"12345").unwrap();
+            let r = check_one_file(&ask(subfolder, "there.safetensors", 8), remote_root, &user, None, &cp);
+            assert!(r.exists, "{subfolder} in {}", dir.display());
+            assert_eq!(r.actual_bytes, 5, "{subfolder}");
+            assert!(r.complete, "{subfolder}");
+        }
+        std::fs::create_dir_all(&engine_dir).unwrap();
+        std::fs::write(engine_dir.join("there.safetensors"), b"1").unwrap();
+        let r = check_one_file(&ask("checkpoints", "there.safetensors", 0), None, &user, Some(&engine), &cp);
+        assert!(r.exists && r.actual_bytes == 1);
+
+        // NEGATIVE CONTROL: a refused subfolder is still refused, and makes nothing.
+        let r = check_one_file(&ask("../escape", "there.safetensors", 0), None, &user, None, &cp);
+        assert!(!r.exists);
+        assert!(!root.join("escape").exists());
+
+        // Check files and Repair resolve their file the same look-only way.
+        let src = include_str!("download.rs");
+        let verify = &src[src.find(concat!("pub(crate) async fn model_", "file_path(")).expect("model_file_path exists")..];
+        let verify = &verify[..verify.find("\n}\n").expect("the function ends")];
+        assert!(verify.contains("comfy_models_path(state"), "{verify}");
+        assert!(!verify.contains("comfy_models_dir("), "{verify}");
+
+        std::fs::remove_dir_all(&root).ok();
+    }
 }
 
 #[cfg(test)]
@@ -930,14 +1010,24 @@ fn models_dir_with(
     comfy_path: &Option<String>,
     subfolder: &str,
 ) -> Result<PathBuf, String> {
+    let dir = models_path_with(user, folders, comfy_path, subfolder)?;
+    fs::create_dir_all(&dir).map_err(|e| format!("Create models dir: {}", os_error::english(&e)))?;
+    Ok(dir)
+}
+
+/// The folder `models_dir_with` writes into, resolved without creating it.
+fn models_path_with(
+    user: &comfy_user_paths::UserComfyPaths,
+    folders: Option<&comfy_folders::ComfyFolders>,
+    comfy_path: &Option<String>,
+    subfolder: &str,
+) -> Result<PathBuf, String> {
     safe_subfolder(subfolder)?;
     let plain = !subfolder.contains('/') && !subfolder.contains('\\');
     if let Some(dir) = plain.then(|| user.write_dir(subfolder)).flatten() {
-        fs::create_dir_all(&dir).map_err(|e| format!("Create models dir: {}", os_error::english(&e)))?;
         return Ok(dir);
     }
     if let Some(dir) = folders.and_then(|f| f.dir_for(subfolder)) {
-        fs::create_dir_all(&dir).map_err(|e| format!("Create models dir: {}", os_error::english(&e)))?;
         return Ok(dir);
     }
     let base = comfy_path.as_ref().ok_or("ComfyUI path not set. Please set it in settings or install ComfyUI first.")?;
@@ -947,7 +1037,6 @@ fn models_dir_with(
     } else {
         PathBuf::from(base).join("models").join(subfolder)
     };
-    fs::create_dir_all(&dir).map_err(|e| format!("Create models dir: {}", os_error::english(&e)))?;
     Ok(dir)
 }
 
@@ -994,11 +1083,16 @@ fn remote_models_root() -> PathBuf {
 }
 
 fn remote_models_dir(root: &Path, subfolder: &str) -> Result<PathBuf, String> {
-    safe_subfolder(subfolder)?;
-    let dir = root.join(subfolder);
+    let dir = remote_models_path(root, subfolder)?;
     fs::create_dir_all(&dir)
         .map_err(|e| format!("Create models dir {}: {}", dir.display(), os_error::english(&e)))?;
     Ok(dir)
+}
+
+/// The folder `remote_models_dir` writes into, resolved without creating it.
+fn remote_models_path(root: &Path, subfolder: &str) -> Result<PathBuf, String> {
+    safe_subfolder(subfolder)?;
+    Ok(root.join(subfolder))
 }
 
 /// Where a ComfyUI model of `subfolder` goes: `models_dir_in`, plus the one
@@ -1012,6 +1106,19 @@ async fn comfy_models_dir(
         return remote_models_dir(&remote.root, subfolder);
     }
     models_dir_in(engine_folders(state).await.as_ref(), comfy_path, subfolder)
+}
+
+/// The folder `comfy_models_dir` writes into, resolved without creating it.
+async fn comfy_models_path(
+    state: &State<'_, AppState>,
+    comfy_path: &Option<String>,
+    subfolder: &str,
+) -> Result<PathBuf, String> {
+    if let Some(remote) = remote_comfy(state) {
+        return remote_models_path(&remote.root, subfolder);
+    }
+    let user = comfy_user_paths::for_comfy(comfy_path);
+    models_path_with(&user, engine_folders(state).await.as_ref(), comfy_path, subfolder)
 }
 
 /// For the frontend: whether ComfyUI models land on this machine only, and
@@ -2361,7 +2468,7 @@ pub async fn check_download_space(
             // reading a cache that can predate it, a cold cache pointed the
             // very first space check of a session at the wrong drive (K5's
             // customer-visible half of the same bug).
-            comfy_models_dir(&state, &comfy_path, &sub).await?
+            comfy_models_path(&state, &comfy_path, &sub).await?
         }
         _ => return Err("check_download_space needs a subfolder or a destDir".to_string()),
     };
@@ -2778,7 +2885,7 @@ pub fn detect_model_path(provider: String) -> Result<serde_json::Value, String> 
         // dir. Fall through to LU's fallback.
         //
         // Cloud providers (OpenRouter, Groq, Together, DeepSeek, Mistral,
-        // OpenAI, Anthropic, Custom) don't use a local model dir at all.
+        // OpenAI, Custom) don't use a local model dir at all.
         _ => vec![],
     };
 
@@ -3063,7 +3170,7 @@ pub(crate) async fn model_file_path(
         }
         p.clone()
     };
-    let dir = comfy_models_dir(state, &comfy_path, subfolder).await?;
+    let dir = comfy_models_path(state, &comfy_path, subfolder).await?;
     let target = checked_model_path(&dir, filename);
     if target.as_ref().map(|p| p.exists()).unwrap_or(true) || remote_comfy(state).is_some() {
         return Ok(target);
@@ -3124,78 +3231,84 @@ pub async fn check_model_sizes(
     // Read once for the whole list (GH #183).
     let user = comfy_user_paths::for_comfy(&comfy_path);
 
-    let mut results = Vec::with_capacity(files.len());
+    Ok(files
+        .iter()
+        .map(|file| check_one_file(file, remote.as_ref().map(|r| r.root.as_path()), &user, folders.as_ref(), &comfy_path))
+        .collect())
+}
 
-    for file in &files {
-        let dest = match &remote {
-            Some(r) => remote_models_dir(&r.root, &file.subfolder),
-            None => models_dir_with(&user, folders.as_ref(), &comfy_path, &file.subfolder),
-        };
-        let dest_dir = match dest {
-            Ok(d) => d,
-            Err(_) => {
-                results.push(CheckFileResult {
-                    filename: file.filename.clone(),
-                    exists: false,
-                    actual_bytes: 0,
-                    complete: false,
-                });
-                continue;
-            }
-        };
-
-        let dest_file = match checked_model_path(&dest_dir, &file.filename) {
-            // GH #183: a model downloaded before the configured folder was
-            // honoured still counts as installed where it is.
-            Some(p) if !p.exists() && remote.is_none() => {
-                existing_elsewhere(&user, folders.as_ref(), &comfy_path, &file.subfolder, &file.filename).unwrap_or(p)
-            }
-            Some(p) => p,
-            None => {
-                results.push(CheckFileResult {
-                    filename: file.filename.clone(),
-                    exists: false,
-                    actual_bytes: 0,
-                    complete: false,
-                });
-                continue;
-            }
-        };
-        if dest_file.exists() {
-            let actual = dest_file.metadata().map(|m| m.len()).unwrap_or(0);
-            // Use 50% threshold for install checks — sizeGB values are rough estimates
-            // (e.g. sizeGB: 0.9 for an 800 MB file), so no tighter bound is possible
-            // from a catalog number alone. This answers "is there a plausible file
-            // here" for the card, NOT "is this the whole file".
-            //
-            // The exact question is settled where it can be: download_model asks the
-            // host for the byte count and compares to the byte (`judge_existing`), and
-            // do_download verifies the digest when the entry carries one. The 90 %
-            // rule that used to live there is gone — a threshold may size a card, it
-            // may never certify a model.
-            let threshold = if file.expected_bytes > 0 {
-                (file.expected_bytes as f64 * 0.5) as u64
-            } else {
-                0
-            };
-            let complete = file.expected_bytes == 0 || actual >= threshold;
-            results.push(CheckFileResult {
-                filename: file.filename.clone(),
-                exists: true,
-                actual_bytes: actual,
-                complete,
-            });
-        } else {
-            results.push(CheckFileResult {
+/// One entry of `check_model_sizes`, measured without the command's state.
+fn check_one_file(
+    file: &CheckFileRequest,
+    remote_root: Option<&Path>,
+    user: &comfy_user_paths::UserComfyPaths,
+    folders: Option<&comfy_folders::ComfyFolders>,
+    comfy_path: &Option<String>,
+) -> CheckFileResult {
+    let dest = match remote_root {
+        Some(root) => remote_models_path(root, &file.subfolder),
+        None => models_path_with(user, folders, comfy_path, &file.subfolder),
+    };
+    let dest_dir = match dest {
+        Ok(d) => d,
+        Err(_) => {
+            return CheckFileResult {
                 filename: file.filename.clone(),
                 exists: false,
                 actual_bytes: 0,
                 complete: false,
-            });
+            };
+        }
+    };
+
+    let dest_file = match checked_model_path(&dest_dir, &file.filename) {
+        // GH #183: a model downloaded before the configured folder was
+        // honoured still counts as installed where it is.
+        Some(p) if !p.exists() && remote_root.is_none() => {
+            existing_elsewhere(user, folders, comfy_path, &file.subfolder, &file.filename).unwrap_or(p)
+        }
+        Some(p) => p,
+        None => {
+            return CheckFileResult {
+                filename: file.filename.clone(),
+                exists: false,
+                actual_bytes: 0,
+                complete: false,
+            };
+        }
+    };
+    if dest_file.exists() {
+        let actual = dest_file.metadata().map(|m| m.len()).unwrap_or(0);
+        // Use 50% threshold for install checks, since sizeGB values are rough estimates
+        // (e.g. sizeGB: 0.9 for an 800 MB file), so no tighter bound is possible
+        // from a catalog number alone. This answers "is there a plausible file
+        // here" for the card, NOT "is this the whole file".
+        //
+        // The exact question is settled where it can be: download_model asks the
+        // host for the byte count and compares to the byte (`judge_existing`), and
+        // do_download verifies the digest when the entry carries one. The 90 %
+        // rule that used to live there is gone: a threshold may size a card, it
+        // may never certify a model.
+        let threshold = if file.expected_bytes > 0 {
+            (file.expected_bytes as f64 * 0.5) as u64
+        } else {
+            0
+        };
+        let complete = file.expected_bytes == 0 || actual >= threshold;
+        CheckFileResult {
+            filename: file.filename.clone(),
+            exists: true,
+            actual_bytes: actual,
+            complete,
+        }
+    } else {
+        CheckFileResult {
+            filename: file.filename.clone(),
+            exists: false,
+            actual_bytes: 0,
+            complete: false,
         }
     }
-
-    Ok(results)
 }
 
 #[cfg(test)]
@@ -3471,11 +3584,11 @@ mod tests {
         let hits_body = fn_body(src, "async fn comfy_model_hits(");
         assert!(!hits_body.contains("comfy_folders::cached()"), "{hits_body}");
         assert!(hits_body.contains("engine_folders(state).await"), "{hits_body}");
-        // The space check goes through comfy_models_dir since GH #143 (a
-        // remote ComfyUI measures the Storage folder), and that one asks
-        // the engine fresh for everything else.
-        assert!(space_body.contains("comfy_models_dir(&state"), "{space_body}");
-        let dir_body = fn_body(src, "async fn comfy_models_dir(");
+        // The space check goes through comfy_models_path, the look-only half
+        // of comfy_models_dir (GH #143: a remote ComfyUI measures the Storage
+        // folder), and that one asks the engine fresh for everything else.
+        assert!(space_body.contains("comfy_models_path(&state"), "{space_body}");
+        let dir_body = fn_body(src, "async fn comfy_models_path(");
         assert!(dir_body.contains("engine_folders(state).await"), "{dir_body}");
         assert!(!dir_body.contains("comfy_folders::cached()"), "{dir_body}");
     }
