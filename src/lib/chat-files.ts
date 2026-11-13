@@ -87,6 +87,9 @@ export interface ChatFileInput {
   file?: File
   /** One sentence for the user when the file could not be read the way it should be. Not stored. */
   notice?: string
+  /** Set for an `@` mention (lib/file-mentions.ts): the path in the working
+   *  folder whose token stands in the text. The chip goes with the token. */
+  mention?: string
 }
 
 /** Reads the text of a PDF or a Word file. Handed in by the phone, which has the reader of the documents of a chat. */

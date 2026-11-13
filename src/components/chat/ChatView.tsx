@@ -57,6 +57,7 @@ import { useIsQueuedForLocalLane, useLocalLaneQueuePosition, useLocalLaneHolderW
 import { useRemoteStore } from '../../stores/remoteStore'
 import { modelDisplayLabel } from '../../lib/model-label'
 import { MONOGRAM, MONOGRAM_INVERT } from '../layout/brand'
+import { useMentionRoot } from '../../hooks/useMentionRoot'
 
 /** Was die Eingangsseite sagt und anbietet, je nach Lage. */
 interface Landing {
@@ -193,6 +194,9 @@ export function ChatView() {
     activeConversationId ? s.agentModeActive[activeConversationId] ?? false : false
   )
   const isComparing = useCompareStore((s) => s.isComparing)
+  // `@` file mentions (U8): Agent mode reads its working folder, plain chat
+  // only a real folder pinned on the chat or set as default.
+  const mentionRoot = useMentionRoot(isAgentActive ? 'agent' : 'chat')
 
   // Remote-chat state: show a reactivate banner when the user is viewing a
   // Remote conversation whose server has been stopped.
@@ -844,6 +848,7 @@ export function ChatView() {
             // Agent mode copies attached files into the working folder;
             // plain chat hands the model a summary of them.
             filesReachTools={isAgentActive}
+            mentionRoot={mentionRoot}
             composerModel={
               /* What this chat's answers were written by rides on the
                  picker itself now, as a dot plus a tooltip, instead of a
