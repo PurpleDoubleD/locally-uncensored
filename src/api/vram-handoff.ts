@@ -49,7 +49,7 @@ import { gpuRolesSeparate } from '../lib/gpu-roles'
 import { backendCall, ollamaUrl, localFetch, isOllamaLocal, isWindows, fetchLocalhostBytes } from './backend'
 import { apiNodes, type ComfyApiGraph } from '../types/comfy-graph'
 import { injectParameters } from './workflows'
-import { ownWorkflowMisfit } from '../lib/own-workflow-fit'
+import { ownWorkflowMisfit, ownWorkflowMisfitNote } from '../lib/own-workflow-fit'
 import type { ComfyModelSource } from '../types/models'
 import { asNumber, asRecordArray, asString, prop } from '../types/json-guards'
 import { listRunningModels, loadModel, unloadModel } from './ollama'
@@ -1545,6 +1545,9 @@ async function generateImage(
       ? await injectParameters(own.workflow, own.parameterMap, params, type, own.overrides)
       : await buildFixable('image', () => buildDynamicWorkflow(params, type))
     if (own) log.info('vram_handoff.image.own_workflow', { model, workflow: own.name })
+    // C72: a workflow set aside for its loader is said in the answer, as
+    // Create says it under the result, not only in the log.
+    const setAside = own ? null : await ownWorkflowSetAsideNote(model, type, listed?.source)
     // Phase markers (chat-agent hang 2026-06-03): make it obvious in the log
     // whether a stall is in the workflow build (/object_info) or the submit
     // (/prompt). Both are now timeout-bounded, so neither can strand the
@@ -1554,7 +1557,8 @@ async function generateImage(
     if (submitted === CANCELLED) return `${label('image')} generation cancelled.`
     const promptId = submitted
     log.info('vram_handoff.image.submitted', { promptId })
-    return await pollAndExtract(promptId, prompt, label('image'), getImageTimeoutMs())
+    const made = await pollAndExtract(promptId, prompt, label('image'), getImageTimeoutMs())
+    return setAside ? `${made}\n\nNote: ${setAside}` : made
   } catch (err) {
     // Surface ComfyUI's message verbatim — an OOM must NOT be masked.
     return buildErrorResult('image', err)
@@ -1577,6 +1581,18 @@ export async function ownWorkflowFor(model: string, type: ModelType, source?: Co
     return null
   }
   return { ...wf, overrides: store.paramOverrides[wf.id] }
+}
+
+/**
+ * C72: the sentence for a workflow the user assigned to `model` that is set
+ * aside because its loader does not fit (the same words Create shows), or
+ * null when there is none or it fits.
+ */
+export async function ownWorkflowSetAsideNote(model: string, type: ModelType, source?: ComfyModelSource): Promise<string | null> {
+  const { useWorkflowStore } = await import('../stores/workflowStore')
+  const wf = useWorkflowStore.getState().getWorkflowForModel(model, type)
+  if (!wf) return null
+  return ownWorkflowMisfitNote(wf.name, apiNodes(wf.workflow).map(([, n]) => n.class_type), type, source)
 }
 
 /** Video path — buildTxt2VidWorkflow with MODEL_TYPE_DEFAULTS + snapToVideoGrid. */

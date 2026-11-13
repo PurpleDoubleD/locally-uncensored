@@ -11,7 +11,7 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { ownWorkflowFor } from '../vram-handoff'
+import { ownWorkflowFor, ownWorkflowSetAsideNote } from '../vram-handoff'
 import { useWorkflowStore } from '../../stores/workflowStore'
 
 const UNET_WF = {
@@ -53,5 +53,17 @@ describe('#192 part 3: the chat image tool takes the workflow assigned to the mo
   it('the image path injects into the assigned workflow before it falls back to the builder', () => {
     const src = readFileSync(resolve(__dirname, '../vram-handoff.ts'), 'utf8')
     expect(src).toMatch(/const own = await ownWorkflowFor\(model, type, listed\?\.source\)\s+const workflow = own\s+\? await injectParameters\(own\.workflow, own\.parameterMap, params, type, own\.overrides\)\s+: await buildFixable\('image', \(\) => buildDynamicWorkflow\(params, type\)\)/)
+  })
+
+  it('C72: a workflow set aside says so in the answer of the tool, with the words of Create', async () => {
+    assign(CKPT_WF)
+    expect(await ownWorkflowSetAsideNote('moss_image.safetensors', 'unknown', 'diffusion_model'))
+      .toBe('Your workflow "SDXL (own)" is not used: this model is a diffusion model and needs a UNETLoader, but the workflow loads a checkpoint (CheckpointLoaderSimple). LU builds its own workflow for this model instead. Change the loader in ComfyUI and import the workflow again, or use it with a model it fits.')
+    assign(UNET_WF)
+    expect(await ownWorkflowSetAsideNote('moss_image.safetensors', 'unknown', 'diffusion_model')).toBeNull()
+    assign(null)
+    expect(await ownWorkflowSetAsideNote('x.safetensors', 'sdxl', 'checkpoint')).toBeNull()
+    const src = readFileSync(resolve(__dirname, '../vram-handoff.ts'), 'utf8')
+    expect(src).toContain('return setAside ? `${made}\\n\\nNote: ${setAside}` : made')
   })
 })
