@@ -80,7 +80,7 @@ export async function bootCreate(page: Page, id: string, title: string, fx: Fx =
   await page.route('https://lu-labs.ai/api/jobs/catalog*', (route) => route.fulfill({
     status: 200, headers: CORS, contentType: 'application/json',
     body: JSON.stringify({
-      models: CLOUD_MODEL_SEED.map((m) => ({ ...m, credits: m.credits ?? { base: BASE[m.kind] } })),
+      models: CLOUD_MODEL_SEED.map((m) => ({ ...m, credits: m.credits ?? { base: BASE[m.kind === '3d' ? 'image' : m.kind] } })),
       ops: { removebg: 1000, eraser: 2500, upscale_image: 1000, upscale_video_per_s: 500, upscale_video_min: 2500 },
       voice: { stt: 600, tts_per_1k_chars: 8000 },
       media_live: true, tier: 'hosted-max', monthly_credits: 2_550_000,

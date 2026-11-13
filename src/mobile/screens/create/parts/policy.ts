@@ -12,11 +12,15 @@ export type { ReportTarget, StorePolicy } from '../../../policy'
 
 /** Report a result of the gallery. A result of the user's computer is reported as made outside the cloud. */
 export function reportItem(item: GalleryItem): void {
+  // The server's report kinds have no 3D yet (content_reports.kind): a model
+  // goes as an image, and the excerpt says what it is.
+  const kind = item.type === '3d' ? 'image' : item.type
+  const excerpt = `${item.type === '3d' ? '3D model: ' : ''}${galleryLabelShort(item, 120)}`
   if (isComputerItem(item)) {
-    openReport({ kind: item.type, id: item.id, model: item.model, source: 'local', origin: 'computer', excerpt: galleryLabelShort(item, 120) })
+    openReport({ kind, id: item.id, model: item.model, source: 'local', origin: 'computer', excerpt })
     return
   }
-  openReport({ kind: item.type, id: item.jobId ?? item.id, model: item.model, source: 'cloud', excerpt: galleryLabelShort(item, 120) })
+  openReport({ kind, id: item.jobId ?? item.id, model: item.model, source: 'cloud', excerpt })
 }
 
 /** Run `start` once the user agreed that content goes to an AI service. On "no" nothing starts and nothing is cleared. */

@@ -12,7 +12,7 @@ import { useCreateStore, imageQualityLadder, type CharacterRef, type ImageRef, t
 import { useCloudAuthStore, deriveCloudAvailable } from '../../../../stores/cloudAuthStore'
 import { useCloudCatalogStore, lengthPrice, runCredits } from '../../../../stores/cloudCatalogStore'
 import { useSettingsStore } from '../../../../stores/settingsStore'
-import { intentToJob, type CloudQuota, type RenderKind, type RenderOp } from '../../../../lib/render/cloud-jobs'
+import { intentToJob, quotaCostKind, type CloudQuota, type RenderKind, type RenderOp } from '../../../../lib/render/cloud-jobs'
 import { createStudioCost, intentRequiredInputs, startImageCount, studioExtraPhotoSlots } from '../../../../lib/render/create-studio'
 import { STUDIO_MODELS, studioFields } from '../../../../lib/render/studio-contract'
 import { runImageCount } from '../../../../lib/render/image-count'
@@ -221,7 +221,7 @@ export function useCreateFacts(): CreateFacts {
     unit = (mine ? cloudStudioCredits : null) ?? lengthUnit(model.id, op, prompt, mine ? price.inputSeconds : undefined)
     if (mine && price.measuring) priceState = 'measuring'
   } else if (quota && model.id) {
-    unit = runCredits(kind, op, model.id, runSeconds, quota.costs[kind === 'audio' ? 'image' : kind], targetResolution)
+    unit = runCredits(kind, op, model.id, runSeconds, quota.costs[quotaCostKind(kind)], targetResolution)
   } else if (quota && !facts.hasModels) {
     unit = runCredits(kind, op, '', runSeconds, quota.costs.image, targetResolution)
   }

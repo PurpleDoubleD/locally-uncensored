@@ -10,7 +10,9 @@ import { isMlxImageHost } from '../../../api/mlx-image'
 import { refreshResultUrl } from '../../../api/cloud/jobs'
 import { blobFromUrl } from '../../../lib/render/data-url'
 
-export function extFor(contentType: string, kind: 'image' | 'video' | 'audio'): string {
+export function extFor(contentType: string, kind: GalleryItem['type']): string {
+  // A 3D model is always handed over as the GLB it was made as.
+  if (kind === '3d') return 'glb'
   if (contentType.includes('png')) return 'png'
   if (contentType.includes('jpeg') || contentType.includes('jpg')) return 'jpg'
   if (contentType.includes('webp')) return 'webp'
@@ -45,11 +47,12 @@ const MIME_BY_EXT: Record<string, string> = {
   png: 'image/png', jpg: 'image/jpeg', webp: 'image/webp',
   mp4: 'video/mp4', webm: 'video/webm',
   mp3: 'audio/mpeg', wav: 'audio/wav', ogg: 'audio/ogg',
+  glb: 'model/gltf-binary', obj: 'model/obj', stl: 'model/stl', usdz: 'model/vnd.usdz+zip',
 }
 
 /** The extension a phone asks for before it has seen the bytes. */
-function extByKind(kind: 'image' | 'video' | 'audio'): string {
-  return kind === 'video' ? 'mp4' : kind === 'audio' ? 'mp3' : 'png'
+function extByKind(kind: GalleryItem['type']): string {
+  return kind === '3d' ? 'glb' : kind === 'video' ? 'mp4' : kind === 'audio' ? 'mp3' : 'png'
 }
 
 export async function downloadGalleryItem(item: GalleryItem): Promise<void> {

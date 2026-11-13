@@ -10,6 +10,7 @@ describe('intentToJob', () => {
       removebg: { kind: 'image', op: 'removebg' },
       upscale: { kind: 'image', op: 'upscale' },
       eraser: { kind: 'image', op: 'eraser' },
+      '3d': { kind: '3d', op: 'studio' },
       video: { kind: 'video', op: 'generate' },
       animate: { kind: 'video', op: 'animate' },
       // The five 2.5.8 cloud categories. The Record<CreateIntent, ...> type

@@ -149,6 +149,7 @@ const INTENT_WHAT: Record<CreateIntent, string> = {
   character: 'train a character from photos, or create images with a trained one', video: 'text to clip',
   animate: 'image to clip', extend: 'continue a clip', video_upscale: 'sharpen a clip', lipsync: 'a portrait speaks a voice track',
   motion: 'movement of a clip onto a character image', music: 'a track from a description',
+  '3d': 'a 3D model, not available in chat',
 }
 
 function inputsOf(intent: CreateIntent, model?: ChatModel): string[] {

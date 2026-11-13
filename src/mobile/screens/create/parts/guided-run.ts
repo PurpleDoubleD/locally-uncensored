@@ -50,7 +50,7 @@ export interface Attached {
 
 export interface StepDone {
   jobId: string
-  kind: 'image' | 'video' | 'audio'
+  kind: 'image' | 'video' | 'audio' | '3d'
 }
 
 export type FileTrouble =

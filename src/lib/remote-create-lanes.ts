@@ -419,7 +419,7 @@ export const FROM_YOUR_PHONE = 'From your phone'
 /** The entries of the desktop gallery that are files on this machine. A
  *  cloud entry or one that only lives in memory has none and is left out. */
 export function galleryForRemote(items: readonly {
-  id: string; type: 'image' | 'video' | 'audio'; filename: string; subfolder: string; comfyType?: string
+  id: string; type: 'image' | 'video' | 'audio' | '3d'; filename: string; subfolder: string; comfyType?: string
   localPath?: string; remoteUrl?: string; prompt: string; model: string; createdAt: number; label?: string
   hidden?: boolean
 }[]): GalleryOut[] {
@@ -427,6 +427,8 @@ export function galleryForRemote(items: readonly {
   for (const it of items) {
     // Hidden on the computer (D27, 3.1.0): not shown on the phone either.
     if (it.hidden) continue
+    // 3D (3.1.0) is not on the phone's view of this computer in v1.
+    if (it.type === '3d') continue
     const base = { key: it.id, media: it.type, prompt: it.prompt ?? '', model: it.model ?? '', created_at: it.createdAt ?? 0, from_phone: it.label === FROM_YOUR_PHONE }
     if (it.localPath) out.push({ ...base, path: it.localPath })
     else if (!it.remoteUrl && it.filename && (it.comfyType ?? 'output') === 'output') out.push({ ...base, comfy_filename: it.filename, comfy_subfolder: it.subfolder ?? '' })

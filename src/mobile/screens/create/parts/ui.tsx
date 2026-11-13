@@ -8,7 +8,7 @@
  */
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react'
 import {
-  Eraser, FastForward, Film, Image as ImageIcon, Maximize2, Mic, Music, PersonStanding, RefreshCw, Scissors,
+  Box, Eraser, FastForward, Film, Image as ImageIcon, Maximize2, Mic, Music, PersonStanding, RefreshCw, Scissors,
   TimerOff, UserRound, Video, Wand2, X,
 } from 'lucide-react'
 import { useCreateStore, type GalleryItem } from '../../../../stores/createStore'
@@ -37,6 +37,7 @@ export const TOOL_ICON: Record<ToolId, IconType> = {
   music: Music,
   extend: FastForward,
   motion: PersonStanding,
+  '3d': Box,
 }
 
 /** The small round X on a thumbnail. Its target is 44 px, the mark is 22 px. */

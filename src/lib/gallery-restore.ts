@@ -19,7 +19,7 @@ import { useCreateStore, type GalleryItem } from '../stores/createStore'
 export interface ScannedFile {
   filename: string
   subfolder: string
-  kind: 'image' | 'video' | 'audio'
+  kind: 'image' | 'video' | 'audio' | '3d'
   modifiedMs: number
   bytes: number
   width?: number | null

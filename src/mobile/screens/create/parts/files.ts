@@ -29,11 +29,20 @@ const KIND_FALLBACK: Record<MediaKind, { ext: string; mime: string }> = {
   audio: { ext: 'mp3', mime: 'audio/mpeg' },
 }
 
+/** What a result can be: a medium, or a 3D model (3.1.0). */
+export type ResultKind = MediaKind | '3d'
+
+/** A 3D model is stored as plain bytes, so its type never names it. It is
+ *  always the GLB it was made as. */
+const GLB = { ext: 'glb', mime: 'model/gltf-binary' }
+
 /** File name and type for a result that is saved or shared. */
-export function saveName(kind: MediaKind, blobType: string, createdAt: number, id: string): { name: string; mime: string } {
+export function saveName(kind: ResultKind, blobType: string, createdAt: number, id: string): { name: string; mime: string } {
   const type = blobType.split(';')[0].trim().toLowerCase()
-  const ext = MIME_EXT[type] ?? KIND_FALLBACK[kind].ext
-  const mime = MIME_EXT[type] ? type : KIND_FALLBACK[kind].mime
+  const fallback = kind === '3d' ? GLB : KIND_FALLBACK[kind]
+  const known = kind !== '3d' && !!MIME_EXT[type]
+  const ext = known ? MIME_EXT[type] : fallback.ext
+  const mime = known ? type : fallback.mime
   const d = new Date(createdAt)
   const pad = (n: number) => String(n).padStart(2, '0')
   const stamp = Number.isFinite(d.getTime())
@@ -43,7 +52,7 @@ export function saveName(kind: MediaKind, blobType: string, createdAt: number, i
   return { name: `lu-${stamp}-${tail}.${ext}`, mime }
 }
 
-/** Where a result is saved: pictures and clips to Photos, sound to Files. */
-export function saveTarget(kind: MediaKind): 'photos' | 'files' {
-  return kind === 'audio' ? 'files' : 'photos'
+/** Where a result is saved: pictures and clips to Photos, sound and 3D models to Files. */
+export function saveTarget(kind: ResultKind): 'photos' | 'files' {
+  return kind === 'audio' || kind === '3d' ? 'files' : 'photos'
 }

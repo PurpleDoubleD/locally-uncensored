@@ -77,6 +77,11 @@ const TOOL: Record<CreateIntent, ToolText> = {
     empty: 'Add a portrait and a video. The portrait moves like the person in the video.',
     show: 'Move a figure from a photo the way someone moves in a video.',
   },
+  '3d': {
+    name: '3D model', short: '3D', placeholder: 'Describe one object',
+    empty: 'Describe an object, or add a photo or a short video of one.',
+    show: 'Turn words, a photo or a short video into a 3D model you can spin around.',
+  },
 }
 
 /** A getter here is a text in two wordings; the store switches of the build pick one (policy/gates.ts). */
@@ -531,7 +536,7 @@ export const CREATE_STRINGS = {
     deleteTitle: (n: number) => (n === 1 ? 'Delete this result?' : `Delete ${n} results?`),
     deleteText: 'It will be removed from your gallery on this phone.',
     deleted: (n: number) => (n === 1 ? 'Deleted' : `${n} deleted`),
-    kind: { image: 'Image', video: 'Video', audio: 'Audio' },
+    kind: { image: 'Image', video: 'Video', audio: 'Audio', '3d': '3D model' },
     saving: (i: number, n: number) => `Saving ${i} of ${n}`,
     preparing: 'Preparing',
   },

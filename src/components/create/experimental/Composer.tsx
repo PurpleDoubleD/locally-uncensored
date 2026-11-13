@@ -10,7 +10,7 @@ import { useCreateStore, MODEL_TYPE_DEFAULTS, EDIT_MAX_DENOISE, imageQualityLadd
 import { classifyModel, resolveLocalOpPick } from '../../../api/comfyui'
 import { readsEditStrength, EDIT_STRENGTH_HINT, EDIT_DENOISE_HINT } from '../../../lib/edit-references'
 import { useCreateExp } from './CreateContext'
-import { intentToJob } from '../../../lib/render/cloud-jobs'
+import { intentToJob, quotaCostKind } from '../../../lib/render/cloud-jobs'
 import { meterState } from '../../../lib/render/credits-meter'
 import { runImageCount } from '../../../lib/render/image-count'
 import { useCloudCatalogStore, cloudModelById, defaultCloudModel, editNeedsMask, modelForOp, runCredits, lengthCredits, lengthPrice } from '../../../stores/cloudCatalogStore'
@@ -255,7 +255,7 @@ export function Composer({ onOpenAdvanced, onOpenWorkflows }: Props) {
   // Dieselbe Zahl wie im Zaehler: nach einem 409 steht im Speicher der Preis
   // des Servers, und die Deckungspruefung muss ihn benutzen.
   const cloudStudioCredits = useCreateStore((s) => s.cloudStudioCredits)
-  const costFallback = quota?.costs[runKind === 'audio' ? 'image' : runKind] ?? 0
+  const costFallback = quota?.costs[quotaCostKind(runKind)] ?? 0
   // The exact rule the meter chip renders, so the button can never invite a run
   // the chip is already refusing. Credits alone were not enough: a user out of
   // monthly character trainings kept an enabled Create button and got a 429.

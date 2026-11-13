@@ -45,8 +45,9 @@ export function chatHandleContext(conversationId: string, now = Date.now()): Omi
   }
   // Only what the cloud made: a local render has no job on the server that a
   // run could take as an input (handles.ts, isCloud).
+  // A 3D model is no input any chat run takes.
   const gallery = useCreateStore.getState().gallery
-    .filter((g) => !!g.jobId)
+    .filter((g): g is typeof g & { type: 'image' | 'video' | 'audio' } => !!g.jobId && g.type !== '3d')
     .map((g) => ({
       id: g.id,
       jobId: g.jobId,

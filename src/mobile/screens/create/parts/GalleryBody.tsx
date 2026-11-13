@@ -13,7 +13,7 @@
  * loaded (content-visibility and an observer).
  */
 import { memo, useMemo, useRef, useState } from 'react'
-import { AudioLines, Check, ListChecks, Play, X } from 'lucide-react'
+import { AudioLines, Box, Check, ListChecks, Play, X } from 'lucide-react'
 import { useCreateStore, type GalleryItem } from '../../../../stores/createStore'
 import { nav } from '../../../nav'
 import { COMPUTER_STRINGS as C, CREATE_STRINGS as T } from '../../../strings/create'
@@ -61,11 +61,12 @@ const Tile = memo(function Tile({ item, selecting, selected, onPress }: TileProp
         {showMedia && item.type === 'image' ? <img src={media.url ?? undefined} alt="" loading="lazy" decoding="async" onError={media.onError} /> : null}
         {showMedia && item.type === 'video' ? <video src={`${media.url}#t=0.1`} muted playsInline preload="metadata" onError={media.onError} /> : null}
         {item.type === 'audio' && state === 'ok' ? <Icon icon={AudioLines} /> : null}
+        {item.type === '3d' && state === 'ok' ? <Icon icon={Box} /> : null}
         {state !== 'ok' ? <MediaStateBox state={state} compact /> : null}
       </button>
       {item.type !== 'image' && state === 'ok' ? (
         <span className="m-k-tile-badge">
-          {item.type === 'video' ? <Play /> : <AudioLines />}
+          {item.type === 'video' ? <Play /> : item.type === '3d' ? <Box /> : <AudioLines />}
           {T.gal.kind[item.type]}
         </span>
       ) : null}

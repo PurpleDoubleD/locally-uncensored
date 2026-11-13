@@ -38,12 +38,13 @@ export const INTENT_LABEL: Record<CreateIntent, string> = {
   image: 'Image', edit: 'Edit image', removebg: 'Remove background', upscale: 'Enhance image', eraser: 'Erase',
   character: 'Character Studio', video: 'Video', animate: 'Animate image', extend: 'Extend clip',
   video_upscale: 'Enhance video', lipsync: 'Talking character', motion: 'Motion transfer', music: 'Music',
+  '3d': '3D model',
 }
 
 export const INTENT_KIND: Record<CreateIntent, RenderKind> = {
   image: 'image', edit: 'image', removebg: 'image', upscale: 'image', eraser: 'image', character: 'image',
   video: 'video', animate: 'video', extend: 'video', video_upscale: 'video', lipsync: 'video', motion: 'video',
-  music: 'audio',
+  music: 'audio', '3d': '3d',
 }
 
 function create(m: { id: string; label: string; kind: RenderKind; adult?: boolean }): ChatModel {

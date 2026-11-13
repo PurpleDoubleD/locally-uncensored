@@ -1,6 +1,6 @@
 import { useCreateStore } from '../../../stores/createStore'
 import { useCreateExp } from './CreateContext'
-import { intentToJob, type RenderKind, type RenderOp } from '../../../lib/render/cloud-jobs'
+import { intentToJob, quotaCostKind, type RenderKind, type RenderOp } from '../../../lib/render/cloud-jobs'
 import { lengthCredits, lengthPrice, runCredits } from '../../../stores/cloudCatalogStore'
 import { createRunModel, createStudioCost, isStudioModel, startImageCount } from '../../../lib/render/create-studio'
 import { STUDIO_MODELS } from '../../../lib/render/studio-contract'
@@ -92,7 +92,7 @@ export function useRunCredits(): RunCredits | null {
     ? cloudStudioCredits ?? lengthCredits(model, lengthRate.basis === 'chars' ? Array.from(prompt).length || undefined : undefined)
     : studioPick
     ? cloudStudioCredits ?? createStudioCost(studioPick, cloudStudioOptions, Array.from(prompt).length, undefined, startImageCount(studioPick, extraPhotos) ?? 1)
-    : runCredits(kind, op, model, seconds, quota.costs[kind === 'audio' ? 'image' : kind], targetResolution)
+    : runCredits(kind, op, model, seconds, quota.costs[quotaCostKind(kind)], targetResolution)
   // Mehrere Bilder: jedes ist ein eigener Auftrag zum vollen Preis, die Summe
   // ist, was der Lauf bindet. Der Zaehler "noch N Bilder" rechnet je Bild.
   const imageCount = runImageCount(intent, cloudImageCount, characterUse)
