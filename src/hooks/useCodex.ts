@@ -101,13 +101,14 @@ import { toolCallCapMs, raceWithToolTimeout, SHELL_EXECUTE_DEFAULT_TIMEOUT_MS } 
 import { getModelMaxTokens, estimateTokens } from '../lib/context-compaction'
 import { capToLearnedWindow, contextOverflowOf, learnSendWindow, shrunkSendWindow } from './codex/context-overflow'
 import { buildRequestMessages, trimWorkingHistory, decayRestoredToolResult, isToolResult } from '../lib/context-decay'
-import { effectiveSendWindow, sendWindowFor } from '../lib/send-window'
+import { effectiveSendWindow, isPaidProvider, sendWindowFor } from '../lib/send-window'
 import { sendsToALanBackend } from '../lib/lan-openai-slot'
 import { useSendSizeStore } from '../stores/sendSizeStore'
 import { resolveAgentNumCtx } from '../lib/agent-num-ctx'
 import { platformPromptLine, hostClockLine } from '../lib/host-platform'
 import { ensureBuiltinAgentCtx } from '../api/builtin-ensure'
 import { AgentLoopGuard } from '../lib/agent-loop-guard'
+import { AgentCostBrake } from '../lib/agent-cost-brake'
 import { applyAllStagedChanges, waitForStagedReview } from '../lib/staged-apply'
 import { turnCaps } from '../lib/remote-turn-caps'
 import { useMemoryStore } from '../stores/memoryStore'
@@ -1278,6 +1279,11 @@ export function useCodex() {
       // it forever while the budget allowed 200 iterations of the loop
       // (Morgan's 5-minute file_read loop, 2026-07-26).
       const loopGuard = new AgentLoopGuard({ enabled: useSettingsStore.getState().settings.agentLoopGuard !== false })
+      // C83: what the run has cost so far, on providers that bill per token.
+      const costBrake = new AgentCostBrake({
+        paid: isPaidProvider(providerId, sendsToALanBackend(providerId, activeModel)),
+        loopGuardEnabled: useSettingsStore.getState().settings.agentLoopGuard !== false,
+      })
       // Which read produced which result message. The request builder reports
       // back the results it sent CAPPED, and this map turns those messages
       // into the loop-guard keys that must not be counted as a repeat (plan
@@ -1759,6 +1765,7 @@ export function useCodex() {
             turnFinishReason = turn.doneReason
             reportTurnUsage(convId!, assistantMsg.id, turn)
             requestUsage.add(turn)
+            costBrake.record(turn.promptEvalCount)
             diagLog('streamWithTools-return', {
               iter: i,
               toolCallsCount: toolCalls.length,
@@ -1816,6 +1823,7 @@ export function useCodex() {
             turnFinishReason = turn.finishReason
             reportTurnUsage(convId!, assistantMsg.id, turn)
             requestUsage.add(turn)
+            costBrake.record(turn.promptEvalCount)
             // GH #147: a model on LU Cloud wrote its calls into the text
             // (!function_call:{"call": "file_read", ...}). This path never
             // looked, so the run stopped on prose. A call from the text counts
@@ -1954,6 +1962,7 @@ export function useCodex() {
           // Gleiche Stelle wie in useAgentChat.
           turnFinishReason = hermesTurn.finishReason
           requestUsage.add(hermesTurn)
+          costBrake.record(hermesTurn.promptEvalCount)
           if (keepThinking && hermesTurn.thinking) {
             thinkingContent += (thinkingContent ? '\n\n' : '') + hermesTurn.thinking
             useChatStore.getState().updateMessageThinking(convId!, assistantMsg.id, thinkingContent)
@@ -2286,6 +2295,19 @@ export function useCodex() {
             timestamp: Date.now(),
           })
           break
+        }
+        // C83: the cost brake looks at what the backend reported, not at the
+        // calls, so it holds even when every call honestly differs.
+        const brake = costBrake.take()
+        if (brake.action === 'halt') {
+          diagLog('cost-brake-halt', { iter: i, inputTokens: costBrake.inputTokens })
+          useChatStore.getState().updateMessageContent(convId, assistantMsg.id, fullContent + `\n\n_(${brake.message})_`)
+          addBlock({ id: uuid(), phase: 'reflection', content: `⛔ ${brake.message}`, timestamp: Date.now() })
+          break
+        }
+        if (brake.action === 'warn') {
+          diagLog('cost-brake-warn', { iter: i, inputTokens: costBrake.inputTokens })
+          addBlock({ id: uuid(), phase: 'reflection', content: `⚠ ${brake.message}`, timestamp: Date.now() })
         }
         // Steer is appended AFTER this iteration's assistant+tool messages
         // (audit F2). Pushed here it landed chronologically BEFORE the calls
