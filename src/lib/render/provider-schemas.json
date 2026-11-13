@@ -9428,5 +9428,854 @@
       "generate_audio",
       "seed"
     ]
+  },
+  "base/trellis-2/image-to-3d": {
+    "additionalProperties": false,
+    "properties": {
+      "image": {
+        "description": "Single input image URL, data URI or base64 image.",
+        "minLength": 1,
+        "type": "string"
+      },
+      "remove_background": {
+        "default": true,
+        "description": "Remove the image background before generation. Disable to use existing image alpha.",
+        "type": "boolean"
+      },
+      "resolution": {
+        "default": "1024",
+        "description": "Geometry resolution. Higher resolution takes more time and memory.",
+        "enum": [
+          "512",
+          "1024",
+          "1536"
+        ],
+        "type": "string",
+        "x-ui-component": "select"
+      },
+      "seed": {
+        "description": "Random seed. Use -1 for a random seed.",
+        "type": "integer"
+      },
+      "target_face_count": {
+        "default": 200000,
+        "description": "Target mesh face count after simplification. The final count is approximate.",
+        "maximum": 1000000,
+        "minimum": 10000,
+        "type": "integer",
+        "x-ui-component": "slider"
+      },
+      "texture_size": {
+        "default": 2048,
+        "description": "PBR texture resolution in pixels.",
+        "enum": [
+          1024,
+          2048,
+          4096
+        ],
+        "type": "integer",
+        "x-ui-component": "select",
+        "disabled": true
+      }
+    },
+    "required": [
+      "image"
+    ],
+    "type": "object",
+    "x-order-properties": [
+      "image",
+      "resolution",
+      "texture_size",
+      "target_face_count",
+      "remove_background",
+      "seed"
+    ]
+  },
+  "base/hunyuan-3d-v3.1/text-to-3d-rapid": {
+    "additionalProperties": false,
+    "properties": {
+      "prompt": {
+        "description": "Text description of the 3D content to generate (max 200 UTF-8 characters)",
+        "type": "string"
+      }
+    },
+    "required": [
+      "prompt"
+    ],
+    "type": "object",
+    "x-order-properties": [
+      "prompt"
+    ]
+  },
+  "base/hunyuan-3d-v3.1/image-to-3d-rapid": {
+    "additionalProperties": false,
+    "properties": {
+      "image": {
+        "description": "Front view image of the object to convert into a 3D model (128-5000px, max 8MB, JPG/PNG/WEBP)",
+        "type": "string"
+      }
+    },
+    "required": [
+      "image"
+    ],
+    "type": "object",
+    "x-order-properties": [
+      "image"
+    ]
+  },
+  "tripo3d/h3.1/text-to-3d": {
+    "additionalProperties": false,
+    "properties": {
+      "auto_size": {
+        "default": false,
+        "description": "Scale the model to real-world size in meters. Needs a textured model.",
+        "type": "boolean"
+      },
+      "delight": {
+        "default": true,
+        "description": "Remove the lighting baked into the source before texturing (texture model v3.5-20260815 only).",
+        "type": "boolean"
+      },
+      "export_uv": {
+        "default": true,
+        "description": "Unwrap UVs during generation. Turn off for faster generation and a smaller file.",
+        "type": "boolean"
+      },
+      "face_limit": {
+        "description": "Maximum number of faces. Omit for adaptive. Up to 1,500,000 (2,000,000 with detailed geometry, 150,000 with quad; 500 to 20,000 with smart_low_poly).",
+        "maximum": 2000000,
+        "minimum": 48,
+        "type": "integer"
+      },
+      "generate_parts": {
+        "default": false,
+        "description": "Generate the model as separate editable parts. Parts are untextured and triangle-only.",
+        "type": "boolean",
+        "disabled": true
+      },
+      "geometry_quality": {
+        "default": "standard",
+        "description": "Geometry quality: standard or detailed (Ultra, up to 2 million faces).",
+        "enum": [
+          "standard",
+          "detailed"
+        ],
+        "type": "string",
+        "x-ui-component": "select",
+        "disabled": true
+      },
+      "image_seed": {
+        "description": "Seed for the text-to-image step.",
+        "type": "integer",
+        "x-hidden": true
+      },
+      "model_seed": {
+        "description": "Seed for the geometry: the same seed and input give the same mesh.",
+        "type": "integer"
+      },
+      "negative_prompt": {
+        "description": "What the model should avoid. Up to 255 characters.",
+        "maxLength": 255,
+        "type": "string"
+      },
+      "pbr": {
+        "default": true,
+        "description": "Generate PBR materials (base color, metallic, roughness, normal). Turning it on also turns on texture.",
+        "type": "boolean",
+        "disabled": true
+      },
+      "prompt": {
+        "description": "Description of the 3D object: shape, material, style and scale. Up to 1024 characters.",
+        "maxLength": 1024,
+        "type": "string",
+        "x-ui-component": "textarea"
+      },
+      "quad": {
+        "default": false,
+        "description": "Output a quad mesh (FBX). Without a face_limit it targets 10,000 faces.",
+        "type": "boolean",
+        "disabled": true
+      },
+      "smart_low_poly": {
+        "default": false,
+        "description": "Generate a low-poly mesh with hand-crafted style topology. Best for simple objects.",
+        "type": "boolean",
+        "disabled": true
+      },
+      "texture": {
+        "default": true,
+        "description": "Generate texture maps. Turn off (with pbr) for an untextured model at a lower price.",
+        "type": "boolean",
+        "disabled": true
+      },
+      "texture_quality": {
+        "default": "standard",
+        "description": "Texture quality: standard, detailed (high resolution), extreme (8K) or fast (same size as standard, quicker; uses texture model v3.5-20260815).",
+        "enum": [
+          "standard",
+          "detailed",
+          "extreme",
+          "fast"
+        ],
+        "type": "string",
+        "x-ui-component": "select"
+      },
+      "texture_seed": {
+        "description": "Seed for the texture: keep model_seed and change texture_seed for new textures on the same mesh.",
+        "type": "integer"
+      },
+      "texture_version": {
+        "default": "v3.0-20250812",
+        "description": "Texture model. v3.5-20260815 is the newest; the fast quality and delight use it.",
+        "enum": [
+          "v3.0-20250812",
+          "v3.5-20260815"
+        ],
+        "type": "string",
+        "x-ui-component": "select"
+      }
+    },
+    "required": [
+      "prompt"
+    ],
+    "type": "object",
+    "x-order-properties": [
+      "prompt",
+      "negative_prompt",
+      "image_seed",
+      "texture",
+      "pbr",
+      "texture_quality",
+      "texture_version",
+      "delight",
+      "geometry_quality",
+      "quad",
+      "smart_low_poly",
+      "generate_parts",
+      "face_limit",
+      "auto_size",
+      "export_uv",
+      "model_seed",
+      "texture_seed"
+    ]
+  },
+  "tripo3d/h3.1/image-to-3d": {
+    "additionalProperties": false,
+    "properties": {
+      "auto_size": {
+        "default": false,
+        "description": "Scale the model to real-world size in meters. Needs a textured model.",
+        "type": "boolean"
+      },
+      "delight": {
+        "default": true,
+        "description": "Remove the lighting baked into the source before texturing (texture model v3.5-20260815 only).",
+        "type": "boolean"
+      },
+      "enable_image_autofix": {
+        "default": false,
+        "description": "Improve a low-quality source image before generation. Takes longer.",
+        "type": "boolean"
+      },
+      "export_uv": {
+        "default": true,
+        "description": "Unwrap UVs during generation. Turn off for faster generation and a smaller file.",
+        "type": "boolean"
+      },
+      "face_limit": {
+        "description": "Maximum number of faces. Omit for adaptive. Up to 1,500,000 (2,000,000 with detailed geometry, 150,000 with quad; 500 to 20,000 with smart_low_poly).",
+        "maximum": 2000000,
+        "minimum": 48,
+        "type": "integer"
+      },
+      "generate_parts": {
+        "default": false,
+        "description": "Generate the model as separate editable parts. Parts are untextured and triangle-only.",
+        "type": "boolean",
+        "disabled": true
+      },
+      "geometry_quality": {
+        "default": "standard",
+        "description": "Geometry quality: standard or detailed (Ultra, up to 2 million faces).",
+        "enum": [
+          "standard",
+          "detailed"
+        ],
+        "type": "string",
+        "x-ui-component": "select",
+        "disabled": true
+      },
+      "image": {
+        "description": "Image of the object (PNG, JPEG or WebP, up to 20 MB). A clean background and little occlusion work best.",
+        "type": "string"
+      },
+      "model_seed": {
+        "description": "Seed for the geometry: the same seed and input give the same mesh.",
+        "type": "integer"
+      },
+      "orientation": {
+        "default": "default",
+        "description": "align_image rotates the model to the source image viewpoint (textured models only).",
+        "enum": [
+          "default",
+          "align_image"
+        ],
+        "type": "string",
+        "x-ui-component": "select"
+      },
+      "pbr": {
+        "default": true,
+        "description": "Generate PBR materials (base color, metallic, roughness, normal). Turning it on also turns on texture.",
+        "type": "boolean",
+        "disabled": true
+      },
+      "quad": {
+        "default": false,
+        "description": "Output a quad mesh (FBX). Without a face_limit it targets 10,000 faces.",
+        "type": "boolean",
+        "disabled": true
+      },
+      "smart_low_poly": {
+        "default": false,
+        "description": "Generate a low-poly mesh with hand-crafted style topology. Best for simple objects.",
+        "type": "boolean",
+        "disabled": true
+      },
+      "texture": {
+        "default": true,
+        "description": "Generate texture maps. Turn off (with pbr) for an untextured model at a lower price.",
+        "type": "boolean",
+        "disabled": true
+      },
+      "texture_alignment": {
+        "default": "original_image",
+        "description": "What the texture follows: the source image colors or the generated geometry.",
+        "enum": [
+          "original_image",
+          "geometry"
+        ],
+        "type": "string",
+        "x-ui-component": "select"
+      },
+      "texture_quality": {
+        "default": "standard",
+        "description": "Texture quality: standard, detailed (high resolution), extreme (8K) or fast (same size as standard, quicker; uses texture model v3.5-20260815).",
+        "enum": [
+          "standard",
+          "detailed",
+          "extreme",
+          "fast"
+        ],
+        "type": "string",
+        "x-ui-component": "select"
+      },
+      "texture_seed": {
+        "description": "Seed for the texture: keep model_seed and change texture_seed for new textures on the same mesh.",
+        "type": "integer"
+      },
+      "texture_version": {
+        "default": "v3.0-20250812",
+        "description": "Texture model. v3.5-20260815 is the newest; the fast quality and delight use it.",
+        "enum": [
+          "v3.0-20250812",
+          "v3.5-20260815"
+        ],
+        "type": "string",
+        "x-ui-component": "select"
+      }
+    },
+    "required": [
+      "image"
+    ],
+    "type": "object",
+    "x-order-properties": [
+      "image",
+      "texture",
+      "pbr",
+      "texture_quality",
+      "texture_version",
+      "delight",
+      "geometry_quality",
+      "quad",
+      "smart_low_poly",
+      "generate_parts",
+      "face_limit",
+      "texture_alignment",
+      "orientation",
+      "enable_image_autofix",
+      "auto_size",
+      "export_uv",
+      "model_seed",
+      "texture_seed"
+    ]
+  },
+  "tripo3d/h3.1/multiview-to-3d": {
+    "additionalProperties": false,
+    "properties": {
+      "auto_size": {
+        "default": false,
+        "description": "Scale the model to real-world size in meters. Needs a textured model.",
+        "type": "boolean"
+      },
+      "delight": {
+        "default": true,
+        "description": "Remove the lighting baked into the source before texturing (texture model v3.5-20260815 only).",
+        "type": "boolean"
+      },
+      "enable_image_autofix": {
+        "default": false,
+        "description": "Improve a low-quality source image before generation. Takes longer.",
+        "type": "boolean"
+      },
+      "export_uv": {
+        "default": true,
+        "description": "Unwrap UVs during generation. Turn off for faster generation and a smaller file.",
+        "type": "boolean"
+      },
+      "face_limit": {
+        "description": "Maximum number of faces. Omit for adaptive. Up to 1,500,000 (2,000,000 with detailed geometry, 150,000 with quad; 500 to 20,000 with smart_low_poly).",
+        "maximum": 2000000,
+        "minimum": 48,
+        "type": "integer"
+      },
+      "generate_parts": {
+        "default": false,
+        "description": "Generate the model as separate editable parts. Parts are untextured and triangle-only.",
+        "type": "boolean",
+        "disabled": true
+      },
+      "geometry_quality": {
+        "default": "standard",
+        "description": "Geometry quality: standard or detailed (Ultra, up to 2 million faces).",
+        "enum": [
+          "standard",
+          "detailed"
+        ],
+        "type": "string",
+        "x-ui-component": "select",
+        "disabled": true
+      },
+      "images": {
+        "description": "2 to 4 images of the same object, in the order front, left, back, right. The front view is required.",
+        "items": {
+          "type": "string"
+        },
+        "maxItems": 4,
+        "minItems": 2,
+        "type": "array"
+      },
+      "model_seed": {
+        "description": "Seed for the geometry: the same seed and input give the same mesh.",
+        "type": "integer"
+      },
+      "orientation": {
+        "default": "default",
+        "description": "align_image rotates the model to the source image viewpoint (textured models only).",
+        "enum": [
+          "default",
+          "align_image"
+        ],
+        "type": "string",
+        "x-ui-component": "select"
+      },
+      "pbr": {
+        "default": true,
+        "description": "Generate PBR materials (base color, metallic, roughness, normal). Turning it on also turns on texture.",
+        "type": "boolean",
+        "disabled": true
+      },
+      "quad": {
+        "default": false,
+        "description": "Output a quad mesh (FBX). Without a face_limit it targets 10,000 faces.",
+        "type": "boolean",
+        "disabled": true
+      },
+      "smart_low_poly": {
+        "default": false,
+        "description": "Generate a low-poly mesh with hand-crafted style topology. Best for simple objects.",
+        "type": "boolean",
+        "disabled": true
+      },
+      "texture": {
+        "default": true,
+        "description": "Generate texture maps. Turn off (with pbr) for an untextured model at a lower price.",
+        "type": "boolean",
+        "disabled": true
+      },
+      "texture_alignment": {
+        "default": "original_image",
+        "description": "What the texture follows: the source image colors or the generated geometry.",
+        "enum": [
+          "original_image",
+          "geometry"
+        ],
+        "type": "string",
+        "x-ui-component": "select"
+      },
+      "texture_quality": {
+        "default": "standard",
+        "description": "Texture quality: standard, detailed (high resolution), extreme (8K) or fast (same size as standard, quicker; uses texture model v3.5-20260815).",
+        "enum": [
+          "standard",
+          "detailed",
+          "extreme",
+          "fast"
+        ],
+        "type": "string",
+        "x-ui-component": "select"
+      },
+      "texture_seed": {
+        "description": "Seed for the texture: keep model_seed and change texture_seed for new textures on the same mesh.",
+        "type": "integer"
+      },
+      "texture_version": {
+        "default": "v3.0-20250812",
+        "description": "Texture model. v3.5-20260815 is the newest; the fast quality and delight use it.",
+        "enum": [
+          "v3.0-20250812",
+          "v3.5-20260815"
+        ],
+        "type": "string",
+        "x-ui-component": "select"
+      }
+    },
+    "required": [
+      "images"
+    ],
+    "type": "object",
+    "x-order-properties": [
+      "images",
+      "texture",
+      "pbr",
+      "texture_quality",
+      "texture_version",
+      "delight",
+      "geometry_quality",
+      "quad",
+      "smart_low_poly",
+      "generate_parts",
+      "face_limit",
+      "texture_alignment",
+      "orientation",
+      "enable_image_autofix",
+      "auto_size",
+      "export_uv",
+      "model_seed",
+      "texture_seed"
+    ]
+  },
+  "bytedance/seed3d-2.0/image-to-3d": {
+    "additionalProperties": false,
+    "properties": {
+      "image": {
+        "description": "Reference image URL for Seed3D generation.",
+        "type": "string"
+      },
+      "subdivision_level": {
+        "default": "medium",
+        "description": "Mesh subdivision level.",
+        "enum": [
+          "low",
+          "medium",
+          "high"
+        ],
+        "type": "string"
+      }
+    },
+    "required": [
+      "image"
+    ],
+    "type": "object",
+    "x-order-properties": [
+      "image",
+      "subdivision_level"
+    ]
+  },
+  "hyper3d/rodin-v2.5/text-to-3d": {
+    "additionalProperties": false,
+    "properties": {
+      "addons": {
+        "description": "Optional HighPack add-on for 4K textures and higher-poly geometry.",
+        "enum": [
+          "HighPack"
+        ],
+        "type": "string",
+        "disabled": true
+      },
+      "geometry_file_format": {
+        "default": "glb",
+        "description": "Output geometry file format.",
+        "enum": [
+          "glb",
+          "obj",
+          "stl"
+        ],
+        "type": "string",
+        "disabled": true
+      },
+      "hd_texture": {
+        "default": false,
+        "description": "Enable enhanced texture post-processing.",
+        "type": "boolean"
+      },
+      "material": {
+        "default": "All",
+        "description": "Material output type.",
+        "enum": [
+          "PBR",
+          "Shaded",
+          "All"
+        ],
+        "type": "string"
+      },
+      "prompt": {
+        "description": "A text prompt describing the 3D asset to generate.",
+        "type": "string"
+      },
+      "quality_and_mesh": {
+        "default": "18K Quad",
+        "description": "Combined quality and mesh type selection.",
+        "enum": [
+          "4K Quad",
+          "8K Quad",
+          "18K Quad",
+          "50K Quad",
+          "2K Triangle",
+          "20K Triangle",
+          "150K Triangle",
+          "500K Triangle"
+        ],
+        "type": "string"
+      },
+      "ta_pose": {
+        "default": false,
+        "description": "Generate characters in T-pose or A-pose format.",
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "prompt"
+    ],
+    "type": "object",
+    "x-order-properties": [
+      "prompt",
+      "geometry_file_format",
+      "material",
+      "quality_and_mesh",
+      "hd_texture",
+      "ta_pose",
+      "addons"
+    ]
+  },
+  "hyper3d/rodin-v2.5/image-to-3d": {
+    "additionalProperties": false,
+    "properties": {
+      "addons": {
+        "description": "Optional HighPack add-on for 4K textures and higher-poly geometry.",
+        "enum": [
+          "HighPack"
+        ],
+        "type": "string",
+        "disabled": true
+      },
+      "geometry_file_format": {
+        "default": "glb",
+        "description": "Output geometry file format.",
+        "enum": [
+          "glb",
+          "obj",
+          "stl"
+        ],
+        "type": "string",
+        "disabled": true
+      },
+      "hd_texture": {
+        "default": false,
+        "description": "Enable enhanced texture post-processing.",
+        "type": "boolean"
+      },
+      "images": {
+        "description": "Reference images for generating the 3D model. Up to 5 images are allowed.",
+        "items": {
+          "type": "string"
+        },
+        "maxItems": 5,
+        "type": "array"
+      },
+      "material": {
+        "default": "All",
+        "description": "Material output type.",
+        "enum": [
+          "PBR",
+          "Shaded",
+          "All"
+        ],
+        "type": "string"
+      },
+      "prompt": {
+        "description": "Optional text prompt. If empty, the model auto-generates a prompt from the images.",
+        "type": "string"
+      },
+      "quality_and_mesh": {
+        "default": "500K Triangle",
+        "description": "Combined quality and mesh type selection.",
+        "enum": [
+          "4K Quad",
+          "8K Quad",
+          "18K Quad",
+          "50K Quad",
+          "2K Triangle",
+          "20K Triangle",
+          "150K Triangle",
+          "500K Triangle"
+        ],
+        "type": "string"
+      },
+      "ta_pose": {
+        "default": false,
+        "description": "Generate characters in T-pose or A-pose format.",
+        "type": "boolean"
+      },
+      "use_original_alpha": {
+        "default": false,
+        "description": "Preserve the transparency channel from input images.",
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "images"
+    ],
+    "type": "object",
+    "x-order-properties": [
+      "images",
+      "prompt",
+      "use_original_alpha",
+      "geometry_file_format",
+      "material",
+      "quality_and_mesh",
+      "hd_texture",
+      "ta_pose",
+      "addons"
+    ]
+  },
+  "meshy/v6-lite/image-to-3d": {
+    "additionalProperties": false,
+    "properties": {
+      "animation_action_id": {
+        "default": 92,
+        "description": "Animation from the Meshy animation library applied when enable_animation is on.",
+        "type": "integer",
+        "disabled": true
+      },
+      "auto_size": {
+        "default": false,
+        "description": "Estimate the real-world size of the object and scale the model to it.",
+        "type": "boolean"
+      },
+      "enable_animation": {
+        "default": false,
+        "description": "Rig and animate the character with animation_action_id. The animated model is returned last.",
+        "type": "boolean",
+        "disabled": true
+      },
+      "enable_pbr": {
+        "default": false,
+        "description": "Generate PBR maps (metallic, roughness, normal).",
+        "type": "boolean"
+      },
+      "enable_rigging": {
+        "default": false,
+        "description": "Rig the generated character (humanoids). The rigged model is returned after the model.",
+        "type": "boolean",
+        "disabled": true
+      },
+      "image": {
+        "description": "Image of the object (JPEG, PNG or WebP).",
+        "type": "string"
+      },
+      "pose_mode": {
+        "description": "Generate characters in an A-pose or T-pose (useful before rigging).",
+        "enum": [
+          "a-pose",
+          "t-pose"
+        ],
+        "type": "string",
+        "x-ui-component": "select",
+        "disabled": true
+      },
+      "rigging_height_meters": {
+        "default": 1.7,
+        "description": "Character height in meters used for rigging.",
+        "type": "number",
+        "disabled": true
+      },
+      "should_remesh": {
+        "default": true,
+        "description": "Remesh to the target polycount and topology.",
+        "type": "boolean"
+      },
+      "should_texture": {
+        "default": true,
+        "description": "Texture the model. Turn off for an untextured mesh at a lower price.",
+        "type": "boolean"
+      },
+      "symmetry_mode": {
+        "default": "auto",
+        "description": "No longer has an effect; kept for compatibility.",
+        "enum": [
+          "off",
+          "auto",
+          "on"
+        ],
+        "type": "string",
+        "x-ui-component": "select"
+      },
+      "target_polycount": {
+        "default": 30000,
+        "description": "Target number of polygons (used when should_remesh is on).",
+        "maximum": 300000,
+        "minimum": 100,
+        "type": "integer"
+      },
+      "texture_image": {
+        "description": "Optional reference image for the texture. Takes priority over texture_prompt.",
+        "type": "string"
+      },
+      "texture_prompt": {
+        "description": "Optional description of the texture.",
+        "type": "string"
+      },
+      "topology": {
+        "default": "triangle",
+        "description": "Mesh topology.",
+        "enum": [
+          "triangle",
+          "quad"
+        ],
+        "type": "string",
+        "x-ui-component": "select"
+      }
+    },
+    "required": [
+      "image"
+    ],
+    "type": "object",
+    "x-order-properties": [
+      "image",
+      "should_texture",
+      "texture_prompt",
+      "texture_image",
+      "enable_pbr",
+      "topology",
+      "target_polycount",
+      "should_remesh",
+      "symmetry_mode",
+      "pose_mode",
+      "auto_size",
+      "enable_rigging",
+      "rigging_height_meters",
+      "enable_animation",
+      "animation_action_id"
+    ]
   }
 }

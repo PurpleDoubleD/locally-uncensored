@@ -32,7 +32,9 @@ describe('der alte Katalog ist wirklich der alte', () => {
       expect(m.weights, m.id).toBeUndefined()
     }
     const ids = new Set(alt.map((m) => m.id))
-    expect(neueIds()).toHaveLength(8)
+    // Eight of 02.10.2026, plus the ten 3D models of 3.1.0.
+    expect(neueIds().filter((id) => !id.match(/3d|trellis|tripo|seed3d|rodin|meshy/))).toHaveLength(8)
+    expect(neueIds()).toHaveLength(18)
     for (const id of neueIds()) expect(ids.has(id), id).toBe(false)
     // Der neue Katalog hat dagegen alles.
     expect(neuerServer().length).toBeGreaterThanOrEqual(alt.length + 8)

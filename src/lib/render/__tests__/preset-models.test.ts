@@ -54,6 +54,8 @@ const SUPPORTED_OPS: Record<string, readonly string[]> = {
   image: ['studio', 'generate', 'edit', 'removebg', 'eraser', 'upscale', 'lora-train'],
   video: ['studio', 'generate', 'animate', 'upscale', 'lipsync', 'extend', 'motion', 'lora-train'],
   audio: ['studio', 'music', 'tts'],
+  // 3.1.0: 3D runs as a studio model only (SUPPORTED_OPS['3d'] on the server).
+  '3d': ['studio'],
 }
 
 describe('jedes waehlbare Modell faehrt seinen Schritt', () => {
