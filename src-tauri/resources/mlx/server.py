@@ -187,9 +187,24 @@ def _ensure_pipe(
     # No attention/VAE slicing here: on torch 2.12 + MPS it corrupts the
     # forward pass into all-NaN latents (verified live — plain runs are
     # clean, sliced runs decode to black frames).
-    _pipe = AutoPipelineForText2Image.from_pretrained(repo, **kwargs).to(device)
+    _pipe = _without_checker(AutoPipelineForText2Image.from_pretrained(repo, **kwargs).to(device))
     _pipe_repo = repo
     return _pipe
+
+
+def _without_checker(pipe):
+    """No image of this app goes through the diffusers safety checker. It
+    blacks out what it reads as nudity, an adult picture included, and says
+    nothing. LU's own gate refuses a prompt that sexualizes minors before any
+    engine starts (lib/render/safety.ts), on every model.
+
+    The catalog's flag skips the checker at load, where a repo bundles one
+    (it also spares its download). On 13.11.2026 no catalog repo shipped
+    checker weights, but the install follows each repo's main branch, so
+    one that adds them later is caught here, for every model alike."""
+    if getattr(pipe, "safety_checker", None) is not None:
+        pipe.safety_checker = None
+    return pipe
 
 
 app = FastAPI(title="LU MLX server")

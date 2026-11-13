@@ -244,3 +244,22 @@ class ProgressTest(unittest.TestCase):
         server._ensure_pipe = lambda *args, **kwargs: OldPipe(on_step=lambda step: seen.append(asyncio.run(server.progress())))
         server.generate(server.GenerateRequest(prompt="a cat", steps=2))
         self.assertEqual([(s["phase"], s["step"], s["step_hook"]) for s in seen], [("steps", 0, False)] * 2)
+
+
+class CheckerTest(unittest.TestCase):
+    """The diffusers safety checker never blacks out a picture (13.11.2026)."""
+
+    def setUp(self):
+        self.server = _load_server()
+
+    def test_a_pipeline_that_brought_a_checker_runs_without_it(self):
+        pipe = types.SimpleNamespace(safety_checker=object())
+        self.assertIs(self.server._without_checker(pipe), pipe)
+        self.assertIsNone(pipe.safety_checker)
+
+    def test_a_pipeline_without_one_is_left_as_it_is(self):
+        pipe = types.SimpleNamespace(transformer=object())
+        self.assertIs(self.server._without_checker(pipe), pipe)
+        self.assertFalse(hasattr(pipe, "safety_checker"))
+        empty = types.SimpleNamespace(safety_checker=None)
+        self.assertIsNone(self.server._without_checker(empty).safety_checker)
