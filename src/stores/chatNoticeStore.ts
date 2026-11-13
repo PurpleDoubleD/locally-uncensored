@@ -34,7 +34,7 @@ import { useChatStore } from './chatStore'
 
 /** Die Zeilen, die es gibt. Kein freier Schluessel: eine Aufzaehlung laesst
  *  sich nachzaehlen, ein String-Schluessel waechst unbemerkt. */
-export type ChatNoticeId = 'document-belongs-in-docs' | 'model-cannot-see-images' | 'image-attach' | 'file-attach' | 'binary-summary-only' | 'file-cut' | 'agent-outside-workspace' | 'agent-for-local-files' | 'create-save'
+export type ChatNoticeId = 'document-belongs-in-docs' | 'model-cannot-see-images' | 'image-attach' | 'file-attach' | 'binary-summary-only' | 'file-cut' | 'agent-outside-workspace' | 'agent-for-local-files' | 'create-save' | 'file-mention'
 
 export interface ChatNotice {
   id: ChatNoticeId

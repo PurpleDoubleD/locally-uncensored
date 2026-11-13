@@ -60,6 +60,7 @@ import { Hinweis } from '../ui/Hinweis'
 import { HINWEIS_TEXT } from '../../lib/hinweis'
 import { stripModelNoise } from '../../lib/strip-model-noise'
 import { useIsQueuedForLocalLane, useLocalLaneQueuePosition } from '../../lib/run-idle'
+import { useMentionRoot } from '../../hooks/useMentionRoot'
 
 // Code always drives a tool loop, so the aggressive tier applies here.
 const stripChannelTags = (text: string) => stripModelNoise(text, { aggressive: true })
@@ -110,6 +111,8 @@ export function CodexView() {
   // the same function). Handed to the send, which never runs looser (A37).
   const codexDefaultMode = useSettingsStore((s) => s.settings.codexDefaultMode)
   const shownMode = useCodexStore((s) => s.nextSendMode(activeConversationId, codexDefaultMode))
+  // `@` file mentions (U8) read the folder this run works in.
+  const mentionRoot = useMentionRoot('code')
 
   const conversation = conversations.find(c => c.id === activeConversationId)
   const messages = conversation?.messages || []
@@ -787,6 +790,7 @@ export function CodexView() {
           waitingForLocalLane={queuedForLocalLane}
           slashCommands="agent"
           filesReachTools
+          mentionRoot={mentionRoot}
           draftScope="code"
           composerModel={<ModelSelector openUpward surface="code" />}
           // Ask / Bypass / Plan sits here, in the CODE composer only (plan
