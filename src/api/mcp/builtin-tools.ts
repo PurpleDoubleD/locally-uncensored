@@ -16,6 +16,7 @@ import { v4 as uuid } from 'uuid'
 import { backendCall, isTauri } from '../backend'
 import { getActiveChatId, getActiveConversationId, getActiveWorkspace, isChatArtifactMode, captureChatArtifact, isReadOnlyShellTurn } from '../agent-context'
 import type { AgentRunContext } from '../agent-context'
+import { readBefore, recordWrite, textBefore } from '../../lib/agent-core/checkpoints'
 import { useAgentWorkflowStore } from '../../stores/agentWorkflowStore'
 import { WorkflowEngine, buildWorkflowApprovalGate, describeWorkflowCompletion, describeWorkflowStepFailure } from '../../lib/workflow-engine'
 import type { StepResult } from '../../types/agent-workflows'
@@ -865,7 +866,11 @@ async function executeFileWrite(args: ToolArgs, run?: AgentRunContext): Promise<
     captureChatArtifact(name, content, mimeForName(name), run)
     return `Created "${name}" (${formatBytes(content.length)}). It is shown to the user right here in the chat with a preview and a Download button. Nothing was written to disk. Do not call file_read on it; just tell the user it's ready.`
   }
-  const data = await backendCall<FsWriteResult>('fs_write', { path, content, ...chatCtx(run) })
+  // CA U4: what the file held before, for "Rewind to here".
+  const target = { path, ...chatCtx(run) }
+  const before = await readBefore(target)
+  const data = await backendCall<FsWriteResult>('fs_write', { ...target, content })
+  if (data.status === 'saved') recordWrite(getActiveConversationId(run) ?? getActiveChatId(run), target, before, data.path)
   // Rust returns {status: 'saved'|'unchanged', path: <absolute>, bytes}. Surface
   // the real path so the model (and the file-change event) knows WHERE the write
   // landed — especially important when chatId is None and Rust routes a relative
@@ -941,6 +946,7 @@ async function executeFileEdit(args: ToolArgs, run?: AgentRunContext): Promise<s
   }
 
   const w = await backendCall<FsWriteResult>('fs_write', { path, content: res.content, ...chatCtx(run) })
+  if (w.status === 'saved') recordWrite(getActiveConversationId(run) ?? getActiveChatId(run), { path, ...chatCtx(run) }, textBefore(content), w.path)
   const n = res.replacements ?? 1
   const note = res.fuzzyCount ? ` ${res.fuzzyCount === 1 ? 'One edit' : `${res.fuzzyCount} edits`} matched with indentation ignored; re-read before editing the same lines again.` : ''
   if (w.status === 'saved' && w.path) return `Edited ${shownToolPath(w.path)} (${n} replacement${n === 1 ? '' : 's'}).${note}`

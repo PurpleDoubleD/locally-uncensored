@@ -10,6 +10,7 @@ import { closeOpenMarkdown } from '../../lib/streaming-markdown'
 import { ThinkingBlock } from './ThinkingBlock'
 import { ToolCallBand } from './ToolCallBand'
 import { ReflectionBlock } from './ReflectionBlock'
+import { RewindHere } from './RewindHere'
 import { SteerNote } from './SteerNote'
 import { groupAgentBlocks } from '../../lib/tool-call-groups'
 import { VramSwitchCard } from './VramSwitchCard'
@@ -715,6 +716,7 @@ function MessageBubbleImpl({ message, onRegenerate, onRegenerateRound, onEdit, p
             'flex items-center gap-0.5 ' + actionBarVisibility + ' ' +
             (isUser ? 'justify-end pr-0.5' : 'justify-start pl-0.5')
           }>
+            {isUser && activeConversationId && !readOnly && <RewindHere conversationId={activeConversationId} message={message} />}
             {isUser && actions.edit && (
               <button onClick={actions.edit} className="p-1 rounded-md text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/10 transition-colors" aria-label="Edit message" title="Edit"><Pencil size={12} /></button>
             )}

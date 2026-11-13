@@ -10,6 +10,7 @@ import { useBackgroundAgentWake } from '../../hooks/useBackgroundAgentWake'
 import { useGenerationStore } from '../../stores/generationStore'
 import { ChatInput } from './ChatInput'
 import { SteerNote } from './SteerNote'
+import { RewindHere } from './RewindHere'
 import { RunErrorActions } from './RunErrorActions'
 import { useSteerQueue } from '../../hooks/useSteerQueue'
 import { ChatFileChip } from './ChatFileChip'
@@ -488,7 +489,7 @@ export function CodexView() {
                 return (
                   <div
                     key={msg.id}
-                    className={`flex gap-2 px-3 py-1 ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}
+                    className={`group flex gap-2 px-3 py-1 ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}
                   >
                     {/* The same avatar column as in the chat (avatar-slot.ts). */}
                     {msg.role === 'user' ? (
@@ -744,6 +745,12 @@ export function CodexView() {
                       })()}
                       {msg.role === 'assistant' && (
                         <RequestUsageLine usage={msg.requestUsage} className="block px-1" />
+                      )}
+                      {/* CA U4: files back to before this instruction. */}
+                      {!readOnly && msg.role === 'user' && activeConversationId && (
+                        <div className="flex justify-end opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity">
+                          <RewindHere conversationId={activeConversationId} message={msg} />
+                        </div>
                       )}
                       {/* CA U7: the newest failed answer offers a way on. */}
                       {!readOnly && msg.role === 'assistant' && msg.error && !codexGenerating && msg.id === lastAssistantId && (

@@ -19,6 +19,7 @@ import { isThinkingCompatible, isVisionCompatible, declaredVision } from '../../
 import { clampEffort, effortChoices, effortLabel, nextEffort, DEFAULT_EFFORT } from '../../lib/effort'
 import type { AgentToolCall } from '../../types/agent-mode'
 import type { ImageAttachment } from '../../types/chat'
+import { useComposerFillStore } from '../../stores/composerFillStore'
 import { loadChatDrafts, newChatKey, storeChatDrafts, type ChatDrafts } from '../../lib/chat-drafts'
 import { MAX_CHAT_IMAGES, prepareChatImages } from '../../lib/chat-image-input'
 import { blindModelNotice } from '../../lib/chat-attachment-input'
@@ -312,6 +313,18 @@ export function ChatInput({ onSend, onStop, isGenerating, waitingForLocalLane, p
     setMention(null)
   }
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  // CA U4: a rewound message comes back into the field once. Decided in the
+  // render, state against state, like the draft switch above (no effect may
+  // move the draft, der-entwurf-wechselt-im-render).
+  const fill = useComposerFillStore((s) => s.fill)
+  const [fillSeen, setFillSeen] = useState(fill?.n ?? 0)
+  if (fill && fill.n !== fillSeen) {
+    setFillSeen(fill.n)
+    setInput(fill.text)
+  }
+  useEffect(() => {
+    if (fillSeen) textareaRef.current?.focus()
+  }, [fillSeen])
   const fileInputRef = useRef<HTMLInputElement>(null)
   // Text already in the box when dictation started. Interim + final transcripts
   // are written as base + transcript, so streaming chunks REPLACE (not stack)

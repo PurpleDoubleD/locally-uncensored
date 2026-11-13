@@ -14,6 +14,7 @@
  */
 
 import { backendCall } from '../api/backend'
+import { beforeFromError, recordWrite, textBefore, type Before } from './agent-core/checkpoints'
 import { useStagedChangesStore, type StagedChange } from '../stores/stagedChangesStore'
 import { useChatStore } from '../stores/chatStore'
 import { resolveChatWorkspaceSlug } from '../api/workspace-slug'
@@ -79,7 +80,7 @@ const withEol = (text: string, eol: '\r\n' | '\n') =>
 async function reconcile(
   jail: string,
   change: StagedChange,
-): Promise<{ content: string; merged: number }> {
+): Promise<{ content: string; merged: number; before: Before }> {
   const base = change.oldContent ?? ''
   let res: { content?: string; encoding?: string } | undefined
   try {
@@ -88,9 +89,9 @@ async function reconcile(
       chatId: jail,
       workingDirectory: change.workingDirectory,
     })
-  } catch {
+  } catch (e) {
     // gone or unreadable, the write recreates it, which is what the user asked for
-    return { content: change.newContent, merged: 0 }
+    return { content: change.newContent, merged: 0, before: beforeFromError(e) }
   }
   // Not UTF-8 on disk (bug hunt 01.10.2026, C8): read as '' it matched an
   // empty base and was overwritten without the drift check ever seeing it.
@@ -100,17 +101,18 @@ async function reconcile(
     )
   }
   const current = res?.content ?? ''
+  const before = textBefore(current)
   // The file on disk decides the form; an empty file inherits the model's.
   const eol = current ? eolOf(current) : eolOf(change.newContent)
   const baseLf = toLf(base)
   const currentLf = toLf(current)
   const newLf = toLf(change.newContent)
   if (currentLf === baseLf || currentLf === newLf) {
-    return { content: withEol(change.newContent, eol), merged: 0 }
+    return { content: withEol(change.newContent, eol), merged: 0, before }
   }
   const merged = mergeThreeWay(baseLf, currentLf, newLf)
   if (merged.ok) {
-    return { content: withEol(merged.content, eol), merged: merged.mergedRegions }
+    return { content: withEol(merged.content, eol), merged: merged.mergedRegions, before }
   }
   throw new Error(
     `${change.path} changed on disk in the same ${merged.conflicts === 1 ? 'place' : 'places'} this edit touches, so applying it would drop those changes. Everything else was left alone. Reject this one and let the model read the file again.`,
@@ -182,19 +184,17 @@ async function applyStagedChangeInner(chatId: string, staged: StagedChange): Pro
   const partial = contentWithDecisions(latest.oldContent ?? '', latest.newContent, latest.hunkDecisions)
   const change: StagedChange = { ...latest, newContent: partial.content }
   const jail = await jailFor(chatId)
-  const { content, merged } = await reconcile(jail, change)
+  const { content, merged, before } = await reconcile(jail, change)
   if (!stillPending(chatId, change)) return false
-  const res = await backendCall<{ status?: string; path?: string }>('fs_write', {
-    path: change.resolvedPath || change.path,
-    content,
-    chatId: jail,
-    workingDirectory: change.workingDirectory,
-  })
+  // CA U4: what the file held before this apply (reconcile just read it), for "Rewind to here".
+  const target = { path: change.resolvedPath || change.path, chatId: jail, workingDirectory: change.workingDirectory }
+  const res = await backendCall<{ status?: string; path?: string }>('fs_write', { ...target, content })
   // 'saved' and 'unchanged' are both success ('unchanged' = the file already
   // matched byte-for-byte). Anything else is a real failure worth retrying.
   if (res?.status && res.status !== 'saved' && res.status !== 'unchanged') {
     throw new Error(`fs_write returned status "${res.status}"`)
   }
+  if (res?.status === 'saved') recordWrite(chatId, target, before, res.path)
   for (const fn of appliedListeners) {
     try { fn(chatId, change.id) } catch { /* a listener never stops the write */ }
   }

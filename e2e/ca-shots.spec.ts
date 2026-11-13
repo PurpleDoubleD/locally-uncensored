@@ -51,6 +51,7 @@ async function boot(page: Page, turns: Turn[], width: number, theme: Theme, hold
     holdTools,
     toolDelayMs: 250,
     files: { 'math.ts': MATH },
+    realWriteStatus: true,
   })
   await seedOnboardingDone(page)
   await page.setViewportSize({ width, height: 900 })
@@ -119,4 +120,27 @@ test.describe('CA shots', () => {
     await page.waitForTimeout(2000)
     await shot(page, 'agent-dark-1280-2-done')
   })
+
+  for (const theme of ['dark', 'light'] as const) {
+    test(`rewind ${theme} 1280`, async ({ page }) => {
+      await boot(page, CODE_RUN, 1280, theme)
+      await page.getByRole('button', { name: 'Code', exact: true }).click()
+      await openNewChat(page)
+      await send(page, 'median() in src/math.ts is missing, implement it and run the tests')
+      for (let i = 0; i < 6; i++) {
+        await page.waitForTimeout(1500)
+        const allow = page.getByRole('button', { name: /^(Approve|Apply all|Run ⏎|Run)$/ }).first()
+        if (await allow.isVisible().catch(() => false)) await allow.click()
+      }
+      await page.waitForTimeout(2000)
+      const rewind = page.getByRole('button', { name: 'Rewind' }).first()
+      await page.locator('[data-rewind]').first().hover()
+      await rewind.click()
+      await expect(page.getByRole('dialog', { name: 'Rewind to before this message' })).toBeVisible()
+      await shot(page, `rewind-${theme}-1280-menu`)
+      await page.getByRole('button', { name: 'Files and chat' }).click()
+      await page.waitForTimeout(800)
+      await shot(page, `rewind-${theme}-1280-after`)
+    })
+  }
 })
