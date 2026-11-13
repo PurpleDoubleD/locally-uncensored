@@ -119,6 +119,9 @@ export interface EngineStatus {
   fitActions?: import('../lib/engine-fit').FitAction[] | null
   /** MoE layers whose experts stay on the processor (`--n-cpu-moe`). */
   cpuMoe?: number | null
+  /** C81 (3.1.0): while no engine runs, what the last one died of when it
+   *  died on its own (exit code or signal, and the likely cause). */
+  lastExit?: string | null
   /** The context the start asked for; `ctx` is what the VRAM plan gave a
    *  context nobody chose (3.0.8, A25). */
   ctxRequested?: number | null

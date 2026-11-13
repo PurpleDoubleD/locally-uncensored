@@ -19,6 +19,7 @@ import { useEffect, useRef, useState } from 'react'
 import { bundledEngineStatus, type EngineStatus } from '../api/engine'
 import { isTauri } from '../api/backend'
 import { onAppForeground } from '../lib/app-lifecycle'
+import { noteSidecarGone } from '../lib/engine-exit-notice'
 
 /** Rust meldet den eingesammelten toten Griff hierunter. */
 export const SIDECAR_GONE_EVENT = 'lu-sidecar-gone'
@@ -64,7 +65,7 @@ export function useBuiltinEngineStatus(pausiert?: () => boolean): EngineStatusVi
     const timer = setInterval(read, ENGINE_STATUS_POLL_MS)
     let unlisten: (() => void) | null = null
     void import('@tauri-apps/api/event')
-      .then(({ listen }) => listen(SIDECAR_GONE_EVENT, () => read()))
+      .then(({ listen }) => listen(SIDECAR_GONE_EVENT, (event) => { noteSidecarGone(event.payload); read() }))
       .then((off) => { if (alive) unlisten = off; else off() })
       .catch(() => {})
     // After a stay in the background the interval was frozen and the engine

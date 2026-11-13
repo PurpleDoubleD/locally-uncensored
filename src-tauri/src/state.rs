@@ -96,6 +96,10 @@ pub struct BundledEngine {
     /// part IS the answer to a request for this model, and must not be torn
     /// down because the part is still on disk.
     pub image_part_note: Option<&'static str>,
+    /// The process's stderr as it is being drained, so a death long after the
+    /// start can still name its last lines (C81). `None` where nothing was
+    /// piped (the phone's in-process engine, tests).
+    pub stderr: Option<std::sync::Arc<std::sync::Mutex<crate::commands::shell::Captured>>>,
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
