@@ -334,6 +334,10 @@ export const RELEASE_NOTES: ReleaseNote[] = [
             title: 'Search models by file name.',
             detail: 'Get new and Installed find a model by its file name too.',
           },
+          {
+            title: 'MiniMax H3 Reference to download.',
+            detail: 'Video from up to nine pictures of who or what is in the clip, with sound. With MiniMax H3 already installed, only the 19.5 GB model file is fetched.',
+          },
         ],
       },
       {

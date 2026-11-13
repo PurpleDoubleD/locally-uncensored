@@ -75,6 +75,9 @@ in the cloud catalogue.
 - Models and Settings stay where you left them when you switch to Chat or Create
   and back.
 - Search finds models by their file name too, in Get new and Installed.
+- MiniMax H3 Reference (video from up to nine pictures, with sound) is a
+  download in Get new. With MiniMax H3 already installed, only the model file
+  (19.5 GB) is fetched.
 - API models whose server does not report a context window: set the window
   from the context button. LU shows where the number comes from (server, you,
   or estimated).
