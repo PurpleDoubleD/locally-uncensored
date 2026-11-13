@@ -189,7 +189,7 @@ export function galleryTypeForFile(
 // 2.5.8: ace / wans2v / wananimate / wanvace are the specialized local-lane
 // architectures (music, talking character, motion control). They are neither
 // image nor video picker material — each lane has its own model list.
-export type ModelType = 'flux' | 'flux2' | 'krea2' | 'zimage' | 'ernie_image' | 'qwenimage' | 'qwenimage1' | 'chroma' | 'hidream' | 'sd3' | 'lumina2' | 'sdxl' | 'sd15' | 'wan' | 'wan22' | 'hunyuan' | 'ltx' | 'ltx25' | 'mochi' | 'cosmos' | 'cogvideo' | 'svd' | 'framepack' | 'pyramidflow' | 'allegro' | 'ace' | 'yue2' | 'wans2v' | 'wananimate' | 'wanvace' | 'animatediff' | 'minimaxh3' | 'unknown'
+export type ModelType = 'flux' | 'flux2' | 'krea2' | 'zimage' | 'ernie_image' | 'qwenimage' | 'qwenimage1' | 'chroma' | 'hidream' | 'sd3' | 'lumina2' | 'sdxl' | 'sd15' | 'wan' | 'wan22' | 'hunyuan' | 'ltx' | 'ltx25' | 'mochi' | 'cosmos' | 'cogvideo' | 'svd' | 'framepack' | 'pyramidflow' | 'allegro' | 'ace' | 'yue2' | 'wans2v' | 'wananimate' | 'wanvace' | 'animatediff' | 'minimaxh3' | 'minimaxh3image' | 'unknown'
 export type VideoBackend = 'wan' | 'animatediff' | 'none'
 
 export interface ClassifiedModel {
@@ -307,6 +307,12 @@ const KNOWN_MODELS: Record<string, ModelType> = {
   absolutereality: 'sd15',
 }
 
+/** C78: a file name of MiniMax H3 Image (minimax_h3_image_pruned_w4a8,
+ *  MiniMax-H3-Image-Q8_0.gguf, minimaxh3image_*). */
+export function isMinimaxH3ImageName(name: string): boolean {
+  return /minimax[_-]?h3[_-]?image/.test(name.toLowerCase())
+}
+
 /** FastVideo's distilled MiniMax H3 (fastvideo_fasth3_8step_v2_*). A full
  *  checkpoint, not a LoRA, and it only does text to video: the model card says
  *  the first/last frame and reference tasks were not distilled. */
@@ -376,6 +382,10 @@ export function classifyModel(name: string | null | undefined): ModelType {
   // generic tag: its CivitAI repacks carry anything in their names.
   // FastH3 (FastVideo's 8 step distillation of H3) is the same architecture
   // under a file name that never says "minimax": fastvideo_fasth3_8step_v2_*.
+  // MiniMax H3 Image (Comfy-Org/MiniMax-H3-Image, minimax_h3_image_*) is a
+  // still model on the H3 layout, not a video (C78). The header decides for a
+  // name that says neither (model_sniff.rs, applyHeaderSniff).
+  if (isMinimaxH3ImageName(lower)) return 'minimaxh3image'
   if (lower.includes('minimax_h3') || lower.includes('minimaxh3') || lower.includes('minimax-h3') || isFastH3(lower)) return 'minimaxh3'
 
   // Video models — most specific first (order matters: specific before generic)
@@ -488,7 +498,7 @@ export function hidreamSampling(model: string): { steps: number; cfg: number; sa
 export function isImageModelType(type: ModelType): boolean {
   return type === 'flux' || type === 'flux2' || type === 'krea2' || type === 'zimage' || type === 'ernie_image' || type === 'qwenimage'
     || type === 'qwenimage1' || type === 'chroma' || type === 'hidream' || type === 'sd3' || type === 'lumina2'
-    || type === 'sdxl' || type === 'sd15' || type === 'unknown'
+    || type === 'sdxl' || type === 'sd15' || type === 'minimaxh3image' || type === 'unknown'
 }
 
 export function isVideoModelType(type: ModelType): boolean {
@@ -755,6 +765,10 @@ export const MODEL_TYPE_DEFAULTS: Record<string, ModelTypeDefaults> = {
   // read 2026-10-01): res_multistep / simple, 20 steps, BasicGuider (no CFG),
   // 1344x768 native canvas, 24 fps, 124 frames is the node's ~5 s default.
   minimaxh3: { steps: 20, cfg: 1.0, sampler: 'res_multistep', scheduler: 'simple', width: 1344, height: 768, frames: 124, fps: 24 },
+  // C78: MiniMax H3 Image, official template image_minimax_h3_image_t2i (read
+  // 12.11.2026): KSampler 6 steps at CFG 1 on euler / simple. The template
+  // note says it works badly below about 4 MP, so 2048 x 2048.
+  minimaxh3image: { steps: 6, cfg: 1.0, sampler: 'euler', scheduler: 'simple', width: 2048, height: 2048, frames: 1, fps: 1 },
   mochi: { steps: 30, cfg: 4.5, sampler: 'euler', scheduler: 'normal', width: 848, height: 480, frames: 84, fps: 24 },
   cosmos: { steps: 35, cfg: 7.0, sampler: 'euler', scheduler: 'normal', width: 1024, height: 1024, frames: 121, fps: 24 },
   cogvideo: { steps: 50, cfg: 6.0, sampler: 'euler_ancestral', scheduler: 'normal', width: 480, height: 480, frames: 49, fps: 8 },
@@ -1227,12 +1241,19 @@ const SNIFF_TYPES: Record<string, ModelType> = {
   flux: 'flux', flux2: 'flux2', krea2: 'krea2', zimage: 'zimage', ernie_image: 'ernie_image',
   qwenimage: 'qwenimage', qwenimage1: 'qwenimage1', chroma: 'chroma', hidream: 'hidream',
   sd3: 'sd3', lumina2: 'lumina2', sdxl: 'sdxl', sd15: 'sd15', wan: 'wan', minimaxh3: 'minimaxh3',
+  minimaxh3image: 'minimaxh3image',
 }
 
 /** Name types the header may overrule: the image families and 'unknown'. A
  *  video or lane name keeps its name type, because Wan 2.1 and 2.2 (and S2V,
  *  Animate, VACE) share one tensor layout and only the name tells them apart. */
-const SNIFF_OVERRULES = (t: ModelType) => isImageModelType(t)
+const SNIFF_OVERRULES = (t: ModelType) => isImageModelType(t) || t === 'minimaxh3'
+
+/** C78: a name taken for H3 video may only be turned into H3 Image by its
+ *  header. The other video families share layouts the header cannot tell apart. */
+function headerMayRetype(from: ModelType, to: ModelType): boolean {
+  return from !== 'minimaxh3' || to === 'minimaxh3image'
+}
 
 /**
  * Discord 2026-09-26..28: a CivitAI name
@@ -1264,10 +1285,12 @@ export async function applyHeaderSniff(models: ClassifiedModel[]): Promise<void>
     if (!a?.arch) continue
     if (a.arch === 'vae' || a.arch === 'text_encoder') { drop.add(m); continue }
     const type = SNIFF_TYPES[a.arch]
-    if (type && type !== m.type) {
+    if (type && type !== m.type && headerMayRetype(m.type, type)) {
       log.info('comfyui.header_sniff_retyped', { name: m.name, from: m.type, to: type })
       m.type = type
     }
+    // An H3 video file keeps the answer it always had: no parts.
+    if (m.type === 'minimaxh3') continue
     m.parts = { textEncoder: !!a.hasTextEncoder, vae: !!a.hasVae }
   }
   if (drop.size > 0) {

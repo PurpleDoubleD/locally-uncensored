@@ -92,7 +92,7 @@ describe('the LoRA stack in a workflow of the user\'s own', () => {
       '5': { class_type: 'KSamplerAdvanced', inputs: { model: ['1', 0], positive: ['4', 0] } },
       '6': { class_type: 'KSamplerAdvanced', inputs: { model: ['2', 0], positive: ['4', 0] } },
     }
-    const out = await injectParameters(wf, { model: { nodeId: '1', inputKey: 'unet_name' } }, params({ model: 'wan22_high.safetensors', lora: 'detail_slider' }), 'wan')
+    const out = await injectParameters(wf, { model: { nodeId: '1', inputKey: 'unet_name', loaderType: 'unet' } }, params({ model: 'wan22_high.safetensors', lora: 'detail_slider' }), 'wan')
     const high = out[String((out['5'].inputs?.model as [string, number])[0])]
     const low = out[String((out['6'].inputs?.model as [string, number])[0])]
     expect(high.class_type).toBe('LoraLoader')

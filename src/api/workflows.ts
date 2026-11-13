@@ -323,7 +323,7 @@ export async function injectParameters(
         'This workflow has no model loader LU can put a LoRA behind. Add a LoraLoader to the workflow in ComfyUI, or clear the LoRA stack.',
       )
     }
-    log.info('[workflows] LoRA stack', lora)
+    log.info('[workflows] LoRA stack', { added: lora.added, alreadyThere: lora.alreadyThere })
   }
 
   log.info('[workflows] Injected workflow nodes', { nodes: apiNodes(wf).map(([id, n]) =>

@@ -122,6 +122,12 @@ interface StrategyResult {
  *  0.35.0, YuE2 in 0.36.0. "Update ComfyUI" in the text is what Create keys the
  *  one click update on (needsComfyUpdate). */
 export const LTX25_NEEDS_UPDATE = 'LTX 2.5 needs ComfyUI 0.32.0 or newer. Update ComfyUI in Settings.'
+
+/** C78: what Create says for MiniMax H3 Image, a still model on the H3
+ *  layout that LU has no graph for yet. */
+export const MINIMAX_H3_IMAGE_NO_BUILDER =
+  'MiniMax H3 Image has no workflow built into LU yet. Save the ComfyUI template "MiniMax-H3-Image: Text to Image", '
+  + 'import it under Workflows and assign it to this model. Create then runs it with your prompt, size and LoRAs.'
 /** A step distillation LoRA names its step count (minimax_h3_fl2v_turbo_8step_...). */
 const H3_STEP_LORA = /turbo\D*?(\d+)\s*_?steps?/i
 export const FASTH3_NEEDS_UPDATE = 'FastH3 needs ComfyUI 0.35.0 or newer. Update ComfyUI in Settings.'
@@ -133,6 +139,13 @@ export function determineStrategy(
   nodes: CategorizedNodes,
   models: AvailableModels,
 ): StrategyResult {
+  // C78: MiniMax H3 Image has no graph of LU's own yet. Its workflow is the
+  // official template; imported under Workflows and assigned to the model,
+  // Create runs it with the prompt, size and LoRAs (workflows.ts).
+  if (modelType === 'minimaxh3image') {
+    return { strategy: 'unavailable', reason: MINIMAX_H3_IMAGE_NO_BUILDER }
+  }
+
   const hasUNET = nodes.loaders.includes('UNETLoader')
   const hasCheckpoint = nodes.loaders.includes('CheckpointLoaderSimple')
   const hasCLIPLoader = nodes.loaders.includes('CLIPLoader')

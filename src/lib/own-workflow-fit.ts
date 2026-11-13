@@ -12,7 +12,7 @@
 
 import type { ComfyModelSource } from '../types/models'
 
-const UNET_FAMILIES = new Set(['flux', 'flux2', 'zimage', 'wan', 'wan22', 'hunyuan', 'ltx25'])
+const UNET_FAMILIES = new Set(['flux', 'flux2', 'zimage', 'wan', 'wan22', 'hunyuan', 'ltx25', 'minimaxh3image'])
 
 export function modelNeedsUnetLoader(type: string, source?: ComfyModelSource): boolean {
   if (source === 'diffusion_model') return true
