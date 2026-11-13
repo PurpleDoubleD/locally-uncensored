@@ -948,7 +948,7 @@ export function ChatInput({ onSend, onStop, isGenerating, waitingForLocalLane, p
                     }`}
                   >
                     <Icon size={11} className="shrink-0 text-gray-400 dark:text-gray-500" />
-                    <span className="min-w-0 truncate text-[0.72rem]">
+                    <span className="min-w-0 truncate t-control">
                       <span className="font-medium text-gray-800 dark:text-gray-100">{base}{entry.isDir ? '/' : ''}</span>
                       {dir && <span className="ml-1.5 t-micro text-gray-400 dark:text-gray-500">{dir}</span>}
                     </span>

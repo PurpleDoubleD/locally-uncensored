@@ -1,4 +1,5 @@
 import { SkillsSettings } from './SkillsSettings'
+import { CommandRulesSettings } from './CommandRulesSettings'
 import { useState, useEffect, useLayoutEffect, useRef, type ReactNode, type ChangeEvent } from 'react'
 import { withDetail } from '../../lib/error-text'
 // `X` steht hier weiterhin, obwohl der Sprachabschnitt mit seinen Symbolen
@@ -2540,6 +2541,12 @@ export function SettingsPage() {
           {FEATURE_FLAGS.AGENT_MODE && (
             <Section title="Skills">
               <SkillsSettings />
+            </Section>
+          )}
+
+          {FEATURE_FLAGS.AGENT_MODE && (
+            <Section title="Allowed commands">
+              <CommandRulesSettings />
             </Section>
           )}
 

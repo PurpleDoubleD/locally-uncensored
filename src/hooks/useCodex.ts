@@ -39,7 +39,7 @@ import { codexAsksBefore } from '../lib/agent-approval-policy'
 import { buildHermesToolPrompt, buildHermesToolResult, buildHermesToolCall, parseHermesToolCalls, stripToolCallTags, hasToolCallTags } from '../api/hermes-tool-calling'
 import { streamProviderTurn, type StreamedProviderTurn } from '../lib/provider-stream'
 import { createHermesDisplayFilter, createThinkStreamSplitter, createTurnThinkingSink } from '../lib/hermes-stream'
-import { beginAgentRun, endAgentRun, setActiveAgentModel, type AgentRunContext } from '../api/agent-context'
+import { beginAgentRun, endAgentRun, getActiveWorkspace, setActiveAgentModel, type AgentRunContext } from '../api/agent-context'
 import { resolveChatWorkspaceSlug } from '../api/workspace-slug'
 import { codexModeKnobs, isCodexMode, stricterCodexMode, type CodexMode } from '../lib/codex-mode'
 import { CODEX_PLAN_SYSTEM_PROMPT } from '../lib/codex-plan-prompt'
@@ -114,6 +114,7 @@ import { turnCaps } from '../lib/remote-turn-caps'
 import { useMemoryStore } from '../stores/memoryStore'
 import { extractMemoriesFromPair } from './useMemory'
 import { useCodexConfirmStore } from '../stores/codexConfirmStore'
+import { commandAllowedHere, ruleScope } from '../stores/commandRulesStore'
 // ── Die Teile, die dieser Haken nicht mehr selbst traegt ────────────────────
 // Jedes dieser Module haelt EINEN geteilten Zustand oder EINE Regel, die
 // mehrere Stellen hier gemeinsam brauchen; der Dateikopf dort sagt jeweils,
@@ -2497,6 +2498,11 @@ export function useCodex() {
                   external: toolRegistry.getToolByName(req.toolName)?.source === 'external',
                 })) return true
                 const a = req.args || {}
+                // CA K4: a command the user allowed for this folder runs without
+                // the card. Every part of a chain must be covered, and the hard
+                // block list still applies when it runs.
+                const scope = ruleScope(getActiveWorkspace(req.run), convId)
+                if (req.toolName === 'shell_execute' && commandAllowedHere(scope, a.command)) return true
                 // In-app popup, not window.confirm. The native dialog carried OS
                 // chrome and the app origin in its title bar, could not be
                 // styled, and had no way to say "stop asking" (2026-07-24).
@@ -2513,6 +2519,7 @@ export function useCodex() {
                   // what put the gate up.
                   cloudReason: !settings.codexConfirmShell && codexMode !== 'ask' && providerId === 'lu-cloud',
                   ...(convId ? { conversationId: convId } : {}),
+                  ...(scope ? { ruleScope: scope } : {}),
                 }, abort.signal)
               }
             // Unattended by choice, stated in writing: awaitApproval is a

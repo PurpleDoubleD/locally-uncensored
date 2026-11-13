@@ -17,7 +17,8 @@ import { v4 as uuid } from 'uuid'
 import { streamProviderTurn, type StreamedProviderTurn } from '../lib/provider-stream'
 import { requestUsageTracker } from '../lib/request-usage'
 import { createHermesDisplayFilter, createThinkStreamSplitter, createTurnThinkingSink } from '../lib/hermes-stream'
-import { beginAgentRun, endAgentRun, setActiveAgentModel, renderWorkspaceSection, takeChatArtifacts, type AgentRunContext } from '../api/agent-context'
+import { beginAgentRun, endAgentRun, getActiveWorkspace, setActiveAgentModel, renderWorkspaceSection, takeChatArtifacts, type AgentRunContext } from '../api/agent-context'
+import { commandAllowedHere, ruleScope } from '../stores/commandRulesStore'
 import { resolveChatWorkspaceSlug } from '../api/workspace-slug'
 import { isOllamaLocal } from '../api/backend'
 import { requestGenerationCancel } from '../api/vram-handoff'
@@ -3092,7 +3093,13 @@ export function useAgentChat() {
               cloudOptIn: settings.codexCloudConfirmOptIn,
               providerId,
             })
+          // CA K4: a command the user allowed for this folder ("Always allow
+          // here") skips the card; chains need every part covered.
+          // Never for a blocked tool: a rule answers "ask?", not "allowed?".
+          const ruleAllows = permLevel !== 'blocked' && tc.function.name === 'shell_execute'
+            && commandAllowedHere(ruleScope(getActiveWorkspace(run), convId), tc.function.arguments?.command)
           const needsApproval = (permLevel !== 'auto' || cloudShellConfirm)
+            && !ruleAllows
             && !(await approvalIsMoot(tc.function.name, tc.function.arguments ?? {}, run))
           // Exec-timeout parity with the Code tab (audit B8): without an
           // injected default the Rust side used its 120 s fallback, so the
@@ -3108,6 +3115,10 @@ export function useAgentChat() {
             args: toolArgs,
             status: needsApproval ? 'pending_approval' : 'running',
             timestamp: Date.now(),
+          }
+          if (needsApproval && tc.function.name === 'shell_execute') {
+            const scope = ruleScope(getActiveWorkspace(run), convId)
+            if (scope) ac.ruleScope = scope
           }
           addBlock(runState, convId!, assistantMessage.id, {
             id: blockId,

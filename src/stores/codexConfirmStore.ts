@@ -34,6 +34,9 @@ export interface CodexConfirmRequest {
   /** The chat that asks, when known: a shared chat forwards the question to
    *  the paired phone (lib/remote-chats-bridge). */
   conversationId?: string
+  /** Where an "always allow here" rule would be kept (stores/commandRulesStore):
+   *  the run's folder, or this chat's own sandbox. Absent: no such button. */
+  ruleScope?: string
 }
 
 interface Waiting {

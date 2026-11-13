@@ -111,6 +111,9 @@ export interface AgentToolCall {
   parentToolCallId?: string
   /** True when args passed JSON-schema validation (Phase 4). */
   schemaValidated?: boolean
+  /** Where an "always allow here" rule for this shell call would be kept
+   *  (stores/commandRulesStore): set on a call that waits for approval. */
+  ruleScope?: string
   /** Unified diff for file_write/file_edit, rendered by ToolCallBlock
    *  (audit D5) instead of raw result text. */
   diff?: string

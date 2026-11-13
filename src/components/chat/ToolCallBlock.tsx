@@ -26,6 +26,8 @@ import { useWorkflowCardStore, workflowCardForCall } from '../../stores/workflow
 import { parseWorkflowMark } from '../../api/mcp/workflow-mark'
 import { isSelfControlToolName } from '../../lib/settings-tool-names'
 import { useChatStore } from '../../stores/chatStore'
+import { useCommandRulesStore } from '../../stores/commandRulesStore'
+import { suggestRuleFor } from '../../lib/agent-core/command-rules'
 import { commandIcon } from '../../lib/shell-command-classify'
 import { requestGenerationCancel } from '../../api/vram-handoff'
 import { cancelBackgroundJob } from '../../lib/background-cancels'
@@ -282,6 +284,10 @@ function ToolCallBlockImpl({ toolCall, onApprove, onReject }: Props) {
   const isRunning = toolCall.status === 'running'
   const isPending = toolCall.status === 'pending_approval'
   const isFailed = toolCall.status === 'failed' || toolCall.status === 'rejected'
+  // CA K4: "Always allow `npm test` here", for a waiting shell call that knows its folder.
+  const alwaysRule = isPending && toolCall.toolName === 'shell_execute' && toolCall.ruleScope && typeof toolCall.args?.command === 'string'
+    ? suggestRuleFor(toolCall.args.command)
+    : null
   // The first use of computer control in a chat waits here for the user's yes.
   const chatAsk = useComputerChatAsk(toolCall.toolName, isRunning, useChatStore((s) => s.activeConversationId))
   // A11 / C60: a change LU makes to itself waits here for Accept, and stays
@@ -630,6 +636,20 @@ A user 2026-06-07 fix this lived inside the collapsed details, so a
                   >
                     <Check size={10} /> Approve
                   </button>
+                  {alwaysRule && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        useCommandRulesStore.getState().allow(toolCall.ruleScope!, alwaysRule)
+                        onApprove()
+                      }}
+                      data-testid="approve-always-here"
+                      title="Approves this command, and from now on commands that start like this run without asking in this folder. You can remove the rule in Settings → Agent."
+                      className="flex items-center gap-1 px-2.5 py-1 rounded t-micro text-gray-700 dark:text-gray-200 border border-gray-300 dark:border-white/15 hover:bg-gray-100 dark:hover:bg-white/[0.06] transition-colors"
+                    >
+                      Always allow <code className="font-mono">{alwaysRule}</code> here
+                    </button>
+                  )}
                   <button
                     onClick={(e) => { e.stopPropagation(); onReject() }}
                     className="flex items-center gap-1 px-2.5 py-1 rounded t-micro font-medium text-red-700 dark:text-red-300 bg-red-500/10 dark:bg-red-500/10 hover:bg-red-500/15 dark:hover:bg-red-500/15 border border-red-500/20 dark:border-red-500/25 transition-colors"
