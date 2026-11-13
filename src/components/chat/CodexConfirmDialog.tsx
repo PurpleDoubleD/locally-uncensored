@@ -87,7 +87,7 @@ export function CodexConfirmDialog() {
         <div className="px-3">
           <pre
             data-testid="confirm-command"
-            className="max-h-48 overflow-auto rounded-md bg-gray-950 dark:bg-black/50 px-3 py-2 t-mono leading-relaxed text-gray-100 whitespace-pre-wrap break-all"
+            className="lu-on-dark max-h-48 overflow-auto rounded-md bg-gray-950 dark:bg-black/50 px-3 py-2 t-mono leading-relaxed text-gray-100 whitespace-pre-wrap break-all"
           >
             {pending.command && !plain ? pending.command : plain ? <><span className="select-none text-gray-500">$ </span>{plain}</> : '(no command preview)'}
           </pre>
@@ -100,7 +100,7 @@ export function CodexConfirmDialog() {
           <button
             onClick={() => answer(true)}
             autoFocus
-            className="inline-flex items-center gap-1.5 px-3 py-1 rounded-md t-control font-medium bg-gray-900 text-white hover:bg-gray-800 dark:bg-white dark:text-gray-900 dark:hover:bg-gray-200 transition-colors"
+            className="lu-control lu-primary inline-flex items-center gap-1.5 px-3 t-control font-medium"
           >
             Run <kbd className="t-micro opacity-60 font-sans">⏎</kbd>
           </button>

@@ -27,6 +27,7 @@ import { parseWorkflowMark } from '../../api/mcp/workflow-mark'
 import { isSelfControlToolName } from '../../lib/settings-tool-names'
 import { useChatStore } from '../../stores/chatStore'
 import { useCommandRulesStore } from '../../stores/commandRulesStore'
+import { useCodexConfirmStore } from '../../stores/codexConfirmStore'
 import { suggestRuleFor } from '../../lib/agent-core/command-rules'
 import { toolCallTitle, diffStat, shellExitCode, hasToolTitle, stripAnsi } from '../../lib/tool-call-title'
 import { toolRegistry } from '../../api/mcp/tool-registry'
@@ -286,7 +287,13 @@ function ToolCallBlockImpl({ toolCall, onApprove, onReject }: Props) {
   const isRunning = toolCall.status === 'running'
   const isPending = toolCall.status === 'pending_approval'
   const isFailed = toolCall.status === 'failed' || toolCall.status === 'rejected'
-  const title = toolCallTitle(toolCall.toolName, toolCall.args, toolCall.status, toolRegistry.displayName(toolCall.toolName))
+  // The Code tab keeps a call 'running' while its confirm card waits; the row
+  // says it waits, not that it runs (CA U1).
+  const waitsOnCard = useCodexConfirmStore((st) =>
+    isRunning && !!st.pending && st.pending.toolName === toolCall.toolName
+    && JSON.stringify(st.pending.args ?? {}) === JSON.stringify(toolCall.args ?? {}),
+  )
+  const title = toolCallTitle(toolCall.toolName, toolCall.args, waitsOnCard ? 'pending_approval' : toolCall.status, toolRegistry.displayName(toolCall.toolName))
   const stat = diffStat(toolCall.diff)
   const isShell = toolCall.toolName === 'shell_execute'
   const exitCode = isShell ? shellExitCode(toolCall.result) : null
@@ -395,7 +402,7 @@ function ToolCallBlockImpl({ toolCall, onApprove, onReject }: Props) {
         >
           <ToolIcon size={13} className="text-gray-400 dark:text-gray-500 shrink-0" />
           {/* CA U1: what the call did, in words; the internal name is the tooltip. */}
-          <span data-testid="tool-title" className={`t-control truncate min-w-0 ${isRunning ? 'lu-tool-shimmer' : 'text-gray-600 dark:text-gray-400'}`}>
+          <span data-testid="tool-title" className={`t-control truncate min-w-0 ${isRunning && !waitsOnCard ? 'lu-tool-shimmer' : 'text-gray-600 dark:text-gray-400'}`}>
             {title.verb}
             {title.target && (
               <>
@@ -639,7 +646,7 @@ A user 2026-06-07 fix this lived inside the collapsed details, so a
               {/* Result (raw text). The inline media preview now renders
                   always-visible above the collapsible (a user 2026-06-07). */}
               {isShell && (
-                <pre data-testid="tool-terminal" className="t-mono leading-relaxed rounded-md bg-gray-950 dark:bg-black/50 text-gray-100 px-3 py-2 overflow-auto scrollbar-thin max-h-[300px] whitespace-pre-wrap break-words">
+                <pre data-testid="tool-terminal" className="lu-on-dark t-mono leading-relaxed rounded-md bg-gray-950 dark:bg-black/50 text-gray-100 px-3 py-2 overflow-auto scrollbar-thin max-h-[300px] whitespace-pre-wrap break-words">
                   <span className="select-none text-gray-500">$ </span>{typeof toolCall.args?.command === 'string' ? toolCall.args.command : ''}
                   {toolCall.result ? `\n${stripAnsi(toolCall.result)}` : ''}
                 </pre>

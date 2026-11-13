@@ -90,7 +90,7 @@ test.describe('CA shots', () => {
         await page.waitForTimeout(2500)
         await shot(page, `code-${theme}-${width}-1-waiting`)
         for (let i = 0; i < 4; i++) {
-          const allow = page.getByRole('button', { name: /^(Allow|Approve|Apply|Run|Accept)/ }).first()
+          const allow = page.getByRole('button', { name: /^(Approve|Apply all|Run ⏎|Run)$/ }).first()
           if (await allow.isVisible().catch(() => false)) {
             await allow.click()
             await page.waitForTimeout(1200)
@@ -110,7 +110,7 @@ test.describe('CA shots', () => {
     await page.waitForTimeout(2500)
     await shot(page, 'agent-dark-1280-1-waiting')
     for (let i = 0; i < 4; i++) {
-      const allow = page.getByRole('button', { name: /^(Allow|Approve|Apply|Run|Accept)/ }).first()
+      const allow = page.getByRole('button', { name: /^(Approve|Apply all|Run ⏎|Run)$/ }).first()
       if (await allow.isVisible().catch(() => false)) {
         await allow.click()
         await page.waitForTimeout(1200)
