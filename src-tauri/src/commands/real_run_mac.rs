@@ -1296,14 +1296,20 @@ fn mesh_run() {
     if !on() || !own_folder_only() {
         return;
     }
-    let state = state();
-    let none = json!({});
     let name = var("LU_REAL_NAME").unwrap_or_else(|| "mesh-run".to_string());
     wait_for_mains();
+    let picture = var("LU_REAL_IMAGES").expect("LU_REAL_IMAGES names the picture");
+    mesh_from_picture(state(), &picture, &name, Value::Null);
+}
+
+/// The 3D half of a run: stage `picture`, make the model, record it as
+/// `mesh3d <name>` with `before` (what came first, such as the picture's own
+/// run) and keep the GLB as `<name>.glb`.
+fn mesh_from_picture(state: &'static AppState, picture: &str, name: &str, before: Value) {
+    let none = json!({});
     let status = mesh3d::mesh3d_status(state, &none).expect("mlx_mesh3d_status");
     assert_eq!(status["installed"], true, "the 3D model is not installed: {status}");
-    let picture = var("LU_REAL_IMAGES").expect("LU_REAL_IMAGES names the picture");
-    let staged = stage(&picture);
+    let staged = stage(picture);
     let run = format!("real-run-{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0));
     let mut args = json!({ "run": run, "imagePath": staged });
     if let Some(resolution) = number::<u32>("LU_REAL_RESOLUTION") {
@@ -1373,6 +1379,7 @@ fn mesh_run() {
         "pid": seen_pid,
         "processesLeft": left.iter().map(|(pid, command)| format!("{pid} {}", shorten(command))).collect::<Vec<_>>(),
         "outputBytes": std::fs::metadata(&output).map(|m| m.len()).ok(),
+        "before": before,
     });
     if Path::new(&output).is_file() {
         let kept = out_dir().join(format!("{name}.glb"));
@@ -1388,4 +1395,124 @@ fn mesh_run() {
     } else {
         assert_eq!(last["status"], "complete", "the model did not complete: {}", last["error"]);
     }
+}
+
+/// What `threeDPicturePrompt` of `src/lib/three/run-local-3d.ts` makes of
+/// the user's words: the picture a 3D run from text paints first.
+fn three_d_picture_prompt(prompt: &str) -> String {
+    let p = prompt.trim().trim_end_matches(|c: char| c == '.' || c == ',' || c == ';' || c.is_whitespace());
+    format!("{p}{THREE_D_PICTURE_SUFFIX}")
+}
+
+const THREE_D_PICTURE_SUFFIX: &str = ", a single object, whole and centered, plain light background, soft studio light, three-quarter view";
+
+/// 3D from text, as Create runs it on a Mac: the image engine and its
+/// smallest model (`sd-turbo`) set up if they are not, one picture of
+/// `threeDPicturePrompt(LU_REAL_PROMPT)` at 512 px with the model's own
+/// steps, then that picture through the 3D engine. Kept as
+/// `<LU_REAL_NAME>-picture.png` and `<LU_REAL_NAME>.glb`.
+///
+/// ```sh
+/// LU_REAL_RUN=1 LU_REAL_RUN_HOME=/path/to/test LU_REAL_PROMPT="a small friendly robot, toy style" \
+///   cargo test real_run_mac::mesh_text -- --ignored --nocapture --test-threads=1
+/// ```
+#[test]
+#[ignore = "the real run: needs LU_REAL_RUN=1"]
+fn mesh_text() {
+    if !on() || !own_folder_only() {
+        return;
+    }
+    let state = state();
+    let none = json!({});
+    let rt = runtime();
+    let name = var("LU_REAL_NAME").unwrap_or_else(|| "mesh-text".to_string());
+    let id = var("LU_REAL_MODEL").unwrap_or_else(|| "sd-turbo".to_string());
+    wait_for_mains();
+    // The port of the image sidecar must be free: a sidecar of the app
+    // would answer for this run, from the app's own folder.
+    assert!(std::net::TcpListener::bind(("127.0.0.1", mlx::MLX_PORT)).is_ok(), "port {} is taken, the app's image engine may be running", mlx::MLX_PORT);
+
+    // The image engine, then the model, each followed on its slot.
+    let started = Instant::now();
+    let engine = Lane {
+        name: "image engine",
+        install: mlx::install_mlx_diffusion,
+        status: mlx::install_mlx_diffusion_status,
+        cancel: mlx::mlx_image_cancel_install,
+        weights: crate::os_paths::data_dir().join("mlx"),
+    };
+    let status = rt.block_on(mlx::mlx_status(state, &none)).expect("mlx_status");
+    let list = mlx::mlx_image_models(state, &none).expect("mlx_image_models");
+    let installed = |list: &Value| list.as_array().into_iter().flatten().any(|m| m["id"] == id.as_str() && m["installed"] == true);
+    let mut setup = json!({ "statusBefore": status });
+    if !installed(&list) {
+        let answer = (engine.install)(state, &none);
+        let (snap, _) = follow_install(&engine, state, started, None);
+        setup["engine"] = json!({ "answer": format!("{answer:?}"), "status": snap["status"], "error": snap["error"], "seconds": seconds(started) });
+        assert_eq!(snap["status"], "complete", "the image engine did not install: {}", snap["error"]);
+        let model_started = Instant::now();
+        let lane = image_lane();
+        let answer = (lane.install)(state, &json!({ "id": id }));
+        let (snap, seen) = follow_install(&lane, state, model_started, None);
+        setup["model"] = json!({ "answer": format!("{answer:?}"), "status": snap["status"], "error": snap["error"], "seconds": seconds(model_started), "seen": seen });
+        assert_eq!(snap["status"], "complete", "{id} did not install: {}", snap["error"]);
+    }
+    let list = mlx::mlx_image_models(state, &none).expect("mlx_image_models");
+    assert!(installed(&list), "{id} is not installed");
+    let model = list.as_array().unwrap().iter().find(|m| m["id"] == id.as_str()).cloned().unwrap();
+
+    // The picture, with the argument object of `mlxGenerate` for a model of
+    // the sidecar (`steps`, no guidance), as the 3D lane asks for it.
+    let picture_prompt = three_d_picture_prompt(&var("LU_REAL_PROMPT").expect("LU_REAL_PROMPT, the user's words"));
+    let side = number::<u32>("LU_REAL_WIDTH").unwrap_or(512);
+    let args = json!({
+        "prompt": picture_prompt,
+        "model": id,
+        "seed": number::<u64>("LU_REAL_SEED").unwrap_or(42),
+        "steps": model["steps"],
+        "width": side,
+        "height": side,
+    });
+    println!("mlx_generate {args}");
+    mlx::mlx_start(state, &none).expect("mlx_start");
+    let up = Instant::now();
+    while !mlx::real_run_sidecar_up() {
+        assert!(up.elapsed() < Duration::from_secs(180), "the sidecar did not come up");
+        std::thread::sleep(Duration::from_millis(250));
+    }
+    let sidecar_up = seconds(up);
+    let sampler = sample_memory(|| descendants().into_iter().find(|(_, command)| command.contains("server.py")).map(|(pid, _)| pid));
+    let painted = Instant::now();
+    let made = rt.block_on(mlx::mlx_generate(state, &args));
+    let picture_seconds = seconds(painted);
+    mlx::real_run_stop_sidecar();
+    let memory = sampler.finish();
+    let made = made.unwrap_or_else(|e| panic!("mlx_generate failed: {e}"));
+    let output = made["output"].as_str().expect("the picture on disk").to_string();
+    let kept = out_dir().join(format!("{name}-picture.png"));
+    std::fs::copy(&output, &kept).expect("keep the picture");
+    let left = descendants();
+    let picture = json!({
+        "setup": setup,
+        "args": args,
+        "sidecarUpSeconds": sidecar_up,
+        "seconds": picture_seconds,
+        "memory": memory,
+        "width": made["width"],
+        "height": made["height"],
+        "kept": kept,
+        "processesLeftAfterSidecar": left.iter().map(|(pid, command)| format!("{pid} {}", shorten(command))).collect::<Vec<_>>(),
+    });
+    println!("picture: {picture}");
+    mesh_from_picture(state, &kept.to_string_lossy(), &name, picture);
+}
+
+#[test]
+fn the_picture_prompt_is_the_one_create_sends() {
+    let ts = include_str!("../../../src/lib/three/run-local-3d.ts");
+    assert!(ts.contains(&format!("`${{p}}{THREE_D_PICTURE_SUFFIX}`")), "threeDPicturePrompt changed in run-local-3d.ts");
+    assert_eq!(
+        three_d_picture_prompt("a small friendly robot, toy style. "),
+        "a small friendly robot, toy style, a single object, whole and centered, plain light background, soft studio light, three-quarter view"
+    );
 }
