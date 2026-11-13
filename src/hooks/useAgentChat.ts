@@ -77,6 +77,7 @@ import { speaksOpenAIProtocol } from '../api/providers/compat-id'
 import { useSendSizeStore } from '../stores/sendSizeStore'
 import { resolveAgentNumCtx } from '../lib/agent-num-ctx'
 import { ensureBuiltinAgentCtx } from '../api/builtin-ensure'
+import { ensureImagePartLoaded, explainImageRefusal } from '../api/image-part-heal'
 import { approvalIsMoot } from '../api/mcp/builtin-tools'
 import { useMemoryStore } from '../stores/memoryStore'
 import { useVoiceStore } from '../stores/voiceStore'
@@ -2096,6 +2097,14 @@ export function useAgentChat() {
           // A7: the first wait of a turn is the model reading the request.
           // Said in words and with its size instead of a bare "Starting"; the
           // first word, shown thought or tool call takes the line back.
+          // A22: a picture goes along and the LU Engine may be running this
+          // model without its image part. Load it again before the server
+          // refuses the picture.
+          if (stepNo === 1 && (sendMessages as Array<{ images?: unknown[] }>).some((m) => m.images?.length)) {
+            await ensureImagePartLoaded(activeModel, () =>
+              useRunActivityStore.getState().setActivity(convId, { label: 'Loading the image part of the model', kind: 'reading' }),
+            )
+          }
           if (stepNo === 1) {
             useRunActivityStore.getState().setActivity(convId, readingActivity(estPrompt))
             // B26: a long first wait on a local Ollama model gets its reason
@@ -3635,7 +3644,8 @@ export function useAgentChat() {
           useChatStore.getState().updateMessageContent(
             convId!, assistantMessage.id,
             reportMultimodalRefusal(visionFeedbackGiven)
-              ? MULTIMODAL_UNSUPPORTED_MESSAGE
+              // A22: the true reason when it is the LU Engine's image part.
+              ? await explainImageRefusal(activeModel).catch(() => MULTIMODAL_UNSUPPORTED_MESSAGE)
               : (runState.content.trim() || closingSummary())
           )
         } else if ((err as { code?: string })?.code === 'tools_unsupported' || errorMsg.includes('does not support tools')) {
