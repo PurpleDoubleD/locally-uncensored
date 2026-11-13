@@ -17,6 +17,7 @@ import { ICON_STROKE_MARK } from '../../ui/icon-size'
 import { Button } from '../ui/Button'
 import { cn } from '../ui/cn'
 import { loadImageRef } from './loadImage'
+import { maskTintUrl } from '../canvas/mask-pixels'
 import { mediaRefFrom } from './mediaRef'
 import {
   subscribeInstallRuns, getInstallRun, startInstallRun, cancelInstallRun, clearInstallRun,
@@ -479,6 +480,20 @@ function InputSlot() {
   )
 }
 
+/** C76: the painted mask as a red, half see-through layer for the preview,
+ *  as the mask editor shows it. Null while it is made, or with no mask. */
+function useMaskTint(mask: { url: string; width: number; height: number } | null): string | null {
+  const [made, setMade] = useState<{ key: string; url: string | null } | null>(null)
+  const key = mask ? `${mask.width}x${mask.height}:${mask.url}` : ''
+  useEffect(() => {
+    if (!mask?.url) return
+    let alive = true
+    void maskTintUrl(mask.url, mask.width, mask.height).then((url) => { if (alive) setMade({ key, url }) })
+    return () => { alive = false }
+  }, [key, mask?.url, mask?.width, mask?.height])
+  return made && made.key === key ? made.url : null
+}
+
 // ── Source loaded, awaiting generation ──
 function SourcePreview({ onOpenMaskEditor }: { onOpenMaskEditor: () => void }) {
   const source = useCreateStore((s) => s.source)
@@ -498,6 +513,7 @@ function SourcePreview({ onOpenMaskEditor }: { onOpenMaskEditor: () => void }) {
     && !editNeedsMask(modelForOp('image', 'edit', cloudImageModel || defaultCloudModel('image')?.id || ''))
   const batchCount = useCreateStore((s) => s.batchSources.length)
   const batchOffered = useBatchOffered()
+  const maskTint = useMaskTint(mask && !noMask ? mask : null)
   // The same run over several images: no mask (it belongs to one image), and
   // the list below replaces "Change image".
   const batchOn = batchOffered && batchCount > 1
@@ -522,6 +538,18 @@ function SourcePreview({ onOpenMaskEditor }: { onOpenMaskEditor: () => void }) {
             className={cn(!maxHeight && 'max-h-[52vh]', 'max-w-full object-contain rounded-[var(--radius-panel)] border border-white/[0.06]', intent === 'removebg' && 'lu-checker')}
             style={maxHeight ? { maxHeight } : undefined}
           />
+          {/* C76: the mask itself, not only a word for it. Same box and the
+              same limits as the picture, so it lies exactly on it. */}
+          {maskTint && (
+            <img
+              src={maskTint}
+              alt=""
+              aria-hidden="true"
+              data-testid="source-mask-overlay"
+              className={cn(!maxHeight && 'max-h-[52vh]', 'pointer-events-none absolute left-0 top-0 max-w-full object-contain rounded-[var(--radius-panel)] border border-transparent')}
+              style={maxHeight ? { maxHeight } : undefined}
+            />
+          )}
           {mask && !noMask && (
             <div className="lu-on-dark absolute top-2 left-2 t-label text-gray-300 bg-black/50 px-2 py-1 rounded-md">mask painted</div>
           )}

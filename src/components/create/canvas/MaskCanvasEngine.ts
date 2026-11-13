@@ -4,6 +4,8 @@
 // LoadImageMask misaligns). Exports white-where-painted on black (ComfyUI
 // mask convention). Pure TS — ports back to src/components/create unchanged.
 // ─────────────────────────────────────────────────────────────────────
+import { maskToAlpha, readPixels } from './mask-pixels'
+
 export type Tool = 'brush' | 'eraser'
 
 const UNDO_CAP = 20
@@ -111,6 +113,22 @@ export class MaskCanvasEngine {
     this.ctx.globalCompositeOperation = 'source-over'
     this.ctx.clearRect(0, 0, this.width, this.height)
     this.ctx.drawImage(tmp, 0, 0)
+  }
+
+  /**
+   * C76: start from a mask painted before (white where painted, on black, as
+   * `exportMaskBlob` writes it). The editor used to open empty every time,
+   * and Apply on the empty canvas then threw the painted mask away. Not an
+   * undo step: it is where this session of the editor begins.
+   */
+  loadMask(img: CanvasImageSource): boolean {
+    const px = readPixels(img, this.width, this.height)
+    if (!px) return false
+    maskToAlpha(px.data.data, [255, 255, 255])
+    this.ctx.globalCompositeOperation = 'source-over'
+    this.ctx.clearRect(0, 0, this.width, this.height)
+    this.ctx.putImageData(px.data, 0, 0)
+    return true
   }
 
   hasPaint(): boolean {
