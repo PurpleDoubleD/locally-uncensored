@@ -64,7 +64,7 @@
  *     5 and never fed detector 6. Steer at 3 per command, halt at 6. A
  *     declined call also no longer counts as a success anywhere.
  *
- *  8. Near-identical silent batches (C83, tid2110 10.11.2026): 233 tool
+ *  8. Near-identical silent batches (C83, support case 10.11.2026): 233 tool
  *     calls of one tool, one every ~4 s, no text at all, each request
  *     420-447k tokens of input on a paid model. The arguments were 487-492
  *     characters and never byte-identical, so detectors 1-3 never saw a

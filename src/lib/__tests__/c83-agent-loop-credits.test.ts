@@ -1,7 +1,7 @@
 /**
  * C83: an agent loop ate a user's credits.
  *
- * tid2110, 10.11.2026 09-10Z, LU Cloud direct/deepseek-v4.1-flash: 233 tool
+ * A support case, 10.11.2026 09-10Z, LU Cloud direct/deepseek-v4.1-flash: 233 tool
  * calls in one run, one every ~4 s, no text from the model at all, and every
  * request carried 420-447k tokens of input. The arguments were 487-492
  * characters long and never byte-identical, so the guard (3 identical calls)

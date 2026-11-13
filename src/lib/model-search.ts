@@ -25,7 +25,7 @@ export function installedRowMatchesSearch(rowId: string, query: string): boolean
 }
 
 /**
- * Does a catalogue entry answer a search? (boromirofgeo, Discord 12.11.2026)
+ * Does a catalogue entry answer a search? (Discord, 12.11.2026)
  *
  * The catalogue names a model the way people say it ("Gemma 4 12B
  * Abliterated"), the disk names it the way the uploader did

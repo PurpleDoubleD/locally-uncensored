@@ -3,7 +3,7 @@ import { isGroupChat } from '../group-chat'
 import { resolveChatPersona } from '../chat-persona'
 
 /**
- * A19 (setimu, Discord 12.11.2026): Voice ignored the persona of the chat.
+ * A19 (Discord, 12.11.2026): Voice ignored the persona of the chat.
  *
  * A voice session keeps its transcript in a conversation of its own, made
  * fresh at Start. A new conversation starts with the persona OFF (the

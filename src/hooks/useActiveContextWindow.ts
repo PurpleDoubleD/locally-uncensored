@@ -70,7 +70,7 @@ export interface ActiveContext {
   /** Ollama only: what Auto sends, which an unknown maximum keeps small. */
   autoWindow?: number
   /**
-   * C77 (redapplevi, Discord 11.11.2026): a hosted OpenAI-compatible API
+   * C77 (Discord, 11.11.2026): a hosted OpenAI-compatible API
    * that names no window for its model. The window was then a guess from the
    * name, 8192 at the floor, and nothing could change it: the picker of a
    * paid model only sets the send window, and "Context window (Ollama)" is

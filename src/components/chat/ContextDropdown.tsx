@@ -380,7 +380,7 @@ export function ContextDropdown({ children }: { children?: ReactNode }) {
           >
             {(!cloud || ctx.sendAdjustable !== false) && (<>
             {cloud && ctx.modelWindowSettable && (
-              <div className="px-2 pt-0.5 text-[0.5rem] uppercase tracking-wide text-gray-400">Sent per message</div>
+              <div className="px-2 pt-0.5 t-micro uppercase tracking-wide text-gray-400">Sent per message</div>
             )}
             <button onClick={() => apply(0)} className={rowCls(selectedNow === 0)}>
               <span>Auto{ctx.provider === 'ollama' ? ` · ${formatContextWindow(ctx.autoWindow ?? ollamaWindowFor(windowUse, ctx.modelMax))}` : ctx.provider === 'builtin' ? ` · ${formatContextWindow(ENGINE_DEFAULT_CTX)}` : ctx.provider === 'custom' && ctx.source !== 'user' ? ` · ${formatContextWindow(ctx.contextWindow)}` : cloud ? ` · ${formatContextWindow(globalSendWindow)}` : ''}</span>
@@ -401,7 +401,7 @@ export function ContextDropdown({ children }: { children?: ReactNode }) {
             </>)}
             {cloud && ctx.modelWindowSettable && (
               <div data-testid="context-model-window" className="flex flex-col gap-0.5">
-                <div className={`px-2 pt-1 ${ctx.sendAdjustable !== false ? 'mt-0.5 border-t border-gray-100 dark:border-white/[0.06]' : ''} text-[0.5rem] uppercase tracking-wide text-gray-400`}>Model context window</div>
+                <div className={`px-2 pt-1 ${ctx.sendAdjustable !== false ? 'mt-0.5 border-t border-gray-100 dark:border-white/[0.06]' : ''} t-micro uppercase tracking-wide text-gray-400`}>Model context window</div>
                 <button onClick={() => applyModelWindow(0)} className={rowCls(modelWindowPick === 0)}>
                   <span>Auto{modelWindowPick === 0 && ctx.modelWindow ? ` · ${formatContextWindow(ctx.modelWindow)}` : ''}</span>
                   {modelWindowPick === 0 && <Check size={10} />}
@@ -412,7 +412,7 @@ export function ContextDropdown({ children }: { children?: ReactNode }) {
                     {modelWindowPick === p && <Check size={10} />}
                   </button>
                 ))}
-                <div className="px-2 pt-0.5 text-[0.5rem] text-gray-400 leading-snug max-w-[220px]">
+                <div className="px-2 pt-0.5 t-micro text-gray-400 leading-snug max-w-[220px]">
                   {`Now ${formatContextWindow(ctx.modelWindow ?? 0)}, ${SOURCE_LABEL[ctx.modelWindowSource ?? 'guess']}. This API does not report the model's context window, so LU cannot check it. Pick the window its documentation names. Saved for this model.`}
                 </div>
               </div>

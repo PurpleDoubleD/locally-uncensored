@@ -1,4 +1,4 @@
-// Models search by file name (boromirofgeo, Discord 12.11.2026): the user had
+// Models search by file name (Discord, 12.11.2026): the user had
 // Gemma 4 12B Abliterated on disk under its uploader's file name and could
 // not find it again on the Models page.
 //

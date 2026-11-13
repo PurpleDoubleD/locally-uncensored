@@ -1,7 +1,7 @@
 /**
  * Cost brake for one agent run (C83).
  *
- * tid2110, 10.11.2026, LU Cloud direct/deepseek-v4.1-flash: 233 tool calls
+ * A support case, 10.11.2026, LU Cloud direct/deepseek-v4.1-flash: 233 tool calls
  * in one run, one every ~4 s, and every single request carried 420-447k
  * tokens of input. Around 214k credits were gone before the user looked.
  * The loop guard now catches near-copies of the same call (detector 8), but

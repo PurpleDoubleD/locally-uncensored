@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 /**
- * C77 (redapplevi, Discord 11.11.2026): an API model on an OpenAI-compatible
+ * C77 (Discord, 11.11.2026): an API model on an OpenAI-compatible
  * endpoint got a context window of 8192 because the API names none, and
  * nothing could change it ("Context window (Ollama)" is Ollama's, and the
  * picker of a paid model sets only the send window).

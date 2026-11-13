@@ -20,6 +20,7 @@ import type { MessageErrorKind } from '../types/chat'
 import { DISCONNECT_WITHOUT_ANSWER } from './answer-notes'
 import { CREDITS_EXHAUSTED_MESSAGE } from './credits-exhausted'
 import { MULTIMODAL_UNSUPPORTED_MESSAGE } from './ollama-errors'
+import { IMAGE_PART_NONE_HEAD, IMAGE_PART_NOT_LOADED_HEAD, IMAGE_PART_RELOADED_HEAD } from './image-part-notes'
 import { PLATFORM_TEXTS } from './platform-text'
 import { requestLimitMessage } from './request-limit'
 import { BAD_REQUEST_SENTENCE, TEMPLATE_REFUSAL_SENTENCE } from './template-refusal'
@@ -99,7 +100,7 @@ const TAIL_RULES: readonly TailRule[] = [
   { heads: bothWordings('cloudSessionEndedMidRun').map(headOf), read: () => ({ kind: 'session', detail: '' }) },
   { heads: bothWordings('agentBackendLost').map(headOf), read: (tail, cloud) => ({ kind: cloud ? 'network' : 'engine', detail: detailsOf(tail) }) },
   { heads: [...bothWordings('agentNoToolSupport'), ...bothWordings('agentToolTransportSwitched')].map(headOf), read: whole },
-  { heads: [MULTIMODAL_UNSUPPORTED_MESSAGE], read: whole },
+  { heads: [MULTIMODAL_UNSUPPORTED_MESSAGE, IMAGE_PART_NONE_HEAD, IMAGE_PART_NOT_LOADED_HEAD, IMAGE_PART_RELOADED_HEAD], read: whole },
   { heads: [headOf(TEMPLATE_REFUSAL_SENTENCE), headOf(BAD_REQUEST_SENTENCE)], read: whole },
   { heads: [THINKING_UNSUPPORTED_HEAD], read: () => ({ kind: 'generic', detail: THINKING_UNSUPPORTED_DETAIL }) },
   { heads: [RATE_LIMIT_HEAD], read: whole },

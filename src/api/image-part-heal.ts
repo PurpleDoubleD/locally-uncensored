@@ -1,5 +1,5 @@
 /**
- * A22 (boromirofgeo, Discord 12.11.2026): a vision model said "This model
+ * A22 (Discord, 12.11.2026): a vision model said "This model
  * can't read images".
  *
  * Gemma 4 12B Abliterated can read images, and its image part (the mmproj
@@ -26,6 +26,7 @@ import { bareBuiltinModelName } from '../lib/builtin-model-identity'
 import { preservedSwapCtx } from '../lib/builtin-ctx'
 import { useSettingsStore } from '../stores/settingsStore'
 import { MULTIMODAL_UNSUPPORTED_MESSAGE } from '../lib/ollama-errors'
+import { imagePartNotLoadedSentence, imagePartReloadedSentence, noImagePartSentence } from '../lib/image-part-notes'
 import { useProviderStore } from '../stores/providerStore'
 import { log } from '../lib/logger'
 
@@ -137,23 +138,11 @@ export async function ensureImagePartLoaded(modelName: string | null | undefined
 export function imagePartRefusalMessage(state: ImagePartState): string {
   switch (state.kind) {
     case 'no-part':
-      return (
-        `${state.model} has no image part installed, so it cannot see the picture. ` +
-        'Add its image part (the mmproj file) on the Models page, or switch to a model that has one, then send again.'
-      )
+      return noImagePartSentence(state.model)
     case 'not-loaded':
-      return (
-        `${state.model} can read images, but the LU Engine is running it without its image part (mmproj)` +
-        (state.note ? `: ${state.note.replace(/^Loaded without image input: /, '')}` : '.') +
-        ' LU tried to load it again and it did not come up. ' +
-        (/smaller context/i.test(state.note ?? '')
-          ? 'Lower the context in the engine settings, then send again.'
-          : 'Restart the engine from the model picker, then send again.')
-      )
+      return imagePartNotLoadedSentence(state.model, state.note)
     case 'sees':
-      return (
-        `${state.model} was running without its image part (mmproj). LU has loaded it again: send the message again and it will see the picture.`
-      )
+      return imagePartReloadedSentence(state.model)
     default:
       return MULTIMODAL_UNSUPPORTED_MESSAGE
   }

@@ -1,4 +1,4 @@
-// A19 (setimu, Discord 12.11.2026): Voice ignored the persona of the chat.
+// A19 (Discord, 12.11.2026): Voice ignored the persona of the chat.
 //
 // A voice session keeps its transcript in a conversation made fresh at Start,
 // and a fresh conversation starts with the persona off. The system prompt was

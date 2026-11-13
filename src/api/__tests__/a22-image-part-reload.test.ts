@@ -1,4 +1,4 @@
-// A22 (boromirofgeo, 12.11.2026): Gemma 4 12B Abliterated said "This model
+// A22 (Discord, 12.11.2026): Gemma 4 12B Abliterated said "This model
 // can't read images" while its image part (mmproj) lay next to it. The LU
 // Engine ran the model without the part; a restart fixed it.
 //
@@ -114,7 +114,7 @@ describe('A22: the image part of a vision model on the LU Engine', () => {
   it('a model with no image part installed says so', async () => {
     engine.imagePart = false
     const msg = await explainImageRefusal(MODEL)
-    expect(msg).toMatch(/has no image part installed/)
+    expect(msg).toMatch(/^No image part installed: /)
     expect(engine.swaps).toEqual([])
   })
 
