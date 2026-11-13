@@ -204,46 +204,6 @@ pub(crate) fn captured_tail(buf: &Arc<Mutex<Captured>>, max_lines: usize) -> Str
     lines[start..].join("\n")
 }
 
-#[cfg(test)]
-mod captured_tail_tests {
-    use super::*;
-
-    #[test]
-    fn the_tail_keeps_the_last_words_long_after_the_head_stopped() {
-        let buf = Arc::new(Mutex::new(Captured::default()));
-        {
-            let mut c = buf.lock().unwrap();
-            // Mehr als MAX_CAPTURE an Geplapper, dann der Absturz.
-            let line = b"slot update_slots: id  0 | task 7 | prompt processing progress\n";
-            let mut written = 0;
-            while written < MAX_CAPTURE + 64 * 1024 {
-                c.push(line);
-                written += line.len();
-            }
-            c.push(b"ggml_cuda_compute_forward: ROCm error: out of memory\n");
-            c.push(b"\x1b[31mGGML_ABORT\x1b[0m failed\n");
-        }
-        let tail = captured_tail(&buf, 2);
-        assert_eq!(tail, "ggml_cuda_compute_forward: ROCm error: out of memory\nGGML_ABORT failed");
-        // Der Kopf bleibt, wie er war: abgeschnitten nach MAX_CAPTURE.
-        assert!(captured_text(&buf).contains("[output truncated"));
-    }
-
-    #[test]
-    fn a_short_output_is_all_tail_and_a_wrapped_first_line_is_dropped() {
-        let buf = Arc::new(Mutex::new(Captured::default()));
-        buf.lock().unwrap().push(b"one\n\ntwo\nthree\n");
-        assert_eq!(captured_tail(&buf, 5), "one\ntwo\nthree");
-        assert_eq!(captured_tail(&buf, 1), "three");
-        let big = Arc::new(Mutex::new(Captured::default()));
-        let mut chunk = vec![b'x'; TAIL_CAPTURE];
-        chunk.extend_from_slice(b"\nlast\n");
-        big.lock().unwrap().push(&chunk);
-        // Die angeschnittene x-Zeile ist kein ganzer Satz und faellt weg.
-        assert_eq!(captured_tail(&big, 5), "last");
-        assert_eq!(captured_tail(&Arc::new(Mutex::new(Captured::default())), 5), "");
-    }
-}
 
 /// Every process descending from `root`, deepest last.
 pub(crate) fn descendants(root: u32, sys: &sysinfo::System) -> Vec<u32> {
@@ -1826,5 +1786,46 @@ mod cwd_in_workspace_tests {
         let abs = ws.join("fotos");
         assert_eq!(cwd_in_workspace(abs.to_str(), &ws), abs);
         let _ = std::fs::remove_dir_all(&ws);
+    }
+}
+
+#[cfg(test)]
+mod captured_tail_tests {
+    use super::*;
+
+    #[test]
+    fn the_tail_keeps_the_last_words_long_after_the_head_stopped() {
+        let buf = Arc::new(Mutex::new(Captured::default()));
+        {
+            let mut c = buf.lock().unwrap();
+            // Mehr als MAX_CAPTURE an Geplapper, dann der Absturz.
+            let line = b"slot update_slots: id  0 | task 7 | prompt processing progress\n";
+            let mut written = 0;
+            while written < MAX_CAPTURE + 64 * 1024 {
+                c.push(line);
+                written += line.len();
+            }
+            c.push(b"ggml_cuda_compute_forward: ROCm error: out of memory\n");
+            c.push(b"\x1b[31mGGML_ABORT\x1b[0m failed\n");
+        }
+        let tail = captured_tail(&buf, 2);
+        assert_eq!(tail, "ggml_cuda_compute_forward: ROCm error: out of memory\nGGML_ABORT failed");
+        // Der Kopf bleibt, wie er war: abgeschnitten nach MAX_CAPTURE.
+        assert!(captured_text(&buf).contains("[output truncated"));
+    }
+
+    #[test]
+    fn a_short_output_is_all_tail_and_a_wrapped_first_line_is_dropped() {
+        let buf = Arc::new(Mutex::new(Captured::default()));
+        buf.lock().unwrap().push(b"one\n\ntwo\nthree\n");
+        assert_eq!(captured_tail(&buf, 5), "one\ntwo\nthree");
+        assert_eq!(captured_tail(&buf, 1), "three");
+        let big = Arc::new(Mutex::new(Captured::default()));
+        let mut chunk = vec![b'x'; TAIL_CAPTURE];
+        chunk.extend_from_slice(b"\nlast\n");
+        big.lock().unwrap().push(&chunk);
+        // Die angeschnittene x-Zeile ist kein ganzer Satz und faellt weg.
+        assert_eq!(captured_tail(&big, 5), "last");
+        assert_eq!(captured_tail(&Arc::new(Mutex::new(Captured::default())), 5), "");
     }
 }
