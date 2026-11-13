@@ -9,10 +9,13 @@
  * catalogue carries reads as "LU does not have it". While a search is typed
  * it now looks in both tabs; without one the tab decides as before.
  */
+import { catalogFileNames, installedRowMatchesSearch, type SearchableCatalogEntry } from './model-search'
 export interface SearchableBundle {
   name: string
   description: string
   uncensored?: boolean
+  /** The files a bundle downloads: found by their names too. */
+  files?: SearchableCatalogEntry[]
 }
 
 export function bundlesForTabAndSearch<T extends SearchableBundle>(
@@ -22,5 +25,10 @@ export function bundlesForTabAndSearch<T extends SearchableBundle>(
 ): T[] {
   const q = search.trim().toLowerCase()
   if (!q) return bundles.filter((b) => (subTab === 'uncensored' ? !!b.uncensored : !b.uncensored))
-  return bundles.filter((b) => b.name.toLowerCase().includes(q) || b.description.toLowerCase().includes(q))
+  return bundles.filter(
+    (b) =>
+      b.name.toLowerCase().includes(q) ||
+      b.description.toLowerCase().includes(q) ||
+      (b.files ?? []).some((f) => catalogFileNames(f).some((n) => installedRowMatchesSearch(n, q))),
+  )
 }

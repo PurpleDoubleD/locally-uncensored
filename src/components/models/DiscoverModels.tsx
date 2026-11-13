@@ -21,6 +21,7 @@ import { kimiK31CatalogEntries } from '../../api/kimi-k3-catalog'
 import { asOneDownload, downloadSizeGB, gbOf, imagePartFileName, includeImageInputLabel, isImagePartFile } from '../../lib/image-part'
 import { sortByTier, tierGroup } from '../../lib/render/model-tier'
 import { bundlesForTabAndSearch } from '../../lib/discover-bundle-search'
+import { catalogEntryMatchesSearch } from '../../lib/model-search'
 import { getTotalRamGb } from '../../lib/hardware'
 import { vramFit } from '../../lib/vram-fit'
 import { chatModelBudgetGb, sharedMemoryWording } from '../../lib/shared-memory-wording'
@@ -760,10 +761,9 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0, o
     return sizeGB > 20 // highend (open-ended)
   }
 
-  const matchesSearch = (m: DiscoverModel) =>
-    !search ||
-    m.name.toLowerCase().includes(search.toLowerCase()) ||
-    m.description.toLowerCase().includes(search.toLowerCase())
+  // Name, description, and the file it downloads (lib/model-search): the
+  // model on disk can be found here by its file name too.
+  const matchesSearch = (m: DiscoverModel) => !search || catalogEntryMatchesSearch(m, search)
 
   // The size filter counts the image part like the tile does: it is loaded
   // next to the model, so a model that only fits without it does not fit.

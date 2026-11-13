@@ -1,5 +1,5 @@
 import { displayModelName } from '../../api/providers/registry'
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import { motion } from 'framer-motion'
 import {
   MessagesSquare, Images, Clapperboard,
@@ -42,7 +42,8 @@ import { counterView } from '../../lib/inventory-counter'
 import { groupInstalledByProvider, needsBackendSwitchHeading, foldedRowsSentence, LU_ENGINE_GROUP } from '../../lib/lu-engine-rows'
 import { isBuiltinEngineEntry } from '../../lib/lmstudio-match'
 import { externalDeleteHint, servesItsOwnFiles } from '../../lib/external-model-hint'
-import { installedRowMatchesSearch } from '../../lib/model-search'
+import { catalogNamesFor, installedModelMatchesSearch, installedRowMatchesSearch } from '../../lib/model-search'
+import { installedCatalogNames } from '../../lib/installed-catalog-names'
 import { isLoraRow } from '../../lib/lora-rows'
 import { useBuiltinEngineStatus, engineIsIdle } from '../../hooks/useBuiltinEngineStatus'
 import { LuEngineSwitchBar } from '../chat/LuEngineSwitchBar'
@@ -367,6 +368,9 @@ export function ModelManager() {
   const loraMatches = (r: LoraRow, q: string) =>
     installedRowMatchesSearch(r.name, q) || (!!r.label && installedRowMatchesSearch(r.label, q)) || (!!r.note && r.note.toLowerCase().includes(q.trim().toLowerCase()))
   const filteredModels = models.filter((m: AIModel) => m.type === mode && !isLoraRow(m))
+  // An installed file also answers to the catalogue name it was downloaded
+  // under ("Gemma 4 12B Abliterated" finds `Huihui-gemma-4-12B-…-Q4_K`).
+  const catalogByFile = useMemo(() => installedCatalogNames(), [])
   const modeMeta = RAIL_ITEMS.find(r => r.key === mode)!
   /** What the Installed counter and the Installed view are about right now. */
   const installedCount = showMacLoras
@@ -580,7 +584,7 @@ export function ModelManager() {
               ) : (
                 (() => {
                   const shown = searchQuery
-                    ? filteredModels.filter(m => installedRowMatchesSearch(m.name, searchQuery))
+                    ? filteredModels.filter(m => installedModelMatchesSearch(m.name, catalogNamesFor(m.name, catalogByFile), searchQuery))
                     : filteredModels
                   return (
                     <section className={skin.cls.group}>
