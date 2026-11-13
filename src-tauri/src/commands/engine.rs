@@ -5418,44 +5418,74 @@ pub(crate) fn last_engine_exit_note() -> Option<String> {
     LAST_ENGINE_EXIT.lock().ok().and_then(|g| g.clone())
 }
 
-/// The name and the usual cause of a POSIX signal, for the ones a model
-/// server actually dies of.
-fn signal_words(signal: i32) -> String {
-    match signal {
-        9 => "SIGKILL, killed from outside; on Linux most often the system's out-of-memory killer".into(),
-        6 => "SIGABRT, the engine stopped itself on an internal error, often a graphics driver (ROCm/CUDA/Vulkan) error".into(),
-        11 => "SIGSEGV, a crash inside the engine or the graphics driver".into(),
-        4 => "SIGILL, the processor does not support an instruction the engine uses".into(),
-        7 => "SIGBUS, a memory access failed, e.g. the model file changed or the disk went away".into(),
-        15 => "SIGTERM, asked to stop from outside LU".into(),
-        2 => "SIGINT, interrupted".into(),
-        n => format!("signal {n}"),
-    }
+/// The POSIX name of the signals a model server actually dies of.
+fn signal_name(signal: i32) -> Option<&'static str> {
+    Some(match signal {
+        2 => "SIGINT",
+        4 => "SIGILL",
+        6 => "SIGABRT",
+        7 => "SIGBUS",
+        9 => "SIGKILL",
+        11 => "SIGSEGV",
+        15 => "SIGTERM",
+        _ => return None,
+    })
+}
+
+/// What that signal usually means for a llama-server, in a user's words.
+fn signal_meaning(signal: i32) -> Option<&'static str> {
+    Some(match signal {
+        2 => "it was interrupted",
+        4 => "the processor does not support an instruction the engine uses",
+        6 => "the engine stopped itself on an internal error, often a graphics driver error",
+        7 => "a memory access failed, for example because the model file changed or its disk went away",
+        9 => "it was killed from outside, on Linux most often by the system's out-of-memory killer",
+        11 => "it crashed inside the engine or the graphics driver",
+        15 => "it was asked to stop from outside LU",
+        _ => return None,
+    })
 }
 
 /// Windows NTSTATUS crash codes, read back from `ExitStatus::code()`.
-fn windows_code_words(code: i32) -> Option<&'static str> {
+fn windows_code_meaning(code: i32) -> Option<&'static str> {
     match code as u32 {
-        0xC000_0005 => Some("access violation, a crash inside the engine or the graphics driver"),
-        0xC000_001D => Some("illegal instruction, the processor lacks AVX2"),
-        0xC000_0409 => Some("fail-fast abort, the engine stopped itself on an internal error"),
-        0xC000_00FD => Some("stack overflow"),
-        0xC000_0017 | 0xC000_012D => Some("out of memory"),
+        0xC000_0005 => Some("it crashed inside the engine or the graphics driver (access violation)"),
+        0xC000_001D => Some("the processor lacks AVX2, which the engine needs"),
+        0xC000_0409 => Some("the engine stopped itself on an internal error"),
+        0xC000_00FD => Some("the engine ran out of stack"),
+        0xC000_0017 | 0xC000_012D => Some("the computer ran out of memory"),
         0xC000_0135 => Some("a DLL the engine needs was not found"),
-        0xC000_013A => Some("stopped with Ctrl+C or Ctrl+Break"),
+        0xC000_013A => Some("it was stopped with Ctrl+C or Ctrl+Break"),
         _ => None,
     }
 }
 
-/// "exit code 1", "signal 9 (SIGKILL, …)", "exit code -1073741819 (0xC0000005, access violation …)".
-pub(crate) fn exit_cause_words(code: Option<i32>, signal: Option<i32>) -> String {
+/// The short label: "signal 6, SIGABRT", "exit code 0xC0000005", "exit code 1".
+fn exit_label(code: Option<i32>, signal: Option<i32>) -> String {
     match (code, signal) {
-        (_, Some(sig)) => format!("signal {sig} ({})", signal_words(sig)),
-        (Some(c), None) => match windows_code_words(c) {
-            Some(w) => format!("exit code {c} (0x{:08X}, {w})", c as u32),
-            None => format!("exit code {c}"),
+        (_, Some(sig)) => match signal_name(sig) {
+            Some(name) => format!("signal {sig}, {name}"),
+            None => format!("signal {sig}"),
         },
+        (Some(c), None) if windows_code_meaning(c).is_some() => format!("exit code 0x{:08X}", c as u32),
+        (Some(c), None) => format!("exit code {c}"),
         (None, None) => "no exit code".into(),
+    }
+}
+
+fn exit_meaning(code: Option<i32>, signal: Option<i32>) -> Option<&'static str> {
+    match (code, signal) {
+        (_, Some(sig)) => signal_meaning(sig),
+        (Some(c), None) => windows_code_meaning(c),
+        (None, None) => None,
+    }
+}
+
+/// For the log: "signal 6, SIGABRT: the engine stopped itself on …".
+pub(crate) fn exit_cause_words(code: Option<i32>, signal: Option<i32>) -> String {
+    match exit_meaning(code, signal) {
+        Some(m) => format!("{}: {m}", exit_label(code, signal)),
+        None => exit_label(code, signal),
     }
 }
 
@@ -5479,18 +5509,20 @@ fn stderr_exit_hint(tail: &str) -> Option<&'static str> {
 }
 
 /// The one sentence a user reads about an engine that stopped on its own.
+///
+/// What the engine itself said wins over what the signal usually means: a
+/// "ROCm error: out of memory" before a SIGABRT is the cause, the abort only
+/// the way it ended.
 pub(crate) fn engine_exit_note(exit: &SidecarExit) -> String {
-    let head = format!(
-        "The LU Engine stopped unexpectedly ({}).",
-        exit_cause_words(exit.code, exit.signal)
-    );
-    let hint = stderr_exit_hint(&exit.stderr_tail).or(match (exit.code, exit.signal) {
-        (_, Some(9)) => Some("This usually means the computer ran out of memory. A smaller model or a shorter context usually fixes this."),
-        _ => None,
-    });
-    match hint {
-        Some(h) => format!("{head} {h} It starts again with your next message; details are in the log."),
-        None => format!("{head} It starts again with your next message; details are in the log."),
+    let label = exit_label(exit.code, exit.signal);
+    let tail = "It starts again with your next message; details are in the log.";
+    if let Some(hint) = stderr_exit_hint(&exit.stderr_tail) {
+        return format!("The LU Engine stopped unexpectedly ({label}). {hint} {tail}");
+    }
+    let memory = if exit.signal == Some(9) { " A smaller model or a shorter context usually fixes this." } else { "" };
+    match exit_meaning(exit.code, exit.signal) {
+        Some(meaning) => format!("The LU Engine stopped unexpectedly ({label}): {meaning}.{memory} {tail}"),
+        None => format!("The LU Engine stopped unexpectedly ({label}). {tail}"),
     }
 }
 
@@ -9604,7 +9636,7 @@ mod tests {
         assert_eq!(exit.code, None);
         assert!(exit.stderr_tail.ends_with("ROCm error: out of memory"), "{exit:?}");
         let note = engine_exit_note(&exit);
-        assert!(note.contains("signal 6 (SIGABRT"), "{note}");
+        assert!(note.starts_with("The LU Engine stopped unexpectedly (signal 6, SIGABRT). The graphics card ran out of memory."), "{note}");
         assert!(note.contains("ran out of memory"), "{note}");
         let payload = sidecar_gone_payload(SIDECAR_ENGINE, port, &exit);
         assert_eq!(payload["signal"], 6);
@@ -9619,7 +9651,7 @@ mod tests {
         assert_eq!(exit.signal, Some(9));
         assert!(exit.stderr_tail.is_empty());
         let note = engine_exit_note(&exit);
-        assert!(note.contains("SIGKILL") && note.contains("ran out of memory"), "{note}");
+        assert!(note.contains("(signal 9, SIGKILL): it was killed from outside") && note.contains("out-of-memory killer"), "{note}");
     }
 
     #[cfg(unix)]
@@ -9639,12 +9671,12 @@ mod tests {
     fn exit_causes_read_like_words_on_every_platform() {
         assert_eq!(exit_cause_words(Some(1), None), "exit code 1");
         assert_eq!(exit_cause_words(None, None), "no exit code");
-        assert!(exit_cause_words(None, Some(11)).starts_with("signal 11 (SIGSEGV"));
-        assert!(exit_cause_words(None, Some(42)).starts_with("signal 42 (signal 42"));
+        assert!(exit_cause_words(None, Some(11)).starts_with("signal 11, SIGSEGV: it crashed"));
+        assert_eq!(exit_cause_words(None, Some(42)), "signal 42");
         // Windows hands NTSTATUS back as a negative i32.
         assert_eq!(
             exit_cause_words(Some(0xC000_0005u32 as i32), None),
-            "exit code -1073741819 (0xC0000005, access violation, a crash inside the engine or the graphics driver)",
+            "exit code 0xC0000005: it crashed inside the engine or the graphics driver (access violation)",
         );
         assert!(exit_cause_words(Some(ILLEGAL_INSTRUCTION_EXIT_CODE), None).contains("AVX2"));
         // A driver error in the tail beats the generic signal guess.

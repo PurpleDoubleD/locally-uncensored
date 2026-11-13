@@ -5,13 +5,15 @@
  * neither the log nor the window said why. Rust now reads the exit code or
  * signal and the last stderr lines when it reaps the process, and sends one
  * sentence with the `lu-sidecar-gone` event (`message`, chat engine only).
- * This shows that sentence above the chat history, where the other chat
- * notices live (stores/chatNoticeStore.ts).
+ * That sentence goes on the LU Engine line (stores/luEngineSwitchStore.ts),
+ * the place every other engine event already uses, as an error: it stays
+ * until it was seen and dismissed, not on a clock.
  */
-import { useChatNoticeStore } from '../stores/chatNoticeStore'
+import { isTauri } from '../api/backend'
+import { useLuEngineSwitchStore } from '../stores/luEngineSwitchStore'
 
-/** Long enough to read a two-sentence cause, short enough not to linger. */
-export const ENGINE_STOPPED_NOTICE_MS = 60_000
+/** Rust's event when its watch reaped a dead sidecar (commands/engine.rs). */
+export const SIDECAR_GONE_EVENT = 'lu-sidecar-gone'
 
 /** Pure: the sentence in a `lu-sidecar-gone` payload, or null. */
 export function engineStoppedMessage(payload: unknown): string | null {
@@ -21,9 +23,19 @@ export function engineStoppedMessage(payload: unknown): string | null {
   return typeof p.message === 'string' && p.message.trim() ? p.message.trim() : null
 }
 
-/** Called for every `lu-sidecar-gone`; shows the sentence when there is one. */
+/** Called for every `lu-sidecar-gone`; announces the sentence when there is one. */
 export function noteSidecarGone(payload: unknown): void {
   const message = engineStoppedMessage(payload)
   if (!message) return
-  useChatNoticeStore.getState().show('engine-stopped', message, 'fehler', ENGINE_STOPPED_NOTICE_MS)
+  useLuEngineSwitchStore.getState().announce(message, 'error')
+}
+
+/** At boot (App.tsx): one listener for the life of the window. */
+export function startEngineExitNotices(): void {
+  if (!isTauri()) return
+  void import('@tauri-apps/api/event')
+    .then(({ listen }) => listen(SIDECAR_GONE_EVENT, (event) => noteSidecarGone(event.payload)))
+    .catch(() => {
+      /* a build without events keeps the Settings line (lastExit) */
+    })
 }

@@ -1391,17 +1391,6 @@ export function ComfyUISettings() {
             Update ComfyUI
           </button>
         )}
-        {/* C80 (GitHub #230): a second, separate install next to the found one. */}
-        {status?.found && status?.complete !== false && installIdle && (
-          <SeparateComfyInstall
-            currentPath={status?.path}
-            onInstall={(target) => {
-              clearInstallNotice()
-              void useComfyInstallStore.getState().runInstall(target)
-            }}
-            buttonClassName="flex items-center gap-1 px-2 py-1 rounded t-micro bg-white/5 text-gray-400 hover:text-gray-200 hover:bg-white/10 transition-colors"
-          />
-        )}
         {(!status?.found || status?.complete === false) && installIdle && (
           <p className="w-full t-micro text-gray-600">
             Installs to your home folder by default. Set Path above (e.g. D:\ComfyUI) to install on another drive.
@@ -1489,6 +1478,18 @@ export function ComfyUISettings() {
           </div>
         )}
       </div>
+      )}
+      {/* C80 (GitHub #230): a second, separate install next to the found one.
+          Its own row: the button row above does not wrap. */}
+      {status?.isLocal !== false && status?.found && status?.complete !== false && installIdle && (
+        <SeparateComfyInstall
+          currentPath={status?.path}
+          onInstall={(target) => {
+            clearInstallNotice()
+            void useComfyInstallStore.getState().runInstall(target)
+          }}
+          buttonClassName="flex items-center gap-1 px-2 py-1 rounded t-micro bg-white/5 text-gray-400 hover:text-gray-200 hover:bg-white/10 transition-colors"
+        />
       )}
       <ComfyUpdateConfirmModal
         open={updateConfirmOpen}

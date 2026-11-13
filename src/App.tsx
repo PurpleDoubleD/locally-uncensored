@@ -44,6 +44,9 @@ function App() {
       // So does the idle unload of the LU Engine (lib/engine-idle-unload.ts).
       void import('./lib/engine-idle-unload').then(({ startEngineIdleUnloadSync }) => startEngineIdleUnloadSync())
 
+      // C81: an engine that died on its own says how (lib/engine-exit-notice.ts).
+      void import('./lib/engine-exit-notice').then(({ startEngineExitNotices }) => startEngineExitNotices())
+
       // The phone's tab name (GitHub #19) sits in Rust the same way
       // (lib/remote-page-title.ts).
       void import('./lib/remote-page-title').then(({ startRemotePageTitleSync }) => startRemotePageTitleSync())

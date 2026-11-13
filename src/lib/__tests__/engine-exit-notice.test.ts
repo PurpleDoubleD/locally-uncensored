@@ -1,23 +1,22 @@
 /**
- * C81 (3.1.0): an engine that dies on its own is named, with its cause, above
- * the chat. Negative control: return null from engineStoppedMessage and the
- * first case turns red.
+ * C81 (3.1.0): an engine that dies on its own is named, with its cause, on the
+ * LU Engine line. Negative control: return null from engineStoppedMessage and
+ * the first case turns red.
  */
 import { describe, it, expect, beforeEach } from 'vitest'
-import { engineStoppedMessage, noteSidecarGone, ENGINE_STOPPED_NOTICE_MS } from '../engine-exit-notice'
-import { useChatNoticeStore } from '../../stores/chatNoticeStore'
+import { engineStoppedMessage, noteSidecarGone } from '../engine-exit-notice'
+import { useLuEngineSwitchStore } from '../../stores/luEngineSwitchStore'
 
-const SENTENCE = 'The LU Engine stopped unexpectedly (signal 6 (SIGABRT, …)). The graphics card ran out of memory.'
+const SENTENCE = 'The LU Engine stopped unexpectedly (signal 6, SIGABRT). The graphics card ran out of memory.'
 
-beforeEach(() => useChatNoticeStore.getState().clear())
+beforeEach(() => useLuEngineSwitchStore.getState().dismiss())
 
-describe('C81: the engine death reaches the chat', () => {
-  it('shows the sentence Rust sent for the chat engine', () => {
+describe('C81: the engine death reaches the engine line', () => {
+  it('announces the sentence Rust sent for the chat engine, as an error', () => {
     noteSidecarGone({ sidecar: 'engine', port: 8127, signal: 6, message: SENTENCE })
-    const n = useChatNoticeStore.getState().notices
-    expect(n).toHaveLength(1)
-    expect(n[0]).toMatchObject({ id: 'engine-stopped', text: SENTENCE, ton: 'fehler' })
-    expect(ENGINE_STOPPED_NOTICE_MS).toBeGreaterThanOrEqual(30_000)
+    const s = useLuEngineSwitchStore.getState()
+    expect(s.note).toBe(SENTENCE)
+    expect(s.tone).toBe('error')
   })
 
   it('says nothing for the embeddings server, an old payload or garbage', () => {
@@ -25,14 +24,7 @@ describe('C81: the engine death reaches the chat', () => {
     noteSidecarGone({ sidecar: 'engine', port: 8127 })
     noteSidecarGone(null)
     noteSidecarGone('engine')
-    expect(useChatNoticeStore.getState().notices).toHaveLength(0)
+    expect(useLuEngineSwitchStore.getState().note).toBeNull()
     expect(engineStoppedMessage({ sidecar: 'engine', message: '   ' })).toBeNull()
-  })
-
-  it('a second death replaces the line instead of stacking', () => {
-    noteSidecarGone({ sidecar: 'engine', message: 'first' })
-    noteSidecarGone({ sidecar: 'engine', message: 'second' })
-    const n = useChatNoticeStore.getState().notices
-    expect(n.map((x) => x.text)).toEqual(['second'])
   })
 })

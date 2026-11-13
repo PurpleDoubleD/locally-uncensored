@@ -112,7 +112,7 @@ describe('an engine killed from outside while the panel stands open', () => {
   // of the exit status and the last stderr lines.
   it('names the cause of the death while no engine runs', async () => {
     await panelWithARunningEngine()
-    const why = 'The LU Engine stopped unexpectedly (signal 9 (SIGKILL, killed from outside)).'
+    const why = 'The LU Engine stopped unexpectedly (signal 9, SIGKILL): it was killed from outside.'
     bundledEngineStatus.mockResolvedValue({ ...DEAD, lastExit: why })
     await fireSidecarGone()
     expect(screen.getByTestId('builtin-engine-last-exit').textContent).toBe(why)
