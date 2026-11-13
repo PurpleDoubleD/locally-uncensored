@@ -1,6 +1,8 @@
 import type { ModelType } from './comfyui'
 import type { GenerateParams, VideoParams } from './comfyui'
-import { findMatchingVAE, findMatchingCLIP, getVAEModels, getCLIPModels } from './comfyui'
+import { findMatchingVAE, findMatchingCLIP, getVAEModels, getCLIPModels, getLoraModels } from './comfyui'
+import { normalizeLoraList } from './dynamic-workflow'
+import { injectLoraStack } from './workflow-lora-inject'
 import { log } from '../lib/logger'
 import { resolveRunSeed } from '../lib/run-seed'
 import { applyParamOverrides, type WorkflowParamOverrides } from './workflow-params'
@@ -309,6 +311,19 @@ export async function injectParameters(
     inject(paramMap.fps, (params as VideoParams).fps)
 
     forceSavedOutput(wf)
+  }
+
+  // C72: the LoRA stack picked in Create, chained behind the model loader
+  // the way LU's own builder does it. Before 3.1.0 it was dropped here.
+  const loraNames = normalizeLoraList(params.lora)
+  if (loraNames.length > 0) {
+    const lora = injectLoraStack(wf, paramMap, loraNames, params.loraStrength, await getLoraModels())
+    if (lora.added.length === 0 && lora.alreadyThere.length === 0) {
+      throw new Error(
+        'This workflow has no model loader LU can put a LoRA behind. Add a LoraLoader to the workflow in ComfyUI, or clear the LoRA stack.',
+      )
+    }
+    log.info('[workflows] LoRA stack', lora)
   }
 
   log.info('[workflows] Injected workflow nodes', { nodes: apiNodes(wf).map(([id, n]) =>

@@ -132,7 +132,7 @@ import { defaultLoraStrength } from '../lib/lora-strength'
 import { fetchGalleryItemBlob } from '../components/create/experimental/galleryUrl'
 import { LongRunStopped, longVideoRequest, runLongVideo, type ClipItem } from '../lib/long-video-run'
 import { settleSeams } from '../api/video-settle'
-import { ownWorkflowMisfit } from '../lib/own-workflow-fit'
+import { ownWorkflowMisfitNote } from '../lib/own-workflow-fit'
 import { loadImageRef } from '../components/create/experimental/loadImage'
 import { listMlxLoras } from '../api/mlx-loras'
 import {
@@ -1984,9 +1984,13 @@ export function useCreate() {
       // Check for custom workflow assignment — but verify it's compatible with the model
       let customWf = localOp || isUpscale ? null : useWorkflowStore.getState().getWorkflowForModel(activeModel, imageModelType)
       if (customWf) {
-        const misfit = ownWorkflowMisfit(apiNodes(customWf.workflow).map(([, n]) => n.class_type), imageModelType, listedModel?.source)
+        const misfit = ownWorkflowMisfitNote(customWf.name, apiNodes(customWf.workflow).map(([, n]) => n.class_type), imageModelType, listedModel?.source)
         if (misfit) {
-          console.warn(`[useCreate] Custom workflow incompatible: ${misfit}. Using auto.`)
+          // C72: said on the progress line and kept under the result, not
+          // only in the console.
+          console.warn(`[useCreate] ${misfit}`)
+          setProgress(5, misfit)
+          skippedNote = skippedNote ? `${skippedNote} ${misfit}` : misfit
           customWf = null
         }
       }

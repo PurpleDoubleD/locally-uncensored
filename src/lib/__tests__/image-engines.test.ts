@@ -273,7 +273,7 @@ describe('Qwen-Image 2.1 edits on the Mac and takes Create\'s settings', () => {
 
   it('COUNTER-CHECK: a model of the sidecar keeps its steps and is sent no CFG', async () => {
     await generateMlxImageDataUrl({ prompt: 'x', model: 'sd-turbo', steps: 4, guidance: 7, seed: 1, width: 512, height: 512 })
-    expect(calls.find((c) => c.cmd === 'mlx_generate')?.args).toEqual({ prompt: 'x', model: 'sd-turbo', steps: 4, seed: 1, width: 512, height: 512, run: expect.any(String) })
+    expect(calls.find((c) => c.cmd === 'mlx_generate')?.args).toEqual({ prompt: 'x', model: 'sd-turbo', steps: 4, seed: 1, width: 512, height: 512, run: expect.any(String), stall_timeout_secs: expect.any(Number) })
     // An image is passed on, so that Rust can refuse the edit in words. It
     // is never dropped on the way.
     calls.length = 0

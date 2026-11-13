@@ -29,3 +29,16 @@ export function ownWorkflowMisfit(classTypes: readonly string[], type: string, s
   if (!needsUnet && hasUnet && !hasCheckpoint) return 'model needs CheckpointLoaderSimple but workflow has UNETLoader'
   return null
 }
+
+/**
+ * C72 (3.1.0): the sentence for a workflow that is set aside, or null when it
+ * fits. The run used to say it only in the developer console, and Create
+ * rendered LU's own graph as if the workflow had been used.
+ */
+export function ownWorkflowMisfitNote(workflowName: string, classTypes: readonly string[], type: string, source?: ComfyModelSource): string | null {
+  if (!ownWorkflowMisfit(classTypes, type, source)) return null
+  const what = modelNeedsUnetLoader(type, source)
+    ? 'this model is a diffusion model and needs a UNETLoader, but the workflow loads a checkpoint (CheckpointLoaderSimple)'
+    : 'this model is a checkpoint and needs a CheckpointLoaderSimple, but the workflow loads a UNETLoader'
+  return `Your workflow "${workflowName}" is not used: ${what}. LU builds its own workflow for this model instead. Change the loader in ComfyUI and import the workflow again, or use it with a model it fits.`
+}

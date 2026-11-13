@@ -49,7 +49,13 @@ async function renderList() {
   await waitFor(() => expect(loadNodeDefs).toHaveBeenCalled())
   // The definitions are in once the LoRA list has its choices.
   fireEvent.click(screen.getByRole('button', { name: /Detail LoRA/ }))
-  await waitFor(() => expect((screen.getByLabelText('Lora name') as HTMLSelectElement).tagName).toBe('SELECT'))
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Lora name' }).getAttribute('aria-haspopup')).toBe('listbox'))
+}
+
+/** C79: a list is LU's own picker now. Open it and click the row. */
+function pick(name: string, row: string) {
+  fireEvent.click(screen.getByRole('button', { name }))
+  fireEvent.click(within(screen.getByRole('listbox')).getByRole('option', { name: row }))
 }
 
 function node(name: RegExp) {
@@ -62,7 +68,7 @@ describe('Workflow parameters in Create', () => {
     expect(screen.getByText('Workflow parameters')).toBeTruthy()
     expect(screen.getByRole('button', { name: /Sampler/ }).getAttribute('aria-expanded')).toBe('false')
     const lora = node(/Detail LoRA/)
-    expect((within(lora).getByLabelText('Lora name') as HTMLSelectElement).value).toBe('detail_tweaker_xl.safetensors')
+    expect(within(lora).getByRole('button', { name: 'Lora name' }).textContent).toBe('detail_tweaker_xl.safetensors')
     const strength = within(lora).getByLabelText('Strength model') as HTMLInputElement
     expect(strength.type).toBe('number')
     expect(strength.min).toBe('-100')
@@ -70,7 +76,7 @@ describe('Workflow parameters in Create', () => {
     fireEvent.click(screen.getByRole('button', { name: /LU_TestToggle/ }))
     expect((screen.getByLabelText('Enabled') as HTMLInputElement).type).toBe('checkbox')
     expect(screen.getByLabelText('Note').tagName).toBe('TEXTAREA')
-    expect(screen.getByLabelText('Mode').tagName).toBe('SELECT')
+    expect(screen.getByRole('button', { name: 'Mode' }).getAttribute('aria-haspopup')).toBe('listbox')
   })
 
   it('stores a change for this workflow, shows it, and Reset goes back to the file', async () => {
@@ -83,7 +89,7 @@ describe('Workflow parameters in Create', () => {
     fireEvent.change(screen.getByLabelText('Strength model'), { target: { value: '0.8' } })
     expect(useWorkflowStore.getState().paramOverrides['wf-1']).toBeUndefined()
 
-    fireEvent.change(screen.getByLabelText('Lora name'), { target: { value: 'detail_tweaker_xl.safetensors' } })
+    pick('Lora name', 'detail_tweaker_xl.safetensors')
     fireEvent.change(screen.getByLabelText('Strength clip'), { target: { value: '2' } })
     expect(useWorkflowStore.getState().paramOverrides['wf-1']).toEqual({ '10': { strength_clip: 2 } })
     fireEvent.click(screen.getByRole('button', { name: /Reset/ }))
@@ -104,12 +110,12 @@ describe('Workflow parameters in Create', () => {
   it('offers the VAE with Auto first, and a pick is stored', async () => {
     await renderList()
     fireEvent.click(screen.getByRole('button', { name: /VAELoader/ }))
-    const vae = screen.getByLabelText('Vae name') as HTMLSelectElement
-    expect(vae.value).toBe('')
-    expect(vae.options[0].text).toBe('Auto (LU picks a match)')
-    fireEvent.change(vae, { target: { value: 'sdxl_vae.safetensors' } })
-    expect(useWorkflowStore.getState().paramOverrides['wf-1']).toEqual({ '12': { vae_name: 'sdxl_vae.safetensors' } })
-    fireEvent.change(vae, { target: { value: '' } })
+    expect(screen.getByRole('button', { name: 'Vae name' }).textContent).toBe('Auto (LU picks a match)')
+    fireEvent.click(screen.getByRole('button', { name: 'Vae name' }))
+    expect(within(screen.getByRole('listbox')).getAllByRole('option')[0].textContent).toBe('Auto (LU picks a match)')
+    fireEvent.click(within(screen.getByRole('listbox')).getByRole('option', { name: 'ae.safetensors' }))
+    expect(useWorkflowStore.getState().paramOverrides['wf-1']).toEqual({ '12': { vae_name: 'ae.safetensors' } })
+    pick('Vae name', 'Auto (LU picks a match)')
     expect(useWorkflowStore.getState().paramOverrides['wf-1']).toBeUndefined()
   })
 
@@ -136,5 +142,47 @@ describe('Workflow parameters in Create', () => {
     useWorkflowStore.setState({ modelNameAssignments: { 'mine.safetensors': 'wf-1' } })
     rerender(createElement(ActiveWorkflowParams, { modelName: 'mine.safetensors', modelType: 'sdxl' }))
     expect(await screen.findByText('Workflow parameters')).toBeTruthy()
+  })
+
+  it('C79: a long LoRA list has a search, and a pick from it is stored', async () => {
+    const many = Array.from({ length: 40 }, (_, i) => `style_${String(i).padStart(2, '0')}.safetensors`)
+    loadNodeDefs.mockResolvedValueOnce({
+      ...defs,
+      LoraLoader: { input: { required: { ...defs.LoraLoader.input.required, lora_name: [['detail_tweaker_xl.safetensors', 'pixel-art-xl.safetensors', ...many]] } } },
+    })
+    await renderList()
+    fireEvent.click(screen.getByRole('button', { name: 'Lora name' }))
+    const search = screen.getByRole('textbox', { name: 'Search Lora name' })
+    fireEvent.change(search, { target: { value: 'pixel' } })
+    const rows = within(screen.getByRole('listbox')).getAllByRole('option')
+    expect(rows.map((r) => r.textContent)).toEqual(['pixel-art-xl.safetensors'])
+    fireEvent.click(rows[0])
+    expect(useWorkflowStore.getState().paramOverrides['wf-1']).toEqual({ '10': { lora_name: 'pixel-art-xl.safetensors' } })
+  })
+
+  it('C79: a short list has no search field', async () => {
+    await renderList()
+    fireEvent.click(screen.getByRole('button', { name: 'Lora name' }))
+    expect(screen.queryByRole('textbox', { name: 'Search Lora name' })).toBeNull()
+  })
+
+  it('C72: a workflow whose loader does not fit the model says so before the run', async () => {
+    const { useCreateStore } = await import('../../../../stores/createStore')
+    useWorkflowStore.setState({ modelNameAssignments: { 'flux1-dev.safetensors': 'wf-1' } })
+    // The checkpoint workflow, assigned to a model from diffusion_models.
+    useCreateStore.setState({ imageModelList: [{ name: 'flux1-dev.safetensors', type: 'flux', source: 'diffusion_model' }] as never })
+    render(createElement(ActiveWorkflowParams, { modelName: 'flux1-dev.safetensors', modelType: 'flux' }))
+    const note = await screen.findByTestId('own-workflow-misfit')
+    expect(note.textContent).toContain('Your workflow "My SDXL" is not used: this model is a diffusion model and needs a UNETLoader')
+    expect(note.textContent).toContain('LU builds its own workflow for this model instead.')
+  })
+
+  it('C72: a fitting workflow shows no such line', async () => {
+    const { useCreateStore } = await import('../../../../stores/createStore')
+    useWorkflowStore.setState({ modelNameAssignments: { 'mine.safetensors': 'wf-1' } })
+    useCreateStore.setState({ imageModelList: [{ name: 'mine.safetensors', type: 'sdxl', source: 'checkpoint' }] as never })
+    render(createElement(ActiveWorkflowParams, { modelName: 'mine.safetensors', modelType: 'sdxl' }))
+    expect(await screen.findByText('Workflow parameters')).toBeTruthy()
+    expect(screen.queryByTestId('own-workflow-misfit')).toBeNull()
   })
 })

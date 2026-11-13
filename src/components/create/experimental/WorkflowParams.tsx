@@ -7,7 +7,7 @@
 // workflow from the workflow manager (installedWorkflows).
 
 import { useEffect, useMemo, useState } from 'react'
-import { ChevronRight, RotateCcw, Search, SlidersHorizontal } from 'lucide-react'
+import { AlertTriangle, ChevronRight, RotateCcw, Search, SlidersHorizontal } from 'lucide-react'
 import type { ModelType } from '../../../api/comfyui'
 import type { ComfyApiGraph } from '../../../types/comfy-graph'
 import type { WorkflowTemplate } from '../../../types/workflows'
@@ -19,8 +19,16 @@ import {
 } from '../../../api/workflow-params'
 import { workflowOptionText } from '../../../lib/sampler-names'
 import { useWorkflowStore } from '../../../stores/workflowStore'
+import { useCreateStore } from '../../../stores/createStore'
+import { ownWorkflowMisfitNote } from '../../../lib/own-workflow-fit'
+import { apiNodes } from '../../../types/comfy-graph'
+import { Hinweis } from '../../ui/Hinweis'
 import { baseFieldClass, label } from './SchemaControl'
 import { cn } from '../ui/cn'
+import { Select, type SelectOption } from '../ui/Select'
+
+/** A list longer than this gets a search field (LoRAs, checkpoints). */
+const SEARCH_FROM = 8
 
 // ── Node definitions, once per set of node types while the app runs ──
 
@@ -128,16 +136,28 @@ function FieldControl({ field, value, onChange, id }: {
     return <NumberInput id={id} field={{ ...field, control: c }} value={typeof value === 'number' ? value : Number(field.fileValue)} onChange={onChange} />
   }
   if (c.kind === 'select') {
+    // C79 (3.1.0): LU's own list instead of a native <select>. Windows drew
+    // the native list white with the field's light grey text on it (Win 10,
+    // LU Dark), and a LoRA folder of a few hundred files had no search.
+    const options: SelectOption[] = [
+      ...(field.autoByLu ? [{ value: '', label: 'Auto (LU picks a match)' }] : []),
+      ...c.options.map((o) => ({ value: o, label: workflowOptionText(field.inputKey, o), title: o })),
+    ]
     return (
-      <select id={id} className={cn(baseFieldClass, 'cursor-pointer')} value={value === undefined ? '' : String(value)}
-        onChange={(e) => {
-          const v = e.target.value
-          if (v === '') return onChange(undefined)
-          onChange(typeof field.fileValue === 'number' && Number.isFinite(Number(v)) ? Number(v) : v)
-        }}>
-        {field.autoByLu && <option value="">Auto (LU picks a match)</option>}
-        {c.options.map((o) => <option key={o} value={o}>{workflowOptionText(field.inputKey, o)}</option>)}
-      </select>
+      <div id={id}>
+        <Select
+          ariaLabel={label(field.inputKey)}
+          size="sm"
+          options={options}
+          searchable={c.options.length > SEARCH_FROM}
+          placeholder={field.autoByLu ? 'Auto (LU picks a match)' : 'Choose…'}
+          value={value === undefined ? '' : String(value)}
+          onChange={(v) => {
+            if (v === '') return onChange(undefined)
+            onChange(typeof field.fileValue === 'number' && Number.isFinite(Number(v)) ? Number(v) : v)
+          }}
+        />
+      </div>
     )
   }
   const text = typeof value === 'string' ? value : value === undefined ? '' : String(value)
@@ -281,6 +301,24 @@ export function ActiveWorkflowParams({ modelName, modelType, path }: {
   path?: WorkflowRunPath
 }) {
   const workflow = useWorkflowStore((s) => s.getWorkflowForModel(modelName, modelType))
+  // The folder the model list found the file in decides the loader it needs.
+  const source = useCreateStore((s) =>
+    (s.imageModelList.find((m) => m.name === modelName) ?? s.videoModelList.find((m) => m.name === modelName))?.source)
   if (!workflow) return null
-  return <WorkflowParams key={workflow.id} workflow={workflow} path={path} />
+  // C72: a workflow with the wrong loader is set aside at run time. Said here
+  // before the run, so the list below is not edited for a workflow that will
+  // not run. Motion Control fills its workflow its own way and checks no loader.
+  const misfit = path === 'lane'
+    ? null
+    : ownWorkflowMisfitNote(workflow.name, apiNodes(workflow.workflow).map(([, n]) => n.class_type), modelType, source)
+  return (
+    <>
+      {misfit && (
+        <div className="mt-4" data-testid="own-workflow-misfit">
+          <Hinweis icon={<AlertTriangle size={12} className="mt-[2px] shrink-0" />}>{misfit}</Hinweis>
+        </div>
+      )}
+      <WorkflowParams key={workflow.id} workflow={workflow} path={path} />
+    </>
+  )
 }
