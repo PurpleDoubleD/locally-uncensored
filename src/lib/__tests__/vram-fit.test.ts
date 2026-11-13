@@ -213,6 +213,7 @@ describe('every bundle in the catalogue carries the two numbers', () => {
     ['LTX Video 2.3 · 22B FP8', 16, 29, 'big big tight tight'],
     ['MiniMax H3 · Video with Sound', 24, 24, 'big big big fits'],
     ['MiniMax H3 Turbo LoRA · 8 Steps', 24, 24, 'big big big fits'],
+    ['MiniMax H3 Reference · Video from Pictures', 24, 24, 'big big big fits'],
     ['FastH3 · MiniMax H3 in 8 Steps', 24, 24, 'big big big fits'],
     ['LTX 2.5 · Video with Sound', 24, 24, 'big big big fits'],
     ['LTX 2.5 · Small (GGUF Q4)', 16, 16, 'big big fits fits'],

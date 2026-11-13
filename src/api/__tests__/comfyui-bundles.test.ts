@@ -11,7 +11,7 @@ describe('Video Bundle Definitions', () => {
     bundles = getVideoBundles()
   })
 
-  it('has 18 video bundles', () => {
+  it('has 22 video bundles', () => {
     // 14 original - Allegro (diffusers only) + CogVideoX 2B replaced by 5B I2V,
     // + Wan 2.2 TI2V-5B (unified T2V/I2V, 2026-06-11); 2.5.8 adds the two
     // uncensored GGUF finetunes (NSFW Wan 14B t2v + Wan 2.2 Rapid AIO i2v).
@@ -20,8 +20,9 @@ describe('Video Bundle Definitions', () => {
     // wrapper registers. See wrapper-node-names.test.ts. 2026-10-01 adds
     // MiniMax H3 (video with sound). 2026-10-02 adds LTX 2.5 and FastH3.
     // 2026-10-03 adds the MiniMax H3 turbo LoRA as an add-on. 3.0.9 (B18)
-    // adds Wan 2.2 A14B I2V and T2V Fast and the Wan 2.1 speed LoRAs.
-    expect(bundles.length).toBe(21)
+    // adds Wan 2.2 A14B I2V and T2V Fast and the Wan 2.1 speed LoRAs. 3.1.0
+    // (W23) adds MiniMax H3 Reference.
+    expect(bundles.length).toBe(22)
   })
 
   it('every bundle has required fields', () => {

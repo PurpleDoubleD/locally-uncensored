@@ -1360,6 +1360,36 @@ export function getVideoBundles(): ModelBundle[] {
         },
       ],
     },
+    // MiniMax H3 Reference (W23, Discord 2026-11-12: the ref2va file was
+    // nowhere to download, though the H3 builder runs it since B38 with up to
+    // nine references, MiniMaxH3ReferenceToVideo). The file is the pruned
+    // int8 tier of the official Comfy-Org/MiniMax-H3 repo, the same tier as
+    // the fl2va bundle. Byte count and SHA-256 are the repo's LFS values, read
+    // from the Hugging Face tree API and an anonymous HEAD on 2026-11-13 (not
+    // gated). Same folder as fl2va; the encoder and the VAEs are the shared
+    // H3 files, so a machine with MiniMax H3 or FastH3 fetches only the model.
+    {
+      name: 'MiniMax H3 Reference · Video from Pictures',
+      description: 'MiniMax H3 with up to 9 reference pictures of who or what is in the clip, with its own sound. Shares its text encoder and VAEs with MiniMax H3.',
+      tags: ['MiniMax H3', 'Audio', 'References'],
+      totalSizeGB: 38.6,
+      vramRequired: '24+ GB',
+      workflow: 'minimaxh3',
+      tier: 'best',
+      url: 'https://huggingface.co/Comfy-Org/MiniMax-H3',
+      files: [
+        {
+          name: 'MiniMax H3 ref2va (int8)',
+          description: 'Main model, references to video with sound.',
+          pulls: '', tags: ['Model', '19.5 GB'], updated: 'New',
+          downloadUrl: 'https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/diffusion_models/minimax_h3_ref2va_pruned_int8_convrot.safetensors',
+          filename: 'minimax_h3_ref2va_pruned_int8_convrot.safetensors', subfolder: 'diffusion_models', sizeGB: 19.53,
+          sizeBytes: 20970379616,
+          sha256: '9255f52b6677845ad238f20dfaafa94727053694127ab7f255c048f0f9365779',
+        },
+        ...H3_SHARED_FILES,
+      ],
+    },
     // FastH3 (FastVideo, 8 step distilled MiniMax H3). A full checkpoint of its
     // own, not a LoRA: FastVideo/FastVideo-FastH3-Comfy ships the distilled
     // weights as diffusion_models/fastvideo_fasth3_8step_v2_pruned_*.safetensors.
