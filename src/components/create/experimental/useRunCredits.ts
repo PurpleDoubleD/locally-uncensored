@@ -2,7 +2,7 @@ import { useCreateStore } from '../../../stores/createStore'
 import { useCreateExp } from './CreateContext'
 import { intentToJob, quotaCostKind, type RenderKind, type RenderOp } from '../../../lib/render/cloud-jobs'
 import { lengthCredits, lengthPrice, runCredits } from '../../../stores/cloudCatalogStore'
-import { createRunModel, createStudioCost, isStudioModel, startImageCount } from '../../../lib/render/create-studio'
+import { createRunModel, createStudioCost, isStudioModel, startImageCount, studioIntentOf } from '../../../lib/render/create-studio'
 import { STUDIO_MODELS } from '../../../lib/render/studio-contract'
 import { runImageCount } from '../../../lib/render/image-count'
 
@@ -25,6 +25,7 @@ export function useRunCredits(): RunCredits | null {
   const intent = useCreateStore((s) => s.intent())
   const cloudImageModel = useCreateStore((s) => s.cloudImageModel)
   const cloudVideoModel = useCreateStore((s) => s.cloudVideoModel)
+  const threeDWay = useCreateStore((s) => s.threeDWay)
   const cloudOpModel = useCreateStore((s) => s.cloudOpModel)
   const characterTab = useCreateStore((s) => s.characterTab)
   const selectedCharacter = useCreateStore((s) => s.selectedCharacter)
@@ -63,7 +64,7 @@ export function useRunCredits(): RunCredits | null {
   // Wahl, die die Unterkategorie nicht fahren kann, rechnet hier als das Modell,
   // das wirklich laeuft.
   const model = createRunModel(
-    intent,
+    studioIntentOf(intent, threeDWay),
     { image: cloudImageModel, video: cloudVideoModel, op: cloudOpModel },
     characterUse ? selectedCharacter?.family ?? '' : undefined,
   )

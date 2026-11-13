@@ -15,6 +15,7 @@ export { listLoras } from '../../../api/cloud/loras'
 /** Which queue kind and op a subcategory renders as. 'video_upscale' is its
  *  own subcategory on the web; the queue knows it as an upscale of kind video. */
 export function intentToJob(intent: StudioIntent): { kind: RenderKind; op: RenderOp } {
+  if (intent === '3d-text' || intent === '3d-image' || intent === '3d-video') return desktopIntentToJob('3d')
   return intent === 'video_upscale' ? { kind: 'video', op: 'upscale' } : desktopIntentToJob(intent)
 }
 

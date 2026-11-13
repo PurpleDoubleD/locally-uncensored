@@ -1,5 +1,7 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
 import { blobFromUrl } from '../lib/render/data-url'
+import { THREE_D_TEXT } from '../lib/three/three-d-text'
+import { MAC_3D_MODEL, MAC_DETAIL_RESOLUTION, PC_3D_MODEL, threeDGalleryItem, threeDPicturePrompt, threeDProvenance } from '../lib/three/run-local-3d'
 import { coverCropBlob } from '../lib/cover-crop'
 import { videoRunGivenUp, videoRunProgress, videoRunStatus } from '../lib/mlx-video-progress'
 import { featherMaskBlob } from '../lib/mask-feather'
@@ -103,7 +105,7 @@ import { buildTrainCaption } from '../lib/train-captions'
 import { trainTriggerWord } from '../lib/train-trigger'
 import { characterThisWouldReplace, useTrainReplaceStore } from '../stores/trainReplaceStore'
 import { buildStyleCaption, missingNameLine, trainedLine, trainedLoraFile } from '../lib/train-kind'
-import { useCreateStore, EDIT_MAX_DENOISE, characterImageRun, deriveIntent, type CreateState, type GalleryItem } from '../stores/createStore'
+import { useCreateStore, EDIT_MAX_DENOISE, characterImageRun, deriveIntent, imageModelParams, type CreateState, type GalleryItem } from '../stores/createStore'
 import { useWorkflowStore } from '../stores/workflowStore'
 import { useSettingsStore } from '../stores/settingsStore'
 import { useRenderPreviewStore } from '../stores/renderPreviewStore'
@@ -176,6 +178,72 @@ async function freeMacMemoryForRender(say: (text: string) => void): Promise<Rend
     return null
   } finally {
     handoff.stop()
+  }
+}
+
+/**
+ * The local 3D run (3.1.0, C3D-PLAN 2.3/2.4): the picture on the Stage, and
+ * the sides of a video, become one GLB in the gallery. The content gate ran
+ * before this in runOnce. A Mac hands the chat model's memory over first, as
+ * for any render.
+ */
+async function runLocalThreeD(state: CreateState, seed: number, abortRef: { current: AbortController | null }): Promise<void> {
+  const { source, setError, setIsGenerating, setProgress, addToGallery } = state
+  setError(null)
+  if (!source) {
+    setError(THREE_D_TEXT.needSource)
+    return
+  }
+  const own = new AbortController()
+  abortRef.current = own
+  setIsGenerating(true)
+  state.setProgressPhase('loading-model')
+  setProgress(0, THREE_D_TEXT.phases.ready)
+  const mac = isMlxImageHost()
+  const eviction = mac ? await freeMacMemoryForRender((text) => setProgress(0, text)) : null
+  const started = Date.now()
+  const way = state.threeDWay
+  const prompt = way === 'text' ? state.prompt.trim() : ''
+  const onProgress = (percent: number | undefined, text: string) => {
+    useCreateStore.getState().setProgressPhase('sampling')
+    useCreateStore.getState().setProgress(percent ?? 0, text)
+  }
+  try {
+    if (mac) {
+      const api = await import('../api/mlx-3d')
+      const staged = source.filename || await stageStartImage(await blobFromUrl(source.url))
+      const made = await api.runMacMesh3d(
+        { imagePath: staged, resolution: MAC_DETAIL_RESOLUTION[state.threeDDetail], cutout: state.threeDCutout },
+        { signal: own.signal, onProgress: (percent, text) => onProgress(percent, text) },
+      )
+      if (own.signal.aborted) return
+      addToGallery(threeDGalleryItem({
+        id: uuid(), way, model: MAC_3D_MODEL, prompt, seed, localPath: made.path, sourceName: source.name,
+      }))
+    } else {
+      const { runComfyThreeD } = await import('../lib/local-3d-comfy')
+      const made = await runComfyThreeD({
+        imageName: source.filename, detail: state.threeDDetail, cutout: state.threeDCutout, seed,
+        signal: own.signal, onProgress: (line, percent) => onProgress(percent, line),
+      })
+      if (own.signal.aborted) return
+      addToGallery(threeDGalleryItem({
+        id: uuid(), way, model: PC_3D_MODEL, prompt, seed,
+        filename: made.filename, subfolder: made.subfolder, comfyType: made.type, sourceName: source.name,
+      }))
+    }
+    useCreateStore.getState().setLastGenTime(`${Math.round((Date.now() - started) / 1000)}s`)
+    useCreateStore.getState().setProgressPhase('complete')
+    setProgress(100, 'Complete!')
+  } catch (e) {
+    if (!own.signal.aborted) {
+      useCreateStore.getState().setError(`3D failed: ${e instanceof Error ? e.message : String(e)}`)
+    }
+  } finally {
+    if (abortRef.current === own) abortRef.current = null
+    useCreateStore.getState().setIsGenerating(false)
+    useCreateStore.getState().setProgress(0)
+    if (eviction) void restoreChatBackendsAfterRender(eviction)
   }
 }
 
@@ -771,7 +839,7 @@ export function useCreate() {
     // one prompt for every tab, and the text left from another tab would steer
     // the run unseen or fail this check for words nobody sees here.
     // Motion Control has an optional field here and sends what is typed in it.
-    const typedPrompt = intentTakesPrompt(state.intent(), state.cloudOp === 'character' && state.characterTab === 'use')
+    const typedPrompt = intentTakesPrompt(state.intent(), state.cloudOp === 'character' && state.characterTab === 'use', state.threeDWay)
       || intentTakesOptionalPrompt(state.intent(), 'local')
       ? state.prompt
       : ''
@@ -788,8 +856,12 @@ export function useCreate() {
     {
       // The negative prompt is read apart (B30, safety.ts): there it keeps
       // things out of the picture.
+      // 3D also reads where its pictures came from (C3D-PLAN 2.8): the gate
+      // sees no pixels, so the name of a file and the prompt of a gallery
+      // picture are what it can check.
+      const provenance = state.intent() === '3d' ? threeDProvenance(state) : ''
       const verdict = checkPromptSafety(
-        `${typedPrompt} ${state.musicLyrics} ${state.triggerWord} ${state.videoShots.join(' ')}`,
+        `${typedPrompt} ${state.musicLyrics} ${state.triggerWord} ${state.videoShots.join(' ')} ${provenance}`,
         { negative: state.negativePrompt },
       )
       if (verdict.blocked) {
@@ -822,6 +894,14 @@ export function useCreate() {
     const isI2I = mode === 'image' && state.imageSubMode === 'img2img'
     // Which redesign intent produced this run (gallery tag).
     const intent = state.intent()
+
+    // ── 3D (3.1.0): the picture on the Stage becomes a GLB. TripoSR on a
+    // Mac (commands/mesh3d.rs), TRELLIS.2 in ComfyUI elsewhere. "From text"
+    // painted that picture in a run of its own first (generateInner). ──
+    if (intent === '3d') {
+      await runLocalThreeD(state, runSeed, abortRef)
+      return
+    }
     // The redesigned Create page drives its unified Stage input via `source`/`mask`
     // ImageRefs. On the local path their `.filename` IS the ComfyUI /upload/image
     // name, so they map straight onto the existing i2iImage/i2vImage handles.
@@ -2688,6 +2768,38 @@ export function useCreate() {
   const generateInner = useCallback(async () => {
     const s = useCreateStore.getState()
     const mac = isMlxImageHost()
+    // 3D from text on this machine is two runs (C3D-PLAN 1.2): a picture
+    // first, with the image model the user has, then the model from it. The
+    // picture lands on the Stage under "From image", where Create makes it 3D
+    // and "From text" paints a new one.
+    if (s.intent() === '3d' && s.backend === 'local' && s.threeDWay === 'text') {
+      if (!s.prompt.trim()) { s.setError('Describe the object first.'); return }
+      const lane = imageLaneModels(s.imageModelList, 'image')
+      const pick = lane.find((m) => m.name === s.imageModel) ?? lane[0]
+      if (!pick) { s.setError(THREE_D_TEXT.needImageModel); return }
+      const before = new Set(s.gallery.map((g) => g.id))
+      await runOnce({
+        mode: 'image', imageSubMode: 'text2img', cloudOp: null, utilityOp: null, removebg: false,
+        imageModel: pick.name, imageModelType: pick.type,
+        ...imageModelParams({ imageModel: pick.name, imageModelType: pick.type }),
+        width: 1024, height: 1024,
+        prompt: threeDPicturePrompt(s.prompt), batchSize: 1, hiresFixEnabled: false, improvePrompt: false,
+        source: null, mask: null, references: [], i2iImage: null,
+      }, { stepLabel: THREE_D_TEXT.pictureFirst })
+      const after = useCreateStore.getState()
+      if (after.error) return
+      const made = after.gallery.find((g) => !before.has(g.id) && g.type === 'image')
+      if (!made) return
+      try {
+        const blob = await fetchGalleryItemBlob(made)
+        const ref = await loadImageRef(new File([blob], made.filename || 'picture.png', { type: blob.type || 'image/png' }))
+        after.setThreeDWay('image')
+        after.setSource(ref)
+      } catch (e) {
+        after.setError(e instanceof Error ? e.message : String(e))
+      }
+      return
+    }
     // A long local clip (B18): several sections, each continuing the clip so
     // far, or one pass with context windows. ComfyUI only; the Mac's MLX
     // lanes keep their own lengths.

@@ -21,6 +21,7 @@ import { useComfyMedia } from './useComfyMedia'
 import { BatchQueue } from './BatchStrip'
 import { FitStage } from './FitStage'
 import { cn } from '../ui/cn'
+import { LazyModelViewer } from '../../three/LazyModelViewer'
 
 // The icon in the waiting circle says which PHASE the render is in, never
 // which device it runs on. The chip is the loading phase, the spark is
@@ -199,6 +200,25 @@ export function ResultView({ item, onFullscreen, onShowPrompt, onSendToEditor, o
   // An old animated .webp clip shows as a picture, which still moves (A19).
   const inPlayer = playsAsVideo(item)
   const isAudio = item.type === 'audio'
+  // A 3D model has its own view with its own bar (download menu, looks), so
+  // it skips the hover buttons of a picture.
+  if (item.type === '3d') {
+    const model = (maxHeight?: string) => (
+      <div className="w-[760px] max-w-full" style={{ height: maxHeight ?? '62vh' }} data-testid="result-3d">
+        <LazyModelViewer key={item.id} item={item} onFullscreen={onFullscreen} />
+      </div>
+    )
+    const under = (
+      <div className="flex items-center gap-3 mt-3 t-mono text-gray-600" data-testid="result-facts">
+        <span className="truncate max-w-[420px]">{galleryLabel(item)}</span>
+        <span>·</span>
+        <button type="button" className="underline underline-offset-2 hover:text-gray-300" onClick={() => useCreateStore.getState().removeFromGallery(item.id)}>
+          {deleteTitle(isMlxImageHost())}
+        </button>
+      </div>
+    )
+    return <FitStage picture={model} under={under} side={side} capVh={62} />
+  }
   // `maxHeight` is the height the stage has left for the result (FitStage).
   // Until the stage is measured it keeps the share of the window it always had.
   const media = (maxHeight?: string) => (

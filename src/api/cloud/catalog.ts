@@ -57,6 +57,9 @@ export async function getCatalog(): Promise<CloudCatalog> {
   // `api_schema`/`pricing`/`quote_required` to the entries this same v=2
   // response already carries, and cloudCatalogStore/runCredits key off the
   // PRESENCE of those fields, never a version number (portplan Abschnitt 4/7).
-  const res = await cloudFetch('/api/jobs/catalog?v=2')
+  // 3.1.0: `with=3d` asks for the 3D models too. A server hands them only to
+  // an app that asks, so an app before 3.1.0 never draws a GLB as a broken
+  // picture.
+  const res = await cloudFetch('/api/jobs/catalog?v=2&with=3d')
   return desktopCatalog(await jsonOrError<Parameters<typeof desktopCatalog>[0]>(res))
 }

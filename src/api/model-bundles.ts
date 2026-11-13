@@ -2086,3 +2086,105 @@ export function getUpscaleBundles(): ModelBundle[] {
     },
   ])
 }
+
+// ─── 3D on Windows and Linux (3.1.0) ───
+//
+// TRELLIS.2 (microsoft/TRELLIS.2-4B, MIT) in the ComfyUI repack, plus BiRefNet
+// (MIT) for the cutout. Both run on ComfyUI core nodes of the pinned release
+// v0.42.4 (comfy_extras/nodes_trellis2.py, nodes_bg_removal.py,
+// nodes_mesh_postprocess.py, nodes_save_3d.py); no custom node pack.
+//
+// Files, folders, byte counts and SHA-256 are the Hugging Face LFS values of
+// the two repositories, read from the tree API on 2026-11-13 and pinned to
+// these commits:
+//   Comfy-Org/TRELLIS.2  430a9d09b2416687018c8fe8edced2ad4858a439
+//   Comfy-Org/BiRefNet   884af709e9b795d89dafbf97f29c8d6a2386f5c6
+// The official template (3d_pixal3d_trellis2_image_to_model.json, see
+// buildThreeDWorkflow) loads the two VAEs from Comfy-Org/Pixal3D; they are
+// byte for byte the files in Comfy-Org/TRELLIS.2 (same SHA-256). Its image
+// encoder there is dino_v3_L_naf_fp32, which carries the NAF upsampler only the
+// Pixal3D branch uses (comfy/clip_vision.py). TRELLIS.2 needs the plain
+// DINOv3 ViT-L, the file its own repository ships.
+//
+// The int8 model is the one the template loads. The bf16 file (10.3 GB) is
+// left out on purpose. `verified` stays false until a run on the box.
+
+/** The five file names the 3D graph loads. One place, so the bundle, the
+ *  graph and the readiness check can never name different files. */
+export const TRELLIS2_FILES = {
+  model: 'trellis_2_int8_convrot.safetensors',
+  shapeVae: 'trellis_2_shape_vae_bf16.safetensors',
+  textureVae: 'trellis_2_texture_vae_bf16.safetensors',
+  imageEncoder: 'dino_v3_vit_l.safetensors',
+  cutout: 'birefnet.safetensors',
+} as const
+
+const GIB = 1_073_741_824
+const gib = (bytes: number) => Math.round((bytes / GIB) * 10000) / 10000
+
+export function getThreeDBundles(): ModelBundle[] {
+  const files: DiscoverModel[] = [
+    {
+      name: 'TRELLIS.2 4B (INT8)',
+      description: 'The model that builds the shape and the surface from one picture.',
+      pulls: '', tags: ['Diffusion Model', '5.25 GB'], updated: 'New',
+      downloadUrl: 'https://huggingface.co/Comfy-Org/TRELLIS.2/resolve/430a9d09b2416687018c8fe8edced2ad4858a439/diffusion_models/trellis_2_int8_convrot.safetensors',
+      filename: TRELLIS2_FILES.model, subfolder: 'diffusion_models', sizeGB: gib(5253048192),
+      sizeBytes: 5253048192,
+      sha256: 'd01952ad137213f6a868f86b6b877026276f84af5eec23069217475a0bad3a31',
+    },
+    {
+      name: 'TRELLIS.2 Shape VAE',
+      description: 'Required, turns the shape into a mesh.',
+      pulls: '', tags: ['VAE', '1.10 GB'], updated: 'New',
+      downloadUrl: 'https://huggingface.co/Comfy-Org/TRELLIS.2/resolve/430a9d09b2416687018c8fe8edced2ad4858a439/vae/trellis_2_shape_vae_bf16.safetensors',
+      filename: TRELLIS2_FILES.shapeVae, subfolder: 'vae', sizeGB: gib(1095844024),
+      sizeBytes: 1095844024,
+      sha256: 'de0cb4949a76c59ee5c091a995a69bcc8c51d5aeda939f0c641a50d2a72341f4',
+    },
+    {
+      name: 'TRELLIS.2 Texture VAE',
+      description: 'Required, paints the surface.',
+      pulls: '', tags: ['VAE', '948 MB'], updated: 'New',
+      downloadUrl: 'https://huggingface.co/Comfy-Org/TRELLIS.2/resolve/430a9d09b2416687018c8fe8edced2ad4858a439/vae/trellis_2_texture_vae_bf16.safetensors',
+      filename: TRELLIS2_FILES.textureVae, subfolder: 'vae', sizeGB: gib(948461364),
+      sizeBytes: 948461364,
+      sha256: '714e5ebf094a610e12a8e3b5175c18a62f37f6ea4218acb6073644456b73ab0e',
+    },
+    {
+      name: 'DINOv3 ViT-L Image Encoder',
+      description: 'Required, reads the picture for TRELLIS.2.',
+      pulls: '', tags: ['CLIP Vision', '1.21 GB'], updated: 'New',
+      downloadUrl: 'https://huggingface.co/Comfy-Org/TRELLIS.2/resolve/430a9d09b2416687018c8fe8edced2ad4858a439/clip_vision/dino_v3_vit_l.safetensors',
+      filename: TRELLIS2_FILES.imageEncoder, subfolder: 'clip_vision', sizeGB: gib(1212559776),
+      sizeBytes: 1212559776,
+      sha256: '5cb785e458de7c460579082418af81f5c62380c181599344bdc60898c63468ee',
+    },
+    {
+      name: 'BiRefNet',
+      description: 'Cuts the object out of its background before the model sees it.',
+      pulls: '', tags: ['Background Removal', '444 MB'], updated: 'New',
+      downloadUrl: 'https://huggingface.co/Comfy-Org/BiRefNet/resolve/884af709e9b795d89dafbf97f29c8d6a2386f5c6/background_removal/birefnet.safetensors',
+      filename: TRELLIS2_FILES.cutout, subfolder: 'background_removal', sizeGB: gib(444473596),
+      sizeBytes: 444473596,
+      sha256: '9ab37426bf4de0567af6b5d21b16151357149139362e6e8992021b8ce356a154',
+    },
+  ]
+  return withVramNeed([
+    {
+      name: 'TRELLIS.2 (Image to 3D)',
+      description: 'Turns one picture of an object into a textured 3D model. MIT licensed, runs on ComfyUI.',
+      tags: ['3D', 'Image to 3D', 'MIT'],
+      totalSizeGB: Math.round(files.reduce((s, f) => s + (f.sizeGB ?? 0), 0) * 100) / 100,
+      // Microsoft names 24 GB for the original bf16 model. What the int8
+      // repack needs on a smaller card is not measured yet.
+      vramRequired: '16-24 GB',
+      workflow: 'trellis2',
+      tier: 'best',
+      uncensored: true,
+      verified: false,
+      url: 'https://huggingface.co/Comfy-Org/TRELLIS.2',
+      files,
+    },
+  ])
+}

@@ -25,7 +25,7 @@ describe('the Enhance tab on the Mac', () => {
     expect(isIntentLocked(INTENT_MAP.upscale, 'local', true, false, false, true)).toBe(false)
     expect(isIntentAvailable('upscale', 'local', true, false, false, true)).toBe(true)
     // With the teasers off it is still there: it is no teaser.
-    expect(ids(true, false)).toEqual(['image', 'removebg', 'upscale', 'video', 'character'])
+    expect(ids(true, false)).toEqual(['image', 'removebg', 'upscale', 'video', 'character', '3d'])
   })
 
   it('opens no other tab: Edit, Erase and Animate keep their own rules', () => {

@@ -47,8 +47,9 @@ vi.mock('../backend', async (importOriginal) => ({
 
 import {
   COMFY_MODEL_FOLDERS, getVideoModels, getImageModels, getAudioModels,
-  getLipsyncModels, getMotionModels, getUpscaleModels, type ClassifiedModel,
+  getLipsyncModels, getMotionModels, getUpscaleModels, getDiffusionModels, type ClassifiedModel,
 } from '../comfyui'
+import { getThreeDBundles } from '../model-bundles'
 import {
   getImageBundles, getVideoBundles, getAudioBundles, getLipsyncBundles, getMotionBundles, getUpscaleBundles,
   modelsNotVisibleInComfy, type ModelBundle, type DiscoverModel,
@@ -74,6 +75,8 @@ const SCANS: Record<string, string[]> = {
   upscale_models: ['models/upscale_models'],
   latent_upscale_models: ['models/latent_upscale_models'],
   style_models: ['models/style_models'],
+  // Local 3D (3.1.0): BiRefNet, read by LoadBackgroundRemovalModel.
+  background_removal: ['models/background_removal'],
 }
 
 function filesIn(root: string, rel: string): string[] {
@@ -121,6 +124,7 @@ function serve(root: string) {
     if (url.includes('LatentUpscaleModelLoader')) return combo('LatentUpscaleModelLoader', 'model_name', listFor(root, 'latent_upscale_models', false))
     if (url.includes('UpscaleModelLoader')) return combo('UpscaleModelLoader', 'model_name', listFor(root, 'upscale_models', false))
     if (url.includes('StyleModelLoader')) return combo('StyleModelLoader', 'style_model_name', listFor(root, 'style_models', false))
+    if (url.includes('LoadBackgroundRemovalModel')) return combo('LoadBackgroundRemovalModel', 'bg_removal_name', listFor(root, 'background_removal', false))
     if (url.includes('ADE_LoadAnimateDiffModel')) {
       return combo('ADE_LoadAnimateDiffModel', 'model_name', filesIn(root, 'custom_nodes/ComfyUI-AnimateDiff-Evolved/models'))
     }
@@ -189,6 +193,12 @@ const LANES: Array<{ lane: string; bundles: () => ModelBundle[]; picker: () => P
     lane: 'upscale', bundles: getUpscaleBundles,
     picker: async () => (await getUpscaleModels()).map((name) => ({ name }) as ClassifiedModel),
   },
+  // Local 3D (3.1.0): TRELLIS.2 has no picker, the graph loads it by name
+  // from UNETLoader's list (lib/local-3d-comfy comfyThreeDReady).
+  {
+    lane: '3d', bundles: getThreeDBundles,
+    picker: async () => (await getDiffusionModels()).map((name) => ({ name }) as ClassifiedModel),
+  },
 ]
 
 const allBundles = () => LANES.flatMap((l) => l.bundles())
@@ -241,6 +251,13 @@ describe('what the Get wrote, the picker offers', () => {
       const offered = (await getVideoModels()).map((m) => m.name)
       for (const f of mainFiles(bundle)) expect(offered, `${name} · ${f.filename}`).toContain(f.filename)
     }
+  })
+
+  it('the 3D model is not offered as an image model after its Get', async () => {
+    const [bundle] = getThreeDBundles()
+    serve(runTheGet(bundle.files))
+    const offered = (await getImageModels()).map((m) => m.name)
+    for (const f of mainFiles(bundle)) expect(offered).not.toContain(f.filename)
   })
 
   // ...and the same question for every other Get target in the catalog, which

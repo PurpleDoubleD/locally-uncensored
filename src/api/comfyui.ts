@@ -181,11 +181,16 @@ export function extractComfyOutputFiles(nodeOutput: unknown): ComfyUIOutput[] {
  *  the long-standing image/video tagging (incl. the animated-webp fallback)
  *  is untouched. */
 const AUDIO_OUTPUT_EXTS = new Set(['mp3', 'wav', 'flac', 'ogg', 'opus', 'm4a'])
+/** 3.1.0: the mesh formats a 3D save node writes. SaveGLB (nodes_save_3d.py,
+ *  ComfyUI v0.42.4) always writes .glb for a mesh and keeps the format of a
+ *  File3D it is handed, so the other four can come out of it too. */
+const MESH_OUTPUT_EXTS = new Set(['glb', 'gltf', 'obj', 'ply', 'stl'])
 export function galleryTypeForFile(
   filename: string,
   mode: 'image' | 'video',
-): 'image' | 'video' | 'audio' {
+): 'image' | 'video' | 'audio' | '3d' {
   const ext = (filename.split('.').pop() || '').toLowerCase()
+  if (MESH_OUTPUT_EXTS.has(ext)) return '3d'
   return AUDIO_OUTPUT_EXTS.has(ext) ? 'audio' : mode
 }
 
@@ -1228,6 +1233,13 @@ export async function filterPartialFiles(filenames: string[]): Promise<Set<strin
  * The catalogue card keeps its own verdict (discover.ts filters there) and goes
  * on saying honestly that the package is not fully downloaded.
  */
+/** A main model file of the local 3D lane (TRELLIS.2). It runs only in the
+ *  3D graph (buildThreeDWorkflow), never as an image or video model. */
+export function isThreeDModelFile(name: string): boolean {
+  const base = name.split(/[\\/]/).pop()!.toLowerCase()
+  return /(^|[^a-z0-9])trellis[._-]?2([^0-9]|$)/.test(base)
+}
+
 /** A VAE that landed in a main model folder (Discord 2026-09-26: a CivitAI
  *  download of minimax_h3_video_vae_fp16 showed up as an IMAGE model). It can
  *  never run as one, so the picker leaves it out. Deliberately narrow: only a
@@ -1340,6 +1352,11 @@ async function mainModelLane(
     if (complete && !complete.has(name)) continue
     if (isStrayAddonFile(name)) continue
     if (listed.has(name)) continue
+    // The 3D model sits in diffusion_models and its name places it in no
+    // family, so it would come back 'unknown' and be offered as an image
+    // model. The pickers leave it out; the inventory (hidePartialDownloads
+    // false) keeps it, so it can still be seen and deleted.
+    if (hidePartialDownloads && isThreeDModelFile(name)) continue
     candidates.push({ name, type: classifyModel(name), source: 'diffusion_model' })
   }
   await applyHeaderSniff(candidates)
@@ -1665,6 +1682,10 @@ export const COMFY_MODEL_FOLDERS: Array<{
   // and a different loader from the image upscalers above).
   { subfolder: 'latent_upscale_models', read: () => nodeOptionsOrNull('LatentUpscaleModelLoader', 'model_name') },
   { subfolder: 'style_models', read: () => nodeOptionsOrNull('StyleModelLoader', 'style_model_name') },
+  // The cutout model of local 3D (BiRefNet). LoadBackgroundRemovalModel is a
+  // core node of ComfyUI v0.42.4 (comfy_extras/nodes_bg_removal.py) and lists
+  // models/background_removal under `bg_removal_name`.
+  { subfolder: 'background_removal', read: () => nodeOptionsOrNull('LoadBackgroundRemovalModel', 'bg_removal_name') },
   { subfolder: ANIMATEDIFF_SUBFOLDER, read: () => nodeOptionsOrNull('ADE_LoadAnimateDiffModel', 'model_name') },
 ]
 

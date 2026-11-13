@@ -43,7 +43,7 @@ const PresetWorkshop = lazy(() =>
   import('./PresetWorkshop').then((m) => ({ default: m.PresetWorkshop })),
 )
 import { INTENT_MAP, isIntentAvailable } from './intents'
-import { studioPickFor } from '../../../lib/render/create-studio'
+import { studioIntentOf, studioPickFor } from '../../../lib/render/create-studio'
 import { modelForOp, useCloudCatalogStore } from '../../../stores/cloudCatalogStore'
 import { stageShowsSetupCard, laneModelCount } from './stageGate'
 import { isMlxImageHost } from '../../../api/mlx-image'
@@ -93,6 +93,7 @@ function CreateExperimentalInner() {
   // Composer.tsx, kept in sync by hand (both read the same store getters and
   // pure functions, no new state).
   const intent = useCreateStore((s) => s.intent())
+  const threeDWay = useCreateStore((s) => s.threeDWay)
   const cloudOpModel = useCreateStore((s) => s.cloudOpModel)
   const cloudImageModel = useCreateStore((s) => s.cloudImageModel)
   const cloudVideoModel = useCreateStore((s) => s.cloudVideoModel)
@@ -104,7 +105,7 @@ function CreateExperimentalInner() {
   // traegt die Regel fuer Composer, Zaehler, Start und diese Schublade; der
   // Character-Weg bleibt davon ausgenommen. Auf der lokalen Spur gibt es nie
   // eine Studio-Wahl.
-  const studioPick = backend === 'cloud' ? studioPickFor(intent, { cloudImageModel, cloudVideoModel, cloudOpModel }) : undefined
+  const studioPick = backend === 'cloud' ? studioPickFor(studioIntentOf(intent, threeDWay), { cloudImageModel, cloudVideoModel, cloudOpModel }) : undefined
 
   const [shownId, setShownId] = useState<string | null>(null)
   const [advancedOpen, setAdvancedOpen] = useState(false)

@@ -14,12 +14,12 @@ import { intentToJob, quotaCostKind } from '../../../lib/render/cloud-jobs'
 import { meterState } from '../../../lib/render/credits-meter'
 import { runImageCount } from '../../../lib/render/image-count'
 import { useCloudCatalogStore, cloudModelById, defaultCloudModel, editNeedsMask, modelForOp, runCredits, lengthCredits, lengthPrice } from '../../../stores/cloudCatalogStore'
-import { createRunModel, intentRequiredInputs, isStudioModel } from '../../../lib/render/create-studio'
+import { createRunModel, intentRequiredInputs, isStudioModel, studioIntentOf } from '../../../lib/render/create-studio'
 import { STUDIO_MODELS } from '../../../lib/render/studio-contract'
 import { effectiveVideoDurations, snapToVideoDuration } from '../../../lib/render/video-duration'
 import { mediaSeconds, useStudioPrice } from './useStudioPrice'
 import { getJob } from '../../../api/cloud/jobs'
-import { INTENT_MAP, intentTakesOptionalPrompt, intentTakesPrompt } from './intents'
+import { INTENT_MAP, intentNeedsSource, intentTakesOptionalPrompt, intentTakesPrompt } from './intents'
 import { MUSIC_PLACEHOLDER, musicText } from '../../../lib/render/music-ui'
 import { subscribeInstallRuns, getInstallRun } from '../../../lib/model-install-runs'
 import { useWorkflowStore, shouldShowManagerNotice } from '../../../stores/workflowStore'
@@ -36,6 +36,8 @@ import { CharacterChip, CharacterNote, characterMakesStart } from './CharacterCh
 import { PromptHistory } from './PromptHistory'
 import { PromptAssistant } from './PromptAssistant'
 import { SpecialControls } from './SpecialIntentControls'
+import { ThreeDControls } from './ThreeDControls'
+import { threeDControlFacts } from '../../../lib/three/three-d-models'
 import { CreditsMeter } from './CreditsMeter'
 import { Button } from '../ui/Button'
 import { PromptField } from '../ui/PromptField'
@@ -138,6 +140,8 @@ export function Composer({ onOpenAdvanced, onOpenWorkflows }: Props) {
     intent === 'character' || intent === 'lipsync' || intent === 'music' ||
     intent === 'extend' || intent === 'motion'
   const characterUse = intent === 'character' && characterTab === 'use'
+  const threeDWay = useCreateStore((s) => s.threeDWay)
+  const needsSource = intentNeedsSource(intent, threeDWay)
   let { kind: intentKind, op: intentOp } = intentToJob(intent)
   if (characterUse) {
     // The use-surface is a plain image generate with the character attached.
@@ -148,7 +152,7 @@ export function Composer({ onOpenAdvanced, onOpenWorkflows }: Props) {
   // flag, plus Character-Studio's use-surface (train has no prompt), plus
   // Motion Control on the local lanes, whose prompt may stay empty.
   const optionalPrompt = intentTakesOptionalPrompt(intent, backend)
-  const needPrompt = intentTakesPrompt(intent, characterUse) || optionalPrompt
+  const needPrompt = intentTakesPrompt(intent, characterUse, threeDWay) || optionalPrompt
   // Gate on the exact run's cost (model + op + clip length), the same figure
   // the CreditsMeter shows — quota.costs[kind] is only the tier's
   // representative per-kind number and would mis-gate utility ops / pricier
@@ -165,7 +169,7 @@ export function Composer({ onOpenAdvanced, onOpenWorkflows }: Props) {
   // Wahl, die die Unterkategorie nicht fahren kann, rechnet hier als das Modell,
   // das wirklich laeuft. Rollen-Absichten behalten ihre Wahl.
   const runModel = createRunModel(
-    intent,
+    studioIntentOf(intent, threeDWay),
     { image: cloudImageModel, video: cloudVideoModel, op: cloudOpModel },
     characterUse ? selectedCharacter?.family ?? '' : undefined,
   )
@@ -361,7 +365,7 @@ export function Composer({ onOpenAdvanced, onOpenWorkflows }: Props) {
   const canGenerate =
     !macSetupFirst &&
     (!needPrompt || optionalPrompt || prompt.trim().length > 0) &&
-    (!meta.needsSource || hasStart) &&
+    (!needsSource || hasStart) &&
     (!needsMask || !!mask) &&
     specialReady &&
     upscaleReady &&
@@ -373,7 +377,7 @@ export function Composer({ onOpenAdvanced, onOpenWorkflows }: Props) {
   const inputNote = showNoPromptHint && !needsMask && isInputHint(intent)
   const laneCaption = noPromptHint(meta.id, backend, backend === 'local' && isMlxImageHost(), trainKind)
   // The disabled button says which input it waits for (laneHint.ts).
-  const missingSource = missingSourceHint({ intent, needsSource: meta.needsSource, hasSource: hasStart })
+  const missingSource = missingSourceHint({ intent, needsSource, hasSource: hasStart })
 
   return (
     // A stable min-height (bottom-anchored) so the prompt window occupies the
@@ -390,6 +394,7 @@ export function Composer({ onOpenAdvanced, onOpenWorkflows }: Props) {
           Befund und hier nicht behoben. */}
       <div className="mx-auto w-full max-w-[660px] space-y-2.5">
         {special && <SpecialControls intent={intent} />}
+        {intent === '3d' && <ThreeDControls {...threeDControlFacts(backend, studioPick)} studioId={studioPick} />}
         {!isUtility && <LaneControls />}
         <CharacterNote />
         {inputNote && (
@@ -753,6 +758,8 @@ function LaneControls() {
   if (backend === 'cloud' && !characterUse && !specialOp && isStudioModel(modelForOp(laneKind, cloudVideoOp, lanePicked))) return null
 
   if (characterTrain) return null
+  // 3D has its own row (ThreeDControls): no size, steps or aspect.
+  if (intent === '3d') return null
 
   // ── Image lanes: quality + aspect (+ edit strength) ──
   if (kind === 'image') {

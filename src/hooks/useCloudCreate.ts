@@ -36,7 +36,10 @@ import { contentPolicySnapshot, loadContentPolicy } from './useContentPolicy'
 import { effectiveContentPolicy } from '../lib/content-policy-cap'
 import { signalCreditsExhausted } from '../lib/credits-exhausted'
 import { resolveRunSeed } from '../lib/run-seed'
-import { intentRoles, intentRequiredInputs, isStudioModel, resolveIntentPick, studioExtraPhotoSlots, cloudTakesEndImage } from '../lib/render/create-studio'
+import { intentRoles, intentRequiredInputs, isStudioModel, resolveIntentPick, studioExtraPhotoSlots, cloudTakesEndImage, studioIntentOf } from '../lib/render/create-studio'
+import { threeDMaxViews } from '../lib/three/three-d-models'
+import { threeDProvenance } from '../lib/three/run-local-3d'
+import { THREE_D_TEXT } from '../lib/three/three-d-text'
 import { bumpSeed, runImageCount } from '../lib/render/image-count'
 import { STUDIO_MODELS, studioFields } from '../lib/render/studio-contract'
 import { modelLabel } from '../lib/render/preset-models'
@@ -289,12 +292,14 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
     // models (create-studio.ts, ported P2); resolveIntentPick's list already
     // contains both, so it replaces resolveOpPick for exactly these four.
     // Character-use never touches Studio: it stays on its fixed -lora family.
-    const roleIntent = !characterUse && intentRoles(intent).length > 0
+    // The 3D tab runs another set of models per way (create-studio.ts).
+    const pickIntent = studioIntentOf(intent, s.threeDWay)
+    const roleIntent = !characterUse && intentRoles(pickIntent).length > 0
     let picked: string
     if (characterUse) {
       picked = resolveCharacterModel(s.selectedCharacter?.family ?? '', s.cloudOpModel) ?? ''
     } else if (roleIntent) {
-      picked = resolveIntentPick(intent, s.cloudOpModel)
+      picked = resolveIntentPick(pickIntent, s.cloudOpModel)
     } else if (specialOp) {
       // Same resolution rule as the chip's display — a pick left over from
       // another intent must not survive into this op's submit (take-01: the
@@ -326,7 +331,10 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
     // Motion Control, the utility ops, training) sends none: the store holds one
     // prompt for every tab, and the text left from another tab would steer the
     // run unseen or fail the content check for words nobody sees here.
-    const prompt = intentTakesPrompt(intent, characterUse) ? s.prompt : ''
+    const prompt = intentTakesPrompt(intent, characterUse, s.threeDWay) ? s.prompt : ''
+    // 3D from a picture or a video: where those pictures came from, for the
+    // content gate here and on the server (params.source_prompt).
+    const provenance = intent === '3d' && s.threeDWay !== 'text' ? threeDProvenance(s) : ''
     s.setError(null)
     if (!cloudMediaLive()) {
       // Server MEDIA_LIVE switch is off — the GPU fleet isn't up, a submit
@@ -352,7 +360,7 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
       const sendsClassicKnobs = !studioModel && !specialOp && op !== 'removebg' && op !== 'upscale' && op !== 'eraser'
       const lyrics = op === 'music' && !studioModel ? s.musicLyrics : ''
       const triggerWord = op === 'lora-train' ? s.triggerWord : ''
-      const verdict = clientSafety(`${prompt} ${lyrics} ${triggerWord}`, sendsClassicKnobs ? s.negativePrompt : '')
+      const verdict = clientSafety(`${prompt} ${lyrics} ${triggerWord} ${provenance}`, sendsClassicKnobs ? s.negativePrompt : '')
       if (verdict.blocked) {
         s.setError(blockMessageFor(verdict.reason))
         return
@@ -530,7 +538,10 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
       // Also exactly what a Studio role's `image` input needs (source_path),
       // the SAME staged upload, studio-contract.ts just names it a schema
       // field instead of a fixed param.
-      if (op !== 'generate' && s.source) {
+      if (provenance) params.source_prompt = provenance
+      // "From text" sends no picture: a source left on the Stage from another
+      // way belongs to that way.
+      if (op !== 'generate' && s.source && !(intent === '3d' && s.threeDWay === 'text')) {
         params.source_path = await uploadInput(dataUrlToBlob(s.source.url), 'source', ...uploadEnds(ac))
         // Ein Studio-Modell, das eine Bilderliste liest (Edit mit mehreren
         // Vorlagen, Referenz zu Video), bekommt das Standbild der Oberflaeche als
@@ -541,7 +552,9 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
             // Das Standbild ist das erste Foto, die Leiste liefert die weiteren
             // bis zur Grenze dieses Modells. Jedes geht in die eigene Ablage.
             const extras = intent === 'edit' || intent === 'animate'
-              ? s.references.slice(0, studioExtraPhotoSlots(studioModel)) : []
+              ? s.references.slice(0, studioExtraPhotoSlots(studioModel))
+              // 3D: the further sides (or still frames) after the Front.
+              : intent === '3d' ? s.threeDViews.slice(0, threeDMaxViews(studioModel) - 1) : []
             const more: string[] = []
             for (const [i, ref] of extras.entries()) {
               if (ac.signal.aborted) return
@@ -749,7 +762,9 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
       // list view (GET /api/jobs), not the only source of the gallery name.
       let label: string | undefined
       if (studioModel) {
-        label = prompt.trim() ? undefined : modelLabel(studioModel)
+        label = prompt.trim() ? undefined
+          : intent === '3d' ? THREE_D_TEXT.gallery[s.threeDWay]
+          : modelLabel(studioModel)
         if (label) params.label = label
       } else if (OP_GALLERY_LABEL[op]) {
         label = OP_GALLERY_LABEL[op]
@@ -828,7 +843,7 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
       // Video renders and character training routinely run several minutes
       // and can queue behind other jobs on the shared fleet — give them a
       // much longer client deadline than images.
-      const verb = opProgressVerb(op)
+      const verb = kind === '3d' ? THREE_D_TEXT.cloudPhase : opProgressVerb(op)
       const addResult = (job: CloudJob, index = 0) => useCreateStore.getState().addToGallery({
         ...galleryItemFromJob(job),
         ...resultFields(index),

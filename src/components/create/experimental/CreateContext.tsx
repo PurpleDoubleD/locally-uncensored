@@ -106,7 +106,7 @@ interface CreateExpValue {
    *  2.5.8 lanes → ACE / S2V / VACE starters incl. their node packs)
    *  with streamed progress, refresh ComfyUI's model enums and re-fetch the
    *  model lists. Throws on failure. */
-  installModelBundle: (kind: 'image' | 'video' | 'audio' | 'lipsync' | 'motion' | 'upscale', onProgress?: (msg: string) => void, signal?: AbortSignal) => Promise<void>
+  installModelBundle: (kind: 'image' | 'video' | 'audio' | 'lipsync' | 'motion' | 'upscale' | '3d', onProgress?: (msg: string) => void, signal?: AbortSignal) => Promise<void>
   /** Runtime backend axis: hosted rendering offered for this session? */
   cloudAvailable: boolean
   quota: CloudQuota | null
@@ -459,7 +459,7 @@ export function CreateExpProvider({ children }: { children: ReactNode }) {
   // then refresh ComfyUI's model enums so the new files are pickable without
   // a restart. Bundles that need a custom node pack (GGUF loader, pose
   // extractor) install + register it first — one click really means one click.
-  const installModelBundle = useCallback(async (kind: 'image' | 'video' | 'audio' | 'lipsync' | 'motion' | 'upscale', onProgress?: (msg: string) => void, signal?: AbortSignal) => {
+  const installModelBundle = useCallback(async (kind: 'image' | 'video' | 'audio' | 'lipsync' | 'motion' | 'upscale' | '3d', onProgress?: (msg: string) => void, signal?: AbortSignal) => {
     // macOS takes the MLX path — engine plus the smallest model of that kind.
     // Everything below this line is the ComfyUI bundle flow, which would start
     // by installing ComfyUI itself; on a Mac that is the one thing that must
@@ -467,6 +467,9 @@ export function CreateExpProvider({ children }: { children: ReactNode }) {
     // Only image and video exist locally there; the other lanes are cloud
     // teasers on a Mac and never render this card.
     if (isMacOS()) {
+      // 3D on a Mac is its own engine with its own download (api/mlx-3d.ts),
+      // never this ComfyUI bundle.
+      if (kind === '3d') throw new Error('3D on this Mac sets up from its own card, not through ComfyUI.')
       if (kind !== 'image' && kind !== 'video' && kind !== 'motion') {
         throw new Error('This one runs in LU Cloud on a Mac — local generation covers images and video.')
       }

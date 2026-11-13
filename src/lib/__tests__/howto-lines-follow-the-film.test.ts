@@ -5,14 +5,21 @@ import { HOWTO, HOWTO_GUIDE_BASE, HOWTO_VIDEO_BASE, howtoGuideUrl, howtoLineAt, 
 import { INTENTS } from '../../components/create/experimental/intents'
 
 describe('how it works', () => {
+  // 3D (3.1.0) has no film yet: it is recorded once the tab is live. Until
+  // then the stage offers none (stageHowtoTopic answers null), instead of a
+  // link to a film that is not on the server.
+  const NO_FILM_YET = new Set(['3d'])
+  const filmed = INTENTS.filter((i) => !NO_FILM_YET.has(i.id))
+
   it('has a film for every Create tab, for Code and for Agent', () => {
-    for (const intent of INTENTS) expect(HOWTO[intent.id], intent.id).toBeTruthy()
+    for (const intent of filmed) expect(HOWTO[intent.id], intent.id).toBeTruthy()
+    for (const id of NO_FILM_YET) expect(stageHowtoTopic(id, 'cloud')).toBeNull()
     expect(HOWTO.code.films.map((f) => f.label)).toEqual(['Modes', 'Slash commands'])
     expect(HOWTO.agent).toBeTruthy()
   })
 
   it('names each Create film after the tab it stands on', () => {
-    for (const intent of INTENTS) expect(HOWTO[intent.id].title).toBe(`How ${intent.short} works`)
+    for (const intent of filmed) expect(HOWTO[intent.id].title).toBe(`How ${intent.short} works`)
   })
 
   it('keeps the lines of every film in the order they are shown', () => {

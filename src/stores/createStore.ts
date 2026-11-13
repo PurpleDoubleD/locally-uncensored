@@ -70,7 +70,7 @@ import { mlxMakesMusic } from '../lib/mac-music'
 import { MAC_EDIT_DEAD_SIDE, MAC_EDIT_SIDE_INSTEAD, imageLaneModels, mlxTakesEditImage } from '../lib/image-engines'
 import { STUDIO_MODELS } from '../lib/render/studio-contract'
 import { cloudModelsFor } from './cloudCatalogStore'
-import { createRunModel } from '../lib/render/create-studio'
+import { createRunModel, studioIntentOf } from '../lib/render/create-studio'
 import { DEFAULT_UPSCALE_FACTOR, normalizeUpscaleFactor, normalizeUpscaleLongSide, type UpscaleFactor } from '../lib/local-upscale'
 import { characterLoraFile, isLocalCharacter, type CharacterRef } from '../lib/character-ref'
 import { triggerWordNote, typedTriggerWord } from '../lib/train-trigger'
@@ -126,7 +126,8 @@ export type ThreeDDetail = 'draft' | 'standard' | 'fine'
 // Character joined in 2.6.0: trainer.rs ships the musubi venv install, so
 // the train lane is a real local tab now (it was cloud-first while 2.5.8
 // had no trainer runtime).
-export const LOCAL_LANE_OPS: ReadonlySet<CloudOp> = new Set(['music', 'lipsync', 'extend', 'motion', 'character'])
+// 3D joined in 3.1.0: TRELLIS.2 on the core nodes of the pinned ComfyUI.
+export const LOCAL_LANE_OPS: ReadonlySet<CloudOp> = new Set(['music', 'lipsync', 'extend', 'motion', 'character', '3d'])
 
 /** An audio/video file (or training image) staged in the composer before
  *  upload. `blob` carries the bytes for the cloud upload; `url` is a local
@@ -165,10 +166,10 @@ export function deriveIntent(s: {
 
 /** The model the tab in this state would run in the cloud. */
 function runModelOf(s: Parameters<typeof deriveIntent>[0] & Pick<CreateState,
-  'cloudImageModel' | 'cloudVideoModel' | 'cloudOpModel' | 'characterTab' | 'selectedCharacter'>): string {
+  'cloudImageModel' | 'cloudVideoModel' | 'cloudOpModel' | 'characterTab' | 'selectedCharacter'> & Partial<Pick<CreateState, 'threeDWay'>>): string {
   const intent = deriveIntent(s)
   return createRunModel(
-    intent,
+    studioIntentOf(intent, s.threeDWay),
     { image: s.cloudImageModel, video: s.cloudVideoModel, op: s.cloudOpModel },
     intent === 'character' && s.characterTab === 'use' ? s.selectedCharacter?.family ?? '' : undefined,
   )
@@ -976,7 +977,7 @@ export function distilledImageCheckpoint(model: string, type: ModelType): boolea
  *  Image, Edit and the other image intents only flipped the mode, so sd_turbo
  *  rendered with MiniMax H3's 20 steps, res_multistep and 1344x768 (3.0.4
  *  Gegenprobe 9). */
-function imageModelParams(state: { imageModel: string; imageModelType: ModelType }) {
+export function imageModelParams(state: { imageModel: string; imageModelType: ModelType }) {
   const defaults = state.imageModelType === 'hidream'
     ? hidreamDefaults(state.imageModel)
     : MODEL_TYPE_DEFAULTS[state.imageModelType] || MODEL_TYPE_DEFAULTS.unknown
@@ -1737,6 +1738,9 @@ export const useCreateStore = create<CreateState>()(
           // uses a character through mflux and trains one with mflux-train.
           || (get().cloudOp === 'lipsync' && mlxTalking(get().videoModelList).tab)
           || get().cloudOp === 'character'
+          // 3D (3.1.0) is always a local tab on a Mac: its Stage offers the
+          // engine's one-time setup when it is not there.
+          || get().cloudOp === '3d'
         const strandsOnMac = backend === 'local' && isMlxImageHost() && !!get().cloudOp && !keepsExtend && !macRunsOp
         const heldMode = get().mode
         set((s) => withOwnStudioOptions(s, ((): Partial<CreateState> => {

@@ -21,6 +21,8 @@ export type StepRole =
   | 'duo' | 'extend' | 'motion' | 'restyle' | 'angles' | 'edit' | 'upscale'
   // 02.10.2026: Text zu Video, Referenz zu Video.
   | 'video' | 'reference'
+  // 3.1.0: 3D from words, from one picture, from several sides.
+  | 'mesh-text' | 'mesh-image' | 'mesh-views'
 
 export interface PresetModel {
   id: string
@@ -43,6 +45,7 @@ const ROLE_OP: Record<StepRole, RenderOp> = {
   extend: 'extend', motion: 'motion', restyle: 'studio', angles: 'studio',
   edit: 'edit', upscale: 'upscale',
   video: 'generate', reference: 'studio',
+  'mesh-text': 'studio', 'mesh-image': 'studio', 'mesh-views': 'studio',
 }
 
 /** The staged inputs a NON-studio member consumes, as provider field -> job
@@ -56,6 +59,7 @@ export const ROLE_INPUTS: Record<StepRole, Record<string, string>> = {
   edit: { image: 'source_path' },
   upscale: { video: 'video_path' },
   video: {}, reference: {},
+  'mesh-text': {}, 'mesh-image': { image: 'source_path' }, 'mesh-views': { images: 'image_paths' },
 }
 
 function studioIds(match: (id: string) => boolean): string[] {
@@ -117,6 +121,11 @@ const ROLE_MEMBERS: Record<StepRole, () => string[]> = {
   edit: () => [...STUDIO_EDIT_MODELS, 'qwen-image-edit'],
   // A finished clip goes in, the same clip at more pixels comes out.
   upscale: () => ['video-upscaler', 'flashvsr', 'video-upscaler-pro', 'ultimate-video-upscaler', 'crystal-upscaler', 'flux-3-upscale'],
+  // 3D (3.1.0): every studio model of kind '3d', sorted by what it reads.
+  // Nothing: words. One picture: source_path. A list: several sides.
+  'mesh-text': () => studioIds((id) => STUDIO_MODELS[id].kind === '3d' && !Object.keys(STUDIO_MODELS[id].inputs).length),
+  'mesh-image': () => studioIds((id) => STUDIO_MODELS[id].kind === '3d' && Object.values(STUDIO_MODELS[id].inputs).includes('source_path')),
+  'mesh-views': () => studioIds((id) => STUDIO_MODELS[id].kind === '3d' && Object.values(STUDIO_MODELS[id].inputs).includes('image_paths')),
 }
 
 /** Classic ids that a studio entry already covers on the same endpoint. The
@@ -308,6 +317,7 @@ const CLASSIC_PROMPT: Record<StepRole, boolean> = {
   video: true, reference: true,
   talking: false, presenter: false, motion: false, soundtrack: false, duo: false,
   angles: false, upscale: false,
+  'mesh-text': true, 'mesh-image': false, 'mesh-views': false,
 }
 
 export function rolePrompts(role: StepRole): boolean {

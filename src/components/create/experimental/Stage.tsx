@@ -6,7 +6,8 @@ import { useModelStore } from '../../../stores/modelStore'
 import { createRunModel } from '../../../lib/render/create-studio'
 import { musicText } from '../../../lib/render/music-ui'
 import { useCreateExp } from './CreateContext'
-import { INTENT_MAP } from './intents'
+import { INTENT_MAP, intentNeedsSource } from './intents'
+import { ThreeDSetupCard, ThreeDVideoHint, useThreeDLocal } from './ThreeDStage'
 import { editNeedsMask, defaultCloudModel, modelForOp } from '../../../stores/cloudCatalogStore'
 import { stageShowsSetupCard, laneModelCount } from './stageGate'
 import { needsMaskFor } from './maskGate'
@@ -74,6 +75,8 @@ interface Props {
 export function Stage({ displayed, onOpenMaskEditor, onEditResult, onAnimateResult, onFullscreen, onShowPrompt, onSaveCharacter, comfyStarting }: Props) {
   const intent = useCreateStore((s) => s.intent())
   const meta = INTENT_MAP[intent]
+  const threeDWay = useCreateStore((s) => s.threeDWay)
+  const needsSource = intentNeedsSource(intent, threeDWay)
   // The width of the stage, for the how-to line at its foot (footLine below).
   const stageRef = useRef<HTMLDivElement>(null)
   const [stageWidth, setStageWidth] = useState<number | null>(null)
@@ -95,6 +98,8 @@ export function Stage({ displayed, onOpenMaskEditor, onEditResult, onAnimateResu
   const setPrompt = useCreateStore((s) => s.setPrompt)
   const caps = useCreateStore((s) => s.caps)
   const backend = useCreateStore((s) => s.backend)
+  // 3D brings its own setup card (TripoSR on a Mac, TRELLIS.2 in ComfyUI).
+  const threeDSetup = useThreeDLocal(intent === '3d' && backend === 'local')
   const imageModelList = useCreateStore((s) => s.imageModelList)
   const videoModelList = useCreateStore((s) => s.videoModelList)
   const audioModelList = useCreateStore((s) => s.audioModelList)
@@ -153,7 +158,7 @@ export function Stage({ displayed, onOpenMaskEditor, onEditResult, onAnimateResu
   // model shows none. Local music keeps them: its prompt is always the style.
   const musicIsLyrics = useCreateStore((s) =>
     s.backend === 'cloud' && musicText(createRunModel('music', { image: '', video: '', op: s.cloudOpModel })).main === 'lyrics')
-  const examples = intent === 'music' && musicIsLyrics ? [] : meta.examples
+  const examples = (intent === 'music' && musicIsLyrics) || (intent === '3d' && threeDWay !== 'text') ? [] : meta.examples
 
   // A bundle is not usable until ALL of its files are down, and the lane list
   // refills the moment the diffusion model alone lands. Measured on the box
@@ -180,6 +185,8 @@ export function Stage({ displayed, onOpenMaskEditor, onEditResult, onAnimateResu
   const howtoTopic = stageHowtoTopic(intent, backend, isMlxImageHost())
   if (isGenerating) {
     body = <GeneratingView />
+  } else if (intent === '3d' && threeDSetup.needsSetup) {
+    body = <ThreeDSetupCard setup={threeDSetup} />
   } else if (modelsMissing || installRun) {
     body = <ModelInstallCard kind={meta.requiresModels!} />
   } else if (meta.capability && !capReady) {
@@ -189,10 +196,10 @@ export function Stage({ displayed, onOpenMaskEditor, onEditResult, onAnimateResu
     // trigger word + train button sit in the composer below.
     body = <TrainSetBoard />
     howtoAtFoot = true
-  } else if (meta.needsSource && !source) {
-    body = <InputSlot />
+  } else if (needsSource && !source) {
+    body = intent === '3d' && threeDWay === 'video' ? <ThreeDVideoHint /> : <InputSlot />
     howtoAtFoot = true
-  } else if (meta.needsSource && source && !freshResult) {
+  } else if (needsSource && source && !freshResult) {
     body = <SourcePreview onOpenMaskEditor={onOpenMaskEditor} />
     howtoAtFoot = true
     howtoOnlyWide = true
@@ -207,7 +214,7 @@ export function Stage({ displayed, onOpenMaskEditor, onEditResult, onAnimateResu
         onSaveCharacter={displayed.type === 'video' && onSaveCharacter ? () => onSaveCharacter(displayed) : undefined}
         // The source and its references stay on screen beside the result
         // (FitStage), so the next run shows what it starts from.
-        side={meta.needsSource && source ? <ResultInputs /> : imageRefSide ? <ImageReferenceStrip /> : undefined}
+        side={needsSource && source ? <ResultInputs /> : imageRefSide ? <ImageReferenceStrip /> : undefined}
       />
     )
   } else {

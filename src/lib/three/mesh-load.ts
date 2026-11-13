@@ -20,9 +20,11 @@ export interface LoadedMesh {
 }
 
 export class MeshLoadError extends Error {
-  constructor(message: string, readonly reason: 'not-glb' | 'compressed' | 'broken') {
+  readonly reason: 'not-glb' | 'compressed' | 'broken'
+  constructor(message: string, reason: 'not-glb' | 'compressed' | 'broken') {
     super(message)
     this.name = 'MeshLoadError'
+    this.reason = reason
   }
 }
 

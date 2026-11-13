@@ -30,7 +30,14 @@ import { intentToJob, type CreateIntentLike } from './cloud-jobs'
 // crystal-upscaler, flux-3-upscale) is correctly wired and tested, but
 // reachable only by calling these functions directly with 'video_upscale',
 // which no UI path does today.
-export type StudioIntent = CreateIntentLike | 'video_upscale'
+export type StudioIntent = CreateIntentLike | 'video_upscale' | '3d-text' | '3d-image' | '3d-video'
+
+/** The studio intent of the tab on screen. The 3D tab runs another set of
+ *  models per way (words, one picture, the frames of a video), so it is
+ *  three studio intents; every other tab is its own. */
+export function studioIntentOf(intent: CreateIntentLike, threeDWay?: 'text' | 'image' | 'video'): StudioIntent {
+  return intent === '3d' ? `3d-${threeDWay ?? 'image'}` : intent
+}
 
 /** Die Rolle, die eine Create-Unterkategorie faehrt. Absichten ohne Eintrag
  *  (Bild, Video, Animate, Edit) haben ihre eigenen, aelteren Waehler. */
@@ -42,6 +49,12 @@ const INTENT_ROLE: Partial<Record<StudioIntent, StepRole[]>> = {
   extend: ['extend'],
   motion: ['motion'],
   video_upscale: ['upscale'],
+  // 3D: a video sends its frames to a model that takes several sides first,
+  // and to a one-picture model with its best frame where none is there.
+  '3d-text': ['mesh-text'],
+  '3d-image': ['mesh-image', 'mesh-views'],
+  '3d-video': ['mesh-views', 'mesh-image'],
+  '3d': ['mesh-image', 'mesh-views', 'mesh-text'],
 }
 
 export function intentRoles(intent: StudioIntent): StepRole[] {

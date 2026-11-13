@@ -11,7 +11,9 @@ export type ModelTier = 'best' | 'standard' | 'older'
 export type ModelWeights = 'open' | 'open-family' | 'closed'
 export interface StudioModel {
   baselineUsd: number; sourceModel?: string; promptField?: string
-  label: string; endpoint: string; kind: 'image' | 'video' | 'audio'; adult: boolean
+  label: string; endpoint: string; kind: 'image' | 'video' | 'audio' | '3d'; adult: boolean
+  /** The usual run time in seconds (3D, shown while the cloud builds). */
+  typical_s?: number
   tier: ModelTier; weights: ModelWeights
   inputs: Record<string, string>; defaults: Record<string, unknown>
   // `resolutionField` / `durationField`: nicht jeder Endpunkt nennt die beiden

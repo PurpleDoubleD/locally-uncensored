@@ -10,6 +10,7 @@ import { isMlxImageHost } from '../../../api/mlx-image'
 import { downloadGalleryItem } from './galleryDownload'
 import { useComfyMedia } from './useComfyMedia'
 import { cn } from '../ui/cn'
+import { ModelThumb } from '../../three/ModelThumb'
 import { HINWEIS_TEXT, HINWEIS_ZEILE } from '../../../lib/hinweis'
 import { hiddenCount, itemsInView } from '../../../lib/gallery-tags'
 import { FolderFilter, MoveToFolderModal, OnBody } from './GalleryFolders'
@@ -378,6 +379,7 @@ function BarBtn({ children, title, onClick, danger }: { children: React.ReactNod
 // direct /view load, #75) — hooks can't run inside the gallery .map().
 function GalleryThumb({ g }: { g: GalleryItem }) {
   const { src, onError, onLoad } = useComfyMedia(g)
+  if (g.type === '3d') return <ModelThumb item={g} />
   if (g.type === 'audio') {
     // No visual to thumbnail — a labeled tile; the Stage viewer holds the
     // actual <audio> player.

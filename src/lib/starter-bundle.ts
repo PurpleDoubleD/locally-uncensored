@@ -2,9 +2,9 @@ import { bundleForVideoIntent } from '../api/comfyui'
 import {
   getImageBundles, getVideoBundles, getAudioBundles, getLipsyncBundles, getMotionBundles, getUpscaleBundles,
 } from '../api/discover'
-import type { ModelBundle } from '../api/model-bundles'
+import { getThreeDBundles, type ModelBundle } from '../api/model-bundles'
 
-export type StarterKind = 'image' | 'video' | 'audio' | 'lipsync' | 'motion' | 'upscale'
+export type StarterKind = 'image' | 'video' | 'audio' | 'lipsync' | 'motion' | 'upscale' | '3d'
 
 /**
  * The bundle the Create setup card installs for a lane. One place, because
@@ -22,6 +22,8 @@ export function starterBundleFor(kind: StarterKind, intent: string): ModelBundle
     : kind === 'audio' ? getAudioBundles()
     : kind === 'lipsync' ? getLipsyncBundles()
     : kind === 'upscale' ? getUpscaleBundles()
+    // 3D on Windows and Linux: TRELLIS.2 and its cutout model (api/model-bundles).
+    : kind === '3d' ? getThreeDBundles()
     : getMotionBundles()
   )[0]
 }

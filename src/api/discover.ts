@@ -22,7 +22,7 @@ import { imagePartFileName, isUpstreamImagePart, pickUpstreamImagePart } from '.
 import { shardSetGap, type ShardGap } from '../lib/gguf-shards'
 import {
   CUSTOM_NODE_REGISTRY,
-  getImageBundles, getVideoBundles, getAudioBundles, getLipsyncBundles, getMotionBundles, getUpscaleBundles,
+  getImageBundles, getVideoBundles, getAudioBundles, getLipsyncBundles, getMotionBundles, getUpscaleBundles, getThreeDBundles,
 } from "./model-bundles"
 
 // Katalog + Formen liegen in model-bundles.ts (siehe dort). Re-Export, damit
@@ -2193,7 +2193,7 @@ export interface FileMeta {
  *  and text models alike. One walk, so the lookups below cannot drift apart. */
 function catalogEntries(): DiscoverModel[] {
   const out: DiscoverModel[] = []
-  for (const bundle of [...getImageBundles(), ...getVideoBundles(), ...getAudioBundles(), ...getLipsyncBundles(), ...getMotionBundles(), ...getUpscaleBundles()]) {
+  for (const bundle of [...getImageBundles(), ...getVideoBundles(), ...getAudioBundles(), ...getLipsyncBundles(), ...getMotionBundles(), ...getUpscaleBundles(), ...getThreeDBundles()]) {
     out.push(...bundle.files)
   }
   out.push(...getUncensoredTextModels(), ...getMainstreamTextModels())

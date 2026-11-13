@@ -7,7 +7,7 @@ import {
 import { DEFAULT_MODEL_IDS } from '../../../lib/render/cloud-models'
 import { groupForPicker, sortByTier, tierGroup, tierMarks } from '../../../lib/render/model-tier'
 import { localTier } from '../../../lib/render/local-model-tier'
-import { intentPickerModels, intentRoles, createStudioCost, isStudioModel } from '../../../lib/render/create-studio'
+import { intentPickerModels, intentRoles, createStudioCost, isStudioModel, studioIntentOf } from '../../../lib/render/create-studio'
 import type { RenderOp } from '../../../lib/render/cloud-jobs'
 import type { PresetModel } from '../../../lib/render/preset-models'
 import { useSettingsStore } from '../../../stores/settingsStore'
@@ -106,8 +106,10 @@ function CloudModelChip() {
   // Portplan P7: lipsync/music/extend/motion reach the Studio track through
   // the SAME picker as their classic op-specialized twins.
   // intentPickerModels() (create-studio.ts, P2) already merges both worlds.
-  const roleIntent = !characterUse && intentRoles(intent).length > 0
-  const roleModels: PresetModel[] = roleIntent ? intentPickerModels(intent) : []
+  const threeDWay = useCreateStore((s) => s.threeDWay)
+  const pickIntent = studioIntentOf(intent, threeDWay)
+  const roleIntent = !characterUse && intentRoles(pickIntent).length > 0
+  const roleModels: PresetModel[] = roleIntent ? intentPickerModels(pickIntent) : []
   const characterModels = characterUse ? characterGenerationModels(selectedCharacter?.family ?? '') : []
   // List only the models that can run the current op — otherwise the picker
   // offers checkpoints that useCloudCreate silently swaps out at submit, so the
