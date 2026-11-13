@@ -29,6 +29,19 @@ export interface ShellExecResult {
    * Fehlt bei jedem Lauf, der ohne Abbruchkennung gestartet wurde.
    */
   cancelled?: boolean
+  /**
+   * T1: the command was still running at its timeout and moved into the
+   * background-task registry under this id (`shell_task_*`). Only set when
+   * the call asked for it with `backgroundOnTimeout: true`.
+   */
+  taskId?: string
+  /** The timeout that was hit, in ms, next to `taskId`. */
+  timeoutMs?: number
+  /**
+   * T1: a finished run with a long output; the whole output stays readable
+   * under this id (`shell_task_status`). Same switch as `taskId`.
+   */
+  outputId?: string
 }
 
 /** `fs_read` — commands/filesystem.rs. Binary files carry `bytes`, no `content`. */

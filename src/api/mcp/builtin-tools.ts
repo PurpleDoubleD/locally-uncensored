@@ -423,7 +423,8 @@ const BUILTIN_TOOLS: MCPToolDefinition[] = [
       + 'For long work set `background: true` to get a task id back at once, then call again with `task: "status"` and `task_id` (or "list" / "kill"). '
       + 'PREFER dedicated tools where available: file_read over `cat`, file_list over `ls`, file_search over `grep`. '
       + '`--no-verify` is refused, and NEVER delete permanently without confirmation. '
-      + 'Default timeout 120 s, test runs 300 s.',
+      + 'Default timeout 120 s, test runs 300 s. '
+      + 'A command still running at its timeout keeps running in the background under a task id.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -1069,13 +1070,38 @@ async function executeShellExecute(
     timeout,
     shell: args.shell || null,
     stdin: argOptString(args, 'stdin') ?? null,
+    // T1: a command still running at the timeout moves into the task
+    // registry instead of being killed (shell.rs, bg_tasks::adopt_foreground).
+    backgroundOnTimeout: true,
     ...chatCtx(run),
   }, abort)
-  const output = data.stdout || ''
-  const err = data.stderr || ''
+  const { cutShellOutput, renderHandedOver } = await import('../agents/shell-result')
+  // Long outputs: head and tail only, the rest stays readable under
+  // `outputId` (Rust keeps it as a finished task). The parsers below read
+  // the uncut text, they summarise it themselves.
+  const rawOut = data.stdout || ''
+  const rawErr = data.stderr || ''
+  const output = cutShellOutput(rawOut, data.outputId)
+  const err = cutShellOutput(rawErr, data.outputId)
   // Vor `timedOut` geprueft: der Abbruch ist die genauere Auskunft, und ein
   // Befehl, den Stop gefaellt hat, ist nicht in eine Zeitgrenze gelaufen.
   if (data.cancelled) return 'Cancelled: the user stopped the run.'
+  if (data.timedOut && data.taskId) {
+    const taskId = data.taskId
+    const { bgKill, rememberShellTask } = await import('../agents/bg-tasks')
+    rememberShellTask(run?.conversationId, taskId)
+    // The foreground Stop wiring ended with the call (invokeShell removes its
+    // listener), so Stop reaches the task the same way it reaches a
+    // `background: true` start: through shell_task_kill.
+    if (abort) {
+      if (abort.aborted) {
+        void bgKill(taskId).catch(() => {})
+        return 'Cancelled: the user stopped the run.'
+      }
+      abort.addEventListener('abort', () => { void bgKill(taskId).catch(() => {}) }, { once: true })
+    }
+    return renderHandedOver({ taskId, timeoutMs: data.timeoutMs ?? timeout, stdout: rawOut, stderr: rawErr })
+  }
   if (data.timedOut) return `Timed out.\n${err}`
 
   const kind = commandKind(command)
@@ -1092,14 +1118,14 @@ async function executeShellExecute(
           : /pytest/.test(command)
             ? 'pytest'
             : 'unknown'
-    const combined = `${output}\n${err}`.trim()
+    const combined = `${rawOut}\n${rawErr}`.trim()
     const tail = combined.length > 4000 ? `…${combined.slice(-4000)}` : combined
     return `${renderResult(parseForRunner(runner, combined))}\n---\n${tail}`
   }
   if (data.exitCode && data.exitCode !== 0) return `Error (${data.exitCode}):\n${err || output}`
   if (kind === 'git-status' && /--porcelain=2/.test(command)) {
     const { parseGitStatus, renderGitStatus } = await import('../agents/git-tools')
-    return renderGitStatus(parseGitStatus(output))
+    return renderGitStatus(parseGitStatus(rawOut))
   }
   if (kind === 'git-commit') {
     const combined = `${output}\n${err}`.trim()
@@ -1226,7 +1252,7 @@ async function executeShellExecuteBg(
   run?: AgentRunContext,
   signal?: AbortSignal,
 ): Promise<string> {
-  const { bgStart, bgKill } = await import('../agents/bg-tasks')
+  const { bgStart, bgKill, rememberShellTask } = await import('../agents/bg-tasks')
   const command = argString(args, 'command')
   // Aus demselben Grund wie die `--no-verify`-Sperre darunter doppelt: über den
   // zurückgezogenen Namen kommt der Aufruf an executeShellExecute vorbei, und
@@ -1257,6 +1283,8 @@ async function executeShellExecuteBg(
     shell: argOptString(args, 'shell'),
     ...chatCtx(run),
   })
+  // check_tasks lists it next to the tasks a timeout handed over (T1).
+  rememberShellTask(run?.conversationId, id)
   // A detached task outlives the turn that started it BY DESIGN, but it must
   // not outlive the user pressing Stop: nothing polls it after the run ends, so
   // an unattended `npm run build`/deploy script would keep writing to the repo

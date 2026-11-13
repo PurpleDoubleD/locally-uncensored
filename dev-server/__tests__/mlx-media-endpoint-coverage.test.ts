@@ -243,7 +243,7 @@ describe('endpointMap covers every backendCall/invokeMedia site the frontend can
     'restart_remote_server', 'restore_rag_chunks', 'restore_stores', 'revoke_remote_memory',
     'save_text_file_dialog', 'self_migrate_finish', 'self_migrate_stage', 'set_chat_workspace_override',
     'set_comfy_gpu_mode', 'set_gpu_selection', 'set_onboarding_done', 'shell_execute_cancel',
-    'shell_task_kill', 'shell_task_list', 'shell_task_start', 'shell_task_status', 'stage_training_image',
+    'shell_task_start', 'stage_training_image',
     'start_bundled_embed', 'start_bundled_engine', 'start_character_training', 'start_lmstudio_server',
     'start_local_api', 'start_ollama', 'stop_bundled_embed', 'stop_bundled_engine', 'stop_local_api',
     'swap_bundled_model', 'sync_custom_model_paths', 'synthesize', 'synthesize_external', 'system_health',

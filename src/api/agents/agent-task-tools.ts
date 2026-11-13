@@ -66,23 +66,63 @@ export const MESSAGE_AGENT_TOOL_DEF: MCPToolDefinition = {
   source: 'builtin',
 }
 
+/**
+ * How much of a shell task's output check_tasks shows: the end, where a
+ * build or a server prints what matters now. The whole output is one
+ * `shell_execute` with `task: "status"` away, and the line says so.
+ */
+export const SHELL_TASK_OUTPUT_CHARS = 2000
+
+/**
+ * The shell tasks of this conversation (T1): the ones a timeout handed over
+ * and the ones started with `background: true`. A task the registry no
+ * longer knows (evicted, or the app restarted) is left out, not reported as
+ * an error: there is nothing the model could do about it.
+ */
+async function shellTaskBlocks(convId: string): Promise<string[]> {
+  const { shellTasksOf, bgStatus, renderBgStatusOneLine } = await import('./bg-tasks')
+  const ids = shellTasksOf(convId)
+  const blocks: string[] = []
+  for (const id of ids) {
+    let s
+    try {
+      s = await bgStatus(id)
+    } catch {
+      continue
+    }
+    const kopf = `shell ${renderBgStatusOneLine(s)} (task_id ${s.id})`
+    const out = (s.output_tail || '').replace(/\s+$/, '')
+    if (!out) {
+      blocks.push(`${kopf}\n(no output so far)`)
+      continue
+    }
+    const cut = out.length > SHELL_TASK_OUTPUT_CHARS
+    const tail = cut ? `…${out.slice(-SHELL_TASK_OUTPUT_CHARS)}` : out
+    const more = cut ? `\n[last ${SHELL_TASK_OUTPUT_CHARS} of ${out.length} characters; all of it: shell_execute with task "status" and this task_id]` : ''
+    blocks.push(`${kopf}\n${tail}${more}`)
+  }
+  return blocks
+}
+
 export function buildCheckTasksExecutor() {
   return async (_args: ToolArgs, run?: AgentRunContext): Promise<string> => {
     const convId = run?.conversationId
     if (!convId) return 'No conversation, so there are no background tasks to list.'
     const { useAgentTaskStore } = await import('../../stores/agentTaskStore')
     const alle = useAgentTaskStore.getState().forConv(convId)
-    if (!alle.length) return 'No background tasks in this conversation.'
+    const shell = await shellTaskBlocks(convId)
+    if (!alle.length && !shell.length) return 'No background tasks in this conversation.'
     const now = Date.now()
     // Die fertigen tragen ihre Antwort gleich mit: das Modell hat sonst die
     // Kennung, muesste dann aber ein zweites Werkzeug rufen, um an das
     // Ergebnis zu kommen — und genau dafuer reicht ein kleines Modell nicht.
-    return alle.map((t) => {
+    const agents = alle.map((t) => {
       const kopf = renderTaskOneLine(t, now)
       if (!isTerminal(t.status)) return kopf
       const leib = t.status === 'done' ? (t.output || '(no answer)') : (t.error || `(${t.status})`)
       return `${kopf}\n${leib}`
-    }).join('\n\n')
+    })
+    return [...agents, ...shell].join('\n\n')
   }
 }
 
