@@ -114,6 +114,18 @@ function MaskEditorInner({ onClose }: { onClose: () => void }) {
     }
     img.src = source.url
     renderOverlay()
+    // C76: a mask painted before on this picture is where the editor starts.
+    // It used to open empty, and Apply then dropped the mask that was there.
+    const painted = useCreateStore.getState().mask
+    if (painted?.url && painted.width === source.width && painted.height === source.height) {
+      const m = new Image()
+      m.onload = () => {
+        if (engineRef.current !== e) return
+        e.loadMask(m)
+        renderOverlay()
+      }
+      m.src = painted.url
+    }
     // No history sync here any more: a brand-new engine has empty stacks, which
     // is exactly what the state above already says for this source.
     return () => { engineRef.current = null }

@@ -132,7 +132,7 @@ import { defaultLoraStrength } from '../lib/lora-strength'
 import { fetchGalleryItemBlob } from '../components/create/experimental/galleryUrl'
 import { LongRunStopped, longVideoRequest, runLongVideo, type ClipItem } from '../lib/long-video-run'
 import { settleSeams } from '../api/video-settle'
-import { ownWorkflowMisfit } from '../lib/own-workflow-fit'
+import { ownWorkflowMisfitNote } from '../lib/own-workflow-fit'
 import { loadImageRef } from '../components/create/experimental/loadImage'
 import { listMlxLoras } from '../api/mlx-loras'
 import {
@@ -1861,6 +1861,9 @@ export function useCreate() {
         // B46: a Qwen edit reads its own Edit strength (1 = as before); the
         // builder ignores it on every other family.
         ...(isI2I && !isRemoveBg && effInputImage && state.editStrength < 1 ? { editStrength: state.editStrength } : {}),
+        // C75: a Qwen-Image 2.1 edit in the shape of the size fields. Only
+        // the edit graph of that model reads it (dynamic-workflow.ts).
+        ...(isI2I && !isRemoveBg && effInputImage && imageModelType === 'qwenimage' && state.qwenEditShape === 'canvas' ? { editShape: 'canvas' as const } : {}),
         // GH #144: further references ride along; the builder keeps only as
         // many as the model's family takes (lib/edit-references).
         ...(isI2I && !isRemoveBg && effInputImage && references.some((r) => r.filename)
@@ -1984,9 +1987,13 @@ export function useCreate() {
       // Check for custom workflow assignment — but verify it's compatible with the model
       let customWf = localOp || isUpscale ? null : useWorkflowStore.getState().getWorkflowForModel(activeModel, imageModelType)
       if (customWf) {
-        const misfit = ownWorkflowMisfit(apiNodes(customWf.workflow).map(([, n]) => n.class_type), imageModelType, listedModel?.source)
+        const misfit = ownWorkflowMisfitNote(customWf.name, apiNodes(customWf.workflow).map(([, n]) => n.class_type), imageModelType, listedModel?.source)
         if (misfit) {
-          console.warn(`[useCreate] Custom workflow incompatible: ${misfit}. Using auto.`)
+          // C72: said on the progress line and kept under the result, not
+          // only in the console.
+          console.warn(`[useCreate] ${misfit}`)
+          setProgress(5, misfit)
+          skippedNote = skippedNote ? `${skippedNote} ${misfit}` : misfit
           customWf = null
         }
       }
@@ -2128,7 +2135,7 @@ export function useCreate() {
       if (hiresFixEnabled && (intent === 'image' || hiresEdit)) {
         setProgress(8, 'Adding native HiRes Fix...')
         const editBase = hiresEdit
-          ? editHiresBase({ source, width, height, modelType: imageModelType, modelName: activeModel })
+          ? editHiresBase({ source, width, height, modelType: imageModelType, modelName: activeModel, editShape: state.qwenEditShape })
           : null
         const hires = applyNativeHiresFix(workflow, {
           baseWidth: editBase?.width ?? width,

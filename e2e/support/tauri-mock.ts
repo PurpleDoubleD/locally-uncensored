@@ -1524,6 +1524,8 @@ export function tauriMockInit(opts: TauriMockOptions) {
           images: m?.images,
           resolution: m?.resolution,
           loras: m?.loras,
+          mask: m?.mask,
+          strength: m?.strength,
         })
         // As in Rust: a pack with the Turbo adapter runs at its six steps,
         // and an edit comes back in the shape of its image.
@@ -1703,10 +1705,14 @@ export function tauriMockInit(opts: TauriMockOptions) {
         // (commands/mlx_cutout.rs). Never a ComfyUI graph.
         record('__E2E_MLX_CALLS__', { cmd, image: m?.image })
         return Promise.resolve({ image_base64: opts.mlx?.imageBase64 ?? TINY_PNG, width: 512, height: 512, output: '/tmp/lu-e2e/images/cutout-e2e.png' })
-      case 'video_stage_start_image':
+      case 'video_stage_start_image': {
         // As in Rust: the bytes land on disk and the answer is their path.
-        record('__E2E_MLX_CALLS__', { cmd, bytes: String(m?.data ?? '').length })
+        // A small picture keeps its bytes in the record, so a spec can read
+        // what was staged (a painted mask, C76).
+        const data = String(m?.data ?? '')
+        record('__E2E_MLX_CALLS__', { cmd, bytes: data.length, ...(data.length < 200_000 ? { data } : {}) })
         return Promise.resolve({ path: '/tmp/lu-e2e/videos/start-images/e2e-start.png' })
+      }
       case 'video_stage_motion_video':
         // Motion Control on a Mac: the clip lands on disk the same way.
         record('__E2E_MLX_CALLS__', { cmd, bytes: String(m?.data ?? '').length })

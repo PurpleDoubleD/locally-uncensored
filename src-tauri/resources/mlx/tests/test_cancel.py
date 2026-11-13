@@ -5,6 +5,7 @@ fastapi, pydantic, uvicorn and torch are replaced by stand-ins, and the
 pipeline is a loop that calls back after each step the way diffusers does.
 """
 
+import asyncio
 import importlib.util
 import sys
 import threading
@@ -200,3 +201,46 @@ class CancelTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ProgressTest(unittest.TestCase):
+    """C71: the app ends a run when nothing moves, so the sidecar says how far it is."""
+
+    def setUp(self):
+        self.server = _load_server()
+
+    def test_idle_before_and_after_an_image(self):
+        server = self.server
+        self.assertEqual(asyncio.run(server.progress())["phase"], "idle")
+        server._ensure_pipe = lambda *args, **kwargs: Pipe()
+        server.generate(server.GenerateRequest(prompt="a cat", steps=3))
+        snap = asyncio.run(server.progress())
+        self.assertEqual((snap["phase"], snap["step"], snap["steps"]), ("idle", 0, 0))
+
+    def test_each_step_is_counted_while_the_image_runs(self):
+        server = self.server
+        seen = []
+
+        def look(step):
+            seen.append(asyncio.run(server.progress()))
+
+        loads = []
+
+        def load(*args, **kwargs):
+            loads.append(asyncio.run(server.progress())["phase"])
+            return Pipe(on_step=look)
+
+        server._ensure_pipe = load
+        server.generate(server.GenerateRequest(prompt="a cat", steps=4))
+        self.assertEqual(loads, ["loading"])
+        # on_step runs before the callback of its step: step n sees n done.
+        self.assertEqual([s["step"] for s in seen], [0, 1, 2, 3])
+        self.assertTrue(all(s["phase"] == "steps" and s["steps"] == 4 and s["step_hook"] for s in seen))
+        self.assertTrue(all(s["quiet_seconds"] >= 0 for s in seen))
+
+    def test_a_pipeline_without_the_hook_says_it_counts_no_steps(self):
+        server = self.server
+        seen = []
+        server._ensure_pipe = lambda *args, **kwargs: OldPipe(on_step=lambda step: seen.append(asyncio.run(server.progress())))
+        server.generate(server.GenerateRequest(prompt="a cat", steps=2))
+        self.assertEqual([(s["phase"], s["step"], s["step_hook"]) for s in seen], [("steps", 0, False)] * 2)

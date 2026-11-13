@@ -194,12 +194,18 @@ export function ParamGroups() {
   // In Edit the picture comes out in the shape of the source, not of the
   // sliders (lib/edit-hires). Without a source there is nothing to name yet.
   const hiresBase = isEdit && !macHires
-    ? editHiresBase({ source: s.source, width: s.width, height: s.height, modelType: laneType, modelName: laneModel })
+    ? editHiresBase({ source: s.source, width: s.width, height: s.height, modelType: laneType, modelName: laneModel, editShape: s.qwenEditShape })
     : isEdit && macHires
       // The Mac's edit comes back in the shape of the source, on the canvas
       // the engine runs (1056 where the sliders say 1024, lib/image-engines).
       ? (s.source ? editCanvas(macEditSide(qwenEditResolution(s.width, s.height)), s.source) : null)
       : { width: s.width, height: s.height }
+  // C75: a local Qwen-Image 2.1 edit on ComfyUI picks its shape. The Mac's
+  // engine edits in the shape of the source and has no such switch.
+  const qwenEditShapeShown = isEdit && !isCloud && !isMlxLocal && laneType === 'qwenimage' && showSize
+  const qwenEditOut = qwenEditShapeShown
+    ? editHiresBase({ source: s.source, width: s.width, height: s.height, modelType: 'qwenimage', editShape: s.qwenEditShape })
+    : null
   // The grid a typed width or height is rounded to: the local model's latent
   // cell. The cloud keeps the 64 its providers were checked against.
   const sizeGrid = isCloud ? 64 : latentDownscale(laneType)
@@ -272,6 +278,35 @@ export function ParamGroups() {
         )}
         {/* B50: far above what the model takes, a note with the range that works. It never blocks. */}
         {showCfg && !isVideo && cfgNote && <p className={`t-micro ${HINWEIS_TEXT.ruhig}`} data-testid="cfg-hint">{cfgNote}</p>}
+        {qwenEditShapeShown && (
+          // C75: the shape of a Qwen-Image 2.1 edit. The default is the one
+          // it always had; 'Custom' crops the picture to the size below.
+          <div className="space-y-1" data-testid="qwen-edit-shape">
+            <span className="t-control text-gray-400">Output shape</span>
+            <div role="radiogroup" aria-label="Output shape" className="grid grid-cols-2 gap-1">
+              {([['source', 'Like the picture'], ['canvas', 'Custom size']] as const).map(([value, text]) => (
+                <button
+                  key={value}
+                  type="button"
+                  role="radio"
+                  aria-checked={s.qwenEditShape === value}
+                  onClick={() => s.setQwenEditShape(value)}
+                  className={cn(
+                    'px-2 py-1 rounded border t-control transition-colors',
+                    s.qwenEditShape === value
+                      ? 'border-white/20 bg-white/[0.08] text-gray-200'
+                      : 'border-white/[0.08] text-gray-400 hover:text-gray-200 hover:bg-white/[0.06]',
+                  )}
+                >{text}</button>
+              ))}
+            </div>
+            <p className="t-micro text-gray-500">
+              {s.qwenEditShape === 'canvas'
+                ? `The edit comes out ${qwenEditOut?.width ?? s.width}×${qwenEditOut?.height ?? s.height} px. The picture is scaled to fill that shape and cropped from its centre.`
+                : `The edit keeps the shape of the picture${qwenEditOut ? `, at ${qwenEditOut.width}×${qwenEditOut.height} px` : ''}. The size below sets how many pixels.`}
+            </p>
+          </div>
+        )}
         {showSize && (macSize && macClip ? (
           // The Mac: the model's grid and bounds. What runs is said below.
           <div className="grid grid-cols-2 gap-2">

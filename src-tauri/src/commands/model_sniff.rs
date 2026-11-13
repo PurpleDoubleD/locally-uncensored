@@ -97,6 +97,12 @@ pub fn classify<'a>(tensors: impl IntoIterator<Item = (&'a str, Option<&'a [u64]
         // MiniMax H3: picture and sound from one model (Discord 2026-09-26,
         // a CivitAI repack listed as an image model).
         Some("minimaxh3")
+    } else if has("video_patch_proj") && has("token_refiner") && has("adaln_t_table") {
+        // MiniMax H3 Image (Comfy-Org/MiniMax-H3-Image, 08.11.2026): the H3
+        // layout without the sound half. A still model, not a video one
+        // (C78, Discord feature-requests 11.11.2026). Read off the header of
+        // minimax_h3_image_pruned_w4a8 on 12.11.2026.
+        Some("minimaxh3image")
     } else if has("double_stream_modulation_img") {
         Some("flux2")
     } else if has("distilled_guidance_layer") {
@@ -264,6 +270,11 @@ mod tests {
         assert_eq!(arch(&["model.diffusion_model.joint_blocks.0.x", "text_encoders.clip_l.x"]).as_deref(), Some("sd3"));
         assert_eq!(arch(&["blocks.0.x", "patch_embedding.weight", "text_embedding.0.weight"]).as_deref(), Some("wan"));
         assert_eq!(arch(&["blocks.0.attn.qkv_proj.weight", "token_refiner.0.x", "audio_patch_proj.weight", "video_patch_proj.weight", "adaln_t_table"]).as_deref(), Some("minimaxh3"));
+        // H3 Image: the picture half with the H3 refiner and time table (C78).
+        assert_eq!(
+            arch(&["blocks.0.attn.qkv.weight", "token_refiner.0.x", "video_patch_proj.weight", "adaln_t_table", "condition_proj.weight", "final_layer.linear.weight", "rope"]).as_deref(),
+            Some("minimaxh3image")
+        );
         // One half alone is not H3.
         assert_eq!(arch(&["blocks.0.x", "video_patch_proj.weight"]), None);
         assert_eq!(arch(&["foo.weight"]), None);

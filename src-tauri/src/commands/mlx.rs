@@ -2277,6 +2277,10 @@ struct GenerateArgs {
     /// strength, in the order they were picked. See `mlx_loras`.
     #[serde(default)]
     loras: Vec<LoraArg>,
+    /// How long an image of the sidecar may go without any progress before
+    /// it is ended, in seconds (Settings, Image timeout). Absent: 20 minutes.
+    #[serde(default)]
+    stall_timeout_secs: Option<u64>,
 }
 
 #[derive(serde::Deserialize)]
@@ -2349,6 +2353,120 @@ fn cancel_sidecar_images(run: Option<&str>) -> bool {
 /// What `mlx_generate` answers for an image that was cancelled. Create does
 /// not show it: it has let go of the run already.
 const IMAGE_CANCELLED: &str = "The image was cancelled.";
+
+// ── How long an image of the sidecar may take (C71) ──────────────────
+//
+// The request used to carry one fixed limit of 900 s, the model load
+// included. Chroma1-HD at 40 steps and 1024 with real CFG takes longer than
+// that on an M1 Max, and the cut-off request came back as "mlx unreachable".
+// The sidecar now says how far it is (`GET /progress`), and a run is ended
+// only when nothing has moved for the limit set in Settings (Image timeout,
+// the same setting ComfyUI renders use). A model that loads gets at least
+// the old 15 minutes for that alone, whatever the setting.
+
+/// The limit when the request names none: Settings' default Image timeout.
+const SIDECAR_STALL_DEFAULT: std::time::Duration = std::time::Duration::from_secs(20 * 60);
+/// What a model load always gets, as much as the whole request had before.
+const SIDECAR_LOAD_FLOOR: std::time::Duration = std::time::Duration::from_secs(15 * 60);
+/// The range Settings allows: 1 to 480 minutes.
+const SIDECAR_STALL_MIN_SECS: u64 = 60;
+const SIDECAR_STALL_MAX_SECS: u64 = 480 * 60;
+/// How often the watch asks the sidecar.
+const SIDECAR_WATCH_EVERY: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// The limit a request asks for, held to the range Settings allows.
+fn sidecar_stall_limit(asked: Option<u64>) -> std::time::Duration {
+    asked.map_or(SIDECAR_STALL_DEFAULT, |s| {
+        std::time::Duration::from_secs(s.clamp(SIDECAR_STALL_MIN_SECS, SIDECAR_STALL_MAX_SECS))
+    })
+}
+
+/// What the sidecar says about the image under way (`GET /progress`).
+#[derive(Debug, Clone, PartialEq, serde::Deserialize)]
+struct SidecarProgress {
+    phase: String,
+    #[serde(default)]
+    step: u32,
+    #[serde(default)]
+    steps: u32,
+    #[serde(default)]
+    step_hook: bool,
+    #[serde(default)]
+    quiet_seconds: f64,
+}
+
+/// Ask the sidecar how far its image is. `None`: no answer, or a sidecar
+/// from before 3.1.0 that has no `/progress`.
+fn sidecar_progress() -> Option<SidecarProgress> {
+    parse_sidecar_progress(&sidecar_ask(MLX_PORT, "GET", "/progress")?)
+}
+
+fn parse_sidecar_progress(answer: &str) -> Option<SidecarProgress> {
+    let (head, body) = answer.split_once("\r\n\r\n")?;
+    if head.lines().next()?.split_whitespace().nth(1)? != "200" {
+        return None;
+    }
+    serde_json::from_str(body).ok()
+}
+
+/// A sidecar that answered before and has not answered for `silent`: ended
+/// once that is as long as a model load may take, never sooner.
+fn sidecar_silence_verdict(model: &str, silent: std::time::Duration, limit: std::time::Duration) -> Option<String> {
+    let load_limit = limit.max(SIDECAR_LOAD_FLOOR);
+    (silent >= load_limit).then(|| {
+        format!(
+            "{model} timed out: the image engine has not answered for {}. Raise Image timeout in Settings, or try fewer steps or a smaller size.",
+            human_span(load_limit)
+        )
+    })
+}
+
+/// "1 minute", "20 minutes", "90 seconds".
+fn human_span(d: std::time::Duration) -> String {
+    let s = d.as_secs();
+    if s >= 60 && s.is_multiple_of(60) {
+        let m = s / 60;
+        format!("{m} {}", if m == 1 { "minute" } else { "minutes" })
+    } else {
+        format!("{s} seconds")
+    }
+}
+
+/// Whether the image of the sidecar has gone quiet for longer than it may,
+/// and the sentence that says so. `elapsed` is the time since the request
+/// went out, used only when the sidecar does not say how far it is.
+fn sidecar_stall_verdict(
+    model: &str,
+    progress: Option<&SidecarProgress>,
+    elapsed: std::time::Duration,
+    limit: std::time::Duration,
+) -> Option<String> {
+    let load_limit = limit.max(SIDECAR_LOAD_FLOOR);
+    const WAY_OUT: &str = "Raise Image timeout in Settings, or try fewer steps or a smaller size.";
+    let Some(p) = progress else {
+        // Nothing to go by: the whole request gets what a load gets.
+        return (elapsed >= load_limit).then(|| {
+            format!("{model} timed out after {} without saying how far it was. {WAY_OUT}", human_span(load_limit))
+        });
+    };
+    let quiet = std::time::Duration::from_secs_f64(p.quiet_seconds.max(0.0));
+    match p.phase.as_str() {
+        "waiting" | "loading" if quiet >= load_limit => Some(format!(
+            "{model} timed out while loading: nothing moved for {}. {WAY_OUT}",
+            human_span(load_limit)
+        )),
+        "steps" if quiet >= limit && p.step_hook && p.steps > 0 => Some(format!(
+            "{model} timed out at step {} of {}: no new step for {}. {WAY_OUT}",
+            p.step,
+            p.steps,
+            human_span(limit)
+        )),
+        "steps" | "saving" if quiet >= limit => {
+            Some(format!("{model} timed out: no progress for {}. {WAY_OUT}", human_span(limit)))
+        }
+        _ => None,
+    }
+}
 
 /// A request to the sidecar that must not wait: Cancel is one click and the
 /// answer is nothing the caller needs. `None`: nobody answered in time.
@@ -2527,9 +2645,10 @@ pub async fn mlx_generate(_state: &AppState, args: &Value) -> CmdResult {
     name_installed_snapshot(entry);
     let at_image = SidecarImage::begin(req.run.clone());
     let client = reqwest::Client::builder()
-        // Big pipelines (Z-Image, Qwen-Image) take minutes to page in from
-        // disk on first use — the old 120 s timeout aborted mid-load.
-        .timeout(std::time::Duration::from_secs(900))
+        // No limit on the whole request: a big pipeline (Chroma1-HD, Qwen-Image)
+        // takes minutes to page in and many more to run. The watch below ends
+        // a run that stops moving (C71).
+        .connect_timeout(std::time::Duration::from_secs(10))
         .build()
         .map_err(|e| crate::commands::internal(e.to_string()))?;
 
@@ -2550,16 +2669,51 @@ pub async fn mlx_generate(_state: &AppState, args: &Value) -> CmdResult {
         // going to the hub. That is what makes an offline render possible.
         "local_files_only": image_model_is_installed(entry),
     });
-    let res = client
-        .post(format!("http://127.0.0.1:{MLX_PORT}/generate"))
-        .json(&body)
-        .send()
-        .await
-        .map_err(|e| {
-            crate::commands::internal(
-                sidecar_failure().unwrap_or_else(|| format!("mlx unreachable: {}", os_error::english(&e))),
-            )
-        })?;
+    let limit = sidecar_stall_limit(req.stall_timeout_secs);
+    let started = std::time::Instant::now();
+    let model = entry.name;
+    let watch = async move {
+        // When the sidecar last answered. An ask that goes unanswered is not
+        // taken for a stall: a busy sidecar can be slow to answer and still
+        // be making steps. Only a long silence ends the run (see
+        // `sidecar_silence_verdict`).
+        let mut answered: Option<std::time::Instant> = None;
+        loop {
+            tokio::time::sleep(SIDECAR_WATCH_EVERY).await;
+            let why = match tokio::task::spawn_blocking(sidecar_progress).await.ok().flatten() {
+                Some(p) => {
+                    answered = Some(std::time::Instant::now());
+                    sidecar_stall_verdict(model, Some(&p), started.elapsed(), limit)
+                }
+                None => match answered {
+                    Some(at) => sidecar_silence_verdict(model, at.elapsed(), limit),
+                    None => sidecar_stall_verdict(model, None, started.elapsed(), limit),
+                },
+            };
+            if let Some(why) = why {
+                break why;
+            }
+        }
+    };
+    let sent = client.post(format!("http://127.0.0.1:{MLX_PORT}/generate")).json(&body).send();
+    let res = tokio::select! {
+        res = sent => res.map_err(|e| {
+            crate::commands::internal(sidecar_failure().unwrap_or_else(|| {
+                if e.is_timeout() {
+                    format!("{model} timed out: {}", os_error::english(&e))
+                } else {
+                    format!("mlx unreachable: {}", os_error::english(&e))
+                }
+            }))
+        })?,
+        why = watch => {
+            // The request is let go here; the sidecar stops at the end of the
+            // step it is in and frees its lock for the next image.
+            let _ = tokio::task::spawn_blocking(|| sidecar_ask(MLX_PORT, "POST", "/cancel")).await;
+            tracing::warn!(target: "mlx", "{why}");
+            return Err(crate::commands::internal(why));
+        }
+    };
     if !res.status().is_success() {
         // The sidecar ended the image between two steps because it was asked to.
         if at_image.cancelled() {
@@ -2745,6 +2899,18 @@ pub(crate) fn reap_orphaned_mflux() {
     }
 }
 
+/// For `commands::real_run_mac`: whether the sidecar's port answers.
+#[cfg(all(test, target_os = "macos"))]
+pub(crate) fn real_run_sidecar_up() -> bool {
+    sidecar_running()
+}
+
+/// For `commands::real_run_mac`: end the sidecar the run started.
+#[cfg(all(test, target_os = "macos"))]
+pub(crate) fn real_run_stop_sidecar() {
+    stop_sidecar();
+}
+
 /// For `commands::real_run_mac`: see `mflux::install_engine_alone`.
 #[cfg(all(test, target_os = "macos"))]
 pub(crate) fn real_run_install_mflux_engine(state: &AppState) -> bool {
@@ -2752,9 +2918,20 @@ pub(crate) fn real_run_install_mflux_engine(state: &AppState) -> bool {
 }
 
 /// How far the image is that the second engine is making: `running`, `step`
-/// and `steps`. The sidecar reports no steps, and with it `running` is false.
+/// and `steps`. An image of the sidecar reports its steps where its pipeline
+/// counts them (`GET /progress`); one that does not leaves `running` false.
 pub fn mlx_generate_progress(_state: &AppState, _args: &Value) -> CmdResult {
-    Ok(mflux::progress())
+    let engine = mflux::progress();
+    if engine.get("running").and_then(Value::as_bool) == Some(true) || !sidecar_at_an_image() {
+        return Ok(engine);
+    }
+    // An image of the sidecar: its steps, where its pipeline counts them (C71).
+    Ok(match sidecar_progress() {
+        Some(p) if p.phase == "steps" && p.step_hook && p.steps > 0 => {
+            json!({ "running": true, "step": p.step, "steps": p.steps })
+        }
+        _ => engine,
+    })
 }
 
 /// Cancel in Create: end the image that is being made. `run` is the name
@@ -3427,6 +3604,94 @@ mod tests {
         assert!(hands_over < counted && counted < request);
     }
 
+    /// C71: Chroma1-HD at 40 steps ran past a fixed 900 s and came back as
+    /// "mlx unreachable". A run is ended only when nothing moves.
+    #[test]
+    fn a_sidecar_image_is_ended_when_it_stops_moving_not_after_a_fixed_time() {
+        use std::time::Duration;
+        let p = |phase: &str, step: u32, quiet: f64| SidecarProgress {
+            phase: phase.into(),
+            step,
+            steps: 40,
+            step_hook: true,
+            quiet_seconds: quiet,
+        };
+        let limit = sidecar_stall_limit(None);
+        assert_eq!(limit, Duration::from_secs(1200), "Settings' default of 20 minutes");
+        // Two hours in, a step every 3 minutes: it runs on.
+        let long = Duration::from_secs(7200);
+        assert_eq!(sidecar_stall_verdict("Chroma1-HD", Some(&p("steps", 30, 180.0)), long, limit), None);
+        // A load of 14 minutes is a load, even under a limit of 1 minute.
+        let short = sidecar_stall_limit(Some(60));
+        assert_eq!(sidecar_stall_verdict("Chroma1-HD", Some(&p("loading", 0, 840.0)), long, short), None);
+        let stuck = sidecar_stall_verdict("Chroma1-HD", Some(&p("loading", 0, 900.0)), long, short).expect("a load that never ends");
+        assert!(stuck.starts_with("Chroma1-HD timed out while loading: nothing moved for 15 minutes."), "{stuck}");
+        // A step that never ends says where it stopped, as a timeout.
+        let why = sidecar_stall_verdict("Chroma1-HD", Some(&p("steps", 12, 1200.0)), long, limit).expect("stalled");
+        assert_eq!(
+            why,
+            "Chroma1-HD timed out at step 12 of 40: no new step for 20 minutes. Raise Image timeout in Settings, or try fewer steps or a smaller size."
+        );
+        assert!(!why.contains("unreachable"), "Create retries an unreachable sidecar and would wait the whole limit again");
+        // A pipeline that counts no steps: quiet time is all there is.
+        let blind = SidecarProgress { step_hook: false, ..p("steps", 0, 1300.0) };
+        assert!(sidecar_stall_verdict("SD Turbo", Some(&blind), long, limit).unwrap().starts_with("SD Turbo timed out: no progress for 20 minutes."));
+        // A sidecar that does not say how far it is gets what a load gets, in all.
+        assert_eq!(sidecar_stall_verdict("X", None, Duration::from_secs(1199), limit), None);
+        assert!(sidecar_stall_verdict("X", None, Duration::from_secs(1200), limit).is_some());
+        // Idle: the request has not arrived yet or the image is through.
+        assert_eq!(sidecar_stall_verdict("X", Some(&p("idle", 0, 99_999.0)), long, limit), None);
+    }
+
+    /// Real run, 12.11.2026: SD Turbo at 300 steps went on stepping while its
+    /// progress asks went unanswered from step 67 (its listener had been
+    /// ended by a SIGTERM on the port; uvicorn then finishes the request it
+    /// has), and the run was ended as stalled after a minute. Silence is not
+    /// a stall: only as long as a load may take.
+    #[test]
+    fn a_sidecar_that_does_not_answer_is_ended_only_after_the_load_limit() {
+        use std::time::Duration;
+        let minute = sidecar_stall_limit(Some(60));
+        assert_eq!(sidecar_silence_verdict("SD Turbo", Duration::from_secs(120), minute), None);
+        assert_eq!(sidecar_silence_verdict("SD Turbo", Duration::from_secs(899), minute), None);
+        let why = sidecar_silence_verdict("SD Turbo", Duration::from_secs(900), minute).expect("15 minutes without an answer");
+        assert!(why.starts_with("SD Turbo timed out: the image engine has not answered for 15 minutes."), "{why}");
+        // A longer Image timeout is longer here too.
+        assert_eq!(sidecar_silence_verdict("X", Duration::from_secs(1700), sidecar_stall_limit(Some(30 * 60))), None);
+        assert!(!why.contains("unreachable"));
+    }
+
+    #[test]
+    fn the_stall_limit_stays_in_the_range_settings_allows() {
+        use std::time::Duration;
+        assert_eq!(sidecar_stall_limit(Some(0)), Duration::from_secs(60));
+        assert_eq!(sidecar_stall_limit(Some(45 * 60)), Duration::from_secs(45 * 60));
+        assert_eq!(sidecar_stall_limit(Some(u64::MAX)), Duration::from_secs(480 * 60));
+        assert_eq!(human_span(Duration::from_secs(60)), "1 minute");
+        assert_eq!(human_span(Duration::from_secs(90)), "90 seconds");
+    }
+
+    #[test]
+    fn the_progress_answer_of_the_sidecar_is_read() {
+        let ok = "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\n\r\n{\"phase\":\"steps\",\"step\":3,\"steps\":40,\"step_hook\":true,\"quiet_seconds\":1.5}";
+        let p = parse_sidecar_progress(ok).expect("read");
+        assert_eq!((p.phase.as_str(), p.step, p.steps, p.step_hook), ("steps", 3, 40, true));
+        // A sidecar from before 3.1.0 has no such route.
+        assert_eq!(parse_sidecar_progress("HTTP/1.1 404 Not Found\r\n\r\n{\"detail\":\"Not Found\"}"), None);
+        assert_eq!(parse_sidecar_progress("garbage"), None);
+    }
+
+    /// The watch replaces the fixed limit on the whole request.
+    #[test]
+    fn the_sidecar_request_has_no_fixed_limit_and_is_watched() {
+        let src = production_source();
+        let generate = &src[src.find("pub async fn mlx_generate(").unwrap()..];
+        let generate = &generate[..generate.find("\npub(crate) fn images_root()").unwrap()];
+        assert!(!generate.contains(".timeout("), "a fixed limit on the whole request is back");
+        assert!(generate.contains("sidecar_stall_verdict("));
+        assert!(generate.contains("tokio::select!"));
+    }
+
     /// The tests that put an image into the sidecar's list take turns.
     fn sidecar_images_in_tests() -> std::sync::MutexGuard<'static, ()> {
         static TURN: std::sync::Mutex<()> = std::sync::Mutex::new(());
@@ -3499,7 +3764,9 @@ mod tests {
         assert!(cancel.contains("sidecar_ask(MLX_PORT, \"POST\", \"/cancel\")"));
         // The sidecar has the endpoint and looks at the mark after each step.
         assert!(SERVER_PY.contains("@app.post(\"/cancel\")"));
-        assert!(SERVER_PY.contains("gen_kwargs[\"callback_on_step_end\"] = _stop_if_cancelled"));
+        assert!(SERVER_PY.contains("gen_kwargs[\"callback_on_step_end\"] = _on_step_end"));
+        assert!(SERVER_PY.contains("return _stop_if_cancelled(pipe, step, timestep, callback_kwargs)"));
+        assert!(SERVER_PY.contains("@app.get(\"/progress\")"));
         let generate = &src[src.find("pub async fn mlx_generate(").unwrap()..];
         let generate = &generate[..generate.find("\npub(crate) fn images_root()").unwrap()];
         assert!(generate.contains("keep_sidecar_image(at_image.cancelled(), payload, entry.guidance, &images_root())"));

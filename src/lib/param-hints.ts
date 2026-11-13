@@ -11,7 +11,7 @@ import type { ModelType } from '../api/comfyui'
  *  so the rule needs no import of the ComfyUI module. SD 1.5 and SDXL (7) are
  *  made for a high CFG and are not in it. */
 export const LOW_CFG_FAMILIES: Partial<Record<ModelType, number>> = {
-  flux: 1, flux2: 1, krea2: 1, qwenimage: 1, hidream: 1, ernie_image: 1,
+  flux: 1, flux2: 1, krea2: 1, qwenimage: 1, hidream: 1, ernie_image: 1, minimaxh3image: 1,
   zimage: 3.5, chroma: 3.5, qwenimage1: 4, sd3: 4, lumina2: 4,
 }
 

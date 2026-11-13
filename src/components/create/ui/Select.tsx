@@ -214,6 +214,7 @@ export function Select({
 
                     <input
                       autoFocus
+                      aria-label={ariaLabel ? `Search ${ariaLabel}` : 'Search'}
                       value={query}
                       onChange={(event) =>
                         setQuery(event.target.value)

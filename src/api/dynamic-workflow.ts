@@ -122,6 +122,12 @@ interface StrategyResult {
  *  0.35.0, YuE2 in 0.36.0. "Update ComfyUI" in the text is what Create keys the
  *  one click update on (needsComfyUpdate). */
 export const LTX25_NEEDS_UPDATE = 'LTX 2.5 needs ComfyUI 0.32.0 or newer. Update ComfyUI in Settings.'
+
+/** C78: what Create says for MiniMax H3 Image, a still model on the H3
+ *  layout that LU has no graph of its own for. */
+export const MINIMAX_H3_IMAGE_NO_BUILDER =
+  'LU has no built-in workflow for MiniMax H3 Image. Save the ComfyUI template "MiniMax-H3-Image: Text to Image", '
+  + 'import it under Workflows and assign it to this model. Create then runs it with your prompt, size and LoRAs.'
 /** A step distillation LoRA names its step count (minimax_h3_fl2v_turbo_8step_...). */
 const H3_STEP_LORA = /turbo\D*?(\d+)\s*_?steps?/i
 export const FASTH3_NEEDS_UPDATE = 'FastH3 needs ComfyUI 0.35.0 or newer. Update ComfyUI in Settings.'
@@ -133,6 +139,13 @@ export function determineStrategy(
   nodes: CategorizedNodes,
   models: AvailableModels,
 ): StrategyResult {
+  // C78: MiniMax H3 Image has no graph of LU's own. Its workflow is the
+  // official template; imported under Workflows and assigned to the model,
+  // Create runs it with the prompt, size and LoRAs (workflows.ts).
+  if (modelType === 'minimaxh3image') {
+    return { strategy: 'unavailable', reason: MINIMAX_H3_IMAGE_NO_BUILDER }
+  }
+
   const hasUNET = nodes.loaders.includes('UNETLoader')
   const hasCheckpoint = nodes.loaders.includes('CheckpointLoaderSimple')
   const hasCLIPLoader = nodes.loaders.includes('CLIPLoader')
@@ -1253,7 +1266,28 @@ export async function buildDynamicWorkflow(
       for (const [i, image] of images.entries()) {
         const loadId = String(n++)
         workflow[loadId] = { class_type: 'LoadImage', inputs: { image } }
-        qwenInputs[`images.image_${i + 1}`] = [loadId, 0]
+        let imageRef: [string, number] = [loadId, 0]
+        if (i === 0 && gp.editShape === 'canvas') {
+          // C75 (Discord feature-requests 11.11.2026): an edit in a shape of
+          // its own. The node's latent follows the first image and has to
+          // (any other latent size shifts the edit), so the source itself is
+          // brought to the shape first: scaled to cover width x height and
+          // cropped from its centre. The pixel budget below stays the size.
+          const scaleId = String(n++)
+          workflow[scaleId] = {
+            class_type: 'ImageScale',
+            inputs: {
+              image: [loadId, 0],
+              upscale_method: resizeMethod(allNodes, 'ImageScale', false),
+              width: params.width,
+              height: params.height,
+              crop: 'center',
+            },
+            _meta: { title: 'Edit shape' },
+          }
+          imageRef = [scaleId, 0]
+        }
+        qwenInputs[`images.image_${i + 1}`] = imageRef
       }
       qwenInputs.vae = [vaeSourceId, vaeOutputSlot]
     } else if (createRefs.length > 0) {
