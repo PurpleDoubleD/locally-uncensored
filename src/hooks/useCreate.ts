@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
 import { blobFromUrl } from '../lib/render/data-url'
+import { coverCropBlob } from '../lib/cover-crop'
 import { videoRunGivenUp, videoRunProgress, videoRunStatus } from '../lib/mlx-video-progress'
 import { featherMaskBlob } from '../lib/mask-feather'
 import { macHiresPass } from '../lib/mac-hires'
@@ -1115,7 +1116,12 @@ export function useCreate() {
       // the canvas apart from the budget, and the canvas below stays at the
       // full size of the source.
       const editSide = macEditSide(referenceSide(editBudget, editRefs.length))
-      const editSize = mlxEdit && source && editRefs.length > 1 ? macEditCanvas(editCanvas(editBudget, source)) : null
+      // C75: a Qwen-Image 2.1 edit in the shape of the size fields. The
+      // picture (and its mask) is cut to that shape before it is staged
+      // (lib/cover-crop), so the engine's edit follows it.
+      const macShape = mlxEdit && !!source && listed?.type === 'qwenimage' && state.qwenEditShape === 'canvas'
+      const shapeOf = macShape ? { width, height } : source
+      const editSize = mlxEdit && source && editRefs.length > 1 ? macEditCanvas(editCanvas(editBudget, shapeOf!)) : null
       // "Transparent background": the same prompt wrapper the Windows graph
       // uses. The model writes the alpha channel and the engine keeps it.
       const transparent = wantsTransparent({
@@ -1154,11 +1160,16 @@ export function useCreate() {
         // An image picked in cloud mode has no file yet. It is written to
         // disk here, the way a start image is before a local video.
         const editImages: string[] = []
-        for (const ref of editRefs) {
-          editImages.push(ref.filename || await stageStartImage(await blobFromUrl(ref.url)))
+        for (const [i, ref] of editRefs.entries()) {
+          editImages.push(i === 0 && macShape
+            ? await stageStartImage(await coverCropBlob(await blobFromUrl(ref.url), width, height))
+            : ref.filename || await stageStartImage(await blobFromUrl(ref.url)))
         }
         const editMask = mlxEdit && mask?.url
-          ? await stageStartImage(await featherMaskBlob(await blobFromUrl(mask.url), growMaskBy))
+          ? await stageStartImage(await featherMaskBlob(
+            macShape ? await coverCropBlob(await blobFromUrl(mask.url), width, height) : await blobFromUrl(mask.url),
+            growMaskBy,
+          ))
           : undefined
         // "Improve my prompt" with the Qwen enhancer (GH #148): it rewrites
         // now, with the chat model out of memory, and its process has ended

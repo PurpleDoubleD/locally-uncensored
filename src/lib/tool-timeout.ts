@@ -16,6 +16,8 @@
 /** Default args.timeout the loops inject for the exec tools (ms). Building an
  * app (npm install, cargo/gradle) routinely runs minutes; the old 30 s
  * default + 60 s JS cap killed every real build (2026-06-04). */
+import { hasMlx } from './capabilities'
+
 export const SHELL_EXECUTE_DEFAULT_TIMEOUT_MS = 600_000
 
 const LONG_RUNNING = new Set([
@@ -77,6 +79,8 @@ export const URL_CARD_CAP_MS = 10 * 60_000
 export interface ToolTimeoutSettings {
   imageGenTimeoutMinutes?: number
   videoGenTimeoutMinutes?: number
+  /** 'cloud' renders on the server; anything else is this machine. */
+  appMode?: string
 }
 
 /**
@@ -118,7 +122,15 @@ export function toolCallCapMs(
   args: Record<string, unknown> | undefined,
   settings: ToolTimeoutSettings,
 ): number {
-  if (name === 'image_generate') return renderStallLimitMs('image', settings) + MEDIA_CALL_OVERHEAD_MS
+  if (name === 'image_generate') {
+    // C71: a local image on a Mac runs on MLX, and Rust ends it the moment it
+    // stops moving (commands/mlx.rs, the Image timeout; the second engine has
+    // its own hour per image). A wall clock here would cut a long render that
+    // is still making steps, Chroma1-HD at 40 steps on an M1 Max among them.
+    // Stop still ends it.
+    if (settings.appMode !== 'cloud' && hasMlx()) return NO_PRACTICAL_CAP_MS
+    return renderStallLimitMs('image', settings) + MEDIA_CALL_OVERHEAD_MS
+  }
   if (name === 'video_generate') return renderStallLimitMs('video', settings) + MEDIA_CALL_OVERHEAD_MS
   if (AGENT_LOOP_TOOLS.has(name) && args?.background !== true) {
     return NO_PRACTICAL_CAP_MS
