@@ -1837,8 +1837,12 @@ for (const size of SIZES) {
       await page.evaluate(async (id) => {
         const spec = '/src/stores/downloadStore.ts'
         const mod = await import(/* @vite-ignore */ spec)
-        const now = mod.useDownloadStore.getState().downloads
-        mod.useDownloadStore.setState({ downloads: { ...now, [id]: { id, filename: id, progress: 40_000_000, total: 400_000_000, speed: 0, status: 'paused' } } })
+        // In `ownRows` as well, as the app writes a row of its own: the next poll rebuilds `downloads` from
+        // `ownRows` plus what the native side reports, and a row in `downloads` alone was gone whenever that
+        // poll came before the card was looked at (CI-like run without retries: 4 of 10 red).
+        const { downloads, ownRows } = mod.useDownloadStore.getState()
+        const row = { id, filename: id, progress: 40_000_000, total: 400_000_000, speed: 0, status: 'paused' }
+        mod.useDownloadStore.setState({ downloads: { ...downloads, [id]: row }, ownRows: { ...ownRows, [id]: row } })
       }, packing)
       const loading = page.locator(`[data-m-id="${other.id}"]:visible`).filter({ has: page.getByTestId('m-models-item-open') })
       await loading.scrollIntoViewIfNeeded()

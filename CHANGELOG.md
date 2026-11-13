@@ -2,6 +2,273 @@
 
 All notable changes to Locally Uncensored are documented here.
 
+## [3.0.10] - 2026-11-05
+
+A fix for lost chats. When the chat list came back without its chats, the
+next backup replaced the only complete copy in `store_backup.json`, and the
+check at launch did not notice the empty list. The bug is in 3.0.8 and 3.0.9.
+LU Cloud keeps its open models: seventeen video models and nine image models
+in the cloud catalogue.
+
+### Fixed
+- A backup whose chat list lost chats keeps the previous backup as
+  `store_backup.chats-<time>.json` first (the newest five stay). Images in
+  those chats are not cleaned up while an archive points at them.
+- The check at launch counts a chat store as there only when it can be read,
+  so an empty or unreadable store is restored from the backup again.
+- Settings, Chat Backup: "Restore chats from backup" brings back every chat
+  the backup files hold that is not in the list. Chats that are there stay as
+  they are, and nothing is added twice. "Choose a backup file..." takes a
+  `store_backup*.json` from anywhere, and "Import chats" reads one too.
+- A note at launch says when the backup holds such chats. It restores
+  nothing by itself.
+
+## [3.0.9] - 2026-11-05
+
+A group chat sends every speaker the context you picked, can redo one
+speaker and lets you set the speaking order. A compaction is one line in the
+chat, and the stretch before it can be read again. Animate takes an end
+image and, with MiniMax H3, up to nine reference pictures; Create takes
+reference pictures for Krea 2, Qwen-Image 2.1 and FLUX.2. Long local videos
+go to 15 seconds without drifting in colour, and a video shows a preview
+while it renders. The trainer learns styles, concepts and poses (Beta), and
+local training uses the full LoRA strength. Hugging Face's "Use this model"
+opens the download in LU. The Linux AppImage starts again without the tray
+library. Liquid LFM3 is in, and the LU Engine runs llama.cpp b11960. What
+has only run in automated tests is listed under Known limits. LU Cloud
+keeps its open models: seventeen video models and nine image models in the
+cloud catalogue.
+
+### Added
+
+- **Regenerate one speaker** in a group chat, with the choice to keep later
+  answers or regenerate from there; "Regenerate whole round" as its own
+  button. (GitHub #199)
+- **Speaking order** with arrows and drag, sitting out one round, "Skip
+  speaker" and "Stop round" during a round. (GitHub #200)
+- **Compaction layers.** The chat starts at the newest compaction; marks on
+  the left open each earlier stretch, read only.
+- **Recall older messages** (setting, off by default): after a compaction the
+  up to four older messages closest in meaning to the new one go back in,
+  embedded and searched on this machine. (GitHub #205)
+- **HTML preview in the chat**: a sandboxed frame served from 127.0.0.1 with a
+  token per page, network only when allowed for that page, never run on its
+  own. Desktop only. (Discord)
+- **Large text fields and an editor with search** for persona, reminder and
+  memory. (GitHub #197)
+- **Custom sampling parameters** in the persona and the chat's sampling popup.
+  (GitHub #198)
+- **Enter key setting**: send, or new line with Ctrl/Cmd+Enter to send.
+  (GitHub #202)
+- A "?" next to every temperature control.
+- "Copy as Markdown" in a message's right-click menu. (Discord)
+- **End image in Animate** for Wan 2.2 A14B, Wan 2.1 FLF2V and MiniMax H3
+  locally and for the LU Cloud catalogue models that offer it; **up to nine
+  reference pictures** for MiniMax H3 reference to video. (Discord)
+- **Reference pictures in Create**: Krea 2 style (up to 3), Qwen-Image 2.1 (up
+  to 10), FLUX.2 (up to 4). (Discord)
+- **Live preview while a video renders.** (Discord)
+- **"After a render"** (Settings, Hardware): free ComfyUI's memory after 5
+  minutes, right away, or never. (Discord)
+- **Prompt assistant** in Create: keywords to a prompt for the picked model.
+  (Discord)
+- The gallery lists the LoRAs of a picture with their strength. (Discord)
+- **LoRA order in Create**: with two or more LoRAs picked, "Order of the
+  run" lists them numbered, with ↑/↓ to move one; the order is kept per
+  task and model. (Discord)
+- **Select several items in the gallery** (desktop): Cmd/Ctrl-click, Shift
+  for a range, Cmd/Ctrl+A, Escape to clear. "N selected" and the right-click
+  menu move them to a folder, download or delete them; Delete asks first.
+  (Discord)
+- **Style, concept and pose training** next to characters (Beta). (Discord)
+- **Hugging Face "Use this model"** opens a checked download dialog in LU
+  (`locallyuncensored://open-model`).
+- Remove refusals shows bytes, speed and time left for every download.
+- A note with the working range when CFG or a LoRA strength is far off.
+  (Discord)
+- Details button for the shortened description on image, video and Mac media
+  tiles. (Discord)
+- Setting "Start ComfyUI when LU starts" (Settings, ComfyUI).
+- **Status menu in the menu bar and tray**: with LU Cloud "Signed in", the
+  plan, credits left and "Plan & Credits…"; locally the engine, the loaded
+  model and its state, memory in use and "Models…"; Open LU and Quit LU.
+- **Liquid LFM3**: Text 1.7B, VL 2B, Omni 2B and Audio 2B as GGUF for the LU
+  Engine, all four through Ollama 0.40.13 or newer and as MLX builds on a
+  Mac, text and pictures in LM Studio (runtime 2.65.1 or newer, else a clear
+  note). LFM3 Audio dictates and reads aloud in the chat and the Voice area,
+  through the LU Engine or Ollama.
+
+### Changed
+
+- **Group chat context** (GitHub #201): local speakers get their chosen window
+  minus room for the answer, no longer about half of it; a grey line names
+  messages that were not sent. A long answer earlier in the round goes out
+  shortened, not refused.
+- **Compaction shows as one line** ("Compacted, 11.6K → 7.1K"), and in an agent
+  run as a step.
+- **Long local videos up to 15 seconds**, each section held to the first one;
+  the colour match stays in YUV.
+- Local training uses the full LoRA strength (network alpha equal to the
+  rank).
+- **ComfyUI is not started without being asked**; LU connects to a running one
+  and follows Comfy Desktop on port 8000.
+- **Remove refusals checks knowledge with 1000 questions** and judges the
+  difference against chance.
+- LoRA picks are kept per task and model. (Discord)
+- Sampler and scheduler in Create show the names people use (DPM++ 2M SDE,
+  Euler a, Karras) with ComfyUI's name beside them; the search finds both
+  spellings. (Discord)
+- Improve my prompt also rewrites an edit instruction. (Discord)
+- A zoomed picture moves with the mouse in the large view. (Discord)
+- The prompt enhancer frees the card first, shows its tokens and ends a
+  silent job after 3 minutes. (Discord)
+- A slow first answer from a partly offloaded Ollama model explains itself and
+  names a smaller installed model. (Discord)
+- The message field fits 375 px.
+- "Continue on phone" says that shared chats show up with the next LU phone
+  app; the current phone app and the browser remote cannot show them yet.
+  (Discord)
+- Updates must carry their version in the signature (Tauri CLI 2.11.5, updater
+  2.12.0, requireSignedVersion); vite 8.1.6.
+- The LU Engine runs llama.cpp b11960 (v0.8.0) instead of b9949; LU passes
+  --load-mode instead of the removed --no-mmap and --mlock.
+
+### Fixed
+
+- **Gallery folders no longer empty themselves.** The gallery kept at most
+  200 entries and silently dropped the oldest, sorted ones too, with their
+  folder and prompt; the files stayed in the output folder. Pictures in a
+  folder are now never removed automatically, the limit of 200 counts only
+  unsorted ones, and the gallery says when older unsorted ones were
+  removed. "Reset settings & reload" keeps the gallery and its folders.
+  Folders and prompts lost before 3.0.9 cannot be brought back. (Discord)
+- "Move to folder" in the large view is readable in light mode, and after a
+  move the large view goes on to the next picture instead of getting
+  stuck. (Discord)
+- Typing the name of an existing gallery folder puts the pictures into that
+  folder instead of creating a second one with the same name.
+- After zooming, the large view shows the picture without stripes at the
+  edges, on a solid background.
+- The LoRA strength slider runs from -2 to +2 with 0 in the middle; a typed
+  value up to ±20 widens the slider. (Discord)
+- **The Linux AppImage starts without a loadable tray library** and carries
+  the tray libraries again. (GitHub #204, #208)
+- **Android: the keyboard no longer closes on Create.**
+- **Right-click "Copy text" copies plain text**, as Ctrl+C does. (Discord)
+- A local Edit makes as many pictures as the batch size. (Discord)
+- 16:9 under the prompt and in Advanced give the same size. (Discord)
+- Qwen Image 2.1 Turbo runs its own 8 step schedule. (Discord)
+- The ⓘ next to an installed image model did nothing; it now shows type,
+  size and folder, and LoRAs have one too. A model or LoRA downloaded from
+  now on keeps its Hugging Face or CivitAI page, opened with "Open source
+  page". (Discord)
+- The Edit strength slider for Qwen-Image edits through ComfyUI is back and
+  now takes effect; before, its value never reached the workflow. At 1.0,
+  the default, an edit comes out as before. (Discord)
+- PyTorch installs with an old pip: before the PyTorch step LU updates a
+  pip older than 24 in ComfyUI's environment. (GitHub #211)
+- Character trainer setup with an old pip: LU updates a pip older than 24 in
+  the trainer environment before PyTorch. Before, Python 3.11.4 and early
+  3.12 ended in "The Python in the trainer environment is one the trainer
+  cannot use", although the Python was fine. The setup steps and the final
+  error now also go to LU's log file. (Discord)
+- Character trainer setup with a working Python 3.11 or 3.12 that "does not
+  start": on Windows the trainer now starts its Python without PYTHONHOME and
+  PYTHONPATH (a leftover of a removed Python can make every one die at start-up),
+  and every Python it skips is named in the log with its exit code and error.
+- When ComfyUI is not running and a task's model files are already on
+  disk, Create says so and offers "Start ComfyUI" instead of a one-time
+  download. (GitHub #209)
+- A long clip no longer grows brighter section by section.
+- Comfy-Org's LTX 2.5 image to video template imports and runs; an own LTX
+  2.5 workflow is kept. (GitHub #196)
+- A model in two folders is listed once. (Discord)
+- MCP servers with uvx start on Windows, and a first start waits while uv or
+  npm downloads the server; a Mac LU from the Finder finds uvx and npx.
+  (Discord)
+- MCP arguments with quotes, ghost servers after a cancelled connect, and an
+  Ask First row for external MCP tools.
+- REA on Apple Silicon says whether Ghidra's decompiler is built for this Mac.
+- An empty placeholder file is not taken for the LU Engine. (GitHub #207)
+- The Local API takes bodies up to 32 MB and routes Ollama and LU Engine
+  requests to the app's addresses.
+- The CivitAI search loads still previews; on Linux the window froze.
+  (Discord)
+- A Hugging Face search hit without a named quant downloads the largest
+  quant that fits in graphics memory with room to spare, not always Q4_K_M,
+  and says which one and why. The link dialog marks files that won't fit
+  fully. An imatrix file is no longer taken for the model. (GitHub #215)
+- Downloading a GGUF chat model no longer fails with "Could not determine
+  model directory" when another OpenAI-compatible server is set up in LU.
+  A model goes to the LU Engine then, the chat stays on that server and a
+  line says why; a real failure names its real reason. (Discord)
+- Windows: LU opened only "Could not find the WebView2 Runtime" when that
+  runtime was missing for the Windows user. The installer now carries
+  Microsoft's WebView2 setup and installs the runtime when it is missing, and
+  LU offers it at start, with Microsoft's download page as the fallback.
+- A split GGUF set with missing parts is not downloaded; a failed Hugging Face
+  search says so; only the newest search writes results.
+- Desktop LU Cloud Create checks negative prompt, lyrics and trigger word only
+  when the run sends them.
+- A new training asks before replacing a character of the same name;
+  same-named photos and non-English trigger words are handled.
+- A stopped character training on the phone is not reported as trained.
+- Train new on Windows and Linux says "Local training uses Z-Image" instead
+  of listing image models it does not train on. (GitHub #210)
+- The onboarding's "Models you already have" lists LU Engine models too.
+- A dismissed update stays dismissed after a restart.
+- Settings resets, bounded number fields, Add Provider's Ollama address, the
+  onboarding re-run and its Ollama address.
+- A broken chat backup, long words in a bubble, a prompt longer than the
+  context, Compare without its error, a cleared download coming back,
+  external voice failures, narrow windows, unnamed controls.
+
+### Known limits
+
+- The last Create fixes ran on Windows with a real ComfyUI on an RTX 3060: ⓘ
+  details for image models and LoRAs, sampler names, the LoRA order (A then
+  B and B then A gave different pictures with the same seed), Edit strength
+  for Qwen-Image 2.1 (0.4 against 1.0), the pip update before PyTorch,
+  "Start ComfyUI" for files already on disk, selecting several gallery items
+  with "Move to folder" from the large view, and the gallery keeping 200
+  sorted pictures with their prompts after 500 new ones. Not checked there:
+  downloads from CivitAI (they need an API key), Download for a gallery
+  selection (one save dialog per file), Edit strength on Qwen-Image 2.1
+  Turbo and Qwen-Image-Edit 2509/2511, zooming with a touchpad or on a
+  portrait picture in the large view, and "Reset settings & reload" keeping
+  the gallery, which ran on a Mac only.
+- Picking a quant by graphics memory ran on Windows on an RTX 3060 (12 GB)
+  and on a Mac with 16 GB simulated; every test download was stopped at the
+  start, so no swapped model has been run to the end.
+- The note on "Continue on phone" ran on a Mac only.
+- The fix for "Could not determine model directory" ran on a Mac only.
+
+- Clicked through on a Mac in builds made like the release. On Windows a
+  test build ran on an RTX 3060 (updates, Hugging Face links, image and
+  video with ComfyUI, HTML preview, uvx MCP servers, Comfy Desktop on port
+  8000, onboarding), the last with the LU Engine of the automated release
+  build.
+- Long videos ran on one RTX 3060 (Wan 2.2 A14B, 15 and 30 seconds).
+- A local end image (Wan 2.2 A14B), the live preview and "After a render"
+  ran on an RTX 3060. Reference pictures, the LU Cloud end image and the
+  enhancer changes have not run on a real graphics card yet.
+- Style training is Beta; a woodcut style was not learned at 600 steps. A
+  test figure was not learned at 1200 steps either; real photos were not
+  measured.
+- The status menu was clicked through on a Mac; on Windows only its memory
+  figure was checked, not its entries.
+- The AppImage fix ran in Linux containers, not on a desktop with a panel.
+  Without a loadable tray library LU starts without the tray and its status
+  menu.
+- If LU installed your ComfyUI before 3.0.9, it no longer starts by itself
+  when LU opens. Turn on "Start ComfyUI when LU starts" in Settings →
+  ComfyUI once, or just generate something in Create, which starts it as
+  before.
+- LFM3 in LM Studio needs runtime 2.65.1 or newer and has not run there.
+- The LU Engine b11960 ran on a Mac and on Windows (text, pictures, start on
+  an RTX 3060 with Vulkan); Linux in automated tests.
+- Recall: plain chat only. Compaction layers in Code: automated tests only.
+
 ## [3.0.8] - 2026-10-27
 
 Web search in the chat finds an answer again: LU asks five search services in

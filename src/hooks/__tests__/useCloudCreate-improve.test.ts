@@ -188,7 +188,7 @@ describe('Improve my prompt: Cloud (Desktop)', () => {
     expect(improve.calls[0].kind).toBe('video')
   })
 
-  it('Bearbeiten ruft das Chatmodell nie, auch bei eingeschaltetem Schalter', async () => {
+  it('Bearbeiten schreibt als Anweisung um (B48)', async () => {
     const s = useCreateStore.getState()
     s.setImprovePrompt(true); s.setIntent('edit'); s.setCloudImageModel('qwen-image-2.1-edit')
     useCreateStore.setState({
@@ -196,8 +196,9 @@ describe('Improve my prompt: Cloud (Desktop)', () => {
       mask: { filename: 'm.png', url: 'data:image/png;base64,AA', width: 512, height: 512 },
     })
     await useCloudCreate().generate()
-    expect(improve.calls).toHaveLength(0)
-    expect(submitted[0].prompt).toBe('my own words')
+    expect(improve.calls).toHaveLength(1)
+    expect(improve.calls[0].kind).toBe('edit')
+    expect(submitted[0].prompt).not.toBe('my own words')
   })
 
   it('Cancel waehrend des Umschreibens: nichts wird abgeschickt', async () => {

@@ -14,7 +14,7 @@ const CHAPTERS = [
 ] as const
 
 /** The step by step guides under the chapters (community questions, 3.0.6). */
-const GUIDES = ['beginners', 'agent-sandbox', 'character-studio', 'remote-access-setup', 'storage'] as const
+const GUIDES = ['beginners', 'agent-sandbox', 'character-studio', 'remote-access-setup', 'storage', 'hugging-face'] as const
 
 const parse = (path: string) => new DOMParser().parseFromString(readFileSync(path, 'utf8'), 'text/html')
 

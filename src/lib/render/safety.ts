@@ -177,10 +177,27 @@ export type SafetyTier = 'local' | 'cloud'
 /** Check a generation prompt (positive + negative + any free-text params
  *  concatenated is fine: the caller should pass everything a backend could
  *  route into the effective prompt). */
+// B30 (2026-10-29): `negative` is the negative prompt, kept apart. It names
+// what the picture must NOT show, and people and chat models fill it with the
+// words that keep minors out ("child, underage, nsfw"). Read together with the
+// prompt, that exclusion completed the minor+sexual conjunction and an adult
+// prompt was refused. No engine renders a negative prompt, so it takes part in
+// the unambiguous terms (with every fold) and nowhere else. The prompt itself
+// is checked exactly as before.
 export function checkPromptSafety(
   text: string,
-  opts: { tier?: SafetyTier; policy?: AdultPolicy } = {},
+  opts: { tier?: SafetyTier; policy?: AdultPolicy; negative?: string } = {},
 ): SafetyVerdict {
+  if (opts.negative?.trim() && unambiguous(opts.negative)) return { blocked: true, reason: 'csam' }
+  return checkPositive(text, opts)
+}
+
+/** The unambiguous terms on their own, with every fold the full check uses. */
+function unambiguous(text: string): boolean {
+  return checkPositive(text, { tier: 'local' }).reason === 'csam'
+}
+
+function checkPositive(text: string, opts: { tier?: SafetyTier; policy?: AdultPolicy }): SafetyVerdict {
   const base = baseNormalize(text)
   // Leet-folded copy for word terms. NOT used for age digits: folding maps
   // '1'->'i'/'4'->'a', which would destroy "14 yo"; ages are matched on `base`.

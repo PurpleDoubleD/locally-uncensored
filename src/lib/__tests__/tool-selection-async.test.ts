@@ -13,6 +13,7 @@ const fullPerms: PermissionMap = {
   image: 'auto',
   video: 'auto',
   workflow: 'auto',
+  mcp: 'auto',
 }
 
 const mkTool = (name: string, description: string, category: keyof PermissionMap = 'system'): MCPToolDefinition => ({

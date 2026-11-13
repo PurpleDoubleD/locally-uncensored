@@ -22,6 +22,7 @@ import {
   type ModelTileProps, type BundleTileProps,
 } from '../ModelTiles'
 import { CloudOfferLine } from '../../cloud/CloudOffer'
+import { DescriptionDetails } from '../DescriptionDetails'
 
 // ─── Drei Rollen, drei Erscheinungen ────────────────────────────────
 //
@@ -87,7 +88,7 @@ export function SizePill({ sizeGB, bytes }: { sizeGB?: number; bytes?: number })
 
 export function ClassicModelTile(props: ModelTileProps) {
   const { variants, vramGb, sharedMemory = false, isInstalled, dlState, onDownload, onInfo, onOpenUrl, onUse, highlight } = props
-  const { pickerOpen, setPickerOpen, setChosen, pickerRef, variantListRef, variantList, sel, groupTitle, dl, downloading, fit, action, sizeOf, selSize, downloadTitle } = useModelTile(props)
+  const { pickerOpen, setPickerOpen, setChosen, pickerRef, variantListRef, variantList, sel, groupTitle, dl, downloading, fit, action, sizeOf, selSize, downloadTitle, target } = useModelTile(props)
 
   return (
     <div
@@ -222,7 +223,7 @@ export function ClassicModelTile(props: ModelTileProps) {
               className={TILE_ACTION}
               title={downloadTitle}
             >
-              <Download size={ICON_SM} /> Get
+              <Download size={ICON_SM} /> Get{target && <span className="opacity-70">→ {target}</span>}
             </button>
           )}
         </div>
@@ -289,6 +290,13 @@ export function ClassicBundleTile(props: BundleTileProps) {
           )}
           {bundleOffersCloud(fit, props) && <CloudOfferLine task={props.cloudTask!} sharedMemory={props.sharedMemory} />}
         </div>
+        {bundle.description && (
+          <DescriptionDetails
+            name={bundle.name}
+            description={bundle.description}
+            className="shrink-0 p-1 rounded-md hover:bg-gray-200 dark:hover:bg-white/10 text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition-colors"
+          />
+        )}
         {bundle.url && (
           <button
             onClick={() => onOpenUrl(bundle.url!)}

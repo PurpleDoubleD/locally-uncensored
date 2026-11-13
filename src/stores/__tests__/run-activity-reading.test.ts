@@ -65,7 +65,9 @@ describe('reading the conversation', () => {
   it('both chat paths set it before the request and take it back when the turn ends', () => {
     const src = (f: string) => readFileSync(resolve(__dirname, '..', '..', 'hooks', f), 'utf8')
     const agent = src('useAgentChat.ts')
-    expect(agent).toMatch(/if \(stepNo === 1\) useRunActivityStore\.getState\(\)\.setActivity\(convId, readingActivity\(estPrompt\)\)/)
+    expect(agent).toMatch(/if \(stepNo === 1\) \{\n\s+useRunActivityStore\.getState\(\)\.setActivity\(convId, readingActivity\(estPrompt\)\)/)
+    // B26: and the watch that says why a long first wait lasts.
+    expect(agent).toMatch(/watchChatFirstWait\(convId, activeModel, abort\.signal\)/)
     expect(agent).toMatch(/endFirstWait\(convId\)\n\s+logFirstWait\(\)\n\s+turn = ollamaTurn/)
     expect(agent.match(/hiddenThoughtArrived\(convId\)/g)!.length).toBe(2)
     // Where the first wait went lands in the log file, once per message.
@@ -73,6 +75,7 @@ describe('reading the conversation', () => {
     expect(agent.match(/logFirstWait\(\)/g)!.length).toBe(2)
     const chat = src('useChat.ts')
     expect(chat).toMatch(/setActivity\(convId, readingActivity\(/)
+    expect(chat).toMatch(/watchChatFirstWait\(convId, activeModel, abort\.signal\)/)
     expect(chat).toMatch(/endFirstWait\(run\.convId\)/)
   })
 })

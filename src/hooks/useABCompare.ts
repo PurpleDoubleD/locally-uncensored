@@ -8,7 +8,7 @@ import { useCompareStore } from '../stores/compareStore'
 import { useSettingsStore } from '../stores/settingsStore'
 import { getProviderForModel, getProviderIdFromModel } from '../api/providers'
 import { getChatWindowTokens } from '../lib/context-compaction'
-import { applySendBudget, chatBudgetApplies, sharedChatSendBudget } from '../lib/chat-send-budget'
+import { applySendBudget, chatBudgetApplies, chatBudgetHysteresis, sharedChatSendBudget } from '../lib/chat-send-budget'
 import { sendsToALanBackend } from '../lib/lan-openai-slot'
 import { buildChatSystemPrompt } from '../lib/system-prompt'
 import { v4 as uuid } from 'uuid'
@@ -21,6 +21,9 @@ import { buildSamplingRequest } from '../lib/sampling'
 import { runInLane } from '../lib/run-slot'
 import { laneOf, currentLaneFacts } from '../lib/run-lane-of-model'
 import { useGenerationStore } from '../stores/generationStore'
+import { messageErrorFor } from '../lib/message-error'
+import { syncOllamaHealthFromError } from '../lib/sync-ollama-health'
+import type { MessageError } from '../types/chat'
 
 /**
  * Booking identity for the local lane, standing in for a `conversationId`.
@@ -40,6 +43,18 @@ import { useGenerationStore } from '../stores/generationStore'
  * Compare rounds at once.
  */
 export const COMPARE_LANE_ID = 'lib:ab-compare'
+
+/**
+ * What a side's catch makes of what was thrown (C5). A stop by the user is no
+ * failure: the side keeps what arrived and its stats. Anything else is: the
+ * side gets the error as a field, the same `messageErrorFor` the chat hook
+ * writes, so the column can say why this model did not answer.
+ */
+export function compareFailureOf(err: unknown, signal: AbortSignal, model: string, answerSoFar: string): MessageError | null {
+  if (signal.aborted || (err instanceof Error && err.name === 'AbortError')) return null
+  syncOllamaHealthFromError(err)
+  return messageErrorFor(err, { cloud: getProviderIdFromModel(model) === 'lu-cloud' }, answerSoFar)
+}
 
 export function useABCompare() {
   const store = useCompareStore()
@@ -103,11 +118,18 @@ export function useABCompare() {
             sendWindowTokens: sendWindowFor(settings, m),
             contextDecay: settings.contextDecay,
             localBackend: sendsToALanBackend(providerId, m),
+            answerTokens: settings.maxTokens,
           }
         }),
       ),
     )
-    const sendMessages = applySendBudget(chatMessages, budget).messages
+    // GH #201: two local sides are trimmed to their budget and no deeper, and
+    // the note they read is a conversation's, not an agent's.
+    const hysteresis = [modelA, modelB].some((m) => {
+      const id = getProviderIdFromModel(m)
+      return chatBudgetHysteresis({ providerId: id, localBackend: sendsToALanBackend(id, m) })
+    })
+    const sendMessages = applySendBudget(chatMessages, budget, { hysteresis, notice: 'chat' }).messages
 
     // R5-10/R5-11: Compare has no conversation of its own (compareStore, not
     // chatStore), so there is no per-chat override to read; only the "omit a
@@ -142,10 +164,12 @@ export function useABCompare() {
         fullContent += part.prose
         useCompareStore.getState().addContentA(part.prose)
       }
+      const signal = abortA.current!.signal
+      let failure: MessageError | null = null
       try {
         const { provider, modelId } = getProviderForModel(modelA)
         const stream = provider.chatStream(modelId, sendMessages, {
-          ...opts, thinking: thinkOptFor(modelA), signal: abortA.current!.signal,
+          ...opts, thinking: thinkOptFor(modelA), signal,
         })
         for await (const chunk of stream) {
           if (chunk.content) {
@@ -154,9 +178,15 @@ export function useABCompare() {
           }
         }
         show(splitter.flush())
-      } catch { /* aborted or error */ }
+      } catch (err) {
+        failure = compareFailureOf(err, signal, modelA, fullContent)
+      }
       fullContent = settleThinking(fullContent, '', false).content
       const elapsed = Date.now() - startTime
+      if (failure) {
+        useCompareStore.getState().finishA(fullContent, null, { ...failure, at: Math.min(failure.at, fullContent.length) })
+        return
+      }
       useCompareStore.getState().finishA(fullContent, {
         tokens: tokenCount,
         timeMs: elapsed,
@@ -180,10 +210,12 @@ export function useABCompare() {
         fullContent += part.prose
         useCompareStore.getState().addContentB(part.prose)
       }
+      const signal = abortB.current!.signal
+      let failure: MessageError | null = null
       try {
         const { provider, modelId } = getProviderForModel(modelB)
         const stream = provider.chatStream(modelId, sendMessages, {
-          ...opts, thinking: thinkOptFor(modelB), signal: abortB.current!.signal,
+          ...opts, thinking: thinkOptFor(modelB), signal,
         })
         for await (const chunk of stream) {
           if (chunk.content) {
@@ -192,9 +224,15 @@ export function useABCompare() {
           }
         }
         show(splitter.flush())
-      } catch { /* aborted or error */ }
+      } catch (err) {
+        failure = compareFailureOf(err, signal, modelB, fullContent)
+      }
       fullContent = settleThinking(fullContent, '', false).content
       const elapsed = Date.now() - startTime
+      if (failure) {
+        useCompareStore.getState().finishB(fullContent, null, { ...failure, at: Math.min(failure.at, fullContent.length) })
+        return
+      }
       useCompareStore.getState().finishB(fullContent, {
         tokens: tokenCount,
         timeMs: elapsed,

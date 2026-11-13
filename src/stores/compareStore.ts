@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { Message } from '../types/chat'
+import type { Message, MessageError } from '../types/chat'
 import { useUIStore } from './uiStore'
 
 interface ModelStats {
@@ -24,8 +24,13 @@ interface CompareState {
   addContentA: (content: string) => void
   addContentB: (content: string) => void
   startRound: (userMessage: Message) => void
-  finishA: (content: string, stats: ModelStats) => void
-  finishB: (content: string, stats: ModelStats) => void
+  /**
+   * End a side's turn. A side whose request failed passes `stats: null` and
+   * its `error`: the column then shows why it did not answer instead of an
+   * empty answer under "0.0 t/s", which read like a result (C5).
+   */
+  finishA: (content: string, stats: ModelStats | null, error?: MessageError) => void
+  finishB: (content: string, stats: ModelStats | null, error?: MessageError) => void
   setStreamingA: (on: boolean) => void
   setStreamingB: (on: boolean) => void
   reset: () => void
@@ -73,20 +78,20 @@ export const useCompareStore = create<CompareState>()((set) => ({
     isStreamingB: true,
   })),
 
-  finishA: (content, stats) => set((s) => {
+  finishA: (content, stats, error) => set((s) => {
     const msgs = [...s.messagesA]
     const last = msgs[msgs.length - 1]
     if (last && last.role === 'assistant') {
-      msgs[msgs.length - 1] = { ...last, content }
+      msgs[msgs.length - 1] = error ? { ...last, content, error } : { ...last, content }
     }
     return { messagesA: msgs, statsA: stats, isStreamingA: false }
   }),
 
-  finishB: (content, stats) => set((s) => {
+  finishB: (content, stats, error) => set((s) => {
     const msgs = [...s.messagesB]
     const last = msgs[msgs.length - 1]
     if (last && last.role === 'assistant') {
-      msgs[msgs.length - 1] = { ...last, content }
+      msgs[msgs.length - 1] = error ? { ...last, content, error } : { ...last, content }
     }
     return { messagesB: msgs, statsB: stats, isStreamingB: false }
   }),

@@ -1,0 +1,33 @@
+--- a/tools/cvector-generator/cvector-generator.cpp
++++ b/tools/cvector-generator/cvector-generator.cpp
+@@ -339,6 +339,16 @@
+         return true;
+     }
+ 
++    // LU: only the outputs of the real blocks before the last one. Some
++    // graphs keep the full rows in the last block (Qwen3.5 in b9949 does), so
++    // the row count alone let a last layer through and the layer count no
++    // longer matched; extra blocks such as MTP/NextN are never l_out here.
++    const char * il_str = t->name + strlen(l_out_name);
++    const int il = *il_str == '-' ? atoi(il_str + 1) : -1;
++    if (il < 0 || il >= cb_data->n_layers - 1) {
++        return true;
++    }
++
+     // save the tensor to current context
+     cb_data->save_tensor_for_layer(t);
+     return true;
+@@ -479,6 +489,13 @@
+         // calculate diff and remove all zero rows
+         auto v_diff_filtered = cb_data.calc_diff();
+ 
++        // LU: a model whose layers cannot be read this way gets a clear line
++        // instead of an abort.
++        if ((int) v_diff_filtered.size() != n_layers - 1) {
++            fprintf(stderr, "LU: unsupported model: %d layer outputs for %d blocks\n", (int) v_diff_filtered.size(), n_layers - 1);
++            return 1;
++        }
++
+         // save & concat the filtered v_diff to ctx_train
+         ctx_train.concat_diff_tmp(v_diff_filtered);
+ 

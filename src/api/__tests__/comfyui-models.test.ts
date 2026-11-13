@@ -392,6 +392,16 @@ describe('determineStrategy', () => {
 // stay safe for downstream URL construction.
 
 describe('extractComfyOutputFiles', () => {
+  it('leaves out the input preview LoadVideo reports (B18 box run)', () => {
+    const files = extractComfyOutputFiles({
+      images: [{ filename: 'lu_long_1.mp4', subfolder: '', type: 'input' }],
+    })
+    expect(files).toEqual([])
+    expect(extractComfyOutputFiles({
+      images: [{ filename: 'clip_00002_.mp4', subfolder: '', type: 'output' }],
+    })).toEqual([{ filename: 'clip_00002_.mp4', subfolder: '', type: 'output' }])
+  })
+
   it('extracts canonical SaveImage output (images key)', () => {
     const node = {
       images: [

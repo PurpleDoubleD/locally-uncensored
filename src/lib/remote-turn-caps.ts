@@ -20,7 +20,7 @@ const caps = new Map<string, Partial<PermissionMap>>()
 export function capsFor(rights: RemoteRights): Partial<PermissionMap> {
   const off: ToolCategory[] = []
   if (!rights.files) off.push('filesystem')
-  if (!rights.terminal) off.push('terminal', 'desktop')
+  if (!rights.terminal) off.push('terminal', 'desktop', 'mcp')
   if (!rights.create) off.push('image', 'video', 'workflow')
   if (!rights.agent) off.push('web', 'system')
   return Object.fromEntries(off.map((c) => [c, 'blocked'])) as Partial<PermissionMap>

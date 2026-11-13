@@ -7,7 +7,8 @@
  *  - `luSetInputs` names the inputs LU writes itself on every run (prompt,
  *    seed, size, model and the rest found by autoDetectParameterMap). Those
  *    are not offered a second time. The VAE and text encoder loaders are a
- *    special case: LU picks a matching file, but a value the user chose wins.
+ *    special case: LU keeps the file the workflow names when ComfyUI has it
+ *    and picks a matching one when not, but a value the user chose wins.
  *  - `listWorkflowParams` walks the graph and returns, per node, its value
  *    inputs (never a connected input) with the control that fits: from the
  *    node definition of `/object_info` when there is one, else from the value.
@@ -21,6 +22,7 @@ import type { ComfyApiGraph, ComfyInputValue } from '../types/comfy-graph'
 import { apiNodes, inputNumber, isComfyLinkRef } from '../types/comfy-graph'
 import type { ComfyNodeDef, ComfyNodeDefs } from './comfy-ui-format'
 import { readComboOptions } from './comfyui-enum'
+import { resolutionSelectorIds, withDetectedPrompts } from './workflow-graph-detect'
 
 /** A value the list can show and the user can set. */
 export type ParamValue = string | number | boolean
@@ -123,16 +125,24 @@ export function luSetInputs(
     for (const name of LANE_SET_FIELDS) mark(paramMap[name], MAP_LABELS[name])
     return out
   }
+  // The prompt boxes as injectParameters finds them on a run.
+  const runMap = withDetectedPrompts(workflow, paramMap)
   for (const [name, label] of Object.entries(MAP_LABELS) as [keyof ParameterMap, string][]) {
-    mark(paramMap[name], label)
+    mark(runMap[name], label)
   }
+  let sized = !!paramMap.width || !!paramMap.height
   if (!paramMap.width || !paramMap.height) {
     const resize = nodes.find(([, n]) => n.class_type === 'ImageResizeKJv2'
       && inputNumber(n, 'width') !== undefined && inputNumber(n, 'height') !== undefined)
     if (resize) {
+      sized = true
       if (!paramMap.width) mark({ nodeId: resize[0], inputKey: 'width' }, 'Width')
       if (!paramMap.height) mark({ nodeId: resize[0], inputKey: 'height' }, 'Height')
     }
+  }
+  // Without a size to write, LU's size picks the aspect ratio.
+  if (!sized) {
+    for (const id of resolutionSelectorIds(workflow)) mark({ nodeId: id, inputKey: 'aspect_ratio' }, 'Aspect ratio')
   }
   if (!paramMap.inputImage) {
     const load = nodes.find(([, n]) => n.class_type === 'LoadImage')

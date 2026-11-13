@@ -8,6 +8,7 @@ import { getProviderIdFromModel } from '../../api/providers/model-name'
 import type { ProviderId } from '../../api/providers/types'
 import { useChatStore, persistConversationMemoryScope } from '../../stores/chatStore'
 import { getModelMaxTokens } from '../../lib/context-compaction'
+import { LongTextField } from '../ui/LongTextField'
 // Eine Schreibweise fuer jedes Kontextfenster. Hier stand zweimal
 // `Math.round(ctx / 1024)}K`, eine eigene Rechnung: bei 32000 Token sagte
 // diese Zeile 31K und der Rest der Oberflaeche 31.3K.
@@ -556,12 +557,14 @@ function MemorySettingsPanel() {
             className="w-full px-2 py-1 rounded bg-white/5 border border-white/10 text-[0.65rem] text-gray-300 placeholder-gray-600 focus:outline-none focus:border-white/20"
             autoFocus
           />
-          <textarea
+          <LongTextField
             value={newContent}
-            onChange={(e) => { setNewContent(e.target.value); if (addError) setAddError(null) }}
+            onChange={(v) => { setNewContent(v); if (addError) setAddError(null) }}
+            storageKey="memory-content"
+            label="Memory details"
             placeholder="Details… (required)"
             rows={2}
-            className="w-full px-2 py-1 rounded bg-white/5 border border-white/10 text-[0.65rem] text-gray-300 placeholder-gray-600 focus:outline-none resize-none"
+            className="block w-full px-2 py-1 rounded bg-white/5 border border-white/10 text-[0.65rem] text-gray-300 placeholder-gray-600 focus:outline-none"
           />
           {addError && (
             <p className="text-[0.55rem] text-red-400 px-0.5">{addError}</p>
@@ -613,11 +616,13 @@ function MemorySettingsPanel() {
                   maxLength={60}
                   className="w-full px-2 py-0.5 rounded bg-white/5 border border-white/10 text-[0.65rem] text-gray-300 focus:outline-none"
                 />
-                <textarea
+                <LongTextField
                   value={editContent}
-                  onChange={(e) => setEditContent(e.target.value)}
+                  onChange={setEditContent}
+                  storageKey="memory-content"
+                  label="Memory details"
                   rows={2}
-                  className="w-full px-2 py-0.5 rounded bg-white/5 border border-white/10 text-[0.65rem] text-gray-300 focus:outline-none resize-none"
+                  className="block w-full px-2 py-0.5 rounded bg-white/5 border border-white/10 text-[0.65rem] text-gray-300 focus:outline-none"
                 />
                 <div className="flex gap-1.5">
                   <label className="text-xs">Project ID

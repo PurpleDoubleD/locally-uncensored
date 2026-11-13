@@ -8,12 +8,22 @@
  *  are made for a wide range around zero (Discord 2026-10-02:
  *  Krea 2 LoRAs meant for -10 to 10; Discord 2026-10-23: some are
  *  used from -10 to 15), so the number field takes -20 to 20.
- *  The slider keeps the usual 0 to 2. */
+ *  The slider covers -2 to 2 with 0 in the middle (Discord 2026-11-01:
+ *  slider LoRAs go below zero all the time); a value typed beyond that
+ *  widens it, see loraSliderReach. */
 export const LORA_STRENGTH_MIN = -20
 export const LORA_STRENGTH_MAX = 20
 export const LORA_STRENGTH_STEP = 0.05
-export const LORA_SLIDER_MIN = 0
+export const LORA_SLIDER_MIN = -2
 export const LORA_SLIDER_MAX = 2
+
+/** How far the slider reaches either side of zero for a value: the usual 2,
+ *  or the next whole number past a typed value beyond it (-15 gives -15 to
+ *  15), so the thumb shows where the value is instead of resting at the end.
+ *  The same on both sides keeps 0 in the middle. */
+export function loraSliderReach(value: number): number {
+  return Math.min(LORA_STRENGTH_MAX, Math.max(LORA_SLIDER_MAX, Math.ceil(Math.abs(value))))
+}
 
 /** Into the allowed range, on ComfyUI's own grid of 0.01. */
 export function clampLoraStrength(value: number): number {

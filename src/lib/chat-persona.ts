@@ -2,6 +2,7 @@ import type { Persona, SamplerValues, Settings } from '../types/settings'
 import { buildSamplingRequest, type SamplingOverrides, type SamplingRequest } from './sampling'
 import { substituteMacros, DEFAULT_USER_NAME } from './character-card'
 import { isGroupChat } from './group-chat'
+import { mergeCustomParams, resolveCustomParams, type CustomParam } from './custom-params'
 
 /**
  * Which persona a chat speaks as, and which prompt that means (GH #170).
@@ -153,12 +154,29 @@ export function samplingPresetFor(
  */
 export function speakerSamplingOptions(
   settings: Pick<Settings, 'temperature' | 'topP' | 'maxTokens' | 'topK'>,
-  conv: Parameters<typeof samplingPresetFor>[0] & { sampling?: SamplingOverrides },
+  conv: Parameters<typeof samplingPresetFor>[0] & { sampling?: SamplingOverrides; customParams?: CustomParam[] },
   model: string,
   personas: readonly Persona[],
   activePersonaId: string | undefined,
   personasOn: boolean,
-): SamplingRequest & { topK: number } {
-  const { preset } = samplingPresetFor(conv, model, personas, activePersonaId, personasOn)
-  return { topK: settings.topK, ...buildSamplingRequest(settings, conv.sampling, preset) }
+): SamplingRequest & { topK: number; customParams?: Record<string, unknown> } {
+  const { persona, preset } = samplingPresetFor(conv, model, personas, activePersonaId, personasOn)
+  const custom = speakerCustomParams(conv, persona)
+  return {
+    topK: settings.topK,
+    ...buildSamplingRequest(settings, conv.sampling, preset),
+    ...(Object.keys(custom).length > 0 ? { customParams: custom } : {}),
+  }
+}
+
+/**
+ * GH #198: the custom sampling rows for one speaker, parsed: this chat's rows
+ * over the rows of the speaker's persona (the one `samplingPresetFor` found,
+ * so a group member brings its own), by key.
+ */
+export function speakerCustomParams(
+  conv: { customParams?: CustomParam[] },
+  persona: Pick<Persona, 'customParams'> | undefined,
+): Record<string, unknown> {
+  return resolveCustomParams(mergeCustomParams(conv.customParams, persona?.customParams))
 }

@@ -73,7 +73,9 @@ export function ReferenceStrip() {
   // Mac's own engine keeps its canvas, only the images shrink there, so it
   // says nothing. Qwen-Image-Edit (two slots) cannot shrink them: past the
   // card it is refused at Create, and the strip says so first.
-  const comfyLane = !cloud && !macEngine
+  // Only an edit shrinks its images; a reference video model (MiniMax H3
+  // ref2va, B38) scales its references itself.
+  const comfyLane = !cloud && !macEngine && intent === 'edit'
   const shrinks = comfyLane && slots > 2 && 1 + shown.length > comfyEditFullImages(cardGb)
   const overCard = comfyLane && slots === 2 ? qwenEditPlusOverCard(1 + Math.min(shown.length, slots), cardGb) : null
 

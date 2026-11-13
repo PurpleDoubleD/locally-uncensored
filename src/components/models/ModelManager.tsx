@@ -9,10 +9,12 @@ import {
 import { useModels } from '../../hooks/useModels'
 import { useModelStore } from '../../stores/modelStore'
 import { useUIStore } from '../../stores/uiStore'
+import { useHfLinkStore } from '../../stores/hfLinkStore'
 import { useProviderStore } from '../../stores/providerStore'
 import { ModelCard } from './ModelCard'
 import { RemoveRefusalsDialog } from './RemoveRefusalsDialog'
 import { useAbliterateStore } from '../../stores/abliterateStore'
+import { downloadLine } from '../../api/abliterate'
 import { prefixModelName } from '../../api/providers/model-name'
 import { PullModelDialog } from './PullModelDialog'
 import { DiscoverModels } from './DiscoverModels'
@@ -23,6 +25,10 @@ import { LoraAddons } from './LoraAddons'
 import { Modal } from '../ui/Modal'
 import { ModalActions, ModalButton } from '../ui/ModalActions'
 import { showModel } from '../../api/ollama'
+import { comfyModelInfo } from '../../api/discover'
+import { ModelFileInfo, type ModelFileInfoState } from './ModelFileInfo'
+import { useModelSourceStore } from '../../stores/modelSourceStore'
+import { comfyKindLabel } from '../../lib/model-source'
 import { checkComfyConnection, refreshComfyModels } from '../../api/comfyui'
 import { isMlxImageHost } from '../../api/mlx-image'
 import { MacMediaLane } from './MacMediaLane'
@@ -111,14 +117,24 @@ export function ModelManager() {
   // das Ganze als JSON.stringify.
   const [modelInfo, setModelInfo] = useState<({ name: string } & Record<string, unknown>) | null>(null)
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
+  // D1: Details for a ComfyUI file (image or video model, LoRA, VAE, …).
+  const [fileInfo, setFileInfo] = useState<ModelFileInfoState | null>(null)
+  const fileInfoFor = useRef<string | null>(null)
   // Open on Discover by default — most opens are to find and install
   // something new. Installed is one click away in the segment control.
   const [tab, setTab] = useState<'installed' | 'discover'>('discover')
 
   // Header search: always visible (no hidden magnifier), live filter +
   // Enter submits the HuggingFace catalog search in Discover.
-  const [searchQuery, setSearchQuery] = useState('')
-  const [searchSubmitToken, setSearchSubmitToken] = useState(0)
+  // A button elsewhere may open Models with a search (Neurons' "Get the
+  // original"): it starts the field and the catalog search once.
+  const [searchQuery, setSearchQuery] = useState(() => useUIStore.getState().discoverQuery ?? '')
+  const [searchSubmitToken, setSearchSubmitToken] = useState(() => (useUIStore.getState().discoverQuery ? 1 : 0))
+  // That search looks for an original model: its changed versions go last.
+  const [originalFor] = useState(() => { const s = useUIStore.getState(); return s.discoverOriginal ? s.discoverQuery : null })
+  useEffect(() => {
+    if (useUIStore.getState().discoverQuery) useUIStore.getState().clearDiscoverQuery()
+  }, [])
   const searchInputRef = useRef<HTMLInputElement>(null)
 
   // The store still defaults categoryFilter to 'all' for legacy reasons, but
@@ -148,6 +164,17 @@ export function ModelManager() {
   // image engine (MacLoraLane), which the LoRA stack in Create reads. Until
   // that folder existed the rail was not offered on the Mac at all.
   const [extraRail, setExtraRail] = useState<'lora' | 'music' | null>(null)
+
+  // A Hugging Face link (HfLinkInbox) opens the Chat lane of Discover, where
+  // its dialog lives, whatever lane or tab was open.
+  const hfLink = useHfLinkStore((s) => s.pending)
+  useEffect(() => {
+    if (!hfLink) return
+    setExtraRail(null)
+    setTab('discover')
+    setCategoryFilter('text')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hfLink])
   const rail: Rail = extraRail === 'lora' ? 'lora' : extraRail === 'music' && macMlxMedia ? 'music' : mode
   const showMlxPanel = macMlxMedia && rail !== 'lora' && (rail === 'music' || mode === 'image' || mode === 'video')
   /** The Mac's own LoRA lane, in place of the ComfyUI one below. */
@@ -195,12 +222,42 @@ export function ModelManager() {
       setInfoOpen(true)
       return
     }
+    if (model && (model.type === 'image' || model.type === 'video')) {
+      await handleFileInfo(name)
+      return
+    }
     try {
       const info = await showModel(name)
       setModelInfo({ name, ...info })
-      setInfoOpen(true)
-    } catch {
-      // ignore
+    } catch (e) {
+      // D1: the click used to end here without a word.
+      setModelInfo({ name, error: `Ollama could not describe this model: ${e instanceof Error ? e.message : String(e)}` })
+    }
+    setInfoOpen(true)
+  }
+
+  /** D1 (a user on Discord, 01.11.2026): the ⓘ of an image model asked
+   *  Ollama, which knows no ComfyUI file, and the error went nowhere. The
+   *  dialog opens at once with what the list knows; the disk fills in the
+   *  rest, or the reason it could not. */
+  const handleFileInfo = async (name: string) => {
+    const row = models.find((m: AIModel) => m.name === name)
+    const source = row && 'source' in row ? row.source : undefined
+    fileInfoFor.current = name
+    const base: ModelFileInfoState = {
+      name,
+      kind: comfyKindLabel(source),
+      size: row?.size ?? 0,
+      facts: null,
+      error: null,
+      page: useModelSourceStore.getState().pageFor(name),
+    }
+    setFileInfo(base)
+    try {
+      const facts = await comfyModelInfo(name)
+      if (fileInfoFor.current === name) setFileInfo({ ...base, facts })
+    } catch (e) {
+      if (fileInfoFor.current === name) setFileInfo({ ...base, error: e instanceof Error ? e.message : String(e) })
     }
   }
 
@@ -396,7 +453,8 @@ export function ModelManager() {
                 // One quiet line above the list, not the empty-state block:
                 // the list stays where it was while the run goes on.
                 <p data-testid="remove-refusals-strip" className="t-body text-gray-500 dark:text-gray-400 mb-2">
-                  Removing refusals from {ablStatus.modelName}: {ablStatus.phaseLabel || 'starting'}.{' '}
+                  Removing refusals from {ablStatus.modelName}: {ablStatus.phaseLabel || 'starting'}
+                  {ablStatus.bytes && ablStatus.total > 0 && ` (${downloadLine(ablStatus)})`}.{' '}
                   <button type="button" className="underline hover:text-gray-900 dark:hover:text-white" onClick={() => openRemoveRefusals(ablStatus.sourcePath)}>Open</button>
                 </p>
               )}
@@ -440,6 +498,7 @@ export function ModelManager() {
                   total={loraRows.length}
                   searchQuery={searchQuery}
                   onDelete={(name) => setConfirmDelete(name)}
+                  onInfo={(name) => { void handleFileInfo(name) }}
                   onGetNew={() => setTab('discover')}
                 />
               ) : models.length === 0 ? (
@@ -601,6 +660,7 @@ export function ModelManager() {
                 category={mode}
                 search={searchQuery}
                 searchSubmitToken={searchSubmitToken}
+                originalFor={originalFor}
               />
             )
           )}
@@ -649,7 +709,12 @@ export function ModelManager() {
         </ModalActions>
       </Modal>
 
+      <ModelFileInfo info={fileInfo} onClose={() => { fileInfoFor.current = null; setFileInfo(null) }} />
+
       <Modal open={infoOpen} onClose={() => setInfoOpen(false)} title={typeof modelInfo?.name === 'string' && modelInfo.name ? displayModelName(modelInfo.name) : 'Model Info'}>
+        {typeof modelInfo?.error === 'string' && (
+          <p role="alert" className="t-micro text-red-500 dark:text-red-400 mb-3 break-words">{modelInfo.error}</p>
+        )}
         {typeof modelInfo?.deleteHint === 'string' && (
           <p className="t-label text-gray-700 dark:text-gray-200 mb-3">{modelInfo.deleteHint}</p>
         )}

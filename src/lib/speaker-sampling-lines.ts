@@ -5,6 +5,7 @@ import { extraSamplersFor, type ExtraSamplerKey, type SamplerTarget } from '../a
 import { effectiveExtraSamplers, effectiveSampling, type SamplingOverrides } from './sampling'
 import { samplingPresetFor } from './chat-persona'
 import { isGroupChat, groupSpeakers } from './group-chat'
+import { customParamProblem, customParamText, mergeCustomParams, type CustomParam } from './custom-params'
 
 /**
  * GH #175: what the Sampling popup says about each speaker of the open chat.
@@ -21,6 +22,8 @@ export interface SpeakerSamplingLine {
   /** "Persona Baron" or "Chat settings". */
   source: string
   preset?: SamplerValues
+  /** GH #198: the persona's custom rows, for the popup's "From persona" line. */
+  personaCustom?: CustomParam[]
   values: { label: string; text: string; sent: boolean }[]
 }
 
@@ -36,7 +39,7 @@ const num = (n: number) => String(Number(n.toFixed(4)))
 
 export function speakerSamplingLines(input: {
   settings: Pick<Settings, 'temperature' | 'topP' | 'maxTokens' | 'topK' | 'personasEnabled'>
-  conv: Parameters<typeof samplingPresetFor>[0] & { sampling?: SamplingOverrides }
+  conv: Parameters<typeof samplingPresetFor>[0] & { sampling?: SamplingOverrides; customParams?: CustomParam[] }
   activeModel: string | null
   personas: readonly Persona[]
   activePersonaId: string | undefined
@@ -68,11 +71,19 @@ export function speakerSamplingLines(input: {
       const v = extras[key]
       if (v !== undefined) values.push({ label: EXTRA_LABELS[key], text: num(v), sent: known.includes(key) })
     }
+    // GH #198: the custom rows in force, the chat's over the persona's. Only
+    // the ones that go out at all are listed; Anthropic and LU Cloud get none.
+    const customSent = providerId !== 'anthropic' && providerId !== 'lu-cloud'
+    for (const row of mergeCustomParams(conv.customParams, persona?.customParams)) {
+      if (customParamProblem(row)) continue
+      values.push({ label: row.key.trim(), text: customParamText(row), sent: customSent })
+    }
     return {
       model,
       label: names?.[model]?.name && names[model].name !== model ? `${names[model].name} (${displayModelName(model)})` : displayModelName(model),
       source: persona ? `Persona ${persona.name}` : 'Chat settings',
       preset,
+      personaCustom: persona?.customParams,
       values,
     }
   })

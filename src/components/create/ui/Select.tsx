@@ -72,15 +72,25 @@ export function Select({
   const current = options.find((option) => option.value === value)
 
   const filtered = useMemo(() => {
-    if (!query.trim()) return options
+    // One row per value. A row's key is its value, and two rows with one key
+    // are not two rows to React: filtering them left a third, stale one behind
+    // (Discord 30.10.2026, a model listed twice showed three times after
+    // typing "tur"). Two rows with one value are one choice anyway.
+    const seen = new Set<string>()
+    const unique = options.filter((option) => !seen.has(option.value) && !!seen.add(option.value))
+    if (!query.trim()) return unique
 
-    const normalizedQuery = query.toLowerCase()
+    // Spaces, underscores, dashes and dots do not count, so "euler a",
+    // "euler_a" and "Euler a" are one search, as are "dpmpp sde" and
+    // "dpmpp_sde" (C24, sampler names written two ways).
+    const loose = (text: string) => text.toLowerCase().replace(/[\s_.-]+/g, '')
+    const normalizedQuery = loose(query)
 
-    return options.filter(
+    return unique.filter(
       (option) =>
-        option.label.toLowerCase().includes(normalizedQuery) ||
-        option.sublabel?.toLowerCase().includes(normalizedQuery) ||
-        option.title?.toLowerCase().includes(normalizedQuery),
+        loose(option.label).includes(normalizedQuery) ||
+        (option.sublabel !== undefined && loose(option.sublabel).includes(normalizedQuery)) ||
+        (option.title !== undefined && loose(option.title).includes(normalizedQuery)),
     )
   }, [options, query])
 

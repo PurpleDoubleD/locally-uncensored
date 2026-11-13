@@ -39,6 +39,8 @@ export const STORE_KEYS = [
   'lu_cloud_notice', 'lu_comfy_notice', 'locally-uncensored-model-health',
   // 3.0.8: which LU Cloud outage sentence was closed (stores/cloudOutageStore).
   'lu-cloud-outage',
+  // Neuron tweaker slider values per model and persona (3.0.9, P11).
+  'lu-neuron-tweaker',
   'locally-uncensored-agent-goal',
   // Computer control: the switch and the always allowed apps.
   'locally-uncensored-computer',
@@ -58,6 +60,9 @@ export const STORE_KEYS = [
   //                             re-downloading tens of GB
   'staged-changes', 'locally-uncensored-todos', 'locally-uncensored-ui',
   'lu_release_notes', 'locally-uncensored-downloads',
+  // D1 (3.0.9): the Hugging Face or CivitAI page of each downloaded model
+  // file, for "Open source page" in Models. Lost, it cannot be re-derived.
+  'locally-uncensored-model-sources',
   // Die lokale Modell-API (2.6.8). Sie MUSS hier stehen, denn sie traegt das
   // einzige Geheimnis in dieser Liste: das API-Token. Geht es bei einem Update
   // verloren, antwortet die API allen bereits eingerichteten Programmen des

@@ -43,7 +43,10 @@ describe('the approval card stays reachable', () => {
 
   it('gives the transcript a floor so no side panel can squeeze it to nothing', () => {
     const src = read('../CodexView.tsx')
-    expect(src).toMatch(/ref=\{scrollRef\} className="flex-1 min-h-\[10rem\] overflow-y-auto[^"]*" data-testid="codex-transcript"/)
+    // 3.0.9: the floor sits on the wrapper that also holds the compact
+    // layer rail and banner; the scroll area fills it.
+    expect(src).toContain('<div className="relative flex-1 min-h-[10rem] flex flex-col">')
+    expect(src).toMatch(/ref=\{scrollRef\}\s+className=\{`flex-1 min-h-0 overflow-y-auto[^`]*`\}\s+data-testid="codex-transcript"/)
   })
 
   it('scrolls the approval card into view the moment it exists', () => {

@@ -427,6 +427,8 @@ describe('the CPU cause is wired into all five failure exits (Runde 12)', () => 
     // They fire from a timer and cannot await, so the answer is fetched when
     // the render starts and read from the cache here.
     expect(create).toContain('void cpuRenderFacts()')
-    expect(create.match(/cpuCauseSuffix\(lastCpuRenderFacts\(\)\)/g)?.length).toBe(2)
+    // One stall verdict (Q3, late result) that both watchdogs give.
+    expect(create.match(/cpuCauseSuffix\(lastCpuRenderFacts\(\)\)/g)?.length).toBe(1)
+    expect(create.match(/reject\(stalled\(\)\)/g)?.length).toBe(2)
   })
 })

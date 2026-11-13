@@ -203,19 +203,19 @@ describe('the run', () => {
     expect(out).toEqual({ status: 'improved', prompt: 'A red fox in deep snow.' })
     expect(comfy.submitted).toEqual([graph])
     // The enhancer is out of the card before the caller builds the picture.
-    expect(comfy.log).toEqual(['submit', 'free'])
+    expect(comfy.log).toEqual(['free', 'submit', 'free'])
   })
 
   it('a ComfyUI error is a failed rewrite, never a thrown one, and the card is freed', async () => {
     comfy.history.push({ status: { status_str: 'error', messages: [['execution_error', { exception_message: 'CUDA out of memory' }]] } })
     await expect(runQwenEnhancer(graph, 'a fox')).resolves.toEqual({ status: 'failed' })
-    expect(comfy.log).toEqual(['submit', 'free'])
+    expect(comfy.log).toEqual(['free', 'submit', 'free'])
   })
 
   it('a rejected graph (file gone since the list was read) is a failed rewrite', async () => {
     comfy.submitError = new Error('ComfyUI rejected workflow: Value not in list')
     await expect(runQwenEnhancer(graph, 'a fox')).resolves.toEqual({ status: 'failed' })
-    expect(comfy.log).toEqual(['submit', 'free'])
+    expect(comfy.log).toEqual(['free', 'submit', 'free'])
   })
 
   it('a refusal or an empty answer is a failed rewrite', async () => {
@@ -229,7 +229,7 @@ describe('the run', () => {
   it('out of time: the job is taken out of the queue, then the card is freed', async () => {
     comfy.history.push(null)
     await expect(runQwenEnhancer(graph, 'a fox', { timeoutMs: -1 })).resolves.toEqual({ status: 'failed' })
-    expect(comfy.log).toEqual(['submit', 'abandon:pe-1', 'free'])
+    expect(comfy.log).toEqual(['free', 'submit', 'abandon:pe-1', 'free'])
   })
 
   it('Cancel: the job is taken out of the queue at once', async () => {
@@ -239,7 +239,7 @@ describe('the run', () => {
     await new Promise((r) => setTimeout(r, 10))
     stop.abort()
     await expect(run).resolves.toEqual({ status: 'failed' })
-    expect(comfy.log).toEqual(['submit', 'abandon:pe-1', 'free'])
+    expect(comfy.log).toEqual(['free', 'submit', 'abandon:pe-1', 'free'])
   })
 
   it('cancelled before it starts: nothing is sent', async () => {

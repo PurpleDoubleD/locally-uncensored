@@ -431,8 +431,8 @@ pub fn estimate(input: &EstimateInput<'_>) -> Estimate {
     let per_trial = (secs_per_trial_per_b(device.kind, quantization) * p_b).max(min_secs_per_trial(device.kind));
     let search = per_trial * input.trials as f64;
     // Loading, the refusal directions, the shard merge, conversion and the
-    // two checks of 150 short prompts each.
-    let fixed = 180.0 + 60.0 * p_b + 2.0 * (60.0 + 30.0 * p_b);
+    // two checks of 100 short prompts and 1000 one-letter MMLU answers each.
+    let fixed = 180.0 + 60.0 * p_b + 2.0 * (120.0 + 60.0 * p_b);
     let minutes = (search + fixed) / 60.0;
     let minutes_low = (minutes * 0.7).ceil().max(5.0) as u64;
     let minutes_high = (minutes * 1.8).ceil().max(minutes_low as f64 + 5.0) as u64;

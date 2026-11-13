@@ -7,6 +7,7 @@
 
 import { PROVIDER_PRESETS } from '../api/providers/types'
 import { localFetch, isTauri } from '../api/backend'
+import { ollamaProbeBase } from './ollama-host-sync'
 import { hasForeignBackends } from './capabilities'
 
 export interface DetectedBackend {
@@ -124,17 +125,25 @@ export async function detectLocalBackends(): Promise<DetectedBackend[]> {
   // A phone has none of them. Fifteen probes on loopback ports would find
   // nothing, or worse, find the app's own engine and rewrite the provider slot.
   if (!hasForeignBackends()) return []
+  // Ollama wird an SEINER Adresse geklopft, nicht am Preset: wer OLLAMA_HOST
+  // auf eine LAN-Box oder einen Container zeigen laesst, hat auf 11434
+  // entweder nichts oder ein anderes Ollama (Issue #31). Die Adresse kommt
+  // aus Rust, im Assistentenfenster genauso wie im Hauptfenster. Der Scan
+  // meldet sie zurueck, und AppShell schreibt sie als baseUrl fest: das
+  // Preset darf dort nie eine eingestellte Adresse ersetzen.
+  const ollamaBase = await ollamaProbeBase()
   const results = await Promise.allSettled(
     PROBE_TARGETS.map(async (preset) => {
       const isOllama = preset.providerId === 'ollama'
-      const reachable = await probeBackend(preset.baseUrl, isOllama)
+      const baseUrl = isOllama ? ollamaBase : preset.baseUrl
+      const reachable = await probeBackend(baseUrl, isOllama)
 
       if (reachable) {
         return {
           id: preset.id,
           name: preset.name,
-          baseUrl: preset.baseUrl,
-          port: extractPort(preset.baseUrl),
+          baseUrl,
+          port: extractPort(baseUrl),
         } satisfies DetectedBackend
       }
       return null

@@ -153,7 +153,10 @@ async fn finish_test_task(id: &str) {
     // Eine Abbruchanforderung ist noch kein ausgefuehrter Abbruch.
     // Endet die Testlaufzeit vorher, verwirft Tokio den Empfaenger und wartet
     // unter Windows auf dessen blockierende Pipe-Leser bis zum Prozessende.
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    // 30 s, not 5: on a loaded Windows CI runner (release gate 05.11.2026,
+    // 245 s for the whole suite) PowerShell and its ping child took longer
+    // than 5 s to go, and the test failed although the task did end.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
     loop {
         let status = shell_task_status_impl(&json!({ "id": id })).await.unwrap();
         if status["running"] == false { return; }

@@ -56,7 +56,7 @@ describe('the notice is written to be seen', () => {
 
 describe('the coding view renders it as a notice, not as the model talking', () => {
   it('has a branch for it before the bubble branch', () => {
-    const list = codexView.slice(codexView.indexOf('messages.filter(msg => !msg.hidden)'))
+    const list = codexView.slice(codexView.indexOf('shownItems.map((item) =>'))
     const branch = list.indexOf("msg.role === 'system' && msg.notice")
     const bubble = list.indexOf("msg.role === 'user' ? 'flex-row-reverse' : ''")
     expect(branch).toBeGreaterThan(-1)

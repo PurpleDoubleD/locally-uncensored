@@ -38,12 +38,11 @@ export const LOCAL_BATCH_MAX = 8
  * Null heisst: dieser Lauf kennt keine Anzahl, also kein Regler.
  *   Cloud: Bild und Bearbeiten, 1 bis MAX_IMAGE_COUNT (runImageCount).
  *   Mac lokal: Bild und Bearbeiten, je Bild ein eigener Lauf (useCreate).
- *   ComfyUI lokal: nur Bild, dort geht batchSize in den leeren Latent; ein
- *   Edit startet vom Quellbild und macht immer eines.
+ *   ComfyUI lokal: Bild (batchSize im leeren Latent) und Bearbeiten (B35:
+ *   der Latent des Quellbilds wird wiederholt, api/edit-batch).
  */
-export function composerImageCountMax(backend: 'local' | 'cloud', intent: string, macLocal: boolean): number | null {
+export function composerImageCountMax(backend: 'local' | 'cloud', intent: string): number | null {
   if (backend === 'cloud') return imageCountApplies(intent) ? MAX_IMAGE_COUNT : null
-  if (intent === 'image') return LOCAL_BATCH_MAX
-  if (macLocal && intent === 'edit') return LOCAL_BATCH_MAX
+  if (intent === 'image' || intent === 'edit') return LOCAL_BATCH_MAX
   return null
 }

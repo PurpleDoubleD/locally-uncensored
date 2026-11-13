@@ -1648,7 +1648,7 @@ for (const size of SIZES) {
       await page.getByTestId('m-settings-about-whats-new').tap()
       await expect(page.getByTestId('m-whats-new-screen')).toBeVisible()
       await expect(page.getByTestId('m-whats-new-version')).toHaveText(`Version ${version.split(' ')[0]}`)
-      await expect(page.getByTestId('m-whats-new-notes')).toContainText('LU is on your phone.')
+      await expect(page.getByTestId('m-whats-new-notes')).toContainText('What changed since 3.0.7.')
       await expectClean(page)
       await page.getByTestId('m-whats-new-got-it').tap()
       await expect(page.getByTestId('m-whats-new-screen')).toHaveCount(0)
@@ -2284,7 +2284,14 @@ for (const size of SIZES) {
       await seedMemory()
       await page.getByTestId('m-account-signout').tap()
       await page.getByTestId('m-dialog-confirm').tap()
-      await expect(page.getByTestId('m-account-state')).toHaveAttribute('data-state', /signed-out|signed-in/)
+      // Wait for the end of the attempt. Right after the tap the page still says signed-in, because the sign out is
+      // running: reading the state then took that for "stayed signed in" and waited for an error that a sign out
+      // finishing on the phone never shows (1 of a CI-like run without retries).
+      // An attempt ends either with the notice (still signed in) or signed out; AccountPage has no third way.
+      await expect.poll(async () => {
+        if (await page.getByTestId('m-account-signout-error').isVisible().catch(() => false)) return 'error'
+        return page.getByTestId('m-account-state').getAttribute('data-state').catch(() => null)
+      }).toMatch(/^(error|signed-out)$/)
       const state = await page.getByTestId('m-account-state').getAttribute('data-state')
       if (state === 'signed-in') await expect(page.getByTestId('m-account-signout-error')).toContainText('Sign out did not finish.')
       else await expect(page.getByTestId('m-account-signout-error')).toHaveCount(0)

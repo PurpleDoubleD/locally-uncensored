@@ -63,6 +63,15 @@ export interface CloudModel {
   /** Video: renders image-to-video (the "Animate Image" intent). Absent = yes;
    *  set false on a t2v-only model to keep it out of the Animate picker. */
   i2v?: boolean
+  /** Animate (B38, W6-API 30.10.2026): the model reads an end image
+   *  (`params.last_image_path`). Absent on a server from before W6, which
+   *  took an end image and dropped it, so the app offers none there. */
+  end_image?: boolean
+  /** W6-API: the model reads a picture list (`params.image_paths`), at most
+   *  this many, the start image counted. Studio reference models only. */
+  reference_images?: number
+  /** W6-API: a Studio model that belongs in the Animate picker. */
+  animate?: boolean
   /** C2: the provider ships this endpoint with its own filter off, so it
    *  produces adult output when the account's content policy allows it (the
    *  server decides that). Drives the

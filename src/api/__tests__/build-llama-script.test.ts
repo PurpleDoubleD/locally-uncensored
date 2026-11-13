@@ -1,8 +1,9 @@
 import { describe, it, expect, afterAll } from 'vitest'
 import { execFileSync } from 'node:child_process'
 import { resolve, join } from 'node:path'
-import { existsSync, statSync, mkdtempSync, rmSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, statSync, mkdtempSync, rmSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
+import { createServer } from 'node:net'
 import { asNumber, prop } from '../../types/json-guards'
 import { bashInterpreter } from './bash-interpreter'
 
@@ -13,6 +14,9 @@ const REPO_ROOT = resolve(__dirname, '../../..')
 // Not the bare name 'bash': on Windows that resolves to the WSL alias stub in
 // WindowsApps and never reaches a shell. See bash-interpreter.ts.
 const BASH = bashInterpreter()
+// The repo's own llama.cpp patches only apply to the real pinned source; the
+// fake upstreams below get none unless a test hands some in.
+const NO_PATCHES = mkdtempSync(join(tmpdir(), 'lu-no-patches-'))
 
 /** Run a snippet with the script sourced. Returns stdout+stderr, both wanted:
  *  the pin guards report through die(), which writes to stderr. */
@@ -24,7 +28,7 @@ function runScript(
     const out = execFileSync(BASH, ['-c', `source '${SCRIPT}'; ${snippet}`], {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
-      env: { ...process.env, ...env },
+      env: { ...process.env, LLAMA_LU_PATCH_DIR: NO_PATCHES, ...env },
     })
     return { code: 0, out: out.trim() }
   } catch (err) {
@@ -403,6 +407,90 @@ describe('build-llama.sh — the llama.cpp revision is pinned to a commit', { ti
     expect(extra.out).toContain('extra.cmake')
   })
 
+  // P11 FEHLER 10 (David's test build, 31.10.2026): the vector tool aborted
+  // on Qwen3.5. The fix is LU's own patch to the generator, so the build
+  // applies reviewed patches and still compiles nothing but the pinned
+  // commit plus exactly those patches.
+  it('applies LU\'s patches to a clean checkout and accepts exactly that tree again', () => {
+    const up = fakeUpstream()
+    const cache = tmp('llama-cache-patched-')
+    const patches = tmp('llama-patches-')
+    writeFileSync(join(patches, '0001-lu.patch'), '--- a/CMakeLists.txt\n+++ b/CMakeLists.txt\n@@ -1 +1,2 @@\n project(fake)\n+# LU\n')
+    const env = { LLAMA_BUILD_CACHE: cache, LLAMA_REPO: up.path, LLAMA_TAG: up.tag, LLAMA_COMMIT: up.sha, LLAMA_LU_PATCH_DIR: patches }
+    const first = runScript('ensure_src', env)
+    expect(first.code, first.out).toBe(0)
+    expect(readFileSync(join(cache, 'llama.cpp', 'CMakeLists.txt'), 'utf8')).toBe('project(fake)\n# LU\n')
+    // The cached, already patched tree is checked, not patched twice.
+    const again = runScript('ensure_src', env)
+    expect(again.code, again.out).toBe(0)
+    expect(readFileSync(join(cache, 'llama.cpp', 'CMakeLists.txt'), 'utf8')).toBe('project(fake)\n# LU\n')
+    // A change on top of the patch in the patched file is refused.
+    writeFileSync(join(cache, 'llama.cpp', 'CMakeLists.txt'), 'project(fake)\n# LU\nadd_definitions(-DBACKDOOR)\n')
+    const tampered = runScript('ensure_src', env)
+    expect(tampered.code).not.toBe(0)
+    expect(tampered.out).toContain('CMakeLists.txt differs')
+  })
+
+  it('refuses a patched tree that carries a change in a file no patch touches', () => {
+    const up = fakeUpstream()
+    const cache = tmp('llama-cache-patched-extra-')
+    const patches = tmp('llama-patches-extra-')
+    writeFileSync(join(patches, '0001-lu.patch'), '--- a/CMakeLists.txt\n+++ b/CMakeLists.txt\n@@ -1 +1,2 @@\n project(fake)\n+# LU\n')
+    const env = { LLAMA_BUILD_CACHE: cache, LLAMA_REPO: up.path, LLAMA_TAG: up.tag, LLAMA_COMMIT: up.sha, LLAMA_LU_PATCH_DIR: patches }
+    expect(runScript('ensure_src', env).code).toBe(0)
+    writeFileSync(join(cache, 'llama.cpp', 'extra.cmake'), '# not in the pinned commit\n')
+    const smuggled = runScript('ensure_src', env)
+    expect(smuggled.code).not.toBe(0)
+    expect(smuggled.out).toContain('does not match')
+  })
+
+  it('stops when a patch does not apply to the pinned source', () => {
+    const up = fakeUpstream()
+    const patches = tmp('llama-patches-bad-')
+    writeFileSync(join(patches, '0001-lu.patch'), '--- a/CMakeLists.txt\n+++ b/CMakeLists.txt\n@@ -1 +1,2 @@\n project(other)\n+# LU\n')
+    const env = { LLAMA_BUILD_CACHE: tmp('llama-cache-bad-'), LLAMA_REPO: up.path, LLAMA_TAG: up.tag, LLAMA_COMMIT: up.sha, LLAMA_LU_PATCH_DIR: patches }
+    const r = runScript('ensure_src', env)
+    expect(r.code).not.toBe(0)
+    expect(r.out).toContain('0001-lu.patch does not apply')
+  })
+
+  it('the repo\'s generator patch keeps the vector on the real blocks and exits cleanly on a model it cannot read', () => {
+    const dir = join(REPO_ROOT, 'scripts', 'llama-patches')
+    const patch = readFileSync(join(dir, '0001-cvector-generator-real-blocks.patch'), 'utf8')
+    // It touches the generator only, so the server stays the pinned source.
+    expect([...patch.matchAll(/^\+\+\+ b\/(.+)$/gm)].map((m) => m[1])).toEqual(['tools/cvector-generator/cvector-generator.cpp'])
+    // Only the blocks before the last one, picked by their layer index.
+    expect(patch).toContain('+    if (il < 0 || il >= cb_data->n_layers - 1) {')
+    // A mismatch is a line and exit 1, not GGML_ASSERT's abort.
+    expect(patch).toContain('+            fprintf(stderr, "LU: unsupported model:')
+    expect(patch).toContain('+            return 1;')
+    // And it is what the build applies.
+    expect(runScript('printf "%s" "$LU_PATCH_DIR"', { LLAMA_LU_PATCH_DIR: '' }).out).toBe(`${REPO_ROOT}/scripts/llama-patches`.replace(/\\/g, '/'))
+  })
+
+  // I1 on the box (31.10.2026): the Windows tool took ~25 min and the app
+  // showed no progress. Over a pipe the generator's printf is fully
+  // buffered, so its "Evaluating prompt[i/n]" lines, which the app reads for
+  // progress and time left, came in batches or only at the end.
+  it('the repo\'s generator patches hand every progress line to the app at once', () => {
+    const dir = join(REPO_ROOT, 'scripts', 'llama-patches')
+    const patch = readFileSync(join(dir, '0003-cvector-generator-progress-flush.patch'), 'utf8')
+    expect([...patch.matchAll(/^\+\+\+ b\/(.+)$/gm)].map((m) => m[1])).toEqual(['tools/cvector-generator/cvector-generator.cpp'])
+    expect(patch).toMatch(/^ {13}\(int\) t\.max_seq_len\);\n(\+ {8}\/\/.*\n)*\+ {8}fflush\(stdout\);$/m)
+  })
+
+  // Single neurons (David, 31.10.2026): a dose is the median length of the
+  // residual stream after the neuron's block, which only the model run can
+  // measure. The app reads these lines (neuron/mod.rs parse_norm).
+  it('the repo\'s generator patches measure the layer lengths a neuron dose is counted in', () => {
+    const patch = readFileSync(join(REPO_ROOT, 'scripts', 'llama-patches', '0004-cvector-generator-layer-norms.patch'), 'utf8')
+    expect([...patch.matchAll(/^\+\+\+ b\/(.+)$/gm)].map((m) => m[1])).toEqual(['tools/cvector-generator/cvector-generator.cpp'])
+    expect(patch).toContain('+    const bool lu_norms = getenv("LU_LAYER_NORMS") != nullptr;')
+    // The first token (BOS) is left out, as the shared recipes measure it.
+    expect(patch).toContain('+                for (int64_t r = 1; r < h->ne[1]; r++) {')
+    expect(patch).toContain('+            printf("LU norm %d %.6f\\n", (int) il, v[v.size() / 2]);')
+  })
+
   it('hashes a digest of the binary it installed', () => {
     const probe = join(tmp('llama-digest-'), 'artifact')
     writeFileSync(probe, 'llama-server')
@@ -421,8 +509,168 @@ describe('build-llama.sh — the llama.cpp revision is pinned to a commit', { ti
       const keys = text.match(/^\s*key:\s*.*llama.*$/gm) ?? []
       expect(keys.length, `${workflow} has no llama cache key`).toBeGreaterThan(0)
       for (const key of keys) {
-        expect(key, workflow).toContain("hashFiles('scripts/build-llama.sh')")
+        expect(key, workflow).toContain("hashFiles('scripts/build-llama.sh', 'scripts/llama-patches/**')")
       }
+    }
+  })
+
+  it("keys the cache and the Windows smoke on LU's llama.cpp patches as well (E1)", () => {
+    // The patches change the compiled tree without touching this script. Left
+    // out of the key, a patch change hits the old cache (assert_patched_tree
+    // then stops the build); left out of the path filter, the Windows smoke
+    // does not run for it at all.
+    const text = readFileSync(resolve(REPO_ROOT, '.github/workflows/sidecar-windows.yml'), 'utf8')
+    const filters = text.match(/^\s*paths:\n(?:\s*-\s*'[^']+'\n)+/gm) ?? []
+    expect(filters.length).toBe(2)
+    for (const filter of filters) {
+      expect(filter).toContain("- 'scripts/build-llama.sh'")
+      expect(filter).toContain("- 'scripts/llama-patches/**'")
+    }
+  })
+})
+
+/**
+ * E1: the vector tool comes out of the server build on every platform (LU
+ * patch 0002 lets it build with GGML_BACKEND_DL), so on Windows/Linux it
+ * runs on the server's CPU variants and Vulkan instead of a static baseline
+ * build of its own (FEHLER-P11 #8, hours on 9B models). Run with a stand-in
+ * `cmake` that records its calls and writes the files a real build would, in
+ * a throwaway checkout: the order and the directories are the point, not the
+ * compile.
+ */
+describe('build-llama.sh: the vector tool comes out of the server build', () => {
+  const temps: string[] = []
+  const tmp = (prefix: string) => {
+    const dir = mkdtempSync(join(tmpdir(), prefix))
+    temps.push(dir)
+    return dir.replace(/\\/g, '/')
+  }
+  afterAll(() => {
+    for (const dir of temps) rmSync(dir, { recursive: true, force: true })
+  })
+
+  const STAND_IN = `
+cmake() {
+  if [ "$1" = "-S" ]; then echo "configure $4 \${*:5}" >> "$CALLS"; return 0; fi
+  local dir="$2" target=""
+  while [ $# -gt 0 ]; do [ "$1" = "--target" ] && target="$2"; shift; done
+  echo "build $dir $target" >> "$CALLS"
+  mkdir -p "$dir/bin"
+  case "$target" in
+    llama-server) touch "$dir/bin/llama-server" "$dir/bin/llama-server.exe" "$dir/bin/libggml-base.so" "$dir/bin/ggml-base.dll" ;;
+    *) touch "$dir/bin/$target" "$dir/bin/$target.exe" ;;
+  esac
+}
+`
+
+  function build(triple: string) {
+    const repoRoot = tmp('llama-p11-root-')
+    const cache = tmp('llama-p11-cache-')
+    const calls = join(cache, 'calls.txt')
+    const { code, out } = runScript(`${STAND_IN} build_triple '${triple}'`, {
+      BUILD_LLAMA_REPO_ROOT: repoRoot,
+      LLAMA_BUILD_CACHE: cache,
+      CALLS: calls,
+    })
+    return { code, out, repoRoot, cache, calls: existsSync(calls) ? readFileSync(calls, 'utf8').trim().split('\n') : [] }
+  }
+
+  for (const triple of ['x86_64-unknown-linux-gnu', 'x86_64-pc-windows-msvc']) {
+    it(`${triple}: one K1 build makes the server and the tool`, () => {
+      const r = build(triple)
+      expect(r.code, r.out).toBe(0)
+      const server = `${r.cache}/build-${triple}`
+      const configures = r.calls.filter((c) => c.startsWith('configure '))
+      expect(configures).toHaveLength(1)
+      expect(configures[0]).toContain(`configure ${server} `)
+      expect(configures[0]).toContain('-DGGML_BACKEND_DL=ON')
+      expect(configures[0]).toContain('-DGGML_CPU_ALL_VARIANTS=ON')
+      expect(r.calls).toContain(`build ${server} llama-server`)
+      expect(r.calls).toContain(`build ${server} llama-cvector-generator`)
+      expect(r.calls.some((c) => c.includes(`build-${triple}-cvector`))).toBe(false)
+      const exe = triple.includes('windows') ? '.exe' : ''
+      expect(existsSync(join(r.repoRoot, 'src-tauri', 'bin', `lu-llama-cvector-generator-${triple}${exe}`))).toBe(true)
+      expect(existsSync(join(r.repoRoot, 'src-tauri', 'bin', `lu-llama-server-${triple}${exe}`))).toBe(true)
+    })
+  }
+
+  it('aarch64-apple-darwin: one static build makes both, as before', () => {
+    const r = build('aarch64-apple-darwin')
+    expect(r.code, r.out).toBe(0)
+    const server = `${r.cache}/build-aarch64-apple-darwin`
+    expect(r.calls.filter((c) => c.startsWith('configure '))).toHaveLength(1)
+    expect(r.calls).toContain(`build ${server} llama-cvector-generator`)
+    expect(existsSync(join(r.repoRoot, 'src-tauri', 'bin', 'lu-llama-cvector-generator-aarch64-apple-darwin'))).toBe(true)
+  })
+
+  // P11's patches 0003 (progress line) and 0004 (LU_LAYER_NORMS, the unit of
+  // a single-neuron dose) come into every build through the patch directory;
+  // CI runs the built tool on each platform and reads both.
+  it('CI runs the patched tool for real on Mac, Windows and Linux', () => {
+    const patches = readdirSync(join(REPO_ROOT, 'scripts', 'llama-patches'))
+    expect(patches).toContain('0003-cvector-generator-progress-flush.patch')
+    expect(patches).toContain('0004-cvector-generator-layer-norms.patch')
+    const steps = (workflow: string) =>
+      readFileSync(resolve(REPO_ROOT, workflow), 'utf8')
+        .split(/^ {6}- name: /m)
+        .filter((step) => step.startsWith('"Vector tool computes'))
+    const release = steps('.github/workflows/release.yml')
+    const windows = steps('.github/workflows/sidecar-windows.yml')
+    expect(release.map((s) => s.match(/^\s+if: (.*)$/m)?.[1] ?? 'mac')).toEqual([
+      "matrix.sidecar_triple == 'x86_64-unknown-linux-gnu'",
+      "matrix.sidecar_triple == 'x86_64-pc-windows-msvc'",
+      'mac',
+    ])
+    expect(windows).toHaveLength(1)
+    for (const step of [...release, ...windows]) {
+      expect(step).toContain('stories260K.gguf')
+      expect(step).toContain('--method mean')
+      expect(step).toContain('Evaluating prompt')
+      expect(step).toMatch(/LU_LAYER_NORMS\s*=\s*'?1/)
+      expect(step).toContain('^LU norm [0-9]+ [0-9]+')
+    }
+  })
+})
+
+describe('build-llama.sh --check: a failed boot leaves no server behind (E1)', { timeout: 30_000 }, () => {
+  it('kills the server itself, not only the subshell that started it', async () => {
+    if (process.platform === 'win32') return
+    // A port nothing listens on: a real llama-server on 8129 (a running LU, a
+    // probe build) would answer /health for the fake and turn this green-red.
+    const port = await new Promise<number>((done, fail) => {
+      const srv = createServer()
+      srv.once('error', fail)
+      srv.listen(0, '127.0.0.1', () => {
+        const a = srv.address()
+        srv.close(() => done(typeof a === 'object' && a ? a.port : 0))
+      })
+    })
+    const root = mkdtempSync(join(tmpdir(), 'bl-check-'))
+    try {
+      const triple = runScript('host_triple').out
+      const bin = join(root, 'src-tauri', 'bin')
+      execFileSync('mkdir', ['-p', bin])
+      // On a dynamic-ISA triple (x86_64 Linux) check_binary runs the server from
+      // its companion-library folder and stops early when that folder is missing,
+      // before any /health probe. The Mac never takes that branch, the Linux CI
+      // gate did (05.11.2026), so the folder is laid out here for every host.
+      execFileSync('mkdir', ['-p', join(root, 'src-tauri', 'resources', 'llama', triple)])
+      const pidFile = join(root, 'server.pid')
+      // A server that never answers /health: it only records its PID and waits.
+      const fake = join(bin, `lu-llama-server-${triple}`)
+      writeFileSync(fake, `#!/bin/sh\n[ "$1" = "--version" ] && exit 0\necho $$ > '${pidFile}'\nexec sleep 30\n`, { mode: 0o755 })
+      const r = runScript('check_binary', { BUILD_LLAMA_REPO_ROOT: root, BUILD_LLAMA_CHECK_TRIES: '3', BUILD_LLAMA_CHECK_PORT: String(port) })
+      expect(r.code).not.toBe(0)
+      expect(r.out).toMatch(/health endpoint never came up/)
+      const pid = Number(readFileSync(pidFile, 'utf8').trim())
+      let alive = true
+      for (let i = 0; i < 20 && alive; i++) {
+        try { process.kill(pid, 0); execFileSync('sleep', ['0.1']) } catch { alive = false }
+      }
+      if (alive) process.kill(pid, 'SIGKILL')
+      expect(alive).toBe(false)
+    } finally {
+      rmSync(root, { recursive: true, force: true })
     }
   })
 })

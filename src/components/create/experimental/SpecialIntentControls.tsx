@@ -36,13 +36,15 @@ import { LOCAL_MUSIC_TEXT, SECONDS_LENGTH, musicHowtoLines, musicLength, musicTe
 import { MAC_MUSIC_MIN_SECONDS } from '../../../lib/mac-music'
 import { createRunModel, studioShownValue } from '../../../lib/render/create-studio'
 import { galleryLabelShort } from '../../../lib/render/gallery-label'
-import { TRAIN_PRESETS, TRAIN_VRAM_PRESETS, LOW_VRAM_NOTE, trainStepsNote, trainVramSuggestion, type TrainVramPreset } from '../../../lib/trainer-presets'
+import { TRAIN_VRAM_PRESETS, LOW_VRAM_NOTE, trainStepsNote, trainVramSuggestion, type TrainVramPreset } from '../../../lib/trainer-presets'
+import { STYLE_MODE_NOTE, STYLE_NAME_PLACEHOLDER, STYLE_TRIGGER_HINT_OFF, STYLE_TRIGGER_HINT_ON, STYLE_TRIGGER_LABEL, TRAIN_KINDS, trainPresetsFor, type TrainKind } from '../../../lib/train-kind'
 import { useGraphicsCardGb } from '../../../hooks/useGraphicsMemory'
+import { BetaMark } from '../../ui/BetaMark'
 import { trainerPathPlaceholder } from '../../../lib/trainer-path-placeholder'
 import { trainerRootHint } from '../../../lib/trainer-root-hint'
 import { useCreateExp } from './CreateContext'
 import { CharacterUseLocally } from './CharacterUseLocally'
-import { CLOUD_TRAINING_FAMILY_NOTE } from '../../../api/character-import'
+import { CLOUD_TRAINING_FAMILY_NOTE, localTrainingFamilyNote } from '../../../api/character-import'
 import { useLocalPick } from './localPick'
 import { characterBaseModel, characterRunBlock } from '../../../lib/character-base'
 import { HINWEIS_TEXT } from '../../../lib/hinweis'
@@ -56,6 +58,7 @@ import { Slider } from '../ui/Slider'
 import { cn } from '../ui/cn'
 import { useClickAway } from '../ui/useClickAway'
 import { Modal } from '../../ui/Modal'
+import { useTrainReplaceStore } from '../../../stores/trainReplaceStore'
 import { ModalActions, ModalButton } from '../../ui/ModalActions'
 import { MIN_TRAIN_IMAGES, maxTrainImages } from '../../../lib/train-image-cap'
 
@@ -251,6 +254,7 @@ function CharacterPanel() {
 
   return (
     <div className="space-y-2">
+      <TrainReplaceDialog />
       <div className="flex items-center justify-center">
         <Segmented
           size="sm"
@@ -277,6 +281,7 @@ function CharacterPanel() {
             placeholder="Trigger word, e.g. davechar"
             className="t-control w-44 px-2.5 h-[var(--control-h-sm)] rounded-md bg-white/[0.03] border border-white/[0.06] text-gray-200 placeholder-gray-600 focus:outline-none focus:border-white/15"
           />
+          <TriggerWordNote />
           <span className="t-label text-gray-600">
             {trainImages.length}/{maxTrainImages(backend)} photos added{trainImages.length < MIN_TRAIN_IMAGES ? `, need at least ${MIN_TRAIN_IMAGES}` : ''}
           </span>
@@ -434,12 +439,57 @@ function TrainerReinstallModal({
 // Local training readiness + inputs (2.5.8 A5). Three gates render in order:
 // trainer env (one-time musubi setup) -> Z-Image base files -> the actual
 // trigger/steps inputs. The Rust side is the source of truth for readiness.
+// 3.0.9 P8: Character or Style / concept, above the inputs of both local
+// trainers (CUDA and Mac). The cloud trains characters only, so it has none.
+function TrainKindPicker() {
+  const trainKind = useCreateStore((s) => s.trainKind)
+  const setTrainKind = useCreateStore((s) => s.setTrainKind)
+  const trainStyleTrigger = useCreateStore((s) => s.trainStyleTrigger)
+  const setTrainStyleTrigger = useCreateStore((s) => s.setTrainStyleTrigger)
+  const isGenerating = useCreateStore((s) => s.isGenerating)
+  return (
+    <div className="flex flex-col items-center gap-1" data-testid="train-kind">
+      <div className="flex items-center gap-1.5">
+        <Segmented
+          size="sm"
+          layoutId="train-kind"
+          value={trainKind}
+          onChange={(v) => { if (!isGenerating) setTrainKind(v as TrainKind) }}
+          options={TRAIN_KINDS.map((k) => ({ value: k.value, label: k.label }))}
+        />
+        {/* Beta stands for the style mode only (lib/beta.ts). */}
+        <BetaMark feature="style-training" />
+      </div>
+      {trainKind === 'style' && (
+        <>
+          <div className="t-label text-gray-500 max-w-[560px] text-center" data-testid="style-mode-note">{STYLE_MODE_NOTE}</div>
+          <label className="t-label text-gray-400 flex items-center gap-1.5 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={trainStyleTrigger}
+              disabled={isGenerating}
+              onChange={(e) => setTrainStyleTrigger(e.target.checked)}
+              data-testid="style-trigger"
+            />
+            {STYLE_TRIGGER_LABEL}
+          </label>
+          <div className="t-label text-gray-600 max-w-[560px] text-center" data-testid="style-trigger-hint">
+            {trainStyleTrigger ? STYLE_TRIGGER_HINT_ON : STYLE_TRIGGER_HINT_OFF}
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
 function LocalTrainControls() {
   const triggerWord = useCreateStore((s) => s.triggerWord)
   const setTriggerWord = useCreateStore((s) => s.setTriggerWord)
   const trainImages = useCreateStore((s) => s.trainImages)
   const trainSteps = useCreateStore((s) => s.trainSteps)
   const setTrainSteps = useCreateStore((s) => s.setTrainSteps)
+  const trainKind = useCreateStore((s) => s.trainKind)
+  const presets = trainPresetsFor(trainKind)
   const trainVramPreset = useCreateStore((s) => s.trainVramPreset)
   const setTrainVramPreset = useCreateStore((s) => s.setTrainVramPreset)
   const isGenerating = useCreateStore((s) => s.isGenerating)
@@ -674,19 +724,22 @@ function LocalTrainControls() {
   }
   return (
     <div className="flex flex-col items-center gap-1.5">
+      <TrainKindPicker />
       <div className="flex items-center justify-center gap-2 flex-wrap">
         <input
           value={triggerWord}
           onChange={(e) => setTriggerWord(e.target.value)}
-          placeholder="Trigger word, e.g. davechar"
+          placeholder={trainKind === 'style' ? STYLE_NAME_PLACEHOLDER : 'Trigger word, e.g. davechar'}
+          aria-label={trainKind === 'style' ? 'Style name' : 'Trigger word'}
           className="t-control w-44 px-2.5 h-[var(--control-h-sm)] rounded-md bg-white/[0.03] border border-white/[0.06] text-gray-200 placeholder-gray-600 focus:outline-none focus:border-white/15"
         />
+        <TriggerWordNote />
         <Segmented
           size="sm"
           layoutId="train-steps"
           value={String(trainSteps)}
           onChange={(v) => setTrainSteps(Number(v))}
-          options={TRAIN_PRESETS.map((p) => ({ value: String(p.steps), label: p.label }))}
+          options={presets.map((p) => ({ value: String(p.steps), label: p.label }))}
         />
         <Segmented
           size="sm"
@@ -696,7 +749,7 @@ function LocalTrainControls() {
           options={TRAIN_VRAM_PRESETS.map((p) => ({ value: p.value, label: p.label }))}
         />
         <span className="t-label text-gray-600">
-          {trainImages.length}/{maxTrainImages('local')} photos{trainImages.length < MIN_TRAIN_IMAGES ? `, need at least ${MIN_TRAIN_IMAGES}` : ''}
+          {trainImages.length}/{maxTrainImages('local')} {trainKind === 'style' ? 'pictures' : 'photos'}{trainImages.length < MIN_TRAIN_IMAGES ? `, need at least ${MIN_TRAIN_IMAGES}` : ''}
         </span>
       </div>
       {!isGenerating && (
@@ -705,7 +758,7 @@ function LocalTrainControls() {
               3.0.0: `(400 STEPS)` allein sagt nicht, welche der drei Stufen
               gerade gilt, und ein Tester hielt Quick deshalb fuer wirkungslos,
               obwohl Quick genau diese 400 sind. */}
-          <span>Runs on your GPU and takes a while ({trainStepsNote(trainSteps)}). The local chat model pauses for the run. The character lands in your local LoRAs.</span>
+          <span>Runs on your GPU and takes a while ({trainStepsNote(trainSteps, presets)}). The local chat model pauses for the run. The {trainKind === 'style' ? 'style' : 'character'} lands in your local LoRAs.</span>
           {/* The run repairs its own environment now (A2), so this is no
               longer the only way out of a broken install. It stays because
               the button used to render ONLY while the environment counted as
@@ -720,6 +773,9 @@ function LocalTrainControls() {
             {busy === 'install' ? 'Reinstalling…' : 'Reinstall trainer'}
           </button>
         </div>
+      )}
+      {!isGenerating && (
+        <div className="t-label text-gray-600 max-w-[560px] text-center" data-testid="local-train-family-note">{localTrainingFamilyNote(trainKind)}</div>
       )}
       {!isGenerating && trainVramPreset === 'low-vram' && (
         <div className="t-label text-gray-600 max-w-[560px] text-center" data-testid="low-vram-note">{LOW_VRAM_NOTE}</div>
@@ -759,6 +815,8 @@ function MacTrainControls() {
   const trainImages = useCreateStore((s) => s.trainImages)
   const trainSteps = useCreateStore((s) => s.trainSteps)
   const setTrainSteps = useCreateStore((s) => s.setTrainSteps)
+  const trainKind = useCreateStore((s) => s.trainKind)
+  const presets = trainPresetsFor(trainKind)
   const isGenerating = useCreateStore((s) => s.isGenerating)
   const setView = useUIStore((s) => s.setView)
   const setCategoryFilter = useModelStore((s) => s.setCategoryFilter)
@@ -789,6 +847,7 @@ function MacTrainControls() {
   const missing = macTrainMissing(status)
   return (
     <div className="flex flex-col items-center gap-1.5" data-testid="mac-train-controls">
+      <TrainKindPicker />
       {missing && (
         <div className="flex items-center justify-center gap-2 flex-wrap max-w-[560px]">
           <span className="t-label text-gray-400 text-center" data-testid="mac-train-note">{missing}</span>
@@ -801,23 +860,25 @@ function MacTrainControls() {
         <input
           value={triggerWord}
           onChange={(e) => setTriggerWord(e.target.value)}
-          placeholder="Trigger word, e.g. davechar"
+          placeholder={trainKind === 'style' ? STYLE_NAME_PLACEHOLDER : 'Trigger word, e.g. davechar'}
+          aria-label={trainKind === 'style' ? 'Style name' : 'Trigger word'}
           className="t-control w-44 px-2.5 h-[var(--control-h-sm)] rounded-md bg-white/[0.03] border border-white/[0.06] text-gray-200 placeholder-gray-600 focus:outline-none focus:border-white/15"
         />
+        <TriggerWordNote />
         <Segmented
           size="sm"
           layoutId="train-steps"
           value={String(trainSteps)}
           onChange={(v) => setTrainSteps(Number(v))}
-          options={TRAIN_PRESETS.map((p) => ({ value: String(p.steps), label: p.label }))}
+          options={presets.map((p) => ({ value: String(p.steps), label: p.label }))}
         />
         <span className="t-label text-gray-600">
-          {trainImages.length}/{maxTrainImages('local')} photos{trainImages.length < MIN_TRAIN_IMAGES ? `, need at least ${MIN_TRAIN_IMAGES}` : ''}
+          {trainImages.length}/{maxTrainImages('local')} {trainKind === 'style' ? 'pictures' : 'photos'}{trainImages.length < MIN_TRAIN_IMAGES ? `, need at least ${MIN_TRAIN_IMAGES}` : ''}
         </span>
       </div>
       {!isGenerating && (
         <div className="t-label text-gray-600 text-center max-w-[560px]" data-testid="mac-train-hint">
-          {macTrainNote(trainStepsNote(trainSteps), status)}{' '}
+          {macTrainNote(trainStepsNote(trainSteps, presets), status, trainKind)}{' '}
           <button
             onClick={() => { void openMlxLoraFolder().catch(() => undefined) }}
             className="underline underline-offset-2 text-gray-500 hover:text-gray-300"
@@ -1463,14 +1524,19 @@ function LocalExtendControls() {
   const panelRef = useRef<HTMLDivElement>(null)
   const panel = usePopoverPlatz(panelRef, open, { bevorzugt: 'oben', abstand: 6, deckel: 256 })
 
-  const adopt = async (getUrl: () => Promise<{ url: string; revoke?: () => void }>, label: string) => {
+  const setExtendClip = useCreateStore((s) => s.setExtendClip)
+  const adopt = async (getUrl: () => Promise<{ url: string; revoke?: () => void; blob?: Blob }>, label: string) => {
     setBusy(true)
     setError(null)
     try {
-      const { url, revoke } = await getUrl()
+      const { url, revoke, blob } = await getUrl()
       try {
         const frame = await lastFrameFile(url, label)
         setSource(await loadImageRef(frame))
+        // B18: the clip itself goes along too. Wan and LTX 2.5 continue from
+        // its last frames instead of the one still, and the result is the
+        // whole clip, longer (lib/long-video-run).
+        setExtendClip(blob ?? null)
         setPickedLabel(label)
       } finally {
         revoke?.()
@@ -1487,13 +1553,13 @@ function LocalExtendControls() {
     adopt(async () => {
       const blob = await fetchGalleryItemBlob(g)
       const url = URL.createObjectURL(blob)
-      return { url, revoke: () => URL.revokeObjectURL(url) }
+      return { url, revoke: () => URL.revokeObjectURL(url), blob }
     }, g.prompt.slice(0, 40) || 'Local video')
 
   const fromFile = (f: File) =>
     adopt(async () => {
       const url = URL.createObjectURL(f)
-      return { url, revoke: () => URL.revokeObjectURL(url) }
+      return { url, revoke: () => URL.revokeObjectURL(url), blob: f }
     }, f.name)
 
   const value = source && pickedLabel ? pickedLabel : null
@@ -1528,7 +1594,7 @@ function LocalExtendControls() {
         </button>
         {value && (
           <button
-            onClick={() => { setSource(null); setPickedLabel(null) }}
+            onClick={() => { setSource(null); setExtendClip(null); setPickedLabel(null) }}
             className="p-1 text-gray-500 hover:text-gray-300" title="Clear" aria-label="Clear"
           >
             <X size={11} />
@@ -1659,5 +1725,37 @@ function MotionControls() {
       <PortraitChip empty="Add character image" />
       <DrivingVideoChip empty="Add driving video (dance/pose)" />
     </div>
+  )
+}
+
+/** C7: says under the trigger field what it did to the typed word ("Jörg" is
+ *  trained as "Joerg"), so the word on screen is visibly the word learned. */
+function TriggerWordNote() {
+  const note = useCreateStore((s) => s.triggerWordNote)
+  if (!note) return null
+  return <p role="status" data-testid="trigger-word-note" className={`w-full text-center t-micro ${HINWEIS_TEXT.ruhig}`}>{note}</p>
+}
+
+/** C8: asks before a new training replaces the character of the same name
+ *  (stores/trainReplaceStore.ts). Same Modal as the shelf's delete question. */
+function TrainReplaceDialog() {
+  const pending = useTrainReplaceStore((s) => s.pending)
+  const answer = useTrainReplaceStore((s) => s.answer)
+  useEffect(() => useTrainReplaceStore.getState().mount(), [])
+  return (
+    <Modal open={!!pending} onClose={() => answer('rename')} title="Replace character?">
+      <p className="t-micro text-gray-600 dark:text-gray-300 mb-3">
+        A character named <span className="text-gray-900 dark:text-white font-mono">{pending}</span> already exists on this computer.
+        Training with the same trigger word replaces its file when the run ends, and the old character is gone.
+      </p>
+      <ModalActions>
+        <ModalButton variant="quiet" onClick={() => answer('rename')} data-testid="train-replace-rename">
+          Pick another name
+        </ModalButton>
+        <ModalButton variant="danger" onClick={() => answer('replace')} data-testid="train-replace-confirm">
+          Replace
+        </ModalButton>
+      </ModalActions>
+    </Modal>
   )
 }

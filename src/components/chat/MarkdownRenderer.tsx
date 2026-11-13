@@ -195,7 +195,9 @@ const components: Components = {
 export function MarkdownRenderer({ content }: Props) {
   const rehypePlugins = useRehypePlugins(content)
   return (
-    <div className="markdown-content text-gray-800 dark:text-gray-200">
+    // wrap-anywhere: a URL, hash or base64 run without a space used to run out
+    // of the bubble and get cut at the window edge (T1 night test 3.0.9, A5).
+    <div className="markdown-content text-gray-800 dark:text-gray-200 wrap-anywhere">
       <ReactMarkdown remarkPlugins={[remarkGfm, [remarkMath, MATH_OPTIONS]]} rehypePlugins={rehypePlugins} components={components}>
         {content}
       </ReactMarkdown>

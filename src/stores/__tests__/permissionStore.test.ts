@@ -31,6 +31,31 @@ describe('video category unlock (v2.5.3)', () => {
   })
 })
 
+// B12 (28.10.2026): MCP tools left 'workflow' for a row of their own. A saved
+// Workflows: Auto must not carry over into running MCP tools unattended.
+describe('MCP row migration (v4)', () => {
+  it('Workflows on Auto becomes MCP on Ask First', () => {
+    const { mcp: _none, ...v3 } = { ...DEFAULT_PERMISSIONS, workflow: 'auto', terminal: 'blocked' }
+    const migrated = migratePermissionState({ globalPermissions: v3, conversationOverrides: { c1: { workflow: 'auto' } } }, 3)
+    expect(migrated.globalPermissions.mcp).toBe('confirm')
+    expect(migrated.globalPermissions.workflow).toBe('auto')
+    expect(migrated.globalPermissions.terminal).toBe('blocked')
+    expect(migrated.conversationOverrides.c1.mcp).toBeUndefined()
+  })
+
+  it('Workflows Blocked keeps MCP tools blocked, globally and per chat', () => {
+    const { mcp: _none, ...v3 } = { ...DEFAULT_PERMISSIONS, workflow: 'blocked' }
+    const migrated = migratePermissionState({ globalPermissions: v3, conversationOverrides: { c1: { workflow: 'blocked' } } }, 3)
+    expect(migrated.globalPermissions.mcp).toBe('blocked')
+    expect(migrated.conversationOverrides.c1.mcp).toBe('blocked')
+  })
+
+  it('a v4 choice for the MCP row is kept', () => {
+    const migrated = migratePermissionState({ globalPermissions: { ...DEFAULT_PERMISSIONS, mcp: 'auto' } }, 4)
+    expect(migrated.globalPermissions.mcp).toBe('auto')
+  })
+})
+
 describe('permissionStore', () => {
   beforeEach(() => {
     usePermissionStore.setState({

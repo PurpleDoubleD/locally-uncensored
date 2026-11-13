@@ -33,8 +33,31 @@ export type TextDownloadTarget =
 export interface TextDownloadTargetInput {
   /** `useModelStore.activeModel`: `<providerId>::<id>`, a bare Ollama tag, or null. */
   activeChatModel?: string | null
-  openai?: { enabled?: boolean; managed?: boolean; name?: string } | null
+  openai?: { enabled?: boolean; managed?: boolean; name?: string; baseUrl?: string } | null
   ollamaEnabled?: boolean
+}
+
+/**
+ * True when the server in the `openai` slot runs on this machine, or when the
+ * slot names no address (old entries, tests).
+ *
+ * D9 (Discord 02.11., Windows, 3.0.8): the slot also holds OpenRouter, Groq,
+ * OpenAI and every "Custom" server, and a GGUF cannot go to any of them. The
+ * download used to pick that slot all the same, looked for its model folder,
+ * found none, and every GGUF tile in Discover answered "Could not determine
+ * model directory. Please check app permissions."
+ */
+export function slotIsOnThisMachine(baseUrl?: string): boolean {
+  const url = (baseUrl || '').trim()
+  if (!url) return true
+  let host: string
+  try {
+    host = new URL(url).hostname.toLowerCase()
+  } catch {
+    return true
+  }
+  return host === 'localhost' || host.endsWith('.localhost') || host === '0.0.0.0'
+    || host === '[::1]' || host === '::1' || /^127\./.test(host)
 }
 
 function isLmStudioName(name?: string): boolean {
@@ -64,23 +87,51 @@ export function resolveTextDownloadTarget(input: TextDownloadTargetInput): TextD
   const { openai, ollamaEnabled } = input
   const active = providerIdOf(input.activeChatModel)
   const managedBuiltin = !!openai?.enabled && openai?.managed === true
+  // A server elsewhere in the slot counts like a cloud model: no file goes there.
+  const slotTakesFiles = !!openai?.managed || slotIsOnThisMachine(openai?.baseUrl)
 
   if (active === 'ollama') return 'ollama'
-  if (active === 'openai') {
+  if (active === 'openai' && slotTakesFiles) {
     if (openai?.managed) return 'builtin'
     return isLmStudioName(openai?.name) ? 'lmstudio' : 'openai-compat'
   }
 
-  // No active model, or an active CLOUD model (anthropic / lu-cloud): a GGUF
+  // No active model, or an active CLOUD model (anthropic / lu-cloud, or a
+  // server elsewhere in the openai slot): a GGUF
   // cannot run there, so the local destination is decided on its own.
   if (managedBuiltin) return 'builtin'
-  if (openai?.enabled && isLmStudioName(openai?.name)) return 'lmstudio'
+  if (openai?.enabled && slotTakesFiles && isLmStudioName(openai?.name)) return 'lmstudio'
   if (ollamaEnabled) return 'ollama'
-  if (openai?.enabled) return 'openai-compat'
+  if (openai?.enabled && slotTakesFiles) return 'openai-compat'
   // Nothing local is enabled at all. The bundled engine is the only backend
   // this app can promise, so send the file to its folder rather than to a
   // directory no installed program reads.
   return 'builtin'
+}
+
+/**
+ * What the Get button and the line over the list call a target (P11, David
+ * 2026-10-30). The target used to be decided out of sight: with an Ollama
+ * model in the chat a GGUF went into Ollama, and the Neuron tweaker, which
+ * only works on LU Engine files, never saw it.
+ */
+export function textDownloadTargetLabel(target: TextDownloadTarget, serverName?: string): string {
+  switch (target) {
+    case 'builtin': return 'LU Engine'
+    case 'ollama': return 'Ollama'
+    case 'lmstudio': return 'LM Studio'
+    case 'openai-compat': return serverName?.trim() || 'your server'
+  }
+}
+
+/**
+ * The target of a download once the user's choice for this visit of
+ * Discover counts: "LU Engine" sends the file to the app's own engine
+ * whatever the chat model is, without switching the chat model first.
+ * No choice: the rule above.
+ */
+export function chosenTextDownloadTarget(input: TextDownloadTargetInput, choice: 'builtin' | null): TextDownloadTarget {
+  return choice === 'builtin' ? 'builtin' : resolveTextDownloadTarget(input)
 }
 
 /**

@@ -12,6 +12,8 @@ const host = vi.hoisted(() => ({ mlx: false }))
 vi.mock('../../../../api/mlx-image', () => ({ isMlxImageHost: () => host.mlx }))
 vi.mock('../../../../api/comfyui', () => ({
   classifyModel: (n: string) => (/qwen_image_2\.1/.test(n) ? 'qwenimage' : 'sdxl'),
+  // B18: the video length controls ask for the card size.
+  getSystemVRAM: async () => null,
   isI2VModel: () => false,
   isT2VCapable: () => true,
   getImageUrl: (f: string) => `http://127.0.0.1:8188/view?filename=${f}`,

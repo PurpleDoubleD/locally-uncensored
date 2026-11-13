@@ -14,11 +14,11 @@ import {
 } from '../lora-strength'
 
 describe('the range', () => {
-  it('is -20 to 20 in steps of 0.05, inside what ComfyUI accepts, and the slider keeps 0 to 2', () => {
+  it('is -20 to 20 in steps of 0.05, inside what ComfyUI accepts, and the slider covers -2 to 2', () => {
     expect([LORA_STRENGTH_MIN, LORA_STRENGTH_MAX, LORA_STRENGTH_STEP]).toEqual([-20, 20, 0.05])
     expect(LORA_STRENGTH_MIN).toBeGreaterThanOrEqual(-100)
     expect(LORA_STRENGTH_MAX).toBeLessThanOrEqual(100)
-    expect([LORA_SLIDER_MIN, LORA_SLIDER_MAX]).toEqual([0, 2])
+    expect([LORA_SLIDER_MIN, LORA_SLIDER_MAX]).toEqual([-2, 2])
   })
 
   it('clamps at both ends and keeps two decimals', () => {

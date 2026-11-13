@@ -30,6 +30,7 @@ import { tryAcquireLuEngineSwap, releaseLuEngineSwap } from '../api/lu-engine-sw
 import { useModelStore } from '../stores/modelStore'
 import { errorText } from '../types/json-guards'
 import { useProviderStore } from '../stores/providerStore'
+import { syncOllamaBaseFromRust } from '../lib/ollama-host-sync'
 import { useSettingsStore } from '../stores/settingsStore'
 import { getEnabledProviders, prefixModelName, getProviderIdFromModel, isOpenAISlotModel } from '../api/providers'
 import {
@@ -205,6 +206,11 @@ export function useModels() {
     // Installed cards, and was right again five seconds later).
     useModelStore.getState().beginInventoryRefresh()
     try {
+      // Erst Rusts Ollama-Adresse (config.json > OLLAMA_HOST), dann fragen.
+      // Der erste Abruf beim Kaltstart lief sonst vor AppShells pullAndArm und
+      // las ein anderes Ollama; dessen Liste warf die gespeicherte Wahl weg.
+      // Einmal pro Fenster gemerkt, ausserhalb von Tauri sofort fertig.
+      if (useProviderStore.getState().providers.ollama.enabled) await syncOllamaBaseFromRust()
       const allModels: AIModel[] = []
       // Built-in engine (2.5.7): when the managed OpenAI-compat backend is the
       // active provider, its model list is the downloaded GGUFs (via the Tauri

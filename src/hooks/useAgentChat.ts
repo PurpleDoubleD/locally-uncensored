@@ -1,6 +1,7 @@
 import { useRef, useState, useCallback, useEffect } from 'react'
 import { frameFlush } from '../lib/frame-flush'
 import { useRunActivityStore, toolProgressActivity, waitBeforeRetry, readingActivity, endFirstWait, hiddenThoughtArrived, waitForChatCard } from '../stores/runActivityStore'
+import { watchChatFirstWait } from '../lib/first-wait-vram'
 import { markCannotThink } from '../lib/model-compatibility'
 import {
   type ApprovalEntry,
@@ -169,7 +170,7 @@ import { asString, errorText, isRecord, prop } from '../types/json-guards'
 import type { ToolArgs } from '../api/mcp/types'
 import { CREDITS_EXHAUSTED_MESSAGE } from '../lib/credits-exhausted'
 import { buildChatSystemPrompt } from '../lib/system-prompt'
-import { withChatPersona, samplingPresetFor, speakerPersonaFor } from '../lib/chat-persona'
+import { withChatPersona, samplingPresetFor, speakerCustomParams, speakerPersonaFor } from '../lib/chat-persona'
 import { injectPersonaNote, noteTokens, personaNoteOf } from '../lib/persona-note'
 
 // ── Hook ──────────────────────────────────────────────────────
@@ -1763,10 +1764,17 @@ export function useAgentChat() {
         // GH #175: the chat persona's preset sits under this chat's own values,
         // while the persona is on for the chat, as its prompt is.
         const { personas: allPersonas, activePersonaId: pickedPersonaId } = useSettingsStore.getState()
-        const personaPreset = samplingConv
-          ? samplingPresetFor(samplingConv, activeModel, allPersonas, pickedPersonaId, settings.personasEnabled !== false).preset
+        const speaker = samplingConv
+          ? samplingPresetFor(samplingConv, activeModel, allPersonas, pickedPersonaId, settings.personasEnabled !== false)
           : undefined
-        const sampling = { topK: settings.topK, ...buildSamplingRequest(settings, convSampling, personaPreset) }
+        const personaPreset = speaker?.preset
+        // GH #198: the custom rows go along here too, the chat's over the persona's.
+        const customParams = samplingConv ? speakerCustomParams(samplingConv, speaker?.persona) : {}
+        const sampling = {
+          topK: settings.topK,
+          ...buildSamplingRequest(settings, convSampling, personaPreset),
+          ...(Object.keys(customParams).length > 0 ? { customParams } : {}),
+        }
         // Small-Model Mode (Knob 6): gently clamp temperature for tool turns.
         // FOLKLORE, not measured — research found NO temperature finding for
         // tool-calling. A low, low-entropy setting is *plausible* for valid
@@ -1855,6 +1863,7 @@ export function useAgentChat() {
             signal: abort.signal,
             state: laufVerdichtung,
             decay: { enabled: decayOn },
+            onCompacted: convId ? (block) => addBlock(runState, convId, assistantMessage.id, block) : undefined,
           })
           if (verdichtet.compacted) agentMessages = verdichtet.messages
           agentMessages = trimWorkingHistory(agentMessages, sendBudget, { enabled: decayOn, hysteresis: decayOn }).messages
@@ -2007,7 +2016,12 @@ export function useAgentChat() {
           // A7: the first wait of a turn is the model reading the request.
           // Said in words and with its size instead of a bare "Starting"; the
           // first word, shown thought or tool call takes the line back.
-          if (stepNo === 1) useRunActivityStore.getState().setActivity(convId, readingActivity(estPrompt))
+          if (stepNo === 1) {
+            useRunActivityStore.getState().setActivity(convId, readingActivity(estPrompt))
+            // B26: a long first wait on a local Ollama model gets its reason
+            // (lib/first-wait-vram). It ends by itself at the first sign.
+            watchChatFirstWait(convId, activeModel, abort.signal)
+          }
           // A7: one line in the log file per message, with where the first
           // wait went: the setup before the request, and the model reading
           // until its first word, thought or call. Measured instead of

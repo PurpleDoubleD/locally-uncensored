@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { HOWTO, HOWTO_GUIDE_BASE, HOWTO_VIDEO_BASE, howtoGuideUrl, howtoLineAt, howtoVideoUrl, stageHowtoTopic } from '../howto'
 import { INTENTS } from '../../components/create/experimental/intents'
 
@@ -58,5 +60,17 @@ describe('how it works', () => {
     expect(stageHowtoTopic('video', 'local', true)).toBe('mac-video')
     expect(stageHowtoTopic('lipsync', 'local', true)).toBe('mac-lipsync')
     expect(stageHowtoTopic('animate', 'local', true)).toBeNull()
+  })
+
+  // P11 (David, 30.10.2026): how a GGUF file the user already has becomes an
+  // LU Engine model, in Help (Settings, Storage) and in the Neuron tweaker.
+  it('explains in two or three steps how to add a GGUF file, under Storage too', () => {
+    const steps = HOWTO['gguf-file'].films[0].steps
+    expect(steps.length).toBeGreaterThanOrEqual(2)
+    expect(steps.length).toBeLessThanOrEqual(3)
+    expect(steps[0].text).toMatch(/GGUF file/)
+    expect(steps.map((s) => s.text).join(' ')).toMatch(/LU Engine/)
+    const settings = readFileSync(resolve(__dirname, '../../components/settings/SettingsPage.tsx'), 'utf8')
+    expect(settings).toContain('<HowtoRow topic="gguf-file" />')
   })
 })

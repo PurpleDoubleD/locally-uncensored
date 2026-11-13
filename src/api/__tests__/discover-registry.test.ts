@@ -423,6 +423,8 @@ describe('discover — data validation', () => {
         expect(m.downloadUrl, `${m.name}: projector without a model file`).toBeTruthy()
         expect(m.filename, `${m.name}: projector without a model filename`).toBeTruthy()
         expect(m.mmprojSizeGB, `${m.name}: projector size`).toBeGreaterThan(0)
+        // N1: LFM3 Audio's projector is a sound part (Audio, not Vision).
+        if (m.tags.includes('Audio') && !m.tags.includes('Vision')) continue
         expect(m.tags, `${m.name}: projector but no Vision tag`).toContain('Vision')
       }
     })

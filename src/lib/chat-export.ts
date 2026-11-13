@@ -318,6 +318,20 @@ export function parseImportedChats(json: string): Conversation[] {
     throw new Error('That file is not valid JSON.')
   }
   let raw: unknown[]
+  // A store backup (store_backup*.json from the app data folder, 3.0.10): the
+  // chats are a JSON string under chat-conversations. The desktop already
+  // unpacks it natively (externalize_import); this covers the web build.
+  const backupChats = data && typeof data === 'object' && !Array.isArray(data)
+    ? (data as Record<string, unknown>)['chat-conversations']
+    : undefined
+  if (typeof backupChats === 'string') {
+    try {
+      const inner = JSON.parse(backupChats) as { state?: { conversations?: unknown } }
+      data = Array.isArray(inner?.state?.conversations) ? inner.state.conversations : []
+    } catch {
+      throw new Error('The chats in that backup could not be read.')
+    }
+  }
   if (Array.isArray(data)) {
     raw = data
   } else if (data && typeof data === 'object' && Array.isArray((data as { conversations?: unknown[] }).conversations)) {
@@ -338,7 +352,36 @@ export function parseImportedChats(json: string): Conversation[] {
   if (valid.length === 0) {
     throw new Error('No valid conversations found in that file.')
   }
-  return valid
+  return valid.map((c) => ({ ...c, messages: importedMessages(c.messages as unknown[], c.id) }))
+}
+
+const ROLES = new Set(['user', 'assistant', 'system', 'tool'])
+
+/**
+ * Every message of an imported chat in the shape the chat view draws.
+ *
+ * A backup is a file from outside: edited by hand, from an older build, or
+ * simply broken. One message with `"content": null` used to be taken as it
+ * was, and the chat view fell over on it, again after every restart, while a
+ * search in the sidebar took the whole app down (T1 night test 3.0.9, A4).
+ * What is not a message at all, or has a role the app does not know, is
+ * dropped; a missing id is made up; content that is not text becomes text.
+ */
+function importedMessages(raw: unknown[], conversationId: string): Message[] {
+  const out: Message[] = []
+  raw.forEach((m, i) => {
+    if (!m || typeof m !== 'object') return
+    const msg = m as Record<string, unknown>
+    if (typeof msg.role !== 'string' || !ROLES.has(msg.role)) return
+    const content = msg.content
+    out.push({
+      ...(msg as unknown as Message),
+      id: typeof msg.id === 'string' && msg.id ? msg.id : `${conversationId}-import-${i}`,
+      content: typeof content === 'string' ? content : content == null ? '' : typeof content === 'object' ? JSON.stringify(content) : String(content),
+      timestamp: typeof msg.timestamp === 'number' ? msg.timestamp : 0,
+    })
+  })
+  return out
 }
 
 /** References are installation-local. The browser build exports the original

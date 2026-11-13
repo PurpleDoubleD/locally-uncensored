@@ -1,7 +1,7 @@
 {
   "$schema": "https://raw.githubusercontent.com/tauri-apps/tauri/dev/crates/tauri-cli/schema.json",
   "productName": "LU",
-  "version": "3.0.8",
+  "version": "3.0.10",
   "identifier": "com.purpledoubled.locally-uncensored",
   "build": {
     "beforeBuildCommand": "npm run build",
@@ -25,7 +25,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self' http://ipc.localhost; connect-src 'self' blob: http://ipc.localhost http://tauri.localhost http://localhost:* http://127.0.0.1:* https://lu-labs.ai https://lrrhheztdytyfpizvuup.supabase.co https://civitai.com https://*.civitai.com https://huggingface.co https://*.huggingface.co https://ollama.com https://openrouter.ai https://api.openai.com https://api.groq.com https://api.together.xyz https://api.deepseek.com https://api.mistral.ai https://api.anthropic.com ws://localhost:* ws://127.0.0.1:*; img-src 'self' data: blob: http://localhost:* http://127.0.0.1:* https://lrrhheztdytyfpizvuup.supabase.co https://*.civitai.com https://*.githubusercontent.com; media-src 'self' blob: http://localhost:* http://127.0.0.1:* https://lrrhheztdytyfpizvuup.supabase.co https://lu-labs.ai; font-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'wasm-unsafe-eval'"
+      "csp": "default-src 'self' http://ipc.localhost; connect-src 'self' blob: http://ipc.localhost http://tauri.localhost http://localhost:* http://127.0.0.1:* https://lu-labs.ai https://lrrhheztdytyfpizvuup.supabase.co https://civitai.com https://*.civitai.com https://huggingface.co https://*.huggingface.co https://ollama.com https://openrouter.ai https://api.openai.com https://api.groq.com https://api.together.xyz https://api.deepseek.com https://api.mistral.ai https://api.anthropic.com ws://localhost:* ws://127.0.0.1:*; img-src 'self' data: blob: http://localhost:* http://127.0.0.1:* https://lrrhheztdytyfpizvuup.supabase.co https://*.civitai.com https://*.githubusercontent.com; media-src 'self' blob: http://localhost:* http://127.0.0.1:* https://lrrhheztdytyfpizvuup.supabase.co https://lu-labs.ai; font-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'wasm-unsafe-eval'; frame-src 'self' http://127.0.0.1:*"
     }
   },
   "plugins": {
@@ -33,6 +33,7 @@
       "endpoints": [
         "https://github.com/purpledoubled/locally-uncensored/releases/latest/download/latest.json"
       ],
+      "requireSignedVersion": true,
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDZDNkRFNzJFRjhFNkIxNDcKUldSSHNlYjRMdWR0YklwQlJhTUR4TXBTTE1xKzFUcWVVTEpTL0hZMi9ldmlOcW5BWFZWeUdzRGMK"
     }
   },
@@ -72,6 +73,10 @@
       "signingIdentity": "-"
     },
     "windows": {
+      "webviewInstallMode": {
+        "type": "embedBootstrapper",
+        "silent": true
+      },
       "wix": {
         "upgradeCode": "a32db5c6-2c3c-5e92-a20a-2464954554f9"
       },

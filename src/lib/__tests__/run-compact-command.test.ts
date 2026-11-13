@@ -426,3 +426,44 @@ describe('nothing-to-compact sagt, WELCHER der beiden Faelle vorliegt', () => {
     expect(schon).toMatch(/already covered/i)
   })
 })
+
+// ── Jaeger A, A3: zu wenige Zuege, aber zu lang fuer das Fenster ──────────
+describe('nothing-to-compact over a chat that does not fit the window', () => {
+  // 16K window, one answer of about 20K tokens, two short turns after it.
+  const RIESIG = 'x'.repeat(82_500)
+  const kurzerChatMitRiesenantwort = () => chatMit([
+    nachricht('m0', 'Frage'),
+    nachricht('m1', RIESIG, 'assistant'),
+    nachricht('m2', 'Weiter'),
+    nachricht('m3', 'Gut', 'assistant'),
+  ])
+
+  it('says that one message alone is longer than the window, not "short enough"', async () => {
+    kurzerChatMitRiesenantwort()
+    const r = await lauf({ window: 16_384 })
+    expect(r).toEqual({ ok: false, reason: 'nothing-to-compact', detail: 'message-over-window' })
+    expect(zusammenfasser).not.toHaveBeenCalled()
+    const text = compactOutcomeMessage(r)
+    expect(text).not.toMatch(/short enough/i)
+    expect(text).toMatch(/too few turns/i)
+    expect(text).toMatch(/one message alone is longer than the model's context window/i)
+  })
+
+  it('names the case where only the few turns together overflow', async () => {
+    const viertel = 'y'.repeat(18_000)
+    chatMit([
+      nachricht('m0', viertel), nachricht('m1', viertel, 'assistant'),
+      nachricht('m2', viertel), nachricht('m3', viertel, 'assistant'),
+    ])
+    const r = await lauf({ window: 16_384 })
+    expect(r).toEqual({ ok: false, reason: 'nothing-to-compact', detail: 'over-window' })
+    expect(compactOutcomeMessage(r)).toMatch(/no longer fit the model's context window/i)
+  })
+
+  it('NEGATIVE CONTROL: the same short chat inside a large window is still "short enough"', async () => {
+    kurzerChatMitRiesenantwort()
+    const r = await lauf({ window: 131_072 })
+    expect(r).toEqual({ ok: false, reason: 'nothing-to-compact' })
+    expect(compactOutcomeMessage(r)).toMatch(/short enough/i)
+  })
+})

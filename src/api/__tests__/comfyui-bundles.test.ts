@@ -19,8 +19,9 @@ describe('Video Bundle Definitions', () => {
     // (21 GB each) and Pyramid Flow, whose builders emitted node class names no
     // wrapper registers. See wrapper-node-names.test.ts. 2026-10-01 adds
     // MiniMax H3 (video with sound). 2026-10-02 adds LTX 2.5 and FastH3.
-    // 2026-10-03 adds the MiniMax H3 turbo LoRA as an add-on.
-    expect(bundles.length).toBe(18)
+    // 2026-10-03 adds the MiniMax H3 turbo LoRA as an add-on. 3.0.9 (B18)
+    // adds Wan 2.2 A14B I2V and T2V Fast and the Wan 2.1 speed LoRAs.
+    expect(bundles.length).toBe(21)
   })
 
   it('every bundle has required fields', () => {
@@ -76,8 +77,9 @@ describe('Video Bundle Definitions', () => {
   it('I2V bundles have i2v: true', () => {
     const i2vBundles = bundles.filter(b => b.i2v)
     // SVD + FramePack + Wan 2.2 TI2V-5B + Rapid AIO (2.5.8). The CogVideoX 5B
-    // I2V bundle was pulled 2026-07-24 with the rest of its lane.
-    expect(i2vBundles.length).toBe(4)
+    // I2V bundle was pulled 2026-07-24 with the rest of its lane. B18 adds
+    // Wan 2.2 A14B I2V Fast.
+    expect(i2vBundles.length).toBe(5)
     const i2vNames = i2vBundles.map(b => b.name)
     expect(i2vNames.some(n => n.includes('SVD'))).toBe(true)
     expect(i2vNames.some(n => n.includes('FramePack'))).toBe(true)

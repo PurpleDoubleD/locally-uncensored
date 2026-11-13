@@ -11,16 +11,18 @@
 //     as `<image1>`, `<image2>`.
 //   - Qwen-Image-Edit 2509/2511 (TextEncodeQwenImageEditPlus) labels them
 //     "Picture 1: ", "Picture 2: ".
+//   - MiniMax H3 ref2va (MiniMaxH3ReferenceToVideo, B38) asks the prompt for
+//     "<Picture 1>", "<Picture 2>", the tags its node description names.
 // So right before the graph is built, every way a user writes the number of
 // an image that is really there is rewritten to the label the encoder put in
 // front of it. The prompt the user typed, in the history and the gallery,
 // stays as typed.
 
-export type ImageRefStyle = 'qwen21' | 'qwenEditPlus'
+export type ImageRefStyle = 'qwen21' | 'qwenEditPlus' | 'minimaxH3'
 
 /** The label an encoder puts in front of image `n` (1 is the source). */
 export function canonicalImageRef(n: number, style: ImageRefStyle): string {
-  return style === 'qwen21' ? `<image${n}>` : `Picture ${n}`
+  return style === 'qwen21' ? `<image${n}>` : style === 'minimaxH3' ? `<Picture ${n}>` : `Picture ${n}`
 }
 
 // A word that names an image, then the number, in any case:

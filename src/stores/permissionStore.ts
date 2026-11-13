@@ -15,7 +15,7 @@ export type ToolOverrides = Record<string, PermissionLevel>
  * agent code can serve a read-only "chat" scope, an edit-capable "edit"
  * scope, or the full "agent" scope.
  *
- *   chat  → no filesystem-write, no terminal, no image_generate, no workflow
+ *   chat  → no filesystem-write, no terminal, no image_generate, no workflow, no MCP
  *   edit  → filesystem + web only (no shell, no codegen, no comfy)
  *   agent → everything (current default behaviour)
  */
@@ -125,7 +125,7 @@ export const usePermissionStore = create<PermissionState>()(
     {
       name: 'locally-uncensored-permissions',
       storage: safeJSONStorage(),
-      version: 3,
+      version: 4,
       migrate: migratePermissionState,
     }
   )
@@ -176,6 +176,24 @@ export function migratePermissionState(persisted: unknown, version: number): Per
       }
     }
   }
+  // v4 (B12, 28.10.2026): external MCP tools left 'workflow' for a category
+  // of their own. They used to follow the Workflows row, so a user with
+  // Workflows on Auto ran every MCP tool unattended, a shell server included.
+  // Carrying that Auto over would keep exactly the hole this closes, so the
+  // new row starts at Ask First. Only Blocked carries over, globally and per
+  // chat: whoever switched Workflows off also switched MCP tools off and must
+  // not find them back on.
+  if (version < 4) {
+    if (isRecord(globals) && asString(globals.mcp) === undefined) {
+      globals.mcp = globals.workflow === 'blocked' ? 'blocked' : 'confirm'
+    }
+    const perChat = prop(persisted, 'conversationOverrides')
+    if (isRecord(perChat)) {
+      for (const chat of Object.values(perChat)) {
+        if (isRecord(chat) && chat.workflow === 'blocked' && chat.mcp === undefined) chat.mcp = 'blocked'
+      }
+    }
+  }
   // zustand types migrate as returning the FULL store, but a blob only ever
   // carries the partialized slice and `merge` puts the actions back.
   return persisted as PermissionState
@@ -192,7 +210,7 @@ export const MODE_SCOPE_ALLOWED_CATEGORIES: Record<ModeScope, ReadonlyArray<Tool
   // Editing: adds filesystem writes. No shell, no codegen, no ComfyUI.
   edit: ['filesystem', 'web', 'system'],
   // Full agent: everything.
-  agent: ['filesystem', 'terminal', 'desktop', 'web', 'system', 'image', 'video', 'workflow'],
+  agent: ['filesystem', 'terminal', 'desktop', 'web', 'system', 'image', 'video', 'workflow', 'mcp'],
 }
 
 /**

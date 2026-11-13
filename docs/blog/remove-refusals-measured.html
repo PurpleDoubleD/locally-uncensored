@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>We Removed the Refusals from a Model and Measured What It Cost | Locally Uncensored</title>
+<meta name="description" content="Refusals from 39 to 3 of 50, MMLU from 409 to 410 of 1000: what Remove refusals in Locally Uncensored did to Qwen2.5 0.5B, and why a 200 question test showed a loss that was not there.">
+<meta name="keywords" content="remove refusals local model, abliteration benchmark, abliterated model mmlu, does abliteration make models dumber, heretic abliteration, uncensored model quality, jailbreakbench refusals">
+<meta property="og:title" content="We Removed the Refusals from a Model and Measured What It Cost">
+<meta property="og:description" content="Refusals from 39 to 3 of 50, MMLU from 409 to 410 of 1000, and why 200 test questions were not enough.">
+<meta property="og:image" content="https://locallyuncensored.com/blog/img/remove-refusals-result.jpg">
+<meta property="og:url" content="https://locallyuncensored.com/blog/remove-refusals-measured.html">
+<meta property="og:type" content="article">
+<meta property="article:published_time" content="2026-11-05">
+<meta property="article:author" content="PurpleDoubleD">
+<meta property="article:tag" content="Abliteration">
+<meta property="article:tag" content="Benchmark">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="We Removed the Refusals from a Model and Measured What It Cost">
+<meta name="twitter:description" content="Refusals from 39 to 3 of 50, MMLU from 409 to 410 of 1000, and why 200 test questions were not enough.">
+<meta name="twitter:image" content="https://locallyuncensored.com/blog/img/remove-refusals-result.jpg">
+<link rel="canonical" href="https://locallyuncensored.com/blog/remove-refusals-measured.html">
+<meta name="robots" content="index, follow">
+<meta name="theme-color" content="#0a0a0a">
+<link rel="icon" href="../favicon.png">
+<!-- Privacy: No external fonts loaded. Using system fonts. -->
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"BlogPosting","headline":"We Removed the Refusals from a Model and Measured What It Cost","description":"Refusals from 39 to 3 of 50, MMLU from 409 to 410 of 1000: what Remove refusals in Locally Uncensored did to Qwen2.5 0.5B, and why a 200 question test showed a loss that was not there.","image":"https://locallyuncensored.com/blog/img/remove-refusals-result.jpg","datePublished":"2026-11-05","dateModified":"2026-11-05","author":{"@type":"Person","name":"PurpleDoubleD","url":"https://github.com/PurpleDoubleD"},"publisher":{"@type":"Organization","name":"Locally Uncensored","url":"https://locallyuncensored.com/"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://locallyuncensored.com/blog/remove-refusals-measured.html"},"keywords":"remove refusals local model, abliteration benchmark, abliterated model mmlu, does abliteration make models dumber, heretic abliteration, uncensored model quality, jailbreakbench refusals"}
+</script>
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"FAQPage","mainEntity":[{"@type":"Question","name":"Does removing refusals make a model dumber?","acceptedAnswer":{"@type":"Answer","text":"Not measurably in our test. Qwen2.5-0.5B-Instruct answered 409 of 1000 MMLU questions right before and 410 after Remove refusals in Locally Uncensored, while refused JailbreakBench prompts dropped from 39 to 3 of 50. We tested one small model; larger models were not measured the same way."}},{"@type":"Question","name":"Why does Locally Uncensored check with 1000 questions?","acceptedAnswer":{"@type":"Answer","text":"With 200 questions the copy looked 9 answers worse, which counted as a real loss. With 1000 questions, including the same 200, it was 1 answer better. The 200 question result was chance, so the app now asks 1000 and says whether a difference is within chance."}},{"@type":"Question","name":"How long does Remove refusals take?","acceptedAnswer":{"@type":"Answer","text":"On an RTX 3060 the search with 200 trials took 22 minutes for a 0.5B model, plus about a minute to merge and convert and about 80 seconds per check. The first run on a Mac took 32 minutes including downloads. Larger models take longer, and the dialog shows an estimate before you start."}},{"@type":"Question","name":"Is anything uploaded when I remove refusals?","acceptedAnswer":{"@type":"Answer","text":"No. The run happens on your computer with Heretic 1.4.0. The copy is saved next to the original, which stays unchanged, and the questions and answers of the checks are not kept."}}]}
+</script>
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://locallyuncensored.com/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://locallyuncensored.com/blog/"},{"@type":"ListItem","position":3,"name":"We Removed the Refusals from a Model and Measured What It Cost","item":"https://locallyuncensored.com/blog/remove-refusals-measured.html"}]}
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@200;300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/assets/lu.css">
+<script defer src="/assets/lu.js"></script>
+  <script data-goatcounter="https://purple47.goatcounter.com/count" async src="//gc.zgo.at/count.js"></script>
+</head>
+<body>
+<nav class="lu-nav">
+  <a class="lu-nav-brand" href="/" aria-label="Locally Uncensored">
+    <span class="lu-mono" data-mono="nav" data-size="40" aria-hidden="true"></span>
+    <span class="lu-nav-word">Locally <span class="accent">Uncensored</span></span>
+  </a>
+  <div class="lu-nav-links" id="lu-nav-links">
+    <a class="lu-nav-link" href="/">Home</a>
+    <a class="lu-nav-link" href="/pricing/">Pricing</a>
+    <a class="lu-nav-link" href="/blog/">Blog</a>
+    <a class="lu-nav-link" href="/guide/">Guide</a>
+    <a class="lu-nav-link" href="/remote-access/">Remote</a>
+  </div>
+  <div class="lu-nav-right">
+    <a class="lu-nav-icon" href="https://github.com/PurpleDoubleD/locally-uncensored" title="GitHub" aria-label="GitHub"><svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.37.5 0 5.87 0 12.5c0 5.3 3.44 9.8 8.21 11.39.6.11.82-.26.82-.58 0-.29-.01-1.04-.02-2.05-3.34.73-4.04-1.61-4.04-1.61-.55-1.39-1.33-1.76-1.33-1.76-1.09-.75.08-.73.08-.73 1.2.08 1.84 1.24 1.84 1.24 1.07 1.83 2.81 1.3 3.5.99.11-.78.42-1.3.76-1.6-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.13-.3-.54-1.52.11-3.18 0 0 1.01-.32 3.3 1.23a11.5 11.5 0 0 1 6.01 0c2.29-1.55 3.3-1.23 3.3-1.23.65 1.66.24 2.88.12 3.18.77.84 1.23 1.91 1.23 3.22 0 4.61-2.8 5.63-5.48 5.92.43.37.81 1.1.81 2.22 0 1.6-.01 2.9-.01 3.29 0 .32.21.7.82.58A12.01 12.01 0 0 0 24 12.5C24 5.87 18.63.5 12 .5Z"/></svg><span class="lu-nav-badge">3000+&#8202;⭐</span></a>
+    <a class="lu-nav-icon discord" href="https://locallyuncensored.com/discord" target="_blank" rel="noopener" title="Discord" aria-label="Discord"><svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M20.32 4.37A19.8 19.8 0 0 0 15.45 3c-.2.36-.44.85-.6 1.23a18.3 18.3 0 0 0-5.7 0c-.16-.38-.4-.87-.6-1.23a19.7 19.7 0 0 0-4.87 1.37C.55 8.9-.32 13.3.11 17.63a19.9 19.9 0 0 0 6 3.03c.48-.66.9-1.36 1.27-2.1-.7-.26-1.36-.58-1.99-.96.17-.12.33-.25.49-.38a14.2 14.2 0 0 0 12.24 0c.16.13.32.26.49.38-.63.38-1.3.7-2 .96.37.74.8 1.44 1.27 2.1a19.8 19.8 0 0 0 6-3.03c.5-5.03-.85-9.39-3.55-13.26ZM8.02 15c-1.18 0-2.15-1.09-2.15-2.42 0-1.34.95-2.43 2.15-2.43 1.2 0 2.17 1.09 2.15 2.43 0 1.33-.95 2.42-2.15 2.42Zm7.96 0c-1.18 0-2.15-1.09-2.15-2.42 0-1.34.95-2.43 2.15-2.43 1.2 0 2.17 1.09 2.15 2.43 0 1.33-.94 2.42-2.15 2.42Z"/></svg><span class="lu-nav-badge">1500+&#8202;<span style="font-size:0.715em">🟢</span></span></a>
+    <span class="lu-nav-sep"></span>
+    <div class="switch" id="theme-switch" role="button" aria-label="Toggle theme"></div>
+    <a class="he-cta" href="/pricing/" aria-label="LU Cloud plans and what they include"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/></svg>Cloud</a>
+    <a class="lu-nav-dl" href="https://github.com/PurpleDoubleD/locally-uncensored/releases/latest"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m0 0 4-4m-4 4-4-4"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>Download</a>
+    <button type="button" class="lu-nav-toggle" aria-label="Menu"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+  </div>
+</nav>
+<div class="container lu-doc">
+  <div class="breadcrumb"><a href="../">Locally Uncensored</a> / <a href="./">Blog</a> / This Post</div>
+
+  <div class="post-meta">
+    <span class="post-tag">Measurement</span>
+    <span>November 5, 2026</span>
+    <span>&middot;</span>
+    <span>6 min read</span>
+  </div>
+
+
+  <article>
+    <h1>We Removed the Refusals from a Model and Measured What It Cost</h1>
+
+    <p>Since 3.0.8, <a href="https://github.com/PurpleDoubleD/locally-uncensored">Locally Uncensored</a> can make a copy of a local model that refuses fewer requests. The button is called Remove refusals, it runs on your own computer, and the original file stays untouched. The question everyone asks about this kind of tool is the same: does the model get dumber?</p>
+
+    <p>So we measured it, before and after, on the same prompts and the same knowledge test. On the model we tested, refusals dropped from 39 of 50 to 3 of 50, and the knowledge test went from 409 to 410 right answers out of 1000. We also found out that a smaller test would have told us the opposite, and that is why LU now asks 1000 questions.</p>
+
+    <h2>What we ran</h2>
+
+    <ul>
+      <li><strong>Model:</strong> Qwen2.5-0.5B-Instruct (Apache 2.0), the copy saved as Q8_0 like the original.</li>
+      <li><strong>Method:</strong> <a href="https://github.com/p-e-w/heretic">Heretic</a> 1.4.0, the tool LU runs inside, on the setting Balanced, with a damage limit of KL 0.2 and 200 search trials.</li>
+      <li><strong>Machine:</strong> a Windows PC with an RTX 3060, running the same script and settings the app uses, with llama.cpp on Vulkan for the checks. A second run in the app itself on a Mac (Apple Silicon, 48 GB), with 100 trials.</li>
+      <li><strong>Refusals:</strong> 50 prompts from <a href="https://jailbreakbench.github.io/">JailbreakBench</a> that the search never saw, and 50 harmless requests that models often refuse anyway.</li>
+      <li><strong>Knowledge:</strong> 1000 multiple choice questions from MMLU, the same 1000 for both versions.</li>
+    </ul>
+
+    <h2>The numbers</h2>
+
+    <table>
+      <thead>
+        <tr><th></th><th>Original</th><th>Copy</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Refused JailbreakBench prompts</td><td>39 of 50</td><td>3 of 50</td></tr>
+        <tr><td>Refused harmless requests</td><td>15 of 50</td><td>2 of 50</td></tr>
+        <tr><td>Refusals during the search</td><td>91 of 100</td><td>3 of 100</td></tr>
+        <tr><td>MMLU, right answers</td><td>409 of 1000</td><td>410 of 1000</td></tr>
+        <tr><td>Change from the original (KL)</td><td>0</td><td>0.044</td></tr>
+      </tbody>
+    </table>
+
+    <p>Windows PC, RTX 3060, 200 trials. The search took 22 minutes, merging and converting the copy to GGUF about a minute, each check about 80 seconds.</p>
+
+    <p>The Mac run with 100 trials came out close: 40 to 5 refusals on JailbreakBench, 15 to 2 on the harmless set, and 409 to 404 on MMLU. That last difference is within chance, more on that below. The first run on the Mac took 32 minutes, including the download of PyTorch and the weights.</p>
+
+    <figure style="margin:24px 0">
+      <img src="img/remove-refusals-result.jpg" alt="The result card of Remove refusals in Locally Uncensored: refused requests 40 of 50 before and 5 of 50 after, knowledge check 409 and 404 of 1000, within chance" width="1600" height="1000" loading="lazy">
+      <figcaption style="font-size:0.9em;opacity:0.75;margin-top:8px">The result card of the Mac run, as LU shows it after a run.</figcaption>
+    </figure>
+
+    <p>The harmless row matters as much as the first one. A model that refuses to explain how to kill a stuck Python process is not safer, just less useful. The copy refused 2 of those 50 instead of 15.</p>
+
+    <h2>Why 200 questions were not enough</h2>
+
+    <p>Our first knowledge check used 200 MMLU questions. The original got 88 right, the copy 79. That looks like a loss of 4.5 points, and the app would have said so.</p>
+
+    <p>Then we asked 1000 questions. The first 200 were the same ones as before. The result: 409 for the original, 410 for the copy. The other 800 questions made up the difference and more. The 9 lost points came from which 200 questions we happened to ask, not from the model.</p>
+
+    <p>LU now judges the difference like this. It counts the answers that changed between the two versions, in either direction. If the net change is smaller than twice the square root of that count, it calls the result within chance. With 200 questions, 17 answers changed and the net was 9, against a limit of 8.2, so it would have reported a real loss. With 1000 questions, 97 answers changed, the net was +1, and the limit was 19.7. Since 3.0.9 the app asks 1000 questions and shows that verdict on the result card.</p>
+
+    <p>The extra questions cost under a minute per check on a 0.5B model. For a 7B or 8B model we expect 5 to 10 minutes more per check, and the time estimate in the dialog includes it.</p>
+
+    <h2>What this does not show</h2>
+
+    <ul>
+      <li>We tested one small model. A 0.5B model is quick to measure. It says little about how a 27B model reacts, and we have not run one through the full measurement.</li>
+      <li>Refusals are counted by keywords. An answer that dodges the question without the usual phrases counts as answered. The result card says so.</li>
+      <li>MMLU checks knowledge. It does not check writing, role play or code, and a copy can be slightly worse at some of those.</li>
+      <li>The copy answers more requests. It is not smarter, and it does not make anything legal that was not legal before.</li>
+    </ul>
+
+    <p>We do not publish the answers the copy gave to the JailbreakBench prompts. The prompts themselves are public at JailbreakBench, and LU does not keep the questions or answers of a check after it shows the counts.</p>
+
+    <h2>Try it on your own model</h2>
+
+    <ol>
+      <li>Install <a href="https://github.com/PurpleDoubleD/locally-uncensored/releases/latest">Locally Uncensored</a> 3.0.10 and download a chat model as GGUF.</li>
+      <li>Open Models and pick Remove refusals next to the model. LU finds the original weights, shows the license, and plans memory, disk and time before anything is downloaded.</li>
+      <li>Choose how far (Gentle, Balanced or Strong) and how long to search (Quick or Thorough), confirm you are 18 or older, and click Start.</li>
+      <li>When the run is done, the card shows both versions side by side. Keep both, use the copy, or move the copy to the Trash.</li>
+    </ol>
+
+    <p>Everything runs on your computer and nothing is uploaded. If you would rather pick a model that someone has already processed, the <a href="abliterated-models-guide.html">abliterated models guide</a> lists the ones worth downloading.</p>
+
+    <h2>Related</h2>
+
+    <ul>
+      <li><a href="abliterated-models-guide.html">Abliterated models in 2026</a>, what abliteration is and which models to get</li>
+      <li><a href="locally-uncensored-v3-0-9-release.html">Locally Uncensored 3.0.9</a>, everything in the release</li>
+      <li><a href="best-uncensored-ai-models-2026.html">The best uncensored AI models in 2026</a></li>
+    </ul>
+
+  </article>
+
+  <div class="post-footer">
+    <p>Remove refusals runs on your own computer, and the original stays as it is</p>
+    <a href="https://github.com/PurpleDoubleD/locally-uncensored/releases/latest" class="cta-btn" target="_blank">
+      Download the latest version
+    </a>
+    <p style="margin-top:14px;margin-bottom:0">No GPU? LU Cloud runs in a browser, paid from credit packs that start at 15 EUR and need no subscription. <a href="/pricing/">See what it costs</a> or <a href="https://lu-labs.ai/pricing?tab=credits&amp;src=luc-remove-refusals-end" target="_blank" rel="noopener">open LU Cloud</a>.</p>
+  </div>
+</div>
+
+<footer>
+  <div class="footer-row footer-meta"><span>&copy; 2026 &middot; Locally Uncensored &middot; AGPL-3.0</span></div>
+  <div class="footer-row footer-links">
+    <a href="https://locallyuncensored.com/blog/">Blog</a>
+    <a href="https://locallyuncensored.com/guide/">Guide</a>
+    <a href="https://locallyuncensored.com/pricing/">Pricing</a>
+    <a href="https://locallyuncensored.com/cloud/">LU Cloud</a>
+    <a href="https://locallyuncensored.com/uncensored-ai-chat-online/">Uncensored AI chat online</a>
+    <a href="https://locallyuncensored.com/uncensored-ai-image-generator-online/">Image generator online</a>
+    <a href="https://locallyuncensored.com/uncensored-ai-video-generator-online/">Video generator online</a>
+    <a href="https://locallyuncensored.com/alternatives/">Alternatives</a>
+    <a href="https://locallyuncensored.com/is-locally-uncensored-safe/">Is it safe?</a>
+    <a href="https://locallyuncensored.com/remote-access/">Remote access</a>
+    <a href="https://locallyuncensored.com/discord" target="_blank" rel="noopener">Discord</a>
+    <a href="https://github.com/PurpleDoubleD/locally-uncensored">GitHub</a>
+    <a href="https://github.com/PurpleDoubleD/locally-uncensored/discussions">Discussions</a>
+    <a href="https://github.com/PurpleDoubleD/locally-uncensored/issues">Issues</a>
+    <a href="https://reddit.com/user/GroundbreakingMall54">Reddit</a>
+    <a href="https://www.linkedin.com/in/david-drobnitza-locallyuncensored/" rel="me noopener" target="_blank">LinkedIn</a>
+    <a href="https://locallyuncensored.com/privacy/">Privacy</a>
+    <a href="https://locallyuncensored.com/terms/">Terms</a>
+    <a href="https://locallyuncensored.com/impressum/">Impressum</a>
+  </div>
+</footer>
+</body>
+</html>

@@ -315,6 +315,29 @@ export async function hasStoredItem(key: string): Promise<boolean | null> {
   }
 }
 
+/**
+ * Whether `key` holds a value the stores can actually hydrate from: a
+ * non-empty string, read the way hydration reads it. Answers null when the
+ * read failed, so the caller can tell "nothing there" from "could not look".
+ *
+ * perrt, 05.11.2026 (3.0.10): `hasStoredItem` answers yes for a row that is
+ * not a string (count() sees it, getItem hands hydration null for it) and for
+ * a leftover localStorage copy (the FIX-3 "[object Object]" one getItem
+ * refuses). The chat store then hydrated empty while the restore at launch
+ * believed the chats were there and restored nothing. This costs one full read
+ * of the value; the launch check is the one place where being right about
+ * "empty" matters more than that.
+ */
+export async function hasReadableItem(key: string): Promise<boolean | null> {
+  try {
+    const value = await Promise.resolve(idbStorage.getItem(key))
+    if (hasFailedRead(key)) return null
+    return typeof value === 'string' && value.trim() !== ''
+  } catch {
+    return null
+  }
+}
+
 let _persistAsked = false
 function askPersist(): void {
   if (_persistAsked) return

@@ -193,6 +193,9 @@ describe('endpointMap covers every backendCall/invokeMedia site the frontend can
     // has no dev route (it is in the list below), so there is nothing a dev
     // route for its cancel could end.
     'lmstudio_cancel_load',
+    // N1: the LM Studio runtime check before an LFM3 load (api/lmstudio.ts),
+    // inside the same load that has no dev route.
+    'lmstudio_gguf_runtime',
     // The folder of the voice engine and LU's own Python (Discord D2,
     // components/settings/RuntimeFolderSetting.tsx). The row only renders
     // behind isTauri(): the browser build has no voice engine and no Python
@@ -206,6 +209,19 @@ describe('endpointMap covers every backendCall/invokeMedia site the frontend can
     // behind isTauri() for the same reason, the browser build has no files of
     // its own to place.
     'storage_apply', 'storage_cancel', 'storage_plan', 'storage_status',
+    // The inbox of locallyuncensored://open-model links (P9, 3.0.9,
+    // components/models/HfLinkInbox.tsx). Read only behind isTauri(): a link
+    // from the system reaches the desktop app, never the browser build.
+    'hf_link_take',
+    // The chat's HTML preview page (B29, 3.0.9, lib/html-preview-source.ts).
+    // Put up and closed only behind isTauri(): the browser build loads the
+    // page as srcdoc and has no loopback server to serve it from.
+    'html_preview_close', 'html_preview_put',
+    // The tray menu's lines and memory figure (T2, 3.0.9, hooks/useTraySync.ts).
+    // Sent only behind isTauri(): the browser build has no tray.
+    'tray_memory', 'tray_update',
+    // Restore chats from backup (3.0.10): reads store_backup*.json, only behind isTauri().
+    'chat_backup_conversations',
     'exit_app', 'file_read', 'find_orphan_downloads', 'fix_comfyui_cors', 'funnel_ping',
     'get_comfy_gpu_status', 'get_current_time', 'import_local_model', 'install_character_trainer',
     'install_lmstudio', 'install_lmstudio_status', 'install_method', 'install_python',

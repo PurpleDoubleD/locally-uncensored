@@ -15,7 +15,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   serverRoot, v1Root, parseLlamaCppProps, parseModelsListContext,
-  parseKoboldMaxContext, parseLmStudioModel, parseModelRowContext,
+  parseKoboldMaxContext, parseLmStudioModel, parseModelRowContext, parseOllamaShowContext,
 } from '../context-probe'
 
 describe('serverRoot: eine Basis-URL mit und ohne /v1 meint denselben Server', () => {
@@ -177,5 +177,23 @@ describe('LM Studio und die allgemeinen Schluessel', () => {
     expect(parseModelRowContext({ context_length: 16384 }))
       .toEqual({ window: 16384, trained: null })
     expect(parseModelRowContext({ id: 'x' })).toEqual({ window: null, trained: null })
+  })
+})
+
+describe('GH #201: an Ollama emulation that names the length outside model_info', () => {
+  it('reads a plain context_length at the top', () => {
+    expect(parseOllamaShowContext({ model_info: {}, context_length: 262144 })).toBe(262144)
+  })
+  it('reads <arch>.context_length at the top, as a pass-through proxy added it', () => {
+    expect(parseOllamaShowContext({ model_info: {}, 'gemma4.context_length': 262144 })).toBe(262144)
+  })
+  it('reads it from details', () => {
+    expect(parseOllamaShowContext({ details: { context_length: '131072' } })).toBe(131072)
+  })
+  it('model_info still wins, as Ollama fills it', () => {
+    expect(parseOllamaShowContext({ model_info: { 'llama.context_length': 8192 }, context_length: 4096 })).toBe(8192)
+  })
+  it('nothing named stays null', () => {
+    expect(parseOllamaShowContext({ model_info: {}, details: { family: 'gemma4' } })).toBeNull()
   })
 })

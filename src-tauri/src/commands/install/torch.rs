@@ -236,6 +236,89 @@ pub(crate) fn python_version_tuple(python_bin: &str) -> Option<(u32, u32)> {
     parse_version_tuple(String::from_utf8_lossy(&out.stdout).trim())
 }
 
+// ── GH #211: an old pip in front of the PyTorch index ──────────────────────
+
+/// GH #211 (31.10.2026, Windows, a ComfyUI venv on Python 3.10.11):
+/// "PyTorch installation failed … No matching distribution found for
+/// flit_core<4,>=3.11". Python 3.10.11 ships pip 23.0.1. Measured on the Mac
+/// on 01.11.2026 with the same pip: it throws away the typing_extensions
+/// 4.16.0 wheel from download.pytorch.org ("inconsistent Name: expected
+/// 'typing-extensions', but metadata has 'typing_extensions'"), falls back to
+/// the source archive, and building that needs flit_core, which the PyTorch
+/// index does not carry. pip 23.1 fails the same way, pip 24.0 resolves the
+/// whole set. Nothing about the Python itself was wrong, so the "no matching
+/// wheel, press Repair environment" sentence sent the user in a circle: the
+/// rebuild makes a venv with the same old pip.
+pub(crate) const MODERN_PIP_MAJOR: u32 = 24;
+
+/// The major of `python -m pip --version` ("pip 23.0.1 from … (python 3.10)").
+pub(crate) fn pip_major_from_version_line(line: &str) -> Option<u32> {
+    line.trim().strip_prefix("pip ")?.split('.').next()?.trim().parse().ok()
+}
+
+/// Pure: the pip args that lift an old pip before the PyTorch step, or None
+/// when the pip there is new enough or could not be read (an unreadable pip
+/// is left to the PyTorch step, which reports it with its own diagnosis).
+/// The upgrade goes to PyPI, the index pip itself comes from.
+pub(crate) fn pip_upgrade_before_torch_args(pip_version_line: Option<&str>) -> Option<Vec<String>> {
+    let major = pip_major_from_version_line(pip_version_line?)?;
+    if major >= MODERN_PIP_MAJOR {
+        return None;
+    }
+    Some(
+        ["-m", "pip", "install", "--progress-bar", "off", "--no-input", "--upgrade"]
+            .iter()
+            .map(|s| s.to_string())
+            .chain(std::iter::once(format!("pip>={MODERN_PIP_MAJOR}.0")))
+            .collect(),
+    )
+}
+
+/// The venv's pip version line, under the same deadline as every other probe,
+/// or why it could not be read. Asked the way a venv Python starts
+/// ([`super::pip::venv_python_command`]): with a leftover `PYTHONHOME` the
+/// plain `python_command` made the venv Python die here, and the lift fell
+/// out without a line (C31, box test D12).
+pub(crate) fn pip_version_line(python_bin: &str) -> Result<String, String> {
+    let mut cmd = super::pip::venv_python_command(python_bin);
+    cmd.args(["-m", "pip", "--version"]);
+    let out = run_probe_with_timeout(cmd, PYTHON_PROBE_TIMEOUT)
+        .ok_or_else(|| "it did not start or did not answer in time".to_string())?;
+    if !out.status.success() {
+        return Err(crate::commands::trainer::probe_failure_detail(out.status.code(), &String::from_utf8_lossy(&out.stderr)));
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+}
+
+/// Lift an old pip in `python_bin` before PyTorch is installed into it. A
+/// failed upgrade is not fatal: the PyTorch step runs anyway and keeps its
+/// own diagnosis. Returns the line for the install log, None when nothing
+/// had to be done.
+pub(crate) fn lift_old_pip_before_torch(
+    python_bin: &str,
+    install_state: &std::sync::Arc<std::sync::Mutex<crate::state::InstallState>>,
+    cancel: Option<&std::sync::Arc<std::sync::atomic::AtomicBool>>,
+) -> Option<String> {
+    let line = match pip_version_line(python_bin) {
+        Ok(line) => line,
+        Err(why) => return Some(pip_unreadable_line(&why)),
+    };
+    let args = pip_upgrade_before_torch_args(Some(&line))?;
+    let refs: Vec<&str> = args.iter().map(String::as_str).collect();
+    Some(match super::pip::venv_pip_install_streaming_with_retry_cancellable(&refs, python_bin, 2, install_state, cancel) {
+        Ok(()) => format!("Updated pip in this environment ({line}), the one it had cannot read the PyTorch index."),
+        Err(e) if e == "cancelled" => "pip update cancelled.".to_string(),
+        Err(e) => format!("Could not update pip in this environment, trying PyTorch with the one it has. {e}"),
+    })
+}
+
+/// The log line when the pip in an environment could not even be asked for
+/// its version. Until C31 this case returned nothing, so the box log showed
+/// no lift and no reason, and PyTorch then ran with pip 23.
+fn pip_unreadable_line(why: &str) -> String {
+    format!("Could not read the pip version in this environment ({why}), so pip was not updated. Trying PyTorch with the pip it has.")
+}
+
 pub(crate) fn parse_version_tuple(s: &str) -> Option<(u32, u32)> {
     let mut parts = s.split('.');
     let major = parts.next()?.parse().ok()?;
@@ -907,6 +990,29 @@ pub(crate) fn base_for_new_venv(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── GH #211 ────────────────────────────────────────────────────────────
+
+    #[test]
+    fn the_pip_of_python_3_10_11_is_lifted_before_torch() {
+        let line = "pip 23.0.1 from C:\\Users\\User\\ComfyUI\\venv\\lib\\site-packages\\pip (python 3.10)";
+        assert_eq!(pip_major_from_version_line(line), Some(23));
+        let args = pip_upgrade_before_torch_args(Some(line)).expect("pip 23 is lifted");
+        assert_eq!(&args[..3], ["-m", "pip", "install"]);
+        assert!(args.iter().any(|a| a == "--upgrade"));
+        assert_eq!(args.last().map(String::as_str), Some("pip>=24.0"));
+        assert!(!args.iter().any(|a| a.contains("index-url")), "pip comes from PyPI: {args:?}");
+        // 23.1 fails the same way on the Mac.
+        assert!(pip_upgrade_before_torch_args(Some("pip 23.1 from /x (python 3.10)")).is_some());
+    }
+
+    #[test]
+    fn a_pip_that_reads_the_index_is_left_alone() {
+        assert_eq!(pip_upgrade_before_torch_args(Some("pip 24.0 from /x (python 3.12)")), None);
+        assert_eq!(pip_upgrade_before_torch_args(Some("pip 26.0.1 from /x (python 3.13)")), None);
+        assert_eq!(pip_upgrade_before_torch_args(None), None);
+        assert_eq!(pip_upgrade_before_torch_args(Some("No module named pip")), None);
+    }
 
     // ── PyTorch-Kanalwahl (W2-Befund 16.08., comfy_kitchen braucht 2.6+) ─
 
@@ -1632,6 +1738,50 @@ mod tests {
         assert_eq!(common_python_versions([Some(torch.clone()), None]), None);
         assert_eq!(common_python_versions([Some(torch), Some(Default::default())]), None);
         assert_eq!(common_python_versions(Vec::new()), None);
+    }
+
+    // ── C31, box test D12: the lift with a leftover PYTHONHOME ────────────
+
+    #[test]
+    fn the_venv_pip_drops_pythonhome_and_pythonpath_on_windows_only() {
+        let cmd = super::super::pip::venv_python_command("python");
+        let removed = |k: &str| cmd.get_envs().any(|(n, v)| n == k && v.is_none());
+        assert_eq!(removed("PYTHONHOME"), cfg!(target_os = "windows"));
+        assert_eq!(removed("PYTHONPATH"), cfg!(target_os = "windows"));
+    }
+
+    #[test]
+    fn the_pip_lift_asks_and_upgrades_through_the_venv_command() {
+        let src = include_str!("torch.rs");
+        let version = &src[src.find("pub(crate) fn pip_version_line(").unwrap()..];
+        let version = &version[..version.find("\n}\n").unwrap()];
+        assert!(version.contains("venv_python_command(python_bin)"), "the version question");
+        let lift = &src[src.find("pub(crate) fn lift_old_pip_before_torch(").unwrap()..];
+        let lift = &lift[..lift.find("\n}\n").unwrap()];
+        assert!(lift.contains("venv_pip_install_streaming_with_retry_cancellable("), "the upgrade itself");
+        assert!(lift.contains("Err(why) => return Some(pip_unreadable_line(&why))"), "no silent fall-through");
+        let pip = include_str!("pip.rs");
+        let venv = &pip[pip.find("pub(crate) fn venv_python_command(").unwrap()..];
+        assert!(venv[..venv.find("\n}\n").unwrap()].contains("env_remove(\"PYTHONHOME\").env_remove(\"PYTHONPATH\")"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_pip_that_cannot_be_asked_leaves_a_line_with_the_cause() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let fake = dir.path().join("python");
+        std::fs::write(&fake, "#!/bin/sh\necho 'Fatal Python error: init_fs_encoding: failed' >&2\necho '  <no Python frame>' >&2\nexit 1\n").unwrap();
+        std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let state = std::sync::Arc::new(std::sync::Mutex::new(crate::state::InstallState::default()));
+        let line = lift_old_pip_before_torch(&fake.to_string_lossy(), &state, None).expect("a line, not silence");
+        assert_eq!(
+            line,
+            "Could not read the pip version in this environment (exit code 1: Fatal Python error: init_fs_encoding: failed), so pip was not updated. Trying PyTorch with the pip it has."
+        );
+        let gone = dir.path().join("missing");
+        let line = lift_old_pip_before_torch(&gone.to_string_lossy(), &state, None).expect("a line for a missing one too");
+        assert!(line.contains("did not start or did not answer in time"), "{line}");
     }
 
 }

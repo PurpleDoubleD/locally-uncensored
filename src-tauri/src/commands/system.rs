@@ -542,7 +542,214 @@ pub(crate) fn backup_candidates(dir: &std::path::Path) -> Vec<std::path::PathBuf
         paths.push(dir.join(format!("store_backup.{i}.json")));
     }
     paths.push(dir.join("store_backup.prev.json"));
+    // The chat archives (archive_dropped_chats) come after everything else:
+    // each one is a whole backup from before chats left the store, so it is
+    // older than the live file and the ring. Listing them here also keeps the
+    // attachment collector from deleting the images their chats point at.
+    paths.extend(chat_archives(dir));
     paths
+}
+
+/// How many chat archives (`store_backup.chats-<ms>.json`) are kept.
+pub(crate) const CHAT_ARCHIVES_KEPT: usize = 5;
+
+const CHAT_ARCHIVE_PREFIX: &str = "store_backup.chats-";
+
+/// The chat archives in `dir`, newest first. A folder that cannot be listed
+/// has none.
+pub(crate) fn chat_archives(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
+    let Ok(entries) = std::fs::read_dir(dir) else { return Vec::new() };
+    let mut found: Vec<(u128, std::path::PathBuf)> = entries
+        .filter_map(|e| e.ok())
+        .filter_map(|e| {
+            let name = e.file_name().to_string_lossy().into_owned();
+            let stamp = name.strip_prefix(CHAT_ARCHIVE_PREFIX)?.strip_suffix(".json")?.parse::<u128>().ok()?;
+            Some((stamp, e.path()))
+        })
+        .collect();
+    found.sort_by_key(|f| std::cmp::Reverse(f.0));
+    found.into_iter().map(|(_, p)| p).collect()
+}
+
+/// The conversation list inside a backup file's `chat-conversations` value.
+/// None when the file, the value or the list cannot be read.
+fn backup_conversation_list(backup: &str) -> Option<Vec<serde_json::Value>> {
+    let outer: serde_json::Value = serde_json::from_str(backup).ok()?;
+    let chat = outer.get(crate::commands::chat_attachments::CHAT_KEY)?.as_str()?;
+    let mut inner: serde_json::Value = serde_json::from_str(chat).ok()?;
+    match inner.pointer_mut("/state/conversations")?.take() {
+        serde_json::Value::Array(list) => Some(list),
+        _ => None,
+    }
+}
+
+/// The conversation ids in a backup file. None when there is no readable list.
+///
+/// Runs on every backup write, so it reads into typed shapes that skip
+/// everything but the ids instead of building the whole history as a Value.
+fn backup_chat_ids(backup: &str) -> Option<std::collections::HashSet<String>> {
+    #[derive(serde::Deserialize)]
+    struct Outer {
+        #[serde(rename = "chat-conversations")]
+        chat: Option<String>,
+    }
+    #[derive(serde::Deserialize)]
+    struct Blob {
+        state: Option<State>,
+    }
+    #[derive(serde::Deserialize)]
+    struct State {
+        conversations: Option<Vec<Option<Entry>>>,
+    }
+    #[derive(serde::Deserialize)]
+    struct Entry {
+        id: Option<serde_json::Value>,
+    }
+    let outer: Outer = serde_json::from_str(backup).ok()?;
+    let blob: Blob = serde_json::from_str(&outer.chat?).ok()?;
+    let list = blob.state?.conversations?;
+    Some(
+        list.into_iter()
+            .flatten()
+            .filter_map(|c| c.id.and_then(|v| v.as_str().map(str::to_string)))
+            .collect(),
+    )
+}
+
+/// The conversation ids the previous backup had and the one about to replace
+/// it has not.
+///
+/// perrt, Discord 05.11.2026, 3.0.8: the chat store came back empty, the
+/// merge in `merged_backup` kept the chats while the key was missing, and the
+/// moment the store wrote a fresh, nearly empty list the next snapshot carried
+/// a valid value again and replaced the only complete copy. A missing key is
+/// not the only shape of a loss: a list without the old chats is one too.
+///
+/// An incoming snapshot without a chat value answers nothing here, that case
+/// is the merge's (the old value stays in the file). An unreadable previous
+/// list answers nothing as well, there is nothing to compare.
+pub(crate) fn chat_ids_dropped(previous: &str, incoming: &str) -> Vec<String> {
+    let Some(before) = backup_chat_ids(previous) else { return Vec::new() };
+    let incoming_has_chats = serde_json::from_str::<serde_json::Value>(incoming)
+        .ok()
+        .and_then(|v| v.get(crate::commands::chat_attachments::CHAT_KEY).and_then(|c| c.as_str()).map(|s| !s.is_empty()))
+        .unwrap_or(false);
+    if !incoming_has_chats {
+        return Vec::new();
+    }
+    let after = backup_chat_ids(incoming).unwrap_or_default();
+    let mut dropped: Vec<String> = before.difference(&after).cloned().collect();
+    dropped.sort();
+    dropped
+}
+
+/// Keep the previous backup as a chat archive before chats leave it.
+///
+/// Not a judgement on whether the loss was wanted: deleting a chat drops its
+/// id too, and the archive costs one file. When the newest archive already
+/// holds every dropped chat nothing is written, so deleting chats one by one
+/// does not rotate the archives through. At most `CHAT_ARCHIVES_KEPT` stay.
+/// Returns the archive written, if any. Best effort: an archive that cannot be
+/// written must not stop the backup itself.
+pub(crate) fn archive_dropped_chats(
+    dir: &std::path::Path,
+    previous: &str,
+    dropped: &[String],
+    now_ms: u128,
+) -> Option<std::path::PathBuf> {
+    if dropped.is_empty() || previous.is_empty() {
+        return None;
+    }
+    let archives = chat_archives(dir);
+    if let Some(newest) = archives.first() {
+        let held = std::fs::read_to_string(newest).ok().and_then(|raw| backup_chat_ids(&raw));
+        if held.is_some_and(|ids| dropped.iter().all(|id| ids.contains(id))) {
+            return None;
+        }
+    }
+    // A name that is already taken (two writes in the same millisecond) moves
+    // on rather than replacing an archive.
+    let mut stamp = now_ms;
+    let mut path = dir.join(format!("{CHAT_ARCHIVE_PREFIX}{stamp}.json"));
+    while path.exists() {
+        stamp += 1;
+        path = dir.join(format!("{CHAT_ARCHIVE_PREFIX}{stamp}.json"));
+    }
+    let tmp = dir.join("store_backup.chats.tmp");
+    let written = (|| -> std::io::Result<()> {
+        use std::io::Write;
+        let mut file = std::fs::File::create(&tmp)?;
+        file.write_all(previous.as_bytes())?;
+        file.sync_all()?;
+        std::fs::rename(&tmp, &path)
+    })();
+    if let Err(e) = written {
+        tracing::warn!("chat archive could not be written: {}", os_error::english(&e));
+        let _ = std::fs::remove_file(&tmp);
+        return None;
+    }
+    for old in chat_archives(dir).into_iter().skip(CHAT_ARCHIVES_KEPT) {
+        let _ = std::fs::remove_file(old);
+    }
+    Some(path)
+}
+
+/// Every chat in every backup file (the live one, the ring, the file set aside
+/// and the chat archives), one entry per id. Where several files hold the same
+/// chat the copy with the newest `updatedAt` wins, on a tie the one with more
+/// messages.
+pub(crate) fn chats_in_backups(raws: impl IntoIterator<Item = String>) -> Vec<serde_json::Value> {
+    let mut by_id: std::collections::HashMap<String, serde_json::Value> = std::collections::HashMap::new();
+    let rank = |c: &serde_json::Value| {
+        (
+            c.get("updatedAt").and_then(|v| v.as_f64()).unwrap_or(0.0),
+            c.get("messages").and_then(|v| v.as_array()).map(|m| m.len()).unwrap_or(0),
+        )
+    };
+    for raw in raws {
+        for chat in backup_conversation_list(&raw).unwrap_or_default() {
+            let Some(id) = chat.get("id").and_then(|v| v.as_str()).map(str::to_string) else { continue };
+            if !chat.get("messages").is_some_and(|m| m.is_array()) {
+                continue;
+            }
+            let better = match by_id.get(&id) {
+                None => true,
+                Some(held) => {
+                    let (a, b) = (rank(&chat), rank(held));
+                    a.0 > b.0 || (a.0 == b.0 && a.1 > b.1)
+                }
+            };
+            if better {
+                by_id.insert(id, chat);
+            }
+        }
+    }
+    let mut list: Vec<serde_json::Value> = by_id.into_values().collect();
+    let id_of = |c: &serde_json::Value| c.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    list.sort_by(|a, b| {
+        rank(b).0.partial_cmp(&rank(a).0).unwrap_or(std::cmp::Ordering::Equal).then_with(|| id_of(a).cmp(&id_of(b)))
+    });
+    list
+}
+
+/// The chats of every backup file, for "Restore chats from backup" in
+/// Settings and the hint at launch. The WebView decides which of them it is
+/// missing. Inline images are moved into the attachment store here, natively,
+/// like `restore_stores` does, so an old backup never reaches the renderer as
+/// one huge string.
+#[tauri::command]
+pub async fn chat_backup_conversations() -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        let dir = persistent_dir()?;
+        let raws = backup_candidates(&dir).into_iter().filter_map(|p| std::fs::read_to_string(p).ok());
+        let mut list = serde_json::Value::Array(chats_in_backups(raws));
+        if let Ok(attachments) = crate::commands::chat_attachments::attachment_dir() {
+            crate::commands::chat_attachments::externalize_conversations(&mut list, &attachments);
+        }
+        Ok(list.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// A backup is worth restoring from when it parses as a JSON object that still
@@ -645,6 +852,23 @@ pub fn backup_stores(data: String) -> Result<(), String> {
         }
         merged_backup(&previous, &data, &lost)
     };
+
+    // Chats that are about to leave the backup go to an archive first, see
+    // chat_ids_dropped (perrt, 05.11.2026).
+    let dropped = chat_ids_dropped(&previous, &payload);
+    if !dropped.is_empty() {
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis())
+            .unwrap_or(0);
+        if let Some(path) = archive_dropped_chats(&dir, &previous, &dropped, now_ms) {
+            tracing::warn!(
+                "{} chats left the chat store, the previous backup is kept as {}",
+                dropped.len(),
+                path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()
+            );
+        }
+    }
 
     rotate_generations(&dir);
 
@@ -1259,6 +1483,119 @@ mod tests {
         // BACKUP_GENERATIONS is the cap, nothing beyond it is written.
         assert!(!dir.join(format!("store_backup.{}.json", BACKUP_GENERATIONS + 1)).exists());
 
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A backup file in the shape 3.0.8 writes: `chat-conversations` is the
+    /// zustand blob as a string, with `state.conversations`.
+    fn backup_with_chats(ids: &[&str]) -> String {
+        let conversations: Vec<serde_json::Value> = ids
+            .iter()
+            .enumerate()
+            .map(|(i, id)| serde_json::json!({ "id": id, "title": id, "createdAt": 1, "updatedAt": 10 + i, "messages": [] }))
+            .collect();
+        let chat = serde_json::json!({ "state": { "conversations": conversations, "activeConversationId": null } });
+        serde_json::json!({ "__ts": "t", "chat-conversations": chat.to_string(), "chat-settings": "{}" }).to_string()
+    }
+
+    /// perrt, 05.11.2026: the merge kept the chats while the key was missing,
+    /// then the store wrote a fresh list and the next snapshot replaced the
+    /// only complete copy. The previous file now goes to an archive first.
+    #[test]
+    fn a_snapshot_whose_list_lost_chats_archives_the_previous_backup() {
+        let dir = scratch_dir("chat-archive");
+        let previous = backup_with_chats(&["a", "b", "c"]);
+        let incoming = backup_with_chats(&["new"]);
+
+        let dropped = chat_ids_dropped(&previous, &incoming);
+        assert_eq!(dropped, vec!["a", "b", "c"]);
+        // Negative control: the rule that decides the merge sees no loss here,
+        // which is exactly how the chats went.
+        assert!(keys_lost(&previous, &incoming).is_empty());
+
+        let path = archive_dropped_chats(&dir, &previous, &dropped, 1000).expect("archived");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), previous);
+        assert_eq!(chat_archives(&dir), vec![path.clone()]);
+        // And a restore and the attachment collector see it.
+        assert!(backup_candidates(&dir).contains(&path));
+
+        // The same chats dropped again: the newest archive has them, no new file.
+        assert!(archive_dropped_chats(&dir, &previous, &["b".to_string()], 2000).is_none());
+        assert_eq!(chat_archives(&dir).len(), 1);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn no_archive_without_a_dropped_chat() {
+        let previous = backup_with_chats(&["a", "b"]);
+        // Grown, unchanged, or a snapshot without the key (the merge's case).
+        assert!(chat_ids_dropped(&previous, &backup_with_chats(&["a", "b", "c"])).is_empty());
+        assert!(chat_ids_dropped(&previous, &previous).is_empty());
+        assert!(chat_ids_dropped(&previous, r#"{"chat-settings":"{}"}"#).is_empty());
+        // No previous list to compare with.
+        assert!(chat_ids_dropped("", &backup_with_chats(&["a"])).is_empty());
+        assert!(chat_ids_dropped(r#"{"chat-conversations":"garbled"}"#, &backup_with_chats(&[])).is_empty());
+    }
+
+    #[test]
+    fn a_stray_null_in_the_list_does_not_hide_the_loss() {
+        let chat = serde_json::json!({ "state": { "conversations": [null, { "id": "a", "messages": [] }] } });
+        let previous = serde_json::json!({ "chat-conversations": chat.to_string() }).to_string();
+        assert_eq!(chat_ids_dropped(&previous, &backup_with_chats(&[])), vec!["a"]);
+    }
+
+    #[test]
+    fn only_the_newest_five_archives_stay() {
+        let dir = scratch_dir("chat-archive-ring");
+        for i in 0..7u128 {
+            let id = format!("chat{i}");
+            let previous = backup_with_chats(&[id.as_str()]);
+            archive_dropped_chats(&dir, &previous, &[id], 100 + i).expect("archived");
+        }
+        let names: Vec<String> = chat_archives(&dir)
+            .iter()
+            .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(names.len(), CHAT_ARCHIVES_KEPT);
+        assert_eq!(names[0], "store_backup.chats-106.json");
+        assert_eq!(names[4], "store_backup.chats-102.json");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Restore chats from backup: one entry per id across every file, the
+    /// newest copy wins, entries without an id or messages are skipped.
+    #[test]
+    fn chats_in_backups_merges_every_file_by_id() {
+        let live = backup_with_chats(&["new"]);
+        let older = backup_with_chats(&["a", "b"]);
+        let newer_b = serde_json::json!({
+            "chat-conversations": serde_json::json!({ "state": { "conversations": [
+                { "id": "b", "updatedAt": 99, "messages": [{ "id": "m" }] },
+                { "id": "broken" },
+                { "title": "no id", "messages": [] }
+            ] } }).to_string()
+        })
+        .to_string();
+        let list = chats_in_backups(vec![live, older, newer_b, "not json".to_string()]);
+        let ids: Vec<&str> = list.iter().map(|c| c["id"].as_str().unwrap()).collect();
+        assert_eq!(ids, vec!["b", "a", "new"]);
+        assert_eq!(list[0]["updatedAt"], 99);
+    }
+
+    /// perrt's folder after five more hours: the ring holds only the two new
+    /// chats, store_backup.prev.json the old ones. Both come back, side by side.
+    #[test]
+    fn the_file_set_aside_is_read_next_to_an_emptied_ring() {
+        let dir = scratch_dir("rescue-prev");
+        std::fs::write(dir.join("store_backup.json"), backup_with_chats(&["new1", "new2"])).unwrap();
+        for i in 1..=BACKUP_GENERATIONS {
+            std::fs::write(dir.join(format!("store_backup.{i}.json")), backup_with_chats(&["new1"])).unwrap();
+        }
+        std::fs::write(dir.join("store_backup.prev.json"), backup_with_chats(&["old1", "old2", "old3"])).unwrap();
+        let raws = backup_candidates(&dir).into_iter().filter_map(|p| std::fs::read_to_string(p).ok());
+        let mut ids: Vec<String> = chats_in_backups(raws).iter().map(|c| c["id"].as_str().unwrap().to_string()).collect();
+        ids.sort();
+        assert_eq!(ids, vec!["new1", "new2", "old1", "old2", "old3"]);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

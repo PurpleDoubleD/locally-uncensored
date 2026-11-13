@@ -31,7 +31,7 @@ const { useProviderStore } = await import('../../stores/providerStore')
 const { effectiveSendWindow, isPaidProvider, DEFAULT_SEND_WINDOW_TOKENS, WINDOW_SHARE } =
   await import('../send-window')
 const { isLanOpenAiBackend, sendsToALanBackend } = await import('../lan-openai-slot')
-const { chatSendBudget } = await import('../chat-send-budget')
+const { chatSendBudget, chatAnswerReserve } = await import('../chat-send-budget')
 
 const LOCAL_MODEL_WINDOW = 262144
 
@@ -127,7 +127,9 @@ describe('the budget follows it', () => {
       modelWindow: LOCAL_MODEL_WINDOW,
       localBackend: sendsToALanBackend('openai', null),
     })
-    expect(local).toBe(Math.floor(LOCAL_MODEL_WINDOW * WINDOW_SHARE))
+    // GH #201: a conversation on a local server keeps its window less the
+    // answer's room, not 0.8 of it.
+    expect(local).toBe(LOCAL_MODEL_WINDOW - chatAnswerReserve(LOCAL_MODEL_WINDOW))
 
     slotPointsAt('https://api.openai.com/v1', false)
     expect(
@@ -217,7 +219,8 @@ describe('no budget is computed without asking the question', () => {
 
   /**
    * Und was das am Hauptpfad in Tokens ausmacht. Der eigene Server im Netz
-   * stellt keine Rechnung, also gilt dort 0.8 mal das eigene Fenster und nicht
+   * stellt keine Rechnung, also gilt dort das eigene Fenster weniger dem
+   * Platz fuer die Antwort (GH #201, vorher 0.8 mal das Fenster) und nicht
    * die Kostendeckelung fuer bezahlte Anbieter.
    */
   it('a LAN server in the openai slot keeps its own window on the main path', () => {
@@ -228,7 +231,7 @@ describe('no budget is computed without asking the question', () => {
         modelWindow: 262_144,
         localBackend: sendsToALanBackend('openai', null),
       }),
-    ).toBe(209_715)
+    ).toBe(262_144 - 8192)
 
     slotPointsAt('https://api.openai.com/v1', false)
     expect(

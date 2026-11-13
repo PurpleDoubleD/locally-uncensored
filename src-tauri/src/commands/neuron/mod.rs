@@ -1,0 +1,1356 @@
+//! The Neuron tweaker (3.0.9, P11): sliders that push a local model's inner
+//! activity in a direction, live in the chat.
+//!
+//! ── How ────────────────────────────────────────────────────────────────────
+//!
+//! Activation steering with control vectors. A direction per layer is added
+//! to the model's residual stream while it writes; llama-server does that
+//! itself (`--control-vector`). Three kinds of direction:
+//!
+//!   * ready-made sliders (`presets.rs`): example pairs LU ships, turned into
+//!     a direction on the user's own model by `lu-llama-cvector-generator`
+//!     (mean of the activation differences, the pinned llama.cpp's own tool);
+//!   * the user's own slider: their "more like this" / "less like this"
+//!     lines, same tool;
+//!   * SAE features (`sae.rs`): one decoder row of an official sparse
+//!     autoencoder, for the models one exists for.
+//!
+//! Each direction gets its own full strength once, measured (`calib.rs`).
+//! The active sliders are mixed into one file (`cvec.rs`), whose name is a
+//! hash of its content, and the engine is restarted with it. llama-server
+//! cannot change control vectors while it runs (no endpoint for it in
+//! b9949, none in b11960 either), so "live" is a restart of a few seconds.
+//!
+//! ── Files ──────────────────────────────────────────────────────────────────
+//!
+//!   <data>/neuron/models/<model key>/vectors/<id>.gguf + <id>.json
+//!   <data>/neuron/models/<model key>/features/<sae>-<n>.json   (strength)
+//!   <data>/neuron/sae/<sae id>/w_dec.f32, top_tokens.i32
+//!   <data>/neuron/mix/<hash>.gguf            what the engine runs with
+//!   <data>/neuron/active.json                model path → mix
+//!
+//! ── Where it works ─────────────────────────────────────────────────────────
+//!
+//! LU Engine only. Ollama, LM Studio and cloud models are answered by
+//! programs that take no control vector; the panel says so.
+
+pub mod calib;
+pub mod cvec;
+pub mod estimate;
+pub mod model;
+pub mod presets;
+pub mod sae;
+pub mod weights;
+
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
+use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::io::{BufRead, BufReader, Read, Write};
+use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{LazyLock, Mutex};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
+use tauri::Manager;
+
+const GENERATOR: &str = "lu-llama-cvector-generator";
+const PROBE_QUESTION: &str = "Write one sentence about rain.";
+const LOG_LINES: usize = 40;
+/// How the vector tool runs. `-ngl auto`: with a GPU backend (E1, 3.0.9:
+/// the tool comes out of the server build with BACKEND_DL) llama.cpp puts
+/// as many layers on the card as fit, as the engine does when the card was
+/// not measured (GH #156); a fixed 99 would fail on a model the card cannot
+/// hold. The chat engine is stopped first, so the tool has the card alone.
+/// LU only uses `mean`; PCA never runs. 1024 tokens hold the longest pair.
+const TOOL_ARGS: [&str; 6] = ["--method", "mean", "-ngl", "auto", "-c", "1024"];
+/// The speed the vector tool showed on this PC (`estimate`).
+const SPEED_FILE: &str = "tool-speed.json";
+
+// ── paths ─────────────────────────────────────────────────────────────────
+
+pub fn root() -> PathBuf {
+    crate::os_paths::data_dir().join("neuron")
+}
+
+/// A folder name for one model file: the stem, cleaned, and its size, so a
+/// different file under the same name gets its own vectors.
+pub fn model_key(model_path: &str) -> String {
+    let p = Path::new(model_path);
+    let stem: String = p
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_default()
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '.' { c.to_ascii_lowercase() } else { '_' })
+        .take(80)
+        .collect();
+    let size = std::fs::metadata(p).map(|m| m.len()).unwrap_or(0);
+    format!("{stem}-{size:x}")
+}
+
+fn model_dir(root: &Path, model_path: &str) -> PathBuf {
+    root.join("models").join(model_key(model_path))
+}
+
+/// Vector ids are ours ("creative") or made here ("own-…"): letters, digits,
+/// dashes. Anything else is refused, so an id never walks out of its folder.
+pub fn valid_id(id: &str) -> bool {
+    !id.is_empty() && id.len() <= 48 && id.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || (id.starts_with("n-L") && (c == 'L' || c == 'N')))
+}
+
+// ── what is active ────────────────────────────────────────────────────────
+
+static ACTIVE: LazyLock<Mutex<Option<BTreeMap<String, String>>>> = LazyLock::new(|| Mutex::new(None));
+
+fn with_active<T>(f: impl FnOnce(&mut BTreeMap<String, String>) -> T) -> T {
+    let mut guard = ACTIVE.lock().unwrap_or_else(|p| p.into_inner());
+    let map = guard.get_or_insert_with(|| {
+        std::fs::read(root().join("active.json")).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
+    });
+    f(map)
+}
+
+fn save_active(map: &BTreeMap<String, String>) {
+    let dir = root();
+    let _ = std::fs::create_dir_all(&dir);
+    if let Ok(bytes) = serde_json::to_vec_pretty(map) {
+        let tmp = dir.join("active.json.part");
+        if std::fs::write(&tmp, bytes).is_ok() {
+            let _ = std::fs::rename(tmp, dir.join("active.json"));
+        }
+    }
+}
+
+/// Only a mix file LU wrote itself is passed to the engine.
+pub(crate) fn mix_path_is_ours(root: &Path, path: &str) -> bool {
+    let p = Path::new(path);
+    p.parent() == Some(root.join("mix").as_path())
+        && p.extension().is_some_and(|e| e == "gguf")
+        && p.file_stem().is_some_and(|s| s.to_string_lossy().chars().all(|c| c.is_ascii_hexdigit()))
+        && p.is_file()
+}
+
+/// The control vector the engine starts this model with, if any.
+pub(crate) fn control_vector_for(model_path: &str) -> Option<String> {
+    let path = with_active(|m| m.get(model_path).cloned())?;
+    if mix_path_is_ours(&root(), &path) {
+        Some(path)
+    } else {
+        tracing::warn!(target: "neuron", path = %path, "ignoring a control vector outside LU's neuron folder or missing");
+        None
+    }
+}
+
+// ── vectors on disk ───────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VectorMeta {
+    pub id: String,
+    /// preset | own | feature
+    pub kind: String,
+    pub name: String,
+    pub left: String,
+    pub right: String,
+    /// The scale slider +1 stands for (calib.rs).
+    pub unit: f32,
+    pub built_at: u64,
+    #[serde(default)]
+    pub more: Vec<String>,
+    #[serde(default)]
+    pub less: Vec<String>,
+    #[serde(default)]
+    pub feature: Option<usize>,
+    #[serde(default)]
+    pub sae: Option<String>,
+}
+
+fn vectors_dir(root: &Path, model_path: &str) -> PathBuf {
+    model_dir(root, model_path).join("vectors")
+}
+
+fn feature_id(sae: &str, feature: usize) -> String {
+    format!("f-{sae}-{feature}")
+}
+
+pub fn list_vectors(root: &Path, model_path: &str) -> Vec<VectorMeta> {
+    let dir = vectors_dir(root, model_path);
+    let mut out: Vec<VectorMeta> = std::fs::read_dir(&dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter(|e| e.path().extension().is_some_and(|x| x == "json"))
+        .filter_map(|e| std::fs::read(e.path()).ok())
+        .filter_map(|b| serde_json::from_slice::<VectorMeta>(&b).ok())
+        .filter(|m| valid_id(&m.id) && (m.kind == "feature" || dir.join(format!("{}.gguf", m.id)).is_file()))
+        .collect();
+    out.sort_by_key(|m| m.built_at);
+    out
+}
+
+fn save_meta(root: &Path, model_path: &str, meta: &VectorMeta) -> Result<(), String> {
+    let dir = vectors_dir(root, model_path);
+    std::fs::create_dir_all(&dir).map_err(|e| crate::os_error::english(&e))?;
+    let bytes = serde_json::to_vec_pretty(meta).map_err(|e| crate::os_error::english(&e))?;
+    std::fs::write(dir.join(format!("{}.json", meta.id)), bytes).map_err(|e| crate::os_error::english(&e))
+}
+
+/// One slider as the frontend sends it.
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Entry {
+    pub id: String,
+    /// −1 … +1, clamped; a single neuron's dose up to ±`NEURON_MAX_DOSE`.
+    pub strength: f32,
+}
+
+/// Neuron recipes go past 1 (1.5 is shared as "strong"); N2's recipe code
+/// stops at the same 3.
+pub const NEURON_MAX_DOSE: f32 = 3.0;
+
+/// Mixes the sliders into one vector. A slider at 0 is left out, so all at 0
+/// is no vector at all: the engine then starts with exactly the argv it has
+/// without the tweaker, and the answer is the unsteered one.
+pub fn mix(root: &Path, model_path: &str, n_embd: usize, entries: &[Entry]) -> Result<Option<cvec::ControlVector>, String> {
+    let metas: HashMap<String, VectorMeta> = list_vectors(root, model_path).into_iter().map(|m| (m.id.clone(), m)).collect();
+    let mut out = cvec::ControlVector::new(n_embd);
+    let mut any = false;
+    for e in entries {
+        if e.strength == 0.0 || !e.strength.is_finite() {
+            continue;
+        }
+        let meta = metas.get(&e.id).ok_or_else(|| format!("The slider \"{}\" has not been computed for this model yet.", e.id))?;
+        let limit = if meta.kind == "neuron" { NEURON_MAX_DOSE } else { 1.0 };
+        let strength = e.strength.clamp(-limit, limit);
+        let v = match (&meta.sae, meta.feature) {
+            (Some(sae_id), Some(f)) => {
+                let spec = sae::by_id(sae_id).ok_or("Unknown feature set.")?;
+                sae::feature_vector(root, spec, f)?
+            }
+            _ => cvec::read(&vectors_dir(root, model_path).join(format!("{}.gguf", meta.id)))?,
+        };
+        out.add_scaled(&v, strength * meta.unit)?;
+        any = true;
+    }
+    Ok(if any && !out.is_zero() { Some(out) } else { None })
+}
+
+/// Writes the mix under its content hash and returns the path.
+fn write_mix(root: &Path, cv: &cvec::ControlVector, hint: &str, n_layer: usize) -> Result<String, String> {
+    let bytes = cvec::to_bytes(cv, hint, n_layer);
+    let dir = root.join("mix");
+    std::fs::create_dir_all(&dir).map_err(|e| crate::os_error::english(&e))?;
+    let path = dir.join(format!("{}.gguf", cvec::content_tag(&bytes)));
+    if !path.is_file() {
+        let tmp = path.with_extension("part");
+        std::fs::write(&tmp, &bytes).map_err(|e| crate::os_error::english(&e))?;
+        std::fs::rename(&tmp, &path).map_err(|e| crate::os_error::english(&e))?;
+    }
+    Ok(path.to_string_lossy().into_owned())
+}
+
+/// Mix files nothing points at any more. Cheap; run after each apply.
+fn prune_mixes(root: &Path, keep: &BTreeMap<String, String>) {
+    let Ok(dir) = std::fs::read_dir(root.join("mix")) else { return };
+    for e in dir.flatten() {
+        let p = e.path().to_string_lossy().into_owned();
+        if p.ends_with(".gguf") && !keep.values().any(|v| *v == p) {
+            let _ = std::fs::remove_file(e.path());
+        }
+    }
+}
+
+// ── the job ───────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Job {
+    /// idle | running | done | failed | cancelled
+    pub status: String,
+    /// build | feature | download
+    pub kind: String,
+    pub title: String,
+    pub model_path: String,
+    pub phase_label: String,
+    pub step: u64,
+    pub total: u64,
+    pub bytes_done: u64,
+    pub bytes_total: u64,
+    pub rate_bps: u64,
+    pub eta_secs: Option<u64>,
+    pub elapsed_secs: u64,
+    pub result_id: Option<String>,
+    pub error: Option<String>,
+    pub logs: VecDeque<String>,
+    #[serde(skip)]
+    started: Option<Instant>,
+    #[serde(skip)]
+    phase_started: Option<Instant>,
+}
+
+static JOB: LazyLock<Mutex<Job>> = LazyLock::new(|| Mutex::new(Job { status: "idle".into(), ..Default::default() }));
+static CANCEL: AtomicBool = AtomicBool::new(false);
+
+fn with_job<T>(f: impl FnOnce(&mut Job) -> T) -> T {
+    let mut g = JOB.lock().unwrap_or_else(|p| p.into_inner());
+    f(&mut g)
+}
+
+fn log(line: impl Into<String>) {
+    let line = line.into();
+    let line = line.trim_end();
+    if line.is_empty() {
+        return;
+    }
+    tracing::info!(target: "neuron", "{line}");
+    with_job(|j| {
+        j.logs.push_back(line.to_string());
+        while j.logs.len() > LOG_LINES {
+            j.logs.pop_front();
+        }
+    });
+}
+
+fn phase(label: &str, total: u64) {
+    log(format!("· {label}"));
+    with_job(|j| {
+        j.phase_label = label.into();
+        j.step = 0;
+        j.total = total;
+        j.eta_secs = None;
+        j.bytes_done = 0;
+        j.bytes_total = 0;
+        j.rate_bps = 0;
+        j.phase_started = Some(Instant::now());
+    });
+}
+
+fn step(n: u64) {
+    with_job(|j| {
+        j.step = n;
+        if let Some(t0) = j.phase_started {
+            let secs = t0.elapsed().as_secs_f64();
+            if n > 0 && j.total > n {
+                j.eta_secs = Some((secs / n as f64 * (j.total - n) as f64).round() as u64);
+            } else if j.total <= n {
+                j.eta_secs = Some(0);
+            }
+        }
+    });
+}
+
+fn cancelled() -> Result<(), String> {
+    if CANCEL.load(Ordering::SeqCst) {
+        Err("cancelled".into())
+    } else {
+        Ok(())
+    }
+}
+
+fn now_ms() -> u64 {
+    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
+}
+
+fn start_job(kind: &str, title: &str, model_path: &str, work: impl FnOnce() -> Result<String, String> + Send + 'static) -> Result<Value, String> {
+    let busy = with_job(|j| {
+        if j.status == "running" {
+            return true;
+        }
+        *j = Job {
+            status: "running".into(),
+            kind: kind.into(),
+            title: title.into(),
+            model_path: model_path.into(),
+            started: Some(Instant::now()),
+            ..Default::default()
+        };
+        false
+    });
+    if busy {
+        return Err("The Neuron tweaker is already computing something. Wait for it or stop it.".into());
+    }
+    CANCEL.store(false, Ordering::SeqCst);
+    std::thread::spawn(move || {
+        let result = work();
+        with_job(|j| {
+            j.elapsed_secs = j.started.map(|t| t.elapsed().as_secs()).unwrap_or(0);
+            match result {
+                Ok(id) => {
+                    j.status = "done".into();
+                    j.result_id = Some(id);
+                    j.eta_secs = Some(0);
+                }
+                Err(e) if e == "cancelled" => j.status = "cancelled".into(),
+                Err(e) => {
+                    j.status = "failed".into();
+                    j.error = Some(e);
+                }
+            }
+        });
+    });
+    Ok(json!({ "started": true }))
+}
+
+// ── generator and probes ──────────────────────────────────────────────────
+
+fn generator_binary(app: &tauri::AppHandle) -> Option<PathBuf> {
+    crate::commands::engine::resolve_sidecar(app, GENERATOR)
+}
+
+/// "Evaluating prompt[12/40]: ..." → (12, 40)
+pub fn parse_progress(line: &str) -> Option<(u64, u64)> {
+    let rest = line.split("Evaluating prompt[").nth(1)?;
+    let (pair, _) = rest.split_once(']')?;
+    let (a, b) = pair.split_once('/')?;
+    Some((a.trim().parse().ok()?, b.trim().parse().ok()?))
+}
+
+/// One readable sentence for a generator that ended without a direction. Its
+/// own output (a backtrace on an abort) goes to the log, not on the page;
+/// only a missing library is named, since that is what the user can act on.
+/// David, 31.10.2026: a failure always says what helps most. Changed models
+/// (abliterated, merged, …) are where the vector tool fails.
+const ORIGINAL_ADVICE: &str = "The Neuron tweaker works best with original, untweaked models: try the original of this model.";
+
+pub fn tool_failure(stderr: &str) -> String {
+    // LU's patch to the generator says so instead of aborting when a model's
+    // layers do not come out the way it reads them (P11 FEHLER 10).
+    if stderr.contains("LU: unsupported model") {
+        return format!("The vector tool cannot read this model's layers, so ready-made and own sliders do not work on it. {ORIGINAL_ADVICE}");
+    }
+    let missing = stderr.lines().map(str::trim).find(|l| {
+        let low = l.to_lowercase();
+        // Linux's loader says "error while loading shared libraries: x.so";
+        // a bare ".so" would also match backtrace frames, so only that phrase.
+        let names_lib = low.contains(".dll") || low.contains(".dylib") || low.contains("error while loading shared libraries");
+        let says_missing = ["not found", "not loaded", "missing", "cannot", "could not", "no such"].iter().any(|w| low.contains(w));
+        names_lib && says_missing && l.len() < 200
+    });
+    match missing {
+        Some(line) => format!("The vector tool could not start: a library is missing ({line})."),
+        None => format!("The vector tool stopped on this model without a result. {ORIGINAL_ADVICE} Its last output is in the app log (target neuron)."),
+    }
+}
+
+/// What one run of the vector tool printed that LU reads: the layer
+/// lengths of a measuring run (patch 0004), parsed, never the raw lines.
+struct ToolRun {
+    norms: BTreeMap<usize, f32>,
+}
+
+/// Runs the vector tool with `args` (and `env`), shows its progress lines
+/// on the job, stops it on cancel, and turns a failure into one sentence.
+fn run_tool(app: &tauri::AppHandle, args: &[std::ffi::OsString], env: &[(&str, &str)]) -> Result<ToolRun, String> {
+    let binary = generator_binary(app).ok_or("This install of LU is missing its vector tool (lu-llama-cvector-generator). Reinstall LU to bring it back.")?;
+    let mut cmd = Command::new(&binary);
+    cmd.args(args).args(TOOL_ARGS).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    for (k, v) in env {
+        cmd.env(k, v);
+    }
+    crate::commands::engine::prepare_tool_command(app, &mut cmd);
+    log(format!("$ {} …", binary.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default()));
+    let mut child = cmd.spawn().map_err(|e| format!("The vector tool did not start: {}", crate::os_error::english(&e)))?;
+    let stderr = child.stderr.take().map(crate::commands::shell::drain);
+    let stdout = child.stdout.take().ok_or("no output")?;
+    let id = child.id();
+    let watcher = std::thread::spawn(move || {
+        let mut norms = BTreeMap::new();
+        for line in BufReader::new(stdout).lines().map_while(Result::ok) {
+            if let Some((n, total)) = parse_progress(&line) {
+                with_job(|j| j.total = total);
+                step(n.saturating_sub(1));
+            } else if let Some((layer, len)) = parse_norm(&line) {
+                norms.insert(layer, len);
+            }
+        }
+        norms
+    });
+    let status = loop {
+        if CANCEL.load(Ordering::SeqCst) {
+            let _ = child.kill();
+            let _ = child.wait();
+            let _ = watcher.join();
+            return Err("cancelled".into());
+        }
+        if let Some(s) = child.try_wait().map_err(|e| crate::os_error::english(&e))? {
+            break s;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(200));
+    };
+    let norms = watcher.join().unwrap_or_default();
+    tracing::info!(target: "neuron", pid = id, ?status, "vector tool finished");
+    if !status.success() {
+        let why = stderr.map(|(buf, _)| crate::commands::shell::captured_text(&buf)).unwrap_or_default();
+        let tail: Vec<&str> = why.lines().rev().take(12).collect::<Vec<_>>().into_iter().rev().collect();
+        for line in &tail {
+            log(format!("  {line}"));
+        }
+        return Err(tool_failure(&why));
+    }
+    with_job(|j| j.step = j.total);
+    Ok(ToolRun { norms })
+}
+
+/// Runs the generator on the example pairs and returns the direction.
+fn generate(app: &tauri::AppHandle, model_path: &str, plus: &[String], minus: &[String], work: &Path) -> Result<cvec::ControlVector, String> {
+    std::fs::create_dir_all(work).map_err(|e| crate::os_error::english(&e))?;
+    let pos = work.join("more.txt");
+    let neg = work.join("less.txt");
+    let out = work.join("direction.gguf");
+    std::fs::write(&pos, plus.join("\n") + "\n").map_err(|e| crate::os_error::english(&e))?;
+    std::fs::write(&neg, minus.join("\n") + "\n").map_err(|e| crate::os_error::english(&e))?;
+    let _ = std::fs::remove_file(&out);
+    let ran = Instant::now();
+    let args: Vec<std::ffi::OsString> = vec!["-m".into(), model_path.into(), "--positive-file".into(), pos.clone().into(), "--negative-file".into(), neg.clone().into(), "-o".into(), out.clone().into()];
+    run_tool(app, &args, &[])?;
+    if !out.is_file() {
+        return Err(tool_failure(""));
+    }
+    let bytes = std::fs::metadata(model_path).map(|m| m.len()).unwrap_or(0);
+    let key = generator_binary(app).and_then(|b| estimate::tool_key(&b));
+    if let (Some(key), Some(speed)) = (key, estimate::speed_of_run(ran.elapsed().as_secs_f64(), bytes, plus.len())) {
+        estimate::remember(&root().join(SPEED_FILE), &key, speed);
+    }
+    let cv = cvec::read(&out)?;
+    let _ = std::fs::remove_file(&pos);
+    let _ = std::fs::remove_file(&neg);
+    Ok(cv)
+}
+
+// ── single MLP neurons (3.0.9, David 31.10.2026) ──────────────────────────
+//
+// Neuron recipes are shared as `L13N7956-1.0`: block 13, MLP neuron 7956,
+// dose −1. A dose of 1 adds the neuron's write direction (column 7956 of
+// block 13's down projection, made length 1) scaled to the median length of
+// the residual stream after that block. That length is the unit recipes are
+// written in (neuronary / neuron-explorer), so it is measured on the user's
+// own model with a fixed text, once per model, and the slider's +1 is
+// exactly one dose. Nothing from outside is loaded: the direction comes out
+// of the user's GGUF.
+
+/// The text the layer lengths are measured on: plain everyday sentences,
+/// one prompt per line.
+const NORM_TEXT: &[&str] = &[
+    "The river runs past the old mill, where children used to watch the wheel turn on summer afternoons and fish for small silver trout in the shallows.",
+    "To make bread at home you need flour, water, salt and yeast, a warm place for the dough to rise, and a little patience before it goes into the oven.",
+    "The committee met on Tuesday to discuss the budget for next year, and after a long debate the members agreed to spend more on schools and public parks.",
+    "Light from the sun takes about eight minutes to reach the Earth, travelling through the vacuum of space at nearly three hundred thousand kilometres per second.",
+    "She opened the letter slowly, read it twice by the window, and then folded it back into the envelope without saying a word to anyone in the room.",
+    "Most programming languages let you store values in variables, repeat work with loops, and group related steps into functions that can be called again.",
+    "In the mountains the weather changes quickly, so hikers carry warm layers, enough water and a map even when the morning sky looks perfectly clear.",
+    "The museum's new exhibition shows paintings, letters and tools from the eighteenth century, telling the story of a small fishing town on the coast.",
+];
+
+const NORMS_FILE: &str = "layer-norms.json";
+
+/// The id a neuron's slider gets; N2's recipe code builds the same.
+pub fn neuron_id(layer: usize, neuron: u64) -> String {
+    format!("n-L{layer}-N{neuron}")
+}
+
+/// `LU norm <block> <median>` (patch 0004) → (block, median length).
+pub fn parse_norm(line: &str) -> Option<(usize, f32)> {
+    let mut it = line.strip_prefix("LU norm ")?.split_whitespace();
+    let layer = it.next()?.parse().ok()?;
+    let v: f32 = it.next()?.parse().ok()?;
+    (v.is_finite() && v > 0.0).then_some((layer, v))
+}
+
+/// The neuron's write direction as a one-layer control vector of length 1.
+pub fn neuron_vector(column: &[f32], layer: usize, n_embd: usize) -> Result<cvec::ControlVector, String> {
+    if column.len() != n_embd {
+        return Err(format!("The neuron's weights have {} values, the model {n_embd}.", column.len()));
+    }
+    let len = column.iter().map(|x| (*x as f64) * (*x as f64)).sum::<f64>().sqrt();
+    if !(len.is_finite() && len > 0.0) {
+        return Err("This neuron writes nothing (its weights are all zero), so turning it changes nothing.".into());
+    }
+    let mut cv = cvec::ControlVector::new(n_embd);
+    cv.layers.insert(layer, column.iter().map(|x| (*x as f64 / len) as f32).collect());
+    Ok(cv)
+}
+
+/// The median residual length after every block of this model, measured once
+/// and kept beside its vectors.
+fn layer_norms(app: &tauri::AppHandle, model_path: &str, work: &Path) -> Result<BTreeMap<usize, f32>, String> {
+    let file = model_dir(&root(), model_path).join(NORMS_FILE);
+    if let Some(known) = std::fs::read(&file).ok().and_then(|b| serde_json::from_slice::<BTreeMap<usize, f32>>(&b).ok()).filter(|m| !m.is_empty()) {
+        return Ok(known);
+    }
+    free_the_model(app);
+    phase("Measuring the model's layers", NORM_TEXT.len() as u64);
+    std::fs::create_dir_all(work).map_err(|e| crate::os_error::english(&e))?;
+    let text = work.join("norm-text.txt");
+    std::fs::write(&text, NORM_TEXT.join("\n") + "\n").map_err(|e| crate::os_error::english(&e))?;
+    let args: Vec<std::ffi::OsString> = vec!["-m".into(), model_path.into(), "--positive-file".into(), text.clone().into(), "--negative-file".into(), text.clone().into(), "-o".into(), work.join("unused.gguf").into()];
+    let run = run_tool(app, &args, &[("LU_LAYER_NORMS", "1")])?;
+    let norms = run.norms;
+    if norms.is_empty() {
+        return Err("This install's vector tool cannot measure layers yet, which single neurons need. Update LU.".into());
+    }
+    let _ = std::fs::remove_file(&text);
+    if let Some(dir) = file.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let _ = std::fs::write(&file, serde_json::to_vec_pretty(&norms).unwrap_or_default());
+    log(format!("  layer lengths measured for {} blocks", norms.len()));
+    Ok(norms)
+}
+
+fn free_port() -> Result<u16, String> {
+    std::net::TcpListener::bind(("127.0.0.1", 0)).and_then(|l| l.local_addr()).map(|a| a.port()).map_err(|e| crate::os_error::english(&e))
+}
+
+/// One answer from an engine on `port`, deterministic: temperature 0 and a
+/// fixed seed.
+/// The request of a check. Thinking is off: a thinking model (Qwen3.5,
+/// Qwen3) spends a short check on reasoning and leaves no answer to judge
+/// (P11 FEHLER 10). Templates without the switch ignore it.
+pub(crate) fn check_request(question: &str, seed: u64, max_tokens: u32) -> Value {
+    json!({
+        "messages": [{ "role": "user", "content": question }],
+        "temperature": 0,
+        "seed": seed,
+        "max_tokens": max_tokens,
+        "stream": false,
+        "chat_template_kwargs": { "enable_thinking": false },
+    })
+}
+
+/// The answer of a check: the content, or the reasoning when a model that
+/// thinks anyway left the content empty.
+pub(crate) fn answer_text(v: &Value) -> String {
+    let msg = &v["choices"][0]["message"];
+    let content = msg["content"].as_str().unwrap_or("");
+    if content.trim().is_empty() {
+        msg["reasoning_content"].as_str().unwrap_or("").to_string()
+    } else {
+        content.to_string()
+    }
+}
+
+pub(crate) fn ask(port: u16, question: &str, seed: u64, max_tokens: u32) -> Result<String, String> {
+    let client = reqwest::blocking::Client::builder().timeout(std::time::Duration::from_secs(300)).build().map_err(|e| crate::os_error::english(&e))?;
+    let body = check_request(question, seed, max_tokens);
+    let req = client.post(format!("http://127.0.0.1:{port}/v1/chat/completions")).json(&body);
+    let resp = crate::commands::engine_key::authorize_blocking(req).send().map_err(|e| format!("The model did not answer: {}", crate::os_error::english(&e)))?;
+    if !resp.status().is_success() {
+        return Err(format!("The model answered with HTTP {}.", resp.status()));
+    }
+    let v: Value = resp.json().map_err(|e| crate::os_error::english(&e))?;
+    Ok(answer_text(&v))
+}
+
+/// What one check answer means for calibration: `Some(text)` to judge,
+/// `None` when the server could not even return the answer (HTTP 5xx on a
+/// garbled output), which is a broken answer. A server that did not answer at
+/// all stays an error.
+pub(crate) fn check_outcome(answer: Result<String, String>) -> Result<Option<String>, String> {
+    match answer {
+        Ok(text) => Ok(Some(text)),
+        Err(e) if e.starts_with("The model answered with HTTP 5") => Ok(None),
+        Err(e) => Err(e),
+    }
+}
+
+/// The measured full strength of `cv` (calib.rs), probing a private engine
+/// per scale. `both_signs`: a slider goes both ways, a feature only up.
+fn calibrate(app: &tauri::AppHandle, model_path: &str, facts: &model::ModelFacts, cv: &cvec::ControlVector, start: f32, both_signs: bool, work: &Path) -> Result<f32, String> {
+    phase("Finding the strongest setting that still reads well", 12);
+    let mut tries = 0u64;
+    let probe_file = work.join("probe.gguf");
+    let mut probe = |scale: f32| -> Result<bool, String> {
+        cancelled()?;
+        let signs: &[f32] = if both_signs { &[1.0, -1.0] } else { &[1.0] };
+        for sign in signs {
+            let mut scaled = cvec::ControlVector::new(cv.n_embd);
+            scaled.add_scaled(cv, scale * sign)?;
+            cvec::write(&probe_file, &scaled, &facts.arch, facts.n_layer)?;
+            let port = free_port()?;
+            let extra = vec!["--control-vector".to_string(), probe_file.to_string_lossy().into_owned()];
+            let mut child = crate::commands::engine::spawn_private_server_with(app, model_path, port, 1024, &extra)?;
+            let answer = ask(port, PROBE_QUESTION, 42, 60);
+            let _ = child.kill();
+            let _ = child.wait();
+            let (ok, shown) = match check_outcome(answer)? {
+                Some(answer) => (calib::coherent(&answer), answer.chars().take(90).collect::<String>().replace('\n', " ")),
+                None => (false, "(the engine could not return this answer)".to_string()),
+            };
+            log(format!("  {:+.3}: {} — {}", scale * sign, if ok { "reads well" } else { "breaks" }, shown));
+            tries += 1;
+            step(tries.min(11));
+            if !ok {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    };
+    let unit = calib::find_unit(start, &mut probe).map_err(|e| format!("{e} {ORIGINAL_ADVICE}"))?;
+    let _ = std::fs::remove_file(&probe_file);
+    log(format!("  full strength = {unit:.3}"));
+    Ok(unit)
+}
+
+/// The chat engine and the tool would hold the model twice. Stop the engine
+/// first; the next chat message (or the apply after the job) brings it back.
+fn free_the_model(app: &tauri::AppHandle) {
+    let state = app.state::<crate::state::AppState>();
+    if crate::commands::engine::stop_engine_on_request(&state) {
+        log("Paused the chat engine while LU computes.");
+    }
+}
+
+// ── commands ──────────────────────────────────────────────────────────────
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BuildArgs {
+    pub model_path: String,
+    /// A preset id, or absent for an own slider.
+    pub preset: Option<String>,
+    pub name: Option<String>,
+    #[serde(default)]
+    pub more: Vec<String>,
+    #[serde(default)]
+    pub less: Vec<String>,
+    /// To recompute an own slider under its id.
+    pub id: Option<String>,
+}
+
+fn own_id(name: &str) -> String {
+    let base: String = name
+        .to_lowercase()
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect::<String>()
+        .split('-')
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>()
+        .join("-");
+    let base: String = base.chars().take(24).collect();
+    let tag = format!("{:x}", now_ms() % 0xfffff);
+    if base.is_empty() { format!("own-{tag}") } else { format!("own-{base}-{tag}") }
+}
+
+/// The time range for a ready-made slider (the largest set of pairs) and for
+/// an own one, said before either starts.
+pub fn build_estimates(model_bytes: u64, template: model::Template, measured: Option<f64>) -> (estimate::Estimate, estimate::Estimate) {
+    let preset_pairs = presets::PRESETS.iter().map(|p| presets::pairs(p, template).0.len()).max().unwrap_or(0);
+    let own_pairs = presets::custom_pairs(&["a".into()], &["b".into()], template).map(|(p, _)| p.len()).unwrap_or(0);
+    (estimate::estimate(model_bytes, preset_pairs, measured), estimate::estimate(model_bytes, own_pairs, measured))
+}
+
+#[tauri::command]
+pub fn neuron_presets() -> Value {
+    json!(presets::PRESETS.iter().map(|p| json!({ "id": p.id, "left": p.left, "right": p.right })).collect::<Vec<_>>())
+}
+
+#[tauri::command]
+pub async fn neuron_info(app: tauri::AppHandle, model_path: String) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let facts = model::facts(&model_path)?;
+        let root = root();
+        let (band_start, band_end) = cvec::band_for(facts.n_layer);
+        let lower_name = facts.name.to_lowercase();
+        let instruct = lower_name.contains("-it") || lower_name.contains(" it") || lower_name.contains("instruct");
+        let sae = sae::for_model(&facts).map(|s| {
+            json!({
+                "id": s.id, "title": s.title, "license": s.license, "layer": s.layer, "width": s.width,
+                "bytes": s.bytes(), "downloaded": sae::is_downloaded(&root, s),
+                "source": format!("https://huggingface.co/{}/tree/{}/{}", s.repo, s.revision, s.folder),
+                "instruct": instruct,
+            })
+        });
+        let active = control_vector_for(&model_path);
+        let measured = generator_binary(&app).and_then(|b| estimate::tool_key(&b)).and_then(|k| estimate::remembered(&root.join(SPEED_FILE), &k));
+        let bytes = std::fs::metadata(&model_path).map(|m| m.len()).unwrap_or(0);
+        let (build_estimate, own_estimate) = build_estimates(bytes, facts.template, measured);
+        let n_ff = weights::neurons_per_layer(&model_path);
+        Ok(json!({
+            "facts": facts,
+            "modelKey": model_key(&model_path),
+            "generator": generator_binary(&app).is_some(),
+            "band": [band_start, band_end],
+            "vectors": list_vectors(&root, &model_path),
+            "sae": sae,
+            "activeMix": active,
+            "mlpNeurons": n_ff.is_some(),
+            "nFf": n_ff,
+            "buildEstimate": build_estimate,
+            "ownEstimate": own_estimate,
+        }))
+    })
+    .await
+    .map_err(|e| crate::os_error::english(&e))?
+}
+
+#[tauri::command]
+pub fn neuron_build(app: tauri::AppHandle, args: BuildArgs) -> Result<Value, String> {
+    let facts = model::facts(&args.model_path)?;
+    if generator_binary(&app).is_none() {
+        return Err("This install of LU is missing its vector tool (lu-llama-cvector-generator). Reinstall LU to bring it back. Feature sliders still work where the model has an SAE.".into());
+    }
+    let (id, kind, name, left, right, plus, minus) = match &args.preset {
+        Some(pid) => {
+            let p = presets::find(pid).ok_or("Unknown slider.")?;
+            let (plus, minus) = presets::pairs(p, facts.template);
+            (p.id.to_string(), "preset", format!("{} ↔ {}", p.left, p.right), p.left.to_string(), p.right.to_string(), plus, minus)
+        }
+        None => {
+            let name = args.name.clone().map(|n| n.trim().chars().take(40).collect::<String>()).filter(|n| !n.is_empty()).unwrap_or_else(|| "My slider".into());
+            let (plus, minus) = presets::custom_pairs(&args.more, &args.less, facts.template)?;
+            let id = match &args.id {
+                Some(id) if valid_id(id) && id.starts_with("own-") => id.clone(),
+                _ => own_id(&name),
+            };
+            (id, "own", name.clone(), "Less like this".into(), name, plus, minus)
+        }
+    };
+    let title = format!("Computing \"{name}\"");
+    let model_path = args.model_path.clone();
+    let (more, less) = (args.more.clone(), args.less.clone());
+    start_job("build", &title, &model_path.clone(), move || {
+        let root = root();
+        let work = model_dir(&root, &model_path).join("work");
+        free_the_model(&app);
+        phase("Reading the examples through the model", plus.len() as u64);
+        let mut cv = generate(&app, &model_path, &plus, &minus, &work)?;
+        let (s, e) = cvec::band_for(facts.n_layer);
+        cv.restrict(s, e);
+        cancelled()?;
+        let unit = calibrate(&app, &model_path, &facts, &cv, 0.25, true, &work)?;
+        let path = vectors_dir(&root, &model_path).join(format!("{id}.gguf"));
+        cvec::write(&path, &cv, &facts.arch, facts.n_layer)?;
+        let meta = VectorMeta {
+            id: id.clone(), kind: kind.into(), name, left, right, unit, built_at: now_ms(),
+            more: if kind == "own" { more } else { Vec::new() },
+            less: if kind == "own" { less } else { Vec::new() },
+            feature: None, sae: None,
+        };
+        save_meta(&root, &model_path, &meta)?;
+        let _ = std::fs::remove_dir_all(&work);
+        log(format!("Saved {id}."));
+        Ok(id)
+    })
+}
+
+#[tauri::command]
+pub fn neuron_feature_add(app: tauri::AppHandle, model_path: String, feature: usize, label: Option<String>) -> Result<Value, String> {
+    let facts = model::facts(&model_path)?;
+    let spec = sae::for_model(&facts).ok_or("There is no official feature set for this model.")?;
+    if !sae::is_downloaded(&root(), spec) {
+        return Err("Download the feature data first.".into());
+    }
+    if feature >= spec.width {
+        return Err("No such feature.".into());
+    }
+    let id = feature_id(if spec.id.contains("270m") { "g270m" } else { "g1b" }, feature);
+    let name = label.map(|l| l.chars().take(60).collect::<String>()).unwrap_or_else(|| format!("Feature #{feature}"));
+    start_job("feature", &format!("Adding feature #{feature}"), &model_path.clone(), move || {
+        let root = root();
+        let work = model_dir(&root, &model_path).join("work");
+        std::fs::create_dir_all(&work).map_err(|e| crate::os_error::english(&e))?;
+        free_the_model(&app);
+        let cv = sae::feature_vector(&root, spec, feature)?;
+        let unit = calibrate(&app, &model_path, &facts, &cv, 50.0, false, &work)?;
+        let meta = VectorMeta {
+            id: id.clone(), kind: "feature".into(), name: format!("#{feature} {name}"), left: "Off".into(), right: "More".into(),
+            unit, built_at: now_ms(), more: Vec::new(), less: Vec::new(), feature: Some(feature), sae: Some(spec.id.into()),
+        };
+        save_meta(&root, &model_path, &meta)?;
+        let _ = std::fs::remove_dir_all(&work);
+        Ok(id)
+    })
+}
+
+#[tauri::command]
+pub fn neuron_mlp_add(app: tauri::AppHandle, model_path: String, layer: usize, neuron: u64) -> Result<Value, String> {
+    let facts = model::facts(&model_path)?;
+    if layer == 0 || layer + 1 >= facts.n_layer {
+        return Err(format!("Single neurons work in layers 1 to {} of this model.", facts.n_layer.saturating_sub(2)));
+    }
+    if generator_binary(&app).is_none() {
+        return Err("This install of LU is missing its vector tool (lu-llama-cvector-generator). Reinstall LU to bring it back.".into());
+    }
+    let id = neuron_id(layer, neuron);
+    start_job("neuron", &format!("Neuron L{layer} N{neuron}"), &model_path.clone(), move || {
+        let root = root();
+        let work = model_dir(&root, &model_path).join("work");
+        phase("Reading the neuron's weights", 1);
+        let (column, _) = weights::neuron_column(&model_path, layer, neuron)?;
+        let cv = neuron_vector(&column, layer, facts.n_embd)?;
+        step(1);
+        cancelled()?;
+        let norms = layer_norms(&app, &model_path, &work)?;
+        let unit = *norms.get(&layer).ok_or_else(|| format!("Layer {layer} was not measured; single neurons work in layers 1 to {}.", facts.n_layer.saturating_sub(2)))?;
+        log(format!("  dose 1 = {unit:.3} (median length after block {layer})"));
+        cvec::write(&vectors_dir(&root, &model_path).join(format!("{id}.gguf")), &cv, &facts.arch, facts.n_layer)?;
+        let meta = VectorMeta {
+            id: id.clone(), kind: "neuron".into(), name: format!("L{layer} N{neuron}"), left: "Less".into(), right: "More".into(),
+            unit, built_at: now_ms(), more: Vec::new(), less: Vec::new(), feature: None, sae: None,
+        };
+        save_meta(&root, &model_path, &meta)?;
+        let _ = std::fs::remove_dir_all(&work);
+        log(format!("Saved {id}."));
+        Ok(id)
+    })
+}
+
+#[tauri::command]
+pub fn neuron_delete(model_path: String, id: String) -> Result<Value, String> {
+    if !valid_id(&id) || !(id.starts_with("own-") || id.starts_with("f-") || id.starts_with("n-L") || presets::find(&id).is_some()) {
+        return Err("Unknown slider.".into());
+    }
+    let dir = vectors_dir(&root(), &model_path);
+    let _ = std::fs::remove_file(dir.join(format!("{id}.gguf")));
+    let _ = std::fs::remove_file(dir.join(format!("{id}.json")));
+    Ok(json!({ "deleted": id }))
+}
+
+/// Byte-range download of one slice with progress and the pinned hash.
+fn fetch_slice(client: &reqwest::blocking::Client, url: &str, slice: &sae::Slice, dest: &Path, done_before: u64, total: u64, t0: Instant) -> Result<(), String> {
+    use sha2::{Digest, Sha256};
+    let part = dest.with_extension("part");
+    let resp = client
+        .get(url)
+        .header(reqwest::header::RANGE, format!("bytes={}-{}", slice.start, slice.end))
+        .send()
+        .map_err(|e| format!("Download failed: {}", crate::os_error::english(&e)))?;
+    if resp.status().as_u16() != 206 {
+        return Err(format!("The server did not send the part LU asked for (HTTP {}).", resp.status()));
+    }
+    let mut resp = resp;
+    let mut f = std::fs::File::create(&part).map_err(|e| crate::os_error::english(&e))?;
+    let mut hasher = Sha256::new();
+    let mut buf = vec![0u8; 256 * 1024];
+    let mut got = 0u64;
+    loop {
+        cancelled()?;
+        let n = resp.read(&mut buf).map_err(|e| format!("Download interrupted: {}", crate::os_error::english(&e)))?;
+        if n == 0 {
+            break;
+        }
+        got += n as u64;
+        if got > slice.len() {
+            return Err("The server sent more than LU asked for.".into());
+        }
+        hasher.update(&buf[..n]);
+        f.write_all(&buf[..n]).map_err(|e| crate::os_error::english(&e))?;
+        with_job(|j| {
+            j.bytes_done = done_before + got;
+            j.bytes_total = total;
+            let secs = t0.elapsed().as_secs_f64().max(0.1);
+            j.rate_bps = (j.bytes_done as f64 / secs) as u64;
+            if let Some(eta) = (total - j.bytes_done).checked_div(j.rate_bps) {
+                j.eta_secs = Some(eta);
+            }
+        });
+    }
+    drop(f);
+    let digest: String = hasher.finalize().iter().map(|b| format!("{b:02x}")).collect();
+    if got != slice.len() || digest != slice.sha256 {
+        let _ = std::fs::remove_file(&part);
+        return Err(format!("The downloaded data does not match the official file (SHA-256 {digest}). Nothing was kept."));
+    }
+    std::fs::rename(&part, dest).map_err(|e| crate::os_error::english(&e))
+}
+
+#[tauri::command]
+pub fn neuron_sae_download(model_path: String) -> Result<Value, String> {
+    let facts = model::facts(&model_path)?;
+    let spec = sae::for_model(&facts).ok_or("There is no official feature set for this model.")?;
+    start_job("download", &format!("Downloading {}", spec.title), &model_path, move || {
+        let root = root();
+        let dir = sae::dir(&root, spec);
+        std::fs::create_dir_all(&dir).map_err(|e| crate::os_error::english(&e))?;
+        phase(&format!("Downloading the feature data ({})", spec.license), 0);
+        let client = reqwest::blocking::Client::builder()
+            .connect_timeout(std::time::Duration::from_secs(20))
+            .timeout(std::time::Duration::from_secs(3600))
+            .user_agent(crate::app_identity::outgoing_agent_for(crate::app_identity::APP_VERSION))
+            .build()
+            .map_err(|e| crate::os_error::english(&e))?;
+        let total = spec.bytes();
+        let t0 = Instant::now();
+        fetch_slice(&client, &spec.url(&spec.w_dec), &spec.w_dec, &dir.join("w_dec.f32"), 0, total, t0)?;
+        fetch_slice(&client, &spec.url(&spec.top_tokens), &spec.top_tokens, &dir.join("top_tokens.i32"), spec.w_dec.len(), total, t0)?;
+        log(format!("Checked against the official SHA-256: {} and {}.", &spec.w_dec.sha256[..12], &spec.top_tokens.sha256[..12]));
+        Ok(spec.id.to_string())
+    })
+}
+
+/// Feature labels per SAE and model file, read once.
+type LabelCache = HashMap<String, std::sync::Arc<Vec<Vec<String>>>>;
+static LABELS: LazyLock<Mutex<LabelCache>> = LazyLock::new(|| Mutex::new(HashMap::new()));
+
+#[tauri::command]
+pub async fn neuron_sae_search(model_path: String, query: String) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let facts = model::facts(&model_path)?;
+        let spec = sae::for_model(&facts).ok_or("There is no official feature set for this model.")?;
+        let root = root();
+        if !sae::is_downloaded(&root, spec) {
+            return Err("Download the feature data first.".to_string());
+        }
+        let key = format!("{}|{}", spec.id, model_key(&model_path));
+        let cached = LABELS.lock().unwrap_or_else(|p| p.into_inner()).get(&key).cloned();
+        let labels = match cached {
+            Some(l) => l,
+            None => {
+                let vocab = model::string_array(Path::new(&model_path), "tokenizer.ggml.tokens")?;
+                let tops = sae::read_i32s(&sae::dir(&root, spec).join("top_tokens.i32"))?;
+                let l = std::sync::Arc::new(sae::labels(&tops, &vocab));
+                LABELS.lock().unwrap_or_else(|p| p.into_inner()).insert(key, l.clone());
+                l
+            }
+        };
+        Ok(json!({ "hits": sae::search(&labels, &query, 30) }))
+    })
+    .await
+    .map_err(|e| crate::os_error::english(&e))?
+}
+
+#[tauri::command]
+pub fn neuron_status() -> Value {
+    let mut j = with_job(|j| {
+        if j.status == "running" {
+            j.elapsed_secs = j.started.map(|t| t.elapsed().as_secs()).unwrap_or(0);
+        }
+        j.clone()
+    });
+    j.logs = j.logs.iter().rev().take(12).rev().cloned().collect();
+    json!(j)
+}
+
+#[tauri::command]
+pub fn neuron_cancel() -> Value {
+    CANCEL.store(true, Ordering::SeqCst);
+    json!({ "cancelling": true })
+}
+
+#[tauri::command]
+pub fn neuron_dismiss() -> Value {
+    with_job(|j| {
+        if j.status != "running" {
+            *j = Job { status: "idle".into(), ..Default::default() };
+        }
+    });
+    json!({ "ok": true })
+}
+
+fn engine_holds(app: &tauri::AppHandle, model_path: &str) -> bool {
+    let state = app.state::<crate::state::AppState>();
+    let guard = state.bundled_engine.lock().unwrap_or_else(|p| p.into_inner());
+    guard.as_ref().is_some_and(|e| e.model_path == model_path)
+}
+
+fn set_active(model_path: &str, mix: Option<String>, persist: bool) {
+    with_active(|m| {
+        match mix {
+            Some(p) => m.insert(model_path.to_string(), p),
+            None => m.remove(model_path),
+        };
+        if persist {
+            save_active(m);
+            prune_mixes(&root(), m);
+        }
+    });
+}
+
+fn restart(app: &tauri::AppHandle, model_path: &str, tuning: Option<crate::commands::engine::EngineTuning>) -> Result<Value, String> {
+    let state = app.state::<crate::state::AppState>();
+    crate::commands::engine::start_bundled_engine_blocking(app, &state, model_path.to_string(), tuning, None)
+}
+
+/// Sets the sliders for a model and, when the engine runs that model,
+/// restarts it with them. `tuning` is the user's engine tuning, the same the
+/// chat's own starts pass.
+#[tauri::command]
+pub async fn neuron_apply(app: tauri::AppHandle, model_path: String, entries: Vec<Entry>, tuning: Option<crate::commands::engine::EngineTuning>) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let facts = model::facts(&model_path)?;
+        let root = root();
+        let mixed = mix(&root, &model_path, facts.n_embd, &entries)?;
+        let path = match &mixed {
+            Some(cv) => Some(write_mix(&root, cv, &facts.arch, facts.n_layer)?),
+            None => None,
+        };
+        set_active(&model_path, path.clone(), true);
+        let load: f32 = entries.iter().map(|e| e.strength.clamp(-1.0, 1.0).abs()).sum();
+        let mut out = json!({ "mix": path, "restarted": false, "load": load });
+        if engine_holds(&app, &model_path) {
+            let started = restart(&app, &model_path, tuning)?;
+            out["restarted"] = json!(started["status"] != "already_running");
+            out["port"] = started["port"].clone();
+        }
+        tracing::info!(target: "neuron", model = %model_path, sliders = entries.len(), mix = ?path, "sliders applied");
+        Ok(out)
+    })
+    .await
+    .map_err(|e| crate::os_error::english(&e))?
+}
+
+/// The same question to the same model with the sliders off and on, side by
+/// side: temperature 0 and a fixed seed, so a difference is the sliders'.
+/// The engine is left with the sliders on (what the user set).
+#[tauri::command]
+pub async fn neuron_compare(
+    app: tauri::AppHandle,
+    model_path: String,
+    question: String,
+    seed: Option<u64>,
+    entries: Vec<Entry>,
+    tuning: Option<crate::commands::engine::EngineTuning>,
+) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let question: String = question.trim().chars().take(2000).collect();
+        if question.is_empty() {
+            return Err("Type a question to compare.".to_string());
+        }
+        let seed = seed.unwrap_or(42);
+        let facts = model::facts(&model_path)?;
+        let root = root();
+        let mixed = mix(&root, &model_path, facts.n_embd, &entries)?;
+        let on = match &mixed {
+            Some(cv) => Some(write_mix(&root, cv, &facts.arch, facts.n_layer)?),
+            None => None,
+        };
+        set_active(&model_path, None, false);
+        let started = restart(&app, &model_path, tuning.clone())?;
+        let port = started["port"].as_u64().unwrap_or(8127) as u16;
+        let before = ask(port, &question, seed, 220);
+        set_active(&model_path, on.clone(), true);
+        let before = before?;
+        let started = restart(&app, &model_path, tuning)?;
+        let port = started["port"].as_u64().unwrap_or(8127) as u16;
+        let after = ask(port, &question, seed, 220)?;
+        Ok(json!({ "before": before, "after": after, "seed": seed, "steered": on.is_some(), "same": before == after }))
+    })
+    .await
+    .map_err(|e| crate::os_error::english(&e))?
+}
+
+#[cfg(test)]
+mod tests {
+    /// T1 (3.0.9): an abort put the raw backtrace on the page.
+    #[test]
+    fn a_tool_failure_reads_as_one_sentence() {
+        let abort = "ggml/src/ggml.c:1234: GGML_ASSERT(x) failed\nSee: https://github.com/ggml-org/llama.cpp/pull/17869\n0 lu-llama-cvector-generator 0x0000000100b14358 ggml_print_backtrace + 276\n1 libggml-base.dylib 0x0000000100c01234 ggml_abort + 160";
+        let msg = super::tool_failure(abort);
+        assert!(!msg.contains("0x") && !msg.contains("github") && msg.contains("app log"), "{msg}");
+        let dll = super::tool_failure("error while loading: llama-common.dll was not found");
+        assert!(dll.contains("llama-common.dll"), "{dll}");
+        let dylib = super::tool_failure("dyld: Library not loaded: @rpath/libllama.dylib");
+        assert!(dylib.contains("libllama.dylib"), "{dylib}");
+        let so = super::tool_failure("lu-llama-cvector-generator: error while loading shared libraries: libllama-common.so: cannot open shared object file: No such file or directory");
+        assert!(so.contains("libllama-common.so"), "{so}");
+        let frame = super::tool_failure("2 libggml-base.so 0x00007f0000001234 ggml_abort + 160 (no such frame info)");
+        assert!(frame.contains("app log"), "{frame}");
+    }
+
+    /// P11 FEHLER 10, second half: Qwen3.5 thinks first, so a 60-token check
+    /// answer was all reasoning and `content` empty, and every strength
+    /// counted as broken ("Even a small push breaks this model's answers").
+    #[test]
+    fn a_check_asks_without_thinking_and_reads_the_reasoning_when_content_is_empty() {
+        let body = super::check_request("Hi?", 42, 60);
+        assert_eq!(body["chat_template_kwargs"]["enable_thinking"], serde_json::json!(false));
+        assert_eq!(body["max_tokens"], serde_json::json!(60));
+        let thinking = serde_json::json!({ "choices": [{ "message": { "content": "", "reasoning_content": "The sky is blue because of Rayleigh scattering." } }] });
+        assert_eq!(super::answer_text(&thinking), "The sky is blue because of Rayleigh scattering.");
+        let plain = serde_json::json!({ "choices": [{ "message": { "content": "Blue.", "reasoning_content": "hm" } }] });
+        assert_eq!(super::answer_text(&plain), "Blue.");
+    }
+
+    /// P11 FEHLER 10, third step (Mac, David's model): at +4.0 the answer
+    /// was so garbled that llama-server could not parse it and said HTTP 500
+    /// ("does not match the expected peg-native format"). That is a broken
+    /// answer, not a broken job: up to ±2.0 everything had read well.
+    #[test]
+    fn a_server_error_on_a_check_counts_as_broken() {
+        let garbled = super::check_outcome(Err("The model answered with HTTP 500 Internal Server Error.".into()));
+        assert_eq!(garbled, Ok(None));
+        let fine = super::check_outcome(Ok("Rain is amazing!".into()));
+        assert_eq!(fine, Ok(Some("Rain is amazing!".to_string())));
+        // A server that never answered is still a failure of the job.
+        assert!(super::check_outcome(Err("The model did not answer: connection refused".into())).is_err());
+    }
+
+    /// P11 FEHLER 10: a model the patched generator cannot read is named as
+    /// such, not as a tool that "stopped without a result".
+    #[test]
+    fn a_model_the_tool_cannot_read_is_said_plainly() {
+        let msg = super::tool_failure("llama_print_build_info: build = 1 (049326a)\nLU: unsupported model: 32 layer outputs for 31 blocks\n");
+        assert!(msg.contains("cannot read this model's layers"), "{msg}");
+        assert!(!msg.contains("without a result"), "{msg}");
+        // David, 31.10.2026: every failure says what helps most.
+        for m in [msg, super::tool_failure("GGML_ASSERT(x) failed")] {
+            assert!(m.contains("works best with original, untweaked models"), "{m}");
+        }
+    }
+
+    use super::*;
+
+    #[test]
+    fn the_time_before_computing_covers_a_ready_made_and_an_own_slider() {
+        // I1 on the box: LFM3 1.7B, a ready-made slider, 31 s with E1's
+        // fast tool. An own slider has half the pairs.
+        let (preset, own) = build_estimates(1_099_627_808, super::model::Template::ChatMl, Some(estimate::SHIPPED_TOOL_CPU));
+        assert!(preset.low_secs <= 31 && preset.high_secs >= 31, "{preset:?}");
+        assert!(own.high_secs < preset.high_secs && own.low_secs < preset.low_secs, "{own:?}");
+        assert!(preset.measured);
+    }
+
+    #[test]
+    fn the_tool_lets_llama_cpp_fit_the_layers_to_the_card() {
+        let ngl = TOOL_ARGS.windows(2).find(|w| w[0] == "-ngl").map(|w| w[1]);
+        assert_eq!(ngl, Some("auto"));
+        assert!(TOOL_ARGS.windows(2).any(|w| w == ["--method", "mean"]));
+    }
+
+    #[test]
+    fn progress_lines_of_the_generator_parse() {
+        assert_eq!(parse_progress("Evaluating prompt[12/40]: \"a\" - \"b\" (31 tokens)"), Some((12, 40)));
+        assert_eq!(parse_progress("n_total_tokens: 2000"), None);
+        assert_eq!(parse_progress("Evaluating prompt[x/40]"), None);
+    }
+
+    #[test]
+    fn ids_cannot_leave_their_folder() {
+        assert!(valid_id("creative"));
+        assert!(valid_id("own-pirate-3f2a"));
+        assert!(!valid_id("../x"));
+        assert!(!valid_id("A"));
+        assert!(!valid_id(""));
+        assert!(own_id("Talk like a Pirate!").starts_with("own-talk-like-a-pirate-"));
+        assert!(own_id("!!!").starts_with("own-"));
+        assert!(valid_id(&own_id("Ünïcode name")));
+    }
+
+    #[test]
+    fn only_our_mix_files_reach_the_engine() {
+        let dir = tempfile::tempdir().unwrap();
+        let mix = dir.path().join("mix");
+        std::fs::create_dir_all(&mix).unwrap();
+        let good = mix.join("0123abcd.gguf");
+        std::fs::write(&good, b"x").unwrap();
+        assert!(mix_path_is_ours(dir.path(), &good.to_string_lossy()));
+        let other = dir.path().join("0123abcd.gguf");
+        std::fs::write(&other, b"x").unwrap();
+        assert!(!mix_path_is_ours(dir.path(), &other.to_string_lossy()));
+        assert!(!mix_path_is_ours(dir.path(), &mix.join("evil;rm.gguf").to_string_lossy()));
+        assert!(!mix_path_is_ours(dir.path(), &mix.join("ffff.gguf").to_string_lossy()), "missing file");
+    }
+
+    fn setup_vector(root: &Path, model: &str, id: &str, unit: f32) {
+        let mut cv = cvec::ControlVector::new(4);
+        cv.layers.insert(2, vec![1.0, 0.0, 0.0, 0.0]);
+        cvec::write(&vectors_dir(root, model).join(format!("{id}.gguf")), &cv, "qwen2", 5).unwrap();
+        let meta = VectorMeta {
+            id: id.into(), kind: "preset".into(), name: id.into(), left: "a".into(), right: "b".into(), unit, built_at: 1,
+            more: vec![], less: vec![], feature: None, sae: None,
+        };
+        save_meta(root, model, &meta).unwrap();
+    }
+
+    #[test]
+    fn mix_scales_by_the_measured_unit_and_zero_is_no_vector() {
+        let dir = tempfile::tempdir().unwrap();
+        let model = dir.path().join("m.gguf");
+        std::fs::write(&model, b"model").unwrap();
+        let model = model.to_string_lossy().into_owned();
+        setup_vector(dir.path(), &model, "creative", 0.8);
+        setup_vector(dir.path(), &model, "casual", 2.0);
+        let e = |id: &str, s: f32| Entry { id: id.into(), strength: s };
+        assert!(mix(dir.path(), &model, 4, &[e("creative", 0.0), e("casual", 0.0)]).unwrap().is_none());
+        assert!(mix(dir.path(), &model, 4, &[]).unwrap().is_none());
+        let m = mix(dir.path(), &model, 4, &[e("creative", 0.5), e("casual", -0.25)]).unwrap().unwrap();
+        assert!((m.layers[&2][0] - (0.4 - 0.5)).abs() < 1e-6);
+        // Out of range is clamped, not multiplied.
+        let m = mix(dir.path(), &model, 4, &[e("creative", 7.0)]).unwrap().unwrap();
+        assert!((m.layers[&2][0] - 0.8).abs() < 1e-6);
+        assert!(mix(dir.path(), &model, 4, &[e("missing", 0.5)]).is_err());
+    }
+
+    // Single neurons (David, 31.10.2026, "Ja, in 3.0.9"): a recipe like
+    // `L13N7956-1.0` is block 13, neuron 7956, dose −1, one dose being the
+    // median residual length after that block.
+    #[test]
+    fn a_neuron_slider_is_its_unit_direction_scaled_by_the_dose() {
+        let cv = neuron_vector(&[3.0, 0.0, 4.0, 0.0], 13, 4).unwrap();
+        assert_eq!(cv.layers.keys().copied().collect::<Vec<_>>(), vec![13], "block 13 is direction.13");
+        assert_eq!(cv.layers[&13], vec![0.6, 0.0, 0.8, 0.0]);
+        assert!(neuron_vector(&[0.0; 4], 13, 4).is_err());
+        assert!(neuron_vector(&[1.0; 3], 13, 4).is_err());
+
+        let dir = tempfile::tempdir().unwrap();
+        let model = dir.path().join("m.gguf");
+        std::fs::write(&model, b"model").unwrap();
+        let model = model.to_string_lossy().into_owned();
+        let id = neuron_id(2, 7956);
+        assert_eq!(id, "n-L2-N7956", "the id N2's recipe code builds");
+        assert!(valid_id(&id));
+        assert!(!valid_id("n-L2-N79/56") && !valid_id("Own-x"));
+        setup_vector(dir.path(), &model, &id, 24.8);
+        let mut meta = list_vectors(dir.path(), &model).pop().unwrap();
+        meta.kind = "neuron".into();
+        save_meta(dir.path(), &model, &meta).unwrap();
+        let e = |s: f32| Entry { id: id.clone(), strength: s };
+        let m = mix(dir.path(), &model, 4, &[e(-1.0)]).unwrap().unwrap();
+        assert!((m.layers[&2][0] + 24.8).abs() < 1e-4, "dose −1 = −p50 along the neuron");
+        // Doses past 1 are recipes' "strong"; they stop at 3, not at 1.
+        let m = mix(dir.path(), &model, 4, &[e(1.5)]).unwrap().unwrap();
+        assert!((m.layers[&2][0] - 1.5 * 24.8).abs() < 1e-3);
+        let m = mix(dir.path(), &model, 4, &[e(9.0)]).unwrap().unwrap();
+        assert!((m.layers[&2][0] - 3.0 * 24.8).abs() < 1e-3);
+    }
+
+    #[test]
+    fn the_tool_s_layer_lengths_are_read() {
+        assert_eq!(parse_norm("LU norm 22 24.8"), Some((22, 24.8)));
+        assert_eq!(parse_norm("LU norm 0 6.9"), Some((0, 6.9)));
+        for bad in ["LU norm x 1", "LU norm 3 nan", "LU norm 4 -1", "LU other", "Evaluating prompt[1/8]"] {
+            assert_eq!(parse_norm(bad), None, "{bad}");
+        }
+    }
+
+    #[test]
+    fn the_same_sliders_give_the_same_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut cv = cvec::ControlVector::new(4);
+        cv.layers.insert(1, vec![0.5; 4]);
+        let a = write_mix(dir.path(), &cv, "x", 3).unwrap();
+        let b = write_mix(dir.path(), &cv, "x", 3).unwrap();
+        assert_eq!(a, b);
+        cv.layers.insert(1, vec![0.6; 4]);
+        assert_ne!(a, write_mix(dir.path(), &cv, "x", 3).unwrap());
+        assert!(mix_path_is_ours(dir.path(), &a));
+    }
+
+    #[test]
+    fn the_engine_argv_carries_the_mix_and_only_then() {
+        use crate::commands::engine::{server_args, EngineTuning};
+        let plain = server_args("/m.gguf", &EngineTuning::default(), 8127, None, None, None, false);
+        assert!(!plain.iter().any(|a| a == "--control-vector"));
+        let tuning = EngineTuning { control_vector: Some("/data/neuron/mix/ab12.gguf".into()), ..EngineTuning::default() };
+        let steered = server_args("/m.gguf", &tuning, 8127, None, None, None, false);
+        let at = steered.iter().position(|a| a == "--control-vector").unwrap();
+        assert_eq!(steered[at + 1], "/data/neuron/mix/ab12.gguf");
+        // A different mix is a different request, so the engine restarts.
+        assert_ne!(plain, steered);
+        // Settings cannot smuggle a path in: the field is never read from JSON.
+        let from_json: EngineTuning = serde_json::from_str(r#"{"controlVector":"/etc/x.gguf","control_vector":"/etc/y.gguf"}"#).unwrap();
+        assert_eq!(from_json.control_vector, None);
+    }
+
+    #[test]
+    fn model_key_separates_files_of_one_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let a = dir.path().join("Qwen 2.5.gguf");
+        std::fs::write(&a, b"12345").unwrap();
+        let k = model_key(&a.to_string_lossy());
+        assert_eq!(k, "qwen_2.5-5");
+        std::fs::write(&a, b"123456").unwrap();
+        assert_ne!(k, model_key(&a.to_string_lossy()));
+    }
+}

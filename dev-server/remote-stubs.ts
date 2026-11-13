@@ -91,15 +91,19 @@ export function registerRemoteStubs(routes: RouteMount): void {
   // and the chat engine that read it.
   // Remove refusals (A14) as well: its runs are Python processes the Rust
   // side starts, reads and stops.
+  // Dictation through an external transcription endpoint (N1) is a Rust
+  // multipart request as well.
   for (const path of [
     '/local-api/local-api-usage', '/local-api/set-download-limit', '/local-api/character-photos', '/local-api/pick-gguf-file',
     '/local-api/list-custom-nodes', '/local-api/remove-custom-node', '/local-api/custom-node-log',
     '/local-api/verify-model-files', '/local-api/verify-model-files-status', '/local-api/verify-model-files-cancel',
-    '/local-api/trash-model-file', '/local-api/set-engine-idle-unload',
+    '/local-api/comfy-model-info',
+    '/local-api/trash-model-file', '/local-api/set-engine-idle-unload', '/local-api/transcribe-external',
     '/local-api/set-gpu-roles', '/local-api/describe-gpu-roles',
     '/local-api/abliterate-plan', '/local-api/abliterate-start', '/local-api/abliterate-status',
     '/local-api/abliterate-cancel', '/local-api/abliterate-dismiss', '/local-api/abliterate-runs',
     '/local-api/abliterate-trash-copy',
+    '/local-api/neuron-presets', '/local-api/neuron-info', '/local-api/neuron-build', '/local-api/neuron-feature-add', '/local-api/neuron-mlp-add', '/local-api/neuron-delete', '/local-api/neuron-sae-download', '/local-api/neuron-sae-search', '/local-api/neuron-status', '/local-api/neuron-cancel', '/local-api/neuron-dismiss', '/local-api/neuron-apply', '/local-api/neuron-compare',
   ]) {
     routes.use(path, (_req, res) => {
       res.writeHead(501, { 'Content-Type': 'application/json' })

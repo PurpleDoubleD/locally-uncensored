@@ -227,3 +227,45 @@ export function enhancerNames(
   if (!where.onMac) return textEncoders
   return where.mlxModel ? macEnhancers : []
 }
+
+/** How long the Qwen enhancer may take on ComfyUI, in minutes, loading
+ *  included (B41, 3.0.9: was 15). The box needs 70 s for a new picture and
+ *  175 s for an edit on a 12 GB card; eight minutes leaves a slower card room
+ *  and no more. Used by the run (api/qwen-enhancer.ts) and said on the line. */
+export const QWEN_ENHANCER_LIMIT_MINUTES = 8
+
+/** What the Qwen enhancer's progress looks like here; the run reports it
+ *  (api/qwen-enhancer.ts `EnhancerProgress`). */
+export type EnhancerPhase =
+  | { phase: 'queued' }
+  | { phase: 'loading' }
+  | { phase: 'reading' }
+  | { phase: 'writing'; tokens: number; max: number; tokensPerSecond: number | null }
+
+/**
+ * The waiting line while the enhancer works (B41, 3.0.9). A user waited 530 s
+ * on "Improving your prompt…" with nothing but the seconds moving. Now the
+ * line says which part is running, and while it writes, how many tokens it
+ * has and how fast it goes: a card that writes one token a second shows it
+ * at once, instead of after minutes. `max` is the limit, not a goal: the
+ * enhancer stops at its own end, usually long before.
+ */
+export function enhancerLine(p: EnhancerPhase, mode: QwenEnhancerMode, limitMinutes = QWEN_ENHANCER_LIMIT_MINUTES): string {
+  switch (p.phase) {
+    case 'queued':
+      return 'Improving your prompt: waiting for ComfyUI…'
+    case 'loading':
+      return 'Improving your prompt: loading the prompt enhancer…'
+    case 'reading':
+      return mode === 'i2i'
+        ? 'Improving your prompt: the enhancer reads your prompt and pictures…'
+        : 'Improving your prompt: the enhancer reads your prompt…'
+    case 'writing': {
+      const rate = p.tokensPerSecond === null ? '' : `, ${p.tokensPerSecond >= 10 ? Math.round(p.tokensPerSecond) : Math.round(p.tokensPerSecond * 10) / 10} tokens/s`
+      const slow = p.tokensPerSecond !== null && p.tokensPerSecond < 3
+        ? ` Slow: the enhancer does not fit on the graphics card next to everything else. LU gives up after ${limitMinutes} min and uses your own prompt.`
+        : ''
+      return `Improving your prompt: ${p.tokens} of up to ${p.max} tokens${rate}…${slow}`
+    }
+  }
+}

@@ -1,4 +1,6 @@
 import { MAX_LOCAL_FRAMES } from '../lib/video-length'
+import { wanSamplingFor, type VideoSpeed } from '../lib/wan-speed'
+import { MAX_LONG_SECONDS, type LongVideoMode } from '../lib/long-video'
 import { create } from 'zustand'
 import { maxTrainImages } from '../lib/train-image-cap'
 import { MAX_STORED_REFERENCES } from '../lib/edit-references'
@@ -8,6 +10,7 @@ import type { FixupPrompt } from '../lib/render-fixups'
 import { persist } from 'zustand/middleware'
 import { safeJSONStorage } from '../lib/storage-quota'
 import { TRAIN_STEPS_DEFAULT, TRAIN_VRAM_PRESET_DEFAULT, isTrainVramPreset, type TrainVramPreset } from '../lib/trainer-presets'
+import { TRAIN_KIND_DEFAULT, isTrainKind, trainPresetsFor, trainStepsDefaultFor, type TrainKind } from '../lib/train-kind'
 import { TRAIN_CAPTION_MAX } from '../lib/train-captions'
 import { isMobile } from '../lib/device-kind'
 import { isRecord } from '../types/json-guards'
@@ -19,7 +22,7 @@ import { cleanFolderName, newFolderId, sanitizeFolders, FOLDER_CAP, type Gallery
  * results, the in-flight flag). Everything else in the blob is a preference.
  */
 const RUNTIME_ONLY_KEYS: readonly string[] = [
-  'backend', 'source', 'mask', 'references', 'caps', 'isGenerating', 'comfyCorsBlocked',
+  'backend', 'source', 'mask', 'references', 'endImage', 'imageReferences', 'caps', 'isGenerating', 'comfyCorsBlocked',
   // A queue of source images from yesterday must never start a run today.
   'batchSources', 'batchRun', 'batchOriginal',
   // Ein gespeicherter Preis von gestern ist eine Luege (siehe partialize
@@ -31,6 +34,8 @@ const RUNTIME_ONLY_KEYS: readonly string[] = [
   'cloudImageCount',
   // The open gallery folder files new results, so it is never carried over.
   'galleryFolderOpen',
+  // The line about trimmed entries belongs to the moment it happened.
+  'galleryNotice',
   // Review A kleiner Punkt 1 (studio-r2): the cloud video length selection,
   // own fields since this bugfix. Session-scratch like source/mask, not a
   // preference worth remembering across restarts.
@@ -42,6 +47,8 @@ const RUNTIME_ONLY_KEYS: readonly string[] = [
   // 3.0.8 D28: the captions belong to the staged photos, which are runtime
   // only (blobs); a caption from yesterday has no photo to stand under.
   'trainCaptions',
+  // B18: the clip Extend Video continues is a blob of this session.
+  'extendClip',
 ]
 import type { ModelType, ClassifiedModel } from '../api/comfyui'
 import { MAX_SHOTS, MAX_SHOT_CHARS } from '../lib/ltx-multishot'
@@ -52,6 +59,7 @@ import { classifyModel, hidreamSampling, resolveLocalOpPick } from '../api/comfy
 import type { HiresUpscaleMethod } from '../api/hires-fix'
 import { mlxFollowsMotion, mlxTakesStartImage, mlxTalking, mlxVideoLaneEntry, releaseVideoBlobUrl } from '../api/mlx-video'
 import { isMlxImageHost, type MacUpscaleFactor } from '../api/mlx-image'
+import { QWEN21_TURBO_SAMPLING, isQwenImage21Turbo } from '../lib/render/qwen21-turbo'
 import { mlxMakesMusic } from '../lib/mac-music'
 import { MAC_EDIT_DEAD_SIDE, MAC_EDIT_SIDE_INSTEAD, imageLaneModels, mlxTakesEditImage } from '../lib/image-engines'
 import { STUDIO_MODELS } from '../lib/render/studio-contract'
@@ -59,6 +67,8 @@ import { cloudModelsFor } from './cloudCatalogStore'
 import { createRunModel } from '../lib/render/create-studio'
 import { DEFAULT_UPSCALE_FACTOR, normalizeUpscaleFactor, type UpscaleFactor } from '../lib/local-upscale'
 import { characterLoraFile, isLocalCharacter, type CharacterRef } from '../lib/character-ref'
+import { triggerWordNote, typedTriggerWord } from '../lib/train-trigger'
+import { loraLaneKey, moveLoraPick, sanitizeLoraLanes, switchLoraLane, type LoraPick } from '../lib/render/lora-lanes'
 // ModelType includes: flux, flux2, zimage, sdxl, sd15, wan, hunyuan, unknown
 
 export type ProgressPhase = 'idle' | 'queued' | 'loading-model' | 'loading-clip' | 'loading-vae' | 'sampling' | 'decoding' | 'complete'
@@ -265,6 +275,9 @@ export interface GalleryItem {
   /** What the run left out of the request, e.g. "Skipping LoRA no longer in
    *  models/loras: style". Shown under the result. */
   runNote?: string
+  /** B40 (3.0.9): the LoRAs the run took, with their strengths. Shown in the
+   *  settings of the result (lib/render/run-settings). Unset where none ran. */
+  loras?: { name: string; strength: number }[]
   resolvedVAE?: string
   resolvedCLIP?: string
   /** Self-contained media URL for backends that don't serve files over
@@ -350,6 +363,17 @@ export interface CreateState {
   batchSize: number
   frames: number
   fps: number
+  /** Fast (lightx2v 4 steps) or Quality sampling for the Wan 14B models
+   *  (B18, lib/wan-speed). Other families ignore it. */
+  videoSpeed: VideoSpeed
+  /** A long local clip in seconds (B18, lib/long-video); 0 is one run at the
+   *  Frames slider's length. */
+  longVideoSeconds: number
+  /** Sections (default) or one pass with context windows. */
+  longVideoMode: LongVideoMode
+  /** The clip Extend Video continues, as picked (runtime only, never
+   *  persisted: partialize does not list it). */
+  extendClip: Blob | null
   // Review A kleiner Punkt 1 (studio-r2): the cloud video Length control used
   // to read and write these SAME frames/fps fields, which the local video
   // lane also owns. Picking a cloud length silently rewrote the local
@@ -393,6 +417,9 @@ export interface CreateState {
   trainImages: MediaRef[]
   /** Character-Studio trigger word — the token that summons the character. */
   triggerWord: string
+  /** C7: what the field did to the last typed trigger word (ö to oe, a
+   *  dropped letter), shown under it. Null when nothing was changed. */
+  triggerWordNote: string | null
   /** Local training length (musubi steps). Quality/time tradeoff, persisted. */
   trainSteps: number
   /** 3.0.8 D28: each staged photo's own description (clothes, hair, place),
@@ -402,6 +429,12 @@ export interface CreateState {
   /** 3.0.8 D20: the local trainer's recipe, Normal or Low VRAM. Persisted:
    *  it follows the card, which does not change between sessions. */
   trainVramPreset: TrainVramPreset
+  /** 3.0.9 P8: what the local trainer learns, a character or a style /
+   *  concept / pose (lib/train-kind.ts). Persisted like the steps. */
+  trainKind: TrainKind
+  /** 3.0.9 P8: in style mode, whether the name leads every caption as a
+   *  trigger word. Off: the LoRA works without one. Persisted. */
+  trainStyleTrigger: boolean
   /** The shelf character selected for use-mode generation. Runtime-only. */
   selectedCharacter: CharacterRef | null
   /** Lipsync speech / voice-clone reference audio. Runtime-only (blob). */
@@ -437,6 +470,10 @@ export interface CreateState {
   /** The last strength set for each LoRA file, kept while the LoRA is off, so
    *  ticking it again brings its own value back instead of the default. */
   loraStrengths: Record<string, number>
+  /** B24: the LoRA picks of every task + model the user left, keyed by
+   *  lib/render/lora-lanes `loraLaneKey`. `selectedLoras` is the lane on
+   *  screen; the subscriber at the end of this file swaps them. */
+  loraLanes: Record<string, LoraPick[]>
   selectedVae: string
   clipSkip: number
   growMaskBy: number  // inpaint mask edge feather (VAEEncodeForInpaint grow_mask_by)
@@ -446,6 +483,14 @@ export interface CreateState {
   /** Edit: further reference images after the source, for a model that takes
    *  them (lib/edit-references). Runtime-only like `source`; cleared with it. */
   references: ImageRef[]
+  /** Animate: the picture the clip ends on (B38), for a model that takes
+   *  one (lib/frame-refs, studioReadsEndImage). Runtime-only like `source`;
+   *  cleared with it. */
+  endImage: ImageRef | null
+  /** Image (text to image): reference images for style, pose and camera
+   *  angle (B45), for a model that reads them (lib/frame-refs). Runtime-only,
+   *  kept apart from the Edit references. */
+  imageReferences: ImageRef[]
   /** Several source images, one edit (lib/batch-edit): the files that get the
    *  same run, one after the other. Empty for a single image, else two or more,
    *  and `source` shows the first. Runtime-only like `source`. */
@@ -547,6 +592,8 @@ export interface CreateState {
    *  lands in it, and a folder picked yesterday must not file today's renders
    *  without the user seeing it. */
   galleryFolderOpen: string | null
+  /** Said once when the cap took older unsorted entries (D3b). Runtime only. */
+  galleryNotice: string | null
   promptHistory: string[]
   /** Runtime-only (not persisted): populated by useCreate.fetchModels so the
    * header-level CreateTopControls can render its model dropdown + Lichtschalter
@@ -595,6 +642,10 @@ export interface CreateState {
   setBatchSize: (batchSize: number) => void
   setFrames: (frames: number) => void
   setFps: (fps: number) => void
+  setVideoSpeed: (speed: VideoSpeed) => void
+  setLongVideoSeconds: (seconds: number) => void
+  setLongVideoMode: (mode: LongVideoMode) => void
+  setExtendClip: (clip: Blob | null) => void
   setCloudFrames: (frames: number) => void
   setCloudFps: (fps: number) => void
   setDenoise: (denoise: number) => void
@@ -614,6 +665,9 @@ export interface CreateState {
   setExpertOpen: (open: boolean) => void
   toggleLora: (name: string) => void
   setLoraStrengthFor: (name: string, strength: number) => void
+  /** D4: moves a pick a place up (-1) or down (1) among `among` (the picks
+   *  the stack shows); the run chains them in this order. */
+  moveLora: (name: string, delta: -1 | 1, among?: string[]) => void
   clearLoras: () => void
   /** Drops picks whose file ComfyUI no longer lists (GH #146), and the local
    *  character that rode on one of them. */
@@ -631,6 +685,8 @@ export interface CreateState {
   setTrainSteps: (n: number) => void
   setTrainCaption: (name: string, text: string) => void
   setTrainVramPreset: (p: TrainVramPreset) => void
+  setTrainKind: (k: TrainKind) => void
+  setTrainStyleTrigger: (on: boolean) => void
   setSelectedCharacter: (c: CharacterRef | null) => void
   setAudioInput: (m: MediaRef | null) => void
   setVoiceFromJob: (v: { jobId: string; label: string } | null) => void
@@ -656,6 +712,9 @@ export interface CreateState {
   addReference: (img: ImageRef) => void
   removeReference: (index: number) => void
   setReferences: (refs: ImageRef[]) => void
+  setEndImage: (img: ImageRef | null) => void
+  addImageReference: (img: ImageRef) => void
+  removeImageReference: (index: number) => void
   setBatchSources: (list: MediaRef[]) => void
   setBatchRun: (run: BatchRunState | null) => void
   setBatchOriginal: (img: ImageRef | null) => void
@@ -685,7 +744,8 @@ export interface CreateState {
   mergeGallery: (items: GalleryItem[]) => void
   removeFromGallery: (id: string) => void
   clearGallery: () => void
-  /** Make a folder. Returns its id, or null for an empty name or a full list. */
+  /** Make a folder. Returns its id (the one already there for a name it has,
+   *  in any case), or null for an empty name or a full list. */
   addGalleryFolder: (name: string) => string | null
   renameGalleryFolder: (id: string, name: string) => void
   /** Remove a folder. Its entries stay in the gallery and go back to "All";
@@ -694,6 +754,7 @@ export interface CreateState {
   /** File entries under a folder, or under none with null. */
   moveToGalleryFolder: (ids: readonly string[], folderId: string | null) => void
   setGalleryFolderOpen: (id: string | null) => void
+  dismissGalleryNotice: () => void
   addToPromptHistory: (prompt: string) => void
   /** Drop a single remembered prompt (the X next to the entry). */
   removeFromPromptHistory: (prompt: string) => void
@@ -705,8 +766,31 @@ export interface CreateState {
   setMlxUpscale: (installed: boolean) => void
 }
 
-/** The gallery keeps the newest N renders. */
+/** The gallery keeps the newest N unsorted renders. */
 const GALLERY_CAP = 200
+
+/** What the gallery says when the cap took entries (D3b). */
+export const GALLERY_TRIMMED_NOTICE =
+  'Older unsorted images were removed from the gallery, the files are still in your output folder.'
+
+/**
+ * The cap, applied to `items` (newest first). D3b (Discord 01.11.2026): it
+ * used to cut the whole list at 200, so new results pushed out the entries the
+ * user had sorted into folders, prompts and all, without a word. An entry in a
+ * folder is never dropped now; the cap counts unsorted entries only, the
+ * oldest go first. The caller frees the dropped ones' media and says so.
+ */
+export function capGallery(items: readonly GalleryItem[]): { kept: GalleryItem[]; dropped: GalleryItem[] } {
+  const kept: GalleryItem[] = []
+  const dropped: GalleryItem[] = []
+  let unsorted = 0
+  for (const g of items) {
+    if (g.folderId) kept.push(g)
+    else if (unsorted < GALLERY_CAP) { kept.push(g); unsorted++ }
+    else dropped.push(g)
+  }
+  return { kept, dropped }
+}
 
 /**
  * Hand a gallery item's in-memory media back to the renderer.
@@ -759,6 +843,35 @@ function releaseDroppedMediaRefs(previous: readonly MediaRef[], next: readonly M
   }
 }
 
+/**
+ * A training photo staged again: the same file as one already in the set, by
+ * its original file name, size and modification time (the most a browser
+ * knows about a file's identity). Only an earlier batch counts; one pick or
+ * one drop never holds the same file twice, so two same-named files in it are
+ * two photos.
+ */
+function isSameTrainFile(had: MediaRef, img: MediaRef): boolean {
+  const a = had.blob
+  const b = img.blob
+  if (a === b) return true
+  if (!(a instanceof File) || !(b instanceof File)) return false
+  return a.name === b.name && a.size === b.size && a.lastModified === b.lastModified
+}
+
+/** `name` if the set does not hold it yet (case-insensitive, like the Mac
+ *  and Windows file systems the trainer writes to), else `stem_2.ext`,
+ *  `stem_3.ext` and so on. */
+function freeTrainImageName(name: string, taken: ReadonlySet<string>): string {
+  if (!taken.has(name.toLowerCase())) return name
+  const dot = name.lastIndexOf('.')
+  const stem = dot > 0 ? name.slice(0, dot) : name
+  const ext = dot > 0 ? name.slice(dot) : ''
+  for (let n = 2; ; n++) {
+    const next = `${stem}_${n}${ext}`
+    if (!taken.has(next.toLowerCase())) return next
+  }
+}
+
 /** The same rule for a slot that holds at most one ref. */
 function releaseReplacedMediaRef(previous: MediaRef | null, next: MediaRef | null): void {
   releaseDroppedMediaRefs(previous ? [previous] : [], next ? [next] : [])
@@ -787,6 +900,15 @@ function imageModelParams(state: { imageModel: string; imageModelType: ModelType
     ? hidreamDefaults(state.imageModel)
     : MODEL_TYPE_DEFAULTS[state.imageModelType] || MODEL_TYPE_DEFAULTS.unknown
   const distilled = distilledImageCheckpoint(state.imageModel, state.imageModelType)
+  // Qwen-Image 2.1 Turbo on ComfyUI runs its own eight step schedule at CFG 1
+  // (lib/render/qwen21-turbo), so the sliders stand at what the run takes.
+  if (state.imageModelType === 'qwenimage' && isQwenImage21Turbo(state.imageModel)) {
+    return {
+      steps: QWEN21_TURBO_SAMPLING.steps, cfgScale: QWEN21_TURBO_SAMPLING.cfg,
+      sampler: QWEN21_TURBO_SAMPLING.sampler, scheduler: QWEN21_TURBO_SAMPLING.scheduler,
+      width: defaults.width, height: defaults.height,
+    }
+  }
   return {
     steps: distilled ? 4 : defaults.steps, cfgScale: distilled ? 1.0 : defaults.cfgScale,
     sampler: defaults.sampler, scheduler: defaults.scheduler,
@@ -888,7 +1010,7 @@ export function imageQualityLadder(
       Standard: own.steps,
       High: Math.round(own.steps * 1.5),
     },
-    ...(local && distilledImageCheckpoint(s.imageModel, s.imageModelType) ? { cfgScale: own.cfgScale } : {}),
+    ...(local && (distilledImageCheckpoint(s.imageModel, s.imageModelType) || isQwenImage21Turbo(s.imageModel)) ? { cfgScale: own.cfgScale } : {}),
   }
 }
 
@@ -913,7 +1035,7 @@ export const MOBILE_CLOUD_VIDEO_FAMILY: ModelType = 'minimaxh3'
 /** The video model's own sampling values, for picking it and for every tab
  *  that runs it. Lightning/rapid merges are distilled to few steps at cfg 1,
  *  the architecture defaults (30 steps, cfg 5+) render them to mush. */
-function videoModelParams(model: string, list: readonly ClassifiedModel[] | null = [], intent = 'video') {
+function videoModelParams(model: string, list: readonly ClassifiedModel[] | null = [], intent = 'video', speed: VideoSpeed = 'fast') {
   // A phone has no local video model, so `model` is empty there and the
   // family would be 'unknown': 1024 by 1024, a square image size, sent along
   // with a cloud clip. It takes the family of the cloud's own default video
@@ -929,12 +1051,17 @@ function videoModelParams(model: string, list: readonly ClassifiedModel[] | null
   // fps under an LTX (persona walk, 09.10.2026, Fund 19). A ComfyUI entry
   // carries no `mlxVideo`, and nothing changes for it.
   const clip = mlxVideoLaneEntry(list, model, intent)?.mlxVideo
+  // The Wan 14B models (B18): Fast is lightx2v's 4 steps at cfg 1, Quality
+  // the official templates; both at the 81 frames, 832×480 and 16 fps Wan
+  // learned. The Mac's MLX entry below still wins on the Mac.
+  const wan = clip ? null : wanSamplingFor(model, speed)
   return {
     steps: lightning ? 6 : defaults.steps, cfgScale: lightning ? 1.0 : defaults.cfgScale,
     sampler: defaults.sampler, scheduler: defaults.scheduler,
     width: defaults.width, height: defaults.height,
     ...(defaults.frames ? { frames: defaults.frames } : {}),
     ...(defaults.fps ? { fps: defaults.fps } : {}),
+    ...(wan ? { steps: wan.steps, cfgScale: wan.cfgScale, sampler: wan.sampler, scheduler: wan.scheduler, width: 832, height: 480, frames: 81, fps: 16 } : {}),
     ...(clip ? { frames: clip.frames, fps: clip.fps, width: clip.width, height: clip.height } : {}),
     // A Wan on the Mac runs its config's steps (50 or 40) unless asked, and
     // the slider starts there, not at the family's ComfyUI count.
@@ -955,7 +1082,7 @@ function videoIntentOf(s: Pick<CreateState, 'videoSubMode' | 'cloudOp'>): string
  */
 function restartSampling(s: CreateState): Partial<CreateState> {
   if (s.cloudOp === 'music') return imageLaneParams(s)
-  if (s.cloudOp === 'lipsync' || s.cloudOp === 'motion') return videoModelParams(s.videoModel, s.videoModelList, videoIntentOf(s))
+  if (s.cloudOp === 'lipsync' || s.cloudOp === 'motion') return videoModelParams(s.videoModel, s.videoModelList, videoIntentOf(s), s.videoSpeed)
   return {}
 }
 
@@ -991,6 +1118,10 @@ export const useCreateStore = create<CreateState>()(
       batchSize: 1,
       frames: 24,
       fps: 8,
+      videoSpeed: 'fast',
+      longVideoSeconds: 0,
+      longVideoMode: 'sections',
+      extendClip: null,
       cloudFrames: 24,
       cloudFps: 8,
       imageLaneKept: null,
@@ -1012,11 +1143,14 @@ export const useCreateStore = create<CreateState>()(
       characterTab: 'train' as 'train' | 'use',
       trainImages: [] as MediaRef[],
       triggerWord: '',
+      triggerWordNote: null,
       // Dieselbe Zahl, die der Trainer ohne Angabe nimmt
       // (`steps.unwrap_or(1200)`, trainer.rs), und die Stufe `Standard`.
       trainSteps: TRAIN_STEPS_DEFAULT,
       trainCaptions: {} as Record<string, string>,
       trainVramPreset: TRAIN_VRAM_PRESET_DEFAULT as TrainVramPreset,
+      trainKind: TRAIN_KIND_DEFAULT as TrainKind,
+      trainStyleTrigger: true,
       selectedCharacter: null as CharacterRef | null,
       audioInput: null as MediaRef | null,
       voiceFromJob: null as { jobId: string; label: string } | null,
@@ -1032,11 +1166,14 @@ export const useCreateStore = create<CreateState>()(
       expertOpen: false,
       selectedLoras: [] as { name: string; strength: number }[],
       loraStrengths: {} as Record<string, number>,
+      loraLanes: {} as Record<string, LoraPick[]>,
       selectedVae: 'auto',
       clipSkip: 0,
       growMaskBy: 6,
       source: null as ImageRef | null,
       references: [] as ImageRef[],
+      endImage: null as ImageRef | null,
+      imageReferences: [] as ImageRef[],
       batchSources: [] as MediaRef[],
       batchRun: null as BatchRunState | null,
       batchOriginal: null as ImageRef | null,
@@ -1075,6 +1212,7 @@ export const useCreateStore = create<CreateState>()(
       gallery: [],
       galleryFolders: [],
       galleryFolderOpen: null,
+      galleryNotice: null,
       promptHistory: [],
       imageModelList: [],
       videoModelList: [],
@@ -1095,7 +1233,7 @@ export const useCreateStore = create<CreateState>()(
         // On a phone both lists are empty for good, and the reset must still
         // happen: the video tab takes the cloud clip size, the way back takes
         // the image size again.
-        if (mode === 'video' && (state.videoModel || isMobile())) return { mode, ...videoModelParams(state.videoModel, state.videoModelList, videoIntentOf(state)) }
+        if (mode === 'video' && (state.videoModel || isMobile())) return { mode, ...videoModelParams(state.videoModel, state.videoModelList, videoIntentOf(state), state.videoSpeed) }
         if (mode === 'image' && (state.imageModel || isMobile())) return { mode, ...imageModelParams(state) }
         return { mode }
       }),
@@ -1106,7 +1244,7 @@ export const useCreateStore = create<CreateState>()(
         imageModel: model, imageModelType: type,
         ...imageModelParams({ imageModel: model, imageModelType: type }),
       })),
-      setVideoModel: (model) => set((s) => ({ videoModel: model, ...videoModelParams(model, s.videoModelList, videoIntentOf(s)) })),
+      setVideoModel: (model) => set((s) => ({ videoModel: model, ...videoModelParams(model, s.videoModelList, videoIntentOf(s), s.videoSpeed) })),
       setSampler: (sampler) => set({ sampler }),
       setScheduler: (scheduler) => set({ scheduler }),
       setSteps: (steps) => set({ steps: Math.max(1, Math.min(200, Math.floor(steps))) }),
@@ -1128,6 +1266,19 @@ export const useCreateStore = create<CreateState>()(
       // slider of the picked family keeps a shorter one inside its range.
       setFrames: (frames) => set({ frames: Math.max(1, Math.min(MAX_LOCAL_FRAMES, Math.floor(frames))) }),
       setFps: (fps) => set({ fps: Math.max(1, Math.min(60, Math.floor(fps))) }),
+      // Switching speed re-reads the sampling values of the picked model; a
+      // model without a fast mode keeps what it has.
+      setVideoSpeed: (videoSpeed) => set((s) => {
+        const wan = wanSamplingFor(s.videoModel, videoSpeed)
+        return wan && s.mode === 'video'
+          ? { videoSpeed, steps: wan.steps, cfgScale: wan.cfgScale, sampler: wan.sampler, scheduler: wan.scheduler }
+          : { videoSpeed }
+      }),
+      setLongVideoSeconds: (seconds) => set({
+        longVideoSeconds: Number.isFinite(seconds) && seconds > 0 ? Math.min(MAX_LONG_SECONDS, Math.round(seconds)) : 0,
+      }),
+      setLongVideoMode: (longVideoMode) => set({ longVideoMode }),
+      setExtendClip: (extendClip) => set({ extendClip }),
       // Review A kleiner Punkt 1 (studio-r2, 20.09.2026, found by the new
       // e2e test itself): the local slider's clamp follows the family
       // (lib/video-length); the cloud track only ever encodes
@@ -1167,7 +1318,7 @@ export const useCreateStore = create<CreateState>()(
         // removebg/animate keep the source but drop a stale mask. Video/animate
         // mirror setMode's reset so image resolution never leaks into video.
         // A stale error from the previous intent never carries over.
-        const dropAll = { source: null, mask: null, sourceSetAt: 0, references: [] }
+        const dropAll = { source: null, mask: null, sourceSetAt: 0, references: [], endImage: null }
         // Back from a tab that runs another model (the video tabs, Music), the
         // image lane gets its own values again; inside the image lane a switch
         // keeps what the user tuned. Music has mode 'image', so asking the mode
@@ -1206,7 +1357,7 @@ export const useCreateStore = create<CreateState>()(
             // The local lane continues from the picked clip's last frame —
             // regular I2V models, regular video defaults.
             return { ...base, cloudOp: 'extend' as const, mode: 'video' as const, videoSubMode: 't2v' as const, ...dropAll,
-              ...videoModelParams(s.videoModel, s.videoModelList, 'extend') }
+              ...videoModelParams(s.videoModel, s.videoModelList, 'extend', s.videoSpeed) }
           }
           case 'motion': {
             // Keeps the source slot (the character image the video drives).
@@ -1234,10 +1385,10 @@ export const useCreateStore = create<CreateState>()(
           case 'eraser':   return { ...base, utilityOp: 'eraser' as const, mode: 'image' as const, imageSubMode: 'img2img' as const }
           case 'video':
             return { ...base, mode: 'video' as const, videoSubMode: 't2v' as const, ...dropAll,
-              ...videoModelParams(s.videoModel, s.videoModelList, 'video') }
+              ...videoModelParams(s.videoModel, s.videoModelList, 'video', s.videoSpeed) }
           case 'animate':
             return { ...base, mode: 'video' as const, videoSubMode: 'i2v' as const, mask: null,
-              ...videoModelParams(s.videoModel, s.videoModelList, 'animate') }
+              ...videoModelParams(s.videoModel, s.videoModelList, 'animate', s.videoSpeed) }
         }
         })()
         // Leaving the image lane, its values are put aside under the model
@@ -1269,6 +1420,7 @@ export const useCreateStore = create<CreateState>()(
           loraStrengths: { ...s.loraStrengths, [name]: value },
         }
       }),
+      moveLora: (name, delta, among) => set((s) => ({ selectedLoras: moveLoraPick(s.selectedLoras, name, delta, among) })),
       clearLoras: () => set((s) => ({
         selectedLoras: [],
         selectedCharacter: isLocalCharacter(s.selectedCharacter) ? null : s.selectedCharacter,
@@ -1292,16 +1444,28 @@ export const useCreateStore = create<CreateState>()(
       setTargetResolution: (targetResolution) => set({ targetResolution }),
       setMacUpscaleScale: (macUpscaleScale) => set({ macUpscaleScale }),
       setCharacterTab: (characterTab) => set((s) => withOwnStudioOptions(s, { characterTab })),
-      // Cap at the backend's photo limit (lib/train-image-cap) and de-dupe by filename so
-      // a re-drop of the same files doesn't double the set. Both of those
-      // THROW REFS AWAY — the caller minted a blob: URL for every file it
-      // handed over, including the ones landing in the dedupe and the ones
-      // the cap cuts off, and neither is reachable from the store afterwards.
-      // So "before" is everything in play, not just what was already staged.
+      // Cap at the backend's photo limit (lib/train-image-cap) and skip a
+      // re-drop of a file already in the set, so the same folder twice does
+      // not double it. Every photo keeps a name of its own: a DIFFERENT photo
+      // under a name the set already holds (IMG_0001.png from a second
+      // folder, two face.png in one drop) is numbered on, face_2.png, the way
+      // the Rust side's free_stem numbers a stem. The name is the photo's id
+      // for Remove, its caption and the grid key. Skipping and capping both
+      // THROW REFS AWAY: the caller minted a blob: URL for every file it
+      // handed over, and none of the dropped ones is reachable from the store
+      // afterwards. So "before" is everything in play, not just what was
+      // already staged.
       addTrainImages: (imgs) => {
         const before = get().trainImages
-        const have = new Set(before.map((i) => i.name))
-        const trainImages = [...before, ...imgs.filter((i) => !have.has(i.name))].slice(0, maxTrainImages(get().backend))
+        const taken = new Set(before.map((i) => i.name.toLowerCase()))
+        const added: MediaRef[] = []
+        for (const img of imgs) {
+          if (before.some((had) => isSameTrainFile(had, img))) continue
+          const name = freeTrainImageName(img.name, taken)
+          taken.add(name.toLowerCase())
+          added.push(name === img.name ? img : { ...img, name })
+        }
+        const trainImages = [...before, ...added].slice(0, maxTrainImages(get().backend))
         releaseDroppedMediaRefs([...before, ...imgs], trainImages)
         set({ trainImages })
       },
@@ -1321,7 +1485,15 @@ export const useCreateStore = create<CreateState>()(
         releaseDroppedMediaRefs(get().trainImages, [])
         set({ trainImages: [], trainCaptions: {} })
       },
-      setTriggerWord: (w) => set({ triggerWord: w.replace(/\s+/g, '').slice(0, 30) }),
+      // C7: the field holds the word in the one form the trainer, the LoRA
+      // file name and the Use shelf agree on (lib/train-trigger.ts). The note
+      // stays until the field is emptied, so it is still there after the next
+      // keystroke.
+      setTriggerWord: (w) => set((s) => {
+        const triggerWord = typedTriggerWord(w)
+        const note = triggerWordNote(w)
+        return { triggerWord, triggerWordNote: triggerWord || note ? note ?? s.triggerWordNote : null }
+      }),
       // Same clamp as the Rust command so the UI can never book a rejected run.
       setTrainSteps: (n) => set({ trainSteps: Math.max(100, Math.min(4000, Math.floor(n))) }),
       setTrainCaption: (name, text) => set((s) => {
@@ -1335,6 +1507,15 @@ export const useCreateStore = create<CreateState>()(
         return { trainCaptions }
       }),
       setTrainVramPreset: (p) => set({ trainVramPreset: isTrainVramPreset(p) ? p : TRAIN_VRAM_PRESET_DEFAULT }),
+      // The steps follow the mode: each has its own three presets, and a
+      // number of the other mode would match none of the switch's options.
+      setTrainKind: (k) => set((s) => {
+        const trainKind = isTrainKind(k) ? k : TRAIN_KIND_DEFAULT
+        if (trainKind === s.trainKind) return {}
+        const fits = trainPresetsFor(trainKind).some((p) => p.steps === s.trainSteps)
+        return { trainKind, ...(fits ? {} : { trainSteps: trainStepsDefaultFor(trainKind) }) }
+      }),
+      setTrainStyleTrigger: (on) => set({ trainStyleTrigger: !!on }),
       setSelectedCharacter: (selectedCharacter) => set((s) => withOwnStudioOptions(s, { selectedCharacter })),
       // Upload and voice-pick are mutually exclusive speech sources.
       setAudioInput: (audioInput) => {
@@ -1404,13 +1585,16 @@ export const useCreateStore = create<CreateState>()(
       setSource: (source) => {
         // The list of further source images goes with the image it belongs to.
         if (!source) get().setBatchSources([])
-        set({ source, sourceSetAt: source ? Date.now() : 0, ...(source ? {} : { mask: null, references: [] }) })
+        set({ source, sourceSetAt: source ? Date.now() : 0, ...(source ? {} : { mask: null, references: [], endImage: null }) })
       },
       // Capped at the most any model takes, local or cloud (lib/edit-references);
       // the UI offers fewer for a model with fewer slots and the builder slices.
       addReference: (img) => set((s) => ({ references: [...s.references, img].slice(0, MAX_STORED_REFERENCES) })),
       removeReference: (index) => set((s) => ({ references: s.references.filter((_, i) => i !== index) })),
       setReferences: (references) => set({ references }),
+      setEndImage: (endImage) => set({ endImage }),
+      addImageReference: (img) => set((s) => ({ imageReferences: [...s.imageReferences, img].slice(0, MAX_STORED_REFERENCES + 1) })),
+      removeImageReference: (index) => set((s) => ({ imageReferences: s.imageReferences.filter((_, i) => i !== index) })),
       setBatchSources: (batchSources) => {
         releaseDroppedMediaRefs(get().batchSources, batchSources)
         set({ batchSources })
@@ -1522,7 +1706,7 @@ export const useCreateStore = create<CreateState>()(
         // The picked model's own values where it has some: a distilled
         // checkpoint reset to its family's 25 or 30 steps renders to mush.
         // LU Cloud renders with its own model, there the family stays.
-        const own = s.backend === 'cloud' ? {} : s.mode === 'video' ? videoModelParams(s.videoModel, s.videoModelList, videoIntentOf(s)) : imageModelParams(s)
+        const own = s.backend === 'cloud' ? {} : s.mode === 'video' ? videoModelParams(s.videoModel, s.videoModelList, videoIntentOf(s), s.videoSpeed) : imageModelParams(s)
         set({
           sampler: d.sampler,
           scheduler: d.scheduler,
@@ -1572,17 +1756,17 @@ export const useCreateStore = create<CreateState>()(
         const filed = !item.folderId && s.galleryFolderOpen && s.galleryFolders.some((f) => f.id === s.galleryFolderOpen)
           ? { ...item, folderId: s.galleryFolderOpen }
           : item
-        const next = [filed, ...s.gallery]
         // The cap used to drop the oldest renders silently, taking the only
         // reference to their blob: URLs with them — the bytes stayed pinned
         // for the rest of the session with nothing left to revoke them by.
-        for (const dropped of next.slice(GALLERY_CAP)) releaseItemMedia(dropped)
-        const gallery = next.slice(0, GALLERY_CAP)
-        if (s.backend !== 'cloud') return { gallery }
+        const { kept: gallery, dropped } = capGallery([filed, ...s.gallery])
+        for (const g of dropped) releaseItemMedia(g)
+        const said = dropped.length > 0 ? { galleryNotice: GALLERY_TRIMMED_NOTICE } : {}
+        if (s.backend !== 'cloud') return { gallery, ...said }
         const id = STUDIO_MODELS[item.model]?.sourceModel ?? item.model
-        if (cloudModelsFor('image').some((m) => m.id === id)) return withOwnStudioOptions(s, { gallery, cloudImageModel: id })
-        if (cloudModelsFor('video').some((m) => m.id === id)) return withOwnStudioOptions(s, { gallery, cloudVideoModel: id })
-        return { gallery }
+        if (cloudModelsFor('image').some((m) => m.id === id)) return withOwnStudioOptions(s, { gallery, cloudImageModel: id, ...said })
+        if (cloudModelsFor('video').some((m) => m.id === id)) return withOwnStudioOptions(s, { gallery, cloudVideoModel: id, ...said })
+        return { gallery, ...said }
       }),
       updateGalleryItem: (id, patch) =>
         // NOT revoking a replaced dataUrl here on purpose: a patch lands while
@@ -1622,8 +1806,9 @@ export const useCreateStore = create<CreateState>()(
         // blob-URL frei. Ein lokaler MLX-Clip, den eine Wolken-Hydrierung vom
         // Deckel schiebt, hielt seine Bytes sonst fuer den Rest der
         // Fenster-Lebensdauer fest (lu-desktop-oom-persist).
-        for (const dropped of merged.slice(GALLERY_CAP)) releaseItemMedia(dropped)
-        return { gallery: merged.slice(0, GALLERY_CAP) }
+        const { kept, dropped } = capGallery(merged)
+        for (const g of dropped) releaseItemMedia(g)
+        return dropped.length > 0 ? { gallery: kept, galleryNotice: GALLERY_TRIMMED_NOTICE } : { gallery: kept }
       }),
       removeFromGallery: (id) => set((s) => {
         const gone = s.gallery.find((g) => g.id === id)
@@ -1646,7 +1831,12 @@ export const useCreateStore = create<CreateState>()(
       addGalleryFolder: (name) => {
         const clean = cleanFolderName(name)
         const s = get()
-        if (!clean || s.galleryFolders.length >= FOLDER_CAP) return null
+        if (!clean) return null
+        // FEHLER-D3 #1: a name that is there already is that folder. Every
+        // typed "Win Test" used to make one more folder of the same name.
+        const same = s.galleryFolders.find((f) => f.name.toLowerCase() === clean.toLowerCase())
+        if (same) return same.id
+        if (s.galleryFolders.length >= FOLDER_CAP) return null
         const id = newFolderId(s.galleryFolders)
         set({ galleryFolders: [...s.galleryFolders, { id, name: clean }] })
         return id
@@ -1668,6 +1858,7 @@ export const useCreateStore = create<CreateState>()(
           gallery: s.gallery.map((g) => (pick.has(g.id) ? { ...g, folderId: folderId ?? undefined } : g)),
         }
       }),
+      dismissGalleryNotice: () => set({ galleryNotice: null }),
       setGalleryFolderOpen: (id) => set((s) => ({
         galleryFolderOpen: id !== null && s.galleryFolders.some((f) => f.id === id) ? id : null,
       })),
@@ -1751,6 +1942,9 @@ export const useCreateStore = create<CreateState>()(
         batchSize: state.batchSize,
         frames: state.frames,
         fps: state.fps,
+        videoSpeed: state.videoSpeed,
+        longVideoSeconds: state.longVideoSeconds,
+        longVideoMode: state.longVideoMode,
         ...restartSampling(state),
         denoise: state.denoise,
         editStrength: state.editStrength,
@@ -1774,6 +1968,7 @@ export const useCreateStore = create<CreateState>()(
         showNegative: state.showNegative,
         selectedLoras: state.selectedLoras,
         loraStrengths: state.loraStrengths,
+        loraLanes: state.loraLanes,
         selectedVae: state.selectedVae,
         clipSkip: state.clipSkip,
         growMaskBy: state.growMaskBy,
@@ -1788,6 +1983,8 @@ export const useCreateStore = create<CreateState>()(
         triggerWord: state.triggerWord,
         trainSteps: state.trainSteps,
         trainVramPreset: state.trainVramPreset,
+        trainKind: state.trainKind,
+        trainStyleTrigger: state.trainStyleTrigger,
         // Studio: the picked step's option values are a preference like the
         // ones above. cloudStudioCredits is NOT here on purpose: a saved
         // price from yesterday is a lie, see the field's own doc comment.
@@ -1845,8 +2042,13 @@ export const useCreateStore = create<CreateState>()(
         // Gallery folders came in 3.0.7. An older blob has no list (the
         // default stays), a damaged one is cleaned instead of trusted.
         if ('galleryFolders' in safe) safe.galleryFolders = sanitizeFolders(safe.galleryFolders)
+        // 3.0.9 B24: an older blob has no lanes, a damaged one is cleaned.
+        if ('loraLanes' in safe) safe.loraLanes = sanitizeLoraLanes(safe.loraLanes)
         // 3.0.8 D20: an unknown recipe name would reach the trainer as text.
         if ('trainVramPreset' in safe && !isTrainVramPreset(safe.trainVramPreset)) safe.trainVramPreset = TRAIN_VRAM_PRESET_DEFAULT
+        // 3.0.9 P8: same for the mode, it picks the LoRA's file name.
+        if ('trainKind' in safe && !isTrainKind(safe.trainKind)) safe.trainKind = TRAIN_KIND_DEFAULT
+        if ('trainStyleTrigger' in safe && typeof safe.trainStyleTrigger !== 'boolean') safe.trainStyleTrigger = true
         // The persisted slice is ~30 independent scalar preferences (see
         // partialize). They are adopted as written, which is what the store
         // has always done; the fields that could actually do damage — the
@@ -1879,4 +2081,23 @@ useCreateStore.subscribe((s, prev) => {
   } else if (s.cloudOpModel !== prev.cloudOpModel && s.cloudOpPicks[slot] !== s.cloudOpModel) {
     useCreateStore.setState({ cloudOpPicks: { ...s.cloudOpPicks, [slot]: s.cloudOpModel } })
   }
+})
+
+// B24: the LoRA picks belong to the task and the local model on screen. A
+// change of either puts the picks aside under the lane that was left and
+// brings back the ones of the lane entered (none for a new one), so a video
+// LoRA never stays on after the change to Image. A change that set the picks
+// itself (a trained style switched on with its tab) keeps them, and so does
+// the LoRA of the picked character.
+function loraLaneOf(s: CreateState): string | null {
+  return loraLaneKey(deriveIntent(s), s.mode === 'video' ? s.videoModel : s.imageModel)
+}
+useCreateStore.subscribe((s, prev) => {
+  const swap = switchLoraLane(
+    { key: loraLaneOf(prev), picks: prev.selectedLoras },
+    { key: loraLaneOf(s), picks: s.selectedLoras },
+    s.loraLanes,
+    s.selectedLoras !== prev.selectedLoras,
+  )
+  if (swap) useCreateStore.setState(swap)
 })

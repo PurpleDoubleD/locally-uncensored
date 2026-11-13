@@ -114,6 +114,12 @@ describe('before the run', () => {
     expect(screen.getByText(/nothing is uploaded/)).toBeTruthy()
   })
 
+  it('names the check the run makes: 100 requests and 1000 knowledge questions (3.0.9)', async () => {
+    api.abliteratePlan.mockResolvedValue(plan())
+    openFor()
+    expect(await screen.findByText(/the same 100 short requests and 1000 knowledge questions/)).toBeTruthy()
+  })
+
   it('opens Start only after the 18+ line, and sends what was chosen', async () => {
     api.abliteratePlan.mockResolvedValue(plan())
     api.abliterateStart.mockResolvedValue(status())
@@ -182,6 +188,39 @@ describe('during and after', () => {
     fireEvent.click(screen.getByText('Stop'))
     await waitFor(() => expect(api.abliterateCancel).toHaveBeenCalled())
     expect(await screen.findByText(/Stopped/)).toBeTruthy()
+  })
+
+  it('a download shows bytes of total, share, speed and time left on the face of the window (3.0.9)', async () => {
+    openFor()
+    useAbliterateStore.setState({ status: status({
+      phase: 'setup', phaseLabel: 'Installing PyTorch: downloading torch 2.14.1+cu130', step: 740e6, total: 1_990_600_000,
+      bytes: true, rateBps: 4_200_000, etaSecs: 298, best: null, elapsedSecs: 1560,
+    }) })
+    const line = await screen.findByTestId('remove-refusals-download')
+    expect(line.textContent).toBe('740 MB of 1.99 GB · 37% · 4.2 MB/s · about 5 min left')
+    expect(screen.getByText('Installing PyTorch: downloading torch 2.14.1+cu130')).toBeTruthy()
+    expect(screen.getByText('Running for 26 min')).toBeTruthy()
+    // the bar has its share, not 0 % as in 3.0.8
+    const bar = screen.getByTestId('remove-refusals-running').querySelector('.bg-lu-accent') as HTMLElement
+    expect(bar.style.width).toBe('37%')
+  })
+
+  it('the knowledge check names the answers that changed and whether that is chance (3.0.9)', async () => {
+    const m = (s: string) => s.padEnd(200, '0')
+    const rec = {
+      ...RECORD,
+      before: { refusals: 41, falseAlarms: 6, mmlu: 3, n: 50, mmluN: 200, mmluMarks: m('111') },
+      after: { refusals: 7, falseAlarms: 2, mmlu: 2, n: 50, mmluN: 200, mmluMarks: m('011') },
+    }
+    openFor()
+    useAbliterateStore.setState({ status: status({ status: 'done', result: rec }) })
+    const table = await screen.findByTestId('remove-refusals-result')
+    expect(table.textContent).toContain('3 of 200')
+    expect(table.textContent).toContain('1 answer turned wrong, 0 answers turned right (-1 of 200): within chance')
+    // the counts never break between "of" and the total
+    const cells = [...table.querySelectorAll('td.font-mono')]
+    expect(cells.length).toBeGreaterThan(0)
+    for (const c of cells) expect(c.className).toContain('whitespace-nowrap')
   })
 
   it('the result card compares original and copy, and Use loads the copy', async () => {

@@ -15,7 +15,7 @@ import { onLocalSlotChanged } from '../lib/builtin-slot-eviction'
 import { LU_ENGINE_NAME, renameLegacyEngine } from '../lib/engine-name'
 import { announceDarkenedSlots } from '../lib/provider-slot-darkening'
 import { honourUserDisable } from '../lib/provider-visibility'
-import { secretGet, secretSet, secretDelete, secretParkGet, secretParkSet, secretParkDelete } from '../api/backend'
+import { secretGet, secretSet, secretDelete, secretParkGet, secretParkSet, secretParkDelete, setOllamaBase } from '../api/backend'
 import { isOpenAIEntryId, OPENAI_ENTRY_PREFIX } from '../api/providers/model-name'
 import { CLOUD_BASE } from '../api/cloud/config'
 
@@ -152,6 +152,27 @@ const DEFAULT_PROVIDERS: Record<FixedProviderId, ProviderConfig> = {
     apiKey: '',
     isLocal: false,
   },
+}
+
+/**
+ * Where a reset points Ollama. Rust reports it with `get_ollama_host` as
+ * `defaultBase`: OLLAMA_HOST if set, else the default. config.json is not
+ * part of it, because that file still holds the address being reset away
+ * from. Until Rust has answered (or outside Tauri) it is the shipped default.
+ * Before this the reset wrote a fixed localhost:11434 even with OLLAMA_HOST
+ * set, and the store subscription then pinned that port in config.json.
+ */
+let ollamaResetBase = DEFAULT_PROVIDERS.ollama.baseUrl
+
+export function rememberOllamaResetBase(base: string | undefined | null): void {
+  const b = base?.trim().replace(/\/+$/, '')
+  if (b) ollamaResetBase = b
+}
+
+function shippedDefault(id: FixedProviderId): ProviderConfig {
+  return id === 'ollama'
+    ? { ...DEFAULT_PROVIDERS.ollama, baseUrl: ollamaResetBase }
+    : DEFAULT_PROVIDERS[id]
 }
 
 /**
@@ -561,7 +582,7 @@ export const useProviderStore = create<ProviderState>()(
         set((state) => ({
           providers: {
             ...state.providers,
-            [id]: DEFAULT_PROVIDERS[id],
+            [id]: shippedDefault(id),
           },
         }))
         // Opus review, round 2, Blocker 7: DEFAULT_PROVIDERS.openai carries
@@ -594,7 +615,7 @@ export const useProviderStore = create<ProviderState>()(
           }
           for (const id of Object.keys(DEFAULT_PROVIDERS) as FixedProviderId[]) {
             next[id] = {
-              ...DEFAULT_PROVIDERS[id],
+              ...shippedDefault(id),
               apiKey: state.providers[id]?.apiKey ?? '',
               ...(id === 'lu-cloud' ? { enabled: state.providers[id]?.enabled ?? false } : {}),
             }
@@ -784,6 +805,17 @@ export const useProviderStore = create<ProviderState>()(
           // GitHub #173: whatever arrives, only well formed entries stay.
           openaiEntries: sanitizeOpenAIEntries(p.openaiEntries),
         }
+      },
+      // Ollamas Adresse in backend.ts, sobald die gespeicherte da ist. Vorher
+      // stand dort bis zu AppShells pullAndArm der Default localhost:11434,
+      // und der erste Modellabruf beim Kaltstart (useModels.fetchModels) ging
+      // an ein anderes Ollama: dessen Liste ersetzte die gespeicherte Wahl.
+      // Rusts OLLAMA_HOST gewinnt danach wie gehabt (lib/ollama-host-sync.ts,
+      // AppShell); spaetere Aenderungen traegt AppShells Subscription.
+      onRehydrateStorage: () => (state) => {
+        const base = state?.providers?.ollama?.baseUrl
+        if (!base) return
+        try { setOllamaBase(base) } catch { /* backend.ts nicht da (Testattrappe) */ }
       },
       // Don't persist transient state, only configs + user's "don't show again" preference.
       // When the OS keychain is active (H5), strip apiKey so the secret never

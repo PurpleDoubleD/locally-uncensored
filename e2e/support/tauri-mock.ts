@@ -408,6 +408,21 @@ export function tauriMockInit(opts: TauriMockOptions) {
   }))
   const IMAGE_PART_NO_ROOM_NOTE =
     'Loaded without image input: the graphics memory has no room for the image part next to the model. A smaller context makes room.'
+  // A fresh profile has no GGUF on disk: the starter lands there only when
+  // the onboarding's download of it finishes. Since 3.0.9 the model step
+  // lists the engine's GGUFs under "Models you already have" (FEHLER-N1 #1),
+  // so a starter that was "on disk" from the first frame turned every fresh
+  // run into a returning user. Specs that describe their disk
+  // (`bundledModels`) or start past the onboarding keep the file from the
+  // start, as before.
+  // Read at the call, not at init: `seedOnboardingDone` adds its init script
+  // after this one, so the seeded settings are not there yet when it runs.
+  const onboardingDone = () => {
+    try {
+      return JSON.parse(w.localStorage.getItem('chat-settings') || 'null')?.state?.settings?.onboardingDone === true
+    } catch { return false }
+  }
+  let starterOnDisk = !!opts.bundledModels
   const loaded = { path: bundled[0].path, withPart: false, note: null as string | null }
   function loadModel(path: string) {
     const m = bundled.find((b) => b.path === path)
@@ -534,7 +549,7 @@ export function tauriMockInit(opts: TauriMockOptions) {
   // Character training on the Mac (commands/mlx_train.rs): the photos of the
   // set, and the one run.
   const trainSets = new Map<string, number>()
-  let trainRun: { job: string; polls: number; cancelled: boolean; trigger: string; steps: number } | null = null
+  let trainRun: { job: string; polls: number; cancelled: boolean; trigger: string; steps: number; file: string } | null = null
   // One install slot per kind, exactly like the Rust side: null means idle
   // (nothing was ever started), a number counts polls since the install began.
   const slot: Record<'image' | 'imageEngine' | 'video' | 'videoEngine' | 'music', number | null> = {
@@ -931,6 +946,7 @@ export function tauriMockInit(opts: TauriMockOptions) {
             ? { progress: Math.round(total * 0.4), total, speed: 1024 * 1024, filename: fn, status: 'downloading' }
             : { progress: total, total, speed: 0, filename: fn, status: 'complete' }
           if (!held) {
+            if (fn.endsWith('.gguf') && !fn.endsWith('.mmproj.gguf')) starterOnDisk = true
             // A finished image part lies next to its model from now on.
             const owner = bundled.find((b) => `${b.name}.mmproj.gguf` === fn)
             if (owner) owner.imagePart = true
@@ -987,7 +1003,7 @@ export function tauriMockInit(opts: TauriMockOptions) {
           // real Qwen2.5 starter, so specs can assert the preset cap.
           // `vision` as engine.rs answers it: the loaded model by what it was
           // started with, every other model by the part on disk.
-          models: bundled.map((b) => ({
+          models: (starterOnDisk || onboardingDone() ? bundled : []).map((b) => ({
             name: b.name,
             path: b.path,
             size: b.size,
@@ -1763,12 +1779,14 @@ export function tauriMockInit(opts: TauriMockOptions) {
         return Promise.resolve({ staged: `photo-${trainSets.get(set)}.png` })
       }
       case 'mlx_train_start': {
-        record('__E2E_MLX_CALLS__', { cmd, set: m?.set, trigger: m?.trigger, steps: m?.steps, run: m?.run })
+        record('__E2E_MLX_CALLS__', { cmd, set: m?.set, trigger: m?.trigger, steps: m?.steps, run: m?.run, kind: m?.kind })
         const photos = trainSets.get(String(m?.set)) ?? 0
         if (photos < 4) return Promise.reject('Add at least 4 photos of your character first.')
         const steps = Math.ceil((m?.steps ?? 1200) / photos) * photos
-        trainRun = { job: 'e2e-train-1', polls: 0, cancelled: false, trigger: String(m?.trigger), steps }
-        return Promise.resolve({ ok: true, jobId: trainRun.job, pid: 4545, base: 'z-image-turbo-4bit', photos, epochs: steps / photos, steps, output: `/tmp/lu-e2e/loras/char_${trainRun.trigger}_zimage.safetensors` })
+        // The file the Rust side names by kind (mlx_train.rs `trained_file`, 3.0.9 P8).
+        const file = `${m?.kind === 'style' ? 'style' : 'char'}_${String(m?.trigger)}_zimage.safetensors`
+        trainRun = { job: 'e2e-train-1', polls: 0, cancelled: false, trigger: String(m?.trigger), steps, file }
+        return Promise.resolve({ ok: true, jobId: trainRun.job, pid: 4545, base: 'z-image-turbo-4bit', photos, epochs: steps / photos, steps, output: `/tmp/lu-e2e/loras/${file}` })
       }
       case 'mlx_train_progress': {
         if (!trainRun) return Promise.resolve({ job: null, status: 'idle', phase: '', percent: 0, step: 0, steps: 0, trigger: null, error: null, output: null, logs: [], running: false })
@@ -1779,14 +1797,14 @@ export function tauriMockInit(opts: TauriMockOptions) {
           // The character lands in the LoRA folder, where the Use shelf reads it.
           const w = window as unknown as { __E2E_MLX_LORAS__?: Array<{ name: string }> }
           w.__E2E_MLX_LORAS__ ??= [...(opts.mlx?.loras ?? [])]
-          const file = `char_${trainRun.trigger}_zimage.safetensors`
+          const file = trainRun.file
           if (!w.__E2E_MLX_LORAS__.some((l) => l.name === file)) w.__E2E_MLX_LORAS__.push({ name: file })
         }
         return Promise.resolve({
           job: trainRun.job, status, phase: done ? '' : 'Training', percent: done ? 100 : 40,
           step: done ? trainRun.steps : Math.round(trainRun.steps / 3), steps: trainRun.steps, trigger: trainRun.trigger,
           error: status === 'error' ? opts.mlx?.trainError : status === 'cancelled' ? 'cancelled' : null,
-          output: status === 'complete' ? `/tmp/lu-e2e/loras/char_${trainRun.trigger}_zimage.safetensors` : null, logs: [], running: status === 'running',
+          output: status === 'complete' ? `/tmp/lu-e2e/loras/${trainRun.file}` : null, logs: [], running: status === 'running',
         })
       }
       case 'mlx_train_cancel':

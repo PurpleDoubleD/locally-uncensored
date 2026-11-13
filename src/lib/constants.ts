@@ -28,6 +28,8 @@ export const DEFAULT_SETTINGS: Settings = {
   thinkingEnabled: true,
   // Emoticons to emojis in the chat composer (3.0.7), as chat apps do.
   emojiAutoReplace: true,
+  // GH #202: Enter sends, as it always did, until the user picks "new line".
+  enterKey: 'send',
   // REA plugin (3.0.7): a local MCP server, off until the user turns it on.
   reaPluginEnabled: false,
   // Reasoning effort (2.6.8). 'high' is not a taste, it is the rung this
@@ -95,6 +97,7 @@ export const DEFAULT_SETTINGS: Settings = {
   // into true. A version bump that buys nothing costs a full state loss on
   // downgrade (lib/persist-version.ts, DOWNGRADE-KONTRAKT).
   autoCompact: true,
+  chatRecall: false,
   autoCompactThreshold: 0,
   // GH #171: 0 = an attached file takes what the model's context allows.
   // Additive like the key above, no version bump.
@@ -136,6 +139,8 @@ export const DEFAULT_SETTINGS: Settings = {
   // 'auto' = evict the local text model only when it wouldn't co-exist with the
   // ComfyUI model in VRAM. Safest default (no eviction on unknown sizes).
   exclusiveVramMode: 'auto',
+  // 3.0.9 (B27): ComfyUI's memory goes back five minutes after the last render.
+  freeAfterRender: 'idle',
   // 3.0.8 (A2): long generations from the chat go on in the background.
   backgroundMediaTools: true,
   // 3.0.8 (A2): no card per service until the user picks one.

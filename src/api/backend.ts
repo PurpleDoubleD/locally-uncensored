@@ -506,6 +506,7 @@ export async function backendCall<T = unknown>(
     install_ollama: { path: "/local-api/install-ollama", method: "POST" },
     install_ollama_status: { path: "/local-api/install-ollama-status" },
     set_comfyui_port: { path: "/local-api/set-comfyui-port", method: "POST" },
+    set_comfyui_autostart: { path: "/local-api/set-comfyui-autostart", method: "POST" },
     set_comfyui_host: { path: "/local-api/set-comfyui-host", method: "POST" },
     set_ollama_host: { path: "/local-api/set-ollama-host", method: "POST" },
     get_ollama_host: { path: "/local-api/get-ollama-host" },
@@ -571,6 +572,9 @@ export async function backendCall<T = unknown>(
     video_generate: { path: "/local-api/video-generate", method: "POST" },
     video_progress: { path: "/local-api/video-progress" },
     video_cancel: { path: "/local-api/video-cancel", method: "POST" },
+    // B18: the colour settle of a long clip runs in the desktop app only
+    // (commands/video_settle.rs); the dev server answers 501.
+    video_color_settle: { path: "/local-api/video-color-settle", method: "POST" },
     read_media_file: { path: "/local-api/read-media-file", method: "POST" },
     // The music engine of the Mac (commands/music.rs), desktop only like the
     // MLX commands above: the dev server answers 501 (mlx-media-stubs.ts).
@@ -608,6 +612,7 @@ export async function backendCall<T = unknown>(
     // REA, the reverse engineering plugin of the agents: the pinned package
     // is fetched and checked by the Rust process only (commands/plugin_rea.rs).
     plugin_rea_status: { path: "/local-api/plugin-rea-status" },
+    mcp_child_path: { path: "/local-api/mcp-child-path" },
     plugin_rea_fetch: { path: "/local-api/plugin-rea-fetch", method: "POST" },
     plugin_rea_guard: { path: "/local-api/plugin-rea-guard", method: "POST" },
     // Astra computer use: mouse, keyboard and screen belong to the Rust
@@ -637,6 +642,7 @@ export async function backendCall<T = unknown>(
     computer_surface: { path: "/local-api/computer-surface", method: "POST" },
     computer_surface_corner: { path: "/local-api/computer-surface-corner", method: "POST" },
     transcribe: { path: "/local-api/transcribe", method: "POST" },
+    transcribe_external: { path: "/local-api/transcribe-external", method: "POST" },
     execute_code: { path: "/local-api/execute-code", method: "POST" },
     // file_read / file_write: ABSICHTLICH NICHT HIER. Die beiden Dev-Endpunkte
     // sind entfernt (siehe vite.config.ts), weil sie keinen Aufrufer mehr
@@ -650,6 +656,8 @@ export async function backendCall<T = unknown>(
     detect_model_path: { path: "/local-api/detect-model-path", method: "POST" },
     check_model_sizes: { path: "/local-api/check-model-sizes", method: "POST" },
     delete_comfy_model: { path: "/local-api/delete-comfy-model", method: "POST" },
+    // D1: Details for a ComfyUI file. Rust only, the dev server answers 501.
+    comfy_model_info: { path: "/local-api/comfy-model-info", method: "POST" },
     // Check files and Repair (GH #113): Rust only, the dev server answers
     // 501 (dev-server/remote-stubs.ts).
     verify_model_files: { path: "/local-api/verify-model-files", method: "POST" },
@@ -667,6 +675,20 @@ export async function backendCall<T = unknown>(
     set_gpu_roles: { path: "/local-api/set-gpu-roles", method: "POST" },
     describe_gpu_roles: { path: "/local-api/describe-gpu-roles" },
     // Remove refusals (A14): Python processes the Rust side starts and owns.
+    // Neuron tweaker (3.0.9, P11): desktop only, stubbed 501 in dev-server.
+    neuron_presets: { path: "/local-api/neuron-presets" },
+    neuron_info: { path: "/local-api/neuron-info", method: "POST" },
+    neuron_build: { path: "/local-api/neuron-build", method: "POST" },
+    neuron_feature_add: { path: "/local-api/neuron-feature-add", method: "POST" },
+    neuron_mlp_add: { path: "/local-api/neuron-mlp-add", method: "POST" },
+    neuron_delete: { path: "/local-api/neuron-delete", method: "POST" },
+    neuron_sae_download: { path: "/local-api/neuron-sae-download", method: "POST" },
+    neuron_sae_search: { path: "/local-api/neuron-sae-search", method: "POST" },
+    neuron_status: { path: "/local-api/neuron-status" },
+    neuron_cancel: { path: "/local-api/neuron-cancel", method: "POST" },
+    neuron_dismiss: { path: "/local-api/neuron-dismiss", method: "POST" },
+    neuron_apply: { path: "/local-api/neuron-apply", method: "POST" },
+    neuron_compare: { path: "/local-api/neuron-compare", method: "POST" },
     abliterate_plan: { path: "/local-api/abliterate-plan", method: "POST" },
     abliterate_start: { path: "/local-api/abliterate-start", method: "POST" },
     abliterate_status: { path: "/local-api/abliterate-status" },

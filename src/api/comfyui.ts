@@ -63,6 +63,10 @@ export interface GenerateParams {
    *  Lets an all-in-one file in models/checkpoints use its own encoder/VAE. */
   modelParts?: { textEncoder: boolean; vae: boolean }
   denoise?: number      // I2I denoise strength (0.0–1.0, default 1.0 = full txt2img)
+  /** Qwen edits only (Qwen-Image 2.1, Qwen-Image-Edit 2509/2511): the Edit
+   *  strength, 0.05 to 1. 1 or unset is the template's edit from noise;
+   *  lower starts the sampler from the source and keeps more of it (B46). */
+  editStrength?: number
   removebg?: boolean    // Background removal: LoadImage → RMBG → SaveImage cutout (no diffusion)
   /** Qwen-Image 2.1 text-to-image only: ask for an RGBA picture with a
    *  transparent background (lib/transparent-image.ts). Ignored elsewhere. */
@@ -99,10 +103,19 @@ export interface VideoParams extends GenerateParams {
   frames: number
   fps: number
   inputImage?: string  // Uploaded image filename for I2V models (SVD, FramePack)
+  /** Animate: the picture the clip ends on (B38), for the models
+   *  lib/frame-refs localEndFrame names. Any other model refuses it. */
+  endImage?: string
   // SVD motion strength (motion_bucket_id, 1–255). Lower = more faithful to the
   // source still / calmer motion; 127 (SVD default) drifts hard. We default ~90
   // for I2V fidelity (2026-06-11). Honoured only by the SVD path.
   motionBucketId?: number
+  /** A later section of a long clip (B18): the clip so far in ComfyUI's input
+   *  folder and how many of its last frames this section repeats. The graph
+   *  starts on those frames and outputs the whole clip (api/video-continue). */
+  continueFrom?: { video: string; overlap: number }
+  /** One pass with sliding context windows instead of sections (B18). */
+  contextWindows?: boolean
 }
 
 export interface ComfyUIOutput {
@@ -141,6 +154,12 @@ export function extractComfyOutputFiles(nodeOutput: unknown): ComfyUIOutput[] {
         typeof (item as { filename: unknown }).filename === 'string'
       ) {
         const it = item as { filename: string; subfolder?: unknown; type?: unknown }
+        // A file of ComfyUI's INPUT folder is never a result. Core LoadVideo
+        // reports a preview of the video it loaded under that type (B18 box
+        // run, 27.10.2026: every continued section of a long clip listed the
+        // clip so far next to its own output, and the chain took the input
+        // for the new section). Motion Control's driving video is the same.
+        if (it.type === 'input') continue
         found.push({
           filename: it.filename,
           subfolder: typeof it.subfolder === 'string' ? it.subfolder : '',
@@ -491,6 +510,9 @@ export function isI2VModel(name: string): boolean {
   if (isFastH3(lower)) return false
   // An A14B half is one or the other, never both like the TI2V-5B.
   if (isWan22A14B(lower)) return lower.includes('i2v') || !lower.includes('t2v')
+  // Wan 2.1 FLF2V (wan2.1_flf2v_720p_14B) starts from an image and ends on
+  // a second one (B38); its name carries no i2v tag.
+  if (/(^|[^a-z0-9])flf2v([^a-z0-9]|$)/.test(lower)) return true
   return lower.includes('i2v') || lower.includes('svd') || lower.includes('framepack')
     || lower.includes('ti2v') || lower.includes('wan2.2') || lower.includes('wan2_2') || lower.includes('wan22')
     || lower.includes('ltx') || lower.includes('video2world') || classifyModel(name) === 'minimaxh3'
@@ -514,7 +536,7 @@ export function isT2VCapable(name: string): boolean {
   if (lower.includes('ti2v') || lower.includes('wan2.2') || lower.includes('wan2_2') || lower.includes('wan22')) return true
   if (lower.includes('svd') || lower.includes('framepack')) return false
   if (lower.includes('video2world')) return false
-  if (lower.includes('i2v')) return false
+  if (lower.includes('i2v') || /(^|[^a-z0-9])flf2v([^a-z0-9]|$)/.test(lower)) return false
   return true
 }
 
@@ -1280,9 +1302,18 @@ async function mainModelLane(
     if (isStrayAddonFile(name)) continue
     candidates.push({ name, type: classifyModel(name), source: 'checkpoint' })
   }
+  // The picker offers a name once (Discord #bug-reports 30.10.2026: Edit listed
+  // "krea2TurboOfficialComfy krea2TurboInt8" three times). A file that sits in
+  // checkpoints/ and in diffusion_models/ (two copies, or one folder that
+  // extra_model_paths.yaml names for both) came back from both loaders. Every
+  // run looks a name up with `find`, which takes the checkpoint entry, so
+  // that is the one kept. The inventory lanes (hidePartialDownloads false) are
+  // left as they were.
+  const listed = new Set(hidePartialDownloads ? candidates.map((m) => m.name) : [])
   for (const name of unets) {
     if (complete && !complete.has(name)) continue
     if (isStrayAddonFile(name)) continue
+    if (listed.has(name)) continue
     candidates.push({ name, type: classifyModel(name), source: 'diffusion_model' })
   }
   await applyHeaderSniff(candidates)
@@ -2224,10 +2255,19 @@ async function findAnimateDiffModel(): Promise<string> {
 
 // ─── Workflow Submission ───
 
-export async function submitWorkflow(workflow: ComfyApiGraph, clientId?: string): Promise<string> {
+export async function submitWorkflow(
+  workflow: ComfyApiGraph,
+  clientId?: string,
+  opts: { previewMethod?: 'auto' | 'latent2rgb' | 'taesd' } = {},
+): Promise<string> {
   // Every run its own output names (comfyui-graph tagOutputPrefixes).
   const payload: Record<string, unknown> = { prompt: tagOutputPrefixes(workflow, newRunTag()) }
   if (clientId) payload.client_id = clientId
+  // B28: live previews for this prompt only. ComfyUI starts with previews off
+  // (--preview-method none) and takes a per-prompt override in extra_data
+  // since PR 11261 (2025-12-15, execution.py set_preview_method); an older
+  // one ignores the key and renders as before, without pictures.
+  if (opts.previewMethod) payload.extra_data = { preview_method: opts.previewMethod }
   // Use localFetch (Rust proxy in Tauri, direct fetch in dev). The previous
   // direct-only fetch broke for any ComfyUI not started by LU itself —
   // `--enable-cors-header` is the LU spawn flag, but a user-run ComfyUI
@@ -2249,33 +2289,7 @@ export async function submitWorkflow(workflow: ComfyApiGraph, clientId?: string)
     const rawText = await res.text().catch(() => '')
     let errMsg = `HTTP ${res.status}`
     try {
-      // ComfyUI's rejection body. Foreign JSON: `error` is a string on some
-      // versions and an `{ message }` on others, and `node_errors` is only
-      // present for a validation failure — so every read is narrowed.
-      const errData: unknown = JSON.parse(rawText)
-      const parts: string[] = []
-      const rawErr = isRecord(errData) ? errData.error : undefined
-      const topLevel = asString(rawErr) ?? (isRecord(rawErr) ? asString(rawErr.message) : undefined)
-      if (topLevel) parts.push(topLevel)
-      const nodeErrors = isRecord(errData) ? errData.node_errors : undefined
-      if (isRecord(nodeErrors)) {
-        for (const [nodeId, data] of Object.entries(nodeErrors)) {
-          const errs = asRecordArray(isRecord(data) ? data.errors : undefined)
-            // "Value not in list" alone names no value; the details say which
-            // one ("ckpt_name: 'x.safetensors' not in [...]"). The list itself
-            // can be hundreds of file names, so it is cut off.
-            .map((e) => {
-              const message = asString(e.message) ?? ''
-              const details = asString(e.details)?.split(' not in [')[0].slice(0, 200)
-              return details && message ? `${message} (${details})` : message || details || ''
-            })
-            .filter(Boolean)
-            .join(', ') || 'unknown'
-          const cls = (isRecord(data) ? asString(data.class_type) : undefined) ?? '?'
-          parts.push(`Node ${nodeId} (${cls}): ${errs}`)
-        }
-      }
-      if (parts.length > 0) errMsg = parts.join(' | ')
+      errMsg = describeComfyRejection(JSON.parse(rawText)) ?? errMsg
     } catch {
       if (rawText) errMsg = rawText.slice(0, 500)
     }
@@ -2284,8 +2298,53 @@ export async function submitWorkflow(workflow: ComfyApiGraph, clientId?: string)
   }
   const data: unknown = await res.json()
   const promptId = isRecord(data) ? asString(data.prompt_id) : undefined
+  // ComfyUI queues a prompt as soon as ONE output node passes validation and
+  // lists the failed ones in node_errors of a 200 answer (execution.py
+  // validate_prompt, server.py post_prompt). The run then ends without the
+  // video or image LU waits for, and all the user saw was "no output was
+  // produced" (GitHub #196). Such a half prompt is taken out of the queue
+  // and reported like a full rejection.
+  const nodeErrors = isRecord(data) ? data.node_errors : undefined
+  if (isRecord(nodeErrors) && Object.keys(nodeErrors).length > 0) {
+    if (promptId) await abandonPrompt(promptId)
+    const errMsg = describeComfyRejection(data) ?? 'some output nodes failed validation'
+    log.error('comfyui.workflow_rejected', { errMsg, partial: true, workflow: JSON.stringify(workflow).slice(0, 2000) })
+    throw new Error(`ComfyUI rejected workflow: ${errMsg}`)
+  }
   if (!promptId) throw new Error('ComfyUI accepted the workflow but returned no prompt_id.')
   return promptId
+}
+
+/**
+ * ComfyUI's verdict on a prompt as one line, or null when it names nothing.
+ * Foreign JSON: `error` is a string on some versions and an `{ message }` on
+ * others, and `node_errors` is only present for a validation failure, so
+ * every read is narrowed.
+ */
+function describeComfyRejection(errData: unknown): string | null {
+  const parts: string[] = []
+  const rawErr = isRecord(errData) ? errData.error : undefined
+  const topLevel = asString(rawErr) ?? (isRecord(rawErr) ? asString(rawErr.message) : undefined)
+  if (topLevel) parts.push(topLevel)
+  const nodeErrors = isRecord(errData) ? errData.node_errors : undefined
+  if (isRecord(nodeErrors)) {
+    for (const [nodeId, data] of Object.entries(nodeErrors)) {
+      const errs = asRecordArray(isRecord(data) ? data.errors : undefined)
+        // "Value not in list" alone names no value; the details say which
+        // one ("ckpt_name: 'x.safetensors' not in [...]"). The list itself
+        // can be hundreds of file names, so it is cut off.
+        .map((e) => {
+          const message = asString(e.message) ?? ''
+          const details = asString(e.details)?.split(' not in [')[0].slice(0, 200)
+          return details && message ? `${message} (${details})` : message || details || ''
+        })
+        .filter(Boolean)
+        .join(', ') || 'unknown'
+      const cls = (isRecord(data) ? asString(data.class_type) : undefined) ?? '?'
+      parts.push(`Node ${nodeId} (${cls}): ${errs}`)
+    }
+  }
+  return parts.length > 0 ? parts.join(' | ') : null
 }
 
 export async function cancelGeneration(): Promise<void> {
@@ -2416,15 +2475,23 @@ export async function getHistory(promptId: string): Promise<ComfyHistoryEntry | 
  *  not a stall — only silence from BOTH the socket and the queue aborts.
  *  Queue entries are `[number, prompt_id, ...]` tuples. */
 export async function isPromptQueued(promptId: string): Promise<boolean> {
+  return (await promptQueueState(promptId)) === 'queued'
+}
+
+/** Like isPromptQueued, but says when ComfyUI gave no answer. A busy ComfyUI
+ *  can leave HTTP unanswered for minutes (I1, 12 GB box: a Z-Image VAE decode
+ *  through shared memory, 22 min), and "no answer" is not "gone": only
+ *  'gone' lets the Create watchdog call a render stalled. */
+export async function promptQueueState(promptId: string): Promise<'queued' | 'gone' | 'unknown'> {
   try {
     const res = await localFetch(comfyuiUrl('/queue'), { timeoutMs: COMFY_POLL_TIMEOUT_MS })
-    if (!res.ok) return false
+    if (!res.ok) return 'unknown'
     const q = await res.json()
     const inList = (list: unknown) => Array.isArray(list)
       && list.some((e) => Array.isArray(e) && e[1] === promptId)
-    return inList(q.queue_running) || inList(q.queue_pending)
+    return inList(q.queue_running) || inList(q.queue_pending) ? 'queued' : 'gone'
   } catch {
-    return false
+    return 'unknown'
   }
 }
 

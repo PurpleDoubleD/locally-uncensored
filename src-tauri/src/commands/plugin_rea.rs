@@ -81,6 +81,14 @@ fn child_path() -> Option<String> {
     }
 }
 
+/// The PATH every external MCP server starts with (api/mcp/external-client,
+/// `spawnEnv`): the login shell's on a Mac, where a Finder start has only
+/// launchd's and an installed uvx or npx is not found; None elsewhere.
+#[tauri::command]
+pub async fn mcp_child_path() -> Result<Option<String>, String> {
+    tokio::task::spawn_blocking(child_path).await.map_err(|e| e.to_string())
+}
+
 /// The file name of Node on this platform.
 const NODE_EXE: &str = if cfg!(windows) { "node.exe" } else { "node" };
 
@@ -280,11 +288,172 @@ pub fn keep_tarball(dir: &Path, bytes: &[u8]) -> Result<PathBuf, String> {
     Ok(target)
 }
 
+// ── Ghidra, and its decompiler on this machine ─────────────────────────────
+//
+// REA uses a Ghidra the user installed (LU installs none) and finds it through
+// GHIDRA_INSTALL_DIR or a `ghidra`/`ghidraRun` launcher on the PATH. Two
+// things went wrong on a Mac (B11, A37 run 27.10.2026):
+//
+//  1. The official Ghidra download carries its native decompiler only for
+//     Windows and Linux x86-64. On Apple Silicon (and Intel Macs, Linux ARM)
+//     Ghidra's own "Getting Started" says to build it once with
+//     `support/gradle` + `gradle buildNatives`. Without that, REA answers every
+//     decompile with `executable_missing … os/mac_arm_64/decompile` and the
+//     user reads it as REA being broken.
+//  2. A Mac app started from the Finder has neither GHIDRA_INSTALL_DIR nor a
+//     terminal's PATH, so a Ghidra unpacked into the home folder was not found
+//     at all.
+//
+// LU now looks for the install, says whether its decompiler is there, and
+// hands REA the folder it found. It builds nothing and downloads nothing: the
+// build is the user's step, in Terminal, with Ghidra's own instructions.
+
+/// The version REA 6.5.0 is validated against (`SUPPORTED_GHIDRA_VERSION`).
+pub const GHIDRA_FOR_REA: &str = "12.1.4";
+
+/// Ghidra's folder name for this machine's native tools, as REA and Ghidra
+/// name them (`Ghidra/Features/Decompiler/os/<dir>`).
+pub fn ghidra_native_dir() -> Option<&'static str> {
+    if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
+        Some("mac_arm_64")
+    } else if cfg!(all(target_os = "macos", target_arch = "x86_64")) {
+        Some("mac_x86_64")
+    } else if cfg!(all(target_os = "linux", target_arch = "x86_64")) {
+        Some("linux_x86_64")
+    } else if cfg!(all(target_os = "linux", target_arch = "aarch64")) {
+        Some("linux_arm_64")
+    } else if cfg!(windows) {
+        // Windows on ARM runs the x86-64 build under emulation (Ghidra docs).
+        Some("win_x86_64")
+    } else {
+        None
+    }
+}
+
+const DECOMPILER_EXE: &str = if cfg!(windows) { "decompile.exe" } else { "decompile" };
+
+/// A folder is a Ghidra install when it has the two files REA checks first.
+fn is_ghidra_root(dir: &Path) -> bool {
+    let headless = if cfg!(windows) { "analyzeHeadless.bat" } else { "analyzeHeadless" };
+    dir.join("Ghidra").join("application.properties").is_file() && dir.join("support").join(headless).is_file()
+}
+
+/// `application.version` from `Ghidra/application.properties`.
+pub fn ghidra_version(root: &Path) -> Option<String> {
+    let raw = std::fs::read_to_string(root.join("Ghidra").join("application.properties")).ok()?;
+    raw.lines().find_map(|l| {
+        let (k, v) = l.split_once('=')?;
+        (k.trim() == "application.version").then(|| v.trim().to_string())
+    })
+}
+
+/// The decompiler Ghidra will use, built (`build/os`) before shipped (`os`),
+/// the order Ghidra and REA prefer.
+pub fn ghidra_decompiler(root: &Path, native_dir: &str) -> Option<PathBuf> {
+    let base = root.join("Ghidra").join("Features").join("Decompiler");
+    [base.join("build").join("os").join(native_dir), base.join("os").join(native_dir)]
+        .into_iter()
+        .map(|d| d.join(DECOMPILER_EXE))
+        .find(|p| p.is_file())
+}
+
+/// Folders a Ghidra is unpacked into without a terminal's help. Not Desktop,
+/// Documents or Downloads: on a Mac the first touch of each asks the user for
+/// permission (see `find_comfyui_path`), and a status poll must not do that.
+fn ghidra_search_dirs(home: &Path) -> Vec<PathBuf> {
+    let mut dirs = vec![home.to_path_buf(), home.join("Applications"), home.join("tools"), home.join("opt")];
+    if cfg!(target_os = "macos") {
+        dirs.push(PathBuf::from("/Applications"));
+        // Homebrew's cask keeps the unpacked release one level down.
+        for cask in ["/opt/homebrew/Caskroom/ghidra", "/usr/local/Caskroom/ghidra"] {
+            if let Ok(rd) = std::fs::read_dir(cask) {
+                dirs.extend(rd.flatten().map(|e| e.path()));
+            }
+        }
+    } else if cfg!(windows) {
+        dirs.push(PathBuf::from("C:\\ghidra"));
+        dirs.push(PathBuf::from("C:\\Program Files"));
+    } else {
+        dirs.push(PathBuf::from("/opt"));
+        dirs.push(PathBuf::from("/usr/share"));
+    }
+    dirs
+}
+
+/// Where the Ghidra REA will use is, and how LU found it.
+///
+/// The order is REA's own: an explicit GHIDRA_INSTALL_DIR wins even when it
+/// is wrong (REA does not look further either), then a launcher on the PATH
+/// REA gets, then the fixed folders, newest version first.
+pub fn find_ghidra(env_dir: Option<&str>, path: Option<&str>, search: &[PathBuf]) -> Option<(PathBuf, &'static str)> {
+    if let Some(d) = env_dir.map(str::trim).filter(|d| !d.is_empty()) {
+        return Some((PathBuf::from(d), "env"));
+    }
+    if let Some(path) = path {
+        let launchers: &[&str] = if cfg!(windows) { &["ghidraRun.bat", "ghidra.bat"] } else { &["ghidraRun", "ghidra"] };
+        for dir in std::env::split_paths(path) {
+            for l in launchers {
+                if let Ok(real) = std::fs::canonicalize(dir.join(l)) {
+                    if let Some(root) = real.parent().filter(|r| is_ghidra_root(r)) {
+                        return Some((root.to_path_buf(), "path"));
+                    }
+                }
+            }
+        }
+    }
+    let mut found: Vec<PathBuf> = search
+        .iter()
+        .filter_map(|d| std::fs::read_dir(d).ok())
+        .flat_map(|rd| rd.flatten().map(|e| e.path()))
+        .filter(|p| {
+            p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.to_ascii_lowercase().starts_with("ghidra"))
+                && is_ghidra_root(p)
+        })
+        .collect();
+    found.sort_by_key(|p| std::cmp::Reverse(ghidra_version(p).map(|v| version_triple(&v))));
+    found.into_iter().next().map(|p| (p, "folder"))
+}
+
+fn version_triple(v: &str) -> (u32, u32, u32) {
+    let mut it = v.split(|c: char| !c.is_ascii_digit()).filter(|s| !s.is_empty()).map(|s| s.parse().unwrap_or(0));
+    (it.next().unwrap_or(0), it.next().unwrap_or(0), it.next().unwrap_or(0))
+}
+
+/// What the plugin row says about Ghidra. `null` fields where nothing was
+/// found; `needsNatives` is the Apple Silicon case B11 is about.
+pub fn ghidra_status_in(found: Option<(PathBuf, &'static str)>, native_dir: Option<&str>) -> Value {
+    let Some((root, how)) = found else {
+        return json!({ "found": false, "nativeDir": native_dir, "wantVersion": GHIDRA_FOR_REA });
+    };
+    let complete = is_ghidra_root(&root);
+    let decompiler = native_dir.and_then(|n| ghidra_decompiler(&root, n));
+    json!({
+        "found": complete,
+        "installDir": root.to_string_lossy(),
+        "foundBy": how,
+        "version": ghidra_version(&root),
+        "wantVersion": GHIDRA_FOR_REA,
+        "nativeDir": native_dir,
+        "decompiler": decompiler.as_ref().map(|p| p.to_string_lossy().into_owned()),
+        "needsNatives": complete && decompiler.is_none(),
+        "buildDir": root.join("support").join("gradle").to_string_lossy(),
+    })
+}
+
+fn ghidra_status(path: Option<&str>) -> Value {
+    let env_dir = std::env::var("GHIDRA_INSTALL_DIR").ok();
+    let home = crate::os_paths::home();
+    ghidra_status_in(find_ghidra(env_dir.as_deref(), path, &ghidra_search_dirs(&home)), ghidra_native_dir())
+}
+
 #[tauri::command]
 pub async fn plugin_rea_status() -> Result<Value, String> {
     tokio::task::spawn_blocking(|| {
         let (path, node) = path_and_node(child_path(), &crate::os_paths::home());
-        status_in(&plugin_dir(&crate::os_paths::data_dir()), path, node)
+        let ghidra = ghidra_status(path.as_deref().or(std::env::var("PATH").ok().as_deref()));
+        let mut status = status_in(&plugin_dir(&crate::os_paths::data_dir()), path, node);
+        status["ghidra"] = ghidra;
+        status
     })
     .await
     .map_err(|e| e.to_string())
@@ -512,6 +681,93 @@ mod tests {
         for not in ["v20.18.0", "v22.18.9", "v23.5.0", "v24.10.0", "v25.2.0", "", "garbage"] {
             assert!(!node_fits(not), "{not}");
         }
+    }
+
+    /// A Ghidra tree as the official zip unpacks it, with or without the
+    /// decompiler for `native`.
+    fn fake_ghidra(parent: &Path, name: &str, version: &str, native: Option<&str>) -> PathBuf {
+        let root = parent.join(name);
+        std::fs::create_dir_all(root.join("Ghidra")).unwrap();
+        std::fs::create_dir_all(root.join("support")).unwrap();
+        std::fs::write(root.join("Ghidra/application.properties"), format!("application.name=Ghidra\napplication.version={version}\n")).unwrap();
+        let headless = if cfg!(windows) { "analyzeHeadless.bat" } else { "analyzeHeadless" };
+        std::fs::write(root.join("support").join(headless), b"#!/bin/sh\n").unwrap();
+        if let Some(n) = native {
+            let d = root.join("Ghidra/Features/Decompiler/os").join(n);
+            std::fs::create_dir_all(&d).unwrap();
+            std::fs::write(d.join(DECOMPILER_EXE), b"x").unwrap();
+        }
+        root
+    }
+
+    /// B11: the official zip on Apple Silicon. It has linux_x86_64 and
+    /// win_x86_64 and nothing for mac_arm_64; the row has to say so.
+    #[test]
+    fn a_ghidra_without_this_machines_decompiler_needs_natives() {
+        let home = temp();
+        let root = fake_ghidra(&home, "ghidra_12.1.4_PUBLIC", "12.1.4", Some("linux_x86_64"));
+        let s = ghidra_status_in(find_ghidra(None, None, std::slice::from_ref(&home)), Some("mac_arm_64"));
+        assert_eq!(s["found"], true);
+        assert_eq!(s["foundBy"], "folder");
+        assert_eq!(s["version"], "12.1.4");
+        assert_eq!(s["needsNatives"], true);
+        assert!(s["decompiler"].is_null());
+        assert_eq!(s["buildDir"], root.join("support").join("gradle").to_string_lossy().as_ref());
+    }
+
+    /// After `gradle buildNatives` the decompiler sits under build/os, which
+    /// Ghidra prefers over os/.
+    #[test]
+    fn a_built_decompiler_counts() {
+        let home = temp();
+        let root = fake_ghidra(&home, "ghidra_12.1.4_PUBLIC", "12.1.4", None);
+        let built = root.join("Ghidra/Features/Decompiler/build/os/mac_arm_64");
+        std::fs::create_dir_all(&built).unwrap();
+        std::fs::write(built.join(DECOMPILER_EXE), b"x").unwrap();
+        let s = ghidra_status_in(find_ghidra(None, None, &[home]), Some("mac_arm_64"));
+        assert_eq!(s["needsNatives"], false);
+        assert!(s["decompiler"].as_str().unwrap().contains("build"));
+    }
+
+    #[test]
+    fn the_newest_ghidra_in_a_folder_wins_and_an_explicit_dir_wins_over_all() {
+        let home = temp();
+        fake_ghidra(&home, "ghidra_11.4_PUBLIC", "11.4", None);
+        fake_ghidra(&home, "ghidra_12.1.4_PUBLIC", "12.1.4", None);
+        fake_ghidra(&home, "not-ghidra", "99.0", None);
+        let (root, how) = find_ghidra(None, None, std::slice::from_ref(&home)).unwrap();
+        assert!(root.ends_with("ghidra_12.1.4_PUBLIC"));
+        assert_eq!(how, "folder");
+        let (root, how) = find_ghidra(Some("/somewhere/else"), None, &[home]).unwrap();
+        assert_eq!((root, how), (PathBuf::from("/somewhere/else"), "env"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_launcher_on_the_path_leads_to_its_install() {
+        // Homebrew's cask: /opt/homebrew/bin/ghidraRun is a link into the tree.
+        let home = temp();
+        let root = fake_ghidra(&home, "ghidra_12.1.4_PUBLIC", "12.1.4", None);
+        std::fs::write(root.join("ghidraRun"), b"#!/bin/sh\n").unwrap();
+        let bin = home.join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        std::os::unix::fs::symlink(root.join("ghidraRun"), bin.join("ghidraRun")).unwrap();
+        let (found, how) = find_ghidra(None, Some(&bin.to_string_lossy()), &[]).unwrap();
+        assert_eq!(how, "path");
+        assert_eq!(std::fs::canonicalize(found).unwrap(), std::fs::canonicalize(root).unwrap());
+    }
+
+    #[test]
+    fn no_ghidra_is_a_plain_not_found() {
+        let s = ghidra_status_in(find_ghidra(None, None, &[temp()]), Some("mac_arm_64"));
+        assert_eq!(s["found"], false);
+        assert!(s.get("needsNatives").is_none());
+    }
+
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    #[test]
+    fn this_mac_looks_for_mac_arm_64() {
+        assert_eq!(ghidra_native_dir(), Some("mac_arm_64"));
     }
 
     #[test]

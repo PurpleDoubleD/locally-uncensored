@@ -15,6 +15,7 @@
  */
 
 import { CLOUD_PITCH, CLOUD_REFUSAL_LINE, CLOUD_SUBSCRIBER_LINE, cloudSalesLines } from './cloud-pitch'
+import { NEURONS_ENABLED } from './features'
 
 /**
  * The two model numbers the 3.0.0 sheet quotes, in one place and read, never
@@ -129,7 +130,76 @@ export interface ReleaseNote {
   details?: ReleaseNoteSection[]
 }
 
+// 3.0.9 (31.10.2026, Kandidat integ/309, I1). Der Umfang steht im
+// CHANGELOG-Entwurf von T1 (Zentrale/entwuerfe/309-release); dieses Blatt
+// nimmt vorn die fuenf Dinge, die ein Nutzer zuerst merkt. Was nur in Tests
+// oder auf einer Karte lief, sagt die Zeile selbst knapp.
+const NOTE_309: ReleaseNote = {
+  version: '3.0.9',
+  headline: NEURONS_ENABLED
+    ? 'Group chats send every speaker the context you picked, Neurons puts sliders on a local model, Animate takes an end image, and Create takes reference pictures.'
+    : 'Group chats send every speaker the context you picked, Animate takes an end image, and Create takes reference pictures.',
+  lines: [
+    {
+      title: 'Group chat: every speaker gets the context you picked.',
+      detail: 'Local speakers get their chosen window minus room for the answer, no longer about half of it, and a grey line names messages that were not sent. One speaker can be regenerated on its own, and the speaking order can be changed with arrows or by dragging (GitHub #199, #200, #201).',
+    },
+    // Neurons is off in 3.0.9 (lib/features); the line comes back with it.
+    ...(NEURONS_ENABLED ? [{
+      title: 'Neurons: sliders that steer a local LU Engine model.',
+      detail: 'Ready made sliders such as Serious to Cheerful or Fewer refusals, sliders from your own examples, and a before and after on the same question. LU measures how far each slider can push on your model; for small models that takes under a minute, and before a longer run Neurons says how long it will take and shows its progress. Ollama and LM Studio cannot take these sliders.',
+    }] : []),
+    {
+      title: 'End images and reference pictures in Animate and Create.',
+      detail: 'Animate takes an end image for Wan 2.2 A14B, Wan 2.1 FLF2V and MiniMax H3, and up to nine reference pictures with MiniMax H3. Create takes reference pictures for Krea 2, Qwen-Image 2.1 and FLUX.2. A video shows a preview while it renders. The local end image and the preview ran on an RTX 3060; the reference pictures ran in automated tests only.',
+    },
+    {
+      title: 'A compaction is one line, and what came before stays readable.',
+      detail: 'The chat starts at the newest compaction, and marks on the left open each earlier stretch, read only. A new setting, off by default, brings back up to four older messages close in meaning to the new one after a compaction, in the plain chat.',
+    },
+    {
+      title: 'Liquid LFM3 and a newer llama.cpp in the LU Engine.',
+      detail: 'Liquid\'s LFM3 text, vision, omni and audio models run in the LU Engine, which now uses llama.cpp b11960, and through Ollama 0.40.13 or newer. The onboarding lists the LU Engine models you already have.',
+    },
+  ],
+  details: [
+    {
+      title: 'Desktop',
+      items: [
+        {
+          title: 'A status menu in the menu bar and tray.',
+          detail: 'With LU Cloud it shows your plan and credits left, locally the engine, the loaded model and the memory in use, with Open LU and Quit LU. On Linux it needs the tray library.',
+        },
+      ],
+    },
+    {
+      title: 'Fixes',
+      items: [
+        {
+          title: 'Train new on Windows and Linux says it trains Z-Image.',
+          detail: 'The local trainer only trains on Z-Image Base, so Train new no longer offers a list of image models there (GitHub #210).',
+        },
+      ],
+    },
+  ],
+}
+
 export const RELEASE_NOTES: ReleaseNote[] = [
+  // 3.0.10 (05.11.2026, Hotfix Chat-Rettung, I1). Wer von 3.0.8 kommt, hat
+  // 3.0.9 nie gesehen (releaseNotesStore zeigt nur die laufende Version),
+  // darum steht hier das Blatt von 3.0.9 mit der Rettung als erster Zeile.
+  {
+    ...NOTE_309,
+    version: '3.0.10',
+    lines: [
+      {
+        title: 'Chats that went missing from the list can be restored.',
+        detail: 'If the chat list lost chats, the backup no longer drops them: the previous backup is kept, and Settings, Chat Backup, Restore chats from backup brings back every chat that is not in your list. Chats you have now stay as they are. A note at launch says so when the backup holds such chats.',
+      },
+      ...NOTE_309.lines,
+    ],
+  },
+  NOTE_309,
   // 3.0.8 (26.10.2026, Kandidat integ/308-rc, A23). Der Umfang steht in
   // CHANGELOG.md unter [3.0.8]; dieses Blatt nimmt vorn die fuenf Dinge, die
   // ein Nutzer zuerst merkt, und darunter den Rest in Abschnitten. Das Blatt

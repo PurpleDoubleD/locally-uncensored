@@ -112,9 +112,9 @@ pub struct EngineTuning {
     /// GPU layers to offload. <0 = all (999, today's behavior); >=0 explicit
     /// (0 = CPU-only is a valid expert choice on RAM-starved boxes).
     pub gpu_layers: i32,
-    /// Pin model in RAM (`--mlock`).
+    /// Pin model in RAM (`--load-mode mlock`, see `load_mode`).
     pub mlock: bool,
-    /// Disable mmap (`--no-mmap`): slower load, fewer pageouts. On Windows
+    /// Disable mmap (`--load-mode none`): slower load, fewer pageouts. On Windows
     /// a start with layers on the card has it off anyway (`mmap_off`).
     pub no_mmap: bool,
     /// The person chose `ctx` (Settings or the chat's context menu, GH #129
@@ -128,6 +128,12 @@ pub struct EngineTuning {
     /// Set by the VRAM plan: `--cache-ram` in MiB when RAM is tight.
     #[serde(skip)]
     pub plan_cache_ram_mib: Option<u64>,
+    /// Set at the start from the Neuron tweaker (3.0.9, P11), never read
+    /// from settings: the one mixed control vector file for this model
+    /// (`--control-vector`). Only a file inside LU's own neuron folder gets
+    /// here (`neuron::control_vector_for`).
+    #[serde(skip)]
+    pub control_vector: Option<String>,
 }
 
 impl Default for EngineTuning {
@@ -144,6 +150,7 @@ impl Default for EngineTuning {
             ctx_chosen: false,
             plan_cpu_moe: 0,
             plan_cache_ram_mib: None,
+            control_vector: None,
         }
     }
 }
@@ -319,8 +326,30 @@ pub(crate) fn existing_mmproj(model_path: &str) -> Option<String> {
 /// gemma-3-4b conversion is a gemma3 by name, the app fed it the picture it
 /// had just generated, and the run ended on a red "This model can't read
 /// images" line under a picture that came out fine.
+///
+/// N1, 30.10.2026: a projector is not always an image part. llama.cpp b11960
+/// loads audio encoders through the same `--mmproj`, and the projector of
+/// LiquidAI/LFM3-Audio-2B-GGUF carries `clip.has_audio_encoder` and no vision
+/// encoder at all (Omni carries both, VL only vision). Such a model hears and
+/// does not see, and an image sent to it ends on a 501 from the engine. The
+/// projector's own head says which; a head without the flag (older and
+/// hand-made projectors, the dummies in the tests below) stays a vision part,
+/// as every projector was before audio ones existed.
 pub(crate) fn model_can_see_images(model_path: &str) -> bool {
-    existing_mmproj(model_path).is_some()
+    existing_mmproj(model_path).is_some_and(|p| projector_sees_images(&p))
+}
+
+/// `clip.has_vision_encoder` of a projector. A head without it is a vision
+/// part unless it names an audio encoder instead (LFM3 Audio writes only
+/// `clip.has_audio_encoder`); an unreadable head stays a vision part.
+pub(crate) fn projector_sees_images(projector_path: &str) -> bool {
+    use crate::commands::gguf::{read_model_head, Meta};
+    let Some(head) = read_model_head(projector_path) else { return true };
+    let flag = |key: &str| match head.keys.get(key) {
+        Some(Meta::Int(n)) => Some(*n != 0),
+        _ => None,
+    };
+    flag("clip.has_vision_encoder").unwrap_or_else(|| flag("clip.has_audio_encoder") != Some(true))
 }
 
 // ── How much of a model a card can actually hold (3.0.0 list, bugs u and a) ──
@@ -638,7 +667,8 @@ pub(crate) fn stderr_blames_the_image_part(stderr: &str) -> bool {
 /// the engine never starts. `-m` and `--mmproj` open through UTF-16
 /// (`ggml_fopen`, `open_ifstream_binary`), and so do the slot files
 /// themselves, so it is only this check that fails (read in b9949:
-/// common/arg.cpp, common/common.cpp).
+/// common/arg.cpp, common/common.cpp; unchanged in b11960, arg.cpp still
+/// calls `fs_is_directory` on it).
 ///
 /// An ASCII path passes the check in every code page. A path that is not
 /// ASCII gets its 8.3 short name, when Windows made an ASCII one; a volume
@@ -765,7 +795,7 @@ pub(crate) fn same_measured_request(running: &[String], requested: &[String], ct
         && (ctx_in(running).unwrap_or(0) >= asked || running_asked == Some(asked))
 }
 
-/// Whether a start goes without mmap (`--no-mmap`).
+/// Whether a start goes without mmap (`--load-mode none`, see `load_mode`).
 ///
 /// Discord (21.10.2026): with gemma-4-31b-it-q4_k_m on a 32 GB Windows PC
 /// all memory was in use right after the start, while the engine's own
@@ -785,6 +815,22 @@ pub(crate) fn same_measured_request(running: &[String], requested: &[String], ct
 /// reading it into a second copy would only cost the time.
 pub(crate) fn mmap_off(tuning: &EngineTuning, ngl: &str, windows: bool) -> bool {
     tuning.no_mmap || (windows && ngl != "0")
+}
+
+/// The `--load-mode` value for the two load settings, `None` for neither.
+///
+/// 3.0.9 (E1): llama.cpp b11960 removed `--mlock` and `--no-mmap` (upstream
+/// #20834 folded them into `--load-mode`, #28334 dropped the old spellings),
+/// and an argument the server does not know ends it before it loads. Same
+/// meaning as before: `mlock` alone kept the mapping and pinned it, both
+/// together read the file into memory and pinned that.
+pub(crate) fn load_mode(mlock: bool, no_mmap: bool) -> Option<&'static str> {
+    match (mlock, no_mmap) {
+        (false, false) => None,
+        (false, true) => Some("none"),
+        (true, false) => Some("mmap+mlock"),
+        (true, true) => Some("mlock"),
+    }
 }
 
 /// Build the `llama-server` argv for a chat engine.
@@ -859,11 +905,9 @@ pub(crate) fn server_args(
         args.push("-t".into());
         args.push(tuning.threads.to_string());
     }
-    if tuning.mlock {
-        args.push("--mlock".into());
-    }
-    if no_mmap {
-        args.push("--no-mmap".into());
+    if let Some(mode) = load_mode(tuning.mlock, no_mmap) {
+        args.push("--load-mode".into());
+        args.push(mode.into());
     }
     // 3.0.8 (A25): what the VRAM plan decided beyond the layer count. The
     // experts of the first layers of an MoE model stay on the processor
@@ -903,6 +947,13 @@ pub(crate) fn server_args(
     if let Some(dir) = slot_save_dir {
         args.push("--slot-save-path".into());
         args.push(dir.into());
+    }
+    // 3.0.9 (P11): the Neuron tweaker's sliders, mixed into one file. Part of
+    // the argv, so a changed slider is a different request and restarts the
+    // engine, and an unchanged one keeps it.
+    if let Some(path) = &tuning.control_vector {
+        args.push("--control-vector".into());
+        args.push(path.clone());
     }
     args
 }
@@ -1409,42 +1460,103 @@ pub fn reap_orphaned_sidecars(app: &AppHandle) {
 
 // ── Sidecar resolution ───────────────────────────────────────────────────────
 
-/// Locate the bundled `llama-server` binary. Prod: next to the main
-/// executable (where Tauri copies `externalBin`). Dev: the target-triple
-/// artifact `scripts/build-llama.sh` drops into `src-tauri/bin/`.
-fn resolve_engine_binary(app: &AppHandle) -> Option<PathBuf> {
-    // 1. Bundled: same dir as the running app binary.
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(dir) = exe.parent() {
-            let candidate = dir.join(sidecar_binary_name());
-            if candidate.exists() {
-                return Some(candidate);
-            }
-        }
-    }
+/// What a sidecar file on disk is.
+///
+/// GH #207: a build from source with the 0-byte stubs ci.yml creates for
+/// `cargo check` (`touch src-tauri/bin/lu-llama-server-<triple>.exe`) found the
+/// stub, because the lookup asked only `exists()`. Windows then refused to run
+/// it with "os error 193" (not a valid Win32 application), an answer that says
+/// nothing about the cause. A file is only the engine when it starts like a
+/// program of this platform.
+#[derive(Debug, PartialEq, Eq)]
+enum SidecarFile {
+    Missing,
+    /// There, but empty or not a program (its size in bytes).
+    NotAProgram(u64),
+    Program,
+}
 
-    // 2. Resource dir (belt-and-suspenders for platforms that stage it there).
+/// The first bytes of an executable on this platform: PE (`MZ`), ELF, or
+/// Mach-O (thin in both byte orders, and universal).
+fn starts_like_a_program(head: &[u8]) -> bool {
+    if cfg!(target_os = "windows") {
+        head.starts_with(b"MZ")
+    } else if cfg!(target_os = "macos") {
+        [[0xcf, 0xfa, 0xed, 0xfe], [0xce, 0xfa, 0xed, 0xfe], [0xfe, 0xed, 0xfa, 0xcf], [0xfe, 0xed, 0xfa, 0xce], [0xca, 0xfe, 0xba, 0xbe]]
+            .iter()
+            .any(|m| head.starts_with(m))
+    } else {
+        head.starts_with(b"\x7fELF")
+    }
+}
+
+fn sidecar_file(p: &Path) -> SidecarFile {
+    use std::io::Read;
+    let Ok(meta) = std::fs::metadata(p) else { return SidecarFile::Missing };
+    if !meta.is_file() {
+        return SidecarFile::Missing;
+    }
+    let mut head = [0u8; 4];
+    let n = std::fs::File::open(p).and_then(|mut f| f.read(&mut head)).unwrap_or(0);
+    if starts_like_a_program(&head[..n]) {
+        SidecarFile::Program
+    } else {
+        SidecarFile::NotAProgram(meta.len())
+    }
+}
+
+/// Where the engine may be, in the order it is looked for. Prod: next to the
+/// main executable (where Tauri copies `externalBin`), then the resource dir.
+/// Dev: the target-triple artifact `scripts/build-llama.sh` drops into
+/// `src-tauri/bin/` (`tauri dev` runs from target/debug, so up to the manifest).
+fn engine_binary_candidates(app: &AppHandle) -> Vec<PathBuf> {
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    if let Some(dir) = std::env::current_exe().ok().and_then(|e| e.parent().map(Path::to_path_buf)) {
+        candidates.push(dir.join(sidecar_binary_name()));
+    }
     if let Ok(res) = app.path().resource_dir() {
-        let candidate = res.join(sidecar_binary_name());
-        if candidate.exists() {
-            return Some(candidate);
-        }
+        candidates.push(res.join(sidecar_binary_name()));
     }
-
-    // 3. Dev: src-tauri/bin/lu-llama-server-<triple>[.exe]. `tauri dev` runs
-    //    the binary from target/debug, so walk up to the manifest dir.
-    let triple = host_target_triple();
     let suffix = if cfg!(target_os = "windows") { ".exe" } else { "" };
-    let dev_name = format!("lu-llama-server-{triple}{suffix}");
-    let mut dev_candidates: Vec<PathBuf> = Vec::new();
+    let dev_name = format!("lu-llama-server-{}{suffix}", host_target_triple());
     if let Ok(manifest) = std::env::var("CARGO_MANIFEST_DIR") {
-        dev_candidates.push(PathBuf::from(&manifest).join("bin").join(&dev_name));
+        candidates.push(PathBuf::from(&manifest).join("bin").join(&dev_name));
     }
     if let Ok(cwd) = std::env::current_dir() {
-        dev_candidates.push(cwd.join("src-tauri").join("bin").join(&dev_name));
-        dev_candidates.push(cwd.join("bin").join(&dev_name));
+        candidates.push(cwd.join("src-tauri").join("bin").join(&dev_name));
+        candidates.push(cwd.join("bin").join(&dev_name));
     }
-    dev_candidates.into_iter().find(|p| p.exists())
+    candidates
+}
+
+/// The first candidate that is a program. A stub is passed over, so a real
+/// binary further down still counts.
+fn pick_engine_binary(candidates: &[PathBuf]) -> Option<PathBuf> {
+    candidates.iter().find(|p| sidecar_file(p) == SidecarFile::Program).cloned()
+}
+
+/// Locate the bundled `llama-server` binary.
+fn resolve_engine_binary(app: &AppHandle) -> Option<PathBuf> {
+    pick_engine_binary(&engine_binary_candidates(app))
+}
+
+/// The sentence for an engine that cannot be started. `missing` is the call
+/// site's own sentence for no file at all; a file that is there but no program
+/// gets its own, because that is a build from source with the CI stub, not a
+/// broken installation.
+fn engine_binary_error(candidates: &[PathBuf], missing: impl FnOnce() -> String) -> String {
+    let stub = candidates.iter().find_map(|p| match sidecar_file(p) {
+        SidecarFile::NotAProgram(len) => Some(len),
+        _ => None,
+    });
+    match stub {
+        Some(len) => format!(
+            "The LU Engine program ({}) in this build is a placeholder of {len} bytes, not the engine, so it cannot start. \
+             A build from source needs the real file: run scripts/build-llama.sh, or take it from the latest release (CONTRIBUTING.md, \"The LU Engine\").",
+            sidecar_binary_name()
+        ),
+        None => missing(),
+    }
 }
 
 /// Another binary that ships next to the engine (`lu-llama-quantize`, used
@@ -1468,7 +1580,7 @@ pub(crate) fn resolve_sidecar(app: &AppHandle, base: &str) -> Option<PathBuf> {
         candidates.push(cwd.join("src-tauri").join("bin").join(&dev_name));
         candidates.push(cwd.join("bin").join(&dev_name));
     }
-    candidates.into_iter().find(|p| p.is_file())
+    candidates.into_iter().find(|p| sidecar_file(p) == SidecarFile::Program)
 }
 
 /// A llama-server of its own for one model, apart from the chat engine:
@@ -1477,9 +1589,16 @@ pub(crate) fn resolve_sidecar(app: &AppHandle, base: &str) -> Option<PathBuf> {
 /// to the app's lifetime, on a port the caller picked. Healthy when this
 /// returns; the caller kills it.
 pub(crate) fn spawn_private_server(app: &AppHandle, model_path: &str, port: u16, ctx: u32) -> Result<std::process::Child, String> {
-    let binary = resolve_engine_binary(app)
-        .ok_or_else(|| format!("Bundled engine binary not found ({}).", sidecar_binary_name()))?;
-    let args: Vec<String> = vec![
+    spawn_private_server_with(app, model_path, port, ctx, &[])
+}
+
+/// `spawn_private_server` with more flags at the end (the Neuron tweaker's
+/// strength check passes `--control-vector`).
+pub(crate) fn spawn_private_server_with(app: &AppHandle, model_path: &str, port: u16, ctx: u32, extra: &[String]) -> Result<std::process::Child, String> {
+    let candidates = engine_binary_candidates(app);
+    let binary = pick_engine_binary(&candidates)
+        .ok_or_else(|| engine_binary_error(&candidates, || format!("Bundled engine binary not found ({}).", sidecar_binary_name())))?;
+    let mut args: Vec<String> = vec![
         "-m".into(),
         model_path.into(),
         "--host".into(),
@@ -1493,6 +1612,7 @@ pub(crate) fn spawn_private_server(app: &AppHandle, model_path: &str, port: u16,
         "-np".into(),
         "1".into(),
     ];
+    args.extend(extra.iter().cloned());
     tracing::info!(target: "engine", port, command = %command_line(&binary, &args), "starting a llama-server for a check");
     let mut cmd = Command::new(&binary);
     super::engine_key::apply(&mut cmd);
@@ -1518,6 +1638,20 @@ pub(crate) fn spawn_private_server(app: &AppHandle, model_path: &str, port: u16,
         return Err(format!("The check could not load the model: {e}\n{why}"));
     }
     Ok(child)
+}
+
+/// What a llama.cpp tool next to the engine needs to find its card and its
+/// libraries the way the engine does: the GPU choice, the companion DLL/so
+/// folder, no console window. Used for `lu-llama-cvector-generator`.
+pub(crate) fn prepare_tool_command(app: &AppHandle, cmd: &mut Command) {
+    let state = app.state::<AppState>();
+    let gpu_selection = state.gpu_selection.lock().ok().map(|sel| sel.clone());
+    if let Some(sel) = gpu_selection {
+        crate::commands::gpu::apply_gpu_env(cmd, &sel);
+    }
+    apply_engine_backend_dir(cmd, resolve_engine_backend_dir(app).as_deref());
+    #[cfg(target_os = "windows")]
+    cmd.creation_flags(CREATE_NO_WINDOW);
 }
 
 /// K1 (3.0.1): directory holding the dynamic-ISA sidecar's companion
@@ -2096,12 +2230,13 @@ pub(crate) fn pick_save_slot(slots: &serde_json::Value) -> u32 {
 }
 
 /// Whether llama-server can save and restore a slot for an engine started with
-/// these arguments. Not with an image part: in the pinned b9949 every slot
-/// save, restore and erase first runs `check_no_mtmd`, which answers 501 "This
-/// feature is not supported by multimodal" as soon as a projector is loaded
-/// (tools/server/server-context.cpp). No flag of that build lifts the check
-/// while the projector stays loaded. `--no-mmproj` turns the image part off
-/// and counts as without one.
+/// these arguments. Not with an image part: in b9949 every slot save, restore
+/// and erase first ran `check_no_mtmd`, which answered 501 "This feature is
+/// not supported by multimodal" as soon as a projector was loaded
+/// (tools/server/server-context.cpp). b11960 (E1, 3.0.9) no longer has that
+/// check; until a hand-off with an image part has been measured on the card
+/// it stays off here. `--no-mmproj` turns the image part off and counts as
+/// without one.
 pub(crate) fn kv_handoff_possible(args: &[String]) -> bool {
     !args.iter().any(|a| {
         let flag = a.split('=').next().unwrap_or(a);
@@ -2826,6 +2961,28 @@ fn stderr_blames_the_model_file(stderr: &str) -> bool {
     MARKERS.iter().any(|m| lower.contains(m))
 }
 
+/// The architecture name llama.cpp says it does not know, when it names one.
+///
+/// N1, 30.10.2026: LiquidAI/LFM3-1.7B-GGUF carries `lfm3`, which the pinned
+/// b9949 does not know, and the engine said `unknown model architecture:
+/// 'lfm3'`. The app answered "may be damaged, cut short ... download it
+/// again", and a second download of a perfectly good file changes nothing. An
+/// EMPTY name stays with the damaged-file answer: that is what a truncated
+/// GGUF prints (`KAPUTTE_GGUF_STDERR`, measured 03.09.2026).
+fn stderr_names_an_unknown_architecture(stderr: &str) -> Option<String> {
+    const MARKER: &str = "unknown model architecture";
+    for line in stderr.lines() {
+        let lower = line.to_ascii_lowercase();
+        let Some(at) = lower.find(MARKER) else { continue };
+        let rest = line[at + MARKER.len()..].trim_start_matches([':', ' ']);
+        let Some(name) = rest.strip_prefix('\'').and_then(|r| r.split('\'').next()) else { continue };
+        if !name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || "-_.".contains(c)) {
+            return Some(name.to_string());
+        }
+    }
+    None
+}
+
 /// Der Anfang einer GGUF: die Marke und die Formatversion.
 const GGUF_MAGIC: &[u8; 4] = b"GGUF";
 
@@ -3025,6 +3182,8 @@ fn illegal_instruction_repair_sentence(module_count: Option<usize>, is_macos: bo
 fn died_failure_hint(stderr: &str, backend_dir_too_long: bool, on_linux: bool) -> String {
     if let Some(lib) = stderr_names_a_missing_system_library(stderr) {
         missing_library_hint(&lib, on_linux)
+    } else if let Some(arch) = stderr_names_an_unknown_architecture(stderr) {
+        format!(" The model file is a {arch} model, and this LU Engine does not know that architecture yet. Downloading it again will not help. Run it through Ollama, or pick another model.")
     } else if backend_dir_too_long {
         format!(" {}", long_install_path_hint())
     } else if stderr_blames_the_model(stderr) {
@@ -3220,7 +3379,7 @@ pub async fn start_bundled_engine(
 }
 
 #[cfg(desktop)]
-fn start_bundled_engine_blocking(
+pub(crate) fn start_bundled_engine_blocking(
     app: &AppHandle,
     state: &State<'_, AppState>,
     model_path: String,
@@ -3232,7 +3391,8 @@ fn start_bundled_engine_blocking(
     // now wants it. Cleared under the gate, so it is only ever a stop that
     // arrives DURING this start that the waits below get to see.
     state.engine_stop_requested.store(false, std::sync::atomic::Ordering::SeqCst);
-    let tuning = tuning.unwrap_or_default();
+    let mut tuning = tuning.unwrap_or_default();
+    tuning.control_vector = crate::commands::neuron::control_vector_for(&model_path);
     let port = port.unwrap_or(DEFAULT_ENGINE_PORT);
 
     if !Path::new(&model_path).exists() {
@@ -3529,14 +3689,18 @@ fn start_after_stop(
         }
     }
 
-    let binary = resolve_engine_binary(app).ok_or_else(|| {
+    let candidates = engine_binary_candidates(app);
+    let binary = pick_engine_binary(&candidates).ok_or_else(|| {
         // This used to name a build script. On a user's machine that is not an
         // instruction, it is noise; the only real remedies are a reinstall or a
-        // different backend (GH #118).
-        format!(
-            "The LU Engine program ({}) is missing from this installation. Reinstall Locally Uncensored, or pick a different backend in Settings, AI Backends.",
-            sidecar_binary_name()
-        )
+        // different backend (GH #118). A placeholder file is the one case that
+        // is a build from source, and gets the build steps (GH #207).
+        engine_binary_error(&candidates, || {
+            format!(
+                "The LU Engine program ({}) is missing from this installation. Reinstall Locally Uncensored, or pick a different backend in Settings, AI Backends.",
+                sidecar_binary_name()
+            )
+        })
     })?;
     // K1 (3.0.1): where the dynamic-ISA sidecar's companion libraries are,
     // None on mac / a static build. Resolved once here and carried through
@@ -4177,6 +4341,12 @@ fn note_image_part(state: &AppState, answer: &mut serde_json::Value, note: Optio
 }
 
 /// The image part a finished argv passes along, when it passes one.
+/// Whether a process started with these arguments can see a picture: it got
+/// a part, and that part is an image part (N1: LFM3 Audio's part only hears).
+pub(crate) fn started_seeing(args: &[String]) -> bool {
+    image_part_in(args).is_some_and(projector_sees_images)
+}
+
 pub(crate) fn image_part_in(args: &[String]) -> Option<&str> {
     let at = args.iter().position(|a| a == "--mmproj")?;
     args.get(at + 1).map(String::as_str)
@@ -4761,7 +4931,7 @@ fn list_bundled_models_blocking(
         let guard = state.bundled_engine.lock().unwrap();
         (
             guard.as_ref().map(|e| e.model_path.clone()),
-            guard.as_ref().is_some_and(|e| image_part_in(&e.args).is_some()),
+            guard.as_ref().is_some_and(|e| started_seeing(&e.args)),
         )
     };
     let dirs = bundled_scan_dirs(&dir, extra_dirs);
@@ -5360,11 +5530,14 @@ fn start_bundled_embed_blocking(
         ));
     }
 
-    let binary = resolve_engine_binary(app).ok_or_else(|| {
-        format!(
-            "Bundled engine binary not found ({}). Run scripts/build-llama.sh to produce the sidecar.",
-            sidecar_binary_name()
-        )
+    let candidates = engine_binary_candidates(app);
+    let binary = pick_engine_binary(&candidates).ok_or_else(|| {
+        engine_binary_error(&candidates, || {
+            format!(
+                "Bundled engine binary not found ({}). Run scripts/build-llama.sh to produce the sidecar.",
+                sidecar_binary_name()
+            )
+        })
     })?;
 
     let embed_args = build_embed_args(&model_path, port);
@@ -6040,7 +6213,8 @@ mod phone_tests {
         // A phone cannot start a process. Whatever builds a `Command` for
         // llama-server must not be reachable there.
         for signature in [
-            "fn start_bundled_engine_blocking(\n    app: &AppHandle,",
+            // pub(crate) since 3.0.9: the Neuron tweaker restarts the engine with it.
+            "pub(crate) fn start_bundled_engine_blocking(\n    app: &AppHandle,",
             "fn restore_engine(binary: &Path,",
             "fn start_after_stop(\n",
             "fn serve_or_heal_garbled(\n",
@@ -6137,7 +6311,7 @@ mod tests {
     #[test]
     fn windows_starts_without_mmap_when_layers_go_to_the_card() {
         let auto = EngineTuning::default();
-        let has = |args: &[String]| args.iter().any(|a| a == "--no-mmap");
+        let has = |args: &[String]| args.windows(2).any(|w| w[0] == "--load-mode" && w[1] == "none");
         // Every layer on the card, a measured count, and the engine's own fit.
         assert!(has(&server_args("/m.gguf", &auto, 8127, None, None, None, true)));
         assert!(has(&server_args("/m.gguf", &auto, 8127, None, None, Some(35), true)));
@@ -6147,13 +6321,13 @@ mod tests {
         // Once, also when the user ticked it as well.
         let ticked = EngineTuning { no_mmap: true, ..Default::default() };
         let args = server_args("/m.gguf", &ticked, 8127, None, None, None, true);
-        assert_eq!(args.iter().filter(|a| *a == "--no-mmap").count(), 1);
+        assert_eq!(args.iter().filter(|a| *a == "--load-mode").count(), 1);
     }
 
     #[test]
     fn windows_keeps_mmap_on_the_processor_and_other_systems_keep_it_always() {
         let auto = EngineTuning::default();
-        let has = |args: &[String]| args.iter().any(|a| a == "--no-mmap");
+        let has = |args: &[String]| args.windows(2).any(|w| w[0] == "--load-mode" && w[1] == "none");
         // Every layer on the processor: the mapping is the model.
         let cpu = EngineTuning { gpu_layers: 0, ..Default::default() };
         assert!(!has(&server_args("/m.gguf", &cpu, 8127, None, None, None, true)));
@@ -6286,7 +6460,7 @@ mod tests {
     #[test]
     fn the_flag_follows_the_machine_it_is_built_for() {
         let args = super::build_server_args("/m.gguf", &EngineTuning::default(), 8127, None, None, None);
-        assert_eq!(args.iter().any(|a| a == "--no-mmap"), cfg!(target_os = "windows"));
+        assert_eq!(args.iter().any(|a| a == "--load-mode"), cfg!(target_os = "windows"));
     }
 
     #[test]
@@ -6557,6 +6731,60 @@ mod tests {
         );
     }
 
+    /// A GGUF head with nothing but these bool keys, as a projector writes them.
+    fn projector_head(flags: &[(&str, bool)]) -> Vec<u8> {
+        let mut b = Vec::new();
+        b.extend_from_slice(b"GGUF");
+        b.extend_from_slice(&3u32.to_le_bytes());
+        b.extend_from_slice(&0u64.to_le_bytes());
+        b.extend_from_slice(&(flags.len() as u64).to_le_bytes());
+        for (key, on) in flags {
+            b.extend_from_slice(&(key.len() as u64).to_le_bytes());
+            b.extend_from_slice(key.as_bytes());
+            b.extend_from_slice(&7u32.to_le_bytes());
+            b.push(u8::from(*on));
+        }
+        b
+    }
+
+    #[test]
+    fn a_loaded_audio_model_does_not_see_either() {
+        // Measured in the Mac app: LFM3-Audio loaded in the LU Engine was
+        // listed with vision=true, because the loaded model answered with
+        // "started with --mmproj".
+        let dir = tempfile::tempdir().unwrap();
+        let audio = dir.path().join("a.mmproj.gguf");
+        std::fs::write(&audio, projector_head(&[("clip.has_audio_encoder", true)])).unwrap();
+        let vision = dir.path().join("v.mmproj.gguf");
+        std::fs::write(&vision, projector_head(&[("clip.has_vision_encoder", true)])).unwrap();
+        let args = |p: &std::path::Path| vec!["-m".to_string(), "/m.gguf".into(), "--mmproj".into(), p.to_string_lossy().to_string()];
+        assert!(!started_seeing(&args(&audio)));
+        assert!(started_seeing(&args(&vision)));
+        assert!(!started_seeing(&["-m".to_string(), "/m.gguf".into()]));
+    }
+
+    #[test]
+    fn an_audio_projector_hears_and_does_not_see() {
+        // The flags of the three LFM3 projectors, read from the files on
+        // Hugging Face (LiquidAI/LFM3-{Audio,Omni,VL}-2B-GGUF, Q8_0) on the Mac.
+        let dir = tempfile::tempdir().unwrap();
+        for (name, flags, sees) in [
+            ("LFM3-Audio-2B-Q4_K_M", vec![("clip.has_audio_encoder", true)], false),
+            ("LFM3-Omni-2B-Q4_K_M", vec![("clip.has_vision_encoder", true), ("clip.has_audio_encoder", true)], true),
+            ("LFM3-VL-2B-Q4_K_M", vec![("clip.has_vision_encoder", true)], true),
+            ("Older-Vision-Q4_K_M", vec![], true),
+            ("Off-Q4_K_M", vec![("clip.has_vision_encoder", false), ("clip.has_audio_encoder", true)], false),
+        ] {
+            let model = dir.path().join(format!("{name}.gguf"));
+            std::fs::write(&model, b"weights").unwrap();
+            std::fs::write(dir.path().join(format!("{name}.mmproj.gguf")), projector_head(&flags)).unwrap();
+            let path = model.to_string_lossy().to_string();
+            assert_eq!(model_can_see_images(&path), sees, "{name}");
+            // The engine still starts with the projector: it is the model's ear.
+            assert!(existing_mmproj(&path).is_some(), "{name}");
+        }
+    }
+
     #[test]
     fn what_the_list_calls_seeing_is_what_the_start_passes_along() {
         // One question, asked twice: the model list reports `vision`, the
@@ -6633,10 +6861,84 @@ mod tests {
                 "-ctk", "q8_0",
                 "-ctv", "q8_0",
                 "-t", "8",
-                "--mlock",
-                "--no-mmap",
+                "--load-mode", "mlock",
             ]
         );
+    }
+
+    /// E1 (3.0.9): every option LU hands the bundled llama.cpp, checked
+    /// against the option list of the pinned tag. b11960 dropped `--mlock`
+    /// and `--no-mmap`, and an option the server does not know ends it before
+    /// it loads a byte: nothing but a real start would have shown that. The
+    /// list is per tag (fixtures/llama-flags/<tag>.txt), so a bump without a
+    /// new list turns this red, and a new list shows every option that went.
+    #[test]
+    fn flags_lu_passes_exist_in_the_pinned_engine() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let script = std::fs::read_to_string(root.join("../scripts/build-llama.sh")).unwrap();
+        let tag = script
+            .lines()
+            .find_map(|l| l.strip_prefix("LLAMA_TAG=\"${LLAMA_TAG:-")?.strip_suffix("}\""))
+            .expect("LLAMA_TAG in build-llama.sh");
+        let list = std::fs::read_to_string(root.join(format!("fixtures/llama-flags/{tag}.txt")))
+            .unwrap_or_else(|_| panic!("fixtures/llama-flags/{tag}.txt is missing: make it from common/arg.cpp of {tag} (see its first lines)"));
+        let known: std::collections::HashSet<&str> = list.lines().filter(|l| l.starts_with('-')).collect();
+
+        let everything = EngineTuning {
+            ctx: 16384,
+            flash_attn: "on".into(),
+            cache_type_k: "q8_0".into(),
+            cache_type_v: "q8_0".into(),
+            threads: 8,
+            gpu_layers: 20,
+            mlock: true,
+            no_mmap: true,
+            plan_cpu_moe: 4,
+            plan_cache_ram_mib: Some(2048),
+            control_vector: Some("/cv.gguf".into()),
+            ..Default::default()
+        };
+        let mut argvs = vec![
+            server_args("/m/qwen.gguf", &everything, 8127, Some("/slots"), Some("/m/qwen.mmproj.gguf"), None, true),
+            server_args("/m.gguf", &EngineTuning::default(), 8127, None, None, None, false),
+            build_embed_args("/e.gguf", 8128),
+        ];
+        // spawn_private_server_with, the GPU choice and the device probe,
+        // and the Neuron tweaker's generator (neuron/mod.rs `generate`).
+        argvs.push(["-c", "-np", "--device", "--list-devices", "--control-vector"].map(String::from).to_vec());
+        argvs.push(["--positive-file", "--negative-file", "-o", "--method", "-ngl", "-c"].map(String::from).to_vec());
+        let src = std::fs::read_to_string(root.join("src/commands/neuron/mod.rs")).unwrap();
+        for flag in ["\"--positive-file\"", "\"--negative-file\"", "\"--method\""] {
+            assert!(src.contains(flag), "the generator call changed, update this list: {flag}");
+        }
+        for argv in &argvs {
+            for a in argv.iter().filter(|a| a.starts_with('-') && a.parse::<f64>().is_err()) {
+                assert!(known.contains(a.as_str()), "llama.cpp {tag} has no option {a} (argv {argv:?})");
+            }
+        }
+    }
+
+    #[test]
+    fn load_settings_become_one_load_mode_the_pinned_engine_knows() {
+        // E1: b11960 ends on `--mlock` and `--no-mmap` ("invalid argument"),
+        // so neither may ever reach the argv again, in any combination.
+        assert_eq!(load_mode(false, false), None);
+        assert_eq!(load_mode(false, true), Some("none"));
+        assert_eq!(load_mode(true, false), Some("mmap+mlock"));
+        assert_eq!(load_mode(true, true), Some("mlock"));
+        for (mlock, no_mmap) in [(false, false), (false, true), (true, false), (true, true)] {
+            let tuning = EngineTuning { mlock, no_mmap, ..Default::default() };
+            for windows in [false, true] {
+                let args = server_args("/m.gguf", &tuning, 8127, None, None, None, windows);
+                assert!(!args.iter().any(|a| a == "--mlock" || a == "--no-mmap" || a == "--mmap"), "{args:?}");
+                assert!(args.iter().filter(|a| *a == "--load-mode").count() <= 1, "{args:?}");
+            }
+        }
+        // Windows with layers on the card reads the file in, and a ticked
+        // mlock pins that copy.
+        let pinned = EngineTuning { mlock: true, ..Default::default() };
+        let args = server_args("/m.gguf", &pinned, 8127, None, None, None, true);
+        assert!(args.windows(2).any(|w| w[0] == "--load-mode" && w[1] == "mlock"), "{args:?}");
     }
 
     #[test]
@@ -6675,8 +6977,7 @@ mod tests {
             "-ctk q8_0",
             "-ctv q4_0",
             "-t 6",
-            "--mlock",
-            "--no-mmap",
+            "--load-mode mlock",
             "--slot-save-path /slots",
         ] {
             assert!(line.contains(wanted), "{wanted:?} missing from:\n{line}");
@@ -6699,7 +7000,7 @@ mod tests {
             Path::new("/opt/lu/lu-llama-server"),
             &build_server_args("/m.gguf", &EngineTuning::default(), 8127, None, None, None),
         );
-        for unwanted in ["-ctk", "-ctv", "-fa", "-t ", "--mlock", "--no-mmap", "--mmproj", "--slot-save-path"] {
+        for unwanted in ["-ctk", "-ctv", "-fa", "-t ", "--load-mode", "--mmproj", "--slot-save-path"] {
             assert!(!line.contains(unwanted), "{unwanted:?} invented in:\n{line}");
         }
         assert!(line.contains("-ngl 999"), "{line}");
@@ -9971,7 +10272,9 @@ mod tests {
             stderr: "llama_model_load: error loading model: unknown model architecture 'wanx'".into(),
             exit_code: None, signal: None };
         let msg = start_failure_message(&f, 8127, Duration::from_secs(60), SecondAttempt::SameOffload, None);
-        assert!(msg.contains("could not read the model file"), "{msg}");
+        // A NAMED architecture is the engine's age, not the file (N1, LFM3).
+        assert!(msg.contains("a wanx model"), "{msg}");
+        assert!(msg.contains("does not know that architecture"), "{msg}");
         assert!(!msg.contains("GPU Layers"), "{msg}");
     }
 
@@ -9991,6 +10294,39 @@ llama_model_load_from_file_impl: failed to load model
 common_fit_params: encountered an error while trying to fit params to free device memory: failed to load model
 cmn    common_init_: failed to load model 'C:\\Users\\x\\models\\diag-kaputt.gguf'
 srv    llama_server: exiting due to model loading error";
+
+    /// Wort fuer Wort, was lu-llama-server 049326a (b9949, aus LU 3.0.7) am
+    /// 30.10.2026 am Mac zu LiquidAI/LFM3-1.7B-GGUF Q4_K_M (sha256 3793e1e6…,
+    /// heil) gesagt hat (N1). Die Datei ist in Ordnung, die Engine zu alt.
+    const LFM3_AUF_B9949_STDERR: &str = "\
+0.00.167.117 E llama_model_load: error loading model: unknown model architecture: 'lfm3'
+0.00.167.232 E llama_model_load_from_file_impl: failed to load model
+0.00.167.484 E common_fit_params: encountered an error while trying to fit params to free device memory: failed to load model
+0.00.221.539 E cmn  common_init_: failed to load model 'dl-gguf/LFM3-1.7B-Q4_K_M.gguf'
+0.00.221.540 E srv    load_model: failed to load model, 'dl-gguf/LFM3-1.7B-Q4_K_M.gguf'
+0.00.221.928 E srv  llama_server: exiting due to model loading error";
+
+    #[test]
+    fn a_model_newer_than_the_engine_is_not_called_a_damaged_file() {
+        let f = StartFailure { died: true, port_taken: false, stderr: LFM3_AUF_B9949_STDERR.into(), exit_code: Some(1), signal: None };
+        let msg = start_failure_message(&f, 8127, Duration::from_secs(60), SecondAttempt::SameOffload, None);
+        assert!(msg.contains("a lfm3 model"), "{msg}");
+        assert!(msg.contains("does not know that architecture"), "{msg}");
+        assert!(msg.contains("Downloading it again will not help"), "{msg}");
+        assert!(!msg.contains("download it again"), "{msg}");
+        assert!(!msg.contains("GPU Layers"), "{msg}");
+        // Auch nach dem zweiten Versuch auf der CPU bleibt es dieselbe Ursache.
+        let cpu = start_failure_message(&f, 8127, Duration::from_secs(60), SecondAttempt::CpuOnly, None);
+        assert!(cpu.contains("does not know that architecture"), "{cpu}");
+    }
+
+    #[test]
+    fn the_architecture_name_is_read_in_both_spellings_and_never_empty() {
+        assert_eq!(stderr_names_an_unknown_architecture(LFM3_AUF_B9949_STDERR).as_deref(), Some("lfm3"));
+        assert_eq!(stderr_names_an_unknown_architecture("error loading model: unknown model architecture 'wanx'").as_deref(), Some("wanx"));
+        assert_eq!(stderr_names_an_unknown_architecture(KAPUTTE_GGUF_STDERR), None);
+        assert_eq!(stderr_names_an_unknown_architecture("unknown model architecture: '<script>'"), None);
+    }
 
     #[test]
     fn a_broken_file_is_not_reported_as_a_graphics_card_problem() {
@@ -10741,5 +11077,74 @@ mod diag_tests {
         assert_eq!(pick_save_slot(&serde_json::json!({})), 0);
         assert_eq!(pick_save_slot(&serde_json::json!([])), 0);
         assert_eq!(pick_save_slot(&serde_json::json!(null)), 0);
+    }
+}
+
+#[cfg(test)]
+mod a_stub_is_not_the_engine {
+    //! GH #207: a build from source with ci.yml's 0-byte sidecar stubs got
+    //! "os error 193" from the embeddings server, because the lookup took any
+    //! file that exists.
+    use super::*;
+
+    /// The head of a real program of this platform: the test binary itself.
+    fn program_bytes() -> Vec<u8> {
+        let mut b = std::fs::read(std::env::current_exe().unwrap()).unwrap();
+        b.truncate(4096);
+        b
+    }
+
+    #[test]
+    fn the_empty_ci_stub_is_passed_over_for_the_real_binary_behind_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let stub = dir.path().join("next-to-the-exe");
+        let real = dir.path().join("src-tauri-bin");
+        std::fs::write(&stub, b"").unwrap();
+        std::fs::write(&real, program_bytes()).unwrap();
+        assert_eq!(pick_engine_binary(&[stub, real.clone()]), Some(real));
+    }
+
+    #[test]
+    fn a_stub_alone_is_no_engine_and_the_error_says_what_it_is() {
+        let dir = tempfile::tempdir().unwrap();
+        let stub = dir.path().join("lu-llama-server");
+        std::fs::write(&stub, b"").unwrap();
+        let candidates = [stub];
+        assert_eq!(pick_engine_binary(&candidates), None);
+        let msg = engine_binary_error(&candidates, || "missing".into());
+        assert!(msg.contains("placeholder of 0 bytes"), "{msg}");
+        // engine-start-failure.ts keys on this fragment: a stub is no reason
+        // for the boot resume to start the engine again.
+        assert!(msg.contains("is a placeholder of"), "{msg}");
+        assert!(msg.contains("scripts/build-llama.sh"), "{msg}");
+        assert!(msg.contains("latest release"), "{msg}");
+        assert!(!msg.contains(dir.path().to_str().unwrap()), "no path of its own: {msg}");
+    }
+
+    #[test]
+    fn a_text_file_of_that_name_is_not_a_program_either() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("lu-llama-server");
+        std::fs::write(&p, b"hello").unwrap();
+        assert_eq!(sidecar_file(&p), SidecarFile::NotAProgram(5));
+    }
+
+    // Negative controls: a real program is still found, and no file at all
+    // keeps the call site's own sentence.
+    #[test]
+    fn a_real_program_is_the_engine() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("lu-llama-server");
+        std::fs::write(&p, program_bytes()).unwrap();
+        assert_eq!(sidecar_file(&p), SidecarFile::Program);
+        assert_eq!(pick_engine_binary(std::slice::from_ref(&p)), Some(p));
+    }
+
+    #[test]
+    fn no_file_at_all_keeps_the_sentence_of_the_call_site() {
+        let dir = tempfile::tempdir().unwrap();
+        let candidates = [dir.path().join("nothing-here")];
+        assert_eq!(sidecar_file(&candidates[0]), SidecarFile::Missing);
+        assert_eq!(engine_binary_error(&candidates, || "missing".into()), "missing");
     }
 }

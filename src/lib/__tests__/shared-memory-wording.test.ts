@@ -25,6 +25,11 @@ describe('the chat catalogue as a Mac reads it', () => {
     // NVIDIA's, so the sentence must not send an NVIDIA owner to them.
     const builds = catalogue.filter((m) => /-(?:nvfp4|mxfp8)$/.test(m.ollamaModel ?? ''))
     expect(builds.map((m) => m.ollamaModel).sort()).toEqual([
+      // N1, 30.10.2026: the LFM3 family's MLX builds, read off ollama.com/library/lfm3*.
+      'lfm3-audio:2b-nvfp4',
+      'lfm3-omni:2b-nvfp4',
+      'lfm3-vl:2b-nvfp4',
+      'lfm3:1.7b-nvfp4',
       'qwen3.6:35b-a3b-coding-mxfp8',
       'qwen3.6:35b-a3b-coding-nvfp4',
       'qwen3.6:35b-a3b-mxfp8',
@@ -38,8 +43,13 @@ describe('the chat catalogue as a Mac reads it', () => {
       expect(m.description).not.toMatch(/RTX|Blackwell|H100|MI300X|datacenter|NVIDIA|\bcards?\b|VRAM/)
       expect(m.tags).toContain('MLX')
       // The size is the one Ollama lists for the tag.
-      expect(m.sizeGB).toBe(/nvfp4$/.test(m.ollamaModel!) ? 24 : 38)
-      expect(m.tags).toContain(`${m.sizeGB} GB`)
+      if (m.ollamaModel!.startsWith('qwen3.6')) {
+        expect(m.sizeGB).toBe(/nvfp4$/.test(m.ollamaModel!) ? 24 : 38)
+        expect(m.tags).toContain(`${m.sizeGB} GB`)
+      } else {
+        // The LFM3 builds are a few GB; the tag rounds the manifest layer sum.
+        expect(m.tags).toContain(`${m.sizeGB!.toFixed(1)} GB`)
+      }
     }
   })
 

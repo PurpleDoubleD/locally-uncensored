@@ -35,10 +35,11 @@ fn emit(app: &tauri::AppHandle, phase: &str, downloaded: u64, total: u64) {
     );
 }
 
-/// The endpoints and the public key out of `tauri.conf.json`, read from the
-/// config the app was built with rather than copied into a second place. The
-/// plugin reads the very same two values, so they cannot drift apart.
-fn updater_config(app: &tauri::AppHandle) -> Result<(Vec<String>, String), String> {
+/// The endpoints, the public key and `requireSignedVersion` out of
+/// `tauri.conf.json`, read from the config the app was built with rather than
+/// copied into a second place. The plugin reads the very same values, so they
+/// cannot drift apart.
+fn updater_config(app: &tauri::AppHandle) -> Result<(Vec<String>, String, bool), String> {
     let plugins = &app.config().plugins.0;
     let updater = plugins
         .get("updater")
@@ -48,6 +49,10 @@ fn updater_config(app: &tauri::AppHandle) -> Result<(Vec<String>, String), Strin
         .and_then(|v| v.as_str())
         .ok_or("this build has no update signing key")?
         .to_string();
+    let require_signed_version = updater
+        .get("requireSignedVersion")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
     let version = crate::app_identity::APP_VERSION.to_string();
     let endpoints: Vec<String> = updater
         .get("endpoints")
@@ -62,7 +67,7 @@ fn updater_config(app: &tauri::AppHandle) -> Result<(Vec<String>, String), Strin
     if endpoints.is_empty() {
         return Err("this build has no update server configured".to_string());
     }
-    Ok((endpoints, pubkey))
+    Ok((endpoints, pubkey, require_signed_version))
 }
 
 /// Refuse to run anywhere the plugin does its job. The frontend already asks
@@ -86,7 +91,7 @@ pub async fn self_migrate_stage(app: tauri::AppHandle) -> Result<serde_json::Val
         .await
         .map_err(|e| format!("the install check failed to run: {e}"))??;
 
-    let (endpoints, pubkey) = updater_config(&app)?;
+    let (endpoints, pubkey, require_signed_version) = updater_config(&app)?;
     let release = fetch_manifest(&endpoints).await?;
 
     let dir = layout.install_dir();
@@ -106,10 +111,11 @@ pub async fn self_migrate_stage(app: tauri::AppHandle) -> Result<serde_json::Val
     emit(&app, "verify", total, total);
     let staged_for_check = staged.clone();
     let signature = release.signature.clone();
+    let announced = release.version.clone();
     let verdict = tauri::async_runtime::spawn_blocking(move || {
         let bytes = std::fs::read(&staged_for_check)
             .map_err(|e| format!("could not read the download back: {}", os_error::english(&e)))?;
-        self_migrate::verify_signature(&bytes, &signature, &pubkey)
+        self_migrate::verify_signature(&bytes, &signature, &pubkey, &announced, require_signed_version)
     })
     .await
     .map_err(|e| format!("the signature check failed to run: {e}"))?;

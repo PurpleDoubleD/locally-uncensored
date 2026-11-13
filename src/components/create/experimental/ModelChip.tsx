@@ -226,10 +226,27 @@ function MacTrainBaseChip() {
   )
 }
 
+/** The Train tab on Windows and Linux (GH #210, 31.10.2026): the local
+ *  trainer trains on Z-Image Base alone (api/trainer TRAINER_BASE_FILES), and
+ *  the training call carries no model. The picker stood here with every image
+ *  model, and a tester picked Qwen-Image 2.1 as the training model. In the
+ *  cloud lane this chip is the training model, so the look was a fair guess. */
+function LocalTrainBaseChip() {
+  return (
+    <span
+      className="lu-control t-control px-2 shrink-0"
+      data-testid="local-train-base"
+      title="The local trainer makes Z-Image characters and styles. Use character runs them on a Z-Image model. Training for other models is in LU Cloud."
+    >
+      Local training uses Z-Image
+    </span>
+  )
+}
+
 function LocalModelChip() {
   const intent = useCreateStore((s) => s.intent())
   const characterTab = useCreateStore((s) => s.characterTab)
-  if (isMlxImageHost() && intent === 'character' && characterTab !== 'use') return <MacTrainBaseChip />
+  if (intent === 'character' && characterTab !== 'use') return isMlxImageHost() ? <MacTrainBaseChip /> : <LocalTrainBaseChip />
   return <LocalModelPicker />
 }
 

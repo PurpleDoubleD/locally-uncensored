@@ -309,6 +309,34 @@ export async function transcribeAudio(audioBlob: Blob): Promise<string> {
   return data.transcript || "";
 }
 
+/**
+ * Dictation through an OpenAI-compatible /v1/audio/transcriptions endpoint
+ * (N1): Ollama 0.40.13+ serves it for models that take audio, such as
+ * lfm3-audio and lfm3-omni. The take is the WAV createAudioRecorder writes,
+ * which is the one format Ollama accepts.
+ */
+export async function transcribeExternal(audioBlob: Blob, url: string, model: string): Promise<string> {
+  const bytes = new Uint8Array(await audioBlob.arrayBuffer());
+  let binary = "";
+  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+  const data: unknown = await backendCall("transcribe_external", {
+    audioBase64: btoa(binary),
+    contentType: audioBlob.type || "audio/wav",
+    url,
+    model,
+  });
+  return asString(prop(data, "transcript")) ?? "";
+}
+
+/** The Ollama addresses for speech in and speech out, from its base URL. */
+export function ollamaSpeechUrls(base: string): { stt: string; tts: string } {
+  const b = base.replace(/\/+$/, "");
+  return { stt: `${b}/v1/audio/transcriptions`, tts: `${b}/v1/audio/speech` };
+}
+
+/** The Ollama model LU fills in for speech in and out: Liquid AI LFM3 Audio (N1). */
+export const OLLAMA_SPEECH_MODEL = "lfm3-audio:2b";
+
 // --- LU Cloud voice (appMode 'cloud') ---
 
 /** Cloud STT: POST the recorded clip to /api/voice/transcribe (Whisper
@@ -500,8 +528,8 @@ export async function synthesizeNeural(text: string, voice?: string): Promise<st
  * http://localhost:8880/v1/audio/speech); `voice` is that engine's voice name.
  * Returns a playable blob URL (the Rust side honors the returned audio type).
  */
-export async function synthesizeExternal(text: string, url: string, voice?: string): Promise<string> {
-  const data = await backendCall<{ audio_base64?: string; mime?: string }>("synthesize_external", { text, url, voice });
+export async function synthesizeExternal(text: string, url: string, voice?: string, model?: string): Promise<string> {
+  const data = await backendCall<{ audio_base64?: string; mime?: string }>("synthesize_external", { text, url, voice, model: model?.trim() || undefined });
   if (!data?.audio_base64) throw new Error("external TTS returned no audio");
   return base64ToBlobUrl(data.audio_base64, data.mime || "audio/wav");
 }

@@ -256,6 +256,11 @@ export function groupHistory(
 ): GroupWireMessage[] {
   const self = speakerKey(model, speakers)
   return messages
+    // A failed turn carries the app's sentence behind its answer (`error.at`,
+    // lib/message-error.ts). That sentence is not the speaker's: sent along,
+    // the next speaker read "This message is longer than the model can read"
+    // as what the one before it had said (T1 2026-10-29).
+    .map((m) => (m.error ? { ...m, content: m.content.slice(0, Math.max(0, m.error.at)).trimEnd() } : m))
     .filter((m) => m.role !== 'system' && m.content.trim() !== '')
     .map((m) => {
       const author = m.role === 'assistant' ? groupTurnAuthor(m, speakers, authors) : null

@@ -18,7 +18,7 @@ Locally Uncensored is a free, open-source (AGPL-3.0) local AI studio for the des
 
 ## Key Facts
 - Name: Locally Uncensored
-- Current Version: v3.0.8
+- Current Version: v3.0.10
 - Type: Desktop AI Application (local AI studio)
 - License: AGPL-3.0 (free and open source)
 - Platforms: Windows 10/11, Linux (deb, rpm, AppImage), macOS 14 or newer on Apple Silicon (dmg, since v3.0.6). Intel Macs are not supported.
@@ -150,6 +150,7 @@ Locally Uncensored is a free, open-source (AGPL-3.0) local AI studio for the des
 - Is Locally Uncensored safe? (unsigned Windows installer, antivirus false positives, how to verify the download): https://locallyuncensored.com/is-locally-uncensored-safe/
 - IA sem censura local (Portuguese guide): https://locallyuncensored.com/blog/ia-sem-censura-local.html
 - IA sin censura en local (Spanish guide): https://locallyuncensored.com/blog/ia-sin-censura-local.html
+- v3.0.9 Release Notes (Liquid LFM3 for small machines with llama.cpp b11960 in the LU Engine, group chats that send every speaker the context you picked with per speaker regenerate and a speaking order, end images and reference pictures in Animate and Create, local videos up to 15 seconds, style training in beta, Use this model from Hugging Face, a status menu in the menu bar and tray, and the Linux AppImage fix): https://locallyuncensored.com/blog/locally-uncensored-v3-0-9-release.html
 - v3.0.7 Release Notes (a trained character in every part of Create and in chat, ComfyUI workflows in the format ComfyUI saves with their node packs and all their settings, Edit with up to ten images, chats you can duplicate and branch, and training, Talking Character and Motion Control on the Mac in beta): https://locallyuncensored.com/blog/locally-uncensored-v3-0-7-release.html
 - New Uncensored Chat Models in LU Cloud ((Guide: the ten new Uncensored (Beta) chat models in LU Cloud since 3.0.6, the four named ones, Limited capacity, the difference to the No Filter mark, local or online per model, desktop Cloud switch and browser)): https://locallyuncensored.com/blog/new-uncensored-chat-models-lu-cloud.html
 - Local AI Computer Use: Let an Agent Control Your PC ((Guide: computer control in LU 3.0.6, switching it on, the per-chat card, per-app and per-action questions, sensitive actions, blocked apps, pause and stop shortcuts, screen model choice, platform status, beta)): https://locallyuncensored.com/blog/local-ai-computer-control.html
@@ -210,6 +211,7 @@ Locally Uncensored is a free, open-source (AGPL-3.0) local AI studio for the des
 - How to Run DeepSeek V4 Pro: https://locallyuncensored.com/blog/how-to-run-deepseek-v4-pro.html
 - DeepSeek V4 Flash vs V4 Pro: https://locallyuncensored.com/blog/deepseek-v4-flash-vs-v4-pro.html
 - Abliterated Models Guide: https://locallyuncensored.com/blog/abliterated-models-guide.html
+- Remove Refusals, Measured (Qwen2.5 0.5B before and after: JailbreakBench refusals 39 to 3 of 50, harmless refusals 15 to 2 of 50, MMLU 409 to 410 of 1000, and why 200 questions showed a false loss): https://locallyuncensored.com/blog/remove-refusals-measured.html
 - Kimi K3 online (browser, desktop app and API key): https://locallyuncensored.com/blog/kimi-k3-online-guide.html
 - Kimi K3 vs DeepSeek V4 (price, thinking, vision, and which plan): https://locallyuncensored.com/blog/kimi-k3-vs-deepseek-v4.html
 - How to run Qwen 3.8 without a GPU (hosted Studio, API key, or the 27B at home): https://locallyuncensored.com/blog/run-qwen-3-8-without-gpu.html

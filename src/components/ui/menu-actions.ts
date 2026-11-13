@@ -37,12 +37,18 @@ export interface MenuAction {
  * Nachricht, oder es läuft gerade eine Antwort).
  */
 export interface MessageMenuHandlers {
+  /** The Copy button of the bar: the message as Markdown. */
   readonly copy: () => void
+  /** Right-click only: the selected or shown text, as Ctrl+C gives it
+   *  (lib/copy-plain.ts). With it, the button's copy becomes "Copy as
+   *  Markdown" in the menu. */
+  readonly copyText?: () => void
   readonly edit: (() => void) | null
   readonly regenerate: (() => void) | null
   /** GH #174: a new chat that ends with this message. */
   readonly branch: (() => void) | null
-  readonly remove: () => void
+  /** Null in a read-only view (an earlier compact layer, 3.0.9). */
+  readonly remove: (() => void) | null
 }
 
 export interface MessageMenuState {
@@ -56,11 +62,17 @@ export function buildMessageMenu(h: MessageMenuHandlers, s: MessageMenuState): M
   const out: MenuAction[] = []
   if (h.edit) out.push({ id: 'edit', label: 'Edit', run: h.edit })
   if (h.regenerate) out.push({ id: 'regenerate', label: 'Regenerate', run: h.regenerate })
-  out.push({ id: 'copy', label: s.copied ? 'Copied' : 'Copy text', run: h.copy })
+  if (h.copyText) {
+    // Discord 30.10.2026: "Copy text" pasted ** around bold words.
+    out.push({ id: 'copy', label: s.copied ? 'Copied' : 'Copy text', run: h.copyText })
+    out.push({ id: 'copy-markdown', label: 'Copy as Markdown', run: h.copy })
+  } else {
+    out.push({ id: 'copy', label: s.copied ? 'Copied' : 'Copy text', run: h.copy })
+  }
   if (h.branch) out.push({ id: 'branch', label: 'Branch from here', run: h.branch })
   // Die Beschriftung sagt dasselbe wie der `title` des Knopfes: der erste
   // Aufruf schärft nur, gelöscht wird erst beim zweiten.
-  out.push({
+  if (h.remove) out.push({
     id: 'delete',
     label: s.confirmDelete ? 'Click again to delete' : 'Delete message',
     run: h.remove,

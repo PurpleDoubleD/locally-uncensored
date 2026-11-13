@@ -262,7 +262,7 @@
   // uses LU Cloud in the browser until then. A computer sees nothing; closed
   // stays closed in this browser.
   var PHONE_KEY = "lu_phone_app_banner_closed";
-  var APK_URL = "https://github.com/PurpleDoubleD/locally-uncensored/releases/download/v3.0.7/LU-3.0.7-Android.apk";
+  var APK_URL = "https://github.com/PurpleDoubleD/locally-uncensored/releases/download/v3.0.10/LU-3.0.10-Android.apk";
   function phoneKind() {
     var ua = navigator.userAgent || "";
     if (/android/i.test(ua)) return "android";
@@ -286,7 +286,7 @@
     box.innerHTML = icon + (kind === "android"
       ? '<div class="lu-phone-app-text"><p class="lu-phone-app-title">LU on your phone</p>' +
         '<p class="lu-phone-app-note">iPhone in review, Play soon. <a href="/android/">Install help</a></p></div>' +
-        '<a class="lu-phone-app-cta" href="' + APK_URL + '" aria-label="Download the Android app (APK, about 27 MB)">Get APK</a>'
+        '<a class="lu-phone-app-cta" href="' + APK_URL + '" aria-label="Download the Android app (APK, about 31 MB)">Get APK</a>'
       : '<div class="lu-phone-app-text"><p class="lu-phone-app-title">LU for iPhone soon</p>' +
         '<p class="lu-phone-app-note">In App Store review. Try LU&nbsp;Cloud.</p></div>' +
         '<a class="lu-phone-app-cta" href="https://lu-labs.ai/app?src=luc-phone-banner">LU Cloud</a>');
@@ -302,11 +302,69 @@
     else document.body.insertBefore(box, document.body.firstChild);
   }
 
+  // ── Mac download: the newest release that has a .dmg ────────────────
+  // The Mac file is built on its own run and can come later than the Windows
+  // and Linux files (3.0.10 went Latest on 5 Nov, its .dmg came on 6 Nov).
+  // So every Mac button points at a FIXED tag in the HTML, which never 404s,
+  // and carries data-mac-latest. Here the newest stable release that really
+  // has an LU_<version>_aarch64.dmg replaces it, if that one is newer. No
+  // answer, a rate limit or a blocked request leave the fixed link alone.
+  // Links in old release notes have no data-mac-latest and stay as written.
+  var MAC_REPO = "https://github.com/PurpleDoubleD/locally-uncensored/releases/download/";
+  var MAC_DMG = /\/download\/v(\d+)\.(\d+)\.(\d+)\/LU_\d+\.\d+\.\d+_aarch64\.dmg$/;
+  var MAC_KEY = "lu-mac-dmg";
+
+  function macVer(url) {
+    var m = MAC_DMG.exec(url || "");
+    return m ? [+m[1], +m[2], +m[3]] : null;
+  }
+  function macNewer(a, b) {
+    for (var i = 0; i < 3; i++) if (a[i] !== b[i]) return a[i] > b[i];
+    return false;
+  }
+  function applyMac(url) {
+    var v = macVer(url);
+    if (!v || url.indexOf(MAC_REPO) !== 0) return;
+    var links = document.querySelectorAll("a[data-mac-latest]");
+    for (var i = 0; i < links.length; i++) {
+      var a = links[i], old = a.getAttribute("href"), ov = macVer(old);
+      if (!ov || !macNewer(v, ov)) continue;
+      a.setAttribute("href", url);
+      var oldName = old.slice(old.lastIndexOf("/") + 1), name = url.slice(url.lastIndexOf("/") + 1);
+      var code = a.querySelector("code");
+      if (code && code.textContent === oldName) code.textContent = name;
+    }
+  }
+  function wireMacLatest() {
+    if (!document.querySelector("a[data-mac-latest]") || !window.fetch) return;
+    try {
+      var hit = JSON.parse(sessionStorage.getItem(MAC_KEY) || "null");
+      if (hit && Date.now() - hit.t < 3600e3) { applyMac(hit.url); return; }
+    } catch (e) {}
+    fetch("https://api.github.com/repos/PurpleDoubleD/locally-uncensored/releases?per_page=10", {
+      headers: { Accept: "application/vnd.github+json" }
+    }).then(function (r) { return r.ok ? r.json() : []; }).then(function (list) {
+      for (var i = 0; i < list.length; i++) {
+        var rel = list[i];
+        if (!rel || rel.draft || rel.prerelease) continue;
+        var assets = rel.assets || [];
+        for (var j = 0; j < assets.length; j++) {
+          var url = assets[j].browser_download_url;
+          if (/^LU_\d+\.\d+\.\d+_aarch64\.dmg$/.test(assets[j].name || "") && macVer(url)) {
+            try { sessionStorage.setItem(MAC_KEY, JSON.stringify({ url: url, t: Date.now() })); } catch (e) {}
+            applyMac(url);
+            return;
+          }
+        }
+      }
+    }).catch(function () {});
+  }
+
   function init() {
     injectAmbient();
     var monos = document.querySelectorAll("[data-mono]");
     for (var i = 0; i < monos.length; i++) buildMono(monos[i]);
-    wireTheme(); wireNav(); wireScrollArrow(); wireFunnelSource(); wireLang(); wirePhoneApp();
+    wireTheme(); wireNav(); wireScrollArrow(); wireFunnelSource(); wireLang(); wirePhoneApp(); wireMacLatest();
   }
 
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init);

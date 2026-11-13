@@ -136,10 +136,11 @@ fn base_pack(root: &Path) -> Option<&'static Pack> {
     BASES.into_iter().find(|p| mflux::pack_complete(&root.join(p.dir)))
 }
 
-/// The file of a character, as the Windows trainer names it
-/// (`parseLocalCharacterLora` in `src/api/trainer.ts`).
-fn character_file(trigger: &str) -> String {
-    format!("char_{trigger}_zimage.safetensors")
+/// The file a run writes: a character's, as the Windows trainer names it
+/// (`parseLocalCharacterLora` in `src/api/trainer.ts`), or since 3.0.9 (P8)
+/// a style's (`TrainKind::output_name`).
+fn trained_file(kind: crate::commands::trainer::TrainKind, name: &str) -> String {
+    format!("{}.safetensors", kind.output_name(name))
 }
 
 fn memory_refusal(total_bytes: u64) -> Option<String> {
@@ -599,7 +600,7 @@ fn start(runs: &Runs, mut cmd: Command, pid_file: &Path) -> Result<std::process:
     cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
     let mut slot = runs.pid();
     if slot.is_some() {
-        return Err("A character is already being trained on this Mac. Wait for it to finish.".to_string());
+        return Err("A training is already running on this Mac. Wait for it to finish.".to_string());
     }
     if runs.stopped.swap(false, SeqCst) {
         return Err(STOPPED.to_string());
@@ -684,6 +685,9 @@ struct StartArgs {
     steps: Option<u32>,
     #[serde(default)]
     run: Option<String>,
+    /// "style" for a style / concept LoRA; missing is a character.
+    #[serde(default)]
+    kind: Option<String>,
 }
 
 pub async fn train_start(state: &AppState, args: &Value) -> CmdResult {
@@ -698,7 +702,7 @@ pub async fn train_start(state: &AppState, args: &Value) -> CmdResult {
         return Err(bad_request("The MLX image engine is not set up. Install Z-Image Turbo in the Model Manager first."));
     }
     let Some(base) = base_pack(&root) else {
-        return Err(bad_request("Training a character on a Mac needs Z-Image Turbo. Install it in the Model Manager first."));
+        return Err(bad_request("Training on a Mac needs Z-Image Turbo. Install it in the Model Manager first."));
     };
     if let Some(refusal) = memory_refusal(crate::commands::system::total_memory_bytes()) {
         return Err(bad_request(refusal));
@@ -706,7 +710,7 @@ pub async fn train_start(state: &AppState, args: &Value) -> CmdResult {
     let data = set_dir(&root, &a.set).map_err(bad_request)?;
     let photos = count_photos(&data);
     if photos < MIN_PHOTOS {
-        return Err(bad_request(format!("Add at least {MIN_PHOTOS} photos of your character first.")));
+        return Err(bad_request(format!("Add at least {MIN_PHOTOS} photos first.")));
     }
     // One model in the memory at a time. What is being made holds its model
     // until it is through, and is not ended for a training.
@@ -722,7 +726,7 @@ pub async fn train_start(state: &AppState, args: &Value) -> CmdResult {
     let job = uuid::Uuid::new_v4().simple().to_string();
     let claim = RUNS
         .claim(a.run.clone(), &job, &trigger)
-        .ok_or_else(|| bad_request("A character is already being trained on this Mac. Wait for it to finish."))?;
+        .ok_or_else(|| bad_request("A training is already running on this Mac. Wait for it to finish."))?;
     // What the sidecar holds goes first, as before an image of the engine.
     let _ = super::mlx_unload(state, &Value::Null).await;
 
@@ -730,7 +734,8 @@ pub async fn train_start(state: &AppState, args: &Value) -> CmdResult {
     let epochs = epochs_for(steps, photos);
     let work = runs_root(&root).join(&job);
     let loras = crate::commands::mlx_loras::loras_root();
-    let output = loras.join(character_file(&trigger));
+    let kind = crate::commands::trainer::TrainKind::from_arg(a.kind.as_deref());
+    let output = loras.join(trained_file(kind, &trigger));
     let config = work.join("config.json");
     let job_file = work.join("job.json");
     let written = std::fs::create_dir_all(&work)
@@ -867,7 +872,17 @@ mod tests {
     #[test]
     fn a_character_is_the_file_the_use_shelf_reads() {
         // `parseLocalCharacterLora` in src/api/trainer.ts.
-        assert_eq!(character_file("luxfox"), "char_luxfox_zimage.safetensors");
+        assert_eq!(trained_file(crate::commands::trainer::TrainKind::Character, "luxfox"), "char_luxfox_zimage.safetensors");
+    }
+
+    #[test]
+    fn a_style_is_a_file_of_its_own_beside_the_characters() {
+        use crate::commands::trainer::TrainKind;
+        // `parseLocalStyleLora` in src/api/trainer.ts; the shelf skips it.
+        assert_eq!(trained_file(TrainKind::Style, "inkwash"), "style_inkwash_zimage.safetensors");
+        let start = &production()[production().find("pub async fn train_start").unwrap()..];
+        assert!(start.contains("TrainKind::from_arg(a.kind.as_deref())"));
+        assert!(start.contains("loras.join(trained_file(kind, &trigger))"));
     }
 
     #[test]
