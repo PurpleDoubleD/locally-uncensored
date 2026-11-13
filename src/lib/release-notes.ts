@@ -360,6 +360,30 @@ export const RELEASE_NOTES: ReleaseNote[] = [
             detail: 'Next to one LU already found, from Settings or the setup. The path field says that only Connect applies a typed path.',
           },
           {
+            title: 'Mac image models keep going past 15 minutes.',
+            detail: 'A render runs as long as it keeps making steps. A stuck one is reported with the step it stopped at, and the limit is the Image timeout in Settings.',
+          },
+          {
+            title: 'Imported workflows use your LoRAs.',
+            detail: 'The LoRAs picked in Create go into an imported ComfyUI workflow. If its loader does not fit the model, Create says so.',
+          },
+          {
+            title: 'The Edit mask stays.',
+            detail: 'A painted mask is still there when you open the mask editor again, and it shows on the picture before you edit.',
+          },
+          {
+            title: 'MiniMax H3 Image is an image model.',
+            detail: 'It is listed with the image models, not the video models. Run it with the official ComfyUI template imported under Workflows.',
+          },
+          {
+            title: 'Qwen-Image 2.1 Edit in the size you want.',
+            detail: 'Pick a size and aspect ratio; the picture is cropped from its centre to fit.',
+          },
+          {
+            title: 'Workflow parameter lists get a search.',
+            detail: 'The lists under Workflow parameters can be searched and are readable in the dark theme.',
+          },
+          {
             title: 'The video preview says what it shows.',
             detail: 'It says it is a still of the first frame, and says so when ComfyUI sends no preview at all.',
           },

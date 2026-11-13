@@ -99,6 +99,10 @@ in the cloud catalogue.
 - Install a separate ComfyUI next to one LU already found ("Install a
   separate ComfyUI…" in Settings and the setup). The path field says that only
   Connect applies a typed path.
+- Qwen-Image 2.1 Edit can come out in a size and aspect ratio of your choice;
+  the picture is cropped from its centre to fit.
+- The lists under Workflow parameters have a search and are readable in the
+  dark theme.
 
 **Local API and workspace**
 - Local API:
@@ -108,6 +112,16 @@ in the cloud catalogue.
   an extra folder the primary, and remove the primary (GitHub #223).
 
 ### Fixed
+- Mac image models no longer stop after 15 minutes. A render runs as long as it
+  keeps making steps, a stuck one is reported with the step it stopped at, and
+  the limit is the Image timeout in Settings.
+- Imported ComfyUI workflows use the LoRAs picked in Create. If a workflow's
+  loader does not fit the model, Create says so instead of quietly running its
+  own workflow.
+- A painted Edit mask stays when you open the mask editor again, and it shows
+  on the picture before you edit.
+- MiniMax H3 Image is listed as an image model, not a video model. Run it with
+  the official ComfyUI template imported under Workflows.
 - Agent runs stop when the model keeps sending nearly identical tool calls
   without a word, and a cost brake ends a paid run after 3M input tokens (with
   a warning on any single request over 400k).
