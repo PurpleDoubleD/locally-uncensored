@@ -14,5 +14,10 @@
     "video-durations.json": "131f8dcf8a075066a640175f536847e870b0b45d402d7884d60fc65c33cf1595",
     "retired-models.ts": "fc9f494bcbfc640c555bd216819d0b00574a6e31aaa1d30f557f15a26f078de6",
     "studio-roles.ts": "8610db1bbc6953d5d4c1ded2f1444ea0336542b3bf473c085d90918bd1fd15ed"
+  },
+  "gate": {
+    "from": "https://lu-labs.ai/api/public/cloud-catalog",
+    "file": "src/lib/cloud-gate-seed.json",
+    "sha256": "3b1813a87ca3508d87e44ff2c1785bcd5bf84ef78feffc1a95715762f3ebe07d"
   }
 }

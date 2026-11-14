@@ -18,7 +18,8 @@
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { GENERATED_FILES, SOURCE_FILE, checkSnapshot, hashText } from '../../../../scripts/studio-snapshot.mjs'
+import { GATE_SEED_FILE, GENERATED_FILES, SOURCE_FILE, checkSnapshot, gateSeedText, hashText } from '../../../../scripts/studio-snapshot.mjs'
+import { isRetiredMediaModel } from '../retired-models'
 
 const DIR = 'src/lib/render'
 const read = (name: string) => readFileSync(resolve(DIR, name), 'utf8')
@@ -27,6 +28,7 @@ interface Source {
   generator: string
   web: { ref: string | null; commit: string | null; committed: string | null; dirty: boolean }
   files: Record<string, string>
+  gate?: { from: string; file: string; sha256: string }
 }
 
 const source = JSON.parse(read(SOURCE_FILE)) as Source
@@ -52,5 +54,34 @@ describe('the catalogue copy is what the generator wrote', () => {
 
   it('the files on disk are a snapshot the app can read', () => {
     expect(() => checkSnapshot(Object.fromEntries(GENERATED_FILES.map((name) => [name, read(name)])))).not.toThrow()
+  })
+})
+
+describe('the offline lists of the gate pop-up are what the generator wrote', () => {
+  const seedText = readFileSync(resolve(GATE_SEED_FILE), 'utf8')
+  const seed = JSON.parse(seedText) as Record<'chat' | 'code' | 'create', Array<{ id: string; label: string; kind?: string; adult?: true }>>
+
+  it('come from the public catalogue and have the hash recorded for them', () => {
+    expect(source.gate?.file).toBe(GATE_SEED_FILE)
+    expect(source.gate?.from).toMatch(/^https:\/\/lu-labs\.ai\/api\/public\/cloud-catalog$/)
+    expect(hashText(seedText), `${GATE_SEED_FILE} differs from what the generator wrote. Run scripts/studio-snapshot.mjs --gate live instead of editing it.`)
+      .toBe(source.gate?.sha256)
+  })
+
+  it('name no model the cloud has retired', () => {
+    expect(seed.create.filter((m) => isRetiredMediaModel(m.id)).map((m) => m.id)).toEqual([])
+  })
+
+  it('keep the app\'s own names and only what the app reads', () => {
+    const out = gateSeedText({
+      version: 1,
+      categories: {
+        chat: [{ id: 'a/b', label: 'Public name', native_label: 'App name', plans: ['hosted'] }],
+        code: [],
+        create: [{ id: 'flux-x', label: 'Flux X', kind: 'image', plans: ['hosted'], adult: true }],
+      },
+    })
+    expect(JSON.parse(out)).toEqual({ chat: [{ id: 'a/b', label: 'App name' }], code: [], create: [{ id: 'flux-x', label: 'Flux X', kind: 'image', adult: true }] })
+    expect(() => gateSeedText({ version: 2, categories: {} })).toThrow()
   })
 })

@@ -62,14 +62,15 @@ describe('the server answer', () => {
     expect(GATE_SEED.offers).toBeNull()
   })
 
-  // 3.0.8: Kimi K3.1 Pro kommt in die Cloud und steht im Schnappschuss vor
-  // Kimi K3, das bleibt.
-  it('offline names Kimi K3.1 Pro right before Kimi K3 in Chat and Code', () => {
+  // 3.0.8: Kimi K3.1 Pro kommt in die Cloud, Kimi K3 bleibt. Die Reihenfolge
+  // kommt seit 3.1.0 aus der öffentlichen Liste (scripts/studio-snapshot.mjs
+  // --gate live) und wird hier nicht festgeschrieben.
+  it('offline names Kimi K3.1 Pro and keeps Kimi K3 in Chat and Code', () => {
     for (const cat of ['chat', 'code'] as const) {
       const ids = GATE_SEED.categories[cat].map((m) => m.id)
       const pro = ids.indexOf('moonshotai/Kimi-K3.1-Pro')
       expect(pro).toBeGreaterThanOrEqual(0)
-      expect(ids[pro + 1]).toBe('moonshotai/Kimi-K3')
+      expect(ids).toContain('moonshotai/Kimi-K3')
       expect(GATE_SEED.categories[cat][pro].label).toBe('Kimi K3.1 Pro')
       expect(paramsInId(ids[pro])).toBeNull()
     }

@@ -217,15 +217,55 @@ export function snapshotFromWeb(webRepo, desktopRoot = DESKTOP_ROOT, ref) {
 /** sha256 of a generated file, hex. @param {string} text */
 export const hashText = (text) => createHash('sha256').update(text, 'utf8').digest('hex')
 
+/** The gate pop-up's offline lists (src/lib/cloud-gate-seed.json). They are
+ *  not files of the web: the web builds them from the pricing page in
+ *  /api/public/cloud-catalog. So the seed is written from that answer as the
+ *  app reads it (header x-lu-client: desktop), with the app's own names and
+ *  only the fields the app keeps, and its source and hash are recorded next
+ *  to the catalogue's. Run it against the live server of the release.
+ *  `--gate <url or saved answer>` */
+export const GATE_SEED_FILE = 'src/lib/cloud-gate-seed.json'
+export const GATE_URL = 'https://lu-labs.ai/api/public/cloud-catalog'
+
+/** The seed text from one answer of the public catalogue.
+ *  @param {any} answer @returns {string} */
+export function gateSeedText(answer) {
+  if (!answer || answer.version !== 1 || !answer.categories) throw new Error('studio-snapshot: not a public catalogue answer (version 1)')
+  const pick = (list, create) => (Array.isArray(list) ? list : []).flatMap((m) => {
+    if (!m || typeof m.id !== 'string') return []
+    const label = [m.native_label, m.label].find((v) => typeof v === 'string' && v.trim() !== '')?.trim() ?? m.id
+    const out = { id: m.id, label }
+    if (create) out.kind = m.kind
+    if (m.adult === true) out.adult = true
+    return [out]
+  })
+  const c = answer.categories
+  const seed = { chat: pick(c.chat, false), code: pick(c.code, false), create: pick(c.create, true) }
+  if (!seed.chat.length || !seed.create.length) throw new Error('studio-snapshot: the public catalogue answer has no chat or create models')
+  return `${JSON.stringify(seed, null, 1)}\n`
+}
+
+/** Reads the answer: a URL (GET with the app's header, read only) or a file.
+ *  @param {string} from */
+export async function readGateAnswer(from) {
+  if (/^https:\/\//.test(from)) {
+    const res = await fetch(from, { headers: { 'x-lu-client': 'desktop', 'user-agent': 'LU-catalog-snapshot' } })
+    if (!res.ok) throw new Error(`studio-snapshot: ${from} answered ${res.status}`)
+    return res.json()
+  }
+  return JSON.parse(readFileSync(from, 'utf8'))
+}
+
 /** The record of where the generated files came from.
  *  @param {Record<string, string>} texts @param {{ commit: string | null, committed: string | null, dirty: boolean }} origin
  *  @param {string | undefined} ref @returns {string} */
-export function sourceText(texts, origin, ref) {
+export function sourceText(texts, origin, ref, gate) {
   const record = {
     generator: 'scripts/studio-snapshot.mjs',
     note: 'Generated files. Do not edit them by hand: run the generator against the web commit this release ships with.',
     web: { ref: ref ?? null, ...origin },
     files: Object.fromEntries(GENERATED_FILES.map((name) => [name, hashText(texts[name])])),
+    ...(gate ? { gate } : {}),
   }
   return `${JSON.stringify(record, null, 2)}\n`
 }
@@ -238,7 +278,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     process.stderr.write('studio-snapshot: --ref needs a commit.\n')
     process.exit(2)
   }
-  const webRepo = process.env.LU_WEB_REPO?.trim() || args.find((arg, i) => !arg.startsWith('--') && i !== refAt + 1)
+  const webRepo = process.env.LU_WEB_REPO?.trim() || args.find((arg, i) => !arg.startsWith('--') && i !== refAt + 1 && args[i - 1] !== '--gate')
   if (!webRepo) {
     process.stderr.write('studio-snapshot: set LU_WEB_REPO to the web repository, or pass its path.\n')
     process.exit(2)
@@ -247,10 +287,23 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   const repo = resolve(webRepo)
   const texts = snapshotFromWeb(repo, DESKTOP_ROOT, ref)
   const origin = webReader(repo, ref).origin([...GENERATED_FILES.map((name) => `${WEB_DIR}/${name}`), `apps/web/${MARK_FILE}`])
-  texts[SOURCE_FILE] = sourceText(texts, origin, ref)
+  // The gate seed: written from --gate, else kept as the last run recorded it.
+  const gateAt = args.indexOf('--gate')
+  const sourcePath = resolve(DESKTOP_ROOT, DESKTOP_DIR, SOURCE_FILE)
+  let gate = existsSync(sourcePath) ? JSON.parse(readFileSync(sourcePath, 'utf8')).gate : undefined
+  if (gateAt >= 0) {
+    const from = args[gateAt + 1] === 'live' ? GATE_URL : args[gateAt + 1]
+    if (!from) {
+      process.stderr.write('studio-snapshot: --gate needs a URL, a saved answer or `live`.\n')
+      process.exit(2)
+    }
+    texts[GATE_SEED_FILE] = gateSeedText(await readGateAnswer(from))
+    gate = { from: /^https:/.test(from) ? from : 'file', file: GATE_SEED_FILE, sha256: hashText(texts[GATE_SEED_FILE]) }
+  }
+  texts[SOURCE_FILE] = sourceText(texts, origin, ref, gate)
   let differ = 0
-  for (const name of [...GENERATED_FILES, SOURCE_FILE]) {
-    const file = resolve(DESKTOP_ROOT, DESKTOP_DIR, name)
+  for (const name of [...GENERATED_FILES, SOURCE_FILE, ...(gateAt >= 0 ? [GATE_SEED_FILE] : [])]) {
+    const file = name === GATE_SEED_FILE ? resolve(DESKTOP_ROOT, name) : resolve(DESKTOP_ROOT, DESKTOP_DIR, name)
     const same = existsSync(file) && readFileSync(file, 'utf8') === texts[name]
     if (!same) differ++
     if (!same && !check) writeFileSync(file, texts[name])
