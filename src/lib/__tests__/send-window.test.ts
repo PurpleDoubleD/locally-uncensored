@@ -25,14 +25,20 @@ describe('A2: the paid-provider send cap', () => {
     expect(budget).toBe(DEFAULT_SEND_WINDOW_TOKENS)
   })
 
-  it('negative control: without the cap the same model gets 0.8 of its window', () => {
+  it('the decay switch does not lift the cap on a paid provider any more (CA, 14.11.2026)', () => {
+    // Decay off used to mean 0.8 of the window, 209k per step on this model.
+    // The support logs of that week show runs sending 120-278k per paid step.
     const budget = effectiveSendWindow({
       providerId: 'lu-cloud',
       modelWindow: 262144,
       capEnabled: false,
     })
+    expect(budget).toBe(DEFAULT_SEND_WINDOW_TOKENS)
+  })
+
+  it('negative control: a local backend still gets 0.8 of its window', () => {
+    const budget = effectiveSendWindow({ providerId: 'ollama', modelWindow: 262144, capEnabled: false })
     expect(budget).toBe(Math.floor(262144 * 0.8))
-    expect(budget).toBeGreaterThan(200000)
   })
 
   it('never RAISES a small model to the cap', () => {

@@ -114,10 +114,11 @@ describe('C77: the window of an API model whose server names none', () => {
     expect(await getChatWindowTokens(model())).toBeGreaterThan(8192)
   })
 
-  it('without the send cap the button stays, for the model window alone', async () => {
+  it('with decay off the paid send cap stays, and so does its button (CA, 14.11.2026)', async () => {
     useSettingsStore.getState().updateSettings({ contextDecay: false })
     const ctx = await resolveModelContext(model(), 'chat', currentContextKnobs())
-    expect(ctx.sendAdjustable).toBe(false)
+    expect(ctx.sendAdjustable).toBe(true)
+    expect(ctx.sendWindow).toBeLessThanOrEqual(32768)
     expect(ctx.adjustable).toBe(true)
     expect(ctx.modelWindowSettable).toBe(true)
   })
