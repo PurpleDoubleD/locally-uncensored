@@ -319,6 +319,7 @@
     "weights": "open",
     "inputs": {},
     "defaults": {},
+    "maxSide": 1536,
     "price": {
       "mode": "flat",
       "rates": {
@@ -337,6 +338,7 @@
     "weights": "open",
     "inputs": {},
     "defaults": {},
+    "maxSide": 1536,
     "price": {
       "mode": "flat",
       "rates": {
@@ -355,6 +357,7 @@
     "weights": "open",
     "inputs": {},
     "defaults": {},
+    "maxSide": 1536,
     "price": {
       "mode": "flat",
       "rates": {
@@ -412,7 +415,7 @@
     "endpoint": "base/wan-2.2-spicy/video-extend",
     "kind": "video",
     "adult": true,
-    "tier": "older",
+    "tier": "standard",
     "weights": "open",
     "inputs": {
       "video": "video_path"
@@ -1070,6 +1073,7 @@
     },
     "inputs": {},
     "defaults": {},
+    "maxSide": 1536,
     "baselineUsd": 0.01
   },
   "nucleus-image": {
@@ -1122,6 +1126,7 @@
     },
     "inputs": {},
     "defaults": {},
+    "maxSide": 1536,
     "baselineUsd": 0.025
   },
   "qwen-image-2.1": {
@@ -1302,5 +1307,476 @@
       "resolution": "480p"
     },
     "baselineUsd": 0.5
+  },
+  "flux-3-klein": {
+    "label": "FLUX 3 Klein",
+    "endpoint": "base/flux-3-klein-image-distilled/text-to-image",
+    "kind": "image",
+    "adult": false,
+    "tier": "best",
+    "weights": "open",
+    "price": {
+      "mode": "flat",
+      "rates": {
+        "1k": 0.01,
+        "1.5k": 0.02,
+        "2k": 0.04
+      }
+    },
+    "inputs": {},
+    "defaults": {},
+    "baselineUsd": 0.01
+  },
+  "flux-3-klein-base": {
+    "label": "FLUX 3 Klein Base",
+    "endpoint": "base/flux-3-klein-image-base/text-to-image",
+    "kind": "image",
+    "adult": false,
+    "tier": "standard",
+    "weights": "open",
+    "price": {
+      "mode": "flat",
+      "rates": {
+        "1k": 0.03,
+        "1.5k": 0.06,
+        "2k": 0.12
+      }
+    },
+    "inputs": {},
+    "defaults": {},
+    "baselineUsd": 0.03
+  },
+  "flux-3-klein-edit": {
+    "label": "FLUX 3 Klein",
+    "endpoint": "base/flux-3-klein-image-distilled/edit",
+    "kind": "image",
+    "adult": false,
+    "tier": "best",
+    "weights": "open",
+    "price": {
+      "mode": "flat",
+      "rates": {
+        "1k": 0.016,
+        "1.5k": 0.032,
+        "2k": 0.064
+      },
+      "extraImage": 0.01
+    },
+    "inputs": {
+      "images": "image_paths"
+    },
+    "defaults": {},
+    "baselineUsd": 0.016
+  },
+  "krea-2-turbo": {
+    "label": "Krea 2 Turbo",
+    "endpoint": "base/krea-v2/turbo",
+    "kind": "image",
+    "adult": true,
+    "tier": "best",
+    "weights": "open",
+    "price": {
+      "mode": "flat",
+      "rates": {
+        "1k": 0.012,
+        "2k": 0.024
+      }
+    },
+    "inputs": {},
+    "defaults": {},
+    "baselineUsd": 0.012
+  },
+  "moss-image": {
+    "label": "MOSS Image",
+    "endpoint": "base/moss-image/text-to-image",
+    "kind": "image",
+    "adult": true,
+    "tier": "standard",
+    "weights": "open-family",
+    "price": {
+      "mode": "flat",
+      "rates": {
+        "1k": 0.02,
+        "1.5k": 0.04,
+        "2k": 0.08
+      }
+    },
+    "inputs": {},
+    "defaults": {},
+    "baselineUsd": 0.02
+  },
+  "eleven-v4": {
+    "label": "ElevenLabs v4",
+    "endpoint": "elevenlabs/eleven-v4",
+    "kind": "audio",
+    "adult": false,
+    "tier": "best",
+    "weights": "closed",
+    "inputs": {},
+    "defaults": {},
+    "promptField": "text",
+    "price": {
+      "mode": "characters",
+      "rates": {
+        "default": 0.008
+      }
+    },
+    "baselineUsd": 0.08
+  },
+  "eleven-v4-turbo": {
+    "label": "ElevenLabs v4 Turbo",
+    "endpoint": "elevenlabs/eleven-v4-turbo",
+    "kind": "audio",
+    "adult": false,
+    "tier": "standard",
+    "weights": "closed",
+    "inputs": {},
+    "defaults": {},
+    "promptField": "text",
+    "price": {
+      "mode": "characters",
+      "rates": {
+        "default": 0.004
+      }
+    },
+    "baselineUsd": 0.04
+  },
+  "wan-3.0-t2v": {
+    "label": "Wan 3.0",
+    "endpoint": "alibaba/wan-3.0/text-to-video",
+    "kind": "video",
+    "adult": false,
+    "tier": "best",
+    "weights": "open-family",
+    "price": {
+      "mode": "output",
+      "rates": {
+        "480p": 0.05,
+        "720p": 0.1,
+        "1080p": 0.2
+      }
+    },
+    "inputs": {},
+    "defaults": {
+      "resolution": "480p"
+    },
+    "baselineUsd": 0.5
+  },
+  "wan-3.0-prime-t2v": {
+    "label": "Wan 3.0 Prime",
+    "endpoint": "alibaba/wan-3.0-prime/text-to-video",
+    "kind": "video",
+    "adult": false,
+    "tier": "standard",
+    "weights": "open-family",
+    "price": {
+      "mode": "output",
+      "rates": {
+        "480p": 0.075,
+        "720p": 0.15,
+        "1080p": 0.3
+      }
+    },
+    "inputs": {},
+    "defaults": {
+      "resolution": "480p"
+    },
+    "baselineUsd": 0.75
+  },
+  "minimax-h3-singularity": {
+    "label": "MiniMax H3 Singularity Uncensored",
+    "endpoint": "base/minimax-h3-singularity/image-to-video",
+    "kind": "video",
+    "adult": true,
+    "tier": "best",
+    "weights": "open",
+    "price": {
+      "mode": "output",
+      "rates": {
+        "480p": 0.05,
+        "540p": 0.075,
+        "768p": 0.1,
+        "1080p": 0.2
+      }
+    },
+    "inputs": {
+      "image": "source_path",
+      "last_image": "last_image_path"
+    },
+    "defaults": {
+      "resolution": "480p"
+    },
+    "baselineUsd": 0.25
+  },
+  "minimax-h3-singularity-ref": {
+    "label": "MiniMax H3 Singularity Uncensored \u2022 Reference",
+    "endpoint": "base/minimax-h3-singularity/reference-to-video",
+    "kind": "video",
+    "adult": true,
+    "tier": "best",
+    "weights": "open",
+    "price": {
+      "mode": "output",
+      "rates": {
+        "480p": 0.057,
+        "540p": 0.082,
+        "768p": 0.107,
+        "1080p": 0.207
+      },
+      "extraImage": 0.02
+    },
+    "inputs": {
+      "reference_images": "image_paths"
+    },
+    "defaults": {
+      "resolution": "480p"
+    },
+    "baselineUsd": 0.25
+  },
+  "gpt-image-2": {
+    "label": "GPT Image 2",
+    "endpoint": "openai/gpt-image-2/text-to-image",
+    "kind": "image",
+    "adult": false,
+    "tier": "best",
+    "weights": "closed",
+    "price": {
+      "mode": "flat",
+      "rates": {
+        "1k/low": 0.01,
+        "1k/medium": 0.06,
+        "1k/high": 0.22,
+        "2k/low": 0.02,
+        "2k/medium": 0.1,
+        "2k/high": 0.4,
+        "4k/low": 0.03,
+        "4k/medium": 0.18,
+        "4k/high": 0.72
+      },
+      "qualityField": "quality"
+    },
+    "inputs": {},
+    "defaults": {},
+    "baselineUsd": 0.06
+  },
+  "gpt-image-2-edit": {
+    "label": "GPT Image 2",
+    "endpoint": "openai/gpt-image-2/edit",
+    "kind": "image",
+    "adult": false,
+    "tier": "best",
+    "weights": "closed",
+    "price": {
+      "mode": "flat",
+      "rates": {
+        "1k/low": 0.02,
+        "1k/medium": 0.07,
+        "1k/high": 0.23,
+        "2k/low": 0.03,
+        "2k/medium": 0.11,
+        "2k/high": 0.41,
+        "4k/low": 0.04,
+        "4k/medium": 0.19,
+        "4k/high": 0.73
+      },
+      "qualityField": "quality",
+      "extraImage": 0.012
+    },
+    "inputs": {
+      "images": "image_paths"
+    },
+    "defaults": {},
+    "baselineUsd": 0.07
+  },
+  "nano-banana-pro": {
+    "label": "Nano Banana Pro",
+    "endpoint": "google/nano-banana-pro/text-to-image",
+    "kind": "image",
+    "adult": false,
+    "tier": "best",
+    "weights": "closed",
+    "price": {
+      "mode": "flat",
+      "rates": {
+        "1k": 0.14,
+        "2k": 0.14,
+        "4k": 0.24
+      }
+    },
+    "inputs": {},
+    "defaults": {},
+    "baselineUsd": 0.14
+  },
+  "nano-banana-pro-edit": {
+    "label": "Nano Banana Pro",
+    "endpoint": "google/nano-banana-pro/edit",
+    "kind": "image",
+    "adult": false,
+    "tier": "best",
+    "weights": "closed",
+    "price": {
+      "mode": "flat",
+      "rates": {
+        "1k": 0.14,
+        "2k": 0.14,
+        "4k": 0.24
+      }
+    },
+    "inputs": {
+      "images": "image_paths"
+    },
+    "defaults": {},
+    "baselineUsd": 0.14
+  },
+  "flux-2-max": {
+    "label": "FLUX.2 Max",
+    "endpoint": "base/flux-2-max/text-to-image",
+    "kind": "image",
+    "adult": false,
+    "tier": "best",
+    "weights": "closed",
+    "price": {
+      "mode": "flat",
+      "rates": {
+        "default": 0.07
+      }
+    },
+    "inputs": {},
+    "defaults": {},
+    "baselineUsd": 0.07
+  },
+  "flux-2-max-edit": {
+    "label": "FLUX.2 Max",
+    "endpoint": "base/flux-2-max/edit",
+    "kind": "image",
+    "adult": false,
+    "tier": "best",
+    "weights": "closed",
+    "price": {
+      "mode": "flat",
+      "rates": {
+        "default": 0.07
+      }
+    },
+    "inputs": {
+      "images": "image_paths"
+    },
+    "defaults": {},
+    "baselineUsd": 0.07
+  },
+  "midjourney": {
+    "label": "Midjourney",
+    "endpoint": "midjourney/text-to-image",
+    "kind": "image",
+    "adult": false,
+    "tier": "best",
+    "weights": "closed",
+    "price": {
+      "mode": "flat",
+      "rates": {
+        "false": 0.1,
+        "true": 0.15
+      },
+      "resolutionField": "hd"
+    },
+    "inputs": {},
+    "defaults": {},
+    "baselineUsd": 0.1
+  },
+  "grok-imagine-quality": {
+    "label": "Grok Imagine Quality",
+    "endpoint": "x-ai/grok-imagine-image-quality/text-to-image",
+    "kind": "image",
+    "adult": false,
+    "tier": "best",
+    "weights": "closed",
+    "price": {
+      "mode": "flat",
+      "rates": {
+        "1k": 0.06,
+        "2k": 0.08
+      }
+    },
+    "inputs": {},
+    "defaults": {},
+    "baselineUsd": 0.06
+  },
+  "grok-imagine-quality-edit": {
+    "label": "Grok Imagine Quality",
+    "endpoint": "x-ai/grok-imagine-image-quality/edit",
+    "kind": "image",
+    "adult": false,
+    "tier": "best",
+    "weights": "closed",
+    "price": {
+      "mode": "flat",
+      "rates": {
+        "1k": 0.07,
+        "2k": 0.09
+      },
+      "extraImage": 0.01
+    },
+    "inputs": {
+      "images": "image_paths"
+    },
+    "defaults": {},
+    "baselineUsd": 0.07
+  },
+  "recraft-v4.1-pro": {
+    "label": "Recraft V4.1 Pro",
+    "endpoint": "recraft-ai/recraft-v4.1-pro/text-to-image",
+    "kind": "image",
+    "adult": false,
+    "tier": "best",
+    "weights": "closed",
+    "price": {
+      "mode": "flat",
+      "rates": {
+        "default": 0.25
+      }
+    },
+    "inputs": {},
+    "defaults": {},
+    "baselineUsd": 0.25
+  },
+  "kling-image-o3": {
+    "label": "Kling Image O3",
+    "endpoint": "kwaivgi/kling-image-o3/text-to-image",
+    "kind": "image",
+    "adult": false,
+    "tier": "standard",
+    "weights": "closed",
+    "price": {
+      "mode": "flat",
+      "rates": {
+        "1k": 0.028,
+        "2k": 0.028,
+        "4k": 0.056
+      }
+    },
+    "inputs": {},
+    "defaults": {},
+    "baselineUsd": 0.028
+  },
+  "kling-image-o3-edit": {
+    "label": "Kling Image O3",
+    "endpoint": "kwaivgi/kling-image-o3/edit",
+    "kind": "image",
+    "adult": false,
+    "tier": "standard",
+    "weights": "closed",
+    "price": {
+      "mode": "flat",
+      "rates": {
+        "1k": 0.028,
+        "2k": 0.028,
+        "4k": 0.056
+      }
+    },
+    "inputs": {
+      "images": "image_paths"
+    },
+    "defaults": {},
+    "baselineUsd": 0.028
   }
 }
