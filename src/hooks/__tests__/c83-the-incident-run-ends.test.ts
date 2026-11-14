@@ -133,7 +133,7 @@ describe('C83: the incident run, end to end', () => {
     expect(requests).toBeLessThanOrEqual(8)
     expect(notes.some((n) => /^⚠ Large request: this step sent 4\d\dk tokens/.test(n))).toBe(true)
     expect(notes.some((n) => /^⛔ Stopped to protect your credits/.test(n))).toBe(true)
-    expect(answer.content).toMatch(/Stopped to protect your credits: this run has sent 3\.\dM tokens/)
+    expect(answer.content).toMatch(/Stopped to protect your credits: this run has sent 2\.\dM tokens/)
   })
 
   it('without usage numbers: the near-copy detector ends it on the 8th', { timeout: 60_000 }, async () => {

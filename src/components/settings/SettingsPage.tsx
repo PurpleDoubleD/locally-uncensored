@@ -1,4 +1,5 @@
 import { SkillsSettings } from './SkillsSettings'
+import { CreditLimitSettings } from './CreditLimitSettings'
 import { CommandRulesSettings } from './CommandRulesSettings'
 import { useState, useEffect, useLayoutEffect, useRef, type ReactNode, type ChangeEvent } from 'react'
 import { withDetail } from '../../lib/error-text'
@@ -2466,6 +2467,7 @@ export function SettingsPage() {
               <div className="t-micro text-gray-500 dark:text-gray-500 leading-relaxed pt-0.5">
                 Stops an agent run that keeps repeating the same steps (&quot;Loop guard halted the run&quot;). Off: the run goes on until its step limit or until you press Stop.
               </div>
+              <CreditLimitSettings />
               {/* C59 A2: the compact profile for local models, on by default. */}
               <InlineToggle
                 label="Short tool list for local models"

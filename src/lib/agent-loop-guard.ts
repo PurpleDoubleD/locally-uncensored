@@ -224,6 +224,40 @@ const READ_ONLY_TOOLS = new Set<string>([
   'git_diff',
 ])
 
+/**
+ * A shell command that only looks (CA, 14.11.2026). Measured in a real run
+ * with LU's own engine: the data was not where the model looked, and it sent
+ * `find . -type f -name "*.json" 2>/dev/null` nine times in 26 calls. Every
+ * shell call counted as "may have changed something", which reset the read
+ * counter each time, so only four identical calls IN A ROW ended it. A command
+ * built from inspection programs only, with no way to write, now counts as a
+ * read here. This list is for counting repeats, never for permission: what
+ * runs without asking is decided elsewhere (command-rules, Ask mode).
+ */
+const INSPECT_FIRST = /^(find|ls|cat|grep|rg|head|tail|wc|pwd|stat|file|du|tree|which|git\s+(status|log|diff|show|blame))(\s|$)/
+const INSPECT_PIPE = /^(head|tail|wc|sort|uniq|grep|rg|cut)(\s|$)/
+const NEVER_INSPECT = /;|&&|\|\||`|\$\(|<\(|\s-exec(dir)?\b|\s-delete\b|\s-ok\b|\bxargs\b|\btee\b|\s-i\b|--output/
+
+export function isInspectionShell(argsJson: string): boolean {
+  let command = ''
+  try {
+    const a = JSON.parse(argsJson) as { command?: unknown }
+    command = typeof a?.command === 'string' ? a.command : ''
+  } catch {
+    return false
+  }
+  const c = command.replace(/\s2>\s*\/dev\/null/g, ' ').replace(/\s2>&1/g, ' ').trim()
+  if (!c || NEVER_INSPECT.test(c) || />/.test(c)) return false
+  const parts = c.split('|').map((x) => x.trim())
+  if (parts.some((x) => !x)) return false
+  return INSPECT_FIRST.test(parts[0]) && parts.slice(1).every((x) => INSPECT_PIPE.test(x))
+}
+
+/** A call that only reads, for counting repeats. */
+function isReadCall(c: { name: string; args: string }): boolean {
+  return READ_ONLY_TOOLS.has(c.name) || (c.name === 'shell_execute' && isInspectionShell(c.args))
+}
+
 export class AgentLoopGuard {
   /** Off (Settings → Agent Permissions, C44): every verdict is `ok`, the run
    *  goes on until its step and tool call limits or the user's Stop. */
@@ -341,7 +375,7 @@ export class AgentLoopGuard {
     const sig = [...keys].sort().join('||')
     const trimmed = opts.trimmedReadKeys
     const isTrimmed = (k: string) => trimmed?.has(k) ?? false
-    const batchHasTrimmedRead = keys.some((k, i) => READ_ONLY_TOOLS.has(calls[i].name) && isTrimmed(k))
+    const batchHasTrimmedRead = keys.some((k, i) => isReadCall(calls[i]) && isTrimmed(k))
 
     // (1) Back-to-back identical batches, any tool class.
     if (sig === this.lastSig) {
@@ -359,7 +393,7 @@ export class AgentLoopGuard {
       return { action: 'steer', message: repeatSteer(calls.map((c) => c.name), this.consecutive, 'in a row') }
     }
 
-    const hasMutation = calls.some((c) => !READ_ONLY_TOOLS.has(c.name))
+    const hasMutation = calls.some((c) => !isReadCall(c))
 
     // (2) Windowed repeats among pure-read batches (alternation). A batch that
     // re-reads something the builder capped is not part of that pattern and is
@@ -384,7 +418,7 @@ export class AgentLoopGuard {
     // (3) Identical read calls within the epoch.
     let steer: LoopGuardVerdict | null = null
     for (let i = 0; i < calls.length; i++) {
-      if (!READ_ONLY_TOOLS.has(calls[i].name)) continue
+      if (!isReadCall(calls[i])) continue
       if (isTrimmed(keys[i]) && !this.trimForgiven.has(keys[i])) {
         // The result aged out of the prompt, so this read returns information
         // the model genuinely no longer has. Clear the counter rather than

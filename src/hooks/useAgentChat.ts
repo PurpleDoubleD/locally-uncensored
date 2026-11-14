@@ -1,4 +1,5 @@
 import { stripSourcesMarker } from '../lib/web-evidence'
+import { billingOf, creditRatesOf } from '../lib/agent-core/credit-rates'
 import { canonicalArgs, repeatLabel, skippedRepeatsNote } from '../lib/agent-core/repeat-note'
 import { replayableReasoning } from '../lib/agent-core/reasoning-replay'
 import { useRef, useState, useCallback, useEffect } from 'react'
@@ -1714,6 +1715,11 @@ export function useAgentChat() {
     const costBrake = new AgentCostBrake({
       paid: isPaidProvider(providerId, sendsToALanBackend(providerId, activeModel)),
       loopGuardEnabled: useSettingsStore.getState().settings.agentLoopGuard !== false,
+      // CA (14.11.2026): credits per task and per hour, priced from the
+      // model's declared rates (LU Cloud catalogue).
+      rates: creditRatesOf(activeModel),
+      runCreditLimit: useSettingsStore.getState().settings.agentRunCreditLimit,
+      hourCreditLimit: useSettingsStore.getState().settings.agentHourCreditLimit,
     })
     // The closing line a turn gets when the model itself said nothing usable.
     // Read from the live counters at call time, so both the normal end of the
@@ -2381,7 +2387,7 @@ export function useAgentChat() {
             })
           }
           requestUsage.add(turn)
-          costBrake.record(turn.promptEvalCount)
+          costBrake.record(turn.promptEvalCount, { output: turn.evalCount, billing: billingOf(turn) })
           // Native thinking field (Ollama; LU Cloud reasoning_content)
           if (turn.thinking) turnThinking = turn.thinking
 
@@ -2475,7 +2481,7 @@ export function useAgentChat() {
           // abschneiden, und dann steht hier ebenfalls kein Werkzeugaufruf.
           turnFinishReason = hermesTurn.finishReason
           requestUsage.add(hermesTurn)
-          costBrake.record(hermesTurn.promptEvalCount)
+          costBrake.record(hermesTurn.promptEvalCount, { output: hermesTurn.evalCount, billing: billingOf(hermesTurn) })
           notePhoneCount(hermesTurn.promptEvalCount)
           if (hermesTurn.thinking) {
             turnThinking = turnThinking
@@ -3062,6 +3068,7 @@ export function useAgentChat() {
             id: uuid(), phase: 'reflection', content: `⛔ ${brake.message}`, timestamp: Date.now(),
           })
           log.warn('agent.cost_brake_halt', { provider: providerId, inputTokens: costBrake.inputTokens })
+          useChatNoticeStore.getState().show('cost-brake', brake.message, 'ruhig')
           break
         }
         if (brake.action === 'warn') {
@@ -3069,6 +3076,8 @@ export function useAgentChat() {
             id: uuid(), phase: 'reflection', content: `⚠ ${brake.message}`, timestamp: Date.now(),
           })
           log.info('agent.cost_brake_warn', { provider: providerId, inputTokens: costBrake.inputTokens })
+          // Visible where the user looks, not only inside the folded steps.
+          useChatNoticeStore.getState().show('cost-brake', brake.message, 'ruhig')
         }
         const pendingSteer = batchVerdict.action === 'steer' ? batchVerdict.message : null
         if (pendingSteer) {

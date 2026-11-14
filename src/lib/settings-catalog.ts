@@ -430,7 +430,7 @@ export const CATALOG: readonly CatalogEntry[] = [
 // ── Locked ──────────────────────────────────────────────────────
 
 export type LockedCategory =
-  | 'computer-control' | 'remote-access' | 'permissions' | 'keys' | 'paths' | 'plugins' | 'persona-text'
+  | 'computer-control' | 'remote-access' | 'permissions' | 'keys' | 'paths' | 'plugins' | 'persona-text' | 'spending'
 
 interface LockRule {
   category: LockedCategory
@@ -477,6 +477,12 @@ export const LOCK_RULES: readonly LockRule[] = [
     category: 'persona-text', what: 'Persona texts and character cards', where: 'Settings → Agent → Personas',
     names: ['personas', 'systemPrompt', 'personaPrompt', 'characterCard'],
     pattern: /systemprompt|personaprompt|personatext|charactercard|instruction/,
+  },
+  {
+    // CA (14.11.2026): an agent must never raise its own spending limit.
+    category: 'spending', what: 'Credit limits of agent runs', where: 'Settings → Agent',
+    names: ['agentRunCreditLimit', 'agentHourCreditLimit', 'creditLimit', 'spendingLimit'],
+    pattern: /credit(limit)?|spending|budget|costbrake/,
   },
 ]
 

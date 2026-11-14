@@ -1,4 +1,5 @@
 import { stripSourcesMarker } from '../lib/web-evidence'
+import { billingOf, creditRatesOf } from '../lib/agent-core/credit-rates'
 import { replayableReasoning } from '../lib/agent-core/reasoning-replay'
 import { NOT_IN_CODE_TAB } from '../lib/browser-tools'
 import { useRef, useState, useCallback } from 'react'
@@ -1280,6 +1281,11 @@ export function useCodex() {
       const costBrake = new AgentCostBrake({
         paid: isPaidProvider(providerId, sendsToALanBackend(providerId, activeModel)),
         loopGuardEnabled: useSettingsStore.getState().settings.agentLoopGuard !== false,
+        // CA (14.11.2026): credits per task and per hour, priced from the
+        // model's declared rates (LU Cloud catalogue).
+        rates: creditRatesOf(activeModel),
+        runCreditLimit: useSettingsStore.getState().settings.agentRunCreditLimit,
+        hourCreditLimit: useSettingsStore.getState().settings.agentHourCreditLimit,
       })
       // Which read produced which result message. The request builder reports
       // back the results it sent CAPPED, and this map turns those messages
@@ -1776,7 +1782,7 @@ export function useCodex() {
             turnFinishReason = turn.doneReason
             reportTurnUsage(convId!, assistantMsg.id, turn)
             requestUsage.add(turn)
-            costBrake.record(turn.promptEvalCount)
+            costBrake.record(turn.promptEvalCount, { output: turn.evalCount, billing: billingOf(turn) })
             diagLog('streamWithTools-return', {
               iter: i,
               toolCallsCount: toolCalls.length,
@@ -1835,7 +1841,7 @@ export function useCodex() {
             turnFinishReason = turn.finishReason
             reportTurnUsage(convId!, assistantMsg.id, turn)
             requestUsage.add(turn)
-            costBrake.record(turn.promptEvalCount)
+            costBrake.record(turn.promptEvalCount, { output: turn.evalCount, billing: billingOf(turn) })
             // GH #147: a model on LU Cloud wrote its calls into the text
             // (!function_call:{"call": "file_read", ...}). This path never
             // looked, so the run stopped on prose. A call from the text counts
@@ -1975,7 +1981,7 @@ export function useCodex() {
           // Gleiche Stelle wie in useAgentChat.
           turnFinishReason = hermesTurn.finishReason
           requestUsage.add(hermesTurn)
-          costBrake.record(hermesTurn.promptEvalCount)
+          costBrake.record(hermesTurn.promptEvalCount, { output: hermesTurn.evalCount, billing: billingOf(hermesTurn) })
           if (keepThinking && hermesTurn.thinking) {
             thinkingContent += (thinkingContent ? '\n\n' : '') + hermesTurn.thinking
             useChatStore.getState().updateMessageThinking(convId!, assistantMsg.id, thinkingContent)
@@ -2324,11 +2330,14 @@ export function useCodex() {
           diagLog('cost-brake-halt', { iter: i, inputTokens: costBrake.inputTokens })
           useChatStore.getState().updateMessageContent(convId, assistantMsg.id, fullContent + `\n\n_(${brake.message})_`)
           addBlock({ id: uuid(), phase: 'reflection', content: `⛔ ${brake.message}`, timestamp: Date.now() })
+          useChatNoticeStore.getState().show('cost-brake', brake.message, 'ruhig')
           break
         }
         if (brake.action === 'warn') {
           diagLog('cost-brake-warn', { iter: i, inputTokens: costBrake.inputTokens })
           addBlock({ id: uuid(), phase: 'reflection', content: `⚠ ${brake.message}`, timestamp: Date.now() })
+          // Visible where the user looks, not only inside the folded steps.
+          useChatNoticeStore.getState().show('cost-brake', brake.message, 'ruhig')
         }
         // Steer is appended AFTER this iteration's assistant+tool messages
         // (audit F2). Pushed here it landed chronologically BEFORE the calls

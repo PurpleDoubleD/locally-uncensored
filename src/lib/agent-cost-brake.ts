@@ -1,3 +1,6 @@
+import type { CreditRates } from '../api/providers/types'
+import { HOSTED_CREDITS_PER_EUR } from './cloud-pitch'
+import { addHourCredits, hourPauseDue, markHourPause } from './agent-core/credit-ledger'
 /**
  * Cost brake for one agent run (C83).
  *
@@ -21,13 +24,34 @@
  * never ends a run, it only says once that the limit has been passed.
  */
 
-export const LARGE_REQUEST_TOKENS = 400_000
-export const RUN_HALT_TOKENS = 3_000_000
+// CA (14.11.2026): 400k and 3M let the incidents of that week through. The
+// send cap keeps a paid step at 32k now, so a step past 64k is unusual and
+// worth a word, and 2M input per run is ~60 full steps at the cap.
+export const LARGE_REQUEST_TOKENS = 64_000
+export const RUN_HALT_TOKENS = 2_000_000
+
+/**
+ * Credits (CA, 14.11.2026). Where the model's catalogue entry declares its
+ * credit price (LU Cloud), every step is priced from the tokens the backend
+ * reported: an upper bound, because cached input is billed for less and the
+ * app does not learn by how much. One task may use up to RUN_CREDIT_LIMIT
+ * before it pauses and asks; all agent runs together up to HOUR_CREDIT_LIMIT
+ * in a rolling hour. Half of the run limit gets a visible notice.
+ * For scale: a Hosted plan carries 900,000 credits a month.
+ */
+export const RUN_CREDIT_LIMIT = 100_000
+export const HOUR_CREDIT_LIMIT = 250_000
 
 export type CostBrakeVerdict =
   | { action: 'ok' }
   | { action: 'warn'; message: string }
   | { action: 'halt'; reason: string; message: string }
+
+const fmtCredits = (n: number): string => (Math.round(n / 1000) * 1000).toLocaleString('en-US')
+const euros = (credits: number): string => {
+  const e = credits / HOSTED_CREDITS_PER_EUR
+  return e < 1 ? 'under 1 €' : `about ${e < 10 ? e.toFixed(1) : Math.round(e)} €`
+}
 
 const fmtTokens = (n: number): string =>
   n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : `${Math.round(n / 1000)}k`
@@ -42,12 +66,35 @@ export class AgentCostBrake {
   private largeWarned = false
   private sumWarned = false
   private pending: CostBrakeVerdict = { action: 'ok' }
+  private readonly rates: CreditRates | null
+  private readonly runCreditLimit: number
+  private readonly hourCreditLimit: number
+  private credits = 0
+  private halfWarned = false
 
-  constructor(opts: { paid: boolean; loopGuardEnabled?: boolean; largeRequestTokens?: number; runHaltTokens?: number }) {
+  constructor(opts: {
+    paid: boolean
+    loopGuardEnabled?: boolean
+    largeRequestTokens?: number
+    runHaltTokens?: number
+    /** The model's declared credit price (LU Cloud catalogue). */
+    rates?: CreditRates | null
+    /** 0 switches the credit limit off. */
+    runCreditLimit?: number
+    hourCreditLimit?: number
+  }) {
     this.paid = opts.paid
     this.mayHalt = opts.loopGuardEnabled !== false
     this.largeAt = opts.largeRequestTokens ?? LARGE_REQUEST_TOKENS
     this.haltAt = opts.runHaltTokens ?? RUN_HALT_TOKENS
+    this.rates = opts.rates && opts.rates.inputPerMillion >= 0 && opts.rates.outputPerMillion >= 0 ? opts.rates : null
+    this.runCreditLimit = opts.runCreditLimit ?? RUN_CREDIT_LIMIT
+    this.hourCreditLimit = opts.hourCreditLimit ?? HOUR_CREDIT_LIMIT
+  }
+
+  /** Credits this run used so far, upper bound; 0 without a declared price. */
+  get creditsUsed(): number {
+    return Math.round(this.credits)
   }
 
   /** Input tokens summed over this run so far, as reported by the backend. */
@@ -59,12 +106,48 @@ export class AgentCostBrake {
    * One model call's reported input. A call without a count adds nothing:
    * the brake never guesses, the same rule as the usage line under an answer.
    */
-  record(promptTokens: number | undefined): void {
+  record(promptTokens: number | undefined, extra: { output?: number; billing?: 'flash' | 'credits' } = {}): void {
     if (!this.paid) return
     const n = typeof promptTokens === 'number' && Number.isFinite(promptTokens) && promptTokens > 0 ? Math.round(promptTokens) : 0
     if (n === 0) return
     this.sum += n
     this.calls++
+    // Credits, where the price is known and the step was billed in credits
+    // (a Flash step on the free allowance costs none).
+    if (this.rates && extra.billing !== 'flash') {
+      const out = typeof extra.output === 'number' && extra.output > 0 ? extra.output : 0
+      const step = (n * this.rates.inputPerMillion + out * this.rates.outputPerMillion) / 1_000_000
+      this.credits += step
+      const hour = addHourCredits(step)
+      if (this.mayHalt && this.runCreditLimit > 0 && this.credits >= this.runCreditLimit) {
+        this.pending = {
+          action: 'halt',
+          reason: `cost brake: this task used up to ${fmtCredits(this.credits)} credits in ${this.calls} steps (limit ${fmtCredits(this.runCreditLimit)})`,
+          message:
+            `Paused to protect your credits: this task has used up to ${fmtCredits(this.credits)} credits (${euros(this.credits)}) in ${this.calls} steps. ` +
+            'Send "continue" to go on with the next ' + fmtCredits(this.runCreditLimit) + ', or change the limit in Settings → Agent.',
+        }
+        return
+      }
+      if (this.mayHalt && this.hourCreditLimit > 0 && hour >= this.hourCreditLimit && hourPauseDue()) {
+        markHourPause()
+        this.pending = {
+          action: 'halt',
+          reason: `cost brake: agent runs used up to ${fmtCredits(hour)} credits in the last hour (limit ${fmtCredits(this.hourCreditLimit)})`,
+          message:
+            `Paused to protect your credits: agent runs have used up to ${fmtCredits(hour)} credits (${euros(hour)}) in the last hour. ` +
+            'Send "continue" to go on; the next pause comes in an hour at the earliest. The limit is in Settings → Agent.',
+        }
+        return
+      }
+      if (this.runCreditLimit > 0 && !this.halfWarned && this.credits >= this.runCreditLimit / 2) {
+        this.halfWarned = true
+        this.pending = {
+          action: 'warn',
+          message: `This task has used up to ${fmtCredits(this.credits)} credits so far (${euros(this.credits)}). It pauses at ${fmtCredits(this.runCreditLimit)}.`,
+        }
+      }
+    }
     if (this.sum >= this.haltAt) {
       if (this.mayHalt) {
         this.pending = {
