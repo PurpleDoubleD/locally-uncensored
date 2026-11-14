@@ -14,6 +14,8 @@ export interface StudioModel {
   label: string; endpoint: string; kind: 'image' | 'video' | 'audio' | '3d'; adult: boolean
   /** The usual run time in seconds (3D, shown while the cloud builds). */
   typical_s?: number
+  /** 14.11.2026 (3.1.0): in the catalogue, not measured yet. See unmeasuredHidden. */
+  unmeasured?: boolean
   tier: ModelTier; weights: ModelWeights
   inputs: Record<string, string>; defaults: Record<string, unknown>
   // `resolutionField` / `durationField`: nicht jeder Endpunkt nennt die beiden
@@ -30,6 +32,15 @@ export interface StudioModel {
     extraViews?: number }
 }
 export const STUDIO_MODELS = definitions as Record<string, StudioModel>
+/** A studio model the catalogue marks `unmeasured` (14.11.2026, 3.1.0): its
+ *  price and filter are not checked by a paid run yet, so no picker, role or
+ *  list shows it. Unless the live catalogue entry carries `unmeasured: true`:
+ *  the server sends that only while its switch for the paid measurement
+ *  (NEXT_PUBLIC_SHOW_UNMEASURED_MODELS on the web) is on. An older server that
+ *  lists such a model without the mark does not put it in front of anyone. */
+export function unmeasuredHidden(entry: { id: string; unmeasured?: boolean }): boolean {
+  return STUDIO_MODELS[entry.id]?.unmeasured === true && entry.unmeasured !== true
+}
 export function studioSchema(id: string): Schema {
   const model = STUDIO_MODELS[id]
   if (!model) throw new Error('Unknown studio model')

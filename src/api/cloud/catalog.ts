@@ -4,6 +4,7 @@
 
 import { cloudFetch, jsonOrError } from './client'
 import type { CloudModel } from '../../lib/render/cloud-models'
+import { unmeasuredHidden } from '../../lib/render/studio-contract'
 
 export interface CatalogOps {
   removebg: number
@@ -42,7 +43,9 @@ type WireModel = CloudModel & { native_label?: unknown }
 export function desktopCatalog(wire: Omit<CloudCatalog, 'models'> & { models: WireModel[] }): CloudCatalog {
   return {
     ...wire,
-    models: wire.models.map(({ native_label, ...m }) =>
+    // A model not measured yet stays out unless the server marks it as open
+    // for the measurement (studio-contract.ts, unmeasuredHidden).
+    models: wire.models.filter((m) => !unmeasuredHidden(m)).map(({ native_label, ...m }) =>
       typeof native_label === 'string' && native_label.trim() ? { ...m, label: native_label } : m,
     ),
   }

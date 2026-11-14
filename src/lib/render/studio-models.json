@@ -1597,6 +1597,7 @@
     "endpoint": "meshy/v7.1/multi-image-to-3d",
     "kind": "3d",
     "adult": false,
+    "unmeasured": true,
     "tier": "best",
     "weights": "closed",
     "price": {
@@ -1735,6 +1736,7 @@
     "endpoint": "tripo3d/p2/multiview-to-3d",
     "kind": "3d",
     "adult": false,
+    "unmeasured": true,
     "tier": "best",
     "weights": "closed",
     "price": {
@@ -1759,6 +1761,7 @@
     "endpoint": "hitem3d/hi3d-v3.0/image-to-3d",
     "kind": "3d",
     "adult": false,
+    "unmeasured": true,
     "tier": "best",
     "weights": "closed",
     "price": {
@@ -1779,6 +1782,7 @@
     "endpoint": "hitem3d/hi3d-v3.0/multi-view-to-3d",
     "kind": "3d",
     "adult": false,
+    "unmeasured": true,
     "tier": "best",
     "weights": "closed",
     "price": {

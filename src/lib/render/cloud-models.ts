@@ -50,6 +50,9 @@ export interface CloudModel {
    *  presence of this field on at least one entry is what unlocks the preset
    *  shelf. A model carrying it must never be priced from a client formula. */
   quote_required?: boolean
+  /** 3.1.0: the server lists this not yet measured studio model only because
+   *  its switch for the measurement is on (studio-contract.ts, unmeasuredHidden). */
+  unmeasured?: boolean
   /** Supports the masked img2img 'edit' op (flux-dev only today). */
   edit?: boolean
   /** R5-66: an instruction-based edit endpoint that takes prompt + image and
