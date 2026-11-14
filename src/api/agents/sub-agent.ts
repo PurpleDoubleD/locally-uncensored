@@ -607,6 +607,28 @@ export async function defaultSubAgentRunner(
     // not happen ("Stop means stop"). Threading the same signal the tool
     // gates already use into the request makes the abort reach the wire.
     const raw = await provider.chatWithTools(modelId, messages, promptTransport ? [] : llmTools, { signal: gates.abortSignal })
+    // Its credits count toward the hour like the main loop's (CA, 14.11.2026):
+    // a sub-agent on LU Cloud spent outside both limits. Past the hour limit
+    // it stops with what it found, as the main loop pauses.
+    // Accounting never breaks the delegation: a store that cannot answer
+    // (a test double, a phone without the catalogue) counts nothing.
+    let paused: string | null = null
+    try {
+      const { stepCredits, HOUR_CREDIT_LIMIT } = await import('../../lib/agent-cost-brake')
+      const { creditRatesOf, billingOf } = await import('../../lib/agent-core/credit-rates')
+      const { addHourCredits } = await import('../../lib/agent-core/credit-ledger')
+      const spent = stepCredits(creditRatesOf(laufmodell), raw.promptEvalCount, raw.evalCount, billingOf(raw))
+      if (spent > 0) {
+        const hour = addHourCredits(spent)
+        const { useSettingsStore } = await import('../../stores/settingsStore')
+        const limit = useSettingsStore.getState().settings.agentHourCreditLimit ?? HOUR_CREDIT_LIMIT
+        if (limit > 0 && hour >= limit) {
+          const material = finalContent || gesammeltesMaterial(messages)
+          paused = `Paused to protect your credits: agent runs used the hourly limit of ${limit.toLocaleString('en-US')} credits. ${material || '(no partial answer)'}`
+        }
+      }
+    } catch { /* counted nothing */ }
+    if (paused) return paused
     // The calls of this turn, wherever the model put them: native, <tool_call>
     // tags on the prompt transport, JSON or prose in the answer, or the
     // reasoning channel. One chain for every loop (lib/agent-core/recover.ts).

@@ -189,3 +189,20 @@ export class AgentCostBrake {
     return v
   }
 }
+
+/**
+ * What one model step costs in credits, where the price is known and the step
+ * was billed in credits; 0 otherwise. For loops that have no brake of their
+ * own (the sub-agent), so their spending still counts toward the hour.
+ */
+export function stepCredits(
+  rates: { inputPerMillion: number; outputPerMillion: number } | null | undefined,
+  promptTokens: number | undefined,
+  outputTokens: number | undefined,
+  billing?: 'flash' | 'credits',
+): number {
+  if (!rates || billing === 'flash') return 0
+  const n = typeof promptTokens === 'number' && promptTokens > 0 ? promptTokens : 0
+  const out = typeof outputTokens === 'number' && outputTokens > 0 ? outputTokens : 0
+  return (n * rates.inputPerMillion + out * rates.outputPerMillion) / 1_000_000
+}
