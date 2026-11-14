@@ -60,7 +60,10 @@ describe('checkCivitaiInstalled', () => {
   it('marks only the hit whose file lies in its own folder with its own size', async () => {
     const same = hit(1, 'juggernautXL_v9.safetensors', 'checkpoints', 6_938_040_682)
     const otherVersion = hit(2, 'detail_tweaker.safetensors', 'loras', 151_110_000)
-    const otherFolder = hit(3, 'flux_dev_fp8.safetensors', 'diffusion_models', 11_900_000_000)
+    // A27 (3.1.0): checkpoints and diffusion_models count as one place here,
+    // since a download from the search moves between them by its header. A
+    // LoRA folder is still another place.
+    const otherFolder = hit(3, 'flux_dev_fp8.safetensors', 'loras', 11_900_000_000)
     disk['checkpoints/juggernautXL_v9.safetensors'] = 6_938_040_682
     disk['loras/detail_tweaker.safetensors'] = 151_110_000 + 37_000_000
     disk['checkpoints/flux_dev_fp8.safetensors'] = 11_900_000_000
@@ -71,7 +74,7 @@ describe('checkCivitaiInstalled', () => {
     // One question to the existing per-file check, no folder scan of its own.
     expect(backendCall).toHaveBeenCalledTimes(1)
     expect(backendCall.mock.calls[0][1].files.map((f: { subfolder: string }) => f.subfolder))
-      .toEqual(['checkpoints', 'loras', 'diffusion_models'])
+      .toEqual(['checkpoints', 'diffusion_models', 'loras', 'loras'])
   })
 
   it('takes the name alone where CivitAI states no size', async () => {
