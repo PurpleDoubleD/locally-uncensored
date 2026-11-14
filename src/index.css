@@ -2994,8 +2994,18 @@ input[type="range"].neuron-range:disabled { cursor: not-allowed; opacity: 0.5; }
 .lu-look-actions .lu-msg-text em,
 .lu-look-actions .lu-action { color: var(--lu-look-action); font-style: italic; }
 .lu-look-font .lu-msg-text { font-family: var(--lu-look-font); }
+/* Line spacing. Not only the line height inside a wrapped paragraph: a
+   roleplay reply is mostly short paragraphs and one-line messages, where that
+   alone moved almost nothing, and the slider looked broken (report 14.11.2026).
+   Paragraph gaps and the gap between messages follow the same value; at the
+   default (1.625) they equal the classes they replace (mb-3, py-1), so the
+   slider has no jump when it first moves. Prose in the Code transcript and
+   in agent notes follows too; code blocks keep their own height. */
 .lu-look-leading .lu-msg-text,
-.lu-look-leading .lu-msg-text :is(p, li) { line-height: var(--lu-look-leading); }
+.lu-look-leading .lu-msg-text :is(p, li),
+.lu-look-leading .markdown-content :is(p, li, blockquote, td, th) { line-height: var(--lu-look-leading); }
+.lu-look-leading .markdown-content :is(p, ul, ol, blockquote) { margin-bottom: calc(var(--lu-look-leading) * 0.46rem); }
+.lu-look-leading .lu-msg-row { padding-block: calc(var(--lu-look-leading) * 0.154rem); }
 
 /* Layout "bubbles": the reply gets a bubble too. */
 .lu-look-bubbles .lu-msg-model-bubble {
