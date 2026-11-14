@@ -4758,3 +4758,30 @@ Hotfix sweep covering the v2.4.3 follow-up reports collected on Discord, Reddit,
 - **Model Auto-Detection** — finds all installed models automatically
 - **One-Click Setup** — `setup.bat` installs everything on Windows
 - **Hardware Detection** — recommends models based on your GPU/RAM
+
+## Release summaries from the README
+
+Until 3.1.0 the README carried a short paragraph for each release. They are
+kept here word for word; the full entries are in the sections above.
+
+3.0.9 brings Liquid's LFM3 models for small machines: 1.7B and 2B, about 1 to 1.7 GB each, for text, pictures and speech, on the LU Engine, on Ollama or as MLX builds on a Mac; the LU Engine moves to llama.cpp b11960 for them. A group chat now sends every speaker the context you picked, can redo one speaker and lets you set who speaks when. A compaction is one quiet line in the chat, and the conversation before it stays one click away. Animate takes an end image and, with MiniMax H3, up to nine reference pictures, and Krea 2, Qwen-Image 2.1 and FLUX.2 take reference pictures for a style, a person or a pose. Local videos run up to 15 seconds without drifting in colour, and a video shows a rough preview while it renders. The trainer learns a style, a concept or a pose next to a character (Beta). "Use this model" on Hugging Face opens the download in LU, and a model from the search comes in a quant that fits your graphics card. A status menu sits in the Mac menu bar and the Windows and Linux tray, and the Linux AppImage starts again on systems without the tray library. What has only run in automated tests is listed under Known limits in the [release notes](https://github.com/PurpleDoubleD/locally-uncensored/releases/tag/v3.0.9).
+
+3.0.8 makes web search in the chat work again: LU asks five search services in turn and needs no key for any of them. A video made in the chat plays in the chat, and a long one renders in the background while you write on. A picture attached in the chat reaches the image tool, and with two graphics cards chat and ComfyUI can each get their own. The LU Engine plans a model's memory from the file itself and offers a shorter context with one click. AMD cards on Windows get AMD's current ROCm build. New: the chat can read and change LU's settings with a confirmation card, the Model Manager can make a copy of a local model that refuses less, and Settings, Storage puts models, gallery and runtime in one folder of your choice. What has only run in automated tests is listed under Known limits in the [CHANGELOG](CHANGELOG.md).
+
+3.0.5 was about Create: LTX 2.5, FastH3 and YuE2 run on your own machine, Qwen-Image 2.1 gets a transparent background and its prompt enhancer, Edit, Remove Background and Enhance Image take up to 50 images in one go, and LU Cloud adds Qwen Image 2.1, LTX 2.5, MiniMax H3 and Wan 3.0 Reference. Chat takes any file, each model in a group chat can have its own persona, dropdowns stay inside the window (issue 149), and the speech install works again on Ubuntu 24.04.
+
+3.0.4 fixed the Code agent and the agent in chat on LU Cloud: writing a long file no longer ends the run, "continue" picks up where a run stopped instead of starting over, the agent keeps a plan only when you ask for one, and cloud context is 32K by default and can be set per model. It also fixed the bugs reported on GitHub and Discord since 3.0.3 (issues 144 to 147): MiniMax H3 runs as a video model with sound, Edit takes up to three extra images with Qwen-Image 2.1, a missing encoder or VAE is named and offered as a download instead of ending in "Value not in list", the LoRA stack follows the loras folder, and group chat works with every LU Engine model.
+
+3.0.3 was a hotfix: chats with many images no longer run the app out of memory, Create reads a model's family from the file instead of its name, and the five bugs reported on GitHub since 3.0.2 are fixed (issues 139 to 143).
+
+3.0.2 was a hotfix: the Code tab lost its scrollbar and its input box once a conversation grew taller than the window (issue 138, a regression in 3.0.1) and is held to the window height again, and the count of open cloud models now takes the Create Studio endpoints in, which makes it fourteen video models and seven image models.
+
+**What is new in 3.0.1**
+
+- **Qwen-Image 2.1 runs locally on Windows and Linux.** One model generates a picture from a prompt and edits one from a reference image, with no mask to paint. About 16 GB of files, ComfyUI 0.37.0 or newer, and a research license that does not allow commercial use.
+- **Models has a LoRAs tab of its own.** Search CivitAI, download into ComfyUI's `models/loras` folder, see what is installed with its size and trigger word, and delete what you no longer want.
+- **A GPU whose free memory could not be measured is planned more carefully**, and the log now says total capacity instead of calling it free.
+- **The Linux AppImage stops handing its own runtime to every program LU starts**, so a healthy system Python, pip, git or ffmpeg keeps working, and a distribution that blocks pip in the system Python keeps the isolated environment LU built.
+- **The local model runs one conversation at a time and says so**, with a line showing how many chats are ahead. Stop works while a chat is still waiting.
+- **Temperature, Top P and Max tokens belong to the conversation you moved them in**, instead of every open chat sharing one value.
+- **Cloud video renders offer the clip lengths the picked model really supports**, read from the live catalog.

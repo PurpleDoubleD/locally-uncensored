@@ -890,8 +890,8 @@ jobs:
           releaseName: 'LU ${{ github.event.release.tag_name || github.event.inputs.tag }}'
           # The Mac paragraph hangs on the same switch as the Mac lane
           # (vars.LU_MAC_RELEASE, see build-tauri-macos). Off, the expression
-          # at the end of the Linux line is the empty string and the text is
-          # byte for byte what it was before the Mac lane existed. On, it adds
+          # at the end of the Linux line is the empty string and the text names
+          # no Mac file. On, it adds
           # one blank line and the paragraph; `fromJSON('"\n"')` is how an
           # expression spells a line break. The sentence promises a signature
           # and a notarization, which is why it must not appear without the
@@ -899,12 +899,24 @@ jobs:
           # names an asset that is not there: take it out of the release text
           # by hand (RELEASE-CHECKLISTE-MAC.md, A7). Like every input of this
           # step it only applies when this run creates the release.
+          # The head every release page opens with (funnel 3.1.0, Nr. 7): which
+          # file is for whom, the SmartScreen box, and one line on LU Cloud.
+          # .github/RELEASE-NOTES-HEAD.md is the same text for a release that is
+          # created by hand, where this input does not apply.
           releaseBody: |
-            ## Download
+            ## Which file do I need?
 
-            **Windows:** Download the `.exe` installer. During setup, choose "Install for current user only" for a portable/no-install experience. Or use the `.msi` for system-wide installation.
+            **Windows 10 and 11:** the file ending in `_x64-setup.exe`. The `.msi` is the same app for a system wide install.
 
-            **Linux:** Download the `.AppImage`, make it executable (`chmod +x`), and run. No installation needed.${{ vars.LU_MAC_RELEASE == '1' && format('{0}{0}**macOS (Apple Silicon, macOS 14 or newer):** Download the `.dmg`, open it and drag LU to Applications. The app is signed with an Apple Developer ID and notarized by Apple. Intel Macs are not supported.', fromJSON('"\n"')) || '' }}
+            **Linux:** the `.AppImage` runs on most distributions: make it executable (`chmod +x`) and start it. The `.deb` is for Ubuntu and Debian, the `.rpm` for Fedora.${{ vars.LU_MAC_RELEASE == '1' && format('{0}{0}**macOS (Apple Silicon only, macOS 14 or newer):** the `.dmg`. Open it and drag LU to Applications. The app is signed with an Apple Developer ID and notarized by Apple. Intel Macs are not supported.', fromJSON('"\n"')) || '' }}
+
+            **Android 7.0 or newer (arm64):** the file ending in `-Android.apk`. Allow installs from your browser or file app when Android asks.
+
+            The other files (`.sig`, `.zip`, `.tar.gz`, `.cdx.json`, `latest.json`) are for the automatic update and for checks. You do not need them.
+
+            **Windows shows "Windows protected your PC"?** The installer has no code signing certificate yet, so SmartScreen does not know it. Click **More info**, then **Run anyway**. It is built by GitHub Actions from the public source: [how to check it](https://github.com/PurpleDoubleD/locally-uncensored/blob/master/SECURITY.md#antivirus--browser-false-positives).
+
+            **No GPU, or a model too big for yours?** Run it in LU Cloud from the same app: a credit pack for €15 with no subscription, or Hosted for €19 a month. [Plans and packs](https://lu-labs.ai/pricing?src=github&utm_source=github&utm_medium=release)
 
             > All versions are portable-friendly, no admin rights required. LU by LU Labs.
           releaseDraft: false
