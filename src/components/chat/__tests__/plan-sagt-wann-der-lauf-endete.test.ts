@@ -87,9 +87,12 @@ describe('die Leiste fragt beide Laufquellen, nicht nur eine', () => {
     expect(src).toMatch(/t\.status === 'in_progress' && runActive && !running/)
     expect(src).toMatch(/state === 'running' \? \(\s*<Loader2[^>]*animate-spin/)
     expect(src).toMatch(/halted \? HINWEIS_TEXT\.ruhig/)
-    // Und es gibt genau EINE Drehung in der Datei, sonst koennte daneben ein
-    // zweiter Kreisel stehen, den kein Lauf mehr anhaelt.
-    expect(src.match(/animate-spin/g) ?? []).toHaveLength(1)
+    // Zwei Drehungen in der Datei, beide an einem laufenden Schritt: die Zeile
+    // in der Liste und, seit 14.11.2026, die eingeklappte Kopfzeile. Die
+    // zweite steht nur, solange ein Schritt 'running' ist (runningIdx >= 0),
+    // und das gibt es nur bei laufendem Lauf.
+    expect(src.match(/animate-spin/g) ?? []).toHaveLength(2)
+    expect(src).toMatch(/\{collapsed && runningIdx >= 0 && \(/)
   })
 
   it('die Schlusszeile hat einen Ton, den ruhigen', () => {

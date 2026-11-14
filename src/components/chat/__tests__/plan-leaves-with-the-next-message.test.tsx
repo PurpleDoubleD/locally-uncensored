@@ -29,7 +29,7 @@ function seedChat(messages: Message[]) {
 }
 
 beforeEach(() => {
-  useTodoStore.setState({ byConversation: {}, updatedAt: {}, archived: {} })
+  useTodoStore.setState({ byConversation: {}, updatedAt: {}, archived: {}, planOpen: {} })
   useGenerationStore.setState((s) => ({ generating: { ...s.generating, [CONV]: false } }))
 })
 afterEach(() => cleanup())

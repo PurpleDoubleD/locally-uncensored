@@ -196,13 +196,18 @@ test.describe('CA shots: pinned plan', () => {
         }
         await openNewChat(page)
         await send(page, 'median() in src/math.ts is missing, implement it and run the tests')
-        await expect(page.getByTestId('plan-pinned')).toBeVisible({ timeout: 30_000 })
+        // Open by default (David, 14.11.2026): every step, the running one spins.
+        const plan = page.getByTestId('plan-pinned')
+        await expect(plan.getByTestId('plan-steps')).toBeVisible({ timeout: 30_000 })
         await shot(page, `plan-${theme}-${width}-1-running`)
+        // Folded by a click on the head: "Plan" and the running step.
+        await plan.getByTitle('Collapse the plan').click()
+        await expect(plan.getByTestId('plan-folded-step')).toBeVisible()
+        await shot(page, `plan-${theme}-${width}-1b-running-folded`)
+        await plan.getByTitle('Show every step').click()
         await page.evaluate(() => (window as unknown as { __E2E_RELEASE_TOOLS__?: () => void }).__E2E_RELEASE_TOOLS__?.())
         await expect(page.getByTestId('plan-run-stopped')).toBeVisible({ timeout: 60_000 })
         await shot(page, `plan-${theme}-${width}-2-ended`)
-        // Folded to one line: the count and the step that comes next.
-        const plan = page.getByTestId('plan-pinned')
         await plan.getByTitle('Collapse the plan').click()
         await shot(page, `plan-${theme}-${width}-3-folded`)
         await plan.getByTitle('Show every step').click()
@@ -225,11 +230,16 @@ test.describe('CA shots: pinned plan', () => {
       await send(page, 'median() in src/math.ts is missing, implement it and run the tests')
       // David, 14.11.2026: finished is the list with every tick, no count,
       // no closing line.
+      // Open (the default): every step ticked. Folded: "Plan" and a tick.
       const plan = page.getByTestId('plan-pinned')
       await expect(plan.locator('li[data-state="done"]')).toHaveCount(3, { timeout: 60_000 })
       await expect(plan.locator('.animate-spin')).toHaveCount(0, { timeout: 60_000 })
       await expect(plan).not.toContainText(/every step done|\d+ of \d+/i)
       await shot(page, `plan-${theme}-1280-5-all-done`)
+      await plan.getByTitle('Collapse the plan').click()
+      await expect(plan.getByTestId('plan-folded-done')).toBeVisible()
+      await shot(page, `plan-${theme}-1280-5b-all-done-folded`)
+      await plan.getByTitle('Show every step').click()
       // The next message: the pinned plan leaves, a folded "Plan" row stays at
       // the answer it belonged to.
       await send(page, 'thanks, mention it in the README too')
@@ -270,7 +280,7 @@ test.describe('CA shots: pinned plan', () => {
       if (await sandbox.isVisible({ timeout: 5_000 }).catch(() => false)) await sandbox.click()
       await expect(agent).toHaveAttribute('title', /Agent Mode is on/i, { timeout: 10_000 })
       await send(page, 'median() in src/math.ts is missing, implement it and run the tests')
-      await expect(page.getByTestId('plan-pinned')).toBeVisible({ timeout: 30_000 })
+      await expect(page.getByTestId('plan-pinned').getByTestId('plan-steps')).toBeVisible({ timeout: 30_000 })
       await shot(page, `plan-agent-${theme}-1280-1-running`)
       await page.evaluate(() => (window as unknown as { __E2E_RELEASE_TOOLS__?: () => void }).__E2E_RELEASE_TOOLS__?.())
       await expect(page.getByTestId('plan-run-stopped')).toBeVisible({ timeout: 60_000 })

@@ -46,6 +46,11 @@ interface TodoState {
    *  (lib/plan-pin.ts). The pinned plan leaves the chat once the user writes
    *  again; the transcript keeps it as a folded "Plan" row. */
   archived: Record<string, ArchivedPlan[]>
+  /** conversation id -> the pinned plan is unfolded. Open unless the user
+   *  folded it (David, 14.11.2026); kept per chat, so a running step never
+   *  folds or unfolds it again. */
+  planOpen: Record<string, boolean>
+  setPlanOpen: (conversationId: string, open: boolean) => void
 
   setTodos: (conversationId: string, todos: TodoItem[]) => void
   archivePlan: (conversationId: string, anchorId: string, todos: TodoItem[]) => void
@@ -82,6 +87,10 @@ export const useTodoStore = create<TodoState>()(
       byConversation: {},
       updatedAt: {},
       archived: {},
+      planOpen: {},
+
+      setPlanOpen: (conversationId, open) =>
+        set((s) => ({ planOpen: { ...s.planOpen, [conversationId]: open } })),
 
       setTodos: (conversationId, todos) =>
         set((s) => ({
@@ -101,10 +110,12 @@ export const useTodoStore = create<TodoState>()(
           const byConversation = { ...s.byConversation }
           const updatedAt = { ...s.updatedAt }
           const archived = { ...s.archived }
+          const planOpen = { ...s.planOpen }
           delete byConversation[conversationId]
           delete updatedAt[conversationId]
           delete archived[conversationId]
-          return { byConversation, updatedAt, archived }
+          delete planOpen[conversationId]
+          return { byConversation, updatedAt, archived, planOpen }
         }),
 
       getTodos: (conversationId) =>

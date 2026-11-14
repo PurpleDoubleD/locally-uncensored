@@ -173,7 +173,13 @@ export function PlanBar({ conversationId, onContinue }: Props) {
     const msgs = s.conversations.find((c) => c.id === conversationId)?.messages
     return msgs ? retiredAt(msgs, updatedAt) !== null : false
   })
-  const [collapsed, setCollapsed] = useState(false)
+  // Open unless the user folded it, per chat, in the store (David,
+  // 14.11.2026: open by default, a click on the head folds it, and the choice
+  // stays with the chat). A running step never folds or unfolds it again, and
+  // a redraw of the transcript cannot reset it.
+  const open = useTodoStore((s) => (conversationId ? s.planOpen?.[conversationId] !== false : true))
+  const setPlanOpen = useTodoStore((s) => s.setPlanOpen)
+  const collapsed = !open
 
   if (!conversationId || !todos || todos.length === 0) return null
   // Gone the moment the user writes, also while the new run starts; a run that
@@ -202,7 +208,7 @@ export function PlanBar({ conversationId, onContinue }: Props) {
         <div className="flex items-center gap-2">
           <button
             type="button"
-            onClick={() => setCollapsed((v) => !v)}
+            onClick={() => setPlanOpen(conversationId, collapsed)}
             aria-expanded={!collapsed}
             title={collapsed ? 'Show every step' : 'Collapse the plan'}
             className="group flex items-center gap-2 min-w-0 flex-1 text-left"
@@ -212,8 +218,19 @@ export function PlanBar({ conversationId, onContinue }: Props) {
               <span className={TONE.quiet} data-testid="plan-title">
                 {PLAN_TITLE}
               </span>
-              {collapsed && (
-                <span className={runningIdx >= 0 ? TONE.strong : TONE.normal} title={headline.content}>
+              {/* Folded: the step that runs, with its spinner; through: a tick;
+                  ended early: the next open step. No count. */}
+              {collapsed && runningIdx >= 0 && (
+                <span className={TONE.strong} title={headline.content} data-testid="plan-folded-step">
+                  <Loader2 size={ICON_SM} className={`inline ${TONE.strong} animate-spin mx-1.5 -mt-0.5`} />
+                  {headline.content}
+                </span>
+              )}
+              {collapsed && runningIdx < 0 && allDone && (
+                <Check size={ICON_SM} className={`inline ${GLYPH_QUIET} ml-1.5 -mt-0.5`} data-testid="plan-folded-done" />
+              )}
+              {collapsed && runningIdx < 0 && !allDone && (
+                <span className={TONE.normal} title={headline.content} data-testid="plan-folded-step">
                   {' '}· {headline.content}
                 </span>
               )}

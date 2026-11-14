@@ -26,7 +26,8 @@ function running(on: boolean) {
 }
 
 beforeEach(() => {
-  useTodoStore.setState({ byConversation: {}, updatedAt: {} })
+  // No choice made yet: open, the default (David, 14.11.2026).
+  useTodoStore.setState({ byConversation: {}, updatedAt: {}, planOpen: {} })
   useStagedChangesStore.setState({ byChat: {} } as never)
   running(false)
 })
@@ -182,5 +183,62 @@ describe('PlanBar, pinned in the transcript', () => {
     const v = render(<PlanBar conversationId={CONV} />)
     fireEvent.click(v.getByTitle('Collapse the plan'))
     expect(v.getByTestId('plan-run-stopped')).toBeTruthy()
+  })
+})
+
+describe('open by default, folded by a click, kept per chat (David, 14.11.2026)', () => {
+  beforeEach(() => { useTodoStore.setState({ planOpen: {} }) })
+
+  it('starts open, with every step and no count', () => {
+    running(true)
+    writeTodos(CONV, PLAN)
+    const v = render(<PlanBar conversationId={CONV} />)
+    expect(v.getByTestId('plan-steps')).toBeTruthy()
+    expect(v.getByTitle('Collapse the plan')).toBeTruthy()
+    expect(v.getByTestId('plan-pinned').textContent).not.toMatch(/\d+\s*(of|\/)\s*\d+/)
+  })
+
+  it('folded while running: "Plan" and the running step with its spinner', () => {
+    running(true)
+    writeTodos(CONV, PLAN)
+    const v = render(<PlanBar conversationId={CONV} />)
+    fireEvent.click(v.getByTitle('Collapse the plan'))
+    expect(v.queryByTestId('plan-steps')).toBeNull()
+    const step = v.getByTestId('plan-folded-step')
+    expect(step.textContent).toBe('Write median()')
+    expect(step.querySelector('.animate-spin')).toBeTruthy()
+  })
+
+  it('folded and through: "Plan" with a tick, nothing else', () => {
+    useTodoStore.getState().setPlanOpen(CONV, false)
+    writeTodos(CONV, PLAN.map((t) => ({ ...t, status: 'completed' as const })))
+    const v = render(<PlanBar conversationId={CONV} />)
+    expect(v.getByTestId('plan-folded-done')).toBeTruthy()
+    expect(v.queryByTestId('plan-folded-step')).toBeNull()
+    expect(v.container.querySelectorAll('.animate-spin')).toHaveLength(0)
+  })
+
+  it('the choice stays while the run goes on and through a redraw', () => {
+    running(true)
+    writeTodos(CONV, PLAN)
+    const v = render(<PlanBar conversationId={CONV} />)
+    fireEvent.click(v.getByTitle('Collapse the plan'))
+    expect(useTodoStore.getState().planOpen[CONV]).toBe(false)
+    act(() => { writeTodos(CONV, [{ content: 'Read the file', status: 'completed' }, { content: 'Write median()', status: 'completed' }, { content: 'Run the tests', status: 'in_progress' }]) })
+    expect(v.queryByTestId('plan-steps')).toBeNull()
+    v.unmount()
+    const again = render(<PlanBar conversationId={CONV} />)
+    expect(again.queryByTestId('plan-steps')).toBeNull()
+    fireEvent.click(again.getByTitle('Show every step'))
+    expect(again.getByTestId('plan-steps')).toBeTruthy()
+    expect(useTodoStore.getState().planOpen[CONV]).toBe(true)
+  })
+
+  it('another chat keeps its own state', () => {
+    useTodoStore.getState().setPlanOpen('other-chat', false)
+    running(true)
+    writeTodos(CONV, PLAN)
+    const v = render(<PlanBar conversationId={CONV} />)
+    expect(v.getByTestId('plan-steps')).toBeTruthy()
   })
 })
