@@ -17,6 +17,9 @@ export interface SelectOption {
   badge?: SelectTag
   /** Kleine Marken hinter dem Namen, nur in der aufgeklappten Liste (etwa Stufe und Herkunft). */
   tags?: SelectTag[]
+  /** Listed, but not pickable right now; `sublabel` says why (Swap Character:
+   *  Kling "one person only" with several people). */
+  disabled?: boolean
 }
 
 /** Eine Marke im Etiketten-Stil der Modellwaehler (index.css, .lu-picker-tag):
@@ -258,12 +261,15 @@ export function Select({
                         type="button"
                         role="option"
                         aria-selected={selected}
+                        aria-disabled={option.disabled || undefined}
+                        disabled={option.disabled}
                         title={option.title}
                         onClick={() => {
+                          if (option.disabled) return
                           onChange(option.value)
                           closeMenu()
                         }}
-                        className="lu-picker-row w-[calc(100%-8px)] text-left"
+                        className={cn('lu-picker-row w-[calc(100%-8px)] text-left', option.disabled && 'cursor-not-allowed opacity-45')}
                       >
                         {option.badge && <Badge tag={option.badge} />}
 

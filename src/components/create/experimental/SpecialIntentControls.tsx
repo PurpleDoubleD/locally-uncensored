@@ -38,9 +38,11 @@ import { createRunModel, studioShownValue } from '../../../lib/render/create-stu
 import { STUDIO_MODELS, studioFields } from '../../../lib/render/studio-contract'
 import { modelLabel } from '../../../lib/render/preset-models'
 import {
-  SWAP_CONSENT_TEXT, SWAP_LONG_MODEL, SWAP_MAIN_MODEL, SWAP_TIPS, swapAutoModel, swapBilledPhotos, swapClipLimits,
-  swapMaxPeople, swapNeedsConsent, swapReadsRoles,
+  SWAP_AUTO_MODELS, SWAP_CONSENT_TEXT, SWAP_INTENT, SWAP_OPENJUTSU_MODEL, SWAP_TIPS, swapAutoModel, swapBilledPhotos,
+  swapDefaultOptions, swapFigureRoles, swapMaxPeople, swapNeedsConsent, swapReadsRoles, swapUsesFrame,
 } from '../../../lib/render/swap'
+import { swapFrameCredits } from '../../../lib/create/swap-frame'
+import { SwapFrameBuild, SwapFramePicker, useSwapFirstFrame } from './SwapFrameSteps'
 import { mediaSeconds } from './useStudioPrice'
 import { ClipLength } from './ClipLength'
 import { galleryLabelShort } from '../../../lib/render/gallery-label'
@@ -1737,13 +1739,15 @@ function MotionControls() {
   )
 }
 
-// ── Swap Character (07.11.2026, port of the web's C52) ─────────────────────
+// ── Swap Character (07.11.2026, port of the web's C52; two steps since
+// 14.11.2026) ───────────────────────────────────────────────────────────────
 //
 // The order of the web panel: the notes first (what the models cannot do, so
 // it is not learned from a failed run), the video and the resolution, the
-// people (photo and role each, up to four), the length with its price, and
-// the consent box for the models that need it. Create and its price stand in
-// the Composer's action bar below.
+// first frame to tap each person to replace, the people (photo and role each),
+// the length with its price, the consent box for the models that need it, and
+// on SCAIL 2 and Kling the frame step (build, check, Continue). Create and its
+// price stand in the Composer's action bar below.
 
 export function SwapControls() {
   const videoInput = useCreateStore((s) => s.videoInput)
@@ -1758,7 +1762,12 @@ export function SwapControls() {
   const opModel = useCreateStore((s) => s.cloudOpModel)
   const setOpModel = useCreateStore((s) => s.setCloudOpModel)
   const isGenerating = useCreateStore((s) => s.isGenerating)
+  const frame = useCreateStore((s) => s.swapFrame)
   const model = createRunModel('swap_character', { image: '', video: '', op: opModel })
+  // SCAIL 2 and Kling: the first frame first, then the video (SwapFrameSteps).
+  const twoStep = swapUsesFrame(SWAP_INTENT, model)
+  // The first frame to tap; for OpenJutsu too, whose roles come from it.
+  useSwapFirstFrame()
   // The length of the customer's video, measured in the app (as the price).
   const [measured, setMeasured] = useState<{ url: string; seconds: number | undefined } | null>(null)
   useEffect(() => {
@@ -1769,20 +1778,32 @@ export function SwapControls() {
   }, [videoInput])
   const videoSeconds = measured && videoInput && measured.url === videoInput.url ? measured.seconds : undefined
 
-  // The model follows the length and the number of people: up to 15 s the
-  // main model, longer Wan 2.2 Animate (one person). Only between these two;
-  // SCAIL 2 picked by hand stays. It switches when the limit is crossed, not
-  // on every move of the slider, and a sentence below says so.
-  const auto = model === SWAP_MAIN_MODEL || model === SWAP_LONG_MODEL
-  const wanted = videoSeconds !== undefined ? Math.min(videoSeconds, swapSeconds ?? Infinity) : swapSeconds ?? undefined
-  const target = swapAutoModel(wanted, figures.length)
+  // The model follows the number of people: up to 3 SCAIL 2, with 4
+  // OpenJutsu. Only between these two; Kling or Wan picked by hand stays. It
+  // switches only when the target changes, not on opening the panel: an own
+  // pick (OpenJutsu for 2 people) stays.
+  const auto = SWAP_AUTO_MODELS.includes(model)
+  const target = swapAutoModel(figures.length)
   const known = !!STUDIO_MODELS[model]
+  const lastTarget = useRef(target)
   useEffect(() => {
+    if (lastTarget.current === target) return
+    lastTarget.current = target
     if (auto && known && target !== model) setOpModel(target)
-  }, [auto, known, target, model, setOpModel])
-  const span = auto
-    ? { min: swapClipLimits(SWAP_MAIN_MODEL).min, max: figures.length > 1 ? swapClipLimits(SWAP_MAIN_MODEL).max : swapClipLimits(SWAP_LONG_MODEL).max }
-    : undefined
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [auto, known, target])
+  // What Swap presets (SCAIL 2: 720p) stands in the store, so slider, button
+  // and run see the same number.
+  useEffect(() => {
+    if (!known) return
+    const preset = swapDefaultOptions(SWAP_INTENT, model)
+    const missing = Object.entries(preset).filter(([k]) => options[k] === undefined)
+    if (missing.length) setOptions({ ...options, ...Object.fromEntries(missing) })
+  }, [known, model, options, setOptions])
+  // One tap more than the model can do: onto the model that can do that many.
+  const fitPeople = (people: number) => {
+    if (people > swapMaxPeople(model)) setOpModel(swapAutoModel(people))
+  }
 
   if (!known) {
     // The server's catalogue does not list the swap models yet.
@@ -1794,17 +1815,22 @@ export function SwapControls() {
   }
 
   const maxPeople = swapMaxPeople(model)
-  const roles = swapReadsRoles(model)
+  const roles = swapReadsRoles(model) || twoStep
+  const placed = swapFigureRoles(figures.map((f) => ({ ...f, role: '' })))
+  const frameCredits = twoStep ? swapFrameCredits(frame?.width ?? 9, frame?.height ?? 16, figures.length) : null
+  // The marks in the first frame: up to the limit of Swap (OpenJutsu: 4).
+  const markMax = swapMaxPeople(SWAP_OPENJUTSU_MODEL)
   const resolutions = (studioFields(model).resolution?.enum ?? []) as string[]
   const resolution = String(studioShownValue(model, options, 'resolution') ?? '')
   const setFigure = (i: number, patch: Partial<SwapFigure>) => setFigures(figures.map((f, j) => (j === i ? { ...f, ...patch } : f)))
 
   return (
-    <div className="flex flex-col items-center gap-2.5" data-swap-controls>
-      <p className="flex w-full items-start gap-1.5 t-control text-gray-500" data-swap-tips>
+    <div className="flex flex-col items-center gap-2.5" data-swap-controls data-swap-two-step={twoStep || undefined}>
+      {/* Grey, not a warning (the desktop's house rule, lib/hinweis.ts). */}
+      <div className="flex w-full items-start gap-1.5 t-control text-gray-500" data-swap-tips>
         <Info size={12} className="mt-[2px] shrink-0" />
-        <span>{SWAP_TIPS.join(' ')}</span>
-      </p>
+        <ul className="space-y-0.5">{SWAP_TIPS.map((t) => <li key={t}>{t}</li>)}</ul>
+      </div>
       <div className="flex w-full items-center justify-between gap-2 flex-wrap">
         <DrivingVideoChip empty="Add original video" />
         {resolutions.length > 1 && (
@@ -1819,6 +1845,8 @@ export function SwapControls() {
         )}
       </div>
 
+      {videoInput && <SwapFramePicker max={markMax} onCount={fitPeople} />}
+
       <div className="w-full space-y-1" data-swap-figures={figures.length}>
         {figures.map((f, i) => (
           <div key={i} className="flex items-center gap-2" data-swap-figure={i + 1}>
@@ -1831,7 +1859,9 @@ export function SwapControls() {
                 maxLength={200}
                 disabled={isGenerating}
                 aria-label={`Who person ${i + 1} replaces`}
-                placeholder={figures.length > 1 ? 'Who? e.g. the woman in black on the left' : 'Optional: who to replace (default: the most prominent person)'}
+                placeholder={placed[i]
+                  ? `${placed[i]} (or describe who)`
+                  : figures.length > 1 ? 'Who? e.g. the woman in black on the left' : 'Optional: who to replace (default: the most prominent person)'}
                 onChange={(e) => setFigure(i, { role: e.target.value })}
                 className="t-control h-[var(--control-h-sm)] min-w-0 flex-1 rounded-md border border-white/[0.08] bg-white/[0.03] px-2 text-gray-200 placeholder:text-gray-500"
               />
@@ -1852,22 +1882,26 @@ export function SwapControls() {
           </div>
         ))}
         <div className="flex items-center gap-2">
-          <button
-            type="button"
-            disabled={figures.length >= 4 || isGenerating}
-            onClick={() => {
-              // Several people only the main model can do. The switch is
-              // said in the sentence below, it does not happen silently.
-              if (maxPeople < 2) setOpModel(SWAP_MAIN_MODEL)
-              setFigures([...figures, { image: null, role: '' }])
-            }}
-            className="t-control h-[var(--control-h-sm)] rounded-md px-2 text-gray-400 hover:text-gray-200 disabled:opacity-40"
-          >
-            + Add person ({figures.length}/4)
-          </button>
+          {/* SCAIL 2 and Kling: people come in by a tap on the first frame.
+              Without a video, and with OpenJutsu, also by this button. */}
+          {(!twoStep || !videoInput) && (
+            <button
+              type="button"
+              disabled={figures.length >= 4 || isGenerating}
+              onClick={() => {
+                // Not every model takes several people. The switch is said in
+                // the sentence below, it does not happen silently.
+                fitPeople(figures.length + 1)
+                setFigures([...figures, { image: null, role: '' }])
+              }}
+              className="t-control h-[var(--control-h-sm)] rounded-md px-2 text-gray-400 hover:text-gray-200 disabled:opacity-40"
+            >
+              + Add person ({figures.length}/4)
+            </button>
+          )}
           {figures.length > 1 && maxPeople < figures.length && (
             <span className="t-body text-gray-500 dark:text-gray-400" data-swap-note="one-person-model">
-              {modelLabel(model)} replaces one person.
+              {modelLabel(model)} replaces {maxPeople === 1 ? 'one person' : `up to ${maxPeople} people`}.
             </span>
           )}
         </div>
@@ -1880,15 +1914,13 @@ export function SwapControls() {
         chosen={swapSeconds}
         onChange={setSwapSeconds}
         photos={swapBilledPhotos(model, figures.length)}
-        span={span}
         disabled={isGenerating}
+        frameCredits={frameCredits}
       />
-      {auto && model === SWAP_LONG_MODEL && (
-        <p className="w-full t-body text-gray-500" data-swap-note="long-model">
-          Longer than 15 s: {modelLabel(SWAP_LONG_MODEL)} runs the whole clip (one person, up to 120 s). Set 15 s or less for {modelLabel(SWAP_MAIN_MODEL)}.
-        </p>
-      )}
       {swapNeedsConsent(model) && (
+        // A real person is swapped for a photo: the customer confirms rights
+        // and consent first (the server asks too, for the frame step as for
+        // the video).
         <label className="flex w-full items-start gap-2 t-control text-gray-300 cursor-pointer" data-swap-consent>
           <input
             type="checkbox"
@@ -1900,6 +1932,7 @@ export function SwapControls() {
           <span>{SWAP_CONSENT_TEXT}</span>
         </label>
       )}
+      {twoStep && <SwapFrameBuild model={model} />}
     </div>
   )
 }

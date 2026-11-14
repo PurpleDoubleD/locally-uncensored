@@ -20,6 +20,7 @@ import type { CloudSubmitIntent } from '../lib/pending-cloud-jobs'
 import { useCreateStore, type GalleryItem } from '../stores/createStore'
 import { intentToJob, galleryItemFromJob } from '../lib/render/cloud-jobs'
 import {
+  adoptInput,
   cancelJob,
   getJob,
   pollJob,
@@ -40,8 +41,10 @@ import { intentRoles, intentRequiredInputs, isStudioModel, resolveIntentPick, st
 import { bumpSeed, runImageCount } from '../lib/render/image-count'
 import { STUDIO_MODELS, studioFields } from '../lib/render/studio-contract'
 import { modelLabel } from '../lib/render/preset-models'
-import { isSwapIntent, SWAP_GALLERY_LABEL } from '../lib/render/swap'
-import { swapInputError, swapRunParams } from '../lib/create/swap-run'
+import { isSwapIntent, swapUsesFrame, SWAP_GALLERY_LABEL } from '../lib/render/swap'
+import { adoptSwapFrame, swapInputError, swapRunParams } from '../lib/create/swap-run'
+import { swapConfirmedFrame } from '../lib/create/swap-frame'
+import { mediaSeconds } from '../components/create/experimental/useStudioPrice'
 import { IMPROVING_PROMPT } from '../lib/render/improve-prompt'
 import { improveKindForRun } from '../lib/render/music-ui'
 import { intentTakesPrompt } from '../components/create/experimental/intents'
@@ -418,7 +421,10 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
         s.setError('Swap Character needs a newer LU Cloud. Try again later.')
         return
       }
-      const invalid = swapInputError(studioModel, { hasVideo: !!s.videoInput, figures: s.swapFigures, consent: s.swapConsent })
+      const invalid = swapInputError(studioModel, {
+        hasVideo: !!s.videoInput, figures: s.swapFigures, consent: s.swapConsent,
+        frameJobId: swapConfirmedFrame(s.swapBuilt, s.videoInput?.url, s.swapFigures),
+      })
       if (invalid) {
         s.setError(invalid)
         return
@@ -602,16 +608,29 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
         params.video_path = await uploadInput(s.videoInput.blob, 'video', ...uploadEnds(ac))
       }
       if (swap && studioModel) {
-        // The people of the panel: a photo each (a list with roles for the
-        // main model, the first photo as the still for a one-person model),
-        // the options the mode fixes, the length and the consent.
+        // The people of the panel: a photo each (a list with roles for
+        // OpenJutsu, the first photo as the still for a one-person model), or
+        // on SCAIL 2 and Kling the confirmed first frame (adopted as an own
+        // result), the options the mode presets and fixes, the length and the
+        // consent. The length of the video as the slider and the button
+        // measured it (SCAIL 2 and Kling run on whole seconds below it).
+        const videoSeconds = s.videoInput && swapUsesFrame(intent, studioModel)
+          ? await mediaSeconds(s.videoInput.url, 'video').catch(() => undefined)
+          : undefined
         Object.assign(params, await swapRunParams(
           studioModel,
-          { hasVideo: !!s.videoInput, figures: s.swapFigures, consent: s.swapConsent, chosenSeconds: s.swapSeconds },
+          {
+            hasVideo: !!s.videoInput, figures: s.swapFigures, consent: s.swapConsent, chosenSeconds: s.swapSeconds,
+            videoSeconds, frameJobId: swapConfirmedFrame(s.swapBuilt, s.videoInput?.url, s.swapFigures),
+          },
           studioOptionsFiltered ?? {},
           async (image, i, total) => {
             s.setProgress(7, `Uploading photos… ${i + 1}/${total}`)
             return uploadInput(dataUrlToBlob(image.url), 'source', ...uploadEnds(ac))
+          },
+          async (jobId) => {
+            s.setProgress(7, 'Uploading first frame…')
+            return adoptSwapFrame(adoptInput, jobId)
           },
         ))
         if (ac.signal.aborted) return
@@ -731,7 +750,7 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
         const quoteFields: Record<string, unknown> = {}
         // clip_seconds: the server cuts a swap video for the quote as for the
         // run, so both price the same seconds.
-        for (const k of ['source_path', 'image_paths', 'mask_path', 'audio_path', 'audio2_path', 'video_path', 'last_image_path', 'shot_type', 'clip_seconds', 'swap_consent'] as const) {
+        for (const k of ['source_path', 'image_paths', 'mask_path', 'audio_path', 'audio2_path', 'video_path', 'last_image_path', 'shot_type', 'clip_seconds', 'swap_consent', 'swap_step'] as const) {
           if (params[k] !== undefined) quoteFields[k] = params[k]
         }
         const quote = await studioQuote(studioModel, runPrompt, {

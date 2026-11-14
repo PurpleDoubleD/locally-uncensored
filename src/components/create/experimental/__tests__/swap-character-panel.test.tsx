@@ -1,24 +1,27 @@
 // @vitest-environment jsdom
 /**
- * Swap Character on the desktop (07.11.2026, port of the web's C52): the
- * panel in the web's order (notes, video and resolution, people, length,
- * consent), people up to four, and Create only once the video, a photo for
- * every person and the consent are there. Nothing is rendered or booked:
- * the Composer's generate is a fake, the catalogue a fixture.
+ * Swap Character on the desktop (07.11.2026, port of the web's C52; two steps
+ * with SCAIL 2 and Kling since 14.11.2026): the panel in the web's order
+ * (notes, video and resolution, first frame, people, length, consent, frame
+ * step), the marks, the model picker, and Create only once the video, a photo
+ * for every person, the consent and (SCAIL 2, Kling) the confirmed first
+ * frame are there. Nothing is rendered or booked: the Composer's generate and
+ * the cloud calls of the frame step are fakes, the catalogue a fixture.
  *
  * Run: npx vitest run src/components/create/experimental/__tests__/swap-character-panel.test.tsx
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, cleanup, screen, fireEvent, act } from '@testing-library/react'
+import { render, cleanup, screen, fireEvent, act, waitFor } from '@testing-library/react'
 
 const QUOTA = {
   tier: 'pro', period: 'month', limits: { credits: 10_000_000 }, costs: { image: 1000, video: 10000 },
   used: { credits_used: 0 }, remaining: { credits: 10_000_000 },
 }
+const refreshQuota = vi.fn(async () => {})
 
 vi.mock('../CreateContext', () => ({
   useCreateExp: () => ({
-    generate: vi.fn(), cancel: vi.fn(), makeVoice: vi.fn(), quota: QUOTA,
+    generate: vi.fn(), cancel: vi.fn(), makeVoice: vi.fn(), quota: QUOTA, refreshQuota,
     samplerList: [], schedulerList: [], loraList: [], vaeList: [], refreshModelLists: vi.fn(),
     connected: true, modelsLoaded: true, modelLoadError: null, mlxMissing: null,
     installCapability: vi.fn(), installModelBundle: vi.fn(),
@@ -28,18 +31,35 @@ vi.mock('../../../../api/backend', async (orig) => ({
   ...((await orig()) as Record<string, unknown>),
   openExternal: vi.fn(),
 }))
+// The frame step: never a real run, every cloud call a fake.
+const cloud = vi.hoisted(() => ({
+  uploadInput: vi.fn(async (_b: Blob, role: string) => `u/${role}-${Math.random().toString(36).slice(2, 6)}`),
+  submitCloudJob: vi.fn(async (_s: unknown) => ({ id: 'bild-1', quota: { cost: 14000 } })),
+  pollJob: vi.fn(async (id: string) => ({ id, status: 'succeeded', result_url: 'https://ours.example/bild.jpg' })),
+  cancelJob: vi.fn(async () => ({ status: 'canceled' })),
+}))
+vi.mock('../../../../api/cloud/jobs', async (orig) => ({ ...((await orig()) as Record<string, unknown>), ...cloud }))
+// jsdom plays no video: the length the WebView would measure.
+const videoLength = vi.hoisted(() => ({ seconds: undefined as number | undefined }))
+vi.mock('../useStudioPrice', async (orig) => ({
+  ...((await orig()) as Record<string, unknown>),
+  mediaSeconds: async () => videoLength.seconds,
+}))
 
 import { Composer } from '../Composer'
 import { SwapStage } from '../SwapStage'
 import { useCreateStore } from '../../../../stores/createStore'
 import { useCloudCatalogStore } from '../../../../stores/cloudCatalogStore'
 import { neuerServer } from '../../../../lib/render/__tests__/fixtures/test-catalogs'
-import { SWAP_CONSENT_TEXT, SWAP_LONG_MODEL, SWAP_MAIN_MODEL, SWAP_TIPS } from '../../../../lib/render/swap'
+import { SWAP_CONSENT_TEXT, SWAP_OPENJUTSU_MODEL, SWAP_TIPS } from '../../../../lib/render/swap'
 
 const photo = { filename: 'face.png', url: 'data:image/png;base64,AA', width: 512, height: 768 }
 const clip = { blob: new Blob(['x'], { type: 'video/mp4' }), name: 'dance.mp4', url: 'blob:dance' }
+const FRAME = { url: 'data:image/jpeg;base64,eA==', width: 1080, height: 1920, videoUrl: 'blob:dance' }
 
 beforeEach(() => {
+  for (const f of Object.values(cloud)) f.mockClear()
+  videoLength.seconds = undefined
   useCloudCatalogStore.setState({ models: neuerServer() })
   useCreateStore.setState({
     isGenerating: false, batchRun: null, error: null, gallery: [], source: null, videoInput: null, prompt: '',
@@ -48,40 +68,45 @@ beforeEach(() => {
     cloudOpModel: '',
   } as never)
   useCreateStore.getState().setIntent('swap_character')
-  useCreateStore.setState({ swapFigures: [{ image: null, role: '' }], swapSeconds: null, swapConsent: false })
+  useCreateStore.setState({ swapFigures: [{ image: null, role: '' }], swapSeconds: null, swapConsent: false, swapBuilt: null, swapFrame: null })
 })
 afterEach(() => cleanup())
 
 function open() {
-  render(<Composer onOpenAdvanced={() => {}} onOpenWorkflows={() => {}} />)
+  return render(<Composer onOpenAdvanced={() => {}} onOpenWorkflows={() => {}} />)
 }
 const create = () => screen.getByRole('button', { name: /^Create/ }) as HTMLButtonElement
 const panel = () => document.querySelector('[data-swap-controls]') as HTMLElement
 
 describe('the Swap Character panel', () => {
-  it('stands in the web order: notes, video, people, length, consent; no prompt field', () => {
+  it('stands in the web order: notes, video, people, length, consent; no prompt field; SCAIL 2 at 720p', () => {
     open()
     expect(panel()).toBeTruthy()
     expect(document.querySelector('textarea')).toBeNull()
-    const order = ['[data-swap-tips]', '[data-swap-figures]', '[data-clip-length]', '[data-swap-consent]']
+    const order = ['[data-swap-tips]', '[data-swap-figures]', '[data-clip-length]', '[data-swap-consent]', '[data-swap-built]']
       .map((sel) => panel().querySelector(sel) as HTMLElement)
     for (const el of order) expect(el).toBeTruthy()
     for (let i = 1; i < order.length; i++) {
       expect(order[i - 1].compareDocumentPosition(order[i]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     }
-    expect(panel().textContent).toContain(SWAP_TIPS.join(' '))
+    // The notes, one line each, grey and not a warning.
+    const tips = panel().querySelector('[data-swap-tips]') as HTMLElement
+    expect([...tips.querySelectorAll('li')].map((li) => li.textContent)).toEqual([...SWAP_TIPS])
+    expect(tips.className).toMatch(/text-gray-500/)
+    expect(tips.className).not.toMatch(/amber|yellow/)
     expect(screen.getByText('Add original video')).toBeTruthy()
     expect(screen.getByText(SWAP_CONSENT_TEXT)).toBeTruthy()
-    // The resolution comes from the schema of the running model, 768p default.
+    // SCAIL 2 is the default, preset to 720p in the store.
     const res = screen.getByRole('radiogroup', { name: 'Resolution' })
-    expect([...res.querySelectorAll('[role=radio]')].map((b) => b.textContent)).toEqual(['480p', '540p', '768p', '1080p'])
-    expect(res.querySelector('[aria-checked=true]')?.textContent).toBe('768p')
-    // The length slider spans 2 to 120 s (main model up to 15, Wan beyond).
+    expect([...res.querySelectorAll('[role=radio]')].map((b) => b.textContent)).toEqual(['480p', '720p'])
+    expect(res.querySelector('[aria-checked=true]')?.textContent).toBe('720p')
+    expect(useCreateStore.getState().cloudStudioOptions.resolution).toBe('720p')
     const slider = document.getElementById('swap-length') as HTMLInputElement
-    expect([slider.min, slider.max]).toEqual(['2', '120'])
+    expect([slider.min, slider.max]).toEqual(['1', '120'])
   })
 
-  it('adds people up to four, each with a photo field and a role', () => {
+  it('OpenJutsu: adds people up to four, each with a photo field and a role', () => {
+    useCreateStore.getState().setCloudOpModel(SWAP_OPENJUTSU_MODEL)
     open()
     const add = () => screen.getByRole('button', { name: /Add person/ }) as HTMLButtonElement
     expect(add().textContent).toBe('+ Add person (1/4)')
@@ -97,70 +122,200 @@ describe('the Swap Character panel', () => {
       expect(screen.getByRole('button', { name: `Add photo of person ${i}` })).toBeTruthy()
       expect(screen.getByRole('textbox', { name: `Who person ${i} replaces` })).toBeTruthy()
     }
-    // Remove brings it back down.
     fireEvent.click(screen.getByRole('button', { name: 'Remove person 2' }))
     expect(useCreateStore.getState().swapFigures).toHaveLength(3)
   })
 
-  it('switches a one-person model to the main model when a second person comes, and says so on SCAIL 2', () => {
-    useCreateStore.getState().setCloudOpModel('scail-2')
+  it('switches Kling to SCAIL 2 when a second person comes, and SCAIL 2 to OpenJutsu at the fourth', () => {
+    useCreateStore.getState().setCloudOpModel('kling-v3-pro-motion-control')
     open()
-    expect(screen.getByRole('button', { name: /Add person/ })).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: /Add person/ }))
-    expect(useCreateStore.getState().cloudOpModel).toBe(SWAP_MAIN_MODEL)
+    expect(useCreateStore.getState().cloudOpModel).toBe('scail-2')
+    fireEvent.click(screen.getByRole('button', { name: /Add person/ }))
+    expect(useCreateStore.getState().cloudOpModel).toBe('scail-2')
+    fireEvent.click(screen.getByRole('button', { name: /Add person/ }))
+    expect(useCreateStore.getState().cloudOpModel).toBe(SWAP_OPENJUTSU_MODEL)
   })
 
-  it('arms Create only with the video, every photo and the consent', () => {
+  it('OpenJutsu (one step) arms Create with the video, every photo and the consent', () => {
+    useCreateStore.getState().setCloudOpModel(SWAP_OPENJUTSU_MODEL)
     open()
     expect(create().disabled).toBe(true)
-    act(() => { useCreateStore.setState({ videoInput: clip } as never) })
+    act(() => { useCreateStore.setState({ videoInput: clip, swapFrame: FRAME } as never) })
     expect(create().disabled).toBe(true)
     act(() => { useCreateStore.setState({ swapFigures: [{ image: photo, role: '' }, { image: null, role: '' }] }) })
     expect(create().disabled).toBe(true)
     act(() => { useCreateStore.setState({ swapFigures: [{ image: photo, role: '' }, { image: photo, role: 'the man on the right' }] }) })
-    // Every photo is there, the box is not ticked yet.
     expect(create().disabled).toBe(true)
     fireEvent.click(screen.getByRole('checkbox'))
     expect(useCreateStore.getState().swapConsent).toBe(true)
     expect(create().disabled).toBe(false)
-    // Untick: off again.
+    // No frame step on OpenJutsu.
+    expect(document.querySelector('[data-swap-built]')).toBeNull()
     fireEvent.click(screen.getByRole('checkbox'))
     expect(create().disabled).toBe(true)
   })
 
-  it('shows no consent box on SCAIL 2, the one model that does not ask', () => {
-    useCreateStore.getState().setCloudOpModel('scail-2')
+  it('shows the consent box on SCAIL 2 and Kling too', () => {
     open()
-    expect(document.querySelector('[data-swap-consent]')).toBeNull()
-    act(() => { useCreateStore.setState({ videoInput: clip, swapFigures: [{ image: photo, role: '' }] } as never) })
-    expect(create().disabled).toBe(false)
+    expect(document.querySelector('[data-swap-consent]')).toBeTruthy()
+    cleanup()
+    useCreateStore.getState().setCloudOpModel('kling-v3-pro-motion-control')
+    open()
+    expect(document.querySelector('[data-swap-consent]')).toBeTruthy()
   })
 
-  it('moves to Wan 2.2 Animate past 15 s with one person, and says so', () => {
+  it('OpenJutsu: names the live price beside the length (15 s, not 120 s)', () => {
+    useCreateStore.getState().setCloudOpModel(SWAP_OPENJUTSU_MODEL)
     open()
-    act(() => { useCreateStore.getState().setSwapSeconds(40) })
-    expect(useCreateStore.getState().cloudOpModel).toBe(SWAP_LONG_MODEL)
-    expect(document.querySelector('[data-swap-note="long-model"]')).toBeTruthy()
-    // Wan reads 480p and 720p only.
-    const res = screen.getByRole('radiogroup', { name: 'Resolution' })
-    expect([...res.querySelectorAll('[role=radio]')].map((b) => b.textContent)).toEqual(['480p', '720p'])
-    // A second person brings the main model back.
-    fireEvent.click(screen.getByRole('button', { name: /Add person/ }))
-    expect(useCreateStore.getState().cloudOpModel).toBe(SWAP_MAIN_MODEL)
-  })
-
-  it('names the live price beside the length: credits and credits per second', () => {
-    open()
-    // No video and no choice yet: the main model runs its whole 15 s at
-    // 768p, with one photo: 15 x 0.20 $ + 0.02 $ = 3.02 $. Not the 120 s at
-    // the end of the slider, which only the long model reads.
     const price = () => (document.querySelector('[data-clip-price]') as HTMLElement).textContent
     const slider = () => document.getElementById('swap-length') as HTMLInputElement
     expect(slider().value).toBe('15')
     expect(price()).toBe('302,000 credits · 20,000/s')
     act(() => { useCreateStore.getState().setSwapSeconds(10) })
-    // 10 s: 2.00 $ + 0.02 $.
     expect(price()).toBe('202,000 credits · 20,000/s')
+  })
+
+  it('SCAIL 2: frame and video together beside the length', () => {
+    useCreateStore.setState({ swapSeconds: 6 })
+    open()
+    const box = document.querySelector('[data-clip-length]')!
+    // 6 s at 720p (8,000/s) plus the first frame (Nano Banana Pro 2k, 14,000).
+    expect(box.querySelector('[data-clip-price]')?.textContent).toBe('62,000 credits · frame + video')
+    expect(box.querySelector('[data-clip-split]')?.textContent).toBe('First frame 14,000 · video 48,000 (8,000/s)')
+  })
+
+  it('Kling 6 s: 100,800 credits for the video', () => {
+    useCreateStore.getState().setCloudOpModel('kling-v3-pro-motion-control')
+    useCreateStore.setState({ swapSeconds: 6 })
+    open()
+    expect(document.querySelector('[data-clip-split]')?.textContent).toBe('First frame 14,000 · video 100,800 (16,800/s)')
+  })
+})
+
+describe('two steps in the panel (14.11.2026)', () => {
+  let rect: { mockRestore: () => void }
+  beforeEach(() => {
+    // jsdom measures nothing: the first frame is 100 x 200 pixels here.
+    rect = vi.spyOn(Element.prototype, 'getBoundingClientRect').mockReturnValue({ left: 0, top: 0, width: 100, height: 200, right: 100, bottom: 200, x: 0, y: 0, toJSON: () => ({}) } as DOMRect)
+  })
+  afterEach(() => { rect.mockRestore() })
+
+  const frameBox = () => screen.getByRole('group', { name: /First frame of your video/ })
+
+  it('tap people: numbered marks, the place becomes the role, a tap on the mark removes it', () => {
+    useCreateStore.setState({ videoInput: clip, swapFrame: FRAME } as never)
+    const { rerender } = open()
+    expect(screen.getByText('Tap each person you want to replace')).toBeTruthy()
+    fireEvent.click(frameBox(), { clientX: 80, clientY: 60 })
+    fireEvent.click(frameBox(), { clientX: 20, clientY: 70 })
+    rerender(<Composer onOpenAdvanced={() => {}} onOpenWorkflows={() => {}} />)
+    const figs = useCreateStore.getState().swapFigures
+    expect(figs).toHaveLength(2)
+    expect(figs.map((f) => f.mark)).toEqual([{ x: 0.8, y: 0.3 }, { x: 0.2, y: 0.35 }])
+    expect((screen.getByRole('textbox', { name: 'Who person 1 replaces' }) as HTMLInputElement).placeholder).toMatch(/^the person on the right/)
+    expect((screen.getByRole('textbox', { name: 'Who person 2 replaces' }) as HTMLInputElement).placeholder).toMatch(/^the person on the left/)
+    // SCAIL 2: people come in by a tap, no Add person button.
+    expect(screen.queryByRole('button', { name: /Add person/ })).toBeNull()
+    // 44 px to hit.
+    const mark = screen.getByRole('button', { name: 'Remove mark 1' })
+    expect(mark.className).toMatch(/h-11 w-11/)
+    fireEvent.click(mark)
+    expect(useCreateStore.getState().swapFigures).toHaveLength(1)
+    expect(useCreateStore.getState().swapFigures[0].mark).toEqual({ x: 0.2, y: 0.35 })
+  })
+
+  it('the fourth mark switches to OpenJutsu, no more than 4; Kling stays with one person', () => {
+    useCreateStore.setState({ videoInput: clip, swapFrame: FRAME, cloudOpModel: 'kling-v3-pro-motion-control' } as never)
+    open()
+    fireEvent.click(frameBox(), { clientX: 10, clientY: 10 })
+    expect(useCreateStore.getState().cloudOpModel).toBe('kling-v3-pro-motion-control')
+    fireEvent.click(frameBox(), { clientX: 50, clientY: 10 })
+    // Two people Kling cannot do: SCAIL 2 takes over.
+    expect(useCreateStore.getState().cloudOpModel).toBe('scail-2')
+    fireEvent.click(frameBox(), { clientX: 90, clientY: 10 })
+    fireEvent.click(frameBox(), { clientX: 30, clientY: 90 })
+    expect(useCreateStore.getState().swapFigures).toHaveLength(4)
+    expect(useCreateStore.getState().cloudOpModel).toBe(SWAP_OPENJUTSU_MODEL)
+    fireEvent.click(frameBox(), { clientX: 60, clientY: 90 })
+    expect(useCreateStore.getState().swapFigures).toHaveLength(4)
+  })
+
+  it('the picker shows Kling greyed out with "one person only" for several people, SCAIL 2 recommended', () => {
+    useCreateStore.setState({ videoInput: clip, swapFrame: FRAME, swapFigures: [{ image: null, role: '' }, { image: null, role: '' }] } as never)
+    open()
+    const chip = [...document.querySelectorAll('button')].find((b) => /SCAIL 2/.test(b.textContent ?? '') && !b.closest('[role=listbox]'))!
+    fireEvent.click(chip)
+    const kling = screen.getByText('Kling 3.0 Pro \u2022 Motion Control').closest('button') as HTMLButtonElement
+    expect(kling.disabled).toBe(true)
+    expect(kling.textContent).toMatch(/one person only/)
+    fireEvent.click(kling)
+    expect(useCreateStore.getState().cloudOpModel).not.toBe('kling-v3-pro-motion-control')
+    const scail = screen.getAllByText(/SCAIL 2/).map((el) => el.closest('button')).find((b) => b?.textContent?.includes('Recommended'))
+    expect(scail).toBeTruthy()
+  })
+
+  it('Build first frame, Does this look right?, Try again, Continue: only then Create', async () => {
+    videoLength.seconds = 6.006
+    useCreateStore.setState({
+      videoInput: clip, swapFrame: FRAME, swapSeconds: null,
+      swapFigures: [{ image: photo, role: '', mark: { x: 0.3, y: 0.4 } }], swapConsent: false,
+    } as never)
+    open()
+    await act(async () => {})
+    expect(create().disabled).toBe(true)
+    const build = () => screen.getByRole('button', { name: /Build first frame/ }) as HTMLButtonElement
+    // The tick stands before the frame step and counts for it too.
+    expect(build().disabled).toBe(true)
+    const box = document.querySelector('[data-swap-consent]')!
+    expect(box.compareDocumentPosition(build()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    fireEvent.click(box.querySelector('input')!)
+    expect(build().disabled).toBe(false)
+    expect(build().title).toBe('Build first frame · 14,000 credits')
+    expect(build().textContent).toMatch(/Build first frame\s*14k/)
+    expect(create().disabled).toBe(true)
+    await act(async () => { fireEvent.click(build()) })
+    await screen.findByText('Does this look right?')
+    expect(cloud.submitCloudJob).toHaveBeenCalledTimes(1)
+    const first = cloud.submitCloudJob.mock.calls[0][0] as { model: string; prompt: string; params: Record<string, unknown> }
+    expect(first.model).toBe('nano-banana-pro-edit')
+    expect(first.params).toMatchObject({ swap_step: 'frame', swap_consent: true, max_credits: 14000, studio_options: { aspect_ratio: '9:16', resolution: '2k', output_format: 'jpeg' } })
+    expect(first.params.image_paths as string[]).toHaveLength(2)
+    expect(first.prompt).toMatch(/^Replace the person in the first image/)
+    expect(screen.getByRole('img', { name: 'Original' })).toBeTruthy()
+    expect((screen.getByRole('img', { name: 'New first frame' }) as HTMLImageElement).src).toBe('https://ours.example/bild.jpg')
+    expect(create().disabled).toBe(true)
+
+    // Try again with a sentence on what is wrong: a new image job.
+    fireEvent.change(screen.getByRole('textbox', { name: "What's wrong?" }), { target: { value: 'head turned to the side' } })
+    const again = screen.getByRole('button', { name: /Try again · 14k credits/ })
+    await act(async () => { fireEvent.click(again) })
+    await waitFor(() => expect(cloud.submitCloudJob).toHaveBeenCalledTimes(2))
+    expect((cloud.submitCloudJob.mock.calls[1][0] as { prompt: string }).prompt).toMatch(/Fix this from the last attempt: head turned to the side$/)
+    await screen.findByText('Does this look right?')
+
+    fireEvent.click(screen.getByRole('button', { name: /Continue/ }))
+    expect(screen.getByText(/First frame ready/)).toBeTruthy()
+    expect(create().disabled).toBe(false)
+
+    // Another role: the frame no longer fits and expires.
+    fireEvent.change(screen.getByRole('textbox', { name: 'Who person 1 replaces' }), { target: { value: 'the man in red' } })
+    expect(create().disabled).toBe(true)
+    await waitFor(() => expect(useCreateStore.getState().swapBuilt).toBeNull())
+    expect(screen.getByRole('button', { name: /Build first frame/ })).toBeTruthy()
+  })
+
+  it('another video drops the first frame, the marks and the built frame', () => {
+    useCreateStore.setState({
+      videoInput: clip, swapFrame: FRAME, swapBuilt: { jobId: 'b', url: 'x', key: 'k', confirmed: true },
+      swapFigures: [{ image: photo, role: '', mark: { x: 0.5, y: 0.5 } }],
+    } as never)
+    useCreateStore.getState().setVideoInput({ name: 'other.mp4', url: 'blob:w', blob: new Blob(['w']) })
+    const s = useCreateStore.getState()
+    expect(s.swapFrame).toBeNull()
+    expect(s.swapBuilt).toBeNull()
+    expect(s.swapFigures[0].mark).toBeNull()
+    expect(s.swapFigures[0].image).toBe(photo)
   })
 })
 

@@ -50,4 +50,8 @@ export function studioReferenceVideo(): string[] {
  *  hinein, kein Pinsel noetig. */
 export const STUDIO_EDIT_MODELS: readonly string[] = [
   'minimax-h3-edit', 'qwen-image-3-edit', 'seedream-5-edit', 'qwen-image-2.1-edit',
+  // 14.11.2026: Nano Banana Pro, as on the web. It also builds the first frame
+  // of Swap Character (lib/render/swap.ts, SWAP_FRAME_MODEL). Listed only when
+  // the server's catalogue carries it.
+  'nano-banana-pro-edit',
 ]

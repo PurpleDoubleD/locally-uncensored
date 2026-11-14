@@ -112,8 +112,10 @@ const ROLE_MEMBERS: Record<StepRole, () => string[]> = {
     'preset-wan-2.2-spicy-extend', 'wan-2.2-spicy-extend', 'ltx-2-extend', 'pixverse-extend',
     'wan-3.0-extend', 'seedance-2.5-extend',
   ],
-  // Movement from a driving clip onto a character image.
-  motion: () => ['scail-2', 'wan-2.2-animate-2', 'wan-2.2-animate', 'steady-dancer', 'p-video-animate', 'dreamactor-v2'],
+  // Movement from a driving clip onto a character image. Kling 3.0 Pro Motion
+  // Control (14.11.2026): the character moves like in the clip, at the highest
+  // resolution of the list.
+  motion: () => ['scail-2', 'kling-v3-pro-motion-control', 'wan-2.2-animate-2', 'wan-2.2-animate', 'steady-dancer', 'p-video-animate', 'dreamactor-v2'],
   // A clip goes in, the same clip comes back changed. Wan DITTO picks a style
   // from a list, MiniMax H3 follows a sentence.
   restyle: () => ['wan-ditto', 'minimax-h3-video-edit'],
@@ -123,7 +125,8 @@ const ROLE_MEMBERS: Record<StepRole, () => string[]> = {
   // A finished clip goes in, the same clip at more pixels comes out.
   upscale: () => ['video-upscaler', 'flashvsr', 'video-upscaler-pro', 'ultimate-video-upscaler', 'crystal-upscaler', 'flux-3-upscale'],
   // A real video stays, its people become the customer's (lib/render/swap.ts).
-  // The one role that shares a model with another (SCAIL 2, see SWAP_ROLES).
+  // The one role that shares models with another (SCAIL 2 and Kling Motion
+  // Control are Motion, see SWAP_ROLES).
   'swap-character': () => [...SWAP_MODELS],
 }
 

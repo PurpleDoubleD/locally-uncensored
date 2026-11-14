@@ -72,6 +72,10 @@ export interface CloudJobParams {
   // customer confirmed the rights and the consent of the people shown.
   clip_seconds?: number
   swap_consent?: boolean
+  /** Swap Character on SCAIL 2 or Kling (14.11.2026): 'frame' builds the first
+   *  frame with the new people (Nano Banana Pro), 'video' runs the clip on it.
+   *  Either step needs swap_consent on the server. */
+  swap_step?: 'frame' | 'video'
 }
 
 export interface CloudJobSubmit {

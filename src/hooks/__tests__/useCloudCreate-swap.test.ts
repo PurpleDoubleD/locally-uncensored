@@ -54,6 +54,10 @@ const hoisted = vi.hoisted(() => {
       result_url: 'https://storage.example/out.mp4', created_at: new Date().toISOString(),
     })),
     cancelJob: vi.fn(async () => ({ status: 'canceled' })),
+    adoptInput: vi.fn(async (jobId: string, role: string) => {
+      hochgeladen.push(`adopt ${jobId} ${role}`)
+      return `user-1/adopted-${jobId}.jpg`
+    }),
     studioQuote: vi.fn(async (..._args: unknown[]) => ({ credits: 42 })),
   }
 })
@@ -73,6 +77,7 @@ vi.mock('../../api/cloud/jobs', () => ({
   submitCloudJob: hoisted.submitCloudJob,
   pollJob: hoisted.pollJob,
   cancelJob: hoisted.cancelJob,
+  adoptInput: hoisted.adoptInput,
   CloudJobError: hoisted.FakeCloudJobError,
   QuoteChangedError: hoisted.FakeQuoteChangedError,
 }))
@@ -87,7 +92,14 @@ vi.mock('../../api/cloud/studio', () => ({
   StudioQuoteChangedError: hoisted.FakeQuoteChangedError,
 }))
 
+// The length of the video as the WebView measures it (no <video> in node).
+vi.mock('../../components/create/experimental/useStudioPrice', async (orig) => ({
+  ...((await orig()) as Record<string, unknown>),
+  mediaSeconds: async () => 6.006,
+}))
+
 import { useCloudCreate } from '../useCloudCreate'
+import { swapKeyOf } from '../../lib/create/swap-frame'
 import { useCreateStore } from '../../stores/createStore'
 import { useCloudCatalogStore } from '../../stores/cloudCatalogStore'
 import { neuerServer } from '../../lib/render/__tests__/fixtures/test-catalogs'
@@ -112,11 +124,12 @@ beforeEach(() => {
   useCreateStore.getState().setPrompt('left from another tab')
   useCloudCatalogStore.setState({ models: neuerServer() })
   useCreateStore.getState().setIntent('swap_character')
-  useCreateStore.setState({ swapFigures: [{ image: null, role: '' }], swapSeconds: null, swapConsent: false })
+  useCreateStore.setState({ swapFigures: [{ image: null, role: '' }], swapSeconds: null, swapConsent: false, swapBuilt: null, swapFrame: null })
 })
 
 describe('Swap Character from the Create tab', () => {
   it('sends a studio run with every photo, the roles, the length and the consent, and no prompt', async () => {
+    useCreateStore.getState().setCloudOpModel('openjutsu-character-swap')
     useCreateStore.setState({
       videoInput: CLIP, swapSeconds: 10, swapConsent: true,
       swapFigures: [{ image: FOTO, role: 'the woman on the left' }, { image: FOTO, role: '' }],
@@ -175,6 +188,7 @@ describe('Swap Character from the Create tab', () => {
   })
 
   it('never sends the Stage source of another tab', async () => {
+    useCreateStore.getState().setCloudOpModel('openjutsu-character-swap')
     useCreateStore.setState({ source: { ...FOTO, filename: 'other.png' }, videoInput: CLIP, swapConsent: true, swapFigures: [{ image: FOTO, role: '' }] })
     await useCloudCreate().generate()
     expect(submitted[0].params.source_path).toBeUndefined()
@@ -182,10 +196,69 @@ describe('Swap Character from the Create tab', () => {
   })
 
   it('refuses on a server whose catalogue does not list the swap models', async () => {
-    useCloudCatalogStore.setState({ models: neuerServer().filter((m) => !['openjutsu-character-swap', 'wan-2.2-animate-replace', 'scail-2'].includes(m.id)) })
+    useCloudCatalogStore.setState({ models: neuerServer().filter((m) => !['openjutsu-character-swap', 'wan-2.2-animate-replace', 'scail-2', 'kling-v3-pro-motion-control'].includes(m.id)) })
     useCreateStore.setState({ videoInput: CLIP, swapConsent: true, swapFigures: [{ image: FOTO, role: '' }] })
     await useCloudCreate().generate()
     expect(useCreateStore.getState().error).toBe('Swap Character needs a newer LU Cloud. Try again later.')
     expect(submitted).toHaveLength(0)
+  })
+
+  it('SCAIL 2 (the default) waits for the confirmed first frame, before any upload', async () => {
+    useCreateStore.setState({ videoInput: CLIP, swapConsent: true, swapFigures: [{ image: FOTO, role: '' }] })
+    await useCloudCreate().generate()
+    expect(useCreateStore.getState().error).toBe('Build the first frame and check it before you start the video.')
+    expect(hoisted.uploadInput).not.toHaveBeenCalled()
+    expect(submitted).toHaveLength(0)
+    // A frame that is built but not confirmed, or built for other inputs, does not count.
+    const figures = [{ image: FOTO, role: '', mark: { x: 0.3, y: 0.5 } }]
+    useCreateStore.setState({ swapFigures: figures, swapBuilt: { jobId: 'f1', url: 'https://x/f.jpg', key: swapKeyOf(CLIP.url, figures), confirmed: false } })
+    await useCloudCreate().generate()
+    expect(submitted).toHaveLength(0)
+    useCreateStore.setState({ swapBuilt: { jobId: 'f1', url: 'https://x/f.jpg', key: swapKeyOf('blob:other', figures), confirmed: true } })
+    await useCloudCreate().generate()
+    expect(submitted).toHaveLength(0)
+  })
+
+  it('SCAIL 2 runs on the confirmed first frame: adopted, video step, 720p replace, whole seconds', async () => {
+    const figures = [{ image: FOTO, role: '', mark: { x: 0.2, y: 0.5 } }, { image: FOTO, role: '', mark: { x: 0.8, y: 0.5 } }]
+    useCreateStore.setState({
+      videoInput: CLIP, swapConsent: true, swapFigures: figures,
+      swapBuilt: { jobId: 'frame-7', url: 'https://x/f.jpg', key: swapKeyOf(CLIP.url, figures), confirmed: true },
+    })
+    await useCloudCreate().generate()
+    expect(useCreateStore.getState().error).toBeNull()
+    expect(submitted).toHaveLength(1)
+    const p = submitted[0].params
+    expect(submitted[0].model).toBe('scail-2')
+    expect(submitted[0].prompt).toBe('')
+    expect(p.source_path).toBe('user-1/adopted-frame-7.jpg')
+    expect(p.image_paths).toBeUndefined()
+    expect(p.video_path).toBe('user-1/staged-video.mp4')
+    expect(p.swap_step).toBe('video')
+    expect(p.swap_consent).toBe(true)
+    expect(p.clip_seconds).toBe(6)
+    expect(p.studio_options).toEqual({ resolution: '720p', mode: 'replace' })
+    // The photos do not go up again: only the video, and the frame by adopt.
+    expect(hochgeladen).toEqual(['video', 'adopt frame-7 image'])
+    // The quote sees the same fields, the video step too.
+    expect(hoisted.studioQuote.mock.calls[0][2]).toMatchObject({ swap_step: 'video', clip_seconds: 6, source_path: p.source_path })
+  })
+
+  it('Kling runs on the confirmed first frame without a prompt, orientation by the video, original sound', async () => {
+    useCreateStore.getState().setCloudOpModel('kling-v3-pro-motion-control')
+    const figures = [{ image: FOTO, role: '' }]
+    useCreateStore.setState({
+      videoInput: CLIP, swapConsent: true, swapSeconds: 4, swapFigures: figures,
+      swapBuilt: { jobId: 'frame-8', url: 'https://x/f.jpg', key: swapKeyOf(CLIP.url, figures), confirmed: true },
+    })
+    await useCloudCreate().generate()
+    expect(submitted).toHaveLength(1)
+    const p = submitted[0].params
+    expect(submitted[0].model).toBe('kling-v3-pro-motion-control')
+    expect(submitted[0].prompt).toBe('')
+    expect(p.studio_options).toEqual({ character_orientation: 'video', keep_original_sound: true })
+    expect(p.clip_seconds).toBe(4)
+    expect(p.swap_step).toBe('video')
+    expect(p.source_path).toBe('user-1/adopted-frame-8.jpg')
   })
 })

@@ -9483,5 +9483,153 @@
       "resolution",
       "seed"
     ]
+  },
+  "kwaivgi/kling-v3.0-pro/motion-control": {
+    "additionalProperties": false,
+    "properties": {
+      "character_orientation": {
+        "default": "video",
+        "description": "Generate the orientation of the characters in the video, which can be selected to match the image or the video.",
+        "enum": [
+          "image",
+          "video"
+        ],
+        "type": "string",
+        "x-ui-component": "select"
+      },
+      "element_list": {
+        "description": "Element reference list.",
+        "items": {
+          "properties": {
+            "element_id": {
+              "description": "Element ID returned by kwaivgi/kling-elements or kwaivgi/kling-elements-advanced.",
+              "type": "string"
+            }
+          },
+          "type": "object",
+          "x-order-properties": [
+            "element_id"
+          ]
+        },
+        "maxItems": 3,
+        "type": "array",
+        "x-ui-component": "array"
+      },
+      "image": {
+        "description": "Supported image formats:.jpg /.jpeg /.png The size of the image file should not exceed 10MB, the width and height of the image should be no less than 300px, and the aspect ratio of the image should be between 1:2.5 and 2.5:1",
+        "type": "string"
+      },
+      "keep_original_sound": {
+        "default": true,
+        "description": "Whether to retain the original video sound",
+        "type": "boolean"
+      },
+      "negative_prompt": {
+        "description": "The negative prompt for the generation.",
+        "type": "string"
+      },
+      "prompt": {
+        "description": "The positive prompt for the generation.",
+        "type": "string"
+      },
+      "video": {
+        "description": "The motion reference video. Supported formats: .mp4/.mov, up to 100MB, width and height between 340px and 3850px. Duration 3-30 seconds when character_orientation is \"video\", 3-10 seconds when it is \"image\"; longer videos are trimmed. The generated video length follows the reference video.",
+        "type": "string",
+        "x-hint": "When character_orientation is \u201dvideo\u201c: maximum 30 seconds,When character_orientation is \u201cimage\u201d: maximum 10 seconds."
+      }
+    },
+    "required": [
+      "image",
+      "video"
+    ],
+    "type": "object",
+    "x-order-properties": [
+      "image",
+      "video",
+      "element_list",
+      "character_orientation",
+      "prompt",
+      "negative_prompt",
+      "keep_original_sound"
+    ]
+  },
+  "google/nano-banana-pro/edit": {
+    "additionalProperties": false,
+    "properties": {
+      "aspect_ratio": {
+        "description": "The aspect ratio of the generated image. If not specified, it is determined automatically from the input image.",
+        "enum": [
+          "1:1",
+          "3:2",
+          "2:3",
+          "3:4",
+          "4:3",
+          "4:5",
+          "5:4",
+          "9:16",
+          "16:9",
+          "21:9"
+        ],
+        "type": "string",
+        "x-placeholder": "Select aspect ratio"
+      },
+      "enable_base64_output": {
+        "default": false,
+        "description": "If set to `true`, the prediction's `output` strings are returned as **naked base64** (no `data:<mime>;base64,` prefix). When `false` (default), outputs are returned as URLs pointing to our CDN.",
+        "disabled": true,
+        "type": "boolean"
+      },
+      "enable_sync_mode": {
+        "default": false,
+        "description": "If set to `true`, the request attempts to wait for the generated result and return outputs in the same response. If the result is not ready within the sync wait window, the API can return a timeout body while the task continues processing. This option is only available via the API and is supported only by some models.",
+        "disabled": true,
+        "type": "boolean"
+      },
+      "images": {
+        "description": "List of URLs of input images for editing. The maximum number of images is 14.",
+        "items": {
+          "type": "string"
+        },
+        "maxItems": 14,
+        "type": "array"
+      },
+      "output_format": {
+        "default": "png",
+        "description": "The format of the output image.",
+        "enum": [
+          "png",
+          "jpeg"
+        ],
+        "type": "string"
+      },
+      "prompt": {
+        "description": "The positive prompt for the generation.",
+        "type": "string"
+      },
+      "resolution": {
+        "default": "1k",
+        "description": "The resolution of the output image.",
+        "enum": [
+          "1k",
+          "2k",
+          "4k"
+        ],
+        "type": "string"
+      }
+    },
+    "required": [
+      "prompt",
+      "images"
+    ],
+    "type": "object",
+    "x-order-properties": [
+      "prompt",
+      "images",
+      "aspect_ratio",
+      "resolution",
+      "output_format",
+      "enable_sync_mode",
+      "enable_base64_output"
+    ]
   }
 }

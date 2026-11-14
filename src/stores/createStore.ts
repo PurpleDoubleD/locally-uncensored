@@ -112,7 +112,21 @@ export type CloudOp = 'character' | 'lipsync' | 'music' | 'extend' | 'motion' | 
 
 /** A new person for Swap Character (07.11.2026): the photo, and who it
  *  replaces when several people are in the video ("the woman on the left"). */
-export interface SwapFigure { image: ImageRef | null; role: string }
+export interface SwapFigure {
+  image: ImageRef | null
+  role: string
+  /** Where the customer tapped this person in the first frame (0 to 1). */
+  mark?: { x: number; y: number } | null
+}
+
+/** Swap Character in two steps (14.11.2026, as on the web): the first frame
+ *  of the video, drawn in the WebView. */
+export interface SwapFrame { url: string; width: number; height: number; videoUrl: string }
+
+/** The built first frame with the new people: a run of its own. `key` are the
+ *  inputs it came from (lib/render/swap.ts, swapFrameKey); once they no longer
+ *  match, it has expired. */
+export interface SwapBuilt { jobId: string; url: string; key: string; confirmed: boolean }
 
 const ONE_FIGURE: SwapFigure[] = [{ image: null, role: '' }]
 
@@ -481,6 +495,11 @@ export interface CreateState {
    *  the people shown (lib/render/swap.ts SWAP_CONSENT_TEXT). Runtime-only,
    *  never persisted: every session confirms again. */
   swapConsent: boolean
+  /** Swap Character: the first frame of the video. Runtime-only. */
+  swapFrame: SwapFrame | null
+  /** Swap Character: the built and (after Continue) confirmed first frame.
+   *  Runtime-only. */
+  swapBuilt: SwapBuilt | null
   /** Music track length in seconds (billed per second on the cloud). */
   musicDuration: number
   /** Music: optional lyrics passed to models that take them. Runtime-only. */
@@ -740,6 +759,8 @@ export interface CreateState {
   setSwapSeconds: (seconds: number | null) => void
   setSwapFigures: (figures: SwapFigure[]) => void
   setSwapConsent: (consent: boolean) => void
+  setSwapFrame: (frame: SwapFrame | null) => void
+  setSwapBuilt: (built: SwapBuilt | null) => void
   bumpCharactersVersion: () => void
   setLoraListKey: (names: readonly string[]) => void
   setCloudOpModel: (id: string) => void
@@ -1238,6 +1259,8 @@ export const useCreateStore = create<CreateState>()(
       swapSeconds: null as number | null,
       swapFigures: ONE_FIGURE,
       swapConsent: false,
+      swapFrame: null as SwapFrame | null,
+      swapBuilt: null as SwapBuilt | null,
       musicDuration: 60,
       musicLyrics: '',
       talkingWords: '',
@@ -1614,15 +1637,22 @@ export const useCreateStore = create<CreateState>()(
         set({ audioInput, ...(audioInput ? { voiceFromJob: null } : {}) })
       },
       setVoiceFromJob: (voiceFromJob) => set({ voiceFromJob, ...(voiceFromJob ? { audioInput: null } : {}) }),
-      // Another video: the chosen length belonged to the old one.
+      // Another video: the chosen length, the first frame, the marks and the
+      // built frame belonged to the old one.
       setVideoInput: (videoInput) => {
         releaseReplacedMediaRef(get().videoInput, videoInput)
-        set(videoInput?.url === get().videoInput?.url ? { videoInput } : { videoInput, swapSeconds: null })
+        const figures = get().swapFigures
+        set(videoInput?.url === get().videoInput?.url ? { videoInput } : {
+          videoInput, swapSeconds: null, swapFrame: null, swapBuilt: null,
+          swapFigures: figures.some((f) => f.mark) ? figures.map((f) => ({ ...f, mark: null })) : figures,
+        })
       },
       setSwapSeconds: (swapSeconds) => set({ swapSeconds: swapSeconds == null ? null : Math.max(1, Math.round(swapSeconds)) }),
       // Always at least one person, at most four (the main model's limit).
       setSwapFigures: (figures) => set({ swapFigures: (figures.length ? figures : ONE_FIGURE).slice(0, 4) }),
       setSwapConsent: (swapConsent) => set({ swapConsent }),
+      setSwapFrame: (swapFrame) => set({ swapFrame }),
+      setSwapBuilt: (swapBuilt) => set({ swapBuilt }),
       bumpCharactersVersion: () => set((s) => ({ charactersVersion: s.charactersVersion + 1 })),
       setLoraListKey: (names) => set((s) => {
         const key = names.join('\n')

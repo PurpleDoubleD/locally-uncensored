@@ -191,6 +191,31 @@
     },
     "baselineUsd": 0.2
   },
+  "kling-v3-pro-motion-control": {
+    "label": "Kling 3.0 Pro \u2022 Motion Control",
+    "endpoint": "kwaivgi/kling-v3.0-pro/motion-control",
+    "kind": "video",
+    "adult": false,
+    "tier": "best",
+    "weights": "closed",
+    "price": {
+      "mode": "input",
+      "rates": {
+        "default": 0.168
+      },
+      "maxSeconds": 30,
+      "minSeconds": 3
+    },
+    "inputs": {
+      "image": "source_path",
+      "video": "video_path"
+    },
+    "defaults": {
+      "character_orientation": "video",
+      "keep_original_sound": true
+    },
+    "baselineUsd": 0.84
+  },
   "openjutsu-character-swap": {
     "label": "OpenJutsu \u2022 Character Swap",
     "endpoint": "base/openjutsu/character-swap",
@@ -1354,5 +1379,26 @@
       "resolution": "480p"
     },
     "baselineUsd": 0.5
+  },
+  "nano-banana-pro-edit": {
+    "label": "Nano Banana Pro",
+    "endpoint": "google/nano-banana-pro/edit",
+    "kind": "image",
+    "adult": false,
+    "tier": "best",
+    "weights": "closed",
+    "price": {
+      "mode": "flat",
+      "rates": {
+        "1k": 0.14,
+        "2k": 0.14,
+        "4k": 0.24
+      }
+    },
+    "inputs": {
+      "images": "image_paths"
+    },
+    "defaults": {},
+    "baselineUsd": 0.14
   }
 }

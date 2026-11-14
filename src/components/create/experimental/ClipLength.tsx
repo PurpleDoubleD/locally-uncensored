@@ -1,6 +1,8 @@
 import { AlertTriangle } from 'lucide-react'
 import { modelLabel } from '../../../lib/render/preset-models'
-import { swapClipCredits, swapClipLimits, swapClipSeconds, swapCreditsPerSecond, swapPricedSeconds } from '../../../lib/render/swap'
+import {
+  SWAP_FRAME_MODELS, swapClipCredits, swapClipLimits, swapClipSeconds, swapCreditsPerSecond, swapPricedSeconds, swapWholeSeconds,
+} from '../../../lib/render/swap'
 
 // The length of a Swap Character run (port of the web's ClipLength, C52).
 // The slider always shows the whole span (2 s up to the longest model, 120 s);
@@ -10,7 +12,7 @@ import { swapClipCredits, swapClipLimits, swapClipSeconds, swapCreditsPerSecond,
 // same seconds the Create button and the server count (swapPricedSeconds).
 
 export function ClipLength({
-  model, options, videoSeconds, chosen, onChange, photos = 0, span, disabled = false,
+  model, options, videoSeconds, chosen, onChange, photos = 0, span, disabled = false, frameCredits = null,
 }: {
   model: string
   options: Record<string, unknown>
@@ -25,18 +27,26 @@ export function ClipLength({
    *  span of the one model. */
   span?: { min: number; max: number }
   disabled?: boolean
+  /** Swap Character on SCAIL 2 or Kling: the frame step costs extra. Then the
+   *  total here reads "frame + video", the Create button names the video
+   *  only. */
+  frameCredits?: number | null
 }) {
   const own = swapClipLimits(model)
+  const frameModel = SWAP_FRAME_MODELS.includes(model)
   const { min, max } = span ?? own
   const value = span
     // Without a choice the run takes the whole video up to the limit of the
     // model on duty (15 s on the main model), not the end of the slider: the
     // slider spans both models, the price is the one model's.
     ? Math.max(min, Math.min(chosen ?? own.max, max, videoSeconds ? Math.max(min, Math.floor(videoSeconds)) : max))
-    : swapClipSeconds(model, chosen, videoSeconds)
-  const video = videoSeconds ? Math.floor(videoSeconds) : undefined
+    // SCAIL 2 and Kling run on whole seconds (swapWholeSeconds): a clip of
+    // 5.96 s reads 6 s, one of 6.006 s too.
+    : frameModel ? swapWholeSeconds(model, chosen, videoSeconds) : swapClipSeconds(model, chosen, videoSeconds)
+  const video = videoSeconds ? (frameModel ? swapWholeSeconds(model, null, videoSeconds) : Math.floor(videoSeconds)) : undefined
   const perSecond = swapCreditsPerSecond(model, options)
-  const total = swapClipCredits(model, options, videoSeconds ? swapPricedSeconds(model, chosen, videoSeconds) : Math.min(value, own.max), photos)
+  const videoCredits = swapClipCredits(model, options, videoSeconds ? swapPricedSeconds(model, chosen, videoSeconds) : Math.min(value, own.max), photos)
+  const total = videoCredits == null ? null : videoCredits + (frameCredits ?? 0)
   const name = modelLabel(model)
   const at = (v: number) => (max > min ? Math.min(100, Math.max(0, ((v - min) / (max - min)) * 100)) : 0)
   const pos = at(value)
@@ -53,7 +63,9 @@ export function ClipLength({
         {total != null && perSecond != null && (
           <span className="text-right" data-clip-price>
             <span className="t-mono text-gray-200">{total.toLocaleString('en-US')}</span>
-            <span className="t-control text-gray-500"> credits · {perSecond.toLocaleString('en-US')}/s</span>
+            {frameCredits != null
+              ? <span className="t-control text-gray-500"> credits · frame + video</span>
+              : <span className="t-control text-gray-500"> credits · {perSecond.toLocaleString('en-US')}/s</span>}
           </span>
         )}
       </div>
@@ -98,6 +110,11 @@ export function ClipLength({
         <p className="mt-1.5 flex items-start gap-1.5 t-body text-gray-500 dark:text-gray-400" data-clip-note="too-short">
           <AlertTriangle size={13} className="mt-0.5 shrink-0" />
           Your video is {video} s. {name} needs at least {own.min} s.
+        </p>
+      )}
+      {frameCredits != null && videoCredits != null && perSecond != null && (
+        <p className="mt-0.5 text-right t-control text-gray-500 tabular-nums" data-clip-split>
+          First frame {frameCredits.toLocaleString('en-US')} · video {videoCredits.toLocaleString('en-US')} ({perSecond.toLocaleString('en-US')}/s)
         </p>
       )}
       {value < own.billedMin && (

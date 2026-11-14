@@ -18,6 +18,7 @@ import { createRunModel, intentRequiredInputs, isStudioModel } from '../../../li
 import { STUDIO_MODELS } from '../../../lib/render/studio-contract'
 import { swapBilledPhotos, swapPricedSeconds, swapShortCredits } from '../../../lib/render/swap'
 import { swapReady } from '../../../lib/create/swap-run'
+import { swapConfirmedFrame } from '../../../lib/create/swap-frame'
 import { effectiveVideoDurations, snapToVideoDuration } from '../../../lib/render/video-duration'
 import { mediaSeconds, useStudioPrice } from './useStudioPrice'
 import { getJob } from '../../../api/cloud/jobs'
@@ -111,6 +112,9 @@ export function Composer({ onOpenAdvanced, onOpenWorkflows }: Props) {
   const swapFigures = useCreateStore((s) => s.swapFigures)
   const swapSeconds = useCreateStore((s) => s.swapSeconds)
   const swapConsent = useCreateStore((s) => s.swapConsent)
+  // SCAIL 2 and Kling: the video starts only on the confirmed first frame,
+  // and only while it fits video, photos and marks.
+  const swapBuilt = useCreateStore((s) => s.swapBuilt)
   const managerNoticeSeen = useWorkflowStore((s) => s.managerNoticeSeen)
   const { generate, cancel, quota, mlxMissing, modelsLoaded } = useCreateExp()
   const imageModels = useCreateStore((s) => s.imageModelList)
@@ -342,7 +346,10 @@ export function Composer({ onOpenAdvanced, onOpenWorkflows }: Props) {
             : swap
               // Studio models only: without one in the server's catalogue the
               // tab says so (SwapControls) and the button stays off.
-              ? !!studioPick && swapReady(studioPick, { hasVideo: !!videoInput, figures: swapFigures, consent: swapConsent })
+              ? !!studioPick && swapReady(studioPick, {
+                hasVideo: !!videoInput, figures: swapFigures, consent: swapConsent,
+                frameJobId: swapConfirmedFrame(swapBuilt, videoInput?.url, swapFigures),
+              })
               : true
   // A half-installed bundle is pickable long before it is usable: the lane
   // list refills as soon as the diffusion model lands, while the VAE it needs
