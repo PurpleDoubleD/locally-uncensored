@@ -1164,7 +1164,7 @@ async function executeShellExecute(
             : 'unknown'
     const combined = `${rawOut}\n${rawErr}`.trim()
     const tail = combined.length > 4000 ? `…${combined.slice(-4000)}` : combined
-    return `${renderResult(parseForRunner(runner, combined))}\n---\n${tail}`
+    return `${renderResult(parseForRunner(runner, combined), data.exitCode)}\n---\n${tail}`
   }
   if (data.exitCode && data.exitCode !== 0) return `Error (${data.exitCode}):\n${err || output}`
   if (kind === 'git-status' && /--porcelain=2/.test(command)) {
@@ -1586,7 +1586,7 @@ async function executeRunTests(args: ToolArgs, run?: AgentRunContext, signal?: A
   }
   const combined = `${data.stdout || ''}\n${data.stderr || ''}`.trim()
   const parsed = parseForRunner(runner ?? 'unknown', combined)
-  return renderResult(parsed)
+  return renderResult(parsed, data.exitCode)
 }
 /**
  * `runner` as the model may send it. A value the runner list does not know
