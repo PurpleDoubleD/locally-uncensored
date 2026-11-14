@@ -101,6 +101,9 @@ export const MAX_THRESHOLD = 0.95
  */
 export const MIN_MESSAGES_TO_COMPACT = 8
 
+/** Over the threshold, this many are enough (see shouldAutoCompact). */
+export const MIN_MESSAGES_WHEN_FULL = 3
+
 /**
  * Messages that must arrive after a compaction before another one may fire.
  *
@@ -254,8 +257,15 @@ export function compactThresholdCeiling(window: number): number {
  * itself next to the answer, and the mechanical trim does the work alone. It
  * is the MODEL window, not the send window: a 32K model whose steps send a
  * share of it is still a 32K model.
+ *
+ * 16K since 14.11.2026 (CA). The 18.10. decision left 16K open, and 16K is
+ * exactly what LU gives every Ollama chat (DEFAULT_CONTEXT_CAP) and every
+ * Ollama agent run on a model that reports no maximum: auto-compact was off
+ * for all of them. David saw a local 27B chat fill to the brim with no
+ * summary and no answer: "der sollte natuerlich autokompaktieren". At 16K the
+ * fitted threshold is 0.74, room enough for the summary call; 8K stays never.
  */
-export const MIN_AUTO_COMPACT_WINDOW = 32768
+export const MIN_AUTO_COMPACT_WINDOW = 16384
 
 /**
  * The threshold auto-compact runs at, from the two settings and the window.
@@ -310,7 +320,15 @@ export function shouldAutoCompact(input: CompactTriggerInput): CompactTriggerRes
   // error, it is a different question. useActiveContextWindow reports 0 until
   // the provider answers, and every consumer already handles that state.
   if (input.window <= 0) return no('no-window')
-  if (input.messageCount < MIN_MESSAGES_TO_COMPACT) return no('too-short')
+  // Few messages are rarely worth a summary, unless they are what fills the
+  // window: three turns with a pasted document or a long answer each left the
+  // chat over the brim with nothing allowed to shrink it (CA, 14.11.2026; the
+  // mechanical trim keeps the newest four whole). Over the threshold, three
+  // messages are enough: the summary replaces the older two.
+  const overNow = ratio >= effectiveThreshold || input.trimImminent === true
+  if (input.messageCount < MIN_MESSAGES_TO_COMPACT && !(overNow && input.messageCount >= MIN_MESSAGES_WHEN_FULL)) {
+    return no('too-short')
+  }
   if (
     input.lastCompactAtMessageCount !== undefined &&
     input.messageCount - input.lastCompactAtMessageCount < MIN_MESSAGES_SINCE_COMPACT

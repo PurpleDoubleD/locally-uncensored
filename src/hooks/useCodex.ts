@@ -9,6 +9,8 @@ import { useCodexStore } from '../stores/codexStore'
 import { useModelStore } from '../stores/modelStore'
 import { runCompactForConversation, compactOutcomeMessage, maybeAutoCompact } from '../lib/run-compact-command'
 import { autoCompactOn } from '../lib/compact-trigger'
+import { ContextFullError, fitToWindow } from '../lib/fit-to-window'
+import { TokenCalibration } from '../lib/token-calibration'
 import { compactRunMidway, newRunCompactState } from '../lib/run-compact-midway'
 import { applyStoredCompaction } from '../lib/compact-summary'
 import { useSettingsStore } from '../stores/settingsStore'
@@ -1263,6 +1265,10 @@ export function useCodex() {
 
     // Keyed on the raw id, like the Agent tab: an Ollama agent variant
     // (`<model>-agent`) has no picker row and no context entry of its own.
+    // The catalogue size of the step before, for the fit check (fit-to-window).
+    let lastToolsEstimate = 0
+    // The run's estimate held against the model's own count (lib/token-calibration.ts).
+    const calib = new TokenCalibration()
     const numCtx: number = await resolveAgentNumCtx(
       modelId, providerId, settings.contextWindowOverride, activeModel,
     )
@@ -1441,14 +1447,16 @@ export function useCodex() {
         // fear is largely a myth). effectiveSendWindow carries that profile,
         // and on a paid provider it also carries the send cap.
         const decayOn = settings.contextDecay !== false
-        const sendWindow = capToLearnedWindow(effectiveSendWindow({
+        // In the model's own tokens (lib/token-calibration.ts): the estimate
+        // reads low on code and logs, so the budget it measures is read smaller.
+        const sendWindow = calib.budget(capToLearnedWindow(effectiveSendWindow({
           providerId,
           modelWindow: numCtx,
           sendWindowTokens: sendWindowFor(settings, activeModel),
           capEnabled: decayOn,
           smallModelMode: settings.smallModelMode,
           localBackend: sendsToALanBackend(providerId, activeModel),
-        }), modelToUse, numCtx)
+        }), modelToUse, numCtx))
         // What this step sends, estimated: the history, and the catalogue that
         // rides beside it on the native transport. Read when the server
         // refuses the step as too large (GH #140).
@@ -1539,6 +1547,16 @@ export function useCodex() {
         } catch {
           // Building is best-effort; fall through with the raw history.
           sendMessages = messages.slice()
+        }
+        // The last check (lib/fit-to-window.ts), outside the best-effort catch
+        // above: against the model's own window, never past it. Ollama would
+        // cut the start silently; the outer catch says why nothing was sent.
+        {
+          // The catalogue is chosen further down; the last step's size stands in.
+          const fit = fitToWindow(sendMessages, calib.budget(numCtx), lastToolsEstimate)
+          if (!fit.fits) throw new ContextFullError(fit.tokens, numCtx)
+          sendMessages = fit.messages
+          if (fit.shortened) stepPromptEstimate = Math.max(0, fit.tokens - lastToolsEstimate)
         }
 
         // Live paint for EVERY transport branch below (Ollama, openai-compat
@@ -1682,6 +1700,7 @@ export function useCodex() {
           // built. Without this the meter showed the messages alone: 732 tokens
           // on the first coding step against 2.400 on the wire.
           stepToolsEstimate = estimateTokens(JSON.stringify(tools))
+          lastToolsEstimate = stepToolsEstimate
           if (convId) {
             useSendSizeStore.getState().reportTools(convId, stepToolsEstimate)
             // CA U5: what this step sent, by kind, for the context breakdown.
@@ -1782,6 +1801,7 @@ export function useCodex() {
             turnFinishReason = turn.doneReason
             reportTurnUsage(convId!, assistantMsg.id, turn)
             requestUsage.add(turn)
+            calib.observe(stepPromptEstimate + stepToolsEstimate, turn.promptEvalCount)
             costBrake.record(turn.promptEvalCount, { output: turn.evalCount, billing: billingOf(turn) })
             diagLog('streamWithTools-return', {
               iter: i,
@@ -1841,6 +1861,7 @@ export function useCodex() {
             turnFinishReason = turn.finishReason
             reportTurnUsage(convId!, assistantMsg.id, turn)
             requestUsage.add(turn)
+            calib.observe(stepPromptEstimate + stepToolsEstimate, turn.promptEvalCount)
             costBrake.record(turn.promptEvalCount, { output: turn.evalCount, billing: billingOf(turn) })
             // GH #147: a model on LU Cloud wrote its calls into the text
             // (!function_call:{"call": "file_read", ...}). This path never
@@ -1981,6 +2002,7 @@ export function useCodex() {
           // Gleiche Stelle wie in useAgentChat.
           turnFinishReason = hermesTurn.finishReason
           requestUsage.add(hermesTurn)
+          calib.observe(stepPromptEstimate + stepToolsEstimate, hermesTurn.promptEvalCount)
           costBrake.record(hermesTurn.promptEvalCount, { output: hermesTurn.evalCount, billing: billingOf(hermesTurn) })
           if (keepThinking && hermesTurn.thinking) {
             thinkingContent += (thinkingContent ? '\n\n' : '') + hermesTurn.thinking

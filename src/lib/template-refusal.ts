@@ -74,6 +74,9 @@ export const TEMPERATURE_REFUSAL_SENTENCE =
  * message; the raw text is kept underneath it, because support reads it.
  */
 export function explainSendRefusal(err: unknown): string | null {
+  // fit-to-window.ts: the request was measured too big and never sent (CA,
+  // 14.11.2026). Same sentence as the engine's own refusal, no detail to add.
+  if (err instanceof Error && err.name === 'ContextFullError') return CONTEXT_OVERFLOW_REFUSAL_SENTENCE
   if (isTemplateRefusal(err)) return withDetail(TEMPLATE_REFUSAL_SENTENCE, err)
   if (httpStatusOf(err) === 400 && TEMPERATURE_MARKERS.test(detailOf(err))) return withDetail(TEMPERATURE_REFUSAL_SENTENCE, err)
   if (httpStatusOf(err) === 400 && isContextOverflow(detailOf(err))) return withDetail(CONTEXT_OVERFLOW_REFUSAL_SENTENCE, err)

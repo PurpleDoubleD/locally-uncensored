@@ -140,6 +140,8 @@ import { buildLoopRecheck, loopPassSaysDone } from '../lib/agent-commands'
 import { applyStoredCompaction } from '../lib/compact-summary'
 import { maybeAutoCompact } from '../lib/run-compact-command'
 import { autoCompactOn } from '../lib/compact-trigger'
+import { ContextFullError, fitToWindow } from '../lib/fit-to-window'
+import { TokenCalibration } from '../lib/token-calibration'
 import { compactRunMidway, newRunCompactState, runCompactionDue, MEMORY_FLUSH_NOTE } from '../lib/run-compact-midway'
 import { generateEmbeddings } from '../api/rag'
 import { truncateToolResult } from '../lib/truncate-tool-result'
@@ -1699,6 +1701,9 @@ export function useAgentChat() {
     const executedCallKeys = new Set<string>()
     /** Size of the tool catalogue the step before sent. Zero before the first step. */
     let catalogTokens = 0
+    // The run's estimate held against the model's own count (lib/token-calibration.ts).
+    const calib = new TokenCalibration()
+    let stepEstimate = 0
     // Canonical arguments (lib/agent-core/repeat-note.ts): a re-ordered or
     // re-spaced copy of a call is the same call.
     const callKey = (tc: { function: { name: string; arguments: unknown } }) =>
@@ -1936,7 +1941,9 @@ export function useAgentChat() {
         const personaNote = samplingConv
           ? personaNoteOf(speakerPersonaFor(samplingConv, activeModel, allPersonas, pickedPersonaId, settings.personasEnabled !== false))
           : null
-        const besideCatalog = budgetBesideTheCatalog(sendWindow, catalogTokens)
+        // In the model's own tokens: the estimate reads low on code and logs,
+        // and a budget it measures has to be read that much smaller.
+        const besideCatalog = budgetBesideTheCatalog(calib.budget(sendWindow), catalogTokens)
         const sendBudget = personaNote ? Math.max(1, besideCatalog - noteTokens(personaNote)) : besideCatalog
         let sendMessages: ChatMessage[] = agentMessages.slice()
         let trimmedReadKeys: ReadonlySet<string> = NO_TRIMMED_KEYS
@@ -1985,6 +1992,14 @@ export function useAgentChat() {
             keepWhole: neededAgain,
           })
           sendMessages = built.messages
+          // The last check (lib/fit-to-window.ts): against the model's own
+          // window, never past it. Ollama would cut the start silently.
+          {
+            const fit = fitToWindow(sendMessages, calib.budget(agentCtx), catalogTokens)
+            if (!fit.fits) throw new ContextFullError(fit.tokens, agentCtx)
+            sendMessages = fit.messages
+            stepEstimate = fit.tokens
+          }
           trimmedReadKeys = new Set(built.trimmedKeys)
           if (convId) {
             useSendSizeStore.getState().report(convId, {
@@ -2387,6 +2402,7 @@ export function useAgentChat() {
             })
           }
           requestUsage.add(turn)
+          calib.observe(stepEstimate, turn.promptEvalCount)
           costBrake.record(turn.promptEvalCount, { output: turn.evalCount, billing: billingOf(turn) })
           // Native thinking field (Ollama; LU Cloud reasoning_content)
           if (turn.thinking) turnThinking = turn.thinking
@@ -2481,6 +2497,7 @@ export function useAgentChat() {
           // abschneiden, und dann steht hier ebenfalls kein Werkzeugaufruf.
           turnFinishReason = hermesTurn.finishReason
           requestUsage.add(hermesTurn)
+          calib.observe(stepEstimate, hermesTurn.promptEvalCount)
           costBrake.record(hermesTurn.promptEvalCount, { output: hermesTurn.evalCount, billing: billingOf(hermesTurn) })
           notePhoneCount(hermesTurn.promptEvalCount)
           if (hermesTurn.thinking) {
