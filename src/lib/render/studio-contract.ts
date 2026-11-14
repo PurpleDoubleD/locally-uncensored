@@ -2,6 +2,7 @@
 import definitions from './studio-models.json'
 import schemas from './provider-schemas.json'
 import endpoints from './provider-endpoints.json'
+import { isRetiredMediaModel } from './retired-models'
 export type Schema = { type?: string; properties?: Record<string, Schema>; required?: string[]; enum?: unknown[]; default?: unknown; minimum?: number; maximum?: number; minItems?: number; maxItems?: number; items?: Schema; description?: string; disabled?: boolean; format?: string }
 // Stufe und Herkunft jedes Cloud-Modells (02.10.2026, Entscheid des Inhabers).
 // `tier` ordnet die Waehler: 'best' steht oben, 'older' gesammelt unten.
@@ -22,18 +23,33 @@ export interface StudioModel {
   // gemessenen Eingabe. Alle vier sind an POST /model/price gemessen.
   price: { mode: string; rates: Record<string, number>; maxSeconds?: number; extraImage?: number
     resolutionField?: string; durationField?: string; unitDivisor?: number; blockSeconds?: number; minSeconds?: number
-    perUnitField?: string }
+    perUnitField?: string
+    // `qualityField` (29.10.2026, GPT Image 2, web catalogue): the price hangs
+    // on two fields, resolution and quality. The rate then stands under
+    // "<resolution>/<quality>".
+    qualityField?: string }
+  // `maxSide` (08.11.2026, web catalogue): the longest side in pixels the
+  // upstream renders where its schema does not say so. A larger size is scaled
+  // down to fit with its aspect kept (fitSize), it is never refused.
+  maxSide?: number
 }
-export const STUDIO_MODELS = definitions as Record<string, StudioModel>
+/** Every studio model, the retired ones included (retired-models.ts, from the
+ *  web): their schema, price and name stay resolvable for old runs and saved
+ *  picks. */
+export const STUDIO_MODELS_WITH_RETIRED = definitions as Record<string, StudioModel>
+/** The studio models on offer. Every picker, role and list reads this. */
+export const STUDIO_MODELS: Record<string, StudioModel> = Object.fromEntries(
+  Object.entries(STUDIO_MODELS_WITH_RETIRED).filter(([id]) => !isRetiredMediaModel(id)),
+)
 export function studioSchema(id: string): Schema {
-  const model = STUDIO_MODELS[id]
+  const model = STUDIO_MODELS_WITH_RETIRED[id]
   if (!model) throw new Error('Unknown studio model')
   return (schemas as Record<string, Schema>)[model.endpoint]
 }
 export function supportsProviderField(id: string, field: string, op = 'generate', lora = false): boolean {
   const m = (endpoints as Record<string, Record<string, string>>)[id]
   const key = op === 'animate' || op === 'edit' ? 'i2' : 't2'
-  const path = STUDIO_MODELS[id]?.endpoint ?? (lora ? m?.[key + 'Lora'] : undefined) ?? m?.[key] ?? m?.i2
+  const path = STUDIO_MODELS_WITH_RETIRED[id]?.endpoint ?? (lora ? m?.[key + 'Lora'] : undefined) ?? m?.[key] ?? m?.i2
   return !!path && !!(schemas as Record<string, Schema>)[path]?.properties?.[field]
 }
 const HIDDEN = new Set(['enable_base64_output', 'enable_sync_mode'])
@@ -52,7 +68,7 @@ export function isMediaField(key: string, s: Schema): boolean {
   return free && (s.format === 'uri' || MEDIA_NAME.test(key))
 }
 export function studioFields(id: string): Record<string, Schema> {
-  const m = STUDIO_MODELS[id]
+  const m = STUDIO_MODELS_WITH_RETIRED[id]
   return Object.fromEntries(Object.entries(studioSchema(id).properties ?? {}).filter(([key,s]) =>
     !m.inputs[key] && key !== (m.promptField ?? 'prompt') && !HIDDEN.has(key) && !s.disabled && !isMediaField(key, s)))
 }
@@ -64,6 +80,45 @@ function validSize(value: unknown, schema: Schema): boolean {
   if (typeof value !== 'string' || !/^\d+\*\d+$/.test(value)) return false
   const lo = Math.max(schema.minimum ?? SIZE_MIN, SIZE_MIN), hi = Math.min(schema.maximum ?? SIZE_MAX, SIZE_MAX)
   return value.split('*').every(v => Number(v) >= lo && Number(v) <= hi)
+}
+/** A "w*h" size scaled down so its longer side is at most `maxSide`, the
+ *  aspect kept. Both sides land on a multiple of 16 and stay between 256 and
+ *  `maxSide`. A size that fits stays exactly as it was asked for. Same rule as
+ *  the web catalogue (08.11.2026). */
+export function fitSize(value: string, maxSide: number): string {
+  const m = /^(\d+)\*(\d+)$/.exec(value)
+  if (!m) return value
+  const w = Number(m[1]), h = Number(m[2])
+  if (Math.max(w, h) <= maxSide) return value
+  const scale = maxSide / Math.max(w, h)
+  const side = (v: number) => Math.min(maxSide, Math.max(SIZE_MIN, Math.floor(v * scale / 16) * 16))
+  return `${side(w)}*${side(h)}`
+}
+// The strongest a LoRA may be applied (08.11.2026, web). A scale outside is
+// brought to the nearest end, never refused.
+export const LORA_SCALE_MAX = 4
+function fitLoras(value: unknown, schema: Schema): unknown {
+  if (!Array.isArray(value)) return value
+  const s = schema.items?.properties?.scale
+  if (!s) return value
+  const lo = s.minimum ?? 0, hi = Math.min(s.maximum ?? LORA_SCALE_MAX, LORA_SCALE_MAX)
+  return value.map((row) => {
+    if (!row || typeof row !== 'object' || Array.isArray(row)) return row
+    const scale = (row as Record<string, unknown>).scale
+    if (typeof scale !== 'number' || !Number.isFinite(scale)) return row
+    return { ...row, scale: Math.min(hi, Math.max(lo, scale)) }
+  })
+}
+/** The longest side a free "w*h" size may have on this model: the measured
+ *  `maxSide`, the schema maximum and our own ceiling, whichever is smallest. */
+export function sizeLimit(model: Pick<StudioModel, 'maxSide'>, schema: Schema): number {
+  return Math.min(model.maxSide ?? SIZE_MAX, schema.maximum ?? SIZE_MAX, SIZE_MAX)
+}
+/** A value of a model option brought inside the limits the upstream keeps. */
+function fitOption(key: string, value: unknown, schema: Schema, model: StudioModel): unknown {
+  if (key === 'size' && !schema.enum && validSize(value, {})) return fitSize(value as string, sizeLimit(model, schema))
+  if (key === 'loras') return fitLoras(value, schema)
+  return value
 }
 function validate(value: unknown, schema: Schema, name: string): void {
   if(name==='size'&&!schema.enum&&!validSize(value,schema))throw new Error('Size must be width*height in pixels, each side 256 to 4096')
@@ -90,11 +145,12 @@ function validate(value: unknown, schema: Schema, name: string): void {
 }
 export function studioOptions(id: string, prompt: string, raw: unknown, checkPrompt = true): Record<string, unknown> {
   if (raw !== undefined && (!raw || typeof raw !== 'object' || Array.isArray(raw))) throw new Error('Invalid model options')
-  const schema = studioSchema(id), m = STUDIO_MODELS[id], fields = studioFields(id)
+  const schema = studioSchema(id), m = STUDIO_MODELS_WITH_RETIRED[id], fields = studioFields(id)
   const options: Record<string, unknown> = { ...m.defaults }
   for (const [k,s] of Object.entries(fields)) if (s.default !== undefined && !(k in options)) options[k] = s.default
-  for (const [k,v] of Object.entries((raw ?? {}) as Record<string,unknown>)) {
+  for (const [k,asked] of Object.entries((raw ?? {}) as Record<string,unknown>)) {
     if (!fields[k]) throw new Error(`Unsupported model option: ${k}`)
+    const v = fitOption(k, asked, fields[k], m)
     validate(v, fields[k],k); options[k] = v
   }
   for (const [key,value] of Object.entries(options)) {
@@ -108,8 +164,9 @@ export function studioOptions(id: string, prompt: string, raw: unknown, checkPro
   return options
 }
 export function studioCredits(id: string, options: Record<string,unknown>, measuredSeconds?: number, imageCount = 1, promptLength = 100): number {
-  const m = STUDIO_MODELS[id]; if (!m) throw new Error('Unknown studio model')
-  const resolution = String(options[m.price.resolutionField ?? 'resolution'] ?? 'default'), rate = m.price.rates[resolution]
+  const m = STUDIO_MODELS_WITH_RETIRED[id]; if (!m) throw new Error('Unknown studio model')
+  const resolution = String(options[m.price.resolutionField ?? 'resolution'] ?? 'default')
+  const rate = m.price.rates[m.price.qualityField ? `${resolution}/${String(options[m.price.qualityField])}` : resolution]
   if (rate === undefined) throw new Error('Unpriced resolution')
   let seconds = m.price.mode === 'characters' ? Math.max(1,promptLength/100) : 1
   if (m.price.mode === 'output') {
@@ -140,7 +197,7 @@ export function studioCredits(id: string, options: Record<string,unknown>, measu
   return Math.ceil((rate * seconds * units + (m.price.extraImage ?? 0) * Math.max(0,imageCount-1)) * 100000 - 1e-8)
 }
 export function studioBaseCredits(id: string): number {
-  const schema = studioSchema(id), m = STUDIO_MODELS[id]
+  const schema = studioSchema(id), m = STUDIO_MODELS_WITH_RETIRED[id]
   const options: Record<string, unknown> = { ...m.defaults }
   for (const [key, s] of Object.entries(schema.properties ?? {})) if (!(key in options) && s.default !== undefined) options[key] = s.default
   return studioCredits(id,options,5)

@@ -34,7 +34,7 @@ import { DESKTOP_WORT, WEB_PLATZHALTER, alsDesktop, gezeigt, webNamen, webWort }
 // Nur LU_WEB_REPO sagt, wo das Web liegt. Frueher wurden Nachbarordner
 // probiert, und ein stehen gebliebener (lu-300-web auf release/3.0.1) hielt
 // den Waechter am Mac dauerhaft rot. Siehe web-checkout.ts.
-const WEB = webCheckout('katalog-paritaet', ['apps/web/lib/render/cloud-models.ts', 'apps/web/lib/billing/credits.ts'])
+const WEB = webCheckout('katalog-paritaet', ['apps/web/lib/render/cloud-models.ts', 'apps/web/lib/render/retired-models.ts', 'apps/web/lib/billing/credits.ts'])
 
 /** Rechnet eine Zeile der Preistabelle in Credits um. */
 const CREDIT_USD = 1e-5
@@ -60,10 +60,26 @@ interface WebZeile {
   weights?: string
 }
 
-/** Die Eintraege aus CLOUD_MODELS des Webs, ohne TypeScript zu laden. */
+/** Die Modelle, die das Web aus seinen Waehlern genommen hat (24.10.2026).
+ *  Das Web fuehrt sie in CLOUD_MODELS_WITH_RETIRED weiter, aber nicht in
+ *  CLOUD_MODELS, und der Server listet sie nicht mehr. Gelesen aus der Datei
+ *  des Webs; der Desktop traegt dieselbe Datei (studio-snapshot.mjs). */
+function webRetired(): Set<string> {
+  const datei = readFileSync(resolve(WEB!, 'apps/web/lib/render/retired-models.ts'), 'utf8')
+  const start = datei.indexOf('export const RETIRED_MEDIA_MODELS')
+  const rumpf = ohneKommentare(datei.slice(start, datei.indexOf('\n}', start)))
+  const ids = [...rumpf.matchAll(/(?:'([^']+)'|([\w.-]+)): \{ since:/g)].map((m) => m[1] ?? m[2])
+  if (ids.length === 0) throw new Error('No retired models read from the web')
+  return new Set(ids)
+}
+
+/** Die Eintraege aus CLOUD_MODELS des Webs, ohne TypeScript zu laden. Die
+ *  Liste steht im Web als CLOUD_MODELS_WITH_RETIRED; CLOUD_MODELS ist sie ohne
+ *  die zurueckgezogenen Modelle. */
 function webKatalog(): WebZeile[] {
   const datei = readFileSync(resolve(WEB!, 'apps/web/lib/render/cloud-models.ts'), 'utf8')
   const start = datei.indexOf('export const CLOUD_MODELS')
+  const retired = webRetired()
   const ende = datei.indexOf('\n]', start)
   // Das Web baut die Namen der offenen Modelle aus seiner einen Konstante.
   // Der Platzhalter wird mit dem Wort des Webs gefuellt; jeder andere
@@ -76,7 +92,7 @@ function webKatalog(): WebZeile[] {
     const id = /id: '([^']+)'/.exec(roh)?.[1]
     const label = /label: (['`])([^'`]+)\1/.exec(roh)?.[2]
     const kind = /kind: '([^']+)'/.exec(roh)?.[1]
-    if (!id || !label || !kind) continue
+    if (!id || !label || !kind || retired.has(id)) continue
     out.push({
       id,
       label,
@@ -323,7 +339,10 @@ describe.skipIf(!WEB)('Katalogparitaet Desktop gegen Web', () => {
 
   it('rechnet den LoRA-Satz mit denselben Zahlen wie das Web, und nur dort', () => {
     const preise = webPreise()
-    const webMitLora = Object.entries(preise).filter(([, p]) => p.lora !== undefined)
+    // Ein zurueckgezogenes Modell behaelt im Web seinen Preis (alte Laeufe),
+    // steht aber in keinem Waehler und darum auch nicht im Notvorrat.
+    const retired = webRetired()
+    const webMitLora = Object.entries(preise).filter(([id, p]) => p.lora !== undefined && !retired.has(id))
     expect(webMitLora.length).toBeGreaterThan(0)
     for (const [id, p] of webMitLora) {
       const s = CLOUD_MODEL_SEED.find((m) => m.id === id)

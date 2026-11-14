@@ -12,7 +12,8 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { CLOUD_MODEL_SEED } from '../cloud-models'
-import { STUDIO_MODELS } from '../studio-contract'
+import { STUDIO_MODELS, STUDIO_MODELS_WITH_RETIRED } from '../studio-contract'
+import { isRetiredMediaModel } from '../retired-models'
 import { intentPickerModels } from '../create-studio'
 import { presetModels } from '../preset-models'
 import { sortByTier } from '../model-tier'
@@ -40,7 +41,7 @@ describe('jedes Cloud-Modell traegt Stufe und Herkunft', () => {
       expect(TIERS, `${id}.tier`).toContain(m.tier)
       expect(WEIGHTS, `${id}.weights`).toContain(m.weights)
     }
-    expect(Object.keys(roh)).toEqual(Object.keys(STUDIO_MODELS))
+    expect(Object.keys(roh)).toEqual(Object.keys(STUDIO_MODELS_WITH_RETIRED))
   })
 
   it('der Katalog des neuen Servers traegt beide Felder an jedem Eintrag', () => {
@@ -65,20 +66,26 @@ describe('jedes Cloud-Modell traegt Stufe und Herkunft', () => {
   it('stuft die benannten Modelle so ein, wie der Inhaber es vorgegeben hat', () => {
     const t = (id: string) => neuerServer().find((m) => m.id === id)!
     for (const id of ['minimax-h3', 'wan-3.0', 'z-image', 'z-image-turbo', 'seedance-2.5']) expect(t(id).tier, id).toBe('best')
-    for (const id of ['flux-schnell', 'flux-dev', 'qwen-image', 'hidream', 'hunyuan-image', 'wan-2.2-720p', 'wan-2.2-fast', 'ltx-2', 'ltx-2.3', 'hunyuan-video']) {
+    // hidream, hunyuan-image, ltx-2.3, hunyuan-video, eleven-v3 und
+    // pixverse-extend standen hier auch. Seit dem 24.10.2026 stehen sie in
+    // keinem Waehler mehr (retired-models.ts).
+    for (const id of ['flux-schnell', 'flux-dev', 'qwen-image', 'wan-2.2-720p', 'wan-2.2-fast', 'ltx-2']) {
       expect(t(id).tier, id).toBe('older')
     }
     for (const id of ['wan-3.0', 'wan-3.0-ref', 'qwen-image-3-edit', 'flux-3-upscale']) expect(t(id).weights, id).toBe('open-family')
-    for (const id of ['seedance-2.5', 'seedance-2.5-spicy', 'seedream-5-edit', 'vidu-q3-spicy', 'heygen-twin', 'eleven-v3', 'mureka-song', 'minimax-music', 'minimax-speech-hd', 'lipsync-3-avatar', 'lipsync-2', 'pixverse-extend']) {
+    for (const id of ['seedance-2.5', 'seedance-2.5-spicy', 'seedream-5-edit', 'vidu-q3-spicy', 'heygen-twin', 'mureka-song', 'minimax-music', 'minimax-speech-hd', 'lipsync-3-avatar', 'lipsync-2']) {
       expect(t(id).weights, id).toBe('closed')
     }
     for (const id of ['minimax-h3', 'z-image', 'ltx-2.5-t2v', 'qwen-image-2.1', 'qwen-image-2.1-edit']) expect(t(id).weights, id).toBe('open')
   })
 
-  it('der Katalog behaelt alles, was er hatte: nichts wurde entfernt', () => {
+  it('der Katalog behaelt alles, was er hatte: entfernt ist nur, was das Web zurueckgezogen hat', () => {
     const jetzt = new Set(neuerServer().map((m) => m.id))
     expect(katalogVor.length).toBeGreaterThan(100)
-    for (const id of katalogVor) expect(jetzt.has(id), id).toBe(true)
+    // Am 24.10.2026 hat das Web neun Modelle aus den Waehlern genommen
+    // (retired-models.ts). Nur die duerfen fehlen, und sie muessen fehlen.
+    for (const id of katalogVor) expect(jetzt.has(id), id).toBe(!isRetiredMediaModel(id))
+    expect(katalogVor.filter((id) => isRetiredMediaModel(id))).toHaveLength(9)
   })
 })
 

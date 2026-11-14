@@ -15,15 +15,23 @@
  *    08.11.) plus four that joined after that run: DeepSeek V4.1 Flash, Kimi
  *    K3.1 Pro, MiMo V2.6 Pro and Nemotron 3.5 Super VL (the same 40 as
  *    lib/cloud-pitch.ts chatModels).
- *  - image 15: the 10 classic image models of lib/render/cloud-models.ts and
- *    5 studio models that make a picture from words (Z-Image Base, Nucleus,
- *    JibMix Qwen, Wan 2.2 Realism, Qwen Image 2.1). Not the 3 studio twins.
- *  - video 24: the 15 classic video models, and 9 studio models: OpenVideo
+ *  Image and video counted again for the web catalogue of 24.10.2026 (3.1.0,
+ *  lib/render/web-catalog-source.json):
+ *  - image 24: the 8 classic image models of lib/render/cloud-models.ts
+ *    (HiDream and HunyuanImage 2.1 left the pickers on 24.10.) and 16 studio
+ *    models that make a picture from words: Z-Image Base, Nucleus, JibMix
+ *    Qwen, Wan 2.2 Realism, Qwen Image 2.1, and since 24.10. FLUX 3 Klein,
+ *    FLUX 3 Klein Base, Krea 2 Turbo, MOSS Image, GPT Image 2, Nano Banana
+ *    Pro, FLUX.2 Max, Midjourney, Grok Imagine Quality, Recraft V4.1 Pro and
+ *    Kling Image O3. Not the 3 studio twins.
+ *  - video 24: the 14 classic video models (HunyuanVideo 1.5 and LTX 2.3 left
+ *    on 24.10., Seedance 2.0 Mini joined), and 10 studio models: OpenVideo
  *    (with its Style LoRA endpoint, one model), Seedance 2.5, Seedance 2.5
- *    Turbo, MiniMax H3 (text, image and reference, one model), Wan 3.0 (image
- *    and reference, one model), Wan 3.0 Spicy, Wan 3.0 Prime, Wan 3.0 Prime
- *    Spicy, LTX 2.5 (text and image, one model). Not the twins, not extend,
- *    upscale, lip sync, motion, restyle or sound.
+ *    Turbo, MiniMax H3 (text, image and reference, one model), Wan 3.0 (text,
+ *    image and reference, one model), Wan 3.0 Spicy, Wan 3.0 Prime (text and
+ *    image, one model), Wan 3.0 Prime Spicy, LTX 2.5 (text and image, one
+ *    model), MiniMax H3 Singularity (image and reference, one model). Not the
+ *    twins, not extend, upscale, lip sync, motion, restyle or sound.
  *
  * open and play list the whole catalogue (play the marked models under the
  * mark "Direct"), so they name the same numbers. appstore leaves models out
@@ -50,7 +58,7 @@ export interface CloudCounts {
 export const CLOUD_COUNTED_ON = '2026-10-24'
 
 /** The counts of the whole catalogue, as the app carries it. */
-export const CATALOGUE_COUNTS = { chat: 40, image: 15, video: 24 } as const
+export const CATALOGUE_COUNTS = { chat: 40, image: 24, video: 24 } as const
 
 const withTotal = (c: { chat: number; image: number; video: number }): CloudCounts => ({ ...c, total: c.chat + c.image + c.video })
 

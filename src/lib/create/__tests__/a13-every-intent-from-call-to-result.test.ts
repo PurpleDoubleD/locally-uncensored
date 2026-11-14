@@ -17,6 +17,8 @@ import { useCreateOrderStore } from '../../../stores/createOrderStore'
 import { useCreateStore } from '../../../stores/createStore'
 import { useChatStore } from '../../../stores/chatStore'
 import { useCloudAuthStore } from '../../../stores/cloudAuthStore'
+import { useCloudCatalogStore } from '../../../stores/cloudCatalogStore'
+import { neuerServer } from '../../render/__tests__/fixtures/test-catalogs'
 import { defaultCreateToolEnv } from '../chat-context'
 import { runCreateOptions, runCreateOrder } from '../chat-tools'
 import { LOST_TRACK_ERROR, ORDER_RESULT_PREFIX, executeOrder, interruptedRuns, markInterrupted } from '../order'
@@ -42,6 +44,10 @@ beforeEach(() => {
   useCreateStore.setState({ gallery: [] })
   useCloudAuthStore.setState({ quota: { costs: { image: 400, video: 9000 } } } as never)
   useChatStore.setState({ conversations: [], activeConversationId: CONV })
+  // Signed in, so the live catalogue is there. Since 24.10.2026 the only
+  // extend models without the filter off are studio models, and a studio
+  // model is offered only when the live catalogue lists it.
+  useCloudCatalogStore.setState({ models: neuerServer() })
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input))
     const method = init?.method ?? 'GET'
@@ -97,10 +103,10 @@ const WALKS: [string, unknown[]][] = [
   ['edit', [IMAGE, { intent: 'edit', prompt: 'make the scarf blue', inputs: { image: 'item:1' } }]],
   ['removebg', [IMAGE, { intent: 'removebg', inputs: { image: 'item:1' } }]],
   ['upscale', [IMAGE, { intent: 'upscale', inputs: { image: 'item:1' } }]],
-  ['extend', [CLIP, { intent: 'extend', prompt: 'she keeps walking', model: 'ltx-2-extend', inputs: { video: 'item:1' } }]],
+  ['extend', [CLIP, { intent: 'extend', prompt: 'she keeps walking', model: 'wan-3.0-extend', inputs: { video: 'item:1' } }]],
   ['video_upscale', [CLIP, { intent: 'video_upscale', inputs: { video: 'item:1' } }]],
   ['lipsync', [IMAGE, VOICE, { intent: 'lipsync', model: 'infinitetalk-fast', inputs: { image: 'item:1', audio: 'item:2' } }]],
-  ['motion', [IMAGE, CLIP, { intent: 'motion', model: 'wan-2.2-animate', prompt: 'dance', inputs: { image: 'item:1', video: 'item:2' } }]],
+  ['motion', [IMAGE, CLIP, { intent: 'motion', model: 'steady-dancer', prompt: 'dance', inputs: { image: 'item:1', video: 'item:2' } }]],
   ['music', [{ intent: 'music', prompt: 'calm piano, rain', options: { duration: 30 } }]],
   ['speech', [VOICE]],
 ]

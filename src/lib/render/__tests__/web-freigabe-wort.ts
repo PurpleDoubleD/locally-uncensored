@@ -27,7 +27,10 @@ import { webModule } from '../../__tests__/web-checkout'
 const REL_PATH = 'apps/web/lib/unfiltered-mark.ts'
 
 /** So schreibt das Web das Wort in seine Katalognamen. */
-export const WEB_PLATZHALTER = '${STATEMENT_MARK_LABEL}'
+// Seit dem 12.10.2026 hat das Web zwei Woerter: die Marke der Zeile
+// (STATEMENT_MARK_LABEL) und den Baustein der Namen (STATEMENT_NAME_WORD).
+// Die Namen bauen auf dem zweiten.
+export const WEB_PLATZHALTER = '${STATEMENT_NAME_WORD}'
 
 /** Das Wort des Desktops. */
 export const DESKTOP_WORT = STATEMENT_MARK_LABEL
@@ -36,9 +39,13 @@ export const DESKTOP_WORT = STATEMENT_MARK_LABEL
  *  Vergleich ohne das Wort waere ein Vergleich gegen eine Annahme. */
 export function webWort(webRepo: string): string {
   const quelle = readFileSync(resolve(webRepo, REL_PATH), 'utf8')
-  const m = quelle.match(/export const STATEMENT_MARK_LABEL =\s*\n?\s*(['"])(.*)\1/)
-  if (!m || !m[2]) throw new Error(`STATEMENT_MARK_LABEL not found in ${REL_PATH}`)
-  return m[2]
+  // Der Baustein der Namen. Ein Web von vor dem 12.10.2026 hat nur das eine
+  // Wort der Marke.
+  for (const name of ['STATEMENT_NAME_WORD', 'STATEMENT_MARK_LABEL']) {
+    const m = quelle.match(new RegExp(`export const ${name} =\\s*\\n?\\s*(['"])(.*)\\1`))
+    if (m && m[2]) return m[2]
+  }
+  throw new Error(`STATEMENT_NAME_WORD not found in ${REL_PATH}`)
 }
 
 /** Ein Name des Webs, wie der Desktop ihn fuehrt: das eine Wort getauscht,
