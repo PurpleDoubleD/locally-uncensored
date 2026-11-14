@@ -6,6 +6,11 @@
  * folds to one line, and once the run is over a closing box says how it ended.
  * Same component for local and cloud models: it reads only the plan the model
  * wrote through todo_write.
+ *
+ * David, 14.11.2026, on the first version, a floating card: "Looks nothing
+ * like Claude Code. Claude Code is not a glass surface, it is integrated into
+ * the chat much more cleanly." Since then it is a plain list in the flow of
+ * the chat, and the block "part of the page" below keeps it one.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render } from '@testing-library/react'
@@ -72,6 +77,35 @@ describe('PlanBar, pinned in the transcript', () => {
     // No closing box while the run goes.
     expect(v.queryByTestId('plan-all-done')).toBeNull()
     expect(v.queryByTestId('plan-run-stopped')).toBeNull()
+  })
+
+  it('is part of the page, not a sheet on top of it', () => {
+    running(true)
+    writeTodos(CONV, PLAN)
+    const v = render(<PlanBar conversationId={CONV} />)
+    const box = v.getByTestId('plan-pinned')
+    // No card: nothing in it floats, casts a shadow, blurs or rings the list.
+    const classes = [box, ...box.querySelectorAll('*')].map((el) => el.getAttribute('class') ?? '').join(' ')
+    expect(classes).not.toMatch(/(?<![\w-])(?:lu-elevated|shadow(?:-\w+)?|backdrop-blur(?:-\w+)?|ring-\w+)(?![\w-])/)
+    // Text scrolls under a sticky list, so it needs a ground: the transcript's
+    // own colour (index.css), which is why it reads as the page.
+    expect(box.className).toMatch(/(?<![\w-])lu-chat-scrim(?![\w-])/)
+    // On the left edge of the answer text: 12 px row padding, the 24 px avatar
+    // column, its 8 px gap and the text's own 4 px.
+    expect(box.className).toMatch(/(?<![\w-])pl-12(?![\w-])/)
+  })
+
+  it('a finished step steps back, it is not crossed out', () => {
+    running(true)
+    writeTodos(CONV, PLAN)
+    const v = render(<PlanBar conversationId={CONV} />)
+    const [done, runs] = [...v.getByTestId('plan-steps').querySelectorAll('li')]
+    expect(done.innerHTML).not.toMatch(/line-through/)
+    // Three tones and no bold: the running step is the full text colour, the
+    // finished one a thinned-out one.
+    expect(done.querySelector('span')?.className).toMatch(/text-gray-900\/60/)
+    expect(runs.querySelector('span')?.className).toMatch(/(?<![\w-])text-gray-900(?![\w/-])/)
+    expect(runs.innerHTML).not.toMatch(/font-(?:medium|semibold|bold)/)
   })
 
   it('updates live and replaces the whole list when the plan changes', () => {
