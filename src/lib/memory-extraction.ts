@@ -14,6 +14,7 @@
 import { extractJsonObject } from './json-scan'
 import { isRecord, asString, asStringArray } from '../types/json-guards'
 import type { MemoryType } from '../types/agent-mode'
+import { onlyStatesAGap } from './memory-gap'
 
 export interface ExtractedMemory {
   type: MemoryType
@@ -241,6 +242,8 @@ export function parseExtractionResponse(response: string): ExtractionResult {
       const content = asString(raw.content)
       if (!type || !title || !content) continue
       const description = asString(raw.description) || content.substring(0, 120)
+      // "X is unknown" is not a fact about the user (memory-gap.ts).
+      if (onlyStatesAGap({ content, description })) continue
       memories.push({
         type,
         title: title.substring(0, 60),
