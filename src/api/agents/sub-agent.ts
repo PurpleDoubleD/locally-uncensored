@@ -633,11 +633,12 @@ export async function defaultSubAgentRunner(
     // (a test double, a phone without the catalogue) counts nothing.
     let paused: string | null = null
     try {
-      const { stepCredits, HOUR_CREDIT_LIMIT } = await import('../../lib/agent-cost-brake')
+      const { stepCredits, HOUR_CREDIT_LIMIT, wireCloudSpent } = await import('../../lib/agent-cost-brake')
       const { creditRatesOf, billingOf } = await import('../../lib/agent-core/credit-rates')
       const { addHourCredits } = await import('../../lib/agent-core/credit-ledger')
       const spent = stepCredits(creditRatesOf(laufmodell), raw.promptEvalCount, raw.evalCount, billingOf(raw))
       if (spent > 0) {
+        if (import.meta.env?.MODE !== 'test') wireCloudSpent()
         const hour = addHourCredits(spent)
         const { useSettingsStore } = await import('../../stores/settingsStore')
         const limit = useSettingsStore.getState().settings.agentHourCreditLimit ?? HOUR_CREDIT_LIMIT

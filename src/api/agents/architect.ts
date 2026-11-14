@@ -74,10 +74,23 @@ export async function planWithArchitect(
     ...(input.recentMessages ?? []),
     { role: 'user', content: input.userInstruction },
   ]
-  const { content } = await provider.chatWithTools(modelId, messages, [], {
+  const raw = await provider.chatWithTools(modelId, messages, [], {
     temperature: input.temperature ?? 0.3,
     signal: input.signal,
   })
+  const { content } = raw
+  // The plan step is paid like any other step on LU Cloud and counts toward
+  // the hourly credit limit (CA, 14.11.2026). Accounting never breaks the plan.
+  try {
+    const { stepCredits, wireCloudSpent } = await import('../../lib/agent-cost-brake')
+    const { creditRatesOf, billingOf } = await import('../../lib/agent-core/credit-rates')
+    const { addHourCredits } = await import('../../lib/agent-core/credit-ledger')
+    const spent = stepCredits(creditRatesOf(input.model), raw.promptEvalCount, raw.evalCount, billingOf(raw))
+    if (spent > 0) {
+      if (import.meta.env?.MODE !== 'test') wireCloudSpent()
+      addHourCredits(spent)
+    }
+  } catch { /* counted nothing */ }
   return {
     // The plan is pasted into the EDITOR's system prompt verbatim, so a
     // thinking model's reasoning would ride into every coding turn after it

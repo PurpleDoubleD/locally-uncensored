@@ -1,6 +1,6 @@
 import type { CreditRates } from '../api/providers/types'
 import { HOSTED_CREDITS_PER_EUR } from './cloud-pitch'
-import { addHourCredits, hourPauseDue, markHourPause } from './agent-core/credit-ledger'
+import { addHourCredits, creditFactor, hourPauseDue, markHourPause } from './agent-core/credit-ledger'
 /**
  * Cost brake for one agent run (C83).
  *
@@ -41,6 +41,11 @@ export const RUN_HALT_TOKENS = 2_000_000
  */
 export const RUN_CREDIT_LIMIT = 100_000
 export const HOUR_CREDIT_LIMIT = 250_000
+
+/** Loaded lazily: the quota client pulls in the cloud API. */
+export function wireCloudSpent(): void {
+  void import('./agent-core/cloud-spent').then((m) => m.ensureCloudSpentReader()).catch(() => {})
+}
 
 export type CostBrakeVerdict =
   | { action: 'ok' }
@@ -90,6 +95,9 @@ export class AgentCostBrake {
     this.rates = opts.rates && opts.rates.inputPerMillion >= 0 && opts.rates.outputPerMillion >= 0 ? opts.rates : null
     this.runCreditLimit = opts.runCreditLimit ?? RUN_CREDIT_LIMIT
     this.hourCreditLimit = opts.hourCreditLimit ?? HOUR_CREDIT_LIMIT
+    // A declared credit price means LU Cloud: let the ledger ask the server
+    // what the steps really cost. Unit tests wire their own reader.
+    if (this.paid && this.rates && import.meta.env?.MODE !== 'test') wireCloudSpent()
   }
 
   /** Credits this run used so far, upper bound; 0 without a declared price. */
@@ -117,7 +125,10 @@ export class AgentCostBrake {
     if (this.rates && extra.billing !== 'flash') {
       const out = typeof extra.output === 'number' && extra.output > 0 ? extra.output : 0
       const step = (n * this.rates.inputPerMillion + out * this.rates.outputPerMillion) / 1_000_000
-      this.credits += step
+      // At the price the server really charged lately (creditFactor, 1 until
+      // it has been asked, see credit-ledger.ts), so the pause comes at the
+      // limit and not at half of it.
+      this.credits += step * creditFactor()
       const hour = addHourCredits(step)
       if (this.mayHalt && this.runCreditLimit > 0 && this.credits >= this.runCreditLimit) {
         this.pending = {
