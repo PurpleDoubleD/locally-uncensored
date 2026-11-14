@@ -60,6 +60,8 @@ pub mod logging;
 pub mod media_cmds;
 // The local 3D engine of the Mac (TripoSR), see mesh3d.rs.
 pub mod mesh3d;
+// Stable Fast 3D, the second model of the 3D lane, see mesh3d_sf3d.rs.
+pub mod mesh3d_sf3d;
 pub mod mlx;
 pub mod mlx_cutout;
 pub mod mlx_loras;

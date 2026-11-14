@@ -43,7 +43,9 @@
 //! `LU_REAL_CANCEL_AFTER` (seconds into an install or a video),
 //! `LU_REAL_CANCEL_AT_STEP` (an image), `LU_REAL_NAME` (the name the result is
 //! kept under), `LU_REAL_OUT` (the folder for results and the record),
-//! `LU_REAL_ANY_POWER` (`1`: do not wait for mains) and `LU_REAL_RUN_HOME`
+//! `LU_REAL_ANY_POWER` (`1`: do not wait for mains), `LU_REAL_3D_MODEL` (`triposr` or
+//! `sf3d`, the 3D model of `mesh_run` and `mesh_text`), `LU_REAL_TEXTURE` (the
+//! texture side of Stable Fast 3D) and `LU_REAL_RUN_HOME`
 //! (an absolute folder the run takes as the app's data, config and cache
 //! folders, so the real app's folders on this Mac stay untouched; the 3D
 //! runs use it, see `mesh_install`).
@@ -397,15 +399,46 @@ fn music_lane() -> Lane {
     }
 }
 
-/// The 3D lane installs its engine, its source and its weights on one slot.
+/// The 3D lane installs its engine, its source and its weights on one slot,
+/// for the model `LU_REAL_MODEL` names (`triposr` or `sf3d`).
 fn mesh_lane() -> Lane {
     Lane {
         name: "mesh3d",
         install: mesh3d::mesh3d_install,
         status: mesh3d::mesh3d_install_status,
         cancel: mesh3d::mesh3d_cancel_install,
-        weights: crate::os_paths::data_dir().join("mesh3d").join("weights"),
+        weights: mesh_root().join("weights"),
     }
+}
+
+/// The folder of the 3D model `LU_REAL_MODEL` names.
+fn mesh_root() -> PathBuf {
+    if mesh_model() == super::mesh3d_sf3d::MODEL_ID {
+        super::mesh3d_sf3d::root()
+    } else {
+        mesh3d::real_run_root()
+    }
+}
+
+/// `LU_REAL_3D_MODEL`, else `LU_REAL_MODEL` when it names a 3D model (the
+/// install), else TripoSR. `mesh_text` uses `LU_REAL_MODEL` for its image model.
+fn mesh_model() -> String {
+    let three_d = |m: &String| m == mesh3d::MODEL_ID || m == super::mesh3d_sf3d::MODEL_ID;
+    var("LU_REAL_3D_MODEL").or_else(|| var("LU_REAL_MODEL").filter(three_d)).unwrap_or_else(|| mesh3d::MODEL_ID.to_string())
+}
+
+/// A gated model downloads with a Hugging Face token. The real run takes the
+/// one `huggingface-cli login` keeps (`~/.cache/huggingface/token`) and no
+/// other: never the app's keychain entry.
+fn hub_token_for_the_run() -> bool {
+    let Some(home) = std::env::var_os("HOME") else { return false };
+    let file = PathBuf::from(home).join(".cache").join("huggingface").join("token");
+    let Ok(token) = std::fs::read_to_string(&file) else {
+        println!("no Hugging Face token in {}", file.display());
+        return false;
+    };
+    let _ = mlx::set_hf_token(state(), &json!({ "token": token.trim() }));
+    true
 }
 
 fn video_lane() -> Lane {
@@ -1278,8 +1311,11 @@ fn own_folder_only() -> bool {
 #[ignore = "the real run: needs LU_REAL_RUN=1"]
 fn mesh_install() {
     if on() && own_folder_only() {
+        if mesh_model() == super::mesh3d_sf3d::MODEL_ID {
+            assert!(hub_token_for_the_run(), "Stable Fast 3D needs a Hugging Face token");
+        }
         install_model(mesh_lane());
-        let root = mesh3d::real_run_root();
+        let root = mesh_root();
         record("mesh3d folders", json!({ "venvGB": dir_gb(&root.join("venv")), "weightsGB": dir_gb(&root.join("weights")), "sourceGB": dir_gb(&root.join("source")) }));
     }
 }
@@ -1308,12 +1344,18 @@ fn mesh_run() {
 fn mesh_from_picture(state: &'static AppState, picture: &str, name: &str, before: Value) {
     let none = json!({});
     let status = mesh3d::mesh3d_status(state, &none).expect("mlx_mesh3d_status");
-    assert_eq!(status["installed"], true, "the 3D model is not installed: {status}");
+    let model = mesh_model();
+    let card = status["models"].as_array().and_then(|all| all.iter().find(|m| m["id"] == model.as_str())).cloned().unwrap_or(Value::Null);
+    assert_eq!(card["installed"], true, "the 3D model {model} is not installed: {status}");
     let staged = stage(picture);
     let run = format!("real-run-{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0));
-    let mut args = json!({ "run": run, "imagePath": staged });
+    let mut args = json!({ "run": run, "imagePath": staged, "model": model });
     if let Some(resolution) = number::<u32>("LU_REAL_RESOLUTION") {
         args["resolution"] = json!(resolution);
+    }
+    // Stable Fast 3D's texture side (512, 1024, 2048).
+    if let Some(texture) = number::<u32>("LU_REAL_TEXTURE") {
+        args["texture"] = json!(texture);
     }
     println!("mlx_mesh3d_generate {args}");
     let available_before = available_memory_gb();
