@@ -74,7 +74,7 @@ export function swapFrameSubmit(framePath: string, figurePaths: string[], req: S
   return {
     kind: 'image',
     model,
-    prompt: swapFramePrompt(roles, req.extra),
+    prompt: swapFramePrompt(roles, req.extra, { open: model !== SWAP_FRAME_MODEL }),
     params: {
       op: 'studio',
       image_paths: [framePath, ...figurePaths],

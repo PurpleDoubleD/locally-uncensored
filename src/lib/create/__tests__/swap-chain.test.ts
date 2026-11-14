@@ -259,6 +259,9 @@ describe('the filtered editor refuses', () => {
     await retrySwapOpen(f.deps)
     expect(f.submits[1].model).toBe('qwen-image-2.1-edit')
     expect(params(f.submits[1]).max_credits).toBe(swapFrameCredits(1280, 720, 2, 'qwen-image-2.1-edit'))
+    // The open editor gets its own sentence: the photos are only face references.
+    expect(f.submits[0].prompt).toMatch(/^In the first image, replace/)
+    expect(f.submits[1].prompt).toMatch(/^The first image is a frame from a video and is the base image\./)
     expect(swapChainStore.getState().chain!.stage).toBe('done')
   })
 

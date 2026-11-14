@@ -25,7 +25,7 @@ import { dataUrlToBlob } from '../render/data-url'
 import { lipsyncSubmit } from '../render/sound'
 import {
   swapFigureRoles, swapFrameFiltered, swapFrameMaxPeople, swapFrameOptionsFor, swapFramePrompt,
-  SWAP_CONSENT_MISSING, SWAP_FRAME_OPEN_MODEL, type SwapMark,
+  SWAP_CONSENT_MISSING, SWAP_FRAME_MODEL, SWAP_FRAME_OPEN_MODEL, type SwapMark,
 } from '../render/swap'
 import { adoptResult, describeSubmitError, failedJobText, type RunDeps } from './engine'
 import { swapFrameCredits, swapFrameSubmit } from './swap-frame'
@@ -367,7 +367,7 @@ export function retrySwapFrame(deps: SwapChainDeps, opts: { extra?: string; mode
     frameSubmit: {
       ...s.frameSubmit,
       model,
-      prompt: swapFramePrompt(s.roles, opts.extra),
+      prompt: swapFramePrompt(s.roles, opts.extra, { open: model !== SWAP_FRAME_MODEL }),
       params: {
         ...params,
         studio_options: swapFrameOptionsFor(model, s.frameSize.width, s.frameSize.height),

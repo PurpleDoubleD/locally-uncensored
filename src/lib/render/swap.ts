@@ -369,7 +369,7 @@ const IMAGE_ORDINAL = ['second', 'third', 'fourth', 'fifth']
  *  frontal heads). The first image is the video frame, from the second on a
  *  photo per person. What the customer writes under "What's wrong?" goes at
  *  the end. */
-export function swapFramePrompt(roles: readonly string[], extra?: string): string {
+export function swapFramePrompt(roles: readonly string[], extra?: string, opts: { open?: boolean } = {}): string {
   const who = roles.length ? roles.map((r) => r.trim() || 'the person') : ['the person']
   const one = who.length === 1
   const replace = one
@@ -382,6 +382,7 @@ export function swapFramePrompt(roles: readonly string[], extra?: string): strin
     ? 'Keep everything else from the first image identical: same pose, the same head angle as in the first image, same head size, mouth position, camera angle, framing, distance, clothing, background, lighting, colors, text overlays and phone-camera quality. It must look like the same raw phone video frame, just with the other person.'
     : `Every other person stays unchanged. Keep everything else from the first image identical: same poses, the same head angles as in the first image, same head sizes, mouth positions, camera angle, framing, distance, clothing, background, lighting, colors, text overlays and phone-camera quality. It must look like the same raw phone video frame, just with the other people.`
   const fix = extra?.trim() ? `Fix this from the last attempt: ${extra.trim().slice(0, 500)}` : ''
+  if (opts.open) return swapFrameOpenPrompt(who, fix)
   return [
     replace, keep,
     one
@@ -389,6 +390,32 @@ export function swapFramePrompt(roles: readonly string[], extra?: string): strin
       : "Use each new person's own hair from their image and remove all of the original people's hair completely, even long hair.",
     one ? 'No headset, no microphone.' : 'No headsets, no microphones.',
     rest, fix,
+  ].filter(Boolean).join(' ')
+}
+
+/** The sentence for every editor but Nano Banana Pro (real test of
+ *  14.11.2026, David's call; port of the web's swapFrameOpenPrompt): with the
+ *  Nano sentence Qwen Image 2.1 Edit pasted the photos in with clothing and
+ *  body. So it says clearly: the first image stays the base, the photos are
+ *  only face references, only face and hair are swapped. */
+function swapFrameOpenPrompt(who: readonly string[], fix: string): string {
+  const one = who.length === 1
+  const refs = one
+    ? 'The second image is only a face reference: do not copy its clothing, body, pose, background or framing.'
+    : `The ${who.map((_, i) => IMAGE_ORDINAL[i]).join(', ').replace(/, ([^,]*)$/, ' and $1')} images are only face references: do not copy their clothing, body, pose, background or framing.`
+  const give = `Edit only the first image: ${who.map((r, i) => `give ${r} the face and hair of the person from the ${IMAGE_ORDINAL[i]} image`).join(', and ')}.`
+  return [
+    'The first image is a frame from a video and is the base image.',
+    refs, give,
+    one
+      ? "Keep the face identity and facial features of the new person exactly. Remove all of the original person's hair completely, even long hair."
+      : "Keep the face identity and facial features of each new person exactly. Remove all of the original people's hair completely, even long hair.",
+    one
+      ? `Keep ${who[0]} exactly where they are, with the same body, pose, head angle, head size, hands, clothing, mouth position, lighting, colors, camera angle, framing, distance and background.`
+      : 'Keep every person in the first image exactly where they are, with the same body, pose, head angle, head size, hands, clothing, mouth position, lighting, colors, camera angle, framing, distance and background.',
+    one ? 'No headset, no microphone.' : 'No headsets, no microphones. Every other person stays unchanged.',
+    one ? 'It must look like the same raw phone video frame, just with the other face.' : 'It must look like the same raw phone video frame, just with the other faces.',
+    fix,
   ].filter(Boolean).join(' ')
 }
 
