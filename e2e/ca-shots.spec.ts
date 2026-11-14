@@ -221,7 +221,10 @@ test.describe('CA shots: pinned plan', () => {
       await page.getByRole('button', { name: 'Code', exact: true }).click()
       await openNewChat(page)
       await send(page, 'median() in src/math.ts is missing, implement it and run the tests')
-      await expect(page.getByTestId('plan-all-done')).toBeVisible({ timeout: 60_000 })
+      // David, 14.11.2026: finished is the count and the greyed list, nothing more.
+      await expect(page.getByTestId('plan-count')).toHaveText(/^(\d+) of \1 done$/, { timeout: 60_000 })
+      await expect(page.getByTestId('plan-pinned').locator('.animate-spin')).toHaveCount(0, { timeout: 60_000 })
+      await expect(page.getByTestId('plan-pinned')).not.toContainText(/every step done/i)
       await shot(page, `plan-${theme}-1280-5-all-done`)
     })
 

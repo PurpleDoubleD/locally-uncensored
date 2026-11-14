@@ -140,12 +140,24 @@ describe('PlanBar, pinned in the transcript', () => {
     expect(v.getByTestId('plan-steps')).toBeTruthy()
   })
 
-  it('a finished run gets a closing box, and names changes still waiting', () => {
+  it('a finished plan is its count and the greyed list, no tick, no sentence', () => {
+    // David, 14.11.2026, on the live build: drop the tick and "every step done".
     writeTodos(CONV, PLAN.map((t) => ({ ...t, status: 'completed' as const })))
     const v = render(<PlanBar conversationId={CONV} />)
-    expect(v.getByTestId('plan-all-done').textContent).toContain('every step done')
+    expect(v.getByTestId('plan-count').textContent).toBe('3 of 3 done')
+    expect([...v.getByTestId('plan-steps').querySelectorAll('li')].map((r) => r.getAttribute('data-state')))
+      .toEqual(['done', 'done', 'done'])
+    expect(v.getByTestId('plan-pinned').textContent).not.toMatch(/every step done/i)
+    expect(v.queryByTestId('plan-changes-waiting')).toBeNull()
+    expect(v.container.innerHTML).not.toMatch(/emerald/)
+  })
+
+  it('changes still waiting for approval are named under a finished plan', () => {
+    writeTodos(CONV, PLAN.map((t) => ({ ...t, status: 'completed' as const })))
+    const v = render(<PlanBar conversationId={CONV} />)
     act(() => { useStagedChangesStore.setState({ byChat: { [CONV]: [{}, {}] } } as never) })
-    expect(v.getByTestId('plan-all-done').textContent).toContain('2 changes still waiting for your approval')
+    expect(v.getByTestId('plan-changes-waiting').textContent).toContain('2 changes still waiting for your approval')
+    expect(v.getByTestId('plan-changes-waiting').textContent).not.toMatch(/every step done/i)
   })
 
   it('a run that ended with steps open says so, with Continue and Clear plan', () => {

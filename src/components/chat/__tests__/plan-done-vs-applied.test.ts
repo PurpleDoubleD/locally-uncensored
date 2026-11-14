@@ -25,13 +25,15 @@ const here = dirname(fileURLToPath(import.meta.url))
 const read = (rel: string) => readFileSync(resolve(here, rel), 'utf8')
 
 describe('planDoneLabel', () => {
-  it('says done, plainly, when nothing is waiting', () => {
-    expect(planDoneLabel(0)).toBe('every step done')
+  // David, 14.11.2026: a plan that is through shows its count and the greyed
+  // list, no tick and no "every step done". The Morgan line stays.
+  it('says nothing more when nothing is waiting', () => {
+    expect(planDoneLabel(0)).toBeNull()
   })
 
   it('names the changes that still need approval', () => {
-    expect(planDoneLabel(1)).toBe('every step done, 1 change still waiting for your approval')
-    expect(planDoneLabel(6)).toBe('every step done, 6 changes still waiting for your approval')
+    expect(planDoneLabel(1)).toBe('1 change still waiting for your approval')
+    expect(planDoneLabel(6)).toBe('6 changes still waiting for your approval')
   })
 })
 
@@ -46,7 +48,7 @@ describe('the bar reads the staging queue', () => {
     const src = read('../PlanBar.tsx')
     // Collapsed-only once hid the Morgan line where the list started open.
     // Since CA (13.11.2026) the closing box hangs on the run, not on the fold.
-    expect(src).toMatch(/\{!runActive && allDone && \(/)
+    expect(src).toMatch(/\{!runActive && allDone && waiting && \(/)
   })
 })
 

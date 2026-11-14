@@ -73,7 +73,7 @@ describe('die Leiste fragt beide Laufquellen, nicht nur eine', () => {
     // abzuschreiben. Zwei Abschriften laufen auseinander, die Typo-Klinke
     // in `die-typo-leiter-und-ihre-umgehung.test.ts` hat genau das schon
     // einmal aufgefangen.
-    expect(src).toMatch(/testid="plan-all-done"/)
+    expect(src).toMatch(/testid="plan-changes-waiting"/)
     expect(src.match(/function Abschluss\(/g) ?? []).toHaveLength(1)
   })
 
@@ -98,12 +98,13 @@ describe('die Leiste fragt beide Laufquellen, nicht nur eine', () => {
     expect(src.match(/animate-spin/g) ?? []).toHaveLength(1)
   })
 
-  it('die Schlusszeile kennt zwei Toene und keinen dritten', () => {
+  it('die Schlusszeile hat einen Ton, den ruhigen', () => {
     // Der dritte hiess `warnung` und war bernsteinfarben. Weder ein Lauf, der
     // endet, noch eine Aenderung, die auf Freigabe wartet, ist ein Fehler;
-    // beides ist ruhig, und fertig ist gruen.
-    expect(src).toMatch(/ton: 'gut' \| 'ruhig'/)
-    expect(src).not.toMatch(/(?:amber|yellow)-/)
+    // beides ist ruhig. Das Gruen fuer "fertig" ist seit 14.11.2026 weg
+    // (David: kein Haken, kein "every step done").
+    expect(src).toMatch(/HINWEIS_TEXT\.ruhig/)
+    expect(src).not.toMatch(/(?:amber|yellow|emerald)-/)
   })
 })
 

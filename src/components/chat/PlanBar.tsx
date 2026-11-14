@@ -42,7 +42,7 @@
 // "Continue" and "Clear plan".
 
 import { useState, type ReactNode } from 'react'
-import { AlertCircle, Check, CheckCircle2, Circle, ChevronDown, ChevronRight, Loader2, X } from 'lucide-react'
+import { AlertCircle, Check, Circle, ChevronDown, ChevronRight, Loader2, X } from 'lucide-react'
 import { useTodoStore, type TodoItem } from '../../stores/todoStore'
 import { useCodexStore } from '../../stores/codexStore'
 import { useGenerationStore } from '../../stores/generationStore'
@@ -54,11 +54,13 @@ import { isActiveCodexStatus } from '../../types/codex'
 import { HINWEIS_TEXT } from '../../lib/hinweis'
 import { ICON_SM } from '../ui/icon-size'
 
-/** What the closing box says once the model ticked off every step. Ticking
- *  off a step is not the same as the change being on disk. */
-export function planDoneLabel(pendingChanges: number): string {
-  if (pendingChanges <= 0) return 'every step done'
-  return `every step done, ${pendingChanges} change${pendingChanges === 1 ? '' : 's'} still waiting for your approval`
+/** The line under a finished plan, and only while changes wait for approval:
+ *  ticking off a step is not the same as the change being on disk. A plan
+ *  that is through with nothing waiting says nothing more than its count and
+ *  the greyed list (David, 14.11.2026: no tick, no "every step done"). */
+export function planDoneLabel(pendingChanges: number): string | null {
+  if (pendingChanges <= 0) return null
+  return `${pendingChanges} change${pendingChanges === 1 ? '' : 's'} still waiting for your approval`
 }
 
 /**
@@ -166,6 +168,7 @@ export function PlanBar({ conversationId, onContinue }: Props) {
   const done = todos.filter((t) => t.status === 'completed').length
   const allDone = done === todos.length
   const stoppedShort = !allDone && !runActive
+  const waiting = planDoneLabel(pending)
   const runningIdx = states.indexOf('running')
   // Collapsed, the one line that matters is what is happening NOW, else the
   // first step still open, else the last one.
@@ -236,14 +239,14 @@ export function PlanBar({ conversationId, onContinue }: Props) {
           </ul>
         )}
 
-        {!runActive && allDone && (
-          <Abschluss testid="plan-all-done" Symbol={CheckCircle2} ton={pending > 0 ? 'ruhig' : 'gut'}>
-            {planDoneLabel(pending)}.
+        {!runActive && allDone && waiting && (
+          <Abschluss testid="plan-changes-waiting" Symbol={AlertCircle}>
+            {waiting}.
           </Abschluss>
         )}
 
         {stoppedShort && (
-          <Abschluss testid="plan-run-stopped" Symbol={AlertCircle} ton="ruhig">
+          <Abschluss testid="plan-run-stopped" Symbol={AlertCircle}>
             {planStoppedLabel(done, todos.length)}.
             {nextOpen && <span> Next: {nextOpen.content}</span>}
             <div className="mt-1.5 flex flex-wrap gap-1.5">
@@ -273,26 +276,23 @@ export function PlanBar({ conversationId, onContinue }: Props) {
 }
 
 /**
- * The closing line under the list once the run is over, in two tones: `gut`
- * (the plan is through) and `ruhig`. Neither a run that ends nor a change that
- * waits for approval is an error, so no amber (`lib/hinweis.ts`). It is a row
- * like the steps above it, glyph and sentence, with no frame of its own.
+ * The closing line under the list once the run is over: a run that ended with
+ * steps open, or changes that still wait for approval. Neither is an error, so
+ * no amber (`lib/hinweis.ts`). It is a row like the steps above it, glyph and
+ * sentence, with no frame of its own. A plan that is simply through gets none.
  */
 function Abschluss({
   testid,
   Symbol,
-  ton,
   children,
 }: {
   testid: string
-  Symbol: typeof CheckCircle2
-  ton: 'gut' | 'ruhig'
+  Symbol: typeof AlertCircle
   children: ReactNode
 }) {
-  const farbe = ton === 'gut' ? 'text-emerald-600 dark:text-emerald-400' : HINWEIS_TEXT.ruhig
   return (
     <div className="mt-1.5 flex items-start gap-2" data-testid={testid}>
-      <Symbol size={ICON_SM} className={`${GLYPH} ${farbe}`} />
+      <Symbol size={ICON_SM} className={`${GLYPH} ${HINWEIS_TEXT.ruhig}`} />
       {/* The labels are written mid-sentence (they are tested as such); the
           capital is drawn here, on the first letter of the line. */}
       <div className={`${LINE} min-w-0 break-words text-gray-800 dark:text-gray-200 first-letter:uppercase`}>{children}</div>
