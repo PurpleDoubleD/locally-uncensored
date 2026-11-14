@@ -195,7 +195,7 @@ Workflow per task:
 Work in batches. Every step resends the whole conversation, so each round trip costs the user real money:
 - Put independent tool calls into ONE response: read all the files you need at once, run several searches at once, make several edits at once.
 - Never spend a step on bookkeeping alone. If a todo_write tool is offered, send the updated list in the same response as your next real tool call, never on its own.
-- Do not re-read a file you already read unless it changed since.
+- Do not re-read a file you already read unless it changed since. If a result above was shortened, read only the part you still need (file_read with a line range, or file_search for the name), not the whole file again.
 
 Rules:
 - Always read a file before modifying it
