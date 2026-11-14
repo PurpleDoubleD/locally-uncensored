@@ -31,6 +31,12 @@ const SWAP_CATALOG = [
   ['wan-2.2-animate-replace', 'Wan 2.2 Animate Replace'],
 ].map(([id, label]) => ({ id, label, kind: 'video', ops: ['studio'], quote_required: true, t2v: false, i2v: false }))
   .concat([{ id: 'nano-banana-pro-edit', label: 'Nano Banana Pro', kind: 'image', ops: ['studio'], quote_required: true, t2v: false, i2v: false }])
+  // The lip sync step of "New voice, lips in sync" (14.11.2026), priced by the
+  // length of the voice as the server lists it.
+  .concat([{
+    id: 'latentsync', label: 'LatentSync', kind: 'video', ops: ['lipsync'], quote_required: false, t2v: false, i2v: false,
+    credits: { base: 9000, length: { basis: 'audio', block: 1, per_block: 3000, min: 3, max: 300, quote: 10 } },
+  } as never])
 
 async function media(name: string, mimeType: string, page?: Page) {
   const dir = process.env.LU_SWAP_MEDIA_DIR
@@ -129,7 +135,7 @@ async function openSwap(page: Page): Promise<Seen> {
   return seen
 }
 
-async function shoot(page: Page, name: string, focus?: string) {
+async function shoot(page: Page, name: string, focus?: string, prefix = 'desktop-app') {
   const dir = process.env.LU_SWAP_SHOTS_DIR
   if (!dir) return
   // The part the shot is about, scrolled into the panel's view.
@@ -140,7 +146,7 @@ async function shoot(page: Page, name: string, focus?: string) {
       document.documentElement.classList.toggle('light', t === 'light')
     }, theme)
     await page.waitForTimeout(250)
-    await page.screenshot({ path: `${dir}/desktop-app-${name}-${theme}.png` })
+    await page.screenshot({ path: `${dir}/${prefix}-${name}-${theme}.png` })
   }
   await page.evaluate(() => {
     document.documentElement.classList.add('dark')
@@ -275,4 +281,78 @@ test('Swap Character with OpenJutsu: one step, people up to four, consent before
   await expect(page.getByRole('button', { name: /Add person/ })).toHaveText('+ Add person (4/4)')
   await expect(page.getByRole('button', { name: /Add person/ })).toBeDisabled()
   await expect(create).toBeDisabled()
+})
+
+/** A voice of `seconds` seconds as a WAV (a quiet tone), made here so the
+ *  WebView can measure it; no file on disk. */
+function voiceWav(seconds: number) {
+  const rate = 8000
+  const n = rate * seconds
+  const buf = Buffer.alloc(44 + n * 2)
+  buf.write('RIFF', 0); buf.writeUInt32LE(36 + n * 2, 4); buf.write('WAVE', 8)
+  buf.write('fmt ', 12); buf.writeUInt32LE(16, 16); buf.writeUInt16LE(1, 20); buf.writeUInt16LE(1, 22)
+  buf.writeUInt32LE(rate, 24); buf.writeUInt32LE(rate * 2, 28); buf.writeUInt16LE(2, 32); buf.writeUInt16LE(16, 34)
+  buf.write('data', 36); buf.writeUInt32LE(n * 2, 40)
+  for (let i = 0; i < n; i++) buf.writeInt16LE(Math.round(Math.sin((i / rate) * 2 * Math.PI * 220) * 3000), 44 + i * 2)
+  return { name: 'voice.wav', mimeType: 'audio/wav', buffer: buf }
+}
+
+test('Sound in Swap: original by default, lip sync greyed out for two people, a new voice priced with the video', async ({ page }) => {
+  const seen = await openSwap(page)
+  const panel = page.locator('[data-swap-controls]')
+  const sound = page.getByRole('radiogroup', { name: 'Sound' })
+  const lipsync = page.getByRole('radio', { name: 'New voice, lips in sync' })
+  await expect(sound).toBeVisible()
+  await expect(page.getByRole('radio', { name: 'Original sound' })).toHaveAttribute('aria-checked', 'true')
+
+  await panel.locator('input[type=file][accept^="video"]').setInputFiles(await media('clip.mp4', 'video/mp4', page))
+  await expect(page.getByText('Tap each person you want to replace')).toBeVisible({ timeout: 20_000 })
+  await tapFrame(page, 0.45, 0.35)
+  await page.locator('[data-swap-photo-input="1"]').setInputFiles(await media('face1.png', 'image/png'))
+  await shoot(page, 'swap-original', '[data-sound-controls]', 'desktop-ton')
+
+  // A new voice: the voice chip, the price of both steps on slider and button.
+  await lipsync.click()
+  await expect(page.locator('[data-sound-lipsync]')).toBeVisible()
+  await page.locator('[data-sound-lipsync] input[type=file][accept="audio/*"]').setInputFiles(voiceWav(8))
+  await expect(page.locator('[data-sound-price]')).toContainText('+ lip sync')
+  await expect(page.locator('[data-clip-price]')).toContainText('credits · frame + video + lip sync')
+  await expect(page.locator('[data-clip-split]')).toContainText('lip sync')
+  await page.getByRole('checkbox').check()
+  await page.getByRole('button', { name: /Build first frame/ }).click()
+  await expect(page.getByText('Does this look right?')).toBeVisible({ timeout: 20_000 })
+  await page.getByRole('button', { name: /Continue/ }).click()
+  const create = page.getByRole('button', { name: /^Create/ }).last()
+  await expect(create).toBeEnabled({ timeout: 15_000 })
+  await expect(create).toContainText('Create ·')
+  await shoot(page, 'swap-lipsync-voice-price', '[data-sound-controls]', 'desktop-ton')
+
+  // A second person: lip sync goes grey, back to the original sound.
+  await tapFrame(page, 0.68, 0.38)
+  await expect(lipsync).toBeDisabled()
+  await expect(lipsync).toHaveAttribute('title', 'Lip sync works with one person')
+  await expect(page.locator('[data-sound-note=lipsync-blocked]')).toHaveText('Lip sync works with one person')
+  await expect(page.getByRole('radio', { name: 'Original sound' })).toHaveAttribute('aria-checked', 'true')
+  await shoot(page, 'swap-lipsync-blocked-two-people', '[data-sound-controls]', 'desktop-ton')
+
+  // Create was never pressed: only the frame step went to the queue.
+  expect(seen.submits.every((b) => b.params.swap_step === 'frame')).toBe(true)
+})
+
+test('Sound in Motion: on the cloud lanes only', async ({ page }) => {
+  await openSwap(page)
+  await page.getByRole('radio', { name: 'Motion Control', exact: true }).click()
+  const sound = page.locator('[data-sound-controls=motion]')
+  await expect(sound).toBeVisible({ timeout: 15_000 })
+  await expect(page.getByRole('radio', { name: 'Original sound' })).toHaveAttribute('aria-checked', 'true')
+  await page.getByRole('radio', { name: 'New voice, lips in sync' }).click()
+  await page.locator('[data-sound-lipsync] input[type=file][accept="audio/*"]').setInputFiles(voiceWav(4))
+  await expect(page.locator('[data-sound-price]')).toContainText('credits')
+  await shoot(page, 'motion-cloud', '[data-sound-controls]', 'desktop-ton')
+
+  // The local lanes: no sound choice (no lip sync step, no worker there).
+  await cloudSwitch(page).click()
+  await expect(cloudSwitch(page)).not.toBeChecked({ timeout: 15_000 })
+  await expect(page.locator('[data-sound-controls]')).toHaveCount(0)
+  await shoot(page, 'motion-local', undefined, 'desktop-ton')
 })

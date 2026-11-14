@@ -74,8 +74,16 @@ export interface CloudJobParams {
   swap_consent?: boolean
   /** Swap Character on SCAIL 2 or Kling (14.11.2026): 'frame' builds the first
    *  frame with the new people (Nano Banana Pro), 'video' runs the clip on it.
-   *  Either step needs swap_consent on the server. */
-  swap_step?: 'frame' | 'video'
+   *  Either step needs swap_consent on the server. 'lipsync' is the step
+   *  after the video when the customer picked a new voice (lib/render/sound.ts). */
+  swap_step?: 'frame' | 'video' | 'lipsync'
+  /** Swap and Motion (14.11.2026): the sound of the result. On original the
+   *  worker lays the clip's sound under a result without one; none removes
+   *  it. */
+  sound?: 'original' | 'none'
+  /** The lip sync step after Swap or Motion: the server cuts a longer voice
+   *  to the length of the clip. */
+  fit_audio?: true
 }
 
 export interface CloudJobSubmit {

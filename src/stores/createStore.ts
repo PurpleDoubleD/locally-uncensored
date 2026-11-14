@@ -500,6 +500,14 @@ export interface CreateState {
   /** Swap Character: the built and (after Continue) confirmed first frame.
    *  Runtime-only. */
   swapBuilt: SwapBuilt | null
+  /** Swap and Motion on the cloud (14.11.2026): the sound of the result
+   *  (lib/render/sound.ts). Runtime-only, the original sound by default. */
+  sound: 'original' | 'none' | 'lipsync'
+  /** The model of the lip sync step after the video. Runtime-only. */
+  lipsyncModel: string
+  /** What the lip sync step costs as the panel shows it (null: no lip sync).
+   *  The Create button adds it to the video. Runtime-only. */
+  lipsyncCredits: number | null
   /** Music track length in seconds (billed per second on the cloud). */
   musicDuration: number
   /** Music: optional lyrics passed to models that take them. Runtime-only. */
@@ -761,6 +769,9 @@ export interface CreateState {
   setSwapConsent: (consent: boolean) => void
   setSwapFrame: (frame: SwapFrame | null) => void
   setSwapBuilt: (built: SwapBuilt | null) => void
+  setSound: (sound: 'original' | 'none' | 'lipsync') => void
+  setLipsyncModel: (model: string) => void
+  setLipsyncCredits: (credits: number | null) => void
   bumpCharactersVersion: () => void
   setLoraListKey: (names: readonly string[]) => void
   setCloudOpModel: (id: string) => void
@@ -1261,6 +1272,9 @@ export const useCreateStore = create<CreateState>()(
       swapConsent: false,
       swapFrame: null as SwapFrame | null,
       swapBuilt: null as SwapBuilt | null,
+      sound: 'original' as 'original' | 'none' | 'lipsync',
+      lipsyncModel: 'latentsync',
+      lipsyncCredits: null as number | null,
       musicDuration: 60,
       musicLyrics: '',
       talkingWords: '',
@@ -1653,6 +1667,9 @@ export const useCreateStore = create<CreateState>()(
       setSwapConsent: (swapConsent) => set({ swapConsent }),
       setSwapFrame: (swapFrame) => set({ swapFrame }),
       setSwapBuilt: (swapBuilt) => set({ swapBuilt }),
+      setSound: (sound) => set({ sound }),
+      setLipsyncModel: (lipsyncModel) => set({ lipsyncModel }),
+      setLipsyncCredits: (lipsyncCredits) => set({ lipsyncCredits }),
       bumpCharactersVersion: () => set((s) => ({ charactersVersion: s.charactersVersion + 1 })),
       setLoraListKey: (names) => set((s) => {
         const key = names.join('\n')

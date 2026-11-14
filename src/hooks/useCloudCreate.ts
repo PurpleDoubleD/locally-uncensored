@@ -44,6 +44,8 @@ import { modelLabel } from '../lib/render/preset-models'
 import { isSwapIntent, swapUsesFrame, SWAP_GALLERY_LABEL } from '../lib/render/swap'
 import { adoptSwapFrame, swapInputError, swapRunParams } from '../lib/create/swap-run'
 import { swapConfirmedFrame } from '../lib/create/swap-frame'
+import { lipsyncCredits, soundApplies, soundClipSeconds, soundInputError, soundParam, soundStudioOptions } from '../lib/render/sound'
+import { lipsyncFailedText, runLipsyncStep } from '../lib/create/lipsync-chain'
 import { mediaSeconds } from '../components/create/experimental/useStudioPrice'
 import { IMPROVING_PROMPT } from '../lib/render/improve-prompt'
 import { improveKindForRun } from '../lib/render/music-ui'
@@ -270,6 +272,62 @@ export function takeCloudRunStop(): CloudRunStop | null {
   return stop
 }
 
+/** Step 2 of a Swap or Motion run with a new voice (14.11.2026, the web's
+ *  useCloudCreate): LatentSync or Lipsync-2 on the own video result. The
+ *  price is the catalogue's rule on the measured voice and clip; a failure
+ *  keeps the video and says so (lipsyncFailedText). */
+async function runLipsyncAfter(job: CloudJob, run: {
+  intent: string; model: string; swap: boolean; label: string | undefined
+  resultFields: Partial<GalleryItem> & { prompt: string }
+  audioInput: { url: string; blob: Blob } | null; voiceFromJob: { jobId: string } | null
+  videoUrl: string | undefined; swapSeconds: number | null; lipModel: string; shown: number | null
+  signal: AbortSignal; timeoutMs: number
+}): Promise<void> {
+  const st = useCreateStore.getState()
+  st.setProgressPhase('sampling')
+  st.setProgress(92, 'Step 2 of 2: lip sync…')
+  try {
+    const voiceUrl = run.audioInput?.url ?? (run.voiceFromJob ? (await getJob(run.voiceFromJob.jobId).catch(() => null))?.result_url ?? undefined : undefined)
+    const audioSeconds = voiceUrl ? await mediaSeconds(voiceUrl, 'audio').catch(() => undefined) : undefined
+    const videoSeconds = run.videoUrl ? await mediaSeconds(run.videoUrl, 'video').catch(() => undefined) : undefined
+    const clip = soundClipSeconds(run.intent, run.model, run.swapSeconds, videoSeconds)
+    // The ceiling: what the panel showed, or the same rule on what was
+    // measured now; never above the shown figure.
+    const measured = lipsyncCredits(run.lipModel, audioSeconds, clip)
+    const credits = run.shown != null && measured != null ? Math.min(run.shown, measured) : run.shown ?? measured
+    const lip = await runLipsyncStep({
+      videoJobId: job.id,
+      audio: run.audioInput ? { type: 'blob', blob: run.audioInput.blob } : { type: 'job', jobId: run.voiceFromJob!.jobId },
+      model: run.lipModel,
+      credits,
+      swap: run.swap,
+    }, {
+      submitCloudJob, pollJob, cancelJob, uploadInput, adoptInput,
+      signal: run.signal, timeoutMs: run.timeoutMs,
+      onSubmitted: (id) => { activeJobId = id; activeJobIds = [id] },
+      onTick: (j) => { if (j.status === 'running') useCreateStore.getState().setProgress(95, 'Step 2 of 2: lip sync…') },
+    })
+    const end = useCreateStore.getState()
+    if (lip.status === 'succeeded' && lip.result_url) {
+      end.setProgressPhase('complete')
+      end.setProgress(100, 'Complete!')
+      end.addToGallery({
+        ...galleryItemFromJob(lip),
+        ...run.resultFields,
+        model: lip.model || run.lipModel,
+        label: run.label ? `${run.label}, lip sync` : 'Lip sync',
+      })
+    } else if (lip.status !== 'canceled') {
+      end.setError(lipsyncFailedText(lip.error))
+    }
+  } catch (err) {
+    if (!(err instanceof Error && err.message === 'polling aborted')) {
+      const reason = err instanceof CloudJobError && err.status === 429 ? throttleMessage(err) : err instanceof Error ? err.message : String(err)
+      useCreateStore.getState().setError(lipsyncFailedText(reason))
+    }
+  }
+}
+
 export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
   const { onQuotaChange } = opts
 
@@ -432,6 +490,17 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
     } else if (op === 'motion' && (!s.source || !s.videoInput)) {
       s.setError('Motion control needs a character image and a driving video.')
       return
+    }
+    // Sound (14.11.2026, lib/render/sound.ts): Swap and Motion on the cloud.
+    // A new voice with lips needs the voice and at most one person.
+    const sound = soundApplies(intent, 'cloud') ? s.sound : undefined
+    {
+      const people = swap ? s.swapFigures.length : 1
+      const invalid = soundInputError(sound, people, 'cloud', !!s.audioInput || !!s.voiceFromJob, s.lipsyncModel)
+      if (invalid) {
+        s.setError(invalid)
+        return
+      }
     }
     if (!specialOp && op !== 'generate' && !s.source) {
       s.setError('Add a source image first.')
@@ -634,6 +703,14 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
           },
         ))
         if (ac.signal.aborted) return
+      }
+      // The sound of the result: Kling has a switch of its own, the rest the
+      // server's worker does. Lip sync runs after the video (below); until
+      // then the video keeps the original sound.
+      if (sound) {
+        params.sound = soundParam(sound)
+        const own = studioModel ? soundStudioOptions(studioModel, sound) : {}
+        if (Object.keys(own).length) params.studio_options = { ...(params.studio_options ?? studioOptionsFiltered ?? {}), ...own }
       }
       if (op === 'lipsync') {
         if (s.audioInput) {
@@ -975,6 +1052,16 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
         st.clearTrainImages()
         st.setCharacterTab('use')
         st.bumpCharactersVersion()
+      } else if (job.status === 'succeeded' && job.result_url && sound === 'lipsync' && (s.audioInput || s.voiceFromJob)) {
+        // Step 2 of 2: the new voice with lips. The video is in the gallery
+        // already and stays there if this step fails.
+        addResult(job)
+        await runLipsyncAfter(job, {
+          intent, model: studioModel ?? model, swap, label, resultFields: resultFields(0),
+          audioInput: s.audioInput, voiceFromJob: s.voiceFromJob, videoUrl: s.videoInput?.url,
+          swapSeconds: s.swapSeconds, lipModel: s.lipsyncModel, shown: s.lipsyncCredits, signal: ac.signal, timeoutMs,
+        })
+        onQuotaChange?.()
       } else if (job.status === 'succeeded' && job.result_url) {
         st.setProgressPhase('complete')
         st.setProgress(100, 'Complete!')

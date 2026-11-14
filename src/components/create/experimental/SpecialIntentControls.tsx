@@ -39,9 +39,14 @@ import { STUDIO_MODELS, studioFields } from '../../../lib/render/studio-contract
 import { modelLabel } from '../../../lib/render/preset-models'
 import {
   SWAP_AUTO_MODELS, SWAP_CONSENT_TEXT, SWAP_INTENT, SWAP_OPENJUTSU_MODEL, SWAP_TIPS, swapAutoModel, swapBilledPhotos,
-  swapDefaultOptions, swapFigureRoles, swapMaxPeople, swapNeedsConsent, swapReadsRoles, swapUsesFrame,
+  swapDefaultOptions, swapFigureRoles, swapMaxPeople, swapNeedsConsent, swapReadsRoles, swapShortCredits, swapUsesFrame,
 } from '../../../lib/render/swap'
 import { swapFrameCredits } from '../../../lib/create/swap-frame'
+import {
+  LIPSYNC_STEP_DEFAULT, LIPSYNC_STEP_MODELS, SOUND_CHOICES, SOUND_LABEL, lipsyncBlocked, lipsyncCredits, lipsyncCut,
+  lipsyncSeconds, soundApplies, soundClipSeconds, type SoundChoice,
+} from '../../../lib/render/sound'
+import { getJob } from '../../../api/cloud/jobs'
 import { SwapFrameBuild, SwapFramePicker, useSwapFirstFrame } from './SwapFrameSteps'
 import { mediaSeconds } from './useStudioPrice'
 import { ClipLength } from './ClipLength'
@@ -1731,10 +1736,136 @@ function CloudExtendControls() {
 // ── Motion control ──────────────────────────────────────────────────────────
 
 function MotionControls() {
+  const backend = useCreateStore((s) => s.backend)
+  const videoInput = useCreateStore((s) => s.videoInput)
+  // Sound on the cloud lanes only: the local lanes have no lip sync step and
+  // no worker to lay the sound under (14.11.2026, as on the web).
+  const cloud = soundApplies('motion', backend)
+  const [measured, setMeasured] = useState<{ url: string; seconds: number | undefined } | null>(null)
+  useEffect(() => {
+    let alive = true
+    if (!cloud || !videoInput) return
+    void mediaSeconds(videoInput.url, 'video').then((v) => { if (alive) setMeasured({ url: videoInput.url, seconds: v }) })
+    return () => { alive = false }
+  }, [cloud, videoInput])
+  const videoSeconds = measured && videoInput && measured.url === videoInput.url ? measured.seconds : undefined
   return (
-    <div className="flex items-center justify-center gap-2 flex-wrap">
-      <PortraitChip empty="Add character image" />
-      <DrivingVideoChip empty="Add driving video (dance/pose)" />
+    <div className="flex flex-col items-center gap-2.5">
+      <div className="flex items-center justify-center gap-2 flex-wrap">
+        <PortraitChip empty="Add character image" />
+        <DrivingVideoChip empty="Add driving video (dance/pose)" />
+      </div>
+      {cloud && <SoundControls intent="motion" people={1} clipSeconds={videoSeconds} withPrice />}
+    </div>
+  )
+}
+
+// ── Sound (14.11.2026, David; port of the web's SoundControls): the original
+// sound, no sound, or a new voice with the lips in sync. Swap and Motion,
+// cloud only (lib/render/sound.ts). ──
+
+function SoundControls({ intent, people, clipSeconds, withPrice = false }: {
+  intent: CreateIntent; people: number; clipSeconds: number | undefined
+  /** Motion has no length slider: the price of the lip sync step stands here. */
+  withPrice?: boolean
+}) {
+  const backend = useCreateStore((s) => s.backend)
+  const sound = useCreateStore((s) => s.sound)
+  const setSound = useCreateStore((s) => s.setSound)
+  const lipModel = useCreateStore((s) => s.lipsyncModel)
+  const setLipModel = useCreateStore((s) => s.setLipsyncModel)
+  const setLipCredits = useCreateStore((s) => s.setLipsyncCredits)
+  const audioInput = useCreateStore((s) => s.audioInput)
+  const setAudioInput = useCreateStore((s) => s.setAudioInput)
+  const voiceFromJob = useCreateStore((s) => s.voiceFromJob)
+  const setVoiceFromJob = useCreateStore((s) => s.setVoiceFromJob)
+  // The catalogue decides whether the lip sync models are there.
+  useCloudCatalogStore((s) => s.fetchedAt)
+  const blocked = lipsyncBlocked(people, backend, lipModel)
+  // A second person: lip sync no longer works, back to the original sound.
+  useEffect(() => { if (blocked && sound === 'lipsync') setSound('original') }, [blocked, sound, setSound])
+  // The length of the voice: an upload is measured here, an earlier voice
+  // through its job's address (as the Composer's meter does).
+  const [voice, setVoice] = useState<{ key: string; seconds: number | undefined } | null>(null)
+  const voiceKey = audioInput?.url ?? (voiceFromJob ? `job:${voiceFromJob.jobId}` : undefined)
+  useEffect(() => {
+    let alive = true
+    if (!voiceKey) return
+    const url = audioInput?.url
+      ? Promise.resolve(audioInput.url)
+      : getJob(voiceFromJob!.jobId).then((j) => j.result_url ?? undefined)
+    void url
+      .then((u) => (u ? mediaSeconds(u, 'audio') : undefined))
+      .catch(() => undefined)
+      .then((v) => { if (alive) setVoice({ key: voiceKey, seconds: v }) })
+    return () => { alive = false }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [voiceKey])
+  const audioSeconds = voice && voice.key === voiceKey ? voice.seconds : undefined
+  const active = sound === 'lipsync' && !blocked
+  const credits = active && (voiceKey ? voice?.key === voiceKey : true) ? lipsyncCredits(lipModel, audioSeconds, clipSeconds) : null
+  useEffect(() => { setLipCredits(credits) }, [credits, setLipCredits])
+  useEffect(() => () => setLipCredits(null), [setLipCredits])
+  const cut = active && lipsyncCut(audioSeconds, clipSeconds)
+
+  return (
+    <div className="w-full space-y-1.5" data-sound-controls={intent}>
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="t-control text-gray-400">Sound</span>
+        <Segmented
+          size="sm"
+          layoutId={`sound-${intent}`}
+          ariaLabel="Sound"
+          className="max-w-full flex-wrap"
+          value={sound}
+          onChange={(v) => setSound(v as SoundChoice)}
+          options={SOUND_CHOICES.map((c) => ({
+            value: c, label: SOUND_LABEL[c],
+            ...(c === 'lipsync' && blocked ? { disabled: true, title: blocked } : {}),
+          }))}
+        />
+      </div>
+      {blocked && (
+        <p className="t-control text-gray-500" data-sound-note="lipsync-blocked">{blocked}</p>
+      )}
+      {active && (
+        <div className="space-y-1.5" data-sound-lipsync>
+          <div className="flex flex-wrap items-center gap-2">
+            <VoiceChip
+              audioName={audioInput?.name ?? null}
+              voiceLabel={voiceFromJob?.label ?? null}
+              onAudioFile={(f) => setAudioInput(mediaRefFrom(f))}
+              onPickVoice={(jobId, label) => setVoiceFromJob({ jobId, label })}
+              onClear={() => { setAudioInput(null); setVoiceFromJob(null) }}
+            />
+            {credits != null && (
+              <span className="t-control text-gray-500 tabular-nums" data-sound-price>
+                + lip sync {withPrice ? `${credits.toLocaleString('en-US')} credits` : swapShortCredits(credits)}
+                {audioSeconds !== undefined ? ` (${Math.ceil(lipsyncSeconds(audioSeconds, clipSeconds)! - 1e-6)} s)` : ''}
+              </span>
+            )}
+          </div>
+          <p className="t-control text-gray-500">After the video, a second step puts the new voice in and moves the lips to it.</p>
+          {cut && (
+            <p className={cn('t-control', HINWEIS_TEXT.ruhig)} data-sound-note="cut">
+              Your voice is {Math.round(audioSeconds!)} s, the clip {Math.round(clipSeconds!)} s. The voice is cut to the clip.
+            </p>
+          )}
+          <details className="t-control text-gray-500">
+            <summary className="cursor-pointer select-none">More</summary>
+            <div className="mt-1.5">
+              <Segmented
+                size="sm"
+                layoutId={`lipsync-model-${intent}`}
+                ariaLabel="Lip sync model"
+                value={LIPSYNC_STEP_MODELS.includes(lipModel) ? lipModel : LIPSYNC_STEP_DEFAULT}
+                onChange={(v) => setLipModel(v)}
+                options={LIPSYNC_STEP_MODELS.map((m) => ({ value: m, label: m === 'latentsync' ? 'LatentSync (recommended)' : 'Lipsync-2' }))}
+              />
+            </div>
+          </details>
+        </div>
+      )}
     </div>
   )
 }
@@ -1763,6 +1894,8 @@ export function SwapControls() {
   const setOpModel = useCreateStore((s) => s.setCloudOpModel)
   const isGenerating = useCreateStore((s) => s.isGenerating)
   const frame = useCreateStore((s) => s.swapFrame)
+  // New voice with lips: its step joins the price on the slider.
+  const lipsyncShown = useCreateStore((s) => (s.sound === 'lipsync' ? s.lipsyncCredits : null))
   const model = createRunModel('swap_character', { image: '', video: '', op: opModel })
   // SCAIL 2 and Kling: the first frame first, then the video (SwapFrameSteps).
   const twoStep = swapUsesFrame(SWAP_INTENT, model)
@@ -1916,7 +2049,10 @@ export function SwapControls() {
         photos={swapBilledPhotos(model, figures.length)}
         disabled={isGenerating}
         frameCredits={frameCredits}
+        lipsyncCredits={lipsyncShown}
       />
+      <SoundControls intent={SWAP_INTENT} people={figures.length}
+        clipSeconds={soundClipSeconds(SWAP_INTENT, model, swapSeconds, videoSeconds)} />
       {swapNeedsConsent(model) && (
         // A real person is swapped for a photo: the customer confirms rights
         // and consent first (the server asks too, for the frame step as for

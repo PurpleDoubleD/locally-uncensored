@@ -344,7 +344,7 @@ export const SWAP_CONSENT_MODELS: readonly string[] = [SWAP_MAIN_MODEL, SWAP_KLI
 const ALWAYS_CONSENT = [SWAP_OPENJUTSU_MODEL, SWAP_LONG_MODEL]
 
 /** The steps of the two step swap, as the run names them to the server. */
-export type SwapStep = 'frame' | 'video'
+export type SwapStep = 'frame' | 'video' | 'lipsync'
 
 /** Does the server ask for the tick on this run? SCAIL 2 and Kling also run in
  *  Motion Control (animate), there without. In Swap yes: SCAIL 2 in mode

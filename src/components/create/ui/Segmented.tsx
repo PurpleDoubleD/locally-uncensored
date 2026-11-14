@@ -8,6 +8,8 @@ export interface SegOption<T extends string> {
   label?: string
   icon?: LucideIcon
   title?: string
+  /** Stands there but cannot be picked right now; `title` says why. */
+  disabled?: boolean
 }
 
 interface Props<T extends string> {
@@ -25,8 +27,9 @@ export function Segmented<T extends string>({ options, value, onChange, size = '
   const iconSize = size === 'sm' ? 13 : 15
 
   const move = (dir: -1 | 1) => {
-    const i = options.findIndex((o) => o.value === value)
-    const next = options[i + dir]
+    let i = options.findIndex((o) => o.value === value) + dir
+    while (options[i]?.disabled) i += dir
+    const next = options[i]
     if (next) onChange(next.value)
   }
 
@@ -40,9 +43,11 @@ export function Segmented<T extends string>({ options, value, onChange, size = '
             key={o.value}
             role="radio"
             aria-checked={selected}
+            disabled={o.disabled}
+            aria-disabled={o.disabled || undefined}
             aria-label={o.label || o.title}
             title={o.title || o.label}
-            onClick={() => onChange(o.value)}
+            onClick={() => { if (!o.disabled) onChange(o.value) }}
             onKeyDown={(e) => {
               if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') { e.preventDefault(); move(-1) }
               if (e.key === 'ArrowRight' || e.key === 'ArrowDown') { e.preventDefault(); move(1) }
@@ -51,6 +56,7 @@ export function Segmented<T extends string>({ options, value, onChange, size = '
               'relative t-control inline-flex items-center justify-center gap-1.5 px-2.5 rounded-[6px] transition-colors',
               h,
               selected ? 'text-white' : 'text-gray-500 hover:text-gray-300',
+              o.disabled && 'cursor-not-allowed opacity-45 hover:text-gray-500',
             )}
           >
             {selected && (

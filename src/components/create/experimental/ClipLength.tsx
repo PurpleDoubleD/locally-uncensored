@@ -12,7 +12,7 @@ import {
 // same seconds the Create button and the server count (swapPricedSeconds).
 
 export function ClipLength({
-  model, options, videoSeconds, chosen, onChange, photos = 0, span, disabled = false, frameCredits = null,
+  model, options, videoSeconds, chosen, onChange, photos = 0, span, disabled = false, frameCredits = null, lipsyncCredits = null,
 }: {
   model: string
   options: Record<string, unknown>
@@ -31,6 +31,9 @@ export function ClipLength({
    *  total here reads "frame + video", the Create button names the video
    *  only. */
   frameCredits?: number | null
+  /** New voice, lips in sync (14.11.2026): the second step costs extra and
+   *  joins the total ("frame + video + lip sync"). */
+  lipsyncCredits?: number | null
 }) {
   const own = swapClipLimits(model)
   const frameModel = SWAP_FRAME_MODELS.includes(model)
@@ -46,7 +49,8 @@ export function ClipLength({
   const video = videoSeconds ? (frameModel ? swapWholeSeconds(model, null, videoSeconds) : Math.floor(videoSeconds)) : undefined
   const perSecond = swapCreditsPerSecond(model, options)
   const videoCredits = swapClipCredits(model, options, videoSeconds ? swapPricedSeconds(model, chosen, videoSeconds) : Math.min(value, own.max), photos)
-  const total = videoCredits == null ? null : videoCredits + (frameCredits ?? 0)
+  const total = videoCredits == null ? null : videoCredits + (frameCredits ?? 0) + (lipsyncCredits ?? 0)
+  const parts = [frameCredits != null && 'frame', 'video', lipsyncCredits != null && 'lip sync'].filter(Boolean).join(' + ')
   const name = modelLabel(model)
   const at = (v: number) => (max > min ? Math.min(100, Math.max(0, ((v - min) / (max - min)) * 100)) : 0)
   const pos = at(value)
@@ -63,8 +67,8 @@ export function ClipLength({
         {total != null && perSecond != null && (
           <span className="text-right" data-clip-price>
             <span className="t-mono text-gray-200">{total.toLocaleString('en-US')}</span>
-            {frameCredits != null
-              ? <span className="t-control text-gray-500"> credits · frame + video</span>
+            {frameCredits != null || lipsyncCredits != null
+              ? <span className="t-control text-gray-500"> credits · {parts}</span>
               : <span className="t-control text-gray-500"> credits · {perSecond.toLocaleString('en-US')}/s</span>}
           </span>
         )}
@@ -112,9 +116,10 @@ export function ClipLength({
           Your video is {video} s. {name} needs at least {own.min} s.
         </p>
       )}
-      {frameCredits != null && videoCredits != null && perSecond != null && (
+      {(frameCredits != null || lipsyncCredits != null) && videoCredits != null && perSecond != null && (
         <p className="mt-0.5 text-right t-control text-gray-500 tabular-nums" data-clip-split>
-          First frame {frameCredits.toLocaleString('en-US')} · video {videoCredits.toLocaleString('en-US')} ({perSecond.toLocaleString('en-US')}/s)
+          {frameCredits != null && `First frame ${frameCredits.toLocaleString('en-US')} · `}video {videoCredits.toLocaleString('en-US')} ({perSecond.toLocaleString('en-US')}/s)
+          {lipsyncCredits != null && ` · lip sync ${lipsyncCredits.toLocaleString('en-US')}`}
         </p>
       )}
       {value < own.billedMin && (

@@ -19,6 +19,7 @@ import { STUDIO_MODELS } from '../../../lib/render/studio-contract'
 import { swapBilledPhotos, swapPricedSeconds, swapShortCredits } from '../../../lib/render/swap'
 import { swapReady } from '../../../lib/create/swap-run'
 import { swapConfirmedFrame } from '../../../lib/create/swap-frame'
+import { soundApplies, soundInputError } from '../../../lib/render/sound'
 import { effectiveVideoDurations, snapToVideoDuration } from '../../../lib/render/video-duration'
 import { mediaSeconds, useStudioPrice } from './useStudioPrice'
 import { getJob } from '../../../api/cloud/jobs'
@@ -270,6 +271,14 @@ export function Composer({ onOpenAdvanced, onOpenWorkflows }: Props) {
   // Dieselbe Zahl wie im Zaehler: nach einem 409 steht im Speicher der Preis
   // des Servers, und die Deckungspruefung muss ihn benutzen.
   const cloudStudioCredits = useCreateStore((s) => s.cloudStudioCredits)
+  // New voice with lips (14.11.2026): the second step belongs to the price of
+  // this start; button and cover check count it (lib/render/sound.ts).
+  const sound = useCreateStore((s) => s.sound)
+  const soundOn = soundApplies(intent, backend) ? sound : undefined
+  const lipsyncOn = soundOn === 'lipsync'
+  const lipsyncExtra = useCreateStore((s) => (lipsyncOn ? s.lipsyncCredits ?? 0 : 0))
+  const lipsyncModel = useCreateStore((s) => s.lipsyncModel)
+  const soundProblem = soundInputError(soundOn, swap ? swapFigures.length : 1, backend, !!audioInput || !!voiceFromJob, lipsyncModel)
   const costFallback = quota?.costs[runKind === 'audio' ? 'image' : runKind] ?? 0
   // The exact rule the meter chip renders, so the button can never invite a run
   // the chip is already refusing. Credits alone were not enough: a user out of
@@ -287,7 +296,7 @@ export function Composer({ onOpenAdvanced, onOpenWorkflows }: Props) {
           ? (studioPrice?.credits ?? costFallback)
           : lengthRate
             ? (cloudStudioCredits ?? lengthShown ?? costFallback)
-            : runCredits(intentKind, intentOp, runModel, runSeconds, costFallback, targetResolution)),
+            : runCredits(intentKind, intentOp, runModel, runSeconds, costFallback, targetResolution)) + lipsyncExtra,
         runKind,
         intentOp,
       ).kind === 'ok')
@@ -386,6 +395,7 @@ export function Composer({ onOpenAdvanced, onOpenWorkflows }: Props) {
     (!meta.needsSource || hasStart) &&
     (!needsMask || !!mask) &&
     specialReady &&
+    !soundProblem &&
     upscaleReady &&
     creditsOk &&
     !installing
@@ -622,7 +632,12 @@ export function Composer({ onOpenAdvanced, onOpenWorkflows }: Props) {
                 <Button variant="primary" size="lg" icon={Sparkles} disabled={!canGenerate} onClick={guardedGenerate}>
                   {/* Swap Character names its price on the button (the web's
                       CreateButton): a paid video run, priced by its length. */}
-                  {swap && backend === 'cloud' && priceSeconds !== undefined && studioPrice ? `Create · ${swapShortCredits(studioPrice.credits)}` : 'Create'}
+                  {/* With a new voice the lip sync step is in the figure too. */}
+                  {swap && backend === 'cloud' && priceSeconds !== undefined && studioPrice
+                    ? `Create · ${swapShortCredits(studioPrice.credits + lipsyncExtra)}`
+                    : lipsyncOn && lipsyncExtra > 0 && (studioPrice?.credits ?? cloudStudioCredits ?? lengthShown) != null
+                      ? `Create · ${swapShortCredits((studioPrice?.credits ?? cloudStudioCredits ?? lengthShown ?? 0) + lipsyncExtra)}`
+                      : 'Create'}
                 </Button>
               </span>
             )}

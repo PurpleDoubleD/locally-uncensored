@@ -332,3 +332,87 @@ describe('the Swap Stage', () => {
     expect(screen.getByText('3 new people')).toBeTruthy()
   })
 })
+
+describe('Sound in the Swap and Motion panel (14.11.2026)', () => {
+  const VOICE = { name: 'voice.mp3', url: 'blob:a', blob: new Blob(['a'], { type: 'audio/mpeg' }) }
+  const sound = () => screen.getByRole('radiogroup', { name: 'Sound' })
+  const option = (name: string) => screen.getByRole('radio', { name }) as HTMLButtonElement
+  beforeEach(() => {
+    // LatentSync as the server lists it: by the length of the voice, 3,000 per second, at least 3 s.
+    useCloudCatalogStore.setState({
+      models: neuerServer().map((m) => (m.id === 'latentsync'
+        ? { ...m, credits: { base: 9000, length: { basis: 'audio' as const, block: 1, per_block: 3000, min: 3, max: 300, quote: 10 } } }
+        : m)),
+    })
+    useCreateStore.setState({ sound: 'original', lipsyncModel: 'latentsync', lipsyncCredits: null, audioInput: null, voiceFromJob: null } as never)
+  })
+
+  it('three choices after the length, the original sound by default', () => {
+    open()
+    expect([...sound().querySelectorAll('[role=radio]')].map((r) => r.textContent)).toEqual(['Original sound', 'No sound', 'New voice, lips in sync'])
+    expect(option('Original sound').getAttribute('aria-checked')).toBe('true')
+    const length = panel().querySelector('[data-clip-length]')!
+    expect(length.compareDocumentPosition(panel().querySelector('[data-sound-controls]')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    fireEvent.click(option('No sound'))
+    expect(useCreateStore.getState().sound).toBe('none')
+  })
+
+  it('with two people lip sync is greyed out, with the note', () => {
+    useCreateStore.setState({ swapFigures: [{ image: null, role: '' }, { image: null, role: '' }] })
+    open()
+    expect(option('New voice, lips in sync').disabled).toBe(true)
+    expect(option('New voice, lips in sync').title).toBe('Lip sync works with one person')
+    expect(document.querySelector('[data-sound-note=lipsync-blocked]')?.textContent).toBe('Lip sync works with one person')
+    fireEvent.click(option('New voice, lips in sync'))
+    expect(useCreateStore.getState().sound).toBe('original')
+  })
+
+  it('a server without the lip sync models: greyed out, not broken', () => {
+    useCloudCatalogStore.setState({ models: neuerServer().filter((m) => m.id !== 'latentsync') })
+    open()
+    expect(option('New voice, lips in sync').disabled).toBe(true)
+    expect(document.querySelector('[data-sound-note=lipsync-blocked]')?.textContent).toBe('Lip sync is not available on this LU Cloud')
+  })
+
+  it('lip sync: the voice chip, swap and lip sync together on the slider and on Create; a longer voice is cut', async () => {
+    videoLength.seconds = 9
+    const figures = [{ image: photo, role: '', mark: { x: 0.4, y: 0.4 } }]
+    useCreateStore.setState({ videoInput: clip, swapFrame: FRAME, swapFigures: figures, swapSeconds: 6, swapConsent: true } as never)
+    const { rerender } = open()
+    fireEvent.click(option('New voice, lips in sync'))
+    expect(document.querySelector('[data-sound-lipsync]')).toBeTruthy()
+    expect(screen.getByText(/a second step puts the new voice in/)).toBeTruthy()
+    expect(screen.getByRole('button', { name: /Add voice/ })).toBeTruthy()
+    useCreateStore.setState({ audioInput: VOICE })
+    await act(async () => {})
+    rerender(<Composer onOpenAdvanced={() => {}} onOpenWorkflows={() => {}} />)
+    await act(async () => {})
+    // 9 s voice, 6 s clip: LatentSync bills 6 s = 18,000.
+    expect(useCreateStore.getState().lipsyncCredits).toBe(18000)
+    expect(document.querySelector('[data-sound-note=cut]')?.textContent).toBe('Your voice is 9 s, the clip 6 s. The voice is cut to the clip.')
+    expect(document.querySelector('[data-sound-price]')?.textContent).toBe('+ lip sync 18k (6 s)')
+    const box = document.querySelector('[data-clip-length]')!
+    // 6 s SCAIL 2 720p (48,000) + first frame (14,000) + lip sync (18,000).
+    expect(box.querySelector('[data-clip-price]')?.textContent).toBe('80,000 credits · frame + video + lip sync')
+    expect(box.querySelector('[data-clip-split]')?.textContent).toBe('First frame 14,000 · video 48,000 (8,000/s) · lip sync 18,000')
+    // Create: video + lip sync, once the first frame is confirmed.
+    const { swapKeyOf } = await import('../../../../lib/create/swap-frame')
+    useCreateStore.setState({ swapBuilt: { jobId: 'b', url: 'x', key: swapKeyOf('blob:dance', figures), confirmed: true } })
+    await act(async () => {})
+    await waitFor(() => expect(create().disabled).toBe(false))
+    expect(create().textContent).toMatch(/Create · 66k/)
+    // Without a voice no start.
+    useCreateStore.setState({ audioInput: null })
+    await act(async () => {})
+    expect(create().disabled).toBe(true)
+  })
+
+  it('Motion: the sound choice on the cloud only; the local lanes do not show it', () => {
+    useCreateStore.getState().setIntent('motion')
+    const { rerender } = open()
+    expect(document.querySelector('[data-sound-controls=motion]')).toBeTruthy()
+    useCreateStore.setState({ backend: 'local' })
+    rerender(<Composer onOpenAdvanced={() => {}} onOpenWorkflows={() => {}} />)
+    expect(document.querySelector('[data-sound-controls]')).toBeNull()
+  })
+})
