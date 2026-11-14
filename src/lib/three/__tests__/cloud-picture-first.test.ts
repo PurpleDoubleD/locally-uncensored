@@ -3,7 +3,7 @@
 // stopped second run keeps the picture.
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import schemas from '../../render/provider-schemas.json'
-import { STUDIO_MODELS, type Schema } from '../../render/studio-contract'
+import { STUDIO_MODELS, STUDIO_MODELS_WITH_RETIRED, type Schema } from '../../render/studio-contract'
 import { useCloudCatalogStore } from '../../../stores/cloudCatalogStore'
 import { checkPromptSafety } from '../../render/safety'
 import { installContentPolicyCap } from '../../content-policy-cap'
@@ -21,7 +21,7 @@ const OPEN = { id: 'z-image', label: 'Z-Image Base', kind: 'image', adult: true,
 const CAPPED = { id: 'qwen-image-2.1', label: 'Qwen Image 2.1', kind: 'image', quote_required: true, tier: 'best', weights: 'open' }
 
 beforeAll(() => {
-  undo = installThreeDStudio(STUDIO_MODELS, schemas as Record<string, Schema>)
+  undo = installThreeDStudio(STUDIO_MODELS, schemas as Record<string, Schema>, STUDIO_MODELS_WITH_RETIRED)
   catalogBefore = useCloudCatalogStore.getState().models
 })
 afterAll(() => {

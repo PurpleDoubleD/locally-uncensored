@@ -4,7 +4,7 @@
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import schemas from '../../../../lib/render/provider-schemas.json'
-import { STUDIO_MODELS, type Schema } from '../../../../lib/render/studio-contract'
+import { STUDIO_MODELS, STUDIO_MODELS_WITH_RETIRED, type Schema } from '../../../../lib/render/studio-contract'
 import { useCloudCatalogStore } from '../../../../stores/cloudCatalogStore'
 import { useCreateStore } from '../../../../stores/createStore'
 import { installContentPolicyCap } from '../../../../lib/content-policy-cap'
@@ -22,7 +22,7 @@ let undo: () => void = () => {}
 let catalogBefore: ReturnType<typeof useCloudCatalogStore.getState>['models']
 
 beforeAll(() => {
-  undo = installThreeDStudio(STUDIO_MODELS, schemas as Record<string, Schema>)
+  undo = installThreeDStudio(STUDIO_MODELS, schemas as Record<string, Schema>, STUDIO_MODELS_WITH_RETIRED)
   catalogBefore = useCloudCatalogStore.getState().models
 })
 afterAll(() => {

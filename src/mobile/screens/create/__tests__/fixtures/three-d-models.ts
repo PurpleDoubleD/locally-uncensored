@@ -61,12 +61,27 @@ export function threeDCatalogEntries(): { id: string; label: string; kind: '3d';
   return Object.entries(THREE_D_STUDIO).map(([id, m]) => ({ id, label: m.label, kind: '3d', adult: m.adult, ops: ['studio'], quote_required: true, tier: m.tier, weights: m.weights }))
 }
 
-/** Put the three into the registry objects the app reads. Returns the undo. */
-export function installThreeDStudio(models: Record<string, StudioModel>, schemas: Record<string, Schema>): () => void {
-  Object.assign(models, THREE_D_STUDIO)
+/** Put the three into the registry objects the app reads. Returns the undo.
+ *  `withRetired` is STUDIO_MODELS_WITH_RETIRED: since the catalogue sync of
+ *  3.1.0 it is an object of its own next to STUDIO_MODELS, and studioSchema
+ *  reads the endpoint from it. The undo puts back what stood there before,
+ *  because some of the three ids are real catalogue entries now. */
+export function installThreeDStudio(models: Record<string, StudioModel>, schemas: Record<string, Schema>, withRetired?: Record<string, StudioModel>): () => void {
+  const targets = withRetired && withRetired !== models ? [models, withRetired] : [models]
+  const before = targets.map((t) => Object.fromEntries(Object.keys(THREE_D_STUDIO).map((id) => [id, t[id]])))
+  const schemasBefore = Object.fromEntries(Object.keys(THREE_D_SCHEMAS).map((path) => [path, schemas[path]]))
+  for (const t of targets) Object.assign(t, THREE_D_STUDIO)
   Object.assign(schemas, THREE_D_SCHEMAS)
   return () => {
-    for (const id of Object.keys(THREE_D_STUDIO)) delete models[id]
-    for (const path of Object.keys(THREE_D_SCHEMAS)) delete schemas[path]
+    targets.forEach((t, i) => {
+      for (const [id, m] of Object.entries(before[i])) {
+        if (m) t[id] = m
+        else delete t[id]
+      }
+    })
+    for (const [path, sc] of Object.entries(schemasBefore)) {
+      if (sc) schemas[path] = sc
+      else delete schemas[path]
+    }
   }
 }
