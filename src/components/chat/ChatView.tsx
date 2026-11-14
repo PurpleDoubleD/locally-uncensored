@@ -30,7 +30,6 @@ import { PluginsDropdown } from './PluginsDropdown'
 import { ModelSelector } from '../models/ModelSelector'
 import { useConversationModelHint } from './ConversationModelNote'
 import { GoalBar } from './GoalBar'
-import { PlanBar } from './PlanBar'
 import { LoopBar } from './LoopBar'
 import { GroupCostHint } from './GroupCostHint'
 import { GroupRoundBar } from './GroupRoundBar'
@@ -463,19 +462,9 @@ export function ChatView() {
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.25, ease: 'easeOut' }}
               >
-                  {/* The plan, for plain chat and for Agent alike. It belongs
-                      above the transcript, not at the prompt box: the Chat
-                      surface has no right-hand column to hand it to, and a plan
-                      is what the run is going to DO, so it reads before the
-                      output, not after it. Collapsed by default so it costs one
-                      line, and it renders nothing at all while there is no plan,
-                      so the empty case costs zero.
-                      (Die uebrigen Sitzungsanzeigen sind mit D-S18 unter das
-                      Transkript gezogen; der Plan bleibt, weil
-                      `the-prompt-window-is-the-prompt-window.test.ts` genau
-                      diese Reihenfolge festnagelt.) */}
-                  <PlanBar />
-
+                  {/* The plan is no longer a band up here: since CA
+                      (13.11.2026) it is pinned under the newest message,
+                      inside MessageList (PlanBar.tsx says why). */}
                   {/* Der Platz, an den die Zeilen aus dem Composer gezogen
                       sind (21.09.2026: „NICHTS im prompt fenster!").
                       Oben im Verlauf, ruhig, mit x, und ausdruecklich NICHT am
@@ -497,6 +486,7 @@ export function ChatView() {
                       pendingApprovalId={pendingApproval?.id ?? null}
                       onApprove={approveToolCall}
                       onReject={rejectToolCall}
+                      onContinuePlan={(text) => sendMessage(text)}
                     />
                   )}
 
@@ -645,9 +635,9 @@ export function ChatView() {
                       Regel dieses Hauses. Diese Leiste ist ein Geschwister der
                       Box, kein Inhalt darin.
 
-                      Der PlanBar bleibt oben, denn `the-prompt-window-is-the-prompt-
-                      window.test.ts` verlangt Plan vor Transkript, und er
-                      rendert ohnehin `null`, solange es keinen Plan gibt. */}
+                      Der Plan steht seit CA (13.11.2026) nicht mehr hier oben,
+                      sondern angeheftet unter der neuesten Nachricht im
+                      Transkript (MessageList, PlanBar.tsx). */}
                   {/* Auf der Breite der Promptbox, nicht auf der des ganzen
                       Bereichs. Gemessen am Windows-Bau (1296x808): die Leiste
                       war 980,9 px breit gegen 792,3 px Promptbox, ragte also

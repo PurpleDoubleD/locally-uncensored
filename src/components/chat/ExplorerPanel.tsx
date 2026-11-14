@@ -63,11 +63,9 @@ import {
   type ExplorerNode,
   type FsList,
 } from '../../lib/explorer-tree'
-import { PlanBar } from './PlanBar'
 import { PlanApprovalBar } from './PlanApprovalBar'
 import { FilePreview } from './FilePreview'
 import { useChatStore } from '../../stores/chatStore'
-import { useTodoStore } from '../../stores/todoStore'
 import { HINWEIS_TEXT } from '../../lib/hinweis'
 import { workspacePickRefusedMessage } from '../../lib/workspace-rejected'
 
@@ -148,10 +146,9 @@ export function ExplorerPanel({ onApprovePlan }: Props) {
   const planWaiting = useCodexStore((s) =>
     activeConversationId ? !!s.planApprovalByConversation[activeConversationId] : false,
   )
-  const planSteps = useTodoStore((s) =>
-    activeConversationId ? (s.byConversation[activeConversationId]?.length ?? 0) : 0,
-  )
-  const planHasSomething = planWaiting || planSteps > 0
+  // The run's progress list moved into the transcript (PlanBar.tsx, CA
+  // 13.11.2026). What stays in this column is the approval card.
+  const planHasSomething = planWaiting
 
   const load = async (dir: string) => {
     setBusy((b) => (b.includes(dir) ? b : [...b, dir]))
@@ -300,7 +297,7 @@ export function ExplorerPanel({ onApprovePlan }: Props) {
         {planHasSomething && (
           <button
             onClick={() => setExplorerCollapsed(false)}
-            title={planWaiting ? 'A plan is waiting for your approval' : 'Show the plan'}
+            title="A plan is waiting for your approval"
             data-testid="explorer-plan-waiting"
             className={`mt-1 p-1 rounded transition-colors hover:bg-gray-100 dark:hover:bg-white/5 ${
               planWaiting ? 'text-lu-accent' : 'text-gray-400 dark:text-gray-500'
@@ -476,12 +473,11 @@ export function ExplorerPanel({ onApprovePlan }: Props) {
         <FilePreview key={selected.path} node={selected} root={root} onClose={() => setSelected(null)} />
       )}
 
-      {/* Bottom of the column, and the only place either of these renders.
-          `shrink-0` so a long file tree can never squeeze the plan, and with
+      {/* Bottom of the column, the only place the approval card renders.
+          `shrink-0` so a long file tree can never squeeze the card, and with
           it the Approve-and-run button, down to nothing. */}
       <div className="shrink-0 border-t border-gray-200 dark:border-white/[0.04]">
         <PlanApprovalBar onApprove={onApprovePlan} />
-        <PlanBar variant="panel" />
       </div>
     </aside>
   )

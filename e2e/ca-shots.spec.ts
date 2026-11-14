@@ -144,3 +144,41 @@ test.describe('CA shots', () => {
     })
   }
 })
+
+const PLAN_RUN: Turn[] = [
+  {
+    text: 'Here is the plan.',
+    toolCalls: [{ name: 'todo_write', args: { todos: [
+      { content: 'Read src/math.ts', status: 'completed' },
+      { content: 'Implement median()', status: 'in_progress' },
+      { content: 'Run the tests', status: 'pending' },
+      { content: 'Summarise the change', status: 'pending' },
+    ] } }],
+  },
+  { text: 'Reading the file.', toolCalls: [{ name: 'file_read', args: { path: 'src/math.ts' } }] },
+  { text: 'I stopped here: `median()` still needs its even-length case.' },
+]
+
+test.describe('CA shots: pinned plan', () => {
+  test.skip(!OUT, 'set LU_CA_SHOTS to a folder')
+  for (const theme of ['dark', 'light'] as const) {
+    for (const width of [1280, 375]) {
+      test(`plan ${theme} ${width}`, async ({ page }) => {
+        await boot(page, PLAN_RUN, width, theme, true)
+        // The Code tab: the plan used to sit in its right column.
+        if (width >= 1024) await page.getByRole('button', { name: 'Code', exact: true }).click()
+        else {
+          await page.getByRole('banner').getByRole('button', { name: 'Main navigation' }).click().catch(() => {})
+          await page.getByRole('button', { name: 'Code', exact: true }).first().click().catch(() => {})
+        }
+        await openNewChat(page)
+        await send(page, 'median() in src/math.ts is missing, implement it and run the tests')
+        await expect(page.getByTestId('plan-pinned')).toBeVisible({ timeout: 30_000 })
+        await shot(page, `plan-${theme}-${width}-1-running`)
+        await page.evaluate(() => (window as unknown as { __E2E_RELEASE_TOOLS__?: () => void }).__E2E_RELEASE_TOOLS__?.())
+        await expect(page.getByTestId('plan-run-stopped')).toBeVisible({ timeout: 60_000 })
+        await shot(page, `plan-${theme}-${width}-2-ended`)
+      })
+    }
+  }
+})

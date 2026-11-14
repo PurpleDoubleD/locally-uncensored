@@ -82,7 +82,7 @@ test('nach dem Lauf sagt die Planleiste, dass sie stehengeblieben ist', async ({
   await box.type('mach vier Schritte')
   await page.keyboard.press('Enter')
 
-  const band = page.getByTestId('plan-header')
+  const band = page.getByTestId('plan-pinned')
   await expect(band).toBeVisible({ timeout: 30_000 })
 
   // Der Lauf muss WIRKLICH vorbei sein, sonst prueft der Rest nichts.
@@ -92,8 +92,8 @@ test('nach dem Lauf sagt die Planleiste, dass sie stehengeblieben ist', async ({
 
   // Und der Kreisel steht. Gemessen war er der zweite Teil derselben Luege:
   // aufgeklappt drehte er sich nach dem Ende des Laufs unbegrenzt weiter.
-  await band.getByRole('button').first().click()
-  await expect(band.getByText('Schritt vier')).toBeVisible()
+  // Die Liste ist offen, seit sie unter der neuesten Nachricht haengt (CA).
+  await expect(band.getByTestId('plan-steps').getByText('Schritt vier')).toBeVisible()
   const drehend = await band.locator('.animate-spin').count()
   expect(drehend).toBe(0)
 })
@@ -122,7 +122,7 @@ test('waehrend der Lauf laeuft, sagt sie nichts von einem Ende', async ({ page }
   await box.type('lauf lange')
   await page.keyboard.press('Enter')
 
-  const band = page.getByTestId('plan-header')
+  const band = page.getByTestId('plan-pinned')
   await expect(band).toBeVisible({ timeout: 30_000 })
 
   // The tool call has reached the bridge and is waiting: from here the run

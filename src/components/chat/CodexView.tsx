@@ -1,4 +1,5 @@
 import { registerChatSender } from '../../lib/remote-chat-senders'
+import { PlanBar } from './PlanBar'
 import { composeFileMessage } from '../../lib/chat-files'
 import { useCodex } from '../../hooks/useCodex'
 import { RequestUsageLine } from './RequestUsageLine'
@@ -787,6 +788,9 @@ export function CodexView() {
                   message={messages[messages.length - 1]?.role === 'assistant' ? messages[messages.length - 1] : undefined}
                 />
               )}
+              {/* The run's plan, pinned under the newest message (PlanBar.tsx).
+                  It used to be the footer of the Explorer column. */}
+              {!readOnly && <PlanBar conversationId={activeConversationId} onContinue={(text) => sendInstruction(text, { shownMode })} />}
             </div>
           )}
         </div>

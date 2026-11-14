@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { PlanBar } from './PlanBar'
 import type { CSSProperties } from 'react'
 import { useChatStore } from '../../stores/chatStore'
 import { useSettingsStore } from '../../stores/settingsStore'
@@ -81,9 +82,11 @@ interface Props {
   pendingApprovalId?: string | null
   onApprove?: () => void
   onReject?: () => void
+  /** Sends a message in this chat: the pinned plan's "Continue". */
+  onContinuePlan?: (text: string) => void
 }
 
-export function MessageList({ isGenerating, isThisChatGenerating, isLoadingModel, onRegenerate, onRegenerateSpeaker, onEdit, pendingApprovalId, onApprove, onReject }: Props) {
+export function MessageList({ isGenerating, isThisChatGenerating, isLoadingModel, onRegenerate, onRegenerateSpeaker, onEdit, pendingApprovalId, onApprove, onReject, onContinuePlan }: Props) {
   const showTyping = isThisChatGenerating ?? isGenerating
   // The question of the first use of computer control is open in this conversation.
   const chatAsked = useComputerStore((s) => !!s.chatAsk && !s.chatAsk.voice && (s.chatAsk.conversationId === null || s.chatAsk.conversationId === useChatStore.getState().activeConversationId))
@@ -365,6 +368,8 @@ export function MessageList({ isGenerating, isThisChatGenerating, isLoadingModel
             message={lastMessage}
           />
         )}
+        {/* The run's plan, pinned under the newest message (PlanBar.tsx). */}
+        {!readOnly && <PlanBar conversationId={conversation.id} onContinue={onContinuePlan} />}
       </div>
     </div>
     <CompactLayerRail view={layers} />

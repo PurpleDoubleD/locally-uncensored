@@ -1,28 +1,39 @@
-// The model's own plan for the current task.
+// The model's own plan for the current task, pinned under the newest message.
 //
 // On a long run the transcript scrolls away and the user is left guessing which
 // step the agent is on and whether it still remembers the goal. The agent writes
 // this list through `todo_write` and keeps it current, so progress is one glance
 // instead of a scroll back through twenty tool calls.
 //
-// Two homes, and neither one touches the prompt window. The owner has asked for
-// that five times now, last on 2026-08-22: the prompt window is the prompt
-// window, nothing about plans may be visible there, on any surface, in any
-// state. So there is no composer variant to reach for:
-//   - 'header' (LU tab, plain chat and Agent alike): a status band under the
-//     header row and above the transcript, next to the other standing status
-//     controls. Collapsed to the current step by default, because a ten-item
-//     list would push the conversation down.
-//   - 'panel' (Code tab): the BOTTOM section of the Explorer column, full
-//     column width and expanded by default. Bottom because the owner read the
-//     column top down on 2026-08-22 and the files are what he wants first;
-//     the plan is the footer of that column, not its headline.
-// Expanded state is per session, not persisted, because a plan is short-lived.
+// Where it lives (CA, 13.11.2026, David: "wie in der Claude-Code-Desktop-App"):
+// at the END of the transcript, right under the newest message, in both the
+// LU tab (Chat and Agent, MessageList) and the Code tab (CodexView). It is
+// `sticky bottom-0` inside the transcript's own scroll box, so while the run
+// writes it moves down with the conversation, and a reader who scrolls up still
+// has it at the bottom edge of the transcript. Before this it sat in two other
+// homes: a band above the transcript (LU tab) and the bottom of the Explorer
+// column (Code tab). The right column no longer shows it; the plan APPROVAL
+// card stays there (PlanApprovalBar), because that is a question with its own
+// button, not progress.
+//
+// It is still never inside the prompt window. The owner asked for that five
+// times (last 2026-08-22), and `the-prompt-window-is-the-prompt-window.test.ts`
+// keeps it: the plan is part of the transcript, not of the composer.
+//
+// One row per step: open (empty circle), running (spinner, bold), done (tick,
+// muted and struck through). Exactly one row runs: a model that marks two
+// steps `in_progress` gets the first one shown as running and the other as
+// open, never as done (a typo must not tick off work). The model replaces the
+// whole list on every `todo_write`, so a changed plan replaces this list whole.
+//
+// Collapsible to one line ("3 of 5 done" and the step that runs). When the run
+// is over, a short closing box sits under the list: the plan is done (and
+// whether changes still wait for approval), or the run ended with steps open,
+// with "Continue" and "Clear plan".
 
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import { AlertCircle, CheckCircle2, Circle, ChevronDown, ChevronRight, Loader2, ListTodo, X } from 'lucide-react'
-import { useTodoStore } from '../../stores/todoStore'
-import { useChatStore } from '../../stores/chatStore'
+import { useTodoStore, type TodoItem } from '../../stores/todoStore'
 import { useCodexStore } from '../../stores/codexStore'
 import { useGenerationStore } from '../../stores/generationStore'
 import { useStagedChangesStore } from '../../stores/stagedChangesStore'
@@ -32,7 +43,7 @@ import { isRunStopped } from '../../lib/run-stop'
 import { isActiveCodexStatus } from '../../types/codex'
 import { HINWEIS_TEXT } from '../../lib/hinweis'
 
-/** What the collapsed bar says once the model ticked off every step. Ticking
+/** What the closing box says once the model ticked off every step. Ticking
  *  off a step is not the same as the change being on disk. */
 export function planDoneLabel(pendingChanges: number): string {
   if (pendingChanges <= 0) return 'every step done'
@@ -40,185 +51,181 @@ export function planDoneLabel(pendingChanges: number): string {
 }
 
 /**
- * Was die Leiste sagt, wenn der Lauf vorbei ist und der Plan offen blieb.
+ * Was die Liste sagt, wenn der Lauf vorbei ist und der Plan offen blieb.
  *
  * Gemessen am 03.09.2026 im laufenden Build: ein Lauf endete mit vier
  * Schritten, von denen drei abgehakt waren, und die Leiste stand danach
- * unveraendert auf "PLAN 3/4", mit dem vierten Punkt als Ueberschrift und,
- * aufgeklappt, einem Kreisel, der weiterdrehte. Kein Wort davon, dass nichts
- * mehr laeuft. Genau so hat eine Persona es gemeldet ("blieb stehen").
- *
- * Die Zahl war dabei richtig: der Aufraeum-Steer in `plan-reconcile.ts` hat
- * ein Budget von zwei, und danach endet der Lauf mit offenem Plan. Die
- * Schlusszeile aus `turn-summary.ts` sagt das auch, aber NUR wenn das Modell
- * selbst nichts geschrieben hat. Schreibt es "fertig, alles erledigt", faellt
- * der Hinweis weg, und genau dann ist er am noetigsten. Die Leiste ist die
- * zweite Stelle, an der es stehen kann, und sie steht immer da.
+ * unveraendert auf "PLAN 3/4", mit einem Kreisel, der weiterdrehte. Kein Wort
+ * davon, dass nichts mehr laeuft. Die Schlusszeile aus `turn-summary.ts` sagt
+ * es nur, wenn das Modell selbst nichts geschrieben hat; die Liste sagt es
+ * immer.
  */
 export function planStoppedLabel(done: number, total: number): string {
   const open = total - done
   return `the run ended here, ${done} of ${total} steps done, ${open} still open`
 }
 
-export type PlanBarVariant = 'header' | 'panel'
+export type PlanRowState = 'done' | 'running' | 'open'
 
-interface Props {
-  variant?: PlanBarVariant
+/**
+ * The state each row shows. Exactly one row runs, and only while the run does:
+ * the first `in_progress` one. A second `in_progress` reads as open, never as
+ * done. After the run nothing spins: the step that was running reads as
+ * stopped (`open`, with the quiet tone the caller adds).
+ */
+export function planRowStates(todos: TodoItem[], runActive: boolean): PlanRowState[] {
+  let running = false
+  return todos.map((t) => {
+    if (t.status === 'completed') return 'done'
+    if (t.status === 'in_progress' && runActive && !running) {
+      running = true
+      return 'running'
+    }
+    return 'open'
+  })
 }
 
-export function PlanBar({ variant = 'header' }: Props) {
-  const panel = variant === 'panel'
-  const activeConversationId = useChatStore((s) => s.activeConversationId)
-  const todos = useTodoStore((s) =>
-    activeConversationId ? s.byConversation[activeConversationId] : undefined,
-  )
+/** "3 of 5 done", the collapsed line's count. */
+export function planCountLabel(todos: TodoItem[]): string {
+  const done = todos.filter((t) => t.status === 'completed').length
+  return `${done} of ${todos.length} done`
+}
+
+interface Props {
+  conversationId: string | null | undefined
+  /** Sends a message in this chat; the "Continue" button uses it. */
+  onContinue?: (text: string) => void
+}
+
+export function PlanBar({ conversationId, onContinue }: Props) {
+  const todos = useTodoStore((s) => (conversationId ? s.byConversation[conversationId] : undefined))
   // Ticking off every step is not the same as the work being on disk. In
   // Stage-and-Approve the writes wait in the queue, and Morgan read "every step
   // done" on a run whose six file changes had all been refused (2026-08-11).
-  const pending = useStagedChangesStore((s) =>
-    activeConversationId ? (s.byChat[activeConversationId]?.length ?? 0) : 0,
-  )
+  const pending = useStagedChangesStore((s) => (conversationId ? (s.byChat[conversationId]?.length ?? 0) : 0))
   const clearTodos = useTodoStore((s) => s.clearTodos)
-  // Laeuft ueberhaupt noch etwas auf dieser Konversation. Beide Quellen einzeln
-  // abonniert, damit die Leiste neu zeichnet, wenn der Lauf endet; das Urteil
-  // selbst kommt aus `run-idle.ts`, der einen Stelle, die die zwei Quellen
-  // versoehnt (AS-08). `generating` allein ist die Haelfte, die der Stop des
-  // Coding-Agenten zuerst loescht.
-  const generating = useGenerationStore((s) =>
-    activeConversationId ? s.generating[activeConversationId] === true : false,
-  )
-  const threadStatus = useCodexStore((s) =>
-    activeConversationId ? s.threads[activeConversationId]?.status : undefined,
-  )
+  // Is anything still running in this conversation. Both sources subscribed
+  // on their own so the list redraws when the run ends; the verdict comes from
+  // `run-idle.ts` (AS-08). `generating` alone is the half that the coding
+  // agent's stop clears first.
+  const generating = useGenerationStore((s) => (conversationId ? s.generating[conversationId] === true : false))
+  const threadStatus = useCodexStore((s) => (conversationId ? s.threads[conversationId]?.status : undefined))
   const runActive = isActiveCodexStatus(
-    runStatusFrom(generating, threadStatus, isRunStopped(activeConversationId), isRunQueued(activeConversationId)),
+    runStatusFrom(generating, threadStatus, isRunStopped(conversationId), isRunQueued(conversationId)),
   )
-  const [expanded, setExpanded] = useState(panel)
+  const [collapsed, setCollapsed] = useState(false)
 
-  if (!activeConversationId || !todos || todos.length === 0) return null
+  if (!conversationId || !todos || todos.length === 0) return null
 
+  const states = planRowStates(todos, runActive)
   const done = todos.filter((t) => t.status === 'completed').length
-  const current = todos.find((t) => t.status === 'in_progress')
   const allDone = done === todos.length
-  // Der Lauf ist vorbei und der Plan ist es nicht. Das ist die Aussage, die
-  // vorher nirgends stand.
   const stoppedShort = !allDone && !runActive
-  // Collapsed, the one line that matters is what is happening NOW. With nothing
-  // in progress (plan written but not started, or everything finished) fall back
-  // to the first item that is still open, and only then to the last one.
-  const headline = current ?? todos.find((t) => t.status === 'pending') ?? todos[todos.length - 1]
+  const runningIdx = states.indexOf('running')
+  // Collapsed, the one line that matters is what is happening NOW, else the
+  // first step still open, else the last one.
+  const headline = todos[runningIdx] ?? todos.find((t) => t.status !== 'completed') ?? todos[todos.length - 1]
+  const nextOpen = todos.find((t) => t.status !== 'completed')
 
   return (
-    <div
-      // 'header' sits directly above the transcript, so it rides the SAME
-      // measure column and the same px-3 gutter the bubbles use — a band that
-      // ran the full window width while the answers below it stopped at 760px
-      // read as a second, wider layout stacked on the first. 'panel' is the
-      // Code Explorer column and owns its own width, so it keeps out of this.
-      className={panel ? 'w-full p-1.5' : 'mx-auto w-full max-w-[var(--lu-measure)] px-3 pt-1'}
-      data-testid={panel ? 'plan-panel' : 'plan-header'}
-    >
-      {/* Neutral on purpose (30.09.2026: "dunkel LU design, nicht
-          abheben"). The plan is a footer of the column, it takes the column's
-          own surface and line colour instead of a blue box of its own. */}
-      <div className="w-full rounded-md border border-gray-200 dark:border-white/[0.06] bg-white dark:bg-white/[0.02]">
-        <div className="flex items-center gap-1.5 px-2 py-1">
+    <div className="sticky bottom-0 z-10 px-3 pt-2 pb-1" data-testid="plan-pinned">
+      <div className="rounded-lg lu-elevated overflow-hidden">
+        <div className="flex items-center gap-1.5 px-2.5 py-1.5">
           <button
-            onClick={() => setExpanded((v) => !v)}
-            title={expanded ? 'Collapse the plan' : 'Show every step'}
+            type="button"
+            onClick={() => setCollapsed((v) => !v)}
+            aria-expanded={!collapsed}
+            title={collapsed ? 'Show every step' : 'Collapse the plan'}
             className="flex items-center gap-1.5 min-w-0 flex-1 text-left"
           >
-            {expanded ? (
-              <ChevronDown size={9} className="text-gray-400 dark:text-gray-500 shrink-0" />
+            {collapsed ? (
+              <ChevronRight size={12} className="text-gray-400 dark:text-gray-500 shrink-0" />
             ) : (
-              <ChevronRight size={9} className="text-gray-400 dark:text-gray-500 shrink-0" />
+              <ChevronDown size={12} className="text-gray-400 dark:text-gray-500 shrink-0" />
             )}
-            <ListTodo size={9} className="text-gray-400 dark:text-gray-500 shrink-0" />
-            <span className="text-[0.55rem] uppercase tracking-wider text-gray-500 shrink-0">
-              plan {done}/{todos.length}
+            <ListTodo size={12} className="text-gray-500 dark:text-gray-400 shrink-0" />
+            <span className="t-micro font-medium text-gray-700 dark:text-gray-200 shrink-0" data-testid="plan-count">
+              {planCountLabel(todos)}
             </span>
-            {!expanded && (
-              <span
-                className="flex-1 min-w-0 truncate t-micro text-gray-700 dark:text-gray-300"
-                title={headline.content}
-              >
-                {headline.content}
+            {collapsed && (
+              <span className="flex-1 min-w-0 truncate t-micro text-gray-600 dark:text-gray-300" title={headline.content}>
+                · {headline.content}
               </span>
             )}
           </button>
           <button
-            onClick={() => clearTodos(activeConversationId)}
+            type="button"
+            onClick={() => clearTodos(conversationId)}
             title="Clear the plan"
-            className="flex items-center justify-center w-4 h-4 rounded text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/5 transition-colors shrink-0"
+            aria-label="Clear the plan"
+            className="flex items-center justify-center w-5 h-5 rounded text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/5 transition-colors shrink-0"
           >
-            <X size={10} />
+            <X size={11} />
           </button>
         </div>
 
-        {expanded && (
-          // Capped so a fifteen-step plan cannot push the transcript off
-          // screen, and in the panel so it cannot push the file tree out of
-          // view.
-          <ul className={`px-2 pb-1.5 space-y-0.5 overflow-y-auto ${panel ? 'max-h-48 scrollbar-thin' : 'max-h-40'}`}>
-            {todos.map((t, i) => (
-              <li key={`${i}-${t.content}`} className="flex items-start gap-1.5">
-                {t.status === 'completed' ? (
-                  <CheckCircle2 size={10} className="text-gray-400 dark:text-gray-500 shrink-0 mt-[1px]" />
-                ) : t.status === 'in_progress' ? (
-                  // Ein Kreisel, der sich dreht, behauptet Arbeit. Nach dem Ende
-                  // des Laufs ist das eine Behauptung ueber nichts: gemessen
-                  // drehte er nach dem letzten Wort des Modells unbegrenzt
-                  // weiter. Ohne Lauf steht er still und wird ruhig grau, wie
-                  // die Zeile unten, die dasselbe in Worten sagt. (Hier stand
-                  // Bernstein. Ein angehaltener Schritt ist kein halber Fehler,
-                  // siehe `lib/hinweis.ts`.)
-                  <Loader2
-                    size={10}
-                    className={`shrink-0 mt-[1px] ${runActive ? 'text-gray-600 dark:text-gray-300 animate-spin' : HINWEIS_TEXT.ruhig}`}
-                  />
-                ) : (
-                  <Circle size={10} className="text-gray-300 dark:text-gray-700 shrink-0 mt-[1px]" />
-                )}
-                <span
-                  className={`t-micro leading-snug ${
-                    t.status === 'completed'
-                      ? 'text-gray-500 line-through'
-                      : t.status === 'in_progress'
-                        ? 'text-gray-800 dark:text-gray-100 font-medium'
-                        : 'text-gray-600 dark:text-gray-400'
-                  }`}
-                >
-                  {t.content}
-                </span>
-              </li>
-            ))}
+        {!collapsed && (
+          // Capped so a fifteen-step plan cannot cover the transcript it pins to.
+          <ul className="px-2.5 pb-2 space-y-1 max-h-56 overflow-y-auto scrollbar-thin" data-testid="plan-steps">
+            {todos.map((t, i) => {
+              const state = states[i]
+              const halted = !runActive && t.status === 'in_progress'
+              return (
+                <li key={`${i}-${t.content}`} className="flex items-start gap-2" data-state={state}>
+                  {state === 'done' ? (
+                    <CheckCircle2 size={13} className="text-gray-400 dark:text-gray-500 shrink-0 mt-[1px]" />
+                  ) : state === 'running' ? (
+                    <Loader2 size={13} className="text-gray-700 dark:text-gray-200 animate-spin shrink-0 mt-[1px]" />
+                  ) : (
+                    <Circle size={13} className={`shrink-0 mt-[1px] ${halted ? HINWEIS_TEXT.ruhig : 'text-gray-300 dark:text-gray-600'}`} />
+                  )}
+                  <span
+                    className={`t-control leading-snug ${
+                      state === 'done'
+                        ? 'text-gray-400 dark:text-gray-500 line-through'
+                        : state === 'running'
+                          ? 'text-gray-900 dark:text-gray-50 font-medium'
+                          : 'text-gray-600 dark:text-gray-300'
+                    }`}
+                  >
+                    {t.content}
+                  </span>
+                </li>
+              )
+            })}
           </ul>
         )}
 
-        {(panel || !expanded) && allDone && (
-          // In the header band this is the collapsed summary line. In the panel
-          // the list is open by default, so the line has to stay: "every step done"
-          // while six writes sit refused in the queue is exactly the sentence
-          // Morgan believed.
-          <Schlusszeile
-            testid="plan-all-done"
-            Symbol={CheckCircle2}
-            ton={pending > 0 ? 'ruhig' : 'gut'}
-            text={planDoneLabel(pending)}
-          />
+        {!runActive && allDone && (
+          <Abschluss testid="plan-all-done" Symbol={CheckCircle2} ton={pending > 0 ? 'ruhig' : 'gut'}>
+            <span className="first-letter:uppercase inline-block">{planDoneLabel(pending)}.</span>
+          </Abschluss>
         )}
 
         {stoppedShort && (
-          // Das Gegenstueck zur Zeile darueber, und aus demselben Grund an
-          // derselben Stelle: sie steht IMMER, aufgeklappt wie zugeklappt.
-          // Zugeklappt las die Leiste sonst "PLAN 3/4" mit dem vierten Punkt
-          // daneben und sah aus wie ein Lauf, der gleich weitermacht.
-          <Schlusszeile
-            testid="plan-run-stopped"
-            Symbol={AlertCircle}
-            ton="ruhig"
-            text={planStoppedLabel(done, todos.length)}
-          />
+          <Abschluss testid="plan-run-stopped" Symbol={AlertCircle} ton="ruhig">
+            <span className="first-letter:uppercase inline-block">{planStoppedLabel(done, todos.length)}.</span>
+            {nextOpen && <span> Next: {nextOpen.content}</span>}
+            <div className="mt-1.5 flex flex-wrap gap-1.5">
+              {onContinue && (
+                <button
+                  type="button"
+                  onClick={() => onContinue('continue')}
+                  data-testid="plan-continue"
+                  className="lu-control lu-primary px-3 t-control font-medium"
+                >
+                  Continue
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => clearTodos(conversationId)}
+                className="lu-control px-3 t-control text-gray-800 dark:text-gray-100 border border-gray-300 dark:border-white/15 hover:bg-gray-100 dark:hover:bg-white/[0.06] transition-colors"
+              >
+                Clear plan
+              </button>
+            </div>
+          </Abschluss>
         )}
       </div>
     </div>
@@ -226,35 +233,26 @@ export function PlanBar({ variant = 'header' }: Props) {
 }
 
 /**
- * Die eine Zeile unter der Liste, in zwei Toenen.
- *
- * Zusammengelegt, weil es jetzt ZWEI davon gibt (fertiger Plan, abgebrochener
- * Lauf) und zwei Abschriften derselben Zeile genau so auseinanderlaufen, wie
- * es die Typo-Sperrklinke beschreibt: die zweite entsteht durch Abschreiben
- * der ersten und bringt frische Umgehungen mit. Eine Groessenangabe, ein
- * Abstand, zwei Toene.
- *
- * Die zwei Toene sind `gut` (der Plan ist durch) und `ruhig`. Vorher hiess der
- * zweite `warnung` und war bernsteinfarben, an beiden Stellen zu Unrecht:
- * weder ein Lauf, der endet, noch eine Aenderung, die auf Freigabe wartet, ist
- * ein Fehler. Ruhig ist derselbe Ton wie sekundaerer Text, `lib/hinweis.ts`.
+ * The closing box under the list once the run is over, in two tones: `gut`
+ * (the plan is through) and `ruhig`. Neither a run that ends nor a change that
+ * waits for approval is an error, so no amber (`lib/hinweis.ts`).
  */
-function Schlusszeile({
+function Abschluss({
   testid,
   Symbol,
   ton,
-  text,
+  children,
 }: {
   testid: string
   Symbol: typeof CheckCircle2
   ton: 'gut' | 'ruhig'
-  text: string
+  children: ReactNode
 }) {
-  const farbe = ton === 'gut' ? 'text-emerald-400' : HINWEIS_TEXT.ruhig
+  const farbe = ton === 'gut' ? 'text-emerald-600 dark:text-emerald-400' : HINWEIS_TEXT.ruhig
   return (
-    <div className={`px-2 pb-1 flex items-center gap-1.5 ${farbe}`} data-testid={testid}>
-      <Symbol size={9} className="shrink-0" />
-      <span className="text-[0.55rem] leading-snug">{text}</span>
+    <div className="border-t border-gray-200 dark:border-white/[0.06] px-2.5 py-2 flex items-start gap-2" data-testid={testid}>
+      <Symbol size={13} className={`shrink-0 mt-[1px] ${farbe}`} />
+      <div className="t-control leading-snug text-gray-700 dark:text-gray-200 min-w-0">{children}</div>
     </div>
   )
 }

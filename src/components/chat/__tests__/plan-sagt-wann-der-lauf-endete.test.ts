@@ -59,13 +59,14 @@ describe('die Leiste fragt beide Laufquellen, nicht nur eine', () => {
   })
 
   it('holt das Urteil aus run-idle statt sich ein zweites zu bauen', () => {
-    expect(src).toMatch(/runStatusFrom\(generating, threadStatus, isRunStopped\(activeConversationId\), isRunQueued\(activeConversationId\)\)/)
+    expect(src).toMatch(/runStatusFrom\(generating, threadStatus, isRunStopped\(conversationId\), isRunQueued\(conversationId\)\)/)
     expect(src).toMatch(/const stoppedShort = !allDone && !runActive/)
   })
 
   it('sagt es zugeklappt wie aufgeklappt, wie die Zeile fuer den fertigen Plan', () => {
-    // Nur zugeklappt haette es im Code-Panel versteckt, das aufgeklappt
-    // startet. Es ist derselbe Fehler, den die Morgan-Zeile schon einmal hatte.
+    // Nur zugeklappt haette es versteckt, solange die Liste offen ist. Es ist
+    // derselbe Fehler, den die Morgan-Zeile schon einmal hatte. Seit CA
+    // (13.11.2026) haengt der Abschlusskasten an keinem Klappzustand.
     expect(src).toMatch(/\{stoppedShort && \(/)
     expect(src).toMatch(/testid="plan-run-stopped"/)
     // Und sie teilt sich die Zeile mit der Morgan-Zeile, statt sie
@@ -73,7 +74,7 @@ describe('die Leiste fragt beide Laufquellen, nicht nur eine', () => {
     // in `die-typo-leiter-und-ihre-umgehung.test.ts` hat genau das schon
     // einmal aufgefangen.
     expect(src).toMatch(/testid="plan-all-done"/)
-    expect(src.match(/function Schlusszeile\(/g) ?? []).toHaveLength(1)
+    expect(src.match(/function Abschluss\(/g) ?? []).toHaveLength(1)
   })
 
   it('der Kreisel dreht nur, solange wirklich etwas laeuft', () => {
@@ -85,7 +86,13 @@ describe('die Leiste fragt beide Laufquellen, nicht nur eine', () => {
     // nichts mehr laeuft, ist kein halber Fehler, sondern ruhig. Die Aussage
     // des Tests ist dieselbe geblieben und haengt jetzt an der Bewegung
     // statt an der Farbe: es dreht sich nur, was wirklich laeuft.
-    expect(src).toMatch(/runActive \? 'text-gray-600 dark:text-gray-300 animate-spin' : HINWEIS_TEXT\.ruhig/)
+    // Seit CA (13.11.2026) entscheidet `planRowStates`: 'running' gibt es nur
+    // bei laufendem Lauf, und nur fuer EINEN Schritt (Verhalten in
+    // plan-pinned-under-the-newest-message.test.tsx). Ein angehaltener
+    // Schritt ist ein ruhiger Kreis.
+    expect(src).toMatch(/t\.status === 'in_progress' && runActive && !running/)
+    expect(src).toMatch(/state === 'running' \? \(\s*<Loader2[^>]*animate-spin/)
+    expect(src).toMatch(/halted \? HINWEIS_TEXT\.ruhig/)
     // Und es gibt genau EINE Drehung in der Datei, sonst koennte daneben ein
     // zweiter Kreisel stehen, den kein Lauf mehr anhaelt.
     expect(src.match(/animate-spin/g) ?? []).toHaveLength(1)
