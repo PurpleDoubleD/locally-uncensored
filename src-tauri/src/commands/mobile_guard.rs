@@ -55,8 +55,6 @@ pub const BLOCKED: &[&str] = &[
     "verify_model_files_cancel",
     "trash_model_file",
     "comfy_torch_plan",
-    // 3.1.0 (C27): reads a ComfyUI output folder on the computer; a phone has none.
-    "scan_comfy_output",
     // 3.1.0 (C60-S5): installs a node pack into ComfyUI and fetches a workflow
     // for it from the web; ComfyUI runs on the computer, a phone has none.
     "install_lu_node_pack",
