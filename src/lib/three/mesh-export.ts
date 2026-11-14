@@ -15,7 +15,7 @@ export interface MeshFormatInfo {
 }
 
 export const MESH_FORMATS: readonly MeshFormatInfo[] = [
-  { id: 'glb', label: 'GLB', note: 'the original, with colors', mime: 'model/gltf-binary' },
+  { id: 'glb', label: 'GLB', note: 'the original, with colors, best for Blender', mime: 'model/gltf-binary' },
   { id: 'obj', label: 'OBJ', note: 'shape only', mime: 'model/obj' },
   { id: 'stl', label: 'STL', note: 'for 3D printing, shape only', mime: 'model/stl' },
   { id: 'usdz', label: 'USDZ', note: 'for iPhone and Mac', mime: 'model/vnd.usdz+zip' },

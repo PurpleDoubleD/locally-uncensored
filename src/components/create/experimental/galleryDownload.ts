@@ -48,6 +48,8 @@ const MIME_BY_EXT: Record<string, string> = {
   mp4: 'video/mp4', webm: 'video/webm',
   mp3: 'audio/mpeg', wav: 'audio/wav', ogg: 'audio/ogg',
   glb: 'model/gltf-binary', obj: 'model/obj', stl: 'model/stl', usdz: 'model/vnd.usdz+zip',
+  // Made by Blender on the desktop (api/blender.ts).
+  blend: 'application/x-blender', fbx: 'application/octet-stream',
 }
 
 /** The extension a phone asks for before it has seen the bytes. */
