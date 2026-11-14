@@ -18,7 +18,7 @@ import type { CloudJob, CloudJobSubmit, UploadRole } from '../../api/cloud/jobs'
 import { studioPreviewCredits } from '../render/studio-contract'
 import { dataUrlToBlob } from '../render/data-url'
 import {
-  swapFigureRoles, swapFrameKey, swapFrameOptions, swapFramePrompt, swapMaxPeople,
+  swapFigureRoles, swapFrameKey, swapFrameOptionsFor, swapFramePrompt, swapMaxPeople,
   SWAP_CONSENT_MISSING, SWAP_FRAME_MODEL, type SwapMark,
 } from '../render/swap'
 
@@ -37,11 +37,15 @@ export interface SwapFrameRequest {
   extra?: string
   /** The price the button shows: the ceiling of the booking. */
   credits: number | null
+  /** One click swap (only with the account switch): the editor of the frame
+   *  step. Without it Nano Banana Pro as before. */
+  frameModel?: string
 }
 
-/** The price of the frame step from the catalogue (Nano Banana Pro, 2k). */
-export function swapFrameCredits(width: number, height: number, people: number): number | null {
-  return studioPreviewCredits(SWAP_FRAME_MODEL, swapFrameOptions(width, height), undefined, people + 1)
+/** The price of the frame step from the catalogue (Nano Banana Pro, 2k, or
+ *  the editor picked). */
+export function swapFrameCredits(width: number, height: number, people: number, model: string = SWAP_FRAME_MODEL): number | null {
+  return studioPreviewCredits(model, swapFrameOptionsFor(model, width, height), undefined, people + 1)
 }
 
 /** What is missing before the frame step can start, as a sentence for the
@@ -66,14 +70,15 @@ export function swapFrameProblem(req: SwapFrameRequest): string | null {
  *  person, in the order of the people. */
 export function swapFrameSubmit(framePath: string, figurePaths: string[], req: SwapFrameRequest): CloudJobSubmit {
   const roles = swapFigureRoles(req.figures)
+  const model = req.frameModel ?? SWAP_FRAME_MODEL
   return {
     kind: 'image',
-    model: SWAP_FRAME_MODEL,
+    model,
     prompt: swapFramePrompt(roles, req.extra),
     params: {
       op: 'studio',
       image_paths: [framePath, ...figurePaths],
-      studio_options: swapFrameOptions(req.frame?.width ?? 0, req.frame?.height ?? 0),
+      studio_options: swapFrameOptionsFor(model, req.frame?.width ?? 0, req.frame?.height ?? 0),
       swap_step: 'frame',
       swap_consent: true,
       ...(req.credits != null ? { max_credits: req.credits } : {}),

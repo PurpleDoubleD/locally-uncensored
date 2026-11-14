@@ -156,3 +156,40 @@ export function UploadLine({ icon, label, accept, onFile, note }: {
     </HubLine>
   )
 }
+
+/** The column every step of the area shares: 660 px, centred. */
+export const HUB_COLUMN = 'mx-auto w-full max-w-[660px] px-4'
+
+/** A switch as a row (one click swap, sketch c2): the name, a grey line what
+ *  it does, the switch at the right. A hairline under it, no box. */
+export function HubSwitch({ title, line, on, onChange, disabled, testId }: {
+  title: string
+  line: string
+  on: boolean
+  onChange: (on: boolean) => void
+  disabled?: boolean
+  testId?: string
+}) {
+  return (
+    <div className="hub-line flex min-h-12 items-center gap-4 border-b py-1.5" data-hub-switch={testId}>
+      <span className="min-w-0 flex-1">
+        <span className="hub-text block hub-fs-14">{title}</span>
+        <span className="hub-dim block hub-fs-125">{line}</span>
+      </span>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={on}
+        aria-label={title}
+        disabled={disabled}
+        onClick={() => onChange(!on)}
+        className={cn(
+          'relative h-[18px] w-[30px] shrink-0 rounded-full transition-colors disabled:opacity-40',
+          on ? 'bg-[var(--hub-acc)]' : 'bg-[var(--hub-edge)]',
+        )}
+      >
+        <span className={cn('absolute top-[2px] h-[14px] w-[14px] rounded-full bg-white shadow transition-[left]', on ? 'left-[14px]' : 'left-[2px]')} />
+      </button>
+    </div>
+  )
+}

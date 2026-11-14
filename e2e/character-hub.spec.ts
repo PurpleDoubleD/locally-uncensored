@@ -286,7 +286,7 @@ test('without the account switch: Swap says coming soon, Motion has no sound cho
   expect(seen.submits).toHaveLength(0)
 })
 
-test('with the switch: the frame step and its check stay as they were', async ({ page }) => {
+test('with the switch: Swap is one click, the check stops after the frame', async ({ page }) => {
   await boot(page, { hub: true })
   // The built frame of the frame step, from the mock (no booking).
   const frameNew = await media('frame-new.jpg', 'image/jpeg')
@@ -316,11 +316,12 @@ test('with the switch: the frame step and its check stay as they were', async ({
   await expect(page.getByRole('group', { name: /First frame of your video/ })).toBeVisible({ timeout: 20_000 })
   await tapFrame(page, 0.45, 0.33)
   await page.getByRole('checkbox').check()
-  await page.getByRole('button', { name: /Build first frame/ }).click()
+  await page.getByRole('switch', { name: 'Check first frame before video' }).click()
+  await page.getByRole('button', { name: /^Create · / }).last().click()
   await expect(page.getByText('Does this look right?')).toBeVisible({ timeout: 20_000 })
-  await shoot(page, 'd-swap-pruefen', '[data-swap-built]')
-  await page.getByRole('button', { name: /Continue/ }).click()
-  await expect(page.getByRole('button', { name: /^Create · / }).last()).toBeEnabled({ timeout: 15_000 })
+  await shoot(page, 'd-swap-pruefen')
+  await expect(page.getByRole('button', { name: /^Continue · / })).toBeEnabled()
+  await expect(page.getByRole('button', { name: /^Try again · 14k/ })).toBeEnabled()
   expect(frames).toBe(1)
 })
 
@@ -368,7 +369,7 @@ test('phone width: the same steps, the bar in its short form', async ({ page }) 
   await tapFrame(page, 0.45, 0.33)
   await tapFrame(page, 0.66, 0.36)
   await page.getByRole('checkbox').check()
-  await expect(page.locator('[data-hub-bar-summary]')).toContainText('SCAIL 2 · 6 s')
+  await expect(page.locator('[data-hub-bar-summary]')).toContainText('Auto · SCAIL-2 · 720p · 6 s')
   await shoot(page, 'handy-c-swap')
   await page.locator('[data-hub-bar-summary]').click()
   await expect(page.locator('[data-hub-bar-options]')).toBeVisible()

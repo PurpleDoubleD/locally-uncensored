@@ -5,12 +5,13 @@ import { openCharacterAction } from './support/character-hub'
 
 /**
  * Swap Character (07.11.2026, port of the web's C52; two steps with SCAIL 2
- * and Kling since 14.11.2026) in the real app, Tauri stubbed, cloud mocked:
- * the pill, the panel in the web's order, the marks on the first frame, the
- * frame step (Build first frame, Does this look right?, Continue), Kling for
- * one person only, and Create only with every input, the consent and the
- * confirmed frame. Nothing is booked: the frame step runs against the mock,
- * and the spec never presses Create.
+ * and Kling since 14.11.2026; one click since 14.11.2026, only with the
+ * account switch) in the real app, Tauri stubbed, cloud mocked: the panel in
+ * the web's order, the marks on the first frame, one Create with the total,
+ * the switches Uncensored and Check first frame, the check (Does this look
+ * right?, Continue), the video on the new frame, Kling for one person only.
+ * Nothing is booked: frame and video run against the mock, the video job
+ * never finishes.
  *
  * Media come from LU_SWAP_MEDIA_DIR (clip.mp4, face1.png, face2.png and
  * frame-new.jpg, the built frame the mock hands back) when it is set; without
@@ -84,7 +85,7 @@ async function recordedClip(page: Page): Promise<Buffer> {
 }
 
 /** What the mock saw of the frame step: every submit body. */
-interface Seen { submits: Array<{ model: string; prompt: string; params: Record<string, unknown> }>; uploads: number }
+interface Seen { submits: Array<{ model: string; prompt: string; params: Record<string, unknown> }>; uploads: number; adopts: unknown[] }
 
 async function openSwap(page: Page): Promise<Seen> {
   await page.setViewportSize({ width: 1296, height: 900 })
@@ -95,7 +96,7 @@ async function openSwap(page: Page): Promise<Seen> {
   // The frame step against the mock: upload, submit, poll, and the built
   // frame. Registered after routeCloud, so these answer first; anything
   // else falls back to the shared mock.
-  const seen: Seen = { submits: [], uploads: 0 }
+  const seen: Seen = { submits: [], uploads: 0, adopts: [] }
   const cors = { 'access-control-allow-origin': '*', 'access-control-allow-headers': '*', 'access-control-allow-methods': 'GET,POST,OPTIONS' }
   const frameImage = await media('frame-new.jpg', 'image/jpeg')
   await page.route('https://lu-labs.ai/**', async (route) => {
@@ -107,12 +108,26 @@ async function openSwap(page: Page): Promise<Seen> {
       seen.uploads++
       return json({ path: `e2e-user-1/staged-${seen.uploads}.bin` })
     }
+    if (path === '/api/jobs/adopt' && req.method() === 'POST') {
+      seen.adopts.push(req.postDataJSON())
+      return json({ path: `e2e-user-1/adopted-${seen.adopts.length}.jpg` })
+    }
     if (path === '/api/jobs' && req.method() === 'POST') {
       const body = req.postDataJSON() as Seen['submits'][number]
       seen.submits.push(body)
-      // Only the frame step may book here; a video run would be a real Create.
+      // The video step of the chain: taken, then it keeps rendering (no result,
+      // nothing booked). Anything else but the frame step is refused.
+      if (body.params?.swap_step === 'video') {
+        return json({ id: 'job-video-1', status: 'queued', created_at: new Date().toISOString(), quota: { kind: 'video', cost: 48000, used: 0, limit: 2_550_000 } }, 202)
+      }
       if (body.params?.swap_step !== 'frame') return json({ error: 'e2e: only the frame step is mocked' }, 400)
       return json({ id: `job-frame-${seen.submits.length}`, status: 'queued', created_at: new Date().toISOString(), quota: { kind: 'image', cost: 14000, used: 0, limit: 2_550_000 } }, 202)
+    }
+    if (path === '/api/jobs/job-video-1' && req.method() === 'GET') {
+      return json({ job: {
+        id: 'job-video-1', kind: 'video', model: 'scail-2', provider: 'upstream', status: 'running',
+        result_url: null, attestation: null, cost_units: 0, created_at: new Date().toISOString(), completed_at: null, error: null,
+      } })
     }
     const job = /^\/api\/jobs\/(job-frame-\d+)$/.exec(path)
     if (job && req.method() === 'GET') {
@@ -165,15 +180,15 @@ async function tapFrame(page: Page, x: number, y: number) {
   await frame.click({ position: { x: box.width * x, y: box.height * y } })
 }
 
-test('Swap Character in two steps: marks, first frame, Continue, Kling for one person', async ({ page }) => {
+test('Swap with one click: marks, one total, the check, then the video on the new frame', async ({ page }) => {
   const seen = await openSwap(page)
   const panel = page.locator('[data-swap-controls]')
   const create = page.getByRole('button', { name: /^Create/ }).last()
 
-  // SCAIL 2 is the default, the notes stand grey.
+  // SCAIL 2 is the default, the notes stand grey, both switches off.
   await expect(panel.locator('[data-swap-tips]')).toContainText('Up to 3 people with SCAIL-2, one person with Kling (highest resolution).')
-  await expect(panel).toHaveAttribute('data-swap-two-step', 'true')
-  // The resolution is under More options (sketches v2).
+  await expect(page.locator('[data-swap-summary]')).toHaveText('Auto · SCAIL-2 · 720p')
+  // The resolution is under More options (sketches v2), with the engines.
   await page.getByRole('button', { name: 'More options' }).click()
   await expect(page.getByRole('radio', { name: '720p' })).toHaveAttribute('aria-checked', 'true')
   await expect(create).toBeDisabled()
@@ -192,100 +207,86 @@ test('Swap Character in two steps: marks, first frame, Continue, Kling for one p
   await page.locator('[data-swap-photo-input="1"]').setInputFiles(await media('face1.png', 'image/png'))
   await page.locator('[data-swap-photo-input="2"]').setInputFiles(await media('face2.png', 'image/png'))
   await expect(page.getByRole('button', { name: 'Character for person 2' })).toContainText('Photo')
-  // The bar prices frame and video together.
+  // The bar prices frame and video together, the button names the total.
   await expect(page.locator('[data-clip-price]')).toHaveAttribute('title', /credits$/)
   await expect(page.locator('[data-clip-split]')).toContainText('frame 14k + video')
 
-  // Kling stands greyed out for two people, SCAIL 2 is recommended.
-  await page.getByRole('button', { name: /SCAIL 2/ }).first().click()
+  // Under More options: Kling stands greyed out for two people.
+  await page.getByRole('button', { name: 'Video model' }).click()
   const kling = page.getByRole('option', { name: /Kling 3.0 Pro/ })
   await expect(kling).toBeDisabled()
   await expect(kling).toContainText('one person only')
-  await expect(page.getByRole('option', { name: /SCAIL 2/ })).toContainText('Recommended')
   await page.keyboard.press('Escape')
   await expect(kling).toBeHidden()
+  await expect(page.getByRole('button', { name: 'First-frame model' })).toContainText('Auto (Nano Banana Pro)')
 
-  // The frame step waits for the tick, Create waits for the frame.
-  const build = page.getByRole('button', { name: /Build first frame/ })
-  await expect(build).toBeDisabled()
+  // The switches: Uncensored off, the check off; Uncensored takes the check along.
+  const uncensored = page.getByRole('switch', { name: 'Uncensored' })
+  const check = page.getByRole('switch', { name: 'Check first frame before video' })
+  await expect(uncensored).toHaveAttribute('aria-checked', 'false')
+  await expect(check).toHaveAttribute('aria-checked', 'false')
+  await uncensored.click()
+  await expect(check).toHaveAttribute('aria-checked', 'true')
+  await uncensored.click()
+  await expect(check).toHaveAttribute('aria-checked', 'false')
+
+  // Create waits for the consent.
+  await expect(create).toBeDisabled()
   await shoot(page, 'swap-two-marks')
   await page.getByRole('checkbox').check()
-  await expect(build).toBeEnabled()
-  await expect(build).toHaveAttribute('title', 'Build first frame · 14,000 credits')
-  await expect(create).toBeDisabled()
-  await build.click()
+  await expect(create).toBeEnabled({ timeout: 15_000 })
+  await expect(create).toContainText(/^Create · \d+k$/)
+  await shoot(page, 'swap-ready-scail2', '[data-swap-bar]')
+
+  // With the check: one press builds the frame and stops.
+  await check.click()
+  await create.click()
   await expect(page.getByText('Does this look right?')).toBeVisible({ timeout: 20_000 })
   expect(seen.submits).toHaveLength(1)
   expect(seen.submits[0].model).toBe('nano-banana-pro-edit')
   expect(seen.submits[0].params).toMatchObject({ op: 'studio', swap_step: 'frame', swap_consent: true, max_credits: 14000 })
   expect(seen.submits[0].params.image_paths).toHaveLength(3)
   expect(seen.submits[0].prompt).toContain('replace the person on the left with the person from the second image and replace the person on the right with the person from the third image')
-  await expect(page.getByRole('img', { name: 'New first frame' })).toBeVisible()
-  await expect(page.getByRole('button', { name: /Try again · 14k credits/ })).toBeEnabled()
+  await expect(page.getByRole('img', { name: /^New first frame/ })).toBeVisible()
+  await expect(page.getByRole('button', { name: /Try again · 14k/ })).toBeEnabled()
   await expect(page.getByRole('textbox', { name: "What's wrong?" })).toHaveAttribute('placeholder', "What's wrong? (optional)")
-  await expect(create).toBeDisabled()
-  await shoot(page, 'swap-review', '[data-swap-built]')
+  await shoot(page, 'swap-review')
 
-  // Continue: now Create is armed, its price names the video.
-  await page.getByRole('button', { name: /Continue/ }).click()
-  await expect(page.getByText('First frame ready. Create starts the video.')).toBeVisible()
-  await expect(create).toBeEnabled({ timeout: 15_000 })
-  await shoot(page, 'swap-ready-scail2', '[data-swap-built]')
-
-  // Kling for one person: the second mark goes, the built frame expires.
-  await page.getByRole('button', { name: 'Remove mark 2' }).click()
-  await expect(page.locator('[data-swap-frame-count]')).toHaveAttribute('data-swap-frame-count', '1')
-  await expect(create).toBeDisabled()
-  await page.getByRole('button', { name: /SCAIL 2/ }).first().click()
-  await expect(page.getByRole('option', { name: /Kling 3.0 Pro/ })).toBeEnabled()
-  await page.getByRole('option', { name: /Kling 3.0 Pro/ }).click()
-  await expect(page.getByRole('radiogroup', { name: 'Resolution' })).toHaveCount(0)
-  await expect(page.getByRole('checkbox')).toBeChecked()
-  await page.getByRole('button', { name: /Build first frame/ }).click()
-  await expect(page.getByText('Does this look right?')).toBeVisible({ timeout: 20_000 })
-  expect(seen.submits).toHaveLength(2)
-  // One mark left: "the person", one photo.
-  expect(seen.submits[1].prompt).toMatch(/^Replace the person in the first image with the person from the second image\./)
-  expect(seen.submits[1].params.image_paths).toHaveLength(2)
-  await page.getByRole('button', { name: /Continue/ }).click()
-  await expect(create).toBeEnabled({ timeout: 15_000 })
-  // Kling: 16,800 credits a second, at least its billed minimum.
-  await expect(page.locator('[data-clip-split]')).toHaveText(/^frame 14k \+ video \d+k$/)
-  await shoot(page, 'swap-kling-one-person', '[data-swap-built]')
-
-  // Nothing but the frame step ever went to the queue.
-  expect(seen.submits.every((b) => b.params.swap_step === 'frame')).toBe(true)
+  // Continue: the video starts on the new frame (adopted), with the consent.
+  await page.getByRole('button', { name: /^Continue/ }).click()
+  await expect(page.locator('[data-swap-one-click=running]')).toBeVisible({ timeout: 15_000 })
+  await expect(page.locator('[data-swap-step=frame]')).toHaveAttribute('data-state', 'done')
+  await expect(page.locator('[data-swap-step=video]')).toHaveAttribute('data-state', 'now')
+  expect(seen.adopts).toEqual([{ job_id: 'job-frame-1', role: 'image' }])
+  const video = seen.submits[1]
+  expect(video.model).toBe('scail-2')
+  expect(video.params).toMatchObject({ op: 'studio', swap_step: 'video', swap_consent: true, sound: 'original', source_path: 'e2e-user-1/adopted-1.jpg' })
+  expect(video.params.image_paths).toBeUndefined()
+  await shoot(page, 'swap-running')
 })
 
-test('Swap Character with OpenJutsu: one step, people up to four, consent before Create', async ({ page }) => {
+test('Swap with OpenJutsu: four people run in one step, no switches', async ({ page }) => {
   await openSwap(page)
   const panel = page.locator('[data-swap-controls]')
   const create = page.getByRole('button', { name: /^Create/ }).last()
-  await page.getByRole('button', { name: /SCAIL 2/ }).first().click()
-  await page.getByRole('option', { name: /OpenJutsu/ }).click()
-  await expect(panel).not.toHaveAttribute('data-swap-two-step', 'true')
-
   await page.locator('[data-swap-photo-input="1"]').setInputFiles(await media('face1.png', 'image/png'))
   await page.getByRole('button', { name: /Add person/ }).click()
   await expect(page.getByRole('button', { name: /Add person/ })).toHaveText('+ Add person (2/4)')
-  await page.getByRole('checkbox').check()
-  await expect(create).toBeDisabled()
-  await page.locator('[data-swap-photo-input="2"]').setInputFiles(await media('face2.png', 'image/png'))
-  await page.getByRole('textbox', { name: 'Who person 1 replaces' }).fill('the woman on the left')
-  await page.getByRole('textbox', { name: 'Who person 2 replaces' }).fill('the woman on the right')
-  // Without the video Create stays off.
-  await expect(create).toBeDisabled()
-  await panel.locator('input[type=file][accept^="video"]').setInputFiles(await media('clip.mp4', 'video/mp4', page))
-  // No frame step on OpenJutsu: Create is armed and names its price.
-  await expect(page.locator('[data-swap-built]')).toHaveCount(0)
-  await expect(create).toBeEnabled({ timeout: 15_000 })
-  await expect(page.locator('[data-clip-price]')).toHaveAttribute('title', /credits$/)
-
   await page.getByRole('button', { name: /Add person/ }).click()
   await page.getByRole('button', { name: /Add person/ }).click()
   await expect(page.getByRole('button', { name: /Add person/ })).toHaveText('+ Add person (4/4)')
   await expect(page.getByRole('button', { name: /Add person/ })).toBeDisabled()
+  // Four people: OpenJutsu by itself, one step, so no frame switches.
+  await expect(page.locator('[data-swap-summary]')).toContainText('Auto · OpenJutsu')
+  await expect(page.getByRole('switch', { name: 'Uncensored' })).toHaveCount(0)
+  for (const i of [2, 3, 4]) await page.locator(`[data-swap-photo-input="${i}"]`).setInputFiles(await media('face2.png', 'image/png'))
+  await page.getByRole('checkbox').check()
+  // Without the video Create stays off.
   await expect(create).toBeDisabled()
+  await panel.locator('input[type=file][accept^="video"]').setInputFiles(await media('clip.mp4', 'video/mp4', page))
+  await expect(create).toBeEnabled({ timeout: 15_000 })
+  await expect(page.locator('[data-clip-price]')).toHaveAttribute('title', /credits$/)
+  await expect(page.locator('[data-clip-split]')).not.toContainText('frame')
 })
 
 /** A voice of `seconds` seconds as a WAV (a quiet tone), made here so the
@@ -324,9 +325,6 @@ test('Sound in Swap: original by default, lip sync greyed out for two people, a 
   await expect(page.locator('[data-clip-split]')).toContainText('frame 14k + video')
   await expect(page.locator('[data-clip-split]')).toContainText('lip sync')
   await page.getByRole('checkbox').check()
-  await page.getByRole('button', { name: /Build first frame/ }).click()
-  await expect(page.getByText('Does this look right?')).toBeVisible({ timeout: 20_000 })
-  await page.getByRole('button', { name: /Continue/ }).click()
   const create = page.getByRole('button', { name: /^Create/ }).last()
   await expect(create).toBeEnabled({ timeout: 15_000 })
   await expect(create).toContainText('Create ·')
@@ -340,8 +338,8 @@ test('Sound in Swap: original by default, lip sync greyed out for two people, a 
   await expect(page.getByRole('radio', { name: 'Original sound' })).toHaveAttribute('aria-checked', 'true')
   await shoot(page, 'swap-lipsync-blocked-two-people', '[data-sound-controls]', 'desktop-ton')
 
-  // Create was never pressed: only the frame step went to the queue.
-  expect(seen.submits.every((b) => b.params.swap_step === 'frame')).toBe(true)
+  // Create was never pressed: nothing went to the queue.
+  expect(seen.submits).toHaveLength(0)
 })
 
 test('Sound in Motion: on the cloud lanes only', async ({ page }) => {

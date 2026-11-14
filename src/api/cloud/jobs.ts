@@ -106,6 +106,9 @@ export interface CloudJob {
   started_at?: string | null
   completed_at: string | null
   error: string | null
+  /** A filtered model refused (one click swap): the open model the server
+   *  names as the way out. Only on failed jobs, only on newer servers. */
+  fallback_model?: string | null
   // Die Anzeigefelder, die die Listenroute (GET /api/jobs) aus den params
   // herausreicht, damit eine neu geladene Galerie den Namen des Laufs
   // wiederherstellt statt jedesmal leer anzufangen.

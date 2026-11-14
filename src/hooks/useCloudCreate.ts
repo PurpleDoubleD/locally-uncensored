@@ -30,6 +30,7 @@ import {
   QuoteChangedError,
   type CloudJobParams,
   type CloudJob,
+  type CloudJobSubmit,
 } from '../api/cloud/jobs'
 import { defaultCloudModel, editNeedsMask, modelForOp, utilityOpModel, resolveOpPick, cloudModelById, cloudMediaLive, resolveCharacterModel, lengthCredits, lengthPrice } from '../stores/cloudCatalogStore'
 import { checkPromptSafety, blockMessageFor, type SafetyVerdict } from '../lib/render/safety'
@@ -1369,4 +1370,42 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
   )
 
   return { generate, cancel, enhanceVideo, makeVoice }
+}
+
+/** One click swap (lib/create/swap-chain.ts, only with the account switch;
+ *  port of the web's buildSwapVideoSubmit, 4395e8d1): the video job, built
+ *  from the store like a Create run of Swap Character, only without its
+ *  image. That comes from the frame step; the chain sets it as source_path.
+ *  The video goes up here, so everything is on the server before the first
+ *  job. The ceiling is the video price the bar shows (cloudStudioCredits).
+ *  Throws with the text for the customer. */
+export async function buildSwapVideoSubmit(model: string, onStep?: (text: string) => void): Promise<CloudJobSubmit> {
+  const s = useCreateStore.getState()
+  if (!characterHubReleasedHere()) throw new Error('Swap Character is coming soon to your LU Cloud.')
+  if (!STUDIO_MODELS[model]) throw new Error('Swap Character needs a newer LU Cloud. Try again later.')
+  if (!s.videoInput) throw new Error('Add the original video first.')
+  const sound = s.sound
+  const invalid = soundInputError(sound, s.swapFigures.length, 'cloud', !!s.audioInput || !!s.voiceFromJob, s.lipsyncModel)
+  if (invalid) throw new Error(invalid)
+  const filtered = Object.fromEntries(
+    Object.entries(s.cloudStudioOptions).filter(([key]) => studioFields(model)[key] !== undefined),
+  )
+  const params: CloudJobParams = { op: 'studio', studio_options: filtered, client_request_id: crypto.randomUUID() }
+  onStep?.('Uploading your video…')
+  params.video_path = await uploadInput(s.videoInput.blob, 'video')
+  const videoSeconds = await mediaSeconds(s.videoInput.url, 'video').catch(() => undefined)
+  // No frame yet: swapRunParams sets swap_step 'video', the options, the
+  // length on whole seconds and the consent, and uploads nothing more.
+  Object.assign(params, await swapRunParams(
+    model,
+    { hasVideo: true, figures: s.swapFigures, consent: s.swapConsent, chosenSeconds: s.swapSeconds, videoSeconds, frameJobId: null },
+    filtered,
+    async () => { throw new Error('Swap: the people go into the first frame, not into the video job.') },
+  ))
+  params.sound = soundParam(sound)
+  const own = soundStudioOptions(model, sound)
+  if (Object.keys(own).length) params.studio_options = { ...(params.studio_options ?? filtered), ...own }
+  params.label = SWAP_GALLERY_LABEL
+  if (s.cloudStudioCredits != null) params.max_credits = s.cloudStudioCredits
+  return { kind: STUDIO_MODELS[model].kind, model, prompt: '', params }
 }

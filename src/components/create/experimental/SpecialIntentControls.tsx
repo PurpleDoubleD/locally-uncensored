@@ -6,7 +6,7 @@
 // specialized lanes), and the surfaces below fork only where the two lanes
 // genuinely differ (extend's source pick, the cloud voice maker).
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { usePopoverPlatz } from '../../../hooks/usePopoverPlatz'
 import { AnimatePresence, motion } from 'framer-motion'
 import {
@@ -1762,9 +1762,19 @@ function SoundControls({ intent, people, clipSeconds, withPrice = false }: {
 // → Bean ▾"), the sound, the consent in one line. The length, the model and
 // the price stand in the bar at the foot (Composer, hub). The frame step
 // (Build first frame, Does this look right?, Continue) is SwapFrameBuild as
-// it was; the one click flow replaces it later.
+// it was. In the one click swap (hub/SwapOneClick.tsx, only with the
+// account switch) the same inputs stand without it: the engine comes from the
+// one click picks, the switches stand above the consent, and Create in its
+// own bar runs the whole chain.
 
-export function SwapControls() {
+export function SwapControls({ oneClick }: {
+  oneClick?: {
+    /** The engine of the video (swapVideoModelFor), kept in the store too. */
+    model: string
+    /** "Uncensored" and "Check first frame before video". */
+    switches?: ReactNode
+  }
+} = {}) {
   const videoInput = useCreateStore((s) => s.videoInput)
   const setVideoInput = useCreateStore((s) => s.setVideoInput)
   const figures = useCreateStore((s) => s.swapFigures)
@@ -1778,7 +1788,7 @@ export function SwapControls() {
   const setOpModel = useCreateStore((s) => s.setCloudOpModel)
   const isGenerating = useCreateStore((s) => s.isGenerating)
   const released = useCharacterHubReleased()
-  const model = createRunModel('swap_character', { image: '', video: '', op: opModel })
+  const model = oneClick?.model ?? createRunModel('swap_character', { image: '', video: '', op: opModel })
   // SCAIL 2 and Kling: the first frame first, then the video (SwapFrameSteps).
   const twoStep = swapUsesFrame(SWAP_INTENT, model)
   // The first frame to tap; for OpenJutsu too, whose roles come from it.
@@ -1802,7 +1812,7 @@ export function SwapControls() {
   const known = !!STUDIO_MODELS[model]
   const lastTarget = useRef(target)
   useEffect(() => {
-    if (lastTarget.current === target) return
+    if (oneClick || lastTarget.current === target) return
     lastTarget.current = target
     if (auto && known && target !== model) setOpModel(target)
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1816,8 +1826,9 @@ export function SwapControls() {
     if (missing.length) setOptions({ ...options, ...Object.fromEntries(missing) })
   }, [known, model, options, setOptions])
   // One tap more than the model can do: onto the model that can do that many.
+  // The one click swap picks its engine by the number of people itself.
   const fitPeople = (people: number) => {
-    if (people > swapMaxPeople(model)) setOpModel(swapAutoModel(people))
+    if (!oneClick && people > swapMaxPeople(model)) setOpModel(swapAutoModel(people))
   }
 
   if (!released) {
@@ -1948,6 +1959,7 @@ export function SwapControls() {
 
       <SoundControls intent={SWAP_INTENT} people={figures.length}
         clipSeconds={soundClipSeconds(SWAP_INTENT, model, swapSeconds, videoSeconds)} />
+      {oneClick?.switches}
       {swapNeedsConsent(model) && (
         // A real person is swapped for a photo: the customer confirms rights
         // and consent first (the server asks too, for the frame step as for
@@ -1963,7 +1975,7 @@ export function SwapControls() {
           <span>{SWAP_CONSENT_TEXT}</span>
         </label>
       )}
-      {twoStep && <div className="pt-3"><SwapFrameBuild model={model} /></div>}
+      {twoStep && !oneClick && <div className="pt-3"><SwapFrameBuild model={model} /></div>}
     </div>
   )
 }

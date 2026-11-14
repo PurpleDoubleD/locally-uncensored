@@ -20,6 +20,7 @@
 //                                one step.
 
 import { STUDIO_MODELS, studioSchema } from './studio-contract'
+import { STUDIO_EDIT_MODELS } from './studio-roles'
 
 export const SWAP_INTENT = 'swap_character' as const
 export type SwapIntent = typeof SWAP_INTENT
@@ -283,6 +284,82 @@ export function swapFrameAspect(width: number, height: number): string {
 /** The options of the frame step. 2k and JPEG as in the real test. */
 export function swapFrameOptions(width: number, height: number): Record<string, unknown> {
   return { aspect_ratio: swapFrameAspect(width, height), resolution: '2k', output_format: 'jpeg' }
+}
+
+// One click swap (14.11.2026, David's call, only with the account switch;
+// port of the web's 4395e8d1). The frame step no longer runs on one fixed
+// model. Filtered it is Nano Banana Pro (2k), with "Uncensored" Qwen Image
+// 2.1 Edit (1k): in the real test of 14.11. the only open editor that kept
+// both identities and ran cleanly with SCAIL 2 (Qwen 3 and FLUX.3 Klein were
+// poor). Under "More options" any editor that reads at least two images (the
+// video frame and a photo per person) can be picked.
+
+/** The open editor of the frame step with "Uncensored". */
+export const SWAP_FRAME_OPEN_MODEL = 'qwen-image-2.1-edit'
+
+/** How many images an editor reads at most (the provider's schema). 0 without
+ *  an image list, 10 when the schema names no limit. */
+export function swapEditorMaxImages(model: string): number {
+  const m = STUDIO_MODELS[model]
+  if (!m) return 0
+  const field = Object.entries(m.inputs).find(([, param]) => param === 'image_paths')?.[0]
+  if (!field) return 0
+  const max = (studioSchema(model).properties?.[field] as { maxItems?: number } | undefined)?.maxItems
+  return typeof max === 'number' ? max : 10
+}
+
+/** The editors the frame step may take: every instruction editor without a
+ *  mask (STUDIO_EDIT_MODELS) that reads at least two images, in the order of
+ *  the picker. */
+export function swapFrameEditors(): string[] {
+  return STUDIO_EDIT_MODELS.filter((id) => !!STUDIO_MODELS[id] && swapEditorMaxImages(id) >= 2)
+}
+
+/** The editor of the frame step: the own pick when it is allowed, else by the
+ *  switch "Uncensored". */
+export function swapFrameModelFor(openModels: boolean, override?: string | null): string {
+  if (override && swapFrameEditors().includes(override)) return override
+  return openModels ? SWAP_FRAME_OPEN_MODEL : SWAP_FRAME_MODEL
+}
+
+/** Does the editor have the provider's content filter (closed weights)? Only
+ *  there a refusal is a case for "Turn on Uncensored". */
+export function swapFrameFiltered(model: string): boolean {
+  return STUDIO_MODELS[model]?.weights !== 'open'
+}
+
+/** How many people the frame step can set on this editor: one image is the
+ *  video frame, the rest a photo per person. */
+export function swapFrameMaxPeople(model: string): number {
+  return Math.max(0, swapEditorMaxImages(model) - 1)
+}
+
+/** The options of the frame step on any editor, only with fields its schema
+ *  knows. Nano Banana Pro stays exactly at the real test (2k, JPEG), Qwen
+ *  Image 2.1 Edit runs at 1k. */
+export function swapFrameOptionsFor(model: string, width: number, height: number): Record<string, unknown> {
+  if (model === SWAP_FRAME_MODEL) return swapFrameOptions(width, height)
+  if (!STUDIO_MODELS[model]) return {}
+  const props = (studioSchema(model).properties ?? {}) as Record<string, { enum?: unknown[] }>
+  const out: Record<string, unknown> = {}
+  const aspects = props.aspect_ratio?.enum?.filter((a): a is string => typeof a === 'string' && /^\d+:\d+$/.test(a))
+  if (aspects?.length) out.aspect_ratio = nearestAspect(aspects, width, height)
+  const resolutions = props.resolution?.enum?.map(String)
+  if (resolutions?.length) out.resolution = resolutions.includes('1k') ? '1k' : resolutions[0]
+  if (props.output_format?.enum?.includes('jpeg')) out.output_format = 'jpeg'
+  return out
+}
+
+function nearestAspect(list: readonly string[], width: number, height: number): string {
+  if (!(width > 0) || !(height > 0)) return list.includes('9:16') ? '9:16' : list[0]
+  const want = Math.log(width / height)
+  let best = list[0], gap = Infinity
+  for (const a of list) {
+    const [w, h] = a.split(':').map(Number)
+    const d = Math.abs(Math.log(w / h) - want)
+    if (d < gap - 1e-9) { best = a; gap = d }
+  }
+  return best
 }
 
 const IMAGE_ORDINAL = ['second', 'third', 'fourth', 'fifth']

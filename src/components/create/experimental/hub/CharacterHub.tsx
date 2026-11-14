@@ -34,7 +34,8 @@ import { Composer, LaneControls } from '../Composer'
 import { SpecialControls, SpecialMore } from '../SpecialIntentControls'
 import { Select, type SelectOption } from '../../ui/Select'
 import { cn } from '../../ui/cn'
-import { HubAvatar, HubCharactersContext, MoreOptions } from './HubParts'
+import { HUB_COLUMN, HubAvatar, HubCharactersContext, MoreOptions } from './HubParts'
+import { SwapOneClick, useSwapOneClickShown } from './SwapOneClick'
 import { openHubAction, useHubCharacters } from './hubCharacters'
 
 type TeaserIntent = Extract<CloudTeaserTarget, { surface: 'intent' }>['intent']
@@ -56,11 +57,15 @@ interface Props {
 }
 
 /** The column every step shares: 660 px, centred. */
-const COLUMN = 'mx-auto w-full max-w-[660px] px-4'
+const COLUMN = HUB_COLUMN
 
 export function CharacterHub({ stage, onOpenAdvanced, onOpenWorkflows, onOpenGallery }: Props) {
   const step = useCreateStore((s) => s.hubStep)
   const { list, loading } = useHubCharacters()
+  // Swap with the account switch on the cloud: the one click flow, with its
+  // own bar (hub/SwapOneClick.tsx). Without it the panel as before.
+  const oneClick = useSwapOneClickShown()
+  const setHubStep = useCreateStore((s) => s.setHubStep)
   return (
     <HubCharactersContext.Provider value={list}>
       <section className="lu-hub flex min-w-0 flex-1 flex-col overflow-hidden" data-character-hub={step} aria-label="Character">
@@ -69,7 +74,10 @@ export function CharacterHub({ stage, onOpenAdvanced, onOpenWorkflows, onOpenGal
         </div>
         {step === 'who' && <Scroll><HubWho list={list} loading={loading} onOpenGallery={onOpenGallery} /></Scroll>}
         {step === 'what' && <Scroll><HubWhat /></Scroll>}
-        {step === 'panel' && (
+        {step === 'panel' && oneClick && (
+          <SwapOneClick onChangeCharacter={() => setHubStep('who')} onOpenAdvanced={onOpenAdvanced} />
+        )}
+        {step === 'panel' && !oneClick && (
           <>
             <Scroll>
               <div className="empty:hidden pt-3"><Stage hub {...stage} /></div>

@@ -79,7 +79,7 @@ const NEGATIVE_FIELD_MAX = 'min(120px, calc(9vh / var(--ui-scale, 1)))'
 const MAC_EDIT_PLACEHOLDER = 'Describe what to change in this image. Paint a mask to change only that area…'
 
 /** The window is phone-wide (the Character area's bar takes m310's short form). */
-function useNarrow(): boolean {
+export function useNarrow(): boolean {
   const query = '(max-width: 520px)'
   const [narrow, setNarrow] = useState(() => typeof window !== 'undefined' && !!window.matchMedia?.(query).matches)
   useEffect(() => {
