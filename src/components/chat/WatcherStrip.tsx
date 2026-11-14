@@ -2,8 +2,10 @@
 // "◷ 3 watchers · next 18:00". A click opens a plain list under it with Pause
 // and Delete. No frame and no surface around it (David, 14.11.2026): it is a
 // line of text in the composer's own column, like the hairlines of a run.
+// Right-aligned, and the row actions are icons with a tooltip (David's Ok to
+// sketch v2).
 import { useEffect, useState } from 'react'
-import { Clock3 } from 'lucide-react'
+import { Clock3, Pause, Play, Trash2, X } from 'lucide-react'
 import { useWatcherStore } from '../../stores/watcherStore'
 import { useChatStore } from '../../stores/chatStore'
 import { useUIStore } from '../../stores/uiStore'
@@ -38,7 +40,7 @@ export function rowState(w: Watcher, now: number): string {
   return `${repeatText(w.schedule)} · ${lastText}`
 }
 
-const act = 'text-gray-500 hover:text-gray-800 dark:hover:text-gray-200 transition-colors'
+const act = 'flex items-center justify-center w-5 h-5 rounded text-gray-500 hover:text-gray-800 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/5 transition-colors shrink-0'
 
 export function WatcherStrip() {
   const watchers = useWatcherStore((s) => s.watchers)
@@ -72,16 +74,18 @@ export function WatcherStrip() {
 
   return (
     <div className={`w-full ${COMPOSER_MAX_W} mx-auto px-3 pb-1`} data-testid="watcher-strip">
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        aria-expanded={open}
-        title={open ? 'Hide the watchers' : 'Show the watchers'}
-        className="flex items-center gap-1.5 px-1 py-0.5 t-micro text-gray-500 hover:text-gray-800 dark:hover:text-gray-200 transition-colors max-w-full"
-      >
-        <Clock3 size={10} className={`shrink-0 ${watchers.some((w) => w.running_since) ? 'text-blue-400' : ''}`} />
-        <span className="truncate tabular-nums">{line}</span>
-      </button>
+      <div className="flex justify-end">
+        <button
+          type="button"
+          onClick={() => setOpen((o) => !o)}
+          aria-expanded={open}
+          title={open ? 'Hide the watchers' : 'Show the watchers'}
+          className="flex items-center gap-1.5 px-1 py-0.5 t-micro text-gray-500 hover:text-gray-800 dark:hover:text-gray-200 transition-colors max-w-full"
+        >
+          <Clock3 size={10} className={`shrink-0 ${watchers.some((w) => w.running_since) ? 'text-blue-400' : ''}`} />
+          <span className="truncate tabular-nums">{line}</span>
+        </button>
+      </div>
       {open && (
         <div className="mt-0.5 mb-1 t-micro">
           {sorted.map((w) => (
@@ -93,16 +97,24 @@ export function WatcherStrip() {
               </button>
               <span className="flex-1 min-w-0 truncate text-gray-500" title={w.runs[0]?.summary || undefined}>{rowState(w, now)}</span>
               {w.next_at && !w.running_since && (
-                <button type="button" className={act} onClick={() => call('watchers_update', { id: w.id, patch: { paused: !w.paused } })}>
-                  {w.paused ? 'Resume' : 'Pause'}
+                <button
+                  type="button"
+                  className={act}
+                  title={w.paused ? 'Resume' : 'Pause'}
+                  aria-label={w.paused ? `Resume ${w.name}` : `Pause ${w.name}`}
+                  onClick={() => call('watchers_update', { id: w.id, patch: { paused: !w.paused } })}
+                >
+                  {w.paused ? <Play size={11} /> : <Pause size={11} />}
                 </button>
               )}
               <button
                 type="button"
-                className={confirming === w.id ? 'text-red-500' : act}
+                className={`${act} ${confirming === w.id ? '!text-red-500' : ''}`}
+                title={confirming === w.id ? 'Click again to delete' : 'Delete'}
+                aria-label={confirming === w.id ? `Click again to delete ${w.name}` : `Delete ${w.name}`}
                 onClick={() => { if (confirming === w.id) { setConfirming(null); call('watchers_delete', { id: w.id }) } else setConfirming(w.id) }}
               >
-                {confirming === w.id ? 'Delete?' : 'Delete'}
+                <Trash2 size={11} />
               </button>
             </div>
           ))}
@@ -112,7 +124,9 @@ export function WatcherStrip() {
               <span className="w-24 shrink-0 tabular-nums">{h.was_next ? whenText(h.was_next, now) : '—'}</span>
               <span className="min-w-0 truncate">{h.name}</span>
               <span className="flex-1 min-w-0 truncate">ended when LU quit, not caught up</span>
-              <button type="button" className={act} onClick={() => call('watchers_dismiss_hint', { id: h.id })}>Dismiss</button>
+              <button type="button" className={act} title="Dismiss" aria-label={`Dismiss the note about ${h.name}`} onClick={() => call('watchers_dismiss_hint', { id: h.id })}>
+                <X size={11} />
+              </button>
             </div>
           ))}
           <div className="border-t border-gray-200 dark:border-white/[0.06]" />
