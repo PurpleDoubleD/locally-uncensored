@@ -954,6 +954,14 @@ async function executeFileEdit(args: ToolArgs, run?: AgentRunContext): Promise<s
   return JSON.stringify(w)
 }
 
+/** What file_list says when it lists nothing. */
+export function emptyListAnswer(args: ToolArgs): string {
+  const pattern = typeof args.pattern === 'string' ? args.pattern.trim() : ''
+  if (!pattern) return 'The folder is empty.'
+  if (args.recursive || pattern.includes('/')) return `No file matches "${pattern}" here or in its subfolders.`
+  return `No file in this folder matches "${pattern}". The pattern does not look into subfolders: set recursive=true or use "**/${pattern}".`
+}
+
 async function executeFileList(args: ToolArgs, run?: AgentRunContext): Promise<string> {
   const bad = missingArgs('file_list', args, 'path')
   if (bad) return bad
@@ -973,7 +981,10 @@ async function executeFileList(args: ToolArgs, run?: AgentRunContext): Promise<s
   if (Array.isArray(data.entries)) {
     // An empty answer read as nothing: the model said "I listed the files"
     // and named none, the step showed no result (3.0.4 box run).
-    if (!data.entries.length) return 'The folder is empty.'
+    // With a pattern an empty answer means "nothing matched", not "empty":
+    // Kimi read "The folder is empty." for `*.{js,mjs}` over a tree full of
+    // .js files (CA bench AG9).
+    if (!data.entries.length) return emptyListAnswer(args)
     return data.entries
       .map((e) => `${e.isDir ? '[DIR]' : ''} ${e.name} (${formatBytes(e.size)})  ${shownToolPath(e.path)}`)
       .join('\n')
