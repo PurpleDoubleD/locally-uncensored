@@ -127,8 +127,12 @@ const VOLLTEXT = QUELLEN.map((p) => readFileSync(p, 'utf8')).join('\n')
  * raus, `://` in URLs geschont. Damit laesst sich sagen, ob eine Klasse im
  * Code steht oder nur in einer Notiz darueber.
  */
+//
+// Ein `/*` direkt hinter einem Buchstaben ist kein Kommentar: `accept="image/*"`
+// (Character-Bereich, HubParts.tsx) hatte sonst alles bis zum naechsten `*/`
+// zur Notiz gemacht, auch zwei echte Call-Sites von `w-[92px]`.
 const nurCode = (s: string) =>
-  s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1')
+  s.replace(/(^|[^\w])\/\*[\s\S]*?\*\//g, '$1').replace(/(^|[^:])\/\/.*$/gm, '$1')
 const CODETEXT = QUELLEN.map((p) => nurCode(readFileSync(p, 'utf8'))).join('\n')
 
 /**
