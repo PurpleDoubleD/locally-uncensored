@@ -81,3 +81,18 @@ describe('3D, second cloud wave', () => {
     expect(studioCredits('meshy-7.1-image', studioOptions('meshy-7.1-image', '', { should_texture: false }, false))).toBe(80_000)
   })
 })
+
+describe('the Detail step follows the price, whatever order the schema lists', () => {
+  it('Tripo: Draft is the plain texture, Fine the 8K one, never the quick one', () => {
+    for (const id of ['tripo-h3.1-image', 'tripo-p1-image', 'tripo-p2-text']) {
+      const f = threeDDetailField(id)!
+      expect(f.values, id).toEqual({ draft: 'standard', standard: 'standard', fine: 'extreme' })
+    }
+  })
+
+
+  it('TRELLIS.2 keeps its resolutions in order', () => {
+    const f = threeDDetailField('trellis-2')!
+    expect(Number(f.values.draft)).toBeLessThan(Number(f.values.fine))
+  })
+})

@@ -38,13 +38,29 @@ export function threeDDetailField(studioId: string | undefined): { field: string
   const field = m.price.resolutionField ?? (m.price.rates && Object.keys(m.price.rates).length > 1 ? 'resolution' : undefined)
   if (!field) return null
   let choices: unknown[] | undefined
+  let fallback: unknown
   try {
-    choices = studioSchema(studioId!).properties?.[field]?.enum
+    const prop = studioSchema(studioId!).properties?.[field]
+    choices = prop?.enum
+    fallback = prop?.default
   } catch {
     return null
   }
   if (!choices || choices.length < 2) return null
-  const mid = choices[Math.floor((choices.length - 1) / 2)]
+  // A schema lists its choices in any order (Tripo: standard, detailed,
+  // extreme, fast; Meshy: texture on, off). When the price runs over the
+  // field, cheapest is Draft and dearest is Fine; of equal prices the first
+  // listed stays. Standard is the model's own default, else the middle one.
+  const rates = m.price.rates ?? {}
+  const priced = choices.every((c) => typeof rates[String(c)] === 'number')
+  if (priced) {
+    const seen = new Set<number>()
+    choices = [...choices]
+      .sort((a, b) => rates[String(a)] - rates[String(b)])
+      .filter((c) => (seen.has(rates[String(c)]) ? false : (seen.add(rates[String(c)]), true)))
+    if (choices.length < 2) return null
+  }
+  const mid = priced && choices.includes(fallback) ? fallback : choices[Math.floor((choices.length - 1) / 2)]
   return { field, values: { draft: choices[0], standard: mid, fine: choices[choices.length - 1] } }
 }
 
