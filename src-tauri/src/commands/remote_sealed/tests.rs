@@ -291,7 +291,7 @@ async fn a_browser_on_the_tunnel_gets_the_app_only_notice() {
         assert!(html.contains("works only with the LU app"), "{path}");
         assert!(html.contains("home Wi-Fi"), "{path}");
         let lower = html.to_ascii_lowercase();
-        for banned in ["<script", "http://", "https://", "src=", "href=", "studio pc", env!("CARGO_PKG_VERSION")] {
+        for banned in ["<script", "http://", "https://", "src=", "href=", "studio pc", crate::app_identity::APP_VERSION] {
             assert!(!lower.contains(&banned.to_ascii_lowercase()), "{path}: {banned}");
         }
     }
