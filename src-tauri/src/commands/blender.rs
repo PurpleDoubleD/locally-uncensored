@@ -161,7 +161,9 @@ pub(crate) fn windows_candidates(registered: &[PathBuf], program_dirs: &[PathBuf
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 pub(crate) fn linux_candidates(home: Option<&Path>, path_dirs: &[PathBuf]) -> Vec<Install> {
     let mut files: Vec<(PathBuf, &'static str)> = Vec::new();
-    for d in path_dirs {
+    // Only absolute PATH folders: an empty entry means "the current folder",
+    // and LU must not run a `blender` that happens to lie where it started.
+    for d in path_dirs.iter().filter(|d| d.is_absolute()) {
         files.push((d.join("blender"), "path"));
     }
     for f in ["/usr/bin/blender", "/usr/local/bin/blender", "/snap/bin/blender"] {
@@ -817,6 +819,16 @@ mod tests {
         let sources: Vec<&str> = ours.iter().map(|i| i.source).collect();
         assert_eq!(sources, vec!["path", "flatpak", "steam", "download"], "{ours:?}");
         assert_eq!(ours[0].exe, bin.join("blender"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn linux_ignores_empty_and_relative_path_entries() {
+        let t = tmp();
+        let rel = PathBuf::from("rel-bin-c3d");
+        let found = linux_candidates(Some(&t.path().join("home")), &[PathBuf::new(), PathBuf::from("."), rel.clone()]);
+        assert!(found.iter().all(|i| i.exe.is_absolute()), "{found:?}");
+        assert!(!found.iter().any(|i| i.source == "path"), "{found:?}");
     }
 
     #[test]
