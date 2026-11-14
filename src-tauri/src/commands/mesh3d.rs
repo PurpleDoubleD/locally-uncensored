@@ -42,6 +42,7 @@
 //!   - the encoder config, Apache 2.0: <https://huggingface.co/facebook/dino-vitb16>
 //!     at `DINO_REVISION`
 
+use crate::commands::mesh3d_sf3d;
 use crate::commands::voice_loop::manifest::RemoteFile;
 use crate::commands::{bad_request, internal, not_found, CmdResult};
 use crate::install_state::InstallSlot;
@@ -98,6 +99,10 @@ const PINNED: [&str; 34] = [
     "transformers==4.57.6", "trimesh==5.1.1", "typing-extensions==4.15.0", "urllib3==2.6.3",
 ];
 
+/// TripoSR's pins, for the test of the other engine's shared versions.
+#[cfg(test)]
+pub(crate) const PINNED_FOR_TESTS: &[&str] = &PINNED;
+
 /// What the install proves it can import before the self test.
 const MODULE: &str = "torch, transformers, omegaconf, trimesh, skimage.measure, einops, PIL";
 
@@ -138,11 +143,11 @@ fn root() -> PathBuf {
     crate::os_paths::data_dir().join("mesh3d")
 }
 
-fn venv_dir(root: &Path) -> PathBuf {
+pub(crate) fn venv_dir(root: &Path) -> PathBuf {
     root.join("venv")
 }
 
-fn venv_python(venv: &Path) -> PathBuf {
+pub(crate) fn venv_python(venv: &Path) -> PathBuf {
     venv.join("bin").join("python")
 }
 
@@ -152,16 +157,16 @@ fn source_dir(root: &Path) -> PathBuf {
 }
 
 /// `model.ckpt`, `config.yaml` and the encoder's `dino-vitb16/config.json`.
-fn weights_dir(root: &Path) -> PathBuf {
+pub(crate) fn weights_dir(root: &Path) -> PathBuf {
     root.join("weights")
 }
 
 /// Where the downloads that are not the weights wait to be unpacked.
-fn downloads_dir(root: &Path) -> PathBuf {
+pub(crate) fn downloads_dir(root: &Path) -> PathBuf {
     root.join("downloads")
 }
 
-fn work_dir(root: &Path) -> PathBuf {
+pub(crate) fn work_dir(root: &Path) -> PathBuf {
     root.join("work")
 }
 
@@ -188,6 +193,7 @@ fn ensure_apple_silicon() -> Result<(), String> {
 
 // ── The engine ────────────────────────────────────────────────────────
 
+#[cfg(test)]
 fn pip_args() -> Vec<String> {
     ["-m", "pip", "install", "--upgrade", "--only-binary", ":all:", "--disable-pip-version-check"]
         .iter()
@@ -208,7 +214,7 @@ fn engine_ready_at(venv: &Path) -> bool {
     venv_python(venv).exists() && std::fs::read_to_string(stamp_file(venv)).is_ok_and(|s| s == stamp())
 }
 
-fn python_has_module(python: &str, module: &str) -> bool {
+pub(crate) fn python_has_module(python: &str, module: &str) -> bool {
     crate::python::python_command(python)
         .args(["-I", "-c", &format!("import {module}")])
         .stdin(Stdio::null())
@@ -219,7 +225,7 @@ fn python_has_module(python: &str, module: &str) -> bool {
         .unwrap_or(false)
 }
 
-fn create_venv(slot: &InstallSlot, base: &str, venv: &Path) -> Result<(), String> {
+pub(crate) fn create_venv(slot: &InstallSlot, base: &str, venv: &Path) -> Result<(), String> {
     if let Some(parent) = venv.parent() {
         std::fs::create_dir_all(parent).map_err(|e| os_error::english(&e))?;
     }
@@ -238,8 +244,40 @@ fn create_venv(slot: &InstallSlot, base: &str, venv: &Path) -> Result<(), String
 /// not. Built from LU's own Python (`private_python`), never one found on the
 /// Mac. `base` is for the tests.
 fn ensure_engine_at(slot: &InstallSlot, base: Option<String>, venv: &Path) -> Result<String, String> {
+    let engine = Engine { pinned: &PINNED, wheels: &[], module: MODULE, stamp: stamp(), stamp_file: stamp_file(venv) };
+    ensure_engine_with(slot, base, venv, &engine)
+}
+
+/// What a 3D engine's venv holds: the packages from PyPI, wheels LU ships
+/// itself (paths on disk, written and checked by the caller), the import
+/// that proves it, and the stamp that says it is this pin.
+pub(crate) struct Engine<'a> {
+    pub pinned: &'a [&'a str],
+    pub wheels: &'a [PathBuf],
+    pub module: &'a str,
+    pub stamp: String,
+    pub stamp_file: PathBuf,
+}
+
+impl Engine<'_> {
+    pub(crate) fn ready(&self, venv: &Path) -> bool {
+        venv_python(venv).exists() && std::fs::read_to_string(&self.stamp_file).is_ok_and(|s| s == self.stamp)
+    }
+
+    pub(crate) fn pip_args(&self) -> Vec<String> {
+        ["-m", "pip", "install", "--upgrade", "--only-binary", ":all:", "--disable-pip-version-check"]
+            .iter()
+            .map(|a| a.to_string())
+            .chain(self.pinned.iter().map(|p| p.to_string()))
+            .chain(self.wheels.iter().map(|w| w.to_string_lossy().to_string()))
+            .collect()
+    }
+}
+
+/// The venv of `engine`, built when it is not there or not this pin.
+pub(crate) fn ensure_engine_with(slot: &InstallSlot, base: Option<String>, venv: &Path, engine: &Engine<'_>) -> Result<String, String> {
     let python = venv_python(venv).to_string_lossy().to_string();
-    if engine_ready_at(venv) {
+    if engine.ready(venv) {
         return Ok(python);
     }
     if !(venv_python(venv).exists() && python_has_module(&python, "pip")) {
@@ -250,15 +288,15 @@ fn ensure_engine_at(slot: &InstallSlot, base: Option<String>, venv: &Path) -> Re
         slot.log(format!("Python: {base}"));
         create_venv(slot, &base, venv)?;
     }
-    let _ = std::fs::remove_file(stamp_file(venv));
-    slot.log(format!("installing the 3D engine packages, {} pinned (one-time)", PINNED.len()));
+    let _ = std::fs::remove_file(&engine.stamp_file);
+    slot.log(format!("installing the 3D engine packages, {} pinned (one-time)", engine.pinned.len() + engine.wheels.len()));
     let mut pip = crate::python::python_command(&python);
-    pip.args(pip_args());
+    pip.args(engine.pip_args());
     crate::commands::video::run_streamed(slot, &mut pip).map_err(|e| format!("Could not install the 3D engine. {e}"))?;
-    if !python_has_module(&python, MODULE) {
-        return Err(format!("pip install finished but `import {MODULE}` still fails"));
+    if !python_has_module(&python, engine.module) {
+        return Err(format!("pip install finished but `import {}` still fails", engine.module));
     }
-    std::fs::write(stamp_file(venv), stamp()).map_err(|e| os_error::english(&e))?;
+    std::fs::write(&engine.stamp_file, &engine.stamp).map_err(|e| os_error::english(&e))?;
     Ok(python)
 }
 
@@ -403,6 +441,12 @@ fn bytes_to_fetch(root: &Path) -> u64 {
 /// Fetch every `(remote, destination)` that is not there yet, one after the
 /// other, with one bar over all of them.
 fn fetch_files(slot: &InstallSlot, files: &[(RemoteFile, PathBuf)], what: &str) -> Result<(), String> {
+    fetch_files_as(slot, files, what, None)
+}
+
+/// `fetch_files` with a Hugging Face token for a gated repository. A refusal
+/// of the hub is said in the words the image lane uses for it.
+pub(crate) fn fetch_files_as(slot: &InstallSlot, files: &[(RemoteFile, PathBuf)], what: &str, hub_token: Option<&str>) -> Result<(), String> {
     use crate::commands::voice_loop::fetch;
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -424,9 +468,14 @@ fn fetch_files(slot: &InstallSlot, files: &[(RemoteFile, PathBuf)], what: &str) 
             let seconds = started.elapsed().as_secs_f64().max(0.001);
             meter.set_download(all, total, (all.saturating_sub(first) as f64 / seconds) as u64);
         };
-        let fetched = runtime.block_on(fetch::fetch_verified(&client, remote, dest, &cancel, &mut on_progress));
+        let fetched = runtime.block_on(fetch::fetch_verified_as(&client, remote, dest, hub_token, &cancel, &mut on_progress));
         if let Err(e) = fetched {
             slot.set_download(0, 0, 0);
+            if let fetch::FetchError::Http(status) = e {
+                if let Some(why) = crate::commands::mlx::hub_denied_message(status, hub_token.is_some()) {
+                    return Err(why.to_string());
+                }
+            }
             return Err(e.user_message(what));
         }
         before += remote.size;
@@ -466,15 +515,19 @@ fn install_weights(slot: &InstallSlot, root: &Path) -> Result<(), String> {
 
 /// The runner on the disk, as compiled into this build.
 fn write_runner(root: &Path) -> Result<PathBuf, String> {
-    let file = runner_file(root);
-    if std::fs::read_to_string(&file).is_ok_and(|s| s == RUNNER) {
-        return Ok(file);
+    write_runner_at(&runner_file(root), RUNNER)
+}
+
+/// A runner `text` at `file`, written only when it differs.
+pub(crate) fn write_runner_at(file: &Path, text: &str) -> Result<PathBuf, String> {
+    if std::fs::read_to_string(file).is_ok_and(|s| s == text) {
+        return Ok(file.to_path_buf());
     }
     if let Some(dir) = file.parent() {
         std::fs::create_dir_all(dir).map_err(|e| os_error::english(&e))?;
     }
-    std::fs::write(&file, RUNNER).map_err(|e| os_error::english(&e))?;
-    Ok(file)
+    std::fs::write(file, text).map_err(|e| os_error::english(&e))?;
+    Ok(file.to_path_buf())
 }
 
 /// The runner's own test: a sphere through the surface, colour and GLB code,
@@ -513,7 +566,10 @@ pub fn mesh3d_status(_state: &AppState, _args: &Value) -> CmdResult {
     let root = root();
     let engine = engine_ready_at(&venv_dir(&root));
     let installed = installed_at(&root);
+    let sf3d = mesh3d_sf3d::model_json(mesh3d_sf3d::installed_at(&mesh3d_sf3d::root()), crate::commands::mlx::hf_token().is_some());
     Ok(json!({
+        "models": [model_json(installed), sf3d],
+        "installing": installing_model(),
         "available": apple_silicon,
         "appleSilicon": apple_silicon,
         "engineInstalled": engine,
@@ -525,13 +581,51 @@ pub fn mesh3d_status(_state: &AppState, _args: &Value) -> CmdResult {
     }))
 }
 
-pub fn mesh3d_install(state: &AppState, _args: &Value) -> CmdResult {
+/// Which model of the 3D lane an install or a run is for. TripoSR when
+/// the caller names none, as every caller before the second model did.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) enum Which {
+    TripoSr,
+    Sf3d,
+}
+
+#[derive(Deserialize, Default)]
+struct ModelArg {
+    #[serde(default)]
+    model: Option<String>,
+    /// What the Model Manager and the real run send.
+    #[serde(default)]
+    id: Option<String>,
+}
+
+fn which(args: &Value) -> Result<Which, String> {
+    let a: ModelArg = serde_json::from_value(args.clone()).unwrap_or_default();
+    match a.model.as_deref().or(a.id.as_deref()) {
+        None | Some(MODEL_ID) => Ok(Which::TripoSr),
+        Some(mesh3d_sf3d::MODEL_ID) => Ok(Which::Sf3d),
+        Some(other) => Err(bad_request(format!("There is no 3D model called {other} on this Mac."))),
+    }
+}
+
+/// The model the install slot works or worked on, for the poll.
+static INSTALLING: Mutex<Option<&'static str>> = Mutex::new(None);
+
+fn installing_model() -> Option<&'static str> {
+    *INSTALLING.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+pub fn mesh3d_install(state: &AppState, args: &Value) -> CmdResult {
     ensure_apple_silicon()?;
-    let root = root();
+    let model = which(args)?;
     let slot = state.install_mesh3d();
     if slot.is_running() {
-        return Ok(json!({ "ok": true, "status": "installing" }));
+        return Ok(json!({ "ok": true, "status": "installing", "id": installing_model() }));
     }
+    if model == Which::Sf3d {
+        return install_sf3d(slot);
+    }
+    *INSTALLING.lock().unwrap_or_else(|e| e.into_inner()) = Some(MODEL_ID);
+    let root = root();
     if installed_at(&root) {
         if slot.try_start() {
             slot.complete(format!("{MODEL_ID} already installed"));
@@ -559,8 +653,37 @@ pub fn mesh3d_install(state: &AppState, _args: &Value) -> CmdResult {
     Ok(json!({ "ok": true, "status": "installing", "id": MODEL_ID }))
 }
 
+/// Stable Fast 3D on the same slot: its weights are gated, so nothing is
+/// fetched before the user's Hugging Face token is there.
+fn install_sf3d(slot: crate::install_state::InstallSlot) -> CmdResult {
+    let root = mesh3d_sf3d::root();
+    *INSTALLING.lock().unwrap_or_else(|e| e.into_inner()) = Some(mesh3d_sf3d::MODEL_ID);
+    if mesh3d_sf3d::installed_at(&root) {
+        if slot.try_start() {
+            slot.complete(format!("{} already installed", mesh3d_sf3d::MODEL_ID));
+        }
+        return Ok(json!({ "ok": true, "status": "complete", "id": mesh3d_sf3d::MODEL_ID }));
+    }
+    let Some(token) = crate::commands::mlx::hf_token() else {
+        return Err(bad_request(crate::commands::mlx::hub_denied_message(401, false).unwrap_or_default()));
+    };
+    let (need, note) = mesh3d_sf3d::install_need(&root);
+    crate::commands::system::ensure_free_space(&crate::os_paths::data_dir(), mesh3d_sf3d::MODEL_NAME, need, note).map_err(bad_request)?;
+    std::fs::create_dir_all(&root).map_err(|e| internal(os_error::english(&e)))?;
+    crate::media_store::keep_out_of_backups(&root);
+    if !slot.try_start() {
+        return Ok(json!({ "ok": true, "status": "installing", "id": installing_model() }));
+    }
+    crate::install_state::spawn_install(slot, move |slot| mesh3d_sf3d::install(slot, &root, &token));
+    Ok(json!({ "ok": true, "status": "installing", "id": mesh3d_sf3d::MODEL_ID }))
+}
+
 pub fn mesh3d_install_status(state: &AppState, _args: &Value) -> CmdResult {
-    Ok(serde_json::to_value(state.install_mesh3d().snapshot()).unwrap_or(Value::Null))
+    let mut answer = serde_json::to_value(state.install_mesh3d().snapshot()).unwrap_or(Value::Null);
+    if answer.is_object() {
+        answer["model"] = json!(installing_model());
+    }
+    Ok(answer)
 }
 
 pub fn mesh3d_cancel_install(state: &AppState, _args: &Value) -> CmdResult {
@@ -568,12 +691,17 @@ pub fn mesh3d_cancel_install(state: &AppState, _args: &Value) -> CmdResult {
 }
 
 /// Remove the weights. The engine and the source stay, as with music.
-pub fn mesh3d_delete(state: &AppState, _args: &Value) -> CmdResult {
+pub fn mesh3d_delete(state: &AppState, args: &Value) -> CmdResult {
+    let model = which(args)?;
     if busy() {
         return Err(bad_request("A 3D model is being made. Wait for it to finish before removing the model."));
     }
     if state.install_mesh3d().is_running() {
         return Err(bad_request("The 3D model is still installing. Wait for it to finish, or stop it first."));
+    }
+    if model == Which::Sf3d {
+        mesh3d_sf3d::delete_at(&mesh3d_sf3d::root())?;
+        return Ok(json!({ "ok": true, "id": mesh3d_sf3d::MODEL_ID }));
     }
     delete_at(&root())?;
     Ok(json!({ "ok": true, "id": MODEL_ID }))
@@ -605,6 +733,12 @@ struct GenerateArgs {
     /// picture that is transparent already is never cut again.
     #[serde(default)]
     cutout: Option<bool>,
+    /// `triposr` (the default) or `sf3d`.
+    #[serde(default)]
+    model: Option<String>,
+    /// The texture side of Stable Fast 3D: 512, 1024 or 2048.
+    #[serde(default)]
+    texture: Option<u32>,
 }
 
 /// The grid side a run uses, within what this lane offers, on steps of 32.
@@ -680,13 +814,18 @@ fn run_command(root: &Path, runner: &Path, job_file: &Path) -> Command {
     cmd
 }
 
+#[cfg(test)]
 fn memory_refusal(total_bytes: u64) -> Option<String> {
+    memory_refusal_for(total_bytes, MODEL_NAME, MIN_RAM_GB)
+}
+
+fn memory_refusal_for(total_bytes: u64, name: &str, min_gb: u32) -> Option<String> {
     if total_bytes == 0 {
         return None;
     }
     let have = (total_bytes as f64 / 1_073_741_824.0).round() as u32;
-    (have < MIN_RAM_GB).then(|| {
-        format!("{MODEL_NAME} needs a Mac with {MIN_RAM_GB} GB of memory, and this one has {have} GB. It was not started, because loading it would freeze this Mac.")
+    (have < min_gb).then(|| {
+        format!("{name} needs a Mac with {min_gb} GB of memory, and this one has {have} GB. It was not started, because loading it would freeze this Mac.")
     })
 }
 
@@ -1040,11 +1179,23 @@ pub async fn mesh3d_generate(state: &AppState, args: &Value) -> CmdResult {
     let run = run_file_stem(req.run.trim()).ok_or_else(|| bad_request("The run needs a name of letters, digits and dashes."))?.to_string();
     let input = crate::commands::mlx_cutout::staged_input(&req.image_path, &crate::commands::mlx_cutout::staged_images_dir())
         .map_err(|e| bad_request(if e == crate::commands::mlx_cutout::NO_IMAGE { "Add a picture of one object first.".to_string() } else { e }))?;
-    let root = root();
-    if !installed_at(&root) {
-        return Err(bad_request(format!("{MODEL_NAME} is not installed. Install it in the Model Manager first.")));
+    let model = match req.model.as_deref() {
+        None | Some(MODEL_ID) => Which::TripoSr,
+        Some(mesh3d_sf3d::MODEL_ID) => Which::Sf3d,
+        Some(other) => return Err(bad_request(format!("There is no 3D model called {other} on this Mac."))),
+    };
+    let (root, name, min_gb) = match model {
+        Which::TripoSr => (root(), MODEL_NAME, MIN_RAM_GB),
+        Which::Sf3d => (mesh3d_sf3d::root(), mesh3d_sf3d::MODEL_NAME, mesh3d_sf3d::MIN_RAM_GB),
+    };
+    let installed = match model {
+        Which::TripoSr => installed_at(&root),
+        Which::Sf3d => mesh3d_sf3d::installed_at(&root),
+    };
+    if !installed {
+        return Err(bad_request(format!("{name} is not installed. Set it up in the 3D tab first.")));
     }
-    if let Some(refusal) = memory_refusal(crate::commands::system::total_memory_bytes()) {
+    if let Some(refusal) = memory_refusal_for(crate::commands::system::total_memory_bytes(), name, min_gb) {
         return Err(bad_request(refusal));
     }
     // One model in the memory at a time.
@@ -1075,7 +1226,11 @@ pub async fn mesh3d_generate(state: &AppState, args: &Value) -> CmdResult {
             return Err(internal(why));
         }
     }
-    let runner = match write_runner(&root) {
+    let written = match model {
+        Which::TripoSr => write_runner(&root),
+        Which::Sf3d => write_runner_at(&mesh3d_sf3d::runner_file(&root), mesh3d_sf3d::RUNNER),
+    };
+    let runner = match written {
         Ok(path) => path,
         Err(why) => {
             RUNS.conclude(&Err(why.clone()));
@@ -1084,10 +1239,16 @@ pub async fn mesh3d_generate(state: &AppState, args: &Value) -> CmdResult {
     };
     let output = output_for(&out_dir, &run, &job);
     let resolution = resolution_for(req.resolution);
+    let texture = mesh3d_sf3d::texture_for(req.texture);
     let cutout = req.cutout.unwrap_or(true);
     RUNS.view().output = Some(output.to_string_lossy().to_string());
-    tracing::info!("[mesh3d] TripoSR at {}: grid {resolution}, cutout {cutout}", &SOURCE_COMMIT[..7]);
-    let pid_file = run_pid_file(&root);
+    match model {
+        Which::TripoSr => tracing::info!("[mesh3d] TripoSR at {}: grid {resolution}, cutout {cutout}", &SOURCE_COMMIT[..7]),
+        Which::Sf3d => tracing::info!("[mesh3d] Stable Fast 3D at {}: texture {texture}, cutout {cutout}", &mesh3d_sf3d::SOURCE_COMMIT[..7]),
+    }
+    // One pid file for the lane, in TripoSR's folder, whatever the model:
+    // there is one run at a time, and the reaper reads this one.
+    let pid_file = run_pid_file(&self::root());
     let out = output.clone();
     std::thread::spawn(move || {
         let verdict = (|| {
@@ -1099,7 +1260,11 @@ pub async fn mesh3d_generate(state: &AppState, args: &Value) -> CmdResult {
             };
             RUNS.set_phase("load", 5);
             let job_file = job_dir.join("job.json");
-            std::fs::write(&job_file, job_json(&root, &picture, resolution, &job_dir, &out).to_string())
+            let job = match model {
+                Which::TripoSr => job_json(&root, &picture, resolution, &job_dir, &out),
+                Which::Sf3d => mesh3d_sf3d::job_json(&root, &picture, texture, &job_dir, &out),
+            };
+            std::fs::write(&job_file, job.to_string())
                 .map_err(|e| format!("write {}: {}", job_file.display(), os_error::english(&e)))?;
             let child = start(&RUNS, run_command(&root, &runner, &job_file), Some(&pid_file))?;
             finish(&RUNS, child, &out, Some(&pid_file), GENERATE_TIMEOUT, STALL_AFTER)
@@ -1122,7 +1287,9 @@ pub async fn mesh3d_generate(state: &AppState, args: &Value) -> CmdResult {
         "jobId": job,
         "run": run,
         "output": output,
+        "model": match model { Which::TripoSr => MODEL_ID, Which::Sf3d => mesh3d_sf3d::MODEL_ID },
         "resolution": resolution,
+        "texture": texture,
         "cutout": cutout,
     }))
 }
@@ -1175,7 +1342,8 @@ pub(crate) fn reap_orphaned_run() -> Option<u32> {
         return None;
     };
     let row = Leftover { parent: process.parent().map(|p| p.as_u32()), cmd: crate::process_util::cmdline_of(process) };
-    if !is_orphaned_run(&row, &work_dir(&root)) {
+    let ours = is_orphaned_run(&row, &work_dir(&root)) || is_orphaned_run(&row, &work_dir(&mesh3d_sf3d::root()));
+    if !ours {
         if row.parent == Some(1) {
             let _ = std::fs::remove_file(&pid_file);
         }
@@ -1456,6 +1624,30 @@ mod tests {
     }
 
     #[test]
+    fn a_command_names_its_model_or_means_triposr() {
+        assert_eq!(which(&json!({})), Ok(Which::TripoSr));
+        assert_eq!(which(&Value::Null), Ok(Which::TripoSr));
+        assert_eq!(which(&json!({ "model": "triposr" })), Ok(Which::TripoSr));
+        assert_eq!(which(&json!({ "model": "sf3d" })), Ok(Which::Sf3d));
+        assert_eq!(which(&json!({ "id": "sf3d" })), Ok(Which::Sf3d));
+        assert!(which(&json!({ "model": "spar3d" })).unwrap_err().contains("no 3D model called spar3d"));
+        // One pid file for the lane, and a leftover run of either model is found.
+        let src = production_source();
+        assert!(src.contains("let pid_file = run_pid_file(&self::root());"));
+        assert!(src.contains("is_orphaned_run(&row, &work_dir(&mesh3d_sf3d::root()))"));
+    }
+
+    #[test]
+    fn stable_fast_3d_is_not_set_up_without_a_token() {
+        let src = production_source();
+        let body = &src[src.find("fn install_sf3d(").unwrap()..src.find("pub fn mesh3d_install_status(").unwrap()];
+        let token = body.find("hf_token()").unwrap();
+        let space = body.find("ensure_free_space(").unwrap();
+        let spawn = body.find("spawn_install(").unwrap();
+        assert!(token < space && space < spawn, "nothing is fetched before the token is there");
+    }
+
+    #[test]
     fn a_mac_with_too_little_memory_is_told_before_anything_loads() {
         const GIB: u64 = 1_073_741_824;
         assert!(memory_refusal(8 * GIB).unwrap().contains("needs a Mac with 16 GB"));
@@ -1611,8 +1803,8 @@ mod tests {
         let src = production_source();
         let generate = &src[src.find("pub async fn mesh3d_generate(").unwrap()..src.find("pub fn mesh3d_progress(").unwrap()];
         let staged = generate.find("mlx_cutout::staged_input(").expect("a picture from anywhere on the disk");
-        let installed = generate.find("if !installed_at(&root)").unwrap();
-        let memory = generate.find("memory_refusal(").unwrap();
+        let installed = generate.find("if !installed {").unwrap();
+        let memory = generate.find("memory_refusal_for(").unwrap();
         let train = generate.find("train::refusal()").unwrap();
         let image = generate.find("image_engine_busy()").unwrap();
         let video = generate.find("state.video_process()").unwrap();

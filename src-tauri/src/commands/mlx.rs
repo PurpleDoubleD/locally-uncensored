@@ -692,7 +692,7 @@ const HF_TOKEN_NO_ACCESS: &str = "Your Hugging Face token has no access to this 
 /// its built-in file patterns, the download then failed on the same refusal,
 /// and the user read "The installer stopped with exit code 1" with the word
 /// "gated" only in the log (Fehlerkontrolle Mac, 08.10.2026, Fund 9).
-fn hub_denied_message(status: u16, has_token: bool) -> Option<&'static str> {
+pub(crate) fn hub_denied_message(status: u16, has_token: bool) -> Option<&'static str> {
     match status {
         401 | 403 if has_token => Some(HF_TOKEN_NO_ACCESS),
         401 | 403 => Some(HF_TOKEN_NEEDED),

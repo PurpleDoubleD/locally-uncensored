@@ -1,7 +1,7 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
 import { blobFromUrl } from '../lib/render/data-url'
 import { THREE_D_TEXT } from '../lib/three/three-d-text'
-import { MAC_3D_MODEL, PC_3D_MODEL, threeDGalleryItem, threeDPicturePrompt, threeDProvenance } from '../lib/three/run-local-3d'
+import { PC_3D_MODEL, threeDGalleryItem, threeDPicturePrompt, threeDProvenance } from '../lib/three/run-local-3d'
 import { coverCropBlob } from '../lib/cover-crop'
 import { videoRunGivenUp, videoRunProgress, videoRunStatus } from '../lib/mlx-video-progress'
 import { featherMaskBlob } from '../lib/mask-feather'
@@ -212,13 +212,16 @@ async function runLocalThreeD(state: CreateState, seed: number, abortRef: { curr
     if (mac) {
       const api = await import('../api/mlx-3d')
       const staged = source.filename || await stageStartImage(await blobFromUrl(source.url))
+      const macModel = api.mac3dModel(state.threeDMacModel)
       const made = await api.runMacMesh3d(
-        { imagePath: staged, resolution: api.mac3dResolution(state.threeDDetail), cutout: state.threeDCutout },
+        macModel.id === 'sf3d'
+          ? { imagePath: staged, model: 'sf3d', texture: api.mac3dTexture(state.threeDDetail), cutout: state.threeDCutout }
+          : { imagePath: staged, resolution: api.mac3dResolution(state.threeDDetail), cutout: state.threeDCutout },
         { signal: own.signal, onProgress: (percent, text) => onProgress(percent, text) },
       )
       if (own.signal.aborted) return
       addToGallery(threeDGalleryItem({
-        id: uuid(), way, model: MAC_3D_MODEL, prompt, seed, localPath: made.path, sourceName: source.name,
+        id: uuid(), way, model: macModel.name, prompt, seed, localPath: made.path, sourceName: source.name,
       }))
     } else {
       const { runComfyThreeD } = await import('../lib/local-3d-comfy')

@@ -10,6 +10,9 @@ pnpm-debug.log*
 lerna-debug.log*
 
 node_modules
+# What Python writes next to a runner when its tests load it by path.
+__pycache__/
+*.pyc
 dist
 dist-ssr
 *.local

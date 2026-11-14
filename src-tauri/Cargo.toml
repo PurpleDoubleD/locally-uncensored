@@ -113,6 +113,10 @@ qrcode = "0.14"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
 rand = "0.8"
 sha2 = "0.10"
+# The git object id of a gated Hugging Face file (commands/mesh3d_sf3d.rs).
+# RustCrypto, the sibling of sha2, already in Cargo.lock at 0.10.6 through
+# other crates, so this adds no crate to the build.
+sha1 = "0.10"
 # Unpacking the private Python of the voice loop (commands/voice_loop). Both
 # are already in Cargo.lock through the updater plugin, so this adds no crate
 # to the build.

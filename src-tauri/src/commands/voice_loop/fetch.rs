@@ -114,10 +114,25 @@ pub async fn fetch_verified(
     cancel: &AtomicBool,
     on_progress: &mut (dyn FnMut(u64) + Send),
 ) -> Result<(), FetchError> {
+    fetch_verified_as(client, remote, dest, None, cancel, on_progress).await
+}
+
+/// `fetch_verified` with a Hugging Face token, for a gated repository. The
+/// token goes out only to `huggingface.co` itself; reqwest drops the header
+/// when the hub redirects to its storage host.
+pub async fn fetch_verified_as(
+    client: &reqwest::Client,
+    remote: &RemoteFile,
+    dest: &Path,
+    hub_token: Option<&str>,
+    cancel: &AtomicBool,
+    on_progress: &mut (dyn FnMut(u64) + Send),
+) -> Result<(), FetchError> {
+    let bearer = hub_token.filter(|_| crate::commands::download::is_huggingface_host(&remote.url));
     let mut wait = Duration::from_secs(2);
     let mut attempt = 1;
     loop {
-        match fetch_once(client, remote, dest, cancel, on_progress).await {
+        match fetch_once(client, remote, dest, bearer, cancel, on_progress).await {
             Err(e) if e.worth_a_retry() && attempt < ATTEMPTS => {
                 tracing::warn!(attempt, "voice loop download attempt failed, retrying: {e:?}");
                 let mut waited = Duration::ZERO;
@@ -140,6 +155,7 @@ async fn fetch_once(
     client: &reqwest::Client,
     remote: &RemoteFile,
     dest: &Path,
+    bearer: Option<&str>,
     cancel: &AtomicBool,
     on_progress: &mut (dyn FnMut(u64) + Send),
 ) -> Result<(), FetchError> {
@@ -166,6 +182,9 @@ async fn fetch_once(
 
     if have < remote.size {
         let mut request = client.get(&remote.url);
+        if let Some(token) = bearer {
+            request = request.bearer_auth(token);
+        }
         if have > 0 {
             request = request.header(reqwest::header::RANGE, format!("bytes={have}-"));
         }
@@ -396,7 +415,7 @@ mod tests {
     async fn run(remote: &RemoteFile, dest: &Path) -> (Result<(), FetchError>, Vec<u64>) {
         let cancel = AtomicBool::new(false);
         let mut seen = Vec::new();
-        let result = fetch_once(&http_client().unwrap(), remote, dest, &cancel, &mut |n| seen.push(n)).await;
+        let result = fetch_once(&http_client().unwrap(), remote, dest, None, &cancel, &mut |n| seen.push(n)).await;
         (result, seen)
     }
 

@@ -26,6 +26,8 @@
 //   mesh3d      src-tauri/src/commands/mesh3d.rs           PINNED (the TripoSR source is
 //                                                          not a pip package: Rust fetches
 //                                                          it by sha256, so pip never sees it)
+//   mesh3d-sf3d src-tauri/src/commands/mesh3d_sf3d.rs      PINNED (its two own wheels ship in
+//                                                          the app, pip gets them as files)
 //
 // Usage:
 //   node scripts/mac-engine-pins.mjs                 # print the lists
@@ -47,6 +49,7 @@ export const SOURCES = {
   'mlx-video': 'src-tauri/src/commands/video.rs',
   'ltx-2-mlx': 'src-tauri/src/commands/video_ltx2mlx.rs',
   mesh3d: 'src-tauri/src/commands/mesh3d.rs',
+  'mesh3d-sf3d': 'src-tauri/src/commands/mesh3d_sf3d.rs',
 }
 
 /** The Python line the app's own interpreter is on, e.g. "3.12". */
@@ -159,6 +162,7 @@ export function readEnginePins(read = (rel) => readFileSync(join(REPO_ROOT, rel)
   ])
   add('ltx-2-mlx', 'second video engine (ltx-2-mlx)', ltxSpecs)
   add('mesh3d', '3D engine (TripoSR)', (src) => rustStrArray(src, 'PINNED'))
+  add('mesh3d-sf3d', '3D engine (Stable Fast 3D)', (src) => rustStrArray(src, 'PINNED'))
   return engines
 }
 

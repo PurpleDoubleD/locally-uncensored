@@ -41,7 +41,7 @@ const byId = (id: string) => engines.find((e) => e.id === id)!
 
 describe('the working tree', () => {
   it('yields the five engines, in a fixed order', () => {
-    expect(engines.map((e) => e.id)).toEqual(['image', 'mflux', 'mlx-video', 'ltx-2-mlx', 'mesh3d'])
+    expect(engines.map((e) => e.id)).toEqual(['image', 'mflux', 'mlx-video', 'ltx-2-mlx', 'mesh3d', 'mesh3d-sf3d'])
     for (const engine of engines) expect(engine.source).toBe(SOURCES[engine.id])
   })
 
@@ -104,6 +104,20 @@ describe('the working tree', () => {
     // torch is the one the music engine installs, so the wheel is fetched once.
     expect(specs).toContain('torch==2.10.0')
     expect(specs.some((s) => s.startsWith('torchmcubes') || s.startsWith('rembg'))).toBe(false)
+  })
+
+  it('reads the Stable Fast 3D engine as the PINNED array of mesh3d_sf3d.rs, without its own wheels', () => {
+    const source = read(SOURCES['mesh3d-sf3d'])
+    const declared = Number(source.match(/const PINNED: \[&str; (\d+)\]/)![1])
+    const specs = byId('mesh3d-sf3d').specs
+    expect(specs).toHaveLength(declared)
+    expect(specs.every((s) => !s.includes(' @ '))).toBe(true)
+    expect(specs).toContain('torch==2.10.0')
+    // The two extensions are LU's own wheels in the app, never asked of PyPI;
+    // what LU replaces is not installed at all.
+    for (const never of ['texture-baker', 'uv-unwrapper', 'rembg', 'gpytoolbox', 'pynanoinstantmeshes']) {
+      expect(specs.some((s) => s.startsWith(`${never}==`))).toBe(false)
+    }
   })
 
   it('takes the Python line from python.json', () => {

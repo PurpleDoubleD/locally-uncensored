@@ -1,13 +1,44 @@
-// The 3D lane on a Mac, as Create sees it: one model of the 3D engine
-// (TripoSR, src-tauri/src/commands/mesh3d.rs). Kept free of imports, so the
-// store, the intent rules and the stage can read it without pulling the
-// engine's commands along (api/mlx-3d.ts has those).
+// The 3D lane on a Mac, as Create sees it: the models of the 3D engine
+// (TripoSR in src-tauri/src/commands/mesh3d.rs, Stable Fast 3D in
+// mesh3d_sf3d.rs). Kept free of imports, so the store, the intent rules and
+// the stage can read it without pulling the engine's commands along
+// (api/mlx-3d.ts has those).
 
-/** The name the picker and the gallery give the one model (`MODEL_NAME`). */
+/** The name the picker and the gallery give the first model (`MODEL_NAME`). */
 export const MAC_3D_MODEL_NAME = 'TripoSR'
 
-/** The id of the one model (`MODEL_ID`). */
+/** The id of the first model (`MODEL_ID`), the one a run takes when none is named. */
 export const MAC_3D_MODEL_ID = 'triposr'
+
+export type Mac3dModelId = 'triposr' | 'sf3d'
+
+/** What the picker says about each model before anything is asked of Rust. */
+export interface Mac3dModelInfo {
+  id: Mac3dModelId
+  name: string
+  /** One short line for the picker. */
+  line: string
+  /** The weights are gated: the user accepts a licence and needs a Hugging Face token. */
+  gated: boolean
+}
+
+/** Every local 3D model of a Mac, in the order the picker shows them. */
+export const MAC_3D_MODELS: readonly Mac3dModelInfo[] = [
+  { id: 'triposr', name: 'TripoSR', line: 'Fast, colours on the surface. 1.7 GB.', gated: false },
+  { id: 'sf3d', name: 'Stable Fast 3D', line: 'Sharper, with a painted texture. 4 GB, needs a Hugging Face token.', gated: true },
+]
+
+export function mac3dModel(id: string | null | undefined): Mac3dModelInfo {
+  return MAC_3D_MODELS.find((m) => m.id === id) ?? MAC_3D_MODELS[0]
+}
+
+/** The texture side of Stable Fast 3D per step of Detail. Rust takes these
+ *  three (`texture_for` in mesh3d_sf3d.rs). */
+export const MAC_3D_TEXTURE = { draft: 512, standard: 1024, fine: 2048 } as const
+
+export function mac3dTexture(detail: keyof typeof MAC_3D_TEXTURE | undefined): number {
+  return MAC_3D_TEXTURE[detail ?? 'standard'] ?? MAC_3D_TEXTURE.standard
+}
 
 /** The grid side per step of Detail. Rust takes 64 to 384 on steps of 32
  *  (`resolution_for` in mesh3d.rs); 256 is TripoSR's own default. */

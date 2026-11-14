@@ -38,10 +38,12 @@ import {
   cancelMesh3dInstall,
   deleteMesh3dModel,
   cancelMesh3d,
+  mesh3dModelOf,
+  type Mesh3dStatus,
   Mesh3dRunCancelled,
   Mesh3dNoObject,
 } from '../../api/mlx-3d'
-import { mesh3dRunLine, mac3dResolution, MESH3D_PHASE_TEXT, MAC_3D_MODEL_NAME, MESH3D_NO_OBJECT } from '../mac-3d'
+import { mesh3dRunLine, mac3dResolution, mac3dTexture, mac3dModel, MAC_3D_MODELS, MESH3D_PHASE_TEXT, MAC_3D_MODEL_NAME, MESH3D_NO_OBJECT } from '../mac-3d'
 
 function poll(status: string, extra: Record<string, unknown> = {}) {
   return { job: 'j1', run: 'r', status, phase: 'shape', detail: '', percent: 40, error: null, errorCode: null, output: '/c/3d/r.glb', triangles: null, vertices: null, device: 'mps', logs: [], running: status === 'running', pid: 7, ...extra }
@@ -112,6 +114,12 @@ describe('the commands', () => {
     const names = rust.calls.map((c) => c.cmd)
     expect(names).toEqual(['mlx_mesh3d_status', 'mlx_mesh3d_install', 'mlx_mesh3d_install_status', 'mlx_mesh3d_cancel_install', 'mlx_mesh3d_delete', 'mlx_mesh3d_cancel'])
     expect(rust.calls.at(-1)!.args).toEqual({ run: 'r9' })
+    // Install and remove name their model; TripoSR when the caller names none.
+    expect(rust.calls[1].args).toEqual({ model: 'triposr' })
+    expect(rust.calls[4].args).toEqual({ model: 'triposr' })
+    await installMesh3d('sf3d')
+    await deleteMesh3dModel('sf3d')
+    expect(rust.calls.slice(-2).map((c) => c.args)).toEqual([{ model: 'sf3d' }, { model: 'sf3d' }])
     const media = readFileSync(join(__dirname, '../../../src-tauri/src/commands/media_cmds.rs'), 'utf8')
     const lib = readFileSync(join(__dirname, '../../../src-tauri/src/lib.rs'), 'utf8')
     for (const name of [...names, 'mlx_mesh3d_generate', 'mlx_mesh3d_progress']) {
@@ -125,6 +133,39 @@ describe('the commands', () => {
     expect(rust.calls[0].args).toEqual({ run: 'r', imagePath: '/s/start-images/a.png' })
     await generateMesh3d({ run: 'r', imagePath: '/s/a.png', resolution: 128, cutout: false })
     expect(rust.calls[1].args).toEqual({ run: 'r', imagePath: '/s/a.png', resolution: 128, cutout: false })
+    await generateMesh3d({ run: 'r', imagePath: '/s/a.png', model: 'sf3d', texture: 2048 })
+    expect(rust.calls[2].args).toEqual({ run: 'r', imagePath: '/s/a.png', model: 'sf3d', texture: 2048 })
+  })
+})
+
+describe('the models of the lane', () => {
+  it('lists TripoSR first and Stable Fast 3D as gated, under the ids and names Rust uses', () => {
+    expect(MAC_3D_MODELS.map((m) => m.id)).toEqual(['triposr', 'sf3d'])
+    expect(MAC_3D_MODELS.map((m) => m.gated)).toEqual([false, true])
+    expect(mac3dModel('sf3d').name).toBe('Stable Fast 3D')
+    expect(mac3dModel('nonsense').id).toBe('triposr')
+    expect(mac3dModel(undefined).id).toBe('triposr')
+    const rs = readFileSync(join(__dirname, '../../../src-tauri/src/commands/mesh3d_sf3d.rs'), 'utf8')
+    expect(rs).toContain('pub(crate) const MODEL_ID: &str = "sf3d";')
+    expect(rs).toContain(`pub(crate) const MODEL_NAME: &str = "${mac3dModel('sf3d').name}";`)
+    for (const m of MAC_3D_MODELS) {
+      expect(m.line).not.toMatch(new RegExp(`[${String.fromCharCode(0x2013, 0x2014)}]| - `))
+    }
+  })
+
+  it('maps Detail to the texture sides Rust takes', () => {
+    expect([mac3dTexture('draft'), mac3dTexture('standard'), mac3dTexture('fine'), mac3dTexture(undefined)]).toEqual([512, 1024, 2048, 1024])
+    const rs = readFileSync(join(__dirname, '../../../src-tauri/src/commands/mesh3d_sf3d.rs'), 'utf8')
+    expect(rs).toContain('const TEXTURES: [u32; 3] = [512, 1024, 2048];')
+  })
+
+  it('finds a card in the list and TripoSR in the old field', () => {
+    const triposr = { id: 'triposr', name: 'TripoSR', installed: true } as Mesh3dStatus['model']
+    const sf3d = { id: 'sf3d', name: 'Stable Fast 3D', installed: false, gated: true } as Mesh3dStatus['model']
+    const both = { model: triposr, models: [triposr, sf3d] } as Mesh3dStatus
+    expect(mesh3dModelOf(both, 'sf3d')?.gated).toBe(true)
+    expect(mesh3dModelOf({ model: triposr } as Mesh3dStatus, 'triposr')?.installed).toBe(true)
+    expect(mesh3dModelOf({ model: triposr } as Mesh3dStatus, 'sf3d')).toBeNull()
   })
 })
 
