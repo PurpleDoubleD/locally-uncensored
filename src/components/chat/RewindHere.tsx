@@ -89,7 +89,7 @@ export function RewindHere({ conversationId, message }: Props) {
         <div
           role="dialog"
           aria-label="Rewind to before this message"
-          className="absolute right-0 top-full mt-1 z-30 w-72 max-w-[calc(100vw-2rem)] rounded-lg border border-gray-200 dark:border-white/[0.1] bg-white dark:bg-[#1c1c1e] shadow-lg p-3 text-left"
+          className="absolute right-0 top-full mt-1 z-30 w-72 max-w-[calc(100vw-2rem)] rounded-lg lu-elevated p-3 text-left"
         >
           <div className="t-body font-medium text-gray-800 dark:text-gray-100">Rewind to before this message?</div>
           <ul className="mt-1.5 space-y-0.5 max-h-32 overflow-auto">
