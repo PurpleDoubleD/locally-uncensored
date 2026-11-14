@@ -171,7 +171,7 @@ describe('stopAllBackgroundWork() beendet zwei gleichzeitig laufende Agentenlaeu
       streamA1.done()
       streamB1.pushTool('call-B')
       streamB1.done()
-      await tick()
+      for (let i = 0; i < 50 && (callsA < 2 || callsB < 2); i++) await tick()
     })
 
     // Round 2 has genuinely been requested for both; the loop is mid-run,
