@@ -166,6 +166,10 @@ export const SETTINGS_STRINGS = {
     payInvoice: 'Pay open invoice',
     syncMemories: 'Sync memories',
     syncMemoriesSub: 'Keep your memories on your account',
+    /** M310: the account carries credits and memories, never chats (no chat sync between devices). */
+    chatsStayHere: 'Chats stay on this phone',
+    chatsStayHereSub: 'Your account keeps credits and memories, not chats. Chats in a browser or on your computer do not show up here.',
+    chatsStayHereSubRemote: 'Your account keeps credits and memories, not chats. A chat on your computer comes here with Continue on phone, under Remote desktop.',
     contentPolicy: 'Content policy',
     apiKeysTitle: 'API keys',
     apiKeysText: 'Use your LU Cloud credits from other apps with an API key. Keys are made and removed on your account page.',
