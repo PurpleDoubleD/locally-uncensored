@@ -420,12 +420,44 @@ export const HOWTO: Record<string, HowtoTopic> = {
   ], '/guide/agent/'),
 }
 
+/** Topics whose films are rendered but not yet on lu-labs.ai/howto/. They
+ *  are kept apart from HOWTO, so nothing in the app offers a film the server
+ *  does not have. Once the films are uploaded, the entry moves into HOWTO
+ *  as it is (and the test's NO_FILM_YET loses it). */
+export const HOWTO_NOT_UPLOADED: Record<string, HowtoTopic> = {
+  '3d': {
+    title: 'How 3D works',
+    guide: '/guide/create/',
+    films: [
+      {
+        id: '3d', label: 'Make a model',
+        steps: [
+          { from: 0.3, text: '3D makes a model of one object, from a description, a picture or a short video.' },
+          { from: 5.09, text: 'Detail sets how fine the model is: Draft, Standard or Fine.' },
+          { from: 7.39, text: 'Switch to Local and it runs on this computer, where Cutout can clear the background first.' },
+        ],
+      },
+      {
+        id: '3d-view', label: 'The result',
+        steps: [
+          { from: 0.3, text: 'The model opens in a 3D view. Drag to turn it, scroll to zoom.' },
+          { from: 3.78, text: 'Color, Clay and Wireframe show its surface, its bare shape and its mesh.' },
+          { from: 9.15, text: 'Download it as GLB, OBJ, STL or USDZ, or hand it straight to Blender.' },
+          { from: 13.71, text: 'Every model also lands in your gallery, shown as a still of itself.' },
+        ],
+      },
+    ],
+  },
+}
+
 /** The Create tabs whose local lane has a film of its own. Every other film
- *  shows the cloud tabs and stands on the stage in Cloud mode only. */
+ *  shows the cloud tabs and stands on the stage in Cloud mode only. 3D's
+ *  first film shows the local lane too; it answers only once HOWTO has it. */
 const LOCAL_STAGE_TOPICS: Record<string, string> = {
   character: 'character-local',
   image: 'workflows',
   motion: 'workflows',
+  '3d': '3d',
 }
 
 /** The same on a Mac, whose local lanes run on MLX and are filmed apart. */
@@ -440,6 +472,7 @@ const MAC_STAGE_TOPICS: Record<string, string> = {
   extend: 'mac-video',
   lipsync: 'mac-lipsync',
   motion: 'mac-motion',
+  '3d': '3d',
 }
 
 /** The film a Create stage offers for this tab and backend, or null. */
