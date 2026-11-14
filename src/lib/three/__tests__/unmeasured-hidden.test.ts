@@ -1,5 +1,6 @@
-// Four 3D models of the second cloud wave are in the catalogue but not
-// measured yet (14.11.2026, 3.1.0). The app hides them everywhere, also when
+// 3D models of the second cloud wave that are in the catalogue but not
+// measured yet (14.11.2026, 3.1.0). Hi3D 3.0 Image, Meshy 7.1 Multi and Tripo
+// P2 Multiview were measured the same day and are on offer; one is left. The app hides them everywhere, also when
 // an older server still lists them, and shows them only where the server
 // marks the entry `unmeasured: true` (its switch for the paid measurement).
 import { beforeEach, describe, expect, it } from 'vitest'
@@ -12,7 +13,7 @@ import { toolProbe } from '../../../mobile/screens/create/parts/catalog'
 import { neuerServer } from '../../render/__tests__/fixtures/test-catalogs'
 import type { CloudModel } from '../../render/cloud-models'
 
-const UNMEASURED = ['hi3d-3.0-image', 'hi3d-3.0-multiview', 'meshy-7.1-multi', 'tripo-p2-multiview']
+const UNMEASURED = ['hi3d-3.0-multiview']
 const WAYS = ['3d-text', '3d-image', '3d-video'] as const
 
 /** A server that lists every studio model without the mark, as one before
@@ -33,15 +34,15 @@ beforeEach(() => {
 })
 
 describe('3D models not measured yet', () => {
-  it('exactly these four carry the mark in the snapshot', () => {
+  it('exactly these carry the mark in the snapshot', () => {
     expect(Object.keys(STUDIO_MODELS).filter((id) => STUDIO_MODELS[id].unmeasured).sort()).toEqual(UNMEASURED)
   })
 
   it('no role, picker or studio list shows them, even where the server lists them', () => {
     const ids = shown()
     for (const id of UNMEASURED) expect(ids, id).not.toContain(id)
-    // Their measured siblings stay.
-    for (const id of ['meshy-7.1-image', 'tripo-p2-image', 'tripo-p1-multiview']) expect(ids, id).toContain(id)
+    // Their measured siblings stay, the three measured on 14.11. too.
+    for (const id of ['meshy-7.1-image', 'tripo-p2-image', 'tripo-p1-multiview', 'hi3d-3.0-image', 'meshy-7.1-multi', 'tripo-p2-multiview']) expect(ids, id).toContain(id)
     // The phone still has 3D.
     expect(toolProbe()['3d']).toBe(true)
   })
@@ -68,8 +69,9 @@ describe('3D models not measured yet', () => {
   })
 
   it('the rule itself', () => {
-    expect(unmeasuredHidden({ id: 'hi3d-3.0-image' })).toBe(true)
-    expect(unmeasuredHidden({ id: 'hi3d-3.0-image', unmeasured: true })).toBe(false)
+    expect(unmeasuredHidden({ id: 'hi3d-3.0-multiview' })).toBe(true)
+    expect(unmeasuredHidden({ id: 'hi3d-3.0-multiview', unmeasured: true })).toBe(false)
+    expect(unmeasuredHidden({ id: 'hi3d-3.0-image' })).toBe(false)
     expect(unmeasuredHidden({ id: 'tripo-p2-image' })).toBe(false)
     expect(unmeasuredHidden({ id: 'flux-schnell' })).toBe(false)
   })
