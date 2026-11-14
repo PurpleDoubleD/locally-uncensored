@@ -116,6 +116,8 @@ export type CloudOp = 'character' | 'lipsync' | 'music' | 'extend' | 'motion' | 
 export type ThreeDWay = 'text' | 'image' | 'video'
 /** The Detail step of the 3D tab. Each model maps it onto its own field. */
 export type ThreeDDetail = 'draft' | 'standard' | 'fine'
+/** The local 3D models of a Mac (lib/mac-3d.ts, MAC_3D_MODELS). */
+export type ThreeDMacModel = 'triposr' | 'sf3d'
 
 /** Which of the specialized categories ALSO run on the local ComfyUI backend
  *  (2.5.8 local lanes: ACE music, Wan S2V talking character, last-frame-chain
@@ -446,6 +448,8 @@ export interface CreateState {
   threeDCutout: boolean
   /** 3D: how fine the model gets, where the picked model offers a choice. */
   threeDDetail: ThreeDDetail
+  /** 3D on a Mac: which local model makes it. Each has its own setup. */
+  threeDMacModel: ThreeDMacModel
   /** 3D: the further sides (left, back, right) for a model that takes several
    *  views, or the still frames picked from a video. Front is the Stage
    *  source. Runtime-only like every ImageRef. */
@@ -730,6 +734,7 @@ export interface CreateState {
   setThreeDWay: (way: ThreeDWay) => void
   setThreeDCutout: (on: boolean) => void
   setThreeDDetail: (detail: ThreeDDetail) => void
+  setThreeDMacModel: (model: ThreeDMacModel) => void
   setThreeDViews: (views: ImageRef[]) => void
   addTrainImages: (imgs: MediaRef[]) => void
   removeTrainImage: (name: string) => void
@@ -1227,6 +1232,7 @@ export const useCreateStore = create<CreateState>()(
       threeDWay: 'image' as ThreeDWay,
       threeDCutout: true,
       threeDDetail: 'standard' as ThreeDDetail,
+      threeDMacModel: 'triposr' as ThreeDMacModel,
       threeDViews: [] as ImageRef[],
       trainImages: [] as MediaRef[],
       triggerWord: '',
@@ -1546,6 +1552,7 @@ export const useCreateStore = create<CreateState>()(
       setThreeDWay: (threeDWay) => set((s) => withOwnStudioOptions(s, { threeDWay, threeDViews: [] })),
       setThreeDCutout: (threeDCutout) => set({ threeDCutout }),
       setThreeDDetail: (threeDDetail) => set({ threeDDetail }),
+      setThreeDMacModel: (threeDMacModel) => set({ threeDMacModel }),
       setThreeDViews: (threeDViews) => set({ threeDViews: threeDViews.slice(0, 4) }),
       // Cap at the backend's photo limit (lib/train-image-cap) and skip a
       // re-drop of a file already in the set, so the same folder twice does
@@ -2082,6 +2089,7 @@ export const useCreateStore = create<CreateState>()(
         threeDWay: state.threeDWay,
         threeDCutout: state.threeDCutout,
         threeDDetail: state.threeDDetail,
+        threeDMacModel: state.threeDMacModel,
         videoBackend: state.videoBackend,
         videoBackendInitialized: state.videoBackendInitialized,
         imageModel: state.imageModel,
@@ -2223,6 +2231,7 @@ export const useCreateStore = create<CreateState>()(
         if ('threeDWay' in safe && !['text', 'image', 'video'].includes(safe.threeDWay as string)) safe.threeDWay = 'image'
         if ('threeDDetail' in safe && !['draft', 'standard', 'fine'].includes(safe.threeDDetail as string)) safe.threeDDetail = 'standard'
         if ('threeDCutout' in safe && typeof safe.threeDCutout !== 'boolean') safe.threeDCutout = true
+        if ('threeDMacModel' in safe && !['triposr', 'sf3d'].includes(safe.threeDMacModel as string)) safe.threeDMacModel = 'triposr'
         // The persisted slice is ~30 independent scalar preferences (see
         // partialize). They are adopted as written, which is what the store
         // has always done; the fields that could actually do damage — the

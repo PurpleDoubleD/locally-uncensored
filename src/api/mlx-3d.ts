@@ -6,11 +6,12 @@
  * Public API, for `useCreate.ts`:
  *
  *   getMesh3dStatus()          -> Mesh3dStatus   installed, running, model card
- *   installMesh3d()            -> starts engine + source + weights, one slot
+ *   installMesh3d(model?)      -> starts engine + source + weights, one slot
+ *                                 for every model ('triposr' or 'sf3d')
  *   getMesh3dInstallStatus()   -> MlxInstallStatus (poll like the music install)
  *   cancelMesh3dInstall()      -> stops it; what was fetched stays
- *   deleteMesh3dModel()        -> removes the weights, the engine stays
- *   generateMesh3d({ run, imagePath, resolution?, cutout? }) -> Mesh3dStarted
+ *   deleteMesh3dModel(model?)  -> removes the weights, the engine stays
+ *   generateMesh3d({ run, imagePath, model?, resolution?, texture?, cutout? }) -> Mesh3dStarted
  *   getMesh3dProgress()        -> Mesh3dProgress (phase, percent, error, ...)
  *   cancelMesh3d(run)          -> ends that run and its process
  *
@@ -33,9 +34,10 @@
 import { invokeMedia } from './mlx-invoke'
 import type { MlxInstallStatus } from './mlx-image'
 import { MESH3D_NO_OBJECT, mesh3dRunLine } from '../lib/mac-3d'
+import type { Mac3dModelId } from '../lib/mac-3d'
 
-export { MAC_3D_MODEL_ID, MAC_3D_MODEL_NAME, MAC_3D_RESOLUTION, MESH3D_PHASE_TEXT, mac3dResolution, mesh3dRunLine } from '../lib/mac-3d'
-export type { Mac3dDetail, Mesh3dPhase } from '../lib/mac-3d'
+export { MAC_3D_MODEL_ID, MAC_3D_MODEL_NAME, MAC_3D_MODELS, MAC_3D_RESOLUTION, MAC_3D_TEXTURE, MESH3D_PHASE_TEXT, mac3dModel, mac3dResolution, mac3dTexture, mesh3dRunLine } from '../lib/mac-3d'
+export type { Mac3dDetail, Mac3dModelId, Mesh3dPhase } from '../lib/mac-3d'
 
 /** The one catalogue entry, in the fields `mesh3d_status` sends. */
 export interface Mesh3dModel {
@@ -47,6 +49,15 @@ export interface Mesh3dModel {
   unfiltered: boolean
   description: string
   installed: boolean
+  /** Stable Fast 3D: the weights are gated on Hugging Face. */
+  gated?: boolean
+  /** Whether a Hugging Face token is stored (gated models only). */
+  hasToken?: boolean
+  license?: string
+  /** The licence in a few plain sentences, shown before the setup. */
+  licenseText?: string
+  /** The model's page, where the licence is accepted. */
+  licenseUrl?: string
 }
 
 export interface Mesh3dStatus {
@@ -58,7 +69,17 @@ export interface Mesh3dStatus {
   installed: boolean
   running: boolean
   outputsRoot: string
+  /** TripoSR, as before the second model. */
   model: Mesh3dModel
+  /** Every model of the lane, each with its own setup. */
+  models?: Mesh3dModel[]
+  /** The model the install slot works or worked on. */
+  installing?: string | null
+}
+
+/** The card of one model out of a status answer. TripoSR's is `model`. */
+export function mesh3dModelOf(status: Mesh3dStatus, id: Mac3dModelId): Mesh3dModel | null {
+  return status.models?.find((m) => m.id === id) ?? (status.model?.id === id ? status.model : null)
 }
 
 export interface Mesh3dProgress {
@@ -87,7 +108,12 @@ export interface Mesh3dProgress {
 export interface Mesh3dRequest {
   /** A picture staged by Create. */
   imagePath: string
+  /** TripoSR when left out. */
+  model?: Mac3dModelId
+  /** TripoSR's grid side. */
   resolution?: number
+  /** Stable Fast 3D's texture side. */
+  texture?: number
   cutout?: boolean
 }
 
@@ -96,7 +122,9 @@ export interface Mesh3dStarted {
   jobId: string
   run: string
   output: string
+  model?: Mac3dModelId
   resolution: number
+  texture?: number
   cutout: boolean
 }
 
@@ -104,8 +132,8 @@ export async function getMesh3dStatus(): Promise<Mesh3dStatus> {
   return invokeMedia<Mesh3dStatus>('mlx_mesh3d_status')
 }
 
-export async function installMesh3d(): Promise<{ ok: boolean; status: string; id?: string }> {
-  return invokeMedia('mlx_mesh3d_install')
+export async function installMesh3d(model: Mac3dModelId = 'triposr'): Promise<{ ok: boolean; status: string; id?: string }> {
+  return invokeMedia('mlx_mesh3d_install', { model })
 }
 
 export async function getMesh3dInstallStatus(): Promise<MlxInstallStatus> {
@@ -116,13 +144,15 @@ export async function cancelMesh3dInstall(): Promise<{ ok: boolean; cancelled: b
   return invokeMedia('mlx_mesh3d_cancel_install')
 }
 
-export async function deleteMesh3dModel(): Promise<{ ok: boolean; id: string }> {
-  return invokeMedia('mlx_mesh3d_delete')
+export async function deleteMesh3dModel(model: Mac3dModelId = 'triposr'): Promise<{ ok: boolean; id: string }> {
+  return invokeMedia('mlx_mesh3d_delete', { model })
 }
 
 export async function generateMesh3d(request: Mesh3dRequest & { run: string }): Promise<Mesh3dStarted> {
   const args: Record<string, unknown> = { run: request.run, imagePath: request.imagePath }
+  if (request.model !== undefined) args.model = request.model
   if (request.resolution !== undefined) args.resolution = request.resolution
+  if (request.texture !== undefined) args.texture = request.texture
   if (request.cutout !== undefined) args.cutout = request.cutout
   return invokeMedia<Mesh3dStarted>('mlx_mesh3d_generate', args)
 }
