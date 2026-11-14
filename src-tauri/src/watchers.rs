@@ -857,7 +857,7 @@ mod tests {
         if let Some(home) = dirs::home_dir() {
             assert!(check_folder(&home.to_string_lossy()).is_err());
         }
-        let tmp = std::env::temp_dir().join(format!("lu-watch-{}", std::process::id()));
+        let tmp = std::env::temp_dir().join(format!("lu-watchers-folder-{}", std::process::id()));
         std::fs::create_dir_all(&tmp).unwrap();
         assert!(check_folder(&tmp.to_string_lossy()).is_ok());
         let _ = std::fs::remove_dir_all(&tmp);
