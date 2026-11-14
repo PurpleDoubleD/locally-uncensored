@@ -77,7 +77,7 @@
 <p>Two ways to connect, both started by you:</p>
 <ul>
 <li><strong>LAN</strong>: phone and PC in the same Wi-Fi. The traffic stays in your network.</li>
-<li><strong>Internet</strong>: LU starts a Cloudflare tunnel and gets a public https address. Nothing to set up on your router.</li>
+<li><strong>Internet</strong>: LU starts a Cloudflare tunnel and gets a public https address. Nothing to set up on your router. This works only with the LU app on the phone; a browser on the phone reaches LU only in the same Wi-Fi.</li>
 </ul>
 
 <h2 id="lan">1. Over your own Wi-Fi (LAN)</h2>
@@ -91,7 +91,8 @@
 <div class="step-body"><p>The phone asks for the "Access Code". Type the six digits from the desktop and tap "Connect". The QR code does not contain the passcode, so you always type it.</p></div></div>
 
 <h2 id="tunnel">2. From anywhere (Internet)</h2>
-<p>Press "Dispatch", then "Internet", then pick the folder. The panel shows "Connecting to Cloudflare…" and holds the QR code back until the public address works; LU waits up to 15 seconds. The address ends in <code>trycloudflare.com/mobile</code>, is new for every session and exists only while it runs. Scan and type the passcode as above. Right after scanning the first connection can take 5 to 10 seconds; if the phone shows a DNS error, wait a moment and reload.</p>
+<p>Over the internet only the LU app on the phone gets through, over its own encrypted channel. A browser does not: the phone page and the passcode work only in the same Wi-Fi as the PC (chapter 1). Opened in a browser, the public address shows only a short note that it works with the LU app.</p>
+<p>Press "Dispatch", then "Internet", then pick the folder. The panel shows "Connecting to Cloudflare…" and holds the QR code back until the public address works; LU waits up to 15 seconds. The address ends in <code>trycloudflare.com</code>, is new for every session and exists only while it runs. Open the LU app on the phone and scan the QR code in the panel; then allow the phone on the PC. Right after scanning the first connection can take 5 to 10 seconds; if the app shows a DNS error, wait a moment and try again.</p>
 <p>You do not need to install anything for this. The helper program cloudflared is downloaded by LU itself the first time, from Cloudflare's releases on GitHub, and fetched again when the copy is more than 30 days old.</p>
 
 <h2 id="passcode">3. The six-digit passcode</h2>
@@ -126,10 +127,11 @@
 <table>
 <tr><th>Symptom</th><th>Cause and fix</th></tr>
 <tr><td>"Dispatch" is greyed out</td><td>No chat model picked. Pick or install one.</td></tr>
-<tr><td>Phone cannot open the address (LAN)</td><td>The phone is on mobile data, a guest network or a different Wi-Fi. Put it on the same network as the PC. Otherwise use Internet.</td></tr>
+<tr><td>Phone cannot open the address (LAN)</td><td>The phone is on mobile data, a guest network or a different Wi-Fi. Put it on the same network as the PC. Otherwise use Internet with the LU app.</td></tr>
 <tr><td>"Connection failed" in the same Wi-Fi</td><td>Windows: the firewall. LU adds the rule "LU Remote 11435" for private networks only when it runs with administrator rights; otherwise allow LU once in the Windows firewall and make sure your Wi-Fi counts as a private network.<br>Linux: allow port 11435 in your firewall if one is active.</td></tr>
 <tr><td>"Invalid access code"</td><td>Typo, or the code changed (after 15 minutes, after the circular arrow, after Restart). Type the code the desktop shows now.</td></tr>
 <tr><td>"Too many attempts. Try again in (N)s"</td><td>Three wrong codes. Wait, then type the current code.</td></tr>
+<tr><td>A browser on the phone shows "This address works only with the LU app"</td><td>That is the internet address. A browser reaches LU only in the same Wi-Fi. Over the internet, scan the QR code in the panel with the LU app.</td></tr>
 <tr><td>"…no public URL appeared within 15 s…"</td><td>cloudflared cannot reach Cloudflare, usually a firewall or VPN. LAN still works. Fix it, then press "Stop" and dispatch again with "Internet".</td></tr>
 <tr><td>"Could not bind 0.0.0.0:11435"</td><td>Port 11435 is taken, usually by a second LU or an earlier session. Press "Stop", quit other LU instances from the tray, dispatch again.</td></tr>
 <tr><td>The phone suddenly asks for the passcode</td><td>Restart was pressed, the device was disconnected, or 24 hours passed. Pair again.</td></tr>

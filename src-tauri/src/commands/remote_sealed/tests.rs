@@ -273,6 +273,58 @@ async fn the_tunnel_listener_knows_only_status_and_the_sealed_door() {
     assert_eq!(v["name"], "Studio PC");
 }
 
+/// #232: a browser under the tunnel address sees a notice, not a blank
+/// page. The page sits behind the same gate, the API answers stay empty.
+#[tokio::test]
+async fn a_browser_on_the_tunnel_gets_the_app_only_notice() {
+    let rig = rig().await;
+    for path in ["/", "/mobile", "/mobile?x=1", "/anything/else"] {
+        let (status, headers, body) = send(&rig, Via::Tunnel("203.0.113.5"), "GET", path, Vec::new()).await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "{path}");
+        assert!(headers["content-type"].to_str().unwrap().starts_with("text/html"), "{path}");
+        let csp = headers["content-security-policy"].to_str().unwrap();
+        assert!(csp.contains("default-src 'none'") && csp.contains("frame-ancestors 'none'"), "{csp}");
+        assert!(!csp.contains("script-src"), "{csp}");
+        assert_eq!(headers["x-content-type-options"], "nosniff");
+        assert_eq!(headers["cache-control"], "no-store");
+        let html = String::from_utf8(body).unwrap();
+        assert!(html.contains("works only with the LU app"), "{path}");
+        assert!(html.contains("home Wi-Fi"), "{path}");
+        let lower = html.to_ascii_lowercase();
+        for banned in ["<script", "http://", "https://", "src=", "href=", "studio pc", env!("CARGO_PKG_VERSION")] {
+            assert!(!lower.contains(&banned.to_ascii_lowercase()), "{path}: {banned}");
+        }
+    }
+    // Other methods and the API paths stay empty.
+    for (method, path) in [
+        ("POST", "/"),
+        ("POST", "/mobile"),
+        ("PUT", "/"),
+        ("DELETE", "/mobile"),
+        ("GET", "/remote-api/sealed"),
+        ("GET", "/remote-api/qr"),
+        ("POST", "/remote-api/status"),
+    ] {
+        let (status, _, body) = send(&rig, Via::Tunnel("203.0.113.5"), method, path, Vec::new()).await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "{method} {path}");
+        assert!(body.is_empty(), "{method} {path} answered with a body");
+    }
+    // The gate still comes first: a foreign name gets nothing.
+    let mut req = Request::builder().method("GET").uri("/").header("host", "evil.example").body(Body::empty()).unwrap();
+    req.extensions_mut().insert(ConnectInfo("127.0.0.1:40000".parse::<SocketAddr>().unwrap()));
+    let res = rig.routers.tunnel.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::NOT_FOUND);
+    assert!(axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap().is_empty());
+    // The sealed door is still reachable: an empty frame is refused by the
+    // channel itself, not by the fallback.
+    let (status, headers, _) = send(&rig, Via::Tunnel("203.0.113.5"), "POST", "/remote-api/sealed", Vec::new()).await;
+    assert_ne!(status, StatusCode::NOT_FOUND);
+    assert!(headers.get("content-security-policy").is_none());
+    let (status, _, _) = send(&rig, Via::Tunnel("203.0.113.5"), "GET", "/remote-api/status", Vec::new()).await;
+    assert_eq!(status, StatusCode::OK);
+}
+
+// ── Pairing ──
 // ── Pairing ──
 
 #[tokio::test]
