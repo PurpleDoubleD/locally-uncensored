@@ -149,6 +149,42 @@ describe('one click: frame, then video, then done', () => {
   })
 })
 
+describe('head crop of the photos (14.11.2026)', () => {
+  it('the frame step gets the cut photos, the video step does not', async () => {
+    const f = fakeDeps((s) => ok(s.kind === 'image' ? 'https://r/frame.jpg' : 'https://r/video.mp4'))
+    const blobs: Blob[] = []
+    const cropped: Blob[] = []
+    f.deps.uploadInput = async (b, role) => { blobs.push(b); f.uploads.push(role); return `u/${f.uploads.length}-${role}` }
+    f.deps.cropFace = async (b) => { const out = new Blob(['head'], { type: b.type }); cropped.push(out); return out }
+    const s = start()
+    const video = structuredClone(s.videoSubmit)
+    await startSwapChain(s, f.deps)
+    // Uploaded: the first frame (whole), then the two heads.
+    expect(blobs).toHaveLength(3)
+    expect(cropped).toHaveLength(2)
+    expect(cropped).not.toContain(blobs[0])
+    expect(blobs.slice(1)).toEqual(cropped)
+    expect(params(f.submits[0]).image_paths).toEqual(['u/1-source', 'u/2-source', 'u/3-source'])
+    // The video: the job from outside, unchanged, plus the result of the
+    // frame step as source_path. None of the heads is in it.
+    const { source_path, ...rest } = params(f.submits[1])
+    expect(rest).toEqual(video.params)
+    expect(source_path).toBe('a/1-image')
+    expect(JSON.stringify(f.submits[1])).not.toMatch(/u\/[23]-source/)
+  })
+
+  it('without a face (crop gives the photo back) the whole photo goes up', async () => {
+    const f = fakeDeps((s) => ok(s.kind === 'image' ? 'https://r/frame.jpg' : 'https://r/video.mp4'))
+    const blobs: Blob[] = []
+    const given: Blob[] = []
+    f.deps.uploadInput = async (b, role) => { blobs.push(b); f.uploads.push(role); return `u/${f.uploads.length}-${role}` }
+    f.deps.cropFace = async (b) => { given.push(b); return b }
+    await startSwapChain(start(), f.deps)
+    expect(blobs.slice(1)).toEqual(given)
+    expect(swapChainStore.getState().chain!.stage).toBe('done')
+  })
+})
+
 describe('Check first frame before video', () => {
   it('stops after the frame; the video starts only on Continue', async () => {
     const f = fakeDeps((s) => ok(s.kind === 'image' ? 'https://r/frame.jpg' : 'https://r/video.mp4'))

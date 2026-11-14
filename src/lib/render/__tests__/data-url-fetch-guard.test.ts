@@ -33,6 +33,9 @@ const SERVER_ONLY: Record<string, Record<string, string>> = {
   // the last preview as /api/loras signs it (https). A saved photo character
   // is read from its own blobs and never comes here.
   'components/create/experimental/hub/hubCharacters.ts': { 'c.image': 'signed https picture of a cloud character from /api/loras' },
+  // The head crop of the swap photos: the face model the app serves itself
+  // from public/face/, a fixed path, never a photo.
+  'lib/create/face-detect.ts': { FACE_MODEL_PATH: 'the face model under /face/, a fixed path of the app' },
   // The phone. None of the seven reads media; each sends a request to a server address the app builds.
   'lib/lu-native.ts': { 'request.url': 'the browser stand-in of the native request to a paired desktop: method, headers and body to its http(s) address' },
   'mobile/remote/remoteClient.ts': { url: 'API routes of a paired desktop, built from its http(s) base address' },

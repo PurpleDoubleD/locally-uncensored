@@ -21,6 +21,7 @@ import {
   swapFigureRoles, swapFrameKey, swapFrameOptionsFor, swapFramePrompt, swapMaxPeople,
   SWAP_CONSENT_MISSING, SWAP_FRAME_MODEL, type SwapMark,
 } from '../render/swap'
+import { headCropPhoto } from './head-crop'
 
 /** A person as the frame step reads it. */
 export interface SwapFrameFigure { imageUrl: string | null; role: string; mark?: SwapMark | null }
@@ -109,6 +110,9 @@ export interface SwapFrameDeps {
   pollJob: (id: string, opts: { signal?: AbortSignal; timeoutMs?: number }) => Promise<CloudJob>
   cancelJob: (id: string) => Promise<unknown>
   uploadInput: (file: Blob, role: UploadRole) => Promise<string>
+  /** Cuts a photo down to the head (head-crop.ts). Left out, it is the face
+   *  detection in the webview. */
+  cropFace?: (photo: Blob) => Promise<Blob>
   signal?: AbortSignal
   onStep?: (text: string) => void
 }
@@ -121,7 +125,10 @@ export async function runSwapFrame(req: SwapFrameRequest, deps: SwapFrameDeps): 
   deps.onStep?.('Uploading…')
   const framePath = await deps.uploadInput(dataUrlToBlob(req.frame!.url), 'source')
   const figurePaths: string[] = []
-  for (const f of req.figures) figurePaths.push(await deps.uploadInput(dataUrlToBlob(f.imageUrl!), 'source'))
+  // Only head and hair as the editor's face reference, else it takes over the
+  // clothes and the body of the photos (head-crop.ts).
+  const crop = deps.cropFace ?? headCropPhoto
+  for (const f of req.figures) figurePaths.push(await deps.uploadInput(await crop(dataUrlToBlob(f.imageUrl!)), 'source'))
   if (deps.signal?.aborted) throw new Error('Canceled.')
   deps.onStep?.('Building the first frame…')
   const { id } = await deps.submitCloudJob(swapFrameSubmit(framePath, figurePaths, req))

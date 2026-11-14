@@ -71,6 +71,8 @@ export default defineConfig([
     '.design-shots',
     // Laeufe des Abnahmerahmens: der Trockenlauf legt dort den Vite-Cache seiner Vorschau ab (gebuendelte Abhaengigkeiten).
     'mobile-tests/out',
+    // Kopien der Wasm-Dateien der Gesichtserkennung aus node_modules (scripts/copy-face-assets.mjs), in public/face/.gitignore.
+    'public/face/vision_wasm_*',
     // Rohdaten eines Geraeteberichts: Rumpfstuecke, die der Treiber als Funktionskoerper ausfuehrt
     // (oberstes return und await), keine Module. Genau dieser eine Ordner, nicht mobile-docs.
     'mobile-docs/r25/kurzpruefung-paket-10/ios/skripte',

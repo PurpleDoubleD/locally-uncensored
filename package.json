@@ -25,8 +25,8 @@
   },
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "vite build",
+    "dev": "node scripts/copy-face-assets.mjs && vite",
+    "build": "node scripts/copy-face-assets.mjs && vite build",
     "dev:mobile": "VITE_LU_BUILD_TARGET=mobile vite",
     "build:mobile": "VITE_LU_BUILD_TARGET=mobile vite build",
     "lint": "eslint .",
@@ -41,6 +41,7 @@
     "test:e2e": "playwright test"
   },
   "dependencies": {
+    "@mediapipe/tasks-vision": "1.2.0",
     "@pipecat-ai/client-js": "1.13.1",
     "@pipecat-ai/websocket-transport": "1.7.2",
     "@react-three/drei": "^10.7.7",

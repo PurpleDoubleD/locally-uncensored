@@ -28,6 +28,7 @@ import {
   SWAP_CONSENT_MISSING, SWAP_FRAME_MODEL, SWAP_FRAME_OPEN_MODEL, type SwapMark,
 } from '../render/swap'
 import { adoptResult, describeSubmitError, failedJobText, type RunDeps } from './engine'
+import { headCropPhoto } from './head-crop'
 import { swapFrameCredits, swapFrameSubmit } from './swap-frame'
 import { lipsyncFailedText } from './lipsync-chain'
 
@@ -127,6 +128,9 @@ export const SWAP_REFUSED_TEXT = 'The first-frame model refused this image. Noth
 
 export interface SwapChainDeps extends RunDeps {
   uploadInput: (file: Blob, role: UploadRole) => Promise<string>
+  /** Cuts a photo down to the head for the frame step (head-crop.ts). Left
+   *  out, it is the face detection in the webview. */
+  cropFace?: (photo: Blob) => Promise<Blob>
   adoptInput: (jobId: string, role: AdoptRole) => Promise<string>
   /** A finished result (video, or video with the new voice) into the gallery. */
   onResult?: (job: CloudJob) => void
@@ -190,7 +194,12 @@ export async function startSwapChain(start: SwapChainStart, deps: SwapChainDeps)
   try {
     const framePath = await deps.uploadInput(dataUrlToBlob(start.frame!.url), 'source')
     const figurePaths: string[] = []
-    for (const f of start.figures) figurePaths.push(await deps.uploadInput(dataUrlToBlob(f.image!.url), 'source'))
+    // The photos are only the editor's face references: head and hair, else it
+    // takes over clothes and body (head-crop.ts). The video step gets its image
+    // from the frame step and its job from outside (videoSubmit), neither
+    // touched by this.
+    const crop = deps.cropFace ?? headCropPhoto
+    for (const f of start.figures) figurePaths.push(await deps.uploadInput(await crop(dataUrlToBlob(f.image!.url)), 'source'))
     const lipsync = start.lipsync
       ? {
           model: start.lipsync.model,

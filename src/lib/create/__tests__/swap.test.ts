@@ -482,6 +482,22 @@ describe('the frame step', () => {
     expect(calls).toEqual([])
   })
 
+  it('the photos go up cut to the head, the first frame does not (head crop, 14.11.2026)', async () => {
+    const sent: string[] = []
+    const cropped: string[] = []
+    const deps = {
+      uploadInput: async (b: Blob, role: string) => { sent.push(`${role} ${await b.text()}`); return `u/${sent.length}` },
+      cropFace: async (b: Blob) => { cropped.push(b.type); return new Blob([`head ${cropped.length}`], { type: 'image/png' }) },
+      submitCloudJob: async () => ({ id: 'job-9' }),
+      pollJob: async (id: string) => ({ id, status: 'succeeded', result_url: 'https://ours/x.jpg' } as never),
+      cancelJob: async () => ({ status: 'canceled' }),
+    }
+    await runSwapFrame(request({ figures: [{ imageUrl: FOTO, role: '' }, { imageUrl: FOTO, role: '' }] }), deps as never)
+    // Each photo cut once, the first frame of the video never.
+    expect(cropped).toHaveLength(2)
+    expect(sent.map((s) => s.includes('head'))).toEqual([false, true, true])
+  })
+
   it('another video, photo, mark or role makes the built frame expire', () => {
     const fig = (url: string, role = '', mark: { x: number; y: number } | null = null) => ({ image: { url }, role, mark })
     const base = swapKeyOf('blob:v1', [fig('data:a')])
