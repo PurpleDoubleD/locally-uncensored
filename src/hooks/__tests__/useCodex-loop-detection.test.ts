@@ -48,7 +48,7 @@ describe('useCodex loop-detector (Bug #5 → AgentLoopGuard)', () => {
     // history read "do not repeat this" and then showed the model doing it.
     const idxHold = src.indexOf('pendingSteer = batchVerdict.message')
     const idxPush = src.indexOf("messages.push({ role: 'user', content: pendingSteer })")
-    const idxHistory = src.indexOf("messages.push({ role: 'assistant', content: turnContent || '', tool_calls: toolCalls })")
+    const idxHistory = src.indexOf("messages.push({ role: 'assistant', content: turnContent || '', tool_calls: toolCalls, reasoning: replayableReasoning(turnReasoning) })")
     expect(idxHold).toBeGreaterThan(0)
     expect(idxHistory).toBeGreaterThan(idxHold)
     expect(idxPush).toBeGreaterThan(idxHistory)

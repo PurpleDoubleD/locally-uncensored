@@ -11,6 +11,7 @@
  * filtering, the model has no syntactically valid path to recurse.
  */
 
+import { replayableReasoning } from '../../lib/agent-core/reasoning-replay'
 import { stripSourcesMarker } from '../../lib/web-evidence'
 import { settleThinking } from '../../lib/thinking-stripper'
 import { toolResultIsFailure } from '../../lib/tool-result-failure'
@@ -618,7 +619,15 @@ export async function defaultSubAgentRunner(
       thinking: raw.thinking,
       tools,
     })
-    const turn = { ...raw, content: recovered.content, toolCalls: recovered.toolCalls }
+    // Every call gets an id here, once. A call recovered from text or the
+    // reasoning channel had none, and the wire format then made up a fresh
+    // one on every request while its result went out with no id at all: the
+    // model could not tie its call to its result (CA, cloud loops).
+    const turn = {
+      ...raw,
+      content: recovered.content,
+      toolCalls: recovered.toolCalls.map((tc, k) => (tc.id ? tc : { ...tc, id: `call_sub${i}_${k}` })),
+    }
     // What a sub-agent returns becomes a TOOL RESULT in the parent's context,
     // so leaked reasoning floods the run it was supposed to shorten (2.6.7
     // Denk-Audit, Loch 11). Same settlement as every visible surface.
@@ -701,7 +710,7 @@ export async function defaultSubAgentRunner(
       continue
     }
 
-    messages.push({ role: 'assistant', content: turn.content || '', tool_calls: turn.toolCalls })
+    messages.push({ role: 'assistant', content: turn.content || '', tool_calls: turn.toolCalls, reasoning: replayableReasoning(raw.thinking) })
     // Map each result back to its ORIGINATING call by index. executeParallel
     // preserves input order (results[i] <-> requests[i] <-> turn.toolCalls[i]),
     // so zipping by index gives every tool message the correct tool_call_id,

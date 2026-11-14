@@ -61,6 +61,9 @@ export class LuCloudProvider implements ProviderClient {
       baseUrl: `${CLOUD_BASE}/api/inference/v1`,
       apiKey: token,
       isLocal: false,
+      // Its reasoners continue from their own reasoning between tool calls
+      // (lib/agent-core/reasoning-replay.ts).
+      replayReasoning: true,
     })
   }
 

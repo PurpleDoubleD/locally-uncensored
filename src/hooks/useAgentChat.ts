@@ -1,4 +1,5 @@
 import { stripSourcesMarker } from '../lib/web-evidence'
+import { replayableReasoning } from '../lib/agent-core/reasoning-replay'
 import { useRef, useState, useCallback, useEffect } from 'react'
 import { frameFlush } from '../lib/frame-flush'
 import { useRunActivityStore, toolProgressActivity, waitBeforeRetry, readingActivity, endFirstWait, hiddenThoughtArrived, waitForChatCard } from '../stores/runActivityStore'
@@ -1726,6 +1727,9 @@ export function useAgentChat() {
     // than a loop (plan A1, LOOP-GUARD). Keyed by the message object, which
     // works across all three transports.
     const guardKeyOfResult = new WeakMap<object, string>()
+    // Reads fetched again after their result was capped: their newest result
+    // stays whole from then on (context-decay keepWhole, CA cloud loops).
+    const neededAgain = new Set<string>()
     const guardKeyFor = (tc: { function: { name: string; arguments?: unknown } }): string =>
       `${tc.function.name}|${JSON.stringify(tc.function.arguments ?? {})}`
     const NO_TRIMMED_KEYS: ReadonlySet<string> = new Set<string>()
@@ -1959,6 +1963,7 @@ export function useAgentChat() {
             enabled: decayOn,
             hysteresis: decayOn,
             keyOf: (m) => guardKeyOfResult.get(m as unknown as object),
+            keepWhole: neededAgain,
           })
           sendMessages = built.messages
           trimmedReadKeys = new Set(built.trimmedKeys)
@@ -3005,6 +3010,10 @@ export function useAgentChat() {
               // decay working as designed, not a loop (plan A1, LOOP-GUARD).
               { trimmedReadKeys },
             )
+        for (const tc of toolCalls) {
+          const k = guardKeyFor(tc)
+          if (trimmedReadKeys.has(k)) neededAgain.add(k)
+        }
         // A plan the model keeps restating steers like a repeated batch does;
         // the batch's own verdict wins where it has one (A37).
         const batchVerdict = recordedVerdict.action === 'ok' ? narrationVerdict : recordedVerdict
@@ -3459,6 +3468,9 @@ export function useAgentChat() {
             role: 'assistant',
             content: turnContent || '',
             tool_calls: toolCalls,
+            // The step's own reasoning goes back with its calls where the
+            // provider asks for it (lib/agent-core/reasoning-replay.ts).
+            reasoning: replayableReasoning(turnThinking),
           })
           for (const { tc } of batch) {
             const result = results.find((r) => r.id === batch.find((b) => b.tc === tc)?.ac.id)!

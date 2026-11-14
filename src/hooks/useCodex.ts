@@ -1,4 +1,5 @@
 import { stripSourcesMarker } from '../lib/web-evidence'
+import { replayableReasoning } from '../lib/agent-core/reasoning-replay'
 import { NOT_IN_CODE_TAB } from '../lib/browser-tools'
 import { useRef, useState, useCallback } from 'react'
 import { markCannotThink } from '../lib/model-compatibility'
@@ -914,7 +915,14 @@ export function useCodex() {
     // the provider now flips through chat_template_kwargs. Asking for tags on
     // top of a template that already opened the thought is a double
     // instruction, and that is what loops a reasoner.
+    //
+    // And not for a model whose catalogue entry declares how it thinks
+    // (`thinkMode`, every LU Cloud model): the provider switches its native
+    // reasoning through reasoning_effort, and the tag request on top is the
+    // same double instruction. Plain chat had this gate (useChat.ts), the Code
+    // tab did not, and GLM on LU Cloud got both (CA, cloud loops, 13.11.2026).
     if (settings.thinkingEnabled && providerId !== 'ollama' && codexCanThink(activeModel)
+        && codexThinkMode(activeModel) === undefined
         && !isLocalModelByName(activeModel)) {
       systemPrompt += '\n\nBefore answering, reason through your thinking inside <think></think> tags. Your thinking will be hidden from the user. After thinking, provide your answer outside the tags.'
     }
@@ -1280,6 +1288,9 @@ export function useCodex() {
       // transport shape and every reordering the builder does; a WeakMap so a
       // dropped message takes its entry with it.
       const guardKeyOfResult = new WeakMap<object, string>()
+      // Reads fetched again after their result was capped: their newest result
+      // stays whole from then on (context-decay keepWhole, CA cloud loops).
+      const neededAgain = new Set<string>()
       const guardKeyFor = (tc: { function: { name: string; arguments: unknown } }): string =>
         `${tc.function.name}|${JSON.stringify(tc.function.arguments)}`
       const NO_TRIMMED_KEYS: ReadonlySet<string> = new Set<string>()
@@ -1357,6 +1368,9 @@ export function useCodex() {
         }
         let toolCalls: ToolCall[] = []
         let turnContent = ''
+        // The step's native reasoning, sent back with its calls where the
+        // provider asks for it (lib/agent-core/reasoning-replay.ts).
+        let turnReasoning = ''
         // Warum DIESER Zug endete. Nur `length` wird ausgewertet, und nur
         // unten in der Weiche ohne Werkzeugaufruf: ein abgeschnittener Zug
         // sah dort bis Fehler D genauso aus wie ein fertiges Modell.
@@ -1469,6 +1483,7 @@ export function useCodex() {
             enabled: decayOn,
             hysteresis: decayOn,
             keyOf: (m) => guardKeyOfResult.get(m as unknown as object),
+            keepWhole: neededAgain,
           })
           sendMessages = built.messages
           stepPromptEstimate = built.promptTokens
@@ -1770,6 +1785,7 @@ export function useCodex() {
               contentHead: turnContent.slice(0, 200),
               thinkingLen: turn.thinking?.length || 0,
             })
+            turnReasoning = turn.thinking || ''
             if (keepThinking && turn.thinking) {
               thinkingContent += (thinkingContent ? '\n\n' : '') + turn.thinking
               useChatStore.getState().updateMessageThinking(convId!, assistantMsg.id, thinkingContent)
@@ -1831,6 +1847,7 @@ export function useCodex() {
               turnContent = recovered.content
               if (recovered.source !== 'native' && recovered.source !== 'none') diagLog('calls-recovered', { from: recovered.source, count: toolCalls.length })
             }
+            turnReasoning = turn.thinking || ''
             if (keepThinking && turn.thinking) {
               thinkingContent += (thinkingContent ? '\n\n' : '') + turn.thinking
               useChatStore.getState().updateMessageThinking(convId!, assistantMsg.id, thinkingContent)
@@ -2274,6 +2291,10 @@ export function useCodex() {
               // not a loop (plan A1, LOOP-GUARD).
               { trimmedReadKeys },
             )
+        for (const tc of toolCalls) {
+          const k = guardKeyFor(tc)
+          if (trimmedReadKeys.has(k)) neededAgain.add(k)
+        }
         // A plan the model keeps restating steers like a repeated batch does;
         // the batch's own verdict wins where it has one (A37).
         const batchVerdict = recordedVerdict.action === 'ok' ? narrationVerdict : recordedVerdict
@@ -2701,7 +2722,7 @@ export function useCodex() {
             ))
           }
         } else if (speaksOpenAIProtocol(providerId) || providerId === 'anthropic') {
-          messages.push({ role: 'assistant', content: turnContent || '', tool_calls: toolCalls })
+          messages.push({ role: 'assistant', content: turnContent || '', tool_calls: toolCalls, reasoning: replayableReasoning(turnReasoning) })
           for (const { tc } of batch) {
             const result = results.find((r) => r.id === batch.find((b) => b.tc === tc)?.ac.id)!
             messages.push(rememberResult({ role: 'tool', content: resultTextFor(result), tool_call_id: tc.id }, tc))

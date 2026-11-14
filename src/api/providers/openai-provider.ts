@@ -102,6 +102,7 @@ export interface OpenAIRequestMessage {
   content: string | OpenAIContentPart[]
   tool_calls?: OpenAIRequestToolCall[]
   tool_call_id?: string
+  reasoning_content?: string
 }
 
 export interface OpenAIChatRequest {
@@ -2047,6 +2048,12 @@ export class OpenAIProvider implements ProviderClient {
 
     if (msg.tool_call_id) {
       m.tool_call_id = msg.tool_call_id
+    }
+
+    // The step's own reasoning, where the provider asks for it
+    // (lib/agent-core/reasoning-replay.ts).
+    if (this.config.replayReasoning && msg.role === 'assistant' && msg.reasoning) {
+      m.reasoning_content = msg.reasoning
     }
 
     return m

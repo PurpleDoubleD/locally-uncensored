@@ -31,6 +31,10 @@ export interface ProviderConfig {
   baseUrl: string       // e.g. "http://localhost:11434", "https://openrouter.ai/api/v1"
   apiKey: string        // Encrypted in store. Empty string for local providers.
   isLocal: boolean      // true for Ollama, LM Studio, vLLM, no API key needed
+  // CA (13.11.2026): send an assistant step's own reasoning back as
+  // `reasoning_content` (lib/agent-core/reasoning-replay.ts). Set by LU Cloud,
+  // whose reasoners need it between tool calls. Undefined = not sent.
+  replayReasoning?: boolean
   // Built-in engine (2.5.7): the app manages this OpenAI-compatible backend's
   // lifecycle itself (bundled llama-server on 127.0.0.1:8127). When true the UI
   // hides the URL/key inputs and the model list comes from `list_bundled_models`
@@ -208,6 +212,10 @@ export interface ChatMessage {
   images?: { data: string; mimeType: string }[]  // base64 image attachments
   tool_calls?: ToolCall[]
   tool_call_id?: string  // Required for OpenAI tool results
+  /** The model's own reasoning on this assistant step, sent back as
+   *  `reasoning_content` where the provider asks for it (replayReasoning).
+   *  Set only by the agent loops for steps of the run that is going. */
+  reasoning?: string
 }
 
 export interface ToolCall {

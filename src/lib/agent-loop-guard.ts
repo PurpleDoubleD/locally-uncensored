@@ -272,6 +272,9 @@ export class AgentLoopGuard {
    */
   private stepSilent: boolean | null = null
 
+  /** Reads whose capped result was already forgiven once (detector 3). */
+  private trimForgiven = new Set<string>()
+
   /**
    * Record one iteration's tool-call batch BEFORE executing it. `args` must
    * be the serialized (stringified) arguments so identity is byte-exact —
@@ -377,11 +380,18 @@ export class AgentLoopGuard {
     let steer: LoopGuardVerdict | null = null
     for (let i = 0; i < calls.length; i++) {
       if (!READ_ONLY_TOOLS.has(calls[i].name)) continue
-      if (isTrimmed(keys[i])) {
+      if (isTrimmed(keys[i]) && !this.trimForgiven.has(keys[i])) {
         // The result aged out of the prompt, so this read returns information
         // the model genuinely no longer has. Clear the counter rather than
         // just skipping it: the epoch before the cap says nothing about the
         // epoch after it.
+        //
+        // Once per read, not forever (CA, cloud loops, 13.11.2026). The loops
+        // keep the newest result of a read that was fetched again whole
+        // (context-decay `keepWhole`), so a second "it was capped" cannot
+        // come from age any more. Forgiving every lap let read, cap, read run
+        // uncounted, and on a 32k cloud window that lap is every few steps.
+        this.trimForgiven.add(keys[i])
         this.readCounts.delete(keys[i])
         continue
       }
@@ -397,10 +407,14 @@ export class AgentLoopGuard {
         this.steeredKeys.add(keys[i])
         steer = {
           action: 'steer',
-          message:
-            `You have now called ${calls[i].name} ${n} times with exactly the same arguments. ` +
-            'Nothing changed in between, so the result is identical to the one you already have. ' +
-            'Do NOT repeat this call again. Use the result from before, or take a DIFFERENT action that moves the task forward.',
+          // A read whose result keeps coming back cut has no whole "result
+          // from before" to point at. The honest way out is a smaller read.
+          message: isTrimmed(keys[i])
+            ? `You have now called ${calls[i].name} ${n} times with exactly the same arguments, and its result is cut every time because the conversation is long. ` +
+              'Do NOT fetch it whole again. Read only the part you need (a line range, or a search for the name you want), or finish the task with what you have.'
+            : `You have now called ${calls[i].name} ${n} times with exactly the same arguments. ` +
+              'Nothing changed in between, so the result is identical to the one you already have. ' +
+              'Do NOT repeat this call again. Use the result from before, or take a DIFFERENT action that moves the task forward.',
         }
       }
     }
@@ -411,6 +425,7 @@ export class AgentLoopGuard {
       // change is never punished. steeredKeys survives: one steer per unique
       // call is enough for the whole run.
       this.readCounts.clear()
+      this.trimForgiven.clear()
       this.pureWindow = []
     }
     return steer ?? (near.action === 'steer' ? near : { action: 'ok' })

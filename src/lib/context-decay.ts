@@ -200,6 +200,15 @@ export interface DecayOptions<T> {
    * legitimate and the guard must not count it (plan A1, LOOP-GUARD).
    */
   keyOf?: (msg: T) => string | undefined
+  /**
+   * Reads the model fetched AGAIN after their result had been capped (CA,
+   * cloud loops, 13.11.2026). The newest result of such a read stays whole:
+   * the model has shown it needs those bytes, and capping them again only
+   * starts the next read, cap, read cycle, each lap a full paid request. Needs
+   * `keyOf`. The window trim (trimWorkingHistory) still applies, so a pinned
+   * result can never push a request past its budget.
+   */
+  keepWhole?: ReadonlySet<string>
 }
 
 export interface DecayReport<T> {
@@ -243,9 +252,22 @@ export function applyToolResultDecay<T extends DecayMessage>(
   let trimmedCount = 0
   let savedChars = 0
   const trimmedKeys: string[] = []
+  // The newest result of every read that must stay whole.
+  const pinned = new Set<number>()
+  if (opts.keepWhole?.size && opts.keyOf) {
+    const seen = new Set<string>()
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (!isToolResult(messages[i])) continue
+      const key = opts.keyOf(messages[i])
+      if (!key || seen.has(key)) continue
+      seen.add(key)
+      if (opts.keepWhole.has(key)) pinned.add(i)
+    }
+  }
   for (let i = 0; i < messages.length; i++) {
     const m = messages[i]
     if (!isToolResult(m)) continue
+    if (pinned.has(i)) continue
     // The request under construction is iteration newest + 1.
     const age = newest + 1 - iters[i]
     if (age < afterIterations) continue
