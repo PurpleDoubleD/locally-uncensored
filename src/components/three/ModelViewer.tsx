@@ -13,6 +13,10 @@ import { MeshLoadError } from '../../lib/three/mesh-load'
 import { fetchGalleryItemBlob, markGalleryItemAvailable } from '../create/experimental/galleryUrl'
 import { saveBytes } from '../create/experimental/galleryDownload'
 import { cn } from '../create/ui/cn'
+import {
+  BLENDER_TEXT, blenderMenu, blenderMenuHint, blenderModelName, blenderPossible, getBlenderStatus, makeWithBlender, openInBlender, stopBlender,
+  type BlenderAction, type BlenderStatus,
+} from '../../api/blender'
 
 export const VIEWER_TEXT = {
   hint: 'Drag to turn. Scroll to zoom.',
@@ -57,6 +61,17 @@ export default function ModelViewer({ item, className, onFullscreen, touch }: Mo
   const [turning, setTurning] = useState(true)
   const [menu, setMenu] = useState(false)
   const [force, setForce] = useState(false)
+  const [blender, setBlender] = useState<BlenderStatus | null>(null)
+  const [busy, setBusy] = useState<{ action: BlenderAction; job: string } | null>(null)
+  const [note, setNote] = useState('')
+
+  // The Blender entries of the menu: asked when the menu opens (desktop app only).
+  useEffect(() => {
+    if (!menu || !blenderPossible()) return
+    let alive = true
+    void getBlenderStatus().then((s) => { if (alive) setBlender(s) })
+    return () => { alive = false }
+  }, [menu])
 
   useEffect(() => {
     if (!webgl) return
@@ -121,6 +136,37 @@ export default function ModelViewer({ item, className, onFullscreen, touch }: Mo
       setMessage(VIEWER_TEXT.saveFailed)
     }
   }, [item.id])
+
+  const toBlender = useCallback(async (action: BlenderAction) => {
+    setMenu(false)
+    const original = bytesRef.current
+    if (!original || busy) return
+    const job = typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `${Date.now()}`
+    const name = blenderModelName(item)
+    setMessage('')
+    setBusy({ action, job })
+    setNote(action === 'open' ? BLENDER_TEXT.opening : BLENDER_TEXT.making[action])
+    try {
+      if (action === 'open') {
+        await openInBlender(original, name)
+        // Blender takes a few seconds to show its window; the line stays that long.
+        await new Promise((r) => setTimeout(r, 4000))
+      } else {
+        const bytes = await makeWithBlender(original, name, action, job)
+        setNote('')
+        await saveBytes(bytes, `lu-${item.id}.${action}`, action)
+      }
+    } catch (err) {
+      const text = err instanceof Error ? err.message : String(err)
+      if (text !== 'Stopped.') setMessage(text || BLENDER_TEXT.failed)
+    } finally {
+      setBusy(null)
+      setNote('')
+    }
+  }, [busy, item])
+
+  const blenderEntries = blenderMenu(blender)
+  const menuHint = blenderMenuHint(blender)
 
   const canExport = phase === 'ready'
   return (
@@ -187,6 +233,21 @@ export default function ModelViewer({ item, className, onFullscreen, touch }: Mo
                   {f.label} <span className="text-gray-500">· {f.note}</span>
                 </button>
               ))}
+              {blenderEntries.length > 0 && <div className="my-1 border-t border-white/10" role="separator" />}
+              {blenderEntries.map((b) => (
+                <button
+                  key={b.id}
+                  type="button"
+                  role="menuitem"
+                  disabled={!!busy}
+                  data-testid={`mv-blender-${b.id}`}
+                  onClick={() => void toBlender(b.id)}
+                  className="lu-on-dark w-full text-left px-3 py-1.5 t-control text-gray-200 hover:bg-white/5 disabled:opacity-50"
+                >
+                  {b.label}{b.note && <span className="text-gray-500"> · {b.note}</span>}
+                </button>
+              ))}
+              {menuHint && <p className="px-3 pt-1 pb-1.5 t-mono text-gray-500 max-w-[260px]" data-testid="mv-blender-hint">{menuHint}</p>}
             </div>
           )}
         </div>
@@ -197,7 +258,17 @@ export default function ModelViewer({ item, className, onFullscreen, touch }: Mo
           <span className={touch ? undefined : 'hidden sm:inline'}>{touch ? VIEWER_TEXT.hintTouch : VIEWER_TEXT.hint}</span>
         </div>
       )}
-      {phase === 'ready' && message && (
+      {note && (
+        <div className="absolute bottom-8 left-3 flex items-center gap-2 t-mono text-gray-300" data-testid="model-viewer-blender">
+          <span>{note}</span>
+          {busy && busy.action !== 'open' && (
+            <button type="button" className="underline underline-offset-2 text-gray-200" onClick={() => void stopBlender(busy.job)} data-testid="mv-blender-stop">
+              {BLENDER_TEXT.stop}
+            </button>
+          )}
+        </div>
+      )}
+      {phase === 'ready' && message && !note && (
         <div className="absolute bottom-8 left-3 t-mono text-red-300" data-testid="model-viewer-note">{message}</div>
       )}
     </div>

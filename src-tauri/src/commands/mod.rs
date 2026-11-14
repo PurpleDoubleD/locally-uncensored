@@ -58,6 +58,9 @@ pub mod local_api;
 pub mod local_api_engine;
 pub mod logging;
 pub mod media_cmds;
+// Create, 3D: open a model in Blender or have Blender make a .blend or FBX.
+#[cfg(desktop)]
+pub mod blender;
 // The local 3D engine of the Mac (TripoSR), see mesh3d.rs.
 pub mod mesh3d;
 pub mod mlx;
