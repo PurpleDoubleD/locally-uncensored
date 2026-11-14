@@ -74,7 +74,7 @@ describe('the pick', () => {
   })
 
   it('the price shown is the picture plus the model', () => {
-    // Z-Image Base is a flat 0.01 USD, 1,000 credits.
+    // Z-Image Base is a flat 1,000 credits.
     expect(pictureFirstPictureCredits('a clay teapot')).toBe(1000)
     expect(pictureStepCredits('3d', 'text', PICTURE_FIRST_MESH, 'a clay teapot')).toBe(1000)
     expect(pictureStepCredits('3d', 'image', PICTURE_FIRST_MESH, 'a clay teapot')).toBe(0)
