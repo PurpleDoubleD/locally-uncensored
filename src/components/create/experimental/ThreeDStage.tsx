@@ -136,21 +136,24 @@ function installLine(st: { status: string; download_progress?: number; download_
 export function ThreeDSetupCard({ setup }: { setup: ThreeDSetup }) {
   const mac = isMlxImageHost()
   const openSettingsAt = useUIStore((s) => s.openSettingsAt)
-  const gated = mac && !!setup.card?.gated
+  // The picked model decides the card, also before (or without) an answer
+  // from the engine: with Stable Fast 3D picked the card never offers TripoSR.
+  const picked = mac3dModel(useCreateStore((s) => s.threeDMacModel))
+  const gated = mac && (setup.card?.gated ?? picked.gated)
   const title = !mac ? SETUP_TEXT.pcTitle : gated ? SETUP_TEXT.sf3dTitle : SETUP_TEXT.macTitle
   const body = !mac ? SETUP_TEXT.pcBody : gated ? SETUP_TEXT.sf3dBody : SETUP_TEXT.macBody
   const tokenMissing = gated && !setup.card?.hasToken
   const licenseUrl = setup.card?.licenseUrl
   return (
-    <div className="m-auto flex flex-col items-center gap-3 max-w-[440px] text-center p-6" data-testid="three-d-setup">
+    <div className="m-auto flex flex-col items-center gap-3 max-w-[440px] max-h-full overflow-y-auto text-center p-6" data-testid="three-d-setup">
       <Box size={30} className="text-gray-400" />
       <h3 className="t-title text-gray-100">{title}</h3>
       <p className="t-body text-gray-400">{body}</p>
       {gated && setup.card?.licenseText && (
         <div className="flex flex-col items-center gap-1.5 rounded-lg border border-white/[0.08] px-3 py-2" data-testid="three-d-license">
-          <p className="t-meta text-gray-400 text-left">{setup.card.licenseText}</p>
+          <p className="t-micro leading-snug text-gray-400 text-left">{setup.card.licenseText}</p>
           {licenseUrl && (
-            <button type="button" className="t-meta text-gray-300 underline" onClick={() => void openExternal(licenseUrl)}>
+            <button type="button" className="t-body text-gray-300 underline" onClick={() => void openExternal(licenseUrl)}>
               {SETUP_TEXT.licenseLink}
             </button>
           )}
@@ -158,19 +161,19 @@ export function ThreeDSetupCard({ setup }: { setup: ThreeDSetup }) {
       )}
       {tokenMissing && !setup.installing && (
         <>
-          <p className="t-meta text-gray-300" data-testid="three-d-token-needed">{SETUP_TEXT.tokenNeeded}</p>
+          <p className="t-body text-gray-300" data-testid="three-d-token-needed">{SETUP_TEXT.tokenNeeded}</p>
           <Button variant="secondary" onClick={() => openSettingsAt({ tab: 'backends' })}>{SETUP_TEXT.tokenButton}</Button>
         </>
       )}
       {setup.installing ? (
         <>
-          <p className="t-meta text-gray-300" data-testid="three-d-setup-line">{setup.line ?? T.phases.ready}</p>
+          <p className="t-body text-gray-300" data-testid="three-d-setup-line">{setup.line ?? T.phases.ready}</p>
           <Button variant="secondary" onClick={setup.cancel}>{SETUP_TEXT.cancel}</Button>
         </>
       ) : (
         <Button variant="primary" onClick={setup.install} disabled={tokenMissing} data-testid="three-d-setup-install">{SETUP_TEXT.install}</Button>
       )}
-      {setup.error && <p className="t-meta text-red-300" role="alert">{setup.error}</p>}
+      {setup.error && <p className="t-body text-red-300" role="alert">{setup.error}</p>}
     </div>
   )
 }
@@ -182,7 +185,7 @@ export function ThreeDVideoHint() {
     <div className="m-auto flex flex-col items-center gap-2 max-w-[420px] text-center p-6" data-testid="three-d-video-hint">
       <Film size={28} className="text-gray-400" />
       <p className="t-body text-gray-300">{T.dropVideo}</p>
-      <p className="t-meta text-gray-500">{T.dropVideoSub}</p>
+      <p className="t-body text-gray-500">{T.dropVideoSub}</p>
     </div>
   )
 }

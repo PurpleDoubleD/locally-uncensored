@@ -61,7 +61,7 @@ export function ThreeDControls({ maxViews, hasDetail, hasCutout, studioId, pictu
         onChange={setWay}
         options={WAYS.map((w) => ({ value: w, label: T.ways[w] }))}
       />
-      {way === 'text' && pictureFirst && <p className="t-meta text-gray-400" data-testid="three-d-picture-first">{T.pictureFirst}</p>}
+      {way === 'text' && pictureFirst && <p className="t-micro text-gray-400" data-testid="three-d-picture-first">{T.pictureFirst}</p>}
       {way === 'image' && maxViews > 1 && <SideStrip maxViews={maxViews} />}
       {way === 'video' && <VideoFrames maxViews={maxViews} />}
       <div className="flex flex-wrap items-center gap-4">
@@ -121,7 +121,7 @@ function SideStrip({ maxViews }: { maxViews: number }) {
           <Slot key={name} name={name} image={views[i]} onPick={() => pick(i)} onClear={() => setViews(views.filter((_, k) => k !== i))} />
         ))}
       </div>
-      <span className="t-meta text-gray-500">{T.moreSidesSub}</span>
+      <span className="t-micro text-gray-500">{T.moreSidesSub}</span>
       <input ref={inputRef} type="file" accept="image/*" className="hidden" onChange={(e) => { void onFile(e.target.files?.[0]); e.target.value = '' }} />
     </div>
   )
@@ -211,16 +211,16 @@ function VideoFrames({ maxViews }: { maxViews: number }) {
         <Film size={14} />
         {name ?? T.dropVideo}
       </button>
-      {reading && <span className="t-meta text-gray-400">{T.framesReading}</span>}
+      {reading && <span className="t-micro text-gray-400">{T.framesReading}</span>}
       {frames.length > 0 && (
         <>
-          <span className="t-meta text-gray-400">{want > 1 ? T.framesMany : T.framesOne}</span>
+          <span className="t-micro text-gray-400">{want > 1 ? T.framesMany : T.framesOne}</span>
           <div className="flex flex-wrap gap-2" data-testid="three-d-frames">
             {frames.map((fr, i) => (
               <Slot key={fr.url} name={`${i + 1}`} image={fr} active={picked.includes(i)} onPick={() => toggle(i)} />
             ))}
           </div>
-          <span className="t-meta text-gray-500">{T.videoHonest}</span>
+          <span className="t-micro text-gray-500">{T.videoHonest}</span>
         </>
       )}
       <input ref={inputRef} type="file" accept="video/mp4,video/webm,video/quicktime" className="hidden" onChange={(e) => { void onFile(e.target.files?.[0]); e.target.value = '' }} />
