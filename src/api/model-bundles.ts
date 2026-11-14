@@ -1304,10 +1304,12 @@ export function getVideoBundles(): ModelBundle[] {
     // MiniMax H3 (Discord, throwaway 2026-09-26). The files and the int8
     // tier are the official Comfy-Org templates' (video_minimax_h3_t2v/_i2v);
     // sizes read from Hugging Face on 2026-10-01. The 21 GB model alone sets
-    // the VRAM line.
+    // the VRAM line. W23 (2026-11-14): the name says what the file is for
+    // (fl2va: start and end frames), next to MiniMax H3 Reference (ref2va:
+    // reference images), so nobody has to guess which of the two to get.
     {
-      name: 'MiniMax H3 · Video with Sound',
-      description: 'Video with its own sound from a prompt or a first frame, up to about 15 seconds. Fastest way: add the MiniMax H3 Turbo LoRA, 8 steps instead of 20.',
+      name: 'MiniMax H3 · Start/End Frames, with Sound',
+      description: 'Video with its own sound from a prompt, a start frame, or start and end frames, up to about 15 seconds. Fastest way: add the MiniMax H3 Turbo LoRA, 8 steps instead of 20.',
       tags: ['MiniMax H3', 'Audio', '768p'],
       verified: true,
       totalSizeGB: 40.1,
@@ -1317,8 +1319,8 @@ export function getVideoBundles(): ModelBundle[] {
       url: 'https://huggingface.co/Comfy-Org/MiniMax-H3',
       files: [
         {
-          name: 'MiniMax H3 fl2va (int8)',
-          description: 'Main model, text or first frame to video with sound.',
+          name: 'MiniMax H3 fl2va (int8) · Start/End frames',
+          description: 'Main model: a prompt, a start frame or start and end frames to video with sound.',
           pulls: '', tags: ['Model', '21 GB'], updated: 'New',
           downloadUrl: 'https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/diffusion_models/minimax_h3_fl2va_pruned_int8_convrot.safetensors',
           filename: 'minimax_h3_fl2va_pruned_int8_convrot.safetensors', subfolder: 'diffusion_models', sizeGB: 21.0,
@@ -1369,8 +1371,8 @@ export function getVideoBundles(): ModelBundle[] {
     // gated). Same folder as fl2va; the encoder and the VAEs are the shared
     // H3 files, so a machine with MiniMax H3 or FastH3 fetches only the model.
     {
-      name: 'MiniMax H3 Reference · Video from Pictures',
-      description: 'MiniMax H3 with up to 9 reference pictures of who or what is in the clip, with its own sound. Shares its text encoder and VAEs with MiniMax H3.',
+      name: 'MiniMax H3 Reference · Reference Images, with Sound',
+      description: 'Video with its own sound from up to 9 reference pictures of who or what is in the clip. Shares its text encoder and VAEs with MiniMax H3.',
       tags: ['MiniMax H3', 'Audio', 'References'],
       totalSizeGB: 38.6,
       vramRequired: '24+ GB',
@@ -1379,8 +1381,8 @@ export function getVideoBundles(): ModelBundle[] {
       url: 'https://huggingface.co/Comfy-Org/MiniMax-H3',
       files: [
         {
-          name: 'MiniMax H3 ref2va (int8)',
-          description: 'Main model, references to video with sound.',
+          name: 'MiniMax H3 ref2va (int8) · Reference images',
+          description: 'Main model: up to 9 reference pictures to video with sound.',
           pulls: '', tags: ['Model', '19.5 GB'], updated: 'New',
           downloadUrl: 'https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/diffusion_models/minimax_h3_ref2va_pruned_int8_convrot.safetensors',
           filename: 'minimax_h3_ref2va_pruned_int8_convrot.safetensors', subfolder: 'diffusion_models', sizeGB: 19.53,

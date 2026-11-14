@@ -75,9 +75,9 @@ describe('where it shows', () => {
     expect(b.name).toBe('MiniMax H3 Turbo LoRA · 8 Steps')
     expect(b.workflow).toBe('minimaxh3')
     expect(b.tier).toBe('best')
-    expect(all[all.findIndex((x) => x.name === b.name) - 1].name).toBe('MiniMax H3 · Video with Sound')
+    expect(all[all.findIndex((x) => x.name === b.name) - 1].name).toBe('MiniMax H3 · Start/End Frames, with Sound')
     // The first minimaxh3 entry stays the model itself.
-    expect(all.find((x) => x.workflow === 'minimaxh3')!.name).toBe('MiniMax H3 · Video with Sound')
+    expect(all.find((x) => x.workflow === 'minimaxh3')!.name).toBe('MiniMax H3 · Start/End Frames, with Sound')
     // It needs the model next to it, so it is sized like the model.
     const model = all.find((x) => x.workflow === 'minimaxh3')!
     expect([b.vramMinGB, b.vramComfortGB]).toEqual([model.vramMinGB, model.vramComfortGB])
@@ -100,7 +100,7 @@ describe('where it shows', () => {
 
 describe('what the cards say', () => {
   it('the H3 bundle names the fastest way, in the two lines a card shows', () => {
-    const h3 = getVideoBundles().find((b) => b.name === 'MiniMax H3 · Video with Sound')!
+    const h3 = getVideoBundles().find((b) => b.name === 'MiniMax H3 · Start/End Frames, with Sound')!
     expect(h3.description).toMatch(/Fastest way: add the MiniMax H3 Turbo LoRA, 8 steps instead of 20\./)
     expect(h3.description.length).toBeLessThanOrEqual(170)
   })

@@ -19,7 +19,7 @@ vi.mock('../backend', async (importOriginal) => {
 import { getVideoBundles } from '../model-bundles'
 import { lookupFileMeta, checkBundlesInstalled } from '../discover'
 import { bundleForVideoIntent, classifyModel } from '../comfyui'
-import { localAnimateReferenceSlots } from '../../lib/frame-refs'
+import { localAnimateReferenceSlots, localEndFrame } from '../../lib/frame-refs'
 import { backendCall } from '../backend'
 
 const FILE = 'minimax_h3_ref2va_pruned_int8_convrot.safetensors'
@@ -29,7 +29,7 @@ const GIB = 1024 ** 3
 
 const all = () => getVideoBundles()
 const ref = () => all().find((b) => b.files.some((f) => f.filename === FILE))!
-const fl2va = () => all().find((b) => b.name === 'MiniMax H3 · Video with Sound')!
+const fl2va = () => all().find((b) => b.name === 'MiniMax H3 · Start/End Frames, with Sound')!
 
 describe('MiniMax H3 Reference is on the Models tab', () => {
   it('its own bundle, with URL, folder, size and sha256 as Hugging Face states them', () => {
@@ -70,14 +70,45 @@ describe('MiniMax H3 Reference is on the Models tab', () => {
   it('the builder reads it as H3 with nine references, and the fl2va bundle stays the starter', () => {
     expect(classifyModel(FILE)).toBe('minimaxh3')
     expect(localAnimateReferenceSlots(FILE)).toBe(8)
-    expect(all().find((b) => b.workflow === 'minimaxh3')!.name).toBe('MiniMax H3 · Video with Sound')
+    expect(all().find((b) => b.workflow === 'minimaxh3')!.name).toBe('MiniMax H3 · Start/End Frames, with Sound')
     expect(bundleForVideoIntent(all(), 'video')?.name).not.toBe(ref().name)
   })
 
   it('the Turbo LoRA stays right behind the H3 bundle, the card text has no dash characters', () => {
     const names = all().map((b) => b.name)
-    expect(names[names.indexOf('MiniMax H3 Turbo LoRA · 8 Steps') - 1]).toBe('MiniMax H3 · Video with Sound')
+    expect(names[names.indexOf('MiniMax H3 Turbo LoRA · 8 Steps') - 1]).toBe('MiniMax H3 · Start/End Frames, with Sound')
     for (const t of [ref().name, ref().description, ref().files[0].name, ref().files[0].description]) expect(t).not.toMatch(/[–—]/)
     expect(ref().description.length).toBeLessThanOrEqual(170)
+  })
+})
+
+describe('W23 (2026-11-14): the two H3 downloads say which one is for what', () => {
+  const FL2VA = 'minimax_h3_fl2va_pruned_int8_convrot.safetensors'
+
+  it('fl2va is named for start and end frames, ref2va for reference images, on the card and on the file', () => {
+    expect(fl2va().name).toMatch(/Start\/End Frames/)
+    expect(fl2va().files[0].name).toMatch(/Start\/End frames/)
+    expect(fl2va().description).toMatch(/start frame, or start and end frames/)
+    expect(ref().name).toMatch(/Reference Images/)
+    expect(ref().files[0].name).toMatch(/Reference images/)
+    expect(ref().description).toMatch(/up to 9 reference pictures/)
+  })
+
+  it('and each label is what the builder does with the file', () => {
+    expect(fl2va().files[0].filename).toBe(FL2VA)
+    expect(localEndFrame(FL2VA)).toBe(true)
+    expect(localAnimateReferenceSlots(FL2VA)).toBe(0)
+    expect(localEndFrame(FILE)).toBe(false)
+    expect(localAnimateReferenceSlots(FILE)).toBe(8)
+  })
+
+  it('NEGATIVE CONTROL: neither label promises what the other file does', () => {
+    for (const t of [fl2va().name, fl2va().files[0].name]) expect(t).not.toMatch(/reference/i)
+    for (const t of [ref().name, ref().files[0].name, ref().description]) expect(t).not.toMatch(/start|end frame/i)
+  })
+
+  it('the fl2va card text stays short and has no dash characters', () => {
+    for (const t of [fl2va().name, fl2va().description, fl2va().files[0].name, fl2va().files[0].description]) expect(t).not.toMatch(/[–—]/)
+    expect(fl2va().description.length).toBeLessThanOrEqual(170)
   })
 })
