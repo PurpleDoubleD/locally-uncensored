@@ -446,7 +446,7 @@ function StartButton({ f, onCreate, onCancel, price }: { f: CreateFacts; onCreat
       <span>{T.cancel}</span>
     </button>
   ) : (
-    <Button risk={batch ? undefined : 'paid'} variant="primary" icon={Sparkles} testid="m-create-generate" el="K1.10" disabled={f.block !== null} onPress={onCreate}>
+    <Button risk={batch ? undefined : 'paid'} variant="primary" icon={Sparkles} label={price !== undefined && f.cost !== null ? `${mainLabel}, ${creditsLabel(f.cost)}` : undefined} testid="m-create-generate" el="K1.10" disabled={f.block !== null} onPress={onCreate}>
       {mainLabel}
       {/* Prompt v2: the price of this run sits on the button that spends it. */}
       {price !== undefined ? (
@@ -557,7 +557,8 @@ function Composer({ f, onCreate, onCancel, startBelow }: { f: CreateFacts; onCre
             el="K1.8"
           />
           <IconButton icon={Paperclip} label={T.addSource} onPress={() => nav.openSheet('source')} disabled={isGenerating} testid="m-create-add-source" el="K1.7" />
-          {startBelow ? null : <StartButton f={f} onCreate={onCreate} onCancel={onCancel} price={priceText} />}
+          {/* The number alone on the button, "credits" stays in its name and in the run settings: the summary keeps its room. */}
+          {startBelow ? null : <StartButton f={f} onCreate={onCreate} onCancel={onCancel} price={f.cost !== null && f.priceState !== 'unavailable' ? formatCredits(f.cost) : priceText} />}
         </div>
       </div>
     </div>
