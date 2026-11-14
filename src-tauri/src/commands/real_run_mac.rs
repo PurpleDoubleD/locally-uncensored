@@ -1551,8 +1551,8 @@ fn mesh_text() {
 
 #[test]
 fn the_picture_prompt_is_the_one_create_sends() {
-    let ts = include_str!("../../../src/lib/three/run-local-3d.ts");
-    assert!(ts.contains(&format!("`${{p}}{THREE_D_PICTURE_SUFFIX}`")), "threeDPicturePrompt changed in run-local-3d.ts");
+    let ts = include_str!("../../../src/lib/three/picture-prompt.ts");
+    assert!(ts.contains(&format!("`${{p}}{THREE_D_PICTURE_SUFFIX}`")), "threeDPicturePrompt changed in picture-prompt.ts");
     assert_eq!(
         three_d_picture_prompt("a small friendly robot, toy style. "),
         "a small friendly robot, toy style, a single object, whole and centered, plain light background, soft studio light, three-quarter view"
