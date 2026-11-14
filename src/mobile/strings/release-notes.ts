@@ -55,6 +55,11 @@ export const MOBILE_RELEASE_NOTES: readonly MobileReleaseNote[] = [
     'When the chats on this phone cannot be read at start, they are restored from the backup.',
     'The gallery keeps every picture, not only the newest 200.',
     'The gallery on this phone has no hide or tag buttons.',
+    {
+      text: 'In a chat of your computer, a question only the computer shows (open an unknown web address, change a setting, install a workflow) no longer keeps this phone waiting. The AI asks you for the link, or to do it at the computer.',
+      needs: 'remoteDesktop',
+    },
+    'Settings, Account says that your account keeps credits and memories, not chats.',
   ]),
   // 3.0.10 is the next phone app after 3.0.7 (3.0.8 and 3.0.9 shipped none): what came since then.
   note('3.0.10', 'What changed since 3.0.7.', [
