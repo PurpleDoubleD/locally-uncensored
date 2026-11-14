@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react'
 import { useAgentTaskStore } from '../stores/agentTaskStore'
 import { useGenerationStore } from '../stores/generationStore'
 import { useModelStore } from '../stores/modelStore'
+import { useChatStore } from '../stores/chatStore'
 import { createWakeWatcher } from '../lib/agent-wake'
 import { isRunStopped } from '../lib/run-stop'
 
@@ -65,6 +66,14 @@ export function useBackgroundAgentWake(
       // geschrieben hat. Was er sieht, ist die Notiz des fertigen Agenten und
       // danach die Antwort darauf.
       send: (text) => sendenRef.current(text, undefined, { hiddenUser: true }),
+      lastUserTurn: (id) => {
+        const msgs = useChatStore.getState().conversations.find((c) => c.id === id)?.messages ?? []
+        for (let i = msgs.length - 1; i >= 0; i--) {
+          const m = msgs[i]
+          if (m.role === 'user' && !m.hidden) return m.id
+        }
+        return null
+      },
     })
 
     // ZWEI Quellen, und die zweite ist die, an der die erste Fassung scheiterte.

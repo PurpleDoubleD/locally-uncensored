@@ -904,7 +904,15 @@ export function useAgentChat() {
     // still in the waiting room: the body (and its own finally below) never
     // ran, so the guard this call claimed above has to be freed here instead.
     const lane = laneOf(activeModel, currentLaneFacts())
-    const laneOutcome = await runInLane(
+    // Safety net (CA, 13.11.2026, support case "the app answers once, then
+    // never again"): about 800 lines of setup run before the loop's own
+    // try/finally, and a throw there left this conversation claimed and
+    // `isAgentRunning` true for good. Every later Enter was then refused
+    // without a word or parked in a steer queue no run would ever read, and
+    // Stop showed in every chat. The Code tab has had this net for a while.
+    let laneOutcome: Awaited<ReturnType<typeof runInLane>> | undefined
+    try {
+    laneOutcome = await runInLane(
       { conversationId: convId, lane, abort: () => abort.abort() },
       async (heldLocalLane) => {
 
@@ -4019,15 +4027,33 @@ export function useAgentChat() {
     }
       },
     )
-    if (laneOutcome === 'cancelled-while-queued' && activeAgentRuns.get(convId) === runState) {
+    } catch (err) {
+      log.warn('agent.setup_threw', { convId, message: err instanceof Error ? err.message.slice(0, 300) : String(err).slice(0, 300) })
+      // Say it where the user is looking, once, in their words.
+      useChatNoticeStore.getState().show(
+        'agent-start-failed',
+        'The agent could not start this time. Send your message again; if it keeps happening, start a new chat.',
+        'fehler',
+        CHAT_NOTICE_MS,
+      )
+    } finally {
+    // Whatever way the body ended, a claim still held by THIS run is a leak:
+    // the loop's own finally deletes it on every path it reaches. Identity
+    // checked, so a newer run on the same conversation is never touched.
+    if (activeAgentRuns.get(convId) === runState) {
       // Stop pulled this run out of the local lane's waiting room before its
-      // own finally ever ran (that finally lives inside the body above), so
-      // the guard this call claimed synchronously at the top has to be freed
-      // here instead. Nothing else needs undoing: the body never started, so
-      // it never added a message, registered its own aborter, or booked a
-      // loop timer.
+      // own finally ever ran ('cancelled-while-queued'), or the setup threw
+      // before reaching it: the guard claimed synchronously at the top has to
+      // be freed here instead.
       activeAgentRuns.delete(convId)
       setIsAgentRunning(activeAgentRuns.size > 0)
+      if (laneOutcome !== 'cancelled-while-queued') {
+        abort.abort()
+        // Through the same contract as every other end of a turn: whatever
+        // the setup stored is on disk before the chat says it is done.
+        await endTurnDurably(() => { useGenerationStore.getState().setGenerating(convId, false) })
+      }
+    }
     }
   }, [])
 

@@ -349,7 +349,7 @@ describe('the turn end starts the write before it starts anything else', () => {
   // and useAgentChat after it, and neither costs the write anything — pinning
   // that difference would be pinning noise.
 
-  it('all five turn ends were found and parsed', () => {
+  it('all six turn ends were found and parsed', () => {
     // `useCodex/runInstruction` und nicht mehr `sendInstruction`: 2.6.8 hat den
     // grossen useCallback in `runInstruction` umbenannt und `sendInstruction`
     // zur duennen Huelle mit beginSend/endSend gemacht. Das Rundenende sitzt
@@ -368,6 +368,9 @@ describe('the turn end starts the write before it starts anything else', () => {
       'useChat/sendMessage',
       'useChat/sendMessage',
       'useCodex/runInstruction',
+      'useAgentChat/sendAgentMessage',
+      // CA (13.11.2026): the safety net around the Agent run setup. A setup
+      // that threw ends its turn here, through the same contract.
       'useAgentChat/sendAgentMessage',
     ])
   })
