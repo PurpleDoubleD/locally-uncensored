@@ -8,7 +8,10 @@
  * no time: the computer is the user's own.
  */
 import { Monitor } from 'lucide-react'
-import { COMPUTER_STRINGS as C } from '../../strings/create'
+import { COMPUTER_STRINGS as C, CREATE_STRINGS as T } from '../../strings/create'
+import { useSheet } from '../../nav'
+import { useCreateSource } from './parts/computer-source'
+import { TOOL_ICON } from './parts/ui'
 import { ListGroup, Notice, NumberField, Row, Segmented, Sheet, TextArea } from '../../ui'
 import type { ComputerField, ComputerModel } from '../../remote/desktopCreate'
 import { fitNumber, modelFor, settingFields, shownValue, sizeNote, useComputerForm } from './parts/computer-form'
@@ -54,7 +57,10 @@ function NumberRow({ f, disabled, model }: { f: ComputerField; disabled: boolean
 }
 
 export default function ComputerSettingsSheet() {
-  const { caps, kind, info } = useComputerTool()
+  const { caps, kind, info, row, tool } = useComputerTool()
+  const setTool = useCreateSource((st) => st.setTool)
+  const setSource = useCreateSource((st) => st.setSource)
+  const { close } = useSheet()
   const form = useComputerForm()
   const run = useComputerRun((s) => s.view)
   const busy = run === 'sending' || run === 'running' || run === 'loading'
@@ -63,6 +69,33 @@ export default function ComputerSettingsSheet() {
   const note = sizeNote(info, form, kind)
   return (
     <Sheet title={C.settingsTitle} testid="m-create-computer-sheet">
+      {/* Prompt v2 (14.11.2026): the tool row above the field and the source chip live here now. */}
+      <ListGroup title={T.run.what} role="radiogroup" testid="m-create-computer-tools">
+        {row.map((t) => (
+          <Row
+            key={t.id}
+            icon={TOOL_ICON[t.id]}
+            title={t.available ? T.tool[t.id].name : `${T.tool[t.id].name}. ${C.unavailableMark}`}
+            radio={{ checked: t.id === tool, onSelect: () => setTool(t.id) }}
+            disabled={busy}
+            testid={`m-create-computer-tool-${t.id}`}
+          />
+        ))}
+      </ListGroup>
+      <ListGroup>
+        <Row
+          title={T.run.runsOn}
+          icon={Monitor}
+          value={C.computer}
+          subtitle={C.useCloud}
+          disabled={busy}
+          onPress={() => {
+            close()
+            setSource('cloud')
+          }}
+          testid="m-create-source-cloud"
+        />
+      </ListGroup>
       {caps.state !== 'ok' ? (
         <div className="m-k-sec">
           <Notice testid="m-create-computer-sheet-wait">{caps.state === 'error' ? caps.message : C.loading}</Notice>

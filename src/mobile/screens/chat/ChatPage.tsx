@@ -12,7 +12,7 @@
  * C8, preview C11, group chat C13, price G13.
  */
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { ArrowDown, Ellipsis, Plus, SlidersHorizontal, Users, X } from 'lucide-react'
+import { ArrowDown, Ellipsis, Users, X } from 'lucide-react'
 import type { Conversation, Message } from '../../../types/chat'
 import { useChat, useIsSendPending } from '../../../hooks/useChat'
 import { useCloudSession } from '../../../hooks/useCloudSession'
@@ -39,9 +39,9 @@ import { useAppLifecycle } from '../../platform'
 import { EngineNotices } from '../../resilience/EngineNotices'
 import { useCloudOnline } from '../../resilience/useOnline'
 import { CHAT_STRINGS } from '../../strings/chat'
-import { Banner, Button, caretToEnd, Composer, EmptyState, Icon, IconButton, ModelChip, Page, Progress, SkeletonRows, Spinner, toast } from '../../ui'
+import { Banner, Button, caretToEnd, Composer, EmptyState, Icon, IconButton, Page, Progress, SkeletonRows, Spinner, toast, tuneSummary } from '../../ui'
 import { ChatNoticeSlot } from '../agent/ChatNoticeSlot'
-import { AgentToolGuard, ComposerStatus } from '../agent/ComposerStatus'
+import { AgentToolGuard, ComposerAlerts, useComposerStatusParts } from '../agent/ComposerStatus'
 import { chatKey as agentChatKey } from '../agent/parts/chat-ref'
 import { isDeviceModel, leavesPhone, modelPlace } from '../../lib/model-place'
 import { canReport, reportForAnswer } from './parts/logic/policy'
@@ -53,9 +53,9 @@ import { copyText } from './parts/adapters/handover'
 import { viewAnswer } from './parts/adapters/run-error'
 import './parts/chat.css'
 import { chatModelDirect, chatModelLabel } from './parts/model-name'
-import { DirectMark } from '../../policy/DirectMark'
+import { DIRECT_MARK } from '../../policy/unfiltered'
 import { useReadingNames } from './parts/logic/reading'
-import { AttachmentChips, CloudChip, CommandList, ContextChip, DictationMeter, useClock } from './parts/ComposerParts'
+import { AttachmentChips, CommandList, ContextChip, DictationMeter, useClock } from './parts/ComposerParts'
 import { cloudAllowed, isCloudModel } from './parts/consent'
 import { ensureAiConsent } from './parts/policy'
 import { registerChatController, takePendingContinue } from './parts/controller'
@@ -180,6 +180,9 @@ function ChatScreen({ chatId, conversation }: { chatId: string | null; conversat
   // A model of a provider with the user's own key needs the network like LU Cloud does.
   const needsNet = inCloud || modelPlace(activeModel) === 'own'
   const modelName = activeModel ? chatModelLabel(models, activeModel) : null
+  // Prompt v2: the grey summary next to the settings button (model, then what is on in this chat).
+  const status = useComposerStatusParts(chatId ?? null, agentChatKey(chatId))
+  const tuneRest = tuneSummary([...status.parts, inCloud ? S.chat.cloudPart : null, chatModelDirect(models, activeModel) ? DIRECT_MARK : null])
   const hasLocalModel = useMemo(() => models.some((m) => m.type === 'text' && m.provider !== 'lu-cloud'), [models])
   // From the tap on: a send first searches documents, picks memories and waits for the model, and only
   // then counts as generating. For that long the answer is empty and nobody has failed yet (H1).
@@ -942,9 +945,9 @@ function ChatScreen({ chatId, conversation }: { chatId: string | null; conversat
           <>
             {/* For every chat, the empty new one included: Agent mode goes off for a model without tools. */}
             <AgentToolGuard chatKey={agentChatKey(chatId)} />
-            {chatId ? <ComposerStatus chatId={chatId} /> : null}
-            {inCloud ? <CloudChip chatId={draftKey} /> : null}
-            {chatId ? <ContextChip chatId={chatId} busy={running} onCompact={() => send('/compact', false)} /> : null}
+            {/* Prompt v2: only warnings stand above the field. The state is the summary of the settings button. */}
+            <ComposerAlerts chatKey={agentChatKey(chatId)} />
+            {chatId ? <ContextChip chatId={chatId} busy={running} onCompact={() => send('/compact', false)} warnOnly /> : null}
           </>
         }
         attachments={
@@ -961,19 +964,21 @@ function ChatScreen({ chatId, conversation }: { chatId: string | null; conversat
           ) : undefined
         }
         replaceField={voice.isRecording || voice.isTranscribing ? <DictationMeter since={recordingSince ?? Date.now()} transcribing={!voice.isRecording} onStop={() => void stopDictation()} /> : undefined}
-        leading={
-          <>
-            <IconButton icon={Plus} label={S.chat.attach} onPress={() => nav.openSheet('attach', { chatId: draftKey })} testid="m-chat-attach" el="C2.4" />
-            <IconButton icon={SlidersHorizontal} label={S.chat.options} onPress={() => nav.openSheet('chat-options', { chatId: draftKey })} testid="m-chat-options" el="C2.5" />
-          </>
-        }
-        model={
-          <>
-            <ModelChip name={modelName} where={isDeviceModel(activeModel) ? 'local' : 'cloud'} emptyText={S.chat.chooseModel} onPress={() => openModels()} testid="m-chat-model" el="C2.6" />
-            {/* The mark "Direct" of a store build, short: there is no room for the word next to the name (policy/DirectMark.tsx). */}
-            {chatModelDirect(models, activeModel) ? <DirectMark compact testid="m-chat-model-direct" /> : null}
-          </>
-        }
+        tune={{
+          summary: (
+            <>
+              <b>{modelName ?? S.chat.chooseModel}</b>
+              {tuneRest ? ` · ${tuneRest}` : null}
+            </>
+          ),
+          label: S.chat.settingsName(tuneSummary([modelName ?? S.chat.chooseModel, tuneRest])),
+          changed: status.changed,
+          place: inCloud ? 'cloud' : 'local',
+          onPress: () => nav.openSheet('chat-options', { chatId: draftKey }),
+          testid: 'm-chat-options',
+          el: 'C2.5',
+        }}
+        attach={{ label: S.chat.attach, onPress: () => nav.openSheet('attach', { chatId: draftKey }), testid: 'm-chat-attach', el: 'C2.4' }}
       />
     </div>
   )

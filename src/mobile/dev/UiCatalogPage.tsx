@@ -699,25 +699,18 @@ export default function UiCatalogPage() {
           onStop={() => setRunning(false)}
           onDictate={() => toast('Dictation uses LU Cloud')}
           idPrefix="m-dev-ui-composer"
-          status={
-            <>
-              <Chip kind="action" mini tone="ok">
-                Agent
-              </Chip>
-              <Chip kind="action" mini>
-                31%
-              </Chip>
-            </>
-          }
-          leading={
-            <>
-              <IconButton icon={Plus} label="Attach" />
-              <IconButton icon={SlidersHorizontal} label="Chat options" />
-            </>
-          }
-          model={<ModelChip name="Gemma 3 4B" where="local" onPress={() => nav.openSheet('dev-demo')} />}
+          tune={{
+            summary: (
+              <>
+                <b>Gemma 3 4B</b> · Agent
+              </>
+            ),
+            label: 'Chat settings: Gemma 3 4B, Agent',
+            onPress: () => nav.openSheet('dev-demo'),
+          }}
+          attach={{ label: 'Attach', onPress: () => toast('Attach') }}
         />
-        <Composer value="Describe your image" onChange={() => {}} onSend={() => {}} cloud sendLabel="Create" risk="paid" idPrefix="m-dev-ui-composer2" model={<ModelChip name="Flux Schnell" where="cloud" onPress={() => {}} />} />
+        <Composer value="Describe your image" onChange={() => {}} onSend={() => {}} cloud sendLabel="Create" risk="paid" idPrefix="m-dev-ui-composer2" tune={{ summary: <b>Image · Flux Schnell · 1:1</b>, label: 'Create settings: Image, Flux Schnell, 1:1', onPress: () => {} }} attach={{ label: 'Add a picture', onPress: () => {} }} />
       </Section>
 
       <Section title="Sheet, Dialog, Toast" id="overlays">

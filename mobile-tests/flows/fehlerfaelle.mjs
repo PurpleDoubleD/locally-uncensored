@@ -107,7 +107,8 @@ export async function fehlerfaelle({ d, config, laufDir }, env = process.env) {
   async function brauchtLokalesModell() {
     if (await f.istDa(S.chat.ohneModell)) f.nichtPruefbar('Auf dem Geraet ist kein lokales Modell. Erst den Kundenfluss laufen lassen.')
     if (await f.istDa(S.chat.cloudChip)) {
-      await f.tap(S.chat.modellChip)
+      await f.tap(S.chat.optionen)
+    await f.tap(S.optionen.modell)
       await f.sieht(S.modellBlatt.blatt)
       await f.tap(S.modellBlatt.lokal)
       await f.tap(S.modellBlatt.zeileLokal)
@@ -118,7 +119,8 @@ export async function fehlerfaelle({ d, config, laufDir }, env = process.env) {
   // Stellt den Chat auf das guenstigste Cloud-Modell. Ohne Anmeldung oder Plan: nicht pruefbar.
   async function waehleCloudBillig() {
     await oeffneChat({ neu: true })
-    await f.tap(S.chat.modellChip)
+    await f.tap(S.chat.optionen)
+    await f.tap(S.optionen.modell)
     await f.sieht(S.modellBlatt.blatt)
     await f.tap(S.modellBlatt.cloud)
     await d.sleep(1200)

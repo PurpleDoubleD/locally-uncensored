@@ -1427,8 +1427,9 @@ html[data-shell='mobile'].light .m-app .m-btn--apple {
 .m-composer textarea {
   display: block;
   width: 100%;
-  /* One line of text, and never lower than a touch target (48 px on Android). */
-  min-height: max(var(--m-touch), calc(2.75 * var(--m-u)));
+  /* Prompt v2 (14.11.2026): three lines of text at least, the field is the main thing of the screen.
+     Little room (ui/room.ts) and the phone on its side bring it back to one line, see below. */
+  min-height: max(var(--m-touch), calc(max(var(--m-text-body), 16px) * 1.45 * 3 + 16px));
   max-height: calc(9 * var(--m-u));
   padding: 12px 14px 4px;
   border: 0;
@@ -1444,13 +1445,56 @@ html[data-shell='mobile'].light .m-app .m-btn--apple {
 }
 .m-composer-row {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   gap: 2px;
   padding: 0 4px 4px;
 }
 .m-composer-spacer {
   flex: 1;
+}
+/* The ONE settings button under the field (prompt v2): icon, dot, grey summary, all of it one target. */
+.m-composer-tune {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: var(--m-touch);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 var(--m-s2);
+  border-radius: var(--m-r-md);
+  color: var(--m-t2);
+  text-align: left;
+}
+.m-composer-tune > svg {
+  flex: none;
+}
+.m-composer-tune-dot {
+  width: 6px;
+  height: 6px;
+  flex: none;
+  margin-left: -4px;
+  border-radius: 50%;
+  background: var(--m-accent);
+}
+.m-composer-tune-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--m-text-caption);
+  line-height: 1.2;
+}
+.m-composer-tune-text b {
+  font-weight: 500;
+  color: var(--m-t1);
+}
+.m-composer-tune:disabled {
+  opacity: 0.5;
+}
+.m-composer-row > .m-composer-attach {
+  flex: none;
+  color: var(--m-t2);
 }
 .m-send {
   width: var(--m-touch);

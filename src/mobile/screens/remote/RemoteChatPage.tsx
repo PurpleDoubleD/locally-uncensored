@@ -27,11 +27,12 @@
  * desktop: a chat of another desktop can be read here and is not continued.
  */
 import { useEffect, useLayoutEffect, useRef } from 'react'
-import { MoreHorizontal, Paperclip, SlidersHorizontal, X } from 'lucide-react'
+import { MoreHorizontal, X } from 'lucide-react'
+import { isThinkingModel } from '../../remote/remoteClient'
 import { nav, useParams } from '../../nav'
 import type { RemoteChat, RemoteImage, RemoteImageInput, RemoteMessage, RemoteStatus } from '../../remote/remoteClientStore'
 import { REMOTE_STRINGS as S } from '../../strings/remote'
-import { Button, Composer, EmptyState, IconButton, ModelChip, Notice, Page, SkeletonRows, Spinner } from '../../ui'
+import { Button, Composer, EmptyState, IconButton, Notice, Page, SkeletonRows, Spinner, tuneSummary } from '../../ui'
 import { ConnectionNotice } from './parts/ConnectionNotice'
 import { Markdown } from '../../ui/Markdown'
 import { openNewRemoteChat, sayOutcome } from './parts/actions'
@@ -260,6 +261,7 @@ export default function RemoteChatPage() {
   const streaming = streamingChatId === chat.id
   const foreign = isForeignChat(chat, connection)
   const blocked = sendBlocked({ status, streamingChatId }, chat.id, foreign)
+  const remoteRest = tuneSummary([chat.agentMode ? S.options.agentPart : null, isThinkingModel(chat.model) && chat.thinkEnabled ? S.options.thinkingPart : null])
   const ownDesktop = chatDesktopName(chat.baseUrl, connection, known) || desktopName(connection)
 
   const send = () => {
@@ -316,22 +318,20 @@ export default function RemoteChatPage() {
           idPrefix="m-remote-chat"
           testid="m-remote-chat-composer"
           el="R4.1"
-          leading={
-            <>
-              <IconButton icon={Paperclip} label={S.chat.attach} onPress={() => nav.openSheet('remote-attach', { chatId: chat.id })} testid="m-remote-chat-attach" el="R4.9" />
-              <IconButton icon={SlidersHorizontal} label={S.chat.options} onPress={() => nav.openSheet('remote-options', { chatId: chat.id })} testid="m-remote-chat-options" el="R4.5" />
-            </>
-          }
-          model={
-            <ModelChip
-              name={remoteModelLabel(chat.model) || null}
-              where="local"
-              emptyText={S.chat.modelNone}
-              onPress={() => nav.openSheet('remote-model', { chatId: chat.id })}
-              testid="m-remote-chat-model"
-              el="R4.4"
-            />
-          }
+          tune={{
+            summary: (
+              <>
+                <b>{remoteModelLabel(chat.model) || S.chat.modelNone}</b>
+                {remoteRest ? ` · ${remoteRest}` : null}
+              </>
+            ),
+            label: S.options.settingsName(tuneSummary([remoteModelLabel(chat.model) || S.chat.modelNone, remoteRest])),
+            changed: chat.agentMode || chat.systemPrompt !== null,
+            onPress: () => nav.openSheet('remote-options', { chatId: chat.id }),
+            testid: 'm-remote-chat-options',
+            el: 'R4.5',
+          }}
+          attach={{ label: S.chat.attach, onPress: () => nav.openSheet('remote-attach', { chatId: chat.id }), testid: 'm-remote-chat-attach', el: 'R4.9' }}
         />
       }
     >

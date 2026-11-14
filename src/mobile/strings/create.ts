@@ -408,6 +408,10 @@ export const CREATE_STRINGS = {
   // ---------- K4 ----------
   run: {
     title: 'Run settings',
+    /** Prompt v2: what stood above and beside the field is at the top of this sheet. */
+    what: 'What',
+    model: 'Model',
+    runsOn: 'Runs on',
     aspect: 'Aspect',
     quality: 'Quality',
     images: 'Images',

@@ -9,7 +9,7 @@
  * lists, the presenter with faces, list fields such as style LoRAs), K4.9 Save as prompt style, K4.10 Close is the
  * close button of the sheet. The footer always shows "This run" and the price.
  */
-import { History, SlidersHorizontal, Sparkles, Star, TextQuote, X } from 'lucide-react'
+import { Box, Cloud, History, SlidersHorizontal, Sparkles, Star, TextQuote, X } from 'lucide-react'
 import { EDIT_MAX_DENOISE, useCreateStore } from '../../../stores/createStore'
 import { MAX_IMAGE_COUNT } from '../../../lib/render/image-count'
 import { nav, useSheet } from '../../nav'
@@ -21,6 +21,9 @@ import { ASPECTS, QUALITIES, aspectSize, creditsLabel, formatCredits, hasAnyPara
 import { checkStyle, cleanStyle, useStyleStore } from './parts/styles'
 import { retryPrice } from './parts/PriceOwner'
 import { SchemaFields, SchemaSub, isSchemaSub, schemaSubTitle, type SchemaHost } from './parts/SchemaFields'
+import { useComputerAvailability, useCreateSource } from './parts/computer-source'
+import { TOOL_ICON } from './parts/ui'
+import { COMPUTER_STRINGS as C } from '../../strings/create'
 
 const st = () => useCreateStore.getState()
 
@@ -121,6 +124,9 @@ export default function RunSettingsSheet() {
   const historyCount = useCreateStore((s) => s.promptHistory.length)
   const footer = <PriceFooter f={f} />
   const host = useSchemaHost(f.model.id)
+  const busy = useCreateStore((s) => s.isGenerating)
+  const computerOffered = useComputerAvailability().offered
+  const setSource = useCreateSource((s) => s.setSource)
 
   if (sub === 'negative') {
     return (
@@ -179,6 +185,51 @@ export default function RunSettingsSheet() {
   const any = hasAnyParam(p)
   return (
     <Sheet title={T.run.title} footer={footer}>
+      {/* Prompt v2 (14.11.2026): the tool row above the field and the model chip beside it live here now. */}
+      <ListGroup testid="m-create-settings-what">
+        <Row
+          title={T.run.what}
+          icon={TOOL_ICON[f.tool]}
+          value={T.tool[f.tool].name}
+          disabled={busy}
+          onPress={() => {
+            close()
+            nav.openSheet('tools')
+          }}
+          testid="m-create-tools-all"
+          el="K1.3"
+        />
+        {f.facts.hasModels ? (
+          <Row
+            title={T.run.model}
+            icon={Box}
+            value={f.model.id ? f.model.label : T.modelNone}
+            disabled={busy}
+            onPress={() => {
+              close()
+              nav.openSheet('create-model')
+            }}
+            testid="m-create-model"
+            el="K1.9"
+          />
+        ) : (
+          <Row title={T.run.model} icon={Box} value={T.modelFixed} testid="m-create-model-fixed" el="K1.9" />
+        )}
+        {computerOffered ? (
+          <Row
+            title={T.run.runsOn}
+            icon={Cloud}
+            value={C.cloud}
+            subtitle={C.useComputer}
+            disabled={busy}
+            onPress={() => {
+              close()
+              setSource('computer')
+            }}
+            testid="m-create-source-computer"
+          />
+        ) : null}
+      </ListGroup>
       {p.aspect ? (
         <div className="m-k-sec">
           <span className="m-label">{T.run.aspect}</span>

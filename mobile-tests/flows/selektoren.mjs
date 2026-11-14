@@ -110,8 +110,10 @@ export const S = {
     kopieren: tid('m-chat-copy'),
     vorlesen: tid('m-chat-speak'),
     vorlesenLaeuft: tid('m-chat-speaking'),
-    modellChip: tid('m-chat-model'),
-    cloudChip: tid('m-chat-cloud-chip'),
+    // Prompt v2 (14.11.2026): kein Modell-Chip und kein Cloud-Chip mehr am Feld. Der Einstellungsknopf traegt den
+    // Modellnamen in seiner Kurzfassung und data-m-place; das Modell-Blatt liegt eine Ebene tiefer (optionen.modell).
+    modellChip: tid('m-chat-options'),
+    cloudChip: tid('m-chat-options', '[data-m-place="cloud"]'),
     optionen: tid('m-chat-options'),
     anhaengen: tid('m-chat-attach'),
     anhangChip: tid('m-chat-attachment'),
@@ -168,6 +170,7 @@ export const S = {
     temperatur: tid('m-options-temperature'),
     samplingZurueck: tid('m-options-sampling-reset'),
     kontext: tid('m-options-context'),
+    modell: tid('m-options-model'),
     fertig: tid('m-options-done'),
     ohneWerkzeuge: tid('m-options-intro-notools'),
   },
@@ -348,6 +351,8 @@ export const S = {
     torAktion: tid('m-create-gate-action'),
     schaukasten: tid('m-create-gate-showcase'),
     prompt: tid('m-create-prompt'),
+    // Prompt v2: Modell und Werkzeug stehen im Blatt Run settings, der Knopf darunter oeffnet es.
+    einstellungen: tid('m-create-settings'),
     modell: tid('m-create-model'),
     modellBlatt: tid('m-sheet-create-model'),
     modellBillig: tid('m-create-model-cheapest'),

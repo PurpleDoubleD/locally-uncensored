@@ -6,8 +6,7 @@
  * neither on the composer nor on the end of the list.
  */
 import { useState } from 'react'
-import { Plus, SlidersHorizontal } from 'lucide-react'
-import { Chip, Composer, IconButton, ListGroup, ModelChip, Page, Row, toast } from '../ui'
+import { Chip, Composer, ListGroup, Page, Row, toast } from '../ui'
 
 export const COMPOSER_ROWS = 16
 
@@ -34,28 +33,22 @@ export default function ComposerPage() {
           idPrefix="m-dev-composer"
           testid="m-dev-composer"
           status={
-            <>
-              <Chip kind="action" mini tone="ok">
-                Agent
-              </Chip>
-              <Chip kind="action" mini>
-                3 documents
-              </Chip>
-              <Chip kind="action" mini tone="cloud">
-                Cloud, uses credits
-              </Chip>
-              <Chip kind="action" mini>
-                31%
-              </Chip>
-            </>
+            <Chip kind="action" mini tone="warn">
+              Context 96%
+            </Chip>
           }
-          leading={
-            <>
-              <IconButton icon={Plus} label="Attach" />
-              <IconButton icon={SlidersHorizontal} label="Chat options" />
-            </>
-          }
-          model={<ModelChip name="Gemma 3 4B instruct, the long name of a model" where="local" onPress={() => {}} />}
+          tune={{
+            summary: (
+              <>
+                <b>Gemma 3 4B instruct, the long name of a model</b> · Agent · 3 documents · Cloud
+              </>
+            ),
+            label: 'Chat settings: Gemma 3 4B instruct, Agent, 3 documents, Cloud',
+            changed: true,
+            onPress: () => toast('Chat settings', { testid: 'dev-composer' }),
+            testid: 'm-dev-composer-options',
+          }}
+          attach={{ label: 'Attach', onPress: () => toast('Attach', { testid: 'dev-composer' }), testid: 'm-dev-composer-attach' }}
         />
       }
     >

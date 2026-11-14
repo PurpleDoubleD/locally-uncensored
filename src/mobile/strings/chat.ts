@@ -58,6 +58,10 @@ export const CHAT_STRINGS = {
     input: 'Message',
     attach: 'Attach',
     options: 'Chat options',
+    /** Prompt v2: the settings button under the field, with the summary of what is set. */
+    settingsName: (summary: string) => `Chat settings: ${summary}`,
+    /** The part of the summary while the chat runs on LU Cloud. */
+    cloudPart: 'Cloud',
     chooseModel: 'Choose a model',
     send: 'Send',
     emptyTitle: 'Ask LU anything',

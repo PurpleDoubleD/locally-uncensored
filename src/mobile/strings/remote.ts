@@ -246,6 +246,12 @@ export const REMOTE_STRINGS = {
   },
   options: {
     title: 'Chat options',
+    /** Prompt v2: the model choice moved from beside the field into this sheet. */
+    model: 'Model',
+    modelSub: 'Runs on your desktop',
+    settingsName: (summary: string) => `Chat options: ${summary}`,
+    agentPart: 'Agent',
+    thinkingPart: 'Thinking',
     agent: 'Agent mode',
     agentSub: (abilities: string) => `The model can use tools on your desktop: ${abilities}.`,
     agentHint: 'Files and terminal commands are switched on your desktop under Settings, Remote Permissions.',
@@ -441,6 +447,8 @@ export const REMOTE_STRINGS = {
 
   // ---- A17: shared chats of the computer (CHATS-V1) ----
   shared: {
+    /** Prompt v2: the button under the field that opens the model choice of a shared chat. */
+    modelName: (name: string) => `Model: ${name}. Change model`,
     listTitle: 'Chats on your computer',
     listEmptyTitle: 'No shared chats',
     listEmptyText: 'On your computer, choose "Continue on phone" in a chat, or start a new one here.',

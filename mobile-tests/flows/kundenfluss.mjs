@@ -130,7 +130,8 @@ export async function schrittModellwechsel({ f, d, env, id, oeffneChat, sendeLok
   const mit2 = await f.text(S.chat.modellChip)
   await sendeLokal('Reply with one word: ready')
   // Und zurueck ueber das Modell-Blatt, so wie ein Kunde wechselt.
-  await f.tap(S.chat.modellChip)
+  await f.tap(S.chat.optionen)
+    await f.tap(S.optionen.modell)
   await f.sieht(S.modellBlatt.blatt)
   await f.tap(S.modellBlatt.lokal)
   const zeilen = await f.zahl(S.modellBlatt.zeileLokal)
@@ -605,7 +606,8 @@ export async function kundenfluss({ d, config, laufDir }, env = process.env) {
   await schritt('cloud-chat', 'Ueber LU Cloud chatten (billigstes Modell, eine Nachricht)', async () => {
     await brauchtAnmeldung()
     await oeffneChat({ neu: true })
-    await f.tap(S.chat.modellChip)
+    await f.tap(S.chat.optionen)
+    await f.tap(S.optionen.modell)
     await f.sieht(S.modellBlatt.blatt)
     await f.tap(S.modellBlatt.cloud)
     if (await f.istDa(S.modellBlatt.planNoetig)) {
@@ -632,6 +634,7 @@ export async function kundenfluss({ d, config, laufDir }, env = process.env) {
     await f.reiter('create')
     await f.sieht(S.bild.screen)
     if (await f.istDa(S.bild.tor)) f.nichtPruefbar(`Create zeigt das Tor (data-state="${await f.attribut(S.bild.tor, 'data-state')}"): Die Sitzung hat keinen Zugang zu Create`)
+    await f.tap(S.bild.einstellungen)
     await f.tap(S.bild.modell)
     await f.sieht(S.bild.modellBlatt)
     const zeile = tid('m-create-model-cheapest', '[data-m-id*="schnell"]')

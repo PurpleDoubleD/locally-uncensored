@@ -9,13 +9,14 @@
  * (mobile-client/personas.js), so nothing is written a third time.
  */
 import { PERSONAS } from '../../../../mobile-client/personas.js'
-import { useSheet } from '../../nav'
+import { nav, useSheet } from '../../nav'
 import { storePolicy } from '../../policy/storePolicy'
 import { isThinkingModel } from '../../remote/remoteClient'
 import { REMOTE_STRINGS as S } from '../../strings/remote'
 import { ListGroup, Row, Sheet } from '../../ui'
 import { remoteToolsFor, type CavemanLevel } from '../../remote/remoteAgent'
 import { remote, useRemote } from './parts/session'
+import { remoteModelLabel } from './parts/view'
 import { agentAbilities } from './parts/view'
 import './parts/remote.css'
 
@@ -58,6 +59,19 @@ export default function RemoteOptionsSheet() {
   const canThink = isThinkingModel(chat.model)
   return (
     <Sheet title={S.options.title}>
+      <ListGroup testid="m-remote-options-group-model">
+        <Row
+          title={S.options.model}
+          subtitle={S.options.modelSub}
+          value={remoteModelLabel(chat.model) || S.chat.modelNone}
+          onPress={() => {
+            sheet.close()
+            nav.openSheet('remote-model', { chatId: chat.id })
+          }}
+          testid="m-remote-options-model"
+          el="R4.4"
+        />
+      </ListGroup>
       <ListGroup>
         <Row
           title={S.options.agent}

@@ -33,7 +33,7 @@ import {
   type ToolCard,
 } from '../../remote/sharedChatStore'
 import { REMOTE_STRINGS as S } from '../../strings/remote'
-import { Button, Composer, EmptyState, Icon, IconButton, ModelChip, Notice, Page, SkeletonRows, Spinner, toast } from '../../ui'
+import { Button, Composer, EmptyState, Icon, IconButton, Notice, Page, SkeletonRows, Spinner, toast } from '../../ui'
 import { Markdown } from '../../ui/Markdown'
 import { ConnectionLine } from './parts/ConnectionLine'
 import { offerRemoteNotices } from './parts/notices'
@@ -402,16 +402,13 @@ export default function SharedChatPage() {
           attachments={files.length > 0 ? <Tray files={files} onRemove={(i) => setFiles((list) => list.filter((_, j) => j !== i))} /> : undefined}
           idPrefix="m-remote-shared"
           testid="m-remote-shared-composer"
-          leading={<IconButton icon={Paperclip} label={S.shared.attach} onPress={() => void attach()} risk="sensor" testid="m-remote-shared-attach" />}
-          model={
-            <ModelChip
-              name={model ? modelShown(model, modelList, remoteModelLabel) : null}
-              where="local"
-              emptyText={S.chat.modelNone}
-              onPress={() => nav.openSheet('remote-shared-model', { chatId: id })}
-              testid="m-remote-shared-model"
-            />
-          }
+          tune={{
+            summary: <b>{model ? modelShown(model, modelList, remoteModelLabel) : S.chat.modelNone}</b>,
+            label: S.shared.modelName(model ? modelShown(model, modelList, remoteModelLabel) : S.chat.modelNone),
+            onPress: () => nav.openSheet('remote-shared-model', { chatId: id }),
+            testid: 'm-remote-shared-model',
+          }}
+          attach={<IconButton icon={Paperclip} label={S.shared.attach} onPress={() => void attach()} risk="sensor" testid="m-remote-shared-attach" />}
         />
       }
     >

@@ -61,7 +61,8 @@ export async function n1({ d, config, laufDir }, env = process.env) {
   }
 
   async function waehle(modell) {
-    await f.tap(S.chat.modellChip)
+    await f.tap(S.chat.optionen)
+    await f.tap(S.optionen.modell)
     await f.sieht(S.modellBlatt.blatt)
     await f.tap(S.modellBlatt.lokal)
     await f.tap(tid('m-chat-model-local', `[data-m-id*="${stamm(modell.name ?? modell.path).replace(/"/g, '')}"]`))

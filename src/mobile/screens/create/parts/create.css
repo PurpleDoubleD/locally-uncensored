@@ -5,21 +5,6 @@
    from the tokens, text sizes are in rem, distances in px. */
 
 /* ---------- tool row (K1.3, K1.4) ---------- */
-.m-k-toolrow {
-  flex: none;
-  display: flex;
-  align-items: center;
-  padding-bottom: 4px;
-}
-.m-k-toolrow > .m-chip {
-  margin-left: var(--m-gutter);
-}
-.m-k-toolrow > .m-chips {
-  flex: 1;
-  min-width: 0;
-  padding-left: var(--m-s2);
-}
-
 /* ---------- stage ---------- */
 .m-k-stage {
   display: flex;
@@ -353,25 +338,6 @@
 .m-k-composer-note {
   margin: 0 var(--m-s1) var(--m-s2);
 }
-.m-app .m-k-summary {
-  width: 100%;
-  min-height: var(--m-touch);
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 2px var(--m-s3);
-  padding: var(--m-s1) 14px;
-  color: var(--m-t3);
-  font-family: var(--m-font-mono);
-  font-size: var(--m-text-mono);
-  line-height: 1.3;
-  text-align: left;
-}
-.m-k-summary-line {
-  flex: 1 1 calc(8 * var(--m-u));
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
 .m-k-summary-price {
   display: inline-flex;
   align-items: center;
@@ -387,40 +353,6 @@
   line-height: 1.4;
   color: var(--m-t3);
 }
-.m-k-composer-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 2px;
-  padding: 0 4px 4px;
-}
-.m-k-composer-row > .m-mchip,
-.m-k-composer-row > .m-k-fixedmodel {
-  flex: 1 1 calc(5 * var(--m-u));
-  min-width: 0;
-}
-.m-k-fixedmodel {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  min-height: var(--m-touch);
-  padding: 0 var(--m-s2);
-  color: var(--m-t3);
-  font-size: var(--m-text-caption);
-}
-.m-app .m-k-composer-row > .m-btn {
-  flex: none;
-  margin-left: auto;
-  border-radius: var(--m-r-pill);
-}
-@container (max-width: 17rem) {
-  .m-k-composer-row > .m-mchip,
-  .m-k-composer-row > .m-k-fixedmodel {
-    order: -1;
-    flex: 1 0 100%;
-  }
-}
-
 /* ---------- rail of prompt styles (K1.22) ---------- */
 .m-app .m-k-style {
   flex: none;
@@ -1233,4 +1165,22 @@
 .m-app .m-viewer-stage img.m-k-see-through {
   position: relative;
   background: transparent;
+}
+
+/* ---------- prompt v2 (14.11.2026): the Create button carries the price ---------- */
+.m-app .m-composer-row > .m-btn {
+  flex: none;
+  border-radius: var(--m-r-pill);
+}
+.m-k-go-price {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 2px;
+  font-size: var(--m-text-caption);
+  font-weight: 500;
+  opacity: 0.72;
+}
+.m-k-go-price[data-short] {
+  opacity: 1;
 }
