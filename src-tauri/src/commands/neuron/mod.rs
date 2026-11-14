@@ -883,7 +883,7 @@ pub fn neuron_feature_add(app: tauri::AppHandle, model_path: String, feature: us
     if feature >= spec.width {
         return Err("No such feature.".into());
     }
-    let id = feature_id(if spec.id.contains("270m") { "g270m" } else { "g1b" }, feature);
+    let id = feature_id(spec.short, feature);
     let name = label.map(|l| l.chars().take(60).collect::<String>()).unwrap_or_else(|| format!("Feature #{feature}"));
     start_job("feature", &format!("Adding feature #{feature}"), &model_path.clone(), move || {
         let root = root();

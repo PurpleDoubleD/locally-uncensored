@@ -90,9 +90,12 @@ export function strengthWarning(entries: NeuronEntry[]): StrengthWarning {
   return null
 }
 
+/** The models with an official feature map (Rust: neuron/sae.rs CATALOG). */
+export const FEATURE_MODELS = 'Gemma 3 270M, 1B, 4B and 12B IT'
+
 export function warningText(w: StrengthWarning): string | null {
-  if (w === 'overload') return 'Several strong sliders at once: answers may repeat themselves or fall apart. Turn some down.'
-  if (w === 'strong') return 'High strength: the effect is strongest here, and so is the risk of odd or repeating text.'
+  if (w === 'overload') return 'Several strong sliders at once: answers may repeat themselves or fall apart, and Agent and Code may stop following the task. Turn some down.'
+  if (w === 'strong') return 'High strength: the effect is strongest here, and so is the risk of odd or repeating text. Agent and Code tasks work better at about ±0.5.'
   return null
 }
 

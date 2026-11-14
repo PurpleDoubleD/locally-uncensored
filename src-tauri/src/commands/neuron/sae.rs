@@ -35,6 +35,9 @@ impl Slice {
 
 pub struct SaeSpec {
     pub id: &'static str,
+    /// Short tag in the ids of feature sliders ("f-g4b-123"), stable once
+    /// shipped: a saved slider keeps its id across updates.
+    pub short: &'static str,
     pub title: &'static str,
     pub repo: &'static str,
     pub revision: &'static str,
@@ -60,12 +63,15 @@ impl SaeSpec {
     }
 }
 
-/// Measured 28.10.2026 from the official repos (cc-by-4.0, not gated):
-/// header lengths read with a range request, offsets from the safetensors
-/// header, hashes over the downloaded slices.
+/// Measured from the official repos (cc-by-4.0, not gated): header lengths
+/// read with a range request, offsets from the safetensors header, hashes
+/// over the downloaded slices. 270M and 1B on 28.10.2026, 4B and 12B on
+/// 14.11.2026 (NEURONEN-SOTA-310.md). Each SAE sits in the middle block of
+/// its model, the layer Gemma Scope 2 offers there at 16k features.
 pub const CATALOG: &[SaeSpec] = &[
     SaeSpec {
         id: "gemma-scope-2-270m-it-l9",
+        short: "g270m",
         title: "Gemma Scope 2 · Gemma 3 270M IT · layer 9 · 16k features",
         repo: "google/gemma-scope-2-270m-it",
         revision: "49801301620db3e196553c903380aa21f42506fa",
@@ -91,6 +97,7 @@ pub const CATALOG: &[SaeSpec] = &[
     },
     SaeSpec {
         id: "gemma-scope-2-1b-it-l13",
+        short: "g1b",
         title: "Gemma Scope 2 · Gemma 3 1B IT · layer 13 · 16k features",
         repo: "google/gemma-scope-2-1b-it",
         revision: "b0fa29457c3601df0a70c48a15534c738d7c10e0",
@@ -111,6 +118,58 @@ pub const CATALOG: &[SaeSpec] = &[
             start: 817_498_984,
             end: 818_154_343,
             sha256: "fea501741b19bd650447a530f06dfe7be1018910149c0991674255a5ee7b1751",
+        },
+        license: "CC-BY-4.0 (Google DeepMind, Gemma Scope 2)",
+    },
+    SaeSpec {
+        id: "gemma-scope-2-4b-it-l17",
+        short: "g4b",
+        title: "Gemma Scope 2 · Gemma 3 4B IT · layer 17 · 16k features",
+        repo: "google/gemma-scope-2-4b-it",
+        revision: "3e94b68be95290aada5b7525cf431d3040f81bb1",
+        folder: "resid_post/layer_17_width_16k_l0_medium",
+        layer: 17,
+        width: 16384,
+        arch: "gemma3",
+        n_embd: 2560,
+        n_layer: 34,
+        w_dec: Slice {
+            file: "params.safetensors",
+            start: 141_696,
+            end: 167_913_855,
+            sha256: "d67b6b31d1ac95b2e5f5ef433c90c480247710b0c1115542ac956aa23cf1a775",
+        },
+        top_tokens: Slice {
+            file: "examples.safetensors",
+            start: 814_682_984,
+            end: 815_338_343,
+            sha256: "b89436f4d6fed2ddfe9074e9b5ac1b82b2854a931169491a76cafbe683eb887e",
+        },
+        license: "CC-BY-4.0 (Google DeepMind, Gemma Scope 2)",
+    },
+    SaeSpec {
+        id: "gemma-scope-2-12b-it-l24",
+        short: "g12b",
+        title: "Gemma Scope 2 · Gemma 3 12B IT · layer 24 · 16k features",
+        repo: "google/gemma-scope-2-12b-it",
+        revision: "4c419f1ba0be8b7754d4151d4f26c23b92a9029e",
+        folder: "resid_post/layer_24_width_16k_l0_medium",
+        layer: 24,
+        width: 16384,
+        arch: "gemma3",
+        n_embd: 3840,
+        n_layer: 48,
+        w_dec: Slice {
+            file: "params.safetensors",
+            start: 146_816,
+            end: 251_805_055,
+            sha256: "646bcdeb7e8c124e5e26f4c652e015ca9a21a7fb6702b1ce63403eb5bcd93d4e",
+        },
+        top_tokens: Slice {
+            file: "examples.safetensors",
+            start: 814_660_456,
+            end: 815_315_815,
+            sha256: "1c6f35ad83a82e31a54afba82b28975a09702f472b73e25fc6ef4ffffacfb046",
         },
         license: "CC-BY-4.0 (Google DeepMind, Gemma Scope 2)",
     },
@@ -247,7 +306,11 @@ mod tests {
         assert_eq!(for_model(&facts("gemma3", 640, 18)).unwrap().id, "gemma-scope-2-270m-it-l9");
         assert_eq!(for_model(&facts("gemma3", 1152, 26)).unwrap().id, "gemma-scope-2-1b-it-l13");
         assert!(for_model(&facts("qwen2", 896, 24)).is_none());
-        assert!(for_model(&facts("gemma3", 2560, 34)).is_none());
+        assert_eq!(for_model(&facts("gemma3", 2560, 34)).unwrap().id, "gemma-scope-2-4b-it-l17");
+        assert_eq!(for_model(&facts("gemma3", 3840, 48)).unwrap().id, "gemma-scope-2-12b-it-l24");
+        // Same width as 4B, other depth (Gemma 4 E4B, say): not this SAE.
+        assert!(for_model(&facts("gemma3", 2560, 42)).is_none());
+        assert!(for_model(&facts("gemma4", 2560, 34)).is_none());
     }
 
     #[test]
@@ -259,6 +322,18 @@ mod tests {
             assert_eq!(s.w_dec.sha256.len(), 64);
             assert!(s.url(&s.w_dec).starts_with("https://huggingface.co/google/gemma-scope-2-"));
             assert!(s.url(&s.w_dec).contains(s.revision));
+            // The SAE reads the middle block, as the shipped ones do.
+            assert_eq!(s.layer, s.n_layer / 2, "{}", s.id);
+            assert!(s.folder.starts_with(&format!("resid_post/layer_{}_", s.layer)), "{}", s.id);
+            assert!(s.id.ends_with(&format!("-l{}", s.layer)), "{}", s.id);
+        }
+        // Ids and tags are unique; a tag names its model size.
+        let mut shorts: Vec<&str> = CATALOG.iter().map(|s| s.short).collect();
+        shorts.sort();
+        shorts.dedup();
+        assert_eq!(shorts.len(), CATALOG.len());
+        for s in CATALOG {
+            assert!(s.id.contains(&format!("-{}-it-", &s.short[1..])), "{}", s.id);
         }
     }
 

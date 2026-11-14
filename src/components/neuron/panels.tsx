@@ -10,7 +10,7 @@ import { ICON_SM } from '../ui/icon-size'
 import { openExternal } from '../../api/backend'
 import { neuronCompare, neuronSaeSearch, type CompareResult, type FeatureHit, type NeuronInfo, type NeuronVector } from '../../api/neuron'
 import type { BundledModel } from '../../api/engine'
-import { sameEntries, type entriesFor } from '../../lib/neuron'
+import { FEATURE_MODELS, sameEntries, type entriesFor } from '../../lib/neuron'
 import {
   coordsLine, entryCode, modelFit, parseRecipe, recipeText, recipeLink,
   type ModelFit, type Recipe, type RecipeEntry,
@@ -165,7 +165,7 @@ export function entryState(e: RecipeEntry, info: NeuronInfo, vectorIds: Readonly
       if (vectorIds.has(ids.own(e))) return { state: 'ready' }
       return info.generator ? { state: 'prepare' } : { state: 'blocked', why: 'This install is missing its vector tool.' }
     case 'feature':
-      if (!info.sae) return { state: 'blocked', why: 'This model has no feature data (only Gemma 3 270M IT and 1B IT have).' }
+      if (!info.sae) return { state: 'blocked', why: `This model has no feature data (only ${FEATURE_MODELS} have).` }
       if (e.feature >= info.sae.width) return { state: 'blocked', why: `This model's features go up to #${info.sae.width - 1}.` }
       if (vectorIds.has(ids.feature(e.feature))) return { state: 'ready' }
       return info.sae.downloaded ? { state: 'prepare' } : { state: 'blocked', why: 'Download the feature data first (Features tab).' }

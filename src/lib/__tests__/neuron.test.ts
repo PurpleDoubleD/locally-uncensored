@@ -12,6 +12,7 @@ import {
   sameEntries,
   shortDuration,
   strengthWarning,
+  warningText,
   tweakedModelNote,
   buildTimeNote,
 } from '../neuron'
@@ -65,6 +66,12 @@ describe('neuron warnings', () => {
     expect(strengthWarning([{ id: 'a', strength: 0.9 }])).toBe('strong')
     expect(strengthWarning([{ id: 'a', strength: 0.6 }, { id: 'b', strength: -0.6 }])).toBe('strong')
     expect(strengthWarning([{ id: 'a', strength: 1 }, { id: 'b', strength: 0.8 }])).toBe('overload')
+  })
+
+  it('says that a strong push costs Agent and Code their task (measured: +0.4 works, +1.0 ignored it)', () => {
+    expect(warningText('strong')).toMatch(/Agent and Code tasks work better at about ±0\.5/)
+    expect(warningText('overload')).toMatch(/Agent and Code may stop following the task/)
+    expect(warningText(null)).toBeNull()
   })
 
   it('names the backend that cannot be steered', () => {

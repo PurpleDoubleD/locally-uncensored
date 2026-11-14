@@ -383,7 +383,9 @@ export function recipeOwnId(e: Extract<RecipeEntry, { kind: 'own' }>): string {
 
 /** The id Rust gives a feature slider (commands/neuron/mod.rs feature_id). */
 export function featureVectorId(saeId: string, feature: number): string {
-  return `f-${saeId.includes('270m') ? 'g270m' : 'g1b'}-${feature}`
+  // The size in the SAE id is Rust's short tag: gemma-scope-2-4b-it-l17 → g4b.
+  const size = /^gemma-scope-2-(\d+[mb])-/.exec(saeId)?.[1] ?? '1b'
+  return `f-g${size}-${feature}`
 }
 
 /** The id the engine piece gives a single-neuron slider (AN-P11-N2.md). */
