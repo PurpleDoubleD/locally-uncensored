@@ -30,6 +30,8 @@ export interface StreamedProviderTurn {
   thinking: string
   promptEvalCount?: number
   evalCount?: number
+  /** Of promptEvalCount, served from the upstream's prompt cache. */
+  cachedPromptCount?: number
   finishReason?: string
   billing?: ChatBilling
 }
@@ -71,6 +73,7 @@ export async function streamProviderTurn(
       if (chunk.toolCalls?.length) turn.toolCalls = chunk.toolCalls
       turn.promptEvalCount = chunk.promptEvalCount
       turn.evalCount = chunk.evalCount
+      turn.cachedPromptCount = chunk.cachedPromptCount
       turn.finishReason = chunk.finishReason
       turn.billing = chunk.billing
     }

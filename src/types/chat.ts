@@ -356,4 +356,7 @@ export interface RequestUsage {
   outputTokens: number
   calls: number
   billing?: 'flash' | 'credits'
+  /** Of inputTokens, how many the backend served from its prompt cache (CA).
+   *  Absent when no call reported it. */
+  cachedTokens?: number
 }

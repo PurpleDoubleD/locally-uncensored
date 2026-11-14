@@ -32,6 +32,7 @@ import { FLASH_MARK_LABEL } from './flash-entitlement'
 export interface CallCounts {
   promptEvalCount?: number
   evalCount?: number
+  cachedPromptCount?: number
   billing?: ChatBilling
 }
 
@@ -50,11 +51,14 @@ export function addCallUsage(prev: RequestUsage | undefined, call: CallCounts): 
   const base: RequestUsage = prev ?? { inputTokens: 0, outputTokens: 0, calls: 0 }
   const billing: ChatBilling | undefined =
     base.billing === 'credits' || call.billing === 'credits' ? 'credits' : (call.billing ?? base.billing)
+  const cached = Math.min(count(call.cachedPromptCount), input)
+  const cachedSum = (base.cachedTokens ?? 0) + cached
   return {
     inputTokens: base.inputTokens + input,
     outputTokens: base.outputTokens + output,
     calls: base.calls + (reported ? 1 : 0),
     ...(billing ? { billing } : {}),
+    ...(cachedSum > 0 ? { cachedTokens: cachedSum } : {}),
   }
 }
 
@@ -88,6 +92,14 @@ export function requestUsageLine(u: RequestUsage | undefined): { text: string; t
       `Tokens for this answer, as reported by the model: ${fmt(u.inputTokens)} in (prompt with system prompt, tools and history), ${fmt(u.outputTokens)} out.`,
     )
     if (u.calls > 1) notes.push(`Summed over ${u.calls} model calls.`)
+    // CA (14.11.2026): what the backend served from its prompt cache. On a
+    // long agent run that is most of the input, and it is billed at a
+    // fraction; a run that shows none is paying full price on every step.
+    if (u.cachedTokens && u.inputTokens > 0) {
+      const pct = Math.round((u.cachedTokens / u.inputTokens) * 100)
+      parts.push(`${pct}% cached`)
+      notes.push(`${fmt(u.cachedTokens)} of the input tokens came from the model's prompt cache.`)
+    }
   }
   if (u.billing === 'flash') {
     parts.push(FLASH_MARK_LABEL)
