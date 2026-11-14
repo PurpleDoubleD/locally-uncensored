@@ -383,17 +383,22 @@ pub(crate) fn refusing_port() -> (u16, socket2::Socket) {
 /// so a test built on one is racing the kernel; a binary this toolchain
 /// produced is ad-hoc signed and is left alone.
 ///
-/// `cargo test` builds examples, so it is there whenever the tests are, and it
-/// lives next to the test binary: `target/<profile>/deps/<test binary>` →
-/// `target/<profile>/examples/park`.
+/// `cargo test` builds examples, so it is there whenever the tests are, and
+/// Cargo copies it to `target/<profile>/examples/park`. The test binary sits
+/// somewhere below `target/<profile>/`, but where is not stable: up to Cargo
+/// 1.99 it was `deps/<test binary>`, from 1.100 it is
+/// `build/<package>/<hash>/out/<test binary>`. So walk up from the test binary
+/// to the first directory that has `examples/park`.
 #[cfg(unix)]
 pub(crate) fn park_binary() -> PathBuf {
     let exe = std::env::current_exe().expect("current_exe");
-    let park = exe
-        .parent()
-        .and_then(|deps| deps.parent())
-        .map(|profile| profile.join("examples").join("park"))
-        .expect("no target/<profile>/ above the test binary");
+    let below = exe.parent().expect("the test binary has a directory");
+    let park = below
+        .ancestors()
+        .map(|dir| dir.join("examples").join("park"))
+        .find(|park| park.is_file())
+        // The old place, so the message below names a path worth looking at.
+        .unwrap_or_else(|| below.parent().unwrap_or(below).join("examples").join("park"));
     assert!(
         park.is_file(),
         "{} is missing. It is `src-tauri/examples/park.rs`, which `cargo test` builds \
