@@ -498,7 +498,11 @@ export async function runRemoteAgentLoop(run: RemoteAgentRun): Promise<RemoteAge
         const verdict = said.action === 'halt'
           ? said
           : guard.recordBatch(calls.map((c) => ({ name: c.function.name, args: JSON.stringify(c.function.arguments ?? {}) })))
-        if (verdict.action === 'halt') return finish('looping', lastContent)
+        if (verdict.action === 'halt') {
+          // The search spiral ends with an honest "not found" as the answer.
+          if (verdict.answer) return finish('done', [lastContent, verdict.answer].filter((x) => x.trim()).join('\n\n'))
+          return finish('looping', lastContent)
+        }
         pendingSteer = verdict.action === 'steer' ? verdict.message : said.action === 'steer' ? said.message : null
       }
       messages.push({

@@ -3043,7 +3043,10 @@ export function useAgentChat() {
         if (batchVerdict.action === 'halt') {
           runState.content =
             (runState.content ? runState.content + '\n\n' : '') +
-            `_(halted: ${batchVerdict.reason}. The model is looping. Try a stronger model for multi-step tasks, or rephrase the instruction.)_`
+            (batchVerdict.answer
+              // The search spiral knows its honest end (not found).
+              ? batchVerdict.answer
+              : `_(halted: ${batchVerdict.reason}. The model is looping. Try a stronger model for multi-step tasks, or rephrase the instruction.)_`)
           scheduleUIUpdate()
           // CA U6: one pass without tools says what is done and what is open.
           {

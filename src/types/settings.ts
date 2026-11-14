@@ -191,6 +191,10 @@ export interface Settings {
   agentLoopGuard?: boolean
   /** CA (14.11.2026): credits one agent task may use before it pauses and
    *  asks (LU Cloud, lib/agent-cost-brake.ts). 0 = no limit. */
+  /** CA (14.11.2026, AG10): the agent's shell may reach outside its folder
+   *  (home, other folders, the whole disk). Off unless the user turns it on;
+   *  locked from the agent (settings-catalog, 'paths'). lib/shell-scope.ts. */
+  agentShellOutsideFolder?: boolean
   agentRunCreditLimit?: number
   /** Credits all agent runs together may use in a rolling hour. 0 = no limit. */
   agentHourCreditLimit?: number

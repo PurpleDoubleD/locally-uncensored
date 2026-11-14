@@ -89,7 +89,9 @@
 export type LoopGuardVerdict =
   | { action: 'ok' }
   | { action: 'steer'; message: string }
-  | { action: 'halt'; reason: string }
+  /** `answer`: what the run says instead of "the model is looping", where the
+   *  guard knows the honest outcome (the search spiral: not found). */
+  | { action: 'halt'; reason: string; answer?: string }
 
 const CONSECUTIVE_HALT_AT = 3
 const BATCH_WINDOW = 6
@@ -144,6 +146,46 @@ const SCROLL_HALT_AT = 20
 const SEARCH_TOOLS = new Set<string>(['web_search'])
 const SEARCH_STEER_AT = 6
 const SEARCH_HALT_AT = 12
+
+/**
+ * Detector 9: the search spiral (CA, 14.11.2026, bench AG10). A model that
+ * could not find a fact searched its memory nine times with nine different
+ * words, then ran about twenty different shell searches across the disk, for
+ * 32 minutes, and gave no answer. No call was a repeat and no two were alike
+ * enough for detector 8. What they shared: each only looked, and nothing was
+ * written or run in between. Lookups since the last call that changed or ran
+ * something are counted (file_read neither counts nor resets: reading what a
+ * search found is the normal next step, and a hunt reads too). Twelve steer the
+ * model to act on what it found or say what it could not find; twenty end the
+ * run with an honest "not found" instead of silence. Wide on purpose: a model
+ * exploring a large codebase greps a lot before its first edit.
+ */
+const HUNT_STEER_AT = 12
+const HUNT_HALT_AT = 20
+const HUNT_TOOLS = new Set<string>(['file_search', 'file_list', 'session_search', 'memory_search', 'web_search', 'tool_search'])
+const HUNT_SHELL = /(^|[\s;|&(`$])(find|grep|egrep|rg|ag|ls|locate|mdfind|ps|whoami|cat|head|tail|tree|du|stat|echo|printenv|env|which|type)(\s|$)/
+// A program in command position (start, or after ; & | ( or `), so `grep -v node`
+// is still a lookup and `npm test` is not.
+const HUNT_SHELL_WRITES = /(^|[^2&])>|(^|[;&|(`]\s*)(sudo\s+)?(rm|mv|cp|mkdir|touch|tee|chmod|chown|ln|npm|npx|pnpm|yarn|bun|node|python3?|pip3?|pytest|jest|vitest|make|cargo|go|curl|wget|git\s+(commit|add|push|checkout|reset|merge|rebase|apply|stash|clone|pull))\b|\bsed\s+-i|\bxargs\b/
+const HUNT_NEUTRAL = new Set<string>(['file_read', 'todo_write', 'get_current_time'])
+
+/** A call that only looks for something. */
+export function isHuntCall(name: string, argsJson: string): boolean {
+  if (HUNT_TOOLS.has(name)) return true
+  let a: Record<string, unknown> = {}
+  try { a = JSON.parse(argsJson) as Record<string, unknown> } catch { /* not an object */ }
+  if (name === 'memory') return /^(search|list|get|recall|find)$/i.test(String(a?.action ?? ''))
+  if (name === 'shell_execute') {
+    const command = typeof a?.command === 'string' ? a.command : ''
+    return !!command && HUNT_SHELL.test(command) && !HUNT_SHELL_WRITES.test(command)
+  }
+  return false
+}
+
+/** The run's end when the spiral halts: plain, and honest about it. */
+export function huntHaltAnswer(n: number): string {
+  return `I could not find it. I looked ${n} times (memory, files and searches) without finding anything, so I stopped instead of searching further. If you know where it is, tell me and I will look there.`
+}
 
 /**
  * Detector 8 (C83). Five silent near-copies in a row get one word, eight end
@@ -313,6 +355,9 @@ export class AgentLoopGuard {
 
   /** Reads whose capped result was already forgiven once (detector 3). */
   private trimForgiven = new Set<string>()
+  /** Detector 9: lookups since the last call that changed or ran something. */
+  private huntCount = 0
+  private huntSteered = false
 
   /**
    * Record one iteration's tool-call batch BEFORE executing it. `args` must
@@ -333,6 +378,42 @@ export class AgentLoopGuard {
     opts: { trimmedReadKeys?: ReadonlySet<string> } = {},
   ): LoopGuardVerdict {
     if (!this.enabled || calls.length === 0) return { action: 'ok' }
+    const hunt = this.recordHunt(calls)
+    const v = this.recordBatchDetectors(calls, opts)
+    if (v.action === 'halt') return v
+    if (hunt.action === 'halt') return hunt
+    return v.action === 'steer' ? v : hunt
+  }
+
+  /** Detector 9, the search spiral (see HUNT_STEER_AT). */
+  private recordHunt(calls: Array<{ name: string; args: string }>): LoopGuardVerdict {
+    for (const c of calls) {
+      if (HUNT_NEUTRAL.has(c.name)) continue
+      if (isHuntCall(c.name, c.args)) this.huntCount++
+      else { this.huntCount = 0; this.huntSteered = false }
+    }
+    if (this.huntCount >= HUNT_HALT_AT) {
+      return {
+        action: 'halt',
+        reason: `${this.huntCount} searches in a row without finding or changing anything`,
+        answer: huntHaltAnswer(this.huntCount),
+      }
+    }
+    if (this.huntCount >= HUNT_STEER_AT && !this.huntSteered) {
+      this.huntSteered = true
+      return {
+        action: 'steer',
+        message: `You have searched ${this.huntCount} times in a row without changing anything. `
+          + 'If you have found what you need, act on it now. If it is not there, stop searching and say plainly what you could not find. Do not search outside your folder.',
+      }
+    }
+    return { action: 'ok' }
+  }
+
+  private recordBatchDetectors(
+    calls: Array<{ name: string; args: string }>,
+    opts: { trimmedReadKeys?: ReadonlySet<string> },
+  ): LoopGuardVerdict {
     // browser_scroll (P-L, C53) repeats its arguments by design: every call
     // moves the page and its answer names the new position. A batch of
     // nothing but scrolls is therefore not a repeat; it gets its own, wider

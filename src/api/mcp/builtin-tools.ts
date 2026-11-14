@@ -424,14 +424,14 @@ const BUILTIN_TOOLS: MCPToolDefinition[] = [
       + 'For long work set `background: true` to get a task id back at once, then call again with `task: "status"` and `task_id` (or "list" / "kill"). '
       + 'PREFER dedicated tools where available: file_read over `cat`, file_list over `ls`, file_search over `grep`. '
       + '`--no-verify` is refused, and NEVER delete permanently without confirmation. '
-      + 'Default timeout 120 s, test runs 300 s. '
+      + 'Paths outside your folder are refused. Timeout at most 120 s, test runs 300 s. '
       + 'A command still running at its timeout keeps running in the background under a task id.',
     inputSchema: {
       type: 'object',
       properties: {
         command: { type: 'string', description: 'The full command to execute. Omit only for task actions.' },
         cwd: { type: 'string', description: 'Working directory (optional, relative to the workspace)' },
-        timeout: { type: 'number', description: 'Timeout in milliseconds (default: 120000)' },
+        timeout: { type: 'number', description: 'Timeout in ms (at most 120000)' },
         shell: { type: 'string', description: 'Override shell: "powershell" | "cmd" | "bash" (default: auto)' },
         stdin: { type: 'string', description: 'Text piped to the command\'s stdin, e.g. a Python script for `python3 -`.' },
         background: { type: 'boolean', description: 'Run detached; returns a task id immediately instead of waiting.' },
@@ -1002,6 +1002,27 @@ async function executeFileSearch(args: ToolArgs, run?: AgentRunContext): Promise
   return JSON.stringify(data)
 }
 
+/**
+ * The front gate of the shell (CA, 14.11.2026, AG10; lib/shell-scope.ts): a
+ * command that points at the home folder, the disk root or a path outside the
+ * agent's folder is refused, unless the user allowed it in Settings → Agent.
+ * "Outside" is the backend jail's own answer, the one the file tools get.
+ */
+async function outsideFolderRefusal(command: string, cwd: unknown, run?: AgentRunContext): Promise<string | null> {
+  const { useSettingsStore } = await import('../../stores/settingsStore')
+  if (useSettingsStore.getState().settings.agentShellOutsideFolder === true) return null
+  const { shellReachOutside, outsideRefusal } = await import('../../lib/shell-scope')
+  const reach = await shellReachOutside(command, async (path) => {
+    try {
+      await backendCall('fs_info', { path, ...chatCtx(run) })
+      return false
+    } catch (e) {
+      return /escapes the allowed workspace/i.test(e instanceof Error ? e.message : String(e))
+    }
+  }, typeof cwd === 'string' && cwd.trim() ? cwd : undefined)
+  return reach ? outsideRefusal(reach) : null
+}
+
 async function executeShellExecute(
   args: ToolArgs,
   run?: AgentRunContext,
@@ -1059,6 +1080,9 @@ async function executeShellExecute(
   // Flag abwaehlt, ist keine.
   const refusal = rejectShellCommand(command) ?? hardBlockedShellCommand(command)
   if (refusal) return refusal
+  // Vor der Hintergrund-Weiche, aus demselben Grund wie die Sperre darueber.
+  const outside = await outsideFolderRefusal(command, args.cwd, run)
+  if (outside) return outside
 
   // `shell` muss mit: das Backend leitet die Argumentform seit ba9557df aus dem
   // Shell-NAMEN ab (shell::shell_argv), das Durchreichen ist also folgenlos
@@ -1066,9 +1090,12 @@ async function executeShellExecute(
   // kennt StartArgs auf der Rust-Seite gar nicht.
   if (args.background) return executeShellExecuteBg({ command, cwd: args.cwd, shell: args.shell }, run, abort)
 
-  // An explicit timeout wins; otherwise a recognised test run keeps the old
-  // run_tests budget (300 s) instead of the shell default.
-  const timeout = argNumber(args, 'timeout') || commandTimeoutMs(command, 120000)
+  // What the model asks for is a wish under the cap (CA, 14.11.2026: one model
+  // asked for 600 s per `find /`); a recognised test run keeps the run_tests
+  // budget (300 s). A command still running at its timeout is not killed, it
+  // goes on as a background task (T1 below).
+  const { cappedShellTimeout, SHELL_TIMEOUT_DEFAULT_MS } = await import('../../lib/shell-scope')
+  const timeout = cappedShellTimeout(argNumber(args, 'timeout') || undefined, commandTimeoutMs(command, SHELL_TIMEOUT_DEFAULT_MS))
   const data = await invokeShell({
     command,
     args: args.args || null,
@@ -1181,6 +1208,14 @@ async function executeCodeExecute(
   // executeShellExecute — die eigene braucht es hier trotzdem.
   const bad = missingArgs('code_execute', args, 'code')
   if (bad) return bad
+  {
+    const { useSettingsStore } = await import('../../stores/settingsStore')
+    if (useSettingsStore.getState().settings.agentShellOutsideFolder !== true) {
+      const { scanCodePaths, outsideRefusal } = await import('../../lib/shell-scope')
+      const reach = scanCodePaths(argString(args, 'code'))
+      if (reach) return outsideRefusal(reach)
+    }
+  }
   const data = await invokeCode({ code: argString(args, 'code'), timeout: 30000, ...chatCtx(run) }, abort)
   const output = data.stdout || ''
   const err = data.stderr || ''
@@ -1275,6 +1310,8 @@ async function executeShellExecuteBg(
   const { rejectShellCommand, hardBlockedShellCommand } = await import('../../lib/shell-command-classify')
   const refusal = rejectShellCommand(command) ?? hardBlockedShellCommand(command)
   if (refusal) return refusal
+  const outside = await outsideFolderRefusal(command, args.cwd, run)
+  if (outside) return outside
   // Thread the chat context through, or the task starts in LU's own directory
   // instead of the workspace the foreground shell tool uses.
   const { id } = await bgStart({
@@ -1525,7 +1562,7 @@ async function executeRunTests(args: ToolArgs, run?: AgentRunContext, signal?: A
     command,
     args: null,
     cwd: args.cwd || null,
-    timeout: argNumber(args, 'timeout') || 300000,
+    timeout: Math.min(argNumber(args, 'timeout') || 300000, 300000),
     shell: null,
     ...chatCtx(run),
   }

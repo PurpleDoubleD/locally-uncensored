@@ -2306,7 +2306,11 @@ export function useCodex() {
         const batchVerdict = recordedVerdict.action === 'ok' ? narrationVerdict : recordedVerdict
         if (batchVerdict.action === 'halt') {
           diagLog('loop-guard-halt', { iter: i, reason: batchVerdict.reason })
-          const msg = `\n\n_(halted: ${batchVerdict.reason}. The model is looping. Try a stronger model for multi-step code tasks, or rephrase the instruction.)_`
+          // The search spiral knows its honest end (not found); every other
+          // halt is a loop and says so.
+          const msg = batchVerdict.answer
+            ? `${fullContent.trim() ? '\n\n' : ''}${batchVerdict.answer}`
+            : `\n\n_(halted: ${batchVerdict.reason}. The model is looping. Try a stronger model for multi-step code tasks, or rephrase the instruction.)_`
           useChatStore.getState().updateMessageContent(convId, assistantMsg.id, fullContent + msg)
           {
             const summary = (isLocalModelByName(activeModel) ? await finishWithoutTools({ provider, model: modelToUse, messages, signal: abort.signal }) : null)

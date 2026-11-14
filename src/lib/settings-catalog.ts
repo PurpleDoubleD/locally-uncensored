@@ -455,7 +455,7 @@ export const LOCK_RULES: readonly LockRule[] = [
   },
   {
     category: 'permissions', what: 'Permissions', where: 'the permission bar of the chat or Settings → Agent',
-    names: ['permissions', 'toolPermissions', 'sandboxLevel', 'bypass', 'autoApprove', 'perToolOverrides'],
+    names: ['permissions', 'toolPermissions', 'sandboxLevel', 'bypass', 'autoApprove', 'perToolOverrides', 'agentShellOutsideFolder'],
     pattern: /permission|sandbox|bypass|autoapprove|allowall|trust/,
   },
   {
