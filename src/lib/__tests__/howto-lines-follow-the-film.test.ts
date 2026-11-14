@@ -5,10 +5,10 @@ import { HOWTO, HOWTO_NOT_UPLOADED, HOWTO_GUIDE_BASE, HOWTO_VIDEO_BASE, howtoGui
 import { INTENTS } from '../../components/create/experimental/intents'
 
 describe('how it works', () => {
-  // 3D (3.1.0) has no film on the server yet. Until it is uploaded the stage
-  // offers none (stageHowtoTopic answers null), instead of a link to a film
-  // that is not there.
-  const NO_FILM_YET = new Set(['3d'])
+  // A tab whose film is not on the server yet gets none on the stage
+  // (stageHowtoTopic answers null), instead of a link to a film that is not
+  // there. Empty since the 3D films went up with 3.1.0.
+  const NO_FILM_YET = new Set<string>([])
   const filmed = INTENTS.filter((i) => !NO_FILM_YET.has(i.id))
 
   it('has a film for every Create tab, for Code and for Agent', () => {
@@ -18,8 +18,8 @@ describe('how it works', () => {
     expect(HOWTO.agent).toBeTruthy()
   })
 
-  // The 3D films are rendered and wait for the upload (HOWTO_NOT_UPLOADED).
-  // At upload the entry moves into HOWTO and '3d' leaves NO_FILM_YET.
+  // Films that are rendered but wait for the upload sit in HOWTO_NOT_UPLOADED.
+  // At upload the entry moves into HOWTO and its id leaves NO_FILM_YET.
   it('keeps every film that waits for the upload ready, and out of the app', () => {
     for (const id of NO_FILM_YET) {
       const ready = HOWTO_NOT_UPLOADED[id]
@@ -34,7 +34,8 @@ describe('how it works', () => {
       expect(stageHowtoTopic(id, 'local')).toBeNull()
       expect(stageHowtoTopic(id, 'local', true)).toBeNull()
     }
-    expect(HOWTO_NOT_UPLOADED['3d'].films.map((f) => f.id)).toEqual(['3d', '3d-view'])
+    expect(HOWTO['3d'].films.map((f) => f.id)).toEqual(['3d', '3d-view'])
+    expect(HOWTO_NOT_UPLOADED['3d']).toBeUndefined()
   })
 
   it('names each Create film after the tab it stands on', () => {

@@ -418,13 +418,6 @@ export const HOWTO: Record<string, HowtoTopic> = {
     { from: 6.56, text: 'Tools switches tool categories on or off for this chat only.' },
     { from: 12.83, text: 'Before a command runs you approve or reject it; the arrow shows its arguments.' },
   ], '/guide/agent/'),
-}
-
-/** Topics whose films are rendered but not yet on lu-labs.ai/howto/. They
- *  are kept apart from HOWTO, so nothing in the app offers a film the server
- *  does not have. Once the films are uploaded, the entry moves into HOWTO
- *  as it is (and the test's NO_FILM_YET loses it). */
-export const HOWTO_NOT_UPLOADED: Record<string, HowtoTopic> = {
   '3d': {
     title: 'How 3D works',
     guide: '/guide/create/',
@@ -448,6 +441,13 @@ export const HOWTO_NOT_UPLOADED: Record<string, HowtoTopic> = {
       },
     ],
   },
+}
+
+/** Topics whose films are rendered but not yet on lu-labs.ai/howto/. They
+ *  are kept apart from HOWTO, so nothing in the app offers a film the server
+ *  does not have. Once the films are uploaded, the entry moves into HOWTO
+ *  as it is (and the test's NO_FILM_YET loses it). */
+export const HOWTO_NOT_UPLOADED: Record<string, HowtoTopic> = {
 }
 
 /** The Create tabs whose local lane has a film of its own. Every other film
