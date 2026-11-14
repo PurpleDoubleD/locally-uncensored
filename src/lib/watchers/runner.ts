@@ -250,7 +250,17 @@ export function startWatcherRunner(): Promise<() => void> {
         const offs = [approvals.subscribeApprovals(answerAll), useSettingsConfirmStore.subscribe(answerAll), useWebUrlConfirmStore.subscribe(answerAll)]
         return () => { for (const off of offs) off() }
       },
-      update: (id, patch) => backendCall('watchers_update', { id, patch }),
+      update: async (id, patch) => {
+        // The chat counts as the watcher's at once, not only when Rust's
+        // `watchers-changed` comes back: the run that starts right after must
+        // already be refused the watcher and settings tools
+        // (lib/self-control-policy.ts, hooks/useChat.ts wantsWatcherTools).
+        if (patch.conversationId) {
+          const { watchers, hints } = useWatcherStore.getState()
+          useWatcherStore.getState().set({ watchers: watchers.map((w) => (w.id === id ? { ...w, conversation_id: patch.conversationId! } : w)), hints })
+        }
+        return backendCall('watchers_update', { id, patch })
+      },
       finished: (id, run) => backendCall('watchers_finished', { id, run }),
       notify: (title, body, sound) => backendCall('watchers_notify', { title, body, sound }),
       notifySettings: () => {
