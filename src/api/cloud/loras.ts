@@ -24,6 +24,71 @@ export async function listLoras(): Promise<CloudLora[]> {
   return loras
 }
 
+/** How long the app waits, step by step, for a finished training to show up
+ *  on the shelf. About 17 seconds in all. */
+export const TRAINED_LORA_WAITS_MS = [500, 1000, 1500, 2000, 3000, 4000, 5000]
+
+/** When the first waits were not enough: asked again in the background for
+ *  about two more minutes. */
+export const TRAINED_LORA_LATE_WAITS_MS = [10_000, 20_000, 30_000, 60_000]
+
+/** A shelf entry counts as the new one when the server wrote it at most this
+ *  long before the job said it was done. The worker and the database each
+ *  keep their own clock; an older character is minutes older, not seconds. */
+const SAME_TRAINING_SLACK_MS = 30_000
+
+/** Said when a training is done but its character did not show up on the
+ *  shelf within the waits. The character is on the account either way. */
+export const TRAINED_NOT_YET_LISTED =
+  'Your character is trained and saved to your account. It can take a minute to show up here. Open Use character again in a moment.'
+
+/** True when the shelf holds the character a training finished at
+ *  `completedAt` (ISO time of the job). */
+export function shelfHasTraining(shelf: CloudLora[], completedAt: string | null | undefined): boolean {
+  const done = completedAt ? Date.parse(completedAt) : NaN
+  if (!Number.isFinite(done)) return false
+  return shelf.some((l) => {
+    const at = Date.parse(l.created_at)
+    return Number.isFinite(at) && at >= done - SAME_TRAINING_SLACK_MS
+  })
+}
+
+/** Waits until a finished training is on the shelf.
+ *
+ *  The server marks a training job done first and puts the character on the
+ *  shelf about a second later (render worker: succeed, then persistLora). An
+ *  app that reads the shelf the moment the job says done gets the list
+ *  without the new character, and the customer sees "No characters yet" after
+ *  a paid training (Fall E7, 07.11.2026). So this asks again a few times.
+ *
+ *  Resolves the shelf that holds the character, or null when it did not show
+ *  within the waits (or `signal` ended the wait). A failed read is just
+ *  another try. Never throws. */
+export async function waitForTrainedLora(
+  job: { completed_at: string | null },
+  opts: {
+    waitsMs?: number[]
+    signal?: AbortSignal
+    list?: () => Promise<CloudLora[]>
+    sleep?: (ms: number) => Promise<void>
+  } = {},
+): Promise<CloudLora[] | null> {
+  const list = opts.list ?? listLoras
+  const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)))
+  const waits = opts.waitsMs ?? TRAINED_LORA_WAITS_MS
+  for (let i = 0; i <= waits.length; i++) {
+    if (opts.signal?.aborted) return null
+    try {
+      const shelf = await list()
+      if (shelfHasTraining(shelf, job.completed_at)) return shelf
+    } catch {
+      // The next try asks again.
+    }
+    if (i < waits.length) await sleep(waits[i])
+  }
+  return null
+}
+
 export async function deleteLora(id: string): Promise<void> {
   const res = await cloudFetch(`/api/loras/${encodeURIComponent(id)}`, { method: 'DELETE' })
   await jsonOrError<{ ok: boolean }>(res)
