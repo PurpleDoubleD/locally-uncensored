@@ -2,7 +2,7 @@
 import definitions from './studio-models.json'
 import schemas from './provider-schemas.json'
 import endpoints from './provider-endpoints.json'
-export type Schema = { type?: string; properties?: Record<string, Schema>; required?: string[]; enum?: unknown[]; default?: unknown; minimum?: number; maximum?: number; minItems?: number; maxItems?: number; items?: Schema; description?: string; disabled?: boolean; format?: string }
+export type Schema = { type?: string; properties?: Record<string, Schema>; required?: string[]; enum?: unknown[]; default?: unknown; minimum?: number; maximum?: number; minItems?: number; maxItems?: number; items?: Schema; description?: string; disabled?: boolean; format?: string; 'x-lu-views'?: string[] }
 // Stufe und Herkunft jedes Cloud-Modells (02.10.2026, Entscheid des Inhabers).
 // `tier` ordnet die Waehler: 'best' steht oben, 'older' gesammelt unten.
 // `weights` sagt, ob genau diese Version offene Gewichte hat ('open'), nur ihre
@@ -24,7 +24,10 @@ export interface StudioModel {
   // gemessenen Eingabe. Alle vier sind an POST /model/price gemessen.
   price: { mode: string; rates: Record<string, number>; maxSeconds?: number; extraImage?: number
     resolutionField?: string; durationField?: string; unitDivisor?: number; blockSeconds?: number; minSeconds?: number
-    perUnitField?: string }
+    perUnitField?: string
+    // `extraViews` (14.11.2026, Hunyuan3D 3): one flat surcharge as soon as a
+    // run has more than one picture, however many further sides it has.
+    extraViews?: number }
 }
 export const STUDIO_MODELS = definitions as Record<string, StudioModel>
 export function studioSchema(id: string): Schema {
@@ -139,12 +142,14 @@ export function studioCredits(id: string, options: Record<string,unknown>, measu
   // Ein abgeschaltetes Feld (num_images) fehlt in den Optionen: der Anbieter nimmt dann seinen Standard 1.
   const units = m.price.perUnitField ? Number(options[m.price.perUnitField] ?? 1) : 1
   if (!Number.isFinite(units) || units <= 0) throw new Error('Invalid size')
-  return Math.ceil((rate * seconds * units + (m.price.extraImage ?? 0) * Math.max(0,imageCount-1)) * 100000 - 1e-8)
+  return Math.ceil((rate * seconds * units + (m.price.extraImage ?? 0) * Math.max(0,imageCount-1) + (imageCount > 1 ? m.price.extraViews ?? 0 : 0)) * 100000 - 1e-8)
 }
 export function studioBaseCredits(id: string): number {
   const schema = studioSchema(id), m = STUDIO_MODELS[id]
   const options: Record<string, unknown> = { ...m.defaults }
-  for (const [key, s] of Object.entries(schema.properties ?? {})) if (!(key in options) && s.default !== undefined) options[key] = s.default
+  // A disabled field never goes out (14.11.2026): the provider takes its own
+  // default, which the run's price already is (Hi3D's resolution).
+  for (const [key, s] of Object.entries(schema.properties ?? {})) if (!(key in options) && s.default !== undefined && !s.disabled) options[key] = s.default
   return studioCredits(id,options,5)
 }
 
