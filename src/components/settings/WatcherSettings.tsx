@@ -1,7 +1,7 @@
 // Settings → Agent → Watchers: the notification of the system when a watcher
 // ran. Three rows and nothing else (David, 14.11.2026): on or off, the sound,
 // and whether a result is worth a notification or only an error.
-import { InlineToggle } from './InlineToggle'
+import { InlineToggle, ROW_LABEL } from './InlineToggle'
 import { useWatcherSettingsStore, type WatcherNotifyOn } from '../../stores/watcherStore'
 
 const CHOICES: { value: WatcherNotifyOn; label: string }[] = [
@@ -14,13 +14,13 @@ export function WatcherSettings() {
   return (
     <div className="space-y-1">
       <p className="t-micro text-gray-500 leading-relaxed pb-1">
-        A notification of the system when a watcher has run, also with the window closed. Watchers are made in the chat
-        (&ldquo;at 18:00 check …&rdquo;) and run as long as LU runs.
+        System notifications when a watcher has run, also with the window closed. Watchers are made in the chat
+        (&ldquo;at 18:00 check …&rdquo;) and run as long as LU is open or in the tray.
       </p>
       <InlineToggle label="Notifications" enabled={notify} onChange={() => update({ notify: !notify })} />
       <InlineToggle label="Sound" enabled={sound && notify} onChange={() => update({ sound: !sound })} />
       <div className="flex items-center justify-between py-0.5">
-        <span className="t-control font-normal text-gray-700 dark:text-gray-400">Notify on</span>
+        <span className={ROW_LABEL}>Notify on</span>
         <div className="flex items-center gap-3" role="radiogroup" aria-label="Notify on">
           {CHOICES.map((c) => (
             <button
