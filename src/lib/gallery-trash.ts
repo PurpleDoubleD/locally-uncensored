@@ -25,16 +25,64 @@ interface GalleryRender {
   localPath?: string
 }
 
-export function isTrashableRender(item: GalleryRender, remaining: GalleryRender[]): boolean {
+export function isTrashableRender(item: GalleryRender, remaining: readonly GalleryRender[]): boolean {
   if (!item.filename || item.jobId || item.remoteUrl || item.localPath) return false
   if ((item.comfyType ?? 'output') !== 'output') return false
   return !remaining.some((g) => g.filename === item.filename && (g.subfolder ?? '') === (item.subfolder ?? ''))
 }
 
 /** A render of the Mac's engines: a file on this Mac that no other entry shows. */
-export function isTrashableMacRender(item: GalleryRender, remaining: GalleryRender[]): boolean {
+export function isTrashableMacRender(item: GalleryRender, remaining: readonly GalleryRender[]): boolean {
   if (!item.localPath || item.jobId || item.remoteUrl) return false
   return !remaining.some((g) => g.localPath === item.localPath)
+}
+
+/**
+ * What Delete does to an entry, so the words on the button say it truly
+ * (C3D, 14.11.2026: under a cloud result it said the file goes to the Trash).
+ *   trash  a file on this computer that no other entry shows: to the Trash
+ *          or the Recycle Bin (trashGalleryFile below);
+ *   cloud  a cloud result: it only leaves this app's gallery. Nothing on the
+ *          server is deleted, the copy in the account stays (the web gallery
+ *          still shows it until it expires);
+ *   entry  anything else (a file another entry still shows, a file outside
+ *          the output folder): only the entry goes.
+ */
+export type DeleteFate = 'trash' | 'cloud' | 'entry'
+
+export function deleteFate(item: GalleryRender, remaining: readonly GalleryRender[]): DeleteFate {
+  if (item.jobId || item.remoteUrl) return 'cloud'
+  return isTrashableMacRender(item, remaining) || isTrashableRender(item, remaining) ? 'trash' : 'entry'
+}
+
+/** The fates of several entries deleted one after the other, as the gallery
+ *  does it: a file two of them share goes with the second. */
+export function deleteFates<T extends GalleryRender & { id: string }>(ids: readonly string[], gallery: readonly T[]): DeleteFate[] {
+  let rest = gallery
+  return ids.map((id) => {
+    const item = rest.find((g) => g.id === id)
+    rest = rest.filter((g) => g.id !== id)
+    return item ? deleteFate(item, rest) : 'entry'
+  })
+}
+
+/** deleteFate for every entry of a whole gallery at once, without a scan of
+ *  the gallery per entry (the strip has thousands, C27): who else shows the
+ *  same file is counted once. Same answer as deleteFate(item, the others). */
+export function deleteFateOf<T extends GalleryRender>(all: readonly T[]): (item: T) => DeleteFate {
+  const comfy = new Map<string, number>()
+  const mac = new Map<string, number>()
+  const comfyKey = (g: GalleryRender) => `${g.subfolder ?? ''}\u0000${g.filename}`
+  for (const g of all) {
+    if (g.filename) comfy.set(comfyKey(g), (comfy.get(comfyKey(g)) ?? 0) + 1)
+    if (g.localPath) mac.set(g.localPath, (mac.get(g.localPath) ?? 0) + 1)
+  }
+  return (item) => {
+    if (item.jobId || item.remoteUrl) return 'cloud'
+    if (item.localPath) return (mac.get(item.localPath) ?? 0) <= 1 ? 'trash' : 'entry'
+    if (!item.filename || (item.comfyType ?? 'output') !== 'output') return 'entry'
+    return (comfy.get(comfyKey(item)) ?? 0) <= 1 ? 'trash' : 'entry'
+  }
 }
 
 /** Returns an error line for the user, or null when all went well. */

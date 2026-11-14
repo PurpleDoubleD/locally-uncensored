@@ -8,9 +8,12 @@ import { cloudDetailOf, threeDControlFacts, threeDDetailField, threeDMaxViews } 
 import { useCloudCatalogStore } from '../../../stores/cloudCatalogStore'
 import { neuerServer } from '../../render/__tests__/fixtures/test-catalogs'
 
-// A server that lists every studio model, the second wave included.
+// A server that lists every studio model, the second wave included, with its
+// switch for the measurement on: the four not measured yet carry the mark that
+// lets the app show them (studio-contract.ts, unmeasuredHidden). Hidden
+// without it: unmeasured-hidden.test.ts.
 beforeEach(() => {
-  useCloudCatalogStore.setState({ models: neuerServer() })
+  useCloudCatalogStore.setState({ models: neuerServer().map((m) => (STUDIO_MODELS[m.id]?.unmeasured ? { ...m, unmeasured: true } : m)) })
 })
 
 const WAVE2 = [

@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 const backend = vi.hoisted(() => ({ call: vi.fn(), tauri: vi.fn(() => true) }))
 vi.mock('../../api/backend', async (o) => ({ ...(await o<typeof import('../../api/backend')>()), backendCall: backend.call, isTauri: backend.tauri }))
 
-import { isTrashableMacRender, isTrashableRender, trashGalleryFile } from '../gallery-trash'
+import { deleteFate, deleteFateOf, deleteFates, isTrashableMacRender, isTrashableRender, trashGalleryFile } from '../gallery-trash'
 import type { GalleryItem } from '../../stores/createStore'
 
 const item = (over: Partial<GalleryItem> = {}): GalleryItem => ({
@@ -71,5 +71,45 @@ describe('gallery delete reaches the file (Discord 2026-09-25)', () => {
       expect(await trashGalleryFile(still(), [])).toBeNull()
       expect(backend.call).not.toHaveBeenCalled()
     })
+  })
+})
+
+// C3D (14.11.2026): the words of Delete follow what it does. A cloud result
+// (a 3D model or any other) keeps its copy in the account: no file, no call.
+describe('what Delete does to an entry', () => {
+  const gallery = [
+    item({ id: 'cloud3d', type: '3d', filename: undefined, jobId: 'j1', remoteUrl: 'https://s/b.glb' }),
+    item({ id: 'cloudimg', filename: undefined, jobId: 'j2' }),
+    item({ id: 'comfy', filename: 'one.png' }),
+    item({ id: 'twinA', filename: 'two.png' }),
+    item({ id: 'twinB', filename: 'two.png' }),
+    item({ id: 'temp', filename: 'tmp.png', comfyType: 'temp' }),
+    item({ id: 'mac', filename: undefined, localPath: '/out/a.glb' }),
+    item({ id: 'macA', filename: undefined, localPath: '/out/b.png' }),
+    item({ id: 'macB', filename: undefined, localPath: '/out/b.png' }),
+    item({ id: 'nofile', filename: undefined }),
+  ] as GalleryItem[]
+  const others = (g: GalleryItem) => gallery.filter((x) => x.id !== g.id)
+
+  it('cloud results only leave the gallery, local files go to the bin, shared ones stay', () => {
+    const fates = Object.fromEntries(gallery.map((g) => [g.id, deleteFate(g, others(g))]))
+    expect(fates).toEqual({
+      cloud3d: 'cloud', cloudimg: 'cloud', comfy: 'trash', twinA: 'entry', twinB: 'entry',
+      temp: 'entry', mac: 'trash', macA: 'entry', macB: 'entry', nofile: 'entry',
+    })
+  })
+
+  it('the whole-gallery form gives the same answer for every entry', () => {
+    const fateOf = deleteFateOf(gallery)
+    for (const g of gallery) expect(fateOf(g), g.id).toBe(deleteFate(g, others(g)))
+  })
+
+  it('deleting two that share a file: the second takes the file along', () => {
+    expect(deleteFates(['twinA', 'twinB', 'cloud3d'], gallery)).toEqual(['entry', 'trash', 'cloud'])
+  })
+
+  it('a cloud 3D result calls nothing on delete', async () => {
+    expect(await trashGalleryFile(gallery[0], others(gallery[0]))).toBeNull()
+    expect(backend.call).not.toHaveBeenCalled()
   })
 })

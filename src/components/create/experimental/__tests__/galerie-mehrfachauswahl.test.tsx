@@ -20,7 +20,7 @@ vi.mock('../useComfyMedia', () => ({
 }))
 vi.mock('../../../../api/mlx-image', () => ({ isMlxImageHost: () => false, MLX_MODEL_PREFIX: 'MLX ' }))
 const trash = vi.hoisted(() => vi.fn(async () => null))
-vi.mock('../../../../lib/gallery-trash', () => ({ trashGalleryFile: trash }))
+vi.mock('../../../../lib/gallery-trash', async (o) => ({ ...(await o<typeof import('../../../../lib/gallery-trash')>()), trashGalleryFile: trash }))
 const download = vi.hoisted(() => vi.fn(async () => {}))
 vi.mock('../galleryDownload', () => ({ downloadGalleryItem: download }))
 
