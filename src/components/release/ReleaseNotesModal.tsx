@@ -69,7 +69,7 @@ export function ReleaseNotesModal() {
   const turnOnCloud = () => {
     close()
     if (cloudAvailable) updateSettings({ appMode: 'cloud' })
-    else setCloudGateOpen(true)
+    else setCloudGateOpen(true, 'release-notes')
   }
 
   if (!note) return null

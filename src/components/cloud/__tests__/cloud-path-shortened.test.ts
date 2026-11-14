@@ -50,9 +50,12 @@ describe('the example-video stage is gone', () => {
   it('the teaser sheet goes straight into checkout from both surfaces', () => {
     // The intent branch used to call setCloudExampleVideo, then both branches
     // went to the in-app gate. Since 2026-09-07 the one button opens
-    // /checkout/start in the browser with Hosted preselected and the card
-    // size as src, and the gate is no longer referenced from the sheet.
-    expect(teaser).toMatch(/openExternal\(`\$\{CLOUD_BASE\}\/checkout\/start\?plan=hosted&src=\$\{src\}`\)/)
+    // /checkout/start in the browser with the card size as src, and the gate
+    // is no longer referenced from the sheet. Since 3.1.0 with two equal
+    // buttons, the subscription and the pack (funnel Nr. 4), both through
+    // lib/cloud-links, which adds the place the click came from.
+    expect(teaser).toMatch(/openExternal\(checkoutStartUrl\(\{ order, src, medium: 'create-sheet' \}\)\)/)
+    expect(teaser).toMatch(/<BuyChoice/)
     expect(teaser).toMatch(/gpuGb !== null \? `gpu\$\{gpuGb\}` : 'gpu-unknown'/)
     expect(teaser).not.toMatch(/setCloudGateOpen/)
     expect(teaser).not.toMatch(/setCloudExampleVideo/)
@@ -79,10 +82,10 @@ describe('the example-video stage is gone', () => {
  */
 describe('the in-app login survives wherever the sales panel leads', () => {
   it('the sign-in entry sits on the sales panel, exactly once', () => {
-    const entries = gate.match(/Already subscribed\? Sign in/g) ?? []
+    const entries = gate.match(/Already bought\? Sign in/g) ?? []
     expect(entries.length, 'sign-in entry must be on the sales panel').toBe(1)
     // Der alte Wortlaut darf nicht danebenstehen bleiben.
-    expect(gate).not.toMatch(/Already got an account/)
+    expect(gate).not.toMatch(/Already got an account|Already subscribed\? Sign in/)
   })
 
   it('it reaches the login step', () => {
@@ -101,8 +104,12 @@ describe('the in-app login survives wherever the sales panel leads', () => {
     expect(start, 'sales panel not found').toBeGreaterThan(-1)
     expect(end, 'the monogram comment no longer follows the panel').toBeGreaterThan(start)
     const panel = gate.slice(start, end)
-    expect(panel).toMatch(/Already subscribed\? Sign in/)
+    expect(panel).toMatch(/Already bought\? Sign in/)
     expect(panel).toMatch(/onSignIn/)
+    // Funnel 3.1.0 (Nr. 11): at the top, before the headline, not under the
+    // buy buttons where somebody back from the browser found the offer first.
+    expect(panel.indexOf('Already bought? Sign in')).toBeLessThan(panel.indexOf('cloudGateHeadline('))
+    expect(panel.indexOf('Already bought? Sign in')).toBeLessThan(panel.indexOf('<BuyChoice'))
   })
 
   it('the login step still has a way back, and it points at the panel', () => {
@@ -133,12 +140,14 @@ describe('the sales panel argues before it asks for a login', () => {
     expect(cloudGateHeadline(false)).toBe('Run uncensored models in the cloud, no GPU needed.')
     expect(flach).toContain('Turn on Cloud to reach the full catalogue from any machine.')
     expect(flach).toContain('Your local models keep working exactly as they do now.')
-    expect(flach).toContain('Cancel anytime. Local mode stays free and offline.')
+    expect(flach).toContain('Local mode stays free and offline.')
   })
 
   it('takes the three lines and the price from the constants, never typed', () => {
     expect(panel).toContain('cloudSalesLines()')
-    expect(panel).toContain('CLOUD_PITCH.hostedMonthlyEUR')
+    // The price sits on the subscription card of BuyChoice since 3.1.0.
+    expect(panel).toContain('<BuyChoice')
+    expect(read('src/components/cloud/BuyChoice.tsx')).toContain('CLOUD_PITCH.hostedMonthlyEUR')
     expect(panel).toContain('CLOUD_SUBSCRIBER_LINE')
     // Negativkontrolle: keine getippte Zahl im Kaufknopf. Genau so ist der
     // Nenner des Blatts einmal veraltet stehen geblieben.
@@ -147,9 +156,15 @@ describe('the sales panel argues before it asks for a login', () => {
   })
 
   it('sends the purchase to the browser, never into the app', () => {
-    expect(panel).toMatch(/openExternal\(`\$\{CLOUD_BASE\}\/pricing`\)/)
+    // Both buttons go to the checkout start on lu-labs.ai, "See all plans"
+    // to the pricing page, each through lib/cloud-links.
+    expect(panel).toMatch(/openGateCheckout\(order, 'app-gate-main', 'gate', from\)/)
+    expect(panel).toMatch(/openExternal\(cloudLink\('\/pricing', 'gate', from\)\)/)
+    const links = read('src/lib/cloud-links.ts')
+    expect(links).toMatch(/cloudLink\(`\/checkout\/start\?/)
     // Die App hat nie eine Zahlung angefasst.
-    expect(panel).not.toMatch(/stripe|checkout\/start/i)
+    expect(panel).not.toMatch(/stripe/i)
+    expect(links).not.toMatch(/stripe\.com|checkout\.stripe/i)
   })
 
   it('is plain: no gradient, no glow, no emoji', () => {

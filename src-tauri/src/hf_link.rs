@@ -12,6 +12,13 @@
 //!
 //! The webview gets no permission of the deep-link plugin. It reads the inbox
 //! through `hf_link_take` and nothing else.
+//!
+//! Since 3.1.0 the same door takes a second link,
+//! `locallyuncensored://cloud/open?status=paid|cancelled`: the way back from a
+//! checkout on lu-labs.ai into the app (funnel Nr. 11). It carries no account
+//! and no order, only whether the payment went through. The app then opens the
+//! Cloud gate on the sign in; it never treats the link as proof of a purchase,
+//! the account check on the server decides that as before.
 
 use serde::Serialize;
 use std::sync::Mutex;
@@ -41,6 +48,9 @@ pub struct HfModelLink {
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum Inbound {
     Model(HfModelLink),
+    /// The way back from a checkout in the browser. `status` is `paid` or
+    /// `cancelled`, nothing else passes.
+    CloudReturn { status: String },
     /// A link with our scheme that failed a check. The page says so instead
     /// of the click going nowhere; the reason never echoes the link itself.
     Rejected { reason: String },
@@ -141,23 +151,83 @@ pub fn parse(raw: &str) -> Result<HfModelLink, String> {
     Ok(HfModelLink { repo, file })
 }
 
+/// The checkout's way back: `locallyuncensored://cloud/open?status=…`, with
+/// the gate model and its category the web page may add (both checked, then
+/// dropped: the app keeps its own pick). Err carries a sentence for the user.
+pub fn parse_cloud_return(raw: &str) -> Result<String, String> {
+    if raw.len() > MAX_LINK_LEN {
+        return Err("The link is too long.".into());
+    }
+    let url = url::Url::parse(raw).map_err(|_| "The link is not a valid address.".to_string())?;
+    if url.scheme() != SCHEME || url.host_str() != Some("cloud") {
+        return Err("The link is not meant for this app.".into());
+    }
+    if !url.username().is_empty() || url.password().is_some() || url.port().is_some() {
+        return Err("The link carries parts it must not have.".into());
+    }
+    if url.path() != "/open" || url.fragment().is_some() {
+        return Err("The link asks for something this version cannot do.".into());
+    }
+    let mut status: Option<String> = None;
+    let mut model: Option<String> = None;
+    let mut category: Option<String> = None;
+    for (key, value) in url.query_pairs() {
+        let slot = match key.as_ref() {
+            "status" => &mut status,
+            "model" => &mut model,
+            "category" => &mut category,
+            _ => return Err("The link carries a parameter this version does not know.".into()),
+        };
+        if slot.is_some() {
+            return Err("The link names a parameter twice.".into());
+        }
+        *slot = Some(value.into_owned());
+    }
+    if let Some(m) = &model {
+        let ok = !m.is_empty() && m.len() <= 80 && m.bytes().all(|b| b.is_ascii_alphanumeric() || b"._:/-".contains(&b));
+        if !ok {
+            return Err("The link names no model this app knows.".into());
+        }
+    }
+    if let Some(c) = &category {
+        if !matches!(c.as_str(), "chat" | "code" | "create") {
+            return Err("The link names no model this app knows.".into());
+        }
+    }
+    match status.as_deref() {
+        Some("paid") | Some("cancelled") => Ok(status.unwrap_or_default()),
+        _ => Err("The link does not say how the checkout ended.".into()),
+    }
+}
+
+/// Which of the two links this is, read by its host.
+pub fn parse_inbound(raw: &str) -> Inbound {
+    let cloud = url::Url::parse(raw).ok().map(|u| u.host_str() == Some("cloud")).unwrap_or(false);
+    if cloud {
+        return match parse_cloud_return(raw) {
+            Ok(status) => Inbound::CloudReturn { status },
+            Err(reason) => Inbound::Rejected { reason },
+        };
+    }
+    match parse(raw) {
+        Ok(link) => Inbound::Model(link),
+        Err(reason) => Inbound::Rejected { reason },
+    }
+}
+
 /// One link from the system: checked, put in the inbox (a newer link replaces
 /// an older one nobody took yet), the page told, the window brought forward.
 #[cfg(desktop)]
 pub fn accept(app: &tauri::AppHandle, raw: &str) {
     use tauri::{Emitter, Manager};
-    let inbound = match parse(raw) {
-        Ok(link) => {
-            tracing::info!(repo = %link.repo, file = ?link.file, "Hugging Face link received");
-            Inbound::Model(link)
-        }
-        Err(reason) => {
-            // The link itself stays out of the log: it is whatever a page
-            // chose to send.
-            tracing::warn!(%reason, "Hugging Face link rejected");
-            Inbound::Rejected { reason }
-        }
-    };
+    let inbound = parse_inbound(raw);
+    match &inbound {
+        Inbound::Model(link) => tracing::info!(repo = %link.repo, file = ?link.file, "Hugging Face link received"),
+        Inbound::CloudReturn { status } => tracing::info!(%status, "checkout return link received"),
+        // The link itself stays out of the log: it is whatever a page chose
+        // to send.
+        Inbound::Rejected { reason } => tracing::warn!(%reason, "app link rejected"),
+    }
     if let Some(inbox) = app.try_state::<HfLinkInbox>() {
         *inbox.0.lock().unwrap_or_else(|e| e.into_inner()) = Some(inbound);
     }
@@ -348,6 +418,48 @@ mod tests {
         );
         let rejected = Inbound::Rejected { reason: "x".into() };
         assert_eq!(serde_json::to_value(rejected).unwrap(), serde_json::json!({ "kind": "rejected", "reason": "x" }));
+    }
+
+    #[test]
+    fn reads_the_way_back_from_a_checkout() {
+        assert_eq!(parse_cloud_return("locallyuncensored://cloud/open?status=paid").unwrap(), "paid");
+        assert_eq!(parse_cloud_return("locallyuncensored://cloud/open?status=cancelled").unwrap(), "cancelled");
+        // What the web page builds (appReturnLink), with model and category.
+        assert_eq!(
+            parse_cloud_return("locallyuncensored://cloud/open?model=direct%2Fv-1.2&category=chat&status=paid").unwrap(),
+            "paid"
+        );
+        assert!(matches!(
+            parse_inbound("locallyuncensored://cloud/open?status=paid"),
+            Inbound::CloudReturn { ref status } if status == "paid"
+        ));
+        // The model link still goes its own way.
+        assert!(matches!(parse_inbound("locallyuncensored://open-model?repo=a/b"), Inbound::Model(_)));
+    }
+
+    #[test]
+    fn refuses_every_other_cloud_link() {
+        for raw in [
+            "locallyuncensored://cloud/open",
+            "locallyuncensored://cloud/open?status=",
+            "locallyuncensored://cloud/open?status=refunded",
+            "locallyuncensored://cloud/open?status=paid&status=paid",
+            "locallyuncensored://cloud/open?status=paid&token=abc",
+            "locallyuncensored://cloud/open?status=paid&next=https://evil.example",
+            "locallyuncensored://cloud/open?status=paid&category=admin",
+            "locallyuncensored://cloud/open?status=paid&model=a%20b",
+            "locallyuncensored://cloud/open?status=paid#x",
+            "locallyuncensored://cloud/buy?status=paid",
+            "locallyuncensored://cloud/open/../x?status=paid",
+            "locallyuncensored://user@cloud/open?status=paid",
+            "locallyuncensored://cloud:9/open?status=paid",
+            "lu://cloud/open?status=paid",
+        ] {
+            assert!(parse_cloud_return(raw).is_err(), "accepted {raw}");
+        }
+        assert!(matches!(parse_inbound("locallyuncensored://cloud/open?status=x"), Inbound::Rejected { .. }));
+        let cloud = Inbound::CloudReturn { status: "paid".into() };
+        assert_eq!(serde_json::to_value(cloud).unwrap(), serde_json::json!({ "kind": "cloudReturn", "status": "paid" }));
     }
 
     /// The scheme the code answers to is the scheme the bundles register.

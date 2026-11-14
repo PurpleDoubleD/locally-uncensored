@@ -23,6 +23,10 @@ export interface HfModelLink {
 export type HfLinkInbound =
   | { kind: 'model'; link: HfModelLink }
   | { kind: 'rejected'; reason: string }
+  /** The way back from a checkout on lu-labs.ai (3.1.0):
+   *  locallyuncensored://cloud/open?status=paid|cancelled. Says nothing about
+   *  the account; the gate's account check decides what is bought. */
+  | { kind: 'cloudReturn'; status: 'paid' | 'cancelled' }
 
 /** Hugging Face's rule for an owner and for a repository name. */
 function validNamePart(s: string): boolean {
@@ -58,6 +62,9 @@ export function readInbound(raw: unknown): HfLinkInbound | null {
     // never as markup, and cut short in case.
     const reason = typeof r.reason === 'string' && r.reason.length <= 200 ? r.reason : REJECTED_FALLBACK
     return { kind: 'rejected', reason }
+  }
+  if (r.kind === 'cloudReturn') {
+    return r.status === 'paid' || r.status === 'cancelled' ? { kind: 'cloudReturn', status: r.status } : null
   }
   if (r.kind !== 'model' || typeof r.repo !== 'string' || !isValidRepoId(r.repo)) return null
   const file = r.file == null ? null : r.file

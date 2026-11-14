@@ -6,6 +6,7 @@
 // new dependencies.
 
 import { CLOUD_BASE } from '../api/cloud/config'
+import { cloudLink } from './cloud-links'
 
 export const CREDITS_EXHAUSTED_EVENT = 'lu:credits-exhausted'
 
@@ -31,6 +32,11 @@ export type ExhaustedReason = 'credits' | 'video_budget' | 'trainings'
  * gegen einen lokalen Server nicht in die Live-Seite laeuft.
  */
 export const PRICING_URL = `${CLOUD_BASE}/pricing`
+
+/** The same page for the dialog's button, with where the click came from
+ *  (lib/cloud-links). The sentence in the transcript keeps the plain address:
+ *  it is read, not clicked, and a query string there is noise. */
+export const PRICING_LINK = cloudLink('/pricing', 'credits-empty')
 
 export function signalCreditsExhausted(reason: ExhaustedReason = 'credits'): void {
   if (typeof window !== 'undefined') {

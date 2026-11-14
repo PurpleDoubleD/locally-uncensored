@@ -35,13 +35,24 @@ export async function takeHfLink(): Promise<void> {
     store.reject(inbound.reason)
     return
   }
+  if (inbound.kind === 'cloudReturn') {
+    // Back from the checkout in the browser (funnel Nr. 11). The gate opens,
+    // re-checks the account on its own, and after a payment it starts on the
+    // sign in instead of the offer. An account that can use the cloud now
+    // flips straight over, as on every opening of the gate.
+    const ui = useUIStore.getState()
+    ui.setCloudGateReturn(inbound.status)
+    ui.setCloudGateOpen(true, 'checkout-return')
+    return
+  }
   const inCloud = useSettingsStore.getState().settings.appMode === 'cloud'
   store.offer(inbound.link, inCloud)
   if (!inCloud) openModelsForLink()
 }
 
 /**
- * The receiving end of `locallyuncensored://open-model` links. Mounted once in
+ * The receiving end of `locallyuncensored://open-model` links, and since 3.1.0
+ * of `locallyuncensored://cloud/open`, the way back from a checkout. Mounted once in
  * the app shell. It only routes: the question about the download itself is
  * asked in Models (HfLinkDialog). What it shows itself is the two cases that
  * never get there: a link that failed the check, and a link that arrives

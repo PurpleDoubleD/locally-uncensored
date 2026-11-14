@@ -58,7 +58,7 @@ export function CloudSwitch() {
         updateSettings({ appMode: 'local' })
         return
       case 'open-gate':
-        setCloudGateOpen(true)
+        setCloudGateOpen(true, 'switch')
         return
       case 'arm':
         setArmed(true)

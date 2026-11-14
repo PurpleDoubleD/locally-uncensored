@@ -3,7 +3,7 @@ import { useRunCredits } from './useRunCredits'
 import { meterState } from '../../../lib/render/credits-meter'
 import { Tooltip } from '../ui/Tooltip'
 import { openExternal } from '../../../api/backend'
-import { CLOUD_BASE } from '../../../api/cloud/config'
+import { cloudLink } from '../../../lib/cloud-links'
 import { cn } from '../ui/cn'
 import { HINWEIS_TEXT, PUNKT_FARBE } from '../../../lib/hinweis'
 
@@ -36,7 +36,7 @@ export function CreditsMeter() {
   // Zwischenton: es haelt den Lauf an. Regel in lib/hinweis.ts.
   const upsell = (label: string, tab?: 'credits') => (
     <button
-      onClick={() => void openExternal(`${CLOUD_BASE}/pricing${tab ? '?tab=credits' : ''}`)}
+      onClick={() => void openExternal(cloudLink(`/pricing${tab ? '?tab=credits' : ''}`, 'credits-meter'))}
       className={cn(
         't-control px-2 h-[var(--control-h-sm)] inline-flex items-center rounded-md',
         'bg-white/[0.04] hover:bg-white/[0.08] transition-colors',

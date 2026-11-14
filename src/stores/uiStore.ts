@@ -3,6 +3,7 @@ import { persist } from 'zustand/middleware'
 import { safeJSONStorage } from '../lib/storage-quota'
 import type { SettingsTab } from '../lib/settings-reset'
 import { visibleView } from '../lib/features'
+import type { CloudGateOpener } from '../lib/cloud-links'
 
 export type View = 'chat' | 'models' | 'settings' | 'create' | 'benchmark' | 'voice' | 'neuron'
 
@@ -184,6 +185,13 @@ interface UIState {
   /** CloudGateModal (login, plan, beta gate), opened by the header's
    *  Cloud switch when the cloud side isn't usable yet. */
   cloudGateOpen: boolean
+  /** Where the gate was opened from (funnel 3.1.0): rides along on the
+   *  gate's links as utm_content. Never persisted. */
+  cloudGateFrom: CloudGateOpener
+  /** A checkout in the browser came back through the app's link with a
+   *  payment (locallyuncensored://cloud/open?status=paid). The gate then opens
+   *  on the sign in, not on the sales panel. Never persisted. */
+  cloudGateReturn: 'paid' | 'cancelled' | null
   /** CloudTeaserModal, null = closed. */
   cloudTeaser: CloudTeaserTarget | null
   /** The Cloud sheet's link has just switched the Cloud features off. Create
@@ -246,7 +254,8 @@ interface UIState {
   clearSettingsFocus: () => void
   toggleSidebar: () => void
   setSidebarOpen: (open: boolean) => void
-  setCloudGateOpen: (open: boolean) => void
+  setCloudGateOpen: (open: boolean, from?: CloudGateOpener) => void
+  setCloudGateReturn: (status: 'paid' | 'cancelled' | null) => void
   setCloudTeaser: (target: CloudTeaserTarget | null) => void
   setCloudHiddenNotice: (shown: boolean) => void
   setPendingCloudModel: (name: string | null) => void
@@ -304,6 +313,8 @@ export const useUIStore = create<UIState>()(
       // scratch on every visit and the choice should survive a restart.
       sidebarOpen: false,
       cloudGateOpen: false,
+      cloudGateFrom: 'switch',
+      cloudGateReturn: null,
       cloudTeaser: null,
       cloudHiddenNotice: false,
       pendingCloudModel: null,
@@ -342,7 +353,8 @@ export const useUIStore = create<UIState>()(
       clearSettingsFocus: () => set({ settingsFocus: null }),
       toggleSidebar: () => set((state) => ({ sidebarOpen: !state.sidebarOpen })),
       setSidebarOpen: (open) => set({ sidebarOpen: open }),
-      setCloudGateOpen: (open) => set({ cloudGateOpen: open }),
+      setCloudGateOpen: (open, from = 'switch') => set(open ? { cloudGateOpen: true, cloudGateFrom: from } : { cloudGateOpen: false }),
+      setCloudGateReturn: (status) => set({ cloudGateReturn: status }),
       setCloudTeaser: (target) => set({ cloudTeaser: target }),
       setCloudHiddenNotice: (shown) => set({ cloudHiddenNotice: shown }),
       setPendingCloudModel: (name) => set({ pendingCloudModel: name }),

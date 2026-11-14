@@ -35,6 +35,7 @@ import { isRunning, formatElapsed, lastLog, type InstallerStatusResponse } from 
 import type { Step } from './wizard-steps'
 import type { OnboardingSkin } from './onboarding-skin'
 import type { InstallerFleet } from './use-installer-fleet'
+import { OnboardingCloudHint } from '../cloud/OnboardingCloudHint'
 
 interface ComfyStepProps {
   skin: OnboardingSkin
@@ -484,6 +485,9 @@ export function ComfyStep({ skin, fleet, step, setStep }: ComfyStepProps) {
               </button>
             </div>
           )}
+          {/* Funnel 3.1.0 (Nr. 14): a small card hears about LU Cloud here,
+              before the download, not after a slow first clip. */}
+          <OnboardingCloudHint />
         </div>
       )}
 

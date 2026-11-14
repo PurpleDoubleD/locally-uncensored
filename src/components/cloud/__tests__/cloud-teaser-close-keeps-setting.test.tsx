@@ -55,8 +55,8 @@ describe('closing the Cloud sheet', () => {
     expect(enabled()).toBe(true)
   })
 
-  it('"Get LU Cloud" opens the checkout and leaves the setting on', () => {
-    fireEvent.click(screen.getByText('Get LU Cloud'))
+  it('"Subscribe" opens the checkout and leaves the setting on', () => {
+    fireEvent.click(screen.getByTestId('buy-sub'))
     expect(openExternal).toHaveBeenCalledTimes(1)
     expect(open()).toBe(false)
     expect(enabled()).toBe(true)

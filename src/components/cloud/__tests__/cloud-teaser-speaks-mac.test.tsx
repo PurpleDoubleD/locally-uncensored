@@ -89,7 +89,7 @@ describe('on a Mac', () => {
     probe.card = 16
     probe.ram = 16
     await openSheet(UPSCALE)
-    fireEvent.click(screen.getByText('Get LU Cloud'))
+    fireEvent.click(screen.getByTestId('buy-sub'))
     expect(openExternal).toHaveBeenCalledTimes(1)
     expect(String(openExternal.mock.calls[0][0])).toContain('src=gpu-unknown')
   })
@@ -107,7 +107,7 @@ describe('WINDOWS CONTROL', () => {
     expect(screen.getByTestId('cloud-teaser-where').textContent).toMatch(
       /^Your GPU has 12 GB\. (Runs on your PC with downloaded models, or on LU Cloud where datacenter GPUs do the heavy lifting\.|Runs on LU Cloud, where datacenter GPUs do the heavy lifting and VRAM is not the limit\.)$/,
     )
-    fireEvent.click(screen.getByText('Get LU Cloud'))
+    fireEvent.click(screen.getByTestId('buy-sub'))
     expect(String(openExternal.mock.calls[0][0])).toContain('src=gpu12')
   })
 })
