@@ -22,6 +22,7 @@
 import { useChatStore } from '../stores/chatStore'
 import { previousRunOf, type AgentRunContext } from '../api/agent-context'
 import { taintLabel } from './run-taint'
+import { isPhoneTurn, PHONE_TURN_NO_CARD } from './remote-turn-caps'
 import type { Message } from '../types/chat'
 
 export const MAX_CARDS_PER_RUN = 3
@@ -82,6 +83,8 @@ export function checkSelfControl(run: AgentRunContext | undefined, ask: PolicyAs
   if (!run?.settingsCard) {
     return { ok: false, why: 'surface', reply: 'Error: LU can only be changed in a chat where the user sees the confirmation card. Nothing changed.' }
   }
+  // A turn the paired phone started: the card would wait at the computer.
+  if (isPhoneTurn(run.conversationId)) return { ok: false, why: 'surface', reply: PHONE_TURN_NO_CARD }
   const taintedBy = taintLabel(run)
   if (ask.strong && taintedBy) {
     return {

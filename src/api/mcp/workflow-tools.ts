@@ -20,6 +20,7 @@ import { v4 as uuid } from 'uuid'
 import type { ToolArgs } from './types'
 import type { AgentRunContext } from '../agent-context'
 import { backendCall } from '../backend'
+import { isPhoneTurn, PHONE_TURN_NO_CARD } from '../../lib/remote-turn-caps'
 import { startModelDownload } from '../discover'
 import { restartComfyForNewNodes } from '../comfy-restart'
 import { clearNodeCache } from '../comfyui-nodes'
@@ -229,6 +230,7 @@ export async function executeWorkflowInstall(args: ToolArgs, run?: AgentRunConte
   if (!id) return 'Error: id is missing. Use an id from workflow_find, checked with workflow_inspect. Nothing changed.'
   if (!hasComfy()) return NO_COMFY
   if (!run?.settingsCard) return NOT_HERE
+  if (isPhoneTurn(run.conversationId)) return PHONE_TURN_NO_CARD
   const c = candidateById(id)
   if (!c) return `Error: there is no workflow "${cleanName(id, 40)}" from this session. Call workflow_find first.`
 
@@ -378,6 +380,7 @@ export async function executeWorkflowAssign(args: ToolArgs, run?: AgentRunContex
   if (!rawModel) return 'Error: model is missing (a model file name as ComfyUI lists it). Nothing changed.'
   if (!hasComfy()) return NO_COMFY
   if (!run?.settingsCard) return NOT_HERE
+  if (isPhoneTurn(run.conversationId)) return PHONE_TURN_NO_CARD
   const verdict = checkSelfControl(run, { names: assignNames, strong: false, what: 'which workflow a model uses' })
   if (!verdict.ok) { audit(run, want, 'refused', verdict.why); return verdict.reply }
   const list = useWorkflowStore.getState().installedWorkflows

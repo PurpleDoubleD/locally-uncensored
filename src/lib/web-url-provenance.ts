@@ -19,6 +19,7 @@
 // catalog imports it, and the chat store pulls half the app in behind it.
 import type { AgentRunContext } from '../api/agent-context'
 import { isMobile } from './device-kind'
+import { isPhoneTurn } from './remote-turn-caps'
 
 const URL_IN_TEXT = /https?:\/\/[^\s<>"'`)\]}]+/gi
 /** Tools whose results are web content (their links were chosen by a page). */
@@ -169,7 +170,9 @@ export async function guardWebUrl(
   // No card can be drawn on the phone (its tool rows have none) or for a call
   // outside a chat run (a workflow step): there the model is told to ask, and
   // nothing waits for a click that cannot come.
-  if (isMobile() || !run) {
+  // A turn the paired phone started in a shared chat is the same case: the
+  // card would stand at the computer while the user waits at the phone.
+  if (isMobile() || !run || isPhoneTurn(convId)) {
     return `Error: ${url} was not given by the user and did not appear in a web result of this conversation, so it was not opened. Ask the user to send the link if they want it read.`
   }
   const { useWebUrlConfirmStore } = await import('../stores/webUrlConfirmStore')
