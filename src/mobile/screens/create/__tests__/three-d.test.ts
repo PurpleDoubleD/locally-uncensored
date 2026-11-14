@@ -118,10 +118,10 @@ describe('the catalog decides', () => {
   })
 
   it('a model says how many pictures it takes and whether it has a detail step', () => {
-    expect(threeDModelFacts(MESH_VIEWS)).toEqual({ maxViews: 4, hasDetail: true })
-    expect(threeDModelFacts(MESH_IMAGE)).toEqual({ maxViews: 1, hasDetail: true })
-    expect(threeDModelFacts(MESH_TEXT)).toEqual({ maxViews: 1, hasDetail: false })
-    expect(threeDModelFacts(undefined)).toEqual({ maxViews: 1, hasDetail: false })
+    expect(threeDModelFacts(MESH_VIEWS)).toEqual({ maxViews: 4, hasDetail: true, pictureFirst: false })
+    expect(threeDModelFacts(MESH_IMAGE)).toEqual({ maxViews: 1, hasDetail: true, pictureFirst: false })
+    expect(threeDModelFacts(MESH_TEXT)).toEqual({ maxViews: 1, hasDetail: false, pictureFirst: false })
+    expect(threeDModelFacts(undefined)).toEqual({ maxViews: 1, hasDetail: false, pictureFirst: false })
   })
 })
 

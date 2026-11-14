@@ -26,7 +26,7 @@ const SERVER_ONLY: Record<string, Record<string, string>> = {
   // web address the call named itself is fetched by the browser.
   'api/vram-handoff.ts': { url: 'an http(s) address the call named, never a file of the local image engine' },
   'lib/backend-detector.ts': { url: 'probes of local server ports' },
-  'hooks/useCloudCreate.ts': { 'vj.result_url': 'signed result URL of a cloud job', 'src.result_url': 'signed result URL of a cloud job' },
+  'hooks/useCloudCreate.ts': { 'vj.result_url': 'signed result URL of a cloud job', 'src.result_url': 'signed result URL of a cloud job', 'job.result_url!': 'signed result URL of a cloud job' },
   'components/create/experimental/PresetWorkshop.tsx': { 'fresh.result_url': 'signed result URL of a cloud job' },
   'components/chat/create/save-media.ts': { url: 'result URL of an order card, always a server file' },
   // The phone. None of the seven reads media; each sends a request to a server address the app builds.
