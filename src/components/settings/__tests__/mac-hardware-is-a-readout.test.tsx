@@ -105,7 +105,7 @@ describe('where the memory comes from', () => {
 
 describe('the section in Settings', () => {
   const flags = (gpuPicker: boolean): SettingsSectionFlags => ({
-    gpuPicker, builtinExpert: false, comfyui: gpuPicker, agentMode: true, agentWorkflows: true, mediaTimeouts: gpuPicker, chatTimeout: true,
+    gpuPicker, builtinExpert: false, comfyui: gpuPicker, agentMode: true, agentWorkflows: true, mediaTimeouts: gpuPicker, chatTimeout: true, watchers: true,
   })
 
   it('a Mac has a Hardware section, and it is not called a GPU picker', () => {

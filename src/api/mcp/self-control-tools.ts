@@ -70,7 +70,7 @@ function auditAction(run: AgentRunContext | undefined, key: string, title: strin
 }
 
 /** Policy, then the card. Null when the user said yes, else the reply. */
-async function confirmAction(
+export async function confirmAction(
   run: AgentRunContext | undefined,
   signal: AbortSignal | undefined,
   o: { key: string; title: string; details: string[]; strong: boolean; names: (t: string, strict: boolean) => boolean; what: string; riskNote?: string },

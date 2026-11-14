@@ -33,6 +33,7 @@ import { GoalBar } from './GoalBar'
 import { ChatNotices } from './ChatNotices'
 import { LocalLaneWaitLine } from './LocalLaneWaitLine'
 import { LoopBar } from './LoopBar'
+import { WatcherStrip } from './WatcherStrip'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { HowItWorks } from '../ui/HowItWorks'
 import { useModelStore } from '../../stores/modelStore'
@@ -770,6 +771,7 @@ export function CodexView() {
         <ChatNotices surface="code" />
         <LoopBar onStop={stopCodex} />
         <GoalBar />
+        <WatcherStrip />
         <LocalLaneWaitLine waiting={!!queuedForLocalLane} queuePosition={localLaneQueuePosition} />
 
         {/* Input */}

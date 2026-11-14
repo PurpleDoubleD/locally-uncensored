@@ -758,6 +758,17 @@ export async function backendCall<T = unknown>(
     remote_chats_sync: { path: "/local-api/remote-chats-sync", method: "POST" },
     remote_chats_event: { path: "/local-api/remote-chats-event", method: "POST" },
     remote_chats_reply: { path: "/local-api/remote-chats-reply", method: "POST" },
+    // Watchers (src-tauri/src/watchers.rs): the clock and the notification
+    // are Rust, so the dev server answers with the desktop-only stub.
+    watchers_list: { path: "/local-api/watchers-list" },
+    watchers_create: { path: "/local-api/watchers-create", method: "POST" },
+    watchers_update: { path: "/local-api/watchers-update", method: "POST" },
+    watchers_delete: { path: "/local-api/watchers-delete", method: "POST" },
+    watchers_run_now: { path: "/local-api/watchers-run-now", method: "POST" },
+    watchers_finished: { path: "/local-api/watchers-finished", method: "POST" },
+    watchers_runner_ready: { path: "/local-api/watchers-runner-ready", method: "POST" },
+    watchers_dismiss_hint: { path: "/local-api/watchers-dismiss-hint", method: "POST" },
+    watchers_notify: { path: "/local-api/watchers-notify", method: "POST" },
     // Device tests only (Cargo feature e2e-remote); other builds have no such command.
     remote_e2e_mode: { path: "/local-api/remote-e2e-mode" },
     remote_create_cancel: { path: "/local-api/remote-create-cancel", method: "POST" },

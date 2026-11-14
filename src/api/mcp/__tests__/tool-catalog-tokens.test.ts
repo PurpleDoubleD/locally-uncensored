@@ -148,8 +148,13 @@ const CODING_TOKEN_CEILING = 1730
 // integ/310: C60, C60-S5, C59 und P-L (web_research) zusammen, gemessen
 // 25.032 Zeichen. Token-Decke geschaetzt im selben Verhaeltnis wie oben
 // (5040 / 23200).
-const FULL_CHAR_CEILING = 25080
-const FULL_TOKEN_CEILING = 5450
+// Waechter: +3.293 Zeichen fuer watcher_create/_list/_update/_delete im
+// VOLLEN Katalog (25.032 -> 28.325, Beschreibungen schon auf Stichworte
+// gekuerzt). Der codierende Zug bleibt gleich: die vier stehen hinter ihrem
+// Tor (WATCHER_GATE_WORDS) und fahren nur auf einer Nachricht ueber eine
+// spaetere Zeit oder eine Wiederholung mit. Token-Decke im selben Verhaeltnis.
+const FULL_CHAR_CEILING = 28380
+const FULL_TOKEN_CEILING = 6170
 
 describe('the coding step carries a catalog the diet actually shrank', () => {
   it('the gate really is what a plain coding turn gets', () => {

@@ -5,6 +5,7 @@
 // the stores behind api/mcp/settings-tools.ts and self-control-tools.ts.
 import { catalogWords } from './settings-catalog'
 import { WORKFLOW_TOOL_NAMES, WORKFLOW_GATE_WORDS } from './workflow-tool-names'
+import { isWatcherToolName, asksAboutWatchers } from './watcher-tool-names'
 
 export const GET_SETTINGS = 'get_settings'
 export const SET_SETTING = 'set_setting'
@@ -35,8 +36,11 @@ export function isSettingsToolName(name: string): boolean {
   return name === GET_SETTINGS || name === SET_SETTING
 }
 
+/** Also the watcher tools (lib/watcher-tool-names.ts): they change LU too,
+ *  wait for the same card and are kept from the same surfaces. They have
+ *  their own gate, so they are not in SELF_CONTROL_TOOL_NAMES. */
 export function isSelfControlToolName(name: string): boolean {
-  return (SELF_CONTROL_TOOL_NAMES as readonly string[]).includes(name)
+  return (SELF_CONTROL_TOOL_NAMES as readonly string[]).includes(name) || isWatcherToolName(name)
 }
 
 /** The one line the system prompt gets on a turn that carries the pair. */
@@ -108,7 +112,10 @@ export function asksAboutSelfControl(userMessage: string): boolean {
  * Agent tab does with withCreateTools. Off such a turn the list is unchanged.
  */
 export function withSelfControlTools<T extends { name: string }>(chosen: T[], all: T[], userMessage: string): T[] {
-  if (!asksAboutSelfControl(userMessage)) return chosen
-  const missing = all.filter((t) => isSelfControlToolName(t.name) && !chosen.some((c) => c.name === t.name))
+  const settings = asksAboutSelfControl(userMessage)
+  const watchers = asksAboutWatchers(userMessage)
+  if (!settings && !watchers) return chosen
+  const wanted = (n: string) => (isWatcherToolName(n) ? watchers : settings && isSelfControlToolName(n))
+  const missing = all.filter((t) => wanted(t.name) && !chosen.some((c) => c.name === t.name))
   return missing.length ? [...chosen, ...missing] : chosen
 }

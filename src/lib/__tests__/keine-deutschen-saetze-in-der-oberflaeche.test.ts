@@ -68,6 +68,7 @@ const DEUTSCH_MIT_GRUND: Record<string, string> = {
   'lib/explicit-search.ts': 'Deutsche Suchauftraege, gegen die getippte Saetze gelesen werden.',
   'lib/settings-tool-names.ts': 'Deutsche Wendungen fuer LUs Aussehen, gegen die getippte Saetze gelesen werden (C60). Nichts davon wird angezeigt.',
   'lib/session-search.ts': 'Deutsche Fuellwoerter, die aus einer getippten Suchanfrage fallen.',
+  'lib/watcher-tool-names.ts': 'Deutsche Zeit- und Wiederholungswendungen (Waechter), gegen die getippte Saetze gelesen werden. Nichts davon wird angezeigt.',
 }
 
 /** Jede .ts und .tsx unter den Ordnern, ohne die Testbaeume. */

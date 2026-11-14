@@ -67,6 +67,8 @@ export interface SettingsSectionFlags {
   /** Issue 177: the chat reply timeout, for local backends only, so not in
    *  cloud mode. */
   chatTimeout: boolean
+  /** `isTauri()`: watchers run in the desktop app only. */
+  watchers: boolean
 }
 
 /**
@@ -110,6 +112,8 @@ export function sectionsFor(tab: SettingsTab, flags: SettingsSectionFlags): stri
         ...(flags.agentMode ? ['Agent Permissions'] : []),
         // C60 (3.1.0): what the agent changed in LU itself, with Undo.
         ...(flags.agentMode ? ['Changes by the agent'] : []),
+        // Watchers: the notification when one ran (desktop app only).
+        ...(flags.agentMode && flags.watchers ? ['Watchers'] : []),
         // Die Kappen fuer delegierte Agenten. Sie standen bis zum
         // 03.09.2026 unter General → Generation, zwischen Temperatur und
         // Auto-Compact; eine Persona suchte sie beim Agenten und fand sie

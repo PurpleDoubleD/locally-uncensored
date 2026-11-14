@@ -62,7 +62,10 @@ describe('AGENT_TOOL_DEFS', () => {
     // sie nur mit, wenn sie gefragt sind: memory und session_search ueber ihre
     // Woerter (TOOL_GROUPS, GATE_KEYWORDS), die Skill-Werkzeuge ueber
     // withSkillTools, wenn es Skills gibt bzw. ein grosses Modell vorschlagen darf.
-    expect(AGENT_TOOL_DEFS).toHaveLength(33 + (browserExistsHere() ? BROWSER_TOOL_NAMES.length : 0))
+    // Waechter: +4, watcher_create/_list/_update/_delete. Kein Werkzeug plant
+    // einen Lauf fuer spaeter; sie stehen hinter ihrem eigenen Tor
+    // (WATCHER_GATE_WORDS) und fragen mit der Karte wie set_setting.
+    expect(AGENT_TOOL_DEFS).toHaveLength(37 + (browserExistsHere() ? BROWSER_TOOL_NAMES.length : 0))
   })
 
   const expectedTools = [
@@ -128,6 +131,7 @@ describe('AGENT_TOOL_DEFS', () => {
       ...(browserExistsHere() ? [...BROWSER_TOOL_NAMES] : []),
       'check_tasks', 'get_settings', 'lu_download', 'lu_models', 'lu_open_settings', 'lu_service', 'memory', 'message_agent',
       'session_search', 'set_setting', 'set_settings', 'skill_save', 'skill_view', 'todo_write', 'web_fetch', 'web_research', 'web_search',
+      'watcher_create', 'watcher_delete', 'watcher_list', 'watcher_update',
       'workflow_assign', 'workflow_find', 'workflow_inspect', 'workflow_install',
     ].sort())
   })

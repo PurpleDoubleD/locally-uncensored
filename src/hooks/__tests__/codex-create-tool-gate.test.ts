@@ -81,7 +81,9 @@ describe('a plain coding turn does not carry the generators', () => {
     // C60-S5: dazu die vier Workflow-Werkzeuge, zusammen achtzehn.
     // C59 A6–A8: +4 (memory, session_search, skill_view, skill_save), on demand only.
     // Zusammen mit C60 und C60-S5: zweiundzwanzig.
-    expect(before.length - after.length).toBe(22)
+    // Waechter: +4 (watcher_create/_list/_update/_delete) hinter ihrem eigenen
+    // Tor, zusammen sechsundzwanzig.
+    expect(before.length - after.length).toBe(26)
     expect(before.filter((n) => !after.includes(n)).sort()).toEqual([...GATE_OPENING_TOOLS].sort())
   })
 
@@ -267,7 +269,9 @@ describe('a run that discovers halfway through that it needs a picture', () => {
       // C60-S5
       'workflow_find', 'workflow_inspect', 'workflow_install', 'workflow_assign',
       // C59 A6–A8
-      'memory', 'session_search', 'skill_view', 'skill_save']
+      'memory', 'session_search', 'skill_view', 'skill_save',
+      // Waechter
+      'watcher_create', 'watcher_list', 'watcher_update', 'watcher_delete']
     for (const n of TOR) expect(isGatedTool(n), n).toBe(true)
     for (const n of ['file_read', 'file_edit', 'shell_execute', 'todo_write', 'web_search']) {
       expect(isGatedTool(n), n).toBe(false)

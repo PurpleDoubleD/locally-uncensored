@@ -60,6 +60,9 @@ function App() {
       // Shared chats: the phone's actions arrive as an event and run in this
       // window (lib/remote-chats-bridge.ts).
       void import('./lib/remote-chats-start').then(({ startRemoteChatsBridge }) => startRemoteChatsBridge()).catch(() => {})
+      // Watchers: the clock in Rust says when, the run happens in this window
+      // (lib/watchers/runner.ts).
+      void import('./lib/watchers/runner').then(({ startWatcherRunner }) => startWatcherRunner()).catch(() => {})
       // Device tests only: a build with the Cargo feature `e2e-remote` and
       // its environment says so; every other build answers no.
       void import('./lib/remote-e2e').then(({ startRemoteForDeviceTests }) => startRemoteForDeviceTests()).catch(() => {})

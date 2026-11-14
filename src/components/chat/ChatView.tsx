@@ -31,6 +31,7 @@ import { useConversationModelHint } from './ConversationModelNote'
 import { GoalBar } from './GoalBar'
 import { PlanBar } from './PlanBar'
 import { LoopBar } from './LoopBar'
+import { WatcherStrip } from './WatcherStrip'
 import { GroupCostHint } from './GroupCostHint'
 import { GroupRoundBar } from './GroupRoundBar'
 import { MemoryDebugToggle } from './MemoryDebugPanel'
@@ -821,6 +822,8 @@ export function ChatView() {
               lokalen Spur ist ein Hinweis und war vorher im Kasten. */}
           <LoopBar onStop={stopGeneration} />
           <GoalBar />
+          {/* Watchers: one thin line, a click shows the list (WatcherStrip.tsx). */}
+          <WatcherStrip />
           <LocalLaneWaitLine
             waiting={!!queuedForLocalLane}
             queuePosition={localLaneQueuePosition}

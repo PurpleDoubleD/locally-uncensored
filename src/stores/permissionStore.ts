@@ -72,8 +72,12 @@ export const usePermissionStore = create<PermissionState>()(
       },
 
       getEffectivePermissionForTool: (toolName, toolCategory, conversationId?) => {
-        if (turnCaps(conversationId)?.[toolCategory] === 'blocked') return 'blocked'
+        const cap = turnCaps(conversationId)?.[toolCategory]
+        if (cap === 'blocked') return 'blocked'
         const perTool = get().perToolOverrides[toolName]
+        // A watcher's cap says 'auto' for what the user allowed when they
+        // made it; a tool the user blocked by name stays blocked.
+        if (cap && perTool !== 'blocked') return cap
         if (perTool) return perTool
         const categoryMap = get().getEffectivePermissions(conversationId)
         return categoryMap[toolCategory]

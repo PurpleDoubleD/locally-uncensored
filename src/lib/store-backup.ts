@@ -47,6 +47,8 @@ export const STORE_KEYS = [
   // persona (3.1.0, C58/C42). Also what keeps those background files alive:
   // the attachment collector keeps every reference it finds in the backup.
   'lu-chat-look',
+  // Watchers: the three notification switches (Settings → Agent → Watchers).
+  'lu-watcher-settings',
   'locally-uncensored-agent-goal',
   // C59 A7: the skills the user saved, and the proposals waiting for them.
   'lu-skills',

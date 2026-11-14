@@ -22,6 +22,7 @@
 import { useChatStore } from '../stores/chatStore'
 import { previousRunOf, type AgentRunContext } from '../api/agent-context'
 import { taintLabel } from './run-taint'
+import { isWatcherConversation } from '../stores/watcherStore'
 import type { Message } from '../types/chat'
 
 export const MAX_CARDS_PER_RUN = 3
@@ -81,6 +82,11 @@ export interface PolicyAsk {
 export function checkSelfControl(run: AgentRunContext | undefined, ask: PolicyAsk): PolicyVerdict {
   if (!run?.settingsCard) {
     return { ok: false, why: 'surface', reply: 'Error: LU can only be changed in a chat where the user sees the confirmation card. Nothing changed.' }
+  }
+  // A watcher's run has nobody in front of the card, and a watcher that made
+  // watchers would be a schedule that grows by itself.
+  if (isWatcherConversation(run.conversationId)) {
+    return { ok: false, why: 'surface', reply: 'Refused: this is a watcher\'s run. It cannot change LU or make, change or delete watchers. Nothing changed.' }
   }
   const taintedBy = taintLabel(run)
   if (ask.strong && taintedBy) {

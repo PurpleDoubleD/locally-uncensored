@@ -11,6 +11,7 @@ import { runSettingsReset } from '../../lib/run-settings-reset'
 import { armedScopeFor, type ResetArm, type ResetArmScope } from '../../lib/reset-arming'
 import { sectionAnchorId, sectionsFor, type SettingsSectionFlags } from './settings-nav'
 import { AgentChangeLog } from './AgentChangeLog'
+import { WatcherSettings } from './WatcherSettings'
 import { ChatReplyTimeoutSettings } from './ChatReplyTimeoutSettings'
 import { CompactThresholdInput } from './CompactThresholdInput'
 import { HowItWorks } from '../ui/HowItWorks'
@@ -1846,6 +1847,7 @@ export function SettingsPage() {
     // C71: the Mac's image engine goes by the Image timeout too.
     mediaTimeouts: settings.appMode !== 'cloud',
     chatTimeout: settings.appMode !== 'cloud',
+    watchers: isTauri(),
   }
 
   return (
@@ -2487,6 +2489,13 @@ export function SettingsPage() {
             <Section title="Changes by the agent">
               {/* C60 (3.1.0): what the agent asked to change in LU, the answer, Undo. */}
               <AgentChangeLog />
+            </Section>
+          )}
+
+          {FEATURE_FLAGS.AGENT_MODE && isTauri() && (
+            <Section title="Watchers">
+              {/* Scheduled turns: only the notification of the system. */}
+              <WatcherSettings />
             </Section>
           )}
 

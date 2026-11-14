@@ -158,6 +158,10 @@ const GATE_KEYWORDS: Record<string, readonly string[]> = {
   // C60: all self-control tools (settings, models, services, downloads) on
   // the wider gate generated from the settings catalog.
   ...Object.fromEntries(SELF_CONTROL_TOOL_NAMES.map((n) => [n, settingsGateWords()])),
+  // Watchers: only on a message about a later time or a repeat. A clock
+  // time alone ("um 18:00") is no word; Agent and chat add the tools by the
+  // full check (asksAboutWatchers), Code by withSelfControlTools.
+  ...Object.fromEntries(WATCHER_TOOL_NAMES.map((n) => [n, WATCHER_GATE_WORDS])),
 }
 
 /**
@@ -271,6 +275,10 @@ const TOOL_GROUPS: ToolGroup[] = [
     keywords: settingsGateWords(),
     tools: [...SELF_CONTROL_TOOL_NAMES],
   },
+  {
+    keywords: [...WATCHER_GATE_WORDS],
+    tools: [...WATCHER_TOOL_NAMES],
+  },
 ]
 
 // Tools that should always be available regardless of the prompt — they're
@@ -320,6 +328,7 @@ export const EMBEDDING_ROUTING_THRESHOLD = 15
 import type { EmbeddingFn } from '../api/agents/embedding-router'
 import { REA_SERVER_ID, reaToolsFor } from './plugins/rea-tools'
 import { SELF_CONTROL_TOOL_NAMES, settingsGateWords } from './settings-tool-names'
+import { WATCHER_TOOL_NAMES, WATCHER_GATE_WORDS } from './watcher-tool-names'
 import { selectToolsByEmbedding } from '../api/agents/embedding-router'
 import { isMobile } from './device-kind'
 
