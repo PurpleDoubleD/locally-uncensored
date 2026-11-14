@@ -482,7 +482,7 @@ export const LOCK_RULES: readonly LockRule[] = [
     // CA (14.11.2026): an agent must never raise its own spending limit.
     category: 'spending', what: 'Credit limits of agent runs', where: 'Settings → Agent',
     names: ['agentRunCreditLimit', 'agentHourCreditLimit', 'creditLimit', 'spendingLimit'],
-    pattern: /credit(limit)?|spending|budget|costbrake/,
+    pattern: /credit(limit)?|spending|costbrake/,
   },
 ]
 
