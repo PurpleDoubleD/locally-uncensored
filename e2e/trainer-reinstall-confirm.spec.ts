@@ -2,6 +2,7 @@ import { resolve } from 'node:path'
 import { test, expect } from '@playwright/test'
 import { tauriMockInit, DEFAULT_ASSISTANT_REPLY, DEFAULT_MODEL_NAME } from './support/tauri-mock'
 import { routeCloud, seedOnboardingDone, cloudSwitch } from './support/cloud-mock'
+import { openCharacterTraining } from './support/character-hub'
 
 /**
  * Z5 (box-gruen/b BERICHT.md, Zusatzpunkt Z5, e2e Windows 18.09.2026): auf
@@ -69,7 +70,7 @@ async function gotoReadyTrainer(
   await page.goto('/')
   await expect(cloudSwitch(page)).toBeVisible()
   await page.getByRole('button', { name: /^Create$/ }).click()
-  await page.getByRole('radio', { name: 'Character Studio', exact: true }).click()
+  await openCharacterTraining(page)
 }
 
 async function installCalls(page: import('@playwright/test').Page): Promise<unknown[]> {

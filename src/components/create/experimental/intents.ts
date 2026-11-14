@@ -5,6 +5,7 @@ import {
 import type { LucideIcon } from 'lucide-react'
 import type { CreateBackend, CreateIntent } from '../../../stores/createStore'
 import { MUSIC_PLACEHOLDER } from '../../../lib/render/music-ui'
+import { isHubIntent } from '../../../lib/create/character-hub'
 
 export interface IntentMeta {
   id: CreateIntent
@@ -334,4 +335,38 @@ export function isIntentAvailable(id: CreateIntent, backend: CreateBackend, mlxH
   const meta = INTENT_MAP[id]
   return visibleIntents(backend, mlxHost, true, mlxAnimate, mlxEdit, mlxUpscale, mlxMusic, mlxMotion, mlxTalk).includes(meta)
     && !isIntentLocked(meta, backend, mlxHost, mlxAnimate, mlxEdit, mlxUpscale, mlxMusic, mlxMotion, mlxTalk)
+}
+
+/**
+ * The pill of the Character area (3.1.0 part B): one pill for Character
+ * Studio, Talking Character, Motion Control and Swap Character. It carries the
+ * id of the first of them, so the bar keeps its order (after Animate).
+ */
+export const HUB_PILL: IntentMeta = {
+  ...INTENT_MAP.character,
+  label: 'Character',
+  short: 'Character',
+}
+
+export interface PillEntry {
+  meta: IntentMeta
+  /** The pill of the Character area. */
+  hub: boolean
+}
+
+/**
+ * The pills of the bar: the visible intents, with the four intents of the
+ * Character area folded into one pill where the first of them stood. The
+ * area itself shows which of its actions are local, locked or cloud.
+ */
+export function pillEntries(visible: readonly IntentMeta[]): PillEntry[] {
+  const out: PillEntry[] = []
+  let hubDone = false
+  for (const meta of visible) {
+    if (!isHubIntent(meta.id)) { out.push({ meta, hub: false }); continue }
+    if (hubDone) continue
+    hubDone = true
+    out.push({ meta: HUB_PILL, hub: true })
+  }
+  return out
 }

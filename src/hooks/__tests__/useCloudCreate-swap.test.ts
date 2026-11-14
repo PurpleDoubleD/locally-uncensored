@@ -102,6 +102,7 @@ import { useCloudCreate } from '../useCloudCreate'
 import { swapKeyOf } from '../../lib/create/swap-frame'
 import { useCreateStore } from '../../stores/createStore'
 import { useCloudCatalogStore } from '../../stores/cloudCatalogStore'
+import { useCharacterHubReleaseStore } from '../../lib/create/character-hub-release'
 import { neuerServer } from '../../lib/render/__tests__/fixtures/test-catalogs'
 import { SWAP_CONSENT_MISSING } from '../../lib/render/swap'
 
@@ -109,6 +110,8 @@ const FOTO = { filename: 'face.png', url: 'data:image/png;base64,AA', width: 512
 const CLIP = { name: 'dance.mp4', url: 'blob:dance', blob: new Blob(['x'], { type: 'video/mp4' }) }
 
 beforeEach(() => {
+  // An account the server released the Character area for (features.characterHub).
+  useCharacterHubReleaseStore.setState({ fromMe: true, fromCatalog: null })
   submitted.length = 0
   hochgeladen.length = 0
   hoisted.studioQuote.mockClear()

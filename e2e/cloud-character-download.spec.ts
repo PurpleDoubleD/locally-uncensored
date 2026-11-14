@@ -1,6 +1,7 @@
 import { test, expect, type Page } from '@playwright/test'
 import { tauriMockInit, DEFAULT_ASSISTANT_REPLY, DEFAULT_MODEL_NAME } from './support/tauri-mock'
 import { routeCloud, seedOnboardingDone, signInViaGate, cloudSwitch } from './support/cloud-mock'
+import { openCharacterHub } from './support/character-hub'
 
 /**
  * A trained cloud character can be saved as a file (10.10.2026).
@@ -77,9 +78,13 @@ async function boot(page: Page, answer: Answer) {
   await signInViaGate(page)
   await expect(cloudSwitch(page)).toBeChecked({ timeout: 20_000 })
   await page.getByRole('button', { name: /^Create$/ }).click()
-  await page.getByRole('radio', { name: /Character Studio/i }).click()
-  await page.getByRole('radio', { name: 'Use character' }).click()
-  await expect(page.getByText('Anna Müller')).toBeVisible({ timeout: 15_000 })
+  // The Character area: the character in step 1, Image in step 2, its file
+  // actions under More options.
+  await openCharacterHub(page)
+  await page.getByRole('button', { name: /Anna Müller/ }).click({ timeout: 15_000 })
+  await page.getByRole('radio', { name: 'Character Studio', exact: true }).click()
+  await page.getByRole('button', { name: 'More options' }).click()
+  await expect(page.locator('[data-character-file-actions]')).toContainText('Anna Müller', { timeout: 15_000 })
   return { fileAsked: () => fileAsked }
 }
 

@@ -2,6 +2,9 @@
 /**
  * D6 (3.0.7): ein trainierter lokaler Charakter laesst sich loeschen.
  *
+ * Seit 3.1.0 Teil B steht der Knopf unter "More options" des Bereichs
+ * Character, Aktion Image, fuer den in Schritt 1 gewaehlten Charakter.
+ *
  * Create, Character, Use character zeigt die lokalen Charaktere aus
  * `models/loras` (`char_<name>_zimage.safetensors`). Die Cloud-Liste hatte
  * einen Papierkorb-Knopf, die lokale nicht: wer einen misslungenen Charakter
@@ -34,8 +37,16 @@ vi.mock('../../../../api/comfyui', () => ({
 }))
 vi.mock('../../../../api/cloud/loras', () => ({ listLoras: vi.fn(async () => []), deleteLora: vi.fn() }))
 
-import { SpecialControls } from '../SpecialIntentControls'
+import { SpecialMore } from '../SpecialIntentControls'
 import { useCreateStore } from '../../../../stores/createStore'
+import { listLocalCharacters, characterFromLora } from '../../../../lib/characters'
+import { hubFromLocal } from '../../../../lib/create/character-hub'
+
+/** The character picked in step 1, and its More options. */
+function showMore(file: string) {
+  useCreateStore.setState({ hubCharacter: hubFromLocal(characterFromLora(file)!) })
+  return render(<SpecialMore intent="character" />)
+}
 
 const ANNA = 'char_anna_zimage.safetensors'
 
@@ -53,23 +64,27 @@ beforeEach(() => {
   })
 })
 
-async function deleteButtons() {
-  await screen.findByText('anna')
-  return screen.getAllByTestId('local-character-delete')
+async function deleteButton(file = ANNA) {
+  showMore(file)
+  return screen.findByTestId('local-character-delete')
 }
 
 describe('ein lokaler Charakter laesst sich loeschen', () => {
-  it('jeder lokale Charakter hat einen Loeschknopf, die fremde LoRA nicht', async () => {
-    render(<SpecialControls intent="character" />)
-    const buttons = await deleteButtons()
-    expect(buttons).toHaveLength(2)
-    expect(buttons[0].getAttribute('aria-label')).toBe('Delete character anna')
-    expect(buttons[1].getAttribute('aria-label')).toBe('Delete character bob')
+  it('jeder lokale Charakter hat einen Loeschknopf, die fremde LoRA ist keiner', async () => {
+    const refs = await listLocalCharacters()
+    expect(refs.map((r) => r.name)).toEqual(['anna', 'bob'])
+    const labels: (string | null)[] = []
+    for (const ref of refs) {
+      useCreateStore.setState({ hubCharacter: hubFromLocal(ref) })
+      const view = render(<SpecialMore intent="character" />)
+      labels.push((await screen.findByTestId('local-character-delete')).getAttribute('aria-label'))
+      view.unmount()
+    }
+    expect(labels).toEqual(['Delete character anna', 'Delete character bob'])
   })
 
   it('der Knopf fragt erst nach, Abbrechen loescht nichts', async () => {
-    render(<SpecialControls intent="character" />)
-    fireEvent.click((await deleteButtons())[0])
+    fireEvent.click(await deleteButton())
     expect(screen.getByText(/Recycle Bin, so you can put it back/)).toBeTruthy()
     expect(backendCall).not.toHaveBeenCalled()
     fireEvent.click(screen.getByText('Cancel'))
@@ -79,9 +94,7 @@ describe('ein lokaler Charakter laesst sich loeschen', () => {
   })
 
   it('bestaetigt geht die Datei in den Papierkorb, Auswahl und LoRA-Haken sind los, die Liste wird neu gelesen', async () => {
-    render(<SpecialControls intent="character" />)
-    fireEvent.click((await deleteButtons())[0])
-    const before = getLoraModels.mock.calls.length
+    fireEvent.click(await deleteButton())
     fireEvent.click(screen.getByTestId('local-character-delete-confirm'))
 
     await waitFor(() => expect(useCreateStore.getState().charactersVersion).toBe(1))
@@ -92,12 +105,14 @@ describe('ein lokaler Charakter laesst sich loeschen', () => {
     expect(s.selectedCharacter).toBeNull()
     expect(s.selectedLoras.map((l) => l.name)).toEqual(['style.safetensors'])
     expect(refreshComfyModels).toHaveBeenCalled()
-    await waitFor(() => expect(getLoraModels.mock.calls.length).toBeGreaterThan(before))
+    // The list of step 1 reads the folder again (charactersVersion), and the
+    // area goes back to it: the character is gone.
+    expect(s.hubCharacter).toBeNull()
+    expect(s.hubStep).toBe('who')
   })
 
   it('ein Charakter im Unterordner wird mit seinem vollen Namen geloescht', async () => {
-    render(<SpecialControls intent="character" />)
-    fireEvent.click((await deleteButtons())[1])
+    fireEvent.click(await deleteButton('chars/char_bob_zimage.safetensors'))
     fireEvent.click(screen.getByTestId('local-character-delete-confirm'))
     await waitFor(() => expect(backendCall).toHaveBeenCalledTimes(1))
     expect(backendCall.mock.calls[0][1]).toMatchObject({ filename: 'chars/char_bob_zimage.safetensors', trash: true })
@@ -108,8 +123,7 @@ describe('ein lokaler Charakter laesst sich loeschen', () => {
 
   it('ein Fehler wird gezeigt, die Auswahl bleibt stehen', async () => {
     backendCall.mockImplementationOnce(async () => { throw new Error('Could not move char_anna_zimage.safetensors to the Recycle Bin: busy') })
-    render(<SpecialControls intent="character" />)
-    fireEvent.click((await deleteButtons())[0])
+    fireEvent.click(await deleteButton())
     fireEvent.click(screen.getByTestId('local-character-delete-confirm'))
     expect(await screen.findByText(/Could not move char_anna_zimage.safetensors/)).toBeTruthy()
     const s = useCreateStore.getState()

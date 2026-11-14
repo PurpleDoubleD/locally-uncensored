@@ -2,6 +2,7 @@ import { test, expect, type Page } from '@playwright/test'
 import { tauriMockInit, DEFAULT_ASSISTANT_REPLY, DEFAULT_MODEL_NAME, type TauriMockOptions } from './support/tauri-mock'
 import { routeCloud, seedOnboardingDone, cloudSwitch } from './support/cloud-mock'
 import { mlxCalls, comfyCalls, requireCall } from './support/recorded'
+import { openCharacterAction, openCharacterWhat } from './support/character-hub'
 
 /**
  * Talking Character on a Mac (3.0.8): LTX-2.3 4-bit turns a portrait and a
@@ -54,12 +55,14 @@ async function bootLocalCreate(page: Page, opts: TauriMockOptions) {
 
 test('mac local: without LTX-2.3 4-bit Talking Character stays the cloud teaser', async ({ page }) => {
   await bootLocalCreate(page, { ...MAC_OPTS, mlx: { installedVideos: ['wan21-t2v-1.3b'] } })
+  await openCharacterWhat(page)
   await expect(page.getByRole('radio', { name: 'Talking Character, runs on LU Cloud' })).toBeVisible({ timeout: 15_000 })
   await expect(page.getByRole('radio', { name: 'Talking Character', exact: true })).toHaveCount(0)
 })
 
 test('mac local: Talking Character offers its own download and runs it on the video slot', async ({ page }) => {
   await bootLocalCreate(page, { ...MAC_OPTS, mlx: { ltx2EngineInstalled: true, installedVideos: ['ltx-2.3-q4'] } })
+  await openCharacterWhat(page)
   const tab = page.getByRole('radio', { name: 'Talking Character', exact: true })
   await expect(tab).toBeVisible({ timeout: 15_000 })
   await tab.click()
@@ -84,7 +87,7 @@ test('mac local: a portrait and a voice go to the a2v run of LTX-2.3 4-bit, neve
     ...MAC_OPTS,
     mlx: { ltx2EngineInstalled: true, installedVideos: ['wan21-t2v-1.3b', 'ltx-2.3-q4'], talkingVideos: ['ltx-2.3-q4'] },
   })
-  await page.getByRole('radio', { name: 'Talking Character', exact: true }).click({ timeout: 15_000 })
+  await openCharacterAction(page, 'Talking Character')
   await expect(page.getByTestId('mac-talking-part')).toHaveCount(0)
   // No prompt field on this tab, and no clip to resync: a portrait and a voice.
   await expect(page.getByText('Add portrait')).toBeVisible()

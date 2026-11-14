@@ -10,14 +10,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { usePopoverPlatz } from '../../../hooks/usePopoverPlatz'
 import { AnimatePresence, motion } from 'framer-motion'
 import {
-  AudioLines, Download, Film, ImagePlus, Info, Loader2, Mic, Music2, Trash2, Upload, Wand2, X,
+  AudioLines, ChevronDown, Download, Film, Info, Loader2, Mic, Music2, Trash2, Upload, Wand2, X,
 } from 'lucide-react'
 import { useCreateStore, type CreateIntent, type GalleryItem, type SwapFigure } from '../../../stores/createStore'
 import { useCloudCatalogStore, cloudModelById, lengthCredits, lengthPrice, modelForOp } from '../../../stores/cloudCatalogStore'
-import { listLoras, deleteLora, downloadLora, type CloudLora, type LoraDownloadProgress } from '../../../api/cloud/loras'
+import { deleteLora, downloadLora, type CloudLora, type LoraDownloadProgress } from '../../../api/cloud/loras'
 import { errorText } from '../../../types/json-guards'
 import {
-  characterTrainerStatus, deleteLocalCharacter, installCharacterTrainer, parseLocalCharacterLora,
+  characterTrainerStatus, deleteLocalCharacter, installCharacterTrainer,
   TRAINER_BASE_FILES, baseDownloadRunning, baseDownloadPercent, missingTrainerBases, missingBasesLine, aboutSize, baseBytes,
   baseStartFailedNote, basesStillMissingNote, type TrainerBaseFile, type TrainerStatus,
 } from '../../../api/trainer'
@@ -30,7 +30,7 @@ import { openMlxLoraFolder } from '../../../api/mlx-loras'
 import { getMacTrainStatus, macTrainMissing, macTrainNote, type MacTrainStatus } from '../../../api/mlx-train'
 import { useUIStore } from '../../../stores/uiStore'
 import { useModelStore } from '../../../stores/modelStore'
-import { characterLoraFile, listLocalCharacters, type CharacterRef } from '../../../lib/characters'
+import { characterLoraFile } from '../../../lib/characters'
 import { isWindows, isMacOS } from '../../../api/backend'
 import { LOCAL_MUSIC_TEXT, SECONDS_LENGTH, musicHowtoLines, musicLength, musicText } from '../../../lib/render/music-ui'
 import { MAC_MUSIC_MIN_SECONDS } from '../../../lib/mac-music'
@@ -38,18 +38,20 @@ import { createRunModel, studioShownValue } from '../../../lib/render/create-stu
 import { STUDIO_MODELS, studioFields } from '../../../lib/render/studio-contract'
 import { modelLabel } from '../../../lib/render/preset-models'
 import {
-  SWAP_AUTO_MODELS, SWAP_CONSENT_TEXT, SWAP_INTENT, SWAP_OPENJUTSU_MODEL, SWAP_TIPS, swapAutoModel, swapBilledPhotos,
-  swapDefaultOptions, swapFigureRoles, swapMaxPeople, swapNeedsConsent, swapReadsRoles, swapShortCredits, swapUsesFrame,
+  SWAP_AUTO_MODELS, SWAP_CONSENT_TEXT, SWAP_INTENT, SWAP_OPENJUTSU_MODEL, SWAP_TIPS, swapAutoModel,
+  swapDefaultOptions, swapFigureRoles, swapClipLimits, swapMaxPeople, swapNeedsConsent, swapShortCredits, swapUsesFrame,
 } from '../../../lib/render/swap'
-import { swapFrameCredits } from '../../../lib/create/swap-frame'
 import {
-  LIPSYNC_STEP_DEFAULT, LIPSYNC_STEP_MODELS, SOUND_CHOICES, SOUND_LABEL, lipsyncBlocked, lipsyncCredits, lipsyncCut,
+  LIPSYNC_ONE_PERSON, LIPSYNC_STEP_DEFAULT, LIPSYNC_STEP_MODELS, SOUND_CHOICES, SOUND_LABEL, lipsyncBlocked, lipsyncCredits, lipsyncCut,
   lipsyncSeconds, soundApplies, soundClipSeconds, type SoundChoice,
 } from '../../../lib/render/sound'
 import { getJob } from '../../../api/cloud/jobs'
 import { SwapFrameBuild, SwapFramePicker, useSwapFirstFrame } from './SwapFrameSteps'
+import { CharacterPick, HubLine, UploadLine } from './hub/HubParts'
+import { hubPortrait, hubPortraitName } from './hub/hubCharacters'
+import { HUB_SWAP_SOON } from '../../../lib/create/character-hub'
+import { useCharacterHubReleased } from '../../../lib/create/character-hub-release'
 import { mediaSeconds } from './useStudioPrice'
-import { ClipLength } from './ClipLength'
 import { galleryLabelShort } from '../../../lib/render/gallery-label'
 import { TRAIN_VRAM_PRESETS, LOW_VRAM_NOTE, trainStepsNote, trainVramSuggestion, type TrainVramPreset } from '../../../lib/trainer-presets'
 import { STYLE_MODE_NOTE, STYLE_NAME_PLACEHOLDER, STYLE_TRIGGER_HINT_OFF, STYLE_TRIGGER_HINT_ON, STYLE_TRIGGER_LABEL, TRAIN_KINDS, trainPresetsFor, type TrainKind } from '../../../lib/train-kind'
@@ -89,105 +91,14 @@ export function SpecialControls({ intent }: { intent: CreateIntent }) {
   }
 }
 
-// ── shared chip: a small labeled file slot (audio/video/image) ──────────────
-//
-// `mediaRefFrom` used to be defined right here, and the training board in
-// Stage.tsx had its own inline copy of the same two lines. Two mints, one
-// release — and it was the copy without a release. Both now come from
-// `./mediaRef`, whose counterpart in createStore is
+// The file inputs of Motion, Talk and Swap are lines of the Character area
+// (hub/HubParts UploadLine, PortraitLine and DrivingVideoLine below).
+// `mediaRefFrom` comes from `./mediaRef`, whose counterpart in createStore is
 // `releaseDroppedMediaRefs`. Do NOT revoke in this file: the ref outlives the
 // component, it lives in the store.
 
-function FileChip({
-  icon: Icon,
-  empty,
-  value,
-  accept,
-  onFile,
-  onClear,
-}: {
-  icon: typeof Upload
-  empty: string
-  value: string | null
-  accept: string
-  onFile: (f: File) => void
-  onClear: () => void
-}) {
-  const inputRef = useRef<HTMLInputElement>(null)
-  return (
-    <div className="flex items-center">
-      <input
-        ref={inputRef}
-        type="file"
-        accept={accept}
-        className="hidden"
-        onChange={(e) => {
-          const f = e.target.files?.[0]
-          if (f) onFile(f)
-          e.target.value = ''
-        }}
-      />
-      <button
-        onClick={() => inputRef.current?.click()}
-        className={cn(
-          't-control flex items-center gap-1.5 px-2.5 h-[var(--control-h-sm)] rounded-md border transition-colors',
-          value
-            ? 'bg-white/[0.06] border-white/10 text-gray-200'
-            : 'bg-white/[0.03] border-white/[0.06] text-gray-400 hover:text-gray-200 hover:border-white/15',
-        )}
-      >
-        <Icon size={12} />
-        <span className="max-w-[140px] truncate">{value ?? empty}</span>
-      </button>
-      {value && (
-        <button onClick={onClear} className="p-1 text-gray-500 hover:text-gray-300" title="Remove" aria-label="Remove">
-          <X size={11} />
-        </button>
-      )}
-    </div>
-  )
-}
-
-// The character-image slot writes the shared Stage source (an ImageRef with a
-// data-URL preview — the cloud upload path re-encodes from it).
-function PortraitChip({ empty }: { empty: string }) {
-  const source = useCreateStore((s) => s.source)
-  const setSource = useCreateStore((s) => s.setSource)
-  return (
-    <FileChip
-      icon={ImagePlus}
-      empty={empty}
-      value={source ? 'Image ready' : null}
-      accept="image/*"
-      onFile={(f) => { void loadImageRef(f).then(setSource) }}
-      onClear={() => setSource(null)}
-    />
-  )
-}
-
-function DrivingVideoChip({ empty }: { empty: string }) {
-  const videoInput = useCreateStore((s) => s.videoInput)
-  const setVideoInput = useCreateStore((s) => s.setVideoInput)
-  return (
-    <FileChip
-      icon={Film}
-      empty={empty}
-      value={videoInput?.name ?? null}
-      accept="video/mp4,video/webm,video/quicktime"
-      onFile={(f) => setVideoInput(mediaRefFrom(f))}
-      onClear={() => setVideoInput(null)}
-    />
-  )
-}
-
 // ── Character-Studio ────────────────────────────────────────────────────────
 
-const FAMILY_LABEL: Record<string, string> = {
-  flux: 'Flux',
-  'z-image': 'Z-Image',
-  'qwen-image': 'Qwen',
-  'ltx-2': 'LTX video',
-}
 
 /** Saves a trained cloud character as a file. The weights are the customer's
  *  own, a few hundred megabytes: the button shows how far the file is, and a
@@ -249,46 +160,23 @@ function CharacterDownload({ lora }: { lora: CloudLora }) {
 function CharacterPanel() {
   const backend = useCreateStore((s) => s.backend)
   const characterTab = useCreateStore((s) => s.characterTab)
-  const setCharacterTab = useCreateStore((s) => s.setCharacterTab)
   const triggerWord = useCreateStore((s) => s.triggerWord)
   const setTriggerWord = useCreateStore((s) => s.setTriggerWord)
   const trainImages = useCreateStore((s) => s.trainImages)
-  const selectedCharacter = useCreateStore((s) => s.selectedCharacter)
-  const setSelectedCharacter = useCreateStore((s) => s.setSelectedCharacter)
-  const charactersVersion = useCreateStore((s) => s.charactersVersion)
   const localLane = backend !== 'cloud'
-  const [shelf, setShelf] = useState<CloudLora[] | null>(null)
 
-  useEffect(() => {
-    if (localLane) return
-    let live = true
-    listLoras()
-      .then((l) => { if (live) setShelf(l) })
-      .catch(() => { if (live) setShelf([]) })
-    return () => { live = false }
-  }, [charactersVersion, localLane])
-
+  // In the Character area the head line picks the character and says
+  // whether this is Image (use) or a new training (sketches v2). The shelf of
+  // chips and the Train/Use switch that stood here are steps 1 and 2 now.
   return (
     <div className="space-y-2">
       <TrainReplaceDialog />
-      <div className="flex items-center justify-center">
-        <Segmented
-          size="sm"
-          layoutId="character-tab"
-          value={characterTab}
-          onChange={(v) => setCharacterTab(v as 'train' | 'use')}
-          options={[
-            { value: 'train', label: 'Train new' },
-            { value: 'use', label: 'Use character' },
-          ]}
-        />
-      </div>
       {characterTab === 'train' && localLane && isMlxImageHost() ? (
         <MacTrainControls />
       ) : characterTab === 'train' && localLane ? (
         <LocalTrainControls />
       ) : characterTab === 'use' && localLane ? (
-        <LocalCharacterShelf />
+        <LocalCharacterNotes />
       ) : characterTab === 'train' ? (
         <div className="flex items-center justify-center gap-2 flex-wrap">
           <input
@@ -308,62 +196,21 @@ function CharacterPanel() {
           </p>
         </div>
       ) : (
-        <div className="flex items-center justify-center gap-1.5 flex-wrap">
-          {shelf === null && <span className="t-label text-gray-600">Loading your characters…</span>}
-          {shelf?.length === 0 && (
-            <span className="t-label text-gray-600">No characters yet. Train one first.</span>
-          )}
-          {shelf?.map((c) => {
-            const active = selectedCharacter?.id === c.id
-            return (
-              <div key={c.id} className="flex items-center">
-                <button
-                  onClick={() =>
-                    setSelectedCharacter(
-                      active
-                        ? null
-                        : { id: c.id, name: c.name, triggerWord: c.trigger_word, family: c.base_family },
-                    )
-                  }
-                  className={cn(
-                    't-control flex items-center gap-1.5 px-2.5 h-[var(--control-h-sm)] rounded-md border transition-colors',
-                    active
-                      ? 'bg-white/10 border-white/20 text-white'
-                      : 'bg-white/[0.03] border-white/[0.06] text-gray-400 hover:text-gray-200',
-                  )}
-                  title={`${c.name}, trigger word: ${c.trigger_word}`}
-                >
-                  <span className="max-w-[110px] truncate">{c.name}</span>
-                  <span className="t-label text-gray-500">{FAMILY_LABEL[c.base_family] ?? c.base_family}</span>
-                </button>
-                <CharacterDownload lora={c} />
-                <CharacterUseLocally lora={c} />
-                <button
-                  onClick={() => {
-                    void deleteLora(c.id)
-                      .then(() => {
-                        if (selectedCharacter?.id === c.id) setSelectedCharacter(null)
-                        useCreateStore.getState().bumpCharactersVersion()
-                      })
-                      .catch(() => {})
-                  }}
-                  className="p-1 text-gray-600 hover:text-red-400"
-                  title="Delete character"
-                  aria-label="Delete character"
-                >
-                  <Trash2 size={11} />
-                </button>
-              </div>
-            )
-          })}
-          {selectedCharacter && (
-            <span className="t-label text-gray-500 w-full text-center">
-              Put “{selectedCharacter.triggerWord}” in your prompt to summon the character.
-            </span>
-          )}
-        </div>
+        <CloudCharacterNotes />
       )}
     </div>
+  )
+}
+
+/** Image with a cloud character: the one sentence the run needs. */
+function CloudCharacterNotes() {
+  const selectedCharacter = useCreateStore((s) => s.selectedCharacter)
+  return (
+    <p className="hub-dim pt-3 text-center hub-fs-125" data-testid="character-use-hint">
+      {selectedCharacter
+        ? <>Put “{selectedCharacter.triggerWord}” in your prompt to summon the character.</>
+        : 'Pick a character in the head line, or train one from photos.'}
+    </p>
   )
 }
 
@@ -908,124 +755,40 @@ function MacTrainControls() {
   )
 }
 
-// Local Use shelf: characters are the trainer's own `char_<name>_zimage`
-// LoRA files. Picking one activates the LoRA on the normal image chain and
-// surfaces the trigger word; generation itself is the plain local image path.
-function LocalCharacterShelf() {
+// Image with a local character: the character is the trainer's own
+// `char_<name>_zimage` LoRA file, picked in step 1 (hub/hubCharacters
+// applyLocalLora puts it on the image chain and brings its model along). This
+// says what the run needs, or why it cannot run, with the way back.
+function LocalCharacterNotes() {
   const selectedCharacter = useCreateStore((s) => s.selectedCharacter)
-  const setSelectedCharacter = useCreateStore((s) => s.setSelectedCharacter)
-  const selectedLoras = useCreateStore((s) => s.selectedLoras)
-  const toggleLora = useCreateStore((s) => s.toggleLora)
-  const charactersVersion = useCreateStore((s) => s.charactersVersion)
   const setImageModel = useCreateStore((s) => s.setImageModel)
   const { list: imageModels, value: runModel } = useLocalPick()
-  const [chars, setChars] = useState<CharacterRef[] | null>(null)
-  // The character the delete dialog asks about, and what went wrong if the
-  // file could not be moved to the Trash or the Recycle Bin.
-  const [confirmDelete, setConfirmDelete] = useState<{ file: string; trigger: string } | null>(null)
-  const [deleting, setDeleting] = useState(false)
-  const [deleteError, setDeleteError] = useState<string | null>(null)
-
-  const removeCharacter = async (file: string) => {
-    setDeleting(true)
-    try {
-      await deleteLocalCharacter(file)
-      // The file is gone: the pick and the LoRA it rode on go with it, so the
-      // next render does not ask for a file that is no longer there.
-      const store = useCreateStore.getState()
-      if (characterLoraFile(store.selectedCharacter) === file) store.setSelectedCharacter(null)
-      if (store.selectedLoras.some((l) => l.name === file)) store.toggleLora(file)
-      setConfirmDelete(null)
-      // ComfyUI rereads its loras folder, then the shelf asks again.
-      await refreshComfyModels().catch(() => { /* rescan is best-effort */ })
-      store.bumpCharactersVersion()
-    } catch (e) {
-      setConfirmDelete(null)
-      setDeleteError(errorText(e))
-    } finally {
-      setDeleting(false)
-    }
-  }
-
-  useEffect(() => {
-    let live = true
-    listLocalCharacters()
-      .then((l) => { if (live) setChars(l) })
-      .catch(() => { if (live) setChars([]) })
-    return () => { live = false }
-  }, [charactersVersion])
 
   // A character from an earlier session, or a model changed after the pick:
-  // the shelf says so, with the way back. Nothing is said before the model
-  // list is in, where every model would read as missing.
+  // this says so, with the way back. Nothing is said before the model list
+  // is in, where every model would read as missing.
   const pickedFile = characterLoraFile(selectedCharacter)
   const base = pickedFile ? characterBaseModel(pickedFile, imageModels, runModel) : null
   const runType = imageModels.find((m) => m.name === runModel)?.type
   const block = pickedFile && runType ? characterRunBlock(pickedFile, runType, !!base) : null
 
   return (
-    <div className="flex items-center justify-center gap-1.5 flex-wrap">
-      {chars === null && <span className="t-label text-gray-600">Loading your characters…</span>}
-      {chars !== null && chars.length === 0 && (isMlxImageHost() ? (
-        <span className="t-label text-gray-600 w-full text-center" data-testid="mac-no-characters">
-          No characters in the LoRA folder yet. A trained character is a file named {'char_<name>_zimage.safetensors'}.{' '}
-          <button onClick={() => { void openMlxLoraFolder().catch(() => undefined) }} className="underline text-gray-400 hover:text-white">Open the LoRA folder</button>
+    <div className="flex flex-col items-center gap-1.5 pt-3 text-center hub-fs-125">
+      {!selectedCharacter && (isMlxImageHost() ? (
+        <span className="hub-dim" data-testid="mac-no-characters">
+          A trained character is a file named {'char_<name>_zimage.safetensors'} in the LoRA folder.{' '}
+          <button onClick={() => { void openMlxLoraFolder().catch(() => undefined) }} className="underline hub-muted">Open the LoRA folder</button>
         </span>
       ) : (
-        <span className="t-label text-gray-600">No local characters yet. Train one first.</span>
+        <span className="hub-dim">Pick a character in the head line, or train one from photos.</span>
       ))}
-      {(chars ?? []).map((ref) => {
-        const active = selectedCharacter?.id === ref.id
-        const c = { file: characterLoraFile(ref) ?? '', trigger: ref.triggerWord }
-        return (
-          <div key={ref.id} className="flex items-center">
-            <button
-              onClick={() => {
-                if (active) {
-                  setSelectedCharacter(null)
-                  if (selectedLoras.some((l) => l.name === c.file)) toggleLora(c.file)
-                  return
-                }
-                // One character at a time: drop other char LoRAs from the chain.
-                for (const l of selectedLoras) {
-                  if (l.name !== c.file && parseLocalCharacterLora(l.name)) toggleLora(l.name)
-                }
-                if (!selectedLoras.some((l) => l.name === c.file)) toggleLora(c.file)
-                // GH #161: the character brings the model it was trained for.
-                const base = characterBaseModel(c.file, imageModels, runModel)
-                if (base && base.name !== runModel) setImageModel(base.name, base.type)
-                setSelectedCharacter(ref)
-              }}
-              className={cn(
-                't-control flex items-center gap-1.5 px-2.5 h-[var(--control-h-sm)] rounded-md border transition-colors',
-                active
-                  ? 'bg-white/10 border-white/20 text-white'
-                  : 'bg-white/[0.03] border-white/[0.06] text-gray-400 hover:text-gray-200',
-              )}
-              title={`Trigger word: ${c.trigger}`}
-            >
-              <span className="max-w-[110px] truncate">{c.trigger}</span>
-              <span className="t-label text-gray-500">Z-Image</span>
-            </button>
-            <button
-              onClick={() => setConfirmDelete(c)}
-              className="p-1 text-gray-600 hover:text-red-400"
-              title="Delete character"
-              aria-label={`Delete character ${c.trigger}`}
-              data-testid="local-character-delete"
-            >
-              <Trash2 size={11} />
-            </button>
-          </div>
-        )
-      })}
       {selectedCharacter && !block && (
-        <span className="t-label text-gray-500 w-full text-center" data-testid="character-use-hint">
+        <span className="hub-dim" data-testid="character-use-hint">
           Put “{selectedCharacter.triggerWord}” in your prompt and describe the key features too. The trigger word alone often does not hold the look.
         </span>
       )}
       {block && (
-        <span role="alert" className={cn('t-label w-full text-center flex items-center justify-center gap-2 flex-wrap', HINWEIS_TEXT.fehler)} data-testid="character-model-warning">
+        <span role="alert" className={cn('flex items-center justify-center gap-2 flex-wrap', HINWEIS_TEXT.fehler)} data-testid="character-model-warning">
           {block}
           {base && (
             <button
@@ -1038,18 +801,63 @@ function LocalCharacterShelf() {
           )}
         </span>
       )}
-      <Modal open={!!confirmDelete} onClose={() => { if (!deleting) setConfirmDelete(null) }} title="Delete character">
+    </div>
+  )
+}
+
+/** Deletes a local character file (More options of Image). The file moves to
+ *  the Trash or the Recycle Bin, after a question. */
+function LocalCharacterDelete({ file, trigger }: { file: string; trigger: string }) {
+  const [asking, setAsking] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
+
+  const removeCharacter = async () => {
+    setDeleting(true)
+    try {
+      await deleteLocalCharacter(file)
+      // The file is gone: the pick and the LoRA it rode on go with it, so the
+      // next render does not ask for a file that is no longer there.
+      const store = useCreateStore.getState()
+      if (characterLoraFile(store.selectedCharacter) === file) store.setSelectedCharacter(null)
+      if (store.selectedLoras.some((l) => l.name === file)) store.toggleLora(file)
+      store.setHubCharacter(null)
+      store.setHubStep('who')
+      setAsking(false)
+      // ComfyUI rereads its loras folder, then the list asks again.
+      await refreshComfyModels().catch(() => { /* rescan is best-effort */ })
+      store.bumpCharactersVersion()
+    } catch (e) {
+      setAsking(false)
+      setDeleteError(errorText(e))
+    } finally {
+      setDeleting(false)
+    }
+  }
+
+  return (
+    <>
+      <button
+        onClick={() => setAsking(true)}
+        className="flex items-center gap-1 p-1 text-gray-600 hover:text-red-400"
+        title="Delete character"
+        aria-label={`Delete character ${trigger}`}
+        data-testid="local-character-delete"
+      >
+        <Trash2 size={11} /> Delete
+      </button>
+      <Modal open={asking} onClose={() => { if (!deleting) setAsking(false) }} title="Delete character">
         <p className="text-[0.7rem] text-gray-600 dark:text-gray-300 mb-3">
-          Delete the character <span className="text-gray-900 dark:text-white font-mono">{confirmDelete?.trigger}</span>?
+          Delete the character <span className="text-gray-900 dark:text-white font-mono">{trigger}</span>?
           Its file moves to the {isMacOS() ? 'Trash' : 'Recycle Bin'}, so you can put it back from there.
         </p>
         <ModalActions>
-          <ModalButton variant="quiet" onClick={() => setConfirmDelete(null)} disabled={deleting}>
+          <ModalButton variant="quiet" onClick={() => setAsking(false)} disabled={deleting}>
             Cancel
           </ModalButton>
           <ModalButton
             variant="danger"
-            onClick={() => confirmDelete && void removeCharacter(confirmDelete.file)}
+            onClick={() => void removeCharacter()}
             disabled={deleting}
             data-testid="local-character-delete-confirm"
           >
@@ -1065,7 +873,7 @@ function LocalCharacterShelf() {
           </ModalButton>
         </ModalActions>
       </Modal>
-    </div>
+    </>
   )
 }
 
@@ -1080,28 +888,36 @@ function LipsyncControls() {
   // A Mac runs Talking Character itself (LTX-2.3 a2v): a portrait and a voice,
   // never a clip to resync, whatever the cloud catalogue says about its pick.
   const macLocal = useCreateStore((s) => s.backend) === 'local' && isMlxImageHost()
-  // Catalog subscription so the chip row re-renders when the live catalog
+  // Catalog subscription so the rows re-render when the live catalog
   // arrives and flips the picked model's source type.
   useCloudCatalogStore((s) => s.fetchedAt)
   const model = cloudModelById(modelForOp('video', 'lipsync', cloudOpModel))
   const needsClip = !macLocal && model?.lipsync_source === 'video'
 
+  // Talk in the Character area (sketches v2): one line per input, the
+  // character's portrait (or the clip to re-sync), then the voice.
   return (
-    <div className="flex items-center justify-center gap-2 flex-wrap">
+    <div className="flex flex-col" data-talk-controls>
       {macLocal && <MacTalkingPart />}
-      {needsClip ? (
-        <DrivingVideoChip empty="Add video to resync" />
-      ) : (
-        <PortraitChip empty="Add portrait" />
-      )}
-      <VoiceChip
-        audioName={audioInput?.name ?? null}
-        voiceLabel={voiceFromJob?.label ?? null}
-        onAudioFile={(f) => setAudioInput(mediaRefFrom(f))}
-        onPickVoice={(jobId, label) => setVoiceFromJob({ jobId, label })}
-        onClear={() => { setAudioInput(null); setVoiceFromJob(null) }}
-      />
-      {macLocal && <MacTalkingWords />}
+      {needsClip ? <DrivingVideoLine empty="Add the clip to re-sync" label="Clip" /> : <PortraitLine empty="Add portrait" />}
+      <HubLine>
+        <span className="hub-text w-[110px] shrink-0">Voice</span>
+        <span className="flex-1" />
+        <VoiceChip
+          flat
+          audioName={audioInput?.name ?? null}
+          voiceLabel={voiceFromJob?.label ?? null}
+          onAudioFile={(f) => setAudioInput(mediaRefFrom(f))}
+          onPickVoice={(jobId, label) => setVoiceFromJob({ jobId, label })}
+          onClear={() => { setAudioInput(null); setVoiceFromJob(null) }}
+        />
+        {(audioInput || voiceFromJob) && (
+          <button onClick={() => { setAudioInput(null); setVoiceFromJob(null) }} className="hub-dim p-1" title="Remove the voice" aria-label="Remove the voice">
+            <X size={12} />
+          </button>
+        )}
+      </HubLine>
+      {macLocal && <div className="pt-2.5"><MacTalkingWords /></div>}
     </div>
   )
 }
@@ -1187,12 +1003,15 @@ function VoiceChip({
   onAudioFile,
   onPickVoice,
   onClear,
+  flat = false,
 }: {
   audioName: string | null
   voiceLabel: string | null
   onAudioFile: (f: File) => void
   onPickVoice: (jobId: string, label: string) => void
   onClear: () => void
+  /** The Character area: text with a small arrow, no box (sketches v2). */
+  flat?: boolean
 }) {
   const [open, setOpen] = useState(false)
   const [makerOpen, setMakerOpen] = useState(false)
@@ -1232,14 +1051,19 @@ function VoiceChip({
       <button
         onClick={() => setOpen((o) => !o)}
         className={cn(
-          't-control flex items-center gap-1.5 px-2.5 h-[var(--control-h-sm)] rounded-md border transition-colors',
-          value
-            ? 'bg-white/[0.06] border-white/10 text-gray-200'
-            : 'bg-white/[0.03] border-white/[0.06] text-gray-400 hover:text-gray-200 hover:border-white/15',
+          flat
+            ? cn('flex items-center gap-1.5 hub-fs-14 transition-colors', value ? 'hub-text font-medium' : 'hub-acc')
+            : cn(
+              't-control flex items-center gap-1.5 px-2.5 h-[var(--control-h-sm)] rounded-md border transition-colors',
+              value
+                ? 'bg-white/[0.06] border-white/10 text-gray-200'
+                : 'bg-white/[0.03] border-white/[0.06] text-gray-400 hover:text-gray-200 hover:border-white/15',
+            ),
         )}
       >
-        <Mic size={12} />
+        {!flat && <Mic size={12} />}
         <span className="max-w-[150px] truncate">{value ?? 'Add voice'}</span>
+        {flat && <ChevronDown size={13} className="hub-dim" />}
       </button>
       {value && (
         <button onClick={onClear} className="p-1 text-gray-500 hover:text-gray-300" title="Remove voice" aria-label="Remove voice">
@@ -1735,12 +1559,67 @@ function CloudExtendControls() {
 
 // ── Motion control ──────────────────────────────────────────────────────────
 
+/** The portrait line of Motion and Talk: "Character → Bean ▾". It writes the
+ *  shared Stage source (an ImageRef with a data-URL preview; the cloud upload
+ *  path re-encodes from it). */
+function PortraitLine({ empty }: { empty: string }) {
+  const source = useCreateStore((s) => s.source)
+  const setSource = useCreateStore((s) => s.setSource)
+  const name = hubPortraitName(source?.url)
+  return (
+    <HubLine data-portrait-line>
+      <span className="hub-text w-[110px] shrink-0">Character</span>
+      {!source && <span className="hub-dim">{empty}</span>}
+      <span className="flex-1" />
+      <CharacterPick
+        name={name}
+        image={source?.url ?? null}
+        label="Character image"
+        onPhoto={(f) => { void loadImageRef(f).then(setSource) }}
+        onCharacter={(c) => {
+          void hubPortrait(c).then((r) => { if (r) setSource(r) })
+            .catch((err: unknown) => useCreateStore.getState().setError(errorText(err)))
+        }}
+      />
+      {source && (
+        <button onClick={() => setSource(null)} className="hub-dim p-1" title="Remove" aria-label="Remove the character image">
+          <X size={12} />
+        </button>
+      )}
+    </HubLine>
+  )
+}
+
+/** The video line of Motion (and Talk's re-sync): the clip, large, once it is
+ *  there; before that one line to add it. Its name and an X stand in the head
+ *  line of the area. */
+function DrivingVideoLine({ empty, label }: { empty: string; label: string }) {
+  const videoInput = useCreateStore((s) => s.videoInput)
+  const setVideoInput = useCreateStore((s) => s.setVideoInput)
+  if (!videoInput) {
+    return (
+      <UploadLine
+        icon={<Film size={15} />}
+        label={empty}
+        accept="video/mp4,video/webm,video/quicktime"
+        onFile={(f) => setVideoInput(mediaRefFrom(f))}
+      />
+    )
+  }
+  return (
+    <figure className="flex flex-col items-center pt-3" data-driving-video>
+      <video src={videoInput.url} muted loop autoPlay playsInline aria-label={label} className="max-h-[min(36vh,280px)] max-w-full rounded-lg bg-black object-contain" />
+    </figure>
+  )
+}
+
 function MotionControls() {
   const backend = useCreateStore((s) => s.backend)
   const videoInput = useCreateStore((s) => s.videoInput)
   // Sound on the cloud lanes only: the local lanes have no lip sync step and
-  // no worker to lay the sound under (14.11.2026, as on the web).
-  const cloud = soundApplies('motion', backend)
+  // no worker to lay the sound under (14.11.2026, as on the web). And only
+  // for an account the server released it for (features.characterHub).
+  const cloud = soundApplies('motion', backend, useCharacterHubReleased())
   const [measured, setMeasured] = useState<{ url: string; seconds: number | undefined } | null>(null)
   useEffect(() => {
     let alive = true
@@ -1749,12 +1628,13 @@ function MotionControls() {
     return () => { alive = false }
   }, [cloud, videoInput])
   const videoSeconds = measured && videoInput && measured.url === videoInput.url ? measured.seconds : undefined
+  // Motion in the Character area (sketches v2): the character, the video
+  // whose moves it copies, the sound.
   return (
-    <div className="flex flex-col items-center gap-2.5">
-      <div className="flex items-center justify-center gap-2 flex-wrap">
-        <PortraitChip empty="Add character image" />
-        <DrivingVideoChip empty="Add driving video (dance/pose)" />
-      </div>
+    <div className="flex flex-col" data-motion-controls>
+      <PortraitLine empty="Add character image" />
+      <DrivingVideoLine empty="Add driving video (dance/pose)" label="Motion video" />
+      {videoInput && <p className="hub-dim pb-1 text-center hub-fs-12">Your character copies the moves of this video.</p>}
       {cloud && <SoundControls intent="motion" people={1} clipSeconds={videoSeconds} withPrice />}
     </div>
   )
@@ -1762,11 +1642,11 @@ function MotionControls() {
 
 // ── Sound (14.11.2026, David; port of the web's SoundControls): the original
 // sound, no sound, or a new voice with the lips in sync. Swap and Motion,
-// cloud only (lib/render/sound.ts). ──
+// cloud only, released accounts only (lib/render/sound.ts). ──
 
 function SoundControls({ intent, people, clipSeconds, withPrice = false }: {
   intent: CreateIntent; people: number; clipSeconds: number | undefined
-  /** Motion has no length slider: the price of the lip sync step stands here. */
+  /** Motion has no length in the bar: the price of the lip sync step stands here. */
   withPrice?: boolean
 }) {
   const backend = useCreateStore((s) => s.backend)
@@ -1809,9 +1689,10 @@ function SoundControls({ intent, people, clipSeconds, withPrice = false }: {
   const cut = active && lipsyncCut(audioSeconds, clipSeconds)
 
   return (
-    <div className="w-full space-y-1.5" data-sound-controls={intent}>
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="t-control text-gray-400">Sound</span>
+    <div className="w-full" data-sound-controls={intent}>
+      <HubLine className="flex-wrap gap-y-1 py-1.5">
+        <span className="hub-text w-[42px] shrink-0">Sound</span>
+        <span className="contents hub-seg">
         <Segmented
           size="sm"
           layoutId={`sound-${intent}`}
@@ -1824,14 +1705,17 @@ function SoundControls({ intent, people, clipSeconds, withPrice = false }: {
             ...(c === 'lipsync' && blocked ? { disabled: true, title: blocked } : {}),
           }))}
         />
-      </div>
-      {blocked && (
-        <p className="t-control text-gray-500" data-sound-note="lipsync-blocked">{blocked}</p>
-      )}
+        </span>
+        {blocked && (
+          <span className="hub-dim hub-fs-11" data-sound-note="lipsync-blocked">{blocked === LIPSYNC_ONE_PERSON ? 'one person only' : blocked}</span>
+        )}
+      </HubLine>
       {active && (
-        <div className="space-y-1.5" data-sound-lipsync>
-          <div className="flex flex-wrap items-center gap-2">
+        <div className="hub-line space-y-1.5 border-b py-2" data-sound-lipsync>
+          <div className="flex flex-wrap items-center gap-2.5 hub-fs-14">
+            <span className="hub-text w-[42px] shrink-0">Voice</span>
             <VoiceChip
+              flat
               audioName={audioInput?.name ?? null}
               voiceLabel={voiceFromJob?.label ?? null}
               onAudioFile={(f) => setAudioInput(mediaRefFrom(f))}
@@ -1839,20 +1723,20 @@ function SoundControls({ intent, people, clipSeconds, withPrice = false }: {
               onClear={() => { setAudioInput(null); setVoiceFromJob(null) }}
             />
             {credits != null && (
-              <span className="t-control text-gray-500 tabular-nums" data-sound-price>
+              <span className="hub-dim hub-fs-125 tabular-nums" data-sound-price>
                 + lip sync {withPrice ? `${credits.toLocaleString('en-US')} credits` : swapShortCredits(credits)}
                 {audioSeconds !== undefined ? ` (${Math.ceil(lipsyncSeconds(audioSeconds, clipSeconds)! - 1e-6)} s)` : ''}
               </span>
             )}
           </div>
-          <p className="t-control text-gray-500">After the video, a second step puts the new voice in and moves the lips to it.</p>
+          <p className="hub-dim hub-fs-125">After the video, a second step puts the new voice in and moves the lips to it.</p>
           {cut && (
-            <p className={cn('t-control', HINWEIS_TEXT.ruhig)} data-sound-note="cut">
+            <p className="hub-dim hub-fs-125" data-sound-note="cut">
               Your voice is {Math.round(audioSeconds!)} s, the clip {Math.round(clipSeconds!)} s. The voice is cut to the clip.
             </p>
           )}
-          <details className="t-control text-gray-500">
-            <summary className="cursor-pointer select-none">More</summary>
+          <details className="hub-dim hub-fs-125">
+            <summary className="cursor-pointer select-none">Lip sync model</summary>
             <div className="mt-1.5">
               <Segmented
                 size="sm"
@@ -1871,21 +1755,21 @@ function SoundControls({ intent, people, clipSeconds, withPrice = false }: {
 }
 
 // ── Swap Character (07.11.2026, port of the web's C52; two steps since
-// 14.11.2026) ───────────────────────────────────────────────────────────────
+// 14.11.2026; in the Character area since part B, sketches v2) ──────────────
 //
-// The order of the web panel: the notes first (what the models cannot do, so
-// it is not learned from a failed run), the video and the resolution, the
-// first frame to tap each person to replace, the people (photo and role each),
-// the length with its price, the consent box for the models that need it, and
-// on SCAIL 2 and Kling the frame step (build, check, Continue). Create and its
-// price stand in the Composer's action bar below.
+// The input part of the sketch: the video, its first frame with a numbered
+// mark per person to replace, one line per person ("1 the person on the left
+// → Bean ▾"), the sound, the consent in one line. The length, the model and
+// the price stand in the bar at the foot (Composer, hub). The frame step
+// (Build first frame, Does this look right?, Continue) is SwapFrameBuild as
+// it was; the one click flow replaces it later.
 
 export function SwapControls() {
   const videoInput = useCreateStore((s) => s.videoInput)
+  const setVideoInput = useCreateStore((s) => s.setVideoInput)
   const figures = useCreateStore((s) => s.swapFigures)
   const setFigures = useCreateStore((s) => s.setSwapFigures)
   const swapSeconds = useCreateStore((s) => s.swapSeconds)
-  const setSwapSeconds = useCreateStore((s) => s.setSwapSeconds)
   const consent = useCreateStore((s) => s.swapConsent)
   const setConsent = useCreateStore((s) => s.setSwapConsent)
   const options = useCreateStore((s) => s.cloudStudioOptions)
@@ -1893,9 +1777,7 @@ export function SwapControls() {
   const opModel = useCreateStore((s) => s.cloudOpModel)
   const setOpModel = useCreateStore((s) => s.setCloudOpModel)
   const isGenerating = useCreateStore((s) => s.isGenerating)
-  const frame = useCreateStore((s) => s.swapFrame)
-  // New voice with lips: its step joins the price on the slider.
-  const lipsyncShown = useCreateStore((s) => (s.sound === 'lipsync' ? s.lipsyncCredits : null))
+  const released = useCharacterHubReleased()
   const model = createRunModel('swap_character', { image: '', video: '', op: opModel })
   // SCAIL 2 and Kling: the first frame first, then the video (SwapFrameSteps).
   const twoStep = swapUsesFrame(SWAP_INTENT, model)
@@ -1925,8 +1807,8 @@ export function SwapControls() {
     if (auto && known && target !== model) setOpModel(target)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [auto, known, target])
-  // What Swap presets (SCAIL 2: 720p) stands in the store, so slider, button
-  // and run see the same number.
+  // What Swap presets (SCAIL 2: 720p) stands in the store, so the bar and
+  // the run see the same number.
   useEffect(() => {
     if (!known) return
     const preset = swapDefaultOptions(SWAP_INTENT, model)
@@ -1938,35 +1820,179 @@ export function SwapControls() {
     if (people > swapMaxPeople(model)) setOpModel(swapAutoModel(people))
   }
 
+  if (!released) {
+    // Without the account switch (features.characterHub) the server refuses
+    // the new swap. Said quietly, nothing to fill in.
+    return (
+      <p className="hub-dim py-8 text-center hub-fs-14" data-swap-unavailable="soon">
+        {HUB_SWAP_SOON}
+      </p>
+    )
+  }
   if (!known) {
     // The server's catalogue does not list the swap models yet.
     return (
-      <p className="t-body text-gray-500 text-center" data-swap-unavailable>
+      <p className="hub-dim py-8 text-center hub-fs-14" data-swap-unavailable>
         Swap Character is not available on this LU Cloud yet.
       </p>
     )
   }
 
   const maxPeople = swapMaxPeople(model)
-  const roles = swapReadsRoles(model) || twoStep
   const placed = swapFigureRoles(figures.map((f) => ({ ...f, role: '' })))
-  const frameCredits = twoStep ? swapFrameCredits(frame?.width ?? 9, frame?.height ?? 16, figures.length) : null
   // The marks in the first frame: up to the limit of Swap (OpenJutsu: 4).
   const markMax = swapMaxPeople(SWAP_OPENJUTSU_MODEL)
-  const resolutions = (studioFields(model).resolution?.enum ?? []) as string[]
-  const resolution = String(studioShownValue(model, options, 'resolution') ?? '')
   const setFigure = (i: number, patch: Partial<SwapFigure>) => setFigures(figures.map((f, j) => (j === i ? { ...f, ...patch } : f)))
+  const limits = swapClipLimits(model)
+  const video = videoSeconds !== undefined ? Math.floor(videoSeconds + 0.05) : undefined
 
   return (
-    <div className="flex flex-col items-center gap-2.5" data-swap-controls data-swap-two-step={twoStep || undefined}>
-      {/* Grey, not a warning (the desktop's house rule, lib/hinweis.ts). */}
-      <div className="flex w-full items-start gap-1.5 t-control text-gray-500" data-swap-tips>
-        <Info size={12} className="mt-[2px] shrink-0" />
-        <ul className="space-y-0.5">{SWAP_TIPS.map((t) => <li key={t}>{t}</li>)}</ul>
+    <div className="flex flex-col" data-swap-controls data-swap-two-step={twoStep || undefined}>
+      {!videoInput ? (
+        <>
+          <UploadLine
+            icon={<Film size={15} />}
+            label="Add the original video"
+            accept="video/mp4,video/webm,video/quicktime"
+            onFile={(f) => setVideoInput(mediaRefFrom(f))}
+            note={`${limits.min} to ${limits.max} s`}
+          />
+          {/* Grey, not a warning (the desktop's house rule, lib/hinweis.ts). */}
+          <ul className="hub-dim space-y-0.5 pt-2.5 hub-fs-125" data-swap-tips>
+            {SWAP_TIPS.map((t) => <li key={t}>{t}</li>)}
+          </ul>
+        </>
+      ) : (
+        <SwapFramePicker max={markMax} onCount={fitPeople} />
+      )}
+
+      <div className="hub-line mt-1 border-t" data-swap-figures={figures.length}>
+        {figures.map((f, i) => (
+          <HubLine key={i} data-swap-figure={i + 1}>
+            <span className="hub-acc w-3.5 shrink-0 hub-fs-125 font-semibold tabular-nums">{i + 1}</span>
+            <input
+              type="text"
+              value={f.role}
+              maxLength={200}
+              disabled={isGenerating}
+              aria-label={`Who person ${i + 1} replaces`}
+              placeholder={placed[i]
+                ? placed[i]
+                : figures.length > 1 ? 'Who? e.g. the woman in black on the left' : 'the main person'}
+              onChange={(e) => setFigure(i, { role: e.target.value })}
+              className="hub-role hub-text min-w-0 flex-1 bg-transparent hub-fs-14 outline-none"
+            />
+            <CharacterPick
+              name={f.character ?? null}
+              image={f.image?.url ?? null}
+              label={`Character for person ${i + 1}`}
+              inputData={{ 'data-swap-photo-input': String(i + 1) }}
+              disabled={isGenerating}
+              onPhoto={(file) => { void loadImageRef(file).then((image) => setFigure(i, { image, character: null })) }}
+              onCharacter={(c) => {
+                void hubPortrait(c).then((image) => { if (image) setFigure(i, { image, character: c.name }) })
+                  .catch((err: unknown) => useCreateStore.getState().setError(errorText(err)))
+              }}
+            />
+            {figures.length > 1 && !(twoStep && videoInput) && (
+              <button
+                type="button"
+                aria-label={`Remove person ${i + 1}`}
+                disabled={isGenerating}
+                onClick={() => setFigures(figures.filter((_, j) => j !== i))}
+                className="hub-dim rounded p-1"
+              >
+                <X size={12} />
+              </button>
+            )}
+          </HubLine>
+        ))}
+        {((!twoStep || !videoInput) || (figures.length > 1 && maxPeople < figures.length)) && (
+          <div className="flex min-h-8 items-center gap-3 hub-fs-125">
+            {/* SCAIL 2 and Kling: people come in by a tap on the first frame.
+                Without a video, and with OpenJutsu, also by this line. */}
+            {(!twoStep || !videoInput) && (
+              <button
+                type="button"
+                disabled={figures.length >= 4 || isGenerating}
+                onClick={() => {
+                  // Not every model takes several people. The switch is said in
+                  // the sentence beside it, it does not happen silently.
+                  fitPeople(figures.length + 1)
+                  setFigures([...figures, { image: null, role: '' }])
+                }}
+                className="hub-acc disabled:opacity-40"
+              >
+                + Add person ({figures.length}/4)
+              </button>
+            )}
+            {figures.length > 1 && maxPeople < figures.length && (
+              <span className="hub-dim" data-swap-note="one-person-model">
+                {modelLabel(model)} replaces {maxPeople === 1 ? 'one person' : `up to ${maxPeople} people`}.
+              </span>
+            )}
+          </div>
+        )}
       </div>
-      <div className="flex w-full items-center justify-between gap-2 flex-wrap">
-        <DrivingVideoChip empty="Add original video" />
-        {resolutions.length > 1 && (
+
+      {video !== undefined && video > limits.max && (
+        <p className="hub-dim pt-2 hub-fs-125" data-clip-note="too-long">
+          Your video is {video} s. {modelLabel(model)} reads at most {limits.max} s, so only the first {Math.min(swapSeconds ?? limits.max, limits.max)} s are used.
+        </p>
+      )}
+      {video !== undefined && video < limits.min && (
+        <p className="hub-dim pt-2 hub-fs-125" data-clip-note="too-short">
+          Your video is {video} s. {modelLabel(model)} needs at least {limits.min} s.
+        </p>
+      )}
+
+      <SoundControls intent={SWAP_INTENT} people={figures.length}
+        clipSeconds={soundClipSeconds(SWAP_INTENT, model, swapSeconds, videoSeconds)} />
+      {swapNeedsConsent(model) && (
+        // A real person is swapped for a photo: the customer confirms rights
+        // and consent first (the server asks too, for the frame step as for
+        // the video).
+        <label className="hub-muted flex w-full cursor-pointer items-start gap-2.5 pt-3 hub-fs-125" data-swap-consent>
+          <input
+            type="checkbox"
+            checked={consent}
+            disabled={isGenerating}
+            onChange={(e) => setConsent(e.target.checked)}
+            className="mt-px h-3 w-3 shrink-0 accent-[var(--color-lu-accent)]"
+          />
+          <span>{SWAP_CONSENT_TEXT}</span>
+        </label>
+      )}
+      {twoStep && <div className="pt-3"><SwapFrameBuild model={model} /></div>}
+    </div>
+  )
+}
+
+/** What "More options" holds in a panel of the Character area. Nothing that
+ *  was there before falls away: the resolution and the notes of Swap, the
+ *  character's file actions of Image. The model's full schema stays one click
+ *  further, in the settings drawer (CharacterHub links it). */
+export function SpecialMore({ intent }: { intent: CreateIntent }) {
+  if (intent === 'swap_character') return <SwapMore />
+  if (intent === 'character') return <CharacterMore />
+  return null
+}
+
+function SwapMore() {
+  const options = useCreateStore((s) => s.cloudStudioOptions)
+  const setOptions = useCreateStore((s) => s.setCloudStudioOptions)
+  const opModel = useCreateStore((s) => s.cloudOpModel)
+  const videoInput = useCreateStore((s) => s.videoInput)
+  const released = useCharacterHubReleased()
+  const model = createRunModel('swap_character', { image: '', video: '', op: opModel })
+  if (!released || !STUDIO_MODELS[model]) return null
+  const resolutions = (studioFields(model).resolution?.enum ?? []) as string[]
+  const resolution = String(studioShownValue(model, options, 'resolution') ?? '')
+  return (
+    <>
+      {resolutions.length > 1 && (
+        <div className="flex items-center gap-2.5 hub-fs-125">
+          <span className="hub-muted w-[80px]">Resolution</span>
           <Segmented
             size="sm"
             layoutId="swap-resolution"
@@ -1975,127 +2001,60 @@ export function SwapControls() {
             onChange={(v) => setOptions({ ...options, resolution: v })}
             options={resolutions.map((r) => ({ value: r, label: r }))}
           />
-        )}
-      </div>
-
-      {videoInput && <SwapFramePicker max={markMax} onCount={fitPeople} />}
-
-      <div className="w-full space-y-1" data-swap-figures={figures.length}>
-        {figures.map((f, i) => (
-          <div key={i} className="flex items-center gap-2" data-swap-figure={i + 1}>
-            <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-lu-accent/15 t-micro font-semibold text-lu-accent">{i + 1}</span>
-            <FigurePhoto image={f.image} index={i} onImage={(image) => setFigure(i, { image })} />
-            {roles ? (
-              <input
-                type="text"
-                value={f.role}
-                maxLength={200}
-                disabled={isGenerating}
-                aria-label={`Who person ${i + 1} replaces`}
-                placeholder={placed[i]
-                  ? `${placed[i]} (or describe who)`
-                  : figures.length > 1 ? 'Who? e.g. the woman in black on the left' : 'Optional: who to replace (default: the most prominent person)'}
-                onChange={(e) => setFigure(i, { role: e.target.value })}
-                className="t-control h-[var(--control-h-sm)] min-w-0 flex-1 rounded-md border border-white/[0.08] bg-white/[0.03] px-2 text-gray-200 placeholder:text-gray-500"
-              />
-            ) : (
-              <span className="t-body flex-1 text-gray-500">{i === 0 ? 'Replaces the main person' : ''}</span>
-            )}
-            {figures.length > 1 && (
-              <button
-                type="button"
-                aria-label={`Remove person ${i + 1}`}
-                disabled={isGenerating}
-                onClick={() => setFigures(figures.filter((_, j) => j !== i))}
-                className="rounded p-1 text-gray-500 hover:text-gray-200"
-              >
-                <X size={13} />
-              </button>
-            )}
-          </div>
-        ))}
-        <div className="flex items-center gap-2">
-          {/* SCAIL 2 and Kling: people come in by a tap on the first frame.
-              Without a video, and with OpenJutsu, also by this button. */}
-          {(!twoStep || !videoInput) && (
-            <button
-              type="button"
-              disabled={figures.length >= 4 || isGenerating}
-              onClick={() => {
-                // Not every model takes several people. The switch is said in
-                // the sentence below, it does not happen silently.
-                fitPeople(figures.length + 1)
-                setFigures([...figures, { image: null, role: '' }])
-              }}
-              className="t-control h-[var(--control-h-sm)] rounded-md px-2 text-gray-400 hover:text-gray-200 disabled:opacity-40"
-            >
-              + Add person ({figures.length}/4)
-            </button>
-          )}
-          {figures.length > 1 && maxPeople < figures.length && (
-            <span className="t-body text-gray-500 dark:text-gray-400" data-swap-note="one-person-model">
-              {modelLabel(model)} replaces {maxPeople === 1 ? 'one person' : `up to ${maxPeople} people`}.
-            </span>
-          )}
         </div>
-      </div>
-
-      <ClipLength
-        model={model}
-        options={options}
-        videoSeconds={videoSeconds}
-        chosen={swapSeconds}
-        onChange={setSwapSeconds}
-        photos={swapBilledPhotos(model, figures.length)}
-        disabled={isGenerating}
-        frameCredits={frameCredits}
-        lipsyncCredits={lipsyncShown}
-      />
-      <SoundControls intent={SWAP_INTENT} people={figures.length}
-        clipSeconds={soundClipSeconds(SWAP_INTENT, model, swapSeconds, videoSeconds)} />
-      {swapNeedsConsent(model) && (
-        // A real person is swapped for a photo: the customer confirms rights
-        // and consent first (the server asks too, for the frame step as for
-        // the video).
-        <label className="flex w-full items-start gap-2 t-control text-gray-300 cursor-pointer" data-swap-consent>
-          <input
-            type="checkbox"
-            checked={consent}
-            disabled={isGenerating}
-            onChange={(e) => setConsent(e.target.checked)}
-            className="mt-[3px] shrink-0 accent-[var(--color-lu-accent)]"
-          />
-          <span>{SWAP_CONSENT_TEXT}</span>
-        </label>
       )}
-      {twoStep && <SwapFrameBuild model={model} />}
-    </div>
+      {videoInput && (
+        <ul className="hub-dim flex items-start gap-1.5 hub-fs-125" data-swap-tips>
+          <Info size={12} className="mt-[2px] shrink-0" />
+          <span className="space-y-0.5">{SWAP_TIPS.map((t) => <li key={t} className="list-none">{t}</li>)}</span>
+        </ul>
+      )}
+    </>
   )
 }
 
-/** The photo of one person: a small field to click, with a preview. */
-function FigurePhoto({ image, index, onImage }: { image: SwapFigure['image']; index: number; onImage: (image: SwapFigure['image']) => void }) {
-  const ref = useRef<HTMLInputElement>(null)
+/** Image: what can be done with the picked character's file. */
+function CharacterMore() {
+  const backend = useCreateStore((s) => s.backend)
+  const characterTab = useCreateStore((s) => s.characterTab)
+  const hubCharacter = useCreateStore((s) => s.hubCharacter)
+  const setSelectedCharacter = useCreateStore((s) => s.setSelectedCharacter)
+  const setHubCharacter = useCreateStore((s) => s.setHubCharacter)
+  const lora = hubCharacter?.lora
+  const localFile = characterLoraFile(hubCharacter?.ref)
+  if (characterTab !== 'use' || !hubCharacter) return null
+  if (localFile && hubCharacter.ref) {
+    return (
+      <div className="flex items-center gap-1 hub-fs-125" data-character-file-actions>
+        <span className="hub-muted mr-2">{hubCharacter.name}</span>
+        <LocalCharacterDelete file={localFile} trigger={hubCharacter.ref.triggerWord} />
+      </div>
+    )
+  }
+  if (backend !== 'cloud' || !lora) return null
   return (
-    <button
-      type="button"
-      aria-label={image ? `Change photo of person ${index + 1}` : `Add photo of person ${index + 1}`}
-      onClick={() => ref.current?.click()}
-      className={cn(
-        'relative grid h-9 w-7 shrink-0 place-items-center overflow-hidden rounded-md border',
-        image ? 'border-white/10' : 'border-dashed border-white/20 text-gray-500 hover:text-gray-300',
-      )}
-    >
-      {image ? <img src={image.url} alt={`New person ${index + 1}`} className="h-full w-full object-cover" /> : <ImagePlus size={14} />}
-      <input
-        ref={ref}
-        type="file"
-        accept="image/*"
-        className="hidden"
-        data-swap-photo-input={index + 1}
-        onChange={(e) => { const f = e.target.files?.[0]; if (f) void loadImageRef(f).then(onImage); e.target.value = '' }}
-      />
-    </button>
+    <div className="flex items-center gap-1 hub-fs-125" data-character-file-actions>
+      <span className="hub-muted mr-2">{hubCharacter.name}</span>
+      <CharacterDownload lora={lora} />
+      <CharacterUseLocally lora={lora} />
+      <button
+        onClick={() => {
+          void deleteLora(lora.id)
+            .then(() => {
+              setSelectedCharacter(null)
+              setHubCharacter(null)
+              useCreateStore.getState().setHubStep('who')
+              useCreateStore.getState().bumpCharactersVersion()
+            })
+            .catch(() => {})
+        }}
+        className="p-1 text-gray-600 hover:text-red-400"
+        title="Delete character"
+        aria-label="Delete character"
+      >
+        <Trash2 size={11} />
+      </button>
+    </div>
   )
 }
 

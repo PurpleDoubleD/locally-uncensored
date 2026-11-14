@@ -1,6 +1,7 @@
 import { test, expect, type Page } from '@playwright/test'
 import { tauriMockInit, DEFAULT_ASSISTANT_REPLY, DEFAULT_MODEL_NAME } from './support/tauri-mock'
 import { routeCloud, seedOnboardingDone, signInViaGate, cloudSwitch } from './support/cloud-mock'
+import { openCharacterAction } from './support/character-hub'
 
 /**
  * Swap Character (07.11.2026, port of the web's C52; two steps with SCAIL 2
@@ -89,7 +90,8 @@ async function openSwap(page: Page): Promise<Seen> {
   await page.setViewportSize({ width: 1296, height: 900 })
   await page.addInitScript(tauriMockInit, { assistantReply: DEFAULT_ASSISTANT_REPLY, modelName: DEFAULT_MODEL_NAME })
   await seedOnboardingDone(page)
-  await routeCloud(page, { license: 'active', access: true, mediaLive: true, extraCatalogModels: SWAP_CATALOG })
+  // An account the server released the Character area for (CHARACTER_HUB).
+  await routeCloud(page, { license: 'active', access: true, mediaLive: true, extraCatalogModels: SWAP_CATALOG, characterHub: true })
   // The frame step against the mock: upload, submit, poll, and the built
   // frame. Registered after routeCloud, so these answer first; anything
   // else falls back to the shared mock.
@@ -130,7 +132,8 @@ async function openSwap(page: Page): Promise<Seen> {
   await signInViaGate(page)
   await expect(cloudSwitch(page)).toBeChecked({ timeout: 20_000 })
   await page.getByRole('button', { name: /^Create$/ }).click()
-  await page.getByRole('radio', { name: 'Swap Character', exact: true }).click()
+  // Since 3.1.0 part B an action of the Character area.
+  await openCharacterAction(page, 'Swap Character')
   await expect(page.locator('[data-swap-controls]')).toBeVisible({ timeout: 15_000 })
   return seen
 }
@@ -170,8 +173,9 @@ test('Swap Character in two steps: marks, first frame, Continue, Kling for one p
   // SCAIL 2 is the default, the notes stand grey.
   await expect(panel.locator('[data-swap-tips]')).toContainText('Up to 3 people with SCAIL-2, one person with Kling (highest resolution).')
   await expect(panel).toHaveAttribute('data-swap-two-step', 'true')
+  // The resolution is under More options (sketches v2).
+  await page.getByRole('button', { name: 'More options' }).click()
   await expect(page.getByRole('radio', { name: '720p' })).toHaveAttribute('aria-checked', 'true')
-  await expect(page.locator('[data-swap-stage]')).toBeVisible()
   await expect(create).toBeDisabled()
   await shoot(page, 'swap-empty')
 
@@ -182,15 +186,15 @@ test('Swap Character in two steps: marks, first frame, Continue, Kling for one p
   await tapFrame(page, 0.45, 0.35)
   await tapFrame(page, 0.68, 0.38)
   await expect(page.getByRole('button', { name: 'Remove mark 2' })).toBeVisible()
-  await expect(page.locator('[data-swap-frame-count]')).toHaveText('2 of 4 people marked. Tap a number to remove it.')
+  await expect(page.locator('[data-swap-frame-count]')).toHaveAttribute('data-swap-frame-count', '2')
   await expect(page.getByRole('textbox', { name: 'Who person 1 replaces' })).toHaveAttribute('placeholder', /^the person on the left/)
   await expect(page.getByRole('textbox', { name: 'Who person 2 replaces' })).toHaveAttribute('placeholder', /^the person on the right/)
   await page.locator('[data-swap-photo-input="1"]').setInputFiles(await media('face1.png', 'image/png'))
   await page.locator('[data-swap-photo-input="2"]').setInputFiles(await media('face2.png', 'image/png'))
-  await expect(page.getByRole('button', { name: 'Change photo of person 2' })).toBeVisible()
-  // The slider prices frame and video together.
-  await expect(page.locator('[data-clip-price]')).toContainText('credits · frame + video')
-  await expect(page.locator('[data-clip-split]')).toContainText('First frame 14,000')
+  await expect(page.getByRole('button', { name: 'Character for person 2' })).toContainText('Photo')
+  // The bar prices frame and video together.
+  await expect(page.locator('[data-clip-price]')).toHaveAttribute('title', /credits$/)
+  await expect(page.locator('[data-clip-split]')).toContainText('frame 14k + video')
 
   // Kling stands greyed out for two people, SCAIL 2 is recommended.
   await page.getByRole('button', { name: /SCAIL 2/ }).first().click()
@@ -230,7 +234,7 @@ test('Swap Character in two steps: marks, first frame, Continue, Kling for one p
 
   // Kling for one person: the second mark goes, the built frame expires.
   await page.getByRole('button', { name: 'Remove mark 2' }).click()
-  await expect(page.locator('[data-swap-frame-count]')).toHaveText('1 of 4 people marked. Tap a number to remove it.')
+  await expect(page.locator('[data-swap-frame-count]')).toHaveAttribute('data-swap-frame-count', '1')
   await expect(create).toBeDisabled()
   await page.getByRole('button', { name: /SCAIL 2/ }).first().click()
   await expect(page.getByRole('option', { name: /Kling 3.0 Pro/ })).toBeEnabled()
@@ -245,7 +249,8 @@ test('Swap Character in two steps: marks, first frame, Continue, Kling for one p
   expect(seen.submits[1].params.image_paths).toHaveLength(2)
   await page.getByRole('button', { name: /Continue/ }).click()
   await expect(create).toBeEnabled({ timeout: 15_000 })
-  await expect(page.locator('[data-clip-split]')).toContainText('16,800/s')
+  // Kling: 16,800 credits a second, at least its billed minimum.
+  await expect(page.locator('[data-clip-split]')).toHaveText(/^frame 14k \+ video \d+k$/)
   await shoot(page, 'swap-kling-one-person', '[data-swap-built]')
 
   // Nothing but the frame step ever went to the queue.
@@ -274,7 +279,7 @@ test('Swap Character with OpenJutsu: one step, people up to four, consent before
   // No frame step on OpenJutsu: Create is armed and names its price.
   await expect(page.locator('[data-swap-built]')).toHaveCount(0)
   await expect(create).toBeEnabled({ timeout: 15_000 })
-  await expect(page.locator('[data-clip-price]')).toContainText('credits')
+  await expect(page.locator('[data-clip-price]')).toHaveAttribute('title', /credits$/)
 
   await page.getByRole('button', { name: /Add person/ }).click()
   await page.getByRole('button', { name: /Add person/ }).click()
@@ -316,7 +321,7 @@ test('Sound in Swap: original by default, lip sync greyed out for two people, a 
   await expect(page.locator('[data-sound-lipsync]')).toBeVisible()
   await page.locator('[data-sound-lipsync] input[type=file][accept="audio/*"]').setInputFiles(voiceWav(8))
   await expect(page.locator('[data-sound-price]')).toContainText('+ lip sync')
-  await expect(page.locator('[data-clip-price]')).toContainText('credits · frame + video + lip sync')
+  await expect(page.locator('[data-clip-split]')).toContainText('frame 14k + video')
   await expect(page.locator('[data-clip-split]')).toContainText('lip sync')
   await page.getByRole('checkbox').check()
   await page.getByRole('button', { name: /Build first frame/ }).click()
@@ -331,7 +336,7 @@ test('Sound in Swap: original by default, lip sync greyed out for two people, a 
   await tapFrame(page, 0.68, 0.38)
   await expect(lipsync).toBeDisabled()
   await expect(lipsync).toHaveAttribute('title', 'Lip sync works with one person')
-  await expect(page.locator('[data-sound-note=lipsync-blocked]')).toHaveText('Lip sync works with one person')
+  await expect(page.locator('[data-sound-note=lipsync-blocked]')).toHaveText('one person only')
   await expect(page.getByRole('radio', { name: 'Original sound' })).toHaveAttribute('aria-checked', 'true')
   await shoot(page, 'swap-lipsync-blocked-two-people', '[data-sound-controls]', 'desktop-ton')
 
@@ -341,7 +346,7 @@ test('Sound in Swap: original by default, lip sync greyed out for two people, a 
 
 test('Sound in Motion: on the cloud lanes only', async ({ page }) => {
   await openSwap(page)
-  await page.getByRole('radio', { name: 'Motion Control', exact: true }).click()
+  await openCharacterAction(page, 'Motion Control')
   const sound = page.locator('[data-sound-controls=motion]')
   await expect(sound).toBeVisible({ timeout: 15_000 })
   await expect(page.getByRole('radio', { name: 'Original sound' })).toHaveAttribute('aria-checked', 'true')

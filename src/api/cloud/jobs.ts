@@ -136,7 +136,7 @@ export interface CloudMe {
   }
   /** What the server has released for this account. `createChat`: Create in
    *  chat. Absent on an older server and for a signed out account = nothing. */
-  features?: { createChat?: boolean }
+  features?: { createChat?: boolean; characterHub?: boolean }
 }
 
 /** Stage an input; returns the render-inputs storage path. Roles: 'source' /

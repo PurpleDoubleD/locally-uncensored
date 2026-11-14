@@ -1,9 +1,11 @@
 // @vitest-environment jsdom
 /**
  * Swap Character on the desktop (07.11.2026, port of the web's C52; two steps
- * with SCAIL 2 and Kling since 14.11.2026): the panel in the web's order
- * (notes, video and resolution, first frame, people, length, consent, frame
- * step), the marks, the model picker, and Create only once the video, a photo
+ * with SCAIL 2 and Kling since 14.11.2026; in the Character area since part B,
+ * sketches v2): the panel (notes and video, first frame, people, sound,
+ * consent, frame step), More options (resolution), the bar at the foot
+ * (model, length, price, Create), the marks, the model picker, and Create
+ * only once the video, a photo
  * for every person, the consent and (SCAIL 2, Kling) the confirmed first
  * frame are there. Nothing is rendered or booked: the Composer's generate and
  * the cloud calls of the frame step are fakes, the catalogue a fixture.
@@ -48,16 +50,20 @@ vi.mock('../useStudioPrice', async (orig) => ({
 
 import { Composer } from '../Composer'
 import { SwapStage } from '../SwapStage'
+import { SpecialControls, SpecialMore } from '../SpecialIntentControls'
+import { useCharacterHubReleaseStore } from '../../../../lib/create/character-hub-release'
 import { useCreateStore } from '../../../../stores/createStore'
 import { useCloudCatalogStore } from '../../../../stores/cloudCatalogStore'
 import { neuerServer } from '../../../../lib/render/__tests__/fixtures/test-catalogs'
-import { SWAP_CONSENT_TEXT, SWAP_OPENJUTSU_MODEL, SWAP_TIPS } from '../../../../lib/render/swap'
+import { SWAP_CONSENT_TEXT, SWAP_OPENJUTSU_MODEL, SWAP_TIPS, swapClipLimits } from '../../../../lib/render/swap'
 
 const photo = { filename: 'face.png', url: 'data:image/png;base64,AA', width: 512, height: 768 }
 const clip = { blob: new Blob(['x'], { type: 'video/mp4' }), name: 'dance.mp4', url: 'blob:dance' }
 const FRAME = { url: 'data:image/jpeg;base64,eA==', width: 1080, height: 1920, videoUrl: 'blob:dance' }
 
 beforeEach(() => {
+  // An account the server released the Character area for (features.characterHub).
+  useCharacterHubReleaseStore.setState({ fromMe: true, fromCatalog: null })
   for (const f of Object.values(cloud)) f.mockClear()
   videoLength.seconds = undefined
   useCloudCatalogStore.setState({ models: neuerServer() })
@@ -72,18 +78,34 @@ beforeEach(() => {
 })
 afterEach(() => cleanup())
 
-function open() {
-  return render(<Composer onOpenAdvanced={() => {}} onOpenWorkflows={() => {}} />)
+/** The panel of the Character area as CharacterHub lays it out: the inputs,
+ *  More options (open here), the bar at the foot. */
+function Panel() {
+  const intent = useCreateStore((s) => s.intent())
+  return (
+    <div className="lu-hub">
+      <SpecialControls intent={intent} />
+      <SpecialMore intent={intent} />
+      <Composer hub onOpenAdvanced={() => {}} onOpenWorkflows={() => {}} />
+    </div>
+  )
 }
+function open() {
+  return render(<Panel />)
+}
+/** The credits of the bar's price, from its title ("62,000 credits"). */
+const total = () => document.querySelector('[data-clip-price]')?.getAttribute('title')
+const split = () => document.querySelector('[data-clip-split]')?.textContent
+const lengthButton = () => screen.getByRole('button', { name: 'Length' })
 const create = () => screen.getByRole('button', { name: /^Create/ }) as HTMLButtonElement
 const panel = () => document.querySelector('[data-swap-controls]') as HTMLElement
 
 describe('the Swap Character panel', () => {
-  it('stands in the web order: notes, video, people, length, consent; no prompt field; SCAIL 2 at 720p', () => {
+  it('stands in the order of the sketch: notes and video, people, sound, consent, frame step; no prompt field; SCAIL 2 at 720p', () => {
     open()
     expect(panel()).toBeTruthy()
     expect(document.querySelector('textarea')).toBeNull()
-    const order = ['[data-swap-tips]', '[data-swap-figures]', '[data-clip-length]', '[data-swap-consent]', '[data-swap-built]']
+    const order = ['[data-swap-tips]', '[data-swap-figures]', '[data-sound-controls]', '[data-swap-consent]', '[data-swap-built]']
       .map((sel) => panel().querySelector(sel) as HTMLElement)
     for (const el of order) expect(el).toBeTruthy()
     for (let i = 1; i < order.length; i++) {
@@ -92,17 +114,19 @@ describe('the Swap Character panel', () => {
     // The notes, one line each, grey and not a warning.
     const tips = panel().querySelector('[data-swap-tips]') as HTMLElement
     expect([...tips.querySelectorAll('li')].map((li) => li.textContent)).toEqual([...SWAP_TIPS])
-    expect(tips.className).toMatch(/text-gray-500/)
+    expect(tips.className).toMatch(/hub-dim/)
     expect(tips.className).not.toMatch(/amber|yellow/)
-    expect(screen.getByText('Add original video')).toBeTruthy()
+    expect(screen.getByText('Add the original video')).toBeTruthy()
     expect(screen.getByText(SWAP_CONSENT_TEXT)).toBeTruthy()
     // SCAIL 2 is the default, preset to 720p in the store.
     const res = screen.getByRole('radiogroup', { name: 'Resolution' })
     expect([...res.querySelectorAll('[role=radio]')].map((b) => b.textContent)).toEqual(['480p', '720p'])
     expect(res.querySelector('[aria-checked=true]')?.textContent).toBe('720p')
     expect(useCreateStore.getState().cloudStudioOptions.resolution).toBe('720p')
-    const slider = document.getElementById('swap-length') as HTMLInputElement
-    expect([slider.min, slider.max]).toEqual(['1', '120'])
+    // Length and price sit in the bar once there is a video to measure.
+    expect(screen.queryByRole('button', { name: 'Length' })).toBeNull()
+    expect(document.querySelector('[data-clip-price]')).toBeNull()
+    expect(swapClipLimits('scail-2').max).toBeGreaterThanOrEqual(15)
   })
 
   it('OpenJutsu: adds people up to four, each with a photo field and a role', () => {
@@ -119,7 +143,7 @@ describe('the Swap Character panel', () => {
     fireEvent.click(add())
     expect(useCreateStore.getState().swapFigures).toHaveLength(4)
     for (let i = 1; i <= 4; i++) {
-      expect(screen.getByRole('button', { name: `Add photo of person ${i}` })).toBeTruthy()
+      expect(screen.getByRole('button', { name: `Character for person ${i}` })).toBeTruthy()
       expect(screen.getByRole('textbox', { name: `Who person ${i} replaces` })).toBeTruthy()
     }
     fireEvent.click(screen.getByRole('button', { name: 'Remove person 2' }))
@@ -165,31 +189,39 @@ describe('the Swap Character panel', () => {
     expect(document.querySelector('[data-swap-consent]')).toBeTruthy()
   })
 
-  it('OpenJutsu: names the live price beside the length (15 s, not 120 s)', () => {
+  it('OpenJutsu: names the live price in the bar beside the length (15 s, not 120 s)', async () => {
     useCreateStore.getState().setCloudOpModel(SWAP_OPENJUTSU_MODEL)
+    videoLength.seconds = 20
+    useCreateStore.setState({ videoInput: clip, swapFrame: FRAME } as never)
     open()
-    const price = () => (document.querySelector('[data-clip-price]') as HTMLElement).textContent
-    const slider = () => document.getElementById('swap-length') as HTMLInputElement
-    expect(slider().value).toBe('15')
-    expect(price()).toBe('302,000 credits · 20,000/s')
+    await act(async () => {})
+    expect(lengthButton().textContent).toBe('15 s')
+    expect(total()).toBe('302,000 credits')
+    expect(split()).toBe('video 302k')
     act(() => { useCreateStore.getState().setSwapSeconds(10) })
-    expect(price()).toBe('202,000 credits · 20,000/s')
+    expect(lengthButton().textContent).toBe('10 s')
+    expect(total()).toBe('202,000 credits')
   })
 
-  it('SCAIL 2: frame and video together beside the length', () => {
-    useCreateStore.setState({ swapSeconds: 6 })
+  it('SCAIL 2: frame and video together in the bar', async () => {
+    videoLength.seconds = 20
+    useCreateStore.setState({ swapSeconds: 6, videoInput: clip, swapFrame: FRAME } as never)
     open()
-    const box = document.querySelector('[data-clip-length]')!
+    await act(async () => {})
     // 6 s at 720p (8,000/s) plus the first frame (Nano Banana Pro 2k, 14,000).
-    expect(box.querySelector('[data-clip-price]')?.textContent).toBe('62,000 credits · frame + video')
-    expect(box.querySelector('[data-clip-split]')?.textContent).toBe('First frame 14,000 · video 48,000 (8,000/s)')
+    expect(total()).toBe('62,000 credits')
+    expect(document.querySelector('[data-clip-price] b')?.textContent).toBe('62k')
+    expect(split()).toBe('frame 14k + video 48k')
   })
 
-  it('Kling 6 s: 100,800 credits for the video', () => {
+  it('Kling 6 s: 100,800 credits for the video', async () => {
     useCreateStore.getState().setCloudOpModel('kling-v3-pro-motion-control')
-    useCreateStore.setState({ swapSeconds: 6 })
+    videoLength.seconds = 20
+    useCreateStore.setState({ swapSeconds: 6, videoInput: clip, swapFrame: FRAME } as never)
     open()
-    expect(document.querySelector('[data-clip-split]')?.textContent).toBe('First frame 14,000 · video 100,800 (16,800/s)')
+    await act(async () => {})
+    expect(total()).toBe('114,800 credits')
+    expect(split()).toBe('frame 14k + video 101k')
   })
 })
 
@@ -206,10 +238,10 @@ describe('two steps in the panel (14.11.2026)', () => {
   it('tap people: numbered marks, the place becomes the role, a tap on the mark removes it', () => {
     useCreateStore.setState({ videoInput: clip, swapFrame: FRAME } as never)
     const { rerender } = open()
-    expect(screen.getByText('Tap each person you want to replace')).toBeTruthy()
+    expect(screen.getByText(/^Tap each person you want to replace\./)).toBeTruthy()
     fireEvent.click(frameBox(), { clientX: 80, clientY: 60 })
     fireEvent.click(frameBox(), { clientX: 20, clientY: 70 })
-    rerender(<Composer onOpenAdvanced={() => {}} onOpenWorkflows={() => {}} />)
+    rerender(<Panel />)
     const figs = useCreateStore.getState().swapFigures
     expect(figs).toHaveLength(2)
     expect(figs.map((f) => f.mark)).toEqual([{ x: 0.8, y: 0.3 }, { x: 0.2, y: 0.35 }])
@@ -347,12 +379,12 @@ describe('Sound in the Swap and Motion panel (14.11.2026)', () => {
     useCreateStore.setState({ sound: 'original', lipsyncModel: 'latentsync', lipsyncCredits: null, audioInput: null, voiceFromJob: null } as never)
   })
 
-  it('three choices after the length, the original sound by default', () => {
+  it('three choices after the people, the original sound by default', () => {
     open()
     expect([...sound().querySelectorAll('[role=radio]')].map((r) => r.textContent)).toEqual(['Original sound', 'No sound', 'New voice, lips in sync'])
     expect(option('Original sound').getAttribute('aria-checked')).toBe('true')
-    const length = panel().querySelector('[data-clip-length]')!
-    expect(length.compareDocumentPosition(panel().querySelector('[data-sound-controls]')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    const people = panel().querySelector('[data-swap-figures]')!
+    expect(people.compareDocumentPosition(panel().querySelector('[data-sound-controls]')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     fireEvent.click(option('No sound'))
     expect(useCreateStore.getState().sound).toBe('none')
   })
@@ -362,7 +394,8 @@ describe('Sound in the Swap and Motion panel (14.11.2026)', () => {
     open()
     expect(option('New voice, lips in sync').disabled).toBe(true)
     expect(option('New voice, lips in sync').title).toBe('Lip sync works with one person')
-    expect(document.querySelector('[data-sound-note=lipsync-blocked]')?.textContent).toBe('Lip sync works with one person')
+    // The sketch's short word beside the choice; the full sentence is its title.
+    expect(document.querySelector('[data-sound-note=lipsync-blocked]')?.textContent).toBe('one person only')
     fireEvent.click(option('New voice, lips in sync'))
     expect(useCreateStore.getState().sound).toBe('original')
   })
@@ -385,16 +418,15 @@ describe('Sound in the Swap and Motion panel (14.11.2026)', () => {
     expect(screen.getByRole('button', { name: /Add voice/ })).toBeTruthy()
     useCreateStore.setState({ audioInput: VOICE })
     await act(async () => {})
-    rerender(<Composer onOpenAdvanced={() => {}} onOpenWorkflows={() => {}} />)
+    rerender(<Panel />)
     await act(async () => {})
     // 9 s voice, 6 s clip: LatentSync bills 6 s = 18,000.
     expect(useCreateStore.getState().lipsyncCredits).toBe(18000)
     expect(document.querySelector('[data-sound-note=cut]')?.textContent).toBe('Your voice is 9 s, the clip 6 s. The voice is cut to the clip.')
     expect(document.querySelector('[data-sound-price]')?.textContent).toBe('+ lip sync 18k (6 s)')
-    const box = document.querySelector('[data-clip-length]')!
     // 6 s SCAIL 2 720p (48,000) + first frame (14,000) + lip sync (18,000).
-    expect(box.querySelector('[data-clip-price]')?.textContent).toBe('80,000 credits · frame + video + lip sync')
-    expect(box.querySelector('[data-clip-split]')?.textContent).toBe('First frame 14,000 · video 48,000 (8,000/s) · lip sync 18,000')
+    expect(total()).toBe('80,000 credits')
+    expect(split()).toBe('frame 14k + video 48k + lip sync 18k')
     // Create: video + lip sync, once the first frame is confirmed.
     const { swapKeyOf } = await import('../../../../lib/create/swap-frame')
     useCreateStore.setState({ swapBuilt: { jobId: 'b', url: 'x', key: swapKeyOf('blob:dance', figures), confirmed: true } })
@@ -412,7 +444,7 @@ describe('Sound in the Swap and Motion panel (14.11.2026)', () => {
     const { rerender } = open()
     expect(document.querySelector('[data-sound-controls=motion]')).toBeTruthy()
     useCreateStore.setState({ backend: 'local' })
-    rerender(<Composer onOpenAdvanced={() => {}} onOpenWorkflows={() => {}} />)
+    rerender(<Panel />)
     expect(document.querySelector('[data-sound-controls]')).toBeNull()
   })
 })

@@ -72,7 +72,10 @@ describe('D-S32: die Reglerzeile steht mittig ueber der Promptbox', () => {
     // mehr statt, waere die Zentrierung eine Zusage ohne Deckung.
     const spalte = code.match(/className="mx-auto w-full max-w-\[(\d+)px\] space-y-[\d.]+"/)
     expect(spalte, 'die gemeinsame Spalte von Reglerzeile und Promptpanel fehlt').toBeTruthy()
-    const panel = code.match(/className="rounded-\[var\(--radius-panel\)\][^"]*"/)
+    // Since 3.1.0 part B the panel has a second face, the bar of the
+    // Character area (`hub`): the class stands as the string of the other
+    // branch, so the quotes may be single.
+    const panel = code.match(/["']rounded-\[var\(--radius-panel\)\][^"']*["']/)
     expect(panel, 'Promptpanel nicht gefunden').toBeTruthy()
     expect(panel![0]).toMatch(/\bborder\b/)
   })

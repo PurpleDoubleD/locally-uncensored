@@ -117,6 +117,9 @@ export interface SwapFigure {
   role: string
   /** Where the customer tapped this person in the first frame (0 to 1). */
   mark?: { x: number; y: number } | null
+  /** The character of the Character area this person becomes, by name, so
+   *  the row says "→ Bean". Unset for a photo picked by hand. */
+  character?: string | null
 }
 
 /** Swap Character in two steps (14.11.2026, as on the web): the first frame
@@ -157,6 +160,7 @@ export type { CharacterRef }
  * URL for preview. Runtime-only — never persisted.
  */
 import type { ImageRef } from '../lib/image-ref'
+import { isHubIntent, type HubCharacter, type HubStep } from '../lib/create/character-hub'
 export type { ImageRef }
 
 /** Flatten mode / sub-mode / removebg / utilityOp / cloudOp into the single
@@ -500,6 +504,13 @@ export interface CreateState {
   /** Swap Character: the built and (after Continue) confirmed first frame.
    *  Runtime-only. */
   swapBuilt: SwapBuilt | null
+  /** The Character area (3.1.0 part B): which of its three steps shows. Only
+   *  read while the intent is one of HUB_INTENTS. Runtime-only. */
+  hubStep: HubStep
+  /** The character picked in step 1, null for "Just use a photo". Runtime-only. */
+  hubCharacter: HubCharacter | null
+  /** The action last open in the area, so the pill goes back to it. */
+  hubLastIntent: CreateIntent | null
   /** Swap and Motion on the cloud (14.11.2026): the sound of the result
    *  (lib/render/sound.ts). Runtime-only, the original sound by default. */
   sound: 'original' | 'none' | 'lipsync'
@@ -769,6 +780,10 @@ export interface CreateState {
   setSwapConsent: (consent: boolean) => void
   setSwapFrame: (frame: SwapFrame | null) => void
   setSwapBuilt: (built: SwapBuilt | null) => void
+  setHubStep: (step: HubStep) => void
+  setHubCharacter: (c: HubCharacter | null) => void
+  /** The pill "Character": back to the action that was open, else step 1. */
+  openCharacterHub: () => void
   setSound: (sound: 'original' | 'none' | 'lipsync') => void
   setLipsyncModel: (model: string) => void
   setLipsyncCredits: (credits: number | null) => void
@@ -1272,6 +1287,9 @@ export const useCreateStore = create<CreateState>()(
       swapConsent: false,
       swapFrame: null as SwapFrame | null,
       swapBuilt: null as SwapBuilt | null,
+      hubStep: 'who' as HubStep,
+      hubCharacter: null as HubCharacter | null,
+      hubLastIntent: null as CreateIntent | null,
       sound: 'original' as 'original' | 'none' | 'lipsync',
       lipsyncModel: 'latentsync',
       lipsyncCredits: null as number | null,
@@ -1536,6 +1554,10 @@ export const useCreateStore = create<CreateState>()(
         // The list of further source images stays only where it can run.
         if (get().batchSources.length && (!get().source || !BATCH_INTENTS.has(intent))) get().setBatchSources([])
         if (!BATCH_INTENTS.has(intent) && get().batchOriginal) set({ batchOriginal: null })
+        // An intent of the Character area opens the panel of its action: a
+        // gallery Reuse, the chat, a preset or the phone land there directly.
+        // The area's own steps 1 and 2 are set by openCharacterHub.
+        if (isHubIntent(intent)) set({ hubStep: 'panel', hubLastIntent: intent })
       },
       toggleNegative: () => set((s) => ({ showNegative: !s.showNegative })),
       setExpertOpen: (expertOpen) => set({ expertOpen }),
@@ -1667,6 +1689,17 @@ export const useCreateStore = create<CreateState>()(
       setSwapConsent: (swapConsent) => set({ swapConsent }),
       setSwapFrame: (swapFrame) => set({ swapFrame }),
       setSwapBuilt: (swapBuilt) => set({ swapBuilt }),
+      setHubStep: (hubStep) => set({ hubStep }),
+      setHubCharacter: (hubCharacter) => set({ hubCharacter }),
+      openCharacterHub: () => {
+        const s = get()
+        if (isHubIntent(s.intent())) return
+        // The intent stays one of the area's own, so the gallery, the meter
+        // and the opSlot see a known tab while step 1 or 2 shows.
+        const last = s.hubLastIntent
+        s.setIntent(last ?? 'character')
+        set({ hubStep: last ? 'panel' : 'who' })
+      },
       setSound: (sound) => set({ sound }),
       setLipsyncModel: (lipsyncModel) => set({ lipsyncModel }),
       setLipsyncCredits: (lipsyncCredits) => set({ lipsyncCredits }),

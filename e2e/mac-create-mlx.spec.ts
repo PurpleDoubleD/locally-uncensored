@@ -2,6 +2,7 @@ import { test, expect, type Page } from '@playwright/test'
 import { tauriMockInit, DEFAULT_ASSISTANT_REPLY, DEFAULT_MODEL_NAME, type TauriMockOptions } from './support/tauri-mock'
 import { routeCloud, seedOnboardingDone, cloudSwitch } from './support/cloud-mock'
 import { mlxCalls, comfyCalls, hfToken, requireCall } from './support/recorded'
+import { openCharacterWhat } from './support/character-hub'
 
 /**
  * macOS local Create — the MLX path (MAC-5).
@@ -88,12 +89,19 @@ test('mac local: MLX lanes run locally, cloud-only lanes stay visible as teasers
   // Music is here because this Mac has no music engine: since 14.10.2026 a
   // Mac with ACE-Step 1.5 installed has a local Music tab (mac-music.spec.ts),
   // one without it keeps the teaser.
-  for (const label of ['Enhance Image', 'Erase Object', 'Talking Character', 'Music', 'Extend Video', 'Motion Control']) {
+  for (const label of ['Enhance Image', 'Erase Object', 'Music', 'Extend Video']) {
     await expect(page.getByRole('radio', { name: `${label}, runs on LU Cloud` })).toBeVisible()
   }
-  // Character Studio is a local tab: "Use character" runs the LoRA from the
-  // Mac's LoRA folder through MLX.
+  // The Character area is a local tab: "Use character" (Image) runs the
+  // LoRA from the Mac's LoRA folder through MLX. Talk and Motion are its
+  // actions and show their cloud lock there.
+  await expect(page.getByRole('radiogroup', { name: 'Create mode' }).getByRole('radio', { name: 'Character', exact: true })).toBeVisible()
+  await openCharacterWhat(page)
+  for (const label of ['Talking Character', 'Motion Control']) {
+    await expect(page.getByRole('radio', { name: `${label}, runs on LU Cloud` })).toBeVisible()
+  }
   await expect(page.getByRole('radio', { name: 'Character Studio', exact: true })).toBeVisible()
+  await page.getByRole('radio', { name: /^Image$/ }).click()
 
   // A locked lane opens the teaser instead of switching the lane, and on a
   // Mac without the music engine the teaser offers no local Music either.

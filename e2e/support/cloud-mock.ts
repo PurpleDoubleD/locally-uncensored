@@ -87,6 +87,16 @@ export interface CloudScenario {
    * server whose model names carry words a store build may not show.
    */
   extraCatalogModels?: unknown[]
+  /**
+   * 14.11.2026, the account switch of the Character area (CHARACTER_HUB on
+   * the web side). `true`: /api/me and /api/jobs/catalog carry
+   * `features.characterHub: true`, as for a released account. Unset: both
+   * answers are the ones of a server without the switch, or of an account
+   * it is not open for.
+   */
+  characterHub?: boolean
+  /** Rows of /api/loras (the cloud characters). Unset: the route answers as before. */
+  loras?: unknown[]
 }
 
 // P9: one Studio model, shaped like a real /api/jobs/catalog entry once P0's
@@ -177,13 +187,16 @@ export async function routeCloud(page: Page, scenario: CloudScenario): Promise<v
               ? { status: 'active', tier, access, ...(scenario.paidPlan === undefined ? {} : { paidPlan: scenario.paidPlan }) }
               : { status: 'none' },
           profile: null,
-          ...(scenario.createChat === undefined ? {} : { features: { createChat: scenario.createChat } }),
+          ...(scenario.createChat === undefined && !scenario.characterHub
+            ? {}
+            : { features: { ...(scenario.createChat === undefined ? {} : { createChat: scenario.createChat }), ...(scenario.characterHub ? { characterHub: true } : {}) } }),
         }),
       )
     }
 
     // What an order of the chat reads before it is laid out. Only with the
     // scenario: every other spec keeps the mock it was written against.
+    if (scenario.loras && path === '/api/loras') return route.fulfill(json(200, { loras: scenario.loras }))
     if (scenario.createChat !== undefined && path === '/api/loras') return route.fulfill(json(200, { loras: [] }))
     if (scenario.createChat !== undefined && path === '/api/account/content-policy') {
       return route.fulfill(json(200, { policy: 'soft', ageConfirmedAt: null, ageConfirmationRequired: true }))
@@ -249,6 +262,7 @@ export async function routeCloud(page: Page, scenario: CloudScenario): Promise<v
           ops: { removebg: 1000, eraser: 2500, upscale_image: 1000, upscale_video_per_s: 500, upscale_video_min: 2500 },
           voice: { stt: 600, tts_per_1k_chars: 8000 },
           media_live: scenario.mediaLive !== false,
+          ...(scenario.characterHub ? { features: { characterHub: true } } : {}),
           tier,
           monthly_credits: 2_550_000,
         }),

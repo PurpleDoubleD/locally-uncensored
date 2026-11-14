@@ -25,11 +25,14 @@ describe('sound choice', () => {
   })
 
   it('stands in Swap and Motion on the cloud only', () => {
-    expect(soundApplies('swap_character', 'cloud')).toBe(true)
-    expect(soundApplies('motion', 'cloud')).toBe(true)
-    expect(soundApplies('motion', 'local')).toBe(false)
-    expect(soundApplies('lipsync', 'cloud')).toBe(false)
-    expect(soundApplies('video', 'cloud')).toBe(false)
+    expect(soundApplies('swap_character', 'cloud', true)).toBe(true)
+    expect(soundApplies('motion', 'cloud', true)).toBe(true)
+    expect(soundApplies('motion', 'local', true)).toBe(false)
+    expect(soundApplies('lipsync', 'cloud', true)).toBe(false)
+    expect(soundApplies('video', 'cloud', true)).toBe(false)
+    // Without the account switch (features.characterHub) there is no choice.
+    expect(soundApplies('motion', 'cloud', false)).toBe(false)
+    expect(soundApplies('swap_character', 'cloud', false)).toBe(false)
   })
 
   it('lip sync: one person, cloud only, and only when the server lists the model', () => {

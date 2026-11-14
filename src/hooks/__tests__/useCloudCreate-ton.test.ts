@@ -93,6 +93,7 @@ import { useCloudCreate } from '../useCloudCreate'
 import { swapKeyOf } from '../../lib/create/swap-frame'
 import { useCreateStore } from '../../stores/createStore'
 import { useCloudCatalogStore } from '../../stores/cloudCatalogStore'
+import { useCharacterHubReleaseStore } from '../../lib/create/character-hub-release'
 import { neuerServer } from '../../lib/render/__tests__/fixtures/test-catalogs'
 import { LIPSYNC_ONE_PERSON } from '../../lib/render/sound'
 
@@ -114,6 +115,8 @@ function swapReady(figures: Array<{ image: typeof FOTO; role: string; mark?: { x
 }
 
 beforeEach(() => {
+  // An account the server released the Character area for (features.characterHub).
+  useCharacterHubReleaseStore.setState({ fromMe: true, fromCatalog: null })
   submitted.length = 0
   steps.length = 0
   lipOutcome.status = 'succeeded'
@@ -156,6 +159,34 @@ describe('Sound of the video run', () => {
     useCreateStore.setState({ source: FOTO as never, videoInput: CLIP })
     await useCloudCreate().generate()
     expect(useCreateStore.getState().error).toBeNull()
+    expect(submitted[0].params.sound).toBe('original')
+  })
+})
+
+describe('without the account switch (features.characterHub)', () => {
+  it('Motion sends no sound at all, also when another one was picked', async () => {
+    useCharacterHubReleaseStore.setState({ fromMe: false, fromCatalog: false })
+    useCreateStore.getState().setIntent('motion')
+    useCreateStore.setState({ source: FOTO as never, videoInput: CLIP, sound: 'none' })
+    await useCloudCreate().generate()
+    expect(useCreateStore.getState().error).toBeNull()
+    expect(submitted).toHaveLength(1)
+    expect(submitted[0].params).not.toHaveProperty('sound')
+  })
+
+  it('Swap stops before any upload: it is coming soon on this account', async () => {
+    useCharacterHubReleaseStore.setState({ fromMe: false, fromCatalog: false })
+    swapReady([{ image: FOTO, role: '' }])
+    await useCloudCreate().generate()
+    expect(useCreateStore.getState().error).toBe('Swap Character is coming soon to your LU Cloud.')
+    expect(steps).toEqual([])
+    expect(submitted).toHaveLength(0)
+  })
+
+  it('the catalogue alone opens it too', async () => {
+    useCharacterHubReleaseStore.setState({ fromMe: null, fromCatalog: true })
+    swapReady([{ image: FOTO, role: '' }])
+    await useCloudCreate().generate()
     expect(submitted[0].params.sound).toBe('original')
   })
 })

@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { tauriMockInit, DEFAULT_ASSISTANT_REPLY, DEFAULT_MODEL_NAME, type TauriMockOptions } from './support/tauri-mock'
 import { routeCloud, seedOnboardingDone, cloudSwitch } from './support/cloud-mock'
 import { mlxCalls } from './support/recorded'
+import { openCharacterAction, openCharacterTraining } from './support/character-hub'
 
 /**
  * 3.0.9 P8 (Discord, 28.10.2026: "can the built-in trainer do styles,
@@ -52,8 +53,7 @@ async function openTrainTab(page: Page) {
   await page.goto('/')
   await expect(cloudSwitch(page)).toBeVisible({ timeout: 20_000 })
   await page.getByRole('button', { name: /^Create$/ }).click()
-  await page.getByRole('radio', { name: 'Character Studio', exact: true }).click()
-  await page.getByRole('radio', { name: 'Train new', exact: true }).click()
+  await openCharacterTraining(page)
 }
 
 const calls = async (page: Page, cmd: string) => (await mlxCalls(page)).filter((c) => c.cmd === cmd)
@@ -62,7 +62,8 @@ test('mac: a style is trained with content captions and lands switched on in the
   await openTrainTab(page)
   const controls = page.getByTestId('mac-train-controls')
   await expect(controls).toBeVisible({ timeout: 15_000 })
-  await expect(page.getByRole('radio', { name: 'Character', exact: true })).toBeChecked()
+  // The training's own switch (the pill bar has a "Character" too since 3.1.0).
+  await expect(controls.getByRole('radio', { name: 'Character', exact: true })).toBeChecked()
   await shot(page, 'p8-1-train-tab-character')
 
   await page.getByRole('radio', { name: 'Style / concept', exact: true }).click()
@@ -117,8 +118,7 @@ test('mac: a style is trained with content captions and lands switched on in the
 
   // The character shelf does not list a style.
   await page.keyboard.press('Escape')
-  await page.getByRole('radio', { name: 'Character Studio', exact: true }).click()
-  await page.getByRole('radio', { name: 'Use character', exact: true }).click()
+  await openCharacterAction(page, 'Character Studio')
   await expect(page.getByTestId('mac-no-characters')).toBeVisible({ timeout: 15_000 })
   await expect(page.getByTitle('Trigger word: p8lino')).toHaveCount(0)
 })

@@ -1,6 +1,7 @@
 import { test, expect, type Page } from '@playwright/test'
 import { tauriMockInit, DEFAULT_ASSISTANT_REPLY, DEFAULT_MODEL_NAME, type TauriMockOptions } from './support/tauri-mock'
 import { routeCloud, seedOnboardingDone, signInViaGate, cloudSwitch, type CloudScenario } from './support/cloud-mock'
+import { openCharacterAction } from './support/character-hub'
 
 /**
  * P9 Integration: das Studio auf der Wolken-Spur, und sein Fehlen ueberall
@@ -185,7 +186,7 @@ test('an older server (no quote_required): Extend and Motion behave exactly as b
   // with no local engine mocked, hence checking the TEXT, not alert count.)
   await expect(page.getByText('This feature needs a newer LU Cloud server')).toHaveCount(0)
 
-  await page.getByRole('radio', { name: 'Motion Control' }).click()
+  await openCharacterAction(page, 'Motion Control')
   await expect(page.getByRole('button', { name: /Wan 2\.2 Animate/ })).toBeVisible({ timeout: 15_000 })
   await expect(page.getByText('This feature needs a newer LU Cloud server')).toHaveCount(0)
 

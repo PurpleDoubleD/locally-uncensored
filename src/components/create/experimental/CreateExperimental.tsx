@@ -15,6 +15,8 @@ import { CreateExpProvider, useCreateExp } from './CreateContext'
 import { IntentBar } from './IntentBar'
 import { Stage } from './Stage'
 import { Composer } from './Composer'
+import { CharacterHub } from './hub/CharacterHub'
+import { isHubIntent } from '../../../lib/create/character-hub'
 import { CreatePanel } from './CreatePanel'
 import { Lightbox } from './Lightbox'
 import { SaveCharacterModal } from './SaveCharacterModal'
@@ -93,6 +95,9 @@ function CreateExperimentalInner() {
   // Composer.tsx, kept in sync by hand (both read the same store getters and
   // pure functions, no new state).
   const intent = useCreateStore((s) => s.intent())
+  // The Character area (3.1.0 part B) takes the place of the stage and the
+  // prompt window for its four intents; gallery and presets stay beside it.
+  const hubOpen = isHubIntent(intent)
   const cloudOpModel = useCreateStore((s) => s.cloudOpModel)
   const cloudImageModel = useCreateStore((s) => s.cloudImageModel)
   const cloudVideoModel = useCreateStore((s) => s.cloudVideoModel)
@@ -476,30 +481,52 @@ function CreateExperimentalInner() {
           beneath them. (Previously the Gallery ran full-height alongside both the
           viewer AND the composer, so it was taller than the viewer.) */}
       <div className="flex-1 min-h-0 flex overflow-hidden">
-        <Stage
-          displayed={displayed}
-          onOpenMaskEditor={() => setMaskOpen(true)}
-          onEditResult={editAvailable ? (it) => { void editResultWithMask(it) } : undefined}
-          onAnimateResult={animateAvailable ? (it) => { void animateResult(it) } : undefined}
-          onFullscreen={(it) => { setLightboxPrompt(false); setLightbox(it) }}
-          onShowPrompt={(it) => { setLightboxPrompt(true); setLightbox(it) }}
-          onSaveCharacter={setCharacterFrom}
-          comfyStarting={comfyStarting}
-        />
-        <CreatePanel open={panelOpen} onOpenChange={setPanelOpen} activeId={shownId} onSelect={openGalleryItem} />
-        <PresetShelf
-          open={presetsOpen}
-          onOpenChange={setPresetsOpen}
-          onSelect={(p) => { setSelectedPreset(p); setPresetStarted(false); setPresetDialogOpen(true) }}
-          resume={selectedPreset && presetStarted && !presetDialogOpen ? { title: selectedPreset.title, onResume: () => setPresetDialogOpen(true) } : null}
-        />
+        {hubOpen ? (
+          <CharacterHub
+            stage={{
+              displayed,
+              onOpenMaskEditor: () => setMaskOpen(true),
+              onEditResult: editAvailable ? (it) => { void editResultWithMask(it) } : undefined,
+              onAnimateResult: animateAvailable ? (it) => { void animateResult(it) } : undefined,
+              onFullscreen: (it) => { setLightboxPrompt(false); setLightbox(it) },
+              onShowPrompt: (it) => { setLightboxPrompt(true); setLightbox(it) },
+              onSaveCharacter: setCharacterFrom,
+              comfyStarting,
+            }}
+            onOpenAdvanced={() => setAdvancedOpen(true)}
+            onOpenWorkflows={() => { setWorkflowsOpen(true); setManagerNoticeSeen(true) }}
+            onOpenGallery={() => setPanelOpen(true)}
+          />
+        ) : (
+          <Stage
+            displayed={displayed}
+            onOpenMaskEditor={() => setMaskOpen(true)}
+            onEditResult={editAvailable ? (it) => { void editResultWithMask(it) } : undefined}
+            onAnimateResult={animateAvailable ? (it) => { void animateResult(it) } : undefined}
+            onFullscreen={(it) => { setLightboxPrompt(false); setLightbox(it) }}
+            onShowPrompt={(it) => { setLightboxPrompt(true); setLightbox(it) }}
+            onSaveCharacter={setCharacterFrom}
+            comfyStarting={comfyStarting}
+          />
+        )}
+        {/* On a phone-wide window the Character area takes the whole width
+            (its rails would leave the column 200 px). */}
+        <div className={hubOpen ? 'contents max-[520px]:hidden' : 'contents'}>
+          <CreatePanel open={panelOpen} onOpenChange={setPanelOpen} activeId={shownId} onSelect={openGalleryItem} />
+          <PresetShelf
+            open={presetsOpen}
+            onOpenChange={setPresetsOpen}
+            onSelect={(p) => { setSelectedPreset(p); setPresetStarted(false); setPresetDialogOpen(true) }}
+            resume={selectedPreset && presetStarted && !presetDialogOpen ? { title: selectedPreset.title, onResume: () => setPresetDialogOpen(true) } : null}
+          />
+        </div>
       </div>
 
       {/* Prompt window — full width, beneath the viewer + gallery. */}
-      <Composer
+      {!hubOpen && <Composer
         onOpenAdvanced={() => setAdvancedOpen(true)}
         onOpenWorkflows={() => { setWorkflowsOpen(true); setManagerNoticeSeen(true) }}
-      />
+      />}
 
       <AdvancedDrawer open={advancedOpen} onClose={() => setAdvancedOpen(false)} studioModel={studioPick} />
       <WorkflowsModal open={workflowsOpen} onClose={() => setWorkflowsOpen(false)} />

@@ -89,7 +89,7 @@ export function SwapFramePicker({ max, onCount }: { max: number; onCount: (peopl
   const box = useRef<HTMLDivElement>(null)
   if (!frame) {
     return (
-      <div className="flex h-24 w-full items-center justify-center rounded-lg border border-dashed border-white/10 t-control text-gray-500" data-swap-frame="loading">
+      <div className="hub-dim flex h-24 w-full items-center justify-center hub-fs-125" data-swap-frame="loading">
         Reading the first frame…
       </div>
     )
@@ -115,9 +115,10 @@ export function SwapFramePicker({ max, onCount }: { max: number; onCount: (peopl
     setFigures(next)
   }
 
+  // The Character area (sketches v2): the frame large and without a border,
+  // a small numbered mark per person, the one line under it says what to do.
   return (
-    <div className="flex w-full flex-col items-center gap-1.5" data-swap-frame="picker">
-      <p className="t-control text-gray-300">{SWAP_TAP_TEXT}</p>
+    <div className="flex w-full flex-col items-center gap-2 pt-3" data-swap-frame="picker">
       <div
         ref={box}
         role="group"
@@ -127,8 +128,8 @@ export function SwapFramePicker({ max, onCount }: { max: number; onCount: (peopl
           if (!r || !r.width || !r.height) return
           add((e.clientX - r.left) / r.width, (e.clientY - r.top) / r.height)
         }}
-        className={cn('relative max-w-full overflow-hidden rounded-lg border border-white/10 bg-white/[0.03]', marked < max && 'cursor-crosshair')}
-        style={{ aspectRatio: `${frame.width} / ${frame.height}`, height: `min(46vh, 420px, calc(min(100vw - 58px, 560px) * ${(frame.height / frame.width).toFixed(4)}))` }}
+        className={cn('relative max-w-full overflow-hidden rounded-lg bg-black', marked < max && 'cursor-crosshair')}
+        style={{ aspectRatio: `${frame.width} / ${frame.height}`, height: `min(40vh, 300px, calc(min(100vw - 40px, 490px) * ${(frame.height / frame.width).toFixed(4)}))` }}
       >
         <img src={frame.url} alt="" draggable={false} className="pointer-events-none h-full w-full select-none object-cover" />
         {figures.map((f, i) => f.mark && (
@@ -138,16 +139,19 @@ export function SwapFramePicker({ max, onCount }: { max: number; onCount: (peopl
             aria-label={`Remove mark ${i + 1}`}
             data-swap-mark={i + 1}
             onClick={(e) => { e.stopPropagation(); remove(i) }}
-            // 44 px to hit with a finger or a trackpad, the circle inside is what shows.
+            // 44 px to hit with a finger or a trackpad, the circle inside is
+            // what shows: 22 px, on a phone 26 px.
             className="absolute grid h-11 w-11 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full"
             style={{ left: `${f.mark.x * 100}%`, top: `${f.mark.y * 100}%` }}
           >
-            <span className="grid h-7 w-7 place-items-center rounded-full bg-lu-accent t-control font-semibold text-white shadow-[0_0_0_2px_rgba(255,255,255,0.9),0_2px_8px_rgba(0,0,0,0.45)]">{i + 1}</span>
+            <span className="grid h-[19px] w-[19px] place-items-center rounded-full bg-lu-accent hub-fs-12 font-semibold text-gray-900 shadow-[0_0_0_1.5px_rgba(255,255,255,0.95),0_1px_6px_rgba(0,0,0,0.45)] max-[520px]:h-[23px] max-[520px]:w-[23px]">{i + 1}</span>
           </button>
         ))}
       </div>
-      <p className="t-control text-gray-500" data-swap-frame-count={marked}>
-        {marked === 0 ? 'No mark: the main person is replaced.' : `${marked} of ${max} ${max === 1 ? 'person' : 'people'} marked. Tap a number to remove it.`}
+      <p className="hub-dim text-center hub-fs-12" data-swap-frame-count={marked}>
+        {marked === 0
+          ? `${SWAP_TAP_TEXT}. Without a mark the main person is replaced.`
+          : marked >= max ? `${marked} of ${max} people marked. Tap a number to remove it.` : `${SWAP_TAP_TEXT}. Tap a number to remove it.`}
       </p>
     </div>
   )

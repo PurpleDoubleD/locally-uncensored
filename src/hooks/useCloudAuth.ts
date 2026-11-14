@@ -5,6 +5,7 @@
 // provider setup.
 
 import { clearCreateChatRelease, noteCreateChatRelease } from '../lib/create/chat-release'
+import { clearCharacterHubRelease, noteCharacterHubFromMe } from '../lib/create/character-hub-release'
 import { useCallback, useEffect, useRef } from 'react'
 import { supabaseCloud, savedSessionUser, onOAuthSignedIn } from '../api/cloud/supabase'
 import { isMobile } from '../lib/device-kind'
@@ -53,6 +54,7 @@ export async function probeAccount(): Promise<void> {
     if (stale()) return
     if (!me.user) {
       clearCreateChatRelease()
+      clearCharacterHubRelease()
       store.setSignedOut()
       syncChatProvider()
       syncAppMode()
@@ -61,6 +63,7 @@ export async function probeAccount(): Promise<void> {
     // The same answer says whether Create in chat is released for this
     // account: one probe, two facts (lib/create/chat-release.ts).
     noteCreateChatRelease(me)
+    noteCharacterHubFromMe(me)
     const licenseActive = me.license?.status === 'active'
     // Server-driven access gate (beta is fully open — servers send true for
     // every licensed account): absent on older servers = allowed.
@@ -110,6 +113,7 @@ export async function probeAccount(): Promise<void> {
     }
     if (authFailure || useCloudAuthStore.getState().status === 'probing') {
       clearCreateChatRelease()
+      clearCharacterHubRelease()
       store.setSignedOut()
       syncChatProvider()
       syncAppMode()
@@ -192,6 +196,7 @@ export async function signOutAccount(): Promise<void> {
   // Moment vorgespielt bekommen, waehrend im Hintergrund noch gerechnet wird.
   stopAllBackgroundWork()
   clearCreateChatRelease()
+  clearCharacterHubRelease()
   useCloudAuthStore.getState().setSignedOut()
   syncChatProvider()
   syncAppMode()

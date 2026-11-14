@@ -113,7 +113,8 @@ test('local mode: local lanes usable, cloud-only ops shown as locked teasers', a
 
   // Character Studio joined the local lanes in 2.6.0 (musubi trainer ships
   // in trainer.rs), so it renders as a plain selectable tab now.
-  await expect(page.getByRole('radio', { name: 'Character Studio', exact: true })).toBeVisible()
+  // Since 3.1.0 part B it is the Character area, one pill for four tabs.
+  await expect(page.getByRole('radiogroup', { name: 'Create mode' }).getByRole('radio', { name: 'Character', exact: true })).toBeVisible()
 
   // Enhance Image runs on local ComfyUI on Windows and Linux since 3.0.7
   // (Discord wish D10), so it is a plain local tab here, not a teaser.

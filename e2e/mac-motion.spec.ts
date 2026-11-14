@@ -2,6 +2,7 @@ import { test, expect, type Page } from '@playwright/test'
 import { tauriMockInit, DEFAULT_ASSISTANT_REPLY, DEFAULT_MODEL_NAME, type TauriMockOptions } from './support/tauri-mock'
 import { routeCloud, seedOnboardingDone, cloudSwitch } from './support/cloud-mock'
 import { mlxCalls, comfyCalls, requireCall } from './support/recorded'
+import { openCharacterAction, openCharacterWhat } from './support/character-hub'
 
 /**
  * Motion Control on a Mac (3.0.8). The tab runs on an LTX-2.3 pack of the
@@ -36,7 +37,7 @@ async function bootLocalCreate(page: Page, opts: TauriMockOptions) {
 test('mac motion: the tab offers its LoRA once, then the lane is ready', async ({ page }) => {
   await bootLocalCreate(page, { ...MAC_OPTS, mlx: { ltx2EngineInstalled: true, installedVideos: ['ltx-2.3-q4'] } })
   // A plain tab, not the cloud teaser.
-  await page.getByRole('radio', { name: 'Motion Control', exact: true }).click({ timeout: 15_000 })
+  await openCharacterAction(page, 'Motion Control')
   await expect(page.getByText('Local motion control needs a one-time download')).toBeVisible({ timeout: 15_000 })
   await expect(page.getByText(/about 650 MB/)).toBeVisible()
   await page.getByRole('button', { name: /Download & install/i }).click()
@@ -52,7 +53,7 @@ test('mac motion: the tab offers its LoRA once, then the lane is ready', async (
 
 test('mac motion: a run stages the image and the motion video and starts the LTX pack with both', async ({ page }) => {
   await bootLocalCreate(page, { ...MAC_OPTS, mlx: { ltx2EngineInstalled: true, installedVideos: ['ltx-2.3-q4', 'ltx-2.3-motion-control'] } })
-  await page.getByRole('radio', { name: 'Motion Control', exact: true }).click({ timeout: 15_000 })
+  await openCharacterAction(page, 'Motion Control')
   await expect(page.getByText('Add driving video (dance/pose)')).toBeVisible({ timeout: 15_000 })
   // The length follows the pack: 49 frames at 24 a second.
   await expect(page.getByTestId('mac-video-length')).toContainText('49 frames')
@@ -78,6 +79,7 @@ test('mac motion: a run stages the image and the motion video and starts the LTX
 
 test('mac motion: without an LTX-2.3 pack the tab stays the cloud teaser', async ({ page }) => {
   await bootLocalCreate(page, { ...MAC_OPTS, mlx: { ltx2EngineInstalled: true, installedVideos: ['ltx-2.5-q4'] } })
+  await openCharacterWhat(page)
   await expect(page.getByRole('radio', { name: 'Motion Control, runs on LU Cloud' })).toBeVisible({ timeout: 15_000 })
   await expect(page.getByRole('radio', { name: 'Motion Control', exact: true })).toHaveCount(0)
 })

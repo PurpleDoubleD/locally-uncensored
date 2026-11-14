@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import { ChevronDown, Search } from 'lucide-react'
@@ -20,6 +20,9 @@ export interface SelectOption {
   /** Listed, but not pickable right now; `sublabel` says why (Swap Character:
    *  Kling "one person only" with several people). */
   disabled?: boolean
+  /** Small picture before the name, in the list and in a closed `text`
+   *  field (the avatar of a character in the Character area). */
+  lead?: ReactNode
 }
 
 /** Eine Marke im Etiketten-Stil der Modellwaehler (index.css, .lu-picker-tag):
@@ -42,6 +45,11 @@ interface Props {
   maxHeight?: number
   /** Beschriftung fuer Bedienhilfen, wo kein sichtbarer Text danebensteht. */
   ariaLabel?: string
+  /** 'text': no box, the value as text with a small arrow, as the model
+   *  choice in the chat (Character area, sketches v2). Default 'box'. */
+  variant?: 'box' | 'text'
+  /** Class of the closed field's text (the `text` variant). */
+  textClassName?: string
 }
 
 export function Select({
@@ -55,6 +63,8 @@ export function Select({
   className,
   maxHeight = 280,
   ariaLabel,
+  variant = 'box',
+  textClassName,
 }: Props) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
@@ -157,15 +167,21 @@ export function Select({
           aria-haspopup="listbox"
           aria-expanded={open}
           className={cn(
-            't-control inline-flex w-full items-center justify-between gap-2 px-2.5',
-            'rounded-[var(--radius-control)] transition-colors',
-            'bg-white/[0.04] border border-white/[0.08]',
-            'hover:border-white/15 text-gray-200',
-            controlHeight,
+            variant === 'text'
+              ? 'inline-flex max-w-full items-center gap-1.5 rounded-md text-gray-200 hover:text-white transition-colors'
+              : cn(
+                't-control inline-flex w-full items-center justify-between gap-2 px-2.5',
+                'rounded-[var(--radius-control)] transition-colors',
+                'bg-white/[0.04] border border-white/[0.08]',
+                'hover:border-white/15 text-gray-200',
+                controlHeight,
+              ),
+            variant === 'text' && textClassName,
           )}
         >
           <span className="flex min-w-0 items-center gap-1.5">
             {current?.badge && <Badge tag={current.badge} />}
+            {variant === 'text' && current?.lead}
 
             <span className="truncate" title={current?.title}>
               {current?.label ?? placeholder}
@@ -272,6 +288,7 @@ export function Select({
                         className={cn('lu-picker-row w-[calc(100%-8px)] text-left', option.disabled && 'cursor-not-allowed opacity-45')}
                       >
                         {option.badge && <Badge tag={option.badge} />}
+                        {option.lead}
 
                         <span className="lu-picker-name truncate">
                           {option.label}

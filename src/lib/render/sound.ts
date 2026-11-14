@@ -40,9 +40,13 @@ export const LIPSYNC_ONE_PERSON = 'Lip sync works with one person'
 export const LIPSYNC_CLOUD_ONLY = 'Cloud only'
 export const LIPSYNC_NOT_AVAILABLE = 'Lip sync is not available on this LU Cloud'
 
-/** Where the sound choice stands: Swap and Motion, cloud only. */
-export function soundApplies(intent: string, backend: string): boolean {
-  if (backend !== 'cloud') return false
+/** Where the sound choice stands: Swap and Motion, cloud only, and only for
+ *  an account the server released the Character area for (features.characterHub,
+ *  lib/create/character-hub-release.ts). Without the switch the server takes
+ *  no `sound` but the original, so the run sends none and the choice is not
+ *  shown. */
+export function soundApplies(intent: string, backend: string, released: boolean): boolean {
+  if (backend !== 'cloud' || !released) return false
   return intent === 'motion' || isSwapIntent(intent)
 }
 

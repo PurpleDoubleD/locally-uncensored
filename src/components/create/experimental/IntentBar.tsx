@@ -2,7 +2,8 @@ import { Cloud } from 'lucide-react'
 import { useCreateStore } from '../../../stores/createStore'
 import { useUIStore, type CloudTeaserTarget } from '../../../stores/uiStore'
 import { useSettingsStore } from '../../../stores/settingsStore'
-import { isIntentLocked, visibleIntents } from './intents'
+import { isIntentLocked, pillEntries, visibleIntents, type IntentMeta } from './intents'
+import { HUB_INTENTS, isHubIntent } from '../../../lib/create/character-hub'
 import { isMlxImageHost } from '../../../api/mlx-image'
 import { mlxFollowsMotion, mlxTakesStartImage, mlxTalking } from '../../../api/mlx-video'
 import { mlxMakesMusic } from '../../../lib/mac-music'
@@ -65,8 +66,95 @@ type TeaserIntent = Extract<CloudTeaserTarget, { surface: 'intent' }>['intent']
 export function IntentBar() {
   const intent = useCreateStore((s) => s.intent())
   const setIntent = useCreateStore((s) => s.setIntent)
-  const backend = useCreateStore((s) => s.backend)
+  const openCharacterHub = useCreateStore((s) => s.openCharacterHub)
   const setCloudTeaser = useUIStore((s) => s.setCloudTeaser)
+  const { intents, lockedOf } = useIntentLanes()
+
+  return (
+    <div
+      role="radiogroup"
+      aria-label="Create mode"
+      // Bis 2.6.7 stand hier `transform: scale(0.763)`, eine dritte
+      // Skalierungsschicht neben dem 18,4px-Wurzelmass und dem `zoom: 1.25`
+      // der Sidebar. `transform` skaliert nur das BILD: die Leiste belegte
+      // weiter ihre ungeschrumpfte Layoutbreite (gemessen 1084,7px fuer eine
+      // sichtbar 827px breite Zeile) und jede Haarlinie darin wurde auf
+      // 0,763px gemalt. Die 0,763 stehen jetzt in den Groessen selbst:
+      // jede rem-Laenge dieser Leiste ist ihr altes Mass mal 0,763, in
+      // ganzen Pixeln des 16px-Rasters (36px Pille -> 28px, 16px Icon ->
+      // 12px = ICON_SM, 12px Label -> 9px).
+      // 05.09.2026: die Leiste klebte an der Hauptnavigation. Gemessen
+      // am Windows-Bau (1296x808): 9,2 gerenderte px zwischen Kopfzeilenkante
+      // und Leiste, 10,9 bis zur ersten Pille. `pt-1.5` legt 4,5
+      // Entwurfspixel dazu, gerendert gut 5. Das ist die „minimale
+      // Luftschicht, wenige Pixel, nicht mehr", die er verlangt hat. Unten bleibt es bei
+      // den 1,5px: darunter steht die Buehne, und die stand nie zu eng.
+      className="flex flex-wrap items-center justify-center gap-x-[3px] gap-y-[3px] px-3 pt-1.5 pb-[1.5px] [--text-control:9px]"
+    >
+      {pillEntries(intents).map(({ meta, hub }) => {
+        // The Character pill locks only where none of its actions runs here
+        // (never so far: Character Studio has a lane on every host).
+        const locked = hub
+          ? intents.filter((m) => HUB_INTENTS.includes(m.id)).every((m) => lockedOf(m))
+          : lockedOf(meta)
+        const selected = !locked && (hub ? isHubIntent(intent) : intent === meta.id)
+        const Icon = meta.icon
+        return (
+          <button
+            key={meta.id}
+            role="radio"
+            aria-checked={selected}
+            aria-label={locked ? `${meta.label}, runs on LU Cloud` : meta.label}
+            title={locked ? `${meta.label}, runs on LU Cloud` : meta.label}
+            onClick={() =>
+              locked
+                ? setCloudTeaser({ surface: 'intent', intent: meta.id as TeaserIntent })
+                : hub ? openCharacterHub() : setIntent(meta.id)
+            }
+            className={cn(
+              'relative flex items-center h-7 rounded-full border transition-[background-color,border-color,box-shadow,color] duration-200',
+              EASE,
+              selected
+                ? 'bg-white/[0.11] border-white/20 shadow-sm text-white'
+                : locked
+                  ? 'border-transparent text-gray-600 hover:text-gray-400 hover:bg-white/[0.03]'
+                  : 'border-transparent text-gray-500 hover:text-gray-200 hover:bg-white/[0.05]',
+            )}
+          >
+            <span className="grid place-items-center w-7 h-7 shrink-0">
+              <Icon size={ICON_SM} />
+            </span>
+            {locked && (
+              // Brighter, theme-aware cloud tag: violet-300/80 was near
+              // invisible on light backgrounds and easy to miss on dark.
+              <Cloud
+                size={8}
+                className="absolute top-[1.5px] right-[1.5px] text-violet-500 dark:text-violet-200"
+                aria-hidden
+              />
+            )}
+            <span className={cn('whitespace-nowrap t-control pl-[3px]', hub ? 'pr-[5px]' : 'pr-[10.5px]')}>
+              {meta.short}
+            </span>
+            {hub && (
+              // The area is new in 3.1.0: one quiet mark, accent text on a
+              // faint accent ground, as in the sketches.
+              <span className="mr-[5px] rounded-full bg-lu-accent/15 px-[5px] py-px lu-new-mark text-lu-accent" aria-hidden>
+                NEW
+              </span>
+            )}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+/** The tabs this host shows and which of them are locked cloud teasers: one
+ *  answer for the bar and for step 2 of the Character area. The rules live
+ *  in intents.ts (pure, unit tested); this only reads the host. */
+export function useIntentLanes(): { intents: IntentMeta[]; lockedOf: (meta: IntentMeta) => boolean } {
+  const backend = useCreateStore((s) => s.backend)
   // Every tool that can run or be previewed is in the bar. With "Show Cloud
   // features in Local mode" off, the hosted-only tools are left out of the
   // local bar (visibleIntents). The 2.5.8 lanes with hasLocalLane
@@ -96,72 +184,6 @@ export function IntentBar() {
   // And Talking Character while a video model that talks is installed.
   const mlxTalk = useCreateStore((s) => mlxTalking(s.videoModelList).tab)
   const intents = visibleIntents(backend, mlxHost, cloudFeatures, mlxAnimate, mlxEdit, mlxUpscale, mlxMusic, mlxMotion, mlxTalk)
-
-  return (
-    <div
-      role="radiogroup"
-      aria-label="Create mode"
-      // Bis 2.6.7 stand hier `transform: scale(0.763)`, eine dritte
-      // Skalierungsschicht neben dem 18,4px-Wurzelmass und dem `zoom: 1.25`
-      // der Sidebar. `transform` skaliert nur das BILD: die Leiste belegte
-      // weiter ihre ungeschrumpfte Layoutbreite (gemessen 1084,7px fuer eine
-      // sichtbar 827px breite Zeile) und jede Haarlinie darin wurde auf
-      // 0,763px gemalt. Die 0,763 stehen jetzt in den Groessen selbst:
-      // jede rem-Laenge dieser Leiste ist ihr altes Mass mal 0,763, in
-      // ganzen Pixeln des 16px-Rasters (36px Pille -> 28px, 16px Icon ->
-      // 12px = ICON_SM, 12px Label -> 9px).
-      // 05.09.2026: die Leiste klebte an der Hauptnavigation. Gemessen
-      // am Windows-Bau (1296x808): 9,2 gerenderte px zwischen Kopfzeilenkante
-      // und Leiste, 10,9 bis zur ersten Pille. `pt-1.5` legt 4,5
-      // Entwurfspixel dazu, gerendert gut 5. Das ist die „minimale
-      // Luftschicht, wenige Pixel, nicht mehr", die er verlangt hat. Unten bleibt es bei
-      // den 1,5px: darunter steht die Buehne, und die stand nie zu eng.
-      className="flex flex-wrap items-center justify-center gap-x-[3px] gap-y-[3px] px-3 pt-1.5 pb-[1.5px] [--text-control:9px]"
-    >
-      {intents.map((meta) => {
-        const locked = isIntentLocked(meta, backend, mlxHost, mlxAnimate, mlxEdit, mlxUpscale, mlxMusic, mlxMotion, mlxTalk)
-        const selected = !locked && intent === meta.id
-        const Icon = meta.icon
-        return (
-          <button
-            key={meta.id}
-            role="radio"
-            aria-checked={selected}
-            aria-label={locked ? `${meta.label}, runs on LU Cloud` : meta.label}
-            title={locked ? `${meta.label}, runs on LU Cloud` : meta.label}
-            onClick={() =>
-              locked
-                ? setCloudTeaser({ surface: 'intent', intent: meta.id as TeaserIntent })
-                : setIntent(meta.id)
-            }
-            className={cn(
-              'relative flex items-center h-7 rounded-full border transition-[background-color,border-color,box-shadow,color] duration-200',
-              EASE,
-              selected
-                ? 'bg-white/[0.11] border-white/20 shadow-sm text-white'
-                : locked
-                  ? 'border-transparent text-gray-600 hover:text-gray-400 hover:bg-white/[0.03]'
-                  : 'border-transparent text-gray-500 hover:text-gray-200 hover:bg-white/[0.05]',
-            )}
-          >
-            <span className="grid place-items-center w-7 h-7 shrink-0">
-              <Icon size={ICON_SM} />
-            </span>
-            {locked && (
-              // Brighter, theme-aware cloud tag: violet-300/80 was near
-              // invisible on light backgrounds and easy to miss on dark.
-              <Cloud
-                size={8}
-                className="absolute top-[1.5px] right-[1.5px] text-violet-500 dark:text-violet-200"
-                aria-hidden
-              />
-            )}
-            <span className="whitespace-nowrap t-control pl-[3px] pr-[10.5px]">
-              {meta.short}
-            </span>
-          </button>
-        )
-      })}
-    </div>
-  )
+  const lockedOf = (meta: IntentMeta) => isIntentLocked(meta, backend, mlxHost, mlxAnimate, mlxEdit, mlxUpscale, mlxMusic, mlxMotion, mlxTalk)
+  return { intents, lockedOf }
 }

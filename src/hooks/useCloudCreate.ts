@@ -46,6 +46,7 @@ import { adoptSwapFrame, swapInputError, swapRunParams } from '../lib/create/swa
 import { swapConfirmedFrame } from '../lib/create/swap-frame'
 import { lipsyncCredits, soundApplies, soundClipSeconds, soundInputError, soundParam, soundStudioOptions } from '../lib/render/sound'
 import { lipsyncFailedText, runLipsyncStep } from '../lib/create/lipsync-chain'
+import { characterHubReleasedHere } from '../lib/create/character-hub-release'
 import { mediaSeconds } from '../components/create/experimental/useStudioPrice'
 import { IMPROVING_PROMPT } from '../lib/render/improve-prompt'
 import { improveKindForRun } from '../lib/render/music-ui'
@@ -475,6 +476,12 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
     // that run would go out as a plain motion job, so it stops here.
     const swap = isSwapIntent(intent)
     if (swap) {
+      // Without the account switch the server refuses the swap (403
+      // preview_feature_off); the panel says "Coming soon" and no run starts.
+      if (!characterHubReleasedHere()) {
+        s.setError('Swap Character is coming soon to your LU Cloud.')
+        return
+      }
       if (!studioModel) {
         s.setError('Swap Character needs a newer LU Cloud. Try again later.')
         return
@@ -493,7 +500,7 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
     }
     // Sound (14.11.2026, lib/render/sound.ts): Swap and Motion on the cloud.
     // A new voice with lips needs the voice and at most one person.
-    const sound = soundApplies(intent, 'cloud') ? s.sound : undefined
+    const sound = soundApplies(intent, 'cloud', characterHubReleasedHere()) ? s.sound : undefined
     {
       const people = swap ? s.swapFigures.length : 1
       const invalid = soundInputError(sound, people, 'cloud', !!s.audioInput || !!s.voiceFromJob, s.lipsyncModel)
