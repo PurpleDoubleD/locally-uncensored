@@ -12,7 +12,8 @@
         "visible": false,
         "decorations": false,
         "transparent": false,
-        "dragDropEnabled": false
+        "dragDropEnabled": false,
+        "backgroundThrottling": "disabled"
       }
     ]
   },
