@@ -50,7 +50,7 @@ export function isPhoneTurn(convId: string | null | undefined): boolean {
 
 /** What a card tool answers in a phone turn. */
 export const PHONE_TURN_NO_CARD =
-  'Error: this chat runs from the paired phone, where the confirmation card of this computer is not shown. Nothing changed. Tell the user to ask for it at the computer.'
+  'NOT DONE. Nothing changed. This message came from the paired phone, and LU only makes this change when the user asks for it at the computer itself. Tell the user so: nothing was changed, and they can ask for it again at the computer.'
 
 /**
  * The category a tool counts as for the phone's rights. A tool of an
