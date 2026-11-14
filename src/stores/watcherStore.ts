@@ -31,7 +31,13 @@ interface WatcherSettingsState {
   sound: boolean
   /** 'all': results and errors; 'errors': only when a run failed. */
   notifyOn: WatcherNotifyOn
-  update: (patch: Partial<Pick<WatcherSettingsState, 'notify' | 'sound' | 'notifyOn'>>) => void
+  /** The first watcher of this install has sent its "set" notification. On a
+   *  Mac the first notification of an app brings the system's permission
+   *  question, and the banner itself is then only filed away (live test
+   *  14.11.2026). So the question comes when the user makes a watcher and is
+   *  at the computer, not with the first result at 3 a.m. */
+  greeted: boolean
+  update: (patch: Partial<Pick<WatcherSettingsState, 'notify' | 'sound' | 'notifyOn' | 'greeted'>>) => void
 }
 
 /** Settings → Agent → Watchers. Kept apart from the big settings blob: three
@@ -42,6 +48,7 @@ export const useWatcherSettingsStore = create<WatcherSettingsState>()(
       notify: true,
       sound: true,
       notifyOn: 'all',
+      greeted: false,
       update: (patch) => set(patch),
     }),
     { name: 'lu-watcher-settings', version: 1, storage: safeJSONStorage() },

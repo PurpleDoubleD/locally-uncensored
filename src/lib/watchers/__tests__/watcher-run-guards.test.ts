@@ -49,3 +49,24 @@ describe('the cap of a watcher run', () => {
     expect(usePermissionStore.getState().getEffectivePermissionForTool('shell_execute', 'terminal', 'phone-chat')).toBe('confirm')
   })
 })
+
+describe('the first watcher of an install', () => {
+  it('sends one quiet "set" notification, so the system asks for permission while the user is there', async () => {
+    const { vi } = await import('vitest')
+    const backend = await import('../../../api/backend')
+    const spy = vi.spyOn(backend, 'backendCall').mockResolvedValue(null as never)
+    const { useWatcherSettingsStore } = await import('../../../stores/watcherStore')
+    const { greetOnce } = await import('../tool-exec')
+    useWatcherSettingsStore.setState({ greeted: false, notify: true })
+    const made = { ...w, schedule: { kind: 'interval', minutes: 60 }, next_at: null } as Watcher
+    await greetOnce(made)
+    await greetOnce(made)
+    const notes = spy.mock.calls.filter(([cmd]) => cmd === 'watchers_notify')
+    expect(notes).toHaveLength(1)
+    expect(notes[0][1]).toMatchObject({ title: 'Watcher set', sound: false })
+    useWatcherSettingsStore.setState({ greeted: false, notify: false })
+    await greetOnce(made)
+    expect(spy.mock.calls.filter(([cmd]) => cmd === 'watchers_notify')).toHaveLength(1)
+    spy.mockRestore()
+  })
+})

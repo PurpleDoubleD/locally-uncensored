@@ -12,7 +12,7 @@ import { backendCall, isTauri } from '../../api/backend'
 import { getProviderIdFromModel } from '../../api/providers/model-name'
 import { useModelStore } from '../../stores/modelStore'
 import { useAgentModeStore } from '../../stores/agentModeStore'
-import { useWatcherStore } from '../../stores/watcherStore'
+import { useWatcherStore, useWatcherSettingsStore } from '../../stores/watcherStore'
 import { isPaidProvider } from '../send-window'
 import { sendsToALanBackend } from '../lan-openai-slot'
 import { asksAboutWatchers } from '../watcher-tool-names'
@@ -62,6 +62,17 @@ function firstRun(s: WatcherSchedule, now: number): number | null {
 function clipTask(t: string): string {
   const s = t.trim().replace(/\s+/g, ' ')
   return s.length > TASK_SHOWN ? `${s.slice(0, TASK_SHOWN - 1)}…` : s
+}
+
+/** Once per install, while the user is at the computer: a short "set"
+ *  notification, so the system asks for permission now and not with the
+ *  first result. Only with notifications on. */
+export async function greetOnce(w: Watcher): Promise<void> {
+  const s = useWatcherSettingsStore.getState()
+  if (s.greeted || !s.notify) return
+  s.update({ greeted: true })
+  const next = w.next_at ? `next ${whenText(w.next_at, Date.now())}` : repeatText(w.schedule)
+  await backendCall('watchers_notify', { title: 'Watcher set', body: `${w.name} · ${next}. Results come here.`, sound: false }).catch(() => null)
 }
 
 async function listing(): Promise<WatcherListing> {
@@ -118,6 +129,7 @@ export async function executeWatcherCreate(args: ToolArgs, run?: AgentRunContext
   try {
     const w = await backendCall<Watcher>('watchers_create', { spec })
     void listing().catch(() => {})
+    void greetOnce(w)
     const next = w.next_at ? whenText(w.next_at, Date.now()) : 'now'
     return `Watcher "${w.name}" is set (id ${w.id.slice(0, 8)}): ${repeatText(w.schedule)}, next run ${next}. `
       + 'It runs as long as LU runs, also with the window closed, and ends when LU quits. The user sees it above the message box.'
