@@ -1098,6 +1098,15 @@ pub fn run() {
             commands::media_cmds::mlx_music_progress,
             #[cfg(desktop)]
             commands::media_cmds::mlx_music_cancel,
+            // Create, 3D to Blender. See commands/blender.rs.
+            #[cfg(desktop)]
+            commands::blender::blender_status,
+            #[cfg(desktop)]
+            commands::blender::blender_open,
+            #[cfg(desktop)]
+            commands::blender::blender_convert,
+            #[cfg(desktop)]
+            commands::blender::blender_cancel,
             // The 3D engine of the Mac (TripoSR). See commands/mesh3d.rs.
             #[cfg(desktop)]
             commands::media_cmds::mlx_mesh3d_status,
@@ -2250,6 +2259,19 @@ mod log_file_tests {
             "commands::runtime_folder::runtime_folder_status",
             "commands::runtime_folder::set_runtime_folder",
             "commands::runtime_folder::move_runtime_folder",
+        ] {
+            assert!(SRC.contains(cmd), "{cmd} is not in generate_handler!");
+        }
+    }
+
+    #[test]
+    fn the_frontend_can_actually_reach_the_blender_commands() {
+        // Create, 3D: the viewer's "Open in Blender", ".blend" and "FBX".
+        for cmd in [
+            "commands::blender::blender_status",
+            "commands::blender::blender_open",
+            "commands::blender::blender_convert",
+            "commands::blender::blender_cancel",
         ] {
             assert!(SRC.contains(cmd), "{cmd} is not in generate_handler!");
         }
