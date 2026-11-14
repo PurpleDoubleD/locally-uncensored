@@ -287,9 +287,9 @@ export function systemVoiceUsable(): boolean {
 //
 // The recorder (api/voice.ts) does not hand out its stream, so the meter
 // takes the stream at the moment the recorder asks the browser for it and
-// listens to it through an analyser of its own. Measured only on a phone, so
-// a desktop recording is exactly what it was. A meter that cannot be built
-// never costs the take: the level then stays at 0.
+// listens to it through an analyser of its own. Measured on the phone since
+// L18 and on desktop and web since 3.1.0 (the live trace in the composer). A
+// meter that cannot be built never costs the take: the level then stays at 0.
 let micLevel = 0;
 const levelListeners = new Set<() => void>();
 
@@ -721,14 +721,11 @@ export function useVoice() {
       recorderRef.current = recorder;
 
       try {
-        if (isMobile()) {
-          // The same start, with the stream handed out for the level meter.
-          const stream = await startRecorderWithStream(recorder);
-          dropMeter(meterRef);
-          meterRef.current = stream ? startLevelMeter(stream) : null;
-        } else {
-          await recorder.start();
-        }
+        // The same start, with the stream handed out for the level meter
+        // (the live trace in every composer, 14.11.2026).
+        const stream = await startRecorderWithStream(recorder);
+        dropMeter(meterRef);
+        meterRef.current = stream ? startLevelMeter(stream) : null;
         store.setRecording(true);
         store.setTranscript("");
 
