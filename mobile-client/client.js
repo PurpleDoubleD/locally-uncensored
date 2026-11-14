@@ -24,7 +24,9 @@ import {
   buildToolDefs,
   capToolResult,
   compactApiMessages,
+  countAgentHourTokens,
   decayToolResults,
+  estimateAgentTokens,
   extractToolCallsFromContent,
   isDecayedAt,
   isSystemPromptEcho,
@@ -1879,7 +1881,21 @@ import {
       // context with room to spare for the model's reply.
       apiMessages = compactApiMessages(apiMessages, 24000);
 
+      var sentChars = JSON.stringify(apiMessages).length + JSON.stringify(tools).length;
       nativeToolChat(apiMessages, tools).then(function(res){
+        // Hourly token limit (agent-core.js): estimated from the characters
+        // that went out and came back. Over it, the run ends here, before
+        // any further tool runs, and the next message goes on.
+        var gotChars = (res.content || '').length + (res.thinking || '').length + JSON.stringify(res.toolCalls || []).length;
+        if(countAgentHourTokens(estimateAgentTokens(sentChars + gotChars))){
+          if(thinkingStepIdx >= 0 && target.agentSteps && target.agentSteps[thinkingStepIdx]){
+            target.agentSteps.splice(thinkingStepIdx, 1);
+            thinkingStepIdx = -1;
+          }
+          appendAgentStep('error', 'Paused: agent runs from this phone sent a lot to the model in the last hour. Send a message to go on.');
+          finishToolLoop(null);
+          return;
+        }
         // Remove the initial "thinking" placeholder on the first
         // successful response (only matters for iter === 1).
         if(thinkingStepIdx >= 0 && target.agentSteps && target.agentSteps[thinkingStepIdx]){

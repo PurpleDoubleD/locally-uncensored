@@ -347,10 +347,58 @@ import { stripNonCanonicalTags } from './personas.js'
     cleaned = stripNonCanonicalTags(cleaned).trim();
     return {content: cleaned, thinking: think};
   }
+  // ── Hourly token limit for agent runs from the phone (CA, 14.11.2026) ──
+  // The phone cannot see what the desktop's model costs (a local engine or a
+  // cloud model with the user's own paid key behind the relay), and the relay
+  // reports no token counts. One run is capped at 50 steps; runs one after
+  // another were not capped at all. So both phone loops (this page and the
+  // app, src/mobile/remote/remoteAgent.ts) count an ESTIMATE from the
+  // characters sent and received, for every model, and pause once per hour
+  // above the limit: the desktop's hourly pause in tokens instead of credits.
+  // About 250 full steps an hour, which a local model rarely meets.
+  var AGENT_HOUR_TOKEN_LIMIT = 2000000;
+  // Below the usual 4: an estimate that runs high pauses early, never late.
+  var AGENT_CHARS_PER_TOKEN = 3.5;
+  var AGENT_HOUR_KEY = 'lu-remote-agent-token-hour';
+  var AGENT_HOUR_MS = 60 * 60 * 1000;
+
+  function estimateAgentTokens(chars){
+    return chars > 0 ? Math.ceil(chars / AGENT_CHARS_PER_TOKEN) : 0;
+  }
+
+  // Count one step. True when the hour is over the limit and no pause
+  // happened in this hour yet: the caller stops, and the user's next message
+  // goes on for another hour. A failing store means a fresh hour.
+  function countAgentHourTokens(tokens, now, limit){
+    if(now === undefined) now = Date.now();
+    if(limit === undefined) limit = AGENT_HOUR_TOKEN_LIMIT;
+    var state = {entries: [], pausedAt: null};
+    try {
+      var raw = globalThis.localStorage && globalThis.localStorage.getItem(AGENT_HOUR_KEY);
+      var s = raw ? JSON.parse(raw) : {};
+      if(Array.isArray(s.entries)){
+        state.entries = s.entries.filter(function(e){
+          return e && typeof e.at === 'number' && typeof e.tokens === 'number' && isFinite(e.tokens) && now - e.at < AGENT_HOUR_MS;
+        });
+      }
+      if(typeof s.pausedAt === 'number' && now - s.pausedAt < AGENT_HOUR_MS) state.pausedAt = s.pausedAt;
+    } catch(_e){ /* a fresh hour */ }
+    if(tokens > 0) state.entries.push({at: now, tokens: tokens});
+    var sum = 0;
+    for(var i = 0; i < state.entries.length; i++) sum += state.entries[i].tokens;
+    var pause = limit > 0 && sum >= limit && state.pausedAt === null;
+    if(pause) state.pausedAt = now;
+    try { globalThis.localStorage && globalThis.localStorage.setItem(AGENT_HOUR_KEY, JSON.stringify(state)); } catch(_e){ /* a fresh hour */ }
+    return pause;
+  }
+
 /*@@LU_TOOLING_ONLY@@*/
 // Cut out by src-tauri/build.rs — see caveman.js.
 export {
   AGENT_ALL_TOOLS,
+  AGENT_CHARS_PER_TOKEN,
+  AGENT_HOUR_KEY,
+  AGENT_HOUR_TOKEN_LIMIT,
   AGENT_TOOLS,
   CODEX_TOOLS,
   DECAY_AFTER_ITERATIONS,
@@ -362,8 +410,10 @@ export {
   buildToolDefs,
   capToolResult,
   compactApiMessages,
+  countAgentHourTokens,
   decayToolResults,
   dropOldImages,
+  estimateAgentTokens,
   extractToolCallsFromContent,
   isDecayedAt,
   isSystemPromptEcho,

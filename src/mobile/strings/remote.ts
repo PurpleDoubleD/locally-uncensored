@@ -177,6 +177,7 @@ export const REMOTE_STRINGS = {
     endMaxSteps: 'The model stopped after the highest number of steps.',
     endToolErrors: 'The model stopped because several steps in a row failed.',
     endLooping: 'Stopped because the model kept repeating the same steps.',
+    endCostLimit: 'Paused: agent runs from this phone sent a lot to the model in the last hour. Send a message to go on.',
     missingTitle: 'This remote chat is not on this phone',
     missingText: 'It may have been deleted. Your other remote chats are in the list.',
     backToList: 'Back to remote chats',

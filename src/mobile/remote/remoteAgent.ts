@@ -32,6 +32,7 @@
  * bekommt die Schritte und das Ende als Daten.
  */
 import { AgentLoopGuard } from '../../lib/agent-loop-guard'
+import { countRemoteStep, estimateRemoteTokens } from '../../lib/agent-core/remote-token-hour'
 import {
   AGENT_TOOLS,
   buildToolDefs,
@@ -334,6 +335,9 @@ export type RemoteAgentEnd =
   /** Der Loop-Guard hat den Lauf beendet: dieselben Aufrufe immer wieder
    *  (lib/agent-loop-guard.ts, derselbe Waechter wie am Desktop, CA 14.11.). */
   | 'looping'
+  /** Die Stundengrenze fuer Agentenlaeufe vom Handy ist erreicht
+   *  (lib/agent-core/remote-token-hour.ts, CA 14.11.). */
+  | 'cost-limit'
   /** Das Modell kann keine Werkzeuge. */
   | 'no-tools'
 
@@ -448,14 +452,24 @@ export async function runRemoteAgentLoop(run: RemoteAgentRun): Promise<RemoteAge
       decayToolResults(messages, iter)
       messages = compactApiMessages(messages, HISTORY_CHAR_BUDGET) as LoopMessage[]
 
+      const sent = messages.map(({ iter: _iter, ...message }) => message)
       const answer = await run.client.chatWithTools({
         model: run.model,
         // `iter` ist Buchhaltung dieser Schleife und geht nicht an den Desktop.
-        messages: messages.map(({ iter: _iter, ...message }) => message),
+        messages: sent,
         tools,
         think: run.think,
         signal: run.signal,
       })
+      // Kosten: geschaetzt aus den Zeichen, die hin und zurueck gingen. Ueber
+      // der Stundengrenze endet der Lauf hier, bevor weitere Werkzeuge laufen.
+      {
+        const chars = JSON.stringify(sent).length + JSON.stringify(tools).length
+          + (answer.content?.length ?? 0) + (answer.thinking?.length ?? 0) + JSON.stringify(answer.toolCalls ?? []).length
+        if (countRemoteStep(estimateRemoteTokens(chars))) {
+          return finish('cost-limit', [lastContent, answer.content ?? ''].filter((x) => x.trim()).join('\n\n'))
+        }
+      }
       if (answer.thinking && run.keepThinking) thinking = thinking ? `${thinking}\n${answer.thinking}` : answer.thinking
 
       let content = answer.content
