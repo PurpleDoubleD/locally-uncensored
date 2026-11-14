@@ -2,9 +2,9 @@
   "generator": "scripts/studio-snapshot.mjs",
   "note": "Generated files. Do not edit them by hand: run the generator against the web commit this release ships with.",
   "web": {
-    "ref": "3b5d5980",
-    "commit": "3b5d5980a8ce8e52893d54115a6fd5273c76a83c",
-    "committed": "2026-11-13T19:36:35-08:00",
+    "ref": "cc5a1354",
+    "commit": "cc5a1354b496824464a424a718bbd20d19ed2273",
+    "committed": "2026-11-13T20:32:57-08:00",
     "dirty": false
   },
   "files": {
