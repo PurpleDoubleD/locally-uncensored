@@ -323,12 +323,14 @@ async function runPictureFirst(args: {
     submit: async (job) => {
       s.setProgress(job.kind === 'image' ? 6 : 52, 'Submitting to the render queue…')
       const step = job.kind === 'image' ? pictureFields(job.prompt) : meshFields()
+      // Only the mesh step carries its own gallery title; the picture step has its prompt.
+      const stepLabel = 'label' in step ? step.label : ''
       const out = await submitNoted({ kind: job.kind, model: job.model, prompt: job.prompt, params: job.params }, {
-        op: 'studio', prompt: job.prompt || step.label || '', timeoutMs, landing: 'gallery', items: [step],
+        op: 'studio', prompt: job.prompt || stepLabel || '', timeoutMs, landing: 'gallery', items: [step],
       })
       const now = Date.now()
       notePendingCloudJob({
-        id: out.id, kind: job.kind, op: 'studio', model: job.model, prompt: job.prompt || step.label || '',
+        id: out.id, kind: job.kind, op: 'studio', model: job.model, prompt: job.prompt || stepLabel || '',
         startedAt: now, deadlineAt: now + timeoutMs, landing: 'gallery', item: step,
       })
       if (job.params.client_request_id) settleCloudSubmitIntent(job.params.client_request_id, true)
