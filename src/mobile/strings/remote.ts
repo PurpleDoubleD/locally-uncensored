@@ -176,6 +176,7 @@ export const REMOTE_STRINGS = {
     photoAlt: 'Attached photo',
     endMaxSteps: 'The model stopped after the highest number of steps.',
     endToolErrors: 'The model stopped because several steps in a row failed.',
+    endLooping: 'Stopped because the model kept repeating the same steps.',
     missingTitle: 'This remote chat is not on this phone',
     missingText: 'It may have been deleted. Your other remote chats are in the list.',
     backToList: 'Back to remote chats',

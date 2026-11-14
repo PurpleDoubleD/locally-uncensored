@@ -31,6 +31,7 @@
  * Kein Store, keine Oberflaeche, kein Text fuer den Nutzer. Der Aufrufer
  * bekommt die Schritte und das Ende als Daten.
  */
+import { AgentLoopGuard } from '../../lib/agent-loop-guard'
 import {
   AGENT_TOOLS,
   buildToolDefs,
@@ -330,6 +331,9 @@ export type RemoteAgentEnd =
   | 'aborted'
   | 'max-iterations'
   | 'tool-errors'
+  /** Der Loop-Guard hat den Lauf beendet: dieselben Aufrufe immer wieder
+   *  (lib/agent-loop-guard.ts, derselbe Waechter wie am Desktop, CA 14.11.). */
+  | 'looping'
   /** Das Modell kann keine Werkzeuge. */
   | 'no-tools'
 
@@ -426,6 +430,11 @@ export async function runRemoteAgentLoop(run: RemoteAgentRun): Promise<RemoteAge
   let echoRetries = ECHO_RETRIES
   let nudges = STOP_NUDGES
   let consecutiveErrors = 0
+  // CA (14.11.2026): the same loop guard as the desktop's agent loops. The
+  // remote loop had only its step limit and five failures in a row, and the
+  // model it drives may be a paid cloud model on the desktop.
+  const guard = new AgentLoopGuard()
+  let pendingSteer: string | null = null
   const finish = (end: RemoteAgentEnd, content: string): RemoteAgentResult => ({ end, content, thinking, steps: steps.map((step) => ({ ...step })) })
   const aborted = () => run.signal?.aborted === true
 
@@ -484,6 +493,14 @@ export async function runRemoteAgentLoop(run: RemoteAgentRun): Promise<RemoteAge
 
       lastContent = content || lastContent
       run.onProgress?.({ content: lastContent, thinking })
+      {
+        const said = guard.recordNarration(content || '')
+        const verdict = said.action === 'halt'
+          ? said
+          : guard.recordBatch(calls.map((c) => ({ name: c.function.name, args: JSON.stringify(c.function.arguments ?? {}) })))
+        if (verdict.action === 'halt') return finish('looping', lastContent)
+        pendingSteer = verdict.action === 'steer' ? verdict.message : said.action === 'steer' ? said.message : null
+      }
       messages.push({
         role: 'assistant',
         content: content || '',
@@ -522,6 +539,11 @@ export async function runRemoteAgentLoop(run: RemoteAgentRun): Promise<RemoteAge
         messages.push({ role: 'tool', content: observation, iter })
         consecutiveErrors = failed ? consecutiveErrors + 1 : 0
         if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) return finish('tool-errors', lastContent)
+      }
+      // The steer goes after the results it is about.
+      if (pendingSteer) {
+        messages.push({ role: 'user', content: pendingSteer })
+        pendingSteer = null
       }
     }
   } catch (err) {
