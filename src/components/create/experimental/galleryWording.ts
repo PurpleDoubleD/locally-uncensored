@@ -5,6 +5,8 @@
 // isMlxImageHost(); with it false every string is the one Windows and Linux
 // always had.
 
+import type { DeleteFate } from '../../../lib/gallery-trash'
+
 /** The line over a result whose file cannot be shown. */
 export function unavailableLine(gone: boolean, mac: boolean): string {
   if (mac) {
@@ -24,11 +26,14 @@ export function unavailableTitle(gone: boolean, mac: boolean): string {
 }
 
 /**
- * The tooltip of Delete. A local render goes to the Recycle Bin on Windows
- * and to the Trash on a Mac (lib/gallery-trash.ts), and each is called by
- * its own name.
+ * The words of Delete, after what it really does (lib/gallery-trash.ts,
+ * deleteFate). A local file goes to the Recycle Bin on Windows and to the
+ * Trash on a Mac, each called by its own name. A cloud result only leaves
+ * this gallery: the copy in the cloud account is not deleted.
  */
-export function deleteTitle(mac: boolean): string {
+export function deleteTitle(mac: boolean, fate: DeleteFate): string {
+  if (fate === 'cloud') return 'Delete (only from this gallery, the cloud copy stays)'
+  if (fate === 'entry') return 'Delete (only from the gallery)'
   return mac ? 'Delete (moves the file to the Trash)' : 'Delete (moves the file to the Recycle Bin)'
 }
 

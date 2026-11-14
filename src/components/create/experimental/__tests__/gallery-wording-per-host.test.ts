@@ -13,13 +13,13 @@ import { deleteTitle, unavailableLine, unavailableTitle } from '../galleryWordin
 
 describe('on a Mac', () => {
   it('no sentence names ComfyUI, an engine to wait for, or the Recycle Bin', () => {
-    const all = [unavailableLine(true, true), unavailableLine(false, true), unavailableTitle(true, true), unavailableTitle(false, true), deleteTitle(true)]
+    const all = [unavailableLine(true, true), unavailableLine(false, true), unavailableTitle(true, true), unavailableTitle(false, true), deleteTitle(true, 'trash'), deleteTitle(true, 'cloud'), deleteTitle(true, 'entry')]
     for (const line of all) expect(line).not.toMatch(/ComfyUI|Recycle Bin|local engine/)
     expect(unavailableLine(true, true)).toBe('This file is no longer on this Mac.')
   })
 
   it('Delete names the Trash, where the file goes', () => {
-    expect(deleteTitle(true)).toBe('Delete (moves the file to the Trash)')
+    expect(deleteTitle(true, 'trash')).toBe('Delete (moves the file to the Trash)')
   })
 })
 
@@ -29,7 +29,7 @@ describe('COUNTER-CHECK: Windows and Linux read what they always did', () => {
     expect(unavailableLine(false, false)).toBe("This render lives on the local engine, which isn't reachable right now. It shows up again as soon as ComfyUI is running.")
     expect(unavailableTitle(true, false)).toBe('No longer in the ComfyUI output folder')
     expect(unavailableTitle(false, false)).toBe("Local render, but the local engine isn't reachable")
-    expect(deleteTitle(false)).toBe('Delete (moves the file to the Recycle Bin)')
+    expect(deleteTitle(false, 'trash')).toBe('Delete (moves the file to the Recycle Bin)')
   })
 })
 
@@ -51,5 +51,17 @@ describe('a video whose file cannot be read (Fund 26)', () => {
     const source = readFileSync(resolve(__dirname, '../OutputView.tsx'), 'utf-8')
     expect(source).toContain('controls={playerHasControls(!!item.unavailable)}')
     expect(source).toContain('!playerHasControls(!!item.unavailable) && UNAVAILABLE_VIDEO_BOX')
+  })
+})
+
+// C3D (14.11.2026): under a cloud result Delete said the file goes to the
+// Trash. A cloud result only leaves this gallery (lib/gallery-trash.ts).
+describe('Delete says what it does to the entry', () => {
+  it('a cloud result: only from this gallery, on every host', () => {
+    for (const mac of [true, false]) {
+      expect(deleteTitle(mac, 'cloud')).toBe('Delete (only from this gallery, the cloud copy stays)')
+      expect(deleteTitle(mac, 'entry')).toBe('Delete (only from the gallery)')
+      for (const fate of ['cloud', 'entry'] as const) expect(deleteTitle(mac, fate)).not.toMatch(/Trash|Recycle Bin|moves the file/)
+    }
   })
 })

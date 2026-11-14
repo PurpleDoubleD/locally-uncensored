@@ -5,6 +5,7 @@
 // the same code its tile buttons use.
 
 import type { MenuAction } from '../../ui/menu-actions'
+import type { DeleteFate } from '../../../lib/gallery-trash'
 
 export interface GallerySelection {
   /** Selected ids, in gallery order. */
@@ -90,10 +91,24 @@ export function buildGalleryMenu(h: GalleryMenuHandlers, count: number): MenuAct
   ]
 }
 
-/** The question before deleting. Where the files go, as deleteTitle says it per host. */
-export function deleteConfirmLine(count: number, mac: boolean): string {
+/** The question before deleting. What happens to each entry, as deleteTitle
+ *  says it (lib/gallery-trash.ts, deleteFates): a local file goes to the bin
+ *  of the host, a cloud result only leaves this gallery. */
+export function deleteConfirmLine(fates: readonly DeleteFate[], mac: boolean): string {
+  const n = fates.length
   const bin = mac ? 'the Trash' : 'the Recycle Bin'
-  return count === 1
-    ? `Delete 1 item? Its file moves to ${bin}.`
-    : `Delete ${count} items? Their files move to ${bin}.`
+  const head = n === 1 ? 'Delete 1 item?' : `Delete ${n} items?`
+  const trash = fates.filter((f) => f === 'trash').length
+  const cloud = fates.filter((f) => f === 'cloud').length
+  if (trash === n) return n === 1 ? `${head} Its file moves to ${bin}.` : `${head} Their files move to ${bin}.`
+  if (cloud === n) {
+    return n === 1
+      ? `${head} It leaves this gallery. The copy in your cloud account stays.`
+      : `${head} They leave this gallery. The copies in your cloud account stay.`
+  }
+  if (trash === 0 && cloud === 0) return `${head} ${n === 1 ? 'It leaves' : 'They leave'} the gallery.`
+  const parts = [head]
+  if (trash > 0) parts.push(trash === 1 ? `The local file moves to ${bin}.` : `The local files move to ${bin}.`)
+  if (cloud > 0) parts.push(cloud === 1 ? 'The cloud result only leaves this gallery.' : 'The cloud results only leave this gallery.')
+  return parts.join(' ')
 }

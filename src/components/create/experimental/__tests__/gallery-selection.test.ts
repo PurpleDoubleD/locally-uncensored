@@ -80,7 +80,16 @@ describe('the menu', () => {
 
 describe('the delete question', () => {
   it('names the count and where the files go, per host', () => {
-    expect(deleteConfirmLine(1, false)).toBe('Delete 1 item? Its file moves to the Recycle Bin.')
-    expect(deleteConfirmLine(4, true)).toBe('Delete 4 items? Their files move to the Trash.')
+    expect(deleteConfirmLine(['trash'], false)).toBe('Delete 1 item? Its file moves to the Recycle Bin.')
+    expect(deleteConfirmLine(['trash', 'trash', 'trash', 'trash'], true)).toBe('Delete 4 items? Their files move to the Trash.')
+  })
+
+  // C3D (14.11.2026): a cloud result only leaves this gallery.
+  it('says a cloud result only leaves this gallery and its cloud copy stays', () => {
+    expect(deleteConfirmLine(['cloud'], true)).toBe('Delete 1 item? It leaves this gallery. The copy in your cloud account stays.')
+    expect(deleteConfirmLine(['cloud', 'cloud'], false)).toBe('Delete 2 items? They leave this gallery. The copies in your cloud account stay.')
+    expect(deleteConfirmLine(['entry'], true)).toBe('Delete 1 item? It leaves the gallery.')
+    expect(deleteConfirmLine(['trash', 'cloud', 'cloud'], true)).toBe('Delete 3 items? The local file moves to the Trash. The cloud results only leave this gallery.')
+    expect(deleteConfirmLine(['trash', 'trash', 'cloud', 'entry'], false)).toBe('Delete 4 items? The local files move to the Recycle Bin. The cloud result only leaves this gallery.')
   })
 })
