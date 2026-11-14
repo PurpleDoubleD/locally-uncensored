@@ -102,6 +102,7 @@ export function registerRemoteStubs(routes: RouteMount): void {
     '/local-api/verify-model-files', '/local-api/verify-model-files-status', '/local-api/verify-model-files-cancel',
     '/local-api/comfy-model-info',
     '/local-api/comfy-model-reveal',
+    '/local-api/chat-backup-clear', '/local-api/chat-backup-reveal',
     '/local-api/bundled-model-delete-plan',
     '/local-api/trash-model-file', '/local-api/set-engine-idle-unload', '/local-api/transcribe-external',
     '/local-api/set-gpu-roles', '/local-api/describe-gpu-roles',

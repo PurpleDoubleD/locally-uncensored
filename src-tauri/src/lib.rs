@@ -913,6 +913,10 @@ pub fn run() {
             commands::gallery_files::scan_comfy_output,
             commands::system::restore_stores,
             commands::system::chat_backup_conversations,
+            #[cfg(desktop)]
+            commands::system::chat_backup_clear,
+            #[cfg(desktop)]
+            commands::system::chat_backup_reveal,
             commands::system::backup_rag_chunks,
             commands::system::restore_rag_chunks,
             commands::system::exit_app,

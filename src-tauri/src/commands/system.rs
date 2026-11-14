@@ -752,6 +752,100 @@ pub async fn chat_backup_conversations() -> Result<String, String> {
     .map_err(|e| e.to_string())?
 }
 
+/// One writer at a time for the backup files: the snapshot (`backup_stores`)
+/// and "Clear backup" (`chat_backup_clear`, A26) both rewrite them.
+static BACKUP_FILES: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// The backup file `raw` with only the chats whose id is in `keep`, and the
+/// ids it took out. None when there was nothing to take out or the file has
+/// no readable chat list; such a file is left exactly as it is. Every other
+/// store in the file (settings, memories, characters) stays untouched.
+pub(crate) fn backup_with_only(raw: &str, keep: &std::collections::HashSet<String>) -> Option<(String, Vec<String>)> {
+    let key = crate::commands::chat_attachments::CHAT_KEY;
+    let mut outer: serde_json::Value = serde_json::from_str(raw).ok()?;
+    let mut inner: serde_json::Value = serde_json::from_str(outer.get(key)?.as_str()?).ok()?;
+    let list = inner.pointer_mut("/state/conversations")?.as_array_mut()?;
+    let mut removed = Vec::new();
+    list.retain(|c| match c.get("id").and_then(|v| v.as_str()) {
+        Some(id) if !keep.contains(id) => {
+            removed.push(id.to_string());
+            false
+        }
+        _ => true,
+    });
+    if removed.is_empty() {
+        return None;
+    }
+    *outer.get_mut(key)? = serde_json::Value::String(inner.to_string());
+    Some((outer.to_string(), removed))
+}
+
+/// A26 (3.1.0): take every chat out of the backup files that is not in the
+/// chat list (`keep`). The chat archives go as a whole, they exist only to
+/// hold chats that left the list. The live file, the ring and the file set
+/// aside keep everything else they carry. Returns how many different chats
+/// were taken out.
+pub(crate) fn clear_chats_outside(dir: &std::path::Path, keep: &std::collections::HashSet<String>) -> Result<usize, String> {
+    let mut removed: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let archives = chat_archives(dir);
+    for path in backup_candidates(dir) {
+        let Ok(raw) = std::fs::read_to_string(&path) else { continue };
+        if archives.contains(&path) {
+            removed.extend(backup_chat_ids(&raw).unwrap_or_default().into_iter().filter(|id| !keep.contains(id)));
+            std::fs::remove_file(&path)
+                .map_err(|e| format!("could not remove {}: {}", path.display(), os_error::english(&e)))?;
+            continue;
+        }
+        let Some((rewritten, gone)) = backup_with_only(&raw, keep) else { continue };
+        let tmp = path.with_extension("json.clear.tmp");
+        let written = (|| -> std::io::Result<()> {
+            use std::io::Write;
+            let mut file = std::fs::File::create(&tmp)?;
+            file.write_all(rewritten.as_bytes())?;
+            file.sync_all()?;
+            std::fs::rename(&tmp, &path)
+        })();
+        if let Err(e) = written {
+            let _ = std::fs::remove_file(&tmp);
+            return Err(format!("could not rewrite {}: {}", path.display(), os_error::english(&e)));
+        }
+        removed.extend(gone);
+    }
+    Ok(removed.len())
+}
+
+/// "Clear backup" in Settings → Chat Backup (A26). `keep` is the chat list
+/// as it is now; every other chat leaves the backup files for good.
+#[cfg(desktop)]
+#[tauri::command]
+pub async fn chat_backup_clear(keep: Vec<String>) -> Result<usize, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let _one = BACKUP_FILES.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = persistent_dir()?;
+        let keep: std::collections::HashSet<String> = keep.into_iter().collect();
+        let n = clear_chats_outside(&dir, &keep)?;
+        if n > 0 {
+            // The images only those chats pointed at can go too.
+            crate::commands::chat_attachments::collect_garbage_soon(dir);
+        }
+        Ok(n)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// "Open folder" in Settings → Chat Backup (A26): the backup file selected
+/// in Finder or Explorer, its folder on Linux.
+#[cfg(desktop)]
+#[tauri::command]
+pub fn chat_backup_reveal() -> Result<String, String> {
+    let dir = persistent_dir()?;
+    let file = dir.join("store_backup.json");
+    let target = if file.exists() { file } else { dir.clone() };
+    crate::commands::download::reveal_in_file_manager(&target)?;
+    Ok(dir.to_string_lossy().into_owned())
+}
+
 /// A backup is worth restoring from when it parses as a JSON object that still
 /// carries at least one non-empty string value.
 ///
@@ -831,6 +925,7 @@ fn rotate_generations(dir: &std::path::Path) {
 /// the shape of failure this whole path exists to survive.
 #[tauri::command]
 pub fn backup_stores(data: String) -> Result<(), String> {
+    let _one = BACKUP_FILES.lock().unwrap_or_else(|e| e.into_inner());
     let dir = persistent_dir()?;
     std::fs::create_dir_all(&dir).map_err(|e| os_error::english(&e))?;
     let target = dir.join("store_backup.json");
@@ -1607,5 +1702,62 @@ mod tests {
         rotate_generations(&dir);
         assert!(!dir.join("store_backup.1.json").exists());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // ── A26: "Clear backup" ─────────────────────────────────────
+
+    fn ids_in(raw: &str) -> Vec<String> {
+        let mut v: Vec<String> = backup_chat_ids(raw).unwrap_or_default().into_iter().collect();
+        v.sort();
+        v
+    }
+
+    /// A26 (3.1.0): the backup kept every deleted chat, and "Clear backup"
+    /// takes them out of the live file, the ring and the file set aside, and
+    /// removes the chat archives. The chats in the list and every other
+    /// store in the files stay.
+    #[test]
+    fn clearing_the_backup_keeps_the_chat_list_and_every_other_store() {
+        let dir = scratch_dir("chat-clear");
+        std::fs::write(dir.join("store_backup.json"), backup_with_chats(&["live1", "live2", "gone1"])).unwrap();
+        std::fs::write(dir.join("store_backup.1.json"), backup_with_chats(&["live1", "gone1", "gone2"])).unwrap();
+        std::fs::write(dir.join("store_backup.prev.json"), backup_with_chats(&["gone3"])).unwrap();
+        std::fs::write(dir.join("store_backup.chats-1000.json"), backup_with_chats(&["live2", "gone4"])).unwrap();
+        // A file without a chat list is not touched.
+        std::fs::write(dir.join("store_backup.2.json"), r#"{"chat-settings":"{}"}"#).unwrap();
+
+        let keep: std::collections::HashSet<String> = ["live1", "live2"].iter().map(|s| s.to_string()).collect();
+        assert_eq!(clear_chats_outside(&dir, &keep).unwrap(), 4, "gone1..gone4, each counted once");
+
+        let live = std::fs::read_to_string(dir.join("store_backup.json")).unwrap();
+        assert_eq!(ids_in(&live), vec!["live1", "live2"]);
+        let outer: serde_json::Value = serde_json::from_str(&live).unwrap();
+        assert_eq!(outer["chat-settings"], "{}", "the other stores stay");
+        assert_eq!(outer["__ts"], "t");
+        assert_eq!(ids_in(&std::fs::read_to_string(dir.join("store_backup.1.json")).unwrap()), vec!["live1"]);
+        assert!(ids_in(&std::fs::read_to_string(dir.join("store_backup.prev.json")).unwrap()).is_empty());
+        assert!(chat_archives(&dir).is_empty(), "the chat archives are gone");
+        assert_eq!(std::fs::read_to_string(dir.join("store_backup.2.json")).unwrap(), r#"{"chat-settings":"{}"}"#);
+        let leftovers: Vec<String> = std::fs::read_dir(&dir).unwrap().filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().into_owned()).filter(|n| n.ends_with(".tmp")).collect();
+        assert!(leftovers.is_empty(), "no temporary file is left: {leftovers:?}");
+
+        // What the restore reads now offers nothing that is not in the list.
+        let raws = backup_candidates(&dir).into_iter().filter_map(|p| std::fs::read_to_string(p).ok());
+        let mut ids: Vec<String> = chats_in_backups(raws).iter().map(|c| c["id"].as_str().unwrap().to_string()).collect();
+        ids.sort();
+        assert_eq!(ids, vec!["live1", "live2"]);
+
+        // Twice is a no-op.
+        assert_eq!(clear_chats_outside(&dir, &keep).unwrap(), 0);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_backup_with_nothing_to_take_out_is_left_byte_for_byte() {
+        let raw = backup_with_chats(&["a", "b"]);
+        let keep: std::collections::HashSet<String> = ["a", "b", "c"].iter().map(|s| s.to_string()).collect();
+        assert!(backup_with_only(&raw, &keep).is_none());
+        assert!(backup_with_only("not json", &keep).is_none());
     }
 }
