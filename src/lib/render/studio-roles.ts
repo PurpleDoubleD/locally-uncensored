@@ -54,3 +54,30 @@ export const STUDIO_EDIT_MODELS: readonly string[] = [
   // Bearbeiten-Weg hat. Midjourney und Recraft haben keinen.
   'gpt-image-2-edit', 'nano-banana-pro-edit', 'flux-2-max-edit', 'grok-imagine-quality-edit', 'kling-image-o3-edit',
 ]
+
+// 3D (13.11.2026, Create bekommt 3D). Die drei Wege lesen sich aus den
+// Eingaben ab: kein Eingang heisst Text, ein Bild (`source_path`) oder eine
+// Liste, die schon mit einem Bild startet, heisst Bild, eine Liste, die
+// mindestens zwei Ansichten verlangt, heisst Mehransicht.
+function minViews(id: string): number {
+  const m = STUDIO_MODELS[id]
+  const field = Object.entries(m.inputs).find(([, key]) => key === 'image_paths')?.[0]
+  return field ? studioSchema(id).properties?.[field]?.minItems ?? 1 : 0
+}
+
+/** Text zu 3D: ein Modell aus Worten, keine Eingabedatei. */
+export function studioMeshText(): string[] {
+  return ids((_, m) => m.kind === '3d' && !Object.keys(m.inputs).length)
+}
+
+/** Bild zu 3D: ein Bild reicht. Ein Modell mit Bildliste, das schon ein Bild
+ *  nimmt (Rodin, bis fuenf), steht hier und nimmt die weiteren Seiten dazu. */
+export function studioMeshImage(): string[] {
+  return ids((id, m) => m.kind === '3d' && Object.keys(m.inputs).length > 0
+    && (Object.values(m.inputs).includes('source_path') || minViews(id) === 1))
+}
+
+/** Mehransicht zu 3D: mindestens zwei Ansichten desselben Gegenstands. */
+export function studioMeshViews(): string[] {
+  return ids((id, m) => m.kind === '3d' && minViews(id) >= 2)
+}
