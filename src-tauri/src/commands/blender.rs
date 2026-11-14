@@ -749,6 +749,8 @@ mod tests {
         app
     }
 
+    // Mac paths use '/', so these run on Unix only (Windows CI would fail them).
+    #[cfg(unix)]
     #[test]
     fn mac_finds_blender_bundles_and_nothing_that_only_has_the_name() {
         let t = tmp();
@@ -764,6 +766,8 @@ mod tests {
         assert_eq!(mac_plist_version(&found[0].exe).as_deref(), Some("5.2.1"));
     }
 
+    // Mac paths use '/', so these run on Unix only (Windows CI would fail them).
+    #[cfg(unix)]
     #[test]
     fn mac_skips_spotlight_hits_in_the_trash_or_on_a_disk_image() {
         let t = tmp();
