@@ -31,3 +31,14 @@ describe('the sub-agent feeds the hour ledger', () => {
     expect(src).toMatch(/Paused to protect your credits: agent runs used the hourly limit/)
   })
 })
+
+describe('the sub-agent checks its request fits, like the main loops', () => {
+  it('fitToWindow runs right before every request, and an overfull one stops with the material', () => {
+    const src = readFileSync('src/api/agents/sub-agent.ts', 'utf8')
+    const fit = src.indexOf('const fit = fitToWindow(messages, ctx,')
+    const call = src.indexOf('const raw = await provider.chatWithTools(modelId, sendThese')
+    expect(fit).toBeGreaterThan(0)
+    expect(call).toBeGreaterThan(fit)
+    expect(src).toMatch(/Stopped: what this sub-agent gathered no longer fits the model's context window\./)
+  })
+})

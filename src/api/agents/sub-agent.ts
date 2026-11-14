@@ -606,7 +606,26 @@ export async function defaultSubAgentRunner(
     // the user stopped, and that is paid compute the product promised would
     // not happen ("Stop means stop"). Threading the same signal the tool
     // gates already use into the request makes the abort reach the wire.
-    const raw = await provider.chatWithTools(modelId, messages, promptTransport ? [] : llmTools, { signal: gates.abortSignal })
+    // The last check before the request leaves (lib/fit-to-window.ts), as in
+    // the main loops (CA, 14.11.2026): a sub-agent's results pile up step by
+    // step, and nothing checked they still fit. Too big: the longest older
+    // results are shortened for this request. Still too big: it stops and
+    // hands back what it found, instead of a silent cut or a refused request.
+    let sendThese = messages
+    try {
+      const { resolveAgentNumCtx } = await import('../../lib/agent-num-ctx')
+      const { fitToWindow } = await import('../../lib/fit-to-window')
+      const { estimateTokens } = await import('../../lib/context-compaction')
+      const { useSettingsStore } = await import('../../stores/settingsStore')
+      const ctx = await resolveAgentNumCtx(modelId, getProviderIdFromModel(laufmodell), useSettingsStore.getState().settings.contextWindowOverride, laufmodell)
+      const fit = fitToWindow(messages, ctx, promptTransport ? 0 : estimateTokens(JSON.stringify(llmTools)))
+      if (!fit.fits) {
+        const material = finalContent || gesammeltesMaterial(messages)
+        return `Stopped: what this sub-agent gathered no longer fits the model's context window. ${material || '(no partial answer)'}`
+      }
+      sendThese = fit.messages
+    } catch { /* an unknown window checks nothing */ }
+    const raw = await provider.chatWithTools(modelId, sendThese, promptTransport ? [] : llmTools, { signal: gates.abortSignal })
     // Its credits count toward the hour like the main loop's (CA, 14.11.2026):
     // a sub-agent on LU Cloud spent outside both limits. Past the hour limit
     // it stops with what it found, as the main loop pauses.
