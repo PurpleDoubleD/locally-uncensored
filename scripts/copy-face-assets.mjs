@@ -4,7 +4,7 @@
 // `vite` und `vite build` (npm run dev/build, also auch vor dem Tauri-Build
 // ueber beforeBuildCommand), ohne Netz. Die Kopien stehen in .gitignore;
 // das Modell (blaze_face_short_range.tflite) liegt im Repository. Port des
-// Web-Stands (apps/web/scripts/copy-face-assets.mjs).
+// Web-Stands.
 //
 //   node scripts/copy-face-assets.mjs
 import { copyFileSync, mkdirSync, statSync } from 'node:fs'

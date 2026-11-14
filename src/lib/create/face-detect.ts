@@ -1,5 +1,5 @@
 // Gesichtserkennung im Webview fuer den Kopf-Zuschnitt (head-crop.ts), Port
-// des Web-Stands (apps/web/lib/create/face-detect.ts).
+// des Web-Stands.
 //
 // MediaPipe Tasks Vision (Google, Apache-2.0, im package.json exakt gepinnt)
 // mit dem Modell BlazeFace short range. Alles kommt aus der App selbst:

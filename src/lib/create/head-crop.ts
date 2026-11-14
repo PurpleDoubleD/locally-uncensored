@@ -1,5 +1,5 @@
 // Kopf-Zuschnitt der Figurfotos fuer den Bildschritt des Swaps (14.11.2026),
-// Port des Web-Stands (apps/web/lib/create/head-crop.ts, a582338f).
+// Port des Web-Stands.
 //
 // Echttest vom 14.11.: Mit Ganzkoerperfotos uebernahm der offene Editor oft
 // Kleidung und Koerper der Fotos statt der Szene. Mit Fotos, die nur Kopf,
