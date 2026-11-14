@@ -1,4 +1,5 @@
 import { MAC_3D_MODEL, PC_3D_MODEL } from '../../../lib/three/run-local-3d'
+import { isPictureFirstRun, pictureFirstPictureCredits } from '../../../lib/three/picture-first'
 import { useCreateStore } from '../../../stores/createStore'
 import {
   useCloudCatalogStore, cloudModelById, defaultCloudModel, opPickerModels, modelCostHint, shortCount,
@@ -179,7 +180,10 @@ function CloudModelChip() {
     ? groupForPicker(roleModels).map(({ model: m, group }) => ({
         value: m.id,
         label: m.label,
-        sublabel: pickerCostHint(m, musicDuration),
+        // "Picture first" costs the picture and the model together.
+        sublabel: pickIntent === '3d-text' && isPictureFirstRun('text', m.id)
+          ? `${shortCount(createStudioCost(m.id, {}, 100) + pictureFirstPictureCredits(''))} cr`
+          : pickerCostHint(m, musicDuration),
         group,
         tags: tierMarks(m),
         badge: m.adult

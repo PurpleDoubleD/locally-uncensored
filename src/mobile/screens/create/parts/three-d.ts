@@ -12,6 +12,7 @@ import { create } from 'zustand'
 import { useCreateStore, type ImageRef, type ThreeDDetail, type ThreeDWay } from '../../../../stores/createStore'
 import { cloudDetailOf, threeDControlFacts, threeDDetailField } from '../../../../lib/three/three-d-models'
 import { framesAcrossVideo } from '../../../../lib/video-frames'
+import { isPictureFirstRun } from '../../../../lib/three/picture-first'
 import { checkFileAgainst } from '../../../../lib/media-file'
 import { loadPhoneImageFromBlob } from './photos'
 
@@ -25,12 +26,14 @@ export interface ThreeDModelFacts {
   maxViews: number
   /** The model has a detail step. */
   hasDetail: boolean
+  /** "From text" paints a picture first, then builds from it (lib/three/picture-first.ts). */
+  pictureFirst: boolean
 }
 
 /** What the cloud model `studioId` takes. A model the registry does not know takes one picture and no step. */
-export function threeDModelFacts(studioId: string | undefined): ThreeDModelFacts {
+export function threeDModelFacts(studioId: string | undefined, way?: ThreeDWay): ThreeDModelFacts {
   const f = threeDControlFacts('cloud', studioId)
-  return { maxViews: f.maxViews, hasDetail: f.hasDetail }
+  return { maxViews: f.maxViews, hasDetail: f.hasDetail, pictureFirst: isPictureFirstRun(way, studioId) }
 }
 
 /** `want` indices spread evenly over `n` frames: 0, 2, 4, 5 of eight. Same rule as the desktop. */

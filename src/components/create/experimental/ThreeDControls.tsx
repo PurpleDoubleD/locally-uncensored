@@ -29,9 +29,12 @@ export interface ThreeDControlsProps {
   hasCutout: boolean
   /** The cloud model that will run, when there is one. */
   studioId?: string
+  /** "From text" paints a picture first (always locally, in the cloud on
+   *  "Picture first"). */
+  pictureFirst?: boolean
 }
 
-export function ThreeDControls({ maxViews, hasDetail, hasCutout, studioId }: ThreeDControlsProps) {
+export function ThreeDControls({ maxViews, hasDetail, hasCutout, studioId, pictureFirst }: ThreeDControlsProps) {
   const way = useCreateStore((s) => s.threeDWay)
   const setWay = useCreateStore((s) => s.setThreeDWay)
   const cutout = useCreateStore((s) => s.threeDCutout)
@@ -58,7 +61,7 @@ export function ThreeDControls({ maxViews, hasDetail, hasCutout, studioId }: Thr
         onChange={setWay}
         options={WAYS.map((w) => ({ value: w, label: T.ways[w] }))}
       />
-      {way === 'text' && backend === 'local' && <p className="t-meta text-gray-400" data-testid="three-d-picture-first">{T.pictureFirst}</p>}
+      {way === 'text' && pictureFirst && <p className="t-meta text-gray-400" data-testid="three-d-picture-first">{T.pictureFirst}</p>}
       {way === 'image' && maxViews > 1 && <SideStrip maxViews={maxViews} />}
       {way === 'video' && <VideoFrames maxViews={maxViews} />}
       <div className="flex flex-wrap items-center gap-4">

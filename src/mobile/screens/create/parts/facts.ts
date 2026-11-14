@@ -27,6 +27,7 @@ import { aspectKey, qualityKey, runParams, summaryParts, type AspectKey, type Qu
 import { blockReason, walletVerdict, type BlockReason, type WalletVerdict } from './run-state'
 import { toolFacts, toolNeedsMask, type ToolFacts, type ToolId } from './tools'
 import { threeDModelFacts, type ThreeDModelFacts } from './three-d'
+import { pictureStepCredits } from '../../../../lib/three/picture-first'
 
 // ---------- the confirmed price, shared ----------
 
@@ -176,7 +177,7 @@ export function useCreateFacts(): CreateFacts {
   const facts = toolFacts(tool, threeDWay)
   const characterUse = tool === 'character' && characterTab === 'use'
   const model = runModel(tool, { cloudImageModel, cloudVideoModel, cloudOpModel }, character, characterUse, threeDWay)
-  const threeD = tool === '3d' ? threeDModelFacts(model.studio ? model.id : undefined) : null
+  const threeD = tool === '3d' ? threeDModelFacts(model.studio ? model.id : undefined, threeDWay) : null
   let { kind, op } = intentToJob(tool)
   if (characterUse) {
     kind = 'image'
@@ -223,6 +224,8 @@ export function useCreateFacts(): CreateFacts {
         unit = null
       }
     }
+    // "Picture first" books the picture and the model: the button shows both.
+    if (unit !== null) unit += pictureStepCredits(tool, threeDWay, model.id, prompt)
   } else if (model.id && lengthPrice(model.id, op)) {
     // Billed by the length of the input (credits.length). The number PriceOwner left is the price of the
     // measured length, or after a 409 the price the server measured; until it is there, the rule itself answers.

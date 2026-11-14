@@ -30,6 +30,7 @@ export function ThreeDWaySwitch({ f, disabled }: { f: CreateFacts; disabled: boo
         options={THREE_D_WAYS.map((way) => ({ value: way, label: S.ways[way], disabled, testid: `m-create-3d-way-${way}` }))}
         testid="m-create-3d-way"
       />
+      {f.threeDWay === 'text' && f.threeD?.pictureFirst ? <span className="m-k-card-sub" data-testid="m-create-3d-picture-first">{S.pictureFirst}</span> : null}
     </div>
   )
 }

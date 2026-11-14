@@ -38,6 +38,7 @@ import { PromptAssistant } from './PromptAssistant'
 import { SpecialControls } from './SpecialIntentControls'
 import { ThreeDControls } from './ThreeDControls'
 import { threeDControlFacts } from '../../../lib/three/three-d-models'
+import { isPictureFirstRun, pictureStepCredits } from '../../../lib/three/picture-first'
 import { CreditsMeter } from './CreditsMeter'
 import { Button } from '../ui/Button'
 import { PromptField } from '../ui/PromptField'
@@ -273,7 +274,7 @@ export function Composer({ onOpenAdvanced, onOpenWorkflows }: Props) {
       meterState(
         quota,
         imageCount * (studioPick
-          ? (studioPrice?.credits ?? costFallback)
+          ? (studioPrice?.credits ?? costFallback) + pictureStepCredits(intent, threeDWay, studioPick, prompt)
           : lengthRate
             ? (cloudStudioCredits ?? lengthShown ?? costFallback)
             : runCredits(intentKind, intentOp, runModel, runSeconds, costFallback, targetResolution)),
@@ -394,7 +395,7 @@ export function Composer({ onOpenAdvanced, onOpenWorkflows }: Props) {
           Befund und hier nicht behoben. */}
       <div className="mx-auto w-full max-w-[660px] space-y-2.5">
         {special && <SpecialControls intent={intent} />}
-        {intent === '3d' && <ThreeDControls {...threeDControlFacts(backend, studioPick)} studioId={studioPick} />}
+        {intent === '3d' && <ThreeDControls {...threeDControlFacts(backend, studioPick)} studioId={studioPick} pictureFirst={backend === 'local' || isPictureFirstRun(threeDWay, studioPick)} />}
         {!isUtility && <LaneControls />}
         <CharacterNote />
         {inputNote && (

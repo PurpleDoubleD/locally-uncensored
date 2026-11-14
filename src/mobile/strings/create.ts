@@ -966,6 +966,7 @@ export const CREATE_STRINGS = {
   threeD: {
     wayLabel: 'How to make the model',
     ways: THREE_D_TEXT.waysShort,
+    pictureFirst: THREE_D_TEXT.pictureFirst,
     sourceTitle: 'Photo of one object',
     sourceSub: 'One thing, fully in frame. A plain background works best.',
     moreSides: THREE_D_TEXT.moreSides,

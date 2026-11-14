@@ -27,6 +27,7 @@ import { effectiveVideoDurations } from '../../../../lib/render/video-duration'
 import { STUDIO_MODELS } from '../../../../lib/render/studio-contract'
 import { shownCreateLabel, shownCreateModel } from './policy'
 import { toolFacts, type ToolId, type ToolProbe } from './tools'
+import { pictureStepCredits } from '../../../../lib/three/picture-first'
 
 /** Re-render when the catalog changes. Returns a number that only serves as a dependency. */
 export function useCatalogVersion(): number {
@@ -106,6 +107,12 @@ function rowCredits(id: string, tool: ToolId, musicSeconds: number, fallback: nu
   return { credits: c.base, quoted: m?.quote_required === true }
 }
 
+/** "Picture first" (lib/three/picture-first.ts) costs the picture and the model together. */
+function withPictureStep<R extends { credits: number | null }>(row: R, tool: ToolId, way: ThreeDWay | undefined, id: string): R {
+  const extra = row.credits === null ? 0 : pictureStepCredits(tool, way, id, '')
+  return extra ? { ...row, credits: (row.credits ?? 0) + extra } : row
+}
+
 /** The models of a tool, grouped and marked the way the desktop picker does it. */
 export function toolModels(tool: ToolId, opts: { character: CharacterRef | null; characterUse: boolean; musicSeconds: number; fallbackCredits: Record<'image' | 'video' | 'audio', number | null>; threeDWay?: ThreeDWay }): ModelRow[] {
   const facts = toolFacts(tool, opts.threeDWay)
@@ -127,7 +134,7 @@ export function toolModels(tool: ToolId, opts: { character: CharacterRef | null;
     label: shownCreateModel(model).name,
     direct: shownCreateModel(model).direct,
     group: group ? shownCreateLabel(group) : group,
-    ...rowCredits(model.id, tool, opts.musicSeconds, fallback),
+    ...withPictureStep(rowCredits(model.id, tool, opts.musicSeconds, fallback), tool, opts.threeDWay, model.id),
     tags: tierMarks(model).map((t) => ({ label: t.label, accent: t.tone === 'accent' })),
     adult: model.adult === true,
   }))

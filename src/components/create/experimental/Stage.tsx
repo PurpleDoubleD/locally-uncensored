@@ -594,6 +594,8 @@ function SourcePreview({ onOpenMaskEditor }: { onOpenMaskEditor: () => void }) {
               : `Write your prompt below, then Create. All ${batchCount} images get the same edit.`
           ) : meta.id === 'removebg' ? 'Hit Create to cut out the subject and export a transparent PNG.'
             : meta.id === 'upscale' ? 'Hit Create to upscale the image.'
+            // 3D reads no prompt from a picture: the picture is all it needs.
+            : meta.id === '3d' ? THREE_D_TEXT.stageReady
             : meta.id === 'eraser' ? (mask ? 'Mask ready. Hit Create.' : 'Paint a mask over the object to remove, then hit Create.')
             : noMask ? 'Write the edit prompt below, then Create. This model needs no mask.'
             // A cloud model that edits through a mask does not start without

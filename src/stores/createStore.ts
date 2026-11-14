@@ -112,10 +112,10 @@ export const LOCAL_UTILITY_OPS: ReadonlySet<UtilityOp> = new Set(['upscale'])
  *  over the image/video mode axis: when set it wins the intent derivation. */
 export type CloudOp = 'character' | 'lipsync' | 'music' | 'extend' | 'motion' | '3d'
 
-/** The three ways of the 3D tab (3.1.0). */
-export type ThreeDWay = 'text' | 'image' | 'video'
-/** The Detail step of the 3D tab. Each model maps it onto its own field. */
-export type ThreeDDetail = 'draft' | 'standard' | 'fine'
+// The three ways and the Detail step of the 3D tab (3.1.0) live in
+// lib/three/three-d-types.ts, so the 3D texts need not import the store.
+import type { ThreeDWay, ThreeDDetail } from '../lib/three/three-d-types'
+export type { ThreeDWay, ThreeDDetail }
 
 /** Which of the specialized categories ALSO run on the local ComfyUI backend
  *  (2.5.8 local lanes: ACE music, Wan S2V talking character, last-frame-chain

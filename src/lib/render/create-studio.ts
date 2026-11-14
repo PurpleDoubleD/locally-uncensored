@@ -14,6 +14,8 @@ import { STUDIO_MODELS, studioBaseCredits, studioFields, studioPreviewCredits, s
 import { presetModels, requiredRoleInputs, type PresetModel, type StepRole } from './preset-models'
 import { cloudModelById, defaultCloudModel, modelForOp, opPickerModels, resolveCharacterModel, resolveOpPick } from '../../stores/cloudCatalogStore'
 import { intentToJob, type CreateIntentLike } from './cloud-jobs'
+import { PICTURE_FIRST_MESH, pictureFirstOffered } from '../three/picture-first'
+import { THREE_D_TEXT } from '../three/three-d-text'
 
 // Desktop port (P2, checked again in P9): the web's CreateIntent already
 // carries 'video_upscale' as a distinct intent from the plain 'upscale'
@@ -91,6 +93,13 @@ export function intentPickerModels(intent: StudioIntent): PresetModel[] {
   const add = (m: PresetModel) => { if (!seen.has(m.id)) { seen.add(m.id); out.push(m) } }
   if (intent === 'lipsync') for (const m of opPickerModels('lipsync')) {
     add({ id: m.id, label: m.label, kind: m.kind, op: 'lipsync', adult: m.adult === true, tier: m.tier, weights: m.weights })
+  }
+  // 3D from words: "Picture first" leads the list, as the image-to-3D model
+  // it ends on (lib/three/picture-first.ts). It is the one way from words
+  // that no text-to-3D filter stands in.
+  if (intent === '3d-text' && pictureFirstOffered()) {
+    const mesh = presetModels('mesh-image').find((m) => m.id === PICTURE_FIRST_MESH)
+    if (mesh) add({ ...mesh, label: THREE_D_TEXT.pictureFirstSwitch })
   }
   for (const role of roles) for (const m of presetModels(role)) add(m)
   return out

@@ -1,6 +1,6 @@
 // Every sentence of the 3D tab (C3D-PLAN 1.8), in one place for the desktop
 // and the phone. English, short, plain, no closing phrase.
-import type { ThreeDDetail, ThreeDWay } from '../../stores/createStore'
+import type { ThreeDDetail, ThreeDWay } from './three-d-types'
 
 export const THREE_D_TEXT = {
   ways: { text: 'From text', image: 'From image', video: 'From video' } as Record<ThreeDWay, string>,
@@ -34,6 +34,10 @@ export const THREE_D_TEXT = {
     save: 'Saving your model…',
   },
   cloudPhase: 'Building your model in the cloud…',
+  cloudPicture: 'Painting your picture in the cloud…',
+  meshFailed: 'Your picture is in the gallery and on the Stage. The 3D step failed and was refunded.',
+  meshRetry: 'Press Create to try again.',
+  stageReady: 'Hit Create to make it 3D.',
   cloudPhaseSub: 'This takes about a minute. You can keep working, it lands in your gallery.',
   noObject: 'LU could not find a clear object in this picture. Try one with a plain background.',
   needImageModel: 'Local 3D from text needs an image model first. Get one in the Model Manager, or start from a picture.',

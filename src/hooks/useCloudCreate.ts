@@ -25,6 +25,7 @@ import {
   pollJob,
   submitCloudJob,
   uploadInput,
+  adoptInput,
   CloudJobError,
   QuoteChangedError,
   type CloudJobParams,
@@ -40,6 +41,9 @@ import { intentRoles, intentRequiredInputs, isStudioModel, resolveIntentPick, st
 import { threeDMaxViews } from '../lib/three/three-d-models'
 import { threeDProvenance } from '../lib/three/run-local-3d'
 import { THREE_D_TEXT } from '../lib/three/three-d-text'
+import { isPictureFirstRun, pictureFirstPictureCredits, pictureFirstPictureModel } from '../lib/three/picture-first'
+import { runCloudPictureFirst } from '../lib/three/cloud-picture-first'
+import { loadImageRef } from '../components/create/experimental/loadImage'
 import { bumpSeed, runImageCount } from '../lib/render/image-count'
 import { STUDIO_MODELS, studioFields } from '../lib/render/studio-contract'
 import { modelLabel } from '../lib/render/preset-models'
@@ -249,6 +253,10 @@ let activeJobId: string | null = null
 // activeJobId. Cancel bricht jeden einzelnen ab.
 let activeJobIds: string[] = []
 let activeAbort: AbortController | null = null
+// Cancel was pressed during this run. A chain of two runs ("Picture first")
+// reads it before it books the second, also when the first could no longer
+// be stopped.
+let stopAsked = false
 
 /** True while a cloud run (generate or enhance) is in flight. CreateContext
  *  routes Cancel by the backend that STARTED the run, not the current axis —
@@ -268,6 +276,146 @@ export function takeCloudRunStop(): CloudRunStop | null {
   return stop
 }
 
+/**
+ * "Picture first" (lib/three/picture-first.ts) with the real cloud calls and
+ * the store. Errors that are not about this chain (429, 401, a dropped line)
+ * go to the caller's catch, like every other run.
+ */
+async function runPictureFirst(args: {
+  prompt: string
+  meshModel: string
+  meshOptions: Record<string, unknown>
+  requestId: string
+  ac: AbortController
+  onQuotaChange?: () => void
+}): Promise<void> {
+  const { prompt, meshModel, meshOptions, ac, onQuotaChange } = args
+  const s = useCreateStore.getState()
+  const pictureModel = pictureFirstPictureModel()
+  if (!pictureModel) {
+    s.setError('Picture first is not available right now. Pick another model.')
+    return
+  }
+  const pictureShown = pictureFirstPictureCredits(prompt, pictureModel)
+  const timeoutMs = runDeadlineMs('3d', 'studio')
+  const startedAt = Date.now()
+  let stepStarted = startedAt
+  // What each job adds to the bare job in the gallery (also the entry a
+  // phone lands after a restart, lib/pending-cloud-jobs.ts).
+  const pictureFields = (picturePrompt: string) => ({
+    model: pictureModel, prompt: picturePrompt, negativePrompt: '', seed: 0,
+    steps: 0, cfgScale: 0, sampler: '', scheduler: '', width: 1024, height: 1024, intent: 'image' as const,
+  })
+  const meshFields = () => ({
+    model: meshModel, prompt: '', label: prompt.trim().slice(0, 120) || THREE_D_TEXT.gallery.text, negativePrompt: '', seed: 0,
+    steps: 0, cfgScale: 0, sampler: '', scheduler: '', width: 0, height: 0, intent: '3d' as const,
+  })
+  const outcome = await runCloudPictureFirst({
+    prompt, pictureModel, meshModel, meshOptions,
+    shown: { mesh: s.cloudStudioCredits, picture: pictureShown },
+    requestIds: [args.requestId, crypto.randomUUID()],
+  }, {
+    gate: (text) => clientSafety(text),
+    quote: async (model, text, options, images) => {
+      s.setProgress(4, 'Confirming the price…')
+      return (await studioQuote(model, text, { op: 'studio', studio_options: options }, images)).credits
+    },
+    submit: async (job) => {
+      s.setProgress(job.kind === 'image' ? 6 : 52, 'Submitting to the render queue…')
+      const step = job.kind === 'image' ? pictureFields(job.prompt) : meshFields()
+      const out = await submitNoted({ kind: job.kind, model: job.model, prompt: job.prompt, params: job.params }, {
+        op: 'studio', prompt: job.prompt || step.label || '', timeoutMs, landing: 'gallery', items: [step],
+      })
+      const now = Date.now()
+      notePendingCloudJob({
+        id: out.id, kind: job.kind, op: 'studio', model: job.model, prompt: job.prompt || step.label || '',
+        startedAt: now, deadlineAt: now + timeoutMs, landing: 'gallery', item: step,
+      })
+      if (job.params.client_request_id) settleCloudSubmitIntent(job.params.client_request_id, true)
+      return out
+    },
+    onBooked: (id, step) => {
+      activeJobId = id
+      activeJobIds = [id]
+      stepStarted = Date.now()
+      onQuotaChange?.()
+      if (step === 1 && prompt.trim()) useCreateStore.getState().addToPromptHistory(prompt.trim())
+    },
+    poll: (id, step) => pollTracked(id, {
+      timeoutMs,
+      signal: ac.signal,
+      onTick: (j) => {
+        const st = useCreateStore.getState()
+        const elapsed = Math.round((Date.now() - stepStarted) / 1000)
+        const verb = step === 1 ? THREE_D_TEXT.cloudPicture : THREE_D_TEXT.cloudPhase
+        if (j.status === 'queued') {
+          st.setProgressPhase('queued')
+          st.setProgress(step === 1 ? 10 : 55, `Waiting for a cloud GPU… ${elapsed}s`)
+        } else if (j.status === 'running') {
+          st.setProgressPhase('sampling')
+          st.setProgress(step === 1 ? Math.min(45, 12 + elapsed) : Math.min(95, 58 + elapsed), `${verb} ${elapsed}s`)
+        }
+      },
+    }),
+    adopt: (jobId) => adoptInput(jobId, 'image'),
+    onPicture: async (job, picturePrompt) => {
+      // The first job is over: Cancel from here on only stops the chain.
+      activeJobId = null
+      activeJobIds = []
+      const st = useCreateStore.getState()
+      // The picture is a result of its own. Landing it must not change the
+      // model the Image tab has picked.
+      const imagePick = st.cloudImageModel
+      st.addToGallery({ ...galleryItemFromJob(job), ...pictureFields(picturePrompt) })
+      if (useCreateStore.getState().cloudImageModel !== imagePick) useCreateStore.getState().setCloudImageModel(imagePick)
+      st.setProgress(50, THREE_D_TEXT.afterPicture)
+      // Onto the Stage under "From image", like the local way: the user sees
+      // it while the model is built, and "Make it 3D" runs it again.
+      try {
+        const res = await fetch(job.result_url!)
+        if (!res.ok) throw new Error('picture')
+        const blob = await res.blob()
+        const ref = await loadImageRef(new File([blob], 'picture.png', { type: blob.type || 'image/png' }))
+        const now = useCreateStore.getState()
+        now.setThreeDWay('image')
+        now.setSource(ref)
+      } catch {
+        // The Stage is a view. The picture is in the gallery, the chain goes on.
+      }
+    },
+    stopped: () => stopAsked || ac.signal.aborted,
+  })
+  const st = useCreateStore.getState()
+  switch (outcome.kind) {
+    case 'blocked':
+      st.setError(blockMessageFor(outcome.reason))
+      return
+    case 'price':
+      // Same rule as a single studio run: show the new sum, book nothing.
+      st.setCloudStudioCredits(outcome.mesh)
+      st.setError(`The price changed to ${outcome.total.toLocaleString('en-US')} credits. Review it, then hit Create again.`)
+      lastRunStop = { reason: 'price' }
+      return
+    case 'stopped':
+      st.setError(null)
+      onQuotaChange?.()
+      return
+    case 'picture-failed':
+      st.setError(outcome.job.error ?? 'Cloud render failed.')
+      onQuotaChange?.()
+      return
+    case 'mesh-failed':
+      st.setError([THREE_D_TEXT.meshFailed, outcome.job.error, THREE_D_TEXT.meshRetry].filter(Boolean).join(' '))
+      onQuotaChange?.()
+      return
+    case 'done':
+      st.setProgressPhase('complete')
+      st.setProgress(100, 'Complete!')
+      st.addToGallery({ ...galleryItemFromJob(outcome.mesh), ...meshFields() })
+      return
+  }
+}
+
 export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
   const { onQuotaChange } = opts
 
@@ -275,6 +423,7 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
     const s = useCreateStore.getState()
     if (s.isGenerating) return
     lastRunStop = null
+    stopAsked = false
     const intent = s.intent()
     let { kind, op } = intentToJob(intent)
     // Character-Studio 'use' surface: a plain image generate with the trained
@@ -468,6 +617,12 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
     const requestId = crypto.randomUUID()
 
     try {
+      // 3D from words on an image-to-3D model: a picture first, then the
+      // model from it (lib/three/cloud-picture-first.ts).
+      if (studioModel && isPictureFirstRun(intent === '3d' ? s.threeDWay : undefined, studioModel)) {
+        await runPictureFirst({ prompt, meshModel: studioModel, meshOptions: studioOptionsFiltered ?? {}, requestId, ac, onQuotaChange })
+        return
+      }
       // Utility endpoints (removebg/upscale/eraser) and the 2.5.8 specialized
       // ops take no generation knobs — send only what the op consumes so the
       // submit schema stays honest.
@@ -1011,6 +1166,7 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
   }, [onQuotaChange])
 
   const cancel = useCallback(async () => {
+    stopAsked = true
     const ids = activeJobIds.length ? activeJobIds : activeJobId ? [activeJobId] : []
     if (!ids.length) {
       activeAbort?.abort()

@@ -5,6 +5,7 @@ import { lengthCredits, lengthPrice, runCredits } from '../../../stores/cloudCat
 import { createRunModel, createStudioCost, isStudioModel, startImageCount, studioIntentOf } from '../../../lib/render/create-studio'
 import { STUDIO_MODELS } from '../../../lib/render/studio-contract'
 import { runImageCount } from '../../../lib/render/image-count'
+import { pictureStepCredits } from '../../../lib/three/picture-first'
 
 /** What the cloud run on screen costs. One reader for the meter chip and for
  *  the list of several source images, so both name the same number. */
@@ -92,7 +93,8 @@ export function useRunCredits(): RunCredits | null {
   const unitCost = lengthRate
     ? cloudStudioCredits ?? lengthCredits(model, lengthRate.basis === 'chars' ? Array.from(prompt).length || undefined : undefined)
     : studioPick
-    ? cloudStudioCredits ?? createStudioCost(studioPick, cloudStudioOptions, Array.from(prompt).length, undefined, startImageCount(studioPick, extraPhotos) ?? 1)
+    ? (cloudStudioCredits ?? createStudioCost(studioPick, cloudStudioOptions, Array.from(prompt).length, undefined, startImageCount(studioPick, extraPhotos) ?? 1))
+      + pictureStepCredits(intent, threeDWay, studioPick, prompt)
     : runCredits(kind, op, model, seconds, quota.costs[quotaCostKind(kind)], targetResolution)
   // Mehrere Bilder: jedes ist ein eigener Auftrag zum vollen Preis, die Summe
   // ist, was der Lauf bindet. Der Zaehler "noch N Bilder" rechnet je Bild.
