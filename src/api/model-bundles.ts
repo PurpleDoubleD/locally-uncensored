@@ -2176,13 +2176,14 @@ export function getThreeDBundles(): ModelBundle[] {
       description: 'Turns one picture of an object into a textured 3D model. MIT licensed, runs on ComfyUI.',
       tags: ['3D', 'Image to 3D', 'MIT'],
       totalSizeGB: Math.round(files.reduce((s, f) => s + (f.sizeGB ?? 0), 0) * 100) / 100,
-      // Microsoft names 24 GB for the original bf16 model. What the int8
-      // repack needs on a smaller card is not measured yet.
-      vramRequired: '16-24 GB',
+      // Measured 14.11.2026 on an RTX 3060 (12 GB), ComfyUI v0.42.4: draft
+      // 127 s (first run, loads the model), standard 62 s, fine 320 s. Peak
+      // memory on the card 11.1 GB, 5.5 GB and 8.1 GB.
+      vramRequired: '12+ GB',
       workflow: 'trellis2',
       tier: 'best',
       uncensored: true,
-      verified: false,
+      verified: true,
       url: 'https://huggingface.co/Comfy-Org/TRELLIS.2',
       files,
     },

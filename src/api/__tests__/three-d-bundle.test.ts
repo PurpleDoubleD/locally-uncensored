@@ -66,12 +66,13 @@ describe('the TRELLIS.2 bundle', () => {
     for (const f of bundle.files) expect(read.has(f.subfolder!), f.subfolder).toBe(true)
   })
 
-  it('is unfiltered, unverified until a box run, and needs no node pack', () => {
+  it('is unfiltered, verified by the box run, and needs no node pack', () => {
     expect(bundle.uncensored).toBe(true)
-    expect(bundle.verified).toBe(false)
+    // Real run on the 12 GB box card, 14.11.2026: draft, standard and fine.
+    expect(bundle.verified).toBe(true)
     expect(bundle.customNodes ?? []).toEqual([])
     expect(bundle.tags).toContain('MIT')
-    expect(bundle.vramMinGB).toBe(16)
+    expect(bundle.vramMinGB).toBe(12)
   })
 
   it('is what the 3D setup card installs', () => {
