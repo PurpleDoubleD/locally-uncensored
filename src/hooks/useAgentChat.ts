@@ -1,4 +1,5 @@
 import { stripSourcesMarker } from '../lib/web-evidence'
+import { canonicalArgs, repeatLabel, skippedRepeatsNote } from '../lib/agent-core/repeat-note'
 import { replayableReasoning } from '../lib/agent-core/reasoning-replay'
 import { useRef, useState, useCallback, useEffect } from 'react'
 import { frameFlush } from '../lib/frame-flush'
@@ -1689,8 +1690,12 @@ export function useAgentChat() {
     const executedCallKeys = new Set<string>()
     /** Size of the tool catalogue the step before sent. Zero before the first step. */
     let catalogTokens = 0
+    // Canonical arguments (lib/agent-core/repeat-note.ts): a re-ordered or
+    // re-spaced copy of a call is the same call.
     const callKey = (tc: { function: { name: string; arguments: unknown } }) =>
-      tc.function.name + '|' + JSON.stringify(tc.function.arguments ?? {})
+      tc.function.name + '|' + canonicalArgs(tc.function.arguments)
+    // The repeats dropped from the current step, named after its results.
+    let skippedRepeats: string[] = []
     // Loop-detection (audit follow-up): agent-loop-guard's own header says it
     // covers "Codex + Chat agent", but only Codex ever wired it — the agent
     // loop relied on the exact-repeat set alone, which the epoch reset (B1)
@@ -2562,6 +2567,7 @@ export function useAgentChat() {
           let droppedVideo = false
           let createInTurn = 0
           const kept: ToolCall[] = []
+          skippedRepeats = []
           for (const tc of toolCalls) {
             const name = tc.function.name
             if (name === CREATE_ORDER_TOOL) {
@@ -2573,6 +2579,7 @@ export function useAgentChat() {
             } else if (executedCallKeys.has(callKey(tc))) {
               blocked = true
               blockedNonMedia = true
+              skippedRepeats.push(repeatLabel(name, tc.function.arguments))
             } else {
               kept.push(tc)
             }
@@ -2588,6 +2595,8 @@ export function useAgentChat() {
           // the model to a short final reply ONCE; if it STILL only emits blocked
           // calls, fall through to the empty-content summary and stop cleanly.
           if (toolCalls.length === 0 && blocked) {
+            // The whole step was repeats: the steer below says so itself.
+            skippedRepeats = []
             if (!mediaSteered) {
               mediaSteered = true
               if (turnContent.trim()) {
@@ -3549,6 +3558,13 @@ export function useAgentChat() {
         // Now the steer sits AFTER the calls it refers to (audit F2).
         if (pendingSteer) {
           agentMessages.push({ role: 'user', content: pendingSteer })
+        }
+        // Part of the step was a repeat and was not run: say which, after the
+        // results of the rest (CA, cloud loops).
+        {
+          const note = skippedRepeatsNote(skippedRepeats)
+          skippedRepeats = []
+          if (note) agentMessages.push({ role: 'user', content: note })
         }
         if (failVerdict.action === 'steer') {
           agentMessages.push({ role: 'user', content: failVerdict.message })

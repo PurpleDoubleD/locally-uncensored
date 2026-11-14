@@ -152,6 +152,8 @@ const SEARCH_HALT_AT = 12
 const NEAR_SIMILARITY = 0.85
 const NEAR_STEER_AT = 5
 const NEAR_HALT_AT = 8
+/** Detector 8: a step's text at least this alike to the step before is no news. */
+const NARRATION_NEWS_BELOW = 0.8
 
 /** Lower-cased, whitespace folded: the form two near-copies are compared in. */
 function normArgs(args: string): string {
@@ -271,6 +273,9 @@ export class AgentLoopGuard {
    * the guard can only judge the text it is shown.
    */
   private stepSilent: boolean | null = null
+
+  /** The last real line of text, for detector 8's "is this news" test. */
+  private nearNarration = ''
 
   /** Reads whose capped result was already forgiven once (detector 3). */
   private trimForgiven = new Set<string>()
@@ -607,7 +612,13 @@ export class AgentLoopGuard {
     if (!this.enabled) return { action: 'ok' }
     const norm = text.trim().replace(/\s+/g, ' ').toLowerCase()
     // Detector 8 (C83): text the step before did not already have is news.
-    this.stepSilent = norm.length < MIN_NARRATION_LEN || norm === this.lastNarration
+    // A near-copy of the last line is not (CA, cloud loops, 13.11.2026):
+    // GLM writes "Let me check the file again." before each identical call,
+    // and a fresh word per step kept the streak at one for good.
+    this.stepSilent = norm.length < MIN_NARRATION_LEN
+      || norm === this.lastNarration
+      || (this.nearNarration !== '' && argSimilarity(this.nearNarration, norm) >= NARRATION_NEWS_BELOW)
+    this.nearNarration = norm.length < MIN_NARRATION_LEN ? this.nearNarration : norm
     if (norm.length < MIN_NARRATION_LEN) {
       this.lastNarration = ''
       this.narrationSeen = 0
