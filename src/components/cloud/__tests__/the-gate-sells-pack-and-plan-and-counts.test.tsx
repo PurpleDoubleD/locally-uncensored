@@ -26,6 +26,7 @@ const { useUIStore } = await import('../../../stores/uiStore')
 const { useCloudGateStore } = await import('../../../stores/cloudGateStore')
 const { useSettingsStore } = await import('../../../stores/settingsStore')
 const { parseGateCatalog } = await import('../../../lib/cloud-gate')
+const { CLOUD_BASE } = await import('../../../api/cloud/config')
 
 const live = parseGateCatalog({
   version: 1,
@@ -110,7 +111,8 @@ describe('the gate, signed out', () => {
       expect(u.searchParams.get('utm_content')).toBe('model-picker')
       expect(u.searchParams.get('scheme')).toBe('locallyuncensored')
     }
-    expect(openExternal.mock.calls.flat().some((u) => /stripe/i.test(String(u)))).toBe(false)
+    // Never straight to the payment provider: both open the LU site itself.
+    expect(opened().map((u) => u.origin)).toEqual([new URL(CLOUD_BASE).origin, new URL(CLOUD_BASE).origin])
   })
 
   it('counts "See all plans" as a plan click and tags the pricing page', async () => {
