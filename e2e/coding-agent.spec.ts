@@ -286,11 +286,13 @@ test('the plan the model writes shows up above the composer and tracks progress'
   // default like the Claude Code desktop app. The toggle names the state it
   // is in, so nothing here is assumed.
   const strip = page.getByTestId('plan-pinned')
-  await expect(strip.getByTestId('plan-count')).toHaveText('1 of 3 done', { timeout: 15_000 })
+  // No count (David, 14.11.2026): the head is "Plan", the rows carry the state.
+  await expect(strip.getByTestId('plan-title')).toHaveText('Plan', { timeout: 15_000 })
+  await expect(strip.locator('li[data-state="done"]')).toHaveCount(1)
   await expect(strip.getByText('read the config')).toBeVisible()
   await expect(strip.getByText('run the suite')).toBeVisible()
 
-  // Folded: the counter and the step that is running right now, not the list.
+  // Folded: the name and the step that is running right now, not the list.
   await strip.getByTitle('Collapse the plan').click()
   await expect(strip.getByTitle('Show every step')).toContainText('patch the parser')
   await expect(strip.getByText('read the config')).toHaveCount(0)

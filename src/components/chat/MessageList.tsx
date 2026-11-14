@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { PlanBar } from './PlanBar'
+import { PlanBar, PlanHistoryRow, usePlanHistory } from './PlanBar'
 import type { CSSProperties } from 'react'
 import { useChatStore } from '../../stores/chatStore'
 import { useSettingsStore } from '../../stores/settingsStore'
@@ -208,6 +208,8 @@ export function MessageList({ isGenerating, isThisChatGenerating, isLoadingModel
   const messages = conversation?.messages
   const forks = conversation?.forks
   const marks = useMemo(() => forkMarks({ messages: messages ?? [], forks }), [messages, forks])
+  // Plans the user has moved on from, as folded rows under their answers.
+  const planRows = usePlanHistory(conversation?.id, messages)
 
   // Decided once per visited conversation, see CONTENT_VISIBILITY_THRESHOLD.
   // React's documented "adjust state when a prop changes" shape: the branch
@@ -347,6 +349,10 @@ export function MessageList({ isGenerating, isThisChatGenerating, isLoadingModel
               {!readOnly && message.greetings && message.greetings.length > 1 && message.id === lastVisibleId && !isGenerating && (
                 <GreetingSwitcher conversationId={conversation.id} message={message} />
               )}
+              {message.role === 'assistant' && planRows.get(message.id)?.map((todos, k) => (
+                // On the answer text's left edge, like the pinned plan.
+                <PlanHistoryRow key={k} todos={todos} className="pl-12 pr-3 pt-1" />
+              ))}
             </div>
             )
           })}

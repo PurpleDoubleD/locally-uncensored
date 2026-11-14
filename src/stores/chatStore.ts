@@ -142,7 +142,7 @@ export function migratePersistedChat(state: unknown): unknown {
 export function dropConversationSideState(id: string): void {
   const steps: [string, () => void][] = [
     ['rag', () => useRAGStore.getState().removeConversation(id)],
-    ['todos', () => useTodoStore.getState().clearTodos(id)],
+    ['todos', () => useTodoStore.getState().forgetConversation(id)],
     ['permissions', () => usePermissionStore.getState().clearConversationOverrides(id)],
     ['staged-changes', () => useStagedChangesStore.getState().clear(id)],
     ['codex', () => useCodexStore.getState().dropConversation(id)],

@@ -1,5 +1,5 @@
 import { registerChatSender } from '../../lib/remote-chat-senders'
-import { PlanBar } from './PlanBar'
+import { PlanBar, PlanHistoryRow, usePlanHistory } from './PlanBar'
 import { composeFileMessage } from '../../lib/chat-files'
 import { useCodex } from '../../hooks/useCodex'
 import { RequestUsageLine } from './RequestUsageLine'
@@ -121,6 +121,8 @@ export function CodexView() {
 
   const conversation = conversations.find(c => c.id === activeConversationId)
   const messages = conversation?.messages || []
+  // Plans the user has moved on from, as folded rows under their answers.
+  const planRows = usePlanHistory(activeConversationId, conversation?.messages)
   // CA U7: Try again under the newest failed answer sends the instruction it answered.
   const lastAssistantId = [...messages].reverse().find((m) => m.role === 'assistant')?.id
   const lastInstruction = (() => {
@@ -747,6 +749,9 @@ export function CodexView() {
                       {msg.role === 'assistant' && (
                         <RequestUsageLine usage={msg.requestUsage} className="block px-1" />
                       )}
+                      {msg.role === 'assistant' && planRows.get(msg.id)?.map((todos, k) => (
+                        <PlanHistoryRow key={k} todos={todos} className="px-1 pt-1" />
+                      ))}
                       {/* CA U4: files back to before this instruction. */}
                       {!readOnly && msg.role === 'user' && activeConversationId && (
                         <div className="flex justify-end opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity">

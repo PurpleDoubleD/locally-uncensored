@@ -14,7 +14,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render } from '@testing-library/react'
-import { PlanBar, planRowStates, planCountLabel } from '../PlanBar'
+import { PlanBar, planRowStates } from '../PlanBar'
 import { useTodoStore, writeTodos, type TodoItem } from '../../../stores/todoStore'
 import { useGenerationStore } from '../../../stores/generationStore'
 import { useStagedChangesStore } from '../../../stores/stagedChangesStore'
@@ -52,9 +52,6 @@ describe('planRowStates', () => {
     expect(planRowStates(PLAN, false)).toEqual(['done', 'open', 'open'])
   })
 
-  it('counts done steps for the folded line', () => {
-    expect(planCountLabel(PLAN)).toBe('1 of 3 done')
-  })
 })
 
 describe('PlanBar, pinned in the transcript', () => {
@@ -72,7 +69,9 @@ describe('PlanBar, pinned in the transcript', () => {
     expect(box.className).toMatch(/\bbottom-0\b/)
     const rows = [...v.getByTestId('plan-steps').querySelectorAll('li')]
     expect(rows.map((r) => r.getAttribute('data-state'))).toEqual(['done', 'running', 'open'])
-    expect(v.getByTestId('plan-count').textContent).toBe('1 of 3 done')
+    // No count (David, 14.11.2026): the head is the word, the ticks say how far.
+    expect(v.getByTestId('plan-title').textContent).toBe('Plan')
+    expect(box.textContent).not.toMatch(/\d+\s*(?:of|\/)\s*\d+/)
     expect(v.container.querySelectorAll('.animate-spin')).toHaveLength(1)
     // No closing box while the run goes.
     expect(v.queryByTestId('plan-all-done')).toBeNull()
@@ -128,14 +127,15 @@ describe('PlanBar, pinned in the transcript', () => {
     expect(v.queryByText('Write median()')).toBeNull()
   })
 
-  it('folds to one line with the count and the running step', () => {
+  it('folds to one line with its name and the running step', () => {
     running(true)
     writeTodos(CONV, PLAN)
     const v = render(<PlanBar conversationId={CONV} />)
     fireEvent.click(v.getByTitle('Collapse the plan'))
     expect(v.queryByTestId('plan-steps')).toBeNull()
-    expect(v.getByTestId('plan-pinned').textContent).toContain('1 of 3 done')
+    expect(v.getByTestId('plan-pinned').textContent).toContain('Plan')
     expect(v.getByTestId('plan-pinned').textContent).toContain('Write median()')
+    expect(v.getByTestId('plan-pinned').textContent).not.toMatch(/of 3/)
     fireEvent.click(v.getByTitle('Show every step'))
     expect(v.getByTestId('plan-steps')).toBeTruthy()
   })
@@ -144,7 +144,8 @@ describe('PlanBar, pinned in the transcript', () => {
     // David, 14.11.2026, on the live build: drop the tick and "every step done".
     writeTodos(CONV, PLAN.map((t) => ({ ...t, status: 'completed' as const })))
     const v = render(<PlanBar conversationId={CONV} />)
-    expect(v.getByTestId('plan-count').textContent).toBe('3 of 3 done')
+    expect(v.getByTestId('plan-title').textContent).toBe('Plan')
+    expect(v.getByTestId('plan-pinned').textContent).not.toMatch(/3 of 3|3\/3/)
     expect([...v.getByTestId('plan-steps').querySelectorAll('li')].map((r) => r.getAttribute('data-state')))
       .toEqual(['done', 'done', 'done'])
     expect(v.getByTestId('plan-pinned').textContent).not.toMatch(/every step done/i)
@@ -165,7 +166,8 @@ describe('PlanBar, pinned in the transcript', () => {
     const onContinue = vi.fn()
     const v = render(<PlanBar conversationId={CONV} onContinue={onContinue} />)
     const box = v.getByTestId('plan-run-stopped')
-    expect(box.textContent).toContain('the run ended here, 1 of 3 steps done, 2 still open')
+    expect(box.textContent).toContain('the run ended before every step was done')
+    expect(box.textContent).not.toMatch(/of 3/)
     expect(box.textContent).toContain('Next: Write median()')
     expect(v.container.querySelectorAll('.animate-spin')).toHaveLength(0)
     fireEvent.click(v.getByTestId('plan-continue'))

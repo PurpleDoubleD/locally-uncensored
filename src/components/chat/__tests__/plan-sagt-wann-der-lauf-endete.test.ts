@@ -32,18 +32,12 @@ const here = dirname(fileURLToPath(import.meta.url))
 const read = (rel: string) => readFileSync(resolve(here, rel), 'utf8')
 
 describe('planStoppedLabel', () => {
-  it('nennt die Zahl UND dass nichts mehr laeuft', () => {
-    expect(planStoppedLabel(3, 4)).toBe('the run ended here, 3 of 4 steps done, 1 still open')
-  })
-
-  it('zaehlt die offenen Schritte im Plural richtig', () => {
-    expect(planStoppedLabel(1, 31)).toBe('the run ended here, 1 of 31 steps done, 30 still open')
-  })
-
-  it('behauptet nie ein Ende, das die Leiste gar nicht zeigt', () => {
-    // Ein fertiger Plan geht durch `planDoneLabel`, nicht hier durch. Die
-    // Zeile darf trotzdem keine negative Restzahl bilden koennen.
-    expect(planStoppedLabel(4, 4)).toContain('0 still open')
+  it('sagt, dass nichts mehr laeuft, ohne Zahlen', () => {
+    // Bis 14.11.2026 "the run ended here, 3 of 4 steps done, 1 still open".
+    // David: kein Zaehler, weder waehrend der Arbeit noch am Ende; welche
+    // Schritte offen sind, zeigt die Liste selbst.
+    expect(planStoppedLabel()).toBe('the run ended before every step was done')
+    expect(planStoppedLabel()).not.toMatch(/\d/)
   })
 })
 

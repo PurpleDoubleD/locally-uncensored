@@ -27,13 +27,30 @@ export interface TodoItem {
   status: TodoStatus
 }
 
+export interface ArchivedPlan {
+  /** The assistant message the plan hangs under in the transcript. */
+  anchorId: string
+  todos: TodoItem[]
+}
+
+/** Older plans of one chat that are kept; the oldest go first. */
+const MAX_ARCHIVED = 30
+
 interface TodoState {
   /** conversation id -> that run's plan */
   byConversation: Record<string, TodoItem[]>
   /** Wall-clock of the last write per conversation, for the "just updated" cue. */
   updatedAt: Record<string, number>
 
+  /** conversation id -> earlier plans, each kept at the answer it belonged to
+   *  (lib/plan-pin.ts). The pinned plan leaves the chat once the user writes
+   *  again; the transcript keeps it as a folded "Plan" row. */
+  archived: Record<string, ArchivedPlan[]>
+
   setTodos: (conversationId: string, todos: TodoItem[]) => void
+  archivePlan: (conversationId: string, anchorId: string, todos: TodoItem[]) => void
+  /** Everything of a chat, its archive included: for a deleted chat. */
+  forgetConversation: (conversationId: string) => void
   getTodos: (conversationId: string | null | undefined) => TodoItem[]
   clearTodos: (conversationId: string) => void
 }
@@ -64,12 +81,31 @@ export const useTodoStore = create<TodoState>()(
     (set, get) => ({
       byConversation: {},
       updatedAt: {},
+      archived: {},
 
       setTodos: (conversationId, todos) =>
         set((s) => ({
           byConversation: { ...s.byConversation, [conversationId]: todos },
           updatedAt: { ...s.updatedAt, [conversationId]: Date.now() },
         })),
+
+      archivePlan: (conversationId, anchorId, todos) =>
+        set((s) => {
+          if (todos.length === 0) return {}
+          const kept = (s.archived[conversationId] ?? []).filter((a) => a.anchorId !== anchorId)
+          return { archived: { ...s.archived, [conversationId]: [...kept, { anchorId, todos }].slice(-MAX_ARCHIVED) } }
+        }),
+
+      forgetConversation: (conversationId) =>
+        set((s) => {
+          const byConversation = { ...s.byConversation }
+          const updatedAt = { ...s.updatedAt }
+          const archived = { ...s.archived }
+          delete byConversation[conversationId]
+          delete updatedAt[conversationId]
+          delete archived[conversationId]
+          return { byConversation, updatedAt, archived }
+        }),
 
       getTodos: (conversationId) =>
         (conversationId && get().byConversation[conversationId]) || [],

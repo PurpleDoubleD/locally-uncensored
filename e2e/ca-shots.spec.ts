@@ -178,6 +178,8 @@ const PLAN_DONE: Turn[] = [
     ] } }],
   },
   { text: '`median()` is implemented and the tests pass.' },
+  // The user's next message: the plan leaves the chat (lib/plan-pin.ts).
+  { text: 'Sure, the README now mentions `median()`.' },
 ]
 
 test.describe('CA shots: pinned plan', () => {
@@ -221,11 +223,24 @@ test.describe('CA shots: pinned plan', () => {
       await page.getByRole('button', { name: 'Code', exact: true }).click()
       await openNewChat(page)
       await send(page, 'median() in src/math.ts is missing, implement it and run the tests')
-      // David, 14.11.2026: finished is the count and the greyed list, nothing more.
-      await expect(page.getByTestId('plan-count')).toHaveText(/^(\d+) of \1 done$/, { timeout: 60_000 })
-      await expect(page.getByTestId('plan-pinned').locator('.animate-spin')).toHaveCount(0, { timeout: 60_000 })
-      await expect(page.getByTestId('plan-pinned')).not.toContainText(/every step done/i)
+      // David, 14.11.2026: finished is the list with every tick, no count,
+      // no closing line.
+      const plan = page.getByTestId('plan-pinned')
+      await expect(plan.locator('li[data-state="done"]')).toHaveCount(3, { timeout: 60_000 })
+      await expect(plan.locator('.animate-spin')).toHaveCount(0, { timeout: 60_000 })
+      await expect(plan).not.toContainText(/every step done|\d+ of \d+/i)
       await shot(page, `plan-${theme}-1280-5-all-done`)
+      // The next message: the pinned plan leaves, a folded "Plan" row stays at
+      // the answer it belonged to.
+      await send(page, 'thanks, mention it in the README too')
+      await expect(page.getByRole('main').getByText('the README now mentions')).toBeVisible({ timeout: 60_000 })
+      await expect(page.getByTestId('plan-pinned')).toHaveCount(0)
+      const row = page.getByTestId('plan-history')
+      await expect(row).toHaveCount(1)
+      await shot(page, `plan-${theme}-1280-6-after-next-message`)
+      await row.getByTitle('Show the plan').click()
+      await expect(row.locator('li[data-state="done"]')).toHaveCount(3)
+      await shot(page, `plan-${theme}-1280-7-history-open`)
     })
 
     // The same list in the LU tab's transcript (Agent mode, MessageList).

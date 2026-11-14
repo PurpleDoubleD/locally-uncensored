@@ -2260,6 +2260,12 @@ async function executeTodoWrite(args: ToolArgs, run?: AgentRunContext): Promise<
   const convId = getActiveConversationId(run)
   if (!convId) return 'Error: no active conversation to attach a plan to.'
 
+  // The plan from before the user's last message keeps its row in the
+  // transcript (lib/plan-pin.ts) before this one takes its place. Loaded on
+  // use: plan-pin reads chatStore, and a static import closes a cycle through
+  // the tool table at start-up.
+  const { archiveRetiredPlan } = await import('../../lib/plan-pin')
+  archiveRetiredPlan(convId)
   const todos = writeTodos(convId, args.todos)
   if (todos.length === 0 && Array.isArray(args.todos) && args.todos.length > 0) {
     return 'Error: every item needs a non-empty `content` string. Nothing was written.'

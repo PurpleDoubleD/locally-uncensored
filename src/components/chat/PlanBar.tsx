@@ -35,16 +35,22 @@
 // never as done (a typo must not tick off work). The model replaces the whole
 // list on every `todo_write`, so a changed plan replaces this list whole.
 //
-// Collapsible to one line ("3 of 5 done · the step that runs"); the line is
-// the list's own first line, so folding moves nothing sideways. When the run
-// is over, a closing line sits under the list: the plan is done (and whether
-// changes still wait for approval), or the run ended with steps open, with
-// "Continue" and "Clear plan".
+// No count anywhere (David, 14.11.2026): the head says "Plan", the ticks say
+// how far it is. Collapsible to one line ("Plan · the step that runs"); the
+// line is the list's own first line, so folding moves nothing sideways. When
+// the run is over a closing line sits under the list only when something is
+// left: changes still waiting for approval, or a run that ended with steps
+// open, with "Continue" and "Clear plan". A plan that is through stays as it
+// is, every step ticked, until the user writes again; then it leaves the chat
+// and keeps a folded "Plan" row at its answer (PlanHistoryRow, lib/plan-pin.ts).
 
-import { useState, type ReactNode } from 'react'
+import { useMemo, useState, type ReactNode } from 'react'
 import { AlertCircle, Check, Circle, ChevronDown, ChevronRight, Loader2, X } from 'lucide-react'
 import { useTodoStore, type TodoItem } from '../../stores/todoStore'
 import { useCodexStore } from '../../stores/codexStore'
+import { useChatStore } from '../../stores/chatStore'
+import { planHistory, retiredAt } from '../../lib/plan-pin'
+import type { Message } from '../../types/chat'
 import { useGenerationStore } from '../../stores/generationStore'
 import { useStagedChangesStore } from '../../stores/stagedChangesStore'
 import { runStatusFrom } from '../../lib/run-idle'
@@ -71,11 +77,11 @@ export function planDoneLabel(pendingChanges: number): string | null {
  * unveraendert auf "PLAN 3/4", mit einem Kreisel, der weiterdrehte. Kein Wort
  * davon, dass nichts mehr laeuft. Die Schlusszeile aus `turn-summary.ts` sagt
  * es nur, wenn das Modell selbst nichts geschrieben hat; die Liste sagt es
- * immer.
+ * immer. Seit 14.11.2026 ohne Zahlen (David: kein Zaehler, nirgends); welche
+ * Schritte offen sind, zeigt die Liste selbst.
  */
-export function planStoppedLabel(done: number, total: number): string {
-  const open = total - done
-  return `the run ended here, ${done} of ${total} steps done, ${open} still open`
+export function planStoppedLabel(): string {
+  return 'the run ended before every step was done'
 }
 
 export type PlanRowState = 'done' | 'running' | 'open'
@@ -98,11 +104,9 @@ export function planRowStates(todos: TodoItem[], runActive: boolean): PlanRowSta
   })
 }
 
-/** "3 of 5 done", the collapsed line's count. */
-export function planCountLabel(todos: TodoItem[]): string {
-  const done = todos.filter((t) => t.status === 'completed').length
-  return `${done} of ${todos.length} done`
-}
+/** The list's own name, the only word in its head (David, 14.11.2026: no
+ *  count, not while it runs and not at the end; the ticks say it). */
+export const PLAN_TITLE = 'Plan'
 
 /**
  * The three greys of the list, written as the full text colour thinned out
@@ -160,9 +164,21 @@ export function PlanBar({ conversationId, onContinue }: Props) {
   const runActive = isActiveCodexStatus(
     runStatusFrom(generating, threadStatus, isRunStopped(conversationId), isRunQueued(conversationId)),
   )
+  // Once the user writes again the plan leaves the chat and keeps a folded
+  // row at its answer (lib/plan-pin.ts). A boolean, so a streaming answer does
+  // not redraw the list on every token.
+  const updatedAt = useTodoStore((s) => (conversationId ? s.updatedAt[conversationId] : undefined))
+  const retired = useChatStore((s) => {
+    if (!conversationId) return false
+    const msgs = s.conversations.find((c) => c.id === conversationId)?.messages
+    return msgs ? retiredAt(msgs, updatedAt) !== null : false
+  })
   const [collapsed, setCollapsed] = useState(false)
 
   if (!conversationId || !todos || todos.length === 0) return null
+  // Gone the moment the user writes, also while the new run starts; a run that
+  // writes a plan again brings a new one.
+  if (retired) return null
 
   const states = planRowStates(todos, runActive)
   const done = todos.filter((t) => t.status === 'completed').length
@@ -193,8 +209,8 @@ export function PlanBar({ conversationId, onContinue }: Props) {
           >
             <Fold size={ICON_SM} className={`shrink-0 ${GLYPH_QUIET} group-hover:text-gray-900 dark:group-hover:text-gray-50 transition-colors`} />
             <span className={`${LINE} min-w-0 truncate`}>
-              <span className={TONE.quiet} data-testid="plan-count">
-                {planCountLabel(todos)}
+              <span className={TONE.quiet} data-testid="plan-title">
+                {PLAN_TITLE}
               </span>
               {collapsed && (
                 <span className={runningIdx >= 0 ? TONE.strong : TONE.normal} title={headline.content}>
@@ -216,27 +232,7 @@ export function PlanBar({ conversationId, onContinue }: Props) {
 
         {!collapsed && (
           // Capped so a fifteen-step plan cannot cover the transcript it pins to.
-          <ul className="mt-1 space-y-0.5 max-h-56 overflow-y-auto scrollbar-thin" data-testid="plan-steps">
-            {todos.map((t, i) => {
-              const state = states[i]
-              const halted = !runActive && t.status === 'in_progress'
-              return (
-                <li key={`${i}-${t.content}`} className="flex items-start gap-2" data-state={state}>
-                  {state === 'done' ? (
-                    <Check size={ICON_SM} className={`${GLYPH} ${GLYPH_QUIET}`} />
-                  ) : state === 'running' ? (
-                    <Loader2 size={ICON_SM} className={`${GLYPH} ${TONE.strong} animate-spin`} />
-                  ) : (
-                    <Circle size={ICON_SM} className={`${GLYPH} ${halted ? HINWEIS_TEXT.ruhig : GLYPH_QUIET}`} />
-                  )}
-                  {/* The colour eases over when a step is ticked off; nothing else moves. */}
-                  <span className={`${LINE} min-w-0 break-words transition-colors duration-[var(--motion-slow)] ${ROW_TEXT[state]}`}>
-                    {t.content}
-                  </span>
-                </li>
-              )
-            })}
-          </ul>
+          <PlanSteps todos={todos} states={states} runActive={runActive} />
         )}
 
         {!runActive && allDone && waiting && (
@@ -247,7 +243,7 @@ export function PlanBar({ conversationId, onContinue }: Props) {
 
         {stoppedShort && (
           <Abschluss testid="plan-run-stopped" Symbol={AlertCircle}>
-            {planStoppedLabel(done, todos.length)}.
+            {planStoppedLabel()}.
             {nextOpen && <span> Next: {nextOpen.content}</span>}
             <div className="mt-1.5 flex flex-wrap gap-1.5">
               {onContinue && (
@@ -275,6 +271,62 @@ export function PlanBar({ conversationId, onContinue }: Props) {
   )
 }
 
+/** The steps, one row each: a tick when done, the spinner on the one that
+ *  runs, an open circle otherwise. Shared by the pinned plan and the folded
+ *  row it leaves in the transcript. */
+function PlanSteps({ todos, states, runActive }: { todos: TodoItem[]; states: PlanRowState[]; runActive: boolean }) {
+  return (
+    // Capped so a fifteen-step plan cannot cover the transcript it pins to.
+    <ul className="mt-1 space-y-0.5 max-h-56 overflow-y-auto scrollbar-thin" data-testid="plan-steps">
+      {todos.map((t, i) => {
+        const state = states[i]
+        const halted = !runActive && t.status === 'in_progress'
+        return (
+          <li key={`${i}-${t.content}`} className="flex items-start gap-2" data-state={state}>
+            {state === 'done' ? (
+              <Check size={ICON_SM} className={`${GLYPH} ${GLYPH_QUIET}`} />
+            ) : state === 'running' ? (
+              <Loader2 size={ICON_SM} className={`${GLYPH} ${TONE.strong} animate-spin`} />
+            ) : (
+              <Circle size={ICON_SM} className={`${GLYPH} ${halted ? HINWEIS_TEXT.ruhig : GLYPH_QUIET}`} />
+            )}
+            {/* The colour eases over when a step is ticked off; nothing else moves. */}
+            <span className={`${LINE} min-w-0 break-words transition-colors duration-[var(--motion-slow)] ${ROW_TEXT[state]}`}>
+              {t.content}
+            </span>
+          </li>
+        )
+      })}
+    </ul>
+  )
+}
+
+/**
+ * What a plan leaves in the transcript once the user wrote again: one folded
+ * line "Plan" under the answer it belonged to, opening to the steps with their
+ * ticks. Quiet, the same type and greys as the pinned list; nothing spins,
+ * because that run is over.
+ */
+export function PlanHistoryRow({ todos, className = '' }: { todos: TodoItem[]; className?: string }) {
+  const [open, setOpen] = useState(false)
+  const Fold = open ? ChevronDown : ChevronRight
+  return (
+    <div className={`t-control ${className}`} data-testid="plan-history">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        title={open ? 'Fold the plan' : 'Show the plan'}
+        className="group flex items-center gap-2 text-left"
+      >
+        <Fold size={ICON_SM} className={`shrink-0 ${GLYPH_QUIET} group-hover:text-gray-900 dark:group-hover:text-gray-50 transition-colors`} />
+        <span className={`${LINE} ${TONE.quiet} group-hover:text-gray-900 dark:group-hover:text-gray-50 transition-colors`}>{PLAN_TITLE}</span>
+      </button>
+      {open && <PlanSteps todos={todos} states={planRowStates(todos, false)} runActive={false} />}
+    </div>
+  )
+}
+
 /**
  * The closing line under the list once the run is over: a run that ended with
  * steps open, or changes that still wait for approval. Neither is an error, so
@@ -297,5 +349,19 @@ function Abschluss({
           capital is drawn here, on the first letter of the line. */}
       <div className={`${LINE} min-w-0 break-words text-gray-800 dark:text-gray-200 first-letter:uppercase`}>{children}</div>
     </div>
+  )
+}
+
+/** Answer id -> the plans that hang under it as folded rows (lib/plan-pin.ts). */
+export function usePlanHistory(
+  conversationId: string | null | undefined,
+  messages: readonly Pick<Message, 'id' | 'role' | 'timestamp' | 'hidden'>[] | undefined,
+): Map<string, TodoItem[][]> {
+  const todos = useTodoStore((s) => (conversationId ? s.byConversation[conversationId] : undefined))
+  const updatedAt = useTodoStore((s) => (conversationId ? s.updatedAt[conversationId] : undefined))
+  const archived = useTodoStore((s) => (conversationId ? s.archived?.[conversationId] : undefined))
+  return useMemo(
+    () => planHistory(messages ?? [], todos, updatedAt, archived),
+    [messages, todos, updatedAt, archived],
   )
 }
