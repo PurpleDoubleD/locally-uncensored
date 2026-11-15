@@ -29,7 +29,7 @@ export interface UnloadScope {
   lmstudio: boolean
 }
 
-interface OffloadReply { offloaded?: string[]; notOurs?: Array<{ backend?: string }> }
+interface OffloadReply { offloaded?: string[]; notOurs?: Array<{ backend?: string; why?: string }> }
 
 export interface UnloadDeps {
   unloadOllama: () => Promise<UnloadAllResult>
@@ -77,8 +77,16 @@ export async function unloadEverything(scope: UnloadScope, deps: UnloadDeps = de
       const reply = await deps.offload()
       const freed = new Set(reply.offloaded ?? [])
       outcomes.push({ engine: 'engine', freed: freed.has('bundled-engine') })
-      if ((reply.notOurs ?? []).some((n) => n.backend === 'comfyui')) {
+      // The app says why it left ComfyUI alone (process.rs, VramRelease):
+      // on another host, nothing answered (not running: nothing to free), or
+      // it answered with an error. Found by the real check: an idle machine
+      // without ComfyUI must not read as "on another computer".
+      const comfy = (reply.notOurs ?? []).find((n) => n.backend === 'comfyui')
+      const why = comfy?.why ?? ''
+      if (comfy && /another host/i.test(why)) {
         outcomes.push({ engine: 'comfyui', freed: false, problem: 'ComfyUI runs on another computer, so LU cannot free its memory from here.' })
+      } else if (comfy && !/nothing answered/i.test(why)) {
+        outcomes.push({ engine: 'comfyui', freed: false, problem: 'ComfyUI did not free its memory.' })
       } else {
         outcomes.push({ engine: 'comfyui', freed: freed.has('comfyui') })
       }

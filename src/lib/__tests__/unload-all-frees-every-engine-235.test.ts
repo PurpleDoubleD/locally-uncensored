@@ -64,8 +64,23 @@ describe('Unload all models frees every engine', () => {
   })
 
   it('a ComfyUI on another computer is said as such', async () => {
-    const d = deps({ offload: vi.fn(async () => ({ offloaded: ['bundled-engine'], notOurs: [{ backend: 'comfyui' }] })) })
+    const why = 'ComfyUI is configured on another host, so its VRAM is not this machine\'s to free'
+    const d = deps({ offload: vi.fn(async () => ({ offloaded: ['bundled-engine'], notOurs: [{ backend: 'comfyui', why }] })) })
     expect(unloadProblems((await unloadEverything({ ollama: false, lmstudio: false }, d)).outcomes)).toMatch(/ComfyUI runs on another computer/)
+  })
+
+  it('NEGATIVE CONTROL (from the real run): no ComfyUI running is not a problem', async () => {
+    // The app's own words on the Mac test build, 15.11.2026, ComfyUI not started.
+    const why = 'nothing answered /free there (error sending request for url (http://localhost:8188/free))'
+    const d = deps({ offload: vi.fn(async () => ({ offloaded: ['bundled-engine'], notOurs: [{ backend: 'comfyui', why }, { backend: 'ollama', why: 'nothing answered /api/ps there' }] })) })
+    const r = await unloadEverything({ ollama: false, lmstudio: false }, d)
+    expect(unloadProblems(r.outcomes)).toBeNull()
+    expect(unloadedNames(r.outcomes)).toEqual(['LU Engine'])
+  })
+
+  it('a ComfyUI that answers with an error is named', async () => {
+    const d = deps({ offload: vi.fn(async () => ({ offloaded: ['bundled-engine'], notOurs: [{ backend: 'comfyui', why: '/free answered HTTP 500' }] })) })
+    expect(unloadProblems((await unloadEverything({ ollama: false, lmstudio: false }, d)).outcomes)).toBe('ComfyUI did not free its memory.')
   })
 
   it('LM Studio still holding a model after the unload is named', async () => {
