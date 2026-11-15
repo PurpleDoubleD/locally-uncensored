@@ -374,7 +374,11 @@ export interface CreateState {
   width: number
   height: number
   seed: number
+  /** Images per run (the chip next to Create). */
   batchSize: number
+  /** W32: the most images one ComfyUI run makes at once (Batch size in
+   *  Advanced settings). LOCAL_BATCH_MAX makes the whole run one batch. */
+  batchPacket: number
   frames: number
   fps: number
   /** Fast (lightx2v 4 steps) or Quality sampling for the Wan 14B models
@@ -670,6 +674,7 @@ export interface CreateState {
   setSize: (width: number, height: number) => void
   setSeed: (seed: number) => void
   setBatchSize: (batchSize: number) => void
+  setBatchPacket: (packet: number) => void
   setFrames: (frames: number) => void
   setFps: (fps: number) => void
   setVideoSpeed: (speed: VideoSpeed) => void
@@ -1176,6 +1181,8 @@ export const useCreateStore = create<CreateState>()(
       height: 1024,
       seed: -1,
       batchSize: 1,
+      // W32: the whole run in one batch, as before the two were split.
+      batchPacket: 8,
       frames: 24,
       fps: 8,
       videoSpeed: 'fast',
@@ -1327,6 +1334,7 @@ export const useCreateStore = create<CreateState>()(
       }),
       setSeed: (seed) => set({ seed: Math.floor(seed) }),
       setBatchSize: (batchSize) => set({ batchSize: Math.max(1, Math.min(8, Math.floor(batchSize))) }),
+      setBatchPacket: (packet) => set({ batchPacket: Math.max(1, Math.min(8, Math.floor(packet) || 8)) }),
       // D4: the longest clip of any local family (lib/video-length), the
       // slider of the picked family keeps a shorter one inside its range.
       setFrames: (frames) => set({ frames: Math.max(1, Math.min(MAX_LOCAL_FRAMES, Math.floor(frames))) }),
@@ -2051,6 +2059,7 @@ export const useCreateStore = create<CreateState>()(
         width: state.width,
         height: state.height,
         batchSize: state.batchSize,
+        batchPacket: state.batchPacket,
         frames: state.frames,
         fps: state.fps,
         videoSpeed: state.videoSpeed,

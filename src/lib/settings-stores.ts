@@ -120,6 +120,7 @@ export function writeEntry(entry: CatalogEntry, value: unknown): void {
         case 'create.sampler': s.setSampler(String(value)); return
         case 'create.scheduler': s.setScheduler(String(value)); return
         case 'create.batchSize': s.setBatchSize(Number(value)); return
+        case 'create.batchPacket': s.setBatchPacket(Number(value)); return
         case 'create.frames': s.setFrames(Number(value)); return
         case 'create.fps': s.setFps(Number(value)); return
         case 'create.hiresFixEnabled': s.setHiresFixEnabled(value === true); return
@@ -167,7 +168,7 @@ export function describeEntryNow(entry: CatalogEntry): string {
 export function useAnyEntryStore(): number {
   const a = useSettingsStore((s) => s.settings)
   const b = useVoiceStore((s) => `${s.ttsEnabled}${s.autoReadAloud}${s.sttEnabled}${s.ttsRate}${s.ttsPitch}${s.ttsMode}${s.sttMode}${s.loopThinking}${s.loopAgent}`)
-  const c = useCreateStore((s) => `${s.imageModel}${s.videoModel}${s.steps}${s.cfgScale}${s.width}${s.height}${s.sampler}${s.scheduler}${s.batchSize}${s.frames}${s.fps}${s.hiresFixEnabled}`)
+  const c = useCreateStore((s) => `${s.imageModel}${s.videoModel}${s.steps}${s.cfgScale}${s.width}${s.height}${s.sampler}${s.scheduler}${s.batchSize}${s.batchPacket}${s.frames}${s.fps}${s.hiresFixEnabled}`)
   const d = useMemoryStore((s) => s.settings)
   const e = usePermissionStore((s) => s.globalPermissions)
   return [a, b, c, d, e].length

@@ -92,7 +92,7 @@ import { canonicalImageRefs } from '../lib/image-ref-names'
 import { macEditReferenceRoom } from '../lib/mac-edit-memory'
 import { getSharedMemoryGb } from '../lib/hardware'
 import { resolveRunSeed } from '../lib/run-seed'
-import { bumpSeed } from '../lib/render/image-count'
+import { batchLabel, batchPlan, batchSeed, bumpSeed, imageCountApplies } from '../lib/render/image-count'
 import { collectLateResult, LATE_RESULT_PROMISE } from '../lib/render/late-result'
 import {
   clearTrainingSet, stageTrainingImage, startCharacterTraining,
@@ -2738,6 +2738,33 @@ export function useCreate() {
         } catch (e) {
           if (!(e instanceof LongRunStopped) || e.message !== 'Stopped.') {
             useCreateStore.getState().setError(e instanceof Error ? e.message : String(e))
+          }
+        } finally {
+          if (chainAbort.current === own) chainAbort.current = null
+          useCreateStore.getState().setIsGenerating(false)
+          useCreateStore.getState().setProgress(0)
+        }
+        return
+      }
+    }
+    // W32: Images per run in batches of Batch size, one ComfyUI run after the
+    // other, each with its own seed, into the same gallery; Stop ends the
+    // batches still to come. The Mac makes one image per run already.
+    if (!mac && s.backend === 'local' && s.mode === 'image' && !isLocalCharacter(s.selectedCharacter)
+      && imageCountApplies(s.intent())) {
+      const plan = batchPlan(s.batchSize, s.batchPacket)
+      if (plan.length > 1) {
+        const own = new AbortController()
+        chainAbort.current = own
+        s.setError(null)
+        try {
+          let before = 0
+          for (const [i, size] of plan.entries()) {
+            if (own.signal.aborted) break
+            await runOnce({ batchSize: size, seed: batchSeed(s.seed, before) }, { stepLabel: batchLabel(i, plan.length) })
+            // A batch that failed said why; the next ones would fail the same way.
+            if (useCreateStore.getState().error) break
+            before += size
           }
         } finally {
           if (chainAbort.current === own) chainAbort.current = null
