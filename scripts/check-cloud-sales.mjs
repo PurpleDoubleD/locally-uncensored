@@ -959,7 +959,8 @@ const downloadFile = { win: /_x64-setup\.exe$/, mac: /_aarch64\.dmg$/, linux: /_
 const downloadDrift = []
 for (const [was, anzahl] of [['class="dl-btn" data-dl-for', 2], ['class="lu-nav-dl" data-dl-for', 1], ['data-dl-os', 2]]) {
   for (const [os, datei] of Object.entries(downloadFile)) {
-    const links = [...homeText.matchAll(new RegExp(`<a ${was}="${os}" href="([^"]+)"`, 'g'))].map((m) => m[1])
+    // Ein Schalter ohne Wert wie data-mac-latest (seit 09.11.) darf vor href stehen.
+    const links = [...homeText.matchAll(new RegExp(`<a ${was}="${os}"(?: data-[a-z-]+)* href="([^"]+)"`, 'g'))].map((m) => m[1])
     if (links.length !== anzahl) downloadDrift.push(`${was}="${os}": ${links.length} instead of ${anzahl}`)
     for (const link of links) if (!datei.test(link)) downloadDrift.push(`${was}="${os}": ${link}`)
   }
