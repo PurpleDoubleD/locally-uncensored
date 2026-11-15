@@ -104,6 +104,7 @@ export function registerRemoteStubs(routes: RouteMount): void {
     '/local-api/comfy-model-reveal',
     '/local-api/bundled-model-delete-plan',
     '/local-api/trash-model-file', '/local-api/set-engine-idle-unload', '/local-api/transcribe-external',
+    '/local-api/parakeet-status', '/local-api/parakeet-install', '/local-api/parakeet-cancel', '/local-api/parakeet-stop', '/local-api/parakeet-transcribe',
     '/local-api/set-gpu-roles', '/local-api/describe-gpu-roles',
     '/local-api/abliterate-plan', '/local-api/abliterate-start', '/local-api/abliterate-status',
     '/local-api/abliterate-cancel', '/local-api/abliterate-dismiss', '/local-api/abliterate-runs',

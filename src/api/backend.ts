@@ -649,6 +649,12 @@ export async function backendCall<T = unknown>(
     computer_surface_corner: { path: "/local-api/computer-surface-corner", method: "POST" },
     transcribe: { path: "/local-api/transcribe", method: "POST" },
     transcribe_external: { path: "/local-api/transcribe-external", method: "POST" },
+    // Parakeet dictation (#233) is desktop only; the dev server answers 501.
+    parakeet_status: { path: "/local-api/parakeet-status" },
+    parakeet_install: { path: "/local-api/parakeet-install", method: "POST" },
+    parakeet_cancel: { path: "/local-api/parakeet-cancel", method: "POST" },
+    parakeet_stop: { path: "/local-api/parakeet-stop", method: "POST" },
+    parakeet_transcribe: { path: "/local-api/parakeet-transcribe", method: "POST" },
     execute_code: { path: "/local-api/execute-code", method: "POST" },
     // file_read / file_write: ABSICHTLICH NICHT HIER. Die beiden Dev-Endpunkte
     // sind entfernt (siehe vite.config.ts), weil sie keinen Aufrufer mehr

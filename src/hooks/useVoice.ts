@@ -22,6 +22,7 @@ import {
   transcribeAudio,
   transcribeAudioCloud,
   transcribeExternal,
+  transcribeParakeet,
   getLastTtsStatus,
   LocalSttError,
   type AudioRecorder,
@@ -163,8 +164,11 @@ export async function transcribeTake(blob: Blob, cloudVoice: boolean): Promise<s
       }
     }
     const ext = externalStt(store);
+    // Parakeet (#233) is LU's own engine like faster-whisper, run by the
+    // desktop; it has no route and goes first.
     const transcript = cloudVoice
       ? await transcribeAudioCloud(blob)
+      : store.sttMode === "parakeet" ? await transcribeParakeet(blob)
       : ext ? await transcribeExternal(blob, ext.url, ext.model).catch((err: unknown) => {
           const refusal = speechRefusalText(err instanceof Error ? err.message : String(err), ext);
           throw refusal ? refusal : err;
@@ -667,7 +671,8 @@ export function useVoice() {
   // Reactive: the source of truth is the store flag set by the startup probe
   // (App.tsx) and the in-app install (Settings). Reading a module-level boolean
   // here was the bug — it never re-rendered when Whisper came up.
-  const sttSupported = cloudVoice || store.sttAvailable || externalStt(store) !== null;
+  const sttSupported = cloudVoice || store.sttAvailable || externalStt(store) !== null
+    || (store.sttMode === "parakeet" && store.parakeetReady);
   const ttsSupported = systemVoiceUsable();
 
   // Reactive neural-TTS availability (Piper), same model as sttAvailable.
@@ -744,7 +749,11 @@ export function useVoice() {
             if (!snap || snap.size < 12000) return;
             interimBusyRef.current = true;
             try {
-              const partial = await transcribeAudio(snap);
+              // The interim text comes from the engine the final take goes
+              // to: with Parakeet chosen, Whisper may not even be installed.
+              const partial = useVoiceStore.getState().sttMode === "parakeet"
+                ? await transcribeParakeet(snap)
+                : await transcribeAudio(snap);
               if (recorderRef.current?.isRecording() && partial.trim()) {
                 store.setTranscript(partial.trim());
                 onInterim(partial.trim());

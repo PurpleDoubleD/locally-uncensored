@@ -842,6 +842,17 @@ pub fn run() {
             commands::tts::synthesize,
             commands::tts::synthesize_external,
             commands::tts::transcribe_external,
+            // Parakeet dictation (#233), NVIDIA's own runtime, desktop only
+            #[cfg(desktop)]
+            commands::parakeet::parakeet_status,
+            #[cfg(desktop)]
+            commands::parakeet::parakeet_install,
+            #[cfg(desktop)]
+            commands::parakeet::parakeet_cancel,
+            #[cfg(desktop)]
+            commands::parakeet::parakeet_stop,
+            #[cfg(desktop)]
+            commands::parakeet::parakeet_transcribe,
             commands::tts::download_voice,
             commands::tts::installed_piper_voices,
             // Agent tools (legacy)

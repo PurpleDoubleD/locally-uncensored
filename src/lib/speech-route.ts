@@ -16,7 +16,9 @@
  * Pure on purpose: which address a take goes to is the part to get right.
  */
 
-export type SttMode = 'whisper' | 'external' | 'engine'
+/** 'parakeet': NVIDIA Parakeet TDT on NVIDIA's own runtime, run by LU itself
+ *  (#233, commands/parakeet.rs). Like 'whisper' it has no route here. */
+export type SttMode = 'whisper' | 'external' | 'engine' | 'parakeet'
 export type TtsMode = 'piper' | 'external' | 'engine'
 
 export interface SpeechRoute {
@@ -52,7 +54,8 @@ export function engineSpeechUrls(engineBaseUrl: string): { stt: string; tts: str
   return root ? { stt: `${root}/v1/audio/transcriptions`, tts: `${root}/tts` } : null
 }
 
-/** Dictation's route, or null for faster-whisper (also when half filled in). */
+/** Dictation's route, or null for LU's own engines, faster-whisper and
+ *  Parakeet (also null when half filled in). */
 export function sttRoute(s: Pick<SpeechSettings, 'sttMode' | 'externalSttUrl' | 'externalSttModel'>, engineBaseUrl: string | null | undefined): SpeechRoute | null {
   if (s.sttMode === 'engine') {
     const urls = engineSpeechUrls(engineBaseUrl ?? '')
