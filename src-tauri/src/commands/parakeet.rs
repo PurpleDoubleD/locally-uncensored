@@ -189,7 +189,12 @@ pub struct Marker {
 
 impl Marker {
     fn load(dirs: &Dirs) -> Marker {
-        std::fs::read_to_string(dirs.marker()).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default()
+        // A missing or unreadable record means nothing was verified; its
+        // reason is never shown, so no system wording reaches the user.
+        match std::fs::read_to_string(dirs.marker()) {
+            Ok(text) => serde_json::from_str(&text).unwrap_or_default(),
+            Err(_) => Marker::default(),
+        }
     }
     fn save(&self, dirs: &Dirs) -> Result<(), String> {
         let text = serde_json::to_string_pretty(self).map_err(|e| e.to_string())?;
