@@ -121,6 +121,8 @@ describe('push to talk', () => {
     })
     await flush(10)
     expect(screen.getByTestId('m-remote-voice').getAttribute('data-state')).toBe('recording')
+    // The finger is on the microphone: letting go ends the take, there is no End.
+    expect(screen.queryByTestId('m-remote-voice-end')).toBeNull()
     fake.level = 0.4
     await flush(1200)
     await act(async () => {

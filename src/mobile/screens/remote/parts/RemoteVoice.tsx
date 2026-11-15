@@ -404,7 +404,8 @@ function Clock({ since }: { since: number }) {
 export function RemoteVoiceLine({ voice }: { voice: RemoteVoice }): ReactNode {
   const { phase, mode, since } = voice
   if (phase === 'off') return null
-  const endButton = mode === 'hold' && phase === 'recording' ? null : (
+  // While the finger is on the microphone, letting go ends the take: no End there.
+  const endButton = phase === 'recording' && mode !== 'free' ? null : (
     <button type="button" className="m-rvoice-end" aria-label={S.endName} data-testid="m-remote-voice-end" onClick={voice.end}>
       {S.end}
     </button>
