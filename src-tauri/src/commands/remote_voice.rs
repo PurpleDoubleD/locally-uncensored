@@ -78,6 +78,8 @@ pub(crate) trait VoiceEngine: Send + Sync {
     fn transcribe(&self, wav: Vec<u8>) -> EngineFuture<String>;
     /// A WAV of `text`.
     fn speak(&self, text: String) -> EngineFuture<Vec<u8>>;
+    /// Load the speech recognition now, so the first take does not wait for it. Returns at once.
+    fn warm(&self) {}
 }
 
 /// The status of the engines, and when it was asked.
@@ -160,7 +162,14 @@ pub(crate) async fn handle_status(AxumState(ctx): AxumState<VoiceCtx>, caller: O
         return StatusCode::UNAUTHORIZED.into_response();
     }
     let here = ctx.engine.is_some();
-    Json(status_body(ctx.abilities().await, here)).into_response()
+    let abilities = ctx.abilities().await;
+    // A phone asks this when a chat with the microphone opens: load the model now, not at the first take.
+    if abilities.listen {
+        if let Some(engine) = &ctx.engine {
+            engine.warm();
+        }
+    }
+    Json(status_body(abilities, here)).into_response()
 }
 
 /// A RIFF/WAVE header, nothing more: the decoder on the other side checks the rest.
@@ -283,6 +292,10 @@ impl VoiceEngine for DesktopVoice {
         })
     }
 
+    fn warm(&self) {
+        super::whisper::warm_up(self.app.clone());
+    }
+
     fn transcribe(&self, wav: Vec<u8>) -> EngineFuture<String> {
         let app = self.app.clone();
         Box::pin(async move {
@@ -319,6 +332,7 @@ mod tests {
     struct Fake {
         abilities: Abilities,
         asked: AtomicUsize,
+        warmed: AtomicUsize,
         heard: Mutex<Vec<usize>>,
     }
 
@@ -335,10 +349,13 @@ mod tests {
         fn speak(&self, text: String) -> EngineFuture<Vec<u8>> {
             Box::pin(async move { Ok(format!("RIFF....WAVE{text}").into_bytes()) })
         }
+        fn warm(&self) {
+            self.warmed.fetch_add(1, Ordering::SeqCst);
+        }
     }
 
     fn fake(listen: bool, speak: bool) -> Arc<Fake> {
-        Arc::new(Fake { abilities: Abilities { listen, speak }, asked: AtomicUsize::new(0), heard: Mutex::new(vec![]) })
+        Arc::new(Fake { abilities: Abilities { listen, speak }, asked: AtomicUsize::new(0), warmed: AtomicUsize::new(0), heard: Mutex::new(vec![]) })
     }
 
     fn router(engine: Option<Arc<dyn VoiceEngine>>, signed_in: bool) -> Router {
@@ -402,6 +419,17 @@ mod tests {
         let v = json_of(&call(router(None, true), "GET", STATUS_PATH, "", vec![]).await.1);
         assert_eq!(v["listen"], false);
         assert_eq!(v["why"], NOT_HERE);
+    }
+
+    #[tokio::test]
+    async fn the_status_loads_the_speech_recognition_ahead_of_the_first_take() {
+        let ready = fake(true, false);
+        call(router(Some(ready.clone()), true), "GET", STATUS_PATH, "", vec![]).await;
+        assert_eq!(ready.warmed.load(Ordering::SeqCst), 1);
+        // Nothing to load where nothing is installed.
+        let none = fake(false, false);
+        call(router(Some(none.clone()), true), "GET", STATUS_PATH, "", vec![]).await;
+        assert_eq!(none.warmed.load(Ordering::SeqCst), 0);
     }
 
     #[tokio::test]

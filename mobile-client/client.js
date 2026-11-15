@@ -2396,6 +2396,8 @@ import {
       var f = s && Array.isArray(s.features) ? s.features : [];
       voiceFeature = f.indexOf('voice') >= 0;
       voiceSlot();
+      // Asking now also lets the computer load its speech recognition before the first take.
+      if(voiceFeature && voiceSecure()) voiceCaps().catch(function(){});
     })
     .catch(function(){});
 

@@ -528,6 +528,31 @@ fn ensure_whisper_running(app: &AppHandle, state: &State<'_, AppState>) -> Resul
     auto_start_whisper_sync(app, &python_bin, &state.whisper)
 }
 
+/// One warm-up at a time.
+static WARMING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Start speech recognition ahead of the first take, in the background
+/// (voice over remote, #212). A phone asks for the voice status when a chat
+/// with the microphone opens; loading the model then takes up to a minute,
+/// and without this the first take waited for all of it. Does nothing while
+/// the server runs or another warm-up is under way; a failure is said again
+/// by the take itself.
+pub fn warm_up(app: AppHandle) {
+    use std::sync::atomic::Ordering;
+    let state = app.state::<AppState>();
+    let running = state.whisper.lock().map(|w| w.is_running()).unwrap_or(true);
+    if running || WARMING.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    std::thread::spawn(move || {
+        let state = app.state::<AppState>();
+        if let Err(why) = ensure_whisper_running(&app, &state) {
+            println!("[Whisper] warm-up for a phone did not start: {}", why);
+        }
+        WARMING.store(false, Ordering::SeqCst);
+    });
+}
+
 /// Tear the server down and bring it back up, once.
 fn restart_whisper(app: &AppHandle, state: &State<'_, AppState>) -> Result<(), String> {
     if let Ok(mut w) = state.whisper.lock() {
