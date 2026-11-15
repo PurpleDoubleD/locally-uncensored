@@ -139,6 +139,10 @@ pub mod funnel;
 #[cfg(desktop)]
 pub mod gallery_files;
 pub mod whisper;
+// Parakeet dictation (#233). A native runtime fetched for this machine; a
+// phone has neither the runtime nor the room for the model.
+#[cfg(desktop)]
+pub mod parakeet;
 
 // ── the web app-compat error helpers ────────────────────────────────────────
 //

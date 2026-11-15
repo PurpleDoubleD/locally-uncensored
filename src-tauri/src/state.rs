@@ -809,6 +809,9 @@ impl AppState {
         if let Ok(mut whisper) = self.whisper.lock() {
             whisper.stop();
         }
+        // Parakeet dictation's server (#233), when it was started.
+        #[cfg(desktop)]
+        crate::commands::parakeet::stop();
 
         // The voice loop sidecar. It would leave by itself once its stdin
         // closes with this process; stopping it here means quit does not

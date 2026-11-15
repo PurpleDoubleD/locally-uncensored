@@ -328,6 +328,46 @@ export async function transcribeExternal(audioBlob: Blob, url: string, model: st
   return asString(prop(data, "transcript")) ?? "";
 }
 
+// --- Parakeet dictation (#233) ---
+
+/** What the desktop knows about Parakeet: whether it can run here, whether it
+ *  is installed, and the download in progress. Written by commands/parakeet.rs. */
+export interface ParakeetStatus {
+  supported: boolean;
+  reason: string | null;
+  installed: boolean;
+  running: boolean;
+  download_bytes: number;
+  model: string;
+  license: string;
+  /** The credit CC BY 4.0 asks for, shown next to the choice. */
+  attribution: string;
+  /** "NeMo-Speech.cpp 0.3.0" and its licence. */
+  runtime: string;
+  runtime_license: string;
+  job: { running: boolean; done_bytes: number; total_bytes: number; error: string | null };
+}
+
+/** Parakeet's status, or null where there is none (a phone, the browser dev server). */
+export async function parakeetStatus(): Promise<ParakeetStatus | null> {
+  if (!isTauri()) return null;
+  try {
+    const data: unknown = await backendCall("parakeet_status");
+    return data && typeof data === "object" && "installed" in data ? (data as ParakeetStatus) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** One take through Parakeet. The desktop starts its server on first use. */
+export async function transcribeParakeet(audioBlob: Blob): Promise<string> {
+  const bytes = new Uint8Array(await audioBlob.arrayBuffer());
+  let binary = "";
+  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+  const data: unknown = await backendCall("parakeet_transcribe", { audioBase64: btoa(binary) });
+  return asString(prop(data, "transcript")) ?? "";
+}
+
 /** The Ollama addresses for speech in and speech out, from its base URL. */
 export function ollamaSpeechUrls(base: string): { stt: string; tts: string } {
   const b = base.replace(/\/+$/, "");

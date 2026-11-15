@@ -2,12 +2,13 @@ import { useCallback, useEffect, useReducer, useState } from 'react'
 import { Check, Download, Loader2, Mic, Volume2, X } from 'lucide-react'
 import { withInstallerOutput } from '../../lib/error-text'
 import { HINWEIS_TEXT } from '../../lib/hinweis'
-import { backendCall, getOllamaBase } from '../../api/backend'
+import { backendCall, getOllamaBase, isTauri } from '../../api/backend'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { useVoiceStore } from '../../stores/voiceStore'
 import { checkWhisperAvailable, checkTtsAvailable, downloadPiperVoice, listInstalledPiperVoices, ollamaSpeechUrls, OLLAMA_SPEECH_MODEL } from '../../api/voice'
 import { InlineToggle } from './InlineToggle'
 import { MicrophoneSetting } from './MicrophoneSetting'
+import { ParakeetSetting } from './ParakeetSetting'
 import { initialProbe, makeProbeReducer, needsInstall, showsHint } from './probe-install'
 
 /**
@@ -310,9 +311,16 @@ export function SpeechSettings() {
     <EngineSwitch
       label="Dictation"
       value={voiceSettings.sttMode}
-      options={[['whisper', 'faster-whisper'], ['external', 'External HTTP'], ['engine', 'LU Engine']]}
-      onPick={(m) => voiceSettings.updateVoiceSettings({ sttMode: m })}
+      options={isTauri()
+        ? [['whisper', 'faster-whisper'], ['parakeet', 'Parakeet'], ['external', 'External HTTP'], ['engine', 'LU Engine']]
+        : [['whisper', 'faster-whisper'], ['external', 'External HTTP'], ['engine', 'LU Engine']]}
+      onPick={(m) => {
+        // Leaving Parakeet frees the memory its server holds (#233).
+        if (voiceSettings.sttMode === 'parakeet' && m !== 'parakeet') void backendCall('parakeet_stop').catch(() => {})
+        voiceSettings.updateVoiceSettings({ sttMode: m })
+      }}
     />
+    {voiceSettings.sttMode === 'parakeet' && <ParakeetSetting />}
     {voiceSettings.sttMode === 'engine' && <EngineSpeechNote what="hears" />}
     {voiceSettings.sttMode === 'external' && (
       <div className="space-y-1.5">

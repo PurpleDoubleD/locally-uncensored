@@ -17,6 +17,10 @@ interface VoiceState {
   // "available" can never light up the mic on a machine where Whisper is gone,
   // and a fresh install lights it up without a restart.
   sttAvailable: boolean;
+  /** Whether Parakeet dictation (#233) is installed on this desktop. Same
+   *  transient probe model as sttAvailable: re-read every launch and after
+   *  its download, never persisted. */
+  parakeetReady: boolean;
   // Whether local neural TTS (Piper) is installed + a voice model is present.
   // Same transient/probe model as sttAvailable.
   ttsAvailable: boolean;
@@ -101,6 +105,7 @@ interface VoiceState {
   setSpeaking: (speaking: boolean) => void;
   setTranscript: (transcript: string) => void;
   setSttAvailable: (available: boolean) => void;
+  setParakeetReady: (ready: boolean) => void;
   setTtsAvailable: (available: boolean) => void;
   setTtsFallbackReason: (reason: string | null) => void;
   setSttError: (error: string | null) => void;
@@ -150,6 +155,7 @@ export const useVoiceStore = create<VoiceState>()(
       isSpeaking: false,
       transcript: "",
       sttAvailable: false,
+      parakeetReady: false,
       ttsAvailable: false,
       ttsFallbackReason: null,
       sttError: null,
@@ -187,6 +193,7 @@ export const useVoiceStore = create<VoiceState>()(
       setSpeaking: (speaking) => set({ isSpeaking: speaking }),
       setTranscript: (transcript) => set({ transcript }),
       setSttAvailable: (available) => set({ sttAvailable: available }),
+      setParakeetReady: (ready) => set({ parakeetReady: ready }),
       setTtsAvailable: (available) => set({ ttsAvailable: available }),
       setTtsFallbackReason: (reason) => set({ ttsFallbackReason: reason }),
       setSttError: (error) => set({ sttError: error }),

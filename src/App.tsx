@@ -73,9 +73,13 @@ function App() {
     // previously never called anywhere → isSpeechRecognitionSupported() stayed
     // false forever → the mic was permanently disabled even with faster-whisper
     // installed and running. Fire-and-forget; never blocks first render.
-    import('./api/voice').then(({ initWhisperCheck, initTtsCheck }) => {
+    import('./api/voice').then(({ initWhisperCheck, initTtsCheck, parakeetStatus }) => {
       initWhisperCheck()
         .then((ok) => useVoiceStore.getState().setSttAvailable(ok))
+        .catch(() => {})
+      // Parakeet dictation (#233): installed means the microphone works with it.
+      parakeetStatus()
+        .then((s) => useVoiceStore.getState().setParakeetReady(!!s?.installed))
         .catch(() => {})
       // Same one-shot probe for local neural TTS (Piper) so the speaker
       // buttons reflect real availability and light up after the install.
