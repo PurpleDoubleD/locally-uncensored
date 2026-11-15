@@ -181,7 +181,7 @@ function GateBuyWindow({ model, category, offers, onBack }: {
   const big = category !== 'create' && tooBigForThisMachine(model.id, budget)
   const go = (way: GateWay) => {
     reportCloudGate(way === 'sub' ? 'cloud_gate_pick_sub' : 'cloud_gate_pick_credits')
-    void openExternal(gateCheckoutUrl(CLOUD_BASE, way, model.id, category))
+    void openExternal(gateCheckoutUrl(CLOUD_BASE, way, model.id, category, useUIStore.getState().cloudGateFrom))
   }
   const ways: { way: GateWay; title: string; button: string }[] = [
     { way: 'sub', title: 'Subscription', button: 'Subscribe' },

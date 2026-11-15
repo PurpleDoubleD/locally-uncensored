@@ -26,7 +26,7 @@ describe('der Dialog bei leerem Guthaben', () => {
     render(<CreditsExhaustedModal />)
     act(() => { window.dispatchEvent(new Event(CREDITS_EXHAUSTED_EVENT)) })
     fireEvent.click(screen.getByText('See plans and packs'))
-    expect(geoeffnet, 'der Knopf hat nichts geoeffnet').toEqual([`${CLOUD_BASE}/pricing`])
+    expect(geoeffnet, 'der Knopf hat nichts geoeffnet').toEqual([`${CLOUD_BASE}/pricing?utm_source=desktop&utm_medium=credits-empty`])
     // Negativkontrolle in dieselbe Richtung: kein Weg dieses Dialogs zeigt
     // noch auf die Aufladeseite, weder der Knopf noch der Satz im Verlauf.
     expect(geoeffnet[0], 'der Knopf springt wieder in den Kauf').not.toContain('/credits')

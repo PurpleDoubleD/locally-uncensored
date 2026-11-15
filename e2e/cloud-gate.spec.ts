@@ -31,16 +31,18 @@ test('signed in without a plan: plan buttons → browser, switch stays off', asy
 
   await expect(page.getByText(/no active plan/i)).toBeVisible({ timeout: 20_000 })
 
-  // The owner's 4 options: three plans (with the monthly price up front) + back
-  // to Local. `€` in the pattern keeps "Max" from matching the window's
-  // Maximize button.
-  await expect(page.getByRole('button', { name: /^Hosted €19/ })).toBeVisible()
+  // The options: subscription and pack side by side (3.1.0), the two bigger
+  // plans with the monthly price up front, and back to Local. `€` in the
+  // pattern keeps "Max" from matching the window's Maximize button.
+  await expect(page.getByTestId('buy-sub')).toBeVisible()
+  await expect(page.getByTestId('buy-pack')).toBeVisible()
+  await expect(page.getByRole('button', { name: /^Hosted €19/ })).toHaveCount(0)
   await expect(page.getByRole('button', { name: /^Pro €49/ })).toBeVisible()
   await expect(page.getByRole('button', { name: /Stay on Local/i })).toBeVisible()
   await page.getByRole('button', { name: /^Max €99/ }).click()
 
   const opened = await page.evaluate(() => (window as unknown as { __E2E_OPENED_URLS__?: string[] }).__E2E_OPENED_URLS__ ?? [])
-  expect(opened.some((u) => u.includes('/pricing#max'))).toBe(true)
+  expect(opened.some((u) => new URL(u).pathname === '/pricing' && new URL(u).hash === '#max')).toBe(true)
 
   // Gate holds: the switch is still off. Read through the modal-proof locator —
   // the gate is still open here, and an open dialog marks the rest of the page

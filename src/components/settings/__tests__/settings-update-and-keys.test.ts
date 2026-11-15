@@ -48,7 +48,7 @@ describe('Settings update section uses the in-app updater', () => {
 describe('Cloud API Keys section', () => {
   it('exists and points at the account page on lu-labs.ai', () => {
     expect(src).toContain('<Section title="Cloud API Keys">')
-    expect(src).toContain('openExternal(`${CLOUD_BASE}/account`)')
+    expect(src).toContain("openExternal(cloudLink('/account', 'settings'))")
   })
 
   it('names the OpenAI-compatible base URL', () => {

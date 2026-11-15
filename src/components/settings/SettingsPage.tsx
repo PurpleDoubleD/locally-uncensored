@@ -76,6 +76,7 @@ import { troubleshootHinweis, type TroubleshootHinweis } from './troubleshoot-me
 import { isMlxImageHost } from '../../api/mlx-image'
 import { ArrowUpCircle, KeyRound, RefreshCw } from 'lucide-react'
 import { CLOUD_BASE } from '../../api/cloud/config'
+import { cloudLink } from '../../lib/cloud-links'
 import { formatBytes } from '../../lib/formatters'
 import { syncCustomModelDir, type CustomModelDirResult } from '../../lib/custom-model-dir'
 import { listBundledModels, lastCustomScanDir, lastScanDirs, type ScannedDir } from '../../api/engine'
@@ -2018,7 +2019,7 @@ export function SettingsPage() {
               A key spends plan tokens only; it can never read or change the account.
             </p>
             <button
-              onClick={() => void openExternal(`${CLOUD_BASE}/account`)}
+              onClick={() => void openExternal(cloudLink('/account', 'settings'))}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[0.65rem] font-medium bg-violet-500/15 text-violet-500 dark:text-violet-300 hover:bg-violet-500/25 transition-colors"
             >
               <KeyRound size={11} /> Generate API key on lu-labs.ai
@@ -2315,7 +2316,7 @@ export function SettingsPage() {
                   <div>
                     <p className="text-gray-700 dark:text-gray-300 font-medium mb-0.5">Local by default.</p>
                     <p>Chat, agent runs, image &amp; video generation all execute on your machine. LU has no analytics kit and sends no crash reports.</p>
-                    <p className="mt-1">On its own LU uses the network for two things. It asks GitHub Releases for a new version a few seconds after start and at most every six hours after that; a new version is downloaded in the background unless you switch that off under Updates, and installing always needs your click. And it counts each press of the Cloud switch with LU Labs: which way it was pressed, platform and app version, no identifier. A click in the window behind the switch counts the same way: that a model, a plan or a pack was clicked, not which model.</p>
+                    <p className="mt-1">On its own LU uses the network for two things. It asks GitHub Releases for a new version a few seconds after start and at most every six hours after that; a new version is downloaded in the background unless you switch that off under Updates, and installing always needs your click. And it counts each press of the Cloud switch with LU Labs: which way it was pressed, platform and app version, no identifier. A click on a way into LU Cloud counts the same way (a model, a plan, a pack, the sign in, or hiding the Cloud features), never which model.</p>
                     <p className="mt-1">While you are signed in to LU Cloud, the app also checks your account at lu-labs.ai every five minutes, and a press of the Cloud switch is counted for your account as well.</p>
                     <p className="mt-1">Everything else that goes online you start yourself: model and engine downloads, cloud providers you set up with your own API keys, web search in agent runs, and Remote Access.</p>
                   </div>

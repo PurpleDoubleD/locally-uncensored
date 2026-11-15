@@ -20,22 +20,24 @@
 // lu-labs.ai, die App fasst keine Zahlung an.
 
 import { useEffect, useState } from 'react'
-import { ExternalLink, HardDrive, RefreshCw, ArrowLeft, ArrowRight, Check } from 'lucide-react'
+import { ExternalLink, HardDrive, RefreshCw, ArrowLeft, ArrowRight, Check, LogIn } from 'lucide-react'
 import { Modal } from '../ui/Modal'
 import { useUIStore } from '../../stores/uiStore'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { useCloudAuthStore, deriveCloudAvailable } from '../../stores/cloudAuthStore'
 import { useCloudAuth } from '../../hooks/useCloudAuth'
 import { AccountPanel } from '../auth/AccountPanel'
-import { CLOUD_BASE } from '../../api/cloud/config'
 import { openExternal, isMacOS } from '../../api/backend'
 import { MONOGRAM, MONOGRAM_INVERT } from '../layout/brand'
-import { CLOUD_PITCH, CLOUD_SUBSCRIBER_LINE, cloudSalesLines } from '../../lib/cloud-pitch'
+import { CLOUD_SUBSCRIBER_LINE, cloudSalesLines } from '../../lib/cloud-pitch'
 import { PAST_DUE_ACTION, pastDueLine } from '../../lib/past-due'
 import { Hinweis } from '../ui/Hinweis'
 import { cloudGateHeadline } from '../../lib/mac-pc-words'
 import { GateModels } from './GateModels'
 import { landOnGatePick } from '../../lib/cloud-gate-landing'
+import { BuyChoice } from './BuyChoice'
+import { reportCloudGate } from '../../api/funnel'
+import { checkoutStartUrl, cloudLink, type CheckoutOrder, type CloudGateOpener, type CloudLinkMedium } from '../../lib/cloud-links'
 
 const PLANS = [
   { anchor: 'hosted', name: 'Hosted', price: '€19' },
@@ -45,14 +47,22 @@ const PLANS = [
 
 /** Three plan buttons → pricing in the browser. Price shown up front (monthly,
  *  EUR — mirrors lib/pricing on lu-labs.ai); the click still leaves for the
- *  browser to actually subscribe. */
+ *  browser to actually subscribe. Counted since 3.1.0 (cloud_gate_plan_click)
+ *  and tagged with where it came from (lib/cloud-links). */
 function PlanGrid() {
+  const from = useUIStore((s) => s.cloudGateFrom)
+  // Hosted is the subscription card of BuyChoice right above (3.1.0), so the
+  // grid keeps the two bigger plans and does not offer Hosted twice.
+  const bigger = PLANS.filter((p) => p.anchor !== 'hosted')
   return (
-    <div className="grid grid-cols-3 gap-2">
-      {PLANS.map((p) => (
+    <div className="grid grid-cols-2 gap-2" data-testid="gate-plan-grid">
+      {bigger.map((p) => (
         <button
           key={p.anchor}
-          onClick={() => void openExternal(`${CLOUD_BASE}/pricing#${p.anchor}`)}
+          onClick={() => {
+            reportCloudGate('cloud_gate_plan_click')
+            void openExternal(cloudLink(`/pricing#${p.anchor}`, 'gate-plans', from))
+          }}
           className="flex flex-col items-center gap-0.5 px-2 py-3 rounded-lg border border-lu-cloud/40 bg-lu-cloud/5 hover:bg-lu-cloud/15 transition-colors"
         >
           <span className="text-[0.8rem] font-semibold text-lu-cloud dark:text-lu-cloud-lift">{p.name}</span>
@@ -63,6 +73,13 @@ function PlanGrid() {
       ))}
     </div>
   )
+}
+
+/** One of the two buttons of the gate (signed out, or signed in without a
+ *  plan): counted, then the checkout start with where it came from. */
+function openGateCheckout(order: CheckoutOrder, src: 'app-gate-main' | 'app-gate-plans', medium: CloudLinkMedium, from: CloudGateOpener): void {
+  reportCloudGate(order === 'sub' ? 'cloud_gate_main_sub' : 'cloud_gate_main_pack')
+  void openExternal(checkoutStartUrl({ order, src, medium, opener: from }))
 }
 
 /** Deliberately big (2026-07-18): the way back to Local must be as
@@ -89,7 +106,7 @@ function PastDueNotice({ tier }: { tier: string | null }) {
   return (
     <div className="space-y-3" data-testid="cloud-gate-past-due">
       <Hinweis ton="fehler">{pastDueLine(tier)}</Hinweis>
-      <button className={primaryBtn} onClick={() => void openExternal(`${CLOUD_BASE}/account`)}>
+      <button className={primaryBtn} onClick={() => void openExternal(cloudLink('/account', 'gate'))}>
         <ExternalLink size={12} /> {PAST_DUE_ACTION}
       </button>
     </div>
@@ -114,18 +131,39 @@ const linkRow =
  * Bis hierher zeigte derselbe Klick ein Login-Fenster. Das ist die falsche
  * Frage an dieser Stelle: wer noch nichts gekauft hat, kann sich nicht
  * anmelden, und ein Anmeldefeld sagt ihm nicht, wofuer. Das Panel beantwortet
- * zuerst, was hinter dem Schalter liegt, und laesst die Anmeldung als
- * Nebenweg fuer den stehen, der schon Kunde ist.
+ * zuerst, was hinter dem Schalter liegt.
  *
- * Gekauft wird im Browser, nicht hier: der Knopf oeffnet `/pricing`. Die App
- * hat nie eine Zahlung angefasst und faengt damit auch jetzt nicht an.
+ * Seit 3.1.0 (Funnel 13.11.2026):
+ *   * Ganz oben, gut sichtbar, der Rueckweg fuer den, der schon gekauft hat
+ *     (Nr. 11). Bis dahin stand er als kleiner Textlink unter dem Kaufknopf,
+ *     und wer aus dem Browser zurueckkam, fand zuerst wieder das Angebot.
+ *   * Statt eines Knopfs "19 EUR / month", der auf die Preisseite ging, zwei
+ *     gleich grosse Wege: Abo und Paket ohne Abo (Nr. 4). Beide gehen auf
+ *     die Kaufseite `/checkout/start`, nie direkt zum Zahlungsanbieter.
+ *   * Jeder Klick hier wird gezaehlt (api/funnel.ts) und jeder Link sagt,
+ *     woher er kommt (lib/cloud-links).
  *
- * Schlicht mit Absicht (Auftrag): dieselben Tailwind-Marken wie die uebrigen
- * Dialoge, derselbe Knopfstil, kein Verlauf, kein Leuchten, kein Emoji.
+ * Gekauft wird im Browser, nicht hier. Die App hat nie eine Zahlung
+ * angefasst und faengt damit auch jetzt nicht an.
+ *
+ * Schlicht mit Absicht: dieselben Tailwind-Marken wie die uebrigen Dialoge,
+ * derselbe Knopfstil, kein Verlauf, kein Leuchten, kein Emoji.
  */
 function CloudSalesPanel({ onSignIn }: { onSignIn: () => void }) {
+  const from = useUIStore((s) => s.cloudGateFrom)
   return (
     <div className="space-y-5 pt-2" data-testid="cloud-sales-panel">
+      <button
+        type="button"
+        onClick={() => {
+          reportCloudGate('cloud_gate_signin')
+          onSignIn()
+        }}
+        className={ghostBtn + ' max-w-xs mx-auto'}
+        data-testid="cloud-gate-signin-top"
+      >
+        <LogIn size={12} /> Already bought? Sign in
+      </button>
       <div className="flex flex-col items-center text-center gap-2">
         <span className="text-[0.6rem] font-semibold uppercase tracking-widest text-lu-cloud dark:text-lu-cloud-lift">
           Cloud
@@ -155,23 +193,22 @@ function CloudSalesPanel({ onSignIn }: { onSignIn: () => void }) {
           two ways in; GateModels has the rest. */}
       <GateModels />
       <div className="space-y-2 max-w-xs mx-auto">
-        <button
-          onClick={() => void openExternal(`${CLOUD_BASE}/pricing`)}
-          className={primaryBtn}
-        >
-          Start Cloud for {CLOUD_PITCH.hostedMonthlyEUR} EUR / month
-        </button>
+        <BuyChoice onPick={(order) => openGateCheckout(order, 'app-gate-main', 'gate', from)} />
         <p className="text-[0.62rem] leading-relaxed text-center text-gray-500 dark:text-gray-400">
           {CLOUD_SUBSCRIBER_LINE}
         </p>
-        {/* Der Weg fuer den, der schon zahlt. Er fuehrt in denselben
-            Anmeldeschritt wie vorher, nur heisst der Einstieg jetzt, was er
-            ist. */}
-        <button onClick={onSignIn} className={linkRow + ' w-full pt-1'}>
-          Already subscribed? Sign in <ArrowRight size={11} />
+        <button
+          type="button"
+          onClick={() => {
+            reportCloudGate('cloud_gate_plan_click')
+            void openExternal(cloudLink('/pricing', 'gate', from))
+          }}
+          className={linkRow + ' w-full'}
+        >
+          See all plans <ArrowRight size={11} />
         </button>
         <p className="text-[0.6rem] leading-relaxed text-center text-gray-400 dark:text-gray-500">
-          Cancel anytime. Local mode stays free and offline.
+          Local mode stays free and offline.
         </p>
       </div>
     </div>
@@ -232,11 +269,22 @@ export function CloudGateModal() {
   // documented "adjust state while rendering" shape. As an effect it was a
   // cascading render (React 19 `set-state-in-effect`) that landed after paint,
   // so a re-open showed one frame of the step the gate was last left on.
-  const [step, setStep] = useState<Step>('sales')
+  // A checkout that came back through the app's link (HfLinkInbox,
+  // locallyuncensored://cloud/open?status=paid) opens the gate on the sign in:
+  // the purchase is done, what is missing is the account in the app (Nr. 11).
+  const checkoutReturn = useUIStore((s) => s.cloudGateReturn)
+  const setCheckoutReturn = useUIStore((s) => s.setCloudGateReturn)
+  const from = useUIStore((s) => s.cloudGateFrom)
+  const [step, setStep] = useState<Step>(() => (open && checkoutReturn === 'paid' ? 'login' : 'sales'))
   const [wasOpen, setWasOpen] = useState(open)
+  const [seenReturn, setSeenReturn] = useState(checkoutReturn)
   if (wasOpen !== open) {
     setWasOpen(open)
-    if (open) setStep('sales')
+    if (open) setStep(checkoutReturn === 'paid' ? 'login' : 'sales')
+  }
+  if (seenReturn !== checkoutReturn) {
+    setSeenReturn(checkoutReturn)
+    if (checkoutReturn === 'paid') setStep('login')
   }
 
   // The moment the account clears every gate — already provisioned when the
@@ -272,6 +320,7 @@ export function CloudGateModal() {
   const setPendingCloudModel = useUIStore((s) => s.setPendingCloudModel)
   const close = () => {
     setPendingCloudModel(null)
+    setCheckoutReturn(null)
     setOpen(false)
   }
 
@@ -296,7 +345,11 @@ export function CloudGateModal() {
         ) : (
           /* step === 'login' */
           <div className="space-y-4 pt-2">
-            <CloudHero subtitle="Sign in with the account you subscribed with." />
+            <CloudHero
+              subtitle={checkoutReturn === 'paid'
+                ? 'Thanks for your purchase. Sign in with the same account you used in the browser, and Cloud turns on.'
+                : 'Sign in with the account you bought with.'}
+            />
             <div className="max-w-xs mx-auto">
               <AccountPanel />
               {/* Zurueck fuehrt an die einzige Stelle, von der man hierher
@@ -326,13 +379,14 @@ export function CloudGateModal() {
             <div className="space-y-3 max-w-xs mx-auto">
               <p className="text-[0.72rem] text-center text-gray-600 dark:text-gray-400">
                 You're signed in as <span className="text-gray-900 dark:text-gray-100">{user.email ?? user.id}</span>,
-                but this account has no active plan yet. LU Cloud is part of the paid plans.
+                but this account has no active plan yet. LU Cloud runs on a subscription or on a credit pack.
               </p>
+              <BuyChoice onPick={(order) => openGateCheckout(order, 'app-gate-plans', 'gate-plans', from)} />
               <PlanGrid />
               <GateModels />
               <StayLocalButton onLocal={stayLocal} />
               <button className={ghostBtn} onClick={() => void refresh()}>
-                <RefreshCw size={12} /> I subscribed, check again
+                <RefreshCw size={12} /> I bought, check again
               </button>
             </div>
           )}
@@ -382,7 +436,7 @@ export function CloudGateModal() {
                   budget, so there's nothing for Cloud mode to run on. Plans with
                   cloud credits are on lu-labs.ai.
                 </p>
-                <button className={primaryBtn} onClick={() => void openExternal(`${CLOUD_BASE}/account`)}>
+                <button className={primaryBtn} onClick={() => void openExternal(cloudLink('/account', 'gate'))}>
                   <ExternalLink size={12} /> Open your account
                 </button>
               </>

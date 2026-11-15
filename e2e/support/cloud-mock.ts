@@ -453,7 +453,7 @@ export function cloudSwitchBehindModal(page: Page) {
  *  zahlt, nimmt den Textlink darunter. */
 export async function signInViaGate(page: Page): Promise<void> {
   await cloudSwitch(page).click()
-  await page.getByRole('button', { name: /Already subscribed\? Sign in/i }).click()
+  await page.getByRole('button', { name: /Already bought\? Sign in/i }).click()
   await page.getByPlaceholder('Email').fill('qa@lu-labs.ai')
   await page.getByPlaceholder('Password').fill('e2e-password')
   await page.getByRole('button', { name: /^Sign in$/i }).click()

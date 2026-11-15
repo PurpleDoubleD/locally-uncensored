@@ -19,7 +19,9 @@ import { isMlxImageHost } from '../../api/mlx-image'
 import { mlxMakesMusic } from '../../lib/mac-music'
 import { mlxFollowsMotion, mlxTalking } from '../../api/mlx-video'
 import { openExternal, isMacOS } from '../../api/backend'
-import { CLOUD_BASE } from '../../api/cloud/config'
+import { checkoutStartUrl } from '../../lib/cloud-links'
+import { reportCloudGate } from '../../api/funnel'
+import { BuyChoice } from './BuyChoice'
 import { getMaxVramGb, getSharedMemoryGb } from '../../lib/hardware'
 import { sharedMemoryWording } from '../../lib/shared-memory-wording'
 
@@ -125,6 +127,7 @@ export function CloudTeaserModal() {
   // that says what it does, and the switch in Settings, General.
   const close = () => setCloudTeaser(null)
   const hideCloudFeatures = () => {
+    reportCloudGate('cloud_teaser_hide')
     updateSettings({ cloudTeasersEnabled: false })
     setCloudTeaser(null)
     // The tabs and rows vanish with this click, so Create says where they
@@ -204,23 +207,23 @@ export function CloudTeaserModal() {
                 {macMemoryGb !== null && `This Mac has ${macMemoryGb} GB of memory. `}
                 {teaserWhereLine(localLane !== null, sharedMemory)}
               </p>
-              <div className="flex items-center gap-2 pt-1">
-                <button
-                  onClick={() => {
-                    // Straight into signup and checkout with Hosted preselected
-                    // (2026-09-07: "die Pricing-Seite ist eine
-                    // Entscheidung zu viel"). Until 2.6.8 this opened
-                    // CloudGateModal, which asks for a login before it shows a
-                    // single price. The src tag names the card size, so the
-                    // funnel on the server can say what this button brings.
-                    close()
-                    const src = gpuGb !== null ? `gpu${gpuGb}` : 'gpu-unknown'
-                    void openExternal(`${CLOUD_BASE}/checkout/start?plan=hosted&src=${src}`)
-                  }}
-                  className="flex-1 flex items-center justify-center gap-1.5 h-8 rounded-lg bg-white text-black text-[0.7rem] font-semibold hover:bg-gray-200 transition-colors"
-                >
-                  <Sparkles size={12} /> Get LU Cloud
-                </button>
+              {/* Abo und Paket gleichrangig (Funnel 3.1.0, Nr. 4). Bis dahin
+                  verkaufte dieses Blatt nur das Hosted-Abo. Beide Knoepfe gehen
+                  auf die Kaufseite, nicht zum Zahlungsanbieter: Hosted vorgewaehlt bzw.
+                  das Paket (2026-09-07: "die Pricing-Seite ist eine
+                  Entscheidung zu viel"). Das src-Wort nennt die Kartengroesse,
+                  damit der Zaehler auf dem Server sagen kann, was dieses
+                  Blatt bringt. */}
+              <BuyChoice
+                tone="sheet"
+                onPick={(order) => {
+                  close()
+                  reportCloudGate(order === 'sub' ? 'cloud_teaser_sub' : 'cloud_teaser_pack')
+                  const src = gpuGb !== null ? `gpu${gpuGb}` : 'gpu-unknown'
+                  void openExternal(checkoutStartUrl({ order, src, medium: 'create-sheet' }))
+                }}
+              />
+              <div className="flex items-center gap-2">
                 {localLane && (
                   <button
                     onClick={() => { close(); setIntent(localLane) }}
@@ -231,7 +234,7 @@ export function CloudTeaserModal() {
                 )}
                 <button
                   onClick={close}
-                  className="px-3 h-8 rounded-lg text-[0.7rem] text-gray-400 hover:text-gray-200 hover:bg-white/[0.06] transition-colors"
+                  className="flex-1 px-3 h-8 rounded-lg text-[0.7rem] text-gray-400 hover:text-gray-200 hover:bg-white/[0.06] transition-colors"
                 >
                   Not now
                 </button>

@@ -639,13 +639,23 @@ describe('release.yml, a dry run signs its updater archive with a key of its own
 })
 
 describe('release.yml, the release text names the Mac only behind the switch', () => {
-  /** The text Windows and Linux releases carried before the Mac lane. */
+  /** The text with the switch off: no Mac file named. Since 3.1.0 (funnel
+   *  Nr. 7) it opens with which file is for whom, the SmartScreen box and one
+   *  line on LU Cloud; .github/RELEASE-NOTES-HEAD.md carries the same text. */
   const BEFORE = [
-    '## Download',
+    '## Which file do I need?',
     '',
-    '**Windows:** Download the `.exe` installer. During setup, choose "Install for current user only" for a portable/no-install experience. Or use the `.msi` for system-wide installation.',
+    '**Windows 10 and 11:** the file ending in `_x64-setup.exe`. The `.msi` is the same app for a system wide install.',
     '',
-    '**Linux:** Download the `.AppImage`, make it executable (`chmod +x`), and run. No installation needed.',
+    '**Linux:** the `.AppImage` runs on most distributions: make it executable (`chmod +x`) and start it. The `.deb` is for Ubuntu and Debian, the `.rpm` for Fedora.',
+    '',
+    '**Android 7.0 or newer (arm64):** the file ending in `-Android.apk`. Allow installs from your browser or file app when Android asks.',
+    '',
+    'The other files (`.sig`, `.zip`, `.tar.gz`, `.cdx.json`, `latest.json`) are for the automatic update and for checks. You do not need them.',
+    '',
+    '**Windows shows "Windows protected your PC"?** The installer has no code signing certificate yet, so SmartScreen does not know it. Click **More info**, then **Run anyway**. It is built by GitHub Actions from the public source: [how to check it](https://github.com/PurpleDoubleD/locally-uncensored/blob/master/SECURITY.md#antivirus--browser-false-positives).',
+    '',
+    '**No GPU, or a model too big for yours?** Run it in LU Cloud from the same app: a credit pack for €15 with no subscription, or Hosted for €19 a month. [Plans and packs](https://lu-labs.ai/pricing?src=github&utm_source=github&utm_medium=release)',
     '',
     '> All versions are portable-friendly, no admin rights required. LU by LU Labs.',
   ].join('\n')
@@ -670,7 +680,7 @@ describe('release.yml, the release text names the Mac only behind the switch', (
     expect(body).toMatch(SWITCHED)
   })
 
-  it('with the switch off the text is byte for byte the old one', () => {
+  it('with the switch off the text names no Mac file', () => {
     expect(body.replace(SWITCHED, '')).toBe(BEFORE)
   })
 
@@ -686,6 +696,12 @@ describe('release.yml, the release text names the Mac only behind the switch', (
     // Same number as the bundle and both workflows.
     const conf = JSON.parse(read('src-tauri/tauri.macos.conf.json'))
     expect(mac).toContain(`macOS ${String(conf.bundle.macOS.minimumSystemVersion).split('.')[0]} or newer`)
+  })
+
+  it('is the same text as .github/RELEASE-NOTES-HEAD.md, the head for a release made by hand', () => {
+    const head = read('.github/RELEASE-NOTES-HEAD.md').replace(/<!--[\s\S]*?-->\n/, '').replace(/\n+$/, '')
+    const on = body.replace(SWITCHED, (_all, text: string) => `\n\n${text}`)
+    expect(head).toBe(on)
   })
 
   it('is the only place outside the Mac job that reads the switch', () => {

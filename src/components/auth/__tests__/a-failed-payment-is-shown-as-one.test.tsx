@@ -62,7 +62,7 @@ describe('a failed renewal without credits', () => {
 
     fireEvent.click(screen.getByText('Pay open invoice'))
     expect(openExternal).toHaveBeenCalledTimes(1)
-    expect(openExternal).toHaveBeenCalledWith('https://lu-labs.ai/account')
+    expect(openExternal).toHaveBeenCalledWith('https://lu-labs.ai/account?utm_source=desktop&utm_medium=account')
   })
 
   it('says "your plan" when the server does not name one', () => {

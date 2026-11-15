@@ -106,7 +106,7 @@ function CloudTeaserSection({ onOpen }: { onOpen: () => void }) {
   const open = (model?: string) => {
     setPendingCloudModel(model ?? null)
     onOpen()
-    setCloudGateOpen(true)
+    setCloudGateOpen(true, 'model-picker')
   }
   return (
     <div className="mt-1 border-t border-white/[0.05]">

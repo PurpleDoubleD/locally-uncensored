@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Zap } from 'lucide-react'
 import { Modal } from '../ui/Modal'
 import { ModalActions, ModalButton } from '../ui/ModalActions'
-import { CREDITS_EXHAUSTED_EVENT, PRICING_URL, type ExhaustedReason } from '../../lib/credits-exhausted'
+import { CREDITS_EXHAUSTED_EVENT, PRICING_LINK, type ExhaustedReason } from '../../lib/credits-exhausted'
 import { CLOUD_SUBSCRIBER_LINE } from '../../lib/cloud-pitch'
 import { openExternal } from '../../api/backend'
 
@@ -74,7 +74,7 @@ export function CreditsExhaustedModal() {
             variant="primary"
             data-autofocus
             onClick={() => {
-              void openExternal(PRICING_URL)
+              void openExternal(PRICING_LINK)
               setOpen(false)
             }}
           >

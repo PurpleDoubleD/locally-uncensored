@@ -687,7 +687,7 @@ describe('the notes table', () => {
     expect(modal.indexOf('release-cloud-block'))
       .toBeLessThan(modal.indexOf('data-testid="release-intro"'))
     // Der Knopf faellt auf denselben Weg zurueck wie der Schalter im Kopf.
-    expect(modal).toContain('setCloudGateOpen(true)')
+    expect(modal).toContain("setCloudGateOpen(true, 'release-notes')")
     expect(modal).toContain("updateSettings({ appMode: 'cloud' })")
   })
 

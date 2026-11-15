@@ -56,13 +56,19 @@ test('the gate is taller than a 230 px window, and every button is reached by sc
   const dialog = page.getByRole('dialog')
   const panel = await dialog.boundingBox()
   expect(panel!.height, 'the gate fits into the window, this spec tests nothing').toBeGreaterThan(LOW.height)
-  const toLogin = page.getByRole('button', { name: /Already subscribed\? Sign in/i })
+  // Since 3.1.0 the sign in sits at the top of the panel (funnel Nr. 11), so
+  // the button below the window edge is the last one, "See all plans".
+  const toLogin = page.getByRole('button', { name: /Already bought\? Sign in/i })
+  const allPlans = page.getByRole('button', { name: /See all plans/i })
 
   // The top of the dialog is not cut off: the wheel brings the X into the
-  // window, and from up there the way to the sign in form is below the edge.
+  // window, and from up there the end of the panel is below the edge.
   await wheelTo(page, dialog.locator('[data-dialog-close]'))
-  expect(await insideWindow(toLogin)).toBe(false)
+  expect(await insideWindow(allPlans)).toBe(false)
+  await wheelTo(page, allPlans)
+  await allPlans.click({ trial: true })
 
+  // And back up to the sign in.
   await wheelTo(page, toLogin)
   await toLogin.click()
 
@@ -77,7 +83,7 @@ test('the gate is taller than a 230 px window, and every button is reached by sc
   // The click arrived: the account has no plan, and the gate says so.
   await expect(page.getByText(/no active plan/i)).toBeAttached({ timeout: 20_000 })
   // The last button of that wall is reachable too.
-  const again = page.getByRole('button', { name: /I subscribed, check again/i })
+  const again = page.getByRole('button', { name: /I bought, check again/i })
   await wheelTo(page, again)
   await again.click({ trial: true })
 })

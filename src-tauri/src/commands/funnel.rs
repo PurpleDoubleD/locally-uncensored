@@ -16,8 +16,9 @@ const LUC_SUPABASE_URL: &str = "https://lrrhheztdytyfpizvuup.supabase.co";
 const LUC_SUPABASE_ANON_KEY: &str = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxycmhoZXp0ZHl0eWZwaXp2dXVwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODMxNDkwNzUsImV4cCI6MjA5ODcyNTA3NX0.1AuX4tmup82d3NHLAgQx1KdXhwlCkPcX7liB6eNSkAU";
 
 /// The four things a press on the Cloud switch can do (lib/cloud-switch-guard
-/// on the frontend), and the three clicks in the pop-up behind it: a model,
-/// a plan, a pack. The SQL function carries the same list.
+/// on the frontend), the three clicks in the pop-up behind it (a model, a
+/// plan, a pack) and, since 3.1.0, the other buttons into LU Cloud
+/// (api/funnel.ts names each one). The SQL function carries the same list.
 pub(crate) const FUNNEL_EVENTS: &[&str] = &[
     "cloud_switch_gate",
     "cloud_switch_arm",
@@ -26,6 +27,17 @@ pub(crate) const FUNNEL_EVENTS: &[&str] = &[
     "cloud_gate_model_click",
     "cloud_gate_pick_sub",
     "cloud_gate_pick_credits",
+    // 3.1.0 (funnel Nr. 3): the main buttons, the sign in, the plan buttons,
+    // the Create sheet, the cloud offer and the onboarding hint.
+    "cloud_gate_main_sub",
+    "cloud_gate_main_pack",
+    "cloud_gate_signin",
+    "cloud_gate_plan_click",
+    "cloud_teaser_sub",
+    "cloud_teaser_pack",
+    "cloud_teaser_hide",
+    "cloud_offer_click",
+    "cloud_onboarding_hint",
 ];
 
 pub(crate) fn funnel_event_allowed(event: &str) -> bool {
@@ -97,8 +109,8 @@ mod tests {
         for e in FUNNEL_EVENTS {
             assert!(funnel_event_allowed(e), "{e}");
         }
-        assert_eq!(FUNNEL_EVENTS.len(), 7);
-        for e in ["", "cloud_switch_seen", "cloud_gate_model", "cloud_gate_pick_sub ", "app_start", "cloud_switch_gate'; drop table x; --", "CLOUD_SWITCH_GATE"] {
+        assert_eq!(FUNNEL_EVENTS.len(), 16);
+        for e in ["", "cloud_switch_seen", "cloud_gate_model", "cloud_gate_pick_sub ", "cloud_teaser", "cloud_gate_main", "app_start", "cloud_switch_gate'; drop table x; --", "CLOUD_SWITCH_GATE"] {
             assert!(!funnel_event_allowed(e), "{e:?} must not count");
         }
     }

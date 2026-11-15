@@ -77,7 +77,7 @@ describe('a failed renewal without credits', () => {
 
     fireEvent.click(screen.getByRole('button', { name: PAST_DUE_ACTION }))
     expect(openExternal).toHaveBeenCalledTimes(1)
-    expect(openExternal).toHaveBeenCalledWith('https://lu-labs.ai/account')
+    expect(openExternal).toHaveBeenCalledWith('https://lu-labs.ai/account?utm_source=desktop&utm_medium=gate')
     // Nothing on this state opens the pricing page.
     expect(openExternal.mock.calls.flat().some((u) => String(u).includes('/pricing'))).toBe(false)
   })
@@ -109,12 +109,16 @@ describe('a failed renewal whose pack credits are used up', () => {
 })
 
 describe('no failed payment', () => {
-  it('an account without a plan sees the three plans as before', async () => {
+  it('an account without a plan sees subscription, pack and the two bigger plans', async () => {
     await openGate({})
 
     expect(screen.getByText(/no active plan yet/)).toBeTruthy()
-    expect(planButtons()).toHaveLength(3)
-    expect(screen.getByRole('button', { name: /I subscribed, check again/ })).toBeTruthy()
+    // Since 3.1.0 Hosted is the subscription card next to the pack, and the
+    // grid keeps Pro and Max.
+    expect(screen.getByTestId('buy-sub')).toBeTruthy()
+    expect(screen.getByTestId('buy-pack')).toBeTruthy()
+    expect(planButtons()).toHaveLength(2)
+    expect(screen.getByRole('button', { name: /I bought, check again/ })).toBeTruthy()
     expect(screen.queryByTestId('cloud-gate-past-due')).toBeNull()
   })
 

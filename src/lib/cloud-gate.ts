@@ -17,6 +17,7 @@
  */
 import seed from './cloud-gate-seed.json'
 import { VRAM_WORKING_GB } from './vram-fit'
+import { CHECKOUT_PACK, CHECKOUT_PLAN, checkoutStartUrl, type CloudGateOpener } from './cloud-links'
 
 export type GateCategory = 'chat' | 'code' | 'create'
 export type GateCreateKind = 'image' | 'video' | 'edit'
@@ -123,20 +124,22 @@ export type GateWay = 'sub' | 'credits'
 
 /** The one button of each way. The plan is the first plan, monthly; the pack
  *  the smallest one. */
-export const GATE_DEFAULT_PLAN = { tier: 'hosted', interval: 'month' } as const
-export const GATE_DEFAULT_PACK = 'pack-15'
+export const GATE_DEFAULT_PLAN = CHECKOUT_PLAN
+export const GATE_DEFAULT_PACK = CHECKOUT_PACK
 
 /** The checkout in the browser. Signed out, the page signs in first and comes
- *  back on its own. */
-export function gateCheckoutUrl(base: string, way: GateWay, model: string, category: GateCategory): string {
-  const q = new URLSearchParams(way === 'sub'
-    ? { plan: GATE_DEFAULT_PLAN.tier, interval: GATE_DEFAULT_PLAN.interval }
-    : { pack: GATE_DEFAULT_PACK })
-  q.set('src', 'app-gate')
-  if (MODEL_ID.test(model)) q.set('model', model)
-  q.set('category', category)
-  q.set('return', 'app')
-  return `${base}/checkout/start?${q.toString()}`
+ *  back on its own. Built by lib/cloud-links, which adds where the click came
+ *  from (utm_medium=gate-models) and the app's own scheme for the way back. */
+export function gateCheckoutUrl(base: string, way: GateWay, model: string, category: GateCategory, opener?: CloudGateOpener): string {
+  return checkoutStartUrl({
+    order: way === 'sub' ? 'sub' : 'pack',
+    src: 'app-gate',
+    medium: 'gate-models',
+    opener,
+    model,
+    category,
+    base,
+  })
 }
 
 const count = (n: number) => n.toLocaleString('en-US')
@@ -154,6 +157,14 @@ export function gateOfferLine(way: GateWay, offerList: GateCatalog['offers']): s
   }
   const k = offerList.packs.find((o) => o.id === GATE_DEFAULT_PACK)
   return k ? `€${count(k.eur)} once, about ${count(k.images)} images or ${count(k.clips)} clips` : null
+}
+
+/** The price of the pack the buttons sell, from the catalogue's offers. Null
+ *  without an answer from the server: the app then names no pack price, as
+ *  lib/cloud-pitch keeps no pack sizes (decision of 13.09.2026). */
+export function gatePackEur(offerList: GateCatalog['offers']): number | null {
+  const k = offerList?.packs.find((o) => o.id === GATE_DEFAULT_PACK)
+  return k ? k.eur : null
 }
 
 /**

@@ -36,6 +36,7 @@ import type { Step } from './wizard-steps'
 import type { OnboardingSkin } from './onboarding-skin'
 import type { InstallerFleet } from './use-installer-fleet'
 import { SeparateComfyInstall, COMFY_PATH_CONNECT_HINT } from '../settings/SeparateComfyInstall'
+import { OnboardingCloudHint } from '../cloud/OnboardingCloudHint'
 
 interface ComfyStepProps {
   skin: OnboardingSkin
@@ -506,6 +507,9 @@ export function ComfyStep({ skin, fleet, step, setStep }: ComfyStepProps) {
           {comfyPathInput !== undefined && comfyPathInput.trim() !== '' && (
             <Hinweis className="text-left">{COMFY_PATH_CONNECT_HINT}</Hinweis>
           )}
+          {/* Funnel 3.1.0 (Nr. 14): a small card hears about LU Cloud here,
+              before the download, not after a slow first clip. */}
+          <OnboardingCloudHint />
         </div>
       )}
 

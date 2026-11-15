@@ -27,6 +27,34 @@ export type GateFunnelEvent =
   | 'cloud_gate_model_click'
   | 'cloud_gate_pick_sub'
   | 'cloud_gate_pick_credits'
+  | OfferFunnelEvent
+
+/** The rest of the ways into LU Cloud (funnel 3.1.0, Nr. 3). Until then only
+ *  the model dropdowns of the gate were counted; the main button, the sign in
+ *  and the Create sheet were not, and 97 percent of the gate stayed blind.
+ *  Each name is one click on one button, nothing about who or which model:
+ *    cloud_gate_main_sub     gate, signed out: Subscribe
+ *    cloud_gate_main_pack    gate, signed out: Credit pack, no subscription
+ *    cloud_gate_signin       gate, signed out: Already bought? Sign in
+ *    cloud_gate_plan_click   gate: a plan button or See all plans
+ *    cloud_teaser_sub        Create sheet: Subscribe
+ *    cloud_teaser_pack       Create sheet: Credit pack
+ *    cloud_teaser_hide       Create sheet: Don't show Cloud features
+ *    cloud_offer_click       a model tile or Create: Try LU Cloud
+ *    cloud_onboarding_hint   onboarding, small card: Run it in LU Cloud
+ *  Opening the gate is not a name of its own: the switch already counts it
+ *  (cloud_switch_gate), and a second count of the same visit would make the
+ *  steps after it look rarer than they are. */
+export type OfferFunnelEvent =
+  | 'cloud_gate_main_sub'
+  | 'cloud_gate_main_pack'
+  | 'cloud_gate_signin'
+  | 'cloud_gate_plan_click'
+  | 'cloud_teaser_sub'
+  | 'cloud_teaser_pack'
+  | 'cloud_teaser_hide'
+  | 'cloud_offer_click'
+  | 'cloud_onboarding_hint'
 
 export function funnelEventFor(action: CloudSwitchAction): FunnelEvent {
   switch (action) {

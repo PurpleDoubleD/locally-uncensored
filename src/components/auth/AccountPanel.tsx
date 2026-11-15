@@ -9,7 +9,7 @@ import { Loader2, LogOut, ExternalLink } from 'lucide-react'
 import { useCloudAuth } from '../../hooks/useCloudAuth'
 import { useCloudAuthStore } from '../../stores/cloudAuthStore'
 import { loginWithProvider } from '../../api/cloud/supabase'
-import { CLOUD_BASE } from '../../api/cloud/config'
+import { cloudLink } from '../../lib/cloud-links'
 import { MONOGRAM } from '../layout/brand'
 import { openExternal } from '../../api/backend'
 import { formatCount } from '../../lib/formatters'
@@ -321,7 +321,7 @@ export function AccountPanel() {
             {licenseActive ? ` ${PAST_DUE_WALLET_LINE}` : ''}
           </Hinweis>
           <button
-            onClick={() => void openExternal(`${CLOUD_BASE}/account`)}
+            onClick={() => void openExternal(cloudLink('/account', 'account'))}
             className="flex items-center gap-1 px-2 py-1 rounded text-[0.65rem] font-medium border border-gray-200 dark:border-white/10 bg-gray-100 dark:bg-white/5 text-gray-800 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-white/10 transition-colors"
           >
             <ExternalLink size={10} /> {PAST_DUE_ACTION}
@@ -356,7 +356,7 @@ export function AccountPanel() {
           invoice is settled, and its button already leads to the account. */}
       {!(pastDue && !licenseActive) && (
         <button
-          onClick={() => void openExternal(`${CLOUD_BASE}/${licenseActive ? 'account' : 'pricing'}`)}
+          onClick={() => void openExternal(cloudLink(licenseActive ? '/account' : '/pricing', 'account'))}
           className="flex items-center gap-1 text-[0.65rem] text-gray-500 hover:text-gray-800 dark:hover:text-gray-200 transition-colors"
         >
           <ExternalLink size={10} /> {licenseActive ? 'Manage subscription' : 'View plans'} on lu-labs.ai

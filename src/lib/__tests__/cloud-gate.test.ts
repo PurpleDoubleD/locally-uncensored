@@ -83,11 +83,15 @@ describe('the checkout link', () => {
     expect(sub.origin + sub.pathname).toBe('https://lu-labs.ai/checkout/start')
     expect(Object.fromEntries(sub.searchParams)).toEqual({
       plan: 'hosted', interval: 'month', src: 'app-gate', model: 'deepseek-ai/DeepSeek-V4.1-Flash', category: 'chat', return: 'app',
+      scheme: 'locallyuncensored', utm_source: 'desktop', utm_medium: 'gate-models',
     })
     const pack = new URL(gateCheckoutUrl('https://lu-labs.ai', 'credits', 'flux-dev', 'create'))
     expect(Object.fromEntries(pack.searchParams)).toEqual({
       pack: 'pack-15', src: 'app-gate', model: 'flux-dev', category: 'create', return: 'app',
+      scheme: 'locallyuncensored', utm_source: 'desktop', utm_medium: 'gate-models',
     })
+    // Where the gate was opened from rides along as utm_content.
+    expect(new URL(gateCheckoutUrl('https://lu-labs.ai', 'sub', 'x', 'chat', 'model-picker')).searchParams.get('utm_content')).toBe('model-picker')
   })
 })
 

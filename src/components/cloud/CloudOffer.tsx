@@ -11,6 +11,7 @@
 
 import { Cloud } from 'lucide-react'
 import { useUIStore } from '../../stores/uiStore'
+import { reportCloudGate } from '../../api/funnel'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { useCreateStore } from '../../stores/createStore'
 import { useCloudAuthStore, deriveCloudAvailable } from '../../stores/cloudAuthStore'
@@ -37,7 +38,7 @@ export function openCloudFor(task: CloudOfferTask): void {
     if (deriveCloudAvailable(useCloudAuthStore.getState())) ui.setView('create')
   }
   ui.setPendingCloudModel(null)
-  ui.setCloudGateOpen(true)
+  ui.setCloudGateOpen(true, 'cloud-offer')
 }
 
 /**
@@ -86,7 +87,12 @@ export function CloudOfferButton({ task }: { task: CloudOfferTask }) {
   return (
     <button
       type="button"
-      onClick={() => openCloudFor(task)}
+      onClick={() => {
+        // Counted since 3.1.0 (funnel Nr. 3): the offer opens the gate, which
+        // the switch's own count does not see.
+        reportCloudGate('cloud_offer_click')
+        openCloudFor(task)
+      }}
       title={CLOUD_OFFER_TITLE}
       data-testid="cloud-offer-button"
       className="inline font-medium text-lu-cloud dark:text-lu-cloud-lift hover:underline underline-offset-2"
