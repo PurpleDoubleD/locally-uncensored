@@ -4,17 +4,17 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Uncensored AI API: local on your machine, or hosted</title>
-<meta name="description" content="An OpenAI compatible API for every model on your own machine, built into the free desktop app, plus a hosted endpoint for 48 chat models that runs on credits.">
+<meta name="description" content="An OpenAI compatible API for every model on your own machine, built into the free desktop app, plus a hosted endpoint for 40 chat models that runs on credits.">
 <meta name="keywords" content="uncensored ai api, uncensored llm api, openai compatible uncensored api, kimi k3 api, qwen 3.8 api, abliterated model api, sillytavern api uncensored">
 <meta property="og:title" content="Uncensored AI API: local on your machine, or hosted">
-<meta property="og:description" content="An OpenAI compatible API for every model on your own machine, built into the free desktop app, plus a hosted endpoint for 48 chat models that runs on credits.">
+<meta property="og:description" content="An OpenAI compatible API for every model on your own machine, built into the free desktop app, plus a hosted endpoint for 40 chat models that runs on credits.">
 <meta property="og:image" content="https://raw.githubusercontent.com/PurpleDoubleD/locally-uncensored/master/docs/social-preview.png">
 <meta property="og:url" content="https://locallyuncensored.com/uncensored-ai-api/">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="Locally Uncensored">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="Uncensored AI API: local on your machine, or hosted">
-<meta name="twitter:description" content="An OpenAI compatible API for every model on your own machine, built into the free desktop app, plus a hosted endpoint for 48 chat models that runs on credits.">
+<meta name="twitter:description" content="An OpenAI compatible API for every model on your own machine, built into the free desktop app, plus a hosted endpoint for 40 chat models that runs on credits.">
 <meta name="twitter:image" content="https://raw.githubusercontent.com/PurpleDoubleD/locally-uncensored/master/docs/social-preview.png">
 <link rel="canonical" href="https://locallyuncensored.com/uncensored-ai-api/">
 <meta name="robots" content="index, follow">
@@ -24,10 +24,10 @@
 {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://locallyuncensored.com/"},{"@type":"ListItem","position":2,"name":"Uncensored AI API","item":"https://locallyuncensored.com/uncensored-ai-api/"}]}
 </script>
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"WebPage","name":"Uncensored AI API, OpenAI compatible endpoint","description":"An uncensored AI API in the OpenAI chat completions shape: base URL https://lu-labs.ai/api/inference/v1, 48 hosted text models with no moderation layer added by us, credits from 15 EUR with no subscription.","url":"https://locallyuncensored.com/uncensored-ai-api/","inLanguage":"en","dateModified":"2026-09-22","isPartOf":{"@type":"WebSite","name":"Locally Uncensored","url":"https://locallyuncensored.com/"},"about":{"@type":"Thing","name":"Uncensored AI API"},"publisher":{"@type":"Organization","name":"Locally Uncensored","url":"https://locallyuncensored.com/"}}
+{"@context":"https://schema.org","@type":"WebPage","name":"Uncensored AI API, OpenAI compatible endpoint","description":"An uncensored AI API in the OpenAI chat completions shape: base URL https://lu-labs.ai/api/inference/v1, 40 hosted text models with no moderation layer added by us, credits from 15 EUR with no subscription.","url":"https://locallyuncensored.com/uncensored-ai-api/","inLanguage":"en","dateModified":"2026-09-22","isPartOf":{"@type":"WebSite","name":"Locally Uncensored","url":"https://locallyuncensored.com/"},"about":{"@type":"Thing","name":"Uncensored AI API"},"publisher":{"@type":"Organization","name":"Locally Uncensored","url":"https://locallyuncensored.com/"}}
 </script>
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"FAQPage","mainEntity":[{"@type":"Question","name":"Is the API uncensored?","acceptedAnswer":{"@type":"Answer","text":"On text we add no moderation layer of our own, so a model answers the way it was trained. That is narrower than a promise that every model says everything: a fine tune trained to decline still declines. Of the 44 cloud chat models we measured on 2026-09-10 and again on 2026-10-05, 19 answer an uncensored fiction request in full, and only those carry the No Filter mark."}},{"@type":"Question","name":"Which models can a key reach?","acceptedAnswer":{"@type":"Answer","text":"All 48 chat models in the catalogue. There is no per plan model boundary: a 15 EUR credit pack reaches the same list as Hosted Max. Plans and packs differ by credit budget, never by access. GET /api/inference/v1/models returns the current list."}},{"@type":"Question","name":"Do API keys get the daily Flash allowance?","acceptedAnswer":{"@type":"Answer","text":"No. The Flash allowance of 500,000 combined input and output tokens per account per UTC day applies to app sessions on an active paid plan. A request through an API key always uses credits, Flash model or not."}},{"@type":"Question","name":"Is it OpenAI compatible?","acceptedAnswer":{"@type":"Answer","text":"Yes. The endpoint speaks the OpenAI chat API. Point any OpenAI SDK or client at the base URL https://lu-labs.ai/api/inference/v1 and pass your lu_ key as the API key. POST /chat/completions answers and streams by default, and GET /models lists the catalogue."}},{"@type":"Question","name":"Do you log prompts or train on them?","acceptedAnswer":{"@type":"Answer","text":"There is no training on user data and it is never sold. Accounts and billing are in the EU. A hosted request does leave your machine by definition, which is what hosted means, so if that is unacceptable for your work, run the free desktop app on your own hardware instead."}},{"@type":"Question","name":"Can I use it with SillyTavern?","acceptedAnswer":{"@type":"Answer","text":"Yes. In SillyTavern pick Chat Completion, then Custom (OpenAI-compatible) as the source, enter https://lu-labs.ai/api/inference/v1 as the custom endpoint and your lu_ key as the API key, then connect and choose a model. The same settings work in Aider, LibreChat, OpenClaw and plain curl."}},{"@type":"Question","name":"Are there rate limits?","acceptedAnswer":{"@type":"Answer","text":"Chat is limited to 60 requests per minute per account. Media jobs are limited to 30 per minute and uploads to 60 per minute, though those run in the app rather than through this endpoint. Beyond the burst limit, your credit balance is the constraint."}},{"@type":"Question","name":"What is blocked everywhere?","acceptedAnswer":{"@type":"Answer","text":"Material involving minors is refused on every request, at every setting, with no exception. You may not upload a photograph of a real, identifiable person without their consent. The Terms of Service apply to API traffic exactly as they apply in the app."}}]}
+{"@context":"https://schema.org","@type":"FAQPage","mainEntity":[{"@type":"Question","name":"Is the API uncensored?","acceptedAnswer":{"@type":"Answer","text":"On text we add no moderation layer of our own, so a model answers the way it was trained. That is narrower than a promise that every model says everything: a fine tune trained to decline still declines. Of the 44 cloud chat models we measured on 2026-09-10 and again on 2026-10-05, 19 answer an uncensored fiction request in full, and only those carry the No Filter mark."}},{"@type":"Question","name":"Which models can a key reach?","acceptedAnswer":{"@type":"Answer","text":"All 40 chat models in the catalogue. There is no per plan model boundary: a 15 EUR credit pack reaches the same list as Hosted Max. Plans and packs differ by credit budget, never by access. GET /api/inference/v1/models returns the current list."}},{"@type":"Question","name":"Do API keys get the daily Flash allowance?","acceptedAnswer":{"@type":"Answer","text":"No. The Flash allowance of 500,000 combined input and output tokens per account per UTC day applies to app sessions on an active paid plan. A request through an API key always uses credits, Flash model or not."}},{"@type":"Question","name":"Is it OpenAI compatible?","acceptedAnswer":{"@type":"Answer","text":"Yes. The endpoint speaks the OpenAI chat API. Point any OpenAI SDK or client at the base URL https://lu-labs.ai/api/inference/v1 and pass your lu_ key as the API key. POST /chat/completions answers and streams by default, and GET /models lists the catalogue."}},{"@type":"Question","name":"Do you log prompts or train on them?","acceptedAnswer":{"@type":"Answer","text":"There is no training on user data and it is never sold. Accounts and billing are in the EU. A hosted request does leave your machine by definition, which is what hosted means, so if that is unacceptable for your work, run the free desktop app on your own hardware instead."}},{"@type":"Question","name":"Can I use it with SillyTavern?","acceptedAnswer":{"@type":"Answer","text":"Yes. In SillyTavern pick Chat Completion, then Custom (OpenAI-compatible) as the source, enter https://lu-labs.ai/api/inference/v1 as the custom endpoint and your lu_ key as the API key, then connect and choose a model. The same settings work in Aider, LibreChat, OpenClaw and plain curl."}},{"@type":"Question","name":"Are there rate limits?","acceptedAnswer":{"@type":"Answer","text":"Chat is limited to 60 requests per minute per account. Media jobs are limited to 30 per minute and uploads to 60 per minute, though those run in the app rather than through this endpoint. Beyond the burst limit, your credit balance is the constraint."}},{"@type":"Question","name":"What is blocked everywhere?","acceptedAnswer":{"@type":"Answer","text":"Material involving minors is refused on every request, at every setting, with no exception. You may not upload a photograph of a real, identifiable person without their consent. The Terms of Service apply to API traffic exactly as they apply in the app."}}]}
 </script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -71,7 +71,7 @@
   <article>
     <h1>Uncensored AI API: local on your machine, or hosted</h1>
 
-    <p>There are two APIs, and the first one costs nothing. The <a href="/">Locally Uncensored</a> desktop app for Windows, Linux and Mac carries its own OpenAI compatible server for every model on your machine, so your code talks to your local models and nothing leaves the building. The second is the hosted endpoint at <a href="https://lu-labs.ai/" target="_blank" rel="noopener">LU Labs</a>, for the models a single card cannot hold, which runs on credits. Both speak the OpenAI chat completions shape, so any OpenAI SDK or client works once the base URL is changed. <a href="/uncensored-ai/">What uncensored AI means</a> on each route is set out on its own page.</p>
+    <p>There are two APIs, and the first one costs nothing. The <a href="/">Locally Uncensored</a> desktop app for Windows, Linux and Mac carries its own OpenAI compatible server for every model on your machine, so your code talks to your local models and nothing leaves the building. The second is the hosted endpoint at <a href="https://lu-labs.ai/?src=luc-ua-api" target="_blank" rel="noopener">LU Labs</a>, for the models a single card cannot hold, which runs on credits. Both speak the OpenAI chat completions shape, so any OpenAI SDK or client works once the base URL is changed. <a href="/uncensored-ai/">What uncensored AI means</a> on each route is set out on its own page.</p>
 
     <h2>The local API in the desktop app</h2>
 
@@ -91,7 +91,7 @@
 
     <h2>The hosted API</h2>
 
-    <p>The LU Labs inference API lives at <code>https://lu-labs.ai/api/inference/v1</code> and takes an <code>lu_</code> key. One key reaches all 48 hosted chat models, and we add no moderation layer of our own on text. Credits start at 15 EUR with no subscription.</p>
+    <p>The LU Labs inference API lives at <code>https://lu-labs.ai/api/inference/v1</code> and takes an <code>lu_</code> key. One key reaches all 40 hosted chat models, and we add no moderation layer of our own on text. Credits start at 15 EUR with no subscription.</p>
 
     <h3>Endpoint and authentication</h3>
 
@@ -151,7 +151,7 @@ for await (const chunk of stream) {
 
     <h2>Which models are behind the key</h2>
 
-    <p>All 48 chat models are reachable from every entitlement. There is no per plan model boundary: a 15 EUR credit pack sees the same list as Hosted Max, and upgrading buys credit volume rather than access. The numbers below are credits per output token, and the No Filter column comes from the measurement of 2026-09-10 described on the <a href="/cloud/">cloud page</a>, and the three round test of 2026-10-05: 19 of the 44 models measured answer an uncensored fiction request in full.</p>
+    <p>All 40 chat models are reachable from every entitlement. There is no per plan model boundary: a 15 EUR credit pack sees the same list as Hosted Max, and upgrading buys credit volume rather than access. The numbers below are credits per output token, and the No Filter column comes from the measurement of 2026-09-10 described on the <a href="/cloud/">cloud page</a>, and the three round test of 2026-10-05: 19 of the 44 models measured answer an uncensored fiction request in full.</p>
 
     <table>
       <thead><tr><th>Model id</th><th>What it is</th><th>Credits per output token</th><th>No Filter</th></tr></thead>
@@ -160,17 +160,12 @@ for await (const chunk of stream) {
         <tr><td><code>openai/gpt-oss-120b</code></td><td>open weight reasoner, cheap per token</td><td>0.017</td><td>not marked</td></tr>
         <tr><td><code>google/gemma-4-26B-A4B-it</code></td><td>small generalist, reads images</td><td>0.034</td><td>yes</td></tr>
         <tr><td><code>deepseek-ai/DeepSeek-V3.2</code></td><td>the everyday default in the picker</td><td>0.038</td><td>yes</td></tr>
-        <tr><td><code>Gryphe/MythoMax-L2-13b</code></td><td>the old character writing standby</td><td>0.04</td><td>yes</td></tr>
-        <tr><td><code>NousResearch/Hermes-3-Llama-3.1-70B</code></td><td>instruction fine tune, steerable</td><td>0.07</td><td>yes</td></tr>
-        <tr><td><code>meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8</code></td><td>mixture of experts, reads images</td><td>0.08</td><td>yes</td></tr>
         <tr><td><code>Sao10K/L3.1-70B-Euryale-v2.2</code></td><td>the 70B people pick for long scenes</td><td>0.085</td><td>no</td></tr>
-        <tr><td><code>NousResearch/Hermes-3-Llama-3.1-405B</code></td><td>the 405B version of the same line</td><td>0.1</td><td>yes</td></tr>
         <tr><td><code>Qwen/Qwen3-Coder-480B-A35B-Instruct-Turbo</code></td><td>coding focused, large context</td><td>0.1</td><td>no</td></tr>
         <tr><td><code>MiniMaxAI/MiniMax-M3</code></td><td>generalist with a thinking toggle</td><td>0.11</td><td>yes</td></tr>
         <tr><td><code>moonshotai/Kimi-K2.6</code></td><td>the mid-size Kimi, reads images</td><td>0.35</td><td>yes</td></tr>
         <tr><td><code>zai-org/GLM-5.3</code></td><td>native reasoner with an effort ladder</td><td>0.4</td><td>no</td></tr>
         <tr><td><code>Qwen/Qwen3.8-Max</code></td><td>the largest Qwen instruct entry</td><td>0.4951</td><td>not marked</td></tr>
-        <tr><td><code>Qwen/Qwen3.8-2.4T-A95B</code></td><td>open weight flagship reasoner</td><td>0.6</td><td>yes</td></tr>
         <tr><td><code>moonshotai/Kimi-K3</code></td><td>the heavyweight, images, 1M context</td><td>1.425</td><td>no</td></tr>
       </tbody>
     </table>
@@ -179,7 +174,7 @@ for await (const chunk of stream) {
 
     <h2>Tool calls and agents</h2>
 
-    <p>Tool definitions work on every chat model in the catalogue. Most of them take the <code>tools</code> parameter natively. For the roleplay fine tunes such as Lunaris, MythoMax, Hermes and Euryale, the upstream API refuses a tools payload, so the proxy translates your tool definitions into the prompt convention those models were trained on and parses the calls back out. Your client sends the same OpenAI shaped request either way. That is why agent and coding workflows are not limited to the well behaved models, which was the usual trade before.</p>
+    <p>Tool definitions work on every chat model in the catalogue. Most of them take the <code>tools</code> parameter natively. For the roleplay fine tunes such as Lunaris and Euryale, the upstream API refuses a tools payload, so the proxy translates your tool definitions into the prompt convention those models were trained on and parses the calls back out. Your client sends the same OpenAI shaped request either way. That is why agent and coding workflows are not limited to the well behaved models, which was the usual trade before.</p>
 
     <p>The transport is an API layer detail, not a capability difference you configure. A model's tool transport is listed in the <a href="https://lu-labs.ai/pricing?src=luc-api" target="_blank" rel="noopener">current model table</a> alongside its context and reasoning controls.</p>
 
@@ -206,7 +201,7 @@ for await (const chunk of stream) {
 
     <h2>More ways in</h2>
 
-    <p>If you want the browser chat window rather than an endpoint, that is <a href="/uncensored-ai-chat-online/">uncensored AI chat online</a>. For how the hosted side compares with another provider, see <a href="/vs/venice/">LU Labs against Venice</a>. <a href="/uncensored-ai/">What uncensored AI means, local and online</a> covers the word itself on both sides.</p>
+    <p>If you want the browser chat window rather than an endpoint, that is <a href="/uncensored-ai-chat-online/">uncensored AI chat online</a>. If you want an agent that edits a repository and opens pull requests, that is the <a href="/uncensored-ai-coding-agent/">uncensored AI coding agent</a>. For how the hosted side compares with another provider, see <a href="/vs/venice/">LU Labs against Venice</a>. <a href="/uncensored-ai/">What uncensored AI means, local and online</a> covers the word itself on both sides.</p>
 
     <h2>FAQ</h2>
 
@@ -214,7 +209,7 @@ for await (const chunk of stream) {
     <p>On text we add no moderation layer of our own, so a model answers the way it was trained. That is narrower than a promise that every model says everything: a fine tune trained to decline still declines. Of the 44 cloud chat models we measured on 2026-09-10 and again on 2026-10-05, 19 answer an uncensored fiction request in full, and only those carry the No Filter mark.</p>
 
     <h3>Which models can a key reach?</h3>
-    <p>All 48 chat models in the catalogue. There is no per plan model boundary: a 15 EUR credit pack reaches the same list as Hosted Max. Plans and packs differ by credit budget, never by access. <code>GET /api/inference/v1/models</code> returns the current list.</p>
+    <p>All 40 chat models in the catalogue. There is no per plan model boundary: a 15 EUR credit pack reaches the same list as Hosted Max. Plans and packs differ by credit budget, never by access. <code>GET /api/inference/v1/models</code> returns the current list.</p>
 
     <h3>Do API keys get the daily Flash allowance?</h3>
     <p>No. The Flash allowance of 500,000 combined input and output tokens per account per UTC day applies to app sessions on an active paid plan. A request through an API key always uses credits, Flash model or not.</p>
@@ -236,7 +231,7 @@ for await (const chunk of stream) {
   </article>
 
   <div class="post-footer">
-    <p>48 hosted chat models behind one OpenAI compatible base URL, no moderation layer from us on text, credits from 15 EUR with no subscription. On a plan, every pack uses your plan's rate.</p>
+    <p>40 hosted chat models behind one OpenAI compatible base URL, no moderation layer from us on text, credits from 15 EUR with no subscription. On a plan, every pack uses your plan's rate.</p>
     <a href="https://lu-labs.ai/pricing?tab=credits&amp;src=luc-api" class="cta-btn" target="_blank" rel="noopener">
       Get credits and a key
     </a>
@@ -254,6 +249,8 @@ for await (const chunk of stream) {
     <a href="https://locallyuncensored.com/uncensored-ai-chat-online/">Uncensored AI chat online</a>
     <a href="https://locallyuncensored.com/uncensored-ai-image-generator-online/">Image generator online</a>
     <a href="https://locallyuncensored.com/uncensored-ai-video-generator-online/">Video generator online</a>
+    <a href="https://locallyuncensored.com/unrestricted-ai/">Unrestricted AI</a>
+    <a href="https://locallyuncensored.com/uncensored-ai-coding-agent/">AI coding agent</a>
     <a href="https://locallyuncensored.com/alternatives/">Alternatives</a>
     <a href="https://locallyuncensored.com/is-locally-uncensored-safe/">Is it safe?</a>
     <a href="https://locallyuncensored.com/remote-access/">Remote access</a>

@@ -1,0 +1,32 @@
+name: IndexNow
+
+# Every push to master that changes the website (docs/, served by GitHub Pages)
+# tells IndexNow which pages are new, changed or gone, so Bing (and Yandex,
+# Seznam, Naver) look within minutes instead of at the next crawl. Google does
+# not take IndexNow. The script waits until Pages serves the new version
+# before it submits. See .github/indexnow/indexnow_docs.py.
+on:
+  push:
+    branches: [master]
+    paths: ['docs/**']
+  workflow_dispatch:
+
+concurrency:
+  group: indexnow
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  submit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+      - name: Test the URL mapping
+        run: python3 -I -m unittest discover -s .github/indexnow -p 'test_indexnow_docs.py'
+      - name: Submit changed pages
+        run: python3 -I .github/indexnow/indexnow_docs.py --before "${{ github.event.before }}" --after "${{ github.sha }}"

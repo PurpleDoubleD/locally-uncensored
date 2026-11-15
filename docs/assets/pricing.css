@@ -71,3 +71,23 @@
 .luc-fineprint p{font-size:.82rem;color:var(--fg-50);line-height:1.65;margin:0}
 @media(max-width:900px){.luc-plan-grid{grid-template-columns:1fr}.luc-plan{max-width:620px;width:100%;margin:0 auto}.luc-packs{grid-template-columns:repeat(2,1fr)}.luc-model-groups{grid-template-columns:1fr}.luc-model-group:first-child{grid-column:auto}.luc-model-group:first-child ul{grid-template-columns:repeat(2,minmax(0,1fr))}.luc-fineprint{grid-template-columns:1fr}.luc-pricing-hero{padding-top:58px}}
 @media(max-width:540px){.luc-pricing-wrap,.luc-pricing-hero{padding-left:16px;padding-right:16px}.luc-packs{grid-template-columns:1fr}.luc-pricing-trust{gap:10px 16px}.luc-plan{padding:25px 20px}.luc-model-group ul,.luc-model-group:first-child ul{grid-template-columns:1fr}.luc-model-group summary{padding-left:16px}.luc-model-group ul{padding-left:14px;padding-right:14px}}
+
+/* Plan- und Pack-Block in den Verkaufsseiten (.luc-buy), seit 15.11.2026 */
+.luc-buy{margin:28px 0 44px;padding:24px 22px 20px;border:1px solid rgba(139,92,246,.38);border-radius:var(--radius-xl);background:linear-gradient(180deg,rgba(73,25,153,.18),rgba(73,25,153,.03))}
+.luc-buy .luc-buy-kicker{font-family:var(--mono);font-size:.66rem;line-height:1.5;letter-spacing:.16em;text-transform:uppercase;color:var(--accent-soft);margin:0 0 6px}
+.luc-buy h2{margin:0 0 2px}
+.luc-buy .luc-plan-grid{margin:22px 0 16px;gap:12px}
+.luc-buy .luc-plan{padding:24px 16px 18px}
+.luc-buy .luc-plan-price strong{font-size:2.2rem}
+.luc-buy .luc-plan-annual{margin-bottom:14px}
+.luc-buy .luc-plan-wallet{padding:11px 12px;margin-bottom:14px}
+.luc-buy .luc-plan ul{margin:0 0 18px;padding:0;gap:8px;font-size:.8rem}
+.luc-buy .luc-plan li{list-style:none}
+.luc-buy .luc-plan .cta{border-bottom:1px solid var(--line-strong);text-decoration:none}
+.luc-buy .luc-plan.popular .cta{border-bottom-color:var(--accent)}
+.luc-buy-pack{display:grid;grid-template-columns:minmax(0,230px) 1fr;gap:16px;align-items:center}
+.luc-buy-pack .luc-pack{margin:0}
+.luc-buy-pack .luc-pack .price{margin:6px 0 8px}
+.luc-buy .luc-buy-note{font-size:.8rem;color:var(--fg-50);line-height:1.6;margin:0}
+@media(max-width:900px){.luc-buy-pack{grid-template-columns:1fr}}
+@media(max-width:540px){.luc-buy{padding:18px 12px 14px;margin-left:-4px;margin-right:-4px}.luc-buy .luc-plan{padding:22px 16px 16px}}

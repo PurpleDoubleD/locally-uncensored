@@ -1195,3 +1195,51 @@ for (const [id, webLabel] of webEditModels) {
     `desktop seed labels '${id}' as "${desktopEditModels.get(id)}", web calls it "${webLabel}"`)
 }
 console.log(`Seed sync guard passed: ${desktopEditModels.size} edit-capable model(s) in the desktop seed match the web catalogue by id and label.`)
+
+// ── Plan- und Pack-Karten ausserhalb der Preisseite ──────────────────
+//
+// Seit 15.11.2026 tragen die Verkaufsseiten (Bild, Video, Chat online und
+// die Tueren-Seiten) im ersten Bildschirm dieselben Plan- und Pack-Karten
+// wie /pricing/. Jede Karte, jede Flash-Zahl und jede Katalogzahl dort
+// haengt an derselben Quelle wie auf der Preisseite.
+let fremdeKarten = 0
+for (const path of docsFiles(docsRoot)) {
+  if (!path.endsWith('.html')) continue
+  const rel = path.slice(docsRoot.length + 1)
+  if (rel === 'pricing/index.html' || rel === 'cloud/index.html') continue
+  const raw = readFileSync(path, 'utf8')
+  if (!/data-plan-id=|data-pack-id=|data-flash-model-count=|data-catalog-count=/.test(raw)) continue
+  const doc = new JSDOM(raw).window.document
+  for (const card of doc.querySelectorAll('.luc-plan[data-plan-id]')) {
+    const tier = tiers.find((row) => row.id === card.dataset.planId)
+    assert.ok(tier, `${rel}: plan missing from pricing.ts: ${card.dataset.planId}`)
+    assert.equal(Number(card.dataset.monthlyEur), tier.monthlyEUR, `${rel}: ${tier.id} monthly price drift`)
+    assert.equal(sichtbar(card, '.luc-plan-price strong', 'the monthly price'), `€${tier.monthlyEUR}`, `${rel}: ${tier.id} monthly price text drift`)
+    assert.equal(Number(card.dataset.annualEur), tier.annualEUR, `${rel}: ${tier.id} annual price drift`)
+    assert.equal(sichtbar(card, '.luc-plan-annual', 'the annual price'), `€${tier.annualEUR}/year · billed annually`, `${rel}: ${tier.id} annual price text drift`)
+    assert.equal(Number(card.dataset.planCredits), tierCredits[card.dataset.planId], `${rel}: ${tier.id} credit drift`)
+    assert.equal(sichtbar(card, '.luc-plan-wallet strong', 'the monthly credits'),
+      `${tierCredits[card.dataset.planId].toLocaleString('en-US')} credits/month`, `${rel}: ${tier.id} credit text drift`)
+    fremdeKarten += 1
+  }
+  for (const card of doc.querySelectorAll('.luc-pack[data-pack-id]')) {
+    const entry = packs.find((row) => row.id === card.dataset.packId)
+    assert.ok(entry, `${rel}: pack missing from topup.ts: ${card.dataset.packId}`)
+    assert.equal(Number(card.dataset.eurCents), entry.eurCents, `${rel}: ${entry.id} pack price drift`)
+    assert.equal(Number(card.dataset.credits), entry.credits, `${rel}: ${entry.id} pack credit drift`)
+    assert.equal(sichtbar(card, '.price', 'the pack price'), `€${entry.eurCents / 100}`, `${rel}: ${entry.id} pack price text drift`)
+    assert.equal(sichtbar(card, 'strong', 'the pack credits'), `${entry.credits.toLocaleString('en-US')} credits`, `${rel}: ${entry.id} pack credit text drift`)
+    fremdeKarten += 1
+  }
+  for (const flashCount of doc.querySelectorAll('[data-flash-model-count]')) {
+    const tier = flashCount.dataset.flashTier
+    const expected = tier === undefined ? flashInCatalog : flashForTier(tier)
+    assert.equal(Number(flashCount.dataset.flashModelCount), expected, `${rel}: flash model count drift${tier ? ` (${tier})` : ''}`)
+    assert.equal(flashCount.textContent, String(expected), `${rel}: flash model count text drift${tier ? ` (${tier})` : ''}`)
+  }
+  for (const claimed of doc.querySelectorAll('[data-catalog-count]')) {
+    assert.equal(Number(claimed.dataset.catalogCount), catalogSize, `${rel}: catalog size drift`)
+    assert.equal(claimed.textContent, String(catalogSize), `${rel}: catalog size text drift`)
+  }
+}
+console.log(`Sales card guard passed: ${fremdeKarten} plan and pack cards outside /pricing/ match the web source.`)

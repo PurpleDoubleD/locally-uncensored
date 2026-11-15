@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Uncensored AI coding agent: local or in the browser</title>
+<meta name="description" content="An uncensored AI coding agent that plans, edits, runs the tests and opens a pull request. In the browser on LU Cloud, or free on your own PC.">
+<meta name="keywords" content="uncensored ai coding agent, uncensored ai agent, uncensored ai code, uncensored coding ai, uncensored ai for coding, uncensored coding agent">
+<meta property="og:title" content="Uncensored AI coding agent: local or in the browser">
+<meta property="og:description" content="An uncensored AI coding agent that plans, edits, runs the tests and opens a pull request. In the browser on LU Cloud, or free on your own PC.">
+<meta property="og:image" content="https://raw.githubusercontent.com/PurpleDoubleD/locally-uncensored/master/docs/social-preview.png">
+<meta property="og:url" content="https://locallyuncensored.com/uncensored-ai-coding-agent/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Locally Uncensored">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Uncensored AI coding agent: local or in the browser">
+<meta name="twitter:description" content="An uncensored AI coding agent that plans, edits, runs the tests and opens a pull request. In the browser on LU Cloud, or free on your own PC.">
+<meta name="twitter:image" content="https://raw.githubusercontent.com/PurpleDoubleD/locally-uncensored/master/docs/social-preview.png">
+<link rel="canonical" href="https://locallyuncensored.com/uncensored-ai-coding-agent/">
+<meta name="robots" content="index, follow">
+<meta name="theme-color" content="#0a0a0a">
+<link rel="icon" href="/favicon.png">
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://locallyuncensored.com/"},{"@type":"ListItem","position":2,"name":"Uncensored AI coding agent","item":"https://locallyuncensored.com/uncensored-ai-coding-agent/"}]}
+</script>
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"WebPage","name":"Uncensored AI coding agent: local or in the browser","description":"An uncensored AI coding agent that plans, edits, runs the tests and opens a pull request. In the browser on LU Cloud, or free on your own PC.","url":"https://locallyuncensored.com/uncensored-ai-coding-agent/","dateModified":"2026-11-15","inLanguage":"en","isPartOf":{"@type":"WebSite","name":"Locally Uncensored","url":"https://locallyuncensored.com/"},"about":{"@type":"Thing","name":"Uncensored AI coding agent"},"publisher":{"@type":"Organization","name":"Locally Uncensored","url":"https://locallyuncensored.com/"}}
+</script>
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"FAQPage","mainEntity":[{"@type":"Question","name":"How many credits does one agent run cost?","acceptedAnswer":{"@type":"Answer","text":"It depends on the model. A typical run reads a few files, changes two or three and runs the tests, around fifteen steps. That costs about 5,900 credits on DeepSeek V4.1 Flash 1017, about 28,500 on GLM 5.3 and about 65,000 on Kimi K3.1 Pro. A large repository or a long session uses more, and a run that goes in circles costs credits like one that succeeds."}},{"@type":"Question","name":"Is the uncensored AI coding agent free?","acceptedAnswer":{"@type":"Answer","text":"The local route is free: the desktop app runs the agent with a local model on your own PC. The hosted route on LU Cloud has no free tier. It starts with a credit pack from 15 EUR for 450,000 credits, with no subscription, and the credits do not expire."}},{"@type":"Question","name":"Which plan should I take for coding?","acceptedAnswer":{"@type":"Answer","text":"Hosted at 19 EUR a month, with 900,000 credits, to try the agent and for occasional tasks. Hosted Pro at 49 EUR, with 2,350,000 credits, for a few agent tasks every working day. Hosted Max at 99 EUR, with 5,000,000 credits, for daily heavy use on the largest models. One wallet pays for chat, code, images and video."}},{"@type":"Question","name":"Which models can the agent use?","acceptedAnswer":{"@type":"Answer","text":"All 40 open chat models on LU Cloud, because all of them can call tools. In our cost table DeepSeek V4.1 Flash 1017 is the cheapest per run and Kimi K3.1 Pro the most expensive. On your own PC the agent uses the model you install."}},{"@type":"Question","name":"Does my code leave my machine?","acceptedAnswer":{"@type":"Answer","text":"On LU Cloud, yes: the code is processed on GPU partners. LU Labs never trains on it and never sells it. In the browser the agent only sees the GitHub repositories you choose, and changes arrive as pull requests. If the code must stay on your computer, use the desktop app with a local model."}},{"@type":"Question","name":"Is it really uncensored?","acceptedAnswer":{"@type":"Answer","text":"LU adds no extra filter to hosted text. The models still differ, and no model writes everything you ask. It helps with legitimate work that cautious assistants refuse, such as security research on your own systems, reverse engineering for interoperability or malware analysis in a lab. Illegal use stays illegal."}}]}
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@200;300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/assets/lu.css">
+<link rel="stylesheet" href="/assets/pricing.css">
+<script defer src="/assets/lu.js"></script>
+  <script data-goatcounter="https://purple47.goatcounter.com/count" async src="//gc.zgo.at/count.js"></script>
+</head>
+<body>
+
+<nav class="lu-nav">
+  <a class="lu-nav-brand" href="/" aria-label="Locally Uncensored">
+    <span class="lu-mono" data-mono="nav" data-size="40" aria-hidden="true"></span>
+    <span class="lu-nav-word">Locally <span class="accent">Uncensored</span></span>
+  </a>
+  <div class="lu-nav-links" id="lu-nav-links">
+    <a class="lu-nav-link" href="/">Home</a>
+    <a class="lu-nav-link" href="/pricing/">Pricing</a>
+    <a class="lu-nav-link" href="/blog/">Blog</a>
+    <a class="lu-nav-link" href="/guide/">Guide</a>
+    <a class="lu-nav-link" href="/remote-access/">Remote</a>
+  </div>
+  <div class="lu-nav-right">
+    <a class="lu-nav-icon" href="https://github.com/PurpleDoubleD/locally-uncensored" title="GitHub" aria-label="GitHub"><svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.37.5 0 5.87 0 12.5c0 5.3 3.44 9.8 8.21 11.39.6.11.82-.26.82-.58 0-.29-.01-1.04-.02-2.05-3.34.73-4.04-1.61-4.04-1.61-.55-1.39-1.33-1.76-1.33-1.76-1.09-.75.08-.73.08-.73 1.2.08 1.84 1.24 1.84 1.24 1.07 1.83 2.81 1.3 3.5.99.11-.78.42-1.3.76-1.6-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.13-.3-.54-1.52.11-3.18 0 0 1.01-.32 3.3 1.23a11.5 11.5 0 0 1 6.01 0c2.29-1.55 3.3-1.23 3.3-1.23.65 1.66.24 2.88.12 3.18.77.84 1.23 1.91 1.23 3.22 0 4.61-2.8 5.63-5.48 5.92.43.37.81 1.1.81 2.22 0 1.6-.01 2.9-.01 3.29 0 .32.21.7.82.58A12.01 12.01 0 0 0 24 12.5C24 5.87 18.63.5 12 .5Z"/></svg><span class="lu-nav-badge">3000+&#8202;⭐</span></a>
+    <a class="lu-nav-icon discord" href="https://locallyuncensored.com/discord" target="_blank" rel="noopener" title="Discord" aria-label="Discord"><svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M20.32 4.37A19.8 19.8 0 0 0 15.45 3c-.2.36-.44.85-.6 1.23a18.3 18.3 0 0 0-5.7 0c-.16-.38-.4-.87-.6-1.23a19.7 19.7 0 0 0-4.87 1.37C.55 8.9-.32 13.3.11 17.63a19.9 19.9 0 0 0 6 3.03c.48-.66.9-1.36 1.27-2.1-.7-.26-1.36-.58-1.99-.96.17-.12.33-.25.49-.38a14.2 14.2 0 0 0 12.24 0c.16.13.32.26.49.38-.63.38-1.3.7-2 .96.37.74.8 1.44 1.27 2.1a19.8 19.8 0 0 0 6-3.03c.5-5.03-.85-9.39-3.55-13.26ZM8.02 15c-1.18 0-2.15-1.09-2.15-2.42 0-1.34.95-2.43 2.15-2.43 1.2 0 2.17 1.09 2.15 2.43 0 1.33-.95 2.42-2.15 2.42Zm7.96 0c-1.18 0-2.15-1.09-2.15-2.42 0-1.34.95-2.43 2.15-2.43 1.2 0 2.17 1.09 2.15 2.43 0 1.33-.94 2.42-2.15 2.42Z"/></svg><span class="lu-nav-badge">1500+&#8202;<span style="font-size:0.715em">🟢</span></span></a>
+    <span class="lu-nav-sep"></span>
+    <div class="switch" id="theme-switch" role="button" aria-label="Toggle theme"></div>
+    <a class="he-cta" href="/pricing/" aria-label="LU Cloud plans and what they include"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/></svg>Cloud</a>
+    <a class="lu-nav-dl" href="https://github.com/PurpleDoubleD/locally-uncensored/releases/latest"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m0 0 4-4m-4 4-4-4"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>Download</a>
+    <button type="button" class="lu-nav-toggle" aria-label="Menu"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+  </div>
+</nav>
+<div class="container lu-doc">
+  <div class="breadcrumb"><a href="/">Locally Uncensored</a> / Uncensored AI coding agent</div>
+
+  <div class="post-meta">
+    <span class="post-tag">Cloud</span>
+    <span>Updated November 15, 2026</span>
+  </div>
+
+  <article>
+    <h1>Uncensored AI coding agent, local or in the browser</h1>
+
+    <p>This uncensored AI coding agent works on your code with no extra filter from LU. Point it at a repository and describe the change: it plans, edits, runs the tests and hands you a pull request. Run it in the browser on LU Cloud from a 15 EUR credit pack, or free on your own PC.</p>
+<section class="luc-buy" aria-labelledby="buy-luc-coding">
+      <p class="luc-buy-kicker">For the agent on LU Cloud</p>
+      <h2 id="buy-luc-coding">Pick a plan for coding</h2>
+      <div class="luc-plan-grid">
+        <article class="luc-plan" data-plan-row data-plan-id="hosted" data-monthly-eur="19" data-annual-eur="190" data-plan-credits="900000"><div class="luc-plan-name">Hosted</div><div class="luc-plan-price"><strong>€19</strong><span>/month</span></div><div class="luc-plan-annual">€190/year · billed annually</div><div class="luc-plan-wallet"><strong>900,000 credits/month</strong><span>One shared cloud wallet</span></div><ul><li>About 31 typical agent runs on GLM 5.3</li><li><span data-flash-model-count="11" data-flash-tier="hosted">11</span> Flash chat models without credits</li></ul><a class="cta" href="https://lu-labs.ai/pricing?tab=monthly&amp;src=luc-coding-plan#hosted" target="_blank" rel="noopener">Choose Hosted →</a></article>
+        <article class="luc-plan popular" data-plan-row data-plan-id="hosted-pro" data-monthly-eur="49" data-annual-eur="490" data-plan-credits="2350000"><span class="luc-plan-badge">For daily use</span><div class="luc-plan-name">Hosted Pro</div><div class="luc-plan-price"><strong>€49</strong><span>/month</span></div><div class="luc-plan-annual">€490/year · billed annually</div><div class="luc-plan-wallet"><strong>2,350,000 credits/month</strong><span>2.6× the Hosted wallet</span></div><ul><li>About 82 typical agent runs on GLM 5.3</li><li><span data-flash-model-count="12" data-flash-tier="hosted-pro">12</span> Flash chat models without credits</li><li>GLM 5.3 Flash included</li></ul><a class="cta" href="https://lu-labs.ai/pricing?tab=monthly&amp;src=luc-coding-plan#hosted-pro" target="_blank" rel="noopener">Choose Pro →</a></article>
+        <article class="luc-plan" data-plan-row data-plan-id="hosted-max" data-monthly-eur="99" data-annual-eur="990" data-plan-credits="5000000"><div class="luc-plan-name">Hosted Max</div><div class="luc-plan-price"><strong>€99</strong><span>/month</span></div><div class="luc-plan-annual">€990/year · billed annually</div><div class="luc-plan-wallet"><strong>5,000,000 credits/month</strong><span>5.6× the Hosted wallet</span></div><ul><li>About 175 typical agent runs on GLM 5.3</li><li><span data-flash-model-count="12" data-flash-tier="hosted-max">12</span> Flash chat models without credits</li><li>GLM 5.3 Flash included</li></ul><a class="cta" href="https://lu-labs.ai/pricing?tab=monthly&amp;src=luc-coding-plan#hosted-max" target="_blank" rel="noopener">Choose Max →</a></article>
+      </div>
+      <div class="luc-buy-pack"><article class="luc-pack" data-pack-id="pack-15" data-eur-cents="1500" data-credits="450000"><strong>450,000 credits</strong><div class="price">€15</div><p>About 15 agent runs on GLM 5.3, no subscription. The credits do not expire.</p><a href="https://lu-labs.ai/pricing?tab=credits&amp;src=luc-coding-pack" target="_blank" rel="noopener">Buy credits →</a></article><p class="luc-buy-note">Every plan and every pack opens the same catalogue; they differ in volume. A plan renews each month until you cancel it, a pack is paid once. Checkout opens on lu-labs.ai, and the payment page uses neutral product language. Full tables on the <a href="/pricing/">pricing page</a>.</p></div>
+    </section>
+
+    <h2>What the agent does</h2>
+
+    <p>There are two places to run it, and one more way to use the same idea in chat.</p>
+
+    <ul>
+      <li><strong>In the browser.</strong> The Code tab on LU Cloud works on a GitHub repository you connected. You choose which repositories it can see. Changes only arrive as pull requests, and you decide what to merge.</li>
+      <li><strong>On your PC.</strong> The <a href="/">desktop app</a> runs the agent on folders on your own machine. Edits across several files are shown as diffs you approve. Commands and tests run in a sandbox. When you run a local model, your code never leaves the computer.</li>
+      <li><strong>Agent mode in chat.</strong> It also plans tasks and calls tools step by step, for work that is not tied to a repository.</li>
+    </ul>
+
+    <h2>Which models it runs on</h2>
+
+    <p>LU Cloud runs the agent on 40 open chat models, and all of them can call tools. You pick the model per task. A cheap model is fine for a small fix. A large model is worth its price when the change touches many files or needs careful reasoning.</p>
+
+    <p>On your PC the agent uses the model you install. How large that model can be depends on your graphics card.</p>
+
+    <h2>What one run costs</h2>
+
+    <p>One typical run is a task that reads a few files, changes two or three and runs the tests. That is around fifteen steps. The table shows the credits for such a run on five models, and how many runs fit into one month of each plan.</p>
+
+    <table>
+      <thead><tr><th>Model</th><th>Credits per run, about</th><th>Runs on Hosted</th><th>Runs on Hosted Pro</th><th>Runs on Hosted Max</th></tr></thead>
+      <tbody>
+        <tr><td>DeepSeek V4.1 Flash 1017</td><td>5,900</td><td>152</td><td>398</td><td>847</td></tr>
+        <tr><td>GLM 5.3</td><td>28,500</td><td>31</td><td>82</td><td>175</td></tr>
+        <tr><td>DeepSeek V4 Pro 0813</td><td>36,400</td><td>24</td><td>64</td><td>137</td></tr>
+        <tr><td>Qwen 3.8 Max</td><td>48,700</td><td>18</td><td>48</td><td>102</td></tr>
+        <tr><td>Kimi K3.1 Pro</td><td>65,000</td><td>13</td><td>36</td><td>76</td></tr>
+      </tbody>
+    </table>
+
+    <p>The runs per plan are alternatives, not a sum. One wallet pays for chat, code, images and video, so every run on one model leaves less for the others. These are estimates, not a quota. A run that goes in circles costs credits like one that succeeds. A large repository or a long session uses more, and a cached prompt makes a run cheaper. For every model, see <a href="https://lu-labs.ai/coding-agent?src=luc-coding-ref" target="_blank" rel="noopener">the full cost table on LU Labs</a>.</p>
+
+    <h2>Plans and packs for coding</h2>
+
+    <ul>
+      <li><strong>Hosted, 19 EUR a month, 900,000 credits.</strong> To try the agent and for occasional tasks.</li>
+      <li><strong>Hosted Pro, 49 EUR a month, 2,350,000 credits.</strong> For a few agent tasks every working day.</li>
+      <li><strong>Hosted Max, 99 EUR a month, 5,000,000 credits.</strong> For daily heavy use on the largest models.</li>
+      <li><strong>Credit pack from 15 EUR, 450,000 credits.</strong> Works without a subscription, and the credits do not expire.</li>
+    </ul>
+
+    <p>Plans also include Flash models that cost no credits in app sessions, on an active paid plan: 11 on Hosted, 12 on Pro and Max, up to 500,000 combined input and output tokens per account per UTC day. GLM 5.3 Flash uses credits on Hosted and is included on Pro and Max. API keys and accounts without an active subscription always use credits.</p>
+
+    <p>Checkout opens on lu-labs.ai. <a href="https://lu-labs.ai/pricing?tab=monthly&amp;src=luc-coding-plans" target="_blank" rel="noopener">Compare the plans on LU Labs</a>.</p>
+
+    <h2>Where uncensored fits for coding</h2>
+
+    <p>Most code is not sensitive. Any capable model will write a form validator or a database migration. The word uncensored matters at the edges, where cautious assistants refuse work that is legitimate. Typical cases:</p>
+
+    <ul>
+      <li><strong>Security research on your own systems.</strong> A scanner for your own network, a test of your own login against brute force, a proof of concept for a bug you found in your own code.</li>
+      <li><strong>Reverse engineering for interoperability.</strong> Reading a binary or a protocol so your software can talk to it. We wrote about this in <a href="/blog/local-ai-reverse-engineering.html">local AI for reverse engineering</a> and in <a href="/blog/reverse-engineer-an-app-with-a-local-model.html">reverse engineering an app with a local model</a>.</li>
+      <li><strong>Malware analysis in a lab.</strong> Unpacking and explaining a sample on an isolated machine, and writing detection rules for it.</li>
+      <li><strong>Adult game modding.</strong> Mods for games with mature themes, where some assistants refuse to touch the project at all.</li>
+    </ul>
+
+    <p>On LU Cloud, hosted text has no extra filter from LU. The models themselves differ. Some were trained to decline more than others, and no model writes everything you ask. If one refuses a legitimate task, try another from the picker. The No Filter mark comes from a writing test, not a coding test, so treat it as a hint: 13 of the 36 cloud chat models we measured answer in full without refusing, and only those carry the No Filter mark.</p>
+
+    <p>Illegal use stays illegal. Attacking systems you do not own or spreading malware is not what this is for, and the Terms of Service apply.</p>
+
+    <h2>Where your code goes</h2>
+
+    <p>On LU Cloud the code is processed on GPU partners. LU Labs never trains on it and never sells it. In the browser the agent only sees the repositories you chose.</p>
+
+    <p>If your code must not leave your machine, run the desktop app with a local model. That route is free.</p>
+
+    <h2>The local route</h2>
+
+    <p><a href="/">Locally Uncensored</a> is free and open source under AGPL-3.0, for Windows, macOS on Apple Silicon and Linux. It runs the agent on folders on your own machine, with the model you install, and needs no account and no credits. The limit is your hardware: the largest models will not fit on a home PC.</p>
+
+    <p>Would you rather use the hosted models from your own editor, script or agent? The <a href="/uncensored-ai-api/">uncensored AI API</a> page shows how to call them from your own tools.</p>
+
+    <h2>How to start</h2>
+
+    <ol>
+      <li>Open <a href="https://lu-labs.ai/pricing?tab=credits&amp;src=luc-coding-start" target="_blank" rel="noopener">the LU Labs pricing page</a> and pick a credit pack or a plan.</li>
+      <li>Open the Code tab, connect GitHub and choose which repositories the agent can see.</li>
+      <li>Pick a model, describe the change and review the pull request it opens.</li>
+    </ol>
+
+    <h2>Questions people ask</h2>
+
+    <h3>How many credits does one agent run cost?</h3>
+    <p>It depends on the model. A typical run reads a few files, changes two or three and runs the tests, around fifteen steps. That costs about 5,900 credits on DeepSeek V4.1 Flash 1017, about 28,500 on GLM 5.3 and about 65,000 on Kimi K3.1 Pro. A large repository or a long session uses more, and a run that goes in circles costs credits like one that succeeds.</p>
+
+    <h3>Is the uncensored AI coding agent free?</h3>
+    <p>The local route is free: the desktop app runs the agent with a local model on your own PC. The hosted route on LU Cloud has no free tier. It starts with a credit pack from 15 EUR for 450,000 credits, with no subscription, and the credits do not expire.</p>
+
+    <h3>Which plan should I take for coding?</h3>
+    <p>Hosted at 19 EUR a month, with 900,000 credits, to try the agent and for occasional tasks. Hosted Pro at 49 EUR, with 2,350,000 credits, for a few agent tasks every working day. Hosted Max at 99 EUR, with 5,000,000 credits, for daily heavy use on the largest models. One wallet pays for chat, code, images and video.</p>
+
+    <h3>Which models can the agent use?</h3>
+    <p>All 40 open chat models on LU Cloud, because all of them can call tools. In our cost table DeepSeek V4.1 Flash 1017 is the cheapest per run and Kimi K3.1 Pro the most expensive. On your own PC the agent uses the model you install.</p>
+
+    <h3>Does my code leave my machine?</h3>
+    <p>On LU Cloud, yes: the code is processed on GPU partners. LU Labs never trains on it and never sells it. In the browser the agent only sees the GitHub repositories you choose, and changes arrive as pull requests. If the code must stay on your computer, use the desktop app with a local model.</p>
+
+    <h3>Is it really uncensored?</h3>
+    <p>LU adds no extra filter to hosted text. The models still differ, and no model writes everything you ask. It helps with legitimate work that cautious assistants refuse, such as security research on your own systems, reverse engineering for interoperability or malware analysis in a lab. Illegal use stays illegal.</p>
+
+    <h2>Read next</h2>
+
+    <ul>
+      <li><a href="/uncensored-ai-api/">Uncensored AI API</a>, the hosted models from your own tools.</li>
+      <li><a href="/blog/local-ai-reverse-engineering.html">Local AI for reverse engineering</a>, the offline route for sensitive work.</li>
+      <li><a href="/uncensored-ai-chat-online/">Uncensored AI chat online</a>, the same models in a chat window.</li>
+      <li><a href="/unrestricted-ai/">Unrestricted AI</a>, chat, images and video in one overview.</li>
+      <li><a href="/pricing/">Pricing</a>, every plan and pack in one table.</li>
+    </ul>
+  </article>
+
+  <div class="post-footer">
+    <p>40 open chat models with tool calls, runs from about 5,900 credits, credits from 15 EUR with no subscription.</p>
+    <a class="cta-btn" href="https://lu-labs.ai/pricing?tab=monthly&amp;src=luc-coding-end#hosted-pro" target="_blank" rel="noopener">See Hosted Pro</a>
+    <a class="cta-btn" href="https://lu-labs.ai/pricing?tab=credits&amp;src=luc-coding-end-pack" target="_blank" rel="noopener">Buy a credit pack</a>
+    <p style="margin-top:14px;margin-bottom:0">Prefer everything offline? The <a href="https://github.com/PurpleDoubleD/locally-uncensored/releases">desktop app</a> is free, AGPL-3.0, Windows, Linux and Mac.</p>
+  </div>
+</div>
+
+<footer>
+  <div class="footer-row footer-meta"><span>&copy; 2026 &middot; Locally Uncensored &middot; AGPL-3.0</span></div>
+  <div class="footer-row footer-links">
+    <a href="https://locallyuncensored.com/blog/">Blog</a>
+    <a href="https://locallyuncensored.com/guide/">Guide</a>
+    <a href="https://locallyuncensored.com/pricing/">Pricing</a>
+    <a href="https://locallyuncensored.com/cloud/">LU Cloud</a>
+    <a href="https://locallyuncensored.com/uncensored-ai-chat-online/">Uncensored AI chat online</a>
+    <a href="https://locallyuncensored.com/uncensored-ai-image-generator-online/">Image generator online</a>
+    <a href="https://locallyuncensored.com/uncensored-ai-video-generator-online/">Video generator online</a>
+    <a href="https://locallyuncensored.com/alternatives/">Alternatives</a>
+    <a href="https://locallyuncensored.com/is-locally-uncensored-safe/">Is it safe?</a>
+    <a href="https://locallyuncensored.com/remote-access/">Remote access</a>
+    <a href="https://locallyuncensored.com/discord" target="_blank" rel="noopener">Discord</a>
+    <a href="https://github.com/PurpleDoubleD/locally-uncensored">GitHub</a>
+    <a href="https://github.com/PurpleDoubleD/locally-uncensored/discussions">Discussions</a>
+    <a href="https://github.com/PurpleDoubleD/locally-uncensored/issues">Issues</a>
+    <a href="https://reddit.com/user/GroundbreakingMall54">Reddit</a>
+    <a href="https://www.linkedin.com/in/david-drobnitza-locallyuncensored/" rel="me noopener" target="_blank">LinkedIn</a>
+    <a href="https://locallyuncensored.com/privacy/">Privacy</a>
+    <a href="https://locallyuncensored.com/terms/">Terms</a>
+    <a href="https://locallyuncensored.com/impressum/">Impressum</a>
+  </div>
+</footer>
+
+
+<!-- LU-CLOUD-FACTS:START -->
+<section><h2>Current Hosted offer</h2><p>Hosted includes 11 Flash models; Pro and Max include 12. In app sessions they cost no credits, up to a daily limit per account. GLM 5.3 Flash uses credits on Hosted and joins the daily allowance on Pro and Max. API keys always use credits.</p><p>EUR 19/month, 900,000 shared monthly credits: up to 900 Neta Lumina Uncensored images or 90 five-second LTX 2.3 Uncensored clips. Every output spends the same wallet.</p><p>Each maximum spends the entire shared monthly wallet on one model. These are alternatives, not separate allowances. Input-image generation, character training, LoRA routes and additional operations cost extra. Uncensored video uses an input image and five-second clips. Failed jobs and changing catalog prices can affect results.</p><p><a href="/uncensored-ai-image-generator-online/">Image models and exact quantities</a> · <a href="/uncensored-ai-video-generator-online/">Video models and exact quantities</a> · <a href="/vs/venice/">Venice comparison</a> · <a href="/cloud-facts.json">Current facts JSON</a></p></section>
+<!-- LU-CLOUD-FACTS:END -->
+</body>
+</html>
