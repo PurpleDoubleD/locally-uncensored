@@ -4,4 +4,9 @@
 import type { StudioIntent } from '../../render/create-studio'
 // The three ways of the 3D tab are studio intents of the Create tab only:
 // chat does not make 3D models (lib/create/order.ts chatKind).
-export type CreateIntent = Exclude<StudioIntent, '3d-text' | '3d-image' | '3d-video'>
+//
+// Swap Character is left out, as on the web (chat-catalog ChatIntent): Create
+// in chat cannot order it, it needs the customer's video and one photo per
+// person, and the chat order has no such places. The Create tab runs it
+// through useCloudCreate and lib/create/swap-run.ts, not through engine.ts.
+export type CreateIntent = Exclude<StudioIntent, '3d-text' | '3d-image' | '3d-video' | 'swap_character'>

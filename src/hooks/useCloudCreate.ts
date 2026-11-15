@@ -20,16 +20,17 @@ import type { CloudSubmitIntent } from '../lib/pending-cloud-jobs'
 import { useCreateStore, type GalleryItem } from '../stores/createStore'
 import { intentToJob, galleryItemFromJob } from '../lib/render/cloud-jobs'
 import {
+  adoptInput,
   cancelJob,
   getJob,
   pollJob,
   submitCloudJob,
   uploadInput,
-  adoptInput,
   CloudJobError,
   QuoteChangedError,
   type CloudJobParams,
   type CloudJob,
+  type CloudJobSubmit,
 } from '../api/cloud/jobs'
 import { defaultCloudModel, editNeedsMask, modelForOp, utilityOpModel, resolveOpPick, cloudModelById, cloudMediaLive, resolveCharacterModel, lengthCredits, lengthPrice } from '../stores/cloudCatalogStore'
 import { checkPromptSafety, blockMessageFor, type SafetyVerdict } from '../lib/render/safety'
@@ -47,6 +48,13 @@ import { loadImageRef } from '../components/create/experimental/loadImage'
 import { bumpSeed, runImageCount } from '../lib/render/image-count'
 import { STUDIO_MODELS, studioFields } from '../lib/render/studio-contract'
 import { modelLabel } from '../lib/render/preset-models'
+import { isSwapIntent, swapUsesFrame, SWAP_GALLERY_LABEL } from '../lib/render/swap'
+import { adoptSwapFrame, swapInputError, swapRunParams } from '../lib/create/swap-run'
+import { swapConfirmedFrame } from '../lib/create/swap-frame'
+import { lipsyncCredits, soundApplies, soundClipSeconds, soundInputError, soundParam, soundStudioOptions } from '../lib/render/sound'
+import { lipsyncFailedText, runLipsyncStep } from '../lib/create/lipsync-chain'
+import { characterHubReleasedHere } from '../lib/create/character-hub-release'
+import { mediaSeconds } from '../components/create/experimental/useStudioPrice'
 import { IMPROVING_PROMPT } from '../lib/render/improve-prompt'
 import { improveKindForRun } from '../lib/render/music-ui'
 import { intentTakesPrompt } from '../components/create/experimental/intents'
@@ -419,6 +427,62 @@ async function runPictureFirst(args: {
   }
 }
 
+/** Step 2 of a Swap or Motion run with a new voice (14.11.2026, the web's
+ *  useCloudCreate): LatentSync or Lipsync-2 on the own video result. The
+ *  price is the catalogue's rule on the measured voice and clip; a failure
+ *  keeps the video and says so (lipsyncFailedText). */
+async function runLipsyncAfter(job: CloudJob, run: {
+  intent: string; model: string; swap: boolean; label: string | undefined
+  resultFields: Partial<GalleryItem> & { prompt: string }
+  audioInput: { url: string; blob: Blob } | null; voiceFromJob: { jobId: string } | null
+  videoUrl: string | undefined; swapSeconds: number | null; lipModel: string; shown: number | null
+  signal: AbortSignal; timeoutMs: number
+}): Promise<void> {
+  const st = useCreateStore.getState()
+  st.setProgressPhase('sampling')
+  st.setProgress(92, 'Step 2 of 2: lip sync…')
+  try {
+    const voiceUrl = run.audioInput?.url ?? (run.voiceFromJob ? (await getJob(run.voiceFromJob.jobId).catch(() => null))?.result_url ?? undefined : undefined)
+    const audioSeconds = voiceUrl ? await mediaSeconds(voiceUrl, 'audio').catch(() => undefined) : undefined
+    const videoSeconds = run.videoUrl ? await mediaSeconds(run.videoUrl, 'video').catch(() => undefined) : undefined
+    const clip = soundClipSeconds(run.intent, run.model, run.swapSeconds, videoSeconds)
+    // The ceiling: what the panel showed, or the same rule on what was
+    // measured now; never above the shown figure.
+    const measured = lipsyncCredits(run.lipModel, audioSeconds, clip)
+    const credits = run.shown != null && measured != null ? Math.min(run.shown, measured) : run.shown ?? measured
+    const lip = await runLipsyncStep({
+      videoJobId: job.id,
+      audio: run.audioInput ? { type: 'blob', blob: run.audioInput.blob } : { type: 'job', jobId: run.voiceFromJob!.jobId },
+      model: run.lipModel,
+      credits,
+      swap: run.swap,
+    }, {
+      submitCloudJob, pollJob, cancelJob, uploadInput, adoptInput,
+      signal: run.signal, timeoutMs: run.timeoutMs,
+      onSubmitted: (id) => { activeJobId = id; activeJobIds = [id] },
+      onTick: (j) => { if (j.status === 'running') useCreateStore.getState().setProgress(95, 'Step 2 of 2: lip sync…') },
+    })
+    const end = useCreateStore.getState()
+    if (lip.status === 'succeeded' && lip.result_url) {
+      end.setProgressPhase('complete')
+      end.setProgress(100, 'Complete!')
+      end.addToGallery({
+        ...galleryItemFromJob(lip),
+        ...run.resultFields,
+        model: lip.model || run.lipModel,
+        label: run.label ? `${run.label}, lip sync` : 'Lip sync',
+      })
+    } else if (lip.status !== 'canceled') {
+      end.setError(lipsyncFailedText(lip.error))
+    }
+  } catch (err) {
+    if (!(err instanceof Error && err.message === 'polling aborted')) {
+      const reason = err instanceof CloudJobError && err.status === 429 ? throttleMessage(err) : err instanceof Error ? err.message : String(err)
+      useCreateStore.getState().setError(lipsyncFailedText(reason))
+    }
+  }
+}
+
 export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
   const { onQuotaChange } = opts
 
@@ -567,9 +631,43 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
       s.setError('Pick one of your cloud videos to extend.')
       return
     }
-    if (op === 'motion' && (!s.source || !s.videoInput)) {
+    // Swap Character (07.11.2026): runs studio models only. A server whose
+    // catalogue does not list them yet leaves the pick without a studio model;
+    // that run would go out as a plain motion job, so it stops here.
+    const swap = isSwapIntent(intent)
+    if (swap) {
+      // Without the account switch the server refuses the swap (403
+      // preview_feature_off); the panel says "Coming soon" and no run starts.
+      if (!characterHubReleasedHere()) {
+        s.setError('Swap Character is coming soon to your LU Cloud.')
+        return
+      }
+      if (!studioModel) {
+        s.setError('Swap Character needs a newer LU Cloud. Try again later.')
+        return
+      }
+      const invalid = swapInputError(studioModel, {
+        hasVideo: !!s.videoInput, figures: s.swapFigures, consent: s.swapConsent,
+        frameJobId: swapConfirmedFrame(s.swapBuilt, s.videoInput?.url, s.swapFigures),
+      })
+      if (invalid) {
+        s.setError(invalid)
+        return
+      }
+    } else if (op === 'motion' && (!s.source || !s.videoInput)) {
       s.setError('Motion control needs a character image and a driving video.')
       return
+    }
+    // Sound (14.11.2026, lib/render/sound.ts): Swap and Motion on the cloud.
+    // A new voice with lips needs the voice and at most one person.
+    const sound = soundApplies(intent, 'cloud', characterHubReleasedHere()) ? s.sound : undefined
+    {
+      const people = swap ? s.swapFigures.length : 1
+      const invalid = soundInputError(sound, people, 'cloud', !!s.audioInput || !!s.voiceFromJob, s.lipsyncModel)
+      if (invalid) {
+        s.setError(invalid)
+        return
+      }
     }
     // 3D from text builds from words alone, under op 'studio'.
     const threeDFromText = intent === '3d' && s.threeDWay === 'text'
@@ -708,8 +806,9 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
       // field instead of a fixed param.
       if (provenance) params.source_prompt = provenance
       // "From text" sends no picture: a source left on the Stage from another
-      // way belongs to that way.
-      if (op !== 'generate' && s.source && !(intent === '3d' && s.threeDWay === 'text')) {
+      // way belongs to that way. Swap reads its own people (below), never the
+      // Stage's source.
+      if (op !== 'generate' && s.source && !swap && !(intent === '3d' && s.threeDWay === 'text')) {
         params.source_path = await uploadInput(dataUrlToBlob(s.source.url), 'source', ...uploadEnds(ac))
         // Ein Studio-Modell, das eine Bilderliste liest (Edit mit mehreren
         // Vorlagen, Referenz zu Video), bekommt das Standbild der Oberflaeche als
@@ -764,6 +863,42 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
       if ((op === 'lipsync' || op === 'motion') && s.videoInput) {
         s.setProgress(6, 'Uploading video…')
         params.video_path = await uploadInput(s.videoInput.blob, 'video', ...uploadEnds(ac))
+      }
+      if (swap && studioModel) {
+        // The people of the panel: a photo each (a list with roles for
+        // OpenJutsu, the first photo as the still for a one-person model), or
+        // on SCAIL 2 and Kling the confirmed first frame (adopted as an own
+        // result), the options the mode presets and fixes, the length and the
+        // consent. The length of the video as the slider and the button
+        // measured it (SCAIL 2 and Kling run on whole seconds below it).
+        const videoSeconds = s.videoInput && swapUsesFrame(intent, studioModel)
+          ? await mediaSeconds(s.videoInput.url, 'video').catch(() => undefined)
+          : undefined
+        Object.assign(params, await swapRunParams(
+          studioModel,
+          {
+            hasVideo: !!s.videoInput, figures: s.swapFigures, consent: s.swapConsent, chosenSeconds: s.swapSeconds,
+            videoSeconds, frameJobId: swapConfirmedFrame(s.swapBuilt, s.videoInput?.url, s.swapFigures),
+          },
+          studioOptionsFiltered ?? {},
+          async (image, i, total) => {
+            s.setProgress(7, `Uploading photos… ${i + 1}/${total}`)
+            return uploadInput(dataUrlToBlob(image.url), 'source', ...uploadEnds(ac))
+          },
+          async (jobId) => {
+            s.setProgress(7, 'Uploading first frame…')
+            return adoptSwapFrame(adoptInput, jobId)
+          },
+        ))
+        if (ac.signal.aborted) return
+      }
+      // The sound of the result: Kling has a switch of its own, the rest the
+      // server's worker does. Lip sync runs after the video (below); until
+      // then the video keeps the original sound.
+      if (sound) {
+        params.sound = soundParam(sound)
+        const own = studioModel ? soundStudioOptions(studioModel, sound) : {}
+        if (Object.keys(own).length) params.studio_options = { ...(params.studio_options ?? studioOptionsFiltered ?? {}), ...own }
       }
       if (op === 'lipsync') {
         if (s.audioInput) {
@@ -878,12 +1013,15 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
       if (studioModel) {
         s.setProgress(9, 'Confirming the price…')
         const quoteFields: Record<string, unknown> = {}
-        for (const k of ['source_path', 'image_paths', 'mask_path', 'audio_path', 'audio2_path', 'video_path', 'last_image_path', 'shot_type'] as const) {
+        // clip_seconds: the server cuts a swap video for the quote as for the
+        // run, so both price the same seconds.
+        for (const k of ['source_path', 'image_paths', 'mask_path', 'audio_path', 'audio2_path', 'video_path', 'last_image_path', 'shot_type', 'clip_seconds', 'swap_consent', 'swap_step'] as const) {
           if (params[k] !== undefined) quoteFields[k] = params[k]
         }
         const quote = await studioQuote(studioModel, runPrompt, {
           op: 'studio',
-          studio_options: studioOptionsFiltered ?? {},
+          // A swap run carries its roles and fixed mode in params.studio_options.
+          studio_options: params.studio_options ?? studioOptionsFiltered ?? {},
           ...quoteFields,
         })
         // Review A kleiner Punkt 1 (Runde 3, 20.09.2026): the cap is the
@@ -930,7 +1068,8 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
       // list view (GET /api/jobs), not the only source of the gallery name.
       let label: string | undefined
       if (studioModel) {
-        label = prompt.trim() ? undefined
+        label = swap ? SWAP_GALLERY_LABEL
+          : prompt.trim() ? undefined
           : intent === '3d' ? THREE_D_TEXT.gallery[s.threeDWay]
           : modelLabel(studioModel)
         if (label) params.label = label
@@ -1126,6 +1265,16 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
             later.bumpCharactersVersion()
           })
         }
+      } else if (job.status === 'succeeded' && job.result_url && sound === 'lipsync' && (s.audioInput || s.voiceFromJob)) {
+        // Step 2 of 2: the new voice with lips. The video is in the gallery
+        // already and stays there if this step fails.
+        addResult(job)
+        await runLipsyncAfter(job, {
+          intent, model: studioModel ?? model, swap, label, resultFields: resultFields(0),
+          audioInput: s.audioInput, voiceFromJob: s.voiceFromJob, videoUrl: s.videoInput?.url,
+          swapSeconds: s.swapSeconds, lipModel: s.lipsyncModel, shown: s.lipsyncCredits, signal: ac.signal, timeoutMs,
+        })
+        onQuotaChange?.()
       } else if (job.status === 'succeeded' && job.result_url) {
         st.setProgressPhase('complete')
         st.setProgress(100, 'Complete!')
@@ -1427,4 +1576,42 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
   )
 
   return { generate, cancel, enhanceVideo, makeVoice }
+}
+
+/** One click swap (lib/create/swap-chain.ts, only with the account switch;
+ *  port of the web's buildSwapVideoSubmit, 4395e8d1): the video job, built
+ *  from the store like a Create run of Swap Character, only without its
+ *  image. That comes from the frame step; the chain sets it as source_path.
+ *  The video goes up here, so everything is on the server before the first
+ *  job. The ceiling is the video price the bar shows (cloudStudioCredits).
+ *  Throws with the text for the customer. */
+export async function buildSwapVideoSubmit(model: string, onStep?: (text: string) => void): Promise<CloudJobSubmit> {
+  const s = useCreateStore.getState()
+  if (!characterHubReleasedHere()) throw new Error('Swap Character is coming soon to your LU Cloud.')
+  if (!STUDIO_MODELS[model]) throw new Error('Swap Character needs a newer LU Cloud. Try again later.')
+  if (!s.videoInput) throw new Error('Add the original video first.')
+  const sound = s.sound
+  const invalid = soundInputError(sound, s.swapFigures.length, 'cloud', !!s.audioInput || !!s.voiceFromJob, s.lipsyncModel)
+  if (invalid) throw new Error(invalid)
+  const filtered = Object.fromEntries(
+    Object.entries(s.cloudStudioOptions).filter(([key]) => studioFields(model)[key] !== undefined),
+  )
+  const params: CloudJobParams = { op: 'studio', studio_options: filtered, client_request_id: crypto.randomUUID() }
+  onStep?.('Uploading your video…')
+  params.video_path = await uploadInput(s.videoInput.blob, 'video')
+  const videoSeconds = await mediaSeconds(s.videoInput.url, 'video').catch(() => undefined)
+  // No frame yet: swapRunParams sets swap_step 'video', the options, the
+  // length on whole seconds and the consent, and uploads nothing more.
+  Object.assign(params, await swapRunParams(
+    model,
+    { hasVideo: true, figures: s.swapFigures, consent: s.swapConsent, chosenSeconds: s.swapSeconds, videoSeconds, frameJobId: null },
+    filtered,
+    async () => { throw new Error('Swap: the people go into the first frame, not into the video job.') },
+  ))
+  params.sound = soundParam(sound)
+  const own = soundStudioOptions(model, sound)
+  if (Object.keys(own).length) params.studio_options = { ...(params.studio_options ?? filtered), ...own }
+  params.label = SWAP_GALLERY_LABEL
+  if (s.cloudStudioCredits != null) params.max_credits = s.cloudStudioCredits
+  return { kind: STUDIO_MODELS[model].kind, model, prompt: '', params }
 }

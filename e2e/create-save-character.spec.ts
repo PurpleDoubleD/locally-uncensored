@@ -1,6 +1,7 @@
 import { test, expect, type Page } from '@playwright/test'
 import { tauriMockInit, DEFAULT_ASSISTANT_REPLY, DEFAULT_MODEL_NAME } from './support/tauri-mock'
 import { routeCloud, seedOnboardingDone, signInViaGate, cloudSwitch } from './support/cloud-mock'
+import { characterPill, openCharacterTraining } from './support/character-hub'
 
 /**
  * "Use frames for a character" (Discord): frames taken evenly across a
@@ -86,7 +87,8 @@ test('frames across a video become a saved character that survives a reload', as
   // Hand the photos to Character Studio: they start the training set.
   await dialog.getByRole('button', { name: 'Train in Character Studio' }).click()
   await expect(dialog).toHaveCount(0)
-  await expect(page.getByRole('radio', { name: /Character Studio/i })).toBeChecked()
+  await expect(characterPill(page)).toBeChecked()
+  await expect(page.locator('[data-hub-head]')).toContainText('Train')
   await expect(page.getByText(/^4\/30 photos\./)).toBeVisible()
 
   // After a reload the character is still there (the boot script puts the app
@@ -95,7 +97,7 @@ test('frames across a video become a saved character that survives a reload', as
   await page.reload()
   await expect(cloudSwitch(page)).toBeVisible({ timeout: 20_000 })
   await page.getByRole('button', { name: /^Create$/ }).click()
-  await page.getByRole('radio', { name: 'Character Studio', exact: true }).click()
+  await openCharacterTraining(page)
   const chip = page.getByTitle('Add the 4 photos of Sir Aldous')
   await expect(chip).toBeVisible({ timeout: 15_000 })
   await chip.click()
@@ -114,6 +116,6 @@ test('the lightbox of a video offers the same action, straight into a training s
   await dialog.getByRole('button', { name: 'Untick frame 1' }).click()
   await dialog.getByRole('button', { name: 'Train with 7 frames' }).click()
   await expect(dialog).toHaveCount(0)
-  await expect(page.getByRole('radio', { name: /Character Studio/i })).toBeChecked()
+  await expect(characterPill(page)).toBeChecked()
   await expect(page.getByText(/^7\/30 photos\./)).toBeVisible()
 })

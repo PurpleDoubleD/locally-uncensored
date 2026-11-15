@@ -110,7 +110,7 @@ export const LOCAL_UTILITY_OPS: ReadonlySet<UtilityOp> = new Set(['upscale'])
  *  Character-Studio (LoRA training + generation), talking character (lipsync),
  *  music, video extend and motion control. Like `utilityOp`, an escape hatch
  *  over the image/video mode axis: when set it wins the intent derivation. */
-export type CloudOp = 'character' | 'lipsync' | 'music' | 'extend' | 'motion' | '3d'
+export type CloudOp = 'character' | 'lipsync' | 'music' | 'extend' | 'motion' | '3d' | 'swap_character'
 
 // The three ways and the Detail step of the 3D tab (3.1.0) live in
 // lib/three/three-d-types.ts, so the 3D texts need not import the store.
@@ -118,6 +118,29 @@ import type { ThreeDWay, ThreeDDetail } from '../lib/three/three-d-types'
 export type { ThreeDWay, ThreeDDetail }
 /** The local 3D models of a Mac (lib/mac-3d.ts, MAC_3D_MODELS). */
 export type ThreeDMacModel = 'triposr' | 'sf3d'
+
+/** A new person for Swap Character (07.11.2026): the photo, and who it
+ *  replaces when several people are in the video ("the woman on the left"). */
+export interface SwapFigure {
+  image: ImageRef | null
+  role: string
+  /** Where the customer tapped this person in the first frame (0 to 1). */
+  mark?: { x: number; y: number } | null
+  /** The character of the Character area this person becomes, by name, so
+   *  the row says "→ Bean". Unset for a photo picked by hand. */
+  character?: string | null
+}
+
+/** Swap Character in two steps (14.11.2026, as on the web): the first frame
+ *  of the video, drawn in the WebView. */
+export interface SwapFrame { url: string; width: number; height: number; videoUrl: string }
+
+/** The built first frame with the new people: a run of its own. `key` are the
+ *  inputs it came from (lib/render/swap.ts, swapFrameKey); once they no longer
+ *  match, it has expired. */
+export interface SwapBuilt { jobId: string; url: string; key: string; confirmed: boolean }
+
+const ONE_FIGURE: SwapFigure[] = [{ image: null, role: '' }]
 
 /** Which of the specialized categories ALSO run on the local ComfyUI backend
  *  (2.5.8 local lanes: ACE music, Wan S2V talking character, last-frame-chain
@@ -147,6 +170,7 @@ export type { CharacterRef }
  * URL for preview. Runtime-only — never persisted.
  */
 import type { ImageRef } from '../lib/image-ref'
+import { isHubIntent, type HubCharacter, type HubStep } from '../lib/create/character-hub'
 export type { ImageRef }
 
 /** Flatten mode / sub-mode / removebg / utilityOp / cloudOp into the single
@@ -488,6 +512,36 @@ export interface CreateState {
   /** Extend: the prior cloud render to continue ({jobId} → fresh signed URL
    *  at submit). Runtime-only. */
   extendSource: { jobId: string; url: string; label: string } | null
+  /** Swap Character: how many seconds of the video run. null = the whole
+   *  video, at most up to the limit of the model. Runtime-only. */
+  swapSeconds: number | null
+  /** Swap Character: 1 to 4 new people, a photo and a role each.
+   *  Runtime-only. */
+  swapFigures: SwapFigure[]
+  /** Swap Character: the customer confirmed the rights and the consent of
+   *  the people shown (lib/render/swap.ts SWAP_CONSENT_TEXT). Runtime-only,
+   *  never persisted: every session confirms again. */
+  swapConsent: boolean
+  /** Swap Character: the first frame of the video. Runtime-only. */
+  swapFrame: SwapFrame | null
+  /** Swap Character: the built and (after Continue) confirmed first frame.
+   *  Runtime-only. */
+  swapBuilt: SwapBuilt | null
+  /** The Character area (3.1.0 part B): which of its three steps shows. Only
+   *  read while the intent is one of HUB_INTENTS. Runtime-only. */
+  hubStep: HubStep
+  /** The character picked in step 1, null for "Just use a photo". Runtime-only. */
+  hubCharacter: HubCharacter | null
+  /** The action last open in the area, so the pill goes back to it. */
+  hubLastIntent: CreateIntent | null
+  /** Swap and Motion on the cloud (14.11.2026): the sound of the result
+   *  (lib/render/sound.ts). Runtime-only, the original sound by default. */
+  sound: 'original' | 'none' | 'lipsync'
+  /** The model of the lip sync step after the video. Runtime-only. */
+  lipsyncModel: string
+  /** What the lip sync step costs as the panel shows it (null: no lip sync).
+   *  The Create button adds it to the video. Runtime-only. */
+  lipsyncCredits: number | null
   /** Music track length in seconds (billed per second on the cloud). */
   musicDuration: number
   /** Music: optional lyrics passed to models that take them. Runtime-only. */
@@ -749,6 +803,18 @@ export interface CreateState {
   setAudioInput: (m: MediaRef | null) => void
   setVoiceFromJob: (v: { jobId: string; label: string } | null) => void
   setVideoInput: (m: MediaRef | null) => void
+  setSwapSeconds: (seconds: number | null) => void
+  setSwapFigures: (figures: SwapFigure[]) => void
+  setSwapConsent: (consent: boolean) => void
+  setSwapFrame: (frame: SwapFrame | null) => void
+  setSwapBuilt: (built: SwapBuilt | null) => void
+  setHubStep: (step: HubStep) => void
+  setHubCharacter: (c: HubCharacter | null) => void
+  /** The pill "Character": back to the action that was open, else step 1. */
+  openCharacterHub: () => void
+  setSound: (sound: 'original' | 'none' | 'lipsync') => void
+  setLipsyncModel: (model: string) => void
+  setLipsyncCredits: (credits: number | null) => void
   bumpCharactersVersion: () => void
   setLoraListKey: (names: readonly string[]) => void
   setCloudOpModel: (id: string) => void
@@ -1249,6 +1315,17 @@ export const useCreateStore = create<CreateState>()(
       voiceFromJob: null as { jobId: string; label: string } | null,
       videoInput: null as MediaRef | null,
       extendSource: null as { jobId: string; url: string; label: string } | null,
+      swapSeconds: null as number | null,
+      swapFigures: ONE_FIGURE,
+      swapConsent: false,
+      swapFrame: null as SwapFrame | null,
+      swapBuilt: null as SwapBuilt | null,
+      hubStep: 'who' as HubStep,
+      hubCharacter: null as HubCharacter | null,
+      hubLastIntent: null as CreateIntent | null,
+      sound: 'original' as 'original' | 'none' | 'lipsync',
+      lipsyncModel: 'latentsync',
+      lipsyncCredits: null as number | null,
       musicDuration: 60,
       musicLyrics: '',
       talkingWords: '',
@@ -1461,6 +1538,10 @@ export const useCreateStore = create<CreateState>()(
             return { ...base, cloudOp: 'extend' as const, mode: 'video' as const, videoSubMode: 't2v' as const, ...dropAll,
               ...videoModelParams(s.videoModel, s.videoModelList, 'extend', s.videoSpeed) }
           }
+          case 'swap_character':
+            // Its inputs are its own slots (video, figures); the Stage's
+            // source and mask are not read.
+            return { ...base, cloudOp: 'swap_character' as const, mode: 'video' as const, videoSubMode: 'i2v' as const, mask: null }
           case 'motion': {
             // Keeps the source slot (the character image the video drives).
             // On the Mac the lane runs an LTX-2.3 pack, and its catalogue
@@ -1510,6 +1591,10 @@ export const useCreateStore = create<CreateState>()(
         // The list of further source images stays only where it can run.
         if (get().batchSources.length && (!get().source || !BATCH_INTENTS.has(intent))) get().setBatchSources([])
         if (!BATCH_INTENTS.has(intent) && get().batchOriginal) set({ batchOriginal: null })
+        // An intent of the Character area opens the panel of its action: a
+        // gallery Reuse, the chat, a preset or the phone land there directly.
+        // The area's own steps 1 and 2 are set by openCharacterHub.
+        if (isHubIntent(intent)) set({ hubStep: 'panel', hubLastIntent: intent })
       },
       toggleNegative: () => set((s) => ({ showNegative: !s.showNegative })),
       setExpertOpen: (expertOpen) => set({ expertOpen }),
@@ -1633,10 +1718,36 @@ export const useCreateStore = create<CreateState>()(
         set({ audioInput, ...(audioInput ? { voiceFromJob: null } : {}) })
       },
       setVoiceFromJob: (voiceFromJob) => set({ voiceFromJob, ...(voiceFromJob ? { audioInput: null } : {}) }),
+      // Another video: the chosen length, the first frame, the marks and the
+      // built frame belonged to the old one.
       setVideoInput: (videoInput) => {
         releaseReplacedMediaRef(get().videoInput, videoInput)
-        set({ videoInput })
+        const figures = get().swapFigures
+        set(videoInput?.url === get().videoInput?.url ? { videoInput } : {
+          videoInput, swapSeconds: null, swapFrame: null, swapBuilt: null,
+          swapFigures: figures.some((f) => f.mark) ? figures.map((f) => ({ ...f, mark: null })) : figures,
+        })
       },
+      setSwapSeconds: (swapSeconds) => set({ swapSeconds: swapSeconds == null ? null : Math.max(1, Math.round(swapSeconds)) }),
+      // Always at least one person, at most four (the main model's limit).
+      setSwapFigures: (figures) => set({ swapFigures: (figures.length ? figures : ONE_FIGURE).slice(0, 4) }),
+      setSwapConsent: (swapConsent) => set({ swapConsent }),
+      setSwapFrame: (swapFrame) => set({ swapFrame }),
+      setSwapBuilt: (swapBuilt) => set({ swapBuilt }),
+      setHubStep: (hubStep) => set({ hubStep }),
+      setHubCharacter: (hubCharacter) => set({ hubCharacter }),
+      openCharacterHub: () => {
+        const s = get()
+        if (isHubIntent(s.intent())) return
+        // The intent stays one of the area's own, so the gallery, the meter
+        // and the opSlot see a known tab while step 1 or 2 shows.
+        const last = s.hubLastIntent
+        s.setIntent(last ?? 'character')
+        set({ hubStep: last ? 'panel' : 'who' })
+      },
+      setSound: (sound) => set({ sound }),
+      setLipsyncModel: (lipsyncModel) => set({ lipsyncModel }),
+      setLipsyncCredits: (lipsyncCredits) => set({ lipsyncCredits }),
       bumpCharactersVersion: () => set((s) => ({ charactersVersion: s.charactersVersion + 1 })),
       setLoraListKey: (names) => set((s) => {
         const key = names.join('\n')

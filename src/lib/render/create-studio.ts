@@ -50,6 +50,7 @@ const INTENT_ROLE: Partial<Record<StudioIntent, StepRole[]>> = {
   music: ['music'],
   extend: ['extend'],
   motion: ['motion'],
+  swap_character: ['swap-character'],
   video_upscale: ['upscale'],
   // 3D: a video sends its frames to a model that takes several sides first,
   // and to a one-picture model with its best frame where none is there.
@@ -175,8 +176,10 @@ export function createStudioCost(
   promptLength = 100,
   seconds?: number,
   imageCount = 1,
+  /** Photos billed one by one (price.perReference, Swap Character). */
+  referenceCount = 0,
 ): number {
-  return studioPreviewCredits(model, options, seconds, imageCount, promptLength) ?? studioBaseCredits(model)
+  return studioPreviewCredits(model, options, seconds, imageCount, promptLength, referenceCount) ?? studioBaseCredits(model)
 }
 
 /** What a control of this model shows: the customer's own value, else the

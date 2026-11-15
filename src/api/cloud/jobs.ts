@@ -70,6 +70,24 @@ export interface CloudJobParams {
   trigger_word?: string // character training
   name?: string // character shelf label
   loras?: { id: string; scale?: number }[] // OWN user_loras rows — server resolves to URLs
+  // Swap Character (07.11.2026). The server cuts the video to the first
+  // clip_seconds seconds (1 to 120), runs and bills exactly that. The models
+  // of SWAP_CONSENT_MODELS (lib/render/swap.ts) need swap_consent true: the
+  // customer confirmed the rights and the consent of the people shown.
+  clip_seconds?: number
+  swap_consent?: boolean
+  /** Swap Character on SCAIL 2 or Kling (14.11.2026): 'frame' builds the first
+   *  frame with the new people (Nano Banana Pro), 'video' runs the clip on it.
+   *  Either step needs swap_consent on the server. 'lipsync' is the step
+   *  after the video when the customer picked a new voice (lib/render/sound.ts). */
+  swap_step?: 'frame' | 'video' | 'lipsync'
+  /** Swap and Motion (14.11.2026): the sound of the result. On original the
+   *  worker lays the clip's sound under a result without one; none removes
+   *  it. */
+  sound?: 'original' | 'none'
+  /** The lip sync step after Swap or Motion: the server cuts a longer voice
+   *  to the length of the clip. */
+  fit_audio?: true
 }
 
 export interface CloudJobSubmit {
@@ -92,6 +110,9 @@ export interface CloudJob {
   started_at?: string | null
   completed_at: string | null
   error: string | null
+  /** A filtered model refused (one click swap): the open model the server
+   *  names as the way out. Only on failed jobs, only on newer servers. */
+  fallback_model?: string | null
   // Die Anzeigefelder, die die Listenroute (GET /api/jobs) aus den params
   // herausreicht, damit eine neu geladene Galerie den Namen des Laufs
   // wiederherstellt statt jedesmal leer anzufangen.
@@ -122,7 +143,7 @@ export interface CloudMe {
   }
   /** What the server has released for this account. `createChat`: Create in
    *  chat. Absent on an older server and for a signed out account = nothing. */
-  features?: { createChat?: boolean }
+  features?: { createChat?: boolean; characterHub?: boolean }
 }
 
 /** Stage an input; returns the render-inputs storage path. Roles: 'source' /

@@ -39,6 +39,8 @@ export const TOOL_ICON: Record<ToolId, IconType> = {
   extend: FastForward,
   motion: PersonStanding,
   '3d': Box,
+  // Not a phone tool (tools.ts TOOLS leaves it out); the type names every intent.
+  swap_character: RefreshCw,
 }
 
 /** The small round X on a thumbnail. Its target is 44 px, the mark is 22 px. */

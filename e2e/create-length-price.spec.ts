@@ -1,6 +1,7 @@
 import { test, expect, type Page } from '@playwright/test'
 import { tauriMockInit, DEFAULT_ASSISTANT_REPLY, DEFAULT_MODEL_NAME } from './support/tauri-mock'
 import { routeCloud, seedOnboardingDone, signInViaGate, cloudSwitch } from './support/cloud-mock'
+import { openCharacterAction } from './support/character-hub'
 
 /**
  * Billing by length in the Create tab (3.0.6).
@@ -25,7 +26,7 @@ async function boot(page: Page, lengthCatalog: boolean) {
   await signInViaGate(page)
   await expect(cloudSwitch(page)).toBeChecked({ timeout: 20_000 })
   await page.getByRole('button', { name: /^Create$/ }).click()
-  await page.getByRole('radio', { name: /Talking Character/i }).click()
+  await openCharacterAction(page, 'Talking Character')
   await page.getByRole('button', { name: /Add voice/ }).click()
   await page.getByRole('button', { name: /Generate a voice/ }).click()
 }

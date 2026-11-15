@@ -16,6 +16,13 @@ export interface CloudLora {
   /** Which generation endpoints accept it: 'flux' | 'z-image' | 'qwen-image' | 'ltx-2'. */
   base_family: string
   created_at: string
+  /** Trained here or uploaded as a file (server 3.0.7). Optional: older servers. */
+  source?: 'trained' | 'uploaded'
+  /** The last picture made with it, signed for an hour, or null. */
+  preview_url?: string | null
+  /** Its base look (B42), signed for an hour, or null. The Character area
+   *  shows it as the picture of the character. */
+  base_url?: string | null
 }
 
 export async function listLoras(): Promise<CloudLora[]> {

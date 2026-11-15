@@ -59,6 +59,10 @@ const INTENT_COPY: Record<Extract<CloudTeaserTarget, { surface: 'intent' }>['int
     title: 'Motion Control',
     line: 'Your character copies the moves from any dance or pose video.',
   },
+  swap_character: {
+    title: 'Swap Character',
+    line: 'Put a new person into a real video. Same moves, same scene, same sound.',
+  },
 }
 
 /**

@@ -20,6 +20,8 @@ interface Props {
   ariaLabel?: string
   type?: 'button' | 'submit'
   active?: boolean
+  /** Extra classes (the phone's pill form of Create in the Character area). */
+  className?: string
 }
 
 const SIZE_H: Record<Size, string> = {
@@ -49,7 +51,7 @@ const VARIANT: Record<Variant, string> = {
 export function Button({
   children, onClick, variant = 'secondary', size = 'md', icon: Icon,
   iconOnly = false, loading = false, disabled = false, fullWidth = false,
-  title, ariaLabel, type = 'button', active = false,
+  title, ariaLabel, type = 'button', active = false, className,
 }: Props) {
   const isDisabled = disabled || loading
   // Der Druck kommt aus der Hausregel in index.css (`:active { scale: .97 }`),
@@ -73,6 +75,7 @@ export function Button({
         active && variant === 'ghost' && 'bg-white/10 text-white',
         fullWidth && 'w-full',
         isDisabled && 'opacity-40 pointer-events-none',
+        className,
       )}
     >
       {loading ? <Loader2 size={ICON_SIZE[size]} className="animate-spin" />

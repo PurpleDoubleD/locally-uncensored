@@ -1,11 +1,12 @@
 import {
   Image as ImageIcon, Wand2, Scissors, Video, Film, Maximize2, Eraser,
-  UserRound, Mic, Music, FastForward, PersonStanding, Box,
+  UserRound, Mic, Music, FastForward, PersonStanding, Box, Replace,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import type { CreateBackend, CreateIntent, ThreeDWay } from '../../../stores/createStore'
 import { THREE_D_TEXT } from '../../../lib/three/three-d-text'
 import { MUSIC_PLACEHOLDER } from '../../../lib/render/music-ui'
+import { isHubIntent } from '../../../lib/create/character-hub'
 
 export interface IntentMeta {
   id: CreateIntent
@@ -180,6 +181,19 @@ export const INTENTS: IntentMeta[] = [
     examples: [],
   },
   {
+    // Swap Character (07.11.2026, port of the web's C52): a real video keeps
+    // its motion, camera, sound and scene, and its people become the people
+    // of the customer's photos. Studio models only (lib/render/swap.ts), no
+    // local lane: in local mode it is a locked cloud pill like Erase. The
+    // pill says "Swap" (the web's desktop word), the full name stands in
+    // title and aria-label; the bar has no room for two more words.
+    id: 'swap_character', label: 'Swap Character', short: 'Swap', icon: Replace,
+    placeholder: '',
+    needsSource: false, needsPrompt: false, allowsMask: false, isVideo: true,
+    cloudOnly: true,
+    examples: [],
+  },
+  {
     // 3.1.0 (C3D-PLAN): a 3D model from words, a picture or a video. The
     // thirteenth pill, at the far right, so no tool moves. Which inputs it
     // takes depends on the way (intentNeedsSource / intentTakesPrompt), so
@@ -346,4 +360,38 @@ export function isIntentAvailable(id: CreateIntent, backend: CreateBackend, mlxH
   const meta = INTENT_MAP[id]
   return visibleIntents(backend, mlxHost, true, mlxAnimate, mlxEdit, mlxUpscale, mlxMusic, mlxMotion, mlxTalk).includes(meta)
     && !isIntentLocked(meta, backend, mlxHost, mlxAnimate, mlxEdit, mlxUpscale, mlxMusic, mlxMotion, mlxTalk)
+}
+
+/**
+ * The pill of the Character area (3.1.0 part B): one pill for Character
+ * Studio, Talking Character, Motion Control and Swap Character. It carries the
+ * id of the first of them, so the bar keeps its order (after Animate).
+ */
+export const HUB_PILL: IntentMeta = {
+  ...INTENT_MAP.character,
+  label: 'Character',
+  short: 'Character',
+}
+
+export interface PillEntry {
+  meta: IntentMeta
+  /** The pill of the Character area. */
+  hub: boolean
+}
+
+/**
+ * The pills of the bar: the visible intents, with the four intents of the
+ * Character area folded into one pill where the first of them stood. The
+ * area itself shows which of its actions are local, locked or cloud.
+ */
+export function pillEntries(visible: readonly IntentMeta[]): PillEntry[] {
+  const out: PillEntry[] = []
+  let hubDone = false
+  for (const meta of visible) {
+    if (!isHubIntent(meta.id)) { out.push({ meta, hub: false }); continue }
+    if (hubDone) continue
+    hubDone = true
+    out.push({ meta: HUB_PILL, hub: true })
+  }
+  return out
 }

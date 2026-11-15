@@ -28,6 +28,9 @@ export interface CloudCatalog {
    *  server that does not send it leaves the client's own limits in place
    *  (lib/upload-limits.ts). */
   upload_limits?: { image?: number; audio?: number; video?: number }
+  /** Only for an account the server released the Character area for
+   *  (CHARACTER_HUB): `{ characterHub: true }`. Missing means no. */
+  features?: { characterHub?: boolean }
 }
 
 /** A catalog entry as the server sends it. `native_label` is the app's own

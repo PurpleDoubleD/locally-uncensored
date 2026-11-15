@@ -28,6 +28,13 @@ interface Allowed {
 
 const ALLOWED: readonly Allowed[] = [
   {
+    reason: 'The Swap action of the desktop Character area while the server has not released it for the account (CHARACTER_HUB, 14.11.2026). David chose the words. The phone has no Swap tool; the files only come along with the shared store and submit.',
+    at: {
+      'lib/create/character-hub.ts': ['Coming soon to your LU Cloud'],
+      'hooks/useCloudCreate.ts': ['Swap Character is coming soon to your LU Cloud.'],
+    },
+  },
+  {
     reason: 'A state of the user\'s own things: nothing made, saved, sent, chosen or measured so far. "yet" says what the user can still do, not what LU will build later.',
     at: {
       'lib/request-usage.ts': ['No answer in this chat yet, so there is no token count to show.'],

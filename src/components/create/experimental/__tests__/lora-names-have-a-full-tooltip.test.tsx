@@ -4,7 +4,7 @@
  * that start alike could not be told apart. The stack in the advanced
  * settings shows the whole name (e2e/lora-names-read-in-full.spec.ts). The two
  * places that keep one line carry the whole name as their tooltip: the style
- * LoRA field of a Studio model and the character chip.
+ * LoRA field of a Studio model and the character row of the Character area.
  *
  * Run: npx vitest run src/components/create/experimental/__tests__/lora-names-have-a-full-tooltip.test.tsx
  */
@@ -24,8 +24,9 @@ vi.mock('../../../../api/cloud/loras', () => ({
 }))
 
 import { SchemaControl } from '../SchemaControl'
-import { SpecialControls } from '../SpecialIntentControls'
-import { useCreateStore } from '../../../../stores/createStore'
+import { HubWho } from '../hub/CharacterHub'
+import { hubFromCloud } from '../../../../lib/create/character-hub'
+import { listLoras } from '../../../../api/cloud/loras'
 
 afterEach(cleanup)
 
@@ -36,10 +37,12 @@ describe('LoRA names that keep one line', () => {
     expect(screen.getByLabelText('LoRA 1').getAttribute('title')).toBe(LONG_B)
   })
 
-  it('a character chip names the character in full as its tooltip, next to the trigger word', async () => {
-    useCreateStore.setState({ backend: 'cloud', characterTab: 'use' })
-    render(<SpecialControls intent="character" />)
-    const chip = await screen.findByRole('button', { name: /Grace in the red coat/ })
-    expect(chip.getAttribute('title')).toBe('Grace in the red coat, studio set, second training run, trigger word: gracechar')
+  it('a character row names the character in full as its tooltip, next to the trigger word', async () => {
+    // Since 3.1.0 part B the characters are the rows of step 1 of the
+    // Character area; a long name is cut there as it was on the chip.
+    const list = (await listLoras()).map(hubFromCloud)
+    render(<HubWho list={list} loading={false} onOpenGallery={() => {}} />)
+    const row = await screen.findByRole('button', { name: /Grace in the red coat/ })
+    expect(row.getAttribute('title')).toBe('Grace in the red coat, studio set, second training run, trigger word: gracechar')
   })
 })

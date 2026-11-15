@@ -9,6 +9,7 @@ import { useCreateExp } from './CreateContext'
 import { INTENT_MAP, intentNeedsSource } from './intents'
 import { ThreeDSetupCard, ThreeDVideoHint, useThreeDLocal } from './ThreeDStage'
 import { THREE_D_TEXT } from '../../../lib/three/three-d-text'
+import { SwapStage } from './SwapStage'
 import { editNeedsMask, defaultCloudModel, modelForOp } from '../../../stores/cloudCatalogStore'
 import { stageShowsSetupCard, laneModelCount } from './stageGate'
 import { needsMaskFor } from './maskGate'
@@ -53,6 +54,11 @@ import { ComfyAutostartToggle } from './ComfyAutostartToggle'
 import { stageHowtoTopic } from '../../../lib/howto'
 
 interface Props {
+  /** The Character area (sketches v2): the stage shows only what it has to
+   *  show (a run, a result, a setup card, the training set), flat on the
+   *  surface, and nothing at all while it would be empty; the inputs stand
+   *  in the area itself. */
+  hub?: boolean
   displayed?: GalleryItem
   onOpenMaskEditor: () => void
   /** Adopt a finished result as the edit source, THEN open the mask editor —
@@ -73,7 +79,7 @@ interface Props {
   comfyStarting?: boolean
 }
 
-export function Stage({ displayed, onOpenMaskEditor, onEditResult, onAnimateResult, onFullscreen, onShowPrompt, onSaveCharacter, comfyStarting }: Props) {
+export function Stage({ hub = false, displayed, onOpenMaskEditor, onEditResult, onAnimateResult, onFullscreen, onShowPrompt, onSaveCharacter, comfyStarting }: Props) {
   const intent = useCreateStore((s) => s.intent())
   const meta = INTENT_MAP[intent]
   const threeDWay = useCreateStore((s) => s.threeDWay)
@@ -206,6 +212,10 @@ export function Stage({ displayed, onOpenMaskEditor, onEditResult, onAnimateResu
     body = <SourcePreview onOpenMaskEditor={onOpenMaskEditor} />
     howtoAtFoot = true
     howtoOnlyWide = true
+  } else if (intent === 'swap_character' && !(displayed && displayed.intent === 'swap_character')) {
+    // Swap Character: original + new people -> result, until a swap is there.
+    // In the Character area the panel shows the video and its people.
+    body = hub ? null : <SwapStage />
   } else if (displayed) {
     body = (
       <ResultView
@@ -220,6 +230,9 @@ export function Stage({ displayed, onOpenMaskEditor, onEditResult, onAnimateResu
         side={needsSource && source ? <ResultInputs /> : imageRefSide ? <ImageReferenceStrip /> : undefined}
       />
     )
+  } else if (hub) {
+    // An empty stage has nothing to say in the Character area.
+    body = null
   } else {
     // D-A9/D-W3-7, die zwoelfte Einbindung: hier stand die 512x512-Bitmap des
     // Monogramms unter ihrem zweiten Dateinamen (die `-white`-Fassung ist
@@ -259,6 +272,21 @@ export function Stage({ displayed, onOpenMaskEditor, onEditResult, onAnimateResu
   }
 
   const footLine = howtoAtFoot && !!howtoTopic && !(howtoOnlyWide && stageWidth !== null && stageWidth < FIT_SIDE_FROM)
+
+  if (hub) {
+    if (body === null) return null
+    return (
+      <div
+        ref={stageRef}
+        data-testid="create-stage"
+        className={cn('relative flex w-full flex-col overflow-hidden', characterTrain ? 'min-h-[min(52vh,26rem)]' : 'h-[min(52vh,26rem)]')}
+      >
+        <AnimatePresence mode="wait">
+          <StageLayer key={intent + (isGenerating ? ':gen' : '')}>{body}</StageLayer>
+        </AnimatePresence>
+      </div>
+    )
+  }
 
   return (
     // The viewer canvas: ONE fixed, centred frame that is identical on every tab

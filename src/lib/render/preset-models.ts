@@ -15,6 +15,7 @@ import {
   STUDIO_EDIT_MODELS, studioImageToVideo, studioReferenceVideo, studioTextToVideo,
 } from './studio-roles'
 import type { RenderKind, RenderOp } from './cloud-jobs'
+import { SWAP_MODELS } from './swap'
 
 export type StepRole =
   | 'image' | 'animate' | 'soundtrack' | 'speech' | 'music' | 'talking' | 'presenter'
@@ -23,6 +24,8 @@ export type StepRole =
   | 'video' | 'reference'
   // 3.1.0: 3D from words, from one picture, from several sides.
   | 'mesh-text' | 'mesh-image' | 'mesh-views'
+  // 07.11.2026: Swap Character (lib/render/swap.ts).
+  | 'swap-character'
 
 export interface PresetModel {
   id: string
@@ -46,6 +49,7 @@ const ROLE_OP: Record<StepRole, RenderOp> = {
   edit: 'edit', upscale: 'upscale',
   video: 'generate', reference: 'studio',
   'mesh-text': 'studio', 'mesh-image': 'studio', 'mesh-views': 'studio',
+  'swap-character': 'studio',
 }
 
 /** The staged inputs a NON-studio member consumes, as provider field -> job
@@ -60,6 +64,7 @@ export const ROLE_INPUTS: Record<StepRole, Record<string, string>> = {
   upscale: { video: 'video_path' },
   video: {}, reference: {},
   'mesh-text': {}, 'mesh-image': { image: 'source_path' }, 'mesh-views': { images: 'image_paths' },
+  'swap-character': {},
 }
 
 function studioIds(match: (id: string) => boolean): string[] {
@@ -111,8 +116,11 @@ const ROLE_MEMBERS: Record<StepRole, () => string[]> = {
     'preset-wan-2.2-spicy-extend', 'wan-2.2-spicy-extend',
     'wan-3.0-extend', 'seedance-2.5-extend',
   ],
-  // Movement from a driving clip onto a character image.
-  motion: () => ['scail-2', 'wan-2.2-animate-2', 'steady-dancer', 'p-video-animate', 'dreamactor-v2'],
+  // Movement from a driving clip onto a character image. Kling 3.0 Pro Motion
+  // Control (14.11.2026): the character moves like in the clip, at the highest
+  // resolution of the list. wan-2.2-animate is retired since 24.10.2026
+  // (retired-models.ts), its successor wan-2.2-animate-2 stands here.
+  motion: () => ['scail-2', 'kling-v3-pro-motion-control', 'wan-2.2-animate-2', 'steady-dancer', 'p-video-animate', 'dreamactor-v2'],
   // A clip goes in, the same clip comes back changed. Wan DITTO picks a style
   // from a list, MiniMax H3 follows a sentence.
   restyle: () => ['wan-ditto', 'minimax-h3-video-edit'],
@@ -126,6 +134,10 @@ const ROLE_MEMBERS: Record<StepRole, () => string[]> = {
   'mesh-text': () => studioIds((id) => STUDIO_MODELS[id].kind === '3d' && !Object.keys(STUDIO_MODELS[id].inputs).length),
   'mesh-image': () => studioIds((id) => STUDIO_MODELS[id].kind === '3d' && Object.values(STUDIO_MODELS[id].inputs).includes('source_path')),
   'mesh-views': () => studioIds((id) => STUDIO_MODELS[id].kind === '3d' && Object.values(STUDIO_MODELS[id].inputs).includes('image_paths')),
+  // A real video stays, its people become the customer's (lib/render/swap.ts).
+  // The one role that shares models with another (SCAIL 2 and Kling Motion
+  // Control are Motion, see SWAP_ROLES).
+  'swap-character': () => [...SWAP_MODELS],
 }
 
 /** Classic ids that a studio entry already covers on the same endpoint. The
@@ -330,6 +342,7 @@ const CLASSIC_PROMPT: Record<StepRole, boolean> = {
   talking: false, presenter: false, motion: false, soundtrack: false, duo: false,
   angles: false, upscale: false,
   'mesh-text': true, 'mesh-image': false, 'mesh-views': false,
+  'swap-character': false,
 }
 
 export function rolePrompts(role: StepRole): boolean {
@@ -342,6 +355,10 @@ export function roleHasChoice(role: StepRole, openOnly = false): boolean {
 }
 
 export const ALL_ROLES = Object.keys(ROLE_MEMBERS) as StepRole[]
+
+/** Roles that share models with another role on purpose (as on the web).
+ *  The rule "every studio model in exactly one role" holds for all others. */
+export const SWAP_ROLES: readonly StepRole[] = ['swap-character']
 
 /** The role a model plays. Every studio model belongs to exactly one, which a
  *  contract test holds true; the ad-hoc single-model workspace needs it to

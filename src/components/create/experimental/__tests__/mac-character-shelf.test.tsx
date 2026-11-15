@@ -9,7 +9,7 @@
  * Run: npx vitest run src/components/create/experimental/__tests__/mac-character-shelf.test.tsx
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 
 const io = vi.hoisted(() => ({
   files: [] as string[], comfy: vi.fn(async () => [] as string[]), open: vi.fn(async () => {}),
@@ -26,8 +26,17 @@ vi.mock('../../../../api/mlx-train', async (orig) => ({
   getMacTrainStatus: vi.fn(async () => io.train),
 }))
 vi.mock('../../../../api/comfyui', async (orig) => ({ ...(await orig<typeof import('../../../../api/comfyui')>()), getLoraModels: () => io.comfy() }))
+vi.mock('../../../../api/in-tauri', () => ({ isTauri: () => true }))
 
 import { SpecialControls } from '../SpecialIntentControls'
+import { HubWho } from '../hub/CharacterHub'
+import { openHubAction, useHubCharacters } from '../hub/hubCharacters'
+
+/** Step 1 of the Character area as the app shows it: every source in one list. */
+function Who() {
+  const { list, loading } = useHubCharacters()
+  return <HubWho list={list} loading={loading} onOpenGallery={() => {}} />
+}
 import { useCreateStore } from '../../../../stores/createStore'
 import type { ClassifiedModel } from '../../../../api/comfyui'
 
@@ -52,11 +61,19 @@ afterEach(() => cleanup())
 describe('Character Studio on the Mac', () => {
   it('lists the characters of the Mac LoRA folder, and a pick brings its Z-Image model', async () => {
     arrange('use')
-    render(<SpecialControls intent="character" />)
-    const chip = await screen.findByTitle('Trigger word: davechar')
+    // Step 1 lists the folder's characters (since 3.1.0 part B the rows of
+    // the Character area), Image is the action that runs one.
+    render(<Who />)
+    const row = await screen.findByTitle('davechar, trigger word: davechar')
+    expect(row.textContent).toContain('Local LoRA')
     expect(screen.queryByRole('button', { name: /other-style/ })).toBeNull()
     expect(io.comfy).not.toHaveBeenCalled()
-    fireEvent.click(chip)
+    fireEvent.click(row)
+    const picked = useCreateStore.getState().hubCharacter
+    expect(picked?.key).toBe(`mlx:${CHAR}`)
+    await act(async () => { await openHubAction('image', picked) })
+    cleanup()
+    render(<SpecialControls intent="character" />)
     const s = useCreateStore.getState()
     // A Mac character names the Mac's folder in its id (lib/characters MLX_PREFIX).
     expect(s.selectedCharacter).toMatchObject({ id: `mlx:${CHAR}`, triggerWord: 'davechar' })

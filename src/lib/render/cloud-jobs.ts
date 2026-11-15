@@ -12,7 +12,7 @@
 // too and which therefore cannot name CreateIntent either.
 export type CreateIntentLike =
   | 'image' | 'edit' | 'removebg' | 'video' | 'animate' | 'upscale' | 'eraser'
-  | 'character' | 'lipsync' | 'music' | 'extend' | 'motion' | '3d'
+  | 'character' | 'lipsync' | 'music' | 'extend' | 'motion' | '3d' | 'swap_character'
 
 // '3d' (3.1.0): a GLB model. Cloud 3D runs as op 'studio' only.
 export type RenderKind = 'image' | 'video' | 'audio' | '3d'
@@ -90,6 +90,10 @@ export function intentToJob(intent: CreateIntentLike): { kind: RenderKind; op: R
     case '3d':
       // Every cloud 3D model is a studio model (C3D 2.5): no op of its own.
       return { kind: '3d', op: 'studio' }
+    // Swap Character runs studio models only (op 'studio' at submit). The op
+    // here says which inputs are gathered: a video, as for Motion.
+    case 'swap_character':
+      return { kind: 'video', op: 'motion' }
     default:
       return { kind: 'image', op: 'generate' }
   }

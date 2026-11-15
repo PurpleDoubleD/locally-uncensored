@@ -16,6 +16,14 @@ import { runImageCount } from '../../../lib/render/image-count'
 import { useCloudCatalogStore, cloudModelById, defaultCloudModel, editNeedsMask, modelForOp, runCredits, lengthCredits, lengthPrice } from '../../../stores/cloudCatalogStore'
 import { createRunModel, intentRequiredInputs, isStudioModel, studioIntentOf } from '../../../lib/render/create-studio'
 import { STUDIO_MODELS } from '../../../lib/render/studio-contract'
+import { swapBilledPhotos, swapPricedSeconds, swapShortCredits } from '../../../lib/render/swap'
+import { swapReady } from '../../../lib/create/swap-run'
+import { modelLabel } from '../../../lib/render/preset-models'
+import { SwapLength, SwapPrice, useSwapBar } from './hub/SwapBarParts'
+import { useLocalPick } from './localPick'
+import { swapConfirmedFrame } from '../../../lib/create/swap-frame'
+import { soundApplies, soundInputError } from '../../../lib/render/sound'
+import { useCharacterHubReleased } from '../../../lib/create/character-hub-release'
 import { effectiveVideoDurations, snapToVideoDuration } from '../../../lib/render/video-duration'
 import { mediaSeconds, useStudioPrice } from './useStudioPrice'
 import { getJob } from '../../../api/cloud/jobs'
@@ -50,6 +58,10 @@ import { cn } from '../ui/cn'
 interface Props {
   onOpenAdvanced: () => void
   onOpenWorkflows: () => void
+  /** The bar at the foot of the Character area (sketches v2): only the field
+   *  where the action takes a prompt, and one row with the model, the length,
+   *  the price and Create. The inputs stand in the area above. */
+  hub?: boolean
 }
 
 /** What the disabled Create says while the Stage offers the Mac's setup. */
@@ -69,7 +81,30 @@ const NEGATIVE_FIELD_MAX = 'min(120px, calc(9vh / var(--ui-scale, 1)))'
 /** The prompt field of the Mac's local Edit tab. See the placeholder below. */
 const MAC_EDIT_PLACEHOLDER = 'Describe what to change in this image. Paint a mask to change only that area…'
 
-export function Composer({ onOpenAdvanced, onOpenWorkflows }: Props) {
+/** The window is phone-wide (the Character area's bar takes m310's short form). */
+export function useNarrow(): boolean {
+  const query = '(max-width: 520px)'
+  const [narrow, setNarrow] = useState(() => typeof window !== 'undefined' && !!window.matchMedia?.(query).matches)
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.matchMedia) return
+    const m = window.matchMedia(query)
+    const on = () => setNarrow(m.matches)
+    on()
+    m.addEventListener('change', on)
+    return () => m.removeEventListener('change', on)
+  }, [])
+  return narrow
+}
+
+/** The name of the local model the tab runs, for the phone's summary. */
+function useLocalPickName(): string | null {
+  const { value } = useLocalPick()
+  return value ? value.replace(/\.(safetensors|gguf|ckpt)$/i, '') : null
+}
+
+export function Composer({ onOpenAdvanced, onOpenWorkflows, hub = false }: Props) {
+  const narrow = useNarrow()
+  const [narrowOpen, setNarrowOpen] = useState(false)
   const intent = useCreateStore((s) => s.intent())
   const meta = INTENT_MAP[intent]
   const prompt = useCreateStore((s) => s.prompt)
@@ -108,6 +143,13 @@ export function Composer({ onOpenAdvanced, onOpenWorkflows }: Props) {
   const videoInput = useCreateStore((s) => s.videoInput)
   const extendSource = useCreateStore((s) => s.extendSource)
   const musicDuration = useCreateStore((s) => s.musicDuration)
+  // Swap Character: the people, the chosen length and the consent.
+  const swapFigures = useCreateStore((s) => s.swapFigures)
+  const swapSeconds = useCreateStore((s) => s.swapSeconds)
+  const swapConsent = useCreateStore((s) => s.swapConsent)
+  // SCAIL 2 and Kling: the video starts only on the confirmed first frame,
+  // and only while it fits video, photos and marks.
+  const swapBuilt = useCreateStore((s) => s.swapBuilt)
   const managerNoticeSeen = useWorkflowStore((s) => s.managerNoticeSeen)
   const { generate, cancel, quota, mlxMissing, modelsLoaded } = useCreateExp()
   const imageModels = useCreateStore((s) => s.imageModelList)
@@ -139,7 +181,8 @@ export function Composer({ onOpenAdvanced, onOpenWorkflows }: Props) {
   // 2.5.8 categories with their own composer surfaces + input contracts.
   const special =
     intent === 'character' || intent === 'lipsync' || intent === 'music' ||
-    intent === 'extend' || intent === 'motion'
+    intent === 'extend' || intent === 'motion' || intent === 'swap_character'
+  const swap = intent === 'swap_character'
   const characterUse = intent === 'character' && characterTab === 'use'
   const threeDWay = useCreateStore((s) => s.threeDWay)
   const needsSource = intentNeedsSource(intent, threeDWay)
@@ -194,7 +237,7 @@ export function Composer({ onOpenAdvanced, onOpenWorkflows }: Props) {
   const lengthRate = backend === 'cloud' && !studioPick ? lengthPrice(runModel, intentOp) : undefined
   const mediaUrl =
     intent === 'lipsync' ? (lengthRate?.basis === 'video' ? videoInput?.url : audioInput?.url)
-      : intent === 'motion' ? videoInput?.url
+      : intent === 'motion' || swap ? videoInput?.url
         : intent === 'extend' ? extendSource?.url
           : undefined
   const mediaKind = intent === 'lipsync' && lengthRate?.basis !== 'video' ? ('audio' as const) : ('video' as const)
@@ -245,7 +288,11 @@ export function Composer({ onOpenAdvanced, onOpenWorkflows }: Props) {
   const cloudImageCount = useCreateStore((s) => s.cloudImageCount)
   const extraPhotos = intent === 'edit' || intent === 'animate' ? references.length : 0
   const imageCount = backend === 'cloud' ? runImageCount(intent, cloudImageCount, characterUse) : 1
-  const studioPrice = useStudioPrice(studioPick, cloudStudioOptions, prompt, runSeconds ?? inputSeconds, extraPhotos)
+  // Swap: the chosen length counts, not the whole video, and every photo is
+  // billed on its own (the same seconds as the slider and the server).
+  const priceSeconds = swap && studioPick && inputSeconds !== undefined ? swapPricedSeconds(studioPick, swapSeconds, inputSeconds) : inputSeconds
+  const billedPhotos = swap && studioPick ? swapBilledPhotos(studioPick, swapFigures.length) : 0
+  const studioPrice = useStudioPrice(studioPick, cloudStudioOptions, prompt, runSeconds ?? priceSeconds, extraPhotos, billedPhotos)
   const setCloudStudioCredits = useCreateStore((s) => s.setCloudStudioCredits)
   // Der Preis der gemessenen Laenge, bei einer Stimme der Zeichen des Textes.
   // Er steht im selben Speicher wie ein Studio-Preis, geht als Deckel mit dem
@@ -260,6 +307,15 @@ export function Composer({ onOpenAdvanced, onOpenWorkflows }: Props) {
   // Dieselbe Zahl wie im Zaehler: nach einem 409 steht im Speicher der Preis
   // des Servers, und die Deckungspruefung muss ihn benutzen.
   const cloudStudioCredits = useCreateStore((s) => s.cloudStudioCredits)
+  // New voice with lips (14.11.2026): the second step belongs to the price of
+  // this start; button and cover check count it (lib/render/sound.ts).
+  const sound = useCreateStore((s) => s.sound)
+  const hubReleased = useCharacterHubReleased()
+  const soundOn = soundApplies(intent, backend, hubReleased) ? sound : undefined
+  const lipsyncOn = soundOn === 'lipsync'
+  const lipsyncExtra = useCreateStore((s) => (lipsyncOn ? s.lipsyncCredits ?? 0 : 0))
+  const lipsyncModel = useCreateStore((s) => s.lipsyncModel)
+  const soundProblem = soundInputError(soundOn, swap ? swapFigures.length : 1, backend, !!audioInput || !!voiceFromJob, lipsyncModel)
   const costFallback = quota?.costs[quotaCostKind(runKind)] ?? 0
   // The exact rule the meter chip renders, so the button can never invite a run
   // the chip is already refusing. Credits alone were not enough: a user out of
@@ -277,7 +333,7 @@ export function Composer({ onOpenAdvanced, onOpenWorkflows }: Props) {
           ? (studioPrice?.credits ?? costFallback) + pictureStepCredits(intent, threeDWay, studioPick, prompt)
           : lengthRate
             ? (cloudStudioCredits ?? lengthShown ?? costFallback)
-            : runCredits(intentKind, intentOp, runModel, runSeconds, costFallback, targetResolution)),
+            : runCredits(intentKind, intentOp, runModel, runSeconds, costFallback, targetResolution)) + lipsyncExtra,
         runKind,
         intentOp,
       ).kind === 'ok')
@@ -333,7 +389,14 @@ export function Composer({ onOpenAdvanced, onOpenWorkflows }: Props) {
           ? (backend === 'cloud' ? !!extendSource : hasStart)
           : intent === 'motion'
             ? hasStart && !!videoInput
-            : true
+            : swap
+              // Studio models only: without one in the server's catalogue the
+              // tab says so (SwapControls) and the button stays off.
+              ? !!studioPick && swapReady(studioPick, {
+                hasVideo: !!videoInput, figures: swapFigures, consent: swapConsent,
+                frameJobId: swapConfirmedFrame(swapBuilt, videoInput?.url, swapFigures),
+              })
+              : true
   // A half-installed bundle is pickable long before it is usable: the lane
   // list refills as soon as the diffusion model lands, while the VAE it needs
   // is still coming down. Measured on the box 2026-08-15 at 88 percent of the
@@ -369,6 +432,7 @@ export function Composer({ onOpenAdvanced, onOpenWorkflows }: Props) {
     (!needsSource || hasStart) &&
     (!needsMask || !!mask) &&
     specialReady &&
+    !soundProblem &&
     upscaleReady &&
     creditsOk &&
     !installing
@@ -379,13 +443,39 @@ export function Composer({ onOpenAdvanced, onOpenWorkflows }: Props) {
   const laneCaption = noPromptHint(meta.id, backend, backend === 'local' && isMlxImageHost(), trainKind)
   // The disabled button says which input it waits for (laneHint.ts).
   const missingSource = missingSourceHint({ intent, needsSource, hasSource: hasStart })
+  // The price of a cloud run in the bar of the Character area (Swap has its
+  // own parts, SwapPrice). Local runs cost nothing and show none.
+  const hubCredits = hub && backend === 'cloud'
+    ? ((studioPick ? studioPrice?.credits : (cloudStudioCredits ?? lengthShown)) ?? null) !== null
+      ? (studioPick ? studioPrice!.credits : (cloudStudioCredits ?? lengthShown)!) * imageCount + lipsyncExtra
+      : null
+    : null
+  // The phone's short summary of the bar: model, and the length on Swap.
+  const localPickName = useLocalPickName()
+  const hubModelName = backend === 'cloud' ? modelLabel(runModel) : (localPickName ?? 'Local')
+  const swapBar = useSwapBar(inputSeconds)
+  // Swap without the account switch has nothing to pick or pay; with it, the
+  // length and its price stand once there is a video to measure.
+  const swapSoon = swap && !hubReleased
+  const swapBarShown = swap && backend === 'cloud' && !swapSoon && !!videoInput
+  const hubSummary = swapBarShown ? `${hubModelName} · ${swapBar.value} s` : swapSoon ? 'Swap' : hubModelName
+  // Swap Character names its price on the button (the web's CreateButton):
+  // a paid video run, priced by its length. With a new voice the lip sync
+  // step is in the figure too. On the phone every cloud run of the area
+  // names it (m310's Create pill).
+  const createPrice = swap && backend === 'cloud' && priceSeconds !== undefined && studioPrice
+    ? swapShortCredits(studioPrice.credits + lipsyncExtra)
+    : lipsyncOn && lipsyncExtra > 0 && (studioPrice?.credits ?? cloudStudioCredits ?? lengthShown) != null
+      ? swapShortCredits((studioPrice?.credits ?? cloudStudioCredits ?? lengthShown ?? 0) + lipsyncExtra)
+      : hub && narrow && hubCredits != null ? swapShortCredits(hubCredits) : null
+
 
   return (
     // A stable min-height (bottom-anchored) so the prompt window occupies the
     // same vertical space on every tab — utility modes (no LaneControls / no
     // prompt) don't shrink it. That keeps the viewer + gallery row above it the
     // exact SAME height across all tabs, not just within one.
-    <div className="shrink-0 px-4 pb-4 pt-2 min-h-[192px] flex flex-col justify-end">
+    <div className={cn('shrink-0 flex flex-col justify-end', hub ? 'px-0 pb-3 pt-2' : 'px-4 pb-4 pt-2 min-h-[192px]')}>
       {/* 660, nicht 760: dieselbe Spalte wie im Chat, und dieselbe Rechnung.
           Die 760 waren hier als KOPIE von --lu-measure eingetippt; seit die
           App eine --ui-scale hat, wird die Zahl mitskaliert, 760 ergaebe also
@@ -394,15 +484,23 @@ export function Composer({ onOpenAdvanced, onOpenWorkflows }: Props) {
           Zahl hier doppelt steht statt den Token zu lesen, ist ein eigener
           Befund und hier nicht behoben. */}
       <div className="mx-auto w-full max-w-[660px] space-y-2.5">
-        {special && <SpecialControls intent={intent} />}
+        {special && !hub && <SpecialControls intent={intent} />}
         {intent === '3d' && <ThreeDControls {...threeDControlFacts(backend, studioPick)} studioId={studioPick} pictureFirst={backend === 'local' || isPictureFirstRun(threeDWay, studioPick)} />}
-        {!isUtility && <LaneControls />}
-        <CharacterNote />
-        {inputNote && (
+        {/* Swap Character's options are its own panel above (SpecialControls). */}
+        {!isUtility && !swap && !hub && <LaneControls />}
+        {!hub && <CharacterNote />}
+        {hub && showNoPromptHint && intent === 'character' && characterTab === 'train' && (
+          // The training's one line on what to add (photos or pictures of the
+          // style), as it stood over the prompt window.
+          <p className="hub-dim hub-fs-125 text-center" data-testid="lane-input-note">{laneCaption}</p>
+        )}
+        {inputNote && !hub && (
           <p className="t-body text-gray-500 text-center px-3.5" data-testid="lane-input-note">{laneCaption}</p>
         )}
 
-        <div className="rounded-[var(--radius-panel)] bg-white/[0.03] border border-white/[0.06] focus-within:border-white/15 transition-colors">
+        <div className={hub
+          ? cn('hub-bar transition-colors', narrow && 'rounded-2xl')
+          : 'rounded-[var(--radius-panel)] bg-white/[0.03] border border-white/[0.06] focus-within:border-white/15 transition-colors'}>
           {needPrompt && (
             // The prompt assistant (B43) sits in the field's corner, not in the
             // action bar: there every pixel is the model chip's, whose whole
@@ -487,7 +585,7 @@ export function Composer({ onOpenAdvanced, onOpenWorkflows }: Props) {
               Zustand der Maske selbst beschreibt, sonst stuende dort ein
               Text, der beim Radiergummi nie zutrifft ("remove the
               background"). */}
-          {showNoPromptHint && !needsMask && !inputNote && (
+          {showNoPromptHint && !needsMask && !inputNote && !hub && (
             <div className="px-3.5 py-3 t-body text-gray-500">
               {laneCaption}
             </div>
@@ -499,7 +597,31 @@ export function Composer({ onOpenAdvanced, onOpenWorkflows }: Props) {
           )}
 
           {/* Action bar */}
-          <div className="flex items-center gap-1.5 px-2.5 py-2 border-t border-white/[0.05]">
+          {hub && narrow && narrowOpen && (
+            // The phone: the choices behind the short summary (m310's
+            // pattern; the sheet from below is theirs to bring, until then
+            // they open here, above the row).
+            <div className={cn('hub-line flex flex-wrap items-center gap-2 px-2.5 py-2', needPrompt && 'border-t')} data-hub-bar-options>
+              {!swapSoon && <ModelChip />}
+              {swapBarShown && <SwapLength videoSeconds={inputSeconds} disabled={isGenerating} />}
+              {swapBarShown && <SwapPrice videoSeconds={inputSeconds} />}
+            </div>
+          )}
+          <div className={hub
+            ? cn('flex items-center gap-1.5 pl-2.5 pr-1.5', narrow ? 'min-h-[45px] py-1.5' : 'min-h-[45px] py-[5px]', (needPrompt || (narrow && narrowOpen)) && 'hub-line border-t')
+            : 'flex items-center gap-1.5 px-2.5 py-2 border-t border-white/[0.05]'}>
+            {hub && narrow && (
+              <button
+                type="button"
+                onClick={() => setNarrowOpen(!narrowOpen)}
+                aria-expanded={narrowOpen}
+                className="hub-muted flex min-h-11 min-w-0 flex-1 items-center gap-1.5 text-left hub-fs-13"
+                data-hub-bar-summary
+              >
+                <SlidersHorizontal size={14} className="shrink-0" />
+                <span className="truncate">{hubSummary}</span>
+              </button>
+            )}
             {/* Ein Schalter, der sagt, dass er einer ist. „Neg" war eine
                 Abkuerzung, deren Aufloesung nur im Hover-`title` stand, und
                 der Knopf meldete seinen Zustand an nichts ausser der
@@ -507,7 +629,7 @@ export function Composer({ onOpenAdvanced, onOpenWorkflows }: Props) {
                 also fuer einen Screenreader ein gewoehnlicher Knopf ohne
                 Zustand. Beides steht jetzt da, und `aria-controls` zeigt auf
                 das Feld, das er aufklappt. */}
-            {needPrompt && !optionalPrompt && negSupported && (
+            {needPrompt && !optionalPrompt && negSupported && !(hub && narrow) && (
               <button
                 onClick={toggleNegative}
                 aria-pressed={showNegative}
@@ -519,11 +641,19 @@ export function Composer({ onOpenAdvanced, onOpenWorkflows }: Props) {
                 Negative
               </button>
             )}
-            {needPrompt && <PromptHistory onPick={setPrompt} />}
-            <div className="flex-1" />
+            {needPrompt && !(hub && narrow) && <PromptHistory onPick={setPrompt} />}
+            {hub && !narrow && !isUtility && !swapSoon && <ModelChip />}
+            {hub && !narrow && swapBarShown && <SwapLength videoSeconds={inputSeconds} disabled={isGenerating} />}
+            {!(hub && narrow) && <div className="flex-1" />}
+            {hub && !narrow && swapBarShown && <SwapPrice videoSeconds={inputSeconds} />}
+            {hub && !narrow && !swap && hubCredits != null && (
+              <span className="hub-text mr-1 hub-fs-13 font-medium tabular-nums" data-hub-price title={`${hubCredits.toLocaleString('en-US')} credits`}>
+                {swapShortCredits(hubCredits)}
+              </span>
+            )}
             {/* The backend axis moved to the global header switch (2.5.7) —
                 the Composer just reflects it via the CreditsMeter. */}
-            {backend === 'cloud' && <CreditsMeter />}
+            {backend === 'cloud' && !hub && <CreditsMeter />}
             {/* Portplan Abschnitt 5, Punkt 3: der Server ist die einzige
                 Preiswahrheit fuer ein Studio-Modell. Ist er nicht erreichbar
                 oder zu alt (studio.ts, OLDER_SERVER_MESSAGE), bleibt Create
@@ -586,7 +716,8 @@ export function Composer({ onOpenAdvanced, onOpenWorkflows }: Props) {
                 </div>
               </Tooltip>
             )}
-            {!isUtility && (
+            {!isUtility && hub && <ImageCountChip />}
+            {!isUtility && !hub && (
               <>
                 <CharacterChip />
                 <ModelChip />
@@ -597,12 +728,20 @@ export function Composer({ onOpenAdvanced, onOpenWorkflows }: Props) {
               </>
             )}
             {isGenerating ? (
-              <Button variant="danger" size="md" icon={X} onClick={guardedCancel}>Cancel</Button>
+              <Button variant="danger" size="md" icon={X} onClick={guardedCancel} className={hub && narrow ? 'h-10 rounded-[20px]' : undefined}>Cancel</Button>
             ) : (
               // The span carries the hint: a disabled button takes no pointer,
               // so a title on the button itself would never show.
               <span className="inline-flex" title={macSetupFirst ? MAC_SETUP_FIRST : (missingSource ?? (upscaleReady ? undefined : UPSCALE_MODEL_FIRST))}>
-                <Button variant="primary" size="lg" icon={Sparkles} disabled={!canGenerate} onClick={guardedGenerate}>Create</Button>
+                <Button variant="primary" size={hub ? 'md' : 'lg'} icon={Sparkles} disabled={!canGenerate} onClick={guardedGenerate}
+                  className={hub && narrow ? 'h-10 rounded-[20px] px-4' : undefined}>
+                  {/* Swap Character names its price on the button (the web's
+                      CreateButton): a paid video run, priced by its length. */}
+                  {/* With a new voice the lip sync step is in the figure too. */}
+                  {hub && narrow && createPrice
+                    ? <>Create <span className="hub-fs-125 tabular-nums opacity-70">{createPrice}</span></>
+                    : createPrice ? `Create · ${createPrice}` : 'Create'}
+                </Button>
               </span>
             )}
           </div>
@@ -645,7 +784,7 @@ const LANE_ROW = 'flex items-center flex-wrap justify-center'
 //     submit "bare" (fixed server-side), so the sliders would do nothing
 //   • audio LOCAL (music): steps (Length lives in MusicControls)
 //   • audio CLOUD (music): hidden — bare submit carries only duration + lyrics
-function LaneControls() {
+export function LaneControls() {
   const intent = useCreateStore((s) => s.intent())
   const meta = INTENT_MAP[intent]
   const backend = useCreateStore((s) => s.backend)

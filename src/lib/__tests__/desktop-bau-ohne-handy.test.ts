@@ -80,9 +80,13 @@ describe('only a build that names the phone carries the mobile shell', () => {
     const scripts = (JSON.parse(read('package.json')) as { scripts: Record<string, string> }).scripts
     expect(scripts['dev:mobile']).toBe('VITE_LU_BUILD_TARGET=mobile vite')
     expect(scripts['build:mobile']).toBe('VITE_LU_BUILD_TARGET=mobile vite build')
-    // The desktop scripts are untouched.
+    // The desktop scripts name no phone. Before Vite they only copy the Wasm
+    // files of the face detection out of node_modules (head crop of the swap
+    // photos, scripts/copy-face-assets.mjs), nothing else.
     expect(scripts.dev).not.toContain('VITE_LU_BUILD_TARGET')
-    expect(scripts.build).toBe('vite build')
+    expect(scripts.build).not.toContain('VITE_LU_BUILD_TARGET')
+    expect(scripts.dev).toBe('node scripts/copy-face-assets.mjs && vite')
+    expect(scripts.build).toBe('node scripts/copy-face-assets.mjs && vite build')
     const playwright = read('playwright.config.ts')
     expect(playwright).toContain("env: { VITE_LU_BUILD_TARGET: 'mobile' }")
     expect(playwright).toContain('baseURL: mobileOrigin')

@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test'
 import { tauriMockInit, DEFAULT_ASSISTANT_REPLY, DEFAULT_MODEL_NAME } from './support/tauri-mock'
 import { seedOnboardingDone } from './support/cloud-mock'
+import { openCharacterAction, openCharacterTraining } from './support/character-hub'
 
 /**
  * GH #210 (31.10.2026, Linux, 3.0.8): on Train new the model chip still listed
@@ -21,14 +22,13 @@ test('Windows, Train new: the chip says local training uses Z-Image, Use charact
   })
   await page.goto('/')
   await page.getByRole('button', { name: /^Create$/ }).click()
-  await page.getByRole('radio', { name: 'Character Studio', exact: true }).click()
-  await page.getByRole('radio', { name: 'Train new' }).click()
+  await openCharacterTraining(page)
 
   const chip = page.getByTestId('local-train-base')
   await expect(chip).toHaveText('Local training uses Z-Image')
   await expect(chip).toHaveAttribute('title', /Training for other models is in LU Cloud/)
   if (SHOTS) await page.screenshot({ path: `${SHOTS}/p8-b210-1-train-chip.png` })
 
-  await page.getByRole('radio', { name: 'Use character' }).click()
+  await openCharacterAction(page, 'Character Studio')
   await expect(page.getByTestId('local-train-base')).toHaveCount(0)
 })

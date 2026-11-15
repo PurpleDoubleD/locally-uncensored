@@ -107,7 +107,9 @@ describe('intent gating on a local MLX Mac (no ComfyUI)', () => {
   it('the hosted-only tools AND the 2.5.8 lanes become cloud teasers', () => {
     // Same locked pill + ", runs on LU Cloud" label the 2.6.0 bar already
     // uses — visible, honest, and it opens the teaser sheet on tap.
-    expect(teasers('local', true)).toEqual(['upscale', 'eraser', 'lipsync', 'music', 'extend', 'motion'])
+    // Swap Character (07.11.2026) is hosted-only like Erase, so it is a teaser
+    // here too.
+    expect(teasers('local', true)).toEqual(['upscale', 'eraser', 'lipsync', 'music', 'extend', 'motion', 'swap_character'])
   })
 
   it('every Mac teaser has a cloud endpoint to teased about', () => {

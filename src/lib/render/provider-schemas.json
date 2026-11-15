@@ -13601,5 +13601,129 @@
       "export_format",
       "shading"
     ]
+  },
+  "base/openjutsu/character-swap": {
+    "additionalProperties": false,
+    "properties": {
+      "video": {
+        "type": "string",
+        "description": "URL of the source video. The people in it are replaced by your characters; the scene, motion and original audio are kept. Use a single shot with a person in the first frame. The output follows the video's length, up to 15 seconds."
+      },
+      "images": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "minItems": 1,
+        "maxItems": 4,
+        "description": "URLs of the character pictures, one per person to replace (up to 4). With one picture and no roles, the most prominent person is replaced. With several, or with roles, only the people you describe are replaced and everyone else stays as filmed."
+      },
+      "roles": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "maxItems": 4,
+        "description": "Optional. One short description per picture, in the same order, saying who it replaces, for example \"the woman in black on the left\"."
+      },
+      "resolution": {
+        "type": "string",
+        "enum": [
+          "480p",
+          "540p",
+          "768p",
+          "1080p"
+        ],
+        "default": "768p",
+        "x-ui-component": "select",
+        "description": "Output resolution. The price per second rises with it."
+      },
+      "seed": {
+        "type": "integer",
+        "description": "The random seed to use for the generation. A negative value means a random seed will be used."
+      }
+    },
+    "required": [
+      "video",
+      "images"
+    ],
+    "type": "object",
+    "x-order-properties": [
+      "video",
+      "images",
+      "roles",
+      "resolution",
+      "seed"
+    ]
+  },
+  "kwaivgi/kling-v3.0-pro/motion-control": {
+    "additionalProperties": false,
+    "properties": {
+      "character_orientation": {
+        "default": "video",
+        "description": "Generate the orientation of the characters in the video, which can be selected to match the image or the video.",
+        "enum": [
+          "image",
+          "video"
+        ],
+        "type": "string",
+        "x-ui-component": "select"
+      },
+      "element_list": {
+        "description": "Element reference list.",
+        "items": {
+          "properties": {
+            "element_id": {
+              "description": "Element ID returned by kwaivgi/kling-elements or kwaivgi/kling-elements-advanced.",
+              "type": "string"
+            }
+          },
+          "type": "object",
+          "x-order-properties": [
+            "element_id"
+          ]
+        },
+        "maxItems": 3,
+        "type": "array",
+        "x-ui-component": "array"
+      },
+      "image": {
+        "description": "Supported image formats:.jpg /.jpeg /.png The size of the image file should not exceed 10MB, the width and height of the image should be no less than 300px, and the aspect ratio of the image should be between 1:2.5 and 2.5:1",
+        "type": "string"
+      },
+      "keep_original_sound": {
+        "default": true,
+        "description": "Whether to retain the original video sound",
+        "type": "boolean"
+      },
+      "negative_prompt": {
+        "description": "The negative prompt for the generation.",
+        "type": "string"
+      },
+      "prompt": {
+        "description": "The positive prompt for the generation.",
+        "type": "string"
+      },
+      "video": {
+        "description": "The motion reference video. Supported formats: .mp4/.mov, up to 100MB, width and height between 340px and 3850px. Duration 3-30 seconds when character_orientation is \"video\", 3-10 seconds when it is \"image\"; longer videos are trimmed. The generated video length follows the reference video.",
+        "type": "string",
+        "x-hint": "When character_orientation is \u201dvideo\u201c: maximum 30 seconds,When character_orientation is \u201cimage\u201d: maximum 10 seconds."
+      }
+    },
+    "required": [
+      "image",
+      "video"
+    ],
+    "type": "object",
+    "x-order-properties": [
+      "image",
+      "video",
+      "element_list",
+      "character_orientation",
+      "prompt",
+      "negative_prompt",
+      "keep_original_sound"
+    ]
   }
 }

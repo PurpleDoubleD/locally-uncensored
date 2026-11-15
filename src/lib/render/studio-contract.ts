@@ -3,7 +3,7 @@ import definitions from './studio-models.json'
 import schemas from './provider-schemas.json'
 import endpoints from './provider-endpoints.json'
 import { isRetiredMediaModel } from './retired-models'
-export type Schema = { type?: string; properties?: Record<string, Schema>; required?: string[]; enum?: unknown[]; default?: unknown; minimum?: number; maximum?: number; minItems?: number; maxItems?: number; items?: Schema; description?: string; disabled?: boolean; format?: string; 'x-lu-views'?: string[] }
+export type Schema = { type?: string; properties?: Record<string, Schema>; required?: string[]; enum?: unknown[]; default?: unknown; minimum?: number; maximum?: number; minItems?: number; maxItems?: number; maxLength?: number; items?: Schema; description?: string; disabled?: boolean; format?: string; 'x-lu-views'?: string[] }
 // Stufe und Herkunft jedes Cloud-Modells (02.10.2026, Entscheid des Inhabers).
 // `tier` ordnet die Waehler: 'best' steht oben, 'older' gesammelt unten.
 // `weights` sagt, ob genau diese Version offene Gewichte hat ('open'), nur ihre
@@ -25,7 +25,11 @@ export interface StudioModel {
   // auf Sekunden, `blockSeconds` bildet einen angefangenen Block ab (ElevenLabs
   // rechnet je angefangene Minute), `minSeconds` die Mindestlaenge einer
   // gemessenen Eingabe. Alle vier sind an POST /model/price gemessen.
-  price: { mode: string; rates: Record<string, number>; maxSeconds?: number; extraImage?: number
+  // `perReference` (wie im Web, 03.11.2026): jedes Bild der Bilderliste kostet
+  // extra, auch das erste, weil das Video die Vorlage ist und kein Bild
+  // (Swap Character: 0,02 $ je Person). Gezaehlt werden die Bilder, die der
+  // Lauf wirklich schickt.
+  price: { mode: string; rates: Record<string, number>; maxSeconds?: number; extraImage?: number; perReference?: number
     resolutionField?: string; durationField?: string; unitDivisor?: number; blockSeconds?: number; minSeconds?: number
     perUnitField?: string
     // `qualityField` (29.10.2026, GPT Image 2, web catalogue): the price hangs
@@ -139,7 +143,7 @@ function fitOption(key: string, value: unknown, schema: Schema, model: StudioMod
 function validate(value: unknown, schema: Schema, name: string): void {
   if(name==='size'&&!schema.enum&&!validSize(value,schema))throw new Error('Size must be width*height in pixels, each side 256 to 4096')
   if (schema.enum && !schema.enum.includes(value)) throw new Error(`Choose a supported ${name}`)
-  if (schema.type === 'string' && (typeof value !== 'string' || value.length > 4000)) throw new Error(`Invalid ${name}`)
+  if (schema.type === 'string' && (typeof value !== 'string' || value.length > (schema.maxLength ?? 4000))) throw new Error(`Invalid ${name}`)
   if (schema.type === 'boolean' && typeof value !== 'boolean') throw new Error(`Invalid ${name}`)
   if (schema.type === 'number' || schema.type === 'integer') {
     if (typeof value !== 'number' || !Number.isFinite(value) || (schema.type === 'integer' && !Number.isInteger(value)) ||
@@ -179,7 +183,7 @@ export function studioOptions(id: string, prompt: string, raw: unknown, checkPro
   for (const k of schema.required ?? []) if (!m.inputs[k] && k !== promptField && options[k] === undefined) throw new Error(`Missing ${k}`)
   return options
 }
-export function studioCredits(id: string, options: Record<string,unknown>, measuredSeconds?: number, imageCount = 1, promptLength = 100): number {
+export function studioCredits(id: string, options: Record<string,unknown>, measuredSeconds?: number, imageCount = 1, promptLength = 100, referenceCount = 0): number {
   const m = STUDIO_MODELS_WITH_RETIRED[id]; if (!m) throw new Error('Unknown studio model')
   const resolution = String(options[m.price.resolutionField ?? 'resolution'] ?? 'default')
   const rate = m.price.rates[m.price.qualityField ? `${resolution}/${String(options[m.price.qualityField])}` : resolution]
@@ -210,7 +214,7 @@ export function studioCredits(id: string, options: Record<string,unknown>, measu
   // Ein abgeschaltetes Feld (num_images) fehlt in den Optionen: der Anbieter nimmt dann seinen Standard 1.
   const units = m.price.perUnitField ? Number(options[m.price.perUnitField] ?? 1) : 1
   if (!Number.isFinite(units) || units <= 0) throw new Error('Invalid size')
-  return Math.ceil((rate * seconds * units + (m.price.extraImage ?? 0) * Math.max(0,imageCount-1) + (imageCount > 1 ? m.price.extraViews ?? 0 : 0)) * 100000 - 1e-8)
+  return Math.ceil((rate * seconds * units + (m.price.extraImage ?? 0) * Math.max(0,imageCount-1) + (imageCount > 1 ? m.price.extraViews ?? 0 : 0) + (m.price.perReference ?? 0) * referenceCount) * 100000 - 1e-8)
 }
 export function studioBaseCredits(id: string): number {
   const schema = studioSchema(id), m = STUDIO_MODELS_WITH_RETIRED[id]
@@ -221,6 +225,6 @@ export function studioBaseCredits(id: string): number {
   return studioCredits(id,options,5)
 }
 
-export function studioPreviewCredits(id: string, raw: Record<string,unknown>, seconds?: number, imageCount = 1, promptLength = 100): number | null {
-  try { return studioCredits(id,studioOptions(id,'',raw,false),seconds,imageCount,promptLength) } catch { return null }
+export function studioPreviewCredits(id: string, raw: Record<string,unknown>, seconds?: number, imageCount = 1, promptLength = 100, referenceCount = 0): number | null {
+  try { return studioCredits(id,studioOptions(id,'',raw,false),seconds,imageCount,promptLength,referenceCount) } catch { return null }
 }

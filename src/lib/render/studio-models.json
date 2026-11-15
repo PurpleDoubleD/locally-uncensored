@@ -191,6 +191,83 @@
     },
     "baselineUsd": 0.2
   },
+  "kling-v3-pro-motion-control": {
+    "label": "Kling 3.0 Pro \u2022 Motion Control",
+    "endpoint": "kwaivgi/kling-v3.0-pro/motion-control",
+    "kind": "video",
+    "adult": false,
+    "tier": "best",
+    "weights": "closed",
+    "price": {
+      "mode": "input",
+      "rates": {
+        "default": 0.168
+      },
+      "maxSeconds": 30,
+      "minSeconds": 3
+    },
+    "inputs": {
+      "image": "source_path",
+      "video": "video_path"
+    },
+    "defaults": {
+      "character_orientation": "video",
+      "keep_original_sound": true
+    },
+    "baselineUsd": 0.84
+  },
+  "openjutsu-character-swap": {
+    "label": "OpenJutsu \u2022 Character Swap",
+    "endpoint": "base/openjutsu/character-swap",
+    "kind": "video",
+    "adult": false,
+    "tier": "best",
+    "weights": "closed",
+    "price": {
+      "mode": "input",
+      "rates": {
+        "480p": 0.15,
+        "540p": 0.17,
+        "768p": 0.2,
+        "1080p": 0.4
+      },
+      "maxSeconds": 15,
+      "minSeconds": 3,
+      "perReference": 0.02
+    },
+    "inputs": {
+      "video": "video_path",
+      "images": "image_paths"
+    },
+    "defaults": {
+      "resolution": "768p"
+    },
+    "baselineUsd": 1.02
+  },
+  "wan-2.2-animate-replace": {
+    "label": "Wan 2.2 Animate \u2022 Replace",
+    "endpoint": "base/wan-2.2/animate",
+    "kind": "video",
+    "adult": false,
+    "tier": "standard",
+    "weights": "open",
+    "price": {
+      "mode": "input",
+      "rates": {
+        "480p": 0.04,
+        "720p": 0.08
+      },
+      "maxSeconds": 120
+    },
+    "inputs": {
+      "image": "source_path",
+      "video": "video_path"
+    },
+    "defaults": {
+      "mode": "replace"
+    },
+    "baselineUsd": 0.2
+  },
   "wan-ditto": {
     "label": "Wan DITTO \u2022 Video Restyle",
     "endpoint": "base/wan-2.1/ditto",
@@ -1275,10 +1352,12 @@
         "768p": 0.2,
         "1080p": 0.4
       },
-      "maxSeconds": 15
+      "maxSeconds": 15,
+      "perReference": 0.02
     },
     "inputs": {
-      "video": "video_path"
+      "video": "video_path",
+      "reference_images": "image_paths"
     },
     "defaults": {
       "resolution": "480p"

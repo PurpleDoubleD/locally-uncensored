@@ -17,6 +17,7 @@ import { useSettingsStore } from '../../../stores/settingsStore'
 import { useUIStore } from '../../../stores/uiStore'
 import { useContentPolicy } from '../../../hooks/useContentPolicy'
 import { Select, type SelectOption, type SelectTag } from '../ui/Select'
+import { SWAP_MAIN_MODEL, swapMaxPeople } from '../../../lib/render/swap'
 import { TYPE_LABEL } from './badges'
 import { UNFILTERED_MARK_LABEL } from '../../../lib/unfiltered-mark'
 import { useLocalPick } from './localPick'
@@ -136,6 +137,7 @@ function CloudModelChip() {
   // Subscribed, not read once: the music sublabel must follow the length
   // slider live so the shown price is the billed price (A3).
   const musicDuration = useCreateStore((s) => s.musicDuration)
+  const swapPeople = useCreateStore((s) => s.swapFigures.length)
   const models = useCloudCatalogStore((s) => s.models)
   const contentPolicy = useContentPolicy()
 
@@ -204,16 +206,22 @@ function CloudModelChip() {
     : intent === 'edit' ? 'edit'
     : intent === 'animate' ? 'animate'
     : 'generate'
+  // Swap Character: the order is the recommendation (SCAIL 2 first), and a
+  // model for fewer people than are marked stands greyed out with the reason.
+  const swap = intent === 'swap_character'
+  const swapTooMany = (id: string) => swap && swapPeople > swapMaxPeople(id)
+  const swapLimitText = (id: string) => (swapMaxPeople(id) === 1 ? 'one person only' : `up to ${swapMaxPeople(id)} people`)
   const options: SelectOption[] = roleIntent
-    ? groupForPicker(roleModels).map(({ model: m, group }) => ({
+    ? (swap ? roleModels.map((model) => ({ model, group: undefined as string | undefined })) : groupForPicker(roleModels)).map(({ model: m, group }) => ({
         value: m.id,
         label: m.label,
         // "Picture first" costs the picture and the model together.
         sublabel: pickIntent === '3d-text' && isPictureFirstRun('text', m.id)
           ? `${shortCount(createStudioCost(m.id, {}, 100) + pictureFirstPictureCredits(''))} cr`
-          : pickerCostHint(m, musicDuration),
+          : swapTooMany(m.id) ? swapLimitText(m.id) : pickerCostHint(m, musicDuration),
+        disabled: swapTooMany(m.id),
         group,
-        tags: tierMarks(m),
+        tags: swap && m.id === SWAP_MAIN_MODEL ? [{ label: 'Recommended', tone: 'accent' as const }, ...tierMarks(m)] : tierMarks(m),
         badge: m.adult
           ? noRefusalsBadge(contentPolicy === 'off')
           : CLOUD_BADGE,
@@ -249,7 +257,9 @@ function CloudModelChip() {
     <Select
       size="sm"
       searchable
-      align="right"
+      // Swap Character: the list is wider (recommendation, the reason for a
+      // greyed out model) and opens to the right, into the panel.
+      align={swap ? 'left' : 'right'}
       className="min-w-[150px] max-w-[230px]"
       options={options}
       value={value}

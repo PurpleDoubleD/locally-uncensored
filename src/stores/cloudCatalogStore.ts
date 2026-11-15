@@ -15,6 +15,7 @@ import {
 } from '../lib/render/studio-roles'
 import type { RenderKind, RenderOp } from '../lib/render/cloud-jobs'
 import { getCatalog, type CatalogOps, type CloudCatalog } from '../api/cloud/catalog'
+import { noteCharacterHubFromCatalog } from '../lib/create/character-hub-release'
 
 interface CloudCatalogState {
   fetchedAt: number | null
@@ -40,7 +41,10 @@ export const useCloudCatalogStore = create<CloudCatalogState>()(
       mediaLive: null,
       uploadLimits: null,
 
-      setCatalog: (c) =>
+      setCatalog: (c) => {
+        // The switch of the Character area rides on the same answer; it is
+        // not persisted, a restart asks the server again.
+        noteCharacterHubFromCatalog(c)
         set({
           fetchedAt: Date.now(),
           models: c.models,
@@ -48,7 +52,8 @@ export const useCloudCatalogStore = create<CloudCatalogState>()(
           voice: c.voice,
           mediaLive: c.media_live,
           uploadLimits: c.upload_limits ?? null,
-        }),
+        })
+      },
     }),
     {
       name: 'lu-cloud-catalog',

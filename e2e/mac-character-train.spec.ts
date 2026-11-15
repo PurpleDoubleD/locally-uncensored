@@ -2,6 +2,7 @@ import { test, expect, type Page } from '@playwright/test'
 import { tauriMockInit, DEFAULT_ASSISTANT_REPLY, DEFAULT_MODEL_NAME, type TauriMockOptions } from './support/tauri-mock'
 import { routeCloud, seedOnboardingDone, cloudSwitch } from './support/cloud-mock'
 import { mlxCalls, comfyCalls } from './support/recorded'
+import { openCharacterTraining } from './support/character-hub'
 
 /**
  * Character training on a Mac (src-tauri/src/commands/mlx_train.rs,
@@ -32,8 +33,7 @@ async function openTrainTab(page: Page, opts: TauriMockOptions) {
   await page.goto('/')
   await expect(cloudSwitch(page)).toBeVisible({ timeout: 20_000 })
   await page.getByRole('button', { name: /^Create$/ }).click()
-  await page.getByRole('radio', { name: 'Character Studio', exact: true }).click()
-  await page.getByRole('radio', { name: 'Train new', exact: true }).click()
+  await openCharacterTraining(page)
 }
 
 async function addPhotos(page: Page, n: number) {
@@ -94,8 +94,12 @@ test('mac with Z-Image Turbo: Train new trains the character locally and it land
   expect(typeof start.raw.run).toBe('string')
 
   // Through: the tab turns to Use, and the new character is on the shelf.
-  await expect(page.getByRole('radio', { name: 'Use character', exact: true })).toBeChecked({ timeout: 20_000 })
-  await expect(page.getByTitle('Trigger word: luxfox')).toBeVisible({ timeout: 10_000 })
+  // In the Character area: the panel turns to Image, and the new character
+  // is in the list of the head line.
+  await expect(page.getByRole('button', { name: 'Action' })).toContainText('Image', { timeout: 20_000 })
+  await page.getByRole('button', { name: 'Character', exact: true }).click()
+  await expect(page.getByRole('option', { name: /^luxfox/ })).toBeVisible({ timeout: 10_000 })
+  await page.keyboard.press('Escape')
   await expect(page.getByText(/Training failed/)).toHaveCount(0)
   // The Windows trainer and ComfyUI are never asked.
   const names = await page.evaluate(() => ((window as unknown as { __TAURI_CALLS__?: Array<{ cmd: string }> }).__TAURI_CALLS__ ?? []).map((c) => c.cmd))
@@ -157,7 +161,7 @@ test('mac: frames of a video go through Use frames for a character into the Mac 
   await expect(dialog).toHaveCount(0)
 
   // They land on the Train tab of the Mac, which trains them here.
-  await expect(page.getByRole('radio', { name: 'Train new', exact: true })).toBeChecked()
+  await expect(page.locator('[data-hub-head]')).toContainText('Train')
   const controls = page.getByTestId('mac-train-controls')
   await expect(controls).toContainText('7/100 photos', { timeout: 15_000 })
   await controls.getByPlaceholder('Trigger word, e.g. davechar').fill('foxclip')
@@ -169,5 +173,8 @@ test('mac: frames of a video go through Use frames for a character into the Mac 
   for (const s of staged) expect(Number(s.raw.bytes)).toBeGreaterThan(100)
   const [start] = await calls(page, 'mlx_train_start')
   expect(start.raw).toMatchObject({ set: 'foxclip', trigger: 'foxclip' })
-  await expect(page.getByTitle('Trigger word: foxclip')).toBeVisible({ timeout: 20_000 })
+  // The new character is in the list of the head line of the Character area.
+  await expect(page.getByRole('button', { name: 'Action' })).toContainText('Image', { timeout: 20_000 })
+  await page.getByRole('button', { name: 'Character', exact: true }).click()
+  await expect(page.getByRole('option', { name: /^foxclip/ })).toBeVisible({ timeout: 10_000 })
 })
