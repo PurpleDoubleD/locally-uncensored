@@ -5358,15 +5358,12 @@ const EXIT_TAIL_LINES: usize = 20;
 /// The reap, with what it found. `None` while the child lives, or when the
 /// question could not be asked.
 pub(crate) fn reap_dead_engine_exit(slot: &mut Option<BundledEngine>) -> Option<SidecarExit> {
-    let status = match slot.as_mut() {
-        // Ok(Some(status)) is an exited child; Ok(None) is a live one. An Err
-        // means the question could not be asked, and a handle we cannot ask
-        // about is not evidence of death, so it is left alone.
-        Some(e) => match e.child.try_wait() {
-            Ok(Some(status)) => status,
-            _ => return None,
-        },
-        None => return None,
+    // Ok(Some(status)) is an exited child; Ok(None) is a live one. An Err
+    // means the question could not be asked, and a handle we cannot ask
+    // about is not evidence of death, so it is left alone.
+    let status = match slot.as_mut()?.child.try_wait() {
+        Ok(Some(status)) => status,
+        _ => return None,
     };
     let mut e = slot.take()?;
     let _ = e.child.wait();
