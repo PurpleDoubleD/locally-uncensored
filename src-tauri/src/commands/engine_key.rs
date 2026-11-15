@@ -13,9 +13,8 @@
 //! that talks to the engine goes through the Rust side, and the Rust side puts
 //! the key on exactly the requests that go to a port an LU engine holds.
 //!
-//! What stays open: llama-server answers a few addresses without a key
-//! (`/health`, `/models`, `/v1/models`). They say that an engine runs and which
-//! model it has loaded, nothing of what was asked or answered.
+//! Health checks (`/health`, `/v1/health`) remain public. Model discovery
+//! (`/models`, `/v1/models`) requires the same key as inference requests.
 
 use std::sync::OnceLock;
 

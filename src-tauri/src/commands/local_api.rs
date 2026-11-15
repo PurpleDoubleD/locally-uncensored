@@ -839,7 +839,11 @@ struct ModelZeile {
 /// gleichzeitig), und sie darf die Liste der anderen nicht mitnehmen.
 async fn lane_modelle(http: &reqwest::Client, up: &Upstream) -> Vec<String> {
     let url = format!("{}/models", up.base.trim_end_matches('/'));
-    let r = match http.get(&url).timeout(std::time::Duration::from_secs(4)).send().await {
+    let mut req = http.get(&url).timeout(std::time::Duration::from_secs(4));
+    if let Some(s) = up.lane().and_then(|lane| engine_schluessel(lane, &url)) {
+        req = req.header(header::AUTHORIZATION, s);
+    }
+    let r = match req.send().await {
         Ok(r) if r.status().is_success() => r,
         _ => return Vec::new(),
     };
@@ -2136,6 +2140,95 @@ mod local_api_echt {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Discovery, health and chat must work with the managed engine's key.
+    #[tokio::test]
+    async fn managed_engine_discovery_uses_the_internal_key() {
+        let upstream = Router::new()
+            .route("/v1/models", get(|| async {
+                Json(serde_json::json!({ "data": [{ "id": "tiny" }] }))
+            }))
+            .route("/v1/chat/completions", post(|Json(body): Json<serde_json::Value>| async move {
+                Json(serde_json::json!({ "model": body["model"], "choices": [] }))
+            }))
+            .layer(axum::middleware::from_fn(|req: axum::extract::Request, next: axum::middleware::Next| async move {
+                if req.headers().get(header::AUTHORIZATION).and_then(|v| v.to_str().ok())
+                    != Some(super::super::engine_key::bearer().as_str())
+                    || req.headers().contains_key("x-api-key")
+                {
+                    return StatusCode::UNAUTHORIZED.into_response();
+                }
+                next.run(req).await
+            }));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, upstream).await.unwrap(); });
+        let live: LaneQuelle = Arc::new(move |lane| lane_basis_der_app(lane, None, Some(address.port())));
+        let api = api_mit(vec![Upstream {
+            lane_prefix: "lu".into(), base: "http://127.0.0.1:9/v1".into(),
+        }], Some(live)).await;
+        let client = reqwest::Client::new();
+
+        for path in ["/v1/models", "/lu/v1/health"] {
+            assert_eq!(client.get(format!("http://{api}{path}"))
+                .send().await.unwrap().status(), StatusCode::UNAUTHORIZED);
+        }
+        assert_eq!(modell_ids(api).await, vec!["lu/tiny"]);
+        let health: serde_json::Value = client.get(format!("http://{api}/lu/v1/health"))
+            .header("x-api-key", "t0k").send().await.unwrap()
+            .error_for_status().unwrap().json().await.unwrap();
+        assert_eq!(health["lanes"]["lu"]["models"], 1);
+        let chat: serde_json::Value = client.post(format!("http://{api}/v1/chat/completions"))
+            .bearer_auth("t0k").header("x-api-key", "client-only")
+            .json(&serde_json::json!({ "model": "lu/tiny", "messages": [{ "role": "user", "content": "hi" }] }))
+            .send().await.unwrap().error_for_status().unwrap().json().await.unwrap();
+        assert_eq!(chat["model"], "lu/tiny");
+    }
+
+    /// Other lanes and non-loopback engine addresses receive neither key.
+    #[tokio::test]
+    async fn discovery_and_forwarding_keep_credentials_out_of_other_upstreams() {
+        let upstream = Router::new()
+            .route("/v1/models", get(|| async {
+                Json(serde_json::json!({ "data": [{ "id": "tiny" }] }))
+            }))
+            .route("/v1/chat/completions", post(|| async {
+                Json(serde_json::json!({ "model": "tiny", "choices": [] }))
+            }))
+            .layer(axum::middleware::from_fn(|req: axum::extract::Request, next: axum::middleware::Next| async move {
+                if req.headers().contains_key(header::AUTHORIZATION) || req.headers().contains_key("x-api-key") {
+                    return StatusCode::FORBIDDEN.into_response();
+                }
+                next.run(req).await
+            }));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, upstream).await.unwrap(); });
+        for (lane, host) in [("ollama", "127.0.0.1"), ("lmstudio", "127.0.0.1"), ("lu", "engine.example.invalid")] {
+            let state = LocalApiState {
+                cfg: Arc::new(RwLock::new(LocalApiConfig {
+                    token: "t0k".into(),
+                    upstreams: vec![Upstream { lane_prefix: lane.into(), base: format!("http://{host}:{}/v1", address.port()) }],
+                    ..LocalApiConfig::default()
+                })),
+                // Resolve the non-loopback hostname locally without contacting an external server.
+                http: reqwest::Client::builder().no_proxy().resolve("engine.example.invalid", address).build().unwrap(),
+                nutzung: Arc::new(Nutzung::neu()),
+                live: None,
+            };
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let api = listener.local_addr().unwrap();
+            let router = build_local_api_router(state);
+            let server = tokio::spawn(async move { axum::serve(listener, router).await.unwrap(); });
+            assert_eq!(modell_ids(api).await, vec![format!("{lane}/tiny")], "{lane} at {host}");
+            let chat = reqwest::Client::new().post(format!("http://{api}/v1/chat/completions"))
+                .bearer_auth("t0k").header("x-api-key", "client-only")
+                .json(&serde_json::json!({ "model": format!("{lane}/tiny"), "messages": [{ "role": "user", "content": "hi" }] }))
+                .send().await.unwrap();
+            assert_eq!(chat.status(), StatusCode::OK, "{lane} at {host}");
+            server.abort();
+        }
+    }
 
     /// GH Discussion #4: what went through the API, counted per start.
     /// A stand-in model server answers once plainly, once as a stream, once
