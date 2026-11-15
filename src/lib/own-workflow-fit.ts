@@ -12,7 +12,7 @@
 
 import type { ComfyModelSource } from '../types/models'
 
-const UNET_FAMILIES = new Set(['flux', 'flux2', 'zimage', 'wan', 'wan22', 'hunyuan', 'ltx25', 'minimaxh3image'])
+const UNET_FAMILIES = new Set(['flux', 'flux2', 'zimage', 'wan', 'wan22', 'hunyuan', 'ltx25', 'minimaxh3image', 'mossimage'])
 
 export function modelNeedsUnetLoader(type: string, source?: ComfyModelSource): boolean {
   if (source === 'diffusion_model') return true
@@ -22,6 +22,9 @@ export function modelNeedsUnetLoader(type: string, source?: ComfyModelSource): b
 
 /** Null when the workflow fits, else why it is set aside. */
 export function ownWorkflowMisfit(classTypes: readonly string[], type: string, source?: ComfyModelSource): string | null {
+  // GH #192: for a model LU does not know, the user's assignment is the only
+  // knowledge there is; LU's own builder has nothing to run it with anyway.
+  if (type === 'unknown') return null
   const needsUnet = modelNeedsUnetLoader(type, source)
   const hasUnet = classTypes.includes('UNETLoader')
   const hasCheckpoint = classTypes.includes('CheckpointLoaderSimple')

@@ -192,7 +192,7 @@ export function galleryTypeForFile(
 // 2.5.8: ace / wans2v / wananimate / wanvace are the specialized local-lane
 // architectures (music, talking character, motion control). They are neither
 // image nor video picker material — each lane has its own model list.
-export type ModelType = 'flux' | 'flux2' | 'krea2' | 'zimage' | 'ernie_image' | 'qwenimage' | 'qwenimage1' | 'chroma' | 'hidream' | 'sd3' | 'lumina2' | 'sdxl' | 'sd15' | 'wan' | 'wan22' | 'hunyuan' | 'ltx' | 'ltx25' | 'mochi' | 'cosmos' | 'cogvideo' | 'svd' | 'framepack' | 'pyramidflow' | 'allegro' | 'ace' | 'yue2' | 'wans2v' | 'wananimate' | 'wanvace' | 'animatediff' | 'minimaxh3' | 'minimaxh3image' | 'unknown'
+export type ModelType = 'flux' | 'flux2' | 'krea2' | 'zimage' | 'ernie_image' | 'qwenimage' | 'qwenimage1' | 'chroma' | 'hidream' | 'sd3' | 'lumina2' | 'sdxl' | 'sd15' | 'wan' | 'wan22' | 'hunyuan' | 'ltx' | 'ltx25' | 'mochi' | 'cosmos' | 'cogvideo' | 'svd' | 'framepack' | 'pyramidflow' | 'allegro' | 'ace' | 'yue2' | 'wans2v' | 'wananimate' | 'wanvace' | 'animatediff' | 'minimaxh3' | 'minimaxh3image' | 'mossimage' | 'unknown'
 export type VideoBackend = 'wan' | 'animatediff' | 'none'
 
 export interface ClassifiedModel {
@@ -316,6 +316,12 @@ export function isMinimaxH3ImageName(name: string): boolean {
   return /minimax[_-]?h3[_-]?image/.test(name.toLowerCase())
 }
 
+/** GH #192: a file name of MOSS Image (OpenMOSS, 16.10.2026): the CivitAI
+ *  repack mossImage_sft_pruned_int8, MOSS-Image_SFT_int8, moss_image_*. */
+export function isMossImageName(name: string): boolean {
+  return /(^|[^a-z0-9])moss[_-]?image/.test(name.toLowerCase())
+}
+
 /** FastVideo's distilled MiniMax H3 (fastvideo_fasth3_8step_v2_*). A full
  *  checkpoint, not a LoRA, and it only does text to video: the model card says
  *  the first/last frame and reference tasks were not distilled. */
@@ -389,6 +395,9 @@ export function classifyModel(name: string | null | undefined): ModelType {
   // still model on the H3 layout, not a video (C78). The header decides for a
   // name that says neither (model_sniff.rs, applyHeaderSniff).
   if (isMinimaxH3ImageName(lower)) return 'minimaxh3image'
+  // GH #192: MOSS Image, an image model of its own (Qwen3.5 9B encoder, the
+  // FLUX.2 VAE). Before any family a word in its name could look like.
+  if (isMossImageName(lower)) return 'mossimage'
   if (lower.includes('minimax_h3') || lower.includes('minimaxh3') || lower.includes('minimax-h3') || isFastH3(lower)) return 'minimaxh3'
 
   // Video models — most specific first (order matters: specific before generic)
@@ -501,7 +510,7 @@ export function hidreamSampling(model: string): { steps: number; cfg: number; sa
 export function isImageModelType(type: ModelType): boolean {
   return type === 'flux' || type === 'flux2' || type === 'krea2' || type === 'zimage' || type === 'ernie_image' || type === 'qwenimage'
     || type === 'qwenimage1' || type === 'chroma' || type === 'hidream' || type === 'sd3' || type === 'lumina2'
-    || type === 'sdxl' || type === 'sd15' || type === 'minimaxh3image' || type === 'unknown'
+    || type === 'sdxl' || type === 'sd15' || type === 'minimaxh3image' || type === 'mossimage' || type === 'unknown'
 }
 
 export function isVideoModelType(type: ModelType): boolean {
@@ -772,6 +781,9 @@ export const MODEL_TYPE_DEFAULTS: Record<string, ModelTypeDefaults> = {
   // 12.11.2026): KSampler 6 steps at CFG 1 on euler / simple. The template
   // note says it works badly below about 4 MP, so 2048 x 2048.
   minimaxh3image: { steps: 6, cfg: 1.0, sampler: 'euler', scheduler: 'simple', width: 2048, height: 2048, frames: 1, fps: 1 },
+  // GH #192: MOSS Image, the OpenMOSS defaults the reporter ran on ComfyUI
+  // 0.42.5: KSampler euler / simple, 50 steps, CFG 3; 512 px to 2K.
+  mossimage: { steps: 50, cfg: 3.0, sampler: 'euler', scheduler: 'simple', width: 1024, height: 1024, frames: 1, fps: 1 },
   mochi: { steps: 30, cfg: 4.5, sampler: 'euler', scheduler: 'normal', width: 848, height: 480, frames: 84, fps: 24 },
   cosmos: { steps: 35, cfg: 7.0, sampler: 'euler', scheduler: 'normal', width: 1024, height: 1024, frames: 121, fps: 24 },
   cogvideo: { steps: 50, cfg: 6.0, sampler: 'euler_ancestral', scheduler: 'normal', width: 480, height: 480, frames: 49, fps: 8 },
