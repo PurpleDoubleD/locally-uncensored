@@ -296,6 +296,19 @@ export const RELEASE_NOTES: ReleaseNote[] = [
         ],
       },
       {
+        title: 'LU Cloud',
+        items: [
+          {
+            title: 'A credit pack next to the subscription.',
+            detail: 'The sign-up window shows both side by side, "Already bought? Sign in" sits at the top, and LU opens again after the checkout.',
+          },
+          {
+            title: 'Ways into LU Cloud are counted anonymously.',
+            detail: 'A click on a model, a plan, a pack or the sign in counts like the Cloud switch already did, never which model. Settings, Privacy says so.',
+          },
+        ],
+      },
+      {
         title: 'Voice',
         items: [
           {

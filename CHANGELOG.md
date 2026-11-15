@@ -79,6 +79,13 @@ in the cloud catalogue.
   with the running time, and says "No sound from mic" after three silent
   seconds.
 
+**LU Cloud**
+- The sign-up window shows a credit pack next to the subscription, "Already
+  bought? Sign in" sits at the top, and LU opens again after the checkout.
+- A click on a way into LU Cloud (a model, a plan, a pack, the sign in) is
+  counted anonymously like the Cloud switch already was, never which model.
+  Settings, Privacy says so.
+
 **Phone app**
 - Talk to your computer from the phone (GitHub #212): hold the microphone in
   a chat with your computer to speak, or tap it for hands free. Your computer
