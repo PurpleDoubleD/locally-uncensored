@@ -1,5 +1,6 @@
 import { stripSourcesMarker } from '../lib/web-evidence'
 import { billingOf, creditRatesOf } from '../lib/agent-core/credit-rates'
+import { isServerLoopCut, LOOP_HALT_COST, LOOP_HALT_GUARD, LOOP_HALT_SERVER_LOOP, SERVER_LOOP_MESSAGE, SERVER_LOOP_RETRIES } from '../lib/agent-core/server-loop-cut'
 import { canonicalArgs, repeatLabel, skippedRepeatsNote } from '../lib/agent-core/repeat-note'
 import { replayableReasoning } from '../lib/agent-core/reasoning-replay'
 import { useRef, useState, useCallback, useEffect } from 'react'
@@ -1726,6 +1727,8 @@ export function useAgentChat() {
       runCreditLimit: useSettingsStore.getState().settings.agentRunCreditLimit,
       hourCreditLimit: useSettingsStore.getState().settings.agentHourCreditLimit,
     })
+    // Steps LU Cloud cut for repeating (lib/agent-core/server-loop-cut.ts).
+    let serverLoopCuts = 0
     // The closing line a turn gets when the model itself said nothing usable.
     // Read from the live counters at call time, so both the normal end of the
     // run and the swallowed multimodal refusal below produce the same text.
@@ -2365,6 +2368,16 @@ export function useAgentChat() {
                 if (shouldDowngradeThinking(streamOpts.thinking, thinkErr)) {
                   providerTurn = await streamProviderTurn(provider, modelToUse, sendMessages, { ...streamOpts, thinking: undefined as unknown as boolean }, onLiveContent, () => {}, onToolProgress)
                   break
+                }
+                // LU Cloud cut this step for repeating itself. The server billed
+                // its input and sent no usage, so it is counted here at the
+                // step's estimate; one more attempt per run, then the run ends.
+                if (isServerLoopCut(thinkErr)) {
+                  costBrake.record(stepEstimate)
+                  serverLoopCuts++
+                  if (serverLoopCuts > SERVER_LOOP_RETRIES) throw thinkErr
+                  log.warn('agent.server_loop_cut_retry', { provider: providerId, cuts: serverLoopCuts })
+                  continue
                 }
                 const transient = asString(prop(thinkErr, 'name')) !== 'AbortError' && !isTerminalModelError(thinkErr) && !cutByModelSwitch(convId)
                 if (transient && connRetries < 2) {
@@ -3076,6 +3089,7 @@ export function useAgentChat() {
             content: `⛔ Loop guard halted the run: ${batchVerdict.reason}.`,
             timestamp: Date.now(),
           })
+          loopHalt = LOOP_HALT_GUARD
           break
         }
         // C83: the cost brake looks at what the backend reported, not at the
@@ -3088,6 +3102,7 @@ export function useAgentChat() {
             id: uuid(), phase: 'reflection', content: `⛔ ${brake.message}`, timestamp: Date.now(),
           })
           log.warn('agent.cost_brake_halt', { provider: providerId, inputTokens: costBrake.inputTokens })
+          loopHalt = LOOP_HALT_COST
           useChatNoticeStore.getState().show('cost-brake', brake.message, 'ruhig')
           break
         }
@@ -3589,6 +3604,7 @@ export function useAgentChat() {
             const summary = (isLocalModelByName(activeModel) ? await finishWithoutTools({ provider, model: modelToUse, messages: agentMessages, signal: abort.signal }) : null)
             if (summary) { runState.content += finishSection(summary); scheduleUIUpdate() }
           }
+          loopHalt = LOOP_HALT_GUARD
           break
         }
 
@@ -3702,6 +3718,13 @@ export function useAgentChat() {
               emptyAnswerExplanation({ finishReason: MODEL_SWITCH_FINISH, captured: false, keepThinking: false }),
             )
           }
+        } else if (isServerLoopCut(err)) {
+          // LU Cloud cut a step twice for repeating (lib/agent-core/server-loop-cut.ts).
+          loopHalt = LOOP_HALT_SERVER_LOOP
+          useChatStore.getState().updateMessageContent(
+            convId!, assistantMessage.id,
+            (runState.content ? runState.content + '\n\n' : '') + SERVER_LOOP_MESSAGE
+          )
         } else if ((err as { code?: string })?.code === 'outage') {
           // LU Cloud has an outage the server announced (lib/cloud-outage.ts).
           // Its sentence instead of "Agent error: ...", and the loop stops:

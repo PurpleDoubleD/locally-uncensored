@@ -19,6 +19,7 @@
 import type { MessageErrorKind } from '../types/chat'
 import { DISCONNECT_WITHOUT_ANSWER } from './answer-notes'
 import { CREDITS_EXHAUSTED_MESSAGE } from './credits-exhausted'
+import { SERVER_LOOP_MESSAGE } from './agent-core/server-loop-cut'
 import { MULTIMODAL_UNSUPPORTED_MESSAGE } from './ollama-errors'
 import { IMAGE_PART_NONE_HEAD, IMAGE_PART_NOT_LOADED_HEAD, IMAGE_PART_RELOADED_HEAD } from './image-part-notes'
 import { PLATFORM_TEXTS } from './platform-text'
@@ -104,6 +105,8 @@ const TAIL_RULES: readonly TailRule[] = [
   { heads: [headOf(TEMPLATE_REFUSAL_SENTENCE), headOf(BAD_REQUEST_SENTENCE)], read: whole },
   { heads: [THINKING_UNSUPPORTED_HEAD], read: () => ({ kind: 'generic', detail: THINKING_UNSUPPORTED_DETAIL }) },
   { heads: [RATE_LIMIT_HEAD], read: whole },
+  // LU Cloud cut a step for repeating (agent-core/server-loop-cut.ts, 15.11.2026).
+  { heads: [headOf(SERVER_LOOP_MESSAGE)], read: whole },
   { heads: [REQUEST_LIMIT_FALLBACK_HEAD], read: (tail) => ({ kind: 'limit', detail: tail.trim() }) },
 ]
 

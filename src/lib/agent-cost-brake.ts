@@ -20,8 +20,11 @@ import { addHourCredits, creditFactor, hourPauseDue, markHourPause } from './age
  *
  * Only providers that bill (isPaidProvider) are braked; a model on this
  * machine or in the LAN costs nothing per token. The loop guard switch (C44,
- * Settings → Agent Permissions) is respected: with the guard off, the brake
- * never ends a run, it only says once that the limit has been passed.
+ * Settings → Agent Permissions) is respected: with the guard off, the token
+ * limit never ends a run, it only says once that it has been passed. The two
+ * credit limits are not tied to that switch (CA, 15.11.2026): they have their
+ * own "No limit" in Settings → Agent, and a guard switched off against false
+ * loop stops must not also switch off the pause that protects the credits.
  */
 
 // CA (14.11.2026): 400k and 3M let the incidents of that week through. The
@@ -130,7 +133,7 @@ export class AgentCostBrake {
       // limit and not at half of it.
       this.credits += step * creditFactor()
       const hour = addHourCredits(step)
-      if (this.mayHalt && this.runCreditLimit > 0 && this.credits >= this.runCreditLimit) {
+      if (this.runCreditLimit > 0 && this.credits >= this.runCreditLimit) {
         this.pending = {
           action: 'halt',
           reason: `cost brake: this task used up to ${fmtCredits(this.credits)} credits in ${this.calls} steps (limit ${fmtCredits(this.runCreditLimit)})`,
@@ -140,7 +143,7 @@ export class AgentCostBrake {
         }
         return
       }
-      if (this.mayHalt && this.hourCreditLimit > 0 && hour >= this.hourCreditLimit && hourPauseDue()) {
+      if (this.hourCreditLimit > 0 && hour >= this.hourCreditLimit && hourPauseDue()) {
         markHourPause()
         this.pending = {
           action: 'halt',

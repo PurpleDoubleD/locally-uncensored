@@ -1,5 +1,6 @@
 import { stripSourcesMarker } from '../lib/web-evidence'
 import { billingOf, creditRatesOf } from '../lib/agent-core/credit-rates'
+import { isServerLoopCut, LOOP_HALT_COST, LOOP_HALT_GUARD, LOOP_HALT_SERVER_LOOP, SERVER_LOOP_MESSAGE } from '../lib/agent-core/server-loop-cut'
 import { replayableReasoning } from '../lib/agent-core/reasoning-replay'
 import { NOT_IN_CODE_TAB } from '../lib/browser-tools'
 import { useRef, useState, useCallback } from 'react'
@@ -1782,6 +1783,10 @@ export function useCodex() {
                 }
                 break
               } catch (limitErr) {
+                // LU Cloud cut this step for repeating itself (lib/agent-core/
+                // server-loop-cut.ts): billed, no usage sent. Count it, then the
+                // run ends below with its own sentence.
+                if (isServerLoopCut(limitErr)) costBrake.record(stepPromptEstimate + stepToolsEstimate)
                 if (httpStatusOf(limitErr) !== 429 || isTerminalModelError(limitErr) || limitWaits >= 2 || abort.signal.aborted) throw limitErr
                 limitWaits++
                 const wait = retryDelayMs(limitErr, limitWaits)
@@ -2347,6 +2352,7 @@ export function useCodex() {
             content: `⛔ Loop guard halted the run: ${batchVerdict.reason}.`,
             timestamp: Date.now(),
           })
+          loopHalt = LOOP_HALT_GUARD
           break
         }
         // C83: the cost brake looks at what the backend reported, not at the
@@ -2357,6 +2363,7 @@ export function useCodex() {
           useChatStore.getState().updateMessageContent(convId, assistantMsg.id, fullContent + `\n\n_(${brake.message})_`)
           addBlock({ id: uuid(), phase: 'reflection', content: `⛔ ${brake.message}`, timestamp: Date.now() })
           useChatNoticeStore.getState().show('cost-brake', brake.message, 'ruhig')
+          loopHalt = LOOP_HALT_COST
           break
         }
         if (brake.action === 'warn') {
@@ -2814,6 +2821,7 @@ export function useCodex() {
             content: `⛔ Loop guard halted the run: ${failVerdict.reason}.`,
             timestamp: Date.now(),
           })
+          loopHalt = LOOP_HALT_GUARD
           break
         }
 
@@ -2927,6 +2935,14 @@ export function useCodex() {
           // another /loop pass would only be refused the same way.
           loopHalt = "too large for the model's context window"
           hint = "\n\nHint: this step does not fit the model's context window, even with the history shortened. Give the model a larger context window (Settings, or where the server loads the model), or start a new chat for the next task."
+        }
+        // LU Cloud cut a step for repeating itself: its sentence, not a code.
+        if (isServerLoopCut(err)) {
+          loopHalt = LOOP_HALT_SERVER_LOOP
+          fullContent += `\n\n${SERVER_LOOP_MESSAGE}`
+          useChatStore.getState().updateMessageContent(convId, assistantMsg.id, fullContent)
+          codexStore.addEvent(convId, { id: uuid(), type: 'error', content: SERVER_LOOP_MESSAGE, timestamp: Date.now() })
+          return
         }
         // An empty wallet is not a crash and no retry fixes it. Replace the
         // status-code line with the plain explanation the other surfaces use.
