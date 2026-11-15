@@ -1,5 +1,4 @@
 import { useEffect } from 'react'
-import { TextContextMenu } from './components/ui/TextContextMenu'
 import { MotionConfig } from 'framer-motion'
 import { AppShell } from './components/layout/AppShell'
 import { useVoiceStore } from './stores/voiceStore'
@@ -92,8 +91,6 @@ function App() {
   return (
     <MotionConfig reducedMotion="user">
       <AppShell />
-      {/* W33: no web view menu on a right click in a release build. */}
-      <TextContextMenu />
     </MotionConfig>
   )
 }

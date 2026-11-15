@@ -1,5 +1,5 @@
 // W33: the right click of the whole window (see lib/text-context-menu.ts).
-// Mounted once in App. Listens on the document after React's own handlers,
+// Mounted once at the root (main.tsx), above both windows' trees, desktop only. Listens on the document after React's own handlers,
 // so a menu of LU's own (chat message, model, gallery tile) that already
 // called preventDefault is left alone.
 import { useEffect, useState } from 'react'
