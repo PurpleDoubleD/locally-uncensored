@@ -34,13 +34,23 @@ describe('PROVIDER_PRESETS', () => {
   })
 
   it('has all major cloud providers', () => {
-    const cloudNames = ['OpenRouter', 'Groq', 'Together', 'DeepSeek', 'Mistral', 'OpenAI', 'Anthropic']
+    const cloudNames = ['OpenRouter', 'Groq', 'Together', 'DeepSeek', 'Mistral', 'MiniMax', 'OpenAI', 'Anthropic']
     for (const name of cloudNames) {
       const preset = PROVIDER_PRESETS.find(p => p.name === name)
       expect(preset, `Missing cloud preset: ${name}`).toBeDefined()
       expect(preset!.isLocal).toBe(false)
       expect(preset!.baseUrl).toMatch(/^https:\/\//)
     }
+  })
+
+  it('uses the MiniMax OpenAI-compatible endpoint', () => {
+    const minimax = PROVIDER_PRESETS.find(p => p.id === 'minimax')
+    expect(minimax).toMatchObject({
+      name: 'MiniMax',
+      providerId: 'openai',
+      baseUrl: 'https://api.minimax.io/v1',
+      isLocal: false,
+    })
   })
 
   it('local presets have no API key placeholder', () => {

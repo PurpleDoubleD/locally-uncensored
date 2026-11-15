@@ -5,7 +5,7 @@
 import { compatProviderId } from '../../../../api/providers/compat-id'
 import { PROVIDER_PRESETS, type ProviderId } from '../../../../api/providers/types'
 
-export type OwnProviderId = 'openrouter' | 'groq' | 'together' | 'deepseek' | 'mistral' | 'openai' | 'anthropic' | 'custom'
+export type OwnProviderId = 'openrouter' | 'groq' | 'together' | 'deepseek' | 'mistral' | 'minimax' | 'openai' | 'anthropic' | 'custom'
 
 export interface OwnProvider {
   id: OwnProviderId
@@ -17,7 +17,7 @@ export interface OwnProvider {
   keyPlaceholder: string
 }
 
-const HOSTED: ReadonlyArray<Exclude<OwnProviderId, 'custom' | 'anthropic'>> = ['openrouter', 'groq', 'together', 'deepseek', 'mistral', 'openai']
+const HOSTED: ReadonlyArray<Exclude<OwnProviderId, 'custom' | 'anthropic'>> = ['openrouter', 'groq', 'together', 'deepseek', 'mistral', 'minimax', 'openai']
 
 function preset(id: string) {
   return PROVIDER_PRESETS.find((p) => p.id === id)
