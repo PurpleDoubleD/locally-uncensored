@@ -225,7 +225,9 @@ Locally Uncensored is a free, open-source (AGPL-3.0) local AI studio for the des
 - Uncensored AI Chat Online (browser, desktop Cloud switch, or API key): https://locallyuncensored.com/blog/uncensored-ai-chat-online-guide.html
 - What No Filter Actually Means Here (the honest limits): https://locallyuncensored.com/blog/what-no-filter-means-online.html
 - Uncensored AI chat online, no filter on text (landing page): https://locallyuncensored.com/uncensored-ai-chat-online/
-- Uncensored AI image generator online (seven uncensored models from 1,000 credits per image, content policy setting on the account): https://locallyuncensored.com/uncensored-ai-image-generator-online/
+- Unrestricted AI (chat, images and image to video without filters from us, what stays blocked, free local route): https://locallyuncensored.com/unrestricted-ai/
+- Uncensored AI coding agent (local or in the browser, credits per typical run on five models, which plan): https://locallyuncensored.com/uncensored-ai-coding-agent/
+- Uncensored AI image generator online (nine uncensored models from 1,000 credits per image, content policy setting on the account): https://locallyuncensored.com/uncensored-ai-image-generator-online/
 - Uncensored AI video generator online (seventeen uncensored models, image-to-video only, five-second clips): https://locallyuncensored.com/uncensored-ai-video-generator-online/
 - Uncensored AI API (local: http://127.0.0.1:8129/v1 in the desktop app, free; hosted: https://lu-labs.ai/api/inference/v1, keys spend credits): https://locallyuncensored.com/uncensored-ai-api/
 - Locally Uncensored vs Open WebUI / LM Studio / Jan / GPT4All / Msty / SillyTavern / KoboldCpp: https://locallyuncensored.com/blog/
