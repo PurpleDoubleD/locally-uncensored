@@ -12,6 +12,7 @@ import { fileFormat } from '../../lib/model-file-format'
 import { ICON_SM } from '../ui/icon-size'
 import { modelSkin } from './skin'
 import { AddImageInput } from './AddImageInput'
+import { useLoraNotesStore } from '../../stores/loraNotesStore'
 
 interface Props {
   model: AIModel
@@ -57,6 +58,8 @@ interface Props {
   onRemoveRefusals?: () => void
   /** W33: show a ComfyUI file in its folder (right click). */
   onReveal?: () => void
+  /** W33: give a ComfyUI file the name LU shows (right click). */
+  onRename?: () => void
 }
 
 // The glyph of each kind of model. Its tone, like every other class of this
@@ -78,7 +81,7 @@ export function createTabForArchitecture(architecture: string | undefined): stri
   return null
 }
 
-export function ModelCard({ model, isActive, onSelect, onDelete, onInfo, infoTitle, canDelete = true, onUse, useBusy = false, engineStopped: luEngineRuht = false, onRemoveRefusals, onReveal }: Props) {
+export function ModelCard({ model, isActive, onSelect, onDelete, onInfo, infoTitle, canDelete = true, onUse, useBusy = false, engineStopped: luEngineRuht = false, onRemoveRefusals, onReveal, onRename }: Props) {
   const typeInfo = TYPE_CONFIG[model.type] || TYPE_CONFIG.text
   const TypeIcon = typeInfo.icon
   const look = modelSkin().card
@@ -88,11 +91,14 @@ export function ModelCard({ model, isActive, onSelect, onDelete, onInfo, infoTit
   // EIN Satz Aktionen fuer die Karte. Die sichtbaren Knoepfe unten lesen aus
   // diesem Objekt, das Kontextmenue bekommt dasselbe Objekt gereicht — es gibt
   // also keinen zweiten Aufrufweg, der irgendwann anders werden koennte.
-  const actions: ModelMenuHandlers = { select: onSelect, info: onInfo, remove: onDelete, removeRefusals: onRemoveRefusals, reveal: onReveal }
+  const actions: ModelMenuHandlers = { select: onSelect, info: onInfo, remove: onDelete, removeRefusals: onRemoveRefusals, reveal: onReveal, rename: onRename }
   const refusalsRemoved = 'refusalsRemoved' in model && model.refusalsRemoved === true
   // Fremde Kennungen tragen Pfadteile und Dateiendungen mit sich, die kein
   // Kunde gewaehlt hat. Der Name selbst bleibt unangetastet (lib/model-label).
-  const { head: nameKopf, tail: nameEnde } = splitForMiddleEllipsis(displayModelName(model.name))
+  // W33: a ComfyUI file the user gave a name of its own shows that name; the
+  // file name stays in the tooltip.
+  const ownName = useLoraNotesStore((s) => (model.type === 'image' || model.type === 'video' ? s.notes[model.name]?.label?.trim() : undefined))
+  const { head: nameKopf, tail: nameEnde } = splitForMiddleEllipsis(ownName || displayModelName(model.name))
   // Was die stehende Engine ueber DIESE Zeile aussagt.
   //
   // Sie bedient nur ihre eigenen Zeilen. Ollama und LM Studio antworten

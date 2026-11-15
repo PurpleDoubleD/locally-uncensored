@@ -24,6 +24,7 @@ import { LORA_USE_HINT, type LoraRow } from './LoraManager'
 import { LoraAddons } from './LoraAddons'
 import { Modal } from '../ui/Modal'
 import { ModalActions, ModalButton } from '../ui/ModalActions'
+import { RenameNoteDialog, type RenameKind } from './RenameNoteDialog'
 import { showModel } from '../../api/ollama'
 import { comfyModelInfo } from '../../api/discover'
 import { ModelFileInfo, type ModelFileInfoState } from './ModelFileInfo'
@@ -291,7 +292,7 @@ export function ModelManager() {
 
   const [deleteError, setDeleteError] = useState<string | null>(null)
   // C41: the rename-and-note dialog of a LoRA, and what a folder open said.
-  const [loraEdit, setLoraEdit] = useState<{ name: string; label: string; note: string } | null>(null)
+  const [loraEdit, setLoraEdit] = useState<{ name: string; kind: RenameKind } | null>(null)
   const [loraNotice, setLoraNotice] = useState<string | null>(null)
 
   // D17: a GGUF from anywhere on the drive. The dialog picks it, the import
@@ -488,10 +489,7 @@ export function ModelManager() {
               search={searchQuery}
               searchSubmitToken={searchSubmitToken}
               onGetNew={() => setTab('discover')}
-              onEdit={(name) => {
-                const n = useLoraNotesStore.getState().notes[name]
-                setLoraEdit({ name, label: n?.label ?? '', note: n?.note ?? '' })
-              }}
+              onEdit={(name) => setLoraEdit({ name, kind: 'lora' })}
             />
           )}
 
@@ -550,10 +548,7 @@ export function ModelManager() {
                   onDelete={(name) => setConfirmDelete(name)}
                   onInfo={(name) => { void handleFileInfo(name) }}
                   onGetNew={() => setTab('discover')}
-                  onEdit={(name) => {
-                    const n = useLoraNotesStore.getState().notes[name]
-                    setLoraEdit({ name, label: n?.label ?? '', note: n?.note ?? '' })
-                  }}
+                  onEdit={(name) => setLoraEdit({ name, kind: 'lora' })}
                   onToggleHidden={(name) => {
                     const hidden = !!useLoraNotesStore.getState().notes[name]?.hidden
                     useLoraNotesStore.getState().setNote(name, { hidden: !hidden })
@@ -665,6 +660,12 @@ export function ModelManager() {
                               engineStopped={engineRuht}
                               onDelete={() => setUninstall(uninstallRequestFor(model))}
                               onInfo={() => handleInfo(model.name)}
+                              // W33: a ComfyUI file gets a name of its own (the file stays).
+                              onRename={
+                                model.type === 'image' || model.type === 'video'
+                                  ? () => setLoraEdit({ name: model.name, kind: 'model' })
+                                  : undefined
+                              }
                               // W33: a ComfyUI file can be shown in its folder.
                               onReveal={
                                 model.type === 'image' || model.type === 'video'
@@ -762,51 +763,8 @@ export function ModelManager() {
         removeOllamaModel={async (name) => { await removeModel(name) }}
       />
 
-      <Modal open={!!loraEdit} onClose={() => setLoraEdit(null)} title="Rename and note">
-        {loraEdit && (
-          <form
-            className="space-y-3"
-            data-testid="lora-edit"
-            onSubmit={(e) => {
-              e.preventDefault()
-              useLoraNotesStore.getState().setNote(loraEdit.name, { label: loraEdit.label, note: loraEdit.note })
-              setLoraEdit(null)
-            }}
-          >
-            <p className="t-micro text-gray-500 dark:text-gray-400">
-              The name is how LU shows this LoRA, here and in the LoRA stack of Create. The file keeps its own name, <span className="font-mono break-all">{loraEdit.name}</span>, so saved settings and workflows still find it.
-            </p>
-            <label className="block t-label text-gray-700 dark:text-gray-200">
-              Name
-              <input
-                autoFocus
-                value={loraEdit.label}
-                onChange={(e) => setLoraEdit({ ...loraEdit, label: e.target.value })}
-                placeholder={loraEdit.name.replace(/\.safetensors$/i, '')}
-                maxLength={120}
-                className="mt-1 w-full px-3 py-2 rounded-lg bg-gray-100 dark:bg-white/5 border border-gray-200 dark:border-white/10 text-sm text-gray-900 dark:text-white"
-                data-testid="lora-edit-name"
-              />
-            </label>
-            <label className="block t-label text-gray-700 dark:text-gray-200">
-              Note
-              <textarea
-                value={loraEdit.note}
-                onChange={(e) => setLoraEdit({ ...loraEdit, note: e.target.value })}
-                placeholder="Trigger words, a strength that works, what it is good for…"
-                rows={4}
-                maxLength={2000}
-                className="mt-1 w-full px-3 py-2 rounded-lg bg-gray-100 dark:bg-white/5 border border-gray-200 dark:border-white/10 text-sm text-gray-900 dark:text-white"
-                data-testid="lora-edit-note"
-              />
-            </label>
-            <ModalActions>
-              <ModalButton variant="quiet" onClick={() => setLoraEdit(null)}>Cancel</ModalButton>
-              <ModalButton variant="primary" type="submit" data-testid="lora-edit-save">Save</ModalButton>
-            </ModalActions>
-          </form>
-        )}
-      </Modal>
+      {/* C41, W33: one dialog for a LoRA and an image or video model. */}
+      <RenameNoteDialog name={loraEdit?.name ?? null} kind={loraEdit?.kind ?? 'lora'} onClose={() => setLoraEdit(null)} />
 
       <Modal open={!!loraNotice} onClose={() => setLoraNotice(null)} title="Could not open the folder">
         <p className="t-micro text-red-500 dark:text-red-400 mb-3">{loraNotice}</p>

@@ -172,7 +172,7 @@ describe('ein Menü, ein Aufrufweg — Gegenprobe an der Quelle', () => {
     const src = read('components', 'models', 'ModelCard.tsx')
     // A14 brought a fourth action, Remove refusals, and W33 a fifth, Show in
     // folder (ComfyUI files), through the same object.
-    expect(src).toContain('const actions: ModelMenuHandlers = { select: onSelect, info: onInfo, remove: onDelete, removeRefusals: onRemoveRefusals, reveal: onReveal }')
+    expect(src).toContain('const actions: ModelMenuHandlers = { select: onSelect, info: onInfo, remove: onDelete, removeRefusals: onRemoveRefusals, reveal: onReveal, rename: onRename }')
     expect(src).toContain('actions.removeRefusals?.()')
     expect(src).toContain('buildModelCardMenu(actions,')
     expect(src).toContain('actions.info()')

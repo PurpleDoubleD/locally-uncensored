@@ -17,7 +17,9 @@ vi.mock('../../../api/backend', async (o) => ({ ...(await o<typeof import('../..
 
 import { TextContextMenu } from '../TextContextMenu'
 import { textMenuActions, readTarget, keepsNativeMenu } from '../../../lib/text-context-menu'
-import { buildLoraRowMenu, buildModelCardMenu } from '../menu-actions'
+import { buildDownloadMenu, buildLoraRowMenu, buildModelCardMenu } from '../menu-actions'
+import { RenameNoteDialog } from '../../models/RenameNoteDialog'
+import { useLoraNotesStore } from '../../../stores/loraNotesStore'
 
 function rightClick(el: Element) {
   const e = new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 20, clientY: 20 })
@@ -108,9 +110,32 @@ describe('the Models tab', () => {
     items.at(-1)!.run()
     expect(remove).toHaveBeenCalledOnce()
   })
-  it('an image or video model gets Show in folder; a chat model does not', () => {
+  it('an image or video model gets Show in folder and Rename; a chat model neither', () => {
     const base = { select: vi.fn(), info: vi.fn(), remove: vi.fn() }
-    expect(buildModelCardMenu({ ...base, reveal: vi.fn() }, { isActive: false, canDelete: true }).map((i) => i.label)).toEqual(['Use this model', 'Details', 'Show in folder', 'Delete model'])
+    expect(buildModelCardMenu({ ...base, reveal: vi.fn(), rename: vi.fn() }, { isActive: false, canDelete: true }).map((i) => i.label)).toEqual(['Use this model', 'Details', 'Show in folder', 'Rename…', 'Delete model'])
     expect(buildModelCardMenu(base, { isActive: false, canDelete: true }).map((i) => i.label)).not.toContain('Show in folder')
   })
 })
+
+describe('W33 part 2: finished downloads and the name of a model', () => {
+  it('a finished single download: Show in folder, Rename, Remove from list, Delete file', () => {
+    const items = buildDownloadMenu({ reveal: vi.fn(), rename: vi.fn(), removeFromList: vi.fn(), deleteFile: vi.fn() })
+    expect(items.map((i) => i.label)).toEqual(['Show in folder', 'Rename…', 'Remove from list', 'Delete file…'])
+    // Taking the entry off the list is not a deletion: only the file entry is red.
+    expect(items.filter((i) => i.destructive).map((i) => i.id)).toEqual(['delete-file'])
+  })
+  it('a finished bundle: Show in folder and Remove from list (its files are rows in the Models tab)', () => {
+    expect(buildDownloadMenu({ reveal: vi.fn(), removeFromList: vi.fn() }).map((i) => i.label)).toEqual(['Show in folder', 'Remove from list'])
+  })
+  it('Rename gives a model file the name LU shows and keeps the file', async () => {
+    useLoraNotesStore.setState({ notes: {} } as never)
+    const onClose = vi.fn()
+    render(<RenameNoteDialog name="ltx-2.5-distilled.safetensors" kind="model" onClose={onClose} />)
+    expect(screen.getByText(/The file keeps its own name/)).toBeTruthy()
+    fireEvent.change(screen.getByTestId('lora-edit-name'), { target: { value: 'LTX fast' } })
+    await act(async () => { fireEvent.click(screen.getByTestId('lora-edit-save')) })
+    expect(useLoraNotesStore.getState().notes['ltx-2.5-distilled.safetensors']?.label).toBe('LTX fast')
+    expect(onClose).toHaveBeenCalled()
+  })
+})
+
