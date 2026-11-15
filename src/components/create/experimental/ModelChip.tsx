@@ -1,3 +1,6 @@
+import { PC_3D_MODEL } from '../../../lib/three/run-local-3d'
+import { MAC_3D_MODELS } from '../../../lib/mac-3d'
+import { isPictureFirstRun, pictureFirstPictureCredits } from '../../../lib/three/picture-first'
 import { useCreateStore } from '../../../stores/createStore'
 import {
   useCloudCatalogStore, cloudModelById, defaultCloudModel, opPickerModels, modelCostHint, shortCount,
@@ -7,7 +10,7 @@ import {
 import { DEFAULT_MODEL_IDS } from '../../../lib/render/cloud-models'
 import { groupForPicker, sortByTier, tierGroup, tierMarks } from '../../../lib/render/model-tier'
 import { localTier } from '../../../lib/render/local-model-tier'
-import { intentPickerModels, intentRoles, createStudioCost, isStudioModel } from '../../../lib/render/create-studio'
+import { intentPickerModels, intentRoles, createStudioCost, isStudioModel, studioIntentOf } from '../../../lib/render/create-studio'
 import type { RenderOp } from '../../../lib/render/cloud-jobs'
 import type { PresetModel } from '../../../lib/render/preset-models'
 import { useSettingsStore } from '../../../stores/settingsStore'
@@ -71,7 +74,52 @@ export const CLOUD_GROUP = 'LU Cloud'
 // (server-driven via cloudCatalogStore) and writes the cloud model slugs.
 export function ModelChip() {
   const backend = useCreateStore((s) => s.backend)
-  return backend === 'cloud' ? <CloudModelChip /> : <LocalModelChip />
+  const intent = useCreateStore((s) => s.intent())
+  if (backend === 'cloud') return <CloudModelChip />
+  // Local 3D: on a Mac a pick of its own models (TripoSR, Stable Fast 3D),
+  // each with its own setup; in ComfyUI the one model, TRELLIS.2, named.
+  if (intent === '3d') return <LocalThreeDChip />
+  return <LocalModelChip />
+}
+
+function LocalThreeDChip() {
+  if (isMlxImageHost()) return <MacThreeDPicker />
+  const name = PC_3D_MODEL
+  return (
+    <span
+      className="inline-flex items-center gap-1.5 h-[var(--control-h-md)] px-3 rounded-lg border border-white/[0.08] t-control text-gray-300"
+      title={`${name} on this machine. Local 3D is never filtered.`}
+      data-testid="model-chip-3d"
+    >
+      {name}
+    </span>
+  )
+}
+
+/** The local 3D models of a Mac. Picking one that is not set up shows its
+ *  setup card on the Stage (ThreeDStage), with the licence where it has one. */
+function MacThreeDPicker() {
+  const value = useCreateStore((s) => s.threeDMacModel)
+  const setModel = useCreateStore((s) => s.setThreeDMacModel)
+  const options: SelectOption[] = MAC_3D_MODELS.map((m) => ({
+    value: m.id,
+    label: m.name,
+    sublabel: m.line,
+    title: `${m.name} on this Mac`,
+  }))
+  return (
+    <span data-testid="model-chip-3d-mac">
+      <Select
+        size="sm"
+        align="right"
+        className="min-w-[150px] max-w-[230px]"
+        options={options}
+        value={value}
+        onChange={(v) => setModel(v === 'sf3d' ? 'sf3d' : 'triposr')}
+        ariaLabel="3D model"
+      />
+    </span>
+  )
 }
 
 function CloudModelChip() {
@@ -106,8 +154,10 @@ function CloudModelChip() {
   // Portplan P7: lipsync/music/extend/motion reach the Studio track through
   // the SAME picker as their classic op-specialized twins.
   // intentPickerModels() (create-studio.ts, P2) already merges both worlds.
-  const roleIntent = !characterUse && intentRoles(intent).length > 0
-  const roleModels: PresetModel[] = roleIntent ? intentPickerModels(intent) : []
+  const threeDWay = useCreateStore((s) => s.threeDWay)
+  const pickIntent = studioIntentOf(intent, threeDWay)
+  const roleIntent = !characterUse && intentRoles(pickIntent).length > 0
+  const roleModels: PresetModel[] = roleIntent ? intentPickerModels(pickIntent) : []
   const characterModels = characterUse ? characterGenerationModels(selectedCharacter?.family ?? '') : []
   // List only the models that can run the current op — otherwise the picker
   // offers checkpoints that useCloudCreate silently swaps out at submit, so the
@@ -158,7 +208,10 @@ function CloudModelChip() {
     ? groupForPicker(roleModels).map(({ model: m, group }) => ({
         value: m.id,
         label: m.label,
-        sublabel: pickerCostHint(m, musicDuration),
+        // "Picture first" costs the picture and the model together.
+        sublabel: pickIntent === '3d-text' && isPictureFirstRun('text', m.id)
+          ? `${shortCount(createStudioCost(m.id, {}, 100) + pictureFirstPictureCredits(''))} cr`
+          : pickerCostHint(m, musicDuration),
         group,
         tags: tierMarks(m),
         badge: m.adult

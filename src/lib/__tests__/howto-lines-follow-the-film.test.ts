@@ -1,18 +1,45 @@
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { HOWTO, HOWTO_GUIDE_BASE, HOWTO_VIDEO_BASE, howtoGuideUrl, howtoLineAt, howtoVideoUrl, stageHowtoTopic } from '../howto'
+import { HOWTO, HOWTO_NOT_UPLOADED, HOWTO_GUIDE_BASE, HOWTO_VIDEO_BASE, howtoGuideUrl, howtoLineAt, howtoVideoUrl, stageHowtoTopic } from '../howto'
 import { INTENTS } from '../../components/create/experimental/intents'
 
 describe('how it works', () => {
+  // A tab whose film is not on the server yet gets none on the stage
+  // (stageHowtoTopic answers null), instead of a link to a film that is not
+  // there. Empty since the 3D films went up with 3.1.0.
+  const NO_FILM_YET = new Set<string>([])
+  const filmed = INTENTS.filter((i) => !NO_FILM_YET.has(i.id))
+
   it('has a film for every Create tab, for Code and for Agent', () => {
-    for (const intent of INTENTS) expect(HOWTO[intent.id], intent.id).toBeTruthy()
+    for (const intent of filmed) expect(HOWTO[intent.id], intent.id).toBeTruthy()
+    for (const id of NO_FILM_YET) expect(stageHowtoTopic(id, 'cloud')).toBeNull()
     expect(HOWTO.code.films.map((f) => f.label)).toEqual(['Modes', 'Slash commands'])
     expect(HOWTO.agent).toBeTruthy()
   })
 
+  // Films that are rendered but wait for the upload sit in HOWTO_NOT_UPLOADED.
+  // At upload the entry moves into HOWTO and its id leaves NO_FILM_YET.
+  it('keeps every film that waits for the upload ready, and out of the app', () => {
+    for (const id of NO_FILM_YET) {
+      const ready = HOWTO_NOT_UPLOADED[id]
+      expect(ready, id).toBeTruthy()
+      expect(HOWTO[id], id).toBeUndefined()
+      expect(ready.title).toBe(`How ${INTENTS.find((i) => i.id === id)!.short} works`)
+      for (const film of ready.films) {
+        const froms = film.steps.map((s) => s.from)
+        expect(froms).toEqual([...froms].sort((a, b) => a - b))
+        expect(film.steps.length).toBeGreaterThanOrEqual(3)
+      }
+      expect(stageHowtoTopic(id, 'local')).toBeNull()
+      expect(stageHowtoTopic(id, 'local', true)).toBeNull()
+    }
+    expect(HOWTO['3d'].films.map((f) => f.id)).toEqual(['3d', '3d-view'])
+    expect(HOWTO_NOT_UPLOADED['3d']).toBeUndefined()
+  })
+
   it('names each Create film after the tab it stands on', () => {
-    for (const intent of INTENTS) expect(HOWTO[intent.id].title).toBe(`How ${intent.short} works`)
+    for (const intent of filmed) expect(HOWTO[intent.id].title).toBe(`How ${intent.short} works`)
   })
 
   it('keeps the lines of every film in the order they are shown', () => {

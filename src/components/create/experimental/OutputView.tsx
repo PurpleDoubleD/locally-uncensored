@@ -14,6 +14,7 @@ import { PromptDetails } from './PromptDetails'
 import { hasPromptPanel } from '../../../lib/render/ran-prompt'
 import { markGalleryItemAvailable, playsAsVideo } from './galleryUrl'
 import { deleteTitle, unavailableLine, playerHasControls, UNAVAILABLE_VIDEO_BOX } from './galleryWording'
+import { deleteFate } from '../../../lib/gallery-trash'
 import { downloadGalleryItem } from './galleryDownload'
 import { galleryLabel } from '../../../lib/render/gallery-label'
 import { resultFacts } from '../../../lib/render/result-facts'
@@ -21,6 +22,7 @@ import { useComfyMedia } from './useComfyMedia'
 import { BatchQueue } from './BatchStrip'
 import { FitStage } from './FitStage'
 import { cn } from '../ui/cn'
+import { LazyModelViewer } from '../../three/LazyModelViewer'
 
 // The icon in the waiting circle says which PHASE the render is in, never
 // which device it runs on. The chip is the loading phase, the spark is
@@ -199,6 +201,29 @@ export function ResultView({ item, onFullscreen, onShowPrompt, onSendToEditor, o
   // An old animated .webp clip shows as a picture, which still moves (A19).
   const inPlayer = playsAsVideo(item)
   const isAudio = item.type === 'audio'
+  // What Delete does here: a local file goes to the bin, a cloud result only
+  // leaves this gallery (lib/gallery-trash.ts). A string, so the view only
+  // draws again when the answer changes.
+  const fate = useCreateStore((s) => deleteFate(item, s.gallery.filter((g) => g.id !== item.id)))
+  // A 3D model has its own view with its own bar (download menu, looks), so
+  // it skips the hover buttons of a picture.
+  if (item.type === '3d') {
+    const model = (maxHeight?: string) => (
+      <div className="w-[760px] max-w-full" style={{ height: maxHeight ?? '62vh' }} data-testid="result-3d">
+        <LazyModelViewer key={item.id} item={item} onFullscreen={onFullscreen} />
+      </div>
+    )
+    const under = (
+      <div className="flex items-center gap-3 mt-3 t-mono text-gray-600" data-testid="result-facts">
+        <span className="truncate max-w-[420px]">{galleryLabel(item)}</span>
+        <span>·</span>
+        <button type="button" className="underline underline-offset-2 hover:text-gray-300" onClick={() => useCreateStore.getState().removeFromGallery(item.id)}>
+          {deleteTitle(isMlxImageHost(), fate)}
+        </button>
+      </div>
+    )
+    return <FitStage picture={model} under={under} side={side} capVh={62} />
+  }
   // `maxHeight` is the height the stage has left for the result (FitStage).
   // Until the stage is measured it keeps the share of the window it always had.
   const media = (maxHeight?: string) => (
@@ -264,9 +289,9 @@ export function ResultView({ item, onFullscreen, onShowPrompt, onSendToEditor, o
           )}
           {/* Discord 2026-09-28 (#feature-requests "DELETE BUTTON"):
               delete from the big view too, not only from the tile's corner.
-              The file goes to the Recycle Bin, on a Mac to the Trash
-              (lib/gallery-trash.ts). */}
-          <IconBtn title={deleteTitle(isMlxImageHost())} onClick={() => useCreateStore.getState().removeFromGallery(item.id)}>
+              A local file goes to the Recycle Bin, on a Mac to the Trash; a
+              cloud result only leaves this gallery (lib/gallery-trash.ts). */}
+          <IconBtn title={deleteTitle(isMlxImageHost(), fate)} onClick={() => useCreateStore.getState().removeFromGallery(item.id)}>
             <Trash2 size={14} />
           </IconBtn>
         </div>

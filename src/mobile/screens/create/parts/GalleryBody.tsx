@@ -13,7 +13,8 @@
  * loaded (content-visibility and an observer).
  */
 import { memo, useMemo, useRef, useState } from 'react'
-import { AudioLines, Check, ListChecks, Play, X } from 'lucide-react'
+import { AudioLines, Box, Check, ListChecks, Play, X } from 'lucide-react'
+import { ModelThumb } from '../../../../components/three/ModelThumb'
 import { useCreateStore, type GalleryItem } from '../../../../stores/createStore'
 import { nav } from '../../../nav'
 import { COMPUTER_STRINGS as C, CREATE_STRINGS as T } from '../../../strings/create'
@@ -22,10 +23,10 @@ import { ComputerGallery } from './ComputerGallery'
 import { useComputerAvailability } from './computer-source'
 import { deleteItems, saveWithToast, takeItemAsExtend, takeItemAsSource, takeItemAsVoice } from './actions'
 import { saveItem } from './media-out'
-import { toolFacts } from './tools'
+import { toolTakesPhoto } from './tools'
 import { MediaStateBox, itemName, useItemMedia, useNearViewport } from './ui'
 
-type Filter = 'all' | 'image' | 'video' | 'audio'
+type Filter = 'all' | 'image' | 'video' | 'audio' | '3d'
 import type { PickPurpose } from './pick'
 
 type Purpose = PickPurpose
@@ -61,11 +62,13 @@ const Tile = memo(function Tile({ item, selecting, selected, onPress }: TileProp
         {showMedia && item.type === 'image' ? <img src={media.url ?? undefined} alt="" loading="lazy" decoding="async" onError={media.onError} /> : null}
         {showMedia && item.type === 'video' ? <video src={`${media.url}#t=0.1`} muted playsInline preload="metadata" onError={media.onError} /> : null}
         {item.type === 'audio' && state === 'ok' ? <Icon icon={AudioLines} /> : null}
+        {/* A 3D model shows the still the 3D view drew of it, or the cube with its name. */}
+        {near && item.type === '3d' && state === 'ok' ? <ModelThumb item={item} small /> : null}
         {state !== 'ok' ? <MediaStateBox state={state} compact /> : null}
       </button>
       {item.type !== 'image' && state === 'ok' ? (
         <span className="m-k-tile-badge">
-          {item.type === 'video' ? <Play /> : <AudioLines />}
+          {item.type === 'video' ? <Play /> : item.type === '3d' ? <Box /> : <AudioLines />}
           {T.gal.kind[item.type]}
         </span>
       ) : null}
@@ -96,6 +99,7 @@ export function GalleryBody({ purpose }: { purpose: Purpose | null }) {
   const onComputer = computerGallery && where === 'computer'
 
   const kind = purpose ? PURPOSE_KIND[purpose] : filter === 'all' ? null : filter
+  const has3d = gallery.some((g) => g.type === '3d')
   const items = useMemo(() => {
     const list = kind ? gallery.filter((g) => g.type === kind) : gallery
     // A picker only offers what can be handed over: a cloud result that still exists.
@@ -164,7 +168,7 @@ export function GalleryBody({ purpose }: { purpose: Purpose | null }) {
     if (purpose === 'source') {
       const st = useCreateStore.getState()
       const tool = st.intent()
-      ok = await takeItemAsSource(item, toolFacts(tool).needsSource || tool === 'lipsync' || tool === 'motion' ? tool : 'edit')
+      ok = await takeItemAsSource(item, toolTakesPhoto(tool) ? tool : 'edit')
     } else if (purpose === 'extend') ok = takeItemAsExtend(item)
     else ok = takeItemAsVoice(item)
     setBusy(null)
@@ -237,9 +241,10 @@ export function GalleryBody({ purpose }: { purpose: Purpose | null }) {
       {tabs}
       {picking ? null : (
         <ChipGroup label={T.gal.filters} testid="m-create-gallery-filters">
-          {(['all', 'image', 'video', 'audio'] as const).map((id) => (
+          {/* The 3D chip only where there is a 3D model, so the row of everyone else stays as it was. */}
+          {(['all', 'image', 'video', 'audio', ...(has3d || filter === '3d' ? ['3d' as const] : [])] as const).map((id) => (
             <Chip key={id} kind="filter" selected={filter === id} onPress={() => setFilter(id)} testid={`m-create-gallery-filter-${id}`} el="K6.1">
-              {id === 'all' ? T.gal.all : id === 'image' ? T.gal.images : id === 'video' ? T.gal.video : T.gal.audio}
+              {id === 'all' ? T.gal.all : id === 'image' ? T.gal.images : id === 'video' ? T.gal.video : id === '3d' ? T.gal.threeD : T.gal.audio}
             </Chip>
           ))}
         </ChipGroup>

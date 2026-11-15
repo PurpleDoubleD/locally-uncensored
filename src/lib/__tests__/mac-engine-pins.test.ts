@@ -1,15 +1,15 @@
 /**
- * The pins of the four Mac media engines have one home each.
+ * The pins of the five Mac media engines have one home each.
  *
  * `macos-gate` in ci.yml asks pip whether the engines' packages still
  * resolve (`scripts/mac-engine-pins-dry-run.sh`). The lists it asks about
  * are read by `scripts/mac-engine-pins.mjs` from the places the app itself
- * installs from: three Rust files and one requirements file. Nothing is
+ * installs from: four Rust files and one requirements file. Nothing is
  * copied, so nothing can drift between a copy and its original. What CAN
  * happen is that a Rust file changes shape and the reader reads less than
  * is there, or nothing. This file holds that the reader then stops:
  *
- *   1. against the working tree it finds all four engines, every entry an
+ *   1. against the working tree it finds all five engines, every entry an
  *      exact pin or a pinned archive, and the lists are what the Rust code
  *      builds (array lengths, the archive addresses);
  *   2. it refuses a source whose shape it does not know: a missing constant,
@@ -40,8 +40,8 @@ const engines = readEnginePins()
 const byId = (id: string) => engines.find((e) => e.id === id)!
 
 describe('the working tree', () => {
-  it('yields the four engines, in a fixed order', () => {
-    expect(engines.map((e) => e.id)).toEqual(['image', 'mflux', 'mlx-video', 'ltx-2-mlx'])
+  it('yields the five engines, in a fixed order', () => {
+    expect(engines.map((e) => e.id)).toEqual(['image', 'mflux', 'mlx-video', 'ltx-2-mlx', 'mesh3d', 'mesh3d-sf3d'])
     for (const engine of engines) expect(engine.source).toBe(SOURCES[engine.id])
   })
 
@@ -93,6 +93,33 @@ describe('the working tree', () => {
     expect(source).toContain(`format!("${LTX_SPEC_TEMPLATE}")`)
   })
 
+  it('reads the 3D engine as exactly the PINNED array of mesh3d.rs, wheels only', () => {
+    const source = read(SOURCES.mesh3d)
+    const declared = Number(source.match(/const PINNED: \[&str; (\d+)\]/)![1])
+    const specs = byId('mesh3d').specs
+    expect(specs).toHaveLength(declared)
+    // Every entry is name==version: the second pass of the dry run checks all
+    // of them for wheels on the oldest macOS.
+    expect(specs.every((s) => !s.includes(' @ '))).toBe(true)
+    // torch is the one the music engine installs, so the wheel is fetched once.
+    expect(specs).toContain('torch==2.10.0')
+    expect(specs.some((s) => s.startsWith('torchmcubes') || s.startsWith('rembg'))).toBe(false)
+  })
+
+  it('reads the Stable Fast 3D engine as the PINNED array of mesh3d_sf3d.rs, without its own wheels', () => {
+    const source = read(SOURCES['mesh3d-sf3d'])
+    const declared = Number(source.match(/const PINNED: \[&str; (\d+)\]/)![1])
+    const specs = byId('mesh3d-sf3d').specs
+    expect(specs).toHaveLength(declared)
+    expect(specs.every((s) => !s.includes(' @ '))).toBe(true)
+    expect(specs).toContain('torch==2.10.0')
+    // The two extensions are LU's own wheels in the app, never asked of PyPI;
+    // what LU replaces is not installed at all.
+    for (const never of ['texture-baker', 'uv-unwrapper', 'rembg', 'gpytoolbox', 'pynanoinstantmeshes']) {
+      expect(specs.some((s) => s.startsWith(`${never}==`))).toBe(false)
+    }
+  })
+
   it('takes the Python line from python.json', () => {
     expect(pythonLine()).toMatch(/^3\.\d+$/)
     expect(JSON.parse(read('src-tauri/resources/voice_loop/python.json')).version.startsWith(pythonLine() + '.')).toBe(true)
@@ -103,6 +130,11 @@ describe('a source that changed shape stops the reader', () => {
   const real = (rel: string) => read(rel)
   const withFile = (rel: string, change: (text: string) => string) => (path: string) =>
     path === rel ? change(real(path)) : real(path)
+
+  it('a 3D engine whose list lost its declared length', () => {
+    const reader = withFile(SOURCES.mesh3d, (t) => t.replace(/const PINNED: \[&str; \d+\]/, 'const PINNED: [&str; 3]'))
+    expect(() => readEnginePins(reader)).toThrow(/mesh3d\.rs.*declares 3 entries/)
+  })
 
   it('a renamed constant', () => {
     const reader = withFile(SOURCES.mflux, (t) => t.replace('const PINNED:', 'const PINS:'))

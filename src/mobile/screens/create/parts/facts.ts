@@ -8,12 +8,12 @@
  * so two open screens never ask the server twice.
  */
 import { create } from 'zustand'
-import { useCreateStore, imageQualityLadder, type CharacterRef, type ImageRef, type MediaRef } from '../../../../stores/createStore'
+import { useCreateStore, imageQualityLadder, type CharacterRef, type ImageRef, type MediaRef, type ThreeDWay } from '../../../../stores/createStore'
 import { useCloudAuthStore, deriveCloudAvailable } from '../../../../stores/cloudAuthStore'
 import { useCloudCatalogStore, lengthPrice, runCredits } from '../../../../stores/cloudCatalogStore'
 import { useSettingsStore } from '../../../../stores/settingsStore'
-import { intentToJob, type CloudQuota, type RenderKind, type RenderOp } from '../../../../lib/render/cloud-jobs'
-import { createStudioCost, intentRequiredInputs, startImageCount, studioExtraPhotoSlots } from '../../../../lib/render/create-studio'
+import { intentToJob, quotaCostKind, type CloudQuota, type RenderKind, type RenderOp } from '../../../../lib/render/cloud-jobs'
+import { createStudioCost, intentRequiredInputs, startImageCount, studioExtraPhotoSlots, studioIntentOf } from '../../../../lib/render/create-studio'
 import { STUDIO_MODELS, studioFields } from '../../../../lib/render/studio-contract'
 import { runImageCount } from '../../../../lib/render/image-count'
 import { meterState, type MeterState } from '../../../../lib/render/credits-meter'
@@ -26,6 +26,8 @@ import { lengthUnit } from './length-price'
 import { aspectKey, qualityKey, runParams, summaryParts, type AspectKey, type QualityKey, type RunParams } from './params'
 import { blockReason, walletVerdict, type BlockReason, type WalletVerdict } from './run-state'
 import { toolFacts, toolNeedsMask, type ToolFacts, type ToolId } from './tools'
+import { threeDModelFacts, type ThreeDModelFacts } from './three-d'
+import { pictureStepCredits } from '../../../../lib/three/picture-first'
 
 // ---------- the confirmed price, shared ----------
 
@@ -127,6 +129,11 @@ export interface CreateFacts {
   videoInput: MediaRef | null
   audioInput: MediaRef | null
   online: boolean
+  /** 3D: the way of the tool, and what its model takes. Null for every other tool. */
+  threeDWay: ThreeDWay
+  threeD: ThreeDModelFacts | null
+  /** 3D: the further sides after the Front (or the further still frames). */
+  threeDViews: ImageRef[]
 }
 
 export function useCreateFacts(): CreateFacts {
@@ -163,11 +170,14 @@ export function useCreateFacts(): CreateFacts {
   const voiceFromJob = useCreateStore((s) => s.voiceFromJob)
   const videoInput = useCreateStore((s) => s.videoInput)
   const extendSource = useCreateStore((s) => s.extendSource)
+  const threeDWay = useCreateStore((s) => s.threeDWay)
+  const threeDViews = useCreateStore((s) => s.threeDViews)
   const price = usePriceStore()
 
-  const facts = toolFacts(tool)
+  const facts = toolFacts(tool, threeDWay)
   const characterUse = tool === 'character' && characterTab === 'use'
-  const model = runModel(tool, { cloudImageModel, cloudVideoModel, cloudOpModel }, character, characterUse)
+  const model = runModel(tool, { cloudImageModel, cloudVideoModel, cloudOpModel }, character, characterUse, threeDWay)
+  const threeD = tool === '3d' ? threeDModelFacts(model.studio ? model.id : undefined, threeDWay) : null
   let { kind, op } = intentToJob(tool)
   if (characterUse) {
     kind = 'image'
@@ -198,7 +208,7 @@ export function useCreateFacts(): CreateFacts {
 
   // The price of one run, by the same rule the cloud hook books with.
   const runSeconds = op === 'music' ? musicDuration : kind === 'video' && !model.studio && seconds !== null ? seconds : undefined
-  const extraPhotos = tool === 'edit' || tool === 'animate' ? references.length : 0
+  const extraPhotos = tool === 'edit' || tool === 'animate' ? references.length : tool === '3d' && threeD ? Math.min(threeDViews.length, threeD.maxViews - 1) : 0
   let unit: number | null = null
   let priceState: CreateFacts['priceState'] = 'known'
   if (model.studio) {
@@ -214,6 +224,8 @@ export function useCreateFacts(): CreateFacts {
         unit = null
       }
     }
+    // "Picture first" books the picture and the model: the button shows both.
+    if (unit !== null) unit += pictureStepCredits(tool, threeDWay, model.id, prompt)
   } else if (model.id && lengthPrice(model.id, op)) {
     // Billed by the length of the input (credits.length). The number PriceOwner left is the price of the
     // measured length, or after a 409 the price the server measured; until it is there, the rule itself answers.
@@ -221,7 +233,7 @@ export function useCreateFacts(): CreateFacts {
     unit = (mine ? cloudStudioCredits : null) ?? lengthUnit(model.id, op, prompt, mine ? price.inputSeconds : undefined)
     if (mine && price.measuring) priceState = 'measuring'
   } else if (quota && model.id) {
-    unit = runCredits(kind, op, model.id, runSeconds, quota.costs[kind === 'audio' ? 'image' : kind], targetResolution)
+    unit = runCredits(kind, op, model.id, runSeconds, quota.costs[quotaCostKind(kind)], targetResolution)
   } else if (quota && !facts.hasModels) {
     unit = runCredits(kind, op, '', runSeconds, quota.costs.image, targetResolution)
   }
@@ -234,7 +246,7 @@ export function useCreateFacts(): CreateFacts {
   const needsMask = toolNeedsMask(tool, model.maskless)
   const promptShown = facts.prompt !== 'no' && (tool !== 'character' || characterUse)
   const promptNeeded = promptShown && facts.prompt === 'yes'
-  const studioNeeds = model.studio ? intentRequiredInputs(tool, model.id) : []
+  const studioNeeds = model.studio ? intentRequiredInputs(studioIntentOf(tool, threeDWay), model.id) : []
   const needsClip = tool === 'lipsync' && (model.studio ? studioNeeds.includes('video_path') : model.lipsyncFromClip)
   const needsPortrait = tool === 'lipsync' && !needsClip && (model.studio ? studioNeeds.includes('source_path') : true)
 
@@ -256,6 +268,7 @@ export function useCreateFacts(): CreateFacts {
     needsClip,
     hasVideo: !!videoInput,
     hasExtendClip: !!extendSource,
+    threeDWay,
     hasModel: !facts.hasModels || !!model.id,
     priceState,
     quotaKnown: quota !== null,
@@ -267,5 +280,6 @@ export function useCreateFacts(): CreateFacts {
     source, mask, references,
     referenceSlots: model.studio && (tool === 'edit' || tool === 'animate') ? studioExtraPhotoSlots(model.id) : 0,
     needsPortrait, needsClip, videoInput, audioInput, online,
+    threeDWay, threeD, threeDViews,
   }
 }

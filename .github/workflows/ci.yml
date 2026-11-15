@@ -643,7 +643,7 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Engine pins still resolve (pip install --dry-run, four engines)
+      - name: Engine pins still resolve (pip install --dry-run, five engines)
         shell: bash
         timeout-minutes: 20
         env:

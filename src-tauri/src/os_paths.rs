@@ -285,21 +285,40 @@ pub(crate) mod test_storage {
         })
     }
 
+    /// A folder of its own for the real run instead of the app's folders on
+    /// this Mac: `LU_REAL_RUN_HOME`, an absolute path. Read only in the real
+    /// run, and only in a test build: a release build has no such switch.
+    /// The data and the config folder are one there, as on a Mac, the cache
+    /// is beside them.
+    pub fn real_run_home() -> Option<PathBuf> {
+        if !real_run() {
+            return None;
+        }
+        std::env::var_os("LU_REAL_RUN_HOME").map(PathBuf::from).filter(|p| p.is_absolute())
+    }
+
     /// The three folders the media engines live in are the app's own in the
-    /// real run. Everything else (settings, stores, workspace) stays scratch.
-    fn real(dir: Option<PathBuf>) -> Option<PathBuf> {
-        if real_run() { dir.map(|d| d.join(APP_DIR)) } else { None }
+    /// real run, or those under `LU_REAL_RUN_HOME` when it names one.
+    /// Everything else (settings, stores, workspace) stays scratch.
+    fn real(dir: Option<PathBuf>, kind: &str) -> Option<PathBuf> {
+        if !real_run() {
+            return None;
+        }
+        match real_run_home() {
+            Some(home) => Some(home.join(kind).join(APP_DIR)),
+            None => dir.map(|d| d.join(APP_DIR)),
+        }
     }
 
     pub fn data_dir() -> PathBuf {
-        real(dirs::data_local_dir()).unwrap_or_else(|| root().join("local").join(APP_DIR))
+        real(dirs::data_local_dir(), "support").unwrap_or_else(|| root().join("local").join(APP_DIR))
     }
     pub fn cache_dir() -> PathBuf {
-        real(dirs::cache_dir())
+        real(dirs::cache_dir(), "cache")
             .unwrap_or_else(|| root().join(if cfg!(windows) { "local" } else { "cache" }).join(APP_DIR))
     }
     pub fn config_root() -> PathBuf {
-        real(dirs::config_dir()).unwrap_or_else(|| config_base().join(APP_DIR))
+        real(dirs::config_dir(), "support").unwrap_or_else(|| config_base().join(APP_DIR))
     }
     pub fn app_config_dir() -> PathBuf { config_base().join(APP_CONFIG_DIR) }
     pub fn tools_bin_dir() -> PathBuf { root().join("local").join(APP_CONFIG_DIR).join("bin") }
@@ -317,6 +336,8 @@ pub(crate) mod test_storage {
         assert_eq!(data_dir(), std::thread::spawn(data_dir).join().unwrap());
         if cfg!(target_os = "macos") { assert_eq!(data_dir(), config_root()); }
         if cfg!(windows) { assert_eq!(data_dir(), cache_dir()); }
+        // Outside the real run the switch of its own folder is not read.
+        assert_eq!(real_run_home(), None);
     }
 
     #[test]

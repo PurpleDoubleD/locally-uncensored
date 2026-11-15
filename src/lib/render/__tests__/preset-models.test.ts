@@ -54,6 +54,8 @@ const SUPPORTED_OPS: Record<string, readonly string[]> = {
   image: ['studio', 'generate', 'edit', 'removebg', 'eraser', 'upscale', 'lora-train'],
   video: ['studio', 'generate', 'animate', 'upscale', 'lipsync', 'extend', 'motion', 'lora-train'],
   audio: ['studio', 'music', 'tts'],
+  // 3.1.0: 3D runs as a studio model only (SUPPORTED_OPS['3d'] on the server).
+  '3d': ['studio'],
 }
 
 describe('jedes waehlbare Modell faehrt seinen Schritt', () => {
@@ -134,7 +136,12 @@ describe('jedes waehlbare Modell faehrt seinen Schritt', () => {
   })
 
   it('jedes Studio-Modell gehoert zu genau einer Rolle', () => {
-    for (const id of Object.keys(STUDIO_MODELS)) {
+    // Ein noch nicht gemessenes Modell (studio-contract.ts, unmeasuredHidden)
+    // gehoert zu keiner, solange der Server es nicht fuer die Messung freigibt.
+    for (const id of Object.keys(STUDIO_MODELS).filter((id) => STUDIO_MODELS[id].unmeasured)) {
+      expect(ALL_ROLES.filter((r) => presetModels(r).some((m) => m.id === id)), id).toEqual([])
+    }
+    for (const id of Object.keys(STUDIO_MODELS).filter((id) => !STUDIO_MODELS[id].unmeasured)) {
       const roles = ALL_ROLES.filter((r) => presetModels(r).some((m) => m.id === id))
       expect(roles, id).toHaveLength(1)
       expect(roleForModel(id), id).toBe(roles[0])

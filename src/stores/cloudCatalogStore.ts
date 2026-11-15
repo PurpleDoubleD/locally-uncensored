@@ -8,7 +8,7 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { safeJSONStorage } from '../lib/storage-quota'
 import { CLOUD_MODEL_SEED, DEFAULT_MODEL_IDS, type CloudLengthPrice, type CloudModel } from '../lib/render/cloud-models'
-import { STUDIO_MODELS } from '../lib/render/studio-contract'
+import { STUDIO_MODELS, unmeasuredHidden } from '../lib/render/studio-contract'
 import {
   STUDIO_EDIT_MODELS, studioImageToVideo, studioReferenceVideo, studioTextToImage,
   studioTextToVideo,
@@ -53,6 +53,13 @@ export const useCloudCatalogStore = create<CloudCatalogState>()(
     {
       name: 'lu-cloud-catalog',
       storage: safeJSONStorage(),
+      // A copy saved from an older server may still hold a model that is not
+      // measured yet (studio-contract.ts, unmeasuredHidden): it stays out.
+      merge: (persisted, current) => {
+        const saved = (persisted ?? {}) as Partial<CloudCatalogState>
+        const models = Array.isArray(saved.models) ? saved.models.filter((m) => !unmeasuredHidden(m)) : current.models
+        return { ...current, ...saved, models }
+      },
     },
   ),
 )
@@ -190,7 +197,7 @@ export function studioEntries(ids: readonly string[]): CloudModel[] {
   const { models } = useCloudCatalogStore.getState()
   return ids
     .map((id) => models.find((m) => m.id === id))
-    .filter((m): m is CloudModel => m !== undefined && m.quote_required === true && STUDIO_MODELS[m.id] !== undefined)
+    .filter((m): m is CloudModel => m !== undefined && m.quote_required === true && STUDIO_MODELS[m.id] !== undefined && !unmeasuredHidden(m))
 }
 
 /** Models that can run the 'edit' op: the masked img2img editors (`edit` flag,

@@ -652,6 +652,10 @@ const MODEL_SUBDIRS: &[&str] = &[
     "controlnet", "upscale_models", "embeddings", "style_models",
     // LTX 2.5's x2 latent upscaler (LatentUpscaleModelLoader reads this folder).
     "latent_upscale_models",
+    // Local 3D (3.1.0): BiRefNet, the cutout model in front of TRELLIS.2.
+    // LoadBackgroundRemovalModel reads it (ComfyUI v0.42.4, folder_paths.py
+    // key "background_removal").
+    "background_removal",
 ];
 
 /// Why a file ComfyUI listed is not in the ComfyUI models tree.
@@ -3460,6 +3464,17 @@ mod tests {
         assert_eq!(sorted.len(), MODEL_SUBDIRS.len(), "duplicate entry");
     }
 
+    #[test]
+    fn the_3d_folders_are_model_subdirs_and_safe_targets() {
+        // The TRELLIS.2 bundle (src/api/model-bundles.ts getThreeDBundles)
+        // writes into these four folders. Each has to be a target the
+        // downloader accepts and a folder delete searches, or the 3D files
+        // could be fetched but never removed from the Installed list.
+        for d in ["diffusion_models", "vae", "clip_vision", "background_removal"] {
+            assert!(super::MODEL_SUBDIRS.contains(&d), "{d} missing from MODEL_SUBDIRS");
+            assert!(super::safe_subfolder(d).is_ok(), "{d} refused as a download target");
+        }
+    }
 
     /// GH #113: a partial as long as the file is answered 416 on every
     /// resume. That and only that sends the partial to the Trash and starts

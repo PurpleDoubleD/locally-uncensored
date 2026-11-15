@@ -1778,5 +1778,497 @@
     },
     "defaults": {},
     "baselineUsd": 0.028
+  },
+  "trellis-2": {
+    "label": "TRELLIS.2",
+    "endpoint": "base/trellis-2/image-to-3d",
+    "kind": "3d",
+    "adult": false,
+    "tier": "best",
+    "weights": "open",
+    "price": {
+      "mode": "flat",
+      "rates": {
+        "512": 0.1,
+        "1024": 0.2,
+        "1536": 0.4
+      }
+    },
+    "inputs": {
+      "image": "source_path"
+    },
+    "defaults": {},
+    "typical_s": 39,
+    "baselineUsd": 0.2
+  },
+  "hunyuan-3d-3.1-text": {
+    "label": "Hunyuan3D 3.1 Rapid",
+    "endpoint": "base/hunyuan-3d-v3.1/text-to-3d-rapid",
+    "kind": "3d",
+    "adult": false,
+    "tier": "standard",
+    "weights": "open-family",
+    "price": {
+      "mode": "flat",
+      "rates": {
+        "default": 0.27
+      }
+    },
+    "inputs": {},
+    "defaults": {},
+    "typical_s": 112,
+    "baselineUsd": 0.27
+  },
+  "hunyuan-3d-3.1-image": {
+    "label": "Hunyuan3D 3.1 Rapid",
+    "endpoint": "base/hunyuan-3d-v3.1/image-to-3d-rapid",
+    "kind": "3d",
+    "adult": false,
+    "tier": "standard",
+    "weights": "open-family",
+    "price": {
+      "mode": "flat",
+      "rates": {
+        "default": 0.27
+      }
+    },
+    "inputs": {
+      "image": "source_path"
+    },
+    "defaults": {},
+    "typical_s": 50,
+    "baselineUsd": 0.27
+  },
+  "tripo-h3.1-text": {
+    "label": "Tripo H3.1",
+    "endpoint": "tripo3d/h3.1/text-to-3d",
+    "kind": "3d",
+    "adult": false,
+    "tier": "best",
+    "weights": "closed",
+    "price": {
+      "mode": "flat",
+      "rates": {
+        "standard": 0.24,
+        "fast": 0.24,
+        "detailed": 0.36,
+        "extreme": 0.48
+      },
+      "resolutionField": "texture_quality"
+    },
+    "inputs": {},
+    "defaults": {},
+    "typical_s": 129,
+    "baselineUsd": 0.24
+  },
+  "tripo-h3.1-image": {
+    "label": "Tripo H3.1",
+    "endpoint": "tripo3d/h3.1/image-to-3d",
+    "kind": "3d",
+    "adult": false,
+    "tier": "best",
+    "weights": "closed",
+    "price": {
+      "mode": "flat",
+      "rates": {
+        "standard": 0.36,
+        "fast": 0.36,
+        "detailed": 0.48,
+        "extreme": 0.6
+      },
+      "resolutionField": "texture_quality"
+    },
+    "inputs": {
+      "image": "source_path"
+    },
+    "defaults": {},
+    "typical_s": 124,
+    "baselineUsd": 0.36
+  },
+  "tripo-h3.1-multiview": {
+    "label": "Tripo H3.1 \u2022 Multiview",
+    "endpoint": "tripo3d/h3.1/multiview-to-3d",
+    "kind": "3d",
+    "adult": false,
+    "tier": "best",
+    "weights": "closed",
+    "price": {
+      "mode": "flat",
+      "rates": {
+        "standard": 0.36,
+        "fast": 0.36,
+        "detailed": 0.48,
+        "extreme": 0.6
+      },
+      "resolutionField": "texture_quality"
+    },
+    "inputs": {
+      "images": "image_paths"
+    },
+    "defaults": {},
+    "typical_s": 130,
+    "baselineUsd": 0.36
+  },
+  "seed3d-2.0": {
+    "label": "Seed3D 2.0",
+    "endpoint": "bytedance/seed3d-2.0/image-to-3d",
+    "kind": "3d",
+    "adult": false,
+    "tier": "standard",
+    "weights": "closed",
+    "price": {
+      "mode": "flat",
+      "rates": {
+        "default": 0.4
+      }
+    },
+    "inputs": {
+      "image": "source_path"
+    },
+    "defaults": {},
+    "typical_s": 388,
+    "baselineUsd": 0.4
+  },
+  "rodin-2.5-text": {
+    "label": "Rodin 2.5",
+    "endpoint": "hyper3d/rodin-v2.5/text-to-3d",
+    "kind": "3d",
+    "adult": false,
+    "tier": "best",
+    "weights": "closed",
+    "price": {
+      "mode": "flat",
+      "rates": {
+        "default": 0.48
+      }
+    },
+    "inputs": {},
+    "defaults": {},
+    "typical_s": 116,
+    "baselineUsd": 0.48
+  },
+  "rodin-2.5-image": {
+    "label": "Rodin 2.5",
+    "endpoint": "hyper3d/rodin-v2.5/image-to-3d",
+    "kind": "3d",
+    "adult": false,
+    "tier": "best",
+    "weights": "closed",
+    "price": {
+      "mode": "flat",
+      "rates": {
+        "default": 0.48
+      }
+    },
+    "inputs": {
+      "images": "image_paths"
+    },
+    "defaults": {},
+    "typical_s": 124,
+    "baselineUsd": 0.48
+  },
+  "meshy-6-lite": {
+    "label": "Meshy 6 Lite",
+    "endpoint": "meshy/v6-lite/image-to-3d",
+    "kind": "3d",
+    "adult": false,
+    "tier": "standard",
+    "weights": "closed",
+    "price": {
+      "mode": "flat",
+      "rates": {
+        "true": 0.6,
+        "false": 0.2
+      },
+      "resolutionField": "should_texture"
+    },
+    "inputs": {
+      "image": "source_path"
+    },
+    "defaults": {},
+    "typical_s": 60,
+    "baselineUsd": 0.6
+  },
+  "hunyuan-3d-v3-text": {
+    "label": "Hunyuan3D 3",
+    "endpoint": "base/hunyuan3d-v3/text-to-3d",
+    "kind": "3d",
+    "adult": false,
+    "tier": "best",
+    "weights": "open-family",
+    "price": {
+      "mode": "flat",
+      "rates": {
+        "default": 0.63
+      }
+    },
+    "inputs": {},
+    "defaults": {},
+    "typical_s": 244,
+    "baselineUsd": 0.3
+  },
+  "hunyuan-3d-v3-image": {
+    "label": "Hunyuan3D 3",
+    "endpoint": "base/hunyuan3d-v3/image-to-3d",
+    "kind": "3d",
+    "adult": false,
+    "tier": "best",
+    "weights": "open-family",
+    "price": {
+      "mode": "flat",
+      "rates": {
+        "default": 0.63
+      },
+      "extraViews": 0.18
+    },
+    "inputs": {
+      "images": "image_paths"
+    },
+    "defaults": {},
+    "typical_s": 143,
+    "baselineUsd": 0.3
+  },
+  "meshy-7.1-text": {
+    "label": "Meshy 7.1",
+    "endpoint": "meshy/v7.1/text-to-3d",
+    "kind": "3d",
+    "adult": false,
+    "tier": "best",
+    "weights": "closed",
+    "price": {
+      "mode": "flat",
+      "rates": {
+        "default": 1.2
+      }
+    },
+    "inputs": {},
+    "defaults": {},
+    "typical_s": 103,
+    "baselineUsd": 1.2
+  },
+  "meshy-7.1-image": {
+    "label": "Meshy 7.1",
+    "endpoint": "meshy/v7.1/image-to-3d",
+    "kind": "3d",
+    "adult": false,
+    "tier": "best",
+    "weights": "closed",
+    "price": {
+      "mode": "flat",
+      "rates": {
+        "true": 1.2,
+        "false": 0.8
+      },
+      "resolutionField": "should_texture"
+    },
+    "inputs": {
+      "image": "source_path"
+    },
+    "defaults": {},
+    "typical_s": 81,
+    "baselineUsd": 1.2
+  },
+  "meshy-7.1-multi": {
+    "label": "Meshy 7.1 \u2022 Multi-image",
+    "endpoint": "meshy/v7.1/multi-image-to-3d",
+    "kind": "3d",
+    "adult": false,
+    "tier": "best",
+    "weights": "closed",
+    "price": {
+      "mode": "flat",
+      "rates": {
+        "true": 1.2,
+        "false": 0.8
+      },
+      "resolutionField": "should_texture"
+    },
+    "inputs": {
+      "images": "image_paths"
+    },
+    "defaults": {},
+    "typical_s": 121,
+    "baselineUsd": 1.2
+  },
+  "tripo-p1-text": {
+    "label": "Tripo P1",
+    "endpoint": "tripo3d/p1/text-to-3d",
+    "kind": "3d",
+    "adult": false,
+    "tier": "best",
+    "weights": "closed",
+    "price": {
+      "mode": "flat",
+      "rates": {
+        "standard": 0.48,
+        "fast": 0.48,
+        "detailed": 0.6,
+        "extreme": 0.72
+      },
+      "resolutionField": "texture_quality"
+    },
+    "inputs": {},
+    "defaults": {},
+    "typical_s": 59,
+    "baselineUsd": 0.48
+  },
+  "tripo-p1-image": {
+    "label": "Tripo P1",
+    "endpoint": "tripo3d/p1/image-to-3d",
+    "kind": "3d",
+    "adult": false,
+    "tier": "best",
+    "weights": "closed",
+    "price": {
+      "mode": "flat",
+      "rates": {
+        "standard": 0.6,
+        "fast": 0.6,
+        "detailed": 0.72,
+        "extreme": 0.84
+      },
+      "resolutionField": "texture_quality"
+    },
+    "inputs": {
+      "image": "source_path"
+    },
+    "defaults": {},
+    "typical_s": 72,
+    "baselineUsd": 0.6
+  },
+  "tripo-p1-multiview": {
+    "label": "Tripo P1 \u2022 Multiview",
+    "endpoint": "tripo3d/p1/multiview-to-3d",
+    "kind": "3d",
+    "adult": false,
+    "tier": "best",
+    "weights": "closed",
+    "price": {
+      "mode": "flat",
+      "rates": {
+        "standard": 0.6,
+        "fast": 0.6,
+        "detailed": 0.72,
+        "extreme": 0.84
+      },
+      "resolutionField": "texture_quality"
+    },
+    "inputs": {
+      "images": "image_paths"
+    },
+    "defaults": {},
+    "typical_s": 77,
+    "baselineUsd": 0.6
+  },
+  "tripo-p2-text": {
+    "label": "Tripo P2",
+    "endpoint": "tripo3d/p2/text-to-3d",
+    "kind": "3d",
+    "adult": false,
+    "tier": "best",
+    "weights": "closed",
+    "price": {
+      "mode": "flat",
+      "rates": {
+        "standard": 1.32,
+        "fast": 1.32,
+        "detailed": 1.44,
+        "extreme": 1.56
+      },
+      "resolutionField": "texture_quality"
+    },
+    "inputs": {},
+    "defaults": {},
+    "typical_s": 103,
+    "baselineUsd": 1.32
+  },
+  "tripo-p2-image": {
+    "label": "Tripo P2",
+    "endpoint": "tripo3d/p2/image-to-3d",
+    "kind": "3d",
+    "adult": false,
+    "tier": "best",
+    "weights": "closed",
+    "price": {
+      "mode": "flat",
+      "rates": {
+        "standard": 1.32,
+        "fast": 1.32,
+        "detailed": 1.44,
+        "extreme": 1.56
+      },
+      "resolutionField": "texture_quality"
+    },
+    "inputs": {
+      "image": "source_path"
+    },
+    "defaults": {},
+    "typical_s": 85,
+    "baselineUsd": 1.32
+  },
+  "tripo-p2-multiview": {
+    "label": "Tripo P2 \u2022 Multiview",
+    "endpoint": "tripo3d/p2/multiview-to-3d",
+    "kind": "3d",
+    "adult": false,
+    "tier": "best",
+    "weights": "closed",
+    "price": {
+      "mode": "flat",
+      "rates": {
+        "standard": 1.32,
+        "fast": 1.32,
+        "detailed": 1.44,
+        "extreme": 1.56
+      },
+      "resolutionField": "texture_quality"
+    },
+    "inputs": {
+      "images": "image_paths"
+    },
+    "defaults": {},
+    "typical_s": 101,
+    "baselineUsd": 1.32
+  },
+  "hi3d-3.0-image": {
+    "label": "Hi3D 3.0",
+    "endpoint": "hitem3d/hi3d-v3.0/image-to-3d",
+    "kind": "3d",
+    "adult": false,
+    "tier": "best",
+    "weights": "closed",
+    "price": {
+      "mode": "flat",
+      "rates": {
+        "default": 2.52
+      }
+    },
+    "inputs": {
+      "image": "source_path"
+    },
+    "defaults": {},
+    "typical_s": 581,
+    "baselineUsd": 2.52
+  },
+  "hi3d-3.0-multiview": {
+    "label": "Hi3D 3.0 \u2022 Multiview",
+    "endpoint": "hitem3d/hi3d-v3.0/multi-view-to-3d",
+    "kind": "3d",
+    "adult": false,
+    "unmeasured": true,
+    "tier": "best",
+    "weights": "closed",
+    "price": {
+      "mode": "flat",
+      "rates": {
+        "default": 2.52
+      }
+    },
+    "inputs": {
+      "images": "image_paths"
+    },
+    "defaults": {},
+    "typical_s": 691,
+    "baselineUsd": 2.52
   }
 }

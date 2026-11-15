@@ -503,6 +503,9 @@ pub(super) async fn enhance(state: &AppState, args: &Value) -> CmdResult {
     if let Some(why) = super::train::refusal() {
         return Err(crate::commands::bad_request(why));
     }
+    if let Some(why) = crate::commands::mesh3d::refusal() {
+        return Err(crate::commands::bad_request(why));
+    }
     if !usable(e) {
         return Err(crate::commands::bad_request(format!("{} is not installed. Install it in the Model Manager first.", e.name)));
     }

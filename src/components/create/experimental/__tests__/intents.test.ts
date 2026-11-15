@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { INTENTS, INTENT_MAP, isIntentAvailable, isIntentLocked, visibleIntents } from '../intents'
+import { INTENTS, INTENT_MAP, intentNeedsSource, intentTakesPrompt, isIntentAvailable, isIntentLocked, visibleIntents } from '../intents'
 import { LOCAL_LANE_OPS, LOCAL_UTILITY_OPS } from '../../../../stores/createStore'
 
 // 2026-07-10 made the advanced ops cloud-only; 2026-07-12 brought
@@ -52,9 +52,9 @@ describe('intent cloud gating', () => {
     expect(fromMeta).toEqual([...LOCAL_LANE_OPS, ...LOCAL_UTILITY_OPS].sort())
   })
 
-  it('the local IntentBar filter keeps the 5 classic tabs, Enhance and the 5 lanes selectable', () => {
+  it('the local IntentBar filter keeps the 5 classic tabs, Enhance, the 5 lanes and 3D selectable', () => {
     const selectable = INTENTS.filter((m) => !m.cloudOnly || m.hasLocalLane).map((m) => m.id)
-    expect(selectable).toEqual(['image', 'edit', 'removebg', 'upscale', 'video', 'animate', 'character', 'lipsync', 'music', 'extend', 'motion'])
+    expect(selectable).toEqual(['image', 'edit', 'removebg', 'upscale', 'video', 'animate', 'character', 'lipsync', 'music', 'extend', 'motion', '3d'])
     // …and that IS what the pure filter reports for a ComfyUI local host.
     expect(unlocked('local', false)).toEqual(selectable)
   })
@@ -96,11 +96,12 @@ describe('intent cloud gating', () => {
 // /upload/image, which does not exist there either. So on a local MLX Mac an
 // intent must never render as an active local tab unless MLX really runs it.
 describe('intent gating on a local MLX Mac (no ComfyUI)', () => {
-  it('only image, video, the cutout and Character Studio stay real local tabs', () => {
+  it('only image, video, the cutout, Character Studio and 3D stay real local tabs', () => {
     // Remove Background runs on Vision in macOS (commands/mlx_cutout.rs).
     // Character Studio runs "Use character" through mflux with the LoRA from
-    // the Mac's LoRA folder; its Train tab says where to train.
-    expect(unlocked('local', true)).toEqual(['image', 'removebg', 'video', 'character'])
+    // the Mac's LoRA folder; its Train tab says where to train. 3D (3.1.0) is
+    // TripoSR's own engine; without it the Stage offers the setup.
+    expect(unlocked('local', true)).toEqual(['image', 'removebg', 'video', 'character', '3d'])
   })
 
   it('the hosted-only tools AND the 2.5.8 lanes become cloud teasers', () => {
@@ -187,5 +188,28 @@ describe('intent gating on a local MLX Mac (no ComfyUI)', () => {
       expect(isIntentLocked(lipsync, 'local', false, false, false, false, false, false, talk)).toBe(false)
       expect(isIntentLocked(lipsync, 'cloud', true, false, false, false, false, false, talk)).toBe(false)
     }
+  })
+})
+
+describe('3D (3.1.0)', () => {
+  it('is the last pill, so no tool moves', () => {
+    expect(INTENTS[INTENTS.length - 1].id).toBe('3d')
+    expect(INTENT_MAP['3d'].short).toBe('3D')
+  })
+  it('takes a prompt from text only, and a source from a picture or a video', () => {
+    expect(intentTakesPrompt('3d', false, 'text')).toBe(true)
+    expect(intentTakesPrompt('3d', false, 'image')).toBe(false)
+    expect(intentTakesPrompt('3d', false, 'video')).toBe(false)
+    expect(intentNeedsSource('3d', 'text')).toBe(false)
+    expect(intentNeedsSource('3d', 'image')).toBe(true)
+    expect(intentNeedsSource('3d', 'video')).toBe(true)
+    // Every other tab keeps its own flags.
+    expect(intentNeedsSource('animate')).toBe(true)
+    expect(intentTakesPrompt('image')).toBe(true)
+  })
+  it('is a working tab in the cloud, on ComfyUI and on a Mac', () => {
+    expect(unlocked('cloud', false)).toContain('3d')
+    expect(unlocked('local', false)).toContain('3d')
+    expect(unlocked('local', true)).toContain('3d')
   })
 })

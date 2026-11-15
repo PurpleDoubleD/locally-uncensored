@@ -66,6 +66,7 @@ async fn off_main(
 static IMAGE_LANE: std::sync::Mutex<()> = std::sync::Mutex::new(());
 static VIDEO_LANE: std::sync::Mutex<()> = std::sync::Mutex::new(());
 static MUSIC_LANE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+static MESH3D_LANE: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// Run `work` when no other command holds `lane`.
 fn in_turn<T>(lane: &std::sync::Mutex<()>, work: impl FnOnce() -> T) -> T {
@@ -334,6 +335,50 @@ pub async fn mlx_music_cancel(app: AppHandle, args: Value) -> Result<Value, Stri
     off_main(app, args, crate::commands::music::music_cancel).await
 }
 
+// ── 3D on the Mac (TripoSR) ──────────────────────────────────────────────
+
+#[tauri::command]
+pub async fn mlx_mesh3d_status(app: AppHandle, args: Value) -> Result<Value, String> {
+    off_main(app, args, crate::commands::mesh3d::mesh3d_status).await
+}
+
+#[tauri::command]
+pub async fn mlx_mesh3d_install(app: AppHandle, args: Value) -> Result<Value, String> {
+    off_main_in_turn(app, args, &MESH3D_LANE, crate::commands::mesh3d::mesh3d_install).await
+}
+
+#[tauri::command]
+pub async fn mlx_mesh3d_install_status(app: AppHandle, args: Value) -> Result<Value, String> {
+    off_main(app, args, crate::commands::mesh3d::mesh3d_install_status).await
+}
+
+#[tauri::command]
+pub async fn mlx_mesh3d_cancel_install(app: AppHandle, args: Value) -> Result<Value, String> {
+    off_main(app, args, crate::commands::mesh3d::mesh3d_cancel_install).await
+}
+
+#[tauri::command]
+pub async fn mlx_mesh3d_delete(app: AppHandle, args: Value) -> Result<Value, String> {
+    off_main_in_turn(app, args, &MESH3D_LANE, crate::commands::mesh3d::mesh3d_delete).await
+}
+
+/// Async like `mlx_music_generate`: it waits for the image engine to let go
+/// of its model before the run starts, with its claim taken before that.
+#[tauri::command]
+pub async fn mlx_mesh3d_generate(state: State<'_, AppState>, args: Value) -> Result<Value, String> {
+    crate::commands::mesh3d::mesh3d_generate(state.inner(), &args).await
+}
+
+#[tauri::command]
+pub async fn mlx_mesh3d_progress(app: AppHandle, args: Value) -> Result<Value, String> {
+    off_main(app, args, crate::commands::mesh3d::mesh3d_progress).await
+}
+
+#[tauri::command]
+pub async fn mlx_mesh3d_cancel(app: AppHandle, args: Value) -> Result<Value, String> {
+    off_main(app, args, crate::commands::mesh3d::mesh3d_cancel).await
+}
+
 // ── Character training on the Mac (mflux-train) ─────────────────────────
 
 #[tauri::command]
@@ -394,6 +439,8 @@ fn allowed_media_roots() -> Vec<PathBuf> {
         crate::commands::mlx::images_root(),
         // Tracks of the music lane (commands/music.rs).
         crate::commands::music::outputs_root(),
+        // Models of the 3D lane (commands/mesh3d.rs), read by the viewer.
+        crate::commands::mesh3d::outputs_root(),
     ]
 }
 

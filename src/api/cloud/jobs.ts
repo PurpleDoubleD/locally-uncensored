@@ -17,6 +17,10 @@ export interface CloudJobParams {
   /** Idempotency key (a UUID minted client-side): a retried submit after a
    *  dropped response replays the same job instead of booking twice. */
   client_request_id?: string
+  /** 3D (3.1.0): where the pictures of the run came from (a file name, the
+   *  prompt of a gallery picture). The server's content gate reads it like
+   *  every other text parameter. */
+  source_prompt?: string
   /** Bilder in diesem Lauf, 1 bis 4 (nur Bild und Bearbeiten). Fehlt das Feld,
    *  bucht der Server genau einen Auftrag, wie vor dem 02.10.2026. Ein Server
    *  ohne die Anzahl bucht ebenfalls einen, deshalb schickt der Start sie nur,

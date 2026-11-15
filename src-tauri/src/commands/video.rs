@@ -2208,6 +2208,9 @@ pub fn video_generate(state: &AppState, args: &Value) -> CmdResult {
     if let Some(why) = crate::commands::mlx::train::refusal() {
         return Err(bad_request(why));
     }
+    if let Some(why) = crate::commands::mesh3d::refusal() {
+        return Err(bad_request(why));
+    }
     let a: GenerateArgs =
         serde_json::from_value(args.clone()).map_err(|e| bad_request(e.to_string()))?;
     let entry = catalog_lookup(&a.id)

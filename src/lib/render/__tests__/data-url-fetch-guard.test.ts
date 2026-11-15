@@ -28,7 +28,7 @@ const SERVER_ONLY: Record<string, Record<string, string>> = {
   'lib/backend-detector.ts': { url: 'probes of local server ports' },
   // M1: outside Tauri, or on a Rust side without mcp_http_request.
   'api/mcp/http-fetch.ts': { url: 'the endpoint of an MCP server added by URL; MCPHttpClient refuses anything but http(s)' },
-  'hooks/useCloudCreate.ts': { 'vj.result_url': 'signed result URL of a cloud job', 'src.result_url': 'signed result URL of a cloud job' },
+  'hooks/useCloudCreate.ts': { 'vj.result_url': 'signed result URL of a cloud job', 'src.result_url': 'signed result URL of a cloud job', 'job.result_url!': 'signed result URL of a cloud job' },
   'components/create/experimental/PresetWorkshop.tsx': { 'fresh.result_url': 'signed result URL of a cloud job' },
   'components/chat/create/save-media.ts': { url: 'result URL of an order card, always a server file' },
   // The phone. None of the seven reads media; each sends a request to a server address the app builds.

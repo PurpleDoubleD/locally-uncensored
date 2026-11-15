@@ -65,6 +65,7 @@ import { extraReferenceSlots, isQwenImageEditModel, referenceSide } from '../lib
 import { canonicalImageRefs } from '../lib/image-ref-names'
 import { KREA2_STYLE_LORA, LOCAL_END_FRAME_MODELS, createReferenceSupport, localAnimateReferenceSlots, localEndFrame, CREATE_REFERENCE_MODELS } from '../lib/frame-refs'
 import { nativeUpscaleScale, upscaleTarget, type UpscaleFactor } from '../lib/local-upscale'
+import { TRELLIS2_FILES } from './model-bundles'
 import { WAN_FAST, findWanSpeedLora, isFastSampling, isWanSpeedLoraName, wanSamplingFor, wanSpeedKind, wanSpeedLoraNames } from '../lib/wan-speed'
 import { addAudioStitch, addContextWindows, addContinueSource, addStitch, CONTINUE_NEEDS_UPDATE, type ContinueSource } from './video-continue'
 
@@ -2125,6 +2126,206 @@ export function buildUpscaleWorkflow(params: UpscaleParams, allNodes: NodePresen
 /** The graph against the running ComfyUI's node list. */
 export async function buildLocalUpscaleWorkflow(params: UpscaleParams): Promise<ComfyApiGraph> {
   return buildUpscaleWorkflow(params, await getAllNodeInfo())
+}
+
+// ─── 3D from one picture (TRELLIS.2, Windows and Linux, 3.1.0) ───
+//
+// The graph is the TRELLIS.2 branch of ComfyUI's own template
+// `3d_pixal3d_trellis2_image_to_model.json`, read as data out of the PyPI
+// wheel comfyui_workflow_templates_json 0.1.120 (sha256
+// f4f8e94d2c8a94ea894a9d9a18235ea6306268112f9dc267611a04b20d2740be). That is
+// the version ComfyUI v0.42.4 pins through comfyui-workflow-templates==0.11.94
+// in its requirements.txt. Class names, input names, types and ranges were
+// checked against the node code at the tag v0.42.4: comfy_extras/
+// nodes_trellis2.py, nodes_bg_removal.py, nodes_images.py (ImageCropToMask),
+// nodes_custom_sampler.py (CFGOverride), nodes_model_advanced.py (RescaleCFG,
+// ModelSamplingSD3), nodes_mesh_postprocess.py and nodes_save_3d.py.
+//
+// The node ids are the template's, so a diff against it stays readable. What
+// differs from the template, on purpose:
+//   * The Pixal3D branch is gone (its model, MoGe, the FOV node and the three
+//     ComfySwitchNode that choose between the two). The template's switch
+//     "Switch to Trellis2" set to true is exactly this graph.
+//   * The preview nodes are gone (PreviewImage, MaskPreview, Preview3DAdvanced,
+//     VoxelToMesh, PaintMesh, RenderUVAtlas, GetMeshInfo, the MeshToFile3D in
+//     front of each preview). In v0.42.4 PreviewImage and MaskPreview pass
+//     their input through, so the links run straight from the node before.
+//   * SaveGLB (mesh in, writes output/3d/*.glb, reports under the key "3d")
+//     stands in for MeshToFile3D plus Save3DAdvanced, which needs the
+//     viewport state of the canvas.
+//   * cutout false skips RemoveBackground and feeds the picture's own mask
+//     (LoadImage output 1) into ImageCropToMask, the template's "Switch:
+//     Remove background" set to false. An opaque picture then has an empty
+//     mask, and ImageCropToMask takes the whole picture (_crop_image_with_mask).
+//   * pad_factor 1.0 instead of the template's 1.1: the Trellis2Conditioning
+//     input says "pad_factor=1.0 for TRELLIS.2"; the template shares the crop
+//     with Pixal3D. Unconfirmed until a run on the box.
+//   * `detail` sets the cascade resolution, the remesh grid, the face count
+//     and the texture sizes. 'fine' is the template's values.
+
+export type ThreeDDetail = 'draft' | 'standard' | 'fine'
+
+export interface ThreeDDetailSettings {
+  /** Trellis2UpsampleStage target_resolution (1024 to 2048, step 128). */
+  shapeResolution: number
+  /** RemeshMesh resolution (32 to 2048). */
+  remeshResolution: number
+  /** DecimateMesh target_face_count. */
+  faces: number
+  /** UnwrapMesh resolution and BakeTextureFromVoxel texture_size (step 256). */
+  texture: number
+  /** BakeNormalMapFromMesh resolution (step 64). */
+  normalMap: number
+  /** BakeAmbientOcclusion resolution (step 64) and its ray count (step 4). */
+  occlusion: number
+  occlusionSamples: number
+}
+
+export const THREE_D_DETAIL: Record<ThreeDDetail, ThreeDDetailSettings> = {
+  draft: { shapeResolution: 1024, remeshResolution: 384, faces: 100_000, texture: 1024, normalMap: 1024, occlusion: 512, occlusionSamples: 32 },
+  standard: { shapeResolution: 1024, remeshResolution: 512, faces: 300_000, texture: 2048, normalMap: 2048, occlusion: 1024, occlusionSamples: 64 },
+  fine: { shapeResolution: 1536, remeshResolution: 768, faces: 700_000, texture: 4096, normalMap: 2048, occlusion: 1024, occlusionSamples: 64 },
+}
+
+export interface ThreeDParams {
+  /** The picture, as ComfyUI's /upload/image named it. */
+  image: string
+  detail: ThreeDDetail
+  /** Cut the object out of its background first (BiRefNet). */
+  cutout: boolean
+  seed: number
+  /** Other file names than the catalogue's, for a ComfyUI that lists them so. */
+  files?: Partial<Record<keyof typeof TRELLIS2_FILES, string>>
+}
+
+export const THREE_D_NEEDS_UPDATE = 'Local 3D needs ComfyUI 0.42.4 or newer. Update ComfyUI in Settings.'
+
+/** The core nodes the graph is built from. The TRELLIS.2 ones are the release
+ *  marker: without them the install is older than the lane. */
+export const THREE_D_TRELLIS_NODES = [
+  'EmptyTrellis2LatentStructure', 'Trellis2Conditioning', 'Trellis2ShapeStage', 'Trellis2UpsampleStage',
+  'Trellis2TextureStage', 'VaeDecodeStructureTrellis2', 'VaeDecodeShapeTrellis', 'VaeDecodeTextureTrellis',
+]
+export const THREE_D_NODES = [
+  ...THREE_D_TRELLIS_NODES,
+  'LoadImage', 'ImageCropToMask', 'CLIPVisionLoader', 'UNETLoader', 'VAELoader',
+  'CFGOverride', 'RescaleCFG', 'ModelSamplingSD3', 'KSampler',
+  'RemeshMesh', 'DecimateMesh', 'MeshSmoothNormals', 'UnwrapMesh',
+  'BakeTextureFromVoxel', 'BakeNormalMapFromMesh', 'BakeAmbientOcclusion', 'ApplyTextureToMesh', 'SaveGLB',
+]
+export const THREE_D_CUTOUT_NODES = ['LoadBackgroundRemovalModel', 'RemoveBackground']
+
+/** The id of the save node, whose history entry carries the model. */
+export const THREE_D_SAVE_NODE = '900'
+
+function sampler(
+  model: [string, number], cond: string, latent: [string, number], seed: number,
+  steps: number, cfg: number, scheduler: string,
+): ComfyNodeInputs {
+  return {
+    model, positive: [cond, 0], negative: [cond, 1], latent_image: latent,
+    seed, steps, cfg, sampler_name: 'euler', scheduler, denoise: 1,
+  }
+}
+
+export function buildThreeDWorkflow(params: ThreeDParams, allNodes: NodePresence): ComfyApiGraph {
+  requireRelease(allNodes, THREE_D_TRELLIS_NODES, THREE_D_NEEDS_UPDATE, 'unavailable')
+  requireRelease(allNodes, ['SaveGLB', 'RemeshMesh', 'BakeTextureFromVoxel'], THREE_D_NEEDS_UPDATE, 'unavailable')
+  requireNodes(allNodes, THREE_D_NODES, 'Local 3D')
+  if (params.cutout) requireNodes(allNodes, THREE_D_CUTOUT_NODES, 'Local 3D')
+  const files = { ...TRELLIS2_FILES, ...params.files }
+  const d = THREE_D_DETAIL[params.detail] ?? THREE_D_DETAIL.standard
+  // KSampler takes 0 to 2^64-1; the texture pass gets its own seed as in the
+  // template (42 for the shape passes, 43 for the texture).
+  const seed = Math.max(0, Math.floor(params.seed))
+  const textureSeed = seed + 1 > Number.MAX_SAFE_INTEGER ? 0 : seed + 1
+  const w: ComfyApiGraph = {}
+
+  // The picture, cut out and cropped to 1024 square.
+  w['122'] = { class_type: 'LoadImage', inputs: { image: params.image } }
+  let mask: [string, number] = ['122', 1]
+  if (params.cutout) {
+    w['193'] = { class_type: 'LoadBackgroundRemovalModel', inputs: { bg_removal_name: files.cutout } }
+    w['192'] = { class_type: 'RemoveBackground', inputs: { bg_removal_model: ['193', 0], image: ['122', 0] } }
+    mask = ['192', 0]
+  }
+  w['312'] = {
+    class_type: 'ImageCropToMask',
+    inputs: { images: ['122', 0], masks: mask, width: 1024, height: 1024, pad_factor: 1.0, grow_mask: 0, background: '#000000' },
+  }
+
+  // Loaders and the two guided model chains of the template.
+  w['15'] = { class_type: 'CLIPVisionLoader', inputs: { clip_name: files.imageEncoder } }
+  w['40'] = { class_type: 'UNETLoader', inputs: { unet_name: files.model, weight_dtype: 'default' } }
+  w['117'] = { class_type: 'VAELoader', inputs: { vae_name: files.shapeVae } }
+  w['118'] = { class_type: 'VAELoader', inputs: { vae_name: files.textureVae } }
+  w['199'] = { class_type: 'CFGOverride', inputs: { model: ['40', 0], cfg: 1, start_percent: 0.667, end_percent: 1 } }
+  w['125'] = { class_type: 'RescaleCFG', inputs: { model: ['199', 0], multiplier: 0.7 } }
+  w['108'] = { class_type: 'ModelSamplingSD3', inputs: { model: ['125', 0], shift: 5 } }
+  w['279'] = { class_type: 'CFGOverride', inputs: { model: ['40', 0], cfg: 1, start_percent: 0.769, end_percent: 1 } }
+  w['126'] = { class_type: 'RescaleCFG', inputs: { model: ['279', 0], multiplier: 0.5 } }
+  w['299'] = { class_type: 'Trellis2Conditioning', inputs: { clip_vision_model: ['15', 0], image: ['312', 0] } }
+
+  // Structure, then shape at 512, then the cascade up to the detail's resolution.
+  w['87'] = { class_type: 'EmptyTrellis2LatentStructure', inputs: { batch_size: 1 } }
+  w['3'] = { class_type: 'KSampler', inputs: sampler(['108', 0], '299', ['87', 0], seed, 12, 7.5, 'normal') }
+  w['119'] = { class_type: 'VaeDecodeStructureTrellis2', inputs: { samples: ['3', 0], vae: ['117', 0], resolution: '32' } }
+  w['91'] = { class_type: 'Trellis2ShapeStage', inputs: { positive: ['299', 0], negative: ['299', 1], voxel: ['119', 0] } }
+  w['18'] = { class_type: 'KSampler', inputs: sampler(['126', 0], '91', ['91', 2], seed, 20, 7.5, 'normal') }
+  w['94'] = {
+    class_type: 'Trellis2UpsampleStage',
+    inputs: { positive: ['91', 0], negative: ['91', 1], shape_latent: ['18', 0], vae: ['117', 0], target_resolution: d.shapeResolution },
+  }
+  w['23'] = { class_type: 'KSampler', inputs: sampler(['126', 0], '94', ['94', 2], seed, 12, 7.5, 'simple') }
+  w['92'] = { class_type: 'VaeDecodeShapeTrellis', inputs: { samples: ['23', 0], vae: ['117', 0] } }
+
+  // The surface, as voxel colours.
+  w['98'] = { class_type: 'Trellis2TextureStage', inputs: { positive: ['94', 0], negative: ['94', 1], shape_latent: ['23', 0] } }
+  w['12'] = { class_type: 'KSampler', inputs: sampler(['40', 0], '98', ['98', 2], textureSeed, 12, 1, 'normal') }
+  w['93'] = { class_type: 'VaeDecodeTextureTrellis', inputs: { samples: ['12', 0], vae: ['118', 0], shape_subdivides: ['92', 1] } }
+
+  // A clean mesh, unwrapped, with the colours baked into textures.
+  w['241'] = {
+    class_type: 'RemeshMesh',
+    inputs: {
+      mesh: ['92', 0], resolution: d.remeshResolution,
+      // A DynamicCombo: the choice under its own name, its options as
+      // "sign_mode.<name>" (comfy_api/latest/_io.py, finalize_prefix).
+      sign_mode: 'solid', 'sign_mode.fill': 20, 'sign_mode.qef': false,
+      band: 1, project_back: 0, fix_poles: false, smooth_iters: 20,
+      drop_small_components: 0.01, precluster_max_verts: 20_000_000,
+    },
+  }
+  w['186'] = { class_type: 'DecimateMesh', inputs: { mesh: ['241', 0], target_face_count: d.faces, placement_mode: 'midpoint' } }
+  w['238'] = { class_type: 'MeshSmoothNormals', inputs: { mesh: ['186', 0], crease_angle: 180 } }
+  w['196'] = { class_type: 'UnwrapMesh', inputs: { mesh: ['238', 0], segmenter: 'pec', resolution: d.texture, padding: 1, weld_distance: 0.0002 } }
+  w['147'] = {
+    class_type: 'BakeTextureFromVoxel',
+    inputs: { mesh: ['196', 0], voxel_colors: ['93', 0], texture_size: d.texture, reference_mesh: ['92', 0] },
+  }
+  w['224'] = {
+    class_type: 'BakeNormalMapFromMesh',
+    inputs: { low_poly: ['196', 0], high_poly: ['241', 0], resolution: d.normalMap, cage_distance: 0.05, ignore_backfaces: true },
+  }
+  w['233'] = {
+    class_type: 'BakeAmbientOcclusion',
+    inputs: { low_poly: ['196', 0], high_poly: ['241', 0], resolution: d.occlusion, samples: d.occlusionSamples, max_distance: 0.71, strength: 1, bias: 0.01 },
+  }
+  w['210'] = {
+    class_type: 'ApplyTextureToMesh',
+    inputs: { mesh: ['196', 0], base_color: ['147', 0], metallic: ['147', 1], roughness: ['147', 2], occlusion: ['233', 0], normal_map: ['224', 0] },
+  }
+  w['260'] = { class_type: 'MeshSmoothNormals', inputs: { mesh: ['210', 0], crease_angle: 180 } }
+  w[THREE_D_SAVE_NODE] = {
+    class_type: 'SaveGLB',
+    inputs: { mesh: ['260', 0], filename_prefix: `3d/${promptFilenamePrefix('', false)}_3d` },
+  }
+  return w
+}
+
+/** The graph against the running ComfyUI's node list. */
+export async function buildLocalThreeDWorkflow(params: ThreeDParams): Promise<ComfyApiGraph> {
+  return buildThreeDWorkflow(params, await getAllNodeInfo())
 }
 
 // Resolve a default value for one RMBG widget input from its object_info spec.

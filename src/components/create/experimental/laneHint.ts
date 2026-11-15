@@ -58,6 +58,8 @@ export function noPromptHint(id: CreateIntent, backend: CreateBackend = 'local',
       return backend === 'local'
         ? 'Add a character image and a driving dance/pose video above, then hit Create. The prompt is optional.'
         : 'No prompt needed. Add a character image and a driving dance/pose video above, then hit Create.'
+    case '3d':
+      return 'No prompt needed. Add a picture or a short video of one object, then hit Create.'
     default:
       return 'No prompt needed. Just hit Create to remove the background.'
   }

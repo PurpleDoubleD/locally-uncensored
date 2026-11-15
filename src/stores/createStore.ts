@@ -27,6 +27,8 @@ const RUNTIME_ONLY_KEYS: readonly string[] = [
   'backend', 'source', 'mask', 'references', 'endImage', 'imageReferences', 'caps', 'isGenerating', 'comfyCorsBlocked',
   // A queue of source images from yesterday must never start a run today.
   'batchSources', 'batchRun', 'batchOriginal',
+  // The further sides of a 3D model are pictures of this session only.
+  'threeDViews',
   // Ein gespeicherter Preis von gestern ist eine Luege (siehe partialize
   // unten): auch wenn ein fremder/aelterer Blob ihn doch mitbringt, darf er
   // nie zurueckkommen.
@@ -68,7 +70,7 @@ import { mlxMakesMusic } from '../lib/mac-music'
 import { MAC_EDIT_DEAD_SIDE, MAC_EDIT_SIDE_INSTEAD, imageLaneModels, mlxTakesEditImage } from '../lib/image-engines'
 import { STUDIO_MODELS } from '../lib/render/studio-contract'
 import { cloudModelsFor } from './cloudCatalogStore'
-import { createRunModel } from '../lib/render/create-studio'
+import { createRunModel, studioIntentOf } from '../lib/render/create-studio'
 import { DEFAULT_UPSCALE_FACTOR, normalizeUpscaleFactor, normalizeUpscaleLongSide, type UpscaleFactor } from '../lib/local-upscale'
 import { characterLoraFile, isLocalCharacter, type CharacterRef } from '../lib/character-ref'
 import { triggerWordNote, typedTriggerWord } from '../lib/train-trigger'
@@ -108,7 +110,14 @@ export const LOCAL_UTILITY_OPS: ReadonlySet<UtilityOp> = new Set(['upscale'])
  *  Character-Studio (LoRA training + generation), talking character (lipsync),
  *  music, video extend and motion control. Like `utilityOp`, an escape hatch
  *  over the image/video mode axis: when set it wins the intent derivation. */
-export type CloudOp = 'character' | 'lipsync' | 'music' | 'extend' | 'motion'
+export type CloudOp = 'character' | 'lipsync' | 'music' | 'extend' | 'motion' | '3d'
+
+// The three ways and the Detail step of the 3D tab (3.1.0) live in
+// lib/three/three-d-types.ts, so the 3D texts need not import the store.
+import type { ThreeDWay, ThreeDDetail } from '../lib/three/three-d-types'
+export type { ThreeDWay, ThreeDDetail }
+/** The local 3D models of a Mac (lib/mac-3d.ts, MAC_3D_MODELS). */
+export type ThreeDMacModel = 'triposr' | 'sf3d'
 
 /** Which of the specialized categories ALSO run on the local ComfyUI backend
  *  (2.5.8 local lanes: ACE music, Wan S2V talking character, last-frame-chain
@@ -119,7 +128,8 @@ export type CloudOp = 'character' | 'lipsync' | 'music' | 'extend' | 'motion'
 // Character joined in 2.6.0: trainer.rs ships the musubi venv install, so
 // the train lane is a real local tab now (it was cloud-first while 2.5.8
 // had no trainer runtime).
-export const LOCAL_LANE_OPS: ReadonlySet<CloudOp> = new Set(['music', 'lipsync', 'extend', 'motion', 'character'])
+// 3D joined in 3.1.0: TRELLIS.2 on the core nodes of the pinned ComfyUI.
+export const LOCAL_LANE_OPS: ReadonlySet<CloudOp> = new Set(['music', 'lipsync', 'extend', 'motion', 'character', '3d'])
 
 /** An audio/video file (or training image) staged in the composer before
  *  upload. `blob` carries the bytes for the cloud upload; `url` is a local
@@ -158,10 +168,10 @@ export function deriveIntent(s: {
 
 /** The model the tab in this state would run in the cloud. */
 function runModelOf(s: Parameters<typeof deriveIntent>[0] & Pick<CreateState,
-  'cloudImageModel' | 'cloudVideoModel' | 'cloudOpModel' | 'characterTab' | 'selectedCharacter'>): string {
+  'cloudImageModel' | 'cloudVideoModel' | 'cloudOpModel' | 'characterTab' | 'selectedCharacter'> & Partial<Pick<CreateState, 'threeDWay'>>): string {
   const intent = deriveIntent(s)
   return createRunModel(
-    intent,
+    studioIntentOf(intent, s.threeDWay),
     { image: s.cloudImageModel, video: s.cloudVideoModel, op: s.cloudOpModel },
     intent === 'character' && s.characterTab === 'use' ? s.selectedCharacter?.family ?? '' : undefined,
   )
@@ -262,7 +272,7 @@ export function hidreamDefaults(model: string): (typeof MODEL_TYPE_DEFAULTS)['hi
 
 export interface GalleryItem {
   id: string
-  type: 'image' | 'video' | 'audio'
+  type: 'image' | 'video' | 'audio' | '3d'
   filename: string
   comfyType?: string
   subfolder: string
@@ -431,6 +441,19 @@ export interface CreateState {
   cloudOp: CloudOp | null
   /** Character-Studio sub-surface: train a new character vs generate with one. */
   characterTab: 'train' | 'use'
+  /** 3D (3.1.0): which way the tab builds a model, from words, one picture
+   *  or still frames of a video. Kept across sessions like characterTab. */
+  threeDWay: ThreeDWay
+  /** 3D: cut the object out of its picture before the model is built. */
+  threeDCutout: boolean
+  /** 3D: how fine the model gets, where the picked model offers a choice. */
+  threeDDetail: ThreeDDetail
+  /** 3D on a Mac: which local model makes it. Each has its own setup. */
+  threeDMacModel: ThreeDMacModel
+  /** 3D: the further sides (left, back, right) for a model that takes several
+   *  views, or the still frames picked from a video. Front is the Stage
+   *  source. Runtime-only like every ImageRef. */
+  threeDViews: ImageRef[]
   /** Character-Studio training set (4-30 images). Runtime-only (blobs). */
   trainImages: MediaRef[]
   /** Character-Studio trigger word — the token that summons the character. */
@@ -708,6 +731,11 @@ export interface CreateState {
   setTargetResolution: (r: '2k' | '4k' | '8k') => void
   setMacUpscaleScale: (scale: MacUpscaleFactor) => void
   setCharacterTab: (tab: 'train' | 'use') => void
+  setThreeDWay: (way: ThreeDWay) => void
+  setThreeDCutout: (on: boolean) => void
+  setThreeDDetail: (detail: ThreeDDetail) => void
+  setThreeDMacModel: (model: ThreeDMacModel) => void
+  setThreeDViews: (views: ImageRef[]) => void
   addTrainImages: (imgs: MediaRef[]) => void
   removeTrainImage: (name: string) => void
   clearTrainImages: () => void
@@ -954,7 +982,7 @@ export function distilledImageCheckpoint(model: string, type: ModelType): boolea
  *  Image, Edit and the other image intents only flipped the mode, so sd_turbo
  *  rendered with MiniMax H3's 20 steps, res_multistep and 1344x768 (3.0.4
  *  Gegenprobe 9). */
-function imageModelParams(state: { imageModel: string; imageModelType: ModelType }) {
+export function imageModelParams(state: { imageModel: string; imageModelType: ModelType }) {
   const defaults = state.imageModelType === 'hidream'
     ? hidreamDefaults(state.imageModel)
     : MODEL_TYPE_DEFAULTS[state.imageModelType] || MODEL_TYPE_DEFAULTS.unknown
@@ -1201,6 +1229,11 @@ export const useCreateStore = create<CreateState>()(
       utilityOp: null as UtilityOp | null,
       cloudOp: null as CloudOp | null,
       characterTab: 'train' as 'train' | 'use',
+      threeDWay: 'image' as ThreeDWay,
+      threeDCutout: true,
+      threeDDetail: 'standard' as ThreeDDetail,
+      threeDMacModel: 'triposr' as ThreeDMacModel,
+      threeDViews: [] as ImageRef[],
       trainImages: [] as MediaRef[],
       triggerWord: '',
       triggerWordNote: null,
@@ -1400,6 +1433,10 @@ export const useCreateStore = create<CreateState>()(
           // ── 2.5.8 cloud categories. Inputs specific to each (train set,
           // audio, driving video, extend pick) live in their own slots and are
           // only read by their own intent — no cross-intent bleed to clear.
+          // 3D keeps the source slot: "From image" builds from it, and the
+          // picture of a two-step "From text" lands there.
+          case '3d':
+            return { ...base, cloudOp: '3d' as const, mode: 'image' as const, imageSubMode: 'text2img' as const, mask: null, references: [], endImage: null }
           case 'character':
             return { ...base, cloudOp: 'character' as const, mode: 'image' as const, imageSubMode: 'text2img' as const, ...dropAll }
           case 'lipsync': {
@@ -1509,6 +1546,14 @@ export const useCreateStore = create<CreateState>()(
       setTargetResolution: (targetResolution) => set({ targetResolution }),
       setMacUpscaleScale: (macUpscaleScale) => set({ macUpscaleScale }),
       setCharacterTab: (characterTab) => set((s) => withOwnStudioOptions(s, { characterTab })),
+      // Another way runs another model (words, one picture, several sides), so
+      // the studio options of the old one go, and the sides of one way never
+      // ride into another.
+      setThreeDWay: (threeDWay) => set((s) => withOwnStudioOptions(s, { threeDWay, threeDViews: [] })),
+      setThreeDCutout: (threeDCutout) => set({ threeDCutout }),
+      setThreeDDetail: (threeDDetail) => set({ threeDDetail }),
+      setThreeDMacModel: (threeDMacModel) => set({ threeDMacModel }),
+      setThreeDViews: (threeDViews) => set({ threeDViews: threeDViews.slice(0, 4) }),
       // Cap at the backend's photo limit (lib/train-image-cap) and skip a
       // re-drop of a file already in the set, so the same folder twice does
       // not double it. Every photo keeps a name of its own: a DIFFERENT photo
@@ -1700,6 +1745,9 @@ export const useCreateStore = create<CreateState>()(
           // uses a character through mflux and trains one with mflux-train.
           || (get().cloudOp === 'lipsync' && mlxTalking(get().videoModelList).tab)
           || get().cloudOp === 'character'
+          // 3D (3.1.0) is always a local tab on a Mac: its Stage offers the
+          // engine's one-time setup when it is not there.
+          || get().cloudOp === '3d'
         const strandsOnMac = backend === 'local' && isMlxImageHost() && !!get().cloudOp && !keepsExtend && !macRunsOp
         const heldMode = get().mode
         set((s) => withOwnStudioOptions(s, ((): Partial<CreateState> => {
@@ -2038,6 +2086,10 @@ export const useCreateStore = create<CreateState>()(
       storage: safeJSONStorage({ skipUnchanged: true }),
       partialize: (state) => ({
         mode: state.mode,
+        threeDWay: state.threeDWay,
+        threeDCutout: state.threeDCutout,
+        threeDDetail: state.threeDDetail,
+        threeDMacModel: state.threeDMacModel,
         videoBackend: state.videoBackend,
         videoBackendInitialized: state.videoBackendInitialized,
         imageModel: state.imageModel,
@@ -2175,6 +2227,11 @@ export const useCreateStore = create<CreateState>()(
         if ('trainStyleTrigger' in safe && typeof safe.trainStyleTrigger !== 'boolean') safe.trainStyleTrigger = true
         // 3.1.0 C75: anything but the one other shape is the source's.
         if ('qwenEditShape' in safe && safe.qwenEditShape !== 'canvas') safe.qwenEditShape = 'source'
+        // 3.1.0 3D: a damaged way or detail falls back to the default.
+        if ('threeDWay' in safe && !['text', 'image', 'video'].includes(safe.threeDWay as string)) safe.threeDWay = 'image'
+        if ('threeDDetail' in safe && !['draft', 'standard', 'fine'].includes(safe.threeDDetail as string)) safe.threeDDetail = 'standard'
+        if ('threeDCutout' in safe && typeof safe.threeDCutout !== 'boolean') safe.threeDCutout = true
+        if ('threeDMacModel' in safe && !['triposr', 'sf3d'].includes(safe.threeDMacModel as string)) safe.threeDMacModel = 'triposr'
         // The persisted slice is ~30 independent scalar preferences (see
         // partialize). They are adopted as written, which is what the store
         // has always done; the fields that could actually do damage — the
@@ -2187,8 +2244,9 @@ export const useCreateStore = create<CreateState>()(
 
 /** Which pick slot the current sub-category owns. Character Studio USE picks a
  *  generation endpoint, TRAIN a trainer, so they are two slots. */
-export function opSlot(s: Pick<CreateState, 'characterTab' | 'removebg' | 'utilityOp' | 'cloudOp' | 'mode' | 'imageSubMode' | 'videoSubMode'>): string {
+export function opSlot(s: Pick<CreateState, 'characterTab' | 'removebg' | 'utilityOp' | 'cloudOp' | 'mode' | 'imageSubMode' | 'videoSubMode'> & Partial<Pick<CreateState, 'threeDWay'>>): string {
   const intent = deriveIntent(s)
+  if (intent === '3d') return `3d:${s.threeDWay ?? 'image'}`
   return intent === 'character' && s.characterTab === 'use' ? 'character:use' : intent
 }
 

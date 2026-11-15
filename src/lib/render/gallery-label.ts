@@ -31,6 +31,7 @@ const TYPE_NAME: Record<GalleryItem['type'], string> = {
   image: 'Image',
   video: 'Clip',
   audio: 'Audio',
+  '3d': '3D model',
 }
 
 // Review A kleiner Punkt 3: this used to be its own copy (STUDIO_MODELS

@@ -3,7 +3,7 @@ import definitions from './studio-models.json'
 import schemas from './provider-schemas.json'
 import endpoints from './provider-endpoints.json'
 import { isRetiredMediaModel } from './retired-models'
-export type Schema = { type?: string; properties?: Record<string, Schema>; required?: string[]; enum?: unknown[]; default?: unknown; minimum?: number; maximum?: number; minItems?: number; maxItems?: number; items?: Schema; description?: string; disabled?: boolean; format?: string }
+export type Schema = { type?: string; properties?: Record<string, Schema>; required?: string[]; enum?: unknown[]; default?: unknown; minimum?: number; maximum?: number; minItems?: number; maxItems?: number; items?: Schema; description?: string; disabled?: boolean; format?: string; 'x-lu-views'?: string[] }
 // Stufe und Herkunft jedes Cloud-Modells (02.10.2026, Entscheid des Inhabers).
 // `tier` ordnet die Waehler: 'best' steht oben, 'older' gesammelt unten.
 // `weights` sagt, ob genau diese Version offene Gewichte hat ('open'), nur ihre
@@ -12,7 +12,11 @@ export type ModelTier = 'best' | 'standard' | 'older'
 export type ModelWeights = 'open' | 'open-family' | 'closed'
 export interface StudioModel {
   baselineUsd: number; sourceModel?: string; promptField?: string
-  label: string; endpoint: string; kind: 'image' | 'video' | 'audio'; adult: boolean
+  label: string; endpoint: string; kind: 'image' | 'video' | 'audio' | '3d'; adult: boolean
+  /** The usual run time in seconds (3D, shown while the cloud builds). */
+  typical_s?: number
+  /** 14.11.2026 (3.1.0): in the catalogue, not measured yet. See unmeasuredHidden. */
+  unmeasured?: boolean
   tier: ModelTier; weights: ModelWeights
   inputs: Record<string, string>; defaults: Record<string, unknown>
   // `resolutionField` / `durationField`: nicht jeder Endpunkt nennt die beiden
@@ -27,7 +31,10 @@ export interface StudioModel {
     // `qualityField` (29.10.2026, GPT Image 2, web catalogue): the price hangs
     // on two fields, resolution and quality. The rate then stands under
     // "<resolution>/<quality>".
-    qualityField?: string }
+    qualityField?: string
+    // `extraViews` (14.11.2026, Hunyuan3D 3): one flat surcharge as soon as a
+    // run has more than one picture, however many further sides it has.
+    extraViews?: number }
   // `maxSide` (08.11.2026, web catalogue): the longest side in pixels the
   // upstream renders where its schema does not say so. A larger size is scaled
   // down to fit with its aspect kept (fitSize), it is never refused.
@@ -41,6 +48,15 @@ export const STUDIO_MODELS_WITH_RETIRED = definitions as Record<string, StudioMo
 export const STUDIO_MODELS: Record<string, StudioModel> = Object.fromEntries(
   Object.entries(STUDIO_MODELS_WITH_RETIRED).filter(([id]) => !isRetiredMediaModel(id)),
 )
+/** A studio model the catalogue marks `unmeasured` (14.11.2026, 3.1.0): its
+ *  price and filter are not checked by a paid run yet, so no picker, role or
+ *  list shows it. Unless the live catalogue entry carries `unmeasured: true`:
+ *  the server sends that only while its switch for the paid measurement
+ *  (NEXT_PUBLIC_SHOW_UNMEASURED_MODELS on the web) is on. An older server that
+ *  lists such a model without the mark does not put it in front of anyone. */
+export function unmeasuredHidden(entry: { id: string; unmeasured?: boolean }): boolean {
+  return STUDIO_MODELS_WITH_RETIRED[entry.id]?.unmeasured === true && entry.unmeasured !== true
+}
 export function studioSchema(id: string): Schema {
   const model = STUDIO_MODELS_WITH_RETIRED[id]
   if (!model) throw new Error('Unknown studio model')
@@ -194,12 +210,14 @@ export function studioCredits(id: string, options: Record<string,unknown>, measu
   // Ein abgeschaltetes Feld (num_images) fehlt in den Optionen: der Anbieter nimmt dann seinen Standard 1.
   const units = m.price.perUnitField ? Number(options[m.price.perUnitField] ?? 1) : 1
   if (!Number.isFinite(units) || units <= 0) throw new Error('Invalid size')
-  return Math.ceil((rate * seconds * units + (m.price.extraImage ?? 0) * Math.max(0,imageCount-1)) * 100000 - 1e-8)
+  return Math.ceil((rate * seconds * units + (m.price.extraImage ?? 0) * Math.max(0,imageCount-1) + (imageCount > 1 ? m.price.extraViews ?? 0 : 0)) * 100000 - 1e-8)
 }
 export function studioBaseCredits(id: string): number {
   const schema = studioSchema(id), m = STUDIO_MODELS_WITH_RETIRED[id]
   const options: Record<string, unknown> = { ...m.defaults }
-  for (const [key, s] of Object.entries(schema.properties ?? {})) if (!(key in options) && s.default !== undefined) options[key] = s.default
+  // A disabled field never goes out (14.11.2026): the provider takes its own
+  // default, which the run's price already is (Hi3D's resolution).
+  for (const [key, s] of Object.entries(schema.properties ?? {})) if (!(key in options) && s.default !== undefined && !s.disabled) options[key] = s.default
   return studioCredits(id,options,5)
 }
 

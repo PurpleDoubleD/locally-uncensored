@@ -57,6 +57,18 @@ const CORE_NODES = new Set([
   'CLIPTextEncode', 'TextEncodeQwenImage21', 'CLIPSetLastLayer', 'CLIPVisionEncode', 'ConditioningZeroOut',
   'InpaintModelConditioning', 'AudioEncoderEncode', 'ModelSamplingSD3', 'ModelSamplingAuraFlow',
   'SVD_img2vid_Conditioning', 'VideoLinearCFGGuidance',
+  // Local 3D (3.1.0, buildThreeDWorkflow), schema node_id of each read in
+  // ComfyUI at tag v0.42.4 on 2026-11-13: nodes_trellis2.py (the eight
+  // Trellis2 nodes), nodes_bg_removal.py (LoadBackgroundRemovalModel,
+  // RemoveBackground), nodes_images.py (ImageCropToMask),
+  // nodes_custom_sampler.py (CFGOverride), nodes_model_advanced.py
+  // (RescaleCFG), nodes_mesh_postprocess.py (the mesh and bake nodes),
+  // nodes_save_3d.py (SaveGLB).
+  'EmptyTrellis2LatentStructure', 'Trellis2Conditioning', 'Trellis2ShapeStage', 'Trellis2UpsampleStage',
+  'Trellis2TextureStage', 'VaeDecodeStructureTrellis2', 'VaeDecodeShapeTrellis', 'VaeDecodeTextureTrellis',
+  'LoadBackgroundRemovalModel', 'RemoveBackground', 'ImageCropToMask', 'CFGOverride', 'RescaleCFG',
+  'RemeshMesh', 'DecimateMesh', 'MeshSmoothNormals', 'UnwrapMesh', 'BakeTextureFromVoxel',
+  'BakeNormalMapFromMesh', 'BakeAmbientOcclusion', 'ApplyTextureToMesh', 'SaveGLB',
   // latents
   'EmptyLatentImage', 'EmptyLTXVLatentVideo', 'Wan22ImageToVideoLatent', 'TrimVideoLatent',
   'WanSoundImageToVideo', 'WanAnimateToVideo', 'WanVaceToVideo',

@@ -30,6 +30,9 @@ import { FROM_YOUR_PHONE, type GalleryOut, type LaneCaps, type LaneInput, type L
 export const REMOTE_CREATE_EVENT = 'remote-create-job'
 
 export type RemoteCreateKind = LaneKind
+
+/** 3D (3.1.0) is made in LU Cloud only in v1, never on the user's computer. */
+export const THREE_D_NOT_ON_COMPUTER = '3D models are made in LU Cloud, not on your computer.'
 export type RemoteCreateTool = 'mlx' | 'comfyui'
 
 export interface RemoteCreateJob {
@@ -217,6 +220,8 @@ export function createRemoteCreateRunner(deps: RemoteCreateDeps): RemoteCreateRu
       // The negative prompt is read apart (B30).
       const verdict = checkPromptSafety(`${job.prompt} ${job.lyrics ?? ''} ${job.character ?? ''}`, { negative: job.negative })
       if (verdict.blocked) throw new Error(blockMessageFor(verdict.reason))
+      // After the gate on purpose: a refused prompt reads as refused, whatever the kind.
+      if ((job.kind as string) === '3d') throw new Error(THREE_D_NOT_ON_COMPUTER)
       if (!(await deps.progress(job.id, { progress: 0, stepText: 'Starting', index: 0 }))) return
       stopWatch = deps.watchEngine?.(report)
       if (lane) {

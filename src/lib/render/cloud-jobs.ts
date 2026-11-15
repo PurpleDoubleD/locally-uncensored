@@ -12,9 +12,10 @@
 // too and which therefore cannot name CreateIntent either.
 export type CreateIntentLike =
   | 'image' | 'edit' | 'removebg' | 'video' | 'animate' | 'upscale' | 'eraser'
-  | 'character' | 'lipsync' | 'music' | 'extend' | 'motion'
+  | 'character' | 'lipsync' | 'music' | 'extend' | 'motion' | '3d'
 
-export type RenderKind = 'image' | 'video' | 'audio'
+// '3d' (3.1.0): a GLB model. Cloud 3D runs as op 'studio' only.
+export type RenderKind = 'image' | 'video' | 'audio' | '3d'
 // 'upscale'/'eraser' are hosted utility endpoints (super-resolution /
 // masked object removal) — cloud-only intents in the Create UI since 2.5.7.
 // 2.5.8 adds the specialized ops behind the new Create categories: 'lipsync'
@@ -51,6 +52,13 @@ export interface CloudQuota {
   trainings?: { limit: number; used: number; remaining: number }
 }
 
+/** The flat fallback price of the quota a kind is counted under when the
+ *  server sent no own price. Audio and 3D have none in `costs` and count as an
+ *  image; a 3D run is a studio pick and always carries a server quote. */
+export function quotaCostKind(kind: RenderKind): 'image' | 'video' {
+  return kind === 'video' ? 'video' : 'image'
+}
+
 /** Which queue kind + workflow op a Create intent renders as.
  *  'character' maps per characterTab (train vs use) — see useCloudCreate; the
  *  default here is the training op, the use-surface submits a plain image
@@ -79,6 +87,9 @@ export function intentToJob(intent: CreateIntentLike): { kind: RenderKind; op: R
       return { kind: 'video', op: 'extend' }
     case 'motion':
       return { kind: 'video', op: 'motion' }
+    case '3d':
+      // Every cloud 3D model is a studio model (C3D 2.5): no op of its own.
+      return { kind: '3d', op: 'studio' }
     default:
       return { kind: 'image', op: 'generate' }
   }

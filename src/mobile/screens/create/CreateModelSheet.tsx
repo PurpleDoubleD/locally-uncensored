@@ -80,6 +80,7 @@ export default function CreateModelSheet() {
       characterUse: f.characterUse,
       musicSeconds,
       fallbackCredits: { image: quota?.costs.image ?? null, video: quota?.costs.video ?? null, audio: quota?.costs.image ?? null },
+      threeDWay: f.threeDWay,
     }),
   )
   const cheapest = cheapestModel(rows)

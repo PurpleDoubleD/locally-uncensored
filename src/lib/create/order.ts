@@ -4,6 +4,7 @@
 // under PATCHES in that script, and the classes under CLASSES.
 import type { CreateIntent } from './bridge/create-store'
 import type { CloudJob, CloudJobParams, CloudJobSubmit, UploadRole } from './bridge/cloud-jobs'
+import type { RenderKind } from '../render/cloud-jobs'
 import { cloudModelById, resolveCharacterModel } from './bridge/cloud-models'
 import { pricesByInput } from '../render/create-studio'
 import {
@@ -167,6 +168,13 @@ const CREATE_SLOT_NAME: Record<string, string> = {
 
 function spec(error: string): never {
   throw new OrderSpecError(error)
+}
+
+/** What a chat order may render. 3D models (3.1.0) are made in the Create tab
+ *  only: chat results are images, clips and tracks. */
+function chatKind(kind: RenderKind): MediaKind {
+  if (kind === '3d') spec('3D models are made in the Create tab, not in chat.')
+  return kind
 }
 
 function isIntent(s: ItemSpec): s is IntentItemSpec {
@@ -443,7 +451,7 @@ async function planCreate(p: Planner, s: IntentItemSpec, intent: CreateIntent, m
     engine: 'create',
     title: INTENT_LABEL[intent],
     model: resolved.model,
-    kind: resolved.op === 'lora-train' ? 'image' : resolved.kind,
+    kind: resolved.op === 'lora-train' ? 'image' : chatKind(resolved.kind),
     prompt,
     options,
     inputs,
@@ -593,7 +601,7 @@ async function planStep(
     engine: 'step',
     title,
     model: r.step.model,
-    kind: r.step.kind,
+    kind: chatKind(r.step.kind),
     prompt,
     options,
     inputs,

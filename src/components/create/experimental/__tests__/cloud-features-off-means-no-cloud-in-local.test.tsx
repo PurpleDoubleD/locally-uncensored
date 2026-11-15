@@ -54,7 +54,7 @@ describe('the rule', () => {
   })
 
   it('off on a Mac: only what the Mac runs itself', () => {
-    expect(visibleIntents('local', true, false).map((m) => m.id)).toEqual(['image', 'removebg', 'video', 'character'])
+    expect(visibleIntents('local', true, false).map((m) => m.id)).toEqual(['image', 'removebg', 'video', 'character', '3d'])
   })
 
   it('cloud mode shows everything, whatever the switch says', () => {

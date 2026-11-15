@@ -15,7 +15,7 @@ use tauri::State;
 use crate::commands::download::{safe_subfolder, sanitize_filename};
 use crate::state::AppState;
 
-const MEDIA_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg", "webp", "gif", "mp4", "webm", "mov", "mkv", "wav", "mp3", "flac", "ogg"];
+const MEDIA_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg", "webp", "gif", "mp4", "webm", "mov", "mkv", "wav", "mp3", "flac", "ogg", "glb"];
 
 #[derive(Debug, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -99,7 +99,7 @@ pub struct OutputFile {
     pub filename: String,
     /// Below the output folder, with "/" between the parts; "" for the folder itself.
     pub subfolder: String,
-    /// "image", "video" or "audio".
+    /// "image", "video", "audio" or "3d" (a GLB model).
     pub kind: &'static str,
     pub modified_ms: u64,
     pub bytes: u64,
@@ -128,6 +128,8 @@ fn kind_of(ext: &str) -> Option<&'static str> {
         "png" | "jpg" | "jpeg" | "webp" | "gif" => Some("image"),
         "mp4" | "webm" | "mov" | "mkv" => Some("video"),
         "wav" | "mp3" | "flac" | "ogg" => Some("audio"),
+        // A 3D model as Create writes it (3.1.0). The gallery calls it "3d".
+        "glb" => Some("3d"),
         _ => None,
     }
 }
@@ -404,6 +406,8 @@ mod tests {
         std::fs::create_dir_all(out.join("video/deep")).unwrap();
         std::fs::write(out.join("video/clip.mp4"), b"x").unwrap();
         std::fs::write(out.join("video/deep/s.wav"), b"x").unwrap();
+        std::fs::create_dir_all(out.join("3d")).unwrap();
+        std::fs::write(out.join("3d/chair.glb"), b"glTF").unwrap();
         std::fs::write(out.join("notes.txt"), b"x").unwrap();
         std::fs::write(out.join("model.safetensors"), b"x").unwrap();
         std::fs::create_dir_all(out.join(".cache")).unwrap();
@@ -412,7 +416,7 @@ mod tests {
         assert!(!truncated);
         let mut names: Vec<_> = files.iter().map(|f| format!("{}|{}|{}", f.subfolder, f.filename, f.kind)).collect();
         names.sort();
-        assert_eq!(names, vec!["video/deep|s.wav|audio", "video|clip.mp4|video", "|a.png|image"]);
+        assert_eq!(names, vec!["3d|chair.glb|3d", "video/deep|s.wav|audio", "video|clip.mp4|video", "|a.png|image"]);
         let a = files.iter().find(|f| f.filename == "a.png").unwrap();
         assert_eq!(a.parameters.as_deref(), Some("a cat\nSteps: 20"));
         assert_eq!((a.width, a.height), (Some(832), Some(1216)));
@@ -442,6 +446,7 @@ mod tests {
         assert_eq!(output_file(&out, "x.png", "../.."), None);
         assert_eq!(output_file(&out, "x.png", "/etc"), None);
         assert_eq!(output_file(&out, "model.safetensors", ""), None);
+        assert_eq!(output_file(&out, "chair.glb", "3d"), Some(out.join("3d").join("chair.glb")), "a 3D model goes to the Trash too");
         assert_eq!(output_file(&out, "noext", ""), None);
         assert_eq!(output_file(&out, "", ""), None);
     }

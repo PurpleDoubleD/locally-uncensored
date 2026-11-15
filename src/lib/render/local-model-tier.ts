@@ -20,6 +20,7 @@ const BEST = new Set([
   'ltx25', 'minimaxh3', // Video mit Ton
   'qwenimage', 'zimage', 'flux2', 'krea2', 'ernie_image', // Bild
   'yue2', // Musik
+  'trellis2', // 3D (Windows und Linux, api/model-bundles getThreeDBundles)
 ])
 
 /** Von einer neueren Familie abgeloest. Nicht versteckt, nur nach unten gesammelt. */

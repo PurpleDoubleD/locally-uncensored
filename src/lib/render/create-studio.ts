@@ -14,6 +14,8 @@ import { STUDIO_MODELS, studioBaseCredits, studioFields, studioPreviewCredits, s
 import { presetModels, requiredRoleInputs, type PresetModel, type StepRole } from './preset-models'
 import { cloudModelById, defaultCloudModel, modelForOp, opPickerModels, resolveCharacterModel, resolveOpPick } from '../../stores/cloudCatalogStore'
 import { intentToJob, type CreateIntentLike } from './cloud-jobs'
+import { PICTURE_FIRST_MESH, pictureFirstOffered } from '../three/picture-first'
+import { THREE_D_TEXT } from '../three/three-d-text'
 
 // Desktop port (P2, checked again in P9): the web's CreateIntent already
 // carries 'video_upscale' as a distinct intent from the plain 'upscale'
@@ -30,7 +32,14 @@ import { intentToJob, type CreateIntentLike } from './cloud-jobs'
 // crystal-upscaler, flux-3-upscale) is correctly wired and tested, but
 // reachable only by calling these functions directly with 'video_upscale',
 // which no UI path does today.
-export type StudioIntent = CreateIntentLike | 'video_upscale'
+export type StudioIntent = CreateIntentLike | 'video_upscale' | '3d-text' | '3d-image' | '3d-video'
+
+/** The studio intent of the tab on screen. The 3D tab runs another set of
+ *  models per way (words, one picture, the frames of a video), so it is
+ *  three studio intents; every other tab is its own. */
+export function studioIntentOf(intent: CreateIntentLike, threeDWay?: 'text' | 'image' | 'video'): StudioIntent {
+  return intent === '3d' ? `3d-${threeDWay ?? 'image'}` : intent
+}
 
 /** Die Rolle, die eine Create-Unterkategorie faehrt. Absichten ohne Eintrag
  *  (Bild, Video, Animate, Edit) haben ihre eigenen, aelteren Waehler. */
@@ -42,6 +51,12 @@ const INTENT_ROLE: Partial<Record<StudioIntent, StepRole[]>> = {
   extend: ['extend'],
   motion: ['motion'],
   video_upscale: ['upscale'],
+  // 3D: a video sends its frames to a model that takes several sides first,
+  // and to a one-picture model with its best frame where none is there.
+  '3d-text': ['mesh-text'],
+  '3d-image': ['mesh-image', 'mesh-views'],
+  '3d-video': ['mesh-views', 'mesh-image'],
+  '3d': ['mesh-image', 'mesh-views', 'mesh-text'],
 }
 
 export function intentRoles(intent: StudioIntent): StepRole[] {
@@ -78,6 +93,13 @@ export function intentPickerModels(intent: StudioIntent): PresetModel[] {
   const add = (m: PresetModel) => { if (!seen.has(m.id)) { seen.add(m.id); out.push(m) } }
   if (intent === 'lipsync') for (const m of opPickerModels('lipsync')) {
     add({ id: m.id, label: m.label, kind: m.kind, op: 'lipsync', adult: m.adult === true, tier: m.tier, weights: m.weights })
+  }
+  // 3D from words: "Picture first" leads the list, as the image-to-3D model
+  // it ends on (lib/three/picture-first.ts). It is the one way from words
+  // that no text-to-3D filter stands in.
+  if (intent === '3d-text' && pictureFirstOffered()) {
+    const mesh = presetModels('mesh-image').find((m) => m.id === PICTURE_FIRST_MESH)
+    if (mesh) add({ ...mesh, label: THREE_D_TEXT.pictureFirstSwitch })
   }
   for (const role of roles) for (const m of presetModels(role)) add(m)
   return out

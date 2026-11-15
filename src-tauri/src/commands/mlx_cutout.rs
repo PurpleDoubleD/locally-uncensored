@@ -27,21 +27,21 @@ use serde_json::Value;
 use crate::commands::CmdResult;
 use crate::state::AppState;
 
-const NO_IMAGE: &str = "Add an image to remove its background.";
+pub(crate) const NO_IMAGE: &str = "Add an image to remove its background.";
 const GONE: &str = "The image to cut out is no longer on disk. Add it again.";
-const NO_SUBJECT: &str =
+pub(crate) const NO_SUBJECT: &str =
     "No subject was found in this image, so there is nothing to cut out. Try a picture with a clear main subject.";
 #[cfg(not(target_os = "macos"))]
 const MAC_ONLY: &str = "This Remove Background runs on a Mac only. Here it runs through ComfyUI.";
 
 /// The folder Create stages an image in before a run reads it
 /// (`video_stage_start_image`). A cutout takes its image from there alone.
-fn staged_images_dir() -> PathBuf {
+pub(crate) fn staged_images_dir() -> PathBuf {
     crate::commands::video::outputs_root().join("start-images")
 }
 
 /// The image of a cutout as it may be read, or the sentence for the user.
-fn staged_input(asked: &str, staged: &Path) -> Result<PathBuf, String> {
+pub(crate) fn staged_input(asked: &str, staged: &Path) -> Result<PathBuf, String> {
     if asked.trim().is_empty() {
         return Err(NO_IMAGE.to_string());
     }
@@ -108,7 +108,7 @@ fn read_upright(path: &Path) -> Result<(image::DynamicImage, bool), String> {
 /// Cut the subject out of the image at `input` and write the PNG into
 /// `out_dir`. Answers with the file and its size.
 #[cfg(target_os = "macos")]
-fn cut_out(input: &Path, out_dir: &Path) -> Result<(PathBuf, u32, u32), String> {
+pub(crate) fn cut_out(input: &Path, out_dir: &Path) -> Result<(PathBuf, u32, u32), String> {
     let (picture, turned) = read_upright(input)?;
     // Vision reads the file as it is stored and the mask has to fit the
     // pixels read above. A picture that had to be turned is handed over

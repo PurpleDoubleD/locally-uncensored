@@ -1,15 +1,17 @@
 import { itemHasAlpha } from '../../../lib/transparent-image'
-import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Images, Play, PanelRightClose, Trash2, Download, MonitorOff, AudioLines, FolderInput, Check, X, Eye, EyeOff, Tag } from 'lucide-react'
 import { useCreateStore, type GalleryItem } from '../../../stores/createStore'
 import { galleryLabel } from '../../../lib/render/gallery-label'
 import { GALLERY_DRAG_TYPE, playsAsVideo } from './galleryUrl'
 import { deleteTitle, unavailableTitle } from './galleryWording'
+import { deleteFateOf, deleteFates } from '../../../lib/gallery-trash'
 import { isMlxImageHost } from '../../../api/mlx-image'
 import { downloadGalleryItem } from './galleryDownload'
 import { useComfyMedia } from './useComfyMedia'
 import { cn } from '../ui/cn'
+import { ModelThumb } from '../../three/ModelThumb'
 import { HINWEIS_TEXT, HINWEIS_ZEILE } from '../../../lib/hinweis'
 import { hiddenCount, itemsInView } from '../../../lib/gallery-tags'
 import { FolderFilter, MoveToFolderModal, OnBody } from './GalleryFolders'
@@ -43,6 +45,9 @@ interface Props {
  */
 export function CreatePanel({ open, onOpenChange, activeId, onSelect }: Props) {
   const all = useCreateStore((s) => s.gallery)
+  // What Delete does to each tile: a local file to the bin, a cloud result
+  // only out of this gallery (lib/gallery-trash.ts).
+  const fateOf = useMemo(() => deleteFateOf(all), [all])
   const folderOpen = useCreateStore((s) => s.galleryFolderOpen)
   const removeFromGallery = useCreateStore((s) => s.removeFromGallery)
   // C27: the output folder of a local ComfyUI. The Mac has none, the cloud neither.
@@ -224,7 +229,7 @@ export function CreatePanel({ open, onOpenChange, activeId, onSelect }: Props) {
           <OnBody>
             <Modal open={confirming.length > 0} onClose={() => setConfirming([])} title="Delete from the gallery" maxWidth="max-w-md">
               <div data-testid="gallery-delete-confirm">
-                <p className="t-body text-gray-700 dark:text-gray-200">{deleteConfirmLine(confirming.length, isMlxImageHost())}</p>
+                <p className="t-body text-gray-700 dark:text-gray-200">{deleteConfirmLine(deleteFates(confirming, all), isMlxImageHost())}</p>
                 <ModalActions>
                   <ModalButton onClick={() => setConfirming([])}>Cancel</ModalButton>
                   <ModalButton variant="danger" onClick={deleteAll}>
@@ -305,7 +310,7 @@ export function CreatePanel({ open, onOpenChange, activeId, onSelect }: Props) {
                     <button
                       onClick={() => removeFromGallery(g.id)}
                       className="lu-on-dark absolute -top-1.5 -right-1.5 w-6 h-6 rounded-full bg-red-600/90 hover:bg-red-600 text-gray-100 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center shadow-sm"
-                      title={deleteTitle(isMlxImageHost())}
+                      title={deleteTitle(isMlxImageHost(), fateOf(g))}
                     >
                       <Trash2 size={12} />
                     </button>
@@ -378,6 +383,7 @@ function BarBtn({ children, title, onClick, danger }: { children: React.ReactNod
 // direct /view load, #75) — hooks can't run inside the gallery .map().
 function GalleryThumb({ g }: { g: GalleryItem }) {
   const { src, onError, onLoad } = useComfyMedia(g)
+  if (g.type === '3d') return <ModelThumb item={g} />
   if (g.type === 'audio') {
     // No visual to thumbnail — a labeled tile; the Stage viewer holds the
     // actual <audio> player.

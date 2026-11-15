@@ -12,7 +12,10 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { deflateSync } from 'node:zlib'
 import { expect, test, type Locator, type Page, type Route } from '@playwright/test'
+import { readFileSync } from 'node:fs'
 import { SIZES, declareAdult, measureLayout, screensLoaded, shellUrl, watchErrors, type OpenOptions } from './support'
+import { cubeGlb } from '../../src/lib/three/glb-build'
+import { THREE_D_SCHEMAS, THREE_D_STUDIO, MESH_TEXT, MESH_VIEWS, threeDCatalogEntries } from '../../src/mobile/screens/create/__tests__/fixtures/three-d-models'
 
 // ---------- test media ----------
 
@@ -107,6 +110,8 @@ function pngCutOut(width: number, height: number): Buffer {
 }
 
 const RESULT_PNG = png(256, 256, 30)
+/** A finished 3D model: the hand built cube of the 3D tests. */
+const GLB = Buffer.from(cubeGlb())
 const photo = (name: string, tint = 0, w = 640, h = 480) => ({ name, mimeType: 'image/png', buffer: png(w, h, tint) })
 const clip = (name = 'clip.webm') => ({ name, mimeType: 'video/webm', buffer: WEBM })
 const sound = (name = 'voice.wav') => ({ name, mimeType: 'audio/wav', buffer: wav() })
@@ -149,7 +154,7 @@ const STUDIO_MODEL = { id: 'nucleus-image', label: 'Nucleus', kind: 'image', adu
 
 interface MockJob {
   id: string
-  kind: 'image' | 'video' | 'audio'
+  kind: 'image' | 'video' | 'audio' | '3d'
   model: string
   op: string
   prompt: string
@@ -237,7 +242,7 @@ class Cloud {
   }
 
   private resultUrl(job: MockJob): string {
-    const ext = job.kind === 'image' ? 'png' : job.kind === 'video' ? 'webm' : 'wav'
+    const ext = job.kind === 'image' ? 'png' : job.kind === 'video' ? 'webm' : job.kind === '3d' ? 'glb' : 'wav'
     return `https://lu-labs.ai/mock-result/${job.id}.${ext}?sig=${this.sig}`
   }
 
@@ -318,8 +323,8 @@ class Cloud {
       if (p.startsWith('/mock-result/')) {
         if (this.mediaDown) return route.abort('connectionfailed')
         if (Number(url.searchParams.get('sig') ?? 0) < this.validFrom || this.resultsGone) return route.fulfill({ status: 403, headers: CORS, body: 'expired' })
-        const body = p.endsWith('.png') ? this.resultPng : p.endsWith('.webm') ? WEBM : wav()
-        const type = p.endsWith('.png') ? 'image/png' : p.endsWith('.webm') ? 'video/webm' : 'audio/wav'
+        const body = p.endsWith('.png') ? this.resultPng : p.endsWith('.webm') ? WEBM : p.endsWith('.glb') ? GLB : wav()
+        const type = p.endsWith('.png') ? 'image/png' : p.endsWith('.webm') ? 'video/webm' : p.endsWith('.glb') ? 'model/gltf-binary' : 'audio/wav'
         return route.fulfill({ status: 200, headers: { ...CORS, 'content-type': type, 'accept-ranges': 'bytes', 'cache-control': 'no-store' }, body })
       }
 
@@ -383,7 +388,7 @@ class Cloud {
       if (p === '/api/jobs' && req.method() === 'POST') {
         const reply = this.submitReplies.shift()
         if (reply) return answer(route, reply)
-        const submit = req.postDataJSON() as { kind: 'image' | 'video' | 'audio'; model: string; prompt: string; params: Record<string, unknown> }
+        const submit = req.postDataJSON() as { kind: 'image' | 'video' | 'audio' | '3d'; model: string; prompt: string; params: Record<string, unknown> }
         this.submits.push(submit)
         const count = typeof submit.params.count === 'number' ? submit.params.count : 1
         const cost = this.priceOf(submit)
@@ -3990,4 +3995,147 @@ test.describe('a prompt that is already there can be changed (3.0.10)', () => {
       await expect(prompt).toHaveValue('a dog in the snow')
     })
   }
+})
+
+// ---------- 3D (3.1.0, cloud only) ----------
+
+/**
+ * The cloud 3D models are not in the shipped registry yet. The app gets the
+ * three stand ins of the unit tests in place of the two registry files, and
+ * the catalog lists them. Nothing else of the app changes.
+ */
+async function serveThreeDRegistry(page: Page): Promise<void> {
+  const here = path.dirname(fileURLToPath(import.meta.url))
+  const read = (name: string) => JSON.parse(readFileSync(path.join(here, '../../src/lib/render', name), 'utf8')) as Record<string, unknown>
+  const models = { ...read('studio-models.json'), ...THREE_D_STUDIO }
+  const schemas = { ...read('provider-schemas.json'), ...THREE_D_SCHEMAS }
+  const asModule = (body: unknown) => ({ status: 200, headers: { 'content-type': 'text/javascript', 'cache-control': 'no-store' }, body: `export default ${JSON.stringify(body)}\n` })
+  await page.route(/\/src\/lib\/render\/studio-models\.json(\?.*)?$/, (route) => route.fulfill(asModule(models)))
+  await page.route(/\/src\/lib\/render\/provider-schemas\.json(\?.*)?$/, (route) => route.fulfill(asModule(schemas)))
+}
+
+const SHOTS_3D = process.env.LU_3D_SHOTS ?? ''
+
+test.describe('3D on the phone', () => {
+  test('the tool is only there when the catalog lists a 3D model', async ({ page }) => {
+    const cloud = new Cloud()
+    await openCreate(page, cloud)
+    await tid(page, 'm-create-tools-all').tap()
+    await expect(tid(page, 'm-sheet-tools')).toBeVisible()
+    await expect(tid(page, 'm-create-tools-3d')).toHaveCount(0)
+  })
+
+  test('from words: the prompt field, the model of the way, no detail step and no photo', async ({ page }) => {
+    await serveThreeDRegistry(page)
+    const cloud = new Cloud()
+    cloud.models = [...CATALOG_MODELS, ...threeDCatalogEntries()]
+    await openCreate(page, cloud)
+    await chooseTool(page, '3d')
+    await expect(tid(page, 'm-create-3d-way')).toBeVisible()
+    // The way a fresh phone starts on: a photo, so no prompt field.
+    await expect(tid(page, 'm-create-prompt')).toHaveCount(0)
+    await tid(page, 'm-create-3d-way-text').tap()
+    await expect(tid(page, 'm-create-model')).toContainText('Hunyuan3D')
+    await expect(tid(page, 'm-create-3d-detail-card')).toHaveCount(0)
+    await expect(tid(page, 'm-create-source-empty')).toHaveCount(0)
+    await expect(tid(page, 'm-create-blocked')).toHaveAttribute('data-m-reason', 'no-prompt')
+    await typePrompt(page, 'a clay teapot with a bamboo handle')
+    await expect(tid(page, 'm-create-generate')).toBeEnabled()
+  })
+
+  test('from words: the run sends the prompt and no picture', async ({ page }) => {
+    await serveThreeDRegistry(page)
+    const cloud = new Cloud()
+    cloud.models = [...CATALOG_MODELS, ...threeDCatalogEntries()]
+    await openCreate(page, cloud)
+    await chooseTool(page, '3d')
+    await tid(page, 'm-create-3d-way-text').tap()
+    await typePrompt(page, 'a clay teapot with a bamboo handle')
+    await run(page)
+    await expect(tid(page, 'm-create-result')).toHaveAttribute('data-m-kind', '3d', { timeout: 20_000 })
+    const submit = cloud.submits[cloud.submits.length - 1]
+    expect(submit).toMatchObject({ model: MESH_TEXT, kind: '3d', prompt: 'a clay teapot with a bamboo handle' })
+    expect(cloud.uploads).toHaveLength(0)
+  })
+
+  test('from a video: still frames, picked like on the desktop, and only the frames are uploaded', async ({ page }) => {
+    await serveThreeDRegistry(page)
+    const cloud = new Cloud()
+    cloud.models = [...CATALOG_MODELS, ...threeDCatalogEntries()]
+    await openCreate(page, cloud)
+    await chooseTool(page, '3d')
+    await tid(page, 'm-create-3d-way-video').tap()
+    await expect(tid(page, 'm-create-blocked')).toHaveAttribute('data-m-reason', 'no-3d-video')
+    await expect(tid(page, 'm-create-prompt')).toHaveCount(0)
+    await pick(page, tid(page, 'm-create-3d-video-add'), [clip('teapot.webm')])
+    await expect(tid(page, 'm-create-3d-video')).toHaveAttribute('data-state', 'ready', { timeout: 20_000 })
+    await expect(tid(page, 'm-create-3d-frame')).toHaveCount(8)
+    await expect(tid(page, 'm-create-3d-video')).toHaveAttribute('data-m-picked', '0,2,4,5')
+    await expect(tid(page, 'm-create-3d-detail')).toBeVisible()
+    if (SHOTS_3D) await page.screenshot({ path: path.join(SHOTS_3D, '3d-video.png') })
+    // Swap a moment: the oldest goes, the order of the video stays.
+    await tid(page, 'm-create-3d-frame').nth(7).tap()
+    await expect(tid(page, 'm-create-3d-video')).toHaveAttribute('data-m-picked', '2,4,5,7')
+    await tid(page, 'm-create-3d-detail-fine').tap()
+    await run(page)
+    await expect(tid(page, 'm-create-result')).toHaveAttribute('data-m-kind', '3d', { timeout: 20_000 })
+    const submit = cloud.submits[cloud.submits.length - 1]
+    expect(submit.model).toBe(MESH_VIEWS)
+    expect(submit.params.image_paths as string[]).toHaveLength(4)
+    expect((submit.params.studio_options as Record<string, unknown>).texture_quality).toBe('extreme')
+    expect(cloud.uploads).toHaveLength(4)
+    // No upload is the video (WebM starts with 1A 45 DF A3).
+    expect(cloud.uploads.some((u) => u.head.join(',') === '26,69,223,163')).toBe(false)
+  })
+
+  test('from a photo: further sides, the 3D view of the result, shared as a GLB, a tile in the gallery', async ({ page }) => {
+    const errors = watchErrors(page)
+    await serveThreeDRegistry(page)
+    const cloud = new Cloud()
+    cloud.models = [...CATALOG_MODELS, ...threeDCatalogEntries()]
+    await openCreate(page, cloud)
+    await chooseTool(page, '3d')
+    await tid(page, 'm-create-3d-way-image').tap()
+    await tid(page, 'm-create-add-source').tap()
+    await expect(tid(page, 'm-create-source-video')).toBeVisible()
+    await pick(page, tid(page, 'm-create-source-library'), [photo('front.png', 10)])
+    await expect(tid(page, 'm-sheet-source')).toHaveCount(0)
+    await expect(tid(page, 'm-create-source')).toBeVisible()
+    await tid(page, 'm-create-model').tap()
+    await page.locator(`[data-m-id="${MESH_VIEWS}"]`).first().tap()
+    await expect(tid(page, 'm-create-3d-sides')).toHaveAttribute('data-state', '0')
+    await pick(page, tid(page, 'm-create-3d-side-add'), [photo('left.png', 40)])
+    await expect(tid(page, 'm-create-3d-sides')).toHaveAttribute('data-state', '1')
+    if (SHOTS_3D) await page.screenshot({ path: path.join(SHOTS_3D, '3d-image.png') })
+    await run(page)
+    await expect(tid(page, 'm-create-result')).toHaveAttribute('data-m-kind', '3d', { timeout: 20_000 })
+    const submit = cloud.submits[cloud.submits.length - 1]
+    expect(submit.model).toBe(MESH_VIEWS)
+    expect(submit.params.image_paths as string[]).toHaveLength(2)
+
+    // The result turns in the 3D view right on the stage.
+    const viewer = tid(page, 'm-create-result-3d').getByTestId('model-viewer')
+    await expect(viewer).toHaveAttribute('data-phase', /ready|no-webgl/, { timeout: 20_000 })
+    if ((await viewer.getAttribute('data-phase')) === 'ready') await expect(tid(page, 'm-create-result-3d').getByTestId('model-viewer-facts')).toContainText('triangles')
+    if (SHOTS_3D) await page.screenshot({ path: path.join(SHOTS_3D, '3d-result.png') })
+
+    // Shared as the GLB it was made as.
+    await tid(page, 'm-create-result-share').tap()
+    await expect.poll(() => page.evaluate(() => (window as unknown as { __shared: { name: string; type: string }[] }).__shared)).toEqual([
+      expect.objectContaining({ name: expect.stringMatching(/\.glb$/), type: 'model/gltf-binary' }),
+    ])
+
+    await tid(page, 'm-create-result-fullscreen').tap()
+    await expect(tid(page, 'm-create-item-3d')).toBeVisible()
+    await expect(tid(page, 'm-create-item-3d').getByTestId('model-viewer')).toHaveAttribute('data-phase', /ready|no-webgl/, { timeout: 20_000 })
+    if (SHOTS_3D) await page.screenshot({ path: path.join(SHOTS_3D, '3d-item.png') })
+    await tid(page, 'm-create-item-close').tap()
+    await tid(page, 'm-create-gallery').tap()
+    const tile = page.locator('[data-testid="m-create-gallery-tile"][data-m-kind="3d"]')
+    await expect(tile).toHaveCount(1)
+    await expect(tile.getByTestId('thumb-3d')).toBeVisible()
+    await expect(tid(page, 'm-create-gallery-filter-3d')).toBeVisible()
+    if (SHOTS_3D) await page.screenshot({ path: path.join(SHOTS_3D, '3d-gallery.png') })
+    expect(errors()).toEqual([])
+  })
 })

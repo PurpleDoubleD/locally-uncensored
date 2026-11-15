@@ -36,13 +36,18 @@ describe('der alte Katalog ist wirklich der alte', () => {
     }
     const ids = new Set(alt.map((m) => m.id))
     // Acht vom 02.10.2026, dazu die 23 des Web-Katalogs vom 24.10.2026
-    // (FLUX 3 Klein, die Spitzenmodelle, Wan 3.0, ElevenLabs v4 und mehr).
+    // (FLUX 3 Klein, die Spitzenmodelle, Wan 3.0, ElevenLabs v4 und mehr)
+    // und die 23 3D-Modelle von 3.1.0 (zehn, dazu dreizehn der zweiten Welle
+    // vom 14.11.2026).
     const katalog2410 = new Set(['flux-3-klein', 'flux-3-klein-base', 'flux-3-klein-edit', 'krea-2-turbo', 'moss-image',
       'eleven-v4', 'eleven-v4-turbo', 'wan-3.0-t2v', 'wan-3.0-prime-t2v', 'minimax-h3-singularity', 'minimax-h3-singularity-ref',
       'gpt-image-2', 'gpt-image-2-edit', 'nano-banana-pro', 'nano-banana-pro-edit', 'flux-2-max', 'flux-2-max-edit',
       'midjourney', 'grok-imagine-quality', 'grok-imagine-quality-edit', 'recraft-v4.1-pro', 'kling-image-o3', 'kling-image-o3-edit'])
-    expect(neueIds().filter((id) => !katalog2410.has(id))).toHaveLength(8)
+    const dreiD = (id: string) => /3d|trellis|tripo|seed3d|rodin|meshy/.test(id)
+    expect(neueIds().filter((id) => !katalog2410.has(id) && !dreiD(id))).toHaveLength(8)
     expect(neueIds().filter((id) => katalog2410.has(id))).toHaveLength(23)
+    expect(neueIds().filter((id) => dreiD(id))).toHaveLength(23)
+    expect(neueIds()).toHaveLength(54)
     for (const id of neueIds()) expect(ids.has(id), id).toBe(false)
     // Der neue Katalog hat dagegen alles.
     expect(neuerServer().length).toBeGreaterThanOrEqual(alt.length + 8)

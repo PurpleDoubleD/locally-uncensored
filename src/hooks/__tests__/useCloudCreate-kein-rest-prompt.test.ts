@@ -171,8 +171,13 @@ describe('Ansichten ohne Promptfeld', () => {
   })
 
   it('kein Studio-Modell einer Ansicht ohne Promptfeld verlangt einen Prompt', () => {
-    for (const meta of INTENTS.filter((m) => !intentTakesPrompt(m.id as CreateIntent))) {
-      for (const m of intentPickerModels(meta.id as CreateIntent)) {
+    // 3D has a prompt field "From text" only: its picture and video ways run
+    // their own models (studioIntentOf), and those must not ask for words.
+    const views = INTENTS.filter((m) => !intentTakesPrompt(m.id as CreateIntent))
+      .flatMap((m) => (m.id === '3d' ? (['3d-image', '3d-video'] as const) : [m.id as CreateIntent]))
+    for (const view of views) {
+      const meta = { id: view }
+      for (const m of intentPickerModels(view)) {
         const studio = STUDIO_MODELS[m.id]
         if (!studio) continue
         expect(studioSchema(m.id).required ?? [], `${meta.id} ${m.id}`).not.toContain(studio.promptField ?? 'prompt')

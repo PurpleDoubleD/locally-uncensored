@@ -1,10 +1,11 @@
 import { useCreateStore } from '../../../stores/createStore'
 import { useCreateExp } from './CreateContext'
-import { intentToJob, type RenderKind, type RenderOp } from '../../../lib/render/cloud-jobs'
+import { intentToJob, quotaCostKind, type RenderKind, type RenderOp } from '../../../lib/render/cloud-jobs'
 import { lengthCredits, lengthPrice, runCredits } from '../../../stores/cloudCatalogStore'
-import { createRunModel, createStudioCost, isStudioModel, startImageCount } from '../../../lib/render/create-studio'
+import { createRunModel, createStudioCost, isStudioModel, startImageCount, studioIntentOf } from '../../../lib/render/create-studio'
 import { STUDIO_MODELS } from '../../../lib/render/studio-contract'
 import { runImageCount } from '../../../lib/render/image-count'
+import { pictureStepCredits } from '../../../lib/three/picture-first'
 
 /** What the cloud run on screen costs. One reader for the meter chip and for
  *  the list of several source images, so both name the same number. */
@@ -25,6 +26,7 @@ export function useRunCredits(): RunCredits | null {
   const intent = useCreateStore((s) => s.intent())
   const cloudImageModel = useCreateStore((s) => s.cloudImageModel)
   const cloudVideoModel = useCreateStore((s) => s.cloudVideoModel)
+  const threeDWay = useCreateStore((s) => s.threeDWay)
   const cloudOpModel = useCreateStore((s) => s.cloudOpModel)
   const characterTab = useCreateStore((s) => s.characterTab)
   const selectedCharacter = useCreateStore((s) => s.selectedCharacter)
@@ -63,7 +65,7 @@ export function useRunCredits(): RunCredits | null {
   // Wahl, die die Unterkategorie nicht fahren kann, rechnet hier als das Modell,
   // das wirklich laeuft.
   const model = createRunModel(
-    intent,
+    studioIntentOf(intent, threeDWay),
     { image: cloudImageModel, video: cloudVideoModel, op: cloudOpModel },
     characterUse ? selectedCharacter?.family ?? '' : undefined,
   )
@@ -91,8 +93,9 @@ export function useRunCredits(): RunCredits | null {
   const unitCost = lengthRate
     ? cloudStudioCredits ?? lengthCredits(model, lengthRate.basis === 'chars' ? Array.from(prompt).length || undefined : undefined)
     : studioPick
-    ? cloudStudioCredits ?? createStudioCost(studioPick, cloudStudioOptions, Array.from(prompt).length, undefined, startImageCount(studioPick, extraPhotos) ?? 1)
-    : runCredits(kind, op, model, seconds, quota.costs[kind === 'audio' ? 'image' : kind], targetResolution)
+    ? (cloudStudioCredits ?? createStudioCost(studioPick, cloudStudioOptions, Array.from(prompt).length, undefined, startImageCount(studioPick, extraPhotos) ?? 1))
+      + pictureStepCredits(intent, threeDWay, studioPick, prompt)
+    : runCredits(kind, op, model, seconds, quota.costs[quotaCostKind(kind)], targetResolution)
   // Mehrere Bilder: jedes ist ein eigener Auftrag zum vollen Preis, die Summe
   // ist, was der Lauf bindet. Der Zaehler "noch N Bilder" rechnet je Bild.
   const imageCount = runImageCount(intent, cloudImageCount, characterUse)

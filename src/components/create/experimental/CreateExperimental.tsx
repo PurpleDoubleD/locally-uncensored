@@ -42,8 +42,8 @@ import { Modal } from '../../ui/Modal'
 const PresetWorkshop = lazy(() =>
   import('./PresetWorkshop').then((m) => ({ default: m.PresetWorkshop })),
 )
-import { INTENT_MAP, isIntentAvailable } from './intents'
-import { studioPickFor } from '../../../lib/render/create-studio'
+import { INTENT_MAP, intentNeedsSource, isIntentAvailable } from './intents'
+import { studioIntentOf, studioPickFor } from '../../../lib/render/create-studio'
 import { modelForOp, useCloudCatalogStore } from '../../../stores/cloudCatalogStore'
 import { stageShowsSetupCard, laneModelCount } from './stageGate'
 import { isMlxImageHost } from '../../../api/mlx-image'
@@ -93,6 +93,7 @@ function CreateExperimentalInner() {
   // Composer.tsx, kept in sync by hand (both read the same store getters and
   // pure functions, no new state).
   const intent = useCreateStore((s) => s.intent())
+  const threeDWay = useCreateStore((s) => s.threeDWay)
   const cloudOpModel = useCreateStore((s) => s.cloudOpModel)
   const cloudImageModel = useCreateStore((s) => s.cloudImageModel)
   const cloudVideoModel = useCreateStore((s) => s.cloudVideoModel)
@@ -104,7 +105,7 @@ function CreateExperimentalInner() {
   // traegt die Regel fuer Composer, Zaehler, Start und diese Schublade; der
   // Character-Weg bleibt davon ausgenommen. Auf der lokalen Spur gibt es nie
   // eine Studio-Wahl.
-  const studioPick = backend === 'cloud' ? studioPickFor(intent, { cloudImageModel, cloudVideoModel, cloudOpModel }) : undefined
+  const studioPick = backend === 'cloud' ? studioPickFor(studioIntentOf(intent, threeDWay), { cloudImageModel, cloudVideoModel, cloudOpModel }) : undefined
 
   const [shownId, setShownId] = useState<string | null>(null)
   const [advancedOpen, setAdvancedOpen] = useState(false)
@@ -278,7 +279,10 @@ function CreateExperimentalInner() {
   // on a Windows or Linux machine with no ComfyUI running the Cloud tab stood
   // under "ComfyUI is not running. Start it from Settings or wait for
   // auto-start." (how-to recording 12.10.2026). It belongs to the local lane.
-  const banner = error ?? (backend === 'cloud' ? null : setupCardOwnsStage || comfyStarting ? null : modelLoadError)
+  // 3D on a Mac runs its own engine (commands/mesh3d.rs): the state of the
+  // image engine is its business only for "From text", which paints first.
+  const threeDOwnEngine = intent === '3d' && isMlxImageHost() && threeDWay !== 'text'
+  const banner = error ?? (backend === 'cloud' ? null : setupCardOwnsStage || comfyStarting || threeDOwnEngine ? null : modelLoadError)
 
   // "Edit with mask" on a finished image force-sets the 'edit' intent and
   // opens the mask editor. On the MLX Mac that is Qwen-Image 2.1 on the
@@ -342,7 +346,9 @@ function CreateExperimentalInner() {
   const openGalleryItem = useCallback((id: string) => {
     const item = useCreateStore.getState().gallery.find((g) => g.id === id)
     if (!item) return
-    if (INTENT_MAP[intent].needsSource) setLightbox(item)
+    // 3D from a picture or a video owns a source too, and a model opens in
+    // the large view, where it can be turned.
+    if (intentNeedsSource(intent, useCreateStore.getState().threeDWay) || item.type === '3d') setLightbox(item)
     else setShownId(id)
   }, [intent])
 

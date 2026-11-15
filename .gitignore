@@ -10,6 +10,9 @@ pnpm-debug.log*
 lerna-debug.log*
 
 node_modules
+# What Python writes next to a runner when its tests load it by path.
+__pycache__/
+*.pyc
 dist
 dist-ssr
 *.local
@@ -169,6 +172,8 @@ MAIL-ENTWURF*.md
 *-BEFUND.md
 *-HANDOFF.md
 *-PLAN.md
+# 3.1.0 C3D: the report names the provider and its prices, like the plan.
+uebergabe-310/C3D-BERICHT.md
 *-SYSTEM-PROMPT.txt
 /AUDIT-*.md
 /GOAL-*.md

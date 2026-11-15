@@ -1,9 +1,10 @@
 import {
   Image as ImageIcon, Wand2, Scissors, Video, Film, Maximize2, Eraser,
-  UserRound, Mic, Music, FastForward, PersonStanding,
+  UserRound, Mic, Music, FastForward, PersonStanding, Box,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
-import type { CreateBackend, CreateIntent } from '../../../stores/createStore'
+import type { CreateBackend, CreateIntent, ThreeDWay } from '../../../stores/createStore'
+import { THREE_D_TEXT } from '../../../lib/three/three-d-text'
 import { MUSIC_PLACEHOLDER } from '../../../lib/render/music-ui'
 
 export interface IntentMeta {
@@ -178,6 +179,20 @@ export const INTENTS: IntentMeta[] = [
     cloudOnly: true, hasLocalLane: true, requiresModels: 'motion',
     examples: [],
   },
+  {
+    // 3.1.0 (C3D-PLAN): a 3D model from words, a picture or a video. The
+    // thirteenth pill, at the far right, so no tool moves. Which inputs it
+    // takes depends on the way (intentNeedsSource / intentTakesPrompt), so
+    // the two flags here stay false. Local: TripoSR on a Mac (its own
+    // engine, commands/mesh3d.rs), TRELLIS.2 in ComfyUI on Windows and Linux.
+    // The Stage gates the local tab on its own setup card, not on
+    // requiresModels.
+    id: '3d', label: '3D Model', short: '3D', icon: Box,
+    placeholder: THREE_D_TEXT.prompt,
+    needsSource: false, needsPrompt: false, allowsMask: false, isVideo: false,
+    cloudOnly: true, hasLocalLane: true,
+    examples: THREE_D_TEXT.examples,
+  },
 ]
 
 export const INTENT_MAP: Record<CreateIntent, IntentMeta> =
@@ -188,8 +203,16 @@ export const INTENT_MAP: Record<CreateIntent, IntentMeta> =
  *  one: a view without the field must never send the text left over from
  *  another tab. Character Studio's use surface is a plain image generate and
  *  has one. */
-export function intentTakesPrompt(intent: CreateIntent, characterUse = false): boolean {
+export function intentTakesPrompt(intent: CreateIntent, characterUse = false, threeDWay: ThreeDWay = 'image'): boolean {
+  if (intent === '3d') return threeDWay === 'text'
   return INTENT_MAP[intent].needsPrompt || characterUse
+}
+
+/** Does the view need a picture on the Stage before it can start? 3D needs
+ *  one from a picture and from a video (the first still frame stands there). */
+export function intentNeedsSource(intent: CreateIntent, threeDWay: ThreeDWay = 'image'): boolean {
+  if (intent === '3d') return threeDWay !== 'text'
+  return INTENT_MAP[intent].needsSource
 }
 
 /** Does the view on `backend` show a prompt field that may stay empty?
@@ -232,7 +255,9 @@ export function intentTakesOptionalPrompt(intent: CreateIntent, backend: CreateB
 // LoRA folder on the second image engine (mflux `--lora`), the way Windows
 // runs it in ComfyUI. Training stays off on the Mac (LocalTrainControls is a
 // ComfyUI/CUDA trainer); the tab says where to train instead.
-const MLX_LOCAL_INTENTS: ReadonlySet<CreateIntent> = new Set<CreateIntent>(['image', 'video', 'removebg', 'character'])
+// 3D (3.1.0) is a local tab on every Mac: without the engine the Stage shows
+// its one-time setup card (commands/mesh3d.rs, TripoSR).
+const MLX_LOCAL_INTENTS: ReadonlySet<CreateIntent> = new Set<CreateIntent>(['image', 'video', 'removebg', 'character', '3d'])
 
 /**
  * Edit is the second lane with a source that the Mac serves: Qwen-Image 2.1

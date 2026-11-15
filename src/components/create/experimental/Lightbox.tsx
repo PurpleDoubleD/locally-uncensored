@@ -8,6 +8,7 @@ import { useCreateExp } from './CreateContext'
 import { useComfyMedia } from './useComfyMedia'
 import { PromptDetails } from './PromptDetails'
 import { cn } from '../ui/cn'
+import { LazyModelViewer } from '../../three/LazyModelViewer'
 import { MoveToFolderModal, OnBody } from './GalleryFolders'
 import { playsAsVideo } from './galleryUrl'
 import { itemsInView } from '../../../lib/gallery-tags'
@@ -277,7 +278,15 @@ export function Lightbox({ item, onClose, onSaveCharacter, onNavigate, promptOpe
               </OnBody>
             </div>
           )}
-          {item.type === 'audio' ? (
+          {item.type === '3d' ? (
+            // The model takes the whole room; its own bar carries the
+            // download menu and the looks.
+            <div className="min-h-0 flex-1 w-full flex items-center justify-center overflow-hidden" onClick={(e) => e.stopPropagation()} data-testid="lightbox-3d">
+              <div className="w-full h-full max-w-[1400px]">
+                <LazyModelViewer key={item.id} item={item} />
+              </div>
+            </div>
+          ) : item.type === 'audio' ? (
             <motion.div
               initial={{ scale: 0.95 }}
               animate={{ scale: 1 }}

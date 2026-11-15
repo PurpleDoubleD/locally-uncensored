@@ -50,7 +50,7 @@ export type PendingCloudJobLanding =
 export interface PendingCloudJob {
   /** The id of the job on the server. */
   id: string
-  kind: 'image' | 'video' | 'audio'
+  kind: 'image' | 'video' | 'audio' | '3d'
   /** The op of the run (generate, edit, tts, upscale, lora-train, studio ...). */
   op: string
   model: string
@@ -74,7 +74,7 @@ export interface CloudSubmitIntent {
   requestId: string
   /** How many jobs the run asked for (several images). */
   count: number
-  kind: 'image' | 'video' | 'audio'
+  kind: 'image' | 'video' | 'audio' | '3d'
   op: string
   model: string
   prompt: string

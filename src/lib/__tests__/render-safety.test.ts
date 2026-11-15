@@ -146,7 +146,14 @@ describe('both render paths gate the same fields', () => {
     // The local path also counts Motion Control's optional field (intents.ts
     // intentTakesOptionalPrompt), which shows on the local lanes only.
     expect(local).toMatch(/const typedPrompt = intentTakesPrompt\([^\n]+\)\n\s+\|\| intentTakesOptionalPrompt\(state\.intent\(\), 'local'\)\n\s+\? state\.prompt\n\s+: ''/)
-    expect(cloud).toMatch(/const prompt = intentTakesPrompt\(intent, characterUse\) \? s\.prompt : ''/)
+    expect(cloud).toMatch(/const prompt = intentTakesPrompt\(intent, characterUse, s\.threeDWay\) \? s\.prompt : ''/)
+  })
+
+  it('3D also gates where its pictures came from, on both paths (C3D 2.8)', () => {
+    expect(local).toMatch(/const provenance = state\.intent\(\) === '3d' \? threeDProvenance\(state\) : ''/)
+    expect(local).toMatch(/\$\{provenance\}`/)
+    expect(cloud).toMatch(/const provenance = intent === '3d' && s\.threeDWay !== 'text' \? threeDProvenance\(s\) : ''/)
+    expect(cloud).toContain('if (provenance) params.source_prompt = provenance')
   })
 
   /** The negative prompt is handed over apart since B30 (safety.ts): the
@@ -163,7 +170,7 @@ describe('both render paths gate the same fields', () => {
   it('the cloud path reads the same fields, each only when its run sends it (B30-Rest)', () => {
     // Bare names there: the lyrics of a classic music run, the trigger word of
     // a training run, the negative prompt where the classic knobs go out.
-    expect(cloud).toMatch(/clientSafety\(`\$\{prompt\} \$\{lyrics\} \$\{triggerWord\}`, sendsClassicKnobs \? s\.negativePrompt : ''\)/)
+    expect(cloud).toMatch(/clientSafety\(`\$\{prompt\} \$\{lyrics\} \$\{triggerWord\} \$\{provenance\}`, sendsClassicKnobs \? s\.negativePrompt : ''\)/)
     expect(cloud).toMatch(/const lyrics = op === 'music' && !studioModel \? s\.musicLyrics : ''/)
     expect(cloud).toMatch(/const triggerWord = op === 'lora-train' \? s\.triggerWord : ''/)
   })

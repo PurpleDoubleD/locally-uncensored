@@ -448,6 +448,9 @@ pub struct AppState {
     /// Install progress of the Mac's music engine and its weights
     /// (`commands::music`), one slot for both.
     pub install_music: crate::install_state::InstallSlot,
+    /// Install progress of the Mac's 3D engine, its source and its weights
+    /// (`commands::mesh3d`), one slot for all three.
+    pub install_mesh3d: crate::install_state::InstallSlot,
     /// Live progress/log of the currently running (or last) video generation.
     pub video_progress: crate::install_state::InstallSlot,
     /// Handle to the running `mlx_video.*.generate` subprocess, if any. `Arc`-
@@ -546,6 +549,7 @@ impl AppState {
             install_mlx_video: crate::install_state::InstallSlot::default(),
             install_video_model: crate::install_state::InstallSlot::default(),
             install_music: crate::install_state::InstallSlot::default(),
+            install_mesh3d: crate::install_state::InstallSlot::default(),
             video_progress: crate::install_state::InstallSlot::default(),
             video_process: Arc::new(Mutex::new(None)),
         }
@@ -571,6 +575,9 @@ impl AppState {
     }
     pub fn install_music(&self) -> crate::install_state::InstallSlot {
         self.install_music.clone()
+    }
+    pub fn install_mesh3d(&self) -> crate::install_state::InstallSlot {
+        self.install_mesh3d.clone()
     }
     pub fn video_progress(&self) -> crate::install_state::InstallSlot {
         self.video_progress.clone()
@@ -608,6 +615,7 @@ impl AppState {
             &self.install_mlx_video,
             &self.install_video_model,
             &self.install_music,
+            &self.install_mesh3d,
         ]
         .into_iter()
         .filter(|slot| slot.cancel())
@@ -752,6 +760,8 @@ impl AppState {
         // A track holds its models as a process of its own, like an image of
         // the second engine.
         crate::commands::music::stop();
+        // And a 3D model of the Mac's 3D engine, the same way.
+        crate::commands::mesh3d::stop();
         // And a character training, the same way.
         crate::commands::mlx::train::stop();
         // Only a sidecar of THIS app (its server.py, started by this process

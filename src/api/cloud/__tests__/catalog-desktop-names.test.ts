@@ -76,7 +76,7 @@ describe('the live catalog reaches every reader under the app name', () => {
   it('getCatalog asks the same route as before and returns the app names', async () => {
     cloudFetch.mockResolvedValue(answer(WIRE))
     const c = await getCatalog()
-    expect(cloudFetch).toHaveBeenCalledWith('/api/jobs/catalog?v=2')
+    expect(cloudFetch).toHaveBeenCalledWith('/api/jobs/catalog?v=2&with=3d')
     expect(c.models.find((m) => m.id === 'chroma')?.label).toBe('Chroma Uncensored')
   })
 
