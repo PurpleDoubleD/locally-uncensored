@@ -33,8 +33,9 @@ use crate::os_error;
 
 const MANIFEST_TEXT: &str = include_str!("parakeet/manifest.json");
 const SUPPORTED_SCHEMA: u32 = 1;
-/// The model loads in about a second; the first take on a Mac also compiles
-/// the Metal shaders once, which took 16 s on an M-series Mac.
+/// The model loads in about a second; the first start on a Mac also compiles
+/// the Metal shaders once (16 to 20 s on an M-series Mac). That start happens
+/// at the end of the install, see `parakeet_install`.
 const READY_TIMEOUT: Duration = Duration::from_secs(120);
 const TRANSCRIBE_TIMEOUT: Duration = Duration::from_secs(300);
 
@@ -529,7 +530,29 @@ pub fn parakeet_install() -> Result<(), String> {
     job().cancel.store(false, Ordering::SeqCst);
     tauri::async_runtime::spawn(async move {
         let dirs = Dirs::current();
-        let result = install_into(&dirs, manifest(), &build, cfg!(windows)).await;
+        let mut result = install_into(&dirs, manifest(), &build, cfg!(windows)).await;
+        // Start it once before saying it is ready. That proves the runtime
+        // runs on this machine, and on a Mac it compiles the Metal shaders
+        // (about 20 s, once per install) here, under the download's spinner,
+        // instead of in the user's first dictation. Stopped again after, so
+        // the model only takes memory when dictation uses it.
+        if result.is_ok() {
+            let started = Instant::now();
+            result = match ensure_running().await {
+                Ok(_) => {
+                    tracing::info!(target: "parakeet", "first start after install took {} ms", started.elapsed().as_millis());
+                    Ok(())
+                }
+                Err(e) => {
+                    // Not ready means not installed: the microphone stays
+                    // closed and the Download button comes back. The files
+                    // stay, so another try only checks them again.
+                    let _ = std::fs::remove_file(dirs.marker());
+                    Err(format!("Parakeet was downloaded but does not start on this computer: {e}"))
+                }
+            };
+            stop();
+        }
         match &result {
             Ok(()) => tracing::info!(target: "parakeet", "installed {} ({}) and {} at {}", manifest().runtime_label(), build.dir, manifest().model.id, manifest().model.revision),
             Err(e) => tracing::warn!(target: "parakeet", "install stopped: {e}"),
