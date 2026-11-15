@@ -95,10 +95,13 @@ describe('offene Videomodelle im Seed', () => {
     expect(t2vModels().filter((m) => m.id.includes('spicy'))).toEqual([])
   })
 
-  it('nimmt seedance-2.0-mini-spicy nicht auf', () => {
-    // Beschreibung und Grundpreis des Anbieters widersprechen sich bei dieser
-    // einen Route. Der Fall haelt fest, dass sie draussen bleibt, damit sie
-    // beim naechsten Abgleich nicht versehentlich nachwaechst.
-    expect(CLOUD_MODEL_SEED.map((m) => m.id)).not.toContain('seedance-2.0-mini-spicy')
+  it('fuehrt seedance-2.0-mini-spicy seit das Web es fuehrt, zum Preis des Webs', () => {
+    // Bis zum 24.10.2026 blieb diese Route draussen: Beschreibung und
+    // Grundpreis des Anbieters widersprachen sich. Das Web hat sie an dem Tag
+    // an der Preisroute gemessen (halber Satz von Seedance 2.0) und
+    // aufgenommen, der Desktop folgt mit 3.1.0.
+    const mini = CLOUD_MODEL_SEED.find((m) => m.id === 'seedance-2.0-mini-spicy')
+    expect(mini?.credits?.base).toBe(30000)
+    expect(mini?.credits?.base).toBe(CLOUD_MODEL_SEED.find((m) => m.id === 'seedance-2.0-spicy')!.credits!.base / 2)
   })
 })

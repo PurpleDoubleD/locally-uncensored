@@ -75,7 +75,8 @@ describe('cloudCatalogStore', () => {
     const editCapable = CLOUD_MODEL_SEED.filter((m) => m.edit).map((m) => m.id)
     expect(editCapable).toEqual(['flux-dev'])
     const negPrompt = CLOUD_MODEL_SEED.filter((m) => m.negative_prompt).map((m) => m.id)
-    expect(negPrompt).toEqual(['wan-2.2-720p', 'wan-2.2-fast', 'hunyuan-video'])
+    // hunyuan-video stand hier bis zum 24.10.2026 (retired-models.ts).
+    expect(negPrompt).toEqual(['wan-2.2-720p', 'wan-2.2-fast'])
   })
 
   it('defaultCloudModel never explodes on an all-specialized kind (audio)', () => {

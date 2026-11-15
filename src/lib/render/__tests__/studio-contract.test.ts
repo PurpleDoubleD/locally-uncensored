@@ -33,7 +33,7 @@
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { STUDIO_MODELS, studioSchema, studioFields, studioOptions, studioCredits, studioBaseCredits, supportsProviderField } from '../studio-contract'
+import { STUDIO_MODELS, STUDIO_MODELS_WITH_RETIRED, studioSchema, studioFields, studioOptions, studioCredits, studioBaseCredits, supportsProviderField } from '../studio-contract'
 import { webCheckout, webModule } from '../../__tests__/web-checkout'
 import { DESKTOP_WORT, alsDesktop, gezeigt, webNamen, webWort } from './web-freigabe-wort'
 import { HOUSE, SNAPSHOT_FILES, checkSnapshot, neutralText, snapshotFromWeb } from '../../../../scripts/studio-snapshot.mjs'
@@ -150,14 +150,17 @@ describe('Cloud studio contracts', () => {
       const namen = await webNamen(WEB!)
       expect(namen.DESKTOP_MARK_LABEL).toBe(DESKTOP_WORT)
       const web = JSON.parse(readFileSync(resolve(WEB!, 'apps/web/lib/render/studio-models.json'), 'utf8')) as Record<string, { label: string }>
-      expect(Object.keys(web)).toEqual(Object.keys(STUDIO_MODELS))
+      // Die Datei fuehrt auch die zurueckgezogenen Modelle (retired-models.ts).
+      expect(Object.keys(web)).toEqual(Object.keys(STUDIO_MODELS_WITH_RETIRED))
       let mitFeld = 0
       for (const [id, w] of Object.entries(web)) {
-        expect(STUDIO_MODELS[id].label, id).toBe(gezeigt(namen, w.label))
-        expect(w.label, id).toBe(namen.webName(STUDIO_MODELS[id].label))
+        expect(STUDIO_MODELS_WITH_RETIRED[id].label, id).toBe(gezeigt(namen, w.label))
+        expect(w.label, id).toBe(namen.webName(STUDIO_MODELS_WITH_RETIRED[id].label))
         if (namen.desktopName(w.label) !== null) mitFeld++
       }
-      expect(mitFeld).toBe(5)
+      // Fuenf seit dem 08.10.2026, dazu die zwei MiniMax H3 Singularity
+      // (Web 3b5d5980, 3.1.0).
+      expect(mitFeld).toBe(7)
     })
   })
 

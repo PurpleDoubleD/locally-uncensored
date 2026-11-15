@@ -9,7 +9,7 @@
 // member really runs: same inputs, same output kind, a price on both sides.
 // The contract test walks each one and refuses a member that cannot.
 
-import { STUDIO_MODELS, studioSchema, type ModelTier, type ModelWeights } from './studio-contract'
+import { STUDIO_MODELS, STUDIO_MODELS_WITH_RETIRED, studioSchema, type ModelTier, type ModelWeights } from './studio-contract'
 import { cloudModelById, cloudModelsFor, i2vModels, runCredits, studioEntries, t2vModels } from '../../stores/cloudCatalogStore'
 import {
   STUDIO_EDIT_MODELS, studioImageToVideo, studioReferenceVideo, studioTextToVideo,
@@ -87,11 +87,11 @@ const ROLE_MEMBERS: Record<StepRole, () => string[]> = {
   speech: () => [
     'preset-qwen3-tts', 'qwen3-tts', 'qwen3-tts-clone', 'qwen3-tts-design',
     'seed-speech-tts', 'minimax-speech-turbo', 'minimax-speech-hd', 'inworld-tts',
-    'eleven-v3', 'chatterbox-tts',
+    'eleven-v4', 'eleven-v4-turbo', 'chatterbox-tts',
   ],
   // Words in, a finished track out. ACE-Step is ours and cheap, the three new
   // ones are what a released song sounds like.
-  music: () => ['ace-step', 'ace-step-1.5', 'sonilo-music', 'minimax-music', 'mureka-song', 'eleven-music'],
+  music: () => ['ace-step-1.5', 'sonilo-music', 'minimax-music', 'mureka-song', 'eleven-music'],
   // A portrait plus one voice track becomes a speaking clip. The re-sync
   // models (latentsync, lipsync-2) need an existing clip and are a different
   // job, so they are not interchangeable here.
@@ -104,11 +104,11 @@ const ROLE_MEMBERS: Record<StepRole, () => string[]> = {
   // Two voice tracks on one image. Only one endpoint does this.
   duo: () => ['infinitetalk-multi', 'longcat-avatar-multi'],
   extend: () => [
-    'preset-wan-2.2-spicy-extend', 'wan-2.2-spicy-extend', 'ltx-2-extend', 'pixverse-extend',
+    'preset-wan-2.2-spicy-extend', 'wan-2.2-spicy-extend',
     'wan-3.0-extend', 'seedance-2.5-extend',
   ],
   // Movement from a driving clip onto a character image.
-  motion: () => ['scail-2', 'wan-2.2-animate-2', 'wan-2.2-animate', 'steady-dancer', 'p-video-animate', 'dreamactor-v2'],
+  motion: () => ['scail-2', 'wan-2.2-animate-2', 'steady-dancer', 'p-video-animate', 'dreamactor-v2'],
   // A clip goes in, the same clip comes back changed. Wan DITTO picks a style
   // from a list, MiniMax H3 follows a sentence.
   restyle: () => ['wan-ditto', 'minimax-h3-video-edit'],
@@ -243,7 +243,8 @@ const HINTS: Record<string, string> = {
   'seed-speech-tts': 'Forty voices across ten languages. Natural, and cheap.',
   'minimax-speech-turbo': 'Fast and emotional. Voices: Wise_Woman, Friendly_Person, Deep_Voice_Man, Calm_Woman.',
   'minimax-speech-hd': 'The Turbo voices at higher fidelity, for twice the price.',
-  'eleven-v3': 'The most expressive English voice. Costs the most per word.',
+  'eleven-v4': 'The most expressive voice, many languages. Costs the most per word.',
+  'eleven-v4-turbo': 'The v4 voices, faster, at half the price per word.',
   'inworld-tts': 'Sixty named voices, many languages, pick one from the list.',
   'chatterbox-tts': 'Add a short recording and it speaks in that voice.',
 
@@ -272,6 +273,17 @@ const HINTS: Record<string, string> = {
   'minimax-h3-video-edit': 'Say what to change. The clip keeps its movement and timing.',
   'minimax-h3-ref': 'Your picture sets who is in the clip. Describe what they do.',
   'wan-3.0-ref': 'Your picture sets who is in the clip. Describe what they do.',
+  // 24.10.2026: die neuen Modelle. Jeder Satz sagt nur, was der Anbieter
+  // selbst zum Endpunkt schreibt.
+  'flux-3-klein': 'Fast and cheap. Higher resolutions cost more.',
+  'flux-3-klein-base': 'The undistilled Klein, slower and more faithful to the prompt. Higher resolutions cost more.',
+  'flux-3-klein-edit': 'Say what to change in plain words. Up to three pictures, no mask needed.',
+  'krea-2-turbo': 'Aesthetic first, in a few seconds. 2K costs double.',
+  'moss-image': 'Reads long prompts and writes clean text into the picture.',
+  'wan-3.0-t2v': 'Describe the movement, not the mood. Say what moves and how.',
+  'wan-3.0-prime-t2v': 'Describe the movement, not the mood. Say what moves and how.',
+  'minimax-h3-singularity': 'Makes a clip with sound from your picture. Describe the movement.',
+  'minimax-h3-singularity-ref': 'Your picture sets who is in the clip. Describe what they do.',
 }
 
 export function modelHint(id: string): string | undefined {
@@ -360,6 +372,7 @@ export function classicCredits(
 /** The customer-facing name of a model id, whichever registry carries it.
  *  A studio twin answers under the catalog name the customer already knows. */
 export function modelLabel(id: string): string {
-  const studio = STUDIO_MODELS[id]
+  // Retired models included (retired-models.ts): old runs keep their name.
+  const studio = STUDIO_MODELS_WITH_RETIRED[id]
   return cloudModelById(studio?.sourceModel ?? id)?.label ?? studio?.label ?? id
 }

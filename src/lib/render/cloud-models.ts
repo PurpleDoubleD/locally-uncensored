@@ -163,13 +163,14 @@ export const DEFAULT_MODEL_IDS = {
 
 const CLIP = { short: 5, long: 8 }
 
+// A model the web took out of its pickers (retired-models.ts) is not in this
+// list either: the server no longer lists it, so the offline list must not
+// offer it. Its name stays known for old runs (preset-models.ts, modelLabel).
 export const CLOUD_MODEL_SEED: CloudModel[] = [
   { id: 'flux-schnell', label: 'Flux Schnell (fast)', kind: 'image', cfg: true, tier: 'older', weights: 'open' },
   { id: 'flux-dev', label: 'Flux Dev (quality)', kind: 'image', edit: true, cfg: true, tier: 'older', weights: 'open' },
   { id: 'flux-2-dev', label: 'Flux 2 Dev', kind: 'image', tier: 'standard', weights: 'open' },
   { id: 'qwen-image', label: 'Qwen Image', kind: 'image', tier: 'older', weights: 'open' },
-  { id: 'hidream', label: 'HiDream', kind: 'image', tier: 'older', weights: 'open' },
-  { id: 'hunyuan-image', label: 'HunyuanImage 2.1', kind: 'image', tier: 'older', weights: 'open' },
   { id: 'z-image-turbo', label: 'Z-Image Turbo (fast)', kind: 'image', tier: 'best', weights: 'open' },
   { id: 'chroma', label: 'Chroma Uncensored', kind: 'image', adult: true, tier: 'standard', weights: 'open' },
   { id: 'prefect-pony', label: 'Prefect Pony XL (illustration) Uncensored', kind: 'image', adult: true, tier: 'standard', weights: 'open' },
@@ -182,8 +183,6 @@ export const CLOUD_MODEL_SEED: CloudModel[] = [
   // One clip length: its endpoints take no duration field (video-durations.json).
   { id: 'wan-2.2-fast', label: 'Wan 2.2 Fast', kind: 'video', t2v: true, i2v: true, negative_prompt: true, clip: { short: 5 }, tier: 'older', weights: 'open' },
   { id: 'ltx-2', label: 'LTX-2 (with audio)', kind: 'video', t2v: true, i2v: true, clip: CLIP, credits: { base: 8000, lora: 10000 }, tier: 'older', weights: 'open' },
-  { id: 'hunyuan-video', label: 'HunyuanVideo 1.5', kind: 'video', t2v: true, i2v: true, negative_prompt: true, clip: CLIP, tier: 'older', weights: 'open' },
-  { id: 'ltx-2.3', label: 'LTX 2.3', kind: 'video', t2v: true, i2v: true, clip: CLIP, tier: 'older', weights: 'open' },
 
   // Image-to-video endpoints the provider ships with its own filter off
   // (mirroring the web app). None of them has a
@@ -201,6 +200,8 @@ export const CLOUD_MODEL_SEED: CloudModel[] = [
   { id: 'seedance-2.5-spicy', label: 'Seedance 2.5 Uncensored', kind: 'video', t2v: false, i2v: true, adult: true, clip: { short: 5 }, credits: { base: 90000 }, tier: 'best', weights: 'closed' },
   { id: 'seedance-2.0-spicy', label: 'Seedance 2.0 Uncensored', kind: 'video', t2v: false, i2v: true, adult: true, clip: { short: 5 }, credits: { base: 60000 }, tier: 'older', weights: 'closed' },
   { id: 'seedance-2.0-fast-spicy', label: 'Seedance 2.0 Fast Uncensored', kind: 'video', t2v: false, i2v: true, adult: true, clip: { short: 5 }, credits: { base: 50000 }, tier: 'older', weights: 'closed' },
+  // 3.1.0 (web catalogue 3b5d5980):
+  { id: 'seedance-2.0-mini-spicy', label: 'Seedance 2.0 Mini Uncensored', kind: 'video', t2v: false, i2v: true, adult: true, clip: { short: 5 }, credits: { base: 30000 }, tier: 'older', weights: 'closed' },
   { id: 'vidu-q3-spicy', label: 'Vidu Q3 Uncensored', kind: 'video', t2v: false, i2v: true, adult: true, clip: { short: 5 }, credits: { base: 35000 }, tier: 'standard', weights: 'closed' },
 
   // ── 2.5.8 op-specialized fleet (Character-Studio / lipsync / voice / music /
@@ -229,13 +230,9 @@ export const CLOUD_MODEL_SEED: CloudModel[] = [
   { id: 'qwen3-tts', label: 'Qwen3 TTS (voices)', kind: 'audio', ops: ['tts'], tier: 'standard', weights: 'open' },
   { id: 'qwen3-tts-clone', label: 'Qwen3 TTS Voice Clone', kind: 'audio', ops: ['tts'], tier: 'standard', weights: 'open' },
   { id: 'qwen3-tts-design', label: 'Qwen3 TTS Voice Design', kind: 'audio', ops: ['tts'], tier: 'standard', weights: 'open' },
-  { id: 'ace-step', label: 'ACE-Step (fast)', kind: 'audio', ops: ['music'], credits: { base: 1200, per_s: 20 }, tier: 'older', weights: 'open' },
   { id: 'ace-step-1.5', label: 'ACE-Step 1.5', kind: 'audio', ops: ['music'], lyrics: true, credits: { base: 1800, per_s: 30 }, tier: 'standard', weights: 'open' },
   { id: 'sonilo-music', label: 'Sonilo Music', kind: 'audio', ops: ['music'], credits: { base: 15000, per_s: 250 }, tier: 'standard', weights: 'closed' },
-  { id: 'wan-2.2-spicy-extend', label: 'Wan 2.2 Uncensored Extend', kind: 'video', ops: ['extend'], t2v: false, i2v: false, adult: true, credits: { base: 15000, lora: 20000 }, tier: 'older', weights: 'open' },
-  { id: 'ltx-2-extend', label: 'LTX-2 Extend', kind: 'video', ops: ['extend'], t2v: false, i2v: false, tier: 'older', weights: 'open' },
-  { id: 'pixverse-extend', label: 'Pixverse Extend (fast)', kind: 'video', ops: ['extend'], t2v: false, i2v: false, tier: 'standard', weights: 'closed' },
-  { id: 'wan-2.2-animate', label: 'Wan 2.2 Animate', kind: 'video', ops: ['motion'], t2v: false, i2v: false, tier: 'standard', weights: 'open' },
+  { id: 'wan-2.2-spicy-extend', label: 'Wan 2.2 Uncensored Extend', kind: 'video', ops: ['extend'], t2v: false, i2v: false, adult: true, credits: { base: 15000, lora: 20000 }, tier: 'standard', weights: 'open' },
   { id: 'steady-dancer', label: 'SteadyDancer', kind: 'video', ops: ['motion'], t2v: false, i2v: false, tier: 'standard', weights: 'open' },
   { id: 'p-video-animate', label: 'P-Video Animate (fast)', kind: 'video', ops: ['motion'], t2v: false, i2v: false, tier: 'standard', weights: 'closed' },
   { id: 'dreamactor-v2', label: 'DreamActor v2', kind: 'video', ops: ['motion'], t2v: false, i2v: false, tier: 'standard', weights: 'closed' },

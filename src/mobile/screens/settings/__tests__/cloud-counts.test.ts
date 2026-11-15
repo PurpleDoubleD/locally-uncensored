@@ -40,7 +40,7 @@ function measuredRows(): string[] {
 
 describe('the counts of the LU Cloud page', () => {
   it('are written out here a second time', () => {
-    expect(CATALOGUE_COUNTS).toEqual({ chat: 40, image: 15, video: 24 })
+    expect(CATALOGUE_COUNTS).toEqual({ chat: 40, image: 24, video: 24 })
     expect(CLOUD_COUNTED_ON).toBe('2026-10-24')
   })
 
@@ -79,7 +79,8 @@ describe('the counts of the LU Cloud page', () => {
   it('the total is the sum of the parts, computed', () => {
     const counts = cloudCountsFor(STORE_PRESETS.open)!
     expect(counts.total).toBe(counts.chat + counts.image + counts.video)
-    expect(counts.total).toBe(79)
+    // 79 until the web catalogue of 24.10.2026 came over (3.1.0), nine more image models since.
+    expect(counts.total).toBe(88)
   })
 
   it('the open build names the numbers, the two store builds none before sign in (Play since r56, 18.10.2026)', () => {
@@ -103,7 +104,7 @@ describe('the counts of the LU Cloud page', () => {
     ]
     setStorePresetForTests('open')
     const open = cloudCountsSeen(chat, offeredCreateModels(CATALOGUE), STORE_PRESETS.open)!
-    expect(open).toMatchObject({ chat: 3, image: 15, video: 24, total: 42 })
+    expect(open).toMatchObject({ chat: 3, image: 24, video: 24, total: 51 })
     setStorePresetForTests('appstore')
     const apple = cloudCountsSeen(chat, offeredCreateModels(CATALOGUE), STORE_PRESETS.appstore)!
     expect(apple.chat).toBe(1)

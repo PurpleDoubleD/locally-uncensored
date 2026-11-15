@@ -49,5 +49,8 @@ export function studioReferenceVideo(): string[] {
 /** Bildbearbeitung per Anweisung, ohne Maske. Das Standbild der Oberflaeche geht
  *  hinein, kein Pinsel noetig. */
 export const STUDIO_EDIT_MODELS: readonly string[] = [
-  'minimax-h3-edit', 'qwen-image-3-edit', 'seedream-5-edit', 'qwen-image-2.1-edit',
+  'minimax-h3-edit', 'qwen-image-3-edit', 'seedream-5-edit', 'qwen-image-2.1-edit', 'flux-3-klein-edit',
+  // 29.10.2026 (W3): die geschlossenen Spitzenmodelle, wo der Anbieter einen
+  // Bearbeiten-Weg hat. Midjourney und Recraft haben keinen.
+  'gpt-image-2-edit', 'nano-banana-pro-edit', 'flux-2-max-edit', 'grok-imagine-quality-edit', 'kling-image-o3-edit',
 ]

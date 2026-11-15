@@ -1,24 +1,16 @@
 {
  "chat": [
   {
-   "id": "deepseek-ai/DeepSeek-V4.1-Flash",
-   "label": "DeepSeek V4.1 Flash"
-  },
-  {
    "id": "moonshotai/Kimi-K3.1-Pro",
    "label": "Kimi K3.1 Pro"
   },
   {
-   "id": "moonshotai/Kimi-K3",
-   "label": "Kimi K3"
+   "id": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+   "label": "DeepSeek V4.1 Flash 1017"
   },
   {
    "id": "zai-org/GLM-5.3",
    "label": "GLM 5.3"
-  },
-  {
-   "id": "Qwen/Qwen3.8-2.4T-A95B",
-   "label": "Qwen 3.8 A95B"
   },
   {
    "id": "zai-org/GLM-5.3-Flash",
@@ -61,24 +53,16 @@
    "label": "Lunaris 8B"
   },
   {
-   "id": "Gryphe/MythoMax-L2-13b",
-   "label": "MythoMax 13B"
-  },
-  {
-   "id": "NousResearch/Hermes-3-Llama-3.1-70B",
-   "label": "Hermes 3 70B"
-  },
-  {
    "id": "Sao10K/L3.1-70B-Euryale-v2.2",
    "label": "Euryale 70B"
   },
   {
-   "id": "NousResearch/Hermes-3-Llama-3.1-405B",
-   "label": "Hermes 3 405B"
-  },
-  {
    "id": "Qwen/Qwen3-Coder-480B-A35B-Instruct-Turbo",
    "label": "Qwen3 Coder 480B"
+  },
+  {
+   "id": "moonshotai/Kimi-K3",
+   "label": "Kimi K3"
   },
   {
    "id": "deepseek-ai/DeepSeek-V3.1",
@@ -87,10 +71,6 @@
   {
    "id": "deepseek-ai/DeepSeek-V4-Flash-0731",
    "label": "DeepSeek V4 Flash 0731"
-  },
-  {
-   "id": "deepseek-ai/DeepSeek-R1-0528",
-   "label": "DeepSeek R1"
   },
   {
    "id": "Qwen/Qwen3-32B",
@@ -137,10 +117,6 @@
    "label": "Llama 3.3 70B Turbo"
   },
   {
-   "id": "meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8",
-   "label": "Llama 4 Maverick"
-  },
-  {
    "id": "meta-llama/Llama-4-Scout-17B-16E-Instruct",
    "label": "Llama 4 Scout"
   },
@@ -153,20 +129,16 @@
    "label": "GLM 4.7"
   },
   {
-   "id": "zai-org/GLM-5",
-   "label": "GLM 5"
-  },
-  {
-   "id": "zai-org/GLM-5.1",
-   "label": "GLM 5.1"
-  },
-  {
    "id": "zai-org/GLM-5.2",
    "label": "GLM 5.2"
   },
   {
    "id": "nvidia/NVIDIA-Nemotron-3-Super-120B-A12B",
    "label": "Nemotron 3 Super 120B"
+  },
+  {
+   "id": "nvidia/NVIDIA-Nemotron-3.5-Super-VL",
+   "label": "Nemotron 3.5 Super VL"
   },
   {
    "id": "openai/gpt-oss-20b",
@@ -177,16 +149,12 @@
    "label": "Kimi K2.6"
   },
   {
-   "id": "moonshotai/Kimi-K2.7-Code",
-   "label": "Kimi K2.7 Code"
-  },
-  {
-   "id": "MiniMaxAI/MiniMax-M2.7",
-   "label": "MiniMax M2.7"
-  },
-  {
    "id": "MiniMaxAI/MiniMax-M3",
    "label": "MiniMax M3"
+  },
+  {
+   "id": "XiaomiMiMo/MiMo-V2.6-Pro",
+   "label": "MiMo V2.6 Pro"
   },
   {
    "id": "mistralai/Mistral-Small-3.2-24B-Instruct-2506",
@@ -231,28 +199,28 @@
   {
    "id": "direct/abliterated-large-v2",
    "label": "Abliterated Large V2"
+  },
+  {
+   "id": "direct/abliterated-large-flash",
+   "label": "Abliterated Large Flash"
+  },
+  {
+   "id": "direct/deepseek-v4.1-flash",
+   "label": "DeepSeek V4.1 Flash Uncensored"
   }
  ],
  "code": [
   {
-   "id": "deepseek-ai/DeepSeek-V4.1-Flash",
-   "label": "DeepSeek V4.1 Flash"
-  },
-  {
    "id": "moonshotai/Kimi-K3.1-Pro",
    "label": "Kimi K3.1 Pro"
   },
   {
-   "id": "moonshotai/Kimi-K3",
-   "label": "Kimi K3"
+   "id": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+   "label": "DeepSeek V4.1 Flash 1017"
   },
   {
    "id": "zai-org/GLM-5.3",
    "label": "GLM 5.3"
-  },
-  {
-   "id": "Qwen/Qwen3.8-2.4T-A95B",
-   "label": "Qwen 3.8 A95B"
   },
   {
    "id": "zai-org/GLM-5.3-Flash",
@@ -295,24 +263,16 @@
    "label": "Lunaris 8B"
   },
   {
-   "id": "Gryphe/MythoMax-L2-13b",
-   "label": "MythoMax 13B"
-  },
-  {
-   "id": "NousResearch/Hermes-3-Llama-3.1-70B",
-   "label": "Hermes 3 70B"
-  },
-  {
    "id": "Sao10K/L3.1-70B-Euryale-v2.2",
    "label": "Euryale 70B"
   },
   {
-   "id": "NousResearch/Hermes-3-Llama-3.1-405B",
-   "label": "Hermes 3 405B"
-  },
-  {
    "id": "Qwen/Qwen3-Coder-480B-A35B-Instruct-Turbo",
    "label": "Qwen3 Coder 480B"
+  },
+  {
+   "id": "moonshotai/Kimi-K3",
+   "label": "Kimi K3"
   },
   {
    "id": "deepseek-ai/DeepSeek-V3.1",
@@ -321,10 +281,6 @@
   {
    "id": "deepseek-ai/DeepSeek-V4-Flash-0731",
    "label": "DeepSeek V4 Flash 0731"
-  },
-  {
-   "id": "deepseek-ai/DeepSeek-R1-0528",
-   "label": "DeepSeek R1"
   },
   {
    "id": "Qwen/Qwen3-32B",
@@ -371,10 +327,6 @@
    "label": "Llama 3.3 70B Turbo"
   },
   {
-   "id": "meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8",
-   "label": "Llama 4 Maverick"
-  },
-  {
    "id": "meta-llama/Llama-4-Scout-17B-16E-Instruct",
    "label": "Llama 4 Scout"
   },
@@ -387,20 +339,16 @@
    "label": "GLM 4.7"
   },
   {
-   "id": "zai-org/GLM-5",
-   "label": "GLM 5"
-  },
-  {
-   "id": "zai-org/GLM-5.1",
-   "label": "GLM 5.1"
-  },
-  {
    "id": "zai-org/GLM-5.2",
    "label": "GLM 5.2"
   },
   {
    "id": "nvidia/NVIDIA-Nemotron-3-Super-120B-A12B",
    "label": "Nemotron 3 Super 120B"
+  },
+  {
+   "id": "nvidia/NVIDIA-Nemotron-3.5-Super-VL",
+   "label": "Nemotron 3.5 Super VL"
   },
   {
    "id": "openai/gpt-oss-20b",
@@ -411,16 +359,12 @@
    "label": "Kimi K2.6"
   },
   {
-   "id": "moonshotai/Kimi-K2.7-Code",
-   "label": "Kimi K2.7 Code"
-  },
-  {
-   "id": "MiniMaxAI/MiniMax-M2.7",
-   "label": "MiniMax M2.7"
-  },
-  {
    "id": "MiniMaxAI/MiniMax-M3",
    "label": "MiniMax M3"
+  },
+  {
+   "id": "XiaomiMiMo/MiMo-V2.6-Pro",
+   "label": "MiMo V2.6 Pro"
   },
   {
    "id": "mistralai/Mistral-Small-3.2-24B-Instruct-2506",
@@ -465,6 +409,14 @@
   {
    "id": "direct/abliterated-large-v2",
    "label": "Abliterated Large V2"
+  },
+  {
+   "id": "direct/abliterated-large-flash",
+   "label": "Abliterated Large Flash"
+  },
+  {
+   "id": "direct/deepseek-v4.1-flash",
+   "label": "DeepSeek V4.1 Flash Uncensored"
   }
  ],
  "create": [
@@ -486,16 +438,6 @@
   {
    "id": "qwen-image",
    "label": "Qwen Image",
-   "kind": "image"
-  },
-  {
-   "id": "hidream",
-   "label": "HiDream",
-   "kind": "image"
-  },
-  {
-   "id": "hunyuan-image",
-   "label": "HunyuanImage 2.1",
    "kind": "image"
   },
   {
@@ -534,16 +476,6 @@
   {
    "id": "ltx-2",
    "label": "LTX-2 (with audio)",
-   "kind": "video"
-  },
-  {
-   "id": "hunyuan-video",
-   "label": "HunyuanVideo 1.5",
-   "kind": "video"
-  },
-  {
-   "id": "ltx-2.3",
-   "label": "LTX 2.3",
    "kind": "video"
   },
   {
@@ -597,6 +529,12 @@
   {
    "id": "seedance-2.0-fast-spicy",
    "label": "Seedance 2.0 Fast Uncensored",
+   "kind": "video",
+   "adult": true
+  },
+  {
+   "id": "seedance-2.0-mini-spicy",
+   "label": "Seedance 2.0 Mini Uncensored",
    "kind": "video",
    "adult": true
   },
@@ -856,6 +794,85 @@
    "kind": "video"
   },
   {
+   "id": "flux-3-klein",
+   "label": "FLUX 3 Klein",
+   "kind": "image"
+  },
+  {
+   "id": "flux-3-klein-base",
+   "label": "FLUX 3 Klein Base",
+   "kind": "image"
+  },
+  {
+   "id": "krea-2-turbo",
+   "label": "Krea 2 Turbo",
+   "kind": "image",
+   "adult": true
+  },
+  {
+   "id": "moss-image",
+   "label": "MOSS Image",
+   "kind": "image",
+   "adult": true
+  },
+  {
+   "id": "wan-3.0-t2v",
+   "label": "Wan 3.0",
+   "kind": "video"
+  },
+  {
+   "id": "wan-3.0-prime-t2v",
+   "label": "Wan 3.0 Prime",
+   "kind": "video"
+  },
+  {
+   "id": "minimax-h3-singularity",
+   "label": "MiniMax H3 Singularity Uncensored",
+   "kind": "video",
+   "adult": true
+  },
+  {
+   "id": "minimax-h3-singularity-ref",
+   "label": "MiniMax H3 Singularity Uncensored • Reference",
+   "kind": "video",
+   "adult": true
+  },
+  {
+   "id": "gpt-image-2",
+   "label": "GPT Image 2",
+   "kind": "image"
+  },
+  {
+   "id": "nano-banana-pro",
+   "label": "Nano Banana Pro",
+   "kind": "image"
+  },
+  {
+   "id": "flux-2-max",
+   "label": "FLUX.2 Max",
+   "kind": "image"
+  },
+  {
+   "id": "midjourney",
+   "label": "Midjourney",
+   "kind": "image"
+  },
+  {
+   "id": "grok-imagine-quality",
+   "label": "Grok Imagine Quality",
+   "kind": "image"
+  },
+  {
+   "id": "recraft-v4.1-pro",
+   "label": "Recraft V4.1 Pro",
+   "kind": "image"
+  },
+  {
+   "id": "kling-image-o3",
+   "label": "Kling Image O3",
+   "kind": "image"
+  },
+  {
    "id": "minimax-h3-edit",
    "label": "MiniMax H3 • Image Edit",
    "kind": "edit"
@@ -873,6 +890,36 @@
   {
    "id": "qwen-image-2.1-edit",
    "label": "Qwen Image 2.1",
+   "kind": "edit"
+  },
+  {
+   "id": "flux-3-klein-edit",
+   "label": "FLUX 3 Klein",
+   "kind": "edit"
+  },
+  {
+   "id": "gpt-image-2-edit",
+   "label": "GPT Image 2",
+   "kind": "edit"
+  },
+  {
+   "id": "nano-banana-pro-edit",
+   "label": "Nano Banana Pro",
+   "kind": "edit"
+  },
+  {
+   "id": "flux-2-max-edit",
+   "label": "FLUX.2 Max",
+   "kind": "edit"
+  },
+  {
+   "id": "grok-imagine-quality-edit",
+   "label": "Grok Imagine Quality",
+   "kind": "edit"
+  },
+  {
+   "id": "kling-image-o3-edit",
+   "label": "Kling Image O3",
    "kind": "edit"
   }
  ]

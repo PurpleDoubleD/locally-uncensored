@@ -35,7 +35,19 @@
     15
   ],
   "minimax-h3-spicy": [
-    5
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15
   ],
   "seedance-1.5-pro-spicy": [
     5
@@ -47,6 +59,9 @@
     5
   ],
   "seedance-2.0-fast-spicy": [
+    5
+  ],
+  "seedance-2.0-mini-spicy": [
     5
   ],
   "vidu-q3-spicy": [

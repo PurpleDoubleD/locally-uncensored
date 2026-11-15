@@ -210,9 +210,11 @@ describe('Studio-Modelle in den Create-Unterkategorien', () => {
   it('laesst eine klassische Wahl unveraendert ihren alten Weg gehen', async () => {
     const s = useCreateStore.getState()
     s.setIntent('music')
-    s.setCloudOpModel('ace-step')
+    // ACE-Step (fast) hat das Web am 24.10.2026 zurueckgezogen
+    // (retired-models.ts); ACE-Step 1.5 ist die klassische Musikwahl seither.
+    s.setCloudOpModel('ace-step-1.5')
     await useCloudCreate().generate()
-    expect(submitted[0].model).toBe('ace-step')
+    expect(submitted[0].model).toBe('ace-step-1.5')
     expect(submitted[0].params.op).toBe('music')
     expect(submitted[0].params.duration).toBeDefined()
     expect(submitted[0].params.studio_options).toBeUndefined()

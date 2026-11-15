@@ -94,7 +94,13 @@ describe('die neuen Modelle aus offenen Familien', () => {
       const field = m.price.resolutionField ?? 'resolution'
       const values = studioSchema(id).properties?.[field]?.enum
       if (!values || m.price.rates.default !== undefined) continue
-      for (const v of values) expect(m.price.rates[String(v)], `${id}: ${field}=${String(v)}`).toBeGreaterThan(0)
+      // Mit `qualityField` (GPT Image 2) steht der Satz unter
+      // "<Aufloesung>/<Qualitaet>": jedes Paar braucht einen.
+      const quality = m.price.qualityField ? studioSchema(id).properties?.[m.price.qualityField]?.enum ?? [] : [undefined]
+      for (const v of values) for (const q of quality) {
+        const key = q === undefined ? String(v) : `${String(v)}/${String(q)}`
+        expect(m.price.rates[key], `${id}: ${key}`).toBeGreaterThan(0)
+      }
     }
   })
 

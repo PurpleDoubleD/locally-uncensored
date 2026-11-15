@@ -3,6 +3,7 @@
 import assert from 'node:assert/strict'
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { resolve, isAbsolute } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import ts from 'typescript'
 import { JSDOM } from 'jsdom'
 
@@ -48,7 +49,9 @@ function docsFiles(dir, out = []) {
   }
   return out
 }
-const docsRoot = new URL('../docs', import.meta.url).pathname
+// fileURLToPath, not .pathname: the URL keeps a space as %20, and a
+// checkout under "Locally Uncensored" then has no docs folder.
+const docsRoot = fileURLToPath(new URL('../docs', import.meta.url))
 
 const page = new JSDOM(readFileSync(new URL('../docs/cloud/index.html', import.meta.url), 'utf8')).window.document
 const catalog = objects(source('apps/web/lib/chat/tier-models.ts'))

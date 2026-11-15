@@ -148,6 +148,9 @@
   "seedance-2.0-fast-spicy": {
     "i2": "bytedance/seedance-2.0-fast/image-to-video-spicy"
   },
+  "seedance-2.0-mini-spicy": {
+    "i2": "bytedance/seedance-2.0-mini/image-to-video-spicy"
+  },
   "vidu-q3-spicy": {
     "i2": "vidu/q3/image-to-video-spicy"
   },

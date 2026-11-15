@@ -91,7 +91,9 @@ describe('freie Groesse als Text', () => {
 
   it.each(['z-image', 'jib-mix-qwen'])('%s: Breite und Hoehe zwischen 256 und 4096', (id) => {
     expect(studioOptions(id, 'x', { size: '1024*1024' }, false).size).toBe('1024*1024')
-    expect(studioOptions(id, 'x', { size: '4096*4096' }, false).size).toBe('4096*4096')
+    // z-image rendert hoechstens 1536 je Seite (maxSide, Web 08.11.2026): eine
+    // groessere Angabe wird verkleinert, nicht abgewiesen.
+    expect(studioOptions(id, 'x', { size: '4096*4096' }, false).size).toBe(id === 'z-image' ? '1536*1536' : '4096*4096')
     expect(studioOptions(id, 'x', { size: '256*256' }, false).size).toBe('256*256')
     for (const zu of ['4097*1024', '1024*4097', '99999*99999', '255*1024', '1024*100', '0*0', '1*1', '1024x1024', '1024*', '*1024', '-5*1024', '1e3*1024']) {
       expect(() => studioOptions(id, 'x', { size: zu }, false), `${id} ${zu}`).toThrow(/Size must be/)

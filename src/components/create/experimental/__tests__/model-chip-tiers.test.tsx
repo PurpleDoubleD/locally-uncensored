@@ -112,7 +112,9 @@ describe('der Bildwaehler (neuer Server)', () => {
     }
 
     const aelter = erwartet.filter((e) => tierOf(e.model) === 'older').map((e) => e.model.label)
-    expect(aelter).toEqual(expect.arrayContaining(['Flux Schnell (fast)', 'Flux Dev (quality)', 'Qwen Image', 'HiDream', 'HunyuanImage 2.1']))
+    // HiDream und HunyuanImage 2.1 stehen seit dem 24.10.2026 in keinem
+    // Waehler mehr (retired-models.ts).
+    expect(aelter).toEqual(expect.arrayContaining(['Flux Schnell (fast)', 'Flux Dev (quality)', 'Qwen Image', 'Wan 2.2 Realism']))
     expect(zeilen.slice(-aelter.length).map((z) => z.name)).toEqual(aelter)
     expect(kopf).toBeTruthy()
     const ersteAlte = zeilen[zeilen.length - aelter.length].name
@@ -176,9 +178,12 @@ describe('die anderen Waehler (neuer Server)', () => {
     const { zeilen } = lies('video')
     expect(zeilen.map((z) => z.name)).toEqual(reihenfolge(videoPickerModels()))
     expect(zeilen[0].best).toBe(true)
-    expect(zeilen.filter((z) => z.best).map((z) => z.name)).toEqual(['LTX 2.5', 'MiniMax H3'])
+    // Wan 3.0 mit Text zu Video seit dem 24.10.2026; LTX 2.3 und
+    // HunyuanVideo 1.5 stehen seither in keinem Waehler mehr.
+    expect(zeilen.filter((z) => z.best).map((z) => z.name)).toEqual(['Wan 3.0', 'LTX 2.5', 'MiniMax H3'])
     const unten = zeilen.slice(-5).map((z) => z.name)
-    expect(unten).toEqual(expect.arrayContaining(['Wan 2.2 720p', 'Wan 2.2 Fast', 'LTX 2.3']))
+    expect(unten).toEqual(expect.arrayContaining(['Wan 2.2 720p', 'Wan 2.2 Fast']))
+    expect(zeilen.map((z) => z.name)).not.toContain('LTX 2.3')
   })
 
   it('Animate: Referenzmodelle und die neuen Bild-zu-Video-Modelle sind waehlbar', () => {
