@@ -56,6 +56,7 @@ import { ComfyFolderTargets } from './ComfyFolderTargets'
 import { ChatbotImporter } from '../import/ChatbotImporter'
 import { ProviderSettings } from './ProviderConfig'
 import { BuiltinEngineSettings } from './BuiltinEngineSettings'
+import { IdleUnloadSetting } from './IdleUnloadSetting'
 import { MlxMediaSettings } from './MlxMediaSettings'
 import { CustomNodesSettings } from './CustomNodesSettings'
 import { useProviderStore } from '../../stores/providerStore'
@@ -2358,6 +2359,11 @@ export function SettingsPage() {
         {tab === 'backends' && (<>
           <Section title="Providers" defaultOpen>
             <ProviderSettings />
+          </Section>
+
+          {/* GH #235: for every local backend, so not in the LU Engine section. */}
+          <Section title="Unused models">
+            <IdleUnloadSetting />
           </Section>
 
           <Section title="Storage">

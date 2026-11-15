@@ -257,7 +257,7 @@ export const CATALOG: readonly CatalogEntry[] = [
   e('chatRecall', 'Recall older messages', 'general', 'After a compaction, send the older messages that relate to the new one along, found by a local embedding model.', bool()),
   e('autoCompactThreshold', 'Auto-compact at', 'general', 'How full the context window gets before auto-compact runs.', compactThreshold),
   e('contextWindowOverride', 'Context window (Ollama)', 'general', 'num_ctx sent to Ollama, in tokens. Other backends ignore it; an API model whose server reports no window gets its own from the context button in the chat.', int(0, CONTEXT_WINDOW_MAX, 'tokens', 'auto')),
-  e('engineIdleUnloadMinutes', 'Unload the model when unused', 'backends', 'Minutes without use before LU Engine frees the model.', int(0, 1_440, 'min', 'never')),
+  e('engineIdleUnloadMinutes', 'Unload the chat model when unused', 'backends', 'Minutes without use before LU Engine, Ollama or LM Studio frees the model.', int(0, 1_440, 'min', 'never')),
   e('builtinEngine.ctx', 'Context window (LU Engine)', 'backends', 'Context size of LU Engine, in tokens. Applies on the next engine start.', int(0, 1_048_576, 'tokens', 'default 8192')),
   e('attachmentTokenLimit', 'Attachment limit', 'general', 'Most tokens one attached text file may take.', int(0, 1_048_576, 'tokens', 'no limit'), { lockOverride: 'A number of tokens, not a token.' }),
   e('contextDecay', 'Context decay', 'agent', 'Shorten old tool results in long agent runs.', bool()),

@@ -22,6 +22,7 @@ import { isLocalTransportFailure, localBackendUnreachableMessage } from '../../l
 import { parseNDJSONStream } from '../stream'
 import { chatFirstReplyMs } from '../../lib/chat-reply-timeout'
 import { useSettingsStore } from '../../stores/settingsStore'
+import { ollamaKeepAlive } from '../../lib/idle-unload'
 import { idleAbortGuard, isStreamIdleTimeout, STREAM_IDLE_TIMEOUT_MS } from '../stream-idle'
 import { repairToolCallArgs, extractToolCallsFromContent } from '../../lib/tool-call-repair'
 import { applyTemplateContract } from './normalize-system'
@@ -156,7 +157,7 @@ export class OllamaProvider implements ProviderClient {
       stream: true,
       // Audit A6: match the agent transport so a long turn never pays a
       // cold multi-GB reload after Ollama's 5-minute default idle unload.
-      keep_alive: '30m',
+      keep_alive: ollamaKeepAlive('30m'),
     }
 
     // v2.4.6 Bug L: dropped hardcoded `num_gpu: 99`. Old code forced ALL
@@ -329,7 +330,7 @@ export class OllamaProvider implements ProviderClient {
       tools,
       stream: false,
       // Audit A6: see chatStream above.
-      keep_alive: '30m',
+      keep_alive: ollamaKeepAlive('30m'),
     }
 
     // v2.4.6 Bug L: see chatStream() above, same num_gpu:99 removal.

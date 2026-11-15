@@ -613,6 +613,7 @@ pub async fn lmstudio_load_model(
     contextLength: Option<u32>,
     timeout_ms: Option<u64>,
     call_id: Option<String>,
+    ttlSeconds: Option<u32>,
 ) -> Result<serde_json::Value, String> {
     // Registered here, before the blocking pool is asked for a thread, so a
     // cancel finds the load from its first moment on.
@@ -624,11 +625,37 @@ pub async fn lmstudio_load_model(
         None => (CancellationToken::new(), None),
     };
     let deadline = Instant::now() + lms_limit(timeout_ms, LMS_LOAD_LIMIT);
-    let result = tokio::task::spawn_blocking(move || lmstudio_load_model_blocking(model, contextLength, deadline, &cancel))
+    let result = tokio::task::spawn_blocking(move || lmstudio_load_model_blocking(model, contextLength, ttlSeconds, deadline, &cancel))
         .await
         .map_err(|e| format!("lmstudio_load_model task: {e}"));
     drop(guard);
     result?
+}
+
+/// The arguments of `lms load`: `-c` for a context length, `--ttl` for the
+/// idle time from Settings (GH #235), both only when set.
+fn lms_load_args(model: &str, context_length: Option<u32>, ttl_seconds: Option<u32>) -> Vec<String> {
+    let mut args = vec!["load".to_string(), model.to_string(), "-y".to_string()];
+    if let Some(ctx) = context_length.filter(|c| *c > 0) {
+        args.push("-c".into());
+        args.push(ctx.to_string());
+    }
+    if let Some(ttl) = ttl_seconds.filter(|t| *t > 0) {
+        args.push("--ttl".into());
+        args.push(ttl.to_string());
+    }
+    args
+}
+
+/// True when `lms load` failed because it does not know `--ttl`.
+fn lms_refused_ttl(end: &LmsEnd) -> bool {
+    match end {
+        LmsEnd::Exited { success: false, stdout, stderr } => {
+            let text = format!("{stderr}\n{stdout}").to_lowercase();
+            text.contains("ttl") && (text.contains("unknown") || text.contains("unexpected") || text.contains("unrecognized"))
+        }
+        _ => false,
+    }
 }
 
 /// End the load that was started with this `call_id`. The `lms` process is
@@ -643,6 +670,7 @@ pub fn lmstudio_cancel_load(call_id: String) -> Result<(), String> {
 fn lmstudio_load_model_blocking(
     model: String,
     contextLength: Option<u32>,
+    ttlSeconds: Option<u32>,
     deadline: Instant,
     cancel: &CancellationToken,
 ) -> Result<serde_json::Value, String> {
@@ -682,17 +710,19 @@ fn lmstudio_load_model_blocking(
             Ok(LmsEnd::Exited { .. }) | Err(_) => {}
         }
     }
-    let ctx = contextLength.unwrap_or(0);
-    let ctx_str = ctx.to_string();
-    let mut args: Vec<&str> = vec!["load", model.as_str(), "-y"];
-    if ctx > 0 {
-        args.push("-c");
-        args.push(ctx_str.as_str());
-    }
+    let args = lms_load_args(&model, contextLength, ttlSeconds);
     let mut cmd = crate::process_util::foreign_system_command(&lms);
     cmd.args(&args);
-    let end = run_lms(cmd, deadline, cancel)
+    let mut end = run_lms(cmd, deadline, cancel)
         .map_err(|e| format!("spawn lms load: {}", os_error::english(&e)))?;
+    // GH #235: an `lms` older than the idle TTL (LM Studio 0.3.9) refuses
+    // `--ttl`; the model then loads as before, without it.
+    if ttlSeconds.is_some() && lms_refused_ttl(&end) {
+        let mut cmd = crate::process_util::foreign_system_command(&lms);
+        cmd.args(lms_load_args(&model, contextLength, None));
+        end = run_lms(cmd, deadline, cancel)
+            .map_err(|e| format!("spawn lms load: {}", os_error::english(&e)))?;
+    }
     match end {
         LmsEnd::Cancelled => {
             eprintln!("[lmstudio_load_model] CANCELLED model='{}' ctx={:?}", model, contextLength);
@@ -1238,5 +1268,34 @@ mod tests {
         assert!(!lmstudio_chat_model_file("publisher\\repo\\mmproj-model-f16.gguf"));
         assert!(lmstudio_chat_model_file("publisher/repo/best-of-breed-7b.gguf"));
         assert!(lmstudio_chat_model_file("publisher/repo/tales-of-2024-q4.gguf"));
+    }
+}
+
+#[cfg(test)]
+mod idle_ttl_tests {
+    use super::{lms_load_args, lms_refused_ttl, LmsEnd};
+
+    /// GH #235: the idle time from Settings reaches `lms load` as `--ttl`.
+    #[test]
+    fn a_set_idle_time_loads_with_lm_studios_ttl() {
+        assert_eq!(lms_load_args("qwen", None, Some(1800)), ["load", "qwen", "-y", "--ttl", "1800"]);
+        assert_eq!(lms_load_args("qwen", Some(8192), Some(600)), ["load", "qwen", "-y", "-c", "8192", "--ttl", "600"]);
+    }
+
+    #[test]
+    fn negative_control_no_idle_time_loads_as_before() {
+        assert_eq!(lms_load_args("qwen", None, None), ["load", "qwen", "-y"]);
+        assert_eq!(lms_load_args("qwen", Some(0), Some(0)), ["load", "qwen", "-y"]);
+        assert_eq!(lms_load_args("qwen", Some(4096), None), ["load", "qwen", "-y", "-c", "4096"]);
+    }
+
+    #[test]
+    fn an_lms_that_does_not_know_ttl_is_told_apart_from_a_failed_load() {
+        let old = LmsEnd::Exited { success: false, stdout: String::new(), stderr: "error: unknown option '--ttl'".into() };
+        assert!(lms_refused_ttl(&old));
+        let oom = LmsEnd::Exited { success: false, stdout: String::new(), stderr: "Failed to load model: out of memory".into() };
+        assert!(!lms_refused_ttl(&oom));
+        assert!(!lms_refused_ttl(&LmsEnd::TimedOut));
+        assert!(!lms_refused_ttl(&LmsEnd::Exited { success: true, stdout: String::new(), stderr: String::new() }));
     }
 }

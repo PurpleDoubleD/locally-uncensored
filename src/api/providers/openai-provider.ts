@@ -56,6 +56,7 @@ import {
 import type { ResolvedContextWindow } from '../../lib/context-source'
 import { contextWindowKey, storedWindow, capIsDerivable } from '../../lib/context-source'
 import { useSettingsStore } from '../../stores/settingsStore'
+import { lmStudioTtlSeconds } from '../../lib/idle-unload'
 import { endpointKey, withExtraModels } from '../../lib/extra-model-ids'
 import { log } from '../../lib/logger'
 import { estimateTokens } from '../../lib/token-estimate'
@@ -130,6 +131,9 @@ export interface OpenAIChatRequest {
   /** One rung of the effort ladder ('none' and 'minimal' mean off). Stepped
    *  down, then deleted, by sendChat. */
   reasoning_effort?: string
+  /** GH #235: LM Studio's idle time in seconds, only to LM Studio and only
+   *  with a time set in Settings. */
+  ttl?: number
   chat_template_kwargs?: Record<string, unknown>
   /** Think budget for the bundled engine only (llama-server b9949 reads it
    *  per request, tools/server/server-common.cpp). Never sent anywhere else. */
@@ -767,6 +771,18 @@ export class OpenAIProvider implements ProviderClient {
    * when the composer offered rungs for this model, so a model without them
    * keeps exactly the request it had before.
    */
+  /**
+   * GH #235: the idle time from Settings, as LM Studio's own TTL, so a model
+   * LM Studio loaded for this request (JIT) is unloaded after it too. Asked
+   * only with a time set, and only of a local server that is not the LU
+   * Engine (which has its own watch) or LU Cloud.
+   */
+  private async applyIdleTtl(body: OpenAIChatRequest): Promise<void> {
+    const ttl = lmStudioTtlSeconds()
+    if (!ttl || this.config.managed === true || !this.isLanBackend || this.config.id === 'lu-cloud') return
+    if (await this.localEffortServer().catch(() => 'unknown') === 'lmstudio') body.ttl = ttl
+  }
+
   private async applyLocalEffortForm(body: OpenAIChatRequest, model: string, options?: ChatOptions): Promise<void> {
     if (options?.thinking !== true || !hasEffortLadder(options?.effortLevels)) return
     if (body.reasoning_effort === undefined) return
@@ -1155,6 +1171,7 @@ export class OpenAIProvider implements ProviderClient {
     if (tmplKwargs) body.chat_template_kwargs = tmplKwargs
     this.applyThinkBudget(body, options)
     await this.applyLocalEffortForm(body, model, options)
+    await this.applyIdleTtl(body)
     this.keepEffortOffEngineTopLevel(body)
     // Round 10, phone only: the caller ends the messages with a cut answer
     // and the engine of the phone goes on inside it. Absent on every other send.
@@ -1402,6 +1419,7 @@ export class OpenAIProvider implements ProviderClient {
     if (tmplKwargs) body.chat_template_kwargs = tmplKwargs
     this.applyThinkBudget(body, options)
     await this.applyLocalEffortForm(body, model, options)
+    await this.applyIdleTtl(body)
     this.keepEffortOffEngineTopLevel(body)
     if (options?.jsonSchema && this.config.id !== 'lu-cloud') {
       body.response_format = { type: 'json_schema', json_schema: { name: 'answer', schema: options.jsonSchema } }

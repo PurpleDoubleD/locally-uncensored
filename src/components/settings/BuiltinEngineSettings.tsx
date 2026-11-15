@@ -17,7 +17,6 @@ import { fitActionsOf } from '../../lib/engine-fit'
 import { FitActionButtons } from '../ui/FitActionButtons'
 import type { BuiltinEngineTuning } from '../../types/settings'
 import { isMacOS, isWindows } from '../../api/backend'
-import { ENGINE_IDLE_UNLOAD_CHOICES, idleUnloadLabel, idleUnloadMinutes } from '../../lib/engine-idle-unload'
 import { engineOffloadWords, gpuLayersHint, gpuLayersLabel, gpuLayersTitle } from '../../lib/mac-pc-words'
 
 type KvType = BuiltinEngineTuning['cacheTypeK']
@@ -52,7 +51,6 @@ function modelNameFromPath(path: string | null): string | null {
  */
 export function BuiltinEngineSettings() {
   const tuning = useSettingsStore((s) => s.settings.builtinEngine)
-  const idleMinutes = useSettingsStore((s) => idleUnloadMinutes(s.settings.engineIdleUnloadMinutes))
   const updateSettings = useSettingsStore((s) => s.updateSettings)
 
   const [dirty, setDirty] = useState(false)
@@ -282,24 +280,6 @@ export function BuiltinEngineSettings() {
           </div>
         </div>
       </label>
-
-      {/* Unload when unused (Discord 21.10.2026). Takes effect at once, no restart. */}
-      <div className="flex items-center justify-between">
-        <span className="text-[0.7rem] text-gray-700 dark:text-gray-400">Unload the model when unused</span>
-        <select
-          value={idleMinutes}
-          onChange={(e) => updateSettings({ engineIdleUnloadMinutes: Number(e.target.value) })}
-          className={selectCls}
-          data-testid="engine-idle-unload"
-        >
-          {ENGINE_IDLE_UNLOAD_CHOICES.map((m) => (
-            <option key={m} value={m}>{idleUnloadLabel(m)}</option>
-          ))}
-        </select>
-      </div>
-      <div className="t-micro text-gray-500 leading-relaxed">
-        The engine keeps the model in memory so answers start at once. With a time set, it frees that memory after the model went unused that long; the next chat message loads it again, which takes a moment.
-      </div>
 
       {/* Apply */}
       <div className="pt-2 border-t border-white/[0.06] space-y-1.5">

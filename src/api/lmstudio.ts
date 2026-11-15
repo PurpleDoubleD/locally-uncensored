@@ -7,6 +7,7 @@
 import { isLfm3Model, lmStudioRuntimeNote } from '../lib/lmstudio-runtime'
 import { backendCall } from './backend'
 import { callLimit, CallTimeoutError, type CallLimitOptions } from '../lib/call-limit'
+import { lmsTtlArg } from '../lib/idle-unload'
 import { lmStudioReason } from '../lib/lmstudio-switch'
 import { log } from '../lib/logger'
 import { detailOf } from '../lib/error-text'
@@ -167,6 +168,8 @@ export async function loadLmStudioModel(model: string, contextLength?: number, o
       contextLength: window,
       timeoutMs: limitMs + BRIDGE_SLACK_MS,
       callId,
+      // GH #235: the idle time from Settings, as LM Studio's own TTL.
+      ...lmsTtlArg(),
     })
     await limit.race(bridge)
   } catch (e) {
