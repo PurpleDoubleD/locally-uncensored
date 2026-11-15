@@ -151,7 +151,26 @@
   // (`luc-pricing`), but an inbound campaign source must win so the
   // eventual checkout can still be attributed after login.
   function wireFunnelSource() {
-    var source = new URLSearchParams(window.location.search).get("src");
+    var params = new URLSearchParams(window.location.search);
+    // ?via=hp: the visitor came through a door on the home page. The page
+    // keeps its own source and appends the door, so a purchase shows both
+    // (luc-image-plan-hp). The web keeps sources up to 32 characters.
+    var via = params.get("via");
+    if (via && /^[a-z0-9]{1,8}$/.test(via)) {
+      var tagged = document.querySelectorAll('a[href^="https://lu-labs.ai/"][href*="src="]');
+      for (var j = 0; j < tagged.length; j++) {
+        try {
+          var dest = new URL(tagged[j].href);
+          var own = dest.searchParams.get("src") || "";
+          var joined = own + "-" + via;
+          if (own && joined.length <= 32) {
+            dest.searchParams.set("src", joined);
+            tagged[j].href = dest.toString();
+          }
+        } catch (e) {}
+      }
+    }
+    var source = params.get("src");
     if (!source || !/^[a-z0-9_-]{1,32}$/.test(source)) return;
 
     var links = document.querySelectorAll('a[href^="https://lu-labs.ai/"]');
