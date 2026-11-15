@@ -2,15 +2,90 @@
 
 All notable changes to Locally Uncensored are documented here.
 
-## [3.1.0] - 2026-11-1X
+## [3.1.0] - 2026-11-16
 
-LU learns to run itself from the chat, reads the web for you with sources, and
-the Agent and Code tabs work better with local models. The gallery keeps every
-picture, the chat gets its own look, and Neurons is back as a plugin.
+LU learns to run itself from the chat and to do tasks on a schedule, the
+coding agent is rebuilt around reviewing, steering and rewinding, and Create
+makes 3D models and gets one place for your characters. Web search reads the
+pages for you with sources, Agent and Code work better with local models, the
+gallery keeps every picture, the chat gets its own look, Neurons is back as a
+plugin, and Parakeet joins Whisper for dictation.
 LU Cloud keeps its open models: seventeen video models and nine image models
 in the cloud catalogue.
 
 ### Added
+
+**Coding agent (Agent and Code)**
+- Tool steps read as plain sentences, with the lines a change added and
+  removed and the exit code of a command. A running step counts its seconds.
+- "Always allow `npm test` here": allow a command for one folder from the
+  approval card, and the card says plainly what it asks.
+- Steer a running task by writing to it, and a task that reaches its limit
+  ends with a clear note instead of breaking off.
+- Review changes in the Code tab hunk by hunk, per file or all at once.
+- Rewind files and chat to before any message.
+- The plan stays pinned under the newest message and shows its progress; a
+  finished plan folds into one row.
+- A context list shows what fills the model's window, and the share of a
+  prompt the provider served from its cache shows under an answer.
+- `@` mentions a file in Code, in Agent and in a chat with a folder.
+- A shell command that runs past its time limit keeps running as a background
+  task.
+- MCP servers can be added by URL (Streamable HTTP), with a status per server.
+- A failed run names the backend that failed and offers a way on.
+- A credit brake for LU Cloud runs: a task tells you at half its limit and
+  pauses at it, all agent runs together pause after a set amount per hour.
+  Both limits are in Settings, Agent, and the agent cannot change them.
+- Agents stay inside their working folder, end a search that finds nothing
+  with an honest answer, compact a full context by the model's own token
+  count instead of stopping without a word, and keep working while LU's
+  window is hidden.
+
+**Watchers**
+- Ask the AI for a task at a time or on a schedule, for example "every
+  morning at 8, sum up the news". After you confirm the card, LU runs it as an
+  agent turn at that time, also while its window is closed to the tray, and
+  shows a system notification when it ran. Pause, resume or delete it in the
+  watcher row of its chat.
+- A watcher does only what its chat allows without asking; everything else
+  is refused. It cannot change LU's settings or make more watchers.
+
+**Create**
+- 3D: a new 3D tab makes a 3D model from a prompt, a picture or still frames
+  of a video. Turn and zoom it, see it in colour, clay or wireframe, and
+  download it as GLB, OBJ, STL or USDZ. With Blender installed, LU opens the
+  model in Blender or saves it as .blend or FBX.
+  - On a Mac, TripoSR and Stable Fast 3D run on your own machine. Stable Fast
+    3D needs your Hugging Face token, because its maker gates the download.
+  - On Windows and Linux, TRELLIS.2 runs through ComfyUI.
+  - LU Cloud 3D models appear in the tab as soon as LU Cloud offers them, on
+    the phone too.
+  - From a video, only the still frames you pick leave your computer.
+- Character: one place for your characters. Pick, train or upload a
+  character, then make pictures with it, copy a motion, let it talk, or swap
+  it into a real video. Swap Character is switched on for LU Cloud accounts
+  step by step; until then the Swap action says so.
+- LU Cloud in Create follows the models of the web catalogue, among them
+  FLUX 3 Klein, GPT Image 2, Nano Banana Pro, Midjourney and Wan 3.0.
+- Images per run and Batch size are two settings: LU makes the images in
+  batches one after another, so a small graphics card is not handed all of
+  them at once.
+
+**Voice**
+- Parakeet TDT 0.6B v3 is a fourth choice for dictation in Settings, Voice
+  (GitHub #233). LU downloads it once, checks it, and runs it on your
+  computer without Python.
+- While you dictate, a live trace under the prompt shows that sound arrives,
+  with the running time, and says "No sound from mic" after three silent
+  seconds.
+
+**Phone app**
+- Talk to your computer from the phone (GitHub #212): hold the microphone in
+  a chat with your computer to speak, or tap it for hands free. Your computer
+  writes down what you say, and the answer is read aloud.
+- The prompt has one row under the field with the settings button, Attach
+  and Send, and Create shows its price on the button.
+- 3D from LU Cloud on the phone.
 
 **Agent, Code and chat**
 - LU can change its own settings and run its own services from the Agent chat:
@@ -50,7 +125,8 @@ in the cloud catalogue.
   - a before and after on the same question.
 
   The sliders act inside the LU Engine model, so tools keep working. Turn it
-  off under Plugins and the engine runs without them.
+  off under Plugins and the engine runs without them. Gemma 3 4B and 12B get
+  sliders too.
 
 **Chat look**
 - Colours for your messages and replies, coloured "quotes" and *actions*, font,
@@ -61,6 +137,8 @@ in the cloud catalogue.
   the web.
 - Zoom the chat text with Ctrl/Cmd + mouse wheel (or pinch) in Chat, Agent and
   Code. The size is remembered.
+- Line spacing reaches paragraphs, the gap between messages and the Code
+  transcript too.
 - Memory quick menu: open a memory to read all of it, and edit it in place.
 
 **Models**
@@ -81,6 +159,19 @@ in the cloud catalogue.
 - API models whose server does not report a context window: set the window
   from the context button. LU shows where the number comes from (server, you,
   or estimated).
+- The two MiniMax H3 downloads say which one is for what.
+- Right-click menus: LoRAs, finished downloads and image and video models can
+  be renamed, shown in their folder or deleted with a confirmation. A text
+  field gets Cut, Copy, Paste and Select all, and the web view's own menu
+  (Print, Reload) is gone.
+- Unused models (Settings, AI Backends): the time after which an unused model
+  is unloaded now applies to Ollama and LM Studio as well as the LU Engine,
+  and Unload all frees every engine (GitHub #235).
+- Provider presets for MiniMax (GitHub PR #203) and for Magnitude on your own
+  computer (GitHub #214).
+- MOSS Image is recognised as an image model. Assign it a workflow and LU runs
+  that workflow; a workflow assigned to any model LU does not know is used too
+  (GitHub #192).
 
 **Create and gallery**
 - Gallery: no limit of 200 entries any more.
@@ -126,8 +217,8 @@ in the cloud catalogue.
 - MiniMax H3 Image is listed as an image model, not a video model. Run it with
   the official ComfyUI template imported under Workflows.
 - Agent runs stop when the model keeps sending nearly identical tool calls
-  without a word, and a cost brake ends a paid run after 3M input tokens (with
-  a warning on any single request over 400k).
+  without a word, and a token brake ends a paid run after 2M input tokens
+  (with a notice on any single step over 64k).
 - Voice speaks as the persona of the chat you start it from.
 - A vision model on the LU Engine without its image part: LU reloads the image
   part before it sends a picture, and names the real reason if that fails,
@@ -185,6 +276,12 @@ in the cloud catalogue.
   The Android app gets the same chat rescue as the desktop.
 - REA (agent plugin) installs its dependencies as they were when LU checked the
   package, and npm's warnings stay out of the server log.
+- A downloaded model lands in the folder its download names (GitHub #234), and
+  checking for a model no longer creates empty model folders (GitHub PR #218).
+- Juggernaut XL V9 downloads from a fixed version and is checked by size and
+  checksum (GitHub PR #229).
+- A batch of local pictures no longer hangs when ComfyUI misses a completion
+  message.
 
 ### Known limits
 - **Two graphics cards:** tested as far as we can without a dual-GPU machine
@@ -204,6 +301,15 @@ in the cloud catalogue.
 - The Mac image engine (mflux) still takes Edit strength its old way.
 - Enhance on the Mac stays at 2x and 4x, LU Cloud at 2K, 4K and 8K.
 - The phone app's own gallery has no hide or tag buttons.
+- **Watchers** run while LU runs. After LU was quit, a missed time is not
+  caught up.
+- **3D:** LU Cloud 3D models and Swap Character depend on what LU Cloud has
+  switched on for your account. TRELLIS.2 asks for a graphics card with
+  12 GB or more. On Linux, the 3D view needs WebGL in the system web view; the
+  download works without it.
+- **Talking from the phone** works in the LU app. A phone browser on your home
+  network address gets no microphone, because browsers only allow it on secure
+  pages.
 
 ## [3.0.10] - 2026-11-05
 

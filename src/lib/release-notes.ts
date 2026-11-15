@@ -184,8 +184,24 @@ export const RELEASE_NOTES: ReleaseNote[] = [
   // die bekannten Grenzen.
   {
     version: '3.1.0',
-    headline: 'LU runs itself from the chat, web search reads the pages for you, and Agent and Code work better with local models.',
+    headline: 'A rebuilt coding agent, tasks on a schedule, 3D in Create and one place for your characters.',
     lines: [
+      {
+        title: 'The coding agent is rebuilt.',
+        detail: 'Review changes hunk by hunk, steer a running task, rewind files and chat to before any message, and allow a command for one folder from the approval card.',
+      },
+      {
+        title: 'Watchers do tasks on a schedule.',
+        detail: 'Ask for "every morning at 8, sum up the news" and confirm the card. LU runs it at that time, also with its window closed to the tray, and tells you when it ran.',
+      },
+      {
+        title: '3D in Create.',
+        detail: 'Make a 3D model from a prompt, a picture or a video, turn it in the viewer and download it as GLB, OBJ, STL or USDZ. On your Mac, on Windows and Linux through ComfyUI, or on LU Cloud.',
+      },
+      {
+        title: 'One place for your characters.',
+        detail: 'Pick, train or upload a character, then make pictures with it, copy a motion, let it talk or swap it into a video.',
+      },
       {
         title: 'LU runs itself from the Agent chat.',
         detail: 'Ask for a lighter theme, a different model or a ComfyUI restart, confirm the card, and undo it any time under Settings, Agent.',
@@ -208,6 +224,90 @@ export const RELEASE_NOTES: ReleaseNote[] = [
       },
     ],
     details: [
+      {
+        title: 'Coding agent',
+        items: [
+          {
+            title: 'Tool steps in plain words.',
+            detail: 'Each step says what it did, with the lines a change added and removed and the exit code of a command. A running step counts its seconds.',
+          },
+          {
+            title: 'The plan stays in view.',
+            detail: 'It is pinned under the newest message and shows its progress; a finished plan folds into one row.',
+          },
+          {
+            title: 'See what fills the window.',
+            detail: 'A context list shows what takes up the model\'s window, and the cached share of a prompt shows under an answer.',
+          },
+          {
+            title: 'Mention files with @.',
+            detail: 'In Code, in Agent and in a chat with a folder.',
+          },
+          {
+            title: 'Long commands keep running.',
+            detail: 'A shell command that runs past its time limit carries on as a background task.',
+          },
+          {
+            title: 'MCP servers by URL.',
+            detail: 'Add a Streamable HTTP server by its address and see a status per server.',
+          },
+          {
+            title: 'A credit brake for LU Cloud runs.',
+            detail: 'A task tells you at half its limit and pauses at it, and all agent runs together pause after a set amount per hour. Both limits are in Settings, Agent, and the agent cannot change them.',
+          },
+          {
+            title: 'Agents keep to their task.',
+            detail: 'They stay inside their working folder, end a search that finds nothing with an honest answer, compact a full context instead of stopping without a word, and keep working while LU\'s window is hidden.',
+          },
+        ],
+      },
+      {
+        title: 'Watchers',
+        items: [
+          {
+            title: 'A watcher does only what its chat allows.',
+            detail: 'Anything that would need a question is refused, and a watcher cannot change LU\'s settings or make more watchers. Pause, resume or delete it in the watcher row of its chat.',
+          },
+        ],
+      },
+      {
+        title: 'Create, 3D and characters',
+        items: [
+          {
+            title: '3D on your own computer.',
+            detail: 'On a Mac TripoSR and Stable Fast 3D (with your Hugging Face token), on Windows and Linux TRELLIS.2 through ComfyUI. With Blender installed, LU opens a model in Blender or saves it as .blend or FBX.',
+          },
+          {
+            title: 'From a video, only still frames leave your computer.',
+            detail: 'You pick the frames; the video stays where it is.',
+          },
+          {
+            title: 'Swap Character comes to LU Cloud step by step.',
+            detail: 'Until it is switched on for your account, the Swap action says so.',
+          },
+          {
+            title: 'LU Cloud follows the web catalogue.',
+            detail: 'Among the models: FLUX 3 Klein, GPT Image 2, Nano Banana Pro, Midjourney and Wan 3.0.',
+          },
+          {
+            title: 'Images per run and Batch size are two settings.',
+            detail: 'LU makes the pictures in batches one after another, so a small graphics card is not handed all of them at once, and a missed completion message no longer holds the next batch.',
+          },
+        ],
+      },
+      {
+        title: 'Voice',
+        items: [
+          {
+            title: 'Dictate with Parakeet.',
+            detail: 'Parakeet TDT 0.6B v3 is a fourth choice in Settings, Voice (GitHub #233). LU downloads and checks it once and runs it on your computer without Python.',
+          },
+          {
+            title: 'See that the microphone hears you.',
+            detail: 'A live trace under the prompt moves with your voice, shows the time, and says "No sound from mic" after three silent seconds.',
+          },
+        ],
+      },
       {
         title: 'Agent and chat',
         items: [
@@ -261,7 +361,7 @@ export const RELEASE_NOTES: ReleaseNote[] = [
           },
           {
             title: 'A looping agent stops, and a cost brake guards paid runs.',
-            detail: 'A run stops when the model keeps sending nearly identical tool calls without a word. A paid run ends after 3M input tokens, with a warning on any single request over 400k.',
+            detail: 'A run stops when the model keeps sending nearly identical tool calls without a word. A paid run ends after 2M input tokens, with a notice on any single step over 64k.',
           },
           {
             title: 'Voice speaks as the persona of your chat.',
@@ -333,6 +433,26 @@ export const RELEASE_NOTES: ReleaseNote[] = [
           {
             title: 'Search models by file name.',
             detail: 'Get new and Installed find a model by its file name too.',
+          },
+          {
+            title: 'Right-click menus for models and downloads.',
+            detail: 'LoRAs, finished downloads and image and video models can be renamed, shown in their folder or deleted with a confirmation. A text field gets Cut, Copy, Paste and Select all.',
+          },
+          {
+            title: 'Unused models unload on every engine.',
+            detail: 'The unload time under Settings, AI Backends, Unused models applies to Ollama and LM Studio too, and Unload all frees every engine (GitHub #235).',
+          },
+          {
+            title: 'MiniMax and Magnitude presets.',
+            detail: 'MiniMax as a provider (GitHub PR #203), Magnitude on your own computer (GitHub #214).',
+          },
+          {
+            title: 'MOSS Image runs the workflow you assign.',
+            detail: 'It is recognised as an image model, and a workflow assigned to a model LU does not know is used (GitHub #192).',
+          },
+          {
+            title: 'Downloads land in the right folder.',
+            detail: 'A model lands in the folder its download names (GitHub #234), a check no longer creates empty folders (GitHub PR #218), and Juggernaut XL V9 is checked by size and checksum (GitHub PR #229).',
           },
           {
             title: 'MiniMax H3 Reference to download.',
@@ -454,6 +574,14 @@ export const RELEASE_NOTES: ReleaseNote[] = [
         title: 'Phone',
         items: [
           {
+            title: 'Talk to your computer from the phone.',
+            detail: 'Hold the microphone in a chat with your computer to speak, or tap it for hands free. Your computer writes down what you say and the answer is read aloud (GitHub #212).',
+          },
+          {
+            title: 'A calmer prompt and 3D on the phone.',
+            detail: 'One row under the field with the settings button, Attach and Send, the price on the Create button, and 3D from LU Cloud.',
+          },
+          {
             title: 'The Android app gets the chat rescue the desktop has.',
             detail: 'Settings, Backup and import, Restore chats from the automatic backup brings back chats the backup holds that are not in your list, and the chat list shows a note when there are any. Chats you deleted on the phone are not offered back.',
           },
@@ -485,6 +613,14 @@ export const RELEASE_NOTES: ReleaseNote[] = [
           {
             title: 'Enhance on the Mac and on LU Cloud keeps its sizes.',
             detail: 'Enhance on the Mac stays at 2x and 4x, LU Cloud at 2K, 4K and 8K.',
+          },
+          {
+            title: 'Watchers run while LU runs.',
+            detail: 'After LU was quit, a missed time is not caught up.',
+          },
+          {
+            title: '3D depends on your card and your account.',
+            detail: 'TRELLIS.2 asks for a graphics card with 12 GB or more. LU Cloud 3D models and Swap Character depend on what LU Cloud has switched on for your account.',
           },
           {
             title: 'No hide or tag buttons in the phone gallery.',
