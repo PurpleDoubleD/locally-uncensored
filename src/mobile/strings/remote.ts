@@ -547,6 +547,24 @@ export const REMOTE_STRINGS = {
     openSettings: 'Open settings',
     settingsFailed: 'The settings of your phone could not be opened.',
   },
+  // ---- Voice over remote (GitHub #212) ----
+  voice: {
+    mic: 'Talk to your computer. Hold to talk, tap for hands free',
+    listening: 'Listening',
+    talk: 'Talk, let go to send',
+    sending: 'Your computer writes it down',
+    waiting: 'LU is answering',
+    speaking: 'Reading the answer',
+    interrupt: 'Tap to talk',
+    end: 'End',
+    endName: 'End voice',
+    nothingHeard: 'Nothing was heard. Hold the microphone a little longer.',
+    micDenied: 'LU has no access to the microphone. Allow it in the system settings.',
+    noMic: 'This phone gives LU no microphone.',
+    notConnected: 'Connect to your computer to talk to it.',
+    gaveUp: 'Hands free ended after a long silence.',
+    speakFailed: 'The answer could not be read aloud.',
+  },
 } as const
 
 export type RemoteStatusKey = keyof typeof REMOTE_STRINGS.status

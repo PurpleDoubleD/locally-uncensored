@@ -37,7 +37,9 @@ import { Button, Composer, EmptyState, Icon, IconButton, Notice, Page, SkeletonR
 import { Markdown } from '../../ui/Markdown'
 import { ConnectionLine } from './parts/ConnectionLine'
 import { offerRemoteNotices } from './parts/notices'
-import { useRemote } from './parts/session'
+import { remote, useRemote } from './parts/session'
+import { RemoteVoiceLine, useRemoteVoice } from './parts/RemoteVoice'
+import { FEATURE_VOICE } from '../../remote/remoteVoice'
 import { remoteModelLabel, stepTitle } from './parts/view'
 import './parts/remote.css'
 
@@ -326,6 +328,16 @@ export default function SharedChatPage() {
   const hydrated = useRemote((s) => s.hydrated)
   const [draft, setDraft] = useState('')
   const [files, setFiles] = useState<PickedAttachment[]>([])
+  const status = useRemote((s) => s.status)
+  const lastAnswer = view ? [...view.messages].reverse().find((m) => m.role === 'assistant') : undefined
+  // Voice over remote (#212): hold the microphone to talk, tap it for hands free.
+  const voice = useRemoteVoice({
+    channel: () => remote().desktopChannel(),
+    ready: status === 'connected' && sharesChats(features) && features.includes(FEATURE_VOICE) && remote().desktopChannel() !== null,
+    send: (text) => sendShared(id, text, []) !== null,
+    busy: !!view?.busy,
+    lastAnswer: lastAnswer ? { id: lastAnswer.id, text: lastAnswer.content } : null,
+  })
 
   useEffect(() => {
     if (!hydrated) return
@@ -409,6 +421,9 @@ export default function SharedChatPage() {
             testid: 'm-remote-shared-model',
           }}
           attach={<IconButton icon={Paperclip} label={S.shared.attach} onPress={() => void attach()} risk="sensor" testid="m-remote-shared-attach" />}
+          micHold={voice.micHold}
+          dictation={voice.dictation}
+          replaceField={voice.phase !== 'off' ? <RemoteVoiceLine voice={voice} /> : undefined}
         />
       }
     >

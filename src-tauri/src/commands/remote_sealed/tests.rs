@@ -851,10 +851,10 @@ async fn create_runs_end_to_end_through_the_sealed_channel() {
 
     // Without its own right the status names no Create, with it it does.
     let status = phone.call(&c.rig, via, "GET", "/remote-api/status/full", b"").await.unwrap();
-    assert_eq!(status.json()["features"], serde_json::json!(["sealed", "pending", "signin"]));
+    assert_eq!(status.json()["features"], serde_json::json!(["sealed", "pending", "signin", "voice"]));
     c.allow_create(&phone);
     let status = phone.call(&c.rig, via, "GET", "/remote-api/status/full", b"").await.unwrap();
-    assert_eq!(status.json()["features"], serde_json::json!(["sealed", "pending", "signin", "create-image", "create-video"]));
+    assert_eq!(status.json()["features"], serde_json::json!(["sealed", "pending", "signin", "create-image", "create-video", "voice"]));
     // The unauthenticated tunnel status stays without Create.
     let (_, _, body) = send(&c.rig, via, "GET", "/remote-api/status", Vec::new()).await;
     let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
@@ -868,7 +868,7 @@ async fn create_runs_end_to_end_through_the_sealed_channel() {
     // Stage 2 (CREATE-V2.md): once the window answered, the gallery word;
     // a kind's word only where the engine can (here none).
     let status = phone.call(&c.rig, via, "GET", "/remote-api/status/full", b"").await.unwrap();
-    assert_eq!(status.json()["features"], serde_json::json!(["sealed", "pending", "signin", "create-image", "create-video", "create-gallery"]));
+    assert_eq!(status.json()["features"], serde_json::json!(["sealed", "pending", "signin", "create-image", "create-video", "create-gallery", "voice"]));
     let unavailable = phone.call(&c.rig, via, "POST", "/remote-api/create/jobs", &job_body("music", "lofi")).await.unwrap();
     assert_eq!(unavailable.status, 409, "{:?}", unavailable.json());
 
@@ -1963,6 +1963,33 @@ async fn shared_chats_go_through_the_channel_with_the_right_chat() {
     assert_eq!((refused.status, refused.json()["right"].clone()), (403, serde_json::json!("chat")));
     let tasks = phone.call(&rig, via, "GET", "/remote-api/tasks", b"").await.unwrap();
     assert_eq!(tasks.status, 403);
+}
+
+// ── Voice over remote (#212) ──
+
+#[tokio::test]
+async fn voice_goes_through_the_channel_with_the_right_chat() {
+    let rig = rig_with(Duration::from_secs(5), Duration::from_secs(5)).await;
+    let via = Via::Tunnel("198.51.100.93");
+    let phone = paired_phone(&rig, 0x53, via).await;
+    // The test server has no desktop behind it: the status says so, a take is answered 503 with the reason.
+    let status = phone.call(&rig, via, "GET", "/remote-api/voice", b"").await.unwrap();
+    assert_eq!(status.status, 200, "{:?}", status.json());
+    assert_eq!(status.json()["listen"], false);
+    assert!(status.json()["why"].as_str().unwrap().contains("desktop app"));
+    let mut wav = b"RIFF\0\0\0\0WAVEfmt ".to_vec();
+    wav.resize(4000, 0);
+    let take = phone.call(&rig, via, "POST", "/remote-api/voice/transcribe", &wav).await.unwrap();
+    assert_eq!(take.status, 503, "{:?}", take.json());
+    // Without the right chat: the channel's 403 before any handler.
+    rig.hub.set_rights(&phone.device_id(), DeviceRights { agent: true, ..DeviceRights::default() }).unwrap();
+    for path in ["/remote-api/voice", "/remote-api/voice/transcribe", "/remote-api/voice/speak"] {
+        let method = if path == "/remote-api/voice" { "GET" } else { "POST" };
+        let refused = phone.call(&rig, via, method, path, b"{}").await.unwrap();
+        assert_eq!((refused.status, refused.json()["right"].clone()), (403, serde_json::json!("chat")), "{path}");
+    }
+    let status = phone.call(&rig, via, "GET", "/remote-api/status/full", b"").await.unwrap();
+    assert!(!status.json()["features"].as_array().unwrap().contains(&serde_json::json!("voice")));
 }
 
 // ── Chat attachments with the right `chat` alone ──

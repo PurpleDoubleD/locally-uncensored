@@ -106,7 +106,7 @@ export function barHeights(level: number): number[] {
  * Their own component, so ten readings a second repaint five bars and
  * nothing else.
  */
-function LevelBars({ since }: { since: number }) {
+export function LevelBars({ since }: { since: number }) {
   const level = useVoiceLevel()
   const [heard, setHeard] = useState(false)
   const [now, setNow] = useState(() => Date.now())

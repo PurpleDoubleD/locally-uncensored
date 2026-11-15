@@ -121,6 +121,7 @@ export default function VoicePage() {
   const pitch = useVoiceStore((s) => s.ttsPitch)
   const update = useVoiceStore((s) => s.updateVoiceSettings)
   const systemFallback = useMobilePrefs((s) => s.systemVoiceFallback)
+  const remoteReadAloud = useMobilePrefs((s) => s.remoteVoiceReadAloud)
   const setPref = useMobilePrefs((s) => s.setPref)
   const micDenied = useMicDenied()
   const online = useCloudOnline()
@@ -441,6 +442,17 @@ export default function VoicePage() {
           </Button>
         </Block>
 
+        <ListGroup title={T.remoteGroup} testid="m-settings-voice-remote">
+          <Row
+            title={T.remoteReadAloud}
+            subtitle={T.remoteReadAloudSub}
+            switch={{ checked: remoteReadAloud, onChange: (next) => setPref('remoteVoiceReadAloud', next) }}
+            testid="m-settings-voice-remote-read"
+          />
+        </ListGroup>
+        <Block>
+          <Hint testid="m-settings-voice-remote-how">{T.remoteHow}</Hint>
+        </Block>
       </div>
     </Page>
   )

@@ -55,6 +55,11 @@ export interface ComposerProps extends Testable {
    * take is written down the microphone is busy and takes no tap (mobile round 48).
    */
   dictation?: 'recording' | 'transcribing'
+  /**
+   * The microphone knows a press and its end (voice over remote, GitHub #212): hold to talk, let go to send, a
+   * short tap for hands free. With it the microphone takes no click; Enter or Space on it counts as a tap.
+   */
+  micHold?: ComposerMicHold
   disabled?: boolean
   /** Prefix for the data-testids of the parts, default "m-chat": m-chat-input, m-chat-send, m-chat-stop, m-chat-mic. */
   idPrefix?: string
@@ -73,6 +78,13 @@ export interface ComposerTune {
   disabled?: boolean
   testid?: string
   el?: string
+}
+
+export interface ComposerMicHold {
+  onDown: () => void
+  onUp: () => void
+  /** Accessible name of the microphone. */
+  label?: string
 }
 
 export interface ComposerAttach {
@@ -111,6 +123,45 @@ export function keepFocus(event: { preventDefault: () => void }): void {
   event.preventDefault()
 }
 
+/**
+ * The handlers of a microphone that knows press and release. The pointer is captured, so a finger that slides off
+ * the button while talking still ends the take where it lifts. A click without a pointer (Enter, Space, a screen
+ * reader) is a tap. The context menu of a long press is not opened.
+ */
+/** The microphones a finger is on. On the element, not in the handlers: the composer paints again while a take runs. */
+const pressedMics = new WeakSet<Element>()
+
+export function micHoldHandlers(hold: ComposerMicHold) {
+  const release = (target: Element) => {
+    if (!pressedMics.has(target)) return
+    pressedMics.delete(target)
+    hold.onUp()
+  }
+  return {
+    onPointerDown: (event: { pointerId: number; button: number; currentTarget: Element; preventDefault: () => void }) => {
+      if (event.button !== 0) return
+      event.preventDefault()
+      try {
+        event.currentTarget.setPointerCapture?.(event.pointerId)
+      } catch {
+        /* a WebView without capture: the release still arrives on the button */
+      }
+      pressedMics.add(event.currentTarget)
+      haptic('light')
+      hold.onDown()
+    },
+    onPointerUp: (event: { currentTarget: Element }) => release(event.currentTarget),
+    onPointerCancel: (event: { currentTarget: Element }) => release(event.currentTarget),
+    onContextMenu: (event: { preventDefault: () => void }) => event.preventDefault(),
+    onClick: (event: { detail: number }) => {
+      // detail 0: the keyboard or a screen reader pressed it, no pointer came first.
+      if (event.detail !== 0) return
+      hold.onDown()
+      hold.onUp()
+    },
+  }
+}
+
 export type ComposerSlot = 'stop' | 'send' | 'mic'
 
 /** Pure: what the shared slot shows. Empty field: microphone. Text or attachment: Send. Running: Stop. */
@@ -131,9 +182,9 @@ export function composerSlot(input: { running?: boolean; text: string; hasAttach
  * Send is never under the keyboard (ui/room.ts).
  */
 export function Composer(props: ComposerProps) {
-  const { value, onChange, label = 'Message', placeholder, onSend, running, onStop, onDictate, hasAttachment, sendBlocked, sendLabel = 'Send', status, attachments, tune, attach, action, cloud, replaceField, disabled, idPrefix = 'm-chat', risk, micRisk, dictation } = props
+  const { value, onChange, label = 'Message', placeholder, onSend, running, onStop, onDictate, hasAttachment, sendBlocked, sendLabel = 'Send', status, attachments, tune, attach, action, cloud, replaceField, disabled, idPrefix = 'm-chat', risk, micRisk, dictation, micHold } = props
   const ref = useRef<HTMLTextAreaElement>(null)
-  const slot = composerSlot({ running, text: value, hasAttachment, canDictate: !!onDictate, dictation })
+  const slot = composerSlot({ running, text: value, hasAttachment, canDictate: !!onDictate || !!micHold, dictation })
   const canSend = value.trim().length > 0 || !!hasAttachment
 
   useEffect(installRoom, [])
@@ -211,13 +262,13 @@ export function Composer(props: ComposerProps) {
               key="mic"
               type="button"
               className="m-send m-send--mic"
-              aria-label="Dictate"
+              aria-label={micHold?.label ?? 'Dictate'}
               aria-busy={dictation === 'transcribing' || undefined}
               disabled={disabled || dictation === 'transcribing'}
               data-testid={`${idPrefix}-mic`}
               data-m-dictation={dictation}
               {...riskProps(micRisk)}
-              onClick={onDictate}
+              {...(micHold ? micHoldHandlers(micHold) : { onClick: onDictate })}
             >
               <Icon icon={Mic} />
             </button>

@@ -258,6 +258,12 @@ impl axum::extract::FromRef<RemoteState> for crate::commands::remote_chats::Chat
     }
 }
 
+impl axum::extract::FromRef<RemoteState> for crate::commands::remote_voice::VoiceCtx {
+    fn from_ref(state: &RemoteState) -> Self {
+        crate::commands::remote_voice::VoiceCtx::of_desktop(state.app_handle.handle())
+    }
+}
+
 impl axum::extract::FromRef<RemoteState> for crate::commands::remote_create::CreateCtx {
     fn from_ref(state: &RemoteState) -> Self {
         crate::commands::remote_create::CreateCtx {
@@ -788,6 +794,11 @@ async fn handle_status_full(
     // once the window has reported its list.
     if sealed_caller.as_ref().is_some_and(|c| c.rights.chat) {
         features.extend(state.chats.features());
+    }
+    // Voice over remote (#212): wherever the caller may chat. Whether this
+    // computer can listen right now says `/remote-api/voice` itself.
+    if sealed_caller.as_ref().is_none_or(|c| c.rights.chat) {
+        features.push(crate::commands::remote_voice::FEATURE.to_string());
     }
     let devices = state.connected_devices.lock().await;
     let mut body = status_full_body(&devices, &machine_name(), &features);
@@ -4623,7 +4634,16 @@ fn build_router(state: RemoteState) -> Router {
         .route("/remote-api/chats/{id}/stop", post(crate::commands::remote_chats::handle_stop))
         .route("/remote-api/chats/{id}/read", post(crate::commands::remote_chats::handle_read))
         .route("/remote-api/approvals/{id}", post(crate::commands::remote_chats::handle_approval))
-        .route("/remote-api/tasks", get(crate::commands::remote_chats::handle_tasks));
+        .route("/remote-api/tasks", get(crate::commands::remote_chats::handle_tasks))
+        // Voice over remote (remote_voice.rs, GitHub #212): with the right `chat`,
+        // on the Wi-Fi way with a JWT and inside the sealed channel.
+        .route(crate::commands::remote_voice::STATUS_PATH, get(crate::commands::remote_voice::handle_status))
+        .route(
+            crate::commands::remote_voice::TRANSCRIBE_PATH,
+            post(crate::commands::remote_voice::handle_transcribe)
+                .layer(axum::extract::DefaultBodyLimit::max(crate::commands::remote_voice::MAX_TAKE_BYTES + 1)),
+        )
+        .route(crate::commands::remote_voice::SPEAK_PATH, post(crate::commands::remote_voice::handle_speak));
 
     // Proxy routes
     let proxy_routes = Router::new()
@@ -5453,7 +5473,8 @@ mod remote_path_tests {
         let v: serde_json::Value = tool.json().await.unwrap();
         assert!(v["error"].is_string());
         let status: serde_json::Value = c.get(format!("{base}/remote-api/status/full")).bearer_auth(&token).send().await.unwrap().json().await.unwrap();
-        assert_eq!(status["features"], serde_json::json!([]));
+        // Voice over remote (#212) is offered wherever the caller may chat.
+        assert_eq!(status["features"], serde_json::json!(["voice"]));
 
         server.permissions.lock().await.create = true;
         let accepted = c.post(&url).bearer_auth(&token).json(&job).send().await.unwrap();
@@ -5461,7 +5482,7 @@ mod remote_path_tests {
         let v: serde_json::Value = accepted.json().await.unwrap();
         assert_eq!(v["state"], "running");
         let status: serde_json::Value = c.get(format!("{base}/remote-api/status/full")).bearer_auth(&token).send().await.unwrap().json().await.unwrap();
-        assert_eq!(status["features"], serde_json::json!(["create-image", "create-video"]));
+        assert_eq!(status["features"], serde_json::json!(["create-image", "create-video", "voice"]));
         assert!(status.get("lan_blocked").is_none(), "only inside the channel");
         // Stage 2, the gallery and documents stay in the sealed channel: the
         // plain Wi-Fi way keeps 3.0.7's Create.

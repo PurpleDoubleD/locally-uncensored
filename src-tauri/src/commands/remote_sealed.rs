@@ -187,6 +187,8 @@ pub(crate) fn right_for_path(path: &str) -> Option<&'static str> {
         || path.starts_with("/remote-api/chats/")
         || path.starts_with("/remote-api/approvals/")
         || path == "/remote-api/tasks"
+        || path == crate::commands::remote_voice::STATUS_PATH
+        || path.starts_with("/remote-api/voice/")
     {
         Some("chat")
     } else if path == "/remote-api/agent-tool" {

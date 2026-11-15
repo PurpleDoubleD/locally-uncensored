@@ -86,6 +86,7 @@ pub mod lan_address;
 pub mod remote;
 pub mod remote_chats;
 pub mod remote_create;
+pub mod remote_voice;
 pub mod video_thumb;
 // Colour settle across the seams of a long video, on ComfyUI's Python.
 // Desktop only: it starts a process.

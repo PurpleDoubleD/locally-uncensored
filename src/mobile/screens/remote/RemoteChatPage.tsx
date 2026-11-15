@@ -39,6 +39,8 @@ import { openNewRemoteChat, sayOutcome } from './parts/actions'
 import { removePendingPhoto, restorePendingPhotos, takePendingPhotos, usePendingPhotos } from './parts/photos'
 import { remote, useKnownDesktops, useRemote } from './parts/session'
 import { Steps } from './parts/Steps'
+import { RemoteVoiceLine, useRemoteVoice } from './parts/RemoteVoice'
+import { FEATURE_VOICE } from '../../remote/remoteVoice'
 import { actionLabel, chatDesktopName, remoteModelLabel, desktopName, isForeignChat, messageFooter, sendBlocked, unansweredAction, type MessageAction } from './parts/view'
 import './parts/remote.css'
 
@@ -226,6 +228,24 @@ export default function RemoteChatPage() {
   const draft = useRemote((s) => s.drafts[id] ?? '')
   const known = useKnownDesktops()
   const photos = usePendingPhotos(id)
+  const features = useRemote((s) => s.features)
+  const lastAnswer = chat ? [...chat.messages].reverse().find((m) => m.role === 'assistant') : undefined
+  const voiceForeign = chat ? isForeignChat(chat, connection) : true
+  // Voice over remote (#212): hold the microphone to talk, tap it for hands free.
+  const voice = useRemoteVoice({
+    channel: () => remote().desktopChannel(),
+    ready: !!chat && status === 'connected' && !voiceForeign && features.includes(FEATURE_VOICE) && remote().desktopChannel() !== null,
+    send: async (text) => {
+      if (!chat) return false
+      const state = remote()
+      state.selectChat(chat.id)
+      const outcome = await state.sendMessage(text)
+      if (outcome !== 'sent') sayOutcome(outcome, chat.id)
+      return outcome === 'sent'
+    },
+    busy: !!chat && streamingChatId === chat.id,
+    lastAnswer: lastAnswer ? { id: lastAnswer.id, text: lastAnswer.state === 'failed' ? '' : lastAnswer.content } : null,
+  })
 
   useEffect(() => {
     // The store sends into its active chat; this page is that chat while it is open.
@@ -332,6 +352,9 @@ export default function RemoteChatPage() {
             el: 'R4.5',
           }}
           attach={{ label: S.chat.attach, onPress: () => nav.openSheet('remote-attach', { chatId: chat.id }), testid: 'm-remote-chat-attach', el: 'R4.9' }}
+          micHold={voice.micHold}
+          dictation={voice.dictation}
+          replaceField={voice.phase !== 'off' ? <RemoteVoiceLine voice={voice} /> : undefined}
         />
       }
     >
