@@ -2,7 +2,7 @@
  * The hint in the chat list (C46, 3.1.0): the automatic backup holds chats
  * the list does not. Same rule as the desktop (lib/chat-rescue.ts,
  * shouldShowRescueHint): more chats in the backup than in the list, or an
- * empty list, and not dismissed at this count. It only says so; the chats
+ * empty list, and one among them the hint was not dismissed for (A26). It only says so; the chats
  * come back when the user taps Restore.
  *
  * Asked once per start, after the restore at the start has decided (it may
@@ -10,7 +10,7 @@
  */
 import { create } from 'zustand'
 import { isTauri } from '../../../../../api/backend'
-import { readDismissedAt, rememberDismissed, shouldShowRescueHint } from '../../../../../lib/chat-rescue'
+import { decideRescueHint, rememberDismissed } from '../../../../../lib/chat-rescue'
 import { useChatStore } from '../../../../../stores/chatStore'
 import { restoreDecided } from '../../../../boot/restore'
 import { restorableChats, restoreChatsFromPhoneBackup } from '../../../../lib/chat-rescue'
@@ -24,10 +24,12 @@ export type RescueOutcome = 'restored' | 'not-saved' | 'failed'
 interface RescueHintState {
   /** Chats the hint offers. 0: no hint. */
   count: number
+  /** Their ids, for a dismissal that lasts (A26). */
+  ids: string[]
   busy: boolean
 }
 
-export const useRescueHint = create<RescueHintState>(() => ({ count: 0, busy: false }))
+export const useRescueHint = create<RescueHintState>(() => ({ count: 0, ids: [], busy: false }))
 
 function local(): Pick<Storage, 'getItem' | 'setItem'> | null {
   try {
@@ -49,8 +51,8 @@ export function lookForRescue(wait: (ms: number) => Promise<void> = (ms) => new 
       else useChatStore.persist.onFinishHydration(() => resolve())
     })
     await wait(LOOK_AFTER_MS)
-    const restorable = (await restorableChats()).length
-    if (shouldShowRescueHint(useChatStore.getState().conversations.length, restorable, readDismissedAt(local()))) useRescueHint.setState({ count: restorable })
+    const ids = (await restorableChats()).map((c) => c.id)
+    if (decideRescueHint(useChatStore.getState().conversations.length, ids, local())) useRescueHint.setState({ count: ids.length, ids })
   })().catch(() => {
     /* no hint is the behaviour before C46 */
   })
@@ -63,7 +65,7 @@ export async function restoreFromHint(): Promise<{ outcome: RescueOutcome; added
   try {
     const ids = await restoreChatsFromPhoneBackup()
     const written = ids.length === 0 || (await chatsAreWritten({ present: ids }))
-    useRescueHint.setState({ count: 0 })
+    useRescueHint.setState({ count: 0, ids: [] })
     return { outcome: written ? 'restored' : 'not-saved', added: ids.length }
   } catch {
     return { outcome: 'failed', added: 0 }
@@ -72,14 +74,14 @@ export async function restoreFromHint(): Promise<{ outcome: RescueOutcome; added
   }
 }
 
-/** "Not now": the hint comes back only when the backup holds more chats than now. */
+/** "Not now": the hint comes back only for a chat that goes missing after this (A26). */
 export function dismissRescueHint(): void {
-  rememberDismissed(local(), useRescueHint.getState().count)
-  useRescueHint.setState({ count: 0 })
+  rememberDismissed(local(), useRescueHint.getState().ids)
+  useRescueHint.setState({ count: 0, ids: [] })
 }
 
 /** Only for tests. */
 export function __resetRescueHintForTests(): void {
   looked = null
-  useRescueHint.setState({ count: 0, busy: false })
+  useRescueHint.setState({ count: 0, ids: [], busy: false })
 }

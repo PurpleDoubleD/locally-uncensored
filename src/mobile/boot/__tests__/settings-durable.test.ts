@@ -118,6 +118,7 @@ describe('which keys are kept', () => {
       'lu-mobile-switched-under-answer': 'a note per answer; lost, the chat says "interrupted" instead of "you switched models"',
       'lu-mobile-settings-stamp': 'the stamp of this copy itself; in the native backup it dates the settings there (L5)',
       'lu-chats-deleted': 'chats deleted on purpose (C46); lost, the restore hint offers them once and Not now keeps it away',
+      'lu-chat-rescue-hint-dismissed': 'the chats the restore hint was dismissed for (A26); lost, the hint shows once more and Not now keeps it away',
     }
     for (const key of STORE_KEYS) {
       const copied = DURABLE_SETTINGS_KEYS.includes(key)

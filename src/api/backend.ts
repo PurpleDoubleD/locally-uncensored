@@ -667,6 +667,10 @@ export async function backendCall<T = unknown>(
     // C41 / C17: show a model file in the file manager, and what Delete would
     // take for an LU Engine row. Rust only, the dev server answers 501.
     comfy_model_reveal: { path: "/local-api/comfy-model-reveal", method: "POST" },
+    // A26 (3.1.0): Settings → Chat Backup, clear the chats only the backup
+    // holds and show its folder. Rust only, the dev server answers 501.
+    chat_backup_clear: { path: "/local-api/chat-backup-clear", method: "POST" },
+    chat_backup_reveal: { path: "/local-api/chat-backup-reveal", method: "POST" },
     bundled_model_delete_plan: { path: "/local-api/bundled-model-delete-plan", method: "POST" },
     // Check files and Repair (GH #113): Rust only, the dev server answers
     // 501 (dev-server/remote-stubs.ts).

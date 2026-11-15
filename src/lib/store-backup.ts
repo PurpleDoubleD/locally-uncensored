@@ -101,6 +101,10 @@ export const STORE_KEYS = [
   // (lib/chat-deletions.ts). The chat archives of the backup keep them; after
   // a lost storage this note keeps the restore from offering them back.
   'lu-chats-deleted',
+  // A26 (3.1.0): the chats the restore hint was dismissed for
+  // (lib/chat-rescue.ts). Without it a lost storage brought the hint back
+  // for chats the user had already said no to.
+  'lu-chat-rescue-hint-dismissed',
   // Round 3 (M8). Found missing by the review: the text of the backup says
   // "chats and settings", and these did not come back.
   //   lu-mobile-remote            the chats held with a paired desktop, on

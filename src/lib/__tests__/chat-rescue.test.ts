@@ -12,7 +12,11 @@ vi.mock('../../api/backend', () => ({ isTauri: () => true, backendCall: backend 
 import { useChatStore } from '../../stores/chatStore'
 import type { Conversation } from '../../types/chat'
 import { parseImportedChats } from '../chat-export'
-import { chatsMissingFrom, restoreChatsFromBackup, countRestorableChats, shouldShowRescueHint, readDismissedAt, rememberDismissed } from '../chat-rescue'
+import { chatsMissingFrom, restoreChatsFromBackup, countRestorableChats, shouldShowRescueHint, readDismissal, rememberDismissed } from '../chat-rescue'
+
+/** No dismissal yet, and N chat ids on offer. */
+const NONE = { ids: new Set<string>(), legacyCount: null }
+const ids = (n: number) => Array.from({ length: n }, (_, i) => `c${i}`)
 // Static, like the store: a block below resets the modules, and a dynamic import would watch another store.
 import { __resetDeletionNoteForTests, installDeletionNote } from '../chat-deletion-note'
 import { readDeletedChats } from '../chat-deletions'
@@ -119,23 +123,23 @@ describe('a store backup picked by hand', () => {
 
 describe('the hint at launch', () => {
   it('shows for an empty list with chats in the backup', () => {
-    expect(shouldShowRescueHint(0, 12, null)).toBe(true)
-    expect(shouldShowRescueHint(0, 0, null)).toBe(false)
+    expect(shouldShowRescueHint(0, ids(12), NONE)).toBe(true)
+    expect(shouldShowRescueHint(0, ids(0), NONE)).toBe(false)
   })
 
   it('shows when the backup holds more chats than the list (a new chat after the loss)', () => {
-    expect(shouldShowRescueHint(1, 40, null)).toBe(true)
+    expect(shouldShowRescueHint(1, ids(40), NONE)).toBe(true)
     // A couple of deleted chats in an archive is not that.
-    expect(shouldShowRescueHint(30, 2, null)).toBe(false)
+    expect(shouldShowRescueHint(30, ids(2), NONE)).toBe(false)
   })
 
-  it('stays away after Dismiss until the backup holds more', () => {
+  it('stays away after Dismiss until a chat goes missing that was not offered then', () => {
     const mem = new Map<string, string>()
     const storage = { getItem: (k: string) => mem.get(k) ?? null, setItem: (k: string, v: string) => void mem.set(k, v) }
-    rememberDismissed(storage, 12)
-    expect(readDismissedAt(storage)).toBe(12)
-    expect(shouldShowRescueHint(0, 12, readDismissedAt(storage))).toBe(false)
-    expect(shouldShowRescueHint(0, 13, readDismissedAt(storage))).toBe(true)
+    rememberDismissed(storage, ids(12))
+    expect([...readDismissal(storage).ids]).toEqual(ids(12))
+    expect(shouldShowRescueHint(0, ids(12), readDismissal(storage))).toBe(false)
+    expect(shouldShowRescueHint(0, ids(13), readDismissal(storage))).toBe(true)
   })
 })
 
@@ -257,7 +261,7 @@ describe('a chat deleted on purpose is not offered back, a lost one still is', (
 
     const live = () => useChatStore.getState().conversations
     expect(await countRestorableChats(live)).toBe(1)
-    expect(shouldShowRescueHint(live().length, 1, null)).toBe(false)
+    expect(shouldShowRescueHint(live().length, ids(1), NONE)).toBe(false)
     expect(await restoreChatsFromBackup(live, useChatStore.getState().importConversations)).toBe(1)
     expect(live().map((c) => c.id).sort()).toEqual(['a', 'c'])
   })
@@ -270,7 +274,7 @@ describe('a chat deleted on purpose is not offered back, a lost one still is', (
     backupAnswer([chat308('a', 1), chat308('b', 2), chat308('c', 3)])
     const restorable = await countRestorableChats(() => useChatStore.getState().conversations)
     expect(restorable).toBe(0)
-    expect(shouldShowRescueHint(0, restorable, null)).toBe(false)
+    expect(shouldShowRescueHint(0, ids(restorable), NONE)).toBe(false)
   })
 
   it('the check the other way: a list that came up empty is a loss, nothing is noted, every chat is offered', async () => {
@@ -283,7 +287,7 @@ describe('a chat deleted on purpose is not offered back, a lost one still is', (
     backupAnswer([chat308('a', 100), chat308('b', 200), chat308('c', 300)])
     const live = () => useChatStore.getState().conversations
     expect(await countRestorableChats(live)).toBe(3)
-    expect(shouldShowRescueHint(live().length, 3, null)).toBe(true)
+    expect(shouldShowRescueHint(live().length, ids(3), NONE)).toBe(true)
     expect(await restoreChatsFromBackup(live, useChatStore.getState().importConversations)).toBe(3)
   })
 

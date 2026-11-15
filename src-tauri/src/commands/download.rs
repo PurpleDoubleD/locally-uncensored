@@ -880,7 +880,7 @@ pub async fn comfy_model_reveal(
 /// The file selected in Finder or Explorer; on Linux, where there is no
 /// common way to select a file, its folder.
 #[cfg(desktop)]
-fn reveal_in_file_manager(file: &Path) -> Result<(), String> {
+pub(crate) fn reveal_in_file_manager(file: &Path) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     let mut cmd = {
         let mut c = std::process::Command::new("open");

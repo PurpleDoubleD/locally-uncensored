@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useChatStore } from '../../stores/chatStore'
 import { isTauri } from '../../api/backend'
 import {
-  countRestorableChats, restoreChatsFromBackup, shouldShowRescueHint, readDismissedAt, rememberDismissed,
+  restorableChatIds, restoreChatsFromBackup, decideRescueHint, rememberDismissed,
 } from '../../lib/chat-rescue'
 import { installDeletionNote } from '../../lib/chat-deletion-note'
 
@@ -19,7 +19,8 @@ export function ChatRescueHint() {
   // A chat that leaves the list from here on was deleted on purpose: the restore does not offer it back (C46).
   // The shell mounts this once for the whole session.
   useEffect(() => { installDeletionNote() }, [])
-  const [count, setCount] = useState(0)
+  const [offered, setOffered] = useState<string[]>([])
+  const count = offered.length
   const [busy, setBusy] = useState(false)
   const [done, setDone] = useState<string | null>(null)
 
@@ -34,9 +35,9 @@ export function ChatRescueHint() {
       await new Promise((r) => setTimeout(r, LOOK_AFTER_MS))
       if (gone) return
       const live = () => useChatStore.getState().conversations
-      const restorable = await countRestorableChats(live)
+      const ids = await restorableChatIds(live)
       const storage = typeof localStorage !== 'undefined' ? localStorage : null
-      if (!gone && shouldShowRescueHint(live().length, restorable, readDismissedAt(storage))) setCount(restorable)
+      if (!gone && decideRescueHint(live().length, ids, storage)) setOffered(ids)
     }
     look().catch(() => { /* no hint is the old behaviour */ })
     return () => { gone = true }
@@ -45,8 +46,9 @@ export function ChatRescueHint() {
   if (count === 0 && !done) return null
 
   const dismiss = () => {
-    rememberDismissed(typeof localStorage !== 'undefined' ? localStorage : null, count)
-    setCount(0)
+    // A26: for these chats, until one goes missing that was not among them.
+    rememberDismissed(typeof localStorage !== 'undefined' ? localStorage : null, offered)
+    setOffered([])
     setDone(null)
   }
 
@@ -54,7 +56,7 @@ export function ChatRescueHint() {
     setBusy(true)
     try {
       const added = await restoreChatsFromBackup(() => useChatStore.getState().conversations, importConversations)
-      setCount(0)
+      setOffered([])
       setDone(`Restored ${added} chat${added === 1 ? '' : 's'} from the backup.`)
     } catch (err) {
       setDone(err instanceof Error ? err.message : 'Could not read the backup.')
