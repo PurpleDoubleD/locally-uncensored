@@ -125,7 +125,7 @@ describe('Neurons in one window with pop-ups', () => {
     expect(tabs.map((t) => t.textContent)).toEqual(['From examples', 'Features', 'Coordinates'])
     expect(screen.getByText(/Your own slider, from examples/)).toBeTruthy()
     fireEvent.click(screen.getByTestId('neuron-way-features'))
-    expect(screen.getByTestId('neuron-features-none').textContent).toMatch(/Gemma 3 270M IT and Gemma 3 1B IT/)
+    expect(screen.getByTestId('neuron-features-none').textContent).toMatch(/Gemma 3 270M, 1B, 4B and 12B IT/)
   })
 
   it('names the window status in its title bar', async () => {

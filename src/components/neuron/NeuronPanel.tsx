@@ -25,7 +25,7 @@ import { isManagedBuiltinSlot } from '../../api/builtin-ensure'
 import { builtinModelMatches } from '../../lib/builtin-model-identity'
 import {
   backendNote, effectiveStrengths, entriesFor, hasPersonaProfile,
-  clampStrength, steeringPersona, strengthWarning, tweakedModelNote, buildTimeNote, warningText, type BackendKind, type Strengths,
+  clampStrength, FEATURE_MODELS, steeringPersona, strengthWarning, tweakedModelNote, buildTimeNote, warningText, type BackendKind, type Strengths,
 } from '../../lib/neuron'
 import { NEURON_MAX_DOSE, featureVectorId, neuronVectorId, recipeOwnId, type Recipe, type RecipeEntry } from '../../lib/neuron-recipe'
 import { editingKey, useNeuronStore } from '../../stores/neuronStore'
@@ -505,7 +505,7 @@ export function NeuronPanel({ chrome = {} }: { chrome?: WindowChrome }) {
                       />
                     ) : (
                       <p className={`t-body ${HINWEIS_TEXT.ruhig}`} data-testid="neuron-features-none">
-                        This model has no official feature map. Features exist for Gemma 3 270M IT and Gemma 3 1B IT (Gemma Scope 2 by Google DeepMind, CC-BY-4.0). Pick one of those as the model, or use the other ways.
+                        This model has no official feature map. Features exist for {FEATURE_MODELS} (Gemma Scope 2 by Google DeepMind, CC-BY-4.0). Pick one of those as the model, or use the other ways.
                       </p>
                     )}
                   </>
@@ -561,7 +561,7 @@ export function NeuronPanel({ chrome = {} }: { chrome?: WindowChrome }) {
                 <li>Each slider is computed for this model the first time: LU reads short example pairs through the model and measures how far it can push before answers break. Seconds for small models, a few minutes for large ones. The chat pauses meanwhile.</li>
                 <li>±1 is just under where the measured answer started to break. Strong settings or many sliders at once can still make text repeat or wander.</li>
                 <li>A change restarts the engine with the new sliders (a few seconds). Turning Neurons off under Plugins restarts it without them.</li>
-                <li>Features exist only for models with an official sparse autoencoder: Gemma 3 270M IT and 1B IT (Gemma Scope 2, CC-BY-4.0).</li>
+                <li>Features exist only for models with an official sparse autoencoder: {FEATURE_MODELS} (Gemma Scope 2, CC-BY-4.0).</li>
                 <li>Small models (under 1B) show traits weakly; special ones like a pirate voice need a bigger model.</li>
               </ul>
               <button type="button" className="lu-control lu-control--outline mt-3" onClick={() => { setPopup(null); showIntro() }} data-testid="neuron-intro-open">

@@ -162,6 +162,8 @@ describe('model names and ids', () => {
     expect(id.length).toBeLessThanOrEqual(48)
     expect(featureVectorId('gemma-scope-2-270m-it-l9', 11690)).toBe('f-g270m-11690')
     expect(featureVectorId('gemma-scope-2-1b-it-l13', 5)).toBe('f-g1b-5')
+    expect(featureVectorId('gemma-scope-2-4b-it-l17', 7)).toBe('f-g4b-7')
+    expect(featureVectorId('gemma-scope-2-12b-it-l24', 16383)).toBe('f-g12b-16383')
     expect(neuronVectorId(13, 7956)).toBe('n-L13-N7956')
   })
 })

@@ -165,6 +165,13 @@ pub(crate) fn set_plugin_on_at(root: &Path, on: bool) -> Result<bool, String> {
     Ok(plugin_on_at(root))
 }
 
+/// Why a before/after comparison cannot steer: with the plugin off the
+/// engine starts every model plain, so "after" would be unsteered too and
+/// still be shown as steered (seen in the 4B run, NEURONEN-SOTA-310.md).
+pub(crate) fn compare_blocked(plugin_on: bool) -> Option<&'static str> {
+    (!plugin_on).then_some("Neurons is off. Turn it on under Plugins to compare.")
+}
+
 /// The control vector the engine starts this model with, if any. None while
 /// the plugin is off.
 pub(crate) fn control_vector_for(model_path: &str) -> Option<String> {
@@ -883,7 +890,7 @@ pub fn neuron_feature_add(app: tauri::AppHandle, model_path: String, feature: us
     if feature >= spec.width {
         return Err("No such feature.".into());
     }
-    let id = feature_id(if spec.id.contains("270m") { "g270m" } else { "g1b" }, feature);
+    let id = feature_id(spec.short, feature);
     let name = label.map(|l| l.chars().take(60).collect::<String>()).unwrap_or_else(|| format!("Feature #{feature}"));
     start_job("feature", &format!("Adding feature #{feature}"), &model_path.clone(), move || {
         let root = root();
@@ -1180,6 +1187,9 @@ pub async fn neuron_compare(
         if question.is_empty() {
             return Err("Type a question to compare.".to_string());
         }
+        if let Some(why) = compare_blocked(plugin_on()) {
+            return Err(why.to_string());
+        }
         let seed = seed.unwrap_or(42);
         let facts = model::facts(&model_path)?;
         let root = root();
@@ -1208,6 +1218,12 @@ mod tests {
     /// 3.1.0: Neurons is a plugin. Off is the default (no marker), and the
     /// switch survives as a file, so an engine start before the app has
     /// spoken starts plain.
+    #[test]
+    fn a_comparison_needs_the_plugin_on() {
+        assert!(compare_blocked(true).is_none());
+        assert!(compare_blocked(false).unwrap().contains("under Plugins"));
+    }
+
     #[test]
     fn the_plugin_switch_is_off_by_default_and_kept_as_a_file() {
         let dir = std::env::temp_dir().join(format!("lu-neuron-plugin-{}", std::process::id()));
