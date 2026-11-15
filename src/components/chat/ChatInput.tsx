@@ -4,6 +4,7 @@ import { SamplingControls } from './SamplingControls'
 import { Send, Square, Paperclip, X, Brain, Gauge, Terminal, Film, Music } from 'lucide-react'
 import { matchAgentCommands, type AgentCommand, type CommandScope } from '../../lib/agent-commands'
 import { VoiceButton, type VoiceButtonHandle } from './VoiceButton'
+import { MicLevelTrace } from '../voice/MicLevelTrace'
 import { ApprovalDialog } from './ApprovalDialog'
 import { ComputerQuestionSlot } from '../computer/ComputerQuestion'
 import { ComputerNote } from '../computer/ComputerNote'
@@ -172,6 +173,8 @@ export function ChatInput({ onSend, onStop, isGenerating, waitingForLocalLane, p
   const imageJob = useRef({ busy: false, epoch: 0 })
   const fileJob = useRef({ busy: false })
   const [isVoiceRecording, setIsVoiceRecording] = useState(false)
+  // When the take started, for the running time of the live trace.
+  const [recordingSince, setRecordingSince] = useState(0)
   const voiceRef = useRef<VoiceButtonHandle>(null)
   // Slash-command autocomplete (v2.5.3). When the input is a lone "/token", show
   // the matching agent commands; ↑/↓ to move, Enter/Tab to pick, Esc to dismiss.
@@ -937,6 +940,10 @@ export function ChatInput({ onSend, onStop, isGenerating, waitingForLocalLane, p
             still keeps one height while it works (see below). */}
         {/* The query container sits one level out: a container query cannot
             style the container itself, and the row has to wrap. */}
+        {/* The live trace of the microphone while a take runs (14.11.2026):
+            a line of its own under the text, so the action row keeps its
+            room; moves with the voice, says so when nothing arrives. */}
+        {isVoiceRecording && <MicLevelTrace since={recordingSince} className="px-3 pb-1.5" />}
         <div className="@container">
         <div className="flex flex-nowrap items-center gap-1 px-2 py-1.5 min-h-[38px] border-t border-gray-200 dark:border-white/[0.05] @max-[26rem]:flex-wrap">
           {/* Clip button */}
@@ -965,7 +972,10 @@ export function ChatInput({ onSend, onStop, isGenerating, waitingForLocalLane, p
             onInterim={applyDictation}
             onTranscript={applyDictation}
             onRecordingChange={(r) => {
-              if (r) dictationBaseRef.current = input
+              if (r) {
+                dictationBaseRef.current = input
+                setRecordingSince(Date.now())
+              }
               setIsVoiceRecording(r)
             }}
             // The microphone stays free while an answer streams: a take that

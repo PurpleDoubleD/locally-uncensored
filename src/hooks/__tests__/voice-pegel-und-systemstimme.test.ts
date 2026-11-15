@@ -182,10 +182,13 @@ describe('the level of the microphone', () => {
     off()
   })
 
-  it('the hook hands the level out and starts the meter only on a phone', () => {
+  // 3.1.0: the live trace in every composer needs the level on desktop and
+  // web too, so the meter starts on every device (it was phone only, L18).
+  it('the hook hands the level out and starts the meter on every device', () => {
     expect(hookSource).toMatch(/getLevel: voiceLevel,/)
-    expect(hookSource).toMatch(/if \(isMobile\(\)\) \{\s+\/\/[^\n]*\n\s+const stream = await startRecorderWithStream\(recorder\);/)
-    expect(hookSource).toMatch(/\} else \{\s+await recorder\.start\(\);\s+\}/)
+    expect(hookSource).toMatch(/const stream = await startRecorderWithStream\(recorder\);\s+dropMeter\(meterRef\);\s+meterRef\.current = stream \? startLevelMeter\(stream\) : null;/)
+    expect(hookSource).not.toMatch(/if \(isMobile\(\)\) \{\s+\/\/[^\n]*\n\s+const stream = await startRecorderWithStream/)
+    expect(hookSource).not.toMatch(/\} else \{\s+await recorder\.start\(\);\s+\}/)
   })
 
   it('every way a take ends also ends the meter', () => {
