@@ -17,7 +17,7 @@ export function IdleUnloadSetting() {
   return (
     <div className="space-y-1.5">
       <div className="flex items-center justify-between">
-        <span className="text-[0.7rem] text-gray-700 dark:text-gray-400">Unload the chat model when unused</span>
+        <span className="t-micro text-gray-700 dark:text-gray-400">Unload the chat model when unused</span>
         <select
           value={idleMinutes}
           onChange={(e) => updateSettings({ engineIdleUnloadMinutes: Number(e.target.value) })}
