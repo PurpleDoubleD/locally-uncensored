@@ -146,6 +146,13 @@ pub fn classify<'a>(tensors: impl IntoIterator<Item = (&'a str, Option<&'a [u64]
 /// Read and classify one file's header. None when it is not a readable
 /// safetensors file.
 pub fn sniff_file(path: &Path) -> Option<Sniff> {
+    let shapes = header_tensors(path)?;
+    Some(classify(shapes.iter().map(|(k, s)| (k.as_str(), s.as_deref()))))
+}
+
+/// The tensor names and shapes of a safetensors header. None when the file
+/// is not one.
+fn header_tensors(path: &Path) -> Option<Vec<(String, Option<Vec<u64>>)>> {
     let mut f = File::open(path).ok()?;
     let total = f.metadata().ok()?.len();
     let mut len = [0u8; 8];
@@ -164,7 +171,135 @@ pub fn sniff_file(path: &Path) -> Option<Sniff> {
             (k.clone(), shape)
         })
         .collect();
-    Some(classify(shapes.iter().map(|(k, s)| (k.as_str(), s.as_deref()))))
+    Some(shapes)
+}
+
+// ── A27: which models folder a file belongs in ─────────────────────────────
+//
+// GitHub #234 (Kubuntu, RTX 5090): diffusion and video models downloaded
+// through the CivitAI search landed in models/checkpoints. The folder came
+// from the title alone (flux, wan, hunyuan, .gguf); LTX, MiniMax H3,
+// Qwen-Image, Z-Image, Chroma, Krea, Mochi, CogVideoX and every Wan offshoot
+// without "wan" in its title went to checkpoints, where ComfyUI's
+// CheckpointLoaderSimple cannot load a bare diffusion model. The header says
+// which it is.
+
+/// The ComfyUI folders a header can send a file to.
+pub const HEADER_FOLDERS: &[&str] = &["checkpoints", "diffusion_models", "vae", "text_encoders"];
+
+/// The folder a file with these tensors belongs in, or None when the header
+/// does not say (a LoRA, an unknown layout): then the caller keeps its own
+/// guess. Pure, so the tests can feed it real headers.
+///
+///   * a bare VAE → vae, a bare text encoder → text_encoders;
+///   * a diffusion model that carries its own VAE → checkpoints, the one
+///     folder CheckpointLoaderSimple reads (SD 1.5, SDXL, the FLUX all-in-one,
+///     LTX-Video, which ComfyUI loads as a checkpoint);
+///   * a diffusion model without one → diffusion_models (UNETLoader).
+pub fn folder_for_tensors<'a>(tensors: &[(&'a str, Option<&'a [u64]>)]) -> Option<&'static str> {
+    // A LoRA names the blocks it changes, which would read as their model:
+    // kohya (`lora_unet_…`), diffusers (`….lora_A.weight`), XLabs
+    // (`….proj_lora1.down.weight`), LyCORIS (`lokr_`, `hada_`).
+    let lora = tensors.iter().any(|(k, _)| {
+        let k = k.to_ascii_lowercase();
+        k.contains("lora") || k.contains("lokr_") || k.contains("hada_w") || k.contains("lycoris")
+    });
+    if lora {
+        return None;
+    }
+    let sniff = classify(tensors.iter().copied());
+    let diffusion = match sniff.arch.as_deref() {
+        Some("vae") => return Some("vae"),
+        Some("text_encoder") => return Some("text_encoders"),
+        Some(_) => true,
+        None => video_layout(tensors),
+    };
+    if !diffusion {
+        return None;
+    }
+    Some(if sniff.has_vae { "checkpoints" } else { "diffusion_models" })
+}
+
+/// The video families `classify` leaves unnamed, because LU has no pipeline
+/// of its own keyed on them. Layouts read off real headers on 14.11.2026:
+/// LTX-Video 0.9.5 and 0.9.7 (Lightricks), Mochi and HunyuanVideo (the
+/// Comfy-Org repacks, Hunyuan under `model.model.`), CogVideoX (THUDM).
+fn video_layout(tensors: &[(&str, Option<&[u64]>)]) -> bool {
+    let mut stems: HashSet<&str> = HashSet::new();
+    for (key, _) in tensors {
+        let bare = ["model.diffusion_model.", "diffusion_model.", "model.model.", "model."]
+            .iter()
+            .find_map(|p| key.strip_prefix(p))
+            .unwrap_or(key);
+        if let Some(stem) = bare.split('.').next() {
+            stems.insert(stem);
+        }
+    }
+    let has = |s: &str| stems.contains(s);
+    (has("transformer_blocks") && (has("patchify_proj") || has("adaln_single")))
+        || (has("transformer_blocks") && has("patch_embed") && has("time_embedding"))
+        || (has("blocks") && has("t5_y_embedder"))
+        || (has("double_blocks") && has("single_blocks"))
+}
+
+/// The folder for one file on disk; None as for `folder_for_tensors`, and
+/// for a file that is not safetensors (a GGUF keeps the rule it has).
+pub fn folder_for_file(path: &Path) -> Option<&'static str> {
+    let shapes = header_tensors(path)?;
+    let view: Vec<(&str, Option<&[u64]>)> = shapes.iter().map(|(k, s)| (k.as_str(), s.as_deref())).collect();
+    folder_for_tensors(&view)
+}
+
+/// `unet` is ComfyUI's older name for diffusion_models.
+fn same_folder(a: &str, b: &str) -> bool {
+    fn n(x: &str) -> &str {
+        if x == "unet" { "diffusion_models" } else { x }
+    }
+    n(a) == n(b)
+}
+
+/// Where a file downloaded into `guessed` (a folder picked from a title)
+/// belongs by its header, and the move there. `dirs` maps each of
+/// `HEADER_FOLDERS` to its directory. Returns the folder and the new path
+/// when the file was moved. Leaves the file where it is when the header does
+/// not say, when it already sits right, or when a file of that name is
+/// already in the other folder (nothing is overwritten).
+pub fn settle_by_header(file: &Path, guessed: &str, dirs: &HashMap<String, PathBuf>) -> Option<(&'static str, PathBuf)> {
+    if !["checkpoints", "diffusion_models", "unet"].contains(&guessed) {
+        return None;
+    }
+    let target = folder_for_file(file)?;
+    if same_folder(guessed, target) {
+        return None;
+    }
+    let dir = dirs.get(target)?;
+    let dest = dir.join(file.file_name()?);
+    if dest.exists() {
+        tracing::warn!("{} belongs in {target}, but {} is taken; it stays", file.display(), dest.display());
+        return None;
+    }
+    if let Err(e) = std::fs::create_dir_all(dir) {
+        tracing::warn!("could not create {}: {}", dir.display(), crate::os_error::english(&e));
+        return None;
+    }
+    if std::fs::rename(file, &dest).is_err() {
+        // Another volume (a Storage folder on a second disk): copy, then remove.
+        if let Err(e) = std::fs::copy(file, &dest) {
+            let _ = std::fs::remove_file(&dest);
+            tracing::warn!("could not move {} to {target}: {}", file.display(), crate::os_error::english(&e));
+            return None;
+        }
+        let _ = std::fs::remove_file(file);
+    }
+    tracing::info!("{} read as a {target} file, moved to {}", file.display(), dest.display());
+    Some((target, dest))
+}
+
+/// Which folder a file that already sits in a main model folder belongs in,
+/// when that is another one: for the hint in Models → Details. Never moves.
+pub fn belongs_elsewhere(file: &Path, found_in: &str) -> Option<&'static str> {
+    let target = folder_for_file(file)?;
+    (!same_folder(found_in, target)).then_some(target)
 }
 
 type CacheKey = (PathBuf, u64, Option<SystemTime>);
@@ -326,6 +461,131 @@ mod tests {
             println!("{want}: {got}");
             assert_eq!(got, want);
         }
+    }
+
+    /// A27 (GitHub #234): the folder of real files, from their real headers
+    /// (src-tauri/tests/fixtures/model_headers, read by range request on
+    /// 14.11.2026; the keys of block 0 and everything outside the blocks).
+    #[test]
+    fn real_headers_name_their_folder() {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/model_headers");
+        let want: &[(&str, Option<&str>)] = &[
+            // Video models, the ones the title rule sent to checkpoints.
+            ("ltxv-2b-0.9.5", Some("checkpoints")),  // carries its VAE; ComfyUI loads LTX as a checkpoint
+            ("ltxv-13b-0.9.7", Some("checkpoints")),
+            ("mochi", Some("diffusion_models")),
+            ("hunyuanvideo", Some("diffusion_models")),
+            ("cogvideox-2b", Some("diffusion_models")),
+            ("wan21-1.3b", Some("diffusion_models")),
+            ("wan22-5b", Some("diffusion_models")),
+            // Image models.
+            ("qwen-image", Some("diffusion_models")),
+            ("chroma1-hd", Some("diffusion_models")),
+            ("zimage-turbo", Some("diffusion_models")),
+            // All-in-one checkpoints stay checkpoints, also with flux in the title.
+            ("flux-schnell-aio", Some("checkpoints")),
+            ("sdxl-base", Some("checkpoints")),
+            ("sd15", Some("checkpoints")),
+            // A LoRA says nothing about a main model folder.
+            ("flux-lora-xlabs", None),
+            ("flux-lora-diffusers", None),
+        ];
+        for (name, folder) in want {
+            let raw = std::fs::read(dir.join(format!("{name}.json"))).unwrap_or_else(|e| panic!("{name}: {e}"));
+            let v: serde_json::Value = serde_json::from_slice(&raw).unwrap();
+            let shapes: Vec<(String, Option<Vec<u64>>)> = v["keys"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|k| {
+                    let k = k.as_str().unwrap().to_string();
+                    let s = v["shapes"].get(&k).and_then(|s| s.as_array()).map(|a| a.iter().filter_map(|x| x.as_u64()).collect());
+                    (k, s)
+                })
+                .collect();
+            let view: Vec<(&str, Option<&[u64]>)> = shapes.iter().map(|(k, s)| (k.as_str(), s.as_deref())).collect();
+            assert_eq!(folder_for_tensors(&view), *folder, "{name}");
+        }
+    }
+
+    #[test]
+    fn a_bare_vae_or_text_encoder_has_its_own_folder() {
+        let f = |keys: &[&str]| folder_for_tensors(&keys.iter().map(|k| (*k, None)).collect::<Vec<_>>());
+        assert_eq!(f(&["encoder.conv_in.weight", "decoder.conv_out.weight"]), Some("vae"));
+        assert_eq!(f(&["encoder.block.0.x", "shared.weight"]), Some("text_encoders"));
+        assert_eq!(f(&["foo.weight"]), None);
+    }
+
+    /// One safetensors file on disk with these keys, for the move tests.
+    fn write_model(path: &Path, keys: &[&str]) {
+        let mut header = serde_json::Map::new();
+        for (i, k) in keys.iter().enumerate() {
+            header.insert(k.to_string(), serde_json::json!({"dtype": "BF16", "shape": [1], "data_offsets": [i * 2, i * 2 + 2]}));
+        }
+        let header = serde_json::Value::Object(header).to_string();
+        let mut bytes = (header.len() as u64).to_le_bytes().to_vec();
+        bytes.extend_from_slice(header.as_bytes());
+        bytes.extend(std::iter::repeat_n(0u8, keys.len() * 2));
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, bytes).unwrap();
+    }
+
+    fn model_dirs(root: &Path) -> HashMap<String, PathBuf> {
+        HEADER_FOLDERS.iter().map(|k| (k.to_string(), root.join(k))).collect()
+    }
+
+    const LTX_BARE: &[&str] = &["model.diffusion_model.transformer_blocks.0.attn1.to_q.weight", "model.diffusion_model.patchify_proj.weight", "model.diffusion_model.adaln_single.linear.weight"];
+
+    #[test]
+    fn a_download_into_checkpoints_moves_to_diffusion_models_by_its_header() {
+        let root = tempfile::tempdir().unwrap();
+        let dirs = model_dirs(root.path());
+        // "Wan 2.2 Rapid" and "LTX 2B distilled" from the CivitAI search: no flux/wan/hunyuan in the title.
+        let file = root.path().join("checkpoints").join("ltx_distilled_bare.safetensors");
+        write_model(&file, LTX_BARE);
+        let (folder, dest) = settle_by_header(&file, "checkpoints", &dirs).expect("moved");
+        assert_eq!(folder, "diffusion_models");
+        assert_eq!(dest, root.path().join("diffusion_models").join("ltx_distilled_bare.safetensors"));
+        assert!(dest.is_file() && !file.exists());
+        // An all-in-one with flux in the title goes the other way.
+        let aio = root.path().join("diffusion_models").join("flux_aio.safetensors");
+        write_model(&aio, &["model.diffusion_model.double_blocks.0.x", "model.diffusion_model.single_blocks.0.x", "text_encoders.t5xxl.x", "vae.decoder.conv_in.weight"]);
+        assert_eq!(settle_by_header(&aio, "diffusion_models", &dirs).map(|m| m.0), Some("checkpoints"));
+    }
+
+    #[test]
+    fn nothing_moves_when_the_header_agrees_says_nothing_or_the_name_is_taken() {
+        let root = tempfile::tempdir().unwrap();
+        let dirs = model_dirs(root.path());
+        let right = root.path().join("diffusion_models").join("ltx.safetensors");
+        write_model(&right, LTX_BARE);
+        assert!(settle_by_header(&right, "diffusion_models", &dirs).is_none());
+        assert!(settle_by_header(&right, "unet", &dirs).is_none(), "unet is diffusion_models");
+        let lora = root.path().join("checkpoints").join("style.safetensors");
+        write_model(&lora, &["lora_unet_double_blocks_0_img_attn_proj.lora_down.weight"]);
+        assert!(settle_by_header(&lora, "checkpoints", &dirs).is_none());
+        let gguf = root.path().join("checkpoints").join("wan.gguf");
+        std::fs::write(&gguf, b"GGUF....").unwrap();
+        assert!(settle_by_header(&gguf, "checkpoints", &dirs).is_none());
+        // Never overwrites: the same name in the target folder keeps both where they are.
+        let twin = root.path().join("checkpoints").join("ltx.safetensors");
+        write_model(&twin, LTX_BARE);
+        assert!(settle_by_header(&twin, "checkpoints", &dirs).is_none());
+        assert!(twin.is_file() && right.is_file());
+        // A LoRA download is never asked.
+        let loras = root.path().join("loras").join("bare.safetensors");
+        write_model(&loras, LTX_BARE);
+        assert!(settle_by_header(&loras, "loras", &dirs).is_none());
+    }
+
+    #[test]
+    fn a_file_already_in_the_wrong_folder_is_named_not_moved() {
+        let root = tempfile::tempdir().unwrap();
+        let file = root.path().join("checkpoints").join("sub").join("qwen.safetensors");
+        write_model(&file, &["transformer_blocks.0.x", "img_in.weight", "txt_in.weight", "txt_norm.weight"]);
+        assert_eq!(belongs_elsewhere(&file, "checkpoints"), Some("diffusion_models"));
+        assert!(file.is_file());
+        assert_eq!(belongs_elsewhere(&file, "diffusion_models"), None);
     }
 
     #[test]

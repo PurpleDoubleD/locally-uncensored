@@ -108,6 +108,8 @@ export interface DownloadMeta {
   expectedBytes?: number
   /** Content digest, when the catalog states one. */
   sha256?: string
+  /** A27: the folder came from a title; the file's header decides where it ends up. */
+  sniffFolder?: boolean
 }
 
 /** One file of a download that goes to a folder by path (every GGUF of the built-in engine). */
@@ -184,7 +186,7 @@ interface DownloadStoreState {
   refresh: () => Promise<void>
   startPolling: () => void
   stopPolling: () => void
-  setMeta: (filename: string, url: string, subfolder: string, destDir?: string, extra?: { expectedBytes?: number; sha256?: string }) => void
+  setMeta: (filename: string, url: string, subfolder: string, destDir?: string, extra?: { expectedBytes?: number; sha256?: string; sniffFolder?: boolean }) => void
   /** Start one file into a folder: remember how to start it again, save that at
    *  once, start, and say how the start ended. */
   startToPath: (file: PathDownload, destDir: string) => Promise<PathStartAnswer>
@@ -526,7 +528,8 @@ export const useDownloadStore = create<DownloadStoreState>()(persist((set, get) 
       }
       if (res?.status === 'error') return false
     } else {
-      await resumeDownload(id, meta.url, meta.subfolder, meta.expectedBytes, meta.sha256)
+      // A27: the header question only travels when it was asked at the start.
+      await resumeDownload(id, meta.url, meta.subfolder, meta.expectedBytes, meta.sha256, ...(meta.sniffFolder ? [true] : []))
     }
     set(s => ({ orphans: withoutFilename(s.orphans, id) }))
     get().startPolling()
@@ -575,7 +578,7 @@ export const useDownloadStore = create<DownloadStoreState>()(persist((set, get) 
     if (meta.destDir) {
       await startModelDownloadToPath(meta.url, meta.destDir, id, meta.expectedBytes, meta.sha256)
     } else {
-      await startModelDownload(meta.url, meta.subfolder, id, meta.expectedBytes, meta.sha256)
+      await startModelDownload(meta.url, meta.subfolder, id, meta.expectedBytes, meta.sha256, ...(meta.sniffFolder ? [{ sniffFolder: true }] : []))
     }
     get().startPolling()
   },
