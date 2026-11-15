@@ -114,6 +114,13 @@ test('a right click in a zoomed transcript opens the menu at the pointer', async
   await page.evaluate(() => localStorage.setItem('lu-chat-look', JSON.stringify({ state: { look: {}, zoom: 1.5, backgrounds: {} }, version: 0 })))
   await page.reload()
   await expect(reply(page)).toBeVisible({ timeout: 30_000 })
+  // The chat view slides in (y 20 -> 0, 250 ms). While it moves, its
+  // transform is the frame a fixed menu sits in, so a click in that window
+  // lands the menu off the pointer. Under load the slide outlasts the boot.
+  await expect.poll(() => reply(page).evaluate((el) => {
+    for (let n: Element | null = el; n; n = n.parentElement) if (getComputedStyle(n).transform !== 'none') return false
+    return true
+  })).toBe(true)
   const box = (await reply(page).boundingBox())!
   const x = box.x + 40
   const y = box.y + box.height / 2
@@ -184,4 +191,35 @@ test('the Memory quick menu opens a long memory in full and edits it', async ({ 
   await page.getByTitle('Memory: view, add or delete the context injected into prompts').click()
   await page.getByRole('button', { name: /Roleplay setting/, expanded: false }).click()
   await expect(page.getByTestId('memory-full')).toContainText('Arin carries a brass key.')
+})
+
+test('the line spacing slider spaces lines, paragraphs and messages, in Chat and Code', async ({ page }) => {
+  await boot(page)
+  const lineRatio = (sel: string) => page.locator(sel).first().evaluate((el) => {
+    const t = (el.querySelector('p') ?? el) as HTMLElement
+    return parseFloat(getComputedStyle(t).lineHeight) / parseFloat(getComputedStyle(t).fontSize)
+  })
+  const gap = (sel: string) => page.locator(sel).first().evaluate((el) => parseFloat(getComputedStyle(el).paddingTop))
+  const before = { model: await lineRatio('.lu-msg-model-text'), user: await lineRatio('.lu-msg-user-text'), row: await gap('.lu-msg-row') }
+
+  await page.getByTestId('chat-look-button').click()
+  const slider = page.getByTestId('chat-look-panel').getByRole('slider', { name: 'Line spacing' })
+  // One step from the default: nothing jumps, the gaps match the classes they replace.
+  await slider.focus()
+  await page.keyboard.press('ArrowRight')
+  await expect(page.getByTestId('chat-look-chat')).toHaveClass(/lu-look-leading/)
+  expect(Math.abs((await gap('.lu-msg-row')) - before.row)).toBeLessThan(1)
+  // All the way up: every line and every gap opens.
+  for (let i = 0; i < 20; i++) await page.keyboard.press('ArrowRight')
+  await expect.poll(() => lineRatio('.lu-msg-model-text')).toBeGreaterThan(before.model + 0.4)
+  expect(await lineRatio('.lu-msg-user-text')).toBeGreaterThan(before.user + 0.4)
+  expect(await gap('.lu-msg-row')).toBeGreaterThan(before.row * 1.25)
+
+  // The Code transcript reads with the same spacing (prose, not code blocks).
+  await page.keyboard.press('Escape')
+  await expect(page.getByTestId('chat-look-code')).toHaveCount(0)
+  await page.getByRole('button', { name: 'Code', exact: true }).first().click()
+  const code = page.getByTestId('chat-look-code')
+  await expect(code).toHaveClass(/lu-look-leading/)
+  expect(await code.evaluate((el) => getComputedStyle(el).getPropertyValue('--lu-look-leading'))).toBe('2.2')
 })

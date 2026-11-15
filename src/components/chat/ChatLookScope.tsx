@@ -80,6 +80,9 @@ export function ChatLookScope({ variant, className, children }: ScopeProps) {
   const zoom = useChatLookStore((s) => s.zoom)
   const setZoom = useChatLookStore((s) => s.setZoom)
   const look = useChatLookStore((s) => (variant === 'chat' ? s.look : DEFAULT_LOOK))
+  // Line spacing is a reading setting like the zoom: the Code transcript
+  // follows it too. Colours, fonts and layouts stay a chat thing.
+  const lineHeight = useChatLookStore((s) => s.look.lineHeight)
   const backgrounds = useChatLookStore((s) => s.backgrounds)
   const theme = useSettingsStore((s) => s.settings.theme)
   const mode = theme === 'light' ? 'light' : 'dark'
@@ -157,7 +160,10 @@ export function ChatLookScope({ variant, className, children }: ScopeProps) {
     [variant, look.customCssOn, look.customCss],
   )
 
-  const vars = useMemo(() => (variant === 'chat' ? lookVars(look, mode) : {}), [variant, look, mode])
+  const vars = useMemo(
+    () => (variant === 'chat' ? lookVars(look, mode) : lookVars({ ...DEFAULT_LOOK, lineHeight }, mode)),
+    [variant, look, lineHeight, mode],
+  )
   const style = { ...vars, '--lu-chat-zoom': String(zoom) } as CSSProperties
   const factor = widthFactor(look.width)
   // "Full" is a factor no window reaches, so the column is as wide as the pane.
@@ -173,7 +179,7 @@ export function ChatLookScope({ variant, className, children }: ScopeProps) {
     vars['--lu-look-quote'] ? 'lu-look-quotes' : '',
     vars['--lu-look-action'] ? 'lu-look-actions' : '',
     vars['--lu-look-font'] ? 'lu-look-font' : '',
-    variant === 'chat' && look.lineHeight !== DEFAULT_LOOK.lineHeight ? 'lu-look-leading' : '',
+    lineHeight !== DEFAULT_LOOK.lineHeight ? 'lu-look-leading' : '',
     variant === 'chat' && look.layout !== 'default' ? `lu-look-${look.layout}` : '',
     bgUrl ? 'lu-look-has-bg' : '',
   ].filter(Boolean).join(' ')
