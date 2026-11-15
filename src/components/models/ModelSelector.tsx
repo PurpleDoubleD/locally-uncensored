@@ -10,7 +10,7 @@ import { useProviderStore } from '../../stores/providerStore'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { useUIStore } from '../../stores/uiStore'
 import {
-  unloadAllModels, loadModel, unloadModelAndLook, readLoadedModels, readRunningModels, modelsAheadOfLoad,
+  loadModel, unloadModelAndLook, readLoadedModels, readRunningModels, modelsAheadOfLoad,
 } from '../../api/ollama'
 import {
   ollamaSwitchState, waitingForSentence, stillBusySentence, switchFailedSentence,
@@ -41,6 +41,7 @@ import {
   lmStudioGoneMark, lmStudioWentAfter,
 } from '../../lib/lmstudio-ended-loads'
 import { isLmStudioProvider } from '../../lib/hf-to-provider'
+import { unloadEverything, unloadProblems, unloadedNames } from '../../lib/unload-everything'
 import { detailOf } from '../../lib/error-text'
 import { lmStudioSlotUpdate, adoptionReplacesBuiltinEngine } from '../../lib/lmstudio-backend-adopt'
 import { nextProbeDelayMs } from '../../lib/probe-backoff'
@@ -1296,7 +1297,9 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
   /**
    * "Unload all models". It stays available while a load is pending and ends
    * that load first: the load would bring its model in right after the unload.
-   * It says "Unloaded" only when /api/ps is empty of what was loaded.
+   * GH #235 follow-up: it frees every engine, not only Ollama (Ollama, the LU
+   * Engine, LM Studio, ComfyUI's memory; lib/unload-everything.ts), and says
+   * per engine what did not go. "Unloaded" only when nothing was left.
    */
   const unloadAllOllama = async () => {
     if (unloading) return
@@ -1306,19 +1309,24 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
     ollamaRunAbort.current?.abort()
     yieldSilentLocalRuns()
     try {
-      const result = await unloadAllModels()
-      setOllamaLoaded(new Set([...result.stillBusy, ...result.failed]))
-      if (result.failed.length > 0) {
-        setOllamaNote({ text: switchFailedSentence('unload', result.failed.map(ollamaLabel).join(', '), { timedOut: false }), tone: 'error' })
-      } else if (result.stillBusy.length > 0) {
-        setOllamaNote({ text: stillBusySentence(result.stillBusy.map(ollamaLabel)), tone: 'info' })
-      } else {
+      const { outcomes, ollama } = await unloadEverything({ ollama: hasOllamaModels, lmstudio: hasLmStudioRows })
+      if (ollama) {
+        setOllamaLoaded(new Set([...ollama.stillBusy, ...ollama.failed]))
+        if (ollama.failed.length > 0) {
+          setOllamaNote({ text: switchFailedSentence('unload', ollama.failed.map(ollamaLabel).join(', '), { timedOut: false }), tone: 'error' })
+        } else if (ollama.stillBusy.length > 0) {
+          setOllamaNote({ text: stillBusySentence(ollama.stillBusy.map(ollamaLabel)), tone: 'info' })
+        }
+      }
+      if (outcomes.some((o) => o.engine === 'lmstudio' && o.freed)) setLmsLoaded([], lmStudioGoneMark())
+      const others = unloadProblems(outcomes.filter((o) => o.engine !== 'ollama' || !ollama))
+      log.info('[picker] "Unload all models"', { freed: unloadedNames(outcomes) })
+      if (others) {
+        setOllamaNote({ text: others, tone: 'error' })
+      } else if (!outcomes.some((o) => o.problem)) {
         setUnloadDone(true)
         setTimeout(() => setUnloadDone(false), 2000)
       }
-    } catch (e) {
-      log.warn('[picker] "Unload all models" did not go through', { err: e })
-      setOllamaNote({ text: 'Could not unload the models. Ollama did not answer.', tone: 'error' })
     } finally {
       setUnloading(false)
     }
@@ -1677,6 +1685,10 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
   const { groups, showHeadings, groupingFailed } =
     computeModelGroups(textModels, luEngineHoldsChat, standbyName, holderName)
   const hasOllamaModels = textModels.some(m => ('provider' in m && m.provider === 'ollama') || !('provider' in m))
+  // GH #235 follow-up: the unload button is there for every local engine, also
+  // when only the LU Engine runs (a managed engine exists on the desktop only).
+  const hasLmStudioRows = textModels.some((m) => isLmStudioProvider(m.providerName))
+  const showUnloadAll = hasOllamaModels || hasLmStudioRows || luEngineHoldsChat
   textModelsEmptyRef.current = textModels.length === 0
 
   // The one reason this picker switches rows off: a pick is already running.
@@ -2258,7 +2270,7 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
             </div>
 
             {/* Sticky footer: Unload */}
-            {hasOllamaModels && (
+            {showUnloadAll && (
               <div className="border-t border-black/[0.06] dark:border-white/[0.04] px-1 py-1">
                 <button
                   data-testid="ollama-unload-all"

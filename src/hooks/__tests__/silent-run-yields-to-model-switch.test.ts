@@ -186,7 +186,7 @@ describe('every model control calls it', () => {
     expect(bodyOf(selector, 'const handleSelectModel = async')).toContain('yieldSilentLocalRuns()')
     expect(bodyOf(selector, 'const toggleOllamaLoad = async')).toContain('yieldSilentLocalRuns()')
     expect(bodyOf(selector, 'const toggleLmStudioLoad = async')).toContain('yieldSilentLocalRuns()')
-    const unloadAll = selector.indexOf('await unloadAllModels()')
+    const unloadAll = selector.indexOf('await unloadEverything(')
     expect(selector.slice(unloadAll - 200, unloadAll)).toContain('yieldSilentLocalRuns()')
   })
 
