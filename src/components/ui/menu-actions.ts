@@ -95,6 +95,8 @@ export interface ModelMenuHandlers {
   readonly remove: () => void
   /** A14: only on LU Engine rows whose original weights are known. */
   readonly removeRefusals?: () => void
+  /** W33: a ComfyUI file (image or video model) shown in its folder. */
+  readonly reveal?: () => void
 }
 
 export interface ModelMenuState {
@@ -108,8 +110,31 @@ export function buildModelCardMenu(h: ModelMenuHandlers, s: ModelMenuState): Men
   // nichts tut — die Karte zeigt an derselben Stelle ihr ACTIVE-Etikett.
   if (!s.isActive) out.push({ id: 'select', label: 'Use this model', run: h.select })
   out.push({ id: 'info', label: 'Details', run: h.info })
+  if (h.reveal) out.push({ id: 'reveal', label: 'Show in folder', run: h.reveal })
   if (h.removeRefusals) out.push({ id: 'remove-refusals', label: 'Remove refusals…', run: h.removeRefusals })
   if (s.canDelete) out.push({ id: 'delete', label: 'Delete model', run: h.remove, destructive: true })
+  return out
+}
+
+/* ── LoRA ────────────────────────────────────────────────────────────────── */
+
+/** W33: the right click on a LoRA row in the Models tab. Only actions the
+ *  row already has as buttons: its folder, the rename-and-note dialog (C41;
+ *  it renames the name LU shows, the file stays), Details, and Delete, which
+ *  opens the same confirmation as the row's Delete button. */
+export interface LoraMenuHandlers {
+  readonly reveal?: () => void
+  readonly rename?: () => void
+  readonly info?: () => void
+  readonly remove: () => void
+}
+
+export function buildLoraRowMenu(h: LoraMenuHandlers): MenuAction[] {
+  const out: MenuAction[] = []
+  if (h.reveal) out.push({ id: 'reveal', label: 'Show in folder', run: h.reveal })
+  if (h.rename) out.push({ id: 'rename', label: 'Rename…', run: h.rename })
+  if (h.info) out.push({ id: 'info', label: 'Details', run: h.info })
+  out.push({ id: 'delete', label: 'Delete…', run: h.remove, destructive: true })
   return out
 }
 

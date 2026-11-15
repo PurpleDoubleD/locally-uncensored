@@ -55,6 +55,8 @@ interface Props {
   /** A14: open the refusal-removal tool for this file. Passed only for LU
    *  Engine rows whose original weights the file names. */
   onRemoveRefusals?: () => void
+  /** W33: show a ComfyUI file in its folder (right click). */
+  onReveal?: () => void
 }
 
 // The glyph of each kind of model. Its tone, like every other class of this
@@ -76,7 +78,7 @@ export function createTabForArchitecture(architecture: string | undefined): stri
   return null
 }
 
-export function ModelCard({ model, isActive, onSelect, onDelete, onInfo, infoTitle, canDelete = true, onUse, useBusy = false, engineStopped: luEngineRuht = false, onRemoveRefusals }: Props) {
+export function ModelCard({ model, isActive, onSelect, onDelete, onInfo, infoTitle, canDelete = true, onUse, useBusy = false, engineStopped: luEngineRuht = false, onRemoveRefusals, onReveal }: Props) {
   const typeInfo = TYPE_CONFIG[model.type] || TYPE_CONFIG.text
   const TypeIcon = typeInfo.icon
   const look = modelSkin().card
@@ -86,7 +88,7 @@ export function ModelCard({ model, isActive, onSelect, onDelete, onInfo, infoTit
   // EIN Satz Aktionen fuer die Karte. Die sichtbaren Knoepfe unten lesen aus
   // diesem Objekt, das Kontextmenue bekommt dasselbe Objekt gereicht — es gibt
   // also keinen zweiten Aufrufweg, der irgendwann anders werden koennte.
-  const actions: ModelMenuHandlers = { select: onSelect, info: onInfo, remove: onDelete, removeRefusals: onRemoveRefusals }
+  const actions: ModelMenuHandlers = { select: onSelect, info: onInfo, remove: onDelete, removeRefusals: onRemoveRefusals, reveal: onReveal }
   const refusalsRemoved = 'refusalsRemoved' in model && model.refusalsRemoved === true
   // Fremde Kennungen tragen Pfadteile und Dateiendungen mit sich, die kein
   // Kunde gewaehlt hat. Der Name selbst bleibt unangetastet (lib/model-label).

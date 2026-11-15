@@ -665,6 +665,12 @@ export function ModelManager() {
                               engineStopped={engineRuht}
                               onDelete={() => setUninstall(uninstallRequestFor(model))}
                               onInfo={() => handleInfo(model.name)}
+                              // W33: a ComfyUI file can be shown in its folder.
+                              onReveal={
+                                model.type === 'image' || model.type === 'video'
+                                  ? () => { revealComfyModel(model.name).catch((e) => setLoraNotice(e instanceof Error ? e.message : String(e))) }
+                                  : undefined
+                              }
                               // A14: where the file names its original weights
                               // and is not itself a copy the tool made.
                               onRemoveRefusals={

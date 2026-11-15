@@ -15,6 +15,9 @@ import { parseLocalCharacterLora } from '../../api/trainer'
 import { formatBytes } from '../../lib/formatters'
 import { ModelEmptyState, SectionHead } from './ModelPageParts'
 import { ICON_SM } from '../ui/icon-size'
+import { useState, type MouseEvent as ReactMouseEvent } from 'react'
+import { ContextMenu } from '../ui/ContextMenu'
+import { buildLoraRowMenu } from '../ui/menu-actions'
 
 export interface LoraRow {
   name: string
@@ -82,6 +85,28 @@ export function LoraRowDetails({ row }: { row: LoraRow }) {
   )
 }
 
+/** W33: the right click on a LoRA row. Returns the row's onContextMenu and
+ *  the menu itself (render it once, next to the rows). */
+export function useLoraRowMenu(h: { onDelete: (name: string) => void; onInfo?: (name: string) => void; onEdit?: (name: string) => void; onReveal?: (name: string) => void }) {
+  const [menu, setMenu] = useState<{ name: string; x: number; y: number } | null>(null)
+  const open = (name: string) => (e: ReactMouseEvent) => { e.preventDefault(); setMenu({ name, x: e.clientX, y: e.clientY }) }
+  const element = menu ? (
+    <ContextMenu
+      items={buildLoraRowMenu({
+        reveal: h.onReveal ? () => h.onReveal!(menu.name) : undefined,
+        rename: h.onEdit ? () => h.onEdit!(menu.name) : undefined,
+        info: h.onInfo ? () => h.onInfo!(menu.name) : undefined,
+        remove: () => h.onDelete(menu.name),
+      })}
+      x={menu.x}
+      y={menu.y}
+      label={`Actions for ${menu.name}`}
+      onClose={() => setMenu(null)}
+    />
+  ) : null
+  return { open, element }
+}
+
 /** C41: the buttons a LoRA row has beside Details and Delete. */
 export function LoraRowActions({ row, onEdit, onToggleHidden, onReveal, buttonClass, iconSize }: {
   row: LoraRow
@@ -135,6 +160,7 @@ export function ShowHiddenLoras({ count, show, onShow, className }: { count?: nu
 export const LORA_USE_HINT = 'Use them in Create, Advanced settings, Expert, LoRA stack.'
 
 export function LoraManager({ rows, total, searchQuery, onDelete, onInfo, onGetNew, onEdit, onToggleHidden, onReveal, hiddenCount, showHidden, onShowHidden }: LoraManagerProps) {
+  const rowMenu = useLoraRowMenu({ onDelete, onInfo, onEdit, onReveal })
   if (total === 0) {
     return (
       <ModelEmptyState
@@ -165,6 +191,7 @@ export function LoraManager({ rows, total, searchQuery, onDelete, onInfo, onGetN
             <div
               key={row.name}
               data-testid="lora-row"
+              onContextMenu={rowMenu.open(row.name)}
               className="lu-tile flex items-center gap-3 px-3.5 py-2.5"
             >
               <div className="min-w-0 flex-1">
@@ -221,6 +248,7 @@ export function LoraManager({ rows, total, searchQuery, onDelete, onInfo, onGetN
           <p className="text-center text-xs text-gray-500 dark:text-gray-400 py-6">No installed LoRAs match "{searchQuery}"</p>
         )}
       </div>
+      {rowMenu.element}
     </section>
   )
 }
