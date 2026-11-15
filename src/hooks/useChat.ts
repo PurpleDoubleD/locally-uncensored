@@ -89,6 +89,8 @@ import { personaNoteOf } from '../lib/persona-note'
 import { toolRegistry } from '../api/mcp'
 import { syncCreateTools } from '../api/mcp/create-tools'
 import { isSettingsToolName, isSelfControlToolName, asksAboutSelfControl, SETTINGS_TOOL_NAMES } from '../lib/settings-tool-names'
+import { asksAboutWatchers, isWatcherToolName, WATCHER_TOOL_NAMES } from '../lib/watcher-tool-names'
+import { isWatcherConversation } from '../stores/watcherStore'
 import { asksAboutSettings } from '../lib/tool-selection'
 import { CREATE_TOOL_NAMES, createSystemText, withCreateText } from '../lib/create/chat-switch'
 // Create in chat only where the order card exists: not on the phone (lib/create-order-surface.ts).
@@ -134,6 +136,17 @@ export function wantsSettingsTools(content: string, history: readonly Message[],
   const used = agentMode ? isSelfControlToolName : isSettingsToolName
   return !!lastAssistant?.agentBlocks?.some((b) =>
     (b.toolCalls?.length ? b.toolCalls : b.toolCall ? [b.toolCall] : []).some((c) => used(c.toolName)))
+}
+
+/** Watchers: the message names a later time or a repeat, or answers the
+ *  model that was just making one ("ja", "8 Uhr"). Never in a watcher's own
+ *  chat: a watcher does not make watchers. */
+export function wantsWatcherTools(content: string, history: readonly Message[], convId: string | null | undefined): boolean {
+  if (isWatcherConversation(convId)) return false
+  if (asksAboutWatchers(content)) return true
+  const lastAssistant = [...history].reverse().find((m) => m.role === 'assistant')
+  return !!lastAssistant?.agentBlocks?.some((b) =>
+    (b.toolCalls?.length ? b.toolCalls : b.toolCall ? [b.toolCall] : []).some((c) => isWatcherToolName(c.toolName)))
 }
 
 /** One model's turn in a group round. Deliberately the PLAIN conversation
@@ -996,6 +1009,11 @@ export function useChat() {
       store.conversations.find((c) => c.id === store.activeConversationId)?.messages ?? [],
       !!store.activeConversationId && useAgentModeStore.getState().isActive(store.activeConversationId),
     )
+    const watchersOn = !inGroup && wantsWatcherTools(
+      content,
+      store.conversations.find((c) => c.id === store.activeConversationId)?.messages ?? [],
+      store.activeConversationId,
+    )
 
     // The short answer to an order on the table: "yes", "ja", "go" approves
     // it, "stop" halts it. Only a short message of the customer's own, and
@@ -1055,12 +1073,13 @@ export function useChat() {
           files,
           createTools: createOn && slash.command.readOnly !== true,
           settingsTools: settingsOn,
+          watcherTools: watchersOn && slash.command.readOnly !== true,
         })
       }
       // Agent mode: an attached file is also copied into this chat's working
       // folder, where the file tools can open it (useAgentChat).
-      if (createOn) return sendAgentMessage(content, images, { files, createTools: true, media, settingsTools: settingsOn })
-      if (settingsOn) return sendAgentMessage(content, images, { files, settingsTools: true })
+      if (createOn) return sendAgentMessage(content, images, { files, createTools: true, media, settingsTools: settingsOn, watcherTools: watchersOn })
+      if (settingsOn || watchersOn) return sendAgentMessage(content, images, { files, settingsTools: settingsOn, watcherTools: watchersOn })
       return sendAgentMessage(content, images, { files })
     }
 
@@ -1134,23 +1153,26 @@ export function useChat() {
           // Create on (Cloud mode only): its two tools ride along with web
           // and file.
           curatedTools: cloudMode
-            ? [...CHAT_TOOLS.filter((t) => t !== 'image_generate' && t !== 'video_generate'), ...(createOn ? CREATE_TOOL_NAMES : []), ...(settingsOn ? SETTINGS_TOOL_NAMES : [])]
-            : [...CHAT_TOOLS, ...(settingsOn ? SETTINGS_TOOL_NAMES : [])],
+            ? [...CHAT_TOOLS.filter((t) => t !== 'image_generate' && t !== 'video_generate'), ...(createOn ? CREATE_TOOL_NAMES : []), ...(settingsOn ? SETTINGS_TOOL_NAMES : []), ...(watchersOn ? WATCHER_TOOL_NAMES : [])]
+            : [...CHAT_TOOLS, ...(settingsOn ? SETTINGS_TOOL_NAMES : []), ...(watchersOn ? WATCHER_TOOL_NAMES : [])],
           chatToolsMode: true,
           mediaHint: route?.mediaHint,
           files,
           createTools: createOn,
           settingsTools: settingsOn,
+          watcherTools: watchersOn,
           media: createOn ? media : undefined,
         })
       }
       // A11: "stell Auto Compact auf 80". Only the settings pair (and Create's
-      // two when Create is on); nothing changes without the card.
-      if (settingsOn) {
+      // two when Create is on); nothing changes without the card. Watchers:
+      // "um 18 Uhr prüf die Preise" likewise, with the watcher tools.
+      if (settingsOn || watchersOn) {
         return sendAgentMessage(content, images, {
-          curatedTools: [...SETTINGS_TOOL_NAMES, ...(createOn ? CREATE_TOOL_NAMES : [])],
+          curatedTools: [...(settingsOn ? SETTINGS_TOOL_NAMES : []), ...(watchersOn ? WATCHER_TOOL_NAMES : []), ...(createOn ? CREATE_TOOL_NAMES : [])],
           chatToolsMode: true,
-          settingsTools: true,
+          settingsTools: settingsOn,
+          watcherTools: watchersOn,
           createTools: createOn,
           files,
           media: createOn ? media : undefined,

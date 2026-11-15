@@ -7,12 +7,15 @@ import type { ReactNode } from 'react'
  * Import zurueck in `SettingsPage.tsx` waere ein Zyklus gewesen, eine
  * zweite Kopie waere die naechste Divergenz. Also hierhin, einmal.
  */
+/** The label of a settings row, shared with rows that are not a switch. */
+export const ROW_LABEL = 'text-[0.7rem] text-gray-700 dark:text-gray-400'
+
 export function InlineToggle({ label, enabled, onChange, icon }: { label: string; enabled: boolean; onChange: () => void; icon?: ReactNode }) {
   return (
     <div className="flex items-center justify-between py-0.5">
       <div className="flex items-center gap-1.5">
         {icon}
-        <span className="text-[0.7rem] text-gray-700 dark:text-gray-400">{label}</span>
+        <span className={ROW_LABEL}>{label}</span>
       </div>
       <button
         onClick={onChange}

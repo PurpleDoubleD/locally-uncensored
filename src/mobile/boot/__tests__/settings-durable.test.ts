@@ -112,6 +112,7 @@ describe('which keys are kept', () => {
       'locally-uncensored-computer': 'desktop only: the settings of computer use, which the phone does not have',
       'lu-neuron-tweaker': 'desktop only (3.0.9, P11): the Neuron tweaker steers LU Engine, which the phone does not have',
       'lu-neuron-window': 'desktop only (3.1.0): where the Neurons window stood, a window the phone does not have',
+      'lu-watcher-settings': 'desktop only: the notification switches of the watchers, which the phone does not run',
       'lu-settings-audit': 'desktop only (3.1.0, C60): what the agent changed in the desktop app; the phone has no self-control tools',
       'locally-uncensored-command-rules': 'desktop only (3.1.0, CA K4): commands the user allowed per folder of this computer',
       'lu-chat-look': 'desktop only (3.1.0, C58): the chat look of the desktop transcript; the phone has its own chat screen',

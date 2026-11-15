@@ -30,6 +30,15 @@ export function setTurnCaps(convId: string, rights: RemoteRights): void {
   caps.set(convId, capsFor(rights))
 }
 
+/**
+ * A whole cap for a run nobody watches (a watcher, lib/watchers/caps.ts):
+ * besides 'blocked' it may say 'auto' for what the user allowed when they
+ * made it. Cleared with clearTurnCaps like a phone's cap.
+ */
+export function setCapMap(convId: string, map: Partial<PermissionMap>): void {
+  caps.set(convId, { ...map })
+}
+
 export function clearTurnCaps(convId: string): void {
   caps.delete(convId)
 }

@@ -95,7 +95,11 @@ export function registerRemoteStubs(routes: RouteMount): void {
   // multipart request as well.
   // The chat's workflow tools (C60-S5): the fetch with its host allowlist and
   // the node pack install by key are Rust; the tools say so before calling.
+  // Watchers: the clock, the list and the notification live in Rust.
   for (const path of [
+    '/local-api/watchers-list', '/local-api/watchers-create', '/local-api/watchers-update', '/local-api/watchers-delete',
+    '/local-api/watchers-run-now', '/local-api/watchers-finished', '/local-api/watchers-runner-ready',
+    '/local-api/watchers-dismiss-hint', '/local-api/watchers-notify',
     '/local-api/workflow-fetch', '/local-api/install-lu-node-pack',
     '/local-api/local-api-usage', '/local-api/set-download-limit', '/local-api/character-photos', '/local-api/pick-gguf-file',
     '/local-api/list-custom-nodes', '/local-api/remove-custom-node', '/local-api/custom-node-log',

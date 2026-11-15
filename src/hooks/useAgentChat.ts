@@ -92,6 +92,7 @@ import { markToolsUnsupported } from '../api/tool-capability'
 import { extractMemoriesFromPair } from './useMemory'
 import { createSystemText, isCreateToolName, withCreateText } from '../lib/create/chat-switch'
 import { isSettingsToolName, isSelfControlToolName, withSelfControlTools, SETTINGS_PROMPT_LINE, SELF_CONTROL_PROMPT_LINE } from '../lib/settings-tool-names'
+import { isWatcherToolName, WATCHER_PROMPT_LINE } from '../lib/watcher-tool-names'
 import { WORKFLOW_PROMPT_LINE } from '../lib/workflow-tool-names'
 // Create in chat only where the order card exists: not on the phone (lib/create-order-surface.ts).
 import { createLiveHere } from '../lib/create-order-surface'
@@ -422,6 +423,10 @@ export function useAgentChat() {
       /** A11: the message is about LU's settings. get_settings and set_setting
        *  go along; every change waits for the user's yes on the card. */
       settingsTools?: boolean
+      /** Watchers: the message names a later time or a repeat. The four
+       *  watcher tools go along; a new or changed watcher waits for the card
+       *  (lib/watcher-tool-names.ts). */
+      watcherTools?: boolean
       /** Clips and sound tracks for Create in chat. The message keeps only
        *  the facts, the bytes stay in the session. */
       media?: PendingMedia[]
@@ -1212,7 +1217,7 @@ export function useAgentChat() {
     const toolMatchesCurated = (name: string) =>
       (!curated || curated.includes(name)) && !(opts?.readOnly && !allowedInReadOnlyTurn(name)) && !(screenByTaskOnly && name === COMPUTER_USE_TOOL_NAME)
       && !(localMediaOff && isMediaTool(name))
-      && (opts?.settingsTools === true || !isSelfControlToolName(name))
+      && (isWatcherToolName(name) ? opts?.watcherTools === true : (opts?.settingsTools === true || !isSelfControlToolName(name)))
     // Cloud mode AND Create in chat released for the account. Without the
     // release every text and rule in this loop is the one that shipped before.
     const createLive = createLiveHere()
@@ -1222,8 +1227,9 @@ export function useAgentChat() {
     // The settings pair likewise: the router has no say once the message is
     // about settings.
     const withCreateTools = <T extends { name: string }>(chosen: T[], all: T[]): T[] => {
-      const extra = (n: string) => (opts?.createTools && isCreateToolName(n)) || (opts?.settingsTools && isSelfControlToolName(n))
-      return opts?.createTools || opts?.settingsTools
+      const extra = (n: string) => (opts?.createTools && isCreateToolName(n))
+        || (isWatcherToolName(n) ? opts?.watcherTools : opts?.settingsTools && isSelfControlToolName(n))
+      return opts?.createTools || opts?.settingsTools || opts?.watcherTools
         ? [...chosen, ...all.filter((t) => extra(t.name) && toolMatchesCurated(t.name) && !chosen.some((c) => c.name === t.name))]
         : chosen
     }
@@ -1349,6 +1355,7 @@ export function useAgentChat() {
       agentSystemPrompt += '\n\nYour tool list is kept short on purpose. When you need a tool that is not in it, call tool_search with a few words first; the tools it finds are in your list from the next step on.'
     }
     if (opts?.settingsTools) agentSystemPrompt += `\n\n${opts?.chatToolsMode ? SETTINGS_PROMPT_LINE : SELF_CONTROL_PROMPT_LINE}`
+    if (opts?.watcherTools) agentSystemPrompt += `\n\n${WATCHER_PROMPT_LINE}`
     // C60-S5: the workflow tools ride with the actions, outside plain chat.
     if (opts?.settingsTools && !opts?.chatToolsMode) agentSystemPrompt += `\n${WORKFLOW_PROMPT_LINE}`
     // Create in chat: on = the paragraph; outside Cloud mode and without the

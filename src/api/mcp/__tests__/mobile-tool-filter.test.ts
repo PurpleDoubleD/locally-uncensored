@@ -49,7 +49,9 @@ const GONE = ['shell_execute', 'pr_resume', 'screenshot', 'image_generate', 'vid
 // A11 (3.0.8), C60 (3.1.0) and C60-S5: LU's own settings, actions and the
 // ComfyUI workflow tools, desktop only.
 const SETTINGS = ['get_settings', 'set_setting', 'set_settings', 'lu_models', 'lu_service', 'lu_download', 'lu_open_settings',
-  'workflow_find', 'workflow_inspect', 'workflow_install', 'workflow_assign']
+  'workflow_find', 'workflow_inspect', 'workflow_install', 'workflow_assign',
+  // Watchers: the clock is in the desktop app.
+  'watcher_create', 'watcher_list', 'watcher_update', 'watcher_delete']
 const STAYS = [
   'todo_write', 'web_research', 'web_search', 'web_fetch', 'file_read', 'file_write', 'file_edit', 'file_list',
   'file_search', 'run_workflow', 'delegate_task', 'check_tasks', 'message_agent',

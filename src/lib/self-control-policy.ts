@@ -23,6 +23,7 @@ import { useChatStore } from '../stores/chatStore'
 import { previousRunOf, type AgentRunContext } from '../api/agent-context'
 import { taintLabel } from './run-taint'
 import { isPhoneTurn, PHONE_TURN_NO_CARD } from './remote-turn-caps'
+import { isWatcherConversation } from '../stores/watcherStore'
 import type { Message } from '../types/chat'
 
 export const MAX_CARDS_PER_RUN = 3
@@ -85,6 +86,11 @@ export function checkSelfControl(run: AgentRunContext | undefined, ask: PolicyAs
   }
   // A turn the paired phone started: the card would wait at the computer.
   if (isPhoneTurn(run.conversationId)) return { ok: false, why: 'surface', reply: PHONE_TURN_NO_CARD }
+  // A watcher's run has nobody in front of the card, and a watcher that made
+  // watchers would be a schedule that grows by itself.
+  if (isWatcherConversation(run.conversationId)) {
+    return { ok: false, why: 'surface', reply: 'Refused: this is a watcher\'s run. It cannot change LU or make, change or delete watchers. Nothing changed.' }
+  }
   const taintedBy = taintLabel(run)
   if (ask.strong && taintedBy) {
     return {

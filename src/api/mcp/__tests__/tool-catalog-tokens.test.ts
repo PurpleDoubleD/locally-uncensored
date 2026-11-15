@@ -152,8 +152,15 @@ const CODING_TOKEN_CEILING = 1730
 // Befehl ueber die Zeitgrenze hinaus als Hintergrundaufgabe weiterlaeuft.
 // Gemessen 25.120, Deckel plus Rand. Der codierende Zug bleibt unter seiner
 // Decke.
-const FULL_CHAR_CEILING = 25150
-const FULL_TOKEN_CEILING = 5450
+// Waechter: +3.293 Zeichen fuer watcher_create/_list/_update/_delete im
+// VOLLEN Katalog (25.032 -> 28.325, Beschreibungen schon auf Stichworte
+// gekuerzt). Der codierende Zug bleibt gleich: die vier stehen hinter ihrem
+// Tor (WATCHER_GATE_WORDS) und fahren nur auf einer Nachricht ueber eine
+// spaetere Zeit oder eine Wiederholung mit. Token-Decke im selben Verhaeltnis.
+// Beide zusammen (CA-Satz und Waechter): gemessen 28.441 Zeichen, Deckel plus
+// Rand. Token-Decke im selben Verhaeltnis wie beim Waechter (6170 / 28380).
+const FULL_CHAR_CEILING = 28470
+const FULL_TOKEN_CEILING = 6190
 
 describe('the coding step carries a catalog the diet actually shrank', () => {
   it('the gate really is what a plain coding turn gets', () => {

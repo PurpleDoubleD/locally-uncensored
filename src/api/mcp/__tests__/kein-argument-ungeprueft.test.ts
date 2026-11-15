@@ -96,6 +96,10 @@ const PFLICHT: Record<string, Record<string, string>> = {
   workflow_inspect: { id: 'civ1' },
   workflow_install: { id: 'civ1' },
   workflow_assign: { workflow: 'Flux Upscale', model: 'flux1-dev.safetensors' },
+  // Watchers: outside the desktop app a sentence, no card and no bridge call.
+  watcher_create: { name: 'Prices', task: 'Check the prices.', repeat: 'once' },
+  watcher_update: { watcher: 'Prices' },
+  watcher_delete: { watcher: 'Prices' },
   // C59 A6–A8: a sentence to the model, no bridge call.
   memory: { action: 'search' },
   skill_view: { name: 'release-notes' },

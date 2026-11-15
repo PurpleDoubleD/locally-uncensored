@@ -24,7 +24,7 @@ const JSX = readFileSync(resolve(__dirname, '..', 'SettingsPage.tsx'), 'utf8')
 
 const ALLE_AN: SettingsSectionFlags = {
   gpuPicker: true, builtinExpert: true, comfyui: true,
-  agentMode: true, agentWorkflows: true, mediaTimeouts: true, chatTimeout: true,
+  agentMode: true, agentWorkflows: true, mediaTimeouts: true, chatTimeout: true, watchers: true,
 }
 
 describe('Unteragenten-Kappen', () => {

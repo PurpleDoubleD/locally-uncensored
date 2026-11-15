@@ -148,11 +148,13 @@ const ALL_ON: SettingsSectionFlags = {
   gpuPicker: true, builtinExpert: true, comfyui: true, agentMode: true, agentWorkflows: true,
   mediaTimeouts: true,
   chatTimeout: true,
+  watchers: true,
 }
 const ALL_OFF: SettingsSectionFlags = {
   gpuPicker: false, builtinExpert: false, comfyui: false, agentMode: false, agentWorkflows: false,
   mediaTimeouts: false,
   chatTimeout: false,
+  watchers: false,
 }
 
 /** Der JSX-Zweig eines Tabs, von seinem Guard bis zum naechsten. */

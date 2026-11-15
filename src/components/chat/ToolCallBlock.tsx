@@ -308,7 +308,7 @@ function ToolCallBlockImpl({ toolCall, onApprove, onReject }: Props) {
   const chatAsk = useComputerChatAsk(toolCall.toolName, isRunning, useChatStore((s) => s.activeConversationId))
   // A11 / C60: a change LU makes to itself waits here for Accept, and stays
   // with Undo: one setting, several on one card, or an action.
-  const isSetSetting = isSelfControlToolName(toolCall.toolName) && toolCall.toolName !== 'get_settings' && toolCall.toolName !== 'lu_open_settings'
+  const isSetSetting = isSelfControlToolName(toolCall.toolName) && toolCall.toolName !== 'get_settings' && toolCall.toolName !== 'lu_open_settings' && toolCall.toolName !== 'watcher_list'
   const settingAsk = useSettingsConfirmStore((s) => (isSetSetting && isRunning ? pendingForCall(s.queue, toolCall.id) : null))
   const settingChanges = isSetSetting && toolCall.status === 'completed' ? parseSettingChanges(toolCall.result) : []
   const selfAction = isSetSetting && toolCall.status === 'completed' ? parseSelfControlAction(toolCall.result) : null

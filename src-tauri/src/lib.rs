@@ -61,6 +61,9 @@ mod runtime_root;
 mod storage_move;
 mod system_tray;
 mod tray_menu;
+// Watchers: tasks the AI runs by itself at a set time (watchers.rs).
+#[cfg(desktop)]
+mod watchers;
 #[cfg(any(windows, test))]
 mod webview2_check;
 mod state;
@@ -662,6 +665,10 @@ pub fn run() {
     // has no computer use and no global shortcuts.
     #[cfg(desktop)]
     let builder = builder.plugin(tauri_plugin_global_shortcut::Builder::new().build());
+    // Watchers: the notification when one ran. Called from Rust only
+    // (watchers::watchers_notify), so no capability names it.
+    #[cfg(desktop)]
+    let builder = builder.plugin(tauri_plugin_notification::init());
 
     use commands::mobile_guard::GuardExt as _;
     builder
@@ -693,6 +700,25 @@ pub fn run() {
             tray_menu::tray_update,
             #[cfg(desktop)]
             tray_menu::tray_memory,
+            // Watchers: the list, the clock's reports and the notification
+            #[cfg(desktop)]
+            watchers::watchers_list,
+            #[cfg(desktop)]
+            watchers::watchers_create,
+            #[cfg(desktop)]
+            watchers::watchers_update,
+            #[cfg(desktop)]
+            watchers::watchers_delete,
+            #[cfg(desktop)]
+            watchers::watchers_run_now,
+            #[cfg(desktop)]
+            watchers::watchers_finished,
+            #[cfg(desktop)]
+            watchers::watchers_runner_ready,
+            #[cfg(desktop)]
+            watchers::watchers_dismiss_hint,
+            #[cfg(desktop)]
+            watchers::watchers_notify,
             // LU Cloud OAuth loopback (Google/GitHub via system browser)
             commands::oauth::oauth_start,
             commands::oauth::oauth_wait,
@@ -1462,6 +1488,12 @@ pub fn run() {
             // timer and emits `lu-sidecar-gone`, so the panel can be right
             // while it is standing open.
             commands::engine::spawn_sidecar_watch(app.handle().clone());
+
+            // ─── Watchers ───
+            // The list of the last quit becomes the hints, then the clock
+            // starts. It runs as long as the process does, window or not.
+            #[cfg(desktop)]
+            watchers::setup(app.handle());
 
             // ─── System Tray ───
             // Desktop only, like the two sections after it: a phone has no

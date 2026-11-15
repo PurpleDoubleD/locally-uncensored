@@ -10,6 +10,8 @@ import { reserveCreateTools } from './create-tools'
 import { registerSettingsTools } from './settings-tools'
 import { registerSelfControlTools } from './self-control-defs'
 import { registerWorkflowTools } from './workflow-defs'
+import { registerWatcherTools } from './watcher-tools'
+import { WATCHER_TOOL_NAMES } from '../../lib/watcher-tool-names'
 import { WORKFLOW_TOOL_NAMES } from '../../lib/workflow-tool-names'
 import { SETTINGS_TOOL_NAMES, SELF_CONTROL_ACTION_NAMES } from '../../lib/settings-tool-names'
 import { v4 as uuid } from 'uuid'
@@ -2674,6 +2676,8 @@ export function registerBuiltinTools(registry: ToolRegistry) {
   if (SELF_CONTROL_ACTION_NAMES.every(toolExistsOnThisDevice)) registerSelfControlTools(registry)
   // C60-S5: ComfyUI workflows from the chat, same gate, surfaces and policy.
   if (WORKFLOW_TOOL_NAMES.every(toolExistsOnThisDevice)) registerWorkflowTools(registry)
+  // Watchers: scheduled turns, desktop only, same gate and card.
+  if (WATCHER_TOOL_NAMES.every(toolExistsOnThisDevice)) registerWatcherTools(registry)
 }
 
 // ── Retired tools (2.6.6 merge, plan E5) ────────────────────────

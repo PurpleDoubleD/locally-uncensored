@@ -17,7 +17,7 @@ import { sectionsFor, type SettingsSectionFlags } from '../settings-nav'
 
 const flagsOff: SettingsSectionFlags = {
   gpuPicker: false, builtinExpert: false, comfyui: false, agentMode: false, agentWorkflows: false,
-  mediaTimeouts: false, chatTimeout: false,
+  mediaTimeouts: false, chatTimeout: false, watchers: false,
 }
 
 const seconds = () => screen.getByLabelText('Chat reply timeout (s)') as HTMLInputElement

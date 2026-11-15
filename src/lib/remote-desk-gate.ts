@@ -34,6 +34,11 @@ export function setWindowDeskGate(gate: DeskGate | null): void {
   windowGate = gate
 }
 
+/** The gate of this window, for another turn nobody typed (a watcher). */
+export function windowDeskGate(): DeskGate | null {
+  return windowGate
+}
+
 /** "Open" in the bar (components/remote/PhoneContinuedBar.tsx). */
 export function openWaitingTurn(key: string): void {
   windowGate?.open(key)
