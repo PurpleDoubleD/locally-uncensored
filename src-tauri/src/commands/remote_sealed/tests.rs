@@ -273,6 +273,58 @@ async fn the_tunnel_listener_knows_only_status_and_the_sealed_door() {
     assert_eq!(v["name"], "Studio PC");
 }
 
+/// #232: a browser under the tunnel address sees a notice, not a blank
+/// page. The page sits behind the same gate, the API answers stay empty.
+#[tokio::test]
+async fn a_browser_on_the_tunnel_gets_the_app_only_notice() {
+    let rig = rig().await;
+    for path in ["/", "/mobile", "/mobile?x=1", "/anything/else"] {
+        let (status, headers, body) = send(&rig, Via::Tunnel("203.0.113.5"), "GET", path, Vec::new()).await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "{path}");
+        assert!(headers["content-type"].to_str().unwrap().starts_with("text/html"), "{path}");
+        let csp = headers["content-security-policy"].to_str().unwrap();
+        assert!(csp.contains("default-src 'none'") && csp.contains("frame-ancestors 'none'"), "{csp}");
+        assert!(!csp.contains("script-src"), "{csp}");
+        assert_eq!(headers["x-content-type-options"], "nosniff");
+        assert_eq!(headers["cache-control"], "no-store");
+        let html = String::from_utf8(body).unwrap();
+        assert!(html.contains("works only with the LU app"), "{path}");
+        assert!(html.contains("home Wi-Fi"), "{path}");
+        let lower = html.to_ascii_lowercase();
+        for banned in ["<script", "http://", "https://", "src=", "href=", "studio pc", crate::app_identity::APP_VERSION] {
+            assert!(!lower.contains(&banned.to_ascii_lowercase()), "{path}: {banned}");
+        }
+    }
+    // Other methods and the API paths stay empty.
+    for (method, path) in [
+        ("POST", "/"),
+        ("POST", "/mobile"),
+        ("PUT", "/"),
+        ("DELETE", "/mobile"),
+        ("GET", "/remote-api/sealed"),
+        ("GET", "/remote-api/qr"),
+        ("POST", "/remote-api/status"),
+    ] {
+        let (status, _, body) = send(&rig, Via::Tunnel("203.0.113.5"), method, path, Vec::new()).await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "{method} {path}");
+        assert!(body.is_empty(), "{method} {path} answered with a body");
+    }
+    // The gate still comes first: a foreign name gets nothing.
+    let mut req = Request::builder().method("GET").uri("/").header("host", "evil.example").body(Body::empty()).unwrap();
+    req.extensions_mut().insert(ConnectInfo("127.0.0.1:40000".parse::<SocketAddr>().unwrap()));
+    let res = rig.routers.tunnel.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::NOT_FOUND);
+    assert!(axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap().is_empty());
+    // The sealed door is still reachable: an empty frame is refused by the
+    // channel itself, not by the fallback.
+    let (status, headers, _) = send(&rig, Via::Tunnel("203.0.113.5"), "POST", "/remote-api/sealed", Vec::new()).await;
+    assert_ne!(status, StatusCode::NOT_FOUND);
+    assert!(headers.get("content-security-policy").is_none());
+    let (status, _, _) = send(&rig, Via::Tunnel("203.0.113.5"), "GET", "/remote-api/status", Vec::new()).await;
+    assert_eq!(status, StatusCode::OK);
+}
+
+// ── Pairing ──
 // ── Pairing ──
 
 #[tokio::test]
@@ -799,10 +851,10 @@ async fn create_runs_end_to_end_through_the_sealed_channel() {
 
     // Without its own right the status names no Create, with it it does.
     let status = phone.call(&c.rig, via, "GET", "/remote-api/status/full", b"").await.unwrap();
-    assert_eq!(status.json()["features"], serde_json::json!(["sealed", "pending", "signin"]));
+    assert_eq!(status.json()["features"], serde_json::json!(["sealed", "pending", "signin", "voice"]));
     c.allow_create(&phone);
     let status = phone.call(&c.rig, via, "GET", "/remote-api/status/full", b"").await.unwrap();
-    assert_eq!(status.json()["features"], serde_json::json!(["sealed", "pending", "signin", "create-image", "create-video"]));
+    assert_eq!(status.json()["features"], serde_json::json!(["sealed", "pending", "signin", "create-image", "create-video", "voice"]));
     // The unauthenticated tunnel status stays without Create.
     let (_, _, body) = send(&c.rig, via, "GET", "/remote-api/status", Vec::new()).await;
     let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
@@ -816,7 +868,7 @@ async fn create_runs_end_to_end_through_the_sealed_channel() {
     // Stage 2 (CREATE-V2.md): once the window answered, the gallery word;
     // a kind's word only where the engine can (here none).
     let status = phone.call(&c.rig, via, "GET", "/remote-api/status/full", b"").await.unwrap();
-    assert_eq!(status.json()["features"], serde_json::json!(["sealed", "pending", "signin", "create-image", "create-video", "create-gallery"]));
+    assert_eq!(status.json()["features"], serde_json::json!(["sealed", "pending", "signin", "create-image", "create-video", "create-gallery", "voice"]));
     let unavailable = phone.call(&c.rig, via, "POST", "/remote-api/create/jobs", &job_body("music", "lofi")).await.unwrap();
     assert_eq!(unavailable.status, 409, "{:?}", unavailable.json());
 
@@ -1911,6 +1963,33 @@ async fn shared_chats_go_through_the_channel_with_the_right_chat() {
     assert_eq!((refused.status, refused.json()["right"].clone()), (403, serde_json::json!("chat")));
     let tasks = phone.call(&rig, via, "GET", "/remote-api/tasks", b"").await.unwrap();
     assert_eq!(tasks.status, 403);
+}
+
+// ── Voice over remote (#212) ──
+
+#[tokio::test]
+async fn voice_goes_through_the_channel_with_the_right_chat() {
+    let rig = rig_with(Duration::from_secs(5), Duration::from_secs(5)).await;
+    let via = Via::Tunnel("198.51.100.93");
+    let phone = paired_phone(&rig, 0x53, via).await;
+    // The test server has no desktop behind it: the status says so, a take is answered 503 with the reason.
+    let status = phone.call(&rig, via, "GET", "/remote-api/voice", b"").await.unwrap();
+    assert_eq!(status.status, 200, "{:?}", status.json());
+    assert_eq!(status.json()["listen"], false);
+    assert!(status.json()["why"].as_str().unwrap().contains("desktop app"));
+    let mut wav = b"RIFF\0\0\0\0WAVEfmt ".to_vec();
+    wav.resize(4000, 0);
+    let take = phone.call(&rig, via, "POST", "/remote-api/voice/transcribe", &wav).await.unwrap();
+    assert_eq!(take.status, 503, "{:?}", take.json());
+    // Without the right chat: the channel's 403 before any handler.
+    rig.hub.set_rights(&phone.device_id(), DeviceRights { agent: true, ..DeviceRights::default() }).unwrap();
+    for path in ["/remote-api/voice", "/remote-api/voice/transcribe", "/remote-api/voice/speak"] {
+        let method = if path == "/remote-api/voice" { "GET" } else { "POST" };
+        let refused = phone.call(&rig, via, method, path, b"{}").await.unwrap();
+        assert_eq!((refused.status, refused.json()["right"].clone()), (403, serde_json::json!("chat")), "{path}");
+    }
+    let status = phone.call(&rig, via, "GET", "/remote-api/status/full", b"").await.unwrap();
+    assert!(!status.json()["features"].as_array().unwrap().contains(&serde_json::json!("voice")));
 }
 
 // ── Chat attachments with the right `chat` alone ──

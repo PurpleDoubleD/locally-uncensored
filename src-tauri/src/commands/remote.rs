@@ -258,6 +258,12 @@ impl axum::extract::FromRef<RemoteState> for crate::commands::remote_chats::Chat
     }
 }
 
+impl axum::extract::FromRef<RemoteState> for crate::commands::remote_voice::VoiceCtx {
+    fn from_ref(state: &RemoteState) -> Self {
+        crate::commands::remote_voice::VoiceCtx::of_desktop(state.app_handle.handle())
+    }
+}
+
 impl axum::extract::FromRef<RemoteState> for crate::commands::remote_create::CreateCtx {
     fn from_ref(state: &RemoteState) -> Self {
         crate::commands::remote_create::CreateCtx {
@@ -788,6 +794,11 @@ async fn handle_status_full(
     // once the window has reported its list.
     if sealed_caller.as_ref().is_some_and(|c| c.rights.chat) {
         features.extend(state.chats.features());
+    }
+    // Voice over remote (#212): wherever the caller may chat. Whether this
+    // computer can listen right now says `/remote-api/voice` itself.
+    if sealed_caller.as_ref().is_none_or(|c| c.rights.chat) {
+        features.push(crate::commands::remote_voice::FEATURE.to_string());
     }
     let devices = state.connected_devices.lock().await;
     let mut body = status_full_body(&devices, &machine_name(), &features);
@@ -2592,24 +2603,30 @@ mod page_title_tests {
 struct QrResponse {
     qr_png_base64: String,
     url: String,
+    /// The tunnel runs: over the internet only the LU app gets through, the
+    /// browser QR still points at the home network (#232).
+    #[serde(rename = "internetAppOnly")]
+    internet_app_only: bool,
+}
+
+/// The address the browser QR names. Always the LAN page: the tunnel
+/// listener has no `/mobile` (E3), so `<tunnel>/mobile` would only ever
+/// show the notice page (#232). The second value says whether the tunnel
+/// runs, so the panel can say that the internet needs the LU app.
+fn browser_qr_target(lan_ip: &str, port: u16, tunnel_active: bool) -> (String, bool) {
+    (format!("http://{}:{}/mobile", lan_ip, port), tunnel_active)
 }
 
 async fn handle_qr(AxumState(state): AxumState<RemoteState>) -> Json<QrResponse> {
-    // Use tunnel URL if active, otherwise LAN
-    let tunnel_url = state.tunnel_url.lock().await.clone();
-    let url = if let Some(ref turl) = tunnel_url {
-        format!("{}/mobile", turl)
-    } else {
-        let lan_ip = super::lan_address::lan_address();
-        let port = 11435u16;
-        format!("http://{}:{}/mobile", lan_ip, port)
-    };
+    let tunnel_active = state.tunnel_url.lock().await.is_some();
+    let lan_ip = super::lan_address::lan_address();
+    let (url, internet_app_only) = browser_qr_target(&lan_ip, 11435u16, tunnel_active);
 
     // Generate QR code as PNG image — never panic, just return an empty
     // image if the QR encoder rejects the URL.
     let qr = match qrcode::QrCode::new(url.as_bytes()) {
         Ok(q) => q,
-        Err(_) => return Json(QrResponse { qr_png_base64: String::new(), url }),
+        Err(_) => return Json(QrResponse { qr_png_base64: String::new(), url, internet_app_only }),
     };
     let qr_image = qr.render::<image::Luma<u8>>()
         .quiet_zone(true)
@@ -2621,7 +2638,61 @@ async fn handle_qr(AxumState(state): AxumState<RemoteState>) -> Json<QrResponse>
 
     let qr_base64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &png_bytes);
 
-    Json(QrResponse { qr_png_base64: qr_base64, url })
+    Json(QrResponse { qr_png_base64: qr_base64, url, internet_app_only })
+}
+
+#[cfg(test)]
+mod browser_qr_tests {
+    use super::*;
+
+    fn state() -> RemoteState {
+        let server = RemoteServer::new();
+        RemoteState {
+            memory_revoked: server.memory_revoked.clone(),
+            jwt_secret: server.jwt_secret.clone(),
+            passcode: server.passcode.clone(),
+            ollama_base: String::new(),
+            backend_kind: "ollama".into(),
+            openai_base: String::new(),
+            openai_key: String::new(),
+            comfy_port: 0,
+            comfy_host: "127.0.0.1".into(),
+            permissions: server.permissions.clone(),
+            connected_devices: server.connected_devices.clone(),
+            tunnel_url: server.tunnel_url.clone(),
+            dispatched_model: server.dispatched_model.clone(),
+            dispatched_system_prompt: server.dispatched_system_prompt.clone(),
+            page_title: server.page_title.clone(),
+            app_handle: RemoteDesktop::unavailable(),
+            sealed: None,
+            create: server.create.clone(),
+            chats: server.chats.clone(),
+        }
+    }
+
+    #[test]
+    fn the_browser_qr_names_the_lan_page_also_with_the_tunnel() {
+        assert_eq!(browser_qr_target("192.168.1.5", 11435, false), ("http://192.168.1.5:11435/mobile".to_string(), false));
+        assert_eq!(browser_qr_target("192.168.1.5", 11435, true), ("http://192.168.1.5:11435/mobile".to_string(), true));
+    }
+
+    /// #232: with the tunnel up the QR used to say `<tunnel>/mobile`, an
+    /// address that never works. Now the LAN page plus the app-only flag.
+    #[tokio::test]
+    async fn handle_qr_with_an_active_tunnel_gives_the_lan_address() {
+        let state = state();
+        let Json(before) = handle_qr(AxumState(state.clone())).await;
+        assert!(!before.internet_app_only);
+        *state.tunnel_url.lock().await = Some("https://quiet-river-1234.trycloudflare.com".into());
+        let Json(qr) = handle_qr(AxumState(state)).await;
+        assert!(qr.internet_app_only);
+        assert!(qr.url.starts_with("http://") && qr.url.ends_with(":11435/mobile"), "{}", qr.url);
+        assert!(!qr.url.contains("trycloudflare"), "{}", qr.url);
+        assert_eq!(qr.url, before.url);
+        assert!(!qr.qr_png_base64.is_empty());
+        let v = serde_json::to_value(&qr).unwrap();
+        assert_eq!(v["internetAppOnly"], true);
+    }
 }
 
 // ─── Devices ───
@@ -3797,15 +3868,11 @@ pub async fn remote_qr_code(
         return Err("Remote server not running".into());
     }
 
-    // Use tunnel URL if active, otherwise LAN
-    let tunnel_url = tunnel_url_arc.lock().await;
-    let url = if let Some(ref turl) = *tunnel_url {
-        format!("{}/mobile", turl)
-    } else {
-        let lan_ip = super::lan_address::lan_address();
-        format!("http://{}:{}/mobile", lan_ip, port)
-    };
-    drop(tunnel_url);
+    // The browser QR always names the LAN page, also while the tunnel runs:
+    // over the internet only the LU app gets through (#232, E3).
+    let tunnel_active = tunnel_url_arc.lock().await.is_some();
+    let lan_ip = super::lan_address::lan_address();
+    let (url, internet_app_only) = browser_qr_target(&lan_ip, port, tunnel_active);
 
     let qr = qrcode::QrCode::new(url.as_bytes()).map_err(|e| e.to_string())?;
     let qr_image = qr.render::<image::Luma<u8>>()
@@ -3826,6 +3893,7 @@ pub async fn remote_qr_code(
         "qr_png_base64": qr_base64,
         "url": url,
         "passcode": passcode,
+        "internetAppOnly": internet_app_only,
     }))
 }
 
@@ -4421,8 +4489,58 @@ async fn handle_sealed_tunnel(
     handle_sealed(state, sealed::Listener::Tunnel, source, addr, headers, body).await
 }
 
+/// What a browser sees under the tunnel address (#232). Static: no script,
+/// no outside resource, no version, no path, nothing about this desktop.
+const TUNNEL_NOTICE_HTML: &str = r#"<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>LU Remote</title>
+<style>
+body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:#111;color:#e5e5e5;font:16px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+main{max-width:30rem;padding:24px}
+h1{font-size:20px;margin:0 0 12px}
+p{margin:0 0 12px;color:#bdbdbd}
+@media (prefers-color-scheme:light){body{background:#fafafa;color:#1a1a1a}p{color:#444}}
+</style>
+</head>
+<body>
+<main>
+<h1>This address works only with the LU app</h1>
+<p>Open the LU app on your phone and scan the pairing QR code in the Remote panel on your computer.</p>
+<p>In a browser, Remote works only on your home Wi-Fi.</p>
+</main>
+</body>
+</html>
+"#;
+
+/// Strict headers for the notice page: no script, no frame, no referrer,
+/// only the inline style of the page itself.
+const TUNNEL_NOTICE_CSP: &str = "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
+
+/// The tunnel listener's answer to everything it does not know. A browser
+/// (GET or HEAD outside `/remote-api/`) gets the notice page with status 404,
+/// everything else stays an empty 404 as before.
+async fn tunnel_fallback(method: Method, uri: axum::http::Uri) -> Response {
+    let browser = (method == Method::GET || method == Method::HEAD) && !uri.path().starts_with("/remote-api/");
+    if !browser {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+    let mut res = (StatusCode::NOT_FOUND, Html(TUNNEL_NOTICE_HTML)).into_response();
+    let h = res.headers_mut();
+    h.insert(header::CONTENT_SECURITY_POLICY, header::HeaderValue::from_static(TUNNEL_NOTICE_CSP));
+    h.insert(header::X_CONTENT_TYPE_OPTIONS, header::HeaderValue::from_static("nosniff"));
+    h.insert(header::X_FRAME_OPTIONS, header::HeaderValue::from_static("DENY"));
+    h.insert(header::REFERRER_POLICY, header::HeaderValue::from_static("no-referrer"));
+    h.insert(header::CACHE_CONTROL, header::HeaderValue::from_static("no-store"));
+    res
+}
+
 /// The listener cloudflared points at. It knows two routes and nothing else:
 /// no `/mobile` page, no code login, no plain API over the internet (E3).
+/// A browser that lands here gets a short notice instead of a blank page.
 fn build_tunnel_router(state: RemoteState) -> Router {
     async fn not_found() -> StatusCode {
         StatusCode::NOT_FOUND
@@ -4430,7 +4548,7 @@ fn build_tunnel_router(state: RemoteState) -> Router {
     Router::new()
         .route("/remote-api/status", get(handle_status_tunnel))
         .route("/remote-api/sealed", post(handle_sealed_tunnel))
-        .fallback(not_found)
+        .fallback(tunnel_fallback)
         .method_not_allowed_fallback(not_found)
         .layer(middleware::from_fn_with_state(state.clone(), tunnel_gate))
         .layer(middleware::from_fn(access_log))
@@ -4533,7 +4651,16 @@ fn build_router(state: RemoteState) -> Router {
         .route("/remote-api/chats/{id}/stop", post(crate::commands::remote_chats::handle_stop))
         .route("/remote-api/chats/{id}/read", post(crate::commands::remote_chats::handle_read))
         .route("/remote-api/approvals/{id}", post(crate::commands::remote_chats::handle_approval))
-        .route("/remote-api/tasks", get(crate::commands::remote_chats::handle_tasks));
+        .route("/remote-api/tasks", get(crate::commands::remote_chats::handle_tasks))
+        // Voice over remote (remote_voice.rs, GitHub #212): with the right `chat`,
+        // on the Wi-Fi way with a JWT and inside the sealed channel.
+        .route(crate::commands::remote_voice::STATUS_PATH, get(crate::commands::remote_voice::handle_status))
+        .route(
+            crate::commands::remote_voice::TRANSCRIBE_PATH,
+            post(crate::commands::remote_voice::handle_transcribe)
+                .layer(axum::extract::DefaultBodyLimit::max(crate::commands::remote_voice::MAX_TAKE_BYTES + 1)),
+        )
+        .route(crate::commands::remote_voice::SPEAK_PATH, post(crate::commands::remote_voice::handle_speak));
 
     // Proxy routes
     let proxy_routes = Router::new()
@@ -5363,7 +5490,8 @@ mod remote_path_tests {
         let v: serde_json::Value = tool.json().await.unwrap();
         assert!(v["error"].is_string());
         let status: serde_json::Value = c.get(format!("{base}/remote-api/status/full")).bearer_auth(&token).send().await.unwrap().json().await.unwrap();
-        assert_eq!(status["features"], serde_json::json!([]));
+        // Voice over remote (#212) is offered wherever the caller may chat.
+        assert_eq!(status["features"], serde_json::json!(["voice"]));
 
         server.permissions.lock().await.create = true;
         let accepted = c.post(&url).bearer_auth(&token).json(&job).send().await.unwrap();
@@ -5371,7 +5499,7 @@ mod remote_path_tests {
         let v: serde_json::Value = accepted.json().await.unwrap();
         assert_eq!(v["state"], "running");
         let status: serde_json::Value = c.get(format!("{base}/remote-api/status/full")).bearer_auth(&token).send().await.unwrap().json().await.unwrap();
-        assert_eq!(status["features"], serde_json::json!(["create-image", "create-video"]));
+        assert_eq!(status["features"], serde_json::json!(["create-image", "create-video", "voice"]));
         assert!(status.get("lan_blocked").is_none(), "only inside the channel");
         // Stage 2, the gallery and documents stay in the sealed channel: the
         // plain Wi-Fi way keeps 3.0.7's Create.
@@ -6724,6 +6852,7 @@ mod remote_hardening_tests {
         let json = serde_json::to_value(QrResponse {
             qr_png_base64: "AAA".into(),
             url: "http://192.168.1.10:11435/mobile".into(),
+            internet_app_only: false,
         })
         .unwrap();
         assert!(json.get("passcode").is_none(), "the QR payload leaks the pairing code");

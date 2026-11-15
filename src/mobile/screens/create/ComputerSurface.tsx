@@ -14,7 +14,7 @@
  * report button, like a cloud result.
  */
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { ListTodo, Brush, Camera, Cloud, Download, Ellipsis, Flag, Image as ImageIcon, Images, LayoutGrid, Monitor, Plus, Share2, SlidersHorizontal, Sparkles, Square, UserRound, Video } from 'lucide-react'
+import { ListTodo, Brush, Camera, Download, Ellipsis, Flag, Image as ImageIcon, Images, LayoutGrid, Paperclip, Share2, Sparkles, Square, UserRound, Video } from 'lucide-react'
 import { useCreateStore, type GalleryItem } from '../../../stores/createStore'
 import { nav } from '../../nav'
 import { haptic } from '../../platform/haptics'
@@ -22,32 +22,17 @@ import { takePhoto } from '../../platform/camera'
 import { pickPhotos, type PickedFile } from '../../platform/files'
 import { COMPUTER_STRINGS as C, CREATE_STRINGS as T } from '../../strings/create'
 import { REMOTE_STRINGS as RS } from '../../strings/remote'
-import { Button, Chip, ChipGroup, Icon, IconButton, ModelChip, Notice, Progress, RootPage, Segmented, SkeletonCards, TextArea, riskProps, toast } from '../../ui'
+import { Button, Chip, ChipGroup, ComposerTuneButton, Icon, IconButton, Notice, Progress, RootPage, Segmented, SkeletonCards, TextArea, riskProps, toast, tuneSummary } from '../../ui'
 import { dataUrlToBlob } from '../../../lib/render/data-url'
 import { saveWithToast, shareWithToast } from './parts/actions'
 import { clearComputerBlocked, cancelComputerJob, dismissComputerError, startComputerJob, useComputerRun } from './parts/computer-run'
 import { MAX_LYRICS, jobBodyOf, modelFor, shownValue, sizeNote, summaryOf, useComputerForm, type StartImage } from './parts/computer-form'
-import { useComputerAvailability, useComputerCaps, useCreateSource } from './parts/computer-source'
+import { useComputerAvailability, useComputerCaps } from './parts/computer-source'
 import { mediaOfTool, modelOptional, toolPrompt, toolTakesMask, type ComputerTool } from './parts/computer-tools'
 import { useComputerTool, type ComputerToolView } from './parts/computer-use'
 import { loadPhoneImage } from './parts/photos'
 import { reportItem, storePolicy } from './parts/policy'
 import { RemoveX, ResultMediaView, TOOL_ICON, itemName, useGalleryItem, useScreenShape } from './parts/ui'
-
-export function SourceChips({ where }: { where: 'cloud' | 'computer' }) {
-  const setSource = useCreateSource((s) => s.setSource)
-  const avail = useComputerAvailability()
-  if (!avail.offered) return null
-  return where === 'cloud' ? (
-    <Chip kind="action" icon={Monitor} label={C.useComputer} onPress={() => setSource('computer')} testid="m-create-source-computer">
-      {C.computer}
-    </Chip>
-  ) : (
-    <Chip kind="action" icon={Cloud} tone="cloud" label={C.useCloud} onPress={() => setSource('cloud')} testid="m-create-source-cloud">
-      {C.cloud}
-    </Chip>
-  )
-}
 
 function useBusy(): boolean {
   const view = useComputerRun((s) => s.view)
@@ -447,23 +432,20 @@ function Composer({ view, onCreate, startBelow }: { view: ComputerToolView; onCr
             }}
           />
         ) : null}
-        <button type="button" className="m-k-summary" aria-label={C.summaryLabel(line || C.summaryEmpty)} data-testid="m-create-computer-summary" onClick={() => nav.openSheet('create-computer')}>
-          <span className="m-k-summary-line">{line || C.summaryEmpty}</span>
-          <span className="m-k-summary-price" data-testid="m-create-computer-where">
-            {C.onYourComputer}
-          </span>
-        </button>
-        <div className="m-k-composer-row">
-          {plus ? <IconButton icon={Plus} label={C.addImage} onPress={() => pickFromLibrary(view)} disabled={busy} risk="sensor" testid="m-create-computer-add-image" /> : null}
-          <IconButton icon={SlidersHorizontal} label={C.settings} onPress={() => nav.openSheet('create-computer')} testid="m-create-computer-settings" />
-          <ModelChip
-            name={model?.name ?? (modelOptional(view.kind) ? C.modelOwn : null)}
-            where="local"
-            emptyText={C.modelNone}
+        {/* Prompt v2 (14.11.2026): one row. Settings with the summary, a start image where the tool takes one, Create. */}
+        <div className="m-composer-row">
+          <ComposerTuneButton
+            summary={
+              <>
+                <b>{T.tool[view.tool].short}</b>
+                {` · ${tuneSummary([model?.name ?? (modelOptional(view.kind) ? C.modelOwn : C.modelNone), line, C.computer])}`}
+              </>
+            }
+            label={C.summaryLabel(tuneSummary([T.tool[view.tool].name, model?.name ?? (modelOptional(view.kind) ? C.modelOwn : C.modelNone), line, C.onYourComputer]))}
             onPress={() => nav.openSheet('create-computer')}
-            disabled={busy}
-            testid="m-create-computer-model"
+            testid="m-create-computer-settings"
           />
+          {plus ? <IconButton icon={Paperclip} label={C.addImage} onPress={() => pickFromLibrary(view)} disabled={busy} risk="sensor" testid="m-create-computer-add-image" /> : null}
           {startBelow ? null : <StartButton onCreate={onCreate} disabled={disabled} />}
         </div>
       </div>
@@ -475,7 +457,6 @@ export default function ComputerSurface() {
   const avail = useComputerAvailability()
   const { reload } = useComputerCaps(true)
   const view = useComputerTool()
-  const setTool = useCreateSource((s) => s.setTool)
   const shape = useScreenShape()
   const prompt = useCreateStore((s) => s.prompt)
   const busy = useBusy()
@@ -514,27 +495,6 @@ export default function ComputerSurface() {
           ) : null}
           <IconButton icon={LayoutGrid} label={T.gallery} onPress={() => nav.push('/create/gallery')} testid="m-create-gallery" el="K1.2" />
         </>
-      }
-      banner={
-        <div className="m-k-toolrow" data-testid="m-create-computer-toolrow">
-          <SourceChips where="computer" />
-          <ChipGroup label={C.toolsLabel} role="radiogroup" testid="m-create-computer-tools">
-            {view.row.map((t) => (
-              <Chip
-                key={t.id}
-                kind="choice"
-                icon={TOOL_ICON[t.id]}
-                selected={t.id === view.tool}
-                label={t.available ? T.tool[t.id].name : `${T.tool[t.id].name}. ${C.unavailableMark}`}
-                onPress={() => setTool(t.id)}
-                disabled={busy}
-                testid={`m-create-computer-tool-${t.id}`}
-              >
-                {T.tool[t.id].short}
-              </Chip>
-            ))}
-          </ChipGroup>
-        </div>
       }
       footer={
         shape === 'tall' ? (

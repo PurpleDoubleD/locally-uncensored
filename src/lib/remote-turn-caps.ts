@@ -39,6 +39,20 @@ export function turnCaps(convId: string | undefined): Partial<PermissionMap> | u
 }
 
 /**
+ * A turn the paired phone started is running in this chat. The cards of the
+ * desktop (Open this address?, settings, workflow installs) are not drawn on
+ * the phone, so such a run must not wait for one: nobody at the phone could
+ * answer it, and the phone would hang until the card times out (M310).
+ */
+export function isPhoneTurn(convId: string | null | undefined): boolean {
+  return !!convId && caps.has(convId)
+}
+
+/** What a card tool answers in a phone turn. */
+export const PHONE_TURN_NO_CARD =
+  'NOT DONE. Nothing changed. This message came from the paired phone, and LU only makes this change when the user asks for it at the computer itself. Tell the user so: nothing was changed, and they can ask for it again at the computer.'
+
+/**
  * The category a tool counts as for the phone's rights. A tool of an
  * external MCP server can do anything its server does, so it needs the
  * strictest right, `terminal`, whatever category it is filed under.

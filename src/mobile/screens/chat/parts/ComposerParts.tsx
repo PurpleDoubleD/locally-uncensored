@@ -106,7 +106,7 @@ export function barHeights(level: number): number[] {
  * Their own component, so ten readings a second repaint five bars and
  * nothing else.
  */
-function LevelBars({ since }: { since: number }) {
+export function LevelBars({ since }: { since: number }) {
   const level = useVoiceLevel()
   const [heard, setHeard] = useState(false)
   const [now, setNow] = useState(() => Date.now())
@@ -169,20 +169,11 @@ export function CommandList(props: { commands: readonly AgentCommand[]; onPick: 
   )
 }
 
-/** "Cloud, uses credits": opens the price of this round (G13). */
-export function CloudChip({ chatId }: { chatId: string }) {
-  return (
-    <Chip mini kind="action" tone="cloud" onPress={() => nav.openSheet('price', { chatId })} testid="m-chat-cloud-chip" el="C2.13">
-      {S.chat.cloudChip}
-    </Chip>
-  )
-}
-
 /**
  * How full the context window is (C2.14). Opens the chat options at the
  * context page; from 95 percent a second chip compacts at once.
  */
-export function ContextChip(props: { chatId: string; onCompact: () => void; busy: boolean }) {
+export function ContextChip(props: { chatId: string; onCompact: () => void; busy: boolean; warnOnly?: boolean }) {
   const activeModel = useModelStore((s) => s.activeModel)
   const engine = useEngineView()
   // The window of a model of this phone is a fact of the running engine. Asked before the engine
@@ -211,8 +202,8 @@ export function usePhoneMeter(chatId: string, window: number): PhoneMeter | null
   }, [conversation, report, agentSent, activeModel, window])
 }
 
-function ContextChipWhenKnown(props: { chatId: string; onCompact: () => void; busy: boolean }) {
-  const { chatId, onCompact, busy } = props
+function ContextChipWhenKnown(props: { chatId: string; onCompact: () => void; busy: boolean; warnOnly?: boolean }) {
+  const { chatId, onCompact, busy, warnOnly } = props
   const messages = useChatStore((s) => s.conversations.find((c) => c.id === chatId)?.messages)
   const sent = useSendSizeStore((s) => s.byConv[chatId])
   const ctx = useActiveContextWindow()
@@ -224,6 +215,8 @@ function ContextChipWhenKnown(props: { chatId: string; onCompact: () => void; bu
   const percent = meter ? meter.percent : contextPercent(Math.min(fill.used, window), window)
   const state = meter?.state ?? 'fits'
   const level = contextLevel(percent)
+  // Prompt v2: above the field only when it wants attention. The figure itself is in the chat settings.
+  if (warnOnly && level === 'ok' && state === 'fits') return null
   return (
     <>
       <Chip

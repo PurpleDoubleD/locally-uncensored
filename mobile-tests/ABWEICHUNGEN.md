@@ -43,23 +43,23 @@ Das sind keine Namensabweichungen, sondern Knoepfe ohne messbare Wirkung im Brow
 
 <!-- GEMESSEN:ANFANG (tabelle/bauen.mjs schreibt diesen Abschnitt) -->
 
-Stand: integ-306@fcf98b787, 110 Schnappschuesse.
+Stand: mobile-310-d0418d@effcb892a, 110 Schnappschuesse.
 
 ### 1. Screen-Wort ausserhalb der Liste
 
-TESTIDS.md erlaubt als `<screen>`: `onboarding`, `chat`, `models`, `create`, `remote`, `settings`, `account`, `nav`, `app`. In den Quellen stehen 797 Kennungen mit einem anderen Wort an dieser Stelle.
+TESTIDS.md erlaubt als `<screen>`: `onboarding`, `chat`, `models`, `create`, `remote`, `settings`, `account`, `nav`, `app`. In den Quellen stehen 820 Kennungen mit einem anderen Wort an dieser Stelle.
 
 | Wort | Kennungen | Strang | Beispiel | Einordnung |
 |---|---|---|---|---|
-| `toast` | 221 | shell, settings, agent, models, chat, remote, create | `m-toast` | Vorgabe des Geruests (STRAENGE.md), fehlt in TESTIDS.md |
-| `dialog` | 84 | shell, settings, models, agent, create, chat, remote | `m-dialog` | Vorgabe des Geruests (STRAENGE.md), fehlt in TESTIDS.md |
+| `toast` | 231 | shell, settings, agent, models, chat, remote, create | `m-toast` | Vorgabe des Geruests (STRAENGE.md), fehlt in TESTIDS.md |
+| `dialog` | 85 | shell, settings, models, agent, create, chat, remote | `m-dialog` | Vorgabe des Geruests (STRAENGE.md), fehlt in TESTIDS.md |
+| `options` | 69 | agent | `m-options` | eigenes Wort des Strangs |
 | `memory` | 66 | agent | `m-memory-add` | eigenes Wort des Strangs |
-| `options` | 65 | agent | `m-options` | eigenes Wort des Strangs |
-| `sheet` | 44 | agent, shell, chat, create, settings, remote | `m-sheet-agent-add-step` | Vorgabe des Geruests (STRAENGE.md), fehlt in TESTIDS.md |
+| `sheet` | 47 | agent, shell, chat, create, settings, remote | `m-sheet-agent-add-step` | Vorgabe des Geruests (STRAENGE.md), fehlt in TESTIDS.md |
 | `cloud` | 34 | settings | `m-cloud-add-credits` | eigenes Wort des Strangs |
 | `documents` | 31 | agent | `m-documents-add` | eigenes Wort des Strangs |
+| `chats` | 25 | chat | `m-chats-empty` | eigenes Wort des Strangs |
 | `step` | 21 | agent | `m-step-cond` | eigenes Wort des Strangs |
-| `chats` | 20 | chat | `m-chats-empty` | eigenes Wort des Strangs |
 | `iap` | 16 | settings | `m-iap-close` | eigenes Wort des Strangs |
 | `search` | 16 | agent | `m-search-free-only` | eigenes Wort des Strangs |
 | `tasks` | 13 | agent | `m-tasks-empty` | eigenes Wort des Strangs |
@@ -107,7 +107,7 @@ Solange ein Blatt noch laedt, traegt der Platzhalter des Geruests `m-sheet-<id>`
 
 ### 3. Seiten mit zusammengesetztem Screen-Wort
 
-TESTIDS.md: "`<screen>` ist ein Wort ohne Bindestrich". 54 von 62 Seiten haengen den Namen der Unterseite an: `m-onboarding-model-screen`, `m-onboarding-documents-screen`, `m-onboarding-done-screen`, `m-chat-file-screen`, `m-chat-message-edit-screen`, `m-chat-message-text-screen`, `m-chat-documents-screen`, `m-chat-compare-screen` und so weiter. Die ganze Liste steht in TABELLE.md.
+TESTIDS.md: "`<screen>` ist ein Wort ohne Bindestrich". 56 von 64 Seiten haengen den Namen der Unterseite an: `m-onboarding-model-screen`, `m-onboarding-documents-screen`, `m-onboarding-done-screen`, `m-chat-file-screen`, `m-chat-message-edit-screen`, `m-chat-message-text-screen`, `m-chat-documents-screen`, `m-chat-compare-screen` und so weiter. Die ganze Liste steht in TABELLE.md.
 
 ### 4. Andere Zeichen als Kleinbuchstaben, Ziffern und Bindestrich
 
@@ -115,7 +115,7 @@ TESTIDS.md: "`<screen>` ist ein Wort ohne Bindestrich". 54 von 62 Seiten haengen
 
 ### 5. Risiko-Markierung `data-m-risk`
 
-Im DOM der Vorschau tragen 66 bedienbare Elemente `data-m-risk`: `m-memory-export-md` (leaves-app), `m-memory-export-json` (leaves-app), `m-consent-privacy` (leaves-app), `m-chat-attach-photo` (sensor), `m-chat-attach-library` (sensor), `m-chat-link-open` (leaves-app), `m-credits-plans` (paid), `m-remote-attach-camera` (sensor), `m-remote-attach-library` (sensor), `m-report-send` (destructive), `m-cloud-sheet-plan-hosted` (paid), `m-cloud-sheet-plan-hosted-pro` (paid), `m-cloud-sheet-plan-hosted-max` (paid), `m-account-delete-go-delete` (destructive), `m-account-reset-send` (destructive), `m-settings-licenses-full` (leaves-app), `m-create-source-take` (sensor), `m-create-source-library` (sensor), `m-create-tools-removebg` (paid), `m-create-tools-eraser` (paid), `m-create-tools-animate` (paid), `m-create-tools-extend` (paid), `m-chat-mic` (paid), `m-cloud-plan-hosted` (paid), `m-cloud-plan-hosted-pro` (paid), `m-cloud-plan-hosted-max` (paid), `m-create-batch-add` (sensor), `m-create-char-add` (sensor), `m-create-train` (paid), `m-create-showcase-plans` (paid), `m-remote-connect-scan` (sensor), `m-settings-about-website` (leaves-app), `m-settings-about-source` (leaves-app), `m-settings-about-contact` (leaves-app), `m-settings-about-privacy` (leaves-app), `m-settings-about-terms` (leaves-app), `m-account-delete-website` (destructive), `m-agent-reset` (destructive), `m-settings-appearance-picture-choose` (sensor), `m-settings-chat-reset` (destructive), `m-settings-data-backup` (leaves-app), `m-settings-data-all-delete` (destructive), `m-settings-engine-reset` (destructive), `m-memory-delete-all` (destructive), `m-personas-reset` (destructive), `m-settings-privacy-policy` (leaves-app), `m-settings-storage-partials-clear` (destructive), `m-settings-storage-cache-clear` (destructive), `m-settings-troubleshooting-share-log` (leaves-app), `m-settings-troubleshooting-setup` (destructive), `m-settings-troubleshooting-reset` (destructive), `m-settings-troubleshooting-share-report` (leaves-app), `m-settings-voice-preview-Wise_Woman` (paid), `m-settings-voice-preview-Calm_Woman` (paid), `m-settings-voice-preview-Lively_Girl` (paid), `m-settings-voice-preview-Lovely_Girl` (paid), `m-settings-voice-preview-Sweet_Girl_2` (paid), `m-settings-voice-preview-Friendly_Person` (paid), `m-settings-voice-preview-Deep_Voice_Man` (paid), `m-settings-voice-preview-Casual_Guy` (paid), `m-settings-voice-preview-Patient_Man` (paid), `m-settings-voice-preview-Determined_Man` (paid), `m-settings-voice-preview-Elegant_Man` (paid), `m-settings-voice-preview-Young_Knight` (paid), `m-settings-voice-test` (paid), `m-age-confirm-minor` (destructive). In den Quellen sind es 103 Kennungen, alle in den Straengen remote, settings, shell, agent, chat, create, models.
+Im DOM der Vorschau tragen 66 bedienbare Elemente `data-m-risk`: `m-memory-export-md` (leaves-app), `m-memory-export-json` (leaves-app), `m-consent-privacy` (leaves-app), `m-chat-attach-photo` (sensor), `m-chat-attach-library` (sensor), `m-chat-link-open` (leaves-app), `m-credits-plans` (paid), `m-remote-attach-camera` (sensor), `m-remote-attach-library` (sensor), `m-report-send` (destructive), `m-cloud-sheet-plan-hosted` (paid), `m-cloud-sheet-plan-hosted-pro` (paid), `m-cloud-sheet-plan-hosted-max` (paid), `m-account-delete-go-delete` (destructive), `m-account-reset-send` (destructive), `m-settings-licenses-full` (leaves-app), `m-create-source-take` (sensor), `m-create-source-library` (sensor), `m-create-tools-removebg` (paid), `m-create-tools-eraser` (paid), `m-create-tools-animate` (paid), `m-create-tools-extend` (paid), `m-chat-mic` (paid), `m-cloud-plan-hosted` (paid), `m-cloud-plan-hosted-pro` (paid), `m-cloud-plan-hosted-max` (paid), `m-create-batch-add` (sensor), `m-create-char-add` (sensor), `m-create-train` (paid), `m-create-showcase-plans` (paid), `m-remote-connect-scan` (sensor), `m-settings-about-website` (leaves-app), `m-settings-about-source` (leaves-app), `m-settings-about-contact` (leaves-app), `m-settings-about-privacy` (leaves-app), `m-settings-about-terms` (leaves-app), `m-account-delete-website` (destructive), `m-agent-reset` (destructive), `m-settings-appearance-picture-choose` (sensor), `m-settings-chat-reset` (destructive), `m-settings-data-backup` (leaves-app), `m-settings-data-all-delete` (destructive), `m-settings-engine-reset` (destructive), `m-memory-delete-all` (destructive), `m-personas-reset` (destructive), `m-settings-privacy-policy` (leaves-app), `m-settings-storage-partials-clear` (destructive), `m-settings-storage-cache-clear` (destructive), `m-settings-troubleshooting-share-log` (leaves-app), `m-settings-troubleshooting-setup` (destructive), `m-settings-troubleshooting-reset` (destructive), `m-settings-troubleshooting-share-report` (leaves-app), `m-settings-voice-preview-Wise_Woman` (paid), `m-settings-voice-preview-Calm_Woman` (paid), `m-settings-voice-preview-Lively_Girl` (paid), `m-settings-voice-preview-Lovely_Girl` (paid), `m-settings-voice-preview-Sweet_Girl_2` (paid), `m-settings-voice-preview-Friendly_Person` (paid), `m-settings-voice-preview-Deep_Voice_Man` (paid), `m-settings-voice-preview-Casual_Guy` (paid), `m-settings-voice-preview-Patient_Man` (paid), `m-settings-voice-preview-Determined_Man` (paid), `m-settings-voice-preview-Elegant_Man` (paid), `m-settings-voice-preview-Young_Knight` (paid), `m-settings-voice-test` (paid), `m-age-confirm-minor` (destructive). In den Quellen sind es 108 Kennungen, alle in den Straengen remote, settings, shell, agent, chat, create, models.
 
 19 bedienbare Elemente im DOM der Vorschau haben KEIN `data-m-risk`, obwohl ihre Kennung nach der Sperrliste (`lib/sperre.mjs`) Geld kostet oder etwas loescht. Der Sweep sperrt sie ueber die Kennung, die Markierung fehlt:
 

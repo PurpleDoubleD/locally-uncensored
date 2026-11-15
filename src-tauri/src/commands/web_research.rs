@@ -338,7 +338,7 @@ pub(crate) async fn gather(query: &str, sources: Vec<SearchResult>, read: Reader
         let final_url = page.map(|p| p.0.clone()).filter(|u| u != &src.url);
         let mut flags: Vec<String> = Vec::new();
         let scanned = format!("{}\n{}", title, passages.join("\n"));
-        if !super::computer::desk::injection::scan(&scanned).is_empty() {
+        if !injection_scan(&scanned).is_empty() {
             flags.push("injection-suspect".to_string());
         }
         out.push(Evidence {
@@ -412,6 +412,24 @@ pub(crate) async fn research(query: &str, want: usize, search: Value, read: Read
         v["providerError"] = e.clone();
     }
     v
+}
+
+/// The injection screen of the screen control (`computer/desk/injection.rs`).
+/// The `computer` module is desktop only; the screen itself is plain text
+/// matching, so a phone build takes the same file (M310: integ/310 did not
+/// build for Android or iOS).
+#[cfg(desktop)]
+fn injection_scan(text: &str) -> Vec<&'static str> {
+    super::computer::desk::injection::scan(text)
+}
+
+#[cfg(mobile)]
+#[path = "computer/desk/injection.rs"]
+mod injection_mobile;
+
+#[cfg(mobile)]
+fn injection_scan(text: &str) -> Vec<&'static str> {
+    injection_mobile::scan(text)
 }
 
 #[cfg(test)]

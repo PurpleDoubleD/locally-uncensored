@@ -171,6 +171,16 @@ export const AGENT_STRINGS = {
   options: {
     title: 'Chat options',
     done: 'Done',
+    /** Prompt v2: the model, the documents and the cost stand at the top of the sheet now, not around the field. */
+    model: 'Model',
+    modelNone: 'Choose a model',
+    modelPhone: 'On this phone',
+    modelCloud: 'LU Cloud, uses credits',
+    modelOther: 'From a provider',
+    documents: 'Documents',
+    documentsSub: 'Files this chat can search',
+    cost: 'Cost of this chat',
+    costSub: 'What a message on LU Cloud takes',
     groupNow: 'This chat',
     /** Above the switches that are settings of the app and hold in every chat (Thinking, Small model mode). */
     groupAll: 'All chats',

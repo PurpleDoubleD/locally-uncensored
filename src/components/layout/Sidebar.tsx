@@ -10,7 +10,7 @@ import { useCompareStore } from '../../stores/compareStore'
 import { useModelStore } from '../../stores/modelStore'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { useCodexStore } from '../../stores/codexStore'
-import { useRemoteStore, REMOTE_DEV_MODE_ERROR } from '../../stores/remoteStore'
+import { useRemoteStore, REMOTE_DEV_MODE_ERROR, remoteAddressView } from '../../stores/remoteStore'
 import { RemoteFirewallNotice } from '../remote/RemoteFirewallNotice'
 import { workspaceRejectedMessage } from '../../lib/workspace-rejected'
 import { CHAT_BASE_SYSTEM_PROMPT } from '../../lib/system-prompt'
@@ -82,6 +82,7 @@ export function Sidebar() {
   const remoteError = useRemoteStore((s) => s.error)
   const tunnelActive = useRemoteStore((s) => s.tunnelActive)
   const tunnelUrl = useRemoteStore((s) => s.tunnelUrl)
+  const internetAppOnly = useRemoteStore((s) => s.internetAppOnly)
   const tunnelLoading = useRemoteStore((s) => s.tunnelLoading)
   const awaitingTunnel = useRemoteStore((s) => s.awaitingTunnel)
   const qrVisible = useRemoteStore((s) => s.qrVisible)
@@ -420,8 +421,10 @@ export function Sidebar() {
 
   const showAppQr = !!appQrPngBase64 && (tunnelActive || qrKind === 'app')
   const qrPngBase64 = showAppQr ? appQrPngBase64 : (tunnelActive ? '' : browserQrPngBase64)
-  // Over the tunnel there is no page to open, only the address the app uses.
-  const shownAddress = tunnelActive && tunnelUrl ? tunnelUrl : (mobileUrl || lanUrl)
+  // The tunnel has no page to open (#232): the address shown and copied is
+  // always the browser page in the same Wi-Fi, and the internet way gets a
+  // hint that it takes the LU app.
+  const { address: shownAddress, appOnlyHint } = remoteAddressView({ tunnelActive, internetAppOnly, mobileUrl, lanUrl })
 
   // A code (and the app's ticket) exists only while the QR panel or the
   // large QR shows: opening makes one, closing ends it on the server.
@@ -895,13 +898,13 @@ export function Sidebar() {
                 </div>
               </div>
 
-              {/* URL — prefer tunnel URL when tunnel is active */}
+              {/* Browser address, same Wi-Fi only, also in internet mode (#232). */}
               <div className="flex items-center gap-1.25">
                 {tunnelLoading ? (
                   <code className="text-[10px] text-emerald-400/70 truncate flex-1 animate-pulse">Starting Cloudflare tunnel…</code>
                 ) : (
                   <>
-                    <code className={`text-[10px] truncate flex-1 ${tunnelActive ? 'text-emerald-400' : 'text-blue-400'}`}>
+                    <code className="text-[10px] truncate flex-1 text-blue-400">
                       {shownAddress}
                     </code>
                     <button
@@ -923,9 +926,12 @@ export function Sidebar() {
                   not available" on first scan, panic, and click
                   Restart. The note is small + auto-disappears once a
                   device authenticates (qrVisible flips false). */}
+              {appOnlyHint && (
+                <p className="t-micro text-gray-500 leading-snug">{appOnlyHint}</p>
+              )}
               {tunnelActive && tunnelUrl && (
                 <p className="text-[10px] text-gray-500/70 leading-snug">
-                  First connection may take 5 to 10 s while DNS propagates. If you see a DNS error, wait a moment and reload.
+                  First connection may take 5 to 10 s while DNS propagates. If the app shows a DNS error, wait a moment and try again.
                 </p>
               )}
 
@@ -1506,7 +1512,7 @@ export function Sidebar() {
             )}
 
             <div className="w-full flex items-center gap-2.5 px-3.75 py-2.5 rounded-[5px] bg-white/[0.04] border border-white/5">
-              <code className={`text-[13px] truncate flex-1 ${tunnelActive ? 'text-emerald-700 dark:text-emerald-400' : 'text-blue-700 dark:text-blue-400'}`}>
+              <code className="text-[13px] truncate flex-1 text-blue-700 dark:text-blue-400">
                 {shownAddress}
               </code>
               <button
@@ -1520,6 +1526,7 @@ export function Sidebar() {
             </div>
 
             <p className="text-[12px] text-gray-500 text-center">
+              {appOnlyHint && <span className="block mb-1.25">{appOnlyHint}</span>}
               {showAppQr
                 ? 'Scan the QR with the LU app, then allow the phone here. At home the app can also pair with the 6-digit code.'
                 : 'Scan the QR or enter the 6-digit code on your phone.'}

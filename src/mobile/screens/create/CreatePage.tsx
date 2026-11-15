@@ -19,7 +19,7 @@
  * page of every tool fits on the first screen of a phone, nothing to scroll.
  */
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { Download, Ellipsis, Flag, FastForward, Film, Images, Layers, LayoutGrid, Maximize2, Plus, Share2, SlidersHorizontal, Sparkles, Square, Wand2, Zap } from 'lucide-react'
+import { Download, Ellipsis, Flag, FastForward, Film, Images, Layers, LayoutGrid, Maximize2, Paperclip, Share2, Sparkles, Square, Wand2, Zap } from 'lucide-react'
 import { useCloudCreate } from '../../../hooks/useCloudCreate'
 import { useCreateStore, type GalleryItem } from '../../../stores/createStore'
 import { useCloudAuthStore } from '../../../stores/cloudAuthStore'
@@ -34,7 +34,7 @@ import { nav } from '../../nav'
 import { haptic } from '../../platform/haptics'
 import { openAppLink } from '../../policy/links'
 import { CREATE_STRINGS as T } from '../../strings/create'
-import { Button, Chip, ChipGroup, EmptyState, Icon, IconButton, ListGroup, ModelChip, Notice, Progress, RootPage, Row, SkeletonCards, riskProps } from '../../ui'
+import { Button, Chip, ComposerTuneButton, EmptyState, Icon, IconButton, ListGroup, Notice, Progress, RootPage, Row, SkeletonCards, riskProps, tuneSummary } from '../../ui'
 import { CloudSwitch } from '../settings/cloud/CloudSwitch'
 import { applyStyle, saveWithToast, setTool, shareWithToast, takeItemAsExtend, takeItemAsSource } from './parts/actions'
 import { toolProbe, useCatalogVersion } from './parts/catalog'
@@ -50,9 +50,9 @@ import { purchaseView, reportItem, storePolicy, withAiConsent } from './parts/po
 import { PriceOwner } from './parts/PriceOwner'
 import { runPhase, runShare, uploadCount } from './parts/run-state'
 import { installCreateServices, refreshQuota, useRunStore } from './parts/services'
-import { availableTools, fallbackTool, toolChoiceRisk } from './parts/tools'
+import { availableTools, fallbackTool } from './parts/tools'
 import { ResultMediaView, TOOL_ICON, itemName, useGalleryItem, useScreenShape } from './parts/ui'
-import ComputerSurface, { SourceChips } from './ComputerSurface'
+import ComputerSurface from './ComputerSurface'
 import { installComputerSource, useComputerAvailability, useCreateSource, useEffectiveSource } from './parts/computer-source'
 import { COMPUTER_STRINGS as C } from '../../strings/create'
 
@@ -443,7 +443,7 @@ function Stage({ f, onRetry, onCancel, onMakeVoice }: { f: CreateFacts; onRetry:
 // ---------- the composer ----------
 
 /** Create, or Cancel while a run is on. The composer holds it; with very large text it stands alone below the page. */
-function StartButton({ f, onCreate, onCancel }: { f: CreateFacts; onCreate: () => void; onCancel: () => void }) {
+function StartButton({ f, onCreate, onCancel, price }: { f: CreateFacts; onCreate: () => void; onCancel: () => void; price?: string }) {
   const isGenerating = useCreateStore((s) => s.isGenerating)
   const batchCount = useCreateStore((s) => s.batchSources.length)
   const cancelling = useRunStore((s) => s.run.cancelling)
@@ -455,8 +455,15 @@ function StartButton({ f, onCreate, onCancel }: { f: CreateFacts; onCreate: () =
       <span>{T.cancel}</span>
     </button>
   ) : (
-    <Button risk={batch ? undefined : 'paid'} variant="primary" icon={Sparkles} testid="m-create-generate" el="K1.10" disabled={f.block !== null} onPress={onCreate}>
+    <Button risk={batch ? undefined : 'paid'} variant="primary" icon={Sparkles} label={price !== undefined && f.cost !== null ? `${mainLabel}, ${creditsLabel(f.cost)}` : undefined} testid="m-create-generate" el="K1.10" disabled={f.block !== null} onPress={onCreate}>
       {mainLabel}
+      {/* Prompt v2: the price of this run sits on the button that spends it. */}
+      {price !== undefined ? (
+        <small className="m-k-go-price" data-short={f.wallet !== 'ok' ? '' : undefined} data-testid="m-create-price" data-state={f.priceState}>
+          {(f.priceState === 'pending' || f.priceState === 'measuring') && f.cost !== null ? <span className="m-ring" aria-hidden="true" /> : null}
+          {price}
+        </small>
+      ) : null}
     </Button>
   )
 }
@@ -501,6 +508,7 @@ function Composer({ f, onCreate, onCancel, startBelow }: { f: CreateFacts; onCre
   const short = f.wallet !== 'ok'
   const priceText = f.priceState === 'unavailable' ? T.block['price-unavailable'] : f.cost === null ? (f.quota ? '' : T.block['quota-unknown']) : creditsLabel(f.cost)
   const line = f.summary.join(' · ')
+  const modelName = f.facts.hasModels ? (f.model.id ? f.model.label : T.modelNone) : T.modelFixed
   const blockText = f.block ? T.block[f.block] : short ? (f.wallet === 'video_budget' ? T.videoBudget : f.wallet === 'trainings' ? T.noTrainings : T.notEnough) : null
 
   return (
@@ -537,37 +545,29 @@ function Composer({ f, onCreate, onCancel, startBelow }: { f: CreateFacts; onCre
             onChange={(event) => setPrompt(event.target.value)}
           />
         ) : null}
-        <button
-          type="button"
-          className="m-k-summary"
-          aria-label={line || priceText ? T.summaryLabel(line || T.summaryEmpty, priceText) : T.summaryEmpty}
-          data-testid="m-create-summary"
-          data-el="K1.6"
-          onClick={() => nav.openSheet('run-settings')}
-        >
-          <span className="m-k-summary-line">{line || T.summaryEmpty}</span>
-          <span className="m-k-summary-price" data-short={short ? '' : undefined} data-testid="m-create-price" data-state={f.priceState}>
-            {(f.priceState === 'pending' || f.priceState === 'measuring') && f.cost !== null ? <span className="m-ring" aria-hidden="true" /> : null}
-            {priceText}
-          </span>
-        </button>
         {blockText && !isGenerating ? (
           <div className="m-k-blocked" data-testid="m-create-blocked" data-m-reason={f.block ?? f.wallet}>
             {blockText}
           </div>
         ) : null}
-        <div className="m-k-composer-row">
-          <IconButton icon={Plus} label={T.addSource} onPress={() => nav.openSheet('source')} disabled={isGenerating} testid="m-create-add-source" el="K1.7" />
-          <IconButton icon={SlidersHorizontal} label={T.settings} onPress={() => nav.openSheet('run-settings')} testid="m-create-settings" el="K1.8" />
-          {f.facts.hasModels ? (
-            <ModelChip name={f.model.id ? f.model.label : null} where="cloud" emptyText={T.modelNone} onPress={() => nav.openSheet('create-model')} disabled={isGenerating} testid="m-create-model" el="K1.9" />
-          ) : (
-            <span className="m-k-fixedmodel" data-testid="m-create-model-fixed" data-el="K1.9">
-              <Icon icon={Zap} small />
-              {T.modelFixed}
-            </span>
-          )}
-          {startBelow ? null : <StartButton f={f} onCreate={onCreate} onCancel={onCancel} />}
+        {/* Prompt v2 (14.11.2026): one row. The settings button with the summary (tool, model, what is set),
+            Add source, Create with the price. Tool, model and everything else are in the run settings. */}
+        <div className="m-composer-row">
+          <ComposerTuneButton
+            summary={
+              <>
+                <b>{T.tool[f.tool].short}</b>
+                {` · ${tuneSummary([modelName, line])}`}
+              </>
+            }
+            label={T.summaryLabel(tuneSummary([T.tool[f.tool].name, modelName, line]) || T.summaryEmpty, priceText)}
+            onPress={() => nav.openSheet('run-settings')}
+            testid="m-create-settings"
+            el="K1.8"
+          />
+          <IconButton icon={Paperclip} label={T.addSource} onPress={() => nav.openSheet('source')} disabled={isGenerating} testid="m-create-add-source" el="K1.7" />
+          {/* The number alone on the button, "credits" stays in its name and in the run settings: the summary keeps its room. */}
+          {startBelow ? null : <StartButton f={f} onCreate={onCreate} onCancel={onCancel} price={f.cost !== null && f.priceState !== 'unavailable' ? formatCredits(f.cost) : priceText} />}
         </div>
       </div>
     </div>
@@ -643,21 +643,6 @@ function Surface() {
           </Chip>
           <IconButton icon={LayoutGrid} label={T.gallery} onPress={() => nav.push('/create/gallery')} testid="m-create-gallery" el="K1.2" />
         </>
-      }
-      banner={
-        <div className="m-k-toolrow">
-          <SourceChips where="cloud" />
-          <Chip kind="action" icon={LayoutGrid} label={T.allToolsLabel} onPress={() => nav.openSheet('tools')} testid="m-create-tools-all" el="K1.3">
-            {T.allTools}
-          </Chip>
-          <ChipGroup label={T.toolRow} role="radiogroup" testid="m-create-tools">
-            {tools.map((id) => (
-              <Chip key={id} kind="choice" icon={TOOL_ICON[id]} selected={id === f.tool} label={T.tool[id].name} onPress={() => setTool(id)} testid={`m-create-tool-${id}`} el="K1.4" risk={toolChoiceRisk(id)}>
-                {T.tool[id].short}
-              </Chip>
-            ))}
-          </ChipGroup>
-        </div>
       }
       footer={shape === 'tall' ? composer : shape === 'low' ? <StartBar f={f} onCreate={onCreate} onCancel={onCancel} /> : undefined}
     >

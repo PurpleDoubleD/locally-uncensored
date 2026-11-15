@@ -248,6 +248,12 @@ export const REMOTE_STRINGS = {
   },
   options: {
     title: 'Chat options',
+    /** Prompt v2: the model choice moved from beside the field into this sheet. */
+    model: 'Model',
+    modelSub: 'Runs on your desktop',
+    settingsName: (summary: string) => `Chat options: ${summary}`,
+    agentPart: 'Agent',
+    thinkingPart: 'Thinking',
     agent: 'Agent mode',
     agentSub: (abilities: string) => `The model can use tools on your desktop: ${abilities}.`,
     agentHint: 'Files and terminal commands are switched on your desktop under Settings, Remote Permissions.',
@@ -443,6 +449,8 @@ export const REMOTE_STRINGS = {
 
   // ---- A17: shared chats of the computer (CHATS-V1) ----
   shared: {
+    /** Prompt v2: the button under the field that opens the model choice of a shared chat. */
+    modelName: (name: string) => `Model: ${name}. Change model`,
     listTitle: 'Chats on your computer',
     listEmptyTitle: 'No shared chats',
     listEmptyText: 'On your computer, choose "Continue on phone" in a chat, or start a new one here.',
@@ -540,6 +548,24 @@ export const REMOTE_STRINGS = {
     offerNotNow: 'Not now',
     openSettings: 'Open settings',
     settingsFailed: 'The settings of your phone could not be opened.',
+  },
+  // ---- Voice over remote (GitHub #212) ----
+  voice: {
+    mic: 'Talk to your computer. Hold to talk, tap for hands free',
+    listening: 'Listening',
+    talk: 'Talk, let go to send',
+    sending: 'Your computer writes it down',
+    waiting: 'LU is answering',
+    speaking: 'Reading the answer',
+    interrupt: 'Tap to talk',
+    end: 'End',
+    endName: 'End voice',
+    nothingHeard: 'Nothing was heard. Hold the microphone a little longer.',
+    micDenied: 'LU has no access to the microphone. Allow it in the system settings.',
+    noMic: 'This phone gives LU no microphone.',
+    notConnected: 'Connect to your computer to talk to it.',
+    gaveUp: 'Hands free ended after a long silence.',
+    speakFailed: 'The answer could not be read aloud.',
   },
 } as const
 

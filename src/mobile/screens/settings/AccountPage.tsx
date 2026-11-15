@@ -17,7 +17,7 @@
  * fresh is mounted once by the frame of the shell, never here.
  */
 import { useEffect, useRef, useState } from 'react'
-import { Brain, CircleUserRound, CreditCard, ExternalLink, KeyRound, LogOut, MessageSquareText, Plus, RefreshCw, UserRoundX, WifiOff } from 'lucide-react'
+import { Brain, CircleUserRound, CreditCard, ExternalLink, KeyRound, LogOut, MessageSquareText, MessagesSquare, Plus, RefreshCw, UserRoundX, WifiOff } from 'lucide-react'
 import type { OAuthProvider } from '../../../api/cloud/supabase'
 import { countUnsyncedAccountMemories } from '../../../lib/memory-unsynced'
 import { PAST_DUE_WALLET_LINE, pastDueLine } from '../../../lib/past-due'
@@ -517,6 +517,7 @@ function SignedIn() {
         {/* Round 17, store switch purchase 'in-app' (iOS, in no preset): credits through the store of the system. Not a link, nothing leaves the app. */}
         {addCredits ? <Row icon={Plus} title={SETTINGS_STRINGS.iap.open} chevron={false} onPress={() => nav.openSheet('settings-add-credits')} testid="m-account-add-credits" /> : null}
         <Row icon={Brain} title={T.syncMemories} subtitle={T.syncMemoriesSub} onPress={() => nav.push('/settings/memory')} testid="m-account-sync-memories" el="E2.11" />
+        <Row icon={MessagesSquare} title={T.chatsStayHere} subtitle={policy.remoteDesktop ? T.chatsStayHereSubRemote : T.chatsStayHereSub} chevron={false} testid="m-account-chats-stay" />
         <Row icon={MessageSquareText} title={T.contentPolicy} onPress={() => nav.push('/settings/content-policy')} testid="m-account-content-policy" el="E2.12" />
       </ListGroup>
 

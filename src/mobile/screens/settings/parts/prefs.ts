@@ -28,10 +28,12 @@ export interface MobilePrefs {
   teaserHintShown: boolean
   /** E19: the last engine self test that passed, for the row "Last speed". null: never. */
   lastSelfTest: SelfTestRecord | null
+  /** GitHub #212: after a voice message to the computer the answer is read aloud. Default on. */
+  remoteVoiceReadAloud: boolean
   setPref: <K extends keyof MobilePrefValues>(key: K, value: MobilePrefValues[K]) => void
 }
 
-export type MobilePrefValues = Pick<MobilePrefs, 'switchCounter' | 'systemVoiceFallback' | 'lastBackupAt' | 'teaserHintShown' | 'lastSelfTest'>
+export type MobilePrefValues = Pick<MobilePrefs, 'switchCounter' | 'systemVoiceFallback' | 'lastBackupAt' | 'teaserHintShown' | 'lastSelfTest' | 'remoteVoiceReadAloud'>
 
 export const MOBILE_PREF_DEFAULTS: MobilePrefValues = {
   switchCounter: true,
@@ -39,6 +41,7 @@ export const MOBILE_PREF_DEFAULTS: MobilePrefValues = {
   lastBackupAt: 0,
   teaserHintShown: false,
   lastSelfTest: null,
+  remoteVoiceReadAloud: true,
 }
 
 export const useMobilePrefs = create<MobilePrefs>()(
@@ -56,6 +59,7 @@ export const useMobilePrefs = create<MobilePrefs>()(
         lastBackupAt: s.lastBackupAt,
         teaserHintShown: s.teaserHintShown,
         lastSelfTest: s.lastSelfTest,
+        remoteVoiceReadAloud: s.remoteVoiceReadAloud,
       }),
     },
   ),

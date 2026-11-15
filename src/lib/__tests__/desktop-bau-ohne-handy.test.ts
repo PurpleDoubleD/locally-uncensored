@@ -161,7 +161,9 @@ describe('the packages: a desktop build has no piece of src/mobile, a phone buil
   it('the marks are what src/mobile writes, and nothing else in the app does', () => {
     expect(read('src/mobile/ui/TabBar.tsx')).toContain('className="m-tabbar"')
     expect(read('src/mobile/ui/Sheet.tsx')).toContain("'m-sheet-close'")
-    expect(read('src/mobile/screens/chat/ChatPage.tsx')).toContain('testid="m-chat-options"')
+    // Since prompt v2 (m310) the options button is drawn by the composer and
+    // ChatPage hands the id over as a prop value, still a string literal.
+    expect(read('src/mobile/screens/chat/ChatPage.tsx')).toContain("testid: 'm-chat-options'")
     // Nothing outside src/mobile writes them (the one way in is main.tsx).
     for (const file of ['src/main.tsx', 'src/App.tsx', 'src/index.css']) {
       for (const mark of MARKS) expect(read(file), `${file} ${mark}`).not.toContain(mark)

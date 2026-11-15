@@ -78,7 +78,7 @@ function revokeRemoteMemory(): Promise<void> {
         await backendCall('stop_remote_server')
         useRemoteStore.setState({
           enabled: false, passcode: '', qrPngBase64: '', appQrPngBase64: '', connectedDevices: [],
-          tunnelActive: false, tunnelUrl: '', awaitingTunnel: false, qrVisible: false,
+          tunnelActive: false, tunnelUrl: '', internetAppOnly: false, awaitingTunnel: false, qrVisible: false,
           error: REMOTE_MEMORY_CHANGED, memoryNotice: REMOTE_MEMORY_CHANGED,
         })
       } catch {
@@ -407,6 +407,25 @@ export function normalizePairedDevices(raw: unknown): { info: SealedInfo; device
   }
 }
 
+/** #232: the internet way takes only the LU app. The tunnel address has no
+ *  browser page, so the panel says so and keeps showing the Wi-Fi address. */
+export const INTERNET_APP_ONLY_HINT = 'Internet works only with the LU app. A browser on your phone needs the same Wi-Fi.'
+
+/** The address the panel shows and copies: always the browser page in the
+ *  home network, never the tunnel, plus the hint while the internet way runs. */
+export function remoteAddressView(s: {
+  tunnelActive: boolean
+  internetAppOnly?: boolean
+  mobileUrl: string
+  lanUrl: string
+}): { address: string; appOnlyHint: string } {
+  const internet = s.tunnelActive || s.internetAppOnly === true
+  return {
+    address: s.mobileUrl || s.lanUrl,
+    appOnlyHint: internet ? INTERNET_APP_ONLY_HINT : '',
+  }
+}
+
 interface RemoteState {
   enabled: boolean
   port: number
@@ -415,6 +434,9 @@ interface RemoteState {
   lanUrl: string
   mobileUrl: string
   qrPngBase64: string
+  /** Set by `remote_qr_code` while the tunnel runs: the browser QR names the
+   *  Wi-Fi page, the internet takes only the LU app (#232). */
+  internetAppOnly: boolean
   connectedDevices: ConnectedDevice[]
   permissions: RemotePermissions
   tunnelActive: boolean
@@ -501,6 +523,7 @@ export const useRemoteStore = create<RemoteState>()((set, get) => ({
   lanUrl: '',
   mobileUrl: '',
   qrPngBase64: '',
+  internetAppOnly: false,
   connectedDevices: [],
   permissions: { filesystem: false, downloads: false, process_control: false, shell: false, create: false },
   tunnelActive: false,
@@ -641,6 +664,7 @@ export const useRemoteStore = create<RemoteState>()((set, get) => ({
         connectedDevices: [],
         tunnelActive: false,
         tunnelUrl: '',
+        internetAppOnly: false,
         awaitingTunnel: false,
         dispatchedConversationId: null,
         qrVisible: false,
@@ -751,8 +775,8 @@ export const useRemoteStore = create<RemoteState>()((set, get) => ({
 
   fetchQrCode: async () => {
     try {
-      const qr = await backendCall<{ qr_png_base64: string; url: string; passcode: string }>('remote_qr_code')
-      set({ qrPngBase64: qr.qr_png_base64 })
+      const qr = await backendCall<{ qr_png_base64: string; url: string; passcode: string; internetAppOnly?: unknown }>('remote_qr_code')
+      set({ qrPngBase64: qr.qr_png_base64, internetAppOnly: qr.internetAppOnly === true })
     } catch {
       // Non-critical
     }
@@ -984,7 +1008,7 @@ export const useRemoteStore = create<RemoteState>()((set, get) => ({
   stopTunnel: async () => {
     try {
       await backendCall('stop_tunnel')
-      set({ tunnelActive: false, tunnelUrl: '' })
+      set({ tunnelActive: false, tunnelUrl: '', internetAppOnly: false })
       // Refresh QR to show LAN IP again
       get().fetchQrCode()
     } catch (err) {
@@ -1097,7 +1121,7 @@ export const useRemoteStore = create<RemoteState>()((set, get) => ({
         qrVisible: true, // Bug #16: fresh restart → fresh passcode → show QR
       })
       // Tunnel gets torn down on stop, so reset its state in the UI.
-      set({ tunnelActive: false, tunnelUrl: '' })
+      set({ tunnelActive: false, tunnelUrl: '', internetAppOnly: false })
       // Re-fetch QR for the new passcode
       get().fetchQrCode()
     } catch (err) {

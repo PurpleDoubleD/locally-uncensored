@@ -53,6 +53,52 @@ export function AgentToolGuard({ chatKey }: { chatKey: string }) {
   return null
 }
 
+/**
+ * Prompt v2 (14.11.2026): what was a row of chips above the field is now the grey summary next to the ONE
+ * settings button under it. The parts in the order of the old chips, each only while its thing is on.
+ * `changed`: something differs from a plain chat (the dot at the button).
+ */
+export function useComposerStatusParts(chatId: string | null, agentKey: string): { parts: string[]; changed: boolean } {
+  const agentOn = useAgentModeStore((s) => s.agentModeActive[agentKey] ?? false)
+  const docCount = useRAGStore((s) => (chatId ? (s.documents[chatId]?.length ?? 0) : 0))
+  const thinking = useThinkingState()
+  const caveman = useSettingsStore((s) => s.settings.cavemanMode)
+  const personasEnabled = useSettingsStore((s) => s.settings.personasEnabled)
+  const personas = offeredPersonas(useSettingsStore((s) => s.personas))
+  const activePersonaId = useSettingsStore((s) => s.activePersonaId)
+  const personaOnChat = useChatStore((s) => (chatId ? s.conversations.find((c) => c.id === chatId)?.personaEnabled === true : false))
+  const ownPrompt = useChatStore((s) => (chatId ? (s.conversations.find((c) => c.id === chatId)?.systemPrompt ?? '').trim() : ''))
+  const groupCount = useChatStore((s) => {
+    const models = chatId ? s.conversations.find((c) => c.id === chatId)?.groupModels : undefined
+    return isGroupChat(models) ? models.length : 0
+  })
+  const personaName = ownPrompt ? (personaNameFor(true, ownPrompt, personas, personas.find((p) => p.id === activePersonaId)?.name ?? null) ?? T.status.personaOwn) : null
+  const showPersona = personasEnabled && personaOnChat && !!personaName
+  const parts: string[] = []
+  if (agentOn) parts.push(T.status.agent)
+  if (docCount > 0) parts.push(T.status.documents(docCount))
+  if (thinking.on) parts.push(T.status.thinking)
+  if (showPersona && personaName) parts.push(personaName)
+  if (groupCount > 0) parts.push(T.status.group(groupCount))
+  if (caveman !== 'off') parts.push(T.status.caveman)
+  return { parts, changed: agentOn || showPersona || groupCount > 0 || caveman !== 'off' }
+}
+
+/**
+ * The warnings that still stand above the field in prompt v2: Agent is on and the model cannot use tools.
+ * Everything else that was a chip here is in the summary of the settings button.
+ */
+export function ComposerAlerts({ chatKey: key }: { chatKey: string }) {
+  const agentOn = useAgentModeStore((s) => s.agentModeActive[key] ?? false)
+  const tools = useAgentToolSupport()
+  if (!agentOn || tools.canUseTools) return null
+  return (
+    <Chip kind="action" mini tone="warn" icon={AlertTriangle} label={T.status.agentNoTools} onPress={() => openOptions({ chatId: key, section: 'agent' })} testid="m-chat-status-agent" el="C2.10">
+      {T.status.agent}
+    </Chip>
+  )
+}
+
 export function ComposerStatus({ chatId }: ComposerStatusProps) {
   const agentOn = useAgentModeStore((s) => s.agentModeActive[chatId] ?? false)
   const tools = useAgentToolSupport()

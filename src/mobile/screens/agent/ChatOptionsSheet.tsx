@@ -43,7 +43,7 @@
  *   Zustaende: Gesperrte Zeilen zeigen den Grund im Zusatz, nie nur grau.
  */
 import { useEffect, useRef } from 'react'
-import { Bot, Brain, Cloud, Database, FileText, Gauge, Globe, ListChecks, Repeat, Shield, SlidersHorizontal, Target, User, Users, Volume1, Workflow, Zap } from 'lucide-react'
+import { Bot, Box, Brain, Cloud, Coins, Database, FileText, Gauge, Globe, ListChecks, Repeat, Shield, SlidersHorizontal, Target, User, Users, Volume1, Workflow, Zap } from 'lucide-react'
 import { agentBlockReason, toolModelFitsThisPhone, useAgentToolSupport, type AgentBlockReason } from './parts/tool-support'
 import { useDevice } from '../models/parts/device'
 import { storePolicy } from '../../policy/storePolicy'
@@ -57,6 +57,11 @@ import { useCloudAuthStore } from '../../../stores/cloudAuthStore'
 import { useMemoryStore } from '../../../stores/memoryStore'
 import { usePermissionStore } from '../../../stores/permissionStore'
 import { useSettingsStore } from '../../../stores/settingsStore'
+import { useModelStore } from '../../../stores/modelStore'
+import { useRAGStore } from '../../../stores/ragStore'
+import { isDeviceModel } from '../../lib/model-place'
+import { isCloudModel } from '../chat/parts/consent'
+import { chatModelLabel } from '../chat/parts/model-name'
 import { shownPersona } from '../../policy/personas'
 import { nav, useSheet } from '../../nav'
 import { AGENT_STRINGS as T } from '../../strings/agent'
@@ -78,6 +83,7 @@ import { isOptionsSub, subPageOf, type ChatOptionsProps } from './parts/options/
 import { WorkflowsPage } from './parts/options/WorkflowsPage'
 
 const S = T.options
+const AGENT_STATUS = T.status
 
 /** The sentence for each reason Agent mode is locked (parts/tool-support.ts, agentBlockReason). */
 const AGENT_BLOCK_TEXT: Record<AgentBlockReason, string> = {
@@ -143,6 +149,11 @@ function FirstPage({ chatKey: key }: { chatKey: string }) {
   const ownPermissions = usePermissionStore((s) => chatDiffers(s.conversationOverrides[key], s.globalPermissions))
   const webLevel = useChatCategoryLevel(key, 'web')
   const fileLevel = useChatCategoryLevel(key, 'filesystem')
+  const activeModel = useModelStore((s) => s.activeModel)
+  const models = useModelStore((s) => s.models)
+  const docCount = useRAGStore((s) => s.documents[key]?.length ?? 0)
+  const inCloud = useSettingsStore((s) => s.settings.appMode === 'cloud')
+  const modelWhere = !activeModel ? undefined : isDeviceModel(activeModel) ? S.modelPhone : isCloudModel(activeModel) ? S.modelCloud : S.modelOther
 
   // Chat tools are always on since 3.0.7 (lib/chat-tools-reach.ts), in plain chat as in Agent.
   const webOn = webLevel !== 'blocked'
@@ -178,6 +189,27 @@ function FirstPage({ chatKey: key }: { chatKey: string }) {
         </Button>
       }
     >
+      {/* Prompt v2 (14.11.2026): what stood around the field (model choice, documents chip, cloud chip) is here. */}
+      <ListGroup testid="m-options-group-model">
+        <Row
+          title={S.model}
+          subtitle={modelWhere}
+          icon={Box}
+          value={activeModel ? chatModelLabel(models, activeModel) : S.modelNone}
+          onPress={() => {
+            sheet.close()
+            nav.openSheet('model', {})
+          }}
+          testid="m-options-model"
+          el="C2.6"
+        />
+        {chat.saved && docCount > 0 ? (
+          <Row title={S.documents} subtitle={S.documentsSub} icon={FileText} value={AGENT_STATUS.documents(docCount)} onPress={() => { sheet.close(); nav.push('/chat/:id/documents', { id: key }) }} testid="m-options-documents" el="C2.11" />
+        ) : null}
+        {inCloud ? (
+          <Row title={S.cost} subtitle={S.costSub} icon={Coins} onPress={() => { sheet.close(); nav.openSheet('price', { chatId: key }) }} testid="m-options-cost" el="C2.13" />
+        ) : null}
+      </ListGroup>
       <ListGroup title={S.groupNow} testid="m-options-group-now">
         <Row
           title={S.agent}

@@ -344,3 +344,18 @@ button{-webkit-appearance:none;appearance:none}
 .settings-btn.perm-gap{border-color:var(--accent);color:var(--accent)}
 .settings-btn.perm-gap::before{content:'';display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--accent);margin-right:6px;animation:perm-pulse 1.4s ease-in-out infinite}
 @keyframes perm-pulse{0%,100%{opacity:0.4}50%{opacity:1}}
+/* Voice over remote (#212): the microphone in the send slot, the line in place of the field. */
+.send-btn.mic{background:var(--container);color:var(--text-primary);touch-action:none;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+.send-btn.mic.live{background:rgba(239,68,68,0.18);color:#fca5a5}
+.voice-line{flex:1;min-height:44px;display:flex;align-items:center;gap:10px;padding:0 4px 0 12px;background:var(--container);border-radius:var(--radius-md);color:var(--text-primary);font-size:0.86rem;min-width:0}
+.voice-bars{display:inline-flex;align-items:center;gap:3px;height:20px;flex:none}
+.voice-bars i{width:3px;height:100%;border-radius:2px;background:#ef4444;transform:scaleY(0.15);transform-origin:center;transition:transform 90ms linear}
+.voice-clock{font-variant-numeric:tabular-nums;color:var(--text-secondary);flex:none}
+.voice-hint{flex:1;min-width:0;color:var(--text-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.voice-note{white-space:normal;padding:8px 0;color:var(--text-primary)}
+.voice-sub{color:var(--text-tertiary);font-size:0.78rem;white-space:nowrap}
+.voice-tap{flex:1;min-width:0;min-height:44px;display:flex;align-items:center;gap:8px;background:none;border:none;color:inherit;font:inherit;text-align:left;padding:0}
+.voice-end{flex:none;min-width:44px;min-height:44px;background:none;border:none;color:var(--text-primary);font:inherit;font-weight:600;padding:0 8px;cursor:pointer}
+.voice-spin{width:16px;height:16px;border-radius:50%;border:2px solid var(--text-tertiary);border-top-color:transparent;animation:voice-spin 0.8s linear infinite;flex:none}
+@keyframes voice-spin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion: reduce){.voice-bars i{transition:none}.voice-spin{animation:none}}

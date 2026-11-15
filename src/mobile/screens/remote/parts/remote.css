@@ -575,3 +575,82 @@
   display: block;
   color: var(--m-t3);
 }
+
+/* ---------- Voice over remote (GitHub #212): the line in place of the text field ---------- */
+.m-app .m-rvoice {
+  width: 100%;
+  min-height: 2.75rem;
+  display: flex;
+  align-items: center;
+  gap: var(--m-s3);
+  padding: 12px 14px 4px;
+  color: var(--m-t1);
+  font-size: var(--m-text-control);
+}
+.m-app .m-rvoice .m-chat-meter-bars {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  height: 20px;
+}
+.m-app .m-rvoice .m-chat-meter-bars i {
+  width: 3px;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--m-err);
+  transform-origin: center;
+  transition: transform 90ms linear;
+}
+@media (prefers-reduced-motion: reduce) {
+  .m-app .m-rvoice .m-chat-meter-bars i {
+    transition: none;
+  }
+}
+.m-app .m-rvoice .m-chat-meter-quiet {
+  color: var(--m-t3);
+  font-size: var(--m-text-caption);
+}
+.m-app .m-rvoice-clock {
+  font-family: var(--m-font-mono);
+  font-size: var(--m-text-mono);
+  color: var(--m-t2);
+}
+.m-app .m-rvoice-hint {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--m-t2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.m-app .m-rvoice-tap {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  gap: var(--m-s2);
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+.m-app .m-rvoice-sub {
+  color: var(--m-t3);
+  font-size: var(--m-text-caption);
+  white-space: nowrap;
+}
+.m-app .m-rvoice-end {
+  flex: none;
+  min-height: 44px;
+  min-width: 44px;
+  padding: 0 var(--m-s2);
+  border: 0;
+  background: none;
+  color: var(--m-t1);
+  font: inherit;
+  font-weight: 600;
+}

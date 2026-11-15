@@ -911,6 +911,7 @@ pub fn run() {
             commands::model_sniff::sniff_model_files,
             #[cfg(desktop)]
             commands::gallery_files::trash_comfy_output,
+            #[cfg(desktop)]
             commands::gallery_files::scan_comfy_output,
             commands::system::restore_stores,
             commands::system::chat_backup_conversations,
