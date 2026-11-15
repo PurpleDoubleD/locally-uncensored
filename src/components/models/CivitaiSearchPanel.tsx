@@ -10,6 +10,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Search, Loader2, ExternalLink, Download, CheckCircle, Info } from 'lucide-react'
 import { useModelSourceStore } from '../../stores/modelSourceStore'
+import { folderIsAGuess } from '../../lib/model-folder-guess'
 import { checkCivitaiInstalled, civitaiHitWithFile, civitaiInstalledInFolder, searchCivitaiModels, startCivitaiDownload, startModelDownloadToPath, type CivitAIModelResult } from '../../api/discover'
 import { CivitaiHitDetails } from './CivitaiHitDetails'
 import { usePageMemoryStore } from '../../stores/pageMemoryStore'
@@ -148,7 +149,9 @@ export function CivitaiSearchPanel({ modelType, title, placeholder, search = '',
       dlStore.getState().startPolling()
       return
     }
-    dlStore.getState().setMeta(model.filename, model.downloadUrl, model.subfolder)
+    // A27: kept for a resume, so the header still decides the folder after a restart.
+    if (folderIsAGuess(model.subfolder)) dlStore.getState().setMeta(model.filename, model.downloadUrl, model.subfolder, undefined, { sniffFolder: true })
+    else dlStore.getState().setMeta(model.filename, model.downloadUrl, model.subfolder)
     await startCivitaiDownload(model)
     dlStore.getState().startPolling()
   }

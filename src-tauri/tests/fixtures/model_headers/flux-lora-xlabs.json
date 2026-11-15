@@ -1,0 +1,16 @@
+{
+"source": "huggingface.co/XLabs-AI/flux-lora-collection anime_lora.safetensors",
+"note": "real safetensors header, read 14.11.2026 by range request; keys of block 0 and the keys outside the blocks, no weights",
+"tensors": 152,
+"keys": [
+"double_blocks.0.processor.proj_lora1.down.weight",
+"double_blocks.0.processor.proj_lora1.up.weight",
+"double_blocks.0.processor.proj_lora2.down.weight",
+"double_blocks.0.processor.proj_lora2.up.weight",
+"double_blocks.0.processor.qkv_lora1.down.weight",
+"double_blocks.0.processor.qkv_lora1.up.weight",
+"double_blocks.0.processor.qkv_lora2.down.weight",
+"double_blocks.0.processor.qkv_lora2.up.weight"
+],
+"shapes": {}
+}

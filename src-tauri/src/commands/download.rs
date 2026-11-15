@@ -915,7 +915,33 @@ pub async fn comfy_model_info(
     let file = hits
         .first()
         .ok_or_else(|| format!("{} was not found in the ComfyUI models folders", filename))?;
-    Ok(file_facts(file, own_folder, hits.len()))
+    let mut facts = file_facts(file, own_folder, hits.len());
+    // A27: a file in the wrong main model folder is named, never moved.
+    let found_in = main_folder_of(file);
+    let path = file.clone();
+    let belongs = match found_in {
+        Some(f) => tauri::async_runtime::spawn_blocking(move || crate::commands::model_sniff::belongs_elsewhere(&path, f))
+            .await
+            .ok()
+            .flatten(),
+        None => None,
+    };
+    if let (Some(target), Some(obj)) = (belongs, facts.as_object_mut()) {
+        obj.insert("belongsIn".into(), serde_json::json!(target));
+        obj.insert("foundIn".into(), serde_json::json!(found_in));
+    }
+    Ok(facts)
+}
+
+/// The main model folder (checkpoints, diffusion_models or unet) a file sits
+/// in, also below a subfolder of it (`checkpoints/flux/x.safetensors`).
+pub(crate) fn main_folder_of(file: &Path) -> Option<&'static str> {
+    file.ancestors().skip(1).find_map(|d| match d.file_name()?.to_str()? {
+        "checkpoints" => Some("checkpoints"),
+        "diffusion_models" => Some("diffusion_models"),
+        "unet" => Some("unet"),
+        _ => None,
+    })
 }
 
 /// C41: show a ComfyUI model file (a LoRA, a checkpoint) in the file
@@ -1285,6 +1311,55 @@ mod chat_download_tests {
     }
 }
 
+/// A27: the directories the header may send a main model file to, for a
+/// download whose folder came from a title. None for any other folder (a
+/// LoRA, a VAE, an upscaler: their search type says what they are) and for
+/// a ComfyUI on another machine, whose files LU does not read back.
+async fn header_folder_dirs(
+    state: &State<'_, AppState>,
+    comfy_path: &Option<String>,
+    subfolder: &str,
+) -> Option<HashMap<String, PathBuf>> {
+    if !["checkpoints", "diffusion_models", "unet"].contains(&subfolder) || remote_comfy(state).is_some() {
+        return None;
+    }
+    let mut dirs = HashMap::new();
+    // Look-only (PR #218): settle_by_header creates the one folder a file
+    // moves into, no other main folder is made by a download.
+    for key in crate::commands::model_sniff::HEADER_FOLDERS {
+        if let Ok(d) = comfy_models_path(state, comfy_path, key).await {
+            dirs.insert(key.to_string(), d);
+        }
+    }
+    Some(dirs)
+}
+
+/// A27: the file of this name in another main model folder, where an earlier
+/// download of it was moved by its header.
+fn already_settled(dirs: &HashMap<String, PathBuf>, subfolder: &str, dest_file: &Path) -> Option<PathBuf> {
+    let name = dest_file.file_name()?;
+    dirs.iter()
+        .filter(|(k, _)| k.as_str() != subfolder)
+        .map(|(_, d)| d.join(name))
+        .find(|p| p.is_file() && !p.with_extension("download").exists())
+}
+
+/// A27: after a finished transfer, move the file to the folder its header
+/// names. The new path when it moved.
+async fn settle_finished(dest_file: &Path, subfolder: &str, dirs: Option<HashMap<String, PathBuf>>) -> Option<PathBuf> {
+    let dirs = dirs?;
+    let file = dest_file.to_path_buf();
+    let guessed = subfolder.to_string();
+    let moved = tauri::async_runtime::spawn_blocking(move || {
+        crate::commands::model_sniff::settle_by_header(&file, &guessed, &dirs)
+    })
+    .await
+    .ok()
+    .flatten()?;
+    println!("[Download] {} is a {} file by its header, moved to {}", dest_file.display(), moved.0, moved.1.display());
+    Some(moved.1)
+}
+
 // Eight arguments since C60's chatOrigin; a Tauri command takes them flat
 // from the frontend's object, so they stay arguments.
 #[allow(non_snake_case, clippy::too_many_arguments)]
@@ -1304,6 +1379,11 @@ pub async fn download_model(
     // .safetensors or .gguf file, only a model folder of ComfyUI; checked here
     // and not only in the frontend, which a prompt-injected run could reach.
     chatOrigin: Option<bool>,
+    // A27 (3.1.0, GitHub #234): the folder was picked from a title (the
+    // CivitAI search, a chat link), not from a catalog. Then the header of
+    // the finished file decides between checkpoints, diffusion_models, vae
+    // and text_encoders, and the file moves there (`settle_by_header`).
+    sniffFolder: Option<bool>,
     state: State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
     if chatOrigin == Some(true) {
@@ -1324,11 +1404,18 @@ pub async fn download_model(
 
     let dest_dir = comfy_models_dir(&state, &comfy_path, &subfolder).await?;
     let dest_file = dest_dir.join(sanitize_filename(&filename));
+    let header_dirs = if sniffFolder == Some(true) { header_folder_dirs(&state, &comfy_path, &subfolder).await } else { None };
 
     let expected_sha256 = match expectedSha256.as_deref() {
         Some(s) => Some(normalize_sha256(s)?),
         None => None,
     };
+
+    // A27: an earlier download of this file was moved by its header. It is
+    // there, complete (a finished transfer only gets its name at the end).
+    if let Some(found) = header_dirs.as_ref().and_then(|d| already_settled(d, &subfolder, &dest_file)) {
+        return Ok(serde_json::json!({"status": "exists", "path": found.to_string_lossy()}));
+    }
 
     if dest_file.exists() {
         let actual = dest_file.metadata().map(|m| m.len()).unwrap_or(0);
@@ -1400,9 +1487,13 @@ pub async fn download_model(
         match do_download(&url, &dest_file, &downloads_arc, &id_clone, token, resume_offset,
                         CatalogClaims { expected_bytes, expected_sha256, auth_token }).await {
             Ok(_) => {
+                let moved = settle_finished(&dest_file, &subfolder, header_dirs).await;
                 if let Ok(mut dl) = downloads_arc.lock() {
                     if let Some(p) = dl.get_mut(&id_clone) {
                         p.status = "complete".to_string();
+                        if let Some(path) = &moved {
+                            p.dest = path.to_string_lossy().into_owned();
+                        }
                     }
                 }
                 println!("[Download] Complete: {}", filename_clone);
@@ -2824,6 +2915,7 @@ pub fn delete_orphan_download(
 // the same name, and one name can carry only one command macro.
 #[cfg_attr(desktop, tauri::command)]
 #[cfg_attr(mobile, allow(dead_code))]
+#[allow(clippy::too_many_arguments)]
 pub async fn resume_download(
     id: String,
     url: String,
@@ -2831,6 +2923,8 @@ pub async fn resume_download(
     expectedBytes: Option<u64>,
     expectedSha256: Option<String>,
     authToken: Option<String>,
+    // A27: as in `download_model`.
+    sniffFolder: Option<bool>,
     state: State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
     let expected_bytes = expectedBytes;
@@ -2846,6 +2940,7 @@ pub async fn resume_download(
 
     let dest_dir = comfy_models_dir(&state, &comfy_path, &subfolder).await?;
     let dest_file = dest_dir.join(&id);
+    let header_dirs = if sniffFolder == Some(true) { header_folder_dirs(&state, &comfy_path, &subfolder).await } else { None };
     let tmp_path = dest_file.with_extension("download");
 
     let resume_offset = if tmp_path.exists() {
@@ -2887,9 +2982,13 @@ pub async fn resume_download(
         match do_download(&url, &dest_file, &downloads_arc, &id_clone, token, resume_offset,
                         CatalogClaims { expected_bytes, expected_sha256, auth_token }).await {
             Ok(_) => {
+                let moved = settle_finished(&dest_file, &subfolder, header_dirs).await;
                 if let Ok(mut dl) = downloads_arc.lock() {
                     if let Some(p) = dl.get_mut(&id_clone) {
                         p.status = "complete".to_string();
+                        if let Some(path) = &moved {
+                            p.dest = path.to_string_lossy().into_owned();
+                        }
                     }
                 }
                 println!("[Download] Complete: {}", id_clone);

@@ -1,4 +1,5 @@
 import { backendCall, fetchExternal } from "./backend"
+import { folderIsAGuess } from '../lib/model-folder-guess'
 import { readComfyFolderLists, filterPartialFiles, refreshComfyModels } from "./comfyui"
 import { COMPONENT_REGISTRY, type ComponentSpec, type ComponentRequirements } from './component-registry'
 import { clearNodeCache, getAllNodeInfo } from "./comfyui-nodes"
@@ -77,7 +78,12 @@ export function civitaiAuthToken(url: string): string | null {
   return key ? key : null
 }
 
-export async function startModelDownload(url: string, subfolder: string, filename: string, expectedBytes?: number, sha256?: string): Promise<{ status: string; id: string; error?: string }> {
+export { folderIsAGuess }
+
+export async function startModelDownload(
+  url: string, subfolder: string, filename: string, expectedBytes?: number, sha256?: string,
+  opts: { sniffFolder?: boolean } = {},
+): Promise<{ status: string; id: string; error?: string }> {
   // D1: the page this file came from, for Details in Models.
   recordSourceFromDownload(filename, url)
   return backendCall("download_model", {
@@ -87,6 +93,7 @@ export async function startModelDownload(url: string, subfolder: string, filenam
     expectedBytes: expectedBytes ?? null,
     expectedSha256: sha256 ?? null,
     authToken: civitaiAuthToken(url),
+    ...(opts.sniffFolder ? { sniffFolder: true } : {}),
   })
 }
 
@@ -105,6 +112,8 @@ export async function startChatLinkDownload(url: string, subfolder: string, file
     expectedSha256: null,
     authToken: civitaiAuthToken(url),
     chatOrigin: true,
+    // A27: the agent picks the folder from the link and the page, a guess.
+    ...(folderIsAGuess(subfolder) ? { sniffFolder: true } : {}),
   })
 }
 
@@ -119,6 +128,10 @@ export interface ComfyFileFacts {
   ownFolder: boolean
   /** How many copies of that name the model folders hold. */
   copies: number
+  /** A27: the main model folder the file's header names, when it sits in another one. */
+  belongsIn?: string
+  /** A27: the main model folder it sits in, set with `belongsIn`. */
+  foundIn?: string
 }
 
 /** Details for a ComfyUI file of the Installed list. Throws with the reason. */
@@ -228,7 +241,7 @@ export function isPermanentDownloadError(error?: string | null): boolean {
   return !!error && PERMANENT_HTTP.test(error)
 }
 
-export async function resumeDownload(id: string, url: string, subfolder: string, expectedBytes?: number, sha256?: string): Promise<void> {
+export async function resumeDownload(id: string, url: string, subfolder: string, expectedBytes?: number, sha256?: string, sniffFolder?: boolean): Promise<void> {
   await backendCall("resume_download", {
     id,
     url,
@@ -236,6 +249,7 @@ export async function resumeDownload(id: string, url: string, subfolder: string,
     expectedBytes: expectedBytes ?? null,
     expectedSha256: sha256 ?? null,
     authToken: civitaiAuthToken(url),
+    ...(sniffFolder ? { sniffFolder: true } : {}),
     ...titleArg(id),
   })
 }
@@ -2577,7 +2591,8 @@ export function isGgufFile(filename: string | undefined): boolean {
  */
 export async function startCivitaiDownload(model: { downloadUrl?: string; filename?: string; subfolder?: string }): Promise<void> {
   if (!model.downloadUrl || !model.filename || !model.subfolder) return
-  await startModelDownload(model.downloadUrl, model.subfolder, model.filename)
+  // A27: the folder came from the title; the header of the file decides.
+  await startModelDownload(model.downloadUrl, model.subfolder, model.filename, undefined, undefined, { sniffFolder: folderIsAGuess(model.subfolder) })
   if (!isGgufFile(model.filename)) return
   const target = await comfyModelTarget()
   if (target.remote) return
@@ -2611,13 +2626,17 @@ export async function checkCivitaiInstalled(models: readonly CivitAIModelResult[
   const installed = new Set<number>()
   const asked = models.filter((m) => m.filename && m.subfolder)
   if (asked.length === 0) return installed
+  // A27: a download from here may have been moved by its header to the other
+  // main model folder; the hit is installed there too.
+  const sibling = (f: string) => (f === 'checkpoints' ? 'diffusion_models' : 'checkpoints')
+  const pairs = asked.flatMap((m) => (folderIsAGuess(m.subfolder!) ? [m.subfolder!, sibling(m.subfolder!)] : [m.subfolder!]).map((subfolder) => ({ m, subfolder })))
   try {
     const results: Array<{ filename: string; exists: boolean; actualBytes: number }> = await backendCall('check_model_sizes', {
-      files: asked.map((m) => ({ subfolder: m.subfolder!, filename: m.filename!, expectedBytes: m.sizeBytes ?? 0 })),
+      files: pairs.map(({ m, subfolder }) => ({ subfolder, filename: m.filename!, expectedBytes: m.sizeBytes ?? 0 })),
     })
     // One answer per file and in order: two hits may share a file name and
     // differ only in their folder, so the name alone cannot pair them up.
-    asked.forEach((m, i) => {
+    pairs.forEach(({ m }, i) => {
       const r = results[i]
       if (r && r.filename === m.filename && r.exists && civitaiFileMatches(m, r.actualBytes)) installed.add(m.id)
     })

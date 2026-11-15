@@ -5,6 +5,7 @@
 import { ExternalLink, Loader2 } from 'lucide-react'
 import { Modal } from '../ui/Modal'
 import { ModalActions, ModalButton } from '../ui/ModalActions'
+import { Hinweis } from '../ui/Hinweis'
 import { formatBytes } from '../../lib/formatters'
 import { openExternal } from '../../api/backend'
 import type { ComfyFileFacts } from '../../api/discover'
@@ -20,6 +21,22 @@ export interface ModelFileInfoState {
   error: string | null
   /** Hugging Face or CivitAI page, only when LU wrote it down. */
   page: string | null
+}
+
+/**
+ * A27 (GitHub #234): the file's header names another models folder than the
+ * one it sits in. LU does not move a file the user put there; it says where
+ * ComfyUI expects it.
+ */
+export function wrongFolderNote(foundIn: string, belongsIn: string): string {
+  const why = belongsIn === 'diffusion_models'
+    ? 'it is a bare diffusion model, without its own VAE, and ComfyUI loads those from models/diffusion_models'
+    : belongsIn === 'checkpoints'
+      ? 'it carries its own VAE, and ComfyUI loads such all-in-one files from models/checkpoints'
+      : belongsIn === 'vae'
+        ? 'it is a VAE, and ComfyUI loads those from models/vae'
+        : `ComfyUI loads files like it from models/${belongsIn}`
+  return `By its file header this file belongs in ${belongsIn}, not ${foundIn}: ${why}. Move it there by hand, then restart ComfyUI so it lists the file.`
 }
 
 function when(secs: number | null): string | null {
@@ -55,6 +72,11 @@ export function ModelFileInfo({ info, onClose }: { info: ModelFileInfoState | nu
             <p className="t-micro text-gray-600 dark:text-gray-300 mb-3">
               This file is in your own model folder (Settings, Storage). LU reads it from there and does not delete it.
             </p>
+          )}
+          {facts?.belongsIn && (
+            <Hinweis className="mb-3">
+              <span data-testid="model-file-wrong-folder">{wrongFolderNote(facts.foundIn ?? 'this folder', facts.belongsIn)}</span>
+            </Hinweis>
           )}
           {facts && facts.copies > 1 && (
             <p className="t-micro text-gray-600 dark:text-gray-300 mb-3">
