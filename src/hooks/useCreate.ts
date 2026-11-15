@@ -7,6 +7,7 @@ import { macHiresPass } from '../lib/mac-hires'
 import { v4 as uuid } from 'uuid'
 import {
   checkComfyConnection,
+  COMFY_PROBE_LIMIT_MS,
   refreshComfyModels,
   getImageModels,
   getVideoModels,
@@ -1758,7 +1759,9 @@ export function useCreate() {
     setIsGenerating(true)
     setProgress(0, 'Checking ComfyUI...')
     const guard = await ensureComfyForRender({
-      probe: () => checkComfyConnection(),
+      // W32 follow-up: asked with a limit of its own, not the proxy's five
+      // minutes in front of every batch.
+      probe: () => checkComfyConnection(COMFY_PROBE_LIMIT_MS),
       status: () => backendCall<ComfyGuardStatus>('comfyui_status').catch(() => null),
       start: async () => { await backendCall('start_comfyui') },
       onProgress: (line) => setProgress(0, line),
@@ -2329,72 +2332,92 @@ export function useCreate() {
             }
           }, 15000)
 
-          // Heartbeat: check ComfyUI every 10s + poll for completion (catches missed WS events)
+          // Heartbeat: every 10s, poll for completion (catches missed WS events) and check ComfyUI.
+          // W32 follow-up: the history is asked FIRST and on its own limit
+          // (getHistory). It used to wait behind a /system_stats probe without
+          // a limit of its own (the proxy's five minutes), so a missed
+          // completion event could sit behind a probe that did not come back,
+          // and the next batch never started. Ticks do not stack.
           let completionHandled = false
           let queueCheckCounter = 0
+          let beating = false
           const heartbeat = setInterval(async () => {
-            if (completionHandled) return
-            const alive = await checkComfyConnection()
-            if (!alive) { cleanup(); reject(new Error('ComfyUI stopped responding during generation')); return }
-            // A prompt still in ComfyUI's queue is alive even when the socket
-            // goes quiet (long model loads emit no events) — refresh the
-            // watchdog once a minute from the queue itself.
-            queueCheckCounter += 1
-            if (queueCheckCounter >= 6) {
-              queueCheckCounter = 0
-              if (await isPromptQueued(promptId).catch(() => false)) lastActivity = Date.now()
-            }
-            // Poll history to catch completion if WebSocket event was missed
+            if (completionHandled || beating) return
+            beating = true
             try {
-              const history = await getHistory(promptId)
-              if (!history) return
-              const statusStr = history.status?.status_str
-              if (statusStr === 'success') {
-                completionHandled = true
-                console.log('[useCreate] Completion detected via polling (WS event missed)')
-                cleanup()
-                useCreateStore.getState().setProgressPhase('complete')
-                setProgress(95, 'Fetching results...')
-                const messages = historyMessages(history)
-                const startMsg = messages.find(([t]) => t === 'execution_start')
-                const endMsg = messages.find(([t]) => t === 'execution_success')
-                const comfyTime = startMsg?.[1]?.timestamp && endMsg?.[1]?.timestamp
-                  ? ((endMsg[1].timestamp - startMsg[1].timestamp) / 1000).toFixed(1) : null
-                setProgress(100, 'Complete!')
-                useCreateStore.getState().setLastGenTime(comfyTime ? `${comfyTime}s` : null)
-                const outputs = history.outputs ?? {}
-                let found = false
-                for (const nodeId of Object.keys(outputs)) {
-                  // Extract files from ANY keyed array, not just images/gifs/
-                  // videos — custom save nodes post under other keys (audio,
-                  // result, files, …); previously those outputs were dropped
-                  // even though they existed on disk.
-                  const files: ComfyUIOutput[] = extractComfyOutputFiles(outputs[nodeId])
-                  for (const file of files) {
-                    found = true
-                    addToGallery({
-                      id: uuid(), type: galleryTypeForFile(file.filename, mode),
-                      filename: file.filename, subfolder: file.subfolder ?? '', comfyType: file.type ?? 'output',
-                      prompt, ...improveFields, ...transparentFields(), negativePrompt, model: activeModel,
-                      modelType: mode === 'image' ? imageModelType : (videoModelsList.find(m => m.name === activeModel)?.type ?? 'wan'),
-                      seed: runSeed,
-                      steps, cfgScale, sampler, scheduler, width: outputWidth, height: outputHeight, batchSize, ...ranLoras(runLoras),
-                      createdAt: Date.now(), builderUsed, intent, ...toolFields, ...(skippedNote ? { runNote: skippedNote } : {}),
-                    })
+              // Poll history to catch completion if WebSocket event was missed
+              try {
+                const history = await getHistory(promptId)
+                // Still running (no entry yet): on to the reachability check.
+                if (!history) throw new Error('no history entry yet')
+                const statusStr = history.status?.status_str
+                if (statusStr === 'success') {
+                  completionHandled = true
+                  console.log('[useCreate] Completion detected via polling (WS event missed)')
+                  cleanup()
+                  useCreateStore.getState().setProgressPhase('complete')
+                  setProgress(95, 'Fetching results...')
+                  const messages = historyMessages(history)
+                  const startMsg = messages.find(([t]) => t === 'execution_start')
+                  const endMsg = messages.find(([t]) => t === 'execution_success')
+                  const comfyTime = startMsg?.[1]?.timestamp && endMsg?.[1]?.timestamp
+                    ? ((endMsg[1].timestamp - startMsg[1].timestamp) / 1000).toFixed(1) : null
+                  setProgress(100, 'Complete!')
+                  useCreateStore.getState().setLastGenTime(comfyTime ? `${comfyTime}s` : null)
+                  const outputs = history.outputs ?? {}
+                  let found = false
+                  for (const nodeId of Object.keys(outputs)) {
+                    // Extract files from ANY keyed array, not just images/gifs/
+                    // videos — custom save nodes post under other keys (audio,
+                    // result, files, …); previously those outputs were dropped
+                    // even though they existed on disk.
+                    const files: ComfyUIOutput[] = extractComfyOutputFiles(outputs[nodeId])
+                    for (const file of files) {
+                      found = true
+                      addToGallery({
+                        id: uuid(), type: galleryTypeForFile(file.filename, mode),
+                        filename: file.filename, subfolder: file.subfolder ?? '', comfyType: file.type ?? 'output',
+                        prompt, ...improveFields, ...transparentFields(), negativePrompt, model: activeModel,
+                        modelType: mode === 'image' ? imageModelType : (videoModelsList.find(m => m.name === activeModel)?.type ?? 'wan'),
+                        seed: runSeed,
+                        steps, cfgScale, sampler, scheduler, width: outputWidth, height: outputHeight, batchSize, ...ranLoras(runLoras),
+                        createdAt: Date.now(), builderUsed, intent, ...toolFields, ...(skippedNote ? { runNote: skippedNote } : {}),
+                      })
+                    }
                   }
+                  if (!found) setError('Generation completed but no output was produced.')
+                  resolve()
+                } else if (statusStr === 'error') {
+                  completionHandled = true
+                  cleanup()
+                  const msgs = historyMessages(history)
+                  const errEntry = msgs.find(([t]) => t === 'execution_error')?.[1]
+                  const raw = errEntry?.exception_message || 'ComfyUI execution error'
+                  const hint = comfyErrorHint(errEntry?.node_type, errEntry?.exception_type, String(raw))
+                  reject(new Error(hint ? `${raw}\n\n${hint}` : raw))
                 }
-                if (!found) setError('Generation completed but no output was produced.')
-                resolve()
-              } else if (statusStr === 'error') {
-                completionHandled = true
-                cleanup()
-                const msgs = historyMessages(history)
-                const errEntry = msgs.find(([t]) => t === 'execution_error')?.[1]
-                const raw = errEntry?.exception_message || 'ComfyUI execution error'
-                const hint = comfyErrorHint(errEntry?.node_type, errEntry?.exception_type, String(raw))
-                reject(new Error(hint ? `${raw}\n\n${hint}` : raw))
+              } catch { /* polling failure is non-fatal */ }
+              if (completionHandled) return
+              // Asked with a limit of its own. A request that fails before the
+              // limit is a ComfyUI that is gone; no answer within it is one too
+              // busy to serve HTTP (a long VAE decode, I1 30.10.2026), which is
+              // said on the line instead of waited out in silence.
+              const asked = Date.now()
+              const alive = await checkComfyConnection(COMFY_PROBE_LIMIT_MS)
+              if (completionHandled) return
+              if (!alive && Date.now() - asked < COMFY_PROBE_LIMIT_MS * 0.8) { cleanup(); reject(new Error('ComfyUI stopped responding during generation')); return }
+              if (!alive) line.setLabel('ComfyUI is busy and does not answer yet...')
+              // A prompt still in ComfyUI's queue is alive even when the socket
+              // goes quiet (long model loads emit no events) — refresh the
+              // watchdog once a minute from the queue itself.
+              queueCheckCounter += 1
+              if (queueCheckCounter >= 6) {
+                queueCheckCounter = 0
+                if (await isPromptQueued(promptId).catch(() => false)) lastActivity = Date.now()
               }
-            } catch { /* polling failure is non-fatal */ }
+            } finally {
+              beating = false
+            }
           }, 10000)
 
           let abortCheck: ReturnType<typeof setInterval> | null = null

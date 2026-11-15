@@ -825,9 +825,14 @@ export { COMPONENT_REGISTRY } from './component-registry'
 
 // ─── Connection & Info ───
 
-export async function checkComfyConnection(): Promise<boolean> {
+/** W32 follow-up: the limit of the check before a run and of the render
+ *  heartbeat's check (the proxy's own default is five minutes). */
+export const COMFY_PROBE_LIMIT_MS = 15_000
+
+/** Does ComfyUI answer. `limitMs` bounds the wait (none: the proxy's default). */
+export async function checkComfyConnection(limitMs?: number): Promise<boolean> {
   try {
-    const res = await localFetch(comfyuiUrl('/system_stats'))
+    const res = await localFetch(comfyuiUrl('/system_stats'), limitMs ? { timeoutMs: limitMs } : undefined)
     return res.ok
   } catch {
     return false
