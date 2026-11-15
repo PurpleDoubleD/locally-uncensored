@@ -43,6 +43,9 @@ vi.mock('../../api/cloud/jobs', () => ({
   pollJob: cloud.pollJob,
   CloudJobError: cloud.FakeCloudJobError,
 }))
+// Fall E7: the shelf is read again once the trained character is on it.
+const shelf = vi.hoisted(() => ({ waitForTrainedLora: vi.fn(async () => null as unknown) }))
+vi.mock('../../api/cloud/loras', () => ({ waitForTrainedLora: shelf.waitForTrainedLora }))
 
 import { useCreateStore } from '../../stores/createStore'
 import { useCloudAuthStore } from '../../stores/cloudAuthStore'
@@ -219,6 +222,17 @@ describe('after a kill, the result still lands', () => {
     expect(summary.landed).toEqual(['train-1'])
     expect(useCreateStore.getState().charactersVersion).toBe(before + 1)
     expect(useCreateStore.getState().gallery).toEqual([])
+  })
+
+  it('a trained character that reaches the shelf late refreshes it once more (Fall E7)', async () => {
+    standOn('iphone')
+    shelf.waitForTrainedLora.mockResolvedValueOnce([{ id: 'c1' }])
+    const before = useCreateStore.getState().charactersVersion
+    afterAKill(entry('train-2', { op: 'lora-train', landing: 'character' }))
+    cloud.pollJob.mockResolvedValue(finished('train-2', { result_url: null, completed_at: '2026-11-07T23:48:21.651Z' }))
+    await resumePendingCloudJobs()
+    await vi.waitFor(() => expect(useCreateStore.getState().charactersVersion).toBe(before + 2))
+    expect(shelf.waitForTrainedLora).toHaveBeenCalledWith(expect.objectContaining({ id: 'train-2' }))
   })
 
   it('a finished voice is in the gallery and picked for the talking character', async () => {

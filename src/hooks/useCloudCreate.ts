@@ -61,6 +61,7 @@ import { studioQuote, StudioQuoteChangedError } from '../api/cloud/studio'
 import { outageAfterFailure } from '../lib/cloud-outage-watch'
 import { MIN_TRAIN_IMAGES, maxTrainImages } from '../lib/train-image-cap'
 import { forgetStaged, stagedMayBeStale, uploadTrainPhotos } from '../lib/train-upload'
+import { waitForTrainedLora, TRAINED_NOT_YET_LISTED, TRAINED_LORA_LATE_WAITS_MS } from '../api/cloud/loras'
 
 // B3 (review-w2ui.md, 18.09.2026): the CSAM floor above runs regardless of
 // tier, but the adult half of safety.ts (ADULT_SOFT_TERMS/ADULT_HARD_TERMS)
@@ -1098,11 +1099,33 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
       if (job.status === 'succeeded' && op === 'lora-train') {
         // Training output is a LoRA on the user's shelf, not a media item —
         // flip Character-Studio to the use-surface with a fresh shelf.
+        //
+        // Fall E7 (07.11.2026): the server says "succeeded" about a second
+        // before the character is on the shelf. Reading the shelf at once
+        // showed "No characters yet" after a paid training, the photos were
+        // gone and nothing said why. So the shelf is asked until the new
+        // character is there, and only then does the surface flip.
         st.setProgressPhase('complete')
-        st.setProgress(100, 'Character trained!')
-        st.clearTrainImages()
-        st.setCharacterTab('use')
-        st.bumpCharactersVersion()
+        st.setProgress(100, 'Character trained! Putting it on your shelf…')
+        const shelf = await waitForTrainedLora(job, { signal: ac.signal })
+        const now = useCreateStore.getState()
+        now.setProgress(100, 'Character trained!')
+        now.clearTrainImages()
+        now.setCharacterTab('use')
+        now.bumpCharactersVersion()
+        if (!shelf && !ac.signal.aborted) {
+          // Still not there: keep asking in the background and refresh the
+          // shelf when it comes. The desktop says so meanwhile; the phone's
+          // character page reads an error as a failed training, so it only
+          // gets the late refresh.
+          if (!isMobile()) now.setError(TRAINED_NOT_YET_LISTED)
+          void waitForTrainedLora(job, { waitsMs: TRAINED_LORA_LATE_WAITS_MS }).then((late) => {
+            if (!late) return
+            const later = useCreateStore.getState()
+            if (later.error === TRAINED_NOT_YET_LISTED) later.setError(null)
+            later.bumpCharactersVersion()
+          })
+        }
       } else if (job.status === 'succeeded' && job.result_url) {
         st.setProgressPhase('complete')
         st.setProgress(100, 'Complete!')

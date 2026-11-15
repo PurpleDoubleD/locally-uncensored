@@ -13,6 +13,7 @@
 // session lands quietly, the screen stays free for the next run.
 
 import { getJob, pollJob, CloudJobError } from '../api/cloud/jobs'
+import { waitForTrainedLora } from '../api/cloud/loras'
 import type { CloudJob } from '../api/cloud/jobs'
 import { galleryItemFromJob } from './render/cloud-jobs'
 import { useCreateStore } from '../stores/createStore'
@@ -84,6 +85,11 @@ function land(entry: PendingCloudJob, job: CloudJob): Outcome {
   if (job.status !== 'succeeded') return 'failed'
   if (entry.landing === 'character') {
     st.bumpCharactersVersion()
+    // Fall E7: the character reaches the shelf a moment after the job says
+    // done. Read the shelf once more when it is there.
+    void waitForTrainedLora(job).then((shelf) => {
+      if (shelf) useCreateStore.getState().bumpCharactersVersion()
+    })
     return 'landed'
   }
   if (!job.result_url) return 'failed'
