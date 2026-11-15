@@ -171,8 +171,14 @@ export function getImageBundles(): ModelBundle[] {
           name: 'Juggernaut XL V9 Photo v2',
           description: 'SDXL checkpoint · includes VAE and CLIP.',
           pulls: '', tags: ['Checkpoint', '6.5 GB'], updated: '',
-          downloadUrl: 'https://huggingface.co/RunDiffusion/Juggernaut-XL-v9/resolve/main/Juggernaut-XL_v9_RunDiffusionPhoto_v2.safetensors',
+          // PR #229 (kayleexlinu): pinned to the repo commit, so a later push
+          // to main cannot change the file under the same name. Commit, size
+          // and LFS sha256 read from the Hugging Face tree API on 2026-11-14:
+          // the pinned file is the one main serves, byte for byte.
+          downloadUrl: 'https://huggingface.co/RunDiffusion/Juggernaut-XL-v9/resolve/cf419233522daa0b9ea36c3aff98fa2cab1fb0fb/Juggernaut-XL_v9_RunDiffusionPhoto_v2.safetensors',
           filename: 'Juggernaut-XL_v9.safetensors', subfolder: 'checkpoints', sizeGB: 6.5,
+          sizeBytes: 7105348188,
+          sha256: 'c9e3e68f89b8e38689e1097d4be4573cf308de4e3fd044c64ca697bdb4aa8bca',
         },
       ],
     },

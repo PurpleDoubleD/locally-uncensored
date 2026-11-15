@@ -11,6 +11,14 @@ import { isMlxImageHost } from '../../api/mlx-image'
 import { formatBytes } from '../../lib/formatters'
 import { HINWEIS_TEXT, PUNKT_FARBE } from '../../lib/hinweis'
 import { trayAfterPulse, trayBundles, bundleVerdict, TRAY_CLOSED, NO_PULSE } from '../../lib/download-tray'
+import { ContextMenu } from '../ui/ContextMenu'
+import { Modal } from '../ui/Modal'
+import { ModalActions, ModalButton } from '../ui/ModalActions'
+import { buildDownloadMenu } from '../ui/menu-actions'
+import { revealComfyModel } from '../../api/discover'
+import { RenameNoteDialog } from '../models/RenameNoteDialog'
+import { UninstallDialog, type UninstallRequest } from '../models/UninstallDialog'
+import { useLoraNotesStore } from '../../stores/loraNotesStore'
 
 function ProgressBar({ progress }: { progress: number }) {
   return (
@@ -21,7 +29,13 @@ function ProgressBar({ progress }: { progress: number }) {
 }
 
 export function DownloadBadge() {
-  const { activePulls, pullModel, pausePull, dismissPull } = useModels()
+  const { activePulls, pullModel, pausePull, dismissPull, fetchModels } = useModels()
+  // W33: the right click on a finished ComfyUI download, and what it opens.
+  const [rowMenu, setRowMenu] = useState<{ x: number; y: number; ids: string[]; cancelled: string[]; file: string; single: boolean } | null>(null)
+  const [renaming, setRenaming] = useState<string | null>(null)
+  const [deleting, setDeleting] = useState<UninstallRequest | null>(null)
+  const [revealError, setRevealError] = useState<string | null>(null)
+  const ownNames = useLoraNotesStore((s) => s.notes)
   const comfyDownloads = useDownloadStore(s => s.downloads)
   const bundleMap = useDownloadStore(s => s.bundleMap)
   // Whether the tray is open, and whether it was the TRAY that opened it —
@@ -252,11 +266,21 @@ export function DownloadBadge() {
                 const resumable = files.filter(f => f.d.status === 'paused')
                 const anyActive = files.some(f => f.d.status === 'downloading' || f.d.status === 'connecting' || f.d.status === 'pausing')
 
+                // W33: finished files of this entry, for the right click.
+                const doneFiles = files.filter(f => f.d.status === 'complete' && f.d.filename).map(f => f.d.filename!)
+                const singleOwnName = !isBundle && doneFiles[0] ? ownNames[doneFiles[0]]?.label?.trim() : undefined
                 return (
-                  <div key={bundleName} className="px-3 py-2 border-t border-gray-100 dark:border-white/[0.04] first:border-t-0">
+                  <div
+                    key={bundleName}
+                    className="px-3 py-2 border-t border-gray-100 dark:border-white/[0.04] first:border-t-0"
+                    onContextMenu={settled && doneFiles.length > 0 ? (e) => {
+                      e.preventDefault()
+                      setRowMenu({ x: e.clientX, y: e.clientY, ids: files.map(f => f.id), cancelled, file: doneFiles[0], single: !isBundle })
+                    } : undefined}
+                  >
                     {/* Bundle header */}
                     <div className="flex items-center justify-between gap-2 mb-1">
-                      <p className={`${isBundle ? 'text-[0.7rem] font-medium' : 'text-[0.7rem] font-mono'} text-gray-700 dark:text-gray-300 truncate`}>{bundleName}</p>
+                      <p title={singleOwnName ? bundleName : undefined} className={`${isBundle || singleOwnName ? 'text-[0.7rem] font-medium' : 'text-[0.7rem] font-mono'} text-gray-700 dark:text-gray-300 truncate`}>{singleOwnName || bundleName}</p>
                       <div className="flex items-center gap-0.5 shrink-0">
                         {resumable.length > 0 && !anyActive && (
                           <button onClick={() => resumable.forEach(f => useDownloadStore.getState().resume(f.id))} className="p-0.5 rounded hover:bg-white/10 text-gray-500 hover:text-gray-300 transition-colors" title="Resume"><Play size={11} /></button>
@@ -427,6 +451,42 @@ export function DownloadBadge() {
           </motion.div>
         )}
       </AnimatePresence>
+      {rowMenu && (
+        <ContextMenu
+          items={buildDownloadMenu({
+            reveal: () => { revealComfyModel(rowMenu.file).catch((e) => setRevealError(e instanceof Error ? e.message : String(e))) },
+            rename: rowMenu.single ? () => setRenaming(rowMenu.file) : undefined,
+            removeFromList: () => {
+              rowMenu.ids.forEach((id) => useDownloadStore.getState().dismiss(id))
+              useDownloadStore.getState().forgetCancelled(rowMenu.cancelled)
+            },
+            deleteFile: rowMenu.single ? () => setDeleting({ kind: 'comfy-file', name: rowMenu.file }) : undefined,
+          })}
+          x={rowMenu.x}
+          y={rowMenu.y}
+          label={`Actions for ${rowMenu.file}`}
+          onClose={() => setRowMenu(null)}
+        />
+      )}
+      <RenameNoteDialog name={renaming} kind="model" onClose={() => setRenaming(null)} />
+      <UninstallDialog
+        request={deleting}
+        onClose={() => setDeleting(null)}
+        onDone={async () => {
+          // The file is gone: its entry goes off the list, the model lists read the disk again.
+          const req = deleting
+          if (req?.kind === 'comfy-file') {
+            Object.entries(useDownloadStore.getState().downloads)
+              .filter(([, d]) => d.filename === req.name)
+              .forEach(([id]) => useDownloadStore.getState().dismiss(id))
+          }
+          await fetchModels().catch(() => {})
+        }}
+      />
+      <Modal open={!!revealError} onClose={() => setRevealError(null)} title="Could not open the folder">
+        <p className="t-micro text-red-500 dark:text-red-400 mb-3">{revealError}</p>
+        <ModalActions><ModalButton variant="primary" onClick={() => setRevealError(null)}>OK</ModalButton></ModalActions>
+      </Modal>
     </div>
   )
 }

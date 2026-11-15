@@ -7,6 +7,7 @@ import { oneEntryPerName } from "../lib/one-entry-per-name"
 import { isLocalTransportFailure, localBackendUnreachableMessage } from "../lib/local-backend-transport"
 import { ollamaWindowFor, type WindowChoice, type WindowUse } from "../lib/context-window"
 import { useSettingsStore } from "../stores/settingsStore"
+import { ollamaKeepAlive } from "../lib/idle-unload"
 import { callLimit, CallTimeoutError, type CallLimitOptions } from "../lib/call-limit"
 import { clampContextWindow } from "../lib/number-limits"
 
@@ -275,7 +276,7 @@ export async function reloadOllamaWithWindow(model: string, use: WindowUse): Pro
     const window = await limit.race(ollamaWindowOption(model, use))
     await localFetch(ollamaUrl("/generate"), {
       method: "POST",
-      body: JSON.stringify({ model, prompt: "", stream: false, keep_alive: "30m", options: window }),
+      body: JSON.stringify({ model, prompt: "", stream: false, keep_alive: ollamaKeepAlive("30m"), options: window }),
       signal: limit.signal,
       timeoutMs: OLLAMA_LOAD_LIMIT_MS + PROXY_SLACK_MS,
     })
@@ -559,7 +560,7 @@ export async function loadModel(name: string, options?: OllamaCallOptions): Prom
     const window = await limit.race(ollamaWindowOption(name))
     const res = await localFetch(ollamaUrl("/generate"), {
       method: "POST",
-      body: JSON.stringify({ model: name, prompt: "", stream: false, keep_alive: "10m", options: window }),
+      body: JSON.stringify({ model: name, prompt: "", stream: false, keep_alive: ollamaKeepAlive("10m"), options: window }),
       signal: limit.signal,
       timeoutMs: limitMs + PROXY_SLACK_MS,
     })

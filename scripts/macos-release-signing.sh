@@ -15,6 +15,9 @@
 #                       issuer BEFORE the build, in seconds.
 #   notarize-dmg FILE   Submits the disk image, waits, staples the ticket,
 #                       validates it and asks Gatekeeper.
+#   stapler ACTION PATH `xcrun stapler staple|validate PATH`, tried up to
+#                       STAPLER_TRIES times (default 5) with STAPLER_PAUSE
+#                       seconds (default 60) in between. See stapler_retry.
 #   cleanup             Deletes the keychain and the key file. Never fails.
 #
 #   intermediate FILE   Only the download and hash check of the intermediate
@@ -265,6 +268,39 @@ notary_check() {
   echo "OK: Apple's notary service accepts the API key."
 }
 
+# ── stapler ────────────────────────────────────────────────────────────────
+#
+# stapler fetches the ticket from Apple's CloudKit (api.apple-cloudkit.com),
+# for validate as well as for staple. On 2026-11-05 the 3.0.10 Mac job lost
+# that connection five times in a row ("The network connection was lost.",
+# Error 68), each time at a different stapler call, while the notarization
+# itself had been accepted. A dropped connection is retried; an answer that
+# cannot change with another try is not: a file with no ticket stapled to it
+# stays without one however often it is validated.
+stapler_retry() {
+  local action="${1:?usage: stapler staple|validate <path>}" path="${2:?usage: stapler staple|validate <path>}"
+  local tries="${STAPLER_TRIES:-5}" pause="${STAPLER_PAUSE:-60}" n out
+  case "$action" in staple|validate) ;; *) die "stapler: unknown action $action" ;; esac
+  local args=("$action")
+  [ "$action" = staple ] && args+=(-v)
+  for ((n = 1; n <= tries; n++)); do
+    if out="$(xcrun stapler "${args[@]}" "$path" 2>&1)"; then
+      printf '%s\n' "$out"
+      echo "stapler $action: OK on try $n of $tries ($(basename "$path"))"
+      return 0
+    fi
+    printf '%s\n' "$out" >&2
+    if [[ "$out" == *'does not have a ticket stapled'* ]]; then
+      die "stapler $action: $(basename "$path") has no ticket stapled to it; another try cannot change that"
+    fi
+    if [ "$n" -lt "$tries" ]; then
+      echo "::warning::stapler $action failed on try $n of $tries ($(basename "$path")); trying again in ${pause}s"
+      sleep "$pause"
+    fi
+  done
+  die "stapler $action failed $tries times for $(basename "$path")"
+}
+
 # ── notarize-dmg ───────────────────────────────────────────────────────────
 #
 # The bundler notarizes and staples the .app and only signs the .dmg. The
@@ -306,8 +342,8 @@ notarize_dmg() {
   fi
 
   echo "== staple and validate"
-  xcrun stapler staple -v "$dmg"
-  xcrun stapler validate "$dmg"
+  stapler_retry staple "$dmg"
+  stapler_retry validate "$dmg"
   # Stapling rewrites the file; the signature has to have survived it.
   codesign --verify --verbose=2 "$dmg"
 
@@ -346,6 +382,7 @@ case "${1:-}" in
   notary-key) notary_key ;;
   notary-check) notary_check ;;
   notarize-dmg) shift; notarize_dmg "$@" ;;
+  stapler) shift; stapler_retry "$@" ;;
   cleanup) cleanup ;;
   intermediate) shift; intermediate "$@" ;;
   pick-identity) shift; pick_identity "$@" ;;

@@ -1284,6 +1284,7 @@ const CSP_DIRECT_HOSTS = new Set([
   'api.together.xyz',
   'api.deepseek.com',
   'api.mistral.ai',
+  'api.minimax.io',
   'api.anthropic.com',
   'ollama.com',
   'huggingface.co',

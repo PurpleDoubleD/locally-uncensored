@@ -2,6 +2,7 @@ import { resolveMessageAttachments } from './chat-attachments'
 import type { ChatMessage, ToolCall, ToolDefinition } from '../api/providers/types'
 import { ollamaUrl, localFetchStream } from '../api/backend'
 import { ollamaWindowOption } from '../api/ollama'
+import { ollamaKeepAlive } from './idle-unload'
 import type { WindowChoice } from './context-window'
 import { isLocalTransportFailure, localBackendUnreachableMessage } from './local-backend-transport'
 import { repairToolCallArgs } from './tool-call-repair'
@@ -91,7 +92,7 @@ export async function streamOllamaChatWithTools(
     // default idle. An agent step that runs a 10-minute build came back to a
     // cold model and paid a multi-GB reload before the next thought — several
     // times per long session. 30m matches the warm-up call in api/ollama.ts.
-    keep_alive: '30m',
+    keep_alive: ollamaKeepAlive('30m'),
     options: {},
   }
   if (options.temperature !== undefined) body.options.temperature = options.temperature

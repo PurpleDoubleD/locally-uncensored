@@ -106,6 +106,10 @@ async function boot() {
     treeForThisWindow(),
     import('./components/ui/ErrorBoundary'),
   ])
+  // W33: loaded only now. It reaches persisted stores (logger, settings), and
+  // nothing of that may load in the main window before the onboarding has
+  // handed over (main-laedt-vor-der-uebergabe-keinen-store.test.ts).
+  const TextMenu = mobileHost ? null : (await import('./components/ui/TextContextMenu')).TextContextMenu
   // Die optische Korrektur der Icon-Leiter, einmal fuer die ganze App — und
   // seit den zwei Fenstern hier, ueber BEIDEN Baeumen, statt in AppShell.
   //
@@ -131,6 +135,10 @@ async function boot() {
       <ErrorBoundary root>
         <LucideProvider absoluteStrokeWidth strokeWidth={ICON_STROKE_PX}>
           {tree}
+          {/* W33: no web view menu on a right click in a release build, in
+              both windows (the onboarding assistant is the first one a new
+              user sees). Not on a phone: a long press there is its own. */}
+          {TextMenu && <TextMenu />}
         </LucideProvider>
       </ErrorBoundary>
     </StrictMode>,

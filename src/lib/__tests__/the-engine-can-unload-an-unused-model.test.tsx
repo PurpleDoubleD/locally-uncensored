@@ -26,6 +26,7 @@ vi.mock('@tauri-apps/api/event', () => ({
 
 import { idleUnloadLabel, idleUnloadMinutes, idleUnloadedNote, startEngineIdleUnloadSync, ENGINE_IDLE_UNLOADED_EVENT } from '../engine-idle-unload'
 import { BuiltinEngineSettings } from '../../components/settings/BuiltinEngineSettings'
+import { IdleUnloadSetting } from '../../components/settings/IdleUnloadSetting'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { useLuEngineSwitchStore } from '../../stores/luEngineSwitchStore'
 import { DEFAULT_SETTINGS } from '../constants'
@@ -59,7 +60,7 @@ describe('unloading an unused model', () => {
     await startEngineIdleUnloadSync()
     expect(idleCalls()).toEqual([{ minutes: 30 }])
 
-    render(<BuiltinEngineSettings />)
+    render(<IdleUnloadSetting />)
     fireEvent.change(screen.getByTestId('engine-idle-unload'), { target: { value: '10' } })
     expect(useSettingsStore.getState().settings.engineIdleUnloadMinutes).toBe(10)
     await vi.waitFor(() => expect(idleCalls()).toContainEqual({ minutes: 10 }))

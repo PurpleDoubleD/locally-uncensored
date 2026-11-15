@@ -25,6 +25,7 @@ export const TYPE_LABEL: Record<ModelType, string> = {
   ltx25: 'LTX 2.5',
   minimaxh3: 'MiniMax H3',
   minimaxh3image: 'MiniMax H3 Image',
+  mossimage: 'MOSS Image',
   mochi: 'Mochi',
   cosmos: 'Cosmos',
   cogvideo: 'CogVideo',

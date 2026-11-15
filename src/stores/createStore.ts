@@ -262,6 +262,7 @@ export const MODEL_TYPE_DEFAULTS: Record<ModelType, {
   ltx25:       { steps: 8,  cfgScale: 1.0, sampler: 'euler_ancestral', scheduler: 'simple', width: 1280, height: 704, frames: 121, fps: 24 },
   minimaxh3:   { steps: 20, cfgScale: 1.0, sampler: 'res_multistep',   scheduler: 'simple', width: 1344, height: 768, frames: 124, fps: 24 },
   minimaxh3image: { steps: 6, cfgScale: 1.0, sampler: 'euler',        scheduler: 'simple', width: 2048, height: 2048, frames: 1, fps: 1 },
+  mossimage:   { steps: 50, cfgScale: 3.0, sampler: 'euler',           scheduler: 'simple', width: 1024, height: 1024, frames: 1, fps: 1 },
   mochi:       { steps: 40, cfgScale: 4.5, sampler: 'euler',           scheduler: 'normal', width: 848,  height: 480, frames: 49, fps: 24 },
   cosmos:      { steps: 30, cfgScale: 7.0, sampler: 'euler',           scheduler: 'normal', width: 1280, height: 704, frames: 57, fps: 24 },
   cogvideo:    { steps: 50, cfgScale: 6.0, sampler: 'euler',           scheduler: 'normal', width: 720,  height: 480, frames: 49, fps: 8  },
@@ -407,7 +408,11 @@ export interface CreateState {
   width: number
   height: number
   seed: number
+  /** Images per run (the chip next to Create). */
   batchSize: number
+  /** W32: the most images one ComfyUI run makes at once (Batch size in
+   *  Advanced settings). LOCAL_BATCH_MAX makes the whole run one batch. */
+  batchPacket: number
   frames: number
   fps: number
   /** Fast (lightx2v 4 steps) or Quality sampling for the Wan 14B models
@@ -746,6 +751,7 @@ export interface CreateState {
   setSize: (width: number, height: number) => void
   setSeed: (seed: number) => void
   setBatchSize: (batchSize: number) => void
+  setBatchPacket: (packet: number) => void
   setFrames: (frames: number) => void
   setFps: (fps: number) => void
   setVideoSpeed: (speed: VideoSpeed) => void
@@ -1269,6 +1275,8 @@ export const useCreateStore = create<CreateState>()(
       height: 1024,
       seed: -1,
       batchSize: 1,
+      // W32: the whole run in one batch, as before the two were split.
+      batchPacket: 8,
       frames: 24,
       fps: 8,
       videoSpeed: 'fast',
@@ -1436,6 +1444,7 @@ export const useCreateStore = create<CreateState>()(
       }),
       setSeed: (seed) => set({ seed: Math.floor(seed) }),
       setBatchSize: (batchSize) => set({ batchSize: Math.max(1, Math.min(8, Math.floor(batchSize))) }),
+      setBatchPacket: (packet) => set({ batchPacket: Math.max(1, Math.min(8, Math.floor(packet) || 8)) }),
       // D4: the longest clip of any local family (lib/video-length), the
       // slider of the picked family keeps a shorter one inside its range.
       setFrames: (frames) => set({ frames: Math.max(1, Math.min(MAX_LOCAL_FRAMES, Math.floor(frames))) }),
@@ -2213,6 +2222,7 @@ export const useCreateStore = create<CreateState>()(
         width: state.width,
         height: state.height,
         batchSize: state.batchSize,
+        batchPacket: state.batchPacket,
         frames: state.frames,
         fps: state.fps,
         videoSpeed: state.videoSpeed,

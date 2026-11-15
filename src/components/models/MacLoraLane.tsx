@@ -22,7 +22,7 @@ import { deleteMlxLora, mlxLoraAlphaNote, mlxLoraKeysNote, openMlxLoraFolder, ML
 import type { MlxLoraFolder } from '../../hooks/useMlxLoras'
 import { useLoraNotesStore } from '../../stores/loraNotesStore'
 import { usePageMemoryStore } from '../../stores/pageMemoryStore'
-import { LoraRowActions, LoraRowDetails, LoraRowName, ShowHiddenLoras } from './LoraManager'
+import { LoraRowActions, LoraRowDetails, LoraRowName, ShowHiddenLoras, useLoraRowMenu } from './LoraManager'
 
 /** Where a LoRA is used. The names are the labels Create shows: the drawer
  *  "Advanced settings", the group "Expert", the list "LoRA stack". */
@@ -52,6 +52,9 @@ export function MacLoraLane({ folder, tab, search, searchSubmitToken, onGetNew, 
     setError(null)
     openMlxLoraFolder().catch((e) => setError(e instanceof Error ? e.message : String(e)))
   }
+
+  // W33: right click on a row. Delete opens the same confirmation as the button.
+  const rowMenu = useLoraRowMenu({ onDelete: (name) => setRemoving(name), onEdit, onReveal: () => openFolder() })
 
   const remove = async (name: string) => {
     setRemoving(null)
@@ -153,7 +156,7 @@ export function MacLoraLane({ folder, tab, search, searchSubmitToken, onGetNew, 
               const note = mlxLoraKeysNote(row.keys)
               const alphaNote = mlxLoraAlphaNote(row.alpha)
               return (
-                <div key={row.name} data-testid="lora-row" className="lu-tile flex items-center gap-3 px-3.5 py-2.5">
+                <div key={row.name} data-testid="lora-row" onContextMenu={rowMenu.open(row.name)} className="lu-tile flex items-center gap-3 px-3.5 py-2.5">
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
                       <LoraRowName row={row} nameClass="text-xs font-medium text-gray-900 dark:text-gray-100" />
@@ -189,6 +192,7 @@ export function MacLoraLane({ folder, tab, search, searchSubmitToken, onGetNew, 
               <p className="text-center text-xs text-gray-500 dark:text-gray-400 py-6">No installed LoRAs match "{search}"</p>
             )}
           </div>
+          {rowMenu.element}
         </section>
       )}
 

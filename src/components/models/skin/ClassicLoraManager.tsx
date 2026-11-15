@@ -6,9 +6,11 @@
 import { Info, Layers, Trash2 } from 'lucide-react'
 import { parseLocalCharacterLora } from '../../../api/trainer'
 import { formatBytes } from '../../../lib/formatters'
-import { LORA_USE_HINT, LoraRowActions, LoraRowDetails, LoraRowName, ShowHiddenLoras, type LoraManagerProps } from '../LoraManager'
+import { LORA_USE_HINT, LoraRowActions, useLoraRowMenu, LoraRowDetails, LoraRowName, ShowHiddenLoras, type LoraManagerProps } from '../LoraManager'
 
 export function ClassicLoraManager({ rows, total, searchQuery, onDelete, onInfo, onGetNew, onEdit, onToggleHidden, onReveal, hiddenCount, showHidden, onShowHidden }: LoraManagerProps) {
+  // W33: the same right-click menu as the other skin.
+  const rowMenu = useLoraRowMenu({ onDelete, onInfo, onEdit, onReveal })
   if (total === 0) {
     return (
       <div className="flex flex-col items-center justify-center text-center py-16 px-6 gap-3">
@@ -48,6 +50,7 @@ export function ClassicLoraManager({ rows, total, searchQuery, onDelete, onInfo,
             <div
               key={row.name}
               data-testid="lora-row"
+              onContextMenu={rowMenu.open(row.name)}
               className="lu-tile rounded-lg! flex items-center gap-3 px-3 py-2"
             >
               <div className="min-w-0 flex-1">
@@ -101,6 +104,7 @@ export function ClassicLoraManager({ rows, total, searchQuery, onDelete, onInfo,
           <p className="text-center t-micro text-gray-500 dark:text-gray-400 py-6">No installed LoRAs match "{searchQuery}"</p>
         )}
       </div>
+      {rowMenu.element}
     </section>
   )
 }

@@ -94,6 +94,7 @@ import { aspectFrame, parseAspectRatio } from '../lib/aspect-frame'
 import { buildWithFixups, wasDeclined } from '../lib/render-fixups'
 import { renderFixupDeps } from './render-fixup-deps'
 import { cancelFreeAfterRender, freeAfterRenderMode, scheduleFreeAfterRender } from '../lib/free-after-render'
+import { lmsTtlArg } from '../lib/idle-unload'
 
 /**
  * Is the ComfyUI we are about to render on running on the processor?
@@ -1374,6 +1375,7 @@ async function runHandoff(
         await backendCall('lmstudio_load_model', {
           model: evictedLms.id,
           ...(evictedLms.contextLength ? { contextLength: evictedLms.contextLength } : {}),
+          ...lmsTtlArg(),
         })
       } catch (e) {
         log.warn('vram_handoff.lms_reload_failed', { lmsModel: evictedLms.id, err: String(e) })
@@ -2833,6 +2835,7 @@ async function restoreParked(): Promise<void> {
         await backendCall('lmstudio_load_model', {
           model: todo.lms.id,
           ...(todo.lms.contextLength ? { contextLength: todo.lms.contextLength } : {}),
+          ...lmsTtlArg(),
         })
       } catch (e) {
         log.warn('render_juggle.lms_reload_failed', { model: todo.lms.id, err: String(e instanceof Error ? e.message : e) })

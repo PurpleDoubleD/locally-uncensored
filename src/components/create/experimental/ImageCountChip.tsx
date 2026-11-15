@@ -14,8 +14,9 @@ import { useClickAway } from '../ui/useClickAway'
  * D23 (Discord): "several images per prompt" existed (Batch size 1 to 8
  * locally, Images 1 to 4 in the cloud) but only inside Advanced settings, so
  * nobody found it. This chip sits in the action bar next to Create: an icon
- * and the number, and one click opens the choice. It writes the same store
- * fields as the sliders in Advanced settings, which stay where they are.
+ * and the number, and one click opens the choice. Locally it writes Images
+ * per run (batchSize); W32: Batch size in Advanced settings is its own field
+ * now (batchPacket), how many of them ComfyUI makes at once.
  * It shows only where the run really makes more than one picture
  * (composerImageCountMax).
  */

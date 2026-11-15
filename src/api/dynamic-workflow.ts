@@ -129,6 +129,10 @@ export const LTX25_NEEDS_UPDATE = 'LTX 2.5 needs ComfyUI 0.32.0 or newer. Update
 export const MINIMAX_H3_IMAGE_NO_BUILDER =
   'LU has no built-in workflow for MiniMax H3 Image. Save the ComfyUI template "MiniMax-H3-Image: Text to Image", '
   + 'import it under Workflows and assign it to this model. Create then runs it with your prompt, size and LoRAs.'
+/** GH #192: what Create says for MOSS Image until LU has a graph of its own. */
+export const MOSS_IMAGE_NO_BUILDER =
+  'LU has no built in workflow for MOSS Image. Import a ComfyUI workflow that runs MOSS Image under Workflows and assign it to this model. '
+  + 'Create then runs it with your prompt, size and LoRAs.'
 /** A step distillation LoRA names its step count (minimax_h3_fl2v_turbo_8step_...). */
 const H3_STEP_LORA = /turbo\D*?(\d+)\s*_?steps?/i
 export const FASTH3_NEEDS_UPDATE = 'FastH3 needs ComfyUI 0.35.0 or newer. Update ComfyUI in Settings.'
@@ -145,6 +149,9 @@ export function determineStrategy(
   // Create runs it with the prompt, size and LoRAs (workflows.ts).
   if (modelType === 'minimaxh3image') {
     return { strategy: 'unavailable', reason: MINIMAX_H3_IMAGE_NO_BUILDER }
+  }
+  if (modelType === 'mossimage') {
+    return { strategy: 'unavailable', reason: MOSS_IMAGE_NO_BUILDER }
   }
 
   const hasUNET = nodes.loaders.includes('UNETLoader')

@@ -459,7 +459,17 @@ export function ParamGroups() {
             </span>
           </button>
         )}
-        {!isVideo && !isCloud && !macMusic && <Slider label="Batch size" min={1} max={8} step={1} value={s.batchSize} onChange={s.setBatchSize} />}
+        {/* W32: Images per run is the chip next to Create. This is how many
+            of them ComfyUI makes at once; the Mac makes one at a time anyway. */}
+        {!isVideo && !isCloud && !isMlxLocal && (
+          <Slider
+            label="Batch size"
+            min={1} max={8} step={1}
+            value={s.batchPacket}
+            onChange={s.setBatchPacket}
+            hint="How many of the images per run ComfyUI makes at once. Lower it when several images run out of graphics memory; LU then makes them batch after batch."
+          />
+        )}
         {showShots && (
           <div className="space-y-2">
             <Slider label="Shots" min={1} max={MAX_SHOTS} step={1} value={1 + s.videoShots.length} onChange={s.setVideoShotCount} />

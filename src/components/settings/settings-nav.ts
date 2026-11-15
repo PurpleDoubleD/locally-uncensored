@@ -99,6 +99,7 @@ export function sectionsFor(tab: SettingsTab, flags: SettingsSectionFlags): stri
     case 'backends':
       return [
         'Providers',
+        'Unused models',
         'Storage',
         'CivitAI API key',
         'Hugging Face token',

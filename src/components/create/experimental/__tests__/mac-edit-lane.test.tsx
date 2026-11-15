@@ -193,9 +193,9 @@ describe('the surface of the Mac\'s Edit is the one Windows has, less what the e
     const q = render(<ParamGroups />)
     expect(screen.getByText('Steps')).toBeTruthy()
     expect(screen.getByText('CFG scale')).toBeTruthy()
-    expect(screen.getByText('Batch size')).toBeTruthy()
-    // What the engine has no flag for is not offered.
-    for (const label of ['Sampler', 'Scheduler', 'VAE', 'Skip CLIP layers', 'Denoise (raw)', 'Mask edge feather']) {
+    // What the engine has no flag for is not offered. W32: Batch size neither,
+    // the Mac makes one image per run; the count is the chip next to Create.
+    for (const label of ['Sampler', 'Scheduler', 'VAE', 'Skip CLIP layers', 'Denoise (raw)', 'Mask edge feather', 'Batch size']) {
       expect(screen.queryByText(label), label).toBeNull()
     }
     // Since 3.0.8 Edit has Native HiRes on the Mac too: a second edit of the

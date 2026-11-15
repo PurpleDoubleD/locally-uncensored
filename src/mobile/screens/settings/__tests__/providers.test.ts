@@ -4,7 +4,7 @@ import { cleanBaseUrl, findOwnProvider, looksLikeKey, ownProviders, testFailure 
 
 describe('ownProviders', () => {
   it('lists the hosted providers of the design, then Anthropic and the custom endpoint', () => {
-    expect(ownProviders('Custom endpoint').map((p) => p.id)).toEqual(['openrouter', 'groq', 'together', 'deepseek', 'mistral', 'openai', 'anthropic', 'custom'])
+    expect(ownProviders('Custom endpoint').map((p) => p.id)).toEqual(['openrouter', 'groq', 'together', 'deepseek', 'mistral', 'minimax', 'openai', 'anthropic', 'custom'])
   })
 
   it('takes names and addresses from the presets of the logic layer', () => {
