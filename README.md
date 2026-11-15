@@ -45,8 +45,8 @@ Take the latest build from [Releases](https://github.com/PurpleDoubleD/locally-u
 
 | Platform | File | Status |
 |----------|------|--------|
-| Windows 10 and 11 | [`Locally.Uncensored_3.0.10_x64-setup.exe`](https://github.com/PurpleDoubleD/locally-uncensored/releases/latest/download/Locally.Uncensored_3.0.10_x64-setup.exe) (NSIS, recommended) or [`Locally.Uncensored_3.0.10_x64_en-US.msi`](https://github.com/PurpleDoubleD/locally-uncensored/releases/latest/download/Locally.Uncensored_3.0.10_x64_en-US.msi) | Tested every release, signed auto update channel |
-| Linux | [`Locally.Uncensored_3.0.10_amd64.AppImage`](https://github.com/PurpleDoubleD/locally-uncensored/releases/latest/download/Locally.Uncensored_3.0.10_amd64.AppImage), [`Locally.Uncensored_3.0.10_amd64.deb`](https://github.com/PurpleDoubleD/locally-uncensored/releases/latest/download/Locally.Uncensored_3.0.10_amd64.deb) or [`Locally.Uncensored-3.0.10-1.x86_64.rpm`](https://github.com/PurpleDoubleD/locally-uncensored/releases/latest/download/Locally.Uncensored-3.0.10-1.x86_64.rpm) | Built on every release |
+| Windows 10 and 11 | [`Locally.Uncensored_3.1.0_x64-setup.exe`](https://github.com/PurpleDoubleD/locally-uncensored/releases/latest/download/Locally.Uncensored_3.1.0_x64-setup.exe) (NSIS, recommended) or [`Locally.Uncensored_3.1.0_x64_en-US.msi`](https://github.com/PurpleDoubleD/locally-uncensored/releases/latest/download/Locally.Uncensored_3.1.0_x64_en-US.msi) | Tested every release, signed auto update channel |
+| Linux | [`Locally.Uncensored_3.1.0_amd64.AppImage`](https://github.com/PurpleDoubleD/locally-uncensored/releases/latest/download/Locally.Uncensored_3.1.0_amd64.AppImage), [`Locally.Uncensored_3.1.0_amd64.deb`](https://github.com/PurpleDoubleD/locally-uncensored/releases/latest/download/Locally.Uncensored_3.1.0_amd64.deb) or [`Locally.Uncensored-3.1.0-1.x86_64.rpm`](https://github.com/PurpleDoubleD/locally-uncensored/releases/latest/download/Locally.Uncensored-3.1.0-1.x86_64.rpm) | Built on every release |
 | macOS 14 or newer, Apple Silicon (Beta) | [`LU_3.0.10_aarch64.dmg`](https://github.com/PurpleDoubleD/locally-uncensored/releases/download/v3.0.10/LU_3.0.10_aarch64.dmg) | Signed with an Apple Developer ID and notarized by Apple. Intel Macs are not supported. The app has run on one Mac so far. Voice has been tried by hand in the app on a Mac and works. Computer control is in the Mac app but not fully tested yet on macOS. Remote Access and the automatic update are not confirmed on macOS |
 | Android 7.0 or newer (arm64) | [`LU-3.0.10-Android.apk`](https://github.com/PurpleDoubleD/locally-uncensored/releases/download/v3.0.10/LU-3.0.10-Android.apk) | The phone app. Not in the Play Store yet: install the file from this page. SHA-256 `dbd515d81bbc8ab70f21b850424f9f8b57ae88ae24962225beefc4116d139d2f` |
 
@@ -58,15 +58,15 @@ Some antivirus engines flag unsigned NSIS installers that download other binarie
 
 Code signing for the Windows installers: free code signing provided by [SignPath.io](https://about.signpath.io), certificate by [SignPath Foundation](https://signpath.org). SignPath Foundation has accepted the project, and the box goes away once the certificate is in place.
 
-Current release: **v3.0.10** (November 2026). Every change since 1.0.0 is in [CHANGELOG.md](CHANGELOG.md).
+Current release: **v3.1.0** (November 2026). Every change since 1.0.0 is in [CHANGELOG.md](CHANGELOG.md).
 
-3.0.10 fixes lost chats from 3.0.8 and 3.0.9. A backup no longer replaces the only complete copy of your chats, a note at launch says when the backup holds chats that are missing from your list, and Settings, Chat Backup has Restore chats from backup. The Android app is back as an APK, with the keyboard staying open in the Create prompt.
+3.1.0 rebuilds the coding agent (review changes hunk by hunk, steer a running task, rewind to before any message), adds watchers that run a task on a schedule, makes 3D models in Create on your own computer or on LU Cloud, and gives your characters one place in Create. Web search reads the pages for you with sources, the gallery keeps every picture, the chat gets its own look, Neurons is back as a plugin, and Parakeet joins Whisper for dictation. The full list is in [CHANGELOG.md](CHANGELOG.md).
 
-Short summaries of the earlier releases, 3.0.9 back to 3.0.1, are at the end of [CHANGELOG.md](CHANGELOG.md#release-summaries-from-the-readme).
+3.0.10 fixed lost chats from 3.0.8 and 3.0.9. Short summaries of the earlier releases, 3.0.9 back to 3.0.1, are at the end of [CHANGELOG.md](CHANGELOG.md#release-summaries-from-the-readme).
 
 ## Mobile app (Android, iPhone)
 
-LU is also available as an app for your phone. The current APK comes from the 3.0.10 release.
+LU is also available as an app for your phone. The current APK comes from the 3.1.0 release.
 
 - **Android:** download `LU-3.0.10-Android.apk` from the [3.0.10 release](https://github.com/PurpleDoubleD/locally-uncensored/releases/tag/v3.0.10). Needs Android 7.0 or newer on a 64-bit (arm64) phone. Allow installing apps from your browser or file app when Android asks. SHA-256: `dbd515d81bbc8ab70f21b850424f9f8b57ae88ae24962225beefc4116d139d2f`
 - **iPhone:** in review at the App Store.
@@ -222,9 +222,18 @@ The macOS row of the [Download](#download) table says whether the current releas
 
 ## Roadmap
 
-Updated 5 November 2026. Everything up to 3.0.10 has shipped; [Releases](https://github.com/PurpleDoubleD/locally-uncensored/releases) has the history.
+Updated 16 November 2026. Everything up to 3.1.0 has shipped; [Releases](https://github.com/PurpleDoubleD/locally-uncensored/releases) has the history.
 
-**Just out: 3.0.10**
+**Just out: 3.1.0**
+
+- A rebuilt coding agent: review hunk by hunk, steer a running task, rewind files and chat
+- Watchers: tasks the AI runs on a schedule, with a notification when they ran
+- 3D in Create, on a Mac, on Windows and Linux through ComfyUI, and on LU Cloud
+- One place for your characters in Create
+- Web search that reads the pages and answers with sources
+- Parakeet dictation and talking to your computer from the phone
+
+**3.0.10**
 
 - Lost chats from 3.0.8 and 3.0.9: a note at launch when the backup still holds them, and Restore chats from backup in Settings
 - The Android app as an APK again, with the keyboard staying open in the Create prompt
