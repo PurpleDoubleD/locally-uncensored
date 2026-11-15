@@ -35,6 +35,7 @@ import { personaPromptOf } from '../lib/chat-persona'
 import type { Persona } from '../types/settings'
 import { copyConversation, forgetForkKey, forkFrom, forkKeyAt, restoreEmptyFork, switchFork } from '../lib/chat-forks'
 import { savedUserEdit } from '../lib/message-edit'
+import { registerTurnLookup } from '../lib/agent-core/checkpoints'
 
 /** GH #169: give each group turn of these models that carries no persona yet
  *  the persona its model played (model name to persona id). A turn that
@@ -141,7 +142,7 @@ export function migratePersistedChat(state: unknown): unknown {
 export function dropConversationSideState(id: string): void {
   const steps: [string, () => void][] = [
     ['rag', () => useRAGStore.getState().removeConversation(id)],
-    ['todos', () => useTodoStore.getState().clearTodos(id)],
+    ['todos', () => useTodoStore.getState().forgetConversation(id)],
     ['permissions', () => usePermissionStore.getState().clearConversationOverrides(id)],
     ['staged-changes', () => useStagedChangesStore.getState().clear(id)],
     ['codex', () => useCodexStore.getState().dropConversation(id)],
@@ -1201,3 +1202,15 @@ function afterHydration(): void {
 }
 if (useChatStore.persist.hasHydrated()) afterHydration()
 else useChatStore.persist.onFinishHydration(afterHydration)
+
+// CA U4: which user message a chat's current turn belongs to, for the file
+// checkpoints of "Rewind to here" (lib/agent-core/checkpoints.ts).
+registerTurnLookup((convId) => {
+  const conv = useChatStore.getState().conversations?.find((c) => c.id === convId)
+  if (!conv) return null
+  for (let i = conv.messages.length - 1; i >= 0; i--) {
+    const m = conv.messages[i]
+    if (m.role === 'user') return { id: m.id, timestamp: m.timestamp }
+  }
+  return null
+})

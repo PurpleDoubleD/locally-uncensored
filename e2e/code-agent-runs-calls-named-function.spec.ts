@@ -61,8 +61,7 @@ test('a call named "function" and a !function_call text both run their tool', as
   await expect(main.getByText('VERIFIER_READ_DONE')).toBeVisible({ timeout: 30_000 })
 
   // The todo list landed in the plan, the file was really read.
-  await expect(page.getByTestId('plan-header').or(page.getByTestId('plan-panel')).first()
-    .getByRole('button', { name: /^plan /i })).toBeVisible({ timeout: 15_000 })
+  await expect(page.getByTestId('plan-pinned').getByTestId('plan-title')).toBeVisible({ timeout: 15_000 })
   const reads = (await toolCalls(page)).filter((c) => c.cmd === 'fs_read')
   expect(reads.some((c) => (c.path ?? '').replace(/\\/g, '/').endsWith('core/verifier.py'))).toBe(true)
 

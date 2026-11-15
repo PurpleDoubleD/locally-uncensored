@@ -768,6 +768,12 @@ export async function backendCall<T = unknown>(
     remote_create_snapshot: { path: "/local-api/remote-create-snapshot" },
     // Agent tools (Phase 1 — new commands)
     shell_execute: { path: "/local-api/shell-execute", method: "POST" },
+    // T1: a shell_execute that outran its timeout runs on as a task in the
+    // dev server too (dev-server/exec-routes.ts), so the bench can read and
+    // stop it like the app does.
+    shell_task_status: { path: "/local-api/shell-task-status", method: "POST" },
+    shell_task_kill: { path: "/local-api/shell-task-kill", method: "POST" },
+    shell_task_list: { path: "/local-api/shell-task-list", method: "POST" },
     fs_read: { path: "/local-api/fs-read", method: "POST" },
     // Capped, jailed byte read for the Explorer image preview (2.6.6 C3).
     // Without this entry the browser dev surface answered "Unknown backend

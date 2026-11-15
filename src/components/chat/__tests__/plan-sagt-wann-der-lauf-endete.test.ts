@@ -32,18 +32,12 @@ const here = dirname(fileURLToPath(import.meta.url))
 const read = (rel: string) => readFileSync(resolve(here, rel), 'utf8')
 
 describe('planStoppedLabel', () => {
-  it('nennt die Zahl UND dass nichts mehr laeuft', () => {
-    expect(planStoppedLabel(3, 4)).toBe('the run ended here, 3 of 4 steps done, 1 still open')
-  })
-
-  it('zaehlt die offenen Schritte im Plural richtig', () => {
-    expect(planStoppedLabel(1, 31)).toBe('the run ended here, 1 of 31 steps done, 30 still open')
-  })
-
-  it('behauptet nie ein Ende, das die Leiste gar nicht zeigt', () => {
-    // Ein fertiger Plan geht durch `planDoneLabel`, nicht hier durch. Die
-    // Zeile darf trotzdem keine negative Restzahl bilden koennen.
-    expect(planStoppedLabel(4, 4)).toContain('0 still open')
+  it('sagt, dass nichts mehr laeuft, ohne Zahlen', () => {
+    // Bis 14.11.2026 "the run ended here, 3 of 4 steps done, 1 still open".
+    // David: kein Zaehler, weder waehrend der Arbeit noch am Ende; welche
+    // Schritte offen sind, zeigt die Liste selbst.
+    expect(planStoppedLabel()).toBe('the run ended before every step was done')
+    expect(planStoppedLabel()).not.toMatch(/\d/)
   })
 })
 
@@ -59,21 +53,22 @@ describe('die Leiste fragt beide Laufquellen, nicht nur eine', () => {
   })
 
   it('holt das Urteil aus run-idle statt sich ein zweites zu bauen', () => {
-    expect(src).toMatch(/runStatusFrom\(generating, threadStatus, isRunStopped\(activeConversationId\), isRunQueued\(activeConversationId\)\)/)
+    expect(src).toMatch(/runStatusFrom\(generating, threadStatus, isRunStopped\(conversationId\), isRunQueued\(conversationId\)\)/)
     expect(src).toMatch(/const stoppedShort = !allDone && !runActive/)
   })
 
   it('sagt es zugeklappt wie aufgeklappt, wie die Zeile fuer den fertigen Plan', () => {
-    // Nur zugeklappt haette es im Code-Panel versteckt, das aufgeklappt
-    // startet. Es ist derselbe Fehler, den die Morgan-Zeile schon einmal hatte.
+    // Nur zugeklappt haette es versteckt, solange die Liste offen ist. Es ist
+    // derselbe Fehler, den die Morgan-Zeile schon einmal hatte. Seit CA
+    // (13.11.2026) haengt der Abschlusskasten an keinem Klappzustand.
     expect(src).toMatch(/\{stoppedShort && \(/)
     expect(src).toMatch(/testid="plan-run-stopped"/)
     // Und sie teilt sich die Zeile mit der Morgan-Zeile, statt sie
     // abzuschreiben. Zwei Abschriften laufen auseinander, die Typo-Klinke
     // in `die-typo-leiter-und-ihre-umgehung.test.ts` hat genau das schon
     // einmal aufgefangen.
-    expect(src).toMatch(/testid="plan-all-done"/)
-    expect(src.match(/function Schlusszeile\(/g) ?? []).toHaveLength(1)
+    expect(src).toMatch(/testid="plan-changes-waiting"/)
+    expect(src.match(/function Abschluss\(/g) ?? []).toHaveLength(1)
   })
 
   it('der Kreisel dreht nur, solange wirklich etwas laeuft', () => {
@@ -85,18 +80,28 @@ describe('die Leiste fragt beide Laufquellen, nicht nur eine', () => {
     // nichts mehr laeuft, ist kein halber Fehler, sondern ruhig. Die Aussage
     // des Tests ist dieselbe geblieben und haengt jetzt an der Bewegung
     // statt an der Farbe: es dreht sich nur, was wirklich laeuft.
-    expect(src).toMatch(/runActive \? 'text-gray-600 dark:text-gray-300 animate-spin' : HINWEIS_TEXT\.ruhig/)
-    // Und es gibt genau EINE Drehung in der Datei, sonst koennte daneben ein
-    // zweiter Kreisel stehen, den kein Lauf mehr anhaelt.
-    expect(src.match(/animate-spin/g) ?? []).toHaveLength(1)
+    // Seit CA (13.11.2026) entscheidet `planRowStates`: 'running' gibt es nur
+    // bei laufendem Lauf, und nur fuer EINEN Schritt (Verhalten in
+    // plan-pinned-under-the-newest-message.test.tsx). Ein angehaltener
+    // Schritt ist ein ruhiger Kreis.
+    expect(src).toMatch(/t\.status === 'in_progress' && runActive && !running/)
+    expect(src).toMatch(/state === 'running' \? \(\s*<Loader2[^>]*animate-spin/)
+    expect(src).toMatch(/halted \? HINWEIS_TEXT\.ruhig/)
+    // Zwei Drehungen in der Datei, beide an einem laufenden Schritt: die Zeile
+    // in der Liste und, seit 14.11.2026, die eingeklappte Kopfzeile. Die
+    // zweite steht nur, solange ein Schritt 'running' ist (runningIdx >= 0),
+    // und das gibt es nur bei laufendem Lauf.
+    expect(src.match(/animate-spin/g) ?? []).toHaveLength(2)
+    expect(src).toMatch(/\{collapsed && runningIdx >= 0 && \(/)
   })
 
-  it('die Schlusszeile kennt zwei Toene und keinen dritten', () => {
+  it('die Schlusszeile hat einen Ton, den ruhigen', () => {
     // Der dritte hiess `warnung` und war bernsteinfarben. Weder ein Lauf, der
     // endet, noch eine Aenderung, die auf Freigabe wartet, ist ein Fehler;
-    // beides ist ruhig, und fertig ist gruen.
-    expect(src).toMatch(/ton: 'gut' \| 'ruhig'/)
-    expect(src).not.toMatch(/(?:amber|yellow)-/)
+    // beides ist ruhig. Das Gruen fuer "fertig" ist seit 14.11.2026 weg
+    // (David: kein Haken, kein "every step done").
+    expect(src).toMatch(/HINWEIS_TEXT\.ruhig/)
+    expect(src).not.toMatch(/(?:amber|yellow|emerald)-/)
   })
 })
 

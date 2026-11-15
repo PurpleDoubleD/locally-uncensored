@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { PlanBar, PlanHistoryRow, usePlanHistory } from './PlanBar'
 import type { CSSProperties } from 'react'
 import { useChatStore } from '../../stores/chatStore'
 import { useSettingsStore } from '../../stores/settingsStore'
@@ -81,9 +82,11 @@ interface Props {
   pendingApprovalId?: string | null
   onApprove?: () => void
   onReject?: () => void
+  /** Sends a message in this chat: the pinned plan's "Continue". */
+  onContinuePlan?: (text: string) => void
 }
 
-export function MessageList({ isGenerating, isThisChatGenerating, isLoadingModel, onRegenerate, onRegenerateSpeaker, onEdit, pendingApprovalId, onApprove, onReject }: Props) {
+export function MessageList({ isGenerating, isThisChatGenerating, isLoadingModel, onRegenerate, onRegenerateSpeaker, onEdit, pendingApprovalId, onApprove, onReject, onContinuePlan }: Props) {
   const showTyping = isThisChatGenerating ?? isGenerating
   // The question of the first use of computer control is open in this conversation.
   const chatAsked = useComputerStore((s) => !!s.chatAsk && !s.chatAsk.voice && (s.chatAsk.conversationId === null || s.chatAsk.conversationId === useChatStore.getState().activeConversationId))
@@ -205,6 +208,8 @@ export function MessageList({ isGenerating, isThisChatGenerating, isLoadingModel
   const messages = conversation?.messages
   const forks = conversation?.forks
   const marks = useMemo(() => forkMarks({ messages: messages ?? [], forks }), [messages, forks])
+  // Plans the user has moved on from, as folded rows under their answers.
+  const planRows = usePlanHistory(conversation?.id, messages)
 
   // Decided once per visited conversation, see CONTENT_VISIBILITY_THRESHOLD.
   // React's documented "adjust state when a prop changes" shape: the branch
@@ -344,6 +349,10 @@ export function MessageList({ isGenerating, isThisChatGenerating, isLoadingModel
               {!readOnly && message.greetings && message.greetings.length > 1 && message.id === lastVisibleId && !isGenerating && (
                 <GreetingSwitcher conversationId={conversation.id} message={message} />
               )}
+              {message.role === 'assistant' && planRows.get(message.id)?.map((todos, k) => (
+                // On the answer text's left edge, like the pinned plan.
+                <PlanHistoryRow key={k} todos={todos} className="pl-12 pr-3 pt-1" />
+              ))}
             </div>
             )
           })}
@@ -365,6 +374,8 @@ export function MessageList({ isGenerating, isThisChatGenerating, isLoadingModel
             message={lastMessage}
           />
         )}
+        {/* The run's plan, pinned under the newest message (PlanBar.tsx). */}
+        {!readOnly && <PlanBar conversationId={conversation.id} onContinue={onContinuePlan} />}
       </div>
     </div>
     <CompactLayerRail view={layers} />

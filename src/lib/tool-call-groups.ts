@@ -68,6 +68,8 @@ export function groupAgentBlocks(blocks: AgentBlock[]): AgentBlockGroup[] {
         groups.push({ kind: 'tools', blocks: [block], calls: [block.toolCall], notes: [] })
       }
     } else if (
+      // A message from the user is never folded into a band (CA U2).
+      !block.steer &&
       INTERIOR_NOTE_PHASES.has(block.phase) &&
       i < lastCallAt &&
       last &&

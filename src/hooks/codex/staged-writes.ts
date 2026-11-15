@@ -5,9 +5,12 @@ import { findStagedForPath, stagedReadResult, stagedListingNote } from '../../li
 import { codexReadCtx, type CodexFsCtx, type CodexFileRead } from './workspace-fs'
 import type { ToolArgs } from '../../api/mcp/types'
 import type { StagedReview } from '../../lib/staged-apply'
+import type { ReviewNote } from '../../types/staged-changes'
 
-/** What the model hears after a blocking review. */
-export function reviewResult(review: StagedReview, path: string, kind: 'write' | 'edit'): string {
+/** What the model hears after a blocking review. A partial apply (some hunks
+ *  rejected) left a note for this change; that note is the better answer. */
+export function reviewResult(review: StagedReview, path: string, kind: 'write' | 'edit', note?: string): string {
+  if (note && (review.outcome === 'applied' || review.outcome === 'rejected')) return note
   switch (review.outcome) {
     case 'applied': return kind === 'write' ? `Wrote ${path}. The user approved the change and it is on disk now.` : `Edited ${path}. The user approved the change and it is on disk now.`
     case 'rejected': return `The user declined this change. ${path} was not written.`
@@ -61,6 +64,11 @@ export function reviewResult(review: StagedReview, path: string, kind: 'write' |
  * einzige pruefbar.
  */
 
+/** Review notes as one block for the model. Short on purpose. */
+export function reviewNotesText(notes: readonly ReviewNote[]): string {
+  return `[User review: ${notes.map((n) => n.text).join(' ')}]`
+}
+
 export interface StagedWriterDeps {
   convId: string
   /** Der Ordner, den auch der Systemprompt nennt. `'.'` = Sandbox pro Chat. */
@@ -104,6 +112,14 @@ function resolveStagedPath(path: string, workDir: string): string {
 
 export function createStagedWriter(deps: StagedWriterDeps): StagedWriter {
   const { convId, workDir, workspaceSlug, readFile, waitForReview } = deps
+
+  // A blocking review answers in the tool result itself, so its note is taken
+  // here and not handed out a second time with a later result.
+  const reviewed = async (stagedId: string, path: string, kind: 'write' | 'edit'): Promise<string> => {
+    const review = await waitForReview!(stagedId, path)
+    const note = useStagedChangesStore.getState().takeNotes(convId, stagedId)[0]?.text
+    return reviewResult(review, path, kind, note)
+  }
 
   // Multi-File Stage-and-Approve (B10). When the user has codex
   // stage mode on, file_write calls don't hit the disk — they
@@ -158,7 +174,7 @@ export function createStagedWriter(deps: StagedWriterDeps): StagedWriter {
       newContent,
       diff,
     })
-    if (waitForReview) return reviewResult(await waitForReview(stagedId, path), path, 'write')
+    if (waitForReview) return reviewed(stagedId, path, 'write')
     return `Staged for review: ${path}. The user will apply or reject the change before it lands on disk.`
   }
 
@@ -214,11 +230,23 @@ export function createStagedWriter(deps: StagedWriterDeps): StagedWriter {
       newContent,
       diff,
     })
-    if (waitForReview) return reviewResult(await waitForReview(stagedId, path), path, 'edit')
+    if (waitForReview) return reviewed(stagedId, path, 'edit')
     return `Staged for review: ${path} (surgical edit). The user will apply or reject the change before it lands on disk.`
   }
 
-  const dispatch = (name: string, args: ToolArgs, passthrough: () => Promise<string>): Promise<string> => {
+  const dispatch = (name: string, args: ToolArgs, passthrough: () => Promise<string>): Promise<string> =>
+    route(name, args, passthrough).then(withReviewNotes)
+
+  // The desktop review runs beside the loop: a file or hunk the user rejected
+  // in the panel is invisible to the model, which then builds on code that is
+  // not there. The next tool result carries what was rejected, once.
+  const withReviewNotes = (result: string): string => {
+    if (!convId) return result
+    const notes = useStagedChangesStore.getState().takeNotes(convId)
+    return notes.length === 0 ? result : `${result}\n\n${reviewNotesText(notes)}`
+  }
+
+  const route = (name: string, args: ToolArgs, passthrough: () => Promise<string>): Promise<string> => {
     if (name === 'file_write') return stageFileWrite(args)
     if (name === 'file_edit') return stageFileEdit(args)
     // Read-your-writes: staged content is invisible on disk, so reads

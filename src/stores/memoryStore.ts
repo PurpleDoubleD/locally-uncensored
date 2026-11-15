@@ -8,6 +8,7 @@ import { generateEmbeddings } from '../api/rag'
 import { singleModelSlot } from '../lib/capabilities'
 import { saveVector, loadVectors, deleteVector, clearAll as clearAllVectors, type MemoryVectorRecord } from '../lib/memoryEmbedDB'
 import { scoreMemoriesBlended, isStale, type BlendCandidate } from '../lib/memory-retrieval'
+import { onlyStatesAGap } from '../lib/memory-gap'
 import type { ResolutionDecision } from '../lib/memory-extraction'
 import { isRecord, prop, asString, asNumber, asStringArray } from '../types/json-guards'
 import { log } from '../lib/logger'
@@ -936,7 +937,9 @@ export const useMemoryStore = create<MemoryState>()(
         // A phone has only this path, so its words are taken without the
         // punctuation ("drink?" must find "drink"). The desktop keeps its split.
         const words = singleModelSlot() ? queryWords(query) : query.toLowerCase().split(/\s+/).filter(w => w.length > 2)
-        let candidates = get().entries.filter(e => !e.sensitive && !isStale(e) && memoryMatchesScope(e, opts?.scope))
+        // An entry that only says something is unknown would outvote the real
+        // fact next to it (memory-gap.ts, CA bench AG10).
+        let candidates = get().entries.filter(e => !e.sensitive && !isStale(e) && !onlyStatesAGap(e) && memoryMatchesScope(e, opts?.scope))
         if (opts?.excludeToolResults) {
           candidates = candidates.filter(e => !isToolResultMemory(e))
         }
@@ -1000,7 +1003,7 @@ export const useMemoryStore = create<MemoryState>()(
           // stubbed sync method in tests is honoured).
           if (budget.budgetTokens === 0 || budget.maxMemories === 0) return fallback()
 
-          let candidates = get().entries.filter(e => !e.sensitive && !isStale(e) && memoryMatchesScope(e, requestOpts?.scope))
+          let candidates = get().entries.filter(e => !e.sensitive && !isStale(e) && !onlyStatesAGap(e) && memoryMatchesScope(e, requestOpts?.scope))
           if (requestOpts?.excludeToolResults) {
             candidates = candidates.filter(e => !isToolResultMemory(e))
           }

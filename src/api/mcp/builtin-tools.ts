@@ -16,6 +16,7 @@ import { v4 as uuid } from 'uuid'
 import { backendCall, isTauri } from '../backend'
 import { getActiveChatId, getActiveConversationId, getActiveWorkspace, isChatArtifactMode, captureChatArtifact, isReadOnlyShellTurn } from '../agent-context'
 import type { AgentRunContext } from '../agent-context'
+import { readBefore, recordWrite, textBefore } from '../../lib/agent-core/checkpoints'
 import { useAgentWorkflowStore } from '../../stores/agentWorkflowStore'
 import { WorkflowEngine, buildWorkflowApprovalGate, describeWorkflowCompletion, describeWorkflowStepFailure } from '../../lib/workflow-engine'
 import type { StepResult } from '../../types/agent-workflows'
@@ -423,13 +424,14 @@ const BUILTIN_TOOLS: MCPToolDefinition[] = [
       + 'For long work set `background: true` to get a task id back at once, then call again with `task: "status"` and `task_id` (or "list" / "kill"). '
       + 'PREFER dedicated tools where available: file_read over `cat`, file_list over `ls`, file_search over `grep`. '
       + '`--no-verify` is refused, and NEVER delete permanently without confirmation. '
-      + 'Default timeout 120 s, test runs 300 s.',
+      + 'Paths outside your folder are refused. Timeout at most 120 s, test runs 300 s. '
+      + 'A command still running at its timeout keeps running in the background under a task id.',
     inputSchema: {
       type: 'object',
       properties: {
         command: { type: 'string', description: 'The full command to execute. Omit only for task actions.' },
         cwd: { type: 'string', description: 'Working directory (optional, relative to the workspace)' },
-        timeout: { type: 'number', description: 'Timeout in milliseconds (default: 120000)' },
+        timeout: { type: 'number', description: 'Timeout in ms (at most 120000)' },
         shell: { type: 'string', description: 'Override shell: "powershell" | "cmd" | "bash" (default: auto)' },
         stdin: { type: 'string', description: 'Text piped to the command\'s stdin, e.g. a Python script for `python3 -`.' },
         background: { type: 'boolean', description: 'Run detached; returns a task id immediately instead of waiting.' },
@@ -864,7 +866,11 @@ async function executeFileWrite(args: ToolArgs, run?: AgentRunContext): Promise<
     captureChatArtifact(name, content, mimeForName(name), run)
     return `Created "${name}" (${formatBytes(content.length)}). It is shown to the user right here in the chat with a preview and a Download button. Nothing was written to disk. Do not call file_read on it; just tell the user it's ready.`
   }
-  const data = await backendCall<FsWriteResult>('fs_write', { path, content, ...chatCtx(run) })
+  // CA U4: what the file held before, for "Rewind to here".
+  const target = { path, ...chatCtx(run) }
+  const before = await readBefore(target)
+  const data = await backendCall<FsWriteResult>('fs_write', { ...target, content })
+  if (data.status === 'saved') recordWrite(getActiveConversationId(run) ?? getActiveChatId(run), target, before, data.path)
   // Rust returns {status: 'saved'|'unchanged', path: <absolute>, bytes}. Surface
   // the real path so the model (and the file-change event) knows WHERE the write
   // landed — especially important when chatId is None and Rust routes a relative
@@ -940,11 +946,20 @@ async function executeFileEdit(args: ToolArgs, run?: AgentRunContext): Promise<s
   }
 
   const w = await backendCall<FsWriteResult>('fs_write', { path, content: res.content, ...chatCtx(run) })
+  if (w.status === 'saved') recordWrite(getActiveConversationId(run) ?? getActiveChatId(run), { path, ...chatCtx(run) }, textBefore(content), w.path)
   const n = res.replacements ?? 1
   const note = res.fuzzyCount ? ` ${res.fuzzyCount === 1 ? 'One edit' : `${res.fuzzyCount} edits`} matched with indentation ignored; re-read before editing the same lines again.` : ''
   if (w.status === 'saved' && w.path) return `Edited ${shownToolPath(w.path)} (${n} replacement${n === 1 ? '' : 's'}).${note}`
   if (w.status === 'unchanged' && w.path) return `No change written to ${shownToolPath(w.path)} (content already matched).`
   return JSON.stringify(w)
+}
+
+/** What file_list says when it lists nothing. */
+export function emptyListAnswer(args: ToolArgs): string {
+  const pattern = typeof args.pattern === 'string' ? args.pattern.trim() : ''
+  if (!pattern) return 'The folder is empty.'
+  if (args.recursive || pattern.includes('/')) return `No file matches "${pattern}" here or in its subfolders.`
+  return `No file in this folder matches "${pattern}". The pattern does not look into subfolders: set recursive=true or use "**/${pattern}".`
 }
 
 async function executeFileList(args: ToolArgs, run?: AgentRunContext): Promise<string> {
@@ -966,7 +981,10 @@ async function executeFileList(args: ToolArgs, run?: AgentRunContext): Promise<s
   if (Array.isArray(data.entries)) {
     // An empty answer read as nothing: the model said "I listed the files"
     // and named none, the step showed no result (3.0.4 box run).
-    if (!data.entries.length) return 'The folder is empty.'
+    // With a pattern an empty answer means "nothing matched", not "empty":
+    // Kimi read "The folder is empty." for `*.{js,mjs}` over a tree full of
+    // .js files (CA bench AG9).
+    if (!data.entries.length) return emptyListAnswer(args)
     return data.entries
       .map((e) => `${e.isDir ? '[DIR]' : ''} ${e.name} (${formatBytes(e.size)})  ${shownToolPath(e.path)}`)
       .join('\n')
@@ -993,6 +1011,27 @@ async function executeFileSearch(args: ToolArgs, run?: AgentRunContext): Promise
       .join('\n\n')
   }
   return JSON.stringify(data)
+}
+
+/**
+ * The front gate of the shell (CA, 14.11.2026, AG10; lib/shell-scope.ts): a
+ * command that points at the home folder, the disk root or a path outside the
+ * agent's folder is refused, unless the user allowed it in Settings → Agent.
+ * "Outside" is the backend jail's own answer, the one the file tools get.
+ */
+async function outsideFolderRefusal(command: string, cwd: unknown, run?: AgentRunContext): Promise<string | null> {
+  const { useSettingsStore } = await import('../../stores/settingsStore')
+  if (useSettingsStore.getState().settings.agentShellOutsideFolder === true) return null
+  const { shellReachOutside, outsideRefusal } = await import('../../lib/shell-scope')
+  const reach = await shellReachOutside(command, async (path) => {
+    try {
+      await backendCall('fs_info', { path, ...chatCtx(run) })
+      return false
+    } catch (e) {
+      return /escapes the allowed workspace/i.test(e instanceof Error ? e.message : String(e))
+    }
+  }, typeof cwd === 'string' && cwd.trim() ? cwd : undefined)
+  return reach ? outsideRefusal(reach) : null
 }
 
 async function executeShellExecute(
@@ -1052,6 +1091,9 @@ async function executeShellExecute(
   // Flag abwaehlt, ist keine.
   const refusal = rejectShellCommand(command) ?? hardBlockedShellCommand(command)
   if (refusal) return refusal
+  // Vor der Hintergrund-Weiche, aus demselben Grund wie die Sperre darueber.
+  const outside = await outsideFolderRefusal(command, args.cwd, run)
+  if (outside) return outside
 
   // `shell` muss mit: das Backend leitet die Argumentform seit ba9557df aus dem
   // Shell-NAMEN ab (shell::shell_argv), das Durchreichen ist also folgenlos
@@ -1059,9 +1101,12 @@ async function executeShellExecute(
   // kennt StartArgs auf der Rust-Seite gar nicht.
   if (args.background) return executeShellExecuteBg({ command, cwd: args.cwd, shell: args.shell }, run, abort)
 
-  // An explicit timeout wins; otherwise a recognised test run keeps the old
-  // run_tests budget (300 s) instead of the shell default.
-  const timeout = argNumber(args, 'timeout') || commandTimeoutMs(command, 120000)
+  // What the model asks for is a wish under the cap (CA, 14.11.2026: one model
+  // asked for 600 s per `find /`); a recognised test run keeps the run_tests
+  // budget (300 s). A command still running at its timeout is not killed, it
+  // goes on as a background task (T1 below).
+  const { cappedShellTimeout, SHELL_TIMEOUT_DEFAULT_MS } = await import('../../lib/shell-scope')
+  const timeout = cappedShellTimeout(argNumber(args, 'timeout') || undefined, commandTimeoutMs(command, SHELL_TIMEOUT_DEFAULT_MS))
   const data = await invokeShell({
     command,
     args: args.args || null,
@@ -1069,13 +1114,38 @@ async function executeShellExecute(
     timeout,
     shell: args.shell || null,
     stdin: argOptString(args, 'stdin') ?? null,
+    // T1: a command still running at the timeout moves into the task
+    // registry instead of being killed (shell.rs, bg_tasks::adopt_foreground).
+    backgroundOnTimeout: true,
     ...chatCtx(run),
   }, abort)
-  const output = data.stdout || ''
-  const err = data.stderr || ''
+  const { cutShellOutput, renderHandedOver } = await import('../agents/shell-result')
+  // Long outputs: head and tail only, the rest stays readable under
+  // `outputId` (Rust keeps it as a finished task). The parsers below read
+  // the uncut text, they summarise it themselves.
+  const rawOut = data.stdout || ''
+  const rawErr = data.stderr || ''
+  const output = cutShellOutput(rawOut, data.outputId)
+  const err = cutShellOutput(rawErr, data.outputId)
   // Vor `timedOut` geprueft: der Abbruch ist die genauere Auskunft, und ein
   // Befehl, den Stop gefaellt hat, ist nicht in eine Zeitgrenze gelaufen.
   if (data.cancelled) return 'Cancelled: the user stopped the run.'
+  if (data.timedOut && data.taskId) {
+    const taskId = data.taskId
+    const { bgKill, rememberShellTask } = await import('../agents/bg-tasks')
+    rememberShellTask(run?.conversationId, taskId)
+    // The foreground Stop wiring ended with the call (invokeShell removes its
+    // listener), so Stop reaches the task the same way it reaches a
+    // `background: true` start: through shell_task_kill.
+    if (abort) {
+      if (abort.aborted) {
+        void bgKill(taskId).catch(() => {})
+        return 'Cancelled: the user stopped the run.'
+      }
+      abort.addEventListener('abort', () => { void bgKill(taskId).catch(() => {}) }, { once: true })
+    }
+    return renderHandedOver({ taskId, timeoutMs: data.timeoutMs ?? timeout, stdout: rawOut, stderr: rawErr })
+  }
   if (data.timedOut) return `Timed out.\n${err}`
 
   const kind = commandKind(command)
@@ -1092,14 +1162,14 @@ async function executeShellExecute(
           : /pytest/.test(command)
             ? 'pytest'
             : 'unknown'
-    const combined = `${output}\n${err}`.trim()
+    const combined = `${rawOut}\n${rawErr}`.trim()
     const tail = combined.length > 4000 ? `…${combined.slice(-4000)}` : combined
-    return `${renderResult(parseForRunner(runner, combined))}\n---\n${tail}`
+    return `${renderResult(parseForRunner(runner, combined), data.exitCode)}\n---\n${tail}`
   }
   if (data.exitCode && data.exitCode !== 0) return `Error (${data.exitCode}):\n${err || output}`
   if (kind === 'git-status' && /--porcelain=2/.test(command)) {
     const { parseGitStatus, renderGitStatus } = await import('../agents/git-tools')
-    return renderGitStatus(parseGitStatus(output))
+    return renderGitStatus(parseGitStatus(rawOut))
   }
   if (kind === 'git-commit') {
     const combined = `${output}\n${err}`.trim()
@@ -1149,6 +1219,14 @@ async function executeCodeExecute(
   // executeShellExecute — die eigene braucht es hier trotzdem.
   const bad = missingArgs('code_execute', args, 'code')
   if (bad) return bad
+  {
+    const { useSettingsStore } = await import('../../stores/settingsStore')
+    if (useSettingsStore.getState().settings.agentShellOutsideFolder !== true) {
+      const { scanCodePaths, outsideRefusal } = await import('../../lib/shell-scope')
+      const reach = scanCodePaths(argString(args, 'code'))
+      if (reach) return outsideRefusal(reach)
+    }
+  }
   const data = await invokeCode({ code: argString(args, 'code'), timeout: 30000, ...chatCtx(run) }, abort)
   const output = data.stdout || ''
   const err = data.stderr || ''
@@ -1226,7 +1304,7 @@ async function executeShellExecuteBg(
   run?: AgentRunContext,
   signal?: AbortSignal,
 ): Promise<string> {
-  const { bgStart, bgKill } = await import('../agents/bg-tasks')
+  const { bgStart, bgKill, rememberShellTask } = await import('../agents/bg-tasks')
   const command = argString(args, 'command')
   // Aus demselben Grund wie die `--no-verify`-Sperre darunter doppelt: über den
   // zurückgezogenen Namen kommt der Aufruf an executeShellExecute vorbei, und
@@ -1243,6 +1321,8 @@ async function executeShellExecuteBg(
   const { rejectShellCommand, hardBlockedShellCommand } = await import('../../lib/shell-command-classify')
   const refusal = rejectShellCommand(command) ?? hardBlockedShellCommand(command)
   if (refusal) return refusal
+  const outside = await outsideFolderRefusal(command, args.cwd, run)
+  if (outside) return outside
   // Thread the chat context through, or the task starts in LU's own directory
   // instead of the workspace the foreground shell tool uses.
   const { id } = await bgStart({
@@ -1257,6 +1337,8 @@ async function executeShellExecuteBg(
     shell: argOptString(args, 'shell'),
     ...chatCtx(run),
   })
+  // check_tasks lists it next to the tasks a timeout handed over (T1).
+  rememberShellTask(run?.conversationId, id)
   // A detached task outlives the turn that started it BY DESIGN, but it must
   // not outlive the user pressing Stop: nothing polls it after the run ends, so
   // an unattended `npm run build`/deploy script would keep writing to the repo
@@ -1491,7 +1573,7 @@ async function executeRunTests(args: ToolArgs, run?: AgentRunContext, signal?: A
     command,
     args: null,
     cwd: args.cwd || null,
-    timeout: argNumber(args, 'timeout') || 300000,
+    timeout: Math.min(argNumber(args, 'timeout') || 300000, 300000),
     shell: null,
     ...chatCtx(run),
   }
@@ -1504,7 +1586,7 @@ async function executeRunTests(args: ToolArgs, run?: AgentRunContext, signal?: A
   }
   const combined = `${data.stdout || ''}\n${data.stderr || ''}`.trim()
   const parsed = parseForRunner(runner ?? 'unknown', combined)
-  return renderResult(parsed)
+  return renderResult(parsed, data.exitCode)
 }
 /**
  * `runner` as the model may send it. A value the runner list does not know
@@ -2226,6 +2308,12 @@ async function executeTodoWrite(args: ToolArgs, run?: AgentRunContext): Promise<
   const convId = getActiveConversationId(run)
   if (!convId) return 'Error: no active conversation to attach a plan to.'
 
+  // The plan from before the user's last message keeps its row in the
+  // transcript (lib/plan-pin.ts) before this one takes its place. Loaded on
+  // use: plan-pin reads chatStore, and a static import closes a cycle through
+  // the tool table at start-up.
+  const { archiveRetiredPlan } = await import('../../lib/plan-pin')
+  archiveRetiredPlan(convId)
   const todos = writeTodos(convId, args.todos)
   if (todos.length === 0 && Array.isArray(args.todos) && args.todos.length > 0) {
     return 'Error: every item needs a non-empty `content` string. Nothing was written.'

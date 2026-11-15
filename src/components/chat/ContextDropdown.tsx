@@ -20,6 +20,8 @@ import { ENGINE_DEFAULT_CTX } from '../../lib/builtin-ctx'
 import { SOURCE_LABEL, withStoredWindow } from '../../lib/context-source'
 import { savedLmStudioContext, withLmStudioPick } from '../../lib/lmstudio-context-pick'
 import { usePopoverPlatz } from '../../hooks/usePopoverPlatz'
+import { smallWindowNote } from '../../lib/context-breakdown'
+import { ContextBreakdownPanel } from './ContextBreakdownPanel'
 
 const PRESETS = [4096, 8192, 16384, 32768, 65536, 131072]
 /** C77: what a hosted model's own window commonly is. */
@@ -87,7 +89,7 @@ export function ContextDropdown({ children }: { children?: ReactNode }) {
    * andere Aufklappmenue der App.
    */
   const listeRef = useRef<HTMLDivElement>(null)
-  const platz = usePopoverPlatz(listeRef, open)
+  const platz = usePopoverPlatz(listeRef, open, { breiteDeckeln: true })
   const [busy, setBusy] = useState(false)
   // Reload failure, surfaced instead of swallowed: the engine's start error
   // (out of memory for the new ctx, port held by a stranger) is actionable,
@@ -154,6 +156,16 @@ export function ContextDropdown({ children }: { children?: ReactNode }) {
   // Hinweis erst, wenn der Nutzer ueber den Standard gegangen ist, vorher
   // nicht (30.09.2026). Grau, kein Gelb (Regel vom 04.09.).
   const raised = cloud && ctx.sendWindow > DEFAULT_SEND_WINDOW_TOKENS
+
+  // U5: a local model whose agent window is below 16K. Calm, grey, one line,
+  // and one click to 32K through `apply`, the same lever as the list below.
+  const smallNote = smallWindowNote({
+    provider: ctx.provider,
+    window: ctx.contextWindow,
+    modelMax: ctx.modelMax,
+    use: windowUse,
+  })
+  const meterWindow = ctx.sendWindow > 0 ? ctx.sendWindow : ctx.contextWindow
 
   /*
    * Die Liste endet an der Decke, und die Decke ist der groesste Eintrag.
@@ -343,6 +355,9 @@ export function ContextDropdown({ children }: { children?: ReactNode }) {
         {busy ? <Loader2 size={9} className="animate-spin" /> : null}
         {applyError && !busy ? <AlertTriangle size={9} className="text-red-400" /> : null}
         {raised && !applyError && !busy ? <AlertTriangle size={9} className="text-gray-400" aria-label="Larger context costs more" /> : null}
+        {smallNote && !raised && !applyError && !busy ? (
+          <span data-testid="context-small-window-mark" title={smallNote.text} className="w-1.5 h-1.5 rounded-full bg-gray-400 dark:bg-gray-500" />
+        ) : null}
         {/* Der Fuellstand IST die Beschriftung. Nur wenn es keinen gibt (leerer
             Chat), steht hier wieder das Fenster allein. */}
         <span id={valueId}>
@@ -378,6 +393,29 @@ export function ContextDropdown({ children }: { children?: ReactNode }) {
               platz.nachOben ? 'bottom-full mb-1' : 'top-full mt-1'
             }`}
           >
+            {smallNote && (
+              <div
+                data-testid="context-small-window"
+                className="w-60 max-w-full mt-0.5 mb-0.5 px-2 py-1.5 rounded-md bg-gray-50 dark:bg-white/[0.04] t-micro text-gray-600 dark:text-gray-300 leading-snug flex flex-col gap-1"
+              >
+                <span className="flex items-start gap-1.5">
+                  <AlertTriangle size={10} className="shrink-0 mt-px text-gray-400" />
+                  <span>{smallNote.text}{smallNote.hint ? ` ${smallNote.hint}` : ''}</span>
+                </span>
+                {smallNote.fix !== null && (
+                  <button
+                    type="button"
+                    onClick={() => apply(smallNote.fix as number)}
+                    className="self-start ml-4 px-2 py-0.5 rounded border border-gray-200 dark:border-white/10 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/[0.08] t-micro font-medium transition-colors"
+                  >
+                    Use {formatContextWindow(smallNote.fix)}
+                  </button>
+                )}
+              </div>
+            )}
+            <ContextBreakdownPanel window={meterWindow} modelWindow={ctx.contextWindow} agent={windowUse === 'agent'} />
+            <div className="mx-1 border-t border-gray-100 dark:border-white/[0.06]" />
+            {!cloud && <div className="px-2 pt-1 t-label text-gray-400">Context window</div>}
             {(!cloud || ctx.sendAdjustable !== false) && (<>
             {cloud && ctx.modelWindowSettable && (
               <div className="px-2 pt-0.5 t-micro uppercase tracking-wide text-gray-400">Sent per message</div>

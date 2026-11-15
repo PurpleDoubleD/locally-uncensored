@@ -1,4 +1,4 @@
-import { File as FileIcon, X } from 'lucide-react'
+import { AtSign, File as FileIcon, X } from 'lucide-react'
 import type { FileAttachment } from '../../types/chat'
 import { formatBytes } from '../../lib/formatters'
 import { chipCutLabel } from '../../lib/chat-file-fit'
@@ -24,7 +24,7 @@ export function binaryReachLabel(file: FileAttachment, reachesTools?: boolean): 
  * (without it). It shows a description, never the file: the bytes are not in
  * the chat (lib/chat-files.ts), so there is nothing here to open or save.
  */
-export function ChatFileChip({ file, onRemove, testId = 'chat-file-chip', reachesTools }: {
+export function ChatFileChip({ file, onRemove, testId = 'chat-file-chip', reachesTools, mention }: {
   file: FileAttachment
   /** Composer only: take the file off the draft again. */
   onRemove?: () => void
@@ -32,6 +32,8 @@ export function ChatFileChip({ file, onRemove, testId = 'chat-file-chip', reache
   /** Composer only: whether a send copies the file into a working folder
    *  (Agent and Code). Unset in the transcript, where the file says it. */
   reachesTools?: boolean
+  /** Composer only: the file came from an `@` mention (lib/file-mentions.ts). */
+  mention?: boolean
 }) {
   const where = file.absolutePath
     ? `\nOn this computer: ${file.absolutePath}`
@@ -43,12 +45,13 @@ export function ChatFileChip({ file, onRemove, testId = 'chat-file-chip', reache
   return (
     <div
       data-testid={testId}
+      data-mention={mention ? 'true' : undefined}
       title={`${file.name}\n${file.kind}, ${formatBytes(file.size)}${cut ? `\nOnly part of the text reached the model: ${cut}` : ''}\nSHA-256 ${file.sha256}${where}`}
       className="flex items-center gap-1.5 max-w-[240px] pl-2 pr-1.5 py-1 rounded-lg border border-gray-200 dark:border-white/10 bg-white dark:bg-white/[0.04] text-left"
     >
-      <FileIcon size={13} className="shrink-0 text-gray-400" />
+      {mention ? <AtSign size={13} className="shrink-0 text-gray-400" /> : <FileIcon size={13} className="shrink-0 text-gray-400" />}
       <span className="min-w-0 flex flex-col leading-tight">
-        <span className="truncate t-mono text-gray-800 dark:text-gray-200">{file.name}</span>
+        <span className="truncate t-mono text-gray-800 dark:text-gray-200">{mention ? `@${file.name}` : file.name}</span>
         <span className="truncate t-micro text-gray-500 dark:text-gray-400">{file.kind}, {formatBytes(file.size)}</span>
         {cut && <span data-testid="chat-file-cut" className="truncate t-micro text-gray-500 dark:text-gray-400">{cut}</span>}
         {reach && <span data-testid="chat-file-reach" className="truncate t-micro text-gray-500 dark:text-gray-400">{reach}</span>}

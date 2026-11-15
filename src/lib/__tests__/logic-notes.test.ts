@@ -181,20 +181,30 @@ describe('guard: the hooks write the sentences this reader knows', () => {
     expect(RATE_LIMIT_LITERAL.startsWith(RATE_LIMIT_HEAD)).toBe(true)
   })
 
-  it('the catch of a plain send has the seven branches read here, the catch of an agent run its twelve', () => {
+  it('the catch of a plain send has the seven branches read here, the catch of an agent run its thirteen', () => {
     // A new branch writes a new sentence into the answer. It belongs into lib/logic-notes.ts and into the list above.
     // The seventh and the twelfth (3.0.8, A28) are the LU Cloud outage: the server's sentence, so they write the field too.
     // A22: the multimodal branch now asks why (api/image-part-heal); its sentences are read above.
+    // The thirteenth (15.11.2026): LU Cloud cut a step for repeating, SERVER_LOOP_MESSAGE.
     const plain = catchOf(chatHook, 'await explainImageRefusal(activeModel)')
     expect(plain.match(/updateMessageContent\(/g)).toHaveLength(7)
     const agent = catchOf(agentHook, "'\\n\\nAgent error: ' + errorMsg")
-    expect(agent.match(/updateMessageContent\(/g)).toHaveLength(12)
+    expect(agent.match(/updateMessageContent\(/g)).toHaveLength(13)
   })
 
   it('an empty turn is explained through one function, in both paths of the chat hook', () => {
     // Twice for an empty turn, once for an answer that lost its model to a pick (SWITCHED_MODEL_HEAD in the reader).
     expect(chatHook.match(/emptyAnswerExplanation\(\{/g)).toHaveLength(3)
     expect(emptyAnswerExplanation({ finishReason: 'model_switch', captured: false, keepThinking: false }).startsWith(SWITCHED_MODEL_HEAD)).toBe(true)
+  })
+})
+
+describe('15.11.2026: the sentence of a step LU Cloud cut for repeating', () => {
+  it('is read as a note of the app, alone and after a partial answer', async () => {
+    const { SERVER_LOOP_MESSAGE } = await import('../agent-core/server-loop-cut')
+    const { splitLogicNote } = await import('../logic-notes')
+    expect(splitLogicNote(SERVER_LOOP_MESSAGE)?.kind).toBe('generic')
+    expect(splitLogicNote(`Checked the first two logs.\n\n${SERVER_LOOP_MESSAGE}`)?.body).toBe('Checked the first two logs.')
   })
 })
 

@@ -438,7 +438,12 @@ export function extractToolCallsWithRanges(content: string): {
       if (argStr) {
         // Try to parse as JSON
         const parsed = repairJson(`{${argStr}}`)
+        const keyword = keywordArgs(argStr)
         if (isRecord(parsed)) args = parsed
+        // `file_read(path="src/math.ts")`: Python-style keywords are no JSON,
+        // and the fallback below used to turn the whole text into
+        // {query: 'path="src/math.ts'} (CA K2, found by the shared chain's test).
+        else if (keyword) args = keyword
         else {
           // Simple single-argument: treat as the first required param
           args = { query: argStr.replace(/^["']|["']$/g, '') }
@@ -449,6 +454,20 @@ export function extractToolCallsWithRanges(content: string): {
   }
 
   return { calls, ranges }
+}
+
+/** `key="v", n=3, ok=true` → object, or null when the text has no keyword. */
+function keywordArgs(text: string): Record<string, unknown> | null {
+  const kw = /([A-Za-z_]\w*)\s*=\s*("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|true|false|null|-?\d+(?:\.\d+)?)/g
+  const out: Record<string, unknown> = {}
+  let m: RegExpExecArray | null
+  while ((m = kw.exec(text)) !== null) {
+    const v = m[2]
+    out[m[1]] = v === 'true' ? true : v === 'false' ? false : v === 'null' ? null
+      : /^-?\d/.test(v) ? Number(v)
+      : v.slice(1, -1).replace(/\\(["'\\])/g, '$1')
+  }
+  return Object.keys(out).length > 0 ? out : null
 }
 
 /**

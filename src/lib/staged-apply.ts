@@ -14,10 +14,12 @@
  */
 
 import { backendCall } from '../api/backend'
+import { beforeFromError, recordWrite, textBefore, type Before } from './agent-core/checkpoints'
 import { useStagedChangesStore, type StagedChange } from '../stores/stagedChangesStore'
 import { useChatStore } from '../stores/chatStore'
 import { resolveChatWorkspaceSlug } from '../api/workspace-slug'
 import { mergeThreeWay } from './three-way-merge'
+import { contentWithDecisions, describeHunk } from './hunks'
 
 /**
  * Line endings, the difference between "merged" and "we refused your own edit".
@@ -78,7 +80,7 @@ const withEol = (text: string, eol: '\r\n' | '\n') =>
 async function reconcile(
   jail: string,
   change: StagedChange,
-): Promise<{ content: string; merged: number }> {
+): Promise<{ content: string; merged: number; before: Before }> {
   const base = change.oldContent ?? ''
   let res: { content?: string; encoding?: string } | undefined
   try {
@@ -87,9 +89,9 @@ async function reconcile(
       chatId: jail,
       workingDirectory: change.workingDirectory,
     })
-  } catch {
+  } catch (e) {
     // gone or unreadable, the write recreates it, which is what the user asked for
-    return { content: change.newContent, merged: 0 }
+    return { content: change.newContent, merged: 0, before: beforeFromError(e) }
   }
   // Not UTF-8 on disk (bug hunt 01.10.2026, C8): read as '' it matched an
   // empty base and was overwritten without the drift check ever seeing it.
@@ -99,17 +101,18 @@ async function reconcile(
     )
   }
   const current = res?.content ?? ''
+  const before = textBefore(current)
   // The file on disk decides the form; an empty file inherits the model's.
   const eol = current ? eolOf(current) : eolOf(change.newContent)
   const baseLf = toLf(base)
   const currentLf = toLf(current)
   const newLf = toLf(change.newContent)
   if (currentLf === baseLf || currentLf === newLf) {
-    return { content: withEol(change.newContent, eol), merged: 0 }
+    return { content: withEol(change.newContent, eol), merged: 0, before }
   }
   const merged = mergeThreeWay(baseLf, currentLf, newLf)
   if (merged.ok) {
-    return { content: withEol(merged.content, eol), merged: merged.mergedRegions }
+    return { content: withEol(merged.content, eol), merged: merged.mergedRegions, before }
   }
   throw new Error(
     `${change.path} changed on disk in the same ${merged.conflicts === 1 ? 'place' : 'places'} this edit touches, so applying it would drop those changes. Everything else was left alone. Reject this one and let the model read the file again.`,
@@ -172,24 +175,37 @@ export async function applyStagedChange(chatId: string, change: StagedChange): P
   }
 }
 
-async function applyStagedChangeInner(chatId: string, change: StagedChange): Promise<boolean> {
-  if (!stillPending(chatId, change)) return false
+async function applyStagedChangeInner(chatId: string, staged: StagedChange): Promise<boolean> {
+  if (!stillPending(chatId, staged)) return false
+  // Hunks the user rejected are left out: the file gets the original text
+  // there. The latest decisions count, read from the store, since the caller
+  // may hold a snapshot from before the last click.
+  const latest = useStagedChangesStore.getState().get(chatId, staged.id) ?? staged
+  const partial = contentWithDecisions(latest.oldContent ?? '', latest.newContent, latest.hunkDecisions)
+  const change: StagedChange = { ...latest, newContent: partial.content }
   const jail = await jailFor(chatId)
-  const { content, merged } = await reconcile(jail, change)
+  const { content, merged, before } = await reconcile(jail, change)
   if (!stillPending(chatId, change)) return false
-  const res = await backendCall<{ status?: string; path?: string }>('fs_write', {
-    path: change.resolvedPath || change.path,
-    content,
-    chatId: jail,
-    workingDirectory: change.workingDirectory,
-  })
+  // CA U4: what the file held before this apply (reconcile just read it), for "Rewind to here".
+  const target = { path: change.resolvedPath || change.path, chatId: jail, workingDirectory: change.workingDirectory }
+  const res = await backendCall<{ status?: string; path?: string }>('fs_write', { ...target, content })
   // 'saved' and 'unchanged' are both success ('unchanged' = the file already
   // matched byte-for-byte). Anything else is a real failure worth retrying.
   if (res?.status && res.status !== 'saved' && res.status !== 'unchanged') {
     throw new Error(`fs_write returned status "${res.status}"`)
   }
+  if (res?.status === 'saved') recordWrite(chatId, target, before, res.path)
   for (const fn of appliedListeners) {
     try { fn(chatId, change.id) } catch { /* a listener never stops the write */ }
+  }
+  const total = partial.model.hunks.length
+  const left = partial.rejected.length
+  if (left > 0) {
+    useStagedChangesStore.getState().addNote(chatId, {
+      changeId: change.id,
+      path: change.path,
+      text: partialNote(change.path, partial.rejected.map(describeHunk), total),
+    })
   }
   useStagedChangesStore.getState().remove(chatId, change.id)
   // Mirror the apply in the chat log so the user sees a confirmation in the
@@ -207,13 +223,37 @@ async function applyStagedChangeInner(chatId: string, change: StagedChange): Pro
   useChatStore.getState().addMessage(chatId, {
     id: crypto.randomUUID(),
     role: 'system',
-    content: merged > 0
+    content: (merged > 0
       ? `Applied staged change: ${change.path} (merged with ${merged} change${merged === 1 ? '' : 's'} made on disk since it was staged, so this file is not byte for byte the diff you approved)`
-      : `Applied staged change: ${change.path}`,
+      : `Applied staged change: ${change.path}`)
+      + (left > 0 ? ` (${total - left} of ${total} parts, ${left} rejected)` : ''),
     timestamp: Date.now(),
     notice: merged > 0 ? 'warn' : 'info',
   })
   return true
+}
+
+/** What the model hears when some hunks of a file were left out. */
+export function partialNote(path: string, rejected: string[], total: number): string {
+  return `The user applied your change to ${path} but rejected ${rejected.length} of ${total} parts (${rejected.join('; ')}). Those parts keep the original text. Read the file before you edit it again.`
+}
+
+/** What the model hears about a file the user rejected as a whole. */
+export function rejectedNote(path: string): string {
+  return `The user rejected your change to ${path}. Nothing was written to it.`
+}
+
+/** Reject one staged change and tell the model at its next tool result. */
+export function rejectStagedChange(chatId: string, change: Pick<StagedChange, 'id' | 'path'>): void {
+  const store = useStagedChangesStore.getState()
+  if (!store.get(chatId, change.id)) return
+  store.remove(chatId, change.id)
+  store.addNote(chatId, { changeId: change.id, path: change.path, text: rejectedNote(change.path) })
+}
+
+/** Reject every staged change of a chat. */
+export function rejectAllStagedChanges(chatId: string): void {
+  for (const change of useStagedChangesStore.getState().list(chatId)) rejectStagedChange(chatId, change)
 }
 
 /** Apply the pending changes of a chat staged at or after `since` (all of

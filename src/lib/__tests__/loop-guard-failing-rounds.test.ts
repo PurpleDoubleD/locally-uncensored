@@ -48,12 +48,33 @@ describe('the icacls run from the R26 measurement', () => {
     'icacls "C:\\\\…\\\\lu-matrix-sandbox" /grant Everyone=R,X',
   ]
 
-  it('NEGATIVE CONTROL: the call-shape detectors never fire on it', () => {
-    // The model wrote a new line before every attempt in the measurement, so
-    // detector 8 (silent near-copies, C83) stays out of it as well.
+  it('NEGATIVE CONTROL: the call-shape detectors stay out of the first four rounds', () => {
+    // The model wrote a line before every attempt in the measurement. Until
+    // CA (13.11.2026) any new line counted as news and kept detector 8 (C83)
+    // out of the whole run; a line that only changes its number is no news
+    // any more, so the fifth near-copy steers. The failure detector (below)
+    // still speaks first, at the third failing round.
+    const g = new AgentLoopGuard()
+    const verdicts = REAL_ARGS.map((args, i) => {
+      g.recordNarration(`Trying permission variant number ${i + 1} on the sandbox folder.`)
+      return g.recordBatch([{ name: 'shell_execute', args }]).action
+    })
+    expect(verdicts.slice(0, 4)).toEqual(['ok', 'ok', 'ok', 'ok'])
+    expect(verdicts).not.toContain('halt')
+  })
+
+  it('a really new line each round still keeps detector 8 out', () => {
+    const lines = [
+      'The grant failed, so I will try the read-execute form instead.',
+      'Quoting the path might matter on Windows, trying that.',
+      'Maybe the comma form is what icacls expects here.',
+      'Checking whether parentheses change how the right is parsed.',
+      'One more spelling of the same right, then I stop.',
+      'Last attempt with quotes and the comma form together.',
+    ]
     const g = new AgentLoopGuard()
     REAL_ARGS.forEach((args, i) => {
-      g.recordNarration(`Trying permission variant number ${i + 1} on the sandbox folder.`)
+      g.recordNarration(lines[i])
       expect(g.recordBatch([{ name: 'shell_execute', args }]).action).toBe('ok')
     })
   })

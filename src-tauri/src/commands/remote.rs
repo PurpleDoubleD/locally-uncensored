@@ -1196,6 +1196,7 @@ async fn handle_agent_tool(
             let code = body.args.get("code").and_then(|v| v.as_str()).unwrap_or("").to_string();
             let timeout = body.args.get("timeout").and_then(|v| v.as_u64());
             if code.is_empty() { Err("code_execute needs a non-empty `code` argument.".into()) }
+            else if let Some(no) = crate::shell_scope::code_refusal(&code) { Err(no) }
             else { crate::commands::agent::execute_code_blocking(code, timeout, chat_id.clone(), None, None, &app_state) }
         }
         "web_search" => {
@@ -1277,8 +1278,14 @@ async fn handle_agent_tool(
                     .or_else(|| Some(crate::commands::agent::agent_workspace_for(chat_id.as_deref(), &app_state)
                         .to_string_lossy()
                         .to_string()));
-                let start_args = serde_json::json!({ "command": command, "cwd": cwd, "chat_id": chat_id });
-                crate::commands::bg_tasks::shell_task_start_impl(&start_args).await
+                let root = crate::commands::agent::agent_workspace_for(chat_id.as_deref(), &app_state);
+                let here = cwd.as_deref().map(std::path::PathBuf::from).unwrap_or_else(|| root.clone());
+                // CA (14.11.2026, AG10): the remote shell stays in its folder.
+                if let Some(no) = crate::shell_scope::refusal(&command, &root, &here) { Err(no) }
+                else {
+                    let start_args = serde_json::json!({ "command": command, "cwd": cwd, "chat_id": chat_id });
+                    crate::commands::bg_tasks::shell_task_start_impl(&start_args).await
+                }
             }
             else {
                 // Default cwd → the per-chat workspace folder so `npm install`
@@ -1301,15 +1308,25 @@ async fn handle_agent_tool(
                 if let Some(ref dir) = cwd {
                     let _ = std::fs::create_dir_all(dir);
                 }
-                let timeout = body.args.get("timeout").and_then(|v| v.as_u64());
+                // CA (14.11.2026, AG10): at most two minutes, the model's
+                // wish below that; then the command goes on as a task (T1).
+                let timeout = crate::shell_scope::capped_timeout(body.args.get("timeout").and_then(|v| v.as_u64()), &command);
                 let shell = body.args.get("shell").and_then(|v| v.as_str()).map(String::from);
                 let stdin = body.args.get("stdin").and_then(|v| v.as_str()).map(String::from);
+                let root = crate::commands::agent::agent_workspace_for(chat_id.as_deref(), &app_state);
+                let here = cwd.as_deref().map(std::path::PathBuf::from).unwrap_or_else(|| root.clone());
                 // `call_id` ist None: die Fernbruecke hat keinen Kanal, ueber
                 // den ein Abbruch zurueckkaeme. Ohne Kennung ist der Befehl
                 // nicht abbrechbar, und das ist ehrlicher als eine Kennung, die
                 // niemand je ruft. Der Weg dahin ist derselbe wie im Fenster:
                 // ein `shell_execute_cancel` in der Fernliste.
-                crate::commands::shell::shell_execute(command, None, cwd, timeout, shell, stdin, chat_id.clone(), None, None).await
+                // `Some(true)` (T1): a command that outruns its timeout keeps
+                // running as a task the phone reaches with task "status" /
+                // "kill" above, as the shared tool description promises.
+                // The remote shell stays in its folder: no switch for it, the
+                // phone is a network surface (shell_scope.rs).
+                if let Some(no) = crate::shell_scope::refusal(&command, &root, &here) { Err(no) }
+                else { crate::commands::shell::shell_execute(command, None, cwd, timeout, shell, stdin, chat_id.clone(), None, None, Some(true)).await }
             }
         }
         "system_info" => crate::commands::system::system_info(),

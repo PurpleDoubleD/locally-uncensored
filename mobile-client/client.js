@@ -24,7 +24,9 @@ import {
   buildToolDefs,
   capToolResult,
   compactApiMessages,
+  countAgentHourTokens,
   decayToolResults,
+  estimateAgentTokens,
   extractToolCallsFromContent,
   isDecayedAt,
   isSystemPromptEcho,
@@ -292,6 +294,15 @@ import {
           if(data.exitCode!==undefined || data.stdout!==undefined){
             var out = data.stdout || '';
             var err = data.stderr || '';
+            // T1: the desktop moved a command that outran its timeout into a
+            // background task instead of killing it.
+            if(data.timedOut && data.taskId){
+              var soFar = (out + (err ? '\n[stderr]\n' + err : '')).replace(/\s+$/, '');
+              if(soFar.length > 2000) soFar = '…' + soFar.slice(-2000);
+              return 'Still running after its timeout, so it was not stopped: it keeps running in the background as task ' + data.taskId + '.\n'
+                + (soFar ? 'Output so far:\n' + soFar + '\n' : '')
+                + 'Use shell_execute with task "status" and task_id "' + data.taskId + '" to read its output, or task "kill" to stop it.';
+            }
             if(data.timedOut) return 'Execution timed out.';
             if(data.exitCode && data.exitCode!==0) return 'Error ('+data.exitCode+'):\n'+(err||out);
             return out || (err ? 'stderr: '+err : 'Done.');
@@ -1870,7 +1881,21 @@ import {
       // context with room to spare for the model's reply.
       apiMessages = compactApiMessages(apiMessages, 24000);
 
+      var sentChars = JSON.stringify(apiMessages).length + JSON.stringify(tools).length;
       nativeToolChat(apiMessages, tools).then(function(res){
+        // Hourly token limit (agent-core.js): estimated from the characters
+        // that went out and came back. Over it, the run ends here, before
+        // any further tool runs, and the next message goes on.
+        var gotChars = (res.content || '').length + (res.thinking || '').length + JSON.stringify(res.toolCalls || []).length;
+        if(countAgentHourTokens(estimateAgentTokens(sentChars + gotChars))){
+          if(thinkingStepIdx >= 0 && target.agentSteps && target.agentSteps[thinkingStepIdx]){
+            target.agentSteps.splice(thinkingStepIdx, 1);
+            thinkingStepIdx = -1;
+          }
+          appendAgentStep('error', 'Paused: agent runs from this phone sent a lot to the model in the last hour. Send a message to go on.');
+          finishToolLoop(null);
+          return;
+        }
         // Remove the initial "thinking" placeholder on the first
         // successful response (only matters for iter === 1).
         if(thinkingStepIdx >= 0 && target.agentSteps && target.agentSteps[thinkingStepIdx]){

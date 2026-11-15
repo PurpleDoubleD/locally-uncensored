@@ -7,7 +7,7 @@
  * tail of the runner output — instead of an opaque stdout dump.
  */
 
-export type Runner = 'vitest' | 'cargo' | 'pytest' | 'jest' | 'unknown'
+export type Runner = 'vitest' | 'cargo' | 'pytest' | 'jest' | 'node' | 'unknown'
 
 export interface ParsedTestRun {
   runner: Runner
@@ -170,8 +170,56 @@ export function parsePytest(out: string): ParsedTestRun {
   }
 }
 
+/**
+ * Node's built-in runner (`node --test`, often behind `npm test`):
+ *   ℹ tests 6        (spec reporter)    # tests 6   (TAP reporter)
+ *   ℹ pass 6                            # pass 6
+ *   ℹ fail 0                            # fail 0
+ *   ✖ evicts the least recently used (1.2ms)     not ok 3 - evicts …
+ */
+export function parseNodeTest(out: string): ParsedTestRun {
+  const count = (name: string) => {
+    const m = out.match(new RegExp(`^\\s*[ℹ#]\\s*${name}\\s+(\\d+)\\s*$`, 'm'))
+    return m ? parseInt(m[1], 10) : 0
+  }
+  const passedCount = count('pass')
+  const failedCount = count('fail')
+  const total = Math.max(count('tests'), passedCount + failedCount)
+  const failedTests: string[] = []
+  for (const line of out.split('\n')) {
+    const m = line.match(/^\s*(?:✖\s+(.+?)(?:\s+\([\d.]+ms\))?|not ok \d+ - (.+))$/)
+    const name = m && (m[1] ?? m[2])
+    if (name && !/^failing tests:?$/i.test(name.trim()) && !failedTests.includes(name.trim())) failedTests.push(name.trim())
+  }
+  return {
+    runner: 'node',
+    passed: failedCount === 0 && total > 0,
+    total,
+    passedCount,
+    failedCount,
+    failedTests,
+    outputTail: tailLines(out, 40),
+  }
+}
+
+/**
+ * The runner read off the output, for a command that does not name one
+ * (`npm test`, `make test`). A green `node --test` behind `npm test` was
+ * headed "NO TESTS / UNPARSEABLE (unknown): 0/0" (CA bench CO10, 14.11.).
+ */
+export function sniffRunner(out: string): Runner {
+  if (/^\s*[ℹ#]\s*(?:tests|pass)\s+\d+\s*$/m.test(out)) return 'node'
+  if (/test result:\s+\w+\.\s+\d+\s+passed/.test(out)) return 'cargo'
+  if (/^\s*Tests\s+(?:\d+\s+failed\s*\|\s*)?\d+\s+passed/m.test(out)) return 'vitest'
+  if (/^=+ .*\d+ (?:passed|failed).* =+$/m.test(out)) return 'pytest'
+  return 'unknown'
+}
+
 export function parseForRunner(runner: Runner, out: string): ParsedTestRun {
+  if (runner === 'unknown') runner = sniffRunner(out)
   switch (runner) {
+    case 'node':
+      return parseNodeTest(out)
     case 'vitest':
     case 'jest':
       return { ...parseVitest(out), runner }
@@ -193,9 +241,15 @@ export function parseForRunner(runner: Runner, out: string): ParsedTestRun {
 }
 
 /** Renders a ParsedTestRun as a string for the model. Compact + greppable. */
-export function renderResult(r: ParsedTestRun): string {
-  const status = r.passed ? 'PASSED' : r.total === 0 ? 'NO TESTS / UNPARSEABLE' : 'FAILED'
-  const head = `${status} (${r.runner}): ${r.passedCount}/${r.total} passed, ${r.failedCount} failed.`
+export function renderResult(r: ParsedTestRun, exitCode?: number | null): string {
+  // No summary found: the exit code is the only honest verdict left. "NO
+  // TESTS" over a run that printed six green ticks sent models back to run
+  // the tests again.
+  const head = r.total === 0 && typeof exitCode === 'number'
+    ? exitCode === 0
+      ? 'RAN (exit 0): the test summary was not recognised, read the output below.'
+      : `FAILED (exit ${exitCode}): the test summary was not recognised, read the output below.`
+    : `${r.passed ? 'PASSED' : r.total === 0 ? 'NO TESTS / UNPARSEABLE' : 'FAILED'} (${r.runner}): ${r.passedCount}/${r.total} passed, ${r.failedCount} failed.`
   const failed = r.failedTests.length
     ? `\nFailing tests:\n${r.failedTests.map((t) => `- ${t}`).join('\n')}`
     : ''

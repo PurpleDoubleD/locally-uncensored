@@ -307,8 +307,10 @@ describe('VoiceSessionPanel', () => {
     expect(view.getByTestId('voice-status').textContent).toBe('Searching')
     const block = () => view.getByRole('group', { name: 'Tools' }).querySelector('[data-tool="web_search"]') as HTMLElement
     expect(block().getAttribute('data-status')).toBe('running')
-    // The look of the chat: the name in the shimmer, the three dots.
-    expect(block().querySelector('.lu-tool-shimmer')?.textContent).toBe('web_search')
+    // The look of the chat: what it does in the shimmer (CA U1: words, the
+    // internal name is the tooltip), the three dots.
+    expect(block().querySelector('.lu-tool-shimmer')?.textContent).toBe('Searching the web for')
+    expect(block().querySelector('[title="web_search"]')).not.toBeNull()
     expect(block().querySelectorAll('.lu-band-dot')).toHaveLength(3)
     send({ type: 'tool-done', id: 'call-1', status: 'failed', result: 'No connection.', durationMs: 1200 })
     expect(block().getAttribute('data-status')).toBe('failed')

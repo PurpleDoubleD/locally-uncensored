@@ -67,6 +67,7 @@ import { fileMessageFields, filesWithoutWorkspace, type ChatFileInput } from "..
 import { fitFilesForSend, requestTextOf } from "./chat-file-room"
 import { isGroupChat, availableGroupMembers, groupSystemPrompt, groupHistory, groupSpeakers, stripImpersonatedSpeakers, hasGroupHistory, soloSpeakers, soloTurnAuthorFields, soloHistoryTag, SOLO_HISTORY_LINE } from "../lib/group-chat"
 import { explainSendRefusal } from "../lib/template-refusal"
+import { ContextFullError, fitToWindow } from "../lib/fit-to-window"
 import { laterAnswersInRound, nextRoundSpeakers, regenerateSpeakers, copiesForNewVersion } from "../lib/group-rounds"
 import { groupTurnStarted, groupRoundEnded } from "../stores/groupRoundStore"
 import { forkStart } from "../lib/chat-forks"
@@ -1656,7 +1657,12 @@ export function useChat() {
     }
     const continued = continueInPlace ? wireForContinue(budgeted, opts?.continueFrom ?? '') : null
     if (continued) markContinuation(convId, assistantMessage.id)
-    const messages = continued ?? budgeted
+    // The last check (lib/fit-to-window.ts): against the model's own window,
+    // never past it. Ollama would cut the start of the chat silently. The
+    // verdict is acted on inside the try below, so the turn ends with the
+    // sentence that says why (explainSendRefusal), never with nothing.
+    const fitted = fitToWindow(continued ?? budgeted, modelWindowTokens)
+    const messages = fitted.messages
 
     // Lane admission (Runde 4, review-lanes.md Blocker 1+6): the built-in
     // engine runs llama-server with n_parallel=1, so two local sends racing
@@ -1706,6 +1712,7 @@ export function useChat() {
     const frames = frameFlush()
 
     try {
+      if (!fitted.fits) throw new ContextFullError(fitted.tokens, modelWindowTokens)
       // ── Multi-Provider: resolve provider for active model ──
       const { provider, modelId } = getProviderForModel(activeModel)
 

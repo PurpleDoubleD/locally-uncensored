@@ -18,6 +18,11 @@ const RUNS = Number(process.env.LU_BENCH_RUNS) || 1
 const RUN_MS = Number(process.env.LU_BENCH_RUN_MS) || 10 * 60_000
 /** Cloud mode: the picker lists LU Cloud models. Needs a signed-in session. */
 const CLOUD = process.env.LU_BENCH_CLOUD === '1'
+/** CA: LU's own engine (the bundled llama-server, same binary and flags) run as
+ *  a test instance on its own port, e.g. http://127.0.0.1:18731/v1. The app
+ *  reaches it through the same OpenAI-compatible slot the built-in engine
+ *  uses; only the lifecycle is outside the app. Ollama stays off. */
+const ENGINE_URL = process.env.LU_BENCH_ENGINE_URL || ''
 
 const STORES = [
   '/src/stores/chatStore.ts',
@@ -27,6 +32,8 @@ const STORES = [
   '/src/stores/codexStore.ts',
   '/src/stores/toolAuditStore.ts',
   '/src/stores/generationStore.ts',
+  '/src/stores/providerStore.ts',
+  '/src/stores/modelStore.ts',
 ]
 
 const tasks = TASKS.filter((t) => !WANTED.length || WANTED.includes(t.id))
@@ -47,6 +54,32 @@ async function boot(page: Page) {
     // measured time.
     A['/src/stores/settingsStore.ts'].useSettingsStore.getState().updateSettings({ codexDefaultMode: 'bypass' })
   })
+  if (ENGINE_URL) {
+    await page.evaluate((url) => {
+      const A = (window as unknown as AppWindow).__APP__
+      const prov = A['/src/stores/providerStore.ts'].useProviderStore.getState()
+      prov.setProviderConfig('openai', { enabled: true, baseUrl: url, managed: false })
+      prov.setProviderConfig('ollama', { enabled: false })
+    }, ENGINE_URL)
+    // The picker reads the providers when it loads its list.
+    await page.reload()
+    await appModules(page, STORES)
+    // With the engine up, the app finds it (and any Ollama) and asks which to
+    // use. The engine is preselected; Ollama stays off.
+    const pick = page.getByRole('button', { name: 'Use selected', exact: true })
+    if (await pick.waitFor({ state: 'visible', timeout: 8_000 }).then(() => true, () => false)) {
+      await expect(page.getByText('LU Engine', { exact: true }).first()).toBeVisible()
+      await pick.click()
+    }
+    // Never fall back to whatever model was active before (it can be one of
+    // the owner's Ollama models the dev server lists): the engine's model only.
+    await page.evaluate(() => {
+      const A = (window as unknown as AppWindow).__APP__
+      const ms = A['/src/stores/modelStore.ts']?.useModelStore?.getState()
+      const own = ms?.models?.find((m: { name: string }) => m.name.startsWith('openai::'))
+      if (own) ms.setActiveModel(own.name)
+    })
+  }
 }
 
 async function pickModel(page: Page, label: string) {

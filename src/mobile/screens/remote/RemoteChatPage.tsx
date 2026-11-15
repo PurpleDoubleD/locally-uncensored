@@ -115,7 +115,7 @@ function Answer({ chat, message, isLast, status, waiting, foreign }: { chat: Rem
       ) : null}
       {message.agentEnd ? (
         <div className="m-remote-msg-foot m-remote-msg-foot--warn" data-testid="m-remote-chat-agent-end">
-          <span className="m-grow">{message.agentEnd === 'max-iterations' ? S.chat.endMaxSteps : S.chat.endToolErrors}</span>
+          <span className="m-grow">{message.agentEnd === 'max-iterations' ? S.chat.endMaxSteps : message.agentEnd === 'looping' ? S.chat.endLooping : message.agentEnd === 'cost-limit' ? S.chat.endCostLimit : S.chat.endToolErrors}</span>
         </div>
       ) : null}
       {footer ? (

@@ -18,7 +18,9 @@
 //! `#[tauri::command]` for the desktop IPC bridge.
 
 use crate::os_error;
+use crate::commands::shell::{captured_full, settle, Captured};
 use crate::commands::{bad_request, internal, not_found, CmdResult};
+use std::sync::atomic::AtomicBool;
 use crate::state::AppState;
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
@@ -67,6 +69,59 @@ struct BgTaskInner {
     /// the `Child`, so this is the only handle the shutdown sweep below has on
     /// a task it must kill.
     pid: Option<u32>,
+    /// Set for a task that began life as a foreground `shell_execute` (T1).
+    /// Its pipes are still read by `shell::drain`, into these buffers, so the
+    /// output comes from here and `output_buf` stays empty.
+    adopted: Option<AdoptedOutput>,
+    /// A finished foreground run kept only so the model can read the output
+    /// its tool result cut (`keep_finished_output`). Capped separately, see
+    /// `KEPT_OUTPUTS_MAX`.
+    kept_output: bool,
+}
+
+/// The two capture buffers of a foreground run, stdout and stderr.
+#[derive(Clone)]
+struct AdoptedOutput {
+    out: Arc<Mutex<Captured>>,
+    err: Arc<Mutex<Captured>>,
+}
+
+/// What `shell_execute` hands over when its timeout hits: the buffers its
+/// drain threads fill, and the flags those threads set at EOF.
+pub(crate) struct AdoptedPipes {
+    pub out_buf: Arc<Mutex<Captured>>,
+    pub err_buf: Arc<Mutex<Captured>>,
+    pub out_done: Arc<AtomicBool>,
+    pub err_done: Arc<AtomicBool>,
+}
+
+/// How many finished foreground outputs the registry keeps for reading. Each
+/// holds up to 2 x (256 + 16) KiB; the 200-task cap alone would have allowed
+/// a hundred megabytes of old build logs.
+const KEPT_OUTPUTS_MAX: usize = 20;
+
+impl BgTaskInner {
+    /// The task's output as the status shows it.
+    fn render_output(&self) -> String {
+        match &self.adopted {
+            Some(a) => render_adopted(a),
+            None => render_tail(&self.output_buf),
+        }
+    }
+}
+
+/// stdout first, then stderr under a marker. Two pipes read by two threads
+/// have no common order to restore, so this does not pretend to one.
+fn render_adopted(a: &AdoptedOutput) -> String {
+    let out = captured_full(&a.out);
+    let err = captured_full(&a.err);
+    if err.trim().is_empty() {
+        return out;
+    }
+    if out.trim().is_empty() {
+        return format!("[stderr]\n{err}");
+    }
+    format!("{out}\n[stderr]\n{err}")
 }
 
 #[derive(Clone)]
@@ -84,6 +139,19 @@ impl BgRegistry {
         let mut g = self.tasks.lock().unwrap();
         // Cap the registry at 200 tasks — drop the oldest *finished* one
         // when we hit the cap so live tasks never get evicted by accident.
+        // Kept foreground outputs have their own, smaller cap: drop the
+        // oldest one before a new one comes in.
+        if t.inner.lock().unwrap().kept_output {
+            let kept: Vec<usize> = g
+                .iter()
+                .enumerate()
+                .filter(|(_, t)| t.inner.lock().unwrap().kept_output)
+                .map(|(i, _)| i)
+                .collect();
+            if kept.len() >= KEPT_OUTPUTS_MAX {
+                g.remove(kept[0]);
+            }
+        }
         if g.len() >= 200 {
             if let Some(idx) = g
                 .iter()
@@ -386,6 +454,8 @@ pub(crate) async fn shell_task_start_impl(args: &Value) -> CmdResult {
         output_buf: Vec::with_capacity(8 * 1024),
         cancel_tx: Some(cancel_tx),
         pid: child.id(),
+        adopted: None,
+        kept_output: false,
     }));
     arm_exit_sweep();
 
@@ -500,7 +570,7 @@ pub(crate) async fn shell_task_start_impl(args: &Value) -> CmdResult {
         g.status.cancelled = cancelled;
         g.status.running = false;
         g.status.finished_at = Some(now_secs());
-        g.status.output_tail = render_tail(&g.output_buf);
+        g.status.output_tail = g.render_output();
         g.cancel_tx = None;
         // Already cleared above, in the same critical section as the reap —
         // this only pins the invariant for any path that reaches here without
@@ -526,8 +596,143 @@ pub(crate) async fn shell_task_status_impl(args: &Value) -> CmdResult {
         .ok_or_else(|| not_found(format!("task not found: {}", a.id)))?;
     let mut g = task.inner.lock().unwrap();
     // Refresh the tail every time so live tasks aren't stuck at start-time.
-    g.status.output_tail = render_tail(&g.output_buf);
+    g.status.output_tail = g.render_output();
     Ok(json!(g.status))
+}
+
+/// Take over a foreground `shell_execute` whose timeout hit (T1).
+///
+/// WHY A HANDOVER AND NOT "START EVERYTHING AS A TASK": the foreground path
+/// has what the task path lacks and the agent needs: stdin, separate stdout
+/// and stderr (the git and test parsers read stdout alone), and the Stop
+/// wiring through `shell_execute_cancel`. Starting every command here and
+/// waiting on it would have meant rebuilding all three on this side. The
+/// handover moves the live `Child` and the buffers its drain threads already
+/// fill, so nothing about the process changes and no output is lost or read
+/// twice.
+///
+/// The child is a `std::process::Child`, not a tokio one, so the reaper is a
+/// plain thread. It keeps the same rule the async reaper above keeps: the
+/// reap (`try_wait`) and clearing the pid happen in ONE critical section of
+/// the task lock, and `kill_all_background_tasks` kills while holding that
+/// same lock, so the exit sweep never shoots at a number the kernel has
+/// already handed to somebody else.
+pub(crate) fn adopt_foreground(
+    mut child: std::process::Child,
+    command: &str,
+    cwd: Option<String>,
+    pipes: AdoptedPipes,
+) -> String {
+    let id = Uuid::new_v4().to_string();
+    let (cancel_tx, mut cancel_rx) = tokio::sync::oneshot::channel::<()>();
+    let adopted = AdoptedOutput { out: pipes.out_buf, err: pipes.err_buf };
+    let inner = Arc::new(Mutex::new(BgTaskInner {
+        status: BgTaskStatus {
+            id: id.clone(),
+            command: command.to_string(),
+            cwd,
+            started_at: now_secs(),
+            finished_at: None,
+            exit_code: None,
+            running: true,
+            cancelled: false,
+            output_tail: String::new(),
+        },
+        output_buf: Vec::new(),
+        cancel_tx: Some(cancel_tx),
+        pid: Some(child.id()),
+        adopted: Some(adopted),
+        kept_output: false,
+    }));
+    arm_exit_sweep();
+    REGISTRY.insert(BgTask { inner: Arc::clone(&inner) });
+
+    let (out_done, err_done) = (pipes.out_done, pipes.err_done);
+    std::thread::spawn(move || {
+        let (exit_code, cancelled) = loop {
+            // Empty is the only answer that means "keep going". A sent
+            // cancel and a dropped sender both stop the task, as the
+            // `&mut cancel_rx` arm of the async reaper does.
+            let cancel_requested = !matches!(
+                cancel_rx.try_recv(),
+                Err(tokio::sync::oneshot::error::TryRecvError::Empty)
+            );
+            if cancel_requested {
+                // Out of the registry BEFORE the kill reaps it, as above.
+                let pid = inner.lock().unwrap().pid.take();
+                if let Some(pid) = pid {
+                    crate::commands::shell::kill_tree(pid);
+                }
+                let _ = child.kill();
+                let _ = child.wait();
+                break (None, true);
+            }
+            {
+                let mut g = inner.lock().unwrap();
+                match child.try_wait() {
+                    Ok(Some(status)) => {
+                        g.pid = None;
+                        break (status.code(), false);
+                    }
+                    Ok(None) => {}
+                    Err(_) => {
+                        g.pid = None;
+                        break (None, false);
+                    }
+                }
+            }
+            std::thread::sleep(REAP_POLL);
+        };
+        // Never joined: a grandchild can hold the pipes open for as long as
+        // it likes. The status reads the live buffers anyway, so a late line
+        // still shows up.
+        settle(&out_done, &err_done, std::time::Duration::from_millis(500));
+        let mut g = inner.lock().unwrap();
+        g.status.exit_code = exit_code;
+        g.status.cancelled = cancelled;
+        g.status.running = false;
+        g.status.finished_at = Some(now_secs());
+        g.status.output_tail = g.render_output();
+        g.cancel_tx = None;
+        g.pid = None;
+    });
+    id
+}
+
+/// Keep the output of a FINISHED foreground run readable under a task id, so
+/// a tool result that was cut can point at the rest (T1). It is a finished
+/// task from the start: nothing to kill, nothing for the sweep.
+pub(crate) fn keep_finished_output(
+    command: &str,
+    cwd: Option<String>,
+    exit_code: Option<i32>,
+    out: Arc<Mutex<Captured>>,
+    err: Arc<Mutex<Captured>>,
+) -> String {
+    let id = Uuid::new_v4().to_string();
+    let now = now_secs();
+    let adopted = AdoptedOutput { out, err };
+    let output_tail = render_adopted(&adopted);
+    let inner = Arc::new(Mutex::new(BgTaskInner {
+        status: BgTaskStatus {
+            id: id.clone(),
+            command: command.to_string(),
+            cwd,
+            started_at: now,
+            finished_at: Some(now),
+            exit_code,
+            running: false,
+            cancelled: false,
+            output_tail,
+        },
+        output_buf: Vec::new(),
+        cancel_tx: None,
+        pid: None,
+        adopted: Some(adopted),
+        kept_output: true,
+    }));
+    REGISTRY.insert(BgTask { inner });
+    id
 }
 
 pub(crate) async fn shell_task_kill_impl(args: &Value) -> CmdResult {
@@ -1274,6 +1479,7 @@ mod foreground_parity_tests {
             // beiden Wege, nicht den Stop. Der hat seine eigenen Tests in
             // commands/shell.rs.
             None,
+            None,
         )
         .await
         .expect("the foreground shell tool ran");
@@ -1376,5 +1582,177 @@ mod foreground_parity_tests {
             BG_TASKS_RS.contains("shell::shell_argv("),
             "the background path no longer goes through the shared argument builder",
         );
+    }
+}
+
+/// T1: a foreground `shell_execute` that runs into its timeout moves into the
+/// registry instead of dying, and everything that ends a task still ends it.
+///
+/// Unix only. The handover itself is platform neutral, but the commands and
+/// the pid checks here are POSIX (`sh`, `$!`); the Windows path differs only
+/// in the Job Object at spawn, which these tests cannot observe from a Mac.
+///
+/// Lauf: cargo test --lib handover
+#[cfg(all(test, unix))]
+mod handover_tests {
+    use super::*;
+
+    /// One foreground call, in a folder of its own so neither path falls
+    /// back to the per-chat workspace in $HOME.
+    async fn run(command: &str, timeout_ms: u64, hand_over: bool) -> Value {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().to_string_lossy().to_string();
+        let command = command.to_string();
+        let out = tokio::task::spawn_blocking(move || {
+            crate::commands::shell::shell_execute_sync(
+                command,
+                None,
+                Some(path.clone()),
+                Some(timeout_ms),
+                Some("sh".into()),
+                None,
+                None,
+                Some(path),
+                None,
+                hand_over,
+            )
+        })
+        .await
+        .expect("join")
+        .expect("the shell ran");
+        drop(dir);
+        out
+    }
+
+    fn alive(pid: u32) -> bool {
+        let mut sys = sysinfo::System::new();
+        sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
+        sys.process(sysinfo::Pid::from_u32(pid)).is_some()
+    }
+
+    async fn gone_within(pid: u32, secs: u64) {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(secs);
+        while alive(pid) {
+            assert!(std::time::Instant::now() < deadline, "pid {pid} survived");
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+    }
+
+    /// The pid `sh` printed for its background `sleep`.
+    fn first_line_pid(stdout: &str) -> u32 {
+        stdout
+            .lines()
+            .next()
+            .and_then(|l| l.trim().parse().ok())
+            .expect("a pid on the first line")
+    }
+
+    #[tokio::test]
+    async fn a_timed_out_command_keeps_running_as_a_task_and_finishes_there() {
+        let _isolation = super::sweep_isolation().await;
+        let out = run("echo before; sleep 2; echo after", 400, true).await;
+        assert_eq!(out["timedOut"], true);
+        assert_eq!(out["exitCode"], -1);
+        let id = out["taskId"].as_str().expect("a task id").to_string();
+        let so_far = out["stdout"].as_str().unwrap();
+        assert!(so_far.contains("before"), "{so_far}");
+        assert!(!so_far.contains("after"), "{so_far}");
+
+        let st = shell_task_status_impl(&json!({ "id": id })).await.unwrap();
+        assert_eq!(st["running"], true, "the process was killed instead of handed over");
+
+        finish_test_task(&id).await;
+        let st = shell_task_status_impl(&json!({ "id": id })).await.unwrap();
+        assert_eq!(st["exit_code"], 0);
+        assert_eq!(st["cancelled"], false);
+        let all = st["output_tail"].as_str().unwrap();
+        assert!(all.contains("before") && all.contains("after"), "{all}");
+    }
+
+    #[tokio::test]
+    async fn killing_a_handed_over_task_takes_its_tree_down() {
+        let _isolation = super::sweep_isolation().await;
+        let out = run("sleep 30 & echo $!; wait", 400, true).await;
+        let id = out["taskId"].as_str().expect("a task id").to_string();
+        let worker = first_line_pid(out["stdout"].as_str().unwrap());
+        assert!(alive(worker), "the worker died with the timeout");
+
+        let r = shell_task_kill_impl(&json!({ "id": id })).await.unwrap();
+        assert_eq!(r["cancelled"], true);
+        finish_test_task(&id).await;
+        let st = shell_task_status_impl(&json!({ "id": id })).await.unwrap();
+        assert_eq!(st["cancelled"], true);
+        gone_within(worker, 5).await;
+    }
+
+    #[tokio::test]
+    async fn the_exit_sweep_reaches_a_handed_over_task() {
+        let _isolation = super::sweep_isolation().await;
+        let out = run("sleep 30 & echo $!; wait", 400, true).await;
+        let id = out["taskId"].as_str().expect("a task id").to_string();
+        let worker = first_line_pid(out["stdout"].as_str().unwrap());
+
+        kill_all_background_tasks();
+        gone_within(worker, 5).await;
+        finish_test_task(&id).await;
+        assert!(
+            REGISTRY.get(&id).and_then(|t| t.inner.lock().unwrap().pid).is_none(),
+            "a finished task still carries a pid",
+        );
+    }
+
+    #[tokio::test]
+    async fn without_the_switch_the_timeout_still_kills() {
+        let _isolation = super::sweep_isolation().await;
+        let out = run("sleep 30 & echo $!; wait", 400, false).await;
+        assert_eq!(out["timedOut"], true);
+        assert!(out.get("taskId").is_none(), "{out}");
+        let worker = first_line_pid(out["stdout"].as_str().unwrap());
+        gone_within(worker, 5).await;
+    }
+
+    #[tokio::test]
+    async fn a_long_finished_output_stays_readable_under_an_id() {
+        let out = run(
+            "i=0; while [ $i -lt 400 ]; do echo line-$i-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx; i=$((i+1)); done; echo END",
+            20_000,
+            true,
+        )
+        .await;
+        assert_eq!(out["timedOut"], false);
+        assert_eq!(out["exitCode"], 0);
+        let id = out["outputId"].as_str().expect("an output id").to_string();
+        let st = shell_task_status_impl(&json!({ "id": id })).await.unwrap();
+        assert_eq!(st["running"], false);
+        let all = st["output_tail"].as_str().unwrap();
+        assert!(all.contains("line-0-") && all.contains("line-399-"), "{all}");
+        assert!(all.trim_end().ends_with("END"), "{all}");
+        // Nothing to kill on a kept output.
+        let r = shell_task_kill_impl(&json!({ "id": id })).await.unwrap();
+        assert_eq!(r["cancelled"], false);
+
+        let short = run("echo short", 20_000, true).await;
+        assert!(short.get("outputId").is_none(), "{short}");
+    }
+
+    #[test]
+    fn kept_outputs_have_their_own_cap() {
+        let ids: Vec<String> = (0..KEPT_OUTPUTS_MAX + 5)
+            .map(|i| {
+                let out = Arc::new(Mutex::new(Captured::default()));
+                let err = Arc::new(Mutex::new(Captured::default()));
+                keep_finished_output(&format!("echo {i}"), None, Some(0), out, err)
+            })
+            .collect();
+        assert!(REGISTRY.get(&ids[0]).is_none(), "the oldest kept output was not dropped");
+        assert!(REGISTRY.get(ids.last().unwrap()).is_some());
+        let kept = REGISTRY
+            .tasks
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|t| t.inner.lock().unwrap().kept_output)
+            .count();
+        assert!(kept <= KEPT_OUTPUTS_MAX, "{kept} kept outputs");
     }
 }

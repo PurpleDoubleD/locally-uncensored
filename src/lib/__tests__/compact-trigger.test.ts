@@ -22,6 +22,7 @@ import {
   MIN_THRESHOLD,
   MAX_THRESHOLD,
   MIN_MESSAGES_TO_COMPACT,
+  MIN_MESSAGES_WHEN_FULL,
   MIN_MESSAGES_SINCE_COMPACT,
   type CompactTriggerInput,
 } from '../compact-trigger'
@@ -78,9 +79,18 @@ describe('der Nenner muss aufgelöst sein', () => {
 })
 
 describe('zu kurz zum Zusammenfassen', () => {
-  it('feuert unterhalb der Mindestlänge nicht', () => {
-    const r = shouldAutoCompact({ ...feuernd, messageCount: MIN_MESSAGES_TO_COMPACT - 1 })
+  it('feuert unterhalb der Mindestlänge nicht, solange das Fenster nicht voll ist', () => {
+    const r = shouldAutoCompact({ ...feuernd, used: 0.2 * feuernd.window, messageCount: MIN_MESSAGES_TO_COMPACT - 1 })
     expect(r.reason).toBe('too-short')
+  })
+
+  it('ein voller Chat aus wenigen, grossen Nachrichten wird doch zusammengefasst (CA, 14.11.2026)', () => {
+    // Drei Runden mit eingefuegten Dokumenten fuellten das Fenster, und nichts
+    // durfte es verkleinern: keine Zusammenfassung, keine Antwort.
+    expect(shouldAutoCompact({ ...feuernd, messageCount: MIN_MESSAGES_WHEN_FULL }).shouldCompact).toBe(true)
+    expect(shouldAutoCompact({ ...feuernd, messageCount: MIN_MESSAGES_TO_COMPACT - 1 }).shouldCompact).toBe(true)
+    // Zwei sind zu wenig: es gaebe nichts Aelteres zusammenzufassen.
+    expect(shouldAutoCompact({ ...feuernd, messageCount: MIN_MESSAGES_WHEN_FULL - 1 }).reason).toBe('too-short')
   })
 
   it('feuert genau ab der Mindestlänge', () => {

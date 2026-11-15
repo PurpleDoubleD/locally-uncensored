@@ -208,10 +208,12 @@ describe('the prompt builders', () => {
   // P-L (3.1.0) changed the web line of the agent and the chat prompt on
   // purpose (web_research first); C59 changed the agent prompt on purpose
   // (A1: plain questions get a direct answer instead of "MUST use tools").
-  // The agent hash below is the one with both changes (integ/310).
+  // The agent hash below is the one with both changes (integ/310), plus CA
+  // (13.11.2026, cloud loops): one line that results stay above and a
+  // shortened one is read in part.
   it('desktop: the three prompts are byte for byte the ones from before this change', () => {
     standOn('windows')
-    expect(sha(buildAgentSystemPrompt('BASE', roster))).toBe('9155fc04df15addacb1bd49778b7658fdf753b65d9570b9fe9468ea40a880a13')
+    expect(sha(buildAgentSystemPrompt('BASE', roster))).toBe('9a1ede6fa93a8789ae2b3082c99560431e75d8253fded5679c8c1325da7c4698')
     expect(sha(buildAgentSystemPromptLean('BASE', 'file_read, file_write'))).toBe('28489a4807fe126dbef27f057b0414996a7618ca58d3c822cd51f7e6796184fd')
     expect(sha(buildChatToolsSystemPrompt('BASE'))).toBe('91e7f3ef8669ea15f7cca78a8789e842248ada2920505d4c23025d37ac416a0e')
     expect(buildAgentSystemPrompt('', roster)).toContain('with full access to this computer')

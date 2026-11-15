@@ -142,7 +142,7 @@ describe('C83: the cost brake', () => {
     expect(firstHalt).toBeGreaterThan(0)
     expect(firstHalt).toBeLessThan(8)
     const h = verdicts[firstHalt]
-    expect(h.action === 'halt' && h.message).toMatch(/Stopped to protect your credits: this run has sent 3\.\dM tokens/)
+    expect(h.action === 'halt' && h.message).toMatch(/Stopped to protect your credits: this run has sent 2\.\dM tokens/)
     expect(h.action === 'halt' && h.message).toMatch(/Send a new message to go on/)
   })
 
@@ -165,7 +165,7 @@ describe('C83: the cost brake', () => {
 
   it('with the loop guard switched off (C44) the brake only tells, once', () => {
     const b = new AgentCostBrake({ paid: true, loopGuardEnabled: false })
-    const actions = Array.from({ length: 20 }, () => {
+    const actions = Array.from({ length: 40 }, () => {
       b.record(LARGE_REQUEST_TOKENS + 10_000)
       return b.take().action
     })
@@ -179,6 +179,7 @@ describe('C83: the cost brake', () => {
     b.record(0)
     expect(b.inputTokens).toBe(0)
     expect(b.take().action).toBe('ok')
-    expect(RUN_HALT_TOKENS).toBe(3_000_000)
+    // CA (14.11.2026): 3M let the incidents of that week through.
+    expect(RUN_HALT_TOKENS).toBe(2_000_000)
   })
 })

@@ -29,6 +29,6 @@ describe('a tool call written as a json block, on the prompt transport', () => {
     const from = src.indexOf('const raw = hermesTurn.content')
     const hermes = src.slice(from, src.indexOf('overflowRetries = 0', from))
     expect(from).toBeGreaterThan(0)
-    expect(hermes).toContain('recoverKnownToolCallsFromContent(')
+    expect(hermes).toContain('recoverTurnCalls(')
   })
 })

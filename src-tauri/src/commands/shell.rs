@@ -183,6 +183,53 @@ pub(crate) fn captured_text(buf: &Arc<Mutex<Captured>>) -> String {
     text
 }
 
+/// Everything a capture still holds, in stream order: the head `kept`, a
+/// marker for the bytes that fell between head and tail, and the tail ring.
+///
+/// `captured_text` stops at the head, which is right for a probe but wrong
+/// for the agent's terminal: a build that printed 300 KiB ended at the 256 KiB
+/// mark, and the last lines the model saw were not the last lines the build
+/// wrote, which is where the error stands. The agent tool cuts this to its own
+/// head and tail in TypeScript (`cutShellOutput` in builtin-tools.ts); the
+/// whole text stays readable as a task in `bg_tasks`.
+pub(crate) fn captured_full(buf: &Arc<Mutex<Captured>>) -> String {
+    let c = match buf.lock() {
+        Ok(c) => c,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    let head = strip_ansi(&String::from_utf8_lossy(&c.kept));
+    if c.total <= c.kept.len() {
+        return head;
+    }
+    let tail: Vec<u8> = c.tail.iter().copied().collect();
+    // Where the ring starts in the stream, and how much of it the head
+    // already covers.
+    let tail_start = c.total - tail.len();
+    let overlap = c.kept.len().saturating_sub(tail_start).min(tail.len());
+    let lost = tail_start.saturating_sub(c.kept.len());
+    let mut text = head;
+    if lost > 0 {
+        text.push_str(&format!("\n[output truncated: {} bytes in the middle not kept]\n", lost));
+    }
+    text.push_str(&strip_ansi(&String::from_utf8_lossy(&tail[overlap..])));
+    text
+}
+
+/// How many bytes went through a capture in all, kept or not.
+pub(crate) fn captured_total(buf: &Arc<Mutex<Captured>>) -> usize {
+    match buf.lock() {
+        Ok(c) => c.total,
+        Err(poisoned) => poisoned.into_inner().total,
+    }
+}
+
+/// From this many captured bytes on, a finished foreground run is also kept
+/// in the task registry, so the model can read what the tool result cut.
+/// The TypeScript side cuts from 8000 characters on (2000 head + 6000 tail,
+/// `SHELL_HEAD_CHARS` + `SHELL_TAIL_CHARS`), and a character is never less
+/// than one byte here, so every result that gets cut has a task behind it.
+pub(crate) const KEEP_OUTPUT_FROM_BYTES: usize = 8_000;
+
 /// Die letzten `max_lines` nicht leeren Zeilen einer Ausgabe, aus dem
 /// Ringpuffer statt aus dem Anfang (C81). Die erste Zeile im Puffer kann
 /// abgeschnitten sein und faellt deshalb weg, sobald der Puffer voll war.
@@ -929,10 +976,18 @@ pub(crate) fn default_shell(windows: bool) -> &'static str {
     }
 }
 
-/// The eight arguments are the IPC contract: `#[tauri::command]` derives the
+/// The arguments are the IPC contract: `#[tauri::command]` derives the
 /// invoke payload from this signature, so folding them into a struct would
 /// change the JSON the frontend sends. `clippy::too_many_arguments` is allowed
 /// here for that reason and not as a matter of taste.
+///
+/// `backgroundOnTimeout` (T1, CA rebuild): with `true`, a command that is
+/// still running when its timeout hits is NOT killed. It moves into the
+/// background-task registry (`bg_tasks::adopt_foreground`, the same ids as
+/// `shell_task_*`) and the reply carries `taskId`. Without it, or with
+/// `false`, the timeout kills the tree as it always has: every caller other
+/// than the agent's terminal tool (the retired git helpers, the phone's remote
+/// path) has nobody who would ever read or stop such a task.
 #[tauri::command]
 #[allow(non_snake_case, clippy::too_many_arguments)]
 pub async fn shell_execute(
@@ -945,9 +1000,21 @@ pub async fn shell_execute(
     chatId: Option<String>,
     workingDirectory: Option<String>,
     callId: Option<String>,
+    backgroundOnTimeout: Option<bool>,
 ) -> Result<serde_json::Value, String> {
     tokio::task::spawn_blocking(move || {
-        shell_execute_sync(command, args, cwd, timeout, shell, stdin, chatId, workingDirectory, callId)
+        shell_execute_sync(
+            command,
+            args,
+            cwd,
+            timeout,
+            shell,
+            stdin,
+            chatId,
+            workingDirectory,
+            callId,
+            backgroundOnTimeout.unwrap_or(false),
+        )
     })
     .await
     .map_err(|e| format!("Task join error: {}", e))?
@@ -957,7 +1024,7 @@ pub async fn shell_execute(
 /// blocking half of the same command, and a different shape here would be a
 /// second place to keep in step with the frontend contract.
 #[allow(clippy::too_many_arguments)]
-fn shell_execute_sync(
+pub(crate) fn shell_execute_sync(
     command: String,
     args: Option<Vec<String>>,
     cwd: Option<String>,
@@ -967,6 +1034,7 @@ fn shell_execute_sync(
     chat_id: Option<String>,
     working_directory: Option<String>,
     call_id: Option<String>,
+    background_on_timeout: bool,
 ) -> Result<serde_json::Value, String> {
     // VOR dem Bauen des Befehls angemeldet, damit ein Abbruch, der den Start
     // ueberholt, einen Platz hat, an dem er stehen bleiben kann.
@@ -1040,6 +1108,17 @@ fn shell_execute_sync(
 
     let mut child = cmd.spawn().map_err(|e| format!("Spawn shell: {}", os_error::english(&e)))?;
 
+    // A run that may outlive this call joins the kill-on-close Job Object at
+    // once, exactly like a task started by `shell_task_start`: on Windows the
+    // job is what takes background tasks down when LU quits (the atexit sweep
+    // in bg_tasks is not armed there). At spawn and not at the handover,
+    // because a job only catches the children created after the assignment,
+    // and by the timeout the shell has long started its worker.
+    #[cfg(target_os = "windows")]
+    if background_on_timeout {
+        crate::commands::process::assign_pid_to_kill_on_close_job(child.id());
+    }
+
     // Der Abbruch kann zwischen Anmelden und Start eingetroffen sein. Dann gab
     // es keine Prozesskennung zu toeten, und dieser Prozess hier ist genau der,
     // den niemand mehr wollte.
@@ -1096,14 +1175,56 @@ fn shell_execute_sync(
         match child.try_wait() {
             Ok(Some(status)) => {
                 settle(&out_done, &err_done, std::time::Duration::from_millis(500));
-                return Ok(serde_json::json!({
-                    "stdout": captured_text(&out_buf),
-                    "stderr": captured_text(&err_buf),
-                    "exitCode": status.code().unwrap_or(-1),
+                let exit_code = status.code().unwrap_or(-1);
+                let mut reply = serde_json::json!({
+                    "stdout": captured_full(&out_buf),
+                    "stderr": captured_full(&err_buf),
+                    "exitCode": exit_code,
                     "timedOut": false,
-                }));
+                });
+                // A long result gets cut in the tool reply; what was cut stays
+                // readable under this id (`shell_task_status`). Only the agent
+                // tool asks for it, the same switch as the handover below.
+                if background_on_timeout
+                    && captured_total(&out_buf) + captured_total(&err_buf) >= KEEP_OUTPUT_FROM_BYTES
+                {
+                    let id = crate::commands::bg_tasks::keep_finished_output(
+                        &command,
+                        workdir_text(&workdir),
+                        status.code(),
+                        out_buf,
+                        err_buf,
+                    );
+                    reply["outputId"] = serde_json::Value::String(id);
+                }
+                return Ok(reply);
             }
             Ok(None) => {
+                if start.elapsed() > timeout_dur && background_on_timeout {
+                    // HANDOVER instead of a kill (T1). The child, its pipe
+                    // readers and their buffers move into the task registry as
+                    // they are: nothing is restarted, nothing is read twice,
+                    // and the process never notices. From here on the
+                    // registry's reaper owns it, `shell_task_kill` and the
+                    // exit sweep reach it like any other task, and this call
+                    // returns what was printed so far.
+                    let stdout_so_far = captured_full(&out_buf);
+                    let stderr_so_far = captured_full(&err_buf);
+                    let id = crate::commands::bg_tasks::adopt_foreground(
+                        child,
+                        &command,
+                        workdir_text(&workdir),
+                        crate::commands::bg_tasks::AdoptedPipes { out_buf, err_buf, out_done, err_done },
+                    );
+                    return Ok(serde_json::json!({
+                        "stdout": stdout_so_far,
+                        "stderr": stderr_so_far,
+                        "exitCode": -1,
+                        "timedOut": true,
+                        "taskId": id,
+                        "timeoutMs": timeout_ms,
+                    }));
+                }
                 if start.elapsed() > timeout_dur {
                     kill_tree(child.id());
                     let _ = child.kill();
@@ -1128,6 +1249,11 @@ fn shell_execute_sync(
             Err(e) => return Err(format!("Wait error: {}", e)),
         }
     }
+}
+
+/// The folder a run happened in, as the task registry shows it.
+fn workdir_text(workdir: &Path) -> Option<String> {
+    workdir.is_dir().then(|| workdir.to_string_lossy().to_string())
 }
 
 /// Der Abbruch eines schon gestarteten Befehls.
@@ -1534,6 +1660,7 @@ mod tests {
             None,
             None,
             None,
+            false,
         )
         .expect("the shell ran");
         let seen = out["stdout"].as_str().unwrap_or_default().to_string();
@@ -1589,6 +1716,40 @@ mod tests {
     fn small_output_comes_back_whole_and_unannotated() {
         let text = capture(b"hello\n".to_vec());
         assert_eq!(text, "hello\n");
+    }
+
+    fn capture_full(bytes: Vec<u8>) -> String {
+        let (buf, done) = drain(Cursor::new(bytes));
+        settle(&done, &done, std::time::Duration::from_secs(2));
+        captured_full(&buf)
+    }
+
+    /// T1: the agent's terminal reads the END of a long output too. Past the
+    /// head, `captured_text` only said "truncated"; the last lines, where a
+    /// build prints its error, were gone.
+    #[test]
+    fn the_full_capture_keeps_head_and_the_real_end() {
+        let mut bytes = vec![b'a'; MAX_CAPTURE + 100_000];
+        bytes.extend_from_slice(b"THE-LAST-LINE\n");
+        let text = capture_full(bytes.clone());
+        assert!(text.starts_with("aaaa"));
+        assert!(text.ends_with("THE-LAST-LINE\n"), "the tail is missing");
+        let lost = bytes.len() - MAX_CAPTURE - TAIL_CAPTURE;
+        assert!(text.contains(&format!("[output truncated: {lost} bytes in the middle not kept]")), "no marker");
+    }
+
+    /// Head and tail overlap when the stream is only a little longer than the
+    /// head: then nothing is lost and nothing may appear twice.
+    #[test]
+    fn an_overlapping_tail_is_not_repeated() {
+        let bytes: Vec<u8> = (0..MAX_CAPTURE + 4_000).map(|i| b'a' + (i % 26) as u8).collect();
+        let text = capture_full(bytes.clone());
+        assert_eq!(text.as_bytes(), &bytes[..], "the stream did not come back exactly once");
+    }
+
+    #[test]
+    fn a_short_full_capture_is_the_output_itself() {
+        assert_eq!(capture_full(b"hello\n".to_vec()), "hello\n");
     }
 
     /// The shell tool creates its fallback cwd with `create_dir_all`. With the

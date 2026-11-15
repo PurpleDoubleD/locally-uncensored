@@ -139,6 +139,14 @@ export interface WakeWatcherPorts {
   activeModel: () => string | null | undefined
   /** Der Weckzug. Fehler daraus dürfen den Wächter nicht umbringen. */
   send: (text: string) => Promise<unknown>
+  /**
+   * Kennung der letzten Nachricht, die der Mensch selbst geschickt hat (keine
+   * versteckte Weck-Nachricht). Aendert sie sich, zaehlt die Weckreihe neu.
+   * Ohne diesen Anschluss gilt die Grenze pro Waechter-Leben.
+   */
+  lastUserTurn?: (convId: string) => string | null
+  /** Hoechstens so viele Weckzuege hintereinander ohne Menschen dazwischen. */
+  maxWakesInARow?: number
   /** Nur für Tests austauschbar; sonst die echten Zeitgeber. */
   setTimer?: (fn: () => void, ms: number) => unknown
   clearTimer?: (h: unknown) => void
@@ -168,6 +176,9 @@ export interface WakeWatcher {
  *
  * Der Hook drumherum reicht nur noch Stores und einen Sendeweg herein.
  */
+/** Weckzuege hintereinander, ohne dass der Mensch dazwischen etwas schickt. */
+export const MAX_WAKES_IN_A_ROW = 3
+
 export function createWakeWatcher(ports: WakeWatcherPorts): WakeWatcher {
   const setTimer = ports.setTimer ?? ((fn, ms) => setTimeout(fn, ms))
   const clearTimer = ports.clearTimer ?? ((h) => clearTimeout(h as ReturnType<typeof setTimeout>))
@@ -175,6 +186,24 @@ export function createWakeWatcher(ports: WakeWatcherPorts): WakeWatcher {
 
   let timer: unknown = null
   let busy = false
+  // CA (13.11.2026): jeder Weckzug ist ein voller, bezahlter Agentenlauf, den
+  // niemand getippt hat, und er darf neue Hintergrundagenten bestellen, deren
+  // Abschluss wieder weckt. Ohne Obergrenze lief eine Kette aus Bestellen,
+  // Wecken, Bestellen so lange, bis das Modell von selbst aufhoerte. Jetzt:
+  // hoechstens drei in Folge, dann wartet der Waechter auf den Menschen.
+  const maxRow = ports.maxWakesInARow ?? MAX_WAKES_IN_A_ROW
+  const reihe = new Map<string, { turn: string | null; n: number }>()
+  const reiheVoll = (convId: string) => {
+    const turn = ports.lastUserTurn?.(convId) ?? null
+    const r = reihe.get(convId)
+    if (!r || r.turn !== turn) return false
+    return r.n >= maxRow
+  }
+  const zaehlen = (convId: string) => {
+    const turn = ports.lastUserTurn?.(convId) ?? null
+    const r = reihe.get(convId)
+    reihe.set(convId, r && r.turn === turn ? { turn, n: r.n + 1 } : { turn, n: 1 })
+  }
 
   const urteilen = (convId: string) => shouldWakeParent({
     conversationId: convId,
@@ -188,6 +217,7 @@ export function createWakeWatcher(ports: WakeWatcherPorts): WakeWatcher {
     const convId = ports.conversationId()
     if (!convId) return
     if (!urteilen(convId).wake) return
+    if (reiheVoll(convId)) return
 
     // Sammelfrist, bei jedem weiteren Abschluss neu gesetzt: es weckt erst,
     // wenn eine Weile lang keiner mehr fertig geworden ist.
@@ -203,6 +233,8 @@ export function createWakeWatcher(ports: WakeWatcherPorts): WakeWatcher {
       // beschlossen, aber noch nicht abgeschickt ist, und ein Zug, der eine
       // Sekunde NACH Stop losgeht, ist genau der, den niemand bestellt hat.
       if (!urteilen(jetzt).wake) return
+      if (reiheVoll(jetzt)) return
+      zaehlen(jetzt)
 
       // `busy` deckt die Luecke zwischen "wir schicken los" und "der
       // Generierungs-Schalter steht auf an". Genau darin saehe ein zweiter

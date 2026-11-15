@@ -32,6 +32,8 @@ export const STORE_KEYS = [
   'chat-conversations', 'chat-settings', 'chat-models', 'lu-providers',
   'create-store', 'locally-uncensored-codex',
   'locally-uncensored-permissions', 'locally-uncensored-mcp-servers',
+  // CA K4: the commands the user allowed per folder (stores/commandRulesStore).
+  'locally-uncensored-command-rules',
   'locally-uncensored-agent-mode', 'locally-uncensored-memory',
   'locally-uncensored-agent-workflows', 'locally-uncensored-agent',
   'locally-uncensored-voice', 'lu-benchmark-store', 'lu-update-checker-v2',

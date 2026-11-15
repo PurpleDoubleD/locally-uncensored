@@ -11,6 +11,7 @@
  * filtering, the model has no syntactically valid path to recurse.
  */
 
+import { replayableReasoning } from '../../lib/agent-core/reasoning-replay'
 import { stripSourcesMarker } from '../../lib/web-evidence'
 import { settleThinking } from '../../lib/thinking-stripper'
 import { toolResultIsFailure } from '../../lib/tool-result-failure'
@@ -32,6 +33,8 @@ import { laneOf, currentLaneFacts, type RunLane } from '../../lib/run-lane-of-mo
 // Einstiegspunkte dieser Datei hängen am `delegate_task`-Executor, den erst
 // registerBuiltinTools() verdrahtet.
 import { toolRegistry } from '../mcp/tool-registry'
+import { buildHermesToolCall, buildHermesToolPrompt, buildHermesToolResult, hasToolCallTags, parseHermesToolCalls, stripToolCallTags } from '../hermes-tool-calling'
+import { recoverTurnCalls } from '../../lib/agent-core/recover'
 import type { MCPToolDefinition, ToolArgs } from '../mcp/types'
 import type { ChatMessage } from '../providers/types'
 import type { AgentToolCall } from '../../types/agent-mode'
@@ -507,7 +510,21 @@ export async function defaultSubAgentRunner(
   }
   const laufmodell = wahl.model
   if (!laufmodell) return 'Error: No active model configured.'
-  const { provider, modelId } = getProviderForModel(laufmodell)
+  // CA K3: the same transport verdict as both tabs. A local model without
+  // native tool calling (hermes_xml) used to get a native `tools` payload
+  // here, ignored it and answered in prose: the sub-agent did nothing and
+  // reported its intentions as the result. A resolver that cannot run (a
+  // test double without the model list, an offline Ollama) keeps the old
+  // native transport rather than failing the delegation.
+  let { provider, modelId } = getProviderForModel(laufmodell)
+  let promptTransport = false
+  try {
+    const { resolveToolCallingStrategy } = await import('../../lib/agent-strategy')
+    const resolved = await resolveToolCallingStrategy(laufmodell)
+    provider = resolved.provider
+    modelId = resolved.modelToUse
+    promptTransport = resolved.strategy === 'hermes_xml'
+  } catch { /* native, as before */ }
 
   const tools: MCPToolDefinition[] = toolRegistry
     .getAll()
@@ -524,7 +541,9 @@ export async function defaultSubAgentRunner(
   const messages: ChatMessage[] = [
     {
       role: 'system',
-      content: buildSubAgentSystemPrompt(),
+      content: promptTransport
+        ? `${buildSubAgentSystemPrompt()}\n\n${buildHermesToolPrompt(tools)}`
+        : buildSubAgentSystemPrompt(),
     },
     {
       role: 'user',
@@ -587,7 +606,70 @@ export async function defaultSubAgentRunner(
     // the user stopped, and that is paid compute the product promised would
     // not happen ("Stop means stop"). Threading the same signal the tool
     // gates already use into the request makes the abort reach the wire.
-    const turn = await provider.chatWithTools(modelId, messages, llmTools, { signal: gates.abortSignal })
+    // The last check before the request leaves (lib/fit-to-window.ts), as in
+    // the main loops (CA, 14.11.2026): a sub-agent's results pile up step by
+    // step, and nothing checked they still fit. Too big: the longest older
+    // results are shortened for this request. Still too big: it stops and
+    // hands back what it found, instead of a silent cut or a refused request.
+    let sendThese = messages
+    try {
+      const { resolveAgentNumCtx } = await import('../../lib/agent-num-ctx')
+      const { fitToWindow } = await import('../../lib/fit-to-window')
+      const { estimateTokens } = await import('../../lib/context-compaction')
+      const { useSettingsStore } = await import('../../stores/settingsStore')
+      const ctx = await resolveAgentNumCtx(modelId, getProviderIdFromModel(laufmodell), useSettingsStore.getState().settings.contextWindowOverride, laufmodell)
+      const fit = fitToWindow(messages, ctx, promptTransport ? 0 : estimateTokens(JSON.stringify(llmTools)))
+      if (!fit.fits) {
+        const material = finalContent || gesammeltesMaterial(messages)
+        return `Stopped: what this sub-agent gathered no longer fits the model's context window. ${material || '(no partial answer)'}`
+      }
+      sendThese = fit.messages
+    } catch { /* an unknown window checks nothing */ }
+    const raw = await provider.chatWithTools(modelId, sendThese, promptTransport ? [] : llmTools, { signal: gates.abortSignal })
+    // Its credits count toward the hour like the main loop's (CA, 14.11.2026):
+    // a sub-agent on LU Cloud spent outside both limits. Past the hour limit
+    // it stops with what it found, as the main loop pauses.
+    // Accounting never breaks the delegation: a store that cannot answer
+    // (a test double, a phone without the catalogue) counts nothing.
+    let paused: string | null = null
+    try {
+      const { stepCredits, HOUR_CREDIT_LIMIT, wireCloudSpent } = await import('../../lib/agent-cost-brake')
+      const { creditRatesOf, billingOf } = await import('../../lib/agent-core/credit-rates')
+      const { addHourCredits } = await import('../../lib/agent-core/credit-ledger')
+      const spent = stepCredits(creditRatesOf(laufmodell), raw.promptEvalCount, raw.evalCount, billingOf(raw))
+      if (spent > 0) {
+        if (import.meta.env?.MODE !== 'test') wireCloudSpent()
+        const hour = addHourCredits(spent)
+        const { useSettingsStore } = await import('../../stores/settingsStore')
+        const limit = useSettingsStore.getState().settings.agentHourCreditLimit ?? HOUR_CREDIT_LIMIT
+        if (limit > 0 && hour >= limit) {
+          const material = finalContent || gesammeltesMaterial(messages)
+          paused = `Paused to protect your credits: agent runs used the hourly limit of ${limit.toLocaleString('en-US')} credits. ${material || '(no partial answer)'}`
+        }
+      }
+    } catch { /* counted nothing */ }
+    if (paused) return paused
+    // The calls of this turn, wherever the model put them: native, <tool_call>
+    // tags on the prompt transport, JSON or prose in the answer, or the
+    // reasoning channel. One chain for every loop (lib/agent-core/recover.ts).
+    const tagged = promptTransport && hasToolCallTags(raw.content || '')
+    const recovered = recoverTurnCalls({
+      toolCalls: tagged
+        ? parseHermesToolCalls(raw.content || '').map((tc) => ({ function: { name: tc.name, arguments: tc.arguments } }))
+        : raw.toolCalls ?? [],
+      content: tagged ? stripToolCallTags(raw.content || '') : raw.content || '',
+      thinking: raw.thinking,
+      tools,
+    })
+    // Every call gets an id here, once. A call recovered from text or the
+    // reasoning channel had none, and the wire format then made up a fresh
+    // one on every request while its result went out with no id at all: the
+    // model could not tie its call to its result (CA, cloud loops).
+    const turn = {
+      ...raw,
+      content: recovered.content,
+      toolCalls: recovered.toolCalls.map((tc, k) => (tc.id ? tc : { ...tc, id: `call_sub${i}_${k}` })),
+    }
     // What a sub-agent returns becomes a TOOL RESULT in the parent's context,
     // so leaked reasoning floods the run it was supposed to shorten (2.6.7
     // Denk-Audit, Loch 11). Same settlement as every visible surface.
@@ -650,7 +732,27 @@ export async function defaultSubAgentRunner(
       { abortSignal: gates.abortSignal },
     )
 
-    messages.push({ role: 'assistant', content: turn.content || '', tool_calls: turn.toolCalls })
+    if (promptTransport) {
+      // The prompt transport speaks in text both ways: a strict chat template
+      // has no branch for the native `tool` role (same rule as useCodex).
+      results.forEach((r, i) => {
+        const tc = turn.toolCalls[i]
+        messages.push({ role: 'assistant', content: buildHermesToolCall(tc.function.name, tc.function.arguments) })
+        messages.push({
+          role: 'user',
+          content: buildHermesToolResult(
+            tc.function.name,
+            clampTaskResult(
+              (r.result !== undefined ? stripSourcesMarker(r.result) : undefined) ?? gates.refusals.get(r.id) ?? r.error ?? '(no output)',
+            ),
+          ),
+        })
+      })
+      if (tasks && options.taskId) tasks.getState().update(options.taskId, { messages: [...messages] })
+      continue
+    }
+
+    messages.push({ role: 'assistant', content: turn.content || '', tool_calls: turn.toolCalls, reasoning: replayableReasoning(raw.thinking) })
     // Map each result back to its ORIGINATING call by index. executeParallel
     // preserves input order (results[i] <-> requests[i] <-> turn.toolCalls[i]),
     // so zipping by index gives every tool message the correct tool_call_id,

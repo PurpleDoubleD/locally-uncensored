@@ -360,7 +360,7 @@ export async function resolveModelContext(model: string, use: WindowUse, k: Cont
     ? await cloudClient.getContextWindow(cloudId).catch(() => null)
     : null
   const max = cloudResolved?.tokens || await getModelMaxTokens(model).catch(() => 4096)
-  const sendAdjustable = k.capEnabled !== false && isPaidProvider(providerId, sendsToALanBackend(providerId, model))
+  const sendAdjustable = isPaidProvider(providerId, sendsToALanBackend(providerId, model))
   const windowSource = remoteWindowSource(providerId, cloudResolved?.source, max)
   // C77: an OpenAI-compatible endpoint (it has a per model window key) that
   // did not say its window. A window the server named is never overridden

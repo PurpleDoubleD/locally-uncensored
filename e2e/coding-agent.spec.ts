@@ -237,7 +237,8 @@ test('file_read pages a large file instead of dumping it whole', async ({ page }
   await expect(page.getByRole('main').getByText('Read lines 100 to 104.')).toBeVisible({ timeout: 30_000 })
 
   // Open the tool block and read what the window actually returned.
-  await page.getByRole('main').getByText('file_read').first().click()
+  // CA U1: the row says "Read src/big.ts"; the tool's own name is its tooltip.
+  await page.getByRole('main').getByTitle('file_read').first().click()
   const block = page.getByRole('main')
   await expect(block.getByText(/\[lines 100-104 of 200\]/)).toBeVisible({ timeout: 10_000 })
   await expect(block.getByText(/call file_read again with offset: 105/)).toBeVisible()
@@ -281,33 +282,24 @@ test('the plan the model writes shows up above the composer and tracks progress'
   await instruct(page, 'fix the parser and prove it')
   await expect(page.getByRole('main').getByText('PLAN_RUN_DONE')).toBeVisible({ timeout: 30_000 })
 
-  // PlanBar has TWO homes and they disagree about the default state ON PURPOSE
-  // (chat/PlanBar.tsx): 'header' starts collapsed so it costs one line above
-  // the transcript, 'panel' — the Code tab's Explorer column — starts expanded.
-  // The old version assumed "collapsed" and clicked a bare text node, so on the
-  // surface that renders the panel the click COLLAPSED the plan and the step
-  // list it then looked for was the one it had just closed. That is what made
-  // this spec pass or fail with whichever home the run happened to render.
-  //
-  // Which home is showing is not what this spec is about, so it drives the
-  // strip through BOTH states and asserts each one. The toggle names the state
-  // it is in, so nothing here is assumed.
-  const strip = page.getByTestId('plan-header').or(page.getByTestId('plan-panel')).first()
-  const planToggle = strip.getByRole('button', { name: /^plan 1\/3/ })
-  await expect(planToggle).toBeVisible({ timeout: 15_000 })
-  if ((await planToggle.getAttribute('title')) === 'Collapse the plan') await planToggle.click()
-
-  // Collapsed: the counter and the step that is running right now — and NOT
-  // the whole list, which is the part that would push the composer away.
-  await expect(planToggle).toHaveAttribute('title', 'Show every step')
-  await expect(planToggle).toContainText('patch the parser')
-  await expect(strip.getByText('read the config')).toHaveCount(0)
-
-  // Expanded: every step, and the strip follows the model's second update.
-  await planToggle.click()
-  await expect(planToggle).toHaveAttribute('title', 'Collapse the plan')
+  // The plan is pinned under the newest message (CA, 13.11.2026), open by
+  // default (David, 14.11.2026). The toggle names the state it is in, so
+  // nothing here is assumed.
+  const strip = page.getByTestId('plan-pinned')
+  // No count: the head is "Plan", the rows carry the state.
+  await expect(strip.getByTestId('plan-title')).toHaveText('Plan', { timeout: 15_000 })
+  await expect(strip.locator('li[data-state="done"]')).toHaveCount(1)
   await expect(strip.getByText('read the config')).toBeVisible()
   await expect(strip.getByText('run the suite')).toBeVisible()
+
+  // Folded by a click on the head: the name and the step that runs now.
+  await strip.getByTitle('Collapse the plan').click()
+  await expect(strip.getByTitle('Show every step')).toContainText('patch the parser')
+  await expect(strip.getByText('read the config')).toHaveCount(0)
+
+  // And open again.
+  await strip.getByTitle('Show every step').click()
+  await expect(strip.getByText('read the config')).toBeVisible()
 
   // `todo_write` must never have gone near the Rust bridge: it is pure
   // conversation state, and a backend round trip would mean a permission gate

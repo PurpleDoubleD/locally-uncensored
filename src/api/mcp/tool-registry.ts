@@ -9,6 +9,7 @@ import { RETIRED_TOOL_NAMES, retiredPermissionLevel } from '../../lib/retired-to
 import { retiredToolRunsOnThisDevice } from '../../lib/mobile-tools'
 import { toolOfferedToChatModel, SUB_AGENTS_NEED_CLOUD_FOR_MODEL } from '../../lib/phone-sub-agents'
 import type { AgentRunContext } from '../agent-context'
+import { externalSecretAccessOf, secretAccessOf, secretRefusal, type SecretHit } from '../../lib/secret-paths'
 
 /**
  * The optional second argument is the run this call belongs to (plan 2.6.6 C1).
@@ -134,7 +135,9 @@ export class ToolRegistry {
   registerExternal(
     serverId: string,
     tools: MCPToolDefinition[],
-    executor: ExternalToolExecutor | LegacyToolExecutor
+    executor: ExternalToolExecutor | LegacyToolExecutor,
+    /** The name the user gave the server, shown as `<server>: <tool>`. */
+    serverName?: string,
   ) {
     const isTwoArg = executor.length >= 2
     for (const tool of tools) {
@@ -151,15 +154,25 @@ export class ToolRegistry {
         )
         continue
       }
-      const bound: ToolExecutor = isTwoArg
+      const call: LegacyToolExecutor = isTwoArg
         ? (args: ToolArgs) =>
             (executor as ExternalToolExecutor)(name, args)
         : (executor as LegacyToolExecutor)
+      // The secret floor of the built-in tools (builtin-tools guardSecrets),
+      // for a third-party server too (M1): a call that names a secret path
+      // anywhere in its arguments is refused before it leaves the app, in
+      // every mode, Bypass included.
+      const bound: ToolExecutor = async (args: ToolArgs) => {
+        const hit = externalSecretAccessOf(args)
+        if (hit) return secretRefusal(hit)
+        return call(args)
+      }
+      const shownServer = serverName?.trim() || tool.serverName
       this.tools.set(name, {
         // Whatever category a definition claims, an external tool sits in
         // 'mcp' (B12): a server must not file its own shell tool under a row
         // the user set to Auto.
-        definition: { ...tool, category: 'mcp', source: 'external', serverId },
+        definition: { ...tool, category: 'mcp', source: 'external', serverId, ...(shownServer ? { serverName: shownServer } : {}) },
         executor: bound,
       })
     }
@@ -195,6 +208,28 @@ export class ToolRegistry {
 
   getToolByName(name: string): MCPToolDefinition | undefined {
     return this.tools.get(name)?.definition
+  }
+
+  /**
+   * The name a person reads for this tool: `<server>: <tool>` for a tool of
+   * an external server, so an approval says whose tool asks (M1). The
+   * registered name the model calls stays the bare tool name.
+   */
+  displayName(name: string): string {
+    const def = this.tools.get(name)?.definition
+    if (def?.source === 'external') return `${def.serverName || def.serverId || 'MCP server'}: ${name}`
+    return name
+  }
+
+  /**
+   * The secret path a call names, with the checker its tool uses: every
+   * string that reads like a path for an external tool, the known keys for
+   * an app tool. For the notice in the run; the refusal itself sits in the
+   * executor.
+   */
+  secretHitOf(name: string, args: Record<string, unknown> | undefined): SecretHit | null {
+    if (this.tools.get(name)?.definition.source === 'external') return externalSecretAccessOf(args)
+    return secretAccessOf(name, args)
   }
 
   /**

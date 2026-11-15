@@ -1,4 +1,8 @@
 import { stripSourcesMarker } from '../lib/web-evidence'
+import { billingOf, creditRatesOf } from '../lib/agent-core/credit-rates'
+import { isServerLoopCut, LOOP_HALT_COST, LOOP_HALT_GUARD, LOOP_HALT_SERVER_LOOP, SERVER_LOOP_MESSAGE, SERVER_LOOP_RETRIES } from '../lib/agent-core/server-loop-cut'
+import { canonicalArgs, repeatLabel, skippedRepeatsNote } from '../lib/agent-core/repeat-note'
+import { replayableReasoning } from '../lib/agent-core/reasoning-replay'
 import { useRef, useState, useCallback, useEffect } from 'react'
 import { frameFlush } from '../lib/frame-flush'
 import { useRunActivityStore, toolProgressActivity, waitBeforeRetry, readingActivity, endFirstWait, hiddenThoughtArrived, waitForChatCard } from '../stores/runActivityStore'
@@ -17,7 +21,8 @@ import { v4 as uuid } from 'uuid'
 import { streamProviderTurn, type StreamedProviderTurn } from '../lib/provider-stream'
 import { requestUsageTracker } from '../lib/request-usage'
 import { createHermesDisplayFilter, createThinkStreamSplitter, createTurnThinkingSink } from '../lib/hermes-stream'
-import { beginAgentRun, endAgentRun, setActiveAgentModel, renderWorkspaceSection, takeChatArtifacts, type AgentRunContext } from '../api/agent-context'
+import { beginAgentRun, endAgentRun, getActiveWorkspace, setActiveAgentModel, renderWorkspaceSection, takeChatArtifacts, type AgentRunContext } from '../api/agent-context'
+import { commandAllowedHere, ruleScope } from '../stores/commandRulesStore'
 import { resolveChatWorkspaceSlug } from '../api/workspace-slug'
 import { isOllamaLocal } from '../api/backend'
 import { requestGenerationCancel } from '../api/vram-handoff'
@@ -49,7 +54,7 @@ import { stripVisionFeedbackMessages, reportMultimodalRefusal } from '../lib/vis
 import { log } from '../lib/logger'
 import { gatePlanTool, planToolAllowed } from '../lib/plan-gate'
 import { buildHermesToolPrompt, buildHermesToolResult, buildHermesToolCall, parseHermesToolCalls, stripToolCallTags, hasToolCallTags } from '../api/hermes-tool-calling'
-import { parseLooseToolCalls, stripMatchedCalls, stripToolCallText, repairToolCall, toolCallsFromReasoning } from '../lib/loose-tool-parse'
+import { recoverTurnCalls } from '../lib/agent-core/recover'
 import { isMediaTool, mediaCallSucceeded } from '../lib/media-result'
 import { mediaTurnCaps, droppedMediaNote } from '../lib/media-turn-caps'
 import { isLocalModelByName } from '../api/agents/model-locality'
@@ -122,6 +127,10 @@ import {
 } from '../lib/agent-fanout'
 import { setExplicitFanout, buildSubAgentGates } from '../api/agents/sub-agent'
 import { appendTaskReport } from '../lib/agent-task-report'
+import { appendSteers } from '../lib/agent-core/steer'
+import { publishStepBreakdown } from '../stores/contextBreakdownStore'
+import { finishWithoutTools, finishSection } from '../lib/agent-core/finish'
+import { useSteerStore } from '../stores/steerStore'
 import { useAgentTaskStore } from '../stores/agentTaskStore'
 import { useAgentGoalStore, renderGoalSection } from '../stores/agentGoalStore'
 import { endLoopUnlessRearmed, useAgentLoopStore } from '../stores/agentLoopStore'
@@ -132,6 +141,8 @@ import { buildLoopRecheck, loopPassSaysDone } from '../lib/agent-commands'
 import { applyStoredCompaction } from '../lib/compact-summary'
 import { maybeAutoCompact } from '../lib/run-compact-command'
 import { autoCompactOn } from '../lib/compact-trigger'
+import { ContextFullError, fitToWindow } from '../lib/fit-to-window'
+import { TokenCalibration } from '../lib/token-calibration'
 import { compactRunMidway, newRunCompactState, runCompactionDue, MEMORY_FLUSH_NOTE } from '../lib/run-compact-midway'
 import { generateEmbeddings } from '../api/rag'
 import { truncateToolResult } from '../lib/truncate-tool-result'
@@ -171,7 +182,7 @@ import { capHiddenToolHistory } from './codex/hidden-history'
 // derselbe, und zwei Wortlaute fuer einen abgeschnittenen Zug waeren zwei
 // Stellen, von denen eine gepflegt wird.
 import { codexCutoffNote, dropCutOffCall } from './codex/turn-cutoff'
-import { asString, errorText, isRecord, prop } from '../types/json-guards'
+import { asString, errorText, prop } from '../types/json-guards'
 import type { ToolArgs } from '../api/mcp/types'
 import { CREDITS_EXHAUSTED_MESSAGE } from '../lib/credits-exhausted'
 import { buildChatSystemPrompt } from '../lib/system-prompt'
@@ -179,7 +190,7 @@ import { agentProfileFor, resultCharsFor, COMPACT_MAX_TOOLS, COMPACT_PREFER } fr
 import { loadProjectFile, renderProjectFileSection } from '../lib/project-instructions'
 import { loadLurules, renderRulesSection } from '../lib/lurules'
 import { makeLurulesReader } from './codex/workspace-fs'
-import { secretAccessOf, secretNotice } from '../lib/secret-paths'
+import { secretNotice } from '../lib/secret-paths'
 import { takeRunNotices } from '../lib/run-notices'
 import { MEMORY_SKILL_PROMPT_LINE, renderSkillsSection, withSkillTools } from '../lib/skill-tools'
 import { useSkillStore } from '../stores/skillStore'
@@ -897,7 +908,15 @@ export function useAgentChat() {
     // still in the waiting room: the body (and its own finally below) never
     // ran, so the guard this call claimed above has to be freed here instead.
     const lane = laneOf(activeModel, currentLaneFacts())
-    const laneOutcome = await runInLane(
+    // Safety net (CA, 13.11.2026, support case "the app answers once, then
+    // never again"): about 800 lines of setup run before the loop's own
+    // try/finally, and a throw there left this conversation claimed and
+    // `isAgentRunning` true for good. Every later Enter was then refused
+    // without a word or parked in a steer queue no run would ever read, and
+    // Stop showed in every chat. The Code tab has had this net for a while.
+    let laneOutcome: Awaited<ReturnType<typeof runInLane>> | undefined
+    try {
+    laneOutcome = await runInLane(
       { conversationId: convId, lane, abort: () => abort.abort() },
       async (heldLocalLane) => {
 
@@ -1683,8 +1702,15 @@ export function useAgentChat() {
     const executedCallKeys = new Set<string>()
     /** Size of the tool catalogue the step before sent. Zero before the first step. */
     let catalogTokens = 0
+    // The run's estimate held against the model's own count (lib/token-calibration.ts).
+    const calib = new TokenCalibration()
+    let stepEstimate = 0
+    // Canonical arguments (lib/agent-core/repeat-note.ts): a re-ordered or
+    // re-spaced copy of a call is the same call.
     const callKey = (tc: { function: { name: string; arguments: unknown } }) =>
-      tc.function.name + '|' + JSON.stringify(tc.function.arguments ?? {})
+      tc.function.name + '|' + canonicalArgs(tc.function.arguments)
+    // The repeats dropped from the current step, named after its results.
+    let skippedRepeats: string[] = []
     // Loop-detection (audit follow-up): agent-loop-guard's own header says it
     // covers "Codex + Chat agent", but only Codex ever wired it — the agent
     // loop relied on the exact-repeat set alone, which the epoch reset (B1)
@@ -1695,7 +1721,14 @@ export function useAgentChat() {
     const costBrake = new AgentCostBrake({
       paid: isPaidProvider(providerId, sendsToALanBackend(providerId, activeModel)),
       loopGuardEnabled: useSettingsStore.getState().settings.agentLoopGuard !== false,
+      // CA (14.11.2026): credits per task and per hour, priced from the
+      // model's declared rates (LU Cloud catalogue).
+      rates: creditRatesOf(activeModel),
+      runCreditLimit: useSettingsStore.getState().settings.agentRunCreditLimit,
+      hourCreditLimit: useSettingsStore.getState().settings.agentHourCreditLimit,
     })
+    // Steps LU Cloud cut for repeating (lib/agent-core/server-loop-cut.ts).
+    let serverLoopCuts = 0
     // The closing line a turn gets when the model itself said nothing usable.
     // Read from the live counters at call time, so both the normal end of the
     // run and the swallowed multimodal refusal below produce the same text.
@@ -1721,6 +1754,9 @@ export function useAgentChat() {
     // than a loop (plan A1, LOOP-GUARD). Keyed by the message object, which
     // works across all three transports.
     const guardKeyOfResult = new WeakMap<object, string>()
+    // Reads fetched again after their result was capped: their newest result
+    // stays whole from then on (context-decay keepWhole, CA cloud loops).
+    const neededAgain = new Set<string>()
     const guardKeyFor = (tc: { function: { name: string; arguments?: unknown } }): string =>
       `${tc.function.name}|${JSON.stringify(tc.function.arguments ?? {})}`
     const NO_TRIMMED_KEYS: ReadonlySet<string> = new Set<string>()
@@ -1753,6 +1789,12 @@ export function useAgentChat() {
           () => useAgentTaskStore.getState().takeUnreported(convId),
           Date.now(),
         )
+        // CA U2: what the user wrote while the run was going, read here, at
+        // the same seam and as the same kind of material as the report above.
+        for (const steer of appendSteers(agentMessages, () => useSteerStore.getState().take(convId), (content) => ({ role: 'user' as const, content }))) {
+          addBlock(runState, convId, assistantMessage.id, { id: uuid(), phase: 'reflection', content: steer.text, steer: true, timestamp: Date.now() })
+          log.info('agent.steer_read', { chars: steer.text.length })
+        }
         // One card, and a render from the chat has the chat model off it
         // (3.0.8, A2): wait for it here, visibly, instead of inside the
         // provider without a word.
@@ -1764,6 +1806,11 @@ export function useAgentChat() {
           runState.content =
             (runState.content ? runState.content + '\n\n' : '') + budget.haltMessage()
           scheduleUIUpdate()
+          // CA U6: one pass without tools says what is done and what is open.
+          {
+            const summary = (isLocalModelByName(activeModel) ? await finishWithoutTools({ provider, model: modelToUse, messages: agentMessages, signal: abort.signal }) : null)
+            if (summary) { runState.content += finishSection(summary); scheduleUIUpdate() }
+          }
           break
         }
         let toolCalls: ToolCall[] = []
@@ -1897,7 +1944,9 @@ export function useAgentChat() {
         const personaNote = samplingConv
           ? personaNoteOf(speakerPersonaFor(samplingConv, activeModel, allPersonas, pickedPersonaId, settings.personasEnabled !== false))
           : null
-        const besideCatalog = budgetBesideTheCatalog(sendWindow, catalogTokens)
+        // In the model's own tokens: the estimate reads low on code and logs,
+        // and a budget it measures has to be read that much smaller.
+        const besideCatalog = budgetBesideTheCatalog(calib.budget(sendWindow), catalogTokens)
         const sendBudget = personaNote ? Math.max(1, besideCatalog - noteTokens(personaNote)) : besideCatalog
         let sendMessages: ChatMessage[] = agentMessages.slice()
         let trimmedReadKeys: ReadonlySet<string> = NO_TRIMMED_KEYS
@@ -1943,8 +1992,17 @@ export function useAgentChat() {
             enabled: decayOn,
             hysteresis: decayOn,
             keyOf: (m) => guardKeyOfResult.get(m as unknown as object),
+            keepWhole: neededAgain,
           })
           sendMessages = built.messages
+          // The last check (lib/fit-to-window.ts): against the model's own
+          // window, never past it. Ollama would cut the start silently.
+          {
+            const fit = fitToWindow(sendMessages, calib.budget(agentCtx), catalogTokens)
+            if (!fit.fits) throw new ContextFullError(fit.tokens, agentCtx)
+            sendMessages = fit.messages
+            stepEstimate = fit.tokens
+          }
           trimmedReadKeys = new Set(built.trimmedKeys)
           if (convId) {
             useSendSizeStore.getState().report(convId, {
@@ -2067,6 +2125,8 @@ export function useAgentChat() {
           // it and the meter read low by the whole catalog.
           if (convId) {
             useSendSizeStore.getState().reportTools(convId, estimateTokens(JSON.stringify(tools)))
+            // CA U5: what this step sent, by kind, for the context breakdown.
+            publishStepBreakdown(convId, sendMessages, estimateTokens(JSON.stringify(tools)))
           }
           catalogTokens = estimateTokens(JSON.stringify(tools))
 
@@ -2309,6 +2369,16 @@ export function useAgentChat() {
                   providerTurn = await streamProviderTurn(provider, modelToUse, sendMessages, { ...streamOpts, thinking: undefined as unknown as boolean }, onLiveContent, () => {}, onToolProgress)
                   break
                 }
+                // LU Cloud cut this step for repeating itself. The server billed
+                // its input and sent no usage, so it is counted here at the
+                // step's estimate; one more attempt per run, then the run ends.
+                if (isServerLoopCut(thinkErr)) {
+                  costBrake.record(stepEstimate)
+                  serverLoopCuts++
+                  if (serverLoopCuts > SERVER_LOOP_RETRIES) throw thinkErr
+                  log.warn('agent.server_loop_cut_retry', { provider: providerId, cuts: serverLoopCuts })
+                  continue
+                }
                 const transient = asString(prop(thinkErr, 'name')) !== 'AbortError' && !isTerminalModelError(thinkErr) && !cutByModelSwitch(convId)
                 if (transient && connRetries < 2) {
                   connRetries++
@@ -2345,7 +2415,8 @@ export function useAgentChat() {
             })
           }
           requestUsage.add(turn)
-          costBrake.record(turn.promptEvalCount)
+          calib.observe(stepEstimate, turn.promptEvalCount)
+          costBrake.record(turn.promptEvalCount, { output: turn.evalCount, billing: billingOf(turn) })
           // Native thinking field (Ollama; LU Cloud reasoning_content)
           if (turn.thinking) turnThinking = turn.thinking
 
@@ -2439,7 +2510,8 @@ export function useAgentChat() {
           // abschneiden, und dann steht hier ebenfalls kein Werkzeugaufruf.
           turnFinishReason = hermesTurn.finishReason
           requestUsage.add(hermesTurn)
-          costBrake.record(hermesTurn.promptEvalCount)
+          calib.observe(stepEstimate, hermesTurn.promptEvalCount)
+          costBrake.record(hermesTurn.promptEvalCount, { output: hermesTurn.evalCount, billing: billingOf(hermesTurn) })
           notePhoneCount(hermesTurn.promptEvalCount)
           if (hermesTurn.thinking) {
             turnThinking = turnThinking
@@ -2483,51 +2555,26 @@ export function useAgentChat() {
         // preserved as a `reflection` block so it renders above the tool
         // calls in chronological order. Only the final-turn content (no
         // tool_calls) becomes the message body.
-        const knownToolNames = toolRegistry.getAll().map((t) => t.name)
-
-        // Canonicalize near-miss tool names (2026-06-03): gemma4 emitted a
-        // NATIVE call to `video_generation` (not `video_generate`) → "Unknown
-        // tool" → it gave up. Map such close misses to the registered name.
-        if (toolCalls.length > 0) {
-          const tools = toolRegistry.getAll()
-          toolCalls = toolCalls.map((tc) => {
-            const fixed = repairToolCall(tc.function.name, isRecord(tc.function.arguments) ? tc.function.arguments : {}, tools)
-            return fixed.name === tc.function.name ? tc : { ...tc, function: { ...tc.function, name: fixed.name, arguments: fixed.arguments } }
-          })
-        }
-
-        // Loose tool-call fallback (2026-06-03): weak local models often
-        // WRITE the call into their answer text instead of using the structured
-        // tool_calls channel — gemma4:e4b answers in prose; qwen2.5-coder:14b
-        // wrote `image_generate(prompt="…")` as plain text and never emitted a
-        // real call, so the image/video flow never fired. If the native/Hermes
-        // channel produced nothing, lift any recognizable call out of the
-        // content (known tool names only) and strip it from the visible prose.
-        if (toolCalls.length === 0 && turnContent.trim()) {
-          const loose = parseLooseToolCalls(turnContent, knownToolNames)
-          if (loose.calls.length > 0) {
-            toolCalls = loose.calls.map((c) => ({ function: { name: c.name, arguments: c.arguments } }))
-            turnContent = stripMatchedCalls(turnContent, loose.matched)
-            log.info('agent.loose_tool_call_recovered', { count: toolCalls.length, names: toolCalls.map((t) => t.function.name) })
-          }
-        }
-
-        // C59 A3: the calls sat in the reasoning channel and the answer is
-        // empty (a server that took the model for a thinking model).
+        // One recovery chain for every loop (CA K2, lib/agent-core/recover.ts):
+        // repaired native names (gemma4 `video_generation`, GH #147 generic
+        // `function`), JSON in the answer, prose calls like
+        // `image_generate(prompt="…")` (qwen2.5-coder:14b, gemma4:e4b), calls
+        // stuck in the reasoning channel (C59 A3), and the call text cleaned
+        // out of the visible answer. Known tool names only.
         {
-          const fromReasoning = toolCallsFromReasoning(turnThinking, turnContent, toolCalls.length, [...knownToolNames, ...(compactRun ? [TOOL_SEARCH] : [])])
-          if (fromReasoning.length) {
-            toolCalls = fromReasoning.map((c) => ({ function: { name: c.name, arguments: c.arguments } }))
-            log.info('agent.reasoning_tool_call_recovered', { count: toolCalls.length, names: toolCalls.map((t) => t.function.name) })
+          const recovered = recoverTurnCalls({
+            toolCalls,
+            content: turnContent,
+            thinking: turnThinking,
+            tools: toolRegistry.getAll(),
+            extraNames: compactRun ? [TOOL_SEARCH] : [],
+          })
+          toolCalls = recovered.toolCalls
+          turnContent = recovered.content
+          if (recovered.source !== 'native' && recovered.source !== 'none') {
+            log.info('agent.tool_call_recovered', { from: recovered.source, count: toolCalls.length, names: toolCalls.map((t) => t.function.name) })
           }
         }
-
-        // Clean any tool-call text the model echoed into its prose (the owner
-        // 2026-06-04) — raw JSON like {"name":"image_generate",…} was leaking
-        // into the chat as a "notes"/JSON block. Runs even when a proper native
-        // call was emitted alongside the echo. Tool args/results stay in the
-        // agent's internal history; this only cleans the visible bubble.
-        turnContent = stripToolCallText(turnContent, knownToolNames)
 
         // A turn cut off by the token limit: its last call may stop halfway
         // (dropCutOffCall). Checked after the loose fallback, which reads the
@@ -2564,6 +2611,7 @@ export function useAgentChat() {
           let droppedVideo = false
           let createInTurn = 0
           const kept: ToolCall[] = []
+          skippedRepeats = []
           for (const tc of toolCalls) {
             const name = tc.function.name
             if (name === CREATE_ORDER_TOOL) {
@@ -2575,6 +2623,7 @@ export function useAgentChat() {
             } else if (executedCallKeys.has(callKey(tc))) {
               blocked = true
               blockedNonMedia = true
+              skippedRepeats.push(repeatLabel(name, tc.function.arguments))
             } else {
               kept.push(tc)
             }
@@ -2590,6 +2639,8 @@ export function useAgentChat() {
           // the model to a short final reply ONCE; if it STILL only emits blocked
           // calls, fall through to the empty-content summary and stop cleanly.
           if (toolCalls.length === 0 && blocked) {
+            // The whole step was repeats: the steer below says so itself.
+            skippedRepeats = []
             if (!mediaSteered) {
               mediaSteered = true
               if (turnContent.trim()) {
@@ -3012,20 +3063,33 @@ export function useAgentChat() {
               // decay working as designed, not a loop (plan A1, LOOP-GUARD).
               { trimmedReadKeys },
             )
+        for (const tc of toolCalls) {
+          const k = guardKeyFor(tc)
+          if (trimmedReadKeys.has(k)) neededAgain.add(k)
+        }
         // A plan the model keeps restating steers like a repeated batch does;
         // the batch's own verdict wins where it has one (A37).
         const batchVerdict = recordedVerdict.action === 'ok' ? narrationVerdict : recordedVerdict
         if (batchVerdict.action === 'halt') {
           runState.content =
             (runState.content ? runState.content + '\n\n' : '') +
-            `_(halted: ${batchVerdict.reason}. The model is looping. Try a stronger model for multi-step tasks, or rephrase the instruction.)_`
+            (batchVerdict.answer
+              // The search spiral knows its honest end (not found).
+              ? batchVerdict.answer
+              : `_(halted: ${batchVerdict.reason}. The model is looping. Try a stronger model for multi-step tasks, or rephrase the instruction.)_`)
           scheduleUIUpdate()
+          // CA U6: one pass without tools says what is done and what is open.
+          {
+            const summary = (isLocalModelByName(activeModel) ? await finishWithoutTools({ provider, model: modelToUse, messages: agentMessages, signal: abort.signal }) : null)
+            if (summary) { runState.content += finishSection(summary); scheduleUIUpdate() }
+          }
           addBlock(runState, convId!, assistantMessage.id, {
             id: uuid(),
             phase: 'reflection',
             content: `⛔ Loop guard halted the run: ${batchVerdict.reason}.`,
             timestamp: Date.now(),
           })
+          loopHalt = LOOP_HALT_GUARD
           break
         }
         // C83: the cost brake looks at what the backend reported, not at the
@@ -3038,6 +3102,8 @@ export function useAgentChat() {
             id: uuid(), phase: 'reflection', content: `⛔ ${brake.message}`, timestamp: Date.now(),
           })
           log.warn('agent.cost_brake_halt', { provider: providerId, inputTokens: costBrake.inputTokens })
+          loopHalt = LOOP_HALT_COST
+          useChatNoticeStore.getState().show('cost-brake', brake.message, 'ruhig')
           break
         }
         if (brake.action === 'warn') {
@@ -3045,6 +3111,8 @@ export function useAgentChat() {
             id: uuid(), phase: 'reflection', content: `⚠ ${brake.message}`, timestamp: Date.now(),
           })
           log.info('agent.cost_brake_warn', { provider: providerId, inputTokens: costBrake.inputTokens })
+          // Visible where the user looks, not only inside the folded steps.
+          useChatNoticeStore.getState().show('cost-brake', brake.message, 'ruhig')
         }
         const pendingSteer = batchVerdict.action === 'steer' ? batchVerdict.message : null
         if (pendingSteer) {
@@ -3058,10 +3126,10 @@ export function useAgentChat() {
         // C59: a call on a secret path is refused by the tool itself
         // (builtin-tools guardSecrets); the user sees it here, not only the model.
         for (const tc of toolCalls) {
-          const hit = secretAccessOf(tc.function?.name ?? '', tc.function?.arguments as Record<string, unknown>)
+          const hit = toolRegistry.secretHitOf(tc.function?.name ?? '', tc.function?.arguments as Record<string, unknown>)
           if (hit) {
             addBlock(runState, convId!, assistantMessage.id, {
-              id: uuid(), phase: 'reflection', content: secretNotice(tc.function.name, hit), timestamp: Date.now(),
+              id: uuid(), phase: 'reflection', content: secretNotice(toolRegistry.displayName(tc.function.name), hit), timestamp: Date.now(),
             })
           }
         }
@@ -3117,7 +3185,13 @@ export function useAgentChat() {
               cloudOptIn: settings.codexCloudConfirmOptIn,
               providerId,
             })
+          // CA K4: a command the user allowed for this folder ("Always allow
+          // here") skips the card; chains need every part covered.
+          // Never for a blocked tool: a rule answers "ask?", not "allowed?".
+          const ruleAllows = permLevel !== 'blocked' && tc.function.name === 'shell_execute'
+            && commandAllowedHere(ruleScope(getActiveWorkspace(run), convId), tc.function.arguments?.command)
           const needsApproval = (permLevel !== 'auto' || cloudShellConfirm)
+            && !ruleAllows
             && !(await approvalIsMoot(tc.function.name, tc.function.arguments ?? {}, run))
           // Exec-timeout parity with the Code tab (audit B8): without an
           // injected default the Rust side used its 120 s fallback, so the
@@ -3133,6 +3207,10 @@ export function useAgentChat() {
             args: toolArgs,
             status: needsApproval ? 'pending_approval' : 'running',
             timestamp: Date.now(),
+          }
+          if (needsApproval && tc.function.name === 'shell_execute') {
+            const scope = ruleScope(getActiveWorkspace(run), convId)
+            if (scope) ac.ruleScope = scope
           }
           addBlock(runState, convId!, assistantMessage.id, {
             id: blockId,
@@ -3451,6 +3529,9 @@ export function useAgentChat() {
             role: 'assistant',
             content: turnContent || '',
             tool_calls: toolCalls,
+            // The step's own reasoning goes back with its calls where the
+            // provider asks for it (lib/agent-core/reasoning-replay.ts).
+            reasoning: replayableReasoning(turnThinking),
           })
           for (const { tc } of batch) {
             const result = results.find((r) => r.id === batch.find((b) => b.tc === tc)?.ac.id)!
@@ -3518,12 +3599,25 @@ export function useAgentChat() {
             (runState.content ? runState.content + '\n\n' : '') +
             `_(halted: ${failVerdict.reason}. The model is looping. Try a stronger model for multi-step tasks, or rephrase the instruction.)_`
           scheduleUIUpdate()
+          // CA U6: one pass without tools says what is done and what is open.
+          {
+            const summary = (isLocalModelByName(activeModel) ? await finishWithoutTools({ provider, model: modelToUse, messages: agentMessages, signal: abort.signal }) : null)
+            if (summary) { runState.content += finishSection(summary); scheduleUIUpdate() }
+          }
+          loopHalt = LOOP_HALT_GUARD
           break
         }
 
         // Now the steer sits AFTER the calls it refers to (audit F2).
         if (pendingSteer) {
           agentMessages.push({ role: 'user', content: pendingSteer })
+        }
+        // Part of the step was a repeat and was not run: say which, after the
+        // results of the rest (CA, cloud loops).
+        {
+          const note = skippedRepeatsNote(skippedRepeats)
+          skippedRepeats = []
+          if (note) agentMessages.push({ role: 'user', content: note })
         }
         if (failVerdict.action === 'steer') {
           agentMessages.push({ role: 'user', content: failVerdict.message })
@@ -3624,6 +3718,13 @@ export function useAgentChat() {
               emptyAnswerExplanation({ finishReason: MODEL_SWITCH_FINISH, captured: false, keepThinking: false }),
             )
           }
+        } else if (isServerLoopCut(err)) {
+          // LU Cloud cut a step twice for repeating (lib/agent-core/server-loop-cut.ts).
+          loopHalt = LOOP_HALT_SERVER_LOOP
+          useChatStore.getState().updateMessageContent(
+            convId!, assistantMessage.id,
+            (runState.content ? runState.content + '\n\n' : '') + SERVER_LOOP_MESSAGE
+          )
         } else if ((err as { code?: string })?.code === 'outage') {
           // LU Cloud has an outage the server announced (lib/cloud-outage.ts).
           // Its sentence instead of "Agent error: ...", and the loop stops:
@@ -3978,15 +4079,33 @@ export function useAgentChat() {
     }
       },
     )
-    if (laneOutcome === 'cancelled-while-queued' && activeAgentRuns.get(convId) === runState) {
+    } catch (err) {
+      log.warn('agent.setup_threw', { convId, message: err instanceof Error ? err.message.slice(0, 300) : String(err).slice(0, 300) })
+      // Say it where the user is looking, once, in their words.
+      useChatNoticeStore.getState().show(
+        'agent-start-failed',
+        'The agent could not start this time. Send your message again; if it keeps happening, start a new chat.',
+        'fehler',
+        CHAT_NOTICE_MS,
+      )
+    } finally {
+    // Whatever way the body ended, a claim still held by THIS run is a leak:
+    // the loop's own finally deletes it on every path it reaches. Identity
+    // checked, so a newer run on the same conversation is never touched.
+    if (activeAgentRuns.get(convId) === runState) {
       // Stop pulled this run out of the local lane's waiting room before its
-      // own finally ever ran (that finally lives inside the body above), so
-      // the guard this call claimed synchronously at the top has to be freed
-      // here instead. Nothing else needs undoing: the body never started, so
-      // it never added a message, registered its own aborter, or booked a
-      // loop timer.
+      // own finally ever ran ('cancelled-while-queued'), or the setup threw
+      // before reaching it: the guard claimed synchronously at the top has to
+      // be freed here instead.
       activeAgentRuns.delete(convId)
       setIsAgentRunning(activeAgentRuns.size > 0)
+      if (laneOutcome !== 'cancelled-while-queued') {
+        abort.abort()
+        // Through the same contract as every other end of a turn: whatever
+        // the setup stored is on disk before the chat says it is done.
+        await endTurnDurably(() => { useGenerationStore.getState().setGenerating(convId, false) })
+      }
+    }
     }
   }, [])
 
@@ -4111,6 +4230,7 @@ That list is what LU can do. Your request carries the subset that fits the task 
 WORK IN BATCHES (every step resends the whole conversation and costs the user money):
 - Put independent tool calls into ONE response: several reads, searches or edits at once.
 - Never spend a step on bookkeeping alone. If a todo_write tool is offered, send the updated list together with your next real tool call.
+- The result of every call you made stays in the conversation above. Do not call a tool again with the same arguments unless something changed in between. If a result above was shortened, read only the part you still need (a line range or a search), not the whole thing again.
 
 AUTONOMY CONTRACT (read carefully, this is the most important rule):
 - When the user asks you to BUILD, CREATE, MAKE, or WRITE something (a file, a website, a script, a folder structure), you MUST execute it via tools, typically file_write.

@@ -1,4 +1,5 @@
 import { registerChatSender } from '../../lib/remote-chat-senders'
+import { PlanBar, PlanHistoryRow, usePlanHistory } from './PlanBar'
 import { composeFileMessage } from '../../lib/chat-files'
 import { useCodex } from '../../hooks/useCodex'
 import { RequestUsageLine } from './RequestUsageLine'
@@ -9,6 +10,10 @@ import { useComputerStore } from '../../stores/computerStore'
 import { useBackgroundAgentWake } from '../../hooks/useBackgroundAgentWake'
 import { useGenerationStore } from '../../stores/generationStore'
 import { ChatInput } from './ChatInput'
+import { SteerNote } from './SteerNote'
+import { RewindHere } from './RewindHere'
+import { RunErrorActions } from './RunErrorActions'
+import { useSteerQueue } from '../../hooks/useSteerQueue'
 import { ChatFileChip } from './ChatFileChip'
 import { FILE_ONLY_TEXT } from '../../lib/chat-files'
 import { ToolCallBlock } from './ToolCallBlock'
@@ -60,6 +65,7 @@ import { Hinweis } from '../ui/Hinweis'
 import { HINWEIS_TEXT } from '../../lib/hinweis'
 import { stripModelNoise } from '../../lib/strip-model-noise'
 import { useIsQueuedForLocalLane, useLocalLaneQueuePosition } from '../../lib/run-idle'
+import { useMentionRoot } from '../../hooks/useMentionRoot'
 
 // Code always drives a tool loop, so the aggressive tier applies here.
 const stripChannelTags = (text: string) => stripModelNoise(text, { aggressive: true })
@@ -110,9 +116,20 @@ export function CodexView() {
   // the same function). Handed to the send, which never runs looser (A37).
   const codexDefaultMode = useSettingsStore((s) => s.settings.codexDefaultMode)
   const shownMode = useCodexStore((s) => s.nextSendMode(activeConversationId, codexDefaultMode))
+  // `@` file mentions (U8) read the folder this run works in.
+  const mentionRoot = useMentionRoot('code')
 
   const conversation = conversations.find(c => c.id === activeConversationId)
   const messages = conversation?.messages || []
+  // Plans the user has moved on from, as folded rows under their answers.
+  const planRows = usePlanHistory(activeConversationId, conversation?.messages)
+  // CA U7: Try again under the newest failed answer sends the instruction it answered.
+  const lastAssistantId = [...messages].reverse().find((m) => m.role === 'assistant')?.id
+  const lastInstruction = (() => {
+    const at = messages.findIndex((m) => m.id === lastAssistantId)
+    for (let i = at - 1; i >= 0; i--) if (messages[i].role === 'user') return (messages[i].content || '').trim()
+    return ''
+  })()
 
   // Per-conversation generating flag (2026-06-12): the typing indicator
   // + realtime counter + a message's live-stream state must follow the coding
@@ -121,6 +138,8 @@ export function CodexView() {
   // refs); the visual bits below read this conversation-scoped flag instead.
   const generatingMap = useGenerationStore((s) => s.generating)
   const codexGenerating = !!activeConversationId && !!generatingMap[activeConversationId]
+  // CA U2: typing during a run queues the message for the run's next step.
+  const steering = useSteerQueue(activeConversationId, isRunning || codexGenerating, true, (text) => sendInstruction(text, { shownMode }))
   const pendingConfirm = useCodexConfirmStore((s) => s.pending)
   // The question of the first use of computer control is open in this conversation.
   const chatAsked = useComputerStore((s) => !!s.chatAsk && !s.chatAsk.voice && (s.chatAsk.conversationId === null || s.chatAsk.conversationId === activeConversationId))
@@ -473,7 +492,7 @@ export function CodexView() {
                 return (
                   <div
                     key={msg.id}
-                    className={`flex gap-2 px-3 py-1 ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}
+                    className={`group flex gap-2 px-3 py-1 ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}
                   >
                     {/* The same avatar column as in the chat (avatar-slot.ts). */}
                     {msg.role === 'user' ? (
@@ -502,7 +521,9 @@ export function CodexView() {
                         const shown = (text: string) => (running ? closeOpenMarkdown(text) : text)
                         const hasBlocks = !!(msg.role === 'assistant' && msg.agentBlocks && msg.agentBlocks.length > 0)
                         const stepCount = msg.agentBlocks?.filter((b) => b.phase === 'tool_call' && b.toolCall).length ?? 0
-                        const hasAnswerBlock = !!(msg.agentBlocks && msg.agentBlocks.some((b) => b.phase === 'answer' && b.content.trim()))
+                        // A message the user wrote during the run (CA U2) needs
+                        // the chronological layout to sit where it was read.
+                        const hasAnswerBlock = !!(msg.agentBlocks && msg.agentBlocks.some((b) => (b.phase === 'answer' && b.content.trim()) || b.steer))
 
                         // Reflection blocks (Architect plan, RepoMap context) ,
                         // shown above the tool calls so the user sees what context
@@ -510,7 +531,7 @@ export function CodexView() {
                         const reflection = hasBlocks ? (
                           <div className="space-y-1">
                             {msg.agentBlocks!
-                              .filter((b) => b.phase === 'reflection' && b.content)
+                              .filter((b) => b.phase === 'reflection' && b.content && !b.steer)
                               .map((block) => (
                                 <div
                                   key={block.id}
@@ -539,6 +560,7 @@ export function CodexView() {
                                     (b) =>
                                       (b.phase === 'tool_call' && b.toolCall) ||
                                       (b.phase === 'answer' && stripChannelTags(b.content)) ||
+                                      (b.steer && b.content.trim()) ||
                                       // G21-2: per-round thoughts, chronological
                                       (b.phase === 'thinking' && b.content.trim()),
                                   )
@@ -585,6 +607,7 @@ export function CodexView() {
                                         )
                                       }
                                       const block = group.block
+                                      if (block.steer) return <SteerNote key={block.id} text={block.content} />
                                       if (block.phase === 'thinking') {
                                         // Trailing thought before the final
                                         // answer, in its collapsed G14-7 bubble.
@@ -726,6 +749,22 @@ export function CodexView() {
                       {msg.role === 'assistant' && (
                         <RequestUsageLine usage={msg.requestUsage} className="block px-1" />
                       )}
+                      {msg.role === 'assistant' && planRows.get(msg.id)?.map((todos, k) => (
+                        <PlanHistoryRow key={k} todos={todos} className="px-1 pt-1" />
+                      ))}
+                      {/* CA U4: files back to before this instruction. */}
+                      {!readOnly && msg.role === 'user' && activeConversationId && (
+                        <div className="flex justify-end opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity">
+                          <RewindHere conversationId={activeConversationId} message={msg} />
+                        </div>
+                      )}
+                      {/* CA U7: the newest failed answer offers a way on. */}
+                      {!readOnly && msg.role === 'assistant' && msg.error && !codexGenerating && msg.id === lastAssistantId && (
+                        <RunErrorActions
+                          error={msg.error}
+                          onRetry={lastInstruction ? () => sendInstruction(lastInstruction, { shownMode }) : undefined}
+                        />
+                      )}
                     </div>
                   </div>
                 )
@@ -754,6 +793,9 @@ export function CodexView() {
                   message={messages[messages.length - 1]?.role === 'assistant' ? messages[messages.length - 1] : undefined}
                 />
               )}
+              {/* The run's plan, pinned under the newest message (PlanBar.tsx).
+                  It used to be the footer of the Explorer column. */}
+              {!readOnly && <PlanBar conversationId={activeConversationId} onContinue={(text) => sendInstruction(text, { shownMode })} />}
             </div>
           )}
         </div>
@@ -787,6 +829,7 @@ export function CodexView() {
           waitingForLocalLane={queuedForLocalLane}
           slashCommands="agent"
           filesReachTools
+          mentionRoot={mentionRoot}
           draftScope="code"
           composerModel={<ModelSelector openUpward surface="code" />}
           // Ask / Bypass / Plan sits here, in the CODE composer only (plan
@@ -795,6 +838,9 @@ export function CodexView() {
           // the header next to New, so this row carries ONE view-specific
           // control and stays a single quiet line in both states.
           composerActions={<CodexModeDropdown openUpward />}
+          onSteer={steering.steer}
+          steerQueue={steering.queue}
+          onUnsteer={steering.unsteer}
         />
       </div>
 

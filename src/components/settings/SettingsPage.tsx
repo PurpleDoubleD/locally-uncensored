@@ -1,4 +1,6 @@
 import { SkillsSettings } from './SkillsSettings'
+import { CreditLimitSettings } from './CreditLimitSettings'
+import { CommandRulesSettings } from './CommandRulesSettings'
 import { useState, useEffect, useLayoutEffect, useRef, type ReactNode, type ChangeEvent } from 'react'
 import { withDetail } from '../../lib/error-text'
 // `X` steht hier weiterhin, obwohl der Sprachabschnitt mit seinen Symbolen
@@ -2465,6 +2467,16 @@ export function SettingsPage() {
               <div className="t-micro text-gray-500 dark:text-gray-500 leading-relaxed pt-0.5">
                 Stops an agent run that keeps repeating the same steps (&quot;Loop guard halted the run&quot;). Off: the run goes on until its step limit or until you press Stop.
               </div>
+              <CreditLimitSettings />
+              {/* CA (14.11.2026, AG10): the shell stays in the agent's folder. */}
+              <InlineToggle
+                label="Let the agent look outside its folder"
+                enabled={settings.agentShellOutsideFolder === true}
+                onChange={() => updateSettings({ agentShellOutsideFolder: settings.agentShellOutsideFolder !== true })}
+              />
+              <div className="t-micro text-gray-500 dark:text-gray-500 leading-relaxed pt-0.5">
+                Off: the agent&apos;s commands stay in its folder and never read your home folder or the rest of the disk. Turn on only for a task that needs it.
+              </div>
               {/* C59 A2: the compact profile for local models, on by default. */}
               <InlineToggle
                 label="Short tool list for local models"
@@ -2540,6 +2552,12 @@ export function SettingsPage() {
           {FEATURE_FLAGS.AGENT_MODE && (
             <Section title="Skills">
               <SkillsSettings />
+            </Section>
+          )}
+
+          {FEATURE_FLAGS.AGENT_MODE && (
+            <Section title="Allowed commands">
+              <CommandRulesSettings />
             </Section>
           )}
 

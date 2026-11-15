@@ -31,6 +31,8 @@
  * Kein Store, keine Oberflaeche, kein Text fuer den Nutzer. Der Aufrufer
  * bekommt die Schritte und das Ende als Daten.
  */
+import { AgentLoopGuard } from '../../lib/agent-loop-guard'
+import { countRemoteStep, estimateRemoteTokens } from '../../lib/agent-core/remote-token-hour'
 import {
   AGENT_TOOLS,
   buildToolDefs,
@@ -271,6 +273,15 @@ export function toolObservation(result: AgentToolResult, args: Record<string, un
   if (obj.exitCode !== undefined || obj.stdout !== undefined) {
     const out = typeof obj.stdout === 'string' ? obj.stdout : ''
     const err = typeof obj.stderr === 'string' ? obj.stderr : ''
+    // T1: the desktop moved a command that outran its timeout into a
+    // background task instead of killing it (same text as mobile-client/client.js).
+    if (obj.timedOut && typeof obj.taskId === 'string' && obj.taskId) {
+      let soFar = `${out}${err ? `\n[stderr]\n${err}` : ''}`.replace(/\s+$/, '')
+      if (soFar.length > 2000) soFar = `…${soFar.slice(-2000)}`
+      return `Still running after its timeout, so it was not stopped: it keeps running in the background as task ${obj.taskId}.\n`
+        + (soFar ? `Output so far:\n${soFar}\n` : '')
+        + `Use shell_execute with task "status" and task_id "${obj.taskId}" to read its output, or task "kill" to stop it.`
+    }
     if (obj.timedOut) return 'Execution timed out.'
     if (typeof obj.exitCode === 'number' && obj.exitCode !== 0) return `Error (${obj.exitCode}):\n${err || out}`
     return out || (err ? `stderr: ${err}` : 'Done.')
@@ -321,6 +332,12 @@ export type RemoteAgentEnd =
   | 'aborted'
   | 'max-iterations'
   | 'tool-errors'
+  /** Der Loop-Guard hat den Lauf beendet: dieselben Aufrufe immer wieder
+   *  (lib/agent-loop-guard.ts, derselbe Waechter wie am Desktop, CA 14.11.). */
+  | 'looping'
+  /** Die Stundengrenze fuer Agentenlaeufe vom Handy ist erreicht
+   *  (lib/agent-core/remote-token-hour.ts, CA 14.11.). */
+  | 'cost-limit'
   /** Das Modell kann keine Werkzeuge. */
   | 'no-tools'
 
@@ -417,6 +434,11 @@ export async function runRemoteAgentLoop(run: RemoteAgentRun): Promise<RemoteAge
   let echoRetries = ECHO_RETRIES
   let nudges = STOP_NUDGES
   let consecutiveErrors = 0
+  // CA (14.11.2026): the same loop guard as the desktop's agent loops. The
+  // remote loop had only its step limit and five failures in a row, and the
+  // model it drives may be a paid cloud model on the desktop.
+  const guard = new AgentLoopGuard()
+  let pendingSteer: string | null = null
   const finish = (end: RemoteAgentEnd, content: string): RemoteAgentResult => ({ end, content, thinking, steps: steps.map((step) => ({ ...step })) })
   const aborted = () => run.signal?.aborted === true
 
@@ -430,14 +452,24 @@ export async function runRemoteAgentLoop(run: RemoteAgentRun): Promise<RemoteAge
       decayToolResults(messages, iter)
       messages = compactApiMessages(messages, HISTORY_CHAR_BUDGET) as LoopMessage[]
 
+      const sent = messages.map(({ iter: _iter, ...message }) => message)
       const answer = await run.client.chatWithTools({
         model: run.model,
         // `iter` ist Buchhaltung dieser Schleife und geht nicht an den Desktop.
-        messages: messages.map(({ iter: _iter, ...message }) => message),
+        messages: sent,
         tools,
         think: run.think,
         signal: run.signal,
       })
+      // Kosten: geschaetzt aus den Zeichen, die hin und zurueck gingen. Ueber
+      // der Stundengrenze endet der Lauf hier, bevor weitere Werkzeuge laufen.
+      {
+        const chars = JSON.stringify(sent).length + JSON.stringify(tools).length
+          + (answer.content?.length ?? 0) + (answer.thinking?.length ?? 0) + JSON.stringify(answer.toolCalls ?? []).length
+        if (countRemoteStep(estimateRemoteTokens(chars))) {
+          return finish('cost-limit', [lastContent, answer.content ?? ''].filter((x) => x.trim()).join('\n\n'))
+        }
+      }
       if (answer.thinking && run.keepThinking) thinking = thinking ? `${thinking}\n${answer.thinking}` : answer.thinking
 
       let content = answer.content
@@ -475,6 +507,18 @@ export async function runRemoteAgentLoop(run: RemoteAgentRun): Promise<RemoteAge
 
       lastContent = content || lastContent
       run.onProgress?.({ content: lastContent, thinking })
+      {
+        const said = guard.recordNarration(content || '')
+        const verdict = said.action === 'halt'
+          ? said
+          : guard.recordBatch(calls.map((c) => ({ name: c.function.name, args: JSON.stringify(c.function.arguments ?? {}) })))
+        if (verdict.action === 'halt') {
+          // The search spiral ends with an honest "not found" as the answer.
+          if (verdict.answer) return finish('done', [lastContent, verdict.answer].filter((x) => x.trim()).join('\n\n'))
+          return finish('looping', lastContent)
+        }
+        pendingSteer = verdict.action === 'steer' ? verdict.message : said.action === 'steer' ? said.message : null
+      }
       messages.push({
         role: 'assistant',
         content: content || '',
@@ -513,6 +557,11 @@ export async function runRemoteAgentLoop(run: RemoteAgentRun): Promise<RemoteAge
         messages.push({ role: 'tool', content: observation, iter })
         consecutiveErrors = failed ? consecutiveErrors + 1 : 0
         if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) return finish('tool-errors', lastContent)
+      }
+      // The steer goes after the results it is about.
+      if (pendingSteer) {
+        messages.push({ role: 'user', content: pendingSteer })
+        pendingSteer = null
       }
     }
   } catch (err) {

@@ -63,6 +63,8 @@ export const DEFAULT_SETTINGS: Settings = {
   agentMaxToolCalls: 400,
   agentMaxIterations: 200,
   agentLoopGuard: true,
+  // CA (14.11.2026, AG10): the agent's shell stays in its folder (lib/shell-scope.ts).
+  agentShellOutsideFolder: false,
   agentCompactAuto: true,
   // Die heutigen festen Werte aus sub-agent.ts, unveraendert uebernommen:
   // wer nichts einstellt, bekommt exakt das Verhalten von 2.6.7.

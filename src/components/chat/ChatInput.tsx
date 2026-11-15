@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useLayoutEffect, useCallback, type ReactNode } from 'react'
 import { usePopoverPlatz } from '../../hooks/usePopoverPlatz'
 import { SamplingControls } from './SamplingControls'
-import { Send, Square, Paperclip, X, Brain, Gauge, Terminal, Film, Music } from 'lucide-react'
+import { Send, Square, Paperclip, X, Brain, Gauge, Terminal, Film, Music, AtSign, FileText, Folder, Lock } from 'lucide-react'
 import { matchAgentCommands, type AgentCommand, type CommandScope } from '../../lib/agent-commands'
 import { VoiceButton, type VoiceButtonHandle } from './VoiceButton'
 import { MicLevelTrace } from '../voice/MicLevelTrace'
@@ -20,6 +20,7 @@ import { isThinkingCompatible, isVisionCompatible, declaredVision } from '../../
 import { clampEffort, effortChoices, effortLabel, nextEffort, DEFAULT_EFFORT } from '../../lib/effort'
 import type { AgentToolCall } from '../../types/agent-mode'
 import type { ImageAttachment } from '../../types/chat'
+import { useComposerFillStore } from '../../stores/composerFillStore'
 import { loadChatDrafts, newChatKey, storeChatDrafts, type ChatDrafts } from '../../lib/chat-drafts'
 import { MAX_CHAT_IMAGES, prepareChatImages } from '../../lib/chat-image-input'
 import { blindModelNotice } from '../../lib/chat-attachment-input'
@@ -39,6 +40,11 @@ import { useCreateChatReleased } from '../../lib/create/chat-release'
 import {
   ATTACH_TOO_LARGE, ATTACH_TOO_MANY, addPendingMedia, mediaKindOf, tooLargeToAttach, type PendingMedia,
 } from '../../lib/create/chat-attachments'
+import {
+  MAX_MENTIONS, TOO_MANY_MENTIONS_MESSAGE, hasMentionToken, insertMention, loadMention, mentionAt, mentionIndexFor,
+  mentionPath, mentionRootKey, mentionSecretReason, rankMentions, removeMentionToken, secretMentionNote, mentionLabel,
+  type MentionEntry, type MentionIndex, type MentionQuery, type MentionRoot,
+} from '../../lib/file-mentions'
 
 interface Props {
   onSend: (content: string, images?: ImageAttachment[], files?: ChatFileInput[], media?: PendingMedia[]) => void
@@ -101,6 +107,18 @@ interface Props {
    * (lib/chat-drafts.ts): Chat and Code each keep their own.
    */
   draftScope?: string
+  /**
+   * `@` file mentions (U8): the folder the list reads. Undefined turns them
+   * off for this composer; null means mentions are on but no folder is known
+   * yet, and the list says so (hooks/useMentionRoot.ts).
+   */
+  mentionRoot?: MentionRoot | null
+  /** CA U2: set while a run of this chat can take a message mid-run. Enter
+   *  then queues the text instead of doing nothing. */
+  onSteer?: (text: string) => void
+  /** Messages waiting to be read by the run, shown above the field. */
+  steerQueue?: readonly { id: string; text: string }[]
+  onUnsteer?: (id: string) => void
 }
 
 /**
@@ -145,7 +163,7 @@ interface SendLock {
   message: string
 }
 
-export function ChatInput({ onSend, onStop, isGenerating, waitingForLocalLane, pendingApproval, onApprove, onReject, disabled, modelReady, slashCommands, composerModel, composerActions, composerAbove, filesReachTools = false, draftScope = 'chat' }: Props) {
+export function ChatInput({ onSend, onStop, isGenerating, waitingForLocalLane, pendingApproval, onApprove, onReject, disabled, modelReady, slashCommands, composerModel, composerActions, composerAbove, filesReachTools = false, draftScope = 'chat', mentionRoot, onSteer, steerQueue, onUnsteer }: Props) {
   // What this composer held when its view closed last (lib/chat-drafts.ts):
   // the draft of the open chat goes straight into the field, the rest into
   // `entwuerfe` below. Read once, on mount.
@@ -182,6 +200,20 @@ export function ChatInput({ onSend, onStop, isGenerating, waitingForLocalLane, p
   const cmdMenuRef = useRef<HTMLDivElement>(null)
   const cmdMenuPlatz = usePopoverPlatz(cmdMenuRef, cmdMenu.length > 0, { bevorzugt: 'oben', abstand: 6, deckel: 256 })
   const [cmdIndex, setCmdIndex] = useState(0)
+  // `@` file mentions (U8, lib/file-mentions.ts). `mention` is the `@query`
+  // the caret stands in; `mentionShut` remembers the `@` whose list Esc
+  // closed, so it stays closed while that word is typed on.
+  const [mention, setMention] = useState<MentionQuery | null>(null)
+  const [mentionShut, setMentionShut] = useState<number | null>(null)
+  const [mentionIndex, setMentionIndex] = useState<{ key: string; index: MentionIndex | null } | null>(null)
+  const [mentionSel, setMentionSel] = useState(0)
+  const mentionMenuRef = useRef<HTMLDivElement>(null)
+  const mentionsOn = mentionRoot !== undefined
+  const mentionOpen = mentionsOn && mention !== null
+  const mentionMenuPlatz = usePopoverPlatz(mentionMenuRef, mentionOpen, { bevorzugt: 'oben', abstand: 6, deckel: 256 })
+  const mentionKey = mentionRootKey(mentionRoot)
+  const mentionLoaded = mentionIndex && mentionIndex.key === mentionKey ? mentionIndex : null
+  const mentionRows: MentionEntry[] = mentionOpen && mentionLoaded?.index ? rankMentions(mentionLoaded.index.entries, mention.query) : []
   /**
    * Ein Entwurf gehoert dem Gespraech, in dem er getippt wurde.
    *
@@ -281,8 +313,21 @@ export function ChatInput({ onSend, onStop, isGenerating, waitingForLocalLane, p
     // draft they were picked for; they are not carried across conversations.
     setMedia([])
     setCmdMenu([])
+    setMention(null)
   }
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  // CA U4: a rewound message comes back into the field once. Decided in the
+  // render, state against state, like the draft switch above (no effect may
+  // move the draft, der-entwurf-wechselt-im-render).
+  const fill = useComposerFillStore((s) => s.fill)
+  const [fillSeen, setFillSeen] = useState(fill?.n ?? 0)
+  if (fill && fill.n !== fillSeen) {
+    setFillSeen(fill.n)
+    setInput(fill.text)
+  }
+  useEffect(() => {
+    if (fillSeen) textareaRef.current?.focus()
+  }, [fillSeen])
   const fileInputRef = useRef<HTMLInputElement>(null)
   // Text already in the box when dictation started. Interim + final transcripts
   // are written as base + transcript, so streaming chunks REPLACE (not stack)
@@ -414,7 +459,9 @@ export function ChatInput({ onSend, onStop, isGenerating, waitingForLocalLane, p
       notices.show('file-attach', 'Still reading the previous files. Add these again in a moment.', 'ruhig', CHAT_NOTICE_MS)
       return
     }
-    const slots = MAX_CHAT_FILES - files.length
+    // `@` mentions have their own limit and take no slot of a dropped file.
+    const ownFiles = files.filter((f) => !f.mention).length
+    const slots = MAX_CHAT_FILES - ownFiles
     if (slots <= 0) {
       notices.show('file-attach', TOO_MANY_FILES_MESSAGE, 'ruhig', CHAT_NOTICE_MS)
       return
@@ -434,7 +481,12 @@ export function ChatInput({ onSend, onStop, isGenerating, waitingForLocalLane, p
       }
       // The draft belongs to the conversation it was started in.
       if (useChatStore.getState().activeConversationId !== startedIn) return
-      if (ready.length) setFiles((prev) => [...prev, ...ready].slice(0, MAX_CHAT_FILES))
+      if (ready.length) {
+        setFiles((prev) => {
+          const room = MAX_CHAT_FILES - prev.filter((f) => !f.mention).length
+          return room > 0 ? [...prev, ...ready.slice(0, room)] : prev
+        })
+      }
       if (problems.length) notices.show('file-attach', problems[0], 'ruhig', CHAT_NOTICE_MS)
       else notices.dismiss('file-attach')
       // A PDF or Word file attaches like any other, but the model gets far
@@ -458,7 +510,7 @@ export function ChatInput({ onSend, onStop, isGenerating, waitingForLocalLane, p
       job.busy = false
       setPreparingFiles(false)
     }
-  }, [files.length, conversationId, filesReachTools])
+  }, [files, conversationId, filesReachTools])
 
   const addFiles = useCallback(async (picked: FileList | File[]) => {
     const all = Array.from(picked)
@@ -559,6 +611,9 @@ export function ChatInput({ onSend, onStop, isGenerating, waitingForLocalLane, p
   const removeFile = (index: number) => {
     const left = files.filter((_, i) => i !== index)
     setFiles(left)
+    // The chip of a mention goes with its token in the text.
+    const gone = files[index]?.mention
+    if (gone) setInput((value) => removeMentionToken(value, gone))
     if (!left.some(({ attachment }) => isBinaryAttachment(attachment))) useChatNoticeStore.getState().dismiss('binary-summary-only')
   }
   useEffect(() => {
@@ -583,6 +638,14 @@ export function ChatInput({ onSend, onStop, isGenerating, waitingForLocalLane, p
   const handleSend = () => {
     // Enter ends the last word as a space would, so an emoticon there turns.
     const trimmed = (emojiOn ? turnOnSend(input) : input).trim()
+    // CA U2: during a run, a plain message waits for the run to read it after
+    // its current step. Attachments and commands still wait for the run's end.
+    if (isGenerating && onSteer && trimmed && !trimmed.startsWith('/') && images.length === 0 && files.length === 0 && media.length === 0 && !disabled) {
+      onSteer(trimmed)
+      setInput('')
+      setMention(null)
+      return
+    }
     if (imageJob.current.busy || fileJob.current.busy || (!trimmed && images.length === 0 && files.length === 0 && media.length === 0) || isGenerating || waitingForLocalLane || disabled) return
     // No chat model to answer: the send handlers return without a word in that
     // case, and the lines below would then empty the field and the chips for a
@@ -599,12 +662,14 @@ export function ChatInput({ onSend, onStop, isGenerating, waitingForLocalLane, p
     // A message is sent: the note about a stop has been seen.
     dismissComputerStop()
     const text = trimmed || (images.length > 0 ? '(image)' : FILE_ONLY_TEXT)
+    // A mention whose token is no longer in the text is not sent.
+    const sendFiles = files.filter((f) => !f.mention || hasMentionToken(trimmed, f.mention))
     const pictures = images.length > 0 ? images : undefined
     // The third argument only exists for a message that carries files, so a
     // send without them reaches its handler exactly as it always did.
     // And the fourth only for one that carries a clip or a sound track.
-    if (media.length > 0) onSend(trimmed || '(attachment)', pictures, files.length > 0 ? files : undefined, media)
-    else if (files.length > 0) onSend(text, pictures, files)
+    if (media.length > 0) onSend(trimmed || '(attachment)', pictures, sendFiles.length > 0 ? sendFiles : undefined, media)
+    else if (sendFiles.length > 0) onSend(text, pictures, sendFiles)
     else onSend(text, pictures)
     // Sent while dictating: the words in the field went out, the take ends
     // here and leaves nothing to fill the emptied field again.
@@ -614,6 +679,8 @@ export function ChatInput({ onSend, onStop, isGenerating, waitingForLocalLane, p
     setFiles([])
     setMedia([])
     setCmdMenu([])
+    setMention(null)
+    setMentionShut(null)
   }
 
   // Update the input + the slash-command typeahead together. The menu shows
@@ -635,6 +702,66 @@ export function ChatInput({ onSend, onStop, isGenerating, waitingForLocalLane, p
     const matches = slashCommands ? matchAgentCommands(value, slashCommands) : []
     setCmdMenu(matches)
     setCmdIndex(0)
+    // The `@` list follows the caret; a chip goes when its token is deleted.
+    if (mentionsOn) {
+      const at = matches.length === 0 ? mentionAt(value, caret ?? value.length) : null
+      const open = at && at.start !== mentionShut ? at : null
+      setMention(open)
+      if (!at) setMentionShut(null)
+      setMentionSel(0)
+      if (files.some((f) => f.mention && !hasMentionToken(value, f.mention))) {
+        setFiles((prev) => prev.filter((f) => !f.mention || hasMentionToken(value, f.mention)))
+      }
+    }
+  }
+
+  // The file list of the working folder, read when the `@` list opens and
+  // again after a few seconds (lib/file-mentions.ts caches it).
+  const wantMentionIndex = mentionOpen && !!mentionKey
+  useEffect(() => {
+    if (!wantMentionIndex || !mentionRoot) return
+    let alive = true
+    const key = mentionRootKey(mentionRoot)
+    mentionIndexFor(mentionRoot).then(
+      (index) => { if (alive) setMentionIndex({ key, index }) },
+      () => { if (alive) setMentionIndex({ key, index: null }) },
+    )
+    return () => { alive = false }
+  }, [wantMentionIndex, mentionRoot])
+
+  // A pick: the typed `@query` becomes the token, then the file is read and
+  // joins the draft as an attachment, the same way a dropped file does.
+  const pickMention = (entry: MentionEntry) => {
+    const at = mention
+    setMention(null)
+    if (!at || !mentionRoot) return
+    const notices = useChatNoticeStore.getState()
+    const rel = mentionPath(entry)
+    const why = mentionSecretReason(entry)
+    if (why) {
+      notices.show('file-mention', secretMentionNote(mentionLabel(rel), why), 'ruhig', CHAT_NOTICE_MS)
+      return
+    }
+    const already = files.some((f) => f.mention === rel)
+    if (!already && files.filter((f) => f.mention).length >= MAX_MENTIONS) {
+      notices.show('file-mention', TOO_MANY_MENTIONS_MESSAGE, 'ruhig', CHAT_NOTICE_MS)
+      return
+    }
+    const caret = textareaRef.current?.selectionStart ?? at.start + 1 + at.query.length
+    const next = insertMention(input, at, caret, rel)
+    caretRef.current = next.caret
+    setInput(next.text)
+    textareaRef.current?.focus()
+    if (already) return
+    const startedIn = conversationId
+    void loadMention(mentionRoot, entry).then((result) => {
+      if (useChatStore.getState().activeConversationId !== startedIn) return
+      if (!result.ok) {
+        notices.show('file-mention', result.note, 'ruhig', CHAT_NOTICE_MS)
+        return
+      }
+      setFiles((prev) => (prev.some((f) => f.mention === rel) ? prev : [...prev, result.input]))
+    })
   }
 
   // Fill the input with the chosen command (trailing space so args can follow)
@@ -679,6 +806,32 @@ export function ChatInput({ onSend, onStop, isGenerating, waitingForLocalLane, p
         e.preventDefault()
         setCmdMenu([])
         return
+      }
+    }
+    // The `@` file list, the same keys as the command menu.
+    if (mentionOpen) {
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        setMentionShut(mention.start)
+        setMention(null)
+        return
+      }
+      if (mentionRows.length > 0) {
+        if (e.key === 'ArrowDown') {
+          e.preventDefault()
+          setMentionSel((i) => (i + 1) % mentionRows.length)
+          return
+        }
+        if (e.key === 'ArrowUp') {
+          e.preventDefault()
+          setMentionSel((i) => (i - 1 + mentionRows.length) % mentionRows.length)
+          return
+        }
+        if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing)) {
+          e.preventDefault()
+          pickMention(mentionRows[Math.min(mentionSel, mentionRows.length - 1)])
+          return
+        }
       }
     }
     if (composerSends({ key: e.key, shiftKey: e.shiftKey, ctrlKey: e.ctrlKey, metaKey: e.metaKey, altKey: e.altKey, isComposing: e.nativeEvent.isComposing }, enterMode)) {
@@ -784,9 +937,88 @@ export function ChatInput({ onSend, onStop, isGenerating, waitingForLocalLane, p
           </div>
         )}
 
+        {/* `@` file list (U8): same place and look as the command menu. */}
+        {mentionOpen && (
+          <div
+            ref={mentionMenuRef}
+            data-testid="mention-menu"
+            role="listbox"
+            aria-label="Files"
+            style={mentionMenuPlatz.style}
+            className={`absolute left-0 right-0 z-50 overflow-y-auto scrollbar-thin rounded-lg lu-elevated py-1 ${mentionMenuPlatz.nachOben ? 'bottom-full mb-1.5' : 'top-full mt-1.5'}`}
+          >
+            <div className="px-2.5 py-1 flex items-center gap-1 text-[0.5rem] uppercase tracking-widest text-gray-400 dark:text-gray-600">
+              <AtSign size={9} /> Files
+            </div>
+            {!mentionRoot ? (
+              <div className="px-2.5 py-1 t-micro text-gray-500 dark:text-gray-400">No working folder yet, so there are no files to mention.</div>
+            ) : !mentionLoaded ? (
+              <div className="px-2.5 py-1 t-micro text-gray-500 dark:text-gray-400">Reading the folder…</div>
+            ) : !mentionLoaded.index ? (
+              <div className="px-2.5 py-1 t-micro text-gray-500 dark:text-gray-400">The folder could not be read.</div>
+            ) : mentionRows.length === 0 ? (
+              <div className="px-2.5 py-1 t-micro text-gray-500 dark:text-gray-400">{mention.query ? 'No file matches.' : 'This folder is empty.'}</div>
+            ) : (
+              mentionRows.map((entry, i) => {
+                const slash = entry.rel.lastIndexOf('/')
+                const dir = slash >= 0 ? entry.rel.slice(0, slash + 1) : ''
+                const base = slash >= 0 ? entry.rel.slice(slash + 1) : entry.rel
+                const secret = !!mentionSecretReason(entry)
+                const Icon = secret ? Lock : entry.isDir ? Folder : FileText
+                return (
+                  <button
+                    key={entry.rel}
+                    role="option"
+                    aria-selected={i === mentionSel}
+                    data-testid="mention-row"
+                    onMouseDown={(e) => { e.preventDefault(); pickMention(entry) }}
+                    onMouseEnter={() => setMentionSel(i)}
+                    className={`w-full text-left px-2.5 py-1 flex items-center gap-1.5 min-w-0 transition-colors ${
+                      i === mentionSel ? 'bg-gray-100 dark:bg-white/[0.07]' : 'hover:bg-gray-50 dark:hover:bg-white/[0.04]'
+                    }`}
+                  >
+                    <Icon size={11} className="shrink-0 text-gray-400 dark:text-gray-500" />
+                    <span className="min-w-0 truncate t-control">
+                      <span className="font-medium text-gray-800 dark:text-gray-100">{base}{entry.isDir ? '/' : ''}</span>
+                      {dir && <span className="ml-1.5 t-micro text-gray-400 dark:text-gray-500">{dir}</span>}
+                    </span>
+                    {secret && <span className="t-micro text-gray-400 dark:text-gray-500 shrink-0 ml-auto">private</span>}
+                  </button>
+                )
+              })
+            )}
+            {mentionLoaded?.index?.truncated && mentionRows.length > 0 && (
+              <div className="px-2.5 pt-1 t-micro text-gray-400 dark:text-gray-500">Large folder: only part of it is searched.</div>
+            )}
+          </div>
+        )}
+
         {/* The standing goal sits above everything else in the composer, so an
             instruction that steers every turn is never invisible. */}
         {composerAbove}
+
+        {/* CA U2: what the user wrote during the run, until the run reads it. */}
+        {steerQueue && steerQueue.length > 0 && (
+          <div className="px-2.5 pt-2 space-y-1" data-testid="steer-queue">
+            {steerQueue.map((m) => (
+              <div key={m.id} className="flex items-start gap-2 rounded-md bg-gray-100 dark:bg-white/[0.05] px-2 py-1">
+                <span className="t-micro text-gray-500 dark:text-gray-400 shrink-0 pt-0.5">Next step reads</span>
+                <span className="t-control text-gray-700 dark:text-gray-200 flex-1 min-w-0 break-words line-clamp-3">{m.text}</span>
+                {onUnsteer && (
+                  <button
+                    type="button"
+                    onClick={() => onUnsteer(m.id)}
+                    aria-label="Take this message back"
+                    title="Take this message back"
+                    className="shrink-0 p-0.5 rounded text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-black/5 dark:hover:bg-white/10"
+                  >
+                    <X size={12} />
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
 
         {/* G31: the run is STOPPED until this is answered, so the answer has to
             be where the user's eyes already are. The inline buttons on the tool
@@ -854,6 +1086,7 @@ export function ChatInput({ onSend, onStop, isGenerating, waitingForLocalLane, p
                   file={attachment}
                   testId="composer-file-chip"
                   reachesTools={filesReachTools}
+                  mention={!!files[i].mention}
                   onRemove={() => removeFile(i)}
                 />
               ))}
@@ -907,9 +1140,9 @@ export function ChatInput({ onSend, onStop, isGenerating, waitingForLocalLane, p
             value={input}
             onChange={(e) => updateInput(e.target.value, e.target.selectionStart)}
             onKeyDown={handleKeyDown}
-            onBlur={() => setTimeout(() => setCmdMenu([]), 120)}
+            onBlur={() => setTimeout(() => { setCmdMenu([]); setMention(null) }, 120)}
             onPaste={handlePaste}
-            placeholder={disabled ? "Unavailable" : isDragOver ? "Drop files here..." : isTranscribing ? "Transcribing..." : isVoiceRecording ? "Recording..." : composerPlaceholder(enterMode, isMacOS())}
+            placeholder={disabled ? "Unavailable" : isGenerating && onSteer ? "Add to the task, the agent reads it after this step…" : isDragOver ? "Drop files here..." : isTranscribing ? "Transcribing..." : isVoiceRecording ? "Recording..." : composerPlaceholder(enterMode, isMacOS())}
             disabled={disabled}
             rows={1}
             className="lu-fokus-am-kasten w-full bg-transparent resize-none text-gray-800 dark:text-gray-200 placeholder-gray-400 dark:placeholder-gray-600 focus:outline-none text-[12px] leading-relaxed max-h-[200px] disabled:opacity-50 scrollbar-thin"

@@ -61,6 +61,9 @@ export class LuCloudProvider implements ProviderClient {
       baseUrl: `${CLOUD_BASE}/api/inference/v1`,
       apiKey: token,
       isLocal: false,
+      // Its reasoners continue from their own reasoning between tool calls
+      // (lib/agent-core/reasoning-replay.ts).
+      replayReasoning: true,
     })
   }
 
@@ -82,7 +85,7 @@ export class LuCloudProvider implements ProviderClient {
     messages: ChatMessage[],
     tools: ToolDefinition[],
     options?: ChatOptions,
-  ): Promise<{ content: string; toolCalls: ToolCall[]; promptEvalCount?: number; evalCount?: number; thinking?: string; billing?: ChatBilling }> {
+  ): Promise<{ content: string; toolCalls: ToolCall[]; promptEvalCount?: number; evalCount?: number; cachedPromptCount?: number; thinking?: string; billing?: ChatBilling }> {
     try {
       const inner = await this.delegate()
       return await inner.chatWithTools(model, messages, tools, options)

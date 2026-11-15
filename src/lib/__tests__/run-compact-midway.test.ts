@@ -271,14 +271,15 @@ describe('compactRunMidway', () => {
     expect(notices(convId).filter((n) => n.notice === 'warn')).toHaveLength(1)
   })
 
-  it('by default never runs below a 32K model window, and always from 32K up', async () => {
+  it('by default never runs at 8K, and always from 16K up', async () => {
     // Owner decision 18.10.2026: "bei 8k nie, bei 32k immer und alles darueber".
-    for (const modelWindow of [8192, 16384]) {
+    // 16K since 14.11.2026: every Ollama chat window (compact-trigger.ts).
+    for (const modelWindow of [8192, 12288]) {
       const out = await compactRunMidway({ messages: run(30), budgetTokens: modelWindow, modelWindow, activeModel: 'ollama::qwen3:8b', state: newRunCompactState() })
       expect(out.reason, `${modelWindow}`).toBe('off')
     }
     expect(summarise).not.toHaveBeenCalled()
-    for (const modelWindow of [32768, 131072]) {
+    for (const modelWindow of [16384, 32768, 131072]) {
       const out = await compactRunMidway({ messages: run(30), budgetTokens: 16384, modelWindow, activeModel: 'ollama::qwen3:8b', state: newRunCompactState() })
       expect(out.compacted, `${modelWindow}`).toBe(true)
     }

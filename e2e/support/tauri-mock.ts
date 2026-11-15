@@ -249,6 +249,10 @@ export interface TauriMockOptions {
   holdTools?: boolean
   /** Canned file contents served to fs_read, keyed by path suffix. */
   files?: Record<string, string>
+  /** fs_write answers like the real bridge (`status: 'saved'`), so the file
+   *  checkpoints of "Rewind to here" record (CA U4). Off by default: older
+   *  specs read the historical `{ ok, path }` answer. */
+  realWriteStatus?: boolean
   /**
    * What Ollama's `/api/tags` reports as already installed. Omit for the
    * historical EMPTY answer, which is what makes a box look brand new.
@@ -2054,7 +2058,10 @@ export function tauriMockInit(opts: TauriMockOptions) {
       }
       case 'fs_write':
         record('__E2E_TOOL_CALLS__', { cmd, path: m?.path, content: m?.content })
-        return afterToolDelay({ ok: true, path: m?.path })
+        return afterToolDelay(opts.realWriteStatus ? { status: 'saved', path: m?.path } : { ok: true, path: m?.path })
+      case 'fs_delete':
+        record('__E2E_TOOL_CALLS__', { cmd, path: m?.path })
+        return afterToolDelay({ deleted: true })
       case 'fs_write_bytes':
         // A chat attachment on its way into the working folder. The bytes
         // themselves are not kept, only how many base64 characters arrived.

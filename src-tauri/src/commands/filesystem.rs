@@ -1208,6 +1208,32 @@ pub(crate) fn fs_write_bytes_sync(
     }))
 }
 
+/// `*.{js,mjs}` → `*.js`, `*.mjs`. One level of braces per group, groups
+/// expand left to right, at most 32 patterns so a crafted pattern stays cheap.
+fn expand_braces(pat: &str) -> Vec<String> {
+    let mut out = vec![pat.to_string()];
+    loop {
+        let mut next = Vec::new();
+        let mut changed = false;
+        for p in &out {
+            match (p.find('{'), p.find('}')) {
+                (Some(a), Some(b)) if a < b && p[a + 1..b].contains(',') => {
+                    changed = true;
+                    for alt in p[a + 1..b].split(',') {
+                        next.push(format!("{}{}{}", &p[..a], alt, &p[b + 1..]));
+                    }
+                }
+                _ => next.push(p.clone()),
+            }
+        }
+        next.truncate(32);
+        out = next;
+        if !changed {
+            return out;
+        }
+    }
+}
+
 #[tauri::command]
 #[allow(non_snake_case)]
 pub fn fs_list(
@@ -1287,16 +1313,27 @@ pub fn fs_list(
                 return Err("Pattern escapes the allowed workspace".to_string());
             }
         }
-        let glob_pattern = dir.join(pat).to_string_lossy().to_string();
-        if let Ok(paths) = glob_match(&glob_pattern) {
-            for entry in paths.flatten() {
-                if entries.len() >= max_entries {
-                    break;
+        // glob 0.3 knows no braces and file_list dropped `recursive` whenever a
+        // pattern came along: Kimi asked for `*.{js,mjs}` recursively over a
+        // tree of .js files and was told "The folder is empty." (CA bench AG9).
+        let mut seen = std::collections::HashSet::new();
+        'outer: for one in expand_braces(pat) {
+            let one = if recursive.unwrap_or(false) && !one.contains('/') && !one.contains('\\') {
+                format!("**/{one}")
+            } else {
+                one
+            };
+            let glob_pattern = dir.join(&one).to_string_lossy().to_string();
+            if let Ok(paths) = glob_match(&glob_pattern) {
+                for entry in paths.flatten() {
+                    if entries.len() >= max_entries {
+                        break 'outer;
+                    }
+                    if contain_within(&dir, &entry).is_err() || !seen.insert(entry.clone()) {
+                        continue;
+                    }
+                    entries.push(file_meta(&entry));
                 }
-                if contain_within(&dir, &entry).is_err() {
-                    continue;
-                }
-                entries.push(file_meta(&entry));
             }
         }
     } else if recursive.unwrap_or(false) {
@@ -1866,6 +1903,30 @@ mod jail_adversarial_tests {
         let ok = fs_list(".".into(), None, Some("*.txt".into()), None, wd).expect("glob");
         assert_eq!(ok["count"], 1);
         assert!(ok.to_string().contains("inside.txt"));
+    }
+
+    /// CA bench AG9: `*.{js,mjs}` with recursive=true over a tree of .js files
+    /// came back empty, and the model was told the folder was empty.
+    #[test]
+    fn a_pattern_with_braces_finds_files_in_subfolders() {
+        use std::fs;
+        let base = crate::os_paths::test_dir("globbraces");
+        let ws = base.join("workspace");
+        fs::create_dir_all(ws.join("projekt/modul0")).unwrap();
+        fs::write(ws.join("projekt/modul0/a.js"), b"x").unwrap();
+        fs::write(ws.join("projekt/modul0/b.mjs"), b"x").unwrap();
+        fs::write(ws.join("projekt/README.md"), b"x").unwrap();
+        allow_root_for_test(&ws);
+        let wd = Some(ws.to_string_lossy().to_string());
+
+        let deep = fs_list("projekt".into(), Some(true), Some("*.{js,mjs}".into()), None, wd.clone()).expect("list");
+        assert_eq!(deep["count"], 2, "{deep}");
+        assert!(!deep.to_string().contains("README"));
+
+        let flat = fs_list("projekt".into(), None, Some("*.{js,mjs}".into()), None, wd).expect("list");
+        assert_eq!(flat["count"], 0, "without recursive the pattern stays in this folder");
+        assert_eq!(expand_braces("*.{a,b}/{c,d}").len(), 4);
+        assert_eq!(expand_braces("plain*.ts"), vec!["plain*.ts".to_string()]);
     }
 }
 

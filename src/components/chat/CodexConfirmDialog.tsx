@@ -1,13 +1,19 @@
 // The coding agent's shell/code approval, inline in the transcript.
 //
-// Two rewrites got it here. It started as `window.confirm`, an OS dialog with
-// system chrome and the app origin in its title bar, which the owner called exactly
-// what it looked like. The first replacement was a centred modal, which was
-// small and tidy but still covered the conversation you were reading. This one
-// sits in the stream under the tool call it belongs to, so the pending command
-// reads as one more step of the run rather than an interruption of it.
+// Three rewrites got it here. It started as `window.confirm`, an OS dialog with
+// system chrome and the app origin in its title bar. The first replacement was
+// a centred modal that covered the conversation. The second sat in the stream
+// under its tool call but read like a debug line ("shell_execute needs your
+// ok", then `command: …` and `timeout: 600000`). CA (13.11.2026) makes it a
+// question a person reads: what will run, where, and three answers, one of
+// them "always allow this here" (stores/commandRulesStore), like the large
+// coding tools.
 //
-// "Don't ask again" both allows the current command AND clears the setting that
+// What runs is never hidden: for a plain command the card shows the command,
+// for anything with a script, stdin or more fields it shows every field that
+// shapes the process (renderApprovalPreview), as before.
+//
+// "Stop asking" both allows the current command AND clears the setting that
 // caused the prompt. Clearing without allowing would leave the task blocked on
 // a question that will not be asked again, which is not what the phrase means.
 
@@ -15,11 +21,25 @@ import { useEffect, useRef } from 'react'
 import { Terminal } from 'lucide-react'
 import { useCodexConfirmStore } from '../../stores/codexConfirmStore'
 import { useSettingsStore } from '../../stores/settingsStore'
+import { toolRegistry } from '../../api/mcp/tool-registry'
+import { useCommandRulesStore } from '../../stores/commandRulesStore'
+import { suggestRuleFor } from '../../lib/agent-core/command-rules'
+
+/** Fields that only tune how a command runs, not what it does. */
+const QUIET_FIELDS = new Set(['timeout', 'shell', 'background'])
+
+/** The command alone when that is all that shapes the process. */
+export function plainCommandOf(args: Record<string, unknown> | undefined): string | null {
+  if (!args || typeof args.command !== 'string' || !args.command.trim()) return null
+  const loud = Object.keys(args).filter((k) => k !== 'command' && k !== 'cwd' && !QUIET_FIELDS.has(k) && args[k] !== undefined && args[k] !== null && args[k] !== '')
+  return loud.length === 0 ? args.command.trim() : null
+}
 
 export function CodexConfirmDialog() {
   const pending = useCodexConfirmStore((s) => s.pending)
   const answer = useCodexConfirmStore((s) => s.answer)
   const updateSettings = useSettingsStore((s) => s.updateSettings)
+  const allowRule = useCommandRulesStore((s) => s.allow)
   const card = useRef<HTMLDivElement>(null)
 
   // The card is the one thing the run waits for, so it must be on screen the
@@ -32,6 +52,11 @@ export function CodexConfirmDialog() {
 
   if (!pending) return null
 
+  const plain = plainCommandOf(pending.args)
+  const cwd = typeof pending.args?.cwd === 'string' && pending.args.cwd.trim() ? pending.args.cwd.trim() : null
+  const rule = pending.toolName === 'shell_execute' && pending.ruleScope && plain ? suggestRuleFor(plain) : null
+  const isCommand = pending.toolName === 'shell_execute' || pending.toolName === 'code_execute' || pending.toolName === 'shell_execute_background'
+
   const stopAsking = () => {
     // Clear whichever arm is asking. When the cloud arm is the reason, the
     // general confirm is already off, so clearing that one would change nothing
@@ -41,37 +66,63 @@ export function CodexConfirmDialog() {
     answer(true)
   }
 
+  const alwaysHere = () => {
+    if (rule && pending.ruleScope) allowRule(pending.ruleScope, rule)
+    answer(true)
+  }
+
   return (
     <div ref={card} className="px-1 py-0.5" data-codex-confirm>
-      <div className="rounded-lg border border-purple-500/20 bg-purple-500/[0.04] px-2 py-1.5">
-        <div className="flex items-center gap-1.5 t-micro text-gray-700 dark:text-gray-300">
-          <Terminal size={10} className="text-purple-400 shrink-0" />
-          <span className="font-mono">{pending.toolName}</span>
-          <span className="text-gray-500">needs your ok</span>
+      <div className="rounded-lg border border-gray-200 dark:border-white/[0.1] bg-white dark:bg-white/[0.03] shadow-sm overflow-hidden">
+        <div className="flex items-center gap-2 px-3 pt-2.5 pb-1.5">
+          <Terminal size={14} className="text-gray-500 dark:text-gray-400 shrink-0" />
+          <span className="t-body font-medium text-gray-800 dark:text-gray-100">
+            {isCommand ? 'Run this command?' : <>Allow <span className="font-mono">{toolRegistry.displayName(pending.toolName)}</span>?</>}
+          </span>
+          {pending.cloudReason && (
+            <span className="ml-auto t-micro text-gray-500 dark:text-gray-400">asked because a cloud model is driving</span>
+          )}
         </div>
 
-        <pre className="mt-1 max-h-20 overflow-auto rounded bg-black/5 dark:bg-black/30 px-1.5 py-1 t-micro font-mono text-gray-800 dark:text-gray-200 whitespace-pre-wrap break-all">
-          {pending.command || '(no command preview)'}
-        </pre>
+        <div className="px-3">
+          <pre
+            data-testid="confirm-command"
+            className="lu-on-dark max-h-48 overflow-auto rounded-md bg-gray-950 dark:bg-black/50 px-3 py-2 t-mono leading-relaxed text-gray-100 whitespace-pre-wrap break-all"
+          >
+            {pending.command && !plain ? pending.command : plain ? <><span className="select-none text-gray-500">$ </span>{plain}</> : '(no command preview)'}
+          </pre>
+          {plain && cwd && (
+            <div className="mt-1 t-micro text-gray-500 dark:text-gray-400 truncate" title={cwd}>in {cwd}</div>
+          )}
+        </div>
 
-        <div className="mt-1.5 flex items-center gap-1.5">
+        <div className="flex flex-wrap items-center gap-1.5 px-3 pt-2 pb-2.5">
           <button
             onClick={() => answer(true)}
             autoFocus
-            className="px-2 py-0.5 rounded t-micro font-medium bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-500/25 transition-colors"
+            className="lu-control lu-primary inline-flex items-center gap-1.5 px-3 t-control font-medium"
           >
-            Run
+            Run <kbd className="t-micro opacity-60 font-sans">⏎</kbd>
           </button>
+          {rule && (
+            <button
+              onClick={alwaysHere}
+              data-testid="confirm-always-here"
+              title="Runs this command, and from now on commands that start like this run without asking in this folder. You can remove the rule in Settings → Agent."
+              className="inline-flex items-center gap-1 px-3 py-1 rounded-md t-control text-gray-800 dark:text-gray-100 border border-gray-300 dark:border-white/15 hover:bg-gray-100 dark:hover:bg-white/[0.06] transition-colors max-w-full"
+            >
+              <span className="shrink-0">Always allow</span>
+              <code className="font-mono t-micro truncate">{rule}</code>
+              <span className="shrink-0">here</span>
+            </button>
+          )}
           <button
             onClick={() => answer(false)}
-            className="px-2 py-0.5 rounded t-micro text-gray-600 dark:text-gray-400 hover:bg-gray-200/60 dark:hover:bg-white/5 transition-colors"
+            className="inline-flex items-center gap-1.5 px-3 py-1 rounded-md t-control text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/[0.06] transition-colors"
           >
-            No
+            No <kbd className="t-micro opacity-60 font-sans">Esc</kbd>
           </button>
           <div className="flex-1" />
-          {pending.cloudReason && (
-            <span className="text-[0.55rem] text-gray-500">cloud model</span>
-          )}
           <button
             onClick={stopAsking}
             // What the click does, not more: it allows this command and

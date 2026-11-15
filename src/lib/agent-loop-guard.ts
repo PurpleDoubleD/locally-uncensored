@@ -89,7 +89,9 @@
 export type LoopGuardVerdict =
   | { action: 'ok' }
   | { action: 'steer'; message: string }
-  | { action: 'halt'; reason: string }
+  /** `answer`: what the run says instead of "the model is looping", where the
+   *  guard knows the honest outcome (the search spiral: not found). */
+  | { action: 'halt'; reason: string; answer?: string }
 
 const CONSECUTIVE_HALT_AT = 3
 const BATCH_WINDOW = 6
@@ -146,12 +148,54 @@ const SEARCH_STEER_AT = 6
 const SEARCH_HALT_AT = 12
 
 /**
+ * Detector 9: the search spiral (CA, 14.11.2026, bench AG10). A model that
+ * could not find a fact searched its memory nine times with nine different
+ * words, then ran about twenty different shell searches across the disk, for
+ * 32 minutes, and gave no answer. No call was a repeat and no two were alike
+ * enough for detector 8. What they shared: each only looked, and nothing was
+ * written or run in between. Lookups since the last call that changed or ran
+ * something are counted (file_read neither counts nor resets: reading what a
+ * search found is the normal next step, and a hunt reads too). Twelve steer the
+ * model to act on what it found or say what it could not find; twenty end the
+ * run with an honest "not found" instead of silence. Wide on purpose: a model
+ * exploring a large codebase greps a lot before its first edit.
+ */
+const HUNT_STEER_AT = 12
+const HUNT_HALT_AT = 20
+const HUNT_TOOLS = new Set<string>(['file_search', 'file_list', 'session_search', 'memory_search', 'web_search', 'tool_search'])
+const HUNT_SHELL = /(^|[\s;|&(`$])(find|grep|egrep|rg|ag|ls|locate|mdfind|ps|whoami|cat|head|tail|tree|du|stat|echo|printenv|env|which|type)(\s|$)/
+// A program in command position (start, or after ; & | ( or `), so `grep -v node`
+// is still a lookup and `npm test` is not.
+const HUNT_SHELL_WRITES = /(^|[^2&])>|(^|[;&|(`]\s*)(sudo\s+)?(rm|mv|cp|mkdir|touch|tee|chmod|chown|ln|npm|npx|pnpm|yarn|bun|node|python3?|pip3?|pytest|jest|vitest|make|cargo|go|curl|wget|git\s+(commit|add|push|checkout|reset|merge|rebase|apply|stash|clone|pull))\b|\bsed\s+-i|\bxargs\b/
+const HUNT_NEUTRAL = new Set<string>(['file_read', 'todo_write', 'get_current_time'])
+
+/** A call that only looks for something. */
+export function isHuntCall(name: string, argsJson: string): boolean {
+  if (HUNT_TOOLS.has(name)) return true
+  let a: Record<string, unknown> = {}
+  try { a = JSON.parse(argsJson) as Record<string, unknown> } catch { /* not an object */ }
+  if (name === 'memory') return /^(search|list|get|recall|find)$/i.test(String(a?.action ?? ''))
+  if (name === 'shell_execute') {
+    const command = typeof a?.command === 'string' ? a.command : ''
+    return !!command && HUNT_SHELL.test(command) && !HUNT_SHELL_WRITES.test(command)
+  }
+  return false
+}
+
+/** The run's end when the spiral halts: plain, and honest about it. */
+export function huntHaltAnswer(n: number): string {
+  return `I could not find it. I looked ${n} times (memory, files and searches) without finding anything, so I stopped instead of searching further. If you know where it is, tell me and I will look there.`
+}
+
+/**
  * Detector 8 (C83). Five silent near-copies in a row get one word, eight end
  * the run. In the incident that is 8 calls instead of 233.
  */
 const NEAR_SIMILARITY = 0.85
 const NEAR_STEER_AT = 5
 const NEAR_HALT_AT = 8
+/** Detector 8: a step's text at least this alike to the step before is no news. */
+const NARRATION_NEWS_BELOW = 0.8
 
 /** Lower-cased, whitespace folded: the form two near-copies are compared in. */
 function normArgs(args: string): string {
@@ -222,6 +266,40 @@ const READ_ONLY_TOOLS = new Set<string>([
   'git_diff',
 ])
 
+/**
+ * A shell command that only looks (CA, 14.11.2026). Measured in a real run
+ * with LU's own engine: the data was not where the model looked, and it sent
+ * `find . -type f -name "*.json" 2>/dev/null` nine times in 26 calls. Every
+ * shell call counted as "may have changed something", which reset the read
+ * counter each time, so only four identical calls IN A ROW ended it. A command
+ * built from inspection programs only, with no way to write, now counts as a
+ * read here. This list is for counting repeats, never for permission: what
+ * runs without asking is decided elsewhere (command-rules, Ask mode).
+ */
+const INSPECT_FIRST = /^(find|ls|cat|grep|rg|head|tail|wc|pwd|stat|file|du|tree|which|git\s+(status|log|diff|show|blame))(\s|$)/
+const INSPECT_PIPE = /^(head|tail|wc|sort|uniq|grep|rg|cut)(\s|$)/
+const NEVER_INSPECT = /;|&&|\|\||`|\$\(|<\(|\s-exec(dir)?\b|\s-delete\b|\s-ok\b|\bxargs\b|\btee\b|\s-i\b|--output/
+
+export function isInspectionShell(argsJson: string): boolean {
+  let command = ''
+  try {
+    const a = JSON.parse(argsJson) as { command?: unknown }
+    command = typeof a?.command === 'string' ? a.command : ''
+  } catch {
+    return false
+  }
+  const c = command.replace(/\s2>\s*\/dev\/null/g, ' ').replace(/\s2>&1/g, ' ').trim()
+  if (!c || NEVER_INSPECT.test(c) || />/.test(c)) return false
+  const parts = c.split('|').map((x) => x.trim())
+  if (parts.some((x) => !x)) return false
+  return INSPECT_FIRST.test(parts[0]) && parts.slice(1).every((x) => INSPECT_PIPE.test(x))
+}
+
+/** A call that only reads, for counting repeats. */
+function isReadCall(c: { name: string; args: string }): boolean {
+  return READ_ONLY_TOOLS.has(c.name) || (c.name === 'shell_execute' && isInspectionShell(c.args))
+}
+
 export class AgentLoopGuard {
   /** Off (Settings → Agent Permissions, C44): every verdict is `ok`, the run
    *  goes on until its step and tool call limits or the user's Stop. */
@@ -272,6 +350,15 @@ export class AgentLoopGuard {
    */
   private stepSilent: boolean | null = null
 
+  /** The last real line of text, for detector 8's "is this news" test. */
+  private nearNarration = ''
+
+  /** Reads whose capped result was already forgiven once (detector 3). */
+  private trimForgiven = new Set<string>()
+  /** Detector 9: lookups since the last call that changed or ran something. */
+  private huntCount = 0
+  private huntSteered = false
+
   /**
    * Record one iteration's tool-call batch BEFORE executing it. `args` must
    * be the serialized (stringified) arguments so identity is byte-exact —
@@ -291,6 +378,42 @@ export class AgentLoopGuard {
     opts: { trimmedReadKeys?: ReadonlySet<string> } = {},
   ): LoopGuardVerdict {
     if (!this.enabled || calls.length === 0) return { action: 'ok' }
+    const hunt = this.recordHunt(calls)
+    const v = this.recordBatchDetectors(calls, opts)
+    if (v.action === 'halt') return v
+    if (hunt.action === 'halt') return hunt
+    return v.action === 'steer' ? v : hunt
+  }
+
+  /** Detector 9, the search spiral (see HUNT_STEER_AT). */
+  private recordHunt(calls: Array<{ name: string; args: string }>): LoopGuardVerdict {
+    for (const c of calls) {
+      if (HUNT_NEUTRAL.has(c.name)) continue
+      if (isHuntCall(c.name, c.args)) this.huntCount++
+      else { this.huntCount = 0; this.huntSteered = false }
+    }
+    if (this.huntCount >= HUNT_HALT_AT) {
+      return {
+        action: 'halt',
+        reason: `${this.huntCount} searches in a row without finding or changing anything`,
+        answer: huntHaltAnswer(this.huntCount),
+      }
+    }
+    if (this.huntCount >= HUNT_STEER_AT && !this.huntSteered) {
+      this.huntSteered = true
+      return {
+        action: 'steer',
+        message: `You have searched ${this.huntCount} times in a row without changing anything. `
+          + 'If you have found what you need, act on it now. If it is not there, stop searching and say plainly what you could not find. Do not search outside your folder.',
+      }
+    }
+    return { action: 'ok' }
+  }
+
+  private recordBatchDetectors(
+    calls: Array<{ name: string; args: string }>,
+    opts: { trimmedReadKeys?: ReadonlySet<string> },
+  ): LoopGuardVerdict {
     // browser_scroll (P-L, C53) repeats its arguments by design: every call
     // moves the page and its answer names the new position. A batch of
     // nothing but scrolls is therefore not a repeat; it gets its own, wider
@@ -333,7 +456,7 @@ export class AgentLoopGuard {
     const sig = [...keys].sort().join('||')
     const trimmed = opts.trimmedReadKeys
     const isTrimmed = (k: string) => trimmed?.has(k) ?? false
-    const batchHasTrimmedRead = keys.some((k, i) => READ_ONLY_TOOLS.has(calls[i].name) && isTrimmed(k))
+    const batchHasTrimmedRead = keys.some((k, i) => isReadCall(calls[i]) && isTrimmed(k))
 
     // (1) Back-to-back identical batches, any tool class.
     if (sig === this.lastSig) {
@@ -351,7 +474,7 @@ export class AgentLoopGuard {
       return { action: 'steer', message: repeatSteer(calls.map((c) => c.name), this.consecutive, 'in a row') }
     }
 
-    const hasMutation = calls.some((c) => !READ_ONLY_TOOLS.has(c.name))
+    const hasMutation = calls.some((c) => !isReadCall(c))
 
     // (2) Windowed repeats among pure-read batches (alternation). A batch that
     // re-reads something the builder capped is not part of that pattern and is
@@ -376,12 +499,19 @@ export class AgentLoopGuard {
     // (3) Identical read calls within the epoch.
     let steer: LoopGuardVerdict | null = null
     for (let i = 0; i < calls.length; i++) {
-      if (!READ_ONLY_TOOLS.has(calls[i].name)) continue
-      if (isTrimmed(keys[i])) {
+      if (!isReadCall(calls[i])) continue
+      if (isTrimmed(keys[i]) && !this.trimForgiven.has(keys[i])) {
         // The result aged out of the prompt, so this read returns information
         // the model genuinely no longer has. Clear the counter rather than
         // just skipping it: the epoch before the cap says nothing about the
         // epoch after it.
+        //
+        // Once per read, not forever (CA, cloud loops, 13.11.2026). The loops
+        // keep the newest result of a read that was fetched again whole
+        // (context-decay `keepWhole`), so a second "it was capped" cannot
+        // come from age any more. Forgiving every lap let read, cap, read run
+        // uncounted, and on a 32k cloud window that lap is every few steps.
+        this.trimForgiven.add(keys[i])
         this.readCounts.delete(keys[i])
         continue
       }
@@ -397,10 +527,14 @@ export class AgentLoopGuard {
         this.steeredKeys.add(keys[i])
         steer = {
           action: 'steer',
-          message:
-            `You have now called ${calls[i].name} ${n} times with exactly the same arguments. ` +
-            'Nothing changed in between, so the result is identical to the one you already have. ' +
-            'Do NOT repeat this call again. Use the result from before, or take a DIFFERENT action that moves the task forward.',
+          // A read whose result keeps coming back cut has no whole "result
+          // from before" to point at. The honest way out is a smaller read.
+          message: isTrimmed(keys[i])
+            ? `You have now called ${calls[i].name} ${n} times with exactly the same arguments, and its result is cut every time because the conversation is long. ` +
+              'Do NOT fetch it whole again. Read only the part you need (a line range, or a search for the name you want), or finish the task with what you have.'
+            : `You have now called ${calls[i].name} ${n} times with exactly the same arguments. ` +
+              'Nothing changed in between, so the result is identical to the one you already have. ' +
+              'Do NOT repeat this call again. Use the result from before, or take a DIFFERENT action that moves the task forward.',
         }
       }
     }
@@ -411,6 +545,7 @@ export class AgentLoopGuard {
       // change is never punished. steeredKeys survives: one steer per unique
       // call is enough for the whole run.
       this.readCounts.clear()
+      this.trimForgiven.clear()
       this.pureWindow = []
     }
     return steer ?? (near.action === 'steer' ? near : { action: 'ok' })
@@ -592,7 +727,13 @@ export class AgentLoopGuard {
     if (!this.enabled) return { action: 'ok' }
     const norm = text.trim().replace(/\s+/g, ' ').toLowerCase()
     // Detector 8 (C83): text the step before did not already have is news.
-    this.stepSilent = norm.length < MIN_NARRATION_LEN || norm === this.lastNarration
+    // A near-copy of the last line is not (CA, cloud loops, 13.11.2026):
+    // GLM writes "Let me check the file again." before each identical call,
+    // and a fresh word per step kept the streak at one for good.
+    this.stepSilent = norm.length < MIN_NARRATION_LEN
+      || norm === this.lastNarration
+      || (this.nearNarration !== '' && argSimilarity(this.nearNarration, norm) >= NARRATION_NEWS_BELOW)
+    this.nearNarration = norm.length < MIN_NARRATION_LEN ? this.nearNarration : norm
     if (norm.length < MIN_NARRATION_LEN) {
       this.lastNarration = ''
       this.narrationSeen = 0

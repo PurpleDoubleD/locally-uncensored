@@ -31,10 +31,10 @@ import { stripNonCanonicalTags } from './personas.js'
      parameters:[{name:'path',type:'string',description:'Directory to search in (recursive by default)',required:true},
                  {name:'pattern',type:'string',description:'Regex pattern to search for',required:true},
                  {name:'maxResults',type:'number',description:'Maximum matching files (default: 50)',required:false}]},
-    {name:'shell_execute', description:'THE terminal. Run a shell command: PowerShell on Windows, bash on Unix. Returns stdout, stderr, exit code. Everything runs here: git, tests, package managers, gh, python, platform utilities, and opening files, folders or apps. A recognised test run and the common git commands come back as a parsed summary. Feed a script through `stdin` instead of quoting it: set command to `python3 -` or `bash -s` (fresh process each call, no REPL state). For long work set `background: true` to get a task id back at once, then call again with `task: "status"` and `task_id` (or "list" / "kill"). PREFER dedicated tools where available: file_read over `cat`, file_list over `ls`, file_search over `grep`. `--no-verify` is refused, and NEVER delete permanently without confirmation. Default timeout 120 s, test runs 300 s.',
+    {name:'shell_execute', description:'THE terminal. Run a shell command: PowerShell on Windows, bash on Unix. Returns stdout, stderr, exit code. Everything runs here: git, tests, package managers, gh, python, platform utilities, and opening files, folders or apps. A recognised test run and the common git commands come back as a parsed summary. Feed a script through `stdin` instead of quoting it: set command to `python3 -` or `bash -s` (fresh process each call, no REPL state). For long work set `background: true` to get a task id back at once, then call again with `task: "status"` and `task_id` (or "list" / "kill"). PREFER dedicated tools where available: file_read over `cat`, file_list over `ls`, file_search over `grep`. `--no-verify` is refused, and NEVER delete permanently without confirmation. Paths outside your folder are refused. Timeout at most 120 s, test runs 300 s. A command still running at its timeout keeps running in the background under a task id.',
      parameters:[{name:'command',type:'string',description:'The full command to execute. Omit only for task actions.',required:false},
                  {name:'cwd',type:'string',description:'Working directory (optional, relative to the workspace)',required:false},
-                 {name:'timeout',type:'number',description:'Timeout in milliseconds (default: 120000)',required:false},
+                 {name:'timeout',type:'number',description:'Timeout in ms (at most 120000)',required:false},
                  {name:'shell',type:'string',description:'Override shell: "powershell" | "cmd" | "bash" (default: auto)',required:false},
                  {name:'stdin',type:'string',description:'Text piped to the command\x27s stdin, e.g. a Python script for `python3 -`.',required:false},
                  {name:'background',type:'boolean',description:'Run detached; returns a task id immediately instead of waiting.',required:false},
@@ -347,10 +347,58 @@ import { stripNonCanonicalTags } from './personas.js'
     cleaned = stripNonCanonicalTags(cleaned).trim();
     return {content: cleaned, thinking: think};
   }
+  // ── Hourly token limit for agent runs from the phone (CA, 14.11.2026) ──
+  // The phone cannot see what the desktop's model costs (a local engine or a
+  // cloud model with the user's own paid key behind the relay), and the relay
+  // reports no token counts. One run is capped at 50 steps; runs one after
+  // another were not capped at all. So both phone loops (this page and the
+  // app, src/mobile/remote/remoteAgent.ts) count an ESTIMATE from the
+  // characters sent and received, for every model, and pause once per hour
+  // above the limit: the desktop's hourly pause in tokens instead of credits.
+  // About 250 full steps an hour, which a local model rarely meets.
+  var AGENT_HOUR_TOKEN_LIMIT = 2000000;
+  // Below the usual 4: an estimate that runs high pauses early, never late.
+  var AGENT_CHARS_PER_TOKEN = 3.5;
+  var AGENT_HOUR_KEY = 'lu-remote-agent-token-hour';
+  var AGENT_HOUR_MS = 60 * 60 * 1000;
+
+  function estimateAgentTokens(chars){
+    return chars > 0 ? Math.ceil(chars / AGENT_CHARS_PER_TOKEN) : 0;
+  }
+
+  // Count one step. True when the hour is over the limit and no pause
+  // happened in this hour yet: the caller stops, and the user's next message
+  // goes on for another hour. A failing store means a fresh hour.
+  function countAgentHourTokens(tokens, now, limit){
+    if(now === undefined) now = Date.now();
+    if(limit === undefined) limit = AGENT_HOUR_TOKEN_LIMIT;
+    var state = {entries: [], pausedAt: null};
+    try {
+      var raw = globalThis.localStorage && globalThis.localStorage.getItem(AGENT_HOUR_KEY);
+      var s = raw ? JSON.parse(raw) : {};
+      if(Array.isArray(s.entries)){
+        state.entries = s.entries.filter(function(e){
+          return e && typeof e.at === 'number' && typeof e.tokens === 'number' && isFinite(e.tokens) && now - e.at < AGENT_HOUR_MS;
+        });
+      }
+      if(typeof s.pausedAt === 'number' && now - s.pausedAt < AGENT_HOUR_MS) state.pausedAt = s.pausedAt;
+    } catch(_e){ /* a fresh hour */ }
+    if(tokens > 0) state.entries.push({at: now, tokens: tokens});
+    var sum = 0;
+    for(var i = 0; i < state.entries.length; i++) sum += state.entries[i].tokens;
+    var pause = limit > 0 && sum >= limit && state.pausedAt === null;
+    if(pause) state.pausedAt = now;
+    try { globalThis.localStorage && globalThis.localStorage.setItem(AGENT_HOUR_KEY, JSON.stringify(state)); } catch(_e){ /* a fresh hour */ }
+    return pause;
+  }
+
 /*@@LU_TOOLING_ONLY@@*/
 // Cut out by src-tauri/build.rs — see caveman.js.
 export {
   AGENT_ALL_TOOLS,
+  AGENT_CHARS_PER_TOKEN,
+  AGENT_HOUR_KEY,
+  AGENT_HOUR_TOKEN_LIMIT,
   AGENT_TOOLS,
   CODEX_TOOLS,
   DECAY_AFTER_ITERATIONS,
@@ -362,8 +410,10 @@ export {
   buildToolDefs,
   capToolResult,
   compactApiMessages,
+  countAgentHourTokens,
   decayToolResults,
   dropOldImages,
+  estimateAgentTokens,
   extractToolCallsFromContent,
   isDecayedAt,
   isSystemPromptEcho,

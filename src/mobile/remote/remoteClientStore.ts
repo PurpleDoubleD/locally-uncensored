@@ -156,7 +156,7 @@ export interface RemoteMessage {
   /** Nur Antworten im Agentenmodus: die Werkzeugschritte auf dem Desktop. */
   steps?: RemoteAgentStep[]
   /** Nur Antworten im Agentenmodus: warum der Lauf endete, wenn nicht mit einer Antwort. */
-  agentEnd?: Extract<RemoteAgentEnd, 'max-iterations' | 'tool-errors'>
+  agentEnd?: Extract<RemoteAgentEnd, 'max-iterations' | 'tool-errors' | 'looping' | 'cost-limit'>
 }
 
 export interface RemoteChat {
@@ -487,7 +487,7 @@ function sanitizeChats(raw: unknown, fallbackBaseUrl: string | null = null): Rem
         ...(m.role === 'user' ? { mirrored: m.mirrored === true } : {}),
         ...(m.role === 'user' && Array.isArray(m.images) && m.images.length > 0 ? { images: sanitizeImages(m.images) } : {}),
         ...(m.role === 'assistant' && Array.isArray(m.steps) && m.steps.length > 0 ? { steps: sanitizeSteps(m.steps) } : {}),
-        ...(m.role === 'assistant' && (m.agentEnd === 'max-iterations' || m.agentEnd === 'tool-errors') ? { agentEnd: m.agentEnd } : {}),
+        ...(m.role === 'assistant' && (m.agentEnd === 'max-iterations' || m.agentEnd === 'tool-errors' || m.agentEnd === 'looping' || m.agentEnd === 'cost-limit') ? { agentEnd: m.agentEnd } : {}),
       })
     }
     out.push({

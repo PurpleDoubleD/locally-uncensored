@@ -14,7 +14,7 @@
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { shouldAutoCompact, resolveCompactThreshold, MIN_MESSAGES_TO_COMPACT } from '../compact-trigger'
+import { shouldAutoCompact, resolveCompactThreshold } from '../compact-trigger'
 import { sendBudgetWouldTrim, applyChatSendBudget } from '../chat-send-budget'
 import { cheapWords } from './token-estimate-samples'
 
@@ -65,7 +65,9 @@ describe('the trim no longer runs instead of the summary', () => {
 
   it('NEGATIVE CONTROL: off, too short and cooldown still say no', () => {
     expect(shouldAutoCompact({ ...base, threshold: undefined, trimImminent: true }).reason).toBe('off')
-    expect(shouldAutoCompact({ ...base, messageCount: MIN_MESSAGES_TO_COMPACT - 1, trimImminent: true }).reason).toBe('too-short')
+    // Below three there is nothing older to summarise. From three on a full
+    // chat may compact (CA, 14.11.2026, a-full-context-never-ends-silently).
+    expect(shouldAutoCompact({ ...base, messageCount: 2, trimImminent: true }).reason).toBe('too-short')
     expect(shouldAutoCompact({ ...base, lastCompactAtMessageCount: base.messageCount - 1, trimImminent: true }).reason).toBe('cooldown')
     expect(shouldAutoCompact({ ...base, window: 0, trimImminent: true }).reason).toBe('no-window')
   })

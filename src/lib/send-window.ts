@@ -83,7 +83,9 @@ export interface SendWindowInput {
   modelWindow: number
   /** settings.codexSendWindowTokens. */
   sendWindowTokens?: number
-  /** settings.contextDecay. The notaus switches the cap off with the decay. */
+  /** settings.contextDecay. Ignored for the cap since CA (14.11.2026): a paid
+   *  provider is always capped, decay on or off. Kept so callers need not
+   *  change. */
   capEnabled?: boolean
   /** settings.smallModelMode. */
   smallModelMode?: boolean
@@ -113,8 +115,15 @@ export function effectiveSendWindow(input: SendWindowInput): number {
   const base = input.smallModelMode
     ? Math.floor(Math.min(window * SMALL_MODEL_SHARE, SMALL_MODEL_CEILING))
     : Math.floor(window * WINDOW_SHARE)
-  if (input.capEnabled === false) return base
   if (!isPaidProvider(input.providerId, input.localBackend)) return base
+  // The decay switch (`capEnabled`) no longer lifts the cap on a provider
+  // that bills (CA, 14.11.2026). Turning decay off means "do not shorten old
+  // results", and it had silently also meant "send the whole history on every
+  // step, however long": the support logs of that week show runs sending
+  // 120-278k tokens per step on LU Cloud, every one of them paid in full. A
+  // run that wants more than the cap per step picks it per model in the
+  // context menu, where the price per step is shown.
+  void input.capEnabled
   const cap =
     typeof input.sendWindowTokens === 'number' && input.sendWindowTokens > 0
       ? Math.floor(input.sendWindowTokens)

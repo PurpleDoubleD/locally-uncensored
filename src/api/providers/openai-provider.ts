@@ -102,6 +102,7 @@ export interface OpenAIRequestMessage {
   content: string | OpenAIContentPart[]
   tool_calls?: OpenAIRequestToolCall[]
   tool_call_id?: string
+  reasoning_content?: string
 }
 
 export interface OpenAIChatRequest {
@@ -483,6 +484,20 @@ async function builtinEngineRunning(): Promise<boolean | null> {
   } catch {
     return null
   }
+}
+
+
+/**
+ * How many prompt tokens the upstream served from its cache, in either of the
+ * two spellings OpenAI-compatible servers use. 0 when the server says nothing.
+ */
+export function cachedPromptTokensOf(usage: unknown): number {
+  if (!usage || typeof usage !== 'object') return 0
+  const u = usage as { prompt_tokens_details?: { cached_tokens?: unknown }; prompt_cache_hit_tokens?: unknown }
+  const a = u.prompt_tokens_details?.cached_tokens
+  const b = u.prompt_cache_hit_tokens
+  const n = typeof a === 'number' ? a : typeof b === 'number' ? b : 0
+  return Number.isFinite(n) && n > 0 ? Math.round(n) : 0
 }
 
 export class OpenAIProvider implements ProviderClient {
@@ -1203,6 +1218,7 @@ export class OpenAIProvider implements ProviderClient {
     const toolCallAccum: Map<number, { id: string; name: string; args: string }> = new Map()
     let promptTokens = 0
     let completionTokens = 0
+    let cachedTokens = 0
     let finishReason: string | undefined
     const billing = chatBilling(res)
     const doneChunk = (fallbackReason: string): ChatStreamChunk => {
@@ -1214,6 +1230,7 @@ export class OpenAIProvider implements ProviderClient {
         finishReason: finishReason ?? fallbackReason,
         promptEvalCount: promptTokens || undefined,
         evalCount: completionTokens || undefined,
+        cachedPromptCount: cachedTokens || undefined,
         billing,
       }
     }
@@ -1267,6 +1284,7 @@ export class OpenAIProvider implements ProviderClient {
         if (u) {
           promptTokens = u.prompt_tokens || promptTokens
           completionTokens = u.completion_tokens || completionTokens
+          cachedTokens = cachedPromptTokensOf(u) || cachedTokens
         }
 
         const choice = chunk.choices?.[0]
@@ -1365,7 +1383,7 @@ export class OpenAIProvider implements ProviderClient {
     messages: ChatMessage[],
     tools: ToolDefinition[],
     options?: ChatOptions,
-  ): Promise<{ content: string; toolCalls: ToolCall[]; promptEvalCount?: number; evalCount?: number; thinking?: string; billing?: ChatBilling }> {
+  ): Promise<{ content: string; toolCalls: ToolCall[]; promptEvalCount?: number; evalCount?: number; cachedPromptCount?: number; thinking?: string; billing?: ChatBilling }> {
     messages = await resolveMessageAttachments(messages)
     const body: OpenAIChatRequest = {
       model,
@@ -1442,6 +1460,7 @@ export class OpenAIProvider implements ProviderClient {
       toolCalls,
       promptEvalCount: usage?.prompt_tokens,
       evalCount: usage?.completion_tokens,
+      cachedPromptCount: usage ? cachedPromptTokensOf(usage) || undefined : undefined,
       thinking: message?.reasoning_content || message?.reasoning || undefined,
       billing: chatBilling(res),
     }
@@ -2047,6 +2066,12 @@ export class OpenAIProvider implements ProviderClient {
 
     if (msg.tool_call_id) {
       m.tool_call_id = msg.tool_call_id
+    }
+
+    // The step's own reasoning, where the provider asks for it
+    // (lib/agent-core/reasoning-replay.ts).
+    if (this.config.replayReasoning && msg.role === 'assistant' && msg.reasoning) {
+      m.reasoning_content = msg.reasoning
     }
 
     return m

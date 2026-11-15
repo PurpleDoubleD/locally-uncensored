@@ -67,14 +67,16 @@ describe('the threshold follows the window', () => {
     expect(compactThresholdCeiling(8192)).toBeLessThan(0.95)
   })
 
-  it('the default runs from a 32K model window up, never below', () => {
+  it('the default runs from a 16K model window up, never at 8K', () => {
     // Owner decision 18.10.2026: "bei 8k nie, bei 32k immer und alles darueber auch immer an".
+    // 16K since 14.11.2026: it is every Ollama chat's window, and David's local
+    // chat filled up with no summary ("der sollte natuerlich autokompaktieren").
     const standard = { autoCompact: true, autoCompactThreshold: 0 }
-    expect(MIN_AUTO_COMPACT_WINDOW).toBe(32768)
+    expect(MIN_AUTO_COMPACT_WINDOW).toBe(16384)
     expect(resolveCompactThreshold(standard, 4096)).toBeNull()
     expect(resolveCompactThreshold(standard, 8192)).toBeNull()
-    expect(resolveCompactThreshold(standard, 16384)).toBeNull()
-    expect(resolveCompactThreshold(standard, 32767)).toBeNull()
+    expect(resolveCompactThreshold(standard, 16383)).toBeNull()
+    expect(resolveCompactThreshold(standard, 16384)).toBe(0.74)
     expect(resolveCompactThreshold(standard, 32768)).toBe(0.81)
     expect(resolveCompactThreshold(standard, 131072)).toBe(0.85)
     expect(resolveCompactThreshold(standard, 1_048_576)).toBe(0.85)
@@ -86,6 +88,8 @@ describe('the threshold follows the window', () => {
     expect(resolveCompactThreshold(standard, 26214, 32768)).toBe(adaptiveCompactThreshold(26214))
     // A large send window on an 8K model does not count.
     expect(resolveCompactThreshold(standard, 32768, 8192)).toBeNull()
+    // The Ollama chat window (DEFAULT_CONTEXT_CAP) compacts by default.
+    expect(resolveCompactThreshold(standard, 16384, 16384)).toBe(0.74)
   })
 
   it('off is only an explicit false', () => {

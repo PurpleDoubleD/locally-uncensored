@@ -25,13 +25,15 @@ const here = dirname(fileURLToPath(import.meta.url))
 const read = (rel: string) => readFileSync(resolve(here, rel), 'utf8')
 
 describe('planDoneLabel', () => {
-  it('says done, plainly, when nothing is waiting', () => {
-    expect(planDoneLabel(0)).toBe('every step done')
+  // David, 14.11.2026: a plan that is through shows its count and the greyed
+  // list, no tick and no "every step done". The Morgan line stays.
+  it('says nothing more when nothing is waiting', () => {
+    expect(planDoneLabel(0)).toBeNull()
   })
 
   it('names the changes that still need approval', () => {
-    expect(planDoneLabel(1)).toBe('every step done, 1 change still waiting for your approval')
-    expect(planDoneLabel(6)).toBe('every step done, 6 changes still waiting for your approval')
+    expect(planDoneLabel(1)).toBe('1 change still waiting for your approval')
+    expect(planDoneLabel(6)).toBe('6 changes still waiting for your approval')
   })
 })
 
@@ -42,70 +44,51 @@ describe('the bar reads the staging queue', () => {
     expect(src).toMatch(/planDoneLabel\(pending\)/)
   })
 
-  it('the warning survives the panel, where the list is open by default', () => {
+  it('the warning stands under the list whatever its fold, once the run is over', () => {
     const src = read('../PlanBar.tsx')
-    // Collapsed-only would have hidden the Morgan line in the panel, because
-    // the panel starts expanded.
-    expect(src).toMatch(/\(panel \|\| !expanded\) && allDone/)
-    expect(src).toMatch(/useState\(panel\)/)
+    // Collapsed-only once hid the Morgan line where the list started open.
+    // Since CA (13.11.2026) the closing box hangs on the run, not on the fold.
+    expect(src).toMatch(/\{!runActive && allDone && waiting && \(/)
   })
 })
 
-describe('the plan moved into the panel (C2)', () => {
-  it('PlanBar has a panel variant and a header variant, no composer one', () => {
-    const src = read('../PlanBar.tsx')
-    expect(src).toMatch(/variant = 'header'/)
-    expect(src).toMatch(/panel = variant === 'panel'/)
-    // The old 70% wrapper was the composer's; in a 280px column it squeezed the
-    // plan into a third of the panel, and at the prompt box it had no business
-    // being at all. The panel therefore still owns its full column width and
-    // must never pick up a measure or a percentage.
-    expect(src).toMatch(/panel \? 'w-full p-1\.5'/)
-    const panelBranch = src.slice(src.indexOf("panel ? 'w-full p-1.5'"))
-    expect(panelBranch.slice(0, panelBranch.indexOf(':'))).not.toMatch(/max-w-|70%/)
-    // The header band, by contrast, sits directly above the transcript and
-    // rides the SAME measure column and gutter as the bubbles (design wave 1) —
-    // a status band running the full window width above 760px of answers read
-    // as a second layout stacked on the first.
-    expect(src).toMatch(/mx-auto w-full max-w-\[var\(--lu-measure\)\] px-3 pt-1/)
-  })
-
+describe('the plan is pinned under the newest message (CA, 13.11.2026)', () => {
+  // C2 (2.6.6) moved it into the Code panel, 2026-08-22 put it at the bottom of
+  // that column and into a header band on the LU tab. David, 13.11.2026: like
+  // the Claude Code desktop app, under the newest message, in both tabs. The
+  // invariant that it never enters the prompt window lives in
+  // the-prompt-window-is-the-prompt-window.test.ts.
   it('the clear button and the staged count came along, unchanged', () => {
     const src = read('../PlanBar.tsx')
-    expect(src).toMatch(/clearTodos\(activeConversationId\)/)
-    expect(src).toMatch(/s\.byChat\[activeConversationId\]\?\.length \?\? 0/)
+    expect(src).toMatch(/clearTodos\(conversationId\)/)
+    expect(src).toMatch(/s\.byChat\[conversationId\]\?\.length \?\? 0/)
   })
 
-  it('the coding composer carries no plan, not even the approval card', () => {
+  it('the coding composer carries no plan', () => {
     const src = read('../CodexView.tsx')
-    // C1 had put the plan APPROVAL card here (a button plus the plan text the
-    // user is approving). It went down into the panel too on 2026-08-22: the
-    // prompt window is the prompt window.
-    // 21.09.2026: dieser Composer reicht gar nichts mehr nach oben durch
-    // („NICHTS im prompt fenster!"). LoopBar und GoalBar sind Bedienelemente
-    // und weiterhin da, nur als Geschwister UEBER dem Kasten. Der Anspruch
-    // dieses Falles ist unveraendert: hier lebt kein Plan.
     expect(src).not.toMatch(/composerAbove/)
     expect(src).toMatch(/<LoopBar onStop=\{stopCodex\} \/>/)
     expect(src).toMatch(/<GoalBar \/>/)
-    expect(src).not.toMatch(/PlanBar/)
     expect(src).not.toMatch(/PlanApprovalBar/)
   })
 
-  it('the panel renders it, below the tree', () => {
-    const src = read('../ExplorerPanel.tsx')
-    expect(src).toMatch(/<PlanBar variant="panel" \/>/)
-    const plan = src.indexOf('<PlanBar variant="panel" />')
-    const tree = src.indexOf('{rows.map((row) => {')
-    expect(plan).toBeGreaterThan(-1)
-    expect(plan).toBeGreaterThan(tree)
+  it('the Code tab renders it after the run anchor, inside the transcript', () => {
+    const src = read('../CodexView.tsx')
+    const anchor = src.indexOf('<WorkingAnchor')
+    const plan = src.indexOf('<PlanBar conversationId={activeConversationId}')
+    expect(plan).toBeGreaterThan(anchor)
+    expect(src.indexOf('<ChatInput')).toBeGreaterThan(plan)
   })
 
-  it('and the chat tab shows it in the header band, not at its composer', () => {
-    // The Chat and Agent surface has no right-hand column, so the plan sits
-    // with the standing status controls above the transcript instead.
-    const src = read('../ChatView.tsx')
-    expect(src).toMatch(/<PlanBar \/>/)
-    expect(src.indexOf('<PlanBar />')).toBeLessThan(src.indexOf('<MessageList'))
+  it('the LU tab renders it at the end of MessageList, not in a band above', () => {
+    const list = read('../MessageList.tsx')
+    expect(list.indexOf('<PlanBar conversationId={conversation.id}')).toBeGreaterThan(list.indexOf('<WorkingAnchor'))
+    expect(read('../ChatView.tsx')).not.toMatch(/<PlanBar\b/)
+  })
+
+  it('and the right column no longer repeats it', () => {
+    const src = read('../ExplorerPanel.tsx')
+    expect(src).not.toMatch(/<PlanBar\b/)
+    expect(src).toMatch(/<PlanApprovalBar onApprove=\{onApprovePlan\} \/>/)
   })
 })
