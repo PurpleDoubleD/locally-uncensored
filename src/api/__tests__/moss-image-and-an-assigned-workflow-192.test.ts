@@ -56,8 +56,12 @@ describe('a workflow assigned to a model LU does not know is used', () => {
     expect(ownWorkflowMisfitNote('MOSS API', MOSS_WORKFLOW, 'unknown')).toBeNull()
   })
 
-  it('also a checkpoint workflow on an unknown model in diffusion_models', () => {
-    expect(ownWorkflowMisfit(['CheckpointLoaderSimple', 'KSampler'], 'unknown', 'diffusion_model')).toBeNull()
+  it('an unknown model in diffusion_models with a UNET workflow fits by its folder', () => {
+    expect(ownWorkflowMisfit(MOSS_WORKFLOW, 'unknown', 'diffusion_model')).toBeNull()
+  })
+
+  it('NEGATIVE CONTROL: where the folder says what it is, a loader that cannot load it is still set aside', () => {
+    expect(ownWorkflowMisfit(['CheckpointLoaderSimple', 'KSampler'], 'unknown', 'diffusion_model')).toMatch(/UNETLoader/)
   })
 
   it('NEGATIVE CONTROL: for a family LU knows, a wrong loader is still set aside', () => {

@@ -22,9 +22,11 @@ export function modelNeedsUnetLoader(type: string, source?: ComfyModelSource): b
 
 /** Null when the workflow fits, else why it is set aside. */
 export function ownWorkflowMisfit(classTypes: readonly string[], type: string, source?: ComfyModelSource): string | null {
-  // GH #192: for a model LU does not know, the user's assignment is the only
-  // knowledge there is; LU's own builder has nothing to run it with anyway.
-  if (type === 'unknown') return null
+  // GH #192: for a model LU does not know, found in no folder that says what
+  // it is, the user's assignment is the only knowledge there is; it used to be
+  // taken for a checkpoint and a UNET workflow was dropped. Where the folder
+  // is known, it decides as for every model (#196).
+  if (type === 'unknown' && !source) return null
   const needsUnet = modelNeedsUnetLoader(type, source)
   const hasUnet = classTypes.includes('UNETLoader')
   const hasCheckpoint = classTypes.includes('CheckpointLoaderSimple')

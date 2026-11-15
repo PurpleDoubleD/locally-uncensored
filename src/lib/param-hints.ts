@@ -13,6 +13,8 @@ import type { ModelType } from '../api/comfyui'
 export const LOW_CFG_FAMILIES: Partial<Record<ModelType, number>> = {
   flux: 1, flux2: 1, krea2: 1, qwenimage: 1, hidream: 1, ernie_image: 1, minimaxh3image: 1,
   zimage: 3.5, chroma: 3.5, qwenimage1: 4, sd3: 4, lumina2: 4,
+  // GH #192: MOSS Image runs at CFG 3 (OpenMOSS default).
+  mossimage: 3,
 }
 
 /** Z-Image: Turbo runs at 1, Base at about 3.5 to 5 (LU starts at 3.5, the

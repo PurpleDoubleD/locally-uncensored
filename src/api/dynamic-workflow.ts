@@ -130,7 +130,7 @@ export const MINIMAX_H3_IMAGE_NO_BUILDER =
   + 'import it under Workflows and assign it to this model. Create then runs it with your prompt, size and LoRAs.'
 /** GH #192: what Create says for MOSS Image until LU has a graph of its own. */
 export const MOSS_IMAGE_NO_BUILDER =
-  'MOSS Image has no workflow built into LU yet. Import a ComfyUI workflow that runs MOSS Image under Workflows and assign it to this model. '
+  'LU has no built in workflow for MOSS Image. Import a ComfyUI workflow that runs MOSS Image under Workflows and assign it to this model. '
   + 'Create then runs it with your prompt, size and LoRAs.'
 /** A step distillation LoRA names its step count (minimax_h3_fl2v_turbo_8step_...). */
 const H3_STEP_LORA = /turbo\D*?(\d+)\s*_?steps?/i
