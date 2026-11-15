@@ -118,6 +118,10 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
   { id: 'aphrodite', name: 'Aphrodite', providerId: 'openai', baseUrl: 'http://localhost:2242/v1', isLocal: true },
   { id: 'sglang', name: 'SGLang', providerId: 'openai', baseUrl: 'http://localhost:30000/v1', isLocal: true },
   { id: 'tgi', name: 'TGI (HuggingFace)', providerId: 'openai', baseUrl: 'http://localhost:8080/v1', isLocal: true },
+  // GH #214: Magnitude (magnitudedev/magnitude, Apache 2.0). Its docs: the
+  // OpenAI compatible API is served on port 10100 under /inference/v1, on
+  // 127.0.0.1 only unless Network access is on, no key needed locally.
+  { id: 'magnitude', name: 'Magnitude', providerId: 'openai', baseUrl: 'http://127.0.0.1:10100/inference/v1', isLocal: true },
 
   // ── Cloud providers (API key required) ───────────────────
   { id: 'openrouter', name: 'OpenRouter', providerId: 'openai', baseUrl: 'https://openrouter.ai/api/v1', isLocal: false, placeholder: 'sk-or-...' },
