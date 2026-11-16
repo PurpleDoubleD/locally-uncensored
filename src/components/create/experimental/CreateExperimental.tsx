@@ -99,6 +99,19 @@ function CreateExperimentalInner() {
   // The Character area (3.1.0 part B) takes the place of the stage and the
   // prompt window for its four intents; gallery and presets stay beside it.
   const hubOpen = isHubIntent(intent)
+  // The Character tab stands on the middle axis of the prompt window: the
+  // room the rails take at the right is kept free at the left as well
+  // (index.css, .lu-hub-row reads --hub-rails).
+  const rails = useRef<HTMLDivElement>(null)
+  const [railsWidth, setRailsWidth] = useState(0)
+  useEffect(() => {
+    const el = rails.current
+    if (!hubOpen || !el || typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(() => setRailsWidth(el.offsetWidth))
+    ro.observe(el)
+    setRailsWidth(el.offsetWidth)
+    return () => ro.disconnect()
+  }, [hubOpen])
   const cloudOpModel = useCreateStore((s) => s.cloudOpModel)
   const cloudImageModel = useCreateStore((s) => s.cloudImageModel)
   const cloudVideoModel = useCreateStore((s) => s.cloudVideoModel)
@@ -488,7 +501,10 @@ function CreateExperimentalInner() {
           viewer AND the composer, so it was taller than the viewer.) */}
       {/* The Character tab: its column stands exactly over the prompt window
           (index.css, .lu-hub-row), the rails stay at the right. */}
-      <div className={hubOpen ? 'lu-hub-row flex-1 min-h-0 overflow-hidden' : 'flex-1 min-h-0 flex overflow-hidden'}>
+      <div
+        className={hubOpen ? 'lu-hub-row flex-1 min-h-0 overflow-hidden' : 'flex-1 min-h-0 flex overflow-hidden'}
+        style={hubOpen ? { ['--hub-rails' as string]: `${Math.max(16, railsWidth)}px` } : undefined}
+      >
         {hubOpen ? (
           <CharacterHub
             stage={{
@@ -517,7 +533,7 @@ function CreateExperimentalInner() {
         )}
         {/* On a phone-wide window the Character area takes the whole width
             (its rails would leave the column 200 px). */}
-        <div className={hubOpen ? 'lu-hub-rails max-[520px]:hidden' : 'contents'}>
+        <div ref={rails} className={hubOpen ? 'lu-hub-rails max-[520px]:hidden' : 'contents'}>
           <CreatePanel open={panelOpen} onOpenChange={setPanelOpen} activeId={shownId} onSelect={openGalleryItem} />
           <PresetShelf
             open={presetsOpen}

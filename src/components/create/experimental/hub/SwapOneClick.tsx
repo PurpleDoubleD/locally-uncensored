@@ -337,7 +337,7 @@ export function SwapOneClick({ onChangeCharacter }: {
 
 /** The part of the stage under the character's head (index.css, .hub-body). */
 function Body({ children }: { children: ReactNode }) {
-  return <div className="hub-body scrollbar-thin pb-4">{children}</div>
+  return <div className="hub-body pb-4">{children}</div>
 }
 
 /** "First frame ▾" and "Video ▾": the models of the swap, in the settings of

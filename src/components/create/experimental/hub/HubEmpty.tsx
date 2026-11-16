@@ -1,5 +1,5 @@
 // The Character area with no character yet (David, 16.11.2026): the three
-// steps and the one button, in the column over the prompt window. No
+// steps and the one button, in the middle over the prompt window. No
 // pictures and nothing that moves; what a character can do stands in the
 // row over the window (Image, Swap, Motion, Talk).
 
@@ -15,14 +15,11 @@ const STEPS = [
 export function HubEmpty({ onCreate }: { onCreate: () => void }) {
   return (
     <div className="hub-empty scrollbar-thin" data-hub-step="who" data-hub-empty>
-      <ol className="hub-line border-t">
+      <ol className="hub-steps">
         {STEPS.map((s, i) => (
-          <li key={s.title} className="hub-line flex gap-4 border-b py-3">
-            <span className="hub-dim w-3 shrink-0 pt-px hub-fs-13 tabular-nums">{i + 1}</span>
-            <span className="min-w-0">
-              <span className="hub-text block hub-fs-14 font-medium">{s.title}</span>
-              <span className="hub-dim mt-0.5 block hub-fs-13">{s.line}</span>
-            </span>
+          <li key={s.title} className="hub-line border-b py-3 text-center">
+            <span className="hub-text block hub-fs-14 font-medium"><span className="hub-dim mr-2 font-normal tabular-nums">{i + 1}</span>{s.title}</span>
+            <span className="hub-dim mt-0.5 block hub-fs-13">{s.line}</span>
           </li>
         ))}
       </ol>

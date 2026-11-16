@@ -17,7 +17,7 @@ export function useHubList(): HubCharacter[] {
   return useContext(HubCharactersContext)
 }
 
-/** A round picture, or the initial on the soft accent where there is none. */
+/** A round picture, or the initial on grey where there is none. */
 export function HubAvatar({ name, image, size = 26 }: { name: string; image: string | null | undefined; size?: number }) {
   if (image) {
     return (
@@ -31,7 +31,7 @@ export function HubAvatar({ name, image, size = 26 }: { name: string; image: str
   return (
     <span
       aria-hidden
-      className="hub-soft hub-acc inline-flex shrink-0 items-center justify-center rounded-full font-semibold"
+      className="hub-none hub-muted inline-flex shrink-0 items-center justify-center rounded-full font-semibold"
       style={{ width: size, height: size, fontSize: Math.round(size * 0.45) }}
     >
       {hubInitial(name)}

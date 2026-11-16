@@ -3191,6 +3191,8 @@ input[type="range"].neuron-range:disabled { cursor: not-allowed; opacity: 0.5; }
 .lu-hub .hub-line { border-color: var(--hub-sep); }
 .lu-hub .hub-hover:hover { background-color: var(--hub-hov); }
 .lu-hub .hub-soft { background-color: var(--hub-soft); }
+/* No picture: the initial on grey. */
+.lu-hub .hub-none { background-color: var(--hub-edge); }
 /* The role of a person in Swap reads as text until it is typed over. */
 .lu-hub .hub-role::placeholder { color: var(--hub-text); }
 /* The type of the Character area: the sizes of the sketches in rendered
@@ -3210,29 +3212,43 @@ input[type="range"].neuron-range:disabled { cursor: not-allowed; opacity: 0.5; }
 /* The area is one column of the prompt window's width (660), centred, over
    that window (David, 16.11.2026: the same container in every tab of
    Create). The row is a grid of three: the space left of the column, the
-   column, and the rails of the gallery and the presets at the right. While
-   there is room both sides are equal, so the column stands exactly over the
-   window; an open gallery takes its room from the left side first. The stage in it: the tabs, the character as a head (a small
+   column, and the rails of the gallery and the presets at the right. Both
+   sides are always equally wide (the left keeps free what the rails take,
+   --hub-rails), so the column stands exactly over the window at every
+   width; with little room it gets narrower, it never leaves the middle.
+   The row of the characters alone may use the whole room between the two
+   sides, so a wide window shows more names. The stage in it: the tabs, the character as a head (a small
    picture, beside it the name and every action it has), then the inputs of
    the action and its photos, which scroll. Nothing here moves by itself. */
-.lu-hub-row { display: grid; grid-template-columns: minmax(16px, 1fr) minmax(0, 660px) minmax(max-content, 1fr); grid-template-rows: minmax(0, 1fr); }
-.lu-hub-row > .hub-column { grid-column: 2; display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
-.lu-hub-rails { grid-column: 3; display: flex; justify-content: flex-end; min-width: 0; min-height: 0; padding-left: 16px; }
+.lu-hub-row { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
+.lu-hub-row > .hub-column { grid-column: 1; grid-row: 1; display: flex; flex-direction: column; align-items: center; min-width: 0; min-height: 0; overflow: hidden; padding-inline: var(--hub-rails, 16px); }
+.lu-hub-row > .hub-column > * { width: 100%; max-width: 660px; }
+.lu-hub-row > .hub-column > .hub-stage { max-width: none; align-items: center; }
+.lu-hub .hub-stage > .hub-scroll { width: 100%; max-width: 660px; }
+.lu-hub-rails { grid-column: 1; grid-row: 1; justify-self: end; position: relative; z-index: 1; display: flex; min-width: 0; min-height: 0; padding-left: 16px; }
+/* A phone-wide window: the area takes the whole width, as before. */
 @media (max-width: 520px) {
-  .lu-hub-row { grid-template-columns: 16px minmax(0, 1fr) 16px; }
+  .lu-hub-rails { display: none; }
 }
 .lu-hub .hub-stage { display: flex; flex-direction: column; flex: 1 1 0%; min-height: 0; }
-.lu-hub .hub-tabs { flex: none; display: flex; align-items: center; gap: 16px; min-height: 38px; }
-.lu-hub .hub-tablist { display: flex; align-items: stretch; align-self: stretch; gap: 20px; flex: 1 1 0%; min-width: 0; overflow-x: auto; }
-.lu-hub .hub-tab { display: inline-flex; align-items: center; gap: 7px; flex: none; white-space: nowrap; margin-bottom: -1px; border-bottom: 1.5px solid transparent; }
+/* Everything stands on the middle axis of the prompt window: the row of
+   the characters around the middle, the head centred over the photos, the
+   photos as a centred grid. */
+.lu-hub .hub-tabs { flex: none; display: flex; justify-content: center; width: 100%; min-height: 38px; }
+/* Lines of the row are balanced: nothing wraps alone under the others. */
+.lu-hub .hub-tablist { display: block; min-width: 0; text-align: center; text-wrap: balance; }
+.lu-hub .hub-tab { display: inline-flex; align-items: center; gap: 7px; min-height: 37px; margin: 0 10px; vertical-align: top; white-space: nowrap; border-bottom: 1.5px solid transparent; }
 .lu-hub .hub-tab--on { border-bottom-color: var(--hub-text); }
-.lu-hub .hub-card { flex: none; position: relative; min-width: 0; min-height: 90px; padding: 10px 0 10px 68px; border-bottom: 1px solid var(--hub-sep); }
-.lu-hub .hub-card > .hub-portrait { position: absolute; left: 0; top: 10px; width: 56px; }
-.lu-hub .hub-body { flex: 1 1 0%; min-width: 0; min-height: 0; overflow-y: auto; }
+.lu-hub .hub-tabs[data-hub-tabs-fit="pictures"] .hub-tab { margin: 0 6px; }
+.lu-hub .hub-scroll { flex: 1 1 0%; min-width: 0; min-height: 0; overflow-y: auto; border-top: 1px solid var(--hub-sep); }
+.lu-hub .hub-card { display: flex; flex-direction: column; align-items: center; min-width: 0; padding: 14px 0 12px; text-align: center; }
+.lu-hub .hub-card > .hub-portrait { width: 64px; margin-bottom: 8px; }
+.lu-hub .hub-body { min-width: 0; }
 .lu-hub .hub-portrait { display: block; aspect-ratio: 4 / 5; border-radius: 8px; background-size: cover; background-position: 50% 20%; }
-.lu-hub .hub-portrait--none { display: grid; place-items: center; background: var(--hub-fill); }
-.lu-hub .hub-initial { font-size: calc(24px / var(--ui-scale, 1.15)); font-weight: 600; line-height: 1; }
-.lu-hub .hub-photos { display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 8px; }
+.lu-hub .hub-portrait--none { display: grid; place-items: center; background: var(--hub-edge); }
+.lu-hub .hub-initial { font-size: calc(26px / var(--ui-scale, 1.15)); font-weight: 600; line-height: 1; }
+.lu-hub .hub-photos { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
+.lu-hub .hub-photos li { width: 104px; }
 .lu-hub .hub-photos img { display: block; width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 6px; }
 /* The row over the prompt window: Image, Swap, Motion, Talk as text, with
    one quiet ground for the one that is picked. */
@@ -3260,7 +3276,8 @@ input[type="range"].neuron-range:disabled { cursor: not-allowed; opacity: 0.5; }
 .lu-hub .hub-radio--on { border-color: var(--hub-acc); }
 .lu-hub .hub-radio--on::after { content: ''; position: absolute; inset: 3px; border-radius: 50%; background: var(--hub-acc); }
 
-/* No character yet: the three steps and the one button. */
-.lu-hub .hub-empty { flex: 1 1 0%; min-height: 0; overflow-y: auto; padding: 16px 0; }
+/* No character yet: the three steps and the one button, in the middle. */
+.lu-hub .hub-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; flex: 1 1 0%; min-height: 0; overflow-y: auto; padding: 16px 0; }
+.lu-hub .hub-steps { width: 100%; max-width: 420px; border-top: 1px solid var(--hub-sep); }
 /* The NEW mark on the Character pill: accent on a faint accent ground. */
 .lu-new-mark { font-size: 7px; font-weight: 600; letter-spacing: 0.06em; line-height: 1.4; }

@@ -1,9 +1,9 @@
 // The row above the prompt window of the Character tab: Image, Swap, Motion
 // and Talk (David, 16.11.2026). It stands where every tab of Create has its
 // own row of controls (LaneControls, ThreeDControls), centred over the
-// window, and it is a row, not a bar: no frame, nothing that moves. Beside
-// the picked action its price or where it runs, under it the one line that
-// says what Local and Cloud mean.
+// window, and it is a row, not a bar: no frame, nothing that moves. Under it
+// one quiet line: the price of the picked action or where it runs, and what
+// Local and Cloud mean.
 
 import type { ReactNode } from 'react'
 import { Image as ImageIcon, Mic, PersonStanding, Replace } from 'lucide-react'
@@ -106,7 +106,9 @@ export function HubActionRow() {
     // The tokens of the area (.lu-hub) come along: the row stands in the
     // Composer, outside the area's own section.
     <div className="lu-hub" data-hub-actions>
-      <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1">
+      {/* The row alone on the middle axis; its price or place and what that
+          means stand under it, as one quiet line. */}
+      <div className="flex justify-center">
         <div role="radiogroup" aria-label="Character action" className="hub-act">
           {actions.map((a) => (
             <button
@@ -124,10 +126,13 @@ export function HubActionRow() {
             </button>
           ))}
         </div>
-        {on?.meta && <span className="hub-dim whitespace-nowrap hub-fs-125 tabular-nums" data-hub-action-meta>{on.meta}</span>}
       </div>
-      {/* What the price beside it means. One quiet line, at every width. */}
-      {on && <p className="hub-dim pt-1 text-center hub-fs-125" data-hub-local-line>{HUB_LOCAL_LINE}</p>}
+      {on && (
+        <p className="hub-dim pt-1 text-center hub-fs-125">
+          {on.meta && <><span className="hub-muted tabular-nums" data-hub-action-meta>{on.meta}</span>{' · '}</>}
+          <span data-hub-local-line>{HUB_LOCAL_LINE}</span>
+        </p>
+      )}
     </div>
   )
 }
