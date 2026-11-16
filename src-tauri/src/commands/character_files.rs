@@ -472,7 +472,7 @@ pub(crate) fn take_piece(loras: &Path, name: &str, offset: u64, bytes: &[u8], la
         let _ = fs::remove_file(&staging);
         return Ok(Piece::Exists { file });
     }
-    fs::create_dir_all(loras).map_err(|e| format!("The LoRA folder could not be made: {}", os_error::english(&e)))?;
+    fs::create_dir_all(loras).map_err(|e| format!("The LoRA folder could not be made: {}", crate::os_error::english(&e)))?;
     let have = if offset == 0 { 0 } else { fs::metadata(&staging).map(|m| m.len()).unwrap_or(0) };
     if have != offset {
         let _ = fs::remove_file(&staging);
@@ -488,11 +488,11 @@ pub(crate) fn take_piece(loras: &Path, name: &str, offset: u64, bytes: &[u8], la
         .append(offset != 0)
         .truncate(offset == 0)
         .open(&staging)
-        .map_err(|e| format!("The file could not be written: {}", os_error::english(&e)))?;
+        .map_err(|e| format!("The file could not be written: {}", crate::os_error::english(&e)))?;
     if let Err(e) = out.write_all(bytes).and_then(|()| out.flush()) {
         drop(out);
         let _ = fs::remove_file(&staging);
-        return Err(format!("The file could not be written: {}", os_error::english(&e)));
+        return Err(format!("The file could not be written: {}", crate::os_error::english(&e)));
     }
     drop(out);
     let received = offset + bytes.len() as u64;
@@ -510,7 +510,7 @@ pub(crate) fn take_piece(loras: &Path, name: &str, offset: u64, bytes: &[u8], la
     }
     if let Err(e) = fs::rename(&staging, &dest) {
         let _ = fs::remove_file(&staging);
-        return Err(format!("The file could not be saved: {}", os_error::english(&e)));
+        return Err(format!("The file could not be saved: {}", crate::os_error::english(&e)));
     }
     Ok(Piece::Saved { file, path: dest, bytes: received, format })
 }
