@@ -7,10 +7,9 @@
 
 import { useEffect, useState } from 'react'
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
-import { ArrowLeft, ArrowRight, FlaskConical, Hash, Sliders, Sparkles } from 'lucide-react'
+import { ArrowLeft, ArrowRight } from 'lucide-react'
 import { Modal } from '../ui/Modal'
 import { MOTION_S } from '../ui/motion'
-import { HINWEIS_TEXT } from '../../lib/hinweis'
 import { ICON_SM } from '../ui/icon-size'
 import { useNeuronStore } from '../../stores/neuronStore'
 import { useNeuronIntroRequest } from '../../stores/neuronIntroStore'
@@ -22,26 +21,55 @@ interface Card {
   art: () => React.ReactElement
 }
 
-/** Layers with words flowing up, and a push added in the middle. */
+// Step 1 (3.1.0): the words run as fine lines through the layers. One layer
+// carries a thumb, like a slider. When it moves, the lines behind it take a
+// new course and the old course stays as a ghost. All of it is CSS on plain
+// SVG (index.css, "new drawings"), so reduced motion holds the pushed state.
+const PUSH_X = 240
+const WIRE_X0 = 92
+const WIRE_X1 = 388
+const WIRES = [0, 1, 2, 3, 4, 5, 6, 7, 8]
+const wireY = (j: number) => 56 + j * 7
+const bentY = (j: number) => 44 + j * 4.5
+const straightWire = (j: number) => `M${WIRE_X0} ${wireY(j)} H${WIRE_X1}`
+const bentTail = (j: number) => `C${PUSH_X + 30} ${wireY(j)} ${PUSH_X + 38} ${bentY(j)} ${PUSH_X + 70} ${bentY(j)} H${WIRE_X1}`
+const pulseDelay = (j: number) => `${-((j * 1.37) % 3.2).toFixed(2)}s`
+
+/** Words as lines through the layers; a push on one layer bends them. */
 function ArtLayers() {
-  const layers = [0, 1, 2, 3, 4, 5]
   return (
-    <svg viewBox="0 0 320 168" className="w-full h-full" aria-hidden>
-      {layers.map((i) => (
-        <rect key={i} x="70" y={142 - i * 24} width="130" height="14" rx="5" className={i === 2 || i === 3 ? 'nintro-layer nintro-layer--hit' : 'nintro-layer'} style={{ animationDelay: `${i * 0.25}s` }} />
+    <svg viewBox="0 0 480 168" className="w-full h-full" aria-hidden>
+      <defs>
+        <clipPath id="nintro-up"><rect x="0" y="0" width={PUSH_X} height="168" /></clipPath>
+        <clipPath id="nintro-down"><rect x={PUSH_X} y="0" width={480 - PUSH_X} height="168" /></clipPath>
+      </defs>
+      {[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((i) => (
+        <line key={i} x1={110 + i * 26} y1="30" x2={110 + i * 26} y2="138" className={i === 5 ? 'nintro-plane nintro-plane--hit' : 'nintro-plane'} />
       ))}
-      {[0, 1, 2].map((i) => (
-        <circle key={i} cx={105 + i * 30} cy="160" r="4" className="nintro-token" style={{ animationDelay: `${i * 0.7}s` }} />
-      ))}
-      <g className="nintro-push">
-        <path d="M290 88 C 255 88, 240 98, 210 100" fill="none" strokeWidth="2.5" strokeLinecap="round" className="nintro-accent-stroke" />
-        <path d="M216 94 L206 100 L216 106" fill="none" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="nintro-accent-stroke" />
-        <rect x="248" y="58" width="58" height="20" rx="10" className="nintro-accent-fill-soft" />
-        <text x="277" y="72" textAnchor="middle" className="nintro-label nintro-accent-text">push</text>
+      {WIRES.map((j) => <path key={j} d={`M${WIRE_X0} ${wireY(j)} H${PUSH_X}`} className="nintro-wire" />)}
+      <g clipPath="url(#nintro-up)">
+        {WIRES.map((j) => <path key={j} d={straightWire(j)} pathLength={100} className="nintro-pulse" style={{ animationDelay: pulseDelay(j) }} />)}
       </g>
-      <text x="135" y="18" textAnchor="middle" className="nintro-label nintro-muted-text">answer</text>
-      <text x="40" y="153" textAnchor="middle" className="nintro-label nintro-muted-text">words</text>
-      <text x="40" y="105" textAnchor="middle" className="nintro-label nintro-muted-text">layers</text>
+      <g className="nintro-ghost">
+        {WIRES.map((j) => <path key={j} d={`M${PUSH_X} ${wireY(j)} H${WIRE_X1}`} className="nintro-wire" />)}
+        <g clipPath="url(#nintro-down)">
+          {WIRES.map((j) => <path key={j} d={straightWire(j)} pathLength={100} className="nintro-pulse" style={{ animationDelay: pulseDelay(j) }} />)}
+        </g>
+      </g>
+      <g className="nintro-bentgroup">
+        {WIRES.map((j) => (
+          <path key={j} d={`M${PUSH_X} ${wireY(j)} ${bentTail(j)}`} pathLength={100} className="nintro-wire nintro-wire--bent" style={{ animationDelay: `${(Math.abs(j - 4) * 0.04).toFixed(2)}s` }} />
+        ))}
+        <g clipPath="url(#nintro-down)">
+          {WIRES.map((j) => <path key={j} d={`M${WIRE_X0} ${wireY(j)} H${PUSH_X} ${bentTail(j)}`} pathLength={100} className="nintro-pulse" style={{ animationDelay: pulseDelay(j) }} />)}
+        </g>
+      </g>
+      <g className="nintro-thumb"><rect x={PUSH_X - 8} y="78" width="16" height="12" rx="4" className="nintro-accent-fill" /></g>
+      <text x={WIRE_X0 - 10} y="87.5" textAnchor="end" className="nintro-label nintro-muted-text">your words</text>
+      <text x={WIRE_X1 + 10} y="87.5" className="nintro-label nintro-muted-text nintro-ghost">answer</text>
+      <text x={WIRE_X1 + 10} y="65.5" className="nintro-label nintro-accent-text nintro-when">new tone</text>
+      <text x={PUSH_X} y="21" textAnchor="middle" className="nintro-label nintro-accent-text nintro-when">push</text>
+      <text x={PUSH_X} y="156" textAnchor="middle" className="nintro-label nintro-muted-text">layers</text>
     </svg>
   )
 }
@@ -70,21 +98,18 @@ function ArtEqualizer() {
   )
 }
 
-/** Before and after: the same question, two answers being written. */
+// Step 4 (3.1.0): one real answer, and a line that wipes across it. Left of
+// the line the sliders are on, right of it they are off. Both answers lie on
+// the same spot, so the eye compares the words and not two boxes.
 function ArtCompare() {
   return (
-    <svg viewBox="0 0 320 168" className="w-full h-full" aria-hidden>
-      <rect x="16" y="20" width="136" height="128" rx="12" className="nintro-card" />
-      <rect x="168" y="20" width="136" height="128" rx="12" className="nintro-card nintro-card--accent" />
-      <text x="32" y="42" className="nintro-label nintro-muted-text">BEFORE</text>
-      <text x="184" y="42" className="nintro-label nintro-accent-text">AFTER</text>
-      {[0, 1, 2, 3].map((i) => (
-        <rect key={`b${i}`} x="32" y={58 + i * 18} width={[104, 92, 100, 60][i]} height="7" rx="3.5" className="nintro-line" style={{ animationDelay: `${i * 0.3}s` }} />
-      ))}
-      {[0, 1, 2, 3].map((i) => (
-        <rect key={`a${i}`} x="184" y={58 + i * 18} width={[96, 104, 84, 70][i]} height="7" rx="3.5" className="nintro-line nintro-line--accent" style={{ animationDelay: `${1.3 + i * 0.3}s` }} />
-      ))}
-    </svg>
+    <div className="nintro-wipe" aria-hidden data-testid="neuron-intro-wipe">
+      <span className="nintro-wipe-tag nintro-wipe-tag--on">SLIDERS ON</span>
+      <span className="nintro-wipe-tag nintro-wipe-tag--off">SLIDERS OFF</span>
+      <p className="nintro-wipe-a nintro-wipe-a--before">It was fine. I answered a few questions, sorted some notes, and that is about all there is to say.</p>
+      <p className="nintro-wipe-a nintro-wipe-a--after">Wonderful! I got to help with so many curious questions, and every single one taught me something new.</p>
+      <i className="nintro-wipe-bar" />
+    </div>
   )
 }
 
@@ -106,23 +131,80 @@ function ArtShare() {
   )
 }
 
-/** The four ways, as tiles that come in one after the other. */
+// Step 3 (3.1.0): four ways lead into one slider. One way at a time lights
+// up, its line runs to the slider, the thumb settles and the slider gets its
+// name. The small marks are drawn for this card, no icon set.
+const WAYS = [
+  { name: 'Ready-made', slider: 'Cheerful' },
+  { name: 'From examples', slider: 'Like a pirate' },
+  { name: 'Features', slider: 'Feature 8949' },
+  { name: 'Coordinates', slider: 'L14N8949 +1.0' },
+]
+const WAY_Y = [30, 66, 102, 138]
+const MARK_X = 56
+const wayPath = (y: number) => `M184 ${y} C250 ${y} 232 84 296 84`
+
+function WayMark({ i, y }: { i: number; y: number }) {
+  if (i === 0) {
+    return (
+      <>
+        {[0, 8, 16].map((dx, k) => (
+          <g key={dx}>
+            <line x1={MARK_X + 2 + dx} y1={y - 8} x2={MARK_X + 2 + dx} y2={y + 8} strokeWidth="1" />
+            <circle cx={MARK_X + 2 + dx} cy={y + [-3, 4, -6][k]} r="2.2" stroke="none" />
+          </g>
+        ))}
+      </>
+    )
+  }
+  if (i === 1) {
+    return (
+      <>
+        <rect x={MARK_X} y={y - 6} width="20" height="2.4" rx="1.2" stroke="none" />
+        <rect x={MARK_X} y={y - 1.2} width="14" height="2.4" rx="1.2" stroke="none" />
+        <rect x={MARK_X} y={y + 3.6} width="18" height="2.4" rx="1.2" stroke="none" />
+      </>
+    )
+  }
+  if (i === 2) {
+    return (
+      <>
+        {[0, 1, 2].flatMap((r) => [0, 1, 2].map((c) => (
+          <circle key={`${r}${c}`} cx={MARK_X + 3 + c * 7} cy={y - 7 + r * 7} r={r === 1 && c === 2 ? 2.8 : 1.3} stroke="none" />
+        )))}
+      </>
+    )
+  }
+  return <text x={MARK_X - 1} y={y + 3.5} className="nintro-code" style={{ fontSize: 9 }} stroke="none">L14</text>
+}
+
+/** The four ways, as lines that run into one slider, one after the other. */
 function ArtWays() {
-  const ways = [
-    { icon: <Sliders size={18} />, name: 'Ready-made', line: 'Five sliders, any model' },
-    { icon: <Sparkles size={18} />, name: 'From examples', line: 'Write lines, get a slider' },
-    { icon: <FlaskConical size={18} />, name: 'Features', line: 'Search what a model knows' },
-    { icon: <Hash size={18} />, name: 'Coordinates', line: 'Paste what others share' },
-  ]
   return (
-    <div className="grid grid-cols-2 gap-2.5 w-full px-2" aria-hidden>
-      {ways.map((w, i) => (
-        <div key={w.name} className="nintro-tile rounded-xl border border-gray-200 dark:border-white/[0.08] bg-white dark:bg-white/[0.03] px-3 py-2.5" style={{ animationDelay: `${i * 0.18}s` }}>
-          <div className="flex items-center gap-2 text-lu-accent">{w.icon}<span className="t-body font-medium text-gray-900 dark:text-white">{w.name}</span></div>
-          <p className={`t-micro ${HINWEIS_TEXT.ruhig} mt-1`}>{w.line}</p>
-        </div>
+    <svg viewBox="0 0 480 168" className="w-full h-full" aria-hidden>
+      {WAYS.map((w, i) => {
+        const y = WAY_Y[i]
+        const delay = { animationDelay: `${i * 2}s` }
+        return (
+          <g key={w.name}>
+            <path d={wayPath(y)} className="nintro-way-wire" />
+            <path d={wayPath(y)} pathLength={100} className="nintro-way-run" style={delay} />
+            <g className="nintro-way" style={delay}>
+              <g className="nintro-way-mark"><WayMark i={i} y={y} /></g>
+              <text x={MARK_X + 30} y={y + 4} className="nintro-name nintro-text">{w.name}</text>
+            </g>
+          </g>
+        )
+      })}
+      <line x1="298" y1="84" x2="424" y2="84" strokeWidth="4" strokeLinecap="round" className="nintro-track" />
+      <line x1="361" y1="74" x2="361" y2="94" strokeWidth="1.5" className="nintro-track" />
+      <g className="nintro-way-knob"><rect x="353" y="71" width="16" height="26" rx="5" className="nintro-accent-fill" /></g>
+      {WAYS.map((w, i) => (
+        <text key={w.name} x="361" y="52" textAnchor="middle" className={`nintro-name nintro-text nintro-way-name${i === 0 ? ' nintro-way-name--first' : ''}`} style={{ animationDelay: `${i * 2}s` }}>{w.slider}</text>
       ))}
-    </div>
+      <text x="298" y="118" className="nintro-label nintro-muted-text">less</text>
+      <text x="424" y="118" textAnchor="end" className="nintro-label nintro-muted-text">more</text>
+    </svg>
   )
 }
 

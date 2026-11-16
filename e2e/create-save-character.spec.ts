@@ -88,7 +88,7 @@ test('frames across a video become a saved character that survives a reload', as
   await dialog.getByRole('button', { name: 'Train in Character Studio' }).click()
   await expect(dialog).toHaveCount(0)
   await expect(characterPill(page)).toBeChecked()
-  await expect(page.locator('[data-hub-head]')).toContainText('Train')
+  await expect(page.locator('[data-hub-training]')).toContainText('Train a model')
   await expect(page.getByText(/^4\/30 photos\./)).toBeVisible()
 
   // After a reload the character is still there (the boot script puts the app

@@ -157,8 +157,18 @@ export function UploadLine({ icon, label, accept, onFile, note }: {
   )
 }
 
-/** The column every step of the area shares: 660 px, centred. */
+/** A page of the area that is one column (the training): 660 px, centred. */
 export const HUB_COLUMN = 'mx-auto w-full max-w-[660px] px-4'
+
+/** What stands at the top of the bar at the foot: on the stage the switch
+ *  between Image, Swap, Motion and Talk. Every bar of the area shows it
+ *  (the Composer's, the one click swap's); outside the stage there is none. */
+export const HubBarTopContext = createContext<ReactNode>(null)
+
+export function HubBarTop() {
+  const top = useContext(HubBarTopContext)
+  return top ? <div className="hub-line border-b" data-hub-bar-top>{top}</div> : null
+}
 
 /** A switch as a row (one click swap, sketch c2): the name, a grey line what
  *  it does, the switch at the right. A hairline under it, no box. */

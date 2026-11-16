@@ -195,6 +195,27 @@ export async function saveCharacter(name: string, photos: readonly Blob[]): Prom
   return { character: revive(row), added: take.length, dropped: photos.length - take.length, merged: !!existing }
 }
 
+/**
+ * Gives a saved character another name. A name another character already
+ * has (upper and lower case count as the same) is refused, so two saves
+ * never fold into one by a rename.
+ */
+export async function renameSavedCharacter(id: string, name: string): Promise<SavedCharacter> {
+  const clean = name.trim().replace(/\s+/g, ' ').slice(0, MAX_CHARACTER_NAME)
+  if (!clean) throw new Error('Give the character a name.')
+  const rows = await readAll()
+  const row = rows.find((r) => r.id === id)
+  if (!row) throw new Error('This character is no longer there.')
+  if (rows.some((r) => r.id !== id && r.name.toLowerCase() === clean.toLowerCase())) {
+    throw new Error(`There is already a character called ${clean}.`)
+  }
+  const next: StoredCharacter = { ...row, name: clean }
+  await write(next)
+  await mirrorAll()
+  changed()
+  return revive(next)
+}
+
 export async function deleteSavedCharacter(id: string): Promise<void> {
   if (!hasIDB()) memory.delete(id)
   else await request('readwrite', (s) => s.delete(id))

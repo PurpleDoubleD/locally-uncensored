@@ -9,7 +9,7 @@
 // LoRA, Swap puts its picture on person 1, Motion and Talk start from its
 // picture. Nothing here books or renders anything.
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useCreateStore } from '../../../../stores/createStore'
 import { listLoras } from '../../../../api/cloud/loras'
 import { listLocalCharacters, characterLoraFile } from '../../../../lib/characters'
@@ -21,6 +21,8 @@ import {
   type HubAction, type HubCharacter,
 } from '../../../../lib/create/character-hub'
 import type { ImageRef } from '../../../../lib/image-ref'
+import { useCharacterNames, withCharacterNames } from '../../../../lib/create/character-names'
+import { trainingPhotos } from '../../../../lib/character-photos'
 import { useSavedCharacters } from '../SavedCharacters'
 import { loadImageRef } from '../loadImage'
 import { loadPhotosAsReferences } from '../characterPhotos'
@@ -60,12 +62,48 @@ export function useHubCharacters(): HubCharacterList {
     return () => { live = false }
   }, [tauri, version])
 
+  const names = useCharacterNames((s) => s.names)
   // A source that is not asked here (cloud off, no Tauri) is an empty list;
-  // one that is asked shows its last answer until the new one is in.
-  const cloud = backend !== 'cloud' ? [] : cloudRows?.list ?? null
-  const local = !tauri ? [] : localRows?.list ?? null
-  const photoSets = saved.map((c) => hubFromSaved(c, c.thumb))
-  return { list: mergeHubCharacters(cloud ?? [], local ?? [], photoSets), loading: cloud === null || local === null }
+  // one that is asked shows its last answer until the new one is in. The
+  // user's own names for LoRA characters (Rename) go in here, so every place
+  // that reads the list shows them.
+  const list = useMemo(() => {
+    const cloud = backend !== 'cloud' ? [] : cloudRows?.list ?? []
+    const local = !tauri ? [] : localRows?.list ?? []
+    return withCharacterNames(mergeHubCharacters(cloud, local, saved.map((c) => hubFromSaved(c, c.thumb))), names)
+  }, [backend, cloudRows, tauri, localRows, saved, names])
+  return { list, loading: (backend === 'cloud' && cloudRows === null) || (tauri && localRows === null) }
+}
+
+/** The most photos the stage shows of one character. */
+export const STAGE_PHOTOS = 30
+
+/**
+ * The photos of a character, for the stage: the saved photos of a photo
+ * character, the training photos a local character still has on this
+ * machine, or the one picture a cloud character brings (its base look).
+ * Addresses made here are given back when the character changes.
+ */
+export function useCharacterPhotos(c: HubCharacter | null): { photos: string[]; loading: boolean } {
+  const [asked, setAsked] = useState<{ key: string; photos: string[] } | null>(null)
+  const key = c?.key ?? ''
+  const blobs = c?.photos
+  const ref = c?.kind === 'local' ? c.ref : undefined
+  const image = c?.image ?? null
+  const own = useMemo(() => (blobs?.length ? blobs.slice(0, STAGE_PHOTOS).map((b) => URL.createObjectURL(b)) : null), [blobs])
+  useEffect(() => () => { for (const u of own ?? []) URL.revokeObjectURL(u) }, [own])
+  useEffect(() => {
+    let live = true
+    if (!key || own || !ref) return
+    trainingPhotos(ref, STAGE_PHOTOS)
+      .then((photos) => { if (live) setAsked({ key, photos }) })
+      .catch(() => { if (live) setAsked({ key, photos: [] }) })
+    return () => { live = false }
+  }, [key, own, ref])
+  if (!key) return { photos: [], loading: false }
+  if (own) return { photos: own, loading: false }
+  if (ref) return { photos: asked?.key === key ? asked.photos : [], loading: asked?.key !== key }
+  return { photos: image ? [image] : [], loading: false }
 }
 
 /** Which character a loaded picture came from, by its address, so a line

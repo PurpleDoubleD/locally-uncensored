@@ -96,7 +96,11 @@ export function registerRemoteStubs(routes: RouteMount): void {
   // The chat's workflow tools (C60-S5): the fetch with its host allowlist and
   // the node pack install by key are Rust; the tools say so before calling.
   // Watchers: the clock, the list and the notification live in Rust.
+  // The LoRA folder of "New character" and a LoRA file dropped there (3.1.0):
+  // the folder, the file manager and the copy are Rust.
   for (const path of [
+    '/local-api/character-lora-folder', '/local-api/character-lora-folder-open',
+    '/local-api/character-lora-import', '/local-api/character-lora-import-cancel',
     '/local-api/watchers-list', '/local-api/watchers-create', '/local-api/watchers-update', '/local-api/watchers-delete',
     '/local-api/watchers-run-now', '/local-api/watchers-finished', '/local-api/watchers-runner-ready',
     '/local-api/watchers-dismiss-hint', '/local-api/watchers-notify',

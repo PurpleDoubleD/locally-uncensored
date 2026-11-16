@@ -1986,7 +1986,10 @@ export function SwapControls({ oneClick }: {
  *  further, in the settings drawer (CharacterHub links it). */
 export function SpecialMore({ intent }: { intent: CreateIntent }) {
   if (intent === 'swap_character') return <SwapMore />
-  if (intent === 'character') return <CharacterMore />
+  // On the stage the file actions stand at the character on the left. That
+  // column is gone on a phone-wide window (index.css, .hub-card), so there
+  // they stay here.
+  if (intent === 'character') return <div className="min-[701px]:hidden"><CharacterMore /></div>
   return null
 }
 
@@ -2025,8 +2028,10 @@ function SwapMore() {
   )
 }
 
-/** Image: what can be done with the picked character's file. */
-function CharacterMore() {
+/** What can be done with the picked character's file: under More options
+ *  of Image, and `bare` (without the name, on any tab) at the character on
+ *  the stage. */
+export function CharacterMore({ bare = false }: { bare?: boolean } = {}) {
   const backend = useCreateStore((s) => s.backend)
   const characterTab = useCreateStore((s) => s.characterTab)
   const hubCharacter = useCreateStore((s) => s.hubCharacter)
@@ -2034,11 +2039,11 @@ function CharacterMore() {
   const setHubCharacter = useCreateStore((s) => s.setHubCharacter)
   const lora = hubCharacter?.lora
   const localFile = characterLoraFile(hubCharacter?.ref)
-  if (characterTab !== 'use' || !hubCharacter) return null
+  if ((!bare && characterTab !== 'use') || !hubCharacter) return null
   if (localFile && hubCharacter.ref) {
     return (
       <div className="flex items-center gap-1 hub-fs-125" data-character-file-actions>
-        <span className="hub-muted mr-2">{hubCharacter.name}</span>
+        {!bare && <span className="hub-muted mr-2">{hubCharacter.name}</span>}
         <LocalCharacterDelete file={localFile} trigger={hubCharacter.ref.triggerWord} />
       </div>
     )
@@ -2046,7 +2051,7 @@ function CharacterMore() {
   if (backend !== 'cloud' || !lora) return null
   return (
     <div className="flex items-center gap-1 hub-fs-125" data-character-file-actions>
-      <span className="hub-muted mr-2">{hubCharacter.name}</span>
+      {!bare && <span className="hub-muted mr-2">{hubCharacter.name}</span>}
       <CharacterDownload lora={lora} />
       <CharacterUseLocally lora={lora} />
       <button

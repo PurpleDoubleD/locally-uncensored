@@ -426,6 +426,189 @@ pub async fn import_cloud_character(
     })
 }
 
+// ── a LoRA file the user brings ─────────────────────────────────────────────
+//
+// 3.1.0, "New character": a `.safetensors` dropped on the page becomes a
+// character of this machine. The window cannot hand over a path (the WebView
+// gives a dropped file as bytes), so the file comes in pieces and is put
+// together next to its place. It only gets its name, `char_<name>_zimage
+// .safetensors`, once its header reads as a LoRA.
+
+/// The most one piece carries, decoded.
+const MAX_PIECE_BYTES: usize = 16 * 1024 * 1024;
+/// The largest LoRA file taken at all.
+const MAX_LORA_BYTES: u64 = 4 * 1024 * 1024 * 1024;
+
+/// What a piece left behind.
+#[derive(Debug, PartialEq)]
+pub(crate) enum Piece {
+    /// Written; `received` bytes are there now.
+    More { received: u64 },
+    /// The last piece: the file stands under its name.
+    Saved { file: String, path: PathBuf, bytes: u64, format: KeyFormat },
+    /// A character of that name is there already. Nothing was replaced.
+    Exists { file: String },
+}
+
+fn staging_of(dest: &Path) -> PathBuf {
+    let mut name = dest.file_name().map(|n| n.to_os_string()).unwrap_or_default();
+    name.push(".upload");
+    dest.with_file_name(name)
+}
+
+/// Adds one piece of a brought LoRA file. `offset` is where the piece
+/// starts: 0 starts over, anything else must be exactly what is there.
+pub(crate) fn take_piece(loras: &Path, name: &str, offset: u64, bytes: &[u8], last: bool) -> Result<Piece, String> {
+    use std::io::Write;
+    let Some(file) = local_character_file(name, name) else {
+        return Err("Give the character a name with letters or digits.".to_string());
+    };
+    if bytes.len() > MAX_PIECE_BYTES {
+        return Err("This piece of the file is too large.".to_string());
+    }
+    let dest = loras.join(&file);
+    let staging = staging_of(&dest);
+    if dest.exists() {
+        let _ = fs::remove_file(&staging);
+        return Ok(Piece::Exists { file });
+    }
+    fs::create_dir_all(loras).map_err(|e| format!("The LoRA folder could not be made: {}", os_error::english(&e)))?;
+    let have = if offset == 0 { 0 } else { fs::metadata(&staging).map(|m| m.len()).unwrap_or(0) };
+    if have != offset {
+        let _ = fs::remove_file(&staging);
+        return Err("The file arrived out of order. Nothing was added, drop it again.".to_string());
+    }
+    if offset.saturating_add(bytes.len() as u64) > MAX_LORA_BYTES {
+        let _ = fs::remove_file(&staging);
+        return Err("This file is larger than a LoRA gets (4 GB). Nothing was added.".to_string());
+    }
+    let mut out = fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .append(offset != 0)
+        .truncate(offset == 0)
+        .open(&staging)
+        .map_err(|e| format!("The file could not be written: {}", os_error::english(&e)))?;
+    if let Err(e) = out.write_all(bytes).and_then(|()| out.flush()) {
+        drop(out);
+        let _ = fs::remove_file(&staging);
+        return Err(format!("The file could not be written: {}", os_error::english(&e)));
+    }
+    drop(out);
+    let received = offset + bytes.len() as u64;
+    if !last {
+        return Ok(Piece::More { received });
+    }
+    let Some(names) = tensor_names(&staging) else {
+        let _ = fs::remove_file(&staging);
+        return Err("This file is not a LoRA LU can read. Nothing was added.".to_string());
+    };
+    let format = key_format(names.iter().map(String::as_str));
+    if dest.exists() {
+        let _ = fs::remove_file(&staging);
+        return Ok(Piece::Exists { file });
+    }
+    if let Err(e) = fs::rename(&staging, &dest) {
+        let _ = fs::remove_file(&staging);
+        return Err(format!("The file could not be saved: {}", os_error::english(&e)));
+    }
+    Ok(Piece::Saved { file, path: dest, bytes: received, format })
+}
+
+/// `character_lora_folder`: where a character file lives on this machine,
+/// `{status: "ok", path}`, or `{status: "no_comfy"}` when there is no LoRA
+/// folder (no ComfyUI found). Desktop only, like the page that asks: a
+/// phone has no LoRA folder.
+#[cfg(desktop)]
+#[tauri::command]
+pub fn character_lora_folder(state: tauri::State<'_, AppState>) -> serde_json::Value {
+    match local_loras_dir(state.inner()) {
+        Some(dir) => serde_json::json!({ "status": "ok", "path": dir.to_string_lossy() }),
+        None => serde_json::json!({ "status": "no_comfy" }),
+    }
+}
+
+/// `character_lora_folder_open`: that folder in the file manager. It is made
+/// first, so a machine without a LoRA yet opens an empty folder.
+#[cfg(desktop)]
+#[tauri::command]
+pub fn character_lora_folder_open(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
+    let Some(dir) = local_loras_dir(state.inner()) else {
+        return Ok(serde_json::json!({ "status": "no_comfy" }));
+    };
+    fs::create_dir_all(&dir).map_err(|e| format!("The LoRA folder could not be made: {}", os_error::english(&e)))?;
+    #[cfg(target_os = "macos")]
+    let mut cmd = {
+        let mut c = std::process::Command::new("open");
+        c.arg(&dir);
+        c
+    };
+    #[cfg(target_os = "windows")]
+    let mut cmd = {
+        let mut c = std::process::Command::new("explorer");
+        c.arg(&dir);
+        c
+    };
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let mut cmd = {
+        let mut c = crate::process_util::foreign_system_command("xdg-open");
+        c.arg(&dir);
+        c
+    };
+    crate::process_util::suppress_window(&mut cmd);
+    // explorer.exe answers 1 even when it worked, so only a failed spawn counts.
+    cmd.spawn().map_err(|e| format!("Could not open the folder: {}", os_error::english(&e)))?;
+    Ok(serde_json::json!({ "status": "ok", "path": dir.to_string_lossy() }))
+}
+
+/// `character_lora_import`: one piece of a LoRA file the user dropped on
+/// "New character" (`take_piece`). Answers `{status: "more", received}`,
+/// `{status: "saved", file, path, bytes, keyFormat}`, `{status: "exists",
+/// file}` or `{status: "no_comfy"}`.
+#[cfg(desktop)]
+#[tauri::command]
+#[allow(non_snake_case)]
+pub async fn character_lora_import(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    name: String,
+    offset: u64,
+    dataB64: String,
+    last: bool,
+) -> Result<serde_json::Value, String> {
+    let Some(loras) = local_loras_dir(state.inner()) else {
+        return Ok(serde_json::json!({ "status": "no_comfy" }));
+    };
+    let train = crate::commands::trainer::trainer_root(&app).join("train");
+    tauri::async_runtime::spawn_blocking(move || {
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(dataB64.as_bytes())
+            .map_err(|_| "The file did not arrive whole. Nothing was added, drop it again.".to_string())?;
+        Ok(match take_piece(&loras, &name, offset, &bytes, last)? {
+            Piece::More { received } => serde_json::json!({ "status": "more", "received": received }),
+            Piece::Exists { file } => serde_json::json!({ "status": "exists", "file": file }),
+            Piece::Saved { file, path, bytes, format } => {
+                // Training photos of an earlier character of this name are
+                // not this file's.
+                if let Some(trigger) = trigger_of(&file) {
+                    disown_training_set(&train.join(crate::commands::trainer::sanitize_component(&trigger)));
+                }
+                serde_json::json!({ "status": "saved", "file": file, "path": path.to_string_lossy(), "bytes": bytes, "keyFormat": format })
+            }
+        })
+    })
+    .await
+    .map_err(|e| format!("The file could not be saved: {e}"))?
+}
+
+/// `character_lora_import_cancel`: the pieces of an import that was given up.
+#[cfg(desktop)]
+#[tauri::command]
+pub fn character_lora_import_cancel(state: tauri::State<'_, AppState>, name: String) {
+    let (Some(loras), Some(file)) = (local_loras_dir(state.inner()), local_character_file(&name, &name)) else { return };
+    let _ = fs::remove_file(staging_of(&loras.join(file)));
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -505,6 +688,62 @@ mod tests {
         assert_eq!(names, vec!["diffusion_model.layers.1.attention.to_k.lora_A.weight".to_string()]);
         fs::write(dir.join("not.safetensors"), b"<html>expired</html>").unwrap();
         assert!(tensor_names(&dir.join("not.safetensors")).is_none());
+    }
+
+    fn lora_bytes(names: &[&str]) -> Vec<u8> {
+        let dir = test_dir("character-lora-bytes");
+        let path = dir.join("x.safetensors");
+        safetensors(&path, names);
+        fs::read(path).unwrap()
+    }
+
+    #[test]
+    fn a_brought_lora_comes_in_pieces_and_gets_its_name_at_the_end() {
+        let dir = test_dir("character-lora-pieces");
+        let loras = dir.join("loras");
+        let bytes = lora_bytes(&["diffusion_model.layers.0.attention.to_q.lora_A.weight"]);
+        let (a, b) = bytes.split_at(bytes.len() / 2);
+        assert_eq!(take_piece(&loras, "Mira", 0, a, false).unwrap(), Piece::More { received: a.len() as u64 });
+        assert!(!loras.join("char_Mira_zimage.safetensors").exists(), "no name before the header was read");
+        let done = take_piece(&loras, "Mira", a.len() as u64, b, true).unwrap();
+        let dest = loras.join("char_Mira_zimage.safetensors");
+        assert_eq!(done, Piece::Saved { file: "char_Mira_zimage.safetensors".into(), path: dest.clone(), bytes: bytes.len() as u64, format: KeyFormat::Same });
+        assert_eq!(fs::read(&dest).unwrap(), bytes);
+        assert!(!staging_of(&dest).exists());
+    }
+
+    #[test]
+    fn a_piece_out_of_order_or_a_file_that_is_no_lora_adds_nothing() {
+        let dir = test_dir("character-lora-refused");
+        let loras = dir.join("loras");
+        let dest = loras.join("char_a_zimage.safetensors");
+        assert!(take_piece(&loras, "a", 0, b"abc", false).is_ok());
+        assert!(take_piece(&loras, "a", 99, b"def", false).unwrap_err().contains("out of order"));
+        assert!(!staging_of(&dest).exists());
+        let err = take_piece(&loras, "a", 0, b"<html>not a lora</html>", true).unwrap_err();
+        assert!(err.contains("not a LoRA"), "{err}");
+        assert!(!dest.exists() && !staging_of(&dest).exists());
+        assert!(take_piece(&loras, "€€", 0, b"x", true).unwrap_err().contains("name"));
+    }
+
+    #[test]
+    fn a_character_of_that_name_is_never_replaced() {
+        let dir = test_dir("character-lora-exists");
+        let loras = dir.join("loras");
+        fs::create_dir_all(&loras).unwrap();
+        fs::write(loras.join("char_a_zimage.safetensors"), b"mine").unwrap();
+        let bytes = lora_bytes(&["diffusion_model.layers.0.attention.to_q.lora_A.weight"]);
+        assert_eq!(take_piece(&loras, "a", 0, &bytes, true).unwrap(), Piece::Exists { file: "char_a_zimage.safetensors".into() });
+        assert_eq!(fs::read(loras.join("char_a_zimage.safetensors")).unwrap(), b"mine");
+    }
+
+    #[test]
+    fn a_lora_for_another_model_is_taken_and_named_as_unknown() {
+        let dir = test_dir("character-lora-other");
+        let loras = dir.join("loras");
+        let bytes = lora_bytes(&["transformer.single_transformer_blocks.0.attn.to_q.lora_A.weight"]);
+        let Piece::Saved { format, .. } = take_piece(&loras, "b", 0, &bytes, true).unwrap() else { panic!("not saved") };
+        assert_eq!(format, KeyFormat::Unknown);
     }
 
     fn photo(path: &Path, w: u32, h: u32) {

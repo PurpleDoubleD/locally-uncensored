@@ -18,7 +18,7 @@ import { mediaSeconds, useStudioPrice } from '../useStudioPrice'
 import { Button } from '../../ui/Button'
 import { Select, type SelectOption } from '../../ui/Select'
 import { cn } from '../../ui/cn'
-import { HUB_COLUMN, HubSwitch, MoreOptions } from './HubParts'
+import { HubBarTop, HubSwitch, MoreOptions } from './HubParts'
 import { SwapLength, useSwapBar } from './SwapBarParts'
 import { adoptInput, cancelJob, pollJob, submitCloudJob, uploadInput, type CloudJob } from '../../../../api/cloud/jobs'
 import { galleryItemFromJob } from '../../../../lib/render/cloud-jobs'
@@ -320,16 +320,14 @@ export function SwapOneClick({ onChangeCharacter, onOpenAdvanced }: {
   )
 }
 
+// The two parts the stage places (index.css, .hub-stage): the body beside
+// the character, the bar across the foot.
 function Body({ children }: { children: ReactNode }) {
-  return (
-    <div className="min-h-0 flex-1 overflow-y-auto scrollbar-thin">
-      <div className={cn(HUB_COLUMN, 'pb-4')}>{children}</div>
-    </div>
-  )
+  return <div className="hub-body scrollbar-thin pb-4">{children}</div>
 }
 
 function Foot({ children }: { children: ReactNode }) {
-  return <div className={cn(HUB_COLUMN, 'shrink-0 pb-3 pt-2')}>{children}</div>
+  return <div className="hub-foot">{children}</div>
 }
 
 /** "First frame ▾" and "Video ▾" under More options (c3). */
@@ -389,6 +387,7 @@ function SwapBar({ narrow, summary, length, seconds, total, parts, ready, hint, 
   if (narrow) {
     return (
       <div className="hub-bar rounded-2xl" data-swap-bar="narrow">
+        <HubBarTop />
         {open && (
           <div className="hub-line flex flex-wrap items-center gap-2 border-b px-2.5 py-2" data-hub-bar-options>
             {length}
@@ -408,6 +407,7 @@ function SwapBar({ narrow, summary, length, seconds, total, parts, ready, hint, 
   }
   return (
     <div className="hub-bar" data-swap-bar="wide">
+      <HubBarTop />
       <div className="flex min-h-[45px] items-center gap-1.5 py-[5px] pl-2.5 pr-1.5">
         <span className="hub-muted whitespace-nowrap hub-fs-13" data-swap-summary>{summary}</span>
         {length}
@@ -498,6 +498,7 @@ function SwapReview({ chain, originalUrl, deps, summary, narrow }: {
       </Body>
       <Foot>
         <div className={cn('hub-bar', narrow && 'rounded-2xl')} data-swap-bar="review">
+          <HubBarTop />
           <input
             type="text"
             value={extra}

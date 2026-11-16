@@ -94,12 +94,10 @@ test('mac with Z-Image Turbo: Train new trains the character locally and it land
   expect(typeof start.raw.run).toBe('string')
 
   // Through: the tab turns to Use, and the new character is on the shelf.
-  // In the Character area: the panel turns to Image, and the new character
-  // is in the list of the head line.
-  await expect(page.getByRole('button', { name: 'Action' })).toContainText('Image', { timeout: 20_000 })
-  await page.getByRole('button', { name: 'Character', exact: true }).click()
-  await expect(page.getByRole('option', { name: /^luxfox/ })).toBeVisible({ timeout: 10_000 })
-  await page.keyboard.press('Escape')
+  // In the Character area: the stage turns to Image, and the new character
+  // is one of its tabs.
+  await expect(page.getByRole('radio', { name: 'Character Studio', exact: true })).toHaveAttribute('aria-checked', 'true', { timeout: 20_000 })
+  await expect(page.getByRole('tab', { name: /^luxfox/ })).toBeVisible({ timeout: 10_000 })
   await expect(page.getByText(/Training failed/)).toHaveCount(0)
   // The Windows trainer and ComfyUI are never asked.
   const names = await page.evaluate(() => ((window as unknown as { __TAURI_CALLS__?: Array<{ cmd: string }> }).__TAURI_CALLS__ ?? []).map((c) => c.cmd))
@@ -161,7 +159,7 @@ test('mac: frames of a video go through Use frames for a character into the Mac 
   await expect(dialog).toHaveCount(0)
 
   // They land on the Train tab of the Mac, which trains them here.
-  await expect(page.locator('[data-hub-head]')).toContainText('Train')
+  await expect(page.locator('[data-hub-training]')).toContainText('Train a model')
   const controls = page.getByTestId('mac-train-controls')
   await expect(controls).toContainText('7/100 photos', { timeout: 15_000 })
   await controls.getByPlaceholder('Trigger word, e.g. davechar').fill('foxclip')
@@ -173,8 +171,7 @@ test('mac: frames of a video go through Use frames for a character into the Mac 
   for (const s of staged) expect(Number(s.raw.bytes)).toBeGreaterThan(100)
   const [start] = await calls(page, 'mlx_train_start')
   expect(start.raw).toMatchObject({ set: 'foxclip', trigger: 'foxclip' })
-  // The new character is in the list of the head line of the Character area.
-  await expect(page.getByRole('button', { name: 'Action' })).toContainText('Image', { timeout: 20_000 })
-  await page.getByRole('button', { name: 'Character', exact: true }).click()
-  await expect(page.getByRole('option', { name: /^foxclip/ })).toBeVisible({ timeout: 10_000 })
+  // The new character is one of the tabs of the stage of the Character area.
+  await expect(page.getByRole('radio', { name: 'Character Studio', exact: true })).toHaveAttribute('aria-checked', 'true', { timeout: 20_000 })
+  await expect(page.getByRole('tab', { name: /^foxclip/ })).toBeVisible({ timeout: 10_000 })
 })
