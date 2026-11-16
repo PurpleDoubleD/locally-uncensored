@@ -1980,16 +1980,11 @@ export function SwapControls({ oneClick }: {
   )
 }
 
-/** What "More options" holds in a panel of the Character area. Nothing that
- *  was there before falls away: the resolution and the notes of Swap, the
- *  character's file actions of Image. The model's full schema stays one click
- *  further, in the settings drawer (CharacterHub links it). */
+/** The further settings of an action of the Character tab, shown in the
+ *  settings of the prompt window (hub/HubSettings): the resolution and the
+ *  notes of Swap. A character's file actions stand at its head on the stage. */
 export function SpecialMore({ intent }: { intent: CreateIntent }) {
   if (intent === 'swap_character') return <SwapMore />
-  // On the stage the file actions stand at the character on the left. That
-  // column is gone on a phone-wide window (index.css, .hub-card), so there
-  // they stay here.
-  if (intent === 'character') return <div className="min-[701px]:hidden"><CharacterMore /></div>
   return null
 }
 

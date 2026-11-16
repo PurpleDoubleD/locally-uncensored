@@ -11,6 +11,8 @@ interface Props {
   /** A pixel cap, or any CSS length. Default: PROMPT_FIELD_MAX. */
   maxHeight?: number | string
   autoFocus?: boolean
+  /** The field stands, and takes no text (an action without a prompt). */
+  disabled?: boolean
   className?: string
 }
 
@@ -29,7 +31,7 @@ interface Props {
 const PROMPT_FIELD_MAX = 'min(220px, calc(16vh / var(--ui-scale, 1)))'
 
 // Auto-grow textarea — grow logic ported from PromptInput.tsx:46-51.
-export function PromptField({ value, onChange, placeholder, onSubmit, maxHeight = PROMPT_FIELD_MAX, autoFocus, className }: Props) {
+export function PromptField({ value, onChange, placeholder, onSubmit, maxHeight = PROMPT_FIELD_MAX, autoFocus, disabled, className }: Props) {
   const ref = useRef<HTMLTextAreaElement>(null)
 
   // Measured off-page and written only on a real change (GH #139), so a key
@@ -45,6 +47,7 @@ export function PromptField({ value, onChange, placeholder, onSubmit, maxHeight 
       ref={ref}
       value={value}
       autoFocus={autoFocus}
+      disabled={disabled}
       onChange={(e) => onChange(e.target.value)}
       onKeyDown={(e) => {
         if (onSubmit && (e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); onSubmit() }

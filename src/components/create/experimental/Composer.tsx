@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Sparkles, X, SlidersHorizontal, Square, Workflow } from 'lucide-react'
+import { Sparkles, X, SlidersHorizontal, Square, Upload, Workflow } from 'lucide-react'
 import { isMlxImageHost, MAC_UPSCALE_FACTORS, type MacUpscaleFactor } from '../../../api/mlx-image'
 import { laneImageModel, runsAtOwnSampling } from '../../../lib/image-engines'
 import { MLX_VIDEO_MIN_FRAMES, mlxFramesOnGrid, mlxVideoLaneEntry, mlxVideoMaxFrames, mlxTalking } from '../../../api/mlx-video'
@@ -18,10 +18,10 @@ import { createRunModel, intentRequiredInputs, isStudioModel, studioIntentOf } f
 import { STUDIO_MODELS } from '../../../lib/render/studio-contract'
 import { swapBilledPhotos, swapPricedSeconds, swapShortCredits } from '../../../lib/render/swap'
 import { swapReady } from '../../../lib/create/swap-run'
-import { modelLabel } from '../../../lib/render/preset-models'
-import { SwapLength, SwapPrice, useSwapBar } from './hub/SwapBarParts'
-import { HubBarTop } from './hub/HubParts'
-import { useLocalPick } from './localPick'
+import { HubActionRow } from './hub/HubActionRow'
+import { useHubRun } from './hub/hubRun'
+import { ACTION_LABEL, actionOfIntent } from '../../../lib/create/character-hub'
+import { mediaRefFrom } from './mediaRef'
 import { swapConfirmedFrame } from '../../../lib/create/swap-frame'
 import { soundApplies, soundInputError } from '../../../lib/render/sound'
 import { useCharacterHubReleased } from '../../../lib/create/character-hub-release'
@@ -59,9 +59,11 @@ import { cn } from '../ui/cn'
 interface Props {
   onOpenAdvanced: () => void
   onOpenWorkflows: () => void
-  /** The bar at the foot of the Character area (sketches v2): only the field
-   *  where the action takes a prompt, and one row with the model, the length,
-   *  the price and Create. The inputs stand in the area above. */
+  /** The Character tab (David, 16.11.2026). The window is this same one, at
+   *  the same place and width. Over it stands the row of the tab (Image,
+   *  Swap, Motion, Talk); in it only the text field, an upload where the
+   *  action takes a video, the settings and Create. Everything else of the
+   *  tab is in the settings (AdvancedDrawer) or in the area above. */
   hub?: boolean
 }
 
@@ -82,30 +84,7 @@ const NEGATIVE_FIELD_MAX = 'min(120px, calc(9vh / var(--ui-scale, 1)))'
 /** The prompt field of the Mac's local Edit tab. See the placeholder below. */
 const MAC_EDIT_PLACEHOLDER = 'Describe what to change in this image. Paint a mask to change only that area…'
 
-/** The window is phone-wide (the Character area's bar takes m310's short form). */
-export function useNarrow(): boolean {
-  const query = '(max-width: 520px)'
-  const [narrow, setNarrow] = useState(() => typeof window !== 'undefined' && !!window.matchMedia?.(query).matches)
-  useEffect(() => {
-    if (typeof window === 'undefined' || !window.matchMedia) return
-    const m = window.matchMedia(query)
-    const on = () => setNarrow(m.matches)
-    on()
-    m.addEventListener('change', on)
-    return () => m.removeEventListener('change', on)
-  }, [])
-  return narrow
-}
-
-/** The name of the local model the tab runs, for the phone's summary. */
-function useLocalPickName(): string | null {
-  const { value } = useLocalPick()
-  return value ? value.replace(/\.(safetensors|gguf|ckpt)$/i, '') : null
-}
-
 export function Composer({ onOpenAdvanced, onOpenWorkflows, hub = false }: Props) {
-  const narrow = useNarrow()
-  const [narrowOpen, setNarrowOpen] = useState(false)
   const intent = useCreateStore((s) => s.intent())
   const meta = INTENT_MAP[intent]
   const prompt = useCreateStore((s) => s.prompt)
@@ -444,31 +423,44 @@ export function Composer({ onOpenAdvanced, onOpenWorkflows, hub = false }: Props
   const laneCaption = noPromptHint(meta.id, backend, backend === 'local' && isMlxImageHost(), trainKind)
   // The disabled button says which input it waits for (laneHint.ts).
   const missingSource = missingSourceHint({ intent, needsSource, hasSource: hasStart })
-  // The price of a cloud run in the bar of the Character area (Swap has its
-  // own parts, SwapPrice). Local runs cost nothing and show none.
+  // The price of a cloud run of the Character tab, named on the button.
+  // Local runs cost nothing and show none.
   const hubCredits = hub && backend === 'cloud'
     ? ((studioPick ? studioPrice?.credits : (cloudStudioCredits ?? lengthShown)) ?? null) !== null
       ? (studioPick ? studioPrice!.credits : (cloudStudioCredits ?? lengthShown)!) * imageCount + lipsyncExtra
       : null
     : null
-  // The phone's short summary of the bar: model, and the length on Swap.
-  const localPickName = useLocalPickName()
-  const hubModelName = backend === 'cloud' ? modelLabel(runModel) : (localPickName ?? 'Local')
-  const swapBar = useSwapBar(inputSeconds)
-  // Swap without the account switch has nothing to pick or pay; with it, the
-  // length and its price stand once there is a video to measure.
-  const swapSoon = swap && !hubReleased
-  const swapBarShown = swap && backend === 'cloud' && !swapSoon && !!videoInput
-  const hubSummary = swapBarShown ? `${hubModelName} · ${swapBar.value} s` : swapSoon ? 'Swap' : hubModelName
   // Swap Character names its price on the button (the web's CreateButton):
   // a paid video run, priced by its length. With a new voice the lip sync
-  // step is in the figure too. On the phone every cloud run of the area
-  // names it (m310's Create pill).
+  // step is in the figure too. In the Character tab every cloud run names it.
   const createPrice = swap && backend === 'cloud' && priceSeconds !== undefined && studioPrice
     ? swapShortCredits(studioPrice.credits + lipsyncExtra)
     : lipsyncOn && lipsyncExtra > 0 && (studioPrice?.credits ?? cloudStudioCredits ?? lengthShown) != null
       ? swapShortCredits((studioPrice?.credits ?? cloudStudioCredits ?? lengthShown ?? 0) + lipsyncExtra)
-      : hub && narrow && hubCredits != null ? swapShortCredits(hubCredits) : null
+      : hub && hubCredits != null ? swapShortCredits(hubCredits) : null
+  // The Character tab: what the area above says about this window (hubRun).
+  // The one click swap and the states of the stage in which nothing can be
+  // made yet bring their own button; everything else is the run of the tab.
+  const hubSwap = useHubRun((st) => st.swap)
+  const hubStage = useHubRun((st) => st.stage)
+  const hubRun = hub ? (hubSwap ?? hubStage?.run ?? null) : null
+  const hubField = hubRun?.field ?? null
+  const hubAction = actionOfIntent(intent)
+  // The field stands on every action. Where the action takes no text, it
+  // says so and takes none.
+  const hubNoText = hub && !needPrompt && !hubField
+  const hubNote = !hub ? null
+    : hubRun ? (!hubRun.ready && !hubRun.running ? hubRun.hint ?? null : null)
+      : showNoPromptHint && !needsMask && isInputHint(intent) ? laneCaption : null
+  // The video of Swap and Motion can come in through the window as well.
+  const hubUpload = hub && (intent === 'motion' || (swap && hubReleased && backend === 'cloud'))
+  const setHubWindow = useHubRun((st) => st.setWindow)
+  const hubTakesNegative = needPrompt && !optionalPrompt && negSupported
+  useEffect(() => { if (hub) setHubWindow(needPrompt && !hubField, hubTakesNegative) }, [hub, needPrompt, hubField, hubTakesNegative, setHubWindow])
+  const submit = () => {
+    if (hubRun) { if (hubRun.ready && !hubRun.running) hubRun.run(); return }
+    if (canGenerate && !isGenerating) guardedGenerate()
+  }
 
 
   return (
@@ -476,7 +468,7 @@ export function Composer({ onOpenAdvanced, onOpenWorkflows, hub = false }: Props
     // same vertical space on every tab — utility modes (no LaneControls / no
     // prompt) don't shrink it. That keeps the viewer + gallery row above it the
     // exact SAME height across all tabs, not just within one.
-    <div className={cn('shrink-0 flex flex-col justify-end', hub ? 'px-0 pb-3 pt-2' : 'px-4 pb-4 pt-2 min-h-[192px]')}>
+    <div className="shrink-0 flex flex-col justify-end px-4 pb-4 pt-2 min-h-[192px]" data-prompt-window-area>
       {/* 660, nicht 760: dieselbe Spalte wie im Chat, und dieselbe Rechnung.
           Die 760 waren hier als KOPIE von --lu-measure eingetippt; seit die
           App eine --ui-scale hat, wird die Zahl mitskaliert, 760 ergaebe also
@@ -484,42 +476,45 @@ export function Composer({ onOpenAdvanced, onOpenWorkflows, hub = false }: Props
           vor der Umstellung hatte. Siehe --lu-measure in index.css; dass die
           Zahl hier doppelt steht statt den Token zu lesen, ist ein eigener
           Befund und hier nicht behoben. */}
-      {/* In the Character area the place decides the width: the stage's foot
-          spans it, the training page is its own 660 column. */}
-      <div className={cn('mx-auto w-full space-y-2.5', !hub && 'max-w-[660px]')}>
+      {/* The same in every tab, the Character tab included (David,
+          16.11.2026): this width, this place, this frame. */}
+      <div className="mx-auto w-full max-w-[660px] space-y-2.5">
         {special && !hub && <SpecialControls intent={intent} />}
         {intent === '3d' && <ThreeDControls {...threeDControlFacts(backend, studioPick)} studioId={studioPick} pictureFirst={backend === 'local' || isPictureFirstRun(threeDWay, studioPick)} />}
         {/* Swap Character's options are its own panel above (SpecialControls). */}
         {!isUtility && !swap && !hub && <LaneControls />}
         {!hub && <CharacterNote />}
-        {hub && showNoPromptHint && intent === 'character' && characterTab === 'train' && (
-          // The training's one line on what to add (photos or pictures of the
-          // style), as it stood over the prompt window.
-          <p className="hub-dim hub-fs-125 text-center" data-testid="lane-input-note">{laneCaption}</p>
+        {/* The Character tab's row, where the other tabs have theirs. */}
+        {hub && <HubActionRow />}
+        {hubNote && (
+          <p className="t-body text-gray-500 text-center px-3.5" data-testid="lane-input-note">{hubNote}</p>
         )}
         {inputNote && !hub && (
           <p className="t-body text-gray-500 text-center px-3.5" data-testid="lane-input-note">{laneCaption}</p>
         )}
 
-        <div className={hub
-          ? cn('hub-bar transition-colors', narrow && 'rounded-2xl')
-          : 'rounded-[var(--radius-panel)] bg-white/[0.03] border border-white/[0.06] focus-within:border-white/15 transition-colors'}>
-          {hub && <HubBarTop />}
-          {needPrompt && (
+        <div className="rounded-[var(--radius-panel)] bg-white/[0.03] border border-white/[0.06] focus-within:border-white/15 transition-colors" data-prompt-window>
+          {(needPrompt || hub) && (
             // The prompt assistant (B43) sits in the field's corner, not in the
             // action bar: there every pixel is the model chip's, whose whole
             // name has to fit at 760 px (FEHLER-Q4 #2). The field keeps its
             // width and only leaves room for the button inside (pr-7).
             <div className="relative px-3.5 pt-3">
-              <div className="absolute top-2 right-2">
-                <PromptAssistant onUse={setPrompt} align="right" />
-              </div>
+              {!hub && (
+                <div className="absolute top-2 right-2">
+                  <PromptAssistant onUse={setPrompt} align="right" />
+                </div>
+              )}
               <PromptField
-                className="pr-7"
-                value={prompt}
-                onChange={setPrompt}
+                className={hub ? undefined : 'pr-7'}
+                value={hubField ? hubField.value : hubNoText ? '' : prompt}
+                onChange={hubField ? hubField.onChange : setPrompt}
+                disabled={hubNoText}
                 placeholder={
-                  characterUse
+                  hubField ? hubField.placeholder
+                  : hubNoText ? `${hubAction && !(intent === 'character' && characterTab === 'train') ? ACTION_LABEL[hubAction] : 'Training'} needs no text.`
+                  : hub && characterUse && hubStage?.placeholder ? hubStage.placeholder
+                  : characterUse
                     ? 'Describe the scene for your character…'
                     // R5-66: the shared 'edit' placeholder promises a maskless
                     // restyle that only the local lane actually allows once a
@@ -538,7 +533,7 @@ export function Composer({ onOpenAdvanced, onOpenWorkflows, hub = false }: Props
                         ? MUSIC_PLACEHOLDER[musicText(runModel).main]
                         : meta.placeholder)
                 }
-                onSubmit={() => canGenerate && !isGenerating && guardedGenerate()}
+                onSubmit={submit}
               />
             </div>
           )}
@@ -601,31 +596,8 @@ export function Composer({ onOpenAdvanced, onOpenWorkflows, hub = false }: Props
           )}
 
           {/* Action bar */}
-          {hub && narrow && narrowOpen && (
-            // The phone: the choices behind the short summary (m310's
-            // pattern; the sheet from below is theirs to bring, until then
-            // they open here, above the row).
-            <div className={cn('hub-line flex flex-wrap items-center gap-2 px-2.5 py-2', needPrompt && 'border-t')} data-hub-bar-options>
-              {!swapSoon && <ModelChip />}
-              {swapBarShown && <SwapLength videoSeconds={inputSeconds} disabled={isGenerating} />}
-              {swapBarShown && <SwapPrice videoSeconds={inputSeconds} />}
-            </div>
-          )}
-          <div className={hub
-            ? cn('flex items-center gap-1.5 pl-2.5 pr-1.5', narrow ? 'min-h-[45px] py-1.5' : 'min-h-[45px] py-[5px]', (needPrompt || (narrow && narrowOpen)) && 'hub-line border-t')
-            : 'flex items-center gap-1.5 px-2.5 py-2 border-t border-white/[0.05]'}>
-            {hub && narrow && (
-              <button
-                type="button"
-                onClick={() => setNarrowOpen(!narrowOpen)}
-                aria-expanded={narrowOpen}
-                className="hub-muted flex min-h-11 min-w-0 flex-1 items-center gap-1.5 text-left hub-fs-13"
-                data-hub-bar-summary
-              >
-                <SlidersHorizontal size={14} className="shrink-0" />
-                <span className="truncate">{hubSummary}</span>
-              </button>
-            )}
+          <div className="flex items-center gap-1.5 px-2.5 py-2 border-t border-white/[0.05]">
+            {hubUpload && <HubVideoUpload disabled={isGenerating || !!hubRun?.running} />}
             {/* Ein Schalter, der sagt, dass er einer ist. „Neg" war eine
                 Abkuerzung, deren Aufloesung nur im Hover-`title` stand, und
                 der Knopf meldete seinen Zustand an nichts ausser der
@@ -633,7 +605,7 @@ export function Composer({ onOpenAdvanced, onOpenWorkflows, hub = false }: Props
                 also fuer einen Screenreader ein gewoehnlicher Knopf ohne
                 Zustand. Beides steht jetzt da, und `aria-controls` zeigt auf
                 das Feld, das er aufklappt. */}
-            {needPrompt && !optionalPrompt && negSupported && !(hub && narrow) && (
+            {needPrompt && !optionalPrompt && negSupported && !hub && (
               <button
                 onClick={toggleNegative}
                 aria-pressed={showNegative}
@@ -645,16 +617,8 @@ export function Composer({ onOpenAdvanced, onOpenWorkflows, hub = false }: Props
                 Negative
               </button>
             )}
-            {needPrompt && !(hub && narrow) && <PromptHistory onPick={setPrompt} />}
-            {hub && !narrow && !isUtility && !swapSoon && <ModelChip />}
-            {hub && !narrow && swapBarShown && <SwapLength videoSeconds={inputSeconds} disabled={isGenerating} />}
-            {!(hub && narrow) && <div className="flex-1" />}
-            {hub && !narrow && swapBarShown && <SwapPrice videoSeconds={inputSeconds} />}
-            {hub && !narrow && !swap && hubCredits != null && (
-              <span className="hub-text mr-1 hub-fs-13 font-medium tabular-nums" data-hub-price title={`${hubCredits.toLocaleString('en-US')} credits`}>
-                {swapShortCredits(hubCredits)}
-              </span>
-            )}
+            {needPrompt && !hub && <PromptHistory onPick={setPrompt} />}
+            <div className="flex-1" />
             {/* The backend axis moved to the global header switch (2.5.7) —
                 the Composer just reflects it via the CreditsMeter. */}
             {backend === 'cloud' && !hub && <CreditsMeter />}
@@ -703,7 +667,7 @@ export function Composer({ onOpenAdvanced, onOpenWorkflows, hub = false }: Props
                 Discord, 15.10.2026: a reporter had a Wan 2.2 Animate workflow
                 running in ComfyUI and did not know LU could run it; the bare
                 icon never told him. */}
-            {backend === 'local' && !isMlxImageHost() && (
+            {backend === 'local' && !isMlxImageHost() && !hub && (
               <Tooltip content="Your own ComfyUI workflows, and the tags that pair them with models.">
                 <div className="relative">
                   {OWN_WORKFLOW_INTENTS.has(meta.id) ? (
@@ -720,7 +684,13 @@ export function Composer({ onOpenAdvanced, onOpenWorkflows, hub = false }: Props
                 </div>
               </Tooltip>
             )}
-            {!isUtility && hub && <ImageCountChip />}
+            {hub && (
+              // The one settings icon of the window: the model, the size and
+              // everything else of the tab (AdvancedDrawer).
+              <Tooltip content="Model, size and all other settings.">
+                <Button variant="ghost" size="sm" icon={SlidersHorizontal} iconOnly onClick={onOpenAdvanced} title="Advanced settings" />
+              </Tooltip>
+            )}
             {!isUtility && !hub && (
               <>
                 <CharacterChip />
@@ -731,20 +701,25 @@ export function Composer({ onOpenAdvanced, onOpenWorkflows, hub = false }: Props
                 </Tooltip>
               </>
             )}
-            {isGenerating ? (
-              <Button variant="danger" size="md" icon={X} onClick={guardedCancel} className={hub && narrow ? 'h-10 rounded-[20px]' : undefined}>Cancel</Button>
+            {hubRun?.running ? (
+              <Button variant="danger" size="md" icon={X} onClick={hubRun.cancel} disabled={hubRun.cancelDisabled}>Cancel</Button>
+            ) : isGenerating ? (
+              <Button variant="danger" size="md" icon={X} onClick={guardedCancel}>Cancel</Button>
+            ) : hubRun ? (
+              <span className="inline-flex" title={hubRun.ready ? undefined : hubRun.hint}>
+                <Button variant="primary" size="lg" icon={Sparkles} disabled={!hubRun.ready} onClick={hubRun.run}>
+                  {hubRun.price ? `${hubRun.label} · ${hubRun.price}` : hubRun.label}
+                </Button>
+              </span>
             ) : (
               // The span carries the hint: a disabled button takes no pointer,
               // so a title on the button itself would never show.
               <span className="inline-flex" title={macSetupFirst ? MAC_SETUP_FIRST : (missingSource ?? (upscaleReady ? undefined : UPSCALE_MODEL_FIRST))}>
-                <Button variant="primary" size={hub ? 'md' : 'lg'} icon={Sparkles} disabled={!canGenerate} onClick={guardedGenerate}
-                  className={hub && narrow ? 'h-10 rounded-[20px] px-4' : undefined}>
+                <Button variant="primary" size="lg" icon={Sparkles} disabled={!canGenerate} onClick={guardedGenerate}>
                   {/* Swap Character names its price on the button (the web's
                       CreateButton): a paid video run, priced by its length. */}
                   {/* With a new voice the lip sync step is in the figure too. */}
-                  {hub && narrow && createPrice
-                    ? <>Create <span className="hub-fs-125 tabular-nums opacity-70">{createPrice}</span></>
-                    : createPrice ? `Create · ${createPrice}` : 'Create'}
+                  {createPrice ? `Create · ${createPrice}` : 'Create'}
                 </Button>
               </span>
             )}
@@ -752,6 +727,29 @@ export function Composer({ onOpenAdvanced, onOpenWorkflows, hub = false }: Props
         </div>
       </div>
     </div>
+  )
+}
+
+/** The upload of the window (Character tab): the video of Swap and Motion,
+ *  the same file the line in the area above takes. */
+function HubVideoUpload({ disabled }: { disabled: boolean }) {
+  const setVideoInput = useCreateStore((s) => s.setVideoInput)
+  const input = useRef<HTMLInputElement>(null)
+  return (
+    <>
+      <input
+        ref={input}
+        type="file"
+        accept="video/mp4,video/webm,video/quicktime"
+        className="hidden"
+        aria-label="Upload the video"
+        data-hub-upload
+        onChange={(e) => { const f = e.target.files?.[0]; if (f) setVideoInput(mediaRefFrom(f)); e.target.value = '' }}
+      />
+      <Tooltip content="Add the video.">
+        <Button variant="ghost" size="sm" icon={Upload} iconOnly disabled={disabled} onClick={() => input.current?.click()} title="Upload the video" />
+      </Tooltip>
+    </>
   )
 }
 

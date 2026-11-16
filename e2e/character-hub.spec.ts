@@ -4,12 +4,14 @@ import { routeCloud, seedOnboardingDone, signInViaGate, cloudSwitch } from './su
 import { characterPill, openCharacterHub, openCharacterTraining } from './support/character-hub'
 
 /**
- * The Character area of Create (3.1.0 part B, the stage David chose on
+ * The Character area of Create (3.1.0 part B, as David set it on
  * 16.11.2026): one pill "Character" instead of Character, Motion, Lipsync
- * and Swap. The characters are tabs, the picked one stands on the left with
- * its photos beside it, and the bar at the foot switches between Image,
- * Swap, Motion and Talk. Without a character the area shows its three steps
- * and "Create a character"; "New character" is a page of its own.
+ * and Swap. The prompt window is the Composer of every tab: 660 wide,
+ * centred, at the same place as on Image. Over it stands the row of the tab
+ * (Image, Swap, Motion, Talk); the area above is one column of the same
+ * width: the characters as tabs, the picked one as a head, its photos or
+ * the inputs of the action. Without a character the area shows its three
+ * steps and "Create a character"; "New character" is a page of its own.
  * Swap, the sound choice and the lip sync step need the account switch of
  * the server (features.characterHub); without it Swap says "Coming soon".
  *
@@ -163,6 +165,18 @@ async function savePhotoCharacter(page: Page, name: string, file: string, copies
   await expect(page.locator(`[data-hub-character^="saved:"]`, { hasText: name })).toHaveAttribute('aria-selected', 'true')
 }
 
+const windowBox = async (page: Page) => (await page.locator('[data-prompt-window]').boundingBox())!
+const settings = (page: Page) => page.locator('[data-prompt-window] button[title="Advanced settings"]')
+
+/** The prompt window stands where it stood on Image: same left edge, same
+ *  width, same lower edge. */
+async function expectWindowAt(page: Page, image: { x: number; y: number; width: number; height: number }) {
+  const now = await windowBox(page)
+  expect(Math.abs(now.x - image.x)).toBeLessThanOrEqual(1)
+  expect(Math.abs(now.width - image.width)).toBeLessThanOrEqual(1)
+  expect(Math.abs(now.y + now.height - (image.y + image.height))).toBeLessThanOrEqual(1)
+}
+
 /** A tap on the first frame at a share of its width and height. */
 async function tapFrame(page: Page, x: number, y: number) {
   const frame = page.getByRole('group', { name: /First frame of your video/ })
@@ -171,8 +185,11 @@ async function tapFrame(page: Page, x: number, y: number) {
   await frame.click({ position: { x: box.width * x, y: box.height * y } })
 }
 
-test('one pill: the characters as tabs, the stage, and the bar switches the action', async ({ page }) => {
+test('one pill: the characters as tabs, the stage, and the row over the window switches the action', async ({ page }) => {
   const seen = await boot(page, { hub: true })
+  // Where the prompt window stands on Image.
+  const onImage = await windowBox(page)
+  expect(Math.round(onImage.width)).toBe(759)
 
   // The four old pills are one now, marked new.
   await expect(characterPill(page)).toBeVisible()
@@ -184,9 +201,16 @@ test('one pill: the characters as tabs, the stage, and the bar switches the acti
   // Every source is a tab; the first character takes the stage by itself.
   await openCharacterHub(page)
   const hub = page.locator('[data-character-hub]')
-  await expect(hub).toHaveAttribute('data-character-hub', 'what')
+  await expect(hub).toHaveAttribute('data-character-hub', 'panel')
   const bean = page.locator('[data-hub-character="cloud:11111111-1111-4111-8111-111111111111"]')
   await expect(bean).toHaveAttribute('aria-selected', 'true')
+  // The same window as on Image, at the same place, and the area over it
+  // is a column of its width.
+  await expectWindowAt(page, onImage)
+  const column = (await page.locator('.hub-column').boundingBox())!
+  expect(Math.abs(column.width - onImage.width)).toBeLessThanOrEqual(1)
+  expect(Math.abs(column.x - onImage.x)).toBeLessThanOrEqual(1)
+  await expect(page.locator('.hub-bar, [data-swap-bar]')).toHaveCount(0)
   await expect(page.locator('[data-hub-card]')).toContainText('Trained · Flux')
   await page.locator('[data-hub-character="cloud:22222222-2222-4222-8222-222222222222"]').click()
   await expect(page.locator('[data-hub-card]')).toContainText('Trained · Qwen')
@@ -198,11 +222,14 @@ test('one pill: the characters as tabs, the stage, and the bar switches the acti
   await expect(page.locator('[data-hub-photo-only]')).toBeVisible()
   await shoot(page, 'a-wer')
 
-  // What Bean should do: the bar asks, nothing is picked yet.
+  // Bean on the stage: Image is the action, and the text field is there.
   await bean.click()
-  await expect(hub).toHaveAttribute('data-character-hub', 'what')
-  await expect(page.locator('[data-hub-action-line]')).toHaveText('What should Bean do?')
-  for (const a of ['image', 'swap', 'motion', 'talk']) await expect(page.locator(`[data-hub-action="${a}"]`)).toHaveAttribute('aria-checked', 'false')
+  await expect(hub).toHaveAttribute('data-character-hub', 'panel')
+  await expect(page.locator('[data-hub-action="image"]')).toHaveAttribute('aria-checked', 'true')
+  for (const a of ['swap', 'motion', 'talk']) await expect(page.locator(`[data-hub-action="${a}"]`)).toHaveAttribute('aria-checked', 'false')
+  await expect(page.locator('[data-prompt-window] textarea')).toHaveAttribute('placeholder', 'Describe a new picture of Bean')
+  await expect(page.locator('[data-prompt-window] textarea')).toBeEnabled()
+  await expectWindowAt(page, onImage)
   await shoot(page, 'b-was')
 
   // Swap, Bean on person 1, with the catalogue's price.
@@ -211,7 +238,10 @@ test('one pill: the characters as tabs, the stage, and the bar switches the acti
   await expect(page.locator('[data-hub-action-meta]')).toHaveText('8k / s')
   await expect(page.locator('[data-swap-controls]')).toBeVisible()
   await expect(page.getByRole('button', { name: 'Character for person 1' })).toContainText('Bean')
-  await page.locator('[data-swap-controls] input[type=file][accept^="video"]').setInputFiles(await clip(page, 'clip.webm', 'clip.mp4'))
+  // The video comes in through the upload of the prompt window.
+  await expectWindowAt(page, onImage)
+  await expect(page.locator('[data-prompt-window] textarea')).toBeDisabled()
+  await page.locator('[data-prompt-window] [data-hub-upload]').setInputFiles(await clip(page, 'clip.webm', 'clip.mp4'))
   await expect(page.locator('[data-hub-clip]')).toContainText('clip.mp4')
   await expect(page.getByRole('group', { name: /First frame of your video/ })).toBeVisible({ timeout: 20_000 })
   await tapFrame(page, 0.45, 0.33)
@@ -226,19 +256,27 @@ test('one pill: the characters as tabs, the stage, and the bar switches the acti
   await expect(page.getByRole('radio', { name: 'Original sound' })).toHaveAttribute('aria-checked', 'true')
   await expect(page.getByRole('radio', { name: 'New voice, lips in sync' })).toBeDisabled()
   await page.getByRole('checkbox').check()
-  // The bar: model, length, price with its parts.
-  // (6 s and 62k with the real clip of LU_HUB_MEDIA_DIR; the clip recorded
-  // in the page is shorter.)
-  await expect(page.getByRole('button', { name: 'Length' })).toContainText(/\d+ s/)
+  // One line says what runs and what the total is made of; the button of
+  // the window names the total. (6 s and 62k with the real clip of
+  // LU_HUB_MEDIA_DIR; the clip recorded in the page is shorter.)
   await expect(page.locator('[data-clip-price]')).toContainText(/\d+k/)
   await expect(page.locator('[data-clip-split]')).toContainText(/frame 14k \+ video \d+k/)
+  await expect(page.locator('[data-prompt-window]').getByRole('button', { name: /^Create · \d+k$/ })).toBeEnabled()
+  await expectWindowAt(page, onImage)
   await shoot(page, 'c-swap')
+  // The length and the engines are in the settings of the window.
+  await settings(page).click()
+  await expect(page.locator('[data-hub-settings]').getByRole('button', { name: 'Length' })).toContainText(/\d+ s/)
+  await expect(page.locator('[data-hub-settings] [data-swap-picks]')).toBeVisible()
+  await shoot(page, 'c-swap-settings')
+  await page.keyboard.press('Escape')
+  await expect(page.locator('[data-hub-settings]')).toHaveCount(0)
 
   // Another action keeps the character.
   await page.getByRole('radio', { name: 'Motion Control', exact: true }).click()
   await expect(page.locator('[data-motion-controls]')).toBeVisible()
   await expect(page.locator('[data-portrait-line]')).toContainText('Bean', { timeout: 15_000 })
-  // The video of Swap came along; the X in the bar takes it away.
+  // The video of Swap came along; the X beside its name takes it away.
   await expect(page.locator('[data-hub-clip]')).toContainText('clip.mp4')
   await page.getByRole('button', { name: 'Remove the video' }).click()
   await page.locator('[data-motion-controls] input[type=file][accept^="video"]').setInputFiles(await clip(page, 'podcast.webm', 'podcast.mp4'))
@@ -274,13 +312,18 @@ test('Image runs on the character, its file actions stand at the character', asy
   await page.locator('[data-hub-character^="cloud:1111"]').click()
   await page.getByRole('radio', { name: 'Character Studio', exact: true }).click()
   await expect(page.getByTestId('character-use-hint')).toContainText('beanchar')
-  // The prompt sits in the bar, like the chat's composer.
-  await expect(page.getByPlaceholder('Describe the scene for your character…')).toBeVisible()
-  await page.getByRole('button', { name: 'More options' }).click()
+  // The prompt sits in the window, as on every tab.
+  await expect(page.getByPlaceholder('Describe a new picture of Bean')).toBeVisible()
   // The file actions stand at the character on the stage, once.
   await expect(page.locator('[data-hub-card] [data-character-file-actions]')).toBeVisible()
   await expect(page.getByRole('button', { name: 'Download character' })).toHaveCount(1)
-  await expect(page.getByTestId('hub-more').locator('[data-character-file-actions]')).toBeHidden()
+  // In the window: the field, the settings and Create. The model is in the
+  // settings, not in the window.
+  const win = page.locator('[data-prompt-window]')
+  await expect(win.locator('button')).toHaveCount(2)
+  await settings(page).click()
+  await expect(page.locator('[data-hub-settings] [data-hub-setting="Model"]')).toBeVisible()
+  await page.keyboard.press('Escape')
 })
 
 test('without the account switch: Swap says coming soon, Motion has no sound choice', async ({ page }) => {
@@ -290,7 +333,6 @@ test('without the account switch: Swap says coming soon, Motion has no sound cho
   await expect(page.locator('[data-hub-card="photo"]')).toContainText('Just use a photo')
   await shoot(page, 'ohne-schalter-b')
   await page.getByRole('radio', { name: 'Swap Character', exact: true }).click()
-  await expect(page.locator('[data-hub-action-meta]')).toHaveText('Coming soon to your LU Cloud')
   await expect(page.locator('[data-swap-unavailable="soon"]')).toHaveText('Coming soon to your LU Cloud')
   await expect(page.locator('[data-swap-controls]')).toHaveCount(0)
   await expect(page.getByRole('button', { name: /^Create/ }).last()).toBeDisabled()
@@ -332,11 +374,14 @@ test('with the switch: Swap is one click, the check stops after the frame', asyn
   await tapFrame(page, 0.45, 0.33)
   await page.getByRole('checkbox').check()
   await page.getByRole('switch', { name: 'Check first frame before video' }).click()
-  await page.getByRole('button', { name: /^Create · / }).last().click()
+  await page.locator('[data-prompt-window]').getByRole('button', { name: /^Create · / }).click()
   await expect(page.getByText('Does this look right?')).toBeVisible({ timeout: 20_000 })
   await shoot(page, 'd-swap-pruefen')
-  await expect(page.getByRole('button', { name: /^Continue · / })).toBeEnabled()
+  // The check goes through the same window: its field asks, its button goes on.
+  await expect(page.locator('[data-prompt-window] textarea')).toHaveAttribute('placeholder', "What's wrong? (optional)")
+  await expect(page.locator('[data-prompt-window]').getByRole('button', { name: /^Continue · / })).toBeEnabled()
   await expect(page.getByRole('button', { name: /^Try again · 14k/ })).toBeEnabled()
+  await expect(page.locator('.hub-bar, [data-swap-bar]')).toHaveCount(0)
   expect(frames).toBe(1)
 })
 
@@ -347,6 +392,22 @@ test('local mode: Swap is locked to the cloud, the local lanes are there', async
   await expect(page.locator('[data-hub-card]')).toContainText('Local LoRA')
   // A local LoRA has no picture and no photos here: a line says so, nothing stands in.
   await expect(page.locator('[data-hub-no-photos]')).toBeVisible()
+  // Image is the action, and the window is ready for a text. The character
+  // of this machine is not put into the run by opening the tab (its LoRA and
+  // its model would follow into the Image tab): Create does that.
+  await expect(page.locator('[data-hub-action="image"]')).toHaveAttribute('aria-checked', 'true')
+  const field = page.locator('[data-prompt-window] textarea')
+  await expect(field).toHaveAttribute('placeholder', 'Describe a new picture of opa')
+  const make = page.locator('[data-prompt-window]').getByRole('button', { name: 'Create' })
+  await expect(make).toBeDisabled()
+  await expect(page.getByTestId('character-use-hint')).toHaveCount(0)
+  await field.fill('opa at the beach')
+  await expect(make).toBeEnabled()
+  await field.fill('')
+  // Picked by hand, the character is in the run and the note says how to call it.
+  await page.locator('[data-hub-character="mlx:char_opa_zimage.safetensors"]').click()
+  await expect(page.locator('[data-hub-step="panel"]')).toBeVisible()
+  await expect(page.locator('[data-testid="character-use-hint"], [data-testid="character-model-warning"]')).toBeVisible()
   await expect(page.getByRole('radio', { name: 'Swap Character, runs on LU Cloud' })).toBeVisible()
   await shoot(page, 'lokal-b')
   await page.getByRole('radio', { name: 'Swap Character, runs on LU Cloud' }).click()
@@ -374,7 +435,7 @@ test('the training is a page of the area, with the way back to the stage', async
   await expect(characterPill(page)).toHaveAttribute('aria-checked', 'true')
 })
 
-test('phone width: the same stage, the character as a head over it, the bar in its short form', async ({ page }) => {
+test('phone width: the same stage and the same window, nothing folded away', async ({ page }) => {
   await boot(page, { hub: true, width: 375, height: 812 })
   await openCharacterHub(page)
   await shoot(page, 'handy-a-wer')
@@ -386,25 +447,30 @@ test('phone width: the same stage, the character as a head over it, the bar in i
   await tapFrame(page, 0.45, 0.33)
   await tapFrame(page, 0.66, 0.36)
   await page.getByRole('checkbox').check()
-  await expect(page.locator('[data-hub-bar-summary]')).toContainText(/Auto · SCAIL-2 · 720p · \d+ s/)
+  await expect(page.locator('[data-swap-summary]')).toHaveText('Auto · SCAIL-2 · 720p')
+  await expect(page.locator('[data-prompt-window]').getByRole('button', { name: /^Create · \d+k$/ })).toBeVisible()
   await shoot(page, 'handy-c-swap')
-  await page.locator('[data-hub-bar-summary]').click()
-  await expect(page.locator('[data-hub-bar-options]')).toBeVisible()
-  await page.locator('[data-hub-bar-summary]').click()
   await page.getByRole('radio', { name: 'Motion Control', exact: true }).click()
   await expect(page.locator('[data-motion-controls]')).toBeVisible()
   await shoot(page, 'handy-e-motion')
 })
 
-test('no character yet: the three steps, one button, four examples and nothing else', async ({ page }) => {
+test('no character yet: the three steps, one button and the same window', async ({ page }) => {
   await boot(page, { hub: true, mock: {} })
+  const onImage = await windowBox(page)
   await page.route('https://lu-labs.ai/api/loras', (route) => route.fulfill({ status: 200, headers: { ...CORS, 'content-type': 'application/json' }, body: JSON.stringify({ loras: [] }) }))
   await openCharacterHub(page)
   const hub = page.locator('[data-character-hub]')
   await expect(hub).toHaveAttribute('data-character-hub', 'who')
   await expect(page.locator('[data-hub-empty] ol > li')).toHaveCount(3)
-  await expect(page.locator('[data-hub-example]')).toHaveCount(4)
+  await expect(page.locator('[data-hub-example], [data-hub-empty] svg[viewBox="0 0 120 80"], [data-hub-empty] img')).toHaveCount(0)
   await expect(page.locator('[data-hub-empty] h1, [data-hub-empty] h2')).toHaveCount(0)
+  // The window is there, with its field, and says what it waits for.
+  await expectWindowAt(page, onImage)
+  await expect(page.locator('[data-prompt-window] textarea')).toBeVisible()
+  await expect(page.locator('[data-hub-action="image"]')).toHaveAttribute('aria-checked', 'true')
+  await expect(page.getByTestId('lane-input-note')).toHaveText('Create a character first.')
+  await expect(page.locator('[data-prompt-window]').getByRole('button', { name: 'Create' })).toBeDisabled()
   await shoot(page, 'leer')
   await page.locator('[data-hub-create] button').click()
   await expect(hub).toHaveAttribute('data-character-hub', 'new')
@@ -418,9 +484,15 @@ test('no character yet: the three steps, one button, four examples and nothing e
   await page.locator('[data-hub-new-name]').fill('Oma')
   await expect(page.locator('[data-hub-save-summary]')).toHaveText('5 photos · kept on this computer · free')
   await shoot(page, 'neu-mit-fotos')
+  await expectWindowAt(page, onImage)
   await page.getByRole('button', { name: 'Save Oma', exact: true }).click()
   await expect(hub).toHaveAttribute('data-character-hub', 'what')
   await expect(page.locator('[data-hub-card-name]')).toHaveText('Oma')
+  // A photo character: the field asks for the picture, the button goes on
+  // to Edit with its photos.
+  await expect(page.locator('[data-prompt-window] textarea')).toHaveAttribute('placeholder', 'Describe a new picture of Oma')
+  await expect(page.locator('[data-prompt-window]').getByRole('button', { name: 'Continue in Edit' })).toBeEnabled()
+  await expectWindowAt(page, onImage)
   // Rename on the desktop.
   await page.locator('[data-hub-rename]').click()
   await page.getByRole('textbox', { name: 'New name for Oma' }).fill('Greta')
@@ -454,7 +526,7 @@ test('no character yet: the three steps, one button, four examples and nothing e
   await expect(page.locator('[data-hub-card-name]')).toHaveText('Oma')
   // The line about Local and Cloud stands where the picked action shows its price.
   await page.setViewportSize({ width: 1280, height: 800 })
-  await expect(page.locator('[data-hub-local-line]')).toHaveCount(0)
+  await expect(page.locator('[data-hub-local-line]')).toHaveCount(1)
   await page.locator('[data-hub-action="motion"]').click()
   await expect(page.locator('[data-hub-local-line]')).toHaveText('Local runs on your own machine and costs nothing. Cloud prices in credits.')
   await page.setViewportSize({ width: 380, height: 800 })

@@ -4,22 +4,23 @@
 // (running), d2 (check, only with "Check first frame"), c5 (refused).
 // One button "Create · total" runs frame, video and sound one after the other
 // (lib/create/swap-chain.ts). The inputs are SwapControls as before; the one
-// framed part is the bar at the foot, built like the Composer's bar of the
-// area. In the desktop style: rows with hairlines, text choices, no boxes.
+// button is the one of the prompt window under the area (David, 16.11.2026:
+// one window in every tab; this flow says through hub/hubRun.ts what its
+// button and its field do). In the desktop style: rows with hairlines, text
+// choices, no boxes.
 
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useStore } from 'zustand'
-import { ArrowRight, Check, Loader2, SlidersHorizontal, Sparkles, X } from 'lucide-react'
+import { ArrowRight, Check, Loader2, X } from 'lucide-react'
 import { useCreateStore, type SwapFigure } from '../../../../stores/createStore'
 import { useCreateExp } from '../CreateContext'
-import { useNarrow } from '../Composer'
-import { SwapControls, SpecialMore } from '../SpecialIntentControls'
+import { SwapControls } from '../SpecialIntentControls'
 import { mediaSeconds, useStudioPrice } from '../useStudioPrice'
-import { Button } from '../../ui/Button'
 import { Select, type SelectOption } from '../../ui/Select'
 import { cn } from '../../ui/cn'
-import { HubBarTop, HubSwitch, MoreOptions } from './HubParts'
-import { SwapLength, useSwapBar } from './SwapBarParts'
+import { HubSwitch } from './HubParts'
+import { useSwapBar } from './SwapBarParts'
+import { useHubRun, type HubRun } from './hubRun'
 import { adoptInput, cancelJob, pollJob, submitCloudJob, uploadInput, type CloudJob } from '../../../../api/cloud/jobs'
 import { galleryItemFromJob } from '../../../../lib/render/cloud-jobs'
 import { studioShownValue } from '../../../../lib/render/create-studio'
@@ -80,14 +81,12 @@ export function useSwapOneClickShown(): boolean {
   return intent === SWAP_INTENT && released && backend === 'cloud'
 }
 
-export function SwapOneClick({ onChangeCharacter, onOpenAdvanced }: {
+export function SwapOneClick({ onChangeCharacter }: {
   /** "Change character" after a refusal: step 1 opens. */
   onChangeCharacter: () => void
-  onOpenAdvanced: () => void
 }) {
   const { refreshQuota, quota, generate, cancel } = useCreateExp()
   const deps = useMemo(() => swapChainDeps(refreshQuota), [refreshQuota])
-  const narrow = useNarrow()
   const released = useCharacterHubReleased()
 
   const videoInput = useCreateStore((s) => s.videoInput)
@@ -199,8 +198,41 @@ export function SwapOneClick({ onChangeCharacter, onOpenAdvanced }: {
     }
   }
 
+  // What the prompt window under the area does for this flow (hubRun): its
+  // button is Create with the total, Cancel while it runs, Continue on the
+  // check of the first frame, whose field takes "What's wrong?".
+  const [extra, setExtra] = useState('')
+  const showing = !!preparing || running || plainRunning
+  const stage = chain?.stage ?? null
+  const next = chain ? chain.videoCredits + (chain.lipsync?.credits ?? 0) : 0
+  const hint = problem ?? (voiceMissing ? 'Add the new voice first.' : !creditsOk ? 'Not enough credits for this swap.' : undefined)
+  const does = useRef({ create: () => {}, cancel: () => {}, approve: () => {} })
+  useEffect(() => {
+    does.current = {
+      create: () => { void create() },
+      cancel: () => { if (plainRunning) void cancel(); else void cancelSwapChain(deps) },
+      approve: () => { void approveSwapFrame(deps) },
+    }
+  })
+  const setSwap = useHubRun((st) => st.setSwap)
+  const cancelOff = !!preparing
+  useEffect(() => {
+    const now: HubRun = showing
+      ? { label: 'Create', ready: false, running: true, cancelDisabled: cancelOff, cancel: () => does.current.cancel(), run: () => {} }
+      : stage === 'review'
+        ? {
+            label: 'Continue', price: swapShortCredits(next), ready: !busy, run: () => does.current.approve(),
+            field: { value: extra, onChange: setExtra, placeholder: "What's wrong? (optional)" },
+          }
+        : stage === 'done'
+          ? { label: 'Make another swap', ready: true, run: () => clearSwapChain() }
+          : { label: 'Create', price: total != null ? swapShortCredits(total) : null, ready, hint, run: () => does.current.create() }
+    setSwap(now)
+  }, [showing, cancelOff, stage, next, busy, extra, total, ready, hint, setSwap])
+  useEffect(() => () => setSwap(null), [setSwap])
+
   // ── running (c4) ──
-  if (preparing || running || plainRunning) {
+  if (showing) {
     return (
       <SwapProgress
         chain={chain}
@@ -209,8 +241,6 @@ export function SwapOneClick({ onChangeCharacter, onOpenAdvanced }: {
         originalUrl={frame?.url ?? null}
         names={names}
         note={note}
-        onCancel={() => { if (plainRunning) void cancel(); else void cancelSwapChain(deps) }}
-        cancelDisabled={!!preparing}
       />
     )
   }
@@ -218,7 +248,7 @@ export function SwapOneClick({ onChangeCharacter, onOpenAdvanced }: {
   // ── check (d2) ──
   if (chain?.stage === 'review') {
     const summary = `${prefs.videoOverride ? '' : 'Auto · '}${swapModelName(videoModel)}${resolution ? ` · ${resolution}` : ''}${seconds ? ` · ${seconds} s` : ''}`
-    return <SwapReview chain={chain} originalUrl={frame?.url ?? null} deps={deps} summary={summary} narrow={narrow} />
+    return <SwapReview chain={chain} originalUrl={frame?.url ?? null} summary={summary} onRetry={() => { void retrySwapFrame(deps, { extra }); setExtra('') }} />
   }
 
   // ── done ──
@@ -231,9 +261,6 @@ export function SwapOneClick({ onChangeCharacter, onOpenAdvanced }: {
           )}
           <p className="hub-dim mt-2 hub-fs-125">Your new video{chain.who ? ` · ${chain.who}` : ''}. It is in your gallery.</p>
           {chain.error && <p className="hub-text mt-2 hub-fs-13" role="alert">{chain.error}</p>}
-          <button type="button" onClick={() => clearSwapChain()} className="hub-muted mt-4 hub-fs-13 underline decoration-[var(--hub-edge)] underline-offset-[3px]">
-            Make another swap
-          </button>
         </div>
       </Body>
     )
@@ -248,91 +275,79 @@ export function SwapOneClick({ onChangeCharacter, onOpenAdvanced }: {
     videoCredits != null ? `video ${swapShortCredits(videoCredits)}` : null,
     lipsyncOn && lipCredits ? `lip sync ${swapShortCredits(lipCredits)}` : null,
   ].filter(Boolean).join(' + ')
-  const hint = problem ?? (voiceMissing ? 'Add the new voice first.' : !creditsOk ? 'Not enough credits for this swap.' : undefined)
 
   return (
-    <>
-      <Body>
-        <div className="pt-3" data-swap-one-click="form" data-swap-marks={marked}>
-          <SwapControls
-            oneClick={{
-              model: videoModel,
-              switches: isChain && (
-                <div className="pt-1" data-swap-switches>
-                  <HubSwitch testId="open-models" title="Uncensored" line={swapOpenModelsLine(videoModel)} on={prefs.openModels} onChange={prefs.setOpenModels} />
-                  <HubSwitch testId="check" title="Check first frame before video" line="Pause after the first frame so you can retry it before paying for the video." on={prefs.check} onChange={prefs.setCheck} />
-                </div>
-              ),
-            }}
-          />
-          <MoreOptions testId="hub-more">
-            <SwapPicks videoModel={videoModel} frameModel={frameModel} people={figures.length} isChain={isChain} />
-            <SpecialMore intent={SWAP_INTENT} />
-            <button type="button" onClick={onOpenAdvanced} className="hub-muted hub-fs-125 underline decoration-[var(--hub-edge)] underline-offset-[3px]">
-              All settings of the model
-            </button>
-          </MoreOptions>
-
-          {refused && (
-            <div className="flex items-start gap-2.5 pt-4" role="alert" data-swap-refused>
-              <X size={14} className="hub-dim mt-[3px] shrink-0" />
-              <div className="hub-fs-13">
-                <p className="hub-text">{chain!.error}</p>
-                <p className="mt-1 flex flex-wrap items-center gap-x-2">
-                  <button type="button" className="hub-acc" onClick={() => {
-                    prefs.setOpenModels(true)
-                    prefs.setFrameOverride('')
-                    // With Uncensored the check is on by default (David, 14.11.).
-                    void retrySwapOpen(deps, useSwapOneClick.getState().check)
-                  }}>
-                    Turn on Uncensored and retry
-                  </button>
-                  <span className="hub-dim" aria-hidden>·</span>
-                  <button type="button" className="hub-acc" onClick={() => { clearSwapChain(); onChangeCharacter() }}>Change character</button>
-                </p>
+    <Body>
+      <div className="pt-3" data-swap-one-click="form" data-swap-marks={marked}>
+        <SwapControls
+          oneClick={{
+            model: videoModel,
+            switches: isChain && (
+              <div className="pt-1" data-swap-switches>
+                <HubSwitch testId="open-models" title="Uncensored" line={swapOpenModelsLine(videoModel)} on={prefs.openModels} onChange={prefs.setOpenModels} />
+                <HubSwitch testId="check" title="Check first frame before video" line="Pause after the first frame so you can retry it before paying for the video." on={prefs.check} onChange={prefs.setCheck} />
               </div>
-            </div>
-          )}
-          {(failedText || error) && (
-            <div className="flex items-start gap-2.5 pt-4" role="alert" data-swap-error>
-              <X size={14} className="hub-dim mt-[3px] shrink-0" />
-              <p className="hub-text flex-1 hub-fs-13">{failedText ?? error}</p>
-              <button type="button" className="hub-dim hub-fs-125" onClick={() => { setError(null); if (chain) clearSwapChain() }}>Dismiss</button>
-            </div>
-          )}
-        </div>
-      </Body>
-
-      <Foot>
-        <SwapBar
-          narrow={narrow}
-          summary={summary}
-          length={videoInput ? <SwapLength videoSeconds={videoSeconds} /> : null}
-          seconds={videoInput ? seconds : null}
-          total={total}
-          parts={parts}
-          ready={ready}
-          hint={hint}
-          onCreate={() => void create()}
+            ),
+          }}
         />
-      </Foot>
-    </>
+        {/* What runs and what the total is made of. The models and the
+            length are picked in the settings of the prompt window. */}
+        <p className="hub-dim flex flex-wrap items-baseline gap-x-2 pt-2.5 hub-fs-125" data-swap-line>
+          <span data-swap-summary>{summary}</span>
+          {videoInput && seconds ? <span data-swap-seconds>{seconds} s</span> : null}
+          {total != null && (
+            <span data-clip-price data-swap-total={total} title={`${total.toLocaleString('en-US')} credits`}>
+              <b className="hub-text font-medium tabular-nums">{swapShortCredits(total)}</b>
+              {parts && <> <span data-clip-split>{parts}</span></>}
+            </span>
+          )}
+        </p>
+
+        {refused && (
+          <div className="flex items-start gap-2.5 pt-4" role="alert" data-swap-refused>
+            <X size={14} className="hub-dim mt-[3px] shrink-0" />
+            <div className="hub-fs-13">
+              <p className="hub-text">{chain!.error}</p>
+              <p className="mt-1 flex flex-wrap items-center gap-x-2">
+                <button type="button" className="hub-acc" onClick={() => {
+                  prefs.setOpenModels(true)
+                  prefs.setFrameOverride('')
+                  // With Uncensored the check is on by default (David, 14.11.).
+                  void retrySwapOpen(deps, useSwapOneClick.getState().check)
+                }}>
+                  Turn on Uncensored and retry
+                </button>
+                <span className="hub-dim" aria-hidden>·</span>
+                <button type="button" className="hub-acc" onClick={() => { clearSwapChain(); onChangeCharacter() }}>Change character</button>
+              </p>
+            </div>
+          </div>
+        )}
+        {(failedText || error) && (
+          <div className="flex items-start gap-2.5 pt-4" role="alert" data-swap-error>
+            <X size={14} className="hub-dim mt-[3px] shrink-0" />
+            <p className="hub-text flex-1 hub-fs-13">{failedText ?? error}</p>
+            <button type="button" className="hub-dim hub-fs-125" onClick={() => { setError(null); if (chain) clearSwapChain() }}>Dismiss</button>
+          </div>
+        )}
+      </div>
+    </Body>
   )
 }
 
-// The two parts the stage places (index.css, .hub-stage): the body beside
-// the character, the bar across the foot.
+/** The part of the stage under the character's head (index.css, .hub-body). */
 function Body({ children }: { children: ReactNode }) {
   return <div className="hub-body scrollbar-thin pb-4">{children}</div>
 }
 
-function Foot({ children }: { children: ReactNode }) {
-  return <div className="hub-foot">{children}</div>
-}
-
-/** "First frame ▾" and "Video ▾" under More options (c3). */
-function SwapPicks({ videoModel, frameModel, people, isChain }: { videoModel: string; frameModel: string; people: number; isChain: boolean }) {
+/** "First frame ▾" and "Video ▾": the models of the swap, in the settings of
+ *  the prompt window (AdvancedDrawer). */
+export function SwapPicks() {
   const prefs = useSwapOneClick()
+  const people = useCreateStore((s) => s.swapFigures.length)
+  const videoModel = swapVideoModelFor(people, prefs.videoOverride || null)
+  const isChain = swapIsChain(videoModel)
+  const frameModel = swapFrameModelFor(prefs.openModels, prefs.frameOverride || null)
   const frameItems: SelectOption[] = swapFrameChoices(prefs.openModels).map((c) => {
     const tooMany = c.value !== '' && swapFrameMaxPeople(c.value) < Math.max(1, people)
     return { ...c, disabled: tooMany, sublabel: tooMany ? `up to ${swapFrameMaxPeople(c.value)} ${swapFrameMaxPeople(c.value) === 1 ? 'person' : 'people'}` : undefined }
@@ -359,71 +374,11 @@ function SwapPicks({ videoModel, frameModel, people, isChain }: { videoModel: st
   )
 }
 
-/** The bar at the foot (c2): summary, length, total with its parts, Create.
- *  Narrow (phone width): the summary opens the length and the parts above
- *  the row, Create names the total (the Composer's narrow bar). */
-function SwapBar({ narrow, summary, length, seconds, total, parts, ready, hint, onCreate }: {
-  narrow: boolean; summary: string; length: ReactNode; seconds: number | null; total: number | null; parts: string
-  ready: boolean; hint: string | undefined; onCreate: () => void
-}) {
-  const [open, setOpen] = useState(false)
-  const price = total != null ? swapShortCredits(total) : null
-  const create = (
-    <span className="inline-flex" title={ready ? undefined : hint}>
-      <Button variant="primary" size="md" icon={Sparkles} disabled={!ready} onClick={onCreate}
-        className={narrow ? 'h-10 rounded-[20px] px-4' : undefined}>
-        {narrow && price
-          ? <>Create <span className="hub-fs-125 tabular-nums opacity-70">{price}</span></>
-          : price ? `Create · ${price}` : 'Create'}
-      </Button>
-    </span>
-  )
-  const priceText = total != null && (
-    <span className="flex items-baseline gap-1.5 whitespace-nowrap hub-fs-12" data-clip-price data-swap-total={total} title={`${total.toLocaleString('en-US')} credits`}>
-      <b className="hub-text hub-fs-13 font-medium tabular-nums">{swapShortCredits(total)}</b>
-      {parts && <span className="hub-dim" data-clip-split>{parts}</span>}
-    </span>
-  )
-  if (narrow) {
-    return (
-      <div className="hub-bar rounded-2xl" data-swap-bar="narrow">
-        <HubBarTop />
-        {open && (
-          <div className="hub-line flex flex-wrap items-center gap-2 border-b px-2.5 py-2" data-hub-bar-options>
-            {length}
-            {priceText}
-          </div>
-        )}
-        <div className="flex min-h-[45px] items-center gap-1.5 py-1.5 pl-2.5 pr-1.5">
-          <button type="button" onClick={() => setOpen(!open)} aria-expanded={open}
-            className="hub-muted flex min-h-11 min-w-0 flex-1 items-center gap-1.5 text-left hub-fs-13" data-hub-bar-summary>
-            <SlidersHorizontal size={14} className="shrink-0" />
-            <span className="truncate">{summary}{seconds ? ` · ${seconds} s` : ''}</span>
-          </button>
-          {create}
-        </div>
-      </div>
-    )
-  }
-  return (
-    <div className="hub-bar" data-swap-bar="wide">
-      <HubBarTop />
-      <div className="flex min-h-[45px] items-center gap-1.5 py-[5px] pl-2.5 pr-1.5">
-        <span className="hub-muted whitespace-nowrap hub-fs-13" data-swap-summary>{summary}</span>
-        {length}
-        <span className="flex-1" />
-        {priceText}
-        <span className="w-1" />
-        {create}
-      </div>
-    </div>
-  )
-}
-
-/** c4: "First frame ✓ → Video … → Sound", Cancel, you can leave. */
-function SwapProgress({ chain, preparing, plain, originalUrl, names, note, onCancel, cancelDisabled }: {
+/** c4: "First frame ✓ → Video … → Sound", you can leave. Cancel is the
+ *  button of the prompt window. */
+function SwapProgress({ chain, preparing, plain, originalUrl, names, note }: {
   chain: SwapChainState | null; preparing: string | null; plain: string | null; originalUrl: string | null; names: string
-  note: string | null; onCancel: () => void; cancelDisabled: boolean
+  note: string | null
 }) {
   const stage = preparing ? 'frame' : plain ? 'video' : chain?.stage ?? 'frame'
   const frameUrl = chain?.frameUrl ?? null
@@ -461,8 +416,6 @@ function SwapProgress({ chain, preparing, plain, originalUrl, names, note, onCan
               </span>
             )
           })}
-          <span className="flex-1" />
-          <button type="button" onClick={onCancel} disabled={cancelDisabled} className="hub-muted min-h-11 shrink-0 hub-fs-14 disabled:opacity-40" data-swap-cancel>Cancel</button>
         </div>
         <p className="hub-dim mt-3 hub-fs-13">{note ?? (plain ? 'About 2 to 7 min. Keep LU open until it is done.' : 'About 2 to 7 min. You can leave this page.')}</p>
         {plain && <p className="hub-dim mt-1 hub-fs-12">{plain}</p>}
@@ -471,57 +424,34 @@ function SwapProgress({ chain, preparing, plain, originalUrl, names, note, onCan
   )
 }
 
-/** d2: "Does this look right?", below "What's wrong?", Try again and Continue. */
-function SwapReview({ chain, originalUrl, deps, summary, narrow }: {
-  chain: SwapChainState; originalUrl: string | null; deps: SwapChainDeps; summary: string; narrow: boolean
+/** d2: "Does this look right?". The prompt window takes "What's wrong?" and
+ *  goes on with Continue; Try again stands here, under the two pictures. */
+function SwapReview({ chain, originalUrl, summary, onRetry }: {
+  chain: SwapChainState; originalUrl: string | null; summary: string; onRetry: () => void
 }) {
-  const [extra, setExtra] = useState('')
   const busy = useStore(swapChainStore, (s) => s.busy)
-  const next = chain.videoCredits + (chain.lipsync?.credits ?? 0)
   return (
-    <>
-      <Body>
-        <div className="pt-4" data-swap-one-click="review">
-          <p className="flex flex-wrap items-baseline gap-x-3">
-            <b className="hub-text hub-fs-14 font-semibold">Does this look right?</b>
-            <span className="hub-dim hub-fs-125">The first frame of your new video. The rest follows the original motion.</span>
-          </p>
-          <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
-            {[{ src: originalUrl, label: 'Original' }, { src: chain.frameUrl, label: `New first frame${chain.who ? ` · ${chain.who}` : ''}` }].map((p) => (
-              <figure key={p.label}>
-                {p.src ? <img src={p.src} alt={p.label} className="max-h-[40vh] w-full rounded-lg bg-black object-cover" /> : <div className="aspect-video rounded-lg bg-[var(--hub-fill)]" />}
-                <figcaption className="hub-dim mt-1.5 hub-fs-125">{p.label}</figcaption>
-              </figure>
-            ))}
-          </div>
+    <Body>
+      <div className="pt-4" data-swap-one-click="review">
+        <p className="flex flex-wrap items-baseline gap-x-3">
+          <b className="hub-text hub-fs-14 font-semibold">Does this look right?</b>
+          <span className="hub-dim hub-fs-125">The first frame of your new video. The rest follows the original motion.</span>
+        </p>
+        <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+          {[{ src: originalUrl, label: 'Original' }, { src: chain.frameUrl, label: `New first frame${chain.who ? ` · ${chain.who}` : ''}` }].map((p) => (
+            <figure key={p.label}>
+              {p.src ? <img src={p.src} alt={p.label} className="max-h-[40vh] w-full rounded-lg bg-black object-cover" /> : <div className="aspect-video rounded-lg bg-[var(--hub-fill)]" />}
+              <figcaption className="hub-dim mt-1.5 hub-fs-125">{p.label}</figcaption>
+            </figure>
+          ))}
         </div>
-      </Body>
-      <Foot>
-        <div className={cn('hub-bar', narrow && 'rounded-2xl')} data-swap-bar="review">
-          <HubBarTop />
-          <input
-            type="text"
-            value={extra}
-            maxLength={500}
-            aria-label="What's wrong?"
-            placeholder="What's wrong? (optional)"
-            onChange={(e) => setExtra(e.target.value)}
-            className="hub-text hub-line h-11 w-full border-b bg-transparent px-3 hub-fs-14 outline-none"
-          />
-          <div className="flex min-h-[45px] items-center gap-2.5 py-[5px] pl-2.5 pr-1.5">
-            {!narrow && <span className="hub-muted whitespace-nowrap hub-fs-13">{summary}</span>}
-            <span className="flex-1" />
-            <button type="button" disabled={busy} onClick={() => { void retrySwapFrame(deps, { extra }); setExtra('') }}
-              className="hub-muted min-h-11 whitespace-nowrap hub-fs-13 disabled:opacity-40" data-swap-retry>
-              Try again · {swapShortCredits(chain.frameCredits)}
-            </button>
-            <Button variant="primary" size="md" icon={Sparkles} disabled={busy} onClick={() => void approveSwapFrame(deps)}
-              className={narrow ? 'h-10 rounded-[20px] px-4' : undefined}>
-              {`Continue · ${swapShortCredits(next)}`}
-            </Button>
-          </div>
-        </div>
-      </Foot>
-    </>
+        <p className="mt-3 flex flex-wrap items-center gap-x-3 hub-fs-13">
+          <button type="button" disabled={busy} onClick={onRetry} className="hub-acc disabled:opacity-40" data-swap-retry>
+            Try again · {swapShortCredits(chain.frameCredits)}
+          </button>
+          <span className="hub-dim hub-fs-125">{summary}</span>
+        </p>
+      </div>
+    </Body>
   )
 }

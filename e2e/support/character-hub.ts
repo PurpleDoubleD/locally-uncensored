@@ -18,10 +18,6 @@ export async function openCharacterHub(page: Page, timeout = 15_000): Promise<vo
   await expect(page.locator('[data-character-hub]')).toBeVisible({ timeout })
 }
 
-const ACTION_OF: Record<string, string> = {
-  'Character Studio': 'image', 'Swap Character': 'swap', 'Motion Control': 'motion', 'Talking Character': 'talk',
-}
-
 /** The stage without a character ("Just use a photo"), from wherever the
  *  area stands. With no character at all there is no stage: the area shows
  *  its first page, and this answers false. */
@@ -46,13 +42,9 @@ async function photoOnlyStage(page: Page, timeout: number): Promise<boolean> {
  *  Character' (a locked one reads "…, runs on LU Cloud"). */
 export async function openCharacterAction(page: Page, name: string, timeout = 15_000): Promise<void> {
   await openCharacterHub(page, timeout)
-  if (await photoOnlyStage(page, timeout)) {
-    await page.getByRole('radio', { name, exact: true }).click({ timeout })
-    return
-  }
-  // No character yet: the examples of the first page open an action.
-  const action = ACTION_OF[name.replace(/, runs on LU Cloud$/, '')]
-  await page.locator(`[data-hub-example="${action}"]`).click({ timeout })
+  // With or without a character: the row over the prompt window picks it.
+  await photoOnlyStage(page, timeout)
+  await page.getByRole('radio', { name, exact: true }).click({ timeout })
 }
 
 /** The training: "New character", "Train a model", on to the training. */
@@ -74,6 +66,6 @@ export async function openCharacterTraining(page: Page, timeout = 15_000): Promi
 export async function openCharacterWhat(page: Page, timeout = 15_000): Promise<void> {
   await openCharacterHub(page, timeout)
   // No character yet: Image (it runs everywhere) opens the stage.
-  if (!(await photoOnlyStage(page, timeout))) await page.locator('[data-hub-example="image"]').click({ timeout })
+  if (!(await photoOnlyStage(page, timeout))) await page.locator('[data-hub-action="image"]').click({ timeout })
   await expect(page.locator('[data-hub-stage]')).toBeVisible({ timeout })
 }

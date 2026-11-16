@@ -70,14 +70,10 @@ describe('D-S32: die Reglerzeile steht mittig ueber der Promptbox', () => {
     // Promptpanel liegen in DERSELBEN Spalte (`mx-auto w-full max-w-[…]`),
     // sind damit gleich breit und haben dieselbe Mitte. Faende das hier nicht
     // mehr statt, waere die Zentrierung eine Zusage ohne Deckung.
-    // Since the stage of the Character area (3.1.0, variant B) the width of
-    // that column is the place's in `hub` (the stage's foot spans it), and
-    // the 660 px stand as the other branch of the same class.
-    const spalte = code.match(/className=\{cn\('mx-auto w-full space-y-[\d.]+', !hub && 'max-w-\[(\d+)px\]'\)\}/)
+    // The Character tab uses this same column (David, 16.11.2026): there is
+    // one width, with no branch on `hub`.
+    const spalte = code.match(/className="mx-auto w-full max-w-\[(\d+)px\] space-y-[\d.]+"/)
     expect(spalte, 'die gemeinsame Spalte von Reglerzeile und Promptpanel fehlt').toBeTruthy()
-    // Since 3.1.0 part B the panel has a second face, the bar of the
-    // Character area (`hub`): the class stands as the string of the other
-    // branch, so the quotes may be single.
     const panel = code.match(/["']rounded-\[var\(--radius-panel\)\][^"']*["']/)
     expect(panel, 'Promptpanel nicht gefunden').toBeTruthy()
     expect(panel![0]).toMatch(/\bborder\b/)
