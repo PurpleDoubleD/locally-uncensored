@@ -317,6 +317,23 @@ const TYPE_ORDER: MemoryType[] = ['user', 'feedback', 'project', 'reference']
 export const MEMORY_CONTEXT_TOKEN_CAP = 1000
 
 /**
+ * GH #238 (A28): with "Max memories injected" set, the user asked for more
+ * memory than the 1k ceiling holds. The override then lifts the ceiling, but
+ * never past this share of the model's context window, so a small model keeps
+ * the 1k (10 percent of 8K is under it) and a 256K model may carry the
+ * override's full budget (100 memories x 150 tokens = 15K, under its 26K).
+ */
+export const MEMORY_OVERRIDE_CONTEXT_SHARE = 0.1
+
+/** The ceiling of the memory block for this window and override. Without an
+ *  override it is MEMORY_CONTEXT_TOKEN_CAP, as before. */
+export function memoryContextCeiling(contextTokens: number, override?: number | null): number {
+  if (override == null || !(override > 0)) return MEMORY_CONTEXT_TOKEN_CAP
+  const share = Number.isFinite(contextTokens) && contextTokens > 0 ? Math.floor(contextTokens * MEMORY_OVERRIDE_CONTEXT_SHARE) : 0
+  return Math.max(MEMORY_CONTEXT_TOKEN_CAP, share)
+}
+
+/**
  * Render an ALREADY-ORDERED, ALREADY-FILTERED list of memories into the
  * grouped <remembered_context> block, respecting the tier's char budget and
  * sanitizing every injected line. Shared by the sync (keyword) and async
@@ -334,9 +351,9 @@ export interface MemoryContext {
   owner?: string
 }
 
-export function renderMemoryContext(ordered: MemoryFile[], budgetTokens: number): MemoryContext {
+export function renderMemoryContext(ordered: MemoryFile[], budgetTokens: number, ceilingTokens: number = MEMORY_CONTEXT_TOKEN_CAP): MemoryContext {
   if (ordered.length === 0) return { text: '', memoryIds: [] }
-  const cappedTokens = Math.min(budgetTokens, MEMORY_CONTEXT_TOKEN_CAP)
+  const cappedTokens = Math.min(budgetTokens, ceilingTokens)
 
   // Group by type for structured output (preserve incoming order within type).
   const grouped: Record<MemoryType, MemoryFile[]> = {
@@ -373,8 +390,8 @@ export function renderMemoryContext(ordered: MemoryFile[], budgetTokens: number)
   return { text: `<remembered_context>\n${result.trim()}\n</remembered_context>`, memoryIds }
 }
 
-function renderRememberedContext(ordered: MemoryFile[], budgetTokens: number, onInjected?: MemoryInjectOpts['onInjected']): string {
-  const context = renderMemoryContext(ordered, budgetTokens)
+function renderRememberedContext(ordered: MemoryFile[], budgetTokens: number, ceilingTokens: number, onInjected?: MemoryInjectOpts['onInjected']): string {
+  const context = renderMemoryContext(ordered, budgetTokens, ceilingTokens)
   onInjected?.(context.memoryIds)
   return context.text
 }
@@ -966,7 +983,8 @@ export const useMemoryStore = create<MemoryState>()(
           .slice(0, budget.maxMemories)
           .map(({ entry }) => entry)
 
-        return renderRememberedContext(fillWithUserNotes(ordered, candidates, budget.maxMemories), budget.budgetTokens, opts?.onInjected)
+        const ceiling = memoryContextCeiling(contextTokens, get().settings.maxMemoriesOverride)
+        return renderRememberedContext(fillWithUserNotes(ordered, candidates, budget.maxMemories), budget.budgetTokens, ceiling, opts?.onInjected)
       },
 
       // ── Context-Aware Prompt Injection (async, embedding-first) ──
@@ -1054,7 +1072,7 @@ export const useMemoryStore = create<MemoryState>()(
           // it CAN still catch is an entry whose embedding is missing or bad.
           if (ordered.length === 0) return fallback()
 
-          return renderRememberedContext(ordered, budget.budgetTokens, requestOpts?.onInjected)
+          return renderRememberedContext(ordered, budget.budgetTokens, memoryContextCeiling(contextTokens, get().settings.maxMemoriesOverride), requestOpts?.onInjected)
         } catch {
           return fallback()
         }

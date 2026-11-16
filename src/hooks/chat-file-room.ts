@@ -20,6 +20,7 @@ import { fileCutNotice, fileRoom, fitFiles, tighterRoom, type FileRoom } from '.
 import { heldText } from '../lib/chat-files'
 import { useSettingsStore } from '../stores/settingsStore'
 import { useChatNoticeStore } from '../stores/chatNoticeStore'
+import { MEMORY_CONTEXT_TOKEN_CAP, memoryContextCeiling, useMemoryStore } from '../stores/memoryStore'
 import { log } from '../lib/logger'
 import { applyStoredCompaction } from '../lib/compact-summary'
 import { currentContextKnobs, resolveModelContext } from './useActiveContextWindow'
@@ -37,6 +38,8 @@ export const WORKSPACE_FILE_SHARE = 0.5
  * remembered context (at most MEMORY_CONTEXT_TOKEN_CAP, 1000), a retrieval
  * block, the thinking and style lines. Measured against an 8K window this is
  * a quarter; against the 262K window of the report it is under one percent.
+ * A memory override may lift that ceiling (GH #238); `roomForModel` keeps
+ * the difference free as well.
  */
 export const PROMPT_EXTRAS_RESERVE_TOKENS = 2048
 
@@ -63,6 +66,10 @@ async function roomForModel(model: string, use: WindowUse, otherTokens: number):
     log.warn('[chat-files] the context window could not be resolved for an attachment', { err: String(err) })
   }
   if (!(window > 0)) window = await getModelMaxTokens(model)
+  // GH #238: a memory override lets the memory block grow past the 1k this
+  // reserve was sized for, up to a tenth of the window.
+  const memoryCeiling = memoryContextCeiling(window, useMemoryStore.getState().settings.maxMemoriesOverride)
+  const reserved = otherTokens + Math.max(0, memoryCeiling - MEMORY_CONTEXT_TOKEN_CAP)
   const providerId = getProviderIdFromModel(model)
   const budget = effectiveSendWindow({
     providerId,
@@ -74,7 +81,7 @@ async function roomForModel(model: string, use: WindowUse, otherTokens: number):
   return fileRoom({
     window,
     payloadBudget: use === 'agent' ? Math.floor(budget * WORKSPACE_FILE_SHARE) : budget,
-    otherTokens,
+    otherTokens: reserved,
     limit: settings.attachmentTokenLimit,
   })
 }
