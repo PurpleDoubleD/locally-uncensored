@@ -418,6 +418,10 @@ export const RELEASE_NOTES: ReleaseNote[] = [
             title: 'Read and edit a memory in place.',
             detail: 'The memory quick menu opens a memory in full and lets you edit it.',
           },
+          {
+            title: 'Max memories injected brings that many memories.',
+            detail: 'The memory block was still cut short, so on a large model only a few of them arrived. With the setting on, it may now use up to a tenth of the model\'s context window (GitHub #238).',
+          },
         ],
       },
       {
