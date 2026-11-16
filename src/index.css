@@ -3243,10 +3243,19 @@ input[type="range"].neuron-range:disabled { cursor: not-allowed; opacity: 0.5; }
   .lu-hub .hub-act-item { padding: 0 8px; }
   .lu-hub .hub-act-item svg { display: none; }
 }
+/* A narrow window has no room for the column on the left. The character
+   then stands as a head over its photos: the picture small, beside it the
+   name and every action it has. Nothing is hidden at any width. The file
+   actions of a LoRA character alone stay where they are on a narrow
+   window, under More options (SpecialMore), so they stand once. */
 @media (max-width: 700px) {
-  .lu-hub .hub-stage { grid-template-columns: minmax(0, 1fr); }
-  .lu-hub .hub-card { display: none; }
-  .lu-hub .hub-body { grid-column: 1; }
+  .lu-hub .hub-stage { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto minmax(0, 1fr) auto; }
+  .lu-hub .hub-card { grid-column: 1; grid-row: 2; position: relative; overflow: visible; min-height: 90px; padding: 10px 0 10px 68px; }
+  .lu-hub .hub-card > .hub-portrait { position: absolute; left: 0; top: 10px; width: 56px; margin-bottom: 0; }
+  .lu-hub .hub-card .hub-initial { font-size: calc(24px / var(--ui-scale, 1.15)); }
+  .lu-hub .hub-card .hub-card-file { display: none; }
+  .lu-hub .hub-body { grid-column: 1; grid-row: 3; }
+  .lu-hub .hub-foot { grid-row: 4; }
 }
 
 /* The pages of the area: "New character" and the training. */

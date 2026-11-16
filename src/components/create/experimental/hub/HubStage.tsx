@@ -10,7 +10,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Image as ImageIcon, ImagePlus, Mic, PersonStanding, Plus, Replace } from 'lucide-react'
 import { useCreateStore } from '../../../../stores/createStore'
 import {
-  ACTION_LABEL, ACTION_LINE, HUB_JUST_PHOTO, HUB_JUST_PHOTO_LINE, hubInitial,
+  ACTION_LABEL, ACTION_LINE, HUB_JUST_PHOTO, HUB_JUST_PHOTO_LINE, HUB_LOCAL_LINE, hubInitial,
   type HubAction, type HubCharacter,
 } from '../../../../lib/create/character-hub'
 import { useCharacterNames, cleanCharacterName, MAX_CHARACTER_LABEL } from '../../../../lib/create/character-names'
@@ -157,7 +157,7 @@ function Card({ c, photo }: { c: HubCharacter | null; photo: string | null }) {
         )}
       </div>
       {/* The file of a LoRA character: download, use on this computer, delete. */}
-      {!saved && <div className="-ml-1 mt-1.5"><CharacterMore bare /></div>}
+      {!saved && <div className="hub-card-file -ml-1 mt-1.5"><CharacterMore bare /></div>}
       {error && <p role="alert" className="mt-1.5 text-red-500 hub-fs-125 dark:text-red-400">{error}</p>}
       {c.kind === 'local' && (
         <p className="hub-dim hub-line mt-4 border-t pt-3 hub-fs-125">In Chat, name it: “a picture of {c.ref?.name ?? c.name} at the beach”.</p>
@@ -265,7 +265,8 @@ export function HubActions({ actions, active, name, onPick, right }: {
     ? ACTION_LINE[on.action].replace('your character', name ?? 'your character').replace('Your character', name ?? 'Your character')
     : name ? `What should ${name} do?` : 'What should your character do?'
   return (
-    <div className="flex min-h-[42px] items-center gap-3 py-1 pl-1.5 pr-3" data-hub-actions>
+    <div data-hub-actions>
+    <div className="flex min-h-[42px] items-center gap-3 py-1 pl-1.5 pr-3">
       <div role="radiogroup" aria-label="Character action" className="hub-act">
         {actions.map((a) => (
           <button
@@ -286,6 +287,10 @@ export function HubActions({ actions, active, name, onPick, right }: {
       <span className="hub-dim min-w-0 flex-1 truncate hub-fs-125 max-[640px]:hidden" data-hub-action-line>{line}</span>
       {right}
       {on?.meta && <span className="hub-dim shrink-0 whitespace-nowrap hub-fs-125 tabular-nums max-[520px]:hidden" data-hub-action-meta>{on.meta}</span>}
+    </div>
+    {/* What the price beside it means, once an action is picked. One quiet
+        line, at every width. */}
+    {on && <p className="hub-dim px-3 pb-1.5 hub-fs-125" data-hub-local-line>{HUB_LOCAL_LINE}</p>}
     </div>
   )
 }
