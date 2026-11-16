@@ -14,7 +14,7 @@
 // The inner intent ids and the panels of the actions are untouched
 // (lib/create/character-hub.ts): an action is still a name for an intent.
 
-import { useEffect, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { ChevronLeft, Film, X } from 'lucide-react'
 import { useCreateStore, type CreateIntent } from '../../../../stores/createStore'
 import { useUIStore, type CloudTeaserTarget } from '../../../../stores/uiStore'
@@ -39,6 +39,9 @@ import { HubNewCharacter } from './HubNewCharacter'
 import { HubActions, HubCard, HubPhotos, HubTabs, type HubActionState } from './HubStage'
 import { SwapOneClick, useSwapOneClickShown } from './SwapOneClick'
 import { openHubAction, useCharacterPhotos, useHubCharacters } from './hubCharacters'
+
+/** How long the first page waits for the list before it shows itself. */
+const LIST_GRACE_MS = 1500
 
 type TeaserIntent = Extract<CloudTeaserTarget, { surface: 'intent' }>['intent']
 
@@ -82,6 +85,25 @@ export function CharacterHub({ stage, onOpenAdvanced, onOpenWorkflows, onOpenGal
     }
   }, [step, first, setHubCharacter, setHubStep])
 
+  // Image opened from outside the stage (a training that just finished, a
+  // Reuse from the gallery) runs on a character nobody picked here: that
+  // character takes the stage, so the left says who the picture will show.
+  const running = useCreateStore((s) => s.selectedCharacter)
+  const runningOnStage = action === 'image' && !picked && running ? list.find((c) => c.ref?.id === running.id) : undefined
+  useEffect(() => {
+    if (runningOnStage) setHubCharacter(runningOnStage)
+  }, [runningOnStage, setHubCharacter])
+
+  // A list that is slow to answer (the cloud does not reach us) holds the
+  // first page back for a moment only, so nobody with characters sees it
+  // flash, and nobody without a connection waits for it.
+  const [waited, setWaited] = useState(false)
+  useEffect(() => {
+    if (step !== 'who' || !loading) return
+    const t = setTimeout(() => setWaited(true), LIST_GRACE_MS)
+    return () => clearTimeout(t)
+  }, [step, loading])
+
   const pick = (c: HubCharacter | null) => {
     setHubCharacter(c)
     if (step === 'panel' && action) {
@@ -122,7 +144,7 @@ export function CharacterHub({ stage, onOpenAdvanced, onOpenWorkflows, onOpenGal
       </div>
     )
   } else if (step === 'who') {
-    body = loading
+    body = loading && !waited
       ? <p className="hub-dim py-6 hub-fs-13" data-hub-step="who">Loading your characters…</p>
       : <HubEmpty onCreate={() => setHubStep('new')} onTry={(a) => { setHubCharacter(null); pickAction(a) }} />
   } else {

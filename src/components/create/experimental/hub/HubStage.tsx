@@ -93,7 +93,7 @@ function Portrait({ c, photo }: { c: HubCharacter | null; photo: string | null }
   }
   return (
     <span className="hub-portrait hub-portrait--none hub-dim" aria-hidden>
-      {c ? <span className="hub-initial">{hubInitial(c.name)}</span> : <ImagePlus size={30} strokeWidth={1.4} />}
+      {c ? <span className="hub-initial">{hubInitial(c.name)}</span> : <ImagePlus size={28} />}
     </span>
   )
 }
@@ -110,11 +110,11 @@ function Card({ c, photo }: { c: HubCharacter | null; photo: string | null }) {
 
   if (!c) {
     return (
-      <aside className="hub-card" data-hub-card="photo">
+      <div className="hub-card" data-hub-card="photo">
         <Portrait c={null} photo={null} />
         <h2 className="hub-text hub-fs-20 font-semibold">{HUB_JUST_PHOTO}</h2>
         <p className="hub-muted mt-1 hub-fs-13">{HUB_JUST_PHOTO_LINE}</p>
-      </aside>
+      </div>
     )
   }
 
@@ -132,7 +132,7 @@ function Card({ c, photo }: { c: HubCharacter | null; photo: string | null }) {
   }
 
   return (
-    <aside className="hub-card" data-hub-card={c.key}>
+    <div className="hub-card" data-hub-card={c.key}>
       <Portrait c={c} photo={photo} />
       {renaming ? (
         <RenameField c={c} onDone={() => setRenaming(false)} />
@@ -162,7 +162,7 @@ function Card({ c, photo }: { c: HubCharacter | null; photo: string | null }) {
       {c.kind === 'local' && (
         <p className="hub-dim hub-line mt-4 border-t pt-3 hub-fs-125">In Chat, name it: “a picture of {c.ref?.name ?? c.name} at the beach”.</p>
       )}
-    </aside>
+    </div>
   )
 }
 

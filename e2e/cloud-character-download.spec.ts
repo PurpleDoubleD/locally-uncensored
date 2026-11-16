@@ -78,13 +78,12 @@ async function boot(page: Page, answer: Answer) {
   await signInViaGate(page)
   await expect(cloudSwitch(page)).toBeChecked({ timeout: 20_000 })
   await page.getByRole('button', { name: /^Create$/ }).click()
-  // The Character area: the character in step 1, Image in step 2, its file
-  // actions under More options.
+  // The Character area: the character takes the stage, its file actions
+  // stand under its name on the left.
   await openCharacterHub(page)
-  await page.getByRole('button', { name: /Anna Müller/ }).click({ timeout: 15_000 })
-  await page.getByRole('radio', { name: 'Character Studio', exact: true }).click()
-  await page.getByRole('button', { name: 'More options' }).click()
-  await expect(page.locator('[data-character-file-actions]')).toContainText('Anna Müller', { timeout: 15_000 })
+  await expect(page.getByRole('tab', { name: /Anna Müller/ })).toHaveAttribute('aria-selected', 'true', { timeout: 15_000 })
+  await expect(page.locator('[data-hub-card-name]')).toHaveText('Anna Müller')
+  await expect(page.locator('[data-hub-card] [data-character-file-actions]')).toBeVisible({ timeout: 15_000 })
   return { fileAsked: () => fileAsked }
 }
 

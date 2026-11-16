@@ -268,7 +268,7 @@ test('one pill: the characters as tabs, the stage, and the bar switches the acti
   expect(seen.submits).toHaveLength(0)
 })
 
-test('Image runs on the character, More options keeps its file actions', async ({ page }) => {
+test('Image runs on the character, its file actions stand at the character', async ({ page }) => {
   await boot(page, { hub: true })
   await openCharacterHub(page)
   await page.locator('[data-hub-character^="cloud:1111"]').click()
@@ -277,11 +277,10 @@ test('Image runs on the character, More options keeps its file actions', async (
   // The prompt sits in the bar, like the chat's composer.
   await expect(page.getByPlaceholder('Describe the scene for your character…')).toBeVisible()
   await page.getByRole('button', { name: 'More options' }).click()
-  const more = page.getByTestId('hub-more')
-  await expect(more.locator('[data-character-file-actions]')).toBeVisible()
-  await expect(more.getByTestId('character-download')).toBeVisible()
-  // The same file actions stand at the character on the stage.
+  // The file actions stand at the character on the stage, once.
   await expect(page.locator('[data-hub-card] [data-character-file-actions]')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Download character' })).toHaveCount(1)
+  await expect(page.getByTestId('hub-more').locator('[data-character-file-actions]')).toBeHidden()
 })
 
 test('without the account switch: Swap says coming soon, Motion has no sound choice', async ({ page }) => {

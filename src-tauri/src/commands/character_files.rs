@@ -517,7 +517,9 @@ pub(crate) fn take_piece(loras: &Path, name: &str, offset: u64, bytes: &[u8], la
 
 /// `character_lora_folder`: where a character file lives on this machine,
 /// `{status: "ok", path}`, or `{status: "no_comfy"}` when there is no LoRA
-/// folder (no ComfyUI found).
+/// folder (no ComfyUI found). Desktop only, like the page that asks: a
+/// phone has no LoRA folder.
+#[cfg(desktop)]
 #[tauri::command]
 pub fn character_lora_folder(state: tauri::State<'_, AppState>) -> serde_json::Value {
     match local_loras_dir(state.inner()) {

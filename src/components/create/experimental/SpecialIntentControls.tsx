@@ -1986,7 +1986,10 @@ export function SwapControls({ oneClick }: {
  *  further, in the settings drawer (CharacterHub links it). */
 export function SpecialMore({ intent }: { intent: CreateIntent }) {
   if (intent === 'swap_character') return <SwapMore />
-  if (intent === 'character') return <CharacterMore />
+  // On the stage the file actions stand at the character on the left. That
+  // column is gone on a phone-wide window (index.css, .hub-card), so there
+  // they stay here.
+  if (intent === 'character') return <div className="min-[701px]:hidden"><CharacterMore /></div>
   return null
 }
 

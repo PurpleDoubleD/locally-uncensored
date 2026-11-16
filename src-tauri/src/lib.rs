@@ -943,6 +943,7 @@ pub fn run() {
             #[cfg(desktop)]
             commands::character_files::import_cloud_character,
             commands::character_files::character_photos,
+            #[cfg(desktop)]
             commands::character_files::character_lora_folder,
             #[cfg(desktop)]
             commands::character_files::character_lora_folder_open,

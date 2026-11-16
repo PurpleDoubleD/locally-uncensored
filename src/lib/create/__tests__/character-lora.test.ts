@@ -27,7 +27,7 @@ describe('the file and its folder', () => {
   })
 
   it('shortens the home folder, and leaves a Windows path alone', () => {
-    expect(shortFolder('/Users/dave/Library/Application Support/lu-labs/loras')).toBe('~/Library/Application Support/lu-labs/loras')
+    expect(shortFolder('/Users/me/Library/Application Support/lu-labs/loras')).toBe('~/Library/Application Support/lu-labs/loras')
     expect(shortFolder('D:\\ComfyUI\\models\\loras')).toBe('D:\\ComfyUI\\models\\loras')
   })
 

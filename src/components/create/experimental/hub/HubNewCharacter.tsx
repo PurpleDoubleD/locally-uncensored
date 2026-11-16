@@ -190,7 +190,7 @@ export function HubNewCharacter({ onBack, onSaved, onOpenGallery }: Props) {
             className={cn('hub-drop flex min-h-16 cursor-pointer items-center gap-3 px-4 hub-fs-14', over && 'hub-drop--over')}
             data-hub-drop
           >
-            <Upload size={17} className="hub-dim shrink-0" />
+            <Upload size={16} className="hub-dim shrink-0" />
             <span className="hub-muted min-w-0 flex-1">
               <span className="hub-text font-medium">{desktop ? 'Drop photos or a LoRA file here' : 'Drop photos here'}</span>, or choose files
             </span>
@@ -225,7 +225,7 @@ export function HubNewCharacter({ onBack, onSaved, onOpenGallery }: Props) {
                     title="Remove this photo"
                     aria-label={`Remove photo ${i + 1}`}
                   >
-                    <X size={10} strokeWidth={2.4} />
+                    <X size={10} />
                   </button>
                 </li>
               ))}
@@ -245,11 +245,11 @@ export function HubNewCharacter({ onBack, onSaved, onOpenGallery }: Props) {
           {!lora && (
             <div className="hub-line mt-5 grid grid-cols-2 gap-6 border-t pt-3.5 hub-fs-13">
               <ul className="hub-muted space-y-1">
-                <li className="hub-text mb-1.5 flex items-center gap-1.5 font-medium"><Check size={13} strokeWidth={2.2} className="text-emerald-500 dark:text-emerald-300" />Good</li>
+                <li className="hub-text mb-1.5 flex items-center gap-1.5 font-medium"><Check size={13} className="text-emerald-500 dark:text-emerald-300" />Good</li>
                 {GOOD.map((t) => <li key={t}>{t}</li>)}
               </ul>
               <ul className="hub-muted space-y-1">
-                <li className="hub-text mb-1.5 flex items-center gap-1.5 font-medium"><X size={13} strokeWidth={2.2} className="text-red-500 dark:text-red-300" />Avoid</li>
+                <li className="hub-text mb-1.5 flex items-center gap-1.5 font-medium"><X size={13} className="text-red-500 dark:text-red-300" />Avoid</li>
                 {AVOID.map((t) => <li key={t}>{t}</li>)}
               </ul>
             </div>

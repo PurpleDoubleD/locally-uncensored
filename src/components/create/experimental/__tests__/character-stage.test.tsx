@@ -14,7 +14,7 @@ import { render, cleanup, screen, fireEvent, waitFor } from '@testing-library/re
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
-const io = vi.hoisted(() => ({ folder: { status: 'ok', path: '/Users/dave/Library/Application Support/lu-labs/loras' } as { status: string; path?: string } | null, opened: 0, imported: [] as string[] }))
+const io = vi.hoisted(() => ({ folder: { status: 'ok', path: '/Users/me/Library/Application Support/lu-labs/loras' } as { status: string; path?: string } | null, opened: 0, imported: [] as string[] }))
 vi.mock('../../../../api/backend', async (orig) => ({ ...(await orig<typeof import('../../../../api/backend')>()), isTauri: () => true }))
 vi.mock('../../../../lib/create/character-lora', async (orig) => ({
   ...(await orig<typeof import('../../../../lib/create/character-lora')>()),
@@ -39,7 +39,7 @@ const hub = (ui: React.ReactElement) => render(<div className="lu-hub">{ui}</div
 beforeEach(() => {
   __resetSavedCharacters()
   useCharacterNames.setState({ names: {} })
-  io.folder = { status: 'ok', path: '/Users/dave/Library/Application Support/lu-labs/loras' }
+  io.folder = { status: 'ok', path: '/Users/me/Library/Application Support/lu-labs/loras' }
   io.opened = 0
   io.imported = []
   let n = 0
@@ -115,7 +115,7 @@ describe('New character', () => {
     const { container } = page()
     const path = await waitFor(() => { const el = container.querySelector('[data-hub-lora-path]'); if (!el) throw new Error('no path yet'); return el })
     expect(path.textContent).toBe('~/Library/Application Support/lu-labs/loras')
-    expect(path.getAttribute('title')).toBe('/Users/dave/Library/Application Support/lu-labs/loras')
+    expect(path.getAttribute('title')).toBe('/Users/me/Library/Application Support/lu-labs/loras')
     fireEvent.click(screen.getByRole('button', { name: 'Open LoRA folder' }))
     await waitFor(() => expect(io.opened).toBe(1))
   })
