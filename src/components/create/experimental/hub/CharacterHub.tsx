@@ -152,7 +152,7 @@ export function CharacterHub({ stage, onOpenGallery }: Props) {
     )
   } else if (step === 'who') {
     body = loading && !waited
-      ? <p className="hub-dim py-6 hub-fs-13" data-hub-step="who">Loading your characters…</p>
+      ? <p className="hub-dim py-6 text-center hub-fs-13" data-hub-step="who">Loading your characters…</p>
       : <HubEmpty onCreate={() => setHubStep('new')} />
   } else {
     body = (
@@ -166,12 +166,15 @@ export function CharacterHub({ stage, onOpenGallery }: Props) {
           onPhotoOnly={() => pick(null)}
           onNew={() => setHubStep('new')}
         />
+        {/* One scroll for the head and what stands under it, so a low
+            window never squeezes the head. */}
+        <div className="hub-scroll scrollbar-thin">
         <HubCard c={current} photo={photos[0] ?? null} />
         <StageClip />
         {oneClick ? (
           <SwapOneClick onChangeCharacter={() => toStage('what')} />
         ) : (
-          <div className="hub-body scrollbar-thin pb-4">
+          <div className="hub-body pb-4">
             <div className="pt-3 empty:hidden"><Stage hub {...stage} /></div>
             {(action !== 'image' || inRun || !current) && <HubPanel />}
             {action === 'image' && fromPhotos && (
@@ -180,6 +183,7 @@ export function CharacterHub({ stage, onOpenGallery }: Props) {
             {action === 'image' && <div className="pt-4"><HubPhotos c={current} photos={photos} loading={photosLoading} /></div>}
           </div>
         )}
+        </div>
       </div>
     )
   }
@@ -266,10 +270,10 @@ function StageClip() {
   const setVideoInput = useCreateStore((s) => s.setVideoInput)
   if (!videoInput || !(intent === 'swap_character' || intent === 'motion' || intent === 'lipsync')) return null
   return (
-    <p className="hub-muted hub-line flex min-h-8 shrink-0 items-center gap-1.5 border-b hub-fs-12" data-hub-clip>
+    <p className="hub-muted flex min-h-8 shrink-0 items-center justify-center gap-1.5 hub-fs-12" data-hub-clip>
       <Film size={13} className="hub-dim shrink-0" />
       <span className="min-w-0 truncate">{videoInput.name}</span>
-      <button type="button" onClick={() => setVideoInput(null)} className="hub-dim ml-auto p-0.5" title="Remove the video" aria-label="Remove the video">
+      <button type="button" onClick={() => setVideoInput(null)} className="hub-dim p-0.5" title="Remove the video" aria-label="Remove the video">
         <X size={12} />
       </button>
     </p>

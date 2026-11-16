@@ -29,7 +29,7 @@ vi.mock('../SpecialIntentControls', () => ({ CharacterMore: () => <span data-tes
 
 import { HubEmpty } from '../hub/HubEmpty'
 import { HubNewCharacter } from '../hub/HubNewCharacter'
-import { HubCard, HubPhotos } from '../hub/HubStage'
+import { HubCard, HubPhotos, HubTabs, tabsFit } from '../hub/HubStage'
 import { HubActionRow } from '../hub/HubActionRow'
 import { useCreateStore } from '../../../../stores/createStore'
 import { useCharacterNames } from '../../../../lib/create/character-names'
@@ -184,7 +184,8 @@ const hubCss = () => {
 describe('one column, one window', () => {
   it('the area is as wide as the prompt window: 660, centred', () => {
     const block = hubCss()
-    expect(block).toMatch(/\.lu-hub-row \{[^}]*grid-template-columns: minmax\(16px, 1fr\) minmax\(0, 660px\) minmax\(max-content, 1fr\)/)
+    // Both sides equally wide at every width: the left keeps free what the rails take.
+    expect(block).toMatch(/\.lu-hub-row \{[^}]*grid-template-columns: minmax\(var\(--hub-rails, 16px\), 1fr\) minmax\(0, 660px\) minmax\(var\(--hub-rails, 16px\), 1fr\)/)
     expect(block).toMatch(/\.lu-hub-row > \.hub-column \{[^}]*grid-column: 2/)
     // The stage is a plain column in it, not a grid across the page.
     expect(block).toMatch(/\.lu-hub \.hub-stage \{[^}]*flex-direction: column/)
@@ -217,15 +218,66 @@ describe('one column, one window', () => {
   })
 })
 
+describe('one middle axis', () => {
+  const names = (n: number) => ['Mira', 'Jonas', 'Aylin', 'Tobias', 'Greta', 'Malik', 'Svenja', 'Ines'].slice(0, n)
+  const chars = (n: number): HubCharacter[] => names(n).map((name, i) => ({ key: `saved:${i}`, kind: 'saved', name, meta: 'Photos · 4', image: null, photos: [] }))
+
+  it('the row of the characters stands around the middle, with New character as its last entry', () => {
+    const block = hubCss()
+    expect(block).toMatch(/\.lu-hub \.hub-tabs \{[^}]*justify-content: center/)
+    expect(block).toMatch(/\.lu-hub \.hub-tablist \{[^}]*justify-content: center/)
+    const { container } = hub(<HubTabs list={chars(3)} loading={false} current="saved:0" photoOnly={false} onPick={() => {}} onPhotoOnly={() => {}} onNew={() => {}} />)
+    const row = container.querySelector('[role=tablist]')!
+    expect(row.lastElementChild!.getAttribute('data-hub-new')).not.toBeNull()
+    expect(container.querySelectorAll('[data-hub-new]')).toHaveLength(1)
+  })
+
+  it('with less room the row gives up names, never the middle: first all but the picked one, then every name', () => {
+    expect(tabsFit(names(1), 'Mira', 660)).toBe('names')
+    expect(tabsFit(names(3), 'Mira', 660)).toBe('names')
+    expect(tabsFit(names(8), 'Mira', 660)).toBe('picked')
+    expect(tabsFit(names(8), 'Mira', 380)).toBe('pictures')
+    expect(tabsFit(names(3), 'Mira', 300)).toBe('pictures')
+    // No width measured yet: the row in full.
+    expect(tabsFit(names(8), 'Mira', 0)).toBe('names')
+  })
+
+  it('a picture without its name still says the name: as its label and its tooltip', () => {
+    const { container } = hub(<HubTabs list={chars(2)} loading={false} current="saved:0" photoOnly={false} onPick={() => {}} onPhotoOnly={() => {}} onNew={() => {}} />)
+    for (const tab of container.querySelectorAll('[data-hub-character]')) {
+      expect(tab.getAttribute('aria-label')).toBeTruthy()
+      expect(tab.getAttribute('title')).toContain(tab.getAttribute('aria-label')!)
+    }
+    // No picture: the initial on grey, not on the accent.
+    const none = container.querySelector('[data-hub-character] span[aria-hidden]')!
+    expect(none.className).toContain('hub-none')
+    expect(none.className).not.toMatch(/hub-acc|hub-soft/)
+  })
+
+  it('the head, the photos and the first page are centred', () => {
+    const block = hubCss()
+    expect(block).toMatch(/\.lu-hub \.hub-photos \{[^}]*justify-content: center/)
+    expect(block).toMatch(/\.lu-hub \.hub-empty \{[^}]*align-items: center;[^}]*justify-content: center/)
+    const c: HubCharacter = { key: 'saved:1', kind: 'saved', name: 'Oma', meta: 'Photos · 2', image: null, photos: [new Blob(['a']), new Blob(['b'])] }
+    const { container } = hub(<HubCard c={c} photo={null} />)
+    expect(container.querySelector('[data-hub-card-links]')!.className).toContain('justify-center')
+    // Nothing in the head is pushed to one side.
+    expect(container.querySelector('.hub-card')!.innerHTML).not.toMatch(/ml-auto|mr-auto|text-left|text-right/)
+  })
+})
+
 describe('nothing is lost', () => {
   it('the character stands as a head over its photos with all it can do, at every width', () => {
     const block = hubCss()
-    expect(block).toMatch(/\.lu-hub \.hub-card \{[^}]*padding: 10px 0 10px 68px/)
-    expect(block).toMatch(/\.hub-card > \.hub-portrait \{[^}]*width: 56px/)
+    expect(block).toMatch(/\.lu-hub \.hub-card \{[^}]*flex-direction: column;[^}]*align-items: center;[^}]*text-align: center/)
+    expect(block).toMatch(/\.hub-card > \.hub-portrait \{[^}]*width: 64px/)
     // Nothing of the area is switched off at any width but the icons of
     // the row on a phone-wide window.
     const off = [...block.matchAll(/([^{}\n]+)\{[^}]*display: none/g)].map((m) => m[1].trim())
-    expect(off).toEqual(['.lu-hub .hub-act-item svg'])
+    // (The first entry is the rails of the gallery on a phone-wide window,
+    // which are not part of the area.)
+    expect(off).toEqual(['@media (max-width: 520px)', '.lu-hub .hub-act-item svg'])
+    expect(block).toMatch(/@media \(max-width: 520px\) \{\s*\.lu-hub-rails \{ display: none; \}/)
     // Rename, Train a model and Delete are plain children of the card.
     const c: HubCharacter = { key: 'saved:1', kind: 'saved', name: 'Oma', meta: 'Photos · 2', image: null, photos: [new Blob(['a']), new Blob(['b'])] }
     const { container } = hub(<HubCard c={c} photo={null} />)
@@ -250,7 +302,7 @@ describe('nothing is lost', () => {
     expect(line).toHaveLength(1)
     expect(line[0].textContent).toBe(HUB_LOCAL_LINE)
     expect(HUB_LOCAL_LINE).toBe('Local runs on your own machine and costs nothing. Cloud prices in credits.')
-    expect(line[0].className).not.toMatch(/hidden/)
+    expect(line[0].className + line[0].parentElement!.className).not.toMatch(/hidden/)
     // A row, not a bar: no frame around it.
     expect(container.querySelector('[data-hub-actions]')!.className).toBe('lu-hub')
   })

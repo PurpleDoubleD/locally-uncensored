@@ -177,6 +177,17 @@ async function expectWindowAt(page: Page, image: { x: number; y: number; width: 
   expect(Math.abs(now.y + now.height - (image.y + image.height))).toBeLessThanOrEqual(1)
 }
 
+/** Everything of the stage stands on the middle axis of the prompt window:
+ *  the row of the characters, the head, the name, the photos. */
+async function expectOnAxis(page: Page, selectors: string[]) {
+  const win = await windowBox(page)
+  const axis = win.x + win.width / 2
+  for (const sel of selectors) {
+    const box = (await page.locator(sel).first().boundingBox())!
+    expect(Math.abs(box.x + box.width / 2 - axis), sel).toBeLessThanOrEqual(2)
+  }
+}
+
 /** A tap on the first frame at a share of its width and height. */
 async function tapFrame(page: Page, x: number, y: number) {
   const frame = page.getByRole('group', { name: /First frame of your video/ })
@@ -220,6 +231,12 @@ test('one pill: the characters as tabs, the stage, and the row over the window s
   await expect(page.getByRole('list', { name: 'Photos of Sam' }).locator('img')).toHaveCount(12)
   await savePhotoCharacter(page, 'Oma', 'oma.png', 8)
   await expect(page.locator('[data-hub-photo-only]')).toBeVisible()
+  // Four characters at this width: the row in full, around the middle, with
+  // New character as its last entry; the head and the photos under it on
+  // the same axis as the prompt window.
+  await expect(page.locator('[data-hub-tabs]')).toHaveAttribute('data-hub-tabs-fit', 'names')
+  await expect(page.locator('[role=tablist] > :last-child')).toHaveAttribute('data-hub-new', /.*/)
+  await expectOnAxis(page, ['[role=tablist][aria-label="My characters"]', '[data-hub-card] .hub-portrait', '[data-hub-card-name]', '[data-hub-card-links]', '.hub-photos'])
   await shoot(page, 'a-wer')
 
   // Bean on the stage: Image is the action, and the text field is there.
@@ -438,6 +455,11 @@ test('the training is a page of the area, with the way back to the stage', async
 test('phone width: the same stage and the same window, nothing folded away', async ({ page }) => {
   await boot(page, { hub: true, width: 375, height: 812 })
   await openCharacterHub(page)
+  // No room for names: the row is the round pictures, still in the middle,
+  // and each one says its name.
+  await expect(page.locator('[data-hub-tabs]')).toHaveAttribute('data-hub-tabs-fit', /picked|pictures/)
+  await expect(page.locator('[data-hub-character^="cloud:2222"]')).toHaveAttribute('title', /Mila/)
+  await expectOnAxis(page, ['[role=tablist][aria-label="My characters"]', '[data-hub-card-name]'])
   await shoot(page, 'handy-a-wer')
   await page.locator('[data-hub-character^="cloud:1111"]').click()
   await shoot(page, 'handy-b-was')
@@ -463,6 +485,7 @@ test('no character yet: the three steps, one button and the same window', async 
   const hub = page.locator('[data-character-hub]')
   await expect(hub).toHaveAttribute('data-character-hub', 'who')
   await expect(page.locator('[data-hub-empty] ol > li')).toHaveCount(3)
+  await expectOnAxis(page, ['[data-hub-empty] ol', '[data-hub-create]'])
   await expect(page.locator('[data-hub-example], [data-hub-empty] svg[viewBox="0 0 120 80"], [data-hub-empty] img')).toHaveCount(0)
   await expect(page.locator('[data-hub-empty] h1, [data-hub-empty] h2')).toHaveCount(0)
   // The window is there, with its field, and says what it waits for.
@@ -518,6 +541,7 @@ test('no character yet: the three steps, one button and the same window', async 
     expect(name.height).toBeGreaterThan(15)
     expect(links.y).toBeGreaterThanOrEqual(name.y + name.height)
     expect(links.y + links.height).toBeLessThanOrEqual(head.y + head.height + 1)
+    await expectOnAxis(page, ['[role=tablist][aria-label="My characters"]', '[data-hub-card-name]', '[data-hub-card-links]', '.hub-photos'])
   }
   await shoot(page, 'schmal-kopf')
   await page.locator('[data-hub-rename]').click()
