@@ -100,8 +100,10 @@ test('a list whose trigger is scrolled out of its panel is not left hanging in t
   await expect.poll(() => list.evaluate((el) => getComputedStyle(el.parentElement as HTMLElement).opacity)).toBe('1')
 
   const open = await measure(page)
-  expect(open.trigger.top, 'the trigger starts inside its panel').toBeGreaterThanOrEqual(open.panel.top)
-  expect(open.trigger.bottom, 'the trigger ends inside its panel').toBeLessThanOrEqual(open.panel.bottom)
+  // One pixel for sub-pixel rounding: under load the trigger was seen 0.14 px
+  // past the panel edge (16.11.2026, seven parallel runs).
+  expect(open.trigger.top, 'the trigger starts inside its panel').toBeGreaterThanOrEqual(open.panel.top - 1)
+  expect(open.trigger.bottom, 'the trigger ends inside its panel').toBeLessThanOrEqual(open.panel.bottom + 1)
   expect(open.menuShown).toBe(true)
 
   // A small scroll: the trigger stays in view and the list stays on it.
