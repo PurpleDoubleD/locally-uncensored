@@ -65,6 +65,14 @@ in the cloud catalogue.
   character, then make pictures with it, copy a motion, let it talk, or swap
   it into a real video. Swap Character is switched on for LU Cloud accounts
   step by step; until then the Swap action says so.
+  - Your characters stand on a stage: one tab each, the picked one with its
+    own photos, and Image, Swap, Motion and Talk in one bar below. Without a
+    character yet, a first page shows the three steps.
+  - New character is one page: drop your photos, keep them or go on to the
+    training. A dropped LoRA (.safetensors) becomes a character of this
+    computer, and the page opens the LoRA folder.
+  - Rename a character on the desktop; a LoRA character keeps its trigger
+    word.
 - LU Cloud in Create follows the models of the web catalogue, among them
   FLUX 3 Klein, GPT Image 2, Nano Banana Pro, Midjourney and Wan 3.0.
 - Images per run and Batch size are two settings: LU makes the images in
@@ -134,6 +142,12 @@ in the cloud catalogue.
   The sliders act inside the LU Engine model, so tools keep working. Turn it
   off under Plugins and the engine runs without them. Gemma 3 4B and 12B get
   sliders too.
+- Every plugin under Plugins (Create, REA, Neurons, Caveman Mode, Persona,
+  Group chat) has one row with its own switch; turned on, its settings open
+  right under it. What you had on stays on. A small dot on Plugins points to
+  Neurons until you have tried it once.
+- The Neurons introduction gets new drawings that show how a slider changes
+  the answer.
 
 **Chat look**
 - Colours for your messages and replies, coloured "quotes" and *actions*, font,

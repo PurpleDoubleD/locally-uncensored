@@ -282,6 +282,10 @@ export const RELEASE_NOTES: ReleaseNote[] = [
             detail: 'You pick the frames; the video stays where it is.',
           },
           {
+            title: 'Characters stand on a stage.',
+            detail: 'One tab per character, its own photos beside it, and Image, Swap, Motion and Talk in one bar. New character is one page; a dropped LoRA becomes a character, and you can rename one.',
+          },
+          {
             title: 'Swap Character comes to LU Cloud step by step.',
             detail: 'Until it is switched on for your account, the Swap action says so.',
           },
@@ -343,6 +347,14 @@ export const RELEASE_NOTES: ReleaseNote[] = [
           {
             title: 'Neurons is back as a plugin.',
             detail: 'Turn it on under Plugins in Chat, Agent or Code: a window with ready-made sliders, your own sliders from examples and a before and after. Tools keep working.',
+          },
+          {
+            title: 'Every plugin has its switch.',
+            detail: 'Create, REA, Neurons, Caveman Mode, Persona and Group chat each sit in one row with a switch; turned on, the settings open under it. What you had on stays on.',
+          },
+          {
+            title: 'A clearer Neurons introduction.',
+            detail: 'New drawings show how a slider changes the answer.',
           },
           {
             title: 'DeepSeek R1 answers a plain hi.',
