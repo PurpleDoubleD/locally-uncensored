@@ -374,7 +374,7 @@ test('the training is a page of the area, with the way back to the stage', async
   await expect(characterPill(page)).toHaveAttribute('aria-checked', 'true')
 })
 
-test('phone width: the same stage without the left column, the bar in its short form', async ({ page }) => {
+test('phone width: the same stage, the character as a head over it, the bar in its short form', async ({ page }) => {
   await boot(page, { hub: true, width: 375, height: 812 })
   await openCharacterHub(page)
   await shoot(page, 'handy-a-wer')
@@ -427,4 +427,36 @@ test('no character yet: the three steps, one button, four examples and nothing e
   await page.locator('[data-hub-rename-save]').click()
   await expect(page.locator('[data-hub-card-name]')).toHaveText('Greta')
   await expect(page.locator('[data-hub-character^="saved:"]')).toContainText('Greta')
+  // A narrow window: the character stands as a head over its photos, with
+  // everything it can do. Nothing is missing at any width.
+  for (const width of [700, 520, 380]) {
+    await page.setViewportSize({ width, height: 800 })
+    const card = page.locator('[data-hub-card]')
+    await expect(card).toBeVisible()
+    await expect(page.locator('[data-hub-card-name]')).toBeVisible()
+    for (const sel of ['[data-hub-rename]', '[data-hub-train]', '[data-hub-delete]']) await expect(page.locator(sel)).toBeVisible()
+    const head = (await card.boundingBox())!
+    const photos = (await page.locator('.hub-photos').boundingBox())!
+    expect(head.y + head.height).toBeLessThanOrEqual(photos.y + 1)
+    expect(head.x + head.width).toBeLessThanOrEqual(width)
+    // Not cut off: the name and the links lie inside the head, below one another.
+    const name = (await page.locator('[data-hub-card-name]').boundingBox())!
+    const links = (await page.locator('[data-hub-card-links]').boundingBox())!
+    expect(name.y).toBeGreaterThanOrEqual(head.y)
+    expect(name.height).toBeGreaterThan(15)
+    expect(links.y).toBeGreaterThanOrEqual(name.y + name.height)
+    expect(links.y + links.height).toBeLessThanOrEqual(head.y + head.height + 1)
+  }
+  await shoot(page, 'schmal-kopf')
+  await page.locator('[data-hub-rename]').click()
+  await page.getByRole('textbox', { name: 'New name for Greta' }).fill('Oma')
+  await page.locator('[data-hub-rename-save]').click()
+  await expect(page.locator('[data-hub-card-name]')).toHaveText('Oma')
+  // The line about Local and Cloud stands where the picked action shows its price.
+  await page.setViewportSize({ width: 1280, height: 800 })
+  await expect(page.locator('[data-hub-local-line]')).toHaveCount(0)
+  await page.locator('[data-hub-action="motion"]').click()
+  await expect(page.locator('[data-hub-local-line]')).toHaveText('Local runs on your own machine and costs nothing. Cloud prices in credits.')
+  await page.setViewportSize({ width: 380, height: 800 })
+  await expect(page.locator('[data-hub-local-line]')).toBeVisible()
 })

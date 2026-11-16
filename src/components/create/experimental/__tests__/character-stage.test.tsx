@@ -27,11 +27,11 @@ vi.mock('../SpecialIntentControls', () => ({ CharacterMore: () => <span data-tes
 
 import { HubEmpty } from '../hub/HubEmpty'
 import { HubNewCharacter } from '../hub/HubNewCharacter'
-import { HubCard, HubPhotos } from '../hub/HubStage'
+import { HubActions, HubCard, HubPhotos, type HubActionState } from '../hub/HubStage'
 import { useCreateStore } from '../../../../stores/createStore'
 import { useCharacterNames } from '../../../../lib/create/character-names'
 import { __resetSavedCharacters, listSavedCharacters, saveCharacter } from '../../../../lib/saved-characters'
-import { hubFromSaved, type HubCharacter } from '../../../../lib/create/character-hub'
+import { HUB_LOCAL_LINE, hubFromSaved, type HubCharacter } from '../../../../lib/create/character-hub'
 
 const png = (name: string) => new File([`png-${name}`], name, { type: 'image/png' })
 const hub = (ui: React.ReactElement) => render(<div className="lu-hub">{ui}</div>)
@@ -177,6 +177,49 @@ describe('the stage', () => {
     fireEvent.keyDown(screen.getByLabelText('New name for char seven'), { key: 'Enter' })
     await waitFor(() => expect(useCharacterNames.getState().names).toEqual({ 'cloud:7': 'Greta' }))
     expect(container.textContent).toContain('Trigger word: sevenchar')
+  })
+})
+
+describe('nothing is lost', () => {
+  it('a narrow window keeps the character and all it can do: as a head over the photos, never hidden', () => {
+    const css = readFileSync(resolve(__dirname, '../../../../index.css'), 'utf8')
+    const from = css.indexOf('@media (max-width: 700px) {\n  .lu-hub .hub-stage')
+    expect(from).toBeGreaterThan(0)
+    const narrow = css.slice(from, css.indexOf('\n}', from))
+    // The card is laid out, not taken away, and nothing in it but the file
+    // actions (which stand under More options there) is switched off.
+    expect(narrow).toMatch(/\.lu-hub \.hub-card \{[^}]*overflow: visible/)
+    expect(narrow).toMatch(/\.hub-portrait \{[^}]*width: 56px/)
+    const off = [...narrow.matchAll(/([^{}\n]+)\{[^}]*display: none/g)].map((m) => m[1].trim())
+    expect(off).toEqual(['.lu-hub .hub-card .hub-card-file'])
+    // Head above the photos, the photos above the bar.
+    expect(narrow).toMatch(/\.hub-card \{[^}]*grid-row: 2/)
+    expect(narrow).toMatch(/\.hub-body \{[^}]*grid-row: 3/)
+    expect(narrow).toMatch(/\.hub-foot \{[^}]*grid-row: 4/)
+    // Rename, Train a model and Delete are plain children of the card.
+    const c: HubCharacter = { key: 'saved:1', kind: 'saved', name: 'Oma', meta: 'Photos · 2', image: null, photos: [new Blob(['a']), new Blob(['b'])] }
+    const { container } = hub(<HubCard c={c} photo={null} />)
+    const links = container.querySelector('.hub-card [data-hub-card-links]')!
+    for (const sel of ['[data-hub-rename]', '[data-hub-train]', '[data-hub-delete]']) expect(links.querySelector(sel)).not.toBeNull()
+    expect(links.closest('.hub-card-file')).toBeNull()
+  })
+
+  it('says once what the price of the picked action means, and only then', () => {
+    const actions: HubActionState[] = [
+      { action: 'image', label: 'Character', locked: false, meta: 'Local · free' },
+      { action: 'swap', label: 'Swap Character', locked: true, meta: 'Runs on LU Cloud' },
+    ]
+    const idle = hub(<HubActions actions={actions} active={null} name="Oma" onPick={() => {}} />)
+    expect(idle.container.querySelector('[data-hub-local-line]')).toBeNull()
+    cleanup()
+    const picked = hub(<HubActions actions={actions} active="image" name="Oma" onPick={() => {}} />)
+    const line = picked.container.querySelectorAll('[data-hub-local-line]')
+    expect(line).toHaveLength(1)
+    expect(line[0].textContent).toBe(HUB_LOCAL_LINE)
+    expect(HUB_LOCAL_LINE).toBe('Local runs on your own machine and costs nothing. Cloud prices in credits.')
+    // The line is not one of those that step aside on a narrow window.
+    expect(line[0].className).not.toMatch(/hidden/)
+    expect(picked.container.querySelector('[data-hub-action-meta]')!.textContent).toBe('Local · free')
   })
 })
 
