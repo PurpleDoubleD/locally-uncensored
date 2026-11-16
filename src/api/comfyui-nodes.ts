@@ -1,4 +1,3 @@
-import { comfyuiUrl, localFetch } from './backend'
 import { log } from '../lib/logger'
 import { readComboOptions } from './comfyui-enum'
 // Audit W-T2: classifyModel/MODEL_TYPE_DEFAULTS kamen hier per `await import()`
@@ -9,7 +8,10 @@ import { readComboOptions } from './comfyui-enum'
 // nicht, also ist ein ganz normaler statischer Import hier die ehrliche Form.
 import { classifyModel, MODEL_TYPE_DEFAULTS } from './comfyui'
 import type { ModelType } from './comfyui'
-import type { ComfyInputValue } from '../types/comfy-graph'
+// The /object_info cache lives in comfyui-node-info.ts (3.1.0), so comfy-split.ts
+// can read it without the cycle comfyui -> comfy-split -> comfyui-nodes -> comfyui.
+import { getAllNodeInfo, resetNodeInfo, cachedNodeInfoHas, CACHE_TTL, type NodeMetadata } from './comfyui-node-info'
+export { getAllNodeInfo, type NodeInputSpec, type NodeMetadata } from './comfyui-node-info'
 
 // ─── Types ───
 
@@ -22,19 +24,6 @@ import type { ComfyInputValue } from '../types/comfy-graph'
  * assume which — `readComboOptions` (comfyui-enum.ts) is the one reader that
  * knows all three shapes, and it takes `unknown` for exactly that reason.
  */
-export interface NodeInputSpec {
-  required: Record<string, ComfyInputValue>
-  optional?: Record<string, ComfyInputValue>
-}
-
-export interface NodeMetadata {
-  input: NodeInputSpec
-  output: string[]
-  output_tooltips?: string[]
-  category?: string
-  display_name?: string
-  description?: string
-}
 
 export interface CategorizedNodes {
   loaders: string[]
@@ -55,46 +44,16 @@ export interface AvailableModels {
   motionModels: string[]
 }
 
-// ─── Cache ───
-
-let nodeInfoCache: Record<string, NodeMetadata> | null = null
-let cacheTimestamp = 0
-const CACHE_TTL = 300_000 // 5 minutes
-
-// ─── Fetch all node info (cached) ───
-
-export async function getAllNodeInfo(forceRefresh = false): Promise<Record<string, NodeMetadata>> {
-  if (!forceRefresh && nodeInfoCache && Date.now() - cacheTimestamp < CACHE_TTL) {
-    return nodeInfoCache
-  }
-
-  // Bound this fetch. /object_info is the heaviest control-plane call (the full
-  // node catalogue) and is the FIRST thing buildDynamicWorkflow hits. Without an
-  // explicit cap it inherits the Rust proxy's 300 s default — and a single wedged
-  // /object_info right after a ComfyUI (re)start froze the whole image-MCP VRAM
-  // hand-off for minutes with the text model left unloaded (chat-agent hang,
-  // 2026-06-03). 30 s is far beyond a healthy localhost response; on timeout we
-  // throw a clean error so the hand-off's finally can free VRAM + reload the model.
-  const res = await localFetch(comfyuiUrl('/object_info'), { timeoutMs: 30_000 })
-  if (!res.ok) throw new Error(`Failed to fetch node info: ${res.status}`)
-  const data = await res.json()
-
-  nodeInfoCache = data
-  cacheTimestamp = Date.now()
-  log.info(`[comfyui-nodes] Loaded ${Object.keys(data).length} node types`)
-  return data
-}
 
 export function clearNodeCache() {
-  nodeInfoCache = null
-  cacheTimestamp = 0
+  resetNodeInfo()
   clearCapabilityCache()
 }
 
 // ─── Node existence check (from cache) ───
 
 export function hasNode(name: string): boolean {
-  return nodeInfoCache ? name in nodeInfoCache : false
+  return cachedNodeInfoHas(name)
 }
 
 // ─── Categorize available nodes ───

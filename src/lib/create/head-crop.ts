@@ -13,11 +13,11 @@
 // Hier steht die Geometrie als reine Funktion und der Ablauf mit
 // austauschbaren Helfern, damit beides ohne Browser pruefbar ist.
 
-/** Ein gefundenes Gesicht in Pixeln des Fotos. */
-export interface FaceBox { x: number; y: number; width: number; height: number; score: number }
+// FaceBox und CropBox stehen in head-crop-boxes.ts (3.1.0), damit face-detect.ts
+// sie ohne Importkreis nutzen kann; hier unter demselben Namen weitergereicht.
+import type { FaceBox, CropBox } from './head-crop-boxes'
+export type { FaceBox, CropBox } from './head-crop-boxes'
 
-/** Der Ausschnitt, ganzzahlig, in Pixeln des Fotos. */
-export interface CropBox { x: number; y: number; width: number; height: number }
 
 export const HEAD_CROP = {
   /** Breite des Ausschnitts als Vielfaches der Gesichtsbreite. */

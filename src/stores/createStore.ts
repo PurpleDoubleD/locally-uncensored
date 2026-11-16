@@ -87,14 +87,6 @@ export type ProgressPhase = 'idle' | 'queued' | 'loading-model' | 'loading-clip'
  */
 export type CreateBackend = 'local' | 'cloud'
 
-/**
- * The redesigned Create page's flat creation intents, derived over
- * mode / image sub-mode / video sub-mode / removebg. The `mode` + sub-mode
- * enums stay the load-bearing state; `intent` is a derived view over them.
- */
-export type CreateIntent =
-  | 'image' | 'edit' | 'removebg' | 'video' | 'animate' | 'upscale' | 'eraser'
-  | CloudOp
 
 /** Single-purpose tools (2.5.7): super-resolution and masked object removal.
  *  Eraser is hosted only. Upscale also runs on the local ComfyUI backend
@@ -106,11 +98,6 @@ export type UtilityOp = 'upscale' | 'eraser'
  *  Windows and Linux, the way LOCAL_LANE_OPS keeps the specialized lanes. */
 export const LOCAL_UTILITY_OPS: ReadonlySet<UtilityOp> = new Set(['upscale'])
 
-/** 2.5.8 specialized Create categories (2026-07-17):
- *  Character-Studio (LoRA training + generation), talking character (lipsync),
- *  music, video extend and motion control. Like `utilityOp`, an escape hatch
- *  over the image/video mode axis: when set it wins the intent derivation. */
-export type CloudOp = 'character' | 'lipsync' | 'music' | 'extend' | 'motion' | '3d' | 'swap_character'
 
 // The three ways and the Detail step of the 3D tab (3.1.0) live in
 // lib/three/three-d-types.ts, so the 3D texts need not import the store.
@@ -171,6 +158,10 @@ export type { CharacterRef }
  */
 import type { ImageRef } from '../lib/image-ref'
 import { isHubIntent, type HubCharacter, type HubStep } from '../lib/create/character-hub'
+// CreateIntent and CloudOp live in lib/create/create-intent.ts (3.1.0), so
+// character-hub.ts can name them without an import cycle with this store.
+import type { CreateIntent, CloudOp } from '../lib/create/create-intent'
+export type { CreateIntent, CloudOp } from '../lib/create/create-intent'
 export type { ImageRef }
 
 /** Flatten mode / sub-mode / removebg / utilityOp / cloudOp into the single

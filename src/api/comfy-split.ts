@@ -44,7 +44,7 @@ export async function withComfySplit(workflow: ComfyApiGraph): Promise<ComfyApiG
       })
       return workflow
     }
-    const { getAllNodeInfo } = await import('./comfyui-nodes')
+    const { getAllNodeInfo } = await import('./comfyui-node-info')
     const info = await getAllNodeInfo()
     const clip = SELECT_CLIP_DEVICE in info
     const vae = SELECT_VAE_DEVICE in info
