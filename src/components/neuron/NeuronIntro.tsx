@@ -98,21 +98,18 @@ function ArtEqualizer() {
   )
 }
 
-/** Before and after: the same question, two answers being written. */
+// Step 4 (3.1.0): one real answer, and a line that wipes across it. Left of
+// the line the sliders are on, right of it they are off. Both answers lie on
+// the same spot, so the eye compares the words and not two boxes.
 function ArtCompare() {
   return (
-    <svg viewBox="0 0 320 168" className="w-full h-full" aria-hidden>
-      <rect x="16" y="20" width="136" height="128" rx="12" className="nintro-card" />
-      <rect x="168" y="20" width="136" height="128" rx="12" className="nintro-card nintro-card--accent" />
-      <text x="32" y="42" className="nintro-label nintro-muted-text">BEFORE</text>
-      <text x="184" y="42" className="nintro-label nintro-accent-text">AFTER</text>
-      {[0, 1, 2, 3].map((i) => (
-        <rect key={`b${i}`} x="32" y={58 + i * 18} width={[104, 92, 100, 60][i]} height="7" rx="3.5" className="nintro-line" style={{ animationDelay: `${i * 0.3}s` }} />
-      ))}
-      {[0, 1, 2, 3].map((i) => (
-        <rect key={`a${i}`} x="184" y={58 + i * 18} width={[96, 104, 84, 70][i]} height="7" rx="3.5" className="nintro-line nintro-line--accent" style={{ animationDelay: `${1.3 + i * 0.3}s` }} />
-      ))}
-    </svg>
+    <div className="nintro-wipe" aria-hidden data-testid="neuron-intro-wipe">
+      <span className="nintro-wipe-tag nintro-wipe-tag--on">SLIDERS ON</span>
+      <span className="nintro-wipe-tag nintro-wipe-tag--off">SLIDERS OFF</span>
+      <p className="nintro-wipe-a nintro-wipe-a--before">It was fine. I answered a few questions, sorted some notes, and that is about all there is to say.</p>
+      <p className="nintro-wipe-a nintro-wipe-a--after">Wonderful! I got to help with so many curious questions, and every single one taught me something new.</p>
+      <i className="nintro-wipe-bar" />
+    </div>
   )
 }
 

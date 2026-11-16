@@ -2870,10 +2870,6 @@ html[data-computer-surface]:not([data-computer-surface='window']) #root {
 .neuron-intro .nintro-card { fill: #ffffff; stroke: #e5e7eb; stroke-width: 1; }
 .dark .neuron-intro .nintro-card { fill: rgba(255, 255, 255, 0.04); stroke: rgba(255, 255, 255, 0.10); }
 .neuron-intro .nintro-card--accent { fill: color-mix(in srgb, var(--color-lu-accent) 8%, transparent); stroke: color-mix(in srgb, var(--color-lu-accent) 45%, transparent); }
-.neuron-intro .nintro-line { fill: #d1d5db; transform-box: fill-box; transform-origin: left center; animation: lu-nintro-write 4.4s ease-out infinite; }
-.dark .neuron-intro .nintro-line { fill: rgba(255, 255, 255, 0.18); }
-.neuron-intro .nintro-line--accent,
-.dark .neuron-intro .nintro-line--accent { fill: var(--color-lu-accent); }
 /* WebKit draws no clip-path on SVG groups: the code slides in instead of being typed. */
 .neuron-intro .nintro-type { opacity: 0; animation: lu-nintro-type 5s ease-out infinite; }
 .neuron-intro .nintro-glow { opacity: 0; animation: lu-nintro-glow 5s ease-in-out infinite; }
@@ -2883,11 +2879,6 @@ html[data-computer-surface]:not([data-computer-surface='window']) #root {
 @keyframes lu-nintro-knob {
   0%, 100% { transform: translateY(0); }
   45%, 70% { transform: translateY(var(--nintro-to, 0px)); }
-}
-@keyframes lu-nintro-write {
-  0% { transform: scaleX(0); }
-  30%, 85% { transform: scaleX(1); }
-  100% { transform: scaleX(1); opacity: 0; }
 }
 @keyframes lu-nintro-type {
   0% { opacity: 0; transform: translateX(-8px); }
@@ -2910,7 +2901,6 @@ html[data-computer-surface]:not([data-computer-surface='window']) #root {
 
 @media (prefers-reduced-motion: reduce) {
   .neuron-intro .nintro-knob,
-  .neuron-intro .nintro-line,
   .neuron-intro .nintro-type,
   .neuron-intro .nintro-glow,
   .neuron-intro .nintro-dash,
@@ -3010,6 +3000,23 @@ html[data-computer-surface]:not([data-computer-surface='window']) #root {
   88%, 100% { transform: translateX(34px); }
 }
 
+/* Step 4: one answer, a line wipes across it. */
+.neuron-intro .nintro-wipe { position: relative; width: 100%; max-width: 400px; height: 100px; }
+.neuron-intro .nintro-wipe-a { position: absolute; left: 0; right: 0; top: 30px; margin: 0; font-size: 15px; line-height: 1.5; }
+.neuron-intro .nintro-wipe-a--before { color: #6b7280; clip-path: inset(0 0 0 30%); animation: lu-nintro-wipe-before 9s cubic-bezier(0.45, 0, 0.2, 1) infinite; }
+.dark .neuron-intro .nintro-wipe-a--before { color: #8b919c; }
+.neuron-intro .nintro-wipe-a--after { color: #111827; clip-path: inset(0 70% 0 0); animation: lu-nintro-wipe-after 9s cubic-bezier(0.45, 0, 0.2, 1) infinite; }
+.dark .neuron-intro .nintro-wipe-a--after { color: #f3f4f6; }
+.neuron-intro .nintro-wipe-bar { position: absolute; top: 22px; bottom: 0; left: 30%; width: 1.5px; margin-left: -0.75px; background: var(--color-lu-accent); animation: lu-nintro-wipe-bar 9s cubic-bezier(0.45, 0, 0.2, 1) infinite; }
+.neuron-intro .nintro-wipe-bar::after { content: ''; position: absolute; left: -4px; top: 50%; width: 9.5px; height: 22px; margin-top: -11px; border-radius: 5px; background: var(--color-lu-accent); }
+.neuron-intro .nintro-wipe-tag { position: absolute; top: 0; font-size: 10px; font-weight: 600; letter-spacing: 0.04em; }
+.neuron-intro .nintro-wipe-tag--on { left: 0; color: var(--color-lu-accent); }
+.neuron-intro .nintro-wipe-tag--off { right: 0; color: #6b7280; }
+.dark .neuron-intro .nintro-wipe-tag--off { color: #9ca3af; }
+@keyframes lu-nintro-wipe-bar { 0%, 8%, 100% { left: 6%; } 45%, 62% { left: 94%; } }
+@keyframes lu-nintro-wipe-after { 0%, 8%, 100% { clip-path: inset(0 94% 0 0); } 45%, 62% { clip-path: inset(0 6% 0 0); } }
+@keyframes lu-nintro-wipe-before { 0%, 8%, 100% { clip-path: inset(0 0 0 6%); } 45%, 62% { clip-path: inset(0 0 0 94%); } }
+
 @media (prefers-reduced-motion: reduce) {
   .neuron-intro .nintro-plane--hit,
   .neuron-intro .nintro-wire--bent,
@@ -3021,7 +3028,10 @@ html[data-computer-surface]:not([data-computer-surface='window']) #root {
   .neuron-intro .nintro-way,
   .neuron-intro .nintro-way-run,
   .neuron-intro .nintro-way-name,
-  .neuron-intro .nintro-way-knob { animation: none; }
+  .neuron-intro .nintro-way-knob,
+  .neuron-intro .nintro-wipe-a--before,
+  .neuron-intro .nintro-wipe-a--after,
+  .neuron-intro .nintro-wipe-bar { animation: none; }
   .neuron-intro .nintro-pulse,
   .neuron-intro .nintro-way-run { opacity: 0; }
   .neuron-intro .nintro-plane--hit { stroke: var(--color-lu-accent); }
@@ -3033,6 +3043,9 @@ html[data-computer-surface]:not([data-computer-surface='window']) #root {
   .neuron-intro .nintro-thumb { transform: translateY(-22px); }
   .neuron-intro .nintro-way-name--first { opacity: 1; }
   .neuron-intro .nintro-way-knob { transform: translateX(-30px); }
+  .neuron-intro .nintro-wipe-bar { left: 50%; }
+  .neuron-intro .nintro-wipe-a--after { clip-path: inset(0 50% 0 0); }
+  .neuron-intro .nintro-wipe-a--before { clip-path: inset(0 0 0 50%); }
 }
 
 /* Neurons slider (N2): the house range (track and knob above), with a

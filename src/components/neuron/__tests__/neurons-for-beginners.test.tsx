@@ -199,7 +199,7 @@ describe('the introduction', () => {
     const css = readFileSync(resolve(__dirname, '../../../index.css'), 'utf8')
     const block = css.slice(css.indexOf('Neurons introduction (N2'))
     const reduced = block.slice(block.indexOf('@media (prefers-reduced-motion: reduce)'))
-    for (const cls of ['nintro-pulse', 'nintro-thumb', 'nintro-way', 'nintro-way-knob', 'nintro-knob', 'nintro-line', 'nintro-type']) {
+    for (const cls of ['nintro-pulse', 'nintro-thumb', 'nintro-way', 'nintro-way-knob', 'nintro-knob', 'nintro-wipe-bar', 'nintro-wipe-a--after', 'nintro-type']) {
       expect(block).toMatch(new RegExp(`\\.${cls}[^{]*\\{[^}]*animation:`))
       expect(reduced).toContain(`.neuron-intro .${cls}`)
     }
@@ -210,6 +210,26 @@ describe('the introduction', () => {
     const rule = shown.slice(0, shown.indexOf('}'))
     for (const cls of ['nintro-type', 'nintro-glow', 'nintro-arrive', 'nintro-dash']) expect(rule).toContain(`.${cls}`)
     expect(rule).toMatch(/opacity: 1/)
+  })
+
+  it('shows step 4 as one answer with a line across it, not two boxes of bars', async () => {
+    useSettingsStore.getState().updateSettings({ neuronsPluginEnabled: true })
+    const { NeuronIntro } = await import('../NeuronIntro')
+    render(<NeuronIntro open onClose={() => {}} />)
+    for (let n = 0; n < 3; n++) fireEvent.click(screen.getByTestId('neuron-intro-next'))
+    await waitFor(() => expect(screen.getByTestId('neuron-intro-step').textContent).toBe('Step 4 of 5'))
+    const wipe = await screen.findByTestId('neuron-intro-wipe')
+    expect(wipe.getAttribute('aria-hidden')).toBe('true')
+    expect(wipe.querySelectorAll('p.nintro-wipe-a')).toHaveLength(2)
+    expect(wipe.textContent).toContain('SLIDERS ON')
+    expect(wipe.textContent).toContain('SLIDERS OFF')
+    expect(wipe.querySelector('rect')).toBeNull()
+    // Standing still, the line is in the middle and both halves are readable.
+    const css = readFileSync(resolve(__dirname, '../../../index.css'), 'utf8')
+    const reduced = css.slice(css.lastIndexOf('.neuron-intro .nintro-wipe-bar { left: 50%; }'))
+    expect(reduced).toContain('.nintro-wipe-a--after { clip-path: inset(0 50% 0 0); }')
+    expect(reduced).toContain('.nintro-wipe-a--before { clip-path: inset(0 0 0 50%); }')
+    expect(css).not.toContain('nintro-line')
   })
 })
 
