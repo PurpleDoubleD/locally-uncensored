@@ -222,9 +222,11 @@ test('agent mode: edit, test, edit, test — the second identical command really
   // is exactly when it HAS changed (audit B1).
   expect(shellRuns.length).toBe(2)
 
-  // And agent mode injects the long shell timeout now, instead of leaving the
-  // Rust default of 120 s to kill a real build (audit B8).
-  expect(shellRuns[0].timeout).toBe(600000)
+  // And agent mode passes a timeout instead of leaving the Rust default of
+  // 120 s to kill a real run (audit B8). `npm test` is a recognised test run,
+  // which keeps run_tests' cap of 300 s (TEST_RUN_TIMEOUT_MS, 3.1.0); any
+  // other command gets the long shell default of 600 s.
+  expect(shellRuns[0].timeout).toBe(300000)
 })
 
 test('file_read pages a large file instead of dumping it whole', async ({ page }) => {

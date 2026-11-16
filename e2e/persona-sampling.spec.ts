@@ -105,7 +105,7 @@ test('a persona made with its own sampling values runs on them, and the chat can
   await page.getByRole('button', { name: /Plugins/ }).click()
   await page.getByRole('button', { name: /^Persona/ }).click()
   await page.getByRole('button', { name: 'Baron', exact: true }).click()
-  await page.getByTitle('Enable persona for this chat').click()
+  // The Persona switch above turned it on for this chat (3.1.0 plugin rows).
   await page.keyboard.press('Escape')
 
   // The popup says the values come from Baron.

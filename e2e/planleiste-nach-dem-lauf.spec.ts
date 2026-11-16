@@ -88,7 +88,8 @@ test('nach dem Lauf sagt die Planleiste, dass sie stehengeblieben ist', async ({
   // Der Lauf muss WIRKLICH vorbei sein, sonst prueft der Rest nichts.
   const gestoppt = page.getByTestId('plan-run-stopped')
   await expect(gestoppt).toBeVisible({ timeout: 60_000 })
-  await expect(gestoppt).toHaveText(/the run ended here, 3 of 4 steps done, 1 still open/)
+  // Seit 14.11.2026 ohne Zahlen (David: kein Zaehler, nirgends, planStoppedLabel).
+  await expect(gestoppt).toContainText('the run ended before every step was done')
 
   // Und der Kreisel steht. Gemessen war er der zweite Teil derselben Luege:
   // aufgeklappt drehte er sich nach dem Ende des Laufs unbegrenzt weiter.

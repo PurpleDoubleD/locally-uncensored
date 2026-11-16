@@ -1060,9 +1060,11 @@ test('mac local: Turbo, an edit and a batch each carry the stack', async ({ page
   await openStack(page)
   await drawer(page).getByRole('button', { name: /qwen\/detail/ }).click()
   await expect(drawer(page).getByText('· 1 active')).toBeVisible()
-  // A batch of two: one run per image, each with the stack.
-  await slider(page, 'Batch size').fill('2')
+  // Two images per run: one run per image, each with the stack. Since W32 this
+  // is the chip next to Create; the Mac has no Batch size (one at a time).
   await page.keyboard.press('Escape')
+  await page.getByRole('button', { name: /^Images per run: / }).click()
+  await page.getByRole('radio', { name: '2', exact: true }).click()
   await page.locator('textarea').first().fill('a lighthouse at dusk')
   await page.getByRole('button', { name: /^Create$/ }).last().click()
   await expect.poll(() => generates(page), { timeout: 30_000 }).toBe(2)
@@ -1081,8 +1083,9 @@ test('mac local: Turbo, an edit and a batch each carry the stack', async ({ page
   await expect(drawer(page).getByText('· 1 active')).toHaveCount(0)
   await drawer(page).getByRole('button', { name: /qwen\/detail/ }).click()
   await expect(drawer(page).getByText('· 1 active')).toBeVisible()
-  await slider(page, 'Batch size').fill('1')
   await page.keyboard.press('Escape')
+  await page.getByRole('button', { name: /^Images per run: / }).click()
+  await page.getByRole('radio', { name: '1', exact: true }).click()
   await page.locator('textarea').first().fill('make the car blue')
   await page.getByRole('button', { name: /^Create$/ }).last().click()
   await expect.poll(() => generates(page), { timeout: 30_000 }).toBe(3)
