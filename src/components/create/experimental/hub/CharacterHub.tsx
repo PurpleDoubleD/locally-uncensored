@@ -167,8 +167,12 @@ export function CharacterHub({ stage, onOpenGallery }: Props) {
           onNew={() => setHubStep('new')}
         />
         {/* One scroll for the head and what stands under it, so a low
-            window never squeezes the head. */}
+            window never squeezes the head. What is shorter than the room
+            (a character without photos) stands in its middle, between the
+            row of the characters and the row over the prompt window; what
+            fills it starts at the top. */}
         <div className="hub-scroll scrollbar-thin">
+        <div className="hub-center">
         <HubCard c={current} photo={photos[0] ?? null} />
         <StageClip />
         {oneClick ? (
@@ -183,6 +187,7 @@ export function CharacterHub({ stage, onOpenGallery }: Props) {
             {action === 'image' && <div className="pt-4"><HubPhotos c={current} photos={photos} loading={photosLoading} /></div>}
           </div>
         )}
+        </div>
         </div>
       </div>
     )
