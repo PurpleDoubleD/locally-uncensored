@@ -116,13 +116,15 @@ describe('every plugin row has the switch at its right end', () => {
     expect(body('persona')).toBeNull()
   })
 
-  it('Persona and Group chat without an open chat: grey, with the reason', () => {
+  it('Persona and Group chat without an open chat: grey, the reason on the switch, the row one line', () => {
     useChatStore.setState({ activeConversationId: null })
     openMenu()
-    expect((switchOf('persona') as HTMLButtonElement).disabled).toBe(true)
-    expect(screen.getByTestId('plugins-persona-reason').textContent).toBe(PERSONA_NO_CHAT_REASON)
-    expect((switchOf('group') as HTMLButtonElement).disabled).toBe(true)
-    expect(screen.getByTestId('plugins-group-reason').textContent).toBe(GROUP_NO_CHAT_REASON)
+    for (const [id, why] of [['persona', PERSONA_NO_CHAT_REASON], ['group', GROUP_NO_CHAT_REASON]]) {
+      const sw = switchOf(id) as HTMLButtonElement
+      expect(sw.disabled).toBe(true)
+      expect(sw.title).toBe(why)
+      expect(screen.queryByTestId(`plugins-${id}-reason`)).toBeNull()
+    }
   })
 
   it('Group chat: on opens the list, off ends the group', () => {

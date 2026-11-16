@@ -69,6 +69,7 @@ export function PluginRow({
   on,
   available = true,
   reason,
+  reasonInline = true,
   onToggle,
   switchLabel,
   switchTitle,
@@ -89,6 +90,9 @@ export function PluginRow({
   available?: boolean
   /** Why the switch is grey; shown under the row while it is. */
   reason?: string
+  /** false: the reason only as the switch's tooltip, the row stays one line
+   *  (a plain "open a chat first" is no news worth a line). */
+  reasonInline?: boolean
   onToggle: () => void
   switchLabel: string
   switchTitle?: string
@@ -117,7 +121,7 @@ export function PluginRow({
           testId={switchTestId}
         />
       </div>
-      {!available && reason && (
+      {!available && reason && reasonInline && (
         // A reason, not an error: the calm grey of lib/hinweis.ts.
         <div data-testid={`${testId}-reason`} className={`pb-1.5 t-micro leading-snug ${HINWEIS_TEXT.ruhig}`}>
           {reason}

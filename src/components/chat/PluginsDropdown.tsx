@@ -31,9 +31,9 @@ export const CREATE_GROUP_REASON = 'Not available in a group chat.'
 const ReaPluginRow = lazy(() => import('./ReaPluginRow').then((m) => ({ default: m.ReaPluginRow })))
 
 /** A persona switch without an open chat has nothing to hold its state. */
-export const PERSONA_NO_CHAT_REASON = 'Open a chat first, the persona lives on the conversation.'
+export const PERSONA_NO_CHAT_REASON = 'Open a chat first: the persona is set per chat.'
 /** Group chat without an open chat, the same. */
-export const GROUP_NO_CHAT_REASON = 'Open a chat first, the group lives on the conversation.'
+export const GROUP_NO_CHAT_REASON = 'Open a chat first: a group is set per chat.'
 
 type CavemanLevel = Exclude<CavemanMode, 'off'>
 
@@ -320,6 +320,7 @@ export function PluginsDropdown({
               on={personaEnabledOnChat}
               available={!!activeConvId}
               reason={PERSONA_NO_CHAT_REASON}
+              reasonInline={false}
               onToggle={() => { if (activeConvId) setConversationPersonaEnabled(activeConvId, !personaEnabledOnChat) }}
               switchLabel="Persona"
               switchTestId="plugins-persona-switch"
@@ -368,6 +369,7 @@ export function PluginsDropdown({
               on={!!activeConvId && groupOn}
               available={!!activeConvId}
               reason={GROUP_NO_CHAT_REASON}
+              reasonInline={false}
               onToggle={() => {
                 if (!activeConvId) return
                 if (groupOn) { setPersonaFor(null); setGroupArmed(false); setGroupModels(activeConvId, []) }
