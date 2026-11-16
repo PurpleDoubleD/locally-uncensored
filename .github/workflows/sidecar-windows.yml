@@ -47,6 +47,10 @@ env:
   STORIES260K_REVISION: '499bc8821c6b12b4e53c5bffcb21ec206f212d81'
   STORIES260K_SHA256: '270cba1bd5109f42d03350f60406024560464db173c0e387d91f0426d3bd256d'
 
+# Only reads the repository (OpenSSF Scorecard, Token-Permissions).
+permissions:
+  contents: read
+
 jobs:
   sidecar-windows:
     runs-on: windows-latest
