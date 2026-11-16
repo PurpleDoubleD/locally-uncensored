@@ -101,6 +101,14 @@ jobs:
 
   e2e:
     runs-on: ubuntu-22.04
+    # Four machines, a quarter of the specs each: one serial run took about
+    # 3 h (1.8k tests, workers 1), and the release gate runs this job too.
+    # Inside a shard it stays one worker, as playwright.config.ts sets it.
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
 
     steps:
       - name: Checkout repository
@@ -127,8 +135,8 @@ jobs:
 
       # The harness stubs the Tauri IPC in-page (e2e/support/tauri-mock.ts) —
       # no Rust sidecar, Ollama or ComfyUI processes needed.
-      - name: Playwright e2e (Tauri-mocked)
-        run: npm run test:e2e
+      - name: Playwright e2e (Tauri-mocked), shard ${{ matrix.shard }} of 4
+        run: npm run test:e2e -- --shard=${{ matrix.shard }}/4
 
   # The voice sidecar is Python and ships as source (src-tauri/resources/
   # voice_loop). Its tests need no voice models: they run against hollow model
