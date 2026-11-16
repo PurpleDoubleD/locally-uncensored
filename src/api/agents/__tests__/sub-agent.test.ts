@@ -280,8 +280,12 @@ const lastToolMessage = (n: number): string => {
 
 const tick = () => new Promise((r) => setTimeout(r, 0))
 
-async function waitForPrompt(convId: string) {
-  for (let i = 0; i < 100; i++) {
+// Waits by time, not by a count of ticks: under CI load 100 empty ticks
+// passed before the card was raised (PR #239, 16.11.2026, 1 of 20 locally
+// with two full suites alongside).
+async function waitForPrompt(convId: string, withinMs = 3000) {
+  const until = Date.now() + withinMs
+  while (Date.now() < until) {
     const head = headApproval(convId)
     if (head) return head
     await tick()
@@ -292,7 +296,8 @@ async function waitForPrompt(convId: string) {
 const runSub = (run?: AgentRunContext) =>
   defaultSubAgentRunner('do it', '', { budget: new AgentBudget({ ...SUB_AGENT_BUDGET }), run })
 
-describe('sub-agent — approval gate (AGT-1)', () => {
+// 15 s: under CI load one run took longer than the default 5 s (PR #239).
+describe('sub-agent — approval gate (AGT-1)', { timeout: 15_000 }, () => {
   beforeEach(() => {
     _setDepth(0)
     permLevel = 'auto'
