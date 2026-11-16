@@ -184,3 +184,21 @@ export async function openHubAction(action: HubAction, c: HubCharacter | null, r
     return err instanceof Error ? err.message : String(err)
   }
 }
+
+/** An action picked on the stage. Image with a photo character stays on the
+ *  stage: it has no LoRA to run, so the prompt window's button goes on to
+ *  Edit with its photos (CharacterHub, the stage's slot of hubRun). Every
+ *  other pick is openHubAction. */
+export async function openStageAction(action: HubAction, c: HubCharacter | null, replace = false): Promise<string | null> {
+  const st = useCreateStore.getState()
+  if (action === 'image' && c?.photos?.length && !c.ref) {
+    st.setIntent('character')
+    st.setCharacterTab('use')
+    st.setSelectedCharacter(null)
+    st.setHubStep('panel')
+    return null
+  }
+  const err = await openHubAction(action, c, replace)
+  useCreateStore.getState().setHubStep('panel')
+  return err
+}

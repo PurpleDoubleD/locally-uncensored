@@ -1,13 +1,15 @@
 // @vitest-environment jsdom
 /**
- * The Character area as David chose it on 16.11.2026 (variant B):
- *   - no character yet: three steps, one button, four examples, no headline;
+ * The Character area as David set it on 16.11.2026:
+ *   - no character yet: three steps and one button, no headline, no picture;
  *   - "New character" starts with the drop field alone and shows only the
  *     photos the user put there;
  *   - the stage shows only real things: a character without photos gets a
  *     line, never a stand-in picture;
  *   - Rename works on the desktop;
- *   - nothing of the area moves by itself except the four examples.
+ *   - the area is one column of the prompt window's width, and it has no
+ *     bar of its own: the window under it is the Composer of every tab;
+ *   - nothing of the area moves by itself.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, cleanup, screen, fireEvent, waitFor } from '@testing-library/react'
@@ -27,7 +29,8 @@ vi.mock('../SpecialIntentControls', () => ({ CharacterMore: () => <span data-tes
 
 import { HubEmpty } from '../hub/HubEmpty'
 import { HubNewCharacter } from '../hub/HubNewCharacter'
-import { HubActions, HubCard, HubPhotos, type HubActionState } from '../hub/HubStage'
+import { HubCard, HubPhotos } from '../hub/HubStage'
+import { HubActionRow } from '../hub/HubActionRow'
 import { useCreateStore } from '../../../../stores/createStore'
 import { useCharacterNames } from '../../../../lib/create/character-names'
 import { __resetSavedCharacters, listSavedCharacters, saveCharacter } from '../../../../lib/saved-characters'
@@ -48,26 +51,15 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.unstubAllGlobals() })
 
 describe('no character yet', () => {
-  it('shows the three steps, one button and four examples, and no headline', () => {
+  it('shows the three steps and one button: no headline, no picture, no example', () => {
     const onCreate = vi.fn()
-    const onTry = vi.fn()
-    const { container } = hub(<HubEmpty onCreate={onCreate} onTry={onTry} />)
+    const { container } = hub(<HubEmpty onCreate={onCreate} />)
     expect(container.querySelectorAll('ol > li')).toHaveLength(3)
-    expect(container.querySelectorAll('[data-hub-example]')).toHaveLength(4)
     expect(container.querySelectorAll('h1, h2, h3')).toHaveLength(0)
-    expect(screen.getAllByRole('button').filter((b) => b.textContent === 'Create a character')).toHaveLength(1)
+    expect(container.querySelectorAll('img, image, svg[viewBox="0 0 120 80"], [data-hub-example]')).toHaveLength(0)
+    expect(screen.getAllByRole('button')).toHaveLength(1)
     fireEvent.click(screen.getByRole('button', { name: 'Create a character' }))
     expect(onCreate).toHaveBeenCalledTimes(1)
-    fireEvent.click(container.querySelector('[data-hub-example="swap"]')!)
-    expect(onTry).toHaveBeenCalledWith('swap')
-  })
-
-  it('draws the examples with the LU mark, not with a photo', () => {
-    const { container } = hub(<HubEmpty onCreate={() => {}} onTry={() => {}} />)
-    expect(container.querySelectorAll('img')).toHaveLength(0)
-    const marks = [...container.querySelectorAll('image')].map((i) => i.getAttribute('href'))
-    expect(marks.length).toBeGreaterThanOrEqual(4)
-    expect(new Set(marks)).toEqual(new Set(['/LU-monogram.svg']))
   })
 })
 
@@ -180,63 +172,97 @@ describe('the stage', () => {
   })
 })
 
-describe('nothing is lost', () => {
-  it('a narrow window keeps the character and all it can do: as a head over the photos, never hidden', () => {
+const hubCss = () => {
+  const css = readFileSync(resolve(__dirname, '../../../../index.css'), 'utf8')
+  const from = css.indexOf('/* The area is one column of the prompt window')
+  const to = css.indexOf('/* The NEW mark on the Character pill')
+  expect(from).toBeGreaterThan(0)
+  expect(to).toBeGreaterThan(from)
+  return css.slice(from, to)
+}
+
+describe('one column, one window', () => {
+  it('the area is as wide as the prompt window: 660, centred', () => {
+    const block = hubCss()
+    expect(block).toMatch(/\.lu-hub-row \{[^}]*grid-template-columns: minmax\(16px, 1fr\) minmax\(0, 660px\) minmax\(max-content, 1fr\)/)
+    expect(block).toMatch(/\.lu-hub-row > \.hub-column \{[^}]*grid-column: 2/)
+    // The stage is a plain column in it, not a grid across the page.
+    expect(block).toMatch(/\.lu-hub \.hub-stage \{[^}]*flex-direction: column/)
+    expect(block).not.toMatch(/grid-template-columns: minmax\(0, 210px\)/)
+  })
+
+  it('has no bar and no foot of its own', () => {
     const css = readFileSync(resolve(__dirname, '../../../../index.css'), 'utf8')
-    const from = css.indexOf('@media (max-width: 700px) {\n  .lu-hub .hub-stage')
+    expect(css).not.toMatch(/\.hub-bar\b/)
+    expect(css).not.toMatch(/\.hub-foot\b/)
+    const dir = resolve(__dirname, '../hub')
+    for (const f of ['CharacterHub.tsx', 'HubStage.tsx', 'SwapOneClick.tsx', 'HubNewCharacter.tsx', 'HubEmpty.tsx']) {
+      const src = readFileSync(resolve(dir, f), 'utf8')
+      expect(src, f).not.toMatch(/hub-bar|hub-foot|<Composer/)
+    }
+  })
+
+  it('the prompt window is not built differently for the Character tab', () => {
+    const src = readFileSync(resolve(__dirname, '../Composer.tsx'), 'utf8')
+    const from = src.indexOf('data-prompt-window-area')
+    const to = src.indexOf('{/* Action bar */}')
     expect(from).toBeGreaterThan(0)
-    const narrow = css.slice(from, css.indexOf('\n}', from))
-    // The card is laid out, not taken away, and nothing in it but the file
-    // actions (which stand under More options there) is switched off.
-    expect(narrow).toMatch(/\.lu-hub \.hub-card \{[^}]*overflow: visible/)
-    expect(narrow).toMatch(/\.hub-portrait \{[^}]*width: 56px/)
-    const off = [...narrow.matchAll(/([^{}\n]+)\{[^}]*display: none/g)].map((m) => m[1].trim())
-    expect(off).toEqual(['.lu-hub .hub-card .hub-card-file'])
-    // Head above the photos, the photos above the bar.
-    expect(narrow).toMatch(/\.hub-card \{[^}]*grid-row: 2/)
-    expect(narrow).toMatch(/\.hub-body \{[^}]*grid-row: 3/)
-    expect(narrow).toMatch(/\.hub-foot \{[^}]*grid-row: 4/)
+    const head = src.slice(src.lastIndexOf('<div', from), to)
+    // One wrapper, one width, one frame: no branch on `hub` in any of them.
+    expect(head).toContain('className="shrink-0 flex flex-col justify-end px-4 pb-4 pt-2 min-h-[192px]"')
+    expect(head).toContain('className="mx-auto w-full max-w-[660px] space-y-2.5"')
+    expect(head).toMatch(/className="rounded-\[var\(--radius-panel\)\][^"]*" data-prompt-window>/)
+    expect(src).not.toMatch(/hub \?\s*(cn\()?'[^']*(px-0|hub-bar)/)
+    expect(src).not.toMatch(/!hub && 'max-w/)
+  })
+})
+
+describe('nothing is lost', () => {
+  it('the character stands as a head over its photos with all it can do, at every width', () => {
+    const block = hubCss()
+    expect(block).toMatch(/\.lu-hub \.hub-card \{[^}]*padding: 10px 0 10px 68px/)
+    expect(block).toMatch(/\.hub-card > \.hub-portrait \{[^}]*width: 56px/)
+    // Nothing of the area is switched off at any width but the icons of
+    // the row on a phone-wide window.
+    const off = [...block.matchAll(/([^{}\n]+)\{[^}]*display: none/g)].map((m) => m[1].trim())
+    expect(off).toEqual(['.lu-hub .hub-act-item svg'])
     // Rename, Train a model and Delete are plain children of the card.
     const c: HubCharacter = { key: 'saved:1', kind: 'saved', name: 'Oma', meta: 'Photos · 2', image: null, photos: [new Blob(['a']), new Blob(['b'])] }
     const { container } = hub(<HubCard c={c} photo={null} />)
     const links = container.querySelector('.hub-card [data-hub-card-links]')!
     for (const sel of ['[data-hub-rename]', '[data-hub-train]', '[data-hub-delete]']) expect(links.querySelector(sel)).not.toBeNull()
-    expect(links.closest('.hub-card-file')).toBeNull()
+    // The file actions of a LoRA character stand at its head as well.
+    cleanup()
+    const lora: HubCharacter = { key: 'cloud:7', kind: 'cloud', name: 'seven', meta: 'Trained · Flux', image: null, ref: { id: '7', name: 'seven', triggerWord: 'sevenchar', family: 'flux' } }
+    const file = hub(<HubCard c={lora} photo={null} />)
+    expect(file.container.querySelector('.hub-card [data-testid="file-actions"]')).not.toBeNull()
   })
 
-  it('says once what the price of the picked action means, and only then', () => {
-    const actions: HubActionState[] = [
-      { action: 'image', label: 'Character', locked: false, meta: 'Local · free' },
-      { action: 'swap', label: 'Swap Character', locked: true, meta: 'Runs on LU Cloud' },
-    ]
-    const idle = hub(<HubActions actions={actions} active={null} name="Oma" onPick={() => {}} />)
-    expect(idle.container.querySelector('[data-hub-local-line]')).toBeNull()
-    cleanup()
-    const picked = hub(<HubActions actions={actions} active="image" name="Oma" onPick={() => {}} />)
-    const line = picked.container.querySelectorAll('[data-hub-local-line]')
+  it('the row over the window: Image is picked by default, and one line says what Local and Cloud mean', () => {
+    useCreateStore.setState({ backend: 'local' } as never)
+    useCreateStore.getState().setIntent('character')
+    useCreateStore.getState().setCharacterTab('use')
+    const { container } = render(<HubActionRow />)
+    const row = screen.getByRole('radiogroup', { name: 'Character action' })
+    expect(row.querySelector('[data-hub-action="image"]')!.getAttribute('aria-checked')).toBe('true')
+    expect([...row.querySelectorAll('[role=radio]')].filter((r) => r.getAttribute('aria-checked') === 'true')).toHaveLength(1)
+    const line = container.querySelectorAll('[data-hub-local-line]')
     expect(line).toHaveLength(1)
     expect(line[0].textContent).toBe(HUB_LOCAL_LINE)
     expect(HUB_LOCAL_LINE).toBe('Local runs on your own machine and costs nothing. Cloud prices in credits.')
-    // The line is not one of those that step aside on a narrow window.
     expect(line[0].className).not.toMatch(/hidden/)
-    expect(picked.container.querySelector('[data-hub-action-meta]')!.textContent).toBe('Local · free')
+    // A row, not a bar: no frame around it.
+    expect(container.querySelector('[data-hub-actions]')!.className).toBe('lu-hub')
   })
 })
 
 describe('nothing moves by itself', () => {
-  it('only the four examples of the first page are animated, and they stand still with reduced motion', () => {
-    const css = readFileSync(resolve(__dirname, '../../../../index.css'), 'utf8')
-    const from = css.indexOf('/* The stage (variant B')
-    const to = css.indexOf('/* The NEW mark on the Character pill')
-    expect(from).toBeGreaterThan(0)
-    expect(to).toBeGreaterThan(from)
-    const block = css.slice(from, to)
-    const animated = [...block.matchAll(/([^{}]+)\{[^{}]*\banimation:(?!\s*none)[^;]+;[^{}]*\}/g)].map((m) => m[1].trim())
-    expect(animated.length).toBe(4)
-    for (const sel of animated) expect(sel).toMatch(/^\.lu-hub \.hub-ex-(a|b|tilt|bar)$/)
+  it('no rule of the area animates or eases anything', () => {
+    const block = hubCss()
+    expect(block).not.toMatch(/\banimation\b/)
+    expect(block).not.toMatch(/@keyframes/)
     expect(block).not.toMatch(/\btransition\b/)
-    const reduced = block.slice(block.indexOf('@media (prefers-reduced-motion: reduce)'))
-    for (const cls of ['hub-ex-a', 'hub-ex-b', 'hub-ex-tilt', 'hub-ex-bar']) expect(reduced).toContain(`.lu-hub .${cls}`)
-    expect(reduced).toMatch(/animation: none/)
+    const css = readFileSync(resolve(__dirname, '../../../../index.css'), 'utf8')
+    expect(css).not.toMatch(/lu-hub-ex|hub-ex-/)
   })
 })

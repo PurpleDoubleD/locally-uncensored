@@ -4,8 +4,9 @@
  * of the web's swap-one-click-ui.test.tsx, 4e121fc0): ONE button with the
  * total (frame + video), one press runs the chain, a refusal of the frame
  * step shows the quiet sentence and books no video, the consent is a must,
- * and without the switch the area keeps the old panel. Every way to the
- * server is a fake, the catalogue a fixture.
+ * and without the switch the area keeps the old panel. The button is the one
+ * of the prompt window under the area (the Composer), not a bar of its own.
+ * Every way to the server is a fake, the catalogue a fixture.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, cleanup, screen, act, fireEvent, renderHook } from '@testing-library/react'
@@ -59,6 +60,7 @@ vi.mock('../../../../api/cloud/jobs', async (orig) => ({
 }))
 
 import { SwapOneClick, useSwapOneClickShown } from '../hub/SwapOneClick'
+import { Composer } from '../Composer'
 import { useCreateStore } from '../../../../stores/createStore'
 import { useCloudCatalogStore } from '../../../../stores/cloudCatalogStore'
 import { useCharacterHubReleaseStore } from '../../../../lib/create/character-hub-release'
@@ -70,8 +72,14 @@ import { SWAP_CONSENT_TEXT } from '../../../../lib/render/swap'
 const PIXEL = 'data:image/jpeg;base64,/9j/4AAQ'
 const flush = () => act(async () => { for (let i = 0; i < 12; i++) await new Promise((r) => setTimeout(r, 0)) })
 
+// The flow and the prompt window under it: the button is the window's.
 function Panel() {
-  return <div className="lu-hub flex flex-col"><SwapOneClick onChangeCharacter={() => {}} onOpenAdvanced={() => {}} /></div>
+  return (
+    <>
+      <div className="lu-hub flex flex-col"><SwapOneClick onChangeCharacter={() => {}} /></div>
+      <Composer hub onOpenAdvanced={() => {}} onOpenWorkflows={() => {}} />
+    </>
+  )
 }
 
 const createButton = () => screen.getByRole('button', { name: /^Create/ }) as HTMLButtonElement
@@ -206,6 +214,37 @@ describe('one button, one price', () => {
     expect(open.getAttribute('aria-checked')).toBe('false')
     expect(screen.getByText('Off: Nano Banana Pro + SCAIL-2. On: open-weight models, less strict.')).toBeTruthy()
     expect(screen.getByRole('switch', { name: 'Check first frame before video' }).getAttribute('aria-checked')).toBe('false')
+  })
+})
+
+describe('one window', () => {
+  it('has no bar of its own: Create, Cancel and Continue are the prompt window\'s', async () => {
+    render(<Panel />)
+    await flush()
+    expect(document.querySelector('[data-swap-bar]')).toBeNull()
+    expect(document.querySelector('.hub-bar')).toBeNull()
+    const win = document.querySelector('[data-prompt-window]')!
+    expect(win.contains(createButton())).toBe(true)
+    expect(screen.getAllByRole('button', { name: /^Create/ })).toHaveLength(1)
+    // The video can come in through the window as well.
+    expect(win.querySelector('[data-hub-upload]')).toBeTruthy()
+  })
+
+  it('the check of the first frame asks in the window\'s field, Try again stands under the pictures', async () => {
+    render(<Panel />)
+    await flush()
+    fireEvent.click(screen.getByRole('switch', { name: 'Check first frame before video' }))
+    fireEvent.click(createButton())
+    await flush()
+    const win = document.querySelector('[data-prompt-window]')!
+    const field = win.querySelector('textarea')!
+    expect(field.getAttribute('placeholder')).toBe("What's wrong? (optional)")
+    expect(win.contains(screen.getByRole('button', { name: /^Continue · 48k/ }))).toBe(true)
+    fireEvent.change(field, { target: { value: 'wrong hair' } })
+    fireEvent.click(document.querySelector('[data-swap-retry]')!)
+    await flush()
+    expect(cloud.submits.map((s) => s.params.swap_step)).toEqual(['frame', 'frame'])
+    expect(JSON.stringify(cloud.submits[1])).toContain('wrong hair')
   })
 })
 

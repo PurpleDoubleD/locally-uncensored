@@ -1,18 +1,14 @@
-// The stage of the Character area (3.1.0, variant B, David 16.11.2026): the
-// characters as text tabs across the top, the picked one on the left with
-// its name and what can be done with it, its photos on the right, and at the
-// foot the bar with the switch between Image, Swap, Motion and Talk. Only
-// real things stand here: the user's characters and their own pictures. A
-// character without a picture shows its initial, one without photos a line
-// that says so.
+// The stage of the Character area (3.1.0, David 16.11.2026): the characters
+// as text tabs across the top, the picked one as a head under them (a small
+// picture, its name, what can be done with it), then its photos. All of it
+// in the one column over the prompt window. Only real things stand here:
+// the user's characters and their own pictures. A character without a
+// picture shows its initial, one without photos a line that says so.
 
-import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { Image as ImageIcon, ImagePlus, Mic, PersonStanding, Plus, Replace } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { ImagePlus, Plus } from 'lucide-react'
 import { useCreateStore } from '../../../../stores/createStore'
-import {
-  ACTION_LABEL, ACTION_LINE, HUB_JUST_PHOTO, HUB_JUST_PHOTO_LINE, HUB_LOCAL_LINE, hubInitial,
-  type HubAction, type HubCharacter,
-} from '../../../../lib/create/character-hub'
+import { HUB_JUST_PHOTO, HUB_JUST_PHOTO_LINE, hubInitial, type HubCharacter } from '../../../../lib/create/character-hub'
 import { useCharacterNames, cleanCharacterName, MAX_CHARACTER_LABEL } from '../../../../lib/create/character-names'
 import { deleteSavedCharacter, renameSavedCharacter } from '../../../../lib/saved-characters'
 import { errorText } from '../../../../types/json-guards'
@@ -20,13 +16,6 @@ import { cn } from '../../ui/cn'
 import { sendPhotosToStudio } from '../characterPhotos'
 import { CharacterMore } from '../SpecialIntentControls'
 import { HubAvatar } from './HubParts'
-
-export const ACTION_ICON: Record<HubAction, ReactNode> = {
-  image: <ImageIcon size={14} />,
-  swap: <Replace size={14} />,
-  motion: <PersonStanding size={14} />,
-  talk: <Mic size={14} />,
-}
 
 // ── the tabs ────────────────────────────────────────────────────────────────
 
@@ -84,7 +73,7 @@ export function HubTabs({ list, loading, current, photoOnly, onPick, onPhotoOnly
   )
 }
 
-// ── the character on the left ───────────────────────────────────────────────
+// ── the character's head ───────────────────────────────────────────────
 
 function Portrait({ c, photo }: { c: HubCharacter | null; photo: string | null }) {
   const image = c?.image ?? photo
@@ -93,7 +82,7 @@ function Portrait({ c, photo }: { c: HubCharacter | null; photo: string | null }
   }
   return (
     <span className="hub-portrait hub-portrait--none hub-dim" aria-hidden>
-      {c ? <span className="hub-initial">{hubInitial(c.name)}</span> : <ImagePlus size={28} />}
+      {c ? <span className="hub-initial">{hubInitial(c.name)}</span> : <ImagePlus size={20} />}
     </span>
   )
 }
@@ -160,7 +149,7 @@ function Card({ c, photo }: { c: HubCharacter | null; photo: string | null }) {
       {!saved && <div className="hub-card-file -ml-1 mt-1.5"><CharacterMore bare /></div>}
       {error && <p role="alert" className="mt-1.5 text-red-500 hub-fs-125 dark:text-red-400">{error}</p>}
       {c.kind === 'local' && (
-        <p className="hub-dim hub-line mt-4 border-t pt-3 hub-fs-125">In Chat, name it: “a picture of {c.ref?.name ?? c.name} at the beach”.</p>
+        <p className="hub-dim mt-1.5 hub-fs-125">In Chat, name it: “a picture of {c.ref?.name ?? c.name} at the beach”.</p>
       )}
     </div>
   )
@@ -204,7 +193,7 @@ function RenameField({ c, onDone }: { c: HubCharacter; onDone: () => void }) {
   )
 }
 
-// ── the photos on the right ─────────────────────────────────────────────────
+// ── the photos ─────────────────────────────────────────────────
 
 /** The character's own photos. "Made with …" (its results) comes with 3.1.1;
  *  until then this is what there is to see of it. */
@@ -234,63 +223,6 @@ export function HubPhotos({ c, photos, loading }: { c: HubCharacter | null; phot
       ) : (
         <p className="hub-dim hub-line border-y py-3 hub-fs-13" data-hub-no-photos>{loading ? 'Loading the photos…' : none}</p>
       )}
-    </div>
-  )
-}
-
-// ── the switch in the bar ───────────────────────────────────────────────────
-
-export interface HubActionState {
-  action: HubAction
-  /** The name of the tab the action stands for ("Swap Character"), read out
-   *  as it was on the old pill. */
-  label: string
-  /** Opens the Cloud sheet instead of the action. */
-  locked: boolean
-  /** The grey words on the right while this action is picked. */
-  meta: string
-}
-
-/** Image, Swap, Motion, Talk: the top line of the bar at the foot. */
-export function HubActions({ actions, active, name, onPick, right }: {
-  actions: HubActionState[]
-  active: HubAction | null
-  name: string | null
-  onPick: (a: HubAction) => void
-  /** What stands before the price on the right: the clip of the panel. */
-  right?: ReactNode
-}) {
-  const on = actions.find((a) => a.action === active) ?? null
-  const line = on
-    ? ACTION_LINE[on.action].replace('your character', name ?? 'your character').replace('Your character', name ?? 'Your character')
-    : name ? `What should ${name} do?` : 'What should your character do?'
-  return (
-    <div data-hub-actions>
-    <div className="flex min-h-[42px] items-center gap-3 py-1 pl-1.5 pr-3">
-      <div role="radiogroup" aria-label="Character action" className="hub-act">
-        {actions.map((a) => (
-          <button
-            key={a.action}
-            type="button"
-            role="radio"
-            aria-checked={a.action === active}
-            aria-label={a.locked ? `${a.label}, runs on LU Cloud` : a.label}
-            title={a.locked ? `${a.label}, runs on LU Cloud` : ACTION_LINE[a.action]}
-            onClick={() => onPick(a.action)}
-            className={cn('hub-act-item hub-fs-13', a.action === active && 'hub-act-item--on', a.locked && 'opacity-60')}
-            data-hub-action={a.action}
-          >
-            {ACTION_ICON[a.action]}{ACTION_LABEL[a.action]}
-          </button>
-        ))}
-      </div>
-      <span className="hub-dim min-w-0 flex-1 truncate hub-fs-125 max-[640px]:hidden" data-hub-action-line>{line}</span>
-      {right}
-      {on?.meta && <span className="hub-dim shrink-0 whitespace-nowrap hub-fs-125 tabular-nums max-[520px]:hidden" data-hub-action-meta>{on.meta}</span>}
-    </div>
-    {/* What the price beside it means, once an action is picked. One quiet
-        line, at every width. */}
-    {on && <p className="hub-dim px-3 pb-1.5 hub-fs-125" data-hub-local-line>{HUB_LOCAL_LINE}</p>}
     </div>
   )
 }

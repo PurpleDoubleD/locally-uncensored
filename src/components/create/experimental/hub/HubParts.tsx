@@ -1,10 +1,10 @@
 // The small parts the Character area is built from (sketches v2): rows on
 // the surface with a hairline under them, a round picture, a text choice with
-// a small arrow, and "More options" as grey text. No box around a field; the
-// one framed part is the bar at the foot (Composer, `hub`).
+// a small arrow. No box around a field; the one framed part of the tab is
+// the prompt window under the area, the same as in every tab.
 
-import { createContext, useContext, useRef, useState, type ReactNode } from 'react'
-import { ArrowRight, ChevronDown, ChevronRight, Plus } from 'lucide-react'
+import { createContext, useContext, useRef, type ReactNode } from 'react'
+import { ArrowRight, Plus } from 'lucide-react'
 import { hubInitial, type HubCharacter } from '../../../../lib/create/character-hub'
 import { Select, type SelectOption } from '../../ui/Select'
 import { cn } from '../../ui/cn'
@@ -44,25 +44,6 @@ export function HubLine({ children, className, ...rest }: { children: ReactNode;
   return (
     <div className={cn('hub-line flex min-h-10 items-center gap-2.5 border-b hub-fs-14', className)} {...rest}>
       {children}
-    </div>
-  )
-}
-
-/** "More options": grey text with a small arrow, the options under it. */
-export function MoreOptions({ children, testId }: { children: ReactNode; testId?: string }) {
-  const [open, setOpen] = useState(false)
-  return (
-    <div className="pt-2.5" data-testid={testId}>
-      <button
-        type="button"
-        aria-expanded={open}
-        onClick={() => setOpen(!open)}
-        className={cn('flex items-center gap-1.5 hub-fs-125 transition-colors', open ? 'hub-muted' : 'hub-dim hover:opacity-80')}
-      >
-        {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-        More options
-      </button>
-      {open && <div className="mt-1.5 space-y-2 pl-[18px]">{children}</div>}
     </div>
   )
 }
@@ -155,19 +136,6 @@ export function UploadLine({ icon, label, accept, onFile, note }: {
       {note && <span className="hub-dim ml-auto hub-fs-125">{note}</span>}
     </HubLine>
   )
-}
-
-/** A page of the area that is one column (the training): 660 px, centred. */
-export const HUB_COLUMN = 'mx-auto w-full max-w-[660px] px-4'
-
-/** What stands at the top of the bar at the foot: on the stage the switch
- *  between Image, Swap, Motion and Talk. Every bar of the area shows it
- *  (the Composer's, the one click swap's); outside the stage there is none. */
-export const HubBarTopContext = createContext<ReactNode>(null)
-
-export function HubBarTop() {
-  const top = useContext(HubBarTopContext)
-  return top ? <div className="hub-line border-b" data-hub-bar-top>{top}</div> : null
 }
 
 /** A switch as a row (one click swap, sketch c2): the name, a grey line what

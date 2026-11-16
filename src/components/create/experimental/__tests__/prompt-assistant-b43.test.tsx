@@ -128,7 +128,11 @@ describe('B43: where it sits', () => {
     const { resolve } = await import('node:path')
     const src = readFileSync(resolve(__dirname, '../Composer.tsx'), 'utf8')
     expect(src.match(/<PromptAssistant /g)).toHaveLength(1)
-    expect(src).toMatch(/<div className="absolute top-2 right-2">\s*<PromptAssistant onUse=\{setPrompt\} align="right" \/>\s*<\/div>\s*<PromptField\s+className="pr-7"/)
+    // The Character tab keeps it in the settings of the window instead
+    // (hub/HubSettings): its window holds the field, the settings and Create.
+    expect(src).toMatch(/\{!hub && \(\s*<div className="absolute top-2 right-2">\s*<PromptAssistant onUse=\{setPrompt\} align="right" \/>\s*<\/div>\s*\)\}\s*<PromptField\s+className=\{hub \? undefined : 'pr-7'\}/)
+    const settings = readFileSync(resolve(__dirname, '../hub/HubSettings.tsx'), 'utf8')
+    expect(settings.match(/<PromptAssistant /g)).toHaveLength(1)
     const bar = src.slice(src.indexOf('{/* Action bar */}'))
     expect(bar).not.toContain('<PromptAssistant')
   })

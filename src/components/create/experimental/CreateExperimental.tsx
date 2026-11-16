@@ -486,7 +486,9 @@ function CreateExperimentalInner() {
           always the exact same height; the prompt window spans the full width
           beneath them. (Previously the Gallery ran full-height alongside both the
           viewer AND the composer, so it was taller than the viewer.) */}
-      <div className="flex-1 min-h-0 flex overflow-hidden">
+      {/* The Character tab: its column stands exactly over the prompt window
+          (index.css, .lu-hub-row), the rails stay at the right. */}
+      <div className={hubOpen ? 'lu-hub-row flex-1 min-h-0 overflow-hidden' : 'flex-1 min-h-0 flex overflow-hidden'}>
         {hubOpen ? (
           <CharacterHub
             stage={{
@@ -499,8 +501,6 @@ function CreateExperimentalInner() {
               onSaveCharacter: setCharacterFrom,
               comfyStarting,
             }}
-            onOpenAdvanced={() => setAdvancedOpen(true)}
-            onOpenWorkflows={() => { setWorkflowsOpen(true); setManagerNoticeSeen(true) }}
             onOpenGallery={() => setPanelOpen(true)}
           />
         ) : (
@@ -517,7 +517,7 @@ function CreateExperimentalInner() {
         )}
         {/* On a phone-wide window the Character area takes the whole width
             (its rails would leave the column 200 px). */}
-        <div className={hubOpen ? 'contents max-[520px]:hidden' : 'contents'}>
+        <div className={hubOpen ? 'lu-hub-rails max-[520px]:hidden' : 'contents'}>
           <CreatePanel open={panelOpen} onOpenChange={setPanelOpen} activeId={shownId} onSelect={openGalleryItem} />
           <PresetShelf
             open={presetsOpen}
@@ -528,13 +528,16 @@ function CreateExperimentalInner() {
         </div>
       </div>
 
-      {/* Prompt window — full width, beneath the viewer + gallery. */}
-      {!hubOpen && <Composer
+      {/* Prompt window — full width, beneath the viewer + gallery. The same
+          one in every tab, the Character tab included (David, 16.11.2026). */}
+      <Composer
+        hub={hubOpen}
         onOpenAdvanced={() => setAdvancedOpen(true)}
         onOpenWorkflows={() => { setWorkflowsOpen(true); setManagerNoticeSeen(true) }}
-      />}
+      />
 
-      <AdvancedDrawer open={advancedOpen} onClose={() => setAdvancedOpen(false)} studioModel={studioPick} />
+      <AdvancedDrawer open={advancedOpen} onClose={() => setAdvancedOpen(false)} studioModel={studioPick}
+        onOpenWorkflows={() => { setAdvancedOpen(false); setWorkflowsOpen(true); setManagerNoticeSeen(true) }} />
       <WorkflowsModal open={workflowsOpen} onClose={() => setWorkflowsOpen(false)} />
       <MaskEditor open={maskOpen} onClose={() => setMaskOpen(false)} />
 
