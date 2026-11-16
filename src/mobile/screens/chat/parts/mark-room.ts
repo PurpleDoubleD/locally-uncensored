@@ -102,8 +102,11 @@ export function useMarkRoom(box: RefObject<HTMLElement | null>, active: boolean)
         const markPart = markShown && mark ? mark.offsetHeight + gap : 0
         const top = greeting.getBoundingClientRect().top + markPart
         const state = greetingRoom(greeting.offsetHeight - markPart, title.getBoundingClientRect().bottom - top, space)
-        if (state === 'all') el.removeAttribute('data-m-greeting')
-        else el.setAttribute('data-m-greeting', state)
+        // The words fit and the mark does not: the mark still has to go. Outside little room only data-m-greeting takes
+        // it away (styles/components.css), so "all words" is said as "words" and not as no attribute. Seen in the
+        // 3.1.0 e2e (320x568 upright, a notice above, the taller composer of prompt v2): the mark stayed and pushed
+        // "Type below to start." under the composer.
+        el.setAttribute('data-m-greeting', state === 'all' ? 'words' : state)
       }
     }
     const queue = () => {
