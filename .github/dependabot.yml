@@ -1,0 +1,44 @@
+# Dependabot (OpenSSF Scorecard, Dependency-Update-Tool, 3.1.0).
+#
+# It only opens pull requests. Nothing is merged on its own: every update is
+# checked by hand (age, maintainer, downloads, name) and stays pinned, as for
+# any new version. A version is offered only after it has been out for a week,
+# so a release that is pulled again in its first days never reaches a PR.
+# Patch and minor updates come grouped in one PR per ecosystem; a major update
+# comes on its own.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    cooldown:
+      default-days: 7
+    groups:
+      npm-patch-and-minor:
+        update-types: [patch, minor]
+
+  - package-ecosystem: cargo
+    directory: /src-tauri
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    cooldown:
+      default-days: 7
+    groups:
+      cargo-patch-and-minor:
+        update-types: [patch, minor]
+
+  - package-ecosystem: github-actions
+    directories:
+      - /
+      - /.github/actions/*
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    cooldown:
+      default-days: 7
+    groups:
+      actions-patch-and-minor:
+        update-types: [patch, minor]

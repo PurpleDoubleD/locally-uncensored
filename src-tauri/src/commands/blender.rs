@@ -738,6 +738,8 @@ mod tests {
         std::fs::write(p, b"x").unwrap();
     }
 
+    // Only the Unix-only Mac tests below use it; on Windows it would be dead code.
+    #[cfg(unix)]
     fn mac_app(dir: &Path, name: &str, bundle: &str, version: &str) -> PathBuf {
         let app = dir.join(name);
         exe(&app.join("Contents/MacOS/Blender"));

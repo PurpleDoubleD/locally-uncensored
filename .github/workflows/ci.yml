@@ -23,6 +23,11 @@ on:
 # compromised or retagged upstream release can't silently run in our CI with
 # secrets in scope. The trailing comment records the human-readable version.
 # To bump: resolve the new tag to its SHA (`gh api repos/<owner>/<repo>/commits/<tag> --jq .sha`).
+
+# CI only reads the repository (OpenSSF Scorecard, Token-Permissions).
+permissions:
+  contents: read
+
 jobs:
   lint-and-build:
     runs-on: ubuntu-22.04

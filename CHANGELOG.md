@@ -289,6 +289,10 @@ in the cloud catalogue.
   checksum (GitHub PR #229).
 - A batch of local pictures no longer hangs when ComfyUI misses a completion
   message.
+- "Max memories injected" now really brings that many memories into the chat.
+  The block was still cut at about 1,000 tokens, so on a large model only a few
+  of them arrived. With the setting on, it may now use up to a tenth of the
+  model's context window (GitHub #238).
 
 ### Known limits
 - **Two graphics cards:** tested as far as we can without a dual-GPU machine

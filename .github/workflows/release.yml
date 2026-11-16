@@ -36,8 +36,10 @@ on:
         required: false
         default: false
 
+# Read only for the workflow; each job that writes to the release names its
+# own right below (OpenSSF Scorecard, Token-Permissions, 3.1.0).
 permissions:
-  contents: write
+  contents: read
 
 # Third-party actions are pinned to a full commit SHA (not a moving tag) so a
 # compromised or retagged upstream release can't run with our signing secrets
@@ -119,6 +121,9 @@ jobs:
   demote-on-arrival:
     if: github.event_name == 'release'
     runs-on: ubuntu-22.04
+    # Keeps the right it had from the workflow (OpenSSF Scorecard, 3.1.0).
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
@@ -185,6 +190,9 @@ jobs:
     # it; in a full dry run build-tauri goes ahead without it (see there).
     # `inputs` is empty on the `release` trigger, so this is true there.
     if: ${{ !inputs.mac_dry_run && !inputs.dry_run && !inputs.mac_only }}
+    # ci.yml only reads.
+    permissions:
+      contents: read
     uses: ./.github/workflows/ci.yml
     with:
       ref: ${{ github.event.release.tag_name || github.event.inputs.tag }}
@@ -1255,6 +1263,9 @@ jobs:
   # scripts/macos-release-signing.sh that need no private key.
   build-tauri-macos:
     needs: build-tauri
+    # Keeps the right it had from the workflow (OpenSSF Scorecard, 3.1.0).
+    permissions:
+      contents: write
     # mac_only is the fourth way in: a release whose Windows and Linux files
     # are attached and checked already (the step after the secret check
     # proves that), and whose Mac half failed. build-tauri is skipped then,
@@ -2029,6 +2040,9 @@ jobs:
   # the files (--clobber).
   sbom-and-checksums:
     needs: [build-tauri, build-tauri-macos]
+    # Keeps the right it had from the workflow (OpenSSF Scorecard, 3.1.0).
+    permissions:
+      contents: write
     if: ${{ always() && !inputs.mac_dry_run && !inputs.dry_run && (needs.build-tauri.result == 'success' || (inputs.mac_only && needs.build-tauri-macos.result == 'success')) }}
     runs-on: ubuntu-22.04
     timeout-minutes: 30
@@ -2099,6 +2113,9 @@ jobs:
   # meant.
   enforce-prerelease:
     needs: [build-tauri, build-tauri-macos]
+    # Keeps the right it had from the workflow (OpenSSF Scorecard, 3.1.0).
+    permissions:
+      contents: write
     if: ${{ always() && !inputs.mac_dry_run && !inputs.dry_run }}
     runs-on: ubuntu-22.04
     steps:
