@@ -155,7 +155,7 @@ html[data-theme="light"] .lu-nav{background:rgba(255,255,255,0.72)}
 .lu-nav-icon:hover{color:var(--fg);background:var(--fill-faint)}
 .lu-nav-icon.discord:hover{color:#5865f2}
 /* Tiny count badge on the top-right corner of a nav icon (GitHub stars,
-   Discord online) — matched 1:1 to the lu-labs.ai .lu-mkt-nav-badge. */
+   Discord members) — matched 1:1 to the lu-labs.ai .lu-mkt-nav-badge. */
 .lu-nav-badge{
   position:absolute;top:0;right:-2px;
   padding:1px 3.5px;
