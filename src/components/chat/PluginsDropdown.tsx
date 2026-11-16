@@ -2,6 +2,8 @@ import { lazy, Suspense, useRef, useState } from 'react'
 import { usePopoverPlatz } from '../../hooks/usePopoverPlatz'
 import { useDismissOnEscape } from '../../hooks/useDismissOnEscape'
 import { Plug, ChevronDown, ChevronUp, Bone, User, Users, Sparkles, X, GripVertical } from 'lucide-react'
+import { PluginRow } from './PluginRow'
+import { NEURONS_HINT_LABEL, neuronsHintDots, useNeuronsHint } from '../../lib/neurons-hint'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { useChatStore } from '../../stores/chatStore'
 import { useModelStore } from '../../stores/modelStore'
@@ -10,7 +12,6 @@ import { moveMember } from '../../lib/group-rounds'
 import { resolveChatPersona } from '../../lib/chat-persona'
 import type { CavemanMode } from '../../types/settings'
 import { displayModelName } from '../../api/providers/registry'
-import { HINWEIS_TEXT } from '../../lib/hinweis'
 import { BetaMark } from '../ui/BetaMark'
 import { isTauri } from '../../api/backend'
 import { createChatLive, createInChatOf, createSupport, servedWindowOf } from '../../lib/create/chat-switch'
@@ -29,8 +30,20 @@ export const CREATE_GROUP_REASON = 'Not available in a group chat.'
 // and texts stay out of every bundle a browser opens.
 const ReaPluginRow = lazy(() => import('./ReaPluginRow').then((m) => ({ default: m.ReaPluginRow })))
 
-const CAVEMAN_MODES: { value: CavemanMode; label: string; desc: string }[] = [
-  { value: 'off', label: 'Off', desc: 'Normal responses' },
+/** A persona switch without an open chat has nothing to hold its state. */
+export const PERSONA_NO_CHAT_REASON = 'Open a chat first, the persona lives on the conversation.'
+/** Group chat without an open chat, the same. */
+export const GROUP_NO_CHAT_REASON = 'Open a chat first, the group lives on the conversation.'
+
+type CavemanLevel = Exclude<CavemanMode, 'off'>
+
+/** The level the Caveman switch turns on: the last one picked, else Lite. */
+export function cavemanLevelOf(mode: CavemanMode | undefined, saved: unknown): CavemanLevel {
+  if (mode === 'lite' || mode === 'full' || mode === 'ultra') return mode
+  return saved === 'full' || saved === 'ultra' || saved === 'lite' ? saved : 'lite'
+}
+
+const CAVEMAN_MODES: { value: CavemanLevel; label: string; desc: string }[] = [
   { value: 'lite', label: 'Lite', desc: 'Slightly shorter' },
   { value: 'full', label: 'Full', desc: 'Very terse' },
   { value: 'ultra', label: 'Ultra', desc: 'Maximum brevity' },
@@ -55,12 +68,21 @@ export function PluginsDropdown({
   agentTools = false,
 }: { openUpward?: boolean; iconOnly?: boolean; agentTools?: boolean } = {}) {
   const [open, setOpen] = useState(false)
-  useDismissOnEscape(open, () => setOpen(false))
+  // Group chat on with nobody picked yet: the switch is on, the list open,
+  // and the conversation is not a group until a model is ticked. Closing the
+  // menu without a pick turns it off again.
+  const [groupArmed, setGroupArmed] = useState(false)
+  const noteMenuOpened = useNeuronsHint((s) => s.noteMenuOpened)
+  // Opening counts for the Neurons hint; an armed group without a pick does
+  // not outlive the menu.
+  const setMenuOpen = (next: boolean) => {
+    setOpen(next)
+    if (next) noteMenuOpened()
+    else setGroupArmed(false)
+  }
+  useDismissOnEscape(open, () => setMenuOpen(false))
   const menuRef = useRef<HTMLDivElement>(null)
   const menu = usePopoverPlatz(menuRef, open, { bevorzugt: openUpward ? 'oben' : 'unten' })
-  const [cavemanOpen, setCavemanOpen] = useState(false)
-  const [personaOpen, setPersonaOpen] = useState(false)
-  const [groupOpen, setGroupOpen] = useState(false)
   // Which participant's persona list is open, by model name.
   const [personaFor, setPersonaFor] = useState<string | null>(null)
   // GH #200: the member being dragged in the speaking order, by index.
@@ -69,6 +91,7 @@ export function PluginsDropdown({
   const activePersonaId = useSettingsStore((s) => s.activePersonaId)
   const allPersonas = useSettingsStore((s) => s.personas)
   const cavemanMode = useSettingsStore((s) => s.settings.cavemanMode)
+  const cavemanSaved = useSettingsStore((s) => s.settings.cavemanLevel)
   const updateSettings = useSettingsStore((s) => s.updateSettings)
   // Create in chat: its own switch, global, remembered, off by default. Only
   // in Cloud mode, and only for an account the server has released; without
@@ -135,7 +158,9 @@ export function PluginsDropdown({
   const isCavemanActive = cavemanMode && cavemanMode !== 'off'
   const isPersonaActive = personaEnabledOnChat &&
     (activePersona ? activePersona.id !== 'unrestricted' : chatPersona.prompt.trim() !== '')
-  const currentCaveman = CAVEMAN_MODES.find((m) => m.value === (cavemanMode || 'off'))
+  const cavemanLevel = cavemanLevelOf(cavemanMode, cavemanSaved)
+  const currentCaveman = CAVEMAN_MODES.find((m) => m.value === cavemanLevel)
+  const groupOn = groupModels.length > 0 || groupArmed
 
   // REA (lib/plugins/rea.ts): a local process, so the desktop app only, and
   // only where its tools go: Agent and Code.
@@ -147,11 +172,19 @@ export function PluginsDropdown({
   const neuronsOn = useSettingsStore((s) => s.settings.neuronsPluginEnabled === true && s.settings.appMode !== 'cloud') && neuronsShown
   const anyPluginActive = !!(isCavemanActive || isPersonaActive || isGroupActive || createOn || reaOn || neuronsOn)
 
+  // The Neurons hint of 3.1.0 (lib/neurons-hint.ts, remove in 3.1.1).
+  const neuronsAvailable = useSettingsStore((s) => s.settings.appMode !== 'cloud') && neuronsShown
+  const hintState = useNeuronsHint()
+  const hint = neuronsHintDots(hintState, neuronsAvailable, neuronsOn)
+  const triggerDot = hint.trigger
+    ? <span data-testid="plugins-hint" aria-hidden="true" title={NEURONS_HINT_LABEL} className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 rounded-full bg-sky-400 pointer-events-none" />
+    : null
+
   return (
     <div className="relative">
       {iconOnly ? (
         <button
-          onClick={() => setOpen(!open)}
+          onClick={() => setMenuOpen(!open)}
           title={anyPluginActive ? 'Plugins (active)' : 'Plugins'}
           aria-label="Plugins"
           data-testid="plugins-trigger-icon"
@@ -164,17 +197,19 @@ export function PluginsDropdown({
           // `data-active`, weil „ein Plugin laeuft" kein Auf-/Zu-Zustand
           // des Menues ist und deshalb nicht in `aria-expanded` gehoert.
           data-active={anyPluginActive || undefined}
-          className="lu-control lu-control--icon"
+          className="lu-control lu-control--icon relative"
         >
           <Plug size={11} />
+          {triggerDot}
         </button>
       ) : (
         <button
-          onClick={() => setOpen(!open)}
+          onClick={() => setMenuOpen(!open)}
           aria-expanded={open}
           data-active={anyPluginActive || undefined}
-          className="lu-control"
+          className="lu-control relative"
         >
+          {triggerDot}
           <Plug size={10} />
           <span className="@max-[26rem]:sr-only">Plugins</span>
           {anyPluginActive && (
@@ -197,197 +232,153 @@ export function PluginsDropdown({
 
       {open && (
         <>
-          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+          <div className="fixed inset-0 z-40" onClick={() => setMenuOpen(false)} />
           <div ref={menuRef} style={menu.style} className={`absolute right-0 z-50 w-56 rounded-lg lu-elevated py-1.5 overflow-y-auto scrollbar-thin ${menu.nachOben ? 'bottom-full mb-1' : 'top-full mt-1'}`}>
 
             {/* Chat Tools are always on since 3.0.7 (lib/chat-tools-reach.ts):
-                no switch here any more. */}
-            <div className="px-2.5">
-              {/* ── Create toggle ───────────────────────────── */}
-              {create.shown && (
-                <>
-                  <div className="w-full flex items-center justify-between py-1.5 gap-2">
-                    <div className="flex items-center gap-1.5 min-w-0">
-                      <Sparkles size={10} className={`shrink-0 ${createOn ? 'text-lu-accent' : 'text-gray-400'}`} />
-                      <span className="shrink-0 t-micro font-medium text-gray-600 dark:text-gray-300">Create</span>
-                      <BetaMark feature="create-in-chat" />
-                      <span className="t-micro text-gray-400 truncate">image · video · music · voice</span>
-                    </div>
-                    <button
-                      onClick={(e) => { e.stopPropagation(); if (create.available) updateSettings({ createEnabled: !createSetting }) }}
-                      disabled={!create.available}
-                      aria-pressed={createOn}
-                      aria-label="Create"
-                      data-testid="plugins-create-switch"
-                      title={!create.available ? create.reason : createOn ? 'Turn off Create in chat' : 'Images, video, music and voice in chat'}
-                      className={
-                        'shrink-0 flex items-center w-7 h-3.5 rounded-full transition-colors ' +
-                        (!create.available
-                          ? 'bg-gray-300/20 dark:bg-white/5 cursor-default justify-start'
-                          : createOn
-                            ? 'bg-lu-accent/45 hover:bg-lu-accent/60 justify-end'
-                            : 'bg-gray-300/30 dark:bg-white/10 hover:bg-gray-300/45 dark:hover:bg-white/15 justify-start')
-                      }
-                    >
-                      <span className={`w-3 h-3 rounded-full shadow-sm mx-px ${create.available ? 'bg-white' : 'bg-white/40'}`} />
-                    </button>
-                  </div>
-                  {!create.available && (
-                    // A reason, not an error: the calm grey of lib/hinweis.ts,
-                    // like the line under Chat Tools.
-                    <div data-testid="plugins-create-reason" className={`pb-1.5 t-micro leading-snug ${HINWEIS_TEXT.ruhig}`}>
-                      {create.reason}
-                    </div>
-                  )}
-                </>
-              )}
-            </div>
+                no switch here any more. Every plugin is one row of the same
+                look (PluginRow): switch at the right, off closes the row, on
+                opens its settings under it; hairlines between the rows. */}
+            <div className="divide-y divide-gray-200 dark:divide-white/[0.06]">
+
+            {/* ── Create ──────────────────────────────────── */}
+            {create.shown && (
+              <PluginRow
+                testId="plugins-create"
+                icon={Sparkles}
+                onColor="text-lu-accent"
+                name="Create"
+                mark={<BetaMark feature="create-in-chat" />}
+                line="image · video · music · voice"
+                on={createOn}
+                available={create.available}
+                reason={create.reason}
+                onToggle={() => updateSettings({ createEnabled: !createSetting })}
+                switchLabel="Create"
+                switchTestId="plugins-create-switch"
+                switchTitle={createOn ? 'Turn off Create in chat' : 'Images, video, music and voice in chat'}
+              />
+            )}
 
             {/* ── REA, reverse engineering for the agents ────── */}
             {reaShown && <Suspense fallback={null}><ReaPluginRow /></Suspense>}
 
             {/* ── Neurons, the neuron tweaker (3.1.0) ─────────── */}
-            {neuronsShown && <NeuronPluginRow onOpenWindow={() => setOpen(false)} />}
+            {neuronsShown && <NeuronPluginRow hint={hint.row} onOpenWindow={() => setMenuOpen(false)} />}
 
-            <div className="border-t border-gray-200 dark:border-white/[0.06] my-1" />
-
-            {/* ── Caveman Mode Dropdown ───────────────────── */}
-            <div className="px-2.5">
-              <button
-                onClick={() => { setCavemanOpen(!cavemanOpen); setPersonaOpen(false) }}
-                className="w-full flex items-center justify-between py-1.5 group"
-              >
-                <div className="flex items-center gap-1.5">
-                  <Bone size={10} className={isCavemanActive ? 'text-pink-400' : 'text-gray-400'} />
-                  <span className="t-micro font-medium text-gray-600 dark:text-gray-300">Caveman Mode</span>
-                </div>
-                <div className="flex items-center gap-1">
-                  <span className={`text-[0.55rem] ${isCavemanActive ? 'text-pink-400' : 'text-gray-500'}`}>
-                    {currentCaveman?.label || 'Off'}
-                  </span>
-                  <ChevronDown size={9} className={`text-gray-500 transition-transform ${cavemanOpen ? 'rotate-180' : ''}`} />
-                </div>
-              </button>
-
-              {cavemanOpen && (
-                <div className="pb-1.5 space-y-0.5">
-                  {CAVEMAN_MODES.map((mode) => {
-                    const isActive = (cavemanMode || 'off') === mode.value
-                    return (
-                      <button
-                        key={mode.value}
-                        onClick={() => { updateSettings({ cavemanMode: mode.value }); setCavemanOpen(false) }}
-                        className={`w-full flex items-center justify-between px-2 py-1 rounded text-left transition-colors ${
-                          isActive
-                            ? mode.value === 'off'
-                              ? 'bg-gray-100 dark:bg-white/[0.06] text-gray-700 dark:text-gray-200'
-                              : 'bg-pink-500/10 text-pink-600 dark:text-pink-400'
-                            : 'text-gray-500 hover:bg-gray-50 dark:hover:bg-white/[0.04] hover:text-gray-700 dark:hover:text-gray-300'
-                        }`}
-                      >
-                        <div className="flex items-center gap-1.5">
-                          {isActive && <div className={`w-1 h-1 rounded-full shrink-0 ${mode.value === 'off' ? 'bg-gray-400' : 'bg-pink-400'}`} />}
-                          <span className="text-[0.55rem] font-medium">{mode.label}</span>
-                        </div>
-                        <span className="text-[0.5rem] text-gray-400">{mode.desc}</span>
-                      </button>
-                    )
-                  })}
-                </div>
-              )}
-            </div>
-
-            <div className="border-t border-gray-200 dark:border-white/[0.06] my-1" />
-
-            {/* ── Personas Dropdown ───────────────────────── */}
-            <div className="px-2.5">
-              <div className="w-full flex items-center justify-between py-1.5 gap-2">
-                <button
-                  onClick={() => { setPersonaOpen(!personaOpen); setCavemanOpen(false) }}
-                  className="flex items-center gap-1.5 flex-1 min-w-0 text-left"
-                >
-                  <User size={10} className={isPersonaActive ? 'text-green-400' : 'text-gray-400'} />
-                  <span className="t-micro font-medium text-gray-600 dark:text-gray-300">Persona</span>
-                  <span className={`text-[0.55rem] truncate ${isPersonaActive ? 'text-green-400' : 'text-gray-500'}`}>
-                    {personaLabel}
-                  </span>
-                  <ChevronDown size={9} className={`text-gray-500 transition-transform ${personaOpen ? 'rotate-180' : ''}`} />
-                </button>
-                {/* On/off toggle for THIS chat — Remote already had this
-                    via `personaEnabled`; now Chat / Code / Agent match.
-                    Always shown when a chat is open (the owner: "personas hat im
-                    chat noch kein an/aus toggle" — it was hidden for the
-                    default Unrestricted persona). */}
-                {activeConvId && (
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      setConversationPersonaEnabled(activeConvId, !personaEnabledOnChat)
-                    }}
-                    title={personaEnabledOnChat ? 'Disable persona for this chat' : 'Enable persona for this chat'}
-                    className={
-                      'shrink-0 flex items-center w-7 h-3.5 rounded-full transition-colors ' +
-                      (personaEnabledOnChat
-                        ? 'bg-green-500/40 hover:bg-green-500/55 justify-end'
-                        : 'bg-gray-300/30 dark:bg-white/10 hover:bg-gray-300/45 dark:hover:bg-white/15 justify-start')
-                    }
-                  >
-                    <span className="w-3 h-3 rounded-full bg-white shadow-sm mx-px" />
-                  </button>
-                )}
+            {/* ── Caveman Mode ────────────────────────────── */}
+            <PluginRow
+              testId="plugins-caveman"
+              icon={Bone}
+              onColor="text-pink-400"
+              name="Caveman Mode"
+              line={isCavemanActive ? currentCaveman?.label : 'shorter answers'}
+              on={!!isCavemanActive}
+              onToggle={() => updateSettings(isCavemanActive
+                ? { cavemanMode: 'off', cavemanLevel }
+                : { cavemanMode: cavemanLevel })}
+              switchLabel="Caveman Mode"
+              switchTestId="plugins-caveman-switch"
+              switchTitle={isCavemanActive ? 'Turn off Caveman Mode: normal answers' : 'Caveman Mode: shorter, terser answers'}
+            >
+              <div className="space-y-0.5">
+                {CAVEMAN_MODES.map((mode) => {
+                  const isActive = cavemanLevel === mode.value
+                  return (
+                    <button
+                      key={mode.value}
+                      onClick={() => updateSettings({ cavemanMode: mode.value, cavemanLevel: mode.value })}
+                      aria-pressed={isActive}
+                      data-testid={`plugins-caveman-${mode.value}`}
+                      className={`w-full flex items-center justify-between px-2 py-1 rounded text-left transition-colors ${
+                        isActive
+                          ? 'bg-pink-500/10 text-pink-600 dark:text-pink-400'
+                          : 'text-gray-500 hover:bg-gray-50 dark:hover:bg-white/[0.04] hover:text-gray-700 dark:hover:text-gray-300'
+                      }`}
+                    >
+                      <div className="flex items-center gap-1.5">
+                        {isActive && <div className="w-1 h-1 rounded-full shrink-0 bg-pink-400" />}
+                        <span className="text-[0.55rem] font-medium">{mode.label}</span>
+                      </div>
+                      <span className="text-[0.5rem] text-gray-400">{mode.desc}</span>
+                    </button>
+                  )
+                })}
               </div>
+            </PluginRow>
 
-              {personaOpen && (
-                <div className="pb-1.5 space-y-0.5 max-h-[180px] overflow-y-auto scrollbar-thin">
-                  {allPersonas.map((p) => {
-                    const isActive = p.id === activePersona?.id
-                    return (
-                      <button
-                        key={p.id}
-                        onClick={() => {
-                          // The app wide pick stays the start of every new
-                          // chat; the open chat takes the persona for itself.
-                          setActivePersona(p.id)
-                          if (activeConvId) setConversationPersona(activeConvId, p)
-                          setPersonaOpen(false)
-                        }}
-                        className={`w-full flex items-center gap-1.5 px-2 py-1 rounded text-left transition-colors ${
-                          isActive
-                            ? 'bg-green-500/10 text-green-600 dark:text-green-400'
-                            : 'text-gray-500 hover:bg-gray-50 dark:hover:bg-white/[0.04] hover:text-gray-700 dark:hover:text-gray-300'
-                        }`}
-                      >
-                        {isActive && <div className="w-1 h-1 rounded-full bg-green-400 shrink-0" />}
-                        <span className="text-[0.55rem] font-medium">{p.name}</span>
-                      </button>
-                    )
-                  })}
-                </div>
-              )}
-            </div>
-
-            <div className="border-t border-gray-200 dark:border-white/[0.06] my-1" />
+            {/* ── Persona ─────────────────────────────────── */}
+            {/* On/off for THIS chat (`personaEnabled`), as Remote has it. The
+                switch says what the chat sends; the list under it picks which
+                persona. Without an open chat there is nothing to hold it. */}
+            <PluginRow
+              testId="plugins-persona"
+              icon={User}
+              onColor="text-green-400"
+              name="Persona"
+              line={personaLabel}
+              on={personaEnabledOnChat}
+              available={!!activeConvId}
+              reason={PERSONA_NO_CHAT_REASON}
+              onToggle={() => { if (activeConvId) setConversationPersonaEnabled(activeConvId, !personaEnabledOnChat) }}
+              switchLabel="Persona"
+              switchTestId="plugins-persona-switch"
+              switchTitle={personaEnabledOnChat ? 'Disable persona for this chat' : 'Enable persona for this chat'}
+            >
+              <div className="space-y-0.5 max-h-[180px] overflow-y-auto scrollbar-thin">
+                {allPersonas.map((p) => {
+                  const isActive = p.id === activePersona?.id
+                  return (
+                    <button
+                      key={p.id}
+                      onClick={() => {
+                        // The app wide pick stays the start of every new
+                        // chat; the open chat takes the persona for itself.
+                        setActivePersona(p.id)
+                        if (activeConvId) setConversationPersona(activeConvId, p)
+                      }}
+                      aria-pressed={isActive}
+                      className={`w-full flex items-center gap-1.5 px-2 py-1 rounded text-left transition-colors ${
+                        isActive
+                          ? 'bg-green-500/10 text-green-600 dark:text-green-400'
+                          : 'text-gray-500 hover:bg-gray-50 dark:hover:bg-white/[0.04] hover:text-gray-700 dark:hover:text-gray-300'
+                      }`}
+                    >
+                      {isActive && <div className="w-1 h-1 rounded-full bg-green-400 shrink-0" />}
+                      <span className="text-[0.55rem] font-medium">{p.name}</span>
+                    </button>
+                  )
+                })}
+              </div>
+            </PluginRow>
 
             {/* ── Group chat (v1) ─────────────────────────── */}
-            <div className="px-2.5">
-              <button
-                onClick={() => { setGroupOpen(!groupOpen); setCavemanOpen(false); setPersonaOpen(false) }}
-                className="w-full flex items-center justify-between py-1.5"
-              >
-                <div className="flex items-center gap-1.5">
-                  <Users size={10} className={isGroupActive ? 'text-purple-400' : 'text-gray-400'} />
-                  <span className="t-micro font-medium text-gray-600 dark:text-gray-300">Group chat</span>
-                  <span data-testid="group-chat-count" className={`text-[0.55rem] ${isGroupActive ? 'text-purple-400' : 'text-gray-500'}`}>
-                    {isGroupActive
-                      ? `${answering} ${answering === 1 ? 'model' : 'models'}${unavailableCount > 0 ? `, ${unavailableCount} unavailable` : ''}`
-                      : 'Off'}
-                  </span>
-                </div>
-                <ChevronDown size={9} className={`text-gray-500 transition-transform ${groupOpen ? 'rotate-180' : ''}`} />
-              </button>
-
-              {groupOpen && (activeConvId ? (
-                <div className="pb-1.5 space-y-0.5 max-h-[220px] overflow-y-auto scrollbar-thin">
+            <PluginRow
+              testId="plugins-group"
+              icon={Users}
+              onColor="text-purple-400"
+              name="Group chat"
+              line={
+                <span data-testid="group-chat-count">
+                  {isGroupActive
+                    ? `${answering} ${answering === 1 ? 'model' : 'models'}${unavailableCount > 0 ? `, ${unavailableCount} unavailable` : ''}`
+                    : groupOn ? 'pick 2 or more' : 'several models in turn'}
+                </span>
+              }
+              on={!!activeConvId && groupOn}
+              available={!!activeConvId}
+              reason={GROUP_NO_CHAT_REASON}
+              onToggle={() => {
+                if (!activeConvId) return
+                if (groupOn) { setPersonaFor(null); setGroupArmed(false); setGroupModels(activeConvId, []) }
+                else setGroupArmed(true)
+              }}
+              switchLabel="Group chat"
+              switchTestId="plugins-group-switch"
+              switchTitle={groupOn ? 'Turn off group chat for this chat' : 'Let several models answer in turn in this chat'}
+            >
+              {activeConvId && (
+                <div className="space-y-0.5 max-h-[220px] overflow-y-auto scrollbar-thin">
                   <p className="px-2 pb-0.5 text-[0.5rem] leading-snug text-gray-400">
                     Pick 2 to {GROUP_CHAT_MAX} models. They answer in turn on every message, and each sees what the others said. Each one can speak as its own persona.
                   </p>
@@ -464,7 +455,9 @@ export function PluginsDropdown({
                           <button
                             disabled={full}
                             onClick={() => {
-                              if (on) setPersonaFor(null)
+                              // Unticking the last one keeps the list open: the
+                              // switch is what turns group chat off.
+                              if (on) { setPersonaFor(null); setGroupArmed(true) }
                               setGroupModels(
                                 activeConvId,
                                 on ? groupModels.filter((x) => x !== m.name) : [...groupModels, m.name],
@@ -564,18 +557,9 @@ export function PluginsDropdown({
                   {groupModels.length === 1 && (
                     <p className="px-2 text-[0.5rem] text-gray-400">One more model turns this into a group.</p>
                   )}
-                  {groupModels.length > 0 && (
-                    <button
-                      onClick={() => { setPersonaFor(null); setGroupModels(activeConvId, []) }}
-                      className="w-full px-2 py-1 rounded text-left text-[0.55rem] text-gray-500 hover:bg-gray-50 dark:hover:bg-white/[0.04] hover:text-gray-700 dark:hover:text-gray-300 transition-colors"
-                    >
-                      Turn off
-                    </button>
-                  )}
                 </div>
-              ) : (
-                <p className="pb-1.5 px-2 text-[0.5rem] text-gray-400">Open a chat first, the group lives on the conversation.</p>
-              ))}
+              )}
+            </PluginRow>
             </div>
 
           </div>

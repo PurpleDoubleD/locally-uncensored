@@ -48,7 +48,8 @@ const orderShown = () => screen.getAllByTestId('group-order-row').map((r) => r.g
 function openGroupMenu() {
   render(<PluginsDropdown openUpward />)
   fireEvent.click(screen.getByRole('button', { name: /Plugins/ }))
-  fireEvent.click(screen.getByRole('button', { name: /Group chat/ }))
+  // A chat that is a group has its switch on, so the list is already open
+  // (3.1.0, every plugin a row with a switch).
 }
 
 describe('GH #200: the speaking order in the group menu', () => {
