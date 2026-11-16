@@ -199,7 +199,7 @@ describe('the introduction', () => {
     const css = readFileSync(resolve(__dirname, '../../../index.css'), 'utf8')
     const block = css.slice(css.indexOf('Neurons introduction (N2'))
     const reduced = block.slice(block.indexOf('@media (prefers-reduced-motion: reduce)'))
-    for (const cls of ['nintro-token', 'nintro-push', 'nintro-knob', 'nintro-line', 'nintro-type', 'nintro-tile']) {
+    for (const cls of ['nintro-pulse', 'nintro-thumb', 'nintro-way', 'nintro-way-knob', 'nintro-knob', 'nintro-line', 'nintro-type']) {
       expect(block).toMatch(new RegExp(`\\.${cls}[^{]*\\{[^}]*animation:`))
       expect(reduced).toContain(`.neuron-intro .${cls}`)
     }
@@ -208,7 +208,7 @@ describe('the introduction', () => {
     // does not move (the code on card 5 was invisible otherwise).
     const shown = reduced.slice(reduced.lastIndexOf('.neuron-intro .nintro-type,'))
     const rule = shown.slice(0, shown.indexOf('}'))
-    for (const cls of ['nintro-type', 'nintro-glow', 'nintro-arrive', 'nintro-tile', 'nintro-dash']) expect(rule).toContain(`.${cls}`)
+    for (const cls of ['nintro-type', 'nintro-glow', 'nintro-arrive', 'nintro-dash']) expect(rule).toContain(`.${cls}`)
     expect(rule).toMatch(/opacity: 1/)
   })
 })
