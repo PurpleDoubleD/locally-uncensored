@@ -154,6 +154,11 @@ export interface Settings {
    */
   createEnabled?: boolean
   cavemanMode: CavemanMode
+  /**
+   * The Caveman level the Plugins switch turns back on (3.1.0). Written when
+   * the switch goes off or a level is picked; absent means Lite.
+   */
+  cavemanLevel?: Exclude<CavemanMode, 'off'>
   searchProvider: SearchProvider
   braveApiKey: string
   tavilyApiKey: string

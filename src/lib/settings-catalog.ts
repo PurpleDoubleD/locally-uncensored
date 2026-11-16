@@ -471,7 +471,7 @@ export const LOCK_RULES: readonly LockRule[] = [
   },
   {
     category: 'plugins', what: 'Plugins, MCP servers and custom nodes', where: 'Settings → Agent (MCP) and Plugins in the composer',
-    names: ['reaPluginEnabled', 'neuronsPluginEnabled', 'createEnabled', 'mcpServers', 'customNodes', 'plugins'],
+    names: ['reaPluginEnabled', 'neuronsPluginEnabled', 'createEnabled', 'cavemanLevel', 'mcpServers', 'customNodes', 'plugins'],
     pattern: /plugin|mcp|customnode|extension|install|rea$/,
   },
   {
