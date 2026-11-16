@@ -82,9 +82,9 @@ test('a persona picked in Plugins after the chat was opened is the one that is s
 
   await page.getByRole('button', { name: /Plugins/ }).click()
   await pickChatPersona(page, 'Baron')
-  await page.getByTitle('Enable persona for this chat').click()
+  // The Persona switch above turned it on for this chat (3.1.0 plugin rows).
   // The menu names Baron for this chat.
-  await expect(page.getByRole('button', { name: /^Persona/ })).toContainText('Baron')
+  await expect(page.getByTestId('plugins-persona')).toContainText('Baron')
   await page.keyboard.press('Escape')
 
   const system = await sendAndReadSystem(page, DEFAULT_MODEL_NAME)
@@ -114,9 +114,9 @@ test('after a group with own personas is switched off, the chat persona from Plu
     await row.getByTestId('group-persona-list').getByRole('button', { name: persona, exact: true }).click()
   }
   // Group chat off, Baron picked for the chat and switched on.
-  await page.getByRole('button', { name: 'Turn off', exact: true }).click()
+  await page.getByTitle('Turn off group chat for this chat').click()
   await pickChatPersona(page, 'Baron')
-  await page.getByTitle('Enable persona for this chat').click()
+  // The Persona switch above turned it on for this chat (3.1.0 plugin rows).
   await page.keyboard.press('Escape')
 
   const system = await sendAndReadSystem(page, DEFAULT_MODEL_NAME)

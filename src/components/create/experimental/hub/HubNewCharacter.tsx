@@ -24,7 +24,7 @@ import { Button } from '../../ui/Button'
 import { cn } from '../../ui/cn'
 import { sendPhotosToStudio } from '../characterPhotos'
 import { refreshLocalShelves } from '../CharacterUseLocally'
-import { ACTION_ICON } from './HubStage'
+import { ACTION_ICON } from './HubActionRow'
 import { ACTION_LABEL, HUB_ACTIONS } from '../../../../lib/create/character-hub'
 
 type Way = 'keep' | 'train'
@@ -335,13 +335,13 @@ export function HubNewCharacter({ onBack, onSaved, onOpenGallery }: Props) {
             {error ?? `${clean} is in your LoRA folder. ${added?.note}`}
           </p>
         )}
-        <div className="hub-bar flex min-h-[52px] items-center gap-3 py-1.5 pl-3.5 pr-2" data-hub-save-bar>
+        {/* A row of the page, not a second prompt window. */}
+        <div className="hub-line flex min-h-[44px] items-center gap-3 border-t pt-2" data-hub-save-bar>
           {urls[0] && !lora && <img src={urls[0]} alt="" className="h-7 w-7 shrink-0 rounded-full object-cover" />}
           {clean && <span className="hub-text shrink-0 hub-fs-14 font-medium">{clean}</span>}
           <span className="hub-dim min-w-0 flex-1 truncate hub-fs-125" data-hub-save-summary>
             {progress !== null ? `Copying… ${Math.round(progress * 100)} %` : summary}
           </span>
-          {!lora && way === 'keep' && photos.length > 0 && <span className="hub-dim hub-fs-125 max-[820px]:hidden">You can still train later.</span>}
           <span className="inline-flex" title={ready || added ? undefined : hint ?? undefined} data-hub-save>
             <Button variant="primary" size="md" disabled={added ? false : !ready} onClick={() => { if (added) onSaved(added.character); else void save() }}>{button}</Button>
           </span>

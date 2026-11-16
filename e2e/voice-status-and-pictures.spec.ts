@@ -89,10 +89,11 @@ for (const look of LOOKS) {
     await play(page, [{ type: 'tool-running', id: 'call-1', name: 'file_write', args: { path: 'shopping.txt', content: 'milk\nbread\ncoffee' } }])
     await expect(status).toHaveText('Writing')
     await expect(view).not.toContainText('Running file_write')
-    // The call itself looks as it does in the chat: the name in the shimmer and three dots.
+    // The call itself looks as it does in the chat: a plain sentence in the
+    // shimmer (3.1.0, tool steps in plain words) and three dots.
     const writing = view.locator('[data-tool="file_write"]')
     await expect(writing).toHaveAttribute('data-status', 'running')
-    await expect(writing.locator('.lu-tool-shimmer')).toHaveText('file_write')
+    await expect(writing.locator('.lu-tool-shimmer')).toHaveText('Writing shopping.txt')
     await expect(writing.locator('.lu-band-dot')).toHaveCount(3)
     await shot(page, `02-tool-writing-${look.tag}`)
 

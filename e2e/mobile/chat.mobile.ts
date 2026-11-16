@@ -154,8 +154,10 @@ function chatBackend(opts: BackendOptions) {
         return Promise.resolve({ content, encoding: 'utf8', bytes: content.length })
       }
       case 'fs_delete': {
-        // A build without the command answers nothing at all (the mock does the same for every unknown command).
-        if (!ctl.workspace || !ctl.workspace.canDelete) return inner(cmd, args)
+        if (!ctl.workspace) return inner(cmd, args)
+        // A build without the command answers nothing at all. Said here: the shared mock knows fs_delete since the
+        // rewind of CA U4 (6ba8a3da0) and would answer "deleted".
+        if (!ctl.workspace.canDelete) return Promise.resolve(null)
         const rel = String(args?.path)
         if (!(rel in ctl.workspace.files)) return Promise.reject('fs_delete: no such file')
         delete ctl.workspace.files[rel]
@@ -506,8 +508,17 @@ function microphoneStub() {
 
 const LONG_REPLY = Array.from({ length: 40 }, (_, i) => `Sentence ${i + 1} of a long answer about tides and the moon.`).join(' ')
 
+/**
+ * Prompt v2 (c19cc0cad): no model chip above the field any more. The model is the first part of the summary on the
+ * settings button under the field, and the model sheet is one level down: settings button, then the row "Model".
+ */
+async function openModelSheet(page: Page): Promise<void> {
+  await page.getByTestId('m-chat-options').tap()
+  await page.getByTestId('m-options-model').tap()
+}
+
 async function waitForModel(page: Page, name = SMALL): Promise<void> {
-  await expect(page.getByTestId('m-chat-model')).toContainText(name)
+  await expect(page.getByTestId('m-chat-options')).toContainText(name)
 }
 
 async function send(page: Page, text: string): Promise<void> {
@@ -840,7 +851,7 @@ for (const size of SIZES) {
       const errors = watchErrors(page)
       await boot(page)
       await waitForModel(page)
-      await page.getByTestId('m-chat-model').tap()
+      await openModelSheet(page)
       await expect(page.getByTestId('m-sheet-model')).toBeVisible()
       const local = page.getByTestId('m-chat-model-local')
       await expect(local).toHaveCount(2)
@@ -851,7 +862,7 @@ for (const size of SIZES) {
       await page.locator(`[data-testid="m-chat-model-local"][data-m-id="openai::${SMALL}"]`).tap()
       await expect(page.getByTestId('m-sheet-model')).toHaveCount(0)
       expect(await backend(page, (ctl) => ctl.engineStarts.length)).toBe(startsBefore)
-      await page.getByTestId('m-chat-model').tap()
+      await openModelSheet(page)
       await expect(page.getByTestId('m-sheet-model')).toBeVisible()
       expect(await layout(page)).toEqual(CLEAN)
 
@@ -873,7 +884,7 @@ for (const size of SIZES) {
       await expect(page.getByTestId('m-chat-model-by').last()).toContainText(VISION_LABEL)
 
       // C3.4.
-      await page.getByTestId('m-chat-model').tap()
+      await openModelSheet(page)
       await page.getByTestId('m-chat-model-get-more').tap()
       await expect(page.getByTestId('m-models-screen')).toBeVisible()
       expect(errors()).toEqual([])
@@ -1155,7 +1166,7 @@ for (const size of SIZES) {
       await boot(page, { models: [] })
       const empty = page.getByTestId('m-chat-empty')
       await expect(empty).toContainText('No model yet.')
-      await expect(page.getByTestId('m-chat-model')).toContainText('Choose a model')
+      await expect(page.getByTestId('m-chat-options')).toContainText('Choose a model')
       expect(await layout(page)).toEqual(CLEAN)
 
       // Sending keeps the text and opens the model sheet, which says where models come from.
@@ -1199,7 +1210,7 @@ for (const size of SIZES) {
       await signInCloud(page)
 
       // C3.5 to C3.8: the catalogue with search, filters and the price page.
-      await page.getByTestId('m-chat-model').tap()
+      await openModelSheet(page)
       await page.getByTestId('m-chat-model-segment-cloud').tap()
       const cloudRows = page.locator('[data-testid="m-sheet-model"] [data-testid^="m-chat-model-cloud"]')
       await expect(cloudRows.first()).toBeVisible({ timeout: 20_000 })
@@ -1235,13 +1246,13 @@ for (const size of SIZES) {
       await expect(page.getByTestId('m-consent-text')).toContainText('LU Cloud')
       await page.getByTestId('m-consent-decline').tap()
       await expect(page.getByTestId('m-sheet-model')).toBeVisible()
-      await expect(page.getByTestId('m-chat-cloud-chip')).toHaveCount(0)
+      await expect(page.getByTestId('m-chat-options').last()).toHaveAttribute('data-m-place', 'local')
       await cheapest.tap()
       await page.getByTestId('m-dialog-confirm').tap()
       await page.getByTestId('m-consent-agree').tap()
       await expect(page.getByTestId('m-sheet-model')).toHaveCount(0)
       await waitForModel(page, cloudName)
-      await expect(page.getByTestId('m-chat-cloud-chip')).toBeVisible()
+      await expect(page.getByTestId('m-chat-options').last()).toHaveAttribute('data-m-place', 'cloud')
       // The model sheet goes through the one door of the mode, so the switch is counted like every other.
       // Review M2: the phone counts anonymously through the native layer only. The count per account,
       // which this route would see, is never sent.
@@ -1303,7 +1314,7 @@ for (const size of SIZES) {
       await page.locator(`[data-testid="m-chat-model-local"][data-m-id="openai::${SMALL}"]`).tap()
       await expect(page.getByTestId('m-toast-back-on-device')).toHaveText('Back on device')
       await waitForModel(page, SMALL)
-      await expect(page.getByTestId('m-chat-cloud-chip')).toHaveCount(0)
+      await expect(page.getByTestId('m-chat-options').last()).toHaveAttribute('data-m-place', 'local')
       await backend(page, (ctl) => { ctl.reply = 'Back on the phone.' })
       await expect(page.getByTestId('m-chat-regenerate')).not.toHaveAttribute('data-m-risk', 'paid')
       await page.getByTestId('m-chat-regenerate').tap()
@@ -1499,7 +1510,7 @@ for (const size of SIZES) {
       await back(page)
 
       // C4.1: the camera, with a model that reads images.
-      await page.getByTestId('m-chat-model').tap()
+      await openModelSheet(page)
       await page.locator(`[data-testid="m-chat-model-local"][data-m-id="openai::${VISION}"]`).tap()
       await waitForModel(page, VISION_LABEL)
       await page.getByTestId('m-chat-attach').tap()
@@ -1521,7 +1532,7 @@ for (const size of SIZES) {
       await expect(page.getByTestId('m-chat-engine-error')).toHaveCount(0)
       await expect(page.getByTestId('m-chat-screen').getByText('Not enough memory for this model.')).toHaveCount(1)
       expect(await layout(page)).toEqual(CLEAN)
-      await page.getByTestId('m-chat-model').tap()
+      await openModelSheet(page)
       await expect(page.getByTestId('m-chat-model-engine-error')).toContainText('Not enough memory for this model.')
       await expect(page.getByTestId('m-chat-model-engine-retry')).toBeVisible()
       expect(await layout(page)).toEqual(CLEAN)
@@ -1598,8 +1609,10 @@ for (const size of SIZES) {
       await expect(page.getByTestId('m-sheet-chat-options')).toBeVisible()
       await page.getByTestId('m-sheet-close').tap()
 
-      await page.getByTestId('m-chat-context').tap()
-      await expect(page.getByTestId('m-sheet-chat-options')).toBeVisible()
+      // Prompt v2: the context chip stands above the field only when it wants attention; the window is in the options.
+      await expect(page.getByTestId('m-chat-context')).toHaveCount(0)
+      await page.getByTestId('m-chat-options').tap()
+      await expect(page.getByTestId('m-options-context')).toBeVisible()
       await page.getByTestId('m-sheet-close').tap()
       expect(errors()).toEqual([])
     })
@@ -1612,7 +1625,8 @@ for (const size of SIZES) {
       const one = (await input.boundingBox())!.height
       await input.fill(Array.from({ length: 12 }, (_, i) => `line ${i + 1}`).join('\n'))
       const many = await input.evaluate((el) => ({ height: el.getBoundingClientRect().height, scroll: el.scrollHeight }))
-      expect(many.height).toBeGreaterThan(one * 2)
+      // Prompt v2: the field starts at three lines and grows to about six, so twice the start is more than it takes.
+      expect(many.height).toBeGreaterThan(one * 1.5)
       expect(many.scroll).toBeGreaterThan(many.height)
       // The composer stays inside the window, with the send button reachable.
       const sendBox = (await page.getByTestId('m-chat-send').boundingBox())!
@@ -1735,7 +1749,7 @@ for (const size of SIZES) {
       expect(await backend(page, (ctl) => ctl.engineStarts.length)).toBe(1)
       expect(await backend(page, (ctl) => ctl.bodies.length)).toBe(1)
       // The model sheet reads the same source: the chosen model is in memory.
-      await page.getByTestId('m-chat-model').tap()
+      await openModelSheet(page)
       await expect(page.getByTestId('m-chat-model-list')).toHaveAttribute('data-m-loaded', 'yes')
       await expect(page.getByTestId('m-chat-model-loads-later')).toHaveCount(0)
       await page.getByTestId('m-sheet-close').tap()
@@ -1762,7 +1776,7 @@ for (const size of SIZES) {
       await expect(line).toHaveAttribute('data-m-reason', 'memory')
       expect(await layout(page)).toEqual(CLEAN)
       // The sheet of the models says the same.
-      await page.getByTestId('m-chat-model').tap()
+      await openModelSheet(page)
       await expect(page.getByTestId('m-chat-model-loads-later')).toBeVisible()
       await expect(page.getByTestId('m-chat-model-list')).toHaveAttribute('data-m-loaded', 'no')
       await page.getByTestId('m-sheet-close').tap()
@@ -2285,7 +2299,7 @@ for (const size of SIZES) {
       })
       expect(textLeftAlone).toBe(true)
 
-      await page.getByTestId('m-chat-model').tap()
+      await openModelSheet(page)
       await page.locator(`[data-testid="m-chat-model-local"][data-m-id="openai::${VISION}"]`).tap()
       await waitForModel(page, VISION_LABEL)
       await paste(2)
@@ -2437,7 +2451,7 @@ for (const size of SIZES) {
         const row = { progress: 40, total: 100, speed: 0, filename: 'Phi-4-mini-Q4_K_M.gguf', status: 'downloading' }
         useDownloadStore.setState({ downloads: { 'Phi-4-mini-Q4_K_M.gguf': row }, ownRows: { 'Phi-4-mini-Q4_K_M.gguf': row } })
       })
-      await page.getByTestId('m-chat-model').tap()
+      await openModelSheet(page)
       const download = page.getByTestId('m-chat-model-download')
       // N1: the name of the model, not the name of its file.
       await expect(download).toContainText('Phi-4-mini-Q4_K_M')
@@ -2470,7 +2484,7 @@ for (const size of SIZES) {
       await signInCloud(page)
 
       // C3.10: signed in, no plan.
-      await page.getByTestId('m-chat-model').tap()
+      await openModelSheet(page)
       await page.getByTestId('m-chat-model-segment-cloud').tap()
       await expect(page.getByTestId('m-chat-model-plans-state')).toBeVisible({ timeout: 20_000 })
       expect(await layout(page)).toEqual(CLEAN)
@@ -2481,7 +2495,7 @@ for (const size of SIZES) {
       // With a plan, and a server that does not hand out the catalogue.
       scenario = 'plan'
       await signInCloud(page)
-      await page.getByTestId('m-chat-model').tap()
+      await openModelSheet(page)
       await page.getByTestId('m-chat-model-segment-cloud').tap()
       await expect(page.getByTestId('m-chat-model-catalog-error')).toBeVisible({ timeout: 30_000 })
       expect(await layout(page)).toEqual(CLEAN)
@@ -2553,7 +2567,7 @@ for (const size of SIZES) {
       await boot(page)
       await waitForModel(page)
       const png = await makePng(page)
-      await page.getByTestId('m-chat-model').tap()
+      await openModelSheet(page)
       await page.locator(`[data-testid="m-chat-model-local"][data-m-id="openai::${VISION}"]`).tap()
       await waitForModel(page, VISION_LABEL)
       await page.getByTestId('m-chat-input').fill('Half a thought about tides')
@@ -2612,12 +2626,12 @@ for (const size of SIZES) {
       })
       // The composer names the model the way the catalogue does, not by its file.
       await waitForModel(page, 'SmolLM2 360M')
-      await expect(page.getByTestId('m-chat-model')).not.toContainText('Q4_K_M')
+      await expect(page.getByTestId('m-chat-options')).not.toContainText('Q4_K_M')
       await expect(page.getByTestId('m-chat-loading-model')).toContainText('Loading SmolLM2 360M')
       expect(await layout(page)).toEqual(CLEAN)
 
       // SmolLM2 does not think: no chip and no switch, before the engine was ever asked.
-      await expect(page.getByTestId('m-chat-status-thinking')).toHaveCount(0)
+      await expect(page.getByTestId('m-chat-options')).not.toContainText('Thinking')
       await page.getByTestId('m-chat-options').tap()
       await expect(page.getByTestId('m-sheet-chat-options')).toBeVisible()
       await expect(page.getByTestId('m-options-thinking')).toHaveCount(0)
@@ -2634,7 +2648,7 @@ for (const size of SIZES) {
       expect(await backend(page, (ctl) => ctl.engineStarts.length)).toBe(1)
       await expect(page.getByTestId('m-chat-model-by').last()).toHaveText(/SmolLM2 360M/)
       await expect(page.getByTestId('m-chat-model-by').last()).not.toContainText('Instruct')
-      await expect(page.getByTestId('m-chat-status-thinking')).toHaveCount(0)
+      await expect(page.getByTestId('m-chat-options')).not.toContainText('Thinking')
       expect(await layout(page)).toEqual(CLEAN)
 
       // A toast over the text field must not swallow the tap that was meant for the field.
@@ -2655,7 +2669,7 @@ for (const size of SIZES) {
       await page.getByTestId('m-chat-input').fill('')
 
       // The model sheet uses the same names. Qwen3 thinks: there the switch is offered.
-      await page.getByTestId('m-chat-model').tap()
+      await openModelSheet(page)
       const local = page.getByTestId('m-chat-model-local')
       await expect(local).toHaveCount(2)
       await expect(local.first()).toContainText('SmolLM2 360M')
@@ -3511,7 +3525,7 @@ test.describe('chat, a provider with the own key', () => {
     await waitForModel(page)
 
     // C3.11: the rows of the provider, under its own heading, next to the models of this phone.
-    await page.getByTestId('m-chat-model').tap()
+    await openModelSheet(page)
     const rows = page.locator('[data-testid="m-sheet-model"] [data-testid="m-chat-model-provider"]')
     await expect(rows).toHaveCount(2)
     await expect(rows.first()).toContainText('llama-3.3-70b')
@@ -3520,8 +3534,9 @@ test.describe('chat, a provider with the own key', () => {
     await rows.first().tap()
     await expect(page.getByTestId('m-sheet-model')).toHaveCount(0)
     await waitForModel(page, 'llama-3.3-70b')
-    // Not a model of this phone: the chip does not say it is one.
-    await expect(page.getByTestId('m-chat-model')).toHaveClass(/m-mchip--cloud/)
+    // Not a model of this phone: the settings button names the model and nothing that says it runs here. Prompt v2 has
+    // no chip colour for "elsewhere" any more; data-m-place says LU Cloud or not (a provider costs no LU credits).
+    await expect(page.getByTestId('m-chat-options')).toHaveAttribute('aria-label', 'Chat settings: llama-3.3-70b')
 
     await send(page, 'Hello provider')
     await answerDone(page, 'Hello from the provider.')
@@ -4152,7 +4167,7 @@ test.describe('chat, round 3 on the small iPhone', () => {
       await page.setViewportSize(SE_SIDE)
       await expect(page.locator('html')).not.toHaveClass(/m-kb-open/)
       await expect(page.getByTestId('m-chat-attach')).toBeVisible()
-      await expect(page.getByTestId('m-chat-model')).toBeVisible()
+      await expect(page.getByTestId('m-chat-options')).toBeVisible()
       expect(errors()).toEqual([])
     })
   })
@@ -4162,7 +4177,8 @@ test.describe('chat, round 3 on the small iPhone', () => {
 
     test('M6: with the keyboard open the chips fold away and the transcript keeps its room', async ({ page }) => {
       await openTalk(page)
-      await expect(page.locator('.m-composer-status--chips')).toBeVisible()
+      // Prompt v2: nothing warns here, so the status row above the field is empty; the settings button carries the state.
+      await expect(page.getByTestId('m-chat-options')).toBeVisible()
       const before = await transcriptHeight(page)
       await openKeyboard(page, SE_KEYBOARD)
       await expect(page.locator('html')).toHaveAttribute('data-m-room', 'tight')
@@ -4404,7 +4420,7 @@ test.describe('chat, round 3 on the small iPhone', () => {
         const { useModelsView } = await import(/* @vite-ignore */ `${location.origin}/src/mobile/screens/models/parts/view.ts`)
         useModelsView.getState().setSegment('installed')
       })
-      await page.getByTestId('m-chat-model').tap()
+      await openModelSheet(page)
       await page.getByTestId('m-chat-model-get-more').tap()
       await expect(page.getByTestId('m-models-screen')).toBeVisible()
       await expect(page.getByTestId('m-models-segment-new')).toHaveAttribute('aria-checked', 'true')
@@ -4420,7 +4436,7 @@ test.describe('chat, round 3 on the small iPhone', () => {
       })
       await send(page, 'Who are you?')
       await answerDone(page)
-      await expect(page.getByTestId('m-chat-status-persona')).toContainText('Code Expert')
+      await expect(page.getByTestId('m-chat-options')).toContainText('Code Expert')
       const bodies = await backend(page, (ctl) => ctl.bodies as string[])
       expect(bodies.at(-1)).toContain('You are an expert software engineer')
       // The options say the same, with the name of the persona.
@@ -4433,7 +4449,7 @@ test.describe('chat, round 3 on the small iPhone', () => {
       await page.getByTestId('m-options-persona-switch').tap()
       await expect(page.getByTestId('m-options-persona-switch')).toContainText('Off: this chat talks to the plain model.')
       await page.getByTestId('m-sheet-close').tap()
-      await expect(page.getByTestId('m-chat-status-persona')).toHaveCount(0)
+      await expect(page.getByTestId('m-chat-options')).not.toContainText('Code Expert')
       await send(page, 'And now?')
       await expect(answers(page)).toHaveCount(2)
       await answerDone(page)
@@ -4445,7 +4461,7 @@ test.describe('chat, round 3 on the small iPhone', () => {
       await waitForModel(page)
       await send(page, 'Who are you?')
       await answerDone(page)
-      await expect(page.getByTestId('m-chat-status-persona')).toHaveCount(0)
+      await expect(page.getByTestId('m-chat-options')).not.toContainText('Code Expert')
       expect((await backend(page, (ctl) => ctl.bodies as string[])).at(-1)).not.toContain('You are an expert software engineer')
     })
 
@@ -4466,7 +4482,7 @@ test.describe('chat, round 3 on the small iPhone', () => {
       await expect(toggle).toHaveAttribute('aria-checked', 'true')
       await expect(toggle).toContainText('On: this chat answers as Code Expert.')
       await page.getByTestId('m-sheet-close').tap()
-      await expect(page.getByTestId('m-chat-status-persona')).toContainText('Code Expert')
+      await expect(page.getByTestId('m-chat-options')).toContainText('Code Expert')
       await send(page, 'And now?')
       await expect(answers(page)).toHaveCount(2)
       await answerDone(page)
@@ -4582,8 +4598,8 @@ test.describe('chat, round 3 on the small iPhone', () => {
       await waitForModel(page)
       await send(page, 'Hi')
       await answerDone(page)
-      const chip = page.getByTestId('m-chat-context')
-      await expect(chip).toContainText(/^Context \d+%$/)
+      // Prompt v2: a chat that fits shows no context chip above the field; the window is named in the options.
+      await expect(page.getByTestId('m-chat-context')).toHaveCount(0)
       await page.getByTestId('m-chat-options').tap()
       await expect(page.getByTestId('m-options-context')).toContainText('One size for all chats')
       await page.getByTestId('m-options-context').tap()
@@ -4835,7 +4851,7 @@ test.describe('chat, round 3 on the small iPhone', () => {
       await boot(page, { engineThinks: true })
       await waitForModel(page)
       // Off from the start, although the logic layer starts with it on.
-      await expect(page.getByTestId('m-chat-status-thinking')).toHaveCount(0)
+      await expect(page.getByTestId('m-chat-options')).not.toContainText('Thinking')
       await page.getByTestId('m-chat-options').tap()
       const toggle = page.locator('[data-testid="m-options-thinking"][role="switch"], [data-testid="m-options-thinking"] [role="switch"]')
       await expect(toggle).toHaveAttribute('aria-checked', 'false')
@@ -4869,7 +4885,7 @@ test.describe('chat, round 3 on the small iPhone', () => {
       await page.getByTestId('m-chat-answer-no-thinking').tap()
       await expect(page.getByTestId('m-toast-thinking-off')).toBeVisible()
       await answerDone(page, 'Your dog is called Bruno.')
-      await expect(page.getByTestId('m-chat-status-thinking')).toHaveCount(0)
+      await expect(page.getByTestId('m-chat-options')).not.toContainText('Thinking')
       const lastBody = (await backend(page, (ctl) => ctl.bodies as string[])).at(-1) ?? ''
       expect(lastBody).toContain('"enable_thinking":false')
       expect(await layout(page)).toEqual(CLEAN)
@@ -5051,14 +5067,14 @@ test.describe('chat, screenshots', () => {
         await page.getByTestId('m-chat-voice-gate-later').tap()
 
         // C3: on device, cloud before and after the sign in, the price page.
-        await page.getByTestId('m-chat-model').tap()
+        await openModelSheet(page)
         await shot(page, 'c3-local')
         await page.getByTestId('m-chat-model-segment-cloud').tap()
         await expect(page.getByTestId('m-chat-model-signin')).toBeVisible()
         await shot(page, 'c3-cloud-signin')
         await closeSheet(page)
         await signInCloud(page)
-        await page.getByTestId('m-chat-model').tap()
+        await openModelSheet(page)
         await page.getByTestId('m-chat-model-segment-cloud').tap()
         await expect(page.locator('[data-testid="m-sheet-model"] [data-testid^="m-chat-model-cloud"]').first()).toBeVisible({ timeout: 20_000 })
         await shot(page, 'c3-cloud')
@@ -5106,7 +5122,7 @@ test.describe('chat, screenshots', () => {
         await boot(page, { theme: variant.theme, fontScale: variant.fontScale, models: [] })
         await expect(page.getByTestId('m-chat-empty')).toBeVisible()
         await shot(page, 'c2-no-model')
-        await page.getByTestId('m-chat-model').tap()
+        await openModelSheet(page)
         await expect(page.getByTestId('m-chat-model-empty')).toBeVisible()
         await shot(page, 'c3-no-model')
       })

@@ -50,7 +50,9 @@ vi.mock('../useStudioPrice', async (orig) => ({
 
 import { Composer } from '../Composer'
 import { SwapStage } from '../SwapStage'
-import { SpecialControls, SpecialMore } from '../SpecialIntentControls'
+import { SpecialControls } from '../SpecialIntentControls'
+import { HubSettings } from '../hub/HubSettings'
+import { ModelChip } from '../ModelChip'
 import { useCharacterHubReleaseStore } from '../../../../lib/create/character-hub-release'
 import { useCreateStore } from '../../../../stores/createStore'
 import { useCloudCatalogStore } from '../../../../stores/cloudCatalogStore'
@@ -78,14 +80,14 @@ beforeEach(() => {
 })
 afterEach(() => cleanup())
 
-/** The panel of the Character area as CharacterHub lays it out: the inputs,
- *  More options (open here), the bar at the foot. */
+/** The panel of the Character area: the inputs, the settings of the prompt
+ *  window (open here: length, price, resolution, engines), and the window. */
 function Panel() {
   const intent = useCreateStore((s) => s.intent())
   return (
     <div className="lu-hub">
       <SpecialControls intent={intent} />
-      <SpecialMore intent={intent} />
+      <HubSettings />
       <Composer hub onOpenAdvanced={() => {}} onOpenWorkflows={() => {}} />
     </div>
   )
@@ -104,7 +106,8 @@ describe('the Swap Character panel', () => {
   it('stands in the order of the sketch: notes and video, people, sound, consent, frame step; no prompt field; SCAIL 2 at 720p', () => {
     open()
     expect(panel()).toBeTruthy()
-    expect(document.querySelector('textarea')).toBeNull()
+    // The window's field stands and takes no text here.
+    expect((document.querySelector('textarea') as HTMLTextAreaElement).disabled).toBe(true)
     const order = ['[data-swap-tips]', '[data-swap-figures]', '[data-sound-controls]', '[data-swap-consent]', '[data-swap-built]']
       .map((sel) => panel().querySelector(sel) as HTMLElement)
     for (const el of order) expect(el).toBeTruthy()
@@ -123,7 +126,7 @@ describe('the Swap Character panel', () => {
     expect([...res.querySelectorAll('[role=radio]')].map((b) => b.textContent)).toEqual(['480p', '720p'])
     expect(res.querySelector('[aria-checked=true]')?.textContent).toBe('720p')
     expect(useCreateStore.getState().cloudStudioOptions.resolution).toBe('720p')
-    // Length and price sit in the bar once there is a video to measure.
+    // Length and price stand in the settings once there is a video to measure.
     expect(screen.queryByRole('button', { name: 'Length' })).toBeNull()
     expect(document.querySelector('[data-clip-price]')).toBeNull()
     expect(swapClipLimits('scail-2').max).toBeGreaterThanOrEqual(15)
@@ -275,7 +278,9 @@ describe('two steps in the panel (14.11.2026)', () => {
 
   it('the picker shows Kling greyed out with "one person only" for several people, SCAIL 2 recommended', () => {
     useCreateStore.setState({ videoInput: clip, swapFrame: FRAME, swapFigures: [{ image: null, role: '' }, { image: null, role: '' }] } as never)
-    open()
+    // The chip itself: the Character tab's Swap picks its engines in the
+    // settings (SwapPicks); the chip's rules for Swap stay pinned here.
+    render(<ModelChip />)
     const chip = [...document.querySelectorAll('button')].find((b) => /SCAIL 2/.test(b.textContent ?? '') && !b.closest('[role=listbox]'))!
     fireEvent.click(chip)
     const kling = screen.getByText('Kling 3.0 Pro \u2022 Motion Control').closest('button') as HTMLButtonElement

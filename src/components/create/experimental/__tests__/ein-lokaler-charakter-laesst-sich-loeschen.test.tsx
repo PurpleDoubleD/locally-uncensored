@@ -2,8 +2,8 @@
 /**
  * D6 (3.0.7): ein trainierter lokaler Charakter laesst sich loeschen.
  *
- * Seit 3.1.0 Teil B steht der Knopf unter "More options" des Bereichs
- * Character, Aktion Image, fuer den in Schritt 1 gewaehlten Charakter.
+ * Seit 3.1.0 Teil B steht der Knopf am Kopf des Charakters auf der Buehne
+ * des Bereichs Character (CharacterMore, `bare`), bei jeder Aktion.
  *
  * Create, Character, Use character zeigt die lokalen Charaktere aus
  * `models/loras` (`char_<name>_zimage.safetensors`). Die Cloud-Liste hatte
@@ -37,15 +37,15 @@ vi.mock('../../../../api/comfyui', () => ({
 }))
 vi.mock('../../../../api/cloud/loras', () => ({ listLoras: vi.fn(async () => []), deleteLora: vi.fn() }))
 
-import { SpecialMore } from '../SpecialIntentControls'
+import { CharacterMore } from '../SpecialIntentControls'
 import { useCreateStore } from '../../../../stores/createStore'
 import { listLocalCharacters, characterFromLora } from '../../../../lib/characters'
 import { hubFromLocal } from '../../../../lib/create/character-hub'
 
-/** The character picked in step 1, and its More options. */
+/** The character on the stage, and the file actions at its head. */
 function showMore(file: string) {
   useCreateStore.setState({ hubCharacter: hubFromLocal(characterFromLora(file)!) })
-  return render(<SpecialMore intent="character" />)
+  return render(<CharacterMore bare />)
 }
 
 const ANNA = 'char_anna_zimage.safetensors'
@@ -76,7 +76,7 @@ describe('ein lokaler Charakter laesst sich loeschen', () => {
     const labels: (string | null)[] = []
     for (const ref of refs) {
       useCreateStore.setState({ hubCharacter: hubFromLocal(ref) })
-      const view = render(<SpecialMore intent="character" />)
+      const view = render(<CharacterMore bare />)
       labels.push((await screen.findByTestId('local-character-delete')).getAttribute('aria-label'))
       view.unmount()
     }

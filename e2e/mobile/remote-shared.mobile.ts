@@ -382,7 +382,8 @@ test.describe('Remote desktop with shared chats', () => {
     await page.getByTestId('m-remote-shared-row').tap()
     const chip = page.getByTestId('m-remote-shared-model')
     await expect(chip).toHaveAttribute('aria-label', new RegExp(long.replace(/[().]/g, '\\$&')))
-    const name = chip.locator('.m-mchip-name')
+    // Prompt v2: the chip is the settings button; the model is the bold first part of its summary.
+    const name = chip.locator('.m-composer-tune-text b')
     const cut = await name.evaluate((el) => ({ cut: el.scrollWidth > el.clientWidth, ellipsis: getComputedStyle(el).textOverflow, right: el.getBoundingClientRect().right }))
     expect(cut).toMatchObject({ cut: true, ellipsis: 'ellipsis' })
     expect(cut.right).toBeLessThanOrEqual(320)

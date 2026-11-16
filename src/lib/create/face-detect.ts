@@ -10,7 +10,7 @@
 // Diese Datei wird nur ueber import() aus head-crop.ts geladen, also erst,
 // wenn der Bildschritt des Swaps Fotos hochlaedt.
 
-import type { CropBox, FaceBox } from './head-crop'
+import type { CropBox, FaceBox } from './head-crop-boxes'
 
 /** Wo die Dateien liegen (public/face/). */
 export const FACE_ASSET_BASE = '/face'

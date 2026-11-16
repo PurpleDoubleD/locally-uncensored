@@ -20,8 +20,8 @@ import { join } from 'node:path'
 import type { ComfyApiGraph } from '../../types/comfy-graph'
 import type { ComfyNodeDefs } from '../../api/comfy-ui-format'
 
-vi.mock('../../api/comfyui-nodes', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../api/comfyui-nodes')>()
+vi.mock('../../api/comfyui-node-info', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../api/comfyui-node-info')>()
   return { ...actual, getAllNodeInfo: vi.fn() }
 })
 vi.mock('../../api/backend', async (importOriginal) => {
@@ -30,7 +30,7 @@ vi.mock('../../api/backend', async (importOriginal) => {
 })
 
 const { splitAcrossCards, comfySeesSplit, SELECT_CLIP_DEVICE, SELECT_VAE_DEVICE } = await import('../comfy-split')
-const { getAllNodeInfo } = await import('../../api/comfyui-nodes')
+const { getAllNodeInfo } = await import('../../api/comfyui-node-info')
 const { localFetch } = await import('../../api/backend')
 const { useSettingsStore } = await import('../../stores/settingsStore')
 const { withComfySplit } = await import('../../api/comfy-split')

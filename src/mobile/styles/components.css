@@ -1488,6 +1488,13 @@ html[data-shell='mobile'].light .m-app .m-btn--apple {
 .m-composer-tune-text b {
   font-weight: 500;
   color: var(--m-t1);
+  /* The model name is its own clipped box: a long name ends in an ellipsis inside the button instead of
+     running past the screen edge behind the clipping (an inline box keeps its full width, 3.1.0 e2e at 200 %). */
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: bottom;
 }
 .m-composer-tune:disabled {
   opacity: 0.5;
@@ -1660,6 +1667,7 @@ html[data-m-room] .m-chat-scroll > .m-empty > .m-empty-title {
    that did not fit stayed in its place, only invisible under data-m-greeting, and pushed "Ask LU anything" under the
    composer; the measure counts the greeting without it. So wherever it does not fit, it goes. */
 html[data-m-room] .m-chat-scroll:not([data-m-mark-fits]) > .m-empty > .m-empty-mark,
+/* data-m-greeting="words": every word fits, the mark does not (screens/chat/parts/mark-room.ts). */
 .m-chat-scroll[data-m-greeting] > .m-empty > .m-empty-mark {
   display: none !important;
 }
@@ -1777,7 +1785,10 @@ html[data-m-room='cramped']:not(.m-kb-open) .m-app .m-screen:has(.m-banners [dat
   flex-wrap: nowrap;
   padding: 0 4px 4px 0;
 }
+/* Prompt v2: the settings button took the place of the model chip and waits the same way. It grows to fill its row,
+   so left there it took the whole line and the field shrank to 28 px under its icon (3.1.0 e2e, 511x272 at 200 %). */
 html[data-m-room='cramped']:not(.m-kb-open) .m-app .m-screen:has(.m-banners [data-testid='m-engine-notice-failed']) .m-composer-row > .m-mchip,
+html[data-m-room='cramped']:not(.m-kb-open) .m-app .m-screen:has(.m-banners [data-testid='m-engine-notice-failed']) .m-composer-row > .m-composer-tune,
 html[data-m-room='cramped']:not(.m-kb-open) .m-app .m-screen:has(.m-banners [data-testid='m-engine-notice-failed']) .m-composer-row > .m-composer-spacer {
   display: none;
 }

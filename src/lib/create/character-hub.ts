@@ -12,7 +12,7 @@
 
 import type { CloudLora } from '../../api/cloud/loras'
 import type { CharacterRef } from '../character-ref'
-import type { CreateIntent } from '../../stores/createStore'
+import type { CreateIntent } from './create-intent'
 import {
   characterGenerationModels, cloudModelById, lengthPrice, loraGenModels,
 } from '../../stores/cloudCatalogStore'

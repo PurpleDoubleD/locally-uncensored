@@ -188,9 +188,12 @@ test('Swap with one click: marks, one total, the check, then the video on the ne
   // SCAIL 2 is the default, the notes stand grey, both switches off.
   await expect(panel.locator('[data-swap-tips]')).toContainText('Up to 3 people with SCAIL-2, one person with Kling (highest resolution).')
   await expect(page.locator('[data-swap-summary]')).toHaveText('Auto · SCAIL-2 · 720p')
-  // The resolution is under More options (sketches v2), with the engines.
-  await page.getByRole('button', { name: 'More options' }).click()
-  await expect(page.getByRole('radio', { name: '720p' })).toHaveAttribute('aria-checked', 'true')
+  // The resolution is in the settings of the prompt window, with the engines.
+  const settings = page.locator('[data-prompt-window] button[title="Advanced settings"]')
+  await settings.click()
+  await expect(page.locator('[data-hub-settings]').getByRole('radio', { name: '720p' })).toHaveAttribute('aria-checked', 'true')
+  await page.keyboard.press('Escape')
+  await expect(page.locator('[data-hub-settings]')).toHaveCount(0)
   await expect(create).toBeDisabled()
   await shoot(page, 'swap-empty')
 
@@ -211,7 +214,8 @@ test('Swap with one click: marks, one total, the check, then the video on the ne
   await expect(page.locator('[data-clip-price]')).toHaveAttribute('title', /credits$/)
   await expect(page.locator('[data-clip-split]')).toContainText('frame 14k + video')
 
-  // Under More options: Kling stands greyed out for two people.
+  // In the settings: Kling stands greyed out for two people.
+  await settings.click()
   await page.getByRole('button', { name: 'Video model' }).click()
   const kling = page.getByRole('option', { name: /Kling 3.0 Pro/ })
   await expect(kling).toBeDisabled()
@@ -219,6 +223,8 @@ test('Swap with one click: marks, one total, the check, then the video on the ne
   await page.keyboard.press('Escape')
   await expect(kling).toBeHidden()
   await expect(page.getByRole('button', { name: 'First-frame model' })).toContainText('Auto (Nano Banana Pro)')
+  await page.keyboard.press('Escape')
+  await expect(page.locator('[data-hub-settings]')).toHaveCount(0)
 
   // The switches: Uncensored off, the check off; Uncensored takes the check along.
   const uncensored = page.getByRole('switch', { name: 'Uncensored' })
@@ -236,7 +242,7 @@ test('Swap with one click: marks, one total, the check, then the video on the ne
   await page.getByRole('checkbox').check()
   await expect(create).toBeEnabled({ timeout: 15_000 })
   await expect(create).toContainText(/^Create · \d+k$/)
-  await shoot(page, 'swap-ready-scail2', '[data-swap-bar]')
+  await shoot(page, 'swap-ready-scail2', '[data-prompt-window]')
 
   // With the check: one press builds the frame and stops.
   await check.click()

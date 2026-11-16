@@ -2094,6 +2094,12 @@ export function tauriMockInit(opts: TauriMockOptions) {
         return data === null ? Promise.reject('Chat attachment is missing. Please attach the original image again.') : Promise.resolve(data)
       }
 
+      // "Unload all models" frees the LU Engine and ComfyUI's memory too
+      // (#235). Here neither runs: nothing to free, and ComfyUI did not answer,
+      // which the app reads as "not running", as process.rs reports it.
+      case 'offload_local_models':
+        return Promise.resolve({ offloaded: [], notOurs: [{ backend: 'comfyui', why: 'nothing answered /free there (connection refused)' }] })
+
       default:
         // Tauri v2 unlisten calls the injected event registry before IPC.
         // Use the already unique callback ID as this fixture's listener ID.

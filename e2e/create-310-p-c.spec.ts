@@ -2,6 +2,15 @@ import { test, expect, type Page } from '@playwright/test'
 import { tauriMockInit, DEFAULT_ASSISTANT_REPLY, DEFAULT_MODEL_NAME } from './support/tauri-mock'
 import { seedOnboardingDone } from './support/cloud-mock'
 import { bootWithFakeComfy } from './support/fake-comfy'
+import { getImageBundles, getVideoBundles } from '../src/api/model-bundles'
+
+// The exact byte counts the catalogue knows (sizeBytes). Since PR #229 a file
+// counts as on disk only at exactly that size, so the mock reports it.
+const CATALOGUE_BYTES: Record<string, number> = Object.fromEntries(
+  [...getImageBundles(), ...getVideoBundles()].flatMap((b) => b.files)
+    .filter((f) => f.filename && f.sizeBytes != null)
+    .map((f) => [f.filename as string, f.sizeBytes as number]),
+)
 
 /**
  * 3.1.0 P-C, Create:
@@ -23,7 +32,7 @@ async function toCreate(page: Page) {
 test('C50: the Start ComfyUI card has the autostart switch, and it saves', async ({ page }) => {
   await page.addInitScript(tauriMockInit, { assistantReply: DEFAULT_ASSISTANT_REPLY, modelName: DEFAULT_MODEL_NAME, platform: 'windows' as const })
   await seedOnboardingDone(page)
-  await page.addInitScript(() => {
+  await page.addInitScript((sizes: Record<string, number>) => {
     const w = window as unknown as { __AUTOSTART__: unknown[]; __TAURI_INTERNALS__: { invoke: (c: string, a: { files?: Array<{ filename: string }> } & Record<string, unknown>) => Promise<unknown> } }
     w.__AUTOSTART__ = []
     const bridge = w.__TAURI_INTERNALS__
@@ -33,10 +42,10 @@ test('C50: the Start ComfyUI card has the autostart switch, and it saves', async
       if (command === 'comfyui_status') return Promise.resolve({ running: false, starting: false, isLocal: true, found: true, autostart })
       if (command === 'set_comfyui_autostart') { autostart = !!args.enabled; w.__AUTOSTART__.push(args.enabled); return Promise.resolve({ status: 'saved' }) }
       // Every starter file is on disk: the card offers Start, not a download.
-      if (command === 'check_model_sizes') return Promise.resolve((args.files ?? []).map((f) => ({ filename: f.filename, exists: true, actualBytes: 1, complete: true })))
+      if (command === 'check_model_sizes') return Promise.resolve((args.files ?? []).map((f) => ({ filename: f.filename, exists: true, actualBytes: sizes[f.filename] ?? 1, complete: true })))
       return invoke(command, args)
     }
-  })
+  }, CATALOGUE_BYTES)
   await toCreate(page)
   await page.getByRole('radio', { name: 'Image', exact: true }).click()
   await expect(page.getByText('Your model files are already here')).toBeVisible({ timeout: 20_000 })

@@ -139,8 +139,9 @@ const CATALOG_MODELS: Record<string, unknown>[] = [
   { id: 'qwen3-tts', label: 'Qwen3 TTS (voices)', kind: 'audio', ops: ['tts'], credits: { base: 800 }, tier: 'standard', weights: 'open' },
   { id: 'qwen3-tts-design', label: 'Qwen3 TTS Voice Design', kind: 'audio', ops: ['tts'], credits: { base: 800 }, tier: 'standard', weights: 'open' },
   { id: 'ace-step-1.5', label: 'ACE-Step 1.5', kind: 'audio', ops: ['music'], lyrics: true, credits: { base: 1800, per_s: 30 }, tier: 'standard', weights: 'open' },
-  { id: 'ltx-2-extend', label: 'LTX-2 Extend', kind: 'video', ops: ['extend'], t2v: false, i2v: false, credits: { base: 9000 }, tier: 'older', weights: 'open' },
-  { id: 'wan-2.2-animate', label: 'Wan 2.2 Animate', kind: 'video', ops: ['motion'], t2v: false, i2v: false, credits: { base: 12000 }, tier: 'standard', weights: 'open' },
+  // ltx-2-extend and wan-2.2-animate are retired since 24.10.2026 (src/lib/render/retired-models.ts): their successors.
+  { id: 'wan-3.0-extend', label: 'Wan 3.0 Extend', kind: 'video', ops: ['studio'], quote_required: true, tier: 'standard', weights: 'closed' },
+  { id: 'wan-2.2-animate-2', label: 'Wan 2.2 Animate 2', kind: 'video', ops: ['studio'], quote_required: true, tier: 'standard', weights: 'open' },
 ]
 /** A model whose price the server confirms before every run. */
 const STUDIO_EDIT_MODEL = { id: 'seedream-5-edit', label: 'Seedream 5 Edit', kind: 'image', ops: ['studio'], quote_required: true, tier: 'best', weights: 'closed' }
@@ -491,8 +492,17 @@ async function pick(page: Page, opener: Locator, files: { name: string; mimeType
   await chooser.setFiles(files)
 }
 
+/**
+ * Prompt v2 (c19cc0cad): no tool row above the field and no model chip beside it. "What" and "Model" are the first
+ * rows of the run settings, which the settings button under the field opens.
+ */
+async function openRunRow(page: Page, row: 'm-create-tools-all' | 'm-create-model'): Promise<void> {
+  await tid(page, 'm-create-settings').tap()
+  await tid(page, row).tap()
+}
+
 async function chooseTool(page: Page, tool: string): Promise<void> {
-  await tid(page, 'm-create-tools-all').tap()
+  await openRunRow(page, 'm-create-tools-all')
   await tid(page, `m-create-tools-${tool}`).tap()
   await expect(stage(page)).toHaveAttribute('data-m-tool', tool)
 }
@@ -549,7 +559,7 @@ async function back(page: Page, screen: string): Promise<void> {
 }
 
 async function pickModel(page: Page, id: string): Promise<void> {
-  await tid(page, 'm-create-model').tap()
+  await openRunRow(page, 'm-create-model')
   await page.locator(`[role="radio"][data-m-id="${id}"]`).tap()
   await expect(tid(page, 'm-sheet-create-model')).toHaveCount(0)
 }
@@ -786,8 +796,8 @@ for (const size of SIZES) {
       await expect(tid(page, 'm-create-empty')).toHaveText('Describe what you want to see.')
       await expect(tid(page, 'm-create-prompt')).toHaveValue('')
       await typePrompt(page, 'a red fox in the snow')
-      await expect(tid(page, 'm-create-price')).toHaveText('300 credits')
-      await expect(tid(page, 'm-create-summary')).toContainText('1 image')
+      await expect(tid(page, 'm-create-price')).toHaveText('300')
+      await expect(tid(page, 'm-create-settings')).toContainText('1 image')
 
       await run(page)
       const id = await expectResult(page, 'image')
@@ -811,7 +821,7 @@ for (const size of SIZES) {
     test('image: the model sheet searches, shows prices and picks; the settings change the run', async ({ page }) => {
       const cloud = new Cloud()
       await openCreate(page, cloud)
-      await tid(page, 'm-create-model').tap()
+      await openRunRow(page, 'm-create-model')
       await expect(tid(page, 'm-sheet-create-model')).toBeVisible()
       await expectLayout(page, 'K3')
       await expect(tid(page, 'm-create-model-cheapest')).toHaveAttribute('data-m-id', 'z-image-turbo')
@@ -825,10 +835,10 @@ for (const size of SIZES) {
       await expect(tid(page, 'm-create-model-price')).toBeVisible()
       await tid(page, 'm-sheet-back').tap()
       await page.locator('[role="radio"][data-m-id="flux-dev"]').tap()
-      await expect(tid(page, 'm-create-model')).toContainText('Flux Dev')
+      await expect(tid(page, 'm-create-settings')).toContainText('Flux Dev')
 
       await typePrompt(page, 'a lighthouse')
-      await expect(tid(page, 'm-create-price')).toHaveText('1,200 credits')
+      await expect(tid(page, 'm-create-price')).toHaveText('1,200')
       await tid(page, 'm-create-settings').tap()
       await expect(tid(page, 'm-sheet-run-settings')).toBeVisible()
       await expectLayout(page, 'K4')
@@ -839,8 +849,8 @@ for (const size of SIZES) {
       await tid(page, 'm-sheet-back').tap()
       await expect(tid(page, 'm-create-settings-price')).toContainText('1,200')
       await tid(page, 'm-sheet-close').tap()
-      await expect(tid(page, 'm-create-summary')).toContainText('16:9')
-      await expect(tid(page, 'm-create-summary')).toContainText('High')
+      await expect(tid(page, 'm-create-settings')).toContainText('16:9')
+      await expect(tid(page, 'm-create-settings')).toContainText('High')
       await run(page)
       await expectResult(page, 'image')
       const p = cloud.submits[0].params
@@ -856,8 +866,8 @@ for (const size of SIZES) {
       await tid(page, 'm-create-settings').tap()
       await tid(page, 'm-create-count-3').tap()
       await tid(page, 'm-sheet-close').tap()
-      await expect(tid(page, 'm-create-summary')).toContainText('3 images')
-      await expect(tid(page, 'm-create-price')).toHaveText('900 credits')
+      await expect(tid(page, 'm-create-settings')).toContainText('3 images')
+      await expect(tid(page, 'm-create-price')).toHaveText('900')
       await run(page)
       await expectResult(page, 'image')
       expect(cloud.submits[0].params.count).toBe(3)
@@ -1018,7 +1028,7 @@ for (const size of SIZES) {
       await expect(tid(page, 'm-create-mask-screen')).toHaveAttribute('data-state', 'ready')
       await paint(page, [[0.45, 0.5], [0.55, 0.5]])
       await tid(page, 'm-create-mask-done').tap()
-      await expect(tid(page, 'm-create-price')).toHaveText('2,500 credits')
+      await expect(tid(page, 'm-create-price')).toHaveText('2,500')
       await run(page)
       await expectResult(page, 'image')
       expect(cloud.submits[0].params.op).toBe('eraser')
@@ -1026,15 +1036,18 @@ for (const size of SIZES) {
     })
 
     for (const tool of [
-      { id: 'removebg', op: 'removebg', price: '1,000 credits' },
-      { id: 'upscale', op: 'upscale', price: '1,000 credits' },
+      { id: 'removebg', op: 'removebg', price: '1,000' },
+      { id: 'upscale', op: 'upscale', price: '1,000' },
     ]) {
       test(`${tool.id}: a photo in, a result out`, async ({ page }) => {
         const cloud = new Cloud()
         await openCreate(page, cloud)
         await chooseTool(page, tool.id)
         await expect(tid(page, 'm-create-prompt')).toHaveCount(0)
+        // Prompt v2: the fixed model is the row "Model" of the run settings.
+        await tid(page, 'm-create-settings').tap()
         await expect(tid(page, 'm-create-model-fixed')).toBeVisible()
+        await tid(page, 'm-sheet-close').tap()
         await addSource(page, [photo('cat.png')])
         if (tool.id === 'upscale') await tid(page, 'm-create-enhance-4k').tap()
         await expect(tid(page, 'm-create-price')).toHaveText(tool.price)
@@ -1052,12 +1065,12 @@ for (const size of SIZES) {
       await openCreate(page, cloud)
       await chooseTool(page, 'video')
       await typePrompt(page, 'waves on a beach')
-      await expect(tid(page, 'm-create-price')).toHaveText('40,000 credits')
+      await expect(tid(page, 'm-create-price')).toHaveText('40,000')
       await tid(page, 'm-create-settings').tap()
       await expect(tid(page, 'm-create-aspect')).toHaveCount(0)
       await tid(page, 'm-create-length-8').tap()
       await tid(page, 'm-sheet-close').tap()
-      await expect(tid(page, 'm-create-price')).toHaveText('64,000 credits')
+      await expect(tid(page, 'm-create-price')).toHaveText('64,000')
       await run(page)
       await expectResult(page, 'video')
       expect(cloud.submits[0]).toMatchObject({ kind: 'video', model: 'wan-2.2-720p' })
@@ -1144,8 +1157,9 @@ for (const size of SIZES) {
       await typePrompt(page, 'the train disappears')
       await run(page)
       await expectResult(page, 'video')
-      expect(cloud.submits[1]).toMatchObject({ kind: 'video', model: 'ltx-2-extend', params: { op: 'extend' } })
-      expect(String(cloud.submits[1].params.source_url)).toContain('/mock-result/job-1.webm')
+      // The successor of ltx-2-extend is a studio model: it runs as op "studio" and takes the clip as an upload.
+      expect(cloud.submits[1]).toMatchObject({ kind: 'video', model: 'wan-3.0-extend', prompt: 'the train disappears', params: { op: 'studio' } })
+      expect(String(cloud.submits[1].params.video_path)).toMatch(/^inputs\//)
     })
 
     test('motion: a portrait follows a motion video', async ({ page }) => {
@@ -1159,7 +1173,9 @@ for (const size of SIZES) {
       await run(page)
       await expectResult(page, 'video')
       expect(cloud.uploads.map((u) => u.role).sort()).toEqual(['source', 'video'])
-      expect(cloud.submits[0]).toMatchObject({ model: 'wan-2.2-animate', params: { op: 'motion' } })
+      // The successor of wan-2.2-animate is a studio model: op "studio", the portrait and the clip as uploads.
+      expect(cloud.submits[0]).toMatchObject({ model: 'wan-2.2-animate-2', params: { op: 'studio' } })
+      expect(cloud.submits[0].params).toMatchObject({ source_path: expect.stringMatching(/^inputs\//), video_path: expect.stringMatching(/^inputs\//) })
     })
 
     test('enhance a video from the viewer', async ({ page }) => {
@@ -1367,7 +1383,7 @@ for (const size of SIZES) {
       await openCreate(page, cloud)
       await pickModel(page, 'nucleus-image')
       await typePrompt(page, 'a quoted picture')
-      await expect(tid(page, 'm-create-price')).toHaveText('1,500 credits')
+      await expect(tid(page, 'm-create-price')).toHaveText('1,500')
       await expect(tid(page, 'm-create-price')).toHaveAttribute('data-state', 'known')
       expect(cloud.quotes.length).toBeGreaterThan(0)
       cloud.quoteCredits = 2100
@@ -1376,7 +1392,7 @@ for (const size of SIZES) {
       await expect(tid(page, 'm-create-error')).toContainText('2,100')
       await expect(tid(page, 'm-create-error')).toContainText('Nothing was charged')
       expect(cloud.submits).toHaveLength(0)
-      await expect(tid(page, 'm-create-price')).toHaveText('2,100 credits')
+      await expect(tid(page, 'm-create-price')).toHaveText('2,100')
       await run(page)
       await expectResult(page, 'image')
       expect(cloud.submits).toHaveLength(1)
@@ -1393,7 +1409,7 @@ for (const size of SIZES) {
       await expect(tid(page, 'm-create-price')).toHaveAttribute('data-state', 'unavailable', { timeout: 20_000 })
       await expect(tid(page, 'm-create-generate')).toBeDisabled()
       await expect(tid(page, 'm-create-blocked')).toContainText('Price could not be confirmed')
-      await tid(page, 'm-create-summary').tap()
+      await tid(page, 'm-create-settings').tap()
       await expect(tid(page, 'm-create-settings-price-retry')).toBeVisible()
       // While the server is still down the button asks again and the state stays honest.
       const asked = cloud.quotes.length
@@ -1408,7 +1424,7 @@ for (const size of SIZES) {
         await expect(tid(page, 'm-create-settings-price')).toContainText('1,500', { timeout: 1500 })
       }).toPass({ timeout: 20_000 })
       await tid(page, 'm-sheet-close').tap()
-      await expect(tid(page, 'm-create-price')).toHaveText('1,500 credits')
+      await expect(tid(page, 'm-create-price')).toHaveText('1,500')
       await expect(tid(page, 'm-create-generate')).toBeEnabled()
     })
 
@@ -2028,25 +2044,26 @@ for (const size of SIZES) {
 
     // ---------- every remaining control leads somewhere ----------
 
-    test('tool strip: a chip switches the tool, the source card opens the source sheet', async ({ page }) => {
+    test('tools: What in the run settings switches the tool, the source card opens the source sheet', async ({ page }) => {
       const cloud = new Cloud()
       await openCreate(page, cloud)
-      await expect(tid(page, 'm-create-tools')).toBeVisible()
+      // Prompt v2: no tool row above the field. The tool is the first part of the summary and the row "What".
+      await expect(tid(page, 'm-create-tools')).toHaveCount(0)
       for (const tool of ['video', 'removebg', 'upscale', 'eraser', 'animate', 'character', 'lipsync', 'music', 'extend', 'motion', 'image']) {
-        await tid(page, `m-create-tool-${tool}`).tap()
-        await expect(stage(page)).toHaveAttribute('data-m-tool', tool)
-        await expect(tid(page, `m-create-tool-${tool}`)).toHaveAttribute('aria-checked', 'true')
+        await chooseTool(page, tool)
+        await openRunRow(page, 'm-create-tools-all')
+        await expect(tid(page, `m-create-tools-${tool}`)).toHaveAttribute('aria-checked', 'true')
+        await tid(page, 'm-sheet-close').tap()
       }
-      // The four tools whose names the sweep of the acceptance frame refuses carry the mark on the element, in the
-      // strip and in the sheet. The other tools do not (acceptance Android, N9).
+      // The four tools whose names the sweep of the acceptance frame refuses carry the mark on the element in the
+      // sheet. The other tools do not (acceptance Android, N9).
       const MARKED = ['animate', 'eraser', 'extend', 'removebg']
       const marksOf = (prefix: string) =>
         page.evaluate(
           ({ prefix, names }) => names.map((name) => document.querySelector(`[data-testid="${prefix}-${name}"]`)?.getAttribute('data-m-risk') ?? null),
           { prefix, names: [...MARKED, 'image', 'video', 'upscale'] },
         )
-      expect(await marksOf('m-create-tool')).toEqual(['paid', 'paid', 'paid', 'paid', null, null, null])
-      await tid(page, 'm-create-tools-all').tap()
+      await openRunRow(page, 'm-create-tools-all')
       await expect(tid(page, 'm-create-tools-grid')).toBeVisible()
       expect(await marksOf('m-create-tools')).toEqual(['paid', 'paid', 'paid', 'paid', null, null, null])
       await tid(page, 'm-sheet-close').tap()
@@ -2056,16 +2073,15 @@ for (const size of SIZES) {
       await tid(page, 'm-create-count-4').tap()
       await tid(page, 'm-create-quality-draft').tap()
       await tid(page, 'm-sheet-close').tap()
-      await expect(tid(page, 'm-create-summary')).toContainText('4 images')
-      await expect(tid(page, 'm-create-summary')).toContainText('Draft')
+      await expect(tid(page, 'm-create-settings')).toContainText('4 images')
+      await expect(tid(page, 'm-create-settings')).toContainText('Draft')
       await tid(page, 'm-create-settings').tap()
       await tid(page, 'm-create-count-1').tap()
       await tid(page, 'm-create-quality-standard').tap()
       await tid(page, 'm-sheet-close').tap()
-      await expect(tid(page, 'm-create-summary')).toContainText('1 image')
-      await expect(tid(page, 'm-create-summary')).toContainText('Standard')
-      await tid(page, 'm-create-tool-edit').tap()
-      await expect(stage(page)).toHaveAttribute('data-m-tool', 'edit')
+      await expect(tid(page, 'm-create-settings')).toContainText('1 image')
+      await expect(tid(page, 'm-create-settings')).toContainText('Standard')
+      await chooseTool(page, 'edit')
       await tid(page, 'm-create-source-add').tap()
       await expect(tid(page, 'm-sheet-source')).toBeVisible()
       // The camera is the first way in.
@@ -2146,18 +2162,18 @@ for (const size of SIZES) {
       await tid(page, 'm-create-settings').tap()
       await tid(page, 'm-create-size-8k').tap()
       await tid(page, 'm-sheet-close').tap()
-      await expect(tid(page, 'm-create-summary')).toContainText('8K')
+      await expect(tid(page, 'm-create-settings')).toContainText('8K')
       await expect(tid(page, 'm-create-enhance-8k')).toHaveAttribute('aria-checked', 'true')
       await tid(page, 'm-create-enhance-2k').tap()
-      await expect(tid(page, 'm-create-summary')).toContainText('2K')
+      await expect(tid(page, 'm-create-settings')).toContainText('2K')
       await tid(page, 'm-create-settings').tap()
       await expect(tid(page, 'm-create-size-2k')).toHaveAttribute('aria-checked', 'true')
       await tid(page, 'm-create-size-4k').tap()
       await tid(page, 'm-create-size-2k').tap()
       await tid(page, 'm-sheet-close').tap()
-      await expect(tid(page, 'm-create-summary')).toContainText('2K')
+      await expect(tid(page, 'm-create-settings')).toContainText('2K')
       await tid(page, 'm-create-enhance-8k').tap()
-      await expect(tid(page, 'm-create-summary')).toContainText('8K')
+      await expect(tid(page, 'm-create-settings')).toContainText('8K')
       await tid(page, 'm-create-enhance-2k').tap()
       await run(page)
       await expectResult(page, 'image')
@@ -2189,7 +2205,7 @@ for (const size of SIZES) {
       const seed = Number(await tid(page, 'm-create-opt-seed').inputValue())
       await tid(page, 'm-create-opt-guidance-scale').fill('5')
       await tid(page, 'm-sheet-close').tap()
-      await expect(tid(page, 'm-create-price')).toHaveText('1,500 credits', { timeout: 20_000 })
+      await expect(tid(page, 'm-create-price')).toHaveText('1,500', { timeout: 20_000 })
       await run(page)
       await expectResult(page, 'image')
       const sent = JSON.stringify(cloud.submits[0].params)
@@ -2290,7 +2306,7 @@ for (const size of SIZES) {
       await tid(page, 'm-sheet-back').tap()
       await expect(row).toContainText('hardcut')
       await tid(page, 'm-sheet-close').tap()
-      await expect(tid(page, 'm-create-price')).toHaveText('1,500 credits', { timeout: 20_000 })
+      await expect(tid(page, 'm-create-price')).toHaveText('1,500', { timeout: 20_000 })
       await run(page)
       await expectResult(page, 'video')
       const sent = cloud.submits[0].params.studio_options as { loras?: { path: string; scale: number }[] }
@@ -2311,7 +2327,7 @@ for (const size of SIZES) {
       const before = await tid(page, 'm-create-price').textContent()
       await tid(page, 'm-create-music-length').fill('120')
       await expect(tid(page, 'm-create-price')).not.toHaveText(before ?? '')
-      await expect(tid(page, 'm-create-summary')).toContainText('2 min')
+      await expect(tid(page, 'm-create-settings')).toContainText('2 min')
       await run(page)
       await expectResult(page, 'audio')
       const sent = JSON.stringify(cloud.submits[0].params)
@@ -2497,6 +2513,7 @@ for (const size of SIZES) {
       await tid(page, 'm-create-save-character-frame-remove').tap()
       await expect(tid(page, 'm-create-save-character-frame-remove')).toHaveCount(0)
       await tid(page, 'm-create-save-character-frame').tap()
+      await expect(tid(page, 'm-create-save-character-frame-remove')).toHaveCount(1)
       await tid(page, 'm-create-save-character-save').tap()
       await expect(tid(page, 'm-toast-create-character-saved')).toBeVisible()
       expect(cloud.submits).toHaveLength(1)
@@ -2594,7 +2611,7 @@ for (const size of SIZES) {
       const cloud = new Cloud()
       cloud.catalogDown = true
       await openCreate(page, cloud)
-      await tid(page, 'm-create-model').tap()
+      await openRunRow(page, 'm-create-model')
       await expect(tid(page, 'm-create-model-stale')).toBeVisible()
       await expect(tid(page, 'm-create-model-list')).toBeVisible()
       cloud.catalogDown = false
@@ -2610,8 +2627,7 @@ for (const size of SIZES) {
       await expect(tid(page, 'm-create-model-row').or(tid(page, 'm-create-model-cheapest')).first()).toBeVisible()
       await tid(page, 'm-sheet-close').tap()
       // A tool the price list has no model for is not offered at all.
-      await expect(tid(page, 'm-create-tool-music')).toHaveCount(0)
-      await tid(page, 'm-create-tools-all').tap()
+      await openRunRow(page, 'm-create-tools-all')
       await expect(tid(page, 'm-create-tools-grid')).toBeVisible()
       await expect(tid(page, 'm-create-tools-music')).toHaveCount(0)
       await expect(tid(page, 'm-create-tools-video')).toBeVisible()
@@ -2736,7 +2752,7 @@ for (const size of SIZES) {
       await card.tap()
       await expect(tid(page, 'm-create-screen')).toBeVisible()
       await expect(stage(page)).toHaveAttribute('data-m-tool', 'video')
-      await expect(tid(page, 'm-create-summary')).toContainText('8 s')
+      await expect(tid(page, 'm-create-settings')).toContainText('8 s')
     })
 
     test('showcase while signed in: it leads back to Create', async ({ page }) => {
@@ -2821,7 +2837,7 @@ for (const size of SIZES) {
       await tid(page, 'm-create-opt-choice').tap()
       await tid(page, 'm-sheet-close').tap()
 
-      await expect(tid(page, 'm-create-price')).toHaveText('1,500 credits', { timeout: 20_000 })
+      await expect(tid(page, 'm-create-price')).toHaveText('1,500', { timeout: 20_000 })
       await run(page)
       await expectResult(page, 'image')
       expect(cloud.uploads).toHaveLength(2)
@@ -3020,7 +3036,7 @@ for (const size of SIZES) {
     test('guided presets: style LoRAs on a step, a prompt idea, Cancel refunds, Start over clears', async ({ page }) => {
       const cloud = new Cloud()
       await openCreate(page, cloud)
-      await tid(page, 'm-create-tools-all').tap()
+      await openRunRow(page, 'm-create-tools-all')
       await tid(page, 'm-create-tools-presets').tap()
       await page.locator('[data-testid="m-create-preset-card"][data-m-id="your-character"]').tap()
       const preset = tid(page, 'm-create-preset')
@@ -3083,7 +3099,7 @@ for (const size of SIZES) {
       await typePrompt(page, 'a harbour')
       await page.locator('[data-testid="m-create-style"][data-m-id="b-cinematic"]').tap()
       await expect(tid(page, 'm-create-prompt')).toHaveValue('a harbour, cinematic lighting, shallow depth of field, film grain')
-      await expect(tid(page, 'm-create-summary')).toContainText('16:9')
+      await expect(tid(page, 'm-create-settings')).toContainText('16:9')
 
       await tid(page, 'm-create-styles-all').tap()
       await expect(tid(page, 'm-create-styles-screen')).toBeVisible()
@@ -3107,7 +3123,7 @@ for (const size of SIZES) {
       await tid(page, 'm-create-style-card').filter({ hasText: 'Moody portrait' }).tap()
       await expect(tid(page, 'm-create-screen')).toBeVisible()
       await expect(tid(page, 'm-create-prompt')).toHaveValue(/soft light, 35mm$/)
-      await expect(tid(page, 'm-create-summary')).toContainText('3:4')
+      await expect(tid(page, 'm-create-settings')).toContainText('3:4')
 
       await tid(page, 'm-create-styles-all').tap()
       await tid(page, 'm-create-style-remove').tap()
@@ -3523,7 +3539,7 @@ test.describe('create on a low screen', () => {
     await expect(tid(page, 'm-sheet-run-settings')).toBeVisible()
     await expectLayout(page, 'K4 low')
     await tid(page, 'm-sheet-close').tap()
-    await tid(page, 'm-create-model').tap()
+    await openRunRow(page, 'm-create-model')
     await expectLayout(page, 'K3 low')
     await tid(page, 'm-sheet-close').tap()
     await run(page)
@@ -3570,11 +3586,11 @@ test.describe('create screenshots', () => {
 
       // K1 empty, K2, K3, K4, K5.
       await shot('k1-empty')
-      await tid(page, 'm-create-tools-all').tap()
+      await openRunRow(page, 'm-create-tools-all')
       await expect(tid(page, 'm-sheet-tools')).toBeVisible()
       await shot('k2-tools')
       await tid(page, 'm-sheet-close').tap()
-      await tid(page, 'm-create-model').tap()
+      await openRunRow(page, 'm-create-model')
       await shot('k3-model')
       await tid(page, 'm-create-model-price-open').first().tap()
       await shot('k3-price')
@@ -3786,9 +3802,13 @@ async function createFit(page: Page): Promise<Fit> {
   })
 }
 
+/** Tools whose models price by a studio quote, which needs their inputs first. */
+const STUDIO_PRICED_TOOLS: readonly string[] = ['extend', 'motion']
+
 /** What has to be on the first screen of a tool to start it. */
 function coreOf(tool: (typeof FIT_TOOLS)[number]): string[] {
-  const ids = ['m-create-tools-all', `m-create-tool-${tool}`, 'm-create-summary', 'm-create-price', 'm-create-settings', 'm-create-add-source', 'm-create-generate']
+  // Prompt v2: tool and model are in the run settings; the settings button, Add source and Create with its price.
+  const ids = ['m-create-price', 'm-create-settings', 'm-create-add-source', 'm-create-generate']
   if (!['removebg', 'upscale', 'eraser', 'lipsync'].includes(tool)) ids.push('m-create-prompt')
   if (['edit', 'removebg', 'upscale', 'eraser', 'animate', 'motion'].includes(tool)) ids.push('m-create-source-add')
   return ids
@@ -3804,7 +3824,9 @@ test.describe('create fits on one screen (round 45)', () => {
     for (const tool of FIT_TOOLS) {
       if (tool !== 'image') await chooseTool(page, tool)
       await expect(stage(page)).toHaveAttribute('data-m-tool', tool)
-      await expect(tid(page, 'm-create-price')).not.toHaveAttribute('data-state', 'pending')
+      // Extend and Motion run on studio models since the catalogue of 24.10.2026: until a clip is in, the price is
+      // the estimate with its ring ("pending") and the live quote has nothing to ask for. Their layout is measured as it is.
+      if (!STUDIO_PRICED_TOOLS.includes(tool)) await expect(tid(page, 'm-create-price')).not.toHaveAttribute('data-state', 'pending')
       const f = await createFit(page)
       if (f.examples > 0) problems.push(`${tool}: ${f.examples} examples in the page`)
       if (f.shape !== 'tall') problems.push(`${tool}: layout ${f.shape}, not the fixed composer`)
@@ -4020,7 +4042,7 @@ test.describe('3D on the phone', () => {
   test('the tool is only there when the catalog lists a 3D model', async ({ page }) => {
     const cloud = new Cloud()
     await openCreate(page, cloud)
-    await tid(page, 'm-create-tools-all').tap()
+    await openRunRow(page, 'm-create-tools-all')
     await expect(tid(page, 'm-sheet-tools')).toBeVisible()
     await expect(tid(page, 'm-create-tools-3d')).toHaveCount(0)
   })
@@ -4035,7 +4057,7 @@ test.describe('3D on the phone', () => {
     // The way a fresh phone starts on: a photo, so no prompt field.
     await expect(tid(page, 'm-create-prompt')).toHaveCount(0)
     await tid(page, 'm-create-3d-way-text').tap()
-    await expect(tid(page, 'm-create-model')).toContainText('Hunyuan3D')
+    await expect(tid(page, 'm-create-settings')).toContainText('Hunyuan3D')
     await expect(tid(page, 'm-create-3d-detail-card')).toHaveCount(0)
     await expect(tid(page, 'm-create-source-empty')).toHaveCount(0)
     await expect(tid(page, 'm-create-blocked')).toHaveAttribute('data-m-reason', 'no-prompt')
@@ -4101,7 +4123,7 @@ test.describe('3D on the phone', () => {
     await pick(page, tid(page, 'm-create-source-library'), [photo('front.png', 10)])
     await expect(tid(page, 'm-sheet-source')).toHaveCount(0)
     await expect(tid(page, 'm-create-source')).toBeVisible()
-    await tid(page, 'm-create-model').tap()
+    await openRunRow(page, 'm-create-model')
     await page.locator(`[data-m-id="${MESH_VIEWS}"]`).first().tap()
     await expect(tid(page, 'm-create-3d-sides')).toHaveAttribute('data-state', '0')
     await pick(page, tid(page, 'm-create-3d-side-add'), [photo('left.png', 40)])

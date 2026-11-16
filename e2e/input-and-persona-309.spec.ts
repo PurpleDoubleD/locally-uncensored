@@ -85,7 +85,7 @@ test('a persona\'s custom rows go out as typed, and a row in the chat wins', asy
   await page.getByRole('button', { name: /Plugins/ }).click()
   await page.getByRole('button', { name: /^Persona/ }).click()
   await page.getByRole('button', { name: 'Baron', exact: true }).click()
-  await page.getByTitle('Enable persona for this chat').click()
+  // The Persona switch above turned it on for this chat (3.1.0 plugin rows).
   await page.keyboard.press('Escape')
 
   await send(page, 'hello')

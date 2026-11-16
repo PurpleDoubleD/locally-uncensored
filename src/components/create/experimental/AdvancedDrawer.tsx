@@ -12,14 +12,19 @@ import { StudioParams } from './StudioParams'
 import { ImproveToggle } from './ImproveToggle'
 import { ImageCount } from './ImageCount'
 import { ActiveWorkflowParams } from './WorkflowParams'
+import { isHubIntent } from '../../../lib/create/character-hub'
+import { HubSettings } from './hub/HubSettings'
 
 export function AdvancedDrawer({
   open,
   onClose,
   studioModel,
+  onOpenWorkflows,
 }: {
   open: boolean
   onClose: () => void
+  /** The Character tab offers the user's own workflows from here. */
+  onOpenWorkflows?: () => void
   /** Set only on the cloud Studio track (Portplan Abschnitt 3b): a Studio
    *  model has no sampler, scheduler, VAE or LoRA list from ComfyUI, so it
    *  REPLACES WorkflowFinder + ParamGroups below rather than adding to them.
@@ -86,6 +91,9 @@ export function AdvancedDrawer({
       title="Advanced settings"
       width={320}
     >
+      {/* The Character tab keeps its model, size and prompt helpers here:
+          its prompt window holds only the field, the upload and Create. */}
+      {open && isHubIntent(intent) && <HubSettings onOpenWorkflows={onOpenWorkflows} />}
       <ImproveToggle />
       <ImageCount />
       {studioModel ? (

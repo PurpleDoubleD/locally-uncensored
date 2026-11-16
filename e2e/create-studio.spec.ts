@@ -186,8 +186,13 @@ test('an older server (no quote_required): Extend and Motion behave exactly as b
   // with no local engine mocked, hence checking the TEXT, not alert count.)
   await expect(page.getByText('This feature needs a newer LU Cloud server')).toHaveCount(0)
 
+  // Motion: the classic Wan 2.2 Animate left the pickers on 24.10.2026
+  // (lib/render/retired-models.ts); its successor is a Studio model, which
+  // an older server does not announce. So Motion offers no classic pick there
+  // any more, and it still makes no studio-quote call and raises no alert.
   await openCharacterAction(page, 'Motion Control')
-  await expect(page.getByRole('button', { name: /Wan 2\.2 Animate/ })).toBeVisible({ timeout: 15_000 })
+  await expect(page.getByRole('radio', { name: 'Motion Control' })).toBeChecked({ timeout: 15_000 })
+  await expect(page.getByRole('button', { name: /^Wan 2\.2 Animate$/ })).toHaveCount(0)
   await expect(page.getByText('This feature needs a newer LU Cloud server')).toHaveCount(0)
 
   expect(studioQuoteCalls, studioQuoteCalls.join(', ')).toHaveLength(0)

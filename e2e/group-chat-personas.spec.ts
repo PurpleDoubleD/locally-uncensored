@@ -103,7 +103,8 @@ test('two participants answer as two different personas and know each other by n
   // The pick lives on the conversation: it is still there after a reload.
   await page.reload()
   await page.getByRole('button', { name: /Plugins/ }).click()
-  await page.getByRole('button', { name: /Group chat/ }).click()
+  // Group chat is still on, so its row is open already; a click on it would
+  // switch it off (one row per plugin with its own switch, 3.1.0).
   await expect(page.locator(`[data-testid="group-participant"][data-model="${FIRST}"]`).getByTestId('group-persona-trigger')).toContainText('Code Expert')
   await expect(page.locator(`[data-testid="group-participant"][data-model="${SECOND}"]`).getByTestId('group-persona-trigger')).toContainText('Helpful Assistant')
 })
