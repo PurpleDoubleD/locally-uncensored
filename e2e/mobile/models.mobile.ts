@@ -451,7 +451,7 @@ test.describe('a fresh install, no developer switch', () => {
     expect((await mock(page).disk()).onboarding).toBe(true)
 
     // The downloaded model is the model of the chat, and it answers.
-    await expect(at(page, 'm-chat-model')).not.toContainText('Choose a model')
+    await expect(at(page, 'm-chat-options')).not.toContainText('Choose a model')
     await at(page, 'm-chat-input').fill('Are you there?')
     await at(page, 'm-chat-send').tap()
     await expect(page.locator('[data-testid="m-chat-message"][data-m-role="assistant"]').last()).toContainText('ready', { timeout: 30_000 })
@@ -1864,7 +1864,7 @@ for (const size of SIZES) {
       expect(await layoutOf(page)).toEqual(CLEAN)
       await said.getByRole('button', { name: 'New chat' }).tap()
       await expect(at(page, 'm-chat-screen')).toBeVisible()
-      await expect(at(page, 'm-chat-screen').getByTestId('m-chat-model')).toContainText(SMALL.name)
+      await expect(at(page, 'm-chat-screen').getByTestId('m-chat-options')).toContainText(SMALL.name)
       await expect(at(page, 'm-chat-screen').getByTestId('m-chat-empty-model')).toContainText(SMALL.name)
       // Back leads to the list of chats, not to a page that is gone.
       await at(page, 'm-page-back').tap()

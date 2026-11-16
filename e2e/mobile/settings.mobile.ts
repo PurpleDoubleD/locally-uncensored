@@ -1648,7 +1648,11 @@ for (const size of SIZES) {
       await page.getByTestId('m-settings-about-whats-new').tap()
       await expect(page.getByTestId('m-whats-new-screen')).toBeVisible()
       await expect(page.getByTestId('m-whats-new-version')).toHaveText(`Version ${version.split(' ')[0]}`)
-      await expect(page.getByTestId('m-whats-new-notes')).toContainText('What changed since 3.0.7.')
+      // The headline of the version shown, as strand 5 wrote it (3.1.0 brought its own, 3.0.10 had "What changed since 3.0.7.").
+      const notesSource = fs.readFileSync(path.join(HERE, '../../src/mobile/strings/release-notes.ts'), 'utf8')
+      const headline = notesSource.match(new RegExp(`note\\('${version.split(' ')[0].replace(/\./g, '\\.')}', '([^']+)'`))?.[1]
+      expect(headline).toBeTruthy()
+      await expect(page.getByTestId('m-whats-new-notes')).toContainText(headline!)
       await expectClean(page)
       await page.getByTestId('m-whats-new-got-it').tap()
       await expect(page.getByTestId('m-whats-new-screen')).toHaveCount(0)
