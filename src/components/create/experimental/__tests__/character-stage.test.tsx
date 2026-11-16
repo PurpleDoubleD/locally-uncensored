@@ -185,8 +185,9 @@ describe('one column, one window', () => {
   it('the area is as wide as the prompt window: 660, centred', () => {
     const block = hubCss()
     // Both sides equally wide at every width: the left keeps free what the rails take.
-    expect(block).toMatch(/\.lu-hub-row \{[^}]*grid-template-columns: minmax\(var\(--hub-rails, 16px\), 1fr\) minmax\(0, 660px\) minmax\(var\(--hub-rails, 16px\), 1fr\)/)
-    expect(block).toMatch(/\.lu-hub-row > \.hub-column \{[^}]*grid-column: 2/)
+    expect(block).toMatch(/\.lu-hub-row > \.hub-column \{[^}]*align-items: center;[^}]*padding-inline: var\(--hub-rails, 16px\)/)
+    expect(block).toMatch(/\.lu-hub-row > \.hub-column > \* \{[^}]*max-width: 660px/)
+    expect(block).toMatch(/\.lu-hub \.hub-stage > \.hub-scroll \{[^}]*max-width: 660px/)
     // The stage is a plain column in it, not a grid across the page.
     expect(block).toMatch(/\.lu-hub \.hub-stage \{[^}]*flex-direction: column/)
     expect(block).not.toMatch(/grid-template-columns: minmax\(0, 210px\)/)
@@ -225,7 +226,7 @@ describe('one middle axis', () => {
   it('the row of the characters stands around the middle, with New character as its last entry', () => {
     const block = hubCss()
     expect(block).toMatch(/\.lu-hub \.hub-tabs \{[^}]*justify-content: center/)
-    expect(block).toMatch(/\.lu-hub \.hub-tablist \{[^}]*justify-content: center/)
+    expect(block).toMatch(/\.lu-hub \.hub-tablist \{[^}]*text-align: center;[^}]*text-wrap: balance/)
     const { container } = hub(<HubTabs list={chars(3)} loading={false} current="saved:0" photoOnly={false} onPick={() => {}} onPhotoOnly={() => {}} onNew={() => {}} />)
     const row = container.querySelector('[role=tablist]')!
     expect(row.lastElementChild!.getAttribute('data-hub-new')).not.toBeNull()
@@ -236,6 +237,8 @@ describe('one middle axis', () => {
     expect(tabsFit(names(1), 'Mira', 660)).toBe('names')
     expect(tabsFit(names(3), 'Mira', 660)).toBe('names')
     expect(tabsFit(names(8), 'Mira', 660)).toBe('picked')
+    // A wide window has room for all eight names.
+    expect(tabsFit(names(8), 'Mira', 1000)).toBe('names')
     expect(tabsFit(names(8), 'Mira', 380)).toBe('pictures')
     expect(tabsFit(names(3), 'Mira', 300)).toBe('pictures')
     // No width measured yet: the row in full.

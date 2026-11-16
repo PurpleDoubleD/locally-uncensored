@@ -71,7 +71,7 @@ export function HubTabs({ list, loading, current, photoOnly, onPick, onPhotoOnly
   const fit = tabsFit(list.map((c) => c.name), picked?.name ?? null, width)
   const small = fit === 'pictures'
   return (
-    <div ref={row} className="hub-tabs hub-line border-b hub-fs-14" data-hub-tabs data-hub-tabs-fit={fit}>
+    <div ref={row} className="hub-tabs hub-fs-14" data-hub-tabs data-hub-tabs-fit={fit}>
       <div role="tablist" aria-label="My characters" className="hub-tablist">
         {list.map((c) => {
           const on = c.key === current
@@ -188,9 +188,10 @@ function Card({ c, photo }: { c: HubCharacter | null; photo: string | null }) {
             <button type="button" className="hub-dim" onClick={() => setAsking(false)}>Keep</button>
           </span>
         )}
+        {/* The file of a LoRA character, in the same row: download, use on
+            this computer, delete. */}
+        {!saved && <span className="hub-card-file inline-flex"><CharacterMore bare /></span>}
       </div>
-      {/* The file of a LoRA character: download, use on this computer, delete. */}
-      {!saved && <div className="hub-card-file mt-1 flex justify-center"><CharacterMore bare /></div>}
       {error && <p role="alert" className="mt-1.5 text-red-500 hub-fs-125 dark:text-red-400">{error}</p>}
       {c.kind === 'local' && (
         <p className="hub-dim mt-1.5 hub-fs-125">In Chat, name it: “a picture of {c.ref?.name ?? c.name} at the beach”.</p>

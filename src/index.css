@@ -3215,12 +3215,17 @@ input[type="range"].neuron-range:disabled { cursor: not-allowed; opacity: 0.5; }
    column, and the rails of the gallery and the presets at the right. Both
    sides are always equally wide (the left keeps free what the rails take,
    --hub-rails), so the column stands exactly over the window at every
-   width; with little room it gets narrower, it never leaves the middle. The stage in it: the tabs, the character as a head (a small
+   width; with little room it gets narrower, it never leaves the middle.
+   The row of the characters alone may use the whole room between the two
+   sides, so a wide window shows more names. The stage in it: the tabs, the character as a head (a small
    picture, beside it the name and every action it has), then the inputs of
    the action and its photos, which scroll. Nothing here moves by itself. */
-.lu-hub-row { display: grid; grid-template-columns: minmax(var(--hub-rails, 16px), 1fr) minmax(0, 660px) minmax(var(--hub-rails, 16px), 1fr); grid-template-rows: minmax(0, 1fr); }
-.lu-hub-row > .hub-column { grid-column: 2; grid-row: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
-.lu-hub-rails { grid-column: 3; grid-row: 1; justify-self: end; display: flex; min-width: 0; min-height: 0; padding-left: 16px; }
+.lu-hub-row { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
+.lu-hub-row > .hub-column { grid-column: 1; grid-row: 1; display: flex; flex-direction: column; align-items: center; min-width: 0; min-height: 0; overflow: hidden; padding-inline: var(--hub-rails, 16px); }
+.lu-hub-row > .hub-column > * { width: 100%; max-width: 660px; }
+.lu-hub-row > .hub-column > .hub-stage { max-width: none; align-items: center; }
+.lu-hub .hub-stage > .hub-scroll { width: 100%; max-width: 660px; }
+.lu-hub-rails { grid-column: 1; grid-row: 1; justify-self: end; position: relative; z-index: 1; display: flex; min-width: 0; min-height: 0; padding-left: 16px; }
 /* A phone-wide window: the area takes the whole width, as before. */
 @media (max-width: 520px) {
   .lu-hub-rails { display: none; }
@@ -3229,12 +3234,13 @@ input[type="range"].neuron-range:disabled { cursor: not-allowed; opacity: 0.5; }
 /* Everything stands on the middle axis of the prompt window: the row of
    the characters around the middle, the head centred over the photos, the
    photos as a centred grid. */
-.lu-hub .hub-tabs { flex: none; display: flex; justify-content: center; min-height: 38px; }
-.lu-hub .hub-tablist { display: flex; flex-wrap: wrap; align-items: stretch; justify-content: center; column-gap: 20px; min-width: 0; }
-.lu-hub .hub-tab { display: inline-flex; align-items: center; gap: 7px; flex: none; min-height: 37px; white-space: nowrap; margin-bottom: -1px; border-bottom: 1.5px solid transparent; }
+.lu-hub .hub-tabs { flex: none; display: flex; justify-content: center; width: 100%; min-height: 38px; }
+/* Lines of the row are balanced: nothing wraps alone under the others. */
+.lu-hub .hub-tablist { display: block; min-width: 0; text-align: center; text-wrap: balance; }
+.lu-hub .hub-tab { display: inline-flex; align-items: center; gap: 7px; min-height: 37px; margin: 0 10px; vertical-align: top; white-space: nowrap; border-bottom: 1.5px solid transparent; }
 .lu-hub .hub-tab--on { border-bottom-color: var(--hub-text); }
-.lu-hub .hub-tabs[data-hub-tabs-fit="pictures"] .hub-tablist { column-gap: 12px; }
-.lu-hub .hub-scroll { flex: 1 1 0%; min-width: 0; min-height: 0; overflow-y: auto; }
+.lu-hub .hub-tabs[data-hub-tabs-fit="pictures"] .hub-tab { margin: 0 6px; }
+.lu-hub .hub-scroll { flex: 1 1 0%; min-width: 0; min-height: 0; overflow-y: auto; border-top: 1px solid var(--hub-sep); }
 .lu-hub .hub-card { display: flex; flex-direction: column; align-items: center; min-width: 0; padding: 14px 0 12px; text-align: center; }
 .lu-hub .hub-card > .hub-portrait { width: 64px; margin-bottom: 8px; }
 .lu-hub .hub-body { min-width: 0; }

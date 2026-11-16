@@ -218,7 +218,7 @@ test('one pill: the characters as tabs, the stage, and the row over the window s
   // The same window as on Image, at the same place, and the area over it
   // is a column of its width.
   await expectWindowAt(page, onImage)
-  const column = (await page.locator('.hub-column').boundingBox())!
+  const column = (await page.locator('.hub-scroll').boundingBox())!
   expect(Math.abs(column.width - onImage.width)).toBeLessThanOrEqual(1)
   expect(Math.abs(column.x - onImage.x)).toBeLessThanOrEqual(1)
   await expect(page.locator('.hub-bar, [data-swap-bar]')).toHaveCount(0)
