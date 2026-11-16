@@ -3194,5 +3194,100 @@ input[type="range"].neuron-range:disabled { cursor: not-allowed; opacity: 0.5; }
 .hub-fs-10 { font-size: calc(10px / var(--ui-scale, 1.15)); line-height: 1.3; letter-spacing: 0.08em; text-transform: uppercase; font-weight: 600; }
 /* The segments of the area (Sound, Resolution) take the sketch's 12 px. */
 .hub-seg { --text-control: calc(12px / var(--ui-scale, 1.15)); }
+.hub-fs-20 { font-size: calc(20px / var(--ui-scale, 1.15)); line-height: 1.2; letter-spacing: -0.01em; }
+
+/* The stage (variant B, David 16.11.2026, uebergabe-310/character-design):
+   the tabs across the top, the character on the left, its photos or the
+   panel of an action on the right, the bar across the foot. A grid, so the
+   parts of the one click swap (its body and its bar are siblings) land in
+   the same places as the Composer's. Nothing here moves by itself. */
+.lu-hub .hub-stage {
+  display: grid;
+  grid-template-columns: minmax(0, 210px) minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  column-gap: 28px;
+  flex: 1 1 0%;
+  min-height: 0;
+}
+.lu-hub .hub-tabs { grid-column: 1 / -1; grid-row: 1; display: flex; align-items: center; gap: 16px; min-height: 38px; }
+.lu-hub .hub-tablist { display: flex; align-items: stretch; align-self: stretch; gap: 20px; flex: 1 1 0%; min-width: 0; overflow-x: auto; }
+.lu-hub .hub-tab { display: inline-flex; align-items: center; gap: 7px; flex: none; white-space: nowrap; margin-bottom: -1px; border-bottom: 1.5px solid transparent; }
+.lu-hub .hub-tab--on { border-bottom-color: var(--hub-text); }
+.lu-hub .hub-card { grid-column: 1; grid-row: 2; min-width: 0; min-height: 0; overflow-y: auto; padding: 16px 0; }
+.lu-hub .hub-body { grid-column: 2; grid-row: 2; min-width: 0; min-height: 0; overflow-y: auto; }
+.lu-hub .hub-foot { grid-column: 1 / -1; grid-row: 3; min-width: 0; padding: 8px 0 12px; }
+.lu-hub .hub-portrait { display: block; aspect-ratio: 4 / 5; margin-bottom: 12px; border-radius: 8px; background-size: cover; background-position: 50% 20%; }
+.lu-hub .hub-portrait--none { display: grid; place-items: center; background: var(--hub-fill); }
+.lu-hub .hub-initial { font-size: calc(52px / var(--ui-scale, 1.15)); font-weight: 600; line-height: 1; }
+.lu-hub .hub-photos { display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 8px; }
+.lu-hub .hub-photos img { display: block; width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 6px; }
+/* The switch between the actions: text with one quiet ground for the one
+   that is picked, no frame of its own inside the bar. */
+.lu-hub .hub-act { display: inline-flex; gap: 2px; }
+.lu-hub .hub-act-item { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border: 1px solid transparent; border-radius: 6px; color: var(--hub-muted); white-space: nowrap; }
+.lu-hub .hub-act-item--on { border-color: var(--hub-edge); background: var(--hub-hov); color: var(--hub-text); font-weight: 500; }
+@media (max-width: 520px) {
+  .lu-hub .hub-act-item { padding: 0 8px; }
+  .lu-hub .hub-act-item svg { display: none; }
+}
+@media (max-width: 700px) {
+  .lu-hub .hub-stage { grid-template-columns: minmax(0, 1fr); }
+  .lu-hub .hub-card { display: none; }
+  .lu-hub .hub-body { grid-column: 1; }
+}
+
+/* The pages of the area: "New character" and the training. */
+.lu-hub .hub-page { display: flex; flex-direction: column; flex: 1 1 0%; min-height: 0; }
+.lu-hub .hub-new { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); align-content: start; gap: 48px; flex: 1 1 0%; min-height: 0; overflow-y: auto; padding: 20px 0 16px; }
+@media (max-width: 760px) {
+  .lu-hub .hub-new { grid-template-columns: minmax(0, 1fr); gap: 24px; }
+}
+.lu-hub .hub-drop { border: 1px dashed color-mix(in srgb, var(--hub-dim) 60%, transparent); border-radius: 8px; }
+.lu-hub .hub-drop--over { border-color: var(--hub-acc); background: var(--hub-fill); }
+.lu-hub .hub-thumb { display: block; width: 84px; height: 84px; object-fit: cover; border-radius: 6px; }
+.lu-hub .hub-name-field { border-color: var(--hub-edge); }
+.lu-hub input.hub-name-field:not(.hub-fs-20) { font-size: calc(16px / var(--ui-scale, 1.15)); line-height: 1.4; }
+.lu-hub .hub-path { font-family: ui-monospace, 'JetBrains Mono', 'SF Mono', Menlo, monospace; font-size: calc(12px / var(--ui-scale, 1.15)); }
+.lu-hub .hub-radio { position: relative; width: 15px; height: 15px; border: 1.5px solid var(--hub-dim); border-radius: 50%; }
+.lu-hub .hub-radio--on { border-color: var(--hub-acc); }
+.lu-hub .hub-radio--on::after { content: ''; position: absolute; inset: 3px; border-radius: 50%; background: var(--hub-acc); }
+
+/* No character yet: the steps beside the four examples, centred on each
+   other. The four small drawings are the only pictures of the area that
+   move; with reduced motion they stand still. */
+.lu-hub .hub-empty { display: flex; align-items: center; gap: 56px; flex: 1 1 0%; min-height: 0; overflow-y: auto; padding: 16px 8px; }
+@media (max-width: 820px) {
+  .lu-hub .hub-empty { flex-direction: column; align-items: stretch; gap: 28px; }
+}
+.lu-hub .hub-ex { width: 120px; height: 80px; border-radius: 6px; background: var(--hub-fill); }
+.light .lu-hub .hub-ex-mark { filter: invert(1); }
+.lu-hub .hub-ex-a { animation: lu-hub-ex-a 6s ease-in-out infinite; }
+.lu-hub .hub-ex-b { opacity: 0; animation: lu-hub-ex-b 6s ease-in-out infinite; }
+.lu-hub .hub-ex-tilt { animation: lu-hub-ex-tilt 2.4s ease-in-out infinite; }
+.lu-hub .hub-ex-bar { animation: lu-hub-ex-bar 1.4s ease-in-out infinite; }
+@keyframes lu-hub-ex-a {
+  0%, 40%, 100% { opacity: 1; }
+  50%, 90% { opacity: 0; }
+}
+@keyframes lu-hub-ex-b {
+  0%, 40%, 100% { opacity: 0; }
+  50%, 90% { opacity: 1; }
+}
+@keyframes lu-hub-ex-tilt {
+  0%, 100% { transform: rotate(-9deg); }
+  50% { transform: rotate(9deg); }
+}
+@keyframes lu-hub-ex-bar {
+  0%, 100% { transform: scaleY(0.45); }
+  50% { transform: scaleY(1); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .lu-hub .hub-ex-a,
+  .lu-hub .hub-ex-b,
+  .lu-hub .hub-ex-tilt,
+  .lu-hub .hub-ex-bar { animation: none; }
+  .lu-hub .hub-ex-a { opacity: 0; }
+  .lu-hub .hub-ex-b { opacity: 1; }
+}
 /* The NEW mark on the Character pill: accent on a faint accent ground. */
 .lu-new-mark { font-size: 7px; font-weight: 600; letter-spacing: 0.06em; line-height: 1.4; }

@@ -14,7 +14,7 @@ import { cn } from '../ui/cn'
 
 /** After a file landed: ComfyUI rereads its folders, then every shelf asks
  *  again. The Mac lists its own folder and needs no rescan. */
-async function refreshLocalShelves(): Promise<void> {
+export async function refreshLocalShelves(): Promise<void> {
   const { isMlxImageHost } = await import('../../../api/mlx-image')
   if (!isMlxImageHost()) {
     const [{ refreshComfyModels }, { clearNodeCache }] = await Promise.all([

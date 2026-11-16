@@ -12,52 +12,68 @@ export function characterPill(page: Page) {
   return page.getByRole('radiogroup', { name: 'Create mode' }).getByRole('radio', { name: 'Character', exact: true })
 }
 
-/** Opens the area (step 1 on a fresh session). */
+/** Opens the area: its first page without a character, else the stage. */
 export async function openCharacterHub(page: Page, timeout = 15_000): Promise<void> {
   await characterPill(page).click({ timeout })
   await expect(page.locator('[data-character-hub]')).toBeVisible({ timeout })
 }
 
-/** Step 2 without a character ("Just use a photo"), then the action row
- *  named like the old pill: 'Character Studio', 'Swap Character',
- *  'Motion Control', 'Talking Character' (a locked one reads
- *  "…, runs on LU Cloud"). */
-export async function openCharacterAction(page: Page, name: string, timeout = 15_000): Promise<void> {
-  await openCharacterHub(page, timeout)
-  const hub = page.locator('[data-character-hub]')
-  if ((await hub.getAttribute('data-character-hub')) === 'who') {
-    await page.getByRole('button', { name: 'Just use a photo' }).click()
-  }
-  if ((await hub.getAttribute('data-character-hub')) !== 'panel') {
-    await page.getByRole('radio', { name, exact: true }).click({ timeout })
-  } else {
-    // Already on a panel: switch the action in the head line.
-    await page.getByRole('button', { name: 'Action' }).click()
-    const label = { 'Character Studio': 'Image', 'Swap Character': 'Swap', 'Motion Control': 'Motion', 'Talking Character': 'Talk' }[name] ?? name
-    await page.getByRole('option', { name: new RegExp(`^${label}`) }).click()
-  }
+const ACTION_OF: Record<string, string> = {
+  'Character Studio': 'image', 'Swap Character': 'swap', 'Motion Control': 'motion', 'Talking Character': 'talk',
 }
 
-/** "Train from photos": Character Studio's training. */
+/** The stage without a character ("Just use a photo"), from wherever the
+ *  area stands. With no character at all there is no stage: the area shows
+ *  its first page, and this answers false. */
+async function photoOnlyStage(page: Page, timeout: number): Promise<boolean> {
+  const hub = page.locator('[data-character-hub]')
+  // A character of the account takes the stage by itself.
+  await expect(hub).not.toHaveAttribute('data-character-hub', 'who', { timeout: 1_500 }).catch(() => undefined)
+  const step = await hub.getAttribute('data-character-hub')
+  if (step === 'who') return false
+  // A page of the area (New character, the training): back to the characters.
+  const back = page.locator('[data-hub-back]')
+  if (await back.count()) {
+    await back.click()
+    if ((await hub.getAttribute('data-character-hub')) === 'who') return false
+  }
+  await page.locator('[data-hub-photo-only]').click({ timeout })
+  return true
+}
+
+/** An action without a character, named like the old pill:
+ *  'Character Studio', 'Swap Character', 'Motion Control', 'Talking
+ *  Character' (a locked one reads "…, runs on LU Cloud"). */
+export async function openCharacterAction(page: Page, name: string, timeout = 15_000): Promise<void> {
+  await openCharacterHub(page, timeout)
+  if (await photoOnlyStage(page, timeout)) {
+    await page.getByRole('radio', { name, exact: true }).click({ timeout })
+    return
+  }
+  // No character yet: the examples of the first page open an action.
+  const action = ACTION_OF[name.replace(/, runs on LU Cloud$/, '')]
+  await page.locator(`[data-hub-example="${action}"]`).click({ timeout })
+}
+
+/** The training: "New character", "Train a model", on to the training. */
 export async function openCharacterTraining(page: Page, timeout = 15_000): Promise<void> {
   await openCharacterHub(page, timeout)
   const hub = page.locator('[data-character-hub]')
-  if ((await hub.getAttribute('data-character-hub')) !== 'who') {
-    await page.getByRole('button', { name: 'Character', exact: true }).click()
-    await page.getByRole('option', { name: /^New character/ }).click()
-    return
-  }
-  await page.getByRole('button', { name: 'Train from photos' }).click()
+  await expect(hub).not.toHaveAttribute('data-character-hub', 'who', { timeout: 1_500 }).catch(() => undefined)
+  if (await page.locator('[data-hub-training]').count()) return
+  const back = page.locator('[data-hub-back]')
+  if (await back.count()) await back.click()
+  if ((await hub.getAttribute('data-character-hub')) === 'who') await page.locator('[data-hub-create] button').click({ timeout })
+  else await page.locator('[data-hub-new]').click({ timeout })
+  await page.locator('[data-hub-way="train"]').click()
+  await page.getByRole('button', { name: 'Continue to training' }).click()
+  await expect(page.locator('[data-hub-training]')).toBeVisible({ timeout })
 }
 
-/** Step 2 without a character, where the actions and their locks show. */
+/** The stage without a character, where the actions and their locks show. */
 export async function openCharacterWhat(page: Page, timeout = 15_000): Promise<void> {
   await openCharacterHub(page, timeout)
-  const hub = page.locator('[data-character-hub]')
-  if ((await hub.getAttribute('data-character-hub')) === 'panel') {
-    await page.getByRole('button', { name: 'Character', exact: true }).click()
-    await page.getByRole('option', { name: 'All characters…' }).click()
-  }
-  await page.getByRole('button', { name: 'Just use a photo' }).click()
-  await expect(hub).toHaveAttribute('data-character-hub', 'what')
+  // No character yet: Image (it runs everywhere) opens the stage.
+  if (!(await photoOnlyStage(page, timeout))) await page.locator('[data-hub-example="image"]').click({ timeout })
+  await expect(page.locator('[data-hub-stage]')).toBeVisible({ timeout })
 }

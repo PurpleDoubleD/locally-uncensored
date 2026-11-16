@@ -943,6 +943,13 @@ pub fn run() {
             #[cfg(desktop)]
             commands::character_files::import_cloud_character,
             commands::character_files::character_photos,
+            commands::character_files::character_lora_folder,
+            #[cfg(desktop)]
+            commands::character_files::character_lora_folder_open,
+            #[cfg(desktop)]
+            commands::character_files::character_lora_import,
+            #[cfg(desktop)]
+            commands::character_files::character_lora_import_cancel,
             commands::chat_attachments::export_chats_dialog,
             commands::chat_attachments::import_chats_dialog,
             commands::model_sniff::sniff_model_files,
