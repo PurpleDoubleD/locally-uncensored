@@ -162,6 +162,18 @@ test.afterEach(async () => {
   await desk.stop()
 })
 
+
+/**
+ * Prompt v2 (c19cc0cad): no tool row above the field on "My computer". The tools are the group "What" in the
+ * settings sheet, which the settings button under the field opens.
+ */
+async function computerTool(page: Page, id: string): Promise<void> {
+  await page.getByTestId('m-create-computer-settings').tap()
+  await page.getByTestId(`m-create-computer-tool-${id}`).tap()
+  if (await page.getByTestId('m-create-computer-sheet').isVisible()) await page.getByTestId('m-sheet-close').tap()
+  await expect(page.getByTestId('m-create-computer-stage')).toHaveAttribute('data-m-tool', id)
+}
+
 test.describe('My computer in Create', () => {
   test('signed out of LU Cloud: create an image on the computer, into the gallery, no price, nothing in plain text', async ({ page, context }) => {
     const errors = watchErrors(page)
@@ -173,9 +185,11 @@ test.describe('My computer in Create', () => {
     // The gate of LU Cloud offers the computer as well.
     await page.getByTestId('m-create-gate-computer').tap()
     await expect(page.getByTestId('m-create-computer-stage')).toBeVisible()
-    await expect(page.getByTestId('m-create-computer-model')).toContainText('FLUX.1 schnell')
+    await expect(page.getByTestId('m-create-computer-settings')).toContainText('FLUX.1 schnell')
     await noPrice(page)
-    await expect(page.getByTestId('m-create-computer-where')).toHaveText('On your computer')
+    // Prompt v2: where it runs is part of the settings button, "My computer" in the summary, the whole words in its name.
+    await expect(page.getByTestId('m-create-computer-settings')).toContainText('My computer')
+    await expect(page.getByTestId('m-create-computer-settings')).toHaveAttribute('aria-label', /On your computer/)
     expect(await measureLayout(page)).toEqual({ overflow: [], small: [], pageScrolls: false })
     // Nothing to scroll on 412x915 (round 45).
     const scroll = await page.evaluate(() => {
@@ -212,7 +226,7 @@ test.describe('My computer in Create', () => {
     desk.sealed!.devices.get(p.sealed.deviceId)!.rights.add('create')
     await openCreateTab(page)
     await page.getByTestId('m-create-gate-computer').tap()
-    const summary = page.getByTestId('m-create-computer-summary')
+    const summary = page.getByTestId('m-create-computer-settings')
     await expect(summary).toHaveAttribute('aria-label', /SD 1\.5 · 512x512/)
 
     // Computer decides: the size is not sent, the computer takes the one of the family.
@@ -258,7 +272,7 @@ test.describe('My computer in Create', () => {
     desk.create!.pollsToDone = 10_000
     await openCreateTab(page)
     await page.getByTestId('m-create-gate-computer').tap()
-    await page.getByTestId('m-create-computer-tool-video').tap()
+    await computerTool(page, 'video')
     await page.getByTestId('m-create-computer-prompt').fill('waves at night')
     await page.getByTestId('m-create-computer-generate').tap()
     await expect(page.getByTestId('m-create-computer-running')).toHaveAttribute('data-state', 'running', { timeout: 10_000 })
@@ -279,7 +293,7 @@ test.describe('My computer in Create', () => {
     desk.sealed!.devices.get(p.sealed.deviceId)!.rights.add('create')
     await openCreateTab(page)
     await page.getByTestId('m-create-gate-computer').tap()
-    await expect(page.getByTestId('m-create-computer-model')).toBeVisible()
+    await expect(page.getByTestId('m-create-computer-settings')).toBeVisible()
     // The switch goes off on the computer while the page is open.
     desk.create!.enabled = false
     await page.getByTestId('m-create-computer-prompt').fill('a fox')
@@ -381,18 +395,21 @@ test.describe('A17: the whole tool row on my computer', () => {
     desk.sealed!.devices.get(p.sealed.deviceId)!.rights.add('create')
     await openCreateTab(page)
     await page.getByTestId('m-create-gate-computer').tap()
+    // Prompt v2: the tool row is the group "What" in the settings sheet.
+    await page.getByTestId('m-create-computer-settings').tap()
     for (const id of ['image', 'edit', 'removebg', 'upscale', 'video', 'character', 'music']) await expect(page.getByTestId(`m-create-computer-tool-${id}`)).toBeAttached()
+    await page.getByTestId('m-sheet-close').tap()
     await noPrice(page)
     expect(await measureLayout(page)).toEqual({ overflow: [], small: [], pageScrolls: false })
     await page.screenshot({ path: test.info().outputPath('a17-computer-tools.png') })
 
     // Cutout: not available, the reason of the computer, Create stays off.
-    await page.getByTestId('m-create-computer-tool-removebg').tap()
+    await computerTool(page, 'removebg')
     await expect(page.getByTestId('m-create-computer-unavailable')).toContainText('Cutting out needs the background model.')
     await expect(page.getByTestId('m-create-computer-generate')).toBeDisabled()
 
     // Edit: three photos from the library, a prompt, the computer gets them in order.
-    await page.getByTestId('m-create-computer-tool-edit').tap()
+    await computerTool(page, 'edit')
     await expect(page.getByTestId('m-create-computer-generate')).toBeDisabled()
     await addPhotos(page, 'm-create-computer-photo-add', 3)
     await expect(page.getByTestId('m-create-computer-photo')).toHaveCount(3)
@@ -408,7 +425,7 @@ test.describe('A17: the whole tool row on my computer', () => {
     expect(edit.mask_id).toBeUndefined()
 
     // Music: style, lyrics, a track that plays on the stage.
-    await page.getByTestId('m-create-computer-tool-music').tap()
+    await computerTool(page, 'music')
     await page.getByTestId('m-create-computer-prompt').fill('calm piano, slow')
     await page.getByTestId('m-create-computer-lyrics').fill('la la la')
     await page.getByTestId('m-create-computer-generate').tap()
@@ -417,7 +434,7 @@ test.describe('A17: the whole tool row on my computer', () => {
     expect(desk.create!.bodies.find((b) => b.kind === 'music')).toMatchObject({ prompt: 'calm piano, slow', lyrics: 'la la la' })
 
     // Character: the list of the computer, the pick goes with the job.
-    await page.getByTestId('m-create-computer-tool-character').tap()
+    await computerTool(page, 'character')
     await expect(page.getByTestId('m-create-computer-character')).toHaveText('Mia')
     await page.getByTestId('m-create-computer-prompt').fill('Mia at the beach')
     await page.getByTestId('m-create-computer-generate').tap()
@@ -425,7 +442,7 @@ test.describe('A17: the whole tool row on my computer', () => {
     expect(desk.create!.bodies.at(-1)).toMatchObject({ kind: 'image', character: 'chr_mia' })
 
     // Enhance: one photo, factor 4.
-    await page.getByTestId('m-create-computer-tool-upscale').tap()
+    await computerTool(page, 'upscale')
     await expect(page.getByTestId('m-create-computer-prompt')).toHaveCount(0)
     await expect(page.getByTestId('m-create-computer-photo')).toHaveCount(1)
     await page.getByRole('radio', { name: '4x' }).tap()
@@ -473,9 +490,11 @@ test.describe('A17: the whole tool row on my computer', () => {
     desk.sealed!.devices.get(p.sealed.deviceId)!.rights.add('create')
     await openCreateTab(page)
     await page.getByTestId('m-create-gate-computer').tap()
+    await page.getByTestId('m-create-computer-settings').tap()
     await expect(page.getByTestId('m-create-computer-tools').getByRole('radio')).toHaveCount(2)
     await expect(page.getByTestId('m-create-computer-tool-image')).toBeVisible()
     await expect(page.getByTestId('m-create-computer-tool-video')).toBeVisible()
+    await page.getByTestId('m-sheet-close').tap()
     await page.getByTestId('m-create-gallery').tap()
     await expect(page.getByTestId('m-create-gallery-tabs')).toHaveCount(0)
   })
@@ -527,7 +546,7 @@ test.describe('A17: the painted area of an edit on my computer', () => {
     desk.sealed!.devices.get(p.sealed.deviceId)!.rights.add('create')
     await openCreateTab(page)
     await page.getByTestId('m-create-gate-computer').tap()
-    await page.getByTestId('m-create-computer-tool-edit').tap()
+    await computerTool(page, 'edit')
     await addPhotos(page, 'm-create-computer-photo-add', 1)
     await page.getByTestId('m-create-computer-paint').tap()
     await expect(page.getByTestId('m-create-mask-screen')).toHaveAttribute('data-state', 'ready')

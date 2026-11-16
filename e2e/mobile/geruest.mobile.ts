@@ -202,7 +202,7 @@ test.describe('scaffold of the mobile shell', () => {
       await expect(page.getByTestId('m-chat-screen')).toBeVisible()
       // Without a model the empty chat says how to get one (the text with a model: chat.mobile.ts, round 57).
       await expect(page.getByTestId('m-chat-empty')).toBeVisible()
-      await expect(page.getByTestId('m-chat-model')).toBeVisible()
+      await expect(page.getByTestId('m-chat-options')).toBeVisible()
       await expect(page.getByTestId('m-chat-input')).toBeVisible()
     }
     // The new chat is no chat of the list until its first message: two starts left nothing behind.
@@ -1038,14 +1038,17 @@ test.describe('kit: composer on its side', () => {
         await expect(composer).toBeVisible()
         const third = variant.height / 3
         expect((await composer.boundingBox())!.height).toBeLessThanOrEqual(third + 0.5)
-        // Status chips, attach, options, model and the shared slot are all still there, in one row.
+        // Prompt v2: the one warning, the settings button with its summary, Attach and the shared slot are all still
+        // there, in one row.
         const row = await page.evaluate(() => {
           const tops = (sel: string) => [...document.querySelectorAll(`[data-testid="m-dev-composer"] ${sel}`)].map((el) => Math.round(el.getBoundingClientRect().top + el.getBoundingClientRect().height / 2))
-          return { chips: tops('.m-chip'), buttons: tops('.m-ib'), model: tops('.m-mchip'), slot: tops('.m-send') }
+          return { chips: tops('.m-chip'), buttons: tops('.m-ib'), tune: tops('.m-composer-tune'), slot: tops('.m-send') }
         })
-        expect(row.chips).toHaveLength(4)
-        expect(row.buttons).toHaveLength(2)
-        const centres = [...row.chips, ...row.buttons, ...row.model, ...row.slot]
+        expect(row.chips).toHaveLength(1)
+        expect(row.buttons).toHaveLength(1)
+        expect(row.tune).toHaveLength(1)
+        expect(row.slot).toHaveLength(1)
+        const centres = [...row.chips, ...row.buttons, ...row.tune, ...row.slot]
         expect(Math.max(...centres) - Math.min(...centres)).toBeLessThanOrEqual(2)
 
         await page.getByTestId('m-dev-composer-input').fill(Array.from({ length: 8 }, (_, i) => `Line ${i + 1} of a long message`).join('\n'))
@@ -1070,7 +1073,8 @@ test.describe('kit: composer on its side', () => {
     expect(order.status).toBeLessThan(order.field)
     expect(order.field).toBeLessThan(order.row)
     const before = (await page.getByTestId('m-dev-composer-input').boundingBox())!.height
-    await page.getByTestId('m-dev-composer-input').fill('One\nTwo\nThree\nFour')
+    // Prompt v2: the field starts at three lines, so it takes six to grow by more than 40 px.
+    await page.getByTestId('m-dev-composer-input').fill('One\nTwo\nThree\nFour\nFive\nSix')
     const after = (await page.getByTestId('m-dev-composer-input').boundingBox())!.height
     expect(after).toBeGreaterThan(before + 40)
   })

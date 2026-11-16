@@ -289,7 +289,7 @@ test.describe('remote desktop', () => {
     await expect(page.getByTestId('m-toast-remote-connected')).toContainText(`Connected to ${ADDRESS}`)
     await expect(page.getByTestId('m-remote-chat-screen').locator('.m-hdr-sub')).toHaveText(`On ${ADDRESS}`)
     await expect(page.getByTestId('m-remote-chat-empty')).toBeVisible()
-    await expect(page.getByTestId('m-remote-chat-model')).toContainText('qwen3:8b')
+    await expect(page.getByTestId('m-remote-chat-options')).toContainText('qwen3:8b')
     expect(await measureLayout(page)).toEqual({ overflow: [], small: [], pageScrolls: false })
     await shot(page, 'r4-empty')
 
@@ -491,7 +491,9 @@ test.describe('remote desktop', () => {
     await openHome(page)
     await pair(page)
 
-    await page.getByTestId('m-remote-chat-model').tap()
+    // Prompt v2: the model is one level down, settings button, then the row "Model".
+    await page.getByTestId('m-remote-chat-options').tap()
+    await page.getByTestId('m-remote-options-model').tap()
     await expect(page.getByTestId('m-sheet-remote-model')).toBeVisible()
     await expect(page.getByTestId('m-remote-model-list').locator('.m-row-title')).toHaveText(['qwen3:8b', 'gemma4:e4b'])
     await expect(page.getByTestId('m-remote-model-0')).toContainText('Chosen on the desktop')
@@ -499,7 +501,7 @@ test.describe('remote desktop', () => {
     await shot(page, 'r4-model-sheet')
     await page.getByTestId('m-remote-model-1').tap()
     await expect(page.getByTestId('m-sheet-remote-model')).toHaveCount(0)
-    await expect(page.getByTestId('m-remote-chat-model')).toContainText('gemma4:e4b')
+    await expect(page.getByTestId('m-remote-chat-options')).toContainText('gemma4:e4b')
 
     desk.delayMs = 4000
     await send(page, 'a long one')
@@ -1301,7 +1303,7 @@ test.describe('remote desktop', () => {
       await expect(page.getByTestId('m-remote-chat-screen').locator('.m-hdr-sub')).toHaveText('On Office PC')
       // A fresh chat, with a model of this desktop.
       await expect(page.getByTestId('m-remote-chat-empty')).toBeVisible()
-      await expect(page.getByTestId('m-remote-chat-model')).toContainText('office:1b')
+      await expect(page.getByTestId('m-remote-chat-options')).toContainText('office:1b')
       await send(page, 'Hello office')
       await expect(page.getByTestId('m-remote-chat-answer')).toContainText('From the office.')
       await backHome(page)
@@ -1320,7 +1322,7 @@ test.describe('remote desktop', () => {
       await expect(page.getByTestId('m-remote-chat-screen').locator('.m-hdr-sub')).toHaveText('On Studio Mac')
       await expect(page.getByTestId('m-remote-chat-other-desktop')).toContainText('This chat was held with Studio Mac')
       await expect(page.getByTestId('m-remote-chat-other-desktop')).toContainText('connected to Office PC')
-      await expect(page.getByTestId('m-remote-chat-model')).toContainText('qwen3:8b')
+      await expect(page.getByTestId('m-remote-chat-options')).toContainText('qwen3:8b')
       await page.getByTestId('m-remote-chat-input').fill('and now?')
       await expect(page.getByTestId('m-remote-chat-send')).toBeDisabled()
       expect(await measureLayout(page)).toEqual({ overflow: [], small: [], pageScrolls: false })

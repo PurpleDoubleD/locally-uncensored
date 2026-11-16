@@ -212,8 +212,11 @@ for (const size of SIZES) {
       await expect(page.getByTestId('m-chat-goal')).toContainText('Know the weather')
       await expect(page.getByTestId('m-chat-loop')).toContainText('pass 2 of 5')
       await expect(page.getByTestId('m-chat-plan-toggle')).toContainText('1 of 3 done')
-      await expect(page.getByTestId('m-chat-status-agent')).toBeVisible()
-      await expect(page.getByTestId('m-chat-status-caveman')).toBeVisible()
+      // Prompt v2: what was a row of chips above the field is the grey summary on the settings button. The chat
+      // that was open before stays in the stack below with its own composer: the page on top is the last one.
+      const options = page.getByTestId('m-chat-options').last()
+      await expect(options).toContainText('Agent')
+      await expect(options).toContainText('Caveman')
       await clean(page, 'slots closed')
 
       // The plan opens and lists its steps.
@@ -222,7 +225,14 @@ for (const size of SIZES) {
       await clean(page, 'plan open')
       await page.getByTestId('m-chat-plan-toggle').tap()
 
-      // Thinking and the band of two steps open.
+      // The lines act: clear the goal, stop the loop.
+      await page.getByTestId('m-chat-goal-clear').tap()
+      await expect(page.getByTestId('m-chat-goal')).toHaveCount(0)
+      await page.getByTestId('m-chat-loop-stop').tap()
+      await expect(page.getByTestId('m-chat-loop')).toHaveCount(0)
+
+      // Thinking and the band of two steps open. After the lines above went: at 320x568 goal, loop, plan and a notice
+      // leave a strip of transcript above the composer of prompt v2 too small to hold the fold still.
       await page.getByTestId('m-chat-thinking').tap()
       await expect(page.getByTestId('m-chat-blocks')).toContainText('I search first')
       await page.getByTestId('m-chat-steps').tap()
@@ -231,19 +241,15 @@ for (const size of SIZES) {
       await expect(page.getByTestId('m-chat-blocks')).toContainText('The page did not answer.')
       await clean(page, 'blocks open')
 
-      // The lines act: clear the goal, stop the loop.
-      await page.getByTestId('m-chat-goal-clear').tap()
-      await expect(page.getByTestId('m-chat-goal')).toHaveCount(0)
-      await page.getByTestId('m-chat-loop-stop').tap()
-      await expect(page.getByTestId('m-chat-loop')).toHaveCount(0)
 
-      // A status chip opens the place where its thing is changed.
-      await page.getByTestId('m-chat-status-caveman').tap()
+      // The settings button opens the place where caveman is changed, one level down.
+      await options.tap()
+      await page.getByTestId('m-options-caveman-row').tap()
       await expect(page.getByTestId('m-options-caveman')).toBeVisible()
       await page.getByTestId('m-options-caveman-off').tap()
       await page.goBack()
       await page.goBack()
-      await expect(page.getByTestId('m-chat-status-caveman')).toHaveCount(0)
+      await expect(options).not.toContainText('Caveman')
       expect(tried).toEqual([])
       expect(errors()).toEqual([])
     })
