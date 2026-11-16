@@ -5,7 +5,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import {
   MAX_CHARACTER_PHOTOS, __resetSavedCharacters, deleteSavedCharacter, listSavedCharacters,
-  saveCharacter, subscribeSavedCharacters,
+  renameSavedCharacter, saveCharacter, subscribeSavedCharacters,
 } from '../saved-characters'
 
 const photo = (text: string) => new Blob([text], { type: 'image/jpeg' })
@@ -68,5 +68,29 @@ describe('deleting and listening', () => {
     off()
     await saveCharacter('Mira', [photo('one')])
     expect(heard).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe('renaming (3.1.0)', () => {
+  it('gives the character another name, keeps its photos and tells the listeners', async () => {
+    const { character } = await saveCharacter('Oma', [photo('one'), photo('two')])
+    const heard = vi.fn()
+    const off = subscribeSavedCharacters(heard)
+    const renamed = await renameSavedCharacter(character.id, '  Greta ')
+    off()
+    expect(renamed.name).toBe('Greta')
+    expect(heard).toHaveBeenCalledTimes(1)
+    const list = await listSavedCharacters()
+    expect(list.map((c) => [c.id, c.name, c.photos.length])).toEqual([[character.id, 'Greta', 2]])
+  })
+
+  it('refuses a name another character has, an empty name and a character that is gone', async () => {
+    const a = (await saveCharacter('Oma', [photo('one')])).character
+    await saveCharacter('Opa', [photo('two')])
+    await expect(renameSavedCharacter(a.id, 'opa')).rejects.toThrow('already a character called opa')
+    await expect(renameSavedCharacter(a.id, '  ')).rejects.toThrow('Give the character a name.')
+    await expect(renameSavedCharacter('nope', 'X')).rejects.toThrow('no longer there')
+    // Its own name in another case is a rename, not a clash.
+    expect((await renameSavedCharacter(a.id, 'OMA')).name).toBe('OMA')
   })
 })

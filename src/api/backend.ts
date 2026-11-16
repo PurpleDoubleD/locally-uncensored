@@ -697,6 +697,13 @@ export async function backendCall<T = unknown>(
     // The training photos of a local character live in the Rust process; the
     // dev server answers 501 (dev-server/remote-stubs.ts).
     character_photos: { path: "/local-api/character-photos", method: "POST" },
+    // The LoRA folder of this machine and a LoRA file dropped on "New
+    // character" (3.1.0) are the Rust process's too; the dev server answers
+    // 501 (dev-server/remote-stubs.ts), and the page asks only in the app.
+    character_lora_folder: { path: "/local-api/character-lora-folder", method: "POST" },
+    character_lora_folder_open: { path: "/local-api/character-lora-folder-open", method: "POST" },
+    character_lora_import: { path: "/local-api/character-lora-import", method: "POST" },
+    character_lora_import_cancel: { path: "/local-api/character-lora-import-cancel", method: "POST" },
     // The GGUF file dialog of the Model Manager is native (D17); the dev
     // server answers 501 (dev-server/remote-stubs.ts).
     pick_gguf_file: { path: "/local-api/pick-gguf-file", method: "POST" },

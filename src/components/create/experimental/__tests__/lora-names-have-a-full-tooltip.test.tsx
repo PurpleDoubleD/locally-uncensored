@@ -24,7 +24,7 @@ vi.mock('../../../../api/cloud/loras', () => ({
 }))
 
 import { SchemaControl } from '../SchemaControl'
-import { HubWho } from '../hub/CharacterHub'
+import { HubTabs } from '../hub/HubStage'
 import { hubFromCloud } from '../../../../lib/create/character-hub'
 import { listLoras } from '../../../../api/cloud/loras'
 
@@ -38,11 +38,11 @@ describe('LoRA names that keep one line', () => {
   })
 
   it('a character row names the character in full as its tooltip, next to the trigger word', async () => {
-    // Since 3.1.0 part B the characters are the rows of step 1 of the
+    // Since 3.1.0 part B the characters are the tabs of the stage of the
     // Character area; a long name is cut there as it was on the chip.
     const list = (await listLoras()).map(hubFromCloud)
-    render(<HubWho list={list} loading={false} onOpenGallery={() => {}} />)
-    const row = await screen.findByRole('button', { name: /Grace in the red coat/ })
+    render(<div className="lu-hub"><HubTabs list={list} loading={false} current={null} photoOnly={false} onPick={() => {}} onPhotoOnly={() => {}} onNew={() => {}} /></div>)
+    const row = await screen.findByRole('tab', { name: /Grace in the red coat/ })
     expect(row.getAttribute('title')).toBe('Grace in the red coat, studio set, second training run, trigger word: gracechar')
   })
 })

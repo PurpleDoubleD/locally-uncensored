@@ -20,6 +20,7 @@ import { swapBilledPhotos, swapPricedSeconds, swapShortCredits } from '../../../
 import { swapReady } from '../../../lib/create/swap-run'
 import { modelLabel } from '../../../lib/render/preset-models'
 import { SwapLength, SwapPrice, useSwapBar } from './hub/SwapBarParts'
+import { HubBarTop } from './hub/HubParts'
 import { useLocalPick } from './localPick'
 import { swapConfirmedFrame } from '../../../lib/create/swap-frame'
 import { soundApplies, soundInputError } from '../../../lib/render/sound'
@@ -483,7 +484,9 @@ export function Composer({ onOpenAdvanced, onOpenWorkflows, hub = false }: Props
           vor der Umstellung hatte. Siehe --lu-measure in index.css; dass die
           Zahl hier doppelt steht statt den Token zu lesen, ist ein eigener
           Befund und hier nicht behoben. */}
-      <div className="mx-auto w-full max-w-[660px] space-y-2.5">
+      {/* In the Character area the place decides the width: the stage's foot
+          spans it, the training page is its own 660 column. */}
+      <div className={cn('mx-auto w-full space-y-2.5', !hub && 'max-w-[660px]')}>
         {special && !hub && <SpecialControls intent={intent} />}
         {intent === '3d' && <ThreeDControls {...threeDControlFacts(backend, studioPick)} studioId={studioPick} pictureFirst={backend === 'local' || isPictureFirstRun(threeDWay, studioPick)} />}
         {/* Swap Character's options are its own panel above (SpecialControls). */}
@@ -501,6 +504,7 @@ export function Composer({ onOpenAdvanced, onOpenWorkflows, hub = false }: Props
         <div className={hub
           ? cn('hub-bar transition-colors', narrow && 'rounded-2xl')
           : 'rounded-[var(--radius-panel)] bg-white/[0.03] border border-white/[0.06] focus-within:border-white/15 transition-colors'}>
+          {hub && <HubBarTop />}
           {needPrompt && (
             // The prompt assistant (B43) sits in the field's corner, not in the
             // action bar: there every pixel is the model chip's, whose whole

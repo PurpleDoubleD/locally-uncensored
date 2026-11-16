@@ -44,7 +44,10 @@ const participant = (model: string) =>
 function openGroupMenu() {
   render(<PluginsDropdown openUpward />)
   fireEvent.click(screen.getByRole('button', { name: /Plugins/ }))
-  fireEvent.click(screen.getByRole('button', { name: /Group chat/ }))
+  // 3.1.0: Group chat is a row with a switch. A chat that is a group has it
+  // on already; otherwise the switch opens the list.
+  const sw = screen.getByRole('button', { name: /Group chat/ })
+  if (sw.getAttribute('aria-pressed') !== 'true') fireEvent.click(sw)
 }
 
 describe('the group menu', () => {

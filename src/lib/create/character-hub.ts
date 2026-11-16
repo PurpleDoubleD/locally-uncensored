@@ -62,8 +62,10 @@ export const ACTION_LINE: Record<HubAction, string> = {
   talk: 'Your character says your text',
 }
 
-/** Where the area stands: who, what, or the panel of an action. */
-export type HubStep = 'who' | 'what' | 'panel'
+/** Where the area stands: who (no character picked yet), new (the page
+ *  that makes one), what (a character on the stage, no action yet), or the
+ *  panel of an action. */
+export type HubStep = 'who' | 'new' | 'what' | 'panel'
 
 // Characters from every source.
 

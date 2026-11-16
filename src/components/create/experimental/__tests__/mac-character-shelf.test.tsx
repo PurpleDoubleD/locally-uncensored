@@ -29,13 +29,19 @@ vi.mock('../../../../api/comfyui', async (orig) => ({ ...(await orig<typeof impo
 vi.mock('../../../../api/in-tauri', () => ({ isTauri: () => true }))
 
 import { SpecialControls } from '../SpecialIntentControls'
-import { HubWho } from '../hub/CharacterHub'
+import { HubTabs } from '../hub/HubStage'
 import { openHubAction, useHubCharacters } from '../hub/hubCharacters'
 
-/** Step 1 of the Character area as the app shows it: every source in one list. */
+/** The tabs of the Character area as the app shows them: every source in one list. */
 function Who() {
   const { list, loading } = useHubCharacters()
-  return <HubWho list={list} loading={loading} onOpenGallery={() => {}} />
+  const current = useCreateStore((s) => s.hubCharacter)
+  return (
+    <div className="lu-hub">
+      <HubTabs list={list} loading={loading} current={current?.key ?? null} photoOnly={false}
+        onPick={(c) => useCreateStore.getState().setHubCharacter(c)} onPhotoOnly={() => {}} onNew={() => {}} />
+    </div>
+  )
 }
 import { useCreateStore } from '../../../../stores/createStore'
 import type { ClassifiedModel } from '../../../../api/comfyui'
@@ -61,16 +67,16 @@ afterEach(() => cleanup())
 describe('Character Studio on the Mac', () => {
   it('lists the characters of the Mac LoRA folder, and a pick brings its Z-Image model', async () => {
     arrange('use')
-    // Step 1 lists the folder's characters (since 3.1.0 part B the rows of
-    // the Character area), Image is the action that runs one.
+    // The tabs list the folder's characters (since 3.1.0 part B the stage
+    // of the Character area), Image is the action that runs one.
     render(<Who />)
     const row = await screen.findByTitle('davechar, trigger word: davechar')
-    expect(row.textContent).toContain('Local LoRA')
-    expect(screen.queryByRole('button', { name: /other-style/ })).toBeNull()
+    expect(screen.queryByRole('tab', { name: /other-style/ })).toBeNull()
     expect(io.comfy).not.toHaveBeenCalled()
     fireEvent.click(row)
     const picked = useCreateStore.getState().hubCharacter
     expect(picked?.key).toBe(`mlx:${CHAR}`)
+    expect(picked?.meta).toBe('Local LoRA')
     await act(async () => { await openHubAction('image', picked) })
     cleanup()
     render(<SpecialControls intent="character" />)
