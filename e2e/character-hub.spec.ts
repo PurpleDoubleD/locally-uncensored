@@ -231,6 +231,13 @@ test('one pill: the characters as tabs, the stage, and the row over the window s
   await expect(page.getByRole('list', { name: 'Photos of Sam' }).locator('img')).toHaveCount(12)
   await savePhotoCharacter(page, 'Oma', 'oma.png', 8)
   await expect(page.locator('[data-hub-photo-only]')).toBeVisible()
+  // With photos that fill the room the block starts at the top.
+  {
+    const room = (await page.locator('.hub-scroll').boundingBox())!
+    const block = (await page.locator('.hub-center').boundingBox())!
+    expect(block.height).toBeGreaterThanOrEqual(room.height - 1)
+    expect(Math.abs(block.y - room.y)).toBeLessThanOrEqual(2)
+  }
   // Four characters at this width: the row in full, around the middle, with
   // New character as its last entry; the head and the photos under it on
   // the same axis as the prompt window.
@@ -409,6 +416,12 @@ test('local mode: Swap is locked to the cloud, the local lanes are there', async
   await expect(page.locator('[data-hub-card]')).toContainText('Local LoRA')
   // A local LoRA has no picture and no photos here: a line says so, nothing stands in.
   await expect(page.locator('[data-hub-no-photos]')).toBeVisible()
+  // Shorter than the room: the block stands in the middle between the row
+  // of the characters and the row over the prompt window, not at the top.
+  const room = (await page.locator('.hub-scroll').boundingBox())!
+  const block = (await page.locator('.hub-center').boundingBox())!
+  expect(block.height).toBeLessThan(room.height)
+  expect(Math.abs((block.y + block.height / 2) - (room.y + room.height / 2))).toBeLessThanOrEqual(2)
   // Image is the action, and the window is ready for a text. The character
   // of this machine is not put into the run by opening the tab (its LoRA and
   // its model would follow into the Image tab): Create does that.

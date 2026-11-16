@@ -259,6 +259,9 @@ describe('one middle axis', () => {
 
   it('the head, the photos and the first page are centred', () => {
     const block = hubCss()
+    // Up and down too: what is shorter than the room stands in its middle.
+    expect(block).toMatch(/\.lu-hub \.hub-scroll \{[^}]*display: flex;[^}]*flex-direction: column/)
+    expect(block).toMatch(/\.lu-hub \.hub-center \{[^}]*margin-block: auto/)
     expect(block).toMatch(/\.lu-hub \.hub-photos \{[^}]*justify-content: center/)
     expect(block).toMatch(/\.lu-hub \.hub-empty \{[^}]*align-items: center;[^}]*justify-content: center/)
     const c: HubCharacter = { key: 'saved:1', kind: 'saved', name: 'Oma', meta: 'Photos · 2', image: null, photos: [new Blob(['a']), new Blob(['b'])] }
