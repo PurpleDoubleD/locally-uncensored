@@ -12,7 +12,7 @@ test('an 8 GB card: the 3D tab says so before the setup, and the setup stays', a
   await page.addInitScript(tauriMockInit, {
     assistantReply: DEFAULT_ASSISTANT_REPLY,
     modelName: DEFAULT_MODEL_NAME,
-    platform: 'windows',
+    platform: 'windows' as const,
     invokeOverrides: {
       detect_gpus: [{ index: 0, vendor: 'AMD', name: 'AMD Radeon RX 6600', memory_mib: 8192, source: 'registry' }],
     },
