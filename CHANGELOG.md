@@ -6,6 +6,8 @@ All notable changes to Locally Uncensored are documented here.
 
 A fix for the cost of long conversations on paid models, and a clear message
 for 3D with an older ComfyUI.
+LU Cloud keeps its open models: seventeen video models and nine image models
+in the cloud catalogue.
 
 ### Fixed
 - Long chats and long Agent or Code runs on LU Cloud and other paid providers

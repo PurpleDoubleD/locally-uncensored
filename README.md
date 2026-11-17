@@ -45,10 +45,10 @@ Take the latest build from [Releases](https://github.com/PurpleDoubleD/locally-u
 
 | Platform | File | Status |
 |----------|------|--------|
-| Windows 10 and 11 | [`Locally.Uncensored_3.1.0_x64-setup.exe`](https://github.com/PurpleDoubleD/locally-uncensored/releases/latest/download/Locally.Uncensored_3.1.0_x64-setup.exe) (NSIS, recommended) or [`Locally.Uncensored_3.1.0_x64_en-US.msi`](https://github.com/PurpleDoubleD/locally-uncensored/releases/latest/download/Locally.Uncensored_3.1.0_x64_en-US.msi) | Tested every release, signed auto update channel |
-| Linux | [`Locally.Uncensored_3.1.0_amd64.AppImage`](https://github.com/PurpleDoubleD/locally-uncensored/releases/latest/download/Locally.Uncensored_3.1.0_amd64.AppImage), [`Locally.Uncensored_3.1.0_amd64.deb`](https://github.com/PurpleDoubleD/locally-uncensored/releases/latest/download/Locally.Uncensored_3.1.0_amd64.deb) or [`Locally.Uncensored-3.1.0-1.x86_64.rpm`](https://github.com/PurpleDoubleD/locally-uncensored/releases/latest/download/Locally.Uncensored-3.1.0-1.x86_64.rpm) | Built on every release |
-| macOS 14 or newer, Apple Silicon (Beta) | [`LU_3.1.0_aarch64.dmg`](https://github.com/PurpleDoubleD/locally-uncensored/releases/download/v3.1.0/LU_3.1.0_aarch64.dmg) | Signed with an Apple Developer ID and notarized by Apple. Intel Macs are not supported. The app has run on one Mac so far. Voice has been tried by hand in the app on a Mac and works. Computer control is in the Mac app but not fully tested yet on macOS. Remote Access and the automatic update are not confirmed on macOS |
-| Android 7.0 or newer (arm64) | [`LU-3.1.0-Android.apk`](https://github.com/PurpleDoubleD/locally-uncensored/releases/download/v3.1.0/LU-3.1.0-Android.apk) | The phone app. Not in the Play Store yet: install the file from this page. SHA-256 `518d18c3d19f76a056b1c4aec3d9fbb9f845c3b3019f333b0b40be259b617ab9` |
+| Windows 10 and 11 | [`Locally.Uncensored_3.1.1_x64-setup.exe`](https://github.com/PurpleDoubleD/locally-uncensored/releases/latest/download/Locally.Uncensored_3.1.1_x64-setup.exe) (NSIS, recommended) or [`Locally.Uncensored_3.1.1_x64_en-US.msi`](https://github.com/PurpleDoubleD/locally-uncensored/releases/latest/download/Locally.Uncensored_3.1.1_x64_en-US.msi) | Tested every release, signed auto update channel |
+| Linux | [`Locally.Uncensored_3.1.1_amd64.AppImage`](https://github.com/PurpleDoubleD/locally-uncensored/releases/latest/download/Locally.Uncensored_3.1.1_amd64.AppImage), [`Locally.Uncensored_3.1.1_amd64.deb`](https://github.com/PurpleDoubleD/locally-uncensored/releases/latest/download/Locally.Uncensored_3.1.1_amd64.deb) or [`Locally.Uncensored-3.1.1-1.x86_64.rpm`](https://github.com/PurpleDoubleD/locally-uncensored/releases/latest/download/Locally.Uncensored-3.1.1-1.x86_64.rpm) | Built on every release |
+| macOS 14 or newer, Apple Silicon (Beta) | [`LU_3.1.1_aarch64.dmg`](https://github.com/PurpleDoubleD/locally-uncensored/releases/download/v3.1.1/LU_3.1.1_aarch64.dmg) | Signed with an Apple Developer ID and notarized by Apple. Intel Macs are not supported. The app has run on one Mac so far. Voice has been tried by hand in the app on a Mac and works. Computer control is in the Mac app but not fully tested yet on macOS. Remote Access and the automatic update are not confirmed on macOS |
+| Android 7.0 or newer (arm64) | [`LU-3.1.1-Android.apk`](https://github.com/PurpleDoubleD/locally-uncensored/releases/download/v3.1.1/LU-3.1.1-Android.apk) | The phone app. Not in the Play Store yet: install the file from this page. SHA-256 `518d18c3d19f76a056b1c4aec3d9fbb9f845c3b3019f333b0b40be259b617ab9` |
 
 <!-- MAC: the macOS row above is the one place in this file that says whether there is a Mac build. This is the Mac version of the row. It is true only for the .dmg that the release run built, signed and notarized, so it goes out after that run is green. -->
 
@@ -58,7 +58,9 @@ Some antivirus engines flag unsigned NSIS installers that download other binarie
 
 Code signing for the Windows installers: free code signing provided by [SignPath.io](https://about.signpath.io), certificate by [SignPath Foundation](https://signpath.org). SignPath Foundation has accepted the project, and the box goes away once the certificate is in place.
 
-Current release: **v3.1.0** (November 2026). Every change since 1.0.0 is in [CHANGELOG.md](CHANGELOG.md).
+Current release: **v3.1.1** (November 2026). Every change since 1.0.0 is in [CHANGELOG.md](CHANGELOG.md).
+
+3.1.1 fixes the cost of long conversations on paid models: the provider can reuse what it already read again, instead of charging every step in full. It also offers the ComfyUI update when 3D needs a newer one.
 
 3.1.0 rebuilds the coding agent (review changes hunk by hunk, steer a running task, rewind to before any message), adds watchers that run a task on a schedule, makes 3D models in Create on your own computer or on LU Cloud, and gives your characters one place in Create. Web search reads the pages for you with sources, the gallery keeps every picture, the chat gets its own look, Neurons is back as a plugin, and Parakeet joins Whisper for dictation. The full list is in [CHANGELOG.md](CHANGELOG.md).
 
@@ -66,9 +68,9 @@ Current release: **v3.1.0** (November 2026). Every change since 1.0.0 is in [CHA
 
 ## Mobile app (Android, iPhone)
 
-LU is also available as an app for your phone. The current APK comes from the 3.1.0 release.
+LU is also available as an app for your phone. The current APK comes from the 3.1.1 release.
 
-- **Android:** download `LU-3.1.0-Android.apk` from the [3.1.0 release](https://github.com/PurpleDoubleD/locally-uncensored/releases/tag/v3.1.0). Needs Android 7.0 or newer on a 64-bit (arm64) phone. Allow installing apps from your browser or file app when Android asks. SHA-256: `518d18c3d19f76a056b1c4aec3d9fbb9f845c3b3019f333b0b40be259b617ab9`
+- **Android:** download `LU-3.1.1-Android.apk` from the [3.1.1 release](https://github.com/PurpleDoubleD/locally-uncensored/releases/tag/v3.1.1). Needs Android 7.0 or newer on a 64-bit (arm64) phone. Allow installing apps from your browser or file app when Android asks. SHA-256: `518d18c3d19f76a056b1c4aec3d9fbb9f845c3b3019f333b0b40be259b617ab9`
 - **iPhone:** in review at the App Store.
 - **Google Play:** coming later.
 
@@ -222,7 +224,7 @@ The macOS row of the [Download](#download) table says whether the current releas
 
 ## Roadmap
 
-Updated 16 November 2026. Everything up to 3.1.0 has shipped; [Releases](https://github.com/PurpleDoubleD/locally-uncensored/releases) has the history.
+Updated 17 November 2026. Everything up to 3.1.1 has shipped; [Releases](https://github.com/PurpleDoubleD/locally-uncensored/releases) has the history.
 
 **Just out: 3.1.0**
 
