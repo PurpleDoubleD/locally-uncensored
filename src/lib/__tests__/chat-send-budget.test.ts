@@ -23,7 +23,8 @@ import {
   chatSendBudget,
   sharedChatSendBudget,
 } from '../chat-send-budget'
-import { estimateMessageTokens, MAX_SEND_MESSAGES } from '../context-compaction'
+import { COMPACT_TRIGGER_RATIO, estimateMessageTokens, MAX_SEND_MESSAGES } from '../context-compaction'
+import { answerRoom } from '../fit-to-window'
 import { DEFAULT_SEND_WINDOW_TOKENS } from '../send-window'
 
 interface Wire {
@@ -55,6 +56,10 @@ const OLLAMA_8K = { providerId: 'ollama', modelWindow: 8192, contextDecay: true 
  *  fuer die Antwort gemessen (8 Prozent, 512 bis 8192), ohne Hysterese. */
 const TRIGGER_8K = 8192 - Math.floor(8192 * 0.08)
 const BUDGET_262K = 262144 - 8192
+/** 3.1.1: a paid model whose send window is as large as its own window is
+ *  held a little under 0.8 of it, so the trim (budget x 1.15) engages before
+ *  the last check shortens turns (budgetBelowTheFit). */
+const PAID_32K = Math.floor((32768 - answerRoom(32768)) / COMPACT_TRIGGER_RATIO)
 
 describe('A4: a long chat costs budget level, not history level', () => {
   it('a 50k-token history plus a short question sends at most the budget', () => {
@@ -63,7 +68,7 @@ describe('A4: a long chat costs budget level, not history level', () => {
     expect(size(history)).toBeGreaterThan(50000)
 
     const budget = chatSendBudget(CLOUD_32K)!
-    expect(budget).toBe(Math.floor(32768 * 0.8))
+    expect(budget).toBe(PAID_32K)
     const sent = applyChatSendBudget(history, CLOUD_32K)
     expect(sent.promptTokens).toBeLessThanOrEqual(budget)
     expect(size(sent.messages)).toBeLessThanOrEqual(budget)
@@ -225,7 +230,7 @@ describe('A4: compare caps the shared base before the fan-out', () => {
   const bothSides = [CLOUD_262K, CLOUD_32K]
 
   it('takes the tightest of the two budgets', () => {
-    expect(sharedChatSendBudget(bothSides)).toBe(Math.floor(32768 * 0.8))
+    expect(sharedChatSendBudget(bothSides)).toBe(PAID_32K)
   })
 
   it('sends both sides the same payload, under budget', () => {
@@ -251,7 +256,7 @@ describe('A4: compare caps the shared base before the fan-out', () => {
   })
 
   it('a mixed pairing takes the paid budget for both, so the prompts match', () => {
-    expect(sharedChatSendBudget([OLLAMA, CLOUD_32K])).toBe(Math.floor(32768 * 0.8))
+    expect(sharedChatSendBudget([OLLAMA, CLOUD_32K])).toBe(PAID_32K)
   })
 
   it('negative control: with the notaus off nothing is capped', () => {

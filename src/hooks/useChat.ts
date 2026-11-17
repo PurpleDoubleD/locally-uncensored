@@ -29,9 +29,9 @@ import { isSearchStopped, waitForSlotOrStop } from "../lib/slot-wait"
 import { sourcesFromChunks } from "../lib/rag-sources"
 import { buildRagSuffix, RETRIEVAL_FAILED_MESSAGE } from "../lib/rag-prompt"
 import { buildTurnContext, withTurnContext } from "../lib/turn-context"
-import { getChatWindowTokens, capMessageCount, compactMessages, compactMessagesWithCount, estimateMessageTokens, shortenLongTurns } from "../lib/context-compaction"
+import { getChatWindowTokens, capMessageCount, compactMessages, compactMessagesWithCount, estimateMessageTokens, shortenLongTurns, COMPACT_TRIGGER_RATIO } from "../lib/context-compaction"
 import { contextOverflowOf, shrunkSendWindow } from "./codex/context-overflow"
-import { applyChatSendBudget, chatBudgetApplies, sendBudgetWouldTrim } from "../lib/chat-send-budget"
+import { applyChatSendBudget, chatBudgetApplies, chatBudgetHysteresis, sendBudgetWouldTrim } from "../lib/chat-send-budget"
 import { sendsToALanBackend } from "../lib/lan-openai-slot"
 import { isTooManyMessagesError, halveHistory, TOO_MANY_MESSAGES_MAX_HALVINGS } from "../lib/too-many-messages"
 import { requestGenerationCancel } from "../api/vram-handoff"
@@ -247,7 +247,13 @@ async function runGroupTurn(convId: string, model: string, allModels: string[], 
   // trim notice may sit in front of or behind it, so it is found as a part.
   const personLine = [...conv.messages].reverse().find((m) => m.role === 'user')?.content.trim() ?? ''
   const keepPersonLine = (m: { role: string; content: string }) => !!personLine && m.role === 'user' && m.content.includes(personLine)
-  const fitted = sent.budget !== null ? shortenLongTurns(sent.messages, sent.budget, keepPersonLine) : { messages: sent.messages, shortened: 0 }
+  // 3.1.1: on a paid model the trim lets the history fill the room up to
+  // its trigger, so that is the limit here too, and a turn that has to be
+  // shortened keeps a fixed length (steadyKeep). Cut to the budget and to
+  // the token, the longest turn changed on every round and the cache missed.
+  const paidRound = chatBudgetHysteresis({ providerId, localBackend: sendsToALanBackend(providerId, model) })
+  const roundLimit = sent.budget !== null && paidRound ? Math.floor(sent.budget * COMPACT_TRIGGER_RATIO) : sent.budget
+  const fitted = roundLimit !== null ? shortenLongTurns(sent.messages, roundLimit, keepPersonLine, { steady: paidRound }) : { messages: sent.messages, shortened: 0 }
   let messages = fitted.messages
   // Said in the chat, next to this answer: older turns did not go out.
   let dropped = full.length - counted.length + sent.droppedMessages
@@ -1683,7 +1689,9 @@ export function useChat() {
     // never past it. Ollama would cut the start of the chat silently. The
     // verdict is acted on inside the try below, so the turn ends with the
     // sentence that says why (explainSendRefusal), never with nothing.
-    const fitted = fitToWindow(continued ?? budgeted, modelWindowTokens)
+    const fitted = fitToWindow(continued ?? budgeted, modelWindowTokens, 0, {
+      steady: chatBudgetHysteresis({ providerId, localBackend: sendsToALanBackend(providerId, activeModel) }),
+    })
     const messages = fitted.messages
 
     // Lane admission (Runde 4, review-lanes.md Blocker 1+6): the built-in

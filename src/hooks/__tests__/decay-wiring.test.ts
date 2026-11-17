@@ -108,14 +108,14 @@ describe('useCodex keeps the working history whole for the store', () => {
 
 describe('the builder runs before the model call, every step', () => {
   it('useCodex builds inside the iteration loop, ahead of the transports', () => {
-    const buildAt = codex.indexOf('const built = buildRequestMessages(messages, {')
+    const buildAt = codex.indexOf('const built = buildRequestMessages(stepWindow, {')
     const nativeAt = codex.indexOf("if (strategy === 'native') {")
     expect(buildAt).toBeGreaterThan(-1)
     expect(buildAt).toBeLessThan(nativeAt)
   })
 
   it('useAgentChat builds ahead of its transports too', () => {
-    const buildAt = agent.indexOf('const built = buildRequestMessages(agentMessages, {')
+    const buildAt = agent.indexOf('const built = buildRequestMessages(stepWindow, {')
     const nativeAt = agent.indexOf("if (strategy === 'native') {")
     expect(buildAt).toBeGreaterThan(-1)
     expect(buildAt).toBeLessThan(nativeAt)

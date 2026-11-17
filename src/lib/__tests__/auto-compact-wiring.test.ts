@@ -299,15 +299,23 @@ describe('Verdrahtung: jede Werkzeugschleife verdichtet mitten im Lauf (3.0.7)',
     expect(schleifenHooks()).toEqual(expect.arrayContaining(['useAgentChat.ts', 'useCodex.ts']))
   })
 
-  it.each(schleifenHooks())('%s ruft compactRunMidway vor jedem trimWorkingHistory', (datei) => {
-    // Danach kaeme die Zusammenfassung zu spaet: der Trim haette die Schritte
-    // schon verworfen, und es gaebe nichts mehr zusammenzufassen.
+  it.each(schleifenHooks())('%s fragt compactRunMidway, bevor das Fenster des Schritts gebaut wird', (datei) => {
+    // Bis 3.1.0 stand hier "vor jedem trimWorkingHistory": der Trim ersetzte
+    // die Arbeitshistorie, und danach gab es nichts mehr zusammenzufassen.
+    // Seit 3.1.1 (Supportfall E8b) verwirft der Trim nichts mehr. Er liefert
+    // nur das Fenster dieses Schritts, die Historie des Laufs bleibt ganz,
+    // damit derselbe Verlauf in jedem Schritt an derselben Stelle geschnitten
+    // wird. Die Zusammenfassung wird nach diesem Fenster gefragt, und nach
+    // ihr wird es neu bestimmt, bevor der Builder es bekommt.
     const text = lies(datei)
-    const trims = [...text.matchAll(/\btrimWorkingHistory\s*\(/g)].map((m) => m.index!)
-    for (const at of trims) {
-      const davor = text.slice(Math.max(0, at - 2500), at)
-      expect(/\bcompactRunMidway\s*\(/.test(davor), `${datei} @${at}`).toBe(true)
-    }
+    const frage = text.search(/\bcompactRunMidway\s*\(/)
+    const neu = frage + text.slice(frage).search(/stepWindow = windowOf\((agentMessages|messages)\)\n\s*\}\n/)
+    const bau = text.indexOf('buildRequestMessages(stepWindow, {')
+    expect(frage, datei).toBeGreaterThan(-1)
+    expect(neu, datei).toBeGreaterThan(frage)
+    expect(bau, datei).toBeGreaterThan(neu)
+    // Der Trim wird der Historie des Laufs nie wieder zugewiesen.
+    expect(text).not.toMatch(/\b(agentMessages|messages) = trimWorkingHistory\(/)
   })
 })
 

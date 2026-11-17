@@ -138,6 +138,9 @@ export const MAX_SEND_MESSAGES = 380
  * of the ceiling. */
 const COUNT_BUDGET = MAX_SEND_MESSAGES - 3
 
+/** How many messages the count cap drops at a time (capMessageCount). */
+export const COUNT_DROP_BLOCK = 64
+
 /** How much of the pinned first user message survives compaction. Enough for
  * any real instruction; a pasted 200 KB file does not ride along forever. */
 const PINNED_TASK_MAX_CHARS = 8000
@@ -303,7 +306,13 @@ export function capMessageCount<T extends { role: string; content?: unknown }>(
   if (messages.length <= max) return messages
   const sys = messages[0]?.role === 'system' ? [messages[0]] : []
   const rest = sys.length ? messages.slice(1) : messages
-  const kept = rest.slice(-(max - sys.length))
+  // 3.1.1 (support case E8b): the oldest messages go in whole blocks counted
+  // from the start. "The newest 380" began one message later on every send,
+  // so a chat past the cap never sent the same beginning twice and nothing
+  // came out of the upstream cache.
+  const over = rest.length - (max - sys.length)
+  const drop = Math.min(rest.length, Math.ceil(over / COUNT_DROP_BLOCK) * COUNT_DROP_BLOCK)
+  const kept = rest.slice(drop)
   while (kept.length > 0 && isToolResultMessage(kept[0] as unknown as OllamaChatMessage)) {
     kept.shift()
   }
@@ -334,6 +343,76 @@ export const COMPACT_TARGET_RATIO = 0.7
  * One at a time would make a long run quadratic for no gain.
  */
 export const COMPACT_DROP_BLOCK = 16
+
+/**
+ * Where a history over the trigger is cut (3.1.1, support case E8b).
+ *
+ * The hysteresis above keeps the prefix still only while the array it is
+ * handed was cut the step before. Every conversation surface hands it the
+ * FULL history on every send, and so does an agent run at the start of each
+ * turn. Once the full history is over the trigger it is over it for good, so
+ * every send dropped down to the target again, counted from the newest
+ * message: the cut moved with every message that arrived, the prefix was new
+ * every time and the upstream cache never hit. Measured on a paid model: a
+ * step at about 4,000 credits instead of 150 to 400.
+ *
+ * So the cut may only sit on fixed marks, and the marks are counted from the
+ * START of the history: every `block` tokens of it is one. The cut is the
+ * first mark behind which the rest fits the budget. New messages at the end
+ * move no mark, so the cut stands until the rest has grown past the budget
+ * again, and then it moves one mark on, back down towards the target. In
+ * between every request starts with the request before it, byte for byte,
+ * with nothing remembered anywhere.
+ *
+ * A history that was never cut still passes whole up to the trigger, as
+ * before. Once it has been cut it lives between target and budget.
+ */
+export const STABLE_BLOCK_FLOOR = 64
+
+/**
+ * The distance between two marks: the room between target and budget,
+ * rounded DOWN to a coarse step (a quarter of the power of two below it).
+ * Rounded, because an agent's budget is calibrated against the backend's own
+ * count on every step and moves by a few tokens; marks that moved with it
+ * would be no marks at all.
+ */
+export function stableDropBlock(budgetTokens: number): number {
+  const span = Math.floor(Math.max(0, budgetTokens) * (1 - COMPACT_TARGET_RATIO))
+  if (span <= STABLE_BLOCK_FLOOR) return STABLE_BLOCK_FLOOR
+  let power = STABLE_BLOCK_FLOOR
+  while (power * 2 <= span) power *= 2
+  const step = power / 4
+  return Math.floor(span / step) * step
+}
+
+/**
+ * The first mark at which `fits(cut)` holds, as an index into `sizes`:
+ * everything before it is dropped. `sizes` are the messages' own sizes, in
+ * order. Never past `maxCut`; when no mark up to there fits, the last mark
+ * before it is the answer (still a fixed place), or `maxCut` without one.
+ * Nothing is cut when the whole history fits.
+ */
+export function stableCutIndex(
+  sizes: number[],
+  block: number,
+  maxCut: number,
+  fits: (cut: number) => boolean,
+): number {
+  if (fits(0)) return 0
+  const step = Math.max(1, Math.floor(block))
+  let before = 0
+  let lastMark = -1
+  for (let i = 1; i <= maxCut && i <= sizes.length; i++) {
+    const after = before + sizes[i - 1]
+    // Message i-1 carried the history over the next multiple of the block.
+    if (Math.floor(after / step) > Math.floor(before / step)) {
+      lastMark = i
+      if (fits(i)) return i
+    }
+    before = after
+  }
+  return lastMark >= 0 ? lastMark : Math.max(0, maxCut)
+}
 
 export interface CompactOptions {
   /** Wait for budget × 1.15, then drop to budget × 0.7. */
@@ -437,17 +516,37 @@ export function compactMessagesWithCount(
   // under the budget, and the notice alone pushed the payload past it.
   const noticeTokens = estimateTokens(opts.notice === 'chat' ? chatTrimNotice(999) : AGENT_NOTICE_SIZE_PROBE) + 8
   const suffixBudget = Math.max(0, budget - pinnedTokens - noticeTokens)
-  const kept: OllamaChatMessage[] = []
-  let used = 0
-  for (let i = capped.length - 1; i >= 0; i--) {
-    // Count bound first: it holds even where the token check would keep
-    // adding, otherwise a many-short-turns history fits every token budget
-    // and still trips the proxy's message-count cap.
-    if (kept.length >= COUNT_BUDGET) break
-    const t = estimateMessageTokens([capped[i]])
-    if (used + t > suffixBudget && kept.length >= KEEP_RECENT) break
-    kept.unshift(capped[i])
-    used += t
+  let kept: OllamaChatMessage[] = []
+  if (opts.hysteresis) {
+    // 3.1.1: the cut sits on a fixed mark counted from the start of the
+    // history (stableCutIndex above), not wherever the target falls counted
+    // from the newest message. The rest fills the room up to the budget, and
+    // one block further on it is back near the target.
+    const sizes = capped.map((m) => estimateMessageTokens([m]))
+    const restFrom: number[] = new Array(sizes.length + 1).fill(0)
+    for (let i = sizes.length - 1; i >= 0; i--) restFrom[i] = restFrom[i + 1] + sizes[i]
+    const room = Math.max(0, maxTokens - systemTokens - pinnedTokens - noticeTokens)
+    const maxCut = capped.length - KEEP_RECENT
+    const byTokens = stableCutIndex(sizes, stableDropBlock(maxTokens), maxCut, (at) => restFrom[at] <= room)
+    // A history of many short messages is over the message count long before
+    // it is over any token budget. Its marks are counted in messages, from
+    // the start as well, or the cut would fall on "the newest 377" again,
+    // one message further on every step (the shape of E8b).
+    const overCount = capped.length - COUNT_BUDGET
+    const byCount = overCount > 0 ? Math.ceil(overCount / COUNT_DROP_BLOCK) * COUNT_DROP_BLOCK : 0
+    kept = capped.slice(Math.min(maxCut, Math.max(byTokens, byCount)))
+  } else {
+    let used = 0
+    for (let i = capped.length - 1; i >= 0; i--) {
+      // Count bound first: it holds even where the token check would keep
+      // adding, otherwise a many-short-turns history fits every token budget
+      // and still trips the proxy's message-count cap.
+      if (kept.length >= COUNT_BUDGET) break
+      const t = estimateMessageTokens([capped[i]])
+      if (used + t > suffixBudget && kept.length >= KEEP_RECENT) break
+      kept.unshift(capped[i])
+      used += t
+    }
   }
 
   // Drop leading orphan tool results (their tool_call fell outside the window)
@@ -513,6 +612,23 @@ export function compactMessagesWithCount(
 const SHORTENED_TURN_FLOOR = 256
 
 /**
+ * What a shortened turn keeps when the same history is sent again and again
+ * (3.1.1, support case E8b): the largest rung of a fixed ladder that still
+ * fits, each rung half as long again as the one below.
+ *
+ * Cut to the token, the longest turn of a history that sits at its limit came
+ * out a little shorter on every send, and the longest turn is often the first
+ * one: the request changed right behind the system prompt and the upstream
+ * cache had nothing to hit. On a rung the turn goes out with the same bytes
+ * until the history has grown by the whole distance to the next rung down.
+ */
+export function steadyKeep(exactTokens: number): number {
+  let rung = SHORTENED_TURN_FLOOR
+  while (rung * 1.5 <= exactTokens) rung = Math.floor(rung * 1.5)
+  return rung
+}
+
+/**
  * Shorten the longest turns until the payload fits `maxTokens`, keeping the
  * head and the tail of each. Never the system prompt (index 0), and never the
  * message being answered: by default the last one, or whatever `isKept` names.
@@ -530,6 +646,7 @@ export function shortenLongTurns<T extends { role: string; content: string }>(
   messages: T[],
   maxTokens: number,
   isKept: (m: T, index: number) => boolean = (_m, i) => i === messages.length - 1,
+  opts: { steady?: boolean } = {},
 ): { messages: T[]; shortened: number } {
   const size = (m: T) => estimateMessageTokens([m as unknown as OllamaChatMessage])
   let total = estimateMessageTokens(messages as unknown as OllamaChatMessage[])
@@ -546,7 +663,8 @@ export function shortenLongTurns<T extends { role: string; content: string }>(
       if (t > largest) { largest = t; at = i }
     }
     if (at < 0) break
-    const keep = Math.max(SHORTENED_TURN_FLOOR, largest - (total - maxTokens) - 32)
+    const exact = Math.max(SHORTENED_TURN_FLOOR, largest - (total - maxTokens) - 32)
+    const keep = opts.steady ? steadyKeep(exact) : exact
     const text = out[at].content
     const chars = Math.max(200, Math.floor((text.length * keep) / largest) - 40)
     if (chars >= text.length) break

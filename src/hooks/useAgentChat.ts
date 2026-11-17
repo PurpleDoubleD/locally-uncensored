@@ -142,7 +142,7 @@ import { buildLoopRecheck, loopPassSaysDone } from '../lib/agent-commands'
 import { applyStoredCompaction } from '../lib/compact-summary'
 import { maybeAutoCompact } from '../lib/run-compact-command'
 import { autoCompactOn } from '../lib/compact-trigger'
-import { ContextFullError, fitToWindow } from '../lib/fit-to-window'
+import { ContextFullError, budgetBelowTheFit, fitToWindow } from '../lib/fit-to-window'
 import { TokenCalibration } from '../lib/token-calibration'
 import { compactRunMidway, newRunCompactState, runCompactionDue, MEMORY_FLUSH_NOTE } from '../lib/run-compact-midway'
 import { generateEmbeddings } from '../api/rag'
@@ -1954,7 +1954,10 @@ export function useAgentChat() {
         // In the model's own tokens: the estimate reads low on code and logs,
         // and a budget it measures has to be read that much smaller.
         const besideCatalog = budgetBesideTheCatalog(calib.budget(sendWindow), catalogTokens)
-        const sendBudget = personaNote ? Math.max(1, besideCatalog - noteTokens(personaNote)) : besideCatalog
+        // 3.1.1 (support case E8b): never so large that the last check below
+        // (fitToWindow) shortens turns before the trim has engaged.
+        const underTheFit = budgetBelowTheFit(besideCatalog, calib.budget(agentCtx), catalogTokens, decayOn)
+        const sendBudget = personaNote ? Math.max(1, underTheFit - noteTokens(personaNote)) : underTheFit
         let sendMessages: ChatMessage[] = agentMessages.slice()
         let trimmedReadKeys: ReadonlySet<string> = NO_TRIMMED_KEYS
         try {
@@ -1972,16 +1975,34 @@ export function useAgentChat() {
           // gets one step to keep durable facts with memory instead; the
           // compaction comes on the next step. Small models skip it: the step
           // costs them more than it brings.
+          // 3.1.1 (support case E8b): the trim's answer is this step's
+          // window and nothing more. agentMessages keeps the whole run, so the
+          // same history is cut at the same place in every step and again in
+          // the next turn, which starts from the stored conversation. Kept in
+          // agentMessages, the cut of a run and the cut of the turn after it
+          // were two different places. It measures what the builder below
+          // sends, the results that stay whole included. The summary just
+          // below is asked about this window, as it always was, not about
+          // the whole run: asked about the whole run it would be due on
+          // every step, each time a paid request of its own.
+          const windowOf = (all: ChatMessage[]) => trimWorkingHistory(all, sendBudget, {
+            enabled: decayOn,
+            hysteresis: decayOn,
+            keyOf: (m) => guardKeyOfResult.get(m as unknown as object),
+            keepWhole: neededAgain,
+          }).messages
+          let stepWindow = windowOf(agentMessages)
           if (fullToolRun && !memoryFlushDone && runCompactionDue({
-            messages: agentMessages, budgetTokens: sendBudget, modelWindow: agentCtx, activeModel, state: laufVerdichtung, decay: { enabled: decayOn },
+            messages: stepWindow, budgetTokens: sendBudget, modelWindow: agentCtx, activeModel, state: laufVerdichtung, decay: { enabled: decayOn },
           })) {
             memoryFlushDone = true
             agentMessages.push({ role: 'user', content: MEMORY_FLUSH_NOTE } as ChatMessage)
+            stepWindow = windowOf(agentMessages)
           }
           const verdichtet = memoryFlushDone && agentMessages[agentMessages.length - 1]?.content === MEMORY_FLUSH_NOTE
             ? { compacted: false as const, messages: agentMessages }
             : await compactRunMidway({
-            messages: agentMessages,
+            messages: stepWindow,
             budgetTokens: sendBudget,
             modelWindow: agentCtx,
             activeModel,
@@ -1992,9 +2013,12 @@ export function useAgentChat() {
             decay: { enabled: decayOn },
             onCompacted: convId ? (block) => addBlock(runState, convId, assistantMessage.id, block) : undefined,
           })
-          if (verdichtet.compacted) agentMessages = verdichtet.messages
-          agentMessages = trimWorkingHistory(agentMessages, sendBudget, { enabled: decayOn, hysteresis: decayOn }).messages
-          const built = buildRequestMessages(agentMessages, {
+          if (verdichtet.compacted) {
+            // The summary stands in for the older steps from here on.
+            agentMessages = verdichtet.messages
+            stepWindow = windowOf(agentMessages)
+          }
+          const built = buildRequestMessages(stepWindow, {
             budgetTokens: sendBudget,
             enabled: decayOn,
             hysteresis: decayOn,
@@ -2005,7 +2029,9 @@ export function useAgentChat() {
           // The last check (lib/fit-to-window.ts): against the model's own
           // window, never past it. Ollama would cut the start silently.
           {
-            const fit = fitToWindow(sendMessages, calib.budget(agentCtx), catalogTokens)
+            const fit = fitToWindow(sendMessages, calib.budget(agentCtx), catalogTokens, {
+              steady: isPaidProvider(providerId, sendsToALanBackend(providerId, activeModel)),
+            })
             if (!fit.fits) throw new ContextFullError(fit.tokens, agentCtx)
             sendMessages = fit.messages
             stepEstimate = fit.tokens

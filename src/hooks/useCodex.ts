@@ -10,7 +10,7 @@ import { useCodexStore } from '../stores/codexStore'
 import { useModelStore } from '../stores/modelStore'
 import { runCompactForConversation, compactOutcomeMessage, maybeAutoCompact } from '../lib/run-compact-command'
 import { autoCompactOn } from '../lib/compact-trigger'
-import { ContextFullError, fitToWindow } from '../lib/fit-to-window'
+import { ContextFullError, budgetBelowTheFit, fitToWindow } from '../lib/fit-to-window'
 import { TokenCalibration } from '../lib/token-calibration'
 import { compactRunMidway, newRunCompactState } from '../lib/run-compact-midway'
 import { applyStoredCompaction } from '../lib/compact-summary'
@@ -1478,8 +1478,22 @@ export function useCodex() {
           // are summarised by the run's own model instead of only dropped.
           // The copies it makes are not the run's own (marked just below
           // with the trim's), so runLog keeps every result complete.
+          // 3.1.1 (support case E8b): the trim's answer is this step's
+          // window and nothing more, and its budget stays below the last
+          // check further down. `messages` keeps the whole run, so the same
+          // history is cut at the same place in every step. The summary is
+          // asked about this window, as it always was. See the same lines
+          // in useAgentChat.ts.
+          const stepBudget = budgetBelowTheFit(sendWindow, calib.budget(numCtx), lastToolsEstimate, decayOn)
+          const windowOf = (all: ChatMessage[]) => trimWorkingHistory(all, stepBudget, {
+            enabled: decayOn,
+            hysteresis: decayOn,
+            keyOf: (m) => guardKeyOfResult.get(m as unknown as object),
+            keepWhole: neededAgain,
+          }).messages
+          let stepWindow = windowOf(messages)
           const verdichtet = await compactRunMidway({
-            messages,
+            messages: stepWindow,
             budgetTokens: sendWindow,
             modelWindow: numCtx,
             activeModel,
@@ -1490,11 +1504,14 @@ export function useCodex() {
             decay: { enabled: decayOn },
             onCompacted: addBlock,
           })
-          if (verdichtet.compacted) messages = verdichtet.messages
-          messages = trimWorkingHistory(messages, sendWindow, { enabled: decayOn, hysteresis: decayOn }).messages
+          if (verdichtet.compacted) {
+            messages = verdichtet.messages
+            stepWindow = windowOf(messages)
+          }
           for (const m of messages) if (!beforeTrim.has(m)) notRunOwn.add(m)
-          const built = buildRequestMessages(messages, {
-            budgetTokens: sendWindow,
+          for (const m of stepWindow) if (!beforeTrim.has(m)) notRunOwn.add(m)
+          const built = buildRequestMessages(stepWindow, {
+            budgetTokens: stepBudget,
             enabled: decayOn,
             hysteresis: decayOn,
             keyOf: (m) => guardKeyOfResult.get(m as unknown as object),
@@ -1554,7 +1571,9 @@ export function useCodex() {
         // cut the start silently; the outer catch says why nothing was sent.
         {
           // The catalogue is chosen further down; the last step's size stands in.
-          const fit = fitToWindow(sendMessages, calib.budget(numCtx), lastToolsEstimate)
+          const fit = fitToWindow(sendMessages, calib.budget(numCtx), lastToolsEstimate, {
+            steady: isPaidProvider(providerId, sendsToALanBackend(providerId, activeModel)),
+          })
           if (!fit.fits) throw new ContextFullError(fit.tokens, numCtx)
           sendMessages = fit.messages
           if (fit.shortened) stepPromptEstimate = Math.max(0, fit.tokens - lastToolsEstimate)

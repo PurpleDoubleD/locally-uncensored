@@ -8,20 +8,24 @@ A fix for the cost of long conversations on paid models, and a clear message
 for 3D with an older ComfyUI.
 
 ### Fixed
-- Long conversations on paid models (LU Cloud and your own API keys) cost
-  what they should again. Once a conversation was long enough to be
-  shortened, LU cut it at a different place on every message. The provider
-  could then never reuse what it had already read, and every step was charged
-  in full: in one measured case about ten times what it should have been.
-  LU now cuts on fixed marks counted from the start, so the part before the
-  cut stays the same and is read from the provider's cache. Agent and Code
-  runs keep the same cut from step to step.
-- To keep that cut steady, a conversation with a paid model now fills at
-  most about three quarters of the model's context window (0.765 of it)
-  instead of 0.8 before. Local models are not affected.
+- Long chats and long Agent or Code runs on LU Cloud and other paid providers
+  (your own API keys) keep the provider's cache discount. Once a conversation
+  was long enough to be trimmed (or had more than 380 messages), the app cut
+  it at a different place on every send, so nothing could be served from the
+  cache and a step cost about ten times what it should. The cut now stays in
+  place for many steps and moves in whole blocks. Applies to Chat, Group,
+  Compare, Agent and Code. Local models are not affected.
 - 3D in Create with a ComfyUI older than 0.42.4 says that ComfyUI needs an
   update and offers it, instead of stopping with an error from ComfyUI's
   RemeshMesh node.
+
+### Changed
+- A paid model whose send window is set as large as the model's own window
+  now sends at most 0.765 of that window (about 76 percent) instead of 0.8,
+  so the trim engages before the last size check has to shorten single
+  messages.
+- After a trim a request stays between 70 and 100 percent of the send budget
+  instead of between 70 and 115.
 
 ## [3.1.0] - 2026-11-16
 

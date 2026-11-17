@@ -26,6 +26,7 @@
 import { COMPACT_TRIGGER_RATIO, compactMessagesWithCount, estimateMessageTokens } from './context-compaction'
 import { ageOutImages } from './context-images'
 import { effectiveSendWindow, isPaidProvider } from './send-window'
+import { budgetBelowTheFit } from './fit-to-window'
 import { injectPersonaNote, noteTokens, type PersonaNote } from './persona-note'
 
 export interface ChatSendBudgetInput {
@@ -169,7 +170,10 @@ export function chatSendBudget(input: ChatSendBudgetInput): number | null {
     capEnabled: true,
     localBackend: input.localBackend,
   })
-  return window > 0 ? window : null
+  // 3.1.1: a paid conversation is trimmed with the hysteresis, and its trim
+  // has to engage before the last check (fitToWindow) starts to shorten
+  // turns to the token on every send. See budgetBelowTheFit.
+  return window > 0 ? budgetBelowTheFit(window, input.modelWindow) : null
 }
 
 /**
