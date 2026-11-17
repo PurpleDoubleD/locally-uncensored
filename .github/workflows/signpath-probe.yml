@@ -288,7 +288,7 @@ jobs:
 
       - name: Keep the signed installers as a workflow artifact
         if: steps.plan.outputs.run == 'true'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: windows-signpath-probe
           path: ${{ steps.signpath.outputs.dist }}
@@ -308,7 +308,7 @@ jobs:
 
       - name: Keep the state of the last stage
         if: steps.plan.outputs.run == 'true'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ${{ steps.state.outputs.name }}
           path: ${{ steps.state.outputs.dir }}

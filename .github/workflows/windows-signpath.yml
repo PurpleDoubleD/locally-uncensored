@@ -125,7 +125,7 @@ jobs:
       - name: Upload it again for this signing request
         id: upload-app
         if: steps.plan.outputs.run == 'true'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: windows-app-unsigned
           path: ${{ runner.temp }}/signpath/app-unsigned
@@ -169,7 +169,7 @@ jobs:
 
       - name: Keep the state of stage 1
         if: steps.plan.outputs.run == 'true'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ${{ steps.state.outputs.name }}
           path: ${{ steps.state.outputs.dir }}
@@ -374,7 +374,7 @@ jobs:
 
       - name: Keep the state of stage 3
         if: steps.plan.outputs.run == 'true'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ${{ steps.state.outputs.name }}
           path: ${{ steps.state.outputs.dir }}
