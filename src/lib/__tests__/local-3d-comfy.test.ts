@@ -37,7 +37,7 @@ vi.mock('../../api/dynamic-workflow', async (importOriginal) => ({
 import {
   comfyThreeDReady, runComfyThreeD, createThreeDProgress, threeDOutputFromHistory, threeDPhaseForNode,
 } from '../local-3d-comfy'
-import { buildThreeDWorkflow, THREE_D_NODES, THREE_D_CUTOUT_NODES, THREE_D_SAVE_NODE } from '../../api/dynamic-workflow'
+import { buildThreeDWorkflow, THREE_D_NODES, THREE_D_CUTOUT_NODES, THREE_D_SAVE_NODE, THREE_D_NEEDS_UPDATE, WorkflowUnavailableError } from '../../api/dynamic-workflow'
 import { TRELLIS2_FILES } from '../../api/model-bundles'
 
 const ALL = Object.fromEntries([...THREE_D_NODES, ...THREE_D_CUTOUT_NODES].map((n) => [n, {}]))
@@ -157,6 +157,13 @@ describe('runComfyThreeD', () => {
     await vi.waitFor(() => expect(wsListeners.length).toBe(1))
     wsListeners[0]({ type: 'execution_error', data: { prompt_id: 'p1', exception_message: 'CUDA out of memory', node_type: 'KSampler' } })
     await expect(run).rejects.toThrow('CUDA out of memory (KSampler)')
+  })
+
+  it('queues nothing on a ComfyUI too old for the graph, and says to update', async () => {
+    // A RemeshMesh without 'solid' (ComfyUI 0.36 to 0.41), found before the run.
+    buildLocalThreeDWorkflow.mockRejectedValue(new WorkflowUnavailableError(THREE_D_NEEDS_UPDATE, 'unavailable', undefined, { needsComfyUpdate: true }))
+    await expect(runComfyThreeD({ imageName: 'chair.png', detail: 'draft', cutout: false })).rejects.toThrow(THREE_D_NEEDS_UPDATE)
+    expect(submitWorkflow).not.toHaveBeenCalled()
   })
 
   it('a cancel takes only this prompt out of ComfyUI', async () => {

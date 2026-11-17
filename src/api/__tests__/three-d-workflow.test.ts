@@ -6,7 +6,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   buildThreeDWorkflow, THREE_D_DETAIL, THREE_D_NODES, THREE_D_CUTOUT_NODES, THREE_D_SAVE_NODE,
-  WorkflowUnavailableError, type ThreeDParams,
+  WorkflowUnavailableError, dynamicComboKeys, type ThreeDParams,
 } from '../dynamic-workflow'
 import { TRELLIS2_FILES } from '../model-bundles'
 import type { ComfyApiGraph } from '../../types/comfy-graph'
@@ -168,6 +168,49 @@ describe('buildThreeDWorkflow', () => {
     const noSave = { ...ALL }
     delete noSave.SaveGLB
     expect(() => build({}, noSave)).toThrow(/newer/)
+  })
+
+  // RemeshMesh's sign_mode as /object_info serves it (DynamicCombo.Input.as_dict,
+  // comfy_api/latest/_io.py). ComfyUI 0.36 to 0.41 offer udf and sdf only;
+  // 'solid' came with 0.42.0 (comfy_extras/nodes_mesh_postprocess.py).
+  const qef = { qef: ['BOOLEAN', { default: false }] }
+  const remesh = (keys: string[]) => ({
+    input: {
+      required: {
+        mesh: ['MESH', {}], resolution: ['INT', { default: 512 }],
+        sign_mode: ['COMFY_DYNAMICCOMBO_V3', {
+          display_name: 'sign_mode',
+          options: keys.map((key) => ({ key, inputs: { required: key === 'solid' ? { fill: ['FLOAT', { default: 20 }], ...qef } : qef } })),
+        }],
+      },
+    },
+  })
+
+  it('reads the choices of a DynamicCombo from /object_info, and says when it cannot', () => {
+    expect(dynamicComboKeys(remesh(['udf', 'sdf', 'solid']), 'sign_mode')).toEqual(['udf', 'sdf', 'solid'])
+    expect(dynamicComboKeys({ input: { optional: { sign_mode: [['udf', 'sdf']] } } }, 'sign_mode')).toEqual(['udf', 'sdf'])
+    for (const unknown of [undefined, {}, true, { input: {} }, { input: { required: { sign_mode: 'x' } } }, { input: { required: { sign_mode: ['COMFY_DYNAMICCOMBO_V3', {}] } } }]) {
+      expect(dynamicComboKeys(unknown, 'sign_mode')).toBeNull()
+    }
+  })
+
+  it('runs on a ComfyUI whose RemeshMesh offers solid (0.42 and newer)', () => {
+    const g = build({}, { ...ALL, RemeshMesh: remesh(['udf', 'sdf', 'solid']) })
+    expect(g['241'].inputs).toMatchObject({ sign_mode: 'solid', 'sign_mode.fill': 20, 'sign_mode.qef': false })
+  })
+
+  it('asks for an update, before the run, on a ComfyUI whose RemeshMesh has no solid (0.36 to 0.41)', () => {
+    // There 'solid' matches no option, ComfyUI drops sign_mode and the node
+    // fails with "missing 1 required positional argument: 'sign_mode'".
+    const old = { ...ALL, RemeshMesh: remesh(['udf', 'sdf']) }
+    expect(() => build({}, old)).toThrow(WorkflowUnavailableError)
+    expect(() => build({}, old)).toThrow(/ComfyUI 0\.42\.4 or newer\. Update ComfyUI in Settings\./)
+    try { build({}, old) } catch (e) { expect((e as WorkflowUnavailableError).needsComfyUpdate).toBe(true) }
+  })
+
+  it('keeps going where the entry cannot be read, as before', () => {
+    expect(build({}, { ...ALL, RemeshMesh: { input: { required: { sign_mode: ['COMFY_DYNAMICCOMBO_V3', {}] } } } })['241'].inputs)
+      .toMatchObject({ sign_mode: 'solid' })
   })
 
   it('refuses a cutout when the cutout nodes are missing', () => {
