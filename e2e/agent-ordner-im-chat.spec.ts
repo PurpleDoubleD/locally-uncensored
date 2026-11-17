@@ -42,6 +42,8 @@ async function turnOn(page: Page) {
   // Kein Dialog, und der Schalter ist sofort bedienbar.
   await expect(page.getByRole('dialog')).toHaveCount(0)
   await expect(page.getByText('Where should the agent work?')).toHaveCount(0)
+  // Noch nichts gewaehlt: die Plakette sagt das, statt schon "Sandbox" zu zeigen.
+  await expect(page.getByTestId('agent-workspace-pill')).toHaveText('Choose…')
 }
 
 async function send(page: Page, text: string) {

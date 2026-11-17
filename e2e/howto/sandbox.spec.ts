@@ -52,14 +52,12 @@ test('sandbox', async ({ page }) => {
     until: () => expect(card).toBeVisible({ timeout: 30_000 }),
   })
 
-  rec.scene('It asks where to work. Sandbox is a separate folder under ~/agent-workspace.')
+  rec.scene('It asks where to work. Sandbox is a separate folder under ~/agent-workspace, not a container.')
   await rec.cam(card, 1.5, 0.9)
   await rec.move(sandbox, { dur: 0.7, at: { fx: 0.8 } })
-  rec.hold(1.3)
-
-  rec.scene('It is not a container: commands still run on this computer.')
+  rec.hold(0.8)
   await rec.move(page.getByTestId('workspace-ask-boundary'), { dur: 0.6, at: { fx: 0.9, fy: 1.0, dy: 6 } })
-  rec.hold(1.5)
+  rec.hold(1.2)
   await rec.click(sandbox, {
     dur: 0.6, at: { fx: 0.3 }, after: 0.2,
     until: () => expect(page.getByRole('button', { name: 'Reject' }).first()).toBeVisible({ timeout: 30_000 }),
@@ -74,7 +72,7 @@ test('sandbox', async ({ page }) => {
   const pill = page.getByTestId('agent-workspace-pill')
   await rec.cam(pill, 1.6)
   await rec.move(pill, { dur: 0.6 })
-  rec.hold(1.1)
+  rec.hold(1.8)
 
   rec.scene('Tools switches a category such as Shell on or off for this chat only.')
   const tools = page.getByRole('button', { name: /^Tools/ })

@@ -27,15 +27,25 @@ beforeEach(() => {
 })
 
 describe('the pill shows where the agent really works', () => {
-  it('nothing chosen: it says Sandbox, and a click opens the folder choice', () => {
+  it('nothing chosen: it says Choose…, grey, not Sandbox, and a click opens the folder choice', () => {
+    // 3.1.2: the first message asks in the chat. Until then nothing is chosen,
+    // and a green "Sandbox" here read as a choice already made.
     render(<AgentWorkspaceBadge />)
     const pill = screen.getByTestId('agent-workspace-pill')
-    expect(pill.textContent).toContain('Sandbox')
+    expect(pill.textContent).toBe('Choose…')
+    expect(pill.textContent).not.toContain('Sandbox')
+    expect(pill.className).not.toMatch(/emerald|green/)
     // Nothing of this chat's own to leave, so no x.
     expect(screen.queryByTestId('agent-workspace-leave')).toBeNull()
     fireEvent.click(pill)
     const options = screen.getByTestId('agent-workspace-options')
     expect(within(options).getByText('Pick a folder…')).toBeTruthy()
+  })
+
+  it('once Sandbox is chosen it says Sandbox', () => {
+    useAgentModeStore.getState().setWorkspace(CONV, { kind: 'sandbox' })
+    render(<AgentWorkspaceBadge />)
+    expect(screen.getByTestId('agent-workspace-pill').textContent).toBe('Sandbox')
   })
 
   it('a remembered default folder is what the run uses, so that is what it shows', () => {

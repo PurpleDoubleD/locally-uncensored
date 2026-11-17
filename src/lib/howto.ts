@@ -255,11 +255,11 @@ export const HOWTO: Record<string, HowtoTopic> = {
     { from: 10.02, text: 'Under Settings, Voice & Remote, four permission switches start off and apply to every paired device.' },
   ], '/guide/remote-access-setup/'),
   sandbox: one('How the sandbox works', 'sandbox', [
-    { from: 0, text: 'Sandbox is a separate folder under ~/agent-workspace, guarded by the file tool path jail.' },
-    { from: 3.08, text: 'It is not a container: commands still run on this computer.' },
-    { from: 6.16, text: 'The badge next to Agent shows where it works; a click picks a real folder.' },
-    { from: 10.67, text: 'By default each shell command waits for Approve or Reject. Read it: it runs on this computer.' },
-    { from: 13.65, text: 'Tools switches a category such as Shell on or off for this chat only.' },
+    { from: 0, text: 'Turn Agent on and send your first message.' },
+    { from: 4.09, text: 'It asks where to work. Sandbox is a separate folder under ~/agent-workspace, not a container.' },
+    { from: 8.37, text: 'Each shell command waits for Approve or Reject. Read it: it runs on this computer.' },
+    { from: 11.35, text: 'The badge next to Agent shows where it works; a click picks a real folder.' },
+    { from: 13.75, text: 'Tools switches a category such as Shell on or off for this chat only.' },
   ], '/guide/agent-sandbox/'),
   'mac-hires': {
     title: 'How Image works on a Mac',
@@ -413,10 +413,11 @@ export const HOWTO: Record<string, HowtoTopic> = {
     { from: 11.76, text: "A value moved in this popup is the chat's own and wins over the persona." },
   ], '/guide/chat/'),
   agent: one('How Agent works', 'agent', [
-    { from: 0, text: 'Turn Agent on at the start of a chat. With your first message it asks where to work.' },
-    { from: 3.08, text: 'The workspace is a folder path jail, not a container or virtual machine.' },
-    { from: 6.56, text: 'Tools switches tool categories on or off for this chat only.' },
-    { from: 12.83, text: 'Before a command runs you approve or reject it; the arrow shows its arguments.' },
+    { from: 0, text: 'Turn Agent on at the start of a chat.' },
+    { from: 1.68, text: 'Tools switches tool categories on or off for this chat only.' },
+    { from: 4.94, text: 'With your first message it asks where to work.' },
+    { from: 9.35, text: 'Sandbox is a separate folder. Commands still run on this computer.' },
+    { from: 12.43, text: 'Before a command runs you approve or reject it; the arrow shows its arguments.' },
   ], '/guide/agent/'),
   '3d': {
     title: 'How 3D works',

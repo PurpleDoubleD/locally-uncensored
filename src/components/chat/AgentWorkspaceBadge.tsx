@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Folder, Shield, X } from 'lucide-react'
+import { Folder, FolderOpen, Shield, X } from 'lucide-react'
 import { useAgentModeStore } from '../../stores/agentModeStore'
 import { useChatStore } from '../../stores/chatStore'
 import { useSettingsStore } from '../../stores/settingsStore'
@@ -84,6 +84,35 @@ export function AgentWorkspaceBadge() {
   // arbeitet, in derselben Reihenfolge wie resolveWorkspace in useAgentChat
   // (dieser Chat, dann der Vorgabeordner, sonst die Sandbox), und ein Klick
   // oeffnet den Dialog mit "Pick a folder…".
+  //
+  // 3.1.2: ohne Wahl und ohne Vorgabeordner ist noch nichts entschieden. Die
+  // erste Nachricht fragt im Chat (WorkspaceAskCard), und bis dahin stand hier
+  // ein gruenes "Sandbox", das wie eine gefallene Wahl aussah. Jetzt steht
+  // dort grau "Choose…", ein Klick oeffnet den Dialog wie bisher.
+  if (!workspace && !defaultWorkspace) {
+    return (
+      <>
+        <button
+          onClick={() => setDialogOpen(true)}
+          data-testid="agent-workspace-pill"
+          data-undecided="true"
+          title="Not chosen yet. Your first message asks: sandbox or folder."
+          className="flex items-center gap-1 px-1.5 py-0.5 rounded border border-gray-200 dark:border-white/10 text-gray-500 dark:text-gray-400 text-[0.55rem] bg-transparent hover:bg-white/5 transition-colors"
+        >
+          <FolderOpen size={10} />
+          <span>Choose…</span>
+        </button>
+        {dialogOpen && (
+          <AgentWorkspaceDialog
+            open={true}
+            conversationId={activeId}
+            onChoose={handleChoose}
+            onClose={() => setDialogOpen(false)}
+          />
+        )}
+      </>
+    )
+  }
   const shown: AgentWorkspace = workspace ?? defaultWorkspace ?? { kind: 'sandbox' }
   const extras = shown.kind === 'folder' ? shown.extraPaths ?? [] : []
   const label =

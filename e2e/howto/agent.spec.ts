@@ -43,6 +43,7 @@ test('agent', async ({ page }) => {
   await rec.click(page.getByRole('button', { name: 'Video', exact: true }), { dur: 0.5, after: 0.9 })
   await page.keyboard.press('Escape')
 
+  rec.scene('With your first message it asks where to work.')
   await rec.click(composer, { dur: 0.5, at: { fx: 0.3 }, after: 0.05 })
   await rec.move(park, { dur: 0.3, real: false })
   await rec.type(composer, 'list what is in this folder', { cps: 30 })
@@ -50,9 +51,8 @@ test('agent', async ({ page }) => {
     dur: 0.45, after: 0.2,
     until: () => expect(card).toBeVisible({ timeout: 30_000 }),
   })
-  rec.scene('With your first message it asks where to work.')
   await rec.cam(card, 1.45, 0.9)
-  rec.hold(1.6)
+  rec.hold(1.4)
 
   rec.scene('Sandbox is a separate folder. Commands still run on this computer.')
   await rec.move(page.getByTestId('workspace-ask-boundary'), { dur: 0.6, at: { fx: 0.85, fy: 1.0, dy: 6 } })
