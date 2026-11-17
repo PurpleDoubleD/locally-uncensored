@@ -107,3 +107,13 @@ describe('how it works', () => {
     expect(settings).toContain('<HowtoRow topic="gguf-file" />')
   })
 })
+
+// 3.1.2: the agent and sandbox films were re-recorded for the question in the
+// chat. They get new file names, so 3.1.0 and 3.1.1, whose lines carry the old
+// timings, keep playing the old agent.mp4 and sandbox.mp4 from the server.
+describe('re-recorded films get a file name of their own', () => {
+  it('agent and sandbox load the 3.1.2 films, not the old ones', () => {
+    expect(howtoVideoUrl(HOWTO.agent.films[0])).toBe('https://lu-labs.ai/howto/agent-312.mp4')
+    expect(howtoVideoUrl(HOWTO.sandbox.films[0])).toBe('https://lu-labs.ai/howto/sandbox-312.mp4')
+  })
+})

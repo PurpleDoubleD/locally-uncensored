@@ -254,7 +254,9 @@ export const HOWTO: Record<string, HowtoTopic> = {
     { from: 7.04, text: 'The QR only carries the address; the passcode is typed on the phone.' },
     { from: 10.02, text: 'Under Settings, Voice & Remote, four permission switches start off and apply to every paired device.' },
   ], '/guide/remote-access-setup/'),
-  sandbox: one('How the sandbox works', 'sandbox', [
+  // 3.1.2: neu aufgenommen (der Agent fragt im Chat). Eigener Dateiname, damit
+  // 3.1.0 und 3.1.1 mit ihren Zeitmarken weiter den alten sandbox.mp4 zeigen.
+  sandbox: one('How the sandbox works', 'sandbox-312', [
     { from: 0, text: 'Turn Agent on and send your first message.' },
     { from: 4.09, text: 'It asks where to work. Sandbox is a separate folder under ~/agent-workspace, not a container.' },
     { from: 8.37, text: 'Each shell command waits for Approve or Reject. Read it: it runs on this computer.' },
@@ -412,7 +414,8 @@ export const HOWTO: Record<string, HowtoTopic> = {
     { from: 7.6, text: 'In the chat, the Sampling popup lists each speaker with the values that hold for it.' },
     { from: 11.76, text: "A value moved in this popup is the chat's own and wins over the persona." },
   ], '/guide/chat/'),
-  agent: one('How Agent works', 'agent', [
+  // 3.1.2: neu aufgenommen, eigener Dateiname wie bei sandbox-312.
+  agent: one('How Agent works', 'agent-312', [
     { from: 0, text: 'Turn Agent on at the start of a chat.' },
     { from: 1.68, text: 'Tools switches tool categories on or off for this chat only.' },
     { from: 4.94, text: 'With your first message it asks where to work.' },
