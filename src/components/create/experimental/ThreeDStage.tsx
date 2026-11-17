@@ -23,7 +23,7 @@ export const SETUP_TEXT = {
   macTitle: '3D on this Mac needs a one-time download',
   macBody: 'This sets up the 3D engine and the TripoSR model, about 1.7 GB. It turns one picture into a 3D model on this Mac. Local 3D is never filtered.',
   pcTitle: 'Local 3D needs a one-time download',
-  pcBody: 'This sets up ComfyUI itself if it is missing, plus the TRELLIS.2 model files, about 9 GB. Local 3D is never filtered.',
+  pcBody: 'This sets up ComfyUI itself if it is missing, plus the TRELLIS.2 model files, about 9 GB. It needs a graphics card with 12 GB or more. Local 3D is never filtered.',
   sf3dTitle: 'Stable Fast 3D needs a one-time download',
   sf3dBody: 'This sets up its own 3D engine and the Stable Fast 3D model, about 4 GB. It turns one picture into a 3D model with a painted texture, on this Mac.',
   licenseLink: 'Open the model page',
