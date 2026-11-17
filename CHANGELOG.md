@@ -2,6 +2,27 @@
 
 All notable changes to Locally Uncensored are documented here.
 
+## [3.1.1] - 2026-11-17
+
+A fix for the cost of long conversations on paid models, and a clear message
+for 3D with an older ComfyUI.
+
+### Fixed
+- Long conversations on paid models (LU Cloud and your own API keys) cost
+  what they should again. Once a conversation was long enough to be
+  shortened, LU cut it at a different place on every message. The provider
+  could then never reuse what it had already read, and every step was charged
+  in full: in one measured case about ten times what it should have been.
+  LU now cuts on fixed marks counted from the start, so the part before the
+  cut stays the same and is read from the provider's cache. Agent and Code
+  runs keep the same cut from step to step.
+- To keep that cut steady, a conversation with a paid model now fills at
+  most about three quarters of the model's context window (0.765 of it)
+  instead of 0.8 before. Local models are not affected.
+- 3D in Create with a ComfyUI older than 0.42.4 says that ComfyUI needs an
+  update and offers it, instead of stopping with an error from ComfyUI's
+  RemeshMesh node.
+
 ## [3.1.0] - 2026-11-16
 
 LU learns to run itself from the chat and to do tasks on a schedule, the

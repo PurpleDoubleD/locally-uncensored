@@ -47,25 +47,35 @@ function note(version: string, headline: string, items: readonly NoteItem[]): Mo
   }
 }
 
+// 3.1.0 (N2, 08.11.2026): what of CHANGELOG [3.1.0] exists on the phone.
+const ITEMS_310: readonly NoteItem[] = [
+  {
+    text: 'In a chat with your computer, hold the microphone to speak, or tap it for hands free. Your computer writes down what you say and the answer is read aloud.',
+    needs: 'remoteDesktop',
+  },
+  'The prompt has one row under the field with the settings button, Attach and Send.',
+  'Settings, Backup and import has "Restore chats from the automatic backup". It brings back chats the backup on this phone holds that are not in your list, and the chat list shows a note when there are any.',
+  'A chat you deleted on this phone is not offered back.',
+  'When the chats on this phone cannot be read at start, they are restored from the backup.',
+  'The gallery keeps every picture, not only the newest 200.',
+  'The gallery on this phone has no hide or tag buttons.',
+  {
+    text: 'In a chat of your computer, a question only the computer shows (open an unknown web address, change a setting, install a workflow) no longer keeps this phone waiting. The AI asks you for the link, or to do it at the computer.',
+    needs: 'remoteDesktop',
+  },
+  'Settings, Account says that your account keeps credits and memories, not chats.',
+]
+
 export const MOBILE_RELEASE_NOTES: readonly MobileReleaseNote[] = [
-  // 3.1.0 (N2, 08.11.2026): what of CHANGELOG [3.1.0] exists on the phone.
-  note('3.1.0', 'Talk to your computer, and your chats and your gallery.', [
+  // 3.1.1 (17.11.2026, hotfix): who comes from 3.0.10 never saw the 3.1.0 page, so it follows the fix.
+  note('3.1.1', 'Long chats on LU Cloud cost what they should again.', [
     {
-      text: 'In a chat with your computer, hold the microphone to speak, or tap it for hands free. Your computer writes down what you say and the answer is read aloud.',
-      needs: 'remoteDesktop',
+      text: 'Once a long chat had to be shortened, the app cut it at a different place on every message, so LU Cloud could not reuse what it had already read and every message was charged in full. Now the cut stays in place and the earlier part is reused.',
+      unpriced: 'Once a long chat had to be shortened, the app cut it at a different place on every message, so LU Cloud could not reuse what it had already read. Now the cut stays in place and the earlier part is reused.',
     },
-    'The prompt has one row under the field with the settings button, Attach and Send.',
-    'Settings, Backup and import has "Restore chats from the automatic backup". It brings back chats the backup on this phone holds that are not in your list, and the chat list shows a note when there are any.',
-    'A chat you deleted on this phone is not offered back.',
-    'When the chats on this phone cannot be read at start, they are restored from the backup.',
-    'The gallery keeps every picture, not only the newest 200.',
-    'The gallery on this phone has no hide or tag buttons.',
-    {
-      text: 'In a chat of your computer, a question only the computer shows (open an unknown web address, change a setting, install a workflow) no longer keeps this phone waiting. The AI asks you for the link, or to do it at the computer.',
-      needs: 'remoteDesktop',
-    },
-    'Settings, Account says that your account keeps credits and memories, not chats.',
+    ...ITEMS_310,
   ]),
+  note('3.1.0', 'Talk to your computer, and your chats and your gallery.', ITEMS_310),
   // 3.0.10 is the next phone app after 3.0.7 (3.0.8 and 3.0.9 shipped none): what came since then.
   note('3.0.10', 'What changed since 3.0.7.', [
     {

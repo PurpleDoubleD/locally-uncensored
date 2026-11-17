@@ -178,487 +178,507 @@ const NOTE_309: ReleaseNote = {
   ],
 }
 
+// 3.1.0 (N2, 08.11.2026, Stand integ/310 2bed36e0b). Aus CHANGELOG.md [3.1.0];
+// vorn die fuenf Dinge, die ein Nutzer zuerst merkt, darunter der Rest und
+// die bekannten Grenzen.
+const NOTE_310: ReleaseNote = {
+  version: '3.1.0',
+  headline: 'A rebuilt coding agent, tasks on a schedule, 3D in Create and one place for your characters.',
+  lines: [
+    {
+      title: 'The coding agent is rebuilt.',
+      detail: 'Review changes hunk by hunk, steer a running task, rewind files and chat to before any message, and allow a command for one folder from the approval card.',
+    },
+    {
+      title: 'Watchers do tasks on a schedule.',
+      detail: 'Ask for "every morning at 8, sum up the news" and confirm the card. LU runs it at that time, also with its window closed to the tray, and tells you when it ran.',
+    },
+    {
+      title: '3D in Create.',
+      detail: 'Make a 3D model from a prompt, a picture or a video, turn it in the viewer and download it as GLB, OBJ, STL or USDZ. On your Mac, on Windows and Linux through ComfyUI, or on LU Cloud.',
+    },
+    {
+      title: 'One place for your characters.',
+      detail: 'Pick, train or upload a character, then make pictures with it, copy a motion, let it talk or swap it into a video.',
+    },
+    {
+      title: 'LU runs itself from the Agent chat.',
+      detail: 'Ask for a lighter theme, a different model or a ComfyUI restart, confirm the card, and undo it any time under Settings, Agent.',
+    },
+    {
+      title: 'Web search reads the pages for you.',
+      detail: 'One step searches, reads the best pages and answers with numbered sources under the reply. No setup needed. A web address the AI made up waits for your OK.',
+    },
+    {
+      title: 'The chat gets its own look.',
+      detail: 'Colours, font, width, bubbles or document layout, and a background picture per chat or persona. Zoom the chat text with Ctrl or Cmd and the mouse wheel.',
+    },
+    {
+      title: 'The gallery keeps every picture.',
+      detail: 'The limit of 200 entries is gone. Hide pictures, tag them and filter by tag, and restore what ComfyUI saved from the output folder.',
+    },
+    {
+      title: 'Agent and Code work better with local models.',
+      detail: 'A short tool list with tool search for models up to 35B, a memory tool, skills you approve, search in earlier chats, and secret files are refused in every mode.',
+    },
+  ],
+  details: [
+    {
+      title: 'Coding agent',
+      items: [
+        {
+          title: 'Tool steps in plain words.',
+          detail: 'Each step says what it did, with the lines a change added and removed and the exit code of a command. A running step counts its seconds.',
+        },
+        {
+          title: 'The plan stays in view.',
+          detail: 'It is pinned under the newest message and shows its progress; a finished plan folds into one row.',
+        },
+        {
+          title: 'See what fills the window.',
+          detail: 'A context list shows what takes up the model\'s window, and the cached share of a prompt shows under an answer.',
+        },
+        {
+          title: 'Mention files with @.',
+          detail: 'In Code, in Agent and in a chat with a folder.',
+        },
+        {
+          title: 'Long commands keep running.',
+          detail: 'A shell command that runs past its time limit carries on as a background task.',
+        },
+        {
+          title: 'MCP servers by URL.',
+          detail: 'Add a Streamable HTTP server by its address and see a status per server.',
+        },
+        {
+          title: 'A credit brake for LU Cloud runs.',
+          detail: 'A task tells you at half its limit and pauses at it, and all agent runs together pause after a set amount per hour. Both limits are in Settings, Agent, and the agent cannot change them.',
+        },
+        {
+          title: 'Agents keep to their task.',
+          detail: 'They stay inside their working folder, end a search that finds nothing with an honest answer, compact a full context instead of stopping without a word, and keep working while LU\'s window is hidden.',
+        },
+      ],
+    },
+    {
+      title: 'Watchers',
+      items: [
+        {
+          title: 'A watcher does only what its chat allows.',
+          detail: 'Anything that would need a question is refused, and a watcher cannot change LU\'s settings or make more watchers. Pause, resume or delete it in the watcher row of its chat.',
+        },
+      ],
+    },
+    {
+      title: 'Create, 3D and characters',
+      items: [
+        {
+          title: '3D on your own computer.',
+          detail: 'On a Mac TripoSR and Stable Fast 3D (with your Hugging Face token), on Windows and Linux TRELLIS.2 through ComfyUI. With Blender installed, LU opens a model in Blender or saves it as .blend or FBX.',
+        },
+        {
+          title: 'From a video, only still frames leave your computer.',
+          detail: 'You pick the frames; the video stays where it is.',
+        },
+        {
+          title: 'Characters stand on a stage.',
+          detail: 'One tab per character, its own photos beside it, and Image, Swap, Motion and Talk in one bar. New character is one page; a dropped LoRA becomes a character, and you can rename one.',
+        },
+        {
+          title: 'Swap Character comes to LU Cloud step by step.',
+          detail: 'Until it is switched on for your account, the Swap action says so.',
+        },
+        {
+          title: 'LU Cloud follows the web catalogue.',
+          detail: 'Among the models: FLUX 3 Klein, GPT Image 2, Nano Banana Pro, Midjourney and Wan 3.0.',
+        },
+        {
+          title: 'Images per run and Batch size are two settings.',
+          detail: 'LU makes the pictures in batches one after another, so a small graphics card is not handed all of them at once, and a missed completion message no longer holds the next batch.',
+        },
+      ],
+    },
+    {
+      title: 'LU Cloud',
+      items: [
+        {
+          title: 'A credit pack next to the subscription.',
+          detail: 'The sign-up window shows both side by side, "Already bought? Sign in" sits at the top, and LU opens again after the checkout.',
+        },
+        {
+          title: 'Ways into LU Cloud are counted anonymously.',
+          detail: 'A click on a model, a plan, a pack or the sign in counts like the Cloud switch already did, never which model. Settings, Privacy says so.',
+        },
+      ],
+    },
+    {
+      title: 'Voice',
+      items: [
+        {
+          title: 'Dictate with Parakeet.',
+          detail: 'Parakeet TDT 0.6B v3 is a fourth choice in Settings, Voice (GitHub #233). LU downloads and checks it once and runs it on your computer without Python.',
+        },
+        {
+          title: 'See that the microphone hears you.',
+          detail: 'A live trace under the prompt moves with your voice, shows the time, and says "No sound from mic" after three silent seconds.',
+        },
+      ],
+    },
+    {
+      title: 'Agent and chat',
+      items: [
+        {
+          title: 'Agent and Code read AGENTS.md and remember facts.',
+          detail: 'They keep facts with a memory tool, find things in earlier chats, and use skills you approve in Settings.',
+        },
+        {
+          title: 'Better tool calls with local models.',
+          detail: 'Qwen\'s XML tool calls are understood, the Code tab plans multi-step tasks, the loop guard warns before it stops a run, and a batch with a shell command runs in order.',
+        },
+        {
+          title: 'Dangerous commands and secret files are refused.',
+          detail: 'Dangerous shell commands and any access to SSH keys, tokens, .env files or browser logins are refused in every mode, with a visible notice.',
+        },
+        {
+          title: 'ComfyUI workflows from the chat (Windows, Linux).',
+          detail: 'Agent and Code find a workflow (your own, ComfyUI\'s templates, CivitAI with your key, GitHub, or a link you send), check it with a traffic light and install it after you confirm. Node packs come only from LU\'s own pinned list.',
+        },
+        {
+          title: 'Neurons is back as a plugin.',
+          detail: 'Turn it on under Plugins in Chat, Agent or Code: a window with ready-made sliders, your own sliders from examples and a before and after. Tools keep working.',
+        },
+        {
+          title: 'Every plugin has its switch.',
+          detail: 'Create, REA, Neurons, Caveman Mode, Persona and Group chat each sit in one row with a switch; turned on, the settings open under it. What you had on stays on.',
+        },
+        {
+          title: 'A clearer Neurons introduction.',
+          detail: 'New drawings show how a slider changes the answer.',
+        },
+        {
+          title: 'DeepSeek R1 answers a plain hi.',
+          detail: 'R1 and its distills get no system message, as their makers advise. LU puts a persona, the agent role and tools into the first message instead, so the model no longer puzzles over LU\'s rules.',
+        },
+        {
+          title: 'Chat tools work in any language.',
+          detail: 'They used to reach only messages in English and German (GitHub #224).',
+        },
+        {
+          title: 'The agent reads its input pictures through LU.',
+          detail: 'Edits, reference pictures and start images no longer fail with "Failed to fetch" on Qwen-Image 2.1 and MiniMax H3.',
+        },
+        {
+          title: 'Reasoning effort fits the chat template.',
+          detail: 'A template that only knows low, medium and xhigh gets xhigh for High and Max, instead of refusing every message.',
+        },
+        {
+          title: 'The workspace dialog can change the primary folder.',
+          detail: 'In Voice and agent chats you can change the primary folder, make an extra folder the primary, or remove the primary (GitHub #223).',
+        },
+        {
+          title: 'A chat you deleted is not offered back.',
+          detail: 'The restore note and the Restore button leave out chats you deleted on purpose. A backup file you pick by hand still brings everything back.',
+        },
+        {
+          title: 'A Loop guard switch.',
+          detail: 'Settings, Agent Permissions. It is on by default.',
+        },
+        {
+          title: 'A looping agent stops, and a cost brake guards paid runs.',
+          detail: 'A run stops when the model keeps sending nearly identical tool calls without a word. A paid run ends after 2M input tokens, with a notice on any single step over 64k.',
+        },
+        {
+          title: 'Voice speaks as the persona of your chat.',
+          detail: 'A voice session started from a chat uses that chat\'s persona.',
+        },
+        {
+          title: 'Vision models get their image part back.',
+          detail: 'When the LU Engine runs a vision model without its image part, LU reloads it before it sends a picture, and names the real reason if that fails.',
+        },
+        {
+          title: 'Set the context window of an API model.',
+          detail: 'When the server does not report one, set it from the context button. LU shows where the number comes from.',
+        },
+      ],
+    },
+    {
+      title: 'Web',
+      items: [
+        {
+          title: 'The LU browser (Windows and macOS).',
+          detail: 'The agent can open and read pages in a window next to LU while you watch, and you can take over at any time. It only reads; it never types, logs in or downloads.',
+        },
+        {
+          title: 'Page text is data.',
+          detail: 'Text from a web page is never taken as an instruction, and a web address the AI made up waits for your OK (Settings, Search).',
+        },
+      ],
+    },
+    {
+      title: 'Chat look',
+      items: [
+        {
+          title: 'Colours that stay readable.',
+          detail: 'Your messages, replies, "quotes" and *actions* get their own colours, readable in light and dark mode. Advanced users can add their own CSS, which cannot load anything from the web.',
+        },
+        {
+          title: 'Zoom the chat text.',
+          detail: 'Ctrl or Cmd with the mouse wheel, or pinch, in Chat, Agent and Code. The size is remembered.',
+        },
+        {
+          title: 'Read and edit a memory in place.',
+          detail: 'The memory quick menu opens a memory in full and lets you edit it.',
+        },
+        {
+          title: 'Max memories injected brings that many memories.',
+          detail: 'The memory block was still cut short, so on a large model only a few of them arrived. With the setting on, it may now use up to a tenth of the model\'s context window (GitHub #238).',
+        },
+      ],
+    },
+    {
+      title: 'Models',
+      items: [
+        {
+          title: 'Filter Get new by what a model is for.',
+          detail: 'Agents, vision, coding, edit, music, lip sync and more.',
+        },
+        {
+          title: 'Uninstall a model with one click.',
+          detail: 'LU first shows every file and the space it frees, and keeps files another model still needs.',
+        },
+        {
+          title: 'Pick the version and file you want.',
+          detail: 'From CivitAI and Hugging Face (fp16, fp8, quants) instead of always the newest, with the full CivitAI description.',
+        },
+        {
+          title: 'LoRAs get names and notes.',
+          detail: 'Rename, add notes, hide from the LoRA stack, show in folder.',
+        },
+        {
+          title: 'Pages stay where you left them.',
+          detail: 'Models and Settings stay as they were when you switch to Chat or Create and back.',
+        },
+        {
+          title: 'Search models by file name.',
+          detail: 'Get new and Installed find a model by its file name too.',
+        },
+        {
+          title: 'Right-click menus for models and downloads.',
+          detail: 'LoRAs, finished downloads and image and video models can be renamed, shown in their folder or deleted with a confirmation. A text field gets Cut, Copy, Paste and Select all.',
+        },
+        {
+          title: 'Unused models unload on every engine.',
+          detail: 'The unload time under Settings, AI Backends, Unused models applies to Ollama and LM Studio too, and Unload all frees every engine (GitHub #235).',
+        },
+        {
+          title: 'MiniMax and Magnitude presets.',
+          detail: 'MiniMax as a provider (GitHub PR #203), Magnitude on your own computer (GitHub #214).',
+        },
+        {
+          title: 'MOSS Image runs the workflow you assign.',
+          detail: 'It is recognised as an image model, and a workflow assigned to a model LU does not know is used (GitHub #192).',
+        },
+        {
+          title: 'Downloads land in the right folder.',
+          detail: 'A model lands in the folder its download names (GitHub #234), a check no longer creates empty folders (GitHub PR #218), and Juggernaut XL V9 is checked by size and checksum (GitHub PR #229).',
+        },
+        {
+          title: 'MiniMax H3 Reference to download.',
+          detail: 'Video from up to nine pictures of who or what is in the clip, with sound. With MiniMax H3 already installed, only the 19.5 GB model file is fetched.',
+        },
+      ],
+    },
+    {
+      title: 'Create and gallery',
+      items: [
+        {
+          title: 'One big model across two cards.',
+          detail: 'Settings, Hardware: the diffusion model stays on your main card and the text encoder and VAE move to the second one. NVIDIA only.',
+        },
+        {
+          title: 'Edit strength below 1.00 changes the picture again.',
+          detail: 'On Qwen-Image 2.1 and Qwen-Image-Edit the strength steers between the edit and no edit inside the sampler. A lighter edit takes longer per step.',
+        },
+        {
+          title: 'Enhance takes any size on local ComfyUI.',
+          detail: 'Any factor from 1x to 8x, or a long side in pixels, and a choice of upscale model.',
+        },
+        {
+          title: 'Start ComfyUI when LU starts, right on the Start ComfyUI card.',
+          detail: 'It is the same setting as the one in Settings.',
+        },
+        {
+          title: 'Install a separate ComfyUI.',
+          detail: 'Next to one LU already found, from Settings or the setup. The path field says that only Connect applies a typed path.',
+        },
+        {
+          title: 'Mac image models keep going past 15 minutes.',
+          detail: 'A render runs as long as it keeps making steps. A stuck one is reported with the step it stopped at, and the limit is the Image timeout in Settings.',
+        },
+        {
+          title: 'Imported workflows use your LoRAs.',
+          detail: 'The LoRAs picked in Create go into an imported ComfyUI workflow. If its loader does not fit the model, Create and the chat image tool say so.',
+        },
+        {
+          title: 'The Edit mask stays.',
+          detail: 'A painted mask is still there when you open the mask editor again, and it shows on the picture before you edit.',
+        },
+        {
+          title: 'MiniMax H3 Image is an image model.',
+          detail: 'It is listed with the image models, not the video models. Run it with the official ComfyUI template imported under Workflows.',
+        },
+        {
+          title: 'Qwen-Image 2.1 Edit in the size you want.',
+          detail: 'Pick a size and aspect ratio; the picture is cropped from its centre to fit.',
+        },
+        {
+          title: 'Workflow parameter lists get a search.',
+          detail: 'The lists under Workflow parameters can be searched and are readable in the dark theme.',
+        },
+        {
+          title: 'The video preview says what it shows.',
+          detail: 'It says it is a still of the first frame, and says so when ComfyUI sends no preview at all.',
+        },
+        {
+          title: 'ComfyUI from Comfy Desktop finds its own model folders.',
+          detail: 'LU finds the model folders of a ComfyUI installed with Comfy Desktop (GitHub #196).',
+        },
+        {
+          title: 'The chat image tool runs the model\'s workflow.',
+          detail: 'The chat image tool runs the workflow assigned to the model (GitHub #192).',
+        },
+        {
+          title: 'No "video generated" after a retry that never ran.',
+          detail: 'A video retry that never ran no longer reports "video generated".',
+        },
+        {
+          title: 'The negative prompt no longer trips the content filter.',
+          detail: 'A harmless prompt with words like "nsfw" kept out in the negative prompt is no longer refused (GitHub #231). The filter now also checks agent videos with a character before anything renders, and jobs sent from your phone. The Mac image engine never blacks out a picture.',
+        },
+        {
+          title: 'Chroma1-HD loads again on the Mac.',
+          detail: 'No more "tiktoken is required", and the image engine updates itself at start when it is out of date.',
+        },
+      ],
+    },
+    {
+      title: 'Local API and system',
+      items: [
+        {
+          title: 'SillyTavern sees LU Engine models again.',
+          detail: 'All installed LU Engine models are in /v1/models, and a request for a model that is not loaded loads it first. A short guide is in Settings, Local API.',
+        },
+        {
+          title: 'Quitting LU stops the LU Engine.',
+          detail: 'A kill, Ctrl+C or a service stop no longer leaves the engine running on macOS and Linux.',
+        },
+        {
+          title: 'LU says why the LU Engine stopped.',
+          detail: 'When the engine stops on its own, LU logs its exit code and last output lines and tells you what happened, for example that the graphics card ran out of memory.',
+        },
+        {
+          title: 'Uninstalling on Windows leaves nothing behind.',
+          detail: 'The uninstaller also removes the LU Engine\'s libraries and leftovers, and the program folder with them.',
+        },
+        {
+          title: 'Linux finds the graphics card without pciutils.',
+          detail: 'On Distrobox, Toolbox and minimal systems LU finds AMD, NVIDIA and Intel cards through the kernel, so ComfyUI gets the GPU build of PyTorch.',
+        },
+        {
+          title: 'Linux keeps keys in the system keyring.',
+          detail: 'The Hugging Face token, provider keys and the LU Cloud session go to GNOME Keyring, KWallet or KeePassXC, or a file only your user can read (#226, thanks @cylon58).',
+        },
+        {
+          title: 'Smaller fixes.',
+          detail: 'No gvfs warnings from the Linux AppImage, dialogs are no longer see-through in the light theme, and how-it-works videos open large.',
+        },
+        {
+          title: 'REA installs the dependencies LU checked.',
+          detail: 'The agent plugin installs its dependencies as they were when LU checked the package, and npm warnings stay out of the server log.',
+        },
+      ],
+    },
+    {
+      title: 'Phone',
+      items: [
+        {
+          title: 'Talk to your computer from the phone.',
+          detail: 'Hold the microphone in a chat with your computer to speak, or tap it for hands free. Your computer writes down what you say and the answer is read aloud (GitHub #212).',
+        },
+        {
+          title: 'A calmer prompt and 3D on the phone.',
+          detail: 'One row under the field with the settings button, Attach and Send, the price on the Create button, and 3D from LU Cloud.',
+        },
+        {
+          title: 'The Android app gets the chat rescue the desktop has.',
+          detail: 'Settings, Backup and import, Restore chats from the automatic backup brings back chats the backup holds that are not in your list, and the chat list shows a note when there are any. Chats you deleted on the phone are not offered back.',
+        },
+      ],
+    },
+    {
+      title: 'Known limits',
+      items: [
+        {
+          title: 'Two cards are tested without a two-card machine.',
+          detail: 'We tested with simulated cards. A diffusion model bigger than the main card still partly sits in system memory. Feedback from two-card setups is welcome.',
+        },
+        {
+          title: 'CivitAI workflows need your key.',
+          detail: 'Finding workflows on CivitAI from the chat needs your CivitAI key.',
+        },
+        {
+          title: 'Your own ComfyUI workflows are for Windows and Linux.',
+          detail: 'On the Mac pictures and video run on the MLX engine, so the workflow tools do not apply there.',
+        },
+        {
+          title: 'Strong Neurons settings can derail a model.',
+          detail: 'Very strong slider settings can make a model ignore its task; around half strength keeps tools and answers on track.',
+        },
+        {
+          title: 'Edit strength on the Mac works the old way.',
+          detail: 'The Mac image engine (mflux) still takes Edit strength its old way.',
+        },
+        {
+          title: 'Enhance on the Mac and on LU Cloud keeps its sizes.',
+          detail: 'Enhance on the Mac stays at 2x and 4x, LU Cloud at 2K, 4K and 8K.',
+        },
+        {
+          title: 'Watchers run while LU runs.',
+          detail: 'After LU was quit, a missed time is not caught up.',
+        },
+        {
+          title: '3D depends on your card and your account.',
+          detail: 'TRELLIS.2 asks for a graphics card with 12 GB or more. LU Cloud 3D models and Swap Character depend on what LU Cloud has switched on for your account.',
+        },
+        {
+          title: 'No hide or tag buttons in the phone gallery.',
+          detail: 'Pictures are hidden and tagged in the desktop app.',
+        },
+      ],
+    },
+  ],
+}
+
 export const RELEASE_NOTES: ReleaseNote[] = [
-  // 3.1.0 (N2, 08.11.2026, Stand integ/310 2bed36e0b). Aus CHANGELOG.md [3.1.0];
-  // vorn die fuenf Dinge, die ein Nutzer zuerst merkt, darunter der Rest und
-  // die bekannten Grenzen.
+  // 3.1.1 (17.11.2026, Hotfix Prompt-Cache, I310). Wer von 3.0.10 kommt, hat
+  // 3.1.0 nie gesehen (releaseNotesStore zeigt nur die laufende Version),
+  // darum steht hier das Blatt von 3.1.0 mit dem Hotfix als erster Zeile.
   {
-    version: '3.1.0',
-    headline: 'A rebuilt coding agent, tasks on a schedule, 3D in Create and one place for your characters.',
+    ...NOTE_310,
+    version: '3.1.1',
     lines: [
       {
-        title: 'The coding agent is rebuilt.',
-        detail: 'Review changes hunk by hunk, steer a running task, rewind files and chat to before any message, and allow a command for one folder from the approval card.',
+        title: 'Long conversations on paid models cost what they should again.',
+        detail: 'Once a conversation was long enough to be shortened, LU cut it at a different place on every message, so the provider could not reuse what it had already read and every step was charged in full. Now the cut stays at the same place, and the part before it is reused. To keep that cut steady, LU fills a little less of a paid model\'s context window than before.',
       },
       {
-        title: 'Watchers do tasks on a schedule.',
-        detail: 'Ask for "every morning at 8, sum up the news" and confirm the card. LU runs it at that time, also with its window closed to the tray, and tells you when it ran.',
+        title: 'An older ComfyUI offers its update for 3D.',
+        detail: 'A 3D model that needs a newer ComfyUI now says so and offers the update, instead of stopping with an error from ComfyUI.',
       },
-      {
-        title: '3D in Create.',
-        detail: 'Make a 3D model from a prompt, a picture or a video, turn it in the viewer and download it as GLB, OBJ, STL or USDZ. On your Mac, on Windows and Linux through ComfyUI, or on LU Cloud.',
-      },
-      {
-        title: 'One place for your characters.',
-        detail: 'Pick, train or upload a character, then make pictures with it, copy a motion, let it talk or swap it into a video.',
-      },
-      {
-        title: 'LU runs itself from the Agent chat.',
-        detail: 'Ask for a lighter theme, a different model or a ComfyUI restart, confirm the card, and undo it any time under Settings, Agent.',
-      },
-      {
-        title: 'Web search reads the pages for you.',
-        detail: 'One step searches, reads the best pages and answers with numbered sources under the reply. No setup needed. A web address the AI made up waits for your OK.',
-      },
-      {
-        title: 'The chat gets its own look.',
-        detail: 'Colours, font, width, bubbles or document layout, and a background picture per chat or persona. Zoom the chat text with Ctrl or Cmd and the mouse wheel.',
-      },
-      {
-        title: 'The gallery keeps every picture.',
-        detail: 'The limit of 200 entries is gone. Hide pictures, tag them and filter by tag, and restore what ComfyUI saved from the output folder.',
-      },
-      {
-        title: 'Agent and Code work better with local models.',
-        detail: 'A short tool list with tool search for models up to 35B, a memory tool, skills you approve, search in earlier chats, and secret files are refused in every mode.',
-      },
-    ],
-    details: [
-      {
-        title: 'Coding agent',
-        items: [
-          {
-            title: 'Tool steps in plain words.',
-            detail: 'Each step says what it did, with the lines a change added and removed and the exit code of a command. A running step counts its seconds.',
-          },
-          {
-            title: 'The plan stays in view.',
-            detail: 'It is pinned under the newest message and shows its progress; a finished plan folds into one row.',
-          },
-          {
-            title: 'See what fills the window.',
-            detail: 'A context list shows what takes up the model\'s window, and the cached share of a prompt shows under an answer.',
-          },
-          {
-            title: 'Mention files with @.',
-            detail: 'In Code, in Agent and in a chat with a folder.',
-          },
-          {
-            title: 'Long commands keep running.',
-            detail: 'A shell command that runs past its time limit carries on as a background task.',
-          },
-          {
-            title: 'MCP servers by URL.',
-            detail: 'Add a Streamable HTTP server by its address and see a status per server.',
-          },
-          {
-            title: 'A credit brake for LU Cloud runs.',
-            detail: 'A task tells you at half its limit and pauses at it, and all agent runs together pause after a set amount per hour. Both limits are in Settings, Agent, and the agent cannot change them.',
-          },
-          {
-            title: 'Agents keep to their task.',
-            detail: 'They stay inside their working folder, end a search that finds nothing with an honest answer, compact a full context instead of stopping without a word, and keep working while LU\'s window is hidden.',
-          },
-        ],
-      },
-      {
-        title: 'Watchers',
-        items: [
-          {
-            title: 'A watcher does only what its chat allows.',
-            detail: 'Anything that would need a question is refused, and a watcher cannot change LU\'s settings or make more watchers. Pause, resume or delete it in the watcher row of its chat.',
-          },
-        ],
-      },
-      {
-        title: 'Create, 3D and characters',
-        items: [
-          {
-            title: '3D on your own computer.',
-            detail: 'On a Mac TripoSR and Stable Fast 3D (with your Hugging Face token), on Windows and Linux TRELLIS.2 through ComfyUI. With Blender installed, LU opens a model in Blender or saves it as .blend or FBX.',
-          },
-          {
-            title: 'From a video, only still frames leave your computer.',
-            detail: 'You pick the frames; the video stays where it is.',
-          },
-          {
-            title: 'Characters stand on a stage.',
-            detail: 'One tab per character, its own photos beside it, and Image, Swap, Motion and Talk in one bar. New character is one page; a dropped LoRA becomes a character, and you can rename one.',
-          },
-          {
-            title: 'Swap Character comes to LU Cloud step by step.',
-            detail: 'Until it is switched on for your account, the Swap action says so.',
-          },
-          {
-            title: 'LU Cloud follows the web catalogue.',
-            detail: 'Among the models: FLUX 3 Klein, GPT Image 2, Nano Banana Pro, Midjourney and Wan 3.0.',
-          },
-          {
-            title: 'Images per run and Batch size are two settings.',
-            detail: 'LU makes the pictures in batches one after another, so a small graphics card is not handed all of them at once, and a missed completion message no longer holds the next batch.',
-          },
-        ],
-      },
-      {
-        title: 'LU Cloud',
-        items: [
-          {
-            title: 'A credit pack next to the subscription.',
-            detail: 'The sign-up window shows both side by side, "Already bought? Sign in" sits at the top, and LU opens again after the checkout.',
-          },
-          {
-            title: 'Ways into LU Cloud are counted anonymously.',
-            detail: 'A click on a model, a plan, a pack or the sign in counts like the Cloud switch already did, never which model. Settings, Privacy says so.',
-          },
-        ],
-      },
-      {
-        title: 'Voice',
-        items: [
-          {
-            title: 'Dictate with Parakeet.',
-            detail: 'Parakeet TDT 0.6B v3 is a fourth choice in Settings, Voice (GitHub #233). LU downloads and checks it once and runs it on your computer without Python.',
-          },
-          {
-            title: 'See that the microphone hears you.',
-            detail: 'A live trace under the prompt moves with your voice, shows the time, and says "No sound from mic" after three silent seconds.',
-          },
-        ],
-      },
-      {
-        title: 'Agent and chat',
-        items: [
-          {
-            title: 'Agent and Code read AGENTS.md and remember facts.',
-            detail: 'They keep facts with a memory tool, find things in earlier chats, and use skills you approve in Settings.',
-          },
-          {
-            title: 'Better tool calls with local models.',
-            detail: 'Qwen\'s XML tool calls are understood, the Code tab plans multi-step tasks, the loop guard warns before it stops a run, and a batch with a shell command runs in order.',
-          },
-          {
-            title: 'Dangerous commands and secret files are refused.',
-            detail: 'Dangerous shell commands and any access to SSH keys, tokens, .env files or browser logins are refused in every mode, with a visible notice.',
-          },
-          {
-            title: 'ComfyUI workflows from the chat (Windows, Linux).',
-            detail: 'Agent and Code find a workflow (your own, ComfyUI\'s templates, CivitAI with your key, GitHub, or a link you send), check it with a traffic light and install it after you confirm. Node packs come only from LU\'s own pinned list.',
-          },
-          {
-            title: 'Neurons is back as a plugin.',
-            detail: 'Turn it on under Plugins in Chat, Agent or Code: a window with ready-made sliders, your own sliders from examples and a before and after. Tools keep working.',
-          },
-          {
-            title: 'Every plugin has its switch.',
-            detail: 'Create, REA, Neurons, Caveman Mode, Persona and Group chat each sit in one row with a switch; turned on, the settings open under it. What you had on stays on.',
-          },
-          {
-            title: 'A clearer Neurons introduction.',
-            detail: 'New drawings show how a slider changes the answer.',
-          },
-          {
-            title: 'DeepSeek R1 answers a plain hi.',
-            detail: 'R1 and its distills get no system message, as their makers advise. LU puts a persona, the agent role and tools into the first message instead, so the model no longer puzzles over LU\'s rules.',
-          },
-          {
-            title: 'Chat tools work in any language.',
-            detail: 'They used to reach only messages in English and German (GitHub #224).',
-          },
-          {
-            title: 'The agent reads its input pictures through LU.',
-            detail: 'Edits, reference pictures and start images no longer fail with "Failed to fetch" on Qwen-Image 2.1 and MiniMax H3.',
-          },
-          {
-            title: 'Reasoning effort fits the chat template.',
-            detail: 'A template that only knows low, medium and xhigh gets xhigh for High and Max, instead of refusing every message.',
-          },
-          {
-            title: 'The workspace dialog can change the primary folder.',
-            detail: 'In Voice and agent chats you can change the primary folder, make an extra folder the primary, or remove the primary (GitHub #223).',
-          },
-          {
-            title: 'A chat you deleted is not offered back.',
-            detail: 'The restore note and the Restore button leave out chats you deleted on purpose. A backup file you pick by hand still brings everything back.',
-          },
-          {
-            title: 'A Loop guard switch.',
-            detail: 'Settings, Agent Permissions. It is on by default.',
-          },
-          {
-            title: 'A looping agent stops, and a cost brake guards paid runs.',
-            detail: 'A run stops when the model keeps sending nearly identical tool calls without a word. A paid run ends after 2M input tokens, with a notice on any single step over 64k.',
-          },
-          {
-            title: 'Voice speaks as the persona of your chat.',
-            detail: 'A voice session started from a chat uses that chat\'s persona.',
-          },
-          {
-            title: 'Vision models get their image part back.',
-            detail: 'When the LU Engine runs a vision model without its image part, LU reloads it before it sends a picture, and names the real reason if that fails.',
-          },
-          {
-            title: 'Set the context window of an API model.',
-            detail: 'When the server does not report one, set it from the context button. LU shows where the number comes from.',
-          },
-        ],
-      },
-      {
-        title: 'Web',
-        items: [
-          {
-            title: 'The LU browser (Windows and macOS).',
-            detail: 'The agent can open and read pages in a window next to LU while you watch, and you can take over at any time. It only reads; it never types, logs in or downloads.',
-          },
-          {
-            title: 'Page text is data.',
-            detail: 'Text from a web page is never taken as an instruction, and a web address the AI made up waits for your OK (Settings, Search).',
-          },
-        ],
-      },
-      {
-        title: 'Chat look',
-        items: [
-          {
-            title: 'Colours that stay readable.',
-            detail: 'Your messages, replies, "quotes" and *actions* get their own colours, readable in light and dark mode. Advanced users can add their own CSS, which cannot load anything from the web.',
-          },
-          {
-            title: 'Zoom the chat text.',
-            detail: 'Ctrl or Cmd with the mouse wheel, or pinch, in Chat, Agent and Code. The size is remembered.',
-          },
-          {
-            title: 'Read and edit a memory in place.',
-            detail: 'The memory quick menu opens a memory in full and lets you edit it.',
-          },
-          {
-            title: 'Max memories injected brings that many memories.',
-            detail: 'The memory block was still cut short, so on a large model only a few of them arrived. With the setting on, it may now use up to a tenth of the model\'s context window (GitHub #238).',
-          },
-        ],
-      },
-      {
-        title: 'Models',
-        items: [
-          {
-            title: 'Filter Get new by what a model is for.',
-            detail: 'Agents, vision, coding, edit, music, lip sync and more.',
-          },
-          {
-            title: 'Uninstall a model with one click.',
-            detail: 'LU first shows every file and the space it frees, and keeps files another model still needs.',
-          },
-          {
-            title: 'Pick the version and file you want.',
-            detail: 'From CivitAI and Hugging Face (fp16, fp8, quants) instead of always the newest, with the full CivitAI description.',
-          },
-          {
-            title: 'LoRAs get names and notes.',
-            detail: 'Rename, add notes, hide from the LoRA stack, show in folder.',
-          },
-          {
-            title: 'Pages stay where you left them.',
-            detail: 'Models and Settings stay as they were when you switch to Chat or Create and back.',
-          },
-          {
-            title: 'Search models by file name.',
-            detail: 'Get new and Installed find a model by its file name too.',
-          },
-          {
-            title: 'Right-click menus for models and downloads.',
-            detail: 'LoRAs, finished downloads and image and video models can be renamed, shown in their folder or deleted with a confirmation. A text field gets Cut, Copy, Paste and Select all.',
-          },
-          {
-            title: 'Unused models unload on every engine.',
-            detail: 'The unload time under Settings, AI Backends, Unused models applies to Ollama and LM Studio too, and Unload all frees every engine (GitHub #235).',
-          },
-          {
-            title: 'MiniMax and Magnitude presets.',
-            detail: 'MiniMax as a provider (GitHub PR #203), Magnitude on your own computer (GitHub #214).',
-          },
-          {
-            title: 'MOSS Image runs the workflow you assign.',
-            detail: 'It is recognised as an image model, and a workflow assigned to a model LU does not know is used (GitHub #192).',
-          },
-          {
-            title: 'Downloads land in the right folder.',
-            detail: 'A model lands in the folder its download names (GitHub #234), a check no longer creates empty folders (GitHub PR #218), and Juggernaut XL V9 is checked by size and checksum (GitHub PR #229).',
-          },
-          {
-            title: 'MiniMax H3 Reference to download.',
-            detail: 'Video from up to nine pictures of who or what is in the clip, with sound. With MiniMax H3 already installed, only the 19.5 GB model file is fetched.',
-          },
-        ],
-      },
-      {
-        title: 'Create and gallery',
-        items: [
-          {
-            title: 'One big model across two cards.',
-            detail: 'Settings, Hardware: the diffusion model stays on your main card and the text encoder and VAE move to the second one. NVIDIA only.',
-          },
-          {
-            title: 'Edit strength below 1.00 changes the picture again.',
-            detail: 'On Qwen-Image 2.1 and Qwen-Image-Edit the strength steers between the edit and no edit inside the sampler. A lighter edit takes longer per step.',
-          },
-          {
-            title: 'Enhance takes any size on local ComfyUI.',
-            detail: 'Any factor from 1x to 8x, or a long side in pixels, and a choice of upscale model.',
-          },
-          {
-            title: 'Start ComfyUI when LU starts, right on the Start ComfyUI card.',
-            detail: 'It is the same setting as the one in Settings.',
-          },
-          {
-            title: 'Install a separate ComfyUI.',
-            detail: 'Next to one LU already found, from Settings or the setup. The path field says that only Connect applies a typed path.',
-          },
-          {
-            title: 'Mac image models keep going past 15 minutes.',
-            detail: 'A render runs as long as it keeps making steps. A stuck one is reported with the step it stopped at, and the limit is the Image timeout in Settings.',
-          },
-          {
-            title: 'Imported workflows use your LoRAs.',
-            detail: 'The LoRAs picked in Create go into an imported ComfyUI workflow. If its loader does not fit the model, Create and the chat image tool say so.',
-          },
-          {
-            title: 'The Edit mask stays.',
-            detail: 'A painted mask is still there when you open the mask editor again, and it shows on the picture before you edit.',
-          },
-          {
-            title: 'MiniMax H3 Image is an image model.',
-            detail: 'It is listed with the image models, not the video models. Run it with the official ComfyUI template imported under Workflows.',
-          },
-          {
-            title: 'Qwen-Image 2.1 Edit in the size you want.',
-            detail: 'Pick a size and aspect ratio; the picture is cropped from its centre to fit.',
-          },
-          {
-            title: 'Workflow parameter lists get a search.',
-            detail: 'The lists under Workflow parameters can be searched and are readable in the dark theme.',
-          },
-          {
-            title: 'The video preview says what it shows.',
-            detail: 'It says it is a still of the first frame, and says so when ComfyUI sends no preview at all.',
-          },
-          {
-            title: 'ComfyUI from Comfy Desktop finds its own model folders.',
-            detail: 'LU finds the model folders of a ComfyUI installed with Comfy Desktop (GitHub #196).',
-          },
-          {
-            title: 'The chat image tool runs the model\'s workflow.',
-            detail: 'The chat image tool runs the workflow assigned to the model (GitHub #192).',
-          },
-          {
-            title: 'No "video generated" after a retry that never ran.',
-            detail: 'A video retry that never ran no longer reports "video generated".',
-          },
-          {
-            title: 'The negative prompt no longer trips the content filter.',
-            detail: 'A harmless prompt with words like "nsfw" kept out in the negative prompt is no longer refused (GitHub #231). The filter now also checks agent videos with a character before anything renders, and jobs sent from your phone. The Mac image engine never blacks out a picture.',
-          },
-          {
-            title: 'Chroma1-HD loads again on the Mac.',
-            detail: 'No more "tiktoken is required", and the image engine updates itself at start when it is out of date.',
-          },
-        ],
-      },
-      {
-        title: 'Local API and system',
-        items: [
-          {
-            title: 'SillyTavern sees LU Engine models again.',
-            detail: 'All installed LU Engine models are in /v1/models, and a request for a model that is not loaded loads it first. A short guide is in Settings, Local API.',
-          },
-          {
-            title: 'Quitting LU stops the LU Engine.',
-            detail: 'A kill, Ctrl+C or a service stop no longer leaves the engine running on macOS and Linux.',
-          },
-          {
-            title: 'LU says why the LU Engine stopped.',
-            detail: 'When the engine stops on its own, LU logs its exit code and last output lines and tells you what happened, for example that the graphics card ran out of memory.',
-          },
-          {
-            title: 'Uninstalling on Windows leaves nothing behind.',
-            detail: 'The uninstaller also removes the LU Engine\'s libraries and leftovers, and the program folder with them.',
-          },
-          {
-            title: 'Linux finds the graphics card without pciutils.',
-            detail: 'On Distrobox, Toolbox and minimal systems LU finds AMD, NVIDIA and Intel cards through the kernel, so ComfyUI gets the GPU build of PyTorch.',
-          },
-          {
-            title: 'Linux keeps keys in the system keyring.',
-            detail: 'The Hugging Face token, provider keys and the LU Cloud session go to GNOME Keyring, KWallet or KeePassXC, or a file only your user can read (#226, thanks @cylon58).',
-          },
-          {
-            title: 'Smaller fixes.',
-            detail: 'No gvfs warnings from the Linux AppImage, dialogs are no longer see-through in the light theme, and how-it-works videos open large.',
-          },
-          {
-            title: 'REA installs the dependencies LU checked.',
-            detail: 'The agent plugin installs its dependencies as they were when LU checked the package, and npm warnings stay out of the server log.',
-          },
-        ],
-      },
-      {
-        title: 'Phone',
-        items: [
-          {
-            title: 'Talk to your computer from the phone.',
-            detail: 'Hold the microphone in a chat with your computer to speak, or tap it for hands free. Your computer writes down what you say and the answer is read aloud (GitHub #212).',
-          },
-          {
-            title: 'A calmer prompt and 3D on the phone.',
-            detail: 'One row under the field with the settings button, Attach and Send, the price on the Create button, and 3D from LU Cloud.',
-          },
-          {
-            title: 'The Android app gets the chat rescue the desktop has.',
-            detail: 'Settings, Backup and import, Restore chats from the automatic backup brings back chats the backup holds that are not in your list, and the chat list shows a note when there are any. Chats you deleted on the phone are not offered back.',
-          },
-        ],
-      },
-      {
-        title: 'Known limits',
-        items: [
-          {
-            title: 'Two cards are tested without a two-card machine.',
-            detail: 'We tested with simulated cards. A diffusion model bigger than the main card still partly sits in system memory. Feedback from two-card setups is welcome.',
-          },
-          {
-            title: 'CivitAI workflows need your key.',
-            detail: 'Finding workflows on CivitAI from the chat needs your CivitAI key.',
-          },
-          {
-            title: 'Your own ComfyUI workflows are for Windows and Linux.',
-            detail: 'On the Mac pictures and video run on the MLX engine, so the workflow tools do not apply there.',
-          },
-          {
-            title: 'Strong Neurons settings can derail a model.',
-            detail: 'Very strong slider settings can make a model ignore its task; around half strength keeps tools and answers on track.',
-          },
-          {
-            title: 'Edit strength on the Mac works the old way.',
-            detail: 'The Mac image engine (mflux) still takes Edit strength its old way.',
-          },
-          {
-            title: 'Enhance on the Mac and on LU Cloud keeps its sizes.',
-            detail: 'Enhance on the Mac stays at 2x and 4x, LU Cloud at 2K, 4K and 8K.',
-          },
-          {
-            title: 'Watchers run while LU runs.',
-            detail: 'After LU was quit, a missed time is not caught up.',
-          },
-          {
-            title: '3D depends on your card and your account.',
-            detail: 'TRELLIS.2 asks for a graphics card with 12 GB or more. LU Cloud 3D models and Swap Character depend on what LU Cloud has switched on for your account.',
-          },
-          {
-            title: 'No hide or tag buttons in the phone gallery.',
-            detail: 'Pictures are hidden and tagged in the desktop app.',
-          },
-        ],
-      },
+      ...NOTE_310.lines,
     ],
   },
+  NOTE_310,
   // 3.0.10 (05.11.2026, Hotfix Chat-Rettung, I1). Wer von 3.0.8 kommt, hat
   // 3.0.9 nie gesehen (releaseNotesStore zeigt nur die laufende Version),
   // darum steht hier das Blatt von 3.0.9 mit der Rettung als erster Zeile.

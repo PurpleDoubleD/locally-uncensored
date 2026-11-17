@@ -1,5 +1,5 @@
 {
-  "version": "3.1.0",
+  "version": "3.1.1",
   "build": {
     "beforeBuildCommand": "VITE_LU_BUILD_TARGET=mobile npm run build",
     "beforeDevCommand": "VITE_LU_BUILD_TARGET=mobile npm run dev"
@@ -24,7 +24,7 @@
     "resources": [],
     "iOS": {
       "minimumSystemVersion": "17.0",
-      "bundleVersion": "30100001"
+      "bundleVersion": "30101001"
     }
   },
   "plugins": {
