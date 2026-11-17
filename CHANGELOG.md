@@ -17,6 +17,9 @@ in the cloud catalogue.
   cache and a step cost about ten times what it should. The cut now stays in
   place for many steps and moves in whole blocks. Applies to Chat, Group,
   Compare, Agent and Code. Local models are not affected.
+- Local 3D in Create says before the setup and before a run when the
+  graphics card has less than 12 GB or ComfyUI runs on the processor, so a
+  slow or failing run does not come as a surprise.
 - 3D in Create with a ComfyUI older than 0.42.4 says that ComfyUI needs an
   update and offers it, instead of stopping with an error from ComfyUI's
   RemeshMesh node.
