@@ -25,6 +25,7 @@ import { WorkflowsModal } from '../WorkflowsModal'
 import { Hinweis } from '../../ui/Hinweis'
 import { BannerText } from './BannerText'
 import { MacVideoMemoryNotice } from './MacVideoMemoryNotice'
+import { ThreeDHardwareNotice } from './ThreeDHardwareNotice'
 import { CreateCloudOffer } from './CreateCloudOffer'
 import { MaskEditor } from './MaskEditor'
 import { VhsInstallModal } from './VhsInstallModal'
@@ -425,6 +426,11 @@ function CreateExperimentalInner() {
       {/* A Mac with less memory than the lane's video model is recommended
           for. The run is not held back, so it is said before it starts. */}
       <MacVideoMemoryNotice />
+
+      {/* Local 3D on a PC whose card is under TRELLIS.2's 12 GB, or with
+          ComfyUI on the processor: one line before setup and run, with the
+          way to LU Cloud 3D. A hint, the setup and the run stay possible. */}
+      <ThreeDHardwareNotice />
 
       {/* The run on screen does not fit this machine (too big for the card,
           only partly on it for a video, or a long Mac run): one quiet line
