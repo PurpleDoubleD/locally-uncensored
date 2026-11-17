@@ -9157,7 +9157,14 @@ mod tests {
         // that says "it exited" without saying how is a log that cannot tell a
         // refused GGUF from a card that ran out of memory.
         assert_eq!(out, HealthWait::ChildExited { code: Some(3), signal: None });
-        assert!(took < Duration::from_secs(5), "waited {took:?}, which is the old dead wait");
+        // 17.11.2026, 3.1.1: on the windows-latest runner Git Bash needed 8.6 s
+        // and 9.97 s for `exit 3` in two runs, while the same Rust code passed
+        // there in the morning (master 4486bf5a4). The code under test did not
+        // change; the runner did. Windows gets 20 s, still well inside the 30 s
+        // budget, so the old dead wait would still fail here. Mac and Linux
+        // keep 5 s. Recheck in 3.1.2.
+        let limit = if cfg!(windows) { Duration::from_secs(20) } else { Duration::from_secs(5) };
+        assert!(took < limit, "waited {took:?}, which is the old dead wait");
     }
 
     // ── Der Rueckfall nach einem misslungenen Wechsel ─────────────────────
