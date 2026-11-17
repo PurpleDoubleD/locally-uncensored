@@ -218,7 +218,7 @@ describe('the agent loop asks', () => {
   const hook = readFileSync(resolve(__dirname, '../../hooks/useAgentChat.ts'), 'utf8')
 
   it('fits the request right before it goes out, after the builder of the desktop', () => {
-    const built = hook.indexOf('const built = buildRequestMessages(agentMessages')
+    const built = hook.indexOf('const built = buildRequestMessages(stepWindow')
     const fit = hook.indexOf('sendMessages = fitRequestForPhone(sendMessages, agentCtx, 0, runQuestion, phoneMeasured)')
     const sent = hook.indexOf("if (strategy === 'native') {", fit)
     expect(built).toBeGreaterThan(0)

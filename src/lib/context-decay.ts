@@ -37,9 +37,10 @@ import {
   compactMessages,
   estimateMessageTokens,
   COMPACT_DROP_BLOCK,
-  COMPACT_TARGET_RATIO,
   COMPACT_TRIGGER_RATIO,
   KEEP_RECENT,
+  stableCutIndex,
+  stableDropBlock,
 } from './context-compaction'
 
 /** Head+tail budget for a result that has aged out, in characters. */
@@ -544,7 +545,6 @@ export function trimWorkingHistory<T extends DecayMessage>(
     )
   const banded = opts.hysteresis !== false
   const trigger = banded ? Math.floor(budgetTokens * COMPACT_TRIGGER_RATIO) : budgetTokens
-  const target = banded ? Math.floor(budgetTokens * COMPACT_TARGET_RATIO) : budgetTokens
   if (budgetTokens <= 0 || sizeOf(messages) <= trigger) return { messages, dropped: 0 }
 
   const systemMsg = messages[0]?.role === 'system' ? messages[0] : null
@@ -577,12 +577,27 @@ export function trimWorkingHistory<T extends DecayMessage>(
   }
 
   const maxDrop = Math.max(0, rest.length - KEEP_RECENT)
+  if (banded) {
+    // 3.1.1 (support case E8b): the cut sits on a fixed mark counted from the
+    // start of the history, see stableCutIndex. The loops hand this function
+    // the whole run on every step and keep nothing of its answer, so the same
+    // history always gets the same cut, in this step, in the next one and in
+    // the next turn, which starts from the stored conversation again. The
+    // marks are placed by the sizes the messages are sent at, after decay,
+    // the same sizes the budget is measured in. Decay only ever touches the
+    // newest two steps' results later on, far behind any mark that matters.
+    const sizes = applyToolResultDecay(rest, opts).messages.map((m) =>
+      estimateMessageTokens([m] as unknown as Parameters<typeof estimateMessageTokens>[0]),
+    )
+    const drop = stableCutIndex(sizes, stableDropBlock(budgetTokens), maxDrop, (at) => sizeOf(assemble(at)) <= budgetTokens)
+    return drop > 0 ? { messages: assemble(drop), dropped: drop } : { messages, dropped: 0 }
+  }
   let drop = 0
   let candidate = messages
   while (drop < maxDrop) {
     drop = Math.min(drop + COMPACT_DROP_BLOCK, maxDrop)
     candidate = assemble(drop)
-    if (sizeOf(candidate) <= target) break
+    if (sizeOf(candidate) <= budgetTokens) break
   }
   return { messages: candidate, dropped: drop }
 }

@@ -81,14 +81,14 @@ describe('fitToWindow, the last check', () => {
 describe('every path runs it before the request leaves', () => {
   it('plain chat, inside the try whose catch explains it', () => {
     const src = readFileSync('src/hooks/useChat.ts', 'utf8')
-    expect(src).toMatch(/const fitted = fitToWindow\(continued \?\? budgeted, modelWindowTokens\)/)
+    expect(src).toMatch(/const fitted = fitToWindow\(continued \?\? budgeted, modelWindowTokens, 0, \{/)
     expect(src).toMatch(/try \{\n\s*if \(!fitted\.fits\) throw new ContextFullError/)
   })
 
   it('the Agent tab, against the model window, after the build', () => {
     const src = readFileSync('src/hooks/useAgentChat.ts', 'utf8')
     const build = src.indexOf('sendMessages = built.messages')
-    const fit = src.indexOf('fitToWindow(sendMessages, calib.budget(agentCtx), catalogTokens)')
+    const fit = src.indexOf('fitToWindow(sendMessages, calib.budget(agentCtx), catalogTokens, {')
     expect(build).toBeGreaterThan(0)
     expect(fit).toBeGreaterThan(build)
     expect(src).toMatch(/if \(!fit\.fits\) throw new ContextFullError\(fit\.tokens, agentCtx\)/)
@@ -97,7 +97,7 @@ describe('every path runs it before the request leaves', () => {
   it('the Code tab, outside the best-effort catch', () => {
     const src = readFileSync('src/hooks/useCodex.ts', 'utf8')
     const bestEffort = src.indexOf('// Building is best-effort; fall through with the raw history.')
-    const fit = src.indexOf('fitToWindow(sendMessages, calib.budget(numCtx), lastToolsEstimate)')
+    const fit = src.indexOf('fitToWindow(sendMessages, calib.budget(numCtx), lastToolsEstimate, {')
     expect(fit).toBeGreaterThan(bestEffort)
     expect(src).toMatch(/if \(!fit\.fits\) throw new ContextFullError\(fit\.tokens, numCtx\)/)
   })
@@ -128,11 +128,11 @@ describe("David's numbers: about 31K of a 32K window in Agent mode, no compactio
   it('both tool loops feed it from every step and read every budget through it', () => {
     const agent = readFileSync('src/hooks/useAgentChat.ts', 'utf8')
     expect(agent).toMatch(/budgetBesideTheCatalog\(calib\.budget\(sendWindow\), catalogTokens\)/)
-    expect(agent).toMatch(/fitToWindow\(sendMessages, calib\.budget\(agentCtx\), catalogTokens\)/)
+    expect(agent).toMatch(/fitToWindow\(sendMessages, calib\.budget\(agentCtx\), catalogTokens, \{/)
     expect(agent.match(/calib\.observe\(stepEstimate, (turn|hermesTurn)\.promptEvalCount\)/g)?.length).toBe(2)
     const code = readFileSync('src/hooks/useCodex.ts', 'utf8')
     expect(code).toMatch(/const sendWindow = calib\.budget\(capToLearnedWindow\(/)
-    expect(code).toMatch(/fitToWindow\(sendMessages, calib\.budget\(numCtx\), lastToolsEstimate\)/)
+    expect(code).toMatch(/fitToWindow\(sendMessages, calib\.budget\(numCtx\), lastToolsEstimate, \{/)
     expect(code.match(/calib\.observe\(stepPromptEstimate \+ stepToolsEstimate, (turn|hermesTurn)\.promptEvalCount\)/g)?.length).toBe(3)
   })
 })

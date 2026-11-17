@@ -342,7 +342,11 @@ describe('message-count ceiling', () => {
 
   it('capMessageCount keeps system prompt and the newest messages', () => {
     const out = capMessageCount(tiny(450))
-    expect(out.length).toBe(MAX_SEND_MESSAGES)
+    // 3.1.1: the oldest go in whole blocks of 64, so the start of the request
+    // stands still for the next sends instead of moving by one each time.
+    expect(out.length).toBeLessThanOrEqual(MAX_SEND_MESSAGES)
+    expect(out.length).toBeGreaterThan(MAX_SEND_MESSAGES - 64)
+    expect(out[1].content).toBe(capMessageCount([...tiny(450), { role: 'user', content: 'one more' }])[1].content)
     expect(out[0].content).toBe('sys')
     expect(out[out.length - 1].content).toBe('m449')
   })

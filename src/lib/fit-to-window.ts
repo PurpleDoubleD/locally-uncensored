@@ -15,7 +15,7 @@
  * copy only; the chat keeps every word). Still too big, and nothing is sent:
  * the turn ends with the honest sentence instead of a silent cut or a hang.
  */
-import { estimateMessageTokens, shortenLongTurns } from './context-compaction'
+import { COMPACT_TRIGGER_RATIO, estimateMessageTokens, shortenLongTurns } from './context-compaction'
 import { CONTEXT_OVERFLOW_REFUSAL_SENTENCE } from './template-refusal'
 import type { OllamaChatMessage } from '../types/agent-mode'
 
@@ -45,15 +45,37 @@ export function fitToWindow<T extends { role: string; content: string }>(
   messages: T[],
   window: number,
   extraTokens = 0,
+  opts: { steady?: boolean } = {},
 ): FitResult<T> {
   const size = (ms: T[]) => estimateMessageTokens(ms as unknown as OllamaChatMessage[]) + extraTokens
   const before = size(messages)
   if (!(Number.isFinite(window) && window > 0)) return { messages, shortened: 0, tokens: before, fits: true }
   const budget = window - answerRoom(window)
   if (before <= budget) return { messages, shortened: 0, tokens: before, fits: true }
-  const cut = shortenLongTurns(messages, Math.max(0, budget - extraTokens))
+  const cut = shortenLongTurns(messages, Math.max(0, budget - extraTokens), undefined, opts)
   const after = size(cut.messages)
   return { messages: cut.messages, shortened: cut.shortened, tokens: after, fits: after <= window - Math.min(512, answerRoom(window)) }
+}
+
+/**
+ * The largest budget for the messages whose trim still engages BEFORE the
+ * check above does (3.1.1, support case E8b).
+ *
+ * The trim waits for budget x 1.15 (the hysteresis). With a send window of
+ * 0.8 of the model window that is 0.92 of it, and the check above already
+ * shortens at 0.88. So a long history on a model with a large send window
+ * never reached its trim: it sat at the limit of the check, which shortened
+ * the longest turn to the token on every single step. The prefix was new
+ * every time and nothing came out of the upstream cache.
+ *
+ * `window` and `extraTokens` are what the check is called with. Without the
+ * hysteresis the trim engages at the budget itself.
+ */
+export function budgetBelowTheFit(budget: number, window: number, extraTokens = 0, hysteresis = true): number {
+  if (!(Number.isFinite(window) && window > 0) || !(budget > 0)) return budget
+  const room = window - answerRoom(window) - Math.max(0, extraTokens)
+  const most = Math.floor(room / (hysteresis ? COMPACT_TRIGGER_RATIO : 1))
+  return Math.max(1, Math.min(budget, most))
 }
 
 /** Thrown by a send path when even the shortened request does not fit. */

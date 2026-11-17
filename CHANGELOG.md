@@ -2,6 +2,26 @@
 
 All notable changes to Locally Uncensored are documented here.
 
+## [3.1.1] - unreleased
+
+### Fixed
+
+- Long chats and long Agent or Code runs on LU Cloud and other paid providers
+  keep the provider's cache discount. Once a conversation was long enough to
+  be trimmed (or had more than 380 messages), the app cut it at a different
+  place on every send, so nothing could be served from the cache and a step
+  cost about ten times what it should. The cut now stays in place for many
+  steps and moves in whole blocks. Applies to Chat, Group, Compare, Agent and
+  Code.
+
+### Changed
+
+- A paid model whose send window is set as large as the model's own window
+  now sends at most about 76 percent of that window instead of 80, so the
+  trim engages before the last size check has to shorten single messages.
+- After a trim a request stays between 70 and 100 percent of the send budget
+  instead of between 70 and 115.
+
 ## [3.1.0] - 2026-11-16
 
 LU learns to run itself from the chat and to do tasks on a schedule, the
