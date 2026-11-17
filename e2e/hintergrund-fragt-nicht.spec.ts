@@ -1,7 +1,7 @@
 import { test, expect, type Page } from '@playwright/test'
 import { tauriMockInit, DEFAULT_MODEL_NAME, type TauriMockOptions } from './support/tauri-mock'
 import { seedOnboardingDone } from './support/cloud-mock'
-import { openNewChat } from './support/ui'
+import { openNewChat, expectWorkspaceAsk, answerWorkspaceAsk } from './support/ui'
 
 /**
  * Drei Unteragenten in einem Zug, und der Nutzer wird kein einziges Mal
@@ -73,11 +73,8 @@ async function boot(page: Page) {
   await openNewChat(page)
   const agentToggle = page.getByRole('main').getByRole('button', { name: 'Agent', exact: true })
   await agentToggle.click()
-  // Die Werkstatt-Frage kommt zuerst und legt den Rest der Seite auf inert.
-  const sandbox = page.getByRole('button', { name: /^Sandbox/ })
-  await expect(sandbox).toBeVisible({ timeout: 15_000 })
-  await sandbox.click()
-  await expect(page.getByRole('dialog', { name: /Agent workspace/i })).toHaveCount(0, { timeout: 10_000 })
+  // Seit 3.1.2 kein Dialog mehr: die erste Nachricht fragt im Chat nach dem Ort.
+  expectWorkspaceAsk(page)
   await expect(agentToggle).toHaveAttribute('title', /Agent Mode is on/i, { timeout: 10_000 })
 }
 
@@ -88,6 +85,7 @@ test('drei Delegationen erzeugen keine einzige Freigabefrage', async ({ page }) 
   await feld.click()
   await feld.fill('Split this into three and hand each part to a sub-agent.')
   await page.keyboard.press('Enter')
+  await answerWorkspaceAsk(page)
 
   // Der Schlusssatz kommt aus dem ZWEITEN Modellzug. Den gab es mit dem alten
   // Stand nie: der erste Zug haengt an seiner ersten Freigabekarte.

@@ -21,6 +21,7 @@ import { NO_EMBED_MODEL_MOBILE_MESSAGE, isSingleSlotConflict } from "../lib/mode
 import { singleModelSlot } from "../lib/capabilities"
 import { continuesInPlace, markContinuation, wireForContinue, withLead } from "../lib/continue-answer"
 import { isMobile } from "../lib/device-kind"
+import { hasOpenAsk, parkForWorkspaceAsk, workspaceAskNeeded } from "../lib/agent-workspace-ask"
 import { withoutUnansweredTurns } from "../lib/unanswered-turns"
 import { fitChatForPhone, meterOfFit, phoneFitApplies } from "../lib/phone-context-fit"
 import { usePhoneMeterStore } from "../stores/phoneMeterStore"
@@ -1062,6 +1063,19 @@ export function useChat() {
         store.addMessage(convId, { id: uuid(), role: 'user', content, timestamp: Date.now() })
         store.addMessage(convId, { id: uuid(), role: 'assistant', content: res.message, timestamp: Date.now() })
         return
+      }
+      // 3.1.2: no pop-up on switching Agent on any more. The first message of
+      // a chat without a workspace waits here, in the thread, under a card
+      // that asks "Sandbox or Folder" (lib/agent-workspace-ask.ts). After the
+      // choice the same message is sent again and lands right back here.
+      {
+        const convId = store.activeConversationId
+        // A message sent while the card is still open joins the parked one.
+        const reason = hasOpenAsk(convId) ? '' : await workspaceAskNeeded(convId)
+        if (reason !== null) {
+          parkForWorkspaceAsk(convId, content, reason ?? '', images, files, media)
+          return
+        }
       }
       if (slash) {
         // /loop seeds the driver so pass 2 onward fires by itself, exactly as

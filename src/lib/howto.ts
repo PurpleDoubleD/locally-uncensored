@@ -413,7 +413,7 @@ export const HOWTO: Record<string, HowtoTopic> = {
     { from: 11.76, text: "A value moved in this popup is the chat's own and wins over the persona." },
   ], '/guide/chat/'),
   agent: one('How Agent works', 'agent', [
-    { from: 0, text: 'Turn Agent on at the start of a chat. It first asks where to work.' },
+    { from: 0, text: 'Turn Agent on at the start of a chat. With your first message it asks where to work.' },
     { from: 3.08, text: 'The workspace is a folder path jail, not a container or virtual machine.' },
     { from: 6.56, text: 'Tools switches tool categories on or off for this chat only.' },
     { from: 12.83, text: 'Before a command runs you approve or reject it; the arrow shows its arguments.' },

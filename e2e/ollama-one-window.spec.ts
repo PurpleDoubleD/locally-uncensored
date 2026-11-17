@@ -1,6 +1,7 @@
 import { test, expect, type Page } from '@playwright/test'
 import { tauriMockInit, DEFAULT_ASSISTANT_REPLY, DEFAULT_MODEL_NAME, type TauriMockOptions } from './support/tauri-mock'
 import { seedOnboardingDone } from './support/cloud-mock'
+import { expectWorkspaceAsk, answerWorkspaceAsk } from './support/ui'
 
 /**
  * One Ollama model, one context window, and what a too large one costs.
@@ -67,6 +68,7 @@ async function say(page: Page, text: string, turn: number, answersOnScreen = tur
     await page.getByRole('button', { name: /Send message/i }).click()
     await expect(composer(page)).toHaveValue('', { timeout: 1_000 })
   }).toPass({ timeout: 20_000 })
+  await answerWorkspaceAsk(page)
   await expect.poll(async () => (await chatWindows(page)).length, { timeout: 20_000 }).toBeGreaterThanOrEqual(turn)
   await expect(page.getByText(DEFAULT_ASSISTANT_REPLY)).toHaveCount(answersOnScreen, { timeout: 20_000 })
 }
@@ -172,7 +174,8 @@ test('Agent mode runs the same model in its agent window, and the counter divide
   // mode starts its own conversation.
   await page.getByRole('button', { name: 'Agent', exact: true }).click()
   await page.getByRole('button', { name: 'New Agent Chat' }).click()
-  await page.getByRole('dialog', { name: 'Agent workspace' }).getByRole('button', { name: /^Sandbox/ }).click()
+  // The first message of the agent chat asks where to work (3.1.2); `say` answers Sandbox.
+  expectWorkspaceAsk(page)
   // Before the first word: the strip already shows the window of this surface.
   await expect(contextButton(page)).toHaveText(/ctx 32K/)
   const before = (await chatWindows(page)).length

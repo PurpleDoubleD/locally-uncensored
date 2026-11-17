@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { tauriMockInit, type TauriMockOptions } from './support/tauri-mock'
 import { seedOnboardingDone } from './support/cloud-mock'
-import { openNewChat } from './support/ui'
+import { openNewChat, expectWorkspaceAsk, answerWorkspaceAsk } from './support/ui'
 
 /**
  * A task on the screen, as the user meets it: the chat model asks for
@@ -75,9 +75,7 @@ async function startAgentChat(page: Page) {
   await openNewChat(page)
   const agentToggle = page.getByRole('main').getByRole('button', { name: 'Agent', exact: true })
   await agentToggle.click()
-  const sandbox = page.getByRole('button', { name: /^Sandbox/ })
-  await expect(sandbox).toBeVisible({ timeout: 15_000 })
-  await sandbox.click()
+  expectWorkspaceAsk(page)
   await expect(agentToggle).toHaveAttribute('title', /Agent Mode is on/i, { timeout: 10_000 })
 }
 
@@ -86,6 +84,7 @@ async function send(page: Page, text: string) {
   await expect(composer).toBeEnabled({ timeout: 20_000 })
   await composer.fill(text)
   await composer.press('Enter')
+  await answerWorkspaceAsk(page)
 }
 
 const fired = (page: Page) => page.evaluate(() => (window as unknown as { __E2E_COMPUTER_FIRED__?: { action: Record<string, unknown> }[] }).__E2E_COMPUTER_FIRED__ ?? [])

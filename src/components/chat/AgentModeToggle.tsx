@@ -10,9 +10,6 @@ import { useSettingsStore } from '../../stores/settingsStore'
 import { useChatNoticeStore } from '../../stores/chatNoticeStore'
 import { canUseTools } from '../../lib/tool-support'
 import { FEATURE_FLAGS } from '../../lib/constants'
-import { AgentWorkspaceDialog } from './AgentWorkspaceDialog'
-import { rememberedFolderRefusal } from '../../api/agents/workspace-validate'
-import type { AgentWorkspace } from '../../types/agent-workspace'
 import { MOTION_S } from '../ui/motion'
 
 /**
@@ -30,15 +27,6 @@ export const TOOLBAR_LABEL_TEXT = 'text-[0.55rem]'
 export function AgentModeToggle() {
   const [showNewChatModal, setShowNewChatModal] = useState(false)
   const [neverShowChecked, setNeverShowChecked] = useState(false)
-  // Workspace picker — opens after a fresh agent-mode activation when
-  // the conversation doesn't yet have a workspace assigned. Cancelable
-  // (the bridge falls back to its per-chat sandbox), but offered so
-  // power users can point the agent at a real folder up front.
-  const [showWorkspaceDialog, setShowWorkspaceDialog] = useState(false)
-  const [workspaceDialogConvId, setWorkspaceDialogConvId] = useState<string | null>(null)
-  // Der Grund, warum der gemerkte Vorgabeordner nicht genommen wurde. Steht im
-  // Dialog, sonst geht er ohne erkennbaren Anlass auf.
-  const [workspaceDialogError, setWorkspaceDialogError] = useState<string | null>(null)
   const activeConversationId = useChatStore((s) => s.activeConversationId)
   const conversations = useChatStore((s) => s.conversations)
   const createConversation = useChatStore((s) => s.createConversation)
@@ -76,38 +64,9 @@ export function AgentModeToggle() {
   const conversation = conversations.find((c) => c.id === activeConversationId)
   const hasMessages = (conversation?.messages?.length ?? 0) > 0
 
-  /**
-   * After an agent-mode activate, if the conversation hasn't picked a
-   * workspace yet, open AgentWorkspaceDialog so the user can choose
-   * between sandbox and a real folder. Skipped when a workspace is
-   * already set (toggling back on after a deactivate) or when the user
-   * has a `settings.defaultWorkspace` the backend still accepts.
-   *
-   * Der Vorgabeordner ueberlebt im Speicher des Browsers, die Erlaubnisliste
-   * der Rust-Seite liegt daneben in einer Datei, und die beiden koennen
-   * auseinanderlaufen: frische Installation, geleerte Daten, oder ein Ordner
-   * direkt unter $HOME, den eine aeltere Fassung noch gesetzt hat. Uebersprang
-   * dieser Dialog die Frage trotzdem, arbeitete der Agent still in einem
-   * Ordner, den jede Dateioperation mit "pick it again to allow it"
-   * beantwortet, und es ging kein Dialog auf, in dem man genau das haette tun
-   * koennen. Ein abgelehnter Vorgabeordner oeffnet die Frage jetzt MIT dem
-   * Grund; gemerkt wird dabei nichts, auf die Erlaubnisliste kommt ein Ordner
-   * weiterhin nur ueber den nativen Dialog.
-   */
-  const maybeOpenWorkspaceDialog = async (convId: string) => {
-    const hasPerChat = !!useAgentModeStore.getState().workspaces[convId]
-    if (hasPerChat) return
-    const fallback = useSettingsStore.getState().settings.defaultWorkspace
-    let refusal: string | null = null
-    if (fallback) {
-      if (fallback.kind !== 'folder' || !fallback.path) return
-      refusal = await rememberedFolderRefusal(fallback.path)
-      if (!refusal) return
-    }
-    setWorkspaceDialogError(refusal)
-    setWorkspaceDialogConvId(convId)
-    setShowWorkspaceDialog(true)
-  }
+  // 3.1.2: switching Agent on opens nothing. Where the agent works is asked in
+  // the thread, on the first message of a chat without a workspace
+  // (lib/agent-workspace-ask.ts, WorkspaceAskCard).
 
   const createNewAgentChat = () => {
     if (!activeModel) return
@@ -116,7 +75,6 @@ export function AgentModeToggle() {
     useAgentModeStore.getState().toggleAgentMode(newId)
     // Die Zeile "Plain chat cannot open files" hat ihren Rat gegeben.
     useChatNoticeStore.getState().dismiss('agent-for-local-files')
-    void maybeOpenWorkspaceDialog(newId)
   }
 
   const handleToggle = () => {
@@ -136,11 +94,8 @@ export function AgentModeToggle() {
     // 2.5.9 dropped the first-run Agent tutorial modal — flipping the switch
     // just flips it now.
     toggleAgentMode(activeConversationId)
-    // If the user just turned agent ON (was inactive, now active) and
-    // hasn't picked a workspace for this conversation, prompt for one.
     if (!isActive) {
       useChatNoticeStore.getState().dismiss('agent-for-local-files')
-      void maybeOpenWorkspaceDialog(activeConversationId)
     }
   }
 
@@ -151,31 +106,6 @@ export function AgentModeToggle() {
     createNewAgentChat()
     setShowNewChatModal(false)
     setNeverShowChecked(false)
-  }
-
-  const handleWorkspaceChoose = (workspace: AgentWorkspace) => {
-    if (workspaceDialogConvId) {
-      useAgentModeStore.getState().setWorkspace(workspaceDialogConvId, workspace)
-    }
-    setShowWorkspaceDialog(false)
-    setWorkspaceDialogConvId(null)
-    setWorkspaceDialogError(null)
-  }
-
-  const handleWorkspaceClose = () => {
-    // Cancel just dismisses — bridge will fall back to per-chat sandbox.
-    //
-    // Diese Zusage stimmt nur, solange kein Vorgabeordner gemerkt ist: sonst
-    // gewinnt er in `resolveWorkspace` ueber das leere Feld, und ein
-    // abgelehnter Vorgabeordner haette den Nutzer nach dem Wegklicken in genau
-    // die Sackgasse geschickt, aus der dieser Dialog ihn holen sollte. Wurde er
-    // abgelehnt, wird der Sandkasten hier also wirklich festgehalten.
-    if (workspaceDialogError && workspaceDialogConvId) {
-      useAgentModeStore.getState().setWorkspace(workspaceDialogConvId, { kind: 'sandbox' })
-    }
-    setShowWorkspaceDialog(false)
-    setWorkspaceDialogConvId(null)
-    setWorkspaceDialogError(null)
   }
 
   return (
@@ -249,15 +179,6 @@ export function AgentModeToggle() {
         </div>
       </Modal>
 
-      {showWorkspaceDialog && workspaceDialogConvId && (
-        <AgentWorkspaceDialog
-          open={showWorkspaceDialog}
-          conversationId={workspaceDialogConvId}
-          onChoose={handleWorkspaceChoose}
-          onClose={handleWorkspaceClose}
-          initialError={workspaceDialogError}
-        />
-      )}
     </>
   )
 }

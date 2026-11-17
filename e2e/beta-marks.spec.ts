@@ -4,7 +4,7 @@ import { resolve } from 'node:path'
 import { tauriMockInit, DEFAULT_ASSISTANT_REPLY, DEFAULT_MODEL_NAME, type TauriMockOptions } from './support/tauri-mock'
 import { routeCloud, seedOnboardingDone, signInViaGate, cloudSwitch } from './support/cloud-mock'
 import { mockModelsAnswer } from './support/chat-catalogue'
-import { openNewChat } from './support/ui'
+import { openNewChat, expectWorkspaceAsk, answerWorkspaceAsk } from './support/ui'
 
 /**
  * The Beta mark in the running app (the owner for 3.0.6: what is not finished to
@@ -220,14 +220,13 @@ for (const theme of THEMES) {
       await openNewChat(page)
       const agentToggle = page.getByRole('main').getByRole('button', { name: 'Agent', exact: true })
       await agentToggle.click()
-      const sandbox = page.getByRole('button', { name: /^Sandbox/ })
-      await expect(sandbox).toBeVisible({ timeout: 15_000 })
-      await sandbox.click()
+      expectWorkspaceAsk(page)
       await expect(agentToggle).toHaveAttribute('title', /Agent Mode is on/i, { timeout: 10_000 })
       const composer = page.locator('textarea').first()
       await expect(composer).toBeEnabled({ timeout: 20_000 })
       await composer.fill('Save my note.')
       await composer.press('Enter')
+      await answerWorkspaceAsk(page)
 
       const panel = page.getByTestId('computer-panel')
       await expect(panel.getByRole('group', { name: 'Allow LU to control Notepad?' })).toBeVisible({ timeout: 30_000 })

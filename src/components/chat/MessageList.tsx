@@ -1,3 +1,5 @@
+import { WorkspaceAskCard } from './WorkspaceAskCard'
+import type { Resend } from '../../lib/agent-workspace-ask'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { PlanBar, PlanHistoryRow, usePlanHistory } from './PlanBar'
 import type { CSSProperties } from 'react'
@@ -84,9 +86,11 @@ interface Props {
   onReject?: () => void
   /** Sends a message in this chat: the pinned plan's "Continue". */
   onContinuePlan?: (text: string) => void
+  /** Sends the message that waited for the workspace question (WorkspaceAskCard). */
+  onResendParked?: Resend
 }
 
-export function MessageList({ isGenerating, isThisChatGenerating, isLoadingModel, onRegenerate, onRegenerateSpeaker, onEdit, pendingApprovalId, onApprove, onReject, onContinuePlan }: Props) {
+export function MessageList({ isGenerating, isThisChatGenerating, isLoadingModel, onRegenerate, onRegenerateSpeaker, onEdit, pendingApprovalId, onApprove, onReject, onContinuePlan, onResendParked }: Props) {
   const showTyping = isThisChatGenerating ?? isGenerating
   // The question of the first use of computer control is open in this conversation.
   const chatAsked = useComputerStore((s) => !!s.chatAsk && !s.chatAsk.voice && (s.chatAsk.conversationId === null || s.chatAsk.conversationId === useChatStore.getState().activeConversationId))
@@ -373,6 +377,12 @@ export function MessageList({ isGenerating, isThisChatGenerating, isLoadingModel
             loadingModel={isLoadingModel}
             message={lastMessage}
           />
+        )}
+        {/* 3.1.2: the first agent message waits here for "Sandbox or Folder". */}
+        {!readOnly && onResendParked && (
+          <div className="pl-12 pr-3 pt-1">
+            <WorkspaceAskCard conversationId={conversation.id} resend={onResendParked} />
+          </div>
         )}
         {/* The run's plan, pinned under the newest message (PlanBar.tsx). */}
         {!readOnly && <PlanBar conversationId={conversation.id} onContinue={onContinuePlan} />}

@@ -1,7 +1,7 @@
 import { test, expect, type Page } from '@playwright/test'
 import { tauriMockInit, DEFAULT_ASSISTANT_REPLY, DEFAULT_MODEL_NAME } from './support/tauri-mock'
 import { seedOnboardingDone } from './support/cloud-mock'
-import { openNewChat } from './support/ui'
+import { openNewChat, expectWorkspaceAsk, answerWorkspaceAsk } from './support/ui'
 
 /**
  * Die Planleiste muss sagen, wann der Lauf vorbei ist.
@@ -49,10 +49,7 @@ async function bootAgent(page: Page, agentTurns: Turn[], holdTools = false) {
   await openNewChat(page)
   const agentToggle = page.getByRole('main').getByRole('button', { name: 'Agent', exact: true })
   await agentToggle.click()
-  const sandbox = page.getByRole('button', { name: /^Sandbox/ })
-  await expect(sandbox).toBeVisible({ timeout: 15_000 })
-  await sandbox.click()
-  await expect(page.getByRole('dialog', { name: /Agent workspace/i })).toHaveCount(0, { timeout: 10_000 })
+  expectWorkspaceAsk(page)
   await expect(agentToggle).toHaveAttribute('title', /Agent Mode is on/i, { timeout: 10_000 })
 }
 
@@ -81,6 +78,7 @@ test('nach dem Lauf sagt die Planleiste, dass sie stehengeblieben ist', async ({
   await box.click()
   await box.type('mach vier Schritte')
   await page.keyboard.press('Enter')
+  await answerWorkspaceAsk(page)
 
   const band = page.getByTestId('plan-pinned')
   await expect(band).toBeVisible({ timeout: 30_000 })
@@ -122,6 +120,7 @@ test('waehrend der Lauf laeuft, sagt sie nichts von einem Ende', async ({ page }
   await box.click()
   await box.type('lauf lange')
   await page.keyboard.press('Enter')
+  await answerWorkspaceAsk(page)
 
   const band = page.getByTestId('plan-pinned')
   await expect(band).toBeVisible({ timeout: 30_000 })

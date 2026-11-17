@@ -3,12 +3,15 @@ import { Rec, HOWTO_OUT } from './rec'
 import { scriptModel, openChat } from './model'
 
 // What the agent sandbox is and what it is not. Captions are the app's own
-// words: the workspace dialog (AgentWorkspaceDialog.tsx), the badge next to
-// Agent (AgentWorkspaceBadge.tsx), the default "Ask First" for Shell
+// words: the workspace card in the chat (WorkspaceAskCard.tsx), the badge
+// next to Agent (AgentWorkspaceBadge.tsx), the default "Ask First" for Shell
 // (api/mcp/types.ts DEFAULT_PERMISSIONS), the Approve / Reject card
 // (ToolCallBlock.tsx) and the per-chat Tools menu (PermissionOverrideBar.tsx).
 // agent.spec.ts shows the Agent switch in general; this one stays on the
 // approval and on the limits of the sandbox.
+//
+// Since 3.1.2 the switch opens no dialog: the first message waits in the chat
+// under the card "Where should I work?", and after Sandbox it goes out.
 //
 // FIXTURES (said in the report too):
 //  - the model's answers are scripted (./model.ts): the first turn asks for
@@ -30,41 +33,48 @@ test('sandbox', async ({ page }) => {
 
   const composer = page.locator('textarea').first()
   const send = page.getByRole('button', { name: 'Send message' })
+  const card = page.getByTestId('workspace-ask')
+  const sandbox = page.getByTestId('workspace-ask-sandbox')
   const park = { x: 1200, y: 812 }
 
   await rec.key()
-  rec.scene('Sandbox is a separate folder under ~/agent-workspace, guarded by the file tool path jail.')
+  rec.scene('Turn Agent on and send your first message.')
   await rec.cam({ x: 757, y: 740 }, 1.5)
   await rec.click(toggle, {
-    dur: 0.8, after: 0.1,
-    until: () => expect(page.getByText('Where should the agent work?')).toBeVisible(),
+    dur: 0.8, after: 0.3,
+    until: () => expect(toggle).toHaveAttribute('title', /Agent Mode is on/i),
   })
-  await rec.cam({ x: 720, y: 450 }, 1.5, 0.9)
-  await rec.move(page.getByRole('button', { name: /^Sandbox/ }), { dur: 0.7, at: { fx: 0.8 } })
+  await rec.click(composer, { dur: 0.5, at: { fx: 0.3 }, after: 0.05 })
+  await rec.move(park, { dur: 0.3, real: false })
+  await rec.type(composer, 'how big is my Documents folder?', { cps: 44 })
+  await rec.click(send, {
+    dur: 0.45, after: 0.2,
+    until: () => expect(card).toBeVisible({ timeout: 30_000 }),
+  })
+
+  rec.scene('It asks where to work. Sandbox is a separate folder under ~/agent-workspace.')
+  await rec.cam(card, 1.5, 0.9)
+  await rec.move(sandbox, { dur: 0.7, at: { fx: 0.8 } })
   rec.hold(1.3)
 
   rec.scene('It is not a container: commands still run on this computer.')
-  await rec.move(page.getByTestId('workspace-security-boundary'), { dur: 0.6, at: { fx: 0.9, fy: 1.0, dy: 6 } })
+  await rec.move(page.getByTestId('workspace-ask-boundary'), { dur: 0.6, at: { fx: 0.9, fy: 1.0, dy: 6 } })
   rec.hold(1.5)
-  await rec.click(page.getByRole('button', { name: /^Sandbox/ }), { dur: 0.6, at: { fx: 0.3 }, after: 0.2 })
+  await rec.click(sandbox, {
+    dur: 0.6, at: { fx: 0.3 }, after: 0.2,
+    until: () => expect(page.getByRole('button', { name: 'Reject' }).first()).toBeVisible({ timeout: 30_000 }),
+  })
+
+  rec.scene('Each shell command waits for Approve or Reject. Read it: it runs on this computer.')
+  await rec.cam(page.getByRole('button', { name: 'Reject' }).first(), 1.5)
+  rec.hold(1.9)
+  await rec.click(page.getByRole('button', { name: 'Reject' }).first(), { dur: 0.6, after: 0.3 })
 
   rec.scene('The badge next to Agent shows where it works; a click picks a real folder.')
   const pill = page.getByTestId('agent-workspace-pill')
   await rec.cam(pill, 1.6)
   await rec.move(pill, { dur: 0.6 })
   rec.hold(1.1)
-
-  await rec.click(composer, { dur: 0.5, at: { fx: 0.3 }, after: 0.05 })
-  await rec.move(park, { dur: 0.3, real: false })
-  await rec.type(composer, 'how big is my Documents folder?', { cps: 44 })
-  await rec.click(send, {
-    dur: 0.45, after: 0.2,
-    until: () => expect(page.getByRole('button', { name: 'Reject' }).first()).toBeVisible({ timeout: 30_000 }),
-  })
-  rec.scene('By default each shell command waits for Approve or Reject. Read it: it runs on this computer.')
-  await rec.cam(page.getByRole('button', { name: 'Reject' }).first(), 1.5)
-  rec.hold(1.9)
-  await rec.click(page.getByRole('button', { name: 'Reject' }).first(), { dur: 0.6, after: 0.3 })
 
   rec.scene('Tools switches a category such as Shell on or off for this chat only.')
   const tools = page.getByRole('button', { name: /^Tools/ })

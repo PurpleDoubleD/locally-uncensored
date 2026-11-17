@@ -1,7 +1,7 @@
 import { test, expect, type Page } from '@playwright/test'
 import { tauriMockInit, DEFAULT_MODEL_NAME } from './support/tauri-mock'
 import { seedOnboardingDone } from './support/cloud-mock'
-import { openNewChat } from './support/ui'
+import { openNewChat, expectWorkspaceAsk, answerWorkspaceAsk } from './support/ui'
 import { toolCalls } from './support/recorded'
 
 /**
@@ -76,6 +76,7 @@ async function instruct(page: Page, text: string) {
     }
     await expect(echoed).toBeVisible({ timeout: 2_000 })
   }).toPass({ timeout: 30_000 })
+  await answerWorkspaceAsk(page)
 }
 
 test('the Code tab streams on the built-in engine instead of painting in one tick', async ({ page }) => {
@@ -189,17 +190,10 @@ async function bootAgentMode(page: Page, agentTurns: Turn[]) {
   await openNewChat(page)
   const agentToggle = page.getByRole('main').getByRole('button', { name: 'Agent', exact: true })
   await agentToggle.click()
-  // Activation opens the "Where should the agent work?" dialog FIRST, and
-  // `ui/Modal` marks the rest of the page `inert` + `aria-hidden` while a
-  // dialog is up. So the toggle behind it is out of the accessibility tree,
-  // and asserting on it before answering the dialog is a race the spec loses
-  // whenever the dialog wins the frame. Answer the dialog, then look at the
-  // toggle. The sandbox is the right answer for a spec — it touches nothing
-  // outside ~/agent-workspace.
-  const sandbox = page.getByRole('button', { name: /^Sandbox/ })
-  await expect(sandbox).toBeVisible({ timeout: 15_000 })
-  await sandbox.click()
-  await expect(page.getByRole('dialog', { name: /Agent workspace/i })).toHaveCount(0, { timeout: 10_000 })
+  // Since 3.1.2 activation opens no dialog. The first instruction waits in the
+  // thread under the "Where should I work?" card, and `instruct` answers it
+  // with Sandbox (it touches nothing outside ~/agent-workspace).
+  expectWorkspaceAsk(page)
   await expect(agentToggle).toHaveAttribute('title', /Agent Mode is on/i, { timeout: 10_000 })
 }
 

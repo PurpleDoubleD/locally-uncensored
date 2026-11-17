@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test'
 import { tauriMockInit, DEFAULT_MODEL_NAME } from './support/tauri-mock'
 import { seedOnboardingDone } from './support/cloud-mock'
-import { openNewChat, appModules, type AppWindow } from './support/ui'
+import { openNewChat, appModules, type AppWindow, expectWorkspaceAsk, answerWorkspaceAsk } from './support/ui'
 import { isRecord } from './support/recorded'
 import type { MemoryFile } from '../src/types/agent-mode'
 
@@ -25,7 +25,7 @@ for (const mode of ['Chat', 'Agent', 'Code'] as const) {
     if (mode === 'Agent') {
       const toggle = page.getByRole('main').getByRole('button', { name: 'Agent', exact: true })
       await toggle.click()
-      await page.getByRole('button', { name: /^Sandbox/ }).click()
+      expectWorkspaceAsk(page)
       await expect(toggle).toHaveAttribute('title', /Agent Mode is on/i)
     }
     // Seed only input state. Retrieval, hooks, provider serialization, answer
@@ -55,6 +55,7 @@ for (const mode of ['Chat', 'Agent', 'Code'] as const) {
     await expect(composer).toBeEnabled()
     await composer.fill('sourceproof preferences please')
     await page.getByRole('button', { name: 'Send message' }).click()
+    await answerWorkspaceAsk(page)
     await expect(page.getByRole('main').getByText('SOURCEPROOF answer from the transport fixture.', { exact: true })).toBeVisible({ timeout: 30_000 })
     await expect(page.getByRole('button', { name: 'Send message' })).toBeVisible({ timeout: 30_000 })
     await appModules(page, ['/src/stores/chatStore.ts'])

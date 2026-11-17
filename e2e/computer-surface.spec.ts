@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { tauriMockInit, type TauriMockOptions } from './support/tauri-mock'
 import { seedOnboardingDone } from './support/cloud-mock'
-import { openNewChat, appModules, type AppWindow } from './support/ui'
+import { openNewChat, appModules, type AppWindow, expectWorkspaceAsk, answerWorkspaceAsk } from './support/ui'
 
 /**
  * LU while it works on the screen (the owner's roadmap of 08.10.2026): the main
@@ -73,9 +73,7 @@ async function startAgentChat(page: Page) {
   await openNewChat(page)
   const agentToggle = page.getByRole('main').getByRole('button', { name: 'Agent', exact: true })
   await agentToggle.click()
-  const sandbox = page.getByRole('button', { name: /^Sandbox/ })
-  await expect(sandbox).toBeVisible({ timeout: 15_000 })
-  await sandbox.click()
+  expectWorkspaceAsk(page)
   await expect(agentToggle).toHaveAttribute('title', /Agent Mode is on/i, { timeout: 10_000 })
 }
 
@@ -84,6 +82,7 @@ async function send(page: Page, text: string) {
   await expect(composer).toBeEnabled({ timeout: 20_000 })
   await composer.fill(text)
   await composer.press('Enter')
+  await answerWorkspaceAsk(page)
 }
 
 /** The session asks only before sensitive actions, as after the switch in a question. */

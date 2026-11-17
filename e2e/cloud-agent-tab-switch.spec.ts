@@ -1,6 +1,7 @@
 import { test, expect, type Page } from '@playwright/test'
 import { tauriMockInit, DEFAULT_MODEL_NAME, DEFAULT_ASSISTANT_REPLY } from './support/tauri-mock'
 import { seedOnboardingDone, routeCloud, signInViaGate, cloudSwitch } from './support/cloud-mock'
+import { expectWorkspaceAsk, answerWorkspaceAsk } from './support/ui'
 
 /**
  * Customer case 30.09.2026, second mail, the customer's own
@@ -88,14 +89,14 @@ for (const mode of ['code', 'agent'] as const) {
         await expect(toggle).toBeVisible({ timeout: 2_000 })
       }).toPass({ timeout: 30_000 })
       await toggle.click()
-      const sandbox = page.getByRole('button', { name: /^Sandbox/ })
-      await expect(sandbox).toBeVisible({ timeout: 15_000 })
-      await sandbox.click()
+      expectWorkspaceAsk(page)
+      await expect(toggle).toHaveAttribute('title', /Agent Mode is on/i, { timeout: 10_000 })
     }
     const composer = page.locator('textarea').first()
     await expect(composer).toBeEnabled({ timeout: 20_000 })
     await composer.fill('walk the whole source tree')
     await composer.press('Enter')
+    await answerWorkspaceAsk(page)
     await expect.poll(() => bodies.length, { timeout: 20_000 }).toBeGreaterThan(2)
 
     const header = page.getByRole('banner')
@@ -140,14 +141,14 @@ for (const mode of ['code', 'agent'] as const) {
         await expect(toggle).toBeVisible({ timeout: 2_000 })
       }).toPass({ timeout: 30_000 })
       await toggle.click()
-      const sandbox = page.getByRole('button', { name: /^Sandbox/ })
-      await expect(sandbox).toBeVisible({ timeout: 15_000 })
-      await sandbox.click()
+      expectWorkspaceAsk(page)
+      await expect(toggle).toHaveAttribute('title', /Agent Mode is on/i, { timeout: 10_000 })
     }
     const composer = page.locator('textarea').first()
     await expect(composer).toBeEnabled({ timeout: 20_000 })
     await composer.fill('walk the whole source tree')
     await composer.press('Enter')
+    await answerWorkspaceAsk(page)
 
     // The run dies on the fifth request and hands the composer back.
     await expect.poll(() => bodies.length, { timeout: 30_000 }).toBeGreaterThanOrEqual(5)

@@ -1,7 +1,7 @@
 import { test, expect, type Page } from '@playwright/test'
 import { tauriMockInit, DEFAULT_MODEL_NAME } from './support/tauri-mock'
 import { seedOnboardingDone } from './support/cloud-mock'
-import { openNewChat } from './support/ui'
+import { openNewChat, expectWorkspaceAsk, answerWorkspaceAsk } from './support/ui'
 
 /**
  * Ueberlebt ein Werkzeugergebnis die naechste Frage?
@@ -61,10 +61,7 @@ async function boot(page: Page) {
   await openNewChat(page)
   const agentToggle = page.getByRole('main').getByRole('button', { name: 'Agent', exact: true })
   await agentToggle.click()
-  const sandbox = page.getByRole('button', { name: /^Sandbox/ })
-  await expect(sandbox).toBeVisible({ timeout: 15_000 })
-  await sandbox.click()
-  await expect(page.getByRole('dialog', { name: /Agent workspace/i })).toHaveCount(0, { timeout: 10_000 })
+  expectWorkspaceAsk(page)
   await expect(agentToggle).toHaveAttribute('title', /Agent Mode is on/i, { timeout: 10_000 })
 }
 
@@ -80,6 +77,7 @@ async function sende(page: Page, text: string) {
     }
     await expect(echoed).toBeVisible({ timeout: 2_000 })
   }).toPass({ timeout: 30_000 })
+  await answerWorkspaceAsk(page)
 }
 
 const koerper = (page: Page) =>

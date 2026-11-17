@@ -488,6 +488,7 @@ export function ChatView() {
                       onApprove={approveToolCall}
                       onReject={rejectToolCall}
                       onContinuePlan={(text) => sendMessage(text)}
+                      onResendParked={sendMessage}
                     />
                   )}
 

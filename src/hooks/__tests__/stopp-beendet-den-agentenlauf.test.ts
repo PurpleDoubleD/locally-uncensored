@@ -100,6 +100,8 @@ function seed(): string {
   useChatStore.getState().setActiveConversation(convId)
   useModelStore.setState({ models: [], activeModel: MODEL })
   useAgentModeStore.getState().setAgentModeActive(convId, true)
+  // 3.1.2: a chat without a workspace asks first (lib/agent-workspace-ask.ts).
+  useAgentModeStore.getState().setWorkspace(convId, { kind: 'sandbox' })
   return convId
 }
 

@@ -124,23 +124,26 @@ describe('der gemerkte Vorgabeordner', () => {
     expect(screen.getByText(/Cannot use/).textContent).toBe(why)
   })
 
-  it('wird geprueft, bevor die Frage uebersprungen wird', () => {
-    // Der Umschalter rendert nur mit Modell, Gespraech und Werkzeugurteil,
-    // und die Weiche selbst ist eine lokale Funktion darin. Gemessen wird
-    // deshalb die Reihenfolge im Quelltext: die Pruefung MUSS vor dem
-    // `return` stehen, mit dem der Dialog uebersprungen wird.
+  it('wird geprueft, bevor die Frage uebersprungen wird', async () => {
+    // Seit 3.1.2 faellt die Weiche bei der ersten Nachricht im Chat
+    // (lib/agent-workspace-ask.ts), nicht mehr beim Einschalten. Die Regel
+    // ist dieselbe: ein abgelehnter Vorgabeordner fuehrt zur Frage MIT Grund.
+    const { workspaceAskNeeded } = await import('../../../lib/agent-workspace-ask')
+    const { useSettingsStore } = await import('../../../stores/settingsStore')
+    useSettingsStore.getState().updateSettings({ defaultWorkspace: { kind: 'folder', path: LAST } })
+    call.mockRejectedValueOnce(new Error(REFUSAL))
+    const grund = await workspaceAskNeeded(CONV)
+    expect(call).toHaveBeenCalledWith('validate_workspace_folder', { path: LAST })
+    expect(grund, 'der gemerkte Vorgabeordner wird wieder ungeprueft genommen').toMatch(/Cannot use/)
+    // Ein Ordner, den die Erlaubnisliste kennt, ersetzt die Frage weiterhin.
+    call.mockResolvedValueOnce(undefined)
+    expect(await workspaceAskNeeded(CONV)).toBeNull()
+    useSettingsStore.getState().updateSettings({ defaultWorkspace: null })
+    // Und nichts wird dabei nachgezogen: merken kann nur der native Dialog.
     const src = readFileSync(
-      resolve(dirname(fileURLToPath(import.meta.url)), '../AgentModeToggle.tsx'),
+      resolve(dirname(fileURLToPath(import.meta.url)), '../../../lib/agent-workspace-ask.ts'),
       'utf8',
     )
-    const weiche = src.slice(src.indexOf('const maybeOpenWorkspaceDialog'))
-    const geprueft = weiche.indexOf('rememberedFolderRefusal')
-    expect(geprueft, 'der gemerkte Vorgabeordner wird wieder ungeprueft genommen').toBeGreaterThan(0)
-    expect(
-      weiche.indexOf('setShowWorkspaceDialog(true)'),
-      'der Dialog geht auf, bevor irgendetwas geprueft wurde',
-    ).toBeGreaterThan(geprueft)
-    // Und nichts wird dabei nachgezogen: merken kann nur der native Dialog.
     expect(src).not.toContain('remember_picked_root')
   })
 })

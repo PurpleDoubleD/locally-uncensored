@@ -83,6 +83,9 @@ test('agent folder dialog entry', async ({ page }) => {
   })
   const toggle = await openChat(page)
   await toggle.click()
+  // Since 3.1.2 the switch opens no dialog; the badge next to it still does.
+  await expect(toggle).toHaveAttribute('title', /Agent Mode is on/i)
+  await page.getByTestId('agent-workspace-pill').click()
   await expect(page.getByText('Where should the agent work?')).toBeVisible()
   await openCard(page, 'sandbox', 'agent-dialog')
 })

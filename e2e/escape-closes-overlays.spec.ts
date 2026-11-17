@@ -83,10 +83,8 @@ test('Escape schliesst das Tools-Menue im Composer und gibt die Klicks frei', as
 
   const agentToggle = page.getByRole('main').getByRole('button', { name: 'Agent', exact: true })
   await agentToggle.click()
-  const sandbox = page.getByRole('button', { name: /^Sandbox/ })
-  await expect(sandbox).toBeVisible({ timeout: 15_000 })
-  await sandbox.click()
-  await expect(page.getByRole('dialog', { name: /Agent workspace/i })).toHaveCount(0, { timeout: 10_000 })
+  // Seit 3.1.2 geht beim Einschalten kein Dialog mehr auf.
+  await expect(agentToggle).toHaveAttribute('title', /Agent Mode is on/i, { timeout: 10_000 })
 
   const tools = page.getByRole('button', { name: /^Tools/ })
   await expect(tools).toBeVisible({ timeout: 10_000 })

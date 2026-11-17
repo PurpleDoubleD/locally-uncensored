@@ -2,7 +2,7 @@ import { resolve } from 'node:path'
 import { test, expect } from '@playwright/test'
 import { tauriMockInit, DEFAULT_ASSISTANT_REPLY, DEFAULT_MODEL_NAME } from './support/tauri-mock'
 import { seedOnboardingDone } from './support/cloud-mock'
-import { openNewChat } from './support/ui'
+import { openNewChat, expectWorkspaceAsk, answerWorkspaceAsk } from './support/ui'
 
 /**
  * Discord feature request "load binary files (such as ROMs) directly" (3.0.8)
@@ -39,9 +39,7 @@ test('a binary in plain chat says "summary only", in Agent mode it goes to the f
 
   const agentToggle = page.getByRole('main').getByRole('button', { name: 'Agent', exact: true })
   await agentToggle.click()
-  const sandbox = page.getByRole('button', { name: /^Sandbox/ })
-  await expect(sandbox).toBeVisible({ timeout: 15_000 })
-  await sandbox.click()
+  expectWorkspaceAsk(page)
   await expect(agentToggle).toHaveAttribute('title', /Agent Mode is on/i, { timeout: 10_000 })
   await page.getByTestId('composer-file-input').setInputFiles(ROM)
   await expect(page.getByTestId('composer-file-chip')).toContainText('goes to the working folder')
@@ -49,6 +47,7 @@ test('a binary in plain chat says "summary only", in Agent mode it goes to the f
 
   await page.locator('textarea').first().fill('what is this?')
   await page.getByRole('button', { name: /Send message/i }).click()
+  await answerWorkspaceAsk(page)
   await expect(page.getByText('I can see the file.').first()).toBeVisible({ timeout: 20_000 })
   await expect(page.getByTestId('chat-file-chip')).toContainText('file in the working folder')
   const bodies = await page.evaluate(() => (Reflect.get(window, '__E2E_CHAT_BODIES__') as unknown[]).map(String))

@@ -101,3 +101,32 @@ export async function appModules(page: Page, paths: string[]): Promise<void> {
 
 /** The page after `appModules`: `(window as unknown as AppWindow).__APP__[path]` is a loaded module. */
 export type AppWindow = { __APP__: Record<string, any> } // eslint-disable-line @typescript-eslint/no-explicit-any
+
+/**
+ * Agent Mode asks for its workspace in the chat since 3.1.2.
+ *
+ * Switching Agent on opens no dialog any more. The FIRST message of an agent
+ * chat without a workspace is parked in the thread under a card ("Where
+ * should I work?", Sandbox / Folder…), and nothing goes to the model until
+ * the card is answered. Then exactly that message is sent again.
+ *
+ * `expectWorkspaceAsk` marks the page right after Agent Mode was switched on
+ * in a fresh chat; the spec's send helper then calls `answerWorkspaceAsk`
+ * after every send. Only the first send after the mark waits for the card and
+ * picks Sandbox (it touches nothing outside ~/agent-workspace); every later
+ * send returns at once, so the mark costs nothing there.
+ */
+const workspaceAskPending = new WeakSet<Page>()
+
+export function expectWorkspaceAsk(page: Page): void {
+  workspaceAskPending.add(page)
+}
+
+export async function answerWorkspaceAsk(page: Page): Promise<void> {
+  if (!workspaceAskPending.has(page)) return
+  workspaceAskPending.delete(page)
+  const sandbox = page.getByTestId('workspace-ask-sandbox')
+  await expect(sandbox).toBeVisible({ timeout: 15_000 })
+  await sandbox.click()
+  await expect(page.getByTestId('workspace-ask')).toHaveCount(0, { timeout: 10_000 })
+}

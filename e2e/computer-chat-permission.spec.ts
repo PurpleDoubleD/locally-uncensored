@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { tauriMockInit, type TauriMockOptions } from './support/tauri-mock'
 import { seedOnboardingDone } from './support/cloud-mock'
-import { openNewChat } from './support/ui'
+import { openNewChat, expectWorkspaceAsk, answerWorkspaceAsk } from './support/ui'
 
 /**
  * The first use of computer control in a chat asks the user, as the card of
@@ -53,11 +53,9 @@ async function startAgentChat(page: Page) {
   await page.getByRole('banner').getByRole('button', { name: 'Chat' }).click()
   await openNewChat(page)
   const agentToggle = page.getByRole('main').getByRole('button', { name: 'Agent', exact: true })
-  if (!/Agent Mode is on/i.test((await agentToggle.getAttribute('title')) ?? '')) {
-    await agentToggle.click()
-    const sandbox = page.getByRole('button', { name: /^Sandbox/ })
-    if (await sandbox.isVisible({ timeout: 5_000 }).catch(() => false)) await sandbox.click()
-  }
+  if (!/Agent Mode is on/i.test((await agentToggle.getAttribute('title')) ?? '')) await agentToggle.click()
+  // A new agent chat asks where to work with its first message (3.1.2).
+  expectWorkspaceAsk(page)
   await expect(agentToggle).toHaveAttribute('title', /Agent Mode is on/i, { timeout: 10_000 })
 }
 
@@ -70,6 +68,7 @@ async function send(page: Page, text: string) {
     await composer.press('Enter')
     await expect(composer).toHaveValue('', { timeout: 1_500 })
   }).toPass({ timeout: 20_000 })
+  await answerWorkspaceAsk(page)
 }
 
 async function shot(page: Page, name: string) {

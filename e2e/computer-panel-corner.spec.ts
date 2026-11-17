@@ -3,7 +3,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { tauriMockInit, type TauriMockOptions } from './support/tauri-mock'
 import { seedOnboardingDone } from './support/cloud-mock'
-import { openNewChat, appModules, type AppWindow } from './support/ui'
+import { openNewChat, appModules, type AppWindow, expectWorkspaceAsk, answerWorkspaceAsk } from './support/ui'
 
 /**
  * The panel does not lock its corner of the display.
@@ -82,14 +82,13 @@ async function startTask(page: Page) {
   await openNewChat(page)
   const agentToggle = page.getByRole('main').getByRole('button', { name: 'Agent', exact: true })
   await agentToggle.click()
-  const sandbox = page.getByRole('button', { name: /^Sandbox/ })
-  await expect(sandbox).toBeVisible({ timeout: 15_000 })
-  await sandbox.click()
+  expectWorkspaceAsk(page)
   await expect(agentToggle).toHaveAttribute('title', /Agent Mode is on/i, { timeout: 10_000 })
   const composer = page.locator('textarea').first()
   await expect(composer).toBeEnabled({ timeout: 20_000 })
   await composer.fill('Close the window.')
   await composer.press('Enter')
+  await answerWorkspaceAsk(page)
 }
 
 /** A desktop behind the surface, as behind the see-through window. */

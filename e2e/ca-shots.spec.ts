@@ -1,7 +1,7 @@
 import { test, expect, type Page } from '@playwright/test'
 import { tauriMockInit, DEFAULT_MODEL_NAME } from './support/tauri-mock'
 import { seedOnboardingDone } from './support/cloud-mock'
-import { openNewChat } from './support/ui'
+import { openNewChat, expectWorkspaceAsk, answerWorkspaceAsk } from './support/ui'
 
 /**
  * Pictures of a coding run for the CA review (Code tab and Agent mode), not a
@@ -67,6 +67,7 @@ async function send(page: Page, text: string) {
   await expect(composer).toBeEnabled({ timeout: 20_000 })
   await composer.fill(text)
   await composer.press('Enter')
+  await answerWorkspaceAsk(page)
 }
 
 async function shot(page: Page, name: string) {
@@ -276,8 +277,7 @@ test.describe('CA shots: pinned plan', () => {
       await openNewChat(page)
       const agent = page.getByRole('main').getByRole('button', { name: 'Agent', exact: true })
       await agent.click()
-      const sandbox = page.getByRole('button', { name: /^Sandbox/ })
-      if (await sandbox.isVisible({ timeout: 5_000 }).catch(() => false)) await sandbox.click()
+      expectWorkspaceAsk(page)
       await expect(agent).toHaveAttribute('title', /Agent Mode is on/i, { timeout: 10_000 })
       await send(page, 'median() in src/math.ts is missing, implement it and run the tests')
       await expect(page.getByTestId('plan-pinned').getByTestId('plan-steps')).toBeVisible({ timeout: 30_000 })
