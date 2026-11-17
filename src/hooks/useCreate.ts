@@ -245,6 +245,10 @@ async function runLocalThreeD(state: CreateState, seed: number, abortRef: { curr
       // Stopped by the user: nothing to say.
     } else if (name === 'Mesh3dNoObject') {
       useCreateStore.getState().setError(THREE_D_TEXT.noObject)
+    } else if (name === 'WorkflowUnavailableError') {
+      // Checked before the run (a ComfyUI too old for the graph, a missing
+      // node): the sentence says what to do, a "failed" in front would not.
+      useCreateStore.getState().setError(e instanceof Error ? e.message : String(e))
     } else {
       useCreateStore.getState().setError(`3D failed: ${e instanceof Error ? e.message : String(e)}`)
     }

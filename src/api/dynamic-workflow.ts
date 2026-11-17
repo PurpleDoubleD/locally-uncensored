@@ -2225,6 +2225,29 @@ export const THREE_D_CUTOUT_NODES = ['LoadBackgroundRemovalModel', 'RemoveBackgr
 /** The id of the save node, whose history entry carries the model. */
 export const THREE_D_SAVE_NODE = '900'
 
+/** The choices of a DynamicCombo input in one node's /object_info entry,
+ *  which ComfyUI serves as ["COMFY_DYNAMICCOMBO_V3", { options: [{ key, inputs }] }]
+ *  (comfy_api/latest/_io.py, DynamicCombo.Input.as_dict). A plain combo
+ *  ([[...choices]]) reads too. Null when the entry says nothing readable,
+ *  so a caller can tell "unknown" from "not offered". */
+export function dynamicComboKeys(nodeInfo: unknown, field: string): string[] | null {
+  if (!nodeInfo || typeof nodeInfo !== 'object') return null
+  const input = (nodeInfo as { input?: { required?: Record<string, unknown>; optional?: Record<string, unknown> } }).input
+  const spec = input?.required?.[field] ?? input?.optional?.[field]
+  if (!Array.isArray(spec)) return null
+  if (Array.isArray(spec[0])) return spec[0].filter((k): k is string => typeof k === 'string')
+  const options = (spec[1] as { options?: unknown } | undefined)?.options
+  if (!Array.isArray(options)) return null
+  return options.map((o) => (o as { key?: unknown })?.key).filter((k): k is string => typeof k === 'string')
+}
+
+/** RemeshMesh's sign_mode choice. 'solid' came with ComfyUI 0.42.0; 0.36 to
+ *  0.41 have the TRELLIS.2 nodes and RemeshMesh but offer only udf and sdf.
+ *  Sent there, 'solid' matches no option, ComfyUI drops the input without a
+ *  word and the node fails with "execute() missing 1 required positional
+ *  argument: 'sign_mode'" (3.1.0, reported 17.11.2026). */
+export const THREE_D_SIGN_MODE = 'solid'
+
 function sampler(
   model: [string, number], cond: string, latent: [string, number], seed: number,
   steps: number, cfg: number, scheduler: string,
@@ -2239,6 +2262,12 @@ export function buildThreeDWorkflow(params: ThreeDParams, allNodes: NodePresence
   requireRelease(allNodes, THREE_D_TRELLIS_NODES, THREE_D_NEEDS_UPDATE, 'unavailable')
   requireRelease(allNodes, ['SaveGLB', 'RemeshMesh', 'BakeTextureFromVoxel'], THREE_D_NEEDS_UPDATE, 'unavailable')
   requireNodes(allNodes, THREE_D_NODES, 'Local 3D')
+  // The node is there, but is its remesh choice? Asked of /object_info before
+  // the run, so an older ComfyUI gets the update offer, not a failed run.
+  const signModes = dynamicComboKeys(allNodes.RemeshMesh, 'sign_mode')
+  if (signModes && !signModes.includes(THREE_D_SIGN_MODE)) {
+    throw new WorkflowUnavailableError(THREE_D_NEEDS_UPDATE, 'unavailable', undefined, { needsComfyUpdate: true })
+  }
   if (params.cutout) requireNodes(allNodes, THREE_D_CUTOUT_NODES, 'Local 3D')
   const files = { ...TRELLIS2_FILES, ...params.files }
   const d = THREE_D_DETAIL[params.detail] ?? THREE_D_DETAIL.standard
@@ -2298,7 +2327,7 @@ export function buildThreeDWorkflow(params: ThreeDParams, allNodes: NodePresence
       mesh: ['92', 0], resolution: d.remeshResolution,
       // A DynamicCombo: the choice under its own name, its options as
       // "sign_mode.<name>" (comfy_api/latest/_io.py, finalize_prefix).
-      sign_mode: 'solid', 'sign_mode.fill': 20, 'sign_mode.qef': false,
+      sign_mode: THREE_D_SIGN_MODE, 'sign_mode.fill': 20, 'sign_mode.qef': false,
       band: 1, project_back: 0, fix_poles: false, smooth_iters: 20,
       drop_small_components: 0.01, precluster_max_verts: 20_000_000,
     },
