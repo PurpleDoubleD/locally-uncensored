@@ -197,7 +197,7 @@ import { takeRunNotices } from '../lib/run-notices'
 import { MEMORY_SKILL_PROMPT_LINE, renderSkillsSection, withSkillTools } from '../lib/skill-tools'
 import { useSkillStore } from '../stores/skillStore'
 import { TOOL_SEARCH, TOOL_SEARCH_DEF, briefFor, clearUnlockedTools, runToolSearch, withToolSearch } from '../lib/tool-search'
-import { withChatPersona, samplingPresetFor, speakerCustomParams, speakerPersonaFor } from '../lib/chat-persona'
+import { withChatPersona, samplingPresetFor, speakerCustomParams, speakerPersonaFor, extractionPersonaOf } from '../lib/chat-persona'
 import { injectPersonaNote, noteTokens, personaNoteOf } from '../lib/persona-note'
 
 // ── Hook ──────────────────────────────────────────────────────
@@ -937,6 +937,7 @@ export function useAgentChat() {
     } catch { /* run with whatever the engine has */ }
 
     const memoryScope = store.conversations.find(c => c.id === convId)?.memoryScope
+    const memoryChatOff = store.conversations.find(c => c.id === convId)?.memoryOff === true
 
     // Publish a HUMAN-READABLE slug ("create-an-index-7f2c3d") so
     // built-in tools land in `~/agent-workspace/<slug>/`. Previously
@@ -1188,7 +1189,7 @@ export function useAgentChat() {
       // small-model tool-calling (LongFuncEval, arXiv 2505.10570).
       const memTier = settings.smallModelMode ? Math.min(memContextTokens, 4096) : memContextTokens
       // Embedding-first retrieval; falls back to keyword scoring offline.
-      const selectedMemory = await useMemoryStore.getState().getMemoryContextAsync(userContent, memTier, { scope: memoryScope })
+      const selectedMemory = await useMemoryStore.getState().getMemoryContextAsync(userContent, memTier, { scope: memoryScope, conversationId: convId, chatOff: memoryChatOff })
       // Behind the newest message, not in the system prompt: the pick
       // changes with every message (lib/turn-context.ts, A7).
       memoryContext = selectedMemory.text
@@ -4024,7 +4025,9 @@ export function useAgentChat() {
           toolNames: runState.blocks.flatMap((b) => (b.toolCalls ?? (b.toolCall ? [b.toolCall] : [])).map((call) => call.toolName)),
           sourceKind: 'chat',
         })
-        void extractMemoriesFromPair(pair.user, pair.assistant, convId, { scope: memoryScope, sourceKind: pair.sourceKind }).catch(() => {})
+        const { personas, activePersonaId } = useSettingsStore.getState()
+        const persona = extractionPersonaOf(useChatStore.getState().conversations.find((c) => c.id === convId), personas, activePersonaId, useSettingsStore.getState().settings.personasEnabled !== false)
+        void extractMemoriesFromPair(pair.user, pair.assistant, convId, { scope: memoryScope, sourceKind: pair.sourceKind, persona }).catch(() => {})
       }
 
       // ── /loop driver ───────────────────────────────────────────────────

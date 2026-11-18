@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
-import { Brain, Download, Upload, Trash2, Search, Plus, X, Check, Pencil, Zap, FileJson, Archive, Sparkles } from 'lucide-react'
-import { useMemoryStore, effectiveMemoryBudget, describeMemoryImport } from '../../stores/memoryStore'
+import { Brain, Download, Upload, Trash2, Search, Plus, X, Check, Pencil, Zap, FileJson, Archive, Sparkles, Pin, Send } from 'lucide-react'
+import { useMemoryStore, effectiveMemoryBudget, memoryContextCeiling, describeMemoryImport, memoryCharLimit, MEMORY_CHARS_MIN, MEMORY_CHARS_MAX, MEMORY_TOKEN_BUDGET_MAX } from '../../stores/memoryStore'
 import { useRemoteStore } from '../../stores/remoteStore'
 import { useModelStore } from '../../stores/modelStore'
 import { useProviderStore } from '../../stores/providerStore'
@@ -21,6 +21,8 @@ import { useCloudAuthStore } from '../../stores/cloudAuthStore'
 import { synchronizeMemoryCollection, type MemorySyncResolution } from '../../lib/memory-sync'
 import { reviewPreviousMemories, finalizePreviousMemories, type LegacyMemoryReview } from '../../lib/memory-legacy'
 import { MemoryRowDelete, MemoryUndoBar, useMemoryUndo } from '../chat/MemoryDelete'
+
+const NUMBER_FIELD = 'w-16 px-1.5 py-0.5 rounded bg-gray-100 dark:bg-white/5 border border-gray-300 dark:border-white/10 text-gray-900 dark:text-white text-right placeholder-gray-500 focus:outline-none focus:border-gray-400 dark:focus:border-white/20'
 
 // ── Subtle type indicator (internal, not user-facing) ─────────
 
@@ -98,6 +100,8 @@ function MemorySettingsPanel() {
   const [savedProject, setSavedProject] = useState<string | null>(null)
   const [projectSaveError, setProjectSaveError] = useState(false)
   const { entries, updateMemory, settings, updateMemorySettings, exportAsMarkdown, importFromMarkdown, exportAsJSON, importFromJSON } = useMemoryStore()
+  const pinnedIds = useMemoryStore(state => state.pinnedMemoryIds)
+  const setMemoryPinned = useMemoryStore(state => state.setMemoryPinned)
   const [search, setSearch] = useState('')
   const [confirmClear, setConfirmClear] = useState(false)
   // A27: every delete here can be undone too, same bar as the Memory panel.
@@ -199,16 +203,18 @@ function MemorySettingsPanel() {
     getModelMaxTokens(activeModel).then((ctx) => {
       if (cancelled) return
       const override = settings.maxMemoriesOverride
-      const budget = effectiveMemoryBudget(ctx, override)
-      const manual = override != null && override > 0 ? ' (manual)' : ''
+      const tokenBudget = settings.memoryTokenBudget
+      const budget = effectiveMemoryBudget(ctx, override, tokenBudget)
+      const tokens = Math.min(budget.budgetTokens, memoryContextCeiling(ctx, override, tokenBudget))
+      const manual = (override != null && override > 0) || (tokenBudget != null && tokenBudget > 0) ? ' (manual)' : ''
       if (budget.budgetTokens === 0) {
         setBudgetLabel(`${formatContextWindow(ctx)} ctx, memory injection disabled`)
       } else {
-        setBudgetLabel(`${formatContextWindow(ctx)} ctx, up to ${budget.maxMemories} memories injected${manual}`)
+        setBudgetLabel(`${formatContextWindow(ctx)} ctx, up to ${budget.maxMemories} memories and ${tokens.toLocaleString('en-US')} tokens per request${manual}`)
       }
     }).catch(() => { if (!cancelled) setBudgetLabel('') })
     return () => { cancelled = true }
-  }, [activeModel, settings.maxMemoriesOverride])
+  }, [activeModel, settings.maxMemoriesOverride, settings.memoryTokenBudget])
 
   const isEntryStale = (e: MemoryFile) => e.stale === true || typeof e.supersededBy === 'string'
   const staleCount = entries.filter(isEntryStale).length
@@ -408,8 +414,26 @@ function MemorySettingsPanel() {
         </div>
       </div>
 
+      {/* GH #255: what is SENT has its own switch, apart from extraction. */}
+      <div className="flex items-center justify-between py-0.5">
+        <div className="flex items-center gap-1.5">
+          <Send size={11} className="text-gray-500" />
+          <span className="text-[0.65rem] text-gray-400">Send memories to the model</span>
+        </div>
+        <button
+          role="switch"
+          aria-checked={settings.injectEnabled !== false}
+          aria-label="Send memories to the model"
+          data-testid="memory-inject-enabled"
+          onClick={() => updateMemorySettings({ injectEnabled: settings.injectEnabled === false })}
+          className={`relative w-7 h-3.5 rounded-full transition-colors ${settings.injectEnabled !== false ? 'bg-green-500' : 'bg-gray-300 dark:bg-gray-700'}`}
+        >
+          <span className={`absolute top-0.5 left-0.5 w-2.5 h-2.5 rounded-full bg-white transition-transform ${settings.injectEnabled !== false ? 'translate-x-3.5' : ''}`} />
+        </button>
+      </div>
+
       {/* Context budget indicator */}
-      {contextBudgetLabel && (
+      {contextBudgetLabel && settings.injectEnabled !== false && (
         <div className="text-[0.6rem] text-gray-500 bg-gray-100 dark:bg-white/[0.03] rounded-lg px-2.5 py-1.5 border border-gray-200 dark:border-white/5">
           {contextBudgetLabel}
         </div>
@@ -440,8 +464,47 @@ function MemorySettingsPanel() {
             const n = v === '' ? null : Math.max(1, Math.min(100, Math.floor(Number(v) || 1)))
             updateMemorySettings({ maxMemoriesOverride: n })
           }}
-          className="w-16 px-1.5 py-0.5 rounded bg-gray-100 dark:bg-white/5 border border-gray-300 dark:border-white/10 text-gray-900 dark:text-white text-right placeholder-gray-500 focus:outline-none focus:border-gray-400 dark:focus:border-white/20"
+          className={NUMBER_FIELD}
           title="How many memories to inject into the prompt. Blank = auto (based on your model's context size)."
+        />
+      </div>
+
+      {/* GH #255: the token budget of its own, and the length of one memory.
+          Blank budget = auto (the count above times 150, or the model tier). */}
+      <div className="flex items-center justify-between gap-2 text-[0.6rem] text-gray-500 px-0.5">
+        <span>Memory tokens per request</span>
+        <input
+          type="number"
+          min={100}
+          max={MEMORY_TOKEN_BUDGET_MAX}
+          step={500}
+          data-testid="memory-token-budget"
+          value={settings.memoryTokenBudget || ''}
+          placeholder="Auto"
+          onChange={(e) => {
+            const v = e.target.value.trim()
+            const n = v === '' ? null : Math.max(100, Math.min(MEMORY_TOKEN_BUDGET_MAX, Math.floor(Number(v) || 100)))
+            updateMemorySettings({ memoryTokenBudget: n })
+          }}
+          className={`${NUMBER_FIELD} w-20`}
+          title="How many tokens all memories together may take in one request, up to half of the model's context. Blank = auto."
+        />
+      </div>
+      <div className="flex items-center justify-between gap-2 text-[0.6rem] text-gray-500 px-0.5">
+        <span>Characters per memory</span>
+        <input
+          type="number"
+          min={MEMORY_CHARS_MIN}
+          max={MEMORY_CHARS_MAX}
+          step={100}
+          data-testid="memory-max-chars"
+          value={memoryCharLimit(settings.maxMemoryChars)}
+          onChange={(e) => {
+            const n = Number(e.target.value)
+            if (Number.isFinite(n) && n > 0) updateMemorySettings({ maxMemoryChars: memoryCharLimit(n) })
+          }}
+          className={`${NUMBER_FIELD} w-20`}
+          title="A longer memory is cut at the end of a sentence, and the prompt says that it was cut."
         />
       </div>
 
@@ -514,6 +577,14 @@ function MemorySettingsPanel() {
           }} className="block rounded border p-1">Save project assignment</button>
           {savedProject === JSON.stringify([conversation.id, conversation.memoryScope]) && <span role="status">Project assignment saved</span>}
           {projectSaveError && <span role="alert">Could not verify the saved project assignment. Try again before closing the app.</span>}
+        </label>
+      )}
+      {conversation && (
+        <label className="flex items-center gap-2 text-xs text-gray-500">
+          <input type="checkbox" data-testid="memory-chat-send"
+            checked={conversation.memoryOff !== true}
+            onChange={e => useChatStore.getState().setConversationMemoryOff(conversation.id, !e.target.checked)} />
+          Send memories in this conversation
         </label>
       )}
       <p className="text-xs text-gray-500">Mark sensitive memories to exclude them from AI requests and embeddings. This does not detect secrets automatically or erase earlier requests. Markdown export omits sensitive and project-scoped entries; JSON export preserves their flags and scope.</p>
@@ -667,6 +738,18 @@ function MemorySettingsPanel() {
               {/* Always visible (A27): behind `group-hover` they never showed
                   where WebKitGTK reports no hover (MemoryDelete.tsx). */}
               <div className="flex items-center gap-0.5 shrink-0">
+                {!stale && (
+                  <button
+                    onClick={() => setMemoryPinned(entry.id, !pinnedIds.includes(entry.id))}
+                    aria-pressed={pinnedIds.includes(entry.id)}
+                    aria-label={pinnedIds.includes(entry.id) ? 'Unpin: send only when it fits the question' : 'Pin: always send'}
+                    title={pinnedIds.includes(entry.id) ? 'Always sent. Click to send it only when it fits the question.' : 'Always send this memory'}
+                    className={`p-0.5 rounded hover:bg-white/10 ${pinnedIds.includes(entry.id) ? 'text-purple-500 dark:text-purple-300' : 'text-gray-600 hover:text-gray-300'}`}
+                    data-testid="memory-pin"
+                  >
+                    <Pin size={10} />
+                  </button>
+                )}
                 {/* Outdated entries are read-only — no edit affordance. */}
                 {!stale && (
                   <button

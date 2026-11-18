@@ -17,6 +17,7 @@ import { isMobile } from '../lib/device-kind'
 import { isThinkingCompatible } from '../lib/model-compatibility'
 import {
   buildExtractionPrompt,
+  extractionContextRules,
   PHONE_EXTRACTION_RULES,
   alreadyKept,
   plainSelfStatement,
@@ -159,6 +160,11 @@ export async function extractMemoriesFromPair(
      * Every other gate does.
      */
     digest?: boolean
+    /**
+     * GH #255: the persona the chat speaks as (lib/chat-persona.ts,
+     * extractionPersonaOf). The extraction spells its names the way it does.
+     */
+    persona?: { name: string; text: string }
   },
 ): Promise<void> {
   const scope = options.scope
@@ -284,7 +290,8 @@ export async function extractMemoriesFromPair(
         const existingSummary = useMemoryStore.getState().entries
           .filter(e => !e.sensitive && !e.stale && e.scope === scope)
           .slice(-20).map(e => `- [${e.type}] ${e.title}`).join('\n')
-        const messages = buildExtractionPrompt(userMessage, assistantResponse, existingSummary, phone ? PHONE_EXTRACTION_RULES : [])
+        const rules = [...extractionContextRules(options.persona), ...(phone ? PHONE_EXTRACTION_RULES : [])]
+        const messages = buildExtractionPrompt(userMessage, assistantResponse, existingSummary, rules)
         // Collect full response via streaming
         let fullResponse = ''
         const stream = provider.chatStream(modelId, messages, {

@@ -228,6 +228,10 @@ export interface MemorySettings {
   autoExtractEnabled: boolean    // default true, costs extra inference
   autoExtractInAllModes: boolean // default true, also extract outside agent mode
   maxMemoriesInPrompt: number    // default 10 (legacy; retrieval uses the budget tier / override)
+  // Most characters of ONE memory that go into a prompt (GH #255). A longer
+  // memory is cut at the end of a sentence and the cut is marked, in the
+  // prompt and in the brain icon's preview. Until 3.1.2 this setting existed
+  // and nothing read it: every memory was cut at 500 characters without a mark.
   maxMemoryChars: number         // default 3000
   // User override for how many memories get injected into the prompt. null =
   // auto (derive from the model's context size via MEMORY_BUDGET_TIERS).
@@ -235,6 +239,13 @@ export interface MemorySettings {
   // (2026-06-07). The token budget scales with it so the extra entries
   // actually fit. Optional for back-compat with pre-2.5.1 persisted settings.
   maxMemoriesOverride?: number | null
+  // Tokens the memory block may take in one request (GH #255). null = auto:
+  // the count above times 150, or the tier of the model's window. Set, it is
+  // the budget on its own, up to half of the model's window.
+  memoryTokenBudget?: number | null
+  // false = no memory goes into any request (GH #255). Extraction has its own
+  // switches; this one only decides what is SENT. Missing = on, as before.
+  injectEnabled?: boolean
 }
 
 // Migration map: old category → new type

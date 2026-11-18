@@ -9,6 +9,10 @@ afterEach(() => __setMemoryEmbedFn())
 const add = (scope?: string, content = 'Project fixture') => useMemoryStore.getState().addMemory({
   type: 'project', title: content, description: content, content, tags: [], source: 'manual', scope,
 })
+/** Written by the extractor: only these may be merged (GH #255). */
+const addAuto = (scope?: string, content = 'Project fixture') => useMemoryStore.getState().addMemory({
+  type: 'project', title: content, description: content, content, tags: [], source: 'conv-1', sourceKind: 'chat', scope,
+})
 
 it('includes global and exact-project entries without crossing project boundaries', async () => {
   add(undefined, 'Global fixture')
@@ -37,17 +41,17 @@ it('preserves JSON scope and never promotes malformed scope to global', () => {
   expect(useMemoryStore.getState().exportAsMarkdown()).not.toContain('Project fixture')
 })
 it('rejects cross-project automatic merges and accepts matching scopes', () => {
-  const targetId = add('A')
-  const wrongId = add('B')
+  const targetId = addAuto('A')
+  const wrongId = addAuto('B')
   const decision = { action: 'UPDATE' as const, targetId, mergedContent: 'Merged fixture' }
   useMemoryStore.getState().applyWriteDecision(decision, { newId: wrongId })
   expect(useMemoryStore.getState().entries[0].content).toBe('Project fixture')
-  const newId = add('A', 'New fixture')
+  const newId = addAuto('A', 'New fixture')
   useMemoryStore.getState().applyWriteDecision(decision, { newId })
   expect(useMemoryStore.getState().entries[0].content).toBe('Merged fixture')
 })
 it('R2-36: an UPDATE without a candidate still merges (no ctx.newId to compare scope against)', () => {
-  const targetId = add('A')
+  const targetId = addAuto('A')
   const decision = { action: 'UPDATE' as const, targetId, mergedContent: 'Merged fixture' }
   useMemoryStore.getState().applyWriteDecision(decision)
   expect(useMemoryStore.getState().entries[0].content).toBe('Merged fixture')

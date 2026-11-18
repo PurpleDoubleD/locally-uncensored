@@ -75,6 +75,23 @@ export function plainChatSpeaker(
   return persona ? { id: persona.id, name: persona.name } : undefined
 }
 
+/**
+ * GH #255: the persona a chat speaks as, for the memory extraction: its name
+ * and its text, read for the spelling of names. Undefined exactly when
+ * `plainChatSpeaker` is, so the extraction never names a persona the chat
+ * prompt does not use.
+ */
+export function extractionPersonaOf(
+  conv: { personaId?: string; systemPrompt?: string | null; personaEnabled?: boolean } | undefined,
+  personas: readonly Persona[],
+  activePersonaId: string | undefined,
+  personasOn: boolean,
+): { name: string; text: string } | undefined {
+  if (!conv || !plainChatSpeaker(conv, personas, activePersonaId, personasOn)) return undefined
+  const resolved = resolveChatPersona(conv, personas, activePersonaId)
+  return resolved.persona ? { name: resolved.persona.name, text: resolved.prompt } : undefined
+}
+
 /** The conversation as `buildChatSystemPrompt` should see it: the same object
  *  with the resolved prompt in place of the kept copy. */
 export function withChatPersona<T extends { personaId?: string; systemPrompt?: string | null }>(

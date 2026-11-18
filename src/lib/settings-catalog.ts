@@ -406,7 +406,9 @@ export const CATALOG: readonly CatalogEntry[] = [
   e('memory.autoExtractEnabled', 'Remember facts automatically', 'agent', 'Save memories from chats by itself. Costs one extra model call per answer.', bool(), { store: 'memory', area: 'memory' }),
   e('memory.autoExtractInAllModes', 'Remember outside Agent', 'agent', 'Also save memories from plain chats.', bool(), { store: 'memory', area: 'memory' }),
   e('memory.maxMemoriesOverride', 'Memories per prompt', 'agent', 'How many memories go into a prompt; 0 = fits the model.', int(0, 100, '', 'auto'), { store: 'memory', area: 'memory' }),
-  e('memory.maxMemoryChars', 'Memory length', 'agent', 'Most characters of one memory.', int(200, 20_000, 'chars'), { store: 'memory', area: 'memory' }),
+  e('memory.maxMemoryChars', 'Memory length', 'agent', 'Most characters of one memory in a prompt; a longer one is cut at a sentence and marked.', int(200, 20_000, 'chars'), { store: 'memory', area: 'memory' }),
+  e('memory.memoryTokenBudget', 'Memory tokens per request', 'agent', 'Tokens all memories may take in one request, up to half the window; 0 = auto.', int(0, 200_000, 'tokens', 'auto'), { store: 'memory', area: 'memory', applies: 'next-message', lockOverride: 'A number of tokens, not a token.' }),
+  e('memory.injectEnabled', 'Send memories', 'agent', 'Send memories to the model at all. Extraction has its own switches.', bool(), { store: 'memory', area: 'memory', applies: 'next-message' }),
 
   // GPU per task (Card per task, 3.0.8 A2). The card list comes from the
   // hardware detection; settings-stores.ts loads it before the parse.

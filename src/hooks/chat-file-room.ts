@@ -68,7 +68,7 @@ async function roomForModel(model: string, use: WindowUse, otherTokens: number):
   if (!(window > 0)) window = await getModelMaxTokens(model)
   // GH #238: a memory override lets the memory block grow past the 1k this
   // reserve was sized for, up to a tenth of the window.
-  const memoryCeiling = memoryContextCeiling(window, useMemoryStore.getState().settings.maxMemoriesOverride)
+  const memoryCeiling = memoryContextCeiling(window, useMemoryStore.getState().settings.maxMemoriesOverride, useMemoryStore.getState().settings.memoryTokenBudget)
   const reserved = otherTokens + Math.max(0, memoryCeiling - MEMORY_CONTEXT_TOKEN_CAP)
   const providerId = getProviderIdFromModel(model)
   const budget = effectiveSendWindow({

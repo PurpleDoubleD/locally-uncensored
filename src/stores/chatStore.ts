@@ -237,6 +237,8 @@ interface ChatState {
   markFromPhone: (conversationId: string, messageId: string) => void
   setActiveConversation: (id: string | null) => void
   setConversationMemoryScope: (id: string, scope?: string) => void
+  /** GH #255: switch the memories of one chat off (true) or on again. */
+  setConversationMemoryOff: (id: string, off: boolean) => void
   /** Toggle the active persona on/off for a specific chat — mirrors the
    *  mobile chat's `personaEnabled` flag so the user can suppress the
    *  persona's systemPrompt without changing the global Settings
@@ -638,6 +640,15 @@ export const useChatStore = create<ChatState>()(
             ? { ...c, memoryScope: value || undefined, updatedAt: Date.now() } : c),
         }))
       },
+      setConversationMemoryOff: (id, off) => set(state => ({
+        conversations: state.conversations.map(c => {
+          if (c.id !== id) return c
+          const next = { ...c }
+          if (off) next.memoryOff = true
+          else delete next.memoryOff
+          return next
+        }),
+      })),
 
       selectGreeting: (conversationId, messageId, index) =>
         set((state) => ({

@@ -277,6 +277,8 @@ export interface Conversation {
   id: string
   /** Stable user-assigned project ID for memory retrieval and extraction. */
   memoryScope?: string
+  /** GH #255: true = this chat sends no memories. Missing = it does. */
+  memoryOff?: boolean
   title: string
   messages: Message[]
   model: string

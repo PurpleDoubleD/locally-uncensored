@@ -51,7 +51,8 @@ export function readEntry(entry: CatalogEntry): unknown {
     }
     case 'memory': {
       const v = (useMemoryStore.getState().settings as unknown as Record<string, unknown>)[field(entry)]
-      return entry.key === 'memory.maxMemoriesOverride' ? (v ?? 0) : v
+      if (entry.key === 'memory.injectEnabled') return v !== false
+      return entry.key === 'memory.maxMemoriesOverride' || entry.key === 'memory.memoryTokenBudget' ? (v ?? 0) : v
     }
     case 'permission':
       return usePermissionStore.getState().globalPermissions[field(entry) as ToolCategory]
@@ -128,7 +129,7 @@ export function writeEntry(entry: CatalogEntry, value: unknown): void {
       }
     }
     case 'memory': {
-      const v = entry.key === 'memory.maxMemoriesOverride' && value === 0 ? null : value
+      const v = (entry.key === 'memory.maxMemoriesOverride' || entry.key === 'memory.memoryTokenBudget') && value === 0 ? null : value
       useMemoryStore.getState().updateMemorySettings({ [field(entry)]: v } as never)
       return
     }

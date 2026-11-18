@@ -26,6 +26,7 @@
 
 import type { MemoryFile, MemoryType } from "../types/agent-mode"
 import { cosineSimilarity, bm25Score } from "../api/rag"
+import { hasCjk, searchTermList } from "./search-terms"
 
 // ── Tunable weights & thresholds (NAMED CONSTANTS) ────────────────
 // NOTE: these are first-pass values. They need live MV3/MV4 validation
@@ -171,7 +172,10 @@ export function scoreMemoriesBlended(
       ? cosineSimilarity(queryVec, c.vector)
       : 0,
   )
-  const rawKeyword = pool.map((_, i) => bm25Score(query, docTexts[i], docTexts))
+  // GH #255: a question in Japanese, Chinese or Korean is cut into pairs of
+  // characters; one without such characters keeps the words between spaces.
+  const terms = hasCjk(query) ? searchTermList : undefined
+  const rawKeyword = pool.map((_, i) => bm25Score(query, docTexts[i], docTexts, terms))
   const rawRecency = pool.map((c) => recencyScore(c.memory.updatedAt, now))
 
   // ── Normalize each signal to 0..1 across the candidate set ─────

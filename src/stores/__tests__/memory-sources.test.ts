@@ -15,14 +15,17 @@ it('reports only IDs whose rows fit the final rendered budget, not matching titl
 })
 
 it('does not report header-only blocks or oversized candidates as context', () => {
-  expect(renderMemoryContext([entry('large', { content: 'x'.repeat(5000) })], 20)).toEqual({ text: '', memoryIds: [] })
-  expect(renderMemoryContext([entry('zero')], 0)).toEqual({ text: '', memoryIds: [] })
+  expect(renderMemoryContext([entry('large', { content: 'x'.repeat(5000) })], 20)).toMatchObject({ text: '', memoryIds: [], leftOut: ['large'] })
+  expect(renderMemoryContext([entry('zero')], 0)).toMatchObject({ text: '', memoryIds: [] })
 })
 
 it('reports an ID when its sanitized and truncated content fits', () => {
+  // GH #255: cut at the per-memory limit (default 3000), not at 500, and marked.
   const result = renderMemoryContext([entry('trimmed', { content: 'x'.repeat(5000) })], 4000)
   expect(result.memoryIds).toEqual(['trimmed'])
-  expect(result.text.length).toBeLessThan(1000)
+  expect(result.shortened).toEqual(['trimmed'])
+  expect(result.text).toContain('[cut: 3000 of 5000 characters]')
+  expect(result.text.length).toBeLessThan(3200)
 })
 
 it('retrieval IDs preserve scope and sensitive/stale filtering', async () => {

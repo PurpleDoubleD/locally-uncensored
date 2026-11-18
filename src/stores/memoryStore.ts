@@ -16,6 +16,7 @@ import { charsPerToken } from '../lib/token-estimate'
 import { useCloudAuthStore } from './cloudAuthStore'
 import type { MemorySyncBaseline } from '../lib/memory-sync-plan'
 import { forgetMark, isForgotten, liftForgotten, readForgotten, withForgotten, type ForgottenMemory } from '../lib/memory-forget'
+import { hasCjk as hasCjkQuery, searchTerms } from '../lib/search-terms'
 
 // ── Embedding model + dim (mirrors rag.ts default) ────────────────
 const MEMORY_EMBED_MODEL = 'nomic-embed-text'
@@ -53,6 +54,45 @@ export interface MemoryInjectOpts {
    * tools actually exist.
    */
   excludeToolResults?: boolean
+  /**
+   * The chat this request belongs to. What was sent is kept per chat, so the
+   * brain icon shows what the last request of THIS chat carried (GH #255).
+   */
+  conversationId?: string
+  /** The chat's own switch is off (Conversation.memoryOff): nothing is sent. */
+  chatOff?: boolean
+}
+
+/**
+ * What one request carried, per chat, for the brain icon (GH #255). Kept for
+ * the session only. `leftOut` are memories that belonged to the question but
+ * did not fit the count or the token budget; `shortened` reached the model
+ * cut at the per-memory limit, with a mark.
+ */
+export interface MemoryInjectionReport {
+  at: number
+  text: string
+  sent: string[]
+  leftOut: string[]
+  shortened: string[]
+  /** Memories this chat may receive at all (scope, sensitive, outdated). */
+  eligible: number
+  tokens: number
+  budget: number
+  /** Why nothing was sent: switched off app wide, or for this chat. */
+  off?: 'all' | 'chat'
+}
+
+/**
+ * A memory the user wrote or imported, not one the extractor wrote. Only an
+ * automatic writer sets `sourceKind` without the source "manual" (useMemory);
+ * the phone's "remember this" sets both and is the user's own words. A record
+ * from before `sourceKind` existed counts as written by hand, so the doubt
+ * always protects the text (GH #255: the merge step turned a hand-written
+ * story day of 1,200 characters into two English sentences).
+ */
+export function isHandWritten(m: Pick<MemoryFile, 'source' | 'sourceKind'>): boolean {
+  return m.source === 'manual' || m.sourceKind === undefined
 }
 
 /**
@@ -225,16 +265,62 @@ function fillWithUserNotes(matched: MemoryFile[], candidates: MemoryFile[], maxM
  * entries actually fit, and allows all types, so the user isn't locked to
  * "32k ctx = 15 memories" (2026-06-07). Exported for unit testing.
  */
-export function effectiveMemoryBudget(contextTokens: number, override?: number | null): MemoryBudgetTier {
+export function effectiveMemoryBudget(contextTokens: number, override?: number | null, tokenBudget?: number | null): MemoryBudgetTier {
   const tier = getMemoryBudget(contextTokens)
-  if (override == null || override <= 0) return tier
-  const n = Math.floor(override)
+  const count = override != null && override > 0 ? Math.floor(override) : null
+  const tokens = tokenBudget != null && tokenBudget > 0 ? Math.floor(tokenBudget) : null
+  if (count === null && tokens === null) return tier
   return {
     ...tier,
-    maxMemories: n,
-    budgetTokens: Math.max(tier.budgetTokens, n * 150),
+    // GH #255: a token budget without a count lets the tokens decide; the
+    // count then stops only at the largest number the count field takes.
+    maxMemories: count ?? MEMORY_COUNT_MAX,
+    budgetTokens: tokens ?? Math.max(tier.budgetTokens, (count ?? 0) * 150),
     typesAllowed: 'all',
   }
+}
+
+/** The largest count "Max memories injected" takes. */
+export const MEMORY_COUNT_MAX = 100
+
+/** The largest token budget the setting takes, and its share of the window. */
+export const MEMORY_TOKEN_BUDGET_MAX = 200_000
+export const MEMORY_TOKEN_BUDGET_WINDOW_SHARE = 0.5
+
+/** Characters of one memory in a prompt: the setting's range and default. */
+export const MEMORY_CHARS_MIN = 200
+export const MEMORY_CHARS_MAX = 20_000
+export const MEMORY_CHARS_DEFAULT = 3000
+
+export function memoryCharLimit(setting: unknown): number {
+  const n = typeof setting === 'number' && Number.isFinite(setting) ? Math.floor(setting) : MEMORY_CHARS_DEFAULT
+  return Math.min(MEMORY_CHARS_MAX, Math.max(MEMORY_CHARS_MIN, n))
+}
+
+/**
+ * One memory, cut to `maxChars` when it is longer (GH #255).
+ *
+ * Until 3.1.2 every memory was cut at character 500, mid-sentence and without
+ * a mark, so the model answered half a story day as if it were the whole. The
+ * cut now falls on the end of a sentence in the last third before the limit
+ * (Japanese and Chinese stops count), else on a space, and the line says that
+ * it was cut and how much is missing.
+ */
+export function fitMemoryText(text: string, maxChars: number): { text: string; cut: boolean } {
+  const chars = [...text]
+  if (chars.length <= maxChars) return { text, cut: false }
+  const head = chars.slice(0, maxChars).join('')
+  const floor = Math.floor(head.length * 0.66)
+  let end = -1
+  for (const m of head.matchAll(/[.!?。！？](?=\s|$|[^.!?。！？])|\n/g)) {
+    if (m.index !== undefined && m.index >= floor) end = m.index + 1
+  }
+  if (end < 0) {
+    const space = head.lastIndexOf(' ')
+    end = space >= floor ? space : head.length
+  }
+  const kept = head.slice(0, end).trimEnd()
+  return { text: `${kept} [cut: ${[...kept].length} of ${chars.length} characters]`, cut: true }
 }
 
 // ── Injection Sanitization ────────────────────────────────────
@@ -255,8 +341,8 @@ function sanitizeForInjection(text: string): string {
     .replace(/^#{1,6}\s/gm, '\\# ')
     // Collapse multiple newlines
     .replace(/\n{3,}/g, '\n\n')
-    // Truncate per entry
-    .substring(0, 500)
+    // The length limit is not here any more: fitMemoryText cuts at the
+    // user's setting and marks the cut (GH #255).
     .trim()
 }
 
@@ -327,7 +413,14 @@ export const MEMORY_OVERRIDE_CONTEXT_SHARE = 0.1
 
 /** The ceiling of the memory block for this window and override. Without an
  *  override it is MEMORY_CONTEXT_TOKEN_CAP, as before. */
-export function memoryContextCeiling(contextTokens: number, override?: number | null): number {
+export function memoryContextCeiling(contextTokens: number, override?: number | null, tokenBudget?: number | null): number {
+  // GH #255: a token budget the user set is the ceiling itself, up to half of
+  // the window (the rest must hold the chat). Unknown window: the budget.
+  if (tokenBudget != null && tokenBudget > 0) {
+    const wanted = Math.min(Math.floor(tokenBudget), MEMORY_TOKEN_BUDGET_MAX)
+    const half = Number.isFinite(contextTokens) && contextTokens > 0 ? Math.floor(contextTokens * MEMORY_TOKEN_BUDGET_WINDOW_SHARE) : wanted
+    return Math.max(1, Math.min(wanted, half))
+  }
   if (override == null || !(override > 0)) return MEMORY_CONTEXT_TOKEN_CAP
   const share = Number.isFinite(contextTokens) && contextTokens > 0 ? Math.floor(contextTokens * MEMORY_OVERRIDE_CONTEXT_SHARE) : 0
   return Math.max(MEMORY_CONTEXT_TOKEN_CAP, share)
@@ -351,9 +444,24 @@ export interface MemoryContext {
   owner?: string
 }
 
-export function renderMemoryContext(ordered: MemoryFile[], budgetTokens: number, ceilingTokens: number = MEMORY_CONTEXT_TOKEN_CAP): MemoryContext {
-  if (ordered.length === 0) return { text: '', memoryIds: [] }
+/** What renderMemoryContext also works out, for the report (GH #255). */
+export interface RenderedMemoryContext extends MemoryContext {
+  /** In `ordered` but over the token budget. */
+  leftOut: string[]
+  /** Sent, but cut at the per-memory limit. */
+  shortened: string[]
+  tokens: number
+  budget: number
+}
+
+/** Estimated tokens of a text, with the same density the budget uses. */
+function estimateTokens(text: string): number {
+  return text ? Math.ceil(text.length / charsPerToken(text)) : 0
+}
+
+export function renderMemoryContext(ordered: MemoryFile[], budgetTokens: number, ceilingTokens: number = MEMORY_CONTEXT_TOKEN_CAP, maxChars: number = MEMORY_CHARS_DEFAULT): RenderedMemoryContext {
   const cappedTokens = Math.min(budgetTokens, ceilingTokens)
+  if (ordered.length === 0) return { text: '', memoryIds: [], leftOut: [], shortened: [], tokens: 0, budget: cappedTokens }
 
   // Group by type for structured output (preserve incoming order within type).
   const grouped: Record<MemoryType, MemoryFile[]> = {
@@ -367,6 +475,7 @@ export function renderMemoryContext(ordered: MemoryFile[], budgetTokens: number,
   const overBudget = (text: string) => text.length > cappedTokens * charsPerToken(text)
   let result = ''
   const memoryIds: string[] = []
+  const shortened: string[] = []
 
   for (const type of TYPE_ORDER) {
     const items = grouped[type]
@@ -374,26 +483,39 @@ export function renderMemoryContext(ordered: MemoryFile[], budgetTokens: number,
 
     const header = `### ${TYPE_SECTION_HEADERS[type]}\n`
     if (overBudget(result + header)) break
-    result += header
+    let section = header
 
     for (const item of items) {
-      const sanitized = sanitizeForInjection(item.content).replace(/\n/g, ' ')
-      const line = `- ${item.title}: ${sanitized}\n`
-      if (overBudget(result + line)) break
-      result += line
+      const clean = sanitizeForInjection(item.content)
+      const lineOf = (fit: { text: string }) => `- ${item.title}: ${fit.text.replace(/\n/g, ' ')}\n`
+      let fitted = fitMemoryText(clean, maxChars)
+      let line = lineOf(fitted)
+      if (overBudget(result + section + line)) {
+        // The rest of the budget holds part of it: that part goes, cut at a
+        // sentence and marked, rather than nothing.
+        const before = result + section
+        const room = Math.floor(cappedTokens * charsPerToken(before + line)) - before.length - item.title.length - 48
+        if (room >= MEMORY_CHARS_MIN) {
+          fitted = fitMemoryText(clean, Math.min(maxChars, room))
+          line = lineOf(fitted)
+        }
+      }
+      // A memory that does not fit is left out and named in the report; a
+      // shorter one behind it may still fit (GH #255: the budget used to stop
+      // at the first one that did not, without a word).
+      if (overBudget(result + section + line)) continue
+      section += line
       memoryIds.push(item.id)
+      if (fitted.cut) shortened.push(item.id)
     }
-    result += '\n'
+    if (section !== header) result += `${section}\n`
   }
 
-  if (memoryIds.length === 0) return { text: '', memoryIds: [] }
-  return { text: `<remembered_context>\n${result.trim()}\n</remembered_context>`, memoryIds }
-}
-
-function renderRememberedContext(ordered: MemoryFile[], budgetTokens: number, ceilingTokens: number, onInjected?: MemoryInjectOpts['onInjected']): string {
-  const context = renderMemoryContext(ordered, budgetTokens, ceilingTokens)
-  onInjected?.(context.memoryIds)
-  return context.text
+  const sent = new Set(memoryIds)
+  const leftOut = ordered.filter(m => !sent.has(m.id)).map(m => m.id)
+  if (memoryIds.length === 0) return { text: '', memoryIds: [], leftOut, shortened: [], tokens: 0, budget: cappedTokens }
+  const text = `<remembered_context>\n${result.trim()}\n</remembered_context>`
+  return { text, memoryIds, leftOut, shortened, tokens: estimateTokens(text), budget: cappedTokens }
 }
 
 // ── Store Interface ───────────────────────────────────────────
@@ -425,6 +547,15 @@ interface MemoryState {
   lastSynced: number
   /** Marks of deleted memories, see lib/memory-forget.ts. Hashes, never text. */
   forgotten: ForgottenMemory[]
+  /**
+   * Memories pinned "always send" (GH #255). Ids, kept apart from the records
+   * so the cloud sync format stays as it is; an id of a deleted memory is
+   * dropped with it.
+   */
+  pinnedMemoryIds: string[]
+  setMemoryPinned: (id: string, pinned: boolean) => void
+  /** What the last request of each chat carried, this session only (GH #255). */
+  lastInjection: Record<string, MemoryInjectionReport>
 
   // CRUD
   /** `auto`: the writer is the extractor, not the user, so a deleted fact is refused. */
@@ -759,6 +890,63 @@ function isoBack(tag: string | undefined): number | null {
 }
 
 
+// ── Selection helpers (GH #255) ───────────────────────────────
+
+/** Off app wide (Settings > Memory) or for this chat. */
+function injectionOff(settings: MemorySettings, opts?: MemoryInjectOpts): 'all' | 'chat' | undefined {
+  if (settings.injectEnabled === false) return 'all'
+  if (opts?.chatOff) return 'chat'
+  return undefined
+}
+
+/** Memories this request may carry at all. An entry that only says something
+ *  is unknown would outvote the real fact next to it (memory-gap.ts, AG10). */
+function eligibleMemories(entries: MemoryFile[], opts?: MemoryInjectOpts): MemoryFile[] {
+  const out = entries.filter(e => !e.sensitive && !isStale(e) && !onlyStatesAGap(e) && memoryMatchesScope(e, opts?.scope))
+  return opts?.excludeToolResults ? out.filter(e => !isToolResultMemory(e)) : out
+}
+
+/** The pinned ones among them, newest first. They go into every request
+ *  before anything the search picked, and do not count against the count. */
+function pinnedOf(eligible: MemoryFile[], ids: readonly string[]): MemoryFile[] {
+  if (ids.length === 0) return []
+  const pinned = new Set(ids)
+  return eligible.filter(e => pinned.has(e.id)).sort((a, b) => b.updatedAt - a.updatedAt)
+}
+
+function recordInjection(opts: MemoryInjectOpts | undefined, report: MemoryInjectionReport): void {
+  const id = opts?.conversationId
+  if (!id) return
+  useMemoryStore.setState(state => ({ lastInjection: { ...state.lastInjection, [id]: report } }))
+}
+
+function reportNothing(opts: MemoryInjectOpts | undefined, off?: 'all' | 'chat'): string {
+  recordInjection(opts, { at: Date.now(), text: '', sent: [], leftOut: [], shortened: [], eligible: 0, tokens: 0, budget: 0, ...(off ? { off } : {}) })
+  return ''
+}
+
+/** Render, tell the caller and the report, return the block. Both retrieval
+ *  paths end here, so the brain icon always shows what was really sent. */
+function deliverMemories(input: {
+  ordered: MemoryFile[]
+  overCount: MemoryFile[]
+  eligible: number
+  budget: MemoryBudgetTier
+  contextTokens: number
+  opts?: MemoryInjectOpts
+}): string {
+  const { settings } = useMemoryStore.getState()
+  const ceiling = memoryContextCeiling(input.contextTokens, settings.maxMemoriesOverride, settings.memoryTokenBudget)
+  const context = renderMemoryContext(input.ordered, input.budget.budgetTokens, ceiling, memoryCharLimit(settings.maxMemoryChars))
+  input.opts?.onInjected?.(context.memoryIds)
+  recordInjection(input.opts, {
+    at: Date.now(), text: context.text, sent: context.memoryIds,
+    leftOut: [...context.leftOut, ...input.overCount.map(m => m.id)],
+    shortened: context.shortened, eligible: input.eligible, tokens: context.tokens, budget: context.budget,
+  })
+  return context.text
+}
+
 // ── Store ─────────────────────────────────────────────────────
 
 export const useMemoryStore = create<MemoryState>()(
@@ -801,6 +989,13 @@ export const useMemoryStore = create<MemoryState>()(
       },
       lastSynced: 0,
       forgotten: [],
+      pinnedMemoryIds: [],
+      lastInjection: {},
+      setMemoryPinned: (id, pinned) => set((state) => {
+        const has = state.pinnedMemoryIds.includes(id)
+        if (pinned === has || (pinned && !state.entries.some(e => e.id === id))) return {}
+        return { pinnedMemoryIds: pinned ? [...state.pinnedMemoryIds, id] : state.pinnedMemoryIds.filter(p => p !== id) }
+      }),
 
       // ── CRUD ────────────────────────────────────────────────
 
@@ -887,6 +1082,7 @@ export const useMemoryStore = create<MemoryState>()(
           entries: state.entries.filter((e) => !wanted.has(e.id)),
           forgotten: withForgotten(state.forgotten, entries.map(e => forgetMark(e, now))),
           lastSynced: now,
+          ...(state.pinnedMemoryIds.some(id => wanted.has(id)) ? { pinnedMemoryIds: state.pinnedMemoryIds.filter(id => !wanted.has(id)) } : {}),
         })
         if (entries.length === state.entries.length) void clearAllVectors()
         else for (const entry of entries) void deleteVector(entry.id)
@@ -918,7 +1114,8 @@ export const useMemoryStore = create<MemoryState>()(
       // ── Search ──────────────────────────────────────────────
 
       searchMemories: (query, options) => {
-        const words = query.toLowerCase().split(/\s+/).filter(w => w.length > 2)
+        // GH #255: pairs of characters for Japanese, Chinese and Korean.
+        const words = searchTerms(query)
         let results = get().entries
 
         // Filter by type
@@ -946,20 +1143,24 @@ export const useMemoryStore = create<MemoryState>()(
       // IndexedDB. getMemoriesForPromptAsync below layers embedding-blended
       // ordering on top and degrades to exactly this output on any error.
       getMemoriesForPrompt: (query, contextTokens, opts) => {
-        const budget = effectiveMemoryBudget(contextTokens, get().settings.maxMemoriesOverride)
+        const { settings } = get()
+        const budget = effectiveMemoryBudget(contextTokens, settings.maxMemoriesOverride, settings.memoryTokenBudget)
+        const off = injectionOff(settings, opts)
+        if (off) return reportNothing(opts, off)
 
         // No budget for tiny models
-        if (budget.budgetTokens === 0 || budget.maxMemories === 0) return ''
+        if (budget.budgetTokens === 0 || budget.maxMemories === 0) return reportNothing(opts)
 
         // A phone has only this path, so its words are taken without the
-        // punctuation ("drink?" must find "drink"). The desktop keeps its split.
-        const words = singleModelSlot() ? queryWords(query) : query.toLowerCase().split(/\s+/).filter(w => w.length > 2)
-        // An entry that only says something is unknown would outvote the real
-        // fact next to it (memory-gap.ts, CA bench AG10).
-        let candidates = get().entries.filter(e => !e.sensitive && !isStale(e) && !onlyStatesAGap(e) && memoryMatchesScope(e, opts?.scope))
-        if (opts?.excludeToolResults) {
-          candidates = candidates.filter(e => !isToolResultMemory(e))
-        }
+        // punctuation ("drink?" must find "drink"). The desktop keeps its
+        // split, except for a question in Japanese, Chinese or Korean, which
+        // has no spaces to split at (GH #255).
+        const words = singleModelSlot() ? queryWords(query)
+          : hasCjkQuery(query) ? searchTerms(query)
+          : query.toLowerCase().split(/\s+/).filter(w => w.length > 2)
+        const eligible = eligibleMemories(get().entries, opts)
+        const pinned = pinnedOf(eligible, get().pinnedMemoryIds)
+        let candidates = eligible.filter(e => !pinned.includes(e))
 
         // Filter by allowed types for this tier
         if (budget.typesAllowed !== 'all') {
@@ -976,15 +1177,19 @@ export const useMemoryStore = create<MemoryState>()(
         // `getMemoriesForPromptAsync('', 8192)`), und das Handy bekam damit
         // dauerhaft den aeltesten Stand. Ohne Anfrage gibt es keine Abdeckung,
         // die entscheiden koennte, also entscheidet die Frische.
-        const ordered = candidates
+        const matched = candidates
           .map((entry) => ({ entry, score: scoreMemory(entry, words) }))
           .filter(({ score }) => score > 0)
           .sort((a, b) => (words.length === 0 ? b.entry.updatedAt - a.entry.updatedAt : b.score - a.score))
-          .slice(0, budget.maxMemories)
           .map(({ entry }) => entry)
+        const ordered = matched.slice(0, budget.maxMemories)
 
-        const ceiling = memoryContextCeiling(contextTokens, get().settings.maxMemoriesOverride)
-        return renderRememberedContext(fillWithUserNotes(ordered, candidates, budget.maxMemories), budget.budgetTokens, ceiling, opts?.onInjected)
+        return deliverMemories({
+          ordered: [...pinned, ...fillWithUserNotes(ordered, candidates, budget.maxMemories)],
+          overCount: matched.slice(budget.maxMemories),
+          eligible: eligible.length,
+          budget, contextTokens, opts,
+        })
       },
 
       // ── Context-Aware Prompt Injection (async, embedding-first) ──
@@ -1014,17 +1219,17 @@ export const useMemoryStore = create<MemoryState>()(
           ? get().getMemoriesForPrompt(query, contextTokens, requestOpts) : ''
         const snapshot = get().entries
         try {
-          const budget = effectiveMemoryBudget(contextTokens, get().settings.maxMemoriesOverride)
+          const budget = effectiveMemoryBudget(contextTokens, get().settings.maxMemoriesOverride, get().settings.memoryTokenBudget)
           // No-op cases (no budget, no candidates, empty query) must return
           // EXACTLY what the sync keyword path would, defer to fallback()
           // rather than re-deriving '' so behaviour stays identical (and so a
           // stubbed sync method in tests is honoured).
           if (budget.budgetTokens === 0 || budget.maxMemories === 0) return fallback()
+          if (injectionOff(get().settings, requestOpts)) return fallback()
 
-          let candidates = get().entries.filter(e => !e.sensitive && !isStale(e) && !onlyStatesAGap(e) && memoryMatchesScope(e, requestOpts?.scope))
-          if (requestOpts?.excludeToolResults) {
-            candidates = candidates.filter(e => !isToolResultMemory(e))
-          }
+          const eligible = eligibleMemories(get().entries, requestOpts)
+          const pinned = pinnedOf(eligible, get().pinnedMemoryIds)
+          let candidates = eligible.filter(e => !pinned.includes(e))
           if (budget.typesAllowed !== 'all') {
             candidates = candidates.filter(e => (budget.typesAllowed as MemoryType[]).includes(e.type))
           }
@@ -1061,8 +1266,8 @@ export const useMemoryStore = create<MemoryState>()(
           // the better-tested equivalent, so fall back to it.
           if (!blendCandidates.some(c => c.vector)) return fallback()
 
-          const scored = scoreMemoriesBlended(queryVec, query, blendCandidates)
-          const ordered = scored.slice(0, budget.maxMemories).map(s => s.memory)
+          const scored = scoreMemoriesBlended(queryVec, query, blendCandidates).map(s => s.memory)
+          const ordered = scored.slice(0, budget.maxMemories)
 
           // An empty blend is a legitimate answer ("nothing here belongs to
           // this question"), not a degenerate one, see MIN_RAW_SEMANTIC. We
@@ -1072,7 +1277,12 @@ export const useMemoryStore = create<MemoryState>()(
           // it CAN still catch is an entry whose embedding is missing or bad.
           if (ordered.length === 0) return fallback()
 
-          return renderRememberedContext(ordered, budget.budgetTokens, memoryContextCeiling(contextTokens, get().settings.maxMemoriesOverride), requestOpts?.onInjected)
+          return deliverMemories({
+            ordered: [...pinned, ...ordered],
+            overCount: scored.slice(budget.maxMemories),
+            eligible: eligible.length,
+            budget, contextTokens, opts: requestOpts,
+          })
         } catch {
           return fallback()
         }
@@ -1099,6 +1309,17 @@ export const useMemoryStore = create<MemoryState>()(
         const target = get().entries.find((e) => e.id === targetId)
         if (!target || target.sensitive) return
         const candidate = ctx?.newId ? get().entries.find(e => e.id === ctx.newId) : undefined
+        // GH #255: a memory the user wrote is never rewritten by the
+        // extractor. The fact is already there in the user's words, so the
+        // speculative copy goes again (no forget mark: the user deleted
+        // nothing) and the hand-written text stays exactly as it was.
+        if (isHandWritten(target)) {
+          if (candidate && candidate.id !== targetId && !isHandWritten(candidate)) {
+            set((state) => ({ entries: state.entries.filter(e => e.id !== candidate.id), lastSynced: Date.now() }))
+            void deleteVector(candidate.id)
+          }
+          return
+        }
         // R2-36: `target.scope !== candidate?.scope` returned true whenever
         // there was no candidate at all (candidate?.scope undefined, target.scope
         // set), so an UPDATE without ctx.newId never applied. The scope check
@@ -1125,10 +1346,12 @@ export const useMemoryStore = create<MemoryState>()(
                 supersededBy: undefined,
               }
             }
-            // The freshly-added candidate (if provided) is the OLD shape of
-            // this fact → mark it stale + point it at the merged target.
+            // The freshly-added candidate (if provided) becomes the record
+            // of the OLD text: stale, pointing at the merged target, with the
+            // target's title and content as they were before this merge. So
+            // "Show outdated" keeps what was replaced (GH #255).
             if (ctx?.newId && e.id === ctx.newId) {
-              return { ...e, stale: true, supersededBy: targetId }
+              return { ...e, title: target.title, description: target.description, content: target.content, stale: true, supersededBy: targetId }
             }
             return e
           }),
@@ -1477,6 +1700,8 @@ export const useMemoryStore = create<MemoryState>()(
           activeMemoryOwner: null,
           memoryCollectionRevision: current.memoryCollectionRevision + 1,
           forgotten: readForgotten(saved.forgotten),
+          pinnedMemoryIds: Array.isArray(saved.pinnedMemoryIds) ? saved.pinnedMemoryIds.filter((id): id is string => typeof id === 'string') : [],
+          lastInjection: {},
         } as MemoryState
       },
       partialize: (state) => ({
@@ -1488,6 +1713,7 @@ export const useMemoryStore = create<MemoryState>()(
         settings: state.settings,
         lastSynced: state.lastSynced,
         forgotten: state.forgotten,
+        pinnedMemoryIds: state.pinnedMemoryIds,
       }),
     }
   )

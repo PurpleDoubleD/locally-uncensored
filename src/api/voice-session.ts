@@ -601,7 +601,7 @@ export async function startVoiceSession(): Promise<void> {
     let memory = ''
     try {
       const contextTokens = Math.min(await getModelMaxTokens(activeModel!), 8192)
-      memory = (await useMemoryStore.getState().getMemoryContextAsync('', contextTokens, { scope: conversation?.memoryScope })).text
+      memory = (await useMemoryStore.getState().getMemoryContextAsync('', contextTokens, { scope: conversation?.memoryScope, conversationId, chatOff: conversation?.memoryOff === true })).text
     } catch { /* a session without remembered context is still a session */ }
     guard(session)
     session.work = {

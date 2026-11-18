@@ -568,12 +568,18 @@ export function cosineSimilarity(a: number[], b: number[]): number {
   return Number.isFinite(score) ? score : 0
 }
 
-export function bm25Score(query: string, document: string, allDocs: string[]): number {
-  const queryTerms = query.toLowerCase().split(/\s+/)
-  const docTerms = document.toLowerCase().split(/\s+/)
+/**
+ * `terms` cuts a text into its terms. Left out, the words between spaces, as
+ * always. The memory search hands in lib/search-terms.ts for a question in
+ * Japanese, Chinese or Korean, which has no spaces to cut at (GH #255).
+ */
+export function bm25Score(query: string, document: string, allDocs: string[], terms?: (text: string) => string[]): number {
+  const cut = terms ?? ((text: string) => text.toLowerCase().split(/\s+/))
+  const queryTerms = terms ? [...new Set(cut(query))] : cut(query)
+  const docTerms = cut(document)
   const docLen = docTerms.length
   const numDocs = allDocs.length || 1
-  const avgDl = allDocs.reduce((sum, d) => sum + d.split(/\s+/).length, 0) / numDocs || 200
+  const avgDl = allDocs.reduce((sum, d) => sum + cut(d).length, 0) / numDocs || 200
   const k1 = 1.2
   const b = 0.75
 

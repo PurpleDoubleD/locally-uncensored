@@ -1,11 +1,10 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { useDismissOnEscape } from '../../hooks/useDismissOnEscape'
 import { createPortal } from 'react-dom'
-import { Brain, X, Plus, Trash2, ChevronDown, ChevronRight, Archive, ListChecks, Pencil, Check } from 'lucide-react'
+import { Brain, X, Plus, Trash2, ChevronDown, ChevronRight, Archive, ListChecks, Pencil, Check, Pin } from 'lucide-react'
 import type { MemoryFile, MemoryType } from '../../types/agent-mode'
-import { useMemoryStore } from '../../stores/memoryStore'
-import { useModelStore } from '../../stores/modelStore'
-import { getModelMaxTokens } from '../../lib/context-compaction'
+import { useMemoryStore, type MemoryInjectionReport } from '../../stores/memoryStore'
+import { useChatStore } from '../../stores/chatStore'
 import { AnimatePresence, motion } from 'framer-motion'
 import { MemoryDeleteConfirm, MemoryRowDelete, MemoryUndoBar, memoriesWord, useMemoryUndo } from './MemoryDelete'
 import { LongTextField } from '../ui/LongTextField'
@@ -56,25 +55,19 @@ function MemoryPopover({ onClose }: { onClose: () => void }) {
   const [selecting, setSelecting] = useState(false)
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set())
   const [confirm, setConfirm] = useState<null | { ids: string[]; all: boolean }>(null)
-  const activeModel = useModelStore((s) => s.activeModel)
-  const [injectedPreview, setInjectedPreview] = useState<string>('')
   const [adding, setAdding] = useState(false)
   const [newTitle, setNewTitle] = useState('')
   const [newContent, setNewContent] = useState('')
+  const pinnedIds = useMemoryStore((s) => s.pinnedMemoryIds)
+  const conversationId = useChatStore((s) => s.activeConversationId)
+  const projectId = useChatStore((s) => s.conversations.find((c) => c.id === s.activeConversationId)?.memoryScope)
+  const [inProject, setInProject] = useState(true)
 
-  // Injection preview uses the SAME embedding-first path the chat hooks use, so
-  // it matches what actually lands in the prompt. Re-runs when memories change.
-  useEffect(() => {
-    if (!activeModel) return
-    let cancelled = false
-    getModelMaxTokens(activeModel)
-      .then((tokens) => useMemoryStore.getState().getMemoriesForPromptAsync('', tokens))
-      .then((preview) => { if (!cancelled) setInjectedPreview(preview) })
-      .catch(() => {})
-    return () => { cancelled = true }
-    // `entries`, not its length: an Undo or an edit changes what is sent
-    // without changing how many there are.
-  }, [activeModel, entries])
+  // GH #255: the preview is what the LAST REQUEST OF THIS CHAT carried, kept
+  // by the store when it was sent (with this chat's question and project ID),
+  // in full. It used to be a fresh lookup with an empty question and no
+  // project, which matched no request at all.
+  const report = useMemoryStore((s) => (conversationId ? s.lastInjection[conversationId] : undefined))
 
   // Ids that left the list (deleted elsewhere, account switch) drop out of the selection.
   const live = new Set(entries.map((e) => e.id))
@@ -114,6 +107,7 @@ function MemoryPopover({ onClose }: { onClose: () => void }) {
       content,
       tags: [],
       source: 'manual',
+      ...(projectId && inProject ? { scope: projectId } : {}),
     })
     setNewTitle('')
     setNewContent('')
@@ -217,7 +211,13 @@ function MemoryPopover({ onClose }: { onClose: () => void }) {
               rows={3}
               className={`block ${FIELD}`}
             />
-            <div className="flex justify-end gap-1.5">
+            <div className="flex items-center justify-end gap-1.5">
+              {projectId && (
+                <label className="mr-auto flex items-center gap-1 t-micro text-gray-500">
+                  <input type="checkbox" checked={inProject} onChange={(e) => setInProject(e.target.checked)} className="accent-purple-500" />
+                  Only in project {projectId}
+                </label>
+              )}
               <button onClick={() => { setAdding(false); setNewTitle(''); setNewContent('') }} className={QUIET_BTN}>Cancel</button>
               <button onClick={handleAdd} disabled={!newContent.trim()} className={SAVE_BTN}>
                 <Plus size={10} /> Save memory
@@ -241,6 +241,7 @@ function MemoryPopover({ onClose }: { onClose: () => void }) {
                 selected={selected.has(entry.id)}
                 onToggleSelected={() => toggleSelected(entry.id)}
                 onDelete={() => remove([entry.id])}
+                pinned={pinnedIds.includes(entry.id)}
                 typeColor={typeColors[entry.type] || 'text-gray-500'}
               />
             ))
@@ -249,16 +250,8 @@ function MemoryPopover({ onClose }: { onClose: () => void }) {
 
         <MemoryUndoBar removal={removal} failed={failed} onUndo={undo} onDismiss={dismiss} />
 
-        {/* Injection preview — exactly what gets prepended to the prompt */}
-        {injectedPreview && (
-          <div className="border-t border-gray-100 dark:border-white/[0.06] px-3 py-2 shrink-0">
-            <div className="flex items-center gap-1 mb-1">
-              <ChevronDown size={10} className="text-gray-500" />
-              <span className="text-[0.5rem] uppercase tracking-wider text-gray-500 font-semibold">Injected into prompt</span>
-            </div>
-            <pre className="text-[0.5rem] text-gray-600 dark:text-gray-400 font-mono whitespace-pre-wrap max-h-20 overflow-y-auto scrollbar-thin leading-relaxed">{injectedPreview.substring(0, 800)}</pre>
-          </div>
-        )}
+        {/* What the last request of this chat carried, in full (GH #255) */}
+        {report && <SentPreview report={report} entries={entries} />}
       </div>
     </motion.div>,
     document.body,
@@ -278,15 +271,17 @@ const MEMORY_TYPES: MemoryType[] = ['user', 'feedback', 'project', 'reference']
  * store re-embeds a memory whose title or text changed (memoryStore
  * updateMemory), so search keeps finding it by its new words.
  */
-function MemoryRow({ entry, selecting, selected, onToggleSelected, onDelete, typeColor }: {
+function MemoryRow({ entry, selecting, selected, onToggleSelected, onDelete, pinned, typeColor }: {
   entry: MemoryFile
   selecting: boolean
   selected: boolean
   onToggleSelected: () => void
   onDelete: () => void
+  pinned: boolean
   typeColor: string
 }) {
   const updateMemory = useMemoryStore((s) => s.updateMemory)
+  const setMemoryPinned = useMemoryStore((s) => s.setMemoryPinned)
   const [open, setOpen] = useState(false)
   const [editing, setEditing] = useState(false)
   const [title, setTitle] = useState(entry.title)
@@ -340,6 +335,19 @@ function MemoryRow({ entry, selecting, selected, onToggleSelected, onDelete, typ
         {stale && (
           <span className="flex items-center gap-0.5 text-[0.45rem] uppercase tracking-wider text-gray-500 shrink-0" title="Outdated, not injected"><Archive size={8} /> outdated</span>
         )}
+        {!selecting && !editing && !stale && (
+          <button
+            type="button"
+            onClick={() => setMemoryPinned(entry.id, !pinned)}
+            aria-pressed={pinned}
+            title={pinned ? 'Always sent. Click to send it only when it fits the question' : 'Always send this memory'}
+            aria-label={pinned ? `Unpin ${entry.title}` : `Pin ${entry.title}`}
+            className={'p-0.5 rounded hover:bg-gray-100 dark:hover:bg-white/10 ' + (pinned ? 'text-purple-600 dark:text-purple-300' : 'text-gray-400 hover:text-gray-800 dark:hover:text-gray-200')}
+            data-testid="memory-pin"
+          >
+            <Pin size={10} />
+          </button>
+        )}
         {!selecting && !editing && (
           <button type="button" onClick={startEdit} title="Edit this memory" aria-label={`Edit ${entry.title}`} className="p-0.5 rounded text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/10" data-testid="memory-edit">
             <Pencil size={10} />
@@ -372,6 +380,38 @@ function MemoryRow({ entry, selecting, selected, onToggleSelected, onDelete, typ
         <p className="mt-1 max-h-48 overflow-y-auto scrollbar-thin whitespace-pre-wrap wrap-anywhere t-micro leading-relaxed text-gray-700 dark:text-gray-300" data-testid="memory-full">{entry.content}</p>
       ) : (
         <p className="text-[0.55rem] text-gray-500 dark:text-gray-500 truncate mt-0.5">{entry.content}</p>
+      )}
+    </div>
+  )
+}
+
+/** Names of memories by id, for the lines below; a deleted one is left out. */
+function titlesOf(ids: readonly string[], entries: readonly MemoryFile[]): string {
+  const byId = new Map(entries.map((e) => [e.id, e.title]))
+  return ids.map((id) => byId.get(id)).filter((t): t is string => !!t).join(', ')
+}
+
+/**
+ * The last request of this chat: how many memories went, how many tokens,
+ * which ones were left out or cut, and the block itself, whole (GH #255).
+ */
+function SentPreview({ report, entries }: { report: MemoryInjectionReport; entries: readonly MemoryFile[] }) {
+  const leftOut = titlesOf(report.leftOut, entries)
+  const shortened = titlesOf(report.shortened, entries)
+  const summary = report.off === 'all' ? 'Memories are switched off in Settings > Memory'
+    : report.off === 'chat' ? 'Memories are switched off for this chat'
+    : `${report.sent.length} of ${report.eligible} sent, ${report.tokens.toLocaleString('en-US')} / ${report.budget.toLocaleString('en-US')} tokens`
+  return (
+    <div className="border-t border-gray-100 dark:border-white/[0.06] px-3 py-2 shrink-0 space-y-1" data-testid="memory-sent-preview">
+      <div className="flex items-center gap-1">
+        <ChevronDown size={10} className="text-gray-500" />
+        <span className="text-[0.5rem] uppercase tracking-wider text-gray-500 font-semibold">Last request</span>
+        <span className="t-micro text-gray-500 ml-auto" data-testid="memory-sent-summary">{summary}</span>
+      </div>
+      {leftOut && <p className="t-micro text-gray-500 wrap-anywhere">Left out: {leftOut}</p>}
+      {shortened && <p className="t-micro text-gray-500 wrap-anywhere">Cut at the length limit: {shortened}</p>}
+      {report.text && (
+        <pre className="text-[0.5rem] text-gray-600 dark:text-gray-400 font-mono whitespace-pre-wrap max-h-40 overflow-y-auto scrollbar-thin leading-relaxed">{report.text}</pre>
       )}
     </div>
   )

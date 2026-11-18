@@ -26,6 +26,14 @@ function addMem(type: MemoryType, title: string, content: string, tags: string[]
   })
 }
 
+/** A memory the extractor wrote (source = a chat, sourceKind set). Only such
+ *  a memory may be merged by a write decision (GH #255). */
+function addAuto(type: MemoryType, title: string, content: string) {
+  return useMemoryStore.getState().addMemory({
+    type, title, description: content.substring(0, 120), content, tags: [], source: 'conv-1', sourceKind: 'chat',
+  })
+}
+
 // ── Memory Budget Tiers ────────────────────────────────────────
 
 describe('Memory Budget Tiers', () => {
@@ -520,7 +528,7 @@ describe('applyWriteDecision', () => {
   })
 
   it('UPDATE rewrites the target content + bumps updatedAt + sets validFrom', () => {
-    const targetId = addMem('user', 'Location', 'User lives in Munich')
+    const targetId = addAuto('user', 'Location', 'User lives in Munich')
     const target0 = useMemoryStore.getState().entries.find((e) => e.id === targetId)!
     const before = target0.updatedAt
 
@@ -539,9 +547,9 @@ describe('applyWriteDecision', () => {
   })
 
   it('UPDATE marks the superseded candidate stale (not deleted) and keeps the merged target live', () => {
-    const targetId = addMem('user', 'Location', 'User lives in Munich')
+    const targetId = addAuto('user', 'Location', 'User lives in Munich')
     // Simulate the speculative candidate the hook adds for the new fact.
-    const newId = addMem('user', 'New location', 'User lives in Berlin')
+    const newId = addAuto('user', 'New location', 'User lives in Berlin')
 
     useMemoryStore.getState().applyWriteDecision(
       { action: 'UPDATE', targetId, mergedContent: 'User lives in Berlin (moved from Munich)' },
@@ -554,6 +562,9 @@ describe('applyWriteDecision', () => {
     const candidate = entries.find((e) => e.id === newId)!
     expect(candidate.stale).toBe(true)
     expect(candidate.supersededBy).toBe(targetId)
+    // GH #255: the stale record keeps the text the merge replaced.
+    expect(candidate.content).toBe('User lives in Munich')
+    expect(candidate.title).toBe('Location')
     // The merged target is NOT stale and is the only one injected.
     const prompt = useMemoryStore.getState().getMemoriesForPrompt('Berlin Munich lives', 16000)
     expect(prompt).toContain('moved from Munich')

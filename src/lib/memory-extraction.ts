@@ -78,6 +78,28 @@ Analyze this exchange. What (if anything) should be remembered?`
   ]
 }
 
+/** How much of a persona's text the extraction reads, for the spelling of names. */
+export const EXTRACTION_PERSONA_CHARS = 600
+
+/**
+ * The rules every extraction gets on top of the fixed ones (GH #255).
+ *
+ * The extractor read only the last exchange and wrote in English, so a
+ * Japanese story chat got memories in English with the characters' names
+ * spelled its own way, next to the user's own entries about the same day. It
+ * now writes in the language of the conversation and, when the chat plays a
+ * persona, reads the start of that persona for the names.
+ */
+export function extractionContextRules(persona?: { name: string; text?: string }): string[] {
+  const rules = ['Write title, description and content in the language the user writes in. Do not translate them into English']
+  const name = persona?.name.trim()
+  if (name) {
+    const excerpt = (persona?.text ?? '').replace(/\s+/g, ' ').trim().slice(0, EXTRACTION_PERSONA_CHARS)
+    rules.push(`The assistant plays the persona "${name}". Spell the names of the persona and of its characters exactly as written here${excerpt ? `: ${excerpt}` : ''}`)
+  }
+  return rules
+}
+
 /**
  * The rules a phone adds to the prompt (hooks/useMemory.ts, behind isMobile).
  * Second check on Android, F12, and the small iPhone, K12: a question about a
@@ -308,7 +330,7 @@ export function buildResolutionPrompt(
 
 ## Rules
 - Choose UPDATE only when the new fact clearly relates to exactly one existing memory.
-- For UPDATE, "targetId" MUST be one of the ids listed below, and "mergedContent" MUST be a single concise sentence or two.
+- For UPDATE, "targetId" MUST be one of the ids listed below, and "mergedContent" MUST be a single concise sentence or two, written in the language of that existing memory.
 - When in doubt between ADD and UPDATE, prefer ADD (losing a correction is worse than a near-duplicate).
 
 ## Existing similar memories
