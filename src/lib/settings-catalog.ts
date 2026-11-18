@@ -286,6 +286,7 @@ export const CATALOG: readonly CatalogEntry[] = [
   e('agentMaxToolCalls', 'Agent tool call limit', 'agent', 'Most tool calls per message. Applies from the next message.', int(0, 10_000, '', 'unlimited')),
   e('agentMaxIterations', 'Agent step limit', 'agent', 'Most steps per message. Applies from the next message.', int(0, 10_000, '', 'unlimited')),
   e('agentCompactAuto', 'Short tool list for local models', 'agent', 'Local models up to about 35B see the core tools and find the rest with tool_search.', bool()),
+  e('shareClockWithModel', 'Share date and time with the model', 'agent', 'The agent is told the date and time when a run starts. Off: no date or time goes to the model.', bool()),
   e('agentLoopGuard', 'Loop guard', 'agent', 'Stops an agent run that repeats the same steps. Off: the run goes on until its step limit or Stop.', bool()),
   e('subAgentMaxToolCalls', 'Sub-agent tool call limit', 'agent', 'Most tool calls of one sub-agent.', int(0, SUB_AGENT_LIMIT_MAX, '', 'default')),
   e('subAgentMaxIterations', 'Sub-agent step limit', 'agent', 'Most steps of one sub-agent.', int(0, SUB_AGENT_LIMIT_MAX, '', 'default')),
@@ -481,8 +482,8 @@ export const LOCK_RULES: readonly LockRule[] = [
   },
   {
     // CA (14.11.2026): an agent must never raise its own spending limit.
-    category: 'spending', what: 'Credit limits of agent runs', where: 'Settings → Agent',
-    names: ['agentRunCreditLimit', 'agentHourCreditLimit', 'creditLimit', 'spendingLimit'],
+    category: 'spending', what: 'Credit and token limits of agent runs', where: 'Settings → Agent',
+    names: ['agentRunCreditLimit', 'agentHourCreditLimit', 'agentRunHaltTokens', 'creditLimit', 'spendingLimit'],
     pattern: /credit(limit)?|spending|costbrake/,
   },
 ]

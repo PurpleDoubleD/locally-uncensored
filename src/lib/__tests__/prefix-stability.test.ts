@@ -45,7 +45,7 @@ describe('A5.1: the clock is its own line and it goes last', () => {
 
   it('the coding loop appends the clock AFTER architect and repo map', () => {
     const codex = src('hooks', 'useCodex.ts')
-    const clockAt = codex.indexOf('systemPrompt += `\\n\\n${hostClockLine()}`')
+    const clockAt = codex.indexOf('if (clockLine) systemPrompt += `\\n\\n${clockLine}`')
     const repoMapAt = codex.indexOf('renderRepoMapSection(repoMap)')
     const memoryAt = codex.indexOf('remembered context from previous conversations')
     expect(clockAt).toBeGreaterThan(-1)
@@ -60,7 +60,7 @@ describe('A5.1: the clock is its own line and it goes last', () => {
     // the turn note behind the newest user message (lib/turn-context.ts).
     const agent = src('hooks', 'useAgentChat.ts')
     expect(agent).not.toContain('agentSystemPrompt += `\\n\\n${hostClockLine()}`')
-    expect(agent).toMatch(/buildTurnContext\(\{ memory: memoryContext, rag: ragSuffix, clock: hostClockLine\(\) \}\)/)
+    expect(agent).toMatch(/buildTurnContext\(\{ memory: memoryContext, rag: ragSuffix, clock: agentClockLine\(\) \}\)/)
     expect(agent).toMatch(/agentMessages = withTurnContext\(agentMessages, turnContext\)/)
   })
 })

@@ -1,5 +1,5 @@
 import { SkillsSettings } from './SkillsSettings'
-import { CreditLimitSettings } from './CreditLimitSettings'
+import { CreditLimitSettings, RunTokenLimitSettings } from './CreditLimitSettings'
 import { CommandRulesSettings } from './CommandRulesSettings'
 import { useState, useEffect, useLayoutEffect, useRef, type ReactNode, type ChangeEvent } from 'react'
 import { withDetail } from '../../lib/error-text'
@@ -2477,6 +2477,16 @@ export function SettingsPage() {
                 Stops an agent run that keeps repeating the same steps (&quot;Loop guard halted the run&quot;). Off: the run goes on until its step limit or until you press Stop.
               </div>
               <CreditLimitSettings />
+              <RunTokenLimitSettings />
+              {/* 3.1.2 (A39, GitHub #257): the clock line of agent runs. */}
+              <InlineToggle
+                label="Share date and time with the model"
+                enabled={settings.shareClockWithModel !== false}
+                onChange={() => updateSettings({ shareClockWithModel: settings.shareClockWithModel === false })}
+              />
+              <div className="t-micro text-gray-500 dark:text-gray-500 leading-relaxed pt-0.5">
+                The agent is told the date and time when a run starts. Off: no date or time goes to the model, useful for stories and roleplay.
+              </div>
               {/* CA (14.11.2026, AG10): the shell stays in the agent's folder. */}
               <InlineToggle
                 label="Let the agent look outside its folder"

@@ -16,7 +16,9 @@ import { addHourCredits, creditFactor, hourPauseDue, markHourPause } from './age
  *    each further step re-reads that much again.
  *  - The run's summed input reaching RUN_HALT_TOKENS ends the run, with a
  *    plain sentence that says how much it sent and that a new message goes
- *    on from here.
+ *    on from here. Since 3.1.2 (A38, GitHub #256) the limit is a setting
+ *    (2M, 5M, 10M, No limit), and the sentence speaks of credits only on
+ *    LU Cloud; with the user's own key it is their API budget.
  *
  * Only providers that bill (isPaidProvider) are braked; a model on this
  * machine or in the LAN costs nothing per token. The loop guard switch (C44,
@@ -32,6 +34,13 @@ import { addHourCredits, creditFactor, hourPauseDue, markHourPause } from './age
 // worth a word, and 2M input per run is ~60 full steps at the cap.
 export const LARGE_REQUEST_TOKENS = 64_000
 export const RUN_HALT_TOKENS = 2_000_000
+/**
+ * 3.1.2 (A38, GitHub #256): the choices of Settings → Agent → Agent
+ * Permissions for the token limit per run. 0 is "No limit". The limit used to
+ * be fixed at 2M, which also stopped long runs on a provider with the user's
+ * own key, where LU has no credits to protect.
+ */
+export const RUN_HALT_CHOICES: readonly number[] = [RUN_HALT_TOKENS, 5_000_000, 10_000_000, 0]
 
 /**
  * Credits (CA, 14.11.2026). Where the model's catalogue entry declares its
@@ -69,6 +78,7 @@ export class AgentCostBrake {
   private readonly mayHalt: boolean
   private readonly largeAt: number
   private readonly haltAt: number
+  private readonly luCloud: boolean
   private sum = 0
   private calls = 0
   private largeWarned = false
@@ -84,7 +94,11 @@ export class AgentCostBrake {
     paid: boolean
     loopGuardEnabled?: boolean
     largeRequestTokens?: number
+    /** 0 switches the token limit off (3.1.2, A38). */
     runHaltTokens?: number
+    /** The run is billed by LU Cloud in credits. Off: the user's own key or
+     *  another provider, and the halt speaks of an API budget instead. */
+    luCloud?: boolean
     /** The model's declared credit price (LU Cloud catalogue). */
     rates?: CreditRates | null
     /** 0 switches the credit limit off. */
@@ -94,7 +108,9 @@ export class AgentCostBrake {
     this.paid = opts.paid
     this.mayHalt = opts.loopGuardEnabled !== false
     this.largeAt = opts.largeRequestTokens ?? LARGE_REQUEST_TOKENS
-    this.haltAt = opts.runHaltTokens ?? RUN_HALT_TOKENS
+    const halt = opts.runHaltTokens ?? RUN_HALT_TOKENS
+    this.haltAt = Number.isFinite(halt) && halt > 0 ? halt : Number.POSITIVE_INFINITY
+    this.luCloud = opts.luCloud === true
     this.rates = opts.rates && opts.rates.inputPerMillion >= 0 && opts.rates.outputPerMillion >= 0 ? opts.rates : null
     this.runCreditLimit = opts.runCreditLimit ?? RUN_CREDIT_LIMIT
     this.hourCreditLimit = opts.hourCreditLimit ?? HOUR_CREDIT_LIMIT
@@ -168,9 +184,10 @@ export class AgentCostBrake {
           action: 'halt',
           reason: `cost brake: this run sent ${fmtTokens(this.sum)} tokens of input in ${this.calls} model calls (limit ${fmtTokens(this.haltAt)})`,
           message:
-            `Stopped to protect your credits: this run has sent ${fmtTokens(this.sum)} tokens to the model in ${this.calls} steps, ` +
+            `Stopped to protect your ${this.luCloud ? 'credits' : 'API budget'}: this run has sent ${fmtTokens(this.sum)} tokens to the model in ${this.calls} steps, ` +
             `the latest step alone ${fmtTokens(n)}. Every step re-reads the whole conversation, so long runs get expensive fast. ` +
-            'Send a new message to go on, or start a new chat to begin with a small context.',
+            'Send a new message to go on, or start a new chat to begin with a small context. ' +
+            'The token limit per run is in Settings → Agent → Agent Permissions.',
         }
         return
       }

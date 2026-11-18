@@ -35,6 +35,7 @@ export function registerRemoteStubs(routes: RouteMount): void {
     '/local-api/disconnect-remote-device',
     '/local-api/set-remote-permissions',
     '/local-api/set-remote-page-title',
+    '/local-api/set-remote-share-clock',
     '/local-api/start-tunnel',
     '/local-api/stop-tunnel',
     '/local-api/tunnel-status',

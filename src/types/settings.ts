@@ -203,6 +203,13 @@ export interface Settings {
   agentRunCreditLimit?: number
   /** Credits all agent runs together may use in a rolling hour. 0 = no limit. */
   agentHourCreditLimit?: number
+  /** 3.1.2 (A38, GitHub #256): input tokens one agent run may send before it
+   *  stops (lib/agent-cost-brake.ts, RUN_HALT_TOKENS). Any provider that
+   *  bills per token, own key included. 0 = no limit. */
+  agentRunHaltTokens?: number
+  /** 3.1.2 (A39, GitHub #257): the agent prompt names the date and time of
+   *  the run (lib/host-platform.ts, hostClockLine). On unless switched off. */
+  shareClockWithModel?: boolean
   /** Local models up to ~35B get a short tool list with one-line
    *  descriptions plus tool_search (lib/agent-profile.ts, C59). On unless
    *  switched off; Small-Model Mode still wins. */

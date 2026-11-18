@@ -23,7 +23,7 @@ describe('the date in the system prompt of the agent', () => {
     // Since 3.0.8 (A7) the clock rides in one note with memories and
     // retrieval: behind the user's message on a desktop, at the end of the
     // system prompt on a phone. Either way every run gets it.
-    expect(hook).toContain('clock: hostClockLine()')
+    expect(hook).toContain('clock: agentClockLine()')
     expect(hook).toContain('if (phoneSystemNote && contextNote) agentSystemPrompt += `\\n\\n${contextNote}`')
   })
 

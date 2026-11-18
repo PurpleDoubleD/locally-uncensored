@@ -60,7 +60,7 @@ describe('the agent prompt renders the platform sentence', () => {
 
   it('the loop still sends it, in the turn note behind the newest message (A7)', () => {
     const agent = read('hooks', 'useAgentChat.ts')
-    expect(agent).toMatch(/clock: hostClockLine\(\)/)
+    expect(agent).toMatch(/clock: agentClockLine\(\)/)
     expect(agent).not.toContain('agentSystemPrompt += `\\n\\n${hostClockLine()}`')
   })
 })
@@ -75,7 +75,7 @@ describe('the coding loop renders the platform sentence into its head', () => {
   it('the platform sentence is interpolated into the stable head', () => {
     expect(codex).toContain('${platformPromptLine()}')
     const platformAt = codex.indexOf('${platformPromptLine()}')
-    const clockAt = codex.indexOf('systemPrompt += `\\n\\n${hostClockLine()}`')
+    const clockAt = codex.indexOf('if (clockLine) systemPrompt += `\\n\\n${clockLine}`')
     expect(platformAt).toBeGreaterThan(-1)
     expect(clockAt).toBeGreaterThan(platformAt)
   })

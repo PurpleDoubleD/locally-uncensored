@@ -116,7 +116,8 @@ import { effectiveSendWindow, isPaidProvider, sendWindowFor } from '../lib/send-
 import { sendsToALanBackend } from '../lib/lan-openai-slot'
 import { useSendSizeStore } from '../stores/sendSizeStore'
 import { resolveAgentNumCtx } from '../lib/agent-num-ctx'
-import { platformPromptLine, hostClockLine } from '../lib/host-platform'
+import { platformPromptLine } from '../lib/host-platform'
+import { agentClockLine } from '../lib/clock-share'
 import { ensureBuiltinAgentCtx } from '../api/builtin-ensure'
 import { AgentLoopGuard } from '../lib/agent-loop-guard'
 import { AgentCostBrake } from '../lib/agent-cost-brake'
@@ -1223,7 +1224,9 @@ export function useCodex() {
     // every minute closes the prompt instead of opening it. A prefix cache
     // matches from byte 0 and stops at the first difference, so a clock near
     // the top re-prices the whole prompt on every new turn.
-    systemPrompt += `\n\n${hostClockLine()}`
+    // 3.1.2 (A39): none at all when the user switched the clock off.
+    const clockLine = agentClockLine()
+    if (clockLine) systemPrompt += `\n\n${clockLine}`
     messages[0] = { role: 'system', content: systemPrompt }
 
     let fullContent = ''
@@ -1293,6 +1296,10 @@ export function useCodex() {
         rates: creditRatesOf(activeModel),
         runCreditLimit: useSettingsStore.getState().settings.agentRunCreditLimit,
         hourCreditLimit: useSettingsStore.getState().settings.agentHourCreditLimit,
+        // 3.1.2 (A38, GitHub #256): the token limit per run from Settings, 0 = none;
+        // the halt names credits only where LU Cloud bills them.
+        runHaltTokens: useSettingsStore.getState().settings.agentRunHaltTokens,
+        luCloud: providerId === 'lu-cloud',
       })
       // Which read produced which result message. The request builder reports
       // back the results it sent CAPPED, and this map turns those messages

@@ -121,12 +121,13 @@ describe('the tools really are gone', () => {
     // it. Both halves still have to be there.
     const agent = read('hooks', 'useAgentChat.ts')
     expect(agent).toMatch(/platformPromptLine\(\)/)
-    expect(agent).toMatch(/hostClockLine\(\)/)
+    // 3.1.2 (A39): through the switch "Share date and time with the model".
+    expect(agent).toMatch(/agentClockLine\(\)/)
     expect(agent).toMatch(/OS, clock and timezone are stated in this prompt/)
     // Codex pays for the block too now (it never had the platform sentence).
     const codex = read('hooks', 'useCodex.ts')
     expect(codex).toMatch(/platformPromptLine\(\)/)
-    expect(codex).toMatch(/hostClockLine\(\)/)
+    expect(codex).toMatch(/agentClockLine\(\)/)
   })
 })
 

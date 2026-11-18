@@ -66,6 +66,8 @@ export const DEFAULT_SETTINGS: Settings = {
   // CA (14.11.2026, AG10): the agent's shell stays in its folder (lib/shell-scope.ts).
   agentShellOutsideFolder: false,
   agentCompactAuto: true,
+  // 3.1.2 (A39, GitHub #257): the agent's clock line, on unless switched off.
+  shareClockWithModel: true,
   // Die heutigen festen Werte aus sub-agent.ts, unveraendert uebernommen:
   // wer nichts einstellt, bekommt exakt das Verhalten von 2.6.7.
   subAgentMaxToolCalls: 10,

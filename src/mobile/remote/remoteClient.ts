@@ -83,6 +83,9 @@ export interface RemoteHostConfig {
   systemPrompt: string
   /** Satz ueber das Betriebssystem des DESKTOPS, fuer Agentenlaeufe. */
   platformLine: string
+  /** 3.1.2 (A39): false when the desktop switched the clock off. Older
+   *  desktops do not send it, which means on. */
+  shareClock?: boolean
 }
 
 export interface RemoteSessionInfo {
@@ -660,6 +663,7 @@ export function createRemoteClient(options: RemoteClientOptions): RemoteClient {
         model: typeof data.model === 'string' ? data.model : '',
         systemPrompt: typeof data.systemPrompt === 'string' ? data.systemPrompt : '',
         platformLine: typeof data.platformLine === 'string' ? data.platformLine : '',
+        shareClock: data.shareClock !== false,
       }
     },
 

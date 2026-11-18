@@ -131,7 +131,8 @@ describe('C83: the cost brake', () => {
   const incidentInput = (i: number) => 420_000 + ((i * 7919) % 27_000)
 
   it('the incident (420-447k per call) warns on the first call and halts within 8 calls', () => {
-    const b = new AgentCostBrake({ paid: true })
+    // Billed in credits: the stop speaks of credits (A38, 3.1.2).
+    const b = new AgentCostBrake({ paid: true, luCloud: true })
     const verdicts = Array.from({ length: 233 }, (_, i) => {
       b.record(incidentInput(i))
       return b.take()

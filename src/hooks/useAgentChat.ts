@@ -170,7 +170,8 @@ import { planResumeAnchor } from '../lib/plan-resume'
 import { reasoningOnlyRound, REASONING_CONTINUE_BUDGET, REASONING_CONTINUE_STEER } from '../lib/reasoning-round'
 import { findUnbackedLinks, steerReplyIsNoAnswer, unbackedLinksSteer } from '../lib/unbacked-links'
 import { useTodoStore } from '../stores/todoStore'
-import { platformPromptLine, hostClockLine } from '../lib/host-platform'
+import { platformPromptLine } from '../lib/host-platform'
+import { agentClockLine } from '../lib/clock-share'
 import { buildTurnContext, withTurnContext } from '../lib/turn-context'
 import { explainSendRefusal } from '../lib/template-refusal'
 import { emptyAnswerExplanation } from '../lib/answer-notes'
@@ -1426,7 +1427,7 @@ export function useAgentChat() {
     // the note behind the question was measured on the desktop only. Inside a
     // run the system prompt does not change, so the steps still reuse the cache.
     const phoneSystemNote = isMobile()
-    const contextNote = buildTurnContext({ memory: memoryContext, rag: ragSuffix, clock: hostClockLine() })
+    const contextNote = buildTurnContext({ memory: memoryContext, rag: ragSuffix, clock: agentClockLine() })
     if (phoneSystemNote && contextNote) agentSystemPrompt += `\n\n${contextNote}`
     const turnContext = phoneSystemNote ? '' : contextNote
 
@@ -1733,6 +1734,10 @@ export function useAgentChat() {
       rates: creditRatesOf(activeModel),
       runCreditLimit: useSettingsStore.getState().settings.agentRunCreditLimit,
       hourCreditLimit: useSettingsStore.getState().settings.agentHourCreditLimit,
+      // 3.1.2 (A38, GitHub #256): the token limit per run from Settings, 0 = none;
+      // the halt names credits only where LU Cloud bills them.
+      runHaltTokens: useSettingsStore.getState().settings.agentRunHaltTokens,
+      luCloud: providerId === 'lu-cloud',
     })
     // Steps LU Cloud cut for repeating (lib/agent-core/server-loop-cut.ts).
     let serverLoopCuts = 0

@@ -77,7 +77,7 @@ const { isThinkingCompatible } = loadFromClient<{
  */
 function buildPrompt(
   chat: MobileChat,
-  extra: { dispatched?: string; hostPlatformLine?: string; clock?: string } = {},
+  extra: { dispatched?: string; hostPlatformLine?: string; clock?: string; shareClock?: boolean } = {},
 ): string {
   const { buildSystemPrompt } = loadFromClient<{ buildSystemPrompt: () => string }>(
     ['AGENT_PROMPT', 'buildSystemPrompt'],
@@ -93,6 +93,7 @@ function buildPrompt(
       dispatchedSystemPrompt: extra.dispatched ?? '',
       hostPlatformLine: extra.hostPlatformLine ?? '',
       hostClockLine: () => extra.clock ?? 'CLOCK',
+      hostShareClock: extra.shareClock ?? true,
     },
   )
   return buildSystemPrompt()
@@ -353,6 +354,14 @@ describe('mobile-parity › the environment block rides only on tool surfaces', 
     const out = buildPrompt(defaults('codex'), { hostPlatformLine: 'PLATFORM', clock: 'CLOCK' })
     expect(out).toContain('PLATFORM')
     expect(out).toContain('CLOCK')
+  })
+
+  it('3.1.2 (A39): the desktop switched the clock off, the page sends none', () => {
+    const agent = buildPrompt({ ...defaults(), agentEnabled: true }, { hostPlatformLine: 'PLATFORM', clock: 'CLOCK', shareClock: false })
+    expect(agent).toContain('PLATFORM')
+    expect(agent).not.toContain('CLOCK')
+    const codex = buildPrompt(defaults('codex'), { hostPlatformLine: 'PLATFORM', clock: 'CLOCK', shareClock: false })
+    expect(codex).not.toContain('CLOCK')
   })
 
   it('an empty platform line is left out rather than guessed at', () => {

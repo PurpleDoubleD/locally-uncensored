@@ -30,7 +30,7 @@ export const SETTINGS_TAB_RESET_KEYS: Record<SettingsTab, (keyof Settings)[]> = 
   backends: ['apiEndpoint', 'hfDownloadPathOverride', 'downloadLimitMBps', 'exclusiveVramMode', 'builtinEngine', 'engineIdleUnloadMinutes'],
   agent: [
     'personasEnabled', 'defaultWorkspace',
-    'agentMaxToolCalls', 'agentMaxIterations', 'agentLoopGuard', 'agentCompactAuto', 'agentShellOutsideFolder',
+    'agentMaxToolCalls', 'agentMaxIterations', 'agentLoopGuard', 'agentCompactAuto', 'agentShellOutsideFolder', 'shareClockWithModel',
     'subAgentMaxToolCalls', 'subAgentMaxIterations', 'loopMaxPasses',
     'searchProvider', 'braveApiKey', 'tavilyApiKey', 'exaApiKey', 'searchUserAgent', 'webStrictUrls',
     'codexArchitectMode', 'codexArchitectModel', 'codexArchitectAllowCloud',

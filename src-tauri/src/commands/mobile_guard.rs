@@ -72,6 +72,7 @@ pub const BLOCKED: &[&str] = &[
     "set_engine_idle_unload",
     "engine_key_for",
     "set_remote_page_title",
+    "set_remote_share_clock",
     "remote_pairing_qr",
     "remote_pairing_window",
     "remote_paired_devices",

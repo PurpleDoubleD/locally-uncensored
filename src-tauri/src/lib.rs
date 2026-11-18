@@ -1298,6 +1298,7 @@ pub fn run() {
             commands::remote::disconnect_remote_device,
             commands::remote::set_remote_permissions,
             commands::remote::set_remote_page_title,
+            commands::remote::set_remote_share_clock,
             commands::remote::start_tunnel,
             commands::remote::stop_tunnel,
             commands::remote::tunnel_status,

@@ -80,6 +80,8 @@ describe('Koppeln', () => {
       model: 'qwen3:8b',
       systemPrompt: 'Be brief.',
       platformLine: 'This machine runs macOS and shell_execute runs bash.',
+      // 3.1.2 (A39): a desktop that says nothing shares the clock.
+      shareClock: true,
     })
     expect(await client.getPermissions()).toEqual({ filesystem: false, downloads: false, process_control: false, shell: false })
   })

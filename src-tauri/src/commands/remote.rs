@@ -2822,7 +2822,21 @@ fn config_payload(model: String, system_prompt: String) -> serde_json::Value {
         // is built in the page on every turn instead of being frozen into the
         // one config fetch a session makes.
         "platformLine": host_platform_prompt_line(),
+        // 3.1.2 (A39, GitHub #257): whether the page and the phone app may put
+        // that clock in at all. Settings → Agent on the desktop decides.
+        "shareClock": SHARE_CLOCK.load(std::sync::atomic::Ordering::Relaxed),
     })
+}
+
+/// 3.1.2 (A39, GitHub #257): "Share date and time with the model" from the
+/// desktop's settings. Like the page title, the frontend hands it over at boot
+/// and on every change (lib/clock-share-remote.ts); on until it says otherwise.
+static SHARE_CLOCK: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+
+#[tauri::command]
+pub fn set_remote_share_clock(share: bool) -> Result<(), String> {
+    SHARE_CLOCK.store(share, std::sync::atomic::Ordering::Relaxed);
+    Ok(())
 }
 
 async fn handle_config(AxumState(state): AxumState<RemoteState>) -> Json<serde_json::Value> {
@@ -7170,6 +7184,20 @@ mod mobile_environment_tests {
         // The clock is deliberately NOT in here: it is fetched once per
         // session and would be stale within the minute.
         assert!(body.get("clockLine").is_none(), "the clock must not be frozen into config");
+    }
+
+    #[test]
+    fn the_config_says_whether_the_clock_may_be_shared() {
+        // 3.1.2 (A39): on by default, off once the desktop switched it off.
+        // One test for both states, so a parallel test never sees it flipped.
+        assert_eq!(super::config_payload(String::new(), String::new())["shareClock"], true);
+        super::set_remote_share_clock(false).unwrap();
+        let off = super::config_payload(String::new(), String::new());
+        super::set_remote_share_clock(true).unwrap();
+        assert_eq!(off["shareClock"], false);
+        let html = page();
+        assert!(html.contains("hostShareClock = cfg.shareClock !== false;"), "the page must read the switch");
+        assert!(html.contains("if(hostShareClock) parts.push(hostClockLine());"), "the page must honour the switch");
     }
 
     #[test]

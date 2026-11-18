@@ -934,6 +934,7 @@ export function createRemoteClientStore(deps: RemoteClientStoreDeps = {}): Remot
             agent: chat.agentMode,
             platformLine: hostConfig?.platformLine ?? '',
             now: new Date(now()),
+            shareClock: hostConfig?.shareClock !== false,
           })
           if (system) out.push({ role: 'system', content: system })
           const reminder = cavemanReminder(chat.caveman)

@@ -57,6 +57,8 @@ import {
   // answer that is always wrong here. Empty until config lands, and an empty
   // line is simply left out rather than guessed at.
   var hostPlatformLine = '';
+  // 3.1.2 (A39): the desktop's "Share date and time with the model".
+  var hostShareClock = true;
 
   // ── Inline SVG icons (Lucide-style). Replaces the Material Symbols
   //    font download to keep the mobile page free of third-party requests.
@@ -493,7 +495,7 @@ import {
     // line instead of everything above it.
     if(isCodex || agentOn){
       if(hostPlatformLine) parts.push(hostPlatformLine);
-      parts.push(hostClockLine());
+      if(hostShareClock) parts.push(hostClockLine());
     }
     return parts.join('\n\n');
   }
@@ -630,6 +632,7 @@ import {
                  : (cfg.model || availableModels[0] || '');
     dispatchedSystemPrompt = cfg.systemPrompt || '';
     hostPlatformLine = cfg.platformLine || '';
+    hostShareClock = cfg.shareClock !== false;
 
     // Ensure we have a current chat
     if(!currentChatId || !findChat(currentChatId)){

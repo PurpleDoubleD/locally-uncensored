@@ -756,6 +756,7 @@ export async function backendCall<T = unknown>(
     remote_connected_devices: { path: "/local-api/remote-connected-devices" },
     set_remote_permissions: { path: "/local-api/set-remote-permissions", method: "POST" },
     set_remote_page_title: { path: "/local-api/set-remote-page-title", method: "POST" },
+    set_remote_share_clock: { path: "/local-api/set-remote-share-clock", method: "POST" },
     start_tunnel: { path: "/local-api/start-tunnel", method: "POST" },
     stop_tunnel: { path: "/local-api/stop-tunnel", method: "POST" },
     tunnel_status: { path: "/local-api/tunnel-status" },

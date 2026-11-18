@@ -206,6 +206,8 @@ export interface SystemPromptInput {
   /** Satz ueber das Betriebssystem des Desktops. */
   platformLine: string
   now?: Date
+  /** 3.1.2 (A39): false when the desktop switched the clock off. Left out = on. */
+  shareClock?: boolean
 }
 
 /**
@@ -226,7 +228,7 @@ export function buildRemoteSystemPrompt(input: SystemPromptInput): string {
     parts.push(REMOTE_AGENT_PROMPT)
     if (input.platformLine) parts.push(input.platformLine)
     // Dieselbe Uhrzeile wie Desktop und Webseite. Sie schliesst den Prompt, weil sie sich jede Minute aendert.
-    parts.push(hostClockLine(input.now))
+    if (input.shareClock !== false) parts.push(hostClockLine(input.now))
   }
   return parts.join('\n\n')
 }

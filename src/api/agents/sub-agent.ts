@@ -48,7 +48,8 @@ import {
 import type { AgentRunContext } from '../agent-context'
 import { AgentBudget } from './budget'
 import { explainError as explainToolError } from './error-hints'
-import { platformPromptLine, hostClockLine } from '../../lib/host-platform'
+import { platformPromptLine } from '../../lib/host-platform'
+import { agentClockLine } from '../../lib/clock-share'
 import { clampTaskResult, describeToolCalls, makeTaskId } from '../../lib/agent-tasks'
 import { istNurAnkuendigung, ANKUENDIGUNG_STEER } from './ankuendigung'
 import { MAX_EXPLICIT_FANOUT } from '../../lib/agent-fanout'
@@ -278,13 +279,14 @@ export type SubAgentRunner = (
  */
 export function buildSubAgentSystemPrompt(
   platformLine: string = platformPromptLine(),
-  clockLine: string = hostClockLine(),
+  clockLine: string = agentClockLine(),
 ): string {
   const stable =
     'You are a focused sub-agent. Work autonomously toward the goal. '
     + 'Be concise, return a direct final answer without filler. '
     + 'Do NOT attempt to call delegate_task; it is not available to you.'
-  return `${stable}\n\n${platformLine}\n\n${clockLine}`
+  // 3.1.2 (A39): the clock is '' when the user switched it off.
+  return clockLine ? `${stable}\n\n${platformLine}\n\n${clockLine}` : `${stable}\n\n${platformLine}`
 }
 
 /**

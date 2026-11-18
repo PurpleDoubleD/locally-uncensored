@@ -50,6 +50,8 @@ function App() {
       // The phone's tab name (GitHub #19) sits in Rust the same way
       // (lib/remote-page-title.ts).
       void import('./lib/remote-page-title').then(({ startRemotePageTitleSync }) => startRemotePageTitleSync())
+      // And whether the phone may share the date and time (A39, lib/clock-share-remote.ts).
+      void import('./lib/clock-share-remote').then(({ startRemoteShareClockSync }) => startRemoteShareClockSync())
 
       // The Local API comes up with LU when the user switched that on, so a
       // server that starts LU with its session keeps the API after a reboot.
