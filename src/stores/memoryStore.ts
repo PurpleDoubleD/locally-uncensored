@@ -312,7 +312,7 @@ export function fitMemoryText(text: string, maxChars: number): { text: string; c
   const head = chars.slice(0, maxChars).join('')
   const floor = Math.floor(head.length * 0.66)
   let end = -1
-  for (const m of head.matchAll(/[.!?。！？](?=\s|$|[^.!?。！？])|\n/g)) {
+  for (const m of head.matchAll(/[。！？]|[.!?](?=\s|$)|\n/g)) {
     if (m.index !== undefined && m.index >= floor) end = m.index + 1
   }
   if (end < 0) {

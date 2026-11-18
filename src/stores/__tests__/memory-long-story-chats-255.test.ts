@@ -47,6 +47,8 @@ describe('1. a memory reaches the model whole, a cut is marked', () => {
     const fit = fitMemoryText(text, 200)
     expect(fit.cut).toBe(true)
     expect(fit.text).toMatch(/here\. \[cut: \d+ of \d+ characters\]$/)
+    // A point inside a number is not the end of a sentence.
+    expect(fitMemoryText('Version 3.5 is out. ' + 'It runs 2.5x faster than 3.1 ever did on this box '.repeat(8), 120).text).not.toMatch(/\d\. \[cut/)
     const ja = fitMemoryText('雨が降った。'.repeat(60), 100)
     expect(ja.text).toMatch(/。 \[cut: \d+ of 360 characters\]$/)
   })
