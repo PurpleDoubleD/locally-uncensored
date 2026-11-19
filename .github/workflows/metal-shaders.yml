@@ -6,7 +6,7 @@ name: Mac sidecar Metal shaders compile on older macOS
 # two bfloat casts that macOS 26 accepts and macOS 14 and 15 refuse, so no
 # model loaded on those Macs. The release lane builds on macos-15 and checks
 # that version itself; this workflow compiles the same embedded sources on
-# every hosted macOS image LU still promises, whenever the llama.cpp pin or
+# the oldest hosted macOS image GitHub still offers, whenever the llama.cpp pin or
 # LU's patches change, weekly against image drift, and on demand.
 #
 # Only ggml-metal is built (scripts/check-metal-shaders.sh --from-source), not
@@ -40,11 +40,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # macos-14 is the oldest macOS LU promises (tauri.macos.conf.json
-        # minimumSystemVersion). When GitHub retires that image this job
-        # fails to start, which is the moment to decide how 14 is checked,
-        # not a reason to drop the entry quietly.
-        runner: [macos-14, macos-15]
+        # macOS 14 is the oldest macOS LU promises, but GitHub no longer
+        # offers a macos-14 image ("The configuration
+        # 'macos-14-arm64-us-default' is not supported", 19.11.2026), so
+        # macos-15 is the oldest compiler this workflow can ask. For 14 the
+        # evidence is upstream: llama.cpp #31272 (M2 Ultra, macOS 14),
+        # confirmed fixed by PR 31360, the change patch 0005 carries.
+        runner: [macos-15]
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     steps:
