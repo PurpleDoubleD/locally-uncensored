@@ -57,6 +57,9 @@ mod remote_seal;
 mod shown_path;
 #[cfg(feature = "e2e-remote")]
 mod e2e_remote;
+// TEST-LOGIN: test builds only, see test_login.rs.
+#[cfg(feature = "test-login")]
+mod test_login;
 mod runtime_root;
 mod storage_move;
 mod system_tray;
@@ -1326,6 +1329,9 @@ pub fn run() {
             commands::remote_chats::remote_chats_reply,
             #[cfg(feature = "e2e-remote")]
             e2e_remote::remote_e2e_mode,
+            // TEST-LOGIN: test builds only (test_login.rs).
+            #[cfg(feature = "test-login")]
+            test_login::test_login_take,
             commands::remote_create::remote_create_cancel,
             commands::remote_create::remote_create_snapshot,
             // Proxy
@@ -1411,6 +1417,9 @@ pub fn run() {
             commands::saved_characters_backup::saved_characters_backup_read_photo,
         ])
         .setup(|app| {
+            // TEST-LOGIN: test builds only (test_login.rs).
+            #[cfg(feature = "test-login")]
+            test_login::read_token_if_asked();
             // A phone has no HOME the `dirs` crate could answer from. The
             // one folder the system gives the app is known from here on,
             // and every path helper in os_paths reads it.
