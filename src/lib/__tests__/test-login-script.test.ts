@@ -20,19 +20,30 @@ const SCRIPT = join(root, 'scripts/testbau/test-login.sh')
 const TOKEN = 'a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f6071829'
 const LINK = 'https://example.supabase.co/auth/v1/verify?token=SECRET-LINK-PART&type=magiclink'
 const KEY = 'service-role-key-for-the-self-test'
+const PAT = 'sbp_personal-access-token-for-the-self-test'
+const REF = 'selftestref'
 
 let server: Server | null = null
 afterEach(() => { server?.close(); server = null })
 
-function adminApi(seen: { headers?: Record<string, unknown>; body?: string }, answer: unknown) {
+type Seen = { headers?: Record<string, unknown>; body?: string; mgmt?: Record<string, unknown>; mgmtPath?: string }
+
+/** One local server for both: the management API (api-keys) and the project's admin API. */
+function adminApi(seen: Seen, answer: unknown) {
   return new Promise<number>((resolve) => {
     server = createServer((req, res) => {
       let body = ''
       req.on('data', (c) => { body += c })
       req.on('end', () => {
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        if (req.url?.startsWith('/v1/projects/')) {
+          seen.mgmt = req.headers
+          seen.mgmtPath = req.url
+          res.end(JSON.stringify([{ name: 'anon', api_key: 'anon-key' }, { name: 'service_role', api_key: KEY }]))
+          return
+        }
         seen.headers = req.headers
         seen.body = body
-        res.writeHead(200, { 'Content-Type': 'application/json' })
         res.end(JSON.stringify(answer))
       })
     }).listen(0, '127.0.0.1', () => resolve((server!.address() as { port: number }).port))
@@ -47,13 +58,17 @@ function standInApp(dir: string) {
   return prog
 }
 
-function runScript(prog: string, port: number) {
+function runScript(prog: string, port: number, via: 'key' | 'pat' = 'key') {
   return new Promise<{ code: number; out: string }>((resolve) => {
+    const base = `http://127.0.0.1:${port}`
     const child = spawn('bash', [SCRIPT, prog], {
-      env: { ...process.env, LU_TEST_LOGIN_EMAIL: 'test@example.com', LU_SUPABASE_URL: `http://127.0.0.1:${port}`, LU_TEST_LOGIN_KEY_FD3: '1' },
+      env: {
+        ...process.env, LU_TEST_LOGIN_EMAIL: 'test@example.com', LU_SUPABASE_URL: base, LU_SUPABASE_REF: REF, LU_SUPABASE_MGMT_URL: base,
+        ...(via === 'key' ? { LU_TEST_LOGIN_KEY_FD3: '1' } : { LU_TEST_LOGIN_PAT_FD3: '1' }),
+      },
       stdio: ['ignore', 'pipe', 'pipe', 'pipe'],
     })
-    ;(child.stdio[3] as NodeJS.WritableStream).end(KEY + '\n')
+    ;(child.stdio[3] as NodeJS.WritableStream).end((via === 'key' ? KEY : PAT) + '\n')
     let out = ''
     child.stdout!.on('data', (c) => { out += c })
     child.stderr!.on('data', (c) => { out += c })
@@ -68,7 +83,7 @@ async function waitFor(path: string) {
 
 describe('scripts/testbau/test-login.sh', () => {
   it('pipes the token into the app and prints none of it', async () => {
-    const seen: { headers?: Record<string, unknown>; body?: string } = {}
+    const seen: Seen = {}
     const port = await adminApi(seen, { action_link: LINK, properties: { hashed_token: TOKEN, action_link: LINK } })
     const dir = mkdtempSync(join(tmpdir(), 'lu-tls-'))
     const { code, out } = await runScript(standInApp(dir), port)
@@ -82,6 +97,21 @@ describe('scripts/testbau/test-login.sh', () => {
     expect(JSON.parse(seen.body ?? '{}')).toEqual({ type: 'magiclink', email: 'test@example.com' })
     // Nothing secret on the screen.
     for (const secret of [TOKEN, 'SECRET-LINK-PART', KEY]) expect(out).not.toContain(secret)
+  })
+
+  it('the Cloud-Pflege way: the PAT fetches the service key from the management API, nothing printed', async () => {
+    const seen: Seen = {}
+    const port = await adminApi(seen, { properties: { hashed_token: TOKEN, action_link: LINK } })
+    const dir = mkdtempSync(join(tmpdir(), 'lu-tls-'))
+    const { code, out } = await runScript(standInApp(dir), port, 'pat')
+    expect(code).toBe(0)
+    await waitFor(join(dir, 'stdin'))
+    expect(readFileSync(join(dir, 'stdin'), 'utf8')).toBe(TOKEN + '\n')
+    expect(seen.mgmtPath).toBe(`/v1/projects/${REF}/api-keys?reveal=true`)
+    expect(seen.mgmt?.authorization).toBe(`Bearer ${PAT}`)
+    // The project got the service key the management API named, not the PAT.
+    expect(seen.headers?.apikey).toBe(KEY)
+    for (const secret of [TOKEN, 'SECRET-LINK-PART', KEY, PAT]) expect(out).not.toContain(secret)
   })
 
   it('an answer without a token says why and hands the app nothing', async () => {
