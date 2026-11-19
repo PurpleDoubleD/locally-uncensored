@@ -23,7 +23,7 @@ import { CLOUD_BASE } from './cloud/config'
 import { getAccessToken } from './cloud/supabase'
 import { backendCall } from './backend'
 import { ollamaNumCtx } from './ollama'
-import { displayModelName } from './providers/model-name'
+import { displayModelName, openaiEntryOfModel } from './providers/model-name'
 
 /** The `llm` block of the voice loop's session request. */
 export interface VoiceLlmConfig {
@@ -234,6 +234,20 @@ export async function resolveVoiceBrain(activeModel: string | null | undefined, 
     // A voice session is a chat that is spoken: it runs in the chat window of
     // this model, from the one place every request to Ollama gets its window.
     ollamaNumCtxForVoice = await ollamaNumCtx(modelToUse, 'chat')
+  } else if (providerId === 'openai' && openaiEntryOfModel(activeModel)) {
+    // GitHub #258 / A42: a model of an additional OpenAI-compatible entry
+    // (LM Studio, Unsloth, any second server) lives at THAT entry's address
+    // with THAT entry's key. Reading the fixed slot sent it to the LU Engine.
+    // The app manages no entry's lifecycle, so nothing is woken here.
+    const entryId = openaiEntryOfModel(activeModel) as string
+    const state = useProviderStore.getState()
+    const entry = state.openaiEntries.find((e) => e.entryId === entryId)
+    if (!entry) {
+      throw new VoiceBrainError('model-error', 'The provider of this model was removed. Pick the model again in Chat.')
+    }
+    baseUrl = trimSlashes(entry.baseUrl)
+    apiKey = state.getOpenAIEntryApiKey(entryId) || undefined
+    local = entry.isLocal === true || isPrivateOrLanHost(hostnameOf(baseUrl))
   } else if (providerId === 'openai') {
     // The app's own engine sleeps after a render and may hold another model.
     // Wake it on this model before the session starts, exactly as a chat
