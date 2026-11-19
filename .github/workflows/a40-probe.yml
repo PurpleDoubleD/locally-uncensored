@@ -27,7 +27,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runner: [macos-14, macos-15]
+        # macos-14 is no longer offered by GitHub ("configuration not supported").
+        runner: [macos-15]
         patch: [with, without]
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
@@ -54,7 +55,9 @@ jobs:
       - name: Probe
         shell: bash
         run: |
-          set -uo pipefail
+          # GitHub runs `bash -e`; this probe reports every outcome, so no early exit.
+          set +e
+          set -u
           bin="$PWD/src-tauri/bin/lu-llama-server-aarch64-apple-darwin"
           echo "unary cast in the binary: constexpr=$(strings "$bin" | grep -c 'inline constexpr bfloat4 ggml_metal_unary_cast') plain=$(strings "$bin" | grep -c 'inline bfloat4 ggml_metal_unary_cast')"
 
@@ -71,7 +74,7 @@ jobs:
           load() {
             local label="$1"; shift
             local log="$RUNNER_TEMP/$label.log"
-            "$bin" -m "$model" --host 127.0.0.1 --port 18930 --ctx-size 2048 -np 1 "$@" >"$log" 2>&1 &
+            "$bin" -m "$model" --host 127.0.0.1 --port 18930 --ctx-size 2048 -np 1 -lv 4 "$@" >"$log" 2>&1 &
             local pid=$! ok=""
             for _ in $(seq 1 240); do
               if curl -fsS http://127.0.0.1:18930/health >/dev/null 2>&1; then ok=1; break; fi
@@ -86,7 +89,7 @@ jobs:
               if python3 -I -c 'import sys,json; d=json.loads(sys.argv[1]); t=d["timings"]; assert d["content"].strip(); print("  text:", repr(d["content"][:80])); print("  tokens/s: %.1f" % t["predicted_per_second"])' "$out"; then result=pass; fi
             fi
             kill "$pid" 2>/dev/null; wait "$pid" 2>/dev/null
-            echo "  metal init lines: $(grep -c 'ggml_metal_init' "$log"), metal library error: $(grep -c 'failed to initialize the Metal library' "$log"), has bfloat: $(grep -m1 'has bfloat' "$log" | awk -F= '{print $2}' | tr -d ' ')"
+            echo "  metal init lines: $(grep -c 'ggml_metal_init' "$log"), metal library error: $(grep -c 'failed to initialize the Metal library' "$log"), has bfloat: $(grep -m1 'has bfloat' "$log" | awk -F= '{print $2}' | tr -d ' '), GPU: $(grep -m1 'GPU name' "$log" | sed 's/.*GPU name: *//'), offloaded: $(grep -m1 -o 'offloaded [0-9]*/[0-9]* layers to GPU' "$log")"
             [ "$result" = pass ] || grep -E 'error|Error' "$log" | head -8
             eval "res_$label=$result"
             echo "$label: $result"
