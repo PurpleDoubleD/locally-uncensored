@@ -9,7 +9,8 @@
  * Run: npx vitest run src/lib/__tests__/gh185-linux-arm64-overlay.test.ts
  */
 import { execFileSync } from 'node:child_process'
-import { readFileSync } from 'node:fs'
+import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
@@ -62,5 +63,17 @@ describe('the Linux ARM64 build', () => {
     // and x86_64 Linux is what it was
     expect(execFileSync('bash', ['-c', `source "${join(ROOT, 'scripts', 'build-llama.sh')}"; cmake_flags_for x86_64-unknown-linux-gnu`], { encoding: 'utf8' })).toContain('-DGGML_VULKAN=ON')
     expect(shell('quantize_ships_for', 'aarch64-unknown-linux-gnu')).toBe('no')
+  })
+  it('build-llama.sh stops early with GCC 13, which refuses the armv9.2 variants (cross build 19.11.)', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'lu-gcc-'))
+    const fake = (v: string) => {
+      const p = join(dir, `gcc${v}`)
+      writeFileSync(p, `#!/bin/sh\n[ "$1" = -dumpversion ] && echo ${v}.2.0 || echo gcc\n`)
+      chmodSync(p, 0o755)
+      return p
+    }
+    const run = (cc: string) => execFileSync('bash', ['-c', `source "${join(ROOT, 'scripts', 'build-llama.sh')}"; (CC="${cc}" require_arm_variant_compiler) 2>&1 && echo ok || echo stopped`], { encoding: 'utf8' })
+    expect(run(fake('13'))).toMatch(/needs GCC 14 or newer[\s\S]*stopped/)
+    expect(run(fake('14')).trim()).toBe('ok')
   })
 })

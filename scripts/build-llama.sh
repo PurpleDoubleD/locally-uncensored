@@ -555,10 +555,26 @@ stage_dynamic_isa_companions() {
   esac
 }
 
+# GitHub #185, cross build check 19.11.2026: the armv9.2 CPU variants of
+# GGML_CPU_ALL_VARIANTS ask for "+sme", which GCC 13 (Ubuntu 24.04's default)
+# refuses ("invalid feature modifier 'sme'"); GCC 14 builds them. Say so up
+# front instead of failing half way. The compiler is $CC when set (a cross
+# build sets it, e.g. CC=aarch64-linux-gnu-gcc-14), else cc.
+require_arm_variant_compiler() {
+  local cc="${CC:-cc}" major
+  if "$cc" --version 2>/dev/null | grep -qi clang; then return 0; fi
+  major="$("$cc" -dumpversion 2>/dev/null | cut -d. -f1)"
+  case "$major" in
+    ''|*[!0-9]*) return 0 ;;
+  esac
+  [ "$major" -ge 14 ] || die "aarch64-unknown-linux-gnu needs GCC 14 or newer for the armv9.2 CPU variants; $cc is GCC $major. Install gcc-14/g++-14 and run again with CC=gcc-14 CXX=g++-14."
+}
+
 build_triple() {
   require_cmake
   local triple="$1"
   local build_dir="$CACHE_DIR/build-$triple"
+  [ "$triple" != "aarch64-unknown-linux-gnu" ] || require_arm_variant_compiler
   local flags; flags="$(cmake_flags_for "$triple")"
   log "configuring $triple  ($flags)"
   # shellcheck disable=SC2086
