@@ -2,7 +2,7 @@
 
 All notable changes to Locally Uncensored are documented here.
 
-## [3.1.3] - 2026-11-22
+## [3.1.3] - 2026-11-23
 
 Scene to Video comes to the desktop app, Swap Character runs on your own
 computer, and Agent mode asks in the chat where it works.
