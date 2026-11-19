@@ -131,6 +131,12 @@ const CORE_NODES = new Set([
   // image) [comfy_extras/nodes_upscale_model.py]; ImageScaleBy (image,
   // upscale_method, scale_by) [nodes.py].
   'UpscaleModelLoader', 'ImageUpscaleWithModel', 'ImageScaleBy',
+  // Scene to Video (3.1.3, buildSceneWorkflow): the own first frame in front
+  // of the depth video and its keep/paint mask. Long-standing core nodes:
+  // ImageBatch, EmptyImage [nodes.py], ImageFromBatch [nodes_images.py],
+  // ImageToMask [nodes_mask.py]; listed by /object_info of ComfyUI v0.42.4
+  // on the Windows box, 19.11.2026.
+  'ImageFromBatch', 'ImageBatch', 'EmptyImage', 'ImageToMask',
   // output
   'SaveImage', 'SaveAnimatedWEBP', 'SaveVideo', 'SaveAudioMP3',
 ])
@@ -154,11 +160,14 @@ const CUSTOM_PACK_NODES: Record<string, Set<string>> = {
     'ADE_LoadAnimateDiffModel', 'ADE_ApplyAnimateDiffModelSimple', 'ADE_UseEvolvedSampling',
   ]),
   // Kosinkadink/ComfyUI-VideoHelperSuite
-  'ComfyUI-VideoHelperSuite': new Set(['VHS_VideoCombine']),
+  // VHS_LoadVideo: Scene to Video resamples the scene to 16 fps with it.
+  'ComfyUI-VideoHelperSuite': new Set(['VHS_VideoCombine', 'VHS_LoadVideo']),
   // 1038lab/ComfyUI-RMBG
   'ComfyUI-RMBG': new Set(['RMBG']),
   // Fannovel16/comfyui_controlnet_aux
-  'comfyui_controlnet_aux': new Set(['DWPreprocessor']),
+  // DepthAnythingV2Preprocessor: Scene to Video's depth video
+  // (node_wrappers/depth_anything_v2.py).
+  'comfyui_controlnet_aux': new Set(['DWPreprocessor', 'DepthAnythingV2Preprocessor']),
   // city96/ComfyUI-GGUF
   'ComfyUI-GGUF': new Set(['UnetLoaderGGUF']),
 }

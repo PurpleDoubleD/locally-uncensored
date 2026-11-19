@@ -5,6 +5,7 @@ import { useCreateStore } from '../../../stores/createStore'
 import {
   classifyModel,
   resolveLocalOpPick,
+  sceneLaneModels,
   videoLaneModels,
 } from '../../../api/comfyui'
 import { ParamGroups } from './ParamGroups'
@@ -14,6 +15,7 @@ import { ImageCount } from './ImageCount'
 import { ActiveWorkflowParams } from './WorkflowParams'
 import { isHubIntent } from '../../../lib/create/character-hub'
 import { HubSettings } from './hub/HubSettings'
+import { SceneSettings } from './SceneControls'
 
 export function AdvancedDrawer({
   open,
@@ -78,6 +80,8 @@ export function AdvancedDrawer({
   const modelName =
     intent === 'motion'
       ? resolveLocalOpPick(localOpModel, motionModels)
+      : intent === 'scene'
+      ? resolveLocalOpPick(localOpModel, sceneLaneModels(motionModels))
       : mode === 'image'
         ? imageModel
         : effectiveVideoModel
@@ -94,6 +98,9 @@ export function AdvancedDrawer({
       {/* The Character tab keeps its model, size and prompt helpers here:
           its prompt window holds only the field, the upload and Create. */}
       {open && isHubIntent(intent) && <HubSettings onOpenWorkflows={onOpenWorkflows} />}
+      {/* Scene to Video: Look and Style at the head (the web's last rows of
+          its settings; here the drawer is the settings). */}
+      {open && intent === 'scene' && <SceneSettings />}
       <ImproveToggle />
       <ImageCount />
       {studioModel ? (

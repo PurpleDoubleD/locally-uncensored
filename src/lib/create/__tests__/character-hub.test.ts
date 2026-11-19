@@ -31,7 +31,8 @@ describe('the intents keep their ids', () => {
   it('the bar folds the four into one pill where Character stood', () => {
     const pills = pillEntries(INTENTS)
     // 3D (3.1.0) is a pill of its own at the far right, outside the Character area.
-    expect(pills.map((p) => p.meta.short)).toEqual(['Image', 'Edit', 'Cutout', 'Enhance', 'Erase', 'Video', 'Animate', 'Character', 'Music', 'Extend', '3D'])
+    // Scene to Video (3.1.3) stands after Animate, as on the web.
+    expect(pills.map((p) => p.meta.short)).toEqual(['Image', 'Edit', 'Cutout', 'Enhance', 'Erase', 'Video', 'Animate', 'Scene', 'Character', 'Music', 'Extend', '3D'])
     const hub = pills.find((p) => p.hub)!
     expect(hub.meta).toBe(HUB_PILL)
     expect(hub.meta.label).toBe('Character')

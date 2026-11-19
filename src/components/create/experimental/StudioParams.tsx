@@ -13,6 +13,7 @@ import { studioShownValue } from '../../../lib/render/create-studio'
 import { STUDIO_MODELS } from '../../../lib/render/studio-contract'
 import { musicText } from '../../../lib/render/music-ui'
 import { swapPanelFields } from '../../../lib/render/swap'
+import { scenePanelFields } from '../../../lib/render/scene'
 
 export function StudioParams({ model }: { model: string }) {
   const options = useCreateStore((s) => s.cloudStudioOptions)
@@ -21,7 +22,8 @@ export function StudioParams({ model }: { model: string }) {
   // Swap Character shows a role per person and the resolution in its own
   // panel, and fixes the mode (lib/render/swap.ts): none of them twice here.
   const intent = useCreateStore((s) => s.intent())
-  const inPanel = swapPanelFields(intent)
+  // Scene to Video sets length, size and the keyframe list from the clip.
+  const inPanel = [...swapPanelFields(intent), ...(intent === 'scene' ? scenePanelFields(model) : [])]
   const fields = studioFieldsInOrder(model).filter(([key]) => !inPanel.includes(key))
   const hint = modelHint(model)
   // Mureka Song calls its style field "prompt" while the prompt field carries

@@ -133,12 +133,12 @@ export function IntentBar() {
                 aria-hidden
               />
             )}
-            <span className={cn('whitespace-nowrap t-control pl-[3px]', hub ? 'pr-[5px]' : 'pr-[10.5px]')}>
+            <span className={cn('whitespace-nowrap t-control pl-[3px]', hub || meta.isNew ? 'pr-[5px]' : 'pr-[10.5px]')}>
               {meta.short}
             </span>
-            {hub && (
-              // The area is new in 3.1.0: one quiet mark, accent text on a
-              // faint accent ground, as in the sketches.
+            {(hub || meta.isNew) && (
+              // The area is new in 3.1.0, Scene to Video in 3.1.3: one quiet
+              // mark, accent text on a faint accent ground, as in the sketches.
               <span className="mr-[5px] rounded-full bg-lu-accent/15 px-[5px] py-px lu-new-mark text-lu-accent" aria-hidden>
                 NEW
               </span>

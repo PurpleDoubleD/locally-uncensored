@@ -51,6 +51,8 @@ const INTENT_ROLE: Partial<Record<StudioIntent, StepRole[]>> = {
   extend: ['extend'],
   motion: ['motion'],
   swap_character: ['swap-character'],
+  // 3.1.3: Scene to Video (lib/render/scene.ts).
+  scene: ['scene'],
   video_upscale: ['upscale'],
   // 3D: a video sends its frames to a model that takes several sides first,
   // and to a one-picture model with its best frame where none is there.

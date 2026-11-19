@@ -127,6 +127,37 @@ export interface SwapFrame { url: string; width: number; height: number; videoUr
  *  match, it has expired. */
 export interface SwapBuilt { jobId: string; url: string; key: string; confirmed: boolean }
 
+/** Scene to Video (3.1.3, port of the web's 16.11.2026): the first frame the
+ *  run starts from. A frame the editor designed on the cloud is an own result
+ *  (`jobId`); an own upload is a picture in the app. `videoUrl` is the scene
+ *  video it belongs to ('' before any clip: it goes with the first one). */
+export type SceneFrame =
+  | { kind: 'designed'; jobId: string; url: string; model: string; videoUrl: string }
+  | { kind: 'upload'; url: string; width: number; height: number; videoUrl: string }
+
+/** Scene to Video beside the scene video (videoInput). Runtime-only. */
+export interface SceneState {
+  /** The scene video as the app measured it. */
+  clip: { videoUrl: string; seconds: number; width: number; height: number } | null
+  /** The first frame of the scene video, drawn in the app. */
+  first: { videoUrl: string; url: string; width: number; height: number } | null
+  /** The customer's own first frame, uploaded or generated; the run starts
+   *  from it instead of the frame taken from the clip. */
+  frame: SceneFrame | null
+  /** The own first frame is being generated: Create waits for it. */
+  frameBusy: boolean
+  /** When the scene video on screen was added. A result made before it
+   *  belongs to an older scene and does not hide the new one. */
+  videoSetAt: number
+}
+
+/** The node sets a local tab needs on top of its model (Stage CapabilityCard).
+ *  'depth' (3.1.3): the depth extractor of comfyui_controlnet_aux, which
+ *  Scene to Video draws its depth video with. */
+export type CreateCapability = 'rmbg' | 'inpaint-nodes' | 'dwpose' | 'depth'
+
+export const EMPTY_SCENE: SceneState = { clip: null, first: null, frame: null, frameBusy: false, videoSetAt: 0 }
+
 const ONE_FIGURE: SwapFigure[] = [{ image: null, role: '' }]
 
 /** Which of the specialized categories ALSO run on the local ComfyUI backend
@@ -139,7 +170,8 @@ const ONE_FIGURE: SwapFigure[] = [{ image: null, role: '' }]
 // the train lane is a real local tab now (it was cloud-first while 2.5.8
 // had no trainer runtime).
 // 3D joined in 3.1.0: TRELLIS.2 on the core nodes of the pinned ComfyUI.
-export const LOCAL_LANE_OPS: ReadonlySet<CloudOp> = new Set(['music', 'lipsync', 'extend', 'motion', 'character', '3d'])
+// Scene to Video joined in 3.1.3: Wan 2.1 VACE with a depth video of the scene.
+export const LOCAL_LANE_OPS: ReadonlySet<CloudOp> = new Set(['music', 'lipsync', 'extend', 'motion', 'character', '3d', 'scene'])
 
 /** An audio/video file (or training image) staged in the composer before
  *  upload. `blob` carries the bytes for the cloud upload; `url` is a local
@@ -523,6 +555,9 @@ export interface CreateState {
   /** Swap Character: the built and (after Continue) confirmed first frame.
    *  Runtime-only. */
   swapBuilt: SwapBuilt | null
+  /** Scene to Video: the measured clip, its first frame and the own first
+   *  frame. Runtime-only. */
+  scene: SceneState
   /** The Character area (3.1.0 part B): which of its three steps shows. Only
    *  read while the intent is one of HUB_INTENTS. Runtime-only. */
   hubStep: HubStep
@@ -662,7 +697,7 @@ export interface CreateState {
    *  stayed hidden until Create was opened again (box run d307-d). */
   loraListKey: string
   /** Runtime-only: which local custom-node capabilities are installed. */
-  caps: Record<'rmbg' | 'inpaint-nodes' | 'dwpose', boolean>
+  caps: Record<CreateCapability, boolean>
 
   isGenerating: boolean
   /** Runtime-only: the user-managed ComfyUI (0.19+) blocked the WebView's
@@ -805,6 +840,7 @@ export interface CreateState {
   setSwapConsent: (consent: boolean) => void
   setSwapFrame: (frame: SwapFrame | null) => void
   setSwapBuilt: (built: SwapBuilt | null) => void
+  setScene: (patch: Partial<SceneState>) => void
   setHubStep: (step: HubStep) => void
   setHubCharacter: (c: HubCharacter | null) => void
   /** The pill "Character": back to the action that was open, else step 1. */
@@ -845,7 +881,7 @@ export interface CreateState {
   setBackend: (backend: CreateBackend) => void
   setCloudImageModel: (id: string) => void
   setCloudVideoModel: (id: string) => void
-  setCaps: (caps: Record<'rmbg' | 'inpaint-nodes' | 'dwpose', boolean>) => void
+  setCaps: (caps: Record<CreateCapability, boolean>) => void
   resetParamsToModelDefaults: () => void
 
   setIsGenerating: (generating: boolean) => void
@@ -1319,6 +1355,7 @@ export const useCreateStore = create<CreateState>()(
       swapConsent: false,
       swapFrame: null as SwapFrame | null,
       swapBuilt: null as SwapBuilt | null,
+      scene: EMPTY_SCENE,
       hubStep: 'who' as HubStep,
       hubCharacter: null as HubCharacter | null,
       hubLastIntent: null as CreateIntent | null,
@@ -1368,7 +1405,7 @@ export const useCreateStore = create<CreateState>()(
       localOpModel: '',
       charactersVersion: 0,
       loraListKey: '',
-      caps: { rmbg: false, 'inpaint-nodes': false, dwpose: false } as Record<'rmbg' | 'inpaint-nodes' | 'dwpose', boolean>,
+      caps: { rmbg: false, 'inpaint-nodes': false, dwpose: false, depth: false } as Record<CreateCapability, boolean>,
 
       isGenerating: false,
       comfyCorsBlocked: false,
@@ -1542,6 +1579,17 @@ export const useCreateStore = create<CreateState>()(
             // Its inputs are its own slots (video, figures); the Stage's
             // source and mask are not read.
             return { ...base, cloudOp: 'swap_character' as const, mode: 'video' as const, videoSubMode: 'i2v' as const, mask: null }
+          case 'scene': {
+            // Scene to Video (3.1.3): the scene video and the own first frame
+            // are its own slots; the Stage's source, mask and references are
+            // not read. The local lane is Wan 2.1 VACE (buildSceneWorkflow),
+            // so its sampling starts from the VACE defaults; size and length
+            // follow the clip at the start.
+            const d = MODEL_TYPE_DEFAULTS.wanvace
+            return { ...base, cloudOp: 'scene' as const, mode: 'video' as const, videoSubMode: 'i2v' as const, mask: null, references: [],
+              steps: d.steps, cfgScale: d.cfgScale, sampler: d.sampler, scheduler: d.scheduler,
+              width: d.width, height: d.height, ...(d.frames ? { frames: d.frames } : {}), ...(d.fps ? { fps: d.fps } : {}) }
+          }
           case 'motion': {
             // Keeps the source slot (the character image the video drives).
             // On the Mac the lane runs an LTX-2.3 pack, and its catalogue
@@ -1723,8 +1771,16 @@ export const useCreateStore = create<CreateState>()(
       setVideoInput: (videoInput) => {
         releaseReplacedMediaRef(get().videoInput, videoInput)
         const figures = get().swapFigures
+        const scene = get().scene
         set(videoInput?.url === get().videoInput?.url ? { videoInput } : {
           videoInput, swapSeconds: null, swapFrame: null, swapBuilt: null,
+          // Scene to Video: measurement and frames belonged to the old video.
+          // An own first frame picked before any clip (videoUrl '') goes with
+          // the first clip, as on the web (18.11.2026).
+          scene: {
+            ...scene, clip: null, first: null, videoSetAt: videoInput ? Date.now() : 0,
+            frame: videoInput && scene.frame?.kind === 'upload' && scene.frame.videoUrl === '' ? { ...scene.frame, videoUrl: videoInput.url } : null,
+          },
           swapFigures: figures.some((f) => f.mark) ? figures.map((f) => ({ ...f, mark: null })) : figures,
         })
       },
@@ -1734,6 +1790,7 @@ export const useCreateStore = create<CreateState>()(
       setSwapConsent: (swapConsent) => set({ swapConsent }),
       setSwapFrame: (swapFrame) => set({ swapFrame }),
       setSwapBuilt: (swapBuilt) => set({ swapBuilt }),
+      setScene: (patch) => set((s) => ({ scene: { ...s.scene, ...patch } })),
       setHubStep: (hubStep) => set({ hubStep }),
       setHubCharacter: (hubCharacter) => set({ hubCharacter }),
       openCharacterHub: () => {

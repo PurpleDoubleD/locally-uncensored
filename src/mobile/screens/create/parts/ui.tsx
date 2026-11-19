@@ -8,7 +8,7 @@
  */
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react'
 import {
-  Box, Eraser, FastForward, Film, Image as ImageIcon, Maximize2, Mic, Music, PersonStanding, RefreshCw, Scissors,
+  Box, Clapperboard, Eraser, FastForward, Film, Image as ImageIcon, Maximize2, Mic, Music, PersonStanding, RefreshCw, Scissors,
   TimerOff, UserRound, Video, Wand2, X,
 } from 'lucide-react'
 import { useCreateStore, type GalleryItem } from '../../../../stores/createStore'
@@ -41,6 +41,7 @@ export const TOOL_ICON: Record<ToolId, IconType> = {
   '3d': Box,
   // Not a phone tool (tools.ts TOOLS leaves it out); the type names every intent.
   swap_character: RefreshCw,
+  scene: Clapperboard,
 }
 
 /** The small round X on a thumbnail. Its target is 44 px, the mark is 22 px. */

@@ -5373,7 +5373,6 @@
           "Annie Sofa Sitting Side 2",
           "Annie Sofa Sitting Side 3",
           "Annie Sofa Sitting Side",
-          "Annie Sofa Sitting Front 2",
           "Annie Studio Pink Sitting Front",
           "Annie Studio Pink Sitting Side",
           "Annie Studio Pink Standing Front",
@@ -5489,7 +5488,6 @@
           "Emilia Outdoor Yoga Side",
           "Emilia Picnic Front",
           "Emilia Picnic Side",
-          "Edward",
           "Fernando Business Indoor Front",
           "Fernando Business Indoor Side",
           "Fernando OutdoorChair Front 2",
@@ -5550,7 +5548,6 @@
           "Jocelyn Office Side 2",
           "Jocelyn Office Side",
           "Jocelyn Sofa Front 2",
-          "Jocelyn Sofa Front",
           "Jocelyn Sofa Side 2",
           "Jocelyn Sofa Side",
           "Joel Couch Front",
@@ -5563,7 +5560,6 @@
           "Jonas Gym Front",
           "Jonas Gym Side 2",
           "Jonas Gym Side ",
-          "June Office Front 2",
           "Juan Office Front",
           "Juan Office Side 2",
           "Juan Office Side",
@@ -5579,14 +5575,11 @@
           "Judy Doctor Standing",
           "Judy Lawyer",
           "Judy Teacher Sitting",
-          "Judy HR",
           "Judy Teacher Standing",
           "June HR",
           "June Office Front",
           "June Office Side 2",
           "June Office Side",
-          "June Sofa Casual Front 2",
-          "June Sofa Casual Front",
           "June Sofa Casual Side 2",
           "June Sofa Casual Side",
           "Kavya Indoor Front",
@@ -5612,7 +5605,6 @@
           "Leszek Outdoor Casual Side",
           "Leszek Sofa Front",
           "Leszek Sofa Side",
-          "Leah",
           "Martina Office Front 2",
           "Martina Office Front",
           "Martina Office Side 2",
@@ -5806,13 +5798,11 @@
           "Vernon Lounge Side",
           "Vince Business Sofa Front",
           "Vince Business Training Front",
-          "Vince Business Training Side 2",
           "Vince Business Training Side",
           "Vince Sofa Casual Front 2",
           "Vince Sofa Casual Front",
           "Vince Sofa Casual Side 2",
-          "Vince Sofa Casual Side",
-          "Matthew"
+          "Vince Sofa Casual Side"
         ],
         "type": "string",
         "x-ui-component": "select"
@@ -11170,17 +11160,15 @@
     "additionalProperties": false,
     "properties": {
       "aspect_ratio": {
-        "default": "auto",
-        "description": "Aspect ratio of the generated image.",
+        "description": "The aspect ratio of the generated image. If not specified, it is determined automatically from the input image.",
         "enum": [
-          "auto",
-          "16:9",
-          "9:16",
           "1:1",
-          "4:3",
-          "3:4",
           "3:2",
           "2:3",
+          "3:4",
+          "4:3",
+          "9:16",
+          "16:9",
           "21:9"
         ],
         "type": "string"
@@ -13724,6 +13712,357 @@
       "prompt",
       "negative_prompt",
       "keep_original_sound"
+    ]
+  },
+  "base/wan-2.1-14b-vace": {
+    "additionalProperties": false,
+    "properties": {
+      "context_scale": {
+        "default": 1,
+        "description": "Controls how close you want the model to stick to the reference context.",
+        "maximum": 2,
+        "minimum": 0,
+        "type": "number",
+        "x-ui-component": "slider"
+      },
+      "duration": {
+        "default": 5,
+        "description": "The duration of the generated media in seconds.",
+        "maximum": 10,
+        "minimum": 5,
+        "type": "integer"
+      },
+      "flow_shift": {
+        "default": 16,
+        "description": "The shift value for the timestep schedule for flow matching.",
+        "maximum": 30,
+        "minimum": 0,
+        "type": "number"
+      },
+      "guidance_scale": {
+        "default": 5,
+        "description": "The guidance scale to use for the generation.",
+        "maximum": 20,
+        "minimum": 0,
+        "type": "number"
+      },
+      "image": {
+        "description": "URL of the first image.",
+        "type": "string",
+        "x-aliases": [
+          "first_image"
+        ]
+      },
+      "images": {
+        "description": "URL of ref images to use while generating the video.",
+        "items": {
+          "type": "string"
+        },
+        "maxItems": 5,
+        "type": "array"
+      },
+      "last_image": {
+        "description": "URL of the last image.",
+        "type": "string"
+      },
+      "mask_image": {
+        "description": "URL of the mask image.",
+        "type": "string"
+      },
+      "mask_video": {
+        "description": "URL of the mask video.",
+        "type": "string"
+      },
+      "negative_prompt": {
+        "description": "The negative prompt for the generation.",
+        "type": "string"
+      },
+      "num_inference_steps": {
+        "default": 30,
+        "description": "The number of inference steps to perform.",
+        "maximum": 40,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "prompt": {
+        "type": "string"
+      },
+      "seed": {
+        "description": "The random seed to use for the generation. -1 means a random seed will be used.",
+        "type": "integer"
+      },
+      "size": {
+        "default": "832*480",
+        "description": "The size of the generated media in pixels (width*height).",
+        "enum": [
+          "832*480",
+          "480*832",
+          "1280*720",
+          "720*1280"
+        ],
+        "type": "string"
+      },
+      "task": {
+        "default": "depth",
+        "description": "Extract control information from the provided video to guide video generation.",
+        "enum": [
+          "depth",
+          "pose",
+          "face",
+          "inpainting",
+          "none"
+        ],
+        "type": "string"
+      },
+      "video": {
+        "description": "The video for generating the output.",
+        "type": "string"
+      }
+    },
+    "required": [
+      "prompt"
+    ],
+    "type": "object",
+    "x-order-properties": [
+      "prompt",
+      "images",
+      "video",
+      "task",
+      "negative_prompt",
+      "mask_video",
+      "mask_image",
+      "image",
+      "last_image",
+      "duration",
+      "size",
+      "num_inference_steps",
+      "guidance_scale",
+      "flow_shift",
+      "context_scale",
+      "seed"
+    ]
+  },
+  "runwayml/aleph-2": {
+    "additionalProperties": false,
+    "properties": {
+      "keyframe_images": {
+        "default": [],
+        "description": "Up to 5 optional keyframe image URLs.",
+        "items": {
+          "type": "string"
+        },
+        "maxItems": 5,
+        "type": "array"
+      },
+      "keyframe_positions": {
+        "default": [],
+        "description": "Position for each keyframe: first, last, or a timestamp in seconds.",
+        "items": {
+          "type": "string"
+        },
+        "maxItems": 5,
+        "type": "array",
+        "x-ui-component": "array"
+      },
+      "prompt": {
+        "description": "Text prompt describing the edit to apply.",
+        "type": "string"
+      },
+      "seed": {
+        "description": "Optional random seed for reproducible generation.",
+        "type": "integer"
+      },
+      "video": {
+        "description": "Input video. Must be 2-30 seconds and less than 16 MB.",
+        "type": "string"
+      }
+    },
+    "required": [
+      "video",
+      "prompt"
+    ],
+    "type": "object",
+    "x-order-properties": [
+      "prompt",
+      "video",
+      "keyframe_images",
+      "keyframe_positions",
+      "seed"
+    ]
+  },
+  "alibaba/wan-3.0/video-edit": {
+    "additionalProperties": false,
+    "properties": {
+      "duration": {
+        "description": "Output duration (2-15 seconds). When omitted, follows the input duration rounded up and clamped to 2-15 seconds.",
+        "maximum": 15,
+        "minimum": 2,
+        "type": "integer",
+        "x-hidden": true,
+        "x-ui-component": "slider",
+        "disabled": true
+      },
+      "enable_prompt_expansion": {
+        "default": false,
+        "description": "If set to true, the prompt optimizer will be enabled.",
+        "type": "boolean"
+      },
+      "generate_audio": {
+        "default": true,
+        "description": "Whether to generate native audio for the edited output. Defaults to true. When set to false, the input video's audio track is preserved on the output instead.",
+        "type": "boolean"
+      },
+      "prompt": {
+        "description": "Describe the edit you want applied to the input video.",
+        "type": "string"
+      },
+      "reference_audios": {
+        "description": "Array of reference audio URLs (up to 5). Total input audio duration must not exceed 15 seconds.",
+        "items": {
+          "type": "string"
+        },
+        "maxItems": 5,
+        "type": "array"
+      },
+      "reference_images": {
+        "description": "Optional reference images to guide the edit (up to 10).",
+        "items": {
+          "type": "string"
+        },
+        "maxItems": 10,
+        "type": "array"
+      },
+      "resolution": {
+        "default": "720p",
+        "description": "Output video resolution.",
+        "enum": [
+          "480p",
+          "720p",
+          "1080p"
+        ],
+        "type": "string",
+        "x-ui-component": "select"
+      },
+      "seed": {
+        "description": "The random seed to use for the generation. -1 means a random seed will be used.",
+        "type": "integer"
+      },
+      "video": {
+        "description": "URL of the input video to edit. Videos longer than 15s are trimmed to 15s.",
+        "type": "string"
+      }
+    },
+    "required": [
+      "prompt",
+      "video"
+    ],
+    "type": "object",
+    "x-order-properties": [
+      "prompt",
+      "video",
+      "reference_images",
+      "reference_audios",
+      "resolution",
+      "duration",
+      "generate_audio",
+      "enable_prompt_expansion",
+      "seed"
+    ]
+  },
+  "bytedance/seedance-2.5-flash/video-edit": {
+    "additionalProperties": false,
+    "properties": {
+      "generate_audio": {
+        "default": true,
+        "description": "Whether to generate native audio for the edited output. Defaults to true. When set to false, the input video's audio track is preserved on the output instead.",
+        "type": "boolean"
+      },
+      "output_format": {
+        "default": "mp4",
+        "description": "The container of the output video. mov is a QuickTime file with H.264 4:4:4 video and uncompressed audio, intended for post-production; some browsers and players cannot play it. mov is not available at 1080p or 4k.",
+        "enum": [
+          "mp4",
+          "mov"
+        ],
+        "type": "string",
+        "x-ui-component": "select",
+        "disabled": true
+      },
+      "prompt": {
+        "description": "Describe the edit you want applied to the input video.",
+        "type": "string"
+      },
+      "reference_audios": {
+        "description": "Optional reference audio URLs to guide audio generation.",
+        "items": {
+          "type": "string"
+        },
+        "maxItems": 5,
+        "type": "array"
+      },
+      "reference_images": {
+        "description": "Optional reference image URLs to guide the edit (subject identity, style, etc.).",
+        "items": {
+          "type": "string"
+        },
+        "maxItems": 10,
+        "type": "array"
+      },
+      "resolution": {
+        "default": "720p",
+        "description": "Output video resolution. 1080p and 4k are generated at 720p and upscaled.",
+        "enum": [
+          "480p",
+          "720p",
+          "1080p",
+          "4k"
+        ],
+        "type": "string",
+        "x-ui-component": "select"
+      },
+      "video": {
+        "description": "URL of the input video to edit. Videos longer than 30s are trimmed to 30s; videos shorter than 4s are padded to 4s.",
+        "type": "string"
+      }
+    },
+    "required": [
+      "prompt",
+      "video"
+    ],
+    "type": "object",
+    "x-order-properties": [
+      "prompt",
+      "video",
+      "reference_images",
+      "reference_audios",
+      "resolution",
+      "generate_audio",
+      "output_format"
+    ]
+  },
+  "black-forest-labs/flux-3/video-edit": {
+    "additionalProperties": false,
+    "properties": {
+      "prompt": {
+        "description": "Describe how to edit the input video. The clip is re-rendered while preserving its motion, timing, and framing. Maximum 4096 characters.",
+        "maxLength": 4096,
+        "minLength": 1,
+        "type": "string"
+      },
+      "video": {
+        "description": "URL of the input MP4 video. The video must be under 50 MB and under 15 seconds.",
+        "minLength": 1,
+        "type": "string"
+      }
+    },
+    "required": [
+      "video",
+      "prompt"
+    ],
+    "type": "object",
+    "x-order-properties": [
+      "video",
+      "prompt"
     ]
   }
 }

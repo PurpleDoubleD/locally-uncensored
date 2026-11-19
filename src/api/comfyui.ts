@@ -620,6 +620,14 @@ export function ref2vRefusal(name: string | null | undefined): string | null {
   }
 }
 
+/** Scene to Video's local models (3.1.3): the full Wan 2.1 VACE files of the
+ *  Motion Control list. Wan 2.2 Animate follows a pose skeleton and has no
+ *  input for the depth of a scene, and a VACE add-on module or a Wan 2.2 VACE
+ *  Fun file needs a graph LU does not build (ref2vRefusal). */
+export function sceneLaneModels(motion: readonly ClassifiedModel[]): ClassifiedModel[] {
+  return motion.filter((m) => m.type === 'wanvace' && ref2vRefusal(m.name) === null)
+}
+
 /** Can Animate run this model with the picture as a reference? */
 export function isRunnableRef2V(name: string | null | undefined): boolean {
   return ref2vFamily(name) !== null && ref2vRefusal(name) === null

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { motion, AnimatePresence, useIsPresent } from 'framer-motion'
-import { UploadCloud, ImagePlus, Scissors, Wand2, Sparkles, X, Loader2, Download, AlertTriangle, Image as ImageIcon, Film, Maximize2, Play } from 'lucide-react'
-import { useCreateStore, type GalleryItem } from '../../../stores/createStore'
+import { UploadCloud, ImagePlus, Scissors, Wand2, Sparkles, X, Loader2, Download, AlertTriangle, Image as ImageIcon, Film, Maximize2, Play, Clapperboard } from 'lucide-react'
+import { useCreateStore, type CreateCapability, type GalleryItem } from '../../../stores/createStore'
 import { useModelStore } from '../../../stores/modelStore'
 import { createRunModel } from '../../../lib/render/create-studio'
 import { musicText } from '../../../lib/render/music-ui'
@@ -10,6 +10,7 @@ import { INTENT_MAP, intentNeedsSource } from './intents'
 import { ThreeDSetupCard, ThreeDVideoHint, useThreeDLocal } from './ThreeDStage'
 import { THREE_D_TEXT } from '../../../lib/three/three-d-text'
 import { SwapStage } from './SwapStage'
+import { SceneStage } from './SceneStage'
 import { editNeedsMask, defaultCloudModel, modelForOp } from '../../../stores/cloudCatalogStore'
 import { stageShowsSetupCard, laneModelCount } from './stageGate'
 import { needsMaskFor } from './maskGate'
@@ -102,6 +103,7 @@ export function Stage({ hub = false, displayed, onOpenMaskEditor, onEditResult, 
   const isGenerating = useCreateStore((s) => s.isGenerating || s.batchRun !== null)
   const source = useCreateStore((s) => s.source)
   const sourceSetAt = useCreateStore((s) => s.sourceSetAt)
+  const sceneVideoSetAt = useCreateStore((s) => s.scene.videoSetAt)
   const setPrompt = useCreateStore((s) => s.setPrompt)
   const caps = useCreateStore((s) => s.caps)
   const backend = useCreateStore((s) => s.backend)
@@ -212,6 +214,10 @@ export function Stage({ hub = false, displayed, onOpenMaskEditor, onEditResult, 
     body = <SourcePreview onOpenMaskEditor={onOpenMaskEditor} />
     howtoAtFoot = true
     howtoOnlyWide = true
+  } else if (intent === 'scene' && !(displayed && displayed.intent === 'scene' && displayed.createdAt >= sceneVideoSetAt)) {
+    // Scene to Video: the scene and its first frame until a clip of this
+    // scene is there (SceneStage).
+    body = <SceneStage />
   } else if (intent === 'swap_character' && !(displayed && displayed.intent === 'swap_character')) {
     // Swap Character: original + new people -> result, until a swap is there.
     // In the Character area the panel shows the video and its people.
@@ -787,6 +793,13 @@ const CAP_COPY = {
     title: 'Motion control needs the pose extractor',
     description: 'DWPose reads the skeleton out of your driving video so the character can copy it. This installs the controlnet aux node pack; the pose models download automatically on your first run.',
   },
+  depth: {
+    icon: Clapperboard,
+    title: 'Scene to Video needs the depth extractor',
+    // Depth Anything V2 Small: Apache-2.0, about 100 MB, fetched by the pack
+    // itself on the first run (buildSceneWorkflow names the file).
+    description: 'Depth Anything reads the depth of your scene so the camera and every shape stay where they are. This installs the controlnet aux node pack; the depth model (about 100 MB) downloads automatically on your first run.',
+  },
 } as const
 
 /** While an install runs, the card must not keep saying "needs a one-time
@@ -817,7 +830,7 @@ const MAC_CANCEL_TITLE = {
   motion: 'Stops showing progress here. The download itself keeps running.',
 } as const
 
-function CapabilityCard({ cap }: { cap: 'rmbg' | 'inpaint-nodes' | 'dwpose' }) {
+function CapabilityCard({ cap }: { cap: CreateCapability }) {
   const { installCapability } = useCreateExp()
   // The run lives outside the card, like a bundle install: a failure must
   // still be readable after a trip to another mode (the box, 03.10.2026: the

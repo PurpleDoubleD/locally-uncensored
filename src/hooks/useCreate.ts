@@ -1,5 +1,7 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
 import { blobFromUrl } from '../lib/render/data-url'
+import { SCENE_LOCAL_FPS, sceneLocalFrames, sceneLocalProblem, sceneLocalSize } from '../lib/render/scene'
+import { sceneFrameFor } from '../lib/create/scene-frame'
 import { THREE_D_TEXT } from '../lib/three/three-d-text'
 import { PC_3D_MODEL, threeDGalleryItem, threeDPicturePrompt, threeDProvenance } from '../lib/three/run-local-3d'
 import { coverCropBlob } from '../lib/cover-crop'
@@ -19,6 +21,7 @@ import {
   getUpscaleModels,
   getCLIPModels,
   resolveLocalOpPick,
+  sceneLaneModels,
   uploadMediaFile,
   getSamplers,
   getSchedulers,
@@ -935,14 +938,17 @@ export function useCreate() {
     // I2V flow below — its source IS the extracted last frame. character
     // trained already branched off above (Rust musubi trainer); its use
     // surface is a plain image generate with the LoRA active. ──
+    // Scene to Video (3.1.3) is the fourth: Wan 2.1 VACE over a depth video
+    // of the scene (buildSceneWorkflow), on the VACE files of the Motion list.
     const localOp =
-      state.cloudOp === 'music' || state.cloudOp === 'lipsync' || state.cloudOp === 'motion'
+      state.cloudOp === 'music' || state.cloudOp === 'lipsync' || state.cloudOp === 'motion' || state.cloudOp === 'scene'
         ? state.cloudOp
         : null
     const localOpList =
       localOp === 'music' ? state.audioModelList
       : localOp === 'lipsync' ? state.lipsyncModelList
       : localOp === 'motion' ? state.motionModelList
+      : localOp === 'scene' ? sceneLaneModels(state.motionModelList)
       : []
     const localOpModel = localOp ? resolveLocalOpPick(state.localOpModel, localOpList) : ''
 
@@ -1746,6 +1752,16 @@ export function useCreate() {
     // lipsync/motion drive off their media inputs (the builder supplies a
     // neutral scene prompt when the field is empty).
     const promptOptional = isRemoveBg || isUpscale || localOp === 'lipsync' || localOp === 'motion'
+    // Scene to Video: the same checks as the stage shows, before the prompt
+    // rule below, so a missing video is named first.
+    const sceneClip = localOp === 'scene' && state.scene.clip && state.scene.clip.videoUrl === state.videoInput?.url ? state.scene.clip : null
+    if (localOp === 'scene') {
+      const problem = sceneLocalProblem({ hasVideo: !!state.videoInput, seconds: sceneClip?.seconds, prompt })
+      if (problem) {
+        setError(problem)
+        return
+      }
+    }
     if (!promptOptional && !prompt.trim()) {
       setError(localOp === 'music' ? 'Describe the track first. Genre, mood, tempo…' : 'Please enter a prompt.')
       return
@@ -1786,6 +1802,8 @@ export function useCreate() {
         setError('No talking character model installed. Use Download & install above to get Wan 2.2 S2V.')
       } else if (localOp === 'motion') {
         setError('No motion model installed. Use Download & install above to get Wan Animate or VACE.')
+      } else if (localOp === 'scene') {
+        setError('Scene to Video runs on Wan 2.1 VACE. Use Download & install above to get it.')
       } else {
         setError(mode === 'image'
           ? 'No image model selected. Add checkpoints or FLUX models to ComfyUI.'
@@ -2042,6 +2060,25 @@ export function useCreate() {
           setProgress(3, 'Uploading the driving video...')
           drivingVideo = await uploadMediaFile(state.videoInput.blob, state.videoInput.name)
         }
+        // Scene to Video: the scene video, and the own first frame where the
+        // customer set one. Size and length follow the clip (lib/render/scene).
+        let firstFrame: string | undefined
+        let sceneShape: { width: number; height: number; frames: number; fps: number } | null = null
+        if (localOp === 'scene' && state.videoInput) {
+          setProgress(3, 'Uploading the scene video...')
+          drivingVideo = await uploadMediaFile(state.videoInput.blob, state.videoInput.name)
+          const own = sceneFrameFor(state.scene, state.videoInput.url)
+          if (own) {
+            setProgress(4, 'Uploading your first frame...')
+            const frameBlob = await blobFromUrl(own.url).catch(() => {
+              throw new Error('Your first frame could not be read. Add it again as a picture.')
+            })
+            firstFrame = await uploadMediaFile(frameBlob, frameBlob.type === 'image/jpeg' ? 'scene-first-frame.jpg' : 'scene-first-frame.png')
+          }
+          sceneShape = { ...sceneLocalSize(sceneClip?.width, sceneClip?.height), frames: sceneLocalFrames(sceneClip?.seconds), fps: SCENE_LOCAL_FPS }
+          outputWidth = sceneShape.width
+          outputHeight = sceneShape.height
+        }
         setProgress(5, 'Building workflow...')
         const laneDefaults = COMFY_MODEL_DEFAULTS[imageModelType] ?? COMFY_MODEL_DEFAULTS.unknown
         // The lanes carry the same version gate as a picture (YuE2, S2V,
@@ -2057,15 +2094,16 @@ export function useCreate() {
           // The shared width/height/frames sliders follow the picked model via
           // setLocalOpModel; fall back to the architecture defaults when a
           // stale persisted value would be off-grid for the lane.
-          width: width || laneDefaults.width,
-          height: height || laneDefaults.height,
-          frames: laneFrames || laneDefaults.frames,
-          fps: mode === 'video' ? fps : laneDefaults.fps,
+          width: sceneShape?.width ?? (width || laneDefaults.width),
+          height: sceneShape?.height ?? (height || laneDefaults.height),
+          frames: sceneShape?.frames ?? (laneFrames || laneDefaults.frames),
+          fps: sceneShape?.fps ?? (mode === 'video' ? fps : laneDefaults.fps),
           seconds: state.musicDuration,
           lyrics: state.musicLyrics,
           audioFile,
           refImage: source?.filename || undefined,
           drivingVideo,
+          firstFrame,
         }
         // A workflow of the user's own, picked for this model in Advanced
         // settings, runs instead of LU's Motion Control graph. Discord,

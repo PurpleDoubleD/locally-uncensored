@@ -3,7 +3,7 @@ import { useCreate } from '../../../hooks/useCreate'
 import { useRereadOnReturn } from '../../../hooks/useRereadOnReturn'
 import { useCloudCreate, hasActiveCloudRun } from '../../../hooks/useCloudCreate'
 import { useCloudSession } from '../../../hooks/useCloudSession'
-import { useCreateStore, type GalleryItem } from '../../../stores/createStore'
+import { useCreateStore, type CreateCapability, type GalleryItem } from '../../../stores/createStore'
 import { listedLoras, getVAEModels, checkComfyConnection, refreshComfyModels } from '../../../api/comfyui'
 import { getAllNodeInfo, clearNodeCache } from '../../../api/comfyui-nodes'
 import { installCustomNodes, nodePacksNotLoaded, assertBundleFits, checkBundlesOnDisk, startModelDownload, getDownloadProgress, modelsNotVisibleInComfy, judgeableFolders } from '../../../api/discover'
@@ -99,7 +99,7 @@ interface CreateExpValue {
    *  and throws on failure. 'rmbg' = the RMBG cutout node; 'inpaint-nodes' =
    *  ComfyUI's core inpaint nodes (nothing to clone — present on any current
    *  install once ComfyUI is up). */
-  installCapability: (cap: 'rmbg' | 'inpaint-nodes' | 'dwpose', onProgress?: (msg: string) => void, signal?: AbortSignal) => Promise<void>
+  installCapability: (cap: CreateCapability, onProgress?: (msg: string) => void, signal?: AbortSignal) => Promise<void>
   /** One-click "everything you need" for a fresh PC: ensure ComfyUI runs
    *  (installing it first if needed), then download the default starter
    *  bundle for the intent kind (image → SDXL checkpoint, video → Wan 2.1,
@@ -248,6 +248,7 @@ export function CreateExpProvider({ children }: { children: ReactNode }) {
         rmbg: names.has('RMBG'),
         'inpaint-nodes': names.has('VAEEncodeForInpaint') || names.has('InpaintModelConditioning'),
         dwpose: names.has('DWPreprocessor'),
+        depth: names.has('DepthAnythingV2Preprocessor'),
       })
     } catch { /* node probe is best-effort */ }
   }, [connected, setCaps])
@@ -405,12 +406,13 @@ export function CreateExpProvider({ children }: { children: ReactNode }) {
   // the node cache each round so we don't read the stale pre-install
   // catalogue) until the node shows up. The BiRefNet / RMBG-2.0 cutout model
   // is fetched by the node itself on the first run.
-  const installCapability = useCallback(async (cap: 'rmbg' | 'inpaint-nodes' | 'dwpose', onProgress?: (msg: string) => void, signal?: AbortSignal) => {
+  const installCapability = useCallback(async (cap: CreateCapability, onProgress?: (msg: string) => void, signal?: AbortSignal) => {
     await ensureComfyRunning(onProgress, signal)
     const capsFrom = (names: Set<string>) => ({
       rmbg: names.has('RMBG'),
       'inpaint-nodes': names.has('VAEEncodeForInpaint') || names.has('InpaintModelConditioning'),
       dwpose: names.has('DWPreprocessor'),
+      depth: names.has('DepthAnythingV2Preprocessor'),
     })
     if (cap === 'inpaint-nodes') {
       // Core ComfyUI nodes — nothing to clone. If they're still missing after
@@ -427,11 +429,15 @@ export function CreateExpProvider({ children }: { children: ReactNode }) {
     }
     // Clone-and-pip capabilities share one flow: install the pack, restart
     // ComfyUI, poll /object_info (cache-cleared) until the node registers.
-    const pack = cap === 'dwpose' ? 'controlnet-aux' : 'rmbg'
-    const nodeClass = cap === 'dwpose' ? 'DWPreprocessor' : 'RMBG'
+    // Pose (Motion Control) and depth (Scene to Video) come from the same
+    // pack, comfyui_controlnet_aux.
+    const pack = cap === 'dwpose' || cap === 'depth' ? 'controlnet-aux' : 'rmbg'
+    const nodeClass = cap === 'dwpose' ? 'DWPreprocessor' : cap === 'depth' ? 'DepthAnythingV2Preprocessor' : 'RMBG'
     onProgress?.(cap === 'dwpose'
       ? 'Downloading & installing the pose extractor (controlnet aux). This can take a minute…'
-      : 'Downloading & installing the background removal node. This can take a minute…')
+      : cap === 'depth'
+        ? 'Downloading & installing the depth extractor (controlnet aux). This can take a minute…'
+        : 'Downloading & installing the background removal node. This can take a minute…')
     await installCustomNodes([pack])
     onProgress?.('Restarting ComfyUI to register the node…')
     await restartComfyForNewNodes()

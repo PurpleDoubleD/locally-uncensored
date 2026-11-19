@@ -84,7 +84,8 @@ describe('M7: the presenter with faces', () => {
   it('the presenter field comes with faces, and most names have one', () => {
     expect(hasFaces('avatar', avatar)).toBe(true)
     expect(hasFaces('voice', avatar)).toBe(false)
-    expect(names.length).toBe(500)
+    // 490 since the provider dropped ten (web e2dbb68e, desktop 3.1.3).
+    expect(names.length).toBe(490)
     expect(names.filter((n) => avatarPreview(n)).length).toBeGreaterThan(480)
   })
 
@@ -103,7 +104,7 @@ describe('M7: the presenter with faces', () => {
 
   it('the search finds by any part of the name', () => {
     expect(searchChoices(names, 'ANNIE').every((n) => n.toLowerCase().includes('annie'))).toBe(true)
-    expect(searchChoices(names, '  ').length).toBe(500)
+    expect(searchChoices(names, '  ').length).toBe(490)
     expect(searchChoices(names, 'no such name')).toEqual([])
   })
 })

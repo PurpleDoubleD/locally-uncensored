@@ -1,12 +1,13 @@
 import {
   Image as ImageIcon, Wand2, Scissors, Video, Film, Maximize2, Eraser,
-  UserRound, Mic, Music, FastForward, PersonStanding, Box, Replace,
+  UserRound, Mic, Music, FastForward, PersonStanding, Box, Replace, Clapperboard,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
-import type { CreateBackend, CreateIntent, ThreeDWay } from '../../../stores/createStore'
+import type { CreateBackend, CreateCapability, CreateIntent, ThreeDWay } from '../../../stores/createStore'
 import { THREE_D_TEXT } from '../../../lib/three/three-d-text'
 import { MUSIC_PLACEHOLDER } from '../../../lib/render/music-ui'
 import { isHubIntent } from '../../../lib/create/character-hub'
+import { SCENE_NAME } from '../../../lib/render/scene'
 
 export interface IntentMeta {
   id: CreateIntent
@@ -22,7 +23,7 @@ export interface IntentMeta {
   allowsMask: boolean
   isVideo: boolean
   /** Capability id (node probe) this intent depends on, if any. */
-  capability?: 'rmbg' | 'inpaint-nodes' | 'dwpose'
+  capability?: CreateCapability
   /** Categories with a hosted endpoint (cloud clip/teaser exists). */
   cloudOnly?: true
   /** 2.5.8: cloudOnly categories that ALSO run on the local ComfyUI backend
@@ -32,6 +33,8 @@ export interface IntentMeta {
   hasLocalLane?: true
   /** Local model files this intent needs (gates the Download & install card). */
   requiresModels?: 'image' | 'video' | 'audio' | 'lipsync' | 'motion' | 'upscale'
+  /** New in this release: the bar marks the pill. */
+  isNew?: true
   examples: string[]
 }
 
@@ -112,6 +115,21 @@ export const INTENTS: IntentMeta[] = [
     needsSource: true, needsPrompt: true, allowsMask: false, isVideo: true,
     requiresModels: 'video',
     examples: ['slow zoom in, subtle parallax', 'hair and clothes moving in the wind'],
+  },
+  {
+    // Scene to Video (3.1.3, the web's tab of 16.11.2026): a grey blockout
+    // video from Blender or any 3D tool becomes a finished clip. Camera and
+    // timing come from the video, the look from the prompt. Its inputs are
+    // its own (SceneStage, SceneControls). Local on Windows and Linux: Wan
+    // 2.1 VACE over a depth video of the scene (lib/render/scene.ts), from
+    // the VACE file Motion Control installs; a Mac has no such lane and shows
+    // the locked cloud pill.
+    id: 'scene', label: SCENE_NAME, short: 'Scene', icon: Clapperboard,
+    placeholder: 'Describe the new look…',
+    needsSource: false, needsPrompt: true, allowsMask: false, isVideo: true,
+    capability: 'depth',
+    cloudOnly: true, hasLocalLane: true, requiresModels: 'motion', isNew: true,
+    examples: [],
   },
 
   // ── 2.5.8 specialized categories (2026-07-17). All have hosted

@@ -8,7 +8,9 @@ import { INTENTS } from '../../components/create/experimental/intents'
 // live on the cloud. Until then the tab names none (stageHowtoTopic below
 // finds no topic, and its Stage shows no how-to line), instead of a link to
 // a film that is not there.
-const NO_FILM_YET = new Set(['swap_character'])
+// Scene to Video (3.1.3) likewise: the web's film (/howto/scene) shows the
+// web tab; the desktop film is recorded once the tab ships.
+const NO_FILM_YET = new Set(['swap_character', 'scene'])
 const FILMED = INTENTS.filter((i) => !NO_FILM_YET.has(i.id))
 
 describe('how it works', () => {

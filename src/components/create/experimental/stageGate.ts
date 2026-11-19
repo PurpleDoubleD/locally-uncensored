@@ -1,5 +1,5 @@
 import type { CreateBackend, CreateIntent } from '../../../stores/createStore'
-import { runnableVideoLaneModels } from '../../../api/comfyui'
+import { runnableVideoLaneModels, sceneLaneModels } from '../../../api/comfyui'
 import { imageLaneModels } from '../../../lib/image-engines'
 import type { IntentMeta } from './intents'
 
@@ -124,5 +124,8 @@ export function laneModelCount(
   // Dasselbe fuer Edit auf dem Mac: dort zaehlen nur die Modelle, die ein Bild
   // nehmen. Eine ComfyUI-Liste bleibt, wie sie ist.
   if (requiresModels === 'image') return imageLaneModels(lists.image as never, intent).length
+  // Scene to Video counts only the VACE files of the Motion list: with only
+  // Wan Animate there, the Stage offers the VACE download.
+  if (intent === 'scene') return sceneLaneModels((lists.motion ?? []) as never).length
   return (lists[requiresModels] ?? []).length
 }
