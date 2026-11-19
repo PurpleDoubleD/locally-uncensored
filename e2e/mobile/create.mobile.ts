@@ -1596,7 +1596,11 @@ for (const size of SIZES) {
       await typePrompt(page, 'kept for a while')
       await run(page)
       await expectResult(page, 'image')
-      // An hour later the address no longer answers.
+      // An hour later the address no longer answers. Chromium 158 (Playwright
+      // 1.65) serves the same picture from its memory cache without asking,
+      // so the cache is off here: the tile has to fetch it for real.
+      const cdp = await page.context().newCDPSession(page)
+      await cdp.send('Network.setCacheDisabled', { cacheDisabled: true })
       cloud.resign()
       await tid(page, 'm-create-gallery').tap()
       const tile = tid(page, 'm-create-gallery-tile')
