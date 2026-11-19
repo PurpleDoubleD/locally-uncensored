@@ -17,6 +17,10 @@ export type StarterKind = 'image' | 'video' | 'audio' | 'lipsync' | 'motion' | '
  */
 export function starterBundleFor(kind: StarterKind, intent: string): ModelBundle | undefined {
   if (kind === 'video') return bundleForVideoIntent(getVideoBundles(), intent)
+  // Swap on this computer runs on Wan 2.2 Animate only (swapLocalModels):
+  // the first motion bundle is VACE, which cannot keep the scene around a
+  // person, and installing it left Swap locked (3.1.3 integration).
+  if (kind === 'motion' && intent === 'swap_character') return getMotionBundles().find((b) => b.workflow === 'wananimate')
   return (
     kind === 'image' ? getImageBundles()
     : kind === 'audio' ? getAudioBundles()

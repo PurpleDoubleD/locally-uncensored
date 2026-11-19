@@ -994,6 +994,18 @@ const SCENE_BUNDLE_COPY = {
   description: 'This sets up Wan 2.1 VACE plus its support files (~10.5 GB, runs from 8 GB VRAM). It follows the depth of your scene and paints the look you describe over it.',
 } as const
 
+/** Swap on this computer installs the Wan 2.2 Animate bundle (starterBundleFor),
+ *  so the card names that bundle, read from it, not the VACE one of Motion. */
+function swapBundleCopy() {
+  const b = starterBundleFor('motion', 'swap_character')
+  const what = b ? `${b.name.replace(/\s*\([^)]*\)\s*$/, '')} plus its support files (~${b.totalSizeGB} GB, ${b.vramRequired} VRAM)` : 'Wan 2.2 Animate plus its support files'
+  return {
+    icon: Film,
+    title: 'Local Swap needs a one-time download',
+    description: `This sets up ${what}. It puts one character into your video and keeps the original sound.`,
+  }
+}
+
 function ModelInstallCard({ kind }: { kind: 'image' | 'video' | 'audio' | 'lipsync' | 'motion' | 'upscale' }) {
   const { installModelBundle, connected } = useCreateExp()
   const intent = useCreateStore((s) => s.intent())
@@ -1009,7 +1021,10 @@ function ModelInstallCard({ kind }: { kind: 'image' | 'video' | 'audio' | 'lipsy
   const macKind = mac && (kind === 'image' || kind === 'video' || kind === 'motion') ? kind : null
   // Scene to Video installs the same VACE bundle as Motion Control, and says
   // what it is for there.
-  const copy = macKind ? MAC_BUNDLE_COPY[macKind] : intent === 'scene' && kind === 'motion' ? SCENE_BUNDLE_COPY : BUNDLE_COPY[kind]
+  const copy = macKind ? MAC_BUNDLE_COPY[macKind]
+    : intent === 'scene' && kind === 'motion' ? SCENE_BUNDLE_COPY
+      : intent === 'swap_character' && kind === 'motion' ? swapBundleCopy()
+        : BUNDLE_COPY[kind]
   // The Mac lane runs its own MLX stack and has no ComfyUI bundle to name.
   const cardGb = useGraphicsCardGb()
   // The Mac's video starter is chosen per Mac, so its card is written from
