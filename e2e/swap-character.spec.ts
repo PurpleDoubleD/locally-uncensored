@@ -265,6 +265,9 @@ test('Swap with one click: marks, one total, the check, then the video on the ne
   await expect(page.locator('[data-swap-one-click=running]')).toBeVisible({ timeout: 15_000 })
   await expect(page.locator('[data-swap-step=frame]')).toHaveAttribute('data-state', 'done')
   await expect(page.locator('[data-swap-step=video]')).toHaveAttribute('data-state', 'now')
+  // The step shows 'now' as soon as the run starts; the video submit can
+  // reach the stand-in a moment later (Playwright 1.65 / Chromium 158).
+  await expect.poll(() => seen.submits.length).toBe(2)
   expect(seen.adopts).toEqual([{ job_id: 'job-frame-1', role: 'image' }])
   const video = seen.submits[1]
   expect(video.model).toBe('scail-2')
