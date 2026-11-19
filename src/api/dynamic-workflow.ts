@@ -3159,7 +3159,7 @@ async function buildLtx25Workflow(params: VideoParams, seed: number, allNodes: N
 // predates the family — REJECT-AND-REPORT, never a broken graph.
 
 export interface LocalOpParams {
-  op: 'music' | 'lipsync' | 'motion'
+  op: 'music' | 'lipsync' | 'motion' | 'swap'
   model: string
   prompt: string
   negativePrompt?: string
@@ -3272,7 +3272,7 @@ function addVideoWithAudioOutput(
   workflow: ComfyApiGraph,
   n: number,
   decodeId: string,
-  fps: number,
+  fps: number | [string, number],
   audioSrc: [string, number] | null,
   allNodes: NodePresence,
   prompt?: string,
@@ -3626,6 +3626,180 @@ export async function buildMotionWorkflow(params: LocalOpParams, seed: number, a
 }
 
 /**
+ * Swap Character on this computer (3.1.3, David 19.11.2026): the person in a
+ * real video becomes the character, the scene, the camera, the timing and
+ * the sound stay. Wan 2.2 Animate in its replace mode, as the official
+ * ComfyUI template "Wan2.2 Animate" (mix): WanAnimateToVideo gets the video
+ * as background_video, with the person painted out, and a character_mask
+ * that says where the new person goes, plus the pose of every frame.
+ *
+ * The template draws the mask with SAM2 and a points editor (two node packs
+ * more). LU draws it from the DWPose skeleton it already makes for Motion:
+ * the skeleton's pixels, grown wide enough to cover body, head and hair,
+ * with ComfyUI's core mask nodes only. No new pack, no new download. The
+ * price: every body the pose finds is masked, so it is one person
+ * (people-rule.ts, SWAP_CAN local: 1).
+ *
+ * The video is read at the run's frame rate (VHS_LoadVideo force_rate when
+ * VideoHelperSuite is there, which LU installs for video output), so motion
+ * and sound keep their speed; without it the core loader reads the first
+ * frames and the clip runs at the video's own rate.
+ */
+export async function buildSwapWorkflow(params: LocalOpParams, seed: number, allNodes: NodePresence): Promise<ComfyApiGraph> {
+  const workflow: ComfyApiGraph = {}
+  let n = 1
+  if (!allNodes['DWPreprocessor']) {
+    throw new WorkflowUnavailableError(
+      'Swap on this computer needs the pose extractor (DWPose) from the controlnet_aux node pack. Install it from the card above, then generate again.',
+      'unavailable',
+      { pack: 'comfyui_controlnet_aux', url: 'https://github.com/Fannovel16/comfyui_controlnet_aux' },
+    )
+  }
+  if (!params.drivingVideo) throw new Error('Add the original video first.')
+  if (!params.refImage) throw new Error('Pick a character or a photo for the person you replace.')
+  if (classifyModel(params.model) !== 'wananimate') {
+    throw new Error('Swap on this computer runs on Wan 2.2 Animate. Pick it in the model list, or download it in the Model Manager.')
+  }
+  requireNodes(allNodes, [
+    'WanAnimateToVideo', 'TrimVideoLatent', 'ImageToMask', 'MaskComposite', 'ThresholdMask', 'GrowMask',
+    'EmptyImage', 'ImageCompositeMasked', 'ImageScale',
+  ], 'Swap on this computer')
+
+  const snap16 = (v: number, def: number) => Math.max(16, Math.round(((v && v > 0) ? v : def) / 16) * 16)
+  const width = snap16(params.width, 832)
+  const height = snap16(params.height, 480)
+  const length = snapWanLength(params.frames || 77)
+  const fps = params.fps || 16
+  const vhs = !!allNodes['VHS_LoadVideo']
+  if (!vhs) requireNodes(allNodes, ['LoadVideo', 'GetVideoComponents'], 'Swap on this computer')
+
+  const [wanClip, wanVae] = await Promise.all([
+    findMatchingCLIP('wan', params.model),
+    findMatchingVAE('wan'),
+  ])
+
+  const unetId = String(n++)
+  addUnetLoader(workflow, unetId, params.model, allNodes)
+  const clipId = String(n++)
+  workflow[clipId] = { class_type: 'CLIPLoader', inputs: { clip_name: wanClip, type: 'wan', device: 'default' } }
+  const vaeId = String(n++)
+  workflow[vaeId] = { class_type: 'VAELoader', inputs: { vae_name: wanVae } }
+  const posId = String(n++)
+  workflow[posId] = { class_type: 'CLIPTextEncode', inputs: { text: params.prompt || 'the person moving naturally in the same scene, high quality', clip: [clipId, 0] } }
+  const negId = String(n++)
+  workflow[negId] = { class_type: 'CLIPTextEncode', inputs: { text: params.negativePrompt || '', clip: [clipId, 0] } }
+
+  // The video: frames and sound, at the run's frame rate where possible.
+  const videoId = String(n++)
+  let frames: [string, number]
+  let audio: [string, number]
+  let outFps: number | [string, number] = fps
+  if (vhs) {
+    workflow[videoId] = {
+      class_type: 'VHS_LoadVideo',
+      inputs: {
+        video: params.drivingVideo, force_rate: fps, custom_width: 0, custom_height: 0,
+        frame_load_cap: length, skip_first_frames: 0, select_every_nth: 1, format: 'AnimateDiff',
+      },
+    }
+    frames = [videoId, 0]
+    audio = [videoId, 2]
+  } else {
+    workflow[videoId] = { class_type: 'LoadVideo', inputs: { file: params.drivingVideo } }
+    const componentsId = String(n++)
+    workflow[componentsId] = { class_type: 'GetVideoComponents', inputs: { video: [videoId, 0] } }
+    frames = [componentsId, 0]
+    audio = [componentsId, 1]
+    outFps = [componentsId, 2]
+  }
+  // One size for everything that follows: the background, the pose, the mask.
+  const framesId = String(n++)
+  workflow[framesId] = { class_type: 'ImageScale', inputs: { image: frames, upscale_method: 'lanczos', width, height, crop: 'center' } }
+
+  const poseRawId = String(n++)
+  workflow[poseRawId] = {
+    class_type: 'DWPreprocessor',
+    inputs: {
+      image: [framesId, 0], detect_hand: 'enable', detect_body: 'enable', detect_face: 'enable',
+      resolution: Math.min(width, height),
+      bbox_detector: 'yolox_l.onnx', pose_estimator: 'dw-ll_ucoco_384.onnx',
+    },
+  }
+  const poseId = String(n++)
+  workflow[poseId] = { class_type: 'ImageScale', inputs: { image: [poseRawId, 0], upscale_method: 'nearest-exact', width, height, crop: 'center' } }
+
+  // The mask: every coloured pixel of the skeleton (the limbs are drawn in
+  // pure colours, so one of the three channels is always high), then grown
+  // to the body. About a tenth of the short side covers shoulders, head and
+  // hair at 480p.
+  const channel = (c: 'red' | 'green' | 'blue') => {
+    const id = String(n++)
+    workflow[id] = { class_type: 'ImageToMask', inputs: { image: [poseId, 0], channel: c } }
+    return id
+  }
+  const r = channel('red'), g = channel('green'), b = channel('blue')
+  const rgId = String(n++)
+  workflow[rgId] = { class_type: 'MaskComposite', inputs: { destination: [r, 0], source: [g, 0], x: 0, y: 0, operation: 'add' } }
+  const rgbId = String(n++)
+  workflow[rgbId] = { class_type: 'MaskComposite', inputs: { destination: [rgId, 0], source: [b, 0], x: 0, y: 0, operation: 'add' } }
+  const threshId = String(n++)
+  workflow[threshId] = { class_type: 'ThresholdMask', inputs: { mask: [rgbId, 0], value: 0.1 } }
+  const maskId = String(n++)
+  workflow[maskId] = { class_type: 'GrowMask', inputs: { mask: [threshId, 0], expand: swapMaskGrow(width, height), tapered_corners: true } }
+
+  // The background: the video with the person painted out, as the
+  // template's DrawMaskOnImage does.
+  const blackId = String(n++)
+  workflow[blackId] = { class_type: 'EmptyImage', inputs: { width, height, batch_size: 1, color: 0 } }
+  const bgId = String(n++)
+  workflow[bgId] = {
+    class_type: 'ImageCompositeMasked',
+    inputs: { destination: [framesId, 0], source: [blackId, 0], x: 0, y: 0, resize_source: false, mask: [maskId, 0] },
+  }
+
+  const imageId = String(n++)
+  workflow[imageId] = { class_type: 'LoadImage', inputs: { image: params.refImage } }
+  const scaleId = String(n++)
+  workflow[scaleId] = { class_type: 'ImageScale', inputs: { image: [imageId, 0], upscale_method: 'lanczos', width, height, crop: 'center' } }
+
+  const condId = String(n++)
+  workflow[condId] = {
+    class_type: 'WanAnimateToVideo',
+    inputs: {
+      positive: [posId, 0], negative: [negId, 0], vae: [vaeId, 0],
+      width, height, length, batch_size: 1,
+      reference_image: [scaleId, 0], pose_video: [poseId, 0],
+      background_video: [bgId, 0], character_mask: [maskId, 0],
+      continue_motion_max_frames: 5, video_frame_offset: 0,
+    },
+  }
+
+  const shiftId = String(n++)
+  workflow[shiftId] = { class_type: 'ModelSamplingSD3', inputs: { model: [unetId, 0], shift: 8.0 } }
+  const samplerId = String(n++)
+  workflow[samplerId] = {
+    class_type: 'KSampler',
+    inputs: {
+      model: [shiftId, 0], positive: [condId, 0], negative: [condId, 1], latent_image: [condId, 2],
+      seed, steps: params.steps, cfg: params.cfgScale, sampler_name: params.sampler, scheduler: params.scheduler, denoise: 1.0,
+    },
+  }
+  const trimId = String(n++)
+  workflow[trimId] = { class_type: 'TrimVideoLatent', inputs: { samples: [samplerId, 0], trim_amount: [condId, 3] } }
+  const decodeId = String(n++)
+  workflow[decodeId] = videoDecodeNode([trimId, 0], [vaeId, 0], 'VAEDecodeTiled' in allNodes)
+
+  addVideoWithAudioOutput(workflow, n, decodeId, outFps, audio, allNodes, params.prompt || 'swap')
+  return workflow
+}
+
+/** How far the skeleton is grown into a body mask: a tenth of the short side,
+ *  at least 24 px. */
+export function swapMaskGrow(width: number, height: number): number {
+  return Math.max(24, Math.round(Math.min(width, height) / 10))
+}
+
+/**
  * Animate with Wan 2.1 VACE as a reference model (D24): the picture goes into
  * WanVaceToVideo as reference_image, with no control video, so the clip is
  * made from the prompt around the subject instead of starting on the picture.
@@ -3704,6 +3878,7 @@ export async function buildLocalOpWorkflow(params: LocalOpParams): Promise<Comfy
     case 'music': return buildMusicWorkflow(params, seed, allNodes)
     case 'lipsync': return await buildS2VWorkflow(params, seed, allNodes)
     case 'motion': return await buildMotionWorkflow(params, seed, allNodes)
+    case 'swap': return await buildSwapWorkflow(params, seed, allNodes)
   }
 }
 

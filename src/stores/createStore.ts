@@ -113,6 +113,9 @@ export interface SwapFigure {
   role: string
   /** Where the customer tapped this person in the first frame (0 to 1). */
   mark?: { x: number; y: number } | null
+  /** Not in the first frame: comes in later from this side (the one
+   *  people rule, lib/create/people-rule.ts). */
+  later?: 'left' | 'right' | null
   /** The character of the Character area this person becomes, by name, so
    *  the row says "→ Bean". Unset for a photo picked by hand. */
   character?: string | null
@@ -139,7 +142,7 @@ const ONE_FIGURE: SwapFigure[] = [{ image: null, role: '' }]
 // the train lane is a real local tab now (it was cloud-first while 2.5.8
 // had no trainer runtime).
 // 3D joined in 3.1.0: TRELLIS.2 on the core nodes of the pinned ComfyUI.
-export const LOCAL_LANE_OPS: ReadonlySet<CloudOp> = new Set(['music', 'lipsync', 'extend', 'motion', 'character', '3d'])
+export const LOCAL_LANE_OPS: ReadonlySet<CloudOp> = new Set(['music', 'lipsync', 'extend', 'motion', 'character', '3d', 'swap_character'])
 
 /** An audio/video file (or training image) staged in the composer before
  *  upload. `blob` carries the bytes for the cloud upload; `url` is a local
@@ -1538,10 +1541,18 @@ export const useCreateStore = create<CreateState>()(
             return { ...base, cloudOp: 'extend' as const, mode: 'video' as const, videoSubMode: 't2v' as const, ...dropAll,
               ...videoModelParams(s.videoModel, s.videoModelList, 'extend', s.videoSpeed) }
           }
-          case 'swap_character':
+          case 'swap_character': {
             // Its inputs are its own slots (video, figures); the Stage's
-            // source and mask are not read.
+            // source and mask are not read. Locally (3.1.3) it runs Wan 2.2
+            // Animate like Motion, with Motion's sampler defaults.
+            if (s.backend === 'local' && !isMlxImageHost()) {
+              const d = MODEL_TYPE_DEFAULTS.wananimate
+              return { ...base, cloudOp: 'swap_character' as const, mode: 'video' as const, videoSubMode: 'i2v' as const, mask: null,
+                steps: d.steps, cfgScale: d.cfgScale, sampler: d.sampler, scheduler: d.scheduler,
+                width: d.width, height: d.height, ...(d.frames ? { frames: d.frames } : {}), ...(d.fps ? { fps: d.fps } : {}) }
+            }
             return { ...base, cloudOp: 'swap_character' as const, mode: 'video' as const, videoSubMode: 'i2v' as const, mask: null }
+          }
           case 'motion': {
             // Keeps the source slot (the character image the video drives).
             // On the Mac the lane runs an LTX-2.3 pack, and its catalogue

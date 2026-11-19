@@ -137,7 +137,8 @@ import { fetchGalleryItemBlob } from '../components/create/experimental/galleryU
 import { LongRunStopped, longVideoRequest, runLongVideo, type ClipItem } from '../lib/long-video-run'
 import { settleSeams } from '../api/video-settle'
 import { ownWorkflowMisfitNote } from '../lib/own-workflow-fit'
-import { loadImageRef } from '../components/create/experimental/loadImage'
+import { ensureLocalFilename, loadImageRef } from '../components/create/experimental/loadImage'
+import { swapLocalModels, swapLocalProblem, swapLocalSize, SWAP_LOCAL_NO_MODEL } from '../lib/create/swap-local'
 import { listMlxLoras } from '../api/mlx-loras'
 import {
   getVideoStatus, listVideoModels, generateVideo, getVideoProgress, cancelVideo,
@@ -935,14 +936,18 @@ export function useCreate() {
     // I2V flow below — its source IS the extracted last frame. character
     // trained already branched off above (Rust musubi trainer); its use
     // surface is a plain image generate with the LoRA active. ──
+    // Swap Character runs locally since 3.1.3 on Wan 2.2 Animate (replace):
+    // the motion list, narrowed to the Animate models (swapLocalModels).
     const localOp =
       state.cloudOp === 'music' || state.cloudOp === 'lipsync' || state.cloudOp === 'motion'
         ? state.cloudOp
+        : state.cloudOp === 'swap_character' ? 'swap' as const
         : null
     const localOpList =
       localOp === 'music' ? state.audioModelList
       : localOp === 'lipsync' ? state.lipsyncModelList
       : localOp === 'motion' ? state.motionModelList
+      : localOp === 'swap' ? swapLocalModels(state.motionModelList)
       : []
     const localOpModel = localOp ? resolveLocalOpPick(state.localOpModel, localOpList) : ''
 
@@ -1745,7 +1750,7 @@ export function useCreate() {
     // Background removal is prompt-free and model-independent (RMBG node);
     // lipsync/motion drive off their media inputs (the builder supplies a
     // neutral scene prompt when the field is empty).
-    const promptOptional = isRemoveBg || isUpscale || localOp === 'lipsync' || localOp === 'motion'
+    const promptOptional = isRemoveBg || isUpscale || localOp === 'lipsync' || localOp === 'motion' || localOp === 'swap'
     if (!promptOptional && !prompt.trim()) {
       setError(localOp === 'music' ? 'Describe the track first. Genre, mood, tempo…' : 'Please enter a prompt.')
       return
@@ -1786,6 +1791,8 @@ export function useCreate() {
         setError('No talking character model installed. Use Download & install above to get Wan 2.2 S2V.')
       } else if (localOp === 'motion') {
         setError('No motion model installed. Use Download & install above to get Wan Animate or VACE.')
+      } else if (localOp === 'swap') {
+        setError(SWAP_LOCAL_NO_MODEL)
       } else {
         setError(mode === 'image'
           ? 'No image model selected. Add checkpoints or FLUX models to ComfyUI.'
@@ -1801,6 +1808,14 @@ export function useCreate() {
       }
       if (!state.audioInput) {
         setError('Add a voice first. Upload or record the speech audio.')
+        return
+      }
+    }
+    if (localOp === 'swap') {
+      // The one people rule and the inputs, before anything uploads.
+      const problem = swapLocalProblem(state)
+      if (problem) {
+        setError(problem)
         return
       }
     }
@@ -2042,6 +2057,16 @@ export function useCreate() {
           setProgress(3, 'Uploading the driving video...')
           drivingVideo = await uploadMediaFile(state.videoInput.blob, state.videoInput.name)
         }
+        let swapRef: string | undefined
+        let swapSize: { width: number; height: number } | null = null
+        if (localOp === 'swap' && state.videoInput) {
+          setProgress(3, 'Uploading your video...')
+          drivingVideo = await uploadMediaFile(state.videoInput.blob, state.videoInput.name)
+          const person = state.swapFigures[0]
+          if (person?.image) swapRef = (await ensureLocalFilename(person.image, person.character ?? 'character')).filename
+          // Portrait video, portrait run: the lane's size turned to the frame.
+          swapSize = swapLocalSize(width, height, state.swapFrame)
+        }
         setProgress(5, 'Building workflow...')
         const laneDefaults = COMFY_MODEL_DEFAULTS[imageModelType] ?? COMFY_MODEL_DEFAULTS.unknown
         // The lanes carry the same version gate as a picture (YuE2, S2V,
@@ -2057,14 +2082,14 @@ export function useCreate() {
           // The shared width/height/frames sliders follow the picked model via
           // setLocalOpModel; fall back to the architecture defaults when a
           // stale persisted value would be off-grid for the lane.
-          width: width || laneDefaults.width,
-          height: height || laneDefaults.height,
+          width: swapSize?.width ?? (width || laneDefaults.width),
+          height: swapSize?.height ?? (height || laneDefaults.height),
           frames: laneFrames || laneDefaults.frames,
           fps: mode === 'video' ? fps : laneDefaults.fps,
           seconds: state.musicDuration,
           lyrics: state.musicLyrics,
           audioFile,
-          refImage: source?.filename || undefined,
+          refImage: localOp === 'swap' ? swapRef : source?.filename || undefined,
           drivingVideo,
         }
         // A workflow of the user's own, picked for this model in Advanced

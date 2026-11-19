@@ -82,8 +82,10 @@ async function boot(page: Page, answer: Answer) {
   // stand under its name on the left.
   await openCharacterHub(page)
   await expect(page.getByRole('tab', { name: /Anna Müller/ })).toHaveAttribute('aria-selected', 'true', { timeout: 15_000 })
-  await expect(page.locator('[data-hub-card-name]')).toHaveText('Anna Müller')
-  await expect(page.locator('[data-hub-card] [data-character-file-actions]')).toBeVisible({ timeout: 15_000 })
+  await expect(page.locator('[data-hub-tab-name]')).toHaveText('Anna Müller')
+  // The file actions are rows of the character's menu (the three dots at its tab).
+  await page.locator('[data-hub-menu]').click()
+  await expect(page.locator('[data-hub-menu-list] [data-hub-download]')).toBeVisible({ timeout: 15_000 })
   return { fileAsked: () => fileAsked }
 }
 

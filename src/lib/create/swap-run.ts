@@ -9,13 +9,14 @@
 
 import { STUDIO_MODELS } from '../render/studio-contract'
 import {
-  swapClipSeconds, swapDefaultOptions, swapFigureRoles, swapFixedOptions, swapMaxPeople, swapNeedsConsent,
-  swapReadsRoles, swapRoles, swapUsesFrame, swapWholeSeconds, SWAP_CONSENT_MISSING, SWAP_INTENT, type SwapMark,
+  swapClipSeconds, swapDefaultOptions, swapFigureRoles, swapFixedOptions, swapNeedsConsent,
+  swapReadsRoles, swapRoles, swapUsesFrame, swapWholeSeconds, SWAP_CONSENT_MISSING, SWAP_INTENT, SWAP_MODELS, type SwapMark,
 } from '../render/swap'
 import type { CloudJobParams } from '../../api/cloud/jobs'
+import { checkPeople } from './people-rule'
 
 /** One new person as the run sees it. `image` is whatever the caller uploads. */
-export interface SwapRunFigure<T> { image: T | null; role: string; mark?: SwapMark | null }
+export interface SwapRunFigure<T> { image: T | null; role: string; mark?: SwapMark | null; later?: 'left' | 'right' | null }
 
 export interface SwapRunState<T> {
   /** The original video is there. */
@@ -35,12 +36,12 @@ export function swapInputError<T>(model: string, s: SwapRunState<T>): string | n
   if (!figures.length || !figures[0].image) return 'Add a photo of the new person.'
   const missing = figures.findIndex((f) => !f.image)
   if (missing >= 0) return `Add a photo for person ${missing + 1}, or remove that person.`
-  // No silent model switch: the panel switches to the main model when a
-  // second person is added, and says so.
-  if (figures.length > swapMaxPeople(model)) {
-    return swapMaxPeople(model) === 1
-      ? 'This model replaces one person. Use SCAIL-2 for up to 3 people, or remove the others.'
-      : `This model replaces at most ${swapMaxPeople(model)} people.`
+  // The one people rule (people-rule.ts): too many people, or a person who
+  // walks in later on a model that needs everyone in the first frame, stop
+  // here with the same sentence the row shows. Nothing switches the model.
+  const people = checkPeople(model, figures, SWAP_MODELS)
+  if (people.blocker) {
+    return people.recommend ? `${people.blocker} ${people.recommend.name} ${people.recommend.reason}.` : people.blocker
   }
   if (figures.some((f) => f.role.length > 200)) return 'Keep each role under 200 characters.'
   if (swapNeedsConsent(model) && !s.consent) return SWAP_CONSENT_MISSING

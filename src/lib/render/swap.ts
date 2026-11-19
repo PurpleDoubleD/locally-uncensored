@@ -87,14 +87,10 @@ export function swapReadsRoles(model: string): boolean {
   return !!STUDIO_MODELS[model] && 'roles' in (studioSchema(model).properties ?? {})
 }
 
-/** The model Swap Character picks for this many people: up to 3 SCAIL 2 (long
- *  clips up to 120 s too), with 4 OpenJutsu. Kling only the customer picks. */
-export function swapAutoModel(figures: number): string {
-  return figures > swapMaxPeople(SWAP_MAIN_MODEL) ? SWAP_OPENJUTSU_MODEL : SWAP_MAIN_MODEL
-}
-
-/** The models the panel switches between by itself. */
-export const SWAP_AUTO_MODELS: readonly string[] = [SWAP_MAIN_MODEL, SWAP_OPENJUTSU_MODEL]
+/** The model Swap Character starts on. It never changes by itself (David,
+ *  19.11.2026: no silent switch): with more people than it takes, the panel
+ *  says so at the row and recommends a model that can (lib/create/people-rule). */
+export const SWAP_DEFAULT_MODEL = SWAP_MAIN_MODEL
 
 // Length. The customer picks from the shortest length the model takes up to
 // its real maximum. The server cuts the video (clip_seconds): the beginning
@@ -224,11 +220,13 @@ export function swapMarkRoles(marks: readonly SwapMark[]): string[] {
 
 /** The role of each person: what the customer writes, else where their mark
  *  sits. People without a mark keep their own role (empty: the main person). */
-export function swapFigureRoles(figures: readonly { role: string; mark?: SwapMark | null }[]): string[] {
-  const marked = figures.map((f, i) => ({ f, i })).filter(({ f }) => f.mark)
+export function swapFigureRoles(figures: readonly { role: string; mark?: SwapMark | null; later?: 'left' | 'right' | null }[]): string[] {
+  const marked = figures.map((f, i) => ({ f, i })).filter(({ f }) => f.mark && !f.later)
   const placed = swapMarkRoles(marked.map(({ f }) => f.mark!))
   const byIndex = new Map(marked.map(({ i }, k) => [i, placed[k]]))
-  return figures.map((f, i) => f.role.trim().slice(0, 200) || byIndex.get(i) || '')
+  return figures.map((f, i) => f.role.trim().slice(0, 200)
+    || (f.later ? `the person who walks in later from the ${f.later}` : '')
+    || byIndex.get(i) || '')
 }
 
 /** The roles as the provider gets them, or undefined. One photo without a role

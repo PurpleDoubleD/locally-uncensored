@@ -54,7 +54,9 @@ export function HubSettings({ onOpenWorkflows }: { onOpenWorkflows?: () => void 
 
   return (
     <div className="lu-hub border-b border-white/10 pb-3 mb-3 space-y-1" data-hub-settings>
-      {!swap && !training && <Row label="Model"><ModelChip /></Row>}
+      {/* Swap on this computer picks its Wan 2.2 Animate file here like any
+          local lane (localPick narrows the list to the Animate models). */}
+      {(!swap || backend === 'local') && !training && <Row label="Model"><ModelChip /></Row>}
       {oneClick && (
         <>
           <SwapPicks />
@@ -62,7 +64,7 @@ export function HubSettings({ onOpenWorkflows }: { onOpenWorkflows?: () => void 
         </>
       )}
       {swap && <div className="space-y-2 pt-1"><SpecialMore intent={intent} /></div>}
-      {!swap && !training && <div className="pt-1 empty:hidden"><LaneControls /></div>}
+      {(!swap || backend === 'local') && !training && <div className="pt-1 empty:hidden"><LaneControls /></div>}
       {takes.prompt && (
         <Row label="Prompt">
           {takes.negative && (

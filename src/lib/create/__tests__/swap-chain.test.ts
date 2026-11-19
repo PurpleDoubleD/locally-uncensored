@@ -233,12 +233,12 @@ describe('Uncensored and own picks', () => {
     expect(swapFrameChoices(true)[0].label).toBe(`Auto (${swapModelName(SWAP_FRAME_OPEN_MODEL)})`)
   })
 
-  it('video: 1 to 3 people SCAIL-2, 4 OpenJutsu, Kling only by hand and only for one', () => {
+  it('video: SCAIL-2 until the customer picks another, never switched by the number of people', () => {
     expect(swapVideoModelFor(1, null)).toBe('scail-2')
     expect(swapVideoModelFor(3, null)).toBe('scail-2')
-    expect(swapVideoModelFor(4, null)).toBe('openjutsu-character-swap')
+    expect(swapVideoModelFor(4, null)).toBe('scail-2')
     expect(swapVideoModelFor(1, 'kling-v3-pro-motion-control')).toBe('kling-v3-pro-motion-control')
-    expect(swapVideoModelFor(2, 'kling-v3-pro-motion-control')).toBe('scail-2')
+    expect(swapVideoModelFor(2, 'kling-v3-pro-motion-control')).toBe('kling-v3-pro-motion-control')
     expect(swapVideoModelFor(1, 'not-a-swap-model')).toBe('scail-2')
     expect(swapVideoBlocked('kling-v3-pro-motion-control', 2)).toBe('one person only')
     expect(swapVideoBlocked('scail-2', 4)).toBe('up to 3 people')

@@ -1,28 +1,27 @@
 // The picks of the one click swap (14.11.2026, only with the account switch;
 // port of the web's lib/create/swap-one-click.ts): which editor builds the
-// first frame and which engine makes the video. Without an own pick the
-// number of people and the switch "Uncensored" decide.
-//   1 person   SCAIL 2 (Kling only when picked under More options)
-//   2 to 3     SCAIL 2
-//   4          OpenJutsu, one step as before
+// first frame and which engine makes the video. The editor follows the
+// switch "Uncensored"; the engine is SCAIL-2 until the customer picks another
+// one. Since 19.11.2026 it no longer follows the number of people by itself
+// (4 people: OpenJutsu is recommended at Create, picked by a click).
 // Without React; the panel (hub/SwapOneClick.tsx) only holds the state.
 
 import { create } from 'zustand'
 import { STUDIO_MODELS } from '../render/studio-contract'
 import {
-  swapAutoModel, swapFrameEditors, swapFrameModelFor, swapMaxPeople, swapUsesFrame,
+  SWAP_DEFAULT_MODEL, swapFrameEditors, swapFrameModelFor, swapMaxPeople, swapUsesFrame,
   SWAP_FRAME_MODEL, SWAP_FRAME_OPEN_MODEL, SWAP_INTENT, SWAP_KLING_MODEL, SWAP_LONG_MODEL, SWAP_MAIN_MODEL, SWAP_OPENJUTSU_MODEL,
 } from '../render/swap'
 
 /** The engines "Video ▾" offers. */
 export const SWAP_VIDEO_CHOICES: readonly string[] = [SWAP_MAIN_MODEL, SWAP_KLING_MODEL, SWAP_OPENJUTSU_MODEL, SWAP_LONG_MODEL]
 
-/** The engine of the video: the own pick while it can take this many people,
- *  else automatic by the number of people. */
-export function swapVideoModelFor(people: number, override: string | null): string {
-  const n = Math.max(1, people)
-  if (override && SWAP_VIDEO_CHOICES.includes(override) && swapMaxPeople(override) >= n) return override
-  return swapAutoModel(n)
+/** The engine of the video: the own pick, else SCAIL-2. Never switched by
+ *  the number of people (no silent switch, David 19.11.2026); more people
+ *  than the engine takes block Create with a recommendation instead. */
+export function swapVideoModelFor(_people: number, override: string | null): string {
+  if (override && SWAP_VIDEO_CHOICES.includes(override)) return override
+  return SWAP_DEFAULT_MODEL
 }
 
 /** Why an engine cannot take this many people, or null. */

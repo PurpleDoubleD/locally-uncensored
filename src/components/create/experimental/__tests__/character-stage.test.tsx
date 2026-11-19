@@ -6,7 +6,7 @@
  *     photos the user put there;
  *   - the stage shows only real things: a character without photos gets a
  *     line, never a stand-in picture;
- *   - Rename works on the desktop;
+ *   - Rename works on the desktop, from the three dots at the tab;
  *   - the area is one column of the prompt window's width, and it has no
  *     bar of its own: the window under it is the Composer of every tab;
  *   - nothing of the area moves by itself.
@@ -25,11 +25,15 @@ vi.mock('../../../../lib/create/character-lora', async (orig) => ({
   importCharacterLora: vi.fn(async (_f: Blob, name: string) => { io.imported.push(name); return { status: 'saved', file: `char_${name}_zimage.safetensors`, path: '/x', keyFormat: 'same' } }),
 }))
 vi.mock('../CharacterUseLocally', () => ({ refreshLocalShelves: vi.fn(async () => undefined), CharacterUseLocally: () => null }))
-vi.mock('../SpecialIntentControls', () => ({ CharacterMore: () => <span data-testid="file-actions" /> }))
+vi.mock('../SpecialIntentControls', () => ({
+  CharacterMore: () => <span data-testid="file-actions" />,
+  CharacterDownload: () => <button type="button" data-testid="character-download" />,
+  LocalCharacterDelete: () => <button type="button" data-testid="local-character-delete" />,
+}))
 
 import { HubEmpty } from '../hub/HubEmpty'
 import { HubNewCharacter } from '../hub/HubNewCharacter'
-import { HubCard, HubPhotos, HubTabs, tabsFit } from '../hub/HubStage'
+import { HubPhotos, HubTabs, tabsFit } from '../hub/HubStage'
 import { HubActionRow } from '../hub/HubActionRow'
 import { useCreateStore } from '../../../../stores/createStore'
 import { useCharacterNames } from '../../../../lib/create/character-names'
@@ -38,6 +42,13 @@ import { HUB_LOCAL_LINE, hubFromSaved, type HubCharacter } from '../../../../lib
 
 const png = (name: string) => new File([`png-${name}`], name, { type: 'image/png' })
 const hub = (ui: React.ReactElement) => render(<div className="lu-hub">{ui}</div>)
+/** The row of the characters with `c` on the stage. */
+const tabsOf = (c: HubCharacter) => <HubTabs list={[c]} loading={false} current={c.key} photoOnly={false} onPick={() => {}} onPhotoOnly={() => {}} onNew={() => {}} />
+/** Opens the list behind the three dots and presses one of its rows. */
+const menu = (container: HTMLElement, row: string) => {
+  fireEvent.click(container.querySelector('[data-hub-menu]')!)
+  fireEvent.click(document.querySelector(`[data-hub-menu-list] ${row}`)!)
+}
 
 beforeEach(() => {
   __resetSavedCharacters()
@@ -138,9 +149,9 @@ describe('New character', () => {
 describe('the stage', () => {
   it('a character without a picture shows its initial, without photos a line, never a stand-in', () => {
     const c: HubCharacter = { key: 'local:char_opa_zimage.safetensors', kind: 'local', name: 'opa', meta: 'Local LoRA', image: null, ref: { id: 'local:char_opa_zimage.safetensors', name: 'opa', triggerWord: 'opa', family: 'zimage' } }
-    const { container } = hub(<><HubCard c={c} photo={null} /><HubPhotos c={c} photos={[]} loading={false} /></>)
-    expect(container.querySelectorAll('img, image')).toHaveLength(0)
-    expect(container.querySelector('.hub-initial')!.textContent).toBe('O')
+    const { container } = hub(<>{tabsOf(c)}<HubPhotos c={c} photos={[]} loading={false} /></>)
+    expect(container.querySelectorAll('img, image, .hub-portrait')).toHaveLength(0)
+    expect(container.querySelector('[data-hub-character] span[aria-hidden]')!.textContent).toBe('O')
     expect(container.querySelector('[data-hub-no-photos]')!.textContent).toBe('The photos opa was trained on are not on this computer.')
   })
 
@@ -152,8 +163,8 @@ describe('the stage', () => {
 
   it('Rename gives a photo character another name where it is stored', async () => {
     const { character } = await saveCharacter('Oma', [new Blob(['a'], { type: 'image/png' })])
-    const { container } = hub(<HubCard c={hubFromSaved(character, null)} photo={null} />)
-    fireEvent.click(container.querySelector('[data-hub-rename]')!)
+    const { container } = hub(tabsOf(hubFromSaved(character, null)))
+    menu(container, '[data-hub-rename]')
     fireEvent.change(screen.getByLabelText('New name for Oma'), { target: { value: 'Greta' } })
     fireEvent.click(container.querySelector('[data-hub-rename-save]')!)
     await waitFor(async () => expect((await listSavedCharacters())[0].name).toBe('Greta'))
@@ -162,8 +173,8 @@ describe('the stage', () => {
 
   it('Rename gives a LoRA character a label on this computer, and its trigger word stays', async () => {
     const c: HubCharacter = { key: 'cloud:7', kind: 'cloud', name: 'char seven', meta: 'Trained · Flux', image: null, ref: { id: '7', name: 'char seven', triggerWord: 'sevenchar', family: 'flux' } }
-    const { container } = hub(<HubCard c={c} photo={null} />)
-    fireEvent.click(container.querySelector('[data-hub-rename]')!)
+    const { container } = hub(tabsOf(c))
+    menu(container, '[data-hub-rename]')
     expect(container.textContent).toContain('The trigger word stays.')
     fireEvent.change(screen.getByLabelText('New name for char seven'), { target: { value: 'Greta' } })
     fireEvent.keyDown(screen.getByLabelText('New name for char seven'), { key: 'Enter' })
@@ -264,19 +275,17 @@ describe('one middle axis', () => {
     expect(block).toMatch(/\.lu-hub \.hub-center \{[^}]*margin-block: auto/)
     expect(block).toMatch(/\.lu-hub \.hub-photos \{[^}]*justify-content: center/)
     expect(block).toMatch(/\.lu-hub \.hub-empty \{[^}]*align-items: center;[^}]*justify-content: center/)
-    const c: HubCharacter = { key: 'saved:1', kind: 'saved', name: 'Oma', meta: 'Photos · 2', image: null, photos: [new Blob(['a']), new Blob(['b'])] }
-    const { container } = hub(<HubCard c={c} photo={null} />)
-    expect(container.querySelector('[data-hub-card-links]')!.className).toContain('justify-center')
-    // Nothing in the head is pushed to one side.
-    expect(container.querySelector('.hub-card')!.innerHTML).not.toMatch(/ml-auto|mr-auto|text-left|text-right/)
+    // The one quiet line under the row stands in the middle too.
+    expect(block).toMatch(/\.lu-hub \.hub-tabs-line \{[^}]*text-align: center/)
   })
 })
 
 describe('nothing is lost', () => {
-  it('the character stands as a head over its photos with all it can do, at every width', () => {
+  it('all a character can do is behind the three dots at its tab, at every width; no card on the stage', () => {
     const block = hubCss()
-    expect(block).toMatch(/\.lu-hub \.hub-card \{[^}]*flex-direction: column;[^}]*align-items: center;[^}]*text-align: center/)
-    expect(block).toMatch(/\.hub-card > \.hub-portrait \{[^}]*width: 64px/)
+    expect(block).not.toMatch(/\.hub-card\b|\.hub-portrait\b/)
+    // The row cuts off sideways only, never what hangs under it.
+    expect(block).toMatch(/\.lu-hub \.hub-tabs \{[^}]*overflow-x: clip;[^}]*overflow-y: visible/)
     // Nothing of the area is switched off at any width but the icons of
     // the row on a phone-wide window.
     const off = [...block.matchAll(/([^{}\n]+)\{[^}]*display: none/g)].map((m) => m[1].trim())
@@ -284,16 +293,13 @@ describe('nothing is lost', () => {
     // which are not part of the area.)
     expect(off).toEqual(['@media (max-width: 520px)', '.lu-hub .hub-act-item svg'])
     expect(block).toMatch(/@media \(max-width: 520px\) \{\s*\.lu-hub-rails \{ display: none; \}/)
-    // Rename, Train a model and Delete are plain children of the card.
+    // Rename, Train a model and Delete are rows of the list behind the dots.
     const c: HubCharacter = { key: 'saved:1', kind: 'saved', name: 'Oma', meta: 'Photos · 2', image: null, photos: [new Blob(['a']), new Blob(['b'])] }
-    const { container } = hub(<HubCard c={c} photo={null} />)
-    const links = container.querySelector('.hub-card [data-hub-card-links]')!
-    for (const sel of ['[data-hub-rename]', '[data-hub-train]', '[data-hub-delete]']) expect(links.querySelector(sel)).not.toBeNull()
-    // The file actions of a LoRA character stand at its head as well.
-    cleanup()
-    const lora: HubCharacter = { key: 'cloud:7', kind: 'cloud', name: 'seven', meta: 'Trained · Flux', image: null, ref: { id: '7', name: 'seven', triggerWord: 'sevenchar', family: 'flux' } }
-    const file = hub(<HubCard c={lora} photo={null} />)
-    expect(file.container.querySelector('.hub-card [data-testid="file-actions"]')).not.toBeNull()
+    const { container } = hub(tabsOf(c))
+    expect(container.querySelector('.hub-card, .hub-portrait')).toBeNull()
+    fireEvent.click(container.querySelector('[data-hub-menu]')!)
+    const list = document.querySelector('[data-hub-menu-list]')!
+    for (const sel of ['[data-hub-rename]', '[data-hub-train]', '[data-hub-delete]']) expect(list.querySelector(sel)).not.toBeNull()
   })
 
   it('the row over the window: Image is picked by default, and one line says what Local and Cloud mean', () => {

@@ -187,7 +187,7 @@ test('Swap with one click: marks, one total, the check, then the video on the ne
 
   // SCAIL 2 is the default, the notes stand grey, both switches off.
   await expect(panel.locator('[data-swap-tips]')).toContainText('Up to 3 people with SCAIL-2, one person with Kling (highest resolution).')
-  await expect(page.locator('[data-swap-summary]')).toHaveText('Auto · SCAIL-2 · 720p')
+  await expect(page.locator('[data-swap-summary]')).toHaveText('SCAIL-2 · 720p')
   // The resolution is in the settings of the prompt window, with the engines.
   const settings = page.locator('[data-prompt-window] button[title="Advanced settings"]')
   await settings.click()
@@ -205,8 +205,9 @@ test('Swap with one click: marks, one total, the check, then the video on the ne
   await tapFrame(page, 0.68, 0.38)
   await expect(page.getByRole('button', { name: 'Remove mark 2' })).toBeVisible()
   await expect(page.locator('[data-swap-frame-count]')).toHaveAttribute('data-swap-frame-count', '2')
-  await expect(page.getByRole('textbox', { name: 'Who person 1 replaces' })).toHaveAttribute('placeholder', /^the person on the left/)
-  await expect(page.getByRole('textbox', { name: 'Who person 2 replaces' })).toHaveAttribute('placeholder', /^the person on the right/)
+  // The one people rule: each row has its number, its place from the tap, its character.
+  await expect(page.locator('[data-swap-figure="1"] [data-swap-place]')).toHaveText('left')
+  await expect(page.locator('[data-swap-figure="2"] [data-swap-place]')).toHaveText('right')
   await page.locator('[data-swap-photo-input="1"]').setInputFiles(await media('face1.png', 'image/png'))
   await page.locator('[data-swap-photo-input="2"]').setInputFiles(await media('face2.png', 'image/png'))
   await expect(page.getByRole('button', { name: 'Character for person 2' })).toContainText('Photo')
@@ -214,11 +215,12 @@ test('Swap with one click: marks, one total, the check, then the video on the ne
   await expect(page.locator('[data-clip-price]')).toHaveAttribute('title', /credits$/)
   await expect(page.locator('[data-clip-split]')).toContainText('frame 14k + video')
 
-  // In the settings: Kling stands greyed out for two people.
+  // In the settings: Kling stays pickable and says what it cannot do with
+  // two people (no hidden choice, no silent switch).
   await settings.click()
   await page.getByRole('button', { name: 'Video model' }).click()
   const kling = page.getByRole('option', { name: /Kling 3.0 Pro/ })
-  await expect(kling).toBeDisabled()
+  await expect(kling).toBeEnabled()
   await expect(kling).toContainText('one person only')
   await page.keyboard.press('Escape')
   await expect(kling).toBeHidden()
@@ -282,8 +284,12 @@ test('Swap with OpenJutsu: four people run in one step, no switches', async ({ p
   await page.getByRole('button', { name: /Add person/ }).click()
   await expect(page.getByRole('button', { name: /Add person/ })).toHaveText('+ Add person (4/4)')
   await expect(page.getByRole('button', { name: /Add person/ })).toBeDisabled()
-  // Four people: OpenJutsu by itself, one step, so no frame switches.
-  await expect(page.locator('[data-swap-summary]')).toContainText('Auto · OpenJutsu')
+  // Four people: SCAIL-2 stays and says so; one click on the recommendation
+  // picks OpenJutsu (no silent switch, 19.11.2026). One step, no frame switches.
+  await expect(page.locator('[data-swap-summary]')).toContainText('SCAIL-2')
+  await expect(page.locator('[data-swap-row-limit="4"]')).toHaveText('SCAIL-2 replaces up to 3 people.')
+  await page.locator('[data-swap-recommend="openjutsu-character-swap"]').click()
+  await expect(page.locator('[data-swap-summary]')).toContainText('OpenJutsu')
   await expect(page.getByRole('switch', { name: 'Uncensored' })).toHaveCount(0)
   for (const i of [2, 3, 4]) await page.locator(`[data-swap-photo-input="${i}"]`).setInputFiles(await media('face2.png', 'image/png'))
   await page.getByRole('checkbox').check()

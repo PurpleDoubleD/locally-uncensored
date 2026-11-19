@@ -100,7 +100,8 @@ export function SwapFramePicker({ max, onCount }: { max: number; onCount: (peopl
     if (isGenerating || marked >= max) return
     const mark = { x: Math.min(1, Math.max(0, x)), y: Math.min(1, Math.max(0, y)) }
     // The first person without a mark gets it, else a new one joins.
-    const free = figures.findIndex((f) => !f.mark)
+    // A person who comes in later has no place in this frame.
+    const free = figures.findIndex((f) => !f.mark && !f.later)
     const next: SwapFigure[] = free >= 0
       ? figures.map((f, i) => (i === free ? { ...f, mark } : f))
       : [...figures, { image: null, role: '', mark }]

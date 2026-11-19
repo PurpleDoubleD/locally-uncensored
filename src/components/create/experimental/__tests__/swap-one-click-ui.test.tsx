@@ -122,7 +122,7 @@ describe('one button, one price', () => {
     expect(button.disabled).toBe(false)
     expect(button.textContent).toBe('Create · 62k')
     expect(document.querySelector('[data-clip-split]')!.textContent).toBe('frame 14k + video 48k')
-    expect(document.querySelector('[data-swap-summary]')!.textContent).toBe('Auto · SCAIL-2 · 720p')
+    expect(document.querySelector('[data-swap-summary]')!.textContent).toBe('SCAIL-2 · 720p')
     // The engine stands in the store, the video price is the ceiling.
     expect(useCreateStore.getState().cloudOpModel).toBe('scail-2')
     expect(useCreateStore.getState().cloudStudioCredits).toBe(48000)
@@ -268,10 +268,14 @@ describe('the gates', () => {
     expect(createButton().disabled).toBe(true)
   })
 
-  it('four people: OpenJutsu in one step through the normal Create run, no chain', async () => {
+  it('four people: SCAIL-2 stays and Create waits; one click on the recommendation picks OpenJutsu, one step, no chain', async () => {
     const fig = { image: { filename: 'p', url: PIXEL, width: 1, height: 1 }, role: '', mark: { x: 0.5, y: 0.5 } }
     useCreateStore.setState({ swapFigures: [fig, fig, fig, fig] })
     render(<Panel />)
+    await flush()
+    expect(useCreateStore.getState().cloudOpModel).toBe('scail-2')
+    expect(createButton().disabled).toBe(true)
+    fireEvent.click(document.querySelector('[data-swap-recommend="openjutsu-character-swap"]')!)
     await flush()
     expect(useCreateStore.getState().cloudOpModel).toBe('openjutsu-character-swap')
     expect(screen.queryByRole('switch', { name: 'Uncensored' })).toBeNull()

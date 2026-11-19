@@ -12,7 +12,7 @@ import { describe, expect, it } from 'vitest'
 import {
   SWAP_CONSENT_MISSING, SWAP_CONSENT_MODELS, SWAP_FRAME_MODEL, SWAP_KLING_MODEL, SWAP_LONG_MODEL, SWAP_MAIN_MODEL,
   SWAP_OPENJUTSU_MODEL, SWAP_MODELS, SWAP_TIPS,
-  swapAutoModel, swapBilledPhotos, swapClipCredits, swapClipLimits, swapClipSeconds, swapConsentRequired,
+  SWAP_DEFAULT_MODEL, swapBilledPhotos, swapClipCredits, swapClipLimits, swapClipSeconds, swapConsentRequired,
   swapCreditsPerSecond, swapDefaultOptions, swapFigureRoles, swapFixedOptions, swapFrameAspect, swapFrameKey,
   swapFrameOptions, swapFramePrompt, swapMarkRoles, swapMaxPeople, swapNeedsConsent, swapPanelFields,
   swapPricedSeconds, swapPrompt, swapReadsRoles, swapRoles, swapShortCredits, swapUsesFrame, swapWholeSeconds,
@@ -60,11 +60,8 @@ describe('model choice and limits', () => {
     expect(SWAP_MAIN_MODEL).toBe('scail-2')
   })
 
-  it('up to 3 people SCAIL 2 (long clips too), with 4 OpenJutsu; Kling never by itself', () => {
-    expect(swapAutoModel(0)).toBe('scail-2')
-    expect(swapAutoModel(1)).toBe('scail-2')
-    expect(swapAutoModel(3)).toBe('scail-2')
-    expect(swapAutoModel(4)).toBe(SWAP_OPENJUTSU_MODEL)
+  it('starts on SCAIL 2 and never switches by the number of people (19.11.2026)', () => {
+    expect(SWAP_DEFAULT_MODEL).toBe('scail-2')
     expect(swapClipLimits('scail-2').max).toBe(120)
   })
 
@@ -169,11 +166,14 @@ describe('the check before a run', () => {
     expect(swapReady(SWAP_OPENJUTSU_MODEL, ok)).toBe(true)
   })
 
-  it('refuses several people on a one-person model instead of switching silently', () => {
+  it('refuses several people on a one-person model instead of switching silently, and names one that can', () => {
     expect(swapInputError(SWAP_LONG_MODEL, { ...ok, figures: [...one, ...one] }))
-      .toBe('This model replaces one person. Use SCAIL-2 for up to 3 people, or remove the others.')
+      .toBe('Wan 2.2 Animate replaces one person. Remove a person or pick another model. SCAIL-2 takes up to 3 people.')
     expect(swapInputError(SWAP_KLING_MODEL, { ...ok, frameJobId: 'f', figures: [...one, ...one] })).toMatch(/replaces one person/)
-    expect(swapInputError('scail-2', { ...ok, frameJobId: 'f', figures: [...one, ...one, ...one, ...one] })).toBe('This model replaces at most 3 people.')
+    expect(swapInputError('scail-2', { ...ok, frameJobId: 'f', figures: [...one, ...one, ...one, ...one] }))
+      .toBe('SCAIL-2 replaces up to 3 people. Remove a person or pick another model. OpenJutsu takes up to 4 people.')
+    expect(swapInputError('scail-2', { ...ok, frameJobId: 'f', figures: [...one, { ...one[0], later: 'right' }] }))
+      .toBe('SCAIL-2 needs everyone in the first frame. Person 2 comes in later.')
     expect(swapInputError('scail-2', { ...ok, frameJobId: 'f', figures: [...one, ...one, ...one] })).toBeNull()
   })
 

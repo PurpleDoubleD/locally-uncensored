@@ -6,8 +6,9 @@
 //   no character   the three steps and "Create a character" (HubEmpty)
 //   new            the page that makes one from photos or a LoRA file
 //                  (HubNewCharacter)
-//   the stage      the characters as tabs, the picked one as a head line,
-//                  under it the inputs of the action and its photos
+//   the stage      the characters as tabs, what the picked one can do
+//                  behind the three dots at its tab, under the row the
+//                  inputs of the action and its photos
 //   training       a page of its own, the panel as it was
 //
 // What the action is stands in the row over the window (HubActionRow), and
@@ -26,7 +27,7 @@ import { ModelChip } from '../ModelChip'
 import { HubCharactersContext } from './HubParts'
 import { HubEmpty } from './HubEmpty'
 import { HubNewCharacter } from './HubNewCharacter'
-import { HubCard, HubPhotos, HubTabs } from './HubStage'
+import { HubPhotos, HubTabs } from './HubStage'
 import { SwapOneClick, useSwapOneClickShown } from './SwapOneClick'
 import { openHubAction, openStageAction, useCharacterPhotos, useHubCharacters } from './hubCharacters'
 import { useHubRun, type HubStageSlot } from './hubRun'
@@ -96,7 +97,7 @@ export function CharacterHub({ stage, onOpenGallery }: Props) {
 
   // Image opened from outside the stage (a training that just finished, a
   // Reuse from the gallery) runs on a character nobody picked here: that
-  // character takes the stage, so the head says who the picture will show.
+  // character takes the stage, so its tab says who the picture will show.
   const running = useCreateStore((s) => s.selectedCharacter)
   const runningOnStage = action === 'image' && !picked && running ? list.find((c) => c.ref?.id === running.id) : undefined
   useEffect(() => {
@@ -161,19 +162,18 @@ export function CharacterHub({ stage, onOpenGallery }: Props) {
           list={list}
           loading={loading}
           current={current?.key ?? null}
+          character={current}
           photoOnly={!current}
           onPick={pick}
           onPhotoOnly={() => pick(null)}
           onNew={() => setHubStep('new')}
         />
-        {/* One scroll for the head and what stands under it, so a low
-            window never squeezes the head. What is shorter than the room
+        {/* One scroll for what stands under the row. What is shorter than the room
             (a character without photos) stands in its middle, between the
             row of the characters and the row over the prompt window; what
             fills it starts at the top. */}
         <div className="hub-scroll scrollbar-thin">
         <div className="hub-center">
-        <HubCard c={current} photo={photos[0] ?? null} />
         <StageClip />
         {oneClick ? (
           <SwapOneClick onChangeCharacter={() => toStage('what')} />

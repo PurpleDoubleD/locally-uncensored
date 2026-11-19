@@ -5,6 +5,7 @@ import { resolveLocalOpPick, videoLaneModels, type ClassifiedModel } from '../..
 import { imageLaneModels } from '../../../lib/image-engines'
 import { isMlxImageHost } from '../../../api/mlx-image'
 import { mlxTalkingEntry } from '../../../api/mlx-video'
+import { swapLocalModels } from '../../../lib/create/swap-local'
 
 export interface LocalPick {
   isVideo: boolean
@@ -39,6 +40,8 @@ export function useLocalPick(): LocalPick {
     : macTalking ? videoModelList.filter((m) => m.mlxVideo?.talking)
     : intent === 'lipsync' ? lipsyncModelList
     : intent === 'motion' ? motionModelList
+    // Swap on this computer (3.1.3): the Animate models of the motion list.
+    : intent === 'swap_character' ? swapLocalModels(motionModelList)
     : null
 
   // Mirror the cloud picker's op-gating (2026-07-17: "only offer models

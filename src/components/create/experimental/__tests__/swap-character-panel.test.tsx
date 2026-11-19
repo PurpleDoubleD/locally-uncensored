@@ -132,7 +132,7 @@ describe('the Swap Character panel', () => {
     expect(swapClipLimits('scail-2').max).toBeGreaterThanOrEqual(15)
   })
 
-  it('OpenJutsu: adds people up to four, each with a photo field and a role', () => {
+  it('OpenJutsu: adds people up to four, each with a photo field and a place', () => {
     useCreateStore.getState().setCloudOpModel(SWAP_OPENJUTSU_MODEL)
     open()
     const add = () => screen.getByRole('button', { name: /Add person/ }) as HTMLButtonElement
@@ -147,21 +147,30 @@ describe('the Swap Character panel', () => {
     expect(useCreateStore.getState().swapFigures).toHaveLength(4)
     for (let i = 1; i <= 4; i++) {
       expect(screen.getByRole('button', { name: `Character for person ${i}` })).toBeTruthy()
-      expect(screen.getByRole('textbox', { name: `Who person ${i} replaces` })).toBeTruthy()
+      // The one people rule: number, place, character. Without a tap the
+      // place is a pick ("comes in later from the left/right").
+      expect(screen.getByRole('button', { name: `Where person ${i} is` })).toBeTruthy()
     }
     fireEvent.click(screen.getByRole('button', { name: 'Remove person 2' }))
     expect(useCreateStore.getState().swapFigures).toHaveLength(3)
   })
 
-  it('switches Kling to SCAIL 2 when a second person comes, and SCAIL 2 to OpenJutsu at the fourth', () => {
+  it('never switches the model by itself: Kling stays, the row says it, a click on the recommendation picks SCAIL 2 (19.11.2026)', () => {
     useCreateStore.getState().setCloudOpModel('kling-v3-pro-motion-control')
     open()
     fireEvent.click(screen.getByRole('button', { name: /Add person/ }))
+    expect(useCreateStore.getState().cloudOpModel).toBe('kling-v3-pro-motion-control')
+    expect(document.querySelector('[data-swap-row-limit="2"]')!.textContent).toBe('Kling 3.0 Pro replaces one person.')
+    expect(document.querySelector('[data-swap-row-limit="1"]')).toBeNull()
+    const rec = document.querySelector('[data-swap-recommend]') as HTMLButtonElement
+    expect(rec.textContent).toBe('Use SCAIL-2, takes up to 3 people')
+    fireEvent.click(rec)
     expect(useCreateStore.getState().cloudOpModel).toBe('scail-2')
     fireEvent.click(screen.getByRole('button', { name: /Add person/ }))
-    expect(useCreateStore.getState().cloudOpModel).toBe('scail-2')
     fireEvent.click(screen.getByRole('button', { name: /Add person/ }))
-    expect(useCreateStore.getState().cloudOpModel).toBe(SWAP_OPENJUTSU_MODEL)
+    // Four people on SCAIL 2: still SCAIL 2, OpenJutsu only recommended.
+    expect(useCreateStore.getState().cloudOpModel).toBe('scail-2')
+    expect((document.querySelector('[data-swap-recommend]') as HTMLElement).dataset.swapRecommend).toBe(SWAP_OPENJUTSU_MODEL)
   })
 
   it('OpenJutsu (one step) arms Create with the video, every photo and the consent', () => {
@@ -248,10 +257,11 @@ describe('two steps in the panel (14.11.2026)', () => {
     const figs = useCreateStore.getState().swapFigures
     expect(figs).toHaveLength(2)
     expect(figs.map((f) => f.mark)).toEqual([{ x: 0.8, y: 0.3 }, { x: 0.2, y: 0.35 }])
-    expect((screen.getByRole('textbox', { name: 'Who person 1 replaces' }) as HTMLInputElement).placeholder).toMatch(/^the person on the right/)
-    expect((screen.getByRole('textbox', { name: 'Who person 2 replaces' }) as HTMLInputElement).placeholder).toMatch(/^the person on the left/)
-    // SCAIL 2: people come in by a tap, no Add person button.
-    expect(screen.queryByRole('button', { name: /Add person/ })).toBeNull()
+    // The place of each row comes from its tap.
+    expect(document.querySelector('[data-swap-figure="1"] [data-swap-place]')!.textContent).toBe('right')
+    expect(document.querySelector('[data-swap-figure="2"] [data-swap-place]')!.textContent).toBe('left')
+    // Somebody who walks in later is added by the line, not by a tap.
+    expect(screen.getByRole('button', { name: /Add person/ })).toBeTruthy()
     // 44 px to hit.
     const mark = screen.getByRole('button', { name: 'Remove mark 1' })
     expect(mark.className).toMatch(/h-11 w-11/)
@@ -260,18 +270,19 @@ describe('two steps in the panel (14.11.2026)', () => {
     expect(useCreateStore.getState().swapFigures[0].mark).toEqual({ x: 0.2, y: 0.35 })
   })
 
-  it('the fourth mark switches to OpenJutsu, no more than 4; Kling stays with one person', () => {
+  it('marks up to 4, the model stays what it is (no silent switch), the rows over its limit say so', () => {
     useCreateStore.setState({ videoInput: clip, swapFrame: FRAME, cloudOpModel: 'kling-v3-pro-motion-control' } as never)
     open()
     fireEvent.click(frameBox(), { clientX: 10, clientY: 10 })
     expect(useCreateStore.getState().cloudOpModel).toBe('kling-v3-pro-motion-control')
     fireEvent.click(frameBox(), { clientX: 50, clientY: 10 })
-    // Two people Kling cannot do: SCAIL 2 takes over.
-    expect(useCreateStore.getState().cloudOpModel).toBe('scail-2')
+    expect(useCreateStore.getState().cloudOpModel).toBe('kling-v3-pro-motion-control')
+    expect(document.querySelector('[data-swap-people-blocker]')!.textContent).toMatch(/^Kling 3\.0 Pro replaces one person\./)
     fireEvent.click(frameBox(), { clientX: 90, clientY: 10 })
     fireEvent.click(frameBox(), { clientX: 30, clientY: 90 })
     expect(useCreateStore.getState().swapFigures).toHaveLength(4)
-    expect(useCreateStore.getState().cloudOpModel).toBe(SWAP_OPENJUTSU_MODEL)
+    expect(useCreateStore.getState().cloudOpModel).toBe('kling-v3-pro-motion-control')
+    expect(document.querySelectorAll('[data-swap-row-limit]')).toHaveLength(3)
     fireEvent.click(frameBox(), { clientX: 60, clientY: 90 })
     expect(useCreateStore.getState().swapFigures).toHaveLength(4)
   })
@@ -335,8 +346,9 @@ describe('two steps in the panel (14.11.2026)', () => {
     expect(screen.getByText(/First frame ready/)).toBeTruthy()
     expect(create().disabled).toBe(false)
 
-    // Another role: the frame no longer fits and expires.
-    fireEvent.change(screen.getByRole('textbox', { name: 'Who person 1 replaces' }), { target: { value: 'the man in red' } })
+    // Another place (the person comes in later now): the frame no longer
+    // fits and expires.
+    act(() => { useCreateStore.setState({ swapFigures: useCreateStore.getState().swapFigures.map((f) => ({ ...f, role: 'the man in red' })) }) })
     expect(create().disabled).toBe(true)
     await waitFor(() => expect(useCreateStore.getState().swapBuilt).toBeNull())
     expect(screen.getByRole('button', { name: /Build first frame/ })).toBeTruthy()

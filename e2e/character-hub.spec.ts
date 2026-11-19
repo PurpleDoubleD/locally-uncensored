@@ -222,28 +222,31 @@ test('one pill: the characters as tabs, the stage, and the row over the window s
   expect(Math.abs(column.width - onImage.width)).toBeLessThanOrEqual(1)
   expect(Math.abs(column.x - onImage.x)).toBeLessThanOrEqual(1)
   await expect(page.locator('.hub-bar, [data-swap-bar]')).toHaveCount(0)
-  await expect(page.locator('[data-hub-card]')).toContainText('Trained · Flux')
+  // No card on the stage: the character's things are in the menu at its tab.
+  await expect(page.locator('[data-hub-card]')).toHaveCount(0)
+  await expect(page.locator('[data-hub-tab-name]')).toHaveText('Bean')
   await page.locator('[data-hub-character="cloud:22222222-2222-4222-8222-222222222222"]').click()
-  await expect(page.locator('[data-hub-card]')).toContainText('Trained · Qwen')
+  await expect(page.locator('[data-hub-tab-name]')).toHaveText('Mila')
   await savePhotoCharacter(page, 'Sam', 'sam-altman.png', 12)
-  await expect(page.locator('[data-hub-card]')).toContainText('Photos · 12')
+  await expect(page.locator('[data-hub-tab-name]')).toHaveText('Sam')
   // Only the character's own photos stand on the stage.
   await expect(page.getByRole('list', { name: 'Photos of Sam' }).locator('img')).toHaveCount(12)
   await savePhotoCharacter(page, 'Oma', 'oma.png', 8)
   await expect(page.locator('[data-hub-photo-only]')).toBeVisible()
-  // With photos that fill the room the block starts at the top.
+  // With photos that fill the room the block starts at the top; shorter
+  // (no card on the stage since 3.1.3) it stands in the middle.
   {
     const room = (await page.locator('.hub-scroll').boundingBox())!
     const block = (await page.locator('.hub-center').boundingBox())!
-    expect(block.height).toBeGreaterThanOrEqual(room.height - 1)
-    expect(Math.abs(block.y - room.y)).toBeLessThanOrEqual(2)
+    if (block.height >= room.height - 1) expect(Math.abs(block.y - room.y)).toBeLessThanOrEqual(2)
+    else expect(Math.abs((block.y + block.height / 2) - (room.y + room.height / 2))).toBeLessThanOrEqual(2)
   }
   // Four characters at this width: the row in full, around the middle, with
   // New character as its last entry; the head and the photos under it on
   // the same axis as the prompt window.
   await expect(page.locator('[data-hub-tabs]')).toHaveAttribute('data-hub-tabs-fit', 'names')
   await expect(page.locator('[role=tablist] > :last-child')).toHaveAttribute('data-hub-new', /.*/)
-  await expectOnAxis(page, ['[role=tablist][aria-label="My characters"]', '[data-hub-card] .hub-portrait', '[data-hub-card-name]', '[data-hub-card-links]', '.hub-photos'])
+  await expectOnAxis(page, ['[role=tablist][aria-label="My characters"]', '.hub-photos'])
   await shoot(page, 'a-wer')
 
   // Bean on the stage: Image is the action, and the text field is there.
@@ -259,7 +262,8 @@ test('one pill: the characters as tabs, the stage, and the row over the window s
   // Swap, Bean on person 1, with the catalogue's price.
   await page.getByRole('radio', { name: 'Swap Character', exact: true }).click()
   await expect(hub).toHaveAttribute('data-character-hub', 'panel')
-  await expect(page.locator('[data-hub-action-meta]')).toHaveText('8k / s')
+  // Swap runs on this computer too since 3.1.3 (Windows/Linux, Wan 2.2 Animate).
+  await expect(page.locator('[data-hub-action-meta]')).toHaveText('Local · 8k / s')
   await expect(page.locator('[data-swap-controls]')).toBeVisible()
   await expect(page.getByRole('button', { name: 'Character for person 1' })).toContainText('Bean')
   // The video comes in through the upload of the prompt window.
@@ -270,8 +274,8 @@ test('one pill: the characters as tabs, the stage, and the row over the window s
   await expect(page.getByRole('group', { name: /First frame of your video/ })).toBeVisible({ timeout: 20_000 })
   await tapFrame(page, 0.45, 0.33)
   await tapFrame(page, 0.66, 0.36)
-  await expect(page.getByRole('textbox', { name: 'Who person 1 replaces' })).toHaveAttribute('placeholder', 'the person on the left')
-  await expect(page.getByRole('textbox', { name: 'Who person 2 replaces' })).toHaveAttribute('placeholder', 'the person on the right')
+  await expect(page.locator('[data-swap-figure="1"] [data-swap-place]')).toHaveText('left')
+  await expect(page.locator('[data-swap-figure="2"] [data-swap-place]')).toHaveText('right')
   // Person 2 becomes Sam, from the list.
   await page.getByRole('button', { name: 'Character for person 2' }).click()
   await page.getByRole('option', { name: /^Sam/ }).click()
@@ -338,9 +342,12 @@ test('Image runs on the character, its file actions stand at the character', asy
   await expect(page.getByTestId('character-use-hint')).toContainText('beanchar')
   // The prompt sits in the window, as on every tab.
   await expect(page.getByPlaceholder('Describe a new picture of Bean')).toBeVisible()
-  // The file actions stand at the character on the stage, once.
-  await expect(page.locator('[data-hub-card] [data-character-file-actions]')).toBeVisible()
+  // The file actions are rows of the menu at the character's tab, once.
+  await page.locator('[data-hub-menu]').click()
+  await expect(page.locator('[data-hub-menu-list] [data-hub-download]')).toBeVisible()
   await expect(page.getByRole('button', { name: 'Download character' })).toHaveCount(1)
+  await page.keyboard.press('Escape')
+  await expect(page.locator('[data-hub-menu-list]')).toBeHidden()
   // In the window: the field, the settings and Create. The model is in the
   // settings, not in the window.
   const win = page.locator('[data-prompt-window]')
@@ -354,7 +361,9 @@ test('without the account switch: Swap says coming soon, Motion has no sound cho
   const seen = await boot(page, { hub: false })
   await openCharacterHub(page)
   await page.locator('[data-hub-photo-only]').click()
-  await expect(page.locator('[data-hub-card="photo"]')).toContainText('Just use a photo')
+  await expect(page.locator('[data-hub-photo-only]')).toHaveAttribute('aria-selected', 'true')
+  // Nothing to rename or delete without a character: no three dots.
+  await expect(page.locator('[data-hub-menu]')).toHaveCount(0)
   await shoot(page, 'ohne-schalter-b')
   await page.getByRole('radio', { name: 'Swap Character', exact: true }).click()
   await expect(page.locator('[data-swap-unavailable="soon"]')).toHaveText('Coming soon to your LU Cloud')
@@ -409,11 +418,11 @@ test('with the switch: Swap is one click, the check stops after the frame', asyn
   expect(frames).toBe(1)
 })
 
-test('local mode: Swap is locked to the cloud, the local lanes are there', async ({ page }) => {
+test('local mode on a Mac: Swap stays on the cloud (no local way there), the local lanes are there', async ({ page }) => {
   await boot(page, { hub: true, local: true, mock: { platform: 'mac', mlx: { ltx2EngineInstalled: true, installedVideos: ['ltx-2.3-q4', 'ltx-2.3-motion-control'], loras: [{ name: 'char_opa_zimage.safetensors' }] } } })
   await openCharacterHub(page)
   await expect(page.locator('[data-hub-character="mlx:char_opa_zimage.safetensors"]')).toHaveAttribute('aria-selected', 'true', { timeout: 15_000 })
-  await expect(page.locator('[data-hub-card]')).toContainText('Local LoRA')
+  await expect(page.locator('[data-hub-trigger]')).toContainText('Trigger word')
   // A local LoRA has no picture and no photos here: a line says so, nothing stands in.
   await expect(page.locator('[data-hub-no-photos]')).toBeVisible()
   // Shorter than the room: the block stands in the middle between the row
@@ -472,7 +481,7 @@ test('phone width: the same stage and the same window, nothing folded away', asy
   // and each one says its name.
   await expect(page.locator('[data-hub-tabs]')).toHaveAttribute('data-hub-tabs-fit', /picked|pictures/)
   await expect(page.locator('[data-hub-character^="cloud:2222"]')).toHaveAttribute('title', /Mila/)
-  await expectOnAxis(page, ['[role=tablist][aria-label="My characters"]', '[data-hub-card-name]'])
+  await expectOnAxis(page, ['[role=tablist][aria-label="My characters"]'])
   await shoot(page, 'handy-a-wer')
   await page.locator('[data-hub-character^="cloud:1111"]').click()
   await shoot(page, 'handy-b-was')
@@ -482,7 +491,7 @@ test('phone width: the same stage and the same window, nothing folded away', asy
   await tapFrame(page, 0.45, 0.33)
   await tapFrame(page, 0.66, 0.36)
   await page.getByRole('checkbox').check()
-  await expect(page.locator('[data-swap-summary]')).toHaveText('Auto · SCAIL-2 · 720p')
+  await expect(page.locator('[data-swap-summary]')).toHaveText('SCAIL-2 · 720p')
   await expect(page.locator('[data-prompt-window]').getByRole('button', { name: /^Create · \d+k$/ })).toBeVisible()
   await shoot(page, 'handy-c-swap')
   await page.getByRole('radio', { name: 'Motion Control', exact: true }).click()
@@ -523,44 +532,45 @@ test('no character yet: the three steps, one button and the same window', async 
   await expectWindowAt(page, onImage)
   await page.getByRole('button', { name: 'Save Oma', exact: true }).click()
   await expect(hub).toHaveAttribute('data-character-hub', 'what')
-  await expect(page.locator('[data-hub-card-name]')).toHaveText('Oma')
+  await expect(page.locator('[data-hub-tab-name]')).toHaveText('Oma')
   // A photo character: the field asks for the picture, the button goes on
   // to Edit with its photos.
   await expect(page.locator('[data-prompt-window] textarea')).toHaveAttribute('placeholder', 'Describe a new picture of Oma')
   await expect(page.locator('[data-prompt-window]').getByRole('button', { name: 'Continue in Edit' })).toBeEnabled()
   await expectWindowAt(page, onImage)
-  // Rename on the desktop.
-  await page.locator('[data-hub-rename]').click()
+  // Rename on the desktop: the three dots at the tab, a short list in the
+  // style of the model list (no card, no grey bubble), Rename in the tab.
+  const onTop = (sel: string) => page.locator(sel).first().evaluate((el) => {
+    const r = el.getBoundingClientRect()
+    const hit = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2)
+    return r.width > 4 && r.height > 4 && !!hit && (hit === el || el.contains(hit)) && r.right <= window.innerWidth && r.left >= 0
+  })
+  await page.locator('[data-hub-menu]').click()
+  await expect(page.locator('[data-hub-menu-sheet].lu-picker [data-hub-menu-list]')).toBeVisible()
+  await page.locator('[data-hub-menu-list] [data-hub-rename]').click()
   await page.getByRole('textbox', { name: 'New name for Oma' }).fill('Greta')
   await page.locator('[data-hub-rename-save]').click()
-  await expect(page.locator('[data-hub-card-name]')).toHaveText('Greta')
+  await expect(page.locator('[data-hub-tab-name]')).toHaveText('Greta')
   await expect(page.locator('[data-hub-character^="saved:"]')).toContainText('Greta')
-  // A narrow window: the character stands as a head over its photos, with
-  // everything it can do. Nothing is missing at any width.
+  // A narrow window: every row of the menu is on screen and on top.
   for (const width of [700, 520, 380]) {
     await page.setViewportSize({ width, height: 800 })
-    const card = page.locator('[data-hub-card]')
-    await expect(card).toBeVisible()
-    await expect(page.locator('[data-hub-card-name]')).toBeVisible()
-    for (const sel of ['[data-hub-rename]', '[data-hub-train]', '[data-hub-delete]']) await expect(page.locator(sel)).toBeVisible()
-    const head = (await card.boundingBox())!
-    const photos = (await page.locator('.hub-photos').boundingBox())!
-    expect(head.y + head.height).toBeLessThanOrEqual(photos.y + 1)
-    expect(head.x + head.width).toBeLessThanOrEqual(width)
-    // Not cut off: the name and the links lie inside the head, below one another.
-    const name = (await page.locator('[data-hub-card-name]').boundingBox())!
-    const links = (await page.locator('[data-hub-card-links]').boundingBox())!
-    expect(name.y).toBeGreaterThanOrEqual(head.y)
-    expect(name.height).toBeGreaterThan(15)
-    expect(links.y).toBeGreaterThanOrEqual(name.y + name.height)
-    expect(links.y + links.height).toBeLessThanOrEqual(head.y + head.height + 1)
-    await expectOnAxis(page, ['[role=tablist][aria-label="My characters"]', '[data-hub-card-name]', '[data-hub-card-links]', '.hub-photos'])
+    await page.locator('[data-hub-menu]').click()
+    for (const sel of ['[data-hub-rename]', '[data-hub-train]', '[data-hub-delete]']) {
+      await expect(page.locator(`[data-hub-menu-list] ${sel}`)).toBeVisible()
+      expect(await onTop(`[data-hub-menu-list] ${sel}`), `${sel} at ${width}`).toBe(true)
+    }
+    if (width === 380) await shoot(page, 'schmal-menue')
+    await page.keyboard.press('Escape')
+    await expect(page.locator('[data-hub-menu-list]')).toBeHidden()
+    await expectOnAxis(page, ['[role=tablist][aria-label="My characters"]', '.hub-photos'])
   }
-  await shoot(page, 'schmal-kopf')
-  await page.locator('[data-hub-rename]').click()
+  await page.setViewportSize({ width: 1280, height: 800 })
+  await page.locator('[data-hub-menu]').click()
+  await page.locator('[data-hub-menu-list] [data-hub-rename]').click()
   await page.getByRole('textbox', { name: 'New name for Greta' }).fill('Oma')
   await page.locator('[data-hub-rename-save]').click()
-  await expect(page.locator('[data-hub-card-name]')).toHaveText('Oma')
+  await expect(page.locator('[data-hub-tab-name]')).toHaveText('Oma')
   // The line about Local and Cloud stands where the picked action shows its price.
   await page.setViewportSize({ width: 1280, height: 800 })
   await expect(page.locator('[data-hub-local-line]')).toHaveCount(1)
