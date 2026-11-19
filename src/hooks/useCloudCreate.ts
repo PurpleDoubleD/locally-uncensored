@@ -49,6 +49,8 @@ import { bumpSeed, runImageCount } from '../lib/render/image-count'
 import { STUDIO_MODELS, studioFields } from '../lib/render/studio-contract'
 import { modelLabel } from '../lib/render/preset-models'
 import { isSwapIntent, swapUsesFrame, SWAP_GALLERY_LABEL } from '../lib/render/swap'
+import { SCENE_NAME, sceneFixedOptions, sceneProblem, scenePrompt, sceneReadsFrame } from '../lib/render/scene'
+import { sceneFrameFor } from '../lib/create/scene-frame'
 import { adoptSwapFrame, swapInputError, swapRunParams } from '../lib/create/swap-run'
 import { swapConfirmedFrame } from '../lib/create/swap-frame'
 import { lipsyncCredits, soundApplies, soundClipSeconds, soundInputError, soundParam, soundStudioOptions } from '../lib/render/sound'
@@ -658,6 +660,28 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
       s.setError('Motion control needs a character image and a driving video.')
       return
     }
+    // Scene to Video (3.1.3): studio models only, the same rules as the web
+    // before anything is uploaded (lib/render/scene.ts sceneProblem).
+    const scene = intent === 'scene'
+    const sceneClip = scene && s.scene.clip && s.scene.clip.videoUrl === s.videoInput?.url ? s.scene.clip : null
+    if (scene) {
+      if (!studioModel) {
+        s.setError('Scene to Video needs a newer LU Cloud. Try again later.')
+        return
+      }
+      if (s.scene.frameBusy) {
+        s.setError('Your first frame is still being made. Wait for it, then press Create.')
+        return
+      }
+      const invalid = sceneProblem({
+        model: studioModel, prompt, hasVideo: !!s.videoInput,
+        seconds: sceneClip?.seconds, bytes: s.videoInput?.blob.size, name: s.videoInput?.name,
+      })
+      if (invalid) {
+        s.setError(invalid)
+        return
+      }
+    }
     // Sound (14.11.2026, lib/render/sound.ts): Swap and Motion on the cloud.
     // A new voice with lips needs the voice and at most one person.
     const sound = soundApplies(intent, 'cloud', characterHubReleasedHere()) ? s.sound : undefined
@@ -679,7 +703,7 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
       s.setError('Describe the object first.')
       return
     }
-    if (!specialOp && op !== 'generate' && !s.source && !threeDFromText) {
+    if (!specialOp && op !== 'generate' && !s.source && !threeDFromText && !scene) {
       s.setError('Add a source image first.')
       return
     }
@@ -808,7 +832,7 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
       // "From text" sends no picture: a source left on the Stage from another
       // way belongs to that way. Swap reads its own people (below), never the
       // Stage's source.
-      if (op !== 'generate' && s.source && !swap && !(intent === '3d' && s.threeDWay === 'text')) {
+      if (op !== 'generate' && s.source && !swap && !scene && !(intent === '3d' && s.threeDWay === 'text')) {
         params.source_path = await uploadInput(dataUrlToBlob(s.source.url), 'source', ...uploadEnds(ac))
         // Ein Studio-Modell, das eine Bilderliste liest (Edit mit mehreren
         // Vorlagen, Referenz zu Video), bekommt das Standbild der Oberflaeche als
@@ -863,6 +887,28 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
       if ((op === 'lipsync' || op === 'motion') && s.videoInput) {
         s.setProgress(6, 'Uploading video…')
         params.video_path = await uploadInput(s.videoInput.blob, 'video', ...uploadEnds(ac))
+      }
+      // Scene to Video: the scene video, the own first frame (only when the
+      // customer set one) into the field the model reads it from, and the
+      // fields the run sets itself (web lib/create/engine.ts stageScene).
+      let sceneWithFrame = false
+      if (scene && studioModel && s.videoInput) {
+        s.setProgress(6, 'Uploading video…')
+        params.video_path = await uploadInput(s.videoInput.blob, 'video', ...uploadEnds(ac))
+        const frame = sceneReadsFrame(studioModel) ? sceneFrameFor(s.scene, s.videoInput.url) : null
+        if (frame) {
+          if (ac.signal.aborted) return
+          s.setProgress(7, 'Uploading first frame…')
+          const path = frame.kind === 'designed'
+            ? await adoptInput(frame.jobId, 'image')
+            : await uploadInput(dataUrlToBlob(frame.url), 'source', ...uploadEnds(ac))
+          const reads = Object.values(STUDIO_MODELS[studioModel].inputs)
+          if (reads.includes('source_path')) params.source_path = path
+          if (reads.includes('image_paths')) params.image_paths = [path]
+          sceneWithFrame = true
+        }
+        params.studio_options = { ...(params.studio_options ?? {}), ...sceneFixedOptions(studioModel, sceneClip ?? {}, sceneWithFrame) }
+        if (ac.signal.aborted) return
       }
       if (swap && studioModel) {
         // The people of the panel: a photo each (a list with roles for
@@ -985,6 +1031,10 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
       // Bail before the (credit-claiming) submit if the user cancelled while
       // we were uploading inputs.
       if (ac.signal.aborted) return
+      // What the model reads. Scene to Video adds the sentence that keeps the
+      // camera (and names the first frame) to the customer's words; the
+      // gallery keeps the customer's own words.
+      const sentPrompt = scene && studioModel ? scenePrompt(studioModel, runPrompt, sceneWithFrame) : runPrompt
 
       // Review A1/B3 (Runde 2, 20.09.2026): a Studio run books against a
       // SERVER-CONFIRMED number, never the client formula alone
@@ -1018,7 +1068,7 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
         for (const k of ['source_path', 'image_paths', 'mask_path', 'audio_path', 'audio2_path', 'video_path', 'last_image_path', 'shot_type', 'clip_seconds', 'swap_consent', 'swap_step'] as const) {
           if (params[k] !== undefined) quoteFields[k] = params[k]
         }
-        const quote = await studioQuote(studioModel, runPrompt, {
+        const quote = await studioQuote(studioModel, sentPrompt, {
           op: 'studio',
           // A swap run carries its roles and fixed mode in params.studio_options.
           studio_options: params.studio_options ?? studioOptionsFiltered ?? {},
@@ -1069,6 +1119,7 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
       let label: string | undefined
       if (studioModel) {
         label = swap ? SWAP_GALLERY_LABEL
+          : scene ? SCENE_NAME
           : prompt.trim() ? undefined
           : intent === '3d' ? THREE_D_TEXT.gallery[s.threeDWay]
           : modelLabel(studioModel)
@@ -1111,7 +1162,7 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
       })
       let submitted: Awaited<ReturnType<typeof submitCloudJob>>
       try {
-        submitted = await submitNoted({ kind, model, prompt: runPrompt, params }, {
+        submitted = await submitNoted({ kind, model, prompt: sentPrompt, params }, {
           op, prompt: OP_GALLERY_LABEL[op] ?? runPrompt, timeoutMs,
           landing: op === 'lora-train' ? 'character' : 'gallery',
           items: Array.from({ length: count }, (_, index) => resultFields(index)),

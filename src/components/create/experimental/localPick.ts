@@ -1,7 +1,7 @@
 // Which local model a run will really use, read once for the picker and for
 // the waiting area, so the two cannot disagree about the model on the card.
 import { useCreateStore } from '../../../stores/createStore'
-import { resolveLocalOpPick, videoLaneModels, type ClassifiedModel } from '../../../api/comfyui'
+import { resolveLocalOpPick, sceneLaneModels, videoLaneModels, type ClassifiedModel } from '../../../api/comfyui'
 import { imageLaneModels } from '../../../lib/image-engines'
 import { isMlxImageHost } from '../../../api/mlx-image'
 import { mlxTalkingEntry } from '../../../api/mlx-video'
@@ -42,6 +42,8 @@ export function useLocalPick(): LocalPick {
     : intent === 'motion' ? motionModelList
     // Swap on this computer (3.1.3): the Animate models of the motion list.
     : intent === 'swap_character' ? swapLocalModels(motionModelList)
+    // Scene to Video runs the full Wan 2.1 VACE files of the same folder.
+    : intent === 'scene' ? sceneLaneModels(motionModelList)
     : null
 
   // Mirror the cloud picker's op-gating (2026-07-17: "only offer models

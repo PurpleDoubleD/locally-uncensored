@@ -12,7 +12,7 @@
 // too and which therefore cannot name CreateIntent either.
 export type CreateIntentLike =
   | 'image' | 'edit' | 'removebg' | 'video' | 'animate' | 'upscale' | 'eraser'
-  | 'character' | 'lipsync' | 'music' | 'extend' | 'motion' | '3d' | 'swap_character'
+  | 'character' | 'lipsync' | 'music' | 'extend' | 'motion' | '3d' | 'swap_character' | 'scene'
 
 // '3d' (3.1.0): a GLB model. Cloud 3D runs as op 'studio' only.
 export type RenderKind = 'image' | 'video' | 'audio' | '3d'
@@ -94,6 +94,10 @@ export function intentToJob(intent: CreateIntentLike): { kind: RenderKind; op: R
     // here says which inputs are gathered: a video, as for Motion.
     case 'swap_character':
       return { kind: 'video', op: 'motion' }
+    // Scene to Video (3.1.3) runs only studio models; its inputs are its own
+    // (hooks/useCloudCreate.ts, the scene block), none of the shared op paths.
+    case 'scene':
+      return { kind: 'video', op: 'studio' }
     default:
       return { kind: 'image', op: 'generate' }
   }

@@ -47,11 +47,14 @@ describe('der alte Katalog ist wirklich der alte', () => {
       'midjourney', 'grok-imagine-quality', 'grok-imagine-quality-edit', 'recraft-v4.1-pro', 'kling-image-o3', 'kling-image-o3-edit'])
     const dreiD = (id: string) => /3d|trellis|tripo|seed3d|rodin|meshy/.test(id)
     const charakter = new Set(['openjutsu-character-swap', 'wan-2.2-animate-replace', 'kling-v3-pro-motion-control'])
-    expect(neueIds().filter((id) => !katalog2410.has(id) && !dreiD(id) && !charakter.has(id))).toHaveLength(8)
+    // Scene to Video (web 16.11.2026, desktop 3.1.3): fuenf Videomodelle.
+    const szene = new Set(['wan-3.0-video-edit', 'seedance-2.5-flash-video-edit', 'wan-2.1-vace', 'aleph-2', 'flux-3-video-edit'])
+    expect(neueIds().filter((id) => !katalog2410.has(id) && !dreiD(id) && !charakter.has(id) && !szene.has(id))).toHaveLength(8)
     expect(neueIds().filter((id) => charakter.has(id))).toHaveLength(3)
+    expect(neueIds().filter((id) => szene.has(id))).toHaveLength(5)
     expect(neueIds().filter((id) => katalog2410.has(id))).toHaveLength(23)
     expect(neueIds().filter((id) => dreiD(id))).toHaveLength(23)
-    expect(neueIds()).toHaveLength(57)
+    expect(neueIds()).toHaveLength(62)
     for (const id of neueIds()) expect(ids.has(id), id).toBe(false)
     // Der neue Katalog hat dagegen alles.
     expect(neuerServer().length).toBeGreaterThanOrEqual(alt.length + 8)

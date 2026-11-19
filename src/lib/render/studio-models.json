@@ -1107,7 +1107,7 @@
       "rates": {
         "default": 0.79
       },
-      "maxSeconds": 120
+      "maxSeconds": 20
     },
     "baselineUsd": 0.79
   },
@@ -2349,5 +2349,148 @@
     "defaults": {},
     "typical_s": 691,
     "baselineUsd": 2.52
+  },
+  "wan-2.1-vace": {
+    "label": "Wan 2.1 VACE",
+    "endpoint": "base/wan-2.1-14b-vace",
+    "kind": "video",
+    "adult": false,
+    "tier": "standard",
+    "weights": "open",
+    "price": {
+      "mode": "output",
+      "rates": {
+        "832*480/5": 0.06,
+        "832*480/6": 0.075,
+        "832*480/7": 0.0642857142857143,
+        "832*480/8": 0.05625,
+        "832*480/9": 0.05,
+        "832*480/10": 0.045,
+        "480*832/5": 0.06,
+        "480*832/6": 0.075,
+        "480*832/7": 0.0642857142857143,
+        "480*832/8": 0.05625,
+        "480*832/9": 0.05,
+        "480*832/10": 0.045,
+        "1280*720/5": 0.08,
+        "1280*720/6": 0.09999999999999999,
+        "1280*720/7": 0.08571428571428572,
+        "1280*720/8": 0.075,
+        "1280*720/9": 0.06666666666666667,
+        "1280*720/10": 0.06,
+        "720*1280/5": 0.08,
+        "720*1280/6": 0.09999999999999999,
+        "720*1280/7": 0.08571428571428572,
+        "720*1280/8": 0.075,
+        "720*1280/9": 0.06666666666666667,
+        "720*1280/10": 0.06
+      },
+      "resolutionField": "size",
+      "qualityField": "duration"
+    },
+    "inputs": {
+      "video": "video_path",
+      "image": "source_path"
+    },
+    "defaults": {
+      "task": "depth",
+      "size": "1280*720",
+      "duration": 5
+    },
+    "baselineUsd": 0.4
+  },
+  "aleph-2": {
+    "label": "Runway Aleph 2",
+    "endpoint": "runwayml/aleph-2",
+    "kind": "video",
+    "adult": false,
+    "tier": "best",
+    "weights": "closed",
+    "price": {
+      "mode": "input",
+      "rates": {
+        "default": 0.37
+      },
+      "maxSeconds": 10
+    },
+    "inputs": {
+      "video": "video_path",
+      "keyframe_images": "image_paths"
+    },
+    "defaults": {},
+    "baselineUsd": 1.85
+  },
+  "wan-3.0-video-edit": {
+    "label": "Wan 3.0 Scene",
+    "endpoint": "alibaba/wan-3.0/video-edit",
+    "kind": "video",
+    "adult": false,
+    "tier": "best",
+    "weights": "open-family",
+    "price": {
+      "mode": "input",
+      "rates": {
+        "480p": 0.1,
+        "720p": 0.2,
+        "1080p": 0.4
+      },
+      "maxSeconds": 10
+    },
+    "inputs": {
+      "video": "video_path",
+      "reference_images": "image_paths"
+    },
+    "defaults": {
+      "resolution": "720p",
+      "generate_audio": false
+    },
+    "baselineUsd": 1.0
+  },
+  "seedance-2.5-flash-video-edit": {
+    "label": "Seedance 2.5 Flash \u2022 Video Edit",
+    "endpoint": "bytedance/seedance-2.5-flash/video-edit",
+    "kind": "video",
+    "adult": false,
+    "tier": "best",
+    "weights": "closed",
+    "price": {
+      "mode": "input",
+      "rates": {
+        "480p": 0.15,
+        "720p": 0.3,
+        "1080p": 0.75,
+        "4k": 1.5
+      },
+      "maxSeconds": 10,
+      "minSeconds": 4
+    },
+    "inputs": {
+      "video": "video_path",
+      "reference_images": "image_paths"
+    },
+    "defaults": {
+      "resolution": "720p"
+    },
+    "baselineUsd": 1.5
+  },
+  "flux-3-video-edit": {
+    "label": "FLUX 3 \u2022 Video Edit",
+    "endpoint": "black-forest-labs/flux-3/video-edit",
+    "kind": "video",
+    "adult": false,
+    "tier": "standard",
+    "weights": "open-family",
+    "price": {
+      "mode": "input",
+      "rates": {
+        "default": 0.03
+      },
+      "maxSeconds": 10
+    },
+    "inputs": {
+      "video": "video_path"
+    },
+    "defaults": {},
+    "baselineUsd": 0.15
   }
 }

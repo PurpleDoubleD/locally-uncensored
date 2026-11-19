@@ -6,7 +6,7 @@
  *  Character-Studio (LoRA training + generation), talking character (lipsync),
  *  music, video extend and motion control. Like `utilityOp`, an escape hatch
  *  over the image/video mode axis: when set it wins the intent derivation. */
-export type CloudOp = 'character' | 'lipsync' | 'music' | 'extend' | 'motion' | '3d' | 'swap_character'
+export type CloudOp = 'character' | 'lipsync' | 'music' | 'extend' | 'motion' | '3d' | 'swap_character' | 'scene'
 
 /**
  * The redesigned Create page's flat creation intents, derived over

@@ -52,9 +52,10 @@ describe('intent cloud gating', () => {
     expect(fromMeta).toEqual([...LOCAL_LANE_OPS, ...LOCAL_UTILITY_OPS].sort())
   })
 
-  it('the local IntentBar filter keeps the 5 classic tabs, Enhance, the 6 lanes (Swap since 3.1.3) and 3D selectable', () => {
+  it('the local IntentBar filter keeps the 5 classic tabs, Enhance, Scene, the 6 lanes (Swap since 3.1.3) and 3D selectable', () => {
     const selectable = INTENTS.filter((m) => !m.cloudOnly || m.hasLocalLane).map((m) => m.id)
-    expect(selectable).toEqual(['image', 'edit', 'removebg', 'upscale', 'video', 'animate', 'character', 'lipsync', 'music', 'extend', 'motion', 'swap_character', '3d'])
+    // Scene to Video (3.1.3) runs Wan 2.1 VACE in ComfyUI, after Animate as on the web.
+    expect(selectable).toEqual(['image', 'edit', 'removebg', 'upscale', 'video', 'animate', 'scene', 'character', 'lipsync', 'music', 'extend', 'motion', 'swap_character', '3d'])
     // …and that IS what the pure filter reports for a ComfyUI local host.
     expect(unlocked('local', false)).toEqual(selectable)
   })
@@ -82,6 +83,10 @@ describe('intent cloud gating', () => {
     // Motion gates on the VACE/Animate model list AND the DWPose pack.
     expect(INTENT_MAP.motion.requiresModels).toBe('motion')
     expect(INTENT_MAP.motion.capability).toBe('dwpose')
+    // Scene to Video gates on the VACE files of the same list and on the
+    // depth extractor of the same pack (laneModelCount counts VACE only).
+    expect(INTENT_MAP.scene.requiresModels).toBe('motion')
+    expect(INTENT_MAP.scene.capability).toBe('depth')
     // Character has no requiresModels gate: LocalTrainControls runs its own
     // three gates (trainer env, Z-Image bases, staged photos) instead.
     expect(INTENT_MAP.character.requiresModels).toBeUndefined()
@@ -109,7 +114,8 @@ describe('intent gating on a local MLX Mac (no ComfyUI)', () => {
     // uses — visible, honest, and it opens the teaser sheet on tap.
     // Swap Character (07.11.2026) is hosted-only like Erase, so it is a teaser
     // here too.
-    expect(teasers('local', true)).toEqual(['upscale', 'eraser', 'lipsync', 'music', 'extend', 'motion', 'swap_character'])
+    // Scene to Video (3.1.3) too: its local lane is a ComfyUI graph.
+    expect(teasers('local', true)).toEqual(['upscale', 'eraser', 'scene', 'lipsync', 'music', 'extend', 'motion', 'swap_character'])
   })
 
   it('every Mac teaser has a cloud endpoint to teased about', () => {

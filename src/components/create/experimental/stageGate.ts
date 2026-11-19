@@ -1,6 +1,6 @@
 import type { CreateBackend, CreateIntent } from '../../../stores/createStore'
 import { swapLocalModels } from '../../../lib/create/swap-local'
-import { runnableVideoLaneModels } from '../../../api/comfyui'
+import { runnableVideoLaneModels, sceneLaneModels } from '../../../api/comfyui'
 import { imageLaneModels } from '../../../lib/image-engines'
 import type { IntentMeta } from './intents'
 
@@ -128,5 +128,8 @@ export function laneModelCount(
   // Swap runs on the Animate models of the motion list only (VACE cannot keep
   // the scene around a person), so a box with VACE alone gets the download.
   if (intent === 'swap_character') return swapLocalModels(lists.motion as never).length
+  // Scene to Video counts only the VACE files of the Motion list: with only
+  // Wan Animate there, the Stage offers the VACE download.
+  if (intent === 'scene') return sceneLaneModels((lists.motion ?? []) as never).length
   return (lists[requiresModels] ?? []).length
 }

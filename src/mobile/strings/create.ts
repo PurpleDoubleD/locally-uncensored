@@ -89,6 +89,12 @@ const TOOL: Record<CreateIntent, ToolText> = {
     empty: 'Add a video and a photo of the new person.',
     show: 'Put a new person into a real video. Same moves, same scene.',
   },
+  // Not a phone tool either (3.1.3: the desktop's Scene to Video).
+  scene: {
+    name: 'Scene to Video', short: 'Scene', placeholder: 'Describe the new look',
+    empty: 'Add a video of your grey 3D scene.',
+    show: 'Turn a grey 3D scene into a finished clip. Same camera, same timing.',
+  },
 }
 
 /** A getter here is a text in two wordings; the store switches of the build pick one (policy/gates.ts). */

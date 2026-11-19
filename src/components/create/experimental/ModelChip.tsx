@@ -212,7 +212,8 @@ function CloudModelChip() {
   const swapTooMany = (id: string) => swap && swapPeople > swapMaxPeople(id)
   const swapLimitText = (id: string) => (swapMaxPeople(id) === 1 ? 'one person only' : `up to ${swapMaxPeople(id)} people`)
   const options: SelectOption[] = roleIntent
-    ? (swap ? roleModels.map((model) => ({ model, group: undefined as string | undefined })) : groupForPicker(roleModels)).map(({ model: m, group }) => ({
+    // Swap and Scene keep the order of their role: it is the recommendation.
+    ? (swap || intent === 'scene' ? roleModels.map((model) => ({ model, group: undefined as string | undefined })) : groupForPicker(roleModels)).map(({ model: m, group }) => ({
         value: m.id,
         label: m.label,
         // "Picture first" costs the picture and the model together.

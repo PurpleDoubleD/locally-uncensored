@@ -63,6 +63,11 @@ const INTENT_COPY: Record<Extract<CloudTeaserTarget, { surface: 'intent' }>['int
     title: 'Swap Character',
     line: 'Put a new person into a real video. Same moves, same scene, same sound.',
   },
+  // 3.1.3: on a Mac the tab is a locked cloud pill (no ComfyUI, no VACE).
+  scene: {
+    title: 'Scene to Video',
+    line: 'Turn a grey 3D scene into a finished clip. Same camera, same timing, the look you describe.',
+  },
 }
 
 /**

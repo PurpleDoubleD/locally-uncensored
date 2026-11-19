@@ -223,10 +223,6 @@
 "annie-sofa-sitting-front",
 "f"
 ],
-"Annie Sofa Sitting Front 2": [
-"annie-sofa-sitting-front-2",
-"f"
-],
 "Annie Sofa Sitting Front 3": [
 "annie-sofa-sitting-front-3",
 "f"
@@ -1015,10 +1011,6 @@
 "judy-doctor-standing",
 "f"
 ],
-"Judy HR": [
-"judy-hr",
-"f"
-],
 "Judy Lawyer": [
 "judy-lawyer",
 "f"
@@ -1039,24 +1031,12 @@
 "june-office-front",
 "f"
 ],
-"June Office Front 2": [
-"june-office-front-2",
-"f"
-],
 "June Office Side": [
 "june-office-side",
 "f"
 ],
 "June Office Side 2": [
 "june-office-side-2",
-"f"
-],
-"June Sofa Casual Front": [
-"june-sofa-casual-front",
-"f"
-],
-"June Sofa Casual Front 2": [
-"june-sofa-casual-front-2",
 "f"
 ],
 "June Sofa Casual Side": [
@@ -1093,10 +1073,6 @@
 ],
 "Kavya Sofa Side": [
 "kavya-sofa-side",
-"f"
-],
-"Leah": [
-"leah",
 "f"
 ],
 "Leos Office Front": [
@@ -1257,10 +1233,6 @@
 ],
 "Matteo Sofa Side 2": [
 "matteo-sofa-side-2",
-"m"
-],
-"Matthew": [
-"matthew",
 "m"
 ],
 "Max Indoor Front": [
@@ -1941,10 +1913,6 @@
 ],
 "Vince Business Training Side": [
 "vince-business-training-side",
-"m"
-],
-"Vince Business Training Side 2": [
-"vince-business-training-side-2",
 "m"
 ],
 "Vince Sofa Casual Front": [

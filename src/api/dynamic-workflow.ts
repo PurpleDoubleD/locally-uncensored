@@ -3159,7 +3159,7 @@ async function buildLtx25Workflow(params: VideoParams, seed: number, allNodes: N
 // predates the family — REJECT-AND-REPORT, never a broken graph.
 
 export interface LocalOpParams {
-  op: 'music' | 'lipsync' | 'motion' | 'swap'
+  op: 'music' | 'lipsync' | 'motion' | 'swap' | 'scene'
   model: string
   prompt: string
   negativePrompt?: string
@@ -3178,8 +3178,11 @@ export interface LocalOpParams {
   /** lipsync: speech audio staged in ComfyUI's input dir + the portrait. */
   audioFile?: string
   refImage?: string
-  /** motion: driving video staged in ComfyUI's input dir. */
+  /** motion: driving video staged in ComfyUI's input dir. scene: the scene
+   *  video (Scene to Video, 3.1.3). */
   drivingVideo?: string
+  /** scene: the customer's own first frame, staged in ComfyUI's input dir. */
+  firstFrame?: string
 }
 
 const UPDATE_COMFY_HINT =
@@ -3272,6 +3275,8 @@ function addVideoWithAudioOutput(
   workflow: ComfyApiGraph,
   n: number,
   decodeId: string,
+  /** A number, or the rate output of GetVideoComponents (Scene to Video
+   *  without VideoHelperSuite keeps the clip's own rate). */
   fps: number | [string, number],
   audioSrc: [string, number] | null,
   allNodes: NodePresence,
@@ -3625,6 +3630,156 @@ export async function buildMotionWorkflow(params: LocalOpParams, seed: number, a
   return workflow
 }
 
+/** The depth model Scene to Video draws its depth video with: Depth
+ *  Anything V2 Small, Apache-2.0 (the Base and Large weights are CC-BY-NC,
+ *  not for a product). comfyui_controlnet_aux fetches it on the first run. */
+export const SCENE_DEPTH_CKPT = 'depth_anything_v2_vits.pth'
+
+/**
+ * Scene to Video on the local lane (3.1.3). A grey blockout video keeps its
+ * camera, layout and timing, the prompt gives it its look:
+ *
+ *   scene video -> 16 fps frames -> Depth Anything V2 -> WanVaceToVideo
+ *   (control_video) -> sampler -> decode -> mp4
+ *
+ * VACE was trained with depth maps from Depth Anything, so this is the
+ * control it reads best; the grey render itself would be read as the look.
+ * VHS_LoadVideo resamples the clip to 16 fps (VACE's rate) and stops at the
+ * run's length. Without the VideoHelperSuite pack the core LoadVideo takes
+ * the clip at its own rate and the result plays at that rate, so the motion
+ * keeps its speed either way.
+ *
+ * An own first frame opens the control video in place of the first depth
+ * frame, with a mask of 0 there (keep) and 1 everywhere else (paint): VACE's
+ * first frame task combined with depth, from core nodes only.
+ */
+export async function buildSceneWorkflow(params: LocalOpParams, seed: number, allNodes: NodePresence): Promise<ComfyApiGraph> {
+  const workflow: ComfyApiGraph = {}
+  let n = 1
+  if (!allNodes['DepthAnythingV2Preprocessor']) {
+    throw new WorkflowUnavailableError(
+      'Scene to Video needs the depth extractor (Depth Anything) from the controlnet_aux node pack. Install it from the card above, then generate again.',
+      'unavailable',
+      { pack: 'comfyui_controlnet_aux', url: 'https://github.com/Fannovel16/comfyui_controlnet_aux' },
+    )
+  }
+  if (!params.drivingVideo) throw new Error('Add your scene video first.')
+  if (classifyModel(params.model) !== 'wanvace') {
+    throw new Error('Scene to Video runs on Wan 2.1 VACE. Install it with Download & install above, or pick it in the model list.')
+  }
+  const vhs = !!allNodes['VHS_LoadVideo']
+  requireNodes(allNodes, ['WanVaceToVideo', 'TrimVideoLatent', ...(vhs ? [] : ['LoadVideo', 'GetVideoComponents', 'ImageFromBatch'])], 'Scene to Video')
+  if (params.firstFrame) requireNodes(allNodes, ['LoadImage', 'ImageScale', 'ImageFromBatch', 'ImageBatch', 'EmptyImage', 'ImageToMask'], 'Scene to Video')
+
+  const snap16 = (v: number, def: number) => Math.max(16, Math.round(((v && v > 0) ? v : def) / 16) * 16)
+  const width = snap16(params.width, 832)
+  const height = snap16(params.height, 480)
+  const length = snapWanLength(params.frames || 81)
+  const fps = params.fps || 16
+
+  const [wanClip, wanVae] = await Promise.all([
+    findMatchingCLIP('wan', params.model),
+    findMatchingVAE('wan'),
+  ])
+
+  const unetId = String(n++)
+  addUnetLoader(workflow, unetId, params.model, allNodes)
+  const clipId = String(n++)
+  workflow[clipId] = { class_type: 'CLIPLoader', inputs: { clip_name: wanClip, type: 'wan', device: 'default' } }
+  const vaeId = String(n++)
+  workflow[vaeId] = { class_type: 'VAELoader', inputs: { vae_name: wanVae } }
+  const posId = String(n++)
+  workflow[posId] = { class_type: 'CLIPTextEncode', inputs: { text: params.prompt, clip: [clipId, 0] } }
+  const negId = String(n++)
+  workflow[negId] = { class_type: 'CLIPTextEncode', inputs: { text: params.negativePrompt || '', clip: [clipId, 0] } }
+
+  // The frames of the scene, at most `length` of them.
+  let frames: [string, number]
+  let outFps: number | [string, number] = fps
+  if (vhs) {
+    const loadId = String(n++)
+    workflow[loadId] = {
+      class_type: 'VHS_LoadVideo',
+      inputs: {
+        video: params.drivingVideo, force_rate: fps, custom_width: 0, custom_height: 0,
+        frame_load_cap: length, skip_first_frames: 0, select_every_nth: 1,
+      },
+    }
+    frames = [loadId, 0]
+  } else {
+    const videoId = String(n++)
+    workflow[videoId] = { class_type: 'LoadVideo', inputs: { file: params.drivingVideo } }
+    const componentsId = String(n++)
+    workflow[componentsId] = { class_type: 'GetVideoComponents', inputs: { video: [videoId, 0] } }
+    const capId = String(n++)
+    workflow[capId] = { class_type: 'ImageFromBatch', inputs: { image: [componentsId, 0], batch_index: 0, length } }
+    frames = [capId, 0]
+    outFps = [componentsId, 2]
+  }
+
+  const depthId = String(n++)
+  workflow[depthId] = {
+    class_type: 'DepthAnythingV2Preprocessor',
+    inputs: { image: frames, ckpt_name: SCENE_DEPTH_CKPT, resolution: snap16(Math.min(width, height), 480) },
+  }
+  let control: [string, number] = [depthId, 0]
+  let masks: [string, number] | null = null
+  if (params.firstFrame) {
+    const imageId = String(n++)
+    workflow[imageId] = { class_type: 'LoadImage', inputs: { image: params.firstFrame } }
+    const firstId = String(n++)
+    workflow[firstId] = { class_type: 'ImageScale', inputs: { image: [imageId, 0], upscale_method: 'lanczos', width, height, crop: 'center' } }
+    const depthSizedId = String(n++)
+    workflow[depthSizedId] = { class_type: 'ImageScale', inputs: { image: [depthId, 0], upscale_method: 'bilinear', width, height, crop: 'disabled' } }
+    const restId = String(n++)
+    workflow[restId] = { class_type: 'ImageFromBatch', inputs: { image: [depthSizedId, 0], batch_index: 1, length: length - 1 } }
+    const batchId = String(n++)
+    workflow[batchId] = { class_type: 'ImageBatch', inputs: { image1: [firstId, 0], image2: [restId, 0] } }
+    control = [batchId, 0]
+    // 0 = keep (the frame), 1 = paint (after the depth), one per frame.
+    const keepId = String(n++)
+    workflow[keepId] = { class_type: 'EmptyImage', inputs: { width, height, batch_size: 1, color: 0 } }
+    const paintId = String(n++)
+    workflow[paintId] = { class_type: 'EmptyImage', inputs: { width, height, batch_size: length - 1, color: 0xffffff } }
+    const maskImagesId = String(n++)
+    workflow[maskImagesId] = { class_type: 'ImageBatch', inputs: { image1: [keepId, 0], image2: [paintId, 0] } }
+    const maskId = String(n++)
+    workflow[maskId] = { class_type: 'ImageToMask', inputs: { image: [maskImagesId, 0], channel: 'red' } }
+    masks = [maskId, 0]
+  }
+
+  const condId = String(n++)
+  workflow[condId] = {
+    class_type: 'WanVaceToVideo',
+    inputs: {
+      positive: [posId, 0], negative: [negId, 0], vae: [vaeId, 0],
+      width, height, length, batch_size: 1, strength: 1.0,
+      control_video: control,
+      ...(masks ? { control_masks: masks } : {}),
+    },
+  }
+
+  const shiftId = String(n++)
+  workflow[shiftId] = { class_type: 'ModelSamplingSD3', inputs: { model: [unetId, 0], shift: 8.0 } }
+  const samplerId = String(n++)
+  workflow[samplerId] = {
+    class_type: 'KSampler',
+    inputs: {
+      model: [shiftId, 0], positive: [condId, 0], negative: [condId, 1], latent_image: [condId, 2],
+      seed, steps: params.steps, cfg: params.cfgScale, sampler_name: params.sampler, scheduler: params.scheduler, denoise: 1.0,
+    },
+  }
+  // No reference image, so the trim takes nothing out; it stays so the graph
+  // has the same tail as the Motion lane's VACE path.
+  const trimId = String(n++)
+  workflow[trimId] = { class_type: 'TrimVideoLatent', inputs: { samples: [samplerId, 0], trim_amount: [condId, 3] } }
+  const decodeId = String(n++)
+  workflow[decodeId] = videoDecodeNode([trimId, 0], [vaeId, 0], 'VAEDecodeTiled' in allNodes)
+
+  addVideoWithAudioOutput(workflow, n, decodeId, outFps, null, allNodes, params.prompt)
+  return workflow
+}
+
 /**
  * Swap Character on this computer (3.1.3, David 19.11.2026): the person in a
  * real video becomes the character, the scene, the camera, the timing and
@@ -3879,6 +4034,7 @@ export async function buildLocalOpWorkflow(params: LocalOpParams): Promise<Comfy
     case 'lipsync': return await buildS2VWorkflow(params, seed, allNodes)
     case 'motion': return await buildMotionWorkflow(params, seed, allNodes)
     case 'swap': return await buildSwapWorkflow(params, seed, allNodes)
+    case 'scene': return await buildSceneWorkflow(params, seed, allNodes)
   }
 }
 

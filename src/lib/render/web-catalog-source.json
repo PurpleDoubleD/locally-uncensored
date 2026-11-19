@@ -2,14 +2,14 @@
   "generator": "scripts/studio-snapshot.mjs",
   "note": "Generated files. Do not edit them by hand: run the generator against the web commit this release ships with.",
   "web": {
-    "ref": "3edb251c",
-    "commit": "3edb251cfc5bdb16a8bc96b422bd735b50a0ce89",
-    "committed": "2026-11-14T10:27:26-08:00",
+    "ref": "8c6c76de",
+    "commit": "8c6c76de92afbc592c3cd92bcbbd87944a01d2ce",
+    "committed": "2026-11-18T16:36:37-08:00",
     "dirty": false
   },
   "files": {
-    "studio-models.json": "7b0b0bc1be4fbf3b11d494709795ed20e4ddef18340f4a997323bd5ae111c238",
-    "provider-schemas.json": "2bd4acaa1ab29f2f8ed626d3f560aeb580be7fffff21a84caebbb48b4028011b",
+    "studio-models.json": "f8bcd020cc2636fdf57543e42bde291341f9e5e39cb41fe62ab30d079836e9cc",
+    "provider-schemas.json": "dd923bbfed7ac9d56ef29899330ad162cbc689bc4c10411dd04e3b24fcef19f7",
     "provider-endpoints.json": "54970333dd8c743c3dae2e3cc489e4fd4e702af51253d9aae21166869d9ff7f7",
     "video-durations.json": "131f8dcf8a075066a640175f536847e870b0b45d402d7884d60fc65c33cf1595",
     "retired-models.ts": "fc9f494bcbfc640c555bd216819d0b00574a6e31aaa1d30f557f15a26f078de6",

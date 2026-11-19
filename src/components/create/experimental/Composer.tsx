@@ -19,6 +19,9 @@ import { STUDIO_MODELS } from '../../../lib/render/studio-contract'
 import { swapBilledPhotos, swapPricedSeconds, swapShortCredits } from '../../../lib/render/swap'
 import { swapReady } from '../../../lib/create/swap-run'
 import { HubActionRow } from './hub/HubActionRow'
+import { SceneVideoButton } from './SceneControls'
+import { sceneClipSeconds, sceneFixedOptions, sceneLocalProblem, sceneProblem, sceneReadsFrame } from '../../../lib/render/scene'
+import { sceneFrameFor } from '../../../lib/create/scene-frame'
 import { useHubRun } from './hub/hubRun'
 import { ACTION_LABEL, actionOfIntent } from '../../../lib/create/character-hub'
 import { mediaRefFrom } from './mediaRef'
@@ -163,6 +166,10 @@ export function Composer({ onOpenAdvanced, onOpenWorkflows, hub = false }: Props
     intent === 'character' || intent === 'lipsync' || intent === 'music' ||
     intent === 'extend' || intent === 'motion' || intent === 'swap_character'
   const swap = intent === 'swap_character'
+  // Scene to Video (3.1.3): its inputs are the scene video and the own first
+  // frame (SceneStage); the clip sets length and size (lib/render/scene.ts).
+  const sceneTab = intent === 'scene'
+  const scene = useCreateStore((s) => s.scene)
   const characterUse = intent === 'character' && characterTab === 'use'
   const threeDWay = useCreateStore((s) => s.threeDWay)
   const needsSource = intentNeedsSource(intent, threeDWay)
@@ -217,7 +224,7 @@ export function Composer({ onOpenAdvanced, onOpenWorkflows, hub = false }: Props
   const lengthRate = backend === 'cloud' && !studioPick ? lengthPrice(runModel, intentOp) : undefined
   const mediaUrl =
     intent === 'lipsync' ? (lengthRate?.basis === 'video' ? videoInput?.url : audioInput?.url)
-      : intent === 'motion' || swap ? videoInput?.url
+      : intent === 'motion' || swap || sceneTab ? videoInput?.url
         : intent === 'extend' ? extendSource?.url
           : undefined
   const mediaKind = intent === 'lipsync' && lengthRate?.basis !== 'video' ? ('audio' as const) : ('video' as const)
@@ -270,9 +277,21 @@ export function Composer({ onOpenAdvanced, onOpenWorkflows, hub = false }: Props
   const imageCount = backend === 'cloud' ? runImageCount(intent, cloudImageCount, characterUse) : 1
   // Swap: the chosen length counts, not the whole video, and every photo is
   // billed on its own (the same seconds as the slider and the server).
-  const priceSeconds = swap && studioPick && inputSeconds !== undefined ? swapPricedSeconds(studioPick, swapSeconds, inputSeconds) : inputSeconds
-  const billedPhotos = swap && studioPick ? swapBilledPhotos(studioPick, swapFigures.length) : 0
-  const studioPrice = useStudioPrice(studioPick, cloudStudioOptions, prompt, runSeconds ?? priceSeconds, extraPhotos, billedPhotos)
+  // Scene to Video: the clip up to 10 seconds, and the options the run sets
+  // itself from the clip (length, VACE size, Aleph's keyframe list), so the
+  // shown price is the booked one. A first frame counts where the model bills
+  // it as a reference.
+  const sceneClipInfo = sceneTab && scene.clip && scene.clip.videoUrl === videoInput?.url ? scene.clip : null
+  const sceneWithFrame = sceneTab && !!studioPick && sceneReadsFrame(studioPick) && !!sceneFrameFor(scene, videoInput?.url)
+  const priceSeconds = swap && studioPick && inputSeconds !== undefined ? swapPricedSeconds(studioPick, swapSeconds, inputSeconds)
+    : sceneTab && inputSeconds !== undefined ? sceneClipSeconds(inputSeconds)
+    : inputSeconds
+  const billedPhotos = swap && studioPick ? swapBilledPhotos(studioPick, swapFigures.length)
+    : sceneWithFrame && studioPick && STUDIO_MODELS[studioPick]?.price.perReference ? 1 : 0
+  const priceOptions = sceneTab && studioPick
+    ? { ...cloudStudioOptions, ...sceneFixedOptions(studioPick, { seconds: inputSeconds, width: sceneClipInfo?.width, height: sceneClipInfo?.height }, sceneWithFrame) }
+    : cloudStudioOptions
+  const studioPrice = useStudioPrice(studioPick, priceOptions, prompt, runSeconds ?? priceSeconds, extraPhotos, billedPhotos)
   const setCloudStudioCredits = useCreateStore((s) => s.setCloudStudioCredits)
   // Der Preis der gemessenen Laenge, bei einer Stimme der Zeichen des Textes.
   // Er steht im selben Speicher wie ein Studio-Preis, geht als Deckel mit dem
@@ -369,6 +388,15 @@ export function Composer({ onOpenAdvanced, onOpenWorkflows, hub = false }: Props
           ? (backend === 'cloud' ? !!extendSource : hasStart)
           : intent === 'motion'
             ? hasStart && !!videoInput
+            : sceneTab
+              // The same checks as the start (useCloudCreate / useCreate):
+              // the button never invites a run that stops at once.
+              ? !scene.frameBusy && (backend === 'cloud'
+                ? !!studioPick && !sceneProblem({
+                  model: studioPick, prompt, hasVideo: !!videoInput, seconds: sceneClipInfo?.seconds,
+                  bytes: videoInput?.blob.size, name: videoInput?.name,
+                })
+                : !sceneLocalProblem({ hasVideo: !!videoInput, seconds: sceneClipInfo?.seconds, prompt }))
             : swap
               // Studio models only: without one in the server's catalogue the
               // tab says so (SwapControls) and the button stays off.
@@ -422,7 +450,9 @@ export function Composer({ onOpenAdvanced, onOpenWorkflows, hub = false }: Props
   const inputNote = showNoPromptHint && !needsMask && isInputHint(intent)
   const laneCaption = noPromptHint(meta.id, backend, backend === 'local' && isMlxImageHost(), trainKind)
   // The disabled button says which input it waits for (laneHint.ts).
-  const missingSource = missingSourceHint({ intent, needsSource, hasSource: hasStart })
+  const missingSource = sceneTab
+    ? (!videoInput ? 'Add your scene video first.' : scene.frameBusy ? 'Your first frame is still being made.' : null)
+    : missingSourceHint({ intent, needsSource, hasSource: hasStart })
   // The price of a cloud run of the Character tab, named on the button.
   // Local runs cost nothing and show none.
   const hubCredits = hub && backend === 'cloud'
@@ -433,7 +463,7 @@ export function Composer({ onOpenAdvanced, onOpenWorkflows, hub = false }: Props
   // Swap Character names its price on the button (the web's CreateButton):
   // a paid video run, priced by its length. With a new voice the lip sync
   // step is in the figure too. In the Character tab every cloud run names it.
-  const createPrice = swap && backend === 'cloud' && priceSeconds !== undefined && studioPrice
+  const createPrice = (swap || sceneTab) && backend === 'cloud' && priceSeconds !== undefined && studioPrice
     ? swapShortCredits(studioPrice.credits + lipsyncExtra)
     : lipsyncOn && lipsyncExtra > 0 && (studioPrice?.credits ?? cloudStudioCredits ?? lengthShown) != null
       ? swapShortCredits((studioPrice?.credits ?? cloudStudioCredits ?? lengthShown ?? 0) + lipsyncExtra)
@@ -482,7 +512,9 @@ export function Composer({ onOpenAdvanced, onOpenWorkflows, hub = false }: Props
         {special && !hub && <SpecialControls intent={intent} />}
         {intent === '3d' && <ThreeDControls {...threeDControlFacts(backend, studioPick)} studioId={studioPick} pictureFirst={backend === 'local' || isPictureFirstRun(threeDWay, studioPick)} />}
         {/* Swap Character's options are its own panel above (SpecialControls). */}
-        {!isUtility && !swap && !hub && <LaneControls />}
+        {/* Scene to Video: the clip sets length and size, the look and the
+            style stand in the settings (SceneSettings). */}
+        {!isUtility && !swap && !hub && !sceneTab && <LaneControls />}
         {!hub && <CharacterNote />}
         {/* The Character tab's row, where the other tabs have theirs. */}
         {hub && <HubActionRow />}
@@ -598,6 +630,7 @@ export function Composer({ onOpenAdvanced, onOpenWorkflows, hub = false }: Props
           {/* Action bar */}
           <div className="flex items-center gap-1.5 px-2.5 py-2 border-t border-white/[0.05]">
             {hubUpload && <HubVideoUpload disabled={isGenerating || !!hubRun?.running} />}
+            {sceneTab && <SceneVideoButton />}
             {/* Ein Schalter, der sagt, dass er einer ist. „Neg" war eine
                 Abkuerzung, deren Aufloesung nur im Hover-`title` stand, und
                 der Knopf meldete seinen Zustand an nichts ausser der

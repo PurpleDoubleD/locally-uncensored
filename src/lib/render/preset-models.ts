@@ -26,6 +26,8 @@ export type StepRole =
   | 'mesh-text' | 'mesh-image' | 'mesh-views'
   // 07.11.2026: Swap Character (lib/render/swap.ts).
   | 'swap-character'
+  // 3.1.3: Scene to Video (lib/render/scene.ts), port of the web's role.
+  | 'scene'
 
 export interface PresetModel {
   id: string
@@ -50,6 +52,7 @@ const ROLE_OP: Record<StepRole, RenderOp> = {
   video: 'generate', reference: 'studio',
   'mesh-text': 'studio', 'mesh-image': 'studio', 'mesh-views': 'studio',
   'swap-character': 'studio',
+  scene: 'studio',
 }
 
 /** The staged inputs a NON-studio member consumes, as provider field -> job
@@ -65,7 +68,25 @@ export const ROLE_INPUTS: Record<StepRole, Record<string, string>> = {
   video: {}, reference: {},
   'mesh-text': {}, 'mesh-image': { image: 'source_path' }, 'mesh-views': { images: 'image_paths' },
   'swap-character': {},
+  scene: {},
 }
+
+/** Scene to Video (web 16.11.2026, desktop 3.1.3): a grey 3D blockout video
+ *  becomes a finished clip, camera and timing from the video, the look from
+ *  the prompt. The order is the recommendation and the FIRST is the default;
+ *  this list is the one place for both (lib/render/scene.ts reads it as
+ *  SCENE_MODELS). The same list and order as the web (preset-models.ts there),
+ *  measured on a real Blender graybox on 16.11.2026: Wan 3.0 Scene keeps
+ *  layout, camera and timing best with the best look; Seedance 2.5 Flash
+ *  nearly as faithful; VACE holds the structure exactly with a plainer look;
+ *  Aleph 2 at 1080p; FLUX 3 the cheapest, words only. */
+export const SCENE_ROLE_MODELS: readonly string[] = [
+  'wan-3.0-video-edit',
+  'seedance-2.5-flash-video-edit',
+  'wan-2.1-vace',
+  'aleph-2',
+  'flux-3-video-edit',
+]
 
 function studioIds(match: (id: string) => boolean): string[] {
   return Object.keys(STUDIO_MODELS).filter(match)
@@ -138,6 +159,7 @@ const ROLE_MEMBERS: Record<StepRole, () => string[]> = {
   // The one role that shares models with another (SCAIL 2 and Kling Motion
   // Control are Motion, see SWAP_ROLES).
   'swap-character': () => [...SWAP_MODELS],
+  scene: () => [...SCENE_ROLE_MODELS],
 }
 
 /** Classic ids that a studio entry already covers on the same endpoint. The
@@ -305,6 +327,12 @@ const HINTS: Record<string, string> = {
   'wan-3.0-prime-t2v': 'Describe the movement, not the mood. Say what moves and how.',
   'minimax-h3-singularity': 'Makes a clip with sound from your picture. Describe the movement.',
   'minimax-h3-singularity-ref': 'Your picture sets who is in the clip. Describe what they do.',
+  // 3.1.3: Scene to Video, the web's lines (16.11.2026).
+  'wan-3.0-video-edit': 'Keeps layout, camera and timing of your scene best. The best look.',
+  'seedance-2.5-flash-video-edit': 'Nearly as faithful to your scene, with a strong look. Faster.',
+  'wan-2.1-vace': 'Holds every shape exactly through depth. A plainer look, 5 to 10 seconds, 720p.',
+  'aleph-2': 'Renders at 1080p. Clips under 16 MB.',
+  'flux-3-video-edit': 'The cheapest. Reads only your words, MP4 clips only.',
 }
 
 export function modelHint(id: string): string | undefined {
@@ -343,6 +371,7 @@ const CLASSIC_PROMPT: Record<StepRole, boolean> = {
   angles: false, upscale: false,
   'mesh-text': true, 'mesh-image': false, 'mesh-views': false,
   'swap-character': false,
+  scene: true,
 }
 
 export function rolePrompts(role: StepRole): boolean {
