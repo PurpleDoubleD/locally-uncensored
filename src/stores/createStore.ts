@@ -474,8 +474,9 @@ export interface CreateState {
   editStrength: number
   /** C75: the shape a local Qwen-Image 2.1 edit (ComfyUI) comes out in.
    *  'source', the default: the shape of the picture, at the pixel budget of
-   *  the size fields. 'canvas': the width and height set below; the picture
-   *  is scaled and cropped from its centre to that shape before the encode. */
+   *  the size fields. 'canvas': the width and height set below; the whole
+   *  picture is the reference (3.1.3; on the Mac a masked edit is still cut
+   *  to the shape, so the mask lines up). */
   qwenEditShape: QwenEditShape
   /** Native text-to-image latent upscale + refinement pass (local ComfyUI). */
   hiresFixEnabled: boolean

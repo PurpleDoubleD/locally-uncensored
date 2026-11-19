@@ -1,12 +1,18 @@
 /**
  * C75 (Discord feature-requests, 11.11.2026): a Qwen-Image 2.1 edit could
  * only come out in the shape of its source. With "Custom size" it comes out
- * in the shape of the size fields: the source is scaled to cover that shape
- * and cropped from its centre BEFORE the encode node, whose latent follows
- * the first image (any other latent size shifts the edit). The default stays.
+ * in the shape of the size fields. The default stays.
+ *
+ * 3.1.3 (Discord bug-reports, 19.11.2026): "Custom size" cropped the source
+ * to that shape from its centre before the encode node. A full-length
+ * picture in a square lost its head, and the red frame drawn around the
+ * face with it, so the model invented a new face, hair and clothes. Now the
+ * whole source is the reference and the canvas latent has the fields' size.
  *
  * Run: npx vitest run src/api/__tests__/qwen-edit-shape-c75.test.ts
  */
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 vi.mock('../comfyui-nodes', async (importOriginal) => {
@@ -63,20 +69,39 @@ describe('the shape of a Qwen-Image 2.1 edit', () => {
     expect(nodeOf(wf, 'TextEncodeQwenImage21')![1].inputs['images.image_1']).toEqual([loadId, 0])
   })
 
-  it('"Custom size": the source is cropped to the fields\' shape before the encode, the latent still comes from the node', async () => {
+  it('"Custom size": the whole source is the reference, the canvas latent has the fields\' size', async () => {
     const wf = await buildDynamicWorkflow(edit({ editShape: 'canvas' }) as never)
     const [loadId] = nodeOf(wf, 'LoadImage')!
-    const [scaleId, scale] = nodeOf(wf, 'ImageScale')!
-    expect(scale.inputs).toEqual({ image: [loadId, 0], upscale_method: 'lanczos', width: 1664, height: 928, crop: 'center' })
-    const [encId, enc] = nodeOf(wf, 'TextEncodeQwenImage21')!
-    expect(enc.inputs['images.image_1']).toEqual([scaleId, 0])
+    // Nothing is cropped off the picture any more.
+    expect(nodeOf(wf, 'ImageScale')).toBeUndefined()
+    const [, enc] = nodeOf(wf, 'TextEncodeQwenImage21')!
+    expect(enc.inputs['images.image_1']).toEqual([loadId, 0])
     // The pixel budget of the fields, as before.
     expect(enc.inputs.resolution).toBe(1248)
+    // The canvas: an empty latent at exactly the fields' size, not the node's.
+    const [latentId, latent] = nodeOf(wf, 'EmptyLatentImage')!
+    expect(latent.inputs).toMatchObject({ width: 1664, height: 928, batch_size: 1 })
+    expect(nodeOf(wf, 'KSampler')![1].inputs.latent_image).toEqual([latentId, 0])
+  })
+
+  it('THE REPORT: a full-length picture in a square keeps its head in the reference', async () => {
+    // The user's case: a tall full-length photo with a red frame around the
+    // face, "close up" in 1024 x 1024. A centre crop to a square removed the
+    // top and the bottom of the picture; now no node cuts anything.
+    const wf = await buildDynamicWorkflow(edit({ editShape: 'canvas', width: 1024, height: 1024, prompt: 'a close-up of the face in the red frame' }) as never)
+    const cropping = Object.values(wf).filter((node) => node.class_type === 'ImageScale' || node.class_type === 'ImageCrop')
+    expect(cropping).toEqual([])
+    expect(nodeOf(wf, 'EmptyLatentImage')![1].inputs).toMatchObject({ width: 1024, height: 1024 })
+  })
+
+  it('"Like the picture" is what it was: the latent comes from the node', async () => {
+    const wf = await buildDynamicWorkflow(edit() as never)
+    const [encId] = nodeOf(wf, 'TextEncodeQwenImage21')!
     expect(nodeOf(wf, 'KSampler')![1].inputs.latent_image).toEqual([encId, 2])
     expect(nodeOf(wf, 'EmptyLatentImage')).toBeUndefined()
   })
 
-  it('only the source is cropped, references go in as they are', async () => {
+  it('references go in as they are', async () => {
     const wf = await buildDynamicWorkflow(edit({ editShape: 'canvas', referenceImages: ['person.png'] }) as never)
     const enc = nodeOf(wf, 'TextEncodeQwenImage21')![1]
     const ref = enc.inputs['images.image_2'] as [string, number]
@@ -88,5 +113,18 @@ describe('the shape of a Qwen-Image 2.1 edit', () => {
     const source = { width: 1000, height: 1500 }
     expect(editHiresBase({ source, width: 1664, height: 928, modelType: 'qwenimage' })).toEqual({ width: 1024, height: 1536 })
     expect(editHiresBase({ source, width: 1664, height: 928, modelType: 'qwenimage', editShape: 'canvas' })).toEqual({ width: 1664, height: 928 })
+  })
+})
+
+describe('the Mac does the same (useCreate, second engine)', () => {
+  const src = readFileSync(join(process.cwd(), 'src/hooks/useCreate.ts'), 'utf8')
+  it('cuts the picture to the shape only for a masked edit, and hands the engine the canvas', () => {
+    expect(src).toMatch(/const macShapeCrop = macShape && !!mask\?\.url/)
+    // Every cover crop of the source and the mask hangs on the masked case.
+    const calls = [...src.matchAll(/await coverCropBlob\(/g)].map((m) => m.index!)
+    expect(calls.length).toBe(2)
+    for (const at of calls) expect(src.slice(at - 80, at)).toContain('macShapeCrop')
+    // "Custom size" names the canvas even with one image, not only with several.
+    expect(src).toMatch(/const editSize = mlxEdit && source && \(editRefs\.length > 1 \|\| macShape\)/)
   })
 })

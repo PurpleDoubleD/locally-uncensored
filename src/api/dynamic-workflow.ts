@@ -1340,27 +1340,13 @@ export async function buildDynamicWorkflow(
       for (const [i, image] of images.entries()) {
         const loadId = String(n++)
         workflow[loadId] = { class_type: 'LoadImage', inputs: { image } }
-        let imageRef: [string, number] = [loadId, 0]
-        if (i === 0 && gp.editShape === 'canvas') {
-          // C75 (Discord feature-requests 11.11.2026): an edit in a shape of
-          // its own. The node's latent follows the first image and has to
-          // (any other latent size shifts the edit), so the source itself is
-          // brought to the shape first: scaled to cover width x height and
-          // cropped from its centre. The pixel budget below stays the size.
-          const scaleId = String(n++)
-          workflow[scaleId] = {
-            class_type: 'ImageScale',
-            inputs: {
-              image: [loadId, 0],
-              upscale_method: resizeMethod(allNodes, 'ImageScale', false),
-              width: params.width,
-              height: params.height,
-              crop: 'center',
-            },
-            _meta: { title: 'Edit shape' },
-          }
-          imageRef = [scaleId, 0]
-        }
+        const imageRef: [string, number] = [loadId, 0]
+        // C75 "Custom size": the source goes in WHOLE. Until 3.1.3 it was
+        // scaled to cover width x height and cropped from its centre first,
+        // which cut the head off a full-length picture in a square or wide
+        // shape, and the red frame drawn around it with it: the model saw
+        // neither and invented a new face (Discord bug-reports 19.11.2026).
+        // The shape now comes from the canvas latent below.
         qwenInputs[`images.image_${i + 1}`] = imageRef
       }
       qwenInputs.vae = [vaeSourceId, vaeOutputSlot]
@@ -1550,7 +1536,8 @@ export async function buildDynamicWorkflow(
     // to the model's format before sampling, so the canvas comes out at the
     // size that was asked for. On the edit path this node is dropped again
     // further down: there the latent comes from TextEncodeQwenImage21, so
-    // the result follows the reference image.
+    // the result follows the reference image. An edit in "Custom size"
+    // keeps it, the canvas of the fields.
     workflow[latentId] = {
       class_type: 'EmptyLatentImage',
       inputs: { width: params.width, height: params.height, batch_size: params.batchSize },
@@ -1596,13 +1583,17 @@ export async function buildDynamicWorkflow(
   if (strategy === 'unet_qwenimage') {
     // One encode node, both conditionings (slots 0 and 1).
     negativeRef = [posId, 1]
-    if (isQwenEdit) {
+    if (isQwenEdit && gp.editShape !== 'canvas') {
       // ...and, with a reference image attached, the latent too (slot 2): an
       // empty latent on the reference's own size, which the node's tooltip
       // calls out as required, because any other size shifts the edit.
       latentRef = [posId, 2]
       delete workflow[latentId]
     }
+    // "Custom size": the empty latent at the fields' size stays (the
+    // generate path's node above). The whole source is the reference, the
+    // picture is laid out anew in that shape, so the subject and anything
+    // drawn on the picture are still there to follow.
   }
 
   if (isQwen1Edit && qwen1EditImageRef) {

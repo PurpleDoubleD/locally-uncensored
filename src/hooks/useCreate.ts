@@ -1227,12 +1227,17 @@ export function useCreate() {
       // the canvas apart from the budget, and the canvas below stays at the
       // full size of the source.
       const editSide = macEditSide(referenceSide(editBudget, editRefs.length))
-      // C75: a Qwen-Image 2.1 edit in the shape of the size fields. The
-      // picture (and its mask) is cut to that shape before it is staged
-      // (lib/cover-crop), so the engine's edit follows it.
+      // C75: a Qwen-Image 2.1 edit in the shape of the size fields. 3.1.3
+      // (Discord bug-reports, 19.11.2026): the picture goes in WHOLE and the
+      // engine is handed the canvas, as on Windows. Cut to the shape first,
+      // a full-length picture in a square lost its head and the red frame
+      // around it, and the model made up a new face. Only with a mask is the
+      // picture (and its mask) still cut to the shape (lib/cover-crop): the
+      // painted area has to sit where it sits in the result.
       const macShape = mlxEdit && !!source && listed?.type === 'qwenimage' && state.qwenEditShape === 'canvas'
+      const macShapeCrop = macShape && !!mask?.url
       const shapeOf = macShape ? { width, height } : source
-      const editSize = mlxEdit && source && editRefs.length > 1 ? macEditCanvas(editCanvas(editBudget, shapeOf!)) : null
+      const editSize = mlxEdit && source && (editRefs.length > 1 || macShape) ? macEditCanvas(editCanvas(editBudget, shapeOf!)) : null
       // "Transparent background": the same prompt wrapper the Windows graph
       // uses. The model writes the alpha channel and the engine keeps it.
       const transparent = wantsTransparent({
@@ -1272,13 +1277,13 @@ export function useCreate() {
         // disk here, the way a start image is before a local video.
         const editImages: string[] = []
         for (const [i, ref] of editRefs.entries()) {
-          editImages.push(i === 0 && macShape
+          editImages.push(i === 0 && macShapeCrop
             ? await stageStartImage(await coverCropBlob(await blobFromUrl(ref.url), width, height))
             : ref.filename || await stageStartImage(await blobFromUrl(ref.url)))
         }
         const editMask = mlxEdit && mask?.url
           ? await stageStartImage(await featherMaskBlob(
-            macShape ? await coverCropBlob(await blobFromUrl(mask.url), width, height) : await blobFromUrl(mask.url),
+            macShapeCrop ? await coverCropBlob(await blobFromUrl(mask.url), width, height) : await blobFromUrl(mask.url),
             growMaskBy,
           ))
           : undefined
