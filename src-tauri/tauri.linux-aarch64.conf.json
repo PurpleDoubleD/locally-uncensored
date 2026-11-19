@@ -1,0 +1,16 @@
+{
+  "$schema": "https://raw.githubusercontent.com/tauri-apps/tauri/dev/crates/tauri-cli/schema.json",
+  "bundle": {
+    "linux": {
+      "appimage": {
+        "files": {
+          "/usr/lib/libayatana-appindicator3.so.1": "/usr/lib/aarch64-linux-gnu/libayatana-appindicator3.so.1"
+        }
+      }
+    },
+    "resources": {
+      "resources/llama/x86_64-unknown-linux-gnu/*": null,
+      "resources/llama/aarch64-unknown-linux-gnu/*": "llama/"
+    }
+  }
+}
