@@ -3179,9 +3179,11 @@ fn illegal_instruction_repair_sentence(module_count: Option<usize>, is_macos: bo
 /// Order, most specific (something the CHILD process itself proved) first:
 /// 1. A named missing system library (`stderr_names_a_missing_system_library`),
 ///    read straight off the loader's own error line.
-/// 1b. A40 (3.1.2): a Metal library the Mac's own shader compiler refused
-///    (`stderr_blames_the_metal_library`). Neither a file nor an install
-///    problem, so neither "download it again" nor "reinstall" fits.
+///
+///    A40 (3.1.2): right after it, a Metal library the Mac's own shader
+///    compiler refused (`stderr_blames_the_metal_library`). Neither a file
+///    nor an install problem, so neither "download it again" nor
+///    "reinstall" fits.
 /// 2. `backend_dir_too_long`: a too-long install path is checked BEFORE the
 ///    general model-blame step, not after. Blocker 9: `stderr_blames_the_model`
 ///    (step 3) matches `failed to load model`, which llama.cpp prints on load
