@@ -211,6 +211,8 @@ test('Swap with one click: marks, one total, the check, then the video on the ne
   await page.locator('[data-swap-photo-input="1"]').setInputFiles(await media('face1.png', 'image/png'))
   await page.locator('[data-swap-photo-input="2"]').setInputFiles(await media('face2.png', 'image/png'))
   await expect(page.getByRole('button', { name: 'Character for person 2' })).toContainText('Photo')
+  // Both photos stay: the second one landing must not drop the first.
+  await expect(page.getByRole('button', { name: 'Character for person 1' })).toContainText('Photo')
   // The bar prices frame and video together, the button names the total.
   await expect(page.locator('[data-clip-price]')).toHaveAttribute('title', /credits$/)
   await expect(page.locator('[data-clip-split]')).toContainText('frame 14k + video')

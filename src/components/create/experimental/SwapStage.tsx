@@ -81,7 +81,7 @@ export function SwapStage() {
             <Pick
               accept="image/*"
               label={first ? 'Change photo of the new person' : 'Add photo of the new person'}
-              onFile={(f) => { void loadImageRef(f).then((image) => setFigures(figures.map((g, i) => (i === 0 ? { ...g, image } : g)))) }}
+              onFile={(f) => { void loadImageRef(f).then((image) => setFigures(useCreateStore.getState().swapFigures.map((g, i) => (i === 0 ? { ...g, image } : g)))) }}
               className={cn(CARD, first ? FILLED : EMPTY)}
             >
               {first

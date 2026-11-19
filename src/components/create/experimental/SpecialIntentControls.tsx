@@ -1851,7 +1851,11 @@ export function SwapControls({ oneClick, local }: {
   // The marks in the first frame: up to the limit of Swap (OpenJutsu: 4).
   // More marks than the model takes stay and are said at the rows.
   const markMax = swapMaxPeople(SWAP_OPENJUTSU_MODEL)
-  const setFigure = (i: number, patch: Partial<SwapFigure>) => setFigures(figures.map((f, j) => (j === i ? { ...f, ...patch } : f)))
+  // A photo or character portrait lands asynchronously, so the row is patched
+  // on the store's current list, not on this render's: two photos picked in
+  // quick succession would otherwise drop the first one.
+  const setFigure = (i: number, patch: Partial<SwapFigure>) =>
+    setFigures(useCreateStore.getState().swapFigures.map((f, j) => (j === i ? { ...f, ...patch } : f)))
   // Locally any length runs; the first seconds are used.
   const limits = local ? { min: 0, max: swapCan(SWAP_LOCAL_MODEL).maxSeconds } : swapClipLimits(model)
   const video = videoSeconds !== undefined ? Math.floor(videoSeconds + 0.05) : undefined
