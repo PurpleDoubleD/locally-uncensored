@@ -104,7 +104,7 @@ export function trainVramSuggestion(
   }
   if (preset === 'standard' && cardMib < TRAIN_VRAM_FLOOR_MIB.standard) {
     return {
-      text: `This card has ${gb(cardMib)}. Normal training needs ${gb(TRAIN_VRAM_FLOOR_MIB.standard)}, Low VRAM is made for cards like this one.`,
+      text: `This card has ${gb(cardMib)}. Normal training needs ${gb(TRAIN_VRAM_FLOOR_MIB.standard)}, Low VRAM is made for cards like this one, and a run started on Normal switches to it on its own.`,
       switchTo: 'low-vram',
     }
   }

@@ -2370,6 +2370,25 @@ pub(crate) fn vram_verdict(vram_mib: Option<u64>, precision: &TrainPrecision, pr
     ))
 }
 
+/// A41 / GitHub #260: a card the Normal recipe refuses but Low VRAM takes
+/// (a 10 GB RTX 3080) used to end the run with "switch to Low VRAM". The run
+/// now switches itself and says so: the sentence returned here is the
+/// notice the panel shows for the whole run. None when nothing changes.
+pub(crate) fn low_vram_fallback(vram_mib: Option<u64>, precision: &TrainPrecision, preset: TrainPreset) -> Option<String> {
+    let mib = vram_mib?;
+    if preset != TrainPreset::Standard
+        || vram_verdict(vram_mib, precision, TrainPreset::Standard).is_none()
+        || vram_verdict(vram_mib, precision, TrainPreset::LowVram).is_some()
+    {
+        return None;
+    }
+    let card = mib as f64 / 1024.0;
+    let need = vram_floor_mib(precision, TrainPreset::Standard) as f64 / 1024.0;
+    Some(format!(
+        "This card has {card:.0} GB and Normal training needs {need:.0} GB, so this run uses Low VRAM: 512 px, slower steps, slightly softer detail.",
+    ))
+}
+
 pub(crate) fn parse_vram_mib(stdout: &str) -> Option<u64> {
     stdout
         .lines()
@@ -3027,6 +3046,7 @@ pub fn start_character_training(
         }
         run.status = "running".to_string();
         run.logs.clear();
+        run.notice.clear();
         run.download_progress = 0;
         run.download_total = 0;
         run.logs.push("Preparing the training run...".to_string());
@@ -3233,6 +3253,18 @@ pub fn start_character_training(
 
         // The card's memory, before ten minutes of caching: below the
         // recipe's own floor the run dies in the first training step.
+        let mut preset = preset;
+        if let Some(note) = low_vram_fallback(vram_mib, &precision, preset) {
+            preset = TrainPreset::LowVram;
+            if let Err(e) = fs::write(&toml_path, dataset_toml(&img_dir, &cache_dir, repeats, preset)) {
+                set_status(&run, "error", &format!("could not write dataset config: {}", os_error::english(&e)));
+                return;
+            }
+            if let Ok(mut s) = run.lock() {
+                s.notice = note.clone();
+            }
+            set_status(&run, "running", &note);
+        }
         if let Some(msg) = vram_verdict(vram_mib, &precision, preset) {
             set_status(&run, "error", &msg);
             return;
@@ -3393,6 +3425,8 @@ pub fn character_training_status(state: State<'_, AppState>) -> Result<serde_jso
     Ok(serde_json::json!({
         "status": run.status,
         "phase": run.phase,
+        // A41: set when the run switched itself to Low VRAM, empty otherwise.
+        "notice": run.notice,
         "logs": run.logs.iter().rev().take(30).rev().collect::<Vec<_>>(),
         "step": run.download_progress,
         "totalSteps": run.download_total,
@@ -6094,6 +6128,38 @@ mod captions_and_low_vram_tests {
         let no_fp8 = train_precision_for_capability(None);
         assert_eq!(vram_floor_mib(&no_fp8, TrainPreset::LowVram), vram_floor_mib(&no_fp8, TrainPreset::Standard));
         assert_eq!(vram_floor_mib(&train_precision_for_capability(Some((8, 6))), TrainPreset::LowVram), 7680);
+    }
+
+    #[test]
+    fn a41_a_ten_gigabyte_card_switches_itself_to_low_vram_and_says_so() {
+        // GitHub #260: RTX 3080, 10 GB, reports about 10240 MiB.
+        let fp8 = train_precision_for_capability(Some((8, 6)));
+        let ten = 10240;
+        let note = low_vram_fallback(Some(ten), &fp8, TrainPreset::Standard).expect("Normal on 10 GB falls back");
+        assert!(note.contains("10 GB") && note.contains("Low VRAM"), "{note}");
+        assert!(vram_verdict(Some(ten), &fp8, TrainPreset::LowVram).is_none(), "and Low VRAM then lets it in");
+        // Nothing changes where Normal fits, where Low VRAM is already chosen,
+        // where even Low VRAM is too small, or where the card is unknown.
+        assert!(low_vram_fallback(Some(12288), &fp8, TrainPreset::Standard).is_none());
+        assert!(low_vram_fallback(Some(ten), &fp8, TrainPreset::LowVram).is_none());
+        assert!(low_vram_fallback(Some(6 * 1024), &fp8, TrainPreset::Standard).is_none());
+        assert!(low_vram_fallback(None, &fp8, TrainPreset::Standard).is_none());
+    }
+
+    #[test]
+    fn a41_the_switch_rewrites_the_dataset_and_reaches_the_panel() {
+        let src = include_str!("trainer.rs");
+        let run = &src[src.find("pub fn start_character_training").expect("start fn")..];
+        let run = &run[..run.find("pub fn character_training_status").expect("end of run")];
+        let at = run.find("low_vram_fallback(vram_mib, &precision, preset)").expect("the run asks");
+        let verdict = run.find("vram_verdict(vram_mib, &precision, preset)").expect("then the verdict");
+        assert!(at < verdict, "the switch comes before the refusal");
+        let between = &run[at..verdict];
+        assert!(between.contains("preset = TrainPreset::LowVram"));
+        assert!(between.contains("dataset_toml(&img_dir, &cache_dir, repeats, preset)"), "512 px dataset for Low VRAM");
+        assert!(between.contains("s.notice = note"));
+        assert!(run.contains("run.notice.clear()"), "a new run starts without the last one's notice");
+        assert!(src.contains("\"notice\": run.notice"), "the status hands it to the panel");
     }
 
     #[test]

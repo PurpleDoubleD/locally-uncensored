@@ -354,6 +354,7 @@ function LocalTrainControls() {
   const trainKind = useCreateStore((s) => s.trainKind)
   const presets = trainPresetsFor(trainKind)
   const trainVramPreset = useCreateStore((s) => s.trainVramPreset)
+  const trainNotice = useCreateStore((s) => s.trainNotice)
   const setTrainVramPreset = useCreateStore((s) => s.setTrainVramPreset)
   const isGenerating = useCreateStore((s) => s.isGenerating)
   // 3.0.8 D20: the card's memory, for the Low VRAM suggestion under the
@@ -640,7 +641,10 @@ function LocalTrainControls() {
       {!isGenerating && (
         <div className="t-label text-gray-600 max-w-[560px] text-center" data-testid="local-train-family-note">{localTrainingFamilyNote(trainKind)}</div>
       )}
-      {!isGenerating && trainVramPreset === 'low-vram' && (
+      {trainNotice && (
+        <div role="status" className="t-label text-gray-400 max-w-[560px] text-center" data-testid="train-low-vram-switch">{trainNotice}</div>
+      )}
+      {!isGenerating && !trainNotice && trainVramPreset === 'low-vram' && (
         <div className="t-label text-gray-600 max-w-[560px] text-center" data-testid="low-vram-note">{LOW_VRAM_NOTE}</div>
       )}
       {!isGenerating && vramHint && (
