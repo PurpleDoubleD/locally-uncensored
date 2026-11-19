@@ -36,11 +36,12 @@ import { LOCAL_MUSIC_TEXT, SECONDS_LENGTH, musicHowtoLines, musicLength, musicTe
 import { MAC_MUSIC_MIN_SECONDS } from '../../../lib/mac-music'
 import { createRunModel, studioShownValue } from '../../../lib/render/create-studio'
 import { STUDIO_MODELS, studioFields } from '../../../lib/render/studio-contract'
-import { modelLabel } from '../../../lib/render/preset-models'
 import {
-  SWAP_AUTO_MODELS, SWAP_CONSENT_TEXT, SWAP_INTENT, SWAP_OPENJUTSU_MODEL, SWAP_TIPS, swapAutoModel,
-  swapDefaultOptions, swapFigureRoles, swapClipLimits, swapMaxPeople, swapNeedsConsent, swapShortCredits, swapUsesFrame,
+  SWAP_CONSENT_TEXT, SWAP_INTENT, SWAP_MODELS, SWAP_OPENJUTSU_MODEL, SWAP_TIPS,
+  swapDefaultOptions, swapClipLimits, swapMaxPeople, swapNeedsConsent, swapShortCredits, swapUsesFrame,
 } from '../../../lib/render/swap'
+import { checkPeople, peopleElsewhere, personPlaceShort, swapCan, SWAP_LOCAL_MODEL, SWAP_LOCAL_TIPS } from '../../../lib/create/people-rule'
+import { Select } from '../ui/Select'
 import {
   LIPSYNC_ONE_PERSON, LIPSYNC_STEP_DEFAULT, LIPSYNC_STEP_MODELS, SOUND_CHOICES, SOUND_LABEL, lipsyncBlocked, lipsyncCredits, lipsyncCut,
   lipsyncSeconds, soundApplies, soundClipSeconds, type SoundChoice,
@@ -60,6 +61,8 @@ import { BetaMark } from '../../ui/BetaMark'
 import { trainerPathPlaceholder } from '../../../lib/trainer-path-placeholder'
 import { trainerRootHint } from '../../../lib/trainer-root-hint'
 import { useCreateExp } from './CreateContext'
+import { useHubRun } from './hub/hubRun'
+import { swapLocalProblem } from '../../../lib/create/swap-local'
 import { CharacterUseLocally } from './CharacterUseLocally'
 import { CLOUD_TRAINING_FAMILY_NOTE, localTrainingFamilyNote } from '../../../api/character-import'
 import { useLocalPick } from './localPick'
@@ -86,7 +89,7 @@ export function SpecialControls({ intent }: { intent: CreateIntent }) {
     case 'music': return <MusicControls />
     case 'extend': return <ExtendControls />
     case 'motion': return <MotionControls />
-    case 'swap_character': return <SwapControls />
+    case 'swap_character': return <SwapPanel />
     default: return null
   }
 }
@@ -105,7 +108,7 @@ export function SpecialControls({ intent }: { intent: CreateIntent }) {
  *  failure lands in the red bar of the Create surface. Once the place is
  *  picked and the file comes in, a second button cancels it: the backend drops
  *  the connection and removes the unfinished file, and the row says so. */
-function CharacterDownload({ lora }: { lora: CloudLora }) {
+export function CharacterDownload({ lora }: { lora: CloudLora }) {
   const [progress, setProgress] = useState<LoraDownloadProgress | null>(null)
   // Set while the backend is downloading, which is when there is something to cancel.
   const [running, setRunning] = useState<AbortController | null>(null)
@@ -807,7 +810,7 @@ function LocalCharacterNotes() {
 
 /** Deletes a local character file (More options of Image). The file moves to
  *  the Trash or the Recycle Bin, after a question. */
-function LocalCharacterDelete({ file, trigger }: { file: string; trigger: string }) {
+export function LocalCharacterDelete({ file, trigger }: { file: string; trigger: string }) {
   const [asking, setAsking] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
@@ -1767,13 +1770,20 @@ function SoundControls({ intent, people, clipSeconds, withPrice = false }: {
 // one click picks, the switches stand above the consent, and Create in its
 // own bar runs the whole chain.
 
-export function SwapControls({ oneClick }: {
+export function SwapControls({ oneClick, local }: {
   oneClick?: {
     /** The engine of the video (swapVideoModelFor), kept in the store too. */
     model: string
     /** "Uncensored" and "Check first frame before video". */
     switches?: ReactNode
+    /** The models the customer can pick here, for the recommendation. */
+    available: readonly string[]
+    /** A click on the recommendation picks that model. */
+    onPick: (model: string) => void
   }
+  /** Local mode: Wan 2.2 Animate in ComfyUI (one person, a mask from the
+   *  pose), no first-frame step, no sound step, no cloud check. */
+  local?: boolean
 } = {}) {
   const videoInput = useCreateStore((s) => s.videoInput)
   const setVideoInput = useCreateStore((s) => s.setVideoInput)
@@ -1788,10 +1798,10 @@ export function SwapControls({ oneClick }: {
   const setOpModel = useCreateStore((s) => s.setCloudOpModel)
   const isGenerating = useCreateStore((s) => s.isGenerating)
   const released = useCharacterHubReleased()
-  const model = oneClick?.model ?? createRunModel('swap_character', { image: '', video: '', op: opModel })
+  const model = local ? SWAP_LOCAL_MODEL : oneClick?.model ?? createRunModel('swap_character', { image: '', video: '', op: opModel })
   // SCAIL 2 and Kling: the first frame first, then the video (SwapFrameSteps).
-  const twoStep = swapUsesFrame(SWAP_INTENT, model)
-  // The first frame to tap; for OpenJutsu too, whose roles come from it.
+  const twoStep = !local && swapUsesFrame(SWAP_INTENT, model)
+  // The first frame to tap; for every model, the rows read their place from it.
   useSwapFirstFrame()
   // The length of the customer's video, measured in the app (as the price).
   const [measured, setMeasured] = useState<{ url: string; seconds: number | undefined } | null>(null)
@@ -1803,35 +1813,20 @@ export function SwapControls({ oneClick }: {
   }, [videoInput])
   const videoSeconds = measured && videoInput && measured.url === videoInput.url ? measured.seconds : undefined
 
-  // The model follows the number of people: up to 3 SCAIL 2, with 4
-  // OpenJutsu. Only between these two; Kling or Wan picked by hand stays. It
-  // switches only when the target changes, not on opening the panel: an own
-  // pick (OpenJutsu for 2 people) stays.
-  const auto = SWAP_AUTO_MODELS.includes(model)
-  const target = swapAutoModel(figures.length)
-  const known = !!STUDIO_MODELS[model]
-  const lastTarget = useRef(target)
-  useEffect(() => {
-    if (oneClick || lastTarget.current === target) return
-    lastTarget.current = target
-    if (auto && known && target !== model) setOpModel(target)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [auto, known, target])
+  // No silent model switch (David, 19.11.2026): the model stays what it is.
+  // What it cannot do stands at the row and at Create, with a model that can,
+  // picked only by a click (lib/create/people-rule.ts).
+  const known = local || !!STUDIO_MODELS[model]
   // What Swap presets (SCAIL 2: 720p) stands in the store, so the bar and
   // the run see the same number.
   useEffect(() => {
-    if (!known) return
+    if (local || !known) return
     const preset = swapDefaultOptions(SWAP_INTENT, model)
     const missing = Object.entries(preset).filter(([k]) => options[k] === undefined)
     if (missing.length) setOptions({ ...options, ...Object.fromEntries(missing) })
-  }, [known, model, options, setOptions])
-  // One tap more than the model can do: onto the model that can do that many.
-  // The one click swap picks its engine by the number of people itself.
-  const fitPeople = (people: number) => {
-    if (!oneClick && people > swapMaxPeople(model)) setOpModel(swapAutoModel(people))
-  }
+  }, [local, known, model, options, setOptions])
 
-  if (!released) {
+  if (!local && !released) {
     // Without the account switch (features.characterHub) the server refuses
     // the new swap. Said quietly, nothing to fill in.
     return (
@@ -1849,16 +1844,21 @@ export function SwapControls({ oneClick }: {
     )
   }
 
-  const maxPeople = swapMaxPeople(model)
-  const placed = swapFigureRoles(figures.map((f) => ({ ...f, role: '' })))
+  const available = local ? [SWAP_LOCAL_MODEL] : oneClick?.available ?? SWAP_MODELS
+  const check = checkPeople(model, figures, available)
+  const elsewhere = check.blocker && !check.recommend ? peopleElsewhere(figures, !!local, available) : null
+  const pick = (id: string) => (oneClick ? oneClick.onPick(id) : setOpModel(id))
   // The marks in the first frame: up to the limit of Swap (OpenJutsu: 4).
+  // More marks than the model takes stay and are said at the rows.
   const markMax = swapMaxPeople(SWAP_OPENJUTSU_MODEL)
   const setFigure = (i: number, patch: Partial<SwapFigure>) => setFigures(figures.map((f, j) => (j === i ? { ...f, ...patch } : f)))
-  const limits = swapClipLimits(model)
+  // Locally any length runs; the first seconds are used.
+  const limits = local ? { min: 0, max: swapCan(SWAP_LOCAL_MODEL).maxSeconds } : swapClipLimits(model)
   const video = videoSeconds !== undefined ? Math.floor(videoSeconds + 0.05) : undefined
+  const name = swapCan(model).name
 
   return (
-    <div className="flex flex-col" data-swap-controls data-swap-two-step={twoStep || undefined}>
+    <div className="flex flex-col" data-swap-controls data-swap-two-step={twoStep || undefined} data-swap-local={local || undefined}>
       {!videoInput ? (
         <>
           <UploadLine
@@ -1866,104 +1866,104 @@ export function SwapControls({ oneClick }: {
             label="Add the original video"
             accept="video/mp4,video/webm,video/quicktime"
             onFile={(f) => setVideoInput(mediaRefFrom(f))}
-            note={`${limits.min} to ${limits.max} s`}
+            note={local ? `the first ${limits.max} s` : `${limits.min} to ${limits.max} s`}
           />
           {/* Grey, not a warning (the desktop's house rule, lib/hinweis.ts). */}
           <ul className="hub-dim space-y-0.5 pt-2.5 hub-fs-125" data-swap-tips>
-            {SWAP_TIPS.map((t) => <li key={t}>{t}</li>)}
+            {(local ? SWAP_LOCAL_TIPS : SWAP_TIPS).map((t) => <li key={t}>{t}</li>)}
           </ul>
         </>
       ) : (
-        <SwapFramePicker max={markMax} onCount={fitPeople} />
+        <SwapFramePicker max={markMax} onCount={() => {}} />
       )}
 
       <div className="hub-line mt-1 border-t" data-swap-figures={figures.length}>
         {figures.map((f, i) => (
-          <HubLine key={i} data-swap-figure={i + 1}>
-            <span className="hub-acc w-3.5 shrink-0 hub-fs-125 font-semibold tabular-nums">{i + 1}</span>
-            <input
-              type="text"
-              value={f.role}
-              maxLength={200}
-              disabled={isGenerating}
-              aria-label={`Who person ${i + 1} replaces`}
-              placeholder={placed[i]
-                ? placed[i]
-                : figures.length > 1 ? 'Who? e.g. the woman in black on the left' : 'the main person'}
-              onChange={(e) => setFigure(i, { role: e.target.value })}
-              className="hub-role hub-text min-w-0 flex-1 bg-transparent hub-fs-14 outline-none"
-            />
-            <CharacterPick
-              name={f.character ?? null}
-              image={f.image?.url ?? null}
-              label={`Character for person ${i + 1}`}
-              inputData={{ 'data-swap-photo-input': String(i + 1) }}
-              disabled={isGenerating}
-              onPhoto={(file) => { void loadImageRef(file).then((image) => setFigure(i, { image, character: null })) }}
-              onCharacter={(c) => {
-                void hubPortrait(c).then((image) => { if (image) setFigure(i, { image, character: c.name }) })
-                  .catch((err: unknown) => useCreateStore.getState().setError(errorText(err)))
-              }}
-            />
-            {figures.length > 1 && !(twoStep && videoInput) && (
-              <button
-                type="button"
-                aria-label={`Remove person ${i + 1}`}
+          <div key={i} className="hub-line border-b" data-swap-figure={i + 1} data-swap-row-note={check.rows[i] ? 'limit' : undefined}>
+            <div className="flex min-h-10 items-center gap-2.5 hub-fs-14">
+              <span className="hub-acc w-3.5 shrink-0 hub-fs-125 font-semibold tabular-nums">{i + 1}</span>
+              <PersonPlace rows={figures} index={i} disabled={isGenerating} onLater={(later) => setFigure(i, { later, mark: later ? null : f.mark })} />
+              <CharacterPick
+                name={f.character ?? null}
+                image={f.image?.url ?? null}
+                label={`Character for person ${i + 1}`}
+                inputData={{ 'data-swap-photo-input': String(i + 1) }}
                 disabled={isGenerating}
-                onClick={() => setFigures(figures.filter((_, j) => j !== i))}
-                className="hub-dim rounded p-1"
-              >
-                <X size={12} />
-              </button>
-            )}
-          </HubLine>
-        ))}
-        {((!twoStep || !videoInput) || (figures.length > 1 && maxPeople < figures.length)) && (
-          <div className="flex min-h-8 items-center gap-3 hub-fs-125">
-            {/* SCAIL 2 and Kling: people come in by a tap on the first frame.
-                Without a video, and with OpenJutsu, also by this line. */}
-            {(!twoStep || !videoInput) && (
-              <button
-                type="button"
-                disabled={figures.length >= 4 || isGenerating}
-                onClick={() => {
-                  // Not every model takes several people. The switch is said in
-                  // the sentence beside it, it does not happen silently.
-                  fitPeople(figures.length + 1)
-                  setFigures([...figures, { image: null, role: '' }])
+                onPhoto={(file) => { void loadImageRef(file).then((image) => setFigure(i, { image, character: null })) }}
+                onCharacter={(c) => {
+                  void hubPortrait(c).then((image) => { if (image) setFigure(i, { image, character: c.name }) })
+                    .catch((err: unknown) => useCreateStore.getState().setError(errorText(err)))
                 }}
-                className="hub-acc disabled:opacity-40"
-              >
-                + Add person ({figures.length}/4)
-              </button>
-            )}
-            {figures.length > 1 && maxPeople < figures.length && (
-              <span className="hub-dim" data-swap-note="one-person-model">
-                {modelLabel(model)} replaces {maxPeople === 1 ? 'one person' : `up to ${maxPeople} people`}.
-              </span>
+              />
+              {figures.length > 1 && (
+                <button
+                  type="button"
+                  aria-label={`Remove person ${i + 1}`}
+                  disabled={isGenerating}
+                  onClick={() => setFigures(figures.filter((_, j) => j !== i))}
+                  className="hub-dim rounded p-1"
+                >
+                  <X size={12} />
+                </button>
+              )}
+            </div>
+            {check.rows[i] && (
+              <p className="hub-muted -mt-1 pb-1.5 pl-6 hub-fs-125" data-swap-row-limit={i + 1}>{check.rows[i]}</p>
             )}
           </div>
-        )}
+        ))}
+        <div className="flex min-h-8 items-center gap-3 hub-fs-125">
+          {/* People come in by a tap on the first frame; somebody who walks
+              in later only by this line ("comes in later" in the row). */}
+          <button
+            type="button"
+            disabled={figures.length >= 4 || isGenerating}
+            onClick={() => setFigures([...figures, { image: null, role: '' }])}
+            className="hub-acc disabled:opacity-40"
+            data-swap-add-person
+          >
+            + Add person ({figures.length}/4)
+          </button>
+          <span className="hub-dim" data-swap-model-people>
+            {name} {swapCan(model).people === 1 ? 'replaces one person' : `takes up to ${swapCan(model).people} people`}.
+          </span>
+        </div>
       </div>
+
+      {(check.blocker || elsewhere) && (
+        // What the model cannot do, and a model that can. Only a click
+        // picks it: the model is never changed by itself.
+        <p className="hub-text flex flex-wrap items-baseline gap-x-2 pt-2.5 hub-fs-13" data-swap-people-blocker>
+          <span>{check.blocker}</span>
+          {check.recommend && (
+            <button type="button" className="hub-acc" onClick={() => pick(check.recommend!.model)} data-swap-recommend={check.recommend.model}>
+              Use {check.recommend.name}, {check.recommend.reason}
+            </button>
+          )}
+          {elsewhere && <span className="hub-muted" data-swap-elsewhere>{elsewhere}</span>}
+        </p>
+      )}
 
       {video !== undefined && video > limits.max && (
         <p className="hub-dim pt-2 hub-fs-125" data-clip-note="too-long">
-          Your video is {video} s. {modelLabel(model)} reads at most {limits.max} s, so only the first {Math.min(swapSeconds ?? limits.max, limits.max)} s are used.
+          Your video is {video} s. {name} reads at most {limits.max} s, so only the first {local ? limits.max : Math.min(swapSeconds ?? limits.max, limits.max)} s are used.
         </p>
       )}
       {video !== undefined && video < limits.min && (
         <p className="hub-dim pt-2 hub-fs-125" data-clip-note="too-short">
-          Your video is {video} s. {modelLabel(model)} needs at least {limits.min} s.
+          Your video is {video} s. {name} needs at least {limits.min} s.
         </p>
       )}
 
-      <SoundControls intent={SWAP_INTENT} people={figures.length}
-        clipSeconds={soundClipSeconds(SWAP_INTENT, model, swapSeconds, videoSeconds)} />
+      {!local && (
+        <SoundControls intent={SWAP_INTENT} people={figures.length}
+          clipSeconds={soundClipSeconds(SWAP_INTENT, model, swapSeconds, videoSeconds)} />
+      )}
       {oneClick?.switches}
-      {swapNeedsConsent(model) && (
+      {(local || swapNeedsConsent(model)) && (
         // A real person is swapped for a photo: the customer confirms rights
         // and consent first (the server asks too, for the frame step as for
-        // the video).
+        // the video; locally the Create button waits for it).
         <label className="hub-muted flex w-full cursor-pointer items-start gap-2.5 pt-3 hub-fs-125" data-swap-consent>
           <input
             type="checkbox"
@@ -1977,6 +1977,62 @@ export function SwapControls({ oneClick }: {
       )}
       {twoStep && !oneClick && <div className="pt-3"><SwapFrameBuild model={model} /></div>}
     </div>
+  )
+}
+
+/** Swap: on the cloud the panel as it was, on this computer the local way
+ *  (Wan 2.2 Animate, 3.1.3), whose Create button says why it waits. */
+function SwapPanel() {
+  const backend = useCreateStore((s) => s.backend)
+  return backend === 'local' ? <LocalSwap /> : <SwapControls />
+}
+
+function LocalSwap() {
+  const { generate, cancel } = useCreateExp()
+  const videoInput = useCreateStore((s) => s.videoInput)
+  const swapFigures = useCreateStore((s) => s.swapFigures)
+  const swapConsent = useCreateStore((s) => s.swapConsent)
+  const isGenerating = useCreateStore((s) => s.isGenerating)
+  const problem = swapLocalProblem({ videoInput, swapFigures, swapConsent })
+  const setSwap = useHubRun((st) => st.setSwap)
+  const does = useRef({ generate, cancel })
+  useEffect(() => { does.current = { generate, cancel } })
+  useEffect(() => {
+    setSwap(isGenerating
+      ? { label: 'Create', ready: false, running: true, cancel: () => { void does.current.cancel() }, run: () => {} }
+      : { label: 'Create', ready: !problem, hint: problem ?? undefined, run: () => { void does.current.generate() } })
+  }, [isGenerating, problem, setSwap])
+  useEffect(() => () => setSwap(null), [setSwap])
+  return <SwapControls local />
+}
+
+/** Where a person is: from the tap ("left", "middle", "right"), else a pick
+ *  "comes in later from the left/right" (the one people rule). */
+function PersonPlace({ rows, index, disabled, onLater }: {
+  rows: readonly SwapFigure[]; index: number; disabled?: boolean; onLater: (later: 'left' | 'right' | null) => void
+}) {
+  const row = rows[index]
+  const short = personPlaceShort(rows, index)
+  if (row.mark && !row.later) {
+    return <span className="hub-muted min-w-0 flex-1 truncate hub-fs-13" data-swap-place={short}>{short}</span>
+  }
+  const value = row.later ? `later-${row.later}` : ''
+  return (
+    <span className="min-w-0 flex-1" data-swap-place={short || 'unset'}>
+      <Select
+        variant="text"
+        ariaLabel={`Where person ${index + 1} is`}
+        textClassName={cn('hub-fs-13', row.later ? 'hub-muted' : 'hub-dim')}
+        value={value}
+        onChange={(v) => onLater(v === 'later-left' ? 'left' : v === 'later-right' ? 'right' : null)}
+        options={[
+          { value: '', label: rows.length === 1 ? 'main person (or tap in the frame)' : 'tap in the first frame' },
+          { value: 'later-left', label: 'comes in later from the left' },
+          { value: 'later-right', label: 'comes in later from the right' },
+        ]}
+      />
+      {disabled && <span className="sr-only">Locked while a run is going</span>}
+    </span>
   )
 }
 
@@ -1994,8 +2050,11 @@ function SwapMore() {
   const opModel = useCreateStore((s) => s.cloudOpModel)
   const videoInput = useCreateStore((s) => s.videoInput)
   const released = useCharacterHubReleased()
+  const backend = useCreateStore((s) => s.backend)
   const model = createRunModel('swap_character', { image: '', video: '', op: opModel })
-  if (!released || !STUDIO_MODELS[model]) return null
+  // Locally the size and length are the lane's (LaneControls); the cloud
+  // resolutions and notes are not read there.
+  if (backend === 'local' || !released || !STUDIO_MODELS[model]) return null
   const resolutions = (studioFields(model).resolution?.enum ?? []) as string[]
   const resolution = String(studioShownValue(model, options, 'resolution') ?? '')
   return (

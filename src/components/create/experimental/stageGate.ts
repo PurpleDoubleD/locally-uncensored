@@ -1,4 +1,5 @@
 import type { CreateBackend, CreateIntent } from '../../../stores/createStore'
+import { swapLocalModels } from '../../../lib/create/swap-local'
 import { runnableVideoLaneModels } from '../../../api/comfyui'
 import { imageLaneModels } from '../../../lib/image-engines'
 import type { IntentMeta } from './intents'
@@ -124,5 +125,8 @@ export function laneModelCount(
   // Dasselbe fuer Edit auf dem Mac: dort zaehlen nur die Modelle, die ein Bild
   // nehmen. Eine ComfyUI-Liste bleibt, wie sie ist.
   if (requiresModels === 'image') return imageLaneModels(lists.image as never, intent).length
+  // Swap runs on the Animate models of the motion list only (VACE cannot keep
+  // the scene around a person), so a box with VACE alone gets the download.
+  if (intent === 'swap_character') return swapLocalModels(lists.motion as never).length
   return (lists[requiresModels] ?? []).length
 }

@@ -34,6 +34,7 @@ import {
 } from '../../../../lib/render/swap'
 import { swapFrameCredits } from '../../../../lib/create/swap-frame'
 import { swapInputError } from '../../../../lib/create/swap-run'
+import { checkPeople } from '../../../../lib/create/people-rule'
 import {
   approveSwapFrame, cancelSwapChain, clearSwapChain, resumeSwapChain, retrySwapFrame, retrySwapOpen,
   startSwapChain, swapChainProblem, swapChainStore, swapChainTotal, SWAP_CHAIN_RUNNING, type SwapChainDeps, type SwapChainState,
@@ -154,7 +155,11 @@ export function SwapOneClick({ onChangeCharacter }: {
   const running = !!chain && SWAP_CHAIN_RUNNING.includes(chain.stage)
   const plainRunning = !isChain && isGenerating
   const creditsOk = total == null || quota == null || quota.remaining.credits >= total
+  // The one people rule: what the engine cannot do waits here with a
+  // recommendation; the engine is never changed by itself.
+  const people = checkPeople(videoModel, figures, SWAP_VIDEO_CHOICES)
   const problem = !videoInput ? 'Add the original video first.'
+    : people.blocker ? people.blocker
     : isChain ? swapChainProblem({ frame, figures: figures.map((f) => ({ image: f.image, role: f.role, mark: f.mark })), frameModel, consent })
       : swapInputError(videoModel, { hasVideo: true, figures, consent })
   const voiceMissing = lipsyncOn && !audioInput && !voiceFromJob
@@ -247,7 +252,7 @@ export function SwapOneClick({ onChangeCharacter }: {
 
   // ── check (d2) ──
   if (chain?.stage === 'review') {
-    const summary = `${prefs.videoOverride ? '' : 'Auto · '}${swapModelName(videoModel)}${resolution ? ` · ${resolution}` : ''}${seconds ? ` · ${seconds} s` : ''}`
+    const summary = `${swapModelName(videoModel)}${resolution ? ` · ${resolution}` : ''}${seconds ? ` · ${seconds} s` : ''}`
     return <SwapReview chain={chain} originalUrl={frame?.url ?? null} summary={summary} onRetry={() => { void retrySwapFrame(deps, { extra }); setExtra('') }} />
   }
 
@@ -269,7 +274,7 @@ export function SwapOneClick({ onChangeCharacter }: {
   // ── inputs (c2 / c3 / c5) ──
   const refused = chain?.stage === 'refused'
   const failedText = chain?.stage === 'failed' ? chain.error : chain?.stage === 'canceled' ? 'Canceled. Nothing more was started.' : null
-  const summary = `${prefs.videoOverride ? '' : 'Auto · '}${swapModelName(videoModel)}${resolution ? ` · ${resolution}` : ''}`
+  const summary = `${swapModelName(videoModel)}${resolution ? ` · ${resolution}` : ''}`
   const parts = [
     isChain && frameCredits != null ? `frame ${swapShortCredits(frameCredits)}` : null,
     videoCredits != null ? `video ${swapShortCredits(videoCredits)}` : null,
@@ -282,6 +287,8 @@ export function SwapOneClick({ onChangeCharacter }: {
         <SwapControls
           oneClick={{
             model: videoModel,
+            available: SWAP_VIDEO_CHOICES,
+            onPick: prefs.setVideoOverride,
             switches: isChain && (
               <div className="pt-1" data-swap-switches>
                 <HubSwitch testId="open-models" title="Uncensored" line={swapOpenModelsLine(videoModel)} on={prefs.openModels} onChange={prefs.setOpenModels} />
@@ -352,10 +359,9 @@ export function SwapPicks() {
     const tooMany = c.value !== '' && swapFrameMaxPeople(c.value) < Math.max(1, people)
     return { ...c, disabled: tooMany, sublabel: tooMany ? `up to ${swapFrameMaxPeople(c.value)} ${swapFrameMaxPeople(c.value) === 1 ? 'person' : 'people'}` : undefined }
   })
-  const videoItems: SelectOption[] = [
-    { value: '', label: `Auto (${swapModelName(swapVideoModelFor(people, null))})` },
-    ...SWAP_VIDEO_CHOICES.map((id) => ({ value: id, label: swapModelName(id), disabled: !!swapVideoBlocked(id, people), sublabel: swapVideoBlocked(id, people) ?? undefined })),
-  ]
+  // Every engine stays pickable; what it cannot do with these people is
+  // said in the row and at Create (no silent switch, no hidden choice).
+  const videoItems: SelectOption[] = SWAP_VIDEO_CHOICES.map((id) => ({ value: id, label: swapModelName(id), sublabel: swapVideoBlocked(id, people) ?? undefined }))
   return (
     <div className="hub-fs-125" data-swap-picks>
       {isChain && (
@@ -367,7 +373,7 @@ export function SwapPicks() {
       )}
       <div className="flex min-h-8 items-center gap-2.5" data-swap-pick="video">
         <span className="hub-muted w-[80px] shrink-0">Video</span>
-        <Select variant="text" ariaLabel="Video model" textClassName="hub-fs-125" value={prefs.videoOverride}
+        <Select variant="text" ariaLabel="Video model" textClassName="hub-fs-125" value={videoModel}
           options={videoItems} onChange={prefs.setVideoOverride} placeholder={swapModelName(videoModel)} />
       </div>
     </div>

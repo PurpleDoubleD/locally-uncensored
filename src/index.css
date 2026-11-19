@@ -3217,9 +3217,9 @@ input[type="range"].neuron-range:disabled { cursor: not-allowed; opacity: 0.5; }
    --hub-rails), so the column stands exactly over the window at every
    width; with little room it gets narrower, it never leaves the middle.
    The row of the characters alone may use the whole room between the two
-   sides, so a wide window shows more names. The stage in it: the tabs, the character as a head (a small
-   picture, beside it the name and every action it has), then the inputs of
-   the action and its photos, which scroll. Nothing here moves by itself. */
+   sides, so a wide window shows more names. The stage in it: the tabs (the picked character with its
+   three dots, what it can do behind them), then the inputs of the action
+   and its photos, which scroll. Nothing here moves by itself. */
 .lu-hub-row { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
 .lu-hub-row > .hub-column { grid-column: 1; grid-row: 1; display: flex; flex-direction: column; align-items: center; min-width: 0; min-height: 0; overflow: hidden; padding-inline: var(--hub-rails, 16px); }
 .lu-hub-row > .hub-column > * { width: 100%; max-width: 660px; }
@@ -3232,24 +3232,32 @@ input[type="range"].neuron-range:disabled { cursor: not-allowed; opacity: 0.5; }
 }
 .lu-hub .hub-stage { display: flex; flex-direction: column; flex: 1 1 0%; min-height: 0; }
 /* Everything stands on the middle axis of the prompt window: the row of
-   the characters around the middle, the head centred over the photos, the
-   photos as a centred grid. */
-.lu-hub .hub-tabs { flex: none; display: flex; justify-content: center; width: 100%; min-height: 38px; }
+   the characters around the middle, the photos under it as a centred
+   grid. */
+.lu-hub .hub-tabs-wrap { flex: none; display: flex; flex-direction: column; align-items: center; width: 100%; }
+/* Only sideways: the row never cuts off what hangs under it (the web, 18.11.2026). */
+.lu-hub .hub-tabs { flex: none; display: flex; justify-content: center; width: 100%; min-height: 38px; overflow-x: clip; overflow-y: visible; }
 /* Lines of the row are balanced: nothing wraps alone under the others. */
 .lu-hub .hub-tablist { display: block; min-width: 0; text-align: center; text-wrap: balance; }
 .lu-hub .hub-tab { display: inline-flex; align-items: center; gap: 7px; min-height: 37px; margin: 0 10px; vertical-align: top; white-space: nowrap; border-bottom: 1.5px solid transparent; }
 .lu-hub .hub-tab--on { border-bottom-color: var(--hub-text); }
 .lu-hub .hub-tabs[data-hub-tabs-fit="pictures"] .hub-tab { margin: 0 6px; }
+/* The picked character and its three dots: one entry of the row. The list
+   behind the dots is the model choice's (.lu-picker), lifted to the body. */
+.lu-hub .hub-tab-pair { display: inline-flex; align-items: center; vertical-align: top; }
+.lu-hub .hub-tab-pair > .hub-tab { margin-right: 2px; }
+.lu-hub .hub-more { display: inline-flex; align-items: center; justify-content: center; width: 22px; min-height: 37px; margin-right: 10px; color: var(--hub-dim); }
+.lu-hub .hub-more:hover,
+.lu-hub .hub-more[aria-expanded="true"] { color: var(--hub-text); }
+.lu-hub .hub-tab-field { border-color: var(--hub-edge); font-size: inherit; line-height: inherit; }
+.lu-hub .hub-tab-field:focus { border-color: var(--hub-acc); }
+/* One quiet line under the row: the trigger word, or the question of Delete. */
+.lu-hub .hub-tabs-line { max-width: 660px; padding: 0 0 8px; text-align: center; }
 .lu-hub .hub-scroll { display: flex; flex-direction: column; flex: 1 1 0%; min-width: 0; min-height: 0; overflow-y: auto; border-top: 1px solid var(--hub-sep); }
 /* Shorter than the room: in its middle. Longer: from the top (the auto
    margins are then nothing). */
 .lu-hub .hub-center { flex: none; width: 100%; margin-block: auto; }
-.lu-hub .hub-card { display: flex; flex-direction: column; align-items: center; min-width: 0; padding: 14px 0 12px; text-align: center; }
-.lu-hub .hub-card > .hub-portrait { width: 64px; margin-bottom: 8px; }
 .lu-hub .hub-body { min-width: 0; }
-.lu-hub .hub-portrait { display: block; aspect-ratio: 4 / 5; border-radius: 8px; background-size: cover; background-position: 50% 20%; }
-.lu-hub .hub-portrait--none { display: grid; place-items: center; background: var(--hub-edge); }
-.lu-hub .hub-initial { font-size: calc(26px / var(--ui-scale, 1.15)); font-weight: 600; line-height: 1; }
 .lu-hub .hub-photos { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
 .lu-hub .hub-photos li { width: 104px; }
 .lu-hub .hub-photos img { display: block; width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 6px; }

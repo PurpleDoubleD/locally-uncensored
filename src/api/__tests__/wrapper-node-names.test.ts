@@ -42,6 +42,9 @@ const CORE_NODES = new Set([
   'CheckpointLoaderSimple', 'UNETLoader', 'CLIPLoader', 'DualCLIPLoader', 'VAELoader',
   'ImageOnlyCheckpointLoader', 'CLIPVisionLoader', 'LoadImage', 'LoadImageMask', 'LoadAudio',
   'LoadVideo', 'AudioEncoderLoader',
+  // Swap on this computer (3.1.3): the mask from the pose skeleton, all core
+  // (nodes.py EmptyImage/ImageCompositeMasked, nodes_mask.py the rest).
+  'EmptyImage', 'ImageCompositeMasked', 'ImageToMask', 'MaskComposite', 'ThresholdMask', 'GrowMask',
   // conditioning
   // TextEncodeQwenImage21: core, registered by the QwenExtension in
   // comfy_extras/nodes_qwen.py (read in comfyanonymous/ComfyUI master on
@@ -154,7 +157,7 @@ const CUSTOM_PACK_NODES: Record<string, Set<string>> = {
     'ADE_LoadAnimateDiffModel', 'ADE_ApplyAnimateDiffModelSimple', 'ADE_UseEvolvedSampling',
   ]),
   // Kosinkadink/ComfyUI-VideoHelperSuite
-  'ComfyUI-VideoHelperSuite': new Set(['VHS_VideoCombine']),
+  'ComfyUI-VideoHelperSuite': new Set(['VHS_VideoCombine', 'VHS_LoadVideo']),
   // 1038lab/ComfyUI-RMBG
   'ComfyUI-RMBG': new Set(['RMBG']),
   // Fannovel16/comfyui_controlnet_aux

@@ -96,7 +96,8 @@ export function HubActionRow() {
     // asked of the local backend. Swap that is not released yet says so in
     // its panel, once.
     const local = !lockedOfLocal(intents, of, backend, lockedOf)
-    const soon = a === 'swap' && !locked && !released
+    // Locally Swap runs on this computer (3.1.3) and needs no release.
+    const soon = a === 'swap' && backend === 'cloud' && !locked && !released
     const price = actionCloudPrice(a, a === 'image' ? family : undefined)
     const line = soon ? '' : locked ? 'Runs on LU Cloud' : actionMeta({ local, cloudPrice: price, showCloud: backend === 'cloud' || (showCloud && !local) })
     return [{ action: a, label: meta.label, locked, meta: line }]

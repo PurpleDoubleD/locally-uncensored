@@ -183,14 +183,15 @@ export const INTENTS: IntentMeta[] = [
   {
     // Swap Character (07.11.2026, port of the web's C52): a real video keeps
     // its motion, camera, sound and scene, and its people become the people
-    // of the customer's photos. Studio models only (lib/render/swap.ts), no
-    // local lane: in local mode it is a locked cloud pill like Erase. The
-    // pill says "Swap" (the web's desktop word), the full name stands in
-    // title and aria-label; the bar has no room for two more words.
+    // of the customer's photos. Cloud: Studio models (lib/render/swap.ts).
+    // Local since 3.1.3: Wan 2.2 Animate in ComfyUI, mode replace, one
+    // person (lib/create/swap-local.ts), with the pose extractor of Motion.
+    // A Mac has no local way (runsOnMlx), there it stays the cloud action.
     id: 'swap_character', label: 'Swap Character', short: 'Swap', icon: Replace,
     placeholder: '',
     needsSource: false, needsPrompt: false, allowsMask: false, isVideo: true,
-    cloudOnly: true,
+    capability: 'dwpose',
+    cloudOnly: true, hasLocalLane: true, requiresModels: 'motion',
     examples: [],
   },
   {
