@@ -107,6 +107,9 @@ function nextNodeId(workflow: ComfyApiGraph): string {
  * Lumina 2, Z-Image and Wan 2.1/2.2 14B.
  */
 export function latentDownscale(modelType: string | undefined): number {
+  // MiniMax H3 Image: a 16 px latent cell, but its node takes sizes on a
+  // 32 px grid (CANVAS_MULTIPLE in comfy_extras/nodes_minimax_h3.py).
+  if (modelType === 'minimaxh3image') return 32
   return modelType === 'qwenimage' || modelType === 'flux2' || modelType === 'ernie_image' || modelType === 'wan22' ? 16 : 8
 }
 

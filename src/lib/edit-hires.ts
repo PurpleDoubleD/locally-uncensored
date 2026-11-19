@@ -27,7 +27,9 @@ export function editHiresBase(opts: {
 }): { width: number; height: number } | null {
   const { source, width, height, modelType, modelName } = opts
   if (!source || !(source.width > 0) || !(source.height > 0)) return null
-  if (modelType === 'qwenimage') {
+  // MiniMax H3 Image edits the same way (3.1.3): the pixels of the fields in
+  // the shape of the source, or cropped to the fields' shape.
+  if (modelType === 'qwenimage' || modelType === 'minimaxh3image') {
     // The source is cropped to the fields' shape first, so the canvas takes it.
     return editCanvas(qwenEditResolution(width, height), opts.editShape === 'canvas' ? { width, height } : source)
   }

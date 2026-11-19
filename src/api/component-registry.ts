@@ -143,6 +143,15 @@ export const COMPONENT_REGISTRY: Record<string, ComponentRequirements> = {
     clip: { matchPatterns: ['minimax_h3_nvfp4', 'minimax'], downloadFilename: 'qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors', downloadUrl: 'https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/text_encoders/qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors', subfolder: 'text_encoders', sizeGB: 15.7 },
     audioVae: { matchPatterns: ['minimax_h3_audio_vae'], downloadFilename: 'minimax_h3_audio_vae_fp32.safetensors', downloadUrl: 'https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/vae/minimax_h3_audio_vae_fp32.safetensors', subfolder: 'vae', sizeGB: 0.6 },
   },
+  // MiniMax H3 Image (3.1.3, Discord 17./18.11.2026): the still model on the
+  // H3 layout. Its own VAE (Comfy-Org/MiniMax-H3-Image), and the same
+  // Qwen3-VL 32B encoder file as MiniMax H3 (byte for byte: both repos state
+  // sha256 35a88d51...), so a machine with H3 video already has it.
+  minimaxh3image: {
+    loader: 'UNETLoader', needsSeparateVAE: true, needsSeparateCLIP: true, clipType: 'minimax',
+    vae: { matchPatterns: ['minimax_h3_image_vae'], downloadFilename: 'minimax_h3_image_vae_fp16.safetensors', downloadUrl: 'https://huggingface.co/Comfy-Org/MiniMax-H3-Image/resolve/main/vae/minimax_h3_image_vae_fp16.safetensors', subfolder: 'vae', sizeGB: 1.17 },
+    clip: { matchPatterns: ['minimax_h3_nvfp4', 'minimax'], downloadFilename: 'qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors', downloadUrl: 'https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/text_encoders/qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors', subfolder: 'text_encoders', sizeGB: 15.7 },
+  },
   // YuE2 (Comfy-Org/YuE2, ComfyUI 0.36.0): model, text model and audio VAE in
   // one checkpoint, like ACE Step, so there is nothing separate to fetch.
   yue2: { loader: 'CheckpointLoaderSimple', needsSeparateVAE: false, needsSeparateCLIP: false },

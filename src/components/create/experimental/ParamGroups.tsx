@@ -190,11 +190,15 @@ export function ParamGroups() {
   const hiresLane = meta.id === 'image' || isEdit
   const macHires = isMlxLocal && hiresLane
     && (s.imageModelList.find((m) => m.name === laneModel)?.editImages ?? 0) > 0
-  const showHiresFix = !isCloud && !isVideo && hiresLane && (!isMlxLocal || macHires)
+  // MiniMax H3 Image renders at 4 MP and more on its own, and its latent
+  // carries a time axis LatentUpscaleBy does not scale: no HiRes pass.
+  const showHiresFix = !isCloud && !isVideo && hiresLane && (!isMlxLocal || macHires) && laneType !== 'minimaxh3image'
   // In Edit the picture comes out in the shape of the source, not of the
   // sliders (lib/edit-hires). Without a source there is nothing to name yet.
   // C75: a Qwen-Image 2.1 edit picks its shape, on ComfyUI and on the Mac.
-  const qwenEditShapeShown = isEdit && !isCloud && laneType === 'qwenimage' && showSize
+  // MiniMax H3 Image the same, on ComfyUI (3.1.3).
+  const qwenEditShapeShown = isEdit && !isCloud && showSize
+    && (laneType === 'qwenimage' || (laneType === 'minimaxh3image' && !isMlxLocal))
   const macShapeChosen = qwenEditShapeShown && isMlxLocal && s.qwenEditShape === 'canvas'
   const hiresBase = isEdit && !macHires
     ? editHiresBase({ source: s.source, width: s.width, height: s.height, modelType: laneType, modelName: laneModel, editShape: s.qwenEditShape })
@@ -211,7 +215,7 @@ export function ParamGroups() {
       ? (s.qwenEditShape === 'canvas' || s.source
         ? editCanvas(macEditSide(qwenEditResolution(s.width, s.height)), s.qwenEditShape === 'canvas' ? { width: s.width, height: s.height } : s.source!)
         : null)
-      : editHiresBase({ source: s.source, width: s.width, height: s.height, modelType: 'qwenimage', editShape: s.qwenEditShape })
+      : editHiresBase({ source: s.source, width: s.width, height: s.height, modelType: laneType, editShape: s.qwenEditShape })
   // The grid a typed width or height is rounded to: the local model's latent
   // cell. The cloud keeps the 64 its providers were checked against.
   const sizeGrid = isCloud ? 64 : latentDownscale(laneType)

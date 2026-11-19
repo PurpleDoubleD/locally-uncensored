@@ -20,6 +20,21 @@ export function modelNeedsUnetLoader(type: string, source?: ComfyModelSource): b
   return UNET_FAMILIES.has(type)
 }
 
+/**
+ * 3.1.3 (Discord 17./18.11.2026): the official ComfyUI template for MiniMax
+ * H3 Image, imported and assigned. Its prompt runs through a prompt writer
+ * (StringReplace, TextGenerateV2, ComfySwitchNode) into the conditioning
+ * node, so LU finds no prompt box to write into, and the size comes from a
+ * ResolutionSelector or the source picture, the batch from nowhere. Every run
+ * drew the template's own sample prompt. LU has its own graph for the model
+ * now, so the template is set aside and that graph runs.
+ */
+export function isH3ImageTemplate(classTypes: readonly string[], type: string): boolean {
+  return type === 'minimaxh3image'
+    && classTypes.includes('MiniMaxH3ImageConditioning')
+    && ['TextGenerateV2', 'ComfySwitchNode', 'StringReplace'].some((c) => classTypes.includes(c))
+}
+
 /** Null when the workflow fits, else why it is set aside. */
 export function ownWorkflowMisfit(classTypes: readonly string[], type: string, source?: ComfyModelSource): string | null {
   // GH #192: for a model LU does not know, found in no folder that says what
@@ -27,6 +42,7 @@ export function ownWorkflowMisfit(classTypes: readonly string[], type: string, s
   // taken for a checkpoint and a UNET workflow was dropped. Where the folder
   // is known, it decides as for every model (#196).
   if (type === 'unknown' && !source) return null
+  if (isH3ImageTemplate(classTypes, type)) return 'the official MiniMax H3 Image template: LU cannot reach its prompt, size or batch'
   const needsUnet = modelNeedsUnetLoader(type, source)
   const hasUnet = classTypes.includes('UNETLoader')
   const hasCheckpoint = classTypes.includes('CheckpointLoaderSimple')
@@ -42,6 +58,9 @@ export function ownWorkflowMisfit(classTypes: readonly string[], type: string, s
  */
 export function ownWorkflowMisfitNote(workflowName: string, classTypes: readonly string[], type: string, source?: ComfyModelSource): string | null {
   if (!ownWorkflowMisfit(classTypes, type, source)) return null
+  if (isH3ImageTemplate(classTypes, type)) {
+    return `Your workflow "${workflowName}" is not used: LU cannot put your prompt, size and batch into the MiniMax H3 Image template. LU runs MiniMax H3 Image with its own workflow now. Remove the assignment under Workflows to stop this note.`
+  }
   const what = modelNeedsUnetLoader(type, source)
     ? 'this model is a diffusion model and needs a UNETLoader, but the workflow loads a checkpoint (CheckpointLoaderSimple)'
     : 'this model is a checkpoint and needs a CheckpointLoaderSimple, but the workflow loads a UNETLoader'

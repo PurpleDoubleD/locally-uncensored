@@ -14,7 +14,7 @@
 import type { ComfyApiGraph, ComfyInputValue } from '../types/comfy-graph'
 import { apiNodes } from '../types/comfy-graph'
 import type { ParameterMap } from '../types/workflows'
-import { normalizeLoraStrengths, resolveLoraNames } from './dynamic-workflow'
+import { dedupeLoraStack, loraFileKey, normalizeLoraStrengths, resolveLoraNames } from './dynamic-workflow'
 
 /** Loaders whose first output is the diffusion model. */
 const MODEL_LOADERS = new Set([
@@ -74,19 +74,20 @@ export function injectLoraStack(
 ): LoraInjection {
   const result: LoraInjection = { added: [], alreadyThere: [] }
   if (names.length === 0) return result
-  const perLora = normalizeLoraStrengths(strengths, names.length)
-  const resolved = resolveLoraNames(names, installed)
+  // A45: a file twice in the stack goes in once.
+  const unique = dedupeLoraStack(resolveLoraNames(names, installed), normalizeLoraStrengths(strengths, names.length))
 
-  // What the workflow loads itself stays its own, at its own strength.
+  // What the workflow loads itself stays its own, at its own strength,
+  // whatever folder or case the workflow spells it with.
   const own = new Set(
     apiNodes(wf)
       .filter(([, n]) => LORA_LOADERS.has(n.class_type) && typeof n.inputs?.lora_name === 'string')
-      .map(([, n]) => String(n.inputs?.lora_name).toLowerCase()),
+      .map(([, n]) => loraFileKey(String(n.inputs?.lora_name))),
   )
-  const stack = resolved
-    .map((name, i) => ({ name, strength: perLora[i] }))
+  const stack = unique.names
+    .map((name, i) => ({ name, strength: unique.strengths[i] }))
     .filter((l) => {
-      if (!own.has(l.name.toLowerCase())) return true
+      if (!own.has(loraFileKey(l.name))) return true
       result.alreadyThere.push(l.name)
       return false
     })

@@ -148,15 +148,19 @@ describe('buildDynamicWorkflow — LoRA chaining', () => {
     expect(loraNodesOf(wf)).toHaveLength(2)
   })
 
-  it('the same LoRA may stack twice (different strengths)', async () => {
+  // A45 (3.1.3): the same LoRA picked twice is one node at the sum of both
+  // strengths, which is what two nodes added to the model (one file never
+  // twice in a chain, no-lora-twice-in-a-chain-a45.test.ts).
+  it('the same LoRA picked twice is one node at the sum of both strengths', async () => {
     const wf = await buildDynamicWorkflow({
       ...baseParams,
       lora: ['pixel-art-xl.safetensors', 'pixel-art-xl.safetensors'],
       loraStrength: [0.8, 0.3],
     } as never)
     const loras = loraNodesOf(wf)
-    expect(loras).toHaveLength(2)
-    expect(loras.map(([, n]) => n.inputs.strength_model).sort()).toEqual([0.3, 0.8])
+    expect(loras).toHaveLength(1)
+    expect(loras[0][1].inputs.strength_model).toBeCloseTo(1.1)
+    expect(loras[0][1].inputs.strength_clip).toBeCloseTo(1.1)
   })
 
   it('an unknown LoRA fails the build with the installed list (never reaches ComfyUI)', async () => {
