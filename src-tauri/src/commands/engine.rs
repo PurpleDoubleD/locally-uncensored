@@ -2912,6 +2912,24 @@ pub(crate) fn stderr_blames_the_port(stderr: &str) -> bool {
 /// install path as the cause (review-longpath.md Runde 2, Blocker 9): this
 /// function stays the right answer for every OTHER "the child died and said
 /// something model-shaped" case, short-path included.
+/// A40 (GH #259, 3.1.2): the Metal compiler of this Mac refused the engine's
+/// shader code. llama.cpp builds its Metal library from source on the user's
+/// machine, with the compiler that ships in macOS, so a shader a newer macOS
+/// accepts can fail on an older one (b11960 on macOS 14 and 15). The log then
+/// carries `ggml_metal_init: error: failed to initialize the Metal library`
+/// after a page of compiler output nobody outside llama.cpp can act on.
+fn stderr_blames_the_metal_library(stderr: &str) -> bool {
+    const MARKERS: &[&str] = &[
+        "failed to initialize the metal library",
+        "ggml_metal_library_compile_all: failed to build",
+    ];
+    let lower = stderr.to_ascii_lowercase();
+    MARKERS.iter().any(|m| lower.contains(m))
+}
+
+/// The sentence a user reads instead of the Metal compiler output.
+const METAL_LIBRARY_HINT: &str = "This Mac could not prepare the graphics code of the LU Engine, so no model could load. Update the app and macOS to the newest version. Until then Ollama works as a backend, pick it in Settings, AI Backends.";
+
 fn stderr_blames_the_model(stderr: &str) -> bool {
     const MARKERS: &[&str] = &[
         "unknown model architecture",
@@ -3161,6 +3179,9 @@ fn illegal_instruction_repair_sentence(module_count: Option<usize>, is_macos: bo
 /// Order, most specific (something the CHILD process itself proved) first:
 /// 1. A named missing system library (`stderr_names_a_missing_system_library`),
 ///    read straight off the loader's own error line.
+/// 1b. A40 (3.1.2): a Metal library the Mac's own shader compiler refused
+///    (`stderr_blames_the_metal_library`). Neither a file nor an install
+///    problem, so neither "download it again" nor "reinstall" fits.
 /// 2. `backend_dir_too_long`: a too-long install path is checked BEFORE the
 ///    general model-blame step, not after. Blocker 9: `stderr_blames_the_model`
 ///    (step 3) matches `failed to load model`, which llama.cpp prints on load
@@ -3182,6 +3203,8 @@ fn illegal_instruction_repair_sentence(module_count: Option<usize>, is_macos: bo
 fn died_failure_hint(stderr: &str, backend_dir_too_long: bool, on_linux: bool) -> String {
     if let Some(lib) = stderr_names_a_missing_system_library(stderr) {
         missing_library_hint(&lib, on_linux)
+    } else if stderr_blames_the_metal_library(stderr) {
+        format!(" {METAL_LIBRARY_HINT}")
     } else if let Some(arch) = stderr_names_an_unknown_architecture(stderr) {
         format!(" The model file is a {arch} model, and this LU Engine does not know that architecture yet. Downloading it again will not help. Run it through Ollama, or pick another model.")
     } else if backend_dir_too_long {
@@ -3323,7 +3346,9 @@ pub(crate) fn start_failure_message(
             budget.as_secs()
         )
     };
-    if failure.stderr.is_empty() {
+    // A40: the Metal compiler output is a page of shader source and helps no
+    // reader of this message. The log file under Troubleshoot keeps all of it.
+    if failure.stderr.is_empty() || stderr_blames_the_metal_library(&failure.stderr) {
         head
     } else {
         format!("{head}\n\n{}", failure.stderr)
@@ -3341,6 +3366,11 @@ pub(crate) fn start_failure_message(
 /// already refused a stranger on the port above and does not retry, so the
 /// port and retry wording would not be true.
 pub(crate) fn embed_start_failure_message(timeout_error: &str, stderr_tail: &str) -> String {
+    if stderr_blames_the_metal_library(stderr_tail) {
+        // A40: the embeddings server is the same binary, so the same Metal
+        // failure kills Document Chat. Same sentence, no shader dump.
+        return format!("The embeddings server of the LU Engine could not start. {METAL_LIBRARY_HINT}");
+    }
     let hint = stderr_names_a_missing_system_library(stderr_tail)
         .map(|lib| missing_library_hint(&lib, cfg!(target_os = "linux")))
         .unwrap_or_default();
@@ -4444,7 +4474,19 @@ fn spawn_engine_attempt(
     // Without it a two-card box spreads the model over both, and the video on
     // the other card runs out of memory. Added here, not in build_server_args,
     // so every attempt and every restart gets it from one place.
-    if let Some(device) = chat_engine_device(state, binary, backend_dir) {
+    //
+    // A40 (GH #259, 3.1.2): on a Mac the processor-only attempt also says
+    // `--device none`. `-ngl 0` alone keeps no layers on the GPU, but
+    // llama.cpp still opens the Metal backend for the context and compiles
+    // its shader library there, so a Metal library the system compiler
+    // refuses killed the "CPU" retry with the same error as the first try.
+    // With no device the Metal context is never created. Mac only for now:
+    // on Windows and Linux the Vulkan behaviour of this flag is not measured
+    // on the box yet, and the chat-card pin below is never set on a Mac.
+    if flags.cpu_fallback && cfg!(target_os = "macos") {
+        tracing::info!(target: "engine", "the processor-only attempt runs with --device none, so Metal is not opened at all");
+        cmd.args(["--device", "none"]);
+    } else if let Some(device) = chat_engine_device(state, binary, backend_dir) {
         tracing::info!(target: "engine", device = %device, "the LU Engine is pinned to the chat card");
         cmd.args(["--device", device.as_str()]);
     }
@@ -7661,6 +7703,63 @@ mod tests {
             argv_without_gpu_layers(&a),
             argv_without_gpu_layers(&build_server_args("/m.gguf", &wider, 8127, None, None, Some(35)))
         );
+    }
+
+    /// A40 (GH #259): the stderr tail of 3.1.1 on macOS 15.7.4, M1 Max, as
+    /// the reporter pasted it (shortened, the shader lines kept).
+    const METAL_LIBRARY_STDERR: &str = "program_source:1570:26: error: constexpr function never produces a constant expression [-Winvalid-constexpr]
+inline constexpr bfloat4 ggml_metal_unary_cast<bfloat4, float4>(float4 x) {
+                         ^
+program_source:1571:27: note: subexpression not valid in a constant expression
+    return bfloat4(bfloat(x[0]), bfloat(x[1]), bfloat(x[2]), bfloat(x[3]));
+                          ^
+0.00.190.668 E ggml_metal_init: error: failed to initialize the Metal library
+0.00.190.675 E ggml_backend_metal_device_init_backend: error: failed to allocate context
+0.00.190.709 E llama_init_from_model: failed to initialize the context: failed to initialize MTL0 backend
+0.00.190.712 E cmn  common_init_: failed to create context with model '/m.gguf'
+0.00.190.715 I srv    operator(): operator(): cleaning up before exit...
+0.00.190.946 E srv  server_run_i: exiting due to model loading error";
+
+    #[test]
+    fn a_metal_library_the_mac_refuses_gets_a_sentence_and_no_shader_dump() {
+        let failure = StartFailure {
+            died: true,
+            port_taken: false,
+            stderr: METAL_LIBRARY_STDERR.into(),
+            exit_code: Some(1),
+            signal: None,
+        };
+        for second in [SecondAttempt::CpuOnly, SecondAttempt::SameOffload] {
+            let msg = start_failure_message(&failure, 8127, Duration::from_secs(60), second, None);
+            assert!(msg.contains(METAL_LIBRARY_HINT), "{msg}");
+            assert!(!msg.contains("program_source"), "{msg}");
+            assert!(!msg.contains("bfloat4"), "{msg}");
+            // Not the reinstall advice: a reinstall brings back the same binary.
+            assert!(!msg.contains("Reinstall"), "{msg}");
+            // Not the GPU-Layers advice either, the retry already ran without
+            // the card and Metal is no name in GPU_BACKENDS.
+            assert!(!msg.contains("set GPU Layers to 0"), "{msg}");
+        }
+        let embed = embed_start_failure_message("LU Engine did not become healthy on port 8128 within 30s", METAL_LIBRARY_STDERR);
+        assert!(embed.contains(METAL_LIBRARY_HINT), "{embed}");
+        assert!(!embed.contains("program_source"), "{embed}");
+        // Any other death still carries llama-server's own words.
+        let other = embed_start_failure_message("x", "some other line");
+        assert!(other.contains("some other line"), "{other}");
+    }
+
+    #[test]
+    fn the_processor_only_attempt_on_a_mac_opens_no_metal_device() {
+        // `-ngl 0` alone still creates the Metal context, which is where the
+        // shader library is compiled. Only `--device none` keeps it shut, so
+        // the retry has to send it, and only when it is the processor retry.
+        let src = include_str!("engine.rs");
+        let body = &src[src.find("\nfn spawn_engine_attempt(\n").expect("spawn_engine_attempt")..];
+        let body = &body[..body.find("\n}\n").expect("end of spawn_engine_attempt")];
+        let gate = body.find("if flags.cpu_fallback && cfg!(target_os = \"macos\") {").expect("the processor retry gate");
+        let none = body.find("cmd.args([\"--device\", \"none\"]);").expect("--device none");
+        let pin = body.find("chat_engine_device(state, binary, backend_dir)").expect("chat card pin");
+        assert!(gate < none && none < pin, "--device none is sent before, and instead of, the chat card pin");
     }
 
     #[test]

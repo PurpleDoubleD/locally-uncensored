@@ -320,8 +320,12 @@ ensure_src() {
 }
 
 # LU's own changes to the pinned source, reviewed in this repo
-# (scripts/llama-patches/*.patch). They only touch tools/cvector-generator,
-# so the server binary is the pinned source unchanged.
+# (scripts/llama-patches/*.patch). 0001-0004 only touch
+# tools/cvector-generator. 0005 (A40, 3.1.2) is upstream llama.cpp PR 31360
+# backported: two `constexpr` words out of ggml-metal/kernels/unary.metal, so
+# the embedded Metal library compiles on macOS 14 and 15 again. Drop it once
+# LLAMA_COMMIT is at or past c9daee1. Everything else in the server binary is
+# the pinned source unchanged.
 #
 # P11 FEHLER 10 (David's test build, 31.10.2026): the vector tool aborted
 # on Qwen3.5 (GGML_ASSERT diff_filtered.size() == n_layers - 1): b9949 keeps

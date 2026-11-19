@@ -491,6 +491,22 @@ describe('build-llama.sh — the llama.cpp revision is pinned to a commit', { ti
     expect(patch).toContain('+            printf("LU norm %d %.6f\\n", (int) il, v[v.size() / 2]);')
   })
 
+  // A40 (GH #259, 3.1.2): b11960's unary shader did not compile on the Metal
+  // compiler of macOS 14 and 15, so no model loaded there. The patch is
+  // upstream PR 31360 and nothing more: the two constexpr words, one file.
+  it('the repo\'s Metal patch is the upstream unary fix and touches nothing else', () => {
+    const patch = readFileSync(join(REPO_ROOT, 'scripts', 'llama-patches', '0005-metal-unary-bf16-no-constexpr.patch'), 'utf8')
+    expect([...patch.matchAll(/^\+\+\+ b\/(.+)$/gm)].map((m) => m[1])).toEqual(['ggml/src/ggml-metal/kernels/unary.metal'])
+    const removed = patch.split('\n').filter((l) => l.startsWith('-') && !l.startsWith('---'))
+    const added = patch.split('\n').filter((l) => l.startsWith('+') && !l.startsWith('+++'))
+    expect(removed).toEqual([
+      '-inline constexpr bfloat4 ggml_metal_unary_cast<bfloat4, float4>(float4 x) {',
+      '-inline constexpr bfloat4 ggml_metal_unary_cast<bfloat4, float>(float x) {',
+    ])
+    expect(added).toEqual(removed.map((l) => '+' + l.slice(1).replace('constexpr ', '')))
+    expect(patch).toContain('c9daee149d606adc30b4c5b7a3254697c9771e2b')
+  })
+
   it('hashes a digest of the binary it installed', () => {
     const probe = join(tmp('llama-digest-'), 'artifact')
     writeFileSync(probe, 'llama-server')

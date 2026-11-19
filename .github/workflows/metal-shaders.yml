@@ -1,0 +1,61 @@
+name: Mac sidecar Metal shaders compile on older macOS
+
+# A40 (GH #259, 3.1.2). The Mac sidecar embeds llama.cpp's Metal shaders as
+# source, and the user's macOS compiles them at the first model load with the
+# Metal compiler that ships in that macOS. b11960 (LU 3.0.9 to 3.1.1) carried
+# two bfloat casts that macOS 26 accepts and macOS 14 and 15 refuse, so no
+# model loaded on those Macs. The release lane builds on macos-15 and checks
+# that version itself; this workflow compiles the same embedded sources on
+# every hosted macOS image LU still promises, whenever the llama.cpp pin or
+# LU's patches change, weekly against image drift, and on demand.
+#
+# Only ggml-metal is built (scripts/check-metal-shaders.sh --from-source), not
+# the whole sidecar: the shader sources are cmake outputs of that one target.
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'scripts/build-llama.sh'
+      - 'scripts/llama-patches/**'
+      - 'scripts/check-metal-shaders.sh'
+      - 'scripts/metal-shader-check.m'
+      - '.github/workflows/metal-shaders.yml'
+  pull_request:
+    paths:
+      - 'scripts/build-llama.sh'
+      - 'scripts/llama-patches/**'
+      - 'scripts/check-metal-shaders.sh'
+      - 'scripts/metal-shader-check.m'
+      - '.github/workflows/metal-shaders.yml'
+  schedule:
+    - cron: '41 4 * * 1' # Mondays 04:41 UTC
+  workflow_dispatch:
+
+# Only reads the repository (OpenSSF Scorecard, Token-Permissions).
+permissions:
+  contents: read
+
+jobs:
+  metal-shaders:
+    strategy:
+      fail-fast: false
+      matrix:
+        # macos-14 is the oldest macOS LU promises (tauri.macos.conf.json
+        # minimumSystemVersion). When GitHub retires that image this job
+        # fails to start, which is the moment to decide how 14 is checked,
+        # not a reason to drop the entry quietly.
+        runner: [macos-14, macos-15]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+
+      - name: Compile the embedded Metal sources with this macOS
+        shell: bash
+        env:
+          BUILD_JOBS: 3
+          MACOSX_DEPLOYMENT_TARGET: '14.0'
+        run: bash scripts/check-metal-shaders.sh --from-source
