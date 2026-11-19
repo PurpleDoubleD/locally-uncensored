@@ -179,7 +179,7 @@ describe.each(FASSUNGEN)('die Kachel, Fassung $name', (f) => {
       // die Filterleiste der Fassung ueber das Raster und sagt ihr, wann die
       // Legende dazugehoert; die Fassung zeichnet sie.
       const leisteIdx = SCREEN.indexOf('<skin.FilterBar')
-      const rasterIdx = SCREEN.indexOf('{gridGroups.map(')
+      const rasterIdx = SCREEN.indexOf('{groups.map((g, i) => renderTile(')
       expect(leisteIdx).toBeGreaterThan(-1)
       expect(leisteIdx).toBeLessThan(rasterIdx)
       expect(SCREEN.slice(leisteIdx, rasterIdx)).toMatch(/legend=\{isText && /)

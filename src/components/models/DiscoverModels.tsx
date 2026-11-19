@@ -20,7 +20,7 @@ import { startPlannedDownload } from '../../api/model-download'
 import { kimiK31CatalogEntries } from '../../api/kimi-k3-catalog'
 import { asOneDownload, downloadSizeGB, gbOf, imagePartFileName, includeImageInputLabel, isImagePartFile } from '../../lib/image-part'
 import { sortByTier, tierGroup } from '../../lib/render/model-tier'
-import { bundlesForTabAndSearch } from '../../lib/discover-bundle-search'
+import { CATALOGUE_TITLE, bundlesForTabAndSearch, catalogueSections } from '../../lib/discover-bundle-search'
 import { catalogEntryMatchesSearch } from '../../lib/model-search'
 import { getTotalRamGb } from '../../lib/hardware'
 import { vramFit } from '../../lib/vram-fit'
@@ -454,10 +454,23 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0, o
   const categorizedBundles: ModelBundle[] = isVideo
     ? filterByCategory(videoItems, VIDEO_CATEGORIES, categoryId).map((v) => v.bundle)
     : isImage ? filterByCategory(vramFilteredBundles, IMAGE_CATEGORIES, categoryId) : vramFilteredBundles
-  const filteredBundles = sortItems(categorizedBundles, sortId, {
+  const sortedFilteredBundles = sortItems(categorizedBundles, sortId, {
     size: (b) => b.totalSizeGB || undefined,
     name: (b) => b.name,
   })
+  // W42: while searching, the hits of the open tab first, then the other
+  // tab's, each group under its catalogue's name (below in the grid).
+  const bundleSections = catalogueSections(subTab, search, {
+    uncensored: sortedFilteredBundles.filter((b) => !!b.uncensored),
+    mainstream: sortedFilteredBundles.filter((b) => !b.uncensored),
+  })
+  const filteredBundles = bundleSections.flatMap((sec) => sec.items)
+  const bundleSectionHead = (bi: number): string | null => {
+    if (!search.trim()) return null
+    const tabOf = (b: ModelBundle): 'uncensored' | 'mainstream' => (b.uncensored ? 'uncensored' : 'mainstream')
+    const here = tabOf(filteredBundles[bi])
+    return bi === 0 || tabOf(filteredBundles[bi - 1]) !== here ? CATALOGUE_TITLE[here] : null
+  }
 
   // Which model the Use button is currently loading. A GGUF start blocks for
   // seconds to minutes, and without this the button stayed live and a second
@@ -1067,12 +1080,14 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0, o
 
   // ── Derived view data for the tile grid ─────────────────────────────
 
-  const activeTextModels = subTab === 'uncensored' ? filteredUncensored : filteredMainstream
-  const allTextGroups = isText ? groupModels(activeTextModels) : []
+  // W42: a typed search looks in both tabs, as Image and Video do.
+  const textSections = catalogueSections(subTab, search, { uncensored: filteredUncensored, mainstream: filteredMainstream })
+  const activeTextModels = textSections.flatMap((sec) => sec.items)
+  const allTextGroups = isText ? textSections.flatMap((sec) => groupModels(sec.items)) : []
   // A card is a group of quants of one model: it belongs to a category when
   // any of its variants does (the tags of a family can differ per quant).
   const groupCategories: CategoryDef<DiscoverModel[]>[] = TEXT_CATEGORIES.map((d) => ({ ...d, match: (g: DiscoverModel[]) => g.some(d.match) }))
-  const textGroups = sortItems(filterByCategory(allTextGroups, groupCategories, categoryId), sortId, {
+  const textGroupsOf = (models: DiscoverModel[]) => sortItems(filterByCategory(isText ? groupModels(models) : [], groupCategories, categoryId), sortId, {
     size: (g) => {
       const sizes = g.map((m) => modelFootprintGb(m)).filter((x): x is number => typeof x === 'number' && x > 0)
       return sizes.length ? Math.min(...sizes) : undefined
@@ -1080,6 +1095,10 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0, o
     released: (g) => g.map((m) => m.released).filter((r): r is string => !!r).sort().pop(),
     name: (g) => g[0].group ?? g[0].name,
   })
+  const textGroupSections = textSections
+    .map((sec) => ({ tab: sec.tab, groups: textGroupsOf(sec.items) }))
+    .filter((sec) => sec.tab === null || sec.groups.length > 0)
+  const textGroups = textGroupSections.flatMap((sec) => sec.groups)
 
   // "Start here" — up to 3 derived picks for the current tab. Pure derivation
   // from existing flags (hot/agent/lightweight) + the hardware fit; no new
@@ -1107,7 +1126,6 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0, o
     : []
   const topPicks = showPicks ? scoredGroups.slice(0, 3).filter(s => s.score > 1).map(s => s.g) : []
   const pickKeys = new Set(topPicks.map(g => g[0].group ?? g[0].name))
-  const gridGroups = textGroups.filter(g => !pickKeys.has(g[0].group ?? g[0].name))
 
   const infoRepoUrl = (m: DiscoverModel): string | null => {
     if (m.url) return m.url
@@ -1352,7 +1370,9 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0, o
         <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-2.5">
           {filteredBundles.map((bundle, bi) => (
             <Fragment key={bundle.name}>
-            {tierGroup(bundle) && tierGroup(bundle) !== tierGroup(filteredBundles[bi - 1] ?? {}) && (
+            {bundleSectionHead(bi) !== null ? (
+              <skin.Head place="tier" title={bundleSectionHead(bi) ?? ''} />
+            ) : !search.trim() && tierGroup(bundle) && tierGroup(bundle) !== tierGroup(filteredBundles[bi - 1] ?? {}) && (
               <skin.Head place="tier" title={tierGroup(bundle) ?? ''} />
             )}
             <motion.div className={skin.cls.tileWrap} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: Math.min(bi, 12) * 0.025 }}>
@@ -1461,15 +1481,23 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0, o
             {topPicks.length >= 2 && (
               <skin.Head place="all" title={subTab === 'uncensored' ? 'All unfiltered models' : 'All mainstream models'} />
             )}
-            <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-2.5">
-              {gridGroups.map((g, i) => renderTile(g, i))}
-            </div>
+            {textGroupSections.map((sec) => {
+              const groups = sec.groups.filter((g) => !pickKeys.has(g[0].group ?? g[0].name))
+              return (
+                <Fragment key={sec.tab ?? 'open'}>
+                  {sec.tab && <skin.Head place="all" title={CATALOGUE_TITLE[sec.tab]} />}
+                  <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-2.5">
+                    {groups.map((g, i) => renderTile(g, i))}
+                  </div>
+                </Fragment>
+              )
+            })}
             {activeTextModels.length > 0 && textGroups.length === 0 && (
               <p className={skin.cls.searchEmpty}>No models of this category here. Pick All, or the other catalogue.</p>
             )}
             {activeTextModels.length === 0 && (
               <p className={skin.cls.searchEmpty}>
-                {subTab === 'uncensored' ? 'No unfiltered models match your search' : 'No mainstream models match your search'}
+                {search.trim() ? 'No models match your search' : subTab === 'uncensored' ? 'No unfiltered models match your search' : 'No mainstream models match your search'}
               </p>
             )}
           </div>
