@@ -175,7 +175,18 @@ cmake_flags_for() {
       # CMAKE_<LANG>_FLAGS_INIT, which CMake's Windows-MSVC module appends its
       # defaults (/EHsc and the rest) to; CMAKE_<LANG>_FLAGS would replace
       # them. Dash spelling for the same MSYS reason as -MAP. MSVC 17.7+, x64.
-      echo "$common -DBUILD_SHARED_LIBS=ON -DGGML_BACKEND_DL=ON -DGGML_CPU_ALL_VARIANTS=ON -DGGML_VULKAN=ON -DCMAKE_SHARED_LINKER_FLAGS=-MAP -DCMAKE_EXE_LINKER_FLAGS=-MAP -DCMAKE_MODULE_LINKER_FLAGS=-MAP -DCMAKE_C_FLAGS_INIT=-jumptablerdata -DCMAKE_CXX_FLAGS_INIT=-jumptablerdata" ;;
+      #
+      # LLAMA_MSVC_TOOLSET (3.1.2, 19.11.2026): the Visual Studio toolset cmake
+      # hands to MSBuild (-T). verify-sidecar-isa.sh only trusts linker
+      # versions whose CRT/STL code was reviewed (WINDOWS_REVIEWED_LINKER_
+      # VERSIONS), and the hosted windows-latest image moved its default to
+      # MSVC 14.52 overnight, which that guard rightly refuses. CI pins the
+      # reviewed 14.44 toolset the image still installs
+      # (Microsoft.VisualStudio.Component.VC.14.44.17.14.x86.x64). Empty
+      # (default, e.g. on the box) leaves the generator's own choice.
+      local toolset=""
+      [ -z "${LLAMA_MSVC_TOOLSET:-}" ] || toolset=" -T ${LLAMA_MSVC_TOOLSET}"
+      echo "$common -DBUILD_SHARED_LIBS=ON -DGGML_BACKEND_DL=ON -DGGML_CPU_ALL_VARIANTS=ON -DGGML_VULKAN=ON -DCMAKE_SHARED_LINKER_FLAGS=-MAP -DCMAKE_EXE_LINKER_FLAGS=-MAP -DCMAKE_MODULE_LINKER_FLAGS=-MAP -DCMAKE_C_FLAGS_INIT=-jumptablerdata -DCMAKE_CXX_FLAGS_INIT=-jumptablerdata${toolset}" ;;
     x86_64-unknown-linux-gnu)
       # CMAKE_BUILD_RPATH_USE_ORIGIN=ON (BLOCKER B3): without it,
       # CMAKE_BUILD_WITH_INSTALL_RPATH's OFF default still makes CMake write

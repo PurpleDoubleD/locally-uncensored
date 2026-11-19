@@ -89,6 +89,14 @@ env:
   # Microsoft.ArtifactSigning.Client, pinned by version and by the sha256 of the
   # .nupkg file, both read from api.nuget.org on 2026-10-08. Bump both together:
   #   https://api.nuget.org/v3-flatcontainer/microsoft.artifactsigning.client/index.json
+  # Reviewed MSVC toolset for the Windows llama.cpp sidecar (3.1.2): the
+  # windows-latest image defaults to 14.52 since 19.11.2026, which
+  # verify-sidecar-isa.sh does not trust (WINDOWS_REVIEWED_LINKER_VERSIONS).
+  # 14.44 is reviewed and still installed on the image
+  # (Microsoft.VisualStudio.Component.VC.14.44.17.14.x86.x64). Read only by
+  # scripts/build-llama.sh for x86_64-pc-windows-msvc. Same value in
+  # release.yml and sidecar-windows.yml.
+  LLAMA_MSVC_TOOLSET: 'v143,version=14.44'
   ARTIFACT_SIGNING_CLIENT_VERSION: '1.0.146'
   ARTIFACT_SIGNING_CLIENT_SHA256: '7761e5d8f31e54b764da21d33cd8b0a2940e1b05526c7dfcb5e94b0431426f70'
 
