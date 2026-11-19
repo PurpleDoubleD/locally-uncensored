@@ -71,6 +71,7 @@ mod lmstudio;
 mod lmstudio_install;
 mod python;
 mod voice;
+pub(crate) mod piper_env;
 mod custom_nodes;
 mod custom_node_packs;
 mod lu_node_packs;
@@ -120,6 +121,7 @@ mod tests {
         ("lmstudio_install.rs", include_str!("lmstudio_install.rs")),
         ("ollama.rs", include_str!("ollama.rs")),
         ("pip.rs", include_str!("pip.rs")),
+        ("piper_env.rs", include_str!("piper_env.rs")),
         ("python.rs", include_str!("python.rs")),
         ("torch.rs", include_str!("torch.rs")),
         ("venv.rs", include_str!("venv.rs")),
