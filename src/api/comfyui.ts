@@ -2020,6 +2020,13 @@ export async function findMatchingVAE(modelType: ModelType): Promise<string> {
     if (match) return match
     throw new Error(`No LTX 2.5 video VAE found. Download "ltx-2.5-video-vae-bf16.safetensors" from the Model Manager.`)
   }
+  if (modelType === 'minimaxh3image') {
+    // MiniMax H3 Image has an autoencoder of its own; the H3 video VAE has a
+    // different latent and is never taken for it.
+    const match = vaes.find(v => isMinimaxH3ImageName(v) && lower(v).includes('vae'))
+    if (match) return match
+    throw new Error(`No MiniMax H3 Image VAE found. Download "minimax_h3_image_vae_fp16.safetensors" from the Model Manager.`)
+  }
   if (modelType === 'minimaxh3') {
     // The VIDEO autoencoder; the audio one is a second file of its own
     // (findMiniMaxAudioVAE), and the two are not interchangeable.
@@ -2241,11 +2248,15 @@ export async function findMatchingCLIP(modelType: ModelType, activeModelName?: s
     if (match) return match
     throw new Error(`No LTX 2.5 text encoder found. Download "gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors" from the Model Manager.`)
   }
-  if (modelType === 'minimaxh3') {
+  if (modelType === 'minimaxh3' || modelType === 'minimaxh3image') {
     // Qwen3-VL 32B, tuned for H3 and shipped only under H3's own names. The
-    // nvfp4 tier is the one the official templates load (15.7 GB).
-    const match = clips.find(c => isMinimaxEncoder(c) && lower(c).includes('nvfp4'))
-      || clips.find(c => isMinimaxEncoder(c))
+    // nvfp4 tier is the one the official templates load (15.7 GB). H3 Image
+    // reads the same file. Its prompt enhancer (qwen3.8_27b_minimax_h3_image_pe)
+    // carries "minimax" in its name too, but is a text writer, not this encoder.
+    const h3Encoder = (c: string) => isMinimaxEncoder(c) && !/(^|[^a-z])pe([^a-z]|$)/.test(lower(c))
+    const match = clips.find(c => h3Encoder(c) && lower(c).includes('nvfp4'))
+      || clips.find(c => h3Encoder(c) && lower(c).includes('qwen3vl'))
+      || clips.find(c => h3Encoder(c))
     if (match) return match
     throw new Error(`No MiniMax H3 text encoder found. Download "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors" from the Model Manager.`)
   }

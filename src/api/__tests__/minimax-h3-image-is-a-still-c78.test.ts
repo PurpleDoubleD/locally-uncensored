@@ -13,7 +13,7 @@ const backend = vi.hoisted(() => ({ call: vi.fn(), tauri: vi.fn(() => true) }))
 vi.mock('../backend', async (o) => ({ ...(await o<typeof import('../backend')>()), backendCall: backend.call, isTauri: backend.tauri }))
 
 import { applyHeaderSniff, classifyModel, isImageModelType, isVideoModelType, type ClassifiedModel } from '../comfyui'
-import { determineStrategy, MINIMAX_H3_IMAGE_NO_BUILDER } from '../dynamic-workflow'
+import { determineStrategy, MINIMAX_H3_IMAGE_NEEDS_UPDATE } from '../dynamic-workflow'
 
 const sniffs = (arch: Record<string, string | null>) =>
   backend.call.mockReset().mockImplementation(async (_cmd: string, args: { files: Array<{ folder: string; name: string }> }) =>
@@ -60,10 +60,14 @@ describe('MiniMax H3 Image is a still model', () => {
     expect(models[0].type).toBe('minimaxh3')
   })
 
-  it('LU\'s own builder says what to do instead of building a wrong graph', () => {
-    const nodes = { loaders: ['UNETLoader', 'CLIPLoader', 'VAELoader', 'CheckpointLoaderSimple'], samplers: ['KSampler'], latentImage: [], textEncoders: [], decoders: [], savers: [], other: [] }
-    const r = determineStrategy('minimaxh3image', false, nodes as never, {} as never)
-    expect(r).toEqual({ strategy: 'unavailable', reason: MINIMAX_H3_IMAGE_NO_BUILDER })
-    expect(r.reason).toContain('MiniMax-H3-Image: Text to Image')
+  // 3.1.3: LU builds the graph itself (minimax-h3-image-builtin.test.ts). An
+  // older ComfyUI without the node gets the update sentence.
+  it('LU\'s own builder runs it from ComfyUI 0.45.0 and asks an older one to update', () => {
+    const base = { loaders: ['UNETLoader', 'CLIPLoader', 'VAELoader', 'CheckpointLoaderSimple'], samplers: ['KSampler'], latentInit: [] as string[], textEncoders: [], decoders: [], savers: [], motion: [], other: [] }
+    const old = determineStrategy('minimaxh3image', false, base as never, {} as never)
+    expect(old).toEqual({ strategy: 'unavailable', reason: MINIMAX_H3_IMAGE_NEEDS_UPDATE })
+    expect(old.reason).toMatch(/update comfyui/i)
+    const now = determineStrategy('minimaxh3image', false, { ...base, latentInit: ['MiniMaxH3ImageConditioning'] } as never, {} as never)
+    expect(now.strategy).toBe('minimaxh3image')
   })
 })

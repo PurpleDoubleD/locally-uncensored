@@ -96,6 +96,7 @@ export type WorkflowStrategy =
   | 'svd'             // SVD: ImageOnlyCheckpointLoader + SVD_img2vid_Conditioning
   | 'framepack'       // FramePack: Kijai wrapper + image input
   | 'minimaxh3'       // MiniMax H3: UNET + CLIPLoader(minimax) + video VAE + audio VAE, picture and sound in one pass
+  | 'minimaxh3image'  // MiniMax H3 Image: UNET + CLIPLoader(minimax) + its VAE + MiniMaxH3ImageConditioning
   // cogvideo / pyramidflow / allegro are gone on purpose (2026-07-24). Their
   // builders emitted node names no wrapper registers, so those model types now
   // resolve to 'unavailable' with an honest reason instead of a ComfyUI 400.
@@ -124,11 +125,9 @@ interface StrategyResult {
  *  one click update on (needsComfyUpdate). */
 export const LTX25_NEEDS_UPDATE = 'LTX 2.5 needs ComfyUI 0.32.0 or newer. Update ComfyUI in Settings.'
 
-/** C78: what Create says for MiniMax H3 Image, a still model on the H3
- *  layout that LU has no graph of its own for. */
-export const MINIMAX_H3_IMAGE_NO_BUILDER =
-  'LU has no built-in workflow for MiniMax H3 Image. Save the ComfyUI template "MiniMax-H3-Image: Text to Image", '
-  + 'import it under Workflows and assign it to this model. Create then runs it with your prompt, size and LoRAs.'
+/** MiniMax H3 Image's node (MiniMaxH3ImageConditioning) came with ComfyUI
+ *  0.45.0 (PR #17655, 10.11.2026). */
+export const MINIMAX_H3_IMAGE_NEEDS_UPDATE = 'MiniMax H3 Image needs ComfyUI 0.45.0 or newer. Update ComfyUI in Settings.'
 /** GH #192: what Create says for MOSS Image until LU has a graph of its own. */
 export const MOSS_IMAGE_NO_BUILDER =
   'LU has no built in workflow for MOSS Image. Import a ComfyUI workflow that runs MOSS Image under Workflows and assign it to this model. '
@@ -144,12 +143,6 @@ export function determineStrategy(
   nodes: CategorizedNodes,
   models: AvailableModels,
 ): StrategyResult {
-  // C78: MiniMax H3 Image has no graph of LU's own. Its workflow is the
-  // official template; imported under Workflows and assigned to the model,
-  // Create runs it with the prompt, size and LoRAs (workflows.ts).
-  if (modelType === 'minimaxh3image') {
-    return { strategy: 'unavailable', reason: MINIMAX_H3_IMAGE_NO_BUILDER }
-  }
   if (modelType === 'mossimage') {
     return { strategy: 'unavailable', reason: MOSS_IMAGE_NO_BUILDER }
   }
@@ -159,6 +152,20 @@ export function determineStrategy(
   const hasCLIPLoader = nodes.loaders.includes('CLIPLoader')
   const hasVAELoader = nodes.loaders.includes('VAELoader')
   const hasAnimateDiff = nodes.motion.includes('ADE_LoadAnimateDiffModel')
+
+  // MiniMax H3 Image (3.1.3): LU's own graph after the official templates
+  // image_minimax_h3_image_t2i and _edit. Up to 3.1.2 it asked for the
+  // template to be imported, and the imported template ignored the batch, the
+  // size and the reference image (Discord 17./18.11.2026).
+  if (modelType === 'minimaxh3image') {
+    if (!(hasUNET && hasCLIPLoader && hasVAELoader)) {
+      return { strategy: 'unavailable', reason: 'MiniMax H3 Image requires UNETLoader + CLIPLoader + VAELoader nodes' }
+    }
+    if (!nodes.latentInit.includes('MiniMaxH3ImageConditioning')) {
+      return { strategy: 'unavailable', reason: MINIMAX_H3_IMAGE_NEEDS_UPDATE }
+    }
+    return { strategy: 'minimaxh3image', reason: 'MiniMax H3 Image → UNETLoader + CLIPLoader(minimax) + MiniMaxH3ImageConditioning' }
+  }
 
   // ERNIE-Image → UNET + CLIPLoader(flux2) + VAE + Flux2LatentImage + ConditioningZeroOut
   if (modelType === 'ernie_image') {
@@ -521,6 +528,49 @@ export function normalizeLoraStrengths(
   return Array(count).fill(fallback)
 }
 
+/** The file a LoRA name points at, for telling two names of one file apart:
+ *  the base name without folder, in lower case. */
+export function loraFileKey(name: string): string {
+  return (name.split(/[\\/]/).pop() ?? name).trim().toLowerCase()
+}
+
+/**
+ * A45 (Discord 15.11.2026): one LoRA file goes into one model chain once.
+ * A file the graph loads on its own (`reserved`, such as the Krea 2 style
+ * reference LoRA of a reference run) leaves the stack, and its strength from
+ * the stack is handed back in `reservedStrength`: twice in the chain it
+ * counted double, and the picture came out as noise.
+ * A file that is in the stack twice (picked twice, or two spellings of one
+ * name) becomes one entry at the sum of its strengths. A LoRA adds its
+ * strength times its weights to the model, so that is what the two nodes did
+ * before, in one node.
+ */
+export function dedupeLoraStack(
+  names: string[],
+  strengths: number[],
+  reserved: string[] = [],
+): { names: string[]; strengths: number[]; reservedStrength: Map<string, number> } {
+  const reservedKeys = new Set(reserved.map(loraFileKey))
+  const seen = new Map<string, number>()
+  const out = { names: [] as string[], strengths: [] as number[], reservedStrength: new Map<string, number>() }
+  names.forEach((name, i) => {
+    const key = loraFileKey(name)
+    if (reservedKeys.has(key)) {
+      if (!out.reservedStrength.has(key)) out.reservedStrength.set(key, strengths[i])
+      return
+    }
+    const at = seen.get(key)
+    if (at !== undefined) {
+      out.strengths[at] += strengths[i]
+      return
+    }
+    seen.set(key, out.names.length)
+    out.names.push(name)
+    out.strengths.push(strengths[i])
+  })
+  return out
+}
+
 /** Resolve requested LoRA names against ComfyUI's installed LoraLoader enum.
  *  Per name: exact → normalized (case/extension/path-separator insensitive)
  *  → basename → unique substring. A miss throws an actionable error listing
@@ -752,6 +802,9 @@ export async function buildDynamicWorkflow(
   }
   if (strategy === 'ltx25') {
     return wrapper(() => buildLtx25Workflow(params as VideoParams, seed, allNodes))
+  }
+  if (strategy === 'minimaxh3image') {
+    return wrapper(() => buildMiniMaxH3ImageWorkflow(gp, seed, allNodes))
   }
 
   // ─── Standard Strategies (UNET/Checkpoint → CLIP → Latent → KSampler → VAEDecode) ───
@@ -1045,11 +1098,24 @@ export async function buildDynamicWorkflow(
   const stackStrengths = normalizeLoraStrengths(params.loraStrength, stackNames.length)
   const keepInStack = stackNames.map((l) => !(fastWan && isWanSpeedLoraName(l)))
   const loraNames = stackNames.filter((_, i) => keepInStack[i])
+  // A45: a Krea 2 run with reference images loads the style reference LoRA
+  // itself (B45, after this chain). Picked in the stack as well, it went in
+  // twice and the picture came out as noise. The graph's own node stays and
+  // takes the strength set in the stack.
+  const krea2StyleRefAhead = strategy === 'unet_krea2' && !isVideo && !gp.inputImage
+    && (gp.referenceImages?.length ?? 0) > 0 && createReferenceSupport(type, params.model).slots > 0
+  let krea2StyleStrength = 1
   if (loraNames.length > 0) {
     const installed: string[] =
       readComboOptions(allNodes?.LoraLoader?.input?.required?.lora_name) ?? []
-    const resolved = resolveLoraNames(loraNames, installed)
-    const strengths = stackStrengths.filter((_, i) => keepInStack[i])
+    const stack = dedupeLoraStack(
+      resolveLoraNames(loraNames, installed),
+      stackStrengths.filter((_, i) => keepInStack[i]),
+      krea2StyleRefAhead ? [KREA2_STYLE_LORA.filename] : [],
+    )
+    krea2StyleStrength = stack.reservedStrength.get(KREA2_STYLE_LORA.filename) ?? 1
+    const resolved = stack.names
+    const strengths = stack.strengths
     resolved.forEach((loraName, i) => {
       const loraId = String(n++)
       workflow[loraId] = {
@@ -1753,7 +1819,7 @@ export async function buildDynamicWorkflow(
   if (krea2StyleRef && krea2StyleLora) {
     const loraId = String(n++)
     const shiftId = String(n++)
-    workflow[loraId] = { class_type: 'LoraLoaderModelOnly', inputs: { model: [samplerModelId, 0], lora_name: krea2StyleLora, strength_model: 1 }, _meta: { title: 'Krea 2 style reference' } }
+    workflow[loraId] = { class_type: 'LoraLoaderModelOnly', inputs: { model: [samplerModelId, 0], lora_name: krea2StyleLora, strength_model: krea2StyleStrength }, _meta: { title: 'Krea 2 style reference' } }
     workflow[shiftId] = { class_type: 'ModelSamplingFlux', inputs: { model: [loraId, 0], max_shift: 1.15, base_shift: 0.5, width: params.width, height: params.height } }
     samplerModelId = shiftId
   }
@@ -2518,9 +2584,12 @@ async function buildWan22Workflow(params: VideoParams, seed: number, nodes: Cate
   // patch the UNET with LoraLoaderModelOnly (no clip side) before the sampling
   // shift. Guarded on params.lora, a plain Wan 2.2 gen stays byte-identical.
   let wanModelSrc = unetId
-  const wanLoras = normalizeLoraList(params.lora)
+  const wanList = normalizeLoraList(params.lora)
+  // A45: one file once, whatever spelling the stack has for it.
+  const wanStack = dedupeLoraStack(wanList, normalizeLoraStrengths(params.loraStrength, wanList.length))
+  const wanLoras = wanStack.names
   if (wanLoras.length > 0) {
-    const wanStrengths = normalizeLoraStrengths(params.loraStrength, wanLoras.length)
+    const wanStrengths = wanStack.strengths
     wanLoras.forEach((loraName, i) => {
       const loraId = String(n++)
       workflow[loraId] = {
@@ -2648,8 +2717,11 @@ async function buildMiniMaxH3Workflow(params: VideoParams, seed: number, allNode
 
   // Video LoRAs (the turbo ones included) patch the model only.
   let modelSrc = unetId
-  const stack = normalizeLoraList(params.lora)
-  const stackStrengths = normalizeLoraStrengths(params.loraStrength, stack.length)
+  const stackList = normalizeLoraList(params.lora)
+  // A45: one file once, whatever spelling the stack has for it.
+  const deduped = dedupeLoraStack(stackList, normalizeLoraStrengths(params.loraStrength, stackList.length))
+  const stack = deduped.names
+  const stackStrengths = deduped.strengths
   // FastH3 is already the 8 step distillation. A step LoRA (the H3 turbo one)
   // on top of it distils twice, so on FastH3 it is left out; every other LoRA
   // in the stack still patches the model.
@@ -2752,6 +2824,165 @@ async function buildMiniMaxH3Workflow(params: VideoParams, seed: number, allNode
   workflow[decodeAudioId] = { class_type: 'VAEDecodeAudio', inputs: { samples: [sampleId, 0], vae: [audioVaeId, 0] } }
 
   addVideoWithAudioOutput(workflow, n, decodeId, params.fps || 24, [decodeAudioId, 0], allNodes, params.prompt)
+  return workflow
+}
+
+/** ImageScaleToTotalPixels counts a megapixel as 1024 x 1024 pixels and takes
+ *  0.01 to 16 of them (comfy_extras/nodes_post_processing.py). */
+export function h3ImageMegapixels(width: number, height: number): number {
+  return Math.min(16, Math.max(0.01, Math.round((width * height) / (1024 * 1024) * 100) / 100))
+}
+
+/** The most pictures one MiniMax H3 Image run makes in one batch, LU's local
+ *  batch limit (api/edit-batch). */
+const H3_IMAGE_BATCH_MAX = 8
+
+/**
+ * MiniMax H3 Image (3.1.3, Discord 17./18.11.2026: two users got noise from
+ * the imported official template, which ignored the batch, the size and the
+ * reference picture). Built after the official Comfy-Org templates
+ * image_minimax_h3_image_t2i and image_minimax_h3_image_edit (read
+ * 19.11.2026) and the node MiniMaxH3ImageConditioning (ComfyUI 0.45.0,
+ * comfy_extras/nodes_minimax_h3.py):
+ *
+ *   UNETLoader → LoRAs (model only) ────────────────────────────┐
+ *   CLIPLoader(minimax) + VAELoader → MiniMaxH3ImageConditioning → KSampler → VAEDecode → SaveImage
+ *        prompt, width, height, images.image_1..N   positive ──┤
+ *                                       ConditioningZeroOut ───┘ (negative)
+ *
+ * - The node makes the conditioning AND the empty latent (batch 1); the batch
+ *   is that latent repeated (RepeatLatentBatch), each copy with its own noise.
+ * - Size: the fields, on the node's 32 px grid. In Edit the source keeps its
+ *   shape at the fields' pixel count (as the edit template scales it to 4 MP
+ *   first), or is cropped to the fields' shape ("Custom size", editShape).
+ * - Pictures: in Edit the source is image_1, the picture to edit, and the
+ *   references follow; in Create the reference images are image_1 and up.
+ *   The prompt names them <Picture 1>, <Picture 2> (lib/image-ref-names).
+ * - KSampler 6 steps, CFG 1, euler / simple are the template's and the
+ *   defaults here; the negative is the zeroed positive as in the template.
+ *   The template's optional prompt enhancer (Qwen3.5 9B, off in its text to
+ *   image graph) is not part of this graph.
+ */
+async function buildMiniMaxH3ImageWorkflow(params: GenerateParams, seed: number, allNodes: NodePresence): Promise<ComfyApiGraph> {
+  requireRelease(allNodes, ['MiniMaxH3ImageConditioning'], MINIMAX_H3_IMAGE_NEEDS_UPDATE, 'minimaxh3image')
+  requireNodes(allNodes, ['KSampler', 'ConditioningZeroOut', 'VAEDecode', 'SaveImage'], 'MiniMax H3 Image')
+
+  const [clipName, vaeName] = await Promise.all([
+    findMatchingCLIP('minimaxh3image', params.model),
+    findMatchingVAE('minimaxh3image'),
+  ])
+
+  const workflow: ComfyApiGraph = {}
+  let n = 1
+  const id = () => String(n++)
+  const snap32 = (v: number | undefined, def: number) => Math.max(32, Math.round(((v && v > 0) ? v : def) / 32) * 32)
+  const width = snap32(params.width, 2048)
+  const height = snap32(params.height, 2048)
+
+  const unetId = id()
+  const clipId = id()
+  const vaeId = id()
+  addUnetLoader(workflow, unetId, params.model, allNodes)
+  workflow[clipId] = { class_type: 'CLIPLoader', inputs: { clip_name: clipName, type: 'minimax', device: 'default' } }
+  workflow[vaeId] = { class_type: 'VAELoader', inputs: { vae_name: vaeName } }
+
+  // LoRAs patch the model, as on H3 video; one file once (A45).
+  let modelSrc: [string, number] = [unetId, 0]
+  const names = normalizeLoraList(params.lora)
+  if (names.length > 0) {
+    const installed = [...new Set([
+      ...nodeComboOptions(allNodes, 'LoraLoaderModelOnly', 'lora_name'),
+      ...nodeComboOptions(allNodes, 'LoraLoader', 'lora_name'),
+    ])]
+    const stack = dedupeLoraStack(resolveLoraNames(names, installed), normalizeLoraStrengths(params.loraStrength, names.length))
+    stack.names.forEach((lora, i) => {
+      const loraId = id()
+      workflow[loraId] = { class_type: 'LoraLoaderModelOnly', inputs: { model: modelSrc, lora_name: lora, strength_model: stack.strengths[i] } }
+      modelSrc = [loraId, 0]
+    })
+  }
+
+  // The pictures, in the order the prompt numbers them.
+  const edit = !!params.inputImage
+  const pictures = edit
+    ? [params.inputImage!, ...(params.referenceImages ?? []).slice(0, extraReferenceSlots('minimaxh3image', params.model))]
+    : (params.referenceImages ?? []).slice(0, createReferenceSupport('minimaxh3image', params.model).slots)
+  const condInputs: ComfyNodeInputs = {
+    clip: [clipId, 0],
+    vae: [vaeId, 0],
+    prompt: canonicalImageRefs(params.prompt, pictures.length, 'minimaxH3'),
+    width,
+    height,
+  }
+  for (const [i, image] of pictures.entries()) {
+    const loadId = id()
+    workflow[loadId] = { class_type: 'LoadImage', inputs: { image } }
+    let picture: [string, number] = [loadId, 0]
+    if (edit && i === 0) {
+      if (params.editShape === 'canvas') {
+        // "Custom size": the source cropped to the fields' shape, so the
+        // picture to edit and the canvas agree.
+        const scaleId = id()
+        workflow[scaleId] = {
+          class_type: 'ImageScale',
+          inputs: { image: picture, upscale_method: resizeMethod(allNodes, 'ImageScale', false), width, height, crop: 'center' },
+          _meta: { title: 'Edit shape' },
+        }
+        picture = [scaleId, 0]
+      } else {
+        // "Like the picture": the fields' pixels in the source's shape, read
+        // off the scaled source the way the edit template does (scale to the
+        // pixel count, on the 32 px grid, then GetImageSize).
+        requireNodes(allNodes, ['ImageScaleToTotalPixels', 'GetImageSize'], 'MiniMax H3 Image edit')
+        const scaleId = id()
+        const sizeId = id()
+        workflow[scaleId] = {
+          class_type: 'ImageScaleToTotalPixels',
+          inputs: { image: picture, upscale_method: 'lanczos', megapixels: h3ImageMegapixels(width, height), resolution_steps: 32 },
+          _meta: { title: 'Edit size (source shape)' },
+        }
+        workflow[sizeId] = { class_type: 'GetImageSize', inputs: { image: [scaleId, 0] } }
+        picture = [scaleId, 0]
+        condInputs.width = [sizeId, 0]
+        condInputs.height = [sizeId, 1]
+      }
+    }
+    condInputs[`images.image_${i + 1}`] = picture
+  }
+  const condId = id()
+  workflow[condId] = { class_type: 'MiniMaxH3ImageConditioning', inputs: condInputs }
+  const negId = id()
+  workflow[negId] = { class_type: 'ConditioningZeroOut', inputs: { conditioning: [condId, 0] } }
+
+  // The node's latent is one picture; the batch is that latent repeated.
+  let latent: [string, number] = [condId, 1]
+  const batch = Math.max(1, Math.min(H3_IMAGE_BATCH_MAX, Math.floor(params.batchSize) || 1))
+  if (batch > 1) {
+    requireNodes(allNodes, ['RepeatLatentBatch'], 'MiniMax H3 Image batch')
+    const repeatId = id()
+    workflow[repeatId] = { class_type: 'RepeatLatentBatch', inputs: { samples: latent, amount: batch } }
+    latent = [repeatId, 0]
+  }
+
+  const samplerId = id()
+  workflow[samplerId] = {
+    class_type: 'KSampler',
+    inputs: {
+      model: modelSrc,
+      positive: [condId, 0],
+      negative: [negId, 0],
+      latent_image: latent,
+      seed,
+      steps: params.steps > 0 ? params.steps : 6,
+      cfg: Number.isFinite(params.cfgScale) ? params.cfgScale : 1,
+      sampler_name: params.sampler || 'euler',
+      scheduler: params.scheduler || 'simple',
+      denoise: 1,
+    },
+  }
+  const decodeId = id()
+  workflow[decodeId] = { class_type: 'VAEDecode', inputs: { samples: [samplerId, 0], vae: [vaeId, 0] } }
+  workflow[id()] = { class_type: 'SaveImage', inputs: { images: [decodeId, 0], filename_prefix: promptFilenamePrefix(params.prompt, false) } }
   return workflow
 }
 

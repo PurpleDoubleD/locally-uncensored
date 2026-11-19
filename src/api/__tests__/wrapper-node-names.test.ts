@@ -84,6 +84,12 @@ const CORE_NODES = new Set([
   'KSamplerAdvanced',
   'KSampler', 'BasicGuider', 'BasicScheduler', 'KSamplerSelect', 'RandomNoise', 'SamplerCustomAdvanced',
   'MiniMaxH3ImageToVideo', 'MiniMaxH3ReferenceToVideo',
+  // MiniMax H3 Image (3.1.3): MiniMaxH3ImageConditioning in
+  // comfy_extras/nodes_minimax_h3.py from v0.45.0; GetImageSize
+  // (comfy_extras/nodes_images.py) and RepeatLatentBatch (nodes.py), both
+  // core. All three in the /object_info of ComfyUI v0.46.0 (a277b5bf2) on
+  // 19.11.2026, and the H3 Image graphs passed its /prompt validation.
+  'MiniMaxH3ImageConditioning', 'GetImageSize', 'RepeatLatentBatch',
   // Read in Comfy-Org/ComfyUI at tag v0.38.0 on 2026-10-02 (schema node_id of
   // each, the file in brackets, the first release that has it):
   //   LTX 2.5, all in comfy_extras/nodes_lt.py unless noted:

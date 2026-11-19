@@ -83,6 +83,8 @@ export function referenceNames(count: number): string {
 export function extraReferenceSlots(type: ModelType | null | undefined, modelName: string): number {
   if (type === 'qwenimage') return MAX_EXTRA_REFERENCES
   if (type === 'qwenimage1' && isQwenImageEditModel(modelName)) return 2
+  // MiniMax H3 Image (3.1.3): the source and three more (lib/frame-refs).
+  if (type === 'minimaxh3image') return 3
   return 0
 }
 

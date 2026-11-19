@@ -108,6 +108,9 @@ export function categorizeNodes(allNodes: Record<string, NodeMetadata>): Categor
     // MiniMax H3: the encode node also builds the joint picture-and-sound
     // latent, so it stands in for the empty latent (ComfyUI PR #15224).
     MiniMaxH3ImageToVideo: 'latentInit',
+    // MiniMax H3 Image (ComfyUI 0.45.0): prompt, reference pictures and the
+    // empty image latent in one node.
+    MiniMaxH3ImageConditioning: 'latentInit',
     // Conditioning
     ConditioningZeroOut: 'textEncoders',
     // Text encoding

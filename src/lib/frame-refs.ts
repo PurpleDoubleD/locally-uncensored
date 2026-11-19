@@ -66,6 +66,12 @@ export interface CreateReferenceSupport {
 export const FLUX2_MAX_REFERENCES = 4
 /** TextEncodeQwenImageEditPlus has image1 to image3. */
 export const KREA2_MAX_REFERENCES = 3
+/** The pictures LU hands MiniMax H3 Image in one run (3.1.3). Its node takes
+ *  up to 100 (MiniMaxH3ImageConditioning images.image_N); each one is read by
+ *  the 32B encoder at a 1024 px short edge and anchored by the VAE, so four
+ *  is what a 12 GB card carries next to a 4 MP picture. In Edit the source is
+ *  the first of them. */
+export const MINIMAX_H3_IMAGE_MAX_PICTURES = 4
 
 /** Reference images for Create (text to image) on the local lane. */
 export function createReferenceSupport(type: ModelType | null | undefined, model: string | null | undefined): CreateReferenceSupport {
@@ -73,11 +79,12 @@ export function createReferenceSupport(type: ModelType | null | undefined, model
   if (t === 'krea2') return { slots: KREA2_MAX_REFERENCES, kind: 'style' }
   if (t === 'qwenimage') return { slots: MAX_EXTRA_REFERENCES + 1, kind: 'content' }
   if (t === 'flux2') return { slots: FLUX2_MAX_REFERENCES, kind: 'content' }
+  if (t === 'minimaxh3image') return { slots: MINIMAX_H3_IMAGE_MAX_PICTURES, kind: 'content' }
   return { slots: 0 }
 }
 
 /** The honest line where the model on screen takes no reference image. */
-export const CREATE_REFERENCE_MODELS = 'Reference images work with Krea 2 (style), Qwen-Image 2.1 and FLUX.2 (style, pose, camera angle, people). This model makes the picture from the prompt alone.'
+export const CREATE_REFERENCE_MODELS = 'Reference images work with Krea 2 (style), Qwen-Image 2.1, FLUX.2 and MiniMax H3 Image (style, pose, camera angle, people). This model makes the picture from the prompt alone.'
 
 /** The line over the reference tiles. */
 export function createReferenceLine(kind: CreateReferenceKind | undefined, count: number): string {

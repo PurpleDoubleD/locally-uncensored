@@ -1969,7 +1969,7 @@ export function useCreate() {
         ...(isI2I && !isRemoveBg && effInputImage && state.editStrength < 1 ? { editStrength: state.editStrength } : {}),
         // C75: a Qwen-Image 2.1 edit in the shape of the size fields. Only
         // the edit graph of that model reads it (dynamic-workflow.ts).
-        ...(isI2I && !isRemoveBg && effInputImage && imageModelType === 'qwenimage' && state.qwenEditShape === 'canvas' ? { editShape: 'canvas' as const } : {}),
+        ...(isI2I && !isRemoveBg && effInputImage && (imageModelType === 'qwenimage' || imageModelType === 'minimaxh3image') && state.qwenEditShape === 'canvas' ? { editShape: 'canvas' as const } : {}),
         // GH #144: further references ride along; the builder keeps only as
         // many as the model's family takes (lib/edit-references).
         ...(isI2I && !isRemoveBg && effInputImage && references.some((r) => r.filename)
@@ -2238,7 +2238,9 @@ export function useCreate() {
       // source (lib/edit-hires), and a masked edit is refused with a line
       // (api/hires-fix).
       const hiresEdit = intent === 'edit' && isI2I && !isRemoveBg && !!effInputImage
-      if (hiresFixEnabled && (intent === 'image' || hiresEdit)) {
+      // MiniMax H3 Image takes no HiRes pass (its latent has a time axis);
+      // Create hides the switch for it, and a switch left on is not applied.
+      if (hiresFixEnabled && (intent === 'image' || hiresEdit) && imageModelType !== 'minimaxh3image') {
         setProgress(8, 'Adding native HiRes Fix...')
         const editBase = hiresEdit
           ? editHiresBase({ source, width, height, modelType: imageModelType, modelName: activeModel, editShape: state.qwenEditShape })

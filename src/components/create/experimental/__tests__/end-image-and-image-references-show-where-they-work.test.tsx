@@ -128,7 +128,7 @@ describe('Image tab: reference images', () => {
     useCreateStore.setState({ imageReferences: [PIC] })
     render(<ImageReferenceStrip />)
     expect(screen.getByTestId('image-references').querySelector('[data-not-sent="true"]')).toBeTruthy()
-    expect(screen.getByTestId('image-references-line').textContent).toContain('Krea 2 (style), Qwen-Image 2.1 and FLUX.2')
+    expect(screen.getByTestId('image-references-line').textContent).toContain('Krea 2 (style), Qwen-Image 2.1, FLUX.2 and MiniMax H3 Image')
   })
   it('LU Cloud points to Edit', () => {
     imageWith('krea2_turbo_int8_convrot.safetensors', 'krea2')
