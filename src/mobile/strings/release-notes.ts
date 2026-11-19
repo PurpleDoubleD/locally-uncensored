@@ -67,6 +67,14 @@ const ITEMS_310: readonly NoteItem[] = [
 ]
 
 export const MOBILE_RELEASE_NOTES: readonly MobileReleaseNote[] = [
+  // 3.1.2 (19.11.2026, hotfix A40 for the Mac engine): nothing changed on the phone, so it keeps the 3.1.1 page for whoever skipped it.
+  note('3.1.2', 'Long chats on LU Cloud cost what they should again.', [
+    {
+      text: 'Once a long chat had to be shortened, the app cut it at a different place on every message, so LU Cloud could not reuse what it had already read and every message was charged in full. Now the cut stays in place and the earlier part is reused.',
+      unpriced: 'Once a long chat had to be shortened, the app cut it at a different place on every message, so LU Cloud could not reuse what it had already read. Now the cut stays in place and the earlier part is reused.',
+    },
+    ...ITEMS_310,
+  ]),
   // 3.1.1 (17.11.2026, hotfix): who comes from 3.0.10 never saw the 3.1.0 page, so it follows the fix.
   note('3.1.1', 'Long chats on LU Cloud cost what they should again.', [
     {

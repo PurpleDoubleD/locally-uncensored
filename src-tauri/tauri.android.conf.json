@@ -4,7 +4,7 @@
     "beforeDevCommand": "VITE_LU_BUILD_TARGET=mobile npm run dev"
   },
   "identifier": "com.purpledoubled.locallyuncensored",
-  "version": "3.1.1",
+  "version": "3.1.2",
   "app": {
     "windows": [
       {
@@ -19,7 +19,7 @@
     "resources": [],
     "android": {
       "minSdkVersion": 24,
-      "versionCode": 30101001
+      "versionCode": 30102001
     }
   },
   "plugins": {

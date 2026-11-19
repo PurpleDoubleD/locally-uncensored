@@ -659,25 +659,40 @@ const NOTE_310: ReleaseNote = {
   ],
 }
 
+// 3.1.1 (17.11.2026, Hotfix Prompt-Cache, I310). Wer von 3.0.10 kommt, hat
+// 3.1.0 nie gesehen (releaseNotesStore zeigt nur die laufende Version),
+// darum steht hier das Blatt von 3.1.0 mit dem Hotfix als erster Zeile.
+const NOTE_311: ReleaseNote = {
+  ...NOTE_310,
+  version: '3.1.1',
+  lines: [
+    {
+      title: 'Long conversations on paid models cost what they should again.',
+      detail: 'Once a conversation was long enough to be shortened, LU cut it at a different place on every message, so the provider could not reuse what it had already read and every step was charged in full. Now the cut stays at the same place, and the part before it is reused. To keep that cut steady, LU fills a little less of a paid model\'s context window than before.',
+    },
+    {
+      title: 'An older ComfyUI offers its update for 3D.',
+      detail: 'A 3D model that needs a newer ComfyUI now says so and offers the update, instead of stopping with an error from ComfyUI.',
+    },
+    ...NOTE_310.lines,
+  ],
+}
+
 export const RELEASE_NOTES: ReleaseNote[] = [
-  // 3.1.1 (17.11.2026, Hotfix Prompt-Cache, I310). Wer von 3.0.10 kommt, hat
-  // 3.1.0 nie gesehen (releaseNotesStore zeigt nur die laufende Version),
-  // darum steht hier das Blatt von 3.1.0 mit dem Hotfix als erster Zeile.
+  // 3.1.2 (19.11.2026, Hotfix A40, GH #259). Wer von 3.1.1 oder 3.0.10 kommt,
+  // sieht das Blatt von 3.1.1 mit der Mac-Zeile vorn.
   {
-    ...NOTE_310,
-    version: '3.1.1',
+    ...NOTE_311,
+    version: '3.1.2',
     lines: [
       {
-        title: 'Long conversations on paid models cost what they should again.',
-        detail: 'Once a conversation was long enough to be shortened, LU cut it at a different place on every message, so the provider could not reuse what it had already read and every step was charged in full. Now the cut stays at the same place, and the part before it is reused. To keep that cut steady, LU fills a little less of a paid model\'s context window than before.',
+        title: 'Local models load again on Macs with macOS 14 and 15.',
+        detail: 'Since 3.0.9 the LU Engine could not prepare its graphics code on macOS 14 and 15, so no local model loaded there. It does again, and if the graphics part of a Mac ever fails, the engine now really falls back to the processor.',
       },
-      {
-        title: 'An older ComfyUI offers its update for 3D.',
-        detail: 'A 3D model that needs a newer ComfyUI now says so and offers the update, instead of stopping with an error from ComfyUI.',
-      },
-      ...NOTE_310.lines,
+      ...NOTE_311.lines,
     ],
   },
+  NOTE_311,
   NOTE_310,
   // 3.0.10 (05.11.2026, Hotfix Chat-Rettung, I1). Wer von 3.0.8 kommt, hat
   // 3.0.9 nie gesehen (releaseNotesStore zeigt nur die laufende Version),

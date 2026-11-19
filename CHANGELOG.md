@@ -2,6 +2,22 @@
 
 All notable changes to Locally Uncensored are documented here.
 
+## [3.1.2] - 2026-11-19
+
+Local models load again on Macs with macOS 14 and 15.
+LU Cloud keeps its open models: seventeen video models and nine image models
+in the cloud catalogue.
+
+### Fixed
+- On macOS 14 and 15, no local model loaded in the LU Engine since 3.0.9,
+  for chat and for Document Chat: the graphics code of the engine did not
+  compile on those macOS versions (GH #259). macOS 26 was not affected.
+- When the graphics part of a Mac fails, the second try of the LU Engine
+  now really runs on the processor, instead of failing the same way.
+- If a Mac still cannot prepare the graphics code, the message says so in
+  plain words and names Ollama as the way to keep chatting, instead of
+  showing the engine's raw compiler output.
+
 ## [3.1.1] - 2026-11-17
 
 A fix for the cost of long conversations on paid models, and a clear message
