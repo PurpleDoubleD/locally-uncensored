@@ -5,7 +5,7 @@
  * English sentence. In the desktop app, Chat and Agent: the sentence is what
  * the user reads, and the request is sent exactly once. No provider ladder,
  * no thinking downgrade, no agent retry. Statuses as the proxy sends them
- * (apps/web route api/inference/v1/chat/completions); each code is also
+ * (the chat completions route of the proxy); each code is also
  * checked as a 422, the status the announcement named.
  *
  * Run: npx vitest run src/api/providers/__tests__/cloud-final-codes.test.ts
@@ -14,7 +14,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import type { ChatStreamChunk } from '../types'
 import type { FetchArgs } from '../../__tests__/provider-test-support'
 
-/** The proxy's own sentences (apps/web lib/chat/image-bytes.ts, structured-output.ts). */
+/** The proxy's own sentences, word for word. */
 const CASES = [
   {
     code: 'images_too_large', status: 413,

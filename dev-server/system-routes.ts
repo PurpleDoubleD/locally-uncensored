@@ -7,6 +7,14 @@ import { errorText } from '../src/types/json-guards'
 /** Die vier Auskunfts-Endpunkte über den Rechner. Sie lesen nur. */
 export function registerSystemRoutes(routes: RouteMount): void {
   // API: System info
+  // A33: the spelling check of LU's right-click menu (commands/spell.rs). In
+  // a browser the browser's own menu stays (TextContextMenu runs in the app
+  // only), so the dev server answers "not misspelled", as Linux does.
+  routes.use('/local-api/spell-suggestions', (_req, res) => {
+    res.writeHead(200, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify({ misspelled: false, suggestions: [] }))
+  })
+
   routes.use('/local-api/system-info', (_req, res) => {
     res.writeHead(200, { 'Content-Type': 'application/json' })
     res.end(JSON.stringify({

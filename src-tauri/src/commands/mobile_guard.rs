@@ -141,6 +141,9 @@ pub const BLOCKED: &[&str] = &[
 /// "decided" from "forgotten", nothing reads this at run time.
 #[cfg(test)]
 pub const ALLOWED: &[&str] = &[
+    // A33: the spelling check of the right-click menu. On a phone it answers
+    // "not misspelled" (spell.rs), the phone has its own keyboard checker.
+    "spell_suggestions",
     "oauth_start",
     "oauth_wait",
     // Status and settings of desktop programs: they answer "not there" or

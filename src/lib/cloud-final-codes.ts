@@ -1,7 +1,6 @@
 /**
  * LU Cloud codes for a request that will fail the same way however often it
- * is sent (lu-labs.ai chat proxy, 19.11.2026, apps/web route
- * api/inference/v1/chat/completions):
+ * is sent (the lu-labs.ai chat proxy, 19.11.2026, its chat completions route):
  *
  *  - `images_too_large` (413): the images of the message are over the size
  *    one request may carry, even after the proxy shrank them.

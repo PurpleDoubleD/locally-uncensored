@@ -582,6 +582,8 @@ export async function backendCall<T = unknown>(
     // (commands/video_settle.rs); the dev server answers 501.
     video_color_settle: { path: "/local-api/video-color-settle", method: "POST" },
     read_media_file: { path: "/local-api/read-media-file", method: "POST" },
+    // A33: answered "not misspelled" by the dev server (system-routes.ts).
+    spell_suggestions: { path: "/local-api/spell-suggestions", method: "POST" },
     // The music engine of the Mac (commands/music.rs), desktop only like the
     // MLX commands above: the dev server answers 501 (mlx-media-stubs.ts).
     mlx_music_status: { path: "/local-api/mlx-music-status" },
