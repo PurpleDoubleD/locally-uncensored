@@ -147,7 +147,8 @@ const CATALOG_MODELS: Record<string, unknown>[] = [
 const STUDIO_EDIT_MODEL = { id: 'seedream-5-edit', label: 'Seedream 5 Edit', kind: 'image', ops: ['studio'], quote_required: true, tier: 'best', weights: 'closed' }
 /** A talking model that re-voices a clip instead of a portrait. */
 const CLIP_SYNC_MODEL = { id: 'latentsync', label: 'LatentSync (clip)', kind: 'video', ops: ['lipsync'], lipsync_source: 'video', t2v: false, i2v: false, credits: { base: 15000 }, tier: 'older', weights: 'open' }
-/** The presenter of the provider: 500 names, most of them with a face. */
+/** The presenter of the provider: every name of the catalogue, most of them with a face. */
+const HEYGEN_AVATAR_COUNT: number = JSON.parse(readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '../../src/lib/render/provider-schemas.json'), 'utf8'))['heygen/avatar-v/digital-twin'].properties.avatar.enum.length
 const HEYGEN_MODEL = { id: 'heygen-twin', label: 'HeyGen Presenter', kind: 'video', ops: ['studio'], quote_required: true, tier: 'standard', weights: 'closed' }
 /** Image to video with style LoRAs, a list field. */
 const LORA_MODEL = { id: 'open-video-lora', label: 'OpenVideo + Style LoRA', kind: 'video', adult: true, ops: ['studio'], quote_required: true, tier: 'standard', weights: 'closed' }
@@ -2234,12 +2235,13 @@ for (const size of SIZES) {
       await row.tap()
       const picker = tid(page, 'm-create-presenter-picker')
       await expect(picker).toBeVisible()
-      // All 500 of the provider's list, not the first 200: a part is drawn, the rest follows.
-      expect(Number(await picker.getAttribute('data-m-total'))).toBe(500)
+      // All of the provider's list, not the first 200: a part is drawn, the rest follows.
+      // Counted from the catalogue (490 since the web's HeyGen fix e2dbb68e, before 500).
+      expect(Number(await picker.getAttribute('data-m-total'))).toBe(HEYGEN_AVATAR_COUNT)
       const faces = tid(page, 'm-create-presenter-face')
       const first = await faces.count()
       expect(first).toBeGreaterThanOrEqual(60)
-      expect(first).toBeLessThan(500)
+      expect(first).toBeLessThan(HEYGEN_AVATAR_COUNT)
       // A face is a picture that really loaded.
       const img = faces.first().locator('img')
       await expect.poll(() => img.evaluate((el: HTMLImageElement) => el.complete && el.naturalWidth > 0)).toBe(true)
@@ -2254,7 +2256,7 @@ for (const size of SIZES) {
           },
           { timeout: 30_000 },
         )
-        .toBe(500)
+        .toBe(HEYGEN_AVATAR_COUNT)
       await expect(tid(page, 'm-create-opt-more')).toHaveCount(0)
       // Search by name, the person stands as a head above her scenes.
       await tid(page, 'm-create-presenter-search').fill('annie')
