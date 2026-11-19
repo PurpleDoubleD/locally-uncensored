@@ -792,6 +792,15 @@ jobs:
           LD_LIBRARY_PATH: ${{ matrix.platform == 'ubuntu-22.04' && format('{0}/src-tauri/resources/llama/{1}', github.workspace, matrix.sidecar_triple) || '' }}
         run: npx tauri build --config src-tauri/tauri.release.conf.json ${{ matrix.args }}
 
+      # TEST-LOGIN (3.1.3): a shipped build carries no test sign in
+      # (src-tauri/src/test_login.rs). The web bundle and the built program
+      # are searched for its traces; any hit fails the release.
+      - name: "Release guard: no test login in the build"
+        if: ${{ inputs.dry_run }}
+        shell: bash
+        run: |
+          progs=$(find src-tauri/target/release -maxdepth 1 -type f \( -name 'locally-uncensored*' -o -name 'LU*' \) ! -name '*.d' ! -name '*.pdb')
+          bash scripts/check-no-test-login.sh dist src-tauri/target/release/bundle $progs
       # The configuration that counts is the one inside the program. This
       # reads the built binaries and fails when one still carries the public
       # endpoint or the release pubkey, and when none carries the dry run
@@ -972,6 +981,15 @@ jobs:
           # bundle.windows.signCommand (scripts/windows-signing-setup.ps1).
           args: --config src-tauri/tauri.release.conf.json ${{ matrix.args }} ${{ steps.winsign.outputs.config_args }}
 
+      # TEST-LOGIN (3.1.3): a shipped build carries no test sign in
+      # (src-tauri/src/test_login.rs). The web bundle and the built program
+      # are searched for its traces; any hit fails the release.
+      - name: "Release guard: no test login in the build"
+        if: ${{ !inputs.dry_run }}
+        shell: bash
+        run: |
+          progs=$(find src-tauri/target/release -maxdepth 1 -type f \( -name 'locally-uncensored*' -o -name 'LU*' \) ! -name '*.d' ! -name '*.pdb')
+          bash scripts/check-no-test-login.sh dist src-tauri/target/release/bundle $progs
       # A configured signCommand that signed nothing must not pass for a signed
       # release. Skipped on the unsigned path, like the setup step.
       - name: Verify the Windows signatures
@@ -1704,6 +1722,14 @@ jobs:
           rm -rf src-tauri/target/release/bundle
           npm run tauri build -- --config src-tauri/tauri.release.conf.json
 
+      # TEST-LOGIN (3.1.3): a shipped build carries no test sign in
+      # (src-tauri/src/test_login.rs). The web bundle and the built program
+      # are searched for its traces; any hit fails the release.
+      - name: "Release guard: no test login in the build"
+        shell: bash
+        run: |
+          progs=$(find src-tauri/target/release -maxdepth 1 -type f \( -name 'locally-uncensored*' -o -name 'LU*' \) ! -name '*.d' ! -name '*.pdb')
+          bash scripts/check-no-test-login.sh dist src-tauri/target/release/bundle $progs
       # What the bundle IS, with no certificate involved: arm64 and nothing
       # else in every Mach-O file, the minimum OS of every binary, the main
       # program and the sidecar, every file of bundle.resources under

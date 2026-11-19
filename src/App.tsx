@@ -68,6 +68,12 @@ function App() {
       // Device tests only: a build with the Cargo feature `e2e-remote` and
       // its environment says so; every other build answers no.
       void import('./lib/remote-e2e').then(({ startRemoteForDeviceTests }) => startRemoteForDeviceTests()).catch(() => {})
+      // TEST-LOGIN: test builds only. Vite replaces the constant, so in every
+      // other bundle this branch and lib/test-login are gone
+      // (scripts/check-no-test-login.sh).
+      if (import.meta.env.VITE_LU_TEST_LOGIN === '1') {
+        void import('./lib/test-login').then(({ runTestLogin }) => runTestLogin()).catch(() => {})
+      }
     }
 
     // Probe local Whisper (STT) once at boot and push the result into the voice

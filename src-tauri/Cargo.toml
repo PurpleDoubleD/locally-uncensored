@@ -29,6 +29,12 @@ insecure-test-keychain = []
 # phone with all rights. NEVER in a default or a shipped build:
 #   tauri build --debug --features e2e-remote
 e2e-remote = []
+# Test-only (TEST-LOGIN, 3.1.3, src/test_login.rs): a test build started with
+# --test-login-stdin signs in to LU Cloud with a one-time token read from
+# standard input, for the accounts named in LU_TEST_LOGIN_ALLOW at build time
+# only. NEVER in a default or a shipped build; scripts/check-no-test-login.sh
+# fails a release that carries it.
+test-login = []
 # The in-process engine (commands/engine_inproc.rs) is always part of the
 # Android and iOS builds: a phone cannot start the llama-server sidecar the
 # desktop uses. This feature builds the SAME file into a macOS build as well,
