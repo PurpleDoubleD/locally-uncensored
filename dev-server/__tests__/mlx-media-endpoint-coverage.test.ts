@@ -145,6 +145,11 @@ describe('endpointMap covers every backendCall/invokeMedia site the frontend can
     // shell_execute_cancel below, same reasoning, same Tauri-only shape
     // (Rust kills the process tree by callId, no HTTP route makes sense).
     'execute_code_cancel',
+    // test_login_take (TEST-LOGIN, 3.1.3): only a Tauri test build with the
+    // Cargo feature test-login has it, and the page calls it only when
+    // VITE_LU_TEST_LOGIN=1. A dev-server route would be a way in without the
+    // feature, so there is none on purpose.
+    'test_login_take',
     // Image part of a cancelled model download (October 2026): removes the
     // finished part next to a GGUF in the built-in engine's models folder.
     // Same Tauri-only shape as clear_download_entry and delete_bundled_model
