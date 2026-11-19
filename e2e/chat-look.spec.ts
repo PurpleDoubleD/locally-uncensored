@@ -185,6 +185,20 @@ test('the Memory quick menu opens a long memory in full and edits it', async ({ 
   await page.getByRole('textbox', { name: 'Memory', exact: true }).fill(LONG + ' Arin carries a brass key.')
   await page.getByTestId('memory-save').click()
   await expect(page.getByTestId('memory-full')).toContainText('Arin carries a brass key.')
+  // Reload only once the edit is on disk, as in memory-review.spec.ts: with
+  // Playwright 1.65 (Chromium 158) the reload came before the IndexedDB put
+  // and the old text came back (v3.1.2 itself fails 3 of 3 that way).
+  await expect.poll(() => page.evaluate(() => new Promise<boolean>((resolve) => {
+    const open = indexedDB.open('locally-uncensored-store')
+    open.onerror = () => resolve(false)
+    open.onsuccess = () => {
+      const db = open.result
+      if (!db.objectStoreNames.contains('kv')) { db.close(); return resolve(false) }
+      const get = db.transaction('kv', 'readonly').objectStore('kv').get('locally-uncensored-memory')
+      get.onerror = () => { db.close(); resolve(false) }
+      get.onsuccess = () => { db.close(); resolve(typeof get.result === 'string' && get.result.includes('Arin carries a brass key.')) }
+    }
+  }))).toBe(true)
   await page.reload()
   await expect(reply(page)).toBeVisible({ timeout: 30_000 })
   // Read back through the app, wherever the store keeps it.
