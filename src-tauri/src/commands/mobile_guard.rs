@@ -95,9 +95,6 @@ pub const BLOCKED: &[&str] = &[
     "remote_chats_event",
     "remote_chats_reply",
     "remote_e2e_mode",
-    // TEST-LOGIN (3.1.3): only in a test build with the feature test-login;
-    // a phone never signs the desktop in, not even there.
-    "test_login_take",
     "remote_create_cancel",
     "remote_create_snapshot",
     "set_gpu_roles",
@@ -377,6 +374,14 @@ mod tests {
                 continue;
             }
             if line.starts_with("#[cfg(desktop)]") {
+                desktop_only = true;
+                continue;
+            }
+            // TEST-LOGIN (3.1.3): a test build only, never a shipped phone
+            // build. Its name must not stand in the BLOCKED list either:
+            // the list is text in every phone library, and
+            // scripts/check-no-test-login.sh fails a package that names it.
+            if line.starts_with("#[cfg(feature = \"test-login\")]") {
                 desktop_only = true;
                 continue;
             }

@@ -112,6 +112,10 @@ try {
   const r = sh(join(HIER, 'pruefe-testhaken.sh'), [dist, ...libs])
   process.stdout.write(r.aus)
   if (!r.ok) fehler += 1
+  // 5b. TEST-LOGIN (3.1.3): derselbe Waechter wie in release.yml fuer die Desktop-Bauten. Das APK
+  // baut kein Workflow, also prueft es hier: keine Spur des Testbau-Eingangs in Bibliothek und Seite.
+  const tl = sh(join(WURZEL, 'scripts/check-no-test-login.sh'), [dist, ...libs])
+  pruefe(libs.length > 0 && tl.ok, 'no trace of the test login (scripts/check-no-test-login.sh)', `the test login is in this package: ${(tl.aus || '').trim().split('\n').slice(1).join(' ')}`)
   // 5c. Keine Pfade des Baurechners im Programm (r49, N2): der Heimordner, und mit ihm der
   // Benutzername, steht in keiner nativen Bibliothek. pfade_umschreiben (_gemeinsam.sh) schreibt
   // sie beim Bau um; fehlt das, stehen hier die Quellpfade von Cargo, rustup und llama.cpp.
