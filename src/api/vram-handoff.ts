@@ -1465,7 +1465,15 @@ async function generateImage(
     const idef = type === 'hidream'
       ? { ...MODEL_TYPE_DEFAULTS.hidream, ...hidreamSampling(model) }
       : MODEL_TYPE_DEFAULTS[type] ?? MODEL_TYPE_DEFAULTS.unknown
-    const tun = resolveTunables(args, caps, { steps: idef.steps, cfg: idef.cfg, sampler: idef.sampler, scheduler: idef.scheduler })
+    // A44 (Discord, 19.11.2026): an image from Chat or Agent ran on these
+    // defaults while Create ran on the Steps, CFG, sampler and scheduler the
+    // user set there, so the same model (and the same own workflow, whose
+    // steps and cfg LU fills in) gave two different results. When Create has
+    // this very model picked, its values are the user's values for it and the
+    // chat run takes them. A value the call names itself still wins.
+    const { useCreateStore } = await import('../stores/createStore')
+    const fromCreate = createSamplingFor(model, useCreateStore.getState())
+    const tun = resolveTunables(args, caps, fromCreate ?? { steps: idef.steps, cfg: idef.cfg, sampler: idef.sampler, scheduler: idef.scheduler })
     if (tun.reject) return `Cannot generate: ${tun.reject}`
 
     const a = args as Record<string, unknown>
@@ -1498,7 +1506,6 @@ async function generateImage(
     // Qwen-Image 2.1: the agent loads the text encoder the user picked in
     // Create's advanced settings, so a picture made in chat reads the prompt
     // with the same one.
-    const { useCreateStore } = await import('../stores/createStore')
     const qwenTextEncoder = useCreateStore.getState().qwenTextEncoder
     const params: GenerateParams = {
         prompt,
@@ -2163,6 +2170,23 @@ interface Tunables { steps: number; cfg: number; sampler: string; scheduler: str
  * video paths. `reject` is non-null only when the USER asked for something the
  * model can't do.
  */
+/**
+ * A44: Create's sampling values for `model`, when Create has exactly that
+ * image model picked, else null. Out of range values fall back to null too,
+ * so a damaged store never reaches a render.
+ */
+export function createSamplingFor(
+  model: string,
+  create: { imageModel?: string; steps?: number; cfgScale?: number; sampler?: string; scheduler?: string },
+): { steps: number; cfg: number; sampler: string; scheduler: string } | null {
+  if (!model || create.imageModel !== model) return null
+  const { steps, cfgScale, sampler, scheduler } = create
+  if (typeof steps !== 'number' || !Number.isFinite(steps) || steps < 1) return null
+  if (typeof cfgScale !== 'number' || !Number.isFinite(cfgScale) || cfgScale < 0) return null
+  if (typeof sampler !== 'string' || !sampler || typeof scheduler !== 'string' || !scheduler) return null
+  return { steps: Math.floor(steps), cfg: cfgScale, sampler, scheduler }
+}
+
 export function resolveTunables(
   args: VramHandoffArgs,
   caps: ModelCapabilities | null,
