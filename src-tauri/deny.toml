@@ -33,17 +33,18 @@ ignore = [
     # trusting local-header names) also land on that zip 4.6.1. Neither path
     # is used there: the updater builds zip 4 without the aes-crypto feature
     # and opens the archive with ZipArchive (updater.rs: install()), never
-    # with ZipStreamReader. Our own zip 9.0.0 has the AES fix; 0548 is listed
-    # for it as well, because nothing in src/ uses ZipStreamReader (only
-    # ZipArchive). zip 9.0.5 would need libc >= 0.2.186, and libc stays on
-    # 0.2.183 until sysinfo moves (see the libc pin in Cargo.toml).
-    { id = "RUSTSEC-2026-0545", reason = "17.11.2026: zip 4.x inside tauri-plugin-updater, built without aes-crypto, only ZipArchive. Lift with zip >= 9.0.5 + libc/sysinfo raise in 3.1.2" },
-    { id = "RUSTSEC-2026-0548", reason = "17.11.2026: no ZipStreamReader, neither in src/ (zip 9.0.0) nor in tauri-plugin-updater (zip 4.x), only ZipArchive. Lift with zip >= 9.0.5 + libc/sysinfo raise in 3.1.2" },
+    # with ZipStreamReader. Since 3.1.3 our own zip is 9.0.5, which has both
+    # fixes (libc went to 0.2.186 for it), so both lines now cover only the
+    # updater's zip 4.6.1. The first tauri-plugin-updater on zip 9 is 2.14,
+    # and that one asks for tauri 2.12 (see the updater pin in Cargo.toml).
+    { id = "RUSTSEC-2026-0545", reason = "zip 4.6.1 inside tauri-plugin-updater 2.12 only, built without aes-crypto, only ZipArchive. Our zip is 9.0.5. Lift with updater >= 2.14 (needs tauri 2.12)" },
+    { id = "RUSTSEC-2026-0548", reason = "zip 4.6.1 inside tauri-plugin-updater 2.12 only, which uses ZipArchive, never ZipStreamReader. Our zip is 9.0.5. Lift with updater >= 2.14 (needs tauri 2.12)" },
     # chrono is marked unmaintained (17.11.2026). It is a notice, not a known
-    # flaw, and no safe upgrade exists. We call it in about twenty files and
-    # trash pulls it in as well, so moving to jiff or time is planned work for
-    # a later release, not something for a hotfix.
-    { id = "RUSTSEC-2026-0543", reason = "17.11.2026: chrono is only unmaintained, no known flaw. Lift with the move to jiff or time in 3.1.2" },
+    # flaw, and no safe upgrade exists. Besides our own calls, trash 5.2 and
+    # uiautomation (Windows) pull it in, and uiautomation 0.25.1, the newest,
+    # still depends on chrono. Moving our own code to jiff would therefore
+    # not lift this line; it stays until uiautomation moves.
+    { id = "RUSTSEC-2026-0543", reason = "chrono is only unmaintained, no known flaw. uiautomation 0.25.1 (newest) still needs it, so it stays even without our own calls" },
 ]
 
 [licenses]

@@ -76,14 +76,14 @@ tokio = { version = "1", features = ["full"] }
 # reqwest is declared per target further down, because the TLS stack differs:
 # the desktop keeps the system one (reqwest's defaults, unchanged), the phones
 # use rustls.
-zip = { version = "9", default-features = false, features = ["deflate-flate2"] }
+zip = { version = "9.0.5", default-features = false, features = ["deflate-flate2"] }
 dirs = "6"
 # Python interpreter discovery for the in-process MLX media engine
 # (os_paths::find_python, mlx.rs::locate_python_311).
 which = "6"
 regex = "1"
 glob = "0.3"
-sysinfo = "0.33"
+sysinfo = "0.39.6"
 walkdir = "2"
 hostname = "0.4"
 whoami = "1"
@@ -295,13 +295,16 @@ objc2-image-io = { version = "0.3", default-features = false, features = ["std",
 # declared for every unix so the desktop test run executes the same function.
 # The crate is in every build already (tokio, sysinfo and others pull it in).
 #
-# The exact version is the point. sysinfo 0.33.1 stops compiling for iOS with
-# libc 0.2.190 (`unresolved import libc::mach_task_self`), and the lock file
-# is shared by every target, so this pin is what keeps a `cargo update` from
-# pulling the newer libc in. Raise it together with sysinfo, never alone.
+# The exact version is the point. sysinfo 0.33.1 stopped compiling for iOS
+# with libc 0.2.190 (`unresolved import libc::mach_task_self`), and the lock
+# file is shared by every target, so this pin is what keeps a `cargo update`
+# from pulling a libc in that nobody checked for the phones. 3.1.3 raised it
+# to 0.2.186 (zip 9.0.5 needs that) together with sysinfo 0.39.6, checked
+# with `cargo check` for aarch64-apple-ios and aarch64-linux-android. Raise
+# it together with sysinfo, never alone.
 # Guard: src/lib/__tests__/mobile-bau-fallen.test.ts
 [target.'cfg(unix)'.dependencies]
-libc = "=0.2.183"
+libc = "=0.2.186"
 
 [target.'cfg(windows)'.dependencies]
 # The LU browser (commands/browser.rs, P-L 3.1.0): ExecuteScript with its
