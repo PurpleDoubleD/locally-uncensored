@@ -6,6 +6,8 @@ All notable changes to Locally Uncensored are documented here.
 
 Scene to Video comes to the desktop app, Swap Character runs on your own
 computer, and Agent mode asks in the chat where it works.
+LU Cloud keeps its open models: seventeen video models and nine image models
+in the cloud catalogue.
 
 ### Added
 - **Scene to Video in Create.** Drop in a short video of a scene, for example
