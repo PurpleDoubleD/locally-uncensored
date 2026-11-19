@@ -89,6 +89,11 @@ test('isAllowlisted: msvcprt:vector_algorithms.obj, MSVCRT:*, and wmemcmp/memcmp
   assert.equal(isAllowlisted({ obj: 'unicode.obj', name: 'memcmp' }), true);
   assert.equal(isAllowlisted({ obj: 'ggml-backend-reg.obj', name: 'wmemcmp' }), true);
   assert.equal(isAllowlisted({ obj: 'server-context.obj', name: 'wmemcmp' }), true);
+  // 3.1.2: the b11960 layout hands the same reviewed wmemcmp COMDAT to these.
+  assert.equal(isAllowlisted({ obj: 'arg.obj', name: 'wmemcmp' }), true);
+  assert.equal(isAllowlisted({ obj: 'server-connect.obj', name: 'wmemcmp' }), true);
+  // Only that exact symbol: other code in those objects stays checked.
+  assert.equal(isAllowlisted({ obj: 'arg.obj', name: 'common_params_parse' }), false);
   assert.equal(isAllowlisted({ obj: 'ggml-quants.obj', name: 'iq2xs_init_impl$omp$1' }), false);
 });
 

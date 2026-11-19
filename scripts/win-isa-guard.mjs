@@ -326,6 +326,20 @@ const WMEMCMP_MEMCMP_HOST_OBJECTS = new Set([
   'unicode.obj',
   'ggml-backend-reg.obj',
   'server-context.obj',
+  // 3.1.2 (19.11.2026, A40): llama.cpp b11960 split common.cpp and the
+  // server sources, so on MSVC 14.44.35207 (windows-2025-vs2026, pinned by
+  // LLAMA_MSVC_TOOLSET) the linker hands the same wmemcmp COMDAT to the
+  // first referencing object of the new layout. Reviewed by hand on the
+  // dumps of sidecar-windows run 44444819140: the wmemcmp in arg.obj
+  // (llama-common.dll) and in server-connect.obj (llama-server-impl.dll) is
+  // instruction for instruction, function-relative jump targets included,
+  // the copy in ggml-backend-reg.obj (ggml.dll) this list already trusts.
+  // Its AVX2 block is entered only past `cmp _Avx2WmemEnabled; je +05f`,
+  // and the vzeroupper at +11f the dominance check could not place is
+  // reached only from `jne +0f5` inside that block (a ret precedes +0f5).
+  // Evidence: ~/Desktop/Zentrale/uebergabe-310/A40-METAL/isa-review-1444/.
+  'arg.obj',
+  'server-connect.obj',
 ]);
 
 // A .map Lib:Object field can carry a "Lib:Object" form (e.g.
