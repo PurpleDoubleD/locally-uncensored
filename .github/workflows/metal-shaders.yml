@@ -13,7 +13,8 @@ name: Mac sidecar Metal shaders compile on older macOS
 # the whole sidecar: the shader sources are cmake outputs of that one target.
 on:
   push:
-    branches: [master]
+    # TEMPORARY (A40 probe): the A40 branch, reverted after its run.
+    branches: [master, claude/a40-metal-macos15-51acd0]
     paths:
       - 'scripts/build-llama.sh'
       - 'scripts/llama-patches/**'
