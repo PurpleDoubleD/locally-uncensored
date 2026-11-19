@@ -68,7 +68,7 @@ describe('Low VRAM (D20)', () => {
   it('eine 8-GB-Karte bekommt den Vorschlag mit Knopf', () => {
     const s = trainVramSuggestion(8, 'standard')
     expect(s?.switchTo).toBe('low-vram')
-    expect(s?.text).toBe('This card has 8 GB. Normal training needs 11 GB, Low VRAM is made for cards like this one.')
+    expect(s?.text).toBe('This card has 8 GB. Normal training needs 11 GB, Low VRAM is made for cards like this one, and a run started on Normal switches to it on its own.')
     expect(trainVramSuggestion(10, 'standard')?.switchTo).toBe('low-vram')
   })
 

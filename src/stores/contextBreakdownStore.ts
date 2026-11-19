@@ -11,14 +11,26 @@ import { useChatStore } from './chatStore'
  */
 interface ContextBreakdownState {
   byConv: Record<string, ContextBreakdown>
+  /** W48 (GitHub #257): the system prompt the last request of a
+   *  conversation carried, exactly as it went on the wire, and when. */
+  systemByConv: Record<string, SentSystemPrompt>
   publish: (convId: string, breakdown: ContextBreakdown) => void
+  noteSystem: (convId: string, sent: SentSystemPrompt) => void
   clear: (convId: string) => void
+}
+
+export interface SentSystemPrompt {
+  text: string
+  at: number
 }
 
 export const useContextBreakdownStore = create<ContextBreakdownState>((set) => ({
   byConv: {},
+  systemByConv: {},
   publish: (convId, breakdown) =>
     set((state) => ({ byConv: { ...state.byConv, [convId]: breakdown } })),
+  noteSystem: (convId, sent) =>
+    set((state) => ({ systemByConv: { ...state.systemByConv, [convId]: sent } })),
   clear: (convId) =>
     set((state) => {
       if (!(convId in state.byConv)) return state
@@ -43,6 +55,7 @@ export function publishStepBreakdown(
   tools: readonly unknown[] | number,
 ): void {
   if (!convId) return
+  noteSentSystemPrompt(convId, messages)
   try {
     const atMessageCount =
       useChatStore.getState().conversations.find((c) => c.id === convId)?.messages.length ?? 0
@@ -53,4 +66,33 @@ export function publishStepBreakdown(
   } catch {
     // The dropdown falls back to the estimate.
   }
+}
+
+/**
+ * W48 (GitHub #257, mirh: "you don't seem to be able to see the final system
+ * prompt anywhere"): remember the system prompt a request carried, the
+ * system messages as they went on the wire, joined. Plain chat calls this
+ * right before it sends; the agent loops reach it through
+ * publishStepBreakdown. The context list shows it under "System prompt".
+ * Never throws, like the meter.
+ */
+export function noteSentSystemPrompt(
+  convId: string | null | undefined,
+  messages: readonly BreakdownMessage[],
+): void {
+  if (!convId) return
+  try {
+    const text = sentSystemText(messages)
+    useContextBreakdownStore.getState().noteSystem(convId, { text, at: Date.now() })
+  } catch {
+    // A missing preview must not break a send.
+  }
+}
+
+/** The system messages of a request, in order, as one text. */
+export function sentSystemText(messages: readonly BreakdownMessage[]): string {
+  return messages
+    .filter((m) => m.role === 'system' && typeof m.content === 'string')
+    .map((m) => m.content as string)
+    .join('\n\n')
 }

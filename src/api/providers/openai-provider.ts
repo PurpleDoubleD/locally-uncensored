@@ -1,4 +1,6 @@
 import { resolveMessageAttachments } from '../../lib/chat-attachments'
+import { finalCodeOf, isCloudFinalCode } from '../../lib/cloud-final-codes'
+import { unknownFieldsIn } from './unknown-fields'
 import { captureFlashGeneration, chatBilling, parseFlashPolicy, recordFlashResponse } from '../../lib/flash-ui'
 
 /**
@@ -980,7 +982,34 @@ export class OpenAIProvider implements ProviderClient {
     // so the ladder could keep spending steps after the user was done.
     const stopped = () => signal?.aborted === true
 
+    // A43: fields this endpoint already refused by name are not sent again.
+    const known = OpenAIProvider.refusedFields.get(this.baseUrl)
+    if (known) for (const f of known) delete (body as unknown as Record<string, unknown>)[f]
+
     let res = await this.sendOrExplain(post)
+
+    // LU Cloud said the request cannot work however it is sent (images or
+    // request too large, a JSON schema the model will not follow). Nothing
+    // below would change that: no ladder, the answer goes to the user.
+    if (!res.ok && await finalCodeOf(res)) {
+      recordFlashResponse(this.catalogKey(model), res, billingGeneration)
+      return res
+    }
+
+    // A43: an endpoint that names the fields it does not know (Gemini, OpenAI,
+    // pydantic servers) gets the request again without exactly those, a few
+    // rounds at most because some name only the first one. Kept per endpoint
+    // once a request then goes through, so the round trip is paid once.
+    for (let round = 0; round < 4 && !stopped() && refused(res); round++) {
+      const named = unknownFieldsIn(await res.clone().text().catch(() => ''))
+        .filter((f) => f in body)
+      if (named.length === 0) break
+      for (const f of named) delete (body as unknown as Record<string, unknown>)[f]
+      const dropped = OpenAIProvider.refusedFields.get(this.baseUrl) ?? new Set<string>()
+      for (const f of named) dropped.add(f)
+      res = await post()
+      if (res.ok) OpenAIProvider.refusedFields.set(this.baseUrl, dropped)
+    }
 
     if (!stopped() && refused(res) && body.reasoning_effort === 'none') {
       body.reasoning_effort = 'minimal'
@@ -1879,6 +1908,8 @@ export class OpenAIProvider implements ProviderClient {
    * one on every message.
    */
   private static templateKwargsRefused = new Set<string>()
+  /** A43: per endpoint, the body fields it refused by name. */
+  private static refusedFields = new Map<string, Set<string>>()
 
   /** Live tool-capability answers per endpoint (G37b). Static for the same
    *  reason as probeCache, and TTL-bound like it: an LM Studio reload or an
@@ -2226,6 +2257,9 @@ export class OpenAIProvider implements ProviderClient {
     // A request without streaming that LU Cloud ended after ten minutes with
     // nothing to show; lib/http-status treats it as terminal.
     else if (serverCode === 'stalled_runaway') code = 'stalled_runaway'
+    // A request LU Cloud says cannot work as it is (lib/cloud-final-codes):
+    // the code travels, so no retry anywhere sends it again.
+    else if (isCloudFinalCode(serverCode)) code = serverCode as string
     // Issue 177: a local server sent nothing within Chat Reply Timeout
     // (api/backend.ts). Terminal for the agent's retry ladder.
     else if (serverCode === FIRST_REPLY_TIMEOUT) code = FIRST_REPLY_TIMEOUT

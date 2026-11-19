@@ -525,6 +525,10 @@ export interface CreateState {
   /** 3.0.8 D20: the local trainer's recipe, Normal or Low VRAM. Persisted:
    *  it follows the card, which does not change between sessions. */
   trainVramPreset: TrainVramPreset
+  /** A41 / GitHub #260: the sentence of a run that switched itself from
+   *  Normal to Low VRAM because the card is too small for Normal. Shown
+   *  under the trainer while it is set. Runtime only. */
+  trainNotice: string | null
   /** 3.0.9 P8: what the local trainer learns, a character or a style /
    *  concept / pose (lib/train-kind.ts). Persisted like the steps. */
   trainKind: TrainKind
@@ -832,6 +836,7 @@ export interface CreateState {
   setTrainSteps: (n: number) => void
   setTrainCaption: (name: string, text: string) => void
   setTrainVramPreset: (p: TrainVramPreset) => void
+  setTrainNotice: (text: string | null) => void
   setTrainKind: (k: TrainKind) => void
   setTrainStyleTrigger: (on: boolean) => void
   setSelectedCharacter: (c: CharacterRef | null) => void
@@ -1346,6 +1351,7 @@ export const useCreateStore = create<CreateState>()(
       trainSteps: TRAIN_STEPS_DEFAULT,
       trainCaptions: {} as Record<string, string>,
       trainVramPreset: TRAIN_VRAM_PRESET_DEFAULT as TrainVramPreset,
+      trainNotice: null as string | null,
       trainKind: TRAIN_KIND_DEFAULT as TrainKind,
       trainStyleTrigger: true,
       selectedCharacter: null as CharacterRef | null,
@@ -1761,6 +1767,7 @@ export const useCreateStore = create<CreateState>()(
         return { trainCaptions }
       }),
       setTrainVramPreset: (p) => set({ trainVramPreset: isTrainVramPreset(p) ? p : TRAIN_VRAM_PRESET_DEFAULT }),
+      setTrainNotice: (text) => set({ trainNotice: text && text.trim() ? text.trim() : null }),
       // The steps follow the mode: each has its own three presets, and a
       // number of the other mode would match none of the switch's options.
       setTrainKind: (k) => set((s) => {

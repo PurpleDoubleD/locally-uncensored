@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect } from "react"
+import { noteSentSystemPrompt } from '../stores/contextBreakdownStore'
 import { create } from "zustand"
 import { frameFlush } from '../lib/frame-flush'
 import { sendWindowFor } from '../lib/send-window'
@@ -336,6 +337,8 @@ async function runGroupTurn(convId: string, model: string, allModels: string[], 
     // larger than its context, because its own count ran ahead of the
     // estimate. Cut once under what it named and send again; the refusal
     // comes before any token, so nothing shows twice.
+    // W48: the member's own system prompt, for the context list.
+    noteSentSystemPrompt(conv.id, messages)
     async function* streamWithOverflowRetry() {
       try {
         yield* provider.chatStream(modelId, messages, streamOpts)
@@ -1821,6 +1824,9 @@ export function useChat() {
       // payload the server just refused. The 400 fires on request
       // validation, before any token streams, so a retry never duplicates
       // visible output. The conversation itself is never touched.
+      // W48 (GitHub #257): the system prompt this request carries, for the
+      // context list.
+      noteSentSystemPrompt(convId, messages)
       async function* createStreamWithFallback() {
         // One card and a render from the chat holds it (3.0.8, A2): wait
         // visibly here instead of inside the provider without a word.

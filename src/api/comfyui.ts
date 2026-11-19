@@ -1,4 +1,5 @@
 import { comfyuiUrl, localFetch, fetchLocalhostBytes, isTauri, backendCall, isMacOS } from "./backend"
+import { misplacedModelMessage, missedModelsOf } from '../lib/misplaced-model'
 import { log } from "../lib/logger"
 import { LU_CLIENT_PREFIX } from "./comfyui-ws"
 import { nodeComboOptions } from "./comfyui-enum"
@@ -2379,12 +2380,16 @@ export async function submitWorkflow(
   if (!res.ok) {
     const rawText = await res.text().catch(() => '')
     let errMsg = `HTTP ${res.status}`
+    let parsed: unknown = null
     try {
-      errMsg = describeComfyRejection(JSON.parse(rawText)) ?? errMsg
+      parsed = JSON.parse(rawText)
+      errMsg = describeComfyRejection(parsed) ?? errMsg
     } catch {
       if (rawText) errMsg = rawText.slice(0, 500)
     }
     log.error('comfyui.workflow_rejected', { errMsg, workflow: JSON.stringify(placed).slice(0, 2000) })
+    const misplaced = await misplacedModelNote(parsed)
+    if (misplaced) throw new Error(misplaced)
     throw new Error(`ComfyUI rejected workflow: ${errMsg}`)
   }
   const data: unknown = await res.json()
@@ -2400,10 +2405,33 @@ export async function submitWorkflow(
     if (promptId) await abandonPrompt(promptId)
     const errMsg = describeComfyRejection(data) ?? 'some output nodes failed validation'
     log.error('comfyui.workflow_rejected', { errMsg, partial: true, workflow: JSON.stringify(placed).slice(0, 2000) })
+    const misplaced = await misplacedModelNote(data)
+    if (misplaced) throw new Error(misplaced)
     throw new Error(`ComfyUI rejected workflow: ${errMsg}`)
   }
   if (!promptId) throw new Error('ComfyUI accepted the workflow but returned no prompt_id.')
   return promptId
+}
+
+/** GitHub #234: a main model in the other main-model folder, named with
+ *  where it belongs (lib/misplaced-model.ts). Null for every other rejection,
+ *  and when the folder lists cannot be read. */
+async function misplacedModelNote(rejection: unknown): Promise<string | null> {
+  const missed = missedModelsOf(rejection)
+  if (missed.length === 0) return null
+  try {
+    const [checkpoints, diffusionModels] = await Promise.all([getCheckpoints(), getDiffusionModels()])
+    for (const m of missed) {
+      const note = misplacedModelMessage(m, { checkpoints, diffusionModels })
+      if (note) {
+        log.warn('comfyui.model_in_wrong_folder', { file: m.file, loader: m.loader, belongsIn: m.folder })
+        return note
+      }
+    }
+  } catch (err) {
+    log.warn('comfyui.misplaced_check_failed', { err })
+  }
+  return null
 }
 
 /**

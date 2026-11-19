@@ -1,3 +1,5 @@
+import { useState } from 'react'
+import { ChevronDown, ChevronRight } from 'lucide-react'
 import { useChatStore } from '../../stores/chatStore'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { useContextBreakdownStore } from '../../stores/contextBreakdownStore'
@@ -37,6 +39,9 @@ export function ContextBreakdownPanel({
   const convId = useChatStore((s) => s.activeConversationId)
   const conv = useChatStore((s) => s.conversations.find((c) => c.id === s.activeConversationId))
   const stored = useContextBreakdownStore((s) => (convId ? s.byConv[convId] : undefined))
+  // W48 (GitHub #257): the system prompt the last request really carried.
+  const sentSystem = useContextBreakdownStore((s) => (convId ? s.systemByConv[convId] : undefined))
+  const [showSystem, setShowSystem] = useState(false)
   const autoCompact = useSettingsStore((s) => s.settings.autoCompact)
   const autoCompactThreshold = useSettingsStore((s) => s.settings.autoCompactThreshold)
 
@@ -59,7 +64,7 @@ export function ContextBreakdownPanel({
     <section
       data-testid="context-breakdown"
       aria-label="What fills the context window"
-      className="w-60 max-w-full px-2 pt-1 pb-1.5 flex flex-col gap-1"
+      className={`${showSystem ? "w-[22rem]" : "w-60"} max-w-full px-2 pt-1 pb-1.5 flex flex-col gap-1`}
     >
       <div className="flex items-baseline justify-between gap-2">
         <span className="t-label text-gray-400">Context use</span>
@@ -86,7 +91,21 @@ export function ContextBreakdownPanel({
       <ul className="flex flex-col gap-0.5 mt-0.5">
         {breakdown.rows.map((r) => (
           <li key={r.key} data-testid={`context-row-${r.key}`} className="grid grid-cols-[1fr_3rem_3.25rem] items-center gap-2 t-micro">
-            <span className="text-gray-600 dark:text-gray-300 truncate">{r.label}</span>
+            {r.key === 'system' && sentSystem ? (
+              <button
+                type="button"
+                data-testid="context-system-toggle"
+                aria-expanded={showSystem}
+                onClick={() => setShowSystem((v) => !v)}
+                title={showSystem ? 'Hide the system prompt' : 'Show the system prompt the last request sent'}
+                className="flex min-w-0 items-center gap-0.5 text-left text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white"
+              >
+                {showSystem ? <ChevronDown size={10} className="shrink-0" /> : <ChevronRight size={10} className="shrink-0" />}
+                <span className="truncate">{r.label}</span>
+              </button>
+            ) : (
+              <span className="text-gray-600 dark:text-gray-300 truncate">{r.label}</span>
+            )}
             <span className="h-1 rounded-full bg-gray-100 dark:bg-white/[0.07] overflow-hidden">
               <span
                 className="block h-full rounded-full bg-gray-400 dark:bg-gray-500"
@@ -98,6 +117,18 @@ export function ContextBreakdownPanel({
             </span>
           </li>
         ))}
+        {showSystem && sentSystem && (
+          <li data-testid="context-system-text" className="t-micro">
+            <span className="block text-gray-400 mb-0.5">
+              Sent {new Date(sentSystem.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}, exactly as the model got it
+            </span>
+            {sentSystem.text.trim() ? (
+              <pre className="max-h-48 overflow-y-auto scrollbar-thin whitespace-pre-wrap wrap-anywhere select-text font-mono text-[0.55rem] leading-relaxed text-gray-600 dark:text-gray-300">{sentSystem.text}</pre>
+            ) : (
+              <span className="block text-gray-500">The last request had no system prompt.</span>
+            )}
+          </li>
+        )}
         <li data-testid="context-row-free" className="grid grid-cols-[1fr_3rem_3.25rem] items-center gap-2 t-micro">
           <span className="text-gray-400">Free</span>
           <span className="h-1 rounded-full bg-gray-100 dark:bg-white/[0.07] overflow-hidden">

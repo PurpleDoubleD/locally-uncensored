@@ -1,4 +1,5 @@
 import { httpStatusOf } from '../../lib/http-status'
+import { isCloudFinalCode } from '../../lib/cloud-final-codes'
 import { errorText } from '../../types/json-guards'
 import { contextOverflowOf } from './context-overflow'
 
@@ -98,6 +99,9 @@ export function isThinkingUnsupportedError(err: unknown): boolean {
   // shrink the request; the agent loops cut the history for it instead
   // (GH #140, codex/context-overflow.ts).
   if (contextOverflowOf(err)) return false
+  // LU Cloud's own "this cannot work as sent" (lib/cloud-final-codes): the
+  // thinking flag has nothing to do with it.
+  if (isCloudFinalCode((err as { code?: unknown } | null)?.code)) return false
   const status = httpStatusOf(err)
   // 400 und 422 sind hier EINE Klasse — siehe den Modulkopf, Abschnitt
   // "DIE 422-FRAGE". Dieselbe Paarung steht an der Quelle des 422, in

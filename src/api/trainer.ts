@@ -42,6 +42,9 @@ export interface TrainingRunStatus {
    *  `logs` ends in whatever the child printed last, which is pip chatter for
    *  minutes at a time, so the progress line reads this instead. */
   phase?: string
+  /** A41: set when the run switched itself from Normal to Low VRAM because
+   *  the card is too small for Normal. Empty or missing otherwise. */
+  notice?: string
   logs: string[]
   step: number
   totalSteps: number

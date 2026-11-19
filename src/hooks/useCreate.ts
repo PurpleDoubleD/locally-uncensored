@@ -759,6 +759,7 @@ export function useCreate() {
       // step 27 while the chat model was brought back beside it).
       if (trainingCancelRequested.current) return
       setProgress(8, 'Starting the training run...')
+      useCreateStore.getState().setTrainNotice(null)
       await startCharacterTraining(setId, trigger, trigger, state.trainSteps, state.trainVramPreset, kind)
       let cancelRounds = 0
       for (;;) {
@@ -766,6 +767,12 @@ export function useCreate() {
         if (!useCreateStore.getState().isGenerating && !trainingCancelRequested.current) return
         const s = await characterTrainingStatus().catch(() => null)
         if (!s) continue
+        // A41 / GitHub #260: the run switched itself to Low VRAM. Say so for
+        // the whole run, and keep Low VRAM picked: it follows the card.
+        if (s.notice && s.notice !== useCreateStore.getState().trainNotice) {
+          useCreateStore.getState().setTrainNotice(s.notice)
+          useCreateStore.getState().setTrainVramPreset('low-vram')
+        }
         if (s.status === 'running') {
           if (trainingCancelRequested.current) {
             // Stop was pressed and the backend still reports a run: the

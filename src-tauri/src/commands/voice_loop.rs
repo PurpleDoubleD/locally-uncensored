@@ -551,6 +551,11 @@ mod tests {
                 Some(serde_json::Value::Array(list)) => {
                     list.iter().map(|v| (v.as_str().unwrap().to_string(), None)).collect()
                 }
+                // A --config overlay (tauri.linux-aarch64.conf.json, GitHub
+                // #185) is a JSON merge patch: `null` removes a key of the file
+                // it is laid over. It is no bundle of its own; the merge is
+                // checked in src/lib/__tests__/gh185-linux-arm64-overlay.test.ts.
+                Some(serde_json::Value::Object(map)) if map.values().any(|v| v.is_null()) => continue,
                 Some(serde_json::Value::Object(map)) => {
                     map.iter().map(|(k, v)| (k.clone(), Some(v.as_str().unwrap().to_string()))).collect()
                 }

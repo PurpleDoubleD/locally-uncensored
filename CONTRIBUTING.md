@@ -57,6 +57,19 @@ build stops, because `externalBin` must exist. Two ways to get it:
    `src-tauri/resources/llama/<triple>/`.
    CI's release build pins the Vulkan SDK version in `release.yml`.
 
+   **Linux on ARM64** (GitHub #185): there is no release for it yet, but it
+   builds from source. `scripts/build-llama.sh` builds
+   `aarch64-unknown-linux-gnu` without Vulkan (`LLAMA_VULKAN=ON` adds it), and
+   the overlay `tauri.linux-aarch64.conf.json` takes the place of the x86_64
+   library folder in the bundle. It needs GCC 14 or newer (the armv9.2 CPU
+   variants; GCC 13, Ubuntu 24.04's default, refuses them), so on Ubuntu
+   24.04 install `gcc-14 g++-14` and pass `CC=gcc-14 CXX=g++-14`:
+
+   ```bash
+   scripts/build-llama.sh
+   npm run tauri build -- --config src-tauri/tauri.linux-aarch64.conf.json --bundles deb
+   ```
+
 2. **Take it from the latest release**
    ([Releases](https://github.com/PurpleDoubleD/locally-uncensored/releases)):
    install or unpack it, then copy the engine and its libraries to the places

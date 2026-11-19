@@ -76,7 +76,8 @@ pub fn tts_status(
     state: State<'_, AppState>,
     app: tauri::AppHandle,
 ) -> Result<serde_json::Value, String> {
-    let python = crate::commands::install::resolve_lu_python(state.inner());
+    // A34: Piper's own environment first (install/piper_env.rs).
+    let python = crate::commands::install::piper_env::piper_python(|| crate::commands::install::resolve_lu_python(state.inner()));
 
     let mut piper_importable = false;
     if !python.is_empty() && crate::python::is_real_python(&python) {
@@ -159,7 +160,8 @@ pub async fn download_voice(
     // owned values to the blocking pool: the download itself is tens of MB over
     // the network and used to run on the Tauri MAIN thread, so the window was
     // frozen for the whole transfer.
-    let python = crate::commands::install::resolve_lu_python(state.inner());
+    // A34: Piper's own environment first (install/piper_env.rs).
+    let python = crate::commands::install::piper_env::piper_python(|| crate::commands::install::resolve_lu_python(state.inner()));
     if python.is_empty() || !crate::python::is_real_python(&python) {
         return Err("no_python: install Python first.".to_string());
     }
@@ -246,7 +248,8 @@ fn synthesize_blocking(
         _ => PIPER_VOICE.to_string(),
     };
 
-    let python = crate::commands::install::resolve_lu_python(state.inner());
+    // A34: Piper's own environment first (install/piper_env.rs).
+    let python = crate::commands::install::piper_env::piper_python(|| crate::commands::install::resolve_lu_python(state.inner()));
     if python.is_empty() || !crate::python::is_real_python(&python) {
         return Err("no_python: install Python first.".to_string());
     }

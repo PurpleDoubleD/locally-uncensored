@@ -198,6 +198,16 @@ cmake_flags_for() {
       # CMake's own default: only readelf on the actual output proves what
       # landed (see check_no_absolute_build_rpath in verify-sidecar-isa.sh).
       echo "$common -DBUILD_SHARED_LIBS=ON -DGGML_BACKEND_DL=ON -DGGML_CPU_ALL_VARIANTS=ON -DGGML_VULKAN=ON -DCMAKE_BUILD_RPATH_USE_ORIGIN=ON" ;;
+    aarch64-unknown-linux-gnu)
+      # GitHub #185 (ThinkPad X13s, Fedora): Linux on ARM64, built from
+      # source by the user, not by CI. Same dynamic layout as x86_64 Linux
+      # (ggml has ARM CPU variants, armv8.0 to armv9.2, for GGML_CPU_ALL_
+      # VARIANTS on Linux), so engine.rs and the bundle find the companions
+      # the same way. Vulkan is OFF by default: the ARM laptops' GPU drivers
+      # on Linux are young, and a missing Vulkan SDK should not stop the
+      # build. LLAMA_VULKAN=ON switches it on. Bundle it with the overlay
+      # src-tauri/tauri.linux-aarch64.conf.json (CONTRIBUTING.md).
+      echo "$common -DBUILD_SHARED_LIBS=ON -DGGML_BACKEND_DL=ON -DGGML_CPU_ALL_VARIANTS=ON -DGGML_VULKAN=${LLAMA_VULKAN:-OFF} -DCMAKE_BUILD_RPATH_USE_ORIGIN=ON" ;;
     *)
       die "unsupported target triple: $triple" ;;
   esac
@@ -210,7 +220,7 @@ cmake_flags_for() {
 # two case statements that could drift apart.
 is_dynamic_isa_triple() {
   case "$1" in
-    x86_64-pc-windows-msvc | x86_64-unknown-linux-gnu) return 0 ;;
+    x86_64-pc-windows-msvc | x86_64-unknown-linux-gnu | aarch64-unknown-linux-gnu) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -268,8 +278,8 @@ quantize_out_name_for() {
 # build is gone; its ISA rules hold for the tool as for the server exe.
 cvector_ships_for() {
   case "$1" in
-    *-apple-darwin | x86_64-pc-windows-msvc | x86_64-unknown-linux-gnu) return 0 ;;
-    *)                                                                 return 1 ;;
+    *-apple-darwin | x86_64-pc-windows-msvc | x86_64-unknown-linux-gnu | aarch64-unknown-linux-gnu) return 0 ;;
+    *)                                                                                           return 1 ;;
   esac
 }
 
@@ -545,10 +555,26 @@ stage_dynamic_isa_companions() {
   esac
 }
 
+# GitHub #185, cross build check 19.11.2026: the armv9.2 CPU variants of
+# GGML_CPU_ALL_VARIANTS ask for "+sme", which GCC 13 (Ubuntu 24.04's default)
+# refuses ("invalid feature modifier 'sme'"); GCC 14 builds them. Say so up
+# front instead of failing half way. The compiler is $CC when set (a cross
+# build sets it, e.g. CC=aarch64-linux-gnu-gcc-14), else cc.
+require_arm_variant_compiler() {
+  local cc="${CC:-cc}" major
+  if "$cc" --version 2>/dev/null | grep -qi clang; then return 0; fi
+  major="$("$cc" -dumpversion 2>/dev/null | cut -d. -f1)"
+  case "$major" in
+    ''|*[!0-9]*) return 0 ;;
+  esac
+  [ "$major" -ge 14 ] || die "aarch64-unknown-linux-gnu needs GCC 14 or newer for the armv9.2 CPU variants; $cc is GCC $major. Install gcc-14/g++-14 and run again with CC=gcc-14 CXX=g++-14."
+}
+
 build_triple() {
   require_cmake
   local triple="$1"
   local build_dir="$CACHE_DIR/build-$triple"
+  [ "$triple" != "aarch64-unknown-linux-gnu" ] || require_arm_variant_compiler
   local flags; flags="$(cmake_flags_for "$triple")"
   log "configuring $triple  ($flags)"
   # shellcheck disable=SC2086
@@ -643,7 +669,7 @@ check_binary() {
   # a triple where $ORIGIN does not reach across directories), which the
   # loader needs before main() ever runs. Mirror the real environment here
   # too, or this check can pass for a reason the shipped app does not share.
-  if [ "${triple}" = "x86_64-unknown-linux-gnu" ]; then
+  if [ "${triple#*-unknown-linux-}" = "gnu" ]; then
     local ld_path="$run_dir"
     [ -z "${LD_LIBRARY_PATH:-}" ] || ld_path="$run_dir:$LD_LIBRARY_PATH"
     export LD_LIBRARY_PATH="$ld_path"
