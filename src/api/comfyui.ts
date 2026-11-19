@@ -2025,7 +2025,10 @@ export async function findMatchingVAE(modelType: ModelType): Promise<string> {
     // different latent and is never taken for it.
     const match = vaes.find(v => isMinimaxH3ImageName(v) && lower(v).includes('vae'))
     if (match) return match
-    throw new Error(`No MiniMax H3 Image VAE found. Download "minimax_h3_image_vae_fp16.safetensors" from the Model Manager.`)
+    // The Model Manager does not list H3 Image while its licence question is
+    // open (3.1.3 integration), so the hint names the official source instead.
+    // Back to "from the Model Manager" when the bundle (87a9f37ba) goes in.
+    throw new Error(`No MiniMax H3 Image VAE found. Put "minimax_h3_image_vae_fp16.safetensors" from Comfy-Org/MiniMax-H3-Image on Hugging Face into ComfyUI's models/vae folder.`)
   }
   if (modelType === 'minimaxh3') {
     // The VIDEO autoencoder; the audio one is a second file of its own
