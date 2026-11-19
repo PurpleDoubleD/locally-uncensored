@@ -2,6 +2,89 @@
 
 All notable changes to Locally Uncensored are documented here.
 
+## [3.1.3] - 2026-11-22
+
+Scene to Video comes to the desktop app, Swap Character runs on your own
+computer, and Agent mode asks in the chat where it works.
+
+### Added
+- **Scene to Video in Create.** Drop in a short video of a scene, for example
+  a grey room from Blender, and a prompt, and LU turns it into a finished
+  clip that keeps the camera and the layout. On LU Cloud with the same models
+  as on lu-labs.ai (Wan 3.0 Scene, Seedance 2.5 Flash, Wan 2.1 VACE, Aleph 2,
+  FLUX 3 Video Edit), with an optional first frame of your own or one made from
+  the prompt. On Windows and Linux it also runs locally through ComfyUI on
+  Wan 2.1 VACE, driven by a depth video of the scene (Depth Anything V2 Small),
+  for the first five seconds of the clip. On macOS Scene to Video runs on
+  LU Cloud.
+- **Swap Character on your own computer (Windows and Linux).** Wan 2.2 Animate
+  in replace mode puts one character into a video and keeps the original
+  sound, for the first five seconds. Two or more people at once run on
+  LU Cloud. On macOS Swap runs on LU Cloud.
+- **One rule for the people in a video, for every model.** Each person is a row
+  with a number, a place in the frame and a character. What a model cannot do
+  is said at that row and at Create, together with a model that can. LU no
+  longer switches the model by itself.
+- **Memory in long story chats (GH #255).** Memories are no longer cut at 500
+  characters without a word: the limit is a setting ("Characters per memory",
+  3000 by default), and a cut memory ends with a note how much was left out.
+  The brain icon shows what the last request really sent, what was left out
+  and what was cut. Pin a memory to send it with every request, give memories
+  a token budget of their own, and switch memories off for the whole app or for
+  one chat. Handwritten memories are never overwritten by the automatic
+  clean-up, and the keyword search finds Japanese, Chinese and Korean words.
+- **A token limit per Agent run (GH #256)** next to the credit limit, and a
+  switch for the line with the date and time in the system prompt (GH #257).
+- **The context list shows the system prompt of the last request**, exactly as
+  the model got it (GH #257).
+
+### Changed
+- **Agent mode turns on right away.** On the first message the agent asks in
+  the chat: sandbox or folder. Your message waits and carries on after the
+  choice. The badge next to Agent says "Choose…" until you pick.
+- **MiniMax H3 Image runs on LU's own workflow.** Your prompt, the size, the
+  number of pictures and up to four reference pictures go in, and Edit works
+  with it. An imported copy of the official template is skipped with a note,
+  because LU could not put your prompt into it.
+- **The Character tab** has a short menu behind the three dots of the active
+  tab instead of the card on the stage.
+- **The search in Discover** looks through Mainstream and Unfiltered for text,
+  image and video models alike, and says which hit comes from which.
+- **Piper text to speech** installs into an environment of its own with pinned
+  versions (GH #254). A Python that is too new for it no longer breaks the
+  install, and a failure shows pip's own lines about the conflict.
+
+### Fixed
+- Voice talks to the provider of the model you picked, also for an additional
+  OpenAI-compatible provider (Discussion #258). Before, it always used the
+  first OpenAI-compatible entry.
+- Voice without an open chat speaks as the persona picked for the whole app.
+- Training on "Normal" on a graphics card just below its memory floor switches
+  to Low VRAM and says so in the trainer, instead of stopping (GH #260).
+- Spelling suggestions are back in the right-click menu of a text field on
+  macOS and Windows.
+- A main model in the wrong ComfyUI folder is named with where it belongs,
+  instead of ComfyUI's "Value not in list" line (GH #234).
+- A LoRA is never loaded twice in one run. Krea 2 with reference pictures no
+  longer loads its style LoRA a second time when it is also on in the LoRA list,
+  which turned the pictures into noise. A LoRA picked twice goes in once, at
+  both strengths added up.
+- A picture made from Chat or Agent takes Steps and CFG from Create for the same
+  model, like Create itself.
+- An endpoint that refuses unknown fields in the request, such as Google's
+  OpenAI-compatible Gemini endpoint, gets those fields left out and answers.
+- LU Cloud answers "images too large", "request too large" and "unsupported
+  response format" end the turn after one request with the server's sentence,
+  instead of repeating the request up to eight times.
+- In Swap, two photos picked one right after the other both stay. Before, the
+  second could drop the first, and Create stayed off.
+
+### Build
+- Linux on ARM64 can be built from source with an overlay configuration
+  (GH #185). It needs GCC 14 or newer. There is no ready ARM64 download.
+- Security updates of the zip, libc and sysinfo libraries, and of the GitHub
+  Actions used to build the release.
+
 ## [3.1.2] - 2026-11-19
 
 Local models load again on Macs with macOS 14 and 15.

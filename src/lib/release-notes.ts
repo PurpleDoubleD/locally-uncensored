@@ -678,7 +678,115 @@ const NOTE_311: ReleaseNote = {
   ],
 }
 
+// 3.1.3 (Integration 313, 19.11.2026). Feature-Blatt: vorn die fuenf Dinge,
+// die ein Nutzer zuerst merkt (Scene, Swap lokal, Agent fragt im Chat,
+// Memory #255, H3 Image), darunter der Rest aus CHANGELOG [3.1.3].
+const NOTE_313: ReleaseNote = {
+  version: '3.1.3',
+  headline: 'Scene to Video in Create, Swap on your own computer, and Agent mode asks in the chat where it works.',
+  lines: [
+    {
+      title: 'Scene to Video in Create.',
+      detail: 'Drop in a short video of a scene and a prompt, and LU turns it into a finished clip that keeps the camera and the layout. On LU Cloud, and on Windows and Linux also locally through ComfyUI with Wan 2.1 VACE.',
+    },
+    {
+      title: 'Swap Character on your own computer.',
+      detail: 'On Windows and Linux, Wan 2.2 Animate puts one character into a video and keeps the original sound. Each person in the video is a row with its place and its character, and LU never changes the model by itself.',
+    },
+    {
+      title: 'Agent mode turns on right away.',
+      detail: 'On the first message it asks in the chat: sandbox or folder. Your message stays and carries on after the choice.',
+    },
+    {
+      title: 'Long story chats keep their memories whole.',
+      detail: 'Memories are no longer cut at 500 characters. The brain icon shows what the last request sent, and you can pin a memory, give memories their own token budget or switch them off for one chat.',
+    },
+    {
+      title: 'MiniMax H3 Image runs on LU\'s own workflow.',
+      detail: 'Your prompt, size, number of pictures and reference pictures go in, and Edit works with it.',
+    },
+  ],
+  details: [
+    {
+      title: 'Agent and chat',
+      items: [
+        {
+          title: 'A token limit per Agent run.',
+          detail: 'It stands next to the credit limit in Settings, Agent.',
+        },
+        {
+          title: 'The date and time line is a switch.',
+          detail: 'Turn off the line with the current date and time in the system prompt.',
+        },
+        {
+          title: 'See the system prompt that was sent.',
+          detail: 'The context list shows the system prompt of the last request, exactly as the model got it.',
+        },
+        {
+          title: 'Endpoints that refuse unknown fields answer.',
+          detail: 'Fields an endpoint names as unknown, as Google\'s Gemini endpoint does, are left out and the request goes again.',
+        },
+        {
+          title: 'Clear LU Cloud errors end the turn.',
+          detail: 'Images too large, request too large and unsupported response format stop after one request with the server\'s sentence.',
+        },
+      ],
+    },
+    {
+      title: 'Create',
+      items: [
+        {
+          title: 'A LoRA is never loaded twice.',
+          detail: 'Krea 2 with reference pictures no longer loads its style LoRA a second time, which turned pictures into noise.',
+        },
+        {
+          title: 'Pictures from Chat or Agent take Create\'s Steps and CFG.',
+          detail: 'For the same model, a picture made from a chat uses the values set in Create.',
+        },
+        {
+          title: 'A model in the wrong folder is named.',
+          detail: 'LU says where the file is and where it belongs, instead of ComfyUI\'s "Value not in list".',
+        },
+        {
+          title: 'The Character tab has a short menu.',
+          detail: 'Rename, Train and Delete sit behind the three dots of the active tab.',
+        },
+        {
+          title: 'Two photos in Swap both stay.',
+          detail: 'A second photo picked right after the first no longer drops it.',
+        },
+      ],
+    },
+    {
+      title: 'Voice, models and training',
+      items: [
+        {
+          title: 'Voice uses the provider of your model.',
+          detail: 'Also for an additional OpenAI-compatible provider. Without an open chat it speaks as the persona picked for the whole app.',
+        },
+        {
+          title: 'Training switches to Low VRAM and says so.',
+          detail: 'Normal on a card just below its memory floor runs on Low VRAM instead of stopping.',
+        },
+        {
+          title: 'Spelling suggestions in the right-click menu.',
+          detail: 'Back in text fields on macOS and Windows.',
+        },
+        {
+          title: 'Discover searches both catalogues.',
+          detail: 'Text, image and video search Mainstream and Unfiltered and say which hit is which.',
+        },
+        {
+          title: 'Piper installs into its own environment.',
+          detail: 'With pinned versions, so a Python that is too new no longer breaks the install.',
+        },
+      ],
+    },
+  ],
+}
+
 export const RELEASE_NOTES: ReleaseNote[] = [
+  NOTE_313,
   // 3.1.2 (19.11.2026, Hotfix A40, GH #259). Wer von 3.1.1 oder 3.0.10 kommt,
   // sieht das Blatt von 3.1.1 mit der Mac-Zeile vorn.
   {

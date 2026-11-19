@@ -67,6 +67,15 @@ const ITEMS_310: readonly NoteItem[] = [
 ]
 
 export const MOBILE_RELEASE_NOTES: readonly MobileReleaseNote[] = [
+  // 3.1.3 (desktop feature release): on the phone only the shared memory store changed (#255), so that line leads and the 3.1.2 page follows for whoever skipped it.
+  note('3.1.3', 'Long chats keep their memories whole.', [
+    'A memory is no longer cut at 500 characters without a word. A long one ends at a sentence and says how much was left out, and Japanese, Chinese and Korean words are found by the search.',
+    {
+      text: 'Once a long chat had to be shortened, the app cut it at a different place on every message, so LU Cloud could not reuse what it had already read and every message was charged in full. Now the cut stays in place and the earlier part is reused.',
+      unpriced: 'Once a long chat had to be shortened, the app cut it at a different place on every message, so LU Cloud could not reuse what it had already read. Now the cut stays in place and the earlier part is reused.',
+    },
+    ...ITEMS_310,
+  ]),
   // 3.1.2 (19.11.2026, hotfix A40 for the Mac engine): nothing changed on the phone, so it keeps the 3.1.1 page for whoever skipped it.
   note('3.1.2', 'Long chats on LU Cloud cost what they should again.', [
     {
