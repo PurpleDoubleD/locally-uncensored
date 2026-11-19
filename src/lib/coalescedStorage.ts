@@ -168,7 +168,9 @@ export function coalescedJSONStorage<S>(
       // Nothing is migrated here. Hydration waits on this read, and every
       // second it takes is a second in which the store holds no chats; any
       // lighter form is produced by the next ordinary write (see `prepare`).
-      return raw instanceof Promise ? raw.then(parse) : parse(raw)
+      // zustand 5.1 types getItem as PromiseLike, so narrow on the synchronous
+      // shapes instead of `instanceof Promise`.
+      return raw === null || typeof raw === 'string' ? parse(raw) : Promise.resolve(raw).then(parse)
     },
 
     setItem: (name, value) => {

@@ -25,7 +25,7 @@ export const memoryPersistence: StateStorage = {
       if (name === KEY && version === writeVersion) latestValue = value
       return value
     }
-    const read = pending ? enqueue(() => idbStorage.getItem(name)) : idbStorage.getItem(name)
+    const read = pending ? enqueue(() => Promise.resolve(idbStorage.getItem(name))) : idbStorage.getItem(name)
     return read === null || typeof read === 'string' ? track(read) : Promise.resolve(read).then(track)
   },
   setItem: (name, value) => {
