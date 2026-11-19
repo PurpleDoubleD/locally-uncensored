@@ -988,6 +988,12 @@ function videoBundleLine(intent: string): string {
   return ` The lane needs ${intent === 'animate' || intent === 'extend' ? 'an image-to-video' : 'a text-to-video'} model, so this installs ${name} (~${b.totalSizeGB} GB, ${b.vramRequired} VRAM).`
 }
 
+const SCENE_BUNDLE_COPY = {
+  icon: Clapperboard,
+  title: 'Local Scene to Video needs a one-time download',
+  description: 'This sets up Wan 2.1 VACE plus its support files (~10.5 GB, runs from 8 GB VRAM). It follows the depth of your scene and paints the look you describe over it.',
+} as const
+
 function ModelInstallCard({ kind }: { kind: 'image' | 'video' | 'audio' | 'lipsync' | 'motion' | 'upscale' }) {
   const { installModelBundle, connected } = useCreateExp()
   const intent = useCreateStore((s) => s.intent())
@@ -1001,7 +1007,9 @@ function ModelInstallCard({ kind }: { kind: 'image' | 'video' | 'audio' | 'lipsy
   // there and never renders this card.
   // Motion Control too (3.0.8): its LoRA, for the LTX-2.3 pack it runs on.
   const macKind = mac && (kind === 'image' || kind === 'video' || kind === 'motion') ? kind : null
-  const copy = macKind ? MAC_BUNDLE_COPY[macKind] : BUNDLE_COPY[kind]
+  // Scene to Video installs the same VACE bundle as Motion Control, and says
+  // what it is for there.
+  const copy = macKind ? MAC_BUNDLE_COPY[macKind] : intent === 'scene' && kind === 'motion' ? SCENE_BUNDLE_COPY : BUNDLE_COPY[kind]
   // The Mac lane runs its own MLX stack and has no ComfyUI bundle to name.
   const cardGb = useGraphicsCardGb()
   // The Mac's video starter is chosen per Mac, so its card is written from
