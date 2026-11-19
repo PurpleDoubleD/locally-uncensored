@@ -1271,6 +1271,8 @@ pub fn run() {
             commands::search::web_search,
             commands::search::web_fetch,
             commands::search::web_research,
+            // A33: the spelling suggestions of LU's own right-click menu.
+            commands::spell::spell_suggestions,
             commands::browser::browser_open,
             commands::browser::browser_snapshot,
             commands::browser::browser_scroll,

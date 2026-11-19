@@ -67,3 +67,35 @@ export function readTarget(el: Element | null, selection: string): TextTarget {
 export function keepsNativeMenu(dev: boolean): boolean {
   return dev
 }
+
+// A33 (Discord, 17.11.2026): the web view's menu carried the spelling
+// suggestions of the word under the click, and they went with it. LU's menu
+// asks the system's checker (src-tauri/src/commands/spell.rs) and puts them
+// on top, as the web view did.
+
+const WORD_CHAR = /[\p{L}'’-]/u
+
+/** The word a right click in a text field is about: the selection when it
+ *  is one word, else the word around the caret. Null when there is none. */
+export function wordAt(value: string, start: number, end: number): { word: string; from: number; to: number } | null {
+  const trimEdges = (from: number, to: number) => {
+    while (from < to && !/\p{L}/u.test(value[from])) from++
+    while (to > from && !/\p{L}/u.test(value[to - 1])) to--
+    return to > from ? { word: value.slice(from, to), from, to } : null
+  }
+  if (end > start) {
+    const sel = value.slice(start, end)
+    if (![...sel].every((c) => WORD_CHAR.test(c))) return null
+    return trimEdges(start, end)
+  }
+  let from = Math.max(0, Math.min(start, value.length))
+  let to = from
+  while (from > 0 && WORD_CHAR.test(value[from - 1])) from--
+  while (to < value.length && WORD_CHAR.test(value[to])) to++
+  return trimEdges(from, to)
+}
+
+/** The menu's id of a suggestion, apart from the four text actions. */
+export function spellActionId(i: number): string {
+  return `spell-${i}`
+}

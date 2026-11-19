@@ -269,14 +269,14 @@ encoding_rs = { version = "0.8", optional = true }
 # Which app a window belongs to, for computer use. Both are already in
 # Cargo.lock through tauri and xcap (MIT). libc, which computer use also names
 # on macOS, is declared once for every unix below, with its exact pin.
-objc2-app-kit = { version = "0.3", default-features = false, features = ["NSRunningApplication", "libc", "NSImage", "NSImageRep", "NSBitmapImageRep"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["NSRunningApplication", "libc", "NSImage", "NSImageRep", "NSBitmapImageRep", "NSSpellChecker"] }
 # The LU browser (commands/browser.rs, P-L 3.1.0): read a page in our own
 # JavaScript world and take its picture. Both crates are in Cargo.lock already
 # through wry, same versions; named here only for the WKWebView calls Tauri
 # 2.10 does not expose (it has no eval with an answer).
 objc2-web-kit = { version = "0.3", default-features = false, features = ["std", "block2", "objc2-app-kit", "WKWebView", "WKContentWorld", "WKFrameInfo", "WKSnapshotConfiguration"] }
 block2 = "0.6"
-objc2-foundation = { version = "0.3", default-features = false, features = ["NSString", "NSURL", "NSArray", "NSData", "NSDictionary", "NSError", "NSIndexSet"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["NSString", "NSURL", "NSArray", "NSData", "NSDictionary", "NSError", "NSIndexSet", "NSRange", "NSEnumerator"] }
 
 # Remove Background on a Mac (commands/mlx_cutout): the subject mask comes
 # from the Vision framework of macOS 14, so the cutout needs no model and no
@@ -308,7 +308,7 @@ libc = "=0.2.183"
 # answer and CapturePreview of WebView2. Both in Cargo.lock already through
 # wry, same versions.
 webview2-com = "0.38"
-windows = { version = "0.61", features = ["Win32_System_Com", "Win32_UI_Shell"] }
+windows = { version = "0.61", features = ["Win32_System_Com", "Win32_UI_Shell", "Win32_Globalization"] }
 windows-sys = { version = "0.59", features = ["Win32_System_JobObjects", "Win32_System_Threading", "Win32_Foundation", "Win32_Security", "Win32_Storage_FileSystem", "Win32_UI_WindowsAndMessaging", "Win32_UI_HiDpi", "Win32_UI_Input_KeyboardAndMouse", "Win32_Graphics_Gdi", "Win32_Graphics_Dwm"] }
 # The accessibility tree for computer use (Apache-2.0). "input" is the one
 # feature its core module does not compile without.

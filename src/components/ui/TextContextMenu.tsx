@@ -6,9 +6,9 @@ import { useEffect, useState } from 'react'
 import { ContextMenu } from './ContextMenu'
 import type { MenuAction } from './menu-actions'
 import { log } from '../../lib/logger'
-import { isTauri } from '../../api/backend'
+import { backendCall, isTauri } from '../../api/backend'
 import {
-  TEXT_ACTION_LABEL, editableOf, keepsNativeMenu, readTarget, textMenuActions, type TextAction,
+  TEXT_ACTION_LABEL, editableOf, keepsNativeMenu, readTarget, spellActionId, textMenuActions, wordAt, type TextAction,
 } from '../../lib/text-context-menu'
 
 interface Open {
@@ -18,6 +18,36 @@ interface Open {
   field: HTMLInputElement | HTMLTextAreaElement | HTMLElement | null
   range: [number, number] | null
   selected: string
+  /** A33: the system checker's suggestions for the word under the click. */
+  spell?: { from: number; to: number; suggestions: string[] }
+}
+
+/** How long the menu waits for the checker before it opens without it. */
+const SPELL_WAIT_MS = 250
+
+/** A33: what the system's checker says about the word under the click.
+ *  Null for anything but a misspelled word, and when it takes too long. */
+async function spellingOf(field: Open['field'], range: [number, number] | null): Promise<Open['spell'] | null> {
+  if (!(field instanceof HTMLInputElement || field instanceof HTMLTextAreaElement) || !range) return null
+  if (field.readOnly || field.disabled || field.spellcheck === false || field.getAttribute('spellcheck') === 'false') return null
+  const at = wordAt(field.value, range[0], range[1])
+  if (!at) return null
+  const answer = await Promise.race([
+    backendCall<{ misspelled: boolean; suggestions: string[] }>('spell_suggestions', { word: at.word }).catch(() => null),
+    new Promise<null>((r) => setTimeout(() => r(null), SPELL_WAIT_MS)),
+  ])
+  if (!answer?.misspelled || answer.suggestions.length === 0) return null
+  return { from: at.from, to: at.to, suggestions: answer.suggestions }
+}
+
+/** Put a suggestion in place of the word, through the editing command, so
+ *  the field's undo and React's onChange see it like typing. */
+function replaceWord(o: Open, text: string) {
+  const f = o.field
+  if (!o.spell || !(f instanceof HTMLInputElement || f instanceof HTMLTextAreaElement)) return
+  f.focus()
+  f.setSelectionRange(o.spell.from, o.spell.to)
+  document.execCommand('insertText', false, text)
 }
 
 /** Put the field back as it was at the right click: focus and selection. */
@@ -78,13 +108,19 @@ export function TextContextMenu() {
         fieldSelected = field.value.slice(range[0], range[1])
       }
       const actions = textMenuActions(readTarget(el, fieldSelected))
-      setOpen(actions.length > 0 ? { x: e.clientX, y: e.clientY, actions, field, range, selected: fieldSelected } : null)
+      if (actions.length === 0) { setOpen(null); return }
+      const base: Open = { x: e.clientX, y: e.clientY, actions, field, range, selected: fieldSelected }
+      void spellingOf(field, range).then((spell) => setOpen(spell ? { ...base, spell } : base))
     }
     document.addEventListener('contextmenu', onMenu)
     return () => document.removeEventListener('contextmenu', onMenu)
   }, [])
 
   if (!open) return null
-  const items: MenuAction[] = open.actions.map((a) => ({ id: a, label: TEXT_ACTION_LABEL[a], run: () => { void run(open, a) } }))
+  const spelling: MenuAction[] = (open.spell?.suggestions ?? []).map((text, i) => ({ id: spellActionId(i), label: text, run: () => replaceWord(open, text) }))
+  const items: MenuAction[] = [
+    ...spelling,
+    ...open.actions.map((a) => ({ id: a, label: TEXT_ACTION_LABEL[a], run: () => { void run(open, a) } })),
+  ]
   return <ContextMenu items={items} x={open.x} y={open.y} label="Text" onClose={() => setOpen(null)} />
 }

@@ -12,8 +12,17 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { cleanup, render, screen, fireEvent, act } from '@testing-library/react'
 
-const env = vi.hoisted(() => ({ tauri: true }))
-vi.mock('../../../api/backend', async (o) => ({ ...(await o<typeof import('../../../api/backend')>()), isTauri: () => env.tauri }))
+const env = vi.hoisted(() => ({ tauri: true, spell: { misspelled: false, suggestions: [] as string[] }, asked: [] as unknown[] }))
+vi.mock('../../../api/backend', async (o) => ({
+  ...(await o<typeof import('../../../api/backend')>()),
+  isTauri: () => env.tauri,
+  // A33: the system checker, as spell.rs answers.
+  backendCall: vi.fn(async (cmd: string, args: unknown) => {
+    if (cmd !== 'spell_suggestions') throw new Error(`unexpected ${cmd}`)
+    env.asked.push(args)
+    return env.spell
+  }),
+}))
 
 import { TextContextMenu } from '../TextContextMenu'
 import { textMenuActions, readTarget, keepsNativeMenu } from '../../../lib/text-context-menu'
@@ -28,7 +37,7 @@ function rightClick(el: Element) {
 }
 const labels = () => screen.queryAllByRole('menuitem').map((b) => b.textContent)
 
-beforeEach(() => { env.tauri = true; vi.stubEnv('DEV', false) })
+beforeEach(() => { env.tauri = true; env.spell = { misspelled: false, suggestions: [] }; env.asked = []; vi.stubEnv('DEV', false) })
 afterEach(() => { cleanup(); vi.unstubAllEnvs(); document.body.innerHTML = '' })
 
 describe('which actions, where', () => {
@@ -54,14 +63,52 @@ describe('which actions, where', () => {
 })
 
 describe('the right click in the app', () => {
-  it('in the prompt: the web view menu is off and LU shows Cut, Copy, Paste, Select all', () => {
+  it('in the prompt: the web view menu is off and LU shows Cut, Copy, Paste, Select all', async () => {
     render(<><textarea data-testid="prompt" defaultValue="a lighthouse at dusk" /><TextContextMenu /></>)
     const ta = screen.getByTestId('prompt') as HTMLTextAreaElement
     ta.focus()
     ta.setSelectionRange(2, 12)
     const e = rightClick(ta)
     expect(e.defaultPrevented).toBe(true)
+    await screen.findByRole('menu')
     expect(labels()).toEqual(['Cut', 'Copy', 'Paste', 'Select all'])
+  })
+
+  it('A33: on a misspelled word the checker\'s suggestions come first and replace the word', async () => {
+    env.spell = { misspelled: true, suggestions: ['receive', 'relieve'] }
+    let value = 'please recieve it'
+    const onChange = vi.fn((e: { target: HTMLTextAreaElement }) => { value = e.target.value })
+    render(<><textarea data-testid="prompt" defaultValue={value} onChange={onChange} /><TextContextMenu /></>)
+    const ta = screen.getByTestId('prompt') as HTMLTextAreaElement
+    ta.focus()
+    ta.setSelectionRange(10, 10)
+    rightClick(ta)
+    await screen.findByRole('menu')
+    expect(env.asked).toEqual([{ word: 'recieve' }])
+    expect(labels()).toEqual(['receive', 'relieve', 'Paste', 'Select all'])
+    // jsdom has no editing commands: stand in for the web view's insertText.
+    const exec = vi.fn((_cmd: string, _ui: boolean, text: string) => {
+      const [a, b] = [ta.selectionStart, ta.selectionEnd]
+      ta.value = ta.value.slice(0, a) + text + ta.value.slice(b)
+      return true
+    })
+    Object.assign(document, { execCommand: exec })
+    await act(async () => { fireEvent.click(screen.getByRole('menuitem', { name: 'receive' })) })
+    expect(exec).toHaveBeenCalledWith('insertText', false, 'receive')
+    expect(ta.value).toBe('please receive it')
+  })
+
+  it('A33: a right word, a read-only field or a field without spellcheck gets no suggestions', async () => {
+    render(<><textarea data-testid="ro" readOnly defaultValue="recieve" /><textarea data-testid="nosc" spellCheck={false} defaultValue="recieve" /><TextContextMenu /></>)
+    env.spell = { misspelled: true, suggestions: ['receive'] }
+    for (const id of ['ro', 'nosc']) {
+      const ta = screen.getByTestId(id) as HTMLTextAreaElement
+      ta.setSelectionRange(2, 2)
+      rightClick(ta)
+      await screen.findByRole('menu')
+      expect(labels()).not.toContain('receive')
+    }
+    expect(env.asked).toEqual([])
   })
 
   it('Copy puts the selected words on the clipboard', async () => {
@@ -72,6 +119,7 @@ describe('the right click in the app', () => {
     ta.focus()
     ta.setSelectionRange(2, 12)
     rightClick(ta)
+    await screen.findByRole('menu')
     await act(async () => { fireEvent.click(screen.getByRole('menuitem', { name: 'Copy' })) })
     expect(writeText).toHaveBeenCalledWith('lighthouse')
   })
