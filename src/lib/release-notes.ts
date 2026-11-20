@@ -759,6 +759,10 @@ const NOTE_313: ReleaseNote = {
           title: 'Two photos in Swap both stay.',
           detail: 'A second photo picked right after the first no longer drops it.',
         },
+        {
+          title: 'Local 3D on the Mac keeps working through a long step.',
+          detail: 'Stable Fast 3D and TripoSR report every 30 seconds, so a long step is no longer ended after five minutes. A run that really hangs is ended with the step it was in and its last lines.',
+        },
       ],
     },
     {

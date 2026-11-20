@@ -86,6 +86,10 @@ in the cloud catalogue.
   and a /loop ends.
 - Right-click spelling suggestions on a Windows without English spelling data
   no longer offer corrections from another language for right English words.
+- Local 3D on the Mac: a step of Stable Fast 3D or TripoSR that works longer
+  than five minutes without a line of its own is no longer ended as hung
+  (GH #261). Both runners send a heartbeat every 30 seconds. A run that really
+  stops answering is ended with the step it was in and its last lines.
 
 ### Build
 - Linux on ARM64 can be built from source with an overlay configuration
