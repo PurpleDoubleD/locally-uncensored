@@ -1,5 +1,6 @@
 import { stripSourcesMarker } from '../lib/web-evidence'
 import { billingOf, creditRatesOf } from '../lib/agent-core/credit-rates'
+import { cloudAgentStopOf, LOOP_HALT_CLOUD_AGENT_STOP } from '../lib/agent-core/cloud-agent-stop'
 import { isServerLoopCut, LOOP_HALT_COST, LOOP_HALT_GUARD, LOOP_HALT_SERVER_LOOP, SERVER_LOOP_MESSAGE, SERVER_LOOP_RETRIES } from '../lib/agent-core/server-loop-cut'
 import { canonicalArgs, repeatLabel, skippedRepeatsNote } from '../lib/agent-core/repeat-note'
 import { replayableReasoning } from '../lib/agent-core/reasoning-replay'
@@ -3757,6 +3758,18 @@ export function useAgentChat() {
               emptyAnswerExplanation({ finishReason: MODEL_SWITCH_FINISH, captured: false, keepThinking: false }),
             )
           }
+        } else if (cloudAgentStopOf(err)) {
+          // LU Cloud ended the run itself (409, lib/agent-core/cloud-agent-stop.ts):
+          // a quiet stop under what was written, not "Agent error: ...", and
+          // nothing is sent again. The loop ends too, its next pass would stop
+          // the same way.
+          const stop = cloudAgentStopOf(err)!
+          loopHalt = LOOP_HALT_CLOUD_AGENT_STOP
+          useChatStore.getState().updateMessageFinishReason(convId!, assistantMessage.id, stop)
+          useChatStore.getState().updateMessageContent(
+            convId!, assistantMessage.id,
+            runState.content.trim() ? runState.content : emptyAnswerExplanation({ finishReason: stop, captured: false, keepThinking: false }),
+          )
         } else if (isServerLoopCut(err)) {
           // LU Cloud cut a step twice for repeating (lib/agent-core/server-loop-cut.ts).
           loopHalt = LOOP_HALT_SERVER_LOOP

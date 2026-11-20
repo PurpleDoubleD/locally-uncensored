@@ -1,5 +1,6 @@
 import { resolveMessageAttachments } from '../../lib/chat-attachments'
 import { finalCodeOf, isCloudFinalCode } from '../../lib/cloud-final-codes'
+import { isCloudAgentStopCode } from '../../lib/agent-core/cloud-agent-stop'
 import { unknownFieldsIn } from './unknown-fields'
 import { captureFlashGeneration, chatBilling, parseFlashPolicy, recordFlashResponse } from '../../lib/flash-ui'
 
@@ -2257,6 +2258,9 @@ export class OpenAIProvider implements ProviderClient {
     // A request without streaming that LU Cloud ended after ten minutes with
     // nothing to show; lib/http-status treats it as terminal.
     else if (serverCode === 'stalled_runaway') code = 'stalled_runaway'
+    // LU Cloud ended the agent run itself (HTTP 409, agent-core/cloud-agent-stop.ts):
+    // the code travels, so the agent shows a quiet stop and sends nothing again.
+    else if (isCloudAgentStopCode(serverCode)) code = serverCode
     // A request LU Cloud says cannot work as it is (lib/cloud-final-codes):
     // the code travels, so no retry anywhere sends it again.
     else if (isCloudFinalCode(serverCode)) code = serverCode as string

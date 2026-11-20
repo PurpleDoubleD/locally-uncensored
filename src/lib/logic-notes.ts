@@ -20,6 +20,7 @@ import type { MessageErrorKind } from '../types/chat'
 import { DISCONNECT_WITHOUT_ANSWER } from './answer-notes'
 import { CREDITS_EXHAUSTED_MESSAGE } from './credits-exhausted'
 import { SERVER_LOOP_MESSAGE } from './agent-core/server-loop-cut'
+import { AGENT_LOOP_STOP_SENTENCE, AGENT_RUN_LIMIT_SENTENCE } from './agent-core/cloud-agent-stop'
 import { MULTIMODAL_UNSUPPORTED_MESSAGE } from './ollama-errors'
 import { IMAGE_PART_NONE_HEAD, IMAGE_PART_NOT_LOADED_HEAD, IMAGE_PART_RELOADED_HEAD } from './image-part-notes'
 import { PLATFORM_TEXTS } from './platform-text'
@@ -96,6 +97,8 @@ const TAIL_RULES: readonly TailRule[] = [
   { heads: [DISCONNECT_WITHOUT_ANSWER], read: () => ({ kind: 'network', detail: '' }) },
   { heads: [HIT_TOKEN_LIMIT], read: (tail) => ({ kind: 'empty', detail: tail.trim() }) },
   { heads: [SWITCHED_MODEL_HEAD], read: (tail) => ({ kind: 'empty', detail: tail.trim() }) },
+  // LU Cloud ended the agent run before any text (agent-core/cloud-agent-stop.ts, A49): a stop, not an error.
+  { heads: [headOf(AGENT_LOOP_STOP_SENTENCE), headOf(AGENT_RUN_LIMIT_SENTENCE)], read: (tail) => ({ kind: 'empty', detail: tail.trim() }) },
   { heads: [NO_VISIBLE_ANSWER], read: () => ({ kind: 'empty', detail: '' }) },
   { heads: [headOf(CREDITS_EXHAUSTED_MESSAGE)], read: () => ({ kind: 'credits', detail: '' }) },
   { heads: bothWordings('cloudSessionEndedMidRun').map(headOf), read: () => ({ kind: 'session', detail: '' }) },

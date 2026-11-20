@@ -7,6 +7,7 @@
 
 import { isMobile } from './device-kind'
 import { MODEL_SWITCH_FINISH } from './model-switch-stop'
+import { AGENT_LOOP_STOP_SENTENCE, AGENT_RUN_LIMIT_SENTENCE, CLOUD_AGENT_LOOP, CLOUD_AGENT_RUN_LIMIT } from './agent-core/cloud-agent-stop'
 
 /** Short badge label for a turn the model did not finish on its own terms.
  *  null for a clean stop, so the caller renders nothing. */
@@ -17,6 +18,9 @@ export function truncationNotice(finishReason?: string): string | null {
   if (finishReason === 'length') return 'Cut off at the length limit'
   if (finishReason === 'disconnect') return 'Connection dropped before the end'
   if (finishReason === MODEL_SWITCH_FINISH) return 'Stopped because you switched to another model'
+  // LU Cloud ended the agent run (agent-core/cloud-agent-stop.ts).
+  if (finishReason === CLOUD_AGENT_LOOP) return 'Agent stopped because it kept repeating the same steps'
+  if (finishReason === CLOUD_AGENT_RUN_LIMIT) return 'Agent stopped at the step limit of one run'
   return null
 }
 
@@ -38,6 +42,8 @@ export function emptyAnswerExplanation(opts: {
   if (finishReason === MODEL_SWITCH_FINISH) {
     return 'Stopped because you switched to another model before this answer was written. Send the message again to get it from the model that is picked now.'
   }
+  if (finishReason === CLOUD_AGENT_LOOP) return AGENT_LOOP_STOP_SENTENCE
+  if (finishReason === CLOUD_AGENT_RUN_LIMIT) return AGENT_RUN_LIMIT_SENTENCE
   if (finishReason === 'disconnect') {
     return DISCONNECT_WITHOUT_ANSWER
   }
