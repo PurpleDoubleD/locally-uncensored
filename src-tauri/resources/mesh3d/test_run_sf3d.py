@@ -115,5 +115,55 @@ class TheNativeParts(unittest.TestCase):
         self.assertEqual(indices.shape[0], f.shape[0])
 
 
+class TheHeartbeat(unittest.TestCase):
+    """A50 (GitHub #261): a step that works longer than the app's five minutes
+    without a line of its own says a `beat` line on its own. Needs no torch:
+    `python3 -I -m unittest discover -s src-tauri/resources/mesh3d -p 'test_run_sf3d.py' -k TheHeartbeat`."""
+
+    def lines(self, text):
+        return [json.loads(l[len(runner.PREFIX):]) for l in text.splitlines() if l.startswith(runner.PREFIX)]
+
+    def test_beats_name_the_step_its_seconds_and_the_place_of_the_main_thread(self):
+        import contextlib
+        import io
+        import time
+
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            runner.say(phase="paint")
+            done = runner.start_heartbeat(0.05)
+            try:
+                deadline = time.monotonic() + 0.6
+                while time.monotonic() < deadline:
+                    time.sleep(0.01)  # a quiet step of the main thread
+            finally:
+                done.set()
+        said = self.lines(out.getvalue())
+        beats = [s for s in said if s["phase"] == "beat"]
+        self.assertGreaterEqual(len(beats), 3, out.getvalue())
+        for b in beats:
+            self.assertEqual(b["step"], "paint")
+            self.assertIn(":test_beats_name_the_step_its_seconds_and_the_place_of_the_main_thread:", b["at"])
+        self.assertEqual(beats[0]["seconds"], 0)
+        # A beat is no step: the step stays paint.
+        self.assertEqual(runner.STEP["name"], "paint")
+
+    def test_lines_from_two_threads_stay_whole(self):
+        import contextlib
+        import io
+        import threading
+
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            workers = [threading.Thread(target=lambda: [runner.say(phase="note", note="x" * 300) for _ in range(200)]) for _ in range(4)]
+            for w in workers:
+                w.start()
+            for w in workers:
+                w.join()
+        text = out.getvalue().splitlines()
+        self.assertEqual(len(text), 800)
+        self.assertEqual(len(self.lines(out.getvalue())), 800)
+
+
 if __name__ == "__main__":
     unittest.main()
