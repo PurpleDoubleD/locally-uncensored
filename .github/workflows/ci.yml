@@ -199,7 +199,7 @@ jobs:
         run: npm audit --package-lock-only --omit=dev --audit-level=high
 
       - name: Install cargo-audit and cargo-deny
-        uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
+        uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
         with:
           tool: cargo-audit@0.22.2,cargo-deny@0.20.2
 
