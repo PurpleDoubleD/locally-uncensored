@@ -2845,7 +2845,8 @@ const H3_IMAGE_BATCH_MAX = 8
  *   is that latent repeated (RepeatLatentBatch), each copy with its own noise.
  * - Size: the fields, on the node's 32 px grid. In Edit the source keeps its
  *   shape at the fields' pixel count (as the edit template scales it to 4 MP
- *   first), or is cropped to the fields' shape ("Custom size", editShape).
+ *   first); in "Custom size" (editShape) the whole source is the reference
+ *   and the canvas has the fields' size.
  * - Pictures: in Edit the source is image_1, the picture to edit, and the
  *   references follow; in Create the reference images are image_1 and up.
  *   The prompt names them <Picture 1>, <Picture 2> (lib/image-ref-names).
@@ -2909,18 +2910,13 @@ async function buildMiniMaxH3ImageWorkflow(params: GenerateParams, seed: number,
     const loadId = id()
     workflow[loadId] = { class_type: 'LoadImage', inputs: { image } }
     let picture: [string, number] = [loadId, 0]
+    // "Custom size": the source goes in WHOLE, as every reference does. The
+    // node scales a picture by its short edge in its own shape and lays the
+    // canvas out at width x height on its own. Until 3.1.3 the source was
+    // cropped to the fields' shape from its centre first, which cut the head
+    // off a full-length picture (as on Qwen-Image 2.1, Discord 19.11.2026).
     if (edit && i === 0) {
-      if (params.editShape === 'canvas') {
-        // "Custom size": the source cropped to the fields' shape, so the
-        // picture to edit and the canvas agree.
-        const scaleId = id()
-        workflow[scaleId] = {
-          class_type: 'ImageScale',
-          inputs: { image: picture, upscale_method: resizeMethod(allNodes, 'ImageScale', false), width, height, crop: 'center' },
-          _meta: { title: 'Edit shape' },
-        }
-        picture = [scaleId, 0]
-      } else {
+      if (params.editShape !== 'canvas') {
         // "Like the picture": the fields' pixels in the source's shape, read
         // off the scaled source the way the edit template does (scale to the
         // pixel count, on the 32 px grid, then GetImageSize).

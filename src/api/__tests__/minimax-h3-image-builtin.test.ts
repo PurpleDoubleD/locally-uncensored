@@ -147,12 +147,17 @@ describe('MiniMax H3 Image: edit', () => {
     expect(h3ImageMegapixels(2720, 1536)).toBe(3.98)
   })
 
-  it('"Custom size": the source cropped to the fields, the canvas the fields', async () => {
+  it('"Custom size": the whole source is the reference, the canvas the fields (3.1.3, nothing cropped)', async () => {
+    // Until 3.1.3 the source was cropped to the fields' shape from its
+    // centre: a full-length picture in a wide canvas lost its head and the
+    // frame drawn around it (the same report as on Qwen-Image 2.1).
     const wf = await run({ inputImage: 'src.png', editShape: 'canvas', width: 2720, height: 1536 })
     const [, c] = cond(wf)
     expect(c.inputs).toMatchObject({ width: 2720, height: 1536 })
-    expect(loaded(wf, c.inputs['images.image_1']).inputs).toMatchObject({ width: 2720, height: 1536, crop: 'center' })
-    expect(classTypes(wf)).not.toContain('GetImageSize')
+    const source = loaded(wf, c.inputs['images.image_1'])
+    expect(source.class_type).toBe('LoadImage')
+    expect(source.inputs.image).toBe('src.png')
+    for (const cut of ['ImageScale', 'ImageCrop', 'GetImageSize', 'ImageScaleToTotalPixels']) expect(classTypes(wf)).not.toContain(cut)
   })
 
   it('the size line in Create says what the edit comes out at', () => {
