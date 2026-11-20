@@ -133,7 +133,7 @@ const CHECKPOINT_WF: Graph = {
   '9': { class_type: 'SaveImage', inputs: { images: ['8', 0], filename_prefix: 'sdxl' } },
 }
 
-test('C75: a Qwen-Image 2.1 edit in 16:9 from a 3:2 picture crops the source to that shape before the encode', async ({ page }) => {
+test('C75: a Qwen-Image 2.1 edit in 16:9 from a 3:2 picture keeps the whole source and lays the edit out at 16:9', async ({ page }) => {
   await openCreate(page, 'Edit / Image to Image')
   await stageSource(page)
   await page.getByRole('button', { name: 'Advanced settings' }).click()
@@ -144,7 +144,9 @@ test('C75: a Qwen-Image 2.1 edit in 16:9 from a 3:2 picture crops the source to 
   await expect(shape).toContainText('The edit keeps the shape of the picture')
   await shape.getByRole('radio', { name: 'Custom size' }).click()
   await drawer(page).getByRole('button', { name: '16:9', exact: true }).click()
-  await expect(shape).toContainText('The picture is scaled to fill that shape and cropped from its centre.')
+  // 3.1.3: nothing of the picture is cut off any more (a full-length
+  // picture in a square lost its head before).
+  await expect(shape).toContainText("The whole picture is the model's reference, nothing of it is cut off.")
   await shape.scrollIntoViewIfNeeded()
   await shot(page, 'c75-edit-seitenverhaeltnis')
   const size = await page.evaluate(() => {
@@ -158,11 +160,16 @@ test('C75: a Qwen-Image 2.1 edit in 16:9 from a 3:2 picture crops the source to 
   await page.getByRole('button', { name: /^Create$/ }).last().click()
   await expect.poll(async () => (await posted(page)).length, { timeout: 20_000 }).toBe(1)
   const graph = (await posted(page))[0]
-  const [scaleId, scale] = Object.entries(graph).find(([, n]) => n.class_type === 'ImageScale')!
-  expect(scale.inputs).toMatchObject({ width: size.width, height: size.height, crop: 'center', upscale_method: 'lanczos' })
-  expect(graph[(scale.inputs.image as [string, number])[0]].inputs.image).toBe('source.png')
+  // No crop node any more: the source itself is image_1 of the encode.
+  expect(Object.values(graph).some((n) => n.class_type === 'ImageScale' && n.inputs.crop === 'center')).toBe(false)
   const enc = Object.values(graph).find((n) => n.class_type === 'TextEncodeQwenImage21')!
-  expect(enc.inputs['images.image_1']).toEqual([scaleId, 0])
+  const ref = enc.inputs['images.image_1'] as [string, number]
+  expect(graph[ref[0]]).toMatchObject({ class_type: 'LoadImage', inputs: { image: 'source.png' } })
+  // The sampler works on an empty latent at the fields' size, not on the
+  // encode node's latent of the picture's shape.
+  const sampler = Object.values(graph).find((n) => n.class_type === 'KSampler')!
+  const latent = graph[(sampler.inputs.latent_image as [string, number])[0]]
+  expect(latent).toMatchObject({ class_type: 'EmptyLatentImage', inputs: { width: size.width, height: size.height } })
   if (SHOTS) writeFileSync(`${SHOTS}/c75-workflow-16zu9.json`, JSON.stringify(graph, null, 2))
 })
 
