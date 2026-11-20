@@ -290,7 +290,8 @@ export function ParamGroups() {
         {showCfg && !isVideo && cfgNote && <p className={`t-micro ${HINWEIS_TEXT.ruhig}`} data-testid="cfg-hint">{cfgNote}</p>}
         {qwenEditShapeShown && (
           // C75: the shape of a Qwen-Image 2.1 edit. The default is the one
-          // it always had; 'Custom' crops the picture to the size below.
+          // it always had; 'Custom' lays the edit out at the size below, with
+          // the whole picture as the reference (3.1.3, nothing is cropped).
           <div className="space-y-1" data-testid="qwen-edit-shape">
             <span className="t-control text-gray-400">Output shape</span>
             <div role="radiogroup" aria-label="Output shape" className="grid grid-cols-2 gap-1">
@@ -312,7 +313,7 @@ export function ParamGroups() {
             </div>
             <p className="t-micro text-gray-500">
               {s.qwenEditShape === 'canvas'
-                ? `The edit comes out ${qwenEditOut?.width ?? s.width}×${qwenEditOut?.height ?? s.height} px. The picture is scaled to fill that shape and cropped from its centre.`
+                ? `The edit comes out ${qwenEditOut?.width ?? s.width}×${qwenEditOut?.height ?? s.height} px. The whole picture is the model's reference, nothing of it is cut off.`
                 : `The edit keeps the shape of the picture${qwenEditOut ? `, at ${qwenEditOut.width}×${qwenEditOut.height} px` : ''}. The size below sets how many pixels.`}
             </p>
           </div>
