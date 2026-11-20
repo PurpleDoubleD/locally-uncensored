@@ -1,5 +1,7 @@
 import { stripSourcesMarker } from '../lib/web-evidence'
 import { billingOf, creditRatesOf } from '../lib/agent-core/credit-rates'
+import { cloudAgentStopOf, LOOP_HALT_CLOUD_AGENT_STOP } from '../lib/agent-core/cloud-agent-stop'
+import { emptyAnswerExplanation, truncationNotice } from '../lib/answer-notes'
 import { isServerLoopCut, LOOP_HALT_COST, LOOP_HALT_GUARD, LOOP_HALT_SERVER_LOOP, SERVER_LOOP_MESSAGE } from '../lib/agent-core/server-loop-cut'
 import { replayableReasoning } from '../lib/agent-core/reasoning-replay'
 import { NOT_IN_CODE_TAB } from '../lib/browser-tools'
@@ -2962,6 +2964,23 @@ export function useCodex() {
           // another /loop pass would only be refused the same way.
           loopHalt = "too large for the model's context window"
           hint = "\n\nHint: this step does not fit the model's context window, even with the history shortened. Give the model a larger context window (Settings, or where the server loads the model), or start a new chat for the next task."
+        }
+        // LU Cloud ended the run itself (409, lib/agent-core/cloud-agent-stop.ts):
+        // a quiet app notice under what was written, as the Agent tab does,
+        // not "Error: [agent_loop_detected] HTTP 409 ...". No error field, no
+        // retry, and a /loop does not start its next pass.
+        const agentStop = cloudAgentStopOf(err)
+        if (agentStop) {
+          loopHalt = LOOP_HALT_CLOUD_AGENT_STOP
+          const store = useChatStore.getState()
+          store.updateMessageFinishReason(convId, assistantMsg.id, agentStop)
+          if (fullContent.trim()) {
+            store.updateMessageContent(convId, assistantMsg.id, fullContent)
+            store.addMessage(convId, { id: uuid(), role: 'system', notice: 'info', content: truncationNotice(agentStop)!, timestamp: Date.now() })
+          } else {
+            store.updateMessageContent(convId, assistantMsg.id, emptyAnswerExplanation({ finishReason: agentStop, captured: false, keepThinking: false }))
+          }
+          return
         }
         // LU Cloud cut a step for repeating itself: its sentence, not a code.
         if (isServerLoopCut(err)) {
