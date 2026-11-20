@@ -67,7 +67,7 @@
     "remark-math": "^6.0.0",
     "tailwindcss": "^4.2.2",
     "three": "0.183.2",
-    "uuid": "^13.0.0",
+    "uuid": "^14.0.3",
     "zustand": "^5.0.12"
   },
   "devDependencies": {
