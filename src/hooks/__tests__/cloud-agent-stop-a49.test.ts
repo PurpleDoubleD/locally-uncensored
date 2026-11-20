@@ -87,8 +87,8 @@ const realFetch = globalThis.fetch
 
 beforeAll(async () => {
   server = createServer((req, res) => {
-    let body = ''
-    req.on('data', (c) => { body += c })
+    // The body is not needed: every call counts, the reply depends on the count.
+    req.on('data', () => {})
     req.on('end', () => {
       requests++
       if (requests >= stopAt) {
