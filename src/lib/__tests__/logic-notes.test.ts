@@ -46,6 +46,8 @@ const SENTENCES: { name: string; text: string; kind: string; finishReason?: stri
   { name: 'token budget gone while thinking', text: emptyAnswerExplanation({ finishReason: 'length', captured: true, keepThinking: true }), kind: 'empty', finishReason: 'length', thinking: 'hm', aloneOnly: true },
   { name: 'thought and never answered', text: emptyAnswerExplanation({ captured: true, keepThinking: true }), kind: 'empty', thinking: 'hm', aloneOnly: true },
   { name: 'the model was switched before any text', text: emptyAnswerExplanation({ finishReason: 'model_switch', captured: false, keepThinking: false }), kind: 'empty', finishReason: 'model_switch' },
+  { name: 'LU Cloud ended the agent run for repeating, before any text', text: emptyAnswerExplanation({ finishReason: 'agent_loop_detected', captured: false, keepThinking: false }), kind: 'empty', finishReason: 'agent_loop_detected' },
+  { name: 'LU Cloud ended the agent run at its step limit, before any text', text: emptyAnswerExplanation({ finishReason: 'agent_run_limit', captured: false, keepThinking: false }), kind: 'empty', finishReason: 'agent_run_limit' },
   { name: 'nothing visible came back', text: emptyAnswerExplanation({ captured: true, keepThinking: false }), kind: 'empty' },
   { name: 'picture for a model without eyes', text: MULTIMODAL_UNSUPPORTED_MESSAGE, kind: 'generic' },
   { name: 'template refused', text: explainSendRefusal(new Error('jinja: raise_exception')) ?? '', kind: 'generic' },
@@ -181,15 +183,16 @@ describe('guard: the hooks write the sentences this reader knows', () => {
     expect(RATE_LIMIT_LITERAL.startsWith(RATE_LIMIT_HEAD)).toBe(true)
   })
 
-  it('the catch of a plain send has the seven branches read here, the catch of an agent run its thirteen', () => {
+  it('the catch of a plain send has the seven branches read here, the catch of an agent run its fourteen', () => {
     // A new branch writes a new sentence into the answer. It belongs into lib/logic-notes.ts and into the list above.
     // The seventh and the twelfth (3.0.8, A28) are the LU Cloud outage: the server's sentence, so they write the field too.
     // A22: the multimodal branch now asks why (api/image-part-heal); its sentences are read above.
     // The thirteenth (15.11.2026): LU Cloud cut a step for repeating, SERVER_LOOP_MESSAGE.
+    // The fourteenth (A49): LU Cloud ended the run (409), emptyAnswerExplanation with the stop's finishReason.
     const plain = catchOf(chatHook, 'await explainImageRefusal(activeModel)')
     expect(plain.match(/updateMessageContent\(/g)).toHaveLength(7)
     const agent = catchOf(agentHook, "'\\n\\nAgent error: ' + errorMsg")
-    expect(agent.match(/updateMessageContent\(/g)).toHaveLength(13)
+    expect(agent.match(/updateMessageContent\(/g)).toHaveLength(14)
   })
 
   it('an empty turn is explained through one function, in both paths of the chat hook', () => {

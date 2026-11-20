@@ -1,4 +1,5 @@
 import { isCloudFinalCode } from './cloud-final-codes'
+import { isCloudAgentStopCode } from './agent-core/cloud-agent-stop'
 import { FIRST_REPLY_TIMEOUT } from './chat-reply-timeout'
 // The HTTP status of a failed model call, whichever field happens to carry it.
 //
@@ -116,6 +117,9 @@ export function isTerminalModelError(err: unknown): boolean {
   // Images or request too large, a schema the model will not follow: the
   // same request fails the same way (lib/cloud-final-codes).
   if (isCloudFinalCode(e?.code)) return true
+  // LU Cloud ended the agent run (409, agent-core/cloud-agent-stop.ts): a
+  // retry meets the same stop.
+  if (isCloudAgentStopCode(e?.code)) return true
   // LU Cloud has an outage the server announced (lib/cloud-outage.ts). A
   // retry lands in the same outage and only delays the sentence that says so.
   if (e?.code === 'outage') return true
