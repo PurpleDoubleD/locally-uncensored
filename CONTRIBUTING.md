@@ -7,6 +7,7 @@ Thanks for your interest in contributing! This project thrives on community inpu
 ### Prerequisites
 
 - **Node.js** 18+ ([download](https://nodejs.org/))
+- **Rust** 1.95 or newer ([rustup](https://rustup.rs/), then `rustup update stable`). Older compilers stop with "rustc … is not supported": sysinfo 0.39 needs 1.95.
 - **Ollama** ([download](https://ollama.com/)) — for text model testing
 - **ComfyUI** (optional) — only needed for image/video gen features
 - **Git** (obviously)

@@ -94,6 +94,19 @@ pub fn combine(word: &str, per_language: Vec<Option<Vec<String>>>) -> SpellAnswe
     SpellAnswer { misspelled: true, suggestions: tidy_suggestions(word, merged) }
 }
 
+/// A33 on Windows (box run 20.11.2026): a German Windows without the English
+/// spelling data has no "en-US" checker, and German alone then marked right
+/// English words as typos ("house" -> Housse, Hose; "the" -> Theo). Prompts
+/// are English more often than not, so without an English checker the answer
+/// is "not misspelled", as before A33: no suggestion beats a wrong one.
+pub fn english_or_nothing(english_checked: bool, answer: SpellAnswer) -> SpellAnswer {
+    if english_checked {
+        answer
+    } else {
+        SpellAnswer::default()
+    }
+}
+
 #[cfg(target_os = "macos")]
 fn check_system(word: &str) -> Result<SpellAnswer, String> {
     use objc2_app_kit::NSSpellChecker;
@@ -104,6 +117,7 @@ fn check_system(word: &str) -> Result<SpellAnswer, String> {
     let available: Vec<String> = checker.availableLanguages().iter().map(|s| s.to_string()).collect();
     let user: Vec<String> = checker.userPreferredLanguages().iter().map(|s| s.to_string()).collect();
     let mut per_language = Vec::new();
+    let mut english_checked = false;
     for lang in languages_to_check(&user) {
         // "en" is not a checker of its own on every Mac; "en_US" or "en_GB" is.
         let Some(lang) = available
@@ -114,6 +128,7 @@ fn check_system(word: &str) -> Result<SpellAnswer, String> {
         else {
             continue;
         };
+        english_checked |= lang.to_ascii_lowercase().starts_with("en");
         let lang_ns = NSString::from_str(&lang);
         // SAFETY: a null word count is allowed by the method.
         let miss = unsafe {
@@ -130,7 +145,7 @@ fn check_system(word: &str) -> Result<SpellAnswer, String> {
         let guesses = checker.guessesForWordRange_inString_language_inSpellDocumentWithTag(range, &text, Some(&lang_ns), 0);
         per_language.push(Some(guesses.map(|a| a.iter().map(|s| s.to_string()).collect()).unwrap_or_default()));
     }
-    Ok(combine(word, per_language))
+    Ok(english_or_nothing(english_checked, combine(word, per_language)))
 }
 
 #[cfg(target_os = "windows")]
@@ -153,6 +168,7 @@ fn check_system(word: &str) -> Result<SpellAnswer, String> {
 
         let text = HSTRING::from(word);
         let mut per_language = Vec::new();
+        let mut english_checked = false;
         for lang in languages_to_check(&user) {
             let lang = if lang == "en" { "en-US".to_string() } else { lang };
             let tag = HSTRING::from(lang.as_str());
@@ -160,6 +176,7 @@ fn check_system(word: &str) -> Result<SpellAnswer, String> {
                 continue;
             }
             let Ok(checker): Result<ISpellChecker, _> = factory.CreateSpellChecker(&tag) else { continue };
+            english_checked |= lang.to_ascii_lowercase().starts_with("en");
             let errors = checker.Check(&text).map_err(|e| e.to_string())?;
             let mut err: Option<ISpellingError> = None;
             let hr = errors.Next(&mut err);
@@ -184,7 +201,7 @@ fn check_system(word: &str) -> Result<SpellAnswer, String> {
             }
             per_language.push(Some(raw));
         }
-        Ok(combine(word, per_language))
+        Ok(english_or_nothing(english_checked, combine(word, per_language)))
     }
 }
 
@@ -254,6 +271,18 @@ mod tests {
 
     /// The real checker of this machine. macOS ships English, so a plain
     /// typo is found and its fix offered; a right word is left alone.
+    #[test]
+    fn without_an_english_checker_nothing_counts_as_misspelled() {
+        // The box: German only, "house" got German suggestions.
+        let german_only = combine("house", vec![Some(vec!["Housse".into(), "Hose".into()])]);
+        assert!(german_only.misspelled);
+        assert_eq!(english_or_nothing(false, german_only), SpellAnswer::default());
+        // With English there, the combined answer stays as it is.
+        let both = combine("recieve", vec![Some(vec!["Receiver".into()]), Some(vec!["receive".into()])]);
+        assert!(both.misspelled);
+        assert_eq!(english_or_nothing(true, both.clone()), both);
+    }
+
     #[cfg(target_os = "macos")]
     #[test]
     fn the_mac_checker_answers_for_a_typo_and_a_right_word() {
