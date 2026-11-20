@@ -130,7 +130,10 @@ const FOREGROUND_RATIO: f64 = 0.85;
 
 /// A run that is still going after this long is not going to end.
 const GENERATE_TIMEOUT: Duration = Duration::from_secs(30 * 60);
-/// A run that has said nothing for this long has hung.
+/// A run that has said nothing for this long has hung. Both runners say a
+/// `beat` line every 30 s while a step works (A50, GitHub #261: a quiet step
+/// of Stable Fast 3D was ended after five minutes while it still worked), so
+/// this ends only a process that stopped answering at all.
 const STALL_AFTER: Duration = Duration::from_secs(5 * 60);
 
 /// LU's runner, compiled in and written next to the engine before a run.
@@ -850,6 +853,10 @@ struct View {
     /// mps or cpu, as the runner reports it.
     device: Option<String>,
     logs: Vec<String>,
+    /// The runner's last heartbeat: step, seconds in it and the place in the
+    /// code. For the words of a run that was ended, not for the poll.
+    #[serde(skip)]
+    beat: Option<String>,
 }
 
 struct Runs {
@@ -880,6 +887,7 @@ impl Runs {
                 vertices: None,
                 device: None,
                 logs: Vec::new(),
+                beat: None,
             }),
             heard: Mutex::new(None),
         }
@@ -983,6 +991,16 @@ impl Runs {
                     }
                     view.detail = said["note"].as_str().unwrap_or("").to_string();
                 }
+                "beat" => {
+                    let beat = format!(
+                        "{} for {} s at {}",
+                        said["step"].as_str().unwrap_or("?"),
+                        said["seconds"].as_u64().unwrap_or(0),
+                        said["at"].as_str().unwrap_or("?")
+                    );
+                    tracing::info!("[mesh3d] still working: {beat}");
+                    view.beat = Some(beat);
+                }
                 "error" => {
                     view.error = said["error"].as_str().map(str::to_string);
                     view.error_code = said["code"].as_str().map(str::to_string);
@@ -1054,7 +1072,46 @@ pub(crate) fn stop() -> bool {
 }
 
 const STOPPED: &str = "The 3D model was not finished because the app stopped the engine.";
-const HUNG: &str = "The 3D engine said nothing for five minutes and was ended. Start it again.";
+
+/// The words of the step a run is in, as the poll names it.
+fn step_words(phase: &str) -> &'static str {
+    match phase {
+        "cutout" => "cutting out the object",
+        "load" => "loading the model",
+        "shape" => "building the shape",
+        "paint" => "painting the texture",
+        "save" => "saving the model",
+        _ => "starting",
+    }
+}
+
+/// The words of a run the watch ended: the step it was in, where its last
+/// heartbeat found it, and its last lines (stderr and plain stdout).
+fn ended_words(view: &View, stalled: bool) -> String {
+    let step = step_words(&view.phase);
+    let mut words = if stalled {
+        format!("The 3D engine stopped answering while {step} and was ended after five minutes of silence.")
+    } else {
+        format!("The 3D engine was still {step} after half an hour and was stopped.")
+    };
+    if let Some(beat) = &view.beat {
+        words.push_str(&format!(" Last heartbeat: {beat}."));
+    }
+    let mut last: Vec<String> = view
+        .logs
+        .iter()
+        .rev()
+        .map(|l| l.trim())
+        .filter(|l| !l.is_empty())
+        .take(3)
+        .map(|l| if l.chars().count() > 200 { format!("{}…", l.chars().take(200).collect::<String>()) } else { l.to_string() })
+        .collect();
+    last.reverse();
+    if !last.is_empty() {
+        words.push_str(&format!(" Last lines: {}", last.join(" | ")));
+    }
+    words
+}
 /// The words of Create for a picture without a clear object (plan 1.8).
 const NO_OBJECT: &str = "LU could not find a clear object in this picture. Try one with a plain background.";
 
@@ -1082,6 +1139,7 @@ fn start(runs: &Runs, mut cmd: Command, pid_file: Option<&Path>) -> Result<std::
 fn finish(runs: &Runs, mut child: std::process::Child, out: &Path, pid_file: Option<&Path>, limit: Duration, stall: Duration) -> Result<(), String> {
     let (stdout, stderr) = (child.stdout.take(), child.stderr.take());
     let started = Instant::now();
+    let mut ended = None;
     let status = std::thread::scope(|scope| {
         scope.spawn(|| crate::commands::music::read_lines(stdout, |line| runs.note(line)));
         scope.spawn(|| crate::commands::music::read_lines(stderr, |line| runs.note(line)));
@@ -1091,15 +1149,13 @@ fn finish(runs: &Runs, mut child: std::process::Child, out: &Path, pid_file: Opt
                 Ok(None) => {}
                 Err(e) => break Err(e),
             }
-            if started.elapsed() > limit {
+            let stalled = runs.silent_for() > stall;
+            if stalled || started.elapsed() > limit {
                 let _ = crate::process_util::kill_tree(&mut child);
                 let _ = child.wait();
-                break Ok(None);
-            }
-            if runs.silent_for() > stall {
-                let _ = crate::process_util::kill_tree(&mut child);
-                let _ = child.wait();
-                runs.view().error = Some(HUNG.to_string());
+                // A moment for the readers to take in the last lines.
+                std::thread::sleep(Duration::from_millis(100));
+                ended = Some(ended_words(&runs.view(), stalled));
                 break Ok(None);
             }
             std::thread::sleep(Duration::from_millis(200));
@@ -1116,22 +1172,19 @@ fn finish(runs: &Runs, mut child: std::process::Child, out: &Path, pid_file: Opt
         (view.error.clone(), view.error_code.clone())
     };
     let status = status.map_err(|e| format!("wait failed: {}", os_error::english(&e)))?;
-    let verdict = outcome(status.as_ref(), out.is_file(), said.as_deref(), code.as_deref(), stopped);
+    let verdict = outcome(status.as_ref(), out.is_file(), said.as_deref(), code.as_deref(), stopped, ended);
     if verdict.is_err() {
         let _ = std::fs::remove_file(out);
     }
     verdict
 }
 
-fn outcome(status: Option<&std::process::ExitStatus>, wrote: bool, said: Option<&str>, code: Option<&str>, stopped: bool) -> Result<(), String> {
+fn outcome(status: Option<&std::process::ExitStatus>, wrote: bool, said: Option<&str>, code: Option<&str>, stopped: bool, ended: Option<String>) -> Result<(), String> {
     if stopped {
         return Err(STOPPED.to_string());
     }
     let Some(status) = status else {
-        return Err(match said {
-            Some(HUNG) => HUNG.to_string(),
-            _ => "The 3D engine did not finish within half an hour and was stopped.".to_string(),
-        });
+        return Err(ended.unwrap_or_else(|| "The 3D engine did not finish within half an hour and was stopped.".to_string()));
     };
     if status.success() && wrote {
         return Ok(());
@@ -1763,10 +1816,74 @@ mod tests {
         drop(claim);
 
         let _claim = runs.claim("r2", "j2").unwrap();
-        let child = start(&runs, shell("sleep 30"), None).unwrap();
+        let script = "echo 'LU-MESH3D {\"phase\": \"shape\", \"fraction\": 0.0}'; echo 'loading weights' >&2; echo 'Warning: a long step' >&2; sleep 30";
+        let child = start(&runs, shell(script), None).unwrap();
         let started = Instant::now();
-        assert_eq!(finish(&runs, child, &out, None, Duration::from_secs(60), Duration::from_millis(400)).unwrap_err(), HUNG);
+        let why = finish(&runs, child, &out, None, Duration::from_secs(60), Duration::from_millis(400)).unwrap_err();
         assert!(started.elapsed() < Duration::from_secs(10));
+        // A50: the words name the step and the last lines.
+        assert!(why.starts_with("The 3D engine stopped answering while building the shape"), "{why}");
+        assert!(why.ends_with("Last lines: loading weights | Warning: a long step"), "{why}");
+    }
+
+    #[test]
+    fn the_words_of_an_ended_run_name_step_heartbeat_and_last_lines() {
+        let mut view = View { phase: "paint".into(), ..View::default() };
+        assert_eq!(ended_words(&view, false), "The 3D engine was still painting the texture after half an hour and was stopped.");
+        view.beat = Some("paint for 1790 s at texture_baker.py:rasterize:41".into());
+        view.logs = ["a", "", "b", "c", &"x".repeat(300)].iter().map(|l| l.to_string()).collect();
+        let words = ended_words(&view, true);
+        assert!(words.starts_with("The 3D engine stopped answering while painting the texture and was ended after five minutes of silence. Last heartbeat: paint for 1790 s at texture_baker.py:rasterize:41. Last lines: b | c | xxx"), "{words}");
+        assert!(words.ends_with("x…"));
+        view.phase = String::new();
+        assert!(ended_words(&view, true).contains("while starting"));
+    }
+
+    /// A50 (GitHub #261): a step of the real runner that works longer than the
+    /// stall watch without a line of its own is not ended, because the
+    /// heartbeat speaks for it. The same quiet step without the heartbeat is
+    /// ended, and the words name the step. The model is replaced by a slow
+    /// stand-in (`time.sleep`), so this needs `python3` and no torch.
+    #[cfg(unix)]
+    #[test]
+    fn the_heartbeat_keeps_a_long_quiet_step_alive_for_both_runners() {
+        if Command::new("python3").arg("-V").output().is_err() {
+            eprintln!("no python3 here, the heartbeat run is left out");
+            return;
+        }
+        let dir = env!("CARGO_MANIFEST_DIR");
+        for runner in ["run_sf3d.py", "run_triposr.py"] {
+            for beat in [true, false] {
+                let tmp = tempfile::tempdir().unwrap();
+                let out = tmp.path().join("m.glb");
+                let job = tmp.path().join("job.json");
+                std::fs::write(&job, json!({ "heartbeat_seconds": if beat { 0.15 } else { 600.0 }, "output": out }).to_string()).unwrap();
+                // The runner as the app starts it, its `run` a slow stand-in:
+                // load, then two seconds of one step that says nothing.
+                let script = format!(
+                    "import importlib.util, json, sys, time\n\
+                     spec = importlib.util.spec_from_file_location('r', '{dir}/resources/mesh3d/{runner}')\n\
+                     r = importlib.util.module_from_spec(spec); spec.loader.exec_module(r)\n\
+                     def run(job):\n    r.say(phase='load'); r.say(phase='shape', fraction=0.0); time.sleep(2.0)\n    open(job['output'], 'w').write('glTF'); r.say(phase='done', triangles=1)\n\
+                     r.run = run\n\
+                     r.main(['--lu-mesh3d-job', sys.argv[1]])\n"
+                );
+                let mut cmd = Command::new("python3");
+                cmd.arg("-I").arg("-u").arg("-c").arg(script).arg(&job);
+                let runs = Runs::new();
+                let _claim = runs.claim("r", "j").unwrap();
+                let child = start(&runs, cmd, None).unwrap();
+                let verdict = finish(&runs, child, &out, None, Duration::from_secs(60), Duration::from_millis(800));
+                if beat {
+                    assert_eq!(verdict, Ok(()), "{runner}");
+                    let last = runs.view().beat.clone().unwrap_or_default();
+                    assert!(last.starts_with("shape for ") && last.contains(":run:"), "{runner}: {last}");
+                } else {
+                    let why = verdict.unwrap_err();
+                    assert!(why.starts_with("The 3D engine stopped answering while building the shape"), "{runner}: {why}");
+                }
+            }
+        }
     }
 
     #[test]
@@ -1777,14 +1894,15 @@ mod tests {
             let ok = std::process::ExitStatus::from_raw(0);
             let code5 = std::process::ExitStatus::from_raw(5 << 8);
             let killed = std::process::ExitStatus::from_raw(9);
-            assert_eq!(outcome(Some(&ok), true, None, None, false), Ok(()));
-            assert!(outcome(Some(&ok), false, None, None, false).unwrap_err().contains("without writing a model"));
-            assert_eq!(outcome(Some(&ok), true, None, None, true).unwrap_err(), STOPPED);
-            assert!(outcome(Some(&code5), false, None, None, false).unwrap_err().contains("exit code 5"));
-            assert!(outcome(Some(&code5), false, Some("boom"), None, false).unwrap_err().contains("boom"));
-            assert!(outcome(Some(&killed), false, None, None, false).unwrap_err().contains("ended by macOS"));
+            assert_eq!(outcome(Some(&ok), true, None, None, false, None), Ok(()));
+            assert!(outcome(Some(&ok), false, None, None, false, None).unwrap_err().contains("without writing a model"));
+            assert_eq!(outcome(Some(&ok), true, None, None, true, None).unwrap_err(), STOPPED);
+            assert!(outcome(Some(&code5), false, None, None, false, None).unwrap_err().contains("exit code 5"));
+            assert!(outcome(Some(&code5), false, Some("boom"), None, false, None).unwrap_err().contains("boom"));
+            assert!(outcome(Some(&killed), false, None, None, false, None).unwrap_err().contains("ended by macOS"));
         }
-        assert_eq!(outcome(None, false, Some(HUNG), None, false).unwrap_err(), HUNG);
+        assert_eq!(outcome(None, false, None, None, false, Some("ended".to_string())).unwrap_err(), "ended");
+        assert!(outcome(None, false, None, None, false, None).unwrap_err().contains("half an hour"));
     }
 
     #[test]

@@ -3,7 +3,7 @@
 The app starts this once per model (`src-tauri/src/commands/mesh3d.rs`) with
 `python -I -u run_triposr.py --lu-mesh3d-job <job.json>` and reads what it says
 on stdout: lines that begin with `LU-MESH3D `, each a JSON object with a
-`phase` (load, shape, paint, save, done, error, note) and, for shape, a
+`phase` (load, shape, paint, save, done, error, note, beat) and, for shape, a
 `fraction` from 0 to 1.
 
 What it changes against `run.py` of TripoSR, and why (read at the pinned
@@ -36,6 +36,7 @@ import json
 import os
 import shutil
 import sys
+import threading
 import time
 import traceback
 import types
@@ -51,8 +52,59 @@ DINO_REPO = "facebook/dino-vitb16"
 POINTS_PER_STEP = 1 << 18
 
 
+# The step the run is in and since when, for the heartbeat.
+STEP = {"name": "start", "since": time.monotonic()}
+WORK_STEPS = ("load", "shape", "paint", "save")
+# Seconds between two heartbeat lines. The app ends a run that says nothing
+# for five minutes; a step of SF3D or TripoSR can work longer than that
+# without a line of its own (A50, GitHub #261).
+BEAT_SECONDS = 30.0
+_SAYING = threading.Lock()
+
+
 def say(**fields):
-    print(PREFIX + json.dumps(fields), flush=True)
+    if fields.get("phase") in WORK_STEPS and fields["phase"] != STEP["name"]:
+        STEP["name"] = fields["phase"]
+        STEP["since"] = time.monotonic()
+    line = PREFIX + json.dumps(fields) + "\n"
+    # One write per line under a lock: the heartbeat speaks from its own thread.
+    with _SAYING:
+        sys.stdout.write(line)
+        sys.stdout.flush()
+
+
+def where(frame):
+    """The innermost place the main thread is at, past torch's own module
+    plumbing: file name, function and line."""
+    first = None
+    while frame is not None:
+        name = frame.f_code.co_filename
+        place = "%s:%s:%d" % (os.path.basename(name), frame.f_code.co_name, frame.f_lineno)
+        first = first or place
+        if os.sep + "torch" + os.sep not in name:
+            return place
+        frame = frame.f_back
+    return first or "unknown"
+
+
+def start_heartbeat(every=BEAT_SECONDS):
+    """Say a `beat` line every `every` seconds while the run works: the step,
+    how long it has been in it, and where the main thread is. A step that works
+    long without a line of its own then is not taken for a hung one, and the
+    log shows whether the place moves (it works) or stays (it waits on one
+    call). Returns the event that ends it."""
+    main_thread = threading.main_thread()
+    done = threading.Event()
+
+    def beat():
+        while not done.wait(every):
+            frame = sys._current_frames().get(main_thread.ident)
+            at = where(frame)
+            del frame
+            say(phase="beat", step=STEP["name"], seconds=round(time.monotonic() - STEP["since"]), at=at)
+
+    threading.Thread(target=beat, name="lu-mesh3d-heartbeat", daemon=True).start()
+    return done
 
 
 # ── Stand-ins for what a Mac cannot install ─────────────────────────────
@@ -323,6 +375,7 @@ def main(argv):
         return
     with open(argv[argv.index(JOB_FLAG) + 1], encoding="utf-8") as f:
         job = json.load(f)
+    start_heartbeat(float(job.get("heartbeat_seconds", BEAT_SECONDS)))
     try:
         run(job)
     except SystemExit:
