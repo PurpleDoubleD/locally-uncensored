@@ -92,6 +92,8 @@ in the cloud catalogue.
   (GH #185). It needs GCC 14 or newer. There is no ready ARM64 download.
 - Security updates of the zip, libc and sysinfo libraries, and of the GitHub
   Actions used to build the release.
+- Building from source needs Rust 1.95 or newer (`rust-version` in
+  `src-tauri/Cargo.toml`).
 
 ## [3.1.2] - 2026-11-19
 
