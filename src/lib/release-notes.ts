@@ -730,6 +730,10 @@ const NOTE_313: ReleaseNote = {
           title: 'Clear LU Cloud errors end the turn.',
           detail: 'Images too large, request too large and unsupported response format stop after one request with the server\'s sentence.',
         },
+        {
+          title: 'An agent run LU Cloud ends is a quiet stop.',
+          detail: 'When LU Cloud stops a run that repeats the same steps or reaches the step limit, what was written stays with a short line under it, in Agent and in Code. Nothing is sent again, and a /loop ends.',
+        },
       ],
     },
     {

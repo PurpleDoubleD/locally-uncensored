@@ -80,6 +80,12 @@ in the cloud catalogue.
   instead of repeating the request up to eight times.
 - In Swap, two photos picked one right after the other both stay. Before, the
   second could drop the first, and Create stayed off.
+- When LU Cloud ends an Agent or Code run itself (it repeated the same steps,
+  or it reached the step limit of one run), what was written stays with a quiet
+  line under it, instead of "Agent error: … HTTP 409". Nothing is sent again,
+  and a /loop ends.
+- Right-click spelling suggestions on a Windows without English spelling data
+  no longer offer corrections from another language for right English words.
 
 ### Build
 - Linux on ARM64 can be built from source with an overlay configuration
