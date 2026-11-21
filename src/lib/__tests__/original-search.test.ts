@@ -39,4 +39,12 @@ describe('original search', () => {
     expect(originals.map((m) => m.description)).toEqual(['unsloth/Qwen3.5-9B-GGUF', 'bartowski/Qwen_Qwen3.5-9B-GGUF', 'AtomicChat/Qwen3.5-9B-GGUF'])
     expect(changed.map((m) => m.description)).toEqual(['Jackrong/Qwen3.5-9B-DeepSeek-V4-Flash-GGUF', 'AtomicChat/Qwen3.5-9B-DFlash-GGUF'])
   })
+
+  it('a checked repository is the one entry, with the checked file (3.1.3)', () => {
+    const hf = ['huihui-ai/Huihui-Qwen3.8-27B-abliterated-GGUF', 'unsloth/Qwen3.8-27B-GGUF'].map(hit)
+    const { originals, changed } = originalsFirst(hf, 'unsloth/Qwen3.8-27B-GGUF', 'Q8/Qwen3.8-27B-Q8_0.gguf')
+    expect(changed).toEqual([])
+    expect(originals).toHaveLength(1)
+    expect(originals[0]).toMatchObject({ description: 'unsloth/Qwen3.8-27B-GGUF', filename: 'Qwen3.8-27B-Q8_0.gguf', downloadUrl: 'https://huggingface.co/unsloth/Qwen3.8-27B-GGUF/resolve/main/Q8/Qwen3.8-27B-Q8_0.gguf' })
+  })
 })

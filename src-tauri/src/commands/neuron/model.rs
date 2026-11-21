@@ -79,8 +79,38 @@ pub struct ModelFacts {
     /// for an original. The view says "works best with original, untweaked
     /// models" before computing when it is not empty.
     pub tweaked: Vec<&'static str>,
-    /// The original to offer instead, family and size ("Qwen3.5 9B").
-    pub original: Option<String>,
+    /// Where the file says it came from. The view settles the original from
+    /// this and the model cards (lib/model-origin.ts), never from the name alone.
+    pub origin: ModelOrigin,
+}
+
+/// One `general.base_model.N` entry of a GGUF head.
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelBase {
+    pub name: Option<String>,
+    pub organization: Option<String>,
+    pub repo_url: Option<String>,
+}
+
+/// The provenance fields of a GGUF head. Other people's text: kept short and
+/// handed on as plain data.
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelOrigin {
+    pub basename: Option<String>,
+    pub size_label: Option<String>,
+    pub source_repos: Vec<String>,
+    pub bases: Vec<ModelBase>,
+    pub file: String,
+}
+
+/// Longest head value handed to the view.
+const ORIGIN_TEXT_MAX: usize = 300;
+
+/// A head value fit to pass on: trimmed, not empty, not overlong.
+fn origin_text(value: Option<&str>) -> Option<String> {
+    value.map(str::trim).filter(|v| !v.is_empty() && v.chars().count() <= ORIGIN_TEXT_MAX).map(str::to_string)
 }
 
 /// What a GGUF head says about where a model came from.
@@ -128,11 +158,6 @@ pub fn tweak_signs(s: &Signs) -> Vec<&'static str> {
     out
 }
 
-/// The original to offer: the family and size the head names.
-pub fn original_of(basename: Option<&str>, size: Option<&str>) -> Option<String> {
-    Some(format!("{} {}", basename?.trim(), size?.trim())).filter(|s| s.len() > 2)
-}
-
 /// Embedding and diffusion models (the architectures llama.cpp gives no
 /// cache) have no chat turn to steer, and the vector tool aborts on them.
 pub fn is_chat_arch(arch: &str) -> bool {
@@ -173,8 +198,23 @@ pub fn facts(path: &str) -> Result<ModelFacts, String> {
         base_count,
         nextn: head.arch_int("nextn_predict_layers").unwrap_or(0),
     });
-    let original = original_of(text("general.basename"), text("general.size_label"));
-    Ok(ModelFacts { template: Template::detect(template_text, &arch), arch, n_layer, n_embd, name, tweaked, original })
+    let origin = ModelOrigin {
+        basename: origin_text(text("general.basename")),
+        size_label: origin_text(text("general.size_label")),
+        source_repos: ["general.source.repo_url", "general.source.url", "general.repo_url", "general.url"]
+            .iter()
+            .filter_map(|k| origin_text(text(k)))
+            .collect(),
+        bases: (0..base_count.clamp(0, 16))
+            .map(|i| ModelBase {
+                name: origin_text(text(&format!("general.base_model.{i}.name"))),
+                organization: origin_text(text(&format!("general.base_model.{i}.organization"))),
+                repo_url: origin_text(text(&format!("general.base_model.{i}.repo_url"))),
+            })
+            .collect(),
+        file: file.clone(),
+    };
+    Ok(ModelFacts { template: Template::detect(template_text, &arch), arch, n_layer, n_embd, name, tweaked, origin })
 }
 
 /// Reads one string array (`tokenizer.ggml.tokens`) out of a GGUF head,
@@ -378,9 +418,10 @@ mod tests {
     }
 
     #[test]
-    fn the_original_to_offer_is_family_and_size() {
-        assert_eq!(original_of(Some("Qwen3.5"), Some("9B")), Some("Qwen3.5 9B".into()));
-        assert_eq!(original_of(Some("gemma-3"), Some("270M")), Some("gemma-3 270M".into()));
-        assert_eq!(original_of(None, Some("9B")), None);
+    fn a_head_value_is_passed_on_only_when_it_is_short_plain_text() {
+        assert_eq!(origin_text(Some("  Qwen3.8 ")), Some("Qwen3.8".into()));
+        assert_eq!(origin_text(Some("   ")), None);
+        assert_eq!(origin_text(Some(&"x".repeat(ORIGIN_TEXT_MAX + 1))), None);
+        assert_eq!(origin_text(None), None);
     }
 }

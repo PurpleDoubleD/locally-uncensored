@@ -1,3 +1,4 @@
+import type { ModelOrigin } from '../lib/model-origin'
 // The Neuron tweaker (3.0.9, P11). The work happens in Rust
 // (src-tauri/src/commands/neuron); this is the app's side of it.
 
@@ -39,7 +40,7 @@ export interface NeuronSae {
 }
 
 export interface NeuronInfo {
-  facts: { arch: string; nLayer: number; nEmbd: number; template: string; name: string; tweaked: string[]; original: string | null }
+  facts: { arch: string; nLayer: number; nEmbd: number; template: string; name: string; tweaked: string[]; origin?: ModelOrigin }
   modelKey: string
   generator: boolean
   band: [number, number]

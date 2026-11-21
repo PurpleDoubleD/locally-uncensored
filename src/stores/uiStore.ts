@@ -243,9 +243,11 @@ interface UIState {
   /** The query looks for the maker's original model: Discover lists the
    *  changed versions after the originals (FEHLER-N2 #1). */
   discoverOriginal: boolean
+  /** The checked file of that original, in its repository. */
+  discoverOriginalFile: string | null
   /** Open Models on Discover's chat lane with downloads going to `target`,
    *  optionally searching for `query`. */
-  openDiscoverFor: (target: 'builtin', query?: string, opts?: { original?: boolean }) => void
+  openDiscoverFor: (target: 'builtin', query?: string, opts?: { original?: boolean; file?: string }) => void
   clearDiscoverTarget: () => void
   clearDiscoverQuery: () => void
   setView: (view: View) => void
@@ -334,9 +336,10 @@ export const useUIStore = create<UIState>()(
       discoverTarget: null,
       discoverQuery: null,
       discoverOriginal: false,
-      openDiscoverFor: (target, query, opts) => set({ currentView: 'models', settingsFocus: null, discoverTarget: target, discoverQuery: query?.trim() || null, discoverOriginal: !!(opts?.original && query?.trim()) }),
+      discoverOriginalFile: null,
+      openDiscoverFor: (target, query, opts) => set({ currentView: 'models', settingsFocus: null, discoverTarget: target, discoverQuery: query?.trim() || null, discoverOriginal: !!(opts?.original && query?.trim()), discoverOriginalFile: opts?.original ? opts.file ?? null : null }),
       clearDiscoverTarget: () => set({ discoverTarget: null }),
-      clearDiscoverQuery: () => set({ discoverQuery: null, discoverOriginal: false }),
+      clearDiscoverQuery: () => set({ discoverQuery: null, discoverOriginal: false, discoverOriginalFile: null }),
 
       // Navigation no longer touches sidebarOpen. The conversation list only
       // makes sense in Chat, and that rule now lives in the Sidebar itself
