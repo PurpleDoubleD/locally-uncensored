@@ -1154,7 +1154,7 @@ function ModelInstallCard({ kind, startOnly }: { kind: 'image' | 'video' | 'audi
 /** Does the Stage show a setup card for this tab (a one-time download, a node
  *  pack)? The Character area then shows that card alone. The same rule as the
  *  Stage's own branches below. */
-export function useStageSetupCard(comfyStarting?: boolean): boolean {
+export function useStageSetupCard(comfyStarting?: boolean | null): boolean {
   const intent = useCreateStore((s) => s.intent())
   const meta = INTENT_MAP[intent]
   const backend = useCreateStore((s) => s.backend)
@@ -1165,13 +1165,23 @@ export function useStageSetupCard(comfyStarting?: boolean): boolean {
   const lipsync = useCreateStore((s) => s.lipsyncModelList)
   const motion = useCreateStore((s) => s.motionModelList)
   const upscale = useCreateStore((s) => s.upscaleModelList)
-  const { connected, modelsLoaded, mlxMissing } = useCreateExp()
+  const { connected, modelsLoaded, modelLoadError, capsPending, mlxMissing } = useCreateExp()
   const installRun = useSyncExternalStore(subscribeInstallRuns, () => (meta.requiresModels ? getInstallRun(meta.requiresModels).running : false))
   const capReady = !meta.capability || backend === 'cloud' || !!caps[meta.capability] || isMlxImageHost()
-  return installRun || !capReady || stageShowsSetupCard({
-    backend, requiresModels: meta.requiresModels, mlxMissing, connected, comfyStarting, modelsLoaded,
+  const live = laneFace(stageSetupAnswer({
+    backend,
+    mlxHost: isMlxImageHost(),
+    modelsFailed: !!modelLoadError?.startsWith('Failed to load models'),
+    requiresModels: meta.requiresModels,
+    mlxMissing, connected, comfyStarting, modelsLoaded,
     laneModelCount: laneModelCount(intent, meta.requiresModels, { image, video, audio, lipsync, motion, upscale }),
-  })
+  }), capabilityAnswer({
+    needed: !!meta.capability && backend !== 'cloud' && !isMlxImageHost(),
+    present: capReady, connected, comfyStarting, capsPending,
+  }))
+  // The face the Stage settled on for this tab (it writes it, this only reads).
+  const face = settleFace(live, stageAnswers.get<LaneFace>(`lane:${backend}|${intent}`))
+  return installRun || face === 'models' || face === 'capability'
 }
 
 export function TrainSetBoard({ compact = false }: { compact?: boolean } = {}) {

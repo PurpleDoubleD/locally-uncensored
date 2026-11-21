@@ -16,7 +16,8 @@ test('a slow answer: the stage waits, then shows one card and keeps it', async (
     const later = <T,>(fn: () => T) => new Promise<T>((res, rej) => setTimeout(() => { try { res(fn()) } catch (e) { rej(e) } }, 500))
     const bridge = w.__TAURI_INTERNALS__
     const invoke = bridge.invoke
-    bridge.invoke = (command: string, args: { url?: string; files: Array<{ filename: string; expectedBytes: number }> }) => {
+    bridge.invoke = (command: string, raw: unknown) => {
+      const args = raw as { url?: string; files: Array<{ filename: string; expectedBytes: number }> }
       if (command === 'comfyui_status') return later(() => ({ running: false, starting: false, found: true, complete: true, isLocal: true }))
       if (command === 'check_model_sizes') return later(() => args.files.map((f) => ({ filename: f.filename, exists: true, complete: true, actualBytes: f.expectedBytes })))
       if (command === 'proxy_localhost' && args?.url?.includes(':8188')) return later(() => { throw new Error('connection refused') })
