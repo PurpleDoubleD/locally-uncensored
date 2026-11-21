@@ -161,9 +161,8 @@ export function useIntentLanes(): { intents: IntentMeta[]; lockedOf: (meta: Inte
   // (lipsync / music / extend / motion) are REAL local tabs, plain selectable
   // pills with NO cloud glyph (2026-07-19: the top row only carries a
   // cloud badge for the genuinely hosted-only tools). Enhance Image runs on
-  // local ComfyUI since 3.0.7. Only eraser (cloudOnly, no local backend)
-  // renders as a locked, cloud-tagged pill in local mode; a tap opens the
-  // teaser sheet / plans gate.
+  // local ComfyUI since 3.0.7. Erase is a cloud tab and is not in the local
+  // bar at all (3.1.3): locally an object goes through a mask in Edit.
   //
   // On an MLX Mac (no ComfyUI at all) those lanes have no local implementation
   // either, so they lock there too. Both rules live in intents.ts so they stay

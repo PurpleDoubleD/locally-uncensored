@@ -81,7 +81,7 @@
 <tr><td>Edit (Edit / Image to Image)</td><td>Change a picture you upload, the whole thing or a painted area.</td><td>Local and hosted</td></tr>
 <tr><td>Cutout (Remove Background)</td><td>Cuts the subject out of a photo.</td><td>Local and hosted</td></tr>
 <tr><td>Upscale</td><td>Makes a picture larger and sharper.</td><td>Hosted only</td></tr>
-<tr><td>Erase (Erase Object)</td><td>Removes a painted area and fills it in.</td><td>Hosted only</td></tr>
+<tr><td>Erase (Erase Object)</td><td>Removes a painted area and fills it in. Locally, use a mask in Edit.</td><td>Hosted only</td></tr>
 <tr><td>Video</td><td>A short clip from a text prompt.</td><td>Local and hosted</td></tr>
 <tr><td>Animate (Animate Image)</td><td>Turns a still picture into a clip.</td><td>Local and hosted</td></tr>
 <tr><td>Character (Character Studio)</td><td>Trains a character from photos, then uses it in prompts.</td><td>Local (12 GB card, or a Mac with 24 GB) and hosted</td></tr>
@@ -91,7 +91,7 @@
 <tr><td>Motion (Motion Control)</td><td>Moves a character the way a reference clip moves.</td><td>Local and hosted</td></tr>
 </table>
 
-<p>In Local mode the two hosted only lanes show a lock pill reading "Upscale, runs on LU Cloud" and "Erase Object, runs on LU Cloud". Clicking one opens a small card that reads "Your GPU has N GB." with a "Get LU Cloud" button. "Show Cloud features in Local mode" under Settings, General, LU Cloud Account hides or shows those pills.</p>
+<p>In Local mode Erase is not in the toolbar: paint over the object in Edit and press Create with an empty prompt. A hosted only lane shows a lock pill such as "Upscale, runs on LU Cloud". Clicking one opens a small card that reads "Your GPU has N GB." with a "Get LU Cloud" button. "Show Cloud features in Local mode" under Settings, General, LU Cloud Account hides or shows those pills.</p>
 
 <h2 id="comfyui">ComfyUI, the program behind the lanes</h2>
 
@@ -137,6 +137,8 @@
 <p>Cutout takes a picture and needs no prompt. Locally it downloads a small background removal model (about 300 MB) the first time.</p>
 
 <p>Upscale and Erase Object run hosted only. Upscale takes a picture and needs no prompt. Erase Object takes a picture and a painted mask over the thing to remove.</p>
+
+<p>To remove an object locally, open Edit, paint over it and press Create with the prompt empty. On Windows and Linux this needs an SDXL or SD 1.5 checkpoint; other models cannot read a mask and the tab says so. On a Mac it runs on Qwen-Image 2.1.</p>
 
 <h2 id="qwen-image">Qwen-Image 2.1: one model that draws and edits</h2>
 

@@ -41,13 +41,13 @@ describe('der Mac strandet nicht auf einem Werkzeug, das er lokal nicht hat', ()
     useCreateStore.getState().setIntent('image')
   })
 
-  it('zwei Werkzeuge sind lokal auf dem Mac wirklich versteckt', () => {
+  it('drei Werkzeuge sind lokal auf dem Mac wirklich versteckt', () => {
     // Ohne diesen Fall koennte der Rest gruen sein, weil gar nichts versteckt
     // ist. Genau das waere die stille Fassung des Fehlers. Remove Background
     // is no longer one of them: the Mac cuts out through Vision.
     const alle = new Set(visibleIntents('cloud', true, true).map((m) => m.id))
     const fehlend = [...alle].filter((id) => !sichtbar().has(id))
-    expect(fehlend.sort()).toEqual(['animate', 'edit'])
+    expect(fehlend.sort()).toEqual(['animate', 'edit', 'eraser'])
   })
 
   it('keins davon ueberlebt den Wechsel auf lokal', () => {

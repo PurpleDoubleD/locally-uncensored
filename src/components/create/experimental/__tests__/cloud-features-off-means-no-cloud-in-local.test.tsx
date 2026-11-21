@@ -11,7 +11,7 @@
  * line says where to turn them back on.
  *
  * 3.0.7: Enhance runs on local ComfyUI (core upscale nodes), so it is a local
- * tab now and only Erase is the hosted-only tool these tests watch.
+ * tab now, and Erase left local mode in 3.1.3: these tests watch Music on a Mac.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, cleanup, screen, fireEvent, act } from '@testing-library/react'
@@ -41,8 +41,8 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.useRealTimers() })
 
 describe('the rule', () => {
-  it('on: every tool is in the local bar, the hosted-only ones as teasers', () => {
-    expect(visibleIntents('local', false, true)).toEqual(INTENTS)
+  it('on: every tool but Erase is in the local bar, the hosted-only ones as teasers', () => {
+    expect(visibleIntents('local', false, true)).toEqual(INTENTS.filter((m) => m.id !== 'eraser'))
   })
 
   it('off: the local bar holds exactly the tools that run locally', () => {
@@ -64,20 +64,18 @@ describe('the rule', () => {
 })
 
 describe('the bar', () => {
-  it('on: Erase carries the cloud tag and opens the Cloud sheet, Enhance is a local tab', () => {
+  it('on: no Erase in the bar, and Enhance is a local tab', () => {
     render(<IntentBar />)
     // Swap Character has no local lane either, but it is an action of the
     // Character area now (3.1.0 part B): the area's pill is a local tab, and
     // Swap shows its cloud lock inside the area.
-    expect(cloudTagged().map((b) => b.textContent)).toEqual(['Erase'])
+    expect(cloudTagged()).toEqual([])
+    expect(pills()).not.toContain('Erase')
     expect(screen.queryByRole('radio', { name: /Swap Character/ })).toBeNull()
     fireEvent.click(screen.getByRole('radio', { name: 'Character' }))
     expect(useUIStore.getState().cloudTeaser).toBeNull()
     expect(useCreateStore.getState().intent()).toBe('character')
     expect(useCreateStore.getState().hubStep).toBe('who')
-    fireEvent.click(screen.getByRole('radio', { name: /Erase Object/ }))
-    expect(useUIStore.getState().cloudTeaser).toEqual({ surface: 'intent', intent: 'eraser' })
-    useUIStore.setState({ cloudTeaser: null })
     fireEvent.click(screen.getByRole('radio', { name: /Enhance Image/ }))
     expect(useUIStore.getState().cloudTeaser).toBeNull()
     expect(useCreateStore.getState().intent()).toBe('upscale')
@@ -94,18 +92,21 @@ describe('the bar', () => {
   })
 
   it('the switch acts on the bar that is on screen', () => {
+    // A Mac without a music engine: Music is a cloud teaser there.
+    mlx.host = true
     render(<IntentBar />)
-    expect(pills()).toContain('Erase')
+    expect(pills()).toContain('Music')
     act(() => setFeatures(false))
-    expect(pills()).not.toContain('Erase')
+    expect(pills()).not.toContain('Music')
     act(() => setFeatures(true))
-    expect(pills()).toContain('Erase')
+    expect(pills()).toContain('Music')
   })
 })
 
 describe('the link on the Cloud sheet is answered', () => {
   const clickLink = async () => {
-    useUIStore.getState().setCloudTeaser({ surface: 'intent', intent: 'eraser' })
+    mlx.host = true
+    useUIStore.getState().setCloudTeaser({ surface: 'intent', intent: 'music' })
     await act(async () => { render(<><CloudHiddenNotice /><IntentBar /><CloudTeaserModal /></>) })
     fireEvent.click(screen.getByText("Don't show Cloud features in Local mode"))
   }
@@ -115,7 +116,7 @@ describe('the link on the Cloud sheet is answered', () => {
     await clickLink()
     expect(CLOUD_HIDDEN_NOTICE).toBe('Cloud features are hidden. Turn them back on in Settings, General.')
     expect(screen.getByRole('status').textContent).toContain(CLOUD_HIDDEN_NOTICE)
-    expect(pills()).not.toContain('Erase')
+    expect(pills()).not.toContain('Music')
   })
 
   it('closing the sheet any other way says nothing', async () => {

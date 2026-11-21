@@ -115,7 +115,7 @@ describe('Edit is a local tab on the Mac while a model takes an image', () => {
     expect([s.steps, s.cfgScale, s.sampler]).toEqual([before.steps, before.cfgScale, before.sampler])
   })
 
-  it('the switch to local keeps Edit with such a model, drops a mask, and falls back to Image without one', () => {
+  it('the switch to local keeps Edit with such a model and its mask, and falls back to Image without one', () => {
     arrange([SDTURBO, QWEN], SDTURBO)
     useCreateStore.setState({ backend: 'cloud' })
     useCreateStore.getState().setIntent('edit')
@@ -123,7 +123,7 @@ describe('Edit is a local tab on the Mac while a model takes an image', () => {
     useCreateStore.getState().setBackend('local')
     expect(intent()).toBe('edit')
     expect(useCreateStore.getState().imageModel).toBe(QWEN.name)
-    expect(useCreateStore.getState().mask).toBeNull()
+    expect(useCreateStore.getState().mask).toEqual(BILD)
 
     arrange([SDTURBO, ZIMAGE], SDTURBO)
     useCreateStore.setState({ backend: 'cloud' })
