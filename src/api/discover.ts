@@ -1747,6 +1747,8 @@ export async function searchHuggingFaceModels(query: string): Promise<DiscoverMo
       filename: q4File,
       url: `https://huggingface.co/${repo.id}`,
       ...(quantGuessed ? { quantGuessed: true } : {}),
+      // The maker's policy goes with the model, whoever converted it.
+      ...(/inkling[-_ ]?2/i.test(repo.id) ? { usagePolicyUrl: INKLING_USAGE_POLICY } : {}),
     })
   }
   return models

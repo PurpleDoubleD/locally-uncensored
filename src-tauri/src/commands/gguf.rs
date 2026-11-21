@@ -244,6 +244,25 @@ impl GeneralFacts {
     }
 }
 
+/// Thinking Machines' usage policy for Inkling covers changed versions and rules
+/// out removing the model's safeguards, so LU's own tools for that stay off it.
+/// Read from the file's architecture: a renamed file is the same model.
+pub(crate) const NO_WEIGHT_TOOLS: &str =
+    "Neurons and refusal removal are not available for Inkling 2 Mini because of its maker's usage policy.";
+
+pub(crate) fn weight_tools_barred(arch: Option<&str>) -> bool {
+    matches!(arch, Some("inkling2" | "inkling2_loop"))
+}
+
+/// `weight_tools_barred` for a model file.
+pub(crate) fn refuse_weight_tools(path: &str) -> Result<(), String> {
+    let head = read_model_head(path);
+    if weight_tools_barred(head.as_ref().and_then(|h| h.arch())) {
+        return Err(NO_WEIGHT_TOOLS.to_string());
+    }
+    Ok(())
+}
+
 /// One pass up to the tokenizer. Writers put `general.*` first and the
 /// tokenizer last, and `general.file_type` sits between the architecture's
 /// numbers and the vocabulary, so the vocabulary is never read.
@@ -677,7 +696,7 @@ pub fn model_file_bytes(path: &str) -> u64 {
 
 #[cfg(test)]
 mod tests {
-    use super::{context_length, read_general, read_header, HeaderFacts};
+    use super::{context_length, read_general, read_header, refuse_weight_tools, HeaderFacts, NO_WEIGHT_TOOLS};
     use std::io::Write;
 
     // Tiny hand-rolled GGUF v3 writer — just enough for the header path.
@@ -761,6 +780,26 @@ mod tests {
         assert_eq!(facts.get("general.architecture"), Some("qwen2"));
         assert_eq!(facts.file_type, Some(7));
         assert!(facts.get("general.description").is_none());
+    }
+
+    #[test]
+    fn weight_tools_stay_off_inkling_by_architecture_not_by_name() {
+        let dir = fixtures("weight-tools");
+        for (file, arch, barred) in [
+            ("renamed-model.gguf", "inkling2_loop", true),
+            ("another-name.gguf", "inkling2", true),
+            ("Inkling-2-Mini-but-really-qwen.gguf", "qwen2", false),
+        ] {
+            let mut w = W::new(1);
+            w.str_field("general.architecture", arch);
+            let p = dir.join(file);
+            w.write_to(&p);
+            let got = refuse_weight_tools(p.to_str().unwrap());
+            assert_eq!(got.is_err(), barred, "{file}");
+            if barred {
+                assert_eq!(got.unwrap_err(), NO_WEIGHT_TOOLS);
+            }
+        }
     }
 
     #[test]
