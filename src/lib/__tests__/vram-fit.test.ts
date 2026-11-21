@@ -211,10 +211,6 @@ describe('every bundle in the catalogue carries the two numbers', () => {
     ['Wan 2.2 · TI2V 5B (Image + Text to Video)', 12, 12, 'big fits fits fits'],
     ['HunyuanVideo 1.5 T2V FP8 (High Quality)', 12, 12, 'big fits fits fits'],
     ['LTX Video 2.3 · 22B FP8', 16, 29, 'big big tight tight'],
-    ['MiniMax H3 · Start/End Frames, with Sound', 24, 24, 'big big big fits'],
-    ['MiniMax H3 Turbo LoRA · 8 Steps', 24, 24, 'big big big fits'],
-    ['MiniMax H3 Reference · Reference Images, with Sound', 24, 24, 'big big big fits'],
-    ['FastH3 · MiniMax H3 in 8 Steps', 24, 24, 'big big big fits'],
     ['LTX 2.5 · Video with Sound', 24, 24, 'big big big fits'],
     ['LTX 2.5 · Small (GGUF Q4)', 16, 16, 'big big fits fits'],
     ['AnimateDiff Lightning', 6, 8, 'fits fits fits fits'],
@@ -244,7 +240,6 @@ describe('every bundle in the catalogue carries the two numbers', () => {
       ['SDXL VAE (fp16-fix) · addon', 'SDXL models'],
       ['Pixel Art XL · SDXL LoRA', 'SDXL models'],
       ['Wan 2.1 14B Speed LoRAs · 4 Steps', 'Wan 2.1 14B'],
-      ['MiniMax H3 Turbo LoRA · 8 Steps', 'MiniMax H3'],
     ])
     // The box, 04.10.2026: the Krea 2 companion files had neither a verdict
     // nor a "For ..." line. Every entry without a number says what it is for.

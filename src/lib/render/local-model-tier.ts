@@ -17,7 +17,7 @@ import type { ModelTier } from './model-tier'
 
 /** Heutiger Stand der Technik unter den offenen Gewichten, lokal lauffaehig. */
 const BEST = new Set([
-  'ltx25', 'minimaxh3', // Video mit Ton
+  'ltx25', // Video mit Ton (MiniMax H3 ist seit 3.1.3 nicht mehr im Angebot)
   'qwenimage', 'zimage', 'flux2', 'krea2', 'ernie_image', // Bild
   'yue2', // Musik
   'trellis2', // 3D (Windows und Linux, api/model-bundles getThreeDBundles)

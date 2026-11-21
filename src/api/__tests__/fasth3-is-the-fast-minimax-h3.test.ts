@@ -23,7 +23,6 @@ vi.mock('../backend', async (importOriginal) => {
 import { buildDynamicWorkflow, FASTH3_NEEDS_UPDATE, WorkflowUnavailableError } from '../dynamic-workflow'
 import { getAllNodeInfo } from '../comfyui-nodes'
 import { classifyModel, isFastH3, isVideoModelType, isI2VModel, isT2VCapable, videoLaneModels, type ClassifiedModel } from '../comfyui'
-import { getVideoBundles } from '../discover'
 import { localFetch } from '../backend'
 import { nodeOf } from './graph-test-support'
 
@@ -88,37 +87,6 @@ describe('FastH3 is an H3 video model that only does text to video', () => {
     expect(videoLaneModels(list, 'video').map((m) => m.name)).toEqual([FAST, BASE])
     expect(videoLaneModels(list, 'animate').map((m) => m.name)).toEqual([BASE])
     expect(videoLaneModels(list, 'extend').map((m) => m.name)).toEqual([BASE])
-  })
-})
-
-describe('the Model Manager card', () => {
-  const bundles = () => getVideoBundles()
-  const fast = () => bundles().find((b) => b.name.startsWith('FastH3'))!
-  const h3 = () => bundles().find((b) => b.name.startsWith('MiniMax H3'))!
-
-  it('a full 8 step checkpoint from FastVideo, with the sha256 Hugging Face states', () => {
-    const main = fast().files[0]
-    expect(main.downloadUrl).toBe(`https://huggingface.co/FastVideo/FastVideo-FastH3-Comfy/resolve/main/diffusion_models/${FAST}`)
-    expect(main.filename).toBe(FAST)
-    expect(main.subfolder).toBe('diffusion_models')
-    expect(main.sizeGB).toBeCloseTo(22128378696 / 1_073_741_824, 2)
-    expect(main.sha256).toBe('0922785978dc9bfe1adf27d8b291b0ca763f9f165f882e6cb297c72fbb6deda8')
-  })
-
-  it('shares the encoder and both VAEs with MiniMax H3, the very same entries', () => {
-    expect(fast().files.slice(1)).toEqual(h3().files.slice(1))
-    expect(fast().files.slice(1).map((f) => f.filename)).toEqual([ENCODER, VIDEO_VAE, AUDIO_VAE])
-    expect(fast().workflow).toBe('minimaxh3')
-  })
-
-  it('is a best-tier bundle, as the base H3', () => {
-    expect(fast().tier).toBe('best')
-    expect(h3().tier).toBe('best')
-  })
-
-  it('totals the files it lists', () => {
-    const sum = fast().files.reduce((a, f) => a + (f.sizeGB ?? 0), 0)
-    expect(fast().totalSizeGB).toBeCloseTo(sum, 1)
   })
 })
 

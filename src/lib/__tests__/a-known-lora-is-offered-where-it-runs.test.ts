@@ -15,7 +15,7 @@
  */
 import { describe, it, expect } from 'vitest'
 import { knownLora, loraFitsModel, loraRows, lorasForRun, skippedLorasLine } from '../lora-stack'
-import { getLoraAddonBundles } from '../../api/model-bundles'
+import { getLoraAddonBundles, getRetiredBundles } from '../../api/model-bundles'
 import { classifyModel } from '../../api/comfyui'
 
 const H3_TURBO = 'minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors'
@@ -35,8 +35,10 @@ describe('what the app knows about a LoRA', () => {
   })
 
   it('every LoRA add-on of the catalogue is known, with its family and its catalogue name', () => {
-    const addons = getLoraAddonBundles()
-    expect(addons.map((b) => b.name)).toEqual(['Pixel Art XL · SDXL LoRA', 'Wan 2.1 14B Speed LoRAs · 4 Steps', 'MiniMax H3 Turbo LoRA · 8 Steps'])
+    // The H3 turbo LoRA is no longer offered, and still known to whoever has it.
+    const addons = [...getLoraAddonBundles(), ...getRetiredBundles().filter((b) => b.files.every((f) => f.subfolder === 'loras'))]
+    expect(getLoraAddonBundles().map((b) => b.name)).toEqual(['Pixel Art XL · SDXL LoRA', 'Wan 2.1 14B Speed LoRAs · 4 Steps'])
+    expect(addons.map((b) => b.name)).toContain('MiniMax H3 Turbo LoRA · 8 Steps')
     for (const b of addons) {
       for (const f of b.files) {
         expect(knownLora(f.filename!), f.filename).toEqual({ family: b.workflow, familyLabel: b.tags[0], catalogName: b.name })

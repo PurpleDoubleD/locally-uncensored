@@ -2,6 +2,7 @@ import { backendCall, fetchExternal } from "./backend"
 import { folderIsAGuess } from '../lib/model-folder-guess'
 import { readComfyFolderLists, filterPartialFiles, refreshComfyModels } from "./comfyui"
 import { COMPONENT_REGISTRY, type ComponentSpec, type ComponentRequirements } from './component-registry'
+import { RETIRED_MODEL_LINE, isRetiredModelName } from '../lib/retired-models'
 import { clearNodeCache, getAllNodeInfo } from "./comfyui-nodes"
 import { restartComfyForNewNodes } from "./comfy-restart"
 import type { ProviderId } from "./providers/types"
@@ -80,10 +81,14 @@ export function civitaiAuthToken(url: string): string | null {
 
 export { folderIsAGuess }
 
+/** MiniMax H3 and its derivatives are fetched on no path (lib/retired-models). */
+const isRetiredDownload = (url: string, filename: string) => isRetiredModelName(url) || isRetiredModelName(filename)
+
 export async function startModelDownload(
   url: string, subfolder: string, filename: string, expectedBytes?: number, sha256?: string,
   opts: { sniffFolder?: boolean } = {},
 ): Promise<{ status: string; id: string; error?: string }> {
+  if (isRetiredDownload(url, filename)) return { status: 'error', id: filename, error: RETIRED_MODEL_LINE }
   // D1: the page this file came from, for Details in Models.
   recordSourceFromDownload(filename, url)
   return backendCall("download_model", {
@@ -103,6 +108,7 @@ export async function startModelDownload(
  * huggingface.co or civitai.com, a .safetensors or .gguf file, a model folder.
  */
 export async function startChatLinkDownload(url: string, subfolder: string, filename: string): Promise<{ status: string; id: string; error?: string }> {
+  if (isRetiredDownload(url, filename)) return { status: 'error', id: filename, error: RETIRED_MODEL_LINE }
   recordSourceFromDownload(filename, url)
   return backendCall("download_model", {
     url,
@@ -242,6 +248,7 @@ export function isPermanentDownloadError(error?: string | null): boolean {
 }
 
 export async function resumeDownload(id: string, url: string, subfolder: string, expectedBytes?: number, sha256?: string, sniffFolder?: boolean): Promise<void> {
+  if (isRetiredDownload(url, id)) throw new Error(RETIRED_MODEL_LINE)
   await backendCall("resume_download", {
     id,
     url,
@@ -1702,6 +1709,8 @@ export async function searchHuggingFaceModels(query: string): Promise<DiscoverMo
   const models: DiscoverModel[] = []
   for (const repo of repos) {
     if (typeof repo?.id !== 'string') continue
+    // MiniMax H3 and its quants are not offered (lib/retired-models).
+    if (isRetiredModelName(repo.id)) continue
     const repoName = repo.id.split('/').pop() || ''
     const q4File = deriveQ4FilenameFromRepo(repoName)
     // D7: the repo name named no quant, so Q4_K_M is only a guess.
@@ -2183,6 +2192,7 @@ function titleArg(filename: string): { title?: string } {
 
 /** Download a GGUF model to a specific directory (for non-Ollama providers) */
 export async function startModelDownloadToPath(url: string, destDir: string, filename: string, expectedBytes?: number, sha256?: string): Promise<{ status: string; id: string; error?: string }> {
+  if (isRetiredDownload(url, filename)) return { status: 'error', id: filename, error: RETIRED_MODEL_LINE }
   // The CivitAI key goes along for a CivitAI address and no other (a LoRA
   // from the CivitAI search into the Mac's LoRA folder). Every other caller
   // sends what it sent before.
@@ -2707,7 +2717,8 @@ export async function searchCivitaiModels(
       ? items.filter((item) => asRecordArray(prop(asRecordArray(prop(item, 'modelVersions'))[0], 'files')).some(isSafetensors))
       : items
 
-    return wanted.map((item) => {
+    // MiniMax H3 and its derivatives are not offered (lib/retired-models).
+    return wanted.filter((item) => !isRetiredModelName(asString(prop(item, 'name')))).map((item) => {
       const version = asRecordArray(prop(item, 'modelVersions'))[0]
       const files = asRecordArray(prop(version, 'files'))
       const file = only?.safetensorsOnly ? files.find(isSafetensors) : files[0]

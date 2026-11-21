@@ -5,7 +5,7 @@
 // This file decides, from the one list ComfyUI reports, which picks a run uses
 // and which LoRAs the stack offers for the model that is picked.
 import { parseLocalCharacterLora, parseLocalStyleLora } from '../api/trainer'
-import { getLoraAddonBundles } from '../api/model-bundles'
+import { getLoraAddonBundles, getRetiredBundles } from '../api/model-bundles'
 import type { ModelType } from '../api/comfyui'
 
 export interface LoraPick {
@@ -30,7 +30,7 @@ const stemOf = (name: string) => fileOf(name).replace(/\.safetensors$/i, '')
  *  workflow, its label the bundle's first tag ("MiniMax H3", "SDXL"). */
 let catalogLoras: Map<string, KnownLora> | null = null
 function catalog(): Map<string, KnownLora> {
-  catalogLoras ??= new Map(getLoraAddonBundles().flatMap((b) => b.files.map((f) => [
+  catalogLoras ??= new Map([...getLoraAddonBundles(), ...getRetiredBundles().filter((b) => b.files.every((f) => f.subfolder === 'loras'))].flatMap((b) => b.files.map((f) => [
     (f.filename ?? '').toLowerCase(),
     { family: b.workflow as ModelType, familyLabel: b.tags[0], catalogName: b.name },
   ])))

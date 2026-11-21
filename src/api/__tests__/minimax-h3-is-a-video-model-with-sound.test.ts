@@ -83,10 +83,8 @@ describe('MiniMax H3 is a video model', () => {
     }
   })
 
-  it('the Model Manager offers the four files of the official template', () => {
-    const bundle = getVideoBundles().find((b) => b.workflow === 'minimaxh3')!
-    expect(bundle.files.map((f) => f.filename)).toEqual([FL2VA, ENCODER, VIDEO_VAE, AUDIO_VAE])
-    for (const f of bundle.files) expect(f.downloadUrl).toMatch(/^https:\/\/huggingface\.co\/Comfy-Org\/MiniMax-H3\/resolve\/main\//)
+  it('the Model Manager no longer offers it (3.1.3, license)', () => {
+    expect(getVideoBundles().some((b) => b.workflow === 'minimaxh3')).toBe(false)
   })
 })
 

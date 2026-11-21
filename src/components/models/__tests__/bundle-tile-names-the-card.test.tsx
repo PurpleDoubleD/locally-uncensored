@@ -102,11 +102,11 @@ describe('a bundle tile compares itself with the detected card', () => {
   // The box, 03.10.2026: the 1.82 GB turbo LoRA read "Needs more than your
   // 12 GB card". An add-on names what it belongs to and carries no verdict.
   it('an add-on says what it is for instead of a verdict', () => {
-    const html = tile('MiniMax H3 Turbo LoRA · 8 Steps', 12)
-    expect(html).toContain('data-bundle-addon-for="MiniMax H3"')
-    expect(html).toContain('>For MiniMax H3<')
+    const html = tile('Wan 2.1 14B Speed LoRAs · 4 Steps', 8)
+    expect(html).toContain('data-bundle-addon-for="Wan 2.1 14B"')
+    expect(html).toContain('>For Wan 2.1 14B<')
     expect(html).not.toContain('data-bundle-fit')
-    expect(html).not.toMatch(/your 12 GB card/)
+    expect(html).not.toMatch(/your 8 GB card/)
     expect(tile('Pixel Art XL · SDXL LoRA', 12)).toContain('>For SDXL models<')
   })
 

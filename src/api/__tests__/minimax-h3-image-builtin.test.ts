@@ -186,12 +186,14 @@ describe('MiniMax H3 Image: what is missing is named', () => {
     expect(err.needsComfyUpdate).toBe(true)
   })
 
-  it('without its VAE, Create offers the file from the official repo', async () => {
+  it('without its VAE the file is named, and nothing is offered or pointed to', async () => {
     serve(NODES({ VAELoader: { input: { required: { vae_name: [[VIDEO_VAE]] } } } }))
     const err = await run().catch((e) => e)
     expect(err).toBeInstanceOf(WorkflowUnavailableError)
     expect(err.message).toContain('minimax_h3_image_vae_fp16.safetensors')
-    expect(COMPONENT_REGISTRY.minimaxh3image.vae?.downloadUrl).toBe('https://huggingface.co/Comfy-Org/MiniMax-H3-Image/resolve/main/vae/minimax_h3_image_vae_fp16.safetensors')
+    expect(err.message).not.toMatch(/huggingface|Comfy-Org|Model Manager/i)
+    expect(err.missing ?? []).toEqual([])
+    expect(COMPONENT_REGISTRY.minimaxh3image.vae?.downloadUrl).toBeUndefined()
   })
 
   it('the prompt enhancer alone is not taken for the encoder', async () => {
