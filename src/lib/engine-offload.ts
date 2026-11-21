@@ -67,6 +67,8 @@ export interface EngineOffloadStatus {
   fitActions?: FitAction[] | null
   /** MoE layers whose experts stay on the processor (`--n-cpu-moe`). */
   cpuMoe?: number | null
+  /** Dense layers whose FFN weights stay on the processor (`--n-cpu-ffn`). */
+  cpuFfn?: number | null
 }
 
 /** The sentence the standing line carries after a fallback. */
@@ -94,6 +96,8 @@ export function engineOffloadLine(status: EngineOffloadStatus | null | undefined
   // An MoE model that does not fit keeps every layer on the card and the
   // experts of its first layers on the processor (3.0.8, A25).
   if (moe > 0 && (layers === null || layers === undefined)) return `GPU layers: all, experts of ${moe} on the CPU`
+  const ffn = typeof status.cpuFfn === 'number' && Number.isInteger(status.cpuFfn) && status.cpuFfn > 0 ? status.cpuFfn : 0
+  if (ffn > 0 && (layers === null || layers === undefined)) return `GPU layers: all, FFN of ${ffn} on the CPU`
   if (typeof layers !== 'number' || !Number.isInteger(layers) || layers < 0) return null
   return `GPU layers: ${layers}`
 }

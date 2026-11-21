@@ -149,5 +149,7 @@ describe('an MoE model with its experts on the processor', () => {
   it('says every layer is on the card and how many layers keep their experts on the CPU', () => {
     expect(engineOffloadLine({ running: true, gpuLayers: null, cpuMoe: 12 })).toBe('GPU layers: all, experts of 12 on the CPU')
     expect(engineOffloadLine({ running: true, gpuLayers: null, cpuMoe: 0 })).toBeNull()
+    expect(engineOffloadLine({ running: true, gpuLayers: null, cpuFfn: 9 })).toBe('GPU layers: all, FFN of 9 on the CPU')
+    expect(engineOffloadLine({ running: true, gpuLayers: null, cpuFfn: 0 })).toBeNull()
   })
 })
