@@ -242,6 +242,9 @@ export function useModels() {
                 // because `hasOllamaModels` is true by the time the api/ollama
                 // path below would have run.
                 contextLength: pm.contextLength, supportsTools: pm.supportsTools,
+                // The vision answer rides the same road and died at the same
+                // literal: carry it, or the composer guesses from the name.
+                supportsVision: pm.supportsVision,
               }
             }
             // ONE place decides what a cloud row carries (lib/cloud-model-row).

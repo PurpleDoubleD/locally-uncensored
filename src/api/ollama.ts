@@ -60,7 +60,7 @@ export class OllamaTimeoutError extends CallTimeoutError {
  */
 type OllamaTagsEntry = Omit<
   OllamaModel,
-  'type' | 'provider' | 'providerName' | 'contextLength' | 'supportsTools'
+  'type' | 'provider' | 'providerName' | 'contextLength' | 'supportsTools' | 'supportsVision'
 > & { capabilities?: unknown }
 
 export async function listModels(): Promise<OllamaModel[]> {
@@ -93,6 +93,14 @@ export async function listModels(): Promise<OllamaModel[]> {
     // Absent field stays undefined, never false: no answer must not read as a
     // denial, or an older Ollama would push every model onto the hermes path.
     supportsTools: Array.isArray(m.capabilities) ? m.capabilities.includes("tools") : undefined,
+    // Same answer, same rule, for pictures. Ollama lists "vision" when the
+    // model was created with its projector (mmproj). Without this the composer
+    // fell back to the family-name list, so a finetune named after itself
+    // ("creative-wordsmith:31b", a Gemma 4 build with its f16 projector) got
+    // "This model can't see the picture" while Ollama said it could, and any
+    // model whose name matched a vision family got the image even when it was
+    // imported without its projector. Absent field stays undefined.
+    supportsVision: Array.isArray(m.capabilities) ? m.capabilities.includes("vision") : undefined,
   }))
 }
 
