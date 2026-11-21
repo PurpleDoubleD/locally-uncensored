@@ -21,7 +21,7 @@ const tools = (n: number) => [
 ]
 
 async function boot(page: Page, agent: boolean) {
-  await page.addInitScript(tauriMockInit, { assistantReply: DEFAULT_ASSISTANT_REPLY, modelName: DEFAULT_MODEL_NAME, platform: 'windows' })
+  await page.addInitScript(tauriMockInit, { assistantReply: DEFAULT_ASSISTANT_REPLY, modelName: DEFAULT_MODEL_NAME, platform: 'windows' as const })
   await seedOnboardingDone(page)
   const messages = [
     msg('u1', 'user', 'Q1 first'), ...(agent ? tools(1) : []), msg('a1', 'assistant', 'A1 middle answer'),

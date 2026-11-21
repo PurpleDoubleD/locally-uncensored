@@ -15,7 +15,7 @@ import { seedOnboardingDone } from './support/cloud-mock'
 const PATH = `/mock/${DEFAULT_MODEL_NAME}.gguf`
 
 async function boot(page: Page, dark = true) {
-  await page.addInitScript(tauriMockInit, { assistantReply: DEFAULT_ASSISTANT_REPLY, modelName: DEFAULT_MODEL_NAME, platform: 'windows' })
+  await page.addInitScript(tauriMockInit, { assistantReply: DEFAULT_ASSISTANT_REPLY, modelName: DEFAULT_MODEL_NAME, platform: 'windows' as const })
   await seedOnboardingDone(page)
   await page.emulateMedia({ colorScheme: dark ? 'dark' : 'light' })
   await page.addInitScript(([dk]) => {
