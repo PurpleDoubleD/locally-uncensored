@@ -41,6 +41,8 @@ mod media_store;
 #[cfg(test)]
 mod mobile_page;
 mod onboarding_window;
+#[cfg(desktop)]
+mod window_place;
 mod os_error;
 mod os_paths;
 mod phone_log;
@@ -1622,7 +1624,13 @@ pub fn run() {
                 let w = window.clone();
                 let hide_gen = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
                 window.on_window_event(move |event| {
+                    // 3.1.3: where the user puts the window is where it opens
+                    // next time (`window_place`).
+                    if matches!(event, tauri::WindowEvent::Moved(_) | tauri::WindowEvent::Resized(_)) {
+                        window_place::remember(&w);
+                    }
                     if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                        window_place::flush();
                         api.prevent_close();
                         // No tray (GH #204): a hidden window could never come
                         // back, so the close button is the Quit item.
@@ -1738,6 +1746,8 @@ pub fn run() {
             // server, the trainer and the MLX sidecar all running. Proved
             // live on 2026-07-28: app gone, the MLX Python still resident.
             if let tauri::RunEvent::Exit = event {
+                #[cfg(desktop)]
+                window_place::flush();
                 if let Some(state) = app.try_state::<AppState>() {
                     state.shutdown_subprocesses();
                 }
