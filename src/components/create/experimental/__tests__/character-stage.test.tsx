@@ -179,7 +179,8 @@ describe('the stage', () => {
     fireEvent.change(screen.getByLabelText('New name for char seven'), { target: { value: 'Greta' } })
     fireEvent.keyDown(screen.getByLabelText('New name for char seven'), { key: 'Enter' })
     await waitFor(() => expect(useCharacterNames.getState().names).toEqual({ 'cloud:7': 'Greta' }))
-    expect(container.textContent).toContain('Trigger word: sevenchar')
+    // The word stands in the tooltip of the tab; no second line under the row.
+    expect(container.querySelector('[data-hub-character="cloud:7"]')?.getAttribute('title')).toContain('trigger word: sevenchar')
   })
 })
 

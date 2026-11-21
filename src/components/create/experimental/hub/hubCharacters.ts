@@ -151,16 +151,33 @@ function applyLocalLora(c: HubCharacter): void {
   st.setSelectedCharacter(c.ref)
 }
 
+/** Image with a photo character (3.1.3, as on the web): it has no model of
+ *  its own, so the run is an Edit with its photos as references, and it
+ *  stays in the Character area instead of jumping to the Edit tab. */
+export async function imageFromPhotos(c: HubCharacter): Promise<string | null> {
+  const st = useCreateStore.getState()
+  st.setSelectedCharacter(null)
+  st.setIntent('edit')
+  st.setHubPhotoImage({ key: c.key, name: c.name })
+  st.setHubStep('panel')
+  st.setSource(null)
+  st.setReferences([])
+  st.setMask(null)
+  try {
+    await loadPhotosAsReferences(c.name, c.photos ?? [])
+    return null
+  } catch (err) {
+    return err instanceof Error ? err.message : String(err)
+  }
+}
+
 /** Opens an action of the area with the character's inputs filled in. A
  *  photo character on Image goes to Edit with its photos as references (no
  *  LoRA to run). Returns a sentence when the picture could not be loaded;
  *  the action is open all the same. */
 export async function openHubAction(action: HubAction, c: HubCharacter | null, replace = false): Promise<string | null> {
   const st = useCreateStore.getState()
-  if (action === 'image' && c?.photos?.length && !c.ref) {
-    await loadPhotosAsReferences(c.name, c.photos)
-    return null
-  }
+  if (action === 'image' && c?.photos?.length && !c.ref) return imageFromPhotos(c)
   st.setIntent(intentOfAction(action))
   if (action === 'image') {
     st.setCharacterTab('use')
@@ -185,19 +202,8 @@ export async function openHubAction(action: HubAction, c: HubCharacter | null, r
   }
 }
 
-/** An action picked on the stage. Image with a photo character stays on the
- *  stage: it has no LoRA to run, so the prompt window's button goes on to
- *  Edit with its photos (CharacterHub, the stage's slot of hubRun). Every
- *  other pick is openHubAction. */
+/** An action picked on the stage. */
 export async function openStageAction(action: HubAction, c: HubCharacter | null, replace = false): Promise<string | null> {
-  const st = useCreateStore.getState()
-  if (action === 'image' && c?.photos?.length && !c.ref) {
-    st.setIntent('character')
-    st.setCharacterTab('use')
-    st.setSelectedCharacter(null)
-    st.setHubStep('panel')
-    return null
-  }
   const err = await openHubAction(action, c, replace)
   useCreateStore.getState().setHubStep('panel')
   return err

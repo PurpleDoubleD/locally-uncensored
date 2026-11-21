@@ -70,6 +70,8 @@ export function IntentBar() {
   const setCloudTeaser = useUIStore((s) => s.setCloudTeaser)
   const { intents, lockedOf } = useIntentLanes()
 
+  // Image with a photo character is an Edit run inside the Character area.
+  const hubPhotoImage = useCreateStore((st) => !!st.hubPhotoImage)
   return (
     <div
       role="radiogroup"
@@ -97,7 +99,7 @@ export function IntentBar() {
         const locked = hub
           ? intents.filter((m) => HUB_INTENTS.includes(m.id)).every((m) => lockedOf(m))
           : lockedOf(meta)
-        const selected = !locked && (hub ? isHubIntent(intent) : intent === meta.id)
+        const selected = !locked && (hub ? isHubIntent(intent) || hubPhotoImage : intent === meta.id && !hubPhotoImage)
         const Icon = meta.icon
         return (
           <button

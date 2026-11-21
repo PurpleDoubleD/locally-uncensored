@@ -70,12 +70,11 @@ test('mac with Z-Image Turbo: Train new trains the character locally and it land
   await addPhotos(page, 4)
   // How-it-works film (15.10.2026): the board said "Training runs on your
   // GPU" and the model chip named the picked image model, "MLX SD Turbo".
-  await expect(page.getByText("Training runs on this Mac and lands the character in the Mac's LoRA folder.")).toBeVisible()
   await expect(page.getByText(/runs on your GPU/)).toHaveCount(0)
   await expect(page.getByTestId('mac-train-base')).toHaveText('Trains on Z-Image Turbo')
-  await expect(controls).toContainText('4/100 photos')
+  await expect(controls).toContainText('4 of 100 photos')
 
-  await page.getByRole('button', { name: /^Create$/ }).last().click()
+  await page.getByRole('button', { name: 'Start training' }).last().click()
 
   await expect.poll(async () => (await calls(page, 'mlx_train_start')).length, { timeout: 30_000 }).toBe(1)
   const [clear] = await calls(page, 'mlx_train_clear')
@@ -110,7 +109,7 @@ test('mac: Stop ends the training in Rust and is no error', async ({ page }) => 
   await openTrainTab(page, { ...ZIMAGE_MAC, mlx: { ...ZIMAGE_MAC.mlx, trainPolls: 400 } })
   await page.getByTestId('mac-train-controls').getByPlaceholder('Trigger word, e.g. davechar').fill('luxfox')
   await addPhotos(page, 5)
-  await page.getByRole('button', { name: /^Create$/ }).last().click()
+  await page.getByRole('button', { name: 'Start training' }).last().click()
   await expect.poll(async () => (await calls(page, 'mlx_train_start')).length, { timeout: 30_000 }).toBe(1)
   await expect(page.getByText(/Training \d+\/\d+/).first()).toBeVisible({ timeout: 15_000 })
 
@@ -120,7 +119,7 @@ test('mac: Stop ends the training in Rust and is no error', async ({ page }) => 
   const [cancel] = await calls(page, 'mlx_train_cancel')
   const [start] = await calls(page, 'mlx_train_start')
   expect(cancel.raw.run).toBe(start.raw.run)
-  await expect(page.getByRole('button', { name: /^Create$/ }).last()).toBeVisible({ timeout: 15_000 })
+  await expect(page.getByRole('button', { name: 'Start training' }).last()).toBeVisible({ timeout: 15_000 })
   await expect(page.getByText(/Training failed/)).toHaveCount(0)
 })
 
@@ -132,8 +131,8 @@ test('mac without Z-Image Turbo: the Train tab says what it needs and Create doe
   await expect(controls.getByRole('button', { name: 'Install Z-Image Turbo' })).toBeVisible()
   await controls.getByPlaceholder('Trigger word, e.g. davechar').fill('luxfox')
   await addPhotos(page, 5)
-  await page.getByRole('button', { name: /^Create$/ }).last().click()
-  await expect(page.getByText(/Install it in the Model Manager, then hit Create again/)).toBeVisible({ timeout: 15_000 })
+  await page.getByRole('button', { name: 'Start training' }).last().click()
+  await expect(page.getByText(/Install it in the Model Manager, then start the training again/)).toBeVisible({ timeout: 15_000 })
   expect(await calls(page, 'mlx_train_start')).toHaveLength(0)
 })
 
@@ -161,9 +160,9 @@ test('mac: frames of a video go through Use frames for a character into the Mac 
   // They land on the Train tab of the Mac, which trains them here.
   await expect(page.locator('[data-hub-training]')).toContainText('Train a model')
   const controls = page.getByTestId('mac-train-controls')
-  await expect(controls).toContainText('7/100 photos', { timeout: 15_000 })
+  await expect(controls).toContainText('7 of 100 photos', { timeout: 15_000 })
   await controls.getByPlaceholder('Trigger word, e.g. davechar').fill('foxclip')
-  await page.getByRole('button', { name: /^Create$/ }).last().click()
+  await page.getByRole('button', { name: 'Start training' }).last().click()
 
   await expect.poll(async () => (await calls(page, 'mlx_train_start')).length, { timeout: 30_000 }).toBe(1)
   const staged = await calls(page, 'mlx_train_stage')

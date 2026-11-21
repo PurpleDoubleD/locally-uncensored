@@ -234,11 +234,10 @@ describe('Delete of a photo character', () => {
 })
 
 describe('the quiet line', () => {
-  it('a local LoRA says its trigger word and how to name it in Chat, as text, not a card', () => {
+  it('a local LoRA has no second line under the row (David, 21.11.): its word is the tooltip of its tab', () => {
     const { container } = stage(localChar)
-    const line = container.querySelector('[data-hub-tabs-line]')!
-    expect(line.tagName).toBe('P')
-    expect(line.textContent).toBe('Trigger word: opa. In Chat, name it: “a picture of opa at the beach”.')
+    expect(container.querySelector('[data-hub-tabs-line]')).toBeNull()
+    expect(container.querySelector('[data-hub-character]')?.getAttribute('title')).toContain('trigger word: opa')
   })
 
   it('a photo character has none', () => {

@@ -43,6 +43,7 @@ export function usePickAction() {
     const meta = intents.find((m) => m.id === intent) ?? INTENT_MAP[intent]
     if (lockedOf(meta)) { setCloudTeaser({ surface: 'intent', intent: intent as TeaserIntent }); return }
     const st = useCreateStore.getState()
+    st.setHubNewDraft(null)
     // Leaving the training or the page of a new character for an action:
     // the stage comes back.
     const fresh = st.hubStep !== 'panel' || (st.intent() === 'character' && st.characterTab === 'train')
@@ -83,7 +84,8 @@ export function HubActionRow() {
   useCloudCatalogStore((s) => s.fetchedAt)
   const { intents, lockedOf } = useIntentLanes()
   const onPick = usePickAction()
-  const active = training ? null : actionOfIntent(intent)
+  const photoImage = useCreateStore((s) => !!s.hubPhotoImage)
+  const active = training ? null : photoImage ? 'image' : actionOfIntent(intent)
   const showCloud = backend === 'cloud' || cloudFeatures
   const actions = HUB_ACTIONS.flatMap((a) => {
     const of: CreateIntent = intentOfAction(a)

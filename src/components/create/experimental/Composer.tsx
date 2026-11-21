@@ -481,11 +481,16 @@ export function Composer({ onOpenAdvanced, onOpenWorkflows, hub = false }: Props
   const hubStage = useHubRun((st) => st.stage)
   const hubRun = hub ? (hubSwap ?? hubStage?.run ?? null) : null
   const hubField = hubRun?.field ?? null
+  // The training page (3.1.3): no text field, the one button says what it
+  // does, and while the page has its own button the window stands back.
+  const hubTrainWindow = useHubRun((st) => st.trainWindow)
+  const hubTraining = hub && intent === 'character' && characterTab === 'train'
   const hubAction = actionOfIntent(intent)
   // The field stands on every action. Where the action takes no text, it
   // says so and takes none.
   const hubNoText = hub && !needPrompt && !hubField
   const hubNote = !hub ? null
+    : hubTraining ? null
     : hubRun ? (!hubRun.ready && !hubRun.running ? hubRun.hint ?? null : null)
       : showNoPromptHint && !needsMask && isInputHint(intent) ? laneCaption : null
   // The video of Swap and Motion can come in through the window as well.
@@ -531,8 +536,8 @@ export function Composer({ onOpenAdvanced, onOpenWorkflows, hub = false }: Props
           <p className="t-body text-gray-500 text-center px-3.5" data-testid="lane-input-note">{laneCaption}</p>
         )}
 
-        <div className="rounded-[var(--radius-panel)] bg-white/[0.03] border border-white/[0.06] focus-within:border-white/15 transition-colors" data-prompt-window>
-          {(needPrompt || hub) && (
+        {!(hubTraining && hubTrainWindow === 'hidden' && !isGenerating) && <div data-hub-train-window={hubTraining || undefined} className="rounded-[var(--radius-panel)] bg-white/[0.03] border border-white/[0.06] focus-within:border-white/15 transition-colors" data-prompt-window>
+          {(needPrompt || hub) && !hubTraining && (
             // The prompt assistant (B43) sits in the field's corner, not in the
             // action bar: there every pixel is the model chip's, whose whole
             // name has to fit at 760 px (FEHLER-Q4 #2). The field keeps its
@@ -551,7 +556,7 @@ export function Composer({ onOpenAdvanced, onOpenWorkflows, hub = false }: Props
                 placeholder={
                   hubField ? hubField.placeholder
                   : hubNoText ? `${hubAction && !(intent === 'character' && characterTab === 'train') ? ACTION_LABEL[hubAction] : 'Training'} needs no text.`
-                  : hub && characterUse && hubStage?.placeholder ? hubStage.placeholder
+                  : hub && (characterUse || intent === 'edit') && hubStage?.placeholder ? hubStage.placeholder
                   : characterUse
                     ? 'Describe the scene for your character…'
                     // R5-66: the shared 'edit' placeholder promises a maskless
@@ -728,7 +733,7 @@ export function Composer({ onOpenAdvanced, onOpenWorkflows, hub = false }: Props
                 </div>
               </Tooltip>
             )}
-            {hub && (
+            {hub && !hubTraining && (
               // The one settings icon of the window: the model, the size and
               // everything else of the tab (AdvancedDrawer).
               <Tooltip content="Model, size and all other settings.">
@@ -763,12 +768,12 @@ export function Composer({ onOpenAdvanced, onOpenWorkflows, hub = false }: Props
                   {/* Swap Character names its price on the button (the web's
                       CreateButton): a paid video run, priced by its length. */}
                   {/* With a new voice the lip sync step is in the figure too. */}
-                  {createPrice ? `Create · ${createPrice}` : 'Create'}
+                  {hubTraining ? (createPrice ? `Start training · ${createPrice}` : 'Start training') : createPrice ? `Create · ${createPrice}` : 'Create'}
                 </Button>
               </span>
             )}
           </div>
-        </div>
+        </div>}
       </div>
     </div>
   )

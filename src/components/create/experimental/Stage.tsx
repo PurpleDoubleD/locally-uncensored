@@ -48,6 +48,7 @@ import { useReferenceSlots } from './referenceSlots'
 import { SavedCharacterChips } from './SavedCharacters'
 import { loadPhotosAsReferences, sendPhotosToStudio } from './characterPhotos'
 import { MIN_TRAIN_IMAGES, maxTrainImages } from '../../../lib/train-image-cap'
+import { TrainMore } from './hub/TrainParts'
 import { TRAIN_CAPTION_HELP, TRAIN_CAPTION_MAX, TRAIN_CAPTION_PLACEHOLDER } from '../../../lib/train-captions'
 import { STYLE_CAPTION_HELP, STYLE_CAPTION_PLACEHOLDER, STYLE_DROP_HINT, STYLE_DROP_TITLE } from '../../../lib/train-kind'
 import { describeAvailability, describeTrainPhoto, type DescribeAvailability } from '../../../lib/render/describe-train-photos'
@@ -185,6 +186,7 @@ export function Stage({ hub = false, displayed, onOpenMaskEditor, onEditResult, 
   const imageRefSide = intent === 'image' && (imageRefSlots > 0 || imageRefCount > 0)
 
   const characterTab = useCreateStore((s) => s.characterTab)
+  const hubPhotoImage = useCreateStore((s) => !!s.hubPhotoImage)
   const characterTrain = intent === 'character' && characterTab === 'train'
   // The example chips of Music are style descriptions. Where the prompt of a
   // cloud model is the lyrics, a chip would be sung word for word, so that
@@ -241,8 +243,11 @@ export function Stage({ hub = false, displayed, onOpenMaskEditor, onEditResult, 
   } else if (characterTrain) {
     // Character-Studio training board: the image SET lives here (4-30 photos);
     // trigger word + train button sit in the composer below.
-    body = <TrainSetBoard />
+    body = <TrainSetBoard compact={hub} />
     howtoAtFoot = true
+  } else if (hub && hubPhotoImage && !(displayed && freshResult)) {
+    // Image with a photo character: its photos stand on the stage (CharacterHub).
+    body = null
   } else if (needsSource && !source) {
     body = intent === '3d' && threeDWay === 'video' ? <ThreeDVideoHint /> : <InputSlot />
     howtoAtFoot = true
@@ -321,7 +326,7 @@ export function Stage({ hub = false, displayed, onOpenMaskEditor, onEditResult, 
       <div
         ref={stageRef}
         data-testid="create-stage"
-        className={cn('relative flex w-full flex-col overflow-hidden', characterTrain ? 'min-h-[min(52vh,26rem)]' : 'h-[min(52vh,26rem)]')}
+        className={cn('relative flex w-full flex-col overflow-hidden', characterTrain ? '' : 'h-[min(52vh,26rem)]')}
       >
         <AnimatePresence mode="wait">
           <StageLayer key={intent + (isGenerating ? ':gen' : '')}>{body}</StageLayer>
@@ -1146,7 +1151,30 @@ function ModelInstallCard({ kind, startOnly }: { kind: 'image' | 'video' | 'audi
 // ── Character-Studio training board (2.5.8): the 4-30 photo set. Trigger word
 // and the Create (train) button live in the composer; this is the visual home
 // of the image set with add/remove + drag&drop. ──
-export function TrainSetBoard() {
+/** Does the Stage show a setup card for this tab (a one-time download, a node
+ *  pack)? The Character area then shows that card alone. The same rule as the
+ *  Stage's own branches below. */
+export function useStageSetupCard(comfyStarting?: boolean): boolean {
+  const intent = useCreateStore((s) => s.intent())
+  const meta = INTENT_MAP[intent]
+  const backend = useCreateStore((s) => s.backend)
+  const caps = useCreateStore((s) => s.caps)
+  const image = useCreateStore((s) => s.imageModelList)
+  const video = useCreateStore((s) => s.videoModelList)
+  const audio = useCreateStore((s) => s.audioModelList)
+  const lipsync = useCreateStore((s) => s.lipsyncModelList)
+  const motion = useCreateStore((s) => s.motionModelList)
+  const upscale = useCreateStore((s) => s.upscaleModelList)
+  const { connected, modelsLoaded, mlxMissing } = useCreateExp()
+  const installRun = useSyncExternalStore(subscribeInstallRuns, () => (meta.requiresModels ? getInstallRun(meta.requiresModels).running : false))
+  const capReady = !meta.capability || backend === 'cloud' || !!caps[meta.capability] || isMlxImageHost()
+  return installRun || !capReady || stageShowsSetupCard({
+    backend, requiresModels: meta.requiresModels, mlxMissing, connected, comfyStarting, modelsLoaded,
+    laneModelCount: laneModelCount(intent, meta.requiresModels, { image, video, audio, lipsync, motion, upscale }),
+  })
+}
+
+export function TrainSetBoard({ compact = false }: { compact?: boolean } = {}) {
   const trainImages = useCreateStore((s) => s.trainImages)
   const addTrainImages = useCreateStore((s) => s.addTrainImages)
   const removeTrainImage = useCreateStore((s) => s.removeTrainImage)
@@ -1207,6 +1235,82 @@ export function TrainSetBoard() {
       .filter((f) => f.type.startsWith('image/'))
       .map(mediaRefFrom)
     if (imgs.length > 0) addTrainImages(imgs)
+  }
+
+  // The training page of the Character area (3.1.3): the photos as one small
+  // strip with its add tile. The descriptions are optional and fold away.
+  if (compact) {
+    return (
+      <div
+        className="flex w-full flex-col items-center gap-2.5 pb-2"
+        data-hub-train-photos={trainImages.length}
+        onDragOver={(e) => e.preventDefault()}
+        onDrop={(e) => { e.preventDefault(); addFiles(e.dataTransfer.files) }}
+      >
+        <input ref={inputRef} type="file" accept="image/*" multiple className="hidden" aria-label="Add training photos"
+          onChange={(e) => { if (e.target.files) addFiles(e.target.files); e.target.value = '' }} />
+        {trainImages.length === 0 && (
+          <button onClick={() => inputRef.current?.click()} className="hub-drop hub-text hub-fs-14 flex min-h-16 w-full max-w-[460px] flex-col items-center justify-center gap-0.5 px-4 py-3">
+            <span className="font-medium">Drop {MIN_TRAIN_IMAGES} to {maxTrainImages(backend)} {style ? STYLE_DROP_TITLE : 'photos of your character here'}</span>
+            <span className="hub-dim hub-fs-125">{style ? STYLE_DROP_HINT : 'One person or character, varied angles and lighting works best'}</span>
+          </button>
+        )}
+        {trainImages.length === 0 && (
+          <SavedCharacterChips
+            label="or start from a saved character"
+            title={(c) => `Add the ${c.photos.length} photos of ${c.name}`}
+            onPick={(c) => sendPhotosToStudio(c.name, c.photos)}
+          />
+        )}
+        {trainImages.length > 0 && <div className="hub-train-photos">
+          {trainImages.map((img) => (
+            <div key={img.name} className="hub-train-photo group">
+              <img src={img.url} alt="" />
+              <button
+                onClick={() => removeTrainImage(img.name)}
+                className="lu-on-dark absolute right-0.5 top-0.5 grid h-4 w-4 place-items-center rounded-full bg-black/60 text-white opacity-0 transition-opacity focus:opacity-100 group-hover:opacity-100"
+                title="Remove"
+                aria-label={`Remove ${img.name}`}
+              >
+                <X size={10} />
+              </button>
+            </div>
+          ))}
+          <button onClick={() => inputRef.current?.click()} className="hub-train-add" title="Add photos" aria-label="Add photos"><ImagePlus size={16} /></button>
+        </div>}
+        {captions && trainImages.length > 0 && (
+          <TrainMore label="Describe the photos (optional)">
+            <p className="hub-dim hub-fs-125 max-w-[460px] text-center" data-testid="train-caption-help">{captionHelp}</p>
+            {describing ? (
+              <button type="button" onClick={() => describeAbort.current?.abort()} className="hub-muted hub-fs-125 inline-flex items-center gap-1 underline underline-offset-2">
+                <Loader2 size={11} className="animate-spin" />Describing {describing.done} of {describing.total}, stop
+              </button>
+            ) : (
+              <button type="button" onClick={describeAll} disabled={!describe?.available || isGenerating} title={describe?.hint ?? 'Checking your chat model...'} className="hub-muted hub-fs-125 underline underline-offset-2 disabled:opacity-50 disabled:no-underline">
+                Describe photos
+              </button>
+            )}
+            <div className="grid w-full grid-cols-2 gap-x-3 gap-y-1.5">
+              {trainImages.map((img) => (
+                <div key={img.name} className="flex items-center gap-2">
+                  <img src={img.url} alt="" className="h-7 w-7 shrink-0 rounded object-cover" />
+                  <input
+                    value={trainCaptions[img.name] ?? ''}
+                    onChange={(e) => setTrainCaption(img.name, e.target.value)}
+                    maxLength={TRAIN_CAPTION_MAX}
+                    disabled={isGenerating}
+                    placeholder={captionPlaceholder}
+                    title={trainCaptions[img.name] || captionPlaceholder}
+                    aria-label={style ? `What is in ${img.name}` : `What changes in ${img.name}`}
+                    className="hub-line hub-text hub-fs-125 min-w-0 flex-1 border-b bg-transparent py-1 outline-none disabled:opacity-60"
+                  />
+                </div>
+              ))}
+            </div>
+          </TrainMore>
+        )}
+      </div>
+    )
   }
 
   return (

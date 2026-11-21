@@ -62,6 +62,7 @@ import { trainerPathPlaceholder } from '../../../lib/trainer-path-placeholder'
 import { trainerRootHint } from '../../../lib/trainer-root-hint'
 import { useCreateExp } from './CreateContext'
 import { useHubRun } from './hub/hubRun'
+import { TrainHead, TrainMore, TrainRow, TrainWord } from './hub/TrainParts'
 import { swapLocalProblem } from '../../../lib/create/swap-local'
 import { CharacterUseLocally } from './CharacterUseLocally'
 import { CLOUD_TRAINING_FAMILY_NOTE, localTrainingFamilyNote } from '../../../api/character-import'
@@ -181,17 +182,20 @@ function CharacterPanel() {
       ) : characterTab === 'use' && localLane ? (
         <LocalCharacterNotes />
       ) : characterTab === 'train' ? (
-        <div className="flex items-center justify-center gap-2 flex-wrap">
-          <input
-            value={triggerWord}
-            onChange={(e) => setTriggerWord(e.target.value)}
-            placeholder="Trigger word, e.g. davechar"
-            className="t-control w-44 px-2.5 h-[var(--control-h-sm)] rounded-md bg-white/[0.03] border border-white/[0.06] text-gray-200 placeholder-gray-600 focus:outline-none focus:border-white/15"
+        <div className="hub-train">
+          <TrainHead
+            now="train"
+            title={trainImages.length < MIN_TRAIN_IMAGES ? `Add ${MIN_TRAIN_IMAGES - trainImages.length} more photos` : !triggerWord.trim() ? 'Type a trigger word' : 'Ready to train'}
+            line={<>{trainImages.length}/{maxTrainImages(backend)} photos added{trainImages.length < MIN_TRAIN_IMAGES ? `, need at least ${MIN_TRAIN_IMAGES}` : ''}</>}
           />
-          <TriggerWordNote />
-          <span className="t-label text-gray-600">
-            {trainImages.length}/{maxTrainImages(backend)} photos added{trainImages.length < MIN_TRAIN_IMAGES ? `, need at least ${MIN_TRAIN_IMAGES}` : ''}
-          </span>
+          <TrainWord
+            value={triggerWord}
+            onChange={setTriggerWord}
+            label="Trigger word"
+            placeholder="Trigger word, e.g. davechar"
+            help="You type this word in a prompt to get this face."
+            after={<TriggerWordNote />}
+          />
           {/* Said before the training, not after it (3.0.8): only a Z-Image
               character can come to this computer. */}
           <p data-testid="cloud-train-family-note" className={`w-full text-center t-micro ${HINWEIS_TEXT.ruhig}`}>
@@ -547,60 +551,72 @@ function LocalTrainControls() {
     setNote(s?.basesReady ? null : baseStartFailedNote(alreadyThere, startProblems.current))
   }
 
+  // While the page has its own button (set up, download) the prompt window
+  // has nothing to start and stands back.
+  const setTrainWindow = useHubRun((st) => st.setTrainWindow)
+  const setupNeeded = !status || !status.envReady || !status.basesReady
+  useEffect(() => { setTrainWindow(setupNeeded ? 'hidden' : 'start'); return () => setTrainWindow(null) }, [setupNeeded, setTrainWindow])
   if (!status) {
-    return <div className="t-label text-gray-600 text-center">Checking the local trainer…</div>
+    return <div className="hub-dim hub-fs-13 text-center">Checking the local trainer…</div>
   }
   if (!status.envReady || (busy === 'install' && status.install.status === 'installing')) {
     return (
-      <div className="flex flex-col items-center gap-1.5">
-        <div className="flex items-center gap-2 flex-wrap justify-center">
-          <span className="t-label text-gray-500">Trains fully on your GPU. One time setup, about 3 GB.</span>
-          <Button size="sm" variant="secondary" icon={Download} loading={busy === 'install'} disabled={busy === 'install'} onClick={startInstall}>
-            {busy === 'install' ? 'Setting up…' : 'Set up trainer'}
-          </Button>
-        </div>
+      <div className="hub-train">
+        <TrainHead now="trainer" title="Set up the trainer" line="One-time download, about 3 GB. Training runs on your graphics card." />
+        <Button size="lg" variant="primary" icon={Download} loading={busy === 'install'} disabled={busy === 'install'} onClick={startInstall}>
+          {busy === 'install' ? 'Setting up…' : 'Set up trainer'}
+        </Button>
+        {note && <div role="status" tabIndex={0} className="hub-dim hub-fs-125 max-w-[460px] max-h-40 overflow-y-auto select-text whitespace-pre-wrap text-center break-words">{note}</div>}
         {busy !== 'install' && (
-          <TrainerPathField
-            value={installPath}
-            onChange={(v) => { setTypedPath(v); setPathTouched(true) }}
-            status={status}
-          />
+          <TrainMore label="Install location">
+            <TrainerPathField
+              value={installPath}
+              onChange={(v) => { setTypedPath(v); setPathTouched(true) }}
+              status={status}
+            />
+          </TrainMore>
         )}
-        {note && <div role="status" tabIndex={0} className="text-xs leading-relaxed text-gray-600 max-w-[520px] max-h-40 overflow-y-auto select-text whitespace-pre-wrap text-center break-words">{note}</div>}
       </div>
     )
   }
   if (!status.basesReady) {
     return (
-      <div className="flex flex-col items-center gap-1.5">
-        <div className="flex items-center gap-2">
-          <span className="t-label text-gray-500">{missingBasesLine(missingBases)}</span>
-          <Button size="sm" variant="secondary" icon={Download} loading={busy === 'bases'} disabled={busy === 'bases'} onClick={startBases}>
-            {busy === 'bases' ? 'Downloading…' : 'Download base files'}
-          </Button>
-        </div>
+      <div className="hub-train">
+        <TrainHead now="bases" title="Download the base model" line={missingBasesLine(missingBases)} />
+        <Button size="lg" variant="primary" icon={Download} loading={busy === 'bases'} disabled={busy === 'bases'} onClick={startBases}>
+          {busy === 'bases' ? 'Downloading…' : 'Download base files'}
+        </Button>
         {/* K5 Blocker 3 (Opus review of `4fda5a0a`): these bytes go through
             download_model, which follows your configured model folder
             (Settings, ComfyUI), not the trainer folder set on the previous
             screen. Said here so the setup does not read as one place for
             everything the trainer downloads. */}
-        <span className="t-label text-gray-600">Goes to your configured model folder (Settings, ComfyUI).</span>
-        {note && <div role="status" tabIndex={0} className="text-xs leading-relaxed text-gray-600 max-w-[520px] max-h-40 overflow-y-auto select-text whitespace-pre-wrap text-center break-words">{note}</div>}
+        <span className="hub-dim hub-fs-125">Goes to your configured model folder (Settings, ComfyUI).</span>
+        {note && <div role="status" tabIndex={0} className="hub-dim hub-fs-125 max-w-[460px] max-h-40 overflow-y-auto select-text whitespace-pre-wrap text-center break-words">{note}</div>}
       </div>
     )
   }
+  const word = trainKind === 'style' ? 'style' : 'character'
+  const short = Math.max(0, MIN_TRAIN_IMAGES - trainImages.length)
+  const title = short > 0 ? `Add ${short} more ${short === 1 ? 'photo' : 'photos'}`
+    : !triggerWord.trim() ? (trainKind === 'style' ? 'Name this style' : 'Type a trigger word')
+    : 'Ready to train'
   return (
-    <div className="flex flex-col items-center gap-1.5">
-      <TrainKindPicker />
-      <div className="flex items-center justify-center gap-2 flex-wrap">
-        <input
-          value={triggerWord}
-          onChange={(e) => setTriggerWord(e.target.value)}
-          placeholder={trainKind === 'style' ? STYLE_NAME_PLACEHOLDER : 'Trigger word, e.g. davechar'}
-          aria-label={trainKind === 'style' ? 'Style name' : 'Trigger word'}
-          className="t-control w-44 px-2.5 h-[var(--control-h-sm)] rounded-md bg-white/[0.03] border border-white/[0.06] text-gray-200 placeholder-gray-600 focus:outline-none focus:border-white/15"
-        />
-        <TriggerWordNote />
+    <div className="hub-train">
+      <TrainHead
+        now="train"
+        title={title}
+        line={`${trainImages.length} of ${maxTrainImages('local')} ${trainKind === 'style' ? 'pictures' : 'photos'}${short > 0 ? `, need at least ${MIN_TRAIN_IMAGES}` : ''}.`}
+      />
+      <TrainWord
+        value={triggerWord}
+        onChange={setTriggerWord}
+        label={trainKind === 'style' ? 'Style name' : 'Trigger word'}
+        placeholder={trainKind === 'style' ? STYLE_NAME_PLACEHOLDER : 'Trigger word, e.g. davechar'}
+        help={trainKind === 'style' ? 'The name this style has in your LoRA list.' : 'You type this word in a prompt to get this face.'}
+        after={<TriggerWordNote />}
+      />
+      <TrainRow label="Quality">
         <Segmented
           size="sm"
           layoutId="train-steps"
@@ -608,6 +624,8 @@ function LocalTrainControls() {
           onChange={(v) => setTrainSteps(Number(v))}
           options={presets.map((p) => ({ value: String(p.steps), label: p.label }))}
         />
+      </TrainRow>
+      <TrainRow label="Graphics memory">
         <Segmented
           size="sm"
           layoutId="train-vram"
@@ -615,17 +633,34 @@ function LocalTrainControls() {
           onChange={(v) => setTrainVramPreset(v as TrainVramPreset)}
           options={TRAIN_VRAM_PRESETS.map((p) => ({ value: p.value, label: p.label }))}
         />
-        <span className="t-label text-gray-600">
-          {trainImages.length}/{maxTrainImages('local')} {trainKind === 'style' ? 'pictures' : 'photos'}{trainImages.length < MIN_TRAIN_IMAGES ? `, need at least ${MIN_TRAIN_IMAGES}` : ''}
-        </span>
-      </div>
+      </TrainRow>
+      {trainNotice && (
+        <div role="status" className="hub-muted hub-fs-125 max-w-[460px] text-center" data-testid="train-low-vram-switch">{trainNotice}</div>
+      )}
+      {!isGenerating && !trainNotice && trainVramPreset === 'low-vram' && (
+        <div className="hub-dim hub-fs-125 max-w-[460px] text-center" data-testid="low-vram-note">{LOW_VRAM_NOTE}</div>
+      )}
+      {!isGenerating && vramHint && (
+        <div className="hub-muted hub-fs-125 flex items-center justify-center gap-1.5 flex-wrap max-w-[460px] text-center" data-testid="low-vram-suggestion">
+          <span>{vramHint.text}</span>
+          {vramHint.switchTo && (
+            <button
+              type="button"
+              onClick={() => setTrainVramPreset(vramHint.switchTo as TrainVramPreset)}
+              className="hub-acc"
+            >
+              Use Low VRAM
+            </button>
+          )}
+        </div>
+      )}
+      {note && <div role="status" tabIndex={0} className="hub-dim hub-fs-125 max-w-[460px] max-h-40 overflow-y-auto select-text whitespace-pre-wrap text-center break-words">{note}</div>}
       {!isGenerating && (
-        <div className="t-label text-gray-600 flex items-center gap-1.5">
-          {/* Die Klammer nennt die Stufe UND die Zahl. Fund 2 der Kampagne
-              3.0.0: `(400 STEPS)` allein sagt nicht, welche der drei Stufen
-              gerade gilt, und ein Tester hielt Quick deshalb fuer wirkungslos,
-              obwohl Quick genau diese 400 sind. */}
-          <span>Runs on your GPU and takes a while ({trainStepsNote(trainSteps, presets)}). The local chat model pauses for the run. The {trainKind === 'style' ? 'style' : 'character'} lands in your local LoRAs.</span>
+        <TrainMore open={trainKind === 'style'}>
+          <TrainKindPicker />
+          {/* Die Klammer nennt die Stufe UND die Zahl (Kampagne 3.0.0, Fund 2). */}
+          <div className="hub-dim hub-fs-125 max-w-[460px] text-center">Runs on your GPU and takes a while ({trainStepsNote(trainSteps, presets)}). The local chat model pauses for the run. The {word} lands in your local LoRAs.</div>
+          <div className="hub-dim hub-fs-125 max-w-[460px] text-center" data-testid="local-train-family-note">{localTrainingFamilyNote(trainKind)}</div>
           {/* The run repairs its own environment now (A2), so this is no
               longer the only way out of a broken install. It stays because
               the button used to render ONLY while the environment counted as
@@ -635,36 +670,12 @@ function LocalTrainControls() {
             type="button"
             onClick={() => setReinstallOpen(true)}
             disabled={busy === 'install'}
-            className="underline underline-offset-2 text-gray-500 hover:text-gray-300 disabled:opacity-50 transition-colors"
+            className="hub-muted hub-fs-125 underline underline-offset-2 disabled:opacity-50"
           >
             {busy === 'install' ? 'Reinstalling…' : 'Reinstall trainer'}
           </button>
-        </div>
+        </TrainMore>
       )}
-      {!isGenerating && (
-        <div className="t-label text-gray-600 max-w-[560px] text-center" data-testid="local-train-family-note">{localTrainingFamilyNote(trainKind)}</div>
-      )}
-      {trainNotice && (
-        <div role="status" className="t-label text-gray-400 max-w-[560px] text-center" data-testid="train-low-vram-switch">{trainNotice}</div>
-      )}
-      {!isGenerating && !trainNotice && trainVramPreset === 'low-vram' && (
-        <div className="t-label text-gray-600 max-w-[560px] text-center" data-testid="low-vram-note">{LOW_VRAM_NOTE}</div>
-      )}
-      {!isGenerating && vramHint && (
-        <div className="t-label text-gray-500 flex items-center justify-center gap-1.5 flex-wrap max-w-[560px] text-center" data-testid="low-vram-suggestion">
-          <span>{vramHint.text}</span>
-          {vramHint.switchTo && (
-            <button
-              type="button"
-              onClick={() => setTrainVramPreset(vramHint.switchTo as TrainVramPreset)}
-              className="underline underline-offset-2 text-gray-400 hover:text-gray-200 transition-colors"
-            >
-              Use Low VRAM
-            </button>
-          )}
-        </div>
-      )}
-      {note && <div role="status" tabIndex={0} className="text-xs leading-relaxed text-gray-600 max-w-[520px] max-h-40 overflow-y-auto select-text whitespace-pre-wrap text-center break-words">{note}</div>}
       <TrainerReinstallModal
         open={reinstallOpen}
         onClose={() => setReinstallOpen(false)}
@@ -716,25 +727,29 @@ function MacTrainControls() {
   // button, like "Download base files" of the Windows trainer.
   const missing = macTrainMissing(status)
   return (
-    <div className="flex flex-col items-center gap-1.5" data-testid="mac-train-controls">
-      <TrainKindPicker />
+    <div className="hub-train" data-testid="mac-train-controls">
+      <TrainHead
+        now={missing ? 'bases' : 'train'}
+        title={missing ? 'Install Z-Image Turbo' : trainImages.length < MIN_TRAIN_IMAGES ? `Add ${MIN_TRAIN_IMAGES - trainImages.length} more photos` : !triggerWord.trim() ? 'Type a trigger word' : 'Ready to train'}
+        line={`${trainImages.length} of ${maxTrainImages('local')} ${trainKind === 'style' ? 'pictures' : 'photos'}${trainImages.length < MIN_TRAIN_IMAGES ? `, need at least ${MIN_TRAIN_IMAGES}` : ''}.`}
+      />
       {missing && (
-        <div className="flex items-center justify-center gap-2 flex-wrap max-w-[560px]">
-          <span className="t-label text-gray-400 text-center" data-testid="mac-train-note">{missing}</span>
-          <Button size="sm" variant="secondary" icon={Download} onClick={() => { setCategoryFilter('image'); setView('models') }}>
+        <>
+          <span className="hub-muted hub-fs-13 max-w-[460px] text-center" data-testid="mac-train-note">{missing}</span>
+          <Button size="lg" variant="primary" icon={Download} onClick={() => { setCategoryFilter('image'); setView('models') }}>
             Install Z-Image Turbo
           </Button>
-        </div>
+        </>
       )}
-      <div className="flex items-center justify-center gap-2 flex-wrap">
-        <input
-          value={triggerWord}
-          onChange={(e) => setTriggerWord(e.target.value)}
-          placeholder={trainKind === 'style' ? STYLE_NAME_PLACEHOLDER : 'Trigger word, e.g. davechar'}
-          aria-label={trainKind === 'style' ? 'Style name' : 'Trigger word'}
-          className="t-control w-44 px-2.5 h-[var(--control-h-sm)] rounded-md bg-white/[0.03] border border-white/[0.06] text-gray-200 placeholder-gray-600 focus:outline-none focus:border-white/15"
-        />
-        <TriggerWordNote />
+      <TrainWord
+        value={triggerWord}
+        onChange={setTriggerWord}
+        label={trainKind === 'style' ? 'Style name' : 'Trigger word'}
+        placeholder={trainKind === 'style' ? STYLE_NAME_PLACEHOLDER : 'Trigger word, e.g. davechar'}
+        help={trainKind === 'style' ? 'The name this style has in your LoRA list.' : 'You type this word in a prompt to get this face.'}
+        after={<TriggerWordNote />}
+      />
+      <TrainRow label="Quality">
         <Segmented
           size="sm"
           layoutId="train-steps"
@@ -742,21 +757,21 @@ function MacTrainControls() {
           onChange={(v) => setTrainSteps(Number(v))}
           options={presets.map((p) => ({ value: String(p.steps), label: p.label }))}
         />
-        <span className="t-label text-gray-600">
-          {trainImages.length}/{maxTrainImages('local')} {trainKind === 'style' ? 'pictures' : 'photos'}{trainImages.length < MIN_TRAIN_IMAGES ? `, need at least ${MIN_TRAIN_IMAGES}` : ''}
-        </span>
-      </div>
+      </TrainRow>
       {!isGenerating && (
-        <div className="t-label text-gray-600 text-center max-w-[560px]" data-testid="mac-train-hint">
-          {macTrainNote(trainStepsNote(trainSteps, presets), status, trainKind)}{' '}
-          <button
-            onClick={() => { void openMlxLoraFolder().catch(() => undefined) }}
-            className="underline underline-offset-2 text-gray-500 hover:text-gray-300"
-            data-testid="mac-train-open-folder"
-          >
-            Open the LoRA folder
-          </button>
-        </div>
+        <TrainMore open={trainKind === 'style'}>
+          <TrainKindPicker />
+          <div className="hub-dim hub-fs-125 text-center max-w-[460px]" data-testid="mac-train-hint">
+            {macTrainNote(trainStepsNote(trainSteps, presets), status, trainKind)}{' '}
+            <button
+              onClick={() => { void openMlxLoraFolder().catch(() => undefined) }}
+              className="underline underline-offset-2"
+              data-testid="mac-train-open-folder"
+            >
+              Open the LoRA folder
+            </button>
+          </div>
+        </TrainMore>
       )}
     </div>
   )

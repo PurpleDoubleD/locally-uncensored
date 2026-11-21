@@ -3273,13 +3273,21 @@ input[type="range"].neuron-range:disabled { cursor: not-allowed; opacity: 0.5; }
 
 /* The pages of the area: "New character" and the training. */
 .lu-hub .hub-page { display: flex; flex-direction: column; flex: 1 1 0%; min-height: 0; }
-.lu-hub .hub-new { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); align-content: start; gap: 28px; flex: 1 1 0%; min-height: 0; overflow-y: auto; padding: 16px 0 12px; }
+/* Two equal columns, so the gap between them lies exactly on the middle axis
+   of the prompt window, and the block stands in the middle of the room like
+   the page before it. It may scroll on a low window, without a bar. */
+.lu-hub .hub-new { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-content: safe center; gap: 28px; flex: 1 1 0%; min-height: 0; overflow-y: auto; padding: 8px 0 4px; scrollbar-width: none; }
+.lu-hub .hub-new::-webkit-scrollbar { width: 0; height: 0; }
+.lu-hub .hub-new input.hub-name-field { outline: none; box-shadow: none; }
+.lu-hub .hub-after { margin-top: 22px; padding-top: 2px; }
+.lu-hub .hub-train-scroll { display: flex; flex-direction: column; flex: 1 1 0%; min-height: 0; overflow-y: auto; scrollbar-width: none; }
+.lu-hub .hub-train-scroll::-webkit-scrollbar { width: 0; height: 0; }
 @media (max-width: 760px) {
   .lu-hub .hub-new { grid-template-columns: minmax(0, 1fr); gap: 24px; }
 }
 .lu-hub .hub-drop { border: 1px dashed color-mix(in srgb, var(--hub-dim) 60%, transparent); border-radius: 8px; }
 .lu-hub .hub-drop--over { border-color: var(--hub-acc); background: var(--hub-fill); }
-.lu-hub .hub-thumb { display: block; width: 84px; height: 84px; object-fit: cover; border-radius: 6px; }
+.lu-hub .hub-thumb { display: block; width: 62px; height: 62px; object-fit: cover; border-radius: 6px; }
 .lu-hub .hub-name-field { border-color: var(--hub-edge); }
 .lu-hub input.hub-name-field:not(.hub-fs-20) { font-size: calc(16px / var(--ui-scale, 1.15)); line-height: 1.4; }
 .lu-hub .hub-path { font-family: ui-monospace, 'JetBrains Mono', 'SF Mono', Menlo, monospace; font-size: calc(12px / var(--ui-scale, 1.15)); }
@@ -3287,8 +3295,29 @@ input[type="range"].neuron-range:disabled { cursor: not-allowed; opacity: 0.5; }
 .lu-hub .hub-radio--on { border-color: var(--hub-acc); }
 .lu-hub .hub-radio--on::after { content: ''; position: absolute; inset: 3px; border-radius: 50%; background: var(--hub-acc); }
 
+/* The training page: what is next and its one button, on the middle axis. */
+.lu-hub .hub-train { display: flex; flex-direction: column; align-items: center; gap: 16px; width: 100%; padding: 18px 0 14px; }
+.lu-hub .hub-train-steps { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 6px; }
+.lu-hub .hub-train-input { height: 40px; padding: 0 12px; border: 1px solid var(--hub-edge); border-radius: 8px; background: transparent; outline: none; font-size: calc(15px / var(--ui-scale, 1.15)); }
+.lu-hub .hub-train-input:focus { border-color: var(--hub-acc); }
+.lu-hub .hub-train-input::placeholder { color: var(--hub-dim); }
+.lu-hub .hub-train-more { text-align: center; }
+.lu-hub .hub-train-more > summary { list-style: none; }
+.lu-hub .hub-train-more > summary::-webkit-details-marker { width: 0; height: 0; visibility: hidden; }
+.lu-hub .hub-train-more[open] .hub-train-chev { transform: rotate(180deg); }
+.lu-hub .hub-train-photos { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; }
+.lu-hub .hub-train-photo { position: relative; width: 56px; height: 56px; }
+.lu-hub .hub-train-photo img { display: block; width: 100%; height: 100%; object-fit: cover; border-radius: 6px; }
+.lu-hub .hub-train-add { display: grid; place-items: center; width: 56px; height: 56px; border: 1px dashed color-mix(in srgb, var(--hub-dim) 60%, transparent); border-radius: 6px; color: var(--hub-dim); }
+.lu-hub .hub-train-add:hover { color: var(--hub-text); border-color: var(--hub-text); }
+
 /* No character yet: the three steps and the one button, in the middle. */
 .lu-hub .hub-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; flex: 1 1 0%; min-height: 0; overflow-y: auto; padding: 16px 0; }
 .lu-hub .hub-steps { width: 100%; max-width: 420px; border-top: 1px solid var(--hub-sep); }
+/* On the training page the window is only its button, in the middle. */
+[data-hub-train-window] { background: transparent !important; border-color: transparent !important; }
+[data-hub-train-window] > div { justify-content: center; border-top: 0 !important; }
+[data-hub-train-window] > div > .flex-1 { flex: none; width: 0; }
+
 /* The NEW mark on the Character pill: accent on a faint accent ground. */
 .lu-new-mark { font-size: 7px; font-weight: 600; letter-spacing: 0.06em; line-height: 1.4; }
