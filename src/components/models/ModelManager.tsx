@@ -38,7 +38,8 @@ import { useMlxLoras } from '../../hooks/useMlxLoras'
 import { modelSkin, type RailEntry } from './skin'
 import { useMlxMedia } from '../../hooks/useMlxMedia'
 import { backendCall } from '../../api/backend'
-import { addGgufFile, customModelDirs } from '../../api/engine'
+import { addGgufFile, bundledEngineStatus, customModelDirs, stopBundledEngine } from '../../api/engine'
+import { luEngineHolds } from '../../lib/lu-engine-loaded'
 import { counterView } from '../../lib/inventory-counter'
 import { groupInstalledByProvider, needsBackendSwitchHeading, foldedRowsSentence, LU_ENGINE_GROUP } from '../../lib/lu-engine-rows'
 import { isBuiltinEngineEntry } from '../../lib/lmstudio-match'
@@ -111,7 +112,22 @@ export function ModelManager() {
   // button that looks idle through all of that gets pressed again.
   const [usingModel, setUsingModel] = useState<string | null>(null)
   // Dieselbe Frage, die das Einstellungsfenster stellt, und dieselbe Antwort.
-  const engineRuht = engineIsIdle(useBuiltinEngineStatus())
+  const engineView = useBuiltinEngineStatus()
+  const engineRuht = engineIsIdle(engineView)
+  // 3.1.3: the row whose Unload is running. Stopping the engine frees its
+  // memory; the pick stays and the next chat loads the model again.
+  const [unloadingModel, setUnloadingModel] = useState<string | null>(null)
+  const unloadLuEngine = async (name: string) => {
+    setUnloadingModel(name)
+    try {
+      await stopBundledEngine()
+      engineView.setStatus(await bundledEngineStatus())
+    } catch (e) {
+      setLoraNotice(e instanceof Error ? e.message : 'The LU Engine did not stop, so its model may still be loaded.')
+    } finally {
+      setUnloadingModel(null)
+    }
+  }
   const [pullOpen, setPullOpen] = useState(false)
   const [infoOpen, setInfoOpen] = useState(false)
   // Gesetzt wird das aus `{ name, ...await showModel(name) }` (unten in
@@ -658,6 +674,14 @@ export function ModelManager() {
                               // Zeile: welche davon sie bedient, entscheidet
                               // die Karte selbst.
                               engineStopped={engineRuht}
+                              onUnload={
+                                isBuiltinEngineEntry(model as unknown as InstalledModelLike)
+                                  && engineView.status?.running
+                                  && luEngineHolds(engineView.status.model_path, model.name)
+                                  ? () => { void unloadLuEngine(model.name) }
+                                  : undefined
+                              }
+                              unloadBusy={unloadingModel === model.name}
                               onDelete={() => setUninstall(uninstallRequestFor(model))}
                               onInfo={() => handleInfo(model.name)}
                               // W33: a ComfyUI file gets a name of its own (the file stays).
