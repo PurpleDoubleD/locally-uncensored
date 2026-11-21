@@ -18,7 +18,7 @@
 //! Befehl für die vorliegende Distribution.
 
 use std::io::{BufRead, BufReader};
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
@@ -185,7 +185,7 @@ pub fn install_python(state: State<'_, AppState>) -> Result<serde_json::Value, S
                 // `winget search python` top result).
                 update("installing", "Running: winget install Python.Python.3.12 --silent --accept-package-agreements --accept-source-agreements");
 
-                let mut cmd = Command::new("winget");
+                let mut cmd = crate::process_util::hidden_command("winget");
                 cmd.args([
                     "install",
                     "Python.Python.3.12",

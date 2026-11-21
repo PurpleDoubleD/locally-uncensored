@@ -404,7 +404,7 @@ pub struct RolePlan {
 /// The env a selection produces, without spawning anything: `apply_gpu_env`
 /// on a throwaway command, read back.
 pub fn env_of(selection: &GpuSelection) -> Vec<String> {
-    let mut cmd = std::process::Command::new("lu-gpu-plan-never-run");
+    let mut cmd = crate::process_util::hidden_command("lu-gpu-plan-never-run");
     crate::commands::gpu::apply_gpu_env(&mut cmd, selection);
     let mut out: Vec<String> = cmd
         .get_envs()

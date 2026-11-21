@@ -539,13 +539,13 @@ pub fn character_lora_folder_open(state: tauri::State<'_, AppState>) -> Result<s
     fs::create_dir_all(&dir).map_err(|e| format!("The LoRA folder could not be made: {}", os_error::english(&e)))?;
     #[cfg(target_os = "macos")]
     let mut cmd = {
-        let mut c = std::process::Command::new("open");
+        let mut c = crate::process_util::hidden_command("open");
         c.arg(&dir);
         c
     };
     #[cfg(target_os = "windows")]
     let mut cmd = {
-        let mut c = std::process::Command::new("explorer");
+        let mut c = crate::process_util::hidden_command("explorer");
         c.arg(&dir);
         c
     };

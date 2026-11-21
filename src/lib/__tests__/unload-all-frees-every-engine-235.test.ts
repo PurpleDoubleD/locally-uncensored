@@ -100,7 +100,7 @@ describe('Unload all models frees every engine', () => {
 describe('the button', () => {
   const src = readFileSync(resolve(__dirname, '../../components/models/ModelSelector.tsx'), 'utf8')
   it('is there for every local engine, also the LU Engine alone', () => {
-    expect(src).toMatch(/const showUnloadAll = hasOllamaModels \|\| hasLmStudioRows \|\| luEngineHoldsChat\n/)
+    expect(src).toMatch(/const showUnloadAll = hasOllamaModels \|\| hasLmStudioRows \|\| luEngineHoldsChat \|\| !!luLoadedPath\n/)
     expect(src).toMatch(/\{showUnloadAll && \(/)
     expect(src).not.toContain("'Could not unload the models. Ollama did not answer.'")
   })

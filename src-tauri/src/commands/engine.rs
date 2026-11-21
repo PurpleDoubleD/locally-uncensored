@@ -1614,7 +1614,7 @@ pub(crate) fn spawn_private_server_with(app: &AppHandle, model_path: &str, port:
     ];
     args.extend(extra.iter().cloned());
     tracing::info!(target: "engine", port, command = %command_line(&binary, &args), "starting a llama-server for a check");
-    let mut cmd = Command::new(&binary);
+    let mut cmd = crate::process_util::hidden_command(&binary);
     super::engine_key::apply(&mut cmd);
     cmd.args(&args).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::piped());
     let state = app.state::<AppState>();
@@ -4468,7 +4468,7 @@ fn spawn_engine_attempt(
         command = %command_line(binary, args),
         "starting the LU Engine llama-server"
     );
-    let mut cmd = Command::new(binary);
+    let mut cmd = crate::process_util::hidden_command(binary);
     // The key the engine answers to, in its environment (engine_key.rs).
     super::engine_key::apply(&mut cmd);
     cmd.args(args);
@@ -5815,7 +5815,7 @@ fn start_bundled_embed_blocking(
         command = %command_line(&binary, &embed_args),
         "starting the LU Engine embeddings server"
     );
-    let mut cmd = Command::new(&binary);
+    let mut cmd = crate::process_util::hidden_command(&binary);
     super::engine_key::apply(&mut cmd);
     cmd.args(&embed_args);
     // 3.0.8 (A2): the embeddings sit next to the chat model, on its card.
@@ -5974,7 +5974,7 @@ pub(crate) fn stop_embed_locked(state: &AppState) -> bool {
 /// failure, which reads as "no device of that name" and leaves the start
 /// unpinned.
 fn list_engine_devices(binary: &Path, backend_dir: Option<&Path>) -> Vec<crate::commands::gpu_roles::LlamaDevice> {
-    let mut cmd = Command::new(binary);
+    let mut cmd = crate::process_util::hidden_command(binary);
     cmd.arg("--list-devices");
     apply_engine_backend_dir(&mut cmd, backend_dir);
     #[cfg(target_os = "windows")]

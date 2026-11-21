@@ -40,11 +40,6 @@ export function gpuLayersHint(mac: boolean): string {
     : '-1 = as many layers on GPU as fit · 0 = CPU only · N = partial offload for models bigger than your VRAM.'
 }
 
-/** The Cloud row at the foot of the chat model picker. */
-export function cloudPickerLine(mac: boolean): string {
-  return mac ? 'Frontier chat models, no powerful Mac needed' : 'Frontier chat models, no GPU needed'
-}
-
 /** The headline of the Cloud panel. */
 export function cloudGateHeadline(mac: boolean): string {
   return mac ? 'Run uncensored models in the cloud, no powerful Mac needed.' : 'Run uncensored models in the cloud, no GPU needed.'
@@ -57,14 +52,4 @@ export function cloudGateHeadline(mac: boolean): string {
 export function engineOffloadWords(line: string | null, mac: boolean): string | null {
   if (!line || !mac) return line
   return line.replace(/^GPU layers/, gpuLayersLabel(true)).replace(/\bthe GPU\b/g, 'the graphics unit')
-}
-
-/**
- * The Mac check of `api/backend.ts` (`isMacOS`), for the one caller that
- * cannot import it: the tests of the chat model picker replace that module
- * whole. Same rule, and a test holds the two together.
- */
-export function hostIsMac(): boolean {
-  if (typeof navigator === 'undefined') return false
-  return /Mac|iPhone|iPad|iPod/.test(navigator.platform || '') || /Mac OS X|Macintosh/.test(navigator.userAgent || '')
 }

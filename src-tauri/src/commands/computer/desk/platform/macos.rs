@@ -104,7 +104,7 @@ pub fn request_permission(permission: Permission) {
             unsafe { CGRequestScreenCaptureAccess() };
         }
     }
-    let _ = std::process::Command::new("/usr/bin/open").arg(settings_url(permission)).spawn();
+    let _ = crate::process_util::hidden_command("/usr/bin/open").arg(settings_url(permission)).spawn();
 }
 
 /// What `tccutil` is called with to drop LU's entry for one permission.
@@ -131,7 +131,7 @@ fn forget_arguments(permission: Permission, bundle_id: &str) -> Option<[String; 
 pub fn forget_permission(permission: Permission, bundle_id: &str) -> PlatformResult<()> {
     let failed = || PlatformError::failed("macOS did not remove the old entry of LU. Remove LU from the list in System Settings with the minus button, then try again.");
     let arguments = forget_arguments(permission, bundle_id).ok_or_else(failed)?;
-    let status = std::process::Command::new("/usr/bin/tccutil").args(arguments).status().map_err(|_| failed())?;
+    let status = crate::process_util::hidden_command("/usr/bin/tccutil").args(arguments).status().map_err(|_| failed())?;
     if status.success() {
         Ok(())
     } else {

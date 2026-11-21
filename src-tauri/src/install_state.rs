@@ -273,7 +273,7 @@ pub(crate) fn received_bytes(pid: u32) -> Option<u64> {
     if !cfg!(target_os = "macos") {
         return None;
     }
-    let out = std::process::Command::new("/usr/bin/nettop")
+    let out = crate::process_util::hidden_command("/usr/bin/nettop")
         .args(["-P", "-L", "1", "-x", "-J", "bytes_in", "-p", &pid.to_string()])
         .stdin(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())

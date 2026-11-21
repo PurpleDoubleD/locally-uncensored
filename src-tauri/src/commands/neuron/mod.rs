@@ -47,7 +47,7 @@ use serde_json::{json, Value};
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{LazyLock, Mutex};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
@@ -488,7 +488,7 @@ struct ToolRun {
 /// on the job, stops it on cancel, and turns a failure into one sentence.
 fn run_tool(app: &tauri::AppHandle, args: &[std::ffi::OsString], env: &[(&str, &str)]) -> Result<ToolRun, String> {
     let binary = generator_binary(app).ok_or("This install of LU is missing its vector tool (lu-llama-cvector-generator). Reinstall LU to bring it back.")?;
-    let mut cmd = Command::new(&binary);
+    let mut cmd = crate::process_util::hidden_command(&binary);
     cmd.args(args).args(TOOL_ARGS).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
     for (k, v) in env {
         cmd.env(k, v);

@@ -25,7 +25,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 #[cfg(target_os = "windows")]
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
@@ -218,7 +218,7 @@ fn authenticode_verdict(path: &Path) -> SignatureVerdict {
     // -LiteralPath so a path with brackets is not read as a wildcard; single
     // quotes doubled so a quote in the path cannot end the string early.
     let escaped = path.to_string_lossy().replace('\'', "''");
-    let mut cmd = Command::new("powershell");
+    let mut cmd = crate::process_util::hidden_command("powershell");
     cmd.args([
         "-NoProfile",
         "-NonInteractive",

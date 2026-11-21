@@ -36,6 +36,9 @@ interface Props {
    * path the tile click takes.
    */
   onUse?: () => void
+  /** 3.1.3: the LU Engine holds this model; frees its memory. */
+  onUnload?: () => void
+  unloadBusy?: boolean
   /**
    * Die LU Engine bedient gerade gar nichts.
    *
@@ -81,7 +84,7 @@ export function createTabForArchitecture(architecture: string | undefined): stri
   return null
 }
 
-export function ModelCard({ model, isActive, onSelect, onDelete, onInfo, infoTitle, canDelete = true, onUse, useBusy = false, engineStopped: luEngineRuht = false, onRemoveRefusals, onReveal, onRename }: Props) {
+export function ModelCard({ model, isActive, onSelect, onDelete, onInfo, infoTitle, canDelete = true, onUse, onUnload, unloadBusy = false, useBusy = false, engineStopped: luEngineRuht = false, onRemoveRefusals, onReveal, onRename }: Props) {
   const typeInfo = TYPE_CONFIG[model.type] || TYPE_CONFIG.text
   const TypeIcon = typeInfo.icon
   const look = modelSkin().card
@@ -207,6 +210,18 @@ export function ModelCard({ model, isActive, onSelect, onDelete, onInfo, infoTit
           >
             {useBusy && <Loader2 size={look.useSpinnerSize} className="animate-spin" />}
             {useBusy ? 'Loading…' : 'Use'}
+          </button>
+        )}
+        {onUnload && !useBusy && (
+          <button
+            onClick={(e) => { e.stopPropagation(); if (!unloadBusy) onUnload() }}
+            disabled={unloadBusy}
+            data-testid="model-card-unload"
+            className={look.use}
+            title="Stop the LU Engine and free the memory this model holds"
+          >
+            {unloadBusy && <Loader2 size={look.useSpinnerSize} className="animate-spin" />}
+            {unloadBusy ? 'Unloading…' : 'Unload'}
           </button>
         )}
         {/* A model that could take images and has no image part installed:

@@ -41,6 +41,8 @@ mod media_store;
 #[cfg(test)]
 mod mobile_page;
 mod onboarding_window;
+#[cfg(desktop)]
+mod window_place;
 mod os_error;
 mod os_paths;
 mod phone_log;
@@ -615,6 +617,10 @@ pub fn run() {
     // PYTHONPATH into its own mount, and every python3 we start inherits them
     // and dies on "No module named 'encodings'".
     python::sanitize_appimage_python_env();
+    // 3.1.3: the Git that "Install Git" put into the data folder (Windows),
+    // first on PATH before anything clones. A no-op everywhere else.
+    #[cfg(desktop)]
+    commands::install::put_own_git_on_path();
 
     // Bound to a named local, not `let _ = ...`: `_log_guard` lives until the
     // end of `run`, i.e. as long as the app runs, while `_` would drop the
@@ -810,6 +816,10 @@ pub fn run() {
             commands::install::install_tts_status,
             #[cfg(desktop)]
             commands::install::check_git_installed,
+            #[cfg(desktop)]
+            commands::install::install_git,
+            #[cfg(desktop)]
+            commands::install::install_git_status,
             // Local character trainer (musubi-tuner)
             #[cfg(desktop)]
             commands::trainer::install_character_trainer,
@@ -1614,7 +1624,13 @@ pub fn run() {
                 let w = window.clone();
                 let hide_gen = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
                 window.on_window_event(move |event| {
+                    // 3.1.3: where the user puts the window is where it opens
+                    // next time (`window_place`).
+                    if matches!(event, tauri::WindowEvent::Moved(_) | tauri::WindowEvent::Resized(_)) {
+                        window_place::remember(&w);
+                    }
                     if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                        window_place::flush();
                         api.prevent_close();
                         // No tray (GH #204): a hidden window could never come
                         // back, so the close button is the Quit item.
@@ -1730,6 +1746,8 @@ pub fn run() {
             // server, the trainer and the MLX sidecar all running. Proved
             // live on 2026-07-28: app gone, the MLX Python still resident.
             if let tauri::RunEvent::Exit = event {
+                #[cfg(desktop)]
+                window_place::flush();
                 if let Some(state) = app.try_state::<AppState>() {
                     state.shutdown_subprocesses();
                 }
