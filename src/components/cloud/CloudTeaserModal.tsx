@@ -225,6 +225,7 @@ export function CloudTeaserModal() {
                   Blatt bringt. */}
               <BuyChoice
                 tone="sheet"
+                plain={hubSheet}
                 onPick={(order) => {
                   close()
                   reportCloudGate(order === 'sub' ? 'cloud_teaser_sub' : 'cloud_teaser_pack')

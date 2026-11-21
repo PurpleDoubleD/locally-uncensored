@@ -23,6 +23,8 @@ export interface BuyChoiceProps {
   onPick: (order: CheckoutOrder) => void
   /** The gate is light and dark, the Create sheet is always dark. */
   tone?: 'gate' | 'sheet'
+  /** The sheets of the Character area: words only, the LU mark is their one picture. */
+  plain?: boolean
 }
 
 const eur = (n: number) => `€${n.toLocaleString('en-US')}`
@@ -47,7 +49,7 @@ export function buyChoiceCards(packEur: number | null): { order: CheckoutOrder; 
   ]
 }
 
-export function BuyChoice({ onPick, tone = 'gate' }: BuyChoiceProps) {
+export function BuyChoice({ onPick, tone = 'gate', plain = false }: BuyChoiceProps) {
   const offers = useCloudGateStore((s) => s.catalog?.offers ?? null)
   // The gate loads the catalogue with its model lists (GateModels); the
   // Create sheet has none, so it asks here. A failure keeps the card without
@@ -88,7 +90,7 @@ export function BuyChoice({ onPick, tone = 'gate' }: BuyChoiceProps) {
                 : 'mt-auto w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg t-control bg-lu-cloud text-white hover:opacity-90 transition-opacity'
             }
           >
-            <ExternalLink size={12} /> {c.button}
+            {!plain && <ExternalLink size={12} />} {c.button}
           </button>
         </div>
       ))}

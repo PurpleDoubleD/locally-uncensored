@@ -453,7 +453,7 @@ test('local mode on a Mac: Swap stays on the cloud (no local way there), the loc
   await expect(page.getByRole('dialog')).toBeVisible()
   // The sheet of the Character area carries the LU mark, no stock icons.
   await expect(page.getByTestId('cloud-teaser-logo').locator('img')).toBeVisible()
-  await expect(page.getByRole('dialog').locator('.lucide-cloud, .lucide-monitor-down, .lucide-sparkles')).toHaveCount(0)
+  await expect(page.getByRole('dialog').locator('.lucide-cloud, .lucide-monitor-down, .lucide-sparkles, .lucide-external-link')).toHaveCount(0)
   await shoot(page, 'cloud-blatt')
   await page.keyboard.press('Escape')
   await expect(page.getByRole('dialog')).toHaveCount(0)
