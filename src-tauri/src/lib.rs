@@ -1398,6 +1398,9 @@ pub fn run() {
             commands::mobile_native::remote_client_request,
             #[cfg(mobile)]
             commands::mobile_native::remote_client_cancel,
+            // The update hint of the open Android package (commands/app_update.rs).
+            #[cfg(mobile)]
+            commands::app_update::app_latest_release,
             // The sealed channel to a desktop (REMOTE-PROTOKOLL v2), the only
             // way to a desktop over the internet (commands/remote_sealed.rs).
             #[cfg(mobile)]

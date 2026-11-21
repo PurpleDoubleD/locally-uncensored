@@ -275,6 +275,7 @@ pub const ALLOWED: &[&str] = &[
     // plain one only in the Wi-Fi (and the bare status over the tunnel).
     "remote_client_request",
     "remote_client_cancel",
+    "app_latest_release",
     // The sealed channel: same address gate, the device key stays in Rust,
     // the six digit code only in the Wi-Fi (remote_sealed.rs).
     "remote_sealed_pair",

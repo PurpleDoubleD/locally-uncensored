@@ -194,6 +194,10 @@ describe('endpointMap covers every backendCall/invokeMedia site the frontend can
     'saved_characters_backup_missing', 'saved_characters_backup_put',
     'saved_characters_backup_read_index', 'saved_characters_backup_read_photo',
     'saved_characters_backup_write_index',
+    // The update hint of the open Android package (mobile/lib/app-update.ts).
+    // Registered on a phone only, and asked only when the build is the open
+    // preset on Android. A browser has no installed version to compare.
+    'app_latest_release',
     // Ends a running `lmstudio_load_model` (api/lmstudio.ts). The load itself
     // has no dev route (it is in the list below), so there is nothing a dev
     // route for its cancel could end.
