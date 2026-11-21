@@ -51,7 +51,7 @@ const TOKENS = ohneKommentare(read('../chat/TokenCounter.tsx'))
  */
 const READOUTS: Array<[string, string, number]> = [
   // Textmodell-Bytes · Bundle-Bytes/Tempo · Datei-Prozent/Tempo · MLX-Bytes
-  ['DownloadBadge', BADGE, 4],
+  ['DownloadBadge', BADGE, 5],
   // Die Statistikzeile ueber Spalte A und ueber Spalte B
   ['ABCompare', AB, 2],
   // letzter Lauf · Schritt/Gesamt waehrend des Laufs · t/s je Rang ·

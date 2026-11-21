@@ -18,6 +18,7 @@ import { getThreeDBundles } from '../../../api/model-bundles'
 import { axisShift, macThreeDChoices, pcThreeDChoices, startingChoice, type ThreeDChoice } from '../../../lib/three/local-3d-choice'
 import { THREE_D_TEXT as T } from '../../../lib/three/three-d-text'
 import { stageAnswers } from '../../../lib/create/stage-answers'
+import { HINWEIS_TEXT } from '../../../lib/hinweis'
 import { useCreateStore } from '../../../stores/createStore'
 import { useUIStore } from '../../../stores/uiStore'
 import { useCreateExp } from './CreateContext'
@@ -271,7 +272,7 @@ export function ThreeDSetupCard({ setup }: { setup: ThreeDSetup }) {
                   <span className="t-control text-gray-200">{c.name}{c.recommended && <span className="ml-2 t-micro text-gray-500">{SETUP_TEXT.recommended}</span>}</span>
                   <span className="t-micro text-gray-500 shrink-0 lu-hud-num">{c.sizeGB.toFixed(1)} GB</span>
                 </span>
-                <span className={`block t-micro ${c.fit === 'tight' ? 'text-amber-500 dark:text-amber-300' : 'text-gray-500'}`}>{c.blocked ? SETUP_TEXT.needsToken : c.fitLine}</span>
+                <span className={`block t-micro ${c.fit === 'tight' ? HINWEIS_TEXT.fehler : 'text-gray-500'}`}>{c.blocked ? SETUP_TEXT.needsToken : c.fitLine}</span>
               </span>
             </button>
           ))}
