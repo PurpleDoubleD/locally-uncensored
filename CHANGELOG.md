@@ -39,6 +39,10 @@ in the cloud catalogue.
   switch for the line with the date and time in the system prompt (GH #257).
 - **The context list shows the system prompt of the last request**, exactly as
   the model got it (GH #257).
+- **Inkling 2 Mini.** The 26B model from Thinking Machines with vision, tools
+  and thinking, in 23 GGUF sizes for the LU Engine and through Ollama 0.40.17 or
+  newer on a Mac. Its maker's usage policy is linked at the model. On a phone it
+  runs through Remote from your computer.
 
 ### Changed
 - **Agent mode turns on right away.** On the first message the agent asks in
@@ -101,6 +105,8 @@ in the cloud catalogue.
   Actions used to build the release.
 - Building from source needs Rust 1.95 or newer (`rust-version` in
   `src-tauri/Cargo.toml`).
+- **LU Engine on llama.cpp b12608.** The Vulkan SDK moves to 1.4.357.0 on
+  Windows and Linux.
 
 ## [3.1.2] - 2026-11-19
 

@@ -2372,6 +2372,61 @@ mod openai_bridge_live_tests {
             println!("LIVE chat(stream ndjson) ok: 2 lines, first content = {:?}", l0["message"]["content"]);
         });
     }
+
+    /// Inkling 2 Mini from a phone: what the phone sends, through the real
+    /// translation, against a llama-server that has the model loaded.
+    ///   LU_OPENAI_LIVE_BASE=http://127.0.0.1:18153/v1 cargo test inkling_through_remote -- --ignored
+    #[test]
+    #[ignore]
+    fn inkling_through_remote_lists_thinks_calls_tools_and_sees() {
+        const RED_PNG: &str = "iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAIAAAD8GO2jAAAAKklEQVR42mN4ICBAU8QwasGoBaMWjFowasGoBaMWjFowasGoBaMWDBULALgcAD3G45K4AAAAAElFTkSuQmCC";
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async {
+            let base = std::env::var("LU_OPENAI_LIVE_BASE").expect("LU_OPENAI_LIVE_BASE");
+            let client = reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(300))
+                .build()
+                .unwrap();
+            let raw: serde_json::Value =
+                client.get(format!("{base}/models")).send().await.unwrap().json().await.unwrap();
+            let tags = openai_models_to_ollama_tags(&raw);
+            let name = tags["models"][0]["name"].as_str().unwrap().to_string();
+            assert!(name.to_lowercase().contains("inkling"), "loaded model: {name}");
+
+            let ask = |body: serde_json::Value| {
+                let client = client.clone();
+                let url = format!("{base}/chat/completions");
+                let wire = ollama_chat_req_to_openai(&body, is_lan_base(&base));
+                async move {
+                    let resp: serde_json::Value =
+                        client.post(url).json(&wire).send().await.unwrap().json().await.unwrap();
+                    openai_resp_to_ollama_message(&resp)
+                }
+            };
+            let opts = serde_json::json!({"num_predict": 800, "temperature": 0, "seed": 7});
+
+            let on = ask(serde_json::json!({"model": name, "stream": false, "think": true, "options": opts,
+                "messages": [{"role": "user", "content": "What is 17 + 26?"}]})).await;
+            assert!(on["message"]["content"].as_str().unwrap_or("").contains("43"), "{on}");
+            assert!(!on["message"]["thinking"].as_str().unwrap_or("").is_empty(), "{on}");
+
+            let off = ask(serde_json::json!({"model": name, "stream": false, "think": false, "options": opts,
+                "messages": [{"role": "user", "content": "What is 17 + 26?"}]})).await;
+            let text = off["message"]["content"].as_str().unwrap_or("");
+            assert!(text.contains("43") && !text.contains("<|"), "{off}");
+
+            let tool = ask(serde_json::json!({"model": name, "stream": false, "think": true, "options": opts,
+                "tools": [{"type": "function", "function": {"name": "get_weather",
+                    "description": "Get the current weather for a city",
+                    "parameters": {"type": "object", "properties": {"city": {"type": "string"}}, "required": ["city"]}}}],
+                "messages": [{"role": "user", "content": "What is the weather in Paris? Use the tool."}]})).await;
+            assert_eq!(tool["message"]["tool_calls"][0]["function"]["name"], "get_weather", "{tool}");
+
+            let image = ask(serde_json::json!({"model": name, "stream": false, "think": true, "options": opts,
+                "messages": [{"role": "user", "content": "What colour fills this image? One word.", "images": [RED_PNG]}]})).await;
+            assert!(image["message"]["content"].as_str().unwrap_or("").to_lowercase().contains("red"), "{image}");
+        });
+    }
 }
 
 // ─── WebSocket proxy (ComfyUI progress) ───
