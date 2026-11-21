@@ -41,6 +41,8 @@ import { localUpscaleReady } from '../../../lib/local-upscale'
 import { UpscaleSizeControls } from './UpscaleSizeControls'
 import { frameRangeFor, framesOnRange } from '../../../lib/video-length'
 import { needsMaskFor } from './maskGate'
+import { useLocalEditMask } from './useLocalEditMask'
+import { MASK_PROMPT_PLACEHOLDER } from '../../../lib/local-edit-mask'
 import { ModelChip } from './ModelChip'
 import { MOTION_OWN_WORKFLOW_NOTE, useMotionOwnWorkflow } from './motionWorkflow'
 import { ImageCountChip } from './ImageCountChip'
@@ -353,6 +355,9 @@ export function Composer({ onOpenAdvanced, onOpenWorkflows, hub = false }: Props
     : !macVideoLane || mlxVideoLaneEntry(videoModels, videoModel, intent)?.mlxVideo?.negativePrompt === true
   // R5-66: see maskGate.ts for the full rule and why 'edit' differs from Web.
   const needsMask = needsMaskFor(intent, backend, !editNeedsMask(runModel))
+  // Local Edit: a mask the picked model cannot read, and the empty prompt
+  // that removes what was painted (lib/local-edit-mask).
+  const localMask = useLocalEditMask()
   // Per-intent readiness for the 2.5.8 categories (mirrors the submit-time
   // checks of BOTH lanes so the button never invites a doomed run). The
   // local lanes always speak from a portrait (no hosted resync endpoints)
@@ -436,9 +441,10 @@ export function Composer({ onOpenAdvanced, onOpenWorkflows, hub = false }: Props
   const upscaleReady = macUpscale || localUpscaleReady({ backend, intent, upscaleModelCount })
   const canGenerate =
     !macSetupFirst &&
-    (!needPrompt || optionalPrompt || prompt.trim().length > 0) &&
+    (!needPrompt || optionalPrompt || prompt.trim().length > 0 || localMask.removes) &&
     (!needsSource || hasStart) &&
     (!needsMask || !!mask) &&
+    !localMask.block &&
     specialReady &&
     !soundProblem &&
     upscaleReady &&
@@ -553,6 +559,8 @@ export function Composer({ onOpenAdvanced, onOpenWorkflows, hub = false }: Props
                     // cloud model requires a mask.
                     : (intent === 'edit' && needsMask
                       ? 'Describe the new look. Paint an area first to tell it what to change…'
+                      : localMask.masked && !localMask.block
+                        ? MASK_PROMPT_PLACEHOLDER
                       // The Mac edits from the prompt, and under a mask
                       // where one is painted. Without one it does not
                       // restyle at a denoise as the Windows graph does, so
@@ -620,6 +628,9 @@ export function Composer({ onOpenAdvanced, onOpenWorkflows, hub = false }: Props
             <div className="px-3.5 py-3 t-body text-gray-500">
               {laneCaption}
             </div>
+          )}
+          {localMask.block && !isGenerating && (
+            <div role="status" className="px-3.5 py-3 t-body text-gray-300">{localMask.block}</div>
           )}
           {needsMask && !needPrompt && !isGenerating && (
             <div className="px-3.5 py-3 t-body text-gray-500">
@@ -747,7 +758,7 @@ export function Composer({ onOpenAdvanced, onOpenWorkflows, hub = false }: Props
             ) : (
               // The span carries the hint: a disabled button takes no pointer,
               // so a title on the button itself would never show.
-              <span className="inline-flex" title={macSetupFirst ? MAC_SETUP_FIRST : (missingSource ?? (upscaleReady ? undefined : UPSCALE_MODEL_FIRST))}>
+              <span className="inline-flex" title={macSetupFirst ? MAC_SETUP_FIRST : (localMask.block ?? missingSource ?? (upscaleReady ? undefined : UPSCALE_MODEL_FIRST))}>
                 <Button variant="primary" size="lg" icon={Sparkles} disabled={!canGenerate} onClick={guardedGenerate}>
                   {/* Swap Character names its price on the button (the web's
                       CreateButton): a paid video run, priced by its length. */}

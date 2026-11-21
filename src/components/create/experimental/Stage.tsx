@@ -14,6 +14,8 @@ import { SceneStage } from './SceneStage'
 import { editNeedsMask, defaultCloudModel, modelForOp } from '../../../stores/cloudCatalogStore'
 import { stageShowsSetupCard, laneModelCount } from './stageGate'
 import { needsMaskFor } from './maskGate'
+import { useLocalEditMask } from './useLocalEditMask'
+import { MASK_READY_LINE } from '../../../lib/local-edit-mask'
 import { GeneratingView, ResultView } from './OutputView'
 import { EmptyState } from '../ui/EmptyState'
 import { MONOGRAM, MONOGRAM_INVERT } from '../../layout/brand'
@@ -559,6 +561,7 @@ function SourcePreview({ onOpenMaskEditor }: { onOpenMaskEditor: () => void }) {
   const batchCount = useCreateStore((s) => s.batchSources.length)
   const batchOffered = useBatchOffered()
   const maskTint = useMaskTint(mask && !noMask ? mask : null)
+  const localMask = useLocalEditMask()
   // The same run over several images: no mask (it belongs to one image), and
   // the list below replaces "Change image".
   const batchOn = batchOffered && batchCount > 1
@@ -634,13 +637,13 @@ function SourcePreview({ onOpenMaskEditor }: { onOpenMaskEditor: () => void }) {
             : noMask ? 'Write the edit prompt below, then Create. This model needs no mask.'
             // A cloud model that edits through a mask does not start without
             // one (maskGate.ts), so the line about an empty mask is local only.
-            : needsMaskFor(intent, backend, false) ? 'Paint the area to change, write your prompt below, then Create.'
+            : localMask.block ?? (localMask.masked ? MASK_READY_LINE : null) ?? (needsMaskFor(intent, backend, false) ? 'Paint the area to change, write your prompt below, then Create.'
             // The Mac's Edit does not restyle at a denoise as the Windows
             // graph does: without a mask the prompt edits the whole image.
             : meta.id === 'edit' && backend === 'local' && isMlxImageHost()
               ? 'Paint an area to change just that, or leave the mask empty to edit the whole image. Write your prompt below, then Create.'
             : meta.allowsMask ? 'Leave the mask empty to restyle the whole image, or paint an area to change just that. Write your prompt below, then Create.'
-            : 'Describe the motion below, then Create.'}
+            : 'Describe the motion below, then Create.')}
         </p>
       </>
   )

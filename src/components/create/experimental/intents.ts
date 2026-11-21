@@ -333,9 +333,10 @@ function runsOnMlx(id: CreateIntent, mlxAnimate: boolean, mlxEdit: boolean, mlxU
  * The intents to surface for a given backend + host. Pure so the rule is unit
  * tested instead of buried in the IntentBar's JSX.
  *
- * Cloud shows everything. Local (ComfyUI, Windows/Linux) also shows
- * everything — the hosted-only tools render as locked cloud teasers rather
- * than disappearing. Local on an MLX Mac hides the intents that have neither a
+ * Cloud shows everything. Local (ComfyUI, Windows/Linux) shows everything
+ * but Erase, which local mode does not have at all (3.1.3): an object goes
+ * through a mask in Edit. The other hosted-only tools render as locked cloud
+ * teasers rather than disappearing. Local on an MLX Mac hides the intents that have neither a
  * local MLX path nor a hosted teaser sheet (edit while no installed model
  * takes an image, and animate while none starts from one): they need a ComfyUI node or a
  * model that is not there, so leaving them selectable is a dead affordance
@@ -346,12 +347,13 @@ function runsOnMlx(id: CreateIntent, mlxAnimate: boolean, mlxEdit: boolean, mlxU
  * local bar carries no cloud teaser at all: a tool that cannot run on this
  * machine is left out, the same way the Mac leaves out what MLX cannot do.
  * Until 3.0.5 the switch only took the LU Cloud rows out of the model
- * pickers, and Enhance and Erase kept their cloud tag and kept opening the
+ * pickers, and the hosted tools kept their cloud tag and kept opening the
  * Cloud sheet (the box, 04.10.2026).
  */
 export function visibleIntents(backend: CreateBackend, mlxHost: boolean, cloudFeatures: boolean, mlxAnimate = false, mlxEdit = false, mlxUpscale = false, mlxMusic = false, mlxMotion = false, mlxTalk = false): IntentMeta[] {
   if (backend === 'cloud') return INTENTS
-  const shown = mlxHost ? INTENTS.filter((m) => runsOnMlx(m.id, mlxAnimate, mlxEdit, mlxUpscale, mlxMusic, mlxMotion, mlxTalk) || m.cloudOnly === true) : INTENTS
+  const local = INTENTS.filter((m) => m.id !== 'eraser')
+  const shown = mlxHost ? local.filter((m) => runsOnMlx(m.id, mlxAnimate, mlxEdit, mlxUpscale, mlxMusic, mlxMotion, mlxTalk) || m.cloudOnly === true) : local
   return cloudFeatures ? shown : shown.filter((m) => !isIntentLocked(m, backend, mlxHost, mlxAnimate, mlxEdit, mlxUpscale, mlxMusic, mlxMotion, mlxTalk))
 }
 
