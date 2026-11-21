@@ -12,7 +12,8 @@ import { THREE_D_TEXT } from '../../../lib/three/three-d-text'
 import { SwapStage } from './SwapStage'
 import { SceneStage } from './SceneStage'
 import { editNeedsMask, defaultCloudModel, modelForOp } from '../../../stores/cloudCatalogStore'
-import { stageShowsSetupCard, laneModelCount } from './stageGate'
+import { stageSetupAnswer, laneModelCount } from './stageGate'
+import { capabilityAnswer, laneFace, settleFace, stageAnswers, threeDFace, STAGE_WAIT_MAX_MS, type LaneFace } from '../../../lib/create/stage-answers'
 import { needsMaskFor } from './maskGate'
 import { useLocalEditMask } from './useLocalEditMask'
 import { MASK_READY_LINE } from '../../../lib/local-edit-mask'
@@ -79,7 +80,7 @@ interface Props {
   /** Pick frames of a finished video and save them as a character. */
   onSaveCharacter?: (item: GalleryItem) => void
   /** ComfyUI is coming up: no setup card in that window (./stageGate). */
-  comfyStarting?: boolean
+  comfyStarting?: boolean | null
 }
 
 export function Stage({ hub = false, displayed, onOpenMaskEditor, onEditResult, onAnimateResult, onFullscreen, onShowPrompt, onSaveCharacter, comfyStarting }: Props) {
@@ -117,7 +118,7 @@ export function Stage({ hub = false, displayed, onOpenMaskEditor, onEditResult, 
   const lipsyncModelList = useCreateStore((s) => s.lipsyncModelList)
   const motionModelList = useCreateStore((s) => s.motionModelList)
   const upscaleModelList = useCreateStore((s) => s.upscaleModelList)
-  const { connected, modelsLoaded, mlxMissing } = useCreateExp()
+  const { connected, modelsLoaded, modelLoadError, capsPending, mlxMissing } = useCreateExp()
   // On the cloud backend the utility ops (background removal, …) run on
   // the render service's hosted endpoints — there's no local ComfyUI node to install,
   // so the capability is always ready. Only the local backend gates on the
@@ -139,8 +140,10 @@ export function Stage({ hub = false, displayed, onOpenMaskEditor, onEditResult, 
   // Die Regel selbst steht in ./stageGate, weil die Kopfzeile in
   // CreateExperimental dieselbe Antwort braucht: sie haelt ihren roten Balken
   // zurueck, solange diese Karte die Lage schon erklaert.
-  const modelsMissing = stageShowsSetupCard({
+  const modelsAnswer = stageSetupAnswer({
     backend,
+    mlxHost: isMlxImageHost(),
+    modelsFailed: !!modelLoadError?.startsWith('Failed to load models'),
     requiresModels: meta.requiresModels,
     mlxMissing,
     connected,
@@ -151,6 +154,25 @@ export function Stage({ hub = false, displayed, onOpenMaskEditor, onEditResult, 
       lipsync: lipsyncModelList, motion: motionModelList, upscale: upscaleModelList,
     }),
   })
+  // An answer that is still out is neither "ready" nor "missing": the stage
+  // keeps the last face it knows for this tab, or waits (lib/create/stage-answers).
+  const liveFace = laneFace(modelsAnswer, capabilityAnswer({
+    needed: !!meta.capability && backend !== 'cloud' && !isMlxImageHost(),
+    present: capReady,
+    connected,
+    comfyStarting,
+    capsPending,
+  }))
+  const faceKey = `lane:${backend}|${intent}`
+  useEffect(() => {
+    if (liveFace !== 'wait') stageAnswers.set(faceKey, liveFace)
+  }, [faceKey, liveFace])
+  const face = settleFace(liveFace, stageAnswers.get<LaneFace>(faceKey))
+  const modelsMissing = face === 'models'
+  const threeDState = intent === '3d' && backend === 'local'
+    ? threeDFace({ ready: threeDSetup.ready, mac: isMlxImageHost(), connected, comfyStarting })
+    : 'work'
+  const waitedTooLong = useWaitedTooLong(face === 'wait' || threeDState === 'wait')
 
   // A result counts for the current source only if it was generated after the
   // source was loaded — otherwise an older gallery item would hijack the stage.
@@ -183,6 +205,15 @@ export function Stage({ hub = false, displayed, onOpenMaskEditor, onEditResult, 
     () => (meta.requiresModels ? getInstallRun(meta.requiresModels).running : false),
   )
 
+  // Only a card that can change its mind has to ask the disk first.
+  const starterOnDisk = useStarterOnDisk(
+    meta.requiresModels,
+    intent,
+    face === 'models' && !isMlxImageHost() && connected !== true && !installRun,
+  )
+  const waiting = !waitedTooLong && !displayed && !installRun
+    && (face === 'wait' || threeDState === 'wait' || (face === 'models' && starterOnDisk === null))
+
   let body: React.ReactNode
   // The empty stage carries the how-to line under its examples. A stage that
   // waits for a file or shows the source has no such place, so the line stands
@@ -196,14 +227,17 @@ export function Stage({ hub = false, displayed, onOpenMaskEditor, onEditResult, 
   const howtoTopic = stageHowtoTopic(intent, backend, isMlxImageHost())
   if (isGenerating) {
     body = <GeneratingView />
+  } else if (waiting) {
+    // In the Character area an empty stage takes no room at all.
+    body = hub ? null : <StageWaiting />
   } else if (intent === '3d' && threeDSetup.needsSetup && !(displayed?.type === '3d' && !(needsSource && source && !freshResult))) {
     // A model already made (in the cloud, or before) is shown; the setup
     // takes the Stage when there is nothing to show.
     body = <ThreeDSetupCard setup={threeDSetup} />
   } else if (modelsMissing || installRun) {
-    body = <ModelInstallCard kind={meta.requiresModels!} />
-  } else if (meta.capability && !capReady) {
-    body = <CapabilityCard cap={meta.capability} />
+    body = <ModelInstallCard kind={meta.requiresModels!} startOnly={starterOnDisk === true} />
+  } else if (face === 'capability' || (waitedTooLong && meta.capability && !capReady)) {
+    body = <CapabilityCard cap={meta.capability!} />
   } else if (characterTrain) {
     // Character-Studio training board: the image SET lives here (4-30 photos);
     // trigger word + train button sit in the composer below.
@@ -345,6 +379,29 @@ export function StageLayer({ children, footRoom = false }: { children: ReactNode
       {children}
     </motion.div>
   )
+}
+
+/** The stage while the answer about this tab is out. Nothing to read and
+ *  nothing to click, and fast answers never show even the small spinner. */
+function StageWaiting() {
+  return (
+    <div data-testid="stage-pending" role="status" aria-label="Checking this tab" className="flex-1 flex items-center justify-center">
+      <motion.span initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.5, duration: 0.3 }}>
+        <Loader2 size={16} className="animate-spin text-gray-400 dark:text-gray-600" />
+      </motion.span>
+    </div>
+  )
+}
+
+/** True once the stage has waited longer than any real answer takes. */
+function useWaitedTooLong(waiting: boolean): boolean {
+  const [over, setOver] = useState(false)
+  useEffect(() => {
+    if (!waiting) return
+    const timer = setTimeout(() => setOver(true), STAGE_WAIT_MAX_MS)
+    return () => { clearTimeout(timer); setOver(false) }
+  }, [waiting])
+  return waiting && over
 }
 
 function teachTitle(intent: string): string {
@@ -908,22 +965,39 @@ const ALREADY_ON_DISK_COPY = {
   description: 'ComfyUI is not running, so nothing can render yet. Start ComfyUI and LU picks up the files you have, nothing on disk is downloaded again.',
 }
 
-function useStarterOnDisk(kind: StarterKind, intent: string, ask: boolean): boolean {
-  // The answer belongs to the lane it was asked for: a switch of lane or a
-  // ComfyUI that came up drops it without a reset in the effect.
-  const key = ask ? `${kind}|${intent}` : null
-  const [onDiskFor, setOnDiskFor] = useState<string | null>(null)
+/** Whether the lane's bundle is complete on disk. null while that is not
+ *  known, so the card never says "download" first and "already here" after. */
+function useStarterOnDisk(kind: StarterKind | undefined, intent: string, ask: boolean): boolean | null {
+  const key = ask && kind ? `disk:${kind}|${intent}` : null
+  const bundle = key && kind ? starterBundleFor(kind, intent) : null
+  const [live, setLive] = useState<{ key: string; onDisk: boolean } | null>(null)
   useEffect(() => {
-    if (!key) return
-    const bundle = starterBundleFor(kind, intent)
-    if (!bundle) return
+    if (!key || !bundle) return
     let stale = false
-    checkBundlesOnDisk([bundle])
-      .then((r) => { if (!stale) setOnDiskFor(r.installed[bundle.name] === true ? key : null) })
-      .catch(() => { /* the card keeps offering the download */ })
-    return () => { stale = true }
-  }, [key, kind, intent])
-  return key !== null && onDiskFor === key
+    const read = () => {
+      const ticket = stageAnswers.ticket()
+      checkBundlesOnDisk([bundle])
+        .then((r) => {
+          // A reply overtaken by a model change is not the state after it.
+          if (stale || ticket !== stageAnswers.ticket()) return
+          const onDisk = r.installed[bundle.name] === true
+          stageAnswers.answer(key, onDisk, ticket)
+          setLive({ key, onDisk })
+        })
+        // Not remembered: the card offers the download, as it always could.
+        .catch(() => { if (!stale && ticket === stageAnswers.ticket()) setLive({ key, onDisk: false }) })
+    }
+    read()
+    window.addEventListener('comfyui-model-downloaded', read)
+    return () => {
+      stale = true
+      window.removeEventListener('comfyui-model-downloaded', read)
+    }
+    // The bundle follows from the key.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key])
+  if (!key || !bundle) return false
+  return live?.key === key ? live.onDisk : stageAnswers.get<boolean>(key) ?? null
 }
 
 /** The plan of the Mac's video setup, for the card. Null until it is read,
@@ -1009,8 +1083,8 @@ function swapBundleCopy() {
   }
 }
 
-function ModelInstallCard({ kind }: { kind: 'image' | 'video' | 'audio' | 'lipsync' | 'motion' | 'upscale' }) {
-  const { installModelBundle, connected } = useCreateExp()
+function ModelInstallCard({ kind, startOnly }: { kind: 'image' | 'video' | 'audio' | 'lipsync' | 'motion' | 'upscale'; startOnly: boolean }) {
+  const { installModelBundle } = useCreateExp()
   const intent = useCreateStore((s) => s.intent())
   // The run outlives this card on purpose. Stage swaps the card away as soon as
   // a render starts or the lane list refills, and a 12 GB install must not lose
@@ -1041,7 +1115,6 @@ function ModelInstallCard({ kind }: { kind: 'image' | 'video' | 'audio' | 'lipsy
   // A Mac no video starter runs on: the card says so and offers no download.
   // A run that is already on its way, or left an error, keeps its body.
   const nothingToInstall = macKind === 'video' && !macVideo.canInstall && !installing && !err
-  const startOnly = useStarterOnDisk(kind, intent, !mac && connected === false && !installing)
 
   const run = () => startInstallRun(kind, (onStatus, signal) =>
     installModelBundle(kind, onStatus, signal).catch((e: unknown) => {
