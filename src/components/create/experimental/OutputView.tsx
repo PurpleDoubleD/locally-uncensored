@@ -103,9 +103,13 @@ export function GeneratingView() {
   const beat = phaseBeat(progressPhase)
 
   return (
-    <div className="flex-1 flex flex-col items-center justify-center p-8">
-      <div className="space-y-6 flex flex-col items-center">
-        <div className="relative w-16 h-16">
+    // With a preview the stage is often lower than picture, caption and bar
+    // stacked (339 px at 1280x720), and what passed its edge was cut off under
+    // the composer (Discord 17.11.2026). The picture then takes the height that
+    // is left and the caption stands beside it.
+    <div className={cn('flex-1 min-h-0 flex flex-col items-center justify-center', preview ? 'p-3' : 'p-8')}>
+      <div className={cn('flex flex-col items-center', preview ? 'flex-1 min-h-0 gap-2' : 'space-y-6')}>
+        <div className={cn('relative w-16 h-16', preview && 'hidden')}>
           {/* Der Schein dahinter. Er atmet langsamer als die Wellen, sonst
               flackert die ganze Flaeche im Takt mit. */}
           <motion.div
@@ -132,12 +136,12 @@ export function GeneratingView() {
         </div>
         <BatchQueue />
         {preview && (
-          <figure className="flex flex-col items-center gap-1" data-testid="render-live-preview">
-            <img src={preview} alt="Live preview of the video being rendered" className="max-h-56 max-w-[22rem] rounded-lg border border-white/10 object-contain" />
+          <figure className="flex-1 min-h-0 flex items-center gap-4" data-testid="render-live-preview">
+            <img src={preview} alt="Live preview of the video being rendered" className="h-full min-h-0 w-auto max-h-56 max-w-[22rem] rounded-lg border border-white/10 object-contain" />
             {/* C45 (Discord 05.11.): read as a broken video preview.
                 ComfyUI decodes one frame of the video latent per step, never
                 the motion, so the caption says it is a still on purpose. */}
-            <figcaption className="t-micro text-gray-500 text-center max-w-[22rem]">
+            <figcaption className="t-micro text-gray-500 w-52 shrink-0">
               Still of the first frame, not the motion: ComfyUI previews one frame while it renders. It gets sharper with every step, the video plays when it is done. Cancel if it is going the wrong way.
             </figcaption>
           </figure>
