@@ -30,7 +30,9 @@ import { openExternal, isMacOS, backendCall } from '../../api/backend'
 import { isLfm3Model, lmStudioRuntimeNote } from '../../lib/lmstudio-runtime'
 import { bundleCloudTask } from '../../lib/cloud-offer'
 import { forThisPlatform } from '../../lib/mlx-only-builds'
+import { ollamaVersionBlock } from '../../lib/ollama-min-version'
 import { useModels } from '../../hooks/useModels'
+import { getOllamaVersion } from '../../api/ollama'
 import { useDownloadStore } from '../../stores/downloadStore'
 import { ModelGridSkeleton } from '../layout/ViewSkeletons'
 import { useProviderStore } from '../../stores/providerStore'
@@ -848,6 +850,11 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0, o
         return
       }
       try {
+        const tooOld = model.minOllama ? ollamaVersionBlock(model, await getOllamaVersion()) : null
+        if (tooOld) {
+          setInstallError(tooOld)
+          return
+        }
         await pullModel(model.ollamaModel)
       } catch (e) {
         log.error('Ollama pull failed', { err: e })

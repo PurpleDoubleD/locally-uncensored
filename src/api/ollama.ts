@@ -287,6 +287,18 @@ export async function reloadOllamaWithWindow(model: string, use: WindowUse): Pro
   }
 }
 
+/** The server's version, or null when it does not say. */
+export async function getOllamaVersion(): Promise<string | null> {
+  try {
+    const res = await localFetch(ollamaUrl("/version"), { timeoutMs: 3000 })
+    if (!res.ok) return null
+    const body = await res.json() as { version?: unknown }
+    return typeof body.version === 'string' ? body.version : null
+  } catch {
+    return null
+  }
+}
+
 export async function pullModel(name: string, signal?: AbortSignal): Promise<Response> {
   const url = isTauri() ? ollamaUrl("/pull") : "/api/pull"
   const res = await localFetchStream(url, {

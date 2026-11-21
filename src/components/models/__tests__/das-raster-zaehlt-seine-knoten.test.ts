@@ -142,7 +142,8 @@ describe('D-S26 · was das Raster wirklich kostet', () => {
     // 54 -> 57 am selben Tag, nach E1 (llama.cpp b11960): LFM3 1.7B, VL 2B
     // und Omni 2B auch als GGUF-Gruppen fuer LU Engine und LM Studio.
     // 57 -> 58: LFM3 Audio 2B als GGUF, seit die LU Engine damit hoert und spricht.
-    expect(messeReiter(getMainstreamTextModels()).kacheln).toBe(58)
+    // 58 -> 59: Inkling 2 Mini ueber Ollama (3.1.3).
+    expect(messeReiter(getMainstreamTextModels()).kacheln).toBe(59)
     //
     // 56 -> 57 am 05.09.2026, vierte Bewegung. Der Inhaber: „orcarouter ist ein
     // muss." Die sechs Qwen-3.8-27B-Uncensored-Quants zeigen jetzt auf

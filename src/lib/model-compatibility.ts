@@ -59,6 +59,8 @@ const AGENT_COMPATIBLE = [
   // Liquid LFM3 (N1, 30.10.2026): every Ollama manifest of the family (lfm3,
   // lfm3-vl, lfm3-omni, lfm3-audio) names the capability "tools".
   'lfm3',
+  // Inkling 2 Mini: "tools" in its Ollama manifest.
+  'inkling2',
 ]
 
 /**
@@ -117,7 +119,7 @@ function normalizeFamily(modelName: string): string {
   // llama-3.1 -> llama3.1, glm-4 -> glm4, phi-4 -> phi4, deepseek-v3 stays.
   // Apply with /g so the pattern collapses anywhere it appears, not just at
   // string start — `huihui-gemma-4-…` needs to collapse the inner `gemma-4`.
-  s = s.replace(/(gemma|qwen|llama|glm|phi)-(\d)/g, '$1$2')
+  s = s.replace(/(gemma|qwen|llama|glm|phi|inkling)-(\d)/g, '$1$2')
   return s
 }
 
@@ -197,6 +199,7 @@ const THINKING_COMPATIBLE = [
   // word also matches lfm3-omni and lfm3-audio, whose manifests do NOT name
   // it, so those two stand in THINKING_EXCLUDED below.
   'lfm3',
+  'inkling2',           // "thinking" in its Ollama manifest
 ]
 
 /** Members of a THINKING_COMPATIBLE family that do not think (N1). */
@@ -285,6 +288,7 @@ const VISION_COMPATIBLE = [
   // Liquid LFM3 VL and Omni: "vision" in their Ollama manifests (N1). The
   // text model and LFM3 Audio take no images.
   'lfm3-vl', 'lfm3-omni',
+  'inkling2',                          // "vision" in its Ollama manifest
 ]
 
 /**

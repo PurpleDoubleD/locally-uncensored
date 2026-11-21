@@ -992,6 +992,9 @@ export { COMPONENT_REGISTRY }
 
 const HF = (repo: string, file: string) => `https://huggingface.co/${repo}/resolve/main/${file}`
 
+// Inkling 2 Mini is Apache-2.0, and its model card adds this policy.
+const INKLING_USAGE_POLICY = 'https://thinkingmachines.ai/model-acceptable-use-policy/'
+
 // The name an image part gets on disk is one rule for the whole app and lives
 // in lib/image-part.ts, next to the Rust side's `mmproj_sibling_path`. Kept
 // under this name here because the catalog and its tests speak of mmproj.
@@ -1287,6 +1290,11 @@ export function getMainstreamTextModels(): DiscoverModel[] {
     { name: 'Gemma 4 12B (Q8)', group: 'Gemma 4 12B', description: 'Google Gemma 4 12B · Q8_0, near-lossless full quality. Native tools + vision, 128K context, ~13 GB. lmstudio-community build (LM-Studio-curated) with a fixed tool-template, so tool calling works out of the box. Best on LM Studio (Ollama cannot load the gemma4 vision projector yet).', pulls: '100K+', tags: ['12B', 'Vision', 'Q8_0', '13 GB'], updated: 'Hot', agent: true, released: '2026-04', downloadUrl: HF('lmstudio-community/gemma-4-12b-it-GGUF', 'gemma-4-12B-it-Q8_0.gguf'), filename: 'gemma-4-12B-it-Q8_0.gguf', sizeGB: 13, ...IMAGE_PART['lmstudio-community/gemma-4-12b-it-GGUF/mmproj-gemma-4-12B-it-BF16.gguf'] },
     { name: 'Gemma 4 E4B', description: 'Gemma 4 E4B · lightweight 4.5B, great for small GPUs.', pulls: '100K+', tags: ['4.5B', 'Vision', 'Q4_K_M', '5 GB'], updated: 'Hot', released: '2026-04', downloadUrl: HF('unsloth/gemma-4-E4B-it-GGUF', 'gemma-4-E4B-it-Q4_K_M.gguf'), filename: 'gemma-4-E4B-it-Q4_K_M.gguf', sizeGB: 5, ...IMAGE_PART['unsloth/gemma-4-E4B-it-GGUF/mmproj-F16.gguf'] },
     { name: 'Gemma 4 E2B', description: 'Gemma 4 E2B · ultra-light 2.3B, runs on anything.', pulls: '100K+', tags: ['2.3B', 'Vision', 'Q4_K_M', '3 GB'], updated: 'New', released: '2026-04', downloadUrl: HF('unsloth/gemma-4-E2B-it-GGUF', 'gemma-4-E2B-it-Q4_K_M.gguf'), filename: 'gemma-4-E2B-it-Q4_K_M.gguf', sizeGB: 3, ...IMAGE_PART['unsloth/gemma-4-E2B-it-GGUF/mmproj-F16.gguf'] },
+    // ── Inkling 2 Mini (November 2026) ──
+    // Ollama's only build: latest, 26b-a5b and 26b-a5b-nvfp4 are one manifest of
+    // 20.19 GB NVFP4 safetensors with `requires: 0.40.17` (registry, 21.11.2026).
+    // Safetensors run on Ollama's MLX runner, hence the MLX tag: Mac only.
+    { name: 'Inkling 2 Mini (Ollama)', description: 'Thinking Machines Inkling 2 Mini · vision + tools + thinking. Apple Silicon, needs Ollama 0.40.17 or newer.', pulls: '', tags: ['26B', 'Vision', 'Tools', 'MLX', 'NVFP4', '19 GB'], updated: 'New', agent: true, released: '2026-11', ollamaModel: 'inkling-2-mini', minOllama: '0.40.17', sizeGB: 18.8, usagePolicyUrl: INKLING_USAGE_POLICY },
     // ── Qwen 3.8 (August 2026) ──
     // Qwen shipped no GGUF of its own, so the 27B rides on unsloth's dynamic
     // quants (the most-downloaded conversion by a wide margin). Every 27B entry

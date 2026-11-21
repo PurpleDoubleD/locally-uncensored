@@ -76,6 +76,8 @@ export interface DiscoverModel {
   providerName?: string   // Display name of the provider
   canPull?: boolean       // false = no download/pull capability (cloud/external)
   ollamaModel?: string    // Ollama model tag for `ollama pull` (e.g. 'qwen3.6')
+  minOllama?: string      // Oldest Ollama that runs it (`requires` in the manifest config)
+  usagePolicyUrl?: string // The maker's usage policy, when it adds terms to the licence
   // Model Hub grouping (2.5.8 redesign): entries that are the SAME model in a
   // different quant share a `group` and render as ONE card with a size picker.
   // Different parameter sizes stay separate cards on purpose.

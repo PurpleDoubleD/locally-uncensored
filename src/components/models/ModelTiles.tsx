@@ -517,6 +517,17 @@ export function ModelTile(props: ModelTileProps) {
         </p>
       )}
 
+      {sel.usagePolicyUrl && (
+        <button
+          type="button"
+          onClick={() => onOpenUrl(sel.usagePolicyUrl!)}
+          className="mt-2 inline-flex items-center gap-1 self-start text-xs text-gray-700 underline underline-offset-2 dark:text-gray-200"
+          data-testid="model-usage-policy"
+        >
+          The maker's usage policy applies <ExternalLink size={ICON_SM} />
+        </button>
+      )}
+
       {/* The verdict has a line of its own, as on the media tiles. It stood in
           the footer between the picker and Get, where it was the first thing
           a narrow tile squeezed. */}
