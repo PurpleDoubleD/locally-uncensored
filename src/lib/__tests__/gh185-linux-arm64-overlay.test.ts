@@ -75,5 +75,7 @@ describe('the Linux ARM64 build', () => {
     const run = (cc: string) => execFileSync('bash', ['-c', `source "${join(ROOT, 'scripts', 'build-llama.sh')}"; (CC="${cc}" require_arm_variant_compiler) 2>&1 && echo ok || echo stopped`], { encoding: 'utf8' })
     expect(run(fake('13'))).toMatch(/needs GCC 14 or newer[\s\S]*stopped/)
     expect(run(fake('14')).trim()).toBe('ok')
-  })
+    // Two bash runs that source build-llama.sh: well under a second alone, but
+    // past vitest's 5 s default when the whole suite loads the machine.
+  }, 30_000)
 })
