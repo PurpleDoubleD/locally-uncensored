@@ -7,6 +7,8 @@ import { useModels } from '../../hooks/useModels'
 import { useDownloadStore } from '../../stores/downloadStore'
 import { isPermanentDownloadError } from '../../api/discover'
 import { useMlxInstallStore, mlxInstallLane } from '../../stores/mlxInstallStore'
+import { useInstallJobsStore } from '../../stores/installJobsStore'
+import { isLiveJob, jobLine } from '../../lib/install-jobs'
 import { isMlxImageHost } from '../../api/mlx-image'
 import { formatBytes } from '../../lib/formatters'
 import { HINWEIS_TEXT, PUNKT_FARBE } from '../../lib/hinweis'
@@ -75,12 +77,20 @@ export function DownloadBadge() {
     if (isMlxImageHost()) void useMlxInstallStore.getState().adopt()
   }, [])
 
-  const totalActive = textActiveCount + comfyActiveCount + mlxActiveCount
+  // Every other install (trainer, ComfyUI, pip environments, engines), read
+  // from one backend list, so no screen has to register anything.
+  const installJobs = useInstallJobsStore(s => s.jobs)
+  const stoppingJobs = useInstallJobsStore(s => s.stopping)
+  const jobStopError = useInstallJobsStore(s => s.stopError)
+  useEffect(() => useInstallJobsStore.getState().start(), [])
+  const jobsActiveCount = installJobs.filter(isLiveJob).length
+
+  const totalActive = textActiveCount + comfyActiveCount + mlxActiveCount + jobsActiveCount
   // A cancelled file has no row and still has something to say: its bundle is
   // listed until the user closes it, so the tray does not shut itself (and
   // then read "No active downloads") the moment the last transfer is stopped.
   const cancelledShown = comfyBundles.reduce((n, b) => n + b.cancelled.length, 0)
-  const listed = textEntries.length + comfyEntries.length + mlxEntries.length + cancelledShown
+  const listed = textEntries.length + comfyEntries.length + mlxEntries.length + cancelledShown + installJobs.length
   const hasAny = listed > 0
 
   // Click outside to close
@@ -165,9 +175,10 @@ export function DownloadBadge() {
               <span className="text-[0.65rem] font-semibold uppercase tracking-widest text-gray-500">
                 Downloads {hasAny && `(${listed})`}
               </span>
-              {(textEntries.some(([, s]) => s.complete) || comfyEntries.some(([, d]) => d.status === 'complete') || mlxEntries.some(e => e.status === 'complete')) && (
+              {(textEntries.some(([, s]) => s.complete) || comfyEntries.some(([, d]) => d.status === 'complete') || mlxEntries.some(e => e.status === 'complete') || installJobs.some(j => !isLiveJob(j))) && (
                 <button
                   onClick={() => {
+                    useInstallJobsStore.getState().dismissFinished()
                     textEntries.filter(([, s]) => s.complete).forEach(([n]) => dismissPull(n))
                     comfyEntries.filter(([, d]) => d.status === 'complete').forEach(([id]) => useDownloadStore.getState().dismiss(id))
                     // A bundle that is over takes its cancelled files with it.
@@ -404,6 +415,52 @@ export function DownloadBadge() {
                   </div>
                 )
               })}
+
+              {/* Installs: trainer, ComfyUI, pip environments, engines. pip
+                  cannot be frozen and picked up again, so these rows carry a
+                  sentence instead of a pause button that does nothing. */}
+              {installJobs.map((job) => {
+                const live = isLiveJob(job)
+                const stopping = job.status === 'cancelling' || stoppingJobs.includes(job.id)
+                const prog = job.total > 0 ? Math.min(100, (job.progress / job.total) * 100) : 0
+                return (
+                  <div key={job.id} data-install-job={job.id} className="px-3 py-2 border-t border-gray-100 dark:border-white/[0.04] first:border-t-0">
+                    <div className="flex items-center justify-between gap-2 mb-1">
+                      <p className="text-[0.7rem] text-gray-700 dark:text-gray-300 truncate">{job.label}</p>
+                      {live ? (
+                        job.canCancel && !stopping && (
+                          <button
+                            onClick={() => void useInstallJobsStore.getState().cancel(job.id)}
+                            className="p-0.5 rounded hover:bg-gray-500/15 text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 transition-colors shrink-0"
+                            title="Stop and clean up"
+                            aria-label={`Stop ${job.label}`}
+                            data-install-job-stop={job.id}
+                          ><X size={11} /></button>
+                        )
+                      ) : (
+                        <button onClick={() => useInstallJobsStore.getState().dismiss(job.id)} className="p-0.5 rounded hover:bg-gray-500/15 text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 transition-colors shrink-0" title="Dismiss" aria-label={`Dismiss ${job.label}`}><X size={11} /></button>
+                      )}
+                    </div>
+                    {job.status === 'complete' ? (
+                      <div className="flex items-center gap-1.5 text-green-400"><CheckCircle size={11} /><span className="text-[0.65rem]">Complete</span></div>
+                    ) : (
+                      <p className={`text-[0.6rem] break-words ${job.status === 'error' ? 'text-red-400' : 'text-gray-500'}`} title={job.phase}>{stopping ? 'Stopping…' : jobLine(job)}</p>
+                    )}
+                    {live && job.total > 0 && (
+                      <div className="mt-1">
+                        <ProgressBar progress={prog} />
+                        <p className="text-[0.55rem] text-gray-500 mt-0.5 lu-hud-num">
+                          {formatBytes(job.progress)} / {formatBytes(job.total)}
+                          <span className="ml-1.5 text-blue-400">{Math.round(prog)}%</span>
+                          {job.speed > 0 && <span className="ml-1.5 text-gray-400">{formatBytes(job.speed)}/s</span>}
+                        </p>
+                      </div>
+                    )}
+                    {live && !stopping && job.note && <p className="mt-0.5 text-[0.55rem] text-gray-500">{job.note}</p>}
+                  </div>
+                )
+              })}
+              {jobStopError && <p className="px-3 py-1.5 text-[0.6rem] text-red-400 border-t border-gray-100 dark:border-white/[0.04]" role="alert">{jobStopError}</p>}
 
               {/* MLX installs (macOS image/video engines + models) */}
               {mlxEntries.map((e) => {

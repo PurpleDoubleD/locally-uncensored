@@ -166,6 +166,10 @@ fn install_ollama_windows_impl<F: Fn(&str, &str)>(
         &installer_path,
         ollama_state,
     ) {
+        if e == "cancelled" {
+            update("cancelled", "Stopped.");
+            return;
+        }
         update("error", &format!("Download failed: {}", e));
         return;
     }

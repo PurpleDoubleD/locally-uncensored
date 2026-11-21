@@ -35,10 +35,6 @@ const INTENT_COPY: Record<Extract<CloudTeaserTarget, { surface: 'intent' }>['int
     title: 'Upscale',
     line: 'Blow any image up to crisp 2K, 4K or 8K. No VRAM needed.',
   },
-  eraser: {
-    title: 'Erase Object',
-    line: 'Paint over anything and it’s gone. Clean fill, no trace.',
-  },
   character: {
     title: 'Character Studio',
     line: 'Train a character from a few photos, then put them in any scene.',
@@ -270,7 +266,6 @@ function TeaserDemo({ target }: { target: CloudTeaserTarget }) {
   const kind = target.surface === 'intent' ? target.intent : target.kind === 'video' ? 'video-model' : 'image-model'
   switch (kind) {
     case 'upscale': return <UpscaleDemo />
-    case 'eraser': return <EraserDemo />
     case 'character': return <CharacterDemo />
     case 'lipsync': return <LipsyncDemo />
     case 'music': return <MusicDemo />
@@ -301,29 +296,6 @@ function UpscaleDemo() {
       >
         4K
       </motion.span>
-    </Stage>
-  )
-}
-
-function EraserDemo() {
-  return (
-    <Stage>
-      <div className="relative w-24 h-16 rounded-lg bg-gradient-to-br from-emerald-800/60 to-emerald-600/40">
-        {/* Der Gegenstand, den der Radierer wegnimmt. Er war gelb, ohne dass
-            hier irgendetwas zu warnen waere: reine Deko. Sky gehoert zur
-            Palette dieses Fensters (violet, sky, fuchsia, rose) und ist als
-            volle Flaeche noch an keinen anderen Demo-Gegenstand vergeben. */}
-        <motion.div
-          className="absolute left-3 bottom-3 w-6 h-8 rounded-sm bg-sky-300/90"
-          animate={{ opacity: [1, 1, 0, 0, 1] }}
-          transition={{ ...LOOP, duration: 3, times: [0, 0.35, 0.55, 0.85, 1] }}
-        />
-        <motion.div
-          className="absolute w-3.5 h-3.5 rounded-full border-2 border-white/80 bg-white/20"
-          animate={{ x: [8, 20, 8], y: [18, 30, 18], opacity: [0, 1, 0] }}
-          transition={{ ...LOOP, duration: 3 }}
-        />
-      </div>
     </Stage>
   )
 }

@@ -219,6 +219,32 @@ impl InstallSlot {
 /// was restarted, while every further click answered "installing" as well
 /// (Fehlerkontrolle Mac, 08.10.2026, Fund 3). A panic now ends in `fail` like
 /// any other error.
+static ACTIVITIES: Mutex<Vec<(String, String)>> = Mutex::new(Vec::new());
+
+/// A short install step with no status of its own (a node pack, one voice).
+/// It is a row in the Downloads tray for as long as this value lives.
+pub struct ActivityGuard(String);
+
+pub fn begin_activity(id: impl Into<String>, label: impl Into<String>) -> ActivityGuard {
+    let id = id.into();
+    ACTIVITIES.lock().unwrap_or_else(|e| e.into_inner()).push((id.clone(), label.into()));
+    ActivityGuard(id)
+}
+
+impl Drop for ActivityGuard {
+    fn drop(&mut self) {
+        let mut list = ACTIVITIES.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(at) = list.iter().position(|(id, _)| *id == self.0) {
+            list.remove(at);
+        }
+    }
+}
+
+/// `(id, label)` of every short step running now.
+pub fn activities() -> Vec<(String, String)> {
+    ACTIVITIES.lock().unwrap_or_else(|e| e.into_inner()).clone()
+}
+
 pub fn spawn_install<F>(slot: InstallSlot, work: F) -> std::thread::JoinHandle<()>
 where
     F: FnOnce(&InstallSlot) -> Result<String, String> + Send + 'static,

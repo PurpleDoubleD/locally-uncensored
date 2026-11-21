@@ -3,6 +3,7 @@ import { swapLocalModels } from '../../../lib/create/swap-local'
 import { runnableVideoLaneModels, sceneLaneModels } from '../../../api/comfyui'
 import { imageLaneModels } from '../../../lib/image-engines'
 import type { IntentMeta } from './intents'
+import type { StageAnswer } from '../../../lib/create/stage-answers'
 
 /**
  * Wann die Buehne statt eines Motivs die Einrichtungskarte zeigt.
@@ -54,10 +55,14 @@ export interface StageGateInput {
    *  sagte die Sonde `false`, und die Buehne bot einen 6,5-GB-Download an,
    *  waehrend oben "ComfyUI is starting up." stand und die Modelle laengst da
    *  waren. Ein Klick haette Juggernaut ein zweites Mal geladen. */
-  comfyStarting?: boolean
+  comfyStarting?: boolean | null
   modelsLoaded: boolean
   /** Wie viele Modelle diese Spur tatsaechlich anbieten kann. */
   laneModelCount: number
+  /** This host answers from MLX: `mlxMissing === null` means "not read yet". */
+  mlxHost?: boolean
+  /** The model list failed for good: no answer is coming, so nothing waits. */
+  modelsFailed?: boolean
 }
 
 /**
@@ -72,6 +77,17 @@ export interface StageGateInput {
  * Karte bei jedem Start kurz auf.
  */
 export function stageShowsSetupCard(i: StageGateInput): boolean {
+  return stageSetupAnswer(i) === 'setup'
+}
+
+/**
+ * The same rule with its third answer: `unknown` while the probe that decides
+ * it is still out. The stage then shows no card and no work surface it might
+ * have to take back (lib/create/stage-answers).
+ */
+export function stageSetupAnswer(i: StageGateInput): StageAnswer {
+  if (i.backend !== 'local' || !i.requiresModels) return 'ready'
+  if (i.mlxHost && i.mlxMissing === null) return 'unknown'
   // Die Videospur zaehlt auch auf dem Mac ueber die Spur und nicht ueber die
   // rohe Liste: ein Mac, dessen einziges Videomodell ein Startbild braucht
   // (Wan 2.2 I2V), hat fuer Text zu Video keines, und die Spur stand sonst
@@ -84,13 +100,16 @@ export function stageShowsSetupCard(i: StageGateInput): boolean {
         // and its list stays empty until the LoRA is installed.
         : i.requiresModels === 'motion' ? i.modelsLoaded && i.laneModelCount === 0
           : false)
-  if (macMissing) return true
-  return (
-    i.mlxMissing === null && i.backend === 'local' && !!i.requiresModels && (
-      (i.connected === false && !i.comfyStarting) ||
-      (i.connected === true && i.modelsLoaded && i.laneModelCount === 0)
-    )
-  )
+  if (macMissing) return 'setup'
+  if (i.mlxMissing !== null) {
+    // A Mac with neither image nor video never sets modelsLoaded.
+    const listed = i.modelsLoaded || (i.mlxMissing.image && i.mlxMissing.video)
+    return !listed && (i.requiresModels === 'video' || i.requiresModels === 'motion') ? 'unknown' : 'ready'
+  }
+  if (i.connected === null) return 'unknown'
+  if (i.connected === false) return i.comfyStarting === null || i.comfyStarting === true ? 'unknown' : 'setup'
+  if (!i.modelsLoaded) return i.modelsFailed ? 'ready' : 'unknown'
+  return i.laneModelCount === 0 ? 'setup' : 'ready'
 }
 
 /**

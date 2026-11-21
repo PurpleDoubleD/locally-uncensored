@@ -74,7 +74,8 @@ describe('D-S34: ein Befehl, ein Knopf', () => {
 
 describe('D-S31: die Regel gibt es genau einmal', () => {
   it('beide Seiten lesen dieselbe Funktion', () => {
-    expect(STAGE).toMatch(/stageShowsSetupCard\(/)
+    // The Stage reads the same rule with its third answer (unknown).
+    expect(STAGE).toMatch(/stageSetupAnswer\(/)
     expect(CREATE).toMatch(/stageShowsSetupCard\(/)
   })
 

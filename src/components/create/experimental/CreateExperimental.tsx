@@ -205,10 +205,12 @@ function CreateExperimentalInner() {
     return () => setRenderSurfaceOpen(false)
   }, [])
   const [idleNotice, setIdleNotice] = useState('')
+  // Until the first look came back, nobody knows whether ComfyUI is starting.
+  const [comfyLooked, setComfyLooked] = useState(false)
   const idleTimerRef = useRef<(() => void) | null>(null)
   useEffect(() => {
     let cancelled = false
-    const clear = () => { if (!cancelled) setIdleNotice('') }
+    const clear = () => { if (!cancelled) { setIdleNotice(''); setComfyLooked(true) } }
     void (async () => {
       const { isMacOS } = await import('../../../api/backend')
       if (cancelled) return
@@ -216,7 +218,7 @@ function CreateExperimentalInner() {
       const { backendCall } = await import('../../../api/backend')
       const look = async () => {
         const st = await backendCall<ComfyGuardStatus>('comfyui_status').catch(() => null)
-        if (!cancelled) setIdleNotice(comfyIdleNotice(st))
+        if (!cancelled) { setIdleNotice(comfyIdleNotice(st)); setComfyLooked(true) }
       }
       await look()
       const timer = setInterval(() => { void look() }, IDLE_WATCH_INTERVAL_MS)
@@ -276,8 +278,11 @@ function CreateExperimentalInner() {
   // `error` ist davon ausgenommen: das sind Laufzeitfehler eines konkreten
   // Laufs, die die Karte nicht erklaert — und nur sie tragen das
   // Schliesskreuz.
-  const comfyStarting = idleNotice === IDLE_STARTING
-  const setupCardOwnsStage = stageShowsSetupCard({
+  const comfyStarting = comfyLooked ? idleNotice === IDLE_STARTING : null
+  // ComfyUI down, and nobody has looked yet whether it is on its way up: the
+  // bar holds back as well, the stage is waiting for the same answer.
+  const comfyUnread = connected === false && comfyStarting === null
+  const setupCardOwnsStage = comfyUnread || stageShowsSetupCard({
     backend,
     requiresModels: INTENT_MAP[intent].requiresModels,
     mlxMissing,

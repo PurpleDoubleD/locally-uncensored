@@ -7,6 +7,7 @@ import { PC_3D_MODEL, threeDGalleryItem, threeDPicturePrompt, threeDProvenance }
 import { coverCropBlob } from '../lib/cover-crop'
 import { videoRunGivenUp, videoRunProgress, videoRunStatus } from '../lib/mlx-video-progress'
 import { featherMaskBlob } from '../lib/mask-feather'
+import { isPromptlessRemoval, REMOVE_NEGATIVE_COMFY, REMOVE_PROMPT_COMFY, REMOVE_PROMPT_MAC } from '../lib/local-edit-mask'
 import { macHiresPass } from '../lib/mac-hires'
 import { v4 as uuid } from 'uuid'
 import {
@@ -931,7 +932,21 @@ export function useCreate() {
     // name, so they map straight onto the existing i2iImage/i2vImage handles.
     const effInputImage = source?.filename ?? i2iImage
     const effI2vImage = source?.filename ?? i2vImage
-    const maskFilename = mask?.filename
+    // A mask painted in cloud mode has no ComfyUI file until the backfill in
+    // CreateContext is through. Without one the run would edit the whole
+    // picture, so it is staged here at the latest.
+    let stagedMask = mask?.filename
+    if (intent === 'edit' && mask && !stagedMask && !isMlxImageHost()) {
+      try {
+        const ref = await ensureLocalFilename(mask, 'mask.png')
+        state.setMask(ref)
+        stagedMask = ref.filename
+      } catch {
+        setError('The mask could not be sent to ComfyUI. Paint it again.')
+        return
+      }
+    }
+    const maskFilename = stagedMask
     const isRemoveBg = mode === 'image' && removebg
     // Enhance Image on local ComfyUI (3.0.7): core upscale nodes, its own
     // model from models/upscale_models, no prompt and no picker model. A Mac
@@ -1012,6 +1027,10 @@ export function useCreate() {
     // the run uses `prompt`, the gallery keeps both. A rewrite that fails never
     // stops the run, it goes on with the user's own prompt.
     let prompt = scenePrompt
+    // Local Edit with a mask and no prompt removes what was painted
+    // (lib/local-edit-mask): the whole area is made new from the surroundings.
+    const removeRun = isPromptlessRemoval({ intent, backend: 'local', hasMask: !!mask, prompt: scenePrompt })
+    if (removeRun) prompt = isMlxImageHost() ? REMOVE_PROMPT_MAC : REMOVE_PROMPT_COMFY
     let improveFields: { promptOriginal?: string; rewrittenBy?: string; improveFailed?: true } = {}
     // The safety check covers the rewrite too: the user wrote an allowed
     // prompt, the model must not turn it into a refusal.
@@ -1287,6 +1306,12 @@ export function useCreate() {
             growMaskBy,
           ))
           : undefined
+        // The second pass has no mask and would repaint the whole picture,
+        // so a masked edit runs without it, as ComfyUI's does.
+        if (editMask && hiresFixEnabled && (listed?.editImages ?? 0) > 0) {
+          const skipped = 'Native HiRes was skipped: it runs on edits of the whole picture.'
+          macSkippedNote = macSkippedNote ? `${macSkippedNote} ${skipped}` : skipped
+        }
         // "Improve my prompt" with the Qwen enhancer (GH #148): it rewrites
         // now, with the chat model out of memory, and its process has ended
         // before the image model loads. An edit shows it the same images, in
@@ -1317,7 +1342,7 @@ export function useCreate() {
             prompt: macRefs ? canonicalImageRefs(prompt, editImages.length, 'qwen21') : transparent ? transparentPrompt(prompt) : prompt,
             steps, seed: imageSeed, guidance: cfgScale,
             ...(mlxEdit
-              ? { images: editImages, resolution: editSide, ...(editSize ?? {}), mask: editMask, strength: state.editStrength }
+              ? { images: editImages, resolution: editSide, ...(editSize ?? {}), mask: editMask, strength: removeRun ? 1 : state.editStrength }
               : { width, height }),
             model: mlxModelIdFor(effImageModel),
             negativePrompt: (macRefs ? canonicalImageRefs(negativePrompt, editImages.length, 'qwen21') : negativePrompt) || undefined,
@@ -1333,7 +1358,7 @@ export function useCreate() {
           // as on Windows. After an edit the same: the edited picture is the
           // image of the second pass (Discord feature request 21.10.2026).
           let first = made
-          const pass = hiresFixEnabled && (listed?.editImages ?? 0) > 0
+          const pass = hiresFixEnabled && !editMask && (listed?.editImages ?? 0) > 0
             ? macHiresPass(made.width || width, made.height || height, { scale: hiresScale, steps: hiresSteps, denoise: hiresDenoise })
             : null
           if (pass) {
@@ -2001,14 +2026,14 @@ export function useCreate() {
       })
       const transparentFields = () => (transparentRequested && builderUsed === 'dynamic' ? { transparent: true as const } : {})
       const baseParams = {
-        prompt, negativePrompt,
+        prompt, negativePrompt: removeRun && !negativePrompt.trim() ? REMOVE_NEGATIVE_COMFY : negativePrompt,
         ...(transparentRequested ? { transparent: true } : {}), model: activeModel, sampler, scheduler, steps, cfgScale, width, height, seed: runSeed, batchSize,
         ...(isRemoveBg && effInputImage ? { removebg: true, inputImage: effInputImage } : {}),
         // Discord 2026-09-25 (a user: "a house becomes a tennis court"): at
         // strength 1.00 the builder read denoise >= 1 as "no img2img" and
         // dropped the source without a word. Edit always keeps the source;
         // 0.95 is the most it repaints (the slider tops out there too).
-        ...(isI2I && !isRemoveBg && effInputImage ? { inputImage: effInputImage, denoise: Math.min(denoise, EDIT_MAX_DENOISE) } : {}),
+        ...(isI2I && !isRemoveBg && effInputImage ? { inputImage: effInputImage, denoise: removeRun ? 1 : Math.min(denoise, EDIT_MAX_DENOISE) } : {}),
         // B46: a Qwen edit reads its own Edit strength (1 = as before); the
         // builder ignores it on every other family.
         ...(isI2I && !isRemoveBg && effInputImage && state.editStrength < 1 ? { editStrength: state.editStrength } : {}),
@@ -2168,7 +2193,10 @@ export function useCreate() {
       // Check for custom workflow assignment — but verify it's compatible with the model
       let customWf = localOp || isUpscale ? null : useWorkflowStore.getState().getWorkflowForModel(activeModel, imageModelType)
       if (customWf) {
+        // An own workflow has no slot for the painted mask (injectParameters),
+        // so a masked edit runs on LU's graph, which reads it or refuses.
         const misfit = ownWorkflowMisfitNote(customWf.name, apiNodes(customWf.workflow).map(([, n]) => n.class_type), imageModelType, listedModel?.source)
+          ?? (intent === 'edit' && maskFilename ? `"${customWf.name}" takes no mask, so this edit ran on LU's own workflow.` : null)
         if (misfit) {
           // C72: said on the progress line and kept under the result, not
           // only in the console.
@@ -2207,7 +2235,8 @@ export function useCreate() {
           if (dynErr instanceof Error && dynErr.name === 'WorkflowUnavailableError') {
             throw dynErr
           }
-          if (!legacyBuilderFits(imageModelType, mode === 'video')) throw dynErr
+          // The legacy graphs are text to image: a mask would be lost in them.
+          if (maskFilename || !legacyBuilderFits(imageModelType, mode === 'video')) throw dynErr
           // Fallback to legacy builders if dynamic fails
           console.warn('[useCreate] Dynamic builder failed, using legacy:', dynErr)
           builderUsed = 'legacy'

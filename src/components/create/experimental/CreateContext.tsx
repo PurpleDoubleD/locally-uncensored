@@ -81,6 +81,9 @@ interface CreateExpValue {
   connected: boolean | null
   modelsLoaded: boolean
   modelLoadError: string | null
+  /** ComfyUI answers and its node list is still on the way: a missing node
+   *  pack cannot be told from one not read yet. */
+  capsPending: boolean
   /** macOS: which local lanes still have no MLX model. `null` off-Mac and until
    *  the first probe answers, so the setup card never flashes during startup. */
   mlxMissing: { image: boolean; video: boolean } | null
@@ -131,6 +134,7 @@ export function CreateExpProvider({ children }: { children: ReactNode }) {
   const backend = useCreateStore((s) => s.backend)
   const setBackend = useCreateStore((s) => s.setBackend)
   const setCaps = useCreateStore((s) => s.setCaps)
+  const [capsAsked, setCapsAsked] = useState(false)
   const [loraList, setLoraList] = useState<string[]>([])
   const [loraKeys, setLoraKeys] = useState<Readonly<Record<string, MlxLoraKeys>>>({})
   const [loraAlpha, setLoraAlpha] = useState<Readonly<Record<string, MlxLoraAlpha>>>({})
@@ -251,6 +255,7 @@ export function CreateExpProvider({ children }: { children: ReactNode }) {
         depth: names.has('DepthAnythingV2Preprocessor'),
       })
     } catch { /* node probe is best-effort */ }
+    setCapsAsked(true)
   }, [connected, setCaps])
   // K3 proof-vorgabe Station 10 / GH #109, the completion case: a character
   // trained locally lands in models/loras the same way a manually dropped
@@ -630,7 +635,7 @@ export function CreateExpProvider({ children }: { children: ReactNode }) {
     enhanceVideo: cloud.enhanceVideo,
     makeVoice: cloud.makeVoice,
     samplerList, schedulerList, loraList, loraKeys, loraAlpha, vaeList, refreshModelLists,
-    connected, modelsLoaded, modelLoadError, mlxMissing, comfyOnCpu, comfyCpuBanner, installCapability, installModelBundle,
+    connected, modelsLoaded, modelLoadError, capsPending: connected === true && !capsAsked, mlxMissing, comfyOnCpu, comfyCpuBanner, installCapability, installModelBundle,
     cloudAvailable, quota, refreshQuota,
   }
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>

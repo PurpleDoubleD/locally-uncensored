@@ -115,7 +115,7 @@ describe('intent gating on a local MLX Mac (no ComfyUI)', () => {
     // Swap Character (07.11.2026) is hosted-only like Erase, so it is a teaser
     // here too.
     // Scene to Video (3.1.3) too: its local lane is a ComfyUI graph.
-    expect(teasers('local', true)).toEqual(['upscale', 'eraser', 'scene', 'lipsync', 'music', 'extend', 'motion', 'swap_character'])
+    expect(teasers('local', true)).toEqual(['upscale', 'scene', 'lipsync', 'music', 'extend', 'motion', 'swap_character'])
   })
 
   it('every Mac teaser has a cloud endpoint to teased about', () => {
@@ -130,13 +130,14 @@ describe('intent gating on a local MLX Mac (no ComfyUI)', () => {
     // negative) — which produced an unrelated fresh image instead of an edit.
     // Hiding is the only honest state left.
     const hidden = INTENTS.map((m) => m.id).filter((id) => !shown('local', true).includes(id))
-    expect(hidden).toEqual(['edit', 'animate'])
+    // Erase is hidden on every local host (3.1.3): a mask in Edit does it.
+    expect(hidden).toEqual(['edit', 'eraser', 'animate'])
   })
 
-  it('nothing is hidden on cloud or on a ComfyUI local host', () => {
+  it('nothing is hidden on cloud, and only Erase on a ComfyUI local host', () => {
     expect(shown('cloud', true)).toEqual(INTENTS.map((m) => m.id))
     expect(shown('cloud', false)).toEqual(INTENTS.map((m) => m.id))
-    expect(shown('local', false)).toEqual(INTENTS.map((m) => m.id))
+    expect(shown('local', false)).toEqual(INTENTS.map((m) => m.id).filter((id) => id !== 'eraser'))
   })
 
   it('cloud unlocks every intent regardless of host', () => {

@@ -870,8 +870,8 @@ describe('createStore', () => {
     const ref = { filename: 'src.png', url: 'data:image/png;base64,x', width: 8, height: 8 }
 
     // Until 3.0.7 this case was upscale. Enhance runs on local ComfyUI now
-    // (local-upscale-store.test.ts), so Erase is the hosted-only tool.
-    it('clears a utility op (eraser) with its mask', () => {
+    // (local-upscale-store.test.ts). Erase becomes Edit since 3.1.3.
+    it('turns Erase into Edit and keeps its source and mask', () => {
       const s = useCreateStore.getState()
       s.setBackend('cloud')
       s.setIntent('eraser')
@@ -880,8 +880,9 @@ describe('createStore', () => {
       useCreateStore.getState().setBackend('local')
       const after = useCreateStore.getState()
       expect(after.utilityOp).toBeNull()
-      expect(after.mask).toBeNull()
-      expect(after.intent()).not.toBe('eraser')
+      expect(after.source).toEqual(ref)
+      expect(after.mask).toEqual(ref)
+      expect(after.intent()).toBe('edit')
     })
 
     it('keeps edit — it has a local lane via checkpoint inpaint (2.5.7)', () => {

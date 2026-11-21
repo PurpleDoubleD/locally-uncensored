@@ -177,6 +177,7 @@ fn download_voice_blocking(
 ) -> Result<serde_json::Value, String> {
     let dir = piper_voices_dir(&app)?;
     let _ = std::fs::create_dir_all(&dir);
+    let _row = crate::install_state::begin_activity(format!("voice:{voice}"), format!("Voice {voice}"));
 
     let mut cmd = crate::python::python_command(&python);
     cmd.args([

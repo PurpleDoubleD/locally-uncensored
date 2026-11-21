@@ -371,6 +371,7 @@ function MaskHint() {
   })
   // Erase has no prompt field: after the mask the next step is Create.
   const isEraser = useCreateStore((s) => s.intent()) === 'eraser'
+  const isLocal = useCreateStore((s) => s.backend) === 'local'
   if (dismissed) return null
   return (
     <div className="pointer-events-none absolute inset-x-0 top-3 z-10 flex justify-center px-3">
@@ -379,6 +380,7 @@ function MaskHint() {
         <span className="t-control text-gray-300">
           {isEraser
             ? 'Apply mask when you are done, then hit Create.'
+            : isLocal ? 'Apply mask when you are done. Create removes it, or describe the change below the image.'
             : 'Apply mask when you are done, then describe the edit below the image.'}
         </span>
         <button

@@ -239,6 +239,14 @@ describe('endpointMap covers every backendCall/invokeMedia site the frontend can
     // (api/mcp/builtin-tools.ts); the LU browser is registered only behind
     // isTauri() (lib/browser-tools.ts, browserExistsHere).
     'web_research', 'browser_control', 'browser_screenshot',
+    // The installs in the Downloads tray (3.1.3, stores/installJobsStore.ts):
+    // polled only behind isTauri(), and a row to stop only comes from that
+    // poll. The browser build installs nothing.
+    'cancel_install_job', 'install_jobs',
+    // What the trainer setup would load (TrainerDownloadLine). The same
+    // install has no dev route either (install_character_trainer below), and
+    // without an answer the line stays away.
+    'trainer_setup_plan',
     // Restore chats from backup (3.0.10): reads store_backup*.json, only behind isTauri().
     'chat_backup_conversations',
     'exit_app', 'file_read', 'find_orphan_downloads', 'fix_comfyui_cors', 'funnel_ping',

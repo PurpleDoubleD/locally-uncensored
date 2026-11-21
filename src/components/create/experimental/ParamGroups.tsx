@@ -221,8 +221,9 @@ export function ParamGroups() {
   const sizeGrid = isCloud ? 64 : latentDownscale(laneType)
   let hiresFinal: { width: number; height: number } | null = null
   let hiresSizeError: string | null = null
-  if (showHiresFix && s.hiresFixEnabled && isEdit && !macHires && s.mask) {
+  if (showHiresFix && s.hiresFixEnabled && isEdit && s.mask) {
     // ComfyUI's masked edit is an inpaint latent; api/hires-fix refuses it.
+    // The Mac's second pass has no mask, so a masked edit runs without it.
     hiresSizeError = 'Native HiRes runs on edits of the whole picture. Clear the mask to use it.'
   } else if (showHiresFix && s.hiresFixEnabled && !hiresBase) {
     hiresSizeError = 'Add the picture to edit, then the final size shows here.'

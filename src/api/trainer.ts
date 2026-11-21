@@ -189,6 +189,30 @@ export async function installCharacterTrainer(installPath?: string): Promise<{ s
   return backendCall('install_character_trainer', { installPath: installPath ?? null })
 }
 
+/** What Set up trainer would fetch on this machine. Downloads nothing. */
+export interface TrainerSetupPlan {
+  items: { label: string; bytes: number }[]
+  downloadBytes: number
+  /** Free space the setup asks for, pip's cache included. */
+  diskGib: number
+  /** A PyTorch that is there gets replaced (wrong build, or a stopped setup). */
+  replacesTorch: boolean
+  /** The last setup was stopped halfway. */
+  interrupted: boolean
+}
+
+export async function trainerSetupPlan(): Promise<TrainerSetupPlan> {
+  return backendCall('trainer_setup_plan')
+}
+
+/** The line before the start. null when the setup has nothing to load. */
+export function trainerPlanLine(plan: TrainerSetupPlan): string | null {
+  if (!plan?.items?.length) return null
+  const what = plan.items.map((i) => i.label).join(', ')
+  const lead = plan.interrupted ? 'The last setup was stopped. Loads again' : 'Loads'
+  return `${lead} ${aboutSize(plan.downloadBytes)}: ${what}. Needs ${plan.diskGib} GB free.`
+}
+
 export async function characterTrainerStatus(): Promise<TrainerStatus> {
   return backendCall('character_trainer_status')
 }

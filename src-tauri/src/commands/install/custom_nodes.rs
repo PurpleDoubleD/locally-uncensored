@@ -81,6 +81,7 @@ pub async fn install_custom_node(
         // Re-resolved here: a `State` borrow cannot cross into the blocking
         // pool, and the pause below stops and starts ComfyUI through it.
         let state = app.state::<AppState>();
+        let _row = crate::install_state::begin_activity(format!("node:{nodeName}"), format!("Node pack {nodeName}"));
         let pause = ComfyPause {
             stop: &|| super::comfy_repair::stop_own_idle_comfyui(&state),
             start: &|| {

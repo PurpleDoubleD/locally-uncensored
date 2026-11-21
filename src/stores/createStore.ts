@@ -1532,7 +1532,13 @@ export const useCreateStore = create<CreateState>()(
       // Eine andere Unterkategorie faehrt ein anderes Modell und wirft damit die
       // Studio-Optionen weg (withOwnStudioOptions): ein Feld wie `resolution` hat
       // je Endpunkt eine andere Auswahl.
-      setIntent: (intent) => {
+      setIntent: (asked) => {
+        // Local mode has no Erase (3.1.3). A way in from anywhere lands in
+        // Edit, which keeps the source and the mask; on a Mac without a model
+        // that edits there is no Edit either, and it lands on Image.
+        const intent: CreateIntent = asked === 'eraser' && get().backend === 'local'
+          ? (isMlxImageHost() && !mlxTakesEditImage(get().imageModelList) ? 'image' : 'edit')
+          : asked
         const changed = get().intent() !== intent
         set((s) => withOwnStudioOptions(s, withMacEditCanvas(s, ((): Partial<CreateState> => {
         const patch = ((): Partial<CreateState> => {
@@ -1901,9 +1907,10 @@ export const useCreateStore = create<CreateState>()(
       setBatchRun: (batchRun) => set({ batchRun }),
       setBatchOriginal: (batchOriginal) => set({ batchOriginal }),
       setMask: (mask) => set({ mask }),
-      // Flipping to local clears the intents that have no local lane
-      // (eraser, and upscale on a Mac, which has no ComfyUI) so the
-      // surface never strands on a dead op the IntentBar no longer shows. Edit
+      // Flipping to local closes the intents that have no local lane (upscale
+      // on a Mac, which has no ComfyUI) so the surface never strands on a dead
+      // op the IntentBar no longer shows. Erase becomes Edit with its source
+      // and mask, the way local mode removes an object (3.1.3). Edit
       // keeps its state since 2.5.7 (checkpoint mask inpaint), removebg keeps
       // its RMBG lane, and animate keeps its i2v state since 2026-07-17 — the
       // local I2V lane is back (buildDynamicWorkflow wires the family's
@@ -1949,13 +1956,13 @@ export const useCreateStore = create<CreateState>()(
           const patch: Partial<CreateState> = { backend, ...cleared }
           // Enhance keeps its tab on Windows and Linux (local ComfyUI upscale,
           // 3.0.7), and on a Mac with an upscaler: SeedVR2 runs it there
-          // (commands/mlx.rs mlx_upscale). Erase always closes, as does
-          // Enhance on a Mac without an upscaler.
+          // (commands/mlx.rs mlx_upscale). Erase always closes into Edit, and
+          // Enhance closes on a Mac without an upscaler.
           const mac = isMlxImageHost()
           const toolStays = mac
             ? s.utilityOp === 'upscale' && s.mlxUpscale
             : !!s.utilityOp && LOCAL_UTILITY_OPS.has(s.utilityOp)
-          if (s.utilityOp && !toolStays) Object.assign(patch, { utilityOp: null, mask: null, error: null })
+          if (s.utilityOp && !toolStays) Object.assign(patch, { utilityOp: null, error: null, ...(s.utilityOp === 'eraser' ? {} : { mask: null }) })
           // music/lipsync/extend/motion (2.5.8) and character (2.6.0, local
           // musubi trainer) run locally, so a backend flip keeps them
           // selected; only the genuinely hosted-only ops (upscale/eraser)
@@ -1981,13 +1988,14 @@ export const useCreateStore = create<CreateState>()(
             // Remove Background stays: every Mac cuts out through Vision
             // (commands/mlx_cutout.rs), with no model and no ComfyUI node.
             // Edit bleibt, solange ein installiertes Bildmodell ein Bild
-            // nimmt (Qwen-Image 2.1 ueber die zweite Engine). Eine Maske
-            // gibt es dort nicht: was in der Cloud gemalt wurde, geht mit.
+            // nimmt (Qwen-Image 2.1 ueber die zweite Engine). Dieses Modell
+            // liest eine Maske, also bleibt sie dort stehen.
             if (s.imageSubMode === 'img2img' && !s.removebg) {
               if (!mlxTakesEditImage(s.imageModelList)) Object.assign(patch, { imageSubMode: 'text2img' })
               else Object.assign(patch, editLanePick(s))
             }
-            if (s.mask) Object.assign(patch, { mask: null })
+            const macEditKeepsMask = s.mode === 'image' && s.imageSubMode === 'img2img' && !s.removebg && mlxTakesEditImage(s.imageModelList)
+            if (s.mask && !macEditKeepsMask) Object.assign(patch, { mask: null })
             if (s.videoSubMode === 'i2v' && !mlxTakesStartImage(s.videoModelList)) Object.assign(patch, { videoSubMode: 't2v' })
           }
           // A tab this flip closes takes its number of images with it, like
@@ -2397,6 +2405,13 @@ export const useCreateStore = create<CreateState>()(
         if ('upscaleLongSide' in safe) safe.upscaleLongSide = normalizeUpscaleLongSide(safe.upscaleLongSide)
         if ('upscaleModelPick' in safe && typeof safe.upscaleModelPick !== 'string') safe.upscaleModelPick = null
         if (safe.mode === 'i2i') {
+          safe.mode = 'image'
+          safe.imageSubMode = 'img2img'
+        }
+        // 3.1.3: local mode has no Erase. An older or foreign blob that holds
+        // it opens on Edit. The cloud track (a phone) keeps its tab.
+        if (safe.utilityOp === 'eraser' && current.backend === 'local') {
+          safe.utilityOp = null
           safe.mode = 'image'
           safe.imageSubMode = 'img2img'
         }
