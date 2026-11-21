@@ -41,6 +41,8 @@ import { ContextDropdown } from './ContextDropdown'
 import { SmallModelModeToggle } from './SmallModelModeToggle'
 import { ABCompare } from './ABCompare'
 import { RecentChats } from './RecentChats'
+import { RemoteEntry } from '../remote/RemoteEntry'
+import { showsRemoteEntry } from '../remote/remote-entry'
 import { useUIStore } from '../../stores/uiStore'
 import { chatModelReady } from '../../lib/chat-model-ready'
 import { useCompareStore } from '../../stores/compareStore'
@@ -216,6 +218,12 @@ export function ChatView() {
   const isThisRemoteActive = isRemoteChat && remoteEnabled && dispatchedConversationId === activeConversationId
   const isThisRemoteStopped = isRemoteChat && !isThisRemoteActive
   const mobileConnectedCount = connectedDevices.length
+  const remoteEntry = useChatStore((s) => showsRemoteEntry(
+    chatMode,
+    s.conversations.find((c) => c.id === s.activeConversationId),
+    dispatchedConversationId,
+    remoteEnabled,
+  ))
 
   // Bug #1: keep the "Live" banner honest. Poll the real connected-device
   // count every 5 s while we're viewing the dispatched chat so the badge
@@ -343,7 +351,18 @@ export function ChatView() {
             <CodexView />
           ) : (<>
           <AnimatePresence mode="wait">
-            {!activeConversationId ? (
+            {remoteEntry ? (
+              <motion.div
+                key="remote-entry"
+                className="flex-1 flex flex-col min-h-0"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.15 }}
+              >
+                <RemoteEntry />
+              </motion.div>
+            ) : !activeConversationId ? (
               // ── Die Eingangsseite ──
               //
               // D-S02 („Empty-State ohne Titel und CTA") und D-S05 („1237x850px
@@ -743,6 +762,14 @@ export function ChatView() {
                             ? `, ${mobileConnectedCount} mobile${mobileConnectedCount === 1 ? '' : 's'} connected`
                             : ', ready for mobile'}
                         </span>
+                        {mobileConnectedCount === 0 && (
+                          <button
+                            onClick={() => { useRemoteStore.getState().showQr(); useUIStore.getState().setSidebarOpen(true) }}
+                            className="underline underline-offset-2 text-green-400 hover:text-green-300"
+                          >
+                            Show QR
+                          </button>
+                        )}
                       </div>
                       <button
                         onClick={handleRemoteReactivate}
@@ -831,6 +858,10 @@ export function ChatView() {
           />
 
           {/* Code mode brings its own composer (CodexView above). */}
+          {/* Hidden, not removed, on the Remote entry: a draft survives the
+              trip to Remote and back. Not `display: none`, the field measures
+              its own height and came back 224 px tall from that. */}
+          <div className={remoteEntry ? 'h-0 overflow-hidden invisible' : 'contents'} inert={remoteEntry}>
           <ChatInput
             onSend={sendMessage}
             modelReady={chatModelReady}
@@ -911,6 +942,7 @@ export function ChatView() {
               </>
             }
           />
+          </div>
           </>)}
         </div>
 

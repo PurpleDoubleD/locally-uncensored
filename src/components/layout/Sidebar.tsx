@@ -190,6 +190,13 @@ export function Sidebar() {
   )
 
   const handleNewChat = () => {
+    // Remote has no blank chat: one without a phone would only talk to the
+    // local model. New Chat here goes back to the Remote entry.
+    if (chatMode === 'remote') {
+      setActiveConversation(null)
+      setView('chat')
+      return
+    }
     if (!activeModel) {
       // No model is active — clicking New Chat used to silently do nothing
       // (Discord 2026-06-17: "cant make a new chat"). That happens
@@ -320,6 +327,8 @@ export function Sidebar() {
     const persona = personasEnabled ? getActivePersona() : null
     const convId = createConversation(activeModel, persona?.systemPrompt || '', 'remote')
     setView('chat')
+    // The QR code lives in the expanded panel.
+    setSidebarOpen(true)
     // For internet mode, suppress the QR until the Cloudflare tunnel is
     // verified up (2026-06-15). Set this BEFORE dispatch() so the LAN
     // QR fetched during startServer never flashes. LAN mode shows the QR
@@ -336,6 +345,8 @@ export function Sidebar() {
       // instance, then click Dispatch again).
       useRemoteStore.setState({ awaitingTunnel: false })
       deleteConversation(convId)
+      // Back to the entry, which shows the reason, not to some other chat.
+      if (chatMode === 'remote') setActiveConversation(null)
       return
     }
     // Auto-start tunnel for internet mode. startTunnel() clears awaitingTunnel
@@ -352,7 +363,7 @@ export function Sidebar() {
   useEffect(() => {
     if (!chatDispatch) return
     useRemoteStore.getState().clearChatDispatch()
-    void handleDispatch('lan')
+    void handleDispatch(chatDispatch.mode)
     // handleDispatch is a fresh closure each render; the request is the trigger.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chatDispatch])

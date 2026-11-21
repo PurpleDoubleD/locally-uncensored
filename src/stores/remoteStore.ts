@@ -474,8 +474,11 @@ interface RemoteState {
    *  strong card. The sidebar takes it through its own Dispatch button, folder
    *  picker included, and clears it. Only 'lan': the internet is never asked
    *  for from the chat. Not persisted. */
-  chatDispatchRequest: { mode: 'lan'; at: number } | null
+  chatDispatchRequest: { mode: 'lan' | 'internet'; at: number } | null
   requestChatDispatch: (mode: 'lan') => void
+  /** The user's own click on the Remote entry screen: the one way to ask for
+   *  'internet' through this request. The chat agent stays on the line above. */
+  requestDispatch: (mode: 'lan' | 'internet') => void
   clearChatDispatch: () => void
   startServer: (model?: string, systemPrompt?: string) => Promise<void>
   stopServer: () => Promise<boolean>
@@ -531,6 +534,7 @@ export const useRemoteStore = create<RemoteState>()((set, get) => ({
   tunnelLoading: false,
   chatDispatchRequest: null,
   requestChatDispatch: (mode) => set({ chatDispatchRequest: { mode, at: Date.now() } }),
+  requestDispatch: (mode) => set({ chatDispatchRequest: { mode, at: Date.now() } }),
   clearChatDispatch: () => set({ chatDispatchRequest: null }),
   awaitingTunnel: false,
   loading: false,

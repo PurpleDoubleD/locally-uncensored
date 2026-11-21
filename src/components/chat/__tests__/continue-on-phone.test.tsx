@@ -5,8 +5,10 @@
  * settings, the default for new chats, and the mark in the chat list.
  */
 import { describe, it, expect, afterEach } from 'vitest'
-import { render, cleanup, screen, fireEvent } from '@testing-library/react'
+import { render, cleanup, screen, fireEvent, waitFor } from '@testing-library/react'
 import { useChatStore } from '../../../stores/chatStore'
+import { useCodexStore } from '../../../stores/codexStore'
+import { useRemoteStore } from '../../../stores/remoteStore'
 import { useSettingsStore } from '../../../stores/settingsStore'
 import { ContinueOnPhoneButton } from '../ContinueOnPhoneButton'
 import { SharedChatsSettings } from '../../settings/SharedChatsSettings'
@@ -15,19 +17,33 @@ import { toSidebarRow, sameSidebarRows } from '../../layout/sidebar-rows'
 afterEach(() => {
   cleanup()
   useChatStore.setState({ conversations: [], activeConversationId: null })
+  useRemoteStore.setState({ pairedDevices: [], connectedDevices: [] })
   useSettingsStore.getState().updateSettings({ shareNewChatsWithPhone: false })
 })
 
 describe('Continue on phone', () => {
-  it('shares the open chat and ends it again', () => {
+  it('with no phone paired, leads to the Remote setup and shares nothing', async () => {
+    const id = useChatStore.getState().createConversation('qwen', '')
+    useRemoteStore.setState({ pairedDevices: [], connectedDevices: [], dispatchedConversationId: null })
+    render(<ContinueOnPhoneButton />)
+    expect(screen.getByTestId('continue-on-phone').getAttribute('title')).toBe('Set up your phone')
+    fireEvent.click(screen.getByTestId('continue-on-phone'))
+    await waitFor(() => expect(useCodexStore.getState().chatMode).toBe('remote'))
+    expect(useChatStore.getState().activeConversationId).toBeNull()
+    expect(useChatStore.getState().conversations.find((c) => c.id === id)?.remoteShared).toBeUndefined()
+    useCodexStore.getState().setChatMode('lu')
+  })
+
+  it('shares the open chat and ends it again', async () => {
     const id = useChatStore.getState().createConversation('qwen', '')
     expect(useChatStore.getState().conversations[0].remoteShared).toBeUndefined()
+    useRemoteStore.setState({ pairedDevices: [{ device_id: 'p1' }] as never })
     render(<ContinueOnPhoneButton />)
     const button = screen.getByTestId('continue-on-phone')
     expect(button.getAttribute('aria-label')).toBe('Continue on phone')
     fireEvent.click(button)
-    expect(useChatStore.getState().conversations.find((c) => c.id === id)?.remoteShared).toBe(true)
-    expect(screen.getByTestId('continue-on-phone').getAttribute('aria-pressed')).toBe('true')
+    await waitFor(() => expect(useChatStore.getState().conversations.find((c) => c.id === id)?.remoteShared).toBe(true))
+    await waitFor(() => expect(screen.getByTestId('continue-on-phone').getAttribute('aria-pressed')).toBe('true'))
     fireEvent.click(screen.getByTestId('continue-on-phone'))
     expect(useChatStore.getState().conversations.find((c) => c.id === id)?.remoteShared).toBeUndefined()
   })
