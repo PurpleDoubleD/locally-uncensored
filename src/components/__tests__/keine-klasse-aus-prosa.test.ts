@@ -415,7 +415,9 @@ describe('was dieser Test ueber sich selbst weiss', () => {
     // waere index.css doch eine Quelle und der Kommentar eine Falle.
     const css = gebaut.css
     if (css === null) return // der Waechter oben hat den Grund schon gesagt
-    for (const beispiel of ['max-w-[760px]', 'hhhh:hhhh', 'text-[…]']) {
+    // `max-w-[760px]` steht auch im Kommentar, ist seit Scene to Video aber eine
+    // echte Klasse (SceneStage) und taugt deshalb nicht mehr als Beleg.
+    for (const beispiel of ['hhhh:hhhh', 'text-[…]']) {
       expect(REGEL_TEXT, `das Beispiel \`${beispiel}\` steht nicht mehr im Scan-Kommentar — dieser Beleg laeuft ins Leere`)
         .toContain(beispiel)
       const escaped = beispiel.replace(/[.:/[\]()#%,!…]/g, (c) => `\\${c}`)
