@@ -424,6 +424,8 @@ export const OUTWARD_BY_ID: Record<string, Outward> = {
   'm-settings-licenses-full': 'leaves-app',
   'm-settings-about-website': 'leaves-app',
   'm-settings-about-source': 'leaves-app',
+  'm-settings-about-update': 'leaves-app',
+  'm-settings-update': 'leaves-app',
   'm-settings-about-contact': 'leaves-app',
   'm-settings-about-privacy': 'leaves-app',
   'm-settings-about-terms': 'leaves-app',

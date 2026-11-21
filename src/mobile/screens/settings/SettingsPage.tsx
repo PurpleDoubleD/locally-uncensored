@@ -6,7 +6,7 @@
  * and E1.13 lead to pages of the strands 2 and 4.
  */
 
-import {
+import { Download,
   Bot,
   Brain,
   Cpu,
@@ -32,6 +32,7 @@ import type { ThemePref } from '../../platform'
 import { useRemoteClientStore } from '../../remote/remoteClientStore'
 import { SETTINGS_STRINGS } from '../../strings/settings'
 import { ListGroup, RootPage, Row } from '../../ui'
+import { openUpdate, useShownUpdate } from './parts/UpdateRow'
 import { AccountCard } from './parts/AccountCard'
 import { storePolicy } from './parts/policy'
 import { APP_VERSION } from './parts/app-info'
@@ -51,9 +52,15 @@ export default function SettingsPage() {
   const remoteStatus = useRemoteClientStore((s) => s.status)
   const policy = storePolicy()
 
+  const update = useShownUpdate()
   return (
     <RootPage title={T.title} screen="settings">
       <AccountCard />
+      {update ? (
+        <ListGroup>
+          <Row icon={Download} title={SETTINGS_STRINGS.about.updateTo(update.version)} subtitle={SETTINGS_STRINGS.about.updateSub} chevron={false} onPress={() => void openUpdate(update)} risk="leaves-app" testid="m-settings-update" />
+        </ListGroup>
+      ) : null}
 
       <ListGroup title={T.groupApp}>
         <Row icon={Palette} title={T.appearance} value={THEME_NAME[theme]} onPress={() => nav.push('/settings/appearance')} testid="m-settings-theme" el="E1.2" />

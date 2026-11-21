@@ -2,10 +2,10 @@
  * E20 About LU. Route /settings/about, page, strand 5 (Account, cloud, settings).
  *
  * Name, version, and the ways out: what is new, licenses, website, source.
- * The phone app is updated by the store it came from, so there is no update
- * check here; the page says where updates come from.
+ * A store build is updated by its store and the page says so. The open
+ * Android package has no store: it shows "Update to X" (lib/app-update.ts).
  */
-import { Code2, Copy, FileText, Globe, Mail, ScrollText, ShieldCheck, Sparkles } from 'lucide-react'
+import { Code2, Download, Copy, FileText, Globe, Mail, ScrollText, ShieldCheck, Sparkles } from 'lucide-react'
 import { nav } from '../../nav'
 import { copyText, mobileOS } from '../../platform'
 import { appLinkAllowed } from '../../policy/links'
@@ -17,6 +17,8 @@ import { Block, Hint } from './parts/layout'
 import { contactSupport } from './parts/contact'
 import { LINKS, SUPPORT_EMAIL, openLink } from './parts/links'
 import { storePolicy } from './parts/policy'
+import { openUpdate, useShownUpdate, useUpdateCheck } from './parts/UpdateRow'
+import { updateHintOffered } from '../../lib/app-update'
 
 const T = SETTINGS_STRINGS.about
 const C = SETTINGS_STRINGS.common
@@ -27,6 +29,8 @@ export default function AboutPage() {
   const os = mobileOS()
   const osName = os ? OS_NAME[os] : undefined
   const build = osName ? `${APP_VERSION} (${osName})` : APP_VERSION
+  useUpdateCheck()
+  const update = useShownUpdate()
 
   const copyVersion = async () => {
     const ok = await copyText(`${T.name} ${build}`)
@@ -81,6 +85,12 @@ export default function AboutPage() {
         />
       </ListGroup>
 
+      {update ? (
+        <ListGroup>
+          <Row icon={Download} title={T.updateTo(update.version)} subtitle={T.updateSub} chevron={false} onPress={() => void openUpdate(update)} risk="leaves-app" testid="m-settings-about-update" />
+        </ListGroup>
+      ) : null}
+
       <ListGroup>
         <Row icon={Sparkles} title={T.whatsNew} onPress={() => nav.push('/whats-new')} testid="m-settings-about-whats-new" el="E20.1" />
         <Row icon={FileText} title={T.licenses} onPress={() => nav.openSheet('settings-licenses')} testid="m-settings-about-licenses" el="E20.2" />
@@ -99,7 +109,7 @@ export default function AboutPage() {
       ) : null}
 
       <Block lead>
-        <Hint>{T.updates}</Hint>
+        <Hint>{updateHintOffered(storePolicy().preset, os) ? T.updatesOpen : T.updates}</Hint>
         <Hint>{T.license}</Hint>
       </Block>
     </Page>

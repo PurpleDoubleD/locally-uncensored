@@ -22,6 +22,10 @@ pub mod download;
 // The same download commands on a phone, where the transfer belongs to the
 // operating system (plugins/lu-native).
 pub mod download_mobile;
+// The newest published version, for the update hint of the open Android package.
+#[cfg(any(mobile, test))]
+#[cfg_attr(not(mobile), allow(dead_code))]
+pub mod app_update;
 pub mod engine;
 pub mod engine_idle;
 pub mod engine_key;
